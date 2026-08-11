@@ -86,6 +86,59 @@ describe("AWS provider availability", () => {
 			await removeWithRetries(tmp);
 		}
 	});
+	test("recognizes a role_arn/source_profile role chain", async () => {
+		const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "aws-registry-chain-"));
+		try {
+			const credentialsPath = path.join(tmp, "credentials");
+			const configPath = path.join(tmp, "config");
+			await Promise.all([
+				Bun.write(credentialsPath, ""),
+				Bun.write(
+					configPath,
+					`[profile irsa]\nrole_arn = arn:aws:iam::111122223333:role/workspace\n` +
+						`web_identity_token_file = /var/run/secrets/token\n\n` +
+						`[default]\nrole_arn = arn:aws:iam::111122223333:role/user\nsource_profile = irsa\n`,
+				),
+			]);
+			await withEnv(
+				{
+					...EMPTY_AWS_ENV,
+					AWS_PROFILE: "default",
+					AWS_SHARED_CREDENTIALS_FILE: credentialsPath,
+					AWS_CONFIG_FILE: configPath,
+					AWS_EC2_METADATA_DISABLED: "true",
+				},
+				async () => expect(getEnvApiKey("bedrock-mantle")).toBeDefined(),
+			);
+		} finally {
+			await removeWithRetries(tmp);
+		}
+	});
+
+	test("ignores a role_arn profile with no resolvable base", async () => {
+		const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "aws-registry-orphan-role-"));
+		try {
+			const credentialsPath = path.join(tmp, "credentials");
+			const configPath = path.join(tmp, "config");
+			await Promise.all([
+				Bun.write(credentialsPath, ""),
+				Bun.write(configPath, "[default]\nrole_arn = arn:aws:iam::111122223333:role/user\n"),
+			]);
+			await withEnv(
+				{
+					...EMPTY_AWS_ENV,
+					AWS_PROFILE: "default",
+					AWS_SHARED_CREDENTIALS_FILE: credentialsPath,
+					AWS_CONFIG_FILE: configPath,
+					AWS_EC2_METADATA_DISABLED: "true",
+				},
+				async () => expect(getEnvApiKey("bedrock-mantle")).toBeUndefined(),
+			);
+		} finally {
+			await removeWithRetries(tmp);
+		}
+	});
+
 	test("recognizes an explicitly configured EC2 metadata endpoint", async () => {
 		await withEnv(
 			{
