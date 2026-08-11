@@ -1006,7 +1006,12 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 						}
 
 						const streamed = await streamResponse(currentResponse);
-						const acceptedSilence = options?.acceptEmptyResponse === true && !streamed.strippedPlanningLeak;
+						// Only accept an empty STOP as valid silence once every fallback
+						// endpoint is exhausted: an earlier endpoint returning empty
+						// successful streams must still fail over (Antigravity auto mode)
+						// rather than be recorded as a real silent review.
+						const acceptedSilence =
+							options?.acceptEmptyResponse === true && !streamed.strippedPlanningLeak && isLastEndpoint;
 						if (output.stopReason !== "stop" || streamed.meaningful || acceptedSilence) {
 							receivedContent = streamed.meaningful || acceptedSilence;
 							break;

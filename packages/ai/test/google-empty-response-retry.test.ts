@@ -364,6 +364,34 @@ describe("Google empty-response retry (Cloud Code Assist path)", () => {
 		expect(textOf(result)).toBe("Recovered.");
 	});
 
+	it("exhausts Antigravity auto failover before accepting silence", async () => {
+		const requestedEndpoints: string[] = [];
+		const fetchMock: FetchImpl = async input => {
+			const endpoint = endpointFromInput(input);
+			requestedEndpoints.push(endpoint);
+			return withResponseUrl(sse(ccaChunk("")), endpoint);
+		};
+
+		const stream = streamGoogleGeminiCli(antigravityModel, context, {
+			apiKey: JSON.stringify({ token: "token", projectId: "proj-123" }),
+			antigravityEndpointMode: "auto",
+			acceptEmptyResponse: true,
+			fetch: fetchMock,
+		});
+		const result = await stream.result();
+
+		// Daily still burns its empty-response budget and fails over; only the
+		// last (sandbox) endpoint records the empty STOP as valid silence.
+		expect(requestedEndpoints).toEqual([
+			ANTIGRAVITY_DAILY_ENDPOINT,
+			ANTIGRAVITY_DAILY_ENDPOINT,
+			ANTIGRAVITY_DAILY_ENDPOINT,
+			ANTIGRAVITY_SANDBOX_ENDPOINT,
+		]);
+		expect(result.stopReason).toBe("stop");
+		expect(result.errorMessage).toBeUndefined();
+	});
+
 	for (const { mode, endpoint } of [
 		{ mode: "production", endpoint: ANTIGRAVITY_DAILY_ENDPOINT },
 		{ mode: "sandbox", endpoint: ANTIGRAVITY_SANDBOX_ENDPOINT },
