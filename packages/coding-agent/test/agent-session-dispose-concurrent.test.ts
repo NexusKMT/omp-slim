@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
+import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { HindsightSessionState } from "@oh-my-pi/pi-coding-agent/hindsight/state";
@@ -60,6 +60,33 @@ describe("AgentSession concurrent disposal", () => {
 		});
 		return session;
 	}
+
+	it("marks owned async job cancellation as manager shutdown", async () => {
+		const owned = new AsyncJobManager({ maxRunningJobs: 1 });
+		const started = Promise.withResolvers<void>();
+		let abortReason: unknown;
+		owned.register("task", "running subagent", async ({ signal }) => {
+			const aborted = Promise.withResolvers<void>();
+			signal.addEventListener(
+				"abort",
+				() => {
+					abortReason = signal.reason;
+					aborted.resolve();
+				},
+				{ once: true },
+			);
+			started.resolve();
+			await aborted.promise;
+			return "stopped";
+		});
+		const current = createSession(owned);
+
+		await started.promise;
+		await current.dispose();
+		session = undefined;
+
+		expect(abortReason).toBe(ASYNC_JOB_MANAGER_SHUTDOWN_REASON);
+	});
 
 	it("starts independent writers together and closes persistence after their barrier", async () => {
 		const owned = new AsyncJobManager({ maxRunningJobs: 1, retentionMs: 1_000, onJobComplete: () => {} });
