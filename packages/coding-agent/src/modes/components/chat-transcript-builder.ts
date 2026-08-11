@@ -54,7 +54,7 @@ import { EvalExecutionComponent } from "./eval-execution";
 import { type LateDiagnosticsFile, LateDiagnosticsMessageComponent } from "./late-diagnostics-message";
 import { groupedReadUsageCallIds, ReadToolGroupComponent, readArgsCollapseIntoGroup } from "./read-tool-group";
 import { SkillMessageComponent } from "./skill-message";
-import { ToolActivityContainer } from "./tool-activity-container";
+import { ToolActivityContainer } from "./tool-activity";
 import { ToolExecutionComponent } from "./tool-execution";
 import { TranscriptContainer } from "./transcript-container";
 import { createUsageRowBlock } from "./usage-row";
@@ -97,7 +97,9 @@ export class ChatTranscriptBuilder {
 	#expandables: Array<{ setExpanded(expanded: boolean): void }> = [];
 	#expanded = false;
 
-	constructor(private readonly deps: ChatTranscriptBuilderDeps) {}
+	constructor(private readonly deps: ChatTranscriptBuilderDeps) {
+		this.container.setToolActivityVisible(!settings.get("display.hideToolActivity"));
+	}
 
 	/** Whether the transcript currently holds any rendered rows. */
 	get isEmpty(): boolean {
@@ -194,7 +196,6 @@ export class ChatTranscriptBuilder {
 			this.#readGroup = new ReadToolGroupComponent({
 				showContentPreview: settings.get("read.toolResultPreview"),
 			});
-			this.#readGroup.setToolActivityVisible(!settings.get("display.hideToolActivity"));
 			this.#trackExpandable(this.#readGroup);
 			this.container.addChild(this.#readGroup);
 		}
@@ -409,7 +410,6 @@ export class ChatTranscriptBuilder {
 				this.deps.cwd,
 				content.id,
 			);
-			component.setToolActivityVisible(!settings.get("display.hideToolActivity"));
 			this.#trackExpandable(component);
 			this.container.addChild(component);
 
@@ -470,14 +470,12 @@ export class ChatTranscriptBuilder {
 		if (!message.display) return;
 		if (message.customType === "async-result") {
 			const component = buildAsyncResultBlock(message);
-			component.setToolActivityVisible(!settings.get("display.hideToolActivity"));
 			this.container.addChild(component);
 			return;
 		}
 		if (message.customType === LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE) {
 			const details = (message as CustomMessage<{ files?: LateDiagnosticsFile[] }>).details;
 			const component = new LateDiagnosticsMessageComponent(details?.files ?? []);
-			component.setToolActivityVisible(!settings.get("display.hideToolActivity"));
 			this.#trackExpandable(component);
 			this.container.addChild(component);
 			return;
@@ -512,7 +510,6 @@ export class ChatTranscriptBuilder {
 			);
 			this.#trackExpandable(messageComponent);
 			const component = new ToolActivityContainer(messageComponent);
-			component.setToolActivityVisible(!settings.get("display.hideToolActivity"));
 			this.container.addChild(component);
 			return;
 		}

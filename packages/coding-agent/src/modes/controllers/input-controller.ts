@@ -11,7 +11,6 @@ import { extractImagePathFromText } from "../../modes/components/custom-editor";
 import { ReadToolGroupComponent } from "../../modes/components/read-tool-group";
 import { renderSegmentTrack } from "../../modes/components/segment-track";
 import { TinyTitleDownloadProgressComponent } from "../../modes/components/tiny-title-download-progress";
-import { isToolActivityComponent } from "../../modes/components/tool-activity";
 import { ToolExecutionComponent } from "../../modes/components/tool-execution";
 import { TreeSelectorComponent } from "../../modes/components/tree-selector";
 import { expandEmoticons } from "../../modes/emoji-autocomplete";
@@ -1925,18 +1924,16 @@ export class InputController {
 		}
 
 		for (const child of this.ctx.chatContainer.children) {
-			if (isToolActivityComponent(child)) {
-				if (
-					!this.ctx.hideToolActivity &&
-					(child instanceof ToolExecutionComponent || child instanceof ReadToolGroupComponent)
-				) {
-					child.setExpanded(false);
-				}
-				child.setToolActivityVisible(!this.ctx.hideToolActivity);
+			if (
+				!this.ctx.hideToolActivity &&
+				(child instanceof ToolExecutionComponent || child instanceof ReadToolGroupComponent)
+			) {
+				child.setExpanded(false);
 			} else if (child instanceof AssistantMessageComponent) {
 				child.setToolResultImagesVisible(!this.ctx.hideToolActivity);
 			}
 		}
+		this.ctx.chatContainer.setToolActivityVisible(!this.ctx.hideToolActivity);
 
 		if (this.ctx.hideToolActivity) this.ctx.ui.clearInlineImages();
 		this.ctx.ui.resetDisplay();

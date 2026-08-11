@@ -16,7 +16,7 @@ import {
 import { createIrcMessageCard } from "../../tools/hub";
 import { replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../../tools/render-utils";
 import { canonicalizeMessage } from "../../utils/thinking-display";
-import { ToolActivityContainer } from "../components/tool-activity-container";
+import { ToolActivityContainer } from "../components/tool-activity";
 import { TranscriptBlock } from "../components/transcript-container";
 import { theme } from "../theme/theme";
 

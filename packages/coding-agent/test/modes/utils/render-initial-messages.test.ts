@@ -17,7 +17,7 @@ import type { AssistantMessage, ImageContent, Usage } from "@oh-my-pi/pi-ai";
 import { kStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-coding-agent/modes/components/assistant-message";
-import { StrippedToolCallsPlaceholder } from "@oh-my-pi/pi-coding-agent/modes/components/stripped-tool-calls-placeholder";
+import { TranscriptContainer } from "@oh-my-pi/pi-coding-agent/modes/components/transcript-container";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
@@ -142,8 +142,9 @@ function makeRenderCtx(
 	transcript: SessionContext,
 	showImages = true,
 	hideToolActivity = false,
-): { ctx: InteractiveModeContext; chatContainer: Container } {
-	const chatContainer = new Container();
+): { ctx: InteractiveModeContext; chatContainer: TranscriptContainer } {
+	const chatContainer = new TranscriptContainer();
+	chatContainer.setToolActivityVisible(!hideToolActivity);
 	let helpers: UiHelpers;
 	const ctx = {
 		chatContainer,
@@ -157,6 +158,10 @@ function makeRenderCtx(
 		updateEditorTopBorder: vi.fn(),
 		ui: { requestRender: vi.fn(), imageBudget: undefined },
 		resetTranscript: () => chatContainer.clear(),
+		present: (content: Component | readonly Component[]) => {
+			const components = Array.isArray(content) ? content : [content];
+			for (const component of components) chatContainer.addChild(component);
+		},
 		// Rebuild paths honor terminal.showImages since the native-image work;
 		// keep it on so the image-replay contracts below stay meaningful.
 		settings: {
@@ -487,6 +492,16 @@ describe("UiHelpers.renderInitialMessages — hidden tool activity", () => {
 		expect(visibleRender).toContain("LAUNCH_COMPLETION_MARKER");
 	});
 
+	it("hides tool-originated warnings when activity is hidden", () => {
+		const hidden = makeRenderCtx(makeEmptyContext(), true, true);
+		new UiHelpers(hidden.ctx).showToolActivityWarning("TODO_WARNING_MARKER");
+		expect(Bun.stripANSI(hidden.chatContainer.render(120).join("\n"))).not.toContain("TODO_WARNING_MARKER");
+
+		const visible = makeRenderCtx(makeEmptyContext(), true, false);
+		new UiHelpers(visible.ctx).showToolActivityWarning("TODO_WARNING_MARKER");
+		expect(Bun.stripANSI(visible.chatContainer.render(120).join("\n"))).toContain("TODO_WARNING_MARKER");
+	});
+
 	it("hides the stripped-tool-calls placeholder with tool activity and restores it on reveal", () => {
 		const strippedAssistant: AgentMessage & StrippedToolCallsMarker = {
 			role: "assistant",
@@ -508,9 +523,7 @@ describe("UiHelpers.renderInitialMessages — hidden tool activity", () => {
 		);
 
 		// A live reveal must restore the placeholder without a transcript rebuild.
-		for (const child of hidden.chatContainer.children) {
-			if (child instanceof StrippedToolCallsPlaceholder) child.setToolActivityVisible(true);
-		}
+		hidden.chatContainer.setToolActivityVisible(true);
 		expect(Bun.stripANSI(hidden.chatContainer.render(120).join("\n"))).toContain(
 			"2 tool calls elided — no result on this branch",
 		);
