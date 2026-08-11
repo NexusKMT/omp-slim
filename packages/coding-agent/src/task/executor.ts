@@ -1095,7 +1095,21 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 			budgetLimitExceeded = true;
 		}
 		if (abortSent) {
-			if (reason === "signal" && abortReason !== "signal" && abortReason !== "timeout") {
+			// Shutdown is a superseding external abort: a process teardown that
+			// races a self-inflicted budget hard-abort must still follow the
+			// shutdown release path (dispose + unregister) instead of the
+			// budget-resumable path, which would leave the subagent adopted and
+			// alive past AgentLifecycleManager.dispose(). Genuine kills
+			// (signal/timeout/terminate) already dispose terminally, and shutdown
+			// is never downgraded back to signal.
+			if (reason === "shutdown" && abortReason === "budget") {
+				abortReason = "shutdown";
+			} else if (
+				reason === "signal" &&
+				abortReason !== "signal" &&
+				abortReason !== "timeout" &&
+				abortReason !== "shutdown"
+			) {
 				abortReason = "signal";
 			}
 			return;

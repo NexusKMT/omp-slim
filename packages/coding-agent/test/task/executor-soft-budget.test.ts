@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
+import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
@@ -342,6 +342,52 @@ describe("runSubprocess soft request budget", () => {
 		await revivedTerminal;
 		expectRpcTurn();
 		rpcRegistry.dispose();
+	});
+
+	it("a shutdown racing a budget hard-abort follows the shutdown release path", async () => {
+		// Regression: a process shutdown that lands right after the soft-budget
+		// grace hard-aborts must supersede the budget reason, so the subagent is
+		// released (disposed + unregistered, restorable as parked) instead of
+		// being left adopted and alive past AgentLifecycleManager.dispose().
+		const id = "RacedScout";
+		const rootSessionFile = `${tempDir.path()}/main.jsonl`;
+		const workerSessionFile = `${tempDir.path()}/main/${id}.jsonl`;
+		await Bun.write(rootSessionFile, "");
+		await Bun.write(workerSessionFile, "");
+		const controller = new AbortController();
+		// abort #1 = budget soft-stop (abortSent still false); abort #2 =
+		// budget hard-abort's abortActiveSession (abortReason already "budget").
+		// Fire the shutdown only on #2 so it must supersede the budget reason.
+		let abortInvocations = 0;
+		const handle = createMockSession(
+			({ promptIndex, emit, pushMessage }) => {
+				if (promptIndex !== 1) return;
+				// Never yields: budget 2 → stop at 3, grace exhausted at 8.
+				for (let i = 1; i <= 8; i++) {
+					const message = assistantText(`burning request ${i}`);
+					pushMessage(message);
+					emit({ type: "message_end", message } as unknown as AgentSessionEvent);
+				}
+			},
+			() => {
+				abortInvocations += 1;
+				if (abortInvocations >= 2 && !controller.signal.aborted) {
+					controller.abort(ASYNC_JOB_MANAGER_SHUTDOWN_REASON);
+				}
+			},
+		);
+		mockCreateAgentSession(handle.session);
+		registerRunning(id, handle.session, workerSessionFile);
+
+		const result = await runSubprocess({ ...baseOptions(id), signal: controller.signal });
+
+		expect(result.aborted).toBe(true);
+		expect(AgentRegistry.global().get(id)).toBeUndefined();
+		expect(handle.disposeCalls()).toBeGreaterThanOrEqual(1);
+		expect(await Bun.file(`${workerSessionFile}.tombstone`).exists()).toBe(false);
+		const restored = new AgentRegistry();
+		await registerPersistedSubagents(restored, rootSessionFile);
+		expect(restored.get(id)?.status).toBe("parked");
 	});
 
 	it("manager shutdown restores a running kept-alive agent as parked without a tombstone", async () => {
