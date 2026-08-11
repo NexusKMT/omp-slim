@@ -445,7 +445,6 @@ export function drawText(
   }
 }
 
-
 /**
  * Set the canvas size to fit all grid columns and rows.
  * Called after layout to ensure the canvas covers the full drawing area.
