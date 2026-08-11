@@ -189,19 +189,25 @@ function resolveSubagentRetryFallbackCandidates(
  * Chain a single-model subagent inherits when its own model patterns supply no
  * fallbacks of their own. The child is pinned to a `subagent:<id>` role whose
  * chain shadows every configured role chain (see
- * {@link installSubagentRetryFallbackChain}), so a role-alias request (`@smol`)
- * MUST inherit that role's chain — otherwise the pin silently re-routes the
- * child onto the `default` role's chain. Explicit model selectors keep
- * inheriting `default`: they carry no role identity, and a role that happens to
- * be assigned the same model must not capture the child's fallback routing.
+ * {@link installSubagentRetryFallbackChain}), so a role-alias request (`@smol`,
+ * the bundled `task` agent's `@task`) MUST inherit that role's chain —
+ * otherwise the pin silently re-routes the child onto the `default` role's
+ * chain. Explicit model selectors keep inheriting `default`: they carry no role
+ * identity, and a role that happens to be assigned the same model must not
+ * capture the child's fallback routing.
+ *
+ * `modelRole` is the sole witness of that identity. Callers hand
+ * `runSubprocess` the model patterns already expanded by
+ * `resolveAgentModelSelection`, so `@task` never survives into them — the role
+ * has to travel beside the patterns, and re-deriving it from them yields
+ * `undefined` every time.
  */
 function resolveSubagentInheritedRetryFallbackChain(
 	settings: Settings,
 	modelRegistry: ModelRegistry,
-	modelPatterns: string[],
+	role: string | undefined,
 ): string[] | undefined {
 	const configuredChains = settings.get("retry.fallbackChains");
-	const role = resolveExplicitModelRole(modelPatterns, settings);
 	// An explicitly emptied role chain means "no fallbacks", not "inherit
 	// default" — mirrors expandDefaultRetryFallbackChains.
 	const fallbackChain = (role !== undefined ? configuredChains?.[role] : undefined) ?? configuredChains?.default;
@@ -2838,7 +2844,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			const configuredModelPatterns = resolveConfiguredModelPatterns(modelPatterns, settings);
 			const inheritedRetryFallbackChain =
 				configuredModelPatterns.length === 1
-					? resolveSubagentInheritedRetryFallbackChain(subagentSettings, modelRegistry, modelPatterns)
+					? resolveSubagentInheritedRetryFallbackChain(subagentSettings, modelRegistry, modelRole)
 					: undefined;
 			const {
 				model,
