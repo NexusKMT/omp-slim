@@ -1812,6 +1812,7 @@ const FIREWORKS_FAST_VARIANT_SPECS: ReadonlyArray<{
 	{ base: "kimi-k2.7-code", name: "Kimi K2.7 Code Fast", cost: { input: 1.9, output: 8, cacheRead: 0.38 } },
 	{ base: "kimi-k2.6", name: "Kimi K2.6 Fast", cost: { input: 2, output: 8, cacheRead: 0.3 } },
 	{ base: "glm-5.1", name: "GLM-5.1 Fast", cost: { input: 2.8, output: 8.8, cacheRead: 0.52 } },
+	{ base: "glm-5.2", name: "GLM-5.2 Fast", cost: { input: 2.1, output: 6.6, cacheRead: 0.21 } },
 ];
 
 /**
@@ -3549,10 +3550,13 @@ export function basetenModelManagerOptions(
 			const features = Array.isArray(raw.supported_features) ? raw.supported_features : [];
 			const modalities = Array.isArray(raw.input_modalities) ? raw.input_modalities : [];
 
-			const isBasetenNativeReasoning =
+			// Baseten's reasoning router accepts only the high/max
+			// effort tiers for its GLM-5.2 and gpt-oss routes.
+			const isEffortReasoning =
 				defaults.id === "openai/gpt-oss-120b" ||
-				defaults.id === "deepseek-ai/DeepSeek-V4-Pro" ||
-				defaults.id === "zai-org/GLM-5.2";
+				defaults.id === "zai-org/GLM-5.2" ||
+				defaults.id === "zai-org/GLM-5.2-Fast";
+			const isBasetenNativeReasoning = isEffortReasoning || defaults.id === "deepseek-ai/DeepSeek-V4-Pro";
 			const reasoning =
 				isBasetenNativeReasoning && (features.includes("reasoning") || features.includes("reasoning_effort"));
 			const supportsTools = features.includes("tools") ? undefined : false;
@@ -3570,10 +3574,6 @@ export function basetenModelManagerOptions(
 			const maxTokens = toPositiveNumber(raw.max_completion_tokens, reference?.maxTokens ?? defaults.maxTokens);
 
 			const baseModel = mapWithBundledReference(entry, defaults, reference);
-
-			// Baseten's reasoning router accepts only the high/max
-			// effort tiers for its GLM-5.2 and gpt-oss routes.
-			const isEffortReasoning = defaults.id === "openai/gpt-oss-120b" || defaults.id === "zai-org/GLM-5.2";
 			const thinking = isEffortReasoning
 				? {
 						mode: "effort" as const,
