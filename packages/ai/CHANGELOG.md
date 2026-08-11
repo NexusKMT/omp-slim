@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Standardized first-party outbound User-Agent headers on `omp/<version>` via the shared `USER_AGENT` utility.
+
 ### Fixed
 
 - Fixed the Amazon Bedrock and Cursor transports ignoring `StreamOptions.headers`; both built their request headers from scratch, so caller-supplied tracing or attribution headers were silently dropped while working on every other provider ([#8107](https://github.com/can1357/oh-my-pi/pull/8107) by [@svperfecta](https://github.com/svperfecta)).

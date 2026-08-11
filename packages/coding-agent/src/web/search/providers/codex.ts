@@ -4,7 +4,6 @@
  * Uses the configured Codex Responses transport for proxy/API-key setups and
  * the official ChatGPT backend for OAuth logins.
  */
-import * as os from "node:os";
 import {
 	type AuthStorage,
 	type FetchImpl,
@@ -22,8 +21,7 @@ import {
 	OPENAI_HEADER_VALUES,
 	OPENAI_HEADERS,
 } from "@oh-my-pi/pi-catalog/wire/codex";
-import { $env, readSseJson } from "@oh-my-pi/pi-utils";
-import packageJson from "../../../../package.json" with { type: "json" };
+import { $env, readSseJson, USER_AGENT } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../../../config/model-registry";
 import type { SearchResponse, SearchSource } from "../../../web/search/types";
 import { SearchProviderError } from "../../../web/search/types";
@@ -441,7 +439,7 @@ function buildCodexHeaders(
 	headers.set(OPENAI_HEADERS.BETA, OPENAI_HEADER_VALUES.BETA_RESPONSES);
 	headers.set(OPENAI_HEADERS.ORIGINATOR, OPENAI_HEADER_VALUES.ORIGINATOR_CODEX);
 	headers.set(OPENAI_HEADERS.VERSION, CODEX_CLIENT_VERSION);
-	headers.set("User-Agent", `pi/${packageJson.version} (${os.platform()} ${os.release()}; ${os.arch()})`);
+	headers.set("User-Agent", USER_AGENT);
 	headers.set("Accept", "text/event-stream");
 	headers.set("Content-Type", "application/json");
 	return headers;

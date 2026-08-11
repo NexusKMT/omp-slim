@@ -14,7 +14,7 @@ import {
 	getAntigravityUserAgent,
 	getGeminiCliHeaders,
 } from "@oh-my-pi/pi-catalog/wire/gemini-headers";
-import { fetchWithRetry } from "@oh-my-pi/pi-utils";
+import { fetchWithRetry, USER_AGENT } from "@oh-my-pi/pi-utils";
 
 import type { SearchCitation, SearchResponse, SearchSource } from "../../../web/search/types";
 import { SearchProviderError } from "../../../web/search/types";
@@ -436,8 +436,8 @@ async function callGeminiSearch(
 				requestId: `agent-${crypto.randomUUID()}`,
 			}
 		: {
-				userAgent: "pi-coding-agent",
-				requestId: `pi-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+				userAgent: USER_AGENT,
+				requestId: `omp-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
 			};
 
 	const normalizedSystemPrompt = systemPrompt?.toWellFormed();

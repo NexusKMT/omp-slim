@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Standardized catalog discovery User-Agent headers on `omp/<version>` via the shared `USER_AGENT` utility.
+
 ### Fixed
 
 - Marked `meta/muse-spark-1.2` and `muse-spark-1.2-contributor` as image-capable (`input: ["text", "image"]`) with the same Responses reasoning, thinking, and cost metadata as `muse-spark-1.1` (contributor uses its discounted 0.1/0.2 pricing), so `omp models` no longer lists them as text-only.

@@ -19,7 +19,9 @@ import {
 	replaceBinaryForUpdate,
 	resolveBunGlobalNodeModulesDirFromLocations,
 	resolveReleaseBinaryAsset,
+	resolveReleaseDist,
 	resolveUpdateMethodForTest,
+	shouldForceBinaryUpdate,
 	sweepStaleBackups,
 	updateViaBinaryAt,
 } from "@oh-my-pi/pi-coding-agent/cli/update-cli";
@@ -738,5 +740,40 @@ describe("update-cli stale backup sweep", () => {
 		expect(await Bun.file(`${targetPath}.1800000000000.99.bak`).exists()).toBe(false);
 		expect(await Bun.file(path.join(dir, "notes.bak")).exists()).toBe(true);
 		expect(await Bun.file(`${targetPath}.config.bak`).exists()).toBe(true);
+	});
+});
+
+describe("update-cli binary-only release gating", () => {
+	it("honors an explicit omp.dist field from the registry manifest", () => {
+		expect(resolveReleaseDist({ omp: { dist: "binary" } })).toBe("binary");
+		expect(resolveReleaseDist({ omp: { dist: "npm" } })).toBe("npm");
+	});
+
+	it("treats unknown dist values as binary-only", () => {
+		expect(resolveReleaseDist({ omp: { dist: "cargo" } })).toBe("binary");
+	});
+
+	it("returns undefined when the manifest carries no dist field", () => {
+		expect(resolveReleaseDist({ version: "1.2.3" })).toBeUndefined();
+		expect(resolveReleaseDist({ omp: {} })).toBeUndefined();
+		expect(resolveReleaseDist(undefined)).toBeUndefined();
+	});
+
+	it("forces binary updates when dist is binary regardless of version", () => {
+		expect(shouldForceBinaryUpdate({ version: "1.2.3", dist: "binary" }, "1.2.2")).toBe(true);
+	});
+
+	it("allows package-manager updates across majors when dist is explicitly npm", () => {
+		expect(shouldForceBinaryUpdate({ version: "2.0.0", dist: "npm" }, "1.9.0")).toBe(false);
+	});
+
+	it("forces binary updates on a major bump without a dist field", () => {
+		expect(shouldForceBinaryUpdate({ version: "2.0.0" }, "1.9.0")).toBe(true);
+		expect(shouldForceBinaryUpdate({ version: "2.0.0-rc.1" }, "1.9.0")).toBe(true);
+	});
+
+	it("keeps package-manager updates within the same major and on downgrades", () => {
+		expect(shouldForceBinaryUpdate({ version: "1.10.0" }, "1.9.0")).toBe(false);
+		expect(shouldForceBinaryUpdate({ version: "1.0.0" }, "2.0.0")).toBe(false);
 	});
 });

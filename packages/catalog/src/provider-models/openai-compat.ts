@@ -1,4 +1,4 @@
-import { VERSION } from "@oh-my-pi/pi-utils";
+import { USER_AGENT } from "@oh-my-pi/pi-utils";
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import {
 	fetchOpenAICompatibleModels,
@@ -111,7 +111,7 @@ const catalogSession: {
 	hasPayload: boolean;
 } = { inflight: null, payload: undefined, etag: null, hasPayload: false };
 
-const CATALOG_USER_AGENT = `omp/${VERSION} (+https://omp.sh)`;
+const CATALOG_USER_AGENT = USER_AGENT;
 
 /**
  * Fetches the models.dev catalog via catalog.stencil.so, which serves a
