@@ -38,6 +38,12 @@ struct ShellSessionCore {
 	shell: BrushShell,
 }
 
+impl Drop for ShellSessionCore {
+	fn drop(&mut self) {
+		terminate_internal_background_jobs(&mut self.shell);
+	}
+}
+
 #[derive(Clone, Default)]
 struct ShellAbortState(Arc<TokioMutex<Option<AbortToken>>>);
 
@@ -1408,10 +1414,16 @@ async fn terminate_run(registry: &process::SpawnRegistry) {
 		}
 	}
 }
-fn terminate_background_jobs(shell: &mut BrushShell) {
-	let mut targets = process::TerminationTargets::new();
+fn terminate_internal_background_jobs(shell: &mut BrushShell) {
 	for job in &mut shell.jobs_mut().jobs {
 		job.abort_internal_tasks();
+	}
+}
+
+fn terminate_background_jobs(shell: &mut BrushShell) {
+	let mut targets = process::TerminationTargets::new();
+	terminate_internal_background_jobs(shell);
+	for job in &shell.jobs().jobs {
 		if let Some(pgid) = job.process_group_id() {
 			targets.add_pgid(pgid);
 		}
@@ -4430,6 +4442,28 @@ replace = [{ pattern = "hello", replacement = "HI" }]
 			max_capture_bytes,
 			..Default::default()
 		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn one_shot_completion_aborts_internal_background_jobs() {
+		let marker = tempfile::NamedTempFile::new().expect("marker file");
+		let marker_path = marker.path().to_string_lossy();
+		std::fs::remove_file(marker.path()).expect("remove initial marker");
+		let command = format!("{{ sleep 1; echo leaked > {}; }} &", quote_arg(&marker_path));
+
+		execute_shell(
+			ShellExecuteOptions { command, ..Default::default() },
+			None,
+			CancelToken::default(),
+		)
+		.await
+		.expect("one-shot shell execution");
+		time::sleep(Duration::from_millis(100)).await;
+
+		assert!(
+			!marker.path().exists(),
+			"an internal background job outlived its one-shot shell session"
+		);
 	}
 
 	/// `live_background_job_count` reports 0 when the session has no live
