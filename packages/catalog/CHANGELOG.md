@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Baseten's `moonshotai/Kimi-K3` catalog metadata so its `low`/`high`/`max` thinking levels are available.
+
 ## [17.2.15] - 2026-08-12
 
 ### Fixed
