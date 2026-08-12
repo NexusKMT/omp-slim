@@ -191,6 +191,50 @@ describe("InteractiveMode vibe mode toggle", () => {
 		expect(session.getToolByName("vibe_spawn")).toBeUndefined();
 	});
 
+	it("resumes a queued user turn without Vibe tools after exiting mid-turn", async () => {
+		const toolNamesPerCall: string[][] = [];
+		let firstStarted: PromiseWithResolvers<void> | undefined;
+		streamFn = (_model, context, options) => {
+			toolNamesPerCall.push((context.tools ?? []).map(tool => tool.name));
+			const isFirst = toolNamesPerCall.length === 1;
+			const stream = new AssistantMessageEventStream();
+			queueMicrotask(() => {
+				stream.push({ type: "start", partial: createAssistantMessage("") });
+				if (isFirst) {
+					options?.signal?.addEventListener(
+						"abort",
+						() => stream.push({ type: "error", reason: "aborted", error: createAssistantMessage("Aborted") }),
+						{ once: true },
+					);
+					firstStarted?.resolve();
+				} else {
+					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("Resumed") });
+				}
+			});
+			return stream;
+		};
+		firstStarted = Promise.withResolvers<void>();
+
+		await mode.handleVibeModeCommand();
+		const prompt = session.prompt("Delegate this");
+		await firstStarted.promise;
+		// Queue a user steer behind the active Vibe turn.
+		await session.steer("and then do the other thing");
+
+		await mode.handleVibeModeCommand();
+		await prompt;
+		await session.waitForIdle();
+
+		// The aborted Vibe turn plus the resumed queued turn.
+		expect(toolNamesPerCall.length).toBe(2);
+		// The resumed turn must not have inherited the torn-down Vibe tools.
+		for (const name of VIBE_TOOL_NAMES) {
+			expect(toolNamesPerCall[1]).not.toContain(name);
+		}
+		expect(session.getVibeModeState()).toBeUndefined();
+		expect(session.getToolByName("vibe_spawn")).toBeUndefined();
+	});
+
 	it("keeps a same-named non-built-in Todo tool unavailable in Vibe mode", async () => {
 		const model = session.model;
 		if (!model) throw new Error("Expected active model");
