@@ -202,6 +202,10 @@ function parseMonthlyBillingConfig(raw: Record<string, unknown>): XaiMonthlyBill
 		onDemandUsed: parseOnDemandAmount(raw.onDemandUsed),
 	};
 }
+function hasPositiveMonthlyLimit(raw: Record<string, unknown>): boolean {
+	const limit = parseOnDemandAmount(raw.monthlyLimit);
+	return limit !== undefined && limit > 0;
+}
 
 function buildOnDemandLimit(
 	onDemandCap: number | undefined,
@@ -384,8 +388,14 @@ export const xaiOauthUsageProvider: UsageProvider = {
 		if (weekly?.inferredPercent && creditsLooksUnified) {
 			if (monthly) {
 				effectiveWeekly = null;
-			} else if (!monthlyPayload || !isRecord(monthlyPayload) || !isRecord(monthlyPayload.config)) {
-				effectiveWeekly = null;
+			} else {
+				const monthlyConfig =
+					monthlyPayload && isRecord(monthlyPayload) && isRecord(monthlyPayload.config)
+						? monthlyPayload.config
+						: null;
+				if (!monthlyConfig || hasPositiveMonthlyLimit(monthlyConfig)) {
+					effectiveWeekly = null;
+				}
 			}
 		}
 		if (!effectiveWeekly && !monthly) return null;
