@@ -39,7 +39,9 @@ import {
 import {
 	Ellipsis,
 	extractSegments,
+	isOsc66Line,
 	normalizeTerminalOutput,
+	osc66MaxScale,
 	sliceByColumn,
 	sliceWithWidth,
 	truncateToWidth,
@@ -1215,6 +1217,12 @@ export class TUI extends Container {
 	// the drag has been quiet for this long. Multiplexer sessions keep their own
 	// debounce (`#armMultiplexerResizeTimer`, see #2088) and never take this path.
 	static readonly #RESIZE_VIEWPORT_SETTLE_MS = 120;
+	// Extra rows composed above the resize viewport so a first-visible blank can
+	// still be identified as the reserved lower half of a scaled OSC 66 heading
+	// that scrolled just above the fold (issue #8318). A scale-`s` heading
+	// reserves `s - 1` rows and the protocol caps `s` at 7, so six rows of
+	// context classify every legal heading exactly.
+	static readonly #RESIZE_SPACER_CONTEXT_ROWS = 6;
 	// Ghostty can drop Kitty graphics commands sent during its first post-startup
 	// settle window, leaving only Unicode placeholder cells. Hold the first image
 	// paint until that window has passed; later images render normally.
@@ -2611,6 +2619,7 @@ export class TUI extends Container {
 				screenStart + i,
 				segment.start + i,
 				this.#committedRows,
+				this.#osc66SpacerGlyphWidth(this.#preparedFrame, segment.start + i),
 			);
 		}
 		const cursorControl = this.#cursorControlSequence(
@@ -4296,7 +4305,42 @@ export class TUI extends Container {
 		return col;
 	}
 
-	#lineRewriteSequence(line: string, width: number, screenRow = -1, frameRow = -1, committedTo = -1): string {
+	/**
+	 * Columns to preserve when `lines[index]` is a blank row that a scaled OSC 66
+	 * heading flows into, or `-1` when it is not such a row. A scale-`s` heading
+	 * occupies `s` rows and `visibleWidth` columns, so the `s - 1` blank rows
+	 * beneath it hold the multicell glyph's lower half; those columns must never
+	 * be erased or overdrawn or the glyph vanishes, leaving reserved-but-invisible
+	 * space (issue #8318). Scans upward across the contiguous blank run so every
+	 * reserved row of a scale ≥ 3 heading is covered, not just the first.
+	 */
+	#osc66SpacerGlyphWidth(lines: readonly string[], index: number): number {
+		if (index <= 0 || lines[index] !== "") return -1;
+		let gap = 1;
+		while (index - gap > 0 && lines[index - gap] === "") gap++;
+		const above = lines[index - gap];
+		if (above === undefined || !isOsc66Line(above) || gap > osc66MaxScale(above) - 1) return -1;
+		return visibleWidth(above);
+	}
+
+	#lineRewriteSequence(
+		line: string,
+		width: number,
+		screenRow = -1,
+		frameRow = -1,
+		committedTo = -1,
+		spacerGlyphWidth = -1,
+	): string {
+		// Reserved lower half of a scaled OSC 66 heading. The glyph re-emitted on
+		// the row above owns columns `[0, spacerGlyphWidth)` here, so preserve
+		// them (any erase there clears the glyph — issue #8318) but still clear
+		// stale cells to their right: a row can reflow from wider text into this
+		// spacer, and the glyph write never covers those columns. Leading reset
+		// keeps the erase on the default background (BCE).
+		if (spacerGlyphWidth >= 0) {
+			if (spacerGlyphWidth >= width) return "";
+			return `${SEGMENT_RESET}\x1b[${spacerGlyphWidth}C${ERASE_TO_END_OF_LINE}`;
+		}
 		if (TERMINAL.isImageLine(line)) {
 			return ERASE_LINE + this.#imageLineSequence(line, screenRow, frameRow, committedTo);
 		}
@@ -4631,7 +4675,14 @@ export class TUI extends Container {
 				if (i > 0) buffer += "\r\n";
 				const writeRow = Math.min(i, height - 1);
 				buffer += options.clearScrollback
-					? this.#lineRewriteSequence(frame[i] ?? "", width, writeRow, i, chunkTo)
+					? this.#lineRewriteSequence(
+							frame[i] ?? "",
+							width,
+							writeRow,
+							i,
+							chunkTo,
+							this.#osc66SpacerGlyphWidth(frame, i),
+						)
 					: this.#terminalLine(frame[i] ?? "", writeRow, i, chunkTo);
 			}
 			for (let screenRow = 0; screenRow < height; screenRow++) {
@@ -4640,7 +4691,14 @@ export class TUI extends Container {
 				const writeRow = Math.min(chunkTo + screenRow, height - 1);
 				const frameRow = windowTop + screenRow;
 				buffer += options.clearScrollback
-					? this.#lineRewriteSequence(line, width, writeRow, frameRow, chunkTo)
+					? this.#lineRewriteSequence(
+							line,
+							width,
+							writeRow,
+							frameRow,
+							chunkTo,
+							this.#osc66SpacerGlyphWidth(frame, frameRow),
+						)
 					: this.#terminalLine(line, writeRow, frameRow, chunkTo);
 			}
 		} else {
@@ -4652,7 +4710,14 @@ export class TUI extends Container {
 				const line = visibleTexts && i >= visibleStart ? visibleTexts[i - visibleStart] : (paintLines[i] ?? "");
 				const writeRow = Math.min(i, height - 1);
 				buffer += options.clearScrollback
-					? this.#lineRewriteSequence(line, width, writeRow, -1, chunkTo)
+					? this.#lineRewriteSequence(
+							line,
+							width,
+							writeRow,
+							-1,
+							chunkTo,
+							this.#osc66SpacerGlyphWidth(paintLines, i),
+						)
 					: this.#terminalLine(line, writeRow, -1, chunkTo);
 			}
 		}
@@ -4739,43 +4804,59 @@ export class TUI extends Container {
 		// off a partial walk. The settle paint's own beginPass()/endPass() is the
 		// authoritative accounting, and its beginPass() wipes these frames.
 		this.#imageBudget.beginPass(true);
-		const { window, contentRows } = this.#composeResizeViewport(width, height);
-		this.#emitResizeViewport(window, height, contentRows, width);
+		const { framed, viewportTop, contentRows } = this.#composeResizeViewport(width, height);
+		this.#emitResizeViewport(framed, viewportTop, height, contentRows, width);
 		this.#resizeViewportPaintCount += 1;
 	}
 
 	/**
 	 * Build the viewport window for a resize fast-path frame: the bottom
 	 * `height` rows of the would-be full frame, collected bottom-up across root
-	 * children. {@link ViewportTailProvider}s (the transcript) yield only their
-	 * tail; the small live-region children below render in full — so every child
+	 * children, plus up to {@link #RESIZE_SPACER_CONTEXT_ROWS} rows above the
+	 * fold. {@link ViewportTailProvider}s (the transcript) yield only their tail;
+	 * the small live-region children below render in full — so every child
 	 * entirely above the fold is skipped. A frame shorter than the viewport is
 	 * top-aligned with blank rows below, matching the full-paint window geometry
 	 * (windowTop = max(0, frameLength - height)). Cursor markers are stripped
 	 * (the drag hides the hardware cursor) and rows are width-fitted via the
 	 * stateless preparer, so no persistent prepared-frame cache is touched.
+	 *
+	 * Returns the visible rows preceded by the context rows in frame order
+	 * (`framed`), the index where the viewport begins (`viewportTop`), and the
+	 * visible content count. The context rows are never emitted; they only let
+	 * {@link #osc66SpacerGlyphWidth} see a scaled heading that scrolled just
+	 * above the fold, so its reserved rows are preserved instead of erased
+	 * (issue #8318).
 	 */
-	#composeResizeViewport(width: number, height: number): { window: readonly string[]; contentRows: number } {
-		const tail: string[] = []; // bottom-first
+	#composeResizeViewport(
+		width: number,
+		height: number,
+	): { framed: readonly string[]; viewportTop: number; contentRows: number } {
+		const maxRows = height + TUI.#RESIZE_SPACER_CONTEXT_ROWS;
+		const tail: string[] = []; // bottom-first: viewport rows plus context above
 		const children = this.children;
-		for (let i = children.length - 1; i >= 0 && tail.length < height; i--) {
+		for (let i = children.length - 1; i >= 0 && tail.length < maxRows; i--) {
 			const child = children[i]!;
 			const provider = asViewportTailProvider(child);
-			const rows = provider ? provider.renderViewportTail(width, height - tail.length) : child.render(width);
-			for (let r = rows.length - 1; r >= 0 && tail.length < height; r--) {
+			const rows = provider ? provider.renderViewportTail(width, maxRows - tail.length) : child.render(width);
+			for (let r = rows.length - 1; r >= 0 && tail.length < maxRows; r--) {
 				tail.push(rows[r]!);
 			}
 		}
-		const count = tail.length;
+		const contentRows = Math.min(tail.length, height);
+		const extra = tail.length - contentRows; // context rows above the fold
 		const window: string[] = new Array(height);
 		for (let screenRow = 0; screenRow < height; screenRow++) {
-			// `tail` holds the bottom `count` frame rows, bottom-first. They fill
-			// the viewport when the frame overflows it and sit at the top (blanks
-			// below) when it underflows.
-			window[screenRow] = screenRow < count ? tail[count - 1 - screenRow]! : "";
+			// `tail` holds the bottom rows first. The bottom `contentRows` fill the
+			// viewport (top-aligned with blanks below on underflow).
+			window[screenRow] = screenRow < contentRows ? tail[contentRows - 1 - screenRow]! : "";
 		}
 		this.#extractCursorMarkers(window);
-		return { window: this.#prepareLinesArray(window, width), contentRows: count };
+		// Frame order: context rows above the fold (top-first) then the window.
+		const framed: string[] = new Array(extra + height);
+		for (let k = 0; k < extra; k++) framed[k] = tail[tail.length - 1 - k]!;
+		for (let screenRow = 0; screenRow < height; screenRow++) framed[extra + screenRow] = window[screenRow]!;
+		return { framed: this.#prepareLinesArray(framed, width), viewportTop: extra, contentRows };
 	}
 
 	/**
@@ -4845,13 +4926,30 @@ export class TUI extends Container {
 	 * flash, #5854). Normal-screen history is rebuilt once at settle via
 	 * `#emitFullPaint`.
 	 */
-	#emitResizeViewport(window: readonly string[], height: number, contentRows: number, width: number): void {
+	#emitResizeViewport(
+		framed: readonly string[],
+		viewportTop: number,
+		height: number,
+		contentRows: number,
+		width: number,
+	): void {
 		const widthChanged = this.#previousWidth > 0 && this.#previousWidth !== width;
 		const altEnter = widthChanged ? this.#enterResizeAltSequence() : "";
 		let buffer = `${this.#paintBeginSequence + altEnter}\x1b[H`;
 		for (let r = 0; r < height; r++) {
 			if (r > 0) buffer += "\r\n";
-			buffer += this.#lineRewriteSequence(window[r] ?? "", width, r, -1, this.#committedRows);
+			// `framed` carries context rows above the fold; the visible window
+			// starts at `viewportTop`, and the spacer lookup scans within `framed`
+			// so a heading just above the fold is still seen (issue #8318).
+			const idx = viewportTop + r;
+			buffer += this.#lineRewriteSequence(
+				framed[idx] ?? "",
+				width,
+				r,
+				-1,
+				this.#committedRows,
+				this.#osc66SpacerGlyphWidth(framed, idx),
+			);
 		}
 		// Park the hardware cursor at the real content bottom, not the padded
 		// viewport bottom: a later height shrink would otherwise scroll the live
@@ -4917,7 +5015,7 @@ export class TUI extends Container {
 		let buffer = `${this.#paintBeginSequence}\x1b[H`;
 		for (let r = 0; r < height; r++) {
 			if (r > 0) buffer += "\r\n";
-			buffer += this.#lineRewriteSequence(fitted[r], width, r, -1, -1);
+			buffer += this.#lineRewriteSequence(fitted[r], width, r, -1, -1, this.#osc66SpacerGlyphWidth(fitted, r));
 		}
 		buffer += this.#paintEndSequence;
 		this.terminal.write(buffer);
@@ -4996,7 +5094,7 @@ export class TUI extends Container {
 				const moveToBottom = height - 1 - currentScreenRow;
 				if (moveToBottom > 0) buffer += `\x1b[${moveToBottom}B`;
 				for (let r = height - scroll; r < height; r++) {
-					buffer += `\r\n${this.#lineRewriteSequence(window[r] ?? "", width, height - 1, windowTop + r, chunkTo)}`;
+					buffer += `\r\n${this.#lineRewriteSequence(window[r] ?? "", width, height - 1, windowTop + r, chunkTo, this.#osc66SpacerGlyphWidth(window, r))}`;
 				}
 				// Rewrite any remaining changed rows after the shift.
 				let firstChanged = -1;
@@ -5013,7 +5111,14 @@ export class TUI extends Container {
 					buffer += "\r";
 					for (let r = firstChanged; r <= lastChanged; r++) {
 						if (r > firstChanged) buffer += "\r\n";
-						buffer += this.#lineRewriteSequence(window[r] ?? "", width, r, windowTop + r, chunkTo);
+						buffer += this.#lineRewriteSequence(
+							window[r] ?? "",
+							width,
+							r,
+							windowTop + r,
+							chunkTo,
+							this.#osc66SpacerGlyphWidth(window, r),
+						);
 					}
 					cursorFromRow = windowTop + lastChanged;
 				}
@@ -5088,6 +5193,7 @@ export class TUI extends Container {
 					r,
 					windowTop + r,
 					this.#committedRows,
+					this.#osc66SpacerGlyphWidth(window, r),
 				);
 			}
 			buffer += fillSequence;
@@ -5119,7 +5225,14 @@ export class TUI extends Container {
 		let wroteLine = false;
 		for (let i = chunkFrom; i < chunkTo; i++) {
 			if (wroteLine) buffer += "\r\n";
-			buffer += this.#lineRewriteSequence(frame[i] ?? "", width, Math.min(i - chunkFrom, height - 1), i, chunkTo);
+			buffer += this.#lineRewriteSequence(
+				frame[i] ?? "",
+				width,
+				Math.min(i - chunkFrom, height - 1),
+				i,
+				chunkTo,
+				this.#osc66SpacerGlyphWidth(frame, i),
+			);
 			wroteLine = true;
 		}
 		for (let screenRow = 0; screenRow < height; screenRow++) {
@@ -5130,6 +5243,7 @@ export class TUI extends Container {
 				Math.min(chunkTo - chunkFrom + screenRow, height - 1),
 				windowTop + screenRow,
 				chunkTo,
+				this.#osc66SpacerGlyphWidth(frame, windowTop + screenRow),
 			);
 			wroteLine = true;
 		}
