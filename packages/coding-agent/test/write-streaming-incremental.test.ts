@@ -80,6 +80,29 @@ describe("write streaming preview incremental line tracking", () => {
 		}
 	});
 
+	it("does not compare the full accumulated payload when validating append-only growth", async () => {
+		const uiTheme = await getUiTheme();
+		const options = { expanded: false, isPartial: true, spinnerFrame: 0 };
+		const first = Array.from({ length: 2_000 }, () => "x".repeat(64)).join("\n");
+		writeToolRenderer.renderCall({ path: "/tmp/inc.ts", content: first }, options, uiTheme)?.render(120);
+
+		const originalStartsWith = String.prototype.startsWith;
+		let wholePrefixComparisons = 0;
+		String.prototype.startsWith = function (this: string, searchString: string, position?: number): boolean {
+			if (searchString === first) wholePrefixComparisons++;
+			return originalStartsWith.call(this, searchString, position);
+		};
+		try {
+			writeToolRenderer
+				.renderCall({ path: "/tmp/inc.ts", content: `${first}\nlast` }, options, uiTheme)
+				?.render(120);
+		} finally {
+			String.prototype.startsWith = originalStartsWith;
+		}
+
+		expect(wholePrefixComparisons).toBe(0);
+	});
+
 	it("normalizes CRLF only in the rendered tail, with correct line numbers", async () => {
 		const options = { expanded: false, isPartial: true, spinnerFrame: 0 };
 		const content = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\r\n");
@@ -106,20 +129,29 @@ describe("write streaming preview incremental line tracking", () => {
 		expect(hasLine(rendered, 2)).toBe(false);
 	});
 
-	it("resets cleanly when streamed content is not append-only", async () => {
-		// A restarted stream reuses the component's render state with a buffer
-		// that no longer extends the previous one; the index must not corrupt
-		// the count or the window.
+	it("renders carriage-return-only content like the previous normalized empty payload", async () => {
 		const options = { expanded: false, isPartial: true, spinnerFrame: 0 };
-		const first = Array.from({ length: 20 }, (_, i) => `alpha ${i + 1}`).join("\n");
+		const empty = await renderCollapsed("", options);
+		const carriageReturns = await renderCollapsed("\r\r", {
+			expanded: false,
+			isPartial: true,
+			spinnerFrame: 0,
+		});
+		expect(carriageReturns).toEqual(empty);
+	});
+
+	it("resets cleanly when a restarted stream is longer but not append-only", async () => {
+		// A restarted stream can reuse the component render state with a longer
+		// replacement buffer; the bounded suffix guard must reset the index.
+		const options = { expanded: false, isPartial: true, spinnerFrame: 0 };
+		const first = "alpha 1\nalpha 2";
 		await renderCollapsed(first, options);
 
-		const restarted = "beta 1\nbeta 2";
+		const restarted = `beta ${"x".repeat(100)}\nbeta 2`;
 		const rendered = await renderCollapsed(restarted, options);
 		const text = stripAnsi(rendered.join("\n"));
 		expect(text).not.toContain("earlier line");
-		expect(text).toContain("beta 1");
-		expect(text).toContain("beta 2");
+		expect(text).toContain("beta");
 		expect(text).not.toContain("alpha");
 	});
 

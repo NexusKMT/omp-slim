@@ -1415,13 +1415,18 @@ const WRITE_GUTTER_MIN_WIDTH = 3;
  * window makes each tick O(delta + preview lines).
  */
 interface WriteStreamingLineIndex {
-	/** Full content string as of the last scan. */
-	content: string;
-	/** `1 + count("\n")` over {@link content}. */
+	/** Number of content code units scanned so far. */
+	length: number;
+	/** Bounded suffix used to detect a restarted/non-append stream. */
+	suffix: string;
+	/** `1 + count("\n")` over the scanned content. */
 	lineCount: number;
 }
 
 const writeStreamingLineIndex = new WeakMap<object, WriteStreamingLineIndex>();
+
+/** Keep append validation constant-time instead of comparing the entire prior payload. */
+const WRITE_STREAMING_APPEND_GUARD_LENGTH = 64;
 
 /** Total logical line count of `content`, resuming from the cached prefix scan when append-only. */
 function streamingTotalLines(streamKey: object | undefined, content: string): number {
@@ -1431,16 +1436,25 @@ function streamingTotalLines(streamKey: object | undefined, content: string): nu
 		return lines;
 	}
 	let entry = writeStreamingLineIndex.get(streamKey);
-	if (entry !== undefined && content.startsWith(entry.content)) {
+	const continuesPrevious =
+		entry !== undefined &&
+		content.length >= entry.length &&
+		content.startsWith(entry.suffix, entry.length - entry.suffix.length);
+	if (entry !== undefined && continuesPrevious) {
 		let lines = entry.lineCount;
-		for (let i = entry.content.length; i < content.length; i++) if (content.charCodeAt(i) === 10) lines++;
-		entry.content = content;
+		for (let i = entry.length; i < content.length; i++) if (content.charCodeAt(i) === 10) lines++;
+		entry.length = content.length;
+		entry.suffix = content.slice(-WRITE_STREAMING_APPEND_GUARD_LENGTH);
 		entry.lineCount = lines;
 		return lines;
 	}
 	let lines = 1;
 	for (let i = 0; i < content.length; i++) if (content.charCodeAt(i) === 10) lines++;
-	entry = { content, lineCount: lines };
+	entry = {
+		length: content.length,
+		suffix: content.slice(-WRITE_STREAMING_APPEND_GUARD_LENGTH),
+		lineCount: lines,
+	};
 	writeStreamingLineIndex.set(streamKey, entry);
 	return lines;
 }
@@ -1493,6 +1507,7 @@ function formatStreamingContent(
 				startIndex === 0 ? content : content.slice(tailWindowStart(content, WRITE_STREAMING_PREVIEW_LINES));
 			visibleText = tail.replace(/\r/g, "");
 		}
+		if (visibleText.length === 0) return "";
 		const hidden = startIndex;
 		const highlighted = highlightCode(visibleText, language);
 		const lineNumberWidth = Math.max(WRITE_GUTTER_MIN_WIDTH, String(totalLines).length);
@@ -1509,6 +1524,7 @@ function formatStreamingContent(
 		}
 		return text;
 	});
+	if (bodyText.length === 0) return "";
 	// The animated glyph lives on this trailing line — inside the transcript's
 	// volatile-tail holdback — never in the header: an animating head row pins
 	// the native-scrollback commit boundary at the top of the block, so a long

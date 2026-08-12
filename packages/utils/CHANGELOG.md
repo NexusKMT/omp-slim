@@ -18,6 +18,9 @@
 ### Fixed
 
 - Fixed Mermaid ASCII state pseudostates rendering empty boxes, miscoloring final-state borders, and inverting rounded corners in bottom-to-top diagrams.
+### Fixed
+
+- Reduced partial JSON parsing work for long streaming tool-call arguments by scaling the parse throttle geometrically with buffer size.
 
 ## [17.2.11] - 2026-08-07
 
