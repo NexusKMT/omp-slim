@@ -13,10 +13,7 @@ export function supportsExternalThinking(model: Model | null | undefined): boole
 		model.compat !== undefined &&
 		"requiresThinkingEnabled" in model.compat &&
 		model.compat.requiresThinkingEnabled === true;
-	if (
-		model.reasoning &&
-		(requiresThinking || (model.thinking?.requiresEffort && !model.thinking.suppressWhenOff))
-	) {
+	if (model.reasoning && (requiresThinking || (model.thinking?.requiresEffort && !model.thinking.suppressWhenOff))) {
 		return false;
 	}
 	if (model.api === "google-generative-ai" || model.api === "google-gemini-cli" || model.api === "google-vertex") {

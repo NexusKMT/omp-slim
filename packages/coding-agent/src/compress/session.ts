@@ -9,7 +9,6 @@ import { getProjectDir } from "@oh-my-pi/pi-utils";
 import { ModelRegistry } from "../config/model-registry";
 import { formatModelString, resolveCliModel } from "../config/model-resolver";
 import { Settings } from "../config/settings";
-import type { ToolDefinition } from "../extensibility/extensions";
 import { createAgentSession, discoverAuthStorage } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import systemPrompt from "./prompts/system.md" with { type: "text" };

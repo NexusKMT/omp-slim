@@ -15,7 +15,6 @@
  */
 import { type } from "@oh-my-pi/omptype";
 import { countTokens } from "@oh-my-pi/pi-agent-core";
-import type { TSchema } from "@oh-my-pi/pi-ai";
 import type { ToolDefinition } from "../extensibility/extensions";
 import approveDescription from "../prompts/tools/approve.md" with { type: "text" };
 import rewriteDescription from "../prompts/tools/rewrite.md" with { type: "text" };

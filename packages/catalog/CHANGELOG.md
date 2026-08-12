@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `parseSemVer` falls back to dynamic parsing when a version misses the precompute table, so model ids with large minor versions (`claude-opus-5-11`) or three-part versions no longer classify as unknown and inherit stale defaults.
+
 ## [17.2.13] - 2026-08-11
 
 ### Changed

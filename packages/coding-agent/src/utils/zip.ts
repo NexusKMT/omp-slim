@@ -704,9 +704,17 @@ function tarChecksumMatches(buffer: Uint8Array, offset: number): boolean {
 }
 
 /**
+ * Sentinel key marking that any `GNU.sparse.*` record appeared in a PAX
+ * header. A real record cannot shadow it: PAX sparse keys always carry a
+ * suffix after the trailing dot.
+ */
+const PAX_SPARSE_MARKER = "GNU.sparse.";
+
+/**
  * Parse a PAX extended-header payload into its `key → value` records. Only
- * keys the indexer consumes are retained; a crafted header packed with
- * millions of unique throwaway records must not amplify into heap.
+ * exactly consumed keys are retained (plus the sparse marker), so a crafted
+ * header packed with millions of unique records — including `GNU.sparse.*`
+ * junk — cannot amplify into heap.
  */
 function parsePaxRecords(data: Uint8Array): Map<string, string> {
 	const attrs = new Map<string, string>();
@@ -731,7 +739,12 @@ function parsePaxRecords(data: Uint8Array): Map<string, string> {
 		const eq = record.indexOf(0x3d);
 		if (eq >= 0) {
 			const key = TAR_TEXT_DECODER.decode(record.subarray(0, eq));
-			if (key === "path" || key === "linkpath" || key === "size" || key.startsWith("GNU.sparse.")) {
+			if (key.startsWith(PAX_SPARSE_MARKER)) {
+				attrs.set(PAX_SPARSE_MARKER, "1");
+				if (key === "GNU.sparse.name" || key === "GNU.sparse.realsize") {
+					attrs.set(key, TAR_TEXT_DECODER.decode(record.subarray(eq + 1)));
+				}
+			} else if (key === "path" || key === "linkpath" || key === "size") {
 				attrs.set(key, TAR_TEXT_DECODER.decode(record.subarray(eq + 1)));
 			}
 		}
@@ -741,11 +754,7 @@ function parsePaxRecords(data: Uint8Array): Map<string, string> {
 }
 
 function paxDeclaresSparse(pax: Map<string, string> | undefined): boolean {
-	if (!pax) return false;
-	for (const key of pax.keys()) {
-		if (key.startsWith("GNU.sparse.")) return true;
-	}
-	return false;
+	return pax?.has(PAX_SPARSE_MARKER) === true;
 }
 
 /**

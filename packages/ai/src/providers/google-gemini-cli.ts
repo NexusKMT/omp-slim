@@ -14,7 +14,6 @@ import {
 	getGeminiCliHeaders,
 } from "@oh-my-pi/pi-catalog/wire/gemini-headers";
 import { extractHttpStatusFromError, fetchWithRetry, readSseJson } from "@oh-my-pi/pi-utils";
-import forcedToolDirective from "./google-antigravity-forced-tool.md" with { type: "text" };
 import * as AIError from "../error";
 import type {
 	Api,
@@ -37,6 +36,7 @@ import { armPreResponseTimeout, getStreamFirstEventTimeoutMs, iterateWithIdleTim
 // the stream provider trusts the access token threaded through `options.apiKey`.
 import { normalizeSchemaForCCA } from "../utils/schema";
 import { StreamMarkupHealing, type StreamMarkupHealingEvent } from "../utils/stream-markup-healing";
+import forcedToolDirective from "./google-antigravity-forced-tool.md" with { type: "text" };
 import type { Content, FunctionCallingConfigMode, ThinkingConfig } from "./google-shared";
 import {
 	convertMessages,
