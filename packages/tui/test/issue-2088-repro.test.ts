@@ -9,6 +9,7 @@ import {
 	type RenderTimer,
 	TUI,
 } from "@oh-my-pi/pi-tui";
+import { Text } from "@oh-my-pi/pi-tui/components/text";
 import { VirtualTerminal } from "./virtual-terminal";
 
 // Regression test for https://github.com/can1357/oh-my-pi/issues/2088
@@ -118,6 +119,20 @@ class RecoveringWrappingLinesComponent extends WrappingLinesComponent implements
 
 	isNativeScrollbackWidthEpochAppendOnly(): boolean {
 		return true;
+	}
+}
+
+class UnresolvedWrappingLinesComponent extends WrappingLinesComponent implements NativeScrollbackWidthEpoch {
+	captureNativeScrollbackWidthEpoch(): unknown {
+		return {};
+	}
+
+	resolveNativeScrollbackWidthEpoch(): undefined {
+		return undefined;
+	}
+
+	getNativeScrollbackWidthEpochRows(): undefined {
+		return undefined;
 	}
 }
 
@@ -337,9 +352,10 @@ class WrappingStreamComponent implements Component, NativeScrollbackLiveRegion, 
 	}
 }
 
-class PinnedMutableLinesComponent implements Component, NativeScrollbackLiveRegion {
+class PinnedMutableLinesComponent implements Component, NativeScrollbackLiveRegion, NativeScrollbackWidthEpoch {
 	#lines: string[];
 	#pinned = true;
+	#finalBoundary = 0;
 
 	constructor(lines: string[]) {
 		this.#lines = [...lines];
@@ -347,6 +363,10 @@ class PinnedMutableLinesComponent implements Component, NativeScrollbackLiveRegi
 
 	setLines(lines: string[]): void {
 		this.#lines = [...lines];
+	}
+
+	setFinalBoundary(rows: number): void {
+		this.#finalBoundary = rows;
 	}
 
 	finalize(): void {
@@ -359,8 +379,20 @@ class PinnedMutableLinesComponent implements Component, NativeScrollbackLiveRegi
 		return this.#lines.map(line => line.slice(0, width));
 	}
 
+	captureNativeScrollbackWidthEpoch(): unknown {
+		return {};
+	}
+
+	resolveNativeScrollbackWidthEpoch(): undefined {
+		return undefined;
+	}
+
+	getNativeScrollbackWidthEpochRows(): number {
+		return this.#lines.length;
+	}
+
 	getNativeScrollbackLiveRegionStart(): number | undefined {
-		return this.#pinned ? 0 : undefined;
+		return this.#pinned ? this.#finalBoundary : undefined;
 	}
 
 	isNativeScrollbackLiveRegionPinned(): boolean {
@@ -520,6 +552,19 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks();
+	});
+
+	it("propagates rendered-height changes from mutable text descendants", () => {
+		const child = new Text("one", 0, 0);
+		const container = new Container();
+		container.addChild(child);
+		container.render(40);
+		const initialRevision = container.getNativeScrollbackWidthEpochRevision();
+
+		child.setText("one\ntwo");
+		container.render(40);
+
+		expect(container.getNativeScrollbackWidthEpochRevision()).toBeGreaterThan(initialRevision);
 	});
 
 	it("coalesces a burst of multiplexer resize events into a single settled render", async () => {
@@ -1448,6 +1493,7 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 						marker,
 					).toHaveLength(1);
 				}
+				expect(buffer.filter(line => line === "")).toHaveLength(9);
 				expect(visible(term).slice(-4)).toEqual(["draft-00", "draft-01", "draft-02", "editor"]);
 
 				const settledBaseY = term.getBufferPosition().baseY;
@@ -1910,6 +1956,51 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 		});
 	});
 
+	it("replays unresolved output queued while a widening epoch reduces reflow rows", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const initial = Array.from(
+				{ length: 12 },
+				(_value, index) => `unresolved-initial-${index.toString().padStart(2, "0")} ${"I".repeat(20)}`,
+			);
+			const appended = Array.from(
+				{ length: 8 },
+				(_value, index) => `unresolved-new-${index.toString().padStart(2, "0")}`,
+			);
+			const settledInitial = ["changed-prefix-00", "changed-prefix-01", ...initial.slice(2)];
+			const term = new VirtualTerminal(17, 6, 10_000);
+			const component = new UnresolvedWrappingLinesComponent(initial);
+			const tui = new TUI(term);
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(40, 4);
+				component.setLines([...settledInitial, ...appended]);
+				tui.requestRender();
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (const line of settledInitial.slice(0, 2)) {
+					expect(
+						buffer.some(bufferLine => bufferLine.includes(line)),
+						line,
+					).toBe(true);
+				}
+				for (const line of appended) {
+					const marker = line;
+					expect(
+						buffer.some(bufferLine => bufferLine.includes(marker)),
+						marker,
+					).toBe(true);
+				}
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
 	it("backfills unresolved growth queued behind an overlay during width settlement", async () => {
 		await withEnvPatch(TMUX_ENV, async () => {
 			const initial = Array.from(
@@ -1991,26 +2082,43 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 				tui.start();
 				await settle(term);
 				term.resize(17, 4);
+				component.setLines(final);
+				tui.requestRender();
 				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
 				await settle(term);
 
-				component.setLines(final);
-				tui.requestRender(true);
+				expect(term.getBufferPosition().baseY).toBe(0);
+				expect(visible(term)).toEqual(final.slice(-4));
+				term.resize(23, 4);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
 				await settle(term);
 				expect(term.getBufferPosition().baseY).toBe(0);
 				expect(visible(term)).toEqual(final.slice(-4));
 
+				const extended = [...final, "pinned-10", "pinned-11"];
+				component.setLines(extended);
+				component.setFinalBoundary(6);
+				tui.requestRender(true);
+				await settle(term);
+				component.setFinalBoundary(8);
+				tui.requestRender(true);
+				await settle(term);
+
 				component.finalize();
 				tui.requestRender(true);
 				await settle(term);
-				expect(term.getBufferPosition().baseY).toBe(6);
+				expect(term.getBufferPosition().baseY).toBe(8);
 				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
-				for (const line of final) {
+				for (const line of extended) {
 					expect(
 						buffer.filter(bufferLine => bufferLine === line),
 						line,
 					).toHaveLength(1);
 				}
+				const finalizedBaseY = term.getBufferPosition().baseY;
+				tui.requestRender(true);
+				await settle(term);
+				expect(term.getBufferPosition().baseY).toBe(finalizedBaseY);
 			} finally {
 				tui.stop();
 			}

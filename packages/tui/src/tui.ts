@@ -1287,6 +1287,10 @@ export class TUI extends Container {
 	// index in an in-place resize session. This is the current-width frame
 	// baseline; only later physical-row growth may advance the append ledger.
 	#widthEpochBaselineRows: number | undefined;
+	// An unresolved captured source boundary was replayed from row zero. While
+	// its live region remains pinned, advance the baseline only through rows
+	// actually emitted; a reported final seam may otherwise skip deferred rows.
+	#widthEpochReplayUnresolved = false;
 	// An overlay-covered width reset with unresolved pending growth owes a
 	// conservative replay from row zero. Sticky across later covered resizes —
 	// even if their source boundary resolves — until an uncovered paint pays it.
@@ -3495,14 +3499,15 @@ export class TUI extends Container {
 		if (resizeEventOccurred) this.#forgetHardwareCursorState();
 		const widthChanged = this.#previousWidth > 0 && this.#previousWidth !== width;
 		const widthEpochOccurred = widthChanged || (resizeEventOccurred && this.#multiplexerWidthEpochPending);
+		const widthEpochBoundary = this.#multiplexerWidthEpochBoundary;
 		const widthEpochSourceBoundary = widthEpochOccurred
-			? this.resolveNativeScrollbackWidthEpoch(this.#multiplexerWidthEpochBoundary)
+			? this.resolveNativeScrollbackWidthEpoch(widthEpochBoundary)
 			: undefined;
 		const widthEpochCurrentRows = widthEpochOccurred
-			? this.#getNativeScrollbackWidthEpochCurrentRows(this.#multiplexerWidthEpochBoundary)
+			? this.#getNativeScrollbackWidthEpochCurrentRows(widthEpochBoundary)
 			: undefined;
 		const widthEpochAppendOnly = widthEpochOccurred
-			? this.#isNativeScrollbackWidthEpochAppendOnly(this.#multiplexerWidthEpochBoundary)
+			? this.#isNativeScrollbackWidthEpochAppendOnly(widthEpochBoundary)
 			: true;
 		if (resizeEventOccurred) {
 			this.#multiplexerWidthEpochBoundary = undefined;
@@ -3657,6 +3662,14 @@ export class TUI extends Container {
 			this.#widthEpochOverlayReplayPending = true;
 		}
 		const replayUnresolvedOverlayFrame = widthEpochReset && this.#widthEpochOverlayReplayPending;
+		const replayUnresolvedWidthEpoch =
+			replayUnresolvedOverlayFrame ||
+			(widthEpochReset && liveRegionPinned && this.#widthEpochReplayUnresolved) ||
+			(widthEpochReset &&
+				resizeHadPendingRender &&
+				widthEpochBoundary !== undefined &&
+				widthEpochSourceBoundary === undefined);
+		if (replayUnresolvedWidthEpoch) prevWindowTop = 0;
 
 		// 4. Classify. A resize is an explicit user gesture: normally the engine
 		// erases and replays so history rewraps at the new geometry (the reader
@@ -3697,10 +3710,11 @@ export class TUI extends Container {
 			// Components without the source contract retain the conservative
 			// legacy fallback, but never compare cross-width counts when a marker
 			// resolved successfully.
-			this.#widthEpochBaselineRows = replayUnresolvedOverlayFrame
+			this.#widthEpochBaselineRows = replayUnresolvedWidthEpoch
 				? 0
 				: (widthEpochSourceBoundary ??
 					(resizeHadPendingRender ? Math.min(frameLength, this.#previousFrameLength) : frameLength));
+			this.#widthEpochReplayUnresolved = replayUnresolvedWidthEpoch;
 			windowTop = Math.max(0, frameLength - height);
 			chunkTo = this.#committedRows;
 			widthEpochAppendFrom = this.#widthEpochBaselineRows;
@@ -3865,6 +3879,7 @@ export class TUI extends Container {
 			this.#clearScrollbackOnNextRender = false;
 			this.#hasEverRendered = true;
 			this.#widthEpochBaselineRows = undefined;
+			this.#widthEpochReplayUnresolved = false;
 			this.#widthEpochOverlayReplayPending = false;
 			this.#widthEpochCommittedPrefix = undefined;
 			this.#publishCommittedRows();
@@ -3880,7 +3895,11 @@ export class TUI extends Container {
 			let scrollRows: number;
 			let commitFrom: number;
 			let commitTo: number;
-			if (logicalAppend && !logicalPrefixAppend) {
+			if (replayUnresolvedWidthEpoch) {
+				commitFrom = 0;
+				commitTo = liveRegionPinned ? Math.min(windowTop, finalBoundary) : windowTop;
+				scrollRows = commitTo;
+			} else if (logicalAppend && !logicalPrefixAppend) {
 				const sourceWindowTop = Math.max(0, widthEpochSourceBoundary - height);
 				const logicalSuffixRows = Math.max(0, widthEpochCurrentRows - widthEpochSourceBoundary);
 				const appendWindowMovement = Math.max(0, windowTop - sourceWindowTop);
@@ -3926,10 +3945,11 @@ export class TUI extends Container {
 			if (!hasVisibleOverlay) {
 				this.#widthEpochOverlayReplayPending = false;
 				if (liveRegionPinned) {
-					this.#widthEpochBaselineRows = widthEpochAppendTo;
+					this.#widthEpochBaselineRows = this.#widthEpochReplayUnresolved ? commitTo : widthEpochAppendTo;
 					this.#windowTopRow = logicalAppend ? windowTop : prevWindowTop + scrollRows;
 				} else {
 					this.#widthEpochBaselineRows = frameLength;
+					this.#widthEpochReplayUnresolved = false;
 					this.#windowTopRow = windowTop;
 				}
 				this.#committedRows += scrollRows;
