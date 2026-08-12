@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { type } from "@oh-my-pi/omptype";
 import { loadCustomCommands } from "../../../src/extensibility/custom-commands/loader";
 
 let tempRoot: string | undefined;
@@ -39,5 +40,8 @@ describe("custom command loader", () => {
 
 		expect(result.errors.find(error => error.path === commandPath)).toBeUndefined();
 		expect(result.commands.map(({ command }) => command.name)).toContain("arktype-compat");
+
+		expect((type as typeof type & { type?: typeof type }).type).toBeUndefined();
+		expect(Object.prototype.propertyIsEnumerable.call(type, "type")).toBeFalse();
 	});
 });
