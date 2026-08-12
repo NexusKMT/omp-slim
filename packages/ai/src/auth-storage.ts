@@ -3428,9 +3428,9 @@ export class AuthStorage {
 		return true;
 	}
 
-	#collectUsageRequests(options?: {
+	async #collectUsageRequests(options?: {
 		baseUrlResolver?: (provider: Provider) => string | undefined;
-	}): UsageRequestDescriptor[] {
+	}): Promise<UsageRequestDescriptor[]> {
 		const resolver = this.#usageProviderResolver;
 		if (!resolver) return [];
 
@@ -3490,10 +3490,19 @@ export class AuthStorage {
 
 			for (const entry of entries) {
 				const credential = entry.credential;
-				const request =
-					credential.type === "api_key"
-						? this.#buildUsageRequest(provider, { type: "api_key", apiKey: credential.key }, baseUrl)
-						: this.#buildUsageRequestForOauth(provider, credential, baseUrl);
+				let request: UsageRequestDescriptor;
+				if (credential.type === "api_key") {
+					// Stored keys may be references (env var name, "!command") —
+					// resolve to the actual secret before it reaches a provider
+					// fetcher's Authorization header. Unresolvable references are
+					// skipped: probing with the literal reference string would
+					// 401 and flag a working credential as bad.
+					const apiKey = await this.#configValueResolver(credential.key);
+					if (!apiKey) continue;
+					request = this.#buildUsageRequest(provider, { type: "api_key", apiKey }, baseUrl);
+				} else {
+					request = this.#buildUsageRequestForOauth(provider, credential, baseUrl);
+				}
 				if (providerImpl.supports && !providerImpl.supports(request)) continue;
 				requests.push(request);
 			}
@@ -3945,7 +3954,7 @@ export class AuthStorage {
 		}
 		if (!this.#usageProviderResolver) return null;
 
-		const requests = this.#collectUsageRequests(options);
+		const requests = await this.#collectUsageRequests(options);
 		if (requests.length === 0) return [];
 
 		this.#usageLogger?.debug("Usage fetch requested", {
@@ -4062,10 +4071,21 @@ export class AuthStorage {
 
 			const baseUrl = options?.baseUrlResolver?.(row.provider as Provider);
 			const cred = row.credential;
-			const initialRequest: UsageRequestDescriptor =
-				cred.type === "api_key"
-					? this.#buildUsageRequest(row.provider as Provider, { type: "api_key", apiKey: cred.key }, baseUrl)
-					: this.#buildUsageRequestForOauth(row.provider as Provider, cred, baseUrl);
+			let initialRequest: UsageRequestDescriptor;
+			if (cred.type === "api_key") {
+				// Stored keys may be references (env var name, "!command") — probe
+				// with the resolved secret, not the reference string, so both the
+				// usage probe and the completion probe exercise the real bytes.
+				const apiKey = await this.#configValueResolver(cred.key);
+				if (!apiKey) {
+					base.reason = "api key reference could not be resolved";
+					results.push(base);
+					continue;
+				}
+				initialRequest = this.#buildUsageRequest(row.provider as Provider, { type: "api_key", apiKey }, baseUrl);
+			} else {
+				initialRequest = this.#buildUsageRequestForOauth(row.provider as Provider, cred, baseUrl);
+			}
 
 			const timeoutSignal = AbortSignal.timeout(timeoutMs);
 			const probeSignal = options?.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;

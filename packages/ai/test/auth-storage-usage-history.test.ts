@@ -252,4 +252,38 @@ describe("OpenCode Go usage via the upstream endpoint", () => {
 			["monthly", 1],
 		]);
 	});
+
+	it("resolves reference-stored API keys before the Authorization header", async () => {
+		// Keys stored as references (env var name, "!command") must reach the
+		// endpoint as the resolved secret, not the reference string (#8337 review).
+		const referenceStorage = new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")), {
+			usageProviderResolver: provider =>
+				provider === "opencode-go" ? opencodeGoUsage.opencodeGoUsageProvider : undefined,
+			configValueResolver: async config => (config === "ref:opencode" ? "sk-resolved-secret" : config),
+			usageFetch: (async (input: string | URL | Request, init?: RequestInit) => {
+				fetchCalls.push({
+					url: String(input),
+					headers: (init?.headers as Record<string, string>) ?? {},
+				});
+				return new Response(
+					JSON.stringify({
+						usage: { rolling: { status: "ok", percent: 5, resetsAt: "2026-08-12T15:09:04.847Z" } },
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				);
+			}) as unknown as typeof fetch,
+		});
+		try {
+			await referenceStorage.reload();
+			await referenceStorage.set("opencode-go", { type: "api_key", key: "ref:opencode" });
+
+			const reports = await referenceStorage.fetchUsageReports();
+
+			expect(fetchCalls).toHaveLength(1);
+			expect(fetchCalls[0]?.headers.authorization).toBe("Bearer sk-resolved-secret");
+			expect(reports?.some(candidate => candidate.provider === "opencode-go")).toBe(true);
+		} finally {
+			referenceStorage.close();
+		}
+	});
 });

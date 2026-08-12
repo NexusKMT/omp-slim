@@ -522,4 +522,38 @@ describe("AuthStorage.checkCredentials", () => {
 			storage.close();
 		}
 	});
+
+	it("probes reference-stored API keys with the resolved secret", async () => {
+		// Keys stored as references (env var name, "!command") must reach the
+		// usage probe as the resolved secret — probing with the literal
+		// reference string would 401 and flag a working credential as bad.
+		const apiKeyRow: StoredAuthCredential = {
+			id: 21,
+			provider: "opencode-go",
+			credential: { type: "api_key", key: "ref:opencode" },
+			disabledCause: null,
+		};
+		const seenKeys: Array<string | undefined> = [];
+		const probeProvider: UsageProvider = {
+			id: "opencode-go",
+			validatesCredentials: true,
+			async fetchUsage(params) {
+				seenKeys.push(params.credential.type === "api_key" ? params.credential.apiKey : undefined);
+				return { provider: "opencode-go", fetchedAt: Date.now(), limits: [] };
+			},
+		};
+		const storage = new AuthStorage(makeStore([apiKeyRow]), {
+			usageProviderResolver: provider => (provider === "opencode-go" ? probeProvider : undefined),
+			configValueResolver: async config => (config === "ref:opencode" ? "sk-resolved-secret" : config),
+		});
+		await storage.reload();
+
+		try {
+			const [result] = await storage.checkCredentials();
+			expect(seenKeys).toEqual(["sk-resolved-secret"]);
+			expect(result.ok).toBe(true);
+		} finally {
+			storage.close();
+		}
+	});
 });

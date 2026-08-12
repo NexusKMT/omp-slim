@@ -4,11 +4,15 @@
 
 ### Changed
 
-- OpenCode Go usage now comes from the official `GET /zen/go/v1/usage` endpoint (rolling 5h / weekly / monthly percent windows with server-computed resets) instead of synthesizing dollar estimates from OMP-observed request costs, so `/usage` reflects spend made outside OMP and the hardcoded $12/$30/$60 caps are gone. The usage probe now validates credentials (401 invalid key, 403 lapsed Go subscription), and a new ranking strategy routes multi-key pools by rolling/weekly headroom while keeping the monthly window display-only (an exhausted monthly can still serve requests via the console "Use balance" fallback).
+- OpenCode Go usage now comes from the official `GET /zen/go/v1/usage` endpoint (rolling 5h / weekly / monthly percent windows with server-computed resets) instead of synthesizing dollar estimates from OMP-observed request costs, so `/usage` reflects spend made outside OMP and the hardcoded $12/$30/$60 caps are gone. The usage probe now validates credentials (401 invalid key, 403 lapsed Go subscription), and a new ranking strategy routes multi-key pools by rolling/weekly headroom while keeping the monthly window display-only (an exhausted monthly can still serve requests via the console "Use balance" fallback) ([#8337](https://github.com/can1357/oh-my-pi/pull/8337) by [@will-bogusz](https://github.com/will-bogusz)).
+
+### Fixed
+
+- Fixed aggregate usage fetches and credential-health probes sending reference-stored API keys (env var name, `!command`) as the literal reference string instead of the resolved secret, which would 401 and flag working credentials as bad for providers whose usage probe validates credentials ([#8337](https://github.com/can1357/oh-my-pi/pull/8337) by [@will-bogusz](https://github.com/will-bogusz)).
 
 ### Removed
 
-- Removed the observed-request-cost machinery that existed only to power the OpenCode Go estimate: `AuthStorage.recordUsageCost`, the store `recordUsageCosts`/`listUsageCosts` hooks, `UsageFetchContext.listUsageCosts`, the `UsageCostHistoryEntry`/`UsageCostHistoryQuery` types, and the `usage_cost_history` schema and statements. Existing unused tables are left intact rather than deleting local data during startup.
+- Removed the observed-request-cost machinery that existed only to power the OpenCode Go estimate: `AuthStorage.recordUsageCost`, the store `recordUsageCosts`/`listUsageCosts` hooks, `UsageFetchContext.listUsageCosts`, the `UsageCostHistoryEntry`/`UsageCostHistoryQuery` types, and the `usage_cost_history` schema and statements. Existing unused tables are left intact rather than deleting local data during startup ([#8337](https://github.com/can1357/oh-my-pi/pull/8337) by [@will-bogusz](https://github.com/will-bogusz)).
 
 ## [17.2.15] - 2026-08-12
 
