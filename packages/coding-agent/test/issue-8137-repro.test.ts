@@ -125,7 +125,7 @@ describe("issue #8137 — inline /skill in mode-command prompts", () => {
 			const turn = new Promise<void>(resolve => {
 				finishTurn = resolve;
 			});
-			const handleModeCommand = vi.fn(() => turn);
+			const handleModeCommand = vi.fn((_prompt?: string) => turn);
 			const clearDraft = vi.fn();
 			const setText = vi.fn();
 			const command = BUILTIN_MODE_SLASH_COMMANDS.find(candidate => candidate.name === name);
