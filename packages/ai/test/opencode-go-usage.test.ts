@@ -148,6 +148,18 @@ describe("opencode-go usage provider", () => {
 		);
 		expect(partial).toBeNull();
 
+		for (const malformedRolling of [
+			{ status: "unknown", percent: 12, resetsAt: "2026-08-12T15:09:04.847Z" },
+			{ status: "ok", percent: 101, resetsAt: "2026-08-12T15:09:04.847Z" },
+			{ status: "ok", percent: 12, resetsAt: "not-a-timestamp" },
+		]) {
+			const malformed = await opencodeGoUsageProvider.fetchUsage(
+				{ provider: "opencode-go", credential: { type: "api_key", apiKey: "sk-test" } },
+				{ fetch: fakeFetch(usagePayload({ rolling: malformedRolling })) },
+			);
+			expect(malformed).toBeNull();
+		}
+
 		const empty = await opencodeGoUsageProvider.fetchUsage(
 			{ provider: "opencode-go", credential: { type: "api_key", apiKey: "sk-test" } },
 			{ fetch: fakeFetch({ usage: {} }) },

@@ -52,12 +52,21 @@ function resolveStatus(windowStatus: unknown, usedFraction: number): UsageStatus
 function buildWindowLimit(descriptor: (typeof OPENCODE_GO_WINDOWS)[number], payload: unknown): UsageLimit | undefined {
 	if (!isRecord(payload)) return undefined;
 	const percent = payload.percent;
-	if (typeof percent !== "number" || !Number.isFinite(percent) || percent < 0) return undefined;
-	const usedFraction = percent / 100;
-	const window: UsageWindow = { id: descriptor.windowId, label: descriptor.label };
-	if (descriptor.durationMs !== undefined) window.durationMs = descriptor.durationMs;
+	const status = payload.status;
+	if (
+		typeof percent !== "number" ||
+		!Number.isFinite(percent) ||
+		percent < 0 ||
+		percent > 100 ||
+		(status !== "ok" && status !== "rate-limited")
+	) {
+		return undefined;
+	}
 	const resetsAtMs = typeof payload.resetsAt === "string" ? Date.parse(payload.resetsAt) : Number.NaN;
-	if (Number.isFinite(resetsAtMs)) window.resetsAt = resetsAtMs;
+	if (!Number.isFinite(resetsAtMs)) return undefined;
+	const usedFraction = percent / 100;
+	const window: UsageWindow = { id: descriptor.windowId, label: descriptor.label, resetsAt: resetsAtMs };
+	if (descriptor.durationMs !== undefined) window.durationMs = descriptor.durationMs;
 	return {
 		id: descriptor.limitId,
 		label: `${descriptor.label} limit`,
@@ -73,7 +82,7 @@ function buildWindowLimit(descriptor: (typeof OPENCODE_GO_WINDOWS)[number], payl
 			remainingFraction: Math.max(0, 1 - usedFraction),
 			unit: "percent",
 		},
-		status: resolveStatus(payload.status, usedFraction),
+		status: resolveStatus(status, usedFraction),
 	};
 }
 
