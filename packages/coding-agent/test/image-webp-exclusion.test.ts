@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Api, Message, Model } from "@oh-my-pi/pi-ai";
+import { buildResponsesInput } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
@@ -245,6 +246,52 @@ describe("normalizeModelContextImages model-aware WebP exclusion", () => {
 		expect(image.detail).toBe("original");
 		// Provider-boundary normalization is ephemeral; persisted history is not mutated.
 		expect(messages[0]!.content[1]).toBe(original);
+	});
+
+	test("drops stale native Responses history after rewriting an image", async () => {
+		const model = buildStbVisionModel("managed-primary", "openai-responses");
+		const original = {
+			type: "image" as const,
+			data: await makeRedWebP(200, 200),
+			mimeType: "image/webp",
+		};
+		const providerPayload = {
+			type: "openaiResponsesHistory" as const,
+			provider: model.provider,
+			dt: true,
+			items: [
+				{
+					type: "message",
+					role: "user",
+					content: [{ type: "input_image", image_url: `data:image/webp;base64,${original.data}` }],
+				},
+			],
+		};
+		const message: Message = {
+			role: "user",
+			content: [{ type: "text", text: "inspect" }, original],
+			providerPayload,
+			timestamp: 1,
+		};
+
+		const messages = await normalizeModelContextMessages([message], model);
+		const normalizedMessage = messages[0]!;
+		expect(normalizedMessage.role).toBe("user");
+		if (normalizedMessage.role !== "user") throw new Error("Expected user message");
+		expect(normalizedMessage.providerPayload).toBeUndefined();
+		expect(message.providerPayload).toBe(providerPayload);
+
+		const wire = buildResponsesInput({
+			model,
+			context: { messages },
+			strictResponsesPairing: false,
+			supportsImageDetailOriginal: true,
+			nativeHistory: { replay: true, filterReasoning: false },
+		});
+		const serializedWire = JSON.stringify(wire);
+		expect(serializedWire).toContain("input_image");
+		expect(serializedWire).not.toContain("image/webp");
+		expect(serializedWire).not.toContain(original.data);
 	});
 
 	test("replaces an undecodable historical WebP with an omission note", async () => {

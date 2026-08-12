@@ -236,7 +236,14 @@ export async function normalizeModelContextMessages(messages: Message[], model: 
 		}
 		if (!content) continue;
 		output ??= messages.slice();
-		output[messageIndex] = { ...message, content } as Message;
+		const normalizedMessage = { ...message, content } as Message;
+		if (normalizedMessage.role === "user" || normalizedMessage.role === "developer") {
+			// Native Responses history takes precedence over message content. Once an
+			// image changes, that opaque replay payload is stale and could resend the
+			// original WebP bytes instead of this normalized transport copy.
+			delete normalizedMessage.providerPayload;
+		}
+		output[messageIndex] = normalizedMessage;
 	}
 	return output ?? messages;
 }
