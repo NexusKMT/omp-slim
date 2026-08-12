@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed bash utility builtins resolving MSYS-style `/c/...` paths against a phantom rooted path instead of the live Windows drive, preventing stale reads and lost writes ([#8355](https://github.com/can1357/oh-my-pi/issues/8355)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Added

@@ -119,7 +119,8 @@ impl Host {
 	/// filesystem: the host process's current directory is unrelated to the
 	/// shell's.
 	pub fn resolve(&self, path: impl AsRef<Path>) -> PathBuf {
-		let path = path.as_ref();
+		let normalized_path = brush_core::sys::fs::normalize_shell_path(path.as_ref());
+		let path = normalized_path.as_ref();
 		if path.is_absolute() {
 			path.to_path_buf()
 		} else {
@@ -867,6 +868,14 @@ mod testing {
 		pub(crate) fn cancel_for_test(&self) {
 			self.cancel.store(true, super::Ordering::Relaxed);
 		}
+	}
+
+	#[cfg(windows)]
+	#[test]
+	fn resolves_msys_drive_aliases_to_native_drive() {
+		let (host, _) = Host::for_test("test", "", r"C:\workspace");
+
+		assert_eq!(host.resolve("/c/Users/Adam/file.txt"), PathBuf::from(r"C:\Users\Adam\file.txt"));
 	}
 
 	/// Parses `argv` and runs `U` against an in-memory host, mirroring what the
