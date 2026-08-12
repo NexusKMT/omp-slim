@@ -191,9 +191,9 @@ describe("InteractiveMode vibe mode toggle", () => {
 		expect(session.getToolByName("vibe_spawn")).toBeUndefined();
 	});
 
-	it("resumes a queued user turn without Vibe tools after exiting mid-turn", async () => {
+	it("holds a user steer queued during Vibe teardown until the tools are removed", async () => {
 		const toolNamesPerCall: string[][] = [];
-		let firstStarted: PromiseWithResolvers<void> | undefined;
+		const firstStarted = Promise.withResolvers<void>();
 		streamFn = (_model, context, options) => {
 			toolNamesPerCall.push((context.tools ?? []).map(tool => tool.name));
 			const isFirst = toolNamesPerCall.length === 1;
@@ -206,28 +206,44 @@ describe("InteractiveMode vibe mode toggle", () => {
 						() => stream.push({ type: "error", reason: "aborted", error: createAssistantMessage("Aborted") }),
 						{ once: true },
 					);
-					firstStarted?.resolve();
+					firstStarted.resolve();
 				} else {
 					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("Resumed") });
 				}
 			});
 			return stream;
 		};
-		firstStarted = Promise.withResolvers<void>();
 
 		await mode.handleVibeModeCommand();
 		const prompt = session.prompt("Delegate this");
 		await firstStarted.promise;
-		// Queue a user steer behind the active Vibe turn.
-		await session.steer("and then do the other thing");
 
-		await mode.handleVibeModeCommand();
+		const abortSettled = Promise.withResolvers<void>();
+		const releaseTeardown = Promise.withResolvers<void>();
+		const abort = session.abort.bind(session);
+		vi.spyOn(session, "abort").mockImplementation(async options => {
+			await abort(options);
+			abortSettled.resolve();
+			await releaseTeardown.promise;
+		});
+		const exit = mode.handleVibeModeCommand();
+		await abortSettled.promise;
+		// Queue while teardown is still guarded. The regular queue path clears its
+		// retry block, but must not clear the independent mode-exit suppression.
+		await session.steer("and then do the other thing");
+		// Drain the microtasks in which an unguarded schedule calls
+		// agent.continue(). The queued steer must remain owned by the queue until
+		// teardown releases.
+		for (let index = 0; index < 5; index++) await Promise.resolve();
+		expect(session.agent.peekSteeringQueue()).toHaveLength(1);
+		expect(toolNamesPerCall.length).toBe(1);
+		releaseTeardown.resolve();
+
+		await exit;
 		await prompt;
 		await session.waitForIdle();
 
-		// The aborted Vibe turn plus the resumed queued turn.
 		expect(toolNamesPerCall.length).toBe(2);
-		// The resumed turn must not have inherited the torn-down Vibe tools.
 		for (const name of VIBE_TOOL_NAMES) {
 			expect(toolNamesPerCall[1]).not.toContain(name);
 		}

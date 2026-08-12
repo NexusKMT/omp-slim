@@ -565,6 +565,7 @@ export class AgentSession {
 	#usageFallbackConfirmer: UsageFallbackConfirmer | undefined;
 	#usagePreflightAbortControllers = new Set<AbortController>();
 	#queuedMessageDrainBlocked = false;
+	#modeExitDrainSuppressionDepth = 0;
 	#usagePreflightReadyForNextModelCall = false;
 	#usagePreflightReadyModel: Model | undefined;
 	#detachUsageBeforeQueueDequeue: (() => void) | undefined;
@@ -5765,13 +5766,14 @@ export class AgentSession {
 	 * turn resumes only after teardown, so it runs as a clean non-mode turn.
 	 */
 	async runModeExitTeardown(teardown: () => Promise<void>): Promise<void> {
-		const previouslyBlocked = this.#queuedMessageDrainBlocked;
-		this.#queuedMessageDrainBlocked = true;
+		this.#modeExitDrainSuppressionDepth++;
 		try {
 			await teardown();
 		} finally {
-			this.#queuedMessageDrainBlocked = previouslyBlocked;
-			this.#scheduleIdleQueueDrain();
+			this.#modeExitDrainSuppressionDepth--;
+			if (this.#modeExitDrainSuppressionDepth === 0) {
+				this.#scheduleIdleQueueDrain();
+			}
 		}
 	}
 
@@ -5823,6 +5825,7 @@ export class AgentSession {
 	#scheduleQueuedMessageDrain(): void {
 		if (
 			this.#queuedMessageDrainScheduled ||
+			this.#modeExitDrainSuppressionDepth > 0 ||
 			this.#queuedMessageDrainBlocked ||
 			!this.#canAutoContinueForFollowUp() ||
 			!this.agent.hasQueuedMessages()
@@ -5832,8 +5835,11 @@ export class AgentSession {
 		this.#queuedMessageDrainScheduled = true;
 		this.#scheduleAgentContinue({
 			shouldContinue: () => {
-				this.#queuedMessageDrainScheduled = false;
-				return this.#canAutoContinueForFollowUp() && this.agent.hasQueuedMessages();
+				return (
+					this.#modeExitDrainSuppressionDepth === 0 &&
+					this.#canAutoContinueForFollowUp() &&
+					this.agent.hasQueuedMessages()
+				);
 			},
 			onSkip: () => {
 				this.#queuedMessageDrainScheduled = false;
