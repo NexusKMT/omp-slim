@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Ollama Cloud DeepSeek V4 Flash (including dated/preview tags like `deepseek-v4-flash:0731`) exposing the generic `minimal`/`low`/`medium`/`high`/`xhigh` effort ladder without `max`; the `ollama-chat` transport now applies the DeepSeek effort contract (Flash → `low`/`high`/`max`, V4 Pro and older reasoners → `high`/`max`), matching the direct API and every other host ([#8334](https://github.com/can1357/oh-my-pi/issues/8334)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Fixed
