@@ -17,7 +17,8 @@ import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { parseModelPattern, parseModelString } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
+import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
+import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { AgentHubOverlayComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
 import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
@@ -27,6 +28,7 @@ import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { ServingModel } from "@oh-my-pi/pi-coding-agent/session/retry-fallback-chains";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 type AutoRetryStartEvent = Extract<AgentSessionEvent, { type: "auto_retry_start" }>;
@@ -259,6 +261,76 @@ describe("AgentSession retry fallback", () => {
 		} finally {
 			hub.dispose();
 		}
+	});
+
+	it("forwards retry fallback events to extension handlers", async () => {
+		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
+		if (!primaryModel || !fallbackModel) {
+			throw new Error("Expected bundled test models to exist");
+		}
+
+		const requestedModels: string[] = [];
+		const agent = createFallbackAgent(primaryModel, requestedModels);
+
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 5,
+			"retry.fallbackChains": {
+				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
+			},
+		});
+		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
+
+		const sessionManager = SessionManager.inMemory();
+		const runtime = new ExtensionRuntime();
+		const appliedFromExtension: Array<{ from: string; to: string; role: string }> = [];
+		const succeededFromExtension: Array<{ model: string; role: string }> = [];
+		const extension = await loadExtensionFromFactory(
+			pi => {
+				pi.on("retry_fallback_applied", event => {
+					appliedFromExtension.push({ from: event.from, to: event.to, role: event.role });
+				});
+				pi.on("retry_fallback_succeeded", event => {
+					succeededFromExtension.push({ model: event.model, role: event.role });
+				});
+			},
+			tempDir.path(),
+			new EventBus(),
+			runtime,
+			"retry-fallback-observer",
+		);
+		const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
+
+		session = new AgentSession({ agent, sessionManager, settings, modelRegistry, extensionRunner });
+
+		const appliedFromSubscribe: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
+		const succeededFromSubscribe: Array<Extract<AgentSessionEvent, { type: "retry_fallback_succeeded" }>> = [];
+		session.subscribe(event => {
+			if (event.type === "retry_fallback_applied") appliedFromSubscribe.push(event);
+			if (event.type === "retry_fallback_succeeded") succeededFromSubscribe.push(event);
+		});
+
+		await session.prompt("Recover onto the fallback model");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual([
+			`${primaryModel.provider}/${primaryModel.id}`,
+			`${fallbackModel.provider}/${fallbackModel.id}`,
+		]);
+		// Extension handlers must observe the same transition and success the session broadcasts.
+		expect(appliedFromExtension).toEqual([
+			{
+				from: `${primaryModel.provider}/${primaryModel.id}`,
+				to: `${fallbackModel.provider}/${fallbackModel.id}`,
+				role: "default",
+			},
+		]);
+		expect(succeededFromExtension).toEqual([
+			{ model: `${fallbackModel.provider}/${fallbackModel.id}`, role: "default" },
+		]);
+		expect(appliedFromExtension).toEqual(appliedFromSubscribe.map(({ from, to, role }) => ({ from, to, role })));
+		expect(succeededFromExtension).toEqual(succeededFromSubscribe.map(({ model, role }) => ({ model, role })));
 	});
 
 	it("confirms before crossing models when every pooled account is inside reserve", async () => {
