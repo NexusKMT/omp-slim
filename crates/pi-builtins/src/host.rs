@@ -101,6 +101,14 @@ pub(crate) struct Host {
 	stdin_is_search_input: bool,
 }
 
+struct CancelOnDrop(Arc<AtomicBool>);
+
+impl Drop for CancelOnDrop {
+	fn drop(&mut self) {
+		self.0.store(true, Ordering::Relaxed);
+	}
+}
+
 impl Host {
 	/// The name the utility was invoked as. Differs from [`Utility::NAME`] when
 	/// one implementation backs several builtins (`grep` and `rg`).
@@ -578,6 +586,7 @@ async fn run_utility<U: Utility, SE: ShellExtensions>(
 	let mut host = build_host(&context, U::NAME)?;
 	let cancel = context.cancel_token();
 	let cancel_flag = host.cancel_flag();
+	let _cancel_on_drop = CancelOnDrop(Arc::clone(&cancel_flag));
 	drop(context);
 
 	let mut handle = tokio::task::spawn_blocking(move || {
