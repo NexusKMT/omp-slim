@@ -55,10 +55,12 @@ export function isDashscopeCompatibleModeTextOnlyQwen(model: Model<"openai-compl
 	if (!isQwenModelId(model.id)) return false;
 	const id = model.id.toLowerCase();
 	if (/\bqwen(?:[\d.]+)?-coder\b/.test(id)) return true;
-	const maxMatch = id.match(/\bqwen(\d+(?:\.\d+)?)?-max\b/);
+	const maxMatch = id.match(/\bqwen(?:(\d+)(?:\.(\d+))?)?-max\b/);
 	if (!maxMatch) return false;
-	// Bare `qwen-max` (undefined version) is the text-only 2.5-era flagship;
-	// treat missing/pre-3.8 versions as text-only, 3.8+ as multimodal.
-	const version = maxMatch[1] ? Number.parseFloat(maxMatch[1]) : 0;
-	return version < 3.8;
+	// Bare `qwen-max` (no version) is the text-only 2.5-era flagship. Compare
+	// major/minor component-wise, not as a decimal float, so `qwen3.10-max`
+	// sorts after `qwen3.8-max`: text-only through 3.7, multimodal from 3.8 on.
+	const major = maxMatch[1] ? Number.parseInt(maxMatch[1], 10) : 0;
+	const minor = maxMatch[2] ? Number.parseInt(maxMatch[2], 10) : 0;
+	return major < 3 || (major === 3 && minor < 8);
 }
