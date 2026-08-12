@@ -5835,6 +5835,7 @@ export class AgentSession {
 		this.#queuedMessageDrainScheduled = true;
 		this.#scheduleAgentContinue({
 			shouldContinue: () => {
+				this.#queuedMessageDrainScheduled = false;
 				return (
 					this.#modeExitDrainSuppressionDepth === 0 &&
 					this.#canAutoContinueForFollowUp() &&
