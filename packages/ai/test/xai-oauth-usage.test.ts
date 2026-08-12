@@ -278,9 +278,8 @@ describe("xai-oauth usage provider", () => {
 		expect(credits?.window?.resetsAt).toBe(Date.parse(periodEnd));
 	});
 
-	it("falls back to monthly included quota when credits has no weekly period", async () => {
-		const creditsNoWeekly = { config: { isUnifiedBillingUser: true, onDemandCap: { val: 0 } } };
-		const { fetch, calls } = dualBillingFetch(creditsNoWeekly, makeUnifiedMonthlyPayload());
+	it("falls back to monthly included quota when credits has no percent fields", async () => {
+		const { fetch, calls } = dualBillingFetch(makeUnifiedCreditsPayload(), makeUnifiedMonthlyPayload());
 		const report = await xaiOauthUsageProvider.fetchUsage(
 			{
 				provider: "xai-oauth",
@@ -335,17 +334,15 @@ describe("xai-oauth usage provider", () => {
 	});
 
 	it("maps unified monthly on-demand when the included quota payload carries a positive cap", async () => {
-		const creditsNoWeekly = { config: { isUnifiedBillingUser: true, onDemandCap: { val: 0 } } };
 		const report = await xaiOauthUsageProvider.fetchUsage(
 			{ provider: "xai-oauth", credential: makeCredential() },
 			{
 				fetch: dualBillingFetch(
-					creditsNoWeekly,
+					makeUnifiedCreditsPayload(),
 					makeUnifiedMonthlyPayload({ onDemandCap: { val: 100 }, onDemandUsed: { val: 25 } }),
 				).fetch,
 			},
 		);
-
 		expect(report?.limits.map(limit => limit.id)).toEqual(["xai-oauth:included:1mo", "xai-oauth:on-demand"]);
 		const onDemand = report?.limits.find(limit => limit.id === "xai-oauth:on-demand");
 		expect(onDemand?.amount.used).toBe(25);

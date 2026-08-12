@@ -50,6 +50,7 @@ interface XaiWeeklyBillingConfig {
 	productUsage: XaiProductUsage[];
 	onDemandCap?: number;
 	onDemandUsed?: number;
+	inferredPercent?: boolean;
 }
 
 /**
@@ -140,8 +141,9 @@ function parseWeeklyBillingConfig(raw: Record<string, unknown>): XaiWeeklyBillin
 	// Fresh weekly periods (or accounts with 0 usage) omit creditUsagePercent;
 	// default to 0 only when the weekly period is active (end > now).
 	// Expired periods without explicit usage data are rejected to retain last good cache.
+	const inferredPercent = raw.creditUsagePercent === undefined || raw.creditUsagePercent === null;
 	let creditUsagePercent: number | undefined;
-	if (raw.creditUsagePercent === undefined || raw.creditUsagePercent === null) {
+	if (inferredPercent) {
 		creditUsagePercent = end > Date.now() ? 0 : undefined;
 	} else {
 		creditUsagePercent = parsePercent(raw.creditUsagePercent);
@@ -172,6 +174,7 @@ function parseWeeklyBillingConfig(raw: Record<string, unknown>): XaiWeeklyBillin
 		productUsage,
 		onDemandCap: parseOnDemandAmount(raw.onDemandCap),
 		onDemandUsed: parseOnDemandAmount(raw.onDemandUsed),
+		inferredPercent,
 	};
 }
 
@@ -370,10 +373,14 @@ export const xaiOauthUsageProvider: UsageProvider = {
 					: null;
 		}
 
-		if (!weekly && !monthly) return null;
+		// When an account has an explicit monthly included quota and weekly credits
+		// were only inferred from an omitted percentage field, prefer the monthly quota
+		// so pure monthly unified accounts do not render a phantom weekly credit.
+		const effectiveWeekly = weekly && (!monthly || !weekly.inferredPercent) ? weekly : null;
+		if (!effectiveWeekly && !monthly) return null;
 
 		const limits: UsageLimit[] = [];
-		if (weekly) limits.push(...buildLimits(weekly, accountId));
+		if (effectiveWeekly) limits.push(...buildLimits(effectiveWeekly, accountId));
 		if (monthly) limits.push(...buildLimits(monthly, accountId));
 		// Deduplicate on-demand if both shapes carried the same cap (keep first).
 		const seen = new Set<string>();
@@ -384,12 +391,13 @@ export const xaiOauthUsageProvider: UsageProvider = {
 		});
 		if (deduped.length === 0) return null;
 
-		const billingKind = weekly && monthly ? "unified" : weekly ? "weekly" : "monthly";
-		const endpoint = weekly && monthly ? `${creditsUrl} + ${monthlyUrl}` : weekly ? creditsUrl : monthlyUrl;
+		const billingKind = effectiveWeekly && monthly ? "unified" : effectiveWeekly ? "weekly" : "monthly";
+		const endpoint =
+			effectiveWeekly && monthly ? `${creditsUrl} + ${monthlyUrl}` : effectiveWeekly ? creditsUrl : monthlyUrl;
 		const raw =
-			weekly && monthly
+			effectiveWeekly && monthly
 				? { credits: creditsPayload, monthly: monthlyPayload }
-				: weekly
+				: effectiveWeekly
 					? creditsPayload
 					: monthlyPayload;
 
