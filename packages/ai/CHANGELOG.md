@@ -9,6 +9,17 @@
 - Fixed the DashScope compatible-mode text-only Qwen override (issue #1859) stripping images from `qwen3.8-max`, which became multimodal in the bundled catalog (image input, #8019). The `-max` guard now only vetoes image content for pre-3.8 SKUs, so `qwen3.8-max`/`qwen3.8-max-preview` and later flagships send `image_url` content — restoring `inspect_image` on those models configured against `dashscope.aliyuncs.com/compatible-mode/v1` ([#8305](https://github.com/can1357/oh-my-pi/issues/8305)).
 - Fixed xAI (`xai-oauth`) usage reporting falling back to a stale exhausted cache when a fresh weekly cycle with 0% consumed credits omits the `creditUsagePercent` field ([#8325](https://github.com/can1357/oh-my-pi/pull/8325) by [@bubua12](https://github.com/bubua12)).
 - Fixed `/login together` always failing with HTTP 400 `model_not_available`: key validation chat-completed against the hardcoded non-serverless model `moonshotai/Kimi-K2.5`, so no valid key could pass. Validation now probes Together's authenticated `/v1/models` listing, matching the model-agnostic approach used by other API-key providers ([#8328](https://github.com/can1357/oh-my-pi/issues/8328)).
+### Changed
+
+- OpenCode Go usage now comes from the official `GET /zen/go/v1/usage` endpoint (rolling 5h / weekly / monthly percent windows with server-computed resets) instead of synthesizing dollar estimates from OMP-observed request costs, so `/usage` reflects spend made outside OMP and the hardcoded $12/$30/$60 caps are gone. The usage probe now validates credentials (401 invalid key, 403 lapsed Go subscription), and a new ranking strategy routes multi-key pools by rolling/weekly headroom while keeping the monthly window display-only (an exhausted monthly can still serve requests via the console "Use balance" fallback) ([#8337](https://github.com/can1357/oh-my-pi/pull/8337) by [@will-bogusz](https://github.com/will-bogusz)).
+
+### Fixed
+
+- Fixed aggregate usage fetches and credential-health probes sending reference-stored API keys (env var name, `!command`) as the literal reference string instead of the resolved secret, which would 401 and flag working credentials as bad for providers whose usage probe validates credentials ([#8337](https://github.com/can1357/oh-my-pi/pull/8337) by [@will-bogusz](https://github.com/will-bogusz)).
+
+### Removed
+
+- Removed the observed-request-cost machinery that existed only to power the OpenCode Go estimate: `AuthStorage.recordUsageCost`, the store `recordUsageCosts`/`listUsageCosts` hooks, `UsageFetchContext.listUsageCosts`, the `UsageCostHistoryEntry`/`UsageCostHistoryQuery` types, and the `usage_cost_history` schema and statements. Existing unused tables are left intact rather than deleting local data during startup ([#8337](https://github.com/can1357/oh-my-pi/pull/8337) by [@will-bogusz](https://github.com/will-bogusz)).
 
 ## [17.2.15] - 2026-08-12
 

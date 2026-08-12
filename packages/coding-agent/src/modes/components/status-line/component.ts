@@ -1448,10 +1448,15 @@ export class StatusLineComponent implements Component {
 					};
 					sevenDayTier = tier || undefined;
 				}
-				// Conservatively gate monthly status-line rendering to Cursor for now —
-				// Copilot/OpenCode also emit monthly windows, but their multi-bucket
-				// shape needs a dedicated selector before we surface `mo N%` for them.
-				if (activeProvider === "cursor" && (windowId === "monthly" || windowId === "30d")) {
+				// Monthly rendering is gated to providers with a single monthly
+				// bucket (Cursor's priority selector picks its personal rail;
+				// OpenCode Go emits exactly one). Copilot also emits monthly
+				// windows, but its multi-bucket shape needs a dedicated selector
+				// before we surface `mo N%` for it.
+				if (
+					(activeProvider === "cursor" || activeProvider === "opencode-go") &&
+					(windowId === "monthly" || windowId === "30d")
+				) {
 					const priority = cursorMonthlyPriority(l.id);
 					const shouldReplace =
 						!monthly ||

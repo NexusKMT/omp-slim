@@ -2592,13 +2592,6 @@ export class AgentSession {
 					this.#maintenance.skipPostTurnMaintenanceAssistantTimestamp = assistantMsg.timestamp;
 				}
 				await this.#recovery.onAssistantSettledSuccessfully(assistantMsg);
-				if (assistantMsg.provider === "opencode-go") {
-					this.#modelRegistry.authStorage.recordUsageCost(assistantMsg.provider, assistantMsg.usage.cost.total, {
-						sessionId: this.#activeProviderSessionId(),
-						recordedAt: assistantMsg.timestamp,
-						baseUrl: this.#modelRegistry.getProviderBaseUrl?.(assistantMsg.provider),
-					});
-				}
 				// Broker deployments: report this request's burn so the broker can
 				// attribute token usage per install. No-op with a local auth store.
 				this.#modelRegistry.authStorage.recordObservedUsage({
