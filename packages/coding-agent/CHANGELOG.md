@@ -109,6 +109,7 @@
 - Fixed a cold persisted-agent revival racing with lifecycle teardown: a revive whose reviver factory or session resolved after `AgentLifecycleManager.dispose()` could attach a live session and arm a TTL on the disposed manager, leaking a session graph and timers past teardown. Late revivals now reject deterministically and dispose any session they built ([#8114](https://github.com/can1357/oh-my-pi/issues/8114)).
 - Fixed stale or unhealthy initial MCP connections leaving child processes or sockets open after `disconnectAll()` or a failed `tools/list` request. ([#8112](https://github.com/can1357/oh-my-pi/issues/8112))
 - Fixed the DAP `runInTerminal` reverse request leaving the spawned debuggee's stdout undrained: the child was spawned with a piped stdout that was never consumed, so a chatty debuggee's output buffered unboundedly in the omp process (toward OOM) and was lost from the session output. Its stdout is now continuously drained into the session output buffer. ([#8111](https://github.com/can1357/oh-my-pi/issues/8111))
+- Fixed the `/ssh add` inline hint omitting the `--scope project|user` option.
 
 ## [17.2.12] - 2026-08-08
 
