@@ -82,6 +82,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 			extensionRunner?: ExtensionRunner;
 			onProviderCall?: (index: number) => void;
 			configureAgent?: (agent: Agent) => void;
+			toolResultDetails?: unknown;
 		} = {},
 	): Promise<{
 		session: AgentSession;
@@ -112,7 +113,10 @@ describe("AgentSession mid-run threshold compaction", () => {
 			label: "Bash",
 			description: "Mock bash tool",
 			parameters: type({}),
-			execute: async () => ({ content: [{ type: "text" as const, text: "tool output" }] }),
+			execute: async () => ({
+				content: [{ type: "text" as const, text: "tool output" }],
+				...(options.toolResultDetails === undefined ? {} : { details: options.toolResultDetails }),
+			}),
 		};
 
 		let call = 0;
@@ -304,6 +308,10 @@ describe("AgentSession mid-run threshold compaction", () => {
 		const secondModelCallEntered = Promise.withResolvers<void>();
 		const releaseSecondModelCall = Promise.withResolvers<void>();
 		const mutationMarker = `LATE-MESSAGE-END-MUTATION-${"x".repeat(500_000)}`;
+		const liveDetails = {
+			nested: { state: "original" },
+			nonCloneable: () => "third-party callback",
+		};
 		let interceptedToolResult = false;
 		const extensionRunner = {
 			hasHandlers: vi.fn((eventType: string) => eventType === "message_end"),
@@ -314,6 +322,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 				toolResultHookEntered.resolve();
 				await releaseMutation.promise;
 				event.message.content = [{ type: "text", text: mutationMarker }];
+				(event.message.details as { nested: { state: string } }).nested.state = "mutated";
 				mutationApplied.resolve();
 			}),
 		} as unknown as ExtensionRunner;
@@ -322,6 +331,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 			{ "compaction.thresholdTokens": 100_000 },
 			{
 				extensionRunner,
+				toolResultDetails: liveDetails,
 				configureAgent: agent => {
 					agent.addBeforeModelCallHook(async () => {
 						if (modelCall++ !== 1) return;
@@ -343,6 +353,10 @@ describe("AgentSession mid-run threshold compaction", () => {
 		expect(observedContexts).toHaveLength(2);
 		expect(observedContexts[1].join("\n")).not.toContain("LATE-MESSAGE-END-MUTATION");
 		expect(JSON.stringify(session.messages)).not.toContain("LATE-MESSAGE-END-MUTATION");
+		expect(liveDetails.nested.state).toBe("original");
+		const storedToolResult = session.messages.find(message => message.role === "toolResult");
+		if (!storedToolResult) throw new Error("Expected a stored tool result");
+		expect((storedToolResult.details as { nested: { state: string } }).nested.state).toBe("original");
 	});
 
 	it("preserves the just-finished tool turn when message_end hooks are still pending", async () => {

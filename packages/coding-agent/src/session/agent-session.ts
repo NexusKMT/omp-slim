@@ -423,6 +423,35 @@ type SetSessionNameWithTrigger = (
 const kPersistedSessionEntryId = Symbol("persistedSessionEntryId");
 type PersistedAssistantMessage = AssistantMessage & { [kPersistedSessionEntryId]?: string };
 
+/**
+ * Clone one top-level notification field without ever returning an object owned
+ * by the live session. Most values take the lossless structured-clone path. If
+ * a third-party metadata object contains functions or other unsupported values,
+ * JSON sanitization drops those values; a cyclic/non-JSON value finally degrades
+ * to a descriptive string rather than retaining a shared mutable reference.
+ */
+function cloneMessageEndNotificationField(value: unknown): unknown {
+	try {
+		return structuredClone(value);
+	} catch {}
+	try {
+		const json = JSON.stringify(value);
+		if (json !== undefined) return JSON.parse(json) as unknown;
+	} catch {}
+	return String(value);
+}
+
+/** Build a detached, notification-only snapshot of an AgentMessage. */
+function cloneMessageEndNotification(message: AgentMessage): AgentMessage {
+	const snapshot: Record<PropertyKey, unknown> = {};
+	for (const key of Reflect.ownKeys(message)) {
+		const descriptor = Object.getOwnPropertyDescriptor(message, key);
+		if (!descriptor?.enumerable) continue;
+		snapshot[key] = cloneMessageEndNotificationField(Reflect.get(message, key));
+	}
+	return snapshot as unknown as AgentMessage;
+}
+
 export class AgentSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
@@ -3447,28 +3476,11 @@ export class AgentSession {
 			// event after an `await` cannot race mid-run maintenance and enlarge (or
 			// otherwise rewrite) the next provider request after its threshold check.
 			// Explicit `tool_result` / `context` hooks remain the supported mutation
-			// surfaces. Standard AgentMessages are structured-cloneable; retain a
-			// shallow fallback for third-party ToolResult `details` carrying values
-			// that the structured clone algorithm does not support.
-			let extensionMessage: AgentMessage;
-			try {
-				extensionMessage = structuredClone(event.message);
-			} catch {
-				extensionMessage = { ...event.message } as AgentMessage;
-				const content = (event.message as { content?: unknown }).content;
-				if (Array.isArray(content)) {
-					(extensionMessage as { content: unknown[] }).content = content.map(block => {
-						try {
-							return structuredClone(block);
-						} catch {
-							return block && typeof block === "object" ? { ...block } : block;
-						}
-					});
-				}
-			}
+			// surfaces. Third-party metadata that is not structured-cloneable is
+			// sanitized field-by-field without retaining nested live references.
 			const extensionEvent: MessageEndEvent = {
 				type: "message_end",
-				message: extensionMessage,
+				message: cloneMessageEndNotification(event.message),
 			};
 			await this.#extensionRunner.emit(extensionEvent);
 		} else if (event.type === "tool_execution_start") {
