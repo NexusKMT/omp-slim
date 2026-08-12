@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "bun:test";
-import { type Component, TUI } from "@oh-my-pi/pi-tui";
+import { type Component, type NativeScrollbackLiveRegion, TUI } from "@oh-my-pi/pi-tui";
 import { VirtualTerminal } from "./virtual-terminal";
 
 // Kitty OSC 66 text-sizing marker and the erase sequences the renderer emits.
@@ -23,6 +23,12 @@ class RawLines implements Component {
 	invalidate(): void {}
 	render(): string[] {
 		return this.#lines;
+	}
+}
+
+class SeamRawLines extends RawLines implements NativeScrollbackLiveRegion {
+	getNativeScrollbackLiveRegionStart(): number {
+		return Number.POSITIVE_INFINITY;
 	}
 }
 
@@ -167,6 +173,32 @@ describe("issue #8318: scaled OSC 66 headings survive repaint and resize", () =>
 			// spacer. The glyph write covers only columns [0, 14); the stale wide
 			// text to the right must still be erased.
 			content.setLines([`${OSC66}s=2;Heading${ST}`, "", "tail"]);
+			tui.requestRender();
+			await settle(term);
+
+			const { heading, spacers } = headingAndSpacers(writes, 1);
+			expect(heading).toContain("Heading");
+			expectClearsRightOfGlyph(spacers[0]!, 14);
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("uses full-frame context when the spacer is the first row below the commit seam", async () => {
+		const term = new VirtualTerminal(80, 4);
+		const tui = new TUI(term);
+		const content = new SeamRawLines(["old heading row", `wide prior text ${"x".repeat(40)}`, "tail-0", "tail-1"]);
+		tui.addChild(content);
+		const writes = captureWrites(term);
+		try {
+			tui.start();
+			await settle(term);
+			writes.length = 0;
+
+			// Appending one row commits frame[0] through the chunk loop. The
+			// reserved frame[1] row becomes window[0], so window-local context
+			// cannot see the heading immediately above the commit seam.
+			content.setLines([`${OSC66}s=2;Heading${ST}`, "", "tail-0", "tail-1", "tail-2"]);
 			tui.requestRender();
 			await settle(term);
 

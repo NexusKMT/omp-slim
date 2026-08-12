@@ -4351,7 +4351,7 @@ export class TUI extends Container {
 				Math.min(chunkTo - chunkFrom + screenRow, height - 1),
 				windowTop + screenRow,
 				chunkTo,
-				this.#osc66SpacerGlyphWidth(window, screenRow),
+				this.#osc66SpacerGlyphWidth(frame, windowTop + screenRow),
 			);
 			wroteLine = true;
 		}
