@@ -658,7 +658,9 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 			try {
 				await releaseOnce();
 			} catch (releaseError) {
-				// The lease has stopped heartbeating and stale cleanup will reap it.
+				// The lease has stopped heartbeating and stale cleanup will reap it
+				// within PROVIDER_INFLIGHT_LEASE_STALE_MS. Until then, its slot may
+				// remain unavailable and waiters rely on the fallback poll.
 				// Never replace a completed response or the provider's original error
 				// with a coordination-directory cleanup failure.
 				logger.warn("Provider in-flight permit release failed", {
