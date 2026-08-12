@@ -147,6 +147,39 @@ describe("normalizeModelContextImages model-aware WebP exclusion", () => {
 		expect(result?.[0]?.mimeType).toBe("image/webp");
 	});
 
+	test("honors resize options when caching STB image normalization", async () => {
+		const webp = { type: "image" as const, data: await makeRedWebP(400, 400), mimeType: "image/webp" };
+		const model = buildStbVisionModel("managed-primary");
+
+		const first = await normalizeModelContextImages([webp], {
+			model,
+			resize: { maxWidth: 120, maxHeight: 120, minDimension: 1 },
+		});
+		const second = await normalizeModelContextImages([webp], {
+			model,
+			resize: { maxWidth: 60, maxHeight: 60, minDimension: 1 },
+		});
+		const firstMetadata = await new Bun.Image(Buffer.from(first![0]!.data, "base64")).metadata();
+		const secondMetadata = await new Bun.Image(Buffer.from(second![0]!.data, "base64")).metadata();
+
+		expect(firstMetadata.width).toBe(120);
+		expect(secondMetadata.width).toBe(60);
+	});
+
+	test("drops an undecodable WebP attachment instead of rejecting the turn", async () => {
+		const corrupt = {
+			type: "image" as const,
+			data: Buffer.from("RIFF0000WEBPcorrupt").toBase64(),
+			mimeType: "image/webp",
+		};
+
+		const result = await normalizeModelContextImages([corrupt], {
+			model: buildStbVisionModel("managed-primary"),
+		});
+
+		expect(result).toEqual([]);
+	});
+
 	test("rewrites resumed tool-result WebP blocks at the STB provider boundary", async () => {
 		const original = {
 			type: "image" as const,
@@ -180,5 +213,33 @@ describe("normalizeModelContextImages model-aware WebP exclusion", () => {
 		expect(image.detail).toBe("original");
 		// Provider-boundary normalization is ephemeral; persisted history is not mutated.
 		expect(messages[0]!.content[1]).toBe(original);
+	});
+
+	test("replaces an undecodable historical WebP with an omission note", async () => {
+		const corrupt = {
+			type: "image" as const,
+			data: Buffer.from("RIFF0000WEBPbad-history").toBase64(),
+			mimeType: "image/webp",
+		};
+		const messages = [
+			{
+				role: "toolResult" as const,
+				toolCallId: "read-corrupt",
+				toolName: "read",
+				content: [corrupt],
+				isError: false,
+				timestamp: 1,
+			},
+		];
+
+		const result = await normalizeModelContextMessages(messages, buildStbVisionModel("managed-primary"));
+		const resultMessage = result[0]!;
+		expect(resultMessage.role).toBe("toolResult");
+		if (resultMessage.role !== "toolResult") throw new Error("Expected tool result message");
+
+		expect(resultMessage.content).toEqual([
+			{ type: "text", text: "[image omitted: WebP could not be decoded for this model]" },
+		]);
+		expect(messages[0]!.content[0]).toBe(corrupt);
 	});
 });
