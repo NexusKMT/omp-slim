@@ -243,12 +243,53 @@ describe("AgentSession mid-run threshold compaction", () => {
 		const compactSpy = mockCompaction("SHOULD-NOT-RUN");
 
 		const prompt = session.prompt("work below the maintenance threshold");
-		await messageEndEntered.promise;
-		await nextProviderCall.promise;
+		const messageEndOutcome = await Promise.race([
+			messageEndEntered.promise.then(() => "entered" as const),
+			Bun.sleep(2_000).then(() => "blocked" as const),
+		]);
+		const providerOutcome =
+			messageEndOutcome === "entered"
+				? await Promise.race([
+						nextProviderCall.promise.then(() => "dispatched" as const),
+						Bun.sleep(2_000).then(() => "blocked" as const),
+					])
+				: "blocked";
 		releaseMessageEnd.resolve();
-		await prompt;
+		const promptOutcome = await Promise.race([
+			prompt.then(() => "settled" as const),
+			Bun.sleep(2_000).then(() => "blocked" as const),
+		]);
 
+		expect(messageEndOutcome).toBe("entered");
+		expect(providerOutcome).toBe("dispatched");
+		expect(promptOutcome).toBe("settled");
 		expect(compactSpy).not.toHaveBeenCalled();
+	});
+
+	it("persists a tool result when its message_end listener rejects below the mid-run threshold", async () => {
+		let rejected = false;
+		const extensionRunner = {
+			hasHandlers: vi.fn((eventType: string) => eventType === "message_end"),
+			emitBeforeAgentStart: vi.fn(async () => undefined),
+			emit: vi.fn(async (event: { type: string; message?: AgentMessage }) => {
+				if (!rejected && event.type === "message_end" && event.message?.role === "toolResult") {
+					rejected = true;
+					throw new Error("intentional message_end failure");
+				}
+			}),
+		} as unknown as ExtensionRunner;
+		const { session, sessionManager } = await createHarness(
+			{ "compaction.thresholdTokens": 100_000 },
+			{ extensionRunner },
+		);
+
+		await session.prompt("work below the maintenance threshold");
+
+		const persistedToolResults = sessionManager
+			.getBranch()
+			.filter(entry => entry.type === "message" && entry.message.role === "toolResult");
+		expect(rejected).toBe(true);
+		expect(persistedToolResults).toHaveLength(1);
 	});
 
 	it("preserves the just-finished tool turn when message_end hooks are still pending", async () => {
