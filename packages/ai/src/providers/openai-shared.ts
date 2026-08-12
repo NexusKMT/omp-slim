@@ -3064,7 +3064,7 @@ export async function processResponsesStream<TApi extends Api>(
 				}
 				closeOpenItem(event.output_index, item.id, entry, item.call_id, prefixedFunctionCallItemKey(item.call_id));
 				stream.push({ type: "toolcall_end", contentIndex, toolCall, partial: output });
-			} else if (item.type === "web_search_call" && item.status === "completed") {
+			} else if (item.type === "web_search_call" && (item.status === undefined || item.status === "completed")) {
 				// A completed provider-hosted web search is progress evidence even when
 				// the model never surfaced an answer; the agent loop continues from it.
 				sawCompletedWebSearchCall = true;
