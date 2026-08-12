@@ -1508,6 +1508,10 @@ export class TUI extends Container {
 					? candidate.rowCount !== captured.rowCount
 					: candidate.widthEpochRevision !== captured.revision)
 			) {
+				if (candidate?.rowCount === captured.rowCount) {
+					rows += candidate.rowCount;
+					continue;
+				}
 				break;
 			}
 			rows += candidate.rowCount;
@@ -1537,6 +1541,16 @@ export class TUI extends Container {
 		const source = getNativeScrollbackWidthEpoch(marker.component);
 		if (source?.isNativeScrollbackWidthEpochAppendOnly?.(marker.childBoundary) === false) return false;
 		if (!marker.hasTrailingRows) return true;
+		for (let trailingIndex = 0; trailingIndex < marker.trailing.length; trailingIndex++) {
+			const captured = marker.trailing[trailingIndex]!;
+			const current = this.#frameSegments[marker.sourceIndex + 1 + trailingIndex];
+			const changed =
+				current?.component !== captured.component ||
+				(captured.revision === undefined
+					? current.rowCount !== captured.rowCount
+					: current.widthEpochRevision !== captured.revision);
+			if (changed && captured.rowCount > 0 && current?.rowCount === captured.rowCount) return false;
+		}
 		const previousRows = source?.resolveNativeScrollbackWidthEpoch(marker.childBoundary);
 		const currentRows = source?.getNativeScrollbackWidthEpochRows();
 		return previousRows === undefined || currentRows === undefined || currentRows <= previousRows;

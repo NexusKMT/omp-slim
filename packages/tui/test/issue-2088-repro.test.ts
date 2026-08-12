@@ -1133,6 +1133,80 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 		});
 	});
 
+	it("does not append a populated trailing root replaced during resize settlement", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const transcript = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				transcript.append(`replaced-tail-${index.toString().padStart(2, "0")} ${"T".repeat(46)}`);
+			}
+			const editor = new RevisionMutableLinesComponent(["editor-before"]);
+			tui.addChild(transcript);
+			tui.addChild(editor);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 6);
+				editor.setLines(["editor-after"]);
+				tui.requestComponentRender(editor);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (let index = 0; index < 8; index++) {
+					const marker = `replaced-tail-${index.toString().padStart(2, "0")}`;
+					expect(
+						buffer.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+				expect(visible(term).at(-1)).toBe("editor-after");
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("preserves populated tails after a replaced empty root", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const transcript = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				transcript.append(`empty-tail-${index.toString().padStart(2, "0")} ${"E".repeat(46)}`);
+			}
+			const emptyStatus = new RevisionMutableLinesComponent([]);
+			const editor = new MutableLinesComponent(["editor"]);
+			tui.addChild(transcript);
+			tui.addChild(emptyStatus);
+			tui.addChild(editor);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 6);
+				emptyStatus.setLines([]);
+				tui.requestComponentRender(emptyStatus);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (let index = 0; index < 8; index++) {
+					const marker = `empty-tail-${index.toString().padStart(2, "0")}`;
+					expect(
+						buffer.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+				expect(visible(term).at(-1)).toBe("editor");
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
 	it("retains rows when a leading root grows before the width-epoch source", async () => {
 		await withEnvPatch(TMUX_ENV, async () => {
 			const term = new VirtualTerminal(40, 6, 10_000);
