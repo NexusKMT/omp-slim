@@ -1289,11 +1289,12 @@ describe("AgentSession retry fallback", () => {
 		});
 	});
 
-	it("applies a model-keyed fallback chain to advisor quota failures", async () => {
+	it("keeps advisor fallback recovery on its role chain when another role shares its model", async () => {
 		const mainModel = getBundledModel("openai", "gpt-4o-mini");
 		const advisorPrimary = getBundledModel("anthropic", "claude-sonnet-4-5");
-		const advisorFallback = getBundledModel("openai", "gpt-4o");
-		if (!mainModel || !advisorPrimary || !advisorFallback) {
+		const unrelatedFallback = getBundledModel("openai", "gpt-4o");
+		const advisorFallback = getBundledModel("google", "gemini-2.5-flash");
+		if (!mainModel || !advisorPrimary || !unrelatedFallback || !advisorFallback) {
 			throw new Error("Expected bundled advisor fallback models to exist");
 		}
 
@@ -1308,6 +1309,8 @@ describe("AgentSession retry fallback", () => {
 		const fallbackSucceeded = Promise.withResolvers<void>();
 		const advisorFailures: string[] = [];
 		const advisorPrimarySelector = `${advisorPrimary.provider}/${advisorPrimary.id}`;
+		const advisorRoleSelector = `${advisorPrimarySelector}:high`;
+		const unrelatedFallbackSelector = `${unrelatedFallback.provider}/${unrelatedFallback.id}`;
 		const advisorFallbackSelector = `${advisorFallback.provider}/${advisorFallback.id}`;
 
 		const agent = new Agent({
@@ -1324,11 +1327,13 @@ describe("AgentSession retry fallback", () => {
 			"compaction.enabled": false,
 			"retry.baseDelayMs": 5,
 			"retry.fallbackChains": {
-				[advisorPrimarySelector]: [advisorFallbackSelector],
+				commit: [unrelatedFallbackSelector],
+				advisor: [advisorFallbackSelector],
 			},
 			"advisor.syncBacklog": "1",
 		});
-		settings.setModelRole("advisor", advisorPrimarySelector);
+		settings.setModelRole("commit", `${advisorPrimarySelector}:medium`);
+		settings.setModelRole("advisor", advisorRoleSelector);
 		vi.spyOn(modelRegistry.authStorage, "markUsageLimitReached").mockResolvedValue({ switched: false });
 
 		session = new AgentSession({
@@ -1337,7 +1342,7 @@ describe("AgentSession retry fallback", () => {
 			settings,
 			modelRegistry,
 			advisorTools: [],
-			advisorConfigs: [{ name: "fallback-test", model: advisorPrimarySelector }],
+			advisorConfigs: [{ name: "fallback-test", model: advisorRoleSelector }],
 			advisorStreamFn: (model, context, options) => {
 				const selector = `${model.provider}/${model.id}`;
 				requestedAdvisorModels.push(selector);
@@ -1347,6 +1352,8 @@ describe("AgentSession retry fallback", () => {
 					});
 				} else if (selector === advisorPrimarySelector) {
 					advisorMock.push({ content: ["Advisor primary restored"] });
+				} else if (selector === unrelatedFallbackSelector) {
+					advisorMock.push({ content: ["Unrelated fallback answered"] });
 				} else if (selector === advisorFallbackSelector) {
 					advisorMock.push({ content: ["Advisor recovered"] });
 				} else {
@@ -1382,16 +1389,16 @@ describe("AgentSession retry fallback", () => {
 		expect(fallbackAppliedEvents).toEqual([
 			{
 				type: "retry_fallback_applied",
-				from: `${advisorPrimarySelector}:medium`,
+				from: advisorRoleSelector,
 				to: advisorFallbackSelector,
-				role: advisorPrimarySelector,
+				role: "advisor",
 			},
 		]);
 		expect(fallbackSucceededEvents).toEqual([
 			{
 				type: "retry_fallback_succeeded",
-				model: advisorFallbackSelector,
-				role: advisorPrimarySelector,
+				model: `${advisorFallbackSelector}:high`,
+				role: "advisor",
 			},
 		]);
 		expect(advisorFailures).toEqual([]);
