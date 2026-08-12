@@ -890,19 +890,18 @@ export function resolveOpenAICompatPolicy<TApi extends Api>(
 		conflictDisableReason !== undefined ||
 		(modelSupported && disabledWithoutRequest) ||
 		disabledByNoneEffort;
-	if (
-		disabled &&
-		disableReason === "caller" &&
-		requestedEffort === undefined &&
-		disableMode === "lowest-effort" &&
-		compat.supportsReasoningEffort &&
-		!omitReasoningEffort
-	) {
-		const minEffort = getSupportedEfforts(model)[0];
-		if (minEffort === undefined) {
-			throw new AIError.ConfigurationError(`Model ${model.provider}/${model.id} has no supported reasoning efforts`);
+	if (disabled && compat.supportsReasoningEffort && !omitReasoningEffort) {
+		if (disableMode === "none-effort") {
+			wireEffort = "none";
+		} else if (disableReason === "caller" && requestedEffort === undefined && disableMode === "lowest-effort") {
+			const minEffort = getSupportedEfforts(model)[0];
+			if (minEffort === undefined) {
+				throw new AIError.ConfigurationError(
+					`Model ${model.provider}/${model.id} has no supported reasoning efforts`,
+				);
+			}
+			wireEffort = mapOpenAIReasoningEffort(model, compat, minEffort);
 		}
-		wireEffort = mapOpenAIReasoningEffort(model, compat, minEffort);
 	}
 
 	return {
@@ -955,6 +954,9 @@ function encodeChatCompletionsDisabledReasoning(
 ): void {
 	delete params.reasoning_effort;
 	switch (disableMode) {
+		case "none-effort":
+			params.reasoning_effort = "none";
+			break;
 		case "zai-thinking-disabled":
 			params.thinking = { type: "disabled" };
 			break;
@@ -1068,7 +1070,7 @@ export function applyChatCompletionsCompatPolicy(params: OpenAICompletionsParams
 	if (
 		reasoning.disableReason === "caller" &&
 		reasoning.requestedEffort === undefined &&
-		reasoning.disableMode === "lowest-effort" &&
+		(reasoning.disableMode === "lowest-effort" || reasoning.disableMode === "none-effort") &&
 		reasoning.wireEffort !== undefined
 	) {
 		params.reasoning_effort = reasoning.wireEffort as Effort;
@@ -3372,7 +3374,7 @@ export function applyResponsesCompatPolicy<P extends ResponseCreateParamsStreami
 			return;
 		}
 		if (
-			reasoning.disableMode === "lowest-effort" &&
+			(reasoning.disableMode === "lowest-effort" || reasoning.disableMode === "none-effort") &&
 			reasoning.wireEffort !== undefined &&
 			!reasoning.omitReasoningEffort
 		) {
