@@ -30,8 +30,9 @@ function hasWebPMagic(data: string): boolean {
 }
 
 function isWebPImage(image: ImageContent): boolean {
+	if (typeof image.data !== "string") return false;
 	const mimeType = typeof image.mimeType === "string" ? image.mimeType.toLowerCase() : undefined;
-	return mimeType === "image/webp" || (typeof image.data === "string" && hasWebPMagic(image.data));
+	return mimeType === "image/webp" || hasWebPMagic(image.data);
 }
 
 function modelBoundaryImageCacheKey(image: ImageContent, resize: ImageResizeOptions | undefined): string {

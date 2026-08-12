@@ -349,4 +349,28 @@ describe("normalizeModelContextImages model-aware WebP exclusion", () => {
 			]);
 		}
 	});
+
+	test("does not throw on persisted image blocks with malformed data", async () => {
+		for (const data of [undefined, null, 42]) {
+			const malformedImage = {
+				type: "image",
+				mimeType: "image/webp",
+				...(data === undefined ? {} : { data }),
+			};
+			const messages = [
+				{
+					role: "toolResult",
+					toolCallId: "read-malformed-data",
+					toolName: "read",
+					content: [malformedImage],
+					isError: false,
+					timestamp: 1,
+				},
+			] as unknown as Message[];
+
+			const result = await normalizeModelContextMessages(messages, buildStbVisionModel("managed-primary"));
+			expect(result).toBe(messages);
+			expect((result[0]!.content as unknown[])[0]).toBe(malformedImage);
+		}
+	});
 });
