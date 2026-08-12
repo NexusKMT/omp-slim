@@ -2144,7 +2144,7 @@ export class TUI extends Container {
 				screenStart + i,
 				segment.start + i,
 				this.#committedRows,
-				this.#isOsc66SpacerRow(this.#preparedFrame, segment.start + i),
+				this.#osc66SpacerGlyphWidth(this.#preparedFrame, segment.start + i),
 			);
 		}
 		const cursorControl = this.#cursorControlSequence(
@@ -3556,19 +3556,21 @@ export class TUI extends Container {
 	}
 
 	/**
-	 * True when `lines[index]` is a blank row that the scaled OSC 66 heading
-	 * above it flows into. A scale-`s` heading occupies `s` rows, so the `s - 1`
-	 * blank rows beneath it hold the multicell glyph's lower half; erasing or
-	 * overdrawing them clears the glyph and leaves reserved-but-invisible space
-	 * (issue #8318). Scans upward across the contiguous blank run so every
+	 * Columns to preserve when `lines[index]` is a blank row that a scaled OSC 66
+	 * heading flows into, or `-1` when it is not such a row. A scale-`s` heading
+	 * occupies `s` rows and `visibleWidth` columns, so the `s - 1` blank rows
+	 * beneath it hold the multicell glyph's lower half; those columns must never
+	 * be erased or overdrawn or the glyph vanishes, leaving reserved-but-invisible
+	 * space (issue #8318). Scans upward across the contiguous blank run so every
 	 * reserved row of a scale ≥ 3 heading is covered, not just the first.
 	 */
-	#isOsc66SpacerRow(lines: readonly string[], index: number): boolean {
-		if (index <= 0 || lines[index] !== "") return false;
+	#osc66SpacerGlyphWidth(lines: readonly string[], index: number): number {
+		if (index <= 0 || lines[index] !== "") return -1;
 		let gap = 1;
 		while (index - gap > 0 && lines[index - gap] === "") gap++;
 		const above = lines[index - gap];
-		return above !== undefined && isOsc66Line(above) && gap <= osc66MaxScale(above) - 1;
+		if (above === undefined || !isOsc66Line(above) || gap > osc66MaxScale(above) - 1) return -1;
+		return visibleWidth(above);
 	}
 
 	#lineRewriteSequence(
@@ -3577,13 +3579,18 @@ export class TUI extends Container {
 		screenRow = -1,
 		frameRow = -1,
 		committedTo = -1,
-		spacer = false,
+		spacerGlyphWidth = -1,
 	): string {
-		// The lower half of a scaled OSC 66 heading. The glyph re-emitted on the
-		// row above already owns these cells, so leave the row untouched — the
-		// caller's `\r\n` advanced the cursor past it. Any erase here would clear
-		// the glyph (issue #8318).
-		if (spacer) return "";
+		// Reserved lower half of a scaled OSC 66 heading. The glyph re-emitted on
+		// the row above owns columns `[0, spacerGlyphWidth)` here, so preserve
+		// them (any erase there clears the glyph — issue #8318) but still clear
+		// stale cells to their right: a row can reflow from wider text into this
+		// spacer, and the glyph write never covers those columns. Leading reset
+		// keeps the erase on the default background (BCE).
+		if (spacerGlyphWidth >= 0) {
+			if (spacerGlyphWidth >= width) return "";
+			return `${SEGMENT_RESET}\x1b[${spacerGlyphWidth}C${ERASE_TO_END_OF_LINE}`;
+		}
 		if (TERMINAL.isImageLine(line)) {
 			return ERASE_LINE + this.#imageLineSequence(line, screenRow, frameRow, committedTo);
 		}
@@ -3808,7 +3815,7 @@ export class TUI extends Container {
 							writeRow,
 							i,
 							chunkTo,
-							this.#isOsc66SpacerRow(frame, i),
+							this.#osc66SpacerGlyphWidth(frame, i),
 						)
 					: this.#terminalLine(frame[i] ?? "", writeRow, i, chunkTo);
 			}
@@ -3824,7 +3831,7 @@ export class TUI extends Container {
 							writeRow,
 							frameRow,
 							chunkTo,
-							this.#isOsc66SpacerRow(frame, frameRow),
+							this.#osc66SpacerGlyphWidth(frame, frameRow),
 						)
 					: this.#terminalLine(line, writeRow, frameRow, chunkTo);
 			}
@@ -3837,7 +3844,14 @@ export class TUI extends Container {
 				const line = visibleTexts && i >= visibleStart ? visibleTexts[i - visibleStart] : (paintLines[i] ?? "");
 				const writeRow = Math.min(i, height - 1);
 				buffer += options.clearScrollback
-					? this.#lineRewriteSequence(line, width, writeRow, -1, chunkTo, this.#isOsc66SpacerRow(paintLines, i))
+					? this.#lineRewriteSequence(
+							line,
+							width,
+							writeRow,
+							-1,
+							chunkTo,
+							this.#osc66SpacerGlyphWidth(paintLines, i),
+						)
 					: this.#terminalLine(line, writeRow, -1, chunkTo);
 			}
 		}
@@ -4042,7 +4056,7 @@ export class TUI extends Container {
 				r,
 				-1,
 				this.#committedRows,
-				this.#isOsc66SpacerRow(window, r),
+				this.#osc66SpacerGlyphWidth(window, r),
 			);
 		}
 		// Park the hardware cursor at the real content bottom, not the padded
@@ -4109,7 +4123,7 @@ export class TUI extends Container {
 		let buffer = `${this.#paintBeginSequence}\x1b[H`;
 		for (let r = 0; r < height; r++) {
 			if (r > 0) buffer += "\r\n";
-			buffer += this.#lineRewriteSequence(fitted[r], width, r, -1, -1, this.#isOsc66SpacerRow(fitted, r));
+			buffer += this.#lineRewriteSequence(fitted[r], width, r, -1, -1, this.#osc66SpacerGlyphWidth(fitted, r));
 		}
 		buffer += this.#paintEndSequence;
 		this.terminal.write(buffer);
@@ -4188,7 +4202,7 @@ export class TUI extends Container {
 				const moveToBottom = height - 1 - currentScreenRow;
 				if (moveToBottom > 0) buffer += `\x1b[${moveToBottom}B`;
 				for (let r = height - scroll; r < height; r++) {
-					buffer += `\r\n${this.#lineRewriteSequence(window[r] ?? "", width, height - 1, windowTop + r, chunkTo, this.#isOsc66SpacerRow(window, r))}`;
+					buffer += `\r\n${this.#lineRewriteSequence(window[r] ?? "", width, height - 1, windowTop + r, chunkTo, this.#osc66SpacerGlyphWidth(window, r))}`;
 				}
 				// Rewrite any remaining changed rows after the shift.
 				let firstChanged = -1;
@@ -4211,7 +4225,7 @@ export class TUI extends Container {
 							r,
 							windowTop + r,
 							chunkTo,
-							this.#isOsc66SpacerRow(window, r),
+							this.#osc66SpacerGlyphWidth(window, r),
 						);
 					}
 					cursorFromRow = windowTop + lastChanged;
@@ -4287,7 +4301,7 @@ export class TUI extends Container {
 					r,
 					windowTop + r,
 					this.#committedRows,
-					this.#isOsc66SpacerRow(window, r),
+					this.#osc66SpacerGlyphWidth(window, r),
 				);
 			}
 			buffer += fillSequence;
@@ -4325,7 +4339,7 @@ export class TUI extends Container {
 				Math.min(i - chunkFrom, height - 1),
 				i,
 				chunkTo,
-				this.#isOsc66SpacerRow(frame, i),
+				this.#osc66SpacerGlyphWidth(frame, i),
 			);
 			wroteLine = true;
 		}
@@ -4337,7 +4351,7 @@ export class TUI extends Container {
 				Math.min(chunkTo - chunkFrom + screenRow, height - 1),
 				windowTop + screenRow,
 				chunkTo,
-				this.#isOsc66SpacerRow(window, screenRow),
+				this.#osc66SpacerGlyphWidth(window, screenRow),
 			);
 			wroteLine = true;
 		}

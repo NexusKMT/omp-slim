@@ -2,13 +2,14 @@ import { describe, expect, it, vi } from "bun:test";
 import { type Component, TUI } from "@oh-my-pi/pi-tui";
 import { VirtualTerminal } from "./virtual-terminal";
 
-// Kitty OSC 66 text-sizing marker and the two erase sequences the renderer
-// emits for ordinary rows. A scale-`s` heading renders `s` cells tall, so the
-// blank rows beneath it hold the multicell glyph's lower half — erasing them
-// clears the glyph and leaves reserved-but-invisible space (issue #8318).
+// Kitty OSC 66 text-sizing marker and the erase sequences the renderer emits.
+// A scale-`s` heading renders `s` cells tall and `visibleWidth` cells wide, so
+// the blank rows beneath it hold the multicell glyph's lower half: those
+// columns must survive every repaint or the glyph vanishes and leaves
+// reserved-but-invisible space (issue #8318). The `s=2` "Heading" glyph is
+// 2 * 7 = 14 cells wide; the `s=3` "Big" glyph is 3 * 3 = 9.
 const OSC66 = "\x1b]66;";
 const ST = "\x1b\\";
-const ERASE_TO_EOL = "\x1b[K";
 const ERASE_LINE = "\x1b[2K";
 
 class RawLines implements Component {
@@ -16,11 +17,15 @@ class RawLines implements Component {
 	constructor(lines: string[]) {
 		this.#lines = lines;
 	}
+	setLines(lines: string[]): void {
+		this.#lines = lines;
+	}
 	invalidate(): void {}
 	render(): string[] {
 		return this.#lines;
 	}
 }
+
 // Flush the real render scheduler. Its throttle and post-paint settle windows
 // are driven by the platform clock, so these integration tests wait real time
 // (the suite-wide convention in deccara/image-budget tests) rather than mock a
@@ -65,8 +70,22 @@ function headingAndSpacers(writes: string[], spacerCount: number): { heading: st
 	return { heading: rows[idx]!, spacers: rows.slice(idx + 1, idx + 1 + spacerCount) };
 }
 
+/**
+ * A reserved spacer row must preserve the glyph's own columns `[0, glyphWidth)`
+ * while clearing any stale cells to their right (a row can reflow from wider
+ * text into the spacer). So: no whole-line erase, no erase-to-end before the
+ * glyph, and exactly one cursor-forward to `glyphWidth` followed by erase-to-end.
+ */
+function expectClearsRightOfGlyph(spacer: string, glyphWidth: number): void {
+	expect(spacer).not.toContain(ERASE_LINE);
+	expect(spacer).not.toMatch(/^(?:\x1b\[0m)?\x1b\[K/);
+	const match = spacer.match(/\x1b\[(\d+)C\x1b\[K/);
+	expect(match).not.toBeNull();
+	expect(Number(match![1])).toBe(glyphWidth);
+}
+
 describe("issue #8318: scaled OSC 66 headings survive repaint and resize", () => {
-	it("re-emits the heading but never erases its reserved row on a full repaint", async () => {
+	it("re-emits the heading and preserves its reserved row on a full repaint", async () => {
 		const term = new VirtualTerminal(80, 6);
 		const tui = new TUI(term);
 		tui.addChild(new RawLines([`${OSC66}s=2;Heading${ST}`, "", "Body"]));
@@ -82,20 +101,15 @@ describe("issue #8318: scaled OSC 66 headings survive repaint and resize", () =>
 			await settle(term);
 
 			const { heading, spacers } = headingAndSpacers(writes, 1);
-			// The glyph is re-emitted, not relied upon from a stale frame.
 			expect(heading).toContain("Heading");
-			// The reserved lower-half row carries no erase.
-			expect(spacers[0]).toBe("");
-			expect(spacers[0]).not.toContain(ERASE_TO_EOL);
-			expect(spacers[0]).not.toContain(ERASE_LINE);
-			// Content below the heading is still repainted.
+			expectClearsRightOfGlyph(spacers[0]!, 14);
 			expect(writes.find(write => write.includes(OSC66))).toContain("Body");
 		} finally {
 			tui.stop();
 		}
 	});
 
-	it("keeps the reserved row intact across a resize repaint", async () => {
+	it("preserves the reserved row across a resize repaint", async () => {
 		const term = new VirtualTerminal(80, 6);
 		const tui = new TUI(term);
 		tui.addChild(new RawLines([`${OSC66}s=2;Heading${ST}`, "", "Body"]));
@@ -110,9 +124,7 @@ describe("issue #8318: scaled OSC 66 headings survive repaint and resize", () =>
 
 			const { heading, spacers } = headingAndSpacers(writes, 1);
 			expect(heading).toContain("Heading");
-			expect(spacers[0]).toBe("");
-			expect(spacers[0]).not.toContain(ERASE_TO_EOL);
-			expect(spacers[0]).not.toContain(ERASE_LINE);
+			expectClearsRightOfGlyph(spacers[0]!, 14);
 		} finally {
 			tui.stop();
 		}
@@ -133,12 +145,34 @@ describe("issue #8318: scaled OSC 66 headings survive repaint and resize", () =>
 
 			const { heading, spacers } = headingAndSpacers(writes, 2);
 			expect(heading).toContain("Big");
-			// Both rows the scale-3 glyph flows into must stay untouched.
-			for (const spacer of spacers) {
-				expect(spacer).toBe("");
-				expect(spacer).not.toContain(ERASE_TO_EOL);
-				expect(spacer).not.toContain(ERASE_LINE);
-			}
+			for (const spacer of spacers) expectClearsRightOfGlyph(spacer, 9);
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("clears stale cells when a wide row reflows into the reserved spacer", async () => {
+		const term = new VirtualTerminal(80, 6);
+		const tui = new TUI(term);
+		// Row 1 starts as text far wider than the eventual 14-cell glyph.
+		const content = new RawLines(["intro", `wide prior text ${"x".repeat(40)}`, "tail"]);
+		tui.addChild(content);
+		const writes = captureWrites(term);
+		try {
+			tui.start();
+			await settle(term);
+			writes.length = 0;
+
+			// Reflow: row 0 becomes the sized heading, row 1 becomes its reserved
+			// spacer. The glyph write covers only columns [0, 14); the stale wide
+			// text to the right must still be erased.
+			content.setLines([`${OSC66}s=2;Heading${ST}`, "", "tail"]);
+			tui.requestRender();
+			await settle(term);
+
+			const { heading, spacers } = headingAndSpacers(writes, 1);
+			expect(heading).toContain("Heading");
+			expectClearsRightOfGlyph(spacers[0]!, 14);
 		} finally {
 			tui.stop();
 		}
