@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/login together` always failing with HTTP 400 `model_not_available`: key validation chat-completed against the hardcoded non-serverless model `moonshotai/Kimi-K2.5`, so no valid key could pass. Validation now probes Together's authenticated `/v1/models` listing, matching the model-agnostic approach used by other API-key providers ([#8328](https://github.com/can1357/oh-my-pi/issues/8328)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Fixed
