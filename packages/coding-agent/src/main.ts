@@ -74,6 +74,7 @@ import {
 	loadSessionExtensions,
 } from "./sdk";
 import type { AgentSession } from "./session/agent-session";
+import { describeAuthBrokerStartupError } from "./session/auth-broker-config";
 import type { AuthStorage } from "./session/auth-storage";
 import { describePendingToolCalls } from "./session/exit-diagnostics";
 import {
@@ -1276,8 +1277,18 @@ export async function runRootCommand(
 	// tree; declare it so headless subagent optimizations (e.g. skipping replan
 	// title refresh) can tell a focusable process from a print/RPC/eval one.
 	setInteractiveHost(isInteractive);
-	// Create AuthStorage and ModelRegistry upfront
-	const authStorage = await logger.time("discoverAuthStorage", deps.discoverAuthStorage ?? discoverAuthStorage);
+	// Create AuthStorage and ModelRegistry upfront. A configured-but-unreachable
+	// auth broker throws here; convert it to an actionable stderr message + clean
+	// exit instead of a raw uncaught stack trace (issue #8096).
+	let authStorage: AuthStorage;
+	try {
+		authStorage = await logger.time("discoverAuthStorage", deps.discoverAuthStorage ?? discoverAuthStorage);
+	} catch (error) {
+		const message = await describeAuthBrokerStartupError(error);
+		if (message === null) throw error;
+		process.stderr.write(`${chalk.red(`Error: ${message}`)}\n`);
+		process.exit(1);
+	}
 	const modelRegistry = logger.time("modelRegistry:init", () => new ModelRegistry(authStorage));
 
 	const settingsInstance =
