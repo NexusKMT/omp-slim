@@ -106,6 +106,23 @@ describe("pi.typebox compatibility shim", () => {
 		expect(object.safeParse({ cfg: { a: "ok", "x-n": "bad" } }).success).toBe(false);
 	});
 
+	it("applies schema-valued additionalProperties only to undeclared raw-object keys", () => {
+		const schema = Type.Object(
+			{ known: { type: "number" } },
+			{ additionalProperties: { type: "string" } },
+		);
+
+		expect(schema.safeParse({ known: 1, extra: "ok" }).success).toBe(true);
+		expect(schema.safeParse({ known: "bad", extra: "ok" }).success).toBe(false);
+		expect(schema.safeParse({ known: 1, extra: 2 }).success).toBe(false);
+		expect(schema.toJsonSchema()).toEqual({
+			type: "object",
+			properties: { known: { type: "number" } },
+			required: ["known"],
+			additionalProperties: { type: "string" },
+		});
+	});
+
 	it("validates Type.Unsafe draft-07 documents like the wire path", () => {
 		const schema = Type.Unsafe({
 			type: "object",
