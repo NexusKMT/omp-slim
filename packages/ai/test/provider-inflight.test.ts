@@ -85,6 +85,18 @@ describe("provider in-flight request limits", () => {
 		expect(mock.calls).toHaveLength(2);
 	});
 
+	test("releases its provider lease before reporting stream completion", async () => {
+		registerMockApi();
+		const mock = createMockModel({ provider: "tests", responses: [{ content: ["reply"] }] });
+
+		const stream = streamSimple(mock.model, context(), { maxInFlightRequests: { tests: 1 } });
+		const result = await stream.result();
+
+		expect(result.content).toEqual([{ type: "text", text: "reply" }]);
+		const entries = await fs.readdir(limiterDir("tests"), { withFileTypes: true });
+		expect(entries.filter(entry => entry.isDirectory())).toHaveLength(0);
+	});
+
 	test("removes an aborted queued request without dispatching it", async () => {
 		registerMockApi();
 		const firstStarted = Promise.withResolvers<void>();

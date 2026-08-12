@@ -177,6 +177,8 @@ const PROVIDER_INFLIGHT_LOCK_STALE_MS = 10_000;
 const PROVIDER_INFLIGHT_LEASE_STALE_MS = 30_000;
 const PROVIDER_INFLIGHT_HEARTBEAT_MS = 5_000;
 const PROVIDER_INFLIGHT_SIGNAL_FALLBACK_MS = 250;
+const PROVIDER_INFLIGHT_HEARTBEAT_FLUSH_TIMEOUT_MS = 1_000;
+const PROVIDER_INFLIGHT_RELEASE_TIMEOUT_MS = 5_000;
 
 let configuredProviderMaxInFlightRequests: Record<string, number> = {};
 let providerInFlightRootOverride: string | undefined;
@@ -519,9 +521,32 @@ async function removeProviderInFlightLeaseDir(leasePath: string): Promise<void> 
 // write `.wakeup` into an unrelated provider directory.
 async function releaseProviderInFlightLease(lease: ProviderInFlightLease): Promise<void> {
 	clearInterval(lease.heartbeat);
-	await lease.flushHeartbeat();
-	await removeProviderInFlightLeaseDir(lease.path);
-	await signalProviderInFlightWaitersInDir(path.dirname(lease.path));
+	const flushTimeout = Promise.withResolvers<"timeout">();
+	const flushTimer = setTimeout(() => flushTimeout.resolve("timeout"), PROVIDER_INFLIGHT_HEARTBEAT_FLUSH_TIMEOUT_MS);
+	flushTimer.unref?.();
+	try {
+		const outcome = await Promise.race([lease.flushHeartbeat().then(() => "flushed" as const), flushTimeout.promise]);
+		if (outcome === "timeout") {
+			logger.warn("Provider in-flight heartbeat flush timed out; forcing lease cleanup", { path: lease.path });
+		}
+	} finally {
+		clearTimeout(flushTimer);
+	}
+
+	const releaseTimeout = Promise.withResolvers<never>();
+	const releaseTimer = setTimeout(
+		() => releaseTimeout.reject(new Error("Provider in-flight lease cleanup timed out")),
+		PROVIDER_INFLIGHT_RELEASE_TIMEOUT_MS,
+	);
+	releaseTimer.unref?.();
+	try {
+		await Promise.race([removeProviderInFlightLeaseDir(lease.path), releaseTimeout.promise]);
+	} finally {
+		clearTimeout(releaseTimer);
+	}
+	// Wake-up is an optimization: waiters also poll every 250 ms. Do not let a
+	// notification-file stall keep a completed provider request open.
+	void signalProviderInFlightWaitersInDir(path.dirname(lease.path));
 }
 
 async function acquireProviderInFlightSlot(
@@ -585,11 +610,11 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
 		let release: (() => Promise<void>) | undefined;
-		let released = false;
-		const releaseOnce = async () => {
-			if (!release || released) return;
-			released = true;
-			await release();
+		let releasePromise: Promise<void> | undefined;
+		const releaseOnce = () => {
+			if (!release) return Promise.resolve();
+			releasePromise ??= release();
+			return releasePromise;
 		};
 		try {
 			const startedWaitingAt = Date.now();
@@ -601,18 +626,39 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 				throw options.signal.reason ?? new AIError.AbortError("Provider request aborted before dispatch");
 			}
 			const inner = healLeakedThinking(model, dispatch());
-			try {
-				for await (const event of inner) {
-					outer.push(event);
-					if (outer.done) return;
+			let terminalEvent: AssistantMessageEvent | undefined;
+			for await (const event of inner) {
+				if (event.type === "done" || event.type === "error") {
+					terminalEvent = event;
+					continue;
 				}
-				if (!outer.done) outer.end(await inner.result());
-			} finally {
-				await releaseOnce();
+				outer.push(event);
+				if (outer.done) {
+					await releaseOnce();
+					return;
+				}
+			}
+			const result = await inner.result();
+			// Releasing the permit is part of request completion. Publishing the
+			// result first lets an immediate follow-up turn contend with its own
+			// still-live lease, which is particularly costly on Windows.
+			await releaseOnce();
+			if (!outer.done) {
+				if (terminalEvent) outer.push(terminalEvent);
+				else outer.end(result);
 			}
 		} catch (error) {
-			await releaseOnce();
-			if (!outer.done) outer.fail(error);
+			let failure = error;
+			try {
+				await releaseOnce();
+			} catch (releaseError) {
+				logger.warn("Provider in-flight permit release failed", {
+					provider: model.provider,
+					error: String(releaseError),
+				});
+				failure = releaseError;
+			}
+			if (!outer.done) outer.fail(failure);
 		}
 	})();
 	return outer;
