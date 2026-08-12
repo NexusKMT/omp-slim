@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
@@ -122,7 +122,23 @@ function emitHighUsageTurn(session: AgentSession): void {
 
 describe("AgentSession eager prelude re-injection after compaction", () => {
 	let tempDir: TempDir;
+	let sharedDir: TempDir;
+	let sharedAuthStorage: AuthStorage;
+	let sharedModelRegistry: ModelRegistry;
 	const cleanups: Array<() => Promise<void>> = [];
+
+	beforeAll(async () => {
+		sharedDir = TempDir.createSync("@pi-agent-session-eager-compaction-shared-");
+		sharedAuthStorage = await AuthStorage.create(path.join(sharedDir.path(), "auth.db"));
+		sharedAuthStorage.setRuntimeApiKey("anthropic", "test-key");
+		sharedAuthStorage.setRuntimeApiKey("openai-codex", "test-key");
+		sharedModelRegistry = new ModelRegistry(sharedAuthStorage, path.join(sharedDir.path(), "models.yml"));
+	});
+
+	afterAll(() => {
+		sharedAuthStorage.close();
+		sharedDir.removeSync();
+	});
 
 	beforeEach(() => {
 		tempDir = TempDir.createSync("@pi-agent-session-eager-compaction-");
@@ -153,9 +169,7 @@ describe("AgentSession eager prelude re-injection after compaction", () => {
 		// not shift the headroom math.
 		const model = { ...selectedModel, contextWindow: 200_000, maxTokens: 64_000 };
 
-		const authStorage = await AuthStorage.create(path.join(tempDir.path(), `testauth-${cleanups.length}.db`));
-		authStorage.setRuntimeApiKey(model.provider, "test-key");
-		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), `models-${cleanups.length}.yml`));
+		const modelRegistry = sharedModelRegistry;
 		const settings = Settings.isolated({
 			"compaction.enabled": true,
 			"compaction.autoContinue": true,
@@ -249,10 +263,7 @@ describe("AgentSession eager prelude re-injection after compaction", () => {
 			return promise;
 		};
 
-		cleanups.push(async () => {
-			await session.dispose();
-			authStorage.close();
-		});
+		cleanups.push(() => session.dispose());
 		return { session, observedCalls, sessionManager, waitForCall };
 	}
 
@@ -293,7 +304,6 @@ describe("AgentSession eager prelude re-injection after compaction", () => {
 		// Reminder-only: the post-compaction nudge never forces a tool on the resumed turn.
 		expect(continuation.toolChoice).toBeUndefined();
 	});
-
 	it("does not re-inject the eager task reminder when task.eager is default", async () => {
 		const { session, waitForCall } = await createHarness({ "task.eager": "default" });
 		stubCompaction();
@@ -302,7 +312,6 @@ describe("AgentSession eager prelude re-injection after compaction", () => {
 
 		expect(continuation.messageTexts.some(text => text.includes(TASK_DELEGATION_MARKER))).toBe(false);
 	});
-
 	it("does not re-inject the eager task reminder when task.eager is preferred", async () => {
 		const { session, waitForCall } = await createHarness({ "task.eager": "preferred" });
 		stubCompaction();
@@ -311,7 +320,6 @@ describe("AgentSession eager prelude re-injection after compaction", () => {
 
 		expect(continuation.messageTexts.some(text => text.includes(TASK_DELEGATION_MARKER))).toBe(false);
 	});
-
 	it("does not re-inject the eager task reminder for subagent sessions", async () => {
 		const { session, waitForCall } = await createHarness({}, { agentId: "SubAgent", agentKind: "sub" });
 		stubCompaction();
@@ -320,7 +328,6 @@ describe("AgentSession eager prelude re-injection after compaction", () => {
 
 		expect(continuation.messageTexts.some(text => text.includes(TASK_DELEGATION_MARKER))).toBe(false);
 	});
-
 	it("does not re-inject the eager task reminder in plan mode", async () => {
 		const { session, waitForCall } = await createHarness();
 		session.setPlanModeState({ enabled: true, planFilePath: path.join(tempDir.path(), "plan.md") });
