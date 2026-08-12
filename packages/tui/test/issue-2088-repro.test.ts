@@ -1092,6 +1092,51 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 		});
 	});
 
+	it("retains transcript growth hidden by a fullscreen overlay across resize", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const transcript = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				transcript.append(`falt-${index.toString().padStart(2, "0")} ${"A".repeat(46)}`);
+			}
+			tui.addChild(transcript);
+
+			try {
+				tui.start();
+				await settle(term);
+				const overlay = tui.showOverlay(new MutableLinesComponent(["fullscreen-overlay"]), {
+					width: "100%",
+					maxHeight: "100%",
+					margin: 0,
+					fullscreen: true,
+				});
+				tui.requestRender(true);
+				await settle(term);
+
+				term.resize(17, 6);
+				transcript.append(`falt-final ${"F".repeat(46)}`);
+				tui.requestRender();
+				await settle(term);
+				overlay.hide();
+				tui.requestRender(true);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (let index = 0; index < 8; index++) {
+					const marker = `falt-${index.toString().padStart(2, "0")}`;
+					expect(
+						buffer.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+				expect(buffer.filter(line => line.includes("falt-final"))).toHaveLength(1);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
 	it("retains transcript rows displaced by a trailing root that grows during resize settlement", async () => {
 		await withEnvPatch(TMUX_ENV, async () => {
 			const term = new VirtualTerminal(40, 6, 10_000);
@@ -1204,7 +1249,7 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 		});
 	});
 
-	it("preserves populated tails after a replaced empty root", async () => {
+	it("preserves populated tails after an empty root gains rows", async () => {
 		await withEnvPatch(TMUX_ENV, async () => {
 			const term = new VirtualTerminal(40, 6, 10_000);
 			const tui = new TUI(term);
@@ -1222,7 +1267,7 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 				tui.start();
 				await settle(term);
 				term.resize(17, 6);
-				emptyStatus.setLines([]);
+				emptyStatus.setLines(["status"]);
 				tui.requestComponentRender(emptyStatus);
 				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
 				await settle(term);
@@ -1235,7 +1280,7 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 						marker,
 					).toHaveLength(1);
 				}
-				expect(visible(term).at(-1)).toBe("editor");
+				expect(visible(term).slice(-2)).toEqual(["status", "editor"]);
 			} finally {
 				tui.stop();
 			}
@@ -1331,8 +1376,10 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 			const editor = new RevisionMutableLinesComponent(["editor"]);
 			const editorRoot = new Container();
 			editorRoot.addChild(editor);
+			editorRoot.addChild(new MutableLinesComponent(["nested-footer"]));
 			tui.addChild(transcript);
 			tui.addChild(editorRoot);
+			tui.addChild(new MutableLinesComponent(["root-footer"]));
 
 			try {
 				tui.start();
@@ -1352,7 +1399,15 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 						marker,
 					).toHaveLength(1);
 				}
-				expect(visible(term).slice(-4)).toEqual(["draft-00", "draft-01", "draft-02", "editor"]);
+				expect(buffer.filter(line => line === "")).toHaveLength(9);
+				expect(visible(term)).toEqual([
+					"draft-00",
+					"draft-01",
+					"draft-02",
+					"editor",
+					"nested-footer",
+					"root-footer",
+				]);
 			} finally {
 				tui.stop();
 			}
@@ -1443,7 +1498,7 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 		});
 	});
 
-	it("preserves populated nested tails after a replaced empty child", async () => {
+	it("preserves populated nested tails after an empty child gains rows", async () => {
 		await withEnvPatch(TMUX_ENV, async () => {
 			const term = new VirtualTerminal(40, 6, 10_000);
 			const tui = new TUI(term);
@@ -1463,7 +1518,7 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 				tui.start();
 				await settle(term);
 				term.resize(17, 6);
-				emptyStatus.setLines([]);
+				emptyStatus.setLines(["status"]);
 				tui.requestComponentRender(emptyStatus);
 				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
 				await settle(term);
@@ -1476,7 +1531,7 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 						marker,
 					).toHaveLength(1);
 				}
-				expect(visible(term).at(-1)).toBe("editor");
+				expect(visible(term).slice(-2)).toEqual(["status", "editor"]);
 			} finally {
 				tui.stop();
 			}

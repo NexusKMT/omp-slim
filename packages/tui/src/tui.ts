@@ -732,10 +732,15 @@ export class Container
 					? currentRows.length !== captured.rowCount
 					: getNativeScrollbackWidthEpochRevision(captured.component) !== captured.revision)
 			) {
-				if (currentRows?.length === captured.rowCount) {
-					rows += currentRows.length;
-					continue;
+				let capturedRows = 0;
+				for (let index = trailingIndex; index < marker.trailing.length; index++) {
+					capturedRows += marker.trailing[index]!.rowCount;
 				}
+				let settledRows = 0;
+				for (let index = currentIndex; index < this.#memoChildLines.length; index++) {
+					settledRows += this.#memoChildLines[index]!.length;
+				}
+				rows += Math.min(capturedRows, settledRows);
 				break;
 			}
 			rows += currentRows.length;
@@ -793,7 +798,9 @@ export class Container
 				(captured.revision === undefined
 					? currentRows.length !== captured.rowCount
 					: getNativeScrollbackWidthEpochRevision(captured.component) !== captured.revision);
-			if (changed && captured.hadRows && currentRows?.length === captured.rowCount) return false;
+			if (changed && (captured.hadRows || marker.trailing.slice(trailingIndex + 1).some(child => child.hadRows))) {
+				return false;
+			}
 		}
 		const previousRows = source?.resolveNativeScrollbackWidthEpoch(marker.childBoundary);
 		const currentRows = source?.getNativeScrollbackWidthEpochRows();
@@ -1299,6 +1306,10 @@ export class TUI extends Container {
 	// opaque marker survives width reflow and resolves after the settled render.
 	#multiplexerWidthEpochBoundary: unknown;
 	#multiplexerWidthEpochPending = false;
+	// Normal-buffer boundary borrowed by a fullscreen alt overlay. If the host
+	// resizes while the transcript is hidden, this remains the physical seam
+	// from before the overlay instead of adopting hidden growth on exit.
+	#altWidthEpochBoundary: unknown;
 
 	// Frame row currently mapped to screen row 0. Monotonic between full
 	// paints: a shrink never re-exposes scrolled-off rows (they cannot be
@@ -1516,19 +1527,24 @@ export class TUI extends Container {
 		for (let trailingIndex = 0; trailingIndex < marker.trailing.length; trailingIndex++) {
 			const captured = marker.trailing[trailingIndex]!;
 			const candidate = this.#frameSegments[marker.sourceIndex + 1 + trailingIndex];
-			// Changed/removed tails are not cross-width comparable. Treat their
-			// entire settled contribution as new in the current boundary: this can
-			// conservatively duplicate rows, but cannot omit displaced transcript.
+			// Changed/removed tails are not individually cross-width comparable.
+			// Preserve the shared physical row count of the remaining tail as one
+			// span; only aggregate height growth belongs to the current suffix.
 			if (
 				candidate?.component !== captured.component ||
 				(captured.revision === undefined
 					? candidate.rowCount !== captured.rowCount
 					: candidate.widthEpochRevision !== captured.revision)
 			) {
-				if (candidate?.rowCount === captured.rowCount) {
-					rows += candidate.rowCount;
-					continue;
+				let capturedRows = 0;
+				for (let index = trailingIndex; index < marker.trailing.length; index++) {
+					capturedRows += marker.trailing[index]!.rowCount;
 				}
+				let settledRows = 0;
+				for (let index = marker.sourceIndex + 1 + trailingIndex; index < this.#frameSegments.length; index++) {
+					settledRows += this.#frameSegments[index]!.rowCount;
+				}
+				rows += Math.min(capturedRows, settledRows);
 				break;
 			}
 			rows += candidate.rowCount;
@@ -1566,7 +1582,12 @@ export class TUI extends Container {
 				(captured.revision === undefined
 					? current.rowCount !== captured.rowCount
 					: current.widthEpochRevision !== captured.revision);
-			if (changed && captured.rowCount > 0 && current?.rowCount === captured.rowCount) return false;
+			if (
+				changed &&
+				(captured.rowCount > 0 || marker.trailing.slice(trailingIndex + 1).some(segment => segment.rowCount > 0))
+			) {
+				return false;
+			}
 		}
 		const previousRows = source?.resolveNativeScrollbackWidthEpoch(marker.childBoundary);
 		const currentRows = source?.getNativeScrollbackWidthEpochRows();
@@ -2040,6 +2061,12 @@ export class TUI extends Container {
 				if (this.#altActive) {
 					if (this.#altEnterWidth === this.terminal.columns && this.#altEnterHeight !== this.terminal.rows) {
 						this.#altToggleResizesInPlace = true;
+					}
+					if (this.#previousWidth > 0 && this.terminal.columns !== this.#previousWidth) {
+						this.#multiplexerWidthEpochPending = true;
+						if (this.#multiplexerWidthEpochBoundary === undefined) {
+							this.#multiplexerWidthEpochBoundary = this.#altWidthEpochBoundary;
+						}
 					}
 					this.#resizeEventPending = true;
 					this.requestRender();
@@ -3323,6 +3350,7 @@ export class TUI extends Container {
 			this.#altPreviousLines = [];
 			this.#altEnterWidth = width;
 			this.#altEnterHeight = height;
+			this.#altWidthEpochBoundary = this.captureNativeScrollbackWidthEpoch();
 		} else if (!wantAlt && this.#altActive) {
 			const mouseExit = this.#altMouseTrackingActive ? MOUSE_TRACKING_OFF : "";
 			const enhancementExit = this.#keyboardEnhancementExit();
@@ -3340,6 +3368,7 @@ export class TUI extends Container {
 			this.#altActive = false;
 			this.#altMouseTrackingActive = false;
 			this.#altPreviousLines = [];
+			this.#altWidthEpochBoundary = undefined;
 			// A resize while on the alt buffer reflowed the terminal's saved
 			// normal screen; it no longer matches our accounting, so force the
 			// geometry rebuild path instead of a stale diff. A pure height change
