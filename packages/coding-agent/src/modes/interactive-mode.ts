@@ -3386,7 +3386,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		await this.#enterPlanMode();
 		if (!initialPrompt) return false;
 		if (isKnownSkillCommand(this, initialPrompt)) {
-			await invokeSkillCommandFromText(this, initialPrompt, "steer");
+			await invokeSkillCommandFromText(this, initialPrompt, "steer", {
+				images: input?.images,
+				propagateErrors: true,
+			});
 			return true;
 		}
 		if (this.session.isStreaming) {
@@ -3431,7 +3434,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		await this.#enterVibeMode();
 		if (!initialPrompt) return false;
 		if (isKnownSkillCommand(this, initialPrompt)) {
-			await invokeSkillCommandFromText(this, initialPrompt, "steer");
+			await invokeSkillCommandFromText(this, initialPrompt, "steer", {
+				images: input?.images,
+				propagateErrors: true,
+			});
 			return true;
 		}
 		if (this.session.isStreaming) {
