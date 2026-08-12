@@ -1906,6 +1906,53 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 		});
 	});
 
+	it("retains resolved overlay growth across repeated width epochs", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const initial = Array.from({ length: 12 }, (_value, index) => `resolved-${index.toString().padStart(2, "0")}`);
+			const appended = Array.from(
+				{ length: 8 },
+				(_value, index) => `resolved-${(12 + index).toString().padStart(2, "0")}`,
+			);
+			const component = new ResetWidthEpochAuditLinesComponent(initial, initial.length, true);
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				const overlay = tui.showOverlay(new MutableLinesComponent(["overlay"]), {
+					anchor: "top-left",
+					row: 1,
+					col: 1,
+				});
+				await settle(term);
+				term.resize(17, 6);
+				component.append(appended);
+				tui.requestRender();
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+				term.resize(23, 6);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				overlay.hide();
+				tui.requestRender(true);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (const line of [...initial, ...appended]) {
+					expect(
+						buffer.filter(bufferLine => bufferLine === line),
+						line,
+					).toHaveLength(1);
+				}
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
 	it("rebases hidden-growth accounting when an overlay spans a widening width epoch", async () => {
 		await withEnvPatch(TMUX_ENV, async () => {
 			const initial = Array.from(

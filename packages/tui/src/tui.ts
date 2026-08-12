@@ -1295,6 +1295,10 @@ export class TUI extends Container {
 	// conservative replay from row zero. Sticky across later covered resizes —
 	// even if their source boundary resolves — until an uncovered paint pays it.
 	#widthEpochOverlayReplayPending = false;
+	// The first logical boundary captured while a normal-buffer overlay covers
+	// a width epoch. Later covered resizes must keep resolving this unpaid seam
+	// instead of adopting hidden growth as the next epoch's source boundary.
+	#widthEpochOverlayBoundary: unknown;
 	// Same-width snapshots physically appended after a width transition. The
 	// ordinary committed prefix includes opaque old-width native rows and can
 	// no longer be indexed against the reflowed frame; this local ledger lets
@@ -3499,7 +3503,8 @@ export class TUI extends Container {
 		if (resizeEventOccurred) this.#forgetHardwareCursorState();
 		const widthChanged = this.#previousWidth > 0 && this.#previousWidth !== width;
 		const widthEpochOccurred = widthChanged || (resizeEventOccurred && this.#multiplexerWidthEpochPending);
-		const widthEpochBoundary = this.#multiplexerWidthEpochBoundary;
+		const capturedWidthEpochBoundary = this.#multiplexerWidthEpochBoundary;
+		const widthEpochBoundary = this.#widthEpochOverlayBoundary ?? capturedWidthEpochBoundary;
 		const widthEpochSourceBoundary = widthEpochOccurred
 			? this.resolveNativeScrollbackWidthEpoch(widthEpochBoundary)
 			: undefined;
@@ -3660,6 +3665,9 @@ export class TUI extends Container {
 		// preferable to dropping rows that were never emitted anywhere.
 		if (widthEpochReset && hasVisibleOverlay && widthEpochSourceBoundary === undefined && resizeHadPendingRender) {
 			this.#widthEpochOverlayReplayPending = true;
+		}
+		if (widthEpochReset && hasVisibleOverlay && this.#widthEpochOverlayBoundary === undefined) {
+			this.#widthEpochOverlayBoundary = capturedWidthEpochBoundary;
 		}
 		const replayUnresolvedOverlayFrame = widthEpochReset && this.#widthEpochOverlayReplayPending;
 		const replayUnresolvedWidthEpoch =
@@ -3881,6 +3889,7 @@ export class TUI extends Container {
 			this.#widthEpochBaselineRows = undefined;
 			this.#widthEpochReplayUnresolved = false;
 			this.#widthEpochOverlayReplayPending = false;
+			this.#widthEpochOverlayBoundary = undefined;
 			this.#widthEpochCommittedPrefix = undefined;
 			this.#publishCommittedRows();
 			if (!firstPaint && frameLength > height) this.#armPostFullPaintSettle();
@@ -3944,6 +3953,7 @@ export class TUI extends Container {
 			this.#pendingAltExit = "";
 			if (!hasVisibleOverlay) {
 				this.#widthEpochOverlayReplayPending = false;
+				this.#widthEpochOverlayBoundary = undefined;
 				if (liveRegionPinned) {
 					this.#widthEpochBaselineRows = this.#widthEpochReplayUnresolved ? commitTo : widthEpochAppendTo;
 					this.#windowTopRow = logicalAppend ? windowTop : prevWindowTop + scrollRows;
