@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed open browser behaviour on Windows, OMP console no longer disappears on commands such as `/stats`
+
 ## [17.2.14] - 2026-08-11
 
 ### Added
