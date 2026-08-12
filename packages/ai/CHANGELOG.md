@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- OpenCode Go usage now comes from the official `GET /zen/go/v1/usage` endpoint (rolling 5h / weekly / monthly percent windows with server-computed resets) instead of synthesizing dollar estimates from OMP-observed request costs, so `/usage` reflects spend made outside OMP and the hardcoded $12/$30/$60 caps are gone. The usage probe now validates credentials (401 invalid key, 403 lapsed Go subscription), and a new ranking strategy routes multi-key pools by rolling/weekly headroom while keeping the monthly window display-only (an exhausted monthly can still serve requests via the console "Use balance" fallback).
+
+### Removed
+
+- Removed the observed-request-cost machinery that existed only to power the OpenCode Go estimate: `AuthStorage.recordUsageCost`, the store `recordUsageCosts`/`listUsageCosts` hooks, `UsageFetchContext.listUsageCosts`, the `UsageCostHistoryEntry`/`UsageCostHistoryQuery` types, and the `usage_cost_history` schema and statements. Existing unused tables are left intact rather than deleting local data during startup.
+
 ## [17.2.15] - 2026-08-12
 
 ### Fixed

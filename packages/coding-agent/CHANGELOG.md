@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `/usage`, `omp usage`, and the status line now show authoritative OpenCode Go quota from the official `GET /zen/go/v1/usage` endpoint — including usage made outside OMP — instead of dollar estimates summed from OMP-observed request costs. The status line renders all three windows (`5h` / `7d` / `mo`), and the per-turn cost recording special case for `opencode-go` sessions is gone along with the "OMP-observed spend only" disclaimer.
+
 ## [17.2.15] - 2026-08-12
 
 ### Added

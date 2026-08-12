@@ -36,8 +36,6 @@ import type {
 	CredentialRankingContext,
 	CredentialRankingStrategy,
 	ObservedUsageEntry,
-	UsageCostHistoryEntry,
-	UsageCostHistoryQuery,
 	UsageCredential,
 	UsageFetchContext,
 	UsageFetchParams,
@@ -66,7 +64,7 @@ import {
 	listCodexResetCredits,
 	pickSoonestExpiringCredit,
 } from "./usage/openai-codex-reset";
-import { opencodeGoUsageProvider } from "./usage/opencode-go";
+import { opencodeGoRankingStrategy, opencodeGoUsageProvider } from "./usage/opencode-go";
 import { syntheticUsageProvider } from "./usage/synthetic";
 import { umansUsageProvider } from "./usage/umans";
 import { xaiOauthUsageProvider } from "./usage/xai-oauth";
@@ -454,10 +452,6 @@ export interface AuthCredentialStore {
 	 * skipped — the broker host records into its own database instead.
 	 */
 	recordUsageSnapshots?(entries: UsageHistoryEntry[]): void;
-	/** Append observed request costs for providers without upstream usage APIs. */
-	recordUsageCosts?(entries: UsageCostHistoryEntry[]): void;
-	/** Read observed request costs, oldest first. */
-	listUsageCosts?(query?: UsageCostHistoryQuery): UsageCostHistoryEntry[];
 	/** Read recorded usage-limit snapshots, oldest first. */
 	listUsageHistory?(query?: UsageHistoryQuery): UsageHistoryEntry[];
 	/**
@@ -698,6 +692,10 @@ const DEFAULT_USAGE_REQUEST_TIMEOUT_MS = 10_000;
 const USAGE_REPORT_CACHE_KEY_VERSION_OVERRIDES: Partial<Record<Provider, number>> = {
 	"google-antigravity": 2,
 	zai: 2,
+	// v2: retires cached reports from the OMP-observed spend estimator (dollar
+	// units) now that limits come from the upstream percent-based `/usage`
+	// endpoint; the 24h last-good retention would otherwise keep serving them.
+	"opencode-go": 2,
 	// v2: cache identity gained an `org:` component so two subscriptions on one
 	// account email stop sharing a slot. v3 retires parsed reports created before
 	// Anthropic extra-usage rows existed; header ingestion can otherwise keep
@@ -1072,6 +1070,7 @@ const DEFAULT_RANKING_STRATEGIES = new Map<Provider, CredentialRankingStrategy>(
 	["anthropic", claudeRankingStrategy],
 	["google-antigravity", antigravityRankingStrategy],
 	["zai", zaiRankingStrategy],
+	["opencode-go", opencodeGoRankingStrategy],
 ]);
 
 function resolveDefaultRankingStrategy(provider: Provider): CredentialRankingStrategy | undefined {
@@ -3175,7 +3174,6 @@ export class AuthStorage {
 			const report = await providerImpl.fetchUsage(params, {
 				fetch: this.#usageFetch,
 				logger: this.#usageLogger,
-				listUsageCosts: query => this.#store.listUsageCosts?.(query) ?? [],
 			});
 			// Attribute the report to the credential's organization. The orgId and
 			// orgName fallbacks apply independently: Claude's usage endpoint stamps
@@ -3297,42 +3295,6 @@ export class AuthStorage {
 		return this.#store.listUsageHistory?.(query) ?? [];
 	}
 
-	/** Record one observed provider request cost for later local usage aggregation. */
-	recordUsageCost(
-		provider: Provider,
-		costUsd: number,
-		options?: { sessionId?: string; recordedAt?: number; baseUrl?: string },
-	): boolean {
-		if (!Number.isFinite(costUsd) || costUsd <= 0) return false;
-		const record = this.#store.recordUsageCosts;
-		if (!record) return false;
-		const credential = this.#resolveObservedUsageCredential(provider, options?.sessionId);
-		if (!credential) return false;
-		const entry: UsageCostHistoryEntry = {
-			recordedAt: options?.recordedAt ?? Date.now(),
-			provider,
-			accountKey: this.#buildUsageCacheIdentity(credential),
-			costUsd,
-		};
-		try {
-			record.call(this.#store, [entry]);
-			const cacheKey = this.#buildUsageReportCacheKey({
-				provider,
-				credential,
-				baseUrl: options?.baseUrl,
-			});
-			const existing = this.#usageCache.getStale<UsageReport | null>(cacheKey);
-			this.#usageCache.set(cacheKey, { value: existing?.value ?? null, expiresAt: Date.now() - 1 });
-			return true;
-		} catch (error) {
-			this.#usageLogger?.debug("usage cost record failed", {
-				provider,
-				error: String(error),
-			});
-			return false;
-		}
-	}
-
 	/**
 	 * Forward one completed request's usage to the store's observer hook.
 	 * Broker-backed stores batch these into per-install reports so the broker
@@ -3381,28 +3343,6 @@ export class AuthStorage {
 	/** Broker host: aggregate recorded per-client usage since `sinceMs`. */
 	getClientUsageSummary(sinceMs: number): ClientUsageSummary {
 		return this.#store.getClientUsageSummary?.(sinceMs) ?? { clients: [] };
-	}
-
-	#resolveObservedUsageCredential(provider: Provider, sessionId?: string): UsageCredential | undefined {
-		const entries = this.#getStoredCredentials(provider);
-		const sessionCredential = this.#getSessionCredential(provider, sessionId);
-		if (sessionCredential) {
-			const credential = entries[sessionCredential.index]?.credential;
-			if (credential) {
-				return credential.type === "api_key"
-					? { type: "api_key", apiKey: credential.key }
-					: this.#buildUsageCredential(credential);
-			}
-		}
-		if (entries.length === 1) {
-			const credential = entries[0]!.credential;
-			return credential.type === "api_key"
-				? { type: "api_key", apiKey: credential.key }
-				: this.#buildUsageCredential(credential);
-		}
-		const envKey = getEnvApiKey(provider);
-		if (envKey) return { type: "api_key", apiKey: envKey };
-		return undefined;
 	}
 
 	ingestUsageHeaders(
@@ -4101,7 +4041,6 @@ export class AuthStorage {
 		const ctx: UsageFetchContext = {
 			fetch: this.#usageFetch,
 			logger: this.#usageLogger,
-			listUsageCosts: query => this.#store.listUsageCosts?.(query) ?? [],
 		};
 
 		const results: CredentialHealthResult[] = [];
