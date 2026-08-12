@@ -27,6 +27,10 @@
 
 - `/usage`, `omp usage`, and the status line now show authoritative OpenCode Go quota from the official `GET /zen/go/v1/usage` endpoint — including usage made outside OMP — instead of dollar estimates summed from OMP-observed request costs. The status line renders all three windows (`5h` / `7d` / `mo`), and the per-turn cost recording special case for `opencode-go` sessions is gone along with the "OMP-observed spend only" disclaimer ([#8337](https://github.com/can1357/oh-my-pi/pull/8337) by [@will-bogusz](https://github.com/will-bogusz)).
 
+### Fixed
+
+- Fixed custom STB-backed vision providers retaining decoder metadata and sending WebP bytes that llama.cpp cannot decode. Image format is now detected from bytes, attached and historical WebP blocks are normalized on the actual provider-request path, and corrupt WebP is omitted instead of making the turn unrecoverable ([#8339](https://github.com/can1357/oh-my-pi/pull/8339) by [@ethancawse](https://github.com/ethancawse)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Added
