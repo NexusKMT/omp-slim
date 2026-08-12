@@ -137,7 +137,12 @@ function parseWeeklyBillingConfig(raw: Record<string, unknown>): XaiWeeklyBillin
 		return null;
 	}
 
-	const creditUsagePercent = parsePercent(raw.creditUsagePercent);
+	// Fresh weekly periods (or accounts with 0 usage) omit creditUsagePercent;
+	// default to 0 when a valid weekly period exists.
+	const creditUsagePercent =
+		raw.creditUsagePercent === undefined || raw.creditUsagePercent === null
+			? 0
+			: parsePercent(raw.creditUsagePercent);
 	if (creditUsagePercent === undefined) return null;
 
 	const productUsage: XaiProductUsage[] = [];
@@ -146,7 +151,8 @@ function parseWeeklyBillingConfig(raw: Record<string, unknown>): XaiWeeklyBillin
 		for (const item of raw.productUsage) {
 			if (!isRecord(item)) continue;
 			const product = typeof item.product === "string" ? item.product.trim() : "";
-			const usagePercent = parsePercent(item.usagePercent);
+			const usagePercent =
+				item.usagePercent === undefined || item.usagePercent === null ? 0 : parsePercent(item.usagePercent);
 			if (!product || usagePercent === undefined) continue;
 			productUsage.push({ product, usagePercent });
 		}
