@@ -2,14 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed repeated pane-width changes corrupting native scrollback: direct HerdR panes now use the same ED3 source replay as direct terminals, preventing settled viewport paints from hardening host-reflowed soft wraps, while ED3-unsafe multiplexers retain opaque logical width epochs that append only source output queued during resize ([#6147](https://github.com/can1357/oh-my-pi/issues/6147), [#7026](https://github.com/can1357/oh-my-pi/issues/7026)).
+
 ## [17.2.13] - 2026-08-11
 
 ### Fixed
 
 - Fixed inline images rendering permanently cropped on Kitty direct-placement terminals (WezTerm, Warp) when an image block straddled the viewport top during streaming: placements are now clipped to the visible slice at write time, and a placement id whose cells reached native scrollback is never re-used ([#8070](https://github.com/can1357/oh-my-pi/pull/8070) by [@voonfoo](https://github.com/voonfoo))
-### Fixed
-
-- Fixed repeated pane-width changes corrupting native scrollback: direct HerdR panes now use the same ED3 source replay as direct terminals, preventing settled viewport paints from hardening host-reflowed soft wraps, while ED3-unsafe multiplexers retain opaque logical width epochs that append only source output queued during resize ([#6147](https://github.com/can1357/oh-my-pi/issues/6147), [#7026](https://github.com/can1357/oh-my-pi/issues/7026)).
 
 ## [17.2.12] - 2026-08-08
 
