@@ -202,9 +202,12 @@ function parseMonthlyBillingConfig(raw: Record<string, unknown>): XaiMonthlyBill
 		onDemandUsed: parseOnDemandAmount(raw.onDemandUsed),
 	};
 }
-function hasPositiveMonthlyLimit(raw: Record<string, unknown>): boolean {
+
+function confirmsNoMonthlyQuota(raw: Record<string, unknown>): boolean {
 	const limit = parseOnDemandAmount(raw.monthlyLimit);
-	return limit !== undefined && limit > 0;
+	if (limit !== undefined) return limit === 0;
+	// Some weekly accounts return the credits shape from the default endpoint too.
+	return parseWeeklyBillingConfig(raw)?.inferredPercent === true;
 }
 
 function buildOnDemandLimit(
@@ -393,7 +396,7 @@ export const xaiOauthUsageProvider: UsageProvider = {
 					monthlyPayload && isRecord(monthlyPayload) && isRecord(monthlyPayload.config)
 						? monthlyPayload.config
 						: null;
-				if (!monthlyConfig || hasPositiveMonthlyLimit(monthlyConfig)) {
+				if (!monthlyConfig || !confirmsNoMonthlyQuota(monthlyConfig)) {
 					effectiveWeekly = null;
 				}
 			}

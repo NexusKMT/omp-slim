@@ -336,6 +336,31 @@ describe("xai-oauth usage provider", () => {
 		expect(report).toBeNull();
 	});
 
+	it("rejects inferred unified weekly usage when monthly quota evidence is absent", async () => {
+		const periodEnd = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+		const periodStart = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+		const report = await xaiOauthUsageProvider.fetchUsage(
+			{ provider: "xai-oauth", credential: makeCredential() },
+			{
+				fetch: dualBillingFetch(
+					{
+						config: {
+							currentPeriod: {
+								end: periodEnd,
+								start: periodStart,
+								type: "USAGE_PERIOD_TYPE_WEEKLY",
+							},
+							isUnifiedBillingUser: true,
+						},
+					},
+					{ config: { isUnifiedBillingUser: true } },
+				).fetch,
+			},
+		);
+
+		expect(report).toBeNull();
+	});
+
 	it("falls back to monthly included quota when credits has no percent fields", async () => {
 		const { fetch, calls } = dualBillingFetch(makeUnifiedCreditsPayload(), makeUnifiedMonthlyPayload());
 		const report = await xaiOauthUsageProvider.fetchUsage(
