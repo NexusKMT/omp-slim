@@ -569,7 +569,9 @@ export class Editor implements Component, Focusable {
 	 * Show or hide the editor border chrome.
 	 */
 	setBorderVisible(borderVisible: boolean): void {
+		if (this.#borderVisible === borderVisible) return;
 		this.#borderVisible = borderVisible;
+		this.#widthEpochRevision++;
 	}
 
 	setPromptGutter(promptGutter: string | undefined): void {

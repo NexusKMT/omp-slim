@@ -57,6 +57,22 @@ describe("Editor component", () => {
 		expect(editor.getNativeScrollbackWidthEpochRevision()).toBe(terminalCursorRevision);
 	});
 
+	it("advances its width-epoch revision when border visibility adds rows", () => {
+		const editor = new Editor(defaultEditorTheme);
+		editor.setText("draft");
+		editor.setBorderVisible(false);
+		const borderlessRows = editor.render(40).length;
+		const borderlessRevision = editor.getNativeScrollbackWidthEpochRevision();
+
+		editor.setBorderVisible(true);
+
+		expect(editor.render(40).length).toBeGreaterThan(borderlessRows);
+		const borderedRevision = editor.getNativeScrollbackWidthEpochRevision();
+		expect(borderedRevision).toBeGreaterThan(borderlessRevision);
+		editor.setBorderVisible(true);
+		expect(editor.getNativeScrollbackWidthEpochRevision()).toBe(borderedRevision);
+	});
+
 	it("tracks lazy top-border changes independently of width reflow", () => {
 		const editor = new Editor(defaultEditorTheme);
 		let status = "idle";
