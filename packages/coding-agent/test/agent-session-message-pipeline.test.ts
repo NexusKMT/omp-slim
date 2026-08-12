@@ -322,11 +322,12 @@ describe("AgentSession message pipeline", () => {
 			agentId: "SubAgent",
 		});
 		try {
-			const corrupt: ImageContent = {
+			// Session persistence accepts historical image blocks without MIME
+			// metadata, so exercise that runtime shape through the real provider path.
+			const corrupt = {
 				type: "image",
 				data: Buffer.from("RIFF0000WEBPbroken-attachment").toBase64(),
-				mimeType: "image/webp",
-			};
+			} as unknown as ImageContent;
 
 			await session.sendUserMessage([{ type: "text", text: "inspect this" }, corrupt]);
 

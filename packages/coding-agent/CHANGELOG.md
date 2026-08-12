@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed custom STB-backed vision providers retaining decoder metadata and sending WebP bytes that llama.cpp cannot decode. Image format is now detected from bytes, attached and historical WebP blocks are normalized on the actual provider-request path, and corrupt WebP is omitted instead of making the turn unrecoverable.
+- Fixed custom STB-backed vision providers retaining decoder metadata and sending WebP bytes that llama.cpp cannot decode. Image format is now detected from bytes, attached and historical WebP blocks are normalized on the actual provider-request path, and corrupt WebP is omitted instead of making the turn unrecoverable ([#8339](https://github.com/can1357/oh-my-pi/pull/8339) by [@ethancawse](https://github.com/ethancawse)).
 
 ## [17.2.15] - 2026-08-12
 

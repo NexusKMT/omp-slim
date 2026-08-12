@@ -16,10 +16,11 @@ const modelBoundaryImageCache = new LRUCache<string, NormalizedImagePayload | nu
 	sizeCalculation: payload => Math.max(1, payload?.data.length ?? 1),
 });
 const modelBoundaryImageNormalizations = new Map<string, Promise<NormalizedImagePayload | null>>();
-const UNDECODABLE_STB_IMAGE_OMISSION: TextContent = {
-	type: "text",
-	text: "[image omitted: WebP could not be decoded for this model]",
-};
+const UNDECODABLE_STB_IMAGE_OMISSION_TEXT = "[image omitted: WebP could not be decoded for this model]";
+
+function createUndecodableStbImageOmission(): TextContent {
+	return { type: "text", text: UNDECODABLE_STB_IMAGE_OMISSION_TEXT };
+}
 
 function hasWebPMagic(data: string): boolean {
 	const header = Buffer.from(data.slice(0, 16), "base64");
@@ -29,7 +30,8 @@ function hasWebPMagic(data: string): boolean {
 }
 
 function isWebPImage(image: ImageContent): boolean {
-	return image.mimeType.toLowerCase() === "image/webp" || hasWebPMagic(image.data);
+	const mimeType = typeof image.mimeType === "string" ? image.mimeType.toLowerCase() : undefined;
+	return mimeType === "image/webp" || (typeof image.data === "string" && hasWebPMagic(image.data));
 }
 
 function modelBoundaryImageCacheKey(image: ImageContent, resize: ImageResizeOptions | undefined): string {
@@ -230,7 +232,7 @@ export async function normalizeModelContextMessages(messages: Message[], model: 
 			}
 			content ??= message.content.slice(0, partIndex);
 			const normalized = await memoizedStbImageNormalization(part, undefined);
-			content.push(normalized ?? UNDECODABLE_STB_IMAGE_OMISSION);
+			content.push(normalized ?? createUndecodableStbImageOmission());
 		}
 		if (!content) continue;
 		output ??= messages.slice();

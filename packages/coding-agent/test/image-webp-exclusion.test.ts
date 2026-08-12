@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { Api, Model } from "@oh-my-pi/pi-ai";
+import type { Api, Message, Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
@@ -273,5 +273,33 @@ describe("normalizeModelContextImages model-aware WebP exclusion", () => {
 			{ type: "text", text: "[image omitted: WebP could not be decoded for this model]" },
 		]);
 		expect(messages[0]!.content[0]).toBe(corrupt);
+	});
+
+	test("normalizes persisted WebP blocks with malformed MIME metadata", async () => {
+		for (const mimeType of [undefined, null, 42]) {
+			const malformedImage = {
+				type: "image",
+				data: Buffer.from("RIFF0000WEBPbad-persisted-image").toBase64(),
+				...(mimeType === undefined ? {} : { mimeType }),
+			};
+			const messages = [
+				{
+					role: "toolResult",
+					toolCallId: "read-malformed",
+					toolName: "read",
+					content: [malformedImage],
+					isError: false,
+					timestamp: 1,
+				},
+			] as unknown as Message[];
+
+			const result = await normalizeModelContextMessages(messages, buildStbVisionModel("managed-primary"));
+			const resultMessage = result[0]!;
+			expect(resultMessage.role).toBe("toolResult");
+			if (resultMessage.role !== "toolResult") throw new Error("Expected tool result message");
+			expect(resultMessage.content).toEqual([
+				{ type: "text", text: "[image omitted: WebP could not be decoded for this model]" },
+			]);
+		}
 	});
 });
