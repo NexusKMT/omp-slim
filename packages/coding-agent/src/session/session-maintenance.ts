@@ -1830,18 +1830,27 @@ export class SessionMaintenance {
 	 * intentionally reserved.
 	 *
 	 * Used by the retry-fallback selector to skip a candidate whose window cannot
-	 * hold the live context before switching onto it, and (via
+	 * hold the retry context before switching onto it, and (via
 	 * {@link #compactionCreatedRetryFit}) to decide whether an overflow recovery
-	 * produced a retryable prompt. When the window is unknown we cannot evaluate
-	 * the budget, so we optimistically report a fit (preserving prior behavior).
+	 * produced a retryable prompt. `excludedMessage` identifies a failed assistant
+	 * turn that will be removed before retrying; subtracting it makes the selector
+	 * judge the request that will actually be sent. When the window is unknown we
+	 * cannot evaluate the budget, so we optimistically report a fit (preserving
+	 * prior behavior).
 	 */
-	contextFitsModel(model: Model): boolean {
+	contextFitsModel(model: Model, excludedMessage?: AssistantMessage): boolean {
 		const contextWindow = model.contextWindow ?? 0;
 		if (contextWindow <= 0) return true;
+		const activeExcludedMessage =
+			excludedMessage && this.#host.messages().includes(excludedMessage) ? excludedMessage : undefined;
+		const providerExcludedTokens = activeExcludedMessage ? estimateTokens(activeExcludedMessage) : 0;
+		const storedExcludedTokens = activeExcludedMessage
+			? estimateTokens(activeExcludedMessage, { excludeEncryptedReasoning: true })
+			: 0;
 		const compactionSettings = this.#host.settings.getGroup("compaction");
 		const residualTokens = compactionContextTokens(
-			this.#host.getContextUsage({ contextWindow })?.tokens ?? 0,
-			this.#estimateStoredContextTokens(),
+			Math.max(0, (this.#host.getContextUsage({ contextWindow })?.tokens ?? 0) - providerExcludedTokens),
+			Math.max(0, this.#estimateStoredContextTokens() - storedExcludedTokens),
 		);
 		const fitBudget = Math.max(0, contextWindow - resolveBudgetReserveTokens(contextWindow, compactionSettings));
 		return residualTokens <= fitBudget;

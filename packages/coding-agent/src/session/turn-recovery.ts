@@ -112,11 +112,12 @@ export interface TurnRecoveryHost {
 	configWarnings: string[];
 	model(): Model | undefined;
 	/**
-	 * Whether the live context fits `model`'s usable window. Retry-fallback
-	 * selection uses it to skip a candidate whose window cannot hold the current
-	 * context before switching onto it. See `SessionMaintenance.contextFitsModel`.
+	 * Whether the live context fits `model`'s usable window. `excludedMessage`
+	 * identifies a failed assistant turn that will be removed before retrying, so
+	 * selection judges the request that will actually be sent. See
+	 * `SessionMaintenance.contextFitsModel`.
 	 */
-	contextFitsModel(model: Model): boolean;
+	contextFitsModel(model: Model, excludedMessage?: AssistantMessage): boolean;
 	/** Whether streamed text has already been committed to the active output sink. */
 	textOutputCommitted(): boolean;
 	thinkingLevel(): ThinkingLevel | undefined;
@@ -1520,7 +1521,11 @@ export class TurnRecovery {
 		return true;
 	}
 
-	async #tryRetryModelFallback(currentSelector: string, options?: { pinFallback?: boolean }): Promise<boolean> {
+	async #tryRetryModelFallback(
+		currentSelector: string,
+		failedMessage: AssistantMessage,
+		options?: { pinFallback?: boolean },
+	): Promise<boolean> {
 		const role = this.#activeRetryFallback?.role ?? this.resolveRetryFallbackRole(currentSelector);
 		if (!role) return false;
 
@@ -1533,10 +1538,10 @@ export class TurnRecovery {
 			// A candidate whose effort floor exceeds the per-spawn ceiling would be
 			// clamped UP past the cap by its model floor — skip it entirely.
 			if (ceiling !== undefined && !modelSupportsEffortCeiling(candidate, ceiling)) continue;
-			// Skip a candidate whose window cannot hold the live context: switching
-			// onto it would send a predictably oversized request. Advance to the
-			// first candidate whose usable window fits (issue #8065).
-			if (!this.#host.contextFitsModel(candidate)) continue;
+			// Skip a candidate whose window cannot hold the retry context. The
+			// failed assistant is removed before continue(), so exclude it here to
+			// judge the request that will actually be sent (issue #8065).
+			if (!this.#host.contextFitsModel(candidate, failedMessage)) continue;
 			const apiKey = await this.#host.modelRegistry.getApiKey(candidate, this.#host.sessionId());
 			if (!apiKey) continue;
 			return this.applyRetryFallbackCandidate(role, selector, currentSelector, options);
@@ -1879,7 +1884,9 @@ export class TurnRecovery {
 				if (!classifierRefusal) {
 					this.noteRetryFallbackCooldown(currentSelector, parsedRetryAfterMs, errorMessage);
 				}
-				switchedModel = await this.#tryRetryModelFallback(currentSelector, { pinFallback: classifierRefusal });
+				switchedModel = await this.#tryRetryModelFallback(currentSelector, message, {
+					pinFallback: classifierRefusal,
+				});
 			}
 			// Auto fallback from a Fireworks Fast variant to its base model. Independent
 			// of the role-fallback setting: it's intrinsic to the Fast contract (speed
