@@ -111,6 +111,12 @@ export interface TurnRecoveryHost {
 	modelRegistry: ModelRegistry;
 	configWarnings: string[];
 	model(): Model | undefined;
+	/**
+	 * Whether the live context fits `model`'s usable window. Retry-fallback
+	 * selection uses it to skip a candidate whose window cannot hold the current
+	 * context before switching onto it. See `SessionMaintenance.contextFitsModel`.
+	 */
+	contextFitsModel(model: Model): boolean;
 	/** Whether streamed text has already been committed to the active output sink. */
 	textOutputCommitted(): boolean;
 	thinkingLevel(): ThinkingLevel | undefined;
@@ -1339,6 +1345,10 @@ export class TurnRecovery {
 			const candidateModel = resolved.model ?? this.#host.modelRegistry.find(candidate.provider, candidate.id);
 			if (!candidateModel || !this.#host.modelRegistry.hasConfiguredAuth(candidateModel)) continue;
 			if (ceiling !== undefined && !modelSupportsEffortCeiling(candidateModel, ceiling)) continue;
+			// A usage fallback must also fit: skip a candidate whose window cannot
+			// hold the live context so we never switch onto an oversized request
+			// (issue #8065).
+			if (!this.#host.contextFitsModel(candidateModel)) continue;
 			try {
 				const candidateHealth = await this.#host.modelRegistry.authStorage.getModelUsageHealth(
 					candidateModel.provider,
@@ -1523,6 +1533,10 @@ export class TurnRecovery {
 			// A candidate whose effort floor exceeds the per-spawn ceiling would be
 			// clamped UP past the cap by its model floor — skip it entirely.
 			if (ceiling !== undefined && !modelSupportsEffortCeiling(candidate, ceiling)) continue;
+			// Skip a candidate whose window cannot hold the live context: switching
+			// onto it would send a predictably oversized request. Advance to the
+			// first candidate whose usable window fits (issue #8065).
+			if (!this.#host.contextFitsModel(candidate)) continue;
 			const apiKey = await this.#host.modelRegistry.getApiKey(candidate, this.#host.sessionId());
 			if (!apiKey) continue;
 			return this.applyRetryFallbackCandidate(role, selector, currentSelector, options);

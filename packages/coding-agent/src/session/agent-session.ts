@@ -1037,6 +1037,7 @@ export class AgentSession {
 			modelRegistry: this.#modelRegistry,
 			configWarnings: this.configWarnings,
 			model: () => this.model,
+			contextFitsModel: model => this.#maintenance.contextFitsModel(model),
 			textOutputCommitted: () => this.#textOutputCommitted,
 			thinkingLevel: () => this.thinkingLevel,
 			configuredThinkingLevel: () => this.configuredThinkingLevel(),
