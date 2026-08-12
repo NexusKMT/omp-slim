@@ -368,7 +368,8 @@ export const agenticFixtures: Record<string, GalleryFixture> = {
 			thoughts: "The retry loop re-reads the config after every failure, which explains the doubled latency.",
 		},
 		args: {
-			thoughts: "The retry loop re-reads the config after every failure, which explains the doubled latency. Cache the parsed config outside the loop, then re-check the invalidation path.",
+			thoughts:
+				"The retry loop re-reads the config after every failure, which explains the doubled latency. Cache the parsed config outside the loop, then re-check the invalidation path.",
 		},
 		result: {
 			content: [{ type: "text", text: "------" }],

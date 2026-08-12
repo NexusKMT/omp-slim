@@ -1408,6 +1408,17 @@ function resolveOpenAiReasoningEffort<TApi extends Api>(
 	return requireSupportedEffort(model, reasoning);
 }
 
+function resolveGoogleThinkingOff<TApi extends Api>(model: Model<TApi>): NonNullable<GoogleOptions["thinking"]> {
+	const thinking: NonNullable<GoogleOptions["thinking"]> = { enabled: false };
+	if (!model.reasoning || !model.thinking) return thinking;
+	if (model.thinking.mode === "budget" && (!model.thinking.requiresEffort || model.thinking.suppressWhenOff)) {
+		thinking.budgetTokens = 0;
+	} else if (model.thinking.mode === "google-level" && model.thinking.suppressWhenOff) {
+		thinking.level = "MINIMAL";
+	}
+	return thinking;
+}
+
 const castApi = <TApi extends Api>(api: OptionsForApi<TApi>): OptionsForApi<Api> => api as OptionsForApi<Api>;
 
 /**
@@ -1428,13 +1439,13 @@ function normalizeMandatoryReasoningOptions<TApi extends Api>(
 		!model.reasoning ||
 		!model.thinking?.requiresEffort ||
 		model.thinking.suppressWhenOff ||
-		(options?.reasoning !== undefined && !options.disableReasoning)
+		(options?.reasoning !== undefined && !options.disableReasoning && !options.forceReasoningOff)
 	) {
 		return options;
 	}
 	const floor = minimumSupportedEffort(model);
 	if (floor === undefined) return options;
-	return { ...options, reasoning: floor, disableReasoning: undefined };
+	return { ...options, reasoning: floor, disableReasoning: undefined, forceReasoningOff: undefined };
 }
 
 function supportsExplicitOpenAIResponsesPromptCache(compat: unknown): boolean {
@@ -1732,7 +1743,7 @@ function mapOptionsForApi<TApi extends Api>(
 				return castApi<"google-generative-ai">({
 					...base,
 					serviceTier: options?.serviceTier,
-					thinking: { enabled: false },
+					thinking: resolveGoogleThinkingOff(model),
 					toolChoice: mapGoogleToolChoice(options?.toolChoice),
 					cachedContent: options?.cachedContent,
 				});
@@ -1838,7 +1849,7 @@ function mapOptionsForApi<TApi extends Api>(
 				return castApi<"google-vertex">({
 					...base,
 					serviceTier: options?.serviceTier,
-					thinking: { enabled: false },
+					thinking: resolveGoogleThinkingOff(model),
 					toolChoice: mapGoogleToolChoice(options?.toolChoice),
 					cachedContent: options?.cachedContent,
 				});

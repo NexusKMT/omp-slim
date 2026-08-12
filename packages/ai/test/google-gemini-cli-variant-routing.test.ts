@@ -150,7 +150,7 @@ describe("google-gemini-cli effort-tier variant routing", () => {
 		});
 	});
 
-	it("routes to the explicit off wire shape when an external work log replaces reasoning", async () => {
+	it("routes to the explicit off wire shape when an external scratchpad replaces reasoning", async () => {
 		const off = await captureRequest(collapsedFlashModel(), Effort.High, { forceReasoningOff: true });
 		expect(off.body.model).toBe("gemini-3.5-flash-extra-low");
 		expect(off.body.request?.generationConfig?.thinkingConfig).toEqual({

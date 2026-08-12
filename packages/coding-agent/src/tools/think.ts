@@ -7,14 +7,26 @@ import { getMarkdownTheme, type Theme } from "../modes/theme/theme";
 
 /** Whether a model transport can suppress native reasoning while private scratchpad thoughts are active. */
 export function supportsExternalThinking(model: Model | null | undefined): boolean {
+	if (!model) return false;
+	const requiresThinking =
+		model.api === "anthropic-messages" &&
+		model.compat !== undefined &&
+		"requiresThinkingEnabled" in model.compat &&
+		model.compat.requiresThinkingEnabled === true;
+	if (
+		model.reasoning &&
+		(requiresThinking || (model.thinking?.requiresEffort && !model.thinking.suppressWhenOff))
+	) {
+		return false;
+	}
+	if (model.api === "google-generative-ai" || model.api === "google-gemini-cli" || model.api === "google-vertex") {
+		return !model.reasoning || model.thinking?.mode === "budget" || model.thinking?.suppressWhenOff === true;
+	}
 	return (
-		model?.api === "openai-responses" ||
-		model?.api === "azure-openai-responses" ||
-		model?.api === "openai-codex-responses" ||
-		model?.api === "anthropic-messages" ||
-		model?.api === "google-generative-ai" ||
-		model?.api === "google-gemini-cli" ||
-		model?.api === "google-vertex"
+		model.api === "openai-responses" ||
+		model.api === "azure-openai-responses" ||
+		model.api === "openai-codex-responses" ||
+		model.api === "anthropic-messages"
 	);
 }
 

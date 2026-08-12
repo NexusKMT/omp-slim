@@ -50,4 +50,19 @@ describe("tool activity visibility", () => {
 		expect(restored).toContain("tool warning");
 		expect(restored).toContain("late activity");
 	});
+
+	it("forwards Ctrl+O expansion to wrapped expandable components", () => {
+		// The transcript expansion traversal only visits top-level children;
+		// without forwarding, a wrapped renderer freezes at insertion-time state.
+		const states: boolean[] = [];
+		class ExpandableText extends Text {
+			setExpanded(expanded: boolean): void {
+				states.push(expanded);
+			}
+		}
+		const wrapper = new ToolActivityContainer(new ExpandableText("activity", 1, 0));
+		wrapper.setExpanded(true);
+		wrapper.setExpanded(false);
+		expect(states).toEqual([true, false]);
+	});
 });

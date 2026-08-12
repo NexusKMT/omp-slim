@@ -109,10 +109,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		workspaceTree: { rootPath: tempDir, rendered: "", truncated: false, totalLines: 0, agentsMdFiles: [] },
 	});
 
-	const requireBundledModel = (
-		provider: "anthropic" | "google-antigravity" | "openai" | "xai",
-		id: string,
-	): Model => {
+	const requireBundledModel = (provider: "anthropic" | "google" | "openai" | "xai", id: string): Model => {
 		const bundled = getBundledModel(provider, id);
 		if (!bundled) throw new Error(`Expected ${provider}/${id} model to exist`);
 		return bundled;
@@ -190,7 +187,8 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		const unsupported = requireBundledModel("xai", "grok-4");
 		const fable = requireBundledModel("anthropic", "claude-fable-5");
 		const responses = requireBundledModel("openai", "gpt-5");
-		const gemini = requireBundledModel("google-antigravity", "gemini-3.6-flash");
+		const gemini = requireBundledModel("google", "gemini-2.5-flash");
+		const mandatoryGemini = requireBundledModel("google", "gemini-2.5-pro");
 		const { session } = await createAgentSession({
 			...baseOptions(tempDir),
 			settings,
@@ -199,7 +197,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		const authStorage = session.modelRegistry.authStorage;
 		authStorage.setRuntimeApiKey("anthropic", "test-key");
 		authStorage.setRuntimeApiKey("openai", "test-key");
-		authStorage.setRuntimeApiKey("google-antigravity", "test-key");
+		authStorage.setRuntimeApiKey("google", "test-key");
 		authStorage.setRuntimeApiKey("xai", "test-key");
 
 		try {
@@ -214,6 +212,8 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(session.getActiveToolNames()).toContain("think");
 			await session.setModel(gemini);
 			expect(session.getActiveToolNames()).toContain("think");
+			await session.setModel(mandatoryGemini);
+			expect(session.getActiveToolNames()).not.toContain("think");
 
 			await session.setModel(unsupported);
 			expect(session.getActiveToolNames()).not.toContain("think");
@@ -249,7 +249,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			fetch: async request => {
 				requestTexts.push(await request.text());
 				if (requestTexts.length === 1) {
-					const argumentsJson = JSON.stringify({ notes: "Checked the request before answering." });
+					const argumentsJson = JSON.stringify({ thoughts: "Checked the request before answering." });
 					return sse([
 						{
 							type: "response.output_item.added",

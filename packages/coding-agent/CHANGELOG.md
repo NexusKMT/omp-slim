@@ -13,7 +13,7 @@
 
 ### Changed
 
-- Renamed the `think` tool's `thoughts` parameter to `notes` and restricted tool availability to models supporting external thinking
+- Restricted the `think` tool to GPT Responses, Claude, and Gemini transports that can replace native reasoning, and kept its streamed scratchpad input named `thoughts`.
 - `omp cleanse` default subagent cap raised from 8 to 32 (`--agents`/`-n` still overrides).
 
 ### Fixed

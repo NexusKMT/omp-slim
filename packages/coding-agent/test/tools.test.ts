@@ -179,6 +179,35 @@ function createSparsePaxTarArchive(realName: string, realSize: number, storedDat
 	return Buffer.concat(parts);
 }
 
+/**
+ * Build an old-GNU sparse archive: an `S` member whose header sets the
+ * `isextended` flag (byte 482), followed by one 512-byte sparse-map
+ * continuation block that is not counted in the member's declared size,
+ * then the stored data and a regular member.
+ */
+function createOldGnuSparseTarArchive(): Buffer {
+	const storedData = Buffer.from("sparse-extent\n", "utf-8");
+	const header = Buffer.alloc(512, 0);
+	writeTarString(header, 0, 100, "data/old-sparse.bin");
+	writeTarOctal(header, 100, 8, 0o644);
+	writeTarOctal(header, 124, 12, storedData.length);
+	writeTarOctal(header, 136, 12, Math.floor(Date.now() / 1000));
+	header[156] = "S".charCodeAt(0);
+	writeTarString(header, 257, 6, "ustar");
+	writeTarString(header, 263, 2, "00");
+	header[482] = 1; // sparse map continues in extension blocks
+	tarChecksum(header);
+
+	// Final continuation block: its own isextended byte (504) stays 0.
+	const continuation = Buffer.alloc(512, 0);
+	const parts: Buffer[] = [header, continuation, storedData];
+	const remainder = storedData.length % 512;
+	if (remainder !== 0) parts.push(Buffer.alloc(512 - remainder, 0));
+	// createTarArchive appends the member and the end-of-archive terminator.
+	parts.push(createTarArchive([{ path: "data/after.txt", content: "after sparse\n" }]));
+	return Buffer.concat(parts);
+}
+
 const CRC32_TABLE = (() => {
 	const table = new Uint32Array(256);
 	for (let index = 0; index < 256; index++) {
@@ -940,21 +969,91 @@ describe("Coding Agent Tools", () => {
 			expect(getTextOutput(linkedResult)).toContain("export const linked = true");
 		});
 
-		it("should reject directory symlinks targeting their own subtree instead of looping", async () => {
+		it("should degrade directory symlinks targeting their own subtree to dangling links", async () => {
 			const archivePath = path.join(testDir, "self-cycle-symlink.tar");
 			fs.writeFileSync(
 				archivePath,
 				createTarArchive([
-					{ path: "a/b/f.txt", content: "unreachable\n" },
-					// `a -> a/b` grows the resolved path on every rewrite; the
-					// pre-fix resolver looped forever on this shape.
+					{ path: "a/b/f.txt", content: "still readable\n" },
+					// `a -> a/b` is inherently cyclic; the pre-fix resolver looped
+					// forever growing the rewritten path. The link now dangles
+					// while real members underneath stay readable.
 					{ path: "a", content: "", typeFlag: "2", linkName: "a/b" },
 				]),
 			);
 
+			const memberResult = await readTool.execute("test-call-tar-self-cycle-member", {
+				path: `${archivePath}:a/b/f.txt`,
+			});
+			expect(getTextOutput(memberResult)).toContain("still readable");
+			await expect(readTool.execute("test-call-tar-self-cycle-link", { path: `${archivePath}:a` })).rejects.toThrow(
+				/cannot be materialized/,
+			);
+		});
+
+		it("should resolve alias chains up to the rewrite bound and reject deeper ones", async () => {
+			const buildChain = (length: number): ArchiveFixtureEntry[] => {
+				const chain: ArchiveFixtureEntry[] = [{ path: "real/f.txt", content: "deep\n" }];
+				for (let i = 0; i < length; i++) {
+					chain.push({
+						path: `a${i}`,
+						content: "",
+						typeFlag: "2",
+						linkName: i === length - 1 ? "real" : `a${i + 1}`,
+					});
+				}
+				return chain;
+			};
+
+			const okPath = path.join(testDir, "alias-chain-40.tar");
+			fs.writeFileSync(okPath, createTarArchive(buildChain(40)));
+			const okResult = await readTool.execute("test-call-tar-alias-chain-40", { path: `${okPath}:a0/f.txt` });
+			expect(getTextOutput(okResult)).toContain("deep");
+
+			const deepPath = path.join(testDir, "alias-chain-41.tar");
+			fs.writeFileSync(deepPath, createTarArchive(buildChain(41)));
 			await expect(
-				readTool.execute("test-call-tar-self-cycle", { path: `${archivePath}:a/b/f.txt` }),
-			).rejects.toThrow(/cyclic or unsupported links/);
+				readTool.execute("test-call-tar-alias-chain-41", { path: `${deepPath}:a0/f.txt` }),
+			).rejects.toThrow(/cyclic symlink/);
+		});
+
+		it("should let the later duplicate tar member win", async () => {
+			const archivePath = path.join(testDir, "duplicate-member.tar");
+			// tar -rf append/update semantics: extraction yields the last member.
+			fs.writeFileSync(
+				archivePath,
+				createTarArchive([
+					{ path: "dup/file.txt", content: "first\n" },
+					{ path: "dup/file.txt", content: "second\n" },
+				]),
+			);
+
+			const result = await readTool.execute("test-call-tar-duplicate-member", {
+				path: `${archivePath}:dup/file.txt`,
+			});
+			expect(getTextOutput(result)).toContain("second");
+			expect(getTextOutput(result)).not.toContain("first");
+		});
+
+		it("should skip old-GNU sparse extension blocks between header and data", async () => {
+			const archivePath = path.join(testDir, "old-gnu-sparse.tar");
+			fs.writeFileSync(archivePath, createOldGnuSparseTarArchive());
+
+			// Pre-fix the continuation block was parsed as the next header and
+			// the whole archive rejected as corrupt.
+			const rootResult = await readTool.execute("test-call-tar-old-gnu-sparse-root", {
+				path: `${archivePath}:data`,
+			});
+			expect(getTextOutput(rootResult)).toContain("old-sparse.bin");
+			expect(getTextOutput(rootResult)).toContain("after.txt");
+
+			const afterResult = await readTool.execute("test-call-tar-old-gnu-sparse-after", {
+				path: `${archivePath}:data/after.txt`,
+			});
+			expect(getTextOutput(afterResult)).toContain("after sparse");
+			await expect(
+				readTool.execute("test-call-tar-old-gnu-sparse-member", { path: `${archivePath}:data/old-sparse.bin` }),
+			).rejects.toThrow(/sparse file and cannot be read/);
 		});
 
 		it("should resolve tar symlinks whose target is the archive root", async () => {

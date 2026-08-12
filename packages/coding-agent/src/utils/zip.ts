@@ -219,11 +219,14 @@ function upsertArchiveEntry(map: Map<string, ArchiveIndexEntry>, entry: ArchiveI
 		return;
 	}
 
+	// Same-kind duplicate: the later record wins (tar append/update semantics,
+	// matching system tar extraction and whole-archive materialization), while
+	// earlier metadata fills any gaps the newer record leaves.
 	map.set(entry.path, {
-		...existing,
-		size: existing.size || entry.size,
-		mtimeMs: existing.mtimeMs ?? entry.mtimeMs,
-		storage: existing.storage ?? entry.storage,
+		...entry,
+		size: entry.size || existing.size,
+		mtimeMs: entry.mtimeMs ?? existing.mtimeMs,
+		storage: entry.storage ?? existing.storage,
 	});
 }
 
@@ -628,6 +631,14 @@ const TAR_LINKNAME_OFFSET = 157;
 const TAR_LINKNAME_LENGTH = 100;
 const TAR_PREFIX_OFFSET = 345;
 const TAR_PREFIX_LENGTH = 155;
+// Old-GNU sparse header: `isextended` flag inside the main header and inside
+// each 512-byte sparse-map continuation block that follows it.
+const TAR_GNU_SPARSE_ISEXTENDED_OFFSET = 482;
+const TAR_GNU_SPARSE_CONT_ISEXTENDED_OFFSET = 504;
+// PATH_MAX-style bound on member paths and link targets. Real archives never
+// exceed it (system tar cannot extract them), and it caps every prefix walk
+// below so crafted multi-hundred-KiB PAX paths cannot pin the CPU.
+const TAR_MAX_PATH_BYTES = 4096;
 const GZIP_MAGIC_0 = 0x1f;
 const GZIP_MAGIC_1 = 0x8b;
 const TAR_TEXT_DECODER = new TextDecoder();
@@ -692,7 +703,11 @@ function tarChecksumMatches(buffer: Uint8Array, offset: number): boolean {
 	return stored === unsigned || stored === signed;
 }
 
-/** Parse a PAX extended-header payload into its `key → value` records. */
+/**
+ * Parse a PAX extended-header payload into its `key → value` records. Only
+ * keys the indexer consumes are retained; a crafted header packed with
+ * millions of unique throwaway records must not amplify into heap.
+ */
 function parsePaxRecords(data: Uint8Array): Map<string, string> {
 	const attrs = new Map<string, string>();
 	let pos = 0;
@@ -715,7 +730,10 @@ function parsePaxRecords(data: Uint8Array): Map<string, string> {
 		const record = data.subarray(space + 1, pos + length - 1);
 		const eq = record.indexOf(0x3d);
 		if (eq >= 0) {
-			attrs.set(TAR_TEXT_DECODER.decode(record.subarray(0, eq)), TAR_TEXT_DECODER.decode(record.subarray(eq + 1)));
+			const key = TAR_TEXT_DECODER.decode(record.subarray(0, eq));
+			if (key === "path" || key === "linkpath" || key === "size" || key.startsWith("GNU.sparse.")) {
+				attrs.set(key, TAR_TEXT_DECODER.decode(record.subarray(eq + 1)));
+			}
 		}
 		pos += length;
 	}
@@ -826,6 +844,16 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 			if (Number.isFinite(parsed) && parsed >= 0) displaySize = parsed;
 		}
 		const sparse = typeFlag === "S" || paxDeclaresSparse(pax);
+		// Old-GNU sparse members chain extra 512-byte sparse-map blocks between
+		// the main header and the stored data; they are not counted in `size`.
+		// Consume the chain so the data offset and the next header line up.
+		if (typeFlag === "S" && buffer[offset - TAR_BLOCK_SIZE + TAR_GNU_SPARSE_ISEXTENDED_OFFSET] === 1) {
+			let extended = true;
+			while (extended && offset + TAR_BLOCK_SIZE <= buffer.length) {
+				extended = buffer[offset + TAR_GNU_SPARSE_CONT_ISEXTENDED_OFFSET] === 1;
+				offset += TAR_BLOCK_SIZE;
+			}
+		}
 		const dataOffset = offset;
 		const memberDataBlocks = Math.ceil(size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
 		offset += memberDataBlocks;
@@ -836,6 +864,9 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 		const isDirectory = typeFlag === "5" || name.endsWith("/");
 		const normalizedPath = normalizeArchiveEntryPath(name);
 		if (!normalizedPath) continue;
+		if (normalizedPath.length > TAR_MAX_PATH_BYTES) {
+			throw new ToolError(`Archive member path exceeds ${TAR_MAX_PATH_BYTES} bytes`);
+		}
 		const mtimeMs = mtime > 0 ? mtime * 1000 : undefined;
 
 		if (isDirectory) {
@@ -861,7 +892,7 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 				size: 0,
 				mtimeMs,
 			};
-			if (targetPath === undefined) {
+			if (targetPath === undefined || targetPath.length > TAR_MAX_PATH_BYTES) {
 				if (kind === "hard link") {
 					throw new ToolError(`Archive hard link '${normalizedPath}' has an invalid target`);
 				}
@@ -902,78 +933,110 @@ function readTarEntries(rawBytes: Uint8Array): ArchiveIndexEntry[] {
 	// Link records carry no data. Resolve file targets after all headers are
 	// indexed; directory symlinks remain one alias node and are traversed lazily
 	// by ArchiveReader so N files behind M aliases never inflate the index to
-	// N×M entries during a root listing.
+	// N×M entries during a root listing. Resolution is a work queue keyed on
+	// blocking links (not a rescan-all fixpoint) so crafted archives with huge
+	// link chains stay linear in dependency edges.
 	if (pendingLinks.size > 0) {
 		const entriesByPath = new Map<string, ArchiveIndexEntry>();
 		for (const entry of entries) entriesByPath.set(entry.path, entry);
-		const unresolved = new Set(pendingLinks.keys());
-
-		// True while the target itself or any directory on its path is a link
-		// that has not been classified yet; such targets must wait a pass so a
-		// file symlink routed through a directory alias is not misjudged
-		// dangling before the alias resolves.
-		const dependsOnUnresolvedLink = (targetPath: string): boolean => {
-			const parts = targetPath.split("/");
-			for (let end = parts.length; end > 0; end--) {
-				const prefixEntry = entriesByPath.get(parts.slice(0, end).join("/"));
-				if (prefixEntry && unresolved.has(prefixEntry)) return true;
+		// Every proper ancestor of a member path: O(1) directory-target checks
+		// instead of scanning all entries per unresolved link.
+		const directoryPrefixes = new Set<string>();
+		for (const entry of entries) {
+			const memberPath = entry.path;
+			for (let cut = memberPath.lastIndexOf("/"); cut > 0; cut = memberPath.lastIndexOf("/", cut - 1)) {
+				const prefix = memberPath.slice(0, cut);
+				if (directoryPrefixes.has(prefix)) break;
+				directoryPrefixes.add(prefix);
 			}
-			return false;
+		}
+		const unresolved = new Set(pendingLinks.keys());
+		// Links deferred behind a still-unclassified link, re-queued when it
+		// settles, so a file symlink routed through a directory alias is not
+		// misjudged dangling before the alias resolves.
+		const dependents = new Map<ArchiveIndexEntry, ArchiveIndexEntry[]>();
+
+		// The first still-unresolved link on `targetPath` (the target itself or
+		// any directory on its path), or null when the target is settled.
+		const findUnresolvedBlocker = (targetPath: string): ArchiveIndexEntry | null => {
+			for (let end = targetPath.length; end > 0; end = targetPath.lastIndexOf("/", end - 1)) {
+				const prefixEntry = entriesByPath.get(targetPath.slice(0, end));
+				if (prefixEntry && unresolved.has(prefixEntry)) return prefixEntry;
+			}
+			return null;
 		};
 
-		while (unresolved.size > 0) {
-			let resolved = 0;
-			for (const entry of unresolved) {
-				const pending = pendingLinks.get(entry)!;
-				if (dependsOnUnresolvedLink(pending.targetPath)) continue;
+		const queue = [...unresolved];
+		while (queue.length > 0) {
+			const entry = queue.pop()!;
+			if (!unresolved.has(entry)) continue;
+			const pending = pendingLinks.get(entry)!;
 
-				// Targets may route through directory aliases classified in an
-				// earlier pass; rewrite before the exact-path lookup.
-				let targetPath = pending.targetPath;
+			// Targets may route through directory aliases classified earlier;
+			// rewrite before the exact-path lookup. A cyclic alias chain falls
+			// through to the dangling-symlink path.
+			let blocker = findUnresolvedBlocker(pending.targetPath);
+			let targetPath = pending.targetPath;
+			if (blocker === null) {
 				try {
 					targetPath = resolveDirectoryAliasPath(entriesByPath, targetPath);
-				} catch {
-					// Cyclic alias chain: fall through to the dangling-symlink path.
+				} catch {}
+				if (targetPath !== pending.targetPath) blocker = findUnresolvedBlocker(targetPath);
+			}
+			if (blocker !== null && blocker !== entry) {
+				const waiting = dependents.get(blocker);
+				if (waiting) {
+					waiting.push(entry);
+				} else {
+					dependents.set(blocker, [entry]);
 				}
-				if (targetPath !== pending.targetPath && dependsOnUnresolvedLink(targetPath)) continue;
+				continue;
+			}
+			unresolved.delete(entry);
+			const settled = dependents.get(entry);
+			if (settled) {
+				dependents.delete(entry);
+				queue.push(...settled);
+			}
+			if (blocker === entry) {
+				// The target passes through the link itself (`a -> a/b`):
+				// inherently cyclic, so it can never become a usable alias even
+				// when real members exist beneath the target prefix.
+				if (pending.kind === "hard link") {
+					throw new ToolError(`Archive hard link '${entry.path}' has a cyclic target '${pending.targetPath}'`);
+				}
+				entry.storage = { type: "tar-link", targetPath: pending.targetPath };
+				continue;
+			}
 
-				const target = entriesByPath.get(targetPath);
-				if (target?.storage && !target.isDirectory) {
-					entry.size = target.size;
-					entry.storage = target.storage;
-					unresolved.delete(entry);
-					resolved++;
+			const target = entriesByPath.get(targetPath);
+			if (target?.storage && !target.isDirectory && !unresolved.has(target)) {
+				entry.size = target.size;
+				entry.storage = target.storage;
+				continue;
+			}
+
+			// An empty target is the archive root, which is always a directory.
+			const targetIsDirectory =
+				targetPath === "" || target?.isDirectory === true || directoryPrefixes.has(targetPath);
+			if (!targetIsDirectory) {
+				if (pending.kind === "symlink") {
+					entry.storage = { type: "tar-link", targetPath: pending.targetPath };
 					continue;
 				}
-
-				// An empty target is the archive root, which is always a directory.
-				const targetPrefix = `${targetPath}/`;
-				const targetIsDirectory =
-					targetPath === "" ||
-					target?.isDirectory === true ||
-					entries.some(candidate => candidate.path.startsWith(targetPrefix));
-				if (!targetIsDirectory) {
-					if (pending.kind === "symlink") {
-						entry.storage = { type: "tar-link", targetPath: pending.targetPath };
-						unresolved.delete(entry);
-						resolved++;
-						continue;
-					}
-					const reason = target ? "unreadable member" : "missing member";
-					throw new ToolError(`Archive hard link '${entry.path}' targets ${reason} '${pending.targetPath}'`);
-				}
-				if (pending.kind === "hard link") {
-					throw new ToolError(`Archive hard link '${entry.path}' targets directory '${pending.targetPath}'`);
-				}
-
-				entry.isDirectory = true;
-				entry.storage = { type: "tar-link", targetPath: pending.targetPath };
-				unresolved.delete(entry);
-				resolved++;
+				const reason = target ? "unreadable member" : "missing member";
+				throw new ToolError(`Archive hard link '${entry.path}' targets ${reason} '${pending.targetPath}'`);
 			}
-			if (resolved === 0) {
-				throw new ToolError("Archive contains cyclic or unsupported links");
+			if (pending.kind === "hard link") {
+				throw new ToolError(`Archive hard link '${entry.path}' targets directory '${pending.targetPath}'`);
 			}
+
+			entry.isDirectory = true;
+			entry.storage = { type: "tar-link", targetPath: pending.targetPath };
+		}
+		// Links never dequeued sit in a dependency cycle (a -> b/x, b -> a/y).
+		if (unresolved.size > 0) {
+			throw new ToolError("Archive contains cyclic or unsupported links");
 		}
 	}
 
@@ -1012,15 +1075,13 @@ const MAX_LINK_RESOLUTION_DEPTH = 40;
 function resolveDirectoryAliasPath(entries: ReadonlyMap<string, ArchiveIndexEntry>, archivePath: string): string {
 	let resolvedPath = archivePath;
 	const seen = new Set<string>();
-	for (let depth = 0; depth < MAX_LINK_RESOLUTION_DEPTH && !seen.has(resolvedPath); depth++) {
+	for (let rewrites = 0; !seen.has(resolvedPath); ) {
 		seen.add(resolvedPath);
-		const parts = resolvedPath.split("/");
 		let replacement: string | undefined;
-		for (let end = parts.length; end > 0; end--) {
-			const prefix = parts.slice(0, end).join("/");
-			const entry = entries.get(prefix);
+		for (let end = resolvedPath.length; end > 0; end = resolvedPath.lastIndexOf("/", end - 1)) {
+			const entry = entries.get(resolvedPath.slice(0, end));
 			if (!entry?.isDirectory || entry.storage?.type !== "tar-link") continue;
-			const suffix = parts.slice(end).join("/");
+			const suffix = resolvedPath.slice(end + 1);
 			replacement = suffix
 				? entry.storage.targetPath
 					? `${entry.storage.targetPath}/${suffix}`
@@ -1029,6 +1090,10 @@ function resolveDirectoryAliasPath(entries: ReadonlyMap<string, ArchiveIndexEntr
 			break;
 		}
 		if (replacement === undefined) return resolvedPath;
+		// The bound counts performed rewrites, so a chain of exactly
+		// MAX_LINK_RESOLUTION_DEPTH aliases still resolves; only needing one
+		// more trips it.
+		if (++rewrites > MAX_LINK_RESOLUTION_DEPTH) break;
 		resolvedPath = replacement;
 	}
 	throw new ToolError(`Archive path '${archivePath}' crosses a cyclic symlink`);
