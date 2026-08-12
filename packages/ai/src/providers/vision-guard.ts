@@ -39,7 +39,11 @@ export function joinTextWithImagePlaceholder(text: string, omittedImages: boolea
  * multimodal content arrays for. The compatible-mode endpoint also serves
  * multimodal Qwen SKUs without `vl` in the id (e.g. `qwen3.7-plus`), so this
  * guard only covers families verified to be text-only for issue #1859:
- * `qwen*-max` and `qwen*-coder*`.
+ * `qwen*-coder*` and `qwen*-max` up to and including `qwen3.7-max`.
+ *
+ * Qwen-Max became multimodal at `qwen3.8-max` (image input, issue #8019), so
+ * `-max` SKUs at version 3.8 or newer are excluded — otherwise the override
+ * would strip images from a genuinely vision-capable flagship (issue #8305).
  *
  * Used as a defensive override in `convertMessages` so a misconfigured custom
  * provider (issue #1859) can't drive the request into an unrecoverable 400.
@@ -48,7 +52,13 @@ export function isDashscopeCompatibleModeTextOnlyQwen(model: Model<"openai-compl
 	if (!isDashscopeCompatibleModeUrl(model.baseUrl)) {
 		return false;
 	}
-	const id = model.id.toLowerCase();
 	if (!isQwenModelId(model.id)) return false;
-	return /\bqwen(?:[\d.]+)?-max\b/.test(id) || /\bqwen(?:[\d.]+)?-coder\b/.test(id);
+	const id = model.id.toLowerCase();
+	if (/\bqwen(?:[\d.]+)?-coder\b/.test(id)) return true;
+	const maxMatch = id.match(/\bqwen(\d+(?:\.\d+)?)?-max\b/);
+	if (!maxMatch) return false;
+	// Bare `qwen-max` (undefined version) is the text-only 2.5-era flagship;
+	// treat missing/pre-3.8 versions as text-only, 3.8+ as multimodal.
+	const version = maxMatch[1] ? Number.parseFloat(maxMatch[1]) : 0;
+	return version < 3.8;
 }

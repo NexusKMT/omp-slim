@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the DashScope compatible-mode text-only Qwen override (issue #1859) stripping images from `qwen3.8-max`, which became multimodal in the bundled catalog (image input, #8019). The `-max` guard now only vetoes image content for pre-3.8 SKUs, so `qwen3.8-max`/`qwen3.8-max-preview` and later flagships send `image_url` content — restoring `inspect_image` on those models configured against `dashscope.aliyuncs.com/compatible-mode/v1` ([#8305](https://github.com/can1357/oh-my-pi/issues/8305)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Fixed
