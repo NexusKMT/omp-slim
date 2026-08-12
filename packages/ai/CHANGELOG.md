@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- OpenCode Go usage now comes from the official `GET /zen/go/v1/usage` endpoint (rolling 5h / weekly / monthly percent windows with server-computed resets) instead of synthesizing dollar estimates from OMP-observed request costs, so `/usage` reflects spend made outside OMP and the hardcoded $12/$30/$60 caps are gone. The usage probe now validates credentials (401 invalid key, 403 lapsed Go subscription), and a new ranking strategy routes multi-key pools by rolling/weekly headroom while keeping the monthly window display-only (an exhausted monthly can still serve requests via the console "Use balance" fallback) ([#8337](https://github.com/can1357/oh-my-pi/pull/8337) by [@will-bogusz](https://github.com/will-bogusz)).
+
 ### Fixed
 
 - Fixed OpenAI Responses turns ending silently after a provider-hosted web search that produced no visible answer: the turn is now classified as `pause_turn` so the agent automatically continues with the search results instead of stopping.
@@ -9,13 +13,8 @@
 - Fixed the DashScope compatible-mode text-only Qwen override (issue #1859) stripping images from `qwen3.8-max`, which became multimodal in the bundled catalog (image input, #8019). The `-max` guard now only vetoes image content for pre-3.8 SKUs, so `qwen3.8-max`/`qwen3.8-max-preview` and later flagships send `image_url` content — restoring `inspect_image` on those models configured against `dashscope.aliyuncs.com/compatible-mode/v1` ([#8305](https://github.com/can1357/oh-my-pi/issues/8305)).
 - Fixed xAI (`xai-oauth`) usage reporting falling back to a stale exhausted cache when a fresh weekly cycle with 0% consumed credits omits the `creditUsagePercent` field ([#8325](https://github.com/can1357/oh-my-pi/pull/8325) by [@bubua12](https://github.com/bubua12)).
 - Fixed `/login together` always failing with HTTP 400 `model_not_available`: key validation chat-completed against the hardcoded non-serverless model `moonshotai/Kimi-K2.5`, so no valid key could pass. Validation now probes Together's authenticated `/v1/models` listing, matching the model-agnostic approach used by other API-key providers ([#8328](https://github.com/can1357/oh-my-pi/issues/8328)).
-### Changed
-
-- OpenCode Go usage now comes from the official `GET /zen/go/v1/usage` endpoint (rolling 5h / weekly / monthly percent windows with server-computed resets) instead of synthesizing dollar estimates from OMP-observed request costs, so `/usage` reflects spend made outside OMP and the hardcoded $12/$30/$60 caps are gone. The usage probe now validates credentials (401 invalid key, 403 lapsed Go subscription), and a new ranking strategy routes multi-key pools by rolling/weekly headroom while keeping the monthly window display-only (an exhausted monthly can still serve requests via the console "Use balance" fallback) ([#8337](https://github.com/can1357/oh-my-pi/pull/8337) by [@will-bogusz](https://github.com/will-bogusz)).
-
-### Fixed
-
 - Fixed aggregate usage fetches and credential-health probes sending reference-stored API keys (env var name, `!command`) as the literal reference string instead of the resolved secret, which would 401 and flag working credentials as bad for providers whose usage probe validates credentials ([#8337](https://github.com/can1357/oh-my-pi/pull/8337) by [@will-bogusz](https://github.com/will-bogusz)).
+- Fixed Perplexity email-OTP login dropping the session cookies required to verify the code ([#8156](https://github.com/can1357/oh-my-pi/issues/8156)).
 
 ### Removed
 
@@ -52,9 +51,6 @@
 - Fixed the AWS credential resolver ignoring `role_arn` profiles: shared-config role chaining (`source_profile` recursion, `web_identity_token_file`, `credential_source`) now resolves via STS `AssumeRole`/`AssumeRoleWithWebIdentity`, honoring `role_session_name`/`duration_seconds`/`external_id`, so Bedrock is detected on EKS/IRSA and multi-account setups instead of reporting "No models available" ([#8209](https://github.com/can1357/oh-my-pi/issues/8209)).
 - Fixed Bedrock availability being under-detected on Nitro/EKS hosts: the EC2 metadata probe now recognizes Nitro DMI markers (`board_asset_tag` instance ids, `Amazon EC2` vendor fields) in addition to the Xen `ec2` UUID prefix ([#8209](https://github.com/can1357/oh-my-pi/issues/8209)).
 - Fixed DeepSeek Responses targets (opencode-go) rejecting a thinking-mode continuation with `400 The reasoning_text in the thinking mode must be passed back to the API` after a prewalk hand-off plus mid-run compaction: the Responses input builder re-encoded replayed assistant turns without a reasoning item, so the request enabled reasoning but shipped no `reasoning_text`. The encoder now synthesizes a `reasoning_text` reasoning item for every replayed assistant turn when the target requires reasoning replay in thinking mode (`requiresReasoningContentForAllAssistantTurns` / `requiresReasoningContentForToolCalls`), mirroring the chat-completions `reasoning_content` safety net ([#8248](https://github.com/can1357/oh-my-pi/issues/8248)).
-### Fixed
-
-- Fixed Perplexity email-OTP login dropping the session cookies required to verify the code ([#8156](https://github.com/can1357/oh-my-pi/issues/8156)).
 
 ## [17.2.12] - 2026-08-08
 
