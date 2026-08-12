@@ -18,6 +18,7 @@ import {
 	encodeTextSized,
 	getPaddingX,
 	getSegmenter,
+	isOsc66Line,
 	padding,
 	replaceTabs,
 	truncateToWidth,
@@ -38,15 +39,11 @@ function normalizeOsc8Terminators(text: string): string {
 }
 
 // OSC 66 (Kitty text-sizing) heading spans are emitted as a single indivisible
-// unit by the H1 render path. Like image-protocol lines, they must bypass
-// ANSI wrapping and width padding: re-wrapping splits/normalizes the sized span
-// (recomputing the explicit `w=` cell count and hoisting SGR out of the OSC
-// payload), and padding would append trailing cells past the doubled glyph.
-const OSC66_LINE_PREFIX = "\x1b]66;";
-
-function isOsc66Line(line: string): boolean {
-	return line.includes(OSC66_LINE_PREFIX);
-}
+// unit by the H1 render path. Like image-protocol lines, they bypass ANSI
+// wrapping and width padding (see `isOsc66Line` in ../utils): re-wrapping
+// splits/normalizes the sized span (recomputing the explicit `w=` cell count
+// and hoisting SGR out of the OSC payload), and padding would append trailing
+// cells past the doubled glyph.
 
 function normalizeHtmlEntitiesForTerminal(raw: string): string {
 	const parseCodePoint = (value: number): string => {

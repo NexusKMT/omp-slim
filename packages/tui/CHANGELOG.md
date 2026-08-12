@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed scaled OSC 66 Markdown headings ("Large Headings" on Kitty) rendering as an invisible placeholder after a redraw or terminal resize: the blank row a `s`-scaled heading flows into was rewritten with an erase, which cleared the multicell glyph's lower half. The renderer now treats those reserved rows as untouchable across every repaint path — full replay, incremental diff, and the resize viewport — and covers all `s - 1` rows of scale ≥ 3 headings ([#8318](https://github.com/can1357/oh-my-pi/issues/8318)).
+
 ## [17.2.13] - 2026-08-11
 
 ### Fixed
