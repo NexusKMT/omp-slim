@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed MCP startup failures omitting the originating configuration path, so stale imported server entries can be traced to their source file.
+
 ## [17.2.15] - 2026-08-12
 
 ### Added

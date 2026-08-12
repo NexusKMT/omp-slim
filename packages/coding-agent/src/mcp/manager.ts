@@ -74,6 +74,12 @@ type TrackedPromise<T> = {
 
 const STARTUP_TIMEOUT_MS = 250;
 
+function createMcpStartupFailure(serverName: string, error: string, source?: SourceMeta): McpConnectionStatusEvent {
+	return source
+		? { type: "failed", serverName, error, sourcePath: source.path }
+		: { type: "failed", serverName, error };
+}
+
 /**
  * Per-server reconnect-storm circuit breaker.
  *
@@ -563,7 +569,7 @@ export class MCPManager {
 					if (this.#pendingToolLoads.get(name) !== toolsPromise) return;
 					this.#pendingToolLoads.delete(name);
 					const message = error instanceof Error ? error.message : String(error);
-					onStatus?.({ type: "failed", serverName: name, error: message });
+					onStatus?.(createMcpStartupFailure(name, message, sources[name]));
 					if (!allowBackgroundLogging || reportedErrors.has(name)) return;
 					logger.error("MCP tool load failed", { path: `mcp:${name}`, error: message });
 				});
@@ -573,7 +579,7 @@ export class MCPManager {
 		if (statusServerNames.length > 0 && onStatus) {
 			onStatus({ type: "connecting", serverNames: statusServerNames });
 			for (const { name, message } of validationFailures) {
-				onStatus({ type: "failed", serverName: name, error: message });
+				onStatus(createMcpStartupFailure(name, message, sources[name]));
 			}
 		}
 
