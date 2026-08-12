@@ -19,6 +19,10 @@
 
 - Fixed print mode claiming `plan.defaultOnStartup` was ignored and recommending `--plan-yolo` when that headless plan flow was already active ([#8312](https://github.com/can1357/oh-my-pi/issues/8312)).
 
+### Fixed
+
+- Fixed MCP startup failures omitting the originating configuration path, so stale imported server entries can be traced to their source file.
+
 ## [17.2.15] - 2026-08-12
 
 ### Added
