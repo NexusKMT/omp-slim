@@ -78,6 +78,20 @@ class DeclaredSettledStreamingBlock extends StreamingBlock {
 	}
 }
 
+class WidthEpochStreamingBlock extends DeclaredSettledStreamingBlock {
+	captureNativeScrollbackWidthEpoch(): unknown {
+		return {};
+	}
+
+	resolveNativeScrollbackWidthEpoch(_boundary: unknown): number | undefined {
+		return 1;
+	}
+
+	getNativeScrollbackWidthEpochRows(): number | undefined {
+		return 1;
+	}
+}
+
 class CountingFinalizedBlock implements Component {
 	renderCount = 0;
 	#lines: string[];
@@ -367,6 +381,38 @@ describe("TranscriptContainer", () => {
 		expect(currentRows).toBeLessThan(rendered.length);
 		expect(currentRows).toBeGreaterThan(previousRows!);
 		expect(rendered.at(-1)).toContain("Finalized notice");
+	});
+
+	it("replays conservatively when finalized history before a live source has no mutation version", () => {
+		const container = new TranscriptContainer();
+		const history = new CountingFinalizedBlock(["history"]);
+		const live = new WidthEpochStreamingBlock(["stable", "pending"], 1);
+		container.addChild(history);
+		container.addChild(live);
+		container.render(40);
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+
+		history.set(["history", "late image"]);
+		container.render(17);
+
+		expect(container.resolveNativeScrollbackWidthEpoch(boundary)).toBeUndefined();
+	});
+
+	it("rejects a width epoch when versioned finalized history before its live source grows", () => {
+		const container = new TranscriptContainer();
+		const history = new VersionedFinalizedBlock(["history"]);
+		const live = new WidthEpochStreamingBlock(["stable", "pending"], 1);
+		container.addChild(history);
+		container.addChild(live);
+		container.render(40);
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+		container.render(17);
+		expect(container.resolveNativeScrollbackWidthEpoch(boundary)).toBeGreaterThan(0);
+
+		history.mutate(["history", "late image"]);
+		container.render(17);
+
+		expect(container.resolveNativeScrollbackWidthEpoch(boundary)).toBeUndefined();
 	});
 
 	it("rejects a captured live tail that mutates while finalizing", () => {

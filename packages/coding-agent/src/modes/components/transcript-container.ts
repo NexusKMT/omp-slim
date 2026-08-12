@@ -191,6 +191,7 @@ export class TranscriptContainer
 			segment: BlockSegment;
 			childBoundary: unknown;
 			childHasBoundary: boolean;
+			precedingSegments: BlockSegment[];
 			trailingSegments: BlockSegment[];
 		}
 	>();
@@ -265,12 +266,14 @@ export class TranscriptContainer
 			typeof child.captureNativeScrollbackWidthEpoch === "function" &&
 			typeof child.resolveNativeScrollbackWidthEpoch === "function" &&
 			typeof child.getNativeScrollbackWidthEpochRows === "function";
+		const segmentIndex = this.#segments.indexOf(segment);
 		const marker = {};
 		this.#widthEpochBoundaries.set(marker, {
 			segment,
 			childBoundary: childHasBoundary ? child.captureNativeScrollbackWidthEpoch?.() : undefined,
 			childHasBoundary,
-			trailingSegments: this.#segments.slice(this.#segments.indexOf(segment) + 1),
+			precedingSegments: this.#segments.slice(0, segmentIndex),
+			trailingSegments: this.#segments.slice(segmentIndex + 1),
 		});
 		return marker;
 	}
@@ -279,8 +282,26 @@ export class TranscriptContainer
 		if (typeof boundary !== "object" || boundary === null) return undefined;
 		const marker = this.#widthEpochBoundaries.get(boundary);
 		if (!marker) return undefined;
-		const current = this.#segments.find(segment => segment.component === marker.segment.component);
+		const currentIndex = this.#segments.findIndex(segment => segment.component === marker.segment.component);
+		const current = this.#segments[currentIndex];
 		if (!current) return undefined;
+		if (currentIndex !== marker.precedingSegments.length) return undefined;
+		for (let i = 0; i < marker.precedingSegments.length; i++) {
+			const captured = marker.precedingSegments[i]!;
+			const preceding = this.#segments[i]!;
+			// A width-dependent physical row count cannot distinguish ordinary
+			// reflow from logical growth. Without a mutation version the leading
+			// boundary is unverifiable, so replay the epoch conservatively.
+			if (
+				preceding.component !== captured.component ||
+				!captured.finalized ||
+				!preceding.finalized ||
+				captured.version === undefined ||
+				preceding.version !== captured.version
+			) {
+				return undefined;
+			}
+		}
 		if (!marker.childHasBoundary) {
 			if (marker.segment.rowCount === 0) return current.startRow;
 			if (!marker.segment.finalized) return undefined;
