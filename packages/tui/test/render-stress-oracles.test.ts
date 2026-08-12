@@ -7,6 +7,8 @@ import {
 	expectedFrameFromLines,
 	expectedScrollbackBuffer,
 	resolveExpectedOverlayLayout,
+	runWidthEpochHeightAppendReplayRegression,
+	runWidthEpochOverlayReplayRegression,
 	scrollbackProbePositions,
 	stripPlainTerminalText,
 } from "./render-stress-harness";
@@ -57,5 +59,13 @@ describe("render stress oracle helpers", () => {
 
 	it("composites overlay text by terminal columns", () => {
 		expect(stripPlainTerminalText(compositeExpectedLineAt("abcdef", "XY", 2, 2, 6))).toBe("abXYef");
+	});
+
+	it("replays overlay-hidden growth across a multiplexer width epoch", async () => {
+		await runWidthEpochOverlayReplayRegression();
+	});
+
+	it("replays append growth concurrent with a height shrink inside a multiplexer width epoch", async () => {
+		await runWidthEpochHeightAppendReplayRegression();
 	});
 });

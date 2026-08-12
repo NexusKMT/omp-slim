@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed repeated pane-width changes corrupting native scrollback: direct HerdR panes now use the same ED3 source replay as direct terminals, preventing settled viewport paints from hardening host-reflowed soft wraps, while ED3-unsafe multiplexers retain opaque logical width epochs that append only source output queued during resize ([#6147](https://github.com/can1357/oh-my-pi/issues/6147), [#7026](https://github.com/can1357/oh-my-pi/issues/7026)).
+
 ## [17.2.13] - 2026-08-11
 
 ### Fixed
