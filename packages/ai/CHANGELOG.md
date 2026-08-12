@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed xAI (`xai-oauth`) usage reporting falling back to a stale exhausted cache when a fresh weekly cycle with 0% consumed credits omits the `creditUsagePercent` field ([#8325](https://github.com/can1357/oh-my-pi/pull/8325) by [@bubua12](https://github.com/bubua12)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Fixed
