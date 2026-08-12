@@ -159,10 +159,12 @@ class CommittedMutableLinesComponent implements Component, NativeScrollbackCommi
 class WidthEpochAuditLinesComponent implements Component, NativeScrollbackLiveRegion {
 	#lines: string[];
 	#liveStart: number | undefined;
+	#pinned: boolean;
 
-	constructor(lines: string[], liveStart: number) {
+	constructor(lines: string[], liveStart: number, pinned = false) {
 		this.#lines = [...lines];
 		this.#liveStart = liveStart;
+		this.#pinned = pinned;
 	}
 
 	append(lines: string[]): void {
@@ -185,10 +187,70 @@ class WidthEpochAuditLinesComponent implements Component, NativeScrollbackLiveRe
 		return this.#liveStart;
 	}
 
+	isNativeScrollbackLiveRegionPinned(): boolean {
+		return this.#pinned;
+	}
+
 	invalidate(): void {}
 
 	render(width: number): string[] {
 		return this.#lines.map(line => line.slice(0, width));
+	}
+}
+
+class ResetWidthEpochAuditLinesComponent implements Component, NativeScrollbackLiveRegion, NativeScrollbackWidthEpoch {
+	#lines: string[];
+	#liveStart: number | undefined;
+	#lastRows = 0;
+	#appendOnly: boolean;
+	#widthEpochBoundaries = new WeakMap<object, number>();
+
+	constructor(lines: string[], liveStart: number, appendOnly: boolean) {
+		this.#lines = [...lines];
+		this.#liveStart = liveStart;
+		this.#appendOnly = appendOnly;
+	}
+
+	append(lines: string[]): void {
+		this.#lines.push(...lines);
+	}
+
+	setLine(index: number, line: string): void {
+		this.#lines[index] = line;
+	}
+
+	finalize(): void {
+		this.#liveStart = undefined;
+	}
+
+	getNativeScrollbackLiveRegionStart(): number | undefined {
+		return this.#liveStart;
+	}
+
+	captureNativeScrollbackWidthEpoch(): unknown {
+		const marker = {};
+		this.#widthEpochBoundaries.set(marker, this.#lastRows);
+		return marker;
+	}
+
+	resolveNativeScrollbackWidthEpoch(boundary: unknown): number | undefined {
+		return typeof boundary === "object" && boundary !== null ? this.#widthEpochBoundaries.get(boundary) : undefined;
+	}
+
+	getNativeScrollbackWidthEpochRows(): number {
+		return this.#lastRows;
+	}
+
+	isNativeScrollbackWidthEpochAppendOnly(): boolean {
+		return this.#appendOnly;
+	}
+
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		const rows = this.#lines.map(line => line.slice(0, width));
+		this.#lastRows = rows.length;
+		return rows;
 	}
 }
 
@@ -1034,6 +1096,83 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 		});
 	});
 
+	it("retains rows when a revisionless trailing root grows during resize settlement", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const transcript = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				transcript.append(`revisionless-${index.toString().padStart(2, "0")} ${"R".repeat(46)}`);
+			}
+			const editor = new MutableLinesComponent(["editor"]);
+			tui.addChild(transcript);
+			tui.addChild(editor);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 6);
+				await Bun.sleep(10);
+				editor.setLines(["draft-00", "draft-01", "draft-02", "editor"]);
+				tui.requestComponentRender(editor);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (let index = 0; index < 8; index++) {
+					const marker = `revisionless-${index.toString().padStart(2, "0")}`;
+					expect(
+						buffer.some(line => line.includes(marker)),
+						marker,
+					).toBe(true);
+				}
+				expect(visible(term).slice(-4)).toEqual(["draft-00", "draft-01", "draft-02", "editor"]);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("retains rows when a leading root grows before the width-epoch source", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const leading = new MutableLinesComponent(["header"]);
+			const transcript = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				transcript.append(`leading-${index.toString().padStart(2, "0")} ${"L".repeat(46)}`);
+			}
+			tui.addChild(leading);
+			tui.addChild(transcript);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 6);
+				await Bun.sleep(10);
+				leading.setLines(["header", "queued-header-00", "queued-header-01", "queued-header-02"]);
+				tui.requestComponentRender(leading);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (let index = 0; index < 8; index++) {
+					const marker = `leading-${index.toString().padStart(2, "0")}`;
+					expect(
+						buffer.some(line => line.includes(marker)),
+						marker,
+					).toBe(true);
+				}
+				const settledBaseY = term.getBufferPosition().baseY;
+				tui.requestRender(true);
+				await settle(term);
+				expect(term.getBufferPosition().baseY).toBe(settledBaseY);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
 	it("captures trailing-root growth queued immediately before SIGWINCH", async () => {
 		await withEnvPatch(TMUX_ENV, async () => {
 			const term = new VirtualTerminal(40, 6, 10_000);
@@ -1691,6 +1830,100 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 				tui.requestRender(true);
 				await settle(term);
 				expect(term.getBufferPosition().baseY).toBe(recommittedAfterHeightGrow);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it.each([
+		{ appendOnly: false, appendedRows: 3, changedRow: 9, expectedRecommit: 2 },
+		{ appendOnly: true, appendedRows: 8, changedRow: 13, expectedRecommit: 3 },
+	])(
+		"recommits a mutable snapshot archived by a $appendOnly width-reset frame",
+		async ({ appendOnly, appendedRows, changedRow, expectedRecommit }) => {
+			await withEnvPatch(TMUX_ENV, async () => {
+				const initial = Array.from({ length: 12 }, (_value, index) => `reset-${index.toString().padStart(2, "0")}`);
+				const appended = Array.from(
+					{ length: appendedRows },
+					(_value, index) => `reset-${(12 + index).toString().padStart(2, "0")}`,
+				);
+				const component = new ResetWidthEpochAuditLinesComponent(initial, 8, appendOnly);
+				const term = new VirtualTerminal(40, 4, 1000);
+				const tui = new TUI(term);
+				tui.addChild(component);
+
+				try {
+					tui.start();
+					await settle(term);
+					term.resize(17, 4);
+					component.append(appended);
+					tui.requestRender(true);
+					await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+					await settle(term);
+					const committedByReset = term.getBufferPosition().baseY;
+
+					component.setLine(changedRow, "reset-preview-changed");
+					tui.requestRender(true);
+					await settle(term);
+					expect(term.getBufferPosition().baseY).toBe(committedByReset);
+
+					component.setLine(changedRow, "reset-finalized");
+					component.finalize();
+					tui.requestRender(true);
+					await settle(term);
+					expect(term.getBufferPosition().baseY).toBe(committedByReset + expectedRecommit);
+					let buffer = term.getScrollBuffer().map(line => line.trimEnd());
+					expect(buffer.filter(line => line === "reset-finalized")).toHaveLength(1);
+
+					tui.requestRender(true);
+					await settle(term);
+					expect(term.getBufferPosition().baseY).toBe(committedByReset + expectedRecommit);
+					buffer = term.getScrollBuffer().map(line => line.trimEnd());
+					expect(buffer.filter(line => line === "reset-finalized")).toHaveLength(1);
+				} finally {
+					tui.stop();
+				}
+			});
+		},
+	);
+
+	it("does not audit reset rows below a pinned width-epoch recovery seam", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const initial = Array.from(
+				{ length: 20 },
+				(_value, index) => `pinned-reset-${index.toString().padStart(2, "0")}`,
+			);
+			const appended = Array.from(
+				{ length: 4 },
+				(_value, index) => `pinned-reset-${(20 + index).toString().padStart(2, "0")}`,
+			);
+			const component = new WidthEpochAuditLinesComponent(initial, 8, true);
+			const term = new VirtualTerminal(40, 8, 1000);
+			const tui = new TUI(term);
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 4);
+				component.append(appended);
+				component.setLiveStart(24);
+				tui.requestRender(true);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+				const committedByReset = term.getBufferPosition().baseY;
+
+				component.setLiveStart(16);
+				component.setLine(17, "pinned-reset-preview");
+				tui.requestRender(true);
+				await settle(term);
+				expect(term.getBufferPosition().baseY).toBe(committedByReset);
+
+				component.setLiveStart(24);
+				tui.requestRender(true);
+				await settle(term);
+				expect(term.getBufferPosition().baseY).toBe(committedByReset);
 			} finally {
 				tui.stop();
 			}

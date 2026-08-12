@@ -1384,7 +1384,9 @@ export class TUI extends Container {
 		{
 			component: Component;
 			childBoundary: unknown;
-			trailingRevisions: Map<Component, number | undefined>;
+			sourceIndex: number;
+			leading: ReadonlyArray<{ component: Component; revision: number | undefined; rowCount: number }>;
+			trailing: ReadonlyArray<{ component: Component; revision: number | undefined; rowCount: number }>;
 			hasTrailingRows: boolean;
 		}
 	>();
@@ -1453,11 +1455,17 @@ export class TUI extends Container {
 			this.#rootWidthEpochBoundaries.set(marker, {
 				component: segment.component,
 				childBoundary,
-				trailingRevisions: new Map(
-					this.#frameSegments
-						.slice(index + 1)
-						.map(candidate => [candidate.component, candidate.widthEpochRevision]),
-				),
+				sourceIndex: index,
+				leading: this.#frameSegments.slice(0, index).map(candidate => ({
+					component: candidate.component,
+					revision: candidate.widthEpochRevision,
+					rowCount: candidate.rowCount,
+				})),
+				trailing: this.#frameSegments.slice(index + 1).map(candidate => ({
+					component: candidate.component,
+					revision: candidate.widthEpochRevision,
+					rowCount: candidate.rowCount,
+				})),
 				hasTrailingRows: this.#frameSegments.slice(index + 1).some(candidate => candidate.rowCount > 0),
 			});
 			return marker;
@@ -1469,20 +1477,40 @@ export class TUI extends Container {
 		if (typeof boundary !== "object" || boundary === null) return undefined;
 		const marker = this.#rootWidthEpochBoundaries.get(boundary);
 		if (!marker) return undefined;
-		const segment = this.#frameSegments.find(candidate => candidate.component === marker.component);
-		if (!segment) return undefined;
+		const segment = this.#frameSegments[marker.sourceIndex];
+		if (segment?.component !== marker.component) return undefined;
+		for (let index = 0; index < marker.leading.length; index++) {
+			const captured = marker.leading[index]!;
+			const current = this.#frameSegments[index];
+			if (
+				current?.component !== captured.component ||
+				(captured.revision === undefined
+					? current.rowCount !== captured.rowCount
+					: current.widthEpochRevision !== captured.revision)
+			) {
+				return undefined;
+			}
+		}
 		const childRows = getNativeScrollbackWidthEpoch(marker.component)?.resolveNativeScrollbackWidthEpoch(
 			marker.childBoundary,
 		);
 		if (childRows === undefined) return undefined;
 		let rows = segment.start + childRows;
-		for (const [component, capturedRevision] of marker.trailingRevisions) {
-			const candidate = this.#frameSegments.find(current => current.component === component);
-			const revision = getNativeScrollbackWidthEpochRevision(component);
+		for (let trailingIndex = 0; trailingIndex < marker.trailing.length; trailingIndex++) {
+			const captured = marker.trailing[trailingIndex]!;
+			const candidate = this.#frameSegments[marker.sourceIndex + 1 + trailingIndex];
 			// Changed/removed tails are not cross-width comparable. Treat their
 			// entire settled contribution as new in the current boundary: this can
 			// conservatively duplicate rows, but cannot omit displaced transcript.
-			if (candidate !== undefined && revision === capturedRevision) rows += candidate.rowCount;
+			if (
+				candidate?.component !== captured.component ||
+				(captured.revision === undefined
+					? candidate.rowCount !== captured.rowCount
+					: candidate.widthEpochRevision !== captured.revision)
+			) {
+				break;
+			}
+			rows += candidate.rowCount;
 		}
 		return rows;
 	}
@@ -1491,8 +1519,8 @@ export class TUI extends Container {
 		if (typeof boundary !== "object" || boundary === null) return undefined;
 		const marker = this.#rootWidthEpochBoundaries.get(boundary);
 		if (!marker) return undefined;
-		const index = this.#frameSegments.findIndex(candidate => candidate.component === marker.component);
-		if (index < 0) return undefined;
+		const index = marker.sourceIndex;
+		if (this.#frameSegments[index]?.component !== marker.component) return undefined;
 		const sourceRows = getNativeScrollbackWidthEpoch(marker.component)?.getNativeScrollbackWidthEpochRows();
 		if (sourceRows === undefined) return undefined;
 		let rows = this.#frameSegments[index]!.start + sourceRows;
@@ -3872,11 +3900,20 @@ export class TUI extends Container {
 						: windowTop;
 			}
 			if (widthEpochReset) {
+				let trackedFrom = commitFrom;
+				let trackedTo = commitTo;
+				if (logicalPrefixAppend) trackedTo = Math.max(trackedFrom, trackedTo - height);
+				if (trackedTo > this.#windowTopRow) {
+					trackedFrom = trackedTo;
+				}
+				const frameRows = Array.from({ length: trackedTo - trackedFrom }, (_value, index) => trackedFrom + index);
+				let auditRows = 0;
+				while (auditRows < frameRows.length && frameRows[auditRows]! < finalBoundary) auditRows++;
 				this.#widthEpochCommittedPrefix = {
-					nativeBaseRows: this.#committedRows,
-					frameRows: [],
-					prefix: [],
-					auditRows: 0,
+					nativeBaseRows: this.#committedRows - frameRows.length,
+					frameRows,
+					prefix: frameRows.map(row => rawFrame[row]!),
+					auditRows,
 				};
 			}
 			this.#clearScrollbackOnNextRender = false;
