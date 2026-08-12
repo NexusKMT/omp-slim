@@ -4,8 +4,7 @@
 
 ### Fixed
 
-- Fixed case-sensitivity in Anthropic model ID parsing for high-res frame selection
-- Extended the Anthropic high-res 1932px frame tier to Opus 5 and later via the shared catalog identity parser, so an Opus 5 session no longer renders archive frames at 1568px with ~33% less history per compaction ([#8256](https://github.com/can1357/oh-my-pi/issues/8256)). Version parsing no longer goes stale past the catalog's semver precompute table (`claude-opus-5-11`), and mixed-case gateway ids keep the tier.
+- Fixed Anthropic model ID parsing to be case-insensitive and extended the high-resolution 1932px frame tier to Claude Opus 5 and later, preventing sessions from falling back to lower-resolution 1568px frames and preserving full history per compaction.
 
 ## [17.1.5] - 2026-07-27
 

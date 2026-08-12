@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Extended parsed Server-Sent Events with optional `id` and `retry` fields, including control-only events, so reconnecting transports can retain stream cursors and server-requested retry intervals.
+- Extended parsed Server-Sent Events (SSE) to include optional id and retry fields, enabling reconnecting transports to retain stream cursors and respect server-requested retry intervals.
 
 ## [17.2.13] - 2026-08-11
 

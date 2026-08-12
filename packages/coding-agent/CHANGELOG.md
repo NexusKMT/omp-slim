@@ -4,29 +4,25 @@
 
 ### Added
 
-- Added `--external-thinking` CLI flag to force external thinking tool activation
-- Added `omp compress`, a command that rewrites a text file into the dense prompt register through a two-tool agent loop: the agent submits a draft with `rewrite` plus every loss it accepted, the command replies with the measured size and that loss list and asks for a verdict, and only an `approve` on a reviewed draft is written. Reports go to stderr and the approved text to stdout, so `omp compress f.md > out.md` yields just the compressed text; `-o` writes a file, `-i` rewrites in place. The session is deliberately sealed — the default system prompt is replaced rather than appended, and skills, rules, `AGENTS.md` context files, prompt templates, slash commands, extensions, MCP, IRC, and LSP are all disabled — and the source document is quoted as nonce-delimited inert data so the directives it contains are compressed instead of obeyed.
-- `omp compress` accepts multiple files and glob patterns, compresses up to `-n` of them concurrently (default 4, one isolated session each), and renders the same TTY completion bar as `omp cleanse`; multi-file runs require `-i` since one `--out` cannot hold many files, and a file that fails is reported without cancelling its peers. The bar itself moved to `src/cli/progress-reporter.ts` and is now shared with `omp cleanse` instead of duplicated.
-- `omp cleanse` discovers far more tooling: staticcheck and golangci-lint for Go; mypy, pylint, flake8, ty, and basedpyright for Python; oxlint, `deno lint`, stylelint, and vue-tsc (preferred over tsc for roots containing `.vue` files) for the JS/TS ecosystem; plus actionlint for GitHub workflows. Alternative tools without a config marker (staticcheck, actionlint) are skipped silently when the binary is missing instead of cluttering the skip report.
-- `omp cleanse "<request>"` (e.g. `omp cleanse "ts errors"`) launches a discovery subagent that inspects the project, works out the exact command(s) and working directory for the request, verifies them by running them once, and maps their output onto a known parser (or gcc-style `generic`) before the normal detect→repair→verify loop runs.
-- `omp cleanse` without arguments on a TTY now shows a picker: run all discovered checkers, run one specific checker, or describe what to fix (which routes through the discovery agent). `--all`/`-a` skips the picker; non-TTY runs keep the old run-everything behavior.
+- Added `--external-thinking` CLI flag to force external thinking tool activation.
+- Added `omp compress` command, which uses an isolated, two-tool agent loop to rewrite single or multiple text files (supporting glob patterns and concurrent processing) into dense prompt registers.
+- Expanded tool discovery in `omp cleanse` to support `staticcheck` and `golangci-lint` (Go); `mypy`, `pylint`, `flake8`, `ty`, and `basedpyright` (Python); `oxlint`, `deno lint`, `stylelint`, and `vue-tsc` (JS/TS); and `actionlint` (GitHub Workflows).
+- Added support for natural language requests in `omp cleanse "<request>"`, which launches a discovery subagent to automatically inspect the project, determine the correct commands, and map outputs.
+- Added an interactive picker to `omp cleanse` when run without arguments on a TTY, allowing users to run all checkers, select a specific checker, or describe what to fix.
 
 ### Changed
 
-- Restricted the `think` tool to GPT Responses, Claude, and Gemini transports that can replace native reasoning, and kept its streamed scratchpad input named `thoughts`.
-- `omp cleanse` default subagent cap raised from 8 to 32 (`--agents`/`-n` still overrides).
+- Restricted the `think` tool to GPT, Claude, and Gemini transports that support native reasoning replacement.
+- Increased the default subagent cap for `omp cleanse` from 8 to 32.
 
 ### Fixed
 
-- Fixed `plan.defaultOnStartup: true` making headless `omp -p` runs hang until `--max-time` with no output. Print mode armed an interactive plan-review flow whose only headless exit was the model emitting a valid `xd://propose` execute-dispatch, so any turn that did not stranded to the deadline. Print mode no longer honors the startup default (it has no surface to review, approve, or exit a plan); `--plan-yolo` remains the supported headless plan flow ([#8272](https://github.com/can1357/oh-my-pi/issues/8272)).
-- Fixed `display.hideToolActivity` leaving TTSR rules, todo reminders, late diagnostics, launch completions, async completions, and the duplicate todo-failure warning visible; all activity blocks now hide and reappear without discarding their mounted state.
-- Fixed the MCP Streamable HTTP transport never sending the `MCP-Protocol-Version` header and negotiating the stale `2025-03-26` revision, which made spec-current servers (e.g. AWS Bedrock AgentCore Gateway with an outbound per-user OAuth target) reject every `tools/call` with a generic internal error. The client now negotiates `2025-11-25`, echoes the negotiated version on every request after `initialize`, and resumes server-closed POST response streams with `Last-Event-ID` after the requested SSE retry interval ([#8264](https://github.com/can1357/oh-my-pi/issues/8264)).
-- Fixed `/handoff` losing the previous session's `local://` artifacts (plans, scratch files, research notes): the handoff document referenced files that became unreadable because the new session's `local/` root was empty. Local artifacts are now copied across the handoff session boundary, mirroring the plan approve-and-execute path ([#8261](https://github.com/can1357/oh-my-pi/issues/8261)).
-- Fixed valid `.tar` and `.tar.gz` archive reads terminating omp through libarchive by parsing tar members in-process ([#4774](https://github.com/can1357/oh-my-pi/issues/4774)).
-- Hardened the in-process tar reader: directory symlinks targeting their own subtree (`a -> a/b`) no longer loop forever (alias rewrites are depth-bounded, ELOOP-style at 40); file symlinks routed through directory aliases resolve instead of dangling; link resolution uses a work queue with precomputed directory prefixes instead of quadratic archive rescans; unused PAX attributes are discarded while parsing; member paths and link targets are capped at 4096 bytes; old-GNU sparse extension blocks between header and data no longer corrupt the index; and duplicate members follow tar append semantics (later member wins).
-- Hardened tar archive reads and rewrites: enforce archive and member memory caps at every materialization boundary; honor global PAX attributes and old-GNU `N` name records; distinguish old-GNU sparse metadata from USTAR prefixes; parse signed GNU base-256 values; reject overlong raw PAX/LongLink path data; and collapse superseded links before resolution.
-- Fixed MCP Streamable HTTP SSE resumption gaps: a 401/403 on a resume GET refreshed auth by replaying the original POST, which could double-execute a state-changing tool — the GET now refreshes and retries in place; abrupt stream drops resume with `Last-Event-ID` like clean closes; and the long-lived GET listener resumes polling-style server closes instead of tearing the session down through the reconnect breaker.
-- Fixed Ctrl+O tool-output expansion not reaching launch-completion messages wrapped by the hidden-tool-activity container.
+- Fixed a hang in headless `omp -p` runs when `plan.defaultOnStartup: true` is enabled by disabling the startup default in print mode.
+- Fixed `display.hideToolActivity` failing to hide certain activity blocks, such as reminders, diagnostics, and completions.
+- Fixed several issues in the MCP Streamable HTTP transport, including updating the negotiated protocol version to `2025-11-25`, resolving connection drops and SSE resumption gaps, and preventing double-execution of tools during auth refreshes.
+- Fixed `/handoff` losing local artifacts (plans, scratch files, research notes) by copying them across the handoff session boundary.
+- Replaced libarchive-based tar parsing with a hardened, in-process tar reader to prevent crashes and safely handle complex archive structures, symlinks, and sparse metadata.
+- Fixed `Ctrl+O` tool-output expansion failing to reach launch-completion messages wrapped in the hidden tool activity container.
 
 ## [17.2.14] - 2026-08-11
 
