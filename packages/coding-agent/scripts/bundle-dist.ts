@@ -90,8 +90,8 @@ async function main(): Promise<void> {
 	// the bundled CLI entrypoint, and written to dist/docs-index.generated.txt so
 	// SDK consumers importing `@oh-my-pi/pi-coding-agent/*` (TypeScript source, no
 	// build-time embed) can still resolve omp:// docs (see src/internal-urls/docs-index.ts).
-	const docsPayload = await buildDocsIndexPayload();
 	try {
+		const docsPayload = await buildDocsIndexPayload();
 		// Build in-process: the docs embed payload is far larger than Linux's
 		// 128KiB per-argv-string cap, so it can never be passed as a CLI
 		// `--define` (posix_spawn fails with E2BIG).
@@ -115,11 +115,11 @@ async function main(): Promise<void> {
 		if (!output.success) {
 			throw new Error(`CLI bundle failed:\n${output.logs.map(log => log.message).join("\n")}`);
 		}
+		await ensureShebang();
+		await Bun.write(path.join(outDir, "docs-index.generated.txt"), docsPayload.payload);
 	} finally {
 		await runCommand(["bun", "--cwd=../stats", "run", "gen:stats:reset"]);
 	}
-	await ensureShebang();
-	await Bun.write(path.join(outDir, "docs-index.generated.txt"), docsPayload.payload);
 	const stat = await fs.stat(cliPath);
 	const elapsedMs = (Bun.nanoseconds() - start) / 1_000_000;
 	process.stdout.write(
