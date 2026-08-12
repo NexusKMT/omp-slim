@@ -15,6 +15,10 @@
 - Fixed command-backed provider API keys (`!command`) staying pinned to their process-cached value after HTTP 401; auth retry now reruns the command, updates live authorization headers, and retries with the refreshed bearer.
 
 
+### Fixed
+
+- Fixed print mode claiming `plan.defaultOnStartup` was ignored and recommending `--plan-yolo` when that headless plan flow was already active ([#8312](https://github.com/can1357/oh-my-pi/issues/8312)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Added
