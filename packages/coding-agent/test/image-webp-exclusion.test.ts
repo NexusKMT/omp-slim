@@ -248,7 +248,7 @@ describe("normalizeModelContextImages model-aware WebP exclusion", () => {
 		expect(messages[0]!.content[1]).toBe(original);
 	});
 
-	test("drops stale native Responses history after rewriting an image", async () => {
+	test("rewrites native Responses history alongside generic image content", async () => {
 		const model = buildStbVisionModel("managed-primary", "openai-responses");
 		const original = {
 			type: "image" as const,
@@ -278,7 +278,9 @@ describe("normalizeModelContextImages model-aware WebP exclusion", () => {
 		const normalizedMessage = messages[0]!;
 		expect(normalizedMessage.role).toBe("user");
 		if (normalizedMessage.role !== "user") throw new Error("Expected user message");
-		expect(normalizedMessage.providerPayload).toBeUndefined();
+		expect(normalizedMessage.providerPayload).not.toBe(providerPayload);
+		expect(JSON.stringify(normalizedMessage.providerPayload)).not.toContain("image/webp");
+		expect(JSON.stringify(normalizedMessage.providerPayload)).not.toContain(original.data);
 		expect(message.providerPayload).toBe(providerPayload);
 
 		const wire = buildResponsesInput({
@@ -292,6 +294,44 @@ describe("normalizeModelContextImages model-aware WebP exclusion", () => {
 		expect(serializedWire).toContain("input_image");
 		expect(serializedWire).not.toContain("image/webp");
 		expect(serializedWire).not.toContain(original.data);
+	});
+
+	test("rewrites WebP retained only in native Responses history", async () => {
+		const model = buildStbVisionModel("managed-primary", "openai-responses");
+		const webp = await makeRedWebP(200, 200);
+		const providerPayload = {
+			type: "openaiResponsesHistory" as const,
+			provider: model.provider,
+			dt: true,
+			items: [
+				{
+					type: "message",
+					role: "user",
+					content: [{ type: "input_image", image_url: `data:image/webp;base64,${webp}` }],
+				},
+			],
+		};
+		const message: Message = { role: "user", content: "inspect native image", providerPayload, timestamp: 1 };
+
+		const messages = await normalizeModelContextMessages([message], model);
+		const normalizedMessage = messages[0]!;
+		expect(normalizedMessage.role).toBe("user");
+		if (normalizedMessage.role !== "user") throw new Error("Expected user message");
+		expect(normalizedMessage.content).toBe("inspect native image");
+		expect(normalizedMessage.providerPayload).not.toBe(providerPayload);
+		expect(message.providerPayload).toBe(providerPayload);
+
+		const wire = buildResponsesInput({
+			model,
+			context: { messages },
+			strictResponsesPairing: false,
+			supportsImageDetailOriginal: true,
+			nativeHistory: { replay: true, filterReasoning: false },
+		});
+		const serializedWire = JSON.stringify(wire);
+		expect(serializedWire).toContain("input_image");
+		expect(serializedWire).not.toContain("image/webp");
+		expect(serializedWire).not.toContain(webp);
 	});
 
 	test("replaces an undecodable historical WebP with an omission note", async () => {

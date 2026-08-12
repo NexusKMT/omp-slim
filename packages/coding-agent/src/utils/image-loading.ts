@@ -1,6 +1,13 @@
 import * as fs from "node:fs/promises";
-import type { Context, ImageContent, Message, Model, TextContent } from "@oh-my-pi/pi-ai";
-import { formatBytes, logger, readImageMetadata, SUPPORTED_IMAGE_MIME_TYPES } from "@oh-my-pi/pi-utils";
+import type {
+	Context,
+	ImageContent,
+	Message,
+	Model,
+	OpenAIResponsesHistoryPayload,
+	TextContent,
+} from "@oh-my-pi/pi-ai";
+import { formatBytes, isRecord, logger, readImageMetadata, SUPPORTED_IMAGE_MIME_TYPES } from "@oh-my-pi/pi-utils";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import { resolveReadPath } from "../tools/path-utils";
 import { formatDimensionNote, type ImageResizeOptions, resizeImage } from "./image-resize";
@@ -22,6 +29,10 @@ function createUndecodableStbImageOmission(): TextContent {
 	return { type: "text", text: UNDECODABLE_STB_IMAGE_OMISSION_TEXT };
 }
 
+function createNativeUndecodableStbImageOmission(): Record<string, unknown> {
+	return { type: "input_text", text: UNDECODABLE_STB_IMAGE_OMISSION_TEXT };
+}
+
 function hasWebPMagic(data: string): boolean {
 	const header = Buffer.from(data.slice(0, 16), "base64");
 	return (
@@ -33,6 +44,16 @@ function isWebPImage(image: ImageContent): boolean {
 	if (typeof image.data !== "string") return false;
 	const mimeType = typeof image.mimeType === "string" ? image.mimeType.toLowerCase() : undefined;
 	return mimeType === "image/webp" || hasWebPMagic(image.data);
+}
+
+function imageFromBase64DataUrl(imageUrl: unknown): ImageContent | undefined {
+	if (typeof imageUrl !== "string" || !imageUrl.toLowerCase().startsWith("data:")) return undefined;
+	const separator = ";base64,";
+	const separatorIndex = imageUrl.toLowerCase().indexOf(separator);
+	if (separatorIndex < 5) return undefined;
+	const mimeType = imageUrl.slice(5, separatorIndex);
+	if (!mimeType.toLowerCase().startsWith("image/")) return undefined;
+	return { type: "image", mimeType, data: imageUrl.slice(separatorIndex + separator.length) };
 }
 
 function modelBoundaryImageCacheKey(image: ImageContent, resize: ImageResizeOptions | undefined): string {
@@ -76,6 +97,44 @@ async function memoizedStbImageNormalization(
 	}
 	const normalized = await pending;
 	return normalized ? { ...image, ...normalized } : null;
+}
+
+async function normalizeNativeResponsesImagePart(part: unknown): Promise<unknown> {
+	if (!isRecord(part) || part.type !== "input_image") return part;
+	const image = imageFromBase64DataUrl(part.image_url);
+	if (!image || !isWebPImage(image)) return part;
+	const normalized = await memoizedStbImageNormalization(image, undefined);
+	if (!normalized) return createNativeUndecodableStbImageOmission();
+	return { ...part, image_url: `data:${normalized.mimeType};base64,${normalized.data}` };
+}
+
+async function normalizeNativeResponsesItem(item: Record<string, unknown>): Promise<Record<string, unknown>> {
+	const normalizedItem = await normalizeNativeResponsesImagePart(item);
+	if (normalizedItem !== item) return normalizedItem as Record<string, unknown>;
+	if (!Array.isArray(item.content)) return item;
+
+	let content: unknown[] | undefined;
+	for (let index = 0; index < item.content.length; index++) {
+		const part = item.content[index];
+		const normalizedPart = await normalizeNativeResponsesImagePart(part);
+		if (normalizedPart !== part) content ??= item.content.slice(0, index);
+		content?.push(normalizedPart);
+	}
+	return content ? { ...item, content } : item;
+}
+
+async function normalizeNativeResponsesHistoryPayload(
+	payload: OpenAIResponsesHistoryPayload | undefined,
+): Promise<OpenAIResponsesHistoryPayload | undefined> {
+	if (payload?.type !== "openaiResponsesHistory" || !Array.isArray(payload.items)) return payload;
+	let items: Array<Record<string, unknown>> | undefined;
+	for (let index = 0; index < payload.items.length; index++) {
+		const item = payload.items[index]!;
+		const normalizedItem = await normalizeNativeResponsesItem(item);
+		if (normalizedItem !== item) items ??= payload.items.slice(0, index);
+		items?.push(normalizedItem);
+	}
+	return items ? { ...payload, items } : payload;
 }
 
 /**
@@ -223,26 +282,36 @@ export async function normalizeModelContextMessages(messages: Message[], model: 
 	let output: Message[] | undefined;
 	for (let messageIndex = 0; messageIndex < messages.length; messageIndex++) {
 		const message = messages[messageIndex]!;
-		if (typeof message.content === "string") continue;
+		const hasNativePayload = message.role === "user" || message.role === "developer";
+		const normalizedProviderPayload = hasNativePayload
+			? await normalizeNativeResponsesHistoryPayload(message.providerPayload)
+			: undefined;
+		const providerPayloadChanged = hasNativePayload && normalizedProviderPayload !== message.providerPayload;
 		let content: Array<(typeof message.content)[number]> | undefined;
-		for (let partIndex = 0; partIndex < message.content.length; partIndex++) {
-			const part = message.content[partIndex]!;
-			if (part.type !== "image" || !isWebPImage(part)) {
-				content?.push(part);
-				continue;
+		if (typeof message.content !== "string") {
+			for (let partIndex = 0; partIndex < message.content.length; partIndex++) {
+				const part = message.content[partIndex]!;
+				if (part.type !== "image" || !isWebPImage(part)) {
+					content?.push(part);
+					continue;
+				}
+				content ??= message.content.slice(0, partIndex);
+				const normalized = await memoizedStbImageNormalization(part, undefined);
+				content.push(normalized ?? createUndecodableStbImageOmission());
 			}
-			content ??= message.content.slice(0, partIndex);
-			const normalized = await memoizedStbImageNormalization(part, undefined);
-			content.push(normalized ?? createUndecodableStbImageOmission());
 		}
-		if (!content) continue;
+		if (!content && !providerPayloadChanged) continue;
 		output ??= messages.slice();
-		const normalizedMessage = { ...message, content } as Message;
+		const normalizedMessage = { ...message, ...(content ? { content } : {}) } as Message;
 		if (normalizedMessage.role === "user" || normalizedMessage.role === "developer") {
-			// Native Responses history takes precedence over message content. Once an
-			// image changes, that opaque replay payload is stale and could resend the
-			// original WebP bytes instead of this normalized transport copy.
-			delete normalizedMessage.providerPayload;
+			if (providerPayloadChanged) {
+				normalizedMessage.providerPayload = normalizedProviderPayload;
+			} else if (content) {
+				// Native Responses history takes precedence over message content. If an
+				// image changed but no matching native image was found, discard the opaque
+				// replay payload rather than risk resending stale bytes.
+				delete normalizedMessage.providerPayload;
+			}
 		}
 		output[messageIndex] = normalizedMessage;
 	}
