@@ -78,7 +78,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 
 	async function createHarness(
 		settingsOverride: Record<string, unknown> = {},
-		options: { extensionRunner?: ExtensionRunner } = {},
+		options: { extensionRunner?: ExtensionRunner; onProviderCall?: (index: number) => void } = {},
 	): Promise<{
 		session: AgentSession;
 		observedContexts: string[][];
@@ -118,6 +118,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 			convertToLlm,
 			streamFn: (_model, context) => {
 				const index = call++;
+				options.onProviderCall?.(index);
 				observedContexts.push(context.messages.map(message => JSON.stringify(message)));
 				const stream = new AssistantMessageEventStream();
 				const isToolTurn = index === 0;
@@ -210,6 +211,44 @@ describe("AgentSession mid-run threshold compaction", () => {
 		expect(handoffSpy).not.toHaveBeenCalled();
 		expect(compactSpy).toHaveBeenCalledTimes(1);
 		expect(observedContexts[1].join("\n")).toContain("HANDOFF-MID-RUN-COMPACTED-IN-PLACE");
+	});
+
+	it("does not wait for message persistence below the mid-run threshold", async () => {
+		const releaseMessageEnd = Promise.withResolvers<void>();
+		const messageEndEntered = Promise.withResolvers<void>();
+		const nextProviderCall = Promise.withResolvers<void>();
+		const extensionRunner = {
+			hasHandlers: vi.fn((eventType: string) => eventType === "message_end"),
+			emitBeforeAgentStart: vi.fn(async () => undefined),
+			emit: vi.fn(async (event: { type: string; message?: AgentMessage }) => {
+				if (
+					event.type === "message_end" &&
+					event.message?.role === "assistant" &&
+					event.message.stopReason === "toolUse"
+				) {
+					messageEndEntered.resolve();
+					await releaseMessageEnd.promise;
+				}
+			}),
+		} as unknown as ExtensionRunner;
+		const { session } = await createHarness(
+			{ "compaction.thresholdTokens": 100_000 },
+			{
+				extensionRunner,
+				onProviderCall: index => {
+					if (index === 1) nextProviderCall.resolve();
+				},
+			},
+		);
+		const compactSpy = mockCompaction("SHOULD-NOT-RUN");
+
+		const prompt = session.prompt("work below the maintenance threshold");
+		await messageEndEntered.promise;
+		await nextProviderCall.promise;
+		releaseMessageEnd.resolve();
+		await prompt;
+
+		expect(compactSpy).not.toHaveBeenCalled();
 	});
 
 	it("preserves the just-finished tool turn when message_end hooks are still pending", async () => {
