@@ -62,7 +62,9 @@ export function formatMCPConnectingMessage(serverNames: readonly string[]): stri
 }
 
 function formatFailedServer({ serverName, error, sourcePath }: McpConnectionFailure): string {
-	const source = sourcePath ? ` [config: ${sanitizeMcpStatusText(sourcePath, TRUNCATE_LENGTHS.CONTENT)}]` : "";
+	const source = sourcePath
+		? ` [config: ${sanitizeMcpStatusText(shortenPath(sourcePath), TRUNCATE_LENGTHS.CONTENT)}]`
+		: "";
 	return `${sanitizeMcpServerName(serverName)}${source}: ${sanitizeMcpStatusError(error)}`;
 }
 

@@ -79,6 +79,30 @@ describe("mcp/startup-events — connection-status cross-module contract", () =>
 		expect(message).toContain("…");
 	});
 
+	it("shortens config sources when the home directory contains spaces", () => {
+		const homeDir = "/tmp/OMP User";
+		const moduleUrl = new URL("../src/mcp/startup-events.ts", import.meta.url).href;
+		const script = `
+			import os from "node:os";
+			import { formatMCPConnectionStatusMessage } from ${JSON.stringify(moduleUrl)};
+			const sourcePath = os.homedir() + "/.codex/config.toml";
+			process.stdout.write(formatMCPConnectionStatusMessage({
+				pendingServers: [],
+				connectedServers: [],
+				failedServers: [{ serverName: "broken", error: "ENOENT", sourcePath }],
+			}));
+		`;
+		const result = Bun.spawnSync({
+			cmd: [process.execPath, "-e", script],
+			env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir },
+		});
+		const message = result.stdout.toString();
+
+		expect(result.exitCode).toBe(0);
+		expect(message).not.toContain(homeDir);
+		expect(message).toContain("broken [config: ~/.codex/config.toml]: ENOENT");
+	});
+
 	it("sanitizes server names before rendering them in status text", () => {
 		const homePath = `${os.homedir()}/.omp`;
 		const message = formatMCPConnectionStatusMessage({
