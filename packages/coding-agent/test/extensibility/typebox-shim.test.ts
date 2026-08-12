@@ -107,10 +107,7 @@ describe("pi.typebox compatibility shim", () => {
 	});
 
 	it("applies schema-valued additionalProperties only to undeclared raw-object keys", () => {
-		const schema = Type.Object(
-			{ known: { type: "number" } },
-			{ additionalProperties: { type: "string" } },
-		);
+		const schema = Type.Object({ known: { type: "number" } }, { additionalProperties: { type: "string" } });
 
 		expect(schema.safeParse({ known: 1, extra: "ok" }).success).toBe(true);
 		expect(schema.safeParse({ known: "bad", extra: "ok" }).success).toBe(false);

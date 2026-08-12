@@ -117,10 +117,7 @@ const object = ((properties: Record<string, unknown>, opts?: ObjectOpts) => {
 		const property = properties[key];
 		normalizedProperties[key] = isRuntimeSchema(property) ? property : unsafe(property as Record<string, unknown>);
 	}
-	if (
-		additionalProperties !== undefined &&
-		typeof additionalProperties !== "boolean"
-	) {
+	if (additionalProperties !== undefined && typeof additionalProperties !== "boolean") {
 		// omptype index signatures validate every string key, including declared
 		// properties. JSON Schema `additionalProperties` validates only undeclared
 		// keys, so preserve the whole document on this legacy raw-property path.

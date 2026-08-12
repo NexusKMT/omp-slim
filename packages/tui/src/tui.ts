@@ -4315,11 +4315,7 @@ export class TUI extends Container {
 	#osc66SpacerGlyphWidth(lines: readonly string[], index: number): number {
 		if (index <= 0 || lines[index] !== "") return -1;
 		let gap = 1;
-		while (
-			gap < TUI.#OSC66_MAX_SPACER_ROWS &&
-			index - gap > 0 &&
-			lines[index - gap] === ""
-		) {
+		while (gap < TUI.#OSC66_MAX_SPACER_ROWS && index - gap > 0 && lines[index - gap] === "") {
 			gap++;
 		}
 		const above = lines[index - gap];

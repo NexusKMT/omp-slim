@@ -26,11 +26,7 @@ import type {
 	LoadedCustomCommand,
 } from "./types";
 
-const arktype = Object.assign(
-	Function.prototype.bind.call(type, undefined) as typeof type,
-	type,
-	{ type },
-);
+const arktype = Object.assign(Function.prototype.bind.call(type, undefined) as typeof type, type, { type });
 
 /**
  * Load a single command module using native Bun import.
