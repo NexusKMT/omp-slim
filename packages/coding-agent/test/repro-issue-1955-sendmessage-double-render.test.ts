@@ -284,4 +284,37 @@ describe("issue #1955 — sendMessage(display:true) during session_start", () =>
 		expect(countOccurrences(rendered, lateMarker)).toBe(1);
 		expect(rendered.indexOf(initialMarker)).toBeLessThan(rendered.indexOf(lateMarker));
 	});
+
+	test("defers display rebuilds that arrive during a later incremental replay", async () => {
+		const existingMarker = "EXISTING_ENTRY_127_END";
+		const lateMarker = "LATE_DURING_REPLAY_END";
+		const harness = createHarness();
+		for (let index = 0; index < 128; index++) {
+			harness.entries.push(
+				makeCustomEntry(index + 1, `EXISTING_ENTRY_${index}_END`, index === 0 ? null : `entry-${index}`),
+			);
+		}
+		await harness.controller.initHooksAndCustomTools();
+		await harness.helpers.renderInitialMessages({ clearTerminalHistory: true });
+		const actions = harness.getActions();
+		expect(actions).toBeDefined();
+
+		const replay = harness.helpers.renderInitialMessages({ clearTerminalHistory: true });
+		expect(harness.ctx.initialChatRendered).toBe(false);
+		actions!.sendMessage(
+			{
+				customType: "issue-1955-probe",
+				content: [{ type: "text", text: lateMarker }],
+				display: true,
+				attribution: "agent",
+			},
+			{ deliverAs: "nextTurn" },
+		);
+		await replay;
+
+		const rendered = Bun.stripANSI(harness.ctx.chatContainer.render(120).join("\n"));
+		expect(countOccurrences(rendered, existingMarker)).toBe(1);
+		expect(countOccurrences(rendered, lateMarker)).toBe(1);
+		expect(rendered.indexOf(existingMarker)).toBeLessThan(rendered.indexOf(lateMarker));
+	});
 });

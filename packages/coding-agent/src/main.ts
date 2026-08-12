@@ -502,16 +502,8 @@ async function runInteractiveMode(
 		await setupWizard.runSetupWizard(mode, setupScenes);
 	}
 
-	versionCheckPromise
-		.then(newVersion => {
-			if (!settings.get("startup.checkUpdate")) {
-				return;
-			}
-			if (newVersion) {
-				mode.showNewVersionNotification(newVersion);
-			}
-		})
-		.catch(() => {});
+	// Consume failures immediately, but defer any banner until the transcript is stable.
+	const checkedVersionPromise = versionCheckPromise.catch(() => undefined);
 
 	// Cold-launch cleanup: the first paint already clears native history, and this
 	// replay replaces the welcome/startup frame with the resumed/new transcript.
@@ -519,6 +511,15 @@ async function runInteractiveMode(
 	// follows the same clean-cutover path instead of preserving a previous run's
 	// transcript above the fresh one.
 	await mode.renderInitialMessages({ preserveExistingChat: true, clearTerminalHistory: true });
+	// A resolved version check must not insert its banner into a partial transcript.
+	checkedVersionPromise.then(newVersion => {
+		if (!settings.get("startup.checkUpdate")) {
+			return;
+		}
+		if (newVersion) {
+			mode.showNewVersionNotification(newVersion);
+		}
+	});
 
 	for (const notify of notifs) {
 		if (!notify) {

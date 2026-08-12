@@ -735,7 +735,7 @@ export class UiHelpers {
 		// dispose them (stopping any live timers/subscriptions) before clearing. When
 		// preserving, the same instances are re-added below, so detach without dispose.
 		const preservedChatChildren = options.preserveExistingChat ? this.ctx.chatContainer.children : undefined;
-		const isInitialReplay = !this.ctx.initialChatRendered;
+		const chatWasAlreadyRendered = this.ctx.initialChatRendered;
 		if (preservedChatChildren) {
 			this.ctx.chatContainer.clear();
 		} else {
@@ -765,40 +765,45 @@ export class UiHelpers {
 		let replayEntryCount = this.ctx.viewSession.sessionManager.getEntries().length;
 		const renderOptions = {
 			updateFooter: true,
-			// A dirty initial replay may restart from a newer context. Populate
-			// history once from the stable context below instead of duplicating it
-			// on every attempt.
-			populateHistory: !this.ctx.focusedAgentId && !isInitialReplay,
+			// A dirty replay may restart from a newer context. Populate history
+			// once from the stable context below instead of duplicating it on
+			// every attempt.
+			populateHistory: false,
 		};
-		while (true) {
-			if (this.ctx.viewSession.isStreaming) {
-				// Live events mutate the same component maps; keep their replay atomic so
-				// a delta cannot land halfway through rebuilding its pending tool block.
-				this.ctx.renderSessionContext(context, renderOptions);
-			} else if (renderChunk) {
-				await this.ctx.renderSessionContextIncrementally(context, renderOptions, renderChunk);
-			} else {
-				await this.ctx.renderSessionContextIncrementally(context, renderOptions);
-			}
-			if (!isInitialReplay || this.ctx.viewSession.sessionManager.getEntries().length === replayEntryCount) {
-				break;
-			}
+		this.ctx.initialChatRendered = false;
+		try {
+			while (true) {
+				if (this.ctx.viewSession.isStreaming) {
+					// Live events mutate the same component maps; keep their replay atomic so
+					// a delta cannot land halfway through rebuilding its pending tool block.
+					this.ctx.renderSessionContext(context, renderOptions);
+				} else if (renderChunk) {
+					await this.ctx.renderSessionContextIncrementally(context, renderOptions, renderChunk);
+				} else {
+					await this.ctx.renderSessionContextIncrementally(context, renderOptions);
+				}
+				if (this.ctx.viewSession.sessionManager.getEntries().length === replayEntryCount) {
+					break;
+				}
 
-			// An extension persisted a display message while the initial replay
-			// yielded. The display callback stayed gated by initialChatRendered;
-			// discard the stale partial tree and replay the current session once
-			// more instead of letting a reentrant synchronous rebuild interleave.
-			this.ctx.resetTranscript();
-			this.ctx.pendingBashComponents = [];
-			this.ctx.pendingPythonComponents = [];
-			terminalHistoryCleared = false;
-			context = this.ctx.viewSession.buildTranscriptSessionContext({
-				collapseCompactedHistory: settings.get("display.collapseCompacted"),
-				keepDanglingToolCalls: this.ctx.viewSession.isStreaming,
-			});
-			replayEntryCount = this.ctx.viewSession.sessionManager.getEntries().length;
+				// An extension persisted a display message while the transcript replay
+				// yielded. The display callback stayed gated by initialChatRendered;
+				// discard the stale partial tree and replay the current session once
+				// more instead of letting a reentrant synchronous rebuild interleave.
+				this.ctx.resetTranscript();
+				this.ctx.pendingBashComponents = [];
+				this.ctx.pendingPythonComponents = [];
+				terminalHistoryCleared = false;
+				context = this.ctx.viewSession.buildTranscriptSessionContext({
+					collapseCompactedHistory: settings.get("display.collapseCompacted"),
+					keepDanglingToolCalls: this.ctx.viewSession.isStreaming,
+				});
+				replayEntryCount = this.ctx.viewSession.sessionManager.getEntries().length;
+			}
+		} finally {
+			this.ctx.initialChatRendered = chatWasAlreadyRendered;
 		}
-		if (isInitialReplay && !this.ctx.focusedAgentId) {
+		if (!this.ctx.focusedAgentId) {
 			for (const message of context.messages) {
 				if (message.role !== "user" || message.synthetic) continue;
 				const text = this.getUserMessageText(message);
