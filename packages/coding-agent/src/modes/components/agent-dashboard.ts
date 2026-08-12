@@ -39,6 +39,7 @@ import { getConfigDirs } from "../../config";
 import type { ModelRegistry } from "../../config/model-registry";
 import {
 	formatModelString,
+	normalizeModelPatternList,
 	resolveAgentModelPatterns,
 	resolveAgentPrewalkPattern,
 	resolveConfiguredModelPatterns,
@@ -447,7 +448,7 @@ export class AgentDashboard extends Container {
 				.map(agent => ({
 					...agent,
 					disabled: disabled.has(agent.name),
-					overrideModel: overrides[agent.name]?.trim() || undefined,
+					overrideModel: normalizeModelPatternList(overrides[agent.name]).join(",") || undefined,
 					prewalkOverride: prewalkOverrides[agent.name]?.trim() || undefined,
 				}));
 
