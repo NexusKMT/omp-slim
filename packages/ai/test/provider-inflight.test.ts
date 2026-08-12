@@ -26,6 +26,7 @@ afterEach(async () => {
 	__providerInFlightForTesting.setRoot(undefined);
 	__providerInFlightForTesting.setHeartbeatTimings(undefined);
 	__providerInFlightForTesting.setHeartbeatWriter(undefined);
+	__providerInFlightForTesting.setLeaseRemover(undefined);
 	if (limiterRoot !== undefined) {
 		await fs.rm(limiterRoot, { recursive: true, force: true });
 		limiterRoot = undefined;
@@ -87,16 +88,60 @@ describe("provider in-flight request limits", () => {
 		expect(mock.calls).toHaveLength(2);
 	});
 
-	test("releases its provider lease before reporting stream completion", async () => {
+	test("releases its provider lease before reporting terminal completion", async () => {
 		registerMockApi();
 		const mock = createMockModel({ provider: "tests", responses: [{ content: ["reply"] }] });
 
 		const stream = streamSimple(mock.model, context(), { maxInFlightRequests: { tests: 1 } });
-		const result = await stream.result();
+		const terminalObservation = (async () => {
+			for await (const event of stream) {
+				if (event.type !== "done" && event.type !== "error") continue;
+				const entries = await fs.readdir(limiterDir("tests"), { withFileTypes: true });
+				return entries.filter(entry => entry.isDirectory()).length;
+			}
+			return undefined;
+		})();
+		const [result, leasesAtTerminal] = await Promise.all([stream.result(), terminalObservation]);
+
+		expect(result.content).toEqual([{ type: "text", text: "reply" }]);
+		expect(leasesAtTerminal).toBe(0);
+	});
+
+	test("keeps a completed response when provider lease removal fails", async () => {
+		registerMockApi();
+		__providerInFlightForTesting.setLeaseRemover(async () => {
+			throw Object.assign(new Error("simulated lease removal failure"), { code: "EBUSY" });
+		});
+		const mock = createMockModel({ provider: "tests", responses: [{ content: ["reply"] }] });
+
+		const result = await streamSimple(mock.model, context(), { maxInFlightRequests: { tests: 1 } }).result();
 
 		expect(result.content).toEqual([{ type: "text", text: "reply" }]);
 		const entries = await fs.readdir(limiterDir("tests"), { withFileTypes: true });
-		expect(entries.filter(entry => entry.isDirectory())).toHaveLength(0);
+		expect(entries.filter(entry => entry.isDirectory())).toHaveLength(1);
+	});
+
+	test("preserves a provider failure when provider lease removal also fails", async () => {
+		registerMockApi();
+		__providerInFlightForTesting.setLeaseRemover(async () => {
+			throw Object.assign(new Error("simulated lease removal failure"), { code: "EBUSY" });
+		});
+		const mock = createMockModel({
+			provider: "tests",
+			handler: async () => {
+				throw new Error("PROVIDER-ORIGINAL-ERROR");
+			},
+		});
+
+		const outcome = await streamSimple(mock.model, context(), { maxInFlightRequests: { tests: 1 } })
+			.result()
+			.then(
+				message => message.errorMessage ?? JSON.stringify(message.content),
+				error => String(error),
+			);
+
+		expect(outcome).toContain("PROVIDER-ORIGINAL-ERROR");
+		expect(outcome).not.toContain("simulated lease removal failure");
 	});
 
 	test("does not recreate a released lease when a heartbeat outlives its flush timeout", async () => {

@@ -10,7 +10,7 @@
 - Fixed an issue where forceReasoningOff was ignored by Anthropic and Google transports, which allowed native thinking alongside a caller-supplied external scratchpad.
 ### Fixed
 
-- Fixed completed model streams retaining their provider concurrency permit until after completion became observable ([#8284](https://github.com/can1357/oh-my-pi/pull/8284) by [@ethancawse](https://github.com/ethancawse)).
+- Fixed completed model streams retaining their provider concurrency permit until after completion became observable, without replacing provider results when lease cleanup fails ([#8284](https://github.com/can1357/oh-my-pi/pull/8284) by [@ethancawse](https://github.com/ethancawse)).
 
 ## [17.2.14] - 2026-08-11
 

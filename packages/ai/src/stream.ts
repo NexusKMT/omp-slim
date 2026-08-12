@@ -186,6 +186,7 @@ let providerInFlightHeartbeatFlushTimeoutMsOverride: number | undefined;
 let providerInFlightHeartbeatWriterOverride:
 	| ((writeProviderInFlightInfo: () => Promise<void>) => Promise<void>)
 	| undefined;
+let providerInFlightLeaseRemoverOverride: ((leasePath: string) => Promise<void>) | undefined;
 
 export function configureProviderMaxInFlightRequests(limits: Record<string, number> | undefined): void {
 	configuredProviderMaxInFlightRequests = limits ?? {};
@@ -566,7 +567,8 @@ async function releaseProviderInFlightLease(lease: ProviderInFlightLease): Promi
 	);
 	releaseTimer.unref?.();
 	try {
-		await Promise.race([removeProviderInFlightLeaseDir(lease.path), releaseTimeout.promise]);
+		const removeLease = providerInFlightLeaseRemoverOverride ?? removeProviderInFlightLeaseDir;
+		await Promise.race([removeLease(lease.path), releaseTimeout.promise]);
 	} finally {
 		clearTimeout(releaseTimer);
 	}
@@ -604,6 +606,9 @@ export const __providerInFlightForTesting = {
 	},
 	setHeartbeatWriter(writer: ((writeProviderInFlightInfo: () => Promise<void>) => Promise<void>) | undefined): void {
 		providerInFlightHeartbeatWriterOverride = writer;
+	},
+	setLeaseRemover(remover: ((leasePath: string) => Promise<void>) | undefined): void {
+		providerInFlightLeaseRemoverOverride = remover;
 	},
 	providerDir(provider: string): string {
 		return providerInFlightDir(provider);
@@ -649,6 +654,19 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 			releasePromise ??= release();
 			return releasePromise;
 		};
+		const releaseBestEffort = async () => {
+			try {
+				await releaseOnce();
+			} catch (releaseError) {
+				// The lease has stopped heartbeating and stale cleanup will reap it.
+				// Never replace a completed response or the provider's original error
+				// with a coordination-directory cleanup failure.
+				logger.warn("Provider in-flight permit release failed", {
+					provider: model.provider,
+					error: String(releaseError),
+				});
+			}
+		};
 		try {
 			const startedWaitingAt = Date.now();
 			release = await acquireProviderInFlightSlot(model.provider, limit, options?.signal);
@@ -663,11 +681,11 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 			for await (const event of inner) {
 				if (event.type === "done" || event.type === "error") {
 					terminalEvent = event;
-					continue;
+					break;
 				}
 				outer.push(event);
 				if (outer.done) {
-					await releaseOnce();
+					await releaseBestEffort();
 					return;
 				}
 			}
@@ -675,23 +693,14 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 			// Releasing the permit is part of request completion. Publishing the
 			// result first lets an immediate follow-up turn contend with its own
 			// still-live lease, which is particularly costly on Windows.
-			await releaseOnce();
+			await releaseBestEffort();
 			if (!outer.done) {
 				if (terminalEvent) outer.push(terminalEvent);
 				else outer.end(result);
 			}
 		} catch (error) {
-			let failure = error;
-			try {
-				await releaseOnce();
-			} catch (releaseError) {
-				logger.warn("Provider in-flight permit release failed", {
-					provider: model.provider,
-					error: String(releaseError),
-				});
-				failure = releaseError;
-			}
-			if (!outer.done) outer.fail(failure);
+			await releaseBestEffort();
+			if (!outer.done) outer.fail(error);
 		}
 	})();
 	return outer;
