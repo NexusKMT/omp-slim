@@ -88,6 +88,42 @@ describe("OpenCode MCP discovery", () => {
 		);
 	});
 
+	test("loads project .opencode config after project-root config", async () => {
+		const projectDir = path.join(tempDir, "project");
+		const projectConfigDir = path.join(projectDir, ".opencode");
+		await fs.mkdir(projectConfigDir, { recursive: true });
+
+		await fs.writeFile(
+			path.join(projectDir, "opencode.json"),
+			JSON.stringify({
+				model: "root-model",
+				mcp: { shared: { type: "local", command: ["root-server"] } },
+			}),
+		);
+		await fs.writeFile(
+			path.join(projectConfigDir, "opencode.jsonc"),
+			`{
+				// Project .opencode config has higher precedence.
+				"model": "dotdir-model",
+				"mcp": { "shared": { "command": ["dotdir-server"] } }
+			}`,
+		);
+
+		const [servers, discoveredSettings] = await Promise.all([
+			loadOpenCodeMcpConfig(projectDir),
+			loadOpenCodeSettings(projectDir),
+		]);
+
+		expect(servers.filter(server => server.name === "shared")).toEqual([
+			expect.objectContaining({ command: "dotdir-server", transport: "stdio" }),
+		]);
+		expect(discoveredSettings.at(-1)).toMatchObject({
+			path: path.join(projectConfigDir, "opencode.jsonc"),
+			level: "project",
+			data: expect.objectContaining({ model: "dotdir-model" }),
+		});
+	});
+
 	test("resolves same-named MCP servers by OpenCode precedence", async () => {
 		const projectDir = path.join(tempDir, "project");
 		const userConfigDir = path.join(tempDir, ".config", "opencode");

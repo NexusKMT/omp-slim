@@ -77,9 +77,11 @@ async function loadJsonConfig(
 
 /**
  * OpenCode config sources in ascending effective precedence (lowest first):
- * user `opencode.json` → user `opencode.jsonc` → project `opencode.json` →
- * project `opencode.jsonc`. This matches how OpenCode merges configs — project
- * overrides user, and within a scope `opencode.jsonc` overrides `opencode.json`.
+ * user `opencode.json` → user `opencode.jsonc` → project-root
+ * `opencode.json` → project-root `opencode.jsonc` → project `.opencode/opencode.json`
+ * → project `.opencode/opencode.jsonc`. This matches how OpenCode merges configs:
+ * project overrides user, `.opencode` overrides project-root config, and within
+ * a directory `opencode.jsonc` overrides `opencode.json`.
  *
  * Both consumers apply this order low-to-high: settings deep-merge in item
  * order (last wins) and `loadMCPServers` deep-merges each server across layers
@@ -93,6 +95,10 @@ function getConfigSources(ctx: LoadContext): OpenCodeConfigSource[] {
 	}
 	for (const filename of CONFIG_FILENAMES) {
 		sources.push({ path: path.join(ctx.cwd, filename), level: "project" });
+	}
+	for (const filename of CONFIG_FILENAMES) {
+		const configPath = getProjectPath(ctx, "opencode", filename);
+		if (configPath) sources.push({ path: configPath, level: "project" });
 	}
 	return sources;
 }
@@ -419,7 +425,7 @@ registerProvider(contextFileCapability.id, {
 registerProvider(mcpCapability.id, {
 	id: PROVIDER_ID,
 	displayName: DISPLAY_NAME,
-	description: "Load MCP servers from opencode.json mcp key",
+	description: "Load MCP servers from OpenCode config files",
 	priority: PRIORITY,
 	load: loadMCPServers,
 });
@@ -451,7 +457,7 @@ registerProvider(slashCommandCapability.id, {
 registerProvider(settingsCapability.id, {
 	id: PROVIDER_ID,
 	displayName: DISPLAY_NAME,
-	description: "Load settings from opencode.json",
+	description: "Load settings from OpenCode config files",
 	priority: PRIORITY,
 	load: loadSettings,
 });
