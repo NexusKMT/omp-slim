@@ -27,7 +27,7 @@
 - Fixed `Ctrl+O` tool-output expansion failing to reach launch-completion messages wrapped in the hidden tool activity container.
 ### Fixed
 
-- Fixed below-threshold tool turns waiting for asynchronous session persistence when no mid-run compaction will run, while preserving journal writes when a `message_end` listener fails ([#8283](https://github.com/can1357/oh-my-pi/pull/8283) by [@ethancawse](https://github.com/ethancawse)).
+- Fixed below-threshold tool turns waiting for asynchronous session persistence when no mid-run compaction will run, while preserving journal writes when a `message_end` listener fails and isolating notification-only handler payloads from late context mutations ([#8283](https://github.com/can1357/oh-my-pi/pull/8283) by [@ethancawse](https://github.com/ethancawse)).
 
 ## [17.2.14] - 2026-08-11
 

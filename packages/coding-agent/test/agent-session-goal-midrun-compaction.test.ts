@@ -78,7 +78,11 @@ describe("AgentSession mid-run threshold compaction", () => {
 
 	async function createHarness(
 		settingsOverride: Record<string, unknown> = {},
-		options: { extensionRunner?: ExtensionRunner; onProviderCall?: (index: number) => void } = {},
+		options: {
+			extensionRunner?: ExtensionRunner;
+			onProviderCall?: (index: number) => void;
+			configureAgent?: (agent: Agent) => void;
+		} = {},
 	): Promise<{
 		session: AgentSession;
 		observedContexts: string[][];
@@ -152,6 +156,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 				return stream;
 			},
 		});
+		options.configureAgent?.(agent);
 
 		const session = new AgentSession({
 			agent,
@@ -290,6 +295,54 @@ describe("AgentSession mid-run threshold compaction", () => {
 			.filter(entry => entry.type === "message" && entry.message.role === "toolResult");
 		expect(rejected).toBe(true);
 		expect(persistedToolResults).toHaveLength(1);
+	});
+
+	it("isolates late message_end mutations from the next provider request", async () => {
+		const releaseMutation = Promise.withResolvers<void>();
+		const mutationApplied = Promise.withResolvers<void>();
+		const toolResultHookEntered = Promise.withResolvers<void>();
+		const secondModelCallEntered = Promise.withResolvers<void>();
+		const releaseSecondModelCall = Promise.withResolvers<void>();
+		const mutationMarker = `LATE-MESSAGE-END-MUTATION-${"x".repeat(500_000)}`;
+		let interceptedToolResult = false;
+		const extensionRunner = {
+			hasHandlers: vi.fn((eventType: string) => eventType === "message_end"),
+			emitBeforeAgentStart: vi.fn(async () => undefined),
+			emit: vi.fn(async (event: { type: string; message?: AgentMessage }) => {
+				if (interceptedToolResult || event.type !== "message_end" || event.message?.role !== "toolResult") return;
+				interceptedToolResult = true;
+				toolResultHookEntered.resolve();
+				await releaseMutation.promise;
+				event.message.content = [{ type: "text", text: mutationMarker }];
+				mutationApplied.resolve();
+			}),
+		} as unknown as ExtensionRunner;
+		let modelCall = 0;
+		const { session, observedContexts } = await createHarness(
+			{ "compaction.thresholdTokens": 100_000 },
+			{
+				extensionRunner,
+				configureAgent: agent => {
+					agent.addBeforeModelCallHook(async () => {
+						if (modelCall++ !== 1) return;
+						secondModelCallEntered.resolve();
+						await releaseSecondModelCall.promise;
+					});
+				},
+			},
+		);
+
+		const prompt = session.prompt("keep notification mutations out of live context");
+		await toolResultHookEntered.promise;
+		await secondModelCallEntered.promise;
+		releaseMutation.resolve();
+		await mutationApplied.promise;
+		releaseSecondModelCall.resolve();
+		await prompt;
+
+		expect(observedContexts).toHaveLength(2);
+		expect(observedContexts[1].join("\n")).not.toContain("LATE-MESSAGE-END-MUTATION");
+		expect(JSON.stringify(session.messages)).not.toContain("LATE-MESSAGE-END-MUTATION");
 	});
 
 	it("preserves the just-finished tool turn when message_end hooks are still pending", async () => {

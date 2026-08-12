@@ -3442,9 +3442,33 @@ export class AgentSession {
 			};
 			await this.#extensionRunner.emit(extensionEvent);
 		} else if (event.type === "message_end") {
+			// `message_end` is a notification, not a context-rewrite hook. Detach its
+			// payload from agent-owned history so an async observer that mutates the
+			// event after an `await` cannot race mid-run maintenance and enlarge (or
+			// otherwise rewrite) the next provider request after its threshold check.
+			// Explicit `tool_result` / `context` hooks remain the supported mutation
+			// surfaces. Standard AgentMessages are structured-cloneable; retain a
+			// shallow fallback for third-party ToolResult `details` carrying values
+			// that the structured clone algorithm does not support.
+			let extensionMessage: AgentMessage;
+			try {
+				extensionMessage = structuredClone(event.message);
+			} catch {
+				extensionMessage = { ...event.message } as AgentMessage;
+				const content = (event.message as { content?: unknown }).content;
+				if (Array.isArray(content)) {
+					(extensionMessage as { content: unknown[] }).content = content.map(block => {
+						try {
+							return structuredClone(block);
+						} catch {
+							return block && typeof block === "object" ? { ...block } : block;
+						}
+					});
+				}
+			}
 			const extensionEvent: MessageEndEvent = {
 				type: "message_end",
-				message: event.message,
+				message: extensionMessage,
 			};
 			await this.#extensionRunner.emit(extensionEvent);
 		} else if (event.type === "tool_execution_start") {
