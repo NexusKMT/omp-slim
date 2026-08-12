@@ -21,6 +21,9 @@
 ### Fixed
 
 - Reduced partial JSON parsing work for long streaming tool-call arguments by scaling the parse throttle geometrically with buffer size.
+### Fixed
+
+- Fixed Mermaid ASCII multi-word edge labels allowing routed lines to show through spaces ([#8098](https://github.com/can1357/oh-my-pi/issues/8098)).
 
 ## [17.2.11] - 2026-08-07
 
