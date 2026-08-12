@@ -57,6 +57,25 @@ describe("Editor component", () => {
 		expect(editor.getNativeScrollbackWidthEpochRevision()).toBe(terminalCursorRevision);
 	});
 
+	it("tracks lazy top-border changes independently of width reflow", () => {
+		const editor = new Editor(defaultEditorTheme);
+		let status = "idle";
+		editor.setTopBorderProvider(availableWidth => {
+			const content = `${status}:${availableWidth}`;
+			return { content, width: visibleWidth(content) };
+		});
+		editor.render(40);
+		const idleRevision = editor.getNativeScrollbackWidthEpochRevision();
+
+		status = "streaming";
+		editor.render(30);
+		const streamingRevision = editor.getNativeScrollbackWidthEpochRevision();
+		expect(streamingRevision).toBeGreaterThan(idleRevision);
+
+		editor.render(50);
+		expect(editor.getNativeScrollbackWidthEpochRevision()).toBe(streamingRevision);
+	});
+
 	it("advances its width-epoch revision when autocomplete changes without changing text", async () => {
 		const editor = new Editor(defaultEditorTheme);
 		const { promise: autocompleteUpdated, resolve: resolveAutocompleteUpdated } = Promise.withResolvers<void>();

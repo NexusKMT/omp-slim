@@ -517,6 +517,8 @@ export class Editor implements Component, Focusable {
 	// per-event rebuilds down to one per rendered frame (see #4145).
 	#topBorderContent?: EditorTopBorder;
 	#topBorderProvider?: (availableWidth: number) => EditorTopBorder | undefined;
+	#topBorderProviderWidth: number | undefined;
+	#topBorderProviderSignature: string | undefined;
 	#borderVisible = true;
 
 	constructor(theme: EditorTheme) {
@@ -538,7 +540,10 @@ export class Editor implements Component, Focusable {
 	 * per-event rebuilds to one per painted frame.
 	 */
 	setTopBorder(content: EditorTopBorder | undefined): void {
+		if (this.#topBorderContent?.content === content?.content && this.#topBorderContent?.width === content?.width)
+			return;
 		this.#topBorderContent = content;
+		this.#widthEpochRevision++;
 	}
 
 	/**
@@ -548,11 +553,16 @@ export class Editor implements Component, Focusable {
 	 *
 	 * Use this when the top border derives from state that mutates far faster
 	 * than the render cadence (session events, streaming, subagent updates).
-	 * The TUI already throttles renders, so a provider is invoked at most once
-	 * per frame and never does wasted work between paints.
+	 * The TUI already throttles renders, so a provider does no work between
+	 * paints. A width transition also evaluates the previous width once so a
+	 * concurrent status mutation remains distinguishable from pure reflow.
 	 */
 	setTopBorderProvider(provider: ((availableWidth: number) => EditorTopBorder | undefined) | undefined): void {
+		if (this.#topBorderProvider === provider) return;
 		this.#topBorderProvider = provider;
+		this.#topBorderProviderWidth = undefined;
+		this.#topBorderProviderSignature = undefined;
+		this.#widthEpochRevision++;
 	}
 
 	/**
@@ -911,7 +921,26 @@ export class Editor implements Component, Focusable {
 			// Provider (lazy) wins over eager content — a host that installs both
 			// wants the coalesced path; falling back to eager keeps existing
 			// setTopBorder callers working unchanged.
-			const topBorder = this.#topBorderProvider ? this.#topBorderProvider(topFillWidth) : this.#topBorderContent;
+			let topBorder: EditorTopBorder | undefined;
+			if (this.#topBorderProvider) {
+				const previousWidth = this.#topBorderProviderWidth;
+				if (previousWidth !== undefined && previousWidth !== topFillWidth) {
+					const previousWidthBorder = this.#topBorderProvider(previousWidth);
+					const previousWidthSignature = previousWidthBorder
+						? `${previousWidthBorder.width}\0${previousWidthBorder.content}`
+						: "";
+					if (previousWidthSignature !== this.#topBorderProviderSignature) this.#widthEpochRevision++;
+				}
+				topBorder = this.#topBorderProvider(topFillWidth);
+				const signature = topBorder ? `${topBorder.width}\0${topBorder.content}` : "";
+				if (previousWidth === topFillWidth && signature !== this.#topBorderProviderSignature) {
+					this.#widthEpochRevision++;
+				}
+				this.#topBorderProviderWidth = topFillWidth;
+				this.#topBorderProviderSignature = signature;
+			} else {
+				topBorder = this.#topBorderContent;
+			}
 			if (topBorder) {
 				const { content, width: statusWidth } = topBorder;
 				if (statusWidth <= topFillWidth) {
