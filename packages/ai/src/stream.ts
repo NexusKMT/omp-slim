@@ -442,7 +442,10 @@ async function tryAcquireProviderInFlightLease(
 			heartbeatFlush = heartbeatFlush
 				.then(async () => {
 					if (!heartbeatActive) return;
-					const write = () => writeProviderInFlightInfo(leaseDir, token);
+					const write = () => {
+						if (!heartbeatActive) return Promise.resolve();
+						return writeProviderInFlightInfo(leaseDir, token);
+					};
 					if (providerInFlightHeartbeatWriterOverride) {
 						await providerInFlightHeartbeatWriterOverride(write);
 					} else {

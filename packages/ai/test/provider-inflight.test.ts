@@ -90,21 +90,51 @@ describe("provider in-flight request limits", () => {
 
 	test("releases its provider lease before reporting terminal completion", async () => {
 		registerMockApi();
+		const removalStarted = Promise.withResolvers<void>();
+		const allowRemoval = Promise.withResolvers<void>();
+		__providerInFlightForTesting.setLeaseRemover(async leasePath => {
+			removalStarted.resolve();
+			await allowRemoval.promise;
+			await fs.rm(leasePath, { recursive: true, force: true });
+		});
 		const mock = createMockModel({ provider: "tests", responses: [{ content: ["reply"] }] });
 
 		const stream = streamSimple(mock.model, context(), { maxInFlightRequests: { tests: 1 } });
+		const terminalObserved = Promise.withResolvers<"done" | "error">();
 		const terminalObservation = (async () => {
 			for await (const event of stream) {
 				if (event.type !== "done" && event.type !== "error") continue;
-				const entries = await fs.readdir(limiterDir("tests"), { withFileTypes: true });
-				return entries.filter(entry => entry.isDirectory()).length;
+				terminalObserved.resolve(event.type);
+				return event.type;
 			}
 			return undefined;
 		})();
-		const [result, leasesAtTerminal] = await Promise.all([stream.result(), terminalObservation]);
+		const resultPromise = stream.result();
+		const removalOutcome = await Promise.race([
+			removalStarted.promise.then(() => "started" as const),
+			Bun.sleep(2_000).then(() => "blocked" as const),
+		]);
+		if (removalOutcome === "blocked") {
+			allowRemoval.resolve();
+			throw new Error("Provider lease removal did not start");
+		}
+		let completionBeforeRelease: "terminal" | "result" | "pending";
+		try {
+			completionBeforeRelease = await Promise.race([
+				terminalObserved.promise.then(() => "terminal" as const),
+				resultPromise.then(() => "result" as const),
+				Bun.sleep(20).then(() => "pending" as const),
+			]);
+		} finally {
+			allowRemoval.resolve();
+		}
+		const [result, terminalType] = await Promise.all([resultPromise, terminalObservation]);
 
+		expect(completionBeforeRelease).toBe("pending");
 		expect(result.content).toEqual([{ type: "text", text: "reply" }]);
-		expect(leasesAtTerminal).toBe(0);
+		expect(terminalType).toBe("done");
+		const entries = await fs.readdir(limiterDir("tests"), { withFileTypes: true });
+		expect(entries.filter(entry => entry.isDirectory())).toHaveLength(0);
 	});
 
 	test("keeps a completed response when provider lease removal fails", async () => {
@@ -193,6 +223,61 @@ describe("provider in-flight request limits", () => {
 		expect(heartbeatWrites).toBe(1);
 		const entries = await fs.readdir(limiterDir("tests"), { withFileTypes: true });
 		expect(entries.filter(entry => entry.isDirectory())).toHaveLength(0);
+	});
+
+	test("does not refresh a surviving lease after heartbeat shutdown", async () => {
+		registerMockApi();
+		const requestStarted = Promise.withResolvers<void>();
+		const finishRequest = Promise.withResolvers<void>();
+		const heartbeatStarted = Promise.withResolvers<void>();
+		const resumeHeartbeat = Promise.withResolvers<void>();
+		const heartbeatSettled = Promise.withResolvers<void>();
+		__providerInFlightForTesting.setHeartbeatTimings({ heartbeatMs: 5, heartbeatFlushTimeoutMs: 20 });
+		__providerInFlightForTesting.setHeartbeatWriter(async writeProviderInFlightInfo => {
+			heartbeatStarted.resolve();
+			await resumeHeartbeat.promise;
+			try {
+				await writeProviderInFlightInfo();
+			} finally {
+				heartbeatSettled.resolve();
+			}
+		});
+		__providerInFlightForTesting.setLeaseRemover(async () => {
+			throw Object.assign(new Error("simulated lease removal failure"), { code: "EBUSY" });
+		});
+		const mock = createMockModel({
+			provider: "tests",
+			handler: async () => {
+				requestStarted.resolve();
+				await finishRequest.promise;
+				return { content: ["reply"] };
+			},
+		});
+
+		const stream = streamSimple(mock.model, context(), { maxInFlightRequests: { tests: 1 } });
+		const resultPromise = stream.result();
+		const keepAlive = setInterval(() => {}, 1_000);
+		let infoPath: string;
+		let infoBeforeLateHeartbeat: string;
+		try {
+			await requestStarted.promise;
+			await heartbeatStarted.promise;
+			finishRequest.resolve();
+			const result = await resultPromise;
+			expect(result.content).toEqual([{ type: "text", text: "reply" }]);
+			const entries = await fs.readdir(limiterDir("tests"), { withFileTypes: true });
+			const lease = entries.find(entry => entry.isDirectory());
+			if (!lease) throw new Error("Expected failed cleanup to leave a provider lease");
+			infoPath = path.join(limiterDir("tests"), lease.name, "info.json");
+			infoBeforeLateHeartbeat = await Bun.file(infoPath).text();
+		} finally {
+			clearInterval(keepAlive);
+			finishRequest.resolve();
+			resumeHeartbeat.resolve();
+		}
+		await heartbeatSettled.promise;
+
+		expect(await Bun.file(infoPath).text()).toBe(infoBeforeLateHeartbeat);
 	});
 
 	test("removes an aborted queued request without dispatching it", async () => {
