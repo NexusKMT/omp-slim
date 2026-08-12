@@ -76,14 +76,16 @@ describe("Editor component", () => {
 	it("tracks lazy top-border changes independently of width reflow", () => {
 		const editor = new Editor(defaultEditorTheme);
 		let status = "idle";
+		let revision = 0;
 		editor.setTopBorderProvider(availableWidth => {
 			const content = `${status}:${availableWidth}`;
-			return { content, width: visibleWidth(content) };
+			return { content, width: visibleWidth(content), revision };
 		});
 		editor.render(40);
 		const idleRevision = editor.getNativeScrollbackWidthEpochRevision();
 
 		status = "streaming";
+		revision++;
 		editor.render(30);
 		const streamingRevision = editor.getNativeScrollbackWidthEpochRevision();
 		expect(streamingRevision).toBeGreaterThan(idleRevision);

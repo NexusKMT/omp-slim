@@ -391,6 +391,8 @@ export interface EditorTopBorder {
 	content: string;
 	/** Visible width of the content */
 	width: number;
+	/** Optional logical revision that changes independently of available width. */
+	revision?: number;
 }
 
 interface HistoryEntry {
@@ -519,6 +521,7 @@ export class Editor implements Component, Focusable {
 	#topBorderProvider?: (availableWidth: number) => EditorTopBorder | undefined;
 	#topBorderProviderWidth: number | undefined;
 	#topBorderProviderSignature: string | undefined;
+	#topBorderProviderRevision: number | undefined;
 	#borderVisible = true;
 
 	constructor(theme: EditorTheme) {
@@ -553,15 +556,16 @@ export class Editor implements Component, Focusable {
 	 *
 	 * Use this when the top border derives from state that mutates far faster
 	 * than the render cadence (session events, streaming, subagent updates).
-	 * The TUI already throttles renders, so a provider does no work between
-	 * paints. A width transition also evaluates the previous width once so a
-	 * concurrent status mutation remains distinguishable from pure reflow.
+	 * The TUI already throttles renders, so a provider is invoked exactly once
+	 * per frame and does no work between paints. Return a logical `revision` to
+	 * distinguish concurrent status mutations from pure width reflow.
 	 */
 	setTopBorderProvider(provider: ((availableWidth: number) => EditorTopBorder | undefined) | undefined): void {
 		if (this.#topBorderProvider === provider) return;
 		this.#topBorderProvider = provider;
 		this.#topBorderProviderWidth = undefined;
 		this.#topBorderProviderSignature = undefined;
+		this.#topBorderProviderRevision = undefined;
 		this.#widthEpochRevision++;
 	}
 
@@ -926,20 +930,21 @@ export class Editor implements Component, Focusable {
 			let topBorder: EditorTopBorder | undefined;
 			if (this.#topBorderProvider) {
 				const previousWidth = this.#topBorderProviderWidth;
-				if (previousWidth !== undefined && previousWidth !== topFillWidth) {
-					const previousWidthBorder = this.#topBorderProvider(previousWidth);
-					const previousWidthSignature = previousWidthBorder
-						? `${previousWidthBorder.width}\0${previousWidthBorder.content}`
-						: "";
-					if (previousWidthSignature !== this.#topBorderProviderSignature) this.#widthEpochRevision++;
-				}
 				topBorder = this.#topBorderProvider(topFillWidth);
 				const signature = topBorder ? `${topBorder.width}\0${topBorder.content}` : "";
-				if (previousWidth === topFillWidth && signature !== this.#topBorderProviderSignature) {
+				const revision = topBorder?.revision;
+				if (
+					(previousWidth !== undefined &&
+						revision !== undefined &&
+						this.#topBorderProviderRevision !== undefined &&
+						revision !== this.#topBorderProviderRevision) ||
+					(previousWidth === topFillWidth && signature !== this.#topBorderProviderSignature)
+				) {
 					this.#widthEpochRevision++;
 				}
 				this.#topBorderProviderWidth = topFillWidth;
 				this.#topBorderProviderSignature = signature;
+				this.#topBorderProviderRevision = revision;
 			} else {
 				topBorder = this.#topBorderContent;
 			}
