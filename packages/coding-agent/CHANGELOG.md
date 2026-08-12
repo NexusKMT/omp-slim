@@ -4,7 +4,6 @@
 
 ### Fixed
 
-- Fixed terminal Mermaid borders and junctions using low-contrast UI chrome colors instead of the active theme's readable content color.
 - Fixed streaming and finalized transcript blocks exposing width-independent source boundaries so multiplexer pane resizes retain output queued during settlement without duplicating prior transcript history.
 
 ## [17.2.15] - 2026-08-12
