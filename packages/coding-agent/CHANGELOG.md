@@ -21,6 +21,7 @@
 - Fixed the MCP Streamable HTTP transport never sending the `MCP-Protocol-Version` header and negotiating the stale `2025-03-26` revision, which made spec-current servers (e.g. AWS Bedrock AgentCore Gateway with an outbound per-user OAuth target) reject every `tools/call` with a generic internal error. The client now negotiates `2025-11-25`, echoes the negotiated version on every request after `initialize`, and resumes server-closed POST response streams with `Last-Event-ID` after the requested SSE retry interval ([#8264](https://github.com/can1357/oh-my-pi/issues/8264)).
 - Fixed `/handoff` losing the previous session's `local://` artifacts (plans, scratch files, research notes): the handoff document referenced files that became unreadable because the new session's `local/` root was empty. Local artifacts are now copied across the handoff session boundary, mirroring the plan approve-and-execute path ([#8261](https://github.com/can1357/oh-my-pi/issues/8261)).
 - Fixed valid `.tar` and `.tar.gz` archive reads terminating omp through libarchive by parsing tar members in-process ([#4774](https://github.com/can1357/oh-my-pi/issues/4774)).
+- Fixed the in-process tar reader looping forever on directory symlinks targeting their own subtree (`a -> a/b`) and misclassifying file symlinks routed through directory aliases as dangling; alias resolution is now depth-bounded and link targets resolve through directory aliases at index time.
 
 ## [17.2.14] - 2026-08-11
 
