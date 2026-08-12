@@ -290,6 +290,44 @@ describe("model thinking derivation", () => {
 		expect(openRouter.thinking?.effortMap).toBeUndefined();
 	});
 
+	it("applies the DeepSeek effort contract to Ollama Cloud ollama-chat models (issue #8334)", () => {
+		const flash = createModel({
+			id: "deepseek-v4-flash",
+			api: "ollama-chat",
+			provider: "ollama-cloud",
+			baseUrl: "https://ollama.com",
+		});
+		const flashDated = createModel({
+			id: "deepseek-v4-flash:0731",
+			api: "ollama-chat",
+			provider: "ollama-cloud",
+			baseUrl: "https://ollama.com",
+		});
+		const pro = createModel({
+			id: "deepseek-v4-pro",
+			api: "ollama-chat",
+			provider: "ollama-cloud",
+			baseUrl: "https://ollama.com",
+		});
+		const v32 = createModel({
+			id: "deepseek-v3.2",
+			api: "ollama-chat",
+			provider: "ollama-cloud",
+			baseUrl: "https://ollama.com",
+		});
+
+		// V4 Flash keeps its low/high/max ladder over the ollama-chat transport
+		// instead of Ollama's generic minimal..xhigh scale (medium/xhigh fold
+		// into high, max is a real wire tier).
+		expect(getSupportedEfforts(flash)).toEqual([Effort.Low, Effort.High, Effort.Max]);
+		expect(getSupportedEfforts(flashDated)).toEqual([Effort.Low, Effort.High, Effort.Max]);
+		expect(flash.thinking?.effortMap).toBeUndefined();
+		// V4 Pro and the older reasoners top out at high/max, matching the
+		// direct DeepSeek API and every aggregator route.
+		expect(getSupportedEfforts(pro)).toEqual([Effort.High, Effort.Max]);
+		expect(getSupportedEfforts(v32)).toEqual([Effort.High, Effort.Max]);
+	});
+
 	it("encodes the Gemini 3 Pro effort gap and mandatory reasoning in metadata", () => {
 		const model = createModel({
 			id: "gemini-3-pro-preview",
