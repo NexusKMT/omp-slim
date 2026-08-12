@@ -343,13 +343,32 @@ describe("AgentSession mid-run threshold compaction", () => {
 		);
 
 		const prompt = session.prompt("keep notification mutations out of live context");
-		await toolResultHookEntered.promise;
-		await secondModelCallEntered.promise;
+		const toolResultHookOutcome = await Promise.race([
+			toolResultHookEntered.promise.then(() => "entered" as const),
+			Bun.sleep(2_000).then(() => "blocked" as const),
+		]);
+		const secondModelCallOutcome =
+			toolResultHookOutcome === "entered"
+				? await Promise.race([
+						secondModelCallEntered.promise.then(() => "dispatched" as const),
+						Bun.sleep(2_000).then(() => "blocked" as const),
+					])
+				: "blocked";
 		releaseMutation.resolve();
-		await mutationApplied.promise;
+		const mutationOutcome = await Promise.race([
+			mutationApplied.promise.then(() => "applied" as const),
+			Bun.sleep(2_000).then(() => "blocked" as const),
+		]);
 		releaseSecondModelCall.resolve();
-		await prompt;
+		const promptOutcome = await Promise.race([
+			prompt.then(() => "settled" as const),
+			Bun.sleep(2_000).then(() => "blocked" as const),
+		]);
 
+		expect(toolResultHookOutcome).toBe("entered");
+		expect(secondModelCallOutcome).toBe("dispatched");
+		expect(mutationOutcome).toBe("applied");
+		expect(promptOutcome).toBe("settled");
 		expect(observedContexts).toHaveLength(2);
 		expect(observedContexts[1].join("\n")).not.toContain("LATE-MESSAGE-END-MUTATION");
 		expect(JSON.stringify(session.messages)).not.toContain("LATE-MESSAGE-END-MUTATION");
