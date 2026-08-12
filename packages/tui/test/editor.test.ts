@@ -40,6 +40,23 @@ describe("Editor component", () => {
 		expect(editor.getNativeScrollbackWidthEpochRevision()).toBeGreaterThan(clippedRevision);
 	});
 
+	it("advances its width-epoch revision when terminal-cursor layout adds a row", () => {
+		const editor = new Editor(defaultEditorTheme);
+		editor.focused = true;
+		editor.setText("draft");
+		editor.setImeSafeCursorLayout(true);
+		const inlineRows = editor.render(40).length;
+		const inlineRevision = editor.getNativeScrollbackWidthEpochRevision();
+
+		editor.setUseTerminalCursor(true);
+
+		expect(editor.render(40).length).toBeGreaterThan(inlineRows);
+		const terminalCursorRevision = editor.getNativeScrollbackWidthEpochRevision();
+		expect(terminalCursorRevision).toBeGreaterThan(inlineRevision);
+		editor.setUseTerminalCursor(true);
+		expect(editor.getNativeScrollbackWidthEpochRevision()).toBe(terminalCursorRevision);
+	});
+
 	it("advances its width-epoch revision when autocomplete changes without changing text", async () => {
 		const editor = new Editor(defaultEditorTheme);
 		const { promise: autocompleteUpdated, resolve: resolveAutocompleteUpdated } = Promise.withResolvers<void>();

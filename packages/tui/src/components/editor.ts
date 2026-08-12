@@ -580,12 +580,16 @@ export class Editor implements Component, Focusable {
 	 * Use the real terminal cursor instead of rendering a cursor glyph.
 	 */
 	setUseTerminalCursor(useTerminalCursor: boolean): void {
+		if (this.#useTerminalCursor === useTerminalCursor) return;
 		this.#useTerminalCursor = useTerminalCursor;
+		this.#widthEpochRevision++;
 	}
 
 	/** Render a dedicated bottom border so terminal-local IME preedit cannot shift editor chrome. */
 	setImeSafeCursorLayout(enabled: boolean): void {
+		if (this.#imeSafeCursorLayout === enabled) return;
 		this.#imeSafeCursorLayout = enabled;
+		this.#widthEpochRevision++;
 	}
 
 	getUseTerminalCursor(): boolean {
