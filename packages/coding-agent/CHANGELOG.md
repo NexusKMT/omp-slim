@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.15] - 2026-08-12
+
 ### Added
 
 - Added `--external-thinking` CLI flag to force external thinking tool activation.

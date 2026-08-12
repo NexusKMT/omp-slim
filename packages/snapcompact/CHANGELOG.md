@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.15] - 2026-08-12
+
 ### Fixed
 
 - Fixed Anthropic model ID parsing to be case-insensitive and extended the high-resolution 1932px frame tier to Claude Opus 5 and later, preventing sessions from falling back to lower-resolution 1568px frames and preserving full history per compaction.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.15] - 2026-08-12
+
 ### Fixed
 
 - Fixed an issue where AWS_BEDROCK_SKIP_AUTH failed to expose Amazon Bedrock models when AWS credential files were unavailable.

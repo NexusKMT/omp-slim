@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.2.15] - 2026-08-12
+
 ### Added
 
 - Added a post-apply parse advisory warning that alerts users when an applied edit fails to parse (despite the pre-edit content parsing successfully), helping catch balance-neutral misplacements that previously failed silently.
