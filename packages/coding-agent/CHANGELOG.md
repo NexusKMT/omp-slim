@@ -104,6 +104,7 @@
 - Fixed advisor recovery selecting another role's fallback chain when both roles use the same model. ([#8075](https://github.com/can1357/oh-my-pi/issues/8075))
 - Fixed `retry_fallback_applied` and `retry_fallback_succeeded` not being forwarded to extensions: `AgentSession.#emitExtensionEvent` had no branch for either event and `ExtensionAPI.on(...)` lacked overloads, so extension handlers could not observe model/advisor fallback transitions or successes that the TUI and RPC paths already received ([#8079](https://github.com/can1357/oh-my-pi/issues/8079)).
 - Fixed the CLI crashing at startup with a raw uncaught `AuthBrokerError` when a configured auth broker (`auth.broker.url` / `OMP_AUTH_BROKER_URL`) is unreachable and no fresh cached snapshot exists. Startup auth discovery now fails with an actionable message naming the broker URL and the recovery options (`omp auth-broker serve`, or resetting `auth.broker.url` / `auth.broker.token`) and exits non-zero, instead of dumping a stack trace ([#8096](https://github.com/can1357/oh-my-pi/issues/8096)).
+- Fixed OpenCode discovery ignoring `opencode.jsonc` files and rejecting comments in `opencode.json`, which omitted imported settings and MCP servers. ([#8104](https://github.com/can1357/oh-my-pi/issues/8104))
 
 ## [17.2.12] - 2026-08-08
 
