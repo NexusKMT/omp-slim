@@ -125,6 +125,9 @@ function dualBillingFetch(
 			});
 		}
 		const payload = url.includes("format=credits") ? creditsPayload : monthlyPayload;
+		if (payload === null) {
+			return new Response("internal error", { status: 500 });
+		}
 		return new Response(JSON.stringify(payload), {
 			status: 200,
 			headers: { "content-type": "application/json" },
@@ -276,6 +279,31 @@ describe("xai-oauth usage provider", () => {
 		expect(credits?.amount.remainingFraction).toBe(1);
 		expect(credits?.status).toBe("ok");
 		expect(credits?.window?.resetsAt).toBe(Date.parse(periodEnd));
+	});
+
+	it("rejects inferred unified weekly usage when the monthly probe encounters a network error", async () => {
+		const periodEnd = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+		const periodStart = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+		const report = await xaiOauthUsageProvider.fetchUsage(
+			{ provider: "xai-oauth", credential: makeCredential() },
+			{
+				fetch: dualBillingFetch(
+					{
+						config: {
+							currentPeriod: {
+								end: periodEnd,
+								start: periodStart,
+								type: "USAGE_PERIOD_TYPE_WEEKLY",
+							},
+							isUnifiedBillingUser: true,
+						},
+					},
+					null,
+				).fetch,
+			},
+		);
+
+		expect(report).toBeNull();
 	});
 
 	it("falls back to monthly included quota when credits has no percent fields", async () => {

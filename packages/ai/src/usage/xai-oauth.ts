@@ -373,10 +373,21 @@ export const xaiOauthUsageProvider: UsageProvider = {
 					: null;
 		}
 
-		// When an account has an explicit monthly included quota and weekly credits
-		// were only inferred from an omitted percentage field, prefer the monthly quota
-		// so pure monthly unified accounts do not render a phantom weekly credit.
-		const effectiveWeekly = weekly && (!monthly || !weekly.inferredPercent) ? weekly : null;
+		// When an account is marked unified billing and weekly credits were only inferred
+		// from an omitted percentage field:
+		// - If a positive monthly quota is returned, use the monthly quota alone.
+		// - If the monthly endpoint returned a valid config without positive monthly quota,
+		//   confirm that this account relies on the weekly reset cycle and use weekly.
+		// - If the monthly fetch failed (transient network error), reject inferred weekly
+		//   so AuthStorage's retain-last-good cache preserves the previous valid snapshot.
+		let effectiveWeekly = weekly;
+		if (weekly?.inferredPercent && creditsLooksUnified) {
+			if (monthly) {
+				effectiveWeekly = null;
+			} else if (!monthlyPayload || !isRecord(monthlyPayload) || !isRecord(monthlyPayload.config)) {
+				effectiveWeekly = null;
+			}
+		}
 		if (!effectiveWeekly && !monthly) return null;
 
 		const limits: UsageLimit[] = [];
