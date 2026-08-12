@@ -412,7 +412,11 @@ describe("DAP multi-session debugging", () => {
 
 		expect(spawnSpy).toHaveBeenCalledTimes(1);
 		expect(spawnSpy.mock.calls[0]?.[0]).toEqual(["/usr/bin/debuggee", "--verbose"]);
-		expect(manager.getOutput().output).toContain(marker);
+		const output = manager.getOutput();
+		expect(output.output).toContain(marker);
+		expect(output.snapshot.outputBytes).toBeGreaterThan(128 * 1024);
+		expect(output.snapshot.outputTruncated).toBe(true);
+		expect(Buffer.byteLength(output.output, "utf-8")).toBeLessThanOrEqual(128 * 1024);
 
 		await manager.terminate(undefined, 1_000);
 	});
