@@ -732,6 +732,10 @@ export class Container
 					? currentRows.length !== captured.rowCount
 					: getNativeScrollbackWidthEpochRevision(captured.component) !== captured.revision)
 			) {
+				if (currentRows?.length === captured.rowCount) {
+					rows += currentRows.length;
+					continue;
+				}
 				break;
 			}
 			rows += currentRows.length;
@@ -779,6 +783,18 @@ export class Container
 		const source = getNativeScrollbackWidthEpoch(marker.component);
 		if (source?.isNativeScrollbackWidthEpochAppendOnly?.(marker.childBoundary) === false) return false;
 		if (!marker.trailing.some(child => child.hadRows)) return true;
+		for (let trailingIndex = 0; trailingIndex < marker.trailing.length; trailingIndex++) {
+			const captured = marker.trailing[trailingIndex]!;
+			const currentIndex = marker.sourceIndex + 1 + trailingIndex;
+			const currentRows = this.#memoChildLines[currentIndex];
+			const changed =
+				this.#memoChildren[currentIndex] !== captured.component ||
+				currentRows === undefined ||
+				(captured.revision === undefined
+					? currentRows.length !== captured.rowCount
+					: getNativeScrollbackWidthEpochRevision(captured.component) !== captured.revision);
+			if (changed && captured.hadRows && currentRows?.length === captured.rowCount) return false;
+		}
 		const previousRows = source?.resolveNativeScrollbackWidthEpoch(marker.childBoundary);
 		const currentRows = source?.getNativeScrollbackWidthEpochRows();
 		return previousRows === undefined || currentRows === undefined || currentRows <= previousRows;
@@ -1282,6 +1298,7 @@ export class TUI extends Container {
 	// SIGWINCH in a multiplexer resize burst. Unlike physical row counts, the
 	// opaque marker survives width reflow and resolves after the settled render.
 	#multiplexerWidthEpochBoundary: unknown;
+	#multiplexerWidthEpochPending = false;
 
 	// Frame row currently mapped to screen row 0. Monotonic between full
 	// paints: a shrink never re-exposes scrolled-off rows (they cannot be
@@ -2037,8 +2054,11 @@ export class TUI extends Container {
 					this.#requestResizeViewportPaint();
 					return;
 				}
-				if (this.#multiplexerWidthEpochBoundary === undefined) {
-					this.#multiplexerWidthEpochBoundary = this.captureNativeScrollbackWidthEpoch();
+				if (this.#previousWidth > 0 && this.terminal.columns !== this.#previousWidth) {
+					this.#multiplexerWidthEpochPending = true;
+					if (this.#multiplexerWidthEpochBoundary === undefined) {
+						this.#multiplexerWidthEpochBoundary = this.captureNativeScrollbackWidthEpoch();
+					}
 				}
 				this.#armMultiplexerResizeTimer({
 					clearScrollback: false,
@@ -3445,16 +3465,20 @@ export class TUI extends Container {
 		this.#multiplexerResizeHasPendingRender = false;
 		if (resizeEventOccurred) this.#forgetHardwareCursorState();
 		const widthChanged = this.#previousWidth > 0 && this.#previousWidth !== width;
-		const widthEpochSourceBoundary = widthChanged
+		const widthEpochOccurred = widthChanged || (resizeEventOccurred && this.#multiplexerWidthEpochPending);
+		const widthEpochSourceBoundary = widthEpochOccurred
 			? this.resolveNativeScrollbackWidthEpoch(this.#multiplexerWidthEpochBoundary)
 			: undefined;
-		const widthEpochCurrentRows = widthChanged
+		const widthEpochCurrentRows = widthEpochOccurred
 			? this.#getNativeScrollbackWidthEpochCurrentRows(this.#multiplexerWidthEpochBoundary)
 			: undefined;
-		const widthEpochAppendOnly = widthChanged
+		const widthEpochAppendOnly = widthEpochOccurred
 			? this.#isNativeScrollbackWidthEpochAppendOnly(this.#multiplexerWidthEpochBoundary)
 			: true;
-		if (resizeEventOccurred) this.#multiplexerWidthEpochBoundary = undefined;
+		if (resizeEventOccurred) {
+			this.#multiplexerWidthEpochBoundary = undefined;
+			this.#multiplexerWidthEpochPending = false;
+		}
 		// A resize event with net-unchanged dimensions still reflowed the
 		// terminal buffer; classify it as a height change so geometry handling
 		// repaints instead of diffing against a screen that no longer exists.
@@ -3462,7 +3486,7 @@ export class TUI extends Container {
 			(this.#previousHeight > 0 && this.#previousHeight !== height) ||
 			(resizeEventOccurred && this.#previousHeight > 0);
 		const geometryChanged = widthChanged || heightChanged;
-		const widthEpochReset = widthChanged && this.#resizeRepaintsInPlace();
+		const widthEpochReset = widthEpochOccurred && this.#resizeRepaintsInPlace();
 		// A later width reset cannot use the opaque native ledger against
 		// attachment rows from the current-width placement epoch. Capture that
 		// epoch's seam before reset classification replaces its baseline.

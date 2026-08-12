@@ -939,6 +939,41 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 		});
 	});
 
+	it("retains streamed rows across a net-unchanged width resize epoch", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const component = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				component.append(`round-trip-${index.toString().padStart(2, "0")} ${"W".repeat(46)}`);
+			}
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 6);
+				component.append(`round-trip-final ${"F".repeat(46)}`);
+				tui.requestRender();
+				term.resize(40, 6);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (let index = 0; index < 8; index++) {
+					const marker = `round-trip-${index.toString().padStart(2, "0")}`;
+					expect(
+						buffer.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+				expect(buffer.filter(line => line.includes("round-trip-final"))).toHaveLength(1);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
 	it("maps a queued append through the settled width using its logical boundary", async () => {
 		await withEnvPatch(TMUX_ENV, async () => {
 			const term = new VirtualTerminal(40, 6, 10_000);
@@ -1364,6 +1399,84 @@ describe("issue #2088: tmux pane-resize race produces viewport flash", () => {
 				tui.requestRender(true);
 				await settle(term);
 				expect(term.getBufferPosition().baseY).toBe(settledBaseY);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("does not append a populated nested tail replaced during resize settlement", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const transcript = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				transcript.append(`nrep-${index.toString().padStart(2, "0")} ${"X".repeat(46)}`);
+			}
+			const editor = new RevisionMutableLinesComponent(["editor-before"]);
+			const root = new Container();
+			root.addChild(transcript);
+			root.addChild(editor);
+			tui.addChild(root);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 6);
+				editor.setLines(["editor-after"]);
+				tui.requestComponentRender(editor);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (let index = 0; index < 8; index++) {
+					const marker = `nrep-${index.toString().padStart(2, "0")}`;
+					expect(
+						buffer.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+				expect(visible(term).at(-1)).toBe("editor-after");
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("preserves populated nested tails after a replaced empty child", async () => {
+		await withEnvPatch(TMUX_ENV, async () => {
+			const term = new VirtualTerminal(40, 6, 10_000);
+			const tui = new TUI(term);
+			const transcript = new WrappingStreamComponent();
+			for (let index = 0; index < 8; index++) {
+				transcript.append(`nempty-${index.toString().padStart(2, "0")} ${"E".repeat(46)}`);
+			}
+			const emptyStatus = new RevisionMutableLinesComponent([]);
+			const editor = new MutableLinesComponent(["editor"]);
+			const root = new Container();
+			root.addChild(transcript);
+			root.addChild(emptyStatus);
+			root.addChild(editor);
+			tui.addChild(root);
+
+			try {
+				tui.start();
+				await settle(term);
+				term.resize(17, 6);
+				emptyStatus.setLines([]);
+				tui.requestComponentRender(emptyStatus);
+				await Bun.sleep(DEBOUNCE_SETTLE_WAIT_MS);
+				await settle(term);
+
+				const buffer = term.getScrollBuffer().map(line => line.trimEnd());
+				for (let index = 0; index < 8; index++) {
+					const marker = `nempty-${index.toString().padStart(2, "0")}`;
+					expect(
+						buffer.filter(line => line.includes(marker)),
+						marker,
+					).toHaveLength(1);
+				}
+				expect(visible(term).at(-1)).toBe("editor");
 			} finally {
 				tui.stop();
 			}
