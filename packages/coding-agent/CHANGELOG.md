@@ -91,6 +91,9 @@
 ### Fixed
 
 - Fixed long streaming `write` previews repeatedly scanning and splitting the full accumulated file content, which could stall the TUI.
+### Fixed
+
+- Fixed custom commands losing the documented `api.arktype.type(...)` compatibility surface while retaining the callable `api.arktype(...)` builder. ([#7968](https://github.com/can1357/oh-my-pi/issues/7968))
 
 ## [17.2.12] - 2026-08-08
 

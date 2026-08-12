@@ -22,7 +22,7 @@ function createApi(): CustomCommandAPI {
 			killed: false,
 		}),
 		typebox: {} as unknown as typeof TypeBox,
-		arktype: type,
+		arktype: Object.assign(type, { type }),
 		zod,
 		pi: piCodingAgent,
 	};
