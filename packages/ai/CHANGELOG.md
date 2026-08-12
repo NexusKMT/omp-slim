@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed `AWS_BEDROCK_SKIP_AUTH` failing to expose Amazon Bedrock models when AWS credential files are unavailable; the registry now recognizes the transport's explicit auth bypass without enabling the separate Bedrock Mantle provider ([#8267](https://github.com/can1357/oh-my-pi/issues/8267)).
+- Fixed `forceReasoningOff` being ignored by Anthropic and Google transports, which allowed native thinking alongside a caller-supplied external scratchpad.
 
 ## [17.2.14] - 2026-08-11
 

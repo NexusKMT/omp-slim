@@ -1515,12 +1515,12 @@ function mapOptionsForApi<TApi extends Api>(
 	switch (model.api) {
 		case "anthropic-messages": {
 			// Explicitly disable thinking when reasoning is not specified, the caller
-			// disabled it, or the model doesn't support it. `disableReasoning` is a
-			// SimpleStreamOptions flag that never reaches AnthropicOptions on its own,
-			// so it must be folded into `thinkingEnabled` here (mandatory-reasoning
-			// models already clamp it away in normalizeMandatoryReasoningOptions).
+			// disabled it, an external scratchpad replaces it, or the model doesn't
+			// support it. These SimpleStreamOptions flags never reach AnthropicOptions
+			// on their own, so fold them into thinkingEnabled here (mandatory-reasoning
+			// models already clamp them away in normalizeMandatoryReasoningOptions).
 			const reasoning = options?.reasoning;
-			if (!reasoning || !model.reasoning || options?.disableReasoning) {
+			if (!reasoning || !model.reasoning || options?.disableReasoning || options?.forceReasoningOff) {
 				return castApi<"anthropic-messages">({
 					...base,
 					requestModelId: resolveWireModelId(model, undefined),
@@ -1725,10 +1725,10 @@ function mapOptionsForApi<TApi extends Api>(
 			});
 
 		case "google-generative-ai": {
-			// Explicitly disable thinking when reasoning is not specified or model doesn't support it
-			// This is needed because Gemini has "dynamic thinking" enabled by default
+			// Explicitly disable thinking when reasoning is absent, unsupported, or
+			// replaced by the caller's external scratchpad. Gemini defaults thinking on.
 			const reasoning = options?.reasoning;
-			if (!reasoning || !model.reasoning) {
+			if (!reasoning || !model.reasoning || options?.disableReasoning || options?.forceReasoningOff) {
 				return castApi<"google-generative-ai">({
 					...base,
 					serviceTier: options?.serviceTier,
@@ -1772,7 +1772,7 @@ function mapOptionsForApi<TApi extends Api>(
 		case "google-gemini-cli": {
 			const reasoning = options?.reasoning;
 			const toolChoice = mapGoogleToolChoice(options?.toolChoice);
-			if (reasoning && model.reasoning) {
+			if (reasoning && model.reasoning && !options?.disableReasoning && !options?.forceReasoningOff) {
 				const effort = requireSupportedEffort(model, reasoning);
 
 				// Gemini 3+ models use thinkingLevel instead of thinkingBudget
@@ -1831,9 +1831,10 @@ function mapOptionsForApi<TApi extends Api>(
 		}
 
 		case "google-vertex": {
-			// Explicitly disable thinking when reasoning is not specified or model doesn't support it
+			// Explicitly disable thinking when reasoning is absent, unsupported, or
+			// replaced by the caller's external scratchpad.
 			const reasoning = options?.reasoning;
-			if (!reasoning || !model.reasoning) {
+			if (!reasoning || !model.reasoning || options?.disableReasoning || options?.forceReasoningOff) {
 				return castApi<"google-vertex">({
 					...base,
 					serviceTier: options?.serviceTier,

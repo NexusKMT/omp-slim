@@ -109,6 +109,15 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		workspaceTree: { rootPath: tempDir, rendered: "", truncated: false, totalLines: 0, agentsMdFiles: [] },
 	});
 
+	const requireBundledModel = (
+		provider: "anthropic" | "google-antigravity" | "openai" | "xai",
+		id: string,
+	): Model => {
+		const bundled = getBundledModel(provider, id);
+		if (!bundled) throw new Error(`Expected ${provider}/${id} model to exist`);
+		return bundled;
+	};
+
 	afterEach(() => {
 		for (const tempDir of tempDirs.splice(0)) {
 			removeSyncWithRetries(tempDir);
@@ -152,6 +161,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		const settings = Settings.isolated();
 		const { session } = await createAgentSession({
 			...baseOptions(tempDir),
+			model: requireBundledModel("openai", "gpt-5"),
 			settings,
 		});
 
@@ -174,18 +184,40 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		}
 	});
 
-	it("activates the private think tool at startup when external thinking is configured", async () => {
+	it("exposes the private think tool only on transports that can disable native reasoning", async () => {
 		const tempDir = makeTempDir();
 		const settings = Settings.isolated({ externalThinking: true });
+		const unsupported = requireBundledModel("xai", "grok-4");
+		const fable = requireBundledModel("anthropic", "claude-fable-5");
+		const responses = requireBundledModel("openai", "gpt-5");
+		const gemini = requireBundledModel("google-antigravity", "gemini-3.6-flash");
 		const { session } = await createAgentSession({
 			...baseOptions(tempDir),
 			settings,
+			model: unsupported,
 		});
+		const authStorage = session.modelRegistry.authStorage;
+		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		authStorage.setRuntimeApiKey("openai", "test-key");
+		authStorage.setRuntimeApiKey("google-antigravity", "test-key");
+		authStorage.setRuntimeApiKey("xai", "test-key");
 
 		try {
+			expect(session.getActiveToolNames()).not.toContain("think");
+
+			await session.setModel(fable);
 			expect(session.getToolByName("think")).toBeDefined();
 			expect(session.getActiveToolNames()).toContain("think");
-			expect(session.getXdevToolEntries().map(entry => entry.name)).not.toContain("think");
+			expect(session.systemPrompt.join("\n")).toContain("private scratchpad; not shown to user");
+
+			await session.setModel(responses);
+			expect(session.getActiveToolNames()).toContain("think");
+			await session.setModel(gemini);
+			expect(session.getActiveToolNames()).toContain("think");
+
+			await session.setModel(unsupported);
+			expect(session.getActiveToolNames()).not.toContain("think");
+			expect(session.systemPrompt.join("\n")).not.toContain("private scratchpad; not shown to user");
 		} finally {
 			await session.dispose();
 		}
@@ -217,7 +249,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			fetch: async request => {
 				requestTexts.push(await request.text());
 				if (requestTexts.length === 1) {
-					const argumentsJson = JSON.stringify({ thoughts: "Checked the request before answering." });
+					const argumentsJson = JSON.stringify({ notes: "Checked the request before answering." });
 					return sse([
 						{
 							type: "response.output_item.added",
@@ -267,8 +299,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 				]);
 			},
 		});
-		const model = getBundledModel("openai", "gpt-5");
-		if (!model) throw new Error("Expected gpt-5 model to exist");
+		const model = requireBundledModel("openai", "gpt-5");
 		// The prompt preflight validates the key through the registry (not the
 		// per-request `getApiKey` override), so seed it for keyless CI runners.
 		modelRegistry.authStorage.setRuntimeApiKey("openai", "test-key");

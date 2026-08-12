@@ -95,12 +95,8 @@ Write JSON args as `content` to `xd://<tool>` via `{{toolRefs.write}}`. Invalid 
 {{/if}}
 
 {{#has tools "think"}}
-§ Reasoning
-`{{toolRefs.think}}`: private scratchpad; unwritten reasoning is unworked.
-- MUST call before turn's first action and before expensive-to-undo edit, destructive command, or final answer.
-- Restate ask/constraints; ordered subproblems; explicitly solve/intermediate-result each; enumerate/resolve cases.
-- Check claims against constraints, a boundary/degenerate case, and likely error. Failed check → redo step, NEVER patch conclusion.
-- Re-call only for material new state: plan-changing result, failed check, unopened subproblem; NEVER narrate progress/restate recorded work.
+§ Scratchpad
+`{{toolRefs.think}}`: private scratchpad; not shown to user.
 {{/has}}
 
 § Tool Policy
