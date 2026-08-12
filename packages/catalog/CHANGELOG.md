@@ -6,6 +6,13 @@
 
 - Fixed Ollama Cloud DeepSeek V4 Flash (including dated/preview tags like `deepseek-v4-flash:0731`) exposing the generic `minimal`/`low`/`medium`/`high`/`xhigh` effort ladder without `max`; the `ollama-chat` transport now applies the DeepSeek effort contract (Flash → `low`/`high`/`max`, V4 Pro and older reasoners → `high`/`max`), matching the direct API and every other host ([#8334](https://github.com/can1357/oh-my-pi/issues/8334)).
 - Bounded OpenAI-compatible model discovery with a default request timeout so a stalled provider `/models` endpoint can no longer hang startup indefinitely in `resolveModelDiscoveryFallback` ([#8315](https://github.com/can1357/oh-my-pi/issues/8315)).
+### Added
+
+- Added first-party OpenAI Daybreak Blue, Daybreak Red, and GPT-5.6 Cyber models with their documented API pricing, token limits, tools, and full `off`/`low`/`medium`/`high`/`xhigh`/`max` reasoning controls.
+
+### Fixed
+
+- Fixed Codex-discovered `gpt-daybreak-*` aliases being treated as unknown models, restoring the GPT-5.6 `low`/`medium`/`high`/`xhigh`/`max` effort ladder and its 372K fallback only when the Codex registry omits `context_window`.
 
 ## [17.2.15] - 2026-08-12
 
@@ -23,9 +30,6 @@
 
 - Marked `meta/muse-spark-1.2` and `muse-spark-1.2-contributor` as image-capable (`input: ["text", "image"]`) with the same Responses reasoning, thinking, and cost metadata as `muse-spark-1.1` (contributor uses its discounted 0.1/0.2 pricing), so `omp models` no longer lists them as text-only.
 - Fixed GLM-5.2 thinking levels across Baseten, CoreWeave, HuggingFace, and other uppercase-ID resellers, which were getting the generic `xhigh` effort ladder instead of the GLM-5.2-specific tiers. Also added Baseten `zai-org/GLM-5.2-Fast` and Fireworks `glm-5.2-fast` as reasoning models ([#8200](https://github.com/can1357/oh-my-pi/pull/8200) by [@jcfrancisco](https://github.com/jcfrancisco)).
-### Added
-
-- Added first-party OpenAI Daybreak Blue, Daybreak Red, and GPT-5.6 Cyber models with their documented API pricing, token limits, tools, and full `off`/`low`/`medium`/`high`/`xhigh`/`max` reasoning controls.
 
 ## [17.2.12] - 2026-08-08
 
