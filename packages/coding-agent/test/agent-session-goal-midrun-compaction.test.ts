@@ -410,7 +410,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 		expect(persistedToolTurnRoles).toEqual(["assistant", "toolResult"]);
 	});
 
-	it("treats same-key assistant content variants as persisted before mid-run compaction", async () => {
+	it("keeps synchronous message_end mutations notification-local during mid-run compaction", async () => {
 		const extensionRuntime = new ExtensionRuntime();
 		const extension = await loadExtensionFromFactory(
 			pi => {
@@ -441,6 +441,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 		expect(compactSpy).toHaveBeenCalledTimes(1);
 		expect(observedContexts.length).toBeGreaterThanOrEqual(2);
 		expect(observedContexts[1].join("\n")).toContain("MID-RUN-COMPACTED-WITH-CONTENT-VARIANT");
+		expect(JSON.stringify(session.messages)).not.toContain("display-variant");
 	});
 
 	it("does not compact mid-run outside goal mode when disabled", async () => {
