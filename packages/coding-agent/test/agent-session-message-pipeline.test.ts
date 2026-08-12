@@ -273,6 +273,7 @@ describe("AgentSession message pipeline", () => {
 	});
 
 	it("continues a user turn when an attached WebP is undecodable by an STB model", async () => {
+		using tempDir = TempDir.createSync("@pi-stb-corrupt-attachment-");
 		const api = "test-stb-corrupt-attachment";
 		const contexts: Context[] = [];
 		registerCustomApi(api, (_model, context) => {
@@ -298,24 +299,47 @@ describe("AgentSession message pipeline", () => {
 			contextWindow: 4096,
 			maxTokens: 1024,
 		} as ModelSpec<Api>) as Model<Api>;
-		const session = new AgentSession({
-			agent: new Agent({ initialState: { model, systemPrompt: ["system"], messages: [], tools: [] } }),
-			sessionManager: SessionManager.inMemory(),
+		const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+		authStorage.setRuntimeApiKey(model.provider, "test-key");
+		const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
+		const { session } = await createAgentSession({
+			cwd: tempDir.path(),
+			agentDir: tempDir.path(),
+			sessionManager: SessionManager.inMemory(tempDir.path()),
+			authStorage,
+			modelRegistry,
 			settings: Settings.isolated({ "compaction.enabled": false }),
-			modelRegistry: createModelRegistryStub() as never,
+			model,
+			disableExtensionDiscovery: true,
+			skills: [],
+			contextFiles: [],
+			promptTemplates: [],
+			slashCommands: [],
+			enableMCP: false,
+			enableLsp: false,
+			skipPythonPreflight: true,
+			taskDepth: 1,
+			agentId: "SubAgent",
 		});
-		sessions.push(session);
-		const corrupt: ImageContent = {
-			type: "image",
-			data: Buffer.from("RIFF0000WEBPbroken-attachment").toBase64(),
-			mimeType: "image/webp",
-		};
+		try {
+			const corrupt: ImageContent = {
+				type: "image",
+				data: Buffer.from("RIFF0000WEBPbroken-attachment").toBase64(),
+				mimeType: "image/webp",
+			};
 
-		await session.sendUserMessage([{ type: "text", text: "inspect this" }, corrupt]);
+			await session.sendUserMessage([{ type: "text", text: "inspect this" }, corrupt]);
 
-		expect(contexts).toHaveLength(1);
-		const userMessage = contexts[0]!.messages.find(message => message.role === "user");
-		expect(userMessage?.content).toEqual([{ type: "text", text: "inspect this" }]);
+			expect(contexts).toHaveLength(1);
+			const userMessage = contexts[0]!.messages.find(message => message.role === "user");
+			expect(userMessage?.content).toEqual([
+				{ type: "text", text: "inspect this" },
+				{ type: "text", text: "[image omitted: WebP could not be decoded for this model]" },
+			]);
+		} finally {
+			await session.dispose();
+			authStorage.close();
+		}
 	});
 
 	it("keeps stored steering text raw while pre-LLM conversion wraps it", async () => {

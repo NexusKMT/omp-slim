@@ -193,7 +193,10 @@ export async function normalizeModelContextImages(
 		try {
 			if (excludesWebP && isWebPImage(image)) {
 				const converted = await memoizedStbImageNormalization(image, options?.resize);
-				if (converted) normalized.push(converted);
+				// Mixed-content callers reassemble normalized images positionally, so
+				// preserve one output slot per input. The provider-boundary pass replaces
+				// an undecodable WebP with an omission note before dispatch.
+				normalized.push(converted ?? image);
 				continue;
 			}
 			const resized = await resizeImage(image, resize);

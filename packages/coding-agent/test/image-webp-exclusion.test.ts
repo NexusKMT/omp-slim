@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
+import type { CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
+import { SessionProviderBoundary } from "@oh-my-pi/pi-coding-agent/session/session-provider-boundary";
 import {
 	modelLacksWebpSupport,
 	normalizeModelContextImages,
@@ -166,7 +168,7 @@ describe("normalizeModelContextImages model-aware WebP exclusion", () => {
 		expect(secondMetadata.width).toBe(60);
 	});
 
-	test("drops an undecodable WebP attachment instead of rejecting the turn", async () => {
+	test("preserves an undecodable WebP attachment slot for provider-boundary omission", async () => {
 		const corrupt = {
 			type: "image" as const,
 			data: Buffer.from("RIFF0000WEBPcorrupt").toBase64(),
@@ -177,7 +179,37 @@ describe("normalizeModelContextImages model-aware WebP exclusion", () => {
 			model: buildStbVisionModel("managed-primary"),
 		});
 
-		expect(result).toEqual([]);
+		expect(result).toEqual([corrupt]);
+	});
+
+	test("keeps custom-message image slots aligned when one WebP is undecodable", async () => {
+		const corrupt = {
+			type: "image" as const,
+			data: Buffer.from("RIFF0000WEBPbad-custom-message").toBase64(),
+			mimeType: "image/webp",
+		};
+		const validPng = {
+			type: "image" as const,
+			data: RED_1X1_PNG_BASE64,
+			mimeType: "image/png",
+		};
+		const message: CustomMessage = {
+			role: "custom",
+			customType: "image-audit",
+			content: [corrupt, { type: "text", text: "between images" }, validPng],
+			display: false,
+			timestamp: 1,
+		};
+		const boundary = new SessionProviderBoundary({
+			model: () => buildStbVisionModel("managed-primary"),
+		} as never);
+
+		const normalized = await boundary.normalizeAgentMessageImages(message);
+
+		expect(normalized.content).not.toBeString();
+		if (typeof normalized.content === "string") throw new Error("Expected block content");
+		expect(normalized.content.map(part => part?.type)).toEqual(["image", "text", "image"]);
+		expect(normalized.content[0]).toBe(corrupt);
 	});
 
 	test("rewrites resumed tool-result WebP blocks at the STB provider boundary", async () => {
