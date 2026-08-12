@@ -209,4 +209,33 @@ describe("issue #8318: scaled OSC 66 headings survive repaint and resize", () =>
 			tui.stop();
 		}
 	});
+
+	it("preserves the top spacer when the heading scrolls above the resize viewport", async () => {
+		const term = new VirtualTerminal(80, 4);
+		const tui = new TUI(term);
+		// windowTop = frameLength - height = 7 - 4 = 3. The heading sits at row 2
+		// (just above the fold) and its reserved spacer at row 3 = window[0], so
+		// the resize fast path composes it as the first visible row.
+		tui.addChild(new RawLines(["f0", "f1", `${OSC66}s=2;Heading${ST}`, "", "b0", "b1", "b2"]));
+		const writes = captureWrites(term);
+		try {
+			tui.start();
+			await settle(term);
+			writes.length = 0;
+
+			// A width drag paints the viewport synchronously via #emitResizeViewport
+			// before the settle full paint. Capture that throwaway frame directly.
+			term.resize(70, 4);
+			const viewportPaint = writes.find(
+				write => write.includes("\x1b[H") && !write.includes("\x1b[2J") && !write.includes("\x1b[3J"),
+			);
+			expect(viewportPaint).toBeDefined();
+			// Row 0 (the spacer) is emitted right after the final cursor-home.
+			const seg0 = viewportPaint!.split("\r\n")[0]!;
+			const row0 = seg0.slice(seg0.lastIndexOf("\x1b[H") + 3);
+			expectClearsRightOfGlyph(row0, 14);
+		} finally {
+			tui.stop();
+		}
+	});
 });
