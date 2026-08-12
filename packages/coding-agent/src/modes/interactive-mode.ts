@@ -3483,6 +3483,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (!this.vibeModeEnabled) {
 			return;
 		}
+		if (this.session.isStreaming) {
+			await this.session.abort();
+		}
 		const ownerScope = this.#vibeModeOwnerScope;
 		const killed = await VibeSessionRegistry.global().killAll(this.#vibeParentSession(), ownerScope);
 		await this.session.deactivateVibeTools(this.#vibeModePreviousTools ?? []);

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/vibe` cancellation leaving an in-flight model turn unaware that Vibe mode and its tools were removed ([#8326](https://github.com/can1357/oh-my-pi/issues/8326)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Added

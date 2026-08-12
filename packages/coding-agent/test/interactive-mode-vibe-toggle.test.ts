@@ -10,7 +10,8 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
-import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
+import { Agent, type AgentTool, type StreamFn } from "@oh-my-pi/pi-agent-core";
+import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
@@ -23,6 +24,7 @@ import { VIBE_TOOL_NAMES } from "@oh-my-pi/pi-coding-agent/tools/vibe";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { VibeSessionRegistry } from "@oh-my-pi/pi-coding-agent/vibe/runtime";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { createAssistantMessage } from "./helpers/agent-session-setup";
 
 function stubTool(name: string): AgentTool {
 	return {
@@ -85,6 +87,7 @@ describe("InteractiveMode vibe mode toggle", () => {
 	let tempDir: TempDir;
 	let authStorage: AuthStorage;
 	let session: AgentSession;
+	let streamFn: StreamFn | undefined;
 	let mode: InteractiveMode;
 	let modelRegistry: ModelRegistry;
 	let storage: ExitFaultStorage;
@@ -112,6 +115,10 @@ describe("InteractiveMode vibe mode toggle", () => {
 					systemPrompt: ["Test"],
 					tools: [],
 					messages: [],
+				},
+				streamFn: (...args) => {
+					if (!streamFn) throw new Error("No test stream configured");
+					return streamFn(...args);
 				},
 			}),
 			sessionManager: SessionManager.create(tempDir.path(), tempDir.path(), storage),
@@ -155,6 +162,33 @@ describe("InteractiveMode vibe mode toggle", () => {
 		expect(mode.vibeModeEnabled).toBe(false);
 		expect(session.getActiveToolNames()).toEqual([]);
 		expect(session.getAllToolNames().toSorted()).toEqual(["read", "todo"]);
+	});
+
+	it("cancels an in-flight model turn before removing Vibe tools", async () => {
+		const started = Promise.withResolvers<void>();
+		streamFn = (_model, _context, options) => {
+			const stream = new AssistantMessageEventStream();
+			queueMicrotask(() => {
+				stream.push({ type: "start", partial: createAssistantMessage("") });
+				options?.signal?.addEventListener(
+					"abort",
+					() => stream.push({ type: "error", reason: "aborted", error: createAssistantMessage("Aborted") }),
+					{ once: true },
+				);
+				started.resolve();
+			});
+			return stream;
+		};
+		await mode.handleVibeModeCommand();
+		const prompt = session.prompt("Delegate this");
+		await started.promise;
+		expect(session.isStreaming).toBe(true);
+
+		await mode.handleVibeModeCommand();
+		await prompt;
+
+		expect(session.isStreaming).toBe(false);
+		expect(session.getToolByName("vibe_spawn")).toBeUndefined();
 	});
 
 	it("keeps a same-named non-built-in Todo tool unavailable in Vibe mode", async () => {
