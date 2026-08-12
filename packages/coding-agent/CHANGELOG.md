@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed print mode claiming `plan.defaultOnStartup` was ignored and recommending `--plan-yolo` when that headless plan flow was already active ([#8312](https://github.com/can1357/oh-my-pi/issues/8312)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Added

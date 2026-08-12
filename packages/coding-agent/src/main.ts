@@ -1787,6 +1787,7 @@ export async function runRootCommand(
 				initialMessage,
 				initialImages,
 				printThoughts: initialArgs.printThoughts,
+				planYolo: parsedArgs.planYolo,
 			});
 			if ($env.PI_TIMING) {
 				logger.printTimings();
