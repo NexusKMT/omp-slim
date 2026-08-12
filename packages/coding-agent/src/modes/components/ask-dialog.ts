@@ -602,7 +602,9 @@ export class AskDialogComponent implements Component {
 			return `Enter submit · ↑/↓ scroll ·${scroll} ${cancel}`;
 		}
 		const question = this.#questions[this.#currentQuestionIndex()];
-		const action = question?.multi ? "Space toggle · Enter submit" : "Enter select · n note";
+		// Enter advances in multi-question dialogs and submits single-question ones.
+		const enterAction = this.#hasSubmitTab() ? "next" : "submit";
+		const action = question?.multi ? `Space toggle · Enter ${enterAction}` : "Enter select · n note";
 		const tabs = this.#hasSubmitTab() ? " · Tab/←/→" : "";
 		if (this.#questionCanPage && indicator) {
 			return `${action} · ↑/↓${tabs} · ${cancel} · ${pageKeysLabel()} ${indicator}`;
@@ -682,10 +684,10 @@ export class AskDialogComponent implements Component {
 		if (question.multi) {
 			if (isEnter) {
 				// Enter confirms the current selection without toggling the
-				// focused option; Space toggles. Matches single-select
-				// Enter-to-submit so the multi dialog never dead-ends on an
-				// undiscoverable Submit tab (#8252).
-				this.#finishSubmit();
+				// focused option; Space toggles. Advances to the next question
+				// (submitting only for a single-question dialog), matching
+				// single-select Enter (#8252).
+				this.#advanceAfterQuestion();
 				return;
 			}
 			if (state.selectedOptions.has(option.label)) {

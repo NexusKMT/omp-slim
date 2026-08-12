@@ -598,6 +598,69 @@ describe("AskDialogComponent", () => {
 		expect(onSubmit.mock.calls[0][0].results[0].customInput).toBe("custom detail");
 	});
 
+	it("multi-question, multi-select: Enter on a plain option advances, does not submit", () => {
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const onPrompt = vi.fn();
+
+		const questions: ExtensionAskDialogQuestion[] = [
+			{
+				id: "q1",
+				question: "Choose multiple?",
+				options: [{ label: "Option A" }, { label: "Option B" }],
+				multi: true,
+			},
+			{
+				id: "q2",
+				question: "Second question?",
+				options: [{ label: "Option C" }, { label: "Option D" }],
+			},
+		];
+
+		const component = new AskDialogComponent(questions, {
+			onSubmit,
+			onCancel,
+			onPrompt,
+		});
+
+		// Space toggles Option A; Enter on the plain option row confirms and
+		// advances to Q2 instead of submitting the whole dialog (#8265 review).
+		component.handleInput(SPACE);
+		component.handleInput(ENTER);
+		expect(onSubmit).not.toHaveBeenCalled();
+
+		// On Q2: Down to Option D and Enter advances to the Submit tab.
+		component.handleInput(DOWN);
+		component.handleInput(ENTER);
+		expect(onSubmit).not.toHaveBeenCalled();
+
+		// On the Submit tab Enter submits once with both answers.
+		component.handleInput(ENTER);
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit.mock.calls[0][0].results).toEqual([
+			{
+				id: "q1",
+				question: "Choose multiple?",
+				options: ["Option A", "Option B"],
+				multi: true,
+				selectedOptions: ["Option A"],
+				customInput: undefined,
+				note: undefined,
+				timedOut: undefined,
+			},
+			{
+				id: "q2",
+				question: "Second question?",
+				options: ["Option C", "Option D"],
+				multi: false,
+				selectedOptions: ["Option D"],
+				customInput: undefined,
+				note: undefined,
+				timedOut: undefined,
+			},
+		]);
+	});
+
 	it("defers a timeout that fires during a pending prompt and honors the resolved custom input", async () => {
 		vi.useFakeTimers();
 		const deferred = Promise.withResolvers<string | undefined>();
@@ -1379,4 +1442,3 @@ describe("AskDialogComponent", () => {
 		expect(result.selectedOptions).toEqual(["Option A"]);
 	});
 });
-

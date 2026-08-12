@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the ask dialog's multi-select mode dead-ending on Enter: Space toggles options and Enter submits the current selection (matching single-select), instead of Enter silently toggling the focused option with the only submit path hidden behind the Submit tab ([#8252](https://github.com/can1357/oh-my-pi/issues/8252)).
+
 ## [17.2.13] - 2026-08-11
 
 ### Added
@@ -31,7 +35,6 @@
 
 ### Fixed
 
-- Fixed the ask dialog's multi-select mode dead-ending on Enter: Space toggles options and Enter submits the current selection (matching single-select), instead of Enter silently toggling the focused option with the only submit path hidden behind the Submit tab ([#8252](https://github.com/can1357/oh-my-pi/issues/8252)).
 - Fixed `/usage`, `/advisor status`, and every other panel command answering only after the agent stopped working. Since `17.0.1` their output was queued until the turn settled (to stop mid-turn transcript mounts duplicating rows in native scrollback, issues #4806/#6767), and the deferral was silent, so on a long turn the command was indistinguishable from a dead one. The panel now renders immediately above the editor in an anchored container that is cleared and rebuilt in place, never entering the transcript, and the full output still lands in the transcript at the next settle. The preview is capped to 40% of the viewport (minimum 6 rows) so a tall report cannot push the prompt off screen.
 - Fixed the todo panel showing no progress while the agent worked through a plan: every sub-todo read as unchecked no matter how far along the run was. Three causes, all in the collapsed (default) view — the walking viewport dropped *every* closed row, so a completion only ever removed a line and the card's strike-reveal animation ran against a row nobody rendered; the phase the agent was actually in was the one phase header rendered without a `done/total` count; and the 60s todo auto-clear deleted closed tasks from an unfinished plan, resetting the phase counter to `0/n` and renumbering the stages until the next `todo` call restored the real snapshot. The viewport now keeps the newest closed task as a checked lead row (additive to the open-task cap), every phase header carries its progress, counts include abandoned tasks, and auto-clear only fires once the whole list is settled.
 - Status-line `usage` now renders monthly Cursor quotas (`mo N%`) in addition to the existing `5h` / `7d` windows ([#7998](https://github.com/can1357/oh-my-pi/pull/7998) by [@dnth](https://github.com/dnth)).
