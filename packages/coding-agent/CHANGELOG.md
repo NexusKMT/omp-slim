@@ -39,6 +39,10 @@
 - Replaced libarchive-based tar parsing with a hardened, in-process tar reader to prevent crashes and safely handle complex archive structures, symlinks, and sparse metadata.
 - Fixed `Ctrl+O` tool-output expansion failing to reach launch-completion messages wrapped in the hidden tool activity container.
 
+### Fixed
+
+- Fixed open browser behaviour on Windows, OMP console no longer disappears on commands such as `/stats`
+
 ## [17.2.14] - 2026-08-11
 
 ### Added
