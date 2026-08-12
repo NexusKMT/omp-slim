@@ -7,6 +7,7 @@
 - Fixed OpenAI Responses turns ending silently after a provider-hosted web search that produced no visible answer: the turn is now classified as `pause_turn` so the agent automatically continues with the search results instead of stopping.
 - Fixed completed model streams retaining their provider concurrency permit until after completion became observable, without replacing provider results when lease cleanup fails ([#8284](https://github.com/can1357/oh-my-pi/pull/8284) by [@ethancawse](https://github.com/ethancawse)).
 - Fixed the DashScope compatible-mode text-only Qwen override (issue #1859) stripping images from `qwen3.8-max`, which became multimodal in the bundled catalog (image input, #8019). The `-max` guard now only vetoes image content for pre-3.8 SKUs, so `qwen3.8-max`/`qwen3.8-max-preview` and later flagships send `image_url` content — restoring `inspect_image` on those models configured against `dashscope.aliyuncs.com/compatible-mode/v1` ([#8305](https://github.com/can1357/oh-my-pi/issues/8305)).
+- Fixed xAI (`xai-oauth`) usage reporting falling back to a stale exhausted cache when a fresh weekly cycle with 0% consumed credits omits the `creditUsagePercent` field ([#8325](https://github.com/can1357/oh-my-pi/pull/8325) by [@bubua12](https://github.com/bubua12)).
 
 ## [17.2.15] - 2026-08-12
 
