@@ -25,6 +25,9 @@
 - Fixed `/handoff` losing local artifacts (plans, scratch files, research notes) by copying them across the handoff session boundary.
 - Replaced libarchive-based tar parsing with a hardened, in-process tar reader to prevent crashes and safely handle complex archive structures, symlinks, and sparse metadata.
 - Fixed `Ctrl+O` tool-output expansion failing to reach launch-completion messages wrapped in the hidden tool activity container.
+### Fixed
+
+- Fixed custom STB-backed vision providers retaining decoder metadata and re-encoding resumed WebP images before provider requests.
 
 ## [17.2.14] - 2026-08-11
 

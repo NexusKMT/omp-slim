@@ -1,11 +1,50 @@
 import * as fs from "node:fs/promises";
-import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
+import type { ImageContent, Message, Model } from "@oh-my-pi/pi-ai";
 import { formatBytes, readImageMetadata, SUPPORTED_IMAGE_MIME_TYPES } from "@oh-my-pi/pi-utils";
+import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import { resolveReadPath } from "../tools/path-utils";
 import { formatDimensionNote, type ImageResizeOptions, resizeImage } from "./image-resize";
 
 export const MAX_IMAGE_INPUT_BYTES = 20 * 1024 * 1024;
 export const SUPPORTED_INPUT_IMAGE_MIME_TYPES = SUPPORTED_IMAGE_MIME_TYPES;
+const MODEL_BOUNDARY_IMAGE_CACHE_LIMIT = 128;
+type NormalizedImagePayload = Pick<ImageContent, "data" | "mimeType">;
+const modelBoundaryImageCache = new LRUCache<string, Promise<NormalizedImagePayload>>({
+	max: MODEL_BOUNDARY_IMAGE_CACHE_LIMIT,
+});
+
+function hasWebPMagic(data: string): boolean {
+	const header = Buffer.from(data.slice(0, 16), "base64");
+	return (
+		header.length >= 12 && header.toString("ascii", 0, 4) === "RIFF" && header.toString("ascii", 8, 12) === "WEBP"
+	);
+}
+
+function isWebPImage(image: ImageContent): boolean {
+	return image.mimeType.toLowerCase() === "image/webp" || hasWebPMagic(image.data);
+}
+
+function modelBoundaryImageCacheKey(image: ImageContent): string {
+	return `${image.data.length}:${image.data.slice(0, 32)}:${image.data.slice(-32)}:${String(Bun.hash(image.data))}`;
+}
+
+async function memoizedStbImageNormalization(image: ImageContent): Promise<ImageContent> {
+	const key = modelBoundaryImageCacheKey(image);
+	let pending = modelBoundaryImageCache.get(key);
+	if (!pending) {
+		pending = resizeImage(image, { excludeWebP: true }).then(resized => {
+			if (resized.mimeType === "image/webp" || hasWebPMagic(resized.data)) {
+				throw new Error("Image normalization retained WebP for an STB-backed model");
+			}
+			return { data: resized.data, mimeType: resized.mimeType };
+		});
+		modelBoundaryImageCache.set(key, pending);
+		void pending.catch(() => {
+			if (modelBoundaryImageCache.peek(key) === pending) modelBoundaryImageCache.delete(key);
+		});
+	}
+	return { ...image, ...(await pending) };
+}
 
 /**
  * Ollama and its local-backend family decode image input through llama.cpp /
@@ -116,21 +155,57 @@ export async function normalizeModelContextImages(
 	options?: NormalizeModelContextImagesOptions,
 ): Promise<ImageContent[] | undefined> {
 	if (!images || images.length === 0) return undefined;
-	const resize: ImageResizeOptions | undefined = modelLacksWebpSupport(options?.model)
+	const excludesWebP = modelLacksWebpSupport(options?.model);
+	const resize: ImageResizeOptions | undefined = excludesWebP
 		? { ...options?.resize, excludeWebP: true }
 		: options?.resize;
 	const normalized: ImageContent[] = [];
 	for (const image of images) {
 		try {
+			if (excludesWebP && isWebPImage(image)) {
+				normalized.push(await memoizedStbImageNormalization(image));
+				continue;
+			}
 			const resized = await resizeImage(image, resize);
-			normalized.push({ type: "image", data: resized.data, mimeType: resized.mimeType });
-		} catch {
+			normalized.push({ ...image, data: resized.data, mimeType: resized.mimeType });
+		} catch (error) {
+			if (excludesWebP && isWebPImage(image)) {
+				throw new Error("Failed to convert WebP image for an STB-backed model", { cause: error });
+			}
 			// Preserve existing caller behavior for decode/resize failures: keep the
 			// user's image block rather than dropping it from the turn.
 			normalized.push(image);
 		}
 	}
 	return normalized;
+}
+
+/**
+ * Rewrites historical/resumed WebP blocks in the ephemeral provider request.
+ * Persisted session messages remain untouched, while STB-backed local servers
+ * never receive a format they cannot decode.
+ */
+export async function normalizeModelContextMessages(messages: Message[], model: Model | undefined): Promise<Message[]> {
+	if (!modelLacksWebpSupport(model)) return messages;
+	let output: Message[] | undefined;
+	for (let messageIndex = 0; messageIndex < messages.length; messageIndex++) {
+		const message = messages[messageIndex]!;
+		if (typeof message.content === "string") continue;
+		const webpImages: ImageContent[] = [];
+		for (const part of message.content) {
+			if (part.type === "image" && isWebPImage(part)) webpImages.push(part);
+		}
+		if (webpImages.length === 0) continue;
+		const normalized = await normalizeModelContextImages(webpImages, { model });
+		if (!normalized) continue;
+		let imageIndex = 0;
+		const content = message.content.map(part =>
+			part.type === "image" && isWebPImage(part) ? normalized[imageIndex++]! : part,
+		);
+		output ??= messages.slice();
+		output[messageIndex] = { ...message, content } as Message;
+	}
+	return output ?? messages;
 }
 
 export async function loadImageInput(options: LoadImageInputOptions): Promise<LoadedImageInput | null> {

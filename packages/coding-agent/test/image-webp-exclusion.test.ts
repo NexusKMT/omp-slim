@@ -5,6 +5,7 @@ import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import {
 	modelLacksWebpSupport,
 	normalizeModelContextImages,
+	normalizeModelContextMessages,
 	webpExclusionForModel,
 } from "@oh-my-pi/pi-coding-agent/utils/image-loading";
 
@@ -144,5 +145,40 @@ describe("normalizeModelContextImages model-aware WebP exclusion", () => {
 		const result = await normalizeModelContextImages([webp], { model: anthropic });
 
 		expect(result?.[0]?.mimeType).toBe("image/webp");
+	});
+
+	test("rewrites resumed tool-result WebP blocks at the STB provider boundary", async () => {
+		const original = {
+			type: "image" as const,
+			data: await makeRedWebP(200, 200),
+			// Exercise byte sniffing as well as declared-MIME handling.
+			mimeType: "image/png",
+			detail: "original" as const,
+		};
+		const messages = [
+			{
+				role: "toolResult" as const,
+				toolCallId: "read-1",
+				toolName: "read",
+				content: [{ type: "text" as const, text: "screenshot" }, original],
+				isError: false,
+				timestamp: 1,
+			},
+		];
+
+		const result = await normalizeModelContextMessages(messages, buildStbVisionModel("managed-primary"));
+		const resultMessage = result[0]!;
+		expect(resultMessage.role).toBe("toolResult");
+		if (resultMessage.role !== "toolResult") throw new Error("Expected tool result message");
+		const image = resultMessage.content[1]!;
+
+		expect(image.type).toBe("image");
+		if (image.type !== "image") throw new Error("Expected normalized image block");
+		expect(image.mimeType).not.toBe("image/webp");
+		expect(["image/png", "image/jpeg"]).toContain(image.mimeType);
+		expect(Buffer.from(image.data.slice(0, 16), "base64").toString("ascii", 8, 12)).not.toBe("WEBP");
+		expect(image.detail).toBe("original");
+		// Provider-boundary normalization is ephemeral; persisted history is not mutated.
+		expect(messages[0]!.content[1]).toBe(original);
 	});
 });

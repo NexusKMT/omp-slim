@@ -13,7 +13,7 @@ import type { LocalProtocolOptions } from "../internal-urls";
 import { deobfuscateSessionContext, obfuscateMessages } from "../secrets/message-transform";
 import type { SecretObfuscator } from "../secrets/obfuscator";
 import { stripPendingSecretPlaceholderSuffix } from "../secrets/placeholder";
-import { normalizeModelContextImages } from "../utils/image-loading";
+import { normalizeModelContextImages, normalizeModelContextMessages } from "../utils/image-loading";
 import { describeAttachedImagesForTextModel } from "../utils/image-vision-fallback";
 import { type CustomMessage, convertToLlm } from "./messages";
 import { IMAGE_ATTACHMENT_DESCRIPTION_TYPE } from "./queued-messages";
@@ -126,7 +126,8 @@ export class SessionProviderBoundary {
 	/** Converts session messages using the configured pre-LLM pipeline. */
 	async convertMessagesToLlm(messages: AgentMessage[], signal?: AbortSignal): Promise<Message[]> {
 		const transformedMessages = await this.#host.transformContext(messages, signal);
-		return await this.#host.convertToLlm(transformedMessages);
+		const converted = await this.#host.convertToLlm(transformedMessages);
+		return await normalizeModelContextMessages(converted, this.#host.model());
 	}
 
 	/** Applies session-level stream hooks and provider defaults to a side request. */
