@@ -21,9 +21,10 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 // the delegate-via-tasks / phased-todo guidance. The post-compaction auto-continuation
 // turn must carry the gated reminders again (reminder-only — never a forced tool_choice).
 
-const CONTINUE_MARKER = "Resume work on the user's most recent intent";
+const TASK_DELEGATION_MARKER = "Task delegation enabled";
 
 type ObservedPromptCall = {
+	callIndex: number;
 	toolChoice: string | undefined;
 	messageTexts: string[];
 };
@@ -202,6 +203,7 @@ describe("AgentSession eager prelude re-injection after compaction", () => {
 			getToolChoice: () => session?.nextToolChoiceDirective(),
 			streamFn: (_model, context, options) => {
 				const call: ObservedPromptCall = {
+					callIndex: observedCalls.length,
 					toolChoice: getToolChoiceName(options?.toolChoice),
 					messageTexts: context.messages.map(message => getMessageText(message)),
 				};
@@ -276,7 +278,7 @@ describe("AgentSession eager prelude re-injection after compaction", () => {
 		activateOngoingGoal(session);
 		await session.prompt("refactor the parser across modules");
 		emitHighUsageTurn(session);
-		return waitForCall(call => call.messageTexts.some(text => text.includes(CONTINUE_MARKER)));
+		return waitForCall(call => call.callIndex > 0);
 	}
 
 	it("re-injects the eager task reminder on the auto-continuation turn (task.eager always)", async () => {
@@ -285,7 +287,7 @@ describe("AgentSession eager prelude re-injection after compaction", () => {
 
 		const continuation = await runToContinuation(session, waitForCall);
 
-		const reminder = continuation.messageTexts.find(text => text.includes("delegation is enabled"));
+		const reminder = continuation.messageTexts.find(text => text.includes(TASK_DELEGATION_MARKER));
 		expect(reminder).toBeDefined();
 		expect(reminder).toContain("`task`");
 		// Reminder-only: the post-compaction nudge never forces a tool on the resumed turn.
@@ -298,7 +300,7 @@ describe("AgentSession eager prelude re-injection after compaction", () => {
 
 		const continuation = await runToContinuation(session, waitForCall);
 
-		expect(continuation.messageTexts.some(text => text.includes("delegation is enabled"))).toBe(false);
+		expect(continuation.messageTexts.some(text => text.includes(TASK_DELEGATION_MARKER))).toBe(false);
 	});
 
 	it("does not re-inject the eager task reminder when task.eager is preferred", async () => {
@@ -307,7 +309,7 @@ describe("AgentSession eager prelude re-injection after compaction", () => {
 
 		const continuation = await runToContinuation(session, waitForCall);
 
-		expect(continuation.messageTexts.some(text => text.includes("delegation is enabled"))).toBe(false);
+		expect(continuation.messageTexts.some(text => text.includes(TASK_DELEGATION_MARKER))).toBe(false);
 	});
 
 	it("does not re-inject the eager task reminder for subagent sessions", async () => {
@@ -316,7 +318,7 @@ describe("AgentSession eager prelude re-injection after compaction", () => {
 
 		const continuation = await runToContinuation(session, waitForCall);
 
-		expect(continuation.messageTexts.some(text => text.includes("delegation is enabled"))).toBe(false);
+		expect(continuation.messageTexts.some(text => text.includes(TASK_DELEGATION_MARKER))).toBe(false);
 	});
 
 	it("does not re-inject the eager task reminder in plan mode", async () => {
@@ -326,7 +328,7 @@ describe("AgentSession eager prelude re-injection after compaction", () => {
 
 		const continuation = await runToContinuation(session, waitForCall);
 
-		expect(continuation.messageTexts.some(text => text.includes("delegation is enabled"))).toBe(false);
+		expect(continuation.messageTexts.some(text => text.includes(TASK_DELEGATION_MARKER))).toBe(false);
 	});
 
 	it("re-injects the eager todo reminder on the auto-continuation turn (todo.eager preferred)", async () => {
@@ -373,7 +375,7 @@ describe("AgentSession eager prelude re-injection after compaction", () => {
 		});
 		stubCompaction(todoEntryId);
 
-		const continuationPromise = waitForCall(call => call.messageTexts.some(text => text.includes(CONTINUE_MARKER)));
+		const continuationPromise = waitForCall(call => call.callIndex > 0);
 		emitHighUsageTurn(session);
 		const continuation = await continuationPromise;
 
