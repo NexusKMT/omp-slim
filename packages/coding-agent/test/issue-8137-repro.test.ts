@@ -145,6 +145,26 @@ describe("issue #8137 — inline /skill in mode-command prompts", () => {
 		}
 	});
 
+	it("forwards draft images into the dispatched skill message", async () => {
+		const promptCustomMessage = vi.spyOn(session, "promptCustomMessage").mockResolvedValue(undefined);
+		const image = { type: "image" as const, data: "aGk=", mimeType: "image/png" };
+
+		await mode.handlePlanModeCommand("do X /skill:grilling", { images: [image] });
+
+		expect(promptCustomMessage).toHaveBeenCalledTimes(1);
+		const [message] = promptCustomMessage.mock.calls[0] ?? [];
+		expect(Array.isArray(message?.content)).toBe(true);
+		expect(message?.content).toContainEqual(image);
+	});
+
+	it("propagates a failed skill dispatch so the detached draft can be restored", async () => {
+		const skill = mode.skillCommands.get("skill:grilling");
+		if (!skill) throw new Error("Expected grilling skill");
+		skill.filePath = path.join(tempDir.path(), "missing-skill.md");
+
+		await expect(mode.handlePlanModeCommand("do X /skill:grilling")).rejects.toThrow();
+	});
+
 	it("still submits a non-skill /plan prompt as a normal prompt", async () => {
 		const promptCustomMessage = vi.spyOn(session, "promptCustomMessage").mockResolvedValue(undefined);
 		let submitted: { text: string } | undefined;
