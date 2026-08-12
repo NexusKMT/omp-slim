@@ -4582,8 +4582,23 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#uiHelpers.renderSessionContext(sessionContext, options);
 	}
 
-	renderInitialMessages(options?: { preserveExistingChat?: boolean; clearTerminalHistory?: boolean }): void {
-		this.#uiHelpers.renderInitialMessages(options);
+	/** Render a session context in bounded chunks so terminal input runs between transcript paints. */
+	async renderSessionContextIncrementally(
+		sessionContext: SessionContext,
+		options: RenderSessionContextOptions,
+		renderChunk?: () => void,
+	): Promise<void> {
+		for (const message of sessionContext.messages) {
+			this.noteDisplayableThinkingContent(message);
+		}
+		await this.#uiHelpers.renderSessionContextIncrementally(sessionContext, options, renderChunk);
+	}
+
+	async renderInitialMessages(options?: {
+		preserveExistingChat?: boolean;
+		clearTerminalHistory?: boolean;
+	}): Promise<void> {
+		await this.#uiHelpers.renderInitialMessages(options);
 	}
 
 	getUserMessageText(message: Message): string {
@@ -5045,7 +5060,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			}
 			this.#btwController.dispose();
 			this.#omfgController.dispose();
-			this.renderInitialMessages({ clearTerminalHistory: true });
+			await this.renderInitialMessages({ clearTerminalHistory: true });
 			this.updateEditorBorderColor();
 			this.showStatus(
 				result.sessionFile ? `Branched /btw to ${path.basename(result.sessionFile)}` : "Branched /btw",
