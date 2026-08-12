@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed OpenAI Responses turns ending silently after a provider-hosted web search that produced no visible answer: the turn is now classified as `pause_turn` so the agent automatically continues with the search results instead of stopping.
+- Fixed completed model streams retaining their provider concurrency permit until after completion became observable, without replacing provider results when lease cleanup fails ([#8284](https://github.com/can1357/oh-my-pi/pull/8284) by [@ethancawse](https://github.com/ethancawse)).
 
 ## [17.2.15] - 2026-08-12
 

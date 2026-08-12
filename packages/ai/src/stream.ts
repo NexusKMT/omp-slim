@@ -161,8 +161,7 @@ function healLeakedThinking(model: Model<Api>, inner: AssistantMessageEventStrea
 
 type ProviderInFlightLease = {
 	path: string;
-	heartbeat: NodeJS.Timeout;
-	flushHeartbeat: () => Promise<void>;
+	stopHeartbeat: () => Promise<void>;
 };
 
 type ProviderInFlightLeaseInfo = {
@@ -177,9 +176,17 @@ const PROVIDER_INFLIGHT_LOCK_STALE_MS = 10_000;
 const PROVIDER_INFLIGHT_LEASE_STALE_MS = 30_000;
 const PROVIDER_INFLIGHT_HEARTBEAT_MS = 5_000;
 const PROVIDER_INFLIGHT_SIGNAL_FALLBACK_MS = 250;
+const PROVIDER_INFLIGHT_HEARTBEAT_FLUSH_TIMEOUT_MS = 1_000;
+const PROVIDER_INFLIGHT_RELEASE_TIMEOUT_MS = 5_000;
 
 let configuredProviderMaxInFlightRequests: Record<string, number> = {};
 let providerInFlightRootOverride: string | undefined;
+let providerInFlightHeartbeatMsOverride: number | undefined;
+let providerInFlightHeartbeatFlushTimeoutMsOverride: number | undefined;
+let providerInFlightHeartbeatWriterOverride:
+	| ((writeProviderInFlightInfo: () => Promise<void>) => Promise<void>)
+	| undefined;
+let providerInFlightLeaseRemoverOverride: ((leasePath: string) => Promise<void>) | undefined;
 
 export function configureProviderMaxInFlightRequests(limits: Record<string, number> | undefined): void {
 	configuredProviderMaxInFlightRequests = limits ?? {};
@@ -246,7 +253,9 @@ async function writeProviderInFlightInfo(dir: string, token: string): Promise<vo
 	const infoPath = path.join(dir, "info.json");
 	const tempPath = path.join(dir, `.info-${process.pid}-${crypto.randomUUID()}.tmp`);
 	try {
-		await Bun.write(tempPath, JSON.stringify(info));
+		// Unlike Bun.write, fs.writeFile does not recreate a lease directory that
+		// was removed while a timed-out heartbeat was still pending.
+		await fs.writeFile(tempPath, JSON.stringify(info), "utf8");
 		await fs.rename(tempPath, infoPath);
 	} catch (error) {
 		await fs.rm(tempPath, { force: true }).catch(() => {});
@@ -426,18 +435,38 @@ async function tryAcquireProviderInFlightLease(
 			await removeProviderInFlightLeaseDir(leaseDir).catch(() => {});
 			throw error;
 		}
+		let heartbeatActive = true;
 		let heartbeatFlush = Promise.resolve();
 		const touchHeartbeat = () => {
+			if (!heartbeatActive) return;
 			heartbeatFlush = heartbeatFlush
-				.then(
-					() => writeProviderInFlightInfo(leaseDir, token),
-					() => writeProviderInFlightInfo(leaseDir, token),
-				)
+				.then(async () => {
+					if (!heartbeatActive) return;
+					const write = () => {
+						if (!heartbeatActive) return Promise.resolve();
+						return writeProviderInFlightInfo(leaseDir, token);
+					};
+					if (providerInFlightHeartbeatWriterOverride) {
+						await providerInFlightHeartbeatWriterOverride(write);
+					} else {
+						await write();
+					}
+				})
 				.catch(() => {});
 		};
-		const heartbeat = setInterval(touchHeartbeat, PROVIDER_INFLIGHT_HEARTBEAT_MS);
+		const heartbeat = setInterval(
+			touchHeartbeat,
+			providerInFlightHeartbeatMsOverride ?? PROVIDER_INFLIGHT_HEARTBEAT_MS,
+		);
 		heartbeat.unref?.();
-		return { path: leaseDir, heartbeat, flushHeartbeat: () => heartbeatFlush };
+		return {
+			path: leaseDir,
+			stopHeartbeat: () => {
+				heartbeatActive = false;
+				clearInterval(heartbeat);
+				return heartbeatFlush;
+			},
+		};
 	} finally {
 		await releaseLock();
 	}
@@ -518,10 +547,37 @@ async function removeProviderInFlightLeaseDir(leasePath: string): Promise<void> 
 // the in-flight root has been repointed (only the test seam does that) must not
 // write `.wakeup` into an unrelated provider directory.
 async function releaseProviderInFlightLease(lease: ProviderInFlightLease): Promise<void> {
-	clearInterval(lease.heartbeat);
-	await lease.flushHeartbeat();
-	await removeProviderInFlightLeaseDir(lease.path);
-	await signalProviderInFlightWaitersInDir(path.dirname(lease.path));
+	const heartbeatFlush = lease.stopHeartbeat();
+	const flushTimeout = Promise.withResolvers<"timeout">();
+	const flushTimer = setTimeout(
+		() => flushTimeout.resolve("timeout"),
+		providerInFlightHeartbeatFlushTimeoutMsOverride ?? PROVIDER_INFLIGHT_HEARTBEAT_FLUSH_TIMEOUT_MS,
+	);
+	flushTimer.unref?.();
+	try {
+		const outcome = await Promise.race([heartbeatFlush.then(() => "flushed" as const), flushTimeout.promise]);
+		if (outcome === "timeout") {
+			logger.warn("Provider in-flight heartbeat flush timed out; forcing lease cleanup", { path: lease.path });
+		}
+	} finally {
+		clearTimeout(flushTimer);
+	}
+
+	const releaseTimeout = Promise.withResolvers<never>();
+	const releaseTimer = setTimeout(
+		() => releaseTimeout.reject(new Error("Provider in-flight lease cleanup timed out")),
+		PROVIDER_INFLIGHT_RELEASE_TIMEOUT_MS,
+	);
+	releaseTimer.unref?.();
+	try {
+		const removeLease = providerInFlightLeaseRemoverOverride ?? removeProviderInFlightLeaseDir;
+		await Promise.race([removeLease(lease.path), releaseTimeout.promise]);
+	} finally {
+		clearTimeout(releaseTimer);
+	}
+	// Wake-up is an optimization: waiters also poll every 250 ms. Do not let a
+	// notification-file stall keep a completed provider request open.
+	void signalProviderInFlightWaitersInDir(path.dirname(lease.path));
 }
 
 async function acquireProviderInFlightSlot(
@@ -546,6 +602,16 @@ async function acquireProviderInFlightSlot(
 export const __providerInFlightForTesting = {
 	setRoot(root: string | undefined): void {
 		providerInFlightRootOverride = root;
+	},
+	setHeartbeatTimings(timings: { heartbeatMs?: number; heartbeatFlushTimeoutMs?: number } | undefined): void {
+		providerInFlightHeartbeatMsOverride = timings?.heartbeatMs;
+		providerInFlightHeartbeatFlushTimeoutMsOverride = timings?.heartbeatFlushTimeoutMs;
+	},
+	setHeartbeatWriter(writer: ((writeProviderInFlightInfo: () => Promise<void>) => Promise<void>) | undefined): void {
+		providerInFlightHeartbeatWriterOverride = writer;
+	},
+	setLeaseRemover(remover: ((leasePath: string) => Promise<void>) | undefined): void {
+		providerInFlightLeaseRemoverOverride = remover;
 	},
 	providerDir(provider: string): string {
 		return providerInFlightDir(provider);
@@ -585,11 +651,26 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
 		let release: (() => Promise<void>) | undefined;
-		let released = false;
-		const releaseOnce = async () => {
-			if (!release || released) return;
-			released = true;
-			await release();
+		let releasePromise: Promise<void> | undefined;
+		const releaseOnce = () => {
+			if (!release) return Promise.resolve();
+			releasePromise ??= release();
+			return releasePromise;
+		};
+		const releaseBestEffort = async () => {
+			try {
+				await releaseOnce();
+			} catch (releaseError) {
+				// The lease has stopped heartbeating and stale cleanup will reap it
+				// within PROVIDER_INFLIGHT_LEASE_STALE_MS. Until then, its slot may
+				// remain unavailable and waiters rely on the fallback poll.
+				// Never replace a completed response or the provider's original error
+				// with a coordination-directory cleanup failure.
+				logger.warn("Provider in-flight permit release failed", {
+					provider: model.provider,
+					error: String(releaseError),
+				});
+			}
 		};
 		try {
 			const startedWaitingAt = Date.now();
@@ -601,17 +682,29 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 				throw options.signal.reason ?? new AIError.AbortError("Provider request aborted before dispatch");
 			}
 			const inner = healLeakedThinking(model, dispatch());
-			try {
-				for await (const event of inner) {
-					outer.push(event);
-					if (outer.done) return;
+			let terminalEvent: AssistantMessageEvent | undefined;
+			for await (const event of inner) {
+				if (event.type === "done" || event.type === "error") {
+					terminalEvent = event;
+					break;
 				}
-				if (!outer.done) outer.end(await inner.result());
-			} finally {
-				await releaseOnce();
+				outer.push(event);
+				if (outer.done) {
+					await releaseBestEffort();
+					return;
+				}
+			}
+			const result = await inner.result();
+			// Releasing the permit is part of request completion. Publishing the
+			// result first lets an immediate follow-up turn contend with its own
+			// still-live lease, which is particularly costly on Windows.
+			await releaseBestEffort();
+			if (!outer.done) {
+				if (terminalEvent) outer.push(terminalEvent);
+				else outer.end(result);
 			}
 		} catch (error) {
-			await releaseOnce();
+			await releaseBestEffort();
 			if (!outer.done) outer.fail(error);
 		}
 	})();
