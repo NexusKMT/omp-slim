@@ -117,6 +117,7 @@
 
 - Clarified that the production collab relay source and binaries are not currently published, and documented the source-available local protocol relay ([#8165](https://github.com/can1357/oh-my-pi/issues/8165)).
 - Fixed snapcompact compaction shipping its redundant frame archive out of `SessionMaintenance.compact()` on both the manual RPC response (which hard-failed protocol v1 with a transport error after the compaction had already persisted) and the `auto_compaction_end` event payload (which forced the shrink ladder on every unattended pass); the archive is now stripped from both exits while the persisted compaction entry keeps it ([#8168](https://github.com/can1357/oh-my-pi/issues/8168)).
+- Fixed the edit tool showing no diff preview in `apply_patch` mode: the built-in `edit` tool presents on the wire as `apply_patch`, but the renderer-provenance gate did not resolve that alias to its built-in owner, so the edit renderer was skipped ([#8184](https://github.com/can1357/oh-my-pi/issues/8184)).
 
 ## [17.2.12] - 2026-08-08
 
