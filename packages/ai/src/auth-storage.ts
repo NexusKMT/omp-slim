@@ -3195,6 +3195,13 @@ export class AuthStorage {
 			}
 			return report;
 		} catch (error) {
+			if (error instanceof AIError.ProviderHttpError && (error.status === 401 || error.status === 403)) {
+				// Definitive auth failure (revoked key, lapsed subscription): purge
+				// the last-good report so #fetchUsageCached's failure branch can't
+				// keep rendering and ranking from stale quota the way it does for
+				// transient failures. Mirrors the definitive-OAuth-refresh path.
+				this.#usageCache.set(this.#buildUsageReportCacheKey(request), { value: null, expiresAt: 0 });
+			}
 			logger.debug("AuthStorage usage fetch failed", {
 				provider: request.provider,
 				error: String(error),

@@ -137,14 +137,16 @@ describe("opencode-go usage provider", () => {
 		expect(report).toBeNull();
 	});
 
-	it("skips malformed windows and returns null when no window parses", async () => {
+	it("rejects the whole payload unless all three windows decode", async () => {
+		// A partial report would overwrite the complete last-good report in the
+		// usage cache, so one malformed window must fail the entire payload.
 		const partial = await opencodeGoUsageProvider.fetchUsage(
 			{ provider: "opencode-go", credential: { type: "api_key", apiKey: "sk-test" } },
 			{
 				fetch: fakeFetch(usagePayload({ rolling: { status: "ok", percent: "abc" }, weekly: null })),
 			},
 		);
-		expect(partial?.limits.map(limit => limit.id)).toEqual(["monthly"]);
+		expect(partial).toBeNull();
 
 		const empty = await opencodeGoUsageProvider.fetchUsage(
 			{ provider: "opencode-go", credential: { type: "api_key", apiKey: "sk-test" } },

@@ -137,7 +137,16 @@ async function fetchOpenCodeGoUsage(params: UsageFetchParams, ctx: UsageFetchCon
 		const limit = buildWindowLimit(descriptor, usage[descriptor.key]);
 		if (limit) limits.push(limit);
 	}
-	if (limits.length === 0) return null;
+	// All-or-nothing: a partial report would overwrite the complete last-good
+	// report in the usage cache, silently dropping the windows used for
+	// ranking and display. Treat any malformed/missing window like a
+	// transient failure so the cached report keeps serving instead.
+	if (limits.length !== OPENCODE_GO_WINDOWS.length) {
+		ctx.logger?.warn("OpenCode Go usage response missing or malformed windows", {
+			decoded: limits.map(limit => limit.id),
+		});
+		return null;
+	}
 
 	return {
 		provider: OPENCODE_GO_PROVIDER,
