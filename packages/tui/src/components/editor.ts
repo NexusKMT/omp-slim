@@ -595,6 +595,7 @@ export class Editor implements Component, Focusable {
 	setMaxHeight(maxHeight: number | undefined): void {
 		if (this.#maxHeight === maxHeight) return;
 		this.#maxHeight = maxHeight;
+		this.#widthEpochRevision++;
 		// Don't reset scrollOffset — #updateScrollOffset will clamp it on next render
 	}
 

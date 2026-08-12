@@ -27,6 +27,19 @@ describe("Editor component", () => {
 		expect(editor.getNativeScrollbackWidthEpochRevision()).toBe(changed);
 	});
 
+	it("advances its width-epoch revision when max height exposes more draft rows", () => {
+		const editor = new Editor(defaultEditorTheme);
+		editor.setText("draft-0\ndraft-1\ndraft-2\ndraft-3");
+		editor.setMaxHeight(3);
+		const clippedRows = editor.render(40).length;
+		const clippedRevision = editor.getNativeScrollbackWidthEpochRevision();
+
+		editor.setMaxHeight(6);
+
+		expect(editor.render(40).length).toBeGreaterThan(clippedRows);
+		expect(editor.getNativeScrollbackWidthEpochRevision()).toBeGreaterThan(clippedRevision);
+	});
+
 	it("advances its width-epoch revision when autocomplete changes without changing text", async () => {
 		const editor = new Editor(defaultEditorTheme);
 		const { promise: autocompleteUpdated, resolve: resolveAutocompleteUpdated } = Promise.withResolvers<void>();
