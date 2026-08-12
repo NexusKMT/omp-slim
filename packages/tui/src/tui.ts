@@ -1217,12 +1217,10 @@ export class TUI extends Container {
 	// the drag has been quiet for this long. Multiplexer sessions keep their own
 	// debounce (`#armMultiplexerResizeTimer`, see #2088) and never take this path.
 	static readonly #RESIZE_VIEWPORT_SETTLE_MS = 120;
-	// Extra rows composed above the resize viewport so a first-visible blank can
-	// still be identified as the reserved lower half of a scaled OSC 66 heading
-	// that scrolled just above the fold (issue #8318). A scale-`s` heading
-	// reserves `s - 1` rows and the protocol caps `s` at 7, so six rows of
-	// context classify every legal heading exactly.
-	static readonly #RESIZE_SPACER_CONTEXT_ROWS = 6;
+	// A scale-`s` OSC 66 heading reserves `s - 1` rows, and the protocol
+	// caps `s` at 7. This bounds spacer lookups and supplies enough context
+	// above the resize viewport to classify every legal heading exactly.
+	static readonly #OSC66_MAX_SPACER_ROWS = 6;
 	// Ghostty can drop Kitty graphics commands sent during its first post-startup
 	// settle window, leaving only Unicode placeholder cells. Hold the first image
 	// paint until that window has passed; later images render normally.
@@ -4317,7 +4315,13 @@ export class TUI extends Container {
 	#osc66SpacerGlyphWidth(lines: readonly string[], index: number): number {
 		if (index <= 0 || lines[index] !== "") return -1;
 		let gap = 1;
-		while (index - gap > 0 && lines[index - gap] === "") gap++;
+		while (
+			gap < TUI.#OSC66_MAX_SPACER_ROWS &&
+			index - gap > 0 &&
+			lines[index - gap] === ""
+		) {
+			gap++;
+		}
 		const above = lines[index - gap];
 		if (above === undefined || !isOsc66Line(above) || gap > osc66MaxScale(above) - 1) return -1;
 		return visibleWidth(above);
@@ -4812,7 +4816,7 @@ export class TUI extends Container {
 	/**
 	 * Build the viewport window for a resize fast-path frame: the bottom
 	 * `height` rows of the would-be full frame, collected bottom-up across root
-	 * children, plus up to {@link #RESIZE_SPACER_CONTEXT_ROWS} rows above the
+	 * children, plus up to {@link #OSC66_MAX_SPACER_ROWS} rows above the
 	 * fold. {@link ViewportTailProvider}s (the transcript) yield only their tail;
 	 * the small live-region children below render in full — so every child
 	 * entirely above the fold is skipped. A frame shorter than the viewport is
@@ -4832,7 +4836,7 @@ export class TUI extends Container {
 		width: number,
 		height: number,
 	): { framed: readonly string[]; viewportTop: number; contentRows: number } {
-		const maxRows = height + TUI.#RESIZE_SPACER_CONTEXT_ROWS;
+		const maxRows = height + TUI.#OSC66_MAX_SPACER_ROWS;
 		const tail: string[] = []; // bottom-first: viewport rows plus context above
 		const children = this.children;
 		for (let i = children.length - 1; i >= 0 && tail.length < maxRows; i--) {
@@ -5094,7 +5098,7 @@ export class TUI extends Container {
 				const moveToBottom = height - 1 - currentScreenRow;
 				if (moveToBottom > 0) buffer += `\x1b[${moveToBottom}B`;
 				for (let r = height - scroll; r < height; r++) {
-					buffer += `\r\n${this.#lineRewriteSequence(window[r] ?? "", width, height - 1, windowTop + r, chunkTo, this.#osc66SpacerGlyphWidth(window, r))}`;
+					buffer += `\r\n${this.#lineRewriteSequence(window[r] ?? "", width, height - 1, windowTop + r, chunkTo, this.#osc66SpacerGlyphWidth(frame, windowTop + r))}`;
 				}
 				// Rewrite any remaining changed rows after the shift.
 				let firstChanged = -1;
@@ -5117,7 +5121,7 @@ export class TUI extends Container {
 							r,
 							windowTop + r,
 							chunkTo,
-							this.#osc66SpacerGlyphWidth(window, r),
+							this.#osc66SpacerGlyphWidth(frame, windowTop + r),
 						);
 					}
 					cursorFromRow = windowTop + lastChanged;
@@ -5193,7 +5197,7 @@ export class TUI extends Container {
 					r,
 					windowTop + r,
 					this.#committedRows,
-					this.#osc66SpacerGlyphWidth(window, r),
+					this.#osc66SpacerGlyphWidth(frame, windowTop + r),
 				);
 			}
 			buffer += fillSequence;

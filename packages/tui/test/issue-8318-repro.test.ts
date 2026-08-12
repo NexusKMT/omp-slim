@@ -157,6 +157,26 @@ describe("issue #8318: scaled OSC 66 headings survive repaint and resize", () =>
 		}
 	});
 
+	it("protects all six reserved rows at the maximum legal scale", async () => {
+		const term = new VirtualTerminal(80, 8);
+		const tui = new TUI(term);
+		tui.addChild(new RawLines([`${OSC66}s=7;Max${ST}`, "", "", "", "", "", "", "Body"]));
+		const writes = captureWrites(term);
+		try {
+			tui.start();
+			await settle(term);
+			writes.length = 0;
+
+			tui.requestRender(true, { clearScrollback: true });
+			await settle(term);
+
+			const { spacers } = headingAndSpacers(writes, 6);
+			for (const spacer of spacers) expectClearsRightOfGlyph(spacer, 21);
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("clears stale cells when a wide row reflows into the reserved spacer", async () => {
 		const term = new VirtualTerminal(80, 6);
 		const tui = new TUI(term);
@@ -205,6 +225,29 @@ describe("issue #8318: scaled OSC 66 headings survive repaint and resize", () =>
 			const { heading, spacers } = headingAndSpacers(writes, 1);
 			expect(heading).toContain("Heading");
 			expectClearsRightOfGlyph(spacers[0]!, 14);
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("preserves the top spacer during an in-place viewport rewrite", async () => {
+		const term = new VirtualTerminal(80, 4);
+		const tui = new TUI(term);
+		// The heading is immediately above the visible window while its reserved
+		// lower row is window[0]. An in-place rewrite must classify that row from
+		// the full frame rather than the context-free window slice.
+		tui.addChild(new RawLines(["f0", "f1", `${OSC66}s=2;Heading${ST}`, "", "b0", "b1", "b2"]));
+		const writes = captureWrites(term);
+		try {
+			tui.start();
+			await settle(term);
+			writes.length = 0;
+
+			tui.requestRender(true);
+			await settle(term);
+
+			const paint = writes.join("");
+			expect(paint).toContain("\x1b[14C\x1b[K");
 		} finally {
 			tui.stop();
 		}
