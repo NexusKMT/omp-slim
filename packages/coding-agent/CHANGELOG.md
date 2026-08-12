@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Python Eval `parallel()` and `pipeline()` rejecting `await` after their work completed, allowing synchronous and awaited calls without repeating operations.
+
 ## [17.2.15] - 2026-08-12
 
 ### Added
