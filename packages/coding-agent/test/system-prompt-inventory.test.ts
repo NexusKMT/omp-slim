@@ -702,8 +702,8 @@ describe("system prompt tool inventory", () => {
 			})
 		).systemPrompt.join("\n\n");
 
-		expect(withoutBrowser).not.toContain("drive it in `browser`");
-		expect(withoutBrowser).not.toContain("drive it in browser");
+		expect(withoutBrowser).not.toContain("browser-drive with `browser`");
+		expect(withoutBrowser).not.toContain("browser-drive with browser");
 		expect(withoutBrowser).toContain("TUI/CLI");
 		expect(withoutBrowser).toContain("behavioral test or smoke test");
 
@@ -722,7 +722,7 @@ describe("system prompt tool inventory", () => {
 			})
 		).systemPrompt.join("\n\n");
 
-		expect(withBrowser).toContain("drive it in `browser`");
+		expect(withBrowser).toContain("browser-drive with `browser`");
 		// A browser-only session still needs the smoke-test fallback for
 		// native-desktop surfaces (no computer tool).
 		expect(withBrowser).toContain("behavioral test or smoke test");
@@ -740,12 +740,12 @@ describe("system prompt tool inventory", () => {
 			inlineToolDescriptors: false,
 		};
 		const withoutTodo = (await buildSystemPrompt({ ...opts, toolNames: ["read", "bash"] })).systemPrompt.join("\n\n");
-		expect(withoutTodo).not.toContain("Todo calls NEVER travel alone");
-		expect(withoutTodo).not.toContain("batch every todo op");
+		expect(withoutTodo).not.toContain("Todo calls NEVER alone");
+		expect(withoutTodo).not.toContain("batch each with turn's real calls");
 
 		const withTodo = (await buildSystemPrompt({ ...opts, toolNames: ["read", "bash", "todo"] })).systemPrompt.join(
 			"\n\n",
 		);
-		expect(withTodo).toContain("Todo calls NEVER travel alone");
+		expect(withTodo).toContain("Todo calls NEVER alone");
 	});
 });
