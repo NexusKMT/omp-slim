@@ -138,11 +138,14 @@ function parseWeeklyBillingConfig(raw: Record<string, unknown>): XaiWeeklyBillin
 	}
 
 	// Fresh weekly periods (or accounts with 0 usage) omit creditUsagePercent;
-	// default to 0 when a valid weekly period exists.
-	const creditUsagePercent =
-		raw.creditUsagePercent === undefined || raw.creditUsagePercent === null
-			? 0
-			: parsePercent(raw.creditUsagePercent);
+	// default to 0 only when the weekly period is active (end > now).
+	// Expired periods without explicit usage data are rejected to retain last good cache.
+	let creditUsagePercent: number | undefined;
+	if (raw.creditUsagePercent === undefined || raw.creditUsagePercent === null) {
+		creditUsagePercent = end > Date.now() ? 0 : undefined;
+	} else {
+		creditUsagePercent = parsePercent(raw.creditUsagePercent);
+	}
 	if (creditUsagePercent === undefined) return null;
 
 	const productUsage: XaiProductUsage[] = [];
