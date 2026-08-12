@@ -4458,7 +4458,13 @@ replace = [{ pattern = "hello", replacement = "HI" }]
 		)
 		.await
 		.expect("one-shot shell execution");
-		time::sleep(Duration::from_millis(100)).await;
+		// `execute_shell` returns after its short post-exit idle drain (~250ms),
+		// while the background job cannot write the marker until its 1s sleep
+		// elapses. Wait well past that delay so a job that outlived the dropped
+		// session has demonstrably had its chance to run — the pre-fix leak fires
+		// at ~1s and is caught here; the fixed path aborts the task on drop and the
+		// marker never appears.
+		time::sleep(Duration::from_millis(2000)).await;
 
 		assert!(
 			!marker.path().exists(),
