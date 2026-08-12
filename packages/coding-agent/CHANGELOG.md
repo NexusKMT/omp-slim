@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Contained Mnemopi bank failures at agent lifecycle boundaries so optional recall and retention cannot terminate the host session ([#8351](https://github.com/can1357/oh-my-pi/issues/8351)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Added
