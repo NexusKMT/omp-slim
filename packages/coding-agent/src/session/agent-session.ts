@@ -148,7 +148,7 @@ import type { IrcMessage } from "../irc/bus";
 import type { DaemonCompletionNotification } from "../launch/protocol";
 import { shutdownMnemopiEmbedClient } from "../mnemopi/embed-client";
 import { getMnemopiSessionState, type MnemopiSessionState, setMnemopiSessionState } from "../mnemopi/state";
-import { containsOrchestrate, ORCHESTRATE_NOTICE } from "../modes/orchestrate";
+import { containsOrchestrate, renderOrchestrateNotice } from "../modes/orchestrate";
 import { theme } from "../modes/theme/theme";
 import { parseTurnBudget } from "../modes/turn-budget";
 import { containsUltrathink, ULTRATHINK_NOTICE } from "../modes/ultrathink";
@@ -4955,12 +4955,15 @@ export class AgentSession {
 				: sessionPlanUrl;
 
 		const planExists = fs.existsSync(resolvedPlanPath);
+		const activeToolNames = this.getActiveToolNames();
 		const content = prompt.render(planModeActivePrompt, {
 			planFilePath: displayPlanPath,
 			planExists,
 			askToolName: "ask",
 			writeToolName: "write",
 			editToolName: "edit",
+			askAvailable: activeToolNames.includes("ask"),
+			taskAvailable: activeToolNames.includes("task"),
 			isHashlineEditMode: this.#resolveActiveEditMode() === "hashline",
 			reentry: state.reentry ?? false,
 			iterative: state.workflow === "iterative",
@@ -5081,14 +5084,19 @@ export class AgentSession {
 			});
 		}
 		if (this.#magicKeywordEnabled("orchestrate") && containsOrchestrate(text)) {
-			keywordNotices.push({
-				role: "custom",
-				customType: "orchestrate-notice",
-				content: ORCHESTRATE_NOTICE,
-				display: false,
-				attribution: "user",
-				timestamp,
-			});
+			const activeToolNames = this.getActiveToolNames();
+			// The contract is entirely about `task` subagent dispatch; without the
+			// task tool the notice would demand an unavailable capability.
+			if (activeToolNames.includes("task")) {
+				keywordNotices.push({
+					role: "custom",
+					customType: "orchestrate-notice",
+					content: renderOrchestrateNotice({ tools: activeToolNames }),
+					display: false,
+					attribution: "user",
+					timestamp,
+				});
+			}
 		}
 		if (this.#magicKeywordEnabled("workflow") && containsWorkflow(text)) {
 			const activeToolNames = this.getActiveToolNames();
