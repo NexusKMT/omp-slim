@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed OpenAI Responses turns ending silently after a provider-hosted web search that produced no visible answer: the turn is now classified as `pause_turn` so the agent automatically continues with the search results instead of stopping.
+
 ## [17.2.15] - 2026-08-12
 
 ### Fixed
@@ -14,9 +18,6 @@
 ### Added
 
 - Added `forceReasoningOff` and `disableReasoning` options to disable reasoning in OpenAI and Azure OpenAI models
-### Fixed
-
-- Fixed OpenAI Responses turns ending silently after a provider-hosted web search that produced no visible answer: the turn is now classified as `pause_turn` so the agent automatically continues with the search results instead of stopping.
 
 ## [17.2.13] - 2026-08-11
 
