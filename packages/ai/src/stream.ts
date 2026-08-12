@@ -161,8 +161,7 @@ function healLeakedThinking(model: Model<Api>, inner: AssistantMessageEventStrea
 
 type ProviderInFlightLease = {
 	path: string;
-	heartbeat: NodeJS.Timeout;
-	flushHeartbeat: () => Promise<void>;
+	stopHeartbeat: () => Promise<void>;
 };
 
 type ProviderInFlightLeaseInfo = {
@@ -182,6 +181,11 @@ const PROVIDER_INFLIGHT_RELEASE_TIMEOUT_MS = 5_000;
 
 let configuredProviderMaxInFlightRequests: Record<string, number> = {};
 let providerInFlightRootOverride: string | undefined;
+let providerInFlightHeartbeatMsOverride: number | undefined;
+let providerInFlightHeartbeatFlushTimeoutMsOverride: number | undefined;
+let providerInFlightHeartbeatWriterOverride:
+	| ((writeProviderInFlightInfo: () => Promise<void>) => Promise<void>)
+	| undefined;
 
 export function configureProviderMaxInFlightRequests(limits: Record<string, number> | undefined): void {
 	configuredProviderMaxInFlightRequests = limits ?? {};
@@ -248,7 +252,9 @@ async function writeProviderInFlightInfo(dir: string, token: string): Promise<vo
 	const infoPath = path.join(dir, "info.json");
 	const tempPath = path.join(dir, `.info-${process.pid}-${crypto.randomUUID()}.tmp`);
 	try {
-		await Bun.write(tempPath, JSON.stringify(info));
+		// Unlike Bun.write, fs.writeFile does not recreate a lease directory that
+		// was removed while a timed-out heartbeat was still pending.
+		await fs.writeFile(tempPath, JSON.stringify(info), "utf8");
 		await fs.rename(tempPath, infoPath);
 	} catch (error) {
 		await fs.rm(tempPath, { force: true }).catch(() => {});
@@ -428,18 +434,35 @@ async function tryAcquireProviderInFlightLease(
 			await removeProviderInFlightLeaseDir(leaseDir).catch(() => {});
 			throw error;
 		}
+		let heartbeatActive = true;
 		let heartbeatFlush = Promise.resolve();
 		const touchHeartbeat = () => {
+			if (!heartbeatActive) return;
 			heartbeatFlush = heartbeatFlush
-				.then(
-					() => writeProviderInFlightInfo(leaseDir, token),
-					() => writeProviderInFlightInfo(leaseDir, token),
-				)
+				.then(async () => {
+					if (!heartbeatActive) return;
+					const write = () => writeProviderInFlightInfo(leaseDir, token);
+					if (providerInFlightHeartbeatWriterOverride) {
+						await providerInFlightHeartbeatWriterOverride(write);
+					} else {
+						await write();
+					}
+				})
 				.catch(() => {});
 		};
-		const heartbeat = setInterval(touchHeartbeat, PROVIDER_INFLIGHT_HEARTBEAT_MS);
+		const heartbeat = setInterval(
+			touchHeartbeat,
+			providerInFlightHeartbeatMsOverride ?? PROVIDER_INFLIGHT_HEARTBEAT_MS,
+		);
 		heartbeat.unref?.();
-		return { path: leaseDir, heartbeat, flushHeartbeat: () => heartbeatFlush };
+		return {
+			path: leaseDir,
+			stopHeartbeat: () => {
+				heartbeatActive = false;
+				clearInterval(heartbeat);
+				return heartbeatFlush;
+			},
+		};
 	} finally {
 		await releaseLock();
 	}
@@ -520,12 +543,15 @@ async function removeProviderInFlightLeaseDir(leasePath: string): Promise<void> 
 // the in-flight root has been repointed (only the test seam does that) must not
 // write `.wakeup` into an unrelated provider directory.
 async function releaseProviderInFlightLease(lease: ProviderInFlightLease): Promise<void> {
-	clearInterval(lease.heartbeat);
+	const heartbeatFlush = lease.stopHeartbeat();
 	const flushTimeout = Promise.withResolvers<"timeout">();
-	const flushTimer = setTimeout(() => flushTimeout.resolve("timeout"), PROVIDER_INFLIGHT_HEARTBEAT_FLUSH_TIMEOUT_MS);
+	const flushTimer = setTimeout(
+		() => flushTimeout.resolve("timeout"),
+		providerInFlightHeartbeatFlushTimeoutMsOverride ?? PROVIDER_INFLIGHT_HEARTBEAT_FLUSH_TIMEOUT_MS,
+	);
 	flushTimer.unref?.();
 	try {
-		const outcome = await Promise.race([lease.flushHeartbeat().then(() => "flushed" as const), flushTimeout.promise]);
+		const outcome = await Promise.race([heartbeatFlush.then(() => "flushed" as const), flushTimeout.promise]);
 		if (outcome === "timeout") {
 			logger.warn("Provider in-flight heartbeat flush timed out; forcing lease cleanup", { path: lease.path });
 		}
@@ -571,6 +597,13 @@ async function acquireProviderInFlightSlot(
 export const __providerInFlightForTesting = {
 	setRoot(root: string | undefined): void {
 		providerInFlightRootOverride = root;
+	},
+	setHeartbeatTimings(timings: { heartbeatMs?: number; heartbeatFlushTimeoutMs?: number } | undefined): void {
+		providerInFlightHeartbeatMsOverride = timings?.heartbeatMs;
+		providerInFlightHeartbeatFlushTimeoutMsOverride = timings?.heartbeatFlushTimeoutMs;
+	},
+	setHeartbeatWriter(writer: ((writeProviderInFlightInfo: () => Promise<void>) => Promise<void>) | undefined): void {
+		providerInFlightHeartbeatWriterOverride = writer;
 	},
 	providerDir(provider: string): string {
 		return providerInFlightDir(provider);

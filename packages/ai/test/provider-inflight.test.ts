@@ -24,6 +24,8 @@ afterEach(async () => {
 	clearCustomApis();
 	configureProviderMaxInFlightRequests(undefined);
 	__providerInFlightForTesting.setRoot(undefined);
+	__providerInFlightForTesting.setHeartbeatTimings(undefined);
+	__providerInFlightForTesting.setHeartbeatWriter(undefined);
 	if (limiterRoot !== undefined) {
 		await fs.rm(limiterRoot, { recursive: true, force: true });
 		limiterRoot = undefined;
@@ -93,6 +95,57 @@ describe("provider in-flight request limits", () => {
 		const result = await stream.result();
 
 		expect(result.content).toEqual([{ type: "text", text: "reply" }]);
+		const entries = await fs.readdir(limiterDir("tests"), { withFileTypes: true });
+		expect(entries.filter(entry => entry.isDirectory())).toHaveLength(0);
+	});
+
+	test("does not recreate a released lease when a heartbeat outlives its flush timeout", async () => {
+		registerMockApi();
+		const requestStarted = Promise.withResolvers<void>();
+		const finishRequest = Promise.withResolvers<void>();
+		const heartbeatStarted = Promise.withResolvers<void>();
+		const resumeHeartbeat = Promise.withResolvers<void>();
+		const heartbeatSettled = Promise.withResolvers<void>();
+		let heartbeatWrites = 0;
+		__providerInFlightForTesting.setHeartbeatTimings({ heartbeatMs: 5, heartbeatFlushTimeoutMs: 20 });
+		__providerInFlightForTesting.setHeartbeatWriter(async writeProviderInFlightInfo => {
+			heartbeatWrites++;
+			heartbeatStarted.resolve();
+			await resumeHeartbeat.promise;
+			try {
+				await writeProviderInFlightInfo();
+			} finally {
+				heartbeatSettled.resolve();
+			}
+		});
+		const mock = createMockModel({
+			provider: "tests",
+			handler: async () => {
+				requestStarted.resolve();
+				await finishRequest.promise;
+				return { content: ["reply"] };
+			},
+		});
+
+		const stream = streamSimple(mock.model, context(), { maxInFlightRequests: { tests: 1 } });
+		const resultPromise = stream.result();
+		const keepAlive = setInterval(() => {}, 1_000);
+		try {
+			await requestStarted.promise;
+			await heartbeatStarted.promise;
+			finishRequest.resolve();
+			const result = await resultPromise;
+			expect(result.content).toEqual([{ type: "text", text: "reply" }]);
+			const entries = await fs.readdir(limiterDir("tests"), { withFileTypes: true });
+			expect(entries.filter(entry => entry.isDirectory())).toHaveLength(0);
+		} finally {
+			clearInterval(keepAlive);
+			finishRequest.resolve();
+			resumeHeartbeat.resolve();
+		}
+		await heartbeatSettled.promise;
+
+		expect(heartbeatWrites).toBe(1);
 		const entries = await fs.readdir(limiterDir("tests"), { withFileTypes: true });
 		expect(entries.filter(entry => entry.isDirectory())).toHaveLength(0);
 	});
