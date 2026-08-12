@@ -902,6 +902,31 @@ describe("anthropic stream envelope handling", () => {
 		]);
 	});
 
+	it("preserves signed thinking content from content_block_start", async () => {
+		const events = createThinkingSuccessEvents(" summary tail");
+		events[1] = {
+			type: "content_block_start",
+			index: 0,
+			content_block: { type: "thinking", thinking: "Summary prefix" },
+		};
+		vi.spyOn(AnthropicMessages.prototype, "create").mockImplementation(() => createMockRequest(events) as never);
+
+		const stream = streamAnthropic(model, context, { apiKey: "sk-ant-test" });
+		for await (const _ of stream) {
+			// drain stream
+		}
+		const result = await stream.result();
+
+		expect(result.content).toHaveLength(1);
+		const block = result.content[0];
+		expect(block?.type).toBe("thinking");
+		if (block?.type !== "thinking") {
+			throw new Error("Expected thinking content from content_block_start");
+		}
+		expect(block.thinking).toBe("Summary prefix summary tail");
+		expect(block.thinkingSignature).toBe("sig_thinking");
+	});
+
 	it("drops replayed closed blocks after a duplicate message_start instead of duplicating content", async () => {
 		const events: MockAnthropicEvent[] = [
 			{
