@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Pi extension contexts omitting the runtime `mode`, which made documented TUI guards silently disable extension UI ([#8419](https://github.com/can1357/oh-my-pi/issues/8419)).
+
 ## [17.3.0] - 2026-08-13
 
 ### Breaking Changes
