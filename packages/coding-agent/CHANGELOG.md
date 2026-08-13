@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `omp update` aborting with `chmod ENOENT` on `<binary>.new` when two update runs overlapped: the download temp path is now unique per attempt (pid, timestamp, and a process-local counter), so concurrent runs no longer delete each other's temp file, and orphaned temp files are reclaimed alongside stale backups ([#8434](https://github.com/can1357/oh-my-pi/issues/8434)).
+
 ## [17.3.0] - 2026-08-13
 
 ### Breaking Changes
