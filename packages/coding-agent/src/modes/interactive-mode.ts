@@ -4440,6 +4440,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.session.model?.name ?? "Unknown",
 			this.session.model?.provider ?? "Unknown",
 		);
+		this.ui.requestRender();
 	}
 
 	#updateWelcomeLspServers(): void {
