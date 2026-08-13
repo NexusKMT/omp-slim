@@ -17,7 +17,7 @@ import type {
 	ServerConfig,
 	WorkspaceEdit,
 } from "./types";
-import { detectLanguageId, EquivalentUriMap, fileToUri } from "./utils";
+import { detectLanguageId, EquivalentUriMap, fileToUri, uriToFile } from "./utils";
 
 // =============================================================================
 // Client State
@@ -481,11 +481,95 @@ async function handleApplyEditRequest(client: LspClient, message: LspJsonRpcRequ
 	}
 
 	try {
-		await applyWorkspaceEdit(params.edit, client.cwd);
+		await applyWorkspaceEditWithLsp(params.edit, client.cwd);
 		await sendResponse(client, message.id, { applied: true }, "workspace/applyEdit");
 	} catch (err) {
 		await sendResponse(client, message.id, { applied: false, failureReason: String(err) }, "workspace/applyEdit");
 	}
+}
+
+function workspaceEditChanges(edit: WorkspaceEdit): {
+	finalUris: Set<string>;
+	deletedRoots: Set<string>;
+	watchedFiles: WatchedFileChange[];
+} {
+	const finalUris = new Set<string>();
+	const deletedRoots = new Set<string>();
+	const watchedFiles: WatchedFileChange[] = [];
+	const watch = (uri: string, type: FileChangeType) => {
+		watchedFiles.push({ filePath: uriToFile(uri), type });
+	};
+
+	if (edit.changes) {
+		for (const uri in edit.changes) {
+			if (edit.changes[uri].length === 0) continue;
+			finalUris.add(uri);
+			watch(uri, FileChangeType.Changed);
+		}
+	}
+	for (const change of edit.documentChanges ?? []) {
+		if ("textDocument" in change) {
+			if (change.edits.length === 0) continue;
+			finalUris.add(change.textDocument.uri);
+			watch(change.textDocument.uri, FileChangeType.Changed);
+		} else if (change.kind === "create") {
+			finalUris.add(change.uri);
+			watch(change.uri, FileChangeType.Created);
+		} else if (change.kind === "rename") {
+			deletedRoots.add(change.oldUri);
+			finalUris.add(change.newUri);
+			watch(change.oldUri, FileChangeType.Deleted);
+			watch(change.newUri, FileChangeType.Created);
+		} else if (change.kind === "delete") {
+			deletedRoots.add(change.uri);
+			watch(change.uri, FileChangeType.Deleted);
+		}
+	}
+
+	return { finalUris, deletedRoots, watchedFiles };
+}
+
+function uriIsWithin(uri: string, root: string): boolean {
+	return uri === root || uri.startsWith(root.endsWith("/") ? root : `${root}/`);
+}
+
+/**
+ * Apply a server-provided workspace edit and reconcile every affected open LSP document.
+ * Runtime callers use this wrapper so later semantic requests observe the committed files.
+ */
+export async function applyWorkspaceEditWithLsp(
+	edit: WorkspaceEdit,
+	cwd: string,
+	signal?: AbortSignal,
+): Promise<string[]> {
+	const applied = await applyWorkspaceEdit(edit, cwd);
+	const { finalUris, deletedRoots, watchedFiles } = workspaceEditChanges(edit);
+	const workspace = path.resolve(cwd);
+	const activeClients = Array.from(clients.values()).filter(
+		client => client.status === "ready" && path.resolve(client.cwd) === workspace,
+	);
+
+	for (const activeClient of activeClients) {
+		for (const uri of [...activeClient.openFiles.keys()]) {
+			let deleted = false;
+			for (const root of deletedRoots) {
+				if (uriIsWithin(uri, root)) {
+					deleted = true;
+					break;
+				}
+			}
+			if (!deleted) continue;
+			await sendNotification(activeClient, "textDocument/didClose", { textDocument: { uri } }, signal);
+			activeClient.openFiles.delete(uri);
+			activeClient.diagnostics.delete(uri);
+		}
+		for (const uri of finalUris) {
+			if (!activeClient.openFiles.has(uri)) continue;
+			await refreshFile(activeClient, uriToFile(uri), signal);
+		}
+	}
+	await notifyWorkspaceWatchedFiles(cwd, watchedFiles, signal);
+	return applied;
 }
 
 interface DynamicCapabilityRegistration {

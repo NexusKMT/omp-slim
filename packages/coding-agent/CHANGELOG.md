@@ -78,6 +78,9 @@
 ### Fixed
 
 - Fixed `lsp` `rename_file` leaving reference edits applied when the file move fails; a failed move now rolls back every rewritten reference file so the source, destination, and references are left unchanged ([#8379](https://github.com/can1357/oh-my-pi/issues/8379)).
+### Fixed
+
+- Fixed applied LSP `WorkspaceEdit`s leaving already-open language-server document overlays stale for later semantic requests ([#8372](https://github.com/can1357/oh-my-pi/issues/8372)).
 
 ## [17.2.15] - 2026-08-12
 

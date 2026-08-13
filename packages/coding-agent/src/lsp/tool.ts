@@ -16,6 +16,7 @@ import { formatPathRelativeToCwd, resolveToCwd } from "../tools/path-utils";
 import { ToolAbortError, ToolError, throwIfAborted } from "../tools/tool-errors";
 import { clampTimeout } from "../tools/tool-timeouts";
 import {
+	applyWorkspaceEditWithLsp,
 	clearInitializationFailure,
 	ensureFileOpen,
 	getActiveClients,
@@ -45,7 +46,6 @@ import {
 } from "./diagnostics";
 import {
 	applyEditsThenRename,
-	applyWorkspaceEdit,
 	flattenWorkspaceTextEdits,
 	type RenameReferenceEdit,
 	rangesOverlap,
@@ -1317,7 +1317,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 						const appliedAction = await applyCodeAction(selectedAction, {
 							resolveCodeAction: async actionItem =>
 								(await sendRequest(client, "codeAction/resolve", actionItem, signal)) as CodeAction,
-							applyWorkspaceEdit: async edit => applyWorkspaceEdit(edit, this.session.cwd),
+							applyWorkspaceEdit: async edit => applyWorkspaceEditWithLsp(edit, this.session.cwd, signal),
 							executeCommand: async commandItem => {
 								await sendRequest(
 									client,
@@ -1413,7 +1413,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 					} else {
 						const shouldApply = apply !== false;
 						if (shouldApply) {
-							const applied = await applyWorkspaceEdit(result, this.session.cwd);
+							const applied = await applyWorkspaceEditWithLsp(result, this.session.cwd, signal);
 							output = `Applied rename:\n${applied.map(a => `  ${a}`).join("\n")}`;
 						} else {
 							const preview = formatWorkspaceEdit(result, this.session.cwd);
