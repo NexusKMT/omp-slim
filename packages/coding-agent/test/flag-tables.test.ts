@@ -85,19 +85,24 @@ describe("--session-dir", () => {
 	});
 });
 
-describe("--tools legacy aliases", () => {
+describe("--tools validation", () => {
 	it("maps search and find to grep and glob", () => {
 		const result = parseArgs(["--tools", "search,find,grep"]);
 
 		expect(result.tools).toEqual(["grep", "glob"]);
 	});
 
-	it("rejects unknown tool names instead of silently narrowing the toolset", () => {
-		// Removed tools (ssh, job, irc, launch, search_tool_bm25) used to be
-		// dropped with only a log-file warning, so `--tools bash,ssh` ran with
-		// just bash and no visible notice.
-		expect(() => parseArgs(["--tools", "bash,ssh"])).toThrow(CliUsageError);
-		expect(() => parseArgs(["--tools", "bash,ssh"])).toThrow(/Unknown tool in --tools: ssh/);
+	it("defers unknown-name validation until extension discovery", () => {
+		expect(parseArgs(["--tools", "bash,intercom"]).tools).toEqual(["bash", "intercom"]);
+	});
+
+	it("accepts registered extension tools and still rejects unknown names after discovery", () => {
+		const extensionFlags = new Map<string, { type: "boolean" | "string" }>();
+		expect(parseArgs(["--tools", "read,intercom"], extensionFlags, ["intercom"]).tools).toEqual(["read", "intercom"]);
+		expect(() => parseArgs(["--tools", "bash,ssh"], extensionFlags, ["intercom"])).toThrow(CliUsageError);
+		expect(() => parseArgs(["--tools", "bash,ssh"], extensionFlags, ["intercom"])).toThrow(
+			/Unknown tool in --tools: ssh/,
+		);
 	});
 });
 

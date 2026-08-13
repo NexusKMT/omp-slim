@@ -47,7 +47,8 @@ import { CliUsageError } from "./usage-error";
 export interface ParseDeps {
 	logger: { warn: (message: string, meta?: Record<string, unknown>) => void };
 	parseThinking: (value: string | null | undefined) => ConfiguredThinkingLevel | undefined;
-	builtinToolNames: readonly string[];
+	toolNames: readonly string[];
+	validateToolNames: boolean;
 	normalizeToolNames: (values: Iterable<string>) => string[];
 	thinkingEfforts: readonly string[];
 }
@@ -191,12 +192,15 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
 		);
 		// An unknown name silently narrowing the toolset is worse than a failed
 		// launch: scripts keep running believing the tool is available (e.g. a
-		// stale `--tools bash,ssh` after the ssh tool's removal).
-		const unknown = names.filter(name => !deps.builtinToolNames.includes(name));
-		if (unknown.length > 0) {
-			throw new CliUsageError(
-				`Unknown tool${unknown.length === 1 ? "" : "s"} in --tools: ${unknown.join(", ")}. Valid tools: ${deps.builtinToolNames.join(", ")}.`,
-			);
+		// stale `--tools bash,ssh` after the ssh tool's removal). The startup
+		// parse defers this check until extensions have registered their tools.
+		if (deps.validateToolNames) {
+			const unknown = names.filter(name => !deps.toolNames.includes(name));
+			if (unknown.length > 0) {
+				throw new CliUsageError(
+					`Unknown tool${unknown.length === 1 ? "" : "s"} in --tools: ${unknown.join(", ")}. Valid tools: ${deps.toolNames.join(", ")}.`,
+				);
+			}
 		}
 		result.tools = names;
 	},

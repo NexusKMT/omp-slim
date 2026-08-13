@@ -108,7 +108,8 @@ export interface Args {
 const PARSE_DEPS: ParseDeps = {
 	logger,
 	parseThinking: parseCliThinkingLevel,
-	builtinToolNames: [...BUILTIN_TOOL_NAMES, ...HIDDEN_TOOL_NAMES],
+	toolNames: [...BUILTIN_TOOL_NAMES, ...HIDDEN_TOOL_NAMES],
+	validateToolNames: false,
 	normalizeToolNames,
 	thinkingEfforts: CLI_THINKING_LEVELS,
 };
@@ -142,12 +143,19 @@ function consumeBuiltInStringValue(flag: string, args: string[], valueIndex: num
 	return { value, index: valueIndex };
 }
 
-export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { type: "boolean" | "string" }>): Args {
+export function parseArgs(
+	inputArgs: string[],
+	extensionFlags?: Map<string, { type: "boolean" | "string" }>,
+	extensionToolNames: readonly string[] = [],
+): Args {
 	// Work on a copy: the `--option=value` handling below splices the value
 	// into the array, and callers reuse the same argv (the post-extension
 	// reparse in `runRootCommand` parses it a second time). Mutating the input
 	// would corrupt that later parse, so never touch the caller's array.
 	const args = [...inputArgs];
+	const parseDeps: ParseDeps = extensionFlags
+		? { ...PARSE_DEPS, toolNames: [...PARSE_DEPS.toolNames, ...extensionToolNames], validateToolNames: true }
+		: PARSE_DEPS;
 	const result: Args = {
 		messages: [],
 		fileArgs: [],
@@ -214,7 +222,7 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 			if (i + 1 < args.length && args[i + 1] !== PROFILE_BOOTSTRAP_BOUNDARY_ARG) {
 				const consumed = consumeBuiltInStringValue(arg, args, i + 1);
 				i = consumed.index;
-				STRING_SETTERS[arg](result, consumed.value, PARSE_DEPS);
+				STRING_SETTERS[arg](result, consumed.value, parseDeps);
 			}
 		} else if (OPTIONAL_VALUE_FLAGS.has(arg)) {
 			const config = OPTIONAL_FLAGS[arg];

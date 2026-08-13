@@ -425,7 +425,19 @@ export function createAcpSessionFactory(args: AcpSessionFactoryOptions): AcpSess
 		if (args.parsedArgs.apiKey && !args.baseOptions.model && nextSession.model) {
 			args.authStorage.setRuntimeApiKey(nextSession.model.provider, args.parsedArgs.apiKey);
 		}
-		applyExtensionFlags(nextSession.extensionRunner, args.rawArgs);
+		const runner = nextSession.extensionRunner;
+		applyExtensionFlags(
+			runner
+				? {
+						getFlags: () => runner.getFlags(),
+						getToolNames: () => runner.getAllRegisteredTools().map(tool => tool.definition.name),
+						setFlagValue: (name, value) => {
+							runner.setFlagValue(name, value);
+						},
+					}
+				: undefined,
+			args.rawArgs,
+		);
 		return nextSession;
 	};
 }
@@ -1615,6 +1627,10 @@ export async function runRootCommand(
 			: await loadSessionExtensions(sessionOptions, cwd, settingsInstance, eventBus);
 		const extensionFlagSink: ExtensionFlagSink = {
 			getFlags: () => ExtensionRunner.aggregateFlags(extensionsResult.extensions),
+			getToolNames: () =>
+				extensionsResult.extensions.flatMap(extension =>
+					Array.from(extension.tools.values(), tool => tool.definition.name),
+				),
 			setFlagValue: (name, value) => {
 				extensionsResult.runtime.flagValues.set(name, value);
 			},

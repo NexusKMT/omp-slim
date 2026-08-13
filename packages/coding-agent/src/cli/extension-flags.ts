@@ -8,6 +8,7 @@ import { type Args, parseArgs } from "./args";
  */
 export interface ExtensionFlagSink {
 	getFlags(): Map<string, { type: "boolean" | "string" }>;
+	getToolNames(): readonly string[];
 	setFlagValue(name: string, value: boolean | string): void;
 }
 
@@ -29,18 +30,14 @@ export interface ExtensionFlagSink {
  * semantics and surfaces in `unknownFlags` — without consuming the following
  * message or overwriting the built-in field. No built-in name list to maintain.
  *
- * Returns `null` when there is no sink or no registered extension flags, in
- * which case the caller keeps its original startup parse (an extension-aware
- * re-parse would be identical anyway).
+ * Returns `null` only when there is no sink. Once extensions have loaded, the
+ * reparse always runs so `--tools` can be validated against their registered
+ * tools even when no extension registered CLI flags.
  */
 export function applyExtensionFlags(runner: ExtensionFlagSink | undefined, rawArgs: string[]): Args | null {
-	const extensionFlags = runner?.getFlags();
-	if (!runner || !extensionFlags || extensionFlags.size === 0) {
-		return null;
-	}
-	const parsed = parseArgs(rawArgs, extensionFlags);
-	// `parseArgs` only records registered extension flags in `unknownFlags`, so
-	// every entry here is a flag this runner owns that was actually passed.
+	if (!runner) return null;
+	const parsed = parseArgs(rawArgs, runner.getFlags(), runner.getToolNames());
+	// `parseArgs` records extension flag values in `unknownFlags`.
 	for (const [name, value] of parsed.unknownFlags) {
 		runner.setFlagValue(name, value);
 	}
