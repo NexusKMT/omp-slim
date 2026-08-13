@@ -733,7 +733,10 @@ export interface MessageUpdateEvent {
 	assistantMessageEvent: AssistantMessageEvent;
 }
 
-/** Fired when a message ends */
+/**
+ * Fired when a message ends. Notification-only: the message is a detached
+ * snapshot, so in-place changes do not rewrite agent or provider context.
+ */
 export interface MessageEndEvent {
 	type: "message_end";
 	message: AgentMessage;

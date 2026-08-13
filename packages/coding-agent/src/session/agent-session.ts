@@ -423,6 +423,35 @@ type SetSessionNameWithTrigger = (
 const kPersistedSessionEntryId = Symbol("persistedSessionEntryId");
 type PersistedAssistantMessage = AssistantMessage & { [kPersistedSessionEntryId]?: string };
 
+/**
+ * Clone one top-level notification field without ever returning an object owned
+ * by the live session. Most values take the lossless structured-clone path. If
+ * a third-party metadata object contains functions or other unsupported values,
+ * JSON sanitization drops those values; a cyclic/non-JSON value finally degrades
+ * to a descriptive string rather than retaining a shared mutable reference.
+ */
+function cloneMessageEndNotificationField(value: unknown): unknown {
+	try {
+		return structuredClone(value);
+	} catch {}
+	try {
+		const json = JSON.stringify(value);
+		if (json !== undefined) return JSON.parse(json) as unknown;
+	} catch {}
+	return String(value);
+}
+
+/** Build a detached, notification-only snapshot of an AgentMessage. */
+function cloneMessageEndNotification(message: AgentMessage): AgentMessage {
+	const snapshot: Record<PropertyKey, unknown> = {};
+	for (const key of Reflect.ownKeys(message)) {
+		const descriptor = Object.getOwnPropertyDescriptor(message, key);
+		if (!descriptor?.enumerable) continue;
+		snapshot[key] = cloneMessageEndNotificationField(Reflect.get(message, key));
+	}
+	return snapshot as unknown as AgentMessage;
+}
+
 export class AgentSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
@@ -2297,6 +2326,27 @@ export class AgentSession {
 		}
 	}
 
+	#persistMessageEnd(message: AgentMessage): void {
+		if (message.role === "hookMessage" || message.role === "custom") {
+			// Prewalk's plan nudge is a one-run steering instruction. Persisting it would
+			// resurrect the consumed prompt on resume, fork, or any context rebuild.
+			if (!isPrewalkPlanNudge(message)) {
+				this.sessionManager.appendCustomMessageEntry(
+					message.customType,
+					message.content,
+					message.display,
+					message.details,
+					message.attribution ?? "agent",
+				);
+			}
+			if (message.role === "custom" && message.customType === "ttsr-injection") {
+				this.#ttsr.markInjectedFromDetails(message.details);
+			}
+			return;
+		}
+		this.#persistSessionMessageIfMissing(message);
+	}
+
 	/**
 	 * On a user-interrupted (`Esc`) abort, copy the trailing thinking run into a
 	 * hidden `display: false` continuity message for the next turn WITHOUT
@@ -2469,7 +2519,17 @@ export class AgentSession {
 			try {
 				await this.#emitSessionEvent(displayEvent);
 			} catch (error) {
-				messageEndPersistence?.release();
+				if (event.type === "message_end") {
+					const persistMessageEnd = () => this.#persistMessageEnd(event.message);
+					try {
+						if (messageEndPersistence) await messageEndPersistence.persist(persistMessageEnd);
+						else persistMessageEnd();
+					} catch (persistenceError) {
+						logger.warn("Failed to persist message after session event emission failed", {
+							error: String(persistenceError),
+						});
+					}
+				}
 				throw error;
 			}
 		}
@@ -2527,27 +2587,7 @@ export class AgentSession {
 
 		// Handle session persistence
 		if (event.type === "message_end") {
-			const persistMessageEnd = () => {
-				// Check if this is a hook/custom message
-				if (event.message.role === "hookMessage" || event.message.role === "custom") {
-					// Prewalk's plan nudge is a one-run steering instruction. Persisting it would
-					// resurrect the consumed prompt on resume, fork, or any context rebuild.
-					if (!isPrewalkPlanNudge(event.message)) {
-						this.sessionManager.appendCustomMessageEntry(
-							event.message.customType,
-							event.message.content,
-							event.message.display,
-							event.message.details,
-							event.message.attribution ?? "agent",
-						);
-					}
-					if (event.message.role === "custom" && event.message.customType === "ttsr-injection") {
-						this.#ttsr.markInjectedFromDetails(event.message.details);
-					}
-				} else {
-					this.#persistSessionMessageIfMissing(event.message);
-				}
-			};
+			const persistMessageEnd = () => this.#persistMessageEnd(event.message);
 			if (messageEndPersistence) {
 				await messageEndPersistence.persist(persistMessageEnd);
 			} else {
@@ -3426,9 +3466,16 @@ export class AgentSession {
 			};
 			await this.#extensionRunner.emit(extensionEvent);
 		} else if (event.type === "message_end") {
+			// `message_end` is a notification, not a context-rewrite hook. Detach its
+			// payload from agent-owned history so an async observer that mutates the
+			// event after an `await` cannot race mid-run maintenance and enlarge (or
+			// otherwise rewrite) the next provider request after its threshold check.
+			// Explicit `tool_result` / `context` hooks remain the supported mutation
+			// surfaces. Third-party metadata that is not structured-cloneable is
+			// sanitized field-by-field without retaining nested live references.
 			const extensionEvent: MessageEndEvent = {
 				type: "message_end",
-				message: event.message,
+				message: cloneMessageEndNotification(event.message),
 			};
 			await this.#extensionRunner.emit(extensionEvent);
 		} else if (event.type === "tool_execution_start") {

@@ -1097,6 +1097,16 @@ export class SessionMaintenance {
 			.find((message): message is AssistantMessage => message.role === "assistant");
 		if (!lastAssistant || lastAssistant.stopReason === "aborted" || lastAssistant.stopReason === "error") return;
 
+		// Decide from the live agent context before waiting for the asynchronous
+		// session journal. The persistence barrier is required only when maintenance
+		// will actually rewrite history; awaiting it on every ordinary tool turn lets
+		// a slow message_end listener leave the TUI "generating" with no provider
+		// request or tool running.
+		const billedContextTokens = calculateContextTokens(lastAssistant.usage);
+		const storedContextTokens = this.#estimateStoredContextTokens();
+		const contextTokens = compactionContextTokens(billedContextTokens, storedContextTokens);
+		if (!shouldCompact(contextTokens, contextWindow, compactionSettings)) return;
+
 		if (!(await this.#host.persistTurnMessagesForMidRunCompaction(context))) return;
 		if (this.#midTurnCompactionDeadEnds.has(activeMessages)) {
 			// A prior boundary already ran the dead-end rescue and could not reduce
@@ -1117,11 +1127,6 @@ export class SessionMaintenance {
 			this.#midTurnCompactionDeadEnds.delete(activeMessages);
 			this.#midTurnDeadEndPendingPrePrompt = false;
 		}
-
-		const billedContextTokens = calculateContextTokens(lastAssistant.usage);
-		const storedContextTokens = this.#estimateStoredContextTokens();
-		const contextTokens = compactionContextTokens(billedContextTokens, storedContextTokens);
-		if (!shouldCompact(contextTokens, contextWindow, compactionSettings)) return;
 
 		// Promote to a larger-context sibling before compacting, mirroring the
 		// pre-prompt (runPrePromptCompactionIfNeeded) and post-turn threshold

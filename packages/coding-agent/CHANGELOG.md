@@ -42,6 +42,9 @@
 - Fixed agent-facing prompts mentioning tools that may be absent from the session catalog: `todo`/`grep` workflow guidance in the system prompt, `glob`/`read`/`edit` drill-in hints in the project prompt, `ask` directives in plan mode, and the orchestrate notice's `task`/`edit`/`write`/`lsp`/`bash`/`todo` budget are now gated on tool availability.
 - Fixed a `/skill:<name>` token embedded in a `/plan` or `/vibe` inline prompt being sent to the agent as literal text instead of loading the skill; mode-command inline prompts now dispatch skill invocations through the same custom-message path as the editor submit flow ([#8137](https://github.com/can1357/oh-my-pi/issues/8137)).
 - Fixed Codex reset fireworks triggering on ordinary weekly-usage decreases when the provider had not advanced the quota reset deadline.
+### Fixed
+
+- Fixed below-threshold tool turns waiting for asynchronous session persistence when no mid-run compaction will run, while preserving journal writes when a `message_end` listener fails and isolating notification-only handler payloads from late context mutations ([#8283](https://github.com/can1357/oh-my-pi/pull/8283) by [@ethancawse](https://github.com/ethancawse)).
 
 ## [17.2.15] - 2026-08-12
 
