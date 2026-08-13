@@ -1,6 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+
+- Fixed Claude Code user discovery ignoring `CLAUDE_CONFIG_DIR` for configuration, plugins, MCP servers, and imported sessions ([#8436](https://github.com/can1357/oh-my-pi/issues/8436)).
+
 
 ## [17.3.0] - 2026-08-13
 
