@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the LSP client advertising transactional text edits despite applying multi-file workspace edits sequentially ([#8375](https://github.com/can1357/oh-my-pi/issues/8375)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Added

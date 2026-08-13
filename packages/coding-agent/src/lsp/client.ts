@@ -169,7 +169,7 @@ const CLIENT_CAPABILITIES = {
 		workspaceEdit: {
 			documentChanges: true,
 			resourceOperations: ["create", "rename", "delete"],
-			failureHandling: "textOnlyTransactional",
+			failureHandling: "abort",
 		},
 		configuration: true,
 		workspaceFolders: true,
