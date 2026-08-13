@@ -2276,7 +2276,9 @@ async function fetchClinePassLiveCatalog(fetchImpl: FetchImpl): Promise<ClinePas
 						}
 					: {}),
 				...(params ? { reasoning: params.includes("reasoning") } : {}),
-				...(modality ? { input: modality.includes("image") ? (["text", "image"] as const) : (["text"] as const) } : {}),
+				...(modality
+					? { input: modality.includes("image") ? (["text", "image"] as const) : (["text"] as const) }
+					: {}),
 			};
 			byId.set(raw.id, entry);
 			// Cline's `buildModelsNameMap` algorithm: roster ids are lab-less slugs
