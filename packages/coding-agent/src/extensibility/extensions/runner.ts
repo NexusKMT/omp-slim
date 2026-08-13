@@ -91,6 +91,10 @@ export function testSetExtensionHandlerTimeoutMs(timeoutMs: number): void {
 	extensionHandlerTimeoutMs = timeoutMs;
 }
 
+function normalizeHandlerTimeout(timeoutMs: number): number {
+	return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : EXTENSION_HANDLER_TIMEOUT_MS;
+}
+
 /**
  * Dedicated cap for `session_shutdown` handlers. The generic 30s budget is
  * appropriate for events extensions can observe (e.g. `session_start`,
@@ -156,7 +160,13 @@ function createHandlerUIContext(
 			? (questions, dialogOptions) =>
 					runDialog(() => askDialog.call(ui, questions, attachHandlerSignal(dialogOptions, handlerSignal)))
 			: undefined,
-		custom: (factory, options) => runDialog(() => ui.custom(factory, options)),
+		custom: (factory, options) =>
+			runDialog(() =>
+				ui.custom(factory, {
+					...options,
+					signal: options?.signal ? AbortSignal.any([options.signal, handlerSignal]) : handlerSignal,
+				}),
+			),
 		editor: (title, prefill, dialogOptions, editorOptions) =>
 			runDialog(() => ui.editor(title, prefill, attachHandlerSignal(dialogOptions, handlerSignal), editorOptions)),
 	} satisfies Pick<ExtensionUIContext, "select" | "confirm" | "input" | "askDialog" | "custom" | "editor">;
@@ -1300,7 +1310,9 @@ export class ExtensionRunner {
 	 */
 	async emitToolCall(event: ToolCallEvent, signal?: AbortSignal): Promise<ToolCallEventResult | undefined> {
 		const ctx = this.createContext();
-		const timeoutMs = this.settings?.get("extensionHandlers.toolCallTimeoutMs") ?? extensionHandlerTimeoutMs;
+		const timeoutMs = normalizeHandlerTimeout(
+			this.settings?.get("extensionHandlers.toolCallTimeoutMs") ?? extensionHandlerTimeoutMs,
+		);
 		let result: ToolCallEventResult | undefined;
 
 		for (const ext of this.extensions) {
@@ -1329,12 +1341,6 @@ export class ExtensionRunner {
 					if (result.block) {
 						return result;
 					}
-				}
-				// Fail closed when the outer dispatch aborted while a handler was
-				// pending: an aborted gate MUST NOT become silent consent to run the
-				// underlying tool. Symmetric with the timeout policy above.
-				if (signal?.aborted) {
-					return { block: true, reason: `Tool execution was cancelled while an extension handler was pending` };
 				}
 			}
 		}

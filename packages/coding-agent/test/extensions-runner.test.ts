@@ -1189,6 +1189,38 @@ describe("ExtensionRunner", () => {
 	});
 
 	describe("handler timeouts", () => {
+		const initializeRunner = (runner: ExtensionRunner, uiContext: ExtensionUIContext): void => {
+			runner.initialize(
+				{
+					sendMessage: () => {},
+					sendUserMessage: () => {},
+					appendEntry: () => {},
+					setLabel: () => {},
+					getActiveTools: () => [],
+					getAllTools: () => [],
+					setActiveTools: async () => {},
+					getCommands: () => [],
+					setModel: async () => false,
+					getThinkingLevel: () => undefined,
+					setThinkingLevel: () => {},
+					getSessionName: () => undefined,
+					setSessionName: async () => {},
+				},
+				{
+					getModel: () => undefined,
+					isIdle: () => true,
+					abort: () => {},
+					hasPendingMessages: () => false,
+					shutdown: () => {},
+					getContextUsage: () => undefined,
+					compact: async () => {},
+					getSystemPrompt: () => [],
+				},
+				undefined,
+				uiContext,
+			);
+		};
+
 		it("times out session_start handlers, emits an error, and continues to sibling extensions", async () => {
 			const hangExtensionPath = path.join(tempDir.path(), "hang-session-start.ts");
 			const fastExtensionPath = path.join(tempDir.path(), "fast-session-start.ts");
@@ -1370,6 +1402,62 @@ describe("ExtensionRunner", () => {
 			warnSpy.mockRestore();
 		});
 
+		it("falls back to the default tool_call timeout for invalid configured values", async () => {
+			const extensionPath = path.join(tempDir.path(), "invalid-timeout-tool-call.ts");
+			fs.writeFileSync(
+				extensionPath,
+				`
+					export default function(pi) {
+						pi.on("tool_call", async () => {
+							await Promise.withResolvers().promise;
+						});
+					}
+				`,
+			);
+			const loaded = await loadTestExtensions([extensionPath]);
+
+			vi.useFakeTimers();
+			try {
+				for (const configuredTimeout of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+					const runner = new ExtensionRunner(
+						loaded.extensions,
+						loaded.runtime,
+						tempDir.path(),
+						sessionManager,
+						modelRegistry,
+						undefined,
+						Settings.isolated({ "extensionHandlers.toolCallTimeoutMs": configuredTimeout }),
+					);
+					let settled = false;
+					const decision = runner
+						.emitToolCall({
+							type: "tool_call",
+							toolName: "guarded",
+							toolCallId: "invalid-timeout-call",
+							input: {},
+						})
+						.then(result => {
+							settled = true;
+							return result;
+						});
+
+					vi.advanceTimersByTime(EXTENSION_HANDLER_TIMEOUT_MS - 1);
+					expect(settled).toBe(false);
+
+					vi.advanceTimersByTime(1);
+					await Promise.resolve();
+					await Promise.resolve();
+					vi.advanceTimersByTime(0);
+					expect(await decision).toEqual({
+						block: true,
+						reason: `Extension ${extensionPath} timed out after ${EXTENSION_HANDLER_TIMEOUT_MS}ms`,
+					});
+				}
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
 		it("fails closed when a tool_call handler registration cannot activate", async () => {
 			const extensionPath = path.join(tempDir.path(), "tool-call-registration.ts");
 			fs.writeFileSync(
@@ -1484,19 +1572,16 @@ describe("ExtensionRunner", () => {
 
 		it("pauses a tool_call handler timeout during standard and custom dialogs, then resumes its budget", async () => {
 			const extensionPath = path.join(tempDir.path(), "confirm-tool-call.ts");
-			const markerPath = path.join(tempDir.path(), "confirm-settled.txt");
 			fs.writeFileSync(
 				extensionPath,
 				`
-					import * as fs from "node:fs";
-
 					export default function(pi) {
 						pi.on("tool_call", async (_event, ctx) => {
 							ctx.ui.notify("Waiting for confirmation");
 							await new Promise(resolve => setTimeout(resolve, 8));
 							await ctx.ui.confirm("High-risk command", "Allow this command?");
 							await ctx.ui.custom(() => ({}));
-							fs.writeFileSync(${JSON.stringify(markerPath)}, "settled");
+							ctx.ui.notify("Custom settled");
 							await Promise.withResolvers().promise;
 						});
 					}
@@ -1512,17 +1597,26 @@ describe("ExtensionRunner", () => {
 				modelRegistry,
 			);
 			const dialog = Promise.withResolvers<boolean>();
+			const handlerStarted = Promise.withResolvers<void>();
+			const confirmationStarted = Promise.withResolvers<void>();
+			const customStarted = Promise.withResolvers<void>();
+			const customCompleted = Promise.withResolvers<void>();
 			let dialogSignal: AbortSignal | undefined;
-			const notify = vi.fn<ExtensionUIContext["notify"]>();
+			const notify: ExtensionUIContext["notify"] = message => {
+				if (message === "Waiting for confirmation") handlerStarted.resolve();
+				if (message === "Custom settled") customCompleted.resolve();
+			};
 			const confirm: ExtensionUIContext["confirm"] = async (_title, _message, dialogOptions) => {
 				dialogSignal = dialogOptions?.signal;
+				confirmationStarted.resolve();
 				dialogSignal?.addEventListener("abort", () => dialog.resolve(false), { once: true });
 				return await dialog.promise;
 			};
 			const customDialog = Promise.withResolvers<void>();
-			let customPending = false;
-			const custom: ExtensionUIContext["custom"] = async <T>() => {
-				customPending = true;
+			let customSignal: AbortSignal | undefined;
+			const custom: ExtensionUIContext["custom"] = async <T>(...args: Parameters<ExtensionUIContext["custom"]>) => {
+				customSignal = args[1]?.signal;
+				customStarted.resolve();
 				await customDialog.promise;
 				return undefined as T;
 			};
@@ -1532,35 +1626,7 @@ describe("ExtensionRunner", () => {
 				notify: { value: notify },
 			});
 			const uiContext: ExtensionUIContext = Object.create(uiPrototype);
-			runner.initialize(
-				{
-					sendMessage: () => {},
-					sendUserMessage: () => {},
-					appendEntry: () => {},
-					setLabel: () => {},
-					getActiveTools: () => [],
-					getAllTools: () => [],
-					setActiveTools: async () => {},
-					getCommands: () => [],
-					setModel: async () => false,
-					getThinkingLevel: () => undefined,
-					setThinkingLevel: () => {},
-					getSessionName: () => undefined,
-					setSessionName: async () => {},
-				},
-				{
-					getModel: () => undefined,
-					isIdle: () => true,
-					abort: () => {},
-					hasPendingMessages: () => false,
-					shutdown: () => {},
-					getContextUsage: () => undefined,
-					compact: async () => {},
-					getSystemPrompt: () => [],
-				},
-				undefined,
-				uiContext,
-			);
+			initializeRunner(runner, uiContext);
 			vi.useFakeTimers();
 			let now = 0;
 			const performanceNow = vi.spyOn(performance, "now").mockImplementation(() => now);
@@ -1576,45 +1642,37 @@ describe("ExtensionRunner", () => {
 					execute: async () => ({ content: [{ type: "text", text: "ran" }] }),
 				};
 				const wrapped = new ExtensionToolWrapper(tool, runner);
-				const flush = async () => {
-					for (let attempts = 0; attempts < 10; attempts++) await Promise.resolve();
-				};
 
 				const execution = wrapped.execute("tool-call-id", {});
-				await flush();
-				expect(notify).toHaveBeenCalledWith("Waiting for confirmation");
+				await handlerStarted.promise;
 				expect(dialogSignal).toBeUndefined();
 
 				now = 8;
 				vi.advanceTimersByTime(8);
-				await flush();
+				await confirmationStarted.promise;
 				expect(dialogSignal).toBeDefined();
 
 				now = 108;
 				vi.advanceTimersByTime(100);
-				await flush();
 				expect(dialogSignal?.aborted).toBe(false);
 
 				dialog.resolve(true);
-				await flush();
-				expect(customPending).toBe(true);
-				expect(fs.existsSync(markerPath)).toBe(false);
+				await customStarted.promise;
+				expect(customSignal).toBeDefined();
+				expect(customSignal?.aborted).toBe(false);
 
 				now = 208;
 				vi.advanceTimersByTime(100);
-				await flush();
-				expect(dialogSignal?.aborted).toBe(false);
-				expect(fs.existsSync(markerPath)).toBe(false);
+				expect(customSignal?.aborted).toBe(false);
 
 				customDialog.resolve();
-				await flush();
-				expect(fs.readFileSync(markerPath, "utf8")).toBe("settled");
+				await customCompleted.promise;
 
 				now = 225;
 				vi.advanceTimersByTime(17);
-				await flush();
+				await Promise.resolve();
+				await Promise.resolve();
 				vi.advanceTimersByTime(0);
-				await flush();
 				await expect(execution).rejects.toThrow(`Extension ${extensionPath} timed out after 25ms`);
 			} finally {
 				performanceNow.mockRestore();
@@ -1624,7 +1682,6 @@ describe("ExtensionRunner", () => {
 
 		it("cancels a pending confirmation and blocks tool execution when the outer dispatch aborts (#4223)", async () => {
 			const extensionPath = path.join(tempDir.path(), "confirm-abort-tool-call.ts");
-			const recordPath = path.join(tempDir.path(), "confirm-abort-executed.jsonl");
 			fs.writeFileSync(
 				extensionPath,
 				`
@@ -1646,8 +1703,10 @@ describe("ExtensionRunner", () => {
 			);
 			let dialogSignal: AbortSignal | undefined;
 			const dialog = Promise.withResolvers<boolean>();
+			const confirmationStarted = Promise.withResolvers<void>();
 			const confirm: ExtensionUIContext["confirm"] = async (_title, _message, dialogOptions) => {
 				dialogSignal = dialogOptions?.signal;
+				confirmationStarted.resolve();
 				dialogSignal?.addEventListener("abort", () => dialog.resolve(false), { once: true });
 				return await dialog.promise;
 			};
@@ -1655,35 +1714,8 @@ describe("ExtensionRunner", () => {
 				confirm: { value: confirm },
 			});
 			const uiContext: ExtensionUIContext = Object.create(uiPrototype);
-			runner.initialize(
-				{
-					sendMessage: () => {},
-					sendUserMessage: () => {},
-					appendEntry: () => {},
-					setLabel: () => {},
-					getActiveTools: () => [],
-					getAllTools: () => [],
-					setActiveTools: async () => {},
-					getCommands: () => [],
-					setModel: async () => false,
-					getThinkingLevel: () => undefined,
-					setThinkingLevel: () => {},
-					getSessionName: () => undefined,
-					setSessionName: async () => {},
-				},
-				{
-					getModel: () => undefined,
-					isIdle: () => true,
-					abort: () => {},
-					hasPendingMessages: () => false,
-					shutdown: () => {},
-					getContextUsage: () => undefined,
-					compact: async () => {},
-					getSystemPrompt: () => [],
-				},
-				undefined,
-				uiContext,
-			);
+			initializeRunner(runner, uiContext);
+			let executed = false;
 
 			const tool: AgentTool = {
 				name: "guarded",
@@ -1692,28 +1724,24 @@ describe("ExtensionRunner", () => {
 				parameters: Type.Object({}),
 				strict: true,
 				execute: async () => {
-					fs.appendFileSync(recordPath, "ran\n");
+					executed = true;
 					return { content: [{ type: "text", text: "ran" }] };
 				},
 			};
 			const wrapped = new ExtensionToolWrapper(tool, runner);
-			const flush = async () => {
-				for (let attempts = 0; attempts < 10; attempts++) await Promise.resolve();
-			};
 
 			const controller = new AbortController();
 			const execution = wrapped.execute("tool-call-id", {} as never, controller.signal);
-			await flush();
+			await confirmationStarted.promise;
 
 			expect(dialogSignal).toBeDefined();
 			expect(dialogSignal?.aborted).toBe(false);
 
 			controller.abort();
-			await flush();
+			await expect(execution).rejects.toThrow();
 
 			expect(dialogSignal?.aborted).toBe(true);
-			await expect(execution).rejects.toThrow();
-			expect(fs.existsSync(recordPath)).toBe(false);
+			expect(executed).toBe(false);
 		});
 	});
 

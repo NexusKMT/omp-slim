@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Made extension tool-call timeouts configurable and paused them during user dialogs.
+
 ## [17.3.0] - 2026-08-13
 
 ### Breaking Changes
