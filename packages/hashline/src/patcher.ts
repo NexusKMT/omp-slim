@@ -569,7 +569,7 @@ export class Patcher {
 		// false "drift" purely from BOM/line-ending restoration asymmetry.
 		const recorded = normalizeToLF(stripBom(write.text).text);
 		const driftedOnWrite = recorded !== after;
-		const fileHash = this.#recordFullSnapshot(canonicalPath, recorded);
+		const fileHash = this.#recordFullSnapshot(canonicalPath, recorded, driftedOnWrite ? [] : undefined);
 		const allWarnings = driftedOnWrite ? [...warnings, writeDriftWarning(section.path)] : warnings;
 
 		return {
@@ -604,18 +604,19 @@ export class Patcher {
 		}
 	}
 
-	#recordFullSnapshot(canonicalPath: string, normalized: string): string {
-		return this.snapshots.record(canonicalPath, normalized);
+	#recordFullSnapshot(canonicalPath: string, normalized: string, seenLines?: Iterable<number>): string {
+		return this.snapshots.record(canonicalPath, normalized, seenLines);
 	}
 
 	/**
 	 * Reject an anchored edit that references a line the read which minted
 	 * `expected` never displayed. `matchedSnapshot` is the store version whose
 	 * text equals the live normalized content — the exact snapshot the model
-	 * anchored against. Absent means no provenance was recorded (the tag was
-	 * externally minted or aged out), so the edit applies as before. Only runs
-	 * on the no-drift path, where anchor line numbers index the tagged content
-	 * 1:1.
+	 * anchored against. A missing snapshot or undefined `seenLines` means no
+	 * provenance was recorded (the tag was externally minted or aged out), so
+	 * the edit applies as before. An empty set means provenance is active but no
+	 * exact lines were displayed, so every anchor remains guarded. Only runs on
+	 * the no-drift path, where anchor line numbers index the tagged content 1:1.
 	 *
 	 * The rejection inlines the actual file content at the unseen anchor lines
 	 * (from `matchedSnapshot.text`, which by definition equals the live
@@ -635,7 +636,7 @@ export class Patcher {
 	 */
 	#assertSeenLines(section: PatchSection, expected: string, matchedSnapshot: Snapshot | null): void {
 		const seen = matchedSnapshot?.seenLines;
-		if (!seen || seen.size === 0) return;
+		if (seen === undefined) return;
 		const unseen = section.collectAnchorLines().filter(line => !seen.has(line));
 		if (unseen.length === 0) return;
 		const sourceLines = matchedSnapshot?.text.split("\n") ?? [];

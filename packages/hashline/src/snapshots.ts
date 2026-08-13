@@ -41,7 +41,8 @@ export interface Snapshot {
 	 * bodies) leaves this sparse; a whole-file read fills every line. Multiple
 	 * reads of the same content union into one set. `undefined` means "no
 	 * provenance recorded" — the patcher then skips the seen-line check and
-	 * applies as before. Mutated in place as more of the same content is read.
+	 * applies as before. An empty set means provenance is active but no exact
+	 * lines were displayed, so every anchored line remains guarded.
 	 */
 	seenLines?: Set<number>;
 }

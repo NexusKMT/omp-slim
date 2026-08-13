@@ -374,6 +374,36 @@ describe("read → edit seen-line guard", () => {
 		).rejects.toThrow(/never displayed \(it showed/);
 	});
 
+	it("does not trust requested diff lines after an ACP client transforms the write", async () => {
+		const file = path.join(tmpDir, "notes.txt");
+		const content = "ONE\nTWO\nTHREE\nFOUR\nFIVE\n";
+		await Bun.write(file, content);
+		const bridge = {
+			capabilities: { writeTextFile: true },
+			writeTextFile: async ({ path: target, content: requested }: { path: string; content: string }) => {
+				await Bun.write(target, `CLIENT\n${requested}`);
+			},
+		};
+		const session = {
+			...createSession(tmpDir),
+			getClientBridge: () => bridge,
+		} as ToolSession;
+		const store = getFileSnapshotStore(session);
+		const originalTag = store.record(canonicalSnapshotKey(file), content, [2]);
+
+		const first = await executeHashlineSingle(
+			execOptions(`[notes.txt#${originalTag}]\nPUT 2.=2:\n+TWO EDITED`, session),
+		);
+		const persistedTag = tagFromOutput(resultText(first));
+		const drifted = "CLIENT\nONE\nTWO EDITED\nTHREE\nFOUR\nFIVE\n";
+		expect(await Bun.file(file).text()).toBe(drifted);
+
+		await expect(
+			executeHashlineSingle(execOptions(`[notes.txt#${persistedTag}]\nPUT 1.=1:\n+OVERWRITE`, session)),
+		).rejects.toThrow(/never displayed/);
+		expect(await Bun.file(file).text()).toBe(drifted);
+	});
+
 	it("keeps the re-read fallback when the anchor set exceeds the inline reveal cap", async () => {
 		const file = path.join(tmpDir, "long.txt");
 		const lines = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`);

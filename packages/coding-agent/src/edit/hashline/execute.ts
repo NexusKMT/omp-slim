@@ -18,11 +18,13 @@ import {
 	commitClipboard,
 	forkClipboard,
 	MismatchError as HashlineMismatchError,
+	normalizeToLF,
 	Patch,
 	Patcher,
 	type PatchSectionResult,
 	type PreparedSection,
 	startClipboardBatch,
+	stripBom,
 	UnseenLinesError,
 } from "@oh-my-pi/hashline";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
@@ -227,7 +229,9 @@ function renderSection(
 	const moveBlock = result.moveDest ? `\nMoved to ${result.moveDest}` : "";
 	const firstChangedLine = result.firstChangedLine ?? diff.firstChangedLine;
 	const text = `${result.header}${blockBlock}${moveBlock}${previewBlock}${warningsBlock}`;
-	recordSeenLinesFromBody(session, canonicalSnapshotKey(result.canonicalPath), result.fileHash, text);
+	if (normalizeToLF(stripBom(result.written).text) === result.after) {
+		recordSeenLinesFromBody(session, canonicalSnapshotKey(result.canonicalPath), result.fileHash, text);
+	}
 	return {
 		toolResult: {
 			content: [
