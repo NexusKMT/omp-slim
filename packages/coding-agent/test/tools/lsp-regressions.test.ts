@@ -505,7 +505,7 @@ describe("lsp regressions", () => {
 		}
 	});
 
-	it("advertises workspace folder support during LSP initialization", async () => {
+	it("advertises workspace folder support and abort-on-failure workspace edits during LSP initialization", async () => {
 		const tempDir = TempDir.createSync("@omp-lsp-workspace-folders-");
 		try {
 			const server = installFakeLsp((message, srv) => {
@@ -528,11 +528,14 @@ describe("lsp regressions", () => {
 
 			const init = server.received.find(message => message.method === "initialize");
 			const params = init?.params as {
-				capabilities?: { workspace?: { workspaceFolders?: unknown } };
+				capabilities?: {
+					workspace?: { workspaceFolders?: unknown; workspaceEdit?: { failureHandling?: unknown } };
+				};
 				workspaceFolders?: unknown;
 			};
 
 			expect(params.capabilities?.workspace?.workspaceFolders).toBe(true);
+			expect(params.capabilities?.workspace?.workspaceEdit?.failureHandling).toBe("abort");
 			expect(params.workspaceFolders).toEqual([
 				{ uri: fileToUri(tempDir.path()), name: path.basename(tempDir.path()) },
 			]);
