@@ -1,3 +1,5 @@
+import type { FetchImpl } from "@oh-my-pi/pi-utils";
+
 /**
  * Build a User-Agent string that identifies as Gemini CLI to unlock higher rate limits.
  * Uses the same format as the official Gemini CLI (v0.35+):
@@ -64,7 +66,7 @@ export function parseAntigravityManifestVersion(yamlText: string): string | null
  * fallback stays valid) and clear the in-flight cache so a later call retries.
  * Skipped entirely when PI_AI_ANTIGRAVITY_VERSION is set.
  */
-export function ensureAntigravityVersion(fetcher: typeof fetch = fetch, signal?: AbortSignal): Promise<void> {
+export function ensureAntigravityVersion(fetcher: FetchImpl = fetch, signal?: AbortSignal): Promise<void> {
 	if (process.env.PI_AI_ANTIGRAVITY_VERSION || discoveredAntigravityVersion) return Promise.resolve();
 	if (antigravityVersionFetch) return antigravityVersionFetch;
 
