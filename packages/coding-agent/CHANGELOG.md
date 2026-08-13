@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed Claude Code custom tool discovery attempting to import non-module files from `.claude/tools`.
+- Fixed Claude Code custom tool discovery attempting to import non-module files from `.claude/tools` ([#8471](https://github.com/can1357/oh-my-pi/pull/8471) by [@Kigbnajd](https://github.com/Kigbnajd)).
 
 ## [17.3.1] - 2026-08-13
 
