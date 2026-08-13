@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed direct Herdr panes continuously flashing during transcript streaming by keeping resize redraws on the pane-safe in-place path instead of clearing and replaying host-owned scrollback ([#8431](https://github.com/can1357/oh-my-pi/issues/8431)).
+- Fixed screen flashing in Herdr panes during transcript streaming.
 
 ## [17.3.0] - 2026-08-13
 
