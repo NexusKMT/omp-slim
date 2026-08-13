@@ -740,3 +740,61 @@ describe("StatusLineComponent applyCwdChange re-points watcher ownership", () =>
 		component.dispose();
 	});
 });
+
+describe("StatusLineComponent git watcher survives atomic HEAD renames", () => {
+	let repoDir: string;
+
+	beforeAll(async () => {
+		repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "status-line-headwatch-"));
+		const run = (...args: string[]) => Bun.spawnSync(["git", ...args], { cwd: repoDir });
+		run("init", "-q");
+		run("config", "user.email", "t@example.com");
+		run("config", "user.name", "Test");
+		run("commit", "--allow-empty", "-q", "-m", "init");
+	});
+
+	afterAll(async () => {
+		setProjectDir(originalProjectDir);
+		await fs.rm(repoDir, { recursive: true, force: true });
+	});
+
+	// git rewrites HEAD via a lock file + atomic rename (HEAD.lock → HEAD), which
+	// unlinks the inode. The pre-fix watcher bound `fs.watch` to the HEAD file, so
+	// it fired for the first switch and then died on the stale inode — freezing the
+	// displayed branch on every subsequent switch (issue #8412). Watching the git
+	// directory instead keeps the watch alive across renames.
+	it("keeps firing #onBranchChange across consecutive branch switches", async () => {
+		vi.spyOn(git.branch, "default").mockReturnValue(Promise.withResolvers<string | null>().promise);
+		vi.spyOn(git.status, "summary").mockReturnValue(Promise.withResolvers<GitStatus | null>().promise);
+		vi.spyOn(jj.repo, "rootSync").mockReturnValue(null);
+
+		setProjectDir(repoDir);
+		const component = new StatusLineComponent(makeSession());
+		component.updateSettings(gitSegment);
+
+		// Await the watcher's own #onBranchChange signal rather than a wall-clock
+		// delay: a fresh resolver is armed before each switch and awaited after it,
+		// so a frozen watcher surfaces as the test-runner timeout, not a flake.
+		let branchChanged = Promise.withResolvers<void>();
+		component.watchBranch(() => branchChanged.resolve());
+		// Prime the branch cache off the initial HEAD. The status/default mocks
+		// never resolve, so this cold paint cannot fire #onBranchChange itself.
+		component.getTopBorder(80);
+
+		const switchTo = async (branchName: string) => {
+			const fired = branchChanged.promise;
+			await git.branch.checkoutNew(repoDir, branchName);
+			await fired;
+			branchChanged = Promise.withResolvers<void>();
+		};
+
+		await switchTo("first");
+		expect(component.getTopBorder(80).content).toContain("first");
+
+		// Regression: the second switch must still reach the display.
+		await switchTo("second");
+		expect(component.getTopBorder(80).content).toContain("second");
+
+		component.dispose();
+	});
+});

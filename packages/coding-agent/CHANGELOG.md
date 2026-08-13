@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the status-line git branch display freezing on the previous branch after the first branch switch, caused by the HEAD watcher binding to a file inode that git unlinks on its atomic HEAD rename ([#8412](https://github.com/can1357/oh-my-pi/issues/8412)).
+
 ## [17.3.0] - 2026-08-13
 
 ### Breaking Changes
