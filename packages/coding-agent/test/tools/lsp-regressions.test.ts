@@ -542,6 +542,36 @@ describe("lsp regressions", () => {
 		}
 	});
 
+	it("does not advertise unsupported snippet text edits", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-snippet-capability-");
+		try {
+			const server = installFakeLsp((message, srv) => {
+				if (message.method === "initialize") {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
+				} else if (message.method === "shutdown") {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: null });
+				} else if (message.method === "exit") {
+					srv.exit(0);
+				}
+			});
+
+			const config: ServerConfig = {
+				command: "fake-lsp",
+				fileTypes: ["rs"],
+				rootMarkers: [],
+			};
+
+			await lspClient.getOrCreateClient(config, tempDir.path(), 1_000);
+
+			const init = server.received.find(message => message.method === "initialize");
+			const params = init?.params as { capabilities?: { experimental?: { snippetTextEdit?: boolean } } };
+			expect(params.capabilities?.experimental?.snippetTextEdit).toBeUndefined();
+		} finally {
+			await lspClient.shutdownAll();
+			tempDir.removeSync();
+		}
+	});
+
 	it("answers workspace/workspaceFolders requests with the current folder set", async () => {
 		const tempDir = TempDir.createSync("@omp-lsp-workspace-folders-request-");
 		try {
@@ -2462,6 +2492,18 @@ describe("lsp regressions", () => {
 				},
 			]),
 		).toBe("import x from './megaMenu';\n");
+	});
+
+	it("rejects unexpected snippet text edits without writing their syntax", () => {
+		expect(() =>
+			applyTextEditsToString("struct S;", [
+				{
+					range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+					newText: "#[derive($0)] ",
+					insertTextFormat: 2,
+				},
+			]),
+		).toThrow("snippet-formatted LSP edits are unsupported");
 	});
 
 	it("keeps byte-identical zero-width inserts because they are not idempotent", () => {

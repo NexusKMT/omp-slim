@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed rust-analyzer code actions writing snippet placeholders such as `$0` into source by no longer advertising unsupported snippet text edits and rejecting any unexpected snippet edit before applying it ([#8376](https://github.com/can1357/oh-my-pi/issues/8376)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Added
