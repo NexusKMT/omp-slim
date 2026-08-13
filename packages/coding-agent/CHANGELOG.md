@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed concurrent OMP sessions sharing one LSP backend overlay, so each session now receives semantic results for its own open-document content. ([#8371](https://github.com/can1357/oh-my-pi/issues/8371))
+
 ## [17.2.15] - 2026-08-12
 
 ### Added
