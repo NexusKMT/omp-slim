@@ -82,7 +82,7 @@ import { isFoundryEnabled } from "./utils/foundry";
 import { wrapLeakedThinkingStream } from "./utils/leaked-thinking-stream";
 import { wrapFetchForProxy } from "./utils/proxy";
 import { withRequestDebugFetch } from "./utils/request-debug";
-import { withGeminiThinkingLoopGuard } from "./utils/thinking-loop";
+import { withThinkingLoopGuard } from "./utils/thinking-loop";
 
 function defaultFetchForModel(model: Model<Api>): FetchImpl {
 	if (model.provider === "anthropic" && model.api === "anthropic-messages") return coworkFetch;
@@ -868,7 +868,7 @@ export function stream<TApi extends Api>(
 	context: Context,
 	options?: OptionsForApi<TApi>,
 ): AssistantMessageEventStream {
-	return withGeminiThinkingLoopGuard(model, options, opts =>
+	return withThinkingLoopGuard(model, options, opts =>
 		withProviderInFlightLimit(model, opts, () => streamDispatch(model, context, opts)),
 	);
 }
@@ -1533,7 +1533,7 @@ function streamSimpleRequest<TApi extends Api>(
 	// extension-registered APIs can't accidentally override a configured
 	// pi-native transport.
 	if (model.transport === "pi-native") {
-		return withGeminiThinkingLoopGuard(model, requestOptions, opts =>
+		return withThinkingLoopGuard(model, requestOptions, opts =>
 			withProviderInFlightLimit(model, opts, () => streamPiNative(model, context, opts)),
 		);
 	}
@@ -1541,7 +1541,7 @@ function streamSimpleRequest<TApi extends Api>(
 	// Check custom API registry (extension-provided APIs)
 	const customApiProvider = getCustomApi(model.api);
 	if (customApiProvider) {
-		return withGeminiThinkingLoopGuard(model, requestOptions, opts =>
+		return withThinkingLoopGuard(model, requestOptions, opts =>
 			withProviderInFlightLimit(model, opts, () => customApiProvider.streamSimple(model, context, opts)),
 		);
 	}

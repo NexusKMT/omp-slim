@@ -2,8 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
 	hasOpus47ApiRestrictions,
 	isClaudeModelId,
+	isGeminiModelId,
 	isGlmVisionModelId,
-	isGrok46ModelId,
+	isGrokModelId,
 	isGrokReasoningEffortCapable,
 	isKimiK26ModelId,
 	isKimiModelId,
@@ -295,8 +296,9 @@ describe("modelFamilyToken", () => {
 	test("classifies non-first-party families", () => {
 		expect(modelFamilyToken("moonshotai/kimi-k2")).toBe("kimi");
 		expect(modelFamilyToken("qwen/qwen3-coder")).toBe("qwen");
+		expect(modelFamilyToken("google/gemini-2.5-flash")).toBe("gemini");
+		expect(modelFamilyToken("xai/grok-4.6")).toBe("grok");
 	});
-
 	test("classifies GLM across provider mirrors so same-lineage SKUs fold together", () => {
 		expect(modelFamilyToken("glm-5.2")).toBe("glm");
 		expect(modelFamilyToken("zai/glm-5.2")).toBe(modelFamilyToken("zhipu-coding-plan/glm-5.2"));
@@ -307,19 +309,23 @@ describe("modelFamilyToken", () => {
 		expect(modelFamilyToken("some-unknown-model")).toBe("");
 	});
 });
-
-describe("isGrok46ModelId", () => {
-	test("matches canonical dashed and Cursor dotted identifiers", () => {
-		expect(isGrok46ModelId("grok-4-6")).toBe(true);
-		expect(isGrok46ModelId("venice/grok-4-6")).toBe(true);
-		expect(isGrok46ModelId("cursor-grok-4.6-high")).toBe(true);
+describe("isGeminiModelId", () => {
+	test("matches gemini ids across namespaces", () => {
+		expect(isGeminiModelId("gemini-3.5-flash")).toBe(true);
+		expect(isGeminiModelId("google/gemini-3-pro")).toBe(true);
+		expect(isGeminiModelId("openrouter/google/gemini-2.5-flash")).toBe(true);
+		expect(isGeminiModelId("gpt-4o")).toBe(false);
 	});
+});
 
-	test("rejects adjacent versions and lookalikes", () => {
-		expect(isGrok46ModelId("grok-4.60")).toBe(false);
-		expect(isGrok46ModelId("grok-4.6.0")).toBe(false);
-		expect(isGrok46ModelId("grok-4-5")).toBe(false);
-		expect(isGrok46ModelId("notgrok-4.6")).toBe(false);
+describe("isGrokModelId", () => {
+	test("matches grok ids across namespaces and delimiters", () => {
+		expect(isGrokModelId("grok-4-6")).toBe(true);
+		expect(isGrokModelId("xai/grok-3")).toBe(true);
+		expect(isGrokModelId("venice/grok-4.5")).toBe(true);
+		expect(isGrokModelId("cursor-grok-4.5-high")).toBe(true);
+		expect(isGrokModelId("notgrok-4.6")).toBe(false);
+		expect(isGrokModelId("gpt-4o")).toBe(false);
 	});
 });
 

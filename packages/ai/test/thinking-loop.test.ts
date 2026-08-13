@@ -9,13 +9,11 @@ import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream"
 import {
 	GEMINI_HEADER_RUNAWAY_THRESHOLD,
 	GeminiHeaderRunDetector,
-	isGeminiThinkingLoopModel,
-	isGeminiThinkingModel,
 	isLoopGuardedModel,
 	isReasoningSummaryHeader,
 	THINKING_LOOP_ERROR_MARKER,
 	ThinkingLoopDetector,
-	withGeminiThinkingLoopGuard,
+	withThinkingLoopGuard,
 } from "@oh-my-pi/pi-ai/utils/thinking-loop";
 import { isRetryableError } from "@oh-my-pi/pi-utils";
 
@@ -226,43 +224,6 @@ function perFileTemplates(): string {
 		.join("\n\n");
 }
 
-describe("isGeminiThinkingLoopModel", () => {
-	test("matches direct and aggregator-routed gemini ids, not lookalikes", () => {
-		const gate = (provider: string, id: string) => isGeminiThinkingLoopModel(createMockModel({ provider, id }).model);
-		expect(gate("google", "gemini-3-pro-preview")).toBe(true);
-		expect(gate("openrouter", "google/gemini-3.5-flash")).toBe(true);
-		expect(gate("google-gemini-cli", "gemini-3-flash")).toBe(true);
-		expect(gate("openai", "gpt-5.5")).toBe(false);
-		expect(gate("google", "gemma-3-1b")).toBe(false);
-	});
-
-	test("trusts the compat flag over the id regex for every OpenAI-compat API", () => {
-		const gate = (api: string, id: string, enableGeminiThinkingLoopGuard: boolean) =>
-			isGeminiThinkingLoopModel({
-				api,
-				provider: "openrouter",
-				id,
-				compat: { enableGeminiThinkingLoopGuard },
-			} as unknown as Model<Api>);
-		// Opaque proxy alias opted in despite a non-gemini id (completions + responses).
-		expect(gate("openai-completions", "my-fast-model", true)).toBe(true);
-		expect(gate("openai-responses", "my-fast-model", true)).toBe(true);
-		// Gemini-shaped id explicitly opted out stays off — the flag wins over the regex.
-		expect(gate("openai-completions", "gemini-3.5-flash", false)).toBe(false);
-		expect(gate("openai-responses", "gemini-3.5-flash", false)).toBe(false);
-	});
-
-	test("guards non-compat Gemini transports (Vertex, direct Google) via id", () => {
-		const gate = (api: string, provider: string, id: string) =>
-			isGeminiThinkingLoopModel({ api, provider, id } as unknown as Model<Api>);
-		// Vertex has no OpenAICompat record; its canonical ids are gemini-shaped.
-		expect(gate("google-vertex", "google-vertex", "gemini-2.5-pro")).toBe(true);
-		expect(gate("google-generative-ai", "google", "gemini-3-pro")).toBe(true);
-		// Non-Gemini models on the same transports (e.g. Claude on Vertex) stay unguarded.
-		expect(gate("google-vertex", "google-vertex", "claude-sonnet-4")).toBe(false);
-	});
-});
-
 describe("ThinkingLoopDetector", () => {
 	test("trips on a tight near-duplicate paragraph loop via the trigram path", () => {
 		// High word-trigram overlap: the cluster check claims it before the lexical
@@ -464,12 +425,12 @@ describe("thinking-loop guard (stream wrapper)", () => {
 	});
 });
 
-describe("withGeminiThinkingLoopGuard (Vertex transport)", () => {
+describe("withThinkingLoopGuard (Vertex transport)", () => {
 	test("emits a retryable empty-content error for a looping Vertex Gemini stream", async () => {
 		const model = { api: "google-vertex", provider: "google-vertex", id: "gemini-2.5-pro" } as unknown as Model<Api>;
 		const partial = { role: "assistant", content: [] } as unknown as AssistantMessage;
 
-		const guarded = withGeminiThinkingLoopGuard(model, undefined, () => {
+		const guarded = withThinkingLoopGuard(model, undefined, () => {
 			const inner = new AssistantMessageEventStream();
 			const events: AssistantMessageEvent[] = [
 				{ type: "start", partial },
@@ -491,29 +452,31 @@ describe("withGeminiThinkingLoopGuard (Vertex transport)", () => {
 	});
 });
 describe("isLoopGuardedModel", () => {
-	test("guards Gemini, DeepSeek, and Grok 4.6 models by default, respects overrides", () => {
+	test("guards Gemini, DeepSeek, and Grok model-id families only", () => {
 		const gemini = createMockModel({ provider: "openrouter", id: "google/gemini-3.5-flash" }).model;
 		const deepseek = createMockModel({ provider: "deepseek", id: "deepseek-reasoner" }).model;
 		const grok46 = createMockModel({ provider: "venice", id: "grok-4-6" }).model;
 		const cursorGrok46 = createMockModel({ provider: "cursor", id: "cursor-grok-4.6-high" }).model;
 		const grok460 = createMockModel({ provider: "venice", id: "grok-4.60" }).model;
 		const grok45 = createMockModel({ provider: "cursor", id: "cursor-grok-4.5-high" }).model;
+		const opaqueDeepseek = createMockModel({ provider: "deepseek", id: "opaque-model" }).model;
 		const other = createMockModel({ provider: "openai", id: "gpt-4o" }).model;
 
 		expect(isLoopGuardedModel(gemini)).toBe(true);
 		expect(isLoopGuardedModel(deepseek)).toBe(true);
 		expect(isLoopGuardedModel(grok46)).toBe(true);
 		expect(isLoopGuardedModel(cursorGrok46)).toBe(true);
-		expect(isLoopGuardedModel(grok460)).toBe(false);
-		expect(isLoopGuardedModel(grok45)).toBe(false);
+		expect(isLoopGuardedModel(grok460)).toBe(true);
+		expect(isLoopGuardedModel(grok45)).toBe(true);
+		expect(isLoopGuardedModel(opaqueDeepseek)).toBe(false);
 		expect(isLoopGuardedModel(other)).toBe(false);
 
-		// enabled: false disables even for target models
+		// enabled: false disables every guarded family.
 		expect(isLoopGuardedModel(gemini, { loopGuard: { enabled: false } })).toBe(false);
 		expect(isLoopGuardedModel(deepseek, { loopGuard: { enabled: false } })).toBe(false);
-		expect(isLoopGuardedModel(grok46, { loopGuard: { enabled: false } })).toBe(false);
+		expect(isLoopGuardedModel(grok45, { loopGuard: { enabled: false } })).toBe(false);
 
-		// force enabled for other models — but disabled overall unless it is Gemini, DeepSeek, or Grok 4.6
+		// enabled: true does not opt unrelated models into the guard.
 		expect(isLoopGuardedModel(other, { loopGuard: { enabled: true } })).toBe(false);
 	});
 });
@@ -528,7 +491,7 @@ describe("loop guard assistant prose/text loops", () => {
 		const partial = { role: "assistant", content: [], stopReason: "stop" } as unknown as AssistantMessage;
 		const options = { loopGuard: { checkAssistantContent: true } };
 
-		const guarded = withGeminiThinkingLoopGuard(model, options, () => {
+		const guarded = withThinkingLoopGuard(model, options, () => {
 			const inner = new AssistantMessageEventStream();
 			const events: AssistantMessageEvent[] = [
 				{ type: "start", partial },
@@ -562,7 +525,7 @@ describe("loop guard assistant prose/text loops", () => {
 		const partial = { role: "assistant", content: [], stopReason: "stop" } as unknown as AssistantMessage;
 		const options = { loopGuard: { checkAssistantContent: false } };
 
-		const guarded = withGeminiThinkingLoopGuard(model, options, () => {
+		const guarded = withThinkingLoopGuard(model, options, () => {
 			const inner = new AssistantMessageEventStream();
 			const events: AssistantMessageEvent[] = [
 				{ type: "start", partial },
@@ -664,20 +627,6 @@ describe("GeminiHeaderRunDetector", () => {
 		detector.reset();
 		expect(detector.count).toBe(0);
 		expect(detector.push(runaway)).toBe(true);
-	});
-});
-
-describe("isGeminiThinkingModel", () => {
-	test("is true for Gemini and false for DeepSeek / other guarded peers", () => {
-		const gemini = createMockModel({ provider: "openrouter", id: "google/gemini-3.5-flash" }).model;
-		const deepseek = createMockModel({ provider: "openrouter", id: "deepseek/deepseek-r1" }).model;
-		const claude = createMockModel({ provider: "anthropic", id: "claude-sonnet-4" }).model;
-		expect(isGeminiThinkingModel(gemini)).toBe(true);
-		expect(isGeminiThinkingModel(deepseek)).toBe(false);
-		expect(isGeminiThinkingModel(claude)).toBe(false);
-		// DeepSeek is still loop-guarded for the similarity guard, just not the header guard.
-		expect(isLoopGuardedModel(deepseek)).toBe(true);
-		expect(isLoopGuardedModel(gemini)).toBe(true);
 	});
 });
 

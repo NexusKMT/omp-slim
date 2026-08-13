@@ -98,12 +98,14 @@ export const isMimoModelIdOrName = memo((value: string): boolean => {
 	return value.toLowerCase().includes("mimo");
 });
 
-/**
- * Grok 4.6 model IDs, including canonical dashed and Cursor dotted variants.
- * Adjacent versions such as `grok-4.60` are deliberately excluded.
- */
-export const isGrok46ModelId = memo((modelId: string): boolean => {
-	return /(?:^|[./_-])grok-4[.-]6(?:$|[-_:])/i.test(bareModelId(modelId));
+/** Gemini family ids in any namespace form (`gemini-*`, `google/gemini-*`, `openrouter/google/gemini-…`). */
+export const isGeminiModelId = memo((modelId: string): boolean => {
+	return /(^|\/)gemini[-.]?/i.test(modelId);
+});
+
+/** Grok family ids across namespace and delimiter forms (`grok-*`, `cursor-grok-*`, `xai/grok-*`). */
+export const isGrokModelId = memo((modelId: string): boolean => {
+	return /(?:^|[./_-])grok(?:[-.]|$)/i.test(modelId);
 });
 
 const GROK_EFFORT_CAPABLE_PREFIXES = ["grok-3-mini", "grok-4.20-multi-agent", "grok-4.3", "grok-4.5"] as const;
@@ -268,6 +270,8 @@ export const modelFamilyToken = memo((modelId: string): string => {
 	if (parsed.family !== "unknown") return parsed.family;
 	if (isClaudeModelId(modelId) || isAnthropicNamespacedModelId(modelId)) return "anthropic";
 	if (isOpenAIModelId(modelId)) return "openai";
+	if (isGeminiModelId(modelId)) return "gemini";
+	if (isGrokModelId(modelId)) return "grok";
 	if (isKimiModelId(modelId)) return "kimi";
 	if (isQwenModelId(modelId)) return "qwen";
 	if (isMinimaxM2FamilyModelId(modelId) || isMinimaxM3FamilyModelId(modelId)) return "minimax";

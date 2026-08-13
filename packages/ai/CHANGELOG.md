@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Renamed `withGeminiThinkingLoopGuard` to `withThinkingLoopGuard`; the guard applies to Gemini, DeepSeek, and Grok model-id families.
+
 ### Changed
 
 - Updated OpenCode Go integration to use the official usage endpoint, removing hardcoded caps, enabling real-time credential validation, and routing multi-key pools based on rolling and weekly headroom.
