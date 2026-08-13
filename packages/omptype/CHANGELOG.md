@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the TypeBox adapter omitting `pattern`, non-URL `format`, and `multipleOf` from emitted JSON Schema even though runtime validation enforced them ([#8425](https://github.com/can1357/oh-my-pi/pull/8425)).
+
 ## [17.3.0] - 2026-08-13
 
 ### Added

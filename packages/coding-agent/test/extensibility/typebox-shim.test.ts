@@ -280,6 +280,31 @@ describe("pi.typebox compatibility shim", () => {
 			expect(schema.safeParse(true).success).toBe(false);
 		});
 
+		it("preserves wire-only constraints on embedded schema builders", () => {
+			const schema = Type.Unsafe({
+				type: "object",
+				properties: {
+					code: Type.String({ pattern: "^x" }),
+					count: Type.Number({ multipleOf: 2 }),
+				},
+				required: ["code", "count"],
+				additionalProperties: false,
+			});
+
+			expect(schema.toJsonSchema()).toEqual({
+				type: "object",
+				properties: {
+					code: { type: "string", pattern: "^x" },
+					count: { type: "number", multipleOf: 2 },
+				},
+				required: ["code", "count"],
+				additionalProperties: false,
+			});
+			expect(schema.safeParse({ code: "xray", count: 4 }).success).toBe(true);
+			expect(schema.safeParse({ code: "bad", count: 4 }).success).toBe(false);
+			expect(schema.safeParse({ code: "xray", count: 3 }).success).toBe(false);
+		});
+
 		it("recovers the wire schema when a builder is spread into a new document", () => {
 			const base = Type.Unsafe({
 				anyOf: [
