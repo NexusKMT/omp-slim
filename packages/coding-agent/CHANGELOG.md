@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed repeated `/btw` panels committing transient frames to native scrollback and replaying conversation history after dismissal.
+
 ## [17.3.0] - 2026-08-13
 
 ### Breaking Changes
