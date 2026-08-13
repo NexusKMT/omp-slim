@@ -414,7 +414,11 @@ class ManualRenderScheduler implements RenderScheduler {
 	}
 
 	scheduleRender(callback: () => void, delayMs: number): RenderTimer {
-		const timer = { at: this.#now + Math.max(0, delayMs), callback, canceled: false };
+		const timer = {
+			at: this.#now + Math.max(0, delayMs),
+			callback,
+			canceled: false,
+		};
 		this.#timers.push(timer);
 		return {
 			cancel: () => {
@@ -519,10 +523,27 @@ const MULTIPLEXER_ENV_KEYS = [
 const NO_MULTIPLEXER_ENV: Record<string, string | undefined> = Object.fromEntries(
 	MULTIPLEXER_ENV_KEYS.map(key => [key, undefined]),
 );
-const TMUX_ENV: Record<string, string | undefined> = { ...NO_MULTIPLEXER_ENV, TMUX: "1" };
+const TMUX_ENV: Record<string, string | undefined> = {
+	...NO_MULTIPLEXER_ENV,
+	TMUX: "1",
+};
 const MULTIPLEXER_ENV_CASES: Array<[string, Record<string, string | undefined>]> = [
-	["CMUX_WORKSPACE_ID", { ...NO_MULTIPLEXER_ENV, TERM: "dumb", CMUX_WORKSPACE_ID: "workspace:cmux-2088" }],
-	["CMUX_SURFACE_ID", { ...NO_MULTIPLEXER_ENV, TERM: "dumb", CMUX_SURFACE_ID: "surface:cmux-2088" }],
+	[
+		"CMUX_WORKSPACE_ID",
+		{
+			...NO_MULTIPLEXER_ENV,
+			TERM: "dumb",
+			CMUX_WORKSPACE_ID: "workspace:cmux-2088",
+		},
+	],
+	[
+		"CMUX_SURFACE_ID",
+		{
+			...NO_MULTIPLEXER_ENV,
+			TERM: "dumb",
+			CMUX_SURFACE_ID: "surface:cmux-2088",
+		},
+	],
 ];
 const CMUX_SOCKET_ONLY_ENV: Record<string, string | undefined> = {
 	...NO_MULTIPLEXER_ENV,
@@ -2512,7 +2533,7 @@ describe("multiplexer detection gates ED3 on resize", () => {
 		});
 	}
 
-	it("rebuilds direct HerdR scrollback from source across repeated widths", async () => {
+	it("repaints direct HerdR resizes in place without ED3", async () => {
 		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
 			const term = new VirtualTerminal(40, 10, 1000);
 			const tui = new TUI(term);
@@ -2535,6 +2556,26 @@ describe("multiplexer detection gates ED3 on resize", () => {
 						).toHaveLength(1);
 					}
 				}
+
+				expect(writes.join("")).not.toContain(ED3);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
+	it("preserves explicit scrollback clears in direct HerdR", async () => {
+		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+			const term = new VirtualTerminal(40, 10, 1000);
+			const tui = new TUI(term);
+			tui.addChild(new MutableLinesComponent(Array.from({ length: 20 }, (_value, index) => `line-${index}`)));
+
+			try {
+				tui.start();
+				await settle(term);
+				const writes = captureWrites(term);
+				tui.resetDisplay();
+				await settle(term);
 
 				expect(writes.join("")).toContain(ED3);
 			} finally {
