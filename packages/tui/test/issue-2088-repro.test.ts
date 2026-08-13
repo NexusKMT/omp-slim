@@ -2564,6 +2564,26 @@ describe("multiplexer detection gates ED3 on resize", () => {
 		});
 	});
 
+	it("preserves explicit scrollback clears in direct HerdR", async () => {
+		await withEnvPatch({ ...NO_MULTIPLEXER_ENV, TERM: "dumb", HERDR_ENV: "1" }, async () => {
+			const term = new VirtualTerminal(40, 10, 1000);
+			const tui = new TUI(term);
+			tui.addChild(new MutableLinesComponent(Array.from({ length: 20 }, (_value, index) => `line-${index}`)));
+
+			try {
+				tui.start();
+				await settle(term);
+				const writes = captureWrites(term);
+				tui.resetDisplay();
+				await settle(term);
+
+				expect(writes.join("")).toContain(ED3);
+			} finally {
+				tui.stop();
+			}
+		});
+	});
+
 	it("keeps nested tmux inside HerdR on the ED3-unsafe path", async () => {
 		await withEnvPatch({ ...TMUX_ENV, TERM: "tmux-256color", HERDR_ENV: "1" }, async () => {
 			const term = new VirtualTerminal(40, 10, 1000);

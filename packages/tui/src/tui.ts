@@ -413,9 +413,25 @@ function parseSizeValue(value: SizeValue | undefined, referenceSize: number): nu
 	return undefined;
 }
 
-/** Detect terminal multiplexers where scrollback clearing and height-change redraws are hostile. */
+/**
+ * Detect sessions where ED3 cannot safely rebuild scrollback. Direct HerdR
+ * panes support explicit clears; nested multiplexers remain unsafe because the
+ * inner tmux/screen/Zellij layer owns their history.
+ */
 function isMultiplexerSession(): boolean {
-	return isInsideTerminalMultiplexer();
+	if (!isInsideTerminalMultiplexer()) return false;
+	if (Bun.env.HERDR_ENV !== "1") return true;
+	const term = Bun.env.TERM?.toLowerCase() ?? "";
+	return Boolean(
+		Bun.env.TMUX ||
+			Bun.env.STY ||
+			Bun.env.ZELLIJ ||
+			Bun.env.CMUX_WORKSPACE_ID ||
+			Bun.env.CMUX_SURFACE_ID ||
+			Bun.env.CMUX_REMOTE_TRANSPORT ||
+			term.startsWith("tmux") ||
+			term.startsWith("screen"),
+	);
 }
 
 /**
@@ -439,12 +455,12 @@ function reportsSizeOnAltScreenToggle(): boolean {
 
 /**
  * Resize should repaint the visible window in place — no alternate-screen
- * borrow, no ED3 scrollback rewrap — for multiplexer panes and for terminals
- * that loop on alt-screen toggles. The tradeoff is identical to a multiplexer:
- * scrollback above the window keeps its old wrap instead of being re-flowed.
+ * borrow, no ED3 scrollback rewrap — for multiplexer and direct HerdR panes,
+ * plus terminals that loop on alt-screen toggles. Direct HerdR remains a
+ * direct terminal for explicit transcript replacement and display reset.
  */
 function resizeRepaintsInPlace(): boolean {
-	return isMultiplexerSession() || reportsSizeOnAltScreenToggle();
+	return isMultiplexerSession() || Bun.env.HERDR_ENV === "1" || reportsSizeOnAltScreenToggle();
 }
 
 /**
