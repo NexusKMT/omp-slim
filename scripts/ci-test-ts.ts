@@ -65,8 +65,14 @@ const validModes: Record<Mode, true> = {
 // separate `bun test` child process. A fresh process per chunk resets Bun's
 // heap and reaps any dangling spawned children between groups, keeping peak RSS
 // under the CI runner's OOM ceiling (a single 170–370-file invocation gets
-// SIGKILLed at 137). The singleton/global-state bucket is left whole: its suites
-// co-locate in one process to exercise process-wide state, so they must not split.
+// SIGKILLed at 137). Every bucket is chunked, including singleton/global-state:
+// that bucket is selected precisely because its suites mutate process-wide state
+// (env vars, fake timers, Settings/agent-dir singletons), and it is sequencing,
+// not co-location, that keeps them from colliding. `parallel: 1` already
+// guarantees the sequencing, so splitting into separate processes strictly
+// increases isolation. Left whole the bucket grew to 79 files and hit the very
+// 137 that chunking exists to prevent; 10 is the width the 650-file native
+// bucket already sustains on this runner.
 //
 // The UI/TUI bucket uses a smaller chunk (5) than the others: its suites build up
 // native ghostty-vt cells, and bun 1.3.14's GC aborts (SIGTRAP/SIGABRT, exit
@@ -76,7 +82,7 @@ const validModes: Record<Mode, true> = {
 // 10-file chunk aborts ~50% of runs while either 5-file half is 0/20; halving the
 // chunk keeps each process under the threshold.
 const codingAgentBucketPlans: Record<CodingAgentBucket, { label: string; parallel: number; chunkSize?: number }> = {
-	singleton: { label: "singleton/global-state bucket", parallel: 1 },
+	singleton: { label: "singleton/global-state bucket", parallel: 1, chunkSize: 10 },
 	ui: { label: "UI/TUI bucket", parallel: 1, chunkSize: 5 },
 	runtime: { label: "runtime/session bucket", parallel: 1, chunkSize: 10 },
 	native: { label: "native/tooling/browser/unit bucket", parallel: 1, chunkSize: 10 },
@@ -417,19 +423,25 @@ async function runTestCommand(testCommand: TestCommand): Promise<void> {
 			stdout: "inherit",
 			stderr: "inherit",
 		});
-		const killTimer = setTimeout(() => proc.kill("SIGKILL"), chunkTimeoutMs());
+		// Watchdog, mirroring the parallel path: record that *we* killed the child,
+		// otherwise the resulting 137 is indistinguishable from an OOM kill.
+		let timedOut = false;
+		const killTimer = setTimeout(() => {
+			timedOut = true;
+			proc.kill("SIGKILL");
+		}, chunkTimeoutMs());
 		const exitCode = await proc.exited;
 		clearTimeout(killTimer);
 		if (exitCode === 0) {
 			return;
 		}
-		if (BUN_CRASH_EXITS[exitCode] && attempt < MAX_CHUNK_ATTEMPTS) {
+		if (!timedOut && BUN_CRASH_EXITS[exitCode] && attempt < MAX_CHUNK_ATTEMPTS) {
 			console.log(
 				`==> ${testCommand.label}: bun crashed (exit ${exitCode}); retrying (attempt ${attempt + 1}/${MAX_CHUNK_ATTEMPTS})`,
 			);
 			continue;
 		}
-		throw new Error(`${testCommand.label} failed with exit code ${exitCode}: ${renderedCommand}`);
+		throw new Error(`${testCommand.label} ${describeChunkFailure(exitCode, timedOut)}: ${renderedCommand}`);
 	}
 }
 
@@ -504,6 +516,21 @@ const BUN_CRASH_EXITS: Record<number, true> = {
 // heap-timing dependent — a fresh process nearly always passes — while a
 // deterministic crash still fails every attempt and is reported normally.
 const MAX_CHUNK_ATTEMPTS = 3;
+
+// Why a chunk failed, in words. Exit 137 is SIGKILL, which this runner reaches
+// two very different ways -- the per-chunk watchdog firing, or the kernel OOM
+// killer reaping a chunk that outgrew the runner -- and the bare exit code
+// cannot tell them apart. Which one it was is the difference between "raise
+// OMP_TEST_CHUNK_TIMEOUT" and "lower this bucket's chunkSize", so say it.
+export function describeChunkFailure(exitCode: number, timedOut: boolean): string {
+	if (timedOut) {
+		return `exceeded the ${Math.round(chunkTimeoutMs() / 1000)}s chunk watchdog and was killed (exit ${exitCode}; OMP_TEST_CHUNK_TIMEOUT to change)`;
+	}
+	if (exitCode === 137) {
+		return "was SIGKILLed (exit 137) without reaching the chunk watchdog, which on a CI runner means the OOM killer; lower this bucket's chunkSize";
+	}
+	return `failed with exit code ${exitCode}`;
+}
 
 // The standard `CI` signal is authoritative. In CI each bucket is its own
 // memory-capped runner job (a single fat invocation gets OOM-killed at 137), so
