@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Astral `ty` as a built-in Python primary LSP server (`ty server`), ordered behind `pyright`/`basedpyright`/`pylsp` so it becomes the primary Python LSP only when the existing servers are unavailable. `ruff` remains the Python linter and coexists alongside `ty` ([#4617](https://github.com/can1357/oh-my-pi/issues/4617)).
+
 ### Changed
 
 - `/usage`, `omp usage`, and the status line now show authoritative OpenCode Go quota from the official `GET /zen/go/v1/usage` endpoint — including usage made outside OMP — instead of dollar estimates summed from OMP-observed request costs. The status line renders all three windows (`5h` / `7d` / `mo`), and the per-turn cost recording special case for `opencode-go` sessions is gone along with the "OMP-observed spend only" disclaimer ([#8337](https://github.com/can1357/oh-my-pi/pull/8337) by [@will-bogusz](https://github.com/will-bogusz)).
@@ -42,9 +46,9 @@
 - Fixed agent-facing prompts mentioning tools that may be absent from the session catalog: `todo`/`grep` workflow guidance in the system prompt, `glob`/`read`/`edit` drill-in hints in the project prompt, `ask` directives in plan mode, and the orchestrate notice's `task`/`edit`/`write`/`lsp`/`bash`/`todo` budget are now gated on tool availability.
 - Fixed a `/skill:<name>` token embedded in a `/plan` or `/vibe` inline prompt being sent to the agent as literal text instead of loading the skill; mode-command inline prompts now dispatch skill invocations through the same custom-message path as the editor submit flow ([#8137](https://github.com/can1357/oh-my-pi/issues/8137)).
 - Fixed Codex reset fireworks triggering on ordinary weekly-usage decreases when the provider had not advanced the quota reset deadline.
-### Fixed
-
 - Fixed below-threshold tool turns waiting for asynchronous session persistence when no mid-run compaction will run, while preserving journal writes when a `message_end` listener fails and isolating notification-only handler payloads from late context mutations ([#8283](https://github.com/can1357/oh-my-pi/pull/8283) by [@ethancawse](https://github.com/ethancawse)).
+- Manual `/shake` now keeps a small recent tail of tool results instead of stripping every eligible result, so the agent does not lose the context it is currently working from ([#7776](https://github.com/can1357/oh-my-pi/issues/7776)).
+- Fixed Hindsight `per-project` and `per-project-tagged` scoping splitting one repository across two memory scopes when the checkout directory carries capitals: the project label is now lowercased, so a checkout at `~/code/General` writes and recalls under `project:general` like every other client of the same bank instead of opening a private `project:General` scope. **Migration note:** mixed-case checkouts previously stored memories under the case-preserving label (`per-project` bank id, `per-project-tagged` `project:<Name>` tags); after upgrading, those sessions read and write the lowercased scope, so memories retained under the old capitalized scope stay in the old bank/tag until re-retained there ([#8158](https://github.com/can1357/oh-my-pi/issues/8158)).
 
 ## [17.2.15] - 2026-08-12
 
@@ -132,15 +136,6 @@
 
 - Removed the `resolveAgentModelSource` model-resolver export, whose only use was being fed to `resolveExplicitModelRole`. Replaced by `resolveAgentModelSelection`, which returns the expanded `patterns` and the pre-expansion `role` together so a spawn path cannot derive one without the other ([#7910](https://github.com/can1357/oh-my-pi/pull/7910) by [@enieuwy](https://github.com/enieuwy)).
 - A run is now attributed to the model that actually produced its output, not whichever model the session was last pointed at. A retry fallback that errored on its first request — an exhausted quota, a hard provider error — was credited with the whole run in the Agent Hub row and the settled task result, even when the previous model did every turn. Sessions expose the serving model directly, holding the last model that produced output while a candidate is armed but unproven, and transcript-derived history stops at the newest turn that produced output.
-### Fixed
-
-- Manual `/shake` now keeps a small recent tail of tool results instead of stripping every eligible result, so the agent does not lose the context it is currently working from ([#7776](https://github.com/can1357/oh-my-pi/issues/7776)).
-### Fixed
-
-- Fixed Hindsight `per-project` and `per-project-tagged` scoping splitting one repository across two memory scopes when the checkout directory carries capitals: the project label is now lowercased, so a checkout at `~/code/General` writes and recalls under `project:general` like every other client of the same bank instead of opening a private `project:General` scope.
-### Added
-
-- Added Astral `ty` as a built-in Python primary LSP server (`ty server`), ordered behind `pyright`/`basedpyright`/`pylsp` so it becomes the primary Python LSP only when the existing servers are unavailable. `ruff` remains the Python linter and coexists alongside `ty` ([#4617](https://github.com/can1357/oh-my-pi/issues/4617)).
 
 ## [17.2.12] - 2026-08-08
 

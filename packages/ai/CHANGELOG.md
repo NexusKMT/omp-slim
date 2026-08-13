@@ -15,6 +15,7 @@
 - Fixed `/login together` always failing with HTTP 400 `model_not_available`: key validation chat-completed against the hardcoded non-serverless model `moonshotai/Kimi-K2.5`, so no valid key could pass. Validation now probes Together's authenticated `/v1/models` listing, matching the model-agnostic approach used by other API-key providers ([#8328](https://github.com/can1357/oh-my-pi/issues/8328)).
 - Fixed aggregate usage fetches and credential-health probes sending reference-stored API keys (env var name, `!command`) as the literal reference string instead of the resolved secret, which would 401 and flag working credentials as bad for providers whose usage probe validates credentials ([#8337](https://github.com/can1357/oh-my-pi/pull/8337) by [@will-bogusz](https://github.com/will-bogusz)).
 - Fixed Perplexity email-OTP login dropping the session cookies required to verify the code ([#8156](https://github.com/can1357/oh-my-pi/issues/8156)).
+- Fixed OpenAI GPT-5.6 and Daybreak `off` thinking requests serializing as `low`; every first-party alias with explicit wire-level off support now sends `reasoning.effort: "none"`.
 
 ### Removed
 
@@ -51,7 +52,6 @@
 - Fixed the AWS credential resolver ignoring `role_arn` profiles: shared-config role chaining (`source_profile` recursion, `web_identity_token_file`, `credential_source`) now resolves via STS `AssumeRole`/`AssumeRoleWithWebIdentity`, honoring `role_session_name`/`duration_seconds`/`external_id`, so Bedrock is detected on EKS/IRSA and multi-account setups instead of reporting "No models available" ([#8209](https://github.com/can1357/oh-my-pi/issues/8209)).
 - Fixed Bedrock availability being under-detected on Nitro/EKS hosts: the EC2 metadata probe now recognizes Nitro DMI markers (`board_asset_tag` instance ids, `Amazon EC2` vendor fields) in addition to the Xen `ec2` UUID prefix ([#8209](https://github.com/can1357/oh-my-pi/issues/8209)).
 - Fixed DeepSeek Responses targets (opencode-go) rejecting a thinking-mode continuation with `400 The reasoning_text in the thinking mode must be passed back to the API` after a prewalk hand-off plus mid-run compaction: the Responses input builder re-encoded replayed assistant turns without a reasoning item, so the request enabled reasoning but shipped no `reasoning_text`. The encoder now synthesizes a `reasoning_text` reasoning item for every replayed assistant turn when the target requires reasoning replay in thinking mode (`requiresReasoningContentForAllAssistantTurns` / `requiresReasoningContentForToolCalls`), mirroring the chat-completions `reasoning_content` safety net ([#8248](https://github.com/can1357/oh-my-pi/issues/8248)).
-- Fixed OpenAI GPT-5.6 and Daybreak `off` thinking requests serializing as `low`; every first-party alias with explicit wire-level off support now sends `reasoning.effort: "none"`.
 
 ## [17.2.12] - 2026-08-08
 
