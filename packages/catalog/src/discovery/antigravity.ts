@@ -162,7 +162,7 @@ export async function fetchAntigravityDiscoveryModels(
 	options: FetchAntigravityDiscoveryModelsOptions,
 ): Promise<ModelSpec<"google-gemini-cli">[] | null> {
 	if (options.userAgent === undefined) {
-		await ensureAntigravityVersion(fetch, options.signal);
+		await ensureAntigravityVersion(options.fetcher ?? fetch, options.signal);
 	}
 
 	const fetcher = discoveryFetch(options.fetcher);

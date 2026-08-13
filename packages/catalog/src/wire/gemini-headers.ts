@@ -90,6 +90,9 @@ export function ensureAntigravityVersion(fetcher: typeof fetch = fetch, signal?:
 /** Antigravity `User-Agent` header value; rebuilt when the discovered version changes. */
 export function getAntigravityUserAgent(): string {
 	const version = getAntigravityVersion();
+	// The backend does not validate `cl` (verified live: stale, zero, and absent
+	// cl all pass model gating on daily-cloudcode-pa; only the version gates).
+	// The update manifest carries no changelist, so the captured value stays.
 	const cl = process.env.PI_AI_ANTIGRAVITY_CL || "963137146";
 	const os = process.env.PI_AI_ANTIGRAVITY_OS || "darwin";
 	const arch = process.env.PI_AI_ANTIGRAVITY_ARCH || "arm64";
