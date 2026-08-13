@@ -67,17 +67,6 @@ let
       runHook postInstall
     '';
   };
-  runtimeLibraries = [
-    libopus
-    openssl
-    pcre2
-  ]
-  ++ lib.optionals stdenv.hostPlatform.isLinux [
-    libpulseaudio
-    pipewire
-    stdenv.cc.cc.lib
-    zlib
-  ];
 in
 stdenv.mkDerivation (
   {
@@ -170,11 +159,18 @@ stdenv.mkDerivation (
 
       install -Dm755 packages/coding-agent/dist/omp "$out/libexec/omp/omp"
 
+      ${lib.optionalString stdenv.hostPlatform.isLinux ''
+        # The addon is gzip-compressed inside the compiled binary, so the Nix
+        # store RUNPATH autoPatchelf wrote into it is invisible to the output
+        # reference scanner. Record it in plain text to pin those libraries
+        # (pipewire, libopus, libgcc) into the runtime closure.
+        mkdir -p "$out/nix-support"
+        patchelf --print-rpath "packages/natives/native/${platform.addon}" \
+          > "$out/nix-support/embedded-addon-runpath"
+      ''}
+
       makeWrapper "$out/libexec/omp/omp" "$out/bin/omp" \
-        --set PI_SKIP_VERSION_CHECK 1 \
-        ${
-          if stdenv.hostPlatform.isLinux then "--prefix LD_LIBRARY_PATH" else "--prefix DYLD_LIBRARY_PATH"
-        } : "${lib.makeLibraryPath runtimeLibraries}"
+        --set PI_SKIP_VERSION_CHECK 1
 
       runHook postInstall
     '';

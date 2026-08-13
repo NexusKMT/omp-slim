@@ -63,6 +63,7 @@ function isMeaningfulCompletionEvent(event: AssistantMessageEvent): boolean {
 interface EmptyCompletionRetryOptions {
 	signal?: AbortSignal;
 	providerRetryWait?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
+	acceptEmptyResponse?: boolean;
 }
 
 /**
@@ -82,7 +83,7 @@ export function withEmptyCompletionRetry<M, O extends EmptyCompletionRetryOption
 		for (let emptyAttempt = 0; ; emptyAttempt++) {
 			const inner = attempt(model, context, options);
 			const buffered: AssistantMessageEvent[] = [];
-			let committed = false;
+			let committed = options?.acceptEmptyResponse === true;
 			let terminal: AssistantMessageEvent | undefined;
 			const flush = (): void => {
 				for (const event of buffered) outer.push(event);
@@ -117,6 +118,7 @@ export function withEmptyCompletionRetry<M, O extends EmptyCompletionRetryOption
 			// one-token invisible stop is still the same empty-completion failure.
 			const message = terminal?.type === "done" ? terminal.message : undefined;
 			const isRetryableEmpty =
+				options?.acceptEmptyResponse !== true &&
 				!committed &&
 				message !== undefined &&
 				message.stopReason === "stop" &&

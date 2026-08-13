@@ -291,13 +291,23 @@ describe("update-cli npm rename contract", () => {
 		expect(buildNpmInstallArgs("16.3.15", "win32-x64")).not.toContain("--force");
 	});
 
-	it("removes the old agent package and its natives companions, including the supported platform leaf", () => {
-		expect(buildRenameCleanupPackages("darwin-arm64")).toEqual([
+	it("removes the old agent package and its natives companions when both names moved", () => {
+		const packages = { pkg: "@new/omp", natives: "@new/natives" };
+		expect(buildRenameCleanupPackages(packages, "darwin-arm64")).toEqual([
 			"@oh-my-pi/pi-coding-agent",
 			"@oh-my-pi/pi-natives",
 			"@oh-my-pi/pi-natives-darwin-arm64",
 		]);
-		expect(buildRenameCleanupPackages("linux-arm")).toEqual(["@oh-my-pi/pi-coding-agent", "@oh-my-pi/pi-natives"]);
+		expect(buildRenameCleanupPackages(packages, "linux-arm")).toEqual([
+			"@oh-my-pi/pi-coding-agent",
+			"@oh-my-pi/pi-natives",
+		]);
+	});
+
+	it("keeps the natives packages on an agent-only rename so cleanup cannot strip the addon the new install pinned", () => {
+		const packages = { pkg: "@new/omp", natives: "@oh-my-pi/pi-natives" };
+		expect(buildRenameCleanupPackages(packages, "darwin-arm64")).toEqual(["@oh-my-pi/pi-coding-agent"]);
+		expect(buildRenameCleanupPackages(packages, "linux-arm")).toEqual(["@oh-my-pi/pi-coding-agent"]);
 	});
 });
 

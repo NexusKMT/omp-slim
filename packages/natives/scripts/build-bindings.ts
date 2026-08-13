@@ -11,7 +11,7 @@ import * as fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { $ } from "bun";
-import { detectHostAvx2Support } from "../../../scripts/host-detect";
+import { detectHostAvx2Support, resolveLocalHostAddon } from "../../../scripts/host-detect";
 import { generateEnumExports } from "./gen-enums";
 
 // pcre2-sys prefers a system libpcre2 when pkg-config finds one. Keep the
@@ -61,10 +61,12 @@ const rustDir = path.join(repoRoot, "crates/pi-natives");
 const nativeDir = path.join(import.meta.dir, "../native");
 const packageJsonPath = path.join(import.meta.dir, "../package.json");
 
-type X64Variant = "modern" | "baseline";
-
-const effectiveVariant: X64Variant | null =
-	process.arch === "x64" ? (detectHostAvx2Support() ? "modern" : "baseline") : null;
+const localAddon = resolveLocalHostAddon({
+	platform: process.platform,
+	arch: process.arch,
+	avx2: detectHostAvx2Support(),
+});
+const effectiveVariant = localAddon.x64Variant;
 const variantSuffix = effectiveVariant ? `-${effectiveVariant}` : "";
 
 // Pin Rust target-cpu so x64 baseline/modern variants get a reproducible ISA floor
@@ -166,7 +168,7 @@ async function installGeneratedBindings(outputDir: string): Promise<void> {
 	}
 }
 
-const canonicalAddonFilename = `pi_natives.${process.platform}-${process.arch}${variantSuffix}.node`;
+const canonicalAddonFilename = localAddon.filename;
 const canonicalAddonPath = path.join(nativeDir, canonicalAddonFilename);
 
 console.log(`Building pi-natives bindings for ${process.platform}-${process.arch}${variantSuffix} (local)…`);
