@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveNixBunDepsGenerator } from "./gen-nix-bun";
+import { BUN2NIX_NPM_SPEC, resolveNixBunDepsGenerator } from "./gen-nix-bun";
 
 describe("resolveNixBunDepsGenerator", () => {
 	test("prefers bun2nix from the active development shell", () => {
@@ -17,9 +17,10 @@ describe("resolveNixBunDepsGenerator", () => {
 		expect(generator).toEqual({ kind: "nix", executable: "/usr/bin/nix" });
 	});
 
-	test("fails before a release mutates files when no generator is available", () => {
-		expect(() => resolveNixBunDepsGenerator(() => null)).toThrow(
-			"Generating nix/bun.nix requires bun2nix from `nix develop`, or Nix to enter that shell.",
-		);
+	test("falls back to the pinned portable bunx package", () => {
+		expect(resolveNixBunDepsGenerator(() => null)).toEqual({
+			kind: "bunx",
+			package: BUN2NIX_NPM_SPEC,
+		});
 	});
 });

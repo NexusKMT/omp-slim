@@ -620,7 +620,7 @@ Build and smoke-test the distributable Nix package with `nix build .#omp`. Wayla
 bun run gen:nix
 ```
 
-The command uses `bun2nix` from `nix develop` when available, otherwise enters the development shell through Nix. Do not edit `nix/bun.nix` manually.
+The command uses `bun2nix` from `nix develop` when available, otherwise enters the development shell through Nix, then falls back to the pinned `bunx bun2nix@2.1.2`. Do not edit `nix/bun.nix` manually.
 
 For a non-interactive smoke check:
 
