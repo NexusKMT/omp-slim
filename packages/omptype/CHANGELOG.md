@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.1] - 2026-08-13
+
 ### Fixed
 
 - Fixed TypeBox adapter omitting pattern, non-URL format, and multipleOf constraints from the emitted JSON Schema.
