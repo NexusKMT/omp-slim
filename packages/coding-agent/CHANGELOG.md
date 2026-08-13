@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed the parent TUI stalling after a subagent submits its result until terminal focus or resize wakes the event loop ([#8462](https://github.com/can1357/oh-my-pi/issues/8462)).
+- Fixed `omp update` routing foreign npm/bun bin-directory alias symlinks through the package manager, causing npm EEXIST instead of updating the aliased standalone binary ([#8468](https://github.com/can1357/oh-my-pi/issues/8468)).
 
 ## [17.3.1] - 2026-08-13
 
