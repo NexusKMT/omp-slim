@@ -393,6 +393,41 @@ describe("listClaudePluginRoots", () => {
 		expect(result3.roots).toHaveLength(2);
 	});
 
+	test("isolates cached OMP plugin roots by home when Claude config is shared", async () => {
+		const sharedClaudeConfig = path.join(tempDir, "shared-claude");
+		const firstHome = path.join(tempDir, "first-home");
+		const secondHome = path.join(tempDir, "second-home");
+		process.env.CLAUDE_CONFIG_DIR = sharedClaudeConfig;
+		for (const [home, pluginId] of [
+			[firstHome, "first@market"],
+			[secondHome, "second@market"],
+		] as const) {
+			const pluginsDir = path.join(home, ".omp", "plugins");
+			await fs.mkdir(pluginsDir, { recursive: true });
+			await fs.writeFile(
+				path.join(pluginsDir, "installed_plugins.json"),
+				JSON.stringify({
+					version: 2,
+					plugins: {
+						[pluginId]: [
+							{
+								scope: "user",
+								installPath: `/path/to/${pluginId.split("@")[0]}`,
+								version: "1.0.0",
+							},
+						],
+					},
+				}),
+			);
+		}
+
+		const first = await listClaudePluginRoots(firstHome);
+		const second = await listClaudePluginRoots(secondHome);
+
+		expect(first.roots.map(root => root.id)).toEqual(["first@market"]);
+		expect(second.roots.map(root => root.id)).toEqual(["second@market"]);
+	});
+
 	test("defaults scope to user when not specified", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		await fs.mkdir(pluginsDir, { recursive: true });
