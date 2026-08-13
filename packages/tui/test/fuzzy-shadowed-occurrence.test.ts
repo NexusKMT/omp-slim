@@ -56,4 +56,20 @@ describe("fuzzy scoring with a shadowed occurrence", () => {
 		expect(none.score).toBeGreaterThan(-500);
 		expect(weak.score).toBeGreaterThan(-500);
 	});
+
+	it("leaves a single-character query on its leading occurrence", () => {
+		// The rescan stops at one character on purpose. "i" occurs mid-word in
+		// "wire" and then starts "input", so rescanning would award the word-start
+		// bonus here — and, because some word starts with the typed letter in almost
+		// every candidate, on the whole corpus at once. The first keystroke of a
+		// search would then reshuffle the result list instead of narrowing it.
+		const shadowed = fuzzyMatch("i", "wire input");
+		const leading = fuzzyMatch("i", "input wire");
+
+		expect(shadowed.matches).toBe(true);
+		expect(leading.matches).toBe(true);
+		expect(shadowed.score).toBeGreaterThan(-500);
+		// A genuine leading word start still earns it.
+		expect(leading.score).toBeLessThan(-500);
+	});
 });

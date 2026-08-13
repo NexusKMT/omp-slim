@@ -42,6 +42,15 @@ const ALPHANUMERIC_SWAP_PENALTY = 5;
 const COMPACT_PHRASE_BONUS = 1200;
 const PHRASE_BONUS = 1000;
 
+/**
+ * Shortest needle worth scanning past its leading occurrence for.
+ *
+ * A single character starts a word in nearly every candidate, so rescanning
+ * would hand the word-start bonus to the whole corpus at once and flatten the
+ * ranking on the first keystroke. Shadowing only misleads for real phrases.
+ */
+const MIN_SHADOW_RESCAN_LENGTH = 2;
+
 function normalizeForSearch(value: string): string {
 	return value
 		.replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
@@ -179,11 +188,16 @@ function isWordBoundaryPhrase(normalized: string, index: number, length: number)
  * dropped whenever an earlier non-qualifying one shadows it — the whole word
  * "image" in "reimage image provider" loses to the "image" inside "reimage".
  * Occurrences are scanned left to right, so the first qualifying hit is also the
- * best-scoring one: the caller's position tiebreak grows with the offset.
+ * best-scoring one: the caller's position tiebreak grows with the offset. The
+ * rescan is limited to {@link MIN_SHADOW_RESCAN_LENGTH} and longer needles.
  */
 function findWordBoundaryPhrase(normalized: string, phrase: string): number {
 	if (phrase.length === 0) return -1;
-	for (let at = normalized.indexOf(phrase); at >= 0; at = normalized.indexOf(phrase, at + 1)) {
+	const first = normalized.indexOf(phrase);
+	if (first < 0) return -1;
+	if (isWordBoundaryPhrase(normalized, first, phrase.length)) return first;
+	if (phrase.length < MIN_SHADOW_RESCAN_LENGTH) return -1;
+	for (let at = normalized.indexOf(phrase, first + 1); at >= 0; at = normalized.indexOf(phrase, at + 1)) {
 		if (isWordBoundaryPhrase(normalized, at, phrase.length)) return at;
 	}
 	return -1;
@@ -191,12 +205,17 @@ function findWordBoundaryPhrase(normalized: string, phrase: string): number {
 
 /**
  * Offset of the first occurrence of `needle` that starts a word in `index.compact`,
- * or -1. Same shadowing hazard as {@link findWordBoundaryPhrase}.
+ * or -1. Same shadowing hazard, and the same length floor, as
+ * {@link findWordBoundaryPhrase}.
  */
 function findCompactWordStart(index: SearchIndex, needle: string): number {
 	if (needle.length === 0) return -1;
 	const { compact, compactWordStarts } = index;
-	for (let at = compact.indexOf(needle); at >= 0; at = compact.indexOf(needle, at + 1)) {
+	const first = compact.indexOf(needle);
+	if (first < 0) return -1;
+	if (compactWordStarts.has(first)) return first;
+	if (needle.length < MIN_SHADOW_RESCAN_LENGTH) return -1;
+	for (let at = compact.indexOf(needle, first + 1); at >= 0; at = compact.indexOf(needle, at + 1)) {
 		if (compactWordStarts.has(at)) return at;
 	}
 	return -1;
