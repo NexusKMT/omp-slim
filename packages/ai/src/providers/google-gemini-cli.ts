@@ -8,7 +8,6 @@ import { scheduler } from "node:timers/promises";
 import { type } from "@oh-my-pi/omptype";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import {
-	ANTIGRAVITY_SYSTEM_INSTRUCTION,
 	getAntigravityModelWireProfile,
 	getAntigravityUserAgent,
 	getGeminiCliHeaders,
@@ -316,13 +315,6 @@ const ANTIGRAVITY_DAILY_ENDPOINT = "https://daily-cloudcode-pa.googleapis.com";
 const ANTIGRAVITY_SANDBOX_ENDPOINT = "https://daily-cloudcode-pa.sandbox.googleapis.com";
 const ANTIGRAVITY_ENDPOINT_FALLBACKS = [ANTIGRAVITY_DAILY_ENDPOINT, ANTIGRAVITY_SANDBOX_ENDPOINT] as const;
 
-export {
-	ANTIGRAVITY_SYSTEM_INSTRUCTION,
-	getAntigravityUserAgent,
-	getGeminiCliHeaders,
-	getGeminiCliUserAgent,
-} from "@oh-my-pi/pi-catalog/wire/gemini-headers";
-
 // Retry configuration
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
@@ -340,11 +332,6 @@ function isClaudeModel(modelId: string): boolean {
 
 function needsClaudeThinkingBetaHeader(model: Model<"google-gemini-cli">): boolean {
 	return model.provider === "google-antigravity" && model.id.startsWith("claude-") && model.reasoning;
-}
-
-function shouldInjectAntigravitySystemInstruction(modelId: string): boolean {
-	const normalized = modelId.toLowerCase();
-	return normalized.includes("claude") || normalized.includes("gemini-3");
 }
 
 const optionalCredentialString = type("unknown").pipe(raw => {
@@ -1317,14 +1304,6 @@ export function buildRequest(
 		request.systemInstruction = {
 			...(isAntigravity ? { role: "user" } : {}),
 			parts: systemPrompts.map(text => ({ text })),
-		};
-	}
-
-	if (isAntigravity && shouldInjectAntigravitySystemInstruction(model.id)) {
-		const existingParts = request.systemInstruction?.parts ?? [];
-		request.systemInstruction = {
-			role: "user",
-			parts: [{ text: ANTIGRAVITY_SYSTEM_INSTRUCTION }, ...existingParts],
 		};
 	}
 
