@@ -2,7 +2,7 @@ import * as path from "node:path";
 import { isEnoent, logger, postmortem, ptree, untilAborted } from "@oh-my-pi/pi-utils";
 import { MessageFramer } from "../jsonrpc/message-framing";
 import { ToolAbortError, throwIfAborted } from "../tools/tool-errors";
-import { applyWorkspaceEdit } from "./edits";
+import { applyWorkspaceEdit, type ExecutedWorkspaceChange } from "./edits";
 import { getLspmuxCommand, isLspmuxSupported } from "./lspmux";
 import { connectSharedLspTransport } from "./mux/daemon";
 import type {
@@ -488,7 +488,7 @@ async function handleApplyEditRequest(client: LspClient, message: LspJsonRpcRequ
 	}
 }
 
-function workspaceEditChanges(edit: WorkspaceEdit): {
+function workspaceEditChanges(executed: ExecutedWorkspaceChange[]): {
 	finalUris: Set<string>;
 	deletedRoots: Set<string>;
 	watchedFiles: WatchedFileChange[];
@@ -500,18 +500,10 @@ function workspaceEditChanges(edit: WorkspaceEdit): {
 		watchedFiles.push({ filePath: uriToFile(uri), type });
 	};
 
-	if (edit.changes) {
-		for (const uri in edit.changes) {
-			if (edit.changes[uri].length === 0) continue;
-			finalUris.add(uri);
-			watch(uri, FileChangeType.Changed);
-		}
-	}
-	for (const change of edit.documentChanges ?? []) {
-		if ("textDocument" in change) {
-			if (change.edits.length === 0) continue;
-			finalUris.add(change.textDocument.uri);
-			watch(change.textDocument.uri, FileChangeType.Changed);
+	for (const change of executed) {
+		if (change.kind === "edit") {
+			finalUris.add(change.uri);
+			watch(change.uri, FileChangeType.Changed);
 		} else if (change.kind === "create") {
 			finalUris.add(change.uri);
 			watch(change.uri, FileChangeType.Created);
@@ -520,7 +512,7 @@ function workspaceEditChanges(edit: WorkspaceEdit): {
 			finalUris.add(change.newUri);
 			watch(change.oldUri, FileChangeType.Deleted);
 			watch(change.newUri, FileChangeType.Created);
-		} else if (change.kind === "delete") {
+		} else {
 			deletedRoots.add(change.uri);
 			watch(change.uri, FileChangeType.Deleted);
 		}
@@ -536,14 +528,16 @@ function uriIsWithin(uri: string, root: string): boolean {
 /**
  * Apply a server-provided workspace edit and reconcile every affected open LSP document.
  * Runtime callers use this wrapper so later semantic requests observe the committed files.
+ * Reconciliation is derived from the ops that actually ran — an op skipped via
+ * `ignoreIfExists`/`ignoreIfNotExists` neither closes overlays nor notifies watchers.
  */
 export async function applyWorkspaceEditWithLsp(
 	edit: WorkspaceEdit,
 	cwd: string,
 	signal?: AbortSignal,
 ): Promise<string[]> {
-	const applied = await applyWorkspaceEdit(edit, cwd);
-	const { finalUris, deletedRoots, watchedFiles } = workspaceEditChanges(edit);
+	const { applied, executed } = await applyWorkspaceEdit(edit, cwd);
+	const { finalUris, deletedRoots, watchedFiles } = workspaceEditChanges(executed);
 	const workspace = path.resolve(cwd);
 	const activeClients = Array.from(clients.values()).filter(
 		client => client.status === "ready" && path.resolve(client.cwd) === workspace,

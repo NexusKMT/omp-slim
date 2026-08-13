@@ -289,14 +289,28 @@ function planDocumentChanges(documentChanges: NonNullable<WorkspaceEdit["documen
 	return ops;
 }
 
+/** One filesystem mutation actually performed by {@link applyWorkspaceEdit}. */
+export type ExecutedWorkspaceChange =
+	| { kind: "edit"; uri: string }
+	| { kind: "create"; uri: string }
+	| { kind: "rename"; oldUri: string; newUri: string }
+	| { kind: "delete"; uri: string };
+
+/** What {@link applyWorkspaceEdit} did: human-readable summaries plus the ops that really ran. */
+export interface WorkspaceEditResult {
+	applied: string[];
+	/** Ops that mutated the filesystem — skipped `ignoreIfExists`/`ignoreIfNotExists` ops are excluded. */
+	executed: ExecutedWorkspaceChange[];
+}
+
 /**
  * Apply a workspace edit (collection of file changes).
  * All text-edit batches are overlap-validated before anything is written so a
  * conflict throws without leaving the workspace half-applied.
- * Returns array of applied change descriptions.
  */
-export async function applyWorkspaceEdit(edit: WorkspaceEdit, cwd: string): Promise<string[]> {
+export async function applyWorkspaceEdit(edit: WorkspaceEdit, cwd: string): Promise<WorkspaceEditResult> {
 	const applied: string[] = [];
+	const executed: ExecutedWorkspaceChange[] = [];
 
 	if (edit.documentChanges) {
 		const ops = planDocumentChanges(edit.documentChanges);
@@ -308,6 +322,7 @@ export async function applyWorkspaceEdit(edit: WorkspaceEdit, cwd: string): Prom
 				const filePath = uriToFile(op.uri);
 				await applyTextEdits(filePath, op.edits);
 				applied.push(`Applied ${op.edits.length} edit(s) to ${formatPathRelativeToCwd(filePath, cwd)}`);
+				executed.push({ kind: "edit", uri: op.uri });
 			} else if (op.kind === "create") {
 				const filePath = uriToFile(op.uri);
 				await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -325,6 +340,7 @@ export async function applyWorkspaceEdit(edit: WorkspaceEdit, cwd: string): Prom
 					continue;
 				}
 				applied.push(`Created ${formatPathRelativeToCwd(filePath, cwd)}`);
+				executed.push({ kind: "create", uri: op.uri });
 			} else if (op.kind === "rename") {
 				const oldPath = uriToFile(op.oldUri);
 				const newPath = uriToFile(op.newUri);
@@ -350,6 +366,7 @@ export async function applyWorkspaceEdit(edit: WorkspaceEdit, cwd: string): Prom
 					await fs.rename(oldPath, newPath);
 				}
 				applied.push(`Renamed ${formatPathRelativeToCwd(oldPath, cwd)} → ${formatPathRelativeToCwd(newPath, cwd)}`);
+				executed.push({ kind: "rename", oldUri: op.oldUri, newUri: op.newUri });
 			} else {
 				const filePath = uriToFile(op.uri);
 				try {
@@ -364,6 +381,7 @@ export async function applyWorkspaceEdit(edit: WorkspaceEdit, cwd: string): Prom
 					continue;
 				}
 				applied.push(`Deleted ${formatPathRelativeToCwd(filePath, cwd)}`);
+				executed.push({ kind: "delete", uri: op.uri });
 			}
 		}
 	} else if (edit.changes) {
@@ -378,8 +396,9 @@ export async function applyWorkspaceEdit(edit: WorkspaceEdit, cwd: string): Prom
 			const filePath = uriToFile(uri);
 			await applyTextEdits(filePath, textEdits);
 			applied.push(`Applied ${textEdits.length} edit(s) to ${formatPathRelativeToCwd(filePath, cwd)}`);
+			executed.push({ kind: "edit", uri });
 		}
 	}
 
-	return applied;
+	return { applied, executed };
 }

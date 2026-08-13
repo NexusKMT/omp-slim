@@ -2770,7 +2770,7 @@ describe("lsp regressions", () => {
 				documentChanges: [childEdit, folderRename],
 			};
 
-			const applied = await applyWorkspaceEdit(workspaceEdit, tempDir.path());
+			const { applied } = await applyWorkspaceEdit(workspaceEdit, tempDir.path());
 
 			// Old folder is gone, new folder holds the edited child.
 			expect(fs.existsSync(srcDir)).toBe(false);
@@ -2832,7 +2832,7 @@ describe("lsp regressions", () => {
 				documentChanges: [targetEdit, renameOp],
 			};
 
-			const applied = await applyWorkspaceEdit(workspaceEdit, tempDir.path());
+			const { applied } = await applyWorkspaceEdit(workspaceEdit, tempDir.path());
 
 			// Three steps observable in order: edit on newUri, then rename clobbers it.
 			expect(applied).toHaveLength(2);
@@ -3009,7 +3009,7 @@ describe("lsp regressions", () => {
 				documentChanges: [createOp, textEdit],
 			};
 
-			const applied = await applyWorkspaceEdit(workspaceEdit, tempDir.path());
+			const { applied } = await applyWorkspaceEdit(workspaceEdit, tempDir.path());
 
 			expect(fs.existsSync(newFilePath)).toBe(true);
 			expect(fs.readFileSync(newFilePath, "utf8")).toBe("export const extracted = 42;\n");
@@ -3041,7 +3041,8 @@ describe("lsp regressions", () => {
 				tempDir.path(),
 			);
 			expect(fs.readFileSync(filePath, "utf8")).toBe("ORIGINAL");
-			expect(ignored).toEqual([]);
+			expect(ignored.applied).toEqual([]);
+			expect(ignored.executed).toEqual([]);
 
 			await applyWorkspaceEdit(
 				{
@@ -3082,7 +3083,8 @@ describe("lsp regressions", () => {
 			);
 			expect(fs.readFileSync(oldPath, "utf8")).toBe("SOURCE");
 			expect(fs.readFileSync(newPath, "utf8")).toBe("TARGET");
-			expect(ignored).toEqual([]);
+			expect(ignored.applied).toEqual([]);
+			expect(ignored.executed).toEqual([]);
 
 			await applyWorkspaceEdit(
 				{
@@ -3100,6 +3102,58 @@ describe("lsp regressions", () => {
 			expect(fs.existsSync(oldPath)).toBe(false);
 			expect(fs.readFileSync(newPath, "utf8")).toBe("SOURCE");
 		} finally {
+			tempDir.removeSync();
+		}
+	});
+
+	it("keeps overlays open when ignoreIfExists skips a rename", async () => {
+		// A RenameFile with ignoreIfExists:true whose target exists performs no
+		// filesystem mutation, so overlay reconciliation must not close the old
+		// URI's open document or announce Deleted/Created to the server.
+		const tempDir = TempDir.createSync("@omp-lsp-skipped-rename-overlay-");
+		try {
+			const oldPath = path.join(tempDir.path(), "old.ts");
+			const newPath = path.join(tempDir.path(), "new.ts");
+			await Bun.write(oldPath, "SOURCE");
+			await Bun.write(newPath, "TARGET");
+
+			const server = installFakeLsp((message, srv) => {
+				if (message.method === "initialize") {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
+				} else if (message.method === "shutdown") {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: null });
+				} else if (message.method === "exit") {
+					srv.exit(0);
+				}
+			});
+			const config: ServerConfig = { command: "fake-lsp", fileTypes: ["ts"], rootMarkers: [] };
+			const client = await lspClient.getOrCreateClient(config, tempDir.path(), 1_000);
+			await lspClient.ensureFileOpen(client, oldPath);
+			await server.waitFor(message => message.method === "textDocument/didOpen");
+
+			const applied = await lspClient.applyWorkspaceEditWithLsp(
+				{
+					documentChanges: [
+						{
+							kind: "rename",
+							oldUri: fileToUri(oldPath),
+							newUri: fileToUri(newPath),
+							options: { overwrite: false, ignoreIfExists: true },
+						} satisfies RenameFile,
+					],
+				},
+				tempDir.path(),
+			);
+
+			// Nothing ran, nothing moved, and the overlay survived.
+			expect(applied).toEqual([]);
+			expect(fs.readFileSync(oldPath, "utf8")).toBe("SOURCE");
+			expect(fs.readFileSync(newPath, "utf8")).toBe("TARGET");
+			expect(client.openFiles.has(fileToUri(oldPath))).toBe(true);
+			expect(server.received.filter(message => message.method === "textDocument/didClose")).toEqual([]);
+			expect(server.received.filter(message => message.method === "workspace/didChangeWatchedFiles")).toEqual([]);
+		} finally {
+			await lspClient.shutdownAll();
 			tempDir.removeSync();
 		}
 	});
@@ -3126,7 +3180,8 @@ describe("lsp regressions", () => {
 				},
 				tempDir.path(),
 			);
-			expect(ignored).toEqual([]);
+			expect(ignored.applied).toEqual([]);
+			expect(ignored.executed).toEqual([]);
 		} finally {
 			tempDir.removeSync();
 		}
@@ -3201,7 +3256,7 @@ describe("lsp regressions", () => {
 				documentChanges: [childEdit, folderDelete],
 			};
 
-			const applied = await applyWorkspaceEdit(workspaceEdit, tempDir.path());
+			const { applied } = await applyWorkspaceEdit(workspaceEdit, tempDir.path());
 
 			// Folder is gone; "Applied" message proves the flush ran before delete.
 			expect(fs.existsSync(srcDir)).toBe(false);
