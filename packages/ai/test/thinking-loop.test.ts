@@ -344,30 +344,35 @@ describe("ThinkingLoopDetector", () => {
 	});
 });
 
-describe("gemini thinking-loop guard (stream wrapper)", () => {
+describe("thinking-loop guard (stream wrapper)", () => {
 	function loopingThinkingResponse(): { content: MockContent[] } {
 		return { content: [{ type: "thinking", thinking: nearDuplicateLoop(12) }] };
 	}
 
-	test("terminates a gemini loop with a retryable empty-content error", async () => {
-		registerMockApi();
-		try {
-			const mock = createMockModel({ provider: "openrouter", id: "google/gemini-3.5-flash" });
-			mock.push(loopingThinkingResponse());
+	for (const { label, provider, id } of [
+		{ label: "Gemini", provider: "openrouter", id: "google/gemini-3.5-flash" },
+		{ label: "Grok 4.6", provider: "xai", id: "grok-4-6" },
+	]) {
+		test(`terminates a ${label} loop with a retryable empty-content error`, async () => {
+			registerMockApi();
+			try {
+				const mock = createMockModel({ provider, id });
+				mock.push(loopingThinkingResponse());
 
-			const result = await stream(mock.model, context()).result();
+				const result = await stream(mock.model, context()).result();
 
-			expect(result.stopReason).toBe("error");
-			expect(result.content).toEqual([]);
-			expect(result.errorMessage).toContain(THINKING_LOOP_ERROR_MARKER);
-			expect(AIError.is(result.errorId, AIError.Flag.ThinkingLoop)).toBe(true);
-			// Empty content + transient phrasing is what makes the turn auto-retry.
-			expect(result.errorMessage).toContain("stream stall");
-			expect(isRetryableError(new Error(result.errorMessage))).toBe(true);
-		} finally {
-			clearCustomApis();
-		}
-	});
+				expect(result.stopReason).toBe("error");
+				expect(result.content).toEqual([]);
+				expect(result.errorMessage).toContain(THINKING_LOOP_ERROR_MARKER);
+				expect(AIError.is(result.errorId, AIError.Flag.ThinkingLoop)).toBe(true);
+				// Empty content + transient phrasing is what makes the turn auto-retry.
+				expect(result.errorMessage).toContain("stream stall");
+				expect(isRetryableError(new Error(result.errorMessage))).toBe(true);
+			} finally {
+				clearCustomApis();
+			}
+		});
+	}
 
 	test("emits no observable thinking/text content before the error terminal", async () => {
 		registerMockApi();
@@ -486,20 +491,29 @@ describe("withGeminiThinkingLoopGuard (Vertex transport)", () => {
 	});
 });
 describe("isLoopGuardedModel", () => {
-	test("guards Gemini and DeepSeek models by default, respects overrides", () => {
+	test("guards Gemini, DeepSeek, and Grok 4.6 models by default, respects overrides", () => {
 		const gemini = createMockModel({ provider: "openrouter", id: "google/gemini-3.5-flash" }).model;
 		const deepseek = createMockModel({ provider: "deepseek", id: "deepseek-reasoner" }).model;
+		const grok46 = createMockModel({ provider: "venice", id: "grok-4-6" }).model;
+		const cursorGrok46 = createMockModel({ provider: "cursor", id: "cursor-grok-4.6-high" }).model;
+		const grok460 = createMockModel({ provider: "venice", id: "grok-4.60" }).model;
+		const grok45 = createMockModel({ provider: "cursor", id: "cursor-grok-4.5-high" }).model;
 		const other = createMockModel({ provider: "openai", id: "gpt-4o" }).model;
 
 		expect(isLoopGuardedModel(gemini)).toBe(true);
 		expect(isLoopGuardedModel(deepseek)).toBe(true);
+		expect(isLoopGuardedModel(grok46)).toBe(true);
+		expect(isLoopGuardedModel(cursorGrok46)).toBe(true);
+		expect(isLoopGuardedModel(grok460)).toBe(false);
+		expect(isLoopGuardedModel(grok45)).toBe(false);
 		expect(isLoopGuardedModel(other)).toBe(false);
 
 		// enabled: false disables even for target models
 		expect(isLoopGuardedModel(gemini, { loopGuard: { enabled: false } })).toBe(false);
 		expect(isLoopGuardedModel(deepseek, { loopGuard: { enabled: false } })).toBe(false);
+		expect(isLoopGuardedModel(grok46, { loopGuard: { enabled: false } })).toBe(false);
 
-		// force enabled for other models — but disabled overall unless it is Gemini/DeepSeek
+		// force enabled for other models — but disabled overall unless it is Gemini, DeepSeek, or Grok 4.6
 		expect(isLoopGuardedModel(other, { loopGuard: { enabled: true } })).toBe(false);
 	});
 });

@@ -18,6 +18,7 @@
 - Fixed aggregate usage fetches and credential-health probes sending reference-stored API keys (env var name, `!command`) as the literal reference string instead of the resolved secret, which would 401 and flag working credentials as bad for providers whose usage probe validates credentials ([#8337](https://github.com/can1357/oh-my-pi/pull/8337) by [@will-bogusz](https://github.com/will-bogusz)).
 - Fixed Perplexity email-OTP login dropping the session cookies required to verify the code ([#8156](https://github.com/can1357/oh-my-pi/issues/8156)).
 - Fixed OpenAI GPT-5.6 and Daybreak `off` thinking requests serializing as `low`; every first-party alias with explicit wire-level off support now sends `reasoning.effort: "none"`.
+- Fixed Grok 4.6 runaway thinking streams bypassing the thinking-loop guard.
 
 ### Removed
 

@@ -3,6 +3,7 @@ import {
 	hasOpus47ApiRestrictions,
 	isClaudeModelId,
 	isGlmVisionModelId,
+	isGrok46ModelId,
 	isGrokReasoningEffortCapable,
 	isKimiK26ModelId,
 	isKimiModelId,
@@ -304,6 +305,21 @@ describe("modelFamilyToken", () => {
 
 	test("returns an empty token for unclassifiable ids so callers fall back to provider", () => {
 		expect(modelFamilyToken("some-unknown-model")).toBe("");
+	});
+});
+
+describe("isGrok46ModelId", () => {
+	test("matches canonical dashed and Cursor dotted identifiers", () => {
+		expect(isGrok46ModelId("grok-4-6")).toBe(true);
+		expect(isGrok46ModelId("venice/grok-4-6")).toBe(true);
+		expect(isGrok46ModelId("cursor-grok-4.6-high")).toBe(true);
+	});
+
+	test("rejects adjacent versions and lookalikes", () => {
+		expect(isGrok46ModelId("grok-4.60")).toBe(false);
+		expect(isGrok46ModelId("grok-4.6.0")).toBe(false);
+		expect(isGrok46ModelId("grok-4-5")).toBe(false);
+		expect(isGrok46ModelId("notgrok-4.6")).toBe(false);
 	});
 });
 

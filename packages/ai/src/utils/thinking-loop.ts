@@ -1,5 +1,5 @@
 /**
- * Gemini thinking-loop guard.
+ * Thinking-loop guard.
  *
  * Gemini models (notably `gemini-3.5-flash` via OpenRouter) occasionally fall
  * into a degenerate reasoning loop: they re-emit the same paragraph intent over
@@ -29,13 +29,14 @@
  *    anchor-free segments; a segment naming a path/identifier resets the run, so
  *    genuine but vocabulary-repetitive work (per-file templates) is spared.
  *
- * Scope is narrow: guarded Gemini/DeepSeek streams before any tool call. Native
+ * Scope is narrow: guarded Gemini, DeepSeek, and Grok 4.6 streams before any tool call. Native
  * thinking is checked first; assistant text can also be checked for providers
  * that surface reasoning as visible prose. On a hit the failed turn is emitted as
  * an empty retryable stream-stall error; result-awaiting callers (`complete`,
  * `completeSimple`) re-sample it a few times and then let a stubborn loop cook
  * through one unguarded pass. Disable detection with `PI_NO_THINKING_LOOP_GUARD=1`.
  */
+import { isGrok46ModelId } from "@oh-my-pi/pi-catalog/identity";
 import { logger } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
 import type { Api, AssistantMessage, Model, StreamOptions } from "../types";
@@ -118,16 +119,16 @@ export function isGeminiThinkingModel(model: Model<Api>): boolean {
 }
 
 /**
- * True when `model` should be guarded for thinking/response loops (Gemini & DeepSeek).
+ * True when `model` should be guarded for thinking/response loops (Gemini, DeepSeek, and Grok 4.6).
  *
- * OpenAI-compat transports can serve Gemini or DeepSeek under an arbitrary provider/id.
- * Direct Gemini/DeepSeek transports carry a clearly shaped id/provider, so a string match
- * is sufficient.
+ * OpenAI-compat transports can serve Gemini or DeepSeek under an arbitrary provider/id. Grok 4.6
+ * is recognized by {@link isGrok46ModelId} across transports; direct Gemini/DeepSeek transports
+ * carry a clearly shaped id/provider, so a string match is sufficient.
  */
 export function isLoopGuardedModel(model: Model<Api>, options?: StreamOptions): boolean {
 	if (options?.loopGuard?.enabled === false) return false;
 	const isDeepseek = /deepseek/i.test(`${model.provider}/${model.id}`);
-	return isGeminiThinkingModel(model) || isDeepseek;
+	return isGeminiThinkingModel(model) || isDeepseek || isGrok46ModelId(model.id);
 }
 
 /** @deprecated Use isLoopGuardedModel instead. */

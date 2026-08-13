@@ -6,6 +6,7 @@
 
 - Added first-party OpenAI Daybreak Blue, Daybreak Red, and GPT-5.6 Cyber models with their documented API pricing, token limits, tools, and full `off`/`low`/`medium`/`high`/`xhigh`/`max` reasoning controls.
 - Added `calculateUncachedInputCost()` for pricing a prompt against its active context-length tier without prompt caching.
+- Added a boundary-aware Grok 4.6 model-ID predicate for shared capability gates.
 
 ### Fixed
 

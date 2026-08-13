@@ -98,6 +98,14 @@ export const isMimoModelIdOrName = memo((value: string): boolean => {
 	return value.toLowerCase().includes("mimo");
 });
 
+/**
+ * Grok 4.6 model IDs, including canonical dashed and Cursor dotted variants.
+ * Adjacent versions such as `grok-4.60` are deliberately excluded.
+ */
+export const isGrok46ModelId = memo((modelId: string): boolean => {
+	return /(?:^|[./_-])grok-4[.-]6(?:$|[-_:])/i.test(bareModelId(modelId));
+});
+
 const GROK_EFFORT_CAPABLE_PREFIXES = ["grok-3-mini", "grok-4.20-multi-agent", "grok-4.3", "grok-4.5"] as const;
 
 /**
