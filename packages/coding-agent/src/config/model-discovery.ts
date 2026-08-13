@@ -645,7 +645,7 @@ export async function discoverLlamaCppModels(
 					name: id,
 					api: providerConfig.api,
 					provider: providerConfig.provider,
-					baseUrl,
+					baseUrl: ensureLlamaCppV1BaseUrl(baseUrl),
 					reasoning: false,
 					input: item.input ?? serverMetadata?.input ?? ["text"],
 					imageInputDecoder: "stb",
