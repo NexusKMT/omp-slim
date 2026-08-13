@@ -262,6 +262,24 @@ describe("pi.typebox compatibility shim", () => {
 			expect(schema.safeParse(42).success).toBe(false);
 		});
 
+		it("preserves a legitimate run property containing a schema builder", () => {
+			const schema = Type.Unsafe({
+				type: "object",
+				properties: { run: Type.Boolean() },
+				required: ["run"],
+				additionalProperties: false,
+			});
+
+			expect(schema.toJsonSchema()).toEqual({
+				type: "object",
+				properties: { run: { type: "boolean" } },
+				required: ["run"],
+				additionalProperties: false,
+			});
+			expect(schema.safeParse({ run: true }).success).toBe(true);
+			expect(schema.safeParse(true).success).toBe(false);
+		});
+
 		it("recovers the wire schema when a builder is spread into a new document", () => {
 			const base = Type.Unsafe({
 				anyOf: [

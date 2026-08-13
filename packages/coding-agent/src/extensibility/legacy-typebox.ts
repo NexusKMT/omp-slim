@@ -1,4 +1,5 @@
 import { type } from "@oh-my-pi/omptype";
+import { IR_BRAND } from "@oh-my-pi/omptype/ir";
 import {
 	type AnySchema,
 	type ObjectOpts,
@@ -63,7 +64,7 @@ function lowerEmbeddedSchemas(value: unknown): unknown {
 	if (value !== null && typeof value === "object") {
 		const source = value as Record<string, unknown>;
 		const canonical = source.run;
-		if (isRuntimeSchema(canonical)) {
+		if (IR_BRAND in value && isRuntimeSchema(canonical)) {
 			const base = canonical.toJsonSchema();
 			const internalKeys = new Set(Object.keys(canonical));
 			for (const key in source) {
