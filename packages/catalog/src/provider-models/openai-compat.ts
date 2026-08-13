@@ -3550,18 +3550,19 @@ export function basetenModelManagerOptions(
 			const features = Array.isArray(raw.supported_features) ? raw.supported_features : [];
 			const modalities = Array.isArray(raw.input_modalities) ? raw.input_modalities : [];
 
-			// Keep dynamic discovery conservative: Baseten's generic feature
-			// list can mention reasoning for routes whose wire dialect OMP does
-			// not know. The shared model-thinking policy derives the exact
-			// effort ladder after this spec is built.
-			const isKnownBasetenReasoningRoute =
+			// Baseten's discovery flags are not enough to enable OMP reasoning for every
+			// model. Only models with a verified Baseten reasoning policy are enabled
+			// here; an unknown model may use a different reasoning wire shape or effort
+			// vocabulary, which OMP must not guess.
+			const isSupportedBasetenReasoningModel =
 				isKimiK3ModelId(defaults.id) ||
 				defaults.id === "openai/gpt-oss-120b" ||
 				defaults.id === "deepseek-ai/DeepSeek-V4-Pro" ||
 				defaults.id === "zai-org/GLM-5.2" ||
 				defaults.id === "zai-org/GLM-5.2-Fast";
 			const reasoning =
-				isKnownBasetenReasoningRoute && (features.includes("reasoning") || features.includes("reasoning_effort"));
+				isSupportedBasetenReasoningModel &&
+				(features.includes("reasoning") || features.includes("reasoning_effort"));
 			const supportsTools = features.includes("tools") ? undefined : false;
 			const vision = modalities.includes("image") || (reference?.input.includes("image") ?? false);
 
