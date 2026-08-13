@@ -2333,6 +2333,113 @@ describe("lsp regressions", () => {
 		}
 	});
 
+	it("synchronizes open document overlays after applying a rename workspace edit", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-workspace-edit-sync-");
+		const filePath = path.join(tempDir.path(), "main.go");
+		const uri = fileToUri(filePath);
+		let overlay = "";
+		try {
+			await Bun.write(filePath, "package main\nfunc OldName() {}\n");
+			const serverConfig: ServerConfig = {
+				command: "fake-gopls",
+				fileTypes: ["go"],
+				rootMarkers: [],
+				isLinter: true,
+			};
+			const server = installFakeLsp((message, srv) => {
+				if (message.method === "initialize") {
+					srv.send({
+						jsonrpc: "2.0",
+						id: message.id,
+						result: { capabilities: { documentSymbolProvider: true, renameProvider: true } },
+					});
+				} else if (message.method === "textDocument/didOpen") {
+					if (
+						typeof message.params === "object" &&
+						message.params !== null &&
+						"textDocument" in message.params &&
+						typeof message.params.textDocument === "object" &&
+						message.params.textDocument !== null &&
+						"text" in message.params.textDocument &&
+						typeof message.params.textDocument.text === "string"
+					) {
+						overlay = message.params.textDocument.text;
+					}
+				} else if (message.method === "textDocument/didChange") {
+					if (
+						typeof message.params === "object" &&
+						message.params !== null &&
+						"contentChanges" in message.params &&
+						Array.isArray(message.params.contentChanges) &&
+						typeof message.params.contentChanges[0] === "object" &&
+						message.params.contentChanges[0] !== null &&
+						"text" in message.params.contentChanges[0] &&
+						typeof message.params.contentChanges[0].text === "string"
+					) {
+						overlay = message.params.contentChanges[0].text;
+					}
+				} else if (message.method === "textDocument/documentSymbol") {
+					const name = overlay.includes("NewName") ? "NewName" : "OldName";
+					srv.send({
+						jsonrpc: "2.0",
+						id: message.id,
+						result: [
+							{
+								name,
+								kind: 12,
+								range: { start: { line: 1, character: 0 }, end: { line: 1, character: 17 } },
+								selectionRange: { start: { line: 1, character: 5 }, end: { line: 1, character: 12 } },
+							},
+						],
+					});
+				} else if (message.method === "textDocument/rename") {
+					srv.send({
+						jsonrpc: "2.0",
+						id: message.id,
+						result: {
+							changes: {
+								[uri]: [
+									{
+										range: { start: { line: 1, character: 5 }, end: { line: 1, character: 12 } },
+										newText: "NewName",
+									},
+								],
+							},
+						},
+					});
+				} else if (message.method === "shutdown") {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: null });
+				} else if (message.method === "exit") {
+					srv.exit(0);
+				}
+			});
+			vi.spyOn(lspConfig, "loadConfig").mockReturnValue({
+				servers: { "fake-gopls": serverConfig },
+				idleTimeoutMs: undefined,
+			});
+
+			const tool = new LspTool(makeLspSession(tempDir.path()));
+			expect(
+				textResult(await tool.execute("symbols-before-rename", { action: "symbols", file: filePath })),
+			).toContain("OldName");
+			await tool.execute("rename-open-document", {
+				action: "rename",
+				file: filePath,
+				line: 2,
+				symbol: "OldName",
+				new_name: "NewName",
+			});
+			expect(await Bun.file(filePath).text()).toContain("NewName");
+
+			const symbols = await tool.execute("symbols-after-rename", { action: "symbols", file: filePath });
+			expect(textResult(symbols)).toContain("NewName");
+		} finally {
+			configCache.delete(tempDir.path());
+			await lspClient.shutdownAll();
+			tempDir.removeSync();
+		}
+	});
+
 	it("flushes pending descendant text edits before a folder rename", async () => {
 		const tempDir = TempDir.createSync("@omp-lsp-folder-rename-");
 		try {

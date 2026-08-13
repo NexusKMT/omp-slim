@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed applied LSP `WorkspaceEdit`s leaving already-open language-server document overlays stale for later semantic requests ([#8372](https://github.com/can1357/oh-my-pi/issues/8372)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Added
