@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added structured `UnseenLinesError.retryable` metadata so hosts can offer compact retry continuations only when every unseen anchor was revealed in full.
+
 ## [17.3.0] - 2026-08-13
 
 ### Fixed

@@ -10,6 +10,7 @@
  * batch's `flush` flag to true only for the final write so diagnostics
  * round-trip once.
  */
+import { randomUUID } from "node:crypto";
 import {
 	type BlockResolution,
 	buildCompactDiffPreview,
@@ -22,6 +23,7 @@ import {
 	type PatchSectionResult,
 	type PreparedSection,
 	startClipboardBatch,
+	UnseenLinesError,
 } from "@oh-my-pi/hashline";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { FileDiagnosticsResult, WritethroughCallback, WritethroughDeferredHandle } from "../../lsp";
@@ -30,7 +32,7 @@ import { outputMeta } from "../../tools/output-meta";
 import { ToolError } from "../../tools/tool-errors";
 import { generateDiffString } from "../diff";
 import { getEditClipboard } from "../edit-clipboard";
-import { getFileSnapshotStore } from "../file-snapshot-store";
+import { canonicalSnapshotKey, getFileSnapshotStore, recordSeenLinesFromBody } from "../file-snapshot-store";
 import type { EditToolDetails, EditToolPerFileResult, LspBatchRequest } from "../renderer";
 import { pruneOversizedEditSnapshots } from "../snapshot-details";
 import { nativeBlockResolver } from "./block-resolver";
@@ -45,6 +47,53 @@ export interface ExecuteHashlineSingleOptions {
 	batchRequest?: LspBatchRequest;
 	writethrough: WritethroughCallback;
 	beginDeferredDiagnosticsForPath: (path: string) => WritethroughDeferredHandle;
+}
+
+interface PendingSeenLineRetry {
+	token: string;
+	input: string;
+}
+
+const pendingSeenLineRetries = new WeakMap<ToolSession, PendingSeenLineRetry>();
+const SEEN_LINE_RETRY_INPUT = /^RETRY ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n?$/i;
+
+function resolveHashlineInput(session: ToolSession, input: string): string {
+	const match = SEEN_LINE_RETRY_INPUT.exec(input);
+	if (!match) {
+		pendingSeenLineRetries.delete(session);
+		return input;
+	}
+	const pending = pendingSeenLineRetries.get(session);
+	if (!pending || pending.token !== match[1]) {
+		throw new ToolError(
+			"Unknown or expired edit retry token. Use the token from the latest seen-line rejection, or submit a full patch.",
+		);
+	}
+	pendingSeenLineRetries.delete(session);
+	return pending.input;
+}
+
+async function prepareWithSeenLineRetry(
+	patcher: Patcher,
+	section: Parameters<Patcher["prepare"]>[0],
+	clipboard: Clipboard,
+	session: ToolSession,
+	input: string,
+): Promise<PreparedSection> {
+	try {
+		return await patcher.prepare(section, clipboard);
+	} catch (error) {
+		if (!(error instanceof UnseenLinesError) || !error.retryable) throw error;
+		const token = randomUUID();
+		pendingSeenLineRetries.set(session, { token, input });
+		throw new ToolError(
+			`${error.message}\n\n` +
+				"The original patch is stored for a one-shot retry. After verifying the revealed lines match your intent, " +
+				"call edit with only:\n" +
+				`RETRY ${token}\n` +
+				"If your intent changed, submit a revised full patch instead. The retry revalidates the live files.",
+		);
+	}
 }
 
 function noChangeDiagnostic(path: string): string {
@@ -128,6 +177,7 @@ function renderSection(
 	result: PatchSectionResult,
 	diagnostics: FileDiagnosticsResult | undefined,
 	sourcePath: string,
+	session: ToolSession,
 ): RenderedSection {
 	if (result.op === "delete") {
 		const toolResult: AgentToolResult<EditToolDetails, typeof hashlineEditParamsSchema> = {
@@ -176,12 +226,14 @@ function renderSection(
 			: "";
 	const moveBlock = result.moveDest ? `\nMoved to ${result.moveDest}` : "";
 	const firstChangedLine = result.firstChangedLine ?? diff.firstChangedLine;
+	const text = `${result.header}${blockBlock}${moveBlock}${previewBlock}${warningsBlock}`;
+	recordSeenLinesFromBody(session, canonicalSnapshotKey(result.canonicalPath), result.fileHash, text);
 	return {
 		toolResult: {
 			content: [
 				{
 					type: "text",
-					text: `${result.header}${blockBlock}${moveBlock}${previewBlock}${warningsBlock}`,
+					text,
 				},
 			],
 			details: pruneOversizedEditSnapshots({
@@ -214,7 +266,8 @@ function renderSection(
 export async function executeHashlineSingle(
 	options: ExecuteHashlineSingleOptions,
 ): Promise<AgentToolResult<EditToolDetails, typeof hashlineEditParamsSchema>> {
-	const patch = Patch.parse(options.input, { cwd: options.session.cwd });
+	const input = resolveHashlineInput(options.session, options.input);
+	const patch = Patch.parse(input, { cwd: options.session.cwd });
 	if (patch.sections.length === 0) {
 		throw new Error("No hashline sections found in input.");
 	}
@@ -237,10 +290,10 @@ export async function executeHashlineSingle(
 	const clipboard = startClipboardBatch(sessionClipboard);
 
 	// Single-section fast path: prepare, commit, render.
-	const inputHash = hashPatchInput(options.input);
+	const inputHash = hashPatchInput(input);
 	if (patch.sections.length === 1) {
 		fs.setBatchRequest(narrowBatchRequest(options.batchRequest, true));
-		const prepared = await patcher.prepare(patch.sections[0], clipboard);
+		const prepared = await prepareWithSeenLineRetry(patcher, patch.sections[0], clipboard, options.session, input);
 		const sectionResult = await patcher.commit(prepared);
 		commitClipboard(clipboard, sessionClipboard);
 		if (sectionResult.op === "noop") {
@@ -248,10 +301,15 @@ export async function executeHashlineSingle(
 			if (escalate) {
 				throw new ToolError(noChangeLoopDiagnostic(sectionResult.path, count));
 			}
-			return renderSection(sectionResult, undefined, prepared.section.path).toolResult;
+			return renderSection(sectionResult, undefined, prepared.section.path, options.session).toolResult;
 		}
 		resetNoopEdit(options.session, sectionResult.canonicalPath);
-		return renderSection(sectionResult, fs.consumeDiagnostics(sectionResult.path), prepared.section.path).toolResult;
+		return renderSection(
+			sectionResult,
+			fs.consumeDiagnostics(sectionResult.path),
+			prepared.section.path,
+			options.session,
+		).toolResult;
 	}
 
 	// Multi-section: prepare every section up front so we fail fast before
@@ -264,7 +322,7 @@ export async function executeHashlineSingle(
 	// deleted would otherwise be lost.
 	const sectionStates: Clipboard[] = [];
 	for (const section of patch.sections) {
-		prepared.push(await patcher.prepare(section, clipboard));
+		prepared.push(await prepareWithSeenLineRetry(patcher, section, clipboard, options.session, input));
 		sectionStates.push(forkClipboard(clipboard));
 	}
 	assertUniqueCanonicalPaths(prepared);
@@ -292,7 +350,14 @@ export async function executeHashlineSingle(
 				: new ToolError(noChangeDiagnostic(sectionResult.path));
 		}
 		resetNoopEdit(options.session, sectionResult.canonicalPath);
-		rendered.push(renderSection(sectionResult, fs.consumeDiagnostics(sectionResult.path), prepared[i].section.path));
+		rendered.push(
+			renderSection(
+				sectionResult,
+				fs.consumeDiagnostics(sectionResult.path),
+				prepared[i].section.path,
+				options.session,
+			),
+		);
 	}
 	return {
 		content: [

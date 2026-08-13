@@ -4,6 +4,10 @@ Line-anchored patch language: name original lines/gaps to replace, insert, cut, 
 Section: `[PATH#TAG]`; `TAG`: 4-hex snapshot from latest `read`/`search`, REQUIRED each section. New files: `write`; hashline edits existing files only.
 </headers>
 
+<retry>
+Only after a seen-line rejection supplies a retry token: verify its revealed lines, then use exactly `RETRY TOKEN` to apply the stored unchanged patch without resending it. A retry is one-shot and revalidates live files. If intent changes, submit a revised full patch instead. NEVER invent or reuse tokens.
+</retry>
+
 <ops>
 `PUT N.=M:`: replace original inclusive lines N–M with body.
 `PUT N*:`: replace syntactic block beginning N; closing line resolved.

@@ -302,6 +302,78 @@ describe("read → edit seen-line guard", () => {
 		expect(after).not.toContain("line 10");
 	});
 
+	it("retries an unchanged patch through a one-shot token without resending its body", async () => {
+		const file = path.join(tmpDir, "notes.txt");
+		await Bun.write(file, CONTENT);
+		const session = createSession(tmpDir);
+
+		const read = await new ReadTool(session).execute("r1", { path: `${file}:1-3` });
+		const tag = tagFromOutput(resultText(read));
+		const input = `[notes.txt#${tag}]\nPUT 10.=12:\n+X10\n+X11\n+X12`;
+
+		let message: string | undefined;
+		try {
+			await executeHashlineSingle(execOptions(input, session));
+		} catch (err) {
+			message = (err as Error).message;
+		}
+		const retry = message?.match(/(?:^|\n)(RETRY [0-9a-f-]{36})(?:\n|$)/)?.[1];
+		expect(retry).toBeDefined();
+		expect(await Bun.file(file).text()).toBe(CONTENT);
+
+		await executeHashlineSingle(execOptions(retry as string, session));
+		const after = await Bun.file(file).text();
+		expect(after).toContain("X10\nX11\nX12");
+		expect(after).not.toContain("line 10");
+
+		await expect(executeHashlineSingle(execOptions(retry as string, session))).rejects.toThrow(
+			/Unknown or expired edit retry token/,
+		);
+	});
+
+	it("revalidates live content before consuming a retry token", async () => {
+		const file = path.join(tmpDir, "notes.txt");
+		await Bun.write(file, CONTENT);
+		const session = createSession(tmpDir);
+
+		const read = await new ReadTool(session).execute("r1", { path: `${file}:1-3` });
+		const tag = tagFromOutput(resultText(read));
+		const input = `[notes.txt#${tag}]\nPUT 10.=12:\n+X10\n+X11\n+X12`;
+
+		let message: string | undefined;
+		try {
+			await executeHashlineSingle(execOptions(input, session));
+		} catch (err) {
+			message = (err as Error).message;
+		}
+		const retry = message?.match(/(?:^|\n)(RETRY [0-9a-f-]{36})(?:\n|$)/)?.[1];
+		expect(retry).toBeDefined();
+
+		const drifted = CONTENT.replace("line 10", "EXTERNAL");
+		await Bun.write(file, drifted);
+		await expect(executeHashlineSingle(execOptions(retry as string, session))).rejects.toThrow();
+		expect(await Bun.file(file).text()).toBe(drifted);
+	});
+
+	it("records numbered edit output under the returned tag and keeps undisplayed lines guarded", async () => {
+		const file = path.join(tmpDir, "notes.txt");
+		await Bun.write(file, CONTENT);
+		const session = createSession(tmpDir);
+		const store = getFileSnapshotStore(session);
+
+		const read = await new ReadTool(session).execute("r1", { path: `${file}:1-3` });
+		const tag = tagFromOutput(resultText(read));
+		const edit = await executeHashlineSingle(execOptions(`[notes.txt#${tag}]\nPUT 2.=2:\n+EDITED`, session));
+		const nextTag = tagFromOutput(resultText(edit));
+		const seen = store.byHash(canonicalSnapshotKey(file), nextTag)?.seenLines;
+
+		expect(seen?.has(2)).toBe(true);
+		expect(seen?.has(12)).toBe(false);
+		await expect(
+			executeHashlineSingle(execOptions(`[notes.txt#${nextTag}]\nPUT 12.=12:\n+UNSEEN`, session)),
+		).rejects.toThrow(/never displayed \(it showed/);
+	});
+
 	it("keeps the re-read fallback when the anchor set exceeds the inline reveal cap", async () => {
 		const file = path.join(tmpDir, "long.txt");
 		const lines = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`);
@@ -328,6 +400,7 @@ describe("read → edit seen-line guard", () => {
 		expect(message).not.toContain("140:line 140");
 		// Guidance directs at a range re-read of the FULL anchor range.
 		expect(message).toMatch(/long\.txt:100-159/);
+		expect(message).not.toMatch(/(?:^|\n)RETRY [0-9a-f-]{36}(?:\n|$)/);
 		expect(await Bun.file(file).text()).toBe(`${lines.join("\n")}\n`);
 	});
 

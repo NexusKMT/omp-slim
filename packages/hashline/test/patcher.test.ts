@@ -12,6 +12,7 @@ import {
 	NodeFilesystem,
 	Patch,
 	Patcher,
+	UnseenLinesError,
 	type WriteResult,
 } from "@oh-my-pi/hashline";
 
@@ -272,9 +273,13 @@ describe("Patcher seen-line provenance", () => {
 		const tag = snapshots.record(PATH, CONTENT, [1, 2]);
 		const patcher = new Patcher({ fs, snapshots });
 
-		await expect(patcher.apply(Patch.parse(`[${PATH}#${tag}]\nPUT 4-4:\n+L4`))).rejects.toThrow(
-			/never displayed \(it showed/,
-		);
+		const error = await patcher
+			.apply(Patch.parse(`[${PATH}#${tag}]\nPUT 4-4:\n+L4`))
+			.then(() => undefined)
+			.catch((cause: unknown) => cause);
+		expect(error).toBeInstanceOf(UnseenLinesError);
+		expect((error as UnseenLinesError).retryable).toBe(true);
+		expect((error as Error).message).toMatch(/never displayed \(it showed/);
 		expect(fs.get(PATH)).toBe(CONTENT);
 	});
 

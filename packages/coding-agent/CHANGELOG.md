@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed seen-line guard retries forcing agents to resend entire unchanged patches. Complete inline reveals now issue one-shot `RETRY <token>` continuations that rerun validation against live files, while numbered lines in successful edit output join the returned snapshot's seen-line provenance.
+
 ## [17.3.1] - 2026-08-13
 
 ### Fixed

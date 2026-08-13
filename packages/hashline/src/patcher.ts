@@ -65,6 +65,20 @@ const SEEN_LINE_REVEAL_CAP = 40;
  */
 const SEEN_LINE_REVEAL_MAX_COLUMNS = 512;
 
+/**
+ * Seen-line rejection metadata for hosts that can offer an explicit retry
+ * continuation after presenting the revealed source to the caller.
+ */
+export class UnseenLinesError extends Error {
+	constructor(
+		message: string,
+		readonly retryable: boolean,
+	) {
+		super(message);
+		this.name = "UnseenLinesError";
+	}
+}
+
 export interface PatcherOptions {
 	/** Storage backend used for all reads and writes. */
 	fs: Filesystem;
@@ -650,7 +664,10 @@ export class Patcher {
 		if (!truncated) {
 			for (const { line } of revealed) seen.add(line);
 		}
-		throw new Error(unseenLinesMessage(section.path, unseen, expected, { lines: revealed, truncated }));
+		throw new UnseenLinesError(
+			unseenLinesMessage(section.path, unseen, expected, { lines: revealed, truncated }),
+			!truncated,
+		);
 	}
 	#mismatchError(
 		section: PatchSection,
