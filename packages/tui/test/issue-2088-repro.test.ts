@@ -414,11 +414,7 @@ class ManualRenderScheduler implements RenderScheduler {
 	}
 
 	scheduleRender(callback: () => void, delayMs: number): RenderTimer {
-		const timer = {
-			at: this.#now + Math.max(0, delayMs),
-			callback,
-			canceled: false,
-		};
+		const timer = { at: this.#now + Math.max(0, delayMs), callback, canceled: false };
 		this.#timers.push(timer);
 		return {
 			cancel: () => {
@@ -523,27 +519,10 @@ const MULTIPLEXER_ENV_KEYS = [
 const NO_MULTIPLEXER_ENV: Record<string, string | undefined> = Object.fromEntries(
 	MULTIPLEXER_ENV_KEYS.map(key => [key, undefined]),
 );
-const TMUX_ENV: Record<string, string | undefined> = {
-	...NO_MULTIPLEXER_ENV,
-	TMUX: "1",
-};
+const TMUX_ENV: Record<string, string | undefined> = { ...NO_MULTIPLEXER_ENV, TMUX: "1" };
 const MULTIPLEXER_ENV_CASES: Array<[string, Record<string, string | undefined>]> = [
-	[
-		"CMUX_WORKSPACE_ID",
-		{
-			...NO_MULTIPLEXER_ENV,
-			TERM: "dumb",
-			CMUX_WORKSPACE_ID: "workspace:cmux-2088",
-		},
-	],
-	[
-		"CMUX_SURFACE_ID",
-		{
-			...NO_MULTIPLEXER_ENV,
-			TERM: "dumb",
-			CMUX_SURFACE_ID: "surface:cmux-2088",
-		},
-	],
+	["CMUX_WORKSPACE_ID", { ...NO_MULTIPLEXER_ENV, TERM: "dumb", CMUX_WORKSPACE_ID: "workspace:cmux-2088" }],
+	["CMUX_SURFACE_ID", { ...NO_MULTIPLEXER_ENV, TERM: "dumb", CMUX_SURFACE_ID: "surface:cmux-2088" }],
 ];
 const CMUX_SOCKET_ONLY_ENV: Record<string, string | undefined> = {
 	...NO_MULTIPLEXER_ENV,

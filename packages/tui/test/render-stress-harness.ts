@@ -369,11 +369,7 @@ function contentOperation(
 	checksRowAccounting: boolean,
 	overrides: AppliedOperationOverrides = {},
 ): AppliedOperation {
-	return appliedOperation(kind, detail, {
-		mutatesContent: true,
-		checksRowAccounting,
-		...overrides,
-	});
+	return appliedOperation(kind, detail, { mutatesContent: true, checksRowAccounting, ...overrides });
 }
 
 function viewOperation(
@@ -418,78 +414,18 @@ interface BurstStepMetadata {
 }
 
 const BURST_STEP_METADATA = {
-	appendSmall: {
-		mutatesContent: true,
-		geometryChanged: false,
-		forcedRender: false,
-		mutatesViewport: false,
-	},
-	streamOne: {
-		mutatesContent: true,
-		geometryChanged: false,
-		forcedRender: false,
-		mutatesViewport: false,
-	},
-	appendRepeatedTail: {
-		mutatesContent: true,
-		geometryChanged: false,
-		forcedRender: false,
-		mutatesViewport: false,
-	},
-	injectBlankCluster: {
-		mutatesContent: true,
-		geometryChanged: false,
-		forcedRender: false,
-		mutatesViewport: false,
-	},
-	editVisibleLine: {
-		mutatesContent: true,
-		geometryChanged: false,
-		forcedRender: false,
-		mutatesViewport: false,
-	},
-	editOffscreenLine: {
-		mutatesContent: true,
-		geometryChanged: false,
-		forcedRender: false,
-		mutatesViewport: false,
-	},
-	tickStatusHeader: {
-		mutatesContent: true,
-		geometryChanged: false,
-		forcedRender: false,
-		mutatesViewport: false,
-	},
-	resizeWidth: {
-		mutatesContent: false,
-		geometryChanged: true,
-		forcedRender: false,
-		mutatesViewport: true,
-	},
-	resizeHeight: {
-		mutatesContent: false,
-		geometryChanged: true,
-		forcedRender: false,
-		mutatesViewport: true,
-	},
-	scrollPartial: {
-		mutatesContent: false,
-		geometryChanged: false,
-		forcedRender: false,
-		mutatesViewport: true,
-	},
-	scrollToBottom: {
-		mutatesContent: false,
-		geometryChanged: false,
-		forcedRender: false,
-		mutatesViewport: true,
-	},
-	forceRender: {
-		mutatesContent: false,
-		geometryChanged: false,
-		forcedRender: true,
-		mutatesViewport: true,
-	},
+	appendSmall: { mutatesContent: true, geometryChanged: false, forcedRender: false, mutatesViewport: false },
+	streamOne: { mutatesContent: true, geometryChanged: false, forcedRender: false, mutatesViewport: false },
+	appendRepeatedTail: { mutatesContent: true, geometryChanged: false, forcedRender: false, mutatesViewport: false },
+	injectBlankCluster: { mutatesContent: true, geometryChanged: false, forcedRender: false, mutatesViewport: false },
+	editVisibleLine: { mutatesContent: true, geometryChanged: false, forcedRender: false, mutatesViewport: false },
+	editOffscreenLine: { mutatesContent: true, geometryChanged: false, forcedRender: false, mutatesViewport: false },
+	tickStatusHeader: { mutatesContent: true, geometryChanged: false, forcedRender: false, mutatesViewport: false },
+	resizeWidth: { mutatesContent: false, geometryChanged: true, forcedRender: false, mutatesViewport: true },
+	resizeHeight: { mutatesContent: false, geometryChanged: true, forcedRender: false, mutatesViewport: true },
+	scrollPartial: { mutatesContent: false, geometryChanged: false, forcedRender: false, mutatesViewport: true },
+	scrollToBottom: { mutatesContent: false, geometryChanged: false, forcedRender: false, mutatesViewport: true },
+	forceRender: { mutatesContent: false, geometryChanged: false, forcedRender: true, mutatesViewport: true },
 } satisfies Record<BurstStepKind, BurstStepMetadata>;
 
 class UnknownViewportTerminal extends VirtualTerminal {
@@ -854,11 +790,7 @@ class StressModel {
 		const offscreenLimit = Math.max(1, this.lines.length - height - count);
 		const index = this.#rng.int(1, Math.max(1, offscreenLimit));
 		const removed = this.lines.splice(index, count);
-		return {
-			index,
-			count: removed.length,
-			firstRemoved: removed[0]?.text ?? null,
-		};
+		return { index, count: removed.length, firstRemoved: removed[0]?.text ?? null };
 	}
 
 	replaceAll(): JsonObject {
@@ -907,17 +839,11 @@ class StressModel {
 	rotateUp(): JsonObject {
 		if (this.lines.length < 2) {
 			this.lines.push(this.#freshLine("t"));
-			return {
-				dropped: null,
-				appended: this.lines[this.lines.length - 1]?.text ?? "",
-			};
+			return { dropped: null, appended: this.lines[this.lines.length - 1]?.text ?? "" };
 		}
 		const dropped = this.lines.shift();
 		this.lines.push(this.#randomLine("t"));
-		return {
-			dropped: dropped?.text ?? null,
-			appended: this.lines[this.lines.length - 1]?.text ?? "",
-		};
+		return { dropped: dropped?.text ?? null, appended: this.lines[this.lines.length - 1]?.text ?? "" };
 	}
 
 	collapseToFew(): JsonObject {
@@ -955,13 +881,7 @@ class StressModel {
 		const editedIndex = this.lines.length - 1;
 		const before = this.lines[editedIndex]?.text ?? "";
 		this.lines[editedIndex] = this.#freshLine("done");
-		return {
-			start,
-			count: removed.length,
-			editedIndex,
-			before,
-			after: this.lines[editedIndex]?.text ?? "",
-		};
+		return { start, count: removed.length, editedIndex, before, after: this.lines[editedIndex]?.text ?? "" };
 	}
 
 	swapOffscreenRows(height: number): JsonObject {
@@ -1126,12 +1046,7 @@ class StressOverlayModel {
 			const index = this.#rng.int(0, this.lines.length - 1);
 			const before = this.lines[index]?.text ?? "";
 			this.lines[index] = this.#freshLine("oe");
-			return {
-				action: "edit",
-				index,
-				before,
-				after: this.lines[index]?.text ?? "",
-			};
+			return { action: "edit", index, before, after: this.lines[index]?.text ?? "" };
 		}
 		if (action === 2) {
 			const index = this.#rng.int(0, this.lines.length - 1);
@@ -1268,12 +1183,7 @@ class StressDriver {
 				scenario.uniqueContent,
 				`child${id}-`,
 			);
-			return {
-				id,
-				model,
-				component: new StressComponent(model, scenario.reflow),
-				active: false,
-			};
+			return { id, model, component: new StressComponent(model, scenario.reflow), active: false };
 		});
 		this.#term = createTerminal(scenario);
 		// Capture every byte written to the terminal so per-op oracles can audit
@@ -1494,18 +1404,9 @@ class StressDriver {
 		const weighted: readonly WeightedCandidate<OperationKind>[] = [
 			{ item: "appendSmall", weight: 14 },
 			{ item: "streamOne", weight: 12 },
-			{
-				item: "appendExactWidth",
-				weight: this.#scenario.uniqueContent ? 0 : 5,
-			},
-			{
-				item: "appendRepeatedTail",
-				weight: this.#scenario.uniqueContent ? 2 : 8,
-			},
-			{
-				item: "appendDuplicateOfExisting",
-				weight: this.#scenario.uniqueContent ? 2 : 8,
-			},
+			{ item: "appendExactWidth", weight: this.#scenario.uniqueContent ? 0 : 5 },
+			{ item: "appendRepeatedTail", weight: this.#scenario.uniqueContent ? 2 : 8 },
+			{ item: "appendDuplicateOfExisting", weight: this.#scenario.uniqueContent ? 2 : 8 },
 			{ item: "injectBlankCluster", weight: 5 },
 			{ item: "appendBulk", weight: 3 },
 			{ item: "editVisibleLine", weight: 8 },
@@ -1532,10 +1433,7 @@ class StressDriver {
 			{ item: "moveCursorOffscreen", weight: 2 },
 			{ item: "showOverlay", weight: this.#overlays.length < 2 ? 3 : 1 },
 			{ item: "hideOverlay", weight: this.#overlays.length > 0 ? 2 : 0 },
-			{
-				item: "toggleOverlayHidden",
-				weight: this.#overlays.length > 0 ? 2 : 0,
-			},
+			{ item: "toggleOverlayHidden", weight: this.#overlays.length > 0 ? 2 : 0 },
 			{ item: "editOverlay", weight: this.#overlays.length > 0 ? 4 : 0 },
 			{ item: "moveOverlayCursor", weight: this.#overlays.length > 0 ? 2 : 0 },
 			{ item: "coalescedBurst", weight: 6 },
@@ -1553,22 +1451,10 @@ class StressDriver {
 			{ item: "resizeBoth", weight: 2 },
 			{ item: "resizeNoop", weight: 1 },
 			{ item: "resizeWithAppend", weight: 2 },
-			{
-				item: "attachChild",
-				weight: this.#children.some(child => !child.active) ? 2 : 0,
-			},
-			{
-				item: "detachChild",
-				weight: this.#children.some(child => child.active) ? 2 : 0,
-			},
-			{
-				item: "reorderChildren",
-				weight: this.#children.filter(child => child.active).length > 1 ? 1 : 0,
-			},
-			{
-				item: "mutateChild",
-				weight: this.#children.some(child => child.active) ? 3 : 0,
-			},
+			{ item: "attachChild", weight: this.#children.some(child => !child.active) ? 2 : 0 },
+			{ item: "detachChild", weight: this.#children.some(child => child.active) ? 2 : 0 },
+			{ item: "reorderChildren", weight: this.#children.filter(child => child.active).length > 1 ? 1 : 0 },
+			{ item: "mutateChild", weight: this.#children.some(child => child.active) ? 3 : 0 },
 		];
 		return weightedPick(this.#streams.ops, weighted);
 	}
@@ -1868,10 +1754,7 @@ class StressDriver {
 		this.#overlays = this.#overlays.filter(overlay => overlay !== entry);
 		this.#hiddenOverlaySentinels.add(entry.sentinel);
 		await this.#settle();
-		return this.#viewOperation("hideOverlay", {
-			id: entry.id,
-			sentinel: entry.sentinel,
-		});
+		return this.#viewOperation("hideOverlay", { id: entry.id, sentinel: entry.sentinel });
 	}
 
 	async #toggleOverlayHidden(): Promise<AppliedOperation> {
@@ -1991,10 +1874,7 @@ class StressDriver {
 	async #resizeNoop(): Promise<AppliedOperation> {
 		this.#term.resize(this.#term.columns, this.#term.rows);
 		await this.#settle();
-		return viewOperation("resizeNoop", {
-			columns: this.#term.columns,
-			rows: this.#term.rows,
-		});
+		return viewOperation("resizeNoop", { columns: this.#term.columns, rows: this.#term.rows });
 	}
 
 	async #scrollUp(): Promise<AppliedOperation> {
@@ -2006,9 +1886,7 @@ class StressDriver {
 
 	async #scrollToBottom(): Promise<AppliedOperation> {
 		this.#term.scrollLines(LARGE_SCROLL);
-		this.#tui.requestRender(true, {
-			clearScrollback: this.#traits.strictNativeScrollback,
-		});
+		this.#tui.requestRender(true, { clearScrollback: this.#traits.strictNativeScrollback });
 		await this.#settle();
 		return forceRenderOperation(
 			"scrollToBottom",
@@ -2079,12 +1957,7 @@ class StressDriver {
 		this.#term.scrollLines(LARGE_SCROLL);
 		this.#tui.requestRender(true, { clearScrollback: true });
 		await this.#settle();
-		return {
-			...this.#forceOperation("forceRenderClearScrollback", {
-				clearScrollback: true,
-			}),
-			checkpoint: true,
-		};
+		return { ...this.#forceOperation("forceRenderClearScrollback", { clearScrollback: true }), checkpoint: true };
 	}
 
 	async #forceRenderAfterEmptyOverflow(): Promise<AppliedOperation> {
@@ -2107,11 +1980,7 @@ class StressDriver {
 		this.#tui.requestRender(true);
 		await this.#settle();
 		return {
-			...this.#forceOperation("forceRenderAfterEmptyOverflow", {
-				detachedChildren,
-				empty,
-				overflow,
-			}),
+			...this.#forceOperation("forceRenderAfterEmptyOverflow", { detachedChildren, empty, overflow }),
 			mutatesContent: true,
 			// In multiplexers everything written during this op scrolls into pane
 			// history on top of whatever was already there.
@@ -2137,10 +2006,7 @@ class StressDriver {
 		}
 		this.#tui.requestRender();
 		await this.#settle();
-		return viewOperation("toggleFocusInput", {
-			focused: this.#component.focused,
-			cursor,
-		});
+		return viewOperation("toggleFocusInput", { focused: this.#component.focused, cursor });
 	}
 
 	// Container.addChild appends and Container.render walks children in array
@@ -2189,9 +2055,7 @@ class StressDriver {
 		await this.#settle();
 		return contentOperation(
 			"reorderChildren",
-			{
-				activeOrder: this.#children.filter(child => child.active).map(child => child.id),
-			},
+			{ activeOrder: this.#children.filter(child => child.active).map(child => child.id) },
 			false,
 		);
 	}
@@ -2548,9 +2412,7 @@ class StressDriver {
 	#assertCursor(op: AppliedOperation, before: Snapshot, after: Snapshot, index: number): void {
 		if (this.#hasVisibleOverlay()) return;
 		if (after.cursor.row < 0 || after.cursor.row >= after.height || after.cursor.col < 0) {
-			this.#fail("cursor bounds", op, before, after, index, {
-				cursor: cursorObject(after),
-			});
+			this.#fail("cursor bounds", op, before, after, index, { cursor: cursorObject(after) });
 		}
 		const expectedCursor = after.expectedCursor;
 		if (expectedCursor === null || !after.atBottom) return;
@@ -2900,9 +2762,7 @@ class StressDriver {
 		for (const sentinel of this.#hiddenOverlaySentinels) {
 			if (visibleSentinels.has(sentinel)) continue;
 			if (nativeText.includes(sentinel)) {
-				this.#fail("stale overlay sentinel", op, before, after, index, {
-					sentinel,
-				});
+				this.#fail("stale overlay sentinel", op, before, after, index, { sentinel });
 			}
 		}
 	}
@@ -3204,18 +3064,11 @@ export function expectedFrameFromLines(lines: readonly string[], width: number, 
 		const cleanLine = markerIndex === -1 ? line : removeCursorMarkers(line);
 		backgroundColumns[row] = expectedBackgroundColumns(cleanLine, width);
 		if (markerIndex !== -1 && cursor === null && row >= viewportTop) {
-			cursor = {
-				row: row - viewportTop,
-				col: visibleWidth(line.slice(0, markerIndex)),
-			};
+			cursor = { row: row - viewportTop, col: visibleWidth(line.slice(0, markerIndex)) };
 		}
 		stripped[row] = cleanLine;
 	}
-	return {
-		frame: stripped.map(line => expectedTerminalLine(line, width)),
-		cursor,
-		backgroundColumns,
-	};
+	return { frame: stripped.map(line => expectedTerminalLine(line, width)), cursor, backgroundColumns };
 }
 
 function expectedBackgroundColumns(line: string, width: number): number[] {
@@ -3282,12 +3135,7 @@ function compositeExpectedOverlays(
 ): string[] {
 	if (overlays.length === 0) return [...lines];
 	const result = [...lines];
-	const rendered: {
-		overlayLines: string[];
-		row: number;
-		col: number;
-		w: number;
-	}[] = [];
+	const rendered: { overlayLines: string[]; row: number; col: number; w: number }[] = [];
 	let minLinesNeeded = result.length;
 	for (const entry of overlays) {
 		if (!isExpectedOverlayVisible(entry, termWidth, termHeight)) continue;
@@ -3297,12 +3145,7 @@ function compositeExpectedOverlays(
 			overlayLines = overlayLines.slice(0, firstLayout.maxHeight);
 		}
 		const layout = resolveExpectedOverlayLayout(entry.options, overlayLines.length, termWidth, termHeight);
-		rendered.push({
-			overlayLines,
-			row: layout.row,
-			col: layout.col,
-			w: layout.width,
-		});
+		rendered.push({ overlayLines, row: layout.row, col: layout.col, w: layout.width });
 		minLinesNeeded = Math.max(minLinesNeeded, layout.row + overlayLines.length);
 	}
 	const workingHeight = Math.max(result.length, minLinesNeeded);
@@ -3337,12 +3180,7 @@ export function resolveExpectedOverlayLayout(
 	const opt = options ?? {};
 	const margin =
 		typeof opt.margin === "number"
-			? {
-					top: opt.margin,
-					right: opt.margin,
-					bottom: opt.margin,
-					left: opt.margin,
-				}
+			? { top: opt.margin, right: opt.margin, bottom: opt.margin, left: opt.margin }
 			: (opt.margin ?? {});
 	const marginTop = Math.max(0, margin.top ?? 0);
 	const marginRight = Math.max(0, margin.right ?? 0);
@@ -3572,18 +3410,12 @@ function snapshotDump(snapshot: Snapshot): JsonObject {
 		view: snapshot.view,
 		viewBackgroundColumns: snapshot.viewBackgroundColumns,
 		frameBackgroundColumns: snapshot.frameBackgroundColumns,
-		position: {
-			baseY: snapshot.position.baseY,
-			viewportY: snapshot.position.viewportY,
-		},
+		position: { baseY: snapshot.position.baseY, viewportY: snapshot.position.viewportY },
 		cursor: cursorObject(snapshot),
 		expectedCursor:
 			snapshot.expectedCursor === null
 				? null
-				: {
-						row: snapshot.expectedCursor.row,
-						col: snapshot.expectedCursor.col,
-					},
+				: { row: snapshot.expectedCursor.row, col: snapshot.expectedCursor.col },
 		redraws: snapshot.redraws,
 		width: snapshot.width,
 		height: snapshot.height,
@@ -3597,18 +3429,12 @@ function snapshotSummary(snapshot: Snapshot): JsonObject {
 		bufferLength: snapshot.buffer.length,
 		view: snapshot.view,
 		viewBackgroundColumns: snapshot.viewBackgroundColumns,
-		position: {
-			baseY: snapshot.position.baseY,
-			viewportY: snapshot.position.viewportY,
-		},
+		position: { baseY: snapshot.position.baseY, viewportY: snapshot.position.viewportY },
 		cursor: cursorObject(snapshot),
 		expectedCursor:
 			snapshot.expectedCursor === null
 				? null
-				: {
-						row: snapshot.expectedCursor.row,
-						col: snapshot.expectedCursor.col,
-					},
+				: { row: snapshot.expectedCursor.row, col: snapshot.expectedCursor.col },
 		redraws: snapshot.redraws,
 		width: snapshot.width,
 		height: snapshot.height,
@@ -3794,9 +3620,7 @@ function parseReplayOperations(): readonly OperationKind[] | null {
 	try {
 		parsed = JSON.parse(fs.readFileSync(path, "utf8"));
 	} catch (error) {
-		throw new Error(`Invalid TUI_STRESS_REPLAY_LOG JSON: ${path}`, {
-			cause: error,
-		});
+		throw new Error(`Invalid TUI_STRESS_REPLAY_LOG JSON: ${path}`, { cause: error });
 	}
 	const entries = Array.isArray(parsed)
 		? parsed
@@ -3932,9 +3756,9 @@ function coreTemplates(): ScenarioTemplate[] {
 			heightChoices: [3, 4, 6],
 		},
 		{
-			// Direct HerdR follows the in-place multiplexer resize policy.
-			// Streaming updates may race the resize but must survive the settled
-			// repaint exactly once.
+			// Direct HerdR implements ED3, so a settled width change clears and
+			// replays the source-owned transcript at its new wrap. Streaming
+			// updates may race the resize but must survive that replay exactly once.
 			name: "darwin-normal-herdr-reflow-stream-small",
 			platform: "darwin",
 			terminalMode: "normal",
@@ -4105,10 +3929,7 @@ function coreTemplates(): ScenarioTemplate[] {
 
 function soakTemplates(): ScenarioTemplate[] {
 	const templates: ScenarioTemplate[] = [];
-	const platformEnvModes: readonly {
-		platform: TestPlatform;
-		envModes: readonly EnvMode[];
-	}[] = [
+	const platformEnvModes: readonly { platform: TestPlatform; envModes: readonly EnvMode[] }[] = [
 		{ platform: "darwin", envModes: ["plain", "tmux", "herdr"] },
 		{ platform: "linux", envModes: ["plain", "tmux", "termux", "vteNoSync"] },
 		{ platform: "win32", envModes: ["plain"] },
@@ -4273,10 +4094,7 @@ async function withPatchedPlatform<T>(platform: Scenario["platform"], run: () =>
 	if (platformPatchDepth > 0) throw new Error("Nested stress platform patching is not supported");
 	platformPatchDepth += 1;
 	const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
-	Object.defineProperty(process, "platform", {
-		configurable: true,
-		value: platform,
-	});
+	Object.defineProperty(process, "platform", { configurable: true, value: platform });
 	try {
 		return await run();
 	} finally {
@@ -4325,11 +4143,7 @@ export async function runStressScenario(scenario: Scenario, options?: { patchEnv
 export async function runWidthEpochOverlayReplayRegression(): Promise<void> {
 	const base = coreTemplates().find(candidate => candidate.name === "darwin-normal-herdr-reflow-stream-small");
 	if (base === undefined) throw new Error("Missing reflow-stream stress template");
-	const template: ScenarioTemplate = {
-		...base,
-		name: "darwin-normal-tmux-reflow-stream-small",
-		envMode: "tmux",
-	};
+	const template: ScenarioTemplate = { ...base, name: "darwin-normal-tmux-reflow-stream-small", envMode: "tmux" };
 	const operations: readonly OperationKind[] = ["resizeWidth", "showOverlay", "streamOne", "streamOne", "hideOverlay"];
 	const scenario = materializeScenario(
 		template,
@@ -4346,11 +4160,7 @@ export async function runWidthEpochOverlayReplayRegression(): Promise<void> {
 export async function runWidthEpochHeightAppendReplayRegression(): Promise<void> {
 	const source = coreTemplates().find(candidate => candidate.name === "darwin-normal-herdr-reflow-stream-small");
 	if (source === undefined) throw new Error("Missing reflow-stream stress template");
-	const base: ScenarioTemplate = {
-		...source,
-		name: "darwin-normal-tmux-reflow-stream-small",
-		envMode: "tmux",
-	};
+	const base: ScenarioTemplate = { ...source, name: "darwin-normal-tmux-reflow-stream-small", envMode: "tmux" };
 	const template: ScenarioTemplate = {
 		...base,
 		columns: 40,
@@ -4394,38 +4204,14 @@ export async function runNoReflowResizeNotificationRegression(): Promise<void> {
 			const processKill = Object.getOwnPropertyDescriptor(process, "kill");
 			const writes: string[] = [];
 
-			Object.defineProperty(process.stdin, "isTTY", {
-				value: true,
-				configurable: true,
-			});
-			Object.defineProperty(process.stdout, "isTTY", {
-				value: true,
-				configurable: true,
-			});
-			Object.defineProperty(process.stdout, "columns", {
-				value: 100,
-				configurable: true,
-			});
-			Object.defineProperty(process.stdout, "rows", {
-				value: 30,
-				configurable: true,
-			});
-			Object.defineProperty(process.stdin, "setRawMode", {
-				value: () => process.stdin,
-				configurable: true,
-			});
-			Object.defineProperty(process.stdin, "setEncoding", {
-				value: () => process.stdin,
-				configurable: true,
-			});
-			Object.defineProperty(process.stdin, "resume", {
-				value: () => process.stdin,
-				configurable: true,
-			});
-			Object.defineProperty(process.stdin, "pause", {
-				value: () => process.stdin,
-				configurable: true,
-			});
+			Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+			Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+			Object.defineProperty(process.stdout, "columns", { value: 100, configurable: true });
+			Object.defineProperty(process.stdout, "rows", { value: 30, configurable: true });
+			Object.defineProperty(process.stdin, "setRawMode", { value: () => process.stdin, configurable: true });
+			Object.defineProperty(process.stdin, "setEncoding", { value: () => process.stdin, configurable: true });
+			Object.defineProperty(process.stdin, "resume", { value: () => process.stdin, configurable: true });
+			Object.defineProperty(process.stdin, "pause", { value: () => process.stdin, configurable: true });
 			Object.defineProperty(process.stdout, "write", {
 				value: (chunk: string | Uint8Array) => {
 					writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString());
@@ -4433,10 +4219,7 @@ export async function runNoReflowResizeNotificationRegression(): Promise<void> {
 				},
 				configurable: true,
 			});
-			Object.defineProperty(process, "kill", {
-				value: () => true,
-				configurable: true,
-			});
+			Object.defineProperty(process, "kill", { value: () => true, configurable: true });
 
 			// Exercises the real ProcessTerminal stdin/stdout pipeline; opt out of
 			// the test-default headless suppression inside the try so the finally

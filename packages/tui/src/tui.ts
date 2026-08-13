@@ -559,11 +559,7 @@ export class Container
 			component: Component;
 			childBoundary: unknown;
 			sourceIndex: number;
-			leading: ReadonlyArray<{
-				component: Component;
-				revision: number | undefined;
-				rowCount: number;
-			}>;
+			leading: ReadonlyArray<{ component: Component; revision: number | undefined; rowCount: number }>;
 			trailing: ReadonlyArray<{
 				component: Component;
 				revision: number | undefined;
@@ -1429,16 +1425,8 @@ export class TUI extends Container {
 			component: Component;
 			childBoundary: unknown;
 			sourceIndex: number;
-			leading: ReadonlyArray<{
-				component: Component;
-				revision: number | undefined;
-				rowCount: number;
-			}>;
-			trailing: ReadonlyArray<{
-				component: Component;
-				revision: number | undefined;
-				rowCount: number;
-			}>;
+			leading: ReadonlyArray<{ component: Component; revision: number | undefined; rowCount: number }>;
+			trailing: ReadonlyArray<{ component: Component; revision: number | undefined; rowCount: number }>;
 			hasTrailingRows: boolean;
 		}
 	>();
@@ -1942,12 +1930,7 @@ export class TUI extends Container {
 	 */
 	showOverlay(component: Component, options?: OverlayOptions): OverlayHandle {
 		component.setIgnoreTight?.(true);
-		const entry = {
-			component,
-			options,
-			preFocus: this.#focusedComponent,
-			hidden: false,
-		};
+		const entry = { component, options, preFocus: this.#focusedComponent, hidden: false };
 		this.overlayStack.push(entry);
 		// Only focus if overlay is actually visible
 		if (this.#isOverlayVisible(entry)) {
@@ -2137,9 +2120,7 @@ export class TUI extends Container {
 		this.#recordHardwareCursorHidden();
 		this.#querySixelSupport();
 		this.#queryCellSize();
-		this.requestRender(true, {
-			clearScrollback: options?.clearScrollback === true,
-		});
+		this.requestRender(true, { clearScrollback: options?.clearScrollback === true });
 	}
 
 	addStartListener(listener: StartListener): () => void {
@@ -2404,10 +2385,7 @@ export class TUI extends Container {
 		// the same `#prepareForcedRender(!isMultiplexerSession())` path via
 		// `requestRender(true)`, so the clear-scrollback intent is preserved.
 		if (this.#multiplexerResizeTimer) {
-			this.#armMultiplexerResizeTimer({
-				clearScrollback: !isMultiplexerSession(),
-				hasPendingRender: true,
-			});
+			this.#armMultiplexerResizeTimer({ clearScrollback: !isMultiplexerSession(), hasPendingRender: true });
 			return;
 		}
 		this.#prepareForcedRender(!isMultiplexerSession());
@@ -3017,12 +2995,7 @@ export class TUI extends Container {
 		// Parse margin (clamp to non-negative)
 		const margin =
 			typeof opt.margin === "number"
-				? {
-						top: opt.margin,
-						right: opt.margin,
-						bottom: opt.margin,
-						left: opt.margin,
-					}
+				? { top: opt.margin, right: opt.margin, bottom: opt.margin, left: opt.margin }
 				: (opt.margin ?? {});
 		const marginTop = Math.max(0, margin.top ?? 0);
 		const marginRight = Math.max(0, margin.right ?? 0);
@@ -3852,10 +3825,7 @@ export class TUI extends Container {
 			window = this.#compositeOverlaysIntoWindow(window, width, height);
 			const overlayMarkers = this.#extractCursorMarkers(window);
 			if (overlayMarkers.length > 0) {
-				cursorPos = {
-					row: windowTop + overlayMarkers[0]!.row,
-					col: overlayMarkers[0]!.col,
-				};
+				cursorPos = { row: windowTop + overlayMarkers[0]!.row, col: overlayMarkers[0]!.col };
 			}
 			window = this.#prepareLinesArray(window, width);
 		}
@@ -4447,10 +4417,7 @@ export class TUI extends Container {
 		this.#hardwareCursorVisible = false;
 		this.#hardwareCursorVisibilityKnown = true;
 		if (!this.#hardwareCursorState) return;
-		this.#hardwareCursorState = {
-			...this.#hardwareCursorState,
-			visible: false,
-		};
+		this.#hardwareCursorState = { ...this.#hardwareCursorState, visible: false };
 	}
 
 	#forgetHardwareCursorState(): void {
@@ -4625,10 +4592,7 @@ export class TUI extends Container {
 			if (cursorPos.row < chunkTo) {
 				paintCursorPos = cursorPos;
 			} else if (cursorPos.row >= windowTop && cursorPos.row < windowTop + height) {
-				paintCursorPos = {
-					row: chunkTo + cursorPos.row - windowTop,
-					col: cursorPos.col,
-				};
+				paintCursorPos = { row: chunkTo + cursorPos.row - windowTop, col: cursorPos.col };
 			}
 		}
 		// ConPTY hosts bound bulk transcript-replacement replays (resume, handoff,
@@ -4890,11 +4854,7 @@ export class TUI extends Container {
 		const framed: string[] = new Array(extra + height);
 		for (let k = 0; k < extra; k++) framed[k] = tail[tail.length - 1 - k]!;
 		for (let screenRow = 0; screenRow < height; screenRow++) framed[extra + screenRow] = window[screenRow]!;
-		return {
-			framed: this.#prepareLinesArray(framed, width),
-			viewportTop: extra,
-			contentRows,
-		};
+		return { framed: this.#prepareLinesArray(framed, width), viewportTop: extra, contentRows };
 	}
 
 	/**
@@ -5325,13 +5285,7 @@ export class TUI extends Container {
 		// No IME target or no content — hide cursor regardless of preference.
 		const target = this.#targetHardwareCursorState(cursorPos, totalLines);
 		if (!target) {
-			return {
-				seq: "\x1b[?25l",
-				toRow: fromRow,
-				toCol: 0,
-				visible: false,
-				state: null,
-			};
+			return { seq: "\x1b[?25l", toRow: fromRow, toCol: 0, visible: false, state: null };
 		}
 
 		// Move cursor from current position to target.
@@ -5346,13 +5300,7 @@ export class TUI extends Container {
 		seq += `\x1b[${target.col + 1}G`;
 		seq += target.visible ? "\x1b[?25h" : "\x1b[?25l";
 
-		return {
-			seq,
-			toRow: target.row,
-			toCol: target.col,
-			visible: target.visible,
-			state: target,
-		};
+		return { seq, toRow: target.row, toCol: target.col, visible: target.visible, state: target };
 	}
 
 	#isHiddenCursorKnown(): boolean {
