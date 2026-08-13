@@ -40,6 +40,7 @@ import type { ModelRegistry } from "../../config/model-registry";
 import {
 	formatModelString,
 	normalizeModelPatternList,
+	resolveAgentAdvisorSelection,
 	resolveAgentModelPatterns,
 	resolveAgentPrewalkPattern,
 	resolveConfiguredModelPatterns,
@@ -78,6 +79,8 @@ interface DashboardAgent extends AgentDefinition {
 	overrideModel?: string;
 	/** `task.agentPrewalk` value for this agent: "on", "off", or a model pattern. */
 	prewalkOverride?: string;
+	/** `task.agentAdvisor` value for this agent: "on", "off", or a model pattern. */
+	advisorOverride?: string;
 }
 
 interface ModelResolution {
@@ -85,6 +88,20 @@ interface ModelResolution {
 	thinkingLevel?: string;
 	explicitThinkingLevel: boolean;
 }
+/** Which per-agent settings override the inline editor is editing. */
+type OverrideEditKind = "model" | "prewalk" | "advisor";
+
+const OVERRIDE_EDIT_META: Record<OverrideEditKind, { title: string; hint: string }> = {
+	model: { title: "Model override", hint: "Enter model pattern (empty clears override)" },
+	prewalk: {
+		title: "Prewalk override",
+		hint: 'Enter "on", "off", or a prewalk target model pattern (empty = agent default)',
+	},
+	advisor: {
+		title: "Advisor override",
+		hint: 'Enter "on", "off", or an advisor model pattern (empty = agent default)',
+	},
+};
 
 interface GeneratedAgentSpec {
 	identifier: string;
@@ -111,7 +128,7 @@ const SOURCE_LABEL: Record<AgentSource, string> = {
 };
 
 const LIST_FOOTER =
-	" ↑/↓: navigate  Space: toggle  Enter: model override  P: prewalk  N: new agent  ←/→: source  Ctrl+R: reload  Esc: close";
+	" ↑/↓: navigate  Space: toggle  Enter: model override  P: prewalk  A: advisor  N: new agent  ←/→: source  Ctrl+R: reload  Esc: close";
 
 const IDENTIFIER_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+){1,5}$/;
 function joinPatterns(patterns: string[]): string {
@@ -266,6 +283,8 @@ class AgentInspectorPane implements Component {
 		private readonly effectiveResolution: ModelResolution | undefined,
 		private readonly prewalkPattern: string | undefined,
 		private readonly prewalkResolution: ModelResolution | undefined,
+		private readonly advisorPattern: string | undefined,
+		private readonly advisorResolution: ModelResolution | undefined,
 	) {}
 
 	render(width: number): readonly string[] {
@@ -296,6 +315,7 @@ class AgentInspectorPane implements Component {
 			`${theme.fg("muted", "Effective:")} ${this.effectiveResolution ? this.#formatResolution(this.effectiveResolution) : theme.fg("dim", "(unresolved)")}`,
 		);
 		lines.push(`${theme.fg("muted", "Prewalk:")} ${this.#prewalkLabel()}`);
+		lines.push(`${theme.fg("muted", "Advisor:")} ${this.#advisorLabel()}`);
 
 		if (this.agent.filePath) {
 			lines.push("");
@@ -329,6 +349,23 @@ class AgentInspectorPane implements Component {
 			? this.#formatResolution(this.prewalkResolution)
 			: theme.fg("dim", "(unresolved)");
 		return `${theme.fg("success", "on")} ${theme.fg("dim", `${replaceTabs(this.prewalkPattern)} →`)} ${target}${sourceTag}`;
+	}
+	/** "off", "on → advisor model" (with source: agent default vs override), or the unresolved pattern. */
+	#advisorLabel(): string {
+		if (!this.agent) return theme.fg("dim", "off");
+		const override = this.agent.advisorOverride?.trim();
+		const sourceTag = override
+			? theme.fg("warning", " (override)")
+			: this.agent.advisor !== undefined && this.agent.advisor !== false
+				? theme.fg("dim", " (agent default)")
+				: "";
+		if (!this.advisorPattern) {
+			return `${theme.fg("dim", "off")}${override ? sourceTag : ""}`;
+		}
+		const target = this.advisorResolution
+			? this.#formatResolution(this.advisorResolution)
+			: theme.fg("dim", "(unresolved)");
+		return `${theme.fg("success", "on")} ${theme.fg("dim", `${replaceTabs(this.advisorPattern)} →`)} ${target}${sourceTag}`;
 	}
 
 	#formatResolution(resolution: ModelResolution): string {
@@ -386,6 +423,7 @@ export class AgentDashboard extends Container {
 	#builtCols = -1;
 
 	#editInput: Input | null = null;
+	#editKind: OverrideEditKind = "model";
 	#editingAgentName: string | null = null;
 
 	#createInput: Editor | null = null;
@@ -437,6 +475,7 @@ export class AgentDashboard extends Container {
 			const disabled = new Set((this.#settingsManager?.get("task.disabledAgents") as string[] | undefined) ?? []);
 			const overrides = this.#settingsManager?.get("task.agentModelOverrides") ?? {};
 			const prewalkOverrides = this.#settingsManager?.get("task.agentPrewalk") ?? {};
+			const advisorOverrides = this.#settingsManager?.get("task.agentAdvisor") ?? {};
 
 			this.#allAgents = agents
 				.slice()
@@ -450,6 +489,7 @@ export class AgentDashboard extends Container {
 					disabled: disabled.has(agent.name),
 					overrideModel: normalizeModelPatternList(overrides[agent.name]).join(",") || undefined,
 					prewalkOverride: prewalkOverrides[agent.name]?.trim() || undefined,
+					advisorOverride: advisorOverrides[agent.name]?.trim() || undefined,
 				}));
 
 			this.#tabs = this.#buildTabs(this.#allAgents);
@@ -596,20 +636,16 @@ export class AgentDashboard extends Container {
 		this.#settingsManager.set("task.agentPrewalk", overrides);
 	}
 
-	/** Cycle the prewalk override for the selected agent: agent default → on → off → agent default. */
-	#cyclePrewalkOverride(): void {
-		const selected = this.#selectedAgent();
-		if (!selected) return;
-		const current = selected.prewalkOverride?.trim().toLowerCase();
-		selected.prewalkOverride = current === undefined || current === "" ? "on" : current === "on" ? "off" : undefined;
-		this.#persistPrewalkOverrides();
-		const pattern = resolveAgentPrewalkPattern({
-			settingsOverride: selected.prewalkOverride,
-			agentPrewalk: resolveAgentPrewalkDefault(selected, this.#settingsManager?.get("task.prewalk") ?? false),
-		});
-		const state = selected.prewalkOverride ?? "agent default";
-		this.#notice = `Prewalk for ${selected.name}: ${state}${pattern ? ` (into ${pattern})` : ""}`;
-		this.#buildLayout();
+	#persistAdvisorOverrides(): void {
+		if (!this.#settingsManager) return;
+		const overrides: Record<string, string> = {};
+		for (const agent of this.#allAgents) {
+			const value = agent.advisorOverride?.trim();
+			if (value) {
+				overrides[agent.name] = value;
+			}
+		}
+		this.#settingsManager.set("task.agentAdvisor", overrides);
 	}
 
 	#toggleSelectedAgent(): void {
@@ -620,41 +656,74 @@ export class AgentDashboard extends Container {
 		this.#buildLayout();
 	}
 
-	#beginModelEdit(): void {
+	#overrideValueFor(agent: DashboardAgent, kind: OverrideEditKind): string | undefined {
+		switch (kind) {
+			case "model":
+				return agent.overrideModel;
+			case "prewalk":
+				return agent.prewalkOverride;
+			case "advisor":
+				return agent.advisorOverride;
+		}
+	}
+
+	#beginOverrideEdit(kind: OverrideEditKind): void {
 		const selected = this.#selectedAgent();
 		if (!selected) return;
 		this.#createError = null;
+		this.#editKind = kind;
 		this.#editingAgentName = selected.name;
 		this.#editInput = new Input();
-		if (selected.overrideModel) {
-			this.#editInput.setValue(selected.overrideModel);
+		const current = this.#overrideValueFor(selected, kind);
+		if (current) {
+			this.#editInput.setValue(current);
 		}
 		this.#editInput.onSubmit = value => {
-			this.#saveModelOverride(value);
+			this.#saveOverrideEdit(value);
 		};
 		this.#buildLayout();
 	}
 
-	#saveModelOverride(rawValue: string): void {
+	#saveOverrideEdit(rawValue: string): void {
 		if (!this.#editingAgentName) return;
 		const selected = this.#allAgents.find(agent => agent.name === this.#editingAgentName);
 		if (!selected) return;
-		const value = rawValue.trim();
-		selected.overrideModel = value || undefined;
-		this.#persistModelOverrides();
+		const kind = this.#editKind;
+		const value = rawValue.trim() || undefined;
+		switch (kind) {
+			case "model":
+				selected.overrideModel = value;
+				this.#persistModelOverrides();
+				this.#notice = `Updated model override for ${selected.name}`;
+				break;
+			case "prewalk": {
+				selected.prewalkOverride = value;
+				this.#persistPrewalkOverrides();
+				const pattern = resolveAgentPrewalkPattern({
+					settingsOverride: value,
+					agentPrewalk: resolveAgentPrewalkDefault(selected, this.#settingsManager?.get("task.prewalk") ?? false),
+				});
+				this.#notice = `Prewalk for ${selected.name}: ${value ?? "agent default"}${pattern ? ` (into ${pattern})` : " (off)"}`;
+				break;
+			}
+			case "advisor": {
+				selected.advisorOverride = value;
+				this.#persistAdvisorOverrides();
+				const selection = resolveAgentAdvisorSelection({ settingsOverride: value, agentAdvisor: selected.advisor });
+				this.#notice = `Advisor for ${selected.name}: ${value ?? "agent default"}${selection ? ` (advised by ${selection.model ?? "@advisor"})` : " (off)"}`;
+				break;
+			}
+		}
 		this.#editingAgentName = null;
 		this.#editInput = null;
 		this.#applyFilters();
-		this.#notice = `Updated model override for ${selected.name}`;
 		this.#buildLayout();
 	}
-
-	#cancelModelEdit(): void {
+	#cancelOverrideEdit(): void {
 		this.#editingAgentName = null;
 		this.#editInput = null;
 		this.#buildLayout();
 	}
-
 	#beginCreateFlow(): void {
 		if (this.#createGenerating) return;
 		this.#createError = null;
@@ -1032,39 +1101,87 @@ export class AgentDashboard extends Container {
 			this.#renderCreateInput();
 		} else if (this.#editInput && this.#editingAgentName) {
 			const editingAgent = this.#allAgents.find(agent => agent.name === this.#editingAgentName) ?? null;
+			const kind = this.#editKind;
+			const meta = OVERRIDE_EDIT_META[kind];
 			const draft = this.#editInput.getValue();
-			const defaultPatterns = editingAgent ? this.#defaultPatternsFor(editingAgent) : [];
-			const defaultResolution = editingAgent ? this.#resolvePatterns(defaultPatterns) : undefined;
-			const previewPatterns = editingAgent ? this.#effectivePatternsFor(editingAgent, draft) : [];
-			const previewResolution = editingAgent ? this.#resolvePatterns(previewPatterns) : undefined;
 			const suggestions = this.#getModelSuggestions(draft);
 
 			this.addChild(
-				new Text(theme.bold(theme.fg("accent", `Model override: ${replaceTabs(this.#editingAgentName)}`)), 0, 0),
+				new Text(theme.bold(theme.fg("accent", `${meta.title}: ${replaceTabs(this.#editingAgentName)}`)), 0, 0),
 			);
 			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("muted", "Enter model pattern (empty clears override)"), 0, 0));
+			this.addChild(new Text(theme.fg("muted", meta.hint), 0, 0));
 			this.addChild(new Spacer(1));
 			this.addChild(this.#editInput);
 			this.addChild(new Spacer(1));
 
-			this.addChild(
-				new Text(theme.fg("muted", `Default pattern: ${replaceTabs(joinPatterns(defaultPatterns))}`), 0, 0),
-			);
-			this.addChild(
-				new Text(
-					`${theme.fg("muted", "Default resolves:")} ${defaultResolution ? formatResolution(defaultResolution) : theme.fg("dim", "(unresolved)")}`,
-					0,
-					0,
-				),
-			);
-			this.addChild(
-				new Text(
-					`${theme.fg("muted", "Preview effective:")} ${previewResolution ? formatResolution(previewResolution) : theme.fg("dim", "(unresolved)")}`,
-					0,
-					0,
-				),
-			);
+			if (kind === "model") {
+				const defaultPatterns = editingAgent ? this.#defaultPatternsFor(editingAgent) : [];
+				const defaultResolution = editingAgent ? this.#resolvePatterns(defaultPatterns) : undefined;
+				const previewPatterns = editingAgent ? this.#effectivePatternsFor(editingAgent, draft) : [];
+				const previewResolution = editingAgent ? this.#resolvePatterns(previewPatterns) : undefined;
+				this.addChild(
+					new Text(theme.fg("muted", `Default pattern: ${replaceTabs(joinPatterns(defaultPatterns))}`), 0, 0),
+				);
+				this.addChild(
+					new Text(
+						`${theme.fg("muted", "Default resolves:")} ${defaultResolution ? formatResolution(defaultResolution) : theme.fg("dim", "(unresolved)")}`,
+						0,
+						0,
+					),
+				);
+				this.addChild(
+					new Text(
+						`${theme.fg("muted", "Preview effective:")} ${previewResolution ? formatResolution(previewResolution) : theme.fg("dim", "(unresolved)")}`,
+						0,
+						0,
+					),
+				);
+			} else if (editingAgent) {
+				// Prewalk/advisor: preview the effective state the draft override
+				// would produce, resolving "on"/"off"/pattern against the agent
+				// definition's own default.
+				const previewPattern =
+					kind === "prewalk"
+						? resolveAgentPrewalkPattern({
+								settingsOverride: draft,
+								agentPrewalk: resolveAgentPrewalkDefault(
+									editingAgent,
+									this.#settingsManager?.get("task.prewalk") ?? false,
+								),
+							})
+						: (() => {
+								const selection = resolveAgentAdvisorSelection({
+									settingsOverride: draft,
+									agentAdvisor: editingAgent.advisor,
+								});
+								return selection ? (selection.model ?? "@advisor") : undefined;
+							})();
+				const previewResolution = previewPattern ? this.#resolvePatterns([previewPattern]) : undefined;
+				const agentDefault = kind === "prewalk" ? editingAgent.prewalk : editingAgent.advisor;
+				this.addChild(
+					new Text(
+						`${theme.fg("muted", "Agent default:")} ${
+							agentDefault === undefined || agentDefault === false
+								? theme.fg("dim", "off")
+								: replaceTabs(String(agentDefault))
+						}`,
+						0,
+						0,
+					),
+				);
+				this.addChild(
+					new Text(
+						`${theme.fg("muted", "Preview effective:")} ${
+							previewPattern
+								? `${theme.fg("success", "on")} ${theme.fg("dim", `${replaceTabs(previewPattern)} →`)} ${previewResolution ? formatResolution(previewResolution) : theme.fg("dim", "(unresolved)")}`
+								: theme.fg("dim", "off")
+						}`,
+						0,
+						0,
+					),
+				);
+			}
 
 			if (suggestions.length > 0) {
 				this.addChild(new Spacer(1));
@@ -1092,6 +1209,14 @@ export class AgentDashboard extends Container {
 					})
 				: undefined;
 			const prewalkResolution = prewalkPattern ? this.#resolvePatterns([prewalkPattern]) : undefined;
+			const advisorSelection = selected
+				? resolveAgentAdvisorSelection({
+						settingsOverride: selected.advisorOverride,
+						agentAdvisor: selected.advisor,
+					})
+				: undefined;
+			const advisorPattern = advisorSelection ? (advisorSelection.model ?? "@advisor") : undefined;
+			const advisorResolution = advisorPattern ? this.#resolvePatterns([advisorPattern]) : undefined;
 
 			const listPane = new AgentListPane(
 				this.#filteredAgents,
@@ -1108,6 +1233,8 @@ export class AgentDashboard extends Container {
 				effectiveResolution,
 				prewalkPattern,
 				prewalkResolution,
+				advisorPattern,
+				advisorResolution,
 			);
 			const bodyHeight = this.#computeBodyHeight();
 			this.addChild(new TwoColumnBody(listPane, inspector, bodyHeight));
@@ -1180,7 +1307,7 @@ export class AgentDashboard extends Container {
 
 		if (this.#editInput) {
 			if (matchesAppInterrupt(data)) {
-				this.#cancelModelEdit();
+				this.#cancelOverrideEdit();
 				return;
 			}
 			this.#editInput.handleInput(data);
@@ -1224,7 +1351,7 @@ export class AgentDashboard extends Container {
 			return;
 		}
 		if (matchesKey(data, "enter") || matchesKey(data, "return") || data === "\n") {
-			this.#beginModelEdit();
+			this.#beginOverrideEdit("model");
 			return;
 		}
 		if (data.toLowerCase() === "n") {
@@ -1232,7 +1359,13 @@ export class AgentDashboard extends Container {
 			return;
 		}
 		if (data.toLowerCase() === "p") {
-			this.#cyclePrewalkOverride();
+			this.#beginOverrideEdit("prewalk");
+			return;
+		}
+		// Uppercase-only: lowercase `a` stays available for search-typing agent
+		// names ("task", "librarian", ...), unlike the rarely-typed n/p letters.
+		if (data === "A") {
+			this.#beginOverrideEdit("advisor");
 			return;
 		}
 

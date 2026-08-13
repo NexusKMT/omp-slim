@@ -468,17 +468,6 @@ export const SETTINGS_SCHEMA = {
 				"Start on the active model, then switch to a fast/cheap model (default the 'smol' role) at the first edit/write after the plan nudge's todo list exists — the strong model plans, commits the todos, and starts the implementation before handing off. Overridable per session with --prewalk / --no-prewalk.",
 		},
 	},
-	"advisor.subagents": {
-		type: "boolean",
-		default: false,
-		ui: {
-			tab: "model",
-			group: "Advisor",
-			label: "Advisor for Subagents",
-			description: "Also enable the advisor on spawned task/eval subagents.",
-			condition: "advisorEnabled",
-		},
-	},
 	"advisor.syncBacklog": {
 		type: "enum",
 		values: ["off", "1", "3", "5"] as const,
@@ -4743,6 +4732,10 @@ export const SETTINGS_SCHEMA = {
 		type: "record",
 		default: {} as Record<string, string>,
 	},
+	"task.agentAdvisor": {
+		type: "record",
+		default: {} as Record<string, string>,
+	},
 	"task.prewalk": {
 		type: "boolean",
 		default: false,
@@ -4751,7 +4744,7 @@ export const SETTINGS_SCHEMA = {
 			group: "Subagents",
 			label: "Generic Task Prewalk",
 			description:
-				"Arm prewalk for the bundled generic `task` subagent: it starts on its resolved model, plans and begins the implementation, then hands off to the 'smol' role at its first edit/write. Per-agent overrides (task.agentPrewalk, toggled with P in /agents) and user agent `prewalk` frontmatter apply regardless of this toggle.",
+				"Arm prewalk for the bundled generic `task` subagent: it starts on its resolved model, plans and begins the implementation, then hands off to the 'smol' role at its first edit/write. Per-agent overrides (task.agentPrewalk, edited with P in /agents) and user agent `prewalk` frontmatter apply regardless of this toggle.",
 		},
 	},
 

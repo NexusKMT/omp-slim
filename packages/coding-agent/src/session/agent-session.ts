@@ -1436,7 +1436,6 @@ export class AgentSession {
 			onPayload: this.#onPayload,
 			onResponse: this.#onResponse,
 			onSseEvent: this.#onSseEvent,
-			agentKind: () => this.#agentKind,
 			isDisposed: () => this.#isDisposed,
 			abortInProgress: () => this.#abortInProgress,
 			allowAgentInitiatedTurns: () => this.#allowAcpAgentInitiatedTurns,
@@ -9188,9 +9187,10 @@ export class AgentSession {
 
 	/**
 	 * Whether a live advisor agent is attached to this session. True only when
-	 * `advisor.enabled` is set AND a model resolved for the `advisor` role AND
-	 * the advisor applies to this agent kind — i.e. the actual runtime exists,
-	 * not merely the setting. Drives the status-line badge and `/dump advisor`.
+	 * `advisor.enabled` is set for this session (subagents opt in per agent via
+	 * frontmatter `advisor` / `task.agentAdvisor`) AND a model resolved for the
+	 * `advisor` role — i.e. the actual runtime exists, not merely the setting.
+	 * Drives the status-line badge and `/dump advisor`.
 	 */
 	isAdvisorActive(): boolean {
 		return this.#advisors.isAdvisorActive();

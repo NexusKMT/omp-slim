@@ -274,3 +274,49 @@ describe("AgentDashboard prewalk", () => {
 		expect(rendered).not.toContain("Prewalk: off");
 	});
 });
+describe("AgentDashboard override editors", () => {
+	test("A opens the advisor editor and saves a model pattern to task.agentAdvisor", async () => {
+		await initTheme(false);
+		vi.spyOn(discovery, "discoverAgents").mockResolvedValue({
+			projectAgentsDir: null,
+			agents: [{ name: "task", description: "Generic task agent", systemPrompt: "", source: "bundled" }],
+		});
+		const settings = Settings.isolated();
+		const dashboard = await AgentDashboard.create(await makeTempCwd(), settings, 24, {});
+		const strip = () => dashboard.render(120).join("\n").replace(ANSI_PATTERN, "");
+
+		dashboard.handleInput("A");
+		expect(strip()).toContain("Advisor override: task");
+
+		typeText(dashboard, "moonshot/k3");
+		dashboard.handleInput("\r");
+
+		expect(settings.get("task.agentAdvisor")).toEqual({ task: "moonshot/k3" });
+		const rendered = strip();
+		expect(rendered).toContain("Advisor: on moonshot/k3");
+	});
+
+	test("P opens the prewalk editor pre-filled and clears the override on empty submit", async () => {
+		await initTheme(false);
+		vi.spyOn(discovery, "discoverAgents").mockResolvedValue({
+			projectAgentsDir: null,
+			agents: [{ name: "dev", description: "Development agent", systemPrompt: "", source: "project" }],
+		});
+		// Seed via set(): Settings.isolated seeds the runtime-override layer,
+		// which the dashboard's set() (global layer) could never shadow.
+		const settings = Settings.isolated();
+		settings.set("task.agentPrewalk", { dev: "on" });
+		const dashboard = await AgentDashboard.create(await makeTempCwd(), settings, 24, {});
+		const strip = () => dashboard.render(120).join("\n").replace(ANSI_PATTERN, "");
+
+		dashboard.handleInput("p");
+		expect(strip()).toContain("Prewalk override: dev");
+
+		// Pre-filled with the persisted "on"; clearing it reverts to agent default.
+		typeText(dashboard, "\x7f\x7f");
+		dashboard.handleInput("\r");
+
+		expect(settings.get("task.agentPrewalk")).toEqual({});
+		expect(strip()).toContain("Prewalk: off");
+	});
+});
