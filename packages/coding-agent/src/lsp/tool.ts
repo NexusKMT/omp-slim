@@ -65,6 +65,7 @@ import {
 	type Hover,
 	type Location,
 	type LocationLink,
+	type LspClient,
 	type LspParams,
 	type LspToolDetails,
 	lspSchema,
@@ -484,14 +485,32 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 			const respondingServers = new Set<string>();
 			const perServerEdits: Array<{ serverName: string; edit: WorkspaceEdit }> = [];
 			const serverNotes: string[] = [];
+			// Servers that support workspace/willRenameFiles (i.e. did not reply
+			// method-not-found) but failed the request. Their semantic edits are
+			// owed but missing, so on apply the rename MUST NOT mutate the workspace
+			// — moving the path without those edits leaves dangling references
+			// (issue #8380).
+			const hardFailures: string[] = [];
 
 			for (const [serverName, serverConfig] of servers) {
 				throwIfAborted(signal);
+				let client: LspClient;
 				try {
-					const client = await getOrCreateClient(serverConfig, this.session.cwd, undefined, signal);
+					client = await getOrCreateClient(serverConfig, this.session.cwd, undefined, signal);
 					if (isProjectAwareLspServer(serverConfig)) {
 						await waitForProjectLoaded(client, signal);
 					}
+				} catch (err) {
+					if (err instanceof ToolAbortError || signal?.aborted) {
+						throw err;
+					}
+					// Could not reach the server at all; note it but don't block —
+					// this is not a willRenameFiles failure.
+					const msg = err instanceof Error ? err.message : String(err);
+					serverNotes.push(`  ${serverName}: ${msg}`);
+					continue;
+				}
+				try {
 					const result = (await sendRequest(
 						client,
 						"workspace/willRenameFiles",
@@ -506,9 +525,13 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 					if (err instanceof ToolAbortError || signal?.aborted) {
 						throw err;
 					}
+					// method-not-found means the server doesn't implement the request;
+					// skip it silently. Any other error is a genuine failure from a
+					// server that supports willRenameFiles.
 					if (!isMethodNotFoundError(err)) {
 						const msg = err instanceof Error ? err.message : String(err);
 						serverNotes.push(`  ${serverName}: ${msg}`);
+						hardFailures.push(serverName);
 					}
 				}
 			}
@@ -545,6 +568,26 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 						action,
 						serverName: Array.from(respondingServers).join(", "),
 						success: true,
+						request: params,
+					},
+				};
+			}
+
+			// A relevant server that supports willRenameFiles failed. Applying
+			// partial edits and moving the path would leave references dangling,
+			// so abort before any mutation and surface the failure (issue #8380).
+			if (hardFailures.length > 0) {
+				const lines: string[] = [
+					`Error: aborted rename; workspace/willRenameFiles failed on ${hardFailures.join(", ")}, so semantic references would not be updated. No files were moved.`,
+				];
+				lines.push("  Server notes:");
+				lines.push(...serverNotes);
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: {
+						action,
+						serverName: Array.from(respondingServers).join(", "),
+						success: false,
 						request: params,
 					},
 				};

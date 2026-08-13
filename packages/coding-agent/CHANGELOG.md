@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `lsp` `rename_file` moving the path even when a server that supports `workspace/willRenameFiles` failed the request, leaving references dangling; the rename now aborts before any filesystem mutation and reports the failure ([#8380](https://github.com/can1357/oh-my-pi/issues/8380)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Added
