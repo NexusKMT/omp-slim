@@ -2315,14 +2315,18 @@ function buildClinePassSubscriptionModel(
 	// A reference pointing back at our own bundle means the last regen knew
 	// nothing about the id and encoded fallback constants — treat as no reference.
 	const upstream = reference && reference.provider !== "cline-pass" ? reference : undefined;
+	// Same degeneracy on the bundle side: a bundled entry whose limits are the
+	// fallback pair was written by a regen that had no upstream data for the id.
+	const baseLimitsAreFallback =
+		base.contextWindow === CLINEPASS_FALLBACK_CONTEXT_WINDOW && base.maxTokens === CLINEPASS_FALLBACK_MAX_TOKENS;
 	if (upstream) {
-		// Known to the bundle: overlay the list price only. Missed by the bundle
-		// (brand-new roster id): full enrichment, like the free-tier path.
-		return references.has(id)
+		// Known to the bundle with real limits: overlay the list price only.
+		// Otherwise full enrichment, like the free-tier path.
+		return references.has(id) && !baseLimitsAreFallback
 			? { ...base, cost: upstream.cost }
 			: {
 					...base,
-					name: upstream.name,
+					name: references.has(id) ? base.name : upstream.name,
 					reasoning: upstream.reasoning,
 					input: upstream.input,
 					cost: upstream.cost,
