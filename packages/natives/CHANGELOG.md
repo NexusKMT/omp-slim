@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed shell-internal background jobs such as `yes >/dev/null &` surviving a one-shot shell session and consuming CPU indefinitely after the command returned ([#8341](https://github.com/can1357/oh-my-pi/issues/8341)).
+- Fixed an issue where shell-internal background jobs (such as `yes >/dev/null &`) could survive a one-shot shell session and consume CPU indefinitely after the command returned.
 
 ## [17.2.12] - 2026-08-08
 

@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added `type.withJsonSchema(schema, json)`, wrapping a validation-only schema so JSON Schema emission yields `json` verbatim even when embedded in objects, arrays, or unions — a `.toJsonSchema()` method override is dropped at nested positions because parents emit a child's IR directly. Schemas with defaults or output-changing morphs are rejected to prevent their transformed outputs from being discarded.
+- Added `type.withJsonSchema(schema, json)` to wrap a validation-only schema, ensuring JSON Schema emission yields the provided `json` verbatim even when nested inside objects, arrays, or unions. Schemas with defaults or output-changing morphs are rejected to prevent transformed outputs from being discarded.
 
 ## [17.2.10] - 2026-08-06
 
