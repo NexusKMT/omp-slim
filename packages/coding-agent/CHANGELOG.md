@@ -240,6 +240,12 @@
 ### Changed
 
 - Upgraded the bundled omptype schema engine: intersection and pipe operators, bigint and RegExp literals in the string DSL, Standard Schema V1 interop, JSON Schema import via fromJsonSchema(), and richer union/collection error reporting.
+### Fixed
+
+- Fixed manual `/compact` failing outright when a summarization request hit a transient provider overload. The auto-compaction path is unchanged: it keeps its own retry loop and now explicitly opts out of the inner one.
+- Fixed transient Anthropic failures (`overloaded_error`, `rate_limit_error`, 429/500/502/503/529) aborting or silently degrading side-effect-free oneshot LLM calls. Session title generation, TTS speech enhancement, commit-message generation, the auto-thinking and unexpected-stop classifiers, memory extraction/consolidation, the commit analysis/summary/changelog/map/reduce passes, and the mnemopi LLM callback now retry with backoff that honors `retry-after`, instead of failing on the first blip or returning `null` — which made a transient overload indistinguishable from a legitimate empty result.
+- Fixed the commit analysis, summary, changelog and reduce passes feeding a provider error message straight into their response parsers: they never checked `stopReason`, so a failed request produced garbage output instead of surfacing the error.
+- Fixed the commit map phase never retrying transient failures: its retry helper only caught thrown errors, so a `stopReason: "error"` response bypassed it entirely.
 
 ## [17.2.7] - 2026-08-03
 
