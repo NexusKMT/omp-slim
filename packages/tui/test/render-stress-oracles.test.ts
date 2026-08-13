@@ -6,6 +6,7 @@ import {
 	duplicateNonblankLines,
 	expectedFrameFromLines,
 	expectedScrollbackBuffer,
+	multiplexerHistoryPrefixChanged,
 	resolveExpectedOverlayLayout,
 	runWidthEpochHeightAppendReplayRegression,
 	runWidthEpochOverlayReplayRegression,
@@ -24,6 +25,11 @@ describe("render stress oracle helpers", () => {
 
 	it("chooses bounded scrollback probe positions", () => {
 		expect(scrollbackProbePositions(40, 100, 10)).toEqual([0, 20, 40]);
+	});
+
+	it("distinguishes mux history replacement from live-tail updates", () => {
+		expect(multiplexerHistoryPrefixChanged(["a", "b", "c"], 2, ["a", "b", "c", "d"], 2)).toBe(false);
+		expect(multiplexerHistoryPrefixChanged(["a", "b", "c"], 2, ["x", "b", "c"], 2)).toBe(true);
 	});
 
 	it("detects only repeated nonblank frame lines", () => {

@@ -308,6 +308,7 @@ interface Snapshot {
 	width: number;
 	height: number;
 	frame: string[];
+	rawFrame: string[];
 	writeCount: number;
 	atBottom: boolean;
 	shadowTapeLength: number;
@@ -1329,6 +1330,7 @@ class StressDriver {
 			width: this.#term.columns,
 			height: this.#term.rows,
 			frame: expected.frame,
+			rawFrame: [...this.#shadowRawFrame],
 			atBottom: position.viewportY >= position.baseY,
 			shadowTapeLength: this.#shadowTape.length,
 			writeCount: this.#writeLog.length,
@@ -2390,12 +2392,19 @@ class StressDriver {
 		if (this.#hasVisibleOverlay()) return;
 		if (!this.#traits.strictNativeScrollback || op.checkpoint || op.geometryChanged) return;
 		if (!before.atBottom || !after.atBottom) return;
-		if (!sameLines(before.frame, after.frame)) return;
-		if (after.buffer.length > before.buffer.length) {
+		// Prepared terminal rows can collide at narrow widths even when the raw
+		// component frame changed. That is not frame-neutral to the renderer:
+		// committed-prefix audits intentionally compare raw rows and may recommit
+		// below an immutable stale copy when divergence rebuilding is disabled.
+		if (!sameLines(before.frame, after.frame) || !sameLines(before.rawFrame, after.rawFrame)) return;
+		const growth = after.buffer.length - before.buffer.length;
+		const transientGrowth = op.transientFrameGrowth ?? 0;
+		if (growth > transientGrowth) {
 			if (this.#isCleanBuffer(after.buffer, after.frame, after.height)) return;
 			this.#fail("frame-neutral scrollback growth", op, before, after, index, {
 				beforeLength: before.buffer.length,
 				afterLength: after.buffer.length,
+				transientGrowth,
 			});
 		}
 	}
@@ -2507,6 +2516,15 @@ class StressDriver {
 		}
 		const heightOnlyResize = op.kind === "resizeHeight";
 		if (op.geometryChanged && !heightOnlyResize) return;
+		// A mutation that changes rows already above the live window cannot be
+		// repaired in place: multiplexer history is immutable, so the renderer's
+		// "duplication, never loss" fallback recommits the corrected suffix below
+		// the opaque old-width copy. The shadow tape tracks logical append
+		// commits, not that physical recovery, so it cannot bound pane growth for
+		// this case. Keep enforcing the oracle when the preserved history prefix
+		// itself is unchanged — ordinary appends and live-window repaints must not
+		// replay the transcript.
+		if (multiplexerHistoryPrefixChanged(before.frame, before.height, after.frame, after.height)) return;
 		const reflowAllowance = heightOnlyResize ? Math.max(0, before.height - after.height) : 0;
 		const deltaBaseY = after.position.baseY - before.position.baseY;
 		if (deltaBaseY <= 0) return;
@@ -2899,6 +2917,18 @@ function sameLines(left: readonly string[], right: readonly string[]): boolean {
 		if (left[i] !== right[i]) return false;
 	}
 	return true;
+}
+
+export function multiplexerHistoryPrefixChanged(
+	beforeFrame: readonly string[],
+	beforeHeight: number,
+	afterFrame: readonly string[],
+	afterHeight: number,
+): boolean {
+	const beforeHistoryRows = Math.max(0, beforeFrame.length - beforeHeight);
+	const afterHistoryRows = Math.max(0, afterFrame.length - afterHeight);
+	const sharedHistoryRows = Math.min(beforeHistoryRows, afterHistoryRows);
+	return !sameLines(beforeFrame.slice(0, sharedHistoryRows), afterFrame.slice(0, sharedHistoryRows));
 }
 
 // ghostty-web's cell-grid text extraction can migrate or merge Unicode
