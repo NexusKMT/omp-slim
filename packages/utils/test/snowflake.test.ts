@@ -49,8 +49,10 @@ describe("Snowflake", () => {
 			expect(Snowflake.valid(Snowflake.lowerbound(ts))).toBe(true);
 			expect(Snowflake.valid(Snowflake.upperbound(ts))).toBe(true);
 		}
-		expect(Snowflake.lowerbound(0)).toBe("0000000000000000");
-		expect(Snowflake.upperbound(MAX_TS + 1)).toBe("ffffffffffffffff");
+		const floor: string = Snowflake.lowerbound(0);
+		const ceiling: string = Snowflake.upperbound(MAX_TS + 1);
+		expect(floor).toBe("0000000000000000");
+		expect(ceiling).toBe("ffffffffffffffff");
 		expect(Snowflake.valid(new Snowflake.Source(0).generate(0))).toBe(true);
 	});
 
