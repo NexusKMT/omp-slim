@@ -40,7 +40,7 @@ import { getThemeByName, setThemeInstance } from "../src/modes/theme/theme";
 const tempDirs: string[] = [];
 
 async function makeTempDir(): Promise<string> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-update-test-"));
+	const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "omp-update-test-")));
 	tempDirs.push(dir);
 	return dir;
 }
@@ -189,7 +189,9 @@ describe("update-cli install target detection", () => {
 	});
 
 	it("updates the resolved standalone binary behind a foreign npm-bin alias", async () => {
-		const dir = await makeTempDir();
+		// realpath: macOS tmpdir lives behind the /var -> /private/var symlink and
+		// the resolver returns realpathed targets.
+		const dir = await fs.realpath(await makeTempDir());
 		const npmBinDir = path.join(dir, ".npm-global", "bin");
 		const standalonePath = path.join(dir, ".local", "bin", "omp");
 		const aliasPath = path.join(npmBinDir, "omp");

@@ -273,7 +273,7 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser tab evaluation", () => {
 						void tab.title().then(() => {
 							throw new Error("continuation failed");
 						});
-						await Bun.sleep(50);
+						await Bun.sleep(500);
 						return "incorrect success";
 					`,
 			});
@@ -292,7 +292,7 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser tab evaluation", () => {
 						void tab.waitForResponse("/never", { timeout: 10 }).catch(reason => {
 							throw reason;
 						});
-						await Bun.sleep(50);
+						await Bun.sleep(500);
 						return "incorrect success";
 					`,
 			});
@@ -332,7 +332,7 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser tab evaluation", () => {
 						]).catch(reason => {
 							throw reason;
 						});
-						await Bun.sleep(50);
+						await Bun.sleep(500);
 						return "incorrect success";
 					`,
 			});
