@@ -9,6 +9,7 @@ import {
 } from "./classes";
 import {
 	isAccountScopedCapText,
+	isDashScopeTokenLimitText,
 	isOpaqueStatusBody,
 	isUsageLimitStatus,
 	matchesUsageLimitText,
@@ -431,7 +432,10 @@ export function classify(error: unknown, api?: Api): number {
 		} else if (link instanceof ProviderHttpError) {
 			let linkKinds = 0;
 			const { status: codeStatus, code } = link;
-			if (code === "usage_limit_reached" || code === "insufficient_quota") {
+			if (
+				code === "usage_limit_reached" ||
+				(code === "insufficient_quota" && !isDashScopeTokenLimitText(link.message))
+			) {
 				linkKinds |= Flag.UsageLimit;
 			}
 			if (code === "overloaded_error" || code === "rate_limit_error") {
