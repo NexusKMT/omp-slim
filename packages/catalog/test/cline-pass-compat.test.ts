@@ -111,7 +111,7 @@ describe("ClinePass catalog", () => {
 		expect(compat.wireModelIdMode).toBe("cline-pass");
 		expect(compat.maxTokensField).toBe("max_completion_tokens");
 		expect(compat.thinkingFormat).toBe("openai");
-		expect(compat.reasoningDisableMode).toBe("reasoning-effort-none");
+		expect(compat.reasoningDisableMode).toBe("none-effort");
 		expect(compat.reasoningEffortMap).toEqual({
 			minimal: "none",
 			low: "low",

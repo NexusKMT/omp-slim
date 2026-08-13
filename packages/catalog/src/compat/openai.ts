@@ -22,7 +22,6 @@ import {
 	isMimoModelIdOrName,
 	isOpenAISamplingRestrictedModelId,
 	isQwenModelId,
-	modelFamilyToken,
 } from "../identity/family";
 import type {
 	ModelSpec,
@@ -487,10 +486,6 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 		supportsSamplingParams: !isOpenAISamplingRestrictedModelId(spec.id),
 		reasoningEffortMap: isClinePass ? CLINEPASS_REASONING_EFFORT_MAP : {},
 		supportsUsageInStreaming: !isCerebras,
-		// pi-ai's thinking-loop guard is gemini-only; default the flag from the
-		// family classifier so OpenAI-compat proxies serving Gemini are covered.
-		// An opaque alias can opt in via `compat.enableGeminiThinkingLoopGuard`.
-		enableGeminiThinkingLoopGuard: modelFamilyToken(spec.id) === "gemini",
 		// Kimi (including via OpenRouter and Fireworks router-form IDs such as
 		// `accounts/fireworks/routers/kimi-*`) calculates TPM rate limits based on
 		// max_tokens, not actual output. The official Kimi K2 model guidance
@@ -526,7 +521,7 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 		// (issue #2299).
 		thinkingFormat,
 		kimiApiFormat: undefined,
-		reasoningDisableMode: isClinePass ? "reasoning-effort-none" : resolveReasoningDisableMode(thinkingFormat),
+		reasoningDisableMode: isClinePass ? "none-effort" : resolveReasoningDisableMode(thinkingFormat),
 		omitReasoningEffort: false,
 		includeEncryptedReasoning: true,
 		filterReasoningHistory: isOpenRouter && isAnthropicModel,
@@ -632,7 +627,7 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 	}
 	if (spec.compat?.reasoningDisableMode === undefined) {
 		compat.reasoningDisableMode = isClinePass
-			? "reasoning-effort-none"
+			? "none-effort"
 			: requiresEnabledThinking
 				? "omit"
 				: isDirectDeepseekReasoning
@@ -765,7 +760,6 @@ export function buildOpenAIResponsesCompat(spec: OpenAIResponsesSpecLike): Resol
 		// lands on Moonshot's MFJS validator.
 		toolSchemaFlavor: isKimiModel ? "moonshot-mfjs" : undefined,
 		alwaysSendMaxTokens: spec.id ? isKimiModelId(spec.id) : false,
-		enableGeminiThinkingLoopGuard: modelFamilyToken(spec.id ?? "") === "gemini",
 		supportsObfuscationOptOut: isOpenAIUrl || spec.provider === "openai",
 		stripDeepseekSpecialTokens:
 			Boolean(id) && isDeepseekModelIdOrName(id) && (spec.provider === "nvidia" || spec.provider === "deepseek"),
