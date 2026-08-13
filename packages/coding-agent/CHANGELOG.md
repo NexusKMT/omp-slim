@@ -24,6 +24,7 @@
 
 ### Fixed
 
+- Fixed WSL2 startup hanging forever when the Windows interop pipe is wedged: the host-home probe added for #3779 ran `Bun.spawnSync(["cmd.exe", "/d", "/c", "echo", "%USERPROFILE%"])` (and `wslpath`) with no timeout, so a stuck `cmd.exe` blocked the whole startup thread before the TUI painted or any log was written. Best-effort discovery probes now run under a 500ms hard timeout (SIGKILL) and treat a killed/non-zero exit as "host home unavailable", falling back to the Linux `$HOME`/`~/.omp` candidates ([#8402](https://github.com/can1357/oh-my-pi/issues/8402)).
 - Refined interrupted-turn continuity prompts by omitting reasoning fragments under 60 characters, relying on native signed or encrypted thinking when available, and framing preserved text as a natural user interruption.
 - Fixed session-title generation regressing after prompt condensation: the telegraphic rewrite of `title-system.md` garbled small-model output (invented names, punctuation-only titles). Restored plain-sentence phrasing with a name-fidelity instruction, pinned the online title request to greedy decoding, and rejected punctuation-only titles in normalization.
 - Fixed Agent Control Center failing to open when an agent model override is configured as a YAML array. ([#8201](https://github.com/can1357/oh-my-pi/issues/8201))
