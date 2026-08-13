@@ -3756,9 +3756,9 @@ function coreTemplates(): ScenarioTemplate[] {
 			heightChoices: [3, 4, 6],
 		},
 		{
-			// Direct HerdR implements ED3, so a settled width change clears and
-			// replays the source-owned transcript at its new wrap. Streaming
-			// updates may race the resize but must survive that replay exactly once.
+			// Direct HerdR follows the in-place multiplexer resize policy.
+			// Streaming updates may race the resize but must survive the settled
+			// repaint exactly once.
 			name: "darwin-normal-herdr-reflow-stream-small",
 			platform: "darwin",
 			terminalMode: "normal",
