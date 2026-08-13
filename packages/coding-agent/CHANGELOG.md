@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Claude Code custom tool discovery attempting to import non-module files from `.claude/tools`.
+
 ## [17.3.1] - 2026-08-13
 
 ### Fixed
