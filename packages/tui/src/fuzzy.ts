@@ -172,6 +172,36 @@ function isWordBoundaryPhrase(normalized: string, index: number, length: number)
 	return before && after;
 }
 
+/**
+ * Offset of the first whole-word occurrence of `phrase` in `normalized`, or -1.
+ *
+ * A bare `indexOf` reports only the leading occurrence, so a qualifying match is
+ * dropped whenever an earlier non-qualifying one shadows it — the whole word
+ * "image" in "reimage image provider" loses to the "image" inside "reimage".
+ * Occurrences are scanned left to right, so the first qualifying hit is also the
+ * best-scoring one: the caller's position tiebreak grows with the offset.
+ */
+function findWordBoundaryPhrase(normalized: string, phrase: string): number {
+	if (phrase.length === 0) return -1;
+	for (let at = normalized.indexOf(phrase); at >= 0; at = normalized.indexOf(phrase, at + 1)) {
+		if (isWordBoundaryPhrase(normalized, at, phrase.length)) return at;
+	}
+	return -1;
+}
+
+/**
+ * Offset of the first occurrence of `needle` that starts a word in `index.compact`,
+ * or -1. Same shadowing hazard as {@link findWordBoundaryPhrase}.
+ */
+function findCompactWordStart(index: SearchIndex, needle: string): number {
+	if (needle.length === 0) return -1;
+	const { compact, compactWordStarts } = index;
+	for (let at = compact.indexOf(needle); at >= 0; at = compact.indexOf(needle, at + 1)) {
+		if (compactWordStarts.has(at)) return at;
+	}
+	return -1;
+}
+
 function scoreTokenAgainstWord(token: string, word: SearchWord): FuzzyMatch | null {
 	if (word.text === token) {
 		return { matches: true, score: withPosition(-200, word.index) };
@@ -230,8 +260,8 @@ function scoreTokenDirect(token: string, index: SearchIndex): FuzzyMatch {
 	if (token.length === 0) return { matches: true, score: 0 };
 
 	let best: FuzzyMatch | null = null;
-	const compactIndex = index.compact.indexOf(token);
-	if (compactIndex >= 0 && index.compactWordStarts.has(compactIndex)) {
+	const compactIndex = findCompactWordStart(index, token);
+	if (compactIndex >= 0) {
 		best = { matches: true, score: withPosition(-140, compactIndex) };
 	}
 
@@ -290,14 +320,14 @@ function fuzzyMatchCore(pq: PreparedQuery | null, index: SearchIndex): FuzzyMatc
 	}
 
 	let totalScore = 0;
-	const phraseIndex = index.normalized.indexOf(pq.normalized);
-	if (phraseIndex >= 0 && isWordBoundaryPhrase(index.normalized, phraseIndex, pq.normalized.length)) {
+	const phraseIndex = findWordBoundaryPhrase(index.normalized, pq.normalized);
+	if (phraseIndex >= 0) {
 		totalScore -= PHRASE_BONUS;
 		totalScore += phraseIndex * 0.01;
 	}
 
-	const compactPhraseIndex = index.compact.indexOf(pq.compact);
-	if (compactPhraseIndex >= 0 && index.compactWordStarts.has(compactPhraseIndex)) {
+	const compactPhraseIndex = findCompactWordStart(index, pq.compact);
+	if (compactPhraseIndex >= 0) {
 		totalScore -= COMPACT_PHRASE_BONUS;
 		totalScore += compactPhraseIndex * 0.01;
 	}
