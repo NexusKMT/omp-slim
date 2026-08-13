@@ -643,21 +643,23 @@ export class LspMuxServer {
 		this.#sessions.delete(session);
 		const server = session.server;
 		if (server) {
-			server.sessions.delete(session);
+			let cleanup: Promise<void> | undefined;
 			for (const uri of session.openUris) {
 				server.documents.delete(uri);
-				await this.#writeServer(server, {
+				cleanup = this.#writeServer(server, {
 					jsonrpc: "2.0",
 					method: "textDocument/didClose",
 					params: { textDocument: { uri } },
 				});
 			}
+			await cleanup;
 			for (const [muxId, pending] of server.pending) {
 				if (pending.session !== session) continue;
 				pending.drop = true;
 				await this.#writeServer(server, { jsonrpc: "2.0", method: "$/cancelRequest", params: { id: muxId } });
 			}
 			server.initializeWaiters.delete(session);
+			server.sessions.delete(session);
 			if (server.sessions.size === 0 && !server.stopping) {
 				server.lingerTimer = setTimeout(() => {
 					if (server.sessions.size === 0) void this.#stopServer(server);

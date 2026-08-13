@@ -365,21 +365,31 @@ describe("LspMuxServer", () => {
 	);
 
 	it.skipIf(process.platform === "win32")(
-		"closes orphaned documents before reusing an idle server",
+		"finishes orphan document closes before reusing a server",
 		async () => {
 			const first = await link();
 			await initialize(first.client);
-			const uri = "file:///orphan.ts";
-			first.client.notify("textDocument/didOpen", {
-				textDocument: { uri, languageId: "typescript", version: 1, text: "orphan" },
-			});
-			await pollUntil(async () => (await state(first.client)).didOpen[uri] === 1, "orphan didOpen");
+			const uris = Array.from({ length: 128 }, (_, index) => `file:///orphan-${index}.ts`);
+			for (const uri of uris) {
+				first.client.notify("textDocument/didOpen", {
+					textDocument: { uri, languageId: "typescript", version: 1, text: "orphan" },
+				});
+			}
+			await first.client.request("test/echo", { barrier: true });
+			const firstClosed = first.client.waitForClose();
 			first.client.destroy();
-			await pollUntil(() => Promise.resolve(server.sessionCount === 0), "orphan session close");
+			await firstClosed;
 
 			const second = await link();
 			expect(second.connected.spawned).toBe(false);
-			await pollUntil(async () => (await state(second.client)).didClose.includes(uri), "orphan didClose");
+			const uri = uris.at(-1);
+			expect(uri).toBeDefined();
+			await initialize(second.client);
+			second.client.notify("textDocument/didOpen", {
+				textDocument: { uri, languageId: "typescript", version: 1, text: "replacement" },
+			});
+			await second.client.request("test/echo", { barrier: true });
+			expect(await second.client.request<string | null>("test/documentText", { uri })).toBe("replacement");
 		},
 		10_000,
 	);
