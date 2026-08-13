@@ -3158,6 +3158,69 @@ describe("lsp regressions", () => {
 		}
 	});
 
+	it("reconciles the executed prefix when a workspace edit fails partway", async () => {
+		// A text edit to an open file inside `src/` is flushed to disk before the
+		// non-recursive delete of `src/` runs (subtree flush), and that delete
+		// throws on the non-empty directory. The error must propagate, but the
+		// already-mutated file's overlay must be refreshed — not left stale.
+		const tempDir = TempDir.createSync("@omp-lsp-partial-edit-overlay-");
+		try {
+			const srcDir = path.join(tempDir.path(), "src");
+			fs.mkdirSync(srcDir);
+			const filePath = path.join(srcDir, "a.ts");
+			await Bun.write(filePath, "export const a = 1;\n");
+
+			const server = installFakeLsp((message, srv) => {
+				if (message.method === "initialize") {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
+				} else if (message.method === "shutdown") {
+					srv.send({ jsonrpc: "2.0", id: message.id, result: null });
+				} else if (message.method === "exit") {
+					srv.exit(0);
+				}
+			});
+			const config: ServerConfig = { command: "fake-lsp", fileTypes: ["ts"], rootMarkers: [] };
+			const client = await lspClient.getOrCreateClient(config, tempDir.path(), 1_000);
+			await lspClient.ensureFileOpen(client, filePath);
+			await server.waitFor(message => message.method === "textDocument/didOpen");
+
+			const uri = fileToUri(filePath);
+			await expect(
+				lspClient.applyWorkspaceEditWithLsp(
+					{
+						documentChanges: [
+							{
+								textDocument: { uri, version: null },
+								edits: [
+									{
+										range: { start: { line: 0, character: 17 }, end: { line: 0, character: 18 } },
+										newText: "2",
+									},
+								],
+							} satisfies TextDocumentEdit,
+							{ kind: "delete", uri: fileToUri(srcDir), options: { recursive: false } } satisfies DeleteFile,
+						],
+					},
+					tempDir.path(),
+				),
+			).rejects.toThrow();
+
+			// Disk carries the executed edit; the failing delete never ran.
+			expect(fs.readFileSync(filePath, "utf8")).toBe("export const a = 2;\n");
+			expect(fs.existsSync(srcDir)).toBe(true);
+
+			// The overlay was refreshed to the committed content despite the failure.
+			const didChange = await server.waitFor(message => message.method === "textDocument/didChange");
+			expect(didChange.params).toMatchObject({
+				textDocument: { uri },
+				contentChanges: [{ text: "export const a = 2;\n" }],
+			});
+		} finally {
+			await lspClient.shutdownAll();
+			tempDir.removeSync();
+		}
+	});
+
 	it("honors DeleteFile recursive and ignoreIfNotExists options", async () => {
 		const tempDir = TempDir.createSync("@omp-lsp-delete-options-");
 		try {

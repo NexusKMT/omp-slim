@@ -525,18 +525,13 @@ function uriIsWithin(uri: string, root: string): boolean {
 	return uri === root || uri.startsWith(root.endsWith("/") ? root : `${root}/`);
 }
 
-/**
- * Apply a server-provided workspace edit and reconcile every affected open LSP document.
- * Runtime callers use this wrapper so later semantic requests observe the committed files.
- * Reconciliation is derived from the ops that actually ran — an op skipped via
- * `ignoreIfExists`/`ignoreIfNotExists` neither closes overlays nor notifies watchers.
- */
-export async function applyWorkspaceEditWithLsp(
-	edit: WorkspaceEdit,
+/** Reconcile open overlays and file watchers with the ops a workspace edit actually performed. */
+async function reconcileExecutedChanges(
+	executed: ExecutedWorkspaceChange[],
 	cwd: string,
 	signal?: AbortSignal,
-): Promise<string[]> {
-	const { applied, executed } = await applyWorkspaceEdit(edit, cwd);
+): Promise<void> {
+	if (executed.length === 0) return;
 	const { finalUris, deletedRoots, watchedFiles } = workspaceEditChanges(executed);
 	const workspace = path.resolve(cwd);
 	const activeClients = Array.from(clients.values()).filter(
@@ -563,6 +558,38 @@ export async function applyWorkspaceEditWithLsp(
 		}
 	}
 	await notifyWorkspaceWatchedFiles(cwd, watchedFiles, signal);
+}
+
+/**
+ * Apply a server-provided workspace edit and reconcile every affected open LSP document.
+ * Runtime callers use this wrapper so later semantic requests observe the committed files.
+ * Reconciliation is derived from the ops that actually ran — an op skipped via
+ * `ignoreIfExists`/`ignoreIfNotExists` neither closes overlays nor notifies watchers, and
+ * when the edit fails partway the already-executed prefix is still reconciled before the
+ * error propagates so mutated files never keep stale overlays.
+ */
+export async function applyWorkspaceEditWithLsp(
+	edit: WorkspaceEdit,
+	cwd: string,
+	signal?: AbortSignal,
+): Promise<string[]> {
+	const executed: ExecutedWorkspaceChange[] = [];
+	let applied: string[];
+	try {
+		({ applied } = await applyWorkspaceEdit(edit, cwd, change => executed.push(change)));
+	} catch (err) {
+		// Best-effort: overlays for the mutated prefix must not stay stale, but
+		// reconciliation problems must not mask the original apply failure.
+		try {
+			await reconcileExecutedChanges(executed, cwd, signal);
+		} catch (reconcileErr) {
+			logger.warn("LSP overlay reconciliation after failed workspace edit failed", {
+				error: reconcileErr instanceof Error ? reconcileErr.message : String(reconcileErr),
+			});
+		}
+		throw err;
+	}
+	await reconcileExecutedChanges(executed, cwd, signal);
 	return applied;
 }
 

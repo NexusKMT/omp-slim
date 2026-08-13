@@ -307,10 +307,23 @@ export interface WorkspaceEditResult {
  * Apply a workspace edit (collection of file changes).
  * All text-edit batches are overlap-validated before anything is written so a
  * conflict throws without leaving the workspace half-applied.
+ *
+ * `onExecuted` fires after each filesystem mutation. When a later op throws,
+ * the callback has already reported the executed prefix — callers that must
+ * reconcile external state (e.g. LSP overlays) rely on this because the
+ * returned {@link WorkspaceEditResult} is lost on failure.
  */
-export async function applyWorkspaceEdit(edit: WorkspaceEdit, cwd: string): Promise<WorkspaceEditResult> {
+export async function applyWorkspaceEdit(
+	edit: WorkspaceEdit,
+	cwd: string,
+	onExecuted?: (change: ExecutedWorkspaceChange) => void,
+): Promise<WorkspaceEditResult> {
 	const applied: string[] = [];
 	const executed: ExecutedWorkspaceChange[] = [];
+	const record = (change: ExecutedWorkspaceChange) => {
+		executed.push(change);
+		onExecuted?.(change);
+	};
 
 	if (edit.documentChanges) {
 		const ops = planDocumentChanges(edit.documentChanges);
@@ -322,7 +335,7 @@ export async function applyWorkspaceEdit(edit: WorkspaceEdit, cwd: string): Prom
 				const filePath = uriToFile(op.uri);
 				await applyTextEdits(filePath, op.edits);
 				applied.push(`Applied ${op.edits.length} edit(s) to ${formatPathRelativeToCwd(filePath, cwd)}`);
-				executed.push({ kind: "edit", uri: op.uri });
+				record({ kind: "edit", uri: op.uri });
 			} else if (op.kind === "create") {
 				const filePath = uriToFile(op.uri);
 				await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -340,7 +353,7 @@ export async function applyWorkspaceEdit(edit: WorkspaceEdit, cwd: string): Prom
 					continue;
 				}
 				applied.push(`Created ${formatPathRelativeToCwd(filePath, cwd)}`);
-				executed.push({ kind: "create", uri: op.uri });
+				record({ kind: "create", uri: op.uri });
 			} else if (op.kind === "rename") {
 				const oldPath = uriToFile(op.oldUri);
 				const newPath = uriToFile(op.newUri);
@@ -366,7 +379,7 @@ export async function applyWorkspaceEdit(edit: WorkspaceEdit, cwd: string): Prom
 					await fs.rename(oldPath, newPath);
 				}
 				applied.push(`Renamed ${formatPathRelativeToCwd(oldPath, cwd)} → ${formatPathRelativeToCwd(newPath, cwd)}`);
-				executed.push({ kind: "rename", oldUri: op.oldUri, newUri: op.newUri });
+				record({ kind: "rename", oldUri: op.oldUri, newUri: op.newUri });
 			} else {
 				const filePath = uriToFile(op.uri);
 				try {
@@ -381,7 +394,7 @@ export async function applyWorkspaceEdit(edit: WorkspaceEdit, cwd: string): Prom
 					continue;
 				}
 				applied.push(`Deleted ${formatPathRelativeToCwd(filePath, cwd)}`);
-				executed.push({ kind: "delete", uri: op.uri });
+				record({ kind: "delete", uri: op.uri });
 			}
 		}
 	} else if (edit.changes) {
@@ -396,7 +409,7 @@ export async function applyWorkspaceEdit(edit: WorkspaceEdit, cwd: string): Prom
 			const filePath = uriToFile(uri);
 			await applyTextEdits(filePath, textEdits);
 			applied.push(`Applied ${textEdits.length} edit(s) to ${formatPathRelativeToCwd(filePath, cwd)}`);
-			executed.push({ kind: "edit", uri });
+			record({ kind: "edit", uri });
 		}
 	}
 
