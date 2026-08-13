@@ -285,13 +285,19 @@ export async function applyWorkspaceEdit(edit: WorkspaceEdit, cwd: string): Prom
 				await fs.mkdir(path.dirname(newPath), { recursive: true });
 				if (oldPath !== newPath) {
 					try {
-						await fs.lstat(newPath);
+						const targetStat = await fs.lstat(newPath);
 						if (!op.options?.overwrite) {
 							if (op.options?.ignoreIfExists) continue;
 							throw new ToolError(`rename target already exists: ${formatPathRelativeToCwd(newPath, cwd)}`);
 						}
-						await fs.lstat(oldPath);
-						await fs.rm(newPath, { recursive: true });
+						// Only remove the destination when it is a distinct file. On a
+						// case-insensitive filesystem a case-only rename resolves both
+						// paths to the same inode; removing newPath would delete the
+						// source, so let fs.rename change the case in place instead.
+						const sourceStat = await fs.lstat(oldPath);
+						if (sourceStat.dev !== targetStat.dev || sourceStat.ino !== targetStat.ino) {
+							await fs.rm(newPath, { recursive: true });
+						}
 					} catch (error) {
 						if (!isEnoent(error)) throw error;
 					}

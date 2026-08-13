@@ -2716,6 +2716,39 @@ describe("lsp regressions", () => {
 		}
 	});
 
+	it("does not delete the source when a rename target resolves to the same file", async () => {
+		// A case-only rename on a case-insensitive filesystem yields distinct path
+		// strings that resolve to one inode. Reproduce that deterministically on a
+		// case-sensitive filesystem with a symlinked parent directory: `dir/f.ts`
+		// and `dirlink/f.ts` are the same file. The overwrite branch must skip
+		// removing the destination, or it deletes the source before the rename.
+		const tempDir = TempDir.createSync("@omp-lsp-same-file-rename-");
+		try {
+			const realDir = path.join(tempDir.path(), "dir");
+			fs.mkdirSync(realDir);
+			const filePath = path.join(realDir, "f.ts");
+			await Bun.write(filePath, "SOURCE");
+
+			const linkDir = path.join(tempDir.path(), "dirlink");
+			fs.symlinkSync(realDir, linkDir);
+			const aliasPath = path.join(linkDir, "f.ts");
+
+			const renameOp: RenameFile = {
+				kind: "rename",
+				oldUri: fileToUri(filePath),
+				newUri: fileToUri(aliasPath),
+				options: { overwrite: true },
+			};
+			expect(renameOp.oldUri).not.toBe(renameOp.newUri);
+
+			await applyWorkspaceEdit({ documentChanges: [renameOp] }, tempDir.path());
+			expect(fs.existsSync(filePath)).toBe(true);
+			expect(fs.readFileSync(filePath, "utf8")).toBe("SOURCE");
+		} finally {
+			tempDir.removeSync();
+		}
+	});
+
 	it("flushes pending descendant text edits before a folder delete", async () => {
 		// Mirror of the folder-rename subtree-flush test for the `delete` arm:
 		// edits queued against a child URI must land at the original path
