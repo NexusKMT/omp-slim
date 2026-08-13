@@ -303,6 +303,14 @@ export interface OpenAICompat {
 	openRouterRouting?: OpenRouterRouting;
 	/** Vercel AI Gateway routing preferences. Only used when baseUrl points to Vercel AI Gateway. */
 	vercelGatewayRouting?: VercelGatewayRouting;
+	/**
+	 * Provider-specific wire model-id transform applied to the base id, overriding
+	 * the provider-detected default. Discovery layers set this per model when the
+	 * upstream roster declares the id's namespace (e.g. ClinePass free-tier models
+	 * arrive pre-namespaced and use `"raw"`), so wire form follows data rather
+	 * than id shape.
+	 */
+	wireModelIdMode?: "raw" | "cline-pass" | "firepass" | "fireworks" | "openrouter";
 	/** Extra fields to include in request body (e.g. gateway routing hints for OpenClaw-style proxies). */
 	extraBody?: Record<string, unknown>;
 	/** Request-session header that should mirror the normalized prompt-cache key. Default: unset. */

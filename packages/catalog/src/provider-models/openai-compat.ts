@@ -23,6 +23,7 @@ import { getBundledModels } from "../models";
 import type { Api, FetchImpl, Model, ModelSpec, OpenAICompat, Provider, ThinkingConfig } from "../types";
 import { discoveryFetch, isAnthropicOAuthToken, isRecord, toBoolean, toNumber, toPositiveNumber } from "../utils";
 import { ALIBABA_TOKEN_PLAN_BASE_URL, parseAlibabaTokenPlanCredential } from "../wire/alibaba-token-plan";
+import { CLINEPASS_API_BASE_URL, clinePassClientHeaders } from "../wire/cline-pass";
 import { coreWeaveProjectHeaders } from "../wire/coreweave";
 import {
 	COPILOT_API_HEADERS,
@@ -2147,8 +2148,7 @@ export function firepassModelManagerOptions(
 	};
 }
 
-const CLINEPASS_API_BASE_URL = "https://api.cline.bot/api/v1";
-const CLINEPASS_MODELS_URL = "https://api.cline.bot/api/v1/ai/cline/recommended-models";
+const CLINEPASS_MODELS_URL = `${CLINEPASS_API_BASE_URL}/ai/cline/recommended-models`;
 const CLINEPASS_FALLBACK_CONTEXT_WINDOW = 128_000;
 const CLINEPASS_FALLBACK_MAX_TOKENS = 8_192;
 
@@ -2168,11 +2168,184 @@ function buildClinePassFallbackModel(id: string): ModelSpec<"openai-completions"
 	};
 }
 
+/**
+ * Live reference catalog mirroring Cline's own client enrichment: the official
+ * CLI fills roster metadata from OpenRouter's public `/models` catalog (their
+ * gateway routes through it), keyed by full id and by slug. We consult it only
+ * for models the bundled reference has no real upstream entry for — the bundle
+ * stays authoritative for known ids, and unknown ids ride fresh live data
+ * instead of the conservative constants until the next regen.
+ */
+interface ClinePassLiveCatalogEntry {
+	name?: string;
+	contextWindow?: number;
+	maxTokens?: number;
+	cost?: ModelSpec<"openai-completions">["cost"];
+	reasoning?: boolean;
+	input?: ("text" | "image")[];
+}
+
+interface ClinePassLiveCatalog {
+	byId: ReadonlyMap<string, ClinePassLiveCatalogEntry>;
+	bySlug: ReadonlyMap<string, ClinePassLiveCatalogEntry>;
+}
+
+const CLINE_PASS_LIVE_CATALOG_URL = "https://openrouter.ai/api/v1/models";
+
+/** Enrichment tier, never authoritative: any failure degrades to the bundled path. */
+async function fetchClinePassLiveCatalog(fetchImpl: FetchImpl): Promise<ClinePassLiveCatalog | undefined> {
+	try {
+		const response = await withCatalogDiscoveryTimeout(5_000, signal =>
+			fetchImpl(CLINE_PASS_LIVE_CATALOG_URL, { signal }),
+		);
+		if (!response.ok) return undefined;
+		const payload: unknown = await response.json();
+		if (!isRecord(payload) || !Array.isArray(payload.data)) return undefined;
+		const byId = new Map<string, ClinePassLiveCatalogEntry>();
+		const bySlug = new Map<string, ClinePassLiveCatalogEntry>();
+		for (const raw of payload.data) {
+			if (!isRecord(raw) || typeof raw.id !== "string" || !raw.id) continue;
+			const pricing = isRecord(raw.pricing) ? raw.pricing : undefined;
+			const topProvider = isRecord(raw.top_provider) ? raw.top_provider : undefined;
+			const params = Array.isArray(raw.supported_parameters) ? raw.supported_parameters : undefined;
+			const modality = String(isRecord(raw.architecture) ? (raw.architecture.modality ?? "") : "");
+			const contextWindow = toPositiveNumber(raw.context_length, 0);
+			const maxTokens = toPositiveNumber(topProvider?.max_completion_tokens, 0);
+			const entry: ClinePassLiveCatalogEntry = {
+				...(typeof raw.name === "string" && raw.name ? { name: raw.name.replace(/^[^:]+:\s*/, "") } : {}),
+				...(contextWindow > 0 ? { contextWindow } : {}),
+				...(maxTokens > 0 ? { maxTokens } : {}),
+				...(pricing
+					? {
+							cost: {
+								input: parseFloat(String(pricing.prompt ?? "0")) * 1_000_000,
+								output: parseFloat(String(pricing.completion ?? "0")) * 1_000_000,
+								cacheRead: parseFloat(String(pricing.input_cache_read ?? "0")) * 1_000_000,
+								cacheWrite: parseFloat(String(pricing.input_cache_write ?? "0")) * 1_000_000,
+							},
+						}
+					: {}),
+				...(params ? { reasoning: params.includes("reasoning") } : {}),
+				...(modality ? { input: modality.includes("image") ? (["text", "image"] as const) : (["text"] as const) } : {}),
+			};
+			byId.set(raw.id, entry);
+			// Cline's `buildModelsNameMap` algorithm: roster ids are lab-less slugs
+			// ("glm-5.2"), so the catalog is also keyed by its last id segment.
+			const slug = raw.id.split("/").at(-1);
+			if (slug) bySlug.set(slug, entry);
+		}
+		return byId.size > 0 ? { byId, bySlug } : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Zero legs mean "unpriced upstream", not "free" — pass models bill quota regardless. */
+function hasClinePassBillableCost(cost: ModelSpec<"openai-completions">["cost"] | undefined): boolean {
+	return cost !== undefined && (cost.input > 0 || cost.output > 0);
+}
+
+/**
+ * Subscription models bill against plan quota, not per token — but the catalog still
+ * carries the upstream list price so cost display reads as API-equivalent spend. Same
+ * policy as the codex/antigravity generator fixups and the zai PAYG descriptor swap
+ * (issue #5598: an all-$0 roster surfaces every model as "free" in the picker, which
+ * was treated as a bug there). The price comes from the bundled upstream reference,
+ * so it works offline and survives roster refreshes (`preferDiscoveryCost` never lets
+ * a zero overwrite it). Ids with no upstream reference keep the honest zero until
+ * models.dev prices them.
+ */
+function buildClinePassSubscriptionModel(
+	id: string,
+	references: ReadonlyMap<string, ModelSpec<"openai-completions">>,
+	liveCatalog?: ClinePassLiveCatalog,
+): ModelSpec<"openai-completions"> {
+	const base = references.get(id) ?? buildClinePassFallbackModel(id);
+	const reference = resolveModelReference(id, getBundledModelReferenceIndex());
+	// A reference pointing back at our own bundle means the last regen knew
+	// nothing about the id and encoded fallback constants — treat as no reference.
+	const upstream = reference && reference.provider !== "cline-pass" ? reference : undefined;
+	if (upstream) {
+		// Known to the bundle: overlay the list price only. Missed by the bundle
+		// (brand-new roster id): full enrichment, like the free-tier path.
+		return references.has(id)
+			? { ...base, cost: upstream.cost }
+			: {
+					...base,
+					name: upstream.name,
+					reasoning: upstream.reasoning,
+					input: upstream.input,
+					cost: upstream.cost,
+					contextWindow: upstream.contextWindow,
+					maxTokens: upstream.maxTokens,
+					...(upstream.reasoning ? {} : { thinking: undefined }),
+				};
+	}
+	const live = liveCatalog?.bySlug.get(id);
+	if (!live) return base;
+	return {
+		...base,
+		...(live.name ? { name: live.name } : {}),
+		...(live.contextWindow ? { contextWindow: live.contextWindow } : {}),
+		...(live.maxTokens ? { maxTokens: live.maxTokens } : {}),
+		...(hasClinePassBillableCost(live.cost) ? { cost: live.cost } : {}),
+		...(live.reasoning !== undefined ? { reasoning: live.reasoning } : {}),
+		...(live.input ? { input: live.input } : {}),
+		...(live.reasoning === false ? { thinking: undefined } : {}),
+	};
+}
+
+/**
+ * Free-tier entries arrive as full OpenRouter-style ids (`deepseek/deepseek-v4-flash`,
+ * `poolside/laguna-s-2.1:free`) and ride usage billing at $0 outside the subscription
+ * quota — their cost is genuinely zero, unlike the subscription roster's list-price
+ * display. Limits and modalities resolve through the bundled upstream reference (its
+ * candidate expansion treats provider prefixes and trailing `:free`-style markers as
+ * identity-preserving), so known models self-enrich offline. Compat and thinking are
+ * deliberately NOT inherited: those describe the reference's native host, while the
+ * Cline gateway dialect is resolved per provider/family. The raw wire tag is
+ * bucket-derived — the gateway already namespaces these ids, so the cline-pass prefix
+ * transform must never apply to them.
+ */
+function buildClinePassFreeModel(id: string, liveCatalog?: ClinePassLiveCatalog): ModelSpec<"openai-completions"> {
+	const reference = resolveModelReference(id, getBundledModelReferenceIndex());
+	const upstream = reference && reference.provider !== "cline-pass" ? reference : undefined;
+	// Free ids are OpenRouter-native, so the live catalog matches by full id
+	// before falling back to the slug — the official client's own lookup order.
+	const live = liveCatalog?.byId.get(id) ?? liveCatalog?.bySlug.get(id.split("/").at(-1) ?? id);
+	// References can carry their own free markers (e.g. OpenRouter-style
+	// "Laguna S 2.1 (free)"); strip before applying our single tier suffix.
+	const baseName = (upstream?.name ?? live?.name ?? id.split("/").at(-1) ?? id)
+		.replace(/\s*\(free\)\s*$/i, "")
+		.replace(/:free$/i, "")
+		.trim();
+	const fallback = buildClinePassFallbackModel(id);
+	const reasoning = upstream?.reasoning ?? live?.reasoning ?? fallback.reasoning;
+	return {
+		...fallback,
+		name: `${baseName || id} (free)`,
+		reasoning,
+		input: upstream?.input ?? live?.input ?? fallback.input,
+		contextWindow: upstream?.contextWindow ?? live?.contextWindow ?? fallback.contextWindow,
+		maxTokens: upstream?.maxTokens ?? live?.maxTokens ?? fallback.maxTokens,
+		// A non-reasoning reference must not carry the Cline effort ladder.
+		...(reasoning ? {} : { thinking: undefined }),
+		compat: { wireModelIdMode: "raw" },
+	};
+}
+
 async function fetchClinePassModels(
 	fetchImpl: FetchImpl,
 	references: ReadonlyMap<string, ModelSpec<"openai-completions">>,
 ): Promise<ModelSpec<"openai-completions">[]> {
-	const response = await withCatalogDiscoveryTimeout(5_000, signal => fetchImpl(CLINEPASS_MODELS_URL, { signal }));
+	// The roster is authoritative for ids; the live reference catalog is a pure
+	// enrichment tier fetched alongside and tolerated away (offline → bundle).
+	const [response, liveCatalog] = await Promise.all([
+		withCatalogDiscoveryTimeout(5_000, signal =>
+			fetchImpl(CLINEPASS_MODELS_URL, { signal, headers: clinePassClientHeaders() }),
+		),
+		fetchClinePassLiveCatalog(fetchImpl),
+	]);
 	if (!response.ok) {
 		throw new Error(`Failed to fetch ClinePass models: HTTP ${response.status}`);
 	}
@@ -2194,19 +2367,42 @@ async function fetchClinePassModels(
 		if (!id) {
 			continue;
 		}
-		models.set(id, references.get(id) ?? buildClinePassFallbackModel(id));
+		models.set(id, buildClinePassSubscriptionModel(id, references, liveCatalog));
 	}
 	if (models.size === 0) {
 		throw new Error("ClinePass model catalog contains no valid model IDs");
+	}
+
+	// Free tier rides the same key and gateway at $0 outside the subscription
+	// quota. Optional overlay: entries validate individually, a cline-pass/-shaped
+	// entry belongs to the pass bucket, pass ids win any collision, and pass-first
+	// insertion order keeps the registry's first-available fallback on a
+	// subscription model.
+	const freeEntries = Array.isArray(payload.free) ? payload.free : [];
+	for (const entry of freeEntries) {
+		if (!isRecord(entry) || typeof entry.id !== "string") {
+			continue;
+		}
+		const id = entry.id.trim();
+		if (!id || id.startsWith("cline-pass/") || models.has(id)) {
+			continue;
+		}
+		models.set(id, buildClinePassFreeModel(id, liveCatalog));
 	}
 	return [...models.values()];
 }
 
 /**
  * Cline's OpenAI-compatible `/models` route is absent, but its public
- * recommended-models endpoint is the authoritative ClinePass roster. Bundled
- * metadata enriches known ids; conservative defaults keep newly added ids
- * usable immediately and the bundled catalog remains the offline fallback.
+ * recommended-models endpoint is the authoritative ClinePass roster: the
+ * `clinePass` bucket lists subscription models and the optional `free` bucket
+ * adds $0 usage-billing models selectable with the same key. Metadata resolves
+ * in three tiers, mirroring the official client's enrichment: bundled upstream
+ * reference first, then OpenRouter's public catalog live (tolerated away
+ * offline), then conservative defaults — so newly added ids are fully usable
+ * before the next bundle regen. Subscription models surface their upstream list
+ * price (API-equivalent spend, like codex and github-copilot); only the free
+ * tier is genuinely $0.
  */
 export function clinePassModelManagerOptions(config?: ModelManagerConfig): ModelManagerOptions<"openai-completions"> {
 	const references = new Map(
@@ -5773,11 +5969,12 @@ const MODELS_DEV_PROVIDER_DESCRIPTORS_CORE: readonly ModelsDevProviderDescriptor
 	// --- Cerebras ---
 	openAiCompletionsDescriptor("cerebras", "cerebras", "https://api.cerebras.ai/v1"),
 	// --- ClinePass ---
+	// Upstream list prices pass through: billing is subscription quota, but cost
+	// display reads as API-equivalent spend (same policy as codex/antigravity).
 	openAiCompletionsDescriptor("cline-pass", "cline-pass", "https://api.cline.bot/api/v1", {
 		transformModel: (model, modelId, raw) => ({
 			...model,
 			id: toClinePassPublicModelId(modelId),
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			...(model.reasoning && {
 				thinking: buildClinePassThinking(raw),
 			}),
