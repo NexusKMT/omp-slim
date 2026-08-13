@@ -43,7 +43,13 @@ import {
 	WORKSPACE_SYMBOL_LIMIT,
 	waitForDiagnostics,
 } from "./diagnostics";
-import { applyTextEdits, applyWorkspaceEdit, flattenWorkspaceTextEdits, rangesOverlap } from "./edits";
+import {
+	applyEditsThenRename,
+	applyWorkspaceEdit,
+	flattenWorkspaceTextEdits,
+	type RenameReferenceEdit,
+	rangesOverlap,
+} from "./edits";
 import { detectLspmux } from "./lspmux";
 import {
 	configCache,
@@ -613,9 +619,10 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 				}
 			}
 
+			const referenceEdits: RenameReferenceEdit[] = [];
 			for (const [uri, bucket] of acceptedByUri) {
 				const filePath = uriToFile(uri);
-				await applyTextEdits(filePath, bucket.edits);
+				referenceEdits.push({ filePath, edits: bucket.edits });
 				const rel = formatPathRelativeToCwd(filePath, this.session.cwd);
 				summary.push(`  ${bucket.primaryServer}: applied ${bucket.edits.length} edit(s) to ${rel}`);
 				if (bucket.discarded > 0) {
@@ -629,8 +636,10 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 				}
 			}
 
-			await fs.promises.mkdir(path.dirname(dest), { recursive: true });
-			await fs.promises.rename(source, dest);
+			// Apply the reference edits and move as one unit: a failed move rolls
+			// the reference edits back so the source, destination, and every
+			// reference file are left unchanged.
+			await applyEditsThenRename(referenceEdits, source, dest);
 			summary.push(`  Renamed ${sourceLabel} → ${destLabel}`);
 
 			for (const [serverName, serverConfig] of servers) {

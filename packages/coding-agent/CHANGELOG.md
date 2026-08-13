@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `lsp` `rename_file` leaving reference edits applied when the file move fails; a failed move now rolls back every rewritten reference file so the source, destination, and references are left unchanged ([#8379](https://github.com/can1357/oh-my-pi/issues/8379)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Added
