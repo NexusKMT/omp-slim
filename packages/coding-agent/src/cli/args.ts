@@ -6,7 +6,7 @@ import { $env, APP_NAME, logger } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import type { ServiceTierOpenAISettingValue } from "../config/service-tier";
 import { CLI_THINKING_LEVELS, type ConfiguredThinkingLevel, parseCliThinkingLevel } from "../thinking";
-import { BUILTIN_TOOL_NAMES, HIDDEN_TOOL_NAMES, normalizeToolNames } from "../tools/builtin-names";
+import { normalizeToolNames } from "../tools/builtin-names";
 import {
 	OPTIONAL_FLAGS,
 	OPTIONAL_VALUE_FLAGS,
@@ -108,8 +108,6 @@ export interface Args {
 const PARSE_DEPS: ParseDeps = {
 	logger,
 	parseThinking: parseCliThinkingLevel,
-	toolNames: [...BUILTIN_TOOL_NAMES, ...HIDDEN_TOOL_NAMES],
-	validateToolNames: false,
 	normalizeToolNames,
 	thinkingEfforts: CLI_THINKING_LEVELS,
 };
@@ -143,19 +141,13 @@ function consumeBuiltInStringValue(flag: string, args: string[], valueIndex: num
 	return { value, index: valueIndex };
 }
 
-export function parseArgs(
-	inputArgs: string[],
-	extensionFlags?: Map<string, { type: "boolean" | "string" }>,
-	extensionToolNames: readonly string[] = [],
-): Args {
+export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { type: "boolean" | "string" }>): Args {
 	// Work on a copy: the `--option=value` handling below splices the value
 	// into the array, and callers reuse the same argv (the post-extension
 	// reparse in `runRootCommand` parses it a second time). Mutating the input
 	// would corrupt that later parse, so never touch the caller's array.
 	const args = [...inputArgs];
-	const parseDeps: ParseDeps = extensionFlags
-		? { ...PARSE_DEPS, toolNames: [...PARSE_DEPS.toolNames, ...extensionToolNames], validateToolNames: true }
-		: PARSE_DEPS;
+	const parseDeps = PARSE_DEPS;
 	const result: Args = {
 		messages: [],
 		fileArgs: [],
@@ -338,6 +330,17 @@ export function parseArgs(
 	}
 
 	return result;
+}
+
+/** Reject requested tool names absent from the fully discovered session registry. */
+export function validateToolNames(requested: readonly string[] | undefined, known: readonly string[]): void {
+	if (!requested) return;
+	const knownNames = new Set(known);
+	const unknown = requested.filter(name => !knownNames.has(name));
+	if (unknown.length === 0) return;
+	throw new CliUsageError(
+		`Unknown tool${unknown.length === 1 ? "" : "s"} in --tools: ${unknown.join(", ")}. Valid tools: ${known.join(", ")}.`,
+	);
 }
 
 /**

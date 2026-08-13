@@ -8,7 +8,6 @@ import { type Args, parseArgs } from "./args";
  */
 export interface ExtensionFlagSink {
 	getFlags(): Map<string, { type: "boolean" | "string" }>;
-	getToolNames(): readonly string[];
 	setFlagValue(name: string, value: boolean | string): void;
 }
 
@@ -36,7 +35,7 @@ export interface ExtensionFlagSink {
  */
 export function applyExtensionFlags(runner: ExtensionFlagSink | undefined, rawArgs: string[]): Args | null {
 	if (!runner) return null;
-	const parsed = parseArgs(rawArgs, runner.getFlags(), runner.getToolNames());
+	const parsed = parseArgs(rawArgs, runner.getFlags());
 	// `parseArgs` records extension flag values in `unknownFlags`.
 	for (const [name, value] of parsed.unknownFlags) {
 		runner.setFlagValue(name, value);

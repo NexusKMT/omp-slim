@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { parseArgs } from "../src/cli/args";
+import { parseArgs, validateToolNames } from "../src/cli/args";
 import { OPTIONAL_VALUE_FLAGS, STRING_VALUE_FLAGS } from "../src/cli/flag-tables";
 import { CliUsageError } from "../src/cli/usage-error";
 
@@ -92,16 +92,22 @@ describe("--tools validation", () => {
 		expect(result.tools).toEqual(["grep", "glob"]);
 	});
 
-	it("defers unknown-name validation until extension discovery", () => {
+	it("defers unknown-name validation until all session tools are discovered", () => {
 		expect(parseArgs(["--tools", "bash,intercom"]).tools).toEqual(["bash", "intercom"]);
+		expect(parseArgs(["--tools", "read,custom_tool"], new Map()).tools).toEqual(["read", "custom_tool"]);
+	});
+});
+
+describe("--tools discovered-registry validation", () => {
+	it("accepts extension and custom tools after they enter the session registry", () => {
+		expect(() =>
+			validateToolNames(["read", "intercom", "custom_tool"], ["read", "intercom", "custom_tool"]),
+		).not.toThrow();
 	});
 
-	it("accepts registered extension tools and still rejects unknown names after discovery", () => {
-		const extensionFlags = new Map<string, { type: "boolean" | "string" }>();
-		expect(parseArgs(["--tools", "read,intercom"], extensionFlags, ["intercom"]).tools).toEqual(["read", "intercom"]);
-		expect(() => parseArgs(["--tools", "bash,ssh"], extensionFlags, ["intercom"])).toThrow(CliUsageError);
-		expect(() => parseArgs(["--tools", "bash,ssh"], extensionFlags, ["intercom"])).toThrow(
-			/Unknown tool in --tools: ssh/,
+	it("rejects names absent from the final registry", () => {
+		expect(() => validateToolNames(["read", "missing"], ["read", "intercom", "custom_tool"])).toThrow(
+			/Unknown tool in --tools: missing/,
 		);
 	});
 });

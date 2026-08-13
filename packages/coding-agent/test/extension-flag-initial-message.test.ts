@@ -103,7 +103,6 @@ describe("extension flags vs initial message", () => {
 		const sessionId = "019ea530-ffff-7000-8000-000000000000";
 		const sink: ExtensionFlagSink = {
 			getFlags: () => extFlags,
-			getToolNames: () => [],
 			setFlagValue: () => {},
 		};
 		const parsed = applyExtensionFlags(sink, ["--continue", sessionId]);
@@ -124,7 +123,6 @@ describe("extension flags vs initial message", () => {
 		const rawArgs = ["--continue", sessionId, "--spawn-peer", "reviewer", "do next"];
 		const sink: ExtensionFlagSink = {
 			getFlags: () => extFlags,
-			getToolNames: () => [],
 			setFlagValue: () => {},
 		};
 		const parsed = applyExtensionFlags(sink, rawArgs);
@@ -149,7 +147,6 @@ describe("extension flags vs initial message", () => {
 
 		const sink: ExtensionFlagSink = {
 			getFlags: () => extFlags,
-			getToolNames: () => [],
 			setFlagValue: () => {},
 		};
 		const extensionArgs = applyExtensionFlags(sink, rawArgs);
@@ -215,7 +212,6 @@ describe("applyExtensionFlags (single-parser flag resolution)", () => {
 		const values = new Map<string, boolean | string>();
 		return {
 			values,
-			getToolNames: () => [],
 			getFlags: () => flagMap,
 			setFlagValue: (name, value) => {
 				values.set(name, value);
@@ -334,7 +330,6 @@ describe("registerFlag with built-in-named flags (r3323473227)", () => {
 		);
 		const sink: ExtensionFlagSink = {
 			getFlags: () => ExtensionRunner.aggregateFlags([ext]),
-			getToolNames: () => [],
 			setFlagValue: (name, value) => {
 				runtime.flagValues.set(name, value);
 			},

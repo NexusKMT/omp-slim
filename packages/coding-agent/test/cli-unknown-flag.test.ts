@@ -113,7 +113,6 @@ describe("parseArgs — unrecognized flag tracking (#2459)", () => {
 	it("propagates unrecognizedFlags through applyExtensionFlags so callers can surface them", () => {
 		const runner = {
 			getFlags: () => new Map<string, { type: "boolean" | "string" }>([["spawn-peer", { type: "string" }]]),
-			getToolNames: () => [],
 			setFlagValue: () => {},
 		};
 		const parsed = applyExtensionFlags(runner, ["--spawn-peer", "reviewer", "--typo"]);
