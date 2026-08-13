@@ -1170,6 +1170,9 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		this.#eventBusUnsubscribers.push(
 			this.session.subscribe(event => {
+				if (event.type === "model_changed") {
+					this.#updateWelcomeModel();
+				}
 				void this.#handleGoalSessionEvent(event);
 			}),
 			onStatusLineSessionAccentChanged(() => {
@@ -4420,6 +4423,17 @@ export class InteractiveMode implements InteractiveModeContext {
 				status: server.status,
 				fileTypes: server.fileTypes,
 			})) ?? []
+		);
+	}
+
+	#updateWelcomeModel(): void {
+		if (!this.#welcomeComponent) {
+			return;
+		}
+
+		this.#welcomeComponent.setModel(
+			this.session.model?.name ?? "Unknown",
+			this.session.model?.provider ?? "Unknown",
 		);
 	}
 

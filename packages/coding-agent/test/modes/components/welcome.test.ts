@@ -62,3 +62,21 @@ describe("WelcomeComponent tips", () => {
 		expect(pickWeightedTip([], 0.5)).toBe("");
 	});
 });
+
+describe("WelcomeComponent model name", () => {
+	beforeAll(async () => {
+		await Settings.init({ inMemory: true });
+		await initTheme(false);
+	});
+
+	it("updates the rendered model name after setModel()", () => {
+		const welcome = new WelcomeComponent("1.0.0", "DeepSeek V4 Pro", "deepseek");
+		const before = welcome.render(100).join("\n");
+		expect(before).toContain("DeepSeek V4 Pro");
+
+		welcome.setModel("GLM-5.2", "zhipu-coding-plan");
+		const after = welcome.render(100).join("\n");
+		expect(after).toContain("GLM-5.2");
+		expect(after).not.toContain("DeepSeek V4 Pro");
+	});
+});
