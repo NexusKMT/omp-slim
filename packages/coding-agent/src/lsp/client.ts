@@ -189,9 +189,6 @@ const CLIENT_CAPABILITIES = {
 			didDelete: false,
 		},
 	},
-	experimental: {
-		snippetTextEdit: true,
-	},
 };
 
 /** LSP `FileChangeType` values for workspace/didChangeWatchedFiles notifications. */

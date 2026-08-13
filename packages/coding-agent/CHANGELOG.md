@@ -66,6 +66,9 @@
 ### Fixed
 
 - Fixed LSP `diagnostics` reporting `OK`/`success: true` when every applicable language server failed; a run with zero successful server responses now fails, and partial failures surface diagnostics while naming the servers that failed ([#8377](https://github.com/can1357/oh-my-pi/issues/8377)).
+### Fixed
+
+- Fixed rust-analyzer code actions writing snippet placeholders such as `$0` into source by no longer advertising unsupported snippet text edits and rejecting any unexpected snippet edit before applying it ([#8376](https://github.com/can1357/oh-my-pi/issues/8376)).
 
 ## [17.2.15] - 2026-08-12
 

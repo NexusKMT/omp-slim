@@ -77,7 +77,16 @@ export function rangesOverlap(a: Range, b: Range): boolean {
  * Byte-identical non-empty range edits are idempotent, so duplicate server
  * output is collapsed before overlap validation.
  */
+function rejectSnippetTextEdits(edits: TextEdit[]): void {
+	for (const edit of edits) {
+		if ("insertTextFormat" in edit && edit.insertTextFormat === 2) {
+			throw new ToolError("snippet-formatted LSP edits are unsupported");
+		}
+	}
+}
+
 export function sortAndValidateTextEdits(edits: TextEdit[]): TextEdit[] {
+	rejectSnippetTextEdits(edits);
 	const sorted = edits
 		.map((edit, index) => ({ edit, index }))
 		.sort((a, b) => {
