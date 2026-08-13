@@ -1,11 +1,13 @@
 {
   autoPatchelfHook,
+  alsa-lib,
   bun,
   bun2nix,
   cmake,
   darwin,
   lib,
   libopus,
+  libpulseaudio,
   ninja,
   pipewire,
   pkg-config,
@@ -135,6 +137,17 @@ stdenv.mkDerivation {
       # The loader extracts this archived addon at runtime, so fix its
       # interpreter-independent Nix RPATH before Bun embeds it.
       autoPatchelf -- "packages/natives/native/${platform.addon}"
+      # pi-voice dlopens libpulse-simple.so.0 / libpulse.so.0 / libasound.so.2
+      # by bare name; glibc resolves those through the calling object's
+      # RUNPATH, so append the client libraries here. Nothing links them, so
+      # autoPatchelf cannot discover them on its own.
+      patchelf --add-rpath "${
+        lib.makeLibraryPath [
+          libpulseaudio
+          alsa-lib
+        ]
+      }" \
+        "packages/natives/native/${platform.addon}"
     ''}
     ${lib.optionalString stdenv.hostPlatform.isDarwin ''
       # arm64 Darwin requires even locally-built Mach-O addons to carry an
