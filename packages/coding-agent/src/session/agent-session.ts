@@ -452,6 +452,8 @@ function cloneMessageEndNotification(message: AgentMessage): AgentMessage {
 	return snapshot as unknown as AgentMessage;
 }
 
+const INTERRUPTED_THINKING_MIN_CHARS = 60;
+
 export class AgentSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
@@ -2348,19 +2350,19 @@ export class AgentSession {
 	}
 
 	/**
-	 * On a user-interrupted (`Esc`) abort, copy the trailing thinking run into a
-	 * hidden `display: false` continuity message for the next turn WITHOUT
-	 * mutating the assistant message. The original thinking stays on the message
-	 * so live render, reload, and display-reset rebuilds keep showing it; `convertToLlm`
-	 * strips the run from the provider request (incomplete/unsigned thinking is
-	 * rejected on resend) when this continuity message follows the assistant turn.
+	 * On a user-interrupted (`Esc`) abort, copy a meaningful trailing thinking
+	 * run into hidden continuity context for the next turn. Short fragments are
+	 * omitted; `convertToLlm` still strips their incomplete thinking from replay.
+	 *
+	 * The original thinking stays on the assistant message so live render, reload,
+	 * and display-reset rebuilds keep showing it.
 	 */
 	#demoteInterruptedThinkingOnUserInterrupt(
 		message: AssistantMessage,
 	): CustomMessage<InterruptedThinkingDetails> | undefined {
 		if (message.stopReason !== "aborted" || !isUserInterruptAbort(message)) return undefined;
 		const demoted = demoteInterruptedThinking(message);
-		if (!demoted) return undefined;
+		if (!demoted || demoted.reasoning.length < INTERRUPTED_THINKING_MIN_CHARS) return undefined;
 		const interruptedAt = Date.now();
 		return {
 			role: "custom",

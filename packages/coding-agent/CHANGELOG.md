@@ -15,7 +15,7 @@
 
 ### Fixed
 
-- Fixed interrupted-turn continuity prompts resembling reasoning-extraction requests by reframing the preserved text as a natural user interruption.
+- Refined interrupted-turn continuity prompts by omitting reasoning fragments under 60 characters, relying on native signed or encrypted thinking when available, and framing preserved text as a natural user interruption.
 - Fixed session-title generation regressing after prompt condensation: the telegraphic rewrite of `title-system.md` garbled small-model output (invented names, punctuation-only titles). Restored plain-sentence phrasing with a name-fidelity instruction, pinned the online title request to greedy decoding, and rejected punctuation-only titles in normalization.
 - Fixed Agent Control Center failing to open when an agent model override is configured as a YAML array. ([#8201](https://github.com/can1357/oh-my-pi/issues/8201))
 - Fixed streaming and finalized transcript blocks exposing width-independent source boundaries so multiplexer pane resizes retain output queued during settlement without duplicating prior transcript history.
