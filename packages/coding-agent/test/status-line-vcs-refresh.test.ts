@@ -767,6 +767,7 @@ describe("StatusLineComponent git watcher survives atomic HEAD renames", () => {
 		vi.spyOn(git.branch, "default").mockReturnValue(Promise.withResolvers<string | null>().promise);
 		vi.spyOn(git.status, "summary").mockReturnValue(Promise.withResolvers<GitStatus | null>().promise);
 		vi.spyOn(jj.repo, "rootSync").mockReturnValue(null);
+		const watchSpy = vi.spyOn(nodeFs, "watch");
 
 		setProjectDir(repoDir);
 		const component = new StatusLineComponent(makeSession());
@@ -777,6 +778,9 @@ describe("StatusLineComponent git watcher survives atomic HEAD renames", () => {
 		// so a frozen watcher surfaces as the test-runner timeout, not a flake.
 		let branchChanged = Promise.withResolvers<void>();
 		component.watchBranch(() => branchChanged.resolve());
+		// macOS may keep a file watch alive across the rename, so also pin the
+		// platform-independent requirement: the watcher owns the stable git dir.
+		expect(watchSpy).toHaveBeenCalledWith(path.join(repoDir, ".git"), expect.any(Function));
 		// Prime the branch cache off the initial HEAD. The status/default mocks
 		// never resolve, so this cold paint cannot fire #onBranchChange itself.
 		component.getTopBorder(80);
