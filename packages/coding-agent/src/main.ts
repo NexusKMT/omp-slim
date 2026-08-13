@@ -23,7 +23,7 @@ import {
 } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { reset as resetCapabilities } from "./capability";
-import { type Args, reportUnrecognizedFlags } from "./cli/args";
+import { type Args, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
 import { applyExtensionFlags, type ExtensionFlagSink } from "./cli/extension-flags";
 import { processFileArguments } from "./cli/file-processor";
 import { buildInitialMessage } from "./cli/initial-message";
@@ -425,7 +425,18 @@ export function createAcpSessionFactory(args: AcpSessionFactoryOptions): AcpSess
 		if (args.parsedArgs.apiKey && !args.baseOptions.model && nextSession.model) {
 			args.authStorage.setRuntimeApiKey(nextSession.model.provider, args.parsedArgs.apiKey);
 		}
-		applyExtensionFlags(nextSession.extensionRunner, args.rawArgs);
+		const runner = nextSession.extensionRunner;
+		applyExtensionFlags(
+			runner
+				? {
+						getFlags: () => runner.getFlags(),
+						setFlagValue: (name, value) => {
+							runner.setFlagValue(name, value);
+						},
+					}
+				: undefined,
+			args.rawArgs,
+		);
 		return nextSession;
 	};
 }
@@ -1684,6 +1695,13 @@ export async function runRootCommand(
 			eventBus,
 			preloadedExtensions: extensionsResult,
 		});
+
+		try {
+			validateToolNames(initialArgs.tools, session.getAllToolNames());
+		} catch (error) {
+			await session.dispose();
+			throw error;
+		}
 
 		// Cold-revive support: a `parked` subagent ref restored from disk (Agent Hub
 		// scan, collab mirror, resumed process) has a sessionFile but no in-memory
