@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { isEexist, isEnoent } from "@oh-my-pi/pi-utils";
+import { isEexist, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { formatPathRelativeToCwd } from "../tools/path-utils";
 import { ToolError } from "../tools/tool-errors";
 import type {
@@ -359,24 +359,59 @@ export async function applyWorkspaceEdit(
 				const newPath = uriToFile(op.newUri);
 				await fs.mkdir(path.dirname(newPath), { recursive: true });
 				if (oldPath !== newPath) {
+					// Displace an overwritten destination into a kernel-reserved sibling
+					// temp dir (same filesystem, so the moves stay atomic) instead of
+					// deleting it, so a failed rename (EXDEV, permissions) can restore
+					// it and leave the workspace exactly as it was.
+					let displaced: { dir: string; file: string } | undefined;
 					try {
 						const targetStat = await fs.lstat(newPath);
 						if (!op.options?.overwrite) {
 							if (op.options?.ignoreIfExists) continue;
 							throw new ToolError(`rename target already exists: ${formatPathRelativeToCwd(newPath, cwd)}`);
 						}
-						// Only remove the destination when it is a distinct file. On a
+						// Only displace the destination when it is a distinct file. On a
 						// case-insensitive filesystem a case-only rename resolves both
-						// paths to the same inode; removing newPath would delete the
+						// paths to the same inode; moving newPath aside would move the
 						// source, so let fs.rename change the case in place instead.
 						const sourceStat = await fs.lstat(oldPath);
 						if (sourceStat.dev !== targetStat.dev || sourceStat.ino !== targetStat.ino) {
-							await fs.rm(newPath, { recursive: true });
+							const holdDir = await fs.mkdtemp(path.join(path.dirname(newPath), ".omp-displaced-"));
+							const holdFile = path.join(holdDir, path.basename(newPath));
+							try {
+								await fs.rename(newPath, holdFile);
+							} catch (error) {
+								await fs.rm(holdDir, { recursive: true, force: true }).catch(() => {});
+								throw error;
+							}
+							displaced = { dir: holdDir, file: holdFile };
 						}
 					} catch (error) {
 						if (!isEnoent(error)) throw error;
 					}
-					await fs.rename(oldPath, newPath);
+					try {
+						await fs.rename(oldPath, newPath);
+					} catch (error) {
+						if (displaced) {
+							try {
+								await fs.rename(displaced.file, newPath);
+							} catch {
+								// Restoration failed: the destination really is gone, so
+								// report it to reconciliation as an executed delete.
+								record({ kind: "delete", uri: op.newUri });
+							}
+							await fs.rm(displaced.dir, { recursive: true, force: true }).catch(() => {});
+						}
+						throw error;
+					}
+					if (displaced) {
+						await fs.rm(displaced.dir, { recursive: true, force: true }).catch((error: unknown) => {
+							logger.debug("LSP rename: failed to remove displaced overwrite target", {
+								displaced: displaced?.dir,
+								error: error instanceof Error ? error.message : String(error),
+							});
+						});
+					}
 				}
 				applied.push(`Renamed ${formatPathRelativeToCwd(oldPath, cwd)} → ${formatPathRelativeToCwd(newPath, cwd)}`);
 				record({ kind: "rename", oldUri: op.oldUri, newUri: op.newUri });

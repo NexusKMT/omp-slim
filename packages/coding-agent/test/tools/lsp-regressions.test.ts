@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentToolResult, RenderResultOptions } from "@oh-my-pi/pi-agent-core";
@@ -13,6 +14,7 @@ import { getServersForFile, type LspConfig, loadConfig } from "@oh-my-pi/pi-codi
 import {
 	applyTextEditsToString,
 	applyWorkspaceEdit,
+	type ExecutedWorkspaceChange,
 	sortAndValidateTextEdits,
 } from "@oh-my-pi/pi-coding-agent/lsp/edits";
 import { renderCall, renderResult } from "@oh-my-pi/pi-coding-agent/lsp/render";
@@ -3279,6 +3281,51 @@ describe("lsp regressions", () => {
 			expect(fs.existsSync(filePath)).toBe(true);
 			expect(fs.readFileSync(filePath, "utf8")).toBe("SOURCE");
 		} finally {
+			tempDir.removeSync();
+		}
+	});
+
+	it("restores an overwritten rename target when the final rename fails", async () => {
+		// An overwrite rename displaces the existing destination before moving the
+		// source. If the move itself then fails (EXDEV, permissions), the
+		// destination must be restored so the workspace is exactly as it was —
+		// previously the destination was deleted outright and stayed lost.
+		const tempDir = TempDir.createSync("@omp-lsp-rename-restore-");
+		try {
+			const oldPath = path.join(tempDir.path(), "old.ts");
+			const newPath = path.join(tempDir.path(), "new.ts");
+			await Bun.write(oldPath, "SOURCE");
+			await Bun.write(newPath, "TARGET");
+
+			const realRename = fsp.rename;
+			vi.spyOn(fsp, "rename").mockImplementation(async (from, to) => {
+				// Fail only the source→destination move; displacement and
+				// restoration of the destination still go through.
+				if (from === oldPath) {
+					throw Object.assign(new Error("EXDEV: cross-device link not permitted"), { code: "EXDEV" });
+				}
+				return realRename(from, to);
+			});
+
+			const renameOp: RenameFile = {
+				kind: "rename",
+				oldUri: fileToUri(oldPath),
+				newUri: fileToUri(newPath),
+				options: { overwrite: true },
+			};
+			const executed: ExecutedWorkspaceChange[] = [];
+			await expect(
+				applyWorkspaceEdit({ documentChanges: [renameOp] }, tempDir.path(), change => executed.push(change)),
+			).rejects.toThrow("EXDEV");
+
+			// Workspace unchanged: source intact, destination restored, no
+			// displaced temp litter, and no executed op reported.
+			expect(fs.readFileSync(oldPath, "utf8")).toBe("SOURCE");
+			expect(fs.readFileSync(newPath, "utf8")).toBe("TARGET");
+			expect(fs.readdirSync(tempDir.path()).sort()).toEqual(["new.ts", "old.ts"]);
+			expect(executed).toEqual([]);
+		} finally {
+			vi.restoreAllMocks();
 			tempDir.removeSync();
 		}
 	});
