@@ -2,6 +2,7 @@ import type { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { isKimiModelId } from "@oh-my-pi/pi-catalog/identity";
 import { resolveWireModelId } from "@oh-my-pi/pi-catalog/model-thinking";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
+import { clinePassClientHeaders } from "@oh-my-pi/pi-catalog/wire/cline-pass";
 import type { ResolvedOpenAICompat } from "@oh-my-pi/pi-catalog/types";
 import { $env, parseStreamingJson, parseStreamingJsonThrottled } from "@oh-my-pi/pi-utils";
 import { renderDemotedThinking } from "../dialect/demotion";
@@ -1410,7 +1411,15 @@ function createRequestSetup(
 		// Provider auth/header overlay: Kimi-code hosts require shared client
 		// attribution headers prepended before caller headers. Kept here (not in
 		// the shared helper) because it is provider-specific request setup.
-		prependHeaders: model.provider === "kimi-code" ? getKimiCommonHeaders : undefined,
+		// ClinePass mirrors the official Cline CLI's client-identity headers: the
+		// gateway gates parts of the roster (some free-tier models) to Cline
+		// product surfaces, and this is the contract that identifies one.
+		prependHeaders:
+			model.provider === "kimi-code"
+				? getKimiCommonHeaders
+				: model.provider === "cline-pass"
+					? clinePassClientHeaders
+					: undefined,
 		alibabaCodingPlanAuth: true,
 		azureChatCompletions: { apiVersion, deploymentName },
 	});

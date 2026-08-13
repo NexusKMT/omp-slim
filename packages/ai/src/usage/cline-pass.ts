@@ -1,3 +1,4 @@
+import { CLINEPASS_API_BASE_URL, clinePassClientHeaders } from "@oh-my-pi/pi-catalog/wire/cline-pass";
 import { ProviderHttpError } from "../error";
 import type {
 	UsageFetchContext,
@@ -10,7 +11,7 @@ import type {
 import { isRecord } from "../utils";
 
 const PROVIDER = "cline-pass";
-const DEFAULT_BASE_URL = "https://api.cline.bot/api/v1";
+const DEFAULT_BASE_URL = CLINEPASS_API_BASE_URL;
 // Dashboard quota route. It accepts the same API key as inference; account OAuth is not required.
 const USAGE_LIMITS_PATH = "/users/me/plan/usage-limits";
 const ACCOUNT_PATH = "/users/me";
@@ -111,6 +112,10 @@ async function fetchClinePassUsage(params: UsageFetchParams, ctx: UsageFetchCont
 	const baseUrl = (params.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
 	const usageUrl = `${baseUrl}${USAGE_LIMITS_PATH}`;
 	const headers = {
+		// The CLI's client identity rides every api.cline.bot call, not just
+		// inference: a uniform mirror keeps account routes working if the
+		// gateway ever extends its client-surface gating beyond model traffic.
+		...clinePassClientHeaders(),
 		Accept: "application/json",
 		Authorization: `Bearer ${credential.apiKey}`,
 	};

@@ -1,3 +1,4 @@
+import { CLINEPASS_API_BASE_URL, clinePassClientHeaders } from "@oh-my-pi/pi-catalog/wire/cline-pass";
 import { createApiKeyLogin } from "./api-key-login";
 import type { OAuthLoginCallbacks } from "./oauth/types";
 import type { ProviderDefinition } from "./types";
@@ -8,13 +9,14 @@ export const loginClinePass = createApiKeyLogin({
 	instructions: "Create an API key in the Cline dashboard under Settings → API Keys",
 	promptMessage: "Paste your Cline API key",
 	placeholder: "sk_...",
+	// Validate against the account identity route, not a probe completion: login
+	// must not couple to any roster model (roster churn can retire the probe's
+	// target) and must not consume subscription quota on a ping.
 	validation: {
-		kind: "chat-completions",
+		kind: "models-endpoint",
 		provider: "ClinePass",
-		baseUrl: "https://api.cline.bot/api/v1",
-		model: "cline-pass/kimi-k3",
-		maxTokensField: "max_completion_tokens",
-		maxTokens: 16,
+		modelsUrl: `${CLINEPASS_API_BASE_URL}/users/me`,
+		headers: clinePassClientHeaders,
 	},
 });
 

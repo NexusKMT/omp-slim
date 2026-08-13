@@ -23,6 +23,10 @@ const ACCOUNT_RATE_LIMIT_PATTERN =
 const INSUFFICIENT_BALANCE_PATTERN = /insufficient.?balance/i;
 const SPEND_LIMIT_PATTERN = /spend.?limit/i;
 const OPENROUTER_DAILY_FREE_LIMIT_PATTERN = /\bfree[-_ ]models[-_ ]per[-_ ]day\b/i;
+// ClinePass subscription-window exhaustion ("clinepass limit …") and free-tier
+// model caps ("free limit reached on model … try again in …") are account-local
+// quota exhaustion, not per-minute rate limiting.
+const CLINE_PASS_QUOTA_PATTERN = /clinepass limit|free limit reached on model/i;
 // gRPC/Connect end-streams carry the status as its name (`resource_exhausted`),
 // while HTTP bodies use the phrase ("resource exhausted"). Strip either form
 // before classifying explicit details; an otherwise opaque status is transient
@@ -84,6 +88,10 @@ export function parseRateLimitReason(errorMessage: string): RateLimitReason {
 		return "QUOTA_EXHAUSTED";
 	}
 
+	if (CLINE_PASS_QUOTA_PATTERN.test(errorMessage)) {
+		return "QUOTA_EXHAUSTED";
+	}
+
 	if (
 		lower.includes("per minute") ||
 		lower.includes("rate limit") ||
@@ -142,7 +150,7 @@ export function calculateRateLimitBackoffMs(reason: RateLimitReason): number {
 
 /** Detect usage/quota limit errors in error messages (persistent, requires credential switch). */
 const USAGE_LIMIT_PATTERN =
-	/usage.?limit|usage_limit_reached|usage_not_included|limit_reached|quota.?(?:exceeded|reached|insufficient)|额度不足|额度耗尽|resource.?exhausted|exhausted your capacity|quota will reset|insufficient.?(?:balance|quota)|balance.?exhausted|run out of credits|out of credits|spending[- _]?limit|personal-team-blocked/i;
+	/usage.?limit|usage_limit_reached|usage_not_included|limit_reached|quota.?(?:exceeded|reached|insufficient)|额度不足|额度耗尽|resource.?exhausted|exhausted your capacity|quota will reset|insufficient.?(?:balance|quota)|balance.?exhausted|run out of credits|out of credits|spending[- _]?limit|personal-team-blocked|clinepass limit|free limit reached on model/i;
 
 /**
  * HTTP status codes that, absent richer body classification, represent an
