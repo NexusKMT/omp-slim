@@ -2042,6 +2042,96 @@ describe("lsp regressions", () => {
 		}
 	});
 
+	it("rename_file rejects a snippet edit before writing any file", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-rename-snippet-");
+		try {
+			const sourceFile = path.join(tempDir.path(), "src", "old.ts");
+			const destFile = path.join(tempDir.path(), "src", "new.ts");
+			const plainFile = path.join(tempDir.path(), "src", "plain.ts");
+			const snippetFile = path.join(tempDir.path(), "src", "snippet.ts");
+			await Bun.write(sourceFile, "export const value = 42;\n");
+			await Bun.write(plainFile, "import { value } from './old';\n");
+			await Bun.write(snippetFile, "import { value } from './old';\n");
+
+			const plainUri = fileToUri(plainFile);
+			const snippetUri = fileToUri(snippetFile);
+
+			const server: ServerConfig = { command: "test-lsp", fileTypes: ["ts"], rootMarkers: [] };
+			const client: LspClient = {
+				name: "test-lsp",
+				cwd: tempDir.path(),
+				config: server,
+				proc: {
+					stdin: { write() {}, flush: async () => {} },
+				} as unknown as LspClient["proc"],
+				requestId: 0,
+				diagnostics: new Map(),
+				diagnosticsVersion: 0,
+				openFiles: new Map(),
+				pendingRequests: new Map(),
+				messageBuffer: new Uint8Array(),
+				isReading: false,
+				status: "ready",
+				lastActivity: Date.now(),
+				writeQueue: Promise.resolve(),
+				activeProgressTokens: new Set(),
+				projectLoaded: Promise.resolve(),
+				resolveProjectLoaded: () => {},
+			};
+
+			vi.spyOn(lspConfig, "loadConfig").mockReturnValue({
+				servers: { "test-lsp": server },
+				idleTimeoutMs: undefined,
+			});
+			vi.spyOn(lspClient, "getOrCreateClient").mockResolvedValue(client);
+			vi.spyOn(lspClient, "sendRequest").mockImplementation(async (_client, method) => {
+				if (method === "workspace/willRenameFiles") {
+					return {
+						// plainUri is a valid edit; snippetUri carries insertTextFormat 2.
+						// The plain bucket must NOT be written when the snippet bucket rejects.
+						changes: {
+							[plainUri]: [
+								{
+									range: { start: { line: 0, character: 22 }, end: { line: 0, character: 29 } },
+									newText: "'./new'",
+								},
+							],
+							[snippetUri]: [
+								{
+									range: { start: { line: 0, character: 22 }, end: { line: 0, character: 29 } },
+									newText: "'./new$0'",
+									insertTextFormat: 2,
+								},
+							],
+						},
+					};
+				}
+				return null;
+			});
+			vi.spyOn(lspClient, "sendNotification").mockResolvedValue();
+
+			const tool = new LspTool(makeLspSession(tempDir.path()));
+			await expect(
+				tool.execute("rename-snippet-test", {
+					action: "rename_file",
+					file: sourceFile,
+					new_name: destFile,
+					timeout: 5,
+				}),
+			).rejects.toThrow("snippet-formatted LSP edits are unsupported");
+
+			// Nothing was half-applied: the plain bucket is untouched and the
+			// rename never ran.
+			expect(await Bun.file(plainFile).text()).toBe("import { value } from './old';\n");
+			expect(await Bun.file(snippetFile).text()).toBe("import { value } from './old';\n");
+			expect(fs.existsSync(sourceFile)).toBe(true);
+			expect(fs.existsSync(destFile)).toBe(false);
+		} finally {
+			vi.restoreAllMocks();
+			tempDir.removeSync();
+		}
+	});
+
 	it("rename_file with apply:false previews edits without filesystem changes", async () => {
 		const tempDir = TempDir.createSync("@omp-lsp-rename-file-preview-");
 		try {

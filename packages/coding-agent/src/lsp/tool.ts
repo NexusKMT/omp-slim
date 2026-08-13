@@ -43,7 +43,13 @@ import {
 	WORKSPACE_SYMBOL_LIMIT,
 	waitForDiagnostics,
 } from "./diagnostics";
-import { applyTextEdits, applyWorkspaceEdit, flattenWorkspaceTextEdits, rangesOverlap } from "./edits";
+import {
+	applyTextEdits,
+	applyWorkspaceEdit,
+	flattenWorkspaceTextEdits,
+	rangesOverlap,
+	sortAndValidateTextEdits,
+} from "./edits";
 import { detectLspmux } from "./lspmux";
 import {
 	configCache,
@@ -611,6 +617,13 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 						}
 					}
 				}
+			}
+
+			// Validate every accepted bucket (overlap + snippet-format rejection)
+			// before writing any file, so a snippet edit in a later URI cannot
+			// leave earlier files half-applied.
+			for (const bucket of acceptedByUri.values()) {
+				sortAndValidateTextEdits(bucket.edits);
 			}
 
 			for (const [uri, bucket] of acceptedByUri) {
