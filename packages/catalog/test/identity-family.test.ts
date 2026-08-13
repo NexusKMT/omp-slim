@@ -298,6 +298,9 @@ describe("modelFamilyToken", () => {
 		expect(modelFamilyToken("qwen/qwen3-coder")).toBe("qwen");
 		expect(modelFamilyToken("google/gemini-2.5-flash")).toBe("gemini");
 		expect(modelFamilyToken("xai/grok-4.6")).toBe("grok");
+		expect(modelFamilyToken("openai/gemini-pro")).toBe("gemini");
+		expect(modelFamilyToken("openai/deepseek-r1")).toBe("deepseek");
+		expect(modelFamilyToken("openai/grok-4.6")).toBe("grok");
 	});
 	test("classifies GLM across provider mirrors so same-lineage SKUs fold together", () => {
 		expect(modelFamilyToken("glm-5.2")).toBe("glm");

@@ -461,6 +461,9 @@ describe("isLoopGuardedModel", () => {
 		const grok45 = createMockModel({ provider: "cursor", id: "cursor-grok-4.5-high" }).model;
 		const opaqueDeepseek = createMockModel({ provider: "deepseek", id: "opaque-model" }).model;
 		const other = createMockModel({ provider: "openai", id: "gpt-4o" }).model;
+		const openaiNamespacedGemini = createMockModel({ provider: "custom", id: "openai/gemini-pro" }).model;
+		const openaiNamespacedDeepseek = createMockModel({ provider: "custom", id: "openai/deepseek-r1" }).model;
+		const openaiNamespacedGrok = createMockModel({ provider: "custom", id: "openai/grok-4.6" }).model;
 
 		expect(isLoopGuardedModel(gemini)).toBe(true);
 		expect(isLoopGuardedModel(deepseek)).toBe(true);
@@ -471,6 +474,9 @@ describe("isLoopGuardedModel", () => {
 		expect(isLoopGuardedModel(opaqueDeepseek)).toBe(false);
 		expect(isLoopGuardedModel(other)).toBe(false);
 
+		expect(isLoopGuardedModel(openaiNamespacedGemini)).toBe(true);
+		expect(isLoopGuardedModel(openaiNamespacedDeepseek)).toBe(true);
+		expect(isLoopGuardedModel(openaiNamespacedGrok)).toBe(true);
 		// enabled: false disables every guarded family.
 		expect(isLoopGuardedModel(gemini, { loopGuard: { enabled: false } })).toBe(false);
 		expect(isLoopGuardedModel(deepseek, { loopGuard: { enabled: false } })).toBe(false);

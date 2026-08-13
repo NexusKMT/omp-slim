@@ -108,9 +108,29 @@ export function getWslWindowsHomeCandidate(options: UserPathCandidateOptions = {
 	return (options.wslPath ?? resolveWithWslPath)(userProfile) ?? convertWindowsPathToDefaultWslMount(userProfile);
 }
 
+/**
+ * Memo for the default-probe WSL home resolution, keyed by the inputs that
+ * decide it (platform + WSL markers + `USERPROFILE`). Discovery calls
+ * {@link getUserPathCandidates} from every loader (skills, rules, prompts,
+ * commands, AGENTS.md, SYSTEM.md); the host-home probe spawns `cmd.exe` over
+ * the WSL interop pipe, so without the memo a wedged pipe costs one
+ * {@link HOST_PROBE_TIMEOUT_MS} stall per loader. Keying by inputs keeps
+ * test/SDK environment changes visible instead of pinning the first answer
+ * for the process lifetime.
+ */
+const wslHomeMemo = new Map<string, string | undefined>();
+
 function getUserHomeCandidates(ctx: LoadContext): string[] {
 	const homes = [ctx.home];
-	const wslHome = getWslWindowsHomeCandidate();
+	const env = process.env;
+	const key = `${process.platform}\0${env.WSL_DISTRO_NAME ?? ""}\0${env.WSL_INTEROP ?? ""}\0${env.USERPROFILE ?? ""}`;
+	let wslHome: string | undefined;
+	if (wslHomeMemo.has(key)) {
+		wslHome = wslHomeMemo.get(key);
+	} else {
+		wslHome = getWslWindowsHomeCandidate();
+		wslHomeMemo.set(key, wslHome);
+	}
 	if (wslHome && !homes.includes(wslHome)) homes.push(wslHome);
 	return homes;
 }
