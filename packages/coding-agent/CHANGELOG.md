@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- Fixed llama.cpp model discovery producing `baseUrl` without the `/v1` prefix for non-Qwen models, causing 404 errors on OpenAI-compatible endpoints (`/v1/responses`, `/v1/chat/completions`). The fix ensures all discovered llama.cpp models include `/v1` in their `baseUrl`, matching the behavior already applied to Qwen models.
 
 ## [17.3.1] - 2026-08-13
 
