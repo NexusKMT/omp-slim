@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Nix standalone binaries retaining Bun's build-time package in their runtime closure.
+
 ## [17.3.0] - 2026-08-13
 
 ### Breaking Changes
