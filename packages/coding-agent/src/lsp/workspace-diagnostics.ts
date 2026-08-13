@@ -159,9 +159,7 @@ export async function runWorkspaceDiagnostics(
 				// the branch below. Mirrors the exit-status gate
 				// `resolveGoWorkspaceDiagnosticsCommand` already applies above.
 				if (exitCode !== 0) {
-					const detail = proc.signalCode
-						? `was killed by ${proc.signalCode}`
-						: `exited with code ${exitCode}`;
+					const detail = proc.signalCode ? `was killed by ${proc.signalCode}` : `exited with code ${exitCode}`;
 					return {
 						output: `Failed to run ${projectType.command.join(" ")}: the checker ${detail} without reporting anything, so the workspace was not verified`,
 						projectType,
