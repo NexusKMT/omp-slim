@@ -2422,6 +2422,7 @@ describe("lsp regressions", () => {
 				kind: "rename",
 				oldUri,
 				newUri,
+				options: { overwrite: true },
 			};
 			const workspaceEdit: WorkspaceEdit = {
 				documentChanges: [targetEdit, renameOp],
@@ -2608,6 +2609,113 @@ describe("lsp regressions", () => {
 		}
 	});
 
+	it("honors CreateFile overwrite and ignoreIfExists options", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-create-options-");
+		try {
+			const filePath = path.join(tempDir.path(), "existing.ts");
+			const uri = fileToUri(filePath);
+			await Bun.write(filePath, "ORIGINAL");
+
+			const ignored = await applyWorkspaceEdit(
+				{
+					documentChanges: [
+						{ kind: "create", uri, options: { overwrite: false, ignoreIfExists: true } } satisfies CreateFile,
+					],
+				},
+				tempDir.path(),
+			);
+			expect(fs.readFileSync(filePath, "utf8")).toBe("ORIGINAL");
+			expect(ignored).toEqual([]);
+
+			await applyWorkspaceEdit(
+				{
+					documentChanges: [
+						{ kind: "create", uri, options: { overwrite: true, ignoreIfExists: true } } satisfies CreateFile,
+					],
+				},
+				tempDir.path(),
+			);
+			expect(fs.readFileSync(filePath, "utf8")).toBe("");
+		} finally {
+			tempDir.removeSync();
+		}
+	});
+
+	it("honors RenameFile overwrite and ignoreIfExists options", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-rename-options-");
+		try {
+			const oldPath = path.join(tempDir.path(), "old.ts");
+			const newPath = path.join(tempDir.path(), "new.ts");
+			const oldUri = fileToUri(oldPath);
+			const newUri = fileToUri(newPath);
+			await Bun.write(oldPath, "SOURCE");
+			await Bun.write(newPath, "TARGET");
+
+			const ignored = await applyWorkspaceEdit(
+				{
+					documentChanges: [
+						{
+							kind: "rename",
+							oldUri,
+							newUri,
+							options: { overwrite: false, ignoreIfExists: true },
+						} satisfies RenameFile,
+					],
+				},
+				tempDir.path(),
+			);
+			expect(fs.readFileSync(oldPath, "utf8")).toBe("SOURCE");
+			expect(fs.readFileSync(newPath, "utf8")).toBe("TARGET");
+			expect(ignored).toEqual([]);
+
+			await applyWorkspaceEdit(
+				{
+					documentChanges: [
+						{
+							kind: "rename",
+							oldUri,
+							newUri,
+							options: { overwrite: true, ignoreIfExists: true },
+						} satisfies RenameFile,
+					],
+				},
+				tempDir.path(),
+			);
+			expect(fs.existsSync(oldPath)).toBe(false);
+			expect(fs.readFileSync(newPath, "utf8")).toBe("SOURCE");
+		} finally {
+			tempDir.removeSync();
+		}
+	});
+
+	it("honors DeleteFile recursive and ignoreIfNotExists options", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-delete-options-");
+		try {
+			const directory = path.join(tempDir.path(), "directory");
+			const uri = fileToUri(directory);
+			fs.mkdirSync(directory);
+			await Bun.write(path.join(directory, "child.ts"), "KEEP");
+
+			const nonRecursive: DeleteFile = { kind: "delete", uri, options: { recursive: false } };
+			await expect(applyWorkspaceEdit({ documentChanges: [nonRecursive] }, tempDir.path())).rejects.toThrow();
+			expect(fs.readFileSync(path.join(directory, "child.ts"), "utf8")).toBe("KEEP");
+
+			const recursive: DeleteFile = { kind: "delete", uri, options: { recursive: true } };
+			await applyWorkspaceEdit({ documentChanges: [recursive] }, tempDir.path());
+			expect(fs.existsSync(directory)).toBe(false);
+
+			const ignored = await applyWorkspaceEdit(
+				{
+					documentChanges: [{ kind: "delete", uri, options: { ignoreIfNotExists: true } } satisfies DeleteFile],
+				},
+				tempDir.path(),
+			);
+			expect(ignored).toEqual([]);
+		} finally {
+			tempDir.removeSync();
+		}
+	});
+
 	it("flushes pending descendant text edits before a folder delete", async () => {
 		// Mirror of the folder-rename subtree-flush test for the `delete` arm:
 		// edits queued against a child URI must land at the original path
@@ -2638,6 +2746,7 @@ describe("lsp regressions", () => {
 			const folderDelete: DeleteFile = {
 				kind: "delete",
 				uri: folderUri,
+				options: { recursive: true },
 			};
 			const workspaceEdit: WorkspaceEdit = {
 				documentChanges: [childEdit, folderDelete],
