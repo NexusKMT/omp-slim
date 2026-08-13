@@ -2585,6 +2585,7 @@ describe("lsp regressions", () => {
 				kind: "rename",
 				oldUri,
 				newUri,
+				options: { overwrite: true },
 			};
 			const workspaceEdit: WorkspaceEdit = {
 				documentChanges: [targetEdit, renameOp],
@@ -2783,6 +2784,146 @@ describe("lsp regressions", () => {
 		}
 	});
 
+	it("honors CreateFile overwrite and ignoreIfExists options", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-create-options-");
+		try {
+			const filePath = path.join(tempDir.path(), "existing.ts");
+			const uri = fileToUri(filePath);
+			await Bun.write(filePath, "ORIGINAL");
+
+			const ignored = await applyWorkspaceEdit(
+				{
+					documentChanges: [
+						{ kind: "create", uri, options: { overwrite: false, ignoreIfExists: true } } satisfies CreateFile,
+					],
+				},
+				tempDir.path(),
+			);
+			expect(fs.readFileSync(filePath, "utf8")).toBe("ORIGINAL");
+			expect(ignored).toEqual([]);
+
+			await applyWorkspaceEdit(
+				{
+					documentChanges: [
+						{ kind: "create", uri, options: { overwrite: true, ignoreIfExists: true } } satisfies CreateFile,
+					],
+				},
+				tempDir.path(),
+			);
+			expect(fs.readFileSync(filePath, "utf8")).toBe("");
+		} finally {
+			tempDir.removeSync();
+		}
+	});
+
+	it("honors RenameFile overwrite and ignoreIfExists options", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-rename-options-");
+		try {
+			const oldPath = path.join(tempDir.path(), "old.ts");
+			const newPath = path.join(tempDir.path(), "new.ts");
+			const oldUri = fileToUri(oldPath);
+			const newUri = fileToUri(newPath);
+			await Bun.write(oldPath, "SOURCE");
+			await Bun.write(newPath, "TARGET");
+
+			const ignored = await applyWorkspaceEdit(
+				{
+					documentChanges: [
+						{
+							kind: "rename",
+							oldUri,
+							newUri,
+							options: { overwrite: false, ignoreIfExists: true },
+						} satisfies RenameFile,
+					],
+				},
+				tempDir.path(),
+			);
+			expect(fs.readFileSync(oldPath, "utf8")).toBe("SOURCE");
+			expect(fs.readFileSync(newPath, "utf8")).toBe("TARGET");
+			expect(ignored).toEqual([]);
+
+			await applyWorkspaceEdit(
+				{
+					documentChanges: [
+						{
+							kind: "rename",
+							oldUri,
+							newUri,
+							options: { overwrite: true, ignoreIfExists: true },
+						} satisfies RenameFile,
+					],
+				},
+				tempDir.path(),
+			);
+			expect(fs.existsSync(oldPath)).toBe(false);
+			expect(fs.readFileSync(newPath, "utf8")).toBe("SOURCE");
+		} finally {
+			tempDir.removeSync();
+		}
+	});
+
+	it("honors DeleteFile recursive and ignoreIfNotExists options", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-delete-options-");
+		try {
+			const directory = path.join(tempDir.path(), "directory");
+			const uri = fileToUri(directory);
+			fs.mkdirSync(directory);
+			await Bun.write(path.join(directory, "child.ts"), "KEEP");
+
+			const nonRecursive: DeleteFile = { kind: "delete", uri, options: { recursive: false } };
+			await expect(applyWorkspaceEdit({ documentChanges: [nonRecursive] }, tempDir.path())).rejects.toThrow();
+			expect(fs.readFileSync(path.join(directory, "child.ts"), "utf8")).toBe("KEEP");
+
+			const recursive: DeleteFile = { kind: "delete", uri, options: { recursive: true } };
+			await applyWorkspaceEdit({ documentChanges: [recursive] }, tempDir.path());
+			expect(fs.existsSync(directory)).toBe(false);
+
+			const ignored = await applyWorkspaceEdit(
+				{
+					documentChanges: [{ kind: "delete", uri, options: { ignoreIfNotExists: true } } satisfies DeleteFile],
+				},
+				tempDir.path(),
+			);
+			expect(ignored).toEqual([]);
+		} finally {
+			tempDir.removeSync();
+		}
+	});
+
+	it("does not delete the source when a rename target resolves to the same file", async () => {
+		// A case-only rename on a case-insensitive filesystem yields distinct path
+		// strings that resolve to one inode. Reproduce that deterministically on a
+		// case-sensitive filesystem with a symlinked parent directory: `dir/f.ts`
+		// and `dirlink/f.ts` are the same file. The overwrite branch must skip
+		// removing the destination, or it deletes the source before the rename.
+		const tempDir = TempDir.createSync("@omp-lsp-same-file-rename-");
+		try {
+			const realDir = path.join(tempDir.path(), "dir");
+			fs.mkdirSync(realDir);
+			const filePath = path.join(realDir, "f.ts");
+			await Bun.write(filePath, "SOURCE");
+
+			const linkDir = path.join(tempDir.path(), "dirlink");
+			fs.symlinkSync(realDir, linkDir);
+			const aliasPath = path.join(linkDir, "f.ts");
+
+			const renameOp: RenameFile = {
+				kind: "rename",
+				oldUri: fileToUri(filePath),
+				newUri: fileToUri(aliasPath),
+				options: { overwrite: true },
+			};
+			expect(renameOp.oldUri).not.toBe(renameOp.newUri);
+
+			await applyWorkspaceEdit({ documentChanges: [renameOp] }, tempDir.path());
+			expect(fs.existsSync(filePath)).toBe(true);
+			expect(fs.readFileSync(filePath, "utf8")).toBe("SOURCE");
+		} finally {
+			tempDir.removeSync();
+		}
+	});
+
 	it("flushes pending descendant text edits before a folder delete", async () => {
 		// Mirror of the folder-rename subtree-flush test for the `delete` arm:
 		// edits queued against a child URI must land at the original path
@@ -2813,6 +2954,7 @@ describe("lsp regressions", () => {
 			const folderDelete: DeleteFile = {
 				kind: "delete",
 				uri: folderUri,
+				options: { recursive: true },
 			};
 			const workspaceEdit: WorkspaceEdit = {
 				documentChanges: [childEdit, folderDelete],

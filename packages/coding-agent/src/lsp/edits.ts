@@ -1,13 +1,17 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { isEexist, isEnoent } from "@oh-my-pi/pi-utils";
 import { formatPathRelativeToCwd } from "../tools/path-utils";
 import { ToolError } from "../tools/tool-errors";
 import type {
 	CreateFile,
+	CreateFileOptions,
 	DeleteFile,
+	DeleteFileOptions,
 	Position,
 	Range,
 	RenameFile,
+	RenameFileOptions,
 	TextDocumentEdit,
 	TextEdit,
 	WorkspaceEdit,
@@ -168,9 +172,9 @@ export async function applyTextEdits(filePath: string, edits: TextEdit[]): Promi
 
 type WorkspaceEditOp =
 	| { kind: "text"; uri: string; edits: TextEdit[] }
-	| { kind: "create"; uri: string }
-	| { kind: "rename"; oldUri: string; newUri: string }
-	| { kind: "delete"; uri: string };
+	| { kind: "create"; uri: string; options?: CreateFileOptions }
+	| { kind: "rename"; oldUri: string; newUri: string; options?: RenameFileOptions }
+	| { kind: "delete"; uri: string; options?: DeleteFileOptions };
 
 /**
  * Flatten documentChanges into an ordered op list. Text edits are accumulated
@@ -216,7 +220,7 @@ function planDocumentChanges(documentChanges: NonNullable<WorkspaceEdit["documen
 			if (change.kind === "create") {
 				const createOp = change as CreateFile;
 				flushUri(createOp.uri);
-				ops.push({ kind: "create", uri: createOp.uri });
+				ops.push({ kind: "create", uri: createOp.uri, options: createOp.options });
 			} else if (change.kind === "rename") {
 				const renameOp = change as RenameFile;
 				// Per LSP §3.16.2 documentChanges are applied in declared order.
@@ -226,11 +230,16 @@ function planDocumentChanges(documentChanges: NonNullable<WorkspaceEdit["documen
 				// `options.overwrite` and `options.ignoreIfExists`).
 				flushSubtree(renameOp.oldUri);
 				flushSubtree(renameOp.newUri);
-				ops.push({ kind: "rename", oldUri: renameOp.oldUri, newUri: renameOp.newUri });
+				ops.push({
+					kind: "rename",
+					oldUri: renameOp.oldUri,
+					newUri: renameOp.newUri,
+					options: renameOp.options,
+				});
 			} else if (change.kind === "delete") {
 				const deleteOp = change as DeleteFile;
 				flushSubtree(deleteOp.uri);
-				ops.push({ kind: "delete", uri: deleteOp.uri });
+				ops.push({ kind: "delete", uri: deleteOp.uri, options: deleteOp.options });
 			}
 		}
 	}
@@ -264,17 +273,59 @@ export async function applyWorkspaceEdit(edit: WorkspaceEdit, cwd: string): Prom
 				applied.push(`Applied ${op.edits.length} edit(s) to ${formatPathRelativeToCwd(filePath, cwd)}`);
 			} else if (op.kind === "create") {
 				const filePath = uriToFile(op.uri);
-				await Bun.write(filePath, "");
+				await fs.mkdir(path.dirname(filePath), { recursive: true });
+				try {
+					if (op.options?.overwrite) {
+						await Bun.write(filePath, "");
+					} else {
+						const handle = await fs.open(filePath, "wx");
+						await handle.close();
+					}
+				} catch (error) {
+					if (!(op.options?.ignoreIfExists && !op.options.overwrite && isEexist(error))) {
+						throw error;
+					}
+					continue;
+				}
 				applied.push(`Created ${formatPathRelativeToCwd(filePath, cwd)}`);
 			} else if (op.kind === "rename") {
 				const oldPath = uriToFile(op.oldUri);
 				const newPath = uriToFile(op.newUri);
 				await fs.mkdir(path.dirname(newPath), { recursive: true });
-				await fs.rename(oldPath, newPath);
+				if (oldPath !== newPath) {
+					try {
+						const targetStat = await fs.lstat(newPath);
+						if (!op.options?.overwrite) {
+							if (op.options?.ignoreIfExists) continue;
+							throw new ToolError(`rename target already exists: ${formatPathRelativeToCwd(newPath, cwd)}`);
+						}
+						// Only remove the destination when it is a distinct file. On a
+						// case-insensitive filesystem a case-only rename resolves both
+						// paths to the same inode; removing newPath would delete the
+						// source, so let fs.rename change the case in place instead.
+						const sourceStat = await fs.lstat(oldPath);
+						if (sourceStat.dev !== targetStat.dev || sourceStat.ino !== targetStat.ino) {
+							await fs.rm(newPath, { recursive: true });
+						}
+					} catch (error) {
+						if (!isEnoent(error)) throw error;
+					}
+					await fs.rename(oldPath, newPath);
+				}
 				applied.push(`Renamed ${formatPathRelativeToCwd(oldPath, cwd)} → ${formatPathRelativeToCwd(newPath, cwd)}`);
 			} else {
 				const filePath = uriToFile(op.uri);
-				await fs.rm(filePath, { recursive: true });
+				try {
+					const stat = await fs.lstat(filePath);
+					if (stat.isDirectory() && !stat.isSymbolicLink() && !op.options?.recursive) {
+						await fs.rmdir(filePath);
+					} else {
+						await fs.rm(filePath, { recursive: op.options?.recursive ?? false });
+					}
+				} catch (error) {
+					if (!(op.options?.ignoreIfNotExists && isEnoent(error))) throw error;
+					continue;
+				}
 				applied.push(`Deleted ${formatPathRelativeToCwd(filePath, cwd)}`);
 			}
 		}
