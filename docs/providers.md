@@ -51,7 +51,7 @@ For headless or remote setups backed by a shared auth broker, the CLI exposes `o
 
 When a model has no credentials, `omp` tells you to run `/login` or set the provider's environment variable.
 
-For ClinePass, set `CLINE_API_KEY` or run `/login cline-pass` to open the Cline dashboard and validate a newly created API key. OMP refreshes its model roster from Cline's public recommended-models endpoint, retains generated metadata as an offline fallback, and reports the subscription's five-hour, weekly, and monthly quota windows through `omp usage`.
+For ClinePass, set `CLINE_API_KEY` or run `/login cline-pass` to open the Cline dashboard and validate a newly created API key. OMP refreshes its model roster from Cline's public recommended-models endpoint, retains generated metadata as an offline fallback, and reports the subscription's five-hour, weekly, and monthly quota windows through `omp usage`. The roster also includes Cline's free-tier models (marked `(free)`): they ride the same key at $0 outside the subscription quota, so they work on any Cline account even without a ClinePass subscription. Subscription models show their upstream list price in the model picker and session cost as an API-equivalent reference (matching Codex and GitHub Copilot); only the `(free)` tier is actually $0. The integration mirrors the official Cline CLI's client behavior throughout — client-identity headers, roster interpretation, and OpenRouter-based metadata enrichment for models the bundled catalog has not priced yet — with Cline's blessing for a native integration.
 
 ### Pinning a key in `models.yml`
 
