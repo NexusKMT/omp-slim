@@ -1,13 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Fixed
 
 - Fixed Claude Code user discovery ignoring `CLAUDE_CONFIG_DIR` for configuration, plugins, MCP servers, and imported sessions ([#8436](https://github.com/can1357/oh-my-pi/issues/8436)).
-
-
-### Fixed
-
 - Fixed the status-line git branch display freezing on the previous branch after the first branch switch, caused by the HEAD watcher binding to a file inode that git unlinks on its atomic HEAD rename ([#8412](https://github.com/can1357/oh-my-pi/issues/8412)).
 - Fixed Pi extension contexts omitting the runtime `mode`, which made documented TUI guards silently disable extension UI ([#8419](https://github.com/can1357/oh-my-pi/issues/8419)).
 - Fixed extension-registered tool names being rejected by `--tools` before extension discovery, preventing least-privilege sessions from allowlisting plugin tools ([#8421](https://github.com/can1357/oh-my-pi/issues/8421)).
