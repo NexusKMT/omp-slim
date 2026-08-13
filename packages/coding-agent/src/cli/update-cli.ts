@@ -20,6 +20,7 @@ const REPO = "can1357/oh-my-pi";
 const PACKAGE = "@oh-my-pi/pi-coding-agent";
 const HOMEBREW_FORMULA = "can1357/tap/omp";
 const MISE_TOOL = "github:can1357/oh-my-pi";
+const NIX_STORE_DIR = "/nix/store";
 /**
  * Official npm registry origin.
  *
@@ -421,7 +422,7 @@ function isPathInDirectory(filePath: string, directoryPath: string): boolean {
 	return isPathInDirectoryLexical(resolvedFile, dirReal);
 }
 
-type UpdateMethod = "brew" | "mise" | "bun" | "npm" | "binary";
+type UpdateMethod = "brew" | "mise" | "nix" | "bun" | "npm" | "binary";
 
 interface UpdateMethodResolutionOptions {
 	homebrewPrefix?: string;
@@ -440,6 +441,7 @@ interface UpdateMethodResolutionOptions {
 type UpdateTarget =
 	| { method: "brew" }
 	| { method: "mise" }
+	| { method: "nix" }
 	| { method: "bun"; path?: string }
 	| { method: "npm"; path?: string }
 	| { method: "binary"; path: string; replacesSymlink: boolean };
@@ -453,6 +455,7 @@ function resolveUpdateMethod(
 	const launcherExtension = path.extname(ompPath).toLowerCase();
 	const isWindowsScriptLauncher =
 		launcherExtension === ".cmd" || launcherExtension === ".ps1" || launcherExtension === ".bat";
+	if (isPathInDirectory(ompPath, NIX_STORE_DIR)) return "nix";
 	if (homebrewPrefix && isPathInDirectory(ompPath, path.join(homebrewPrefix, "bin"))) return "brew";
 	if (miseBinDirs.some(dir => isPathInDirectory(ompPath, dir))) return "mise";
 	if (miseDataDir && isPathInDirectory(ompPath, path.join(miseDataDir, "shims"))) return "mise";
@@ -1355,7 +1358,10 @@ export async function runUpdateCommand(opts: { force: boolean; check: boolean })
 	try {
 		const forceBinary = shouldForceBinaryUpdate(release);
 		const target = await resolveUpdateTarget({ allowPackageManagers: !forceBinary });
-		if (target.method === "brew") {
+		if (target.method === "nix") {
+			console.log(chalk.yellow("This installation is managed by Nix and cannot update itself."));
+			console.log(chalk.dim("Update the flake input or profile that provides omp, then rebuild."));
+		} else if (target.method === "brew") {
 			await updateViaHomebrew(release.version, opts.force);
 		} else if (target.method === "mise") {
 			await updateViaMise(release.version, opts.force);

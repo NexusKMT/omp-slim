@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Made the embedded dashboard archive byte-reproducible by sorting entries and zeroing tar and gzip timestamps before it is compiled into OMP.
+
 ## [17.2.10] - 2026-08-06
 
 ### Changed

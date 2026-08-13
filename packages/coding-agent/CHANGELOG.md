@@ -5,6 +5,7 @@
 ### Added
 
 - Added Astral `ty` as a built-in Python primary LSP server (`ty server`), ordered behind `pyright`/`basedpyright`/`pylsp` so it becomes the primary Python LSP only when the existing servers are unavailable. `ruff` remains the Python linter and coexists alongside `ty` ([#4617](https://github.com/can1357/oh-my-pi/issues/4617)).
+- Added first-party Nix support with reproducible source builds for Linux and macOS on x86-64 and ARM64, a pinned development shell, an overlay, NixOS and Home Manager modules, offline Bun dependencies, and lightweight flake evaluation in CI. Nix-managed installs now direct updates back through Nix instead of replacing store-managed executables.
 
 ### Changed
 

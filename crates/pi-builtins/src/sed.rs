@@ -7930,7 +7930,7 @@ fn re_or_saved_re<'a>(
 
 #[cfg(unix)]
 fn shell_command(cmd: &str, host: &Host) -> std::process::Command {
-	let mut c = std::process::Command::new("/bin/sh");
+	let mut c = std::process::Command::new("sh");
 	c.arg("-c").arg(cmd);
 	// run relative to the shell's cwd,
 	// not the host process cwd. `output()` already keeps the child's stdio
