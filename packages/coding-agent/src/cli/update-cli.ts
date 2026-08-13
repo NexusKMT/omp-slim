@@ -12,6 +12,7 @@ import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { $env, $which, APP_NAME, compareVersions, isEnoent, VERSION } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
+import { withFileLock } from "@oh-my-pi/pi-utils/file-lock";
 import { $ } from "bun";
 import { theme } from "../modes/theme/theme";
 import { isTimeoutError, withTimeoutSignal } from "../utils/fetch-timeout";
@@ -1396,16 +1397,22 @@ export async function updateViaBinaryAt(
 	});
 	console.log(chalk.dim(`Verified ${asset.digest}`));
 
-	console.log(chalk.dim("Installing update..."));
-	await replaceBinaryForUpdate({
-		targetPath,
-		tempPath,
-		backupPath,
-		expectedVersion,
-		verifyInstalledVersion: options.verifyInstalledVersion ?? verifyInstalledVersion,
+	// Serialize the target swap and stale-artifact sweep per target so two
+	// overlapping `omp update` runs never replace the same binary concurrently
+	// or reclaim each other's live backup/temp files. The download above writes
+	// to a unique temp path and is safe to overlap; only the swap is shared.
+	await withFileLock(targetPath, async () => {
+		console.log(chalk.dim("Installing update..."));
+		await replaceBinaryForUpdate({
+			targetPath,
+			tempPath,
+			backupPath,
+			expectedVersion,
+			verifyInstalledVersion: options.verifyInstalledVersion ?? verifyInstalledVersion,
+		});
+		// Reclaim backups from earlier updates whose owning process has since exited.
+		await sweepStaleUpdateArtifacts(targetPath);
 	});
-	// Reclaim backups from earlier updates whose owning process has since exited.
-	await sweepStaleUpdateArtifacts(targetPath);
 	printVerifiedVersion(expectedVersion);
 	console.log(chalk.dim(`Restart ${APP_NAME} to use the new version`));
 }
@@ -1464,65 +1471,69 @@ export async function updateViaShimTakeover(
 		fetchImpl: options.fetchImpl,
 	});
 	console.log(chalk.dim(`Verified ${asset.digest}`));
-
-	console.log(chalk.dim(`Installing ${APP_NAME}.exe beside the script launcher...`));
-	await fs.promises.rename(tempPath, exePath);
-	// Retire the shims so PATH resolution lands on the new exe. Renamed, not
-	// deleted: restorable on verification failure, and Windows permits
-	// renaming a batch file that is still executing. A shim that cannot be
-	// renamed (held open without delete sharing) is rewritten in place as a
-	// forwarder to the exe — write and rename take different Windows locks,
-	// so one can succeed where the other fails.
-	const backupSuffix = `${attempt}.bak`;
-	const retired: Array<{ launcher: string; backup: string }> = [];
 	const forwarded: Array<{ launcher: string; original: string }> = [];
 	const stuck: string[] = [];
-	for (const ext of ["", ".cmd", ".ps1", ".bat"]) {
-		const launcher = path.join(launcherDir, `${APP_NAME}${ext}`);
-		const backup = `${launcher}.${backupSuffix}`;
-		try {
-			await fs.promises.rename(launcher, backup);
-			retired.push({ launcher, backup });
-		} catch (err) {
-			if (isEnoent(err)) continue;
+	// Serialize the launcher swap and artifact sweep so two overlapping updates
+	// never retire the same shims or reclaim a live run's backup before its
+	// verification can roll it back.
+	await withFileLock(exePath, async () => {
+		console.log(chalk.dim(`Installing ${APP_NAME}.exe beside the script launcher...`));
+		await fs.promises.rename(tempPath, exePath);
+		// Retire the shims so PATH resolution lands on the new exe. Renamed, not
+		// deleted: restorable on verification failure, and Windows permits
+		// renaming a batch file that is still executing. A shim that cannot be
+		// renamed (held open without delete sharing) is rewritten in place as a
+		// forwarder to the exe — write and rename take different Windows locks,
+		// so one can succeed where the other fails.
+		const backupSuffix = `${attempt}.bak`;
+		const retired: Array<{ launcher: string; backup: string }> = [];
+		for (const ext of ["", ".cmd", ".ps1", ".bat"]) {
+			const launcher = path.join(launcherDir, `${APP_NAME}${ext}`);
+			const backup = `${launcher}.${backupSuffix}`;
 			try {
-				const original = await Bun.file(launcher).text();
-				await Bun.write(launcher, SHIM_FORWARDERS[ext]);
-				forwarded.push({ launcher, original });
-			} catch {
-				stuck.push(launcher);
+				await fs.promises.rename(launcher, backup);
+				retired.push({ launcher, backup });
+			} catch (err) {
+				if (isEnoent(err)) continue;
+				try {
+					const original = await Bun.file(launcher).text();
+					await Bun.write(launcher, SHIM_FORWARDERS[ext]);
+					forwarded.push({ launcher, original });
+				} catch {
+					stuck.push(launcher);
+				}
 			}
 		}
-	}
 
-	// Verify the exe by its explicit path: $which cached the shim path when
-	// the update target was resolved, and the shim was just renamed away, so
-	// a PATH re-resolution here would test a file that no longer exists.
-	const verify = options.verifyBinary ?? verifyBinaryAtPath;
-	const verification = await verify(exePath, expectedVersion);
-	if (!verification.ok) {
-		for (const { launcher, backup } of retired) {
-			try {
-				await fs.promises.rename(backup, launcher);
-			} catch {}
+		// Verify the exe by its explicit path: $which cached the shim path when
+		// the update target was resolved, and the shim was just renamed away, so
+		// a PATH re-resolution here would test a file that no longer exists.
+		const verify = options.verifyBinary ?? verifyBinaryAtPath;
+		const verification = await verify(exePath, expectedVersion);
+		if (!verification.ok) {
+			for (const { launcher, backup } of retired) {
+				try {
+					await fs.promises.rename(backup, launcher);
+				} catch {}
+			}
+			for (const { launcher, original } of forwarded) {
+				try {
+					await Bun.write(launcher, original);
+				} catch {}
+			}
+			await unlinkIfExists(exePath);
+			throw new Error(
+				`${formatVerificationFailure(verification, expectedVersion)}; restored previous ${APP_NAME} launcher`,
+			);
 		}
-		for (const { launcher, original } of forwarded) {
-			try {
-				await Bun.write(launcher, original);
-			} catch {}
+		for (const { backup } of retired) {
+			await removeBackupBestEffort(backup);
 		}
-		await unlinkIfExists(exePath);
-		throw new Error(
-			`${formatVerificationFailure(verification, expectedVersion)}; restored previous ${APP_NAME} launcher`,
-		);
-	}
-	for (const { backup } of retired) {
-		await removeBackupBestEffort(backup);
-	}
-	// Reclaim exe backups and retired-shim leftovers from earlier attempts.
-	for (const ext of [".exe", "", ".cmd", ".ps1", ".bat"]) {
-		await sweepStaleUpdateArtifacts(path.join(launcherDir, `${APP_NAME}${ext}`));
-	}
+		// Reclaim exe backups and retired-shim leftovers from earlier attempts.
+		for (const ext of [".exe", "", ".cmd", ".ps1", ".bat"]) {
+			await sweepStaleUpdateArtifacts(path.join(launcherDir, `${APP_NAME}${ext}`));
+		}
+	});
 	for (const { launcher } of forwarded) {
 		console.log(chalk.dim(`Converted ${launcher} to a forwarder (it could not be removed).`));
 	}

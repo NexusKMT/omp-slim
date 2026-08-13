@@ -1105,12 +1105,16 @@ describe("update-cli concurrent binary updates", () => {
 		});
 	}
 
-	// Regression for #8434: two overlapping `omp update` runs must not share a
-	// temp path. Run A downloads slowly and only finishes after run B has fully
-	// installed. With the old fixed `<binary>.new` temp name, B's pre-download
-	// unlink deleted A's temp file, so A's chmod failed with ENOENT even though
-	// its size + digest passed. Unique temp paths keep the two runs independent.
-	it("lets an overlapping slow run install after a fast run completes, instead of failing chmod with ENOENT", async () => {
+	const fastFetch = async (input: string | URL | Request): Promise<Response> => {
+		const requestUrl = String(input);
+		if (requestUrl.startsWith("https://api.github.com/")) return metadata();
+		if (requestUrl === url) return new Response(payload);
+		throw new Error(`Unexpected request: ${requestUrl}`);
+	};
+
+	const verify = async () => ({ ok: true, actual: version });
+
+	async function prepare(): Promise<{ dir: string; targetPath: string }> {
 		const loadedTheme = await getThemeByName("dark");
 		if (!loadedTheme) throw new Error("theme unavailable");
 		setThemeInstance(loadedTheme);
@@ -1118,6 +1122,16 @@ describe("update-cli concurrent binary updates", () => {
 		const dir = await makeTempDir();
 		const targetPath = path.join(dir, "omp");
 		await Bun.write(targetPath, "old binary");
+		return { dir, targetPath };
+	}
+
+	// Regression for #8434: two overlapping `omp update` runs must not share a
+	// temp path. Run A downloads slowly and only finishes after run B has fully
+	// installed. With the old fixed `<binary>.new` temp name, B's pre-download
+	// unlink deleted A's temp file, so A's chmod failed with ENOENT even though
+	// its size + digest passed. Unique temp paths keep the two runs independent.
+	it("lets an overlapping slow run install after a fast run completes, instead of failing chmod with ENOENT", async () => {
+		const { dir, targetPath } = await prepare();
 
 		const aWroteFirstChunk = Promise.withResolvers<void>();
 		const letAFinish = Promise.withResolvers<void>();
@@ -1139,13 +1153,6 @@ describe("update-cli concurrent binary updates", () => {
 			}
 			throw new Error(`Unexpected request: ${requestUrl}`);
 		};
-		const fastFetch = async (input: string | URL | Request): Promise<Response> => {
-			const requestUrl = String(input);
-			if (requestUrl.startsWith("https://api.github.com/")) return metadata();
-			if (requestUrl === url) return new Response(payload);
-			throw new Error(`Unexpected request: ${requestUrl}`);
-		};
-		const verify = async () => ({ ok: true, actual: version, path: targetPath });
 
 		const runA = updateViaBinaryAt(targetPath, version, {
 			binaryName,
@@ -1163,6 +1170,41 @@ describe("update-cli concurrent binary updates", () => {
 
 		expect(await Bun.file(targetPath).bytes()).toEqual(new Uint8Array(payload));
 		const residue = (await fs.readdir(dir)).filter(name => name.endsWith(".new"));
+		expect(residue).toEqual([]);
+	});
+
+	// Regression: a failed verification must still roll back its own backup even
+	// when another update completes while it is held. The per-target lock
+	// serializes the swap + sweep, so the concurrent run's sweep cannot reclaim
+	// the live backup before the rollback renames it back.
+	it("rolls back its backup when verification fails while another update runs", async () => {
+		const { dir, targetPath } = await prepare();
+
+		const enteredVerify = Promise.withResolvers<void>();
+		const releaseVerify = Promise.withResolvers<void>();
+		const failingVerify = async () => {
+			enteredVerify.resolve();
+			await releaseVerify.promise;
+			return { ok: false, actual: "0.0.0", path: targetPath };
+		};
+
+		const runA = updateViaBinaryAt(targetPath, version, {
+			binaryName,
+			fetchImpl: fastFetch,
+			verifyInstalledVersion: failingVerify,
+		});
+		await enteredVerify.promise;
+		const runB = updateViaBinaryAt(targetPath, version, {
+			binaryName,
+			fetchImpl: fastFetch,
+			verifyInstalledVersion: verify,
+		});
+		releaseVerify.resolve();
+		await expect(runA).rejects.toThrow(/still reports 0\.0\.0 \(expected 999\.0\.0\)/);
+		await runB;
+
+		expect(await Bun.file(targetPath).bytes()).toEqual(new Uint8Array(payload));
+		const residue = (await fs.readdir(dir)).filter(name => name.endsWith(".bak") || name.endsWith(".new"));
 		expect(residue).toEqual([]);
 	});
 });
