@@ -3492,3 +3492,88 @@ describe("expert elixir lsp", () => {
 		expect(names.indexOf("elixirls")).toBeLessThan(names.indexOf("expert"));
 	});
 });
+
+describe("ty python lsp", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("registers ty for .py behind existing Python primaries and before ruff", () => {
+		const config = { servers: DEFAULTS as unknown as Record<string, ServerConfig> };
+		const names = getServersForFile(config, "app.py").map(([name]) => name);
+		expect(names).toContain("ty");
+		expect(names).toContain("ruff");
+		// ty is behind all existing Python primaries
+		expect(names.indexOf("pyright")).toBeLessThan(names.indexOf("ty"));
+		expect(names.indexOf("basedpyright")).toBeLessThan(names.indexOf("ty"));
+		expect(names.indexOf("pylsp")).toBeLessThan(names.indexOf("ty"));
+		// ruff (linter) sorts after all primaries including ty
+		expect(names.indexOf("ty")).toBeLessThan(names.indexOf("ruff"));
+	});
+
+	it("registers ty for .pyi stub files", () => {
+		const config = { servers: DEFAULTS as unknown as Record<string, ServerConfig> };
+		const names = getServersForFile(config, "app.pyi").map(([name]) => name);
+		expect(names).toContain("ty");
+	});
+
+	it("auto-detects ty when its binary and Python root markers are present", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-ty-detect-");
+		const resolvedTy = path.join(tempDir.path(), "bin", "ty");
+		const whichSpy = vi
+			.spyOn(piUtils, "$which")
+			.mockImplementation(command => (command === "ty" ? resolvedTy : null));
+		try {
+			await Bun.write(path.join(tempDir.path(), "pyproject.toml"), '[project]\nname = "demo"\n');
+			const config = loadConfig(tempDir.path());
+			expect(config.servers.ty?.resolvedCommand).toBe(resolvedTy);
+			expect(config.servers.ty?.command).toBe("ty");
+			expect(config.servers.ty?.args).toEqual(["server"]);
+			expect(whichSpy).toHaveBeenCalledWith("ty");
+		} finally {
+			tempDir.removeSync();
+		}
+	});
+
+	it("coexists with ruff: ty is primary, ruff is linter, both auto-detected", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-ty-ruff-");
+		const resolvedTy = path.join(tempDir.path(), "bin", "ty");
+		const resolvedRuff = path.join(tempDir.path(), "bin", "ruff");
+		vi.spyOn(piUtils, "$which").mockImplementation(command =>
+			command === "ty" ? resolvedTy : command === "ruff" ? resolvedRuff : null,
+		);
+		try {
+			await Bun.write(path.join(tempDir.path(), "pyproject.toml"), '[project]\nname = "demo"\n');
+			const config = loadConfig(tempDir.path());
+			expect(config.servers.ty?.resolvedCommand).toBe(resolvedTy);
+			expect(config.servers.ruff?.resolvedCommand).toBe(resolvedRuff);
+			expect(config.servers.ruff?.isLinter).toBe(true);
+			expect(config.servers.ty?.isLinter).toBeFalsy();
+			const names = getServersForFile(config, path.join(tempDir.path(), "app.py")).map(([name]) => name);
+			expect(names.indexOf("ty")).toBeLessThan(names.indexOf("ruff"));
+		} finally {
+			tempDir.removeSync();
+		}
+	});
+
+	it("auto-detects ty in a ty.toml-only project, resolving via project-local venv bin", async () => {
+		// Astral documents ty.toml as a first-class project config file; a project
+		// that opts into ty with only that file (no pyproject/setup/requirements)
+		// must still pass the root-marker gate AND resolve the local venv binary.
+		const tempDir = TempDir.createSync("@omp-lsp-ty-toml-");
+		const venvBin = process.platform === "win32" ? ".venv/Scripts" : ".venv/bin";
+		const resolvedTy = path.join(tempDir.path(), venvBin, "ty");
+		// $which never succeeds: only LOCAL_BIN_PATHS resolution can find ty.
+		vi.spyOn(piUtils, "$which").mockImplementation(() => null);
+		try {
+			await Bun.write(path.join(tempDir.path(), "ty.toml"), "[configuration]\n");
+			await Bun.write(resolvedTy, '#!/bin/sh\nexec ty "$@"\n');
+			const config = loadConfig(tempDir.path());
+			expect(config.servers.ty?.resolvedCommand).toBe(resolvedTy);
+			expect(config.servers.ty?.command).toBe("ty");
+			expect(config.servers.ty?.args).toEqual(["server"]);
+		} finally {
+			tempDir.removeSync();
+		}
+	});
+});

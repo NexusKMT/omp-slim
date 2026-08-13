@@ -135,6 +135,9 @@
 ### Fixed
 
 - Fixed Hindsight `per-project` and `per-project-tagged` scoping splitting one repository across two memory scopes when the checkout directory carries capitals: the project label is now lowercased, so a checkout at `~/code/General` writes and recalls under `project:general` like every other client of the same bank instead of opening a private `project:General` scope.
+### Added
+
+- Added Astral `ty` as a built-in Python primary LSP server (`ty server`), ordered behind `pyright`/`basedpyright`/`pylsp` so it becomes the primary Python LSP only when the existing servers are unavailable. `ruff` remains the Python linter and coexists alongside `ty` ([#4617](https://github.com/can1357/oh-my-pi/issues/4617)).
 
 ## [17.2.12] - 2026-08-08
 
