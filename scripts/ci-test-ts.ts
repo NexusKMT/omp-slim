@@ -65,14 +65,8 @@ const validModes: Record<Mode, true> = {
 // separate `bun test` child process. A fresh process per chunk resets Bun's
 // heap and reaps any dangling spawned children between groups, keeping peak RSS
 // under the CI runner's OOM ceiling (a single 170–370-file invocation gets
-// SIGKILLed at 137). Every bucket is chunked, including singleton/global-state:
-// that bucket is selected precisely because its suites mutate process-wide state
-// (env vars, fake timers, Settings/agent-dir singletons), and it is sequencing,
-// not co-location, that keeps them from colliding. `parallel: 1` already
-// guarantees the sequencing, so splitting into separate processes strictly
-// increases isolation. Left whole the bucket grew to 79 files and hit the very
-// 137 that chunking exists to prevent; 10 is the width the 650-file native
-// bucket already sustains on this runner.
+// SIGKILLed at 137). The singleton/global-state bucket is left whole: its suites
+// co-locate in one process to exercise process-wide state, so they must not split.
 //
 // The UI/TUI bucket uses a smaller chunk (5) than the others: its suites build up
 // native ghostty-vt cells, and bun 1.3.14's GC aborts (SIGTRAP/SIGABRT, exit
@@ -82,7 +76,7 @@ const validModes: Record<Mode, true> = {
 // 10-file chunk aborts ~50% of runs while either 5-file half is 0/20; halving the
 // chunk keeps each process under the threshold.
 const codingAgentBucketPlans: Record<CodingAgentBucket, { label: string; parallel: number; chunkSize?: number }> = {
-	singleton: { label: "singleton/global-state bucket", parallel: 1, chunkSize: 10 },
+	singleton: { label: "singleton/global-state bucket", parallel: 1 },
 	ui: { label: "UI/TUI bucket", parallel: 1, chunkSize: 5 },
 	runtime: { label: "runtime/session bucket", parallel: 1, chunkSize: 10 },
 	native: { label: "native/tooling/browser/unit bucket", parallel: 1, chunkSize: 10 },
