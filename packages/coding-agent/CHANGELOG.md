@@ -132,6 +132,9 @@
 ### Fixed
 
 - Manual `/shake` now keeps a small recent tail of tool results instead of stripping every eligible result, so the agent does not lose the context it is currently working from ([#7776](https://github.com/can1357/oh-my-pi/issues/7776)).
+### Fixed
+
+- Fixed Hindsight `per-project` and `per-project-tagged` scoping splitting one repository across two memory scopes when the checkout directory carries capitals: the project label is now lowercased, so a checkout at `~/code/General` writes and recalls under `project:general` like every other client of the same bank instead of opening a private `project:General` scope.
 
 ## [17.2.12] - 2026-08-08
 
