@@ -43,7 +43,7 @@ import {
 	resolveSymbolColumn,
 	uriToFile,
 } from "@oh-my-pi/pi-coding-agent/lsp/utils";
-import { getThemeByName } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { getThemeByName, initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 import { clampTimeout } from "@oh-my-pi/pi-coding-agent/tools/tool-timeouts";
@@ -1594,6 +1594,46 @@ describe("lsp regressions", () => {
 				.join("\n");
 
 			expect(output).toBe("OK");
+		} finally {
+			vi.restoreAllMocks();
+			tempDir.removeSync();
+		}
+	});
+
+	it("reports failure when every applicable diagnostics server fails (#8377)", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-all-servers-fail-");
+		try {
+			const targetFile = path.join(tempDir.path(), "target.ts");
+			await Bun.write(targetFile, "export const target = 1;\n");
+			// The diagnostics renderer prefixes status lines via the global theme,
+			// which production initializes before any tool runs.
+			await initTheme();
+
+			const serverConfig: ServerConfig = {
+				command: "broken-lsp",
+				fileTypes: ["ts"],
+				rootMarkers: [],
+			};
+			vi.spyOn(lspConfig, "loadConfig").mockReturnValue({
+				servers: { broken: serverConfig },
+				idleTimeoutMs: undefined,
+			});
+			vi.spyOn(lspConfig, "getServersForFile").mockReturnValue([["broken", serverConfig]]);
+			vi.spyOn(lspClient, "getOrCreateClient").mockRejectedValue(new Error("server exited with code 7"));
+
+			const tool = new LspTool(makeLspSession(tempDir.path()));
+			const result = await tool.execute("all-servers-fail", {
+				action: "diagnostics",
+				file: targetFile,
+				timeout: 5,
+			});
+
+			// A total server failure must not masquerade as a clean file.
+			expect(result.details?.success).toBe(false);
+			const output = textResult(result);
+			expect(output).not.toBe("OK");
+			expect(output).toContain("all language servers failed");
+			expect(output).toContain("broken");
 		} finally {
 			vi.restoreAllMocks();
 			tempDir.removeSync();

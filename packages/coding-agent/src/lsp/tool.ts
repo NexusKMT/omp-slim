@@ -284,6 +284,8 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 				: Math.min(SINGLE_DIAGNOSTICS_WAIT_TIMEOUT_MS, timeoutSec * 1000);
 			const results: string[] = [];
 			const allServerNames = new Set<string>();
+			let totalServerAttempts = 0;
+			let totalServerSuccesses = 0;
 			if (truncatedGlobTargets) {
 				results.push(
 					`${theme.status.warning} Pattern matched more than ${MAX_GLOB_DIAGNOSTIC_TARGETS} files; showing first ${MAX_GLOB_DIAGNOSTIC_TARGETS}. Narrow the glob or use workspace diagnostics.`,
@@ -302,16 +304,21 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 				const uri = fileToUri(resolved);
 				const relPath = formatPathRelativeToCwd(resolved, this.session.cwd);
 				const allDiagnostics: Diagnostic[] = [];
+				const failedServers: string[] = [];
+				let succeededServers = 0;
 
 				// Query all applicable servers for this file
 				for (const [serverName, serverConfig] of servers) {
 					allServerNames.add(serverName);
+					totalServerAttempts++;
 					try {
 						throwIfAborted(signal);
 						if (serverConfig.createClient) {
 							const linterClient = getLinterClient(serverName, serverConfig, this.session.cwd);
 							const diagnostics = await linterClient.lint(resolved);
 							allDiagnostics.push(...diagnostics);
+							succeededServers++;
+							totalServerSuccesses++;
 							continue;
 						}
 						const client = await getOrCreateClient(serverConfig, this.session.cwd, undefined, signal);
@@ -329,11 +336,19 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 							expectedDocumentVersion,
 						});
 						allDiagnostics.push(...diagnostics);
+						succeededServers++;
+						totalServerSuccesses++;
 					} catch (err) {
 						if (err instanceof ToolAbortError || signal?.aborted) {
 							throw err;
 						}
-						// Server failed, continue with others
+						// Server failed; record it so a total failure is not reported as clean.
+						failedServers.push(serverName);
+						logger.debug("LSP diagnostics server failed", {
+							server: serverName,
+							file: relPath,
+							error: err instanceof Error ? err.message : String(err),
+						});
 					}
 				}
 
@@ -351,16 +366,35 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 				sortDiagnostics(uniqueDiagnostics);
 
 				if (!detailed && targets.length === 1) {
-					if (uniqueDiagnostics.length === 0) {
+					if (succeededServers === 0) {
 						return {
-							content: [{ type: "text", text: "OK" }],
+							content: [
+								{
+									type: "text",
+									text: `${theme.status.error} ${relPath}: all language servers failed (${failedServers.join(", ")})`,
+								},
+							],
+							details: { action, serverName: Array.from(allServerNames).join(", "), success: false },
+						};
+					}
+
+					if (uniqueDiagnostics.length === 0) {
+						const text =
+							failedServers.length > 0
+								? `OK\n${theme.status.warning} some servers failed: ${failedServers.join(", ")}`
+								: "OK";
+						return {
+							content: [{ type: "text", text }],
 							details: { action, serverName: Array.from(allServerNames).join(", "), success: true },
 						};
 					}
 
 					const summary = formatDiagnosticsSummary(uniqueDiagnostics);
 					const formatted = uniqueDiagnostics.map(d => formatDiagnostic(d, relPath));
-					const output = `${summary}:\n${formatGroupedDiagnosticMessages(formatted)}`;
+					let output = `${summary}:\n${formatGroupedDiagnosticMessages(formatted)}`;
+					if (failedServers.length > 0) {
+						output += `\n${theme.status.warning} some servers failed: ${failedServers.join(", ")}`;
+					}
 					return {
 						content: [{ type: "text", text: output }],
 						details: { action, serverName: Array.from(allServerNames).join(", "), success: true },
@@ -368,18 +402,33 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 				}
 
 				if (uniqueDiagnostics.length === 0) {
-					results.push(`${theme.status.success} ${relPath}: no issues`);
+					if (succeededServers === 0) {
+						results.push(
+							`${theme.status.error} ${relPath}: all language servers failed (${failedServers.join(", ")})`,
+						);
+					} else {
+						results.push(`${theme.status.success} ${relPath}: no issues`);
+						if (failedServers.length > 0) {
+							results.push(
+								`${theme.status.warning} ${relPath}: some servers failed (${failedServers.join(", ")})`,
+							);
+						}
+					}
 				} else {
 					const summary = formatDiagnosticsSummary(uniqueDiagnostics);
 					results.push(`${theme.status.error} ${relPath}: ${summary}`);
 					const formatted = uniqueDiagnostics.map(d => formatDiagnostic(d, relPath));
 					results.push(formatGroupedDiagnosticMessages(formatted));
+					if (failedServers.length > 0) {
+						results.push(`${theme.status.warning} ${relPath}: some servers failed (${failedServers.join(", ")})`);
+					}
 				}
 			}
 
+			const allServersFailed = totalServerAttempts > 0 && totalServerSuccesses === 0;
 			return {
 				content: [{ type: "text", text: results.join("\n") }],
-				details: { action, serverName: Array.from(allServerNames).join(", "), success: true },
+				details: { action, serverName: Array.from(allServerNames).join(", "), success: !allServersFailed },
 			};
 		}
 
