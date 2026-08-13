@@ -7,7 +7,7 @@
 ### Fixed
 
 - Fixed Claude Code user discovery ignoring CLAUDE_CONFIG_DIR for configuration, plugins, MCP servers, and imported sessions.
-- Fixed the status-line git branch display freezing after switching branches.
+- Fixed the status-line git branch display freezing after switching branches. The original directory-watch fix still froze on Linux, where Bun's inotify-backed `fs.watch` permanently stops delivering events after git's atomic HEAD rename ([oven-sh/bun#24875](https://github.com/oven-sh/bun/issues/24875)); branch watching now stat-polls the HEAD path (`git.head.watch`) on every platform, which also fixes the footer's branch display dying after the first switch.
 - Fixed Pi extension contexts omitting the runtime mode, which caused TUI guards to silently disable extension UI.
 - Fixed extension-registered tool names being rejected by the --tools flag before extension discovery, which prevented least-privilege sessions from allowlisting plugin tools.
 - Fixed omp plugin install failing with cloning errors for legacy Pi extensions whose tool schemas use legacy-typebox builders.
