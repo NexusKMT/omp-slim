@@ -30,7 +30,7 @@ import {
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { FileDiagnosticsResult, WritethroughCallback, WritethroughDeferredHandle } from "../../lsp";
 import type { ToolSession } from "../../tools";
-import { outputMeta } from "../../tools/output-meta";
+import { outputMeta, resolveArtifactSpillThresholdBytes } from "../../tools/output-meta";
 import { ToolError } from "../../tools/tool-errors";
 import { generateDiffString } from "../diff";
 import { getEditClipboard } from "../edit-clipboard";
@@ -66,7 +66,7 @@ function resolveHashlineInput(session: ToolSession, input: string): string {
 		return input;
 	}
 	const pending = pendingSeenLineRetries.get(session);
-	if (!pending || pending.token !== match[1]) {
+	if (!pending || pending.token.toLowerCase() !== match[1].toLowerCase()) {
 		throw new ToolError(
 			"Unknown or expired edit retry token. Use the token from the latest seen-line rejection, or submit a full patch.",
 		);
@@ -149,9 +149,33 @@ function narrowBatchRequest(outer: LspBatchRequest | undefined, isLast: boolean)
 	return { id: outer.id, flush: isLast && outer.flush };
 }
 
+interface SeenLineProvenance {
+	absolutePath: string;
+	tag: string;
+	body: string;
+}
+
 interface RenderedSection {
 	toolResult: AgentToolResult<EditToolDetails, typeof hashlineEditParamsSchema>;
 	perFileResult: EditToolPerFileResult;
+	seenLineProvenance?: SeenLineProvenance;
+}
+
+function recordRenderedSeenLines(
+	session: ToolSession,
+	result: AgentToolResult<EditToolDetails, typeof hashlineEditParamsSchema>,
+	rendered: readonly RenderedSection[],
+): void {
+	const fullText = result.content
+		.filter(part => part.type === "text" && part.text)
+		.map(part => (part.type === "text" ? part.text : ""))
+		.join("\n");
+	if (Buffer.byteLength(fullText, "utf8") > resolveArtifactSpillThresholdBytes(session.settings)) return;
+	for (const section of rendered) {
+		const provenance = section.seenLineProvenance;
+		if (!provenance) continue;
+		recordSeenLinesFromBody(session, provenance.absolutePath, provenance.tag, provenance.body);
+	}
 }
 
 const BLOCK_OP_LABELS: Record<BlockResolution["op"], string> = {
@@ -179,7 +203,6 @@ function renderSection(
 	result: PatchSectionResult,
 	diagnostics: FileDiagnosticsResult | undefined,
 	sourcePath: string,
-	session: ToolSession,
 ): RenderedSection {
 	if (result.op === "delete") {
 		const toolResult: AgentToolResult<EditToolDetails, typeof hashlineEditParamsSchema> = {
@@ -229,10 +252,16 @@ function renderSection(
 	const moveBlock = result.moveDest ? `\nMoved to ${result.moveDest}` : "";
 	const firstChangedLine = result.firstChangedLine ?? diff.firstChangedLine;
 	const text = `${result.header}${blockBlock}${moveBlock}${previewBlock}${warningsBlock}`;
-	if (normalizeToLF(stripBom(result.written).text) === result.after) {
-		recordSeenLinesFromBody(session, canonicalSnapshotKey(result.canonicalPath), result.fileHash, text);
-	}
+	const seenLineProvenance =
+		normalizeToLF(stripBom(result.written).text) === result.after
+			? {
+					absolutePath: canonicalSnapshotKey(result.canonicalPath),
+					tag: result.fileHash,
+					body: text,
+				}
+			: undefined;
 	return {
+		seenLineProvenance,
 		toolResult: {
 			content: [
 				{
@@ -305,15 +334,12 @@ export async function executeHashlineSingle(
 			if (escalate) {
 				throw new ToolError(noChangeLoopDiagnostic(sectionResult.path, count));
 			}
-			return renderSection(sectionResult, undefined, prepared.section.path, options.session).toolResult;
+			return renderSection(sectionResult, undefined, prepared.section.path).toolResult;
 		}
 		resetNoopEdit(options.session, sectionResult.canonicalPath);
-		return renderSection(
-			sectionResult,
-			fs.consumeDiagnostics(sectionResult.path),
-			prepared.section.path,
-			options.session,
-		).toolResult;
+		const rendered = renderSection(sectionResult, fs.consumeDiagnostics(sectionResult.path), prepared.section.path);
+		recordRenderedSeenLines(options.session, rendered.toolResult, [rendered]);
+		return rendered.toolResult;
 	}
 
 	// Multi-section: prepare every section up front so we fail fast before
@@ -354,16 +380,9 @@ export async function executeHashlineSingle(
 				: new ToolError(noChangeDiagnostic(sectionResult.path));
 		}
 		resetNoopEdit(options.session, sectionResult.canonicalPath);
-		rendered.push(
-			renderSection(
-				sectionResult,
-				fs.consumeDiagnostics(sectionResult.path),
-				prepared[i].section.path,
-				options.session,
-			),
-		);
+		rendered.push(renderSection(sectionResult, fs.consumeDiagnostics(sectionResult.path), prepared[i].section.path));
 	}
-	return {
+	const result: AgentToolResult<EditToolDetails, typeof hashlineEditParamsSchema> = {
 		content: [
 			{
 				type: "text",
@@ -377,6 +396,8 @@ export async function executeHashlineSingle(
 			perFileResults: rendered.map(r => r.perFileResult),
 		}),
 	};
+	recordRenderedSeenLines(options.session, result, rendered);
+	return result;
 }
 
 export { HashlineMismatchError, type HashlineParams, hashlineEditParamsSchema };

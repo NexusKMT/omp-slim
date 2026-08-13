@@ -321,7 +321,7 @@ describe("read → edit seen-line guard", () => {
 		expect(retry).toBeDefined();
 		expect(await Bun.file(file).text()).toBe(CONTENT);
 
-		await executeHashlineSingle(execOptions(retry as string, session));
+		await executeHashlineSingle(execOptions((retry as string).toUpperCase(), session));
 		const after = await Bun.file(file).text();
 		expect(after).toContain("X10\nX11\nX12");
 		expect(after).not.toContain("line 10");
@@ -372,6 +372,33 @@ describe("read → edit seen-line guard", () => {
 		await expect(
 			executeHashlineSingle(execOptions(`[notes.txt#${nextTag}]\nPUT 12.=12:\n+UNSEEN`, session)),
 		).rejects.toThrow(/never displayed \(it showed/);
+	});
+
+	it("does not record edit-output lines when the result will spill", async () => {
+		const file = path.join(tmpDir, "notes.txt");
+		await Bun.write(file, CONTENT);
+		const session = {
+			...createSession(tmpDir),
+			settings: Settings.isolated({
+				"edit.enforceSeenLines": true,
+				"tools.artifactSpillThreshold": 0.1,
+				"tools.artifactHeadBytes": 0.03,
+				"tools.artifactTailBytes": 0.03,
+			}),
+		} as ToolSession;
+		const store = getFileSnapshotStore(session);
+
+		const read = await new ReadTool(session).execute("r1", { path: `${file}:1-3` });
+		const tag = tagFromOutput(resultText(read));
+		const edit = await executeHashlineSingle(
+			execOptions(`[notes.txt#${tag}]\nPUT 2.=2:\n+${"EDITED ".repeat(80)}`, session),
+		);
+		const text = resultText(edit);
+		const nextTag = tagFromOutput(text);
+		expect(text).toContain("2:");
+
+		const seen = store.byHash(canonicalSnapshotKey(file), nextTag)?.seenLines;
+		expect(seen?.has(2) ?? false).toBe(false);
 	});
 
 	it("does not trust requested diff lines after an ACP client transforms the write", async () => {
