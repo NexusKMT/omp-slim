@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added dynamic Antigravity and Gemini CLI discovery support for Gemini 3.7 Flash, with low/medium/high thinking-level routing.
+
 ### Changed
 
 - Updated model metadata, context windows, pricing, and configurations in the catalog
