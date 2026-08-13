@@ -225,4 +225,65 @@ describe("pi.typebox compatibility shim", () => {
 			}
 		});
 	});
+
+	// Issue #8420: legacy extensions build raw documents that embed omptype
+	// schema builders. Those builders are callable values, so a document that
+	// nests or spreads them is neither structured-cloneable nor a plain TypeBox
+	// object; `Type.Unsafe` must lower them to wire JSON before use.
+	describe("lowers embedded omptype schemas inside Type.Unsafe documents", () => {
+		it("embeds sibling schema builders in an anyOf branch", () => {
+			const item = Type.Object({ agent: Type.String() });
+			const template = Type.Object({ agent: Type.String() }, { additionalProperties: false });
+			const schema = Type.Unsafe({
+				anyOf: [Type.Array(item, { minItems: 1 }), template],
+				description: "static array or single template",
+			});
+
+			const document = schema.toJsonSchema();
+			expect(() => structuredClone(document)).not.toThrow();
+			expect(document).toEqual({
+				anyOf: [
+					{
+						type: "array",
+						minItems: 1,
+						items: { type: "object", properties: { agent: { type: "string" } }, required: ["agent"] },
+					},
+					{
+						type: "object",
+						properties: { agent: { type: "string" } },
+						required: ["agent"],
+						additionalProperties: false,
+					},
+				],
+				description: "static array or single template",
+			});
+			expect(schema.safeParse([{ agent: "scout" }]).success).toBe(true);
+			expect(schema.safeParse({ agent: "scout" }).success).toBe(true);
+			expect(schema.safeParse(42).success).toBe(false);
+		});
+
+		it("recovers the wire schema when a builder is spread into a new document", () => {
+			const base = Type.Unsafe({
+				anyOf: [
+					{ type: "object", additionalProperties: true },
+					{ type: "boolean", enum: [false] },
+				],
+			});
+			// `{ ...base, description }` copies omptype's internal fields, not JSON
+			// keywords; the shim must recover `anyOf` from the copied self-reference
+			// and overlay the caller's added `description`.
+			const schema = Type.Unsafe({ ...base, description: "mission object or false" });
+
+			expect(schema.toJsonSchema()).toEqual({
+				anyOf: [
+					{ type: "object", additionalProperties: true },
+					{ type: "boolean", enum: [false] },
+				],
+				description: "mission object or false",
+			});
+			expect(schema.safeParse(false).success).toBe(true);
+			expect(schema.safeParse({ objective: "ship" }).success).toBe(true);
+			expect(schema.safeParse("nope").success).toBe(false);
+		});
+	});
 });
