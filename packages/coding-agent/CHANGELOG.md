@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Agent Hub parking a mid-spawn child JSONL (title + session header only) so `task` then fails with `already owned by another session generation` and the row cannot be revived.
+
 ## [17.3.0] - 2026-08-13
 
 ### Breaking Changes

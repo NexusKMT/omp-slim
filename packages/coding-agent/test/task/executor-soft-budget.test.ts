@@ -352,7 +352,21 @@ describe("runSubprocess soft request budget", () => {
 		const rootSessionFile = `${tempDir.path()}/main.jsonl`;
 		const workerSessionFile = `${tempDir.path()}/main/${id}.jsonl`;
 		await Bun.write(rootSessionFile, "");
-		await Bun.write(workerSessionFile, "");
+		await Bun.write(
+			workerSessionFile,
+			[
+				JSON.stringify({ type: "session", version: 3, id, timestamp: "2026-08-13T17:14:48.000Z", cwd: "/tmp" }),
+				JSON.stringify({
+					type: "session_init",
+					id: "si",
+					parentId: null,
+					timestamp: "2026-08-13T17:14:48.000Z",
+					systemPrompt: "system",
+					task: "work",
+					tools: ["read"],
+				}),
+			].join("\n"),
+		);
 		const controller = new AbortController();
 		// abort #1 = budget soft-stop (abortSent still false); abort #2 =
 		// budget hard-abort's abortActiveSession (abortReason already "budget").
@@ -394,7 +408,21 @@ describe("runSubprocess soft request budget", () => {
 		const rootSessionFile = `${tempDir.path()}/main.jsonl`;
 		const workerSessionFile = `${tempDir.path()}/main/${id}.jsonl`;
 		await Bun.write(rootSessionFile, "");
-		await Bun.write(workerSessionFile, "");
+		await Bun.write(
+			workerSessionFile,
+			[
+				JSON.stringify({ type: "session", version: 3, id, timestamp: "2026-08-13T17:14:48.000Z", cwd: "/tmp" }),
+				JSON.stringify({
+					type: "session_init",
+					id: "si",
+					parentId: null,
+					timestamp: "2026-08-13T17:14:48.000Z",
+					systemPrompt: "system",
+					task: "work",
+					tools: ["read"],
+				}),
+			].join("\n"),
+		);
 		const promptStarted = Promise.withResolvers<void>();
 		const promptStopped = Promise.withResolvers<void>();
 		const handle = createMockSession(
