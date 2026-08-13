@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.2] - 2026-08-13
+
 ### Fixed
 
 - Fixed the parent TUI stalling after a subagent submits its result until terminal focus or resize wakes the event loop ([#8462](https://github.com/can1357/oh-my-pi/issues/8462)).

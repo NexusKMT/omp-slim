@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.2] - 2026-08-13
+
 ### Fixed
 
 - Dropped unsigned thinking blocks from Antigravity Claude requests instead of sending them without a signature, preventing HTTP 400 responses when resuming sessions or switching models.
@@ -10,7 +12,6 @@
 ### Removed
 
 - Removed the Antigravity identity-prompt injection (`ANTIGRAVITY_SYSTEM_INSTRUCTION` and `shouldInjectAntigravitySystemInstruction`): Cloud Code Assist accepts arbitrary system instructions on gemini-3.x and Claude routes (verified live), and the injected stub never matched the real client's system prompt anyway. User system prompts are now sent unmodified (still tagged `role: "user"`).
-
 - Fixed Antigravity `auto` mode not failing over to the sandbox endpoint when the daily endpoint returned a thinking-only `STOP`, which caused Advisor turns to be falsely recorded as empty-response failures ([#8480](https://github.com/can1357/oh-my-pi/issues/8480)).
 
 ## [17.3.0] - 2026-08-13
