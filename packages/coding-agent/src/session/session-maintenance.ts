@@ -2625,6 +2625,11 @@ export class SessionMaintenance {
 									providerSessionState: this.#host.providerSessionState,
 									preferWebsockets: this.#host.preferWebsockets,
 									codexCompaction,
+									// This loop already retries the whole compaction attempt on
+									// transient errors, so the summarization oneshots must not
+									// retry too — the budgets would multiply and each outer
+									// wait would stack on top of an inner backoff.
+									oneshotRetry: false,
 								},
 							);
 							break;
