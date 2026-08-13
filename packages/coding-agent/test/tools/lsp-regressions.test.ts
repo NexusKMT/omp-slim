@@ -2645,7 +2645,7 @@ describe("lsp regressions", () => {
 				rootMarkers: [],
 				isLinter: true,
 			};
-			const server = installFakeLsp((message, srv) => {
+			installFakeLsp((message, srv) => {
 				if (message.method === "initialize") {
 					srv.send({
 						jsonrpc: "2.0",
