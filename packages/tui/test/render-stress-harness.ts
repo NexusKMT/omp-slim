@@ -1277,6 +1277,7 @@ class StressDriver {
 		try {
 			this.#tui.start();
 			await this.#settle();
+			let before = this.#snapshot();
 			this.#assertOracles(
 				{
 					kind: "forceRender",
@@ -1288,22 +1289,19 @@ class StressDriver {
 					mutatesViewport: false,
 					checkpoint: false,
 				},
-				this.#snapshot(),
-				this.#snapshot(),
+				before,
+				before,
 				-1,
 			);
 
 			for (let index = 0; index < this.#scenario.iterations; index++) {
-				const before = this.#snapshot();
 				const kind = this.#scenario.replayOperations?.[index] ?? this.#chooseOperation(index, before);
 				const op = await this.#applyOperation(kind);
 				const after = this.#snapshot();
 				this.#recordOperation(index, op.kind, op.detail, before, after);
 				this.#assertOracles(op, before, after, index);
 
-				if ((index + 1) % 50 === 0) {
-					await this.#checkpoint(index, "periodicCheckpoint");
-				}
+				before = (index + 1) % 50 === 0 ? await this.#checkpoint(index, after) : after;
 			}
 		} finally {
 			this.#tui.stop();
@@ -1314,17 +1312,22 @@ class StressDriver {
 	#snapshot(): Snapshot {
 		const position = this.#term.getBufferPosition();
 		const expected = this.#expectedFrame();
-		const view = normalizeLines(this.#term.getViewport());
+		// A scroll-buffer read already contains the viewport rows. Derive the
+		// presented window from it instead of asking Ghostty to decode the active
+		// grid a second time on every oracle snapshot. Tmux-style scenarios do not
+		// consume historical rows, so retain their cheaper viewport-only path.
+		const buffer = this.#traits.preservesPaneHistory
+			? normalizeLines(this.#term.getViewport())
+			: normalizeLines(this.#term.getScrollBuffer());
+		const view = this.#traits.preservesPaneHistory
+			? buffer
+			: buffer.slice(position.viewportY, position.viewportY + this.#term.rows);
 		const viewBackgroundColumns: number[][] = [];
 		for (let row = 0; row < this.#term.rows; row++) {
 			viewBackgroundColumns.push(this.#term.getViewportRowBackgroundColumns(row));
 		}
-		// Tmux pane history is intentionally preserved, so overlay bytes can remain
-		// in historical scrollback after resize/reflow. The non-strict tmux stress
-		// oracle only checks live viewport behavior; avoid repeatedly materializing
-		// huge preserved pane history that no invariant consumes.
 		return {
-			buffer: this.#traits.preservesPaneHistory ? view : normalizeLines(this.#term.getScrollBuffer()),
+			buffer,
 			view,
 			viewBackgroundColumns,
 			frameBackgroundColumns: expected.backgroundColumns,
@@ -2088,8 +2091,7 @@ class StressDriver {
 		return candidates.length === 0 ? current : this.#streams.geometry.pick(candidates);
 	}
 
-	async #checkpoint(index: number, kind: "periodicCheckpoint"): Promise<void> {
-		const before = this.#snapshot();
+	async #checkpoint(index: number, before: Snapshot): Promise<Snapshot> {
 		// Model a prompt submit: the editor keystroke pins the terminal to the
 		// bottom, then the app reconciles any deferred native-scrollback rewrite
 		// only if the renderer can prove the native host viewport is at the tail.
@@ -2111,7 +2113,13 @@ class StressDriver {
 		}
 		await this.#settle();
 		const after = this.#snapshot();
-		this.#recordOperation(index, kind, { forcedCheckpoint: this.#traits.strictNativeScrollback }, before, after);
+		this.#recordOperation(
+			index,
+			"periodicCheckpoint",
+			{ forcedCheckpoint: this.#traits.strictNativeScrollback },
+			before,
+			after,
+		);
 		this.#assertOracles(
 			{
 				kind: "scrollToBottom",
@@ -2128,6 +2136,7 @@ class StressDriver {
 			after,
 			index,
 		);
+		return after;
 	}
 
 	#recordOperation(

@@ -446,7 +446,7 @@ describe.skipIf(process.platform === "win32")("JavaScript eval process isolation
 		await disposeAllVmContexts();
 	});
 
-	it("runs spawned commands in the isolated POSIX process group", async () => {
+	it("preserves process isolation, cwd, state, and rejection recovery in one kernel", async () => {
 		using tempDir = TempDir.createSync("@omp-js-process-isolation-");
 		const session = makeSession(tempDir.path());
 		const evalSessionId = `js-isolation:${crypto.randomUUID()}`;
@@ -461,6 +461,15 @@ describe.skipIf(process.platform === "win32")("JavaScript eval process isolation
 		expect(parentProcessId).not.toBe(process.pid);
 		expect(processGroupId).toBe(parentProcessId);
 
+		const cwd = await executeJs("return process.cwd();", {
+			cwd: tempDir.path(),
+			sessionId: evalSessionId,
+			session,
+		});
+		// process.chdir resolves symlinks (macOS tempdirs live under /var ->
+		// /private/var), so compare physical paths.
+		expect(cwd.output.trim()).toBe(fs.realpathSync(tempDir.path()));
+
 		await executeJs("var saved = 41; function increment(value) { return value + 1; }", {
 			cwd: tempDir.path(),
 			sessionId: evalSessionId,
@@ -472,20 +481,30 @@ describe.skipIf(process.platform === "win32")("JavaScript eval process isolation
 			session,
 		});
 		expect(reused.output.trim()).toBe("42");
-	});
 
-	it("mirrors the session cwd onto the subprocess's real cwd", async () => {
-		using tempDir = TempDir.createSync("@omp-js-process-cwd-");
-		const session = makeSession(tempDir.path());
-		const evalSessionId = `js-cwd:${crypto.randomUUID()}`;
-		const result = await executeJs("return process.cwd();", {
+		const handled = await executeJs('await Promise.reject("handled rejection").catch(() => undefined); return 42;', {
 			cwd: tempDir.path(),
 			sessionId: evalSessionId,
 			session,
 		});
-		// process.chdir resolves symlinks (macOS tempdirs live under /var ->
-		// /private/var), so compare physical paths.
-		expect(result.output.trim()).toBe(fs.realpathSync(tempDir.path()));
+		expect(handled.exitCode).toBe(0);
+		expect(handled.output.trim()).toBe("42");
+
+		const rejected = await executeJs('var savedAfterRejection = 41; Promise.reject("stackless rejection");', {
+			cwd: tempDir.path(),
+			sessionId: evalSessionId,
+			session,
+		});
+		expect(rejected.exitCode).toBe(1);
+		expect(rejected.output).toContain("Unhandled rejection (missing await?): stackless rejection");
+
+		const recovered = await executeJs("return savedAfterRejection + 1;", {
+			cwd: tempDir.path(),
+			sessionId: evalSessionId,
+			session,
+		});
+		expect(recovered.exitCode).toBe(0);
+		expect(recovered.output.trim()).toBe("42");
 	});
 
 	it("still runs cells when the session cwd does not exist", async () => {
@@ -499,33 +518,5 @@ describe.skipIf(process.platform === "win32")("JavaScript eval process isolation
 		});
 		expect(result.exitCode).toBe(0);
 		expect(result.output.trim()).toBe("42");
-	});
-
-	it("keeps the isolated process alive after handled and stackless floated rejections", async () => {
-		using tempDir = TempDir.createSync("@omp-js-process-rejection-");
-		const session = makeSession(tempDir.path());
-		const evalSessionId = `js-rejection:${crypto.randomUUID()}`;
-		const handled = await executeJs('await Promise.reject("handled rejection").catch(() => undefined); return 42;', {
-			cwd: tempDir.path(),
-			sessionId: evalSessionId,
-			session,
-		});
-		expect(handled.exitCode).toBe(0);
-		expect(handled.output.trim()).toBe("42");
-
-		const rejected = await executeJs(
-			'var savedAfterRejection = 41; Promise.reject("stackless rejection"); await Bun.sleep(10);',
-			{ cwd: tempDir.path(), sessionId: evalSessionId, session },
-		);
-		expect(rejected.exitCode).toBe(1);
-		expect(rejected.output).toContain("Unhandled rejection (missing await?): stackless rejection");
-
-		const reused = await executeJs("return savedAfterRejection + 1;", {
-			cwd: tempDir.path(),
-			sessionId: evalSessionId,
-			session,
-		});
-		expect(reused.exitCode).toBe(0);
-		expect(reused.output.trim()).toBe("42");
 	});
 });

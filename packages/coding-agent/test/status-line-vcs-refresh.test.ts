@@ -746,11 +746,9 @@ describe("StatusLineComponent git watcher survives atomic HEAD renames", () => {
 
 	beforeAll(async () => {
 		repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "status-line-headwatch-"));
-		const run = (...args: string[]) => Bun.spawnSync(["git", ...args], { cwd: repoDir });
-		run("init", "-q");
-		run("config", "user.email", "t@example.com");
-		run("config", "user.name", "Test");
-		run("commit", "--allow-empty", "-q", "-m", "init");
+		const gitDir = path.join(repoDir, ".git");
+		await fs.mkdir(gitDir);
+		await fs.writeFile(path.join(gitDir, "HEAD"), "ref: refs/heads/main\n");
 	});
 
 	afterAll(async () => {
@@ -774,10 +772,15 @@ describe("StatusLineComponent git watcher survives atomic HEAD renames", () => {
 		component.updateSettings(gitSegment);
 
 		// Await the watcher's own #onBranchChange signal rather than a wall-clock
-		// delay: a fresh resolver is armed before each switch and awaited after it,
-		// so a frozen watcher surfaces as the test-runner timeout, not a flake.
+		// delay. Only resolve once the atomically replaced HEAD is observable:
+		// directory watchers may also report creation of HEAD.lock.
 		let branchChanged = Promise.withResolvers<void>();
-		component.watchBranch(() => branchChanged.resolve());
+		let expectedBranch: string | null = null;
+		component.watchBranch(() => {
+			if (expectedBranch && component.getTopBorder(80).content.includes(expectedBranch)) {
+				branchChanged.resolve();
+			}
+		});
 		// macOS may keep a file watch alive across the rename, so also pin the
 		// platform-independent requirement: the watcher owns the stable git dir.
 		expect(watchSpy).toHaveBeenCalledWith(path.join(repoDir, ".git"), expect.any(Function));
@@ -786,10 +789,18 @@ describe("StatusLineComponent git watcher survives atomic HEAD renames", () => {
 		component.getTopBorder(80);
 
 		const switchTo = async (branchName: string) => {
-			const fired = branchChanged.promise;
-			await git.branch.checkoutNew(repoDir, branchName);
-			await fired;
+			const gitDir = path.join(repoDir, ".git");
+			const headLock = path.join(gitDir, "HEAD.lock");
+			// Reproduce Git's relevant integration boundary directly: write the
+			// lock, then atomically replace HEAD. Spawning Git adds process startup
+			// but no coverage to the filesystem-watcher regression.
+			await fs.writeFile(headLock, `ref: refs/heads/${branchName}\n`);
 			branchChanged = Promise.withResolvers<void>();
+			expectedBranch = branchName;
+			const fired = branchChanged.promise;
+			await fs.rename(headLock, path.join(gitDir, "HEAD"));
+			await fired;
+			expectedBranch = null;
 		};
 
 		await switchTo("first");

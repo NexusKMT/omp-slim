@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Updated model metadata, context windows, pricing, and configurations in the catalog
+
 ## [17.3.0] - 2026-08-13
 
 ### Breaking Changes
