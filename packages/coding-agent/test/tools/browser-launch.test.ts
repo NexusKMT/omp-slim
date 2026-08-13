@@ -138,6 +138,30 @@ describe("browser executable selection", () => {
 		}
 	});
 
+	it("does not launch the candidate to probe its version on Windows (#8445)", async () => {
+		const tempDir = TempDir.createSync("@browser-probe-win32-");
+		try {
+			const marker = path.join(tempDir.path(), "gui-launched");
+			const fakeChrome = path.join(tempDir.path(), "chrome.exe");
+			// A GUI chrome.exe handoff: executing it has a side effect (this marker)
+			// but prints nothing a console version probe would accept.
+			await Bun.write(fakeChrome, `#!/bin/sh\ntouch "${marker}"\necho "activating existing window"\n`);
+			fs.chmodSync(fakeChrome, 0o755);
+
+			const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+			Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+			try {
+				await expect(chromiumExecutableProbeForTest(fakeChrome)).resolves.toBe(true);
+			} finally {
+				if (platformDescriptor) Object.defineProperty(process, "platform", platformDescriptor);
+			}
+
+			expect(fs.existsSync(marker)).toBe(false);
+		} finally {
+			await tempDir.remove();
+		}
+	});
+
 	it("honors PUPPETEER_EXECUTABLE_PATH before a detected Windows system Chrome", async () => {
 		const tempDir = TempDir.createSync("@browser-executable-");
 		try {
