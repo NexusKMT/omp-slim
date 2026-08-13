@@ -102,7 +102,8 @@ exec hosts. Replaces cargo-xwin.
   defaults to the Debug config → `/MDd` → `msvcrtd.lib`, which the lean splat
   (like cargo-xwin's) does not carry; toolchain.cmake pins
   `CMAKE_TRY_COMPILE_CONFIGURATION=Release`, `CMAKE_POLICY_DEFAULT_CMP0091=NEW`
-  and `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL` (/MD everywhere).
+  and `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded` (static release `/MT`
+  everywhere, matching the addon's static-CRT policy — issue #8439).
   Verified on darwin: scratch `project(C)` + `add_executable` configures with
   "Clang 20.1.7 with MSVC-like command-line" and links a valid PE32+ exe
   through vs_link_exe with the wrapper rc/mt/linker.
