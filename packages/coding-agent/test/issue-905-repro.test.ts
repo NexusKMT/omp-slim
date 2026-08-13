@@ -14,15 +14,17 @@
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { AuthStorage } from "@oh-my-pi/pi-ai";
 import { runModelsListing } from "@oh-my-pi/pi-coding-agent/cli/models-cli";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 
 let tmp: TempDir;
 let extPath: string;
 let explicitPackagePath: string;
 let ambientExtPath: string;
+let ambientHookMarkerPath: string;
 let dbPath: string;
 let shutdownExtPath: string;
 let shutdownPath: string;
@@ -64,7 +66,16 @@ beforeAll(async () => {
 	);
 	explicitPackagePath = tmp.join("explicit-package");
 	ambientExtPath = tmp.join("ambient.ts");
+	ambientHookMarkerPath = tmp.join("ambient-hook-loaded");
 	await fs.mkdir(tmp.join("explicit-package", "src"), { recursive: true });
+	const hookDir = path.join(getProjectAgentDir(tmp.path()), "hooks", "pre");
+	await fs.mkdir(hookDir, { recursive: true });
+	await fs.writeFile(
+		path.join(hookDir, "models-poison.ts"),
+		`await Bun.write(${JSON.stringify(ambientHookMarkerPath)}, "loaded");
+export default function () {}
+`,
+	);
 	await fs.writeFile(
 		tmp.join("explicit-package", "package.json"),
 		JSON.stringify({ name: "explicit-package", omp: { extensions: ["./src/main.ts"] } }),
@@ -143,6 +154,37 @@ test("omp models surfaces extension-registered providers (issue #905)", async ()
 		const output = captured.join("");
 		expect(output).toContain("test-gw");
 		expect(output).toContain("test-model");
+	} finally {
+		authStorage.close();
+	}
+});
+
+test("omp models does not execute ambient hooks while retaining explicit providers", async () => {
+	const authStorage = await AuthStorage.create(":memory:");
+	try {
+		const modelRegistry = new ModelRegistry(authStorage);
+		const captured: string[] = [];
+		const originalWrite = process.stdout.write.bind(process.stdout);
+		process.stdout.write = ((chunk: string | Uint8Array) => {
+			captured.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+			return true;
+		}) as typeof process.stdout.write;
+
+		try {
+			await runModelsListing({
+				modelRegistry,
+				cwd: tmp.path(),
+				action: "ls",
+				additionalExtensionPaths: [extPath],
+			});
+		} finally {
+			process.stdout.write = originalWrite;
+		}
+
+		const output = captured.join("");
+		expect(output).toContain("test-gw");
+		expect(output).toContain("test-model");
+		expect(await Bun.file(ambientHookMarkerPath).exists()).toBe(false);
 	} finally {
 		authStorage.close();
 	}
