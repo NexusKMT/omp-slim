@@ -102,7 +102,7 @@ describe("AgentSession retry fallback", () => {
 		authStorage.setRuntimeApiKey("openrouter", "openrouter-test-key");
 		authStorage.setRuntimeApiKey("devin", "devin-test-key");
 		authStorage.setRuntimeApiKey("openai-codex", "openai-codex-test-key");
-		sharedRegistry = new ModelRegistry(authStorage);
+		sharedRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
 	});
 
 	afterAll(() => {

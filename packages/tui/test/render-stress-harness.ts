@@ -288,6 +288,7 @@ type ViewportProbeTrait = "known" | "unknown" | "intermittentUnknown" | "staleBo
 
 interface TerminalStressTraits {
 	readonly preservesPaneHistory: boolean;
+	readonly resizeRepaintsInPlace: boolean;
 	readonly strictNativeScrollback: boolean;
 	readonly syncOutputDisabled: boolean;
 	readonly viewportProbe: ViewportProbeTrait;
@@ -573,6 +574,9 @@ function assertNever(value: never): never {
 function terminalStressTraits(scenario: Scenario): TerminalStressTraits {
 	return {
 		preservesPaneHistory: scenario.envMode === "tmux",
+		// Direct HerdR panes take the in-place multiplexer resize path (no ED3
+		// reflow on width change), but keep direct-terminal scrollback semantics.
+		resizeRepaintsInPlace: scenario.envMode === "tmux" || scenario.envMode === "herdr",
 		strictNativeScrollback: scenario.strictScrollback,
 		syncOutputDisabled: scenario.envMode === "vteNoSync",
 		viewportProbe: scenario.terminalMode === "normal" ? "known" : scenario.terminalMode,
@@ -2649,9 +2653,10 @@ class StressDriver {
 		// Audit and shrink re-anchoring are mirrored at render time (they can
 		// fire on zero-byte frames); the write hook only applies commits.
 		const tail = Math.max(0, length - height);
-		// Multiplexer width changes terminate the physical-row epoch. Other
-		// geometry frames retain the legacy height-only rebase below.
-		if (this.#traits.preservesPaneHistory && this.#shadowFrameWidthChanged) {
+		// In-place width changes (multiplexer panes and direct HerdR) terminate
+		// the physical-row epoch. Other geometry frames retain the legacy
+		// height-only rebase below.
+		if (this.#traits.resizeRepaintsInPlace && this.#shadowFrameWidthChanged) {
 			// Existing history and its old-width prefix stay opaque. The resize
 			// write changes only the viewport and establishes an independent
 			// frame-length baseline; it does not advance native commits.
@@ -4177,6 +4182,25 @@ export async function runWidthEpochHeightAppendReplayRegression(): Promise<void>
 		CORE_TIMEOUT_MS,
 		10,
 		operations,
+	);
+	await runStressScenario(scenario);
+}
+
+export async function runHerdrWidthEpochCollapseReplayRegression(): Promise<void> {
+	const template = coreTemplates().find(candidate => candidate.name === "darwin-normal-herdr-reflow-stream-small");
+	if (template === undefined) throw new Error("Missing reflow-stream stress template");
+	// Unlike the tmux width-epoch regressions above, keep `envMode: "herdr"` so
+	// the direct-HerdR in-place resize path is exercised. Seed 0xcafed00d with 24
+	// iterations replays the width change followed by a high-water preview
+	// collapse that previously diverged the shadow ledger from the runtime
+	// viewport (foreground-stream viewport fidelity, op index 23).
+	const scenario = materializeScenario(
+		template,
+		0xcafed00d,
+		24,
+		CORE_BULK_MAX,
+		CORE_TIMEOUT_MS,
+		maxOf(template.heightChoices),
 	);
 	await runStressScenario(scenario);
 }

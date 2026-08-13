@@ -521,7 +521,7 @@ describe("UiHelpers.renderInitialMessages — hidden tool activity", () => {
 		expect(visibleRender).toContain(toolResultMarker);
 	});
 
-	it("hides and restores persisted internal activity blocks", () => {
+	it("hides and restores persisted internal activity blocks", async () => {
 		const transcript = transcriptWith([
 			{
 				role: "custom",
@@ -558,14 +558,14 @@ describe("UiHelpers.renderInitialMessages — hidden tool activity", () => {
 		]);
 
 		const hidden = makeRenderCtx(transcript, true, true);
-		new UiHelpers(hidden.ctx).renderInitialMessages();
+		await new UiHelpers(hidden.ctx).renderInitialMessages();
 		const hiddenRender = Bun.stripANSI(hidden.chatContainer.render(120).join("\n"));
 		expect(hiddenRender).not.toContain("ASYNC_JOB_MARKER");
 		expect(hiddenRender).not.toContain("LATE_DIAGNOSTIC_MARKER");
 		expect(hiddenRender).not.toContain("LAUNCH_COMPLETION_MARKER");
 
 		const visible = makeRenderCtx(transcript, true, false);
-		new UiHelpers(visible.ctx).renderInitialMessages();
+		await new UiHelpers(visible.ctx).renderInitialMessages();
 		const visibleRender = Bun.stripANSI(visible.chatContainer.render(120).join("\n"));
 		expect(visibleRender).toContain("ASYNC_JOB_MARKER");
 		expect(visibleRender).toContain("LATE_DIAGNOSTIC_MARKER");
