@@ -25,6 +25,7 @@ describe("Claude Code slash command discovery", () => {
 		resetSettingsForTest();
 		originalHome = process.env.HOME;
 		originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+		delete process.env.CLAUDE_CONFIG_DIR;
 		root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-claude-commands-"));
 		home = path.join(root, "home");
 		project = path.join(root, "project");
