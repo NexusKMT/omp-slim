@@ -115,7 +115,7 @@ mod platform {
 	/// Whether the caller's security session has GUI/graphic access.
 	///
 	/// `DCDevice.isSupported` synchronously opens an XPC connection to the
-	/// per-user DeviceCheck metadata daemon, which exists only in an
+	/// per-user `DeviceCheck` metadata daemon, which exists only in an
 	/// interactive GUI login session. From a session without graphic access
 	/// (SSH, a launchd `LaunchDaemon`, a CI runner, a service account, a
 	/// sandbox) the connection setup hits `_xpc_api_misuse` and aborts the
