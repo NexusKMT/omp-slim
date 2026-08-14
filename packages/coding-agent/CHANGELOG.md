@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed prompt caching on open-weight providers (DeepSeek, Qwen, GLM, …) by moving the per-request date/cwd line out of the system prompt into a `<system-reminder>` block on the first user turn, so the tool schemas rendered after the system content stay cached across directory changes and midnight rollovers ([#7404](https://github.com/can1357/oh-my-pi/issues/7404)).
+
 ## [17.3.3] - 2026-08-14
 
 ### Fixed
