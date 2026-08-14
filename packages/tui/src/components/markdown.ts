@@ -43,6 +43,65 @@ function normalizeOsc8Terminators(text: string): string {
 	return text.replace(OSC8_ST_PREFIX_REGEX, "$1\x07");
 }
 
+const MARKDOWN_FENCE_LINE = /^ {0,3}(`{3,}|~{3,})[ \t]*(.*)$/;
+const MARKDOWN_HEADING_LINE = /^ {0,3}#{1,6}[ \t]+\S/;
+const FENCED_SOURCE_INTRO = /\b(?:code|example|markdown|output|snippet|source)\s*:?\s*$/i;
+
+function isGfmTableDelimiter(line: string): boolean {
+	const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+	const cells = trimmed.split("|");
+	return cells.length > 0 && cells.every(cell => /^:?-{3,}:?$/.test(cell.trim()));
+}
+
+/**
+ * Gemini can emit a bare closing fence without its opener, then continue with
+ * headings and tables. CommonMark must interpret that lone fence as an opener,
+ * which turns the rest of an otherwise valid report into one raw code block.
+ *
+ * Repair only the unambiguous rich-document shape at final render: one
+ * unmatched bare fence after prose, followed by both an ATX heading and a GFM
+ * table delimiter. Keep ordinary incomplete code blocks, fenced Markdown
+ * examples, and every matched fence untouched.
+ */
+function repairOrphanClosingFence(text: string): string {
+	const lines = text.split("\n");
+	let open: { index: number; marker: string; info: string } | undefined;
+	for (let index = 0; index < lines.length; index++) {
+		const match = MARKDOWN_FENCE_LINE.exec(lines[index]!);
+		if (!match) continue;
+		const marker = match[1]!;
+		const info = match[2]!.trim();
+		if (!open) {
+			open = { index, marker, info };
+			continue;
+		}
+		if (marker[0] === open.marker[0] && marker.length >= open.marker.length && info === "") {
+			open = undefined;
+		}
+	}
+	if (!open || open.info !== "") return text;
+
+	let previous = "";
+	for (let index = open.index - 1; index >= 0; index--) {
+		previous = lines[index]!.trim();
+		if (previous) break;
+	}
+	if (!previous || previous.endsWith(":") || FENCED_SOURCE_INTRO.test(previous)) return text;
+
+	let hasHeading = false;
+	let hasTableDelimiter = false;
+	for (let index = open.index + 1; index < lines.length; index++) {
+		const line = lines[index]!;
+		hasHeading ||= MARKDOWN_HEADING_LINE.test(line);
+		hasTableDelimiter ||= isGfmTableDelimiter(line);
+		if (hasHeading && hasTableDelimiter) {
+			lines.splice(open.index, 1);
+			return lines.join("\n");
+		}
+	}
+	return text;
+}
+
 // OSC 66 (Kitty text-sizing) heading spans are emitted as a single indivisible
 // unit by the H1 render path. Like image-protocol lines, they bypass ANSI
 // wrapping and width padding (see `isOsc66Line` in ../utils): re-wrapping
@@ -1730,7 +1789,9 @@ export class Markdown
 		}
 
 		// Replace tabs with 3 spaces for consistent rendering
-		const normalizedText = replaceTabs(this.#text);
+		const normalizedText = this.transientRenderCache
+			? replaceTabs(this.#text)
+			: repairOrphanClosingFence(replaceTabs(this.#text));
 		const signature = this.#renderSignature(width, paddingX);
 
 		// L2: module-level LRU — survives component disposal/recreation across
