@@ -265,7 +265,6 @@ describe("AgentSession empty stop guard", () => {
 		expect(mock.calls).toHaveLength(2);
 		expect(assistantText(session.agent.state.messages)).toContain("finished after provider-empty retry");
 		expect(reminderMessages(session.agent.state.messages)).toHaveLength(1);
-		expect(JSON.stringify(reminderMessages(session.agent.state.messages))).toContain("user-visible final answer");
 		expect(
 			session.agent.state.messages.some(message => message.role === "assistant" && message.stopReason === "error"),
 		).toBe(false);

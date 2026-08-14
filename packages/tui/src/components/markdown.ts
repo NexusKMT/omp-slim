@@ -85,7 +85,7 @@ function repairOrphanClosingFence(text: string): string {
 			open = undefined;
 		}
 	}
-	if (!open || open.info !== "") return text;
+	if (open?.info !== "") return text;
 
 	let previous = "";
 	for (let index = open.index - 1; index >= 0; index--) {
