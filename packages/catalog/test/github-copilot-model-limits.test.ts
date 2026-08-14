@@ -42,6 +42,10 @@ async function discoverCopilotModels(
 	const requestApiVersions: Array<string | undefined> = [];
 	const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
 		const url = typeof input === "string" ? input : input.toString();
+		if (url === "https://api.github.com/copilot_internal/user") {
+			expect(getHeaderValue(init?.headers, "Authorization")).toBe(`token ${expectedAuthorizationToken}`);
+			return Response.json({ endpoints: { api: expectedBaseUrl } });
+		}
 		expect(url).toBe(`${expectedBaseUrl}/models`);
 		expect(init?.method).toBe("GET");
 		expect(getHeaderValue(init?.headers, "Authorization")).toBe(`Bearer ${expectedAuthorizationToken}`);
@@ -72,13 +76,15 @@ function cachedCopilotCompletionModel(id: string, name: string): ModelSpec<"open
 }
 
 describe("github copilot model limits mapping", () => {
-	it("uses configured base URL for discovery", async () => {
+	it("discovers the plan endpoint for a raw environment token before model discovery", async () => {
+		const token = "ghu_valid_business_token";
 		const { fetchMock } = await discoverCopilotModels(
 			{ data: [] },
-			"copilot-test-key",
-			"https://api.githubcopilot.com",
+			token,
+			"https://api.business.githubcopilot.com",
+			token,
 		);
-		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
 
 	it("unwraps structured OAuth keys for discovery and routes enterprise discovery to the enterprise host", async () => {
@@ -355,7 +361,7 @@ describe("github copilot model limits mapping", () => {
 				const { models } = await manager.refresh("online-if-uncached");
 				const model = models.find(candidate => candidate.id === migration.id);
 
-				expect(fetchMock).toHaveBeenCalledTimes(1);
+				expect(fetchMock).toHaveBeenCalledTimes(2);
 				expect(model?.api).toBe("openai-responses");
 			} finally {
 				await fs.rm(tempDir, { recursive: true, force: true });
@@ -390,7 +396,7 @@ describe("github copilot model limits mapping", () => {
 			});
 			const { models } = await manager.refresh("online-if-uncached");
 
-			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(fetchMock).toHaveBeenCalledTimes(2);
 			// The bundled catalog now ships a responses-route grok-4.5, so the id
 			// resurfaces from the bundle after the failed refresh. The migration
 			// contract is that the stale cached COMPLETIONS route never comes

@@ -25,6 +25,7 @@ import { ALIBABA_TOKEN_PLAN_BASE_URL, parseAlibabaTokenPlanCredential } from "..
 import { coreWeaveProjectHeaders } from "../wire/coreweave";
 import {
 	COPILOT_API_HEADERS,
+	discoverGitHubCopilotApiEndpoint,
 	getGitHubCopilotBaseUrl,
 	isPersonalGitHubCopilotBaseUrl,
 	parseGitHubCopilotApiKey,
@@ -5201,11 +5202,15 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 		restorableHeaderFallback: { ...COPILOT_API_HEADERS },
 		...(apiKey && {
 			fetchDynamicModels: async () => {
+				const fetchImpl = discoveryFetch(config?.fetch);
+				const requestBaseUrl = isPersonalGitHubCopilotBaseUrl(baseUrl)
+					? ((await discoverGitHubCopilotApiEndpoint(apiKey, fetchImpl)) ?? baseUrl)
+					: baseUrl;
 				const longContextVariants: ModelSpec<Api>[] = [];
 				const models = await fetchOpenAICompatibleModels<Api>({
 					api: "openai-completions",
 					provider: "github-copilot",
-					baseUrl,
+					baseUrl: requestBaseUrl,
 					apiKey,
 					headers: COPILOT_API_HEADERS,
 					mapModel: (
@@ -5251,7 +5256,7 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 						const input: ModelSpec<Api>["input"] =
 							supportsVision === true
 								? ["text", "image"]
-								: supportsVision === false || !isPersonalGitHubCopilotBaseUrl(baseUrl)
+								: supportsVision === false || !isPersonalGitHubCopilotBaseUrl(requestBaseUrl)
 									? ["text"]
 									: (reference?.input ?? defaults.input);
 						// With COPILOT_API_HEADERS the served window is the long-context
@@ -5272,7 +5277,7 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 									...reference,
 									api,
 									provider: "github-copilot",
-									baseUrl,
+									baseUrl: requestBaseUrl,
 									name,
 									input,
 									contextWindow: defaultTierWindow,
@@ -5294,7 +5299,7 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 							: {
 									...defaults,
 									api,
-									baseUrl,
+									baseUrl: requestBaseUrl,
 									name,
 									input,
 									contextWindow: defaultTierWindow,
@@ -5340,7 +5345,7 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 						}
 						return base;
 					},
-					fetch: config?.fetch,
+					fetch: fetchImpl,
 				});
 				if (models === null) {
 					return null;
