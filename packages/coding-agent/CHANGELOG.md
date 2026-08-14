@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.3] - 2026-08-14
+
 ### Fixed
 
 - Automatically continued Gemini turns that stopped after thinking without final output, using a bounded final-answer reminder instead of exhausting generic retries.
