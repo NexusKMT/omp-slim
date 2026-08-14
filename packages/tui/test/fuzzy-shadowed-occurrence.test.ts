@@ -58,11 +58,11 @@ describe("fuzzy scoring with a shadowed occurrence", () => {
 	});
 
 	it("leaves a single-character query on its leading occurrence", () => {
-		// The rescan stops at one character on purpose. "i" occurs mid-word in
-		// "wire" and then starts "input", so rescanning would award the word-start
-		// bonus here — and, because some word starts with the typed letter in almost
-		// every candidate, on the whole corpus at once. The first keystroke of a
-		// search would then reshuffle the result list instead of narrowing it.
+		// The rescan has a length floor on purpose. "i" occurs mid-word in "wire"
+		// and then starts "input", so rescanning would award the word-start bonus
+		// here — and, because some word starts with the typed letter in almost every
+		// candidate, on the whole corpus at once. The first keystroke of a search
+		// would then reshuffle the result list instead of narrowing it.
 		const shadowed = fuzzyMatch("i", "wire input");
 		const leading = fuzzyMatch("i", "input wire");
 
@@ -71,5 +71,32 @@ describe("fuzzy scoring with a shadowed occurrence", () => {
 		expect(shadowed.score).toBeGreaterThan(-500);
 		// A genuine leading word start still earns it.
 		expect(leading.score).toBeLessThan(-500);
+	});
+
+	it("leaves a two-character query on its leading occurrence", () => {
+		// Same hazard one character further out, and it is not hypothetical: "im"
+		// is buried in "experimental", which opens the description of several real
+		// settings. Rescanning at two characters moved those rows by ~1200 points
+		// and reordered the settings search after the second keystroke.
+		const shadowed = fuzzyMatch("im", "experimental image rendering");
+		const leading = fuzzyMatch("im", "image rendering experimental");
+
+		expect(shadowed.matches).toBe(true);
+		expect(leading.matches).toBe(true);
+		expect(shadowed.score).toBeGreaterThan(-500);
+		expect(leading.score).toBeLessThan(-500);
+	});
+
+	it("treats a leading word-start hit as a prefix match, not a shadowed one", () => {
+		// "images" starts a word, so the query "image" is an ordinary prefix match
+		// there. Only an occurrence buried inside a word can be shadowed, so this
+		// must not reach past "images" to collect the whole-word bonus from the
+		// later "image" — that would re-rank prefix matches corpus-wide.
+		const prefixHit = fuzzyMatch("image", "describe images for text models when an image is attached");
+
+		expect(prefixHit.matches).toBe(true);
+		expect(prefixHit.score).toBeGreaterThan(-2000);
+		// The buried case still qualifies: "reimage" cannot start a word.
+		expect(fuzzyMatch("image", "reimage image provider").score).toBeLessThan(-2000);
 	});
 });

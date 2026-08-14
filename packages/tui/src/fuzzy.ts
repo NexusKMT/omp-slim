@@ -45,11 +45,12 @@ const PHRASE_BONUS = 1000;
 /**
  * Shortest needle worth scanning past its leading occurrence for.
  *
- * A single character starts a word in nearly every candidate, so rescanning
- * would hand the word-start bonus to the whole corpus at once and flatten the
- * ranking on the first keystroke. Shadowing only misleads for real phrases.
+ * One or two characters sit mid-word in nearly every candidate — "im" is inside
+ * "experimental" — so rescanning that short would hand the word-start bonus to
+ * the whole corpus at once and reshuffle the list on the opening keystrokes of a
+ * search instead of narrowing it. Shadowing only misleads for real phrases.
  */
-const MIN_SHADOW_RESCAN_LENGTH = 2;
+const MIN_SHADOW_RESCAN_LENGTH = 3;
 
 function normalizeForSearch(value: string): string {
 	return value
@@ -188,14 +189,21 @@ function isWordBoundaryPhrase(normalized: string, index: number, length: number)
  * dropped whenever an earlier non-qualifying one shadows it — the whole word
  * "image" in "reimage image provider" loses to the "image" inside "reimage".
  * Occurrences are scanned left to right, so the first qualifying hit is also the
- * best-scoring one: the caller's position tiebreak grows with the offset. The
- * rescan is limited to {@link MIN_SHADOW_RESCAN_LENGTH} and longer needles.
+ * best-scoring one: the caller's position tiebreak grows with the offset.
+ *
+ * Only a hit buried inside a word can shadow. A leading hit that already starts
+ * a word is an ordinary prefix match — the query is "image" and the text says
+ * "images" — and it is scored exactly as before rather than borrowing a
+ * whole-word bonus from some later occurrence; `findCompactWordStart` treats its
+ * leading word-start hit the same way. The rescan is additionally limited to
+ * {@link MIN_SHADOW_RESCAN_LENGTH} and longer needles.
  */
 function findWordBoundaryPhrase(normalized: string, phrase: string): number {
 	if (phrase.length === 0) return -1;
 	const first = normalized.indexOf(phrase);
 	if (first < 0) return -1;
 	if (isWordBoundaryPhrase(normalized, first, phrase.length)) return first;
+	if (first === 0 || normalized[first - 1] === " ") return -1;
 	if (phrase.length < MIN_SHADOW_RESCAN_LENGTH) return -1;
 	for (let at = normalized.indexOf(phrase, first + 1); at >= 0; at = normalized.indexOf(phrase, at + 1)) {
 		if (isWordBoundaryPhrase(normalized, at, phrase.length)) return at;
