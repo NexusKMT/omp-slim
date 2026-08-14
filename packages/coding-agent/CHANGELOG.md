@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed capped empty local-model stops remaining in active and persisted context after retries, which could strand subsequent turns. ([#5179](https://github.com/can1357/oh-my-pi/issues/5179))
+- Fixed empty local-model stops lingering in the persisted journal after retries; discarded empty turns are now physically removed and the file rewritten, so a reload (or a mid-retry process kill) can no longer resurrect them as the active leaf and strand subsequent turns. ([#5179](https://github.com/can1357/oh-my-pi/issues/5179))
 
 ## [16.4.4] - 2026-07-11
 

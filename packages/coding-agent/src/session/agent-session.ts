@@ -10963,7 +10963,8 @@ export class AgentSession {
 		}
 
 		this.#emptyStopRetryCount++;
-		if (this.#emptyStopRetryCount > EMPTY_STOP_MAX_RETRIES) {
+		const capExceeded = this.#emptyStopRetryCount > EMPTY_STOP_MAX_RETRIES;
+		if (capExceeded) {
 			const attempts = this.#emptyStopRetryCount - 1;
 			const finalError = "Assistant returned empty stop after retry cap";
 			logger.warn(finalError, {
@@ -10980,14 +10981,18 @@ export class AgentSession {
 			this.#clearPendingRecoveredRetryErrors();
 			this.#retryAttempt = 0;
 			this.#resolveRetry();
-			// A capped empty turn carries no transcript value, while its provider
-			// usage can anchor later context accounting to the failed request. Wait
-			// for concurrent message persistence, then remove every empty stop from
-			// active context and the persisted branch.
-			await this.#dropPersistedAssistantTurn(assistantMessage);
-			return false;
 		}
-		this.#discardAssistantTurn(assistantMessage);
+		// An empty turn carries no transcript value, and its provider usage can
+		// anchor later context accounting to the failed request. It must never
+		// linger in the persisted journal either: the session loader rebuilds the
+		// active branch from the last physical entry, so a reparent that is not
+		// physically committed lets the empty stop resurface as the active leaf on
+		// reload — or if the process is killed mid retry sequence. Wait for the
+		// in-flight message_end persistence, remove it from active context + the
+		// branch, then physically drop the persisted entry and rewrite the file.
+		const droppedEntryId = await this.#dropPersistedAssistantTurn(assistantMessage);
+		if (droppedEntryId) await this.sessionManager.dropLeafEntry(droppedEntryId);
+		if (capExceeded) return false;
 		this.agent.appendMessage({
 			role: "developer",
 			content: [{ type: "text", text: this.#emptyStopRetryReminder() }],
@@ -11126,9 +11131,9 @@ export class AgentSession {
 	 * replays the failed turn, while no-recovery paths leave the persisted entry
 	 * (and the user-visible transcript line) in place.
 	 */
-	async #dropPersistedAssistantTurn(assistantMessage: AssistantMessage): Promise<void> {
+	async #dropPersistedAssistantTurn(assistantMessage: AssistantMessage): Promise<string | undefined> {
 		await this.#waitForSessionMessagePersistence(assistantMessage);
-		this.#discardAssistantTurn(assistantMessage);
+		return this.#discardAssistantTurn(assistantMessage);
 	}
 
 	/**
@@ -11186,7 +11191,7 @@ export class AgentSession {
 	 * the Gemini header-runaway interrupt, which must not replay a partial,
 	 * loop-fueling thinking block.
 	 */
-	#discardAssistantTurn(assistantMessage: AssistantMessage): void {
+	#discardAssistantTurn(assistantMessage: AssistantMessage): string | undefined {
 		this.#removeAssistantMessageFromActiveContext(assistantMessage);
 
 		const branchEntry = this.sessionManager
@@ -11200,13 +11205,14 @@ export class AgentSession {
 					this.#isSameAssistantMessage(entry.message as AssistantMessage, assistantMessage),
 			);
 		if (!branchEntry) {
-			return;
+			return undefined;
 		}
 		if (branchEntry.parentId === null) {
 			this.sessionManager.resetLeaf();
 		} else {
 			this.sessionManager.branch(branchEntry.parentId);
 		}
+		return branchEntry.id;
 	}
 
 	#isSameAssistantMessage(left: AssistantMessage, right: AssistantMessage): boolean {

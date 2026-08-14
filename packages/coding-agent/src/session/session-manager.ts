@@ -1734,6 +1734,31 @@ export class SessionManager {
 		this.#index.setLeaf(null);
 	}
 
+	/**
+	 * Physically remove a childless entry from the journal and rewrite the file.
+	 *
+	 * {@link branch}/{@link resetLeaf} only move the in-memory leaf; the session
+	 * loader reconstructs the active branch from the *last physical entry* in the
+	 * file (`collectActiveBranchIds`), so an in-memory-only reparent is lost on
+	 * reload when nothing is appended after it. A terminally discarded turn (e.g.
+	 * an empty stop that exhausts the retry cap, with no continuation) must be
+	 * removed durably or it resurfaces as the active leaf on the next load.
+	 *
+	 * No-ops when the entry is unknown or still has children — removing it would
+	 * orphan its subtree. After removal the leaf is reparented to the entry's
+	 * parent, matching the reload path.
+	 */
+	async dropLeafEntry(entryId: string): Promise<void> {
+		const entry = this.#index.get(entryId);
+		if (!entry) return;
+		if (this.#index.childrenOf(entryId).length > 0) return;
+		const parentId = entry.parentId;
+		this.#entries = this.#entries.filter(candidate => candidate.id !== entryId);
+		this.#index.rebuild(this.#entries);
+		this.#index.setLeaf(parentId);
+		await this.rewriteEntries();
+	}
+
 	/** Like branch(), but also records a branch_summary of the abandoned path. */
 	branchWithSummary(branchFromId: string | null, summary: string, details?: unknown, fromExtension?: boolean): string {
 		if (branchFromId !== null && !this.#index.has(branchFromId)) throw new Error(`Entry ${branchFromId} not found`);
