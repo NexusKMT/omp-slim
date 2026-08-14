@@ -312,6 +312,9 @@ describe("AgentSession checkpoint rewind branch context", () => {
 		);
 		expect(reminder).toBeDefined();
 		expect(reminder?.content).toContain("MUST `rewind` before yielding");
+		// #checkpointState is set synchronously with the reminder (pre-await), so an
+		// immediate rewind would find an active checkpoint, not "No active checkpoint".
+		expect(session.getCheckpointState()).toBeDefined();
 		proceed.resolve();
 		await promptPromise;
 
