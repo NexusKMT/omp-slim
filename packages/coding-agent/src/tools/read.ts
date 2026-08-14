@@ -100,7 +100,7 @@ import {
 	isRemoteMountPath,
 	type SuffixMatchCache,
 } from "./read-path-resolution";
-import { readPdfImageMember, rewritePdfImagePlaceholders, splitPdfImageMemberReadPath } from "./read-pdf-images";
+import { pdfImageRenderingUnsupportedMessage, splitUnsupportedPdfImageReadPath } from "./read-pdf";
 import { isMultiRange, isRawSelector, type ParsedSelector, parseSel, selToOffsetLimit } from "./read-selector";
 import { readSqlite, resolveSqliteReadPath } from "./read-sqlite";
 import { isProseSummaryPath, renderSummary, routeReadThroughBridge, trySummarize } from "./read-summary";
@@ -892,7 +892,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 
 		// Prefer a literal filesystem match over selector interpretation so real
 		// POSIX filenames containing selector-looking suffixes win over structured
-		// archive / sqlite / pdf-image dispatch. A selector promoted from local://
+		// archive / sqlite / unsupported PDF-image dispatch. A selector promoted from local://
 		// remains separate so it cannot be mistaken for part of the resolved path.
 		const literalSplit =
 			promotedSelector === undefined
@@ -925,35 +925,10 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				return readSqlite(sqlitePath, signal);
 			}
 
-			const pdfImageMemberPath = splitPdfImageMemberReadPath(readPath);
-			if (pdfImageMemberPath) {
-				let absolutePdfPath = resolveReadPath(pdfImageMemberPath.pdfPath, this.session.cwd);
-				let suffixResolution: { from: string; to: string } | undefined;
-				try {
-					const stat = await Bun.file(absolutePdfPath).stat();
-					if (stat.isDirectory())
-						throw new ToolError(`Path '${pdfImageMemberPath.pdfPath}' is a directory, not a PDF file`);
-				} catch (error) {
-					if (!isNotFoundError(error) || isRemoteMountPath(absolutePdfPath)) throw error;
-					const suffixMatch = await findSuffixMatchCached(
-						this.session,
-						suffixCache,
-						pdfImageMemberPath.pdfPath,
-						signal,
-					);
-					if (!suffixMatch) throw new ToolError(`Path '${pdfImageMemberPath.pdfPath}' not found`);
-					absolutePdfPath = suffixMatch.absolutePath;
-					suffixResolution = { from: pdfImageMemberPath.pdfPath, to: suffixMatch.displayPath };
-				}
-				return readPdfImageMember(
-					this.session,
-					this.#autoResizeImages,
-					absolutePdfPath,
-					pdfImageMemberPath.pdfPath,
-					pdfImageMemberPath.member,
-					suffixResolution,
-					signal,
-				);
+			const unsupportedPdfImageRead =
+				literalSplit.sel === undefined ? splitUnsupportedPdfImageReadPath(readPath) : null;
+			if (unsupportedPdfImageRead && (await probeLiteralPathExists(readPath, this.session.cwd)) === "missing") {
+				throw new ToolError(pdfImageRenderingUnsupportedMessage(unsupportedPdfImageRead.pdfPath));
 			}
 		}
 
@@ -1102,8 +1077,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			// Convert document via markit.
 			const result = await convertFileWithMarkit(absolutePath, signal);
 			if (result.ok) {
-				const renderedContent =
-					ext === ".pdf" ? rewritePdfImagePlaceholders(result.content, resolvedDisplayPath) : result.content;
+				const renderedContent = result.content;
 				// Route the converted markdown through the in-memory text builder
 				// so line-range selectors (`file.pdf:50-100`, `:5-16,40-80`) and
 				// raw mode apply against the converted output. Without this,
