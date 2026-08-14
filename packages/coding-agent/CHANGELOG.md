@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the capped empty-stop failure always naming the context/`/shake images` hint even when the provider billed output tokens. A zero-block `stop` with `usage.output > 0` means content was generated and dropped downstream (a filter/refusal flattened to `finish_reason: "stop"` by a proxy, or a lossy API translation), so the message now reports the billed output-token count and points at a provider-side filter/translation instead of a context problem, and logs `outputTokens` alongside the existing warning fields ([#8511](https://github.com/can1357/oh-my-pi/issues/8511)).
+
 ## [17.3.3] - 2026-08-14
 
 ### Fixed

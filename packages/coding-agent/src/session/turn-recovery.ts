@@ -674,15 +674,27 @@ export class TurnRecovery {
 		this.#emptyStopRetryCount++;
 		if (this.#emptyStopRetryCount > EMPTY_STOP_MAX_RETRIES) {
 			const attempts = this.#emptyStopRetryCount - 1;
-			const finalError = providerEmptyOutput
-				? "Assistant returned no final output after retry cap; try switching models"
-				: "Assistant returned empty stop after retry cap; try switching models or `/shake images` to remove archived frames";
+			const outputTokens = assistantMessage.usage.output;
+			let finalError: string;
+			if (providerEmptyOutput) {
+				finalError = "Assistant returned no final output after retry cap; try switching models";
+			} else if (outputTokens > 0) {
+				// Billed output on a zero-block stop means content was generated and then
+				// dropped downstream (a filter/refusal flattened to `finish_reason: "stop"`
+				// by a proxy, or a lossy API translation) — the context/`/shake images`
+				// hint is wrong here, so name the billed output instead.
+				finalError = `Assistant returned an empty stop after retry cap, but the provider billed ${outputTokens} output token${outputTokens === 1 ? "" : "s"} for it; content was generated and then dropped before delivery, which usually points to a provider-side content filter or a lossy API translation rather than a context problem`;
+			} else {
+				finalError =
+					"Assistant returned empty stop after retry cap; try switching models or `/shake images` to remove archived frames";
+			}
 			assistantMessage.errorMessage = finalError;
 			if (providerEmptyOutput) assistantMessage.errorId = AIError.create();
 			logger.warn(finalError, {
 				attempts,
 				model: assistantMessage.model,
 				provider: assistantMessage.provider,
+				outputTokens,
 			});
 			await this.#host.emitSessionEvent({
 				type: "auto_retry_end",
