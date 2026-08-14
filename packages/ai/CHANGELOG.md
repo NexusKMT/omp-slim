@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Distinguished Gemini thought-only `STOP` responses from empty transports, avoiding repeated identical reasoning requests and duplicate Antigravity endpoint streams while surfacing the missing final output for session-level recovery.
+
 ## [17.3.2] - 2026-08-13
 
 ### Fixed
