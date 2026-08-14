@@ -499,6 +499,31 @@ describe("AgentSession empty stop guard", () => {
 		expect(finalError).not.toContain("/shake images");
 	});
 
+	it("keeps the context hint for a capped thinking-only stop even though it billed output", async () => {
+		const { session, mock } = await createHarness([
+			thinkingOnlyStop(),
+			thinkingOnlyStop(),
+			thinkingOnlyStop(),
+			thinkingOnlyStop(),
+		]);
+		const retryEndEvents: Array<Extract<AgentSessionEvent, { type: "auto_retry_end" }>> = [];
+		session.subscribe(event => {
+			if (event.type === "auto_retry_end") {
+				retryEndEvents.push(event);
+			}
+		});
+
+		await expectPromptCompletes(session.prompt("think without answering"));
+		await session.waitForIdle();
+
+		expect(mock.calls).toHaveLength(4);
+		expect(retryEndEvents).toHaveLength(1);
+		expect(retryEndEvents[0]?.success).toBe(false);
+		const finalError = retryEndEvents[0]?.finalError ?? "";
+		expect(finalError).toContain("/shake images");
+		expect(finalError).not.toContain("billed");
+	});
+
 	it("ends auto-retry state when empty stop retries hit the cap", async () => {
 		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
 		const { session, mock } = await createHarness(

@@ -678,11 +678,13 @@ export class TurnRecovery {
 			let finalError: string;
 			if (providerEmptyOutput) {
 				finalError = "Assistant returned no final output after retry cap; try switching models";
-			} else if (outputTokens > 0) {
-				// Billed output on a zero-block stop means content was generated and then
-				// dropped downstream (a filter/refusal flattened to `finish_reason: "stop"`
-				// by a proxy, or a lossy API translation) — the context/`/shake images`
-				// hint is wrong here, so name the billed output instead.
+			} else if (outputTokens > 0 && assistantMessage.content.length === 0) {
+				// Billed output on a truly zero-block stop means content was generated and
+				// then dropped downstream (a filter/refusal flattened to
+				// `finish_reason: "stop"` by a proxy, or a lossy API translation) — the
+				// context/`/shake images` hint is wrong here, so name the billed output
+				// instead. Thinking-only stops keep a thinking block (and bill output for
+				// it), so they fall through to the context hint rather than this path.
 				finalError = `Assistant returned an empty stop after retry cap, but the provider billed ${outputTokens} output token${outputTokens === 1 ? "" : "s"} for it; content was generated and then dropped before delivery, which usually points to a provider-side content filter or a lossy API translation rather than a context problem`;
 			} else {
 				finalError =
