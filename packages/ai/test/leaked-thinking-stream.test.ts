@@ -419,6 +419,58 @@ describe("wrapLeakedThinkingStream", () => {
 		expect(result.content.slice(1, 3)).toEqual(serverBlocks);
 	});
 
+	it("preserves complete Anthropic tool-search history through the custom-endpoint projector", async () => {
+		const firstThinking: ThinkingContent = {
+			type: "thinking",
+			thinking: "find the deferred tool",
+			thinkingSignature: "sig-1",
+		};
+		const serverBlocks: AnthropicServerToolContent[] = [
+			{
+				type: "anthropicServerTool",
+				block: {
+					type: "server_tool_use",
+					id: "srvtoolu_search",
+					name: "tool_search_tool_regex",
+					input: { pattern: "read" },
+				},
+			},
+			{
+				type: "anthropicServerTool",
+				block: {
+					type: "tool_search_tool_result",
+					tool_use_id: "srvtoolu_search",
+					content: {
+						type: "tool_search_tool_search_result",
+						tool_references: [{ type: "tool_reference", tool_name: "_read" }],
+					},
+				},
+			},
+		];
+		const secondThinking: ThinkingContent = {
+			type: "thinking",
+			thinking: "use the discovered tool",
+			thinkingSignature: "sig-2",
+		};
+		const call: ToolCall = {
+			type: "toolCall",
+			id: "toolu_read",
+			name: "_read",
+			arguments: { path: "notes.txt" },
+		};
+		const content: AssistantMessage["content"] = [firstThinking, ...serverBlocks, secondThinking, call];
+		const terminal = msg({ content, stopReason: "toolUse" });
+
+		const { result } = await runWrapper(inner => {
+			inner.push({ type: "start", partial: msg() });
+			inner.push({ type: "toolcall_start", contentIndex: 4, partial: terminal });
+			inner.push({ type: "toolcall_end", contentIndex: 4, toolCall: call, partial: terminal });
+			inner.push({ type: "done", reason: "toolUse", message: terminal });
+		});
+
+		expect(result.content).toEqual(content);
+	});
+
 	it("drops incomplete Anthropic web-search history instead of replaying orphan blocks", async () => {
 		const content: AssistantMessage["content"] = [
 			{

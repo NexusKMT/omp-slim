@@ -79,7 +79,7 @@ import {
 	type Usage as AnthropicWireUsage,
 	type ContentBlockParam,
 	type FallbackParam,
-	isAnthropicWebSearchHistoryBlock,
+	isAnthropicServerToolHistoryBlock,
 	type MessageCreateParams,
 	type MessageCreateParamsStreaming,
 	type MessageParam,
@@ -2429,8 +2429,11 @@ const streamAnthropicOnce = (
 									kind: "redactedThinking",
 								});
 							} else if (
-								isAnthropicWebSearchHistoryBlock(event.content_block) &&
-								umansGatewayWebSearchHeader === undefined
+								isAnthropicServerToolHistoryBlock(event.content_block) &&
+								(umansGatewayWebSearchHeader === undefined ||
+									(event.content_block.type === "server_tool_use"
+										? event.content_block.name !== "web_search"
+										: event.content_block.type !== "web_search_tool_result"))
 							) {
 								streamedReplayUnsafeContent = true;
 								const block: Block = {
