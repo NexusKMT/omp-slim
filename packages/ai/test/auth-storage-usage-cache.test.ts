@@ -18,7 +18,7 @@ import {
 	AuthStorage,
 	type StoredAuthCredential,
 } from "@oh-my-pi/pi-ai/auth-storage";
-import type { UsageLimit, UsageReport } from "@oh-my-pi/pi-ai/usage";
+import type { UsageLimit, UsageProvider, UsageReport } from "@oh-my-pi/pi-ai/usage";
 import { alibabaTokenPlanUsageProvider } from "@oh-my-pi/pi-ai/usage/alibaba-token-plan";
 import * as claudeUsage from "@oh-my-pi/pi-ai/usage/claude";
 import { serializeAlibabaTokenPlanCredential } from "@oh-my-pi/pi-catalog/wire/alibaba-token-plan";
@@ -325,6 +325,71 @@ describe("AuthStorage usage cache: last-good failure fallback", () => {
 		const third = anthropicReports(await storage.fetchUsageReports());
 		expect(third).toHaveLength(1);
 		expect(calls).toBe(3);
+	});
+
+	it("does not replay last-good quota after an explicit invalidation", async () => {
+		let calls = 0;
+		vi.spyOn(claudeUsage.claudeUsageProvider, "fetchUsage").mockImplementation(async () => {
+			calls += 1;
+			return calls === 1 ? makeReport("a@example.com") : null;
+		});
+
+		expect(anthropicReports(await storage.fetchUsageReports())).toHaveLength(1);
+		await storage.invalidateUsageCache();
+
+		expect(anthropicReports(await storage.fetchUsageReports())).toHaveLength(0);
+		expect(calls).toBe(2);
+	});
+});
+
+
+describe("AuthStorage usage cache: explicit invalidation", () => {
+	it("clears cached API-key reports before the next usage read", async () => {
+		const store = makeStore([
+			{
+				id: 1,
+				provider: "zai",
+				credential: { type: "api_key", key: "zai-key" },
+				disabledCause: null,
+			},
+		]);
+		let calls = 0;
+		const usageProvider: UsageProvider = {
+			id: "zai",
+			supports: params => params.provider === "zai" && params.credential.type === "api_key",
+			async fetchUsage() {
+				calls += 1;
+				return {
+					provider: "zai",
+					fetchedAt: Date.now(),
+					limits: [
+						{
+							id: "zai:requests:5h",
+							label: "Z.AI Request Quota",
+							scope: { provider: "zai", windowId: "5h" },
+							amount: { used: calls === 1 ? 80 : 20, limit: 100, unit: "requests" },
+							status: "ok",
+						},
+					],
+				};
+			},
+		};
+		const storage = new AuthStorage(store, {
+			usageProviderResolver: provider => (provider === "zai" ? usageProvider : undefined),
+		});
+		await storage.reload();
+		try {
+			const initial = await storage.fetchUsageReports();
+			expect(initial?.[0]?.limits[0]?.amount.used).toBe(80);
+
+			await storage.invalidateUsageCache();
+
+			const refreshed = await storage.fetchUsageReports();
+			expect(refreshed?.[0]?.limits[0]?.amount.used).toBe(20);
+			expect(calls).toBe(2);
+		} finally {
+			storage.close();
+		}
 	});
 });
 describe("AuthStorage usage cache: provider failure policy", () => {
