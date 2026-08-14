@@ -44,6 +44,9 @@ async function discoverCopilotModels(
 		const url = typeof input === "string" ? input : input.toString();
 		if (url === "https://api.github.com/copilot_internal/user") {
 			expect(getHeaderValue(init?.headers, "Authorization")).toBe(`token ${expectedAuthorizationToken}`);
+			// The probe must be bounded by the shared discovery deadline so a
+			// stalled endpoint cannot hang discovery (PR #8510 review).
+			expect(init?.signal).toBeInstanceOf(AbortSignal);
 			return Response.json({ endpoints: { api: expectedBaseUrl } });
 		}
 		expect(url).toBe(`${expectedBaseUrl}/models`);
@@ -84,6 +87,21 @@ describe("github copilot model limits mapping", () => {
 			"https://api.business.githubcopilot.com",
 			token,
 		);
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+	it("falls back to the personal endpoint when the raw-token probe fails", async () => {
+		const token = "ghu_valid_business_token";
+		const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+			const url = typeof input === "string" ? input : input.toString();
+			if (url === "https://api.github.com/copilot_internal/user") {
+				expect(init?.signal).toBeInstanceOf(AbortSignal);
+				throw new DOMException("The operation timed out.", "TimeoutError");
+			}
+			expect(url).toBe("https://api.githubcopilot.com/models");
+			return Response.json({ data: [] });
+		});
+		const models = await githubCopilotModelManagerOptions({ apiKey: token, fetch: fetchMock }).fetchDynamicModels?.();
+		expect(models).toEqual([]);
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
 

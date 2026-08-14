@@ -77,11 +77,14 @@ export function normalizeGitHubCopilotApiEndpoint(input: string | undefined): st
 }
 /**
  * Resolve the plan-specific Copilot API endpoint advertised for a GitHub token.
- * Login and raw environment-token discovery share this best-effort probe.
+ * Login and raw environment-token discovery share this best-effort probe. Pass
+ * a `signal` to bound it against the same discovery deadline as `/models`; a
+ * stalled probe otherwise blocks discovery indefinitely.
  */
 export async function discoverGitHubCopilotApiEndpoint(
 	token: string,
 	fetchImpl: FetchImpl,
+	signal?: AbortSignal,
 ): Promise<string | undefined> {
 	try {
 		const response = await fetchImpl("https://api.github.com/copilot_internal/user", {
@@ -90,6 +93,7 @@ export async function discoverGitHubCopilotApiEndpoint(
 				Authorization: `token ${token}`,
 				...OPENCODE_HEADERS,
 			},
+			signal,
 		});
 		if (!response.ok) return undefined;
 		const data: unknown = await response.json();
