@@ -3,7 +3,12 @@ import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Message, ThinkingContent } from "@oh-my-pi/pi-ai";
-import { createMockModel, type MockContent, type MockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
+import {
+	createMockModel,
+	type MockContent,
+	type MockModel,
+	type MockResponseSource,
+} from "@oh-my-pi/pi-ai/providers/mock";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
@@ -105,7 +110,7 @@ function signedThinking(thinking: string, thinkingSignature: string): MockConten
 }
 
 async function createHarness(
-	responses: MockResponse[],
+	responses: MockResponseSource,
 	tools: AgentTool[] = [checkpointTool as AgentTool, rewindTool as AgentTool],
 	options?: { onAgentEnd?: (willContinue: boolean | undefined) => void },
 ): Promise<Harness & { mock: MockModel }> {
@@ -286,7 +291,7 @@ describe("AgentSession checkpoint rewind branch context", () => {
 					stopReason: "toolUse",
 				};
 				yield { content: ["DONE"], stopReason: "stop" };
-			})(),
+			})() as MockResponseSource,
 		);
 
 		const promptPromise = session.prompt("investigate with a checkpoint");
@@ -302,9 +307,11 @@ describe("AgentSession checkpoint rewind branch context", () => {
 			await Bun.sleep(10);
 		}
 		const reminder = session.messages.find(
-			message => message.role === "custom" && message.customType === "checkpoint-active-reminder",
+			(message): message is Extract<AgentMessage, { role: "custom" }> =>
+				message.role === "custom" && message.customType === "checkpoint-active-reminder",
 		);
-		expect(messageText(reminder!)).toContain("MUST `rewind` before yielding");
+		expect(reminder).toBeDefined();
+		expect(reminder?.content).toContain("MUST `rewind` before yielding");
 		proceed.resolve();
 		await promptPromise;
 
