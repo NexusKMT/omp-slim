@@ -74,6 +74,18 @@ const EMPTY_STOP_MAX_RETRIES = 3;
 const SIBLING_UNBLOCK_BUFFER_MS = 1_000;
 const NON_WHITESPACE_RE = /\S/;
 const USAGE_PREFLIGHT_BLOCKED_PREFIX = "Usage preflight blocked:";
+const IMMUTABLE_ANTHROPIC_THINKING_ERROR_PATTERN =
+	/messages\.\d+\.content\.\d+.*\b(?:thinking|redacted_thinking)\b.*\blatest assistant message cannot be modified\b/is;
+
+function isImmutableAnthropicThinkingError(message: AssistantMessage, model: Model): boolean {
+	const isBadRequest =
+		message.errorStatus === 400 || message.errorId === 400 || message.errorMessage?.startsWith("400 ") === true;
+	return (
+		model.api === "anthropic-messages" &&
+		isBadRequest &&
+		IMMUTABLE_ANTHROPIC_THINKING_ERROR_PATTERN.test(message.errorMessage ?? "")
+	);
+}
 
 function hasNonWhitespace(value: string): boolean {
 	return NON_WHITESPACE_RE.test(value);
@@ -1030,6 +1042,8 @@ export class TurnRecovery {
 	isRetryableError(message: AssistantMessage): boolean {
 		if (message.stopReason !== "error") return false;
 		if (this.#isUsagePreflightBlocked(message)) return false;
+		const model = this.#host.model();
+		if (model && isImmutableAnthropicThinkingError(message, model)) return false;
 
 		const id = this.#classifyRetryMessage(message);
 		// Context overflow is handled by compaction, not retry.
@@ -1603,6 +1617,7 @@ export class TurnRecovery {
 		if (this.#isUsagePreflightBlocked(message)) return false;
 		const model = this.#host.model();
 		if (!model) return false;
+		if (isImmutableAnthropicThinkingError(message, model)) return false;
 		const retrySettings = this.#host.settings.getGroup("retry");
 		if (!retrySettings.enabled || !retrySettings.modelFallback) return false;
 		if (this.isClassifierRefusal(message)) return false;

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Stopped Anthropic `invalid_request_error` responses for immutable thinking blocks from entering model fallback and replaying the unchanged invalid turn ([#8558](https://github.com/can1357/oh-my-pi/issues/8558)).
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed
