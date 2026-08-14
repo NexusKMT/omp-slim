@@ -48,9 +48,13 @@ describe("idle checker (#8390)", () => {
 	it("never reports a client with an in-flight request as idle", async () => {
 		const client = makeClient();
 		const pending = sendRequest(client, "textDocument/hover", {}, undefined, 10 * IDLE_TIMEOUT_MS);
+		// One clock read drives both the client's timestamp and every sweep below.
+		// Re-reading `Date.now()` per assertion would make the margins depend on
+		// how long the test itself took, which a loaded CI runner does not bound.
+		const now = Date.now();
 		// The request was *sent* long ago and is still outstanding: exactly the
 		// shape that used to be torn down mid-flight.
-		client.lastActivity = Date.now() - 10 * IDLE_TIMEOUT_MS;
+		client.lastActivity = now - 10 * IDLE_TIMEOUT_MS;
 
 		expect(client.pendingRequests.size).toBe(1);
 
@@ -59,10 +63,10 @@ describe("idle checker (#8390)", () => {
 		// below would have been rejected with "LSP client shutdown" mid-flight.
 		// Keep both assertions together so a regression that drops the guard
 		// fails loudly instead of silently agreeing with the old behaviour.
-		expect(Date.now() - client.lastActivity > IDLE_TIMEOUT_MS).toBe(true);
-		expect(isIdleClient(client, Date.now(), IDLE_TIMEOUT_MS)).toBe(false);
+		expect(now - client.lastActivity > IDLE_TIMEOUT_MS).toBe(true);
+		expect(isIdleClient(client, now, IDLE_TIMEOUT_MS)).toBe(false);
 		// Not even an arbitrarily distant sweep may reap it while work is in flight.
-		expect(isIdleClient(client, Date.now() + 24 * 60 * 60_000, IDLE_TIMEOUT_MS)).toBe(false);
+		expect(isIdleClient(client, now + 24 * 60 * 60_000, IDLE_TIMEOUT_MS)).toBe(false);
 
 		settle(client, 1, { value: { contents: "ok" } });
 		await expect(pending).resolves.toEqual({ contents: "ok" });
@@ -70,17 +74,25 @@ describe("idle checker (#8390)", () => {
 
 	it("reports a quiet client as idle once the window elapses", () => {
 		const client = makeClient();
-		client.lastActivity = Date.now() - 10 * IDLE_TIMEOUT_MS;
+		const now = Date.now();
+		client.lastActivity = now - 10 * IDLE_TIMEOUT_MS;
 
 		expect(client.pendingRequests.size).toBe(0);
-		expect(isIdleClient(client, Date.now(), IDLE_TIMEOUT_MS)).toBe(true);
+		expect(isIdleClient(client, now, IDLE_TIMEOUT_MS)).toBe(true);
 	});
 
 	it("keeps a client below the idle window alive", () => {
 		const client = makeClient();
-		client.lastActivity = Date.now();
+		// Both the stamp and the sweep come from one clock read: the boundary
+		// case is exactly `IDLE_TIMEOUT_MS - 1`, so even 2ms of scheduling drift
+		// between two `Date.now()` calls would push the sweep past the window and
+		// flip this assertion on a busy runner.
+		const now = Date.now();
+		client.lastActivity = now;
 
-		expect(isIdleClient(client, Date.now() + IDLE_TIMEOUT_MS - 1, IDLE_TIMEOUT_MS)).toBe(false);
+		expect(isIdleClient(client, now + IDLE_TIMEOUT_MS - 1, IDLE_TIMEOUT_MS)).toBe(false);
+		// The far side of the same boundary, from the same clock read.
+		expect(isIdleClient(client, now + IDLE_TIMEOUT_MS + 1, IDLE_TIMEOUT_MS)).toBe(true);
 	});
 
 	it("refreshes lastActivity when a request settles so a fresh answer is not reaped", async () => {
