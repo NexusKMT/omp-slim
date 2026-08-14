@@ -77,16 +77,6 @@ const USAGE_PREFLIGHT_BLOCKED_PREFIX = "Usage preflight blocked:";
 const IMMUTABLE_ANTHROPIC_THINKING_ERROR_PATTERN =
 	/messages\.\d+\.content\.\d+.*\b(?:thinking|redacted_thinking)\b.*\blatest assistant message cannot be modified\b/is;
 
-function isImmutableAnthropicThinkingError(message: AssistantMessage, model: Model): boolean {
-	const isBadRequest =
-		message.errorStatus === 400 || message.errorId === 400 || message.errorMessage?.startsWith("400 ") === true;
-	return (
-		model.api === "anthropic-messages" &&
-		isBadRequest &&
-		IMMUTABLE_ANTHROPIC_THINKING_ERROR_PATTERN.test(message.errorMessage ?? "")
-	);
-}
-
 function hasNonWhitespace(value: string): boolean {
 	return NON_WHITESPACE_RE.test(value);
 }
@@ -1043,7 +1033,13 @@ export class TurnRecovery {
 		if (message.stopReason !== "error") return false;
 		if (this.#isUsagePreflightBlocked(message)) return false;
 		const model = this.#host.model();
-		if (model && isImmutableAnthropicThinkingError(message, model)) return false;
+		const immutableAnthropicThinkingError =
+			model?.api === "anthropic-messages" &&
+			(message.errorStatus === 400 ||
+				message.errorId === 400 ||
+				message.errorMessage?.startsWith("400 ") === true) &&
+			IMMUTABLE_ANTHROPIC_THINKING_ERROR_PATTERN.test(message.errorMessage ?? "");
+		if (immutableAnthropicThinkingError) return false;
 
 		const id = this.#classifyRetryMessage(message);
 		// Context overflow is handled by compaction, not retry.
@@ -1550,11 +1546,32 @@ export class TurnRecovery {
 		if (!role) return false;
 
 		const ceiling = this.#host.thinkingLevelCeiling();
+		const latestAssistant = this.#host.agent.state.messages.findLast(
+			(message): message is AssistantMessage => message.role === "assistant" && message !== failedMessage,
+		);
 		for (const selector of this.findRetryFallbackCandidates(role, currentSelector)) {
 			if (this.isRetryFallbackSelectorSuppressed(selector)) continue;
 			const resolved = resolveModelOverride([selector.raw], this.#host.modelRegistry, this.#host.settings);
 			const candidate = resolved.model ?? this.#host.modelRegistry.find(selector.provider, selector.id);
 			if (!candidate) continue;
+			// Anthropic signatures and redacted blocks are model-bound, while the
+			// latest assistant response must remain byte-identical. A same-provider
+			// model switch can satisfy neither constraint, so keep retrying the
+			// source model or consider a later cross-provider candidate whose
+			// message transform can safely demote the foreign thinking.
+			if (
+				candidate.api === "anthropic-messages" &&
+				latestAssistant?.api === "anthropic-messages" &&
+				latestAssistant.provider === candidate.provider &&
+				latestAssistant.model !== candidate.id &&
+				latestAssistant.content.some(
+					block =>
+						(block.type === "thinking" && Boolean(block.thinkingSignature?.trim())) ||
+						block.type === "redactedThinking",
+				)
+			) {
+				continue;
+			}
 			// A candidate whose effort floor exceeds the per-spawn ceiling would be
 			// clamped UP past the cap by its model floor — skip it entirely.
 			if (ceiling !== undefined && !modelSupportsEffortCeiling(candidate, ceiling)) continue;
@@ -1617,7 +1634,13 @@ export class TurnRecovery {
 		if (this.#isUsagePreflightBlocked(message)) return false;
 		const model = this.#host.model();
 		if (!model) return false;
-		if (isImmutableAnthropicThinkingError(message, model)) return false;
+		const immutableAnthropicThinkingError =
+			model.api === "anthropic-messages" &&
+			(message.errorStatus === 400 ||
+				message.errorId === 400 ||
+				message.errorMessage?.startsWith("400 ") === true) &&
+			IMMUTABLE_ANTHROPIC_THINKING_ERROR_PATTERN.test(message.errorMessage ?? "");
+		if (immutableAnthropicThinkingError) return false;
 		const retrySettings = this.#host.settings.getGroup("retry");
 		if (!retrySettings.enabled || !retrySettings.modelFallback) return false;
 		if (this.isClassifierRefusal(message)) return false;
