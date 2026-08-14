@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed interrupted `vibe_wait` calls being reported as elapsed timeout windows while preserving the per-call wait timeout.
+
 ## [17.3.3] - 2026-08-14
 
 ### Fixed
