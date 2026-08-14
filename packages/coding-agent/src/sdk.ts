@@ -3044,7 +3044,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// registry it manages; the corpse's transcript stays at history://.
 			const stale = agentRegistry.get(resolvedAgentId);
 			const lifecycle = AgentLifecycleManager.global();
-			if (stale && lifecycle.manages(agentRegistry) && lifecycle.reclaimDeadCorpse(resolvedAgentId, stale)) {
+			if (stale && lifecycle.manages(agentRegistry) && (await lifecycle.reclaimDeadCorpse(resolvedAgentId, stale))) {
 				registeredAgentRef = agentRegistry.registerIfAvailable(registrationInput, null);
 			}
 		}

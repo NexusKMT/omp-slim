@@ -176,21 +176,35 @@ export class AgentLifecycleManager {
 
 	/**
 	 * Reclaim a provably-dead parked corpse so a fresh spawn can reuse its id.
-	 * A ref qualifies only when it still resolves to `expected`, is `parked`
-	 * with no live session, this manager does not own it (no in-memory reviver
-	 * adoption), and no park/revive is in flight. Such a ref cannot be revived
-	 * — {@link ensureLive} throws for it — yet {@link AgentRegistry.registerIfAvailable}
-	 * refuses to overwrite it, so one construction failure or isolated-run park
-	 * would otherwise poison the id for the whole process (#8490).
+	 * Refuses live, adopted, in-flight, or cold-revivable refs. For a parked ref
+	 * restored from disk, the persisted factory is consulted before removal
+	 * because cold revivers are created lazily by {@link ensureLive}.
 	 *
 	 * Only refs in the registry this manager owns are touched; the transcript
 	 * stays readable at `history://<id>`. Returns true when the corpse was
 	 * unregistered.
 	 */
-	reclaimDeadCorpse(id: string, expected: AgentRef): boolean {
+	async reclaimDeadCorpse(id: string, expected: AgentRef): Promise<boolean> {
 		const ref = this.#registry.get(id);
 		if (ref !== expected || ref.status !== "parked" || ref.session) return false;
 		if (this.#adopted.has(id) || this.#parks.has(id) || this.#revivals.has(id)) return false;
+
+		const persistedFactory = ref.sessionFile ? this.#persistedReviverFactory : undefined;
+		if (persistedFactory) {
+			try {
+				if (await persistedFactory(ref)) return false;
+			} catch (error) {
+				logger.warn("AgentLifecycleManager.reclaimDeadCorpse: persisted reviver probe failed", {
+					id,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				return false;
+			}
+			// The factory awaited I/O; another lifecycle operation may now own or
+			// have replaced this ref. Revalidate every reclaim invariant.
+			if (this.#registry.get(id) !== ref || ref.status !== "parked" || ref.session) return false;
+			if (this.#adopted.has(id) || this.#parks.has(id) || this.#revivals.has(id)) return false;
+		}
 		return this.#registry.unregister(id, ref);
 	}
 

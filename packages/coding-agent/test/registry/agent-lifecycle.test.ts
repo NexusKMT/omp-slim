@@ -169,7 +169,7 @@ describe("AgentLifecycleManager", () => {
 			session: live.session,
 			status: "running",
 		});
-		expect(lifecycle.reclaimDeadCorpse("Live-Sub", registry.get("Live-Sub")!)).toBe(false);
+		expect(await lifecycle.reclaimDeadCorpse("Live-Sub", registry.get("Live-Sub")!)).toBe(false);
 		expect(registry.get("Live-Sub")?.session).toBe(live.session);
 
 		// An adopted (revivable) parked agent is never reclaimed.
@@ -182,14 +182,14 @@ describe("AgentLifecycleManager", () => {
 			status: "parked",
 		});
 		lifecycle.adopt("Adopted-Sub", { idleTtlMs: 0, revive: async () => makeSessionStub().session }, adopted);
-		expect(lifecycle.reclaimDeadCorpse("Adopted-Sub", adopted)).toBe(false);
+		expect(await lifecycle.reclaimDeadCorpse("Adopted-Sub", adopted)).toBe(false);
 		expect(registry.get("Adopted-Sub")).toBe(adopted);
 
 		// A stale expected ref (points at a different agent) is never reclaimed.
-		expect(lifecycle.reclaimDeadCorpse("Corpse-Sub", adopted)).toBe(false);
+		expect(await lifecycle.reclaimDeadCorpse("Corpse-Sub", adopted)).toBe(false);
 
 		// The corpse is reclaimed, and its id becomes registerable again.
-		expect(lifecycle.reclaimDeadCorpse("Corpse-Sub", corpse)).toBe(true);
+		expect(await lifecycle.reclaimDeadCorpse("Corpse-Sub", corpse)).toBe(true);
 		expect(registry.get("Corpse-Sub")).toBeUndefined();
 		const respawn = registry.registerIfAvailable(
 			{ id: "Corpse-Sub", displayName: "task", kind: "sub", session: null, status: "running" },
@@ -197,6 +197,32 @@ describe("AgentLifecycleManager", () => {
 		);
 		expect(respawn?.status).toBe("running");
 		expect(registry.get("Corpse-Sub")).toBe(respawn);
+	});
+
+	it("reclaimDeadCorpse preserves an unadopted parked ref when its persisted session can cold-revive", async () => {
+		const revived = makeSessionStub();
+		const cold = registry.register({
+			id: "Cold-Sub",
+			displayName: "task",
+			kind: "sub",
+			session: null,
+			sessionFile: "/tmp/Cold-Sub.jsonl",
+			status: "parked",
+		});
+		let factoryCalls = 0;
+		lifecycle.setPersistedSubagentReviverFactory(async ref => {
+			factoryCalls++;
+			expect(ref).toBe(cold);
+			return async () => revived.session;
+		}, 0);
+
+		expect(await lifecycle.reclaimDeadCorpse("Cold-Sub", cold)).toBe(false);
+		expect(registry.get("Cold-Sub")).toBe(cold);
+		expect(factoryCalls).toBe(1);
+
+		// The preserved ref remains messageable through the normal cold-revive path.
+		expect(await lifecycle.ensureLive("Cold-Sub")).toBe(revived.session);
+		expect(registry.get("Cold-Sub")?.session).toBe(revived.session);
 	});
 
 	it("concurrent ensureLive calls during a slow revive coalesce into one reviver run", async () => {
