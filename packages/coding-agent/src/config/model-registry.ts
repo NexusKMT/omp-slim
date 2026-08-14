@@ -61,9 +61,11 @@ import {
 	type DiscoveryProviderConfig,
 	discoverLlamaCppModelRuntimeMetadata,
 	discoverModelsByProviderType,
+	ensureLlamaCppV1BaseUrl,
 	getImplicitOllamaBaseUrl,
 	getOllamaContextLengthOverride,
 	normalizeLiteLLMDiscoveryBaseUrl,
+	normalizeLlamaCppBaseUrl,
 } from "./model-discovery";
 import {
 	AUTHORITATIVE_RUNTIME_CATALOG_PROVIDERS,
@@ -1459,7 +1461,10 @@ export class ModelRegistry {
 			if (!llamaCppProviders.has(model.provider)) return model;
 			const withFixups = applyLlamaCppQwenThinking(model);
 			if (!withFixups.transport && !withFixups.baseUrl.endsWith("/v1")) {
-				return buildModel({ ...withFixups, baseUrl: `${withFixups.baseUrl}/v1` });
+				return buildModel({
+					...withFixups,
+					baseUrl: ensureLlamaCppV1BaseUrl(normalizeLlamaCppBaseUrl(withFixups.baseUrl)),
+				});
 			}
 			return withFixups;
 		});
