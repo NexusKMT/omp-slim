@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.4] - 2026-08-14
+
 ### Changed
 
 - Replaced the MuPDF-WASM PDF document backend with `pdf-inspector` through `@oh-my-pi/pi-natives`, preserving cached text conversion and PDF line selectors while reporting pages that need OCR.
