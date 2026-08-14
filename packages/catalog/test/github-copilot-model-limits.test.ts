@@ -104,6 +104,53 @@ describe("github copilot model limits mapping", () => {
 		expect(models).toEqual([]);
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
+	it("does not reuse another token's authoritative cache after COPILOT_GITHUB_TOKEN switches", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-ai-copilot-token-switch-"));
+		const cacheDbPath = path.join(tempDir, "models.db");
+		try {
+			const personalFetch = vi.fn(async (input: string | URL | Request) => {
+				const url = typeof input === "string" ? input : input.toString();
+				if (url === "https://api.github.com/copilot_internal/user") {
+					return Response.json({ endpoints: { api: "https://api.githubcopilot.com" } });
+				}
+				if (url === "https://api.githubcopilot.com/models") {
+					return Response.json({ data: [{ id: "gpt-5.5", name: "GPT-5.5" }] });
+				}
+				throw new Error(`unexpected personal request: ${url}`);
+			});
+			const personalManager = createModelManager({
+				...githubCopilotModelManagerOptions({ apiKey: "ghu_personal_token", fetch: personalFetch }),
+				cacheDbPath,
+			});
+			// Personal token discovery writes a fresh authoritative cache.
+			await personalManager.refresh("online");
+
+			const businessSeen: string[] = [];
+			const businessFetch = vi.fn(async (input: string | URL | Request) => {
+				const url = typeof input === "string" ? input : input.toString();
+				businessSeen.push(url);
+				if (url === "https://api.github.com/copilot_internal/user") {
+					return Response.json({ endpoints: { api: "https://api.business.githubcopilot.com" } });
+				}
+				if (url === "https://api.business.githubcopilot.com/models") {
+					return Response.json({ data: [{ id: "gpt-5.5", name: "GPT-5.5" }] });
+				}
+				throw new Error(`unexpected business request: ${url}`);
+			});
+			const businessManager = createModelManager({
+				...githubCopilotModelManagerOptions({ apiKey: "ghu_business_token", fetch: businessFetch }),
+				cacheDbPath,
+			});
+			// Default online-if-uncached must not satisfy the switched token from the
+			// prior token's fresh authoritative personal-endpoint cache.
+			const { models } = await businessManager.refresh("online-if-uncached");
+			expect(businessSeen).toContain("https://api.github.com/copilot_internal/user");
+			expect(businessSeen).toContain("https://api.business.githubcopilot.com/models");
+			expect(models.some(model => model.baseUrl === "https://api.business.githubcopilot.com")).toBe(true);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
 
 	it("unwraps structured OAuth keys for discovery and routes enterprise discovery to the enterprise host", async () => {
 		const structuredApiKey = JSON.stringify({
