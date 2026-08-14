@@ -273,16 +273,16 @@ describe("AgentSession empty stop guard", () => {
 			.map(entry => entry.message as AgentMessage);
 		expect(emptyAssistantStops(activeBranchMessages)).toHaveLength(0);
 
-		// The session loader reconstructs the active branch from the last physical
-		// journal entry, so a capped empty stop must be physically removed — not
-		// just reparented in memory — or it resurfaces as the active leaf on reload.
+		// The loader reconstructs the active branch from the last physical journal
+		// entry. The empty stop is removed from history and a marker durably
+		// selects its parent, so reload cannot reactivate the discarded turn.
 		const journalMessages = session.sessionManager
 			.getEntries()
 			.filter(entry => entry.type === "message")
 			.map(entry => entry.message as AgentMessage);
 		expect(emptyAssistantStops(journalMessages)).toHaveLength(0);
 		const lastJournalEntry = session.sessionManager.getEntries().at(-1);
-		expect(lastJournalEntry?.type === "message" && lastJournalEntry.message.role === "toolResult").toBe(true);
+		expect(lastJournalEntry).toMatchObject({ type: "custom", customType: "discarded-entry-branch" });
 	});
 
 	it("emits failed auto-retry end when repeated empty stops exhaust the retry cap", async () => {

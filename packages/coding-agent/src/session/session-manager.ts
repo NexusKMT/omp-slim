@@ -78,6 +78,7 @@ const JSONL_SUFFIX_LENGTH = ".jsonl".length;
 const DRAFT_ONLY_SESSION_MARKER = ".draft-only-session";
 const SUPERSEDED_COMPACTION_SUMMARY = "[Superseded compaction summary elided after a newer compaction]";
 const SUPERSEDED_COMPACTION_SHORT_SUMMARY = "Superseded compaction elided";
+const DISCARDED_ENTRY_BRANCH_MARKER = "discarded-entry-branch";
 
 function mintSessionId(): string {
 	return Bun.randomUUIDv7();
@@ -1735,27 +1736,31 @@ export class SessionManager {
 	}
 
 	/**
-	 * Physically remove a childless entry from the journal and rewrite the file.
+	 * Durably move the active branch past a discarded entry.
 	 *
-	 * {@link branch}/{@link resetLeaf} only move the in-memory leaf; the session
-	 * loader reconstructs the active branch from the *last physical entry* in the
-	 * file (`collectActiveBranchIds`), so an in-memory-only reparent is lost on
-	 * reload when nothing is appended after it. A terminally discarded turn (e.g.
-	 * an empty stop that exhausts the retry cap, with no continuation) must be
-	 * removed durably or it resurfaces as the active leaf on the next load.
-	 *
-	 * No-ops when the entry is unknown or still has children — removing it would
-	 * orphan its subtree. After removal the leaf is reparented to the entry's
-	 * parent, matching the reload path.
+	 * The loader reconstructs the active branch from the last physical journal
+	 * entry, so changing the in-memory leaf alone is lost on reload. Known
+	 * metadata children are chained onto the discarded entry's parent before the
+	 * entry is removed. If any child may carry content, the subtree is preserved
+	 * off-branch instead. Both paths append a metadata-only branch marker and
+	 * rewrite the journal, making the selected path durable.
 	 */
-	async dropLeafEntry(entryId: string): Promise<void> {
+	async discardEntryDurably(entryId: string): Promise<void> {
 		const entry = this.#index.get(entryId);
 		if (!entry) return;
-		if (this.#index.childrenOf(entryId).length > 0) return;
-		const parentId = entry.parentId;
-		this.#entries = this.#entries.filter(candidate => candidate.id !== entryId);
-		this.#index.rebuild(this.#entries);
-		this.#index.setLeaf(parentId);
+		const children = this.#index.childrenOf(entryId);
+		const canReparentChildren = children.every(child => child.type === "service_tier_change");
+		let leafId = entry.parentId;
+		if (canReparentChildren) {
+			for (const child of children) {
+				child.parentId = leafId;
+				leafId = child.id;
+			}
+			this.#entries = this.#entries.filter(candidate => candidate.id !== entryId);
+			this.#index.rebuild(this.#entries);
+		}
+		this.#index.setLeaf(leafId);
+		this.appendCustomEntry(DISCARDED_ENTRY_BRANCH_MARKER, { discardedEntryId: entryId });
 		await this.rewriteEntries();
 	}
 

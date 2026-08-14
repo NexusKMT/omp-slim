@@ -10983,15 +10983,14 @@ export class AgentSession {
 			this.#resolveRetry();
 		}
 		// An empty turn carries no transcript value, and its provider usage can
-		// anchor later context accounting to the failed request. It must never
-		// linger in the persisted journal either: the session loader rebuilds the
-		// active branch from the last physical entry, so a reparent that is not
-		// physically committed lets the empty stop resurface as the active leaf on
-		// reload — or if the process is killed mid retry sequence. Wait for the
-		// in-flight message_end persistence, remove it from active context + the
-		// branch, then physically drop the persisted entry and rewrite the file.
+		// anchor later context accounting to the failed request. It must not
+		// remain on the persisted active branch: the loader rebuilds that branch
+		// from the last physical entry, so an in-memory-only reparent lets the
+		// empty stop resurface on reload (or a mid-retry process kill). Wait for
+		// message_end persistence, remove it from active context + the branch,
+		// then durably persist the selected path.
 		const droppedEntryId = await this.#dropPersistedAssistantTurn(assistantMessage);
-		if (droppedEntryId) await this.sessionManager.dropLeafEntry(droppedEntryId);
+		if (droppedEntryId) await this.sessionManager.discardEntryDurably(droppedEntryId);
 		if (capExceeded) return false;
 		this.agent.appendMessage({
 			role: "developer",
