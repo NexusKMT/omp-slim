@@ -12,7 +12,7 @@ import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { RewindTool, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import { CheckpointTool, RewindTool, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
@@ -250,7 +250,9 @@ describe("AgentSession checkpoint rewind branch context", () => {
 		const reportMessage = finalCall.context.messages[reportIndex];
 		if (!reportMessage) throw new Error("Expected rewind report context");
 		const reportText = messageText(reportMessage);
-		expect(reportText).toContain("`rewind`");
+		expect(reportText).toContain(
+			"Checkpoint called and rewound. Report retained below. Need explore again → new `checkpoint`.",
+		);
 		expect(reportText).toContain(report);
 
 		expect(
@@ -265,6 +267,83 @@ describe("AgentSession checkpoint rewind branch context", () => {
 		const finalThinking = finalAssistant.content.find((block): block is ThinkingContent => block.type === "thinking");
 		expect(finalThinking?.thinking).toBe("answer after rewind");
 		expect(finalThinking?.thinkingSignature).toBe("sig_after_rewind");
+	});
+
+	it("shows a transient checkpoint-active reminder that is branch-cut away on rewind", async () => {
+		const report = "findings: transient reminder";
+		const proceed = Promise.withResolvers<void>();
+		const { session, mock } = await createHarness(
+			(async function* () {
+				yield {
+					content: [
+						{ type: "toolCall", id: "call_checkpoint", name: "checkpoint", arguments: { goal: "inspect" } },
+					],
+					stopReason: "toolUse",
+				};
+				await proceed.promise;
+				yield {
+					content: [{ type: "toolCall", id: "call_rewind", name: "rewind", arguments: { report } }],
+					stopReason: "toolUse",
+				};
+				yield { content: ["DONE"], stopReason: "stop" };
+			})(),
+		);
+
+		const promptPromise = session.prompt("investigate with a checkpoint");
+		// Pause the model between the checkpoint and rewind calls to observe the
+		// active-checkpoint state: the transient notice must be in the active path.
+		const deadline = Date.now() + 5000;
+		while (
+			!session.messages.some(
+				message => message.role === "custom" && message.customType === "checkpoint-active-reminder",
+			)
+		) {
+			if (Date.now() > deadline) throw new Error("checkpoint-active-reminder never appeared");
+			await Bun.sleep(10);
+		}
+		const reminder = session.messages.find(
+			message => message.role === "custom" && message.customType === "checkpoint-active-reminder",
+		);
+		expect(messageText(reminder!)).toContain("MUST `rewind` before yielding");
+		proceed.resolve();
+		await promptPromise;
+
+		// After rewind the branch cut dropped the reminder from the active path.
+		expect(
+			session.messages.some(
+				message => message.role === "custom" && message.customType === "checkpoint-active-reminder",
+			),
+		).toBe(false);
+
+		// No negation guard anywhere in the model-visible context.
+		const finalCall = mock.calls.at(-1);
+		if (!finalCall) throw new Error("Expected final post-rewind provider call");
+		for (const message of finalCall.context.messages) {
+			const text = messageText(message);
+			expect(text).not.toContain("NEVER call");
+			expect(text).not.toContain("Do not call `rewind` again");
+		}
+
+		// Exactly one developer message carries the forward-looking rewind report.
+		const reportMessages = finalCall.context.messages.filter(
+			message => message.role === "developer" && messageText(message).includes("Checkpoint called and rewound."),
+		);
+		expect(reportMessages).toHaveLength(1);
+		expect(messageText(reportMessages[0]!)).toContain("Need explore again → new `checkpoint`.");
+		expect(messageText(reportMessages[0]!)).toContain(report);
+	});
+
+	it("checkpoint tool result carries only the goal and a forward-looking line", async () => {
+		const tool = new CheckpointTool(
+			createToolSession({
+				getCheckpointState: () => undefined,
+			}),
+		);
+		const result = await tool.execute("call_checkpoint", { goal: "inspect" });
+		const text = result.content.find(part => part.type === "text")?.text;
+		expect(text).toBe("Checkpoint: inspect\nFinish exploration and formulate findings.");
+		expect(text).not.toContain("Run your investigation");
+		expect(text).not.toContain("call rewind");
 	});
 
 	it("ignores a completed cycle's rewind result after rebuilding context", async () => {

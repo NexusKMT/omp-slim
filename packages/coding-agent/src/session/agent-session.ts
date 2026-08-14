@@ -2713,6 +2713,37 @@ export class AgentSession {
 					};
 					this.#pendingRewindReport = undefined;
 					this.#lastCompletedRewind = undefined;
+					const goal = semanticDetails ? stringProperty(semanticDetails, "goal") : undefined;
+					const reminderText = [
+						"<system-notice>",
+						"Exploration checkpoint active.",
+						"- MUST `rewind` with findings once exploration is done.",
+						"- MUST `rewind` before yielding.",
+						"</system-notice>",
+					].join("\n");
+					// Direct append (not the queued nextTurn seam): message_end for the
+					// checkpoint result fires mid-turn while streaming, so a queued
+					// reminder would only surface at the next user prompt — after the
+					// checkpoint may already be rewound. Appending here puts the notice
+					// in the very next model call, and the rewind branch cut
+					// (branchWithSummary(checkpointEntryId)) drops it from the active
+					// path automatically since it sits after the checkpoint entry.
+					this.agent.appendMessage({
+						role: "custom",
+						customType: "checkpoint-active-reminder",
+						content: reminderText,
+						display: false,
+						details: { goal },
+						attribution: "agent",
+						timestamp: Date.now(),
+					});
+					this.sessionManager.appendCustomMessageEntry(
+						"checkpoint-active-reminder",
+						reminderText,
+						false,
+						{ goal },
+						"agent",
+					);
 				}
 				if (semanticResult?.toolName === "rewind" && !isError && this.#checkpointState) {
 					const detailReport = semanticDetails ? (stringProperty(semanticDetails, "report")?.trim() ?? "") : "";
