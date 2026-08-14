@@ -1110,7 +1110,7 @@ describe("RemoteAuthCredentialStore + AuthStorage integration", () => {
 
 	test("broker invalidation drops server-side last-good usage reports", async () => {
 		const credential = serverStore!.listAuthCredentials("anthropic")[0];
-		if (!credential || credential.credential.type !== "oauth") throw new Error("expected OAuth credential");
+		if (credential?.credential.type !== "oauth") throw new Error("expected OAuth credential");
 		serverStore!.updateAuthCredential(credential.id, {
 			...credential.credential,
 			expires: Date.now() + 3_600_000,
