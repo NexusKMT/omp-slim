@@ -1,4 +1,4 @@
-Run one step of code in a persistent kernel. State persists across calls and subagents.
+Run one step of code in a persistent kernel. State persists across calls and `task` subagents; Eval `agent()` children use independent kernels.
 
 Work incrementally: imports → define → test → use, each its own cell. Re-run setup ONLY after `reset`, kernel crash.
 Parallelize *within* a cell with `parallel(thunks)`, not by batching.
