@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed inline-code foreground color carrying into plain text when a Markdown codespan ended exactly at a soft-wrap boundary ([#8582](https://github.com/can1357/oh-my-pi/issues/8582)).
+
 ## [17.3.4] - 2026-08-14
 
 ### Added
