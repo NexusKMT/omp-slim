@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added wire constants for Codex V2 remote-compaction feature negotiation.
+
 ## [17.3.2] - 2026-08-13
 
 ### Added
