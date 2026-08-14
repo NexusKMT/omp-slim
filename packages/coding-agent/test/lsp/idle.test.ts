@@ -7,14 +7,28 @@ const IDLE_TIMEOUT_MS = 60_000;
 /**
  * Minimal in-memory LSP client. `stdin` is a sink so `sendRequest` can register
  * a pending request without a real server process; nothing ever answers, so the
- * request stays in flight until the test settles it by hand.
+ * request stays in flight until the test settles it by hand. The rest of `proc`
+ * mirrors the shape the other hand-built clients in this repo use, so any
+ * teardown path that runs is looking at a whole process, not a hole.
  */
 function makeClient(): LspClient {
 	return {
 		name: "test-lsp",
 		cwd: process.cwd(),
 		config: { command: "test-lsp", fileTypes: [".ts"], rootMarkers: [] },
-		proc: { stdin: { write() {}, flush: async () => {} } } as unknown as LspClient["proc"],
+		proc: {
+			exited: new Promise<number>(() => {}),
+			exitCode: null,
+			stdin: {
+				write(chunk: string | Uint8Array) {
+					return typeof chunk === "string" ? Buffer.byteLength(chunk, "utf-8") : chunk.byteLength;
+				},
+				flush: () => 0,
+			},
+			stdout: new ReadableStream<Uint8Array>(),
+			peekStderr: () => "",
+			kill() {},
+		} as unknown as LspClient["proc"],
 		requestId: 0,
 		diagnostics: new Map(),
 		diagnosticsVersion: 0,
@@ -44,7 +58,7 @@ function settle(client: LspClient, id: number, outcome: { value: unknown } | { e
 	else entry.resolve(outcome.value);
 }
 
-describe.skip("idle checker (#8390)", () => {
+describe("idle checker (#8390)", () => {
 	it("never reports a client with an in-flight request as idle", async () => {
 		const client = makeClient();
 		const pending = sendRequest(client, "textDocument/hover", {}, undefined, 10 * IDLE_TIMEOUT_MS);
