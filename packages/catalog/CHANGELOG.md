@@ -9,6 +9,17 @@
 - ClinePass subscription models now surface upstream list prices (resolved from the bundled reference) so cost display reads as API-equivalent spend, matching the Codex/GitHub Copilot policy; only the free tier renders as $0 ([#7863](https://github.com/can1357/oh-my-pi/pull/7863) by [@will-bogusz](https://github.com/will-bogusz)).
 - ClinePass roster metadata now falls through to OpenRouter's public catalog live for ids the bundled reference does not know — the same enrichment source the official Cline client uses — so newly added models get real limits and pricing immediately instead of riding conservative defaults until the next bundle regeneration ([#7863](https://github.com/can1357/oh-my-pi/pull/7863) by [@will-bogusz](https://github.com/will-bogusz)).
 
+## [17.3.4] - 2026-08-14
+
+### Added
+
+- Added wire constants for Codex V2 remote-compaction feature negotiation.
+
+### Fixed
+
+- Fixed raw `COPILOT_GITHUB_TOKEN` credentials skipping plan-specific endpoint discovery, which routed GitHub Copilot Business model requests to the personal endpoint and returned HTTP 403. The GitHub Copilot model cache is now scoped per credential, so switching the token no longer serves another account's stale endpoint for the cache TTL ([#8507](https://github.com/can1357/oh-my-pi/issues/8507)).
+- Fixed the OpenRouter `deepseek/deepseek-v4-pro-0813` route silently clamping the reasoning effort to `high`: the dated SKU advertises (and accepts) the wire-exact `low`/`high`/`max` ladder, so its effort override no longer collapses to `high`-only. The undated `deepseek/deepseek-v4-pro` OpenRouter route stays `high`-only. ([#8517](https://github.com/can1357/oh-my-pi/issues/8517))
+
 ## [17.3.2] - 2026-08-13
 
 ### Added

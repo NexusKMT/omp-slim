@@ -9,6 +9,19 @@
 - ClinePass failures now surface actionable messages: subscription-window and free-tier limit markers classify as usage limits (fail fast, rotate sibling credentials), while not-subscribed, organization-account, and roster-rotation `model not found` responses are rewritten with recovery guidance ([#7863](https://github.com/can1357/oh-my-pi/pull/7863) by [@will-bogusz](https://github.com/will-bogusz)).
 - ClinePass requests now mirror the official Cline CLI's client-identity headers (with Cline's blessing), unlocking roster entries the gateway restricts to Cline product surfaces — including free-tier `deepseek/deepseek-v4-flash`. A surface-gate 403 is classified as per-model client policy rather than a credential failure, so it no longer rotates sibling keys ([#7863](https://github.com/can1357/oh-my-pi/pull/7863) by [@will-bogusz](https://github.com/will-bogusz)).
 
+## [17.3.4] - 2026-08-14
+
+### Fixed
+
+- Fixed `omp usage invalidate` to discard stale OAuth and API-key usage snapshots, then force a cache-bypassing, per-provider serialized refresh with a broker request budget sized for the full unfiltered account batch, so upgraded subscriptions do not silently retain pre-change quota data.
+- Fixed quota reporting and Cookie capture guidance for China (Beijing) Alibaba Token Plan credentials ([#8509](https://github.com/can1357/oh-my-pi/issues/8509)).
+
+## [17.3.3] - 2026-08-14
+
+### Fixed
+
+- Distinguished Gemini thought-only `STOP` responses from empty transports, avoiding repeated identical reasoning requests and duplicate Antigravity endpoint streams while surfacing the missing final output for session-level recovery.
+
 ## [17.3.2] - 2026-08-13
 
 ### Fixed
