@@ -4233,7 +4233,7 @@ describe("AgentSession retry fallback", () => {
 		expect(modelRegistry.isSelectorSuppressed("openai/gpt-4o")).toBe(false);
 	});
 
-	it("auto-retries Gemini MALFORMED_FUNCTION_CALL transient errors", async () => {
+	it("auto-retries Gemini MALFORMED_FUNCTION_CALL after an unexecuted tool call", async () => {
 		const model = getBundledModel("google", "gemini-1.5-flash");
 		if (!model) {
 			throw new Error("Expected bundled Google test model to exist");
@@ -4241,11 +4241,30 @@ describe("AgentSession retry fallback", () => {
 
 		const malformedError = "Generation failed with finish reason: MALFORMED_FUNCTION_CALL";
 		const requestedModels: string[] = [];
+		let toolExecutions = 0;
+		const toolSchema = type({ value: type("string") });
+		const tool: AgentTool<typeof toolSchema, { value: string }> = {
+			name: "record",
+			label: "Record",
+			description: "Record a value",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				toolExecutions += 1;
+				return { content: [{ type: "text", text: params.value }], details: params };
+			},
+		};
 
 		const mock = createMockModel({
 			responses: [
 				{
-					content: [{ type: "thinking", thinking: "Thinking before malformed function call..." }],
+					content: [
+						{
+							type: "toolCall",
+							id: "malformed-call",
+							name: "record",
+							arguments: { value: "must-not-execute" },
+						},
+					],
 					stopReason: "error",
 					errorMessage: malformedError,
 				},
@@ -4257,7 +4276,7 @@ describe("AgentSession retry fallback", () => {
 			initialState: {
 				model,
 				systemPrompt: ["Test"],
-				tools: [],
+				tools: [tool],
 				messages: [],
 			},
 			streamFn: (requestedModel, context, options) => {
@@ -4284,15 +4303,28 @@ describe("AgentSession retry fallback", () => {
 		await session.prompt("recover from Gemini malformed error");
 		await session.waitForIdle();
 
-		expect(mock.calls).toHaveLength(2);
+		expect(requestedModels).toEqual([`${model.provider}/${model.id}`, `${model.provider}/${model.id}`]);
+		expect(toolExecutions).toBe(0);
 		expect(retryStartEvents).toHaveLength(1);
 		expect(retryEndEvents).toHaveLength(1);
-		expect(session.agent.state.messages).toHaveLength(2);
-		const assistantMsg = session.agent.state.messages[1];
-		if (assistantMsg.role !== "assistant") {
-			throw new Error(`Expected assistant message, got ${assistantMsg.role}`);
+		const messages = session.agent.state.messages;
+		expect(messages.map(message => message.role)).toEqual(["user", "assistant", "toolResult", "assistant"]);
+		const failedAssistant = messages[1];
+		if (failedAssistant.role !== "assistant") {
+			throw new Error(`Expected failed assistant message, got ${failedAssistant.role}`);
 		}
-		const contentBlock = assistantMsg.content[0];
+		expect(failedAssistant.errorMessage).toBe(malformedError);
+		const syntheticResult = messages[2];
+		if (syntheticResult.role !== "toolResult") {
+			throw new Error(`Expected synthetic tool result, got ${syntheticResult.role}`);
+		}
+		expect(syntheticResult.toolCallId).toBe("malformed-call");
+		expect(syntheticResult.details).toMatchObject({ executed: false, source: "assistant_stop_error" });
+		const recoveredAssistant = messages[3];
+		if (recoveredAssistant.role !== "assistant") {
+			throw new Error(`Expected recovered assistant message, got ${recoveredAssistant.role}`);
+		}
+		const contentBlock = recoveredAssistant.content[0];
 		if (contentBlock.type !== "text") {
 			throw new Error(`Expected text content block, got ${contentBlock.type}`);
 		}

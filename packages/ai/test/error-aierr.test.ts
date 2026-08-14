@@ -88,7 +88,7 @@ describe("AIError.classify — structural provider errors", () => {
 		expect(AIError.retriable(id)).toBe(true);
 	});
 
-	it("classifies an empty provider response as transient + retryable", () => {
+	it("classifies an empty provider response as transient + empty-response + retryable", () => {
 		// Regression: "Cloud Code Assist API returned an empty response" matched no
 		// text pattern and empty-body carried no flag, so retry/model-fallback
 		// chains never engaged and the turn hard-failed.
@@ -98,6 +98,7 @@ describe("AIError.classify — structural provider errors", () => {
 		});
 		const id = AIError.classify(err);
 		expect(AIError.is(id, AIError.Flag.Transient)).toBe(true);
+		expect(AIError.is(id, AIError.Flag.EmptyResponse)).toBe(true);
 		expect(AIError.retriable(id)).toBe(true);
 	});
 

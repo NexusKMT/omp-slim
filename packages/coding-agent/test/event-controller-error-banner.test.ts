@@ -65,6 +65,7 @@ function createFixture(streamingMessage?: AssistantMessage) {
 	};
 	const showPinnedError = vi.fn();
 	const clearPinnedError = vi.fn();
+	const showError = vi.fn();
 	const statusContainer = {
 		clear: vi.fn(),
 		disposeChildren: vi.fn(),
@@ -116,7 +117,7 @@ function createFixture(streamingMessage?: AssistantMessage) {
 		flushCompactionQueue: vi.fn(async () => {}),
 		showPinnedError,
 		clearPinnedError,
-		showError: vi.fn(),
+		showError,
 		showStatus: vi.fn(),
 		noteDisplayableThinkingContent,
 		get hasDisplayableThinkingContent() {
@@ -134,7 +135,7 @@ function createFixture(streamingMessage?: AssistantMessage) {
 	} as unknown as InteractiveModeContext;
 
 	const controller = new EventController(ctx);
-	return { controller, ctx, showPinnedError, clearPinnedError, streamingComponent, componentCalls };
+	return { controller, ctx, showPinnedError, clearPinnedError, showError, streamingComponent, componentCalls };
 }
 
 describe("EventController error banner", () => {
@@ -153,6 +154,82 @@ describe("EventController error banner", () => {
 		// The same error is mirrored in the banner, so the transcript's inline
 		// `Error: …` line is suppressed to avoid a duplicate render.
 		expect(streamingComponent.setErrorPinned).toHaveBeenCalledWith(true);
+	});
+
+	it("suppresses a recoverable empty-output error while session continuation starts", async () => {
+		const message = makeAssistantMessage({
+			content: [{ type: "thinking", thinking: "Reasoning finished without final output." }],
+			stopReason: "error",
+			errorId: AIError.create(AIError.Flag.Transient, AIError.Flag.EmptyResponse),
+			errorMessage: "Cloud Code Assist API returned a thought-only response without final output",
+		});
+		const { controller, showPinnedError, streamingComponent } = createFixture(message);
+
+		await controller.handleEvent({ type: "message_end", message } as Extract<
+			AgentSessionEvent,
+			{ type: "message_end" }
+		>);
+
+		expect(streamingComponent.setErrorPinned).toHaveBeenCalledWith(true);
+		expect(showPinnedError).not.toHaveBeenCalled();
+		streamingComponent.setErrorPinned.mockClear();
+
+		await controller.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
+
+		expect(streamingComponent.setErrorPinned).not.toHaveBeenCalled();
+	});
+
+	it("keeps a terminal retry error pinned without adding a duplicate failure banner", async () => {
+		const errorMessage = "Retry budget exhausted after 2 retries: Cloud Code Assist API returned an empty response";
+		const message = makeAssistantMessage({ stopReason: "error", errorMessage });
+		const { controller, showPinnedError, clearPinnedError, showError } = createFixture(message);
+
+		await controller.handleEvent({ type: "message_end", message } as Extract<
+			AgentSessionEvent,
+			{ type: "message_end" }
+		>);
+		clearPinnedError.mockClear();
+		showPinnedError.mockClear();
+
+		await controller.handleEvent({
+			type: "auto_retry_end",
+			success: false,
+			attempt: 2,
+			finalError: "Cloud Code Assist API returned an empty response",
+			retryErrors: [
+				{
+					entryId: "prior-attempt",
+					persistenceKey: "prior-attempt",
+					note: "error; retried",
+					retryRecovery: {
+						kind: "auto-retry",
+						status: "superseded",
+						attempt: 1,
+						recovery: "plain",
+						note: "error; retried",
+					},
+				},
+			],
+		} as Extract<AgentSessionEvent, { type: "auto_retry_end" }>);
+
+		expect(clearPinnedError).not.toHaveBeenCalled();
+		expect(showError).not.toHaveBeenCalled();
+		expect(showPinnedError).toHaveBeenCalledWith(errorMessage);
+	});
+
+	it("shows a failed retry banner when no terminal assistant error exists", async () => {
+		const { controller, showError } = createFixture();
+
+		await controller.handleEvent({
+			type: "auto_retry_end",
+			success: false,
+			attempt: 3,
+			finalError: "Assistant returned empty stop after retry cap",
+		} as Extract<AgentSessionEvent, { type: "auto_retry_end" }>);
+
+		expect(showError).toHaveBeenCalledWith(
+			"Retry failed after 3 attempts: Assistant returned empty stop after retry cap",
+		);
 	});
 
 	it("restores the transcript inline error when the next turn starts", async () => {
