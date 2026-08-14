@@ -6,8 +6,14 @@ import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { ReadTool, type ReadToolDetails } from "@oh-my-pi/pi-coding-agent/tools/read";
+import * as pdfRead from "@oh-my-pi/pi-coding-agent/tools/read-pdf";
 import * as markit from "@oh-my-pi/pi-coding-agent/utils/markit";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
+
+const ONE_PX_PNG = Buffer.from(
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+	"base64",
+);
 
 function makeSession(cwd: string): ToolSession {
 	return {
@@ -15,7 +21,7 @@ function makeSession(cwd: string): ToolSession {
 		hasUI: false,
 		getSessionFile: () => null,
 		getSessionSpawns: () => "*",
-		settings: Settings.isolated({ "images.autoResize": false }),
+		settings: Settings.isolated({ "images.autoResize": false, "inspect_image.mode": "off" }),
 	} as ToolSession;
 }
 
@@ -26,14 +32,17 @@ function textOf(result: AgentToolResult<ReadToolDetails>): string {
 		.join("\n");
 }
 
-describe("read unsupported PDF image members", () => {
+describe("read PDF page screenshots", () => {
 	let testDir: string;
 	let pdfPath: string;
+	let screenshotPath: string;
 
 	beforeEach(async () => {
-		testDir = await fs.mkdtemp(path.join(os.tmpdir(), "read-pdf-image-unsupported-"));
+		testDir = await fs.mkdtemp(path.join(os.tmpdir(), "read-pdf-page-"));
 		pdfPath = path.join(testDir, "doc.pdf");
 		await fs.writeFile(pdfPath, `%PDF-stub-${testDir}`);
+		screenshotPath = path.join(testDir, "rendered.png");
+		await fs.writeFile(screenshotPath, ONE_PX_PNG);
 	});
 
 	afterEach(async () => {
@@ -41,21 +50,28 @@ describe("read unsupported PDF image members", () => {
 		await removeWithRetries(testDir);
 	});
 
-	it("directs former image listing and PNG member reads to browser rendering", async () => {
+	it("renders former image-member reads through Chromium", async () => {
+		const render = vi.spyOn(pdfRead, "renderPdfPageScreenshot").mockResolvedValue({
+			dest: screenshotPath,
+			mimeType: "image/png",
+			bytes: ONE_PX_PNG.byteLength,
+			width: 1,
+			height: 1,
+		});
 		const tool = new ReadTool(makeSession(testDir));
 
-		for (const readPath of [`${pdfPath}:`, `${pdfPath}:p1-img0.png`]) {
-			try {
-				await tool.execute("read-pdf-image", { path: readPath });
-				throw new Error("Expected the PDF image read to fail");
-			} catch (error) {
-				expect(error).toBeInstanceOf(Error);
-				const message = (error as Error).message;
-				expect(message).toContain("pdf-inspector cannot render PDF images");
-				expect(message).toContain("Puppeteer browser tool");
-				expect(message).toContain(`read '${pdfPath}' for extracted text`);
-			}
+		for (const [readPath, page] of [
+			[`${pdfPath}:`, 1],
+			[`${pdfPath}:p2-img0.png`, 2],
+		] as const) {
+			const result = await tool.execute("read-pdf-image", { path: readPath });
+			expect(result.content.some(entry => entry.type === "image" && entry.mimeType === "image/png")).toBe(true);
+			expect(textOf(result)).toContain("Read image file [image/png]");
+			expect(result.details?.resolvedPath).toBe(pdfPath);
+			expect(render).toHaveBeenLastCalledWith(expect.anything(), pdfPath, page, undefined);
 		}
+		expect(tool.approval({ path: `${pdfPath}:p1-img0.png` })).toBe("exec");
+		expect(tool.approval({ path: `${pdfPath}:2-2` })).toBe("read");
 	});
 
 	it("preserves a literal filename that looks like a PDF image listing", async () => {
