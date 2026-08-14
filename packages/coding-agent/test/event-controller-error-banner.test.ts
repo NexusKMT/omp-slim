@@ -179,42 +179,103 @@ describe("EventController error banner", () => {
 		expect(streamingComponent.setErrorPinned).not.toHaveBeenCalled();
 	});
 
-	it("keeps a terminal retry error pinned without adding a duplicate failure banner", async () => {
-		const errorMessage = "Retry budget exhausted after 2 retries: Cloud Code Assist API returned an empty response";
-		const message = makeAssistantMessage({ stopReason: "error", errorMessage });
+	it("keeps a terminal empty-output error pinned without adding a duplicate failure banner", async () => {
+		const message = makeAssistantMessage({
+			content: [{ type: "thinking", thinking: "Reasoning finished without final output." }],
+			stopReason: "error",
+			errorId: AIError.create(AIError.Flag.Transient, AIError.Flag.EmptyResponse),
+			errorMessage: "Cloud Code Assist API returned a thought-only response without final output",
+		});
 		const { controller, showPinnedError, clearPinnedError, showError } = createFixture(message);
 
 		await controller.handleEvent({ type: "message_end", message } as Extract<
 			AgentSessionEvent,
 			{ type: "message_end" }
 		>);
+		expect(showPinnedError).not.toHaveBeenCalled();
+
+		const finalError = "Assistant returned no final output after retry cap; try switching models";
+		message.errorId = AIError.create();
+		message.errorMessage = finalError;
 		clearPinnedError.mockClear();
 		showPinnedError.mockClear();
 
 		await controller.handleEvent({
 			type: "auto_retry_end",
 			success: false,
-			attempt: 2,
-			finalError: "Cloud Code Assist API returned an empty response",
-			retryErrors: [
-				{
-					entryId: "prior-attempt",
-					persistenceKey: "prior-attempt",
-					note: "error; retried",
-					retryRecovery: {
-						kind: "auto-retry",
-						status: "superseded",
-						attempt: 1,
-						recovery: "plain",
-						note: "error; retried",
-					},
-				},
-			],
+			attempt: 3,
+			finalError,
 		} as Extract<AgentSessionEvent, { type: "auto_retry_end" }>);
 
 		expect(clearPinnedError).not.toHaveBeenCalled();
 		expect(showError).not.toHaveBeenCalled();
-		expect(showPinnedError).toHaveBeenCalledWith(errorMessage);
+		expect(showPinnedError).toHaveBeenCalledWith(finalError);
+	});
+
+	it("keeps retry-attempt context when a terminal provider error is pinned", async () => {
+		const errorMessage = "Service unavailable";
+		const message = makeAssistantMessage({
+			stopReason: "error",
+			errorId: AIError.create(AIError.Flag.Transient),
+			errorMessage,
+		});
+		const { controller, showPinnedError, showError } = createFixture(message);
+
+		await controller.handleEvent({ type: "message_end", message } as Extract<
+			AgentSessionEvent,
+			{ type: "message_end" }
+		>);
+		showPinnedError.mockClear();
+
+		await controller.handleEvent({
+			type: "auto_retry_end",
+			success: false,
+			attempt: 3,
+			finalError: errorMessage,
+		} as Extract<AgentSessionEvent, { type: "auto_retry_end" }>);
+
+		expect(showError).not.toHaveBeenCalled();
+		expect(showPinnedError).toHaveBeenCalledWith("Retry failed after 3 attempts: Service unavailable");
+	});
+
+	it("surfaces a local continuation failure instead of the stale pinned provider error", async () => {
+		const providerError = "Service unavailable";
+		const message = makeAssistantMessage({
+			stopReason: "error",
+			errorId: AIError.create(AIError.Flag.Transient),
+			errorMessage: providerError,
+		});
+		const { controller, showPinnedError, clearPinnedError, showError, streamingComponent } = createFixture(message);
+
+		await controller.handleEvent({ type: "message_end", message } as Extract<
+			AgentSessionEvent,
+			{ type: "message_end" }
+		>);
+		await controller.handleEvent({
+			type: "auto_retry_start",
+			attempt: 1,
+			maxAttempts: 2,
+			delayMs: 0,
+			errorMessage: providerError,
+			errorId: message.errorId,
+		} as Extract<AgentSessionEvent, { type: "auto_retry_start" }>);
+		showPinnedError.mockClear();
+		clearPinnedError.mockClear();
+		showError.mockClear();
+		streamingComponent.setErrorPinned.mockClear();
+
+		const finalError = `Retry continuation failed locally: local hook failed. Original error: ${providerError}`;
+		await controller.handleEvent({
+			type: "auto_retry_end",
+			success: false,
+			attempt: 1,
+			finalError,
+		} as Extract<AgentSessionEvent, { type: "auto_retry_end" }>);
+
+		expect(showPinnedError).not.toHaveBeenCalled();
+		expect(clearPinnedError).toHaveBeenCalledTimes(1);
+		expect(streamingComponent.setErrorPinned).toHaveBeenCalledWith(false);
+		expect(showError).toHaveBeenCalledWith(`Retry failed after 1 attempts: ${finalError}`);
 	});
 
 	it("shows a failed retry banner when no terminal assistant error exists", async () => {

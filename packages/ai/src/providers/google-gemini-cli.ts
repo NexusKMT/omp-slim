@@ -622,11 +622,8 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 			const isFlashLeakModel = model.id.includes("flash");
 
 			let started = false;
-			// Tracks whether *visible* content (text delta or tool call) has been
-			// pushed downstream. `started` alone is a poor failover guard because a
-			// hidden thought part also flips it (via `ensureStarted`); a thinking-only
-			// STOP must still fail over to the alternate Antigravity endpoint (#8480).
-			let emittedVisibleContent = false;
+			// Once any stream event starts, the endpoint is committed downstream.
+			// Failover remains safe only while `started` is false.
 			let sawFinishReason = false;
 			let lastResponseId: string | undefined;
 			const ensureStarted = () => {
@@ -705,7 +702,6 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 
 				const emitVisibleText = (delta: string, thoughtSignature?: string): void => {
 					if (!delta) return;
-					emittedVisibleContent = true;
 					const block = startTextBlock();
 					block.text += delta;
 					block.textSignature = retainThoughtSignature(block.textSignature, thoughtSignature);
@@ -864,7 +860,6 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 								};
 
 								output.content.push(toolCall);
-								emittedVisibleContent = true;
 								ensureStarted();
 								pushToolCallEvents(toolCall, blockIndex(), output, stream);
 							}
@@ -943,7 +938,6 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 				const isLastEndpoint = i === endpoints.length - 1;
 				try {
 					started = false;
-					emittedVisibleContent = false;
 					resetOutput();
 
 					// Per attempt: arm a pre-response (TTFT) timer, cleared the instant
@@ -1027,12 +1021,15 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 						}
 
 						const streamed = await streamResponse(currentResponse);
-						// Only accept an empty STOP as valid silence once every fallback
-						// endpoint is exhausted: an earlier endpoint returning empty
-						// successful streams must still fail over (Antigravity auto mode)
-						// rather than be recorded as a real silent review.
+						// Eventless silence may fail over to the alternate Antigravity
+						// endpoint. Once thinking has streamed, the endpoint is already
+						// committed downstream; Advisor mode may accept that silence,
+						// while normal sessions surface it to final-output recovery.
+						const thoughtOnly = hasThinkingOutput();
 						const acceptedSilence =
-							options?.acceptEmptyResponse === true && !streamed.strippedPlanningLeak && isLastEndpoint;
+							options?.acceptEmptyResponse === true &&
+							!streamed.strippedPlanningLeak &&
+							(isLastEndpoint || thoughtOnly);
 						if (output.stopReason !== "stop" || streamed.meaningful || acceptedSilence) {
 							receivedContent = streamed.meaningful || acceptedSilence;
 							break;
@@ -1042,7 +1039,7 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 						// transiently empty transport. Replaying the identical request
 						// burns another full reasoning pass; let session recovery add
 						// an explicit final-output reminder instead.
-						if (hasThinkingOutput()) break;
+						if (thoughtOnly) break;
 
 						if (emptyAttempt < MAX_EMPTY_STREAM_RETRIES) {
 							resetOutput();
@@ -1098,7 +1095,7 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 					const status = extractHttpStatusFromError(error);
 					if (
 						!isLastEndpoint &&
-						!emittedVisibleContent &&
+						!started &&
 						(AIError.isTransientStatus(status) ||
 							(status === undefined &&
 								!(error instanceof AIError.ProviderResponseError && error.kind === "output") &&

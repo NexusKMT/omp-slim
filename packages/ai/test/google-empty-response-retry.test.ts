@@ -438,7 +438,7 @@ describe("Google empty-response retry (Cloud Code Assist path)", () => {
 		expect(result.errorMessage).toBeUndefined();
 	});
 
-	it("fails over before accepting Advisor silence when daily returns a thinking-only STOP", async () => {
+	it("accepts Advisor silence without failover after thought events start", async () => {
 		const requestedEndpoints: string[] = [];
 		const fetchMock: FetchImpl = async input => {
 			const endpoint = endpointFromInput(input);
@@ -456,42 +456,52 @@ describe("Google empty-response retry (Cloud Code Assist path)", () => {
 			acceptEmptyResponse: true,
 			fetch: fetchMock,
 		});
+		const { events, starts } = await drain(stream);
 		const result = await stream.result();
 
-		expect({
-			requestedEndpoints,
-			stopReason: result.stopReason,
-			errorMessage: result.errorMessage,
-			text: textOf(result),
-		}).toEqual({
-			requestedEndpoints: [ANTIGRAVITY_DAILY_ENDPOINT, ANTIGRAVITY_SANDBOX_ENDPOINT],
-			stopReason: "stop",
-			errorMessage: undefined,
-			text: "Recovered.",
-		});
+		expect(requestedEndpoints).toEqual([ANTIGRAVITY_DAILY_ENDPOINT]);
+		expect(starts).toBe(1);
+		expect(events.filter(event => event.type === "thinking_start")).toHaveLength(1);
+		expect(events.filter(event => event.type === "thinking_delta")).toHaveLength(1);
+		expect(events.filter(event => event.type === "thinking_end")).toHaveLength(1);
+		expect(result.stopReason).toBe("stop");
+		expect(result.errorMessage).toBeUndefined();
+		expect(textOf(result)).toBe("");
 	});
 
-	it("accepts thinking-only silence on the final endpoint when both endpoints stay silent", async () => {
+	it("does not fail over a thought-only error after stream events start", async () => {
 		const requestedEndpoints: string[] = [];
 		const fetchMock: FetchImpl = async input => {
 			const endpoint = endpointFromInput(input);
 			requestedEndpoints.push(endpoint);
-			return withResponseUrl(sse(ccaThinkingOnlyChunk("Nothing to add. Staying silent.")), endpoint);
+			const response =
+				endpoint === ANTIGRAVITY_SANDBOX_ENDPOINT
+					? sse(ccaChunk("Recovered."))
+					: sse(ccaThinkingOnlyChunk("I reasoned but omitted the final answer."));
+			return withResponseUrl(response, endpoint);
 		};
 
 		const stream = streamGoogleGeminiCli(antigravityModel, context, {
 			apiKey: JSON.stringify({ token: "token", projectId: "proj-123" }),
 			antigravityEndpointMode: "auto",
-			acceptEmptyResponse: true,
 			fetch: fetchMock,
 		});
+		const { events, starts } = await drain(stream);
 		const result = await stream.result();
 
-		// A complete thought-only STOP skips same-request retries, then fails over;
-		// the sandbox (final) endpoint records valid Advisor silence.
-		expect(requestedEndpoints).toEqual([ANTIGRAVITY_DAILY_ENDPOINT, ANTIGRAVITY_SANDBOX_ENDPOINT]);
-		expect(result.stopReason).toBe("stop");
-		expect(result.errorMessage).toBeUndefined();
+		expect(requestedEndpoints).toEqual([ANTIGRAVITY_DAILY_ENDPOINT]);
+		expect(starts).toBe(1);
+		expect(events.filter(event => event.type === "thinking_start")).toHaveLength(1);
+		expect(events.filter(event => event.type === "thinking_delta")).toHaveLength(1);
+		expect(events.filter(event => event.type === "thinking_end")).toHaveLength(1);
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toContain("thought-only response without final output");
+		expect(result.content).toEqual([
+			expect.objectContaining({
+				type: "thinking",
+				thinking: "I reasoned but omitted the final answer.",
+			}),
+		]);
 	});
 
 	for (const { mode, endpoint } of [

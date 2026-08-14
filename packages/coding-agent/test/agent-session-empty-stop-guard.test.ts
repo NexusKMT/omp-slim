@@ -81,7 +81,7 @@ function emptyProviderResponse(): MockResponse {
 	return {
 		content: [{ type: "thinking", thinking: "I finished reasoning but omitted the final answer." }],
 		stopReason: "error",
-		errorMessage: "Cloud Code Assist API returned an empty response",
+		errorMessage: "Cloud Code Assist API returned a thought-only response without final output",
 	};
 }
 

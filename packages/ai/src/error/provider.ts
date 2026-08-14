@@ -40,13 +40,11 @@ export class ProviderResponseError extends Error {
 		this.kind = options.kind ?? "output";
 		// A safety filter block is terminal and intentionally non-retryable.
 		if (this.kind === "content-blocked") attach(this, create(Flag.ContentBlocked));
-		// An incomplete stream, empty body, or logically empty output produced no
-		// final content, so all are transient. Preserve the empty distinction so
-		// session recovery can request an actual final answer instead of replaying
-		// the same prompt.
-		else if (this.kind === "empty-body" || this.kind === "empty-output")
-			attach(this, create(Flag.Transient, Flag.EmptyResponse));
-		else if (this.kind === "incomplete-stream") attach(this, create(Flag.Transient));
+		// A logically empty completed output needs a session-level reminder that
+		// asks for the missing final answer. Empty bodies and incomplete streams
+		// stay on the generic transient retry/model-fallback path.
+		else if (this.kind === "empty-output") attach(this, create(Flag.Transient, Flag.EmptyResponse));
+		else if (this.kind === "incomplete-stream" || this.kind === "empty-body") attach(this, create(Flag.Transient));
 	}
 }
 

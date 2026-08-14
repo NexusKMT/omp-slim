@@ -47,10 +47,16 @@ const MARKDOWN_FENCE_LINE = /^ {0,3}(`{3,}|~{3,})[ \t]*(.*)$/;
 const MARKDOWN_HEADING_LINE = /^ {0,3}#{1,6}[ \t]+\S/;
 const FENCED_SOURCE_INTRO = /\b(?:code|example|markdown|output|snippet|source)\s*:?\s*$/i;
 
-function isGfmTableDelimiter(line: string): boolean {
-	const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
-	const cells = trimmed.split("|");
-	return cells.length > 0 && cells.every(cell => /^:?-{3,}:?$/.test(cell.trim()));
+function isGfmTableDelimiter(line: string, headerLine: string | undefined): boolean {
+	if (!headerLine || !line.includes("|") || !headerLine.includes("|")) return false;
+	const delimiterCells = line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|");
+	const headerCells = headerLine.trim().replace(/^\|/, "").replace(/\|$/, "").split("|");
+	return (
+		delimiterCells.length >= 2 &&
+		headerCells.length === delimiterCells.length &&
+		delimiterCells.every(cell => /^:?-{3,}:?$/.test(cell.trim())) &&
+		headerCells.every(cell => cell.trim().length > 0)
+	);
 }
 
 /**
@@ -93,7 +99,7 @@ function repairOrphanClosingFence(text: string): string {
 	for (let index = open.index + 1; index < lines.length; index++) {
 		const line = lines[index]!;
 		hasHeading ||= MARKDOWN_HEADING_LINE.test(line);
-		hasTableDelimiter ||= isGfmTableDelimiter(line);
+		hasTableDelimiter ||= isGfmTableDelimiter(line, lines[index - 1]);
 		if (hasHeading && hasTableDelimiter) {
 			lines.splice(open.index, 1);
 			return lines.join("\n");
