@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `defaultThinkingLevel: auto` skipping classification for user-invoked `/skill:<name>` turns, which left the effort stuck on pending `auto`; user-attributed skill prompts now classify like any user turn while agent/autoload injections stay excluded ([#8554](https://github.com/can1357/oh-my-pi/issues/8554)).
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed
