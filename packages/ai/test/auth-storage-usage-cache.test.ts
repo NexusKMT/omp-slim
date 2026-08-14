@@ -342,7 +342,6 @@ describe("AuthStorage usage cache: last-good failure fallback", () => {
 	});
 });
 
-
 describe("AuthStorage usage cache: explicit invalidation", () => {
 	it("clears cached API-key reports before the next usage read", async () => {
 		const store = makeStore([
@@ -389,6 +388,138 @@ describe("AuthStorage usage cache: explicit invalidation", () => {
 			expect(calls).toBe(2);
 		} finally {
 			storage.close();
+		}
+	});
+
+	it("serializes a persisted Codex refresh and returns an upgraded plan", async () => {
+		const store = makeStore([
+			{
+				id: 1,
+				provider: "openai-codex",
+				credential: {
+					type: "oauth",
+					access: "access-free",
+					refresh: "refresh-free",
+					expires: Date.now() + 3_600_000,
+					accountId: "account-free",
+					email: "free@example.com",
+				},
+				disabledCause: null,
+			},
+			{
+				id: 2,
+				provider: "openai-codex",
+				credential: {
+					type: "oauth",
+					access: "access-upgraded",
+					refresh: "refresh-upgraded",
+					expires: Date.now() + 3_600_000,
+					accountId: "account-upgraded",
+					email: "upgraded@example.com",
+				},
+				disabledCause: null,
+			},
+			{
+				id: 3,
+				provider: "openai-codex",
+				credential: {
+					type: "oauth",
+					access: "access-other",
+					refresh: "refresh-other",
+					expires: Date.now() + 3_600_000,
+					accountId: "account-other",
+					email: "other@example.com",
+				},
+				disabledCause: null,
+			},
+		]);
+		let upgraded = false;
+		const refreshStarted = new Map<string, PromiseWithResolvers<void>>();
+		const refreshReleases = new Map<string, PromiseWithResolvers<void>>();
+		for (const accountId of ["account-free", "account-upgraded", "account-other"]) {
+			refreshStarted.set(accountId, Promise.withResolvers<void>());
+			refreshReleases.set(accountId, Promise.withResolvers<void>());
+		}
+		const startedAccounts: string[] = [];
+		const usageProvider: UsageProvider = {
+			id: "openai-codex",
+			supports: params => params.provider === "openai-codex" && params.credential.type === "oauth",
+			async fetchUsage(params) {
+				const accountId = params.credential.accountId;
+				if (!accountId) return null;
+				if (upgraded) {
+					const started = refreshStarted.get(accountId);
+					const release = refreshReleases.get(accountId);
+					if (!started || !release) throw new Error(`unexpected account ${accountId}`);
+					startedAccounts.push(accountId);
+					started.resolve();
+					await release.promise;
+				}
+				return {
+					provider: "openai-codex",
+					fetchedAt: Date.now(),
+					limits: [
+						{
+							id: "openai-codex:7d",
+							label: "7 days",
+							scope: { provider: "openai-codex", windowId: "7d" },
+							amount: { used: 0, limit: 100, unit: "percent" },
+							status: "ok",
+						},
+					],
+					metadata: {
+						accountId,
+						email: params.credential.email,
+						planType: upgraded && accountId === "account-upgraded" ? "pro" : "free",
+					},
+				};
+			},
+		};
+		const initialStorage = new AuthStorage(store, {
+			usageProviderResolver: provider => (provider === "openai-codex" ? usageProvider : undefined),
+		});
+		await initialStorage.reload();
+		try {
+			expect(await initialStorage.fetchUsageReports()).toHaveLength(3);
+			await initialStorage.invalidateUsageCache();
+		} finally {
+			initialStorage.close();
+		}
+
+		upgraded = true;
+		const refreshedStorage = new AuthStorage(store, {
+			usageProviderResolver: provider => (provider === "openai-codex" ? usageProvider : undefined),
+		});
+		await refreshedStorage.reload();
+		try {
+			const refresh = refreshedStorage.fetchUsageReports();
+			const freeStarted = refreshStarted.get("account-free");
+			const freeRelease = refreshReleases.get("account-free");
+			if (!freeStarted || !freeRelease) throw new Error("missing free-account refresh gates");
+			await freeStarted.promise;
+			expect(startedAccounts).toEqual(["account-free"]);
+			freeRelease.resolve();
+
+			const upgradedStarted = refreshStarted.get("account-upgraded");
+			const upgradedRelease = refreshReleases.get("account-upgraded");
+			if (!upgradedStarted || !upgradedRelease) throw new Error("missing upgraded-account refresh gates");
+			await upgradedStarted.promise;
+			expect(startedAccounts).toEqual(["account-free", "account-upgraded"]);
+			upgradedRelease.resolve();
+
+			const otherStarted = refreshStarted.get("account-other");
+			const otherRelease = refreshReleases.get("account-other");
+			if (!otherStarted || !otherRelease) throw new Error("missing other-account refresh gates");
+			await otherStarted.promise;
+			expect(startedAccounts).toEqual(["account-free", "account-upgraded", "account-other"]);
+			otherRelease.resolve();
+
+			const reports = await refresh;
+			expect(reports?.find(report => report.metadata?.accountId === "account-upgraded")?.metadata?.planType).toBe(
+				"pro",
+			);
+		} finally {
+			refreshedStorage.close();
 		}
 	});
 });

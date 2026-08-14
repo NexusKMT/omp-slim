@@ -677,6 +677,7 @@ const DEFAULT_USAGE_PROVIDER_MAP = new Map<Provider, UsageProvider>(
 );
 
 const USAGE_CACHE_PREFIX = "usage_cache:";
+const USAGE_FORCE_REFRESH_CACHE_PREFIX = "force-refresh:";
 const USAGE_HEADER_INGEST_INTERVAL_MS = 60_000;
 const USAGE_LAST_GOOD_RETENTION_MS = 24 * 60 * 60_000;
 /**
@@ -686,6 +687,12 @@ const USAGE_LAST_GOOD_RETENTION_MS = 24 * 60 * 60_000;
  * on the next poll.
  */
 const USAGE_FAILURE_BACKOFF_MS = 10_000;
+/**
+ * A manual invalidation persists across the next CLI process and serializes
+ * same-provider probes, avoiding a cold-account burst against IP-limited
+ * upstream usage endpoints.
+ */
+const USAGE_FORCE_REFRESH_TTL_MS = 5 * 60_000;
 // Bumped from 3s — Claude usage retries up to 3 times with exponential backoff
 // (~3.5s total worst case); a tight per-request budget aborts retries mid-cycle.
 const DEFAULT_USAGE_REQUEST_TIMEOUT_MS = 10_000;
@@ -790,6 +797,11 @@ type UsageRequestDescriptor = {
 	provider: Provider;
 	credential: UsageCredential;
 	baseUrl?: string;
+};
+
+type ForcedUsageRefresh = {
+	all: boolean;
+	providers: Set<Provider>;
 };
 
 type AuthApiKeyOptions = {
@@ -2967,6 +2979,47 @@ export class AuthStorage {
 		return versionOverride === undefined ? provider : `${versionOverride}:${provider}`;
 	}
 
+	#usageForceRefreshCacheKey(provider?: Provider): string {
+		return provider
+			? `${USAGE_FORCE_REFRESH_CACHE_PREFIX}provider:${provider}`
+			: `${USAGE_FORCE_REFRESH_CACHE_PREFIX}all`;
+	}
+
+	#markUsageForceRefresh(provider?: Provider): void {
+		this.#usageCache.set(this.#usageForceRefreshCacheKey(provider), {
+			value: true,
+			expiresAt: Date.now() + USAGE_FORCE_REFRESH_TTL_MS,
+		});
+	}
+
+	#hasUsageForceRefresh(provider?: Provider): boolean {
+		const key = this.#usageForceRefreshCacheKey(provider);
+		const entry = this.#usageCache.get<boolean>(key);
+		if (entry?.value !== true) return false;
+		if (entry.expiresAt > Date.now()) return true;
+		this.#usageCache.set(key, { value: null, expiresAt: 0 });
+		return false;
+	}
+
+	#usageForceRefresh(requests: readonly UsageRequestDescriptor[]): ForcedUsageRefresh {
+		const all = this.#hasUsageForceRefresh();
+		const providers = new Set<Provider>();
+		for (const request of requests) providers.add(request.provider);
+		if (!all) {
+			for (const provider of providers) {
+				if (!this.#hasUsageForceRefresh(provider)) providers.delete(provider);
+			}
+		}
+		return { all, providers };
+	}
+
+	#clearUsageForceRefresh(refresh: ForcedUsageRefresh): void {
+		if (refresh.all) this.#usageCache.set(this.#usageForceRefreshCacheKey(), { value: null, expiresAt: 0 });
+		for (const provider of refresh.providers) {
+			this.#usageCache.set(this.#usageForceRefreshCacheKey(provider), { value: null, expiresAt: 0 });
+		}
+	}
+
 	#buildUsageReportCacheKey(request: UsageRequestDescriptor): string {
 		const baseUrl = this.#normalizeUsageBaseUrl(request.baseUrl) || "default";
 		const identity = this.#buildUsageCacheIdentity(request.credential);
@@ -3219,19 +3272,23 @@ export class AuthStorage {
 		}
 	}
 
-	async #fetchUsageCached(request: UsageRequestDescriptor, timeoutMs?: number): Promise<UsageReport | null> {
+	async #fetchUsageCached(
+		request: UsageRequestDescriptor,
+		timeoutMs?: number,
+		forceRefresh = false,
+	): Promise<UsageReport | null> {
 		const cacheKey = this.#buildUsageReportCacheKey(request);
 		const now = Date.now();
-		const cached = this.#usageCache.get<UsageReport | null>(cacheKey);
+		const cached = forceRefresh ? undefined : this.#usageCache.get<UsageReport | null>(cacheKey);
 		// Fresh cache hit: return whatever's there (success or null fallback).
 		if (cached && cached.expiresAt > now) {
 			return cached.value;
 		}
 
-		const inFlight = this.#usageRequestInFlight.get(cacheKey);
-		if (inFlight) return inFlight;
-
 		const usageCacheEpoch = this.#usageCacheEpoch;
+		const inFlightKey = `${cacheKey}\0${usageCacheEpoch}`;
+		const inFlight = this.#usageRequestInFlight.get(inFlightKey);
+		if (inFlight) return inFlight;
 		const promise = (async () => {
 			const report = await this.#fetchUsageUncached(request, timeoutMs);
 			if (usageCacheEpoch !== this.#usageCacheEpoch) return report;
@@ -3251,7 +3308,8 @@ export class AuthStorage {
 			// re-hit the endpoint on every poll. Most providers serve the last good
 			// value through transient failures. Session-cookie providers can opt out
 			// so an expired login does not display stale quota indefinitely.
-			const retainLastGood = this.#usageProviderResolver?.(request.provider)?.retainLastGoodOnFailure !== false;
+			const retainLastGood =
+				!forceRefresh && this.#usageProviderResolver?.(request.provider)?.retainLastGoodOnFailure !== false;
 			const lastGood = retainLastGood
 				? (this.#usageCache.getStale<UsageReport | null>(cacheKey)?.value ?? null)
 				: null;
@@ -3260,10 +3318,10 @@ export class AuthStorage {
 			this.#usageCache.set(cacheKey, { value: lastGood, expiresAt: coolDown });
 			return lastGood;
 		})().finally(() => {
-			this.#usageRequestInFlight.delete(cacheKey);
+			this.#usageRequestInFlight.delete(inFlightKey);
 		});
 
-		this.#usageRequestInFlight.set(cacheKey, promise);
+		this.#usageRequestInFlight.set(inFlightKey, promise);
 		return promise;
 	}
 
@@ -3936,6 +3994,35 @@ export class AuthStorage {
 		return true;
 	}
 
+	/**
+	 * Fetch every requested report, keeping normal polls parallel while a
+	 * manually invalidated provider probes accounts one at a time.
+	 */
+	#fetchUsageRequests(
+		requests: readonly UsageRequestDescriptor[],
+		serializedProviders: ReadonlySet<Provider>,
+	): Promise<Array<UsageReport | null>> {
+		const tails = new Map<Provider, Promise<void>>();
+		return Promise.all(
+			requests.map(request => {
+				const forceRefresh = serializedProviders.has(request.provider);
+				if (!forceRefresh) {
+					return this.#fetchUsageCached(request, this.#usageRequestTimeoutMs);
+				}
+				const tail = tails.get(request.provider) ?? Promise.resolve();
+				const current = tail.then(() => this.#fetchUsageCached(request, this.#usageRequestTimeoutMs, true));
+				tails.set(
+					request.provider,
+					current.then(
+						() => undefined,
+						() => undefined,
+					),
+				);
+				return current;
+			}),
+		);
+	}
+
 	async fetchUsageReports(options?: {
 		baseUrlResolver?: (provider: Provider) => string | undefined;
 		/** Caller's cancel signal; only rejects this caller, never the shared upstream fetch. */
@@ -3954,15 +4041,15 @@ export class AuthStorage {
 			// dispatch + credential selection) coalesce into one upstream call.
 			// Each caller's `signal` only cancels THAT caller's await; the
 			// shared upstream fetch runs to completion so peers aren't punished.
-			const OVERRIDE_KEY = "__override__";
-			let shared = this.#usageReportsInFlight.get(OVERRIDE_KEY);
+			const overrideKey = `__override__\0${this.#usageCacheEpoch}`;
+			let shared = this.#usageReportsInFlight.get(overrideKey);
 			if (!shared) {
 				// Don't forward the caller signal into the shared fetch — first caller's
 				// abort would otherwise cancel the upstream for every peer.
 				shared = override().finally(() => {
-					this.#usageReportsInFlight.delete(OVERRIDE_KEY);
+					this.#usageReportsInFlight.delete(overrideKey);
 				});
-				this.#usageReportsInFlight.set(OVERRIDE_KEY, shared);
+				this.#usageReportsInFlight.set(overrideKey, shared);
 			}
 			const reports = await raceUsageWithSignal(shared, options?.signal);
 			if (shouldReconcileStoreHookReports && reports) this.#reconcileCodexUsageBlocksFromReports(reports);
@@ -3982,7 +4069,8 @@ export class AuthStorage {
 		// a single decorrelation snapshot for 30s, defeating the jitter (some
 		// accounts can be missing from one fetch and present in the next; the
 		// aggregate cache freezes whichever set landed first).
-		const cacheKey = this.#buildUsageReportsCacheKey(requests);
+		const forcedRefresh = this.#usageForceRefresh(requests);
+		const cacheKey = `${this.#buildUsageReportsCacheKey(requests)}\0${this.#usageCacheEpoch}`;
 
 		const inFlight = this.#usageReportsInFlight.get(cacheKey);
 		if (inFlight) return inFlight;
@@ -3998,9 +4086,7 @@ export class AuthStorage {
 				});
 			}
 
-			const results = await Promise.all(
-				requests.map(request => this.#fetchUsageCached(request, this.#usageRequestTimeoutMs)),
-			);
+			const results = await this.#fetchUsageRequests(requests, forcedRefresh.providers);
 			const reports = results.filter((report): report is UsageReport => report !== null);
 			const deduped = this.#dedupeUsageReports(reports);
 			// no outer cache write — see comment above.
@@ -4021,6 +4107,7 @@ export class AuthStorage {
 					};
 				}),
 			});
+			this.#clearUsageForceRefresh(forcedRefresh);
 			return resolved;
 		})().finally(() => {
 			this.#usageReportsInFlight.delete(cacheKey);
@@ -5739,26 +5826,28 @@ export class AuthStorage {
 
 	/**
 	 * Drop report snapshots for a user-requested refresh so a failed probe
-	 * cannot replay the pre-invalidation last-good value.
+	 * cannot replay the pre-invalidation last-good value. The persisted marker
+	 * makes the next same-provider refresh serial rather than a cold fan-out.
 	 */
 	async #clearUsageReportCache(provider?: string): Promise<void> {
 		this.#usageCacheEpoch += 1;
 		const prefix = provider ? `report:${this.#usageCacheProviderKey(provider)}:` : "report:";
-		if (this.#usageCache.deletePrefix(prefix)) return;
-
-		// Third-party stores may not support prefix deletion. Clear every active
-		// request key instead, including API-key and environment credentials.
-		const requests = await this.#collectUsageRequests();
-		for (const request of requests) {
-			if (provider && request.provider !== provider) continue;
-			this.#usageCache.set(this.#buildUsageReportCacheKey(request), { value: null, expiresAt: 0 });
+		if (!this.#usageCache.deletePrefix(prefix)) {
+			// Third-party stores may not support prefix deletion. Clear every active
+			// request key instead, including API-key and environment credentials.
+			const requests = await this.#collectUsageRequests();
+			for (const request of requests) {
+				if (provider && request.provider !== provider) continue;
+				this.#usageCache.set(this.#buildUsageReportCacheKey(request), { value: null, expiresAt: 0 });
+			}
 		}
+		if (!this.#fetchUsageReportsOverride && !this.#store.fetchUsageReports) this.#markUsageForceRefresh(provider);
 	}
 
 	/**
 	 * Discard cached usage reports before a user-requested refresh. The next
-	 * read probes upstream; a failure reports no fresh usage instead of replaying
-	 * an invalidated last-good snapshot.
+	 * read probes upstream serially per provider; a failure reports no fresh
+	 * usage instead of replaying an invalidated last-good snapshot.
 	 */
 	async invalidateUsageCache(provider?: string, signal?: AbortSignal): Promise<void> {
 		await this.#clearUsageReportCache(provider);
