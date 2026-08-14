@@ -74,6 +74,9 @@ const EMPTY_STOP_MAX_RETRIES = 3;
 const SIBLING_UNBLOCK_BUFFER_MS = 1_000;
 const NON_WHITESPACE_RE = /\S/;
 const USAGE_PREFLIGHT_BLOCKED_PREFIX = "Usage preflight blocked:";
+const STREAM_STALL_ERROR_RE = /stream stall/i;
+const HTTP2_STREAM_RESET_ERROR_RE =
+	/stream closed with error code\s+nghttp2_(?:internal_error|refused_stream)|nghttp2_(?:internal_error|refused_stream)|HTTP2(?:StreamReset|RefusedStream)/i;
 
 function hasNonWhitespace(value: string): boolean {
 	return NON_WHITESPACE_RE.test(value);
@@ -1103,10 +1106,10 @@ export class TurnRecovery {
 	}
 
 	/**
-	 * Classify a reasonless abort or stream stall whose emitted tool calls all
-	 * have results. The failed assistant/tool-result pair stays in context so
-	 * continuation cannot replay completed side effects; synthetic results tell
-	 * the next turn that an unexecuted call must be reissued.
+	 * Classify a reasonless abort, idle stream stall, or HTTP/2 stream reset whose
+	 * emitted tool calls all have results. The failed assistant/tool-result pair
+	 * stays in context so continuation cannot replay completed side effects;
+	 * synthetic results tell the next turn that an unexecuted call must be reissued.
 	 */
 	classifyResolvedInterruptedToolTurn(message: AssistantMessage): "reasonless-abort" | "stream-stall" | undefined {
 		const id = this.#classifyRetryMessage(message);
@@ -1118,20 +1121,28 @@ export class TurnRecovery {
 			!this.#host.isDisposed() &&
 			!this.#host.streamingEditAbortTriggered() &&
 			((message.stopReason === "aborted" && AIError.is(id, AIError.Flag.Abort)) || genericAbort);
+		const errorMessage = message.errorMessage ?? "";
 		const streamStall =
+			message.stopReason === "error" && STREAM_STALL_ERROR_RE.test(errorMessage) && AIError.retriable(id);
+		const transportReset =
 			message.stopReason === "error" &&
-			message.errorMessage?.toLowerCase().includes("stream stall") === true &&
-			AIError.retriable(id);
-		if (!reasonlessAbort && !streamStall) return undefined;
+			HTTP2_STREAM_RESET_ERROR_RE.test(errorMessage) &&
+			AIError.retriable(id) &&
+			!this.#host.abortInProgress() &&
+			!this.#host.isDisposed() &&
+			!this.#host.streamingEditAbortTriggered();
+		if (!reasonlessAbort && !streamStall && !transportReset) return undefined;
 		if (reasonlessAbort && genericAbort) message.errorId = AIError.create(AIError.Flag.Abort);
 
-		// The Cursor server-execution marker gate applies only to the stream-stall
+		// The Cursor server-execution marker gate applies only to the idle stream-stall
 		// path: an unmarked/unresolved Cursor block there means the server has not
 		// finished executing, so resuming would race it. A reasonless abort instead
 		// ends the turn and the agent loop pairs every un-run call (Cursor's unmarked
 		// `todo`/MCP blocks included) with a synthetic `executed: false` result, so
 		// the tool-result reconciliation below is the safety gate and the marker is
-		// irrelevant.
+		// irrelevant. An HTTP/2 RST_STREAM / NGHTTP2_* close also ends the Connect
+		// stream, so there is no in-flight server exec to race — unmarked MCP/todo
+		// blocks are safe to continue once every emitted call has a result.
 		const resolvedToolCallIds: string[] = [];
 		for (const block of message.content) {
 			if (block.type !== "toolCall") continue;

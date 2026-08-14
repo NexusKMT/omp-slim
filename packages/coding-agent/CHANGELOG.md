@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Continued Cursor turns that died with `NGHTTP2_INTERNAL_ERROR` / `NGHTTP2_REFUSED_STREAM` after tool calls already had results, instead of leaving the agent idle until the user typed "continue". HTTP/2 stream resets now use the same preserve-and-continue path as idle stream stalls, without requiring the Cursor exec-resolved marker that MCP/todo blocks never carry.
+
 ## [17.3.3] - 2026-08-14
 
 ### Fixed
