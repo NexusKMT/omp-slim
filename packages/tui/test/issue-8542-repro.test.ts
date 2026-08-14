@@ -14,6 +14,20 @@ import { setTerminalHeadless } from "@oh-my-pi/pi-utils";
 // A meaty multi-parameter DA1 reply, exactly as the reporter observed it.
 const DA1_REPLY = "\x1b[?1;22;23;24;28;32;42;52c";
 
+const stdinIsTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+const stdoutIsTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+const stdinSetRawModeDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "setRawMode");
+const stdoutColumnsDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "columns");
+const stdoutRowsDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+
+function restoreProperty(target: object, key: string, descriptor: PropertyDescriptor | undefined): void {
+	if (descriptor) {
+		Object.defineProperty(target, key, descriptor);
+		return;
+	}
+	delete (target as Record<string, unknown>)[key];
+}
+
 describe("issue #8542: late DA response must not leak into the composer", () => {
 	let terminal: ProcessTerminal | undefined;
 	let previousHeadless = false;
@@ -47,11 +61,11 @@ describe("issue #8542: late DA response must not leak into the composer", () => 
 		terminal = undefined;
 		for (const spy of spies) spy.mockRestore();
 		spies = [];
-		Reflect.deleteProperty(process.stdin, "isTTY");
-		Reflect.deleteProperty(process.stdout, "isTTY");
-		Reflect.deleteProperty(process.stdin, "setRawMode");
-		Reflect.deleteProperty(process.stdout, "columns");
-		Reflect.deleteProperty(process.stdout, "rows");
+		restoreProperty(process.stdin, "isTTY", stdinIsTtyDescriptor);
+		restoreProperty(process.stdout, "isTTY", stdoutIsTtyDescriptor);
+		restoreProperty(process.stdin, "setRawMode", stdinSetRawModeDescriptor);
+		restoreProperty(process.stdout, "columns", stdoutColumnsDescriptor);
+		restoreProperty(process.stdout, "rows", stdoutRowsDescriptor);
 		setTerminalHeadless(previousHeadless);
 	});
 
