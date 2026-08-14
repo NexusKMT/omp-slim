@@ -2203,7 +2203,7 @@ function b() {
 			await asyncJobManager.dispose();
 		});
 
-		it("should auto-background long-running commands when enabled", async () => {
+		it("should auto-background at the threshold even with a longer timeout", async () => {
 			const deliveries: Array<{ jobId: string; text: string }> = [];
 			const updates: string[] = [];
 			const asyncJobManager = new AsyncJobManager({
@@ -2231,6 +2231,7 @@ function b() {
 				"test-call-9-auto-running",
 				{
 					command: "printf 'start\\n'; sleep 0.03; printf 'done\\n'",
+					timeout: 3_600,
 				},
 				undefined,
 				update => {
@@ -2241,6 +2242,7 @@ function b() {
 			expect(result.details?.async?.state).toBe("running");
 			expect(result.details?.async?.type).toBe("bash");
 			expect(getTextOutput(result)).toContain("Backgrounded as job");
+			expect(result.details?.timeoutSeconds).toBe(3_600);
 
 			const jobId = result.details?.async?.jobId;
 			if (!jobId) {

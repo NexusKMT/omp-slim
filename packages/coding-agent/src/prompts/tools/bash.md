@@ -19,5 +19,5 @@ Use ONLY for one binary or a short pipeline that computes a fact (`wc -l`, `sort
 {{#if hasLaunch}}- Services, watchers, debuggers, and REPLs MUST use `hub` (`op:"start"`).{{/if}}
 </critical>
 
-{{#if autoBackgroundEnabled}}Long foreground calls may auto-background and deliver later. Need inline? Raise `timeout`.{{/if}}
+{{#if autoBackgroundEnabled}}Long foreground calls may auto-background at or before the configured {{autoBackgroundThresholdSeconds}}s foreground threshold and deliver later. `timeout` sets the job deadline; raising it does not extend foreground waiting.{{/if}}
 No truncation footer means the displayed output is complete.

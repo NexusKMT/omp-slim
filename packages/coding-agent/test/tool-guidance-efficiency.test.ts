@@ -25,4 +25,10 @@ describe("tool guidance efficiency", () => {
 	test("keeps the corrected guidance smaller than the previous prompt set", () => {
 		expect(bash.length + grep.length + glob.length).toBeLessThan(3_050);
 	});
+
+	test("separates the job deadline from the auto-background threshold", () => {
+		expect(bash).toContain("configured 60s foreground threshold");
+		expect(bash).toContain("`timeout` sets the job deadline; raising it does not extend foreground waiting");
+		expect(bash).not.toContain("Need inline? Raise");
+	});
 });
