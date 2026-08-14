@@ -1343,6 +1343,21 @@ const streamOpenAICompletionsOnce = (
 					kind: "runtime",
 				});
 			}
+			// Detect premature stream closure: the stream ended (EOF/`[DONE]`)
+			// without any chunk carrying a `finish_reason`, but content was
+			// produced — the connection died mid-generation (e.g. DeepSeek's
+			// `insufficient_system_resource` interruption). Finalizing the
+			// partial message as a clean "stop" would make the agent loop treat
+			// the truncated turn as complete (silent mid-sentence halt), so fail
+			// the turn. An empty stream without a finish_reason stays on the
+			// empty-completion retry path. Mirrors the Responses provider's
+			// `sawTerminalResponseEvent` guard.
+			if (streamFinishedAt === undefined && output.content.length > 0) {
+				throw new AIError.ProviderResponseError(
+					"OpenAI completions stream closed before a finish_reason was received",
+					{ provider: model.provider, kind: "incomplete-stream" },
+				);
+			}
 
 			output.errorMessage = undefined;
 			output.duration = performance.now() - startTime;
@@ -2380,6 +2395,16 @@ function mapStopReason(reason: ChatCompletionChunk.Choice["finish_reason"] | str
 			// the message to match the session retry classifier's transient-transport
 			// pattern (`provider.?returned.?error`) and get the turn auto-retried.
 			return { stopReason: "error", errorMessage: "Provider returned error finish_reason" };
+		case "insufficient_system_resource":
+			// DeepSeek kills the generation mid-stream when its inference system runs
+			// out of resources (docs: "the request is interrupted due to insufficient
+			// resource of the inference system"). Server-side capacity failure — like
+			// the bare `error` case, word the message to match the transient-transport
+			// retry pattern so the turn is auto-retried instead of pinned as an error.
+			return {
+				stopReason: "error",
+				errorMessage: "Provider returned error finish_reason: insufficient_system_resource",
+			};
 		default:
 			return {
 				stopReason: "error",
