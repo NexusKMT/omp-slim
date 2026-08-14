@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a parked, session-less agent-registry entry with no reviver permanently poisoning its agent id for the process lifetime: a fresh subagent spawn reusing that id died post-registration with `already owned by another session generation`, and messages to it failed with `is parked and cannot be revived`. Such dead corpses (left by an isolated run's park or an interrupted construction) are now reclaimed on a fresh-spawn collision so the id becomes reusable; the corpse's transcript remains readable at `history://<id>` ([#8490](https://github.com/can1357/oh-my-pi/issues/8490)).
+
 ## [17.3.2] - 2026-08-13
 
 ### Fixed

@@ -175,6 +175,26 @@ export class AgentLifecycleManager {
 	}
 
 	/**
+	 * Reclaim a provably-dead parked corpse so a fresh spawn can reuse its id.
+	 * A ref qualifies only when it still resolves to `expected`, is `parked`
+	 * with no live session, this manager does not own it (no in-memory reviver
+	 * adoption), and no park/revive is in flight. Such a ref cannot be revived
+	 * — {@link ensureLive} throws for it — yet {@link AgentRegistry.registerIfAvailable}
+	 * refuses to overwrite it, so one construction failure or isolated-run park
+	 * would otherwise poison the id for the whole process (#8490).
+	 *
+	 * Only refs in the registry this manager owns are touched; the transcript
+	 * stays readable at `history://<id>`. Returns true when the corpse was
+	 * unregistered.
+	 */
+	reclaimDeadCorpse(id: string, expected: AgentRef): boolean {
+		const ref = this.#registry.get(id);
+		if (ref !== expected || ref.status !== "parked" || ref.session) return false;
+		if (this.#adopted.has(id) || this.#parks.has(id) || this.#revivals.has(id)) return false;
+		return this.#registry.unregister(id, ref);
+	}
+
+	/**
 	 * True when this manager owns `registry` — i.e. its adopt/park/revive state
 	 * describes that registry's refs. Lets a caller holding a specific registry
 	 * (e.g. a custom-registry {@link IrcBus} that fell back to the global
