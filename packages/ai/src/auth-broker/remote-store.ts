@@ -253,6 +253,7 @@ export class RemoteAuthCredentialStore implements AuthCredentialStore {
 	#usageInflight?: Promise<UsageReport[] | null>;
 	#credentialBlockReconcileAfter: Map<string, number> = new Map();
 	#usageCacheEpoch = 0;
+	#maxUsageAccountsPerProvider = 1;
 	/** Per-snapshot lookup of oauth credentials by provider; rebuilt when `#snapshot` is replaced. */
 	#usageFilterLookup?: { snapshot: SnapshotResponse; byProvider: Map<Provider, OAuthCredential[]> };
 	/** Memoized `#filterUsageReports` output, keyed on (input identity, lookup identity). */
@@ -296,6 +297,7 @@ export class RemoteAuthCredentialStore implements AuthCredentialStore {
 
 	#applySnapshot(snapshot: SnapshotResponse, generation: number, protectNewBlocks = true): void {
 		const nowMs = Date.now();
+		this.#maxUsageAccountsPerProvider = this.#countUsageAccounts(snapshot.credentials);
 		const previousCredentials = this.#snapshot.credentials;
 		const credentials = snapshot.credentials
 			.filter(entry => isCredentialInAccountPool(entry, this.#accountPool))
@@ -1066,6 +1068,17 @@ export class RemoteAuthCredentialStore implements AuthCredentialStore {
 		});
 	}
 
+	#countUsageAccounts(entries: readonly SnapshotEntry[]): number {
+		const counts = new Map<Provider, number>();
+		let maximum = 1;
+		for (const entry of entries) {
+			const count = (counts.get(entry.provider) ?? 0) + 1;
+			counts.set(entry.provider, count);
+			maximum = Math.max(maximum, count);
+		}
+		return maximum;
+	}
+
 	#loadUsageReports(): Promise<UsageReport[] | null> {
 		const cached = this.#usageCache;
 		if (cached && Date.now() - cached.fetchedAt < USAGE_CACHE_TTL_MS) {
@@ -1074,7 +1087,7 @@ export class RemoteAuthCredentialStore implements AuthCredentialStore {
 		if (this.#usageInflight) return this.#usageInflight;
 		const epoch = this.#usageCacheEpoch;
 		const inflight = this.#client
-			.fetchUsage()
+			.fetchUsage({ maxAccountsPerProvider: this.#maxUsageAccountsPerProvider })
 			.then(body => {
 				if (epoch !== this.#usageCacheEpoch) return this.#loadUsageReports();
 				this.#usageCache = { reports: body.reports, fetchedAt: Date.now() };
