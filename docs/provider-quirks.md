@@ -1456,7 +1456,7 @@ Umans AI Coding Plan is a proxy service for AI coding models, operating via the 
 ### Auth & usage
 - **Auth**: Uses `UMANS_AI_CODING_PLAN_API_KEY` environment variable or `/login umans` key prompt (`packages/ai/src/registry/umans.ts`, `packages/ai/src/registry/registry.ts`). Key validation executes a lightweight Anthropic messages call (`max_tokens: 1`) to `https://api.code.umans.ai/v1/messages`.
 - **Usage endpoint**: Fetches quota and rate limit status from `GET /v1/usage` (`packages/ai/src/usage/umans.ts`) using `Authorization: Bearer <key>`.
-- **Limits surfaced**: Returns a rolling 5-hour request limit (`umans:requests`) and an instantaneous session concurrency limit (`umans:concurrency`). Also surfaces low-priority status notes when rate-limit bursts occur.
+- **Limits surfaced**: Returns a rolling 5-hour request split into a model-weighted soft cap (`umans:requests:soft`, the "effective requests" contract) and a raw burst ceiling (`umans:requests:hard`, `hard_cap`), plus an instantaneous session concurrency limit (`umans:concurrency`). The soft cap only ever warns — `exhausted` is reserved for the burst ceiling, where throttling actually starts. Legacy payloads without weighted counters fall back to a single raw `umans:requests` row. Also surfaces low-priority status notes when rate-limit bursts occur.
 
 ### Catalog model handling
 - **Descriptor & discovery**: Registered as `umans` with default model `umans-coder` (`packages/catalog/src/provider-models/descriptors.ts`). Dynamic discovery fetches model details from `GET /v1/models/info` (`packages/catalog/src/provider-models/openai-compat.ts`).
