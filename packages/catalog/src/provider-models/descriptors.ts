@@ -169,7 +169,7 @@ export const CATALOG_PROVIDERS = [
 	},
 	{
 		id: "devin",
-		defaultModel: "swe-1-6",
+		defaultModel: "swe-1-6-fast",
 		envVars: ["DEVIN_API_KEY"],
 		createModelManagerOptions: (config: ModelManagerConfig) => devinModelManagerOptions(config),
 		dynamicModelsAuthoritative: true,
