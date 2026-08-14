@@ -6,6 +6,9 @@
 
 - Replaced the MuPDF-WASM PDF document backend with `pdf-inspector` through `@oh-my-pi/pi-natives`, preserving cached text conversion and PDF line selectors while reporting pages that need OCR.
 - Removed `read <pdf>:` image listings and `read <pdf>:<image>.png` extraction because `pdf-inspector` does not rasterize pages; these reads now direct users to the Puppeteer browser tool for rendering or to read the PDF path for extracted text.
+### Fixed
+
+- Fixed Streamable HTTP MCP sessions being invalidated by opening the optional GET SSE stream before sending `notifications/initialized`, which prevented Figma Dev Mode MCP from connecting ([#8514](https://github.com/can1357/oh-my-pi/issues/8514)).
 
 ## [17.3.3] - 2026-08-14
 
