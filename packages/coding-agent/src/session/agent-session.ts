@@ -10980,11 +10980,11 @@ export class AgentSession {
 			this.#clearPendingRecoveredRetryErrors();
 			this.#retryAttempt = 0;
 			this.#resolveRetry();
-			// Tool-use orphans corrupt Anthropic message history (tool_result without
-			// matching tool_use). Always remove them even when the retry cap is hit.
-			if (assistantMessage.stopReason === "toolUse") {
-				this.#discardAssistantTurn(assistantMessage);
-			}
+			// A capped empty turn carries no transcript value, while its provider
+			// usage can anchor later context accounting to the failed request. Wait
+			// for concurrent message persistence, then remove every empty stop from
+			// active context and the persisted branch.
+			await this.#dropPersistedAssistantTurn(assistantMessage);
 			return false;
 		}
 		this.#discardAssistantTurn(assistantMessage);

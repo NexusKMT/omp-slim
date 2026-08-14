@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed capped empty local-model stops remaining in active and persisted context after retries, which could strand subsequent turns. ([#5179](https://github.com/can1357/oh-my-pi/issues/5179))
+
 ## [16.4.4] - 2026-07-11
 
 ### Changed
