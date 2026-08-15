@@ -1072,7 +1072,7 @@ function blockTokens(src: string, lexer: Lexer, output: Token[]): Token[] {
 		let raw = line;
 		i++;
 		// An indented code block cannot interrupt a paragraph (CommonMark lazy
-		// continuation): a 4-space-indented line directly attached to nonblank
+		// continuation): a line indented by at least 4 spaces directly attached to
 		// paragraph text stays inside the paragraph, bypassing every block-start
 		// probe — matching marked's paragraph rule. After a whitespace-padded
 		// blank line the indent is no longer attached, so it still opens an
@@ -1080,7 +1080,7 @@ function blockTokens(src: string, lexer: Lexer, output: Token[]): Token[] {
 		let prevBlankish = false;
 		while (i < lines.length) {
 			const next = lines[i]!;
-			const lazyIndent = !prevBlankish && /^ {4}\S/.test(next);
+			const lazyIndent = !prevBlankish && next.trim() !== "" && /^ {4}/.test(next);
 			if (!lazyIndent && isBlockStart(lines, i)) break;
 			prevBlankish = next.trim() === "";
 			raw += next;
