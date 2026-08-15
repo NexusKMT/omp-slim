@@ -4,7 +4,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { FileEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import * as sessionLoader from "@oh-my-pi/pi-coding-agent/session/session-loader";
-import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import { serializeTitleSlot } from "@oh-my-pi/pi-coding-agent/session/session-title-slot";
 
 // Parity contract for the ≥8MiB streaming loader (now Bun.JSONL-based): it must
@@ -17,13 +16,6 @@ import { serializeTitleSlot } from "@oh-my-pi/pi-coding-agent/session/session-ti
 
 const ISO = "2026-06-29T12:00:00.000Z";
 const HEADER = { type: "session", version: 3, id: "s1", timestamp: ISO, cwd: "/tmp" };
-const LARGE_SESSION_BYTES = 9 * 1024 * 1024;
-
-class LargeFileSessionStorage extends FileSessionStorage {
-	override statSync(filePath: string) {
-		return { ...super.statSync(filePath), size: LARGE_SESSION_BYTES };
-	}
-}
 
 const msg = (id: string, parentId: string, text: string) => ({
 	type: "message",
@@ -101,6 +93,7 @@ describe("loadEntriesFromFileStream (Bun.JSONL parity)", () => {
 
 		expect(titleSlot?.title).toBe("Visitor");
 		expect(entryIds(visited)).toEqual(["s1", "m1", "m2"]);
+		expect(visited[0]).toMatchObject({ title: "Visitor", titleSource: "user" });
 	});
 
 	it("visits a large journal before reading its tail", async () => {
@@ -179,26 +172,6 @@ describe("loadEntriesFromFileStream (Bun.JSONL parity)", () => {
 			sessionLoader.visitEntriesFromFileStream(file, () => {
 				throw failure;
 			}),
-		).rejects.toBe(failure);
-	});
-
-	it("propagates ENOENT errors through the routed visitor", async () => {
-		const file = await writeTemp(`${JSON.stringify(HEADER)}\n`);
-		const failure = Object.assign(new Error("visitor failed"), { code: "ENOENT" });
-
-		await expect(
-			sessionLoader.visitEntriesFromFile(file, () => {
-				throw failure;
-			}),
-		).rejects.toBe(failure);
-		await expect(
-			sessionLoader.visitEntriesFromFile(
-				file,
-				() => {
-					throw failure;
-				},
-				new LargeFileSessionStorage(),
-			),
 		).rejects.toBe(failure);
 	});
 

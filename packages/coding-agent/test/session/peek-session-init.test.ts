@@ -1,7 +1,6 @@
-import { afterEach, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import * as sessionLoader from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { FileSessionStorage, MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -22,6 +21,9 @@ afterEach(async () => {
 class LargeFileSessionStorage extends FileSessionStorage {
 	override statSync(filePath: string) {
 		return { ...super.statSync(filePath), size: LARGE_SESSION_BYTES };
+	}
+	override async readText(): Promise<string> {
+		throw new Error("Large sessions must stream");
 	}
 }
 
@@ -76,7 +78,7 @@ describe("SessionManager.peekSessionInit", () => {
 		expect(peek?.init?.restrictToolNames).toBe(true);
 	});
 
-	it("routes the latest large-file metadata through the entry visitor", async () => {
+	it("streams large file-backed sessions without a full read", async () => {
 		const cwd = makeTempDir("@pi-peek-stream-");
 		const manager = SessionManager.create(cwd, path.join(cwd, "sessions"));
 		const sessionFile = manager.getSessionFile();
@@ -86,17 +88,9 @@ describe("SessionManager.peekSessionInit", () => {
 		manager.appendSessionInit({ systemPrompt: "second", task: "task", tools: ["read"], spawns: "" });
 		manager.appendMessage(assistantMessage("journal tail"));
 
-		const storage = new LargeFileSessionStorage();
-		const visitEntries = spyOn(sessionLoader, "visitEntriesFromFile");
-		try {
-			const peek = await SessionManager.peekSessionInit(sessionFile, storage);
-
-			expect(peek?.cwd).toBe(manager.getCwd());
-			expect(peek?.init?.systemPrompt).toBe("second");
-			expect(visitEntries).toHaveBeenCalledTimes(1);
-		} finally {
-			visitEntries.mockRestore();
-		}
+		const peek = await SessionManager.peekSessionInit(sessionFile, new LargeFileSessionStorage());
+		expect(peek?.cwd).toBe(manager.getCwd());
+		expect(peek?.init?.systemPrompt).toBe("second");
 	});
 
 	it("preserves non-file storage behavior", async () => {

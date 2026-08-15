@@ -46,25 +46,18 @@ function isValidSessionHeader(entry: FileEntry | undefined): entry is SessionHea
 	return entry?.type === "session" && typeof entry.id === "string";
 }
 
-function applyTitleSlot(header: SessionHeader, slot: SessionTitleUpdate): void {
+function applyTitleSlot(entry: FileEntry | undefined, slot: SessionTitleUpdate | undefined): void {
+	if (!slot || !isValidSessionHeader(entry)) return;
 	if (slot.title && slot.title.length > 0) {
-		header.title = slot.title;
+		entry.title = slot.title;
 	} else {
-		delete header.title;
+		delete entry.title;
 	}
 	if (slot.source) {
-		header.titleSource = slot.source;
+		entry.titleSource = slot.source;
 	} else {
-		delete header.titleSource;
+		delete entry.titleSource;
 	}
-}
-
-function foldTitleSlot(entries: FileEntry[], slot: SessionTitleUpdate | undefined): FileEntry[] {
-	if (!slot || entries.length === 0) return entries;
-	const header = entries[0];
-	if (!isValidSessionHeader(header)) return entries;
-	applyTitleSlot(header, slot);
-	return entries;
 }
 
 /** Parse session JSONL while stripping and folding the optional fixed title slot. */
@@ -74,17 +67,19 @@ export function parseSessionContent(content: string): {
 } {
 	const { body, slot } = splitTitleSlot(content);
 	const entries = parseJsonlLenient<RawFileEntry>(body) as FileEntry[];
-	return { entries: foldTitleSlot(entries, slot), titleSlot: slot };
+	applyTitleSlot(entries[0], slot);
+	return { entries, titleSlot: slot };
 }
 
 /** Parse session JSONL and visit each entry without retaining prior entries. */
 export async function visitEntriesFromFileStream(
 	filePath: string,
-	visit: (entry: FileEntry, titleSlot: SessionTitleUpdate | undefined) => void | boolean,
+	visit: (entry: FileEntry) => void | boolean,
 	options: VisitEntriesFromFileStreamOptions = {},
 ): Promise<SessionTitleUpdate | undefined> {
 	let titleSlot: SessionTitleUpdate | undefined;
 	let sawFirstLine = false;
+	let sawFirstEntry = false;
 	let bytesSinceYield = 0;
 	let entriesSinceYield = 0;
 	let recordsSeen = 0;
@@ -129,8 +124,13 @@ export async function visitEntriesFromFileStream(
 					stopped = true;
 					break;
 				}
+				const entry = value as FileEntry;
+				if (!sawFirstEntry) {
+					sawFirstEntry = true;
+					applyTitleSlot(entry, titleSlot);
+				}
 				try {
-					if (visit(value as FileEntry, titleSlot) === false) {
+					if (visit(entry) === false) {
 						stopped = true;
 						break;
 					}
@@ -219,7 +219,7 @@ export async function loadEntriesFromFileStream(filePath: string): Promise<{
 	const titleSlot = await visitEntriesFromFileStream(filePath, entry => {
 		entries.push(entry);
 	});
-	return { entries: foldTitleSlot(entries, titleSlot), titleSlot };
+	return { entries, titleSlot };
 }
 
 /** Read only the fixed-size head window to detect a physical title slot. */
@@ -277,37 +277,21 @@ export async function visitEntriesFromFile(
 	visit: (entry: FileEntry) => void | boolean,
 	storage: SessionStorage = new FileSessionStorage(),
 ): Promise<void> {
-	let visitorThrew = false;
-	const callVisitor = (entry: FileEntry): void | boolean => {
-		try {
+	const size = storage.statSync(filePath).size;
+	if (shouldStreamEntries(storage, size)) {
+		let sawFirstEntry = false;
+		await visitEntriesFromFileStream(filePath, entry => {
+			if (!sawFirstEntry) {
+				sawFirstEntry = true;
+				if (!isValidSessionHeader(entry)) return false;
+			}
 			return visit(entry);
-		} catch (err) {
-			visitorThrew = true;
-			throw err;
-		}
-	};
-	try {
-		const size = storage.statSync(filePath).size;
-		if (shouldStreamEntries(storage, size)) {
-			let sawFirstEntry = false;
-			await visitEntriesFromFileStream(filePath, (entry, titleSlot) => {
-				if (!sawFirstEntry) {
-					sawFirstEntry = true;
-					if (!isValidSessionHeader(entry)) return false;
-					if (titleSlot) applyTitleSlot(entry, titleSlot);
-				}
-				return callVisitor(entry);
-			});
-			return;
-		}
+		});
+		return;
+	}
 
-		for (const entry of await loadEntriesWithKnownSize(filePath, storage, size)) {
-			if (callVisitor(entry) === false) return;
-		}
-	} catch (err) {
-		if (visitorThrew) throw err;
-		if (isEnoent(err)) return;
-		throw err;
+	for (const entry of await loadEntriesWithKnownSize(filePath, storage, size)) {
+		if (visit(entry) === false) return;
 	}
 }
 
