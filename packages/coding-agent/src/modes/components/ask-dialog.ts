@@ -4,6 +4,7 @@ import {
 	Markdown,
 	type MarkdownTheme,
 	matchesKey,
+	padding,
 	renderInlineMarkdown,
 	replaceTabs,
 	ScrollView,
@@ -12,6 +13,7 @@ import {
 	Text,
 	type TUI,
 	truncateToWidth,
+	visibleWidth,
 	wrapTextWithAnsi,
 } from "@oh-my-pi/pi-tui";
 import type {
@@ -315,8 +317,20 @@ function renderRowLabel(
 	const cursor = selected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
 	const label = renderInlineMarkdown(rowItem.label, mdTheme, t => theme.fg(color, t));
 	const noteMarker = state.note && state.noteRowKey === rowItem.key ? theme.fg("success", "  ✎ note") : "";
-	const firstLine = `${cursor}${marker}${label}${noteMarker}`;
-	const lines = [truncateToWidth(firstLine, width, Ellipsis.Unicode)];
+	// Wrap the label onto continuation lines indented under the marker so the
+	// cursor stays visually anchored and the full label stays readable (the
+	// body ScrollView carries vertical overflow). The note marker is reserved
+	// on the first line; the label wraps to the remaining width. The row()
+	// chrome (borders + insets) consumes 4 columns, so the label must fit
+	// `width - 4` or the outer fit() re-truncates it with an ellipsis.
+	const noteWidth = noteMarker ? visibleWidth(noteMarker) : 0;
+	const labelWidth = Math.max(1, width - 4 - visibleWidth(cursor) - visibleWidth(marker) - noteWidth);
+	const wrappedLabel = wrapTextWithAnsi(label, labelWidth);
+	const indent = padding(visibleWidth(cursor) + visibleWidth(marker));
+	const lines = [`${cursor}${marker}${wrappedLabel[0] ?? ""}${noteMarker}`];
+	for (let i = 1; i < wrappedLabel.length; i++) {
+		lines.push(`${indent}${wrappedLabel[i] ?? ""}`);
+	}
 	if (rowItem.kind === "option") {
 		const option = question.options[rowItem.optionIndex ?? -1];
 		if (option?.description?.trim()) {

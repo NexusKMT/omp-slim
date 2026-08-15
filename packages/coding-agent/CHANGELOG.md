@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed long `ask` option labels being hard-truncated at the terminal width with no way to read the clipped tail; the rich ask dialog now wraps labels onto indented continuation lines, matching the legacy selector ([#1243](https://github.com/can1357/oh-my-pi/issues/1243), [#8594](https://github.com/can1357/oh-my-pi/issues/8594)).
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed

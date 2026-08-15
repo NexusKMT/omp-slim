@@ -1250,6 +1250,36 @@ describe("AskDialogComponent", () => {
 		expect(matches?.length ?? 0).toBeLessThan(10);
 	});
 
+	it("wraps long option labels onto indented continuation lines instead of truncating", () => {
+		const onSubmit = vi.fn();
+		const longLabel = "This is a deliberately long option label ".repeat(4).trim();
+		const questions: ExtensionAskDialogQuestion[] = [
+			{
+				id: "q1",
+				question: "Pick one?",
+				options: [{ label: longLabel }, { label: "Short" }],
+			},
+		];
+
+		const component = new AskDialogComponent(questions, {
+			onSubmit,
+			onCancel: vi.fn(),
+			onPrompt: vi.fn(),
+		});
+
+		const output = render(component);
+		// The label tail must be present — no ellipsis truncation.
+		expect(output).toContain("deliberately long option label");
+		expect(output).not.toContain("…");
+		// The first line carries the cursor glyph; continuation lines are
+		// indented under the marker so the cursor stays visually anchored.
+		const lines = output.split("\n");
+		const first = lines.find(line => line.includes("This is a deliberately")) ?? "";
+		const continuation = lines.find(line => line.includes("option label") && !line.includes("❯")) ?? "";
+		expect(first).toMatch(/│ ❯/);
+		expect(continuation).toMatch(/│ {3}/);
+	});
+
 	it("Other editor cancel returns to the option list without submitting", async () => {
 		const onPrompt = vi.fn().mockReturnValue(Promise.resolve(undefined));
 		const onSubmit = vi.fn();
