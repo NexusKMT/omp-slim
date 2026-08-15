@@ -2344,11 +2344,11 @@ export class AgentSession {
 
 	/**
 	 * Builds the transient checkpoint-active reminder for a successful
-	 * checkpoint tool result, or undefined otherwise. The reminder is appended
-	 * to agent.state synchronously in the message_end handler (before any
-	 * await) so the next provider call within the same tool loop sees it, and
-	 * is persisted via #persistMessageEnd. Because the entry sits after the
-	 * checkpoint entry, the rewind branch cut drops it from the active path.
+	 * checkpoint tool result, or undefined otherwise. The reminder is queued as
+	 * steering synchronously in the message_end handler (before any await), so
+	 * the agent loop folds it into the next provider call and persists it through
+	 * its normal custom-message event. Because the entry sits after the checkpoint
+	 * entry, the rewind branch cut drops it from the active path.
 	 */
 	#checkpointActiveReminderFor(
 		message: AgentMessage,
@@ -2527,14 +2527,12 @@ export class AgentSession {
 			this.agent.appendMessage(interruptedThinkingMessage);
 		}
 
-		// Same pre-await visibility requirement as the interrupted-thinking
-		// message: agent-core invokes message_end listeners fire-and-forget, so
-		// the next provider call can start before any awaited session-event
-		// emission or persistence below settles. The checkpoint-active reminder
-		// must already be in agent.state for that call — append it synchronously
-		// here and persist it later (see #persistMessageEnd). It sits after the
-		// checkpoint entry, so the rewind branch cut
-		// (branchWithSummary(checkpointEntryId)) drops it from the active path
+		// message_end listeners are fire-and-forget, and the agent loop runs against
+		// a context cloned at prompt start. Appending only to agent.state would not
+		// reach the next provider call in this tool loop. Queue the reminder as
+		// steering before any await so the loop drains it at the next step boundary;
+		// its normal custom-message event persists it after the checkpoint entry,
+		// allowing the rewind branch cut to drop it from the active path.
 		const checkpointReminder =
 			event.type === "message_end" && event.message.role === "toolResult"
 				? this.#checkpointActiveReminderFor(event.message)
@@ -2555,7 +2553,7 @@ export class AgentSession {
 			};
 			this.#pendingRewindReport = undefined;
 			this.#lastCompletedRewind = undefined;
-			this.agent.appendMessage(checkpointReminder);
+			this.agent.steer(checkpointReminder);
 		}
 
 		const messageEndPersistence =
@@ -2675,15 +2673,6 @@ export class AgentSession {
 					interruptedThinkingMessage.display,
 					interruptedThinkingMessage.details,
 					interruptedThinkingMessage.attribution,
-				);
-			}
-			if (checkpointReminder) {
-				this.sessionManager.appendCustomMessageEntry(
-					checkpointReminder.customType,
-					checkpointReminder.content,
-					checkpointReminder.display,
-					checkpointReminder.details,
-					checkpointReminder.attribution,
 				);
 			}
 			// Other message types (bashExecution, compactionSummary, branchSummary) are persisted elsewhere

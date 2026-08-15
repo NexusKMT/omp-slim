@@ -301,9 +301,10 @@ describe("AgentSession checkpoint rewind branch context", () => {
 		while (
 			!session.messages.some(
 				message => message.role === "custom" && message.customType === "checkpoint-active-reminder",
-			)
+			) ||
+			mock.calls.length < 2
 		) {
-			if (Date.now() > deadline) throw new Error("checkpoint-active-reminder never appeared");
+			if (Date.now() > deadline) throw new Error("checkpoint reminder/provider call never appeared");
 			await Bun.sleep(10);
 		}
 		const reminder = session.messages.find(
@@ -312,6 +313,11 @@ describe("AgentSession checkpoint rewind branch context", () => {
 		);
 		expect(reminder).toBeDefined();
 		expect(reminder?.content).toContain("MUST `rewind` before yielding");
+		const activeCall = mock.calls[1];
+		expect(activeCall).toBeDefined();
+		expect(
+			activeCall?.context.messages.some(message => messageText(message).includes("Exploration checkpoint active.")),
+		).toBe(true);
 		// #checkpointState is set synchronously with the reminder (pre-await), so an
 		// immediate rewind would find an active checkpoint, not "No active checkpoint".
 		expect(session.getCheckpointState()).toBeDefined();
