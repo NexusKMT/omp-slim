@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed toggling `display.showTokenUsage` from `/settings` leaving existing token-usage rows stale until the transcript was rebuilt.
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed
