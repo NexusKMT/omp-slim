@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `always-ask` approval prompts bypassing edit preview readiness when a built-in tool executes under its wire-level alias, such as `edit` running as `apply_patch` ([#8607](https://github.com/can1357/oh-my-pi/issues/8607)).
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed
