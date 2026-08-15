@@ -1299,6 +1299,16 @@ const streamOpenAICompletionsOnce = (
 				flushDeepseekStripBuffer(true);
 			}
 
+			// Detect premature stream closure before the normal block-finalization
+			// sweep. Throwing after that sweep would make the error handler emit a
+			// second text_end/thinking_end for the same partial block.
+			if (streamFinishedAt === undefined && output.content.length > 0) {
+				throw new AIError.ProviderResponseError(
+					"OpenAI completions stream closed before a finish_reason was received",
+					{ provider: model.provider, kind: "incomplete-stream" },
+				);
+			}
+
 			if (currentBlock?.type === "toolCall") {
 				finishPendingToolCallBlocks();
 			} else {
@@ -1342,21 +1352,6 @@ const streamOpenAICompletionsOnce = (
 					provider: model.provider,
 					kind: "runtime",
 				});
-			}
-			// Detect premature stream closure: the stream ended (EOF/`[DONE]`)
-			// without any chunk carrying a `finish_reason`, but content was
-			// produced — the connection died mid-generation (e.g. DeepSeek's
-			// `insufficient_system_resource` interruption). Finalizing the
-			// partial message as a clean "stop" would make the agent loop treat
-			// the truncated turn as complete (silent mid-sentence halt), so fail
-			// the turn. An empty stream without a finish_reason stays on the
-			// empty-completion retry path. Mirrors the Responses provider's
-			// `sawTerminalResponseEvent` guard.
-			if (streamFinishedAt === undefined && output.content.length > 0) {
-				throw new AIError.ProviderResponseError(
-					"OpenAI completions stream closed before a finish_reason was received",
-					{ provider: model.provider, kind: "incomplete-stream" },
-				);
 			}
 
 			output.errorMessage = undefined;

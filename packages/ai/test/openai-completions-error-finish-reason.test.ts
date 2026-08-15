@@ -142,13 +142,18 @@ describe("premature stream closure", () => {
 			completionChunk({ choices: [{ index: 0, delta: { content: "lo" } }] }),
 		]);
 
-		const result = await streamOpenAICompletions(completionsModel, baseContext(), {
+		const eventTypes: string[] = [];
+		let errorMessage: string | undefined;
+		for await (const event of streamOpenAICompletions(completionsModel, baseContext(), {
 			apiKey: "test-key",
 			fetch: fetchMock,
-		}).result();
+		})) {
+			eventTypes.push(event.type);
+			if (event.type === "error") errorMessage = event.error.errorMessage;
+		}
 
-		expect(result.stopReason).toBe("error");
-		expect(result.errorMessage).toContain("finish_reason");
+		expect(eventTypes).toEqual(["start", "text_start", "text_delta", "text_delta", "text_end", "error"]);
+		expect(errorMessage).toContain("finish_reason");
 	}, 10_000);
 
 	it("still retries a genuinely empty close via the empty-completion path", async () => {
