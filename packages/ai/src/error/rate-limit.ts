@@ -73,18 +73,22 @@ const CN_THROTTLE_PATTERN = /速率(?:限制|过快)|频率(?:过高|过快)|过
 // throttle (429 Throttling.AllocationQuota, type `insufficient_quota`) with
 // OpenAI-compatible billing wording — "You exceeded your current quota,
 // please check your plan and billing details. … (type=insufficient_quota
-// param=insufficient_quota)" — but links the error-code doc's `token-limit`
+// param=insufficient_quota)" — and links the error-code doc's `token-limit`
 // anchor. Per that doc section the error is a transient TPM/TPS cap that
 // clears within the minute window, not an account-local quota exhaustion.
-// Classified RATE_LIMIT_EXCEEDED and excluded from the usage-limit lane so
-// the session retries with a short backoff on the same credential instead of
-// the 30-minute QUOTA_EXHAUSTED credential block. The identical wording
-// WITHOUT the anchor stays quota-exhausted (OpenAI's real account-quota
-// error uses the same sentence).
-const DASHSCOPE_TOKEN_LIMIT_PATTERN = /model-studio\/error-code[^()\s]*#token-limit|error-code[^()\s]*#token-limit/i;
-/** True for DashScope/Bailian's TPM/TPS throttle wording (see {@link DASHSCOPE_TOKEN_LIMIT_PATTERN}). */
+// The same doc anchor also covers permanent errors such as "Free allocated
+// quota exceeded", so require both the anchor and the exact throttle wording.
+// The identical wording WITHOUT the anchor stays quota-exhausted (OpenAI's
+// real account-quota error uses the same sentence).
+const DASHSCOPE_TOKEN_LIMIT_DOC_PATTERN = /error-code[^()\s]*#token-limit/i;
+const DASHSCOPE_TOKEN_LIMIT_MESSAGE_PATTERN =
+	/\byou exceeded your current quota, please check your plan and billing details\b/i;
+/** True for DashScope/Bailian's documented OpenAI-compatible TPM/TPS throttle. */
 export function isDashScopeTokenLimitText(errorMessage: string): boolean {
-	return DASHSCOPE_TOKEN_LIMIT_PATTERN.test(errorMessage);
+	return (
+		DASHSCOPE_TOKEN_LIMIT_DOC_PATTERN.test(errorMessage) &&
+		DASHSCOPE_TOKEN_LIMIT_MESSAGE_PATTERN.test(errorMessage)
+	);
 }
 
 const GOOGLE_RPC_ERROR_INFO_TYPE = "type.googleapis.com/google.rpc.ErrorInfo";

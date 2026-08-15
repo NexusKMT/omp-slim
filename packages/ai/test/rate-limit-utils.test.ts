@@ -176,6 +176,14 @@ describe("parseRateLimitReason", () => {
 			"429 You exceeded your current quota, please check your plan and billing details. For details, see: https://platform.openai.com/account/usage (type=insufficient_quota)";
 		expect(parseRateLimitReason(openaiQuota)).toBe("QUOTA_EXHAUSTED");
 		expect(isUsageLimitOutcome(429, openaiQuota)).toBe(true);
+
+		// The same DashScope doc anchor also covers permanent free-quota
+		// exhaustion. The anchor alone must not turn that into a retry loop.
+		const freeQuota =
+			"429 Free allocated quota exceeded. For details, see: https://help.aliyun.com/zh/model-studio/error-code#token-limit (type=insufficient_quota)";
+		expect(parseRateLimitReason(freeQuota)).toBe("QUOTA_EXHAUSTED");
+		expect(isUsageLimit(new ProviderHttpError(freeQuota, 429, { code: "insufficient_quota" }))).toBe(true);
+		expect(isUsageLimitOutcome(429, freeQuota)).toBe(true);
 	});
 
 	it("classifies Codex usage limit error as QUOTA_EXHAUSTED", () => {
