@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Kept completed edit previews within their collapsed line limit for oversized single hunks and cached header change statistics across terminal repaints.
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed
