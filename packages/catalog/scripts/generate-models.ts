@@ -641,7 +641,7 @@ async function generateModels() {
 	}
 	// Seed Devin's SWE-1.6 lanes. Cascade's catalog is credential-scoped, so it
 	// is never fetched during generation (CREDENTIAL_SCOPED_PROVIDERS) and the
-	// seed is the entire bundled surface: the descriptor's `swe-1-6-fast`
+	// seed is the entire bundled surface: the descriptor's `swe-1-6`
 	// default must resolve synchronously at boot, before credential-scoped
 	// runtime discovery replaces the seed with the account's live catalog.
 	allModels.push(...DEVIN_STATIC_MODELS);
