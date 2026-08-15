@@ -313,6 +313,11 @@ export class SessionMaintenance {
 	set skipPostTurnMaintenanceAssistantTimestamp(timestamp: number | undefined) {
 		this.#skipPostTurnMaintenanceAssistantTimestamp = timestamp;
 	}
+
+	/**
+	 * Emit a compaction lifecycle event. Mid-turn callers pass `detach` so a
+	 * hung extension/UI handler cannot pin the live loop after history rewrite.
+	 */
 	#emitLifecycleEvent(event: AgentSessionEvent, detach: boolean): Promise<void> {
 		const emit = this.#host.emitSessionEvent(event);
 		if (!detach) return emit;
