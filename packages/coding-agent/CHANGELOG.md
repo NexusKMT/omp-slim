@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Repaired torn session JSONL appends after disk-write failures, rewrote malformed resumed files before their next append, retried transient persistence failures, and surfaced failures in the TUI ([#8596](https://github.com/can1357/oh-my-pi/issues/8596)).
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed
