@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+
+- Fixed Codex Daybreak Blue and Red model discovery reporting zero token prices, which made the model picker label the models as free.
 
 ## [17.3.4] - 2026-08-14
 

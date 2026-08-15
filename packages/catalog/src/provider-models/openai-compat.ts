@@ -20,7 +20,17 @@ import {
 import { resolveModelReference } from "../identity/reference";
 import type { ModelManagerOptions } from "../model-manager";
 import { type GeneratedProvider, getBundledModels } from "../models";
-import type { Api, FetchImpl, Model, ModelSpec, OpenAICompat, Provider, ThinkingConfig } from "../types";
+import { OPENAI_GPT_56_CYBER_STANDARD_COST, OPENAI_GPT_56_SOL_STANDARD_COST } from "../openai-pricing";
+import type {
+	Api,
+	FetchImpl,
+	LongContextTokenCost,
+	Model,
+	ModelSpec,
+	OpenAICompat,
+	Provider,
+	ThinkingConfig,
+} from "../types";
 import { discoveryFetch, isAnthropicOAuthToken, isRecord, toBoolean, toNumber, toPositiveNumber } from "../utils";
 import { ALIBABA_TOKEN_PLAN_BASE_URL, parseAlibabaTokenPlanCredential } from "../wire/alibaba-token-plan";
 import { coreWeaveProjectHeaders } from "../wire/coreweave";
@@ -869,6 +879,7 @@ export function umansModelManagerOptions(config?: UmansModelManagerConfig): Mode
 // ---------------------------------------------------------------------------
 
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
+/** GPT-5.6 rates applied when a first-party request exceeds 272K input tokens. */
 export const OPENAI_GPT_56_LONG_CONTEXT_COSTS = {
 	luna: {
 		inputThreshold: 272_000,
@@ -891,20 +902,7 @@ export const OPENAI_GPT_56_LONG_CONTEXT_COSTS = {
 		cacheRead: 0.4,
 		cacheWrite: 5,
 	},
-} as const;
-const OPENAI_GPT_56_SOL_STANDARD_COST = {
-	input: 5,
-	output: 30,
-	cacheRead: 0.5,
-	cacheWrite: 6.25,
-	longContext: OPENAI_GPT_56_LONG_CONTEXT_COSTS.sol,
-} as const;
-const OPENAI_GPT_56_CYBER_STANDARD_COST = {
-	input: 12.5,
-	output: 75,
-	cacheRead: 1.25,
-	cacheWrite: 15.625,
-} as const;
+} as const satisfies Readonly<Record<"luna" | "sol" | "terra", LongContextTokenCost>>;
 
 export interface OpenAIModelManagerConfig {
 	apiKey?: string;
@@ -938,7 +936,10 @@ export const OPENAI_DAYBREAK_CURATED_FALLBACK_MODELS: readonly ModelSpec<"openai
 		baseUrl: OPENAI_API_BASE_URL,
 		reasoning: true,
 		input: ["text", "image"],
-		cost: OPENAI_GPT_56_SOL_STANDARD_COST,
+		cost: {
+			...OPENAI_GPT_56_SOL_STANDARD_COST,
+			longContext: OPENAI_GPT_56_LONG_CONTEXT_COSTS.sol,
+		},
 		contextWindow: 1_050_000,
 		maxTokens: 128_000,
 	},
