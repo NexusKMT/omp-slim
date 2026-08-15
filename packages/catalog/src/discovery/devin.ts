@@ -321,10 +321,12 @@ export async function fetchDevinModels(
 		if (decoded.clientModelConfigs.length === 0) {
 			// The backend gates the native catalog on the pinned CLI identity; an
 			// empty-but-200 response is the failure signature of a stale version
-			// pin (there is no explicit error), so leave a trail for diagnosis.
+			// pin (there is no explicit error). Treat it as failed discovery so
+			// the static seed survives, and leave a trail for diagnosis.
 			logger.warn("Devin returned an empty native model catalog; the pinned CLI identity may be stale", {
 				metadata: devinDiscoveryMetadata(undefined),
 			});
+			return null;
 		}
 
 		return normalizeDevinModels(decoded.clientModelConfigs, options.baseUrl);

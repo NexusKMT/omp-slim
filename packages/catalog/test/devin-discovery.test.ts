@@ -320,6 +320,16 @@ describe("devin native discovery request", () => {
 		]);
 		expect(requestMetadata?.apiKey).toBe("devin-session-token$fixture-token");
 	});
+
+	it("treats an empty-but-200 catalog as failed discovery so the seed survives", async () => {
+		const emptyPayload = toBinary(
+			GetCliModelConfigsResponseSchema,
+			create(GetCliModelConfigsResponseSchema, { clientModelConfigs: [] }),
+		);
+		const fetchImpl: FetchImpl = async () =>
+			new Response(emptyPayload, { status: 200, headers: { "content-type": "application/proto" } });
+		expect(await fetchDevinModels({ apiKey: "fixture-token", fetch: fetchImpl })).toBeNull();
+	});
 });
 
 describe("devin native display filtering", () => {
