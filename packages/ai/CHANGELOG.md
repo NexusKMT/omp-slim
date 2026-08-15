@@ -4,8 +4,14 @@
 
 ### Fixed
 
-- Fixed `omp usage invalidate` to discard stale OAuth and API-key usage snapshots, then force a cache-bypassing, per-provider serialized refresh so upgraded subscriptions do not silently retain pre-change quota data.
 - Fixed Umans usage reporting computing utilization from raw request counts instead of the model-weighted "effective requests", falsely reporting the quota as exhausted while the account still had weighted headroom. The request limit is now split into a weighted soft-cap row (warns, never exhausts) and a raw burst-ceiling row (exhausted only where throttling actually starts), and the rolling 5h window's absolute `resets_at` is surfaced as a countdown ([#7858](https://github.com/can1357/oh-my-pi/issues/7858)).
+
+## [17.3.4] - 2026-08-14
+
+### Fixed
+
+- Fixed `omp usage invalidate` to discard stale OAuth and API-key usage snapshots, then force a cache-bypassing, per-provider serialized refresh with a broker request budget sized for the full unfiltered account batch, so upgraded subscriptions do not silently retain pre-change quota data.
+- Fixed quota reporting and Cookie capture guidance for China (Beijing) Alibaba Token Plan credentials ([#8509](https://github.com/can1357/oh-my-pi/issues/8509)).
 
 ## [17.3.3] - 2026-08-14
 
