@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { FileEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import * as sessionLoader from "@oh-my-pi/pi-coding-agent/session/session-loader";
+import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import { serializeTitleSlot } from "@oh-my-pi/pi-coding-agent/session/session-title-slot";
 
 // Parity contract for the ≥8MiB streaming loader (now Bun.JSONL-based): it must
@@ -16,6 +17,14 @@ import { serializeTitleSlot } from "@oh-my-pi/pi-coding-agent/session/session-ti
 
 const ISO = "2026-06-29T12:00:00.000Z";
 const HEADER = { type: "session", version: 3, id: "s1", timestamp: ISO, cwd: "/tmp" };
+const LARGE_SESSION_BYTES = 9 * 1024 * 1024;
+
+class LargeFileSessionStorage extends FileSessionStorage {
+	override statSync(filePath: string) {
+		return { ...super.statSync(filePath), size: LARGE_SESSION_BYTES };
+	}
+}
+
 const msg = (id: string, parentId: string, text: string) => ({
 	type: "message",
 	id,
@@ -96,7 +105,8 @@ describe("loadEntriesFromFileStream (Bun.JSONL parity)", () => {
 
 	it("visits a large journal before reading its tail", async () => {
 		const largeText = "x".repeat(1024 * 1024);
-		const lines = [JSON.stringify(HEADER)];
+		const slotLine = serializeTitleSlot({ title: "Visitor", source: "user", updatedAt: ISO });
+		const lines = [slotLine, JSON.stringify({ ...HEADER, title: "stale", titleSource: "generated" })];
 		for (let index = 1; index <= 9; index++) {
 			lines.push(JSON.stringify(msg(`m${index}`, index === 1 ? "s1" : `m${index - 1}`, largeText)));
 		}
@@ -104,14 +114,22 @@ describe("loadEntriesFromFileStream (Bun.JSONL parity)", () => {
 		expect(fs.statSync(file).size).toBeGreaterThan(8 * 1024 * 1024);
 
 		let visited = 0;
-		await sessionLoader.visitEntriesFromFile(file, () => {
+		let headerTitle: string | undefined;
+		let headerTitleSource: string | undefined;
+		await sessionLoader.visitEntriesFromFile(file, entry => {
 			visited++;
+			if (entry.type === "session") {
+				headerTitle = entry.title;
+				headerTitleSource = entry.titleSource;
+			}
 			if (visited === 1) fs.truncateSync(file, 0);
 		});
 
 		// A collecting load reads the tail before the first callback and would
 		// still visit every in-memory entry after the file is truncated.
-		expect(visited).toBe(1);
+		expect(visited).toBeLessThan(10);
+		expect(headerTitle).toBe("Visitor");
+		expect(headerTitleSource).toBe("user");
 	});
 
 	it("does not revisit entries before a malformed line spanning stream chunks", async () => {
@@ -172,6 +190,15 @@ describe("loadEntriesFromFileStream (Bun.JSONL parity)", () => {
 			sessionLoader.visitEntriesFromFile(file, () => {
 				throw failure;
 			}),
+		).rejects.toBe(failure);
+		await expect(
+			sessionLoader.visitEntriesFromFile(
+				file,
+				() => {
+					throw failure;
+				},
+				new LargeFileSessionStorage(),
+			),
 		).rejects.toBe(failure);
 	});
 

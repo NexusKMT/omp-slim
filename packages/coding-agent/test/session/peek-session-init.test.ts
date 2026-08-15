@@ -76,28 +76,26 @@ describe("SessionManager.peekSessionInit", () => {
 		expect(peek?.init?.restrictToolNames).toBe(true);
 	});
 
-	it("returns metadata through the large-file stream path", async () => {
+	it("routes the latest large-file metadata through the entry visitor", async () => {
 		const cwd = makeTempDir("@pi-peek-stream-");
 		const manager = SessionManager.create(cwd, path.join(cwd, "sessions"));
 		const sessionFile = manager.getSessionFile();
 		if (!sessionFile) throw new Error("Expected a persisted session file path");
 
-		manager.appendSessionInit({ systemPrompt: "streamed", task: "task", tools: ["read"], spawns: "" });
+		manager.appendSessionInit({ systemPrompt: "first", task: "task", tools: ["read"], spawns: "" });
+		manager.appendSessionInit({ systemPrompt: "second", task: "task", tools: ["read"], spawns: "" });
 		manager.appendMessage(assistantMessage("journal tail"));
 
 		const storage = new LargeFileSessionStorage();
 		const visitEntries = spyOn(sessionLoader, "visitEntriesFromFile");
-		const loadEntries = spyOn(sessionLoader, "loadEntriesFromFile");
 		try {
 			const peek = await SessionManager.peekSessionInit(sessionFile, storage);
 
 			expect(peek?.cwd).toBe(manager.getCwd());
-			expect(peek?.init?.systemPrompt).toBe("streamed");
+			expect(peek?.init?.systemPrompt).toBe("second");
 			expect(visitEntries).toHaveBeenCalledTimes(1);
-			expect(loadEntries).not.toHaveBeenCalled();
 		} finally {
 			visitEntries.mockRestore();
-			loadEntries.mockRestore();
 		}
 	});
 

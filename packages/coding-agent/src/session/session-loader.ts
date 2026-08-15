@@ -46,10 +46,7 @@ function isValidSessionHeader(entry: FileEntry | undefined): entry is SessionHea
 	return entry?.type === "session" && typeof entry.id === "string";
 }
 
-function foldTitleSlot(entries: FileEntry[], slot: SessionTitleUpdate | undefined): FileEntry[] {
-	if (!slot || entries.length === 0) return entries;
-	const header = entries[0];
-	if (!isValidSessionHeader(header)) return entries;
+function applyTitleSlot(header: SessionHeader, slot: SessionTitleUpdate): void {
 	if (slot.title && slot.title.length > 0) {
 		header.title = slot.title;
 	} else {
@@ -60,6 +57,13 @@ function foldTitleSlot(entries: FileEntry[], slot: SessionTitleUpdate | undefine
 	} else {
 		delete header.titleSource;
 	}
+}
+
+function foldTitleSlot(entries: FileEntry[], slot: SessionTitleUpdate | undefined): FileEntry[] {
+	if (!slot || entries.length === 0) return entries;
+	const header = entries[0];
+	if (!isValidSessionHeader(header)) return entries;
+	applyTitleSlot(header, slot);
 	return entries;
 }
 
@@ -76,7 +80,7 @@ export function parseSessionContent(content: string): {
 /** Parse session JSONL and visit each entry without retaining prior entries. */
 export async function visitEntriesFromFileStream(
 	filePath: string,
-	visit: (entry: FileEntry) => void | boolean,
+	visit: (entry: FileEntry, titleSlot: SessionTitleUpdate | undefined) => void | boolean,
 	options: VisitEntriesFromFileStreamOptions = {},
 ): Promise<SessionTitleUpdate | undefined> {
 	let titleSlot: SessionTitleUpdate | undefined;
@@ -126,7 +130,7 @@ export async function visitEntriesFromFileStream(
 					break;
 				}
 				try {
-					if (visit(value as FileEntry) === false) {
+					if (visit(value as FileEntry, titleSlot) === false) {
 						stopped = true;
 						break;
 					}
@@ -286,10 +290,11 @@ export async function visitEntriesFromFile(
 		const size = storage.statSync(filePath).size;
 		if (shouldStreamEntries(storage, size)) {
 			let sawFirstEntry = false;
-			await visitEntriesFromFileStream(filePath, entry => {
+			await visitEntriesFromFileStream(filePath, (entry, titleSlot) => {
 				if (!sawFirstEntry) {
 					sawFirstEntry = true;
 					if (!isValidSessionHeader(entry)) return false;
+					if (titleSlot) applyTitleSlot(entry, titleSlot);
 				}
 				return callVisitor(entry);
 			});
