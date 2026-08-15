@@ -496,6 +496,59 @@ describe("AgentSession mid-run threshold compaction", () => {
 		expect(JSON.stringify(session.messages)).not.toContain("display-variant");
 	});
 
+	it("does not wait for auto_compaction_end handlers before the next provider call", async () => {
+		const releaseCompactionEnd = Promise.withResolvers<void>();
+		const compactionEndEntered = Promise.withResolvers<void>();
+		const nextProviderCall = Promise.withResolvers<void>();
+		const extensionRunner = {
+			hasHandlers: vi.fn((eventType: string) => eventType === "auto_compaction_end"),
+			emitBeforeAgentStart: vi.fn(async () => undefined),
+			emit: vi.fn(async (event: { type: string }) => {
+				if (event.type === "auto_compaction_end") {
+					compactionEndEntered.resolve();
+					await releaseCompactionEnd.promise;
+				}
+			}),
+		} as unknown as ExtensionRunner;
+		const { session, observedContexts } = await createHarness(
+			{},
+			{
+				extensionRunner,
+				onProviderCall: index => {
+					if (index === 1) nextProviderCall.resolve();
+				},
+			},
+		);
+		const compactSpy = mockCompaction("MID-RUN-COMPACTED-WITHOUT-WAITING-ON-END");
+
+		const prompt = session.prompt("work on the release");
+		const compactionEndOutcome = await raceWithTimeout(
+			compactionEndEntered.promise.then(() => "entered" as const),
+			2_000,
+			"blocked" as const,
+		);
+		const providerOutcome =
+			compactionEndOutcome === "entered"
+				? await raceWithTimeout(
+						nextProviderCall.promise.then(() => "dispatched" as const),
+						2_000,
+						"blocked" as const,
+					)
+				: "blocked";
+		releaseCompactionEnd.resolve();
+		const promptOutcome = await raceWithTimeout(
+			prompt.then(() => "settled" as const),
+			2_000,
+			"blocked" as const,
+		);
+
+		expect(compactionEndOutcome).toBe("entered");
+		expect(providerOutcome).toBe("dispatched");
+		expect(promptOutcome).toBe("settled");
+		expect(compactSpy).toHaveBeenCalledTimes(1);
+		expect(observedContexts[1].join("\n")).toContain("MID-RUN-COMPACTED-WITHOUT-WAITING-ON-END");
+	});
+
 	it("does not compact mid-run outside goal mode when disabled", async () => {
 		const { session } = await createHarness({ "compaction.midTurnEnabled": false });
 		const compactSpy = mockCompaction("SHOULD-NOT-RUN");

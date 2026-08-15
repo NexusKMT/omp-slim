@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed mid-run auto-compaction waiting on `auto_compaction_end` extension handlers before the next provider call, which could hang the live loop after a snapcompact or context-full pass.
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed
