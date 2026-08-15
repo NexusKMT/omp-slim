@@ -430,8 +430,8 @@ export interface SharedBrowserLaunchSpec {
  * Resolve the executable and complete argv for a shared Chromium the daemon
  * broker spawns directly (no puppeteer inside the broker). Mirrors
  * `launchHeadlessBrowser` flag assembly — puppeteer's default args minus the
- * stealth-suppressed set — plus `--remote-debugging-port=0` so every client
- * attaches over CDP. Returns null when no Chromium executable resolves;
+ * stealth-suppressed set — suppresses Puppeteer's unowned startup window, and
+ * exposes CDP on an ephemeral port. Returns null when no executable resolves;
  * callers fall back to a process-local launch.
  */
 export async function resolveSharedBrowserLaunchSpec(opts: {
@@ -451,7 +451,7 @@ export async function resolveSharedBrowserLaunchSpec(opts: {
 	});
 	return {
 		executablePath,
-		args: [...defaults.filter(arg => !ignored.has(arg)), "--remote-debugging-port=0"],
+		args: [...defaults.filter(arg => !ignored.has(arg)), "--no-startup-window", "--remote-debugging-port=0"],
 	};
 }
 
