@@ -20,6 +20,7 @@
 - Removed unsupported `xhigh` (and `max`) thinking tiers from first-party Grok 4.5 / 4.3 / 3-mini Responses rows; leftover `xhigh`/`max` requests clamp to `high`. `grok-4.20-multi-agent*` still advertises unmapped `xhigh` (16-agent mode).
 - Stopped baking `reasoningEffortMap` on first-party xAI catalog rows that omit `reasoning.effort` (`omitReasoningEffort: true`).
 - Suppressed presence/frequency penalties on every first-party xAI Responses model, including non-reasoning ids such as `grok-2`; xAI's `/v1/responses` marks those fields unsupported.
+- Routed `grok-4.6` (added on main) through first-party xAI Responses with the same 4-tier effort allowlist as `grok-4.5`, instead of leaving the paid row on Chat Completions.
 
 ## [17.3.4] - 2026-08-14
 
