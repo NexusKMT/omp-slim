@@ -16,13 +16,11 @@ export const OPENAI_GPT_56_CYBER_STANDARD_COST = {
 	cacheWrite: 15.625,
 } as const satisfies TokenCost;
 
-/** Resolve standard rates for direct and Codex-prefixed Daybreak aliases. */
+/** Resolve standard rates for Codex-prefixed Daybreak aliases. */
 export function resolveOpenAIDaybreakStandardCost(modelId: string): TokenCost | undefined {
 	switch (modelId) {
-		case "daybreak-blue-latest":
 		case "gpt-daybreak-blue-latest":
 			return OPENAI_GPT_56_SOL_STANDARD_COST;
-		case "daybreak-red-latest":
 		case "gpt-daybreak-red-latest":
 			return OPENAI_GPT_56_CYBER_STANDARD_COST;
 		default:
