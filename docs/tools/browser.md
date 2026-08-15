@@ -65,8 +65,8 @@
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `all` | `boolean` | No | Close every known tab. Omitted closes only `name`. |
-| `kill` | `boolean` | No | When a tab release drops a spawned-app browser handle to refcount 0, also terminate its process tree. Has no effect on headless shutdown and only disconnects connected CDP browsers. |
+| `all` | `boolean` | No | Release every known managed tab. Omitted releases only `name`. Tool-owned headless pages and owned cmux surfaces close; spawned, connected, and relay pages remain open. |
+| `kill` | `boolean` | No | When a tab release drops a spawned-app browser handle to refcount 0, also terminate its process tree. Has no effect on headless shutdown; connected and relay browsers are only disconnected. |
 
 ### `action: "run"`
 
@@ -160,7 +160,7 @@ The tool returns one result per call; no streaming partial output is emitted fro
 18. `tab.click()` uses a custom retry loop for `text/...` selectors to find an actionable visible match; other selectors use `page.locator(...).click()`. Interactive actions (`click`/`fill`/`type`/`press`/`scroll`/`drag`/`scrollIntoView`/`select`/`uploadFile`) and the `waitFor*` helpers run under a per-op deadline (`min(cellBudget − slack, ceiling)`) threaded into both the puppeteer `signal` and `.setTimeout()`, so a stalled helper aborts the CDP action and rejects with a named `tab.<op> timed out after <ms>ms` that leaves cell budget — never the opaque whole-cell timeout. `goto`/`evaluate` stay uncapped.
 19. `tab.screenshot()` captures the page or selected element as PNG, resizes a model copy, saves under `browser.screenshotDir` or the OS temp directory, returns that path, records metadata, and optionally emits text plus image content.
 20. `display()` calls accumulate in an array. After code finishes, the worker posts `{ displays, returnValue, screenshots }`; `BrowserTool.#run()` appends the return value as trailing text content when not `undefined`.
-21. `close` releases one tab or all tabs via `releaseTab()` / `releaseAllTabs()`. Each tab aborts pending runs, asks the worker to close, waits up to `750` ms for a `closed` ack, terminates the worker, decrements browser refcount, and disposes the browser handle when refcount reaches zero.
+21. `close` releases one managed tab handle or all handles via `releaseTab()` / `releaseAllTabs()`. Each tab aborts pending runs, asks the worker to clean up, waits up to `750` ms for a `closed` ack, terminates the worker, decrements browser refcount, and disposes the browser handle when refcount reaches zero. Headless workers close their tool-owned page; attach workers disconnect without closing spawned, connected, or relay pages.
 
 ## Modes / Variants
 - **Action dispatch**
@@ -258,7 +258,7 @@ The tool returns one result per call; no streaming partial output is emitted fro
 - Relay mode drives an existing user browser and receives no stealth patches. Anything that can reach the relay endpoint can drive logged-in tabs; the built-in server binds loopback, and an optional shared token gates the extension connection.
 - `applyStealthPatches()` also strips Puppeteer's `//# sourceURL=__puppeteer_evaluation_script__` suffix from CDP `Runtime.evaluate` / `Runtime.callFunctionOn` payloads.
 - `tab.extract()` reads `page.content()`, runs Readability first, then falls back to the first non-empty of `[data-pagefind-body]`/`main article`/`article`/`main`/`[role='main']`/`body`, and returns `null` if neither extraction path yields content.
-- `close(all: true, kill: false)` disconnects from spawned, connected, and relay browsers when the last tab closes but leaves spawned app processes and the user's Chrome running.
+- `close(all: true, kill: false)` disconnects from spawned, connected, and relay browsers when the last managed tab is released but leaves their pages, spawned app processes, and the user's Chrome running. `kill: true` additionally terminates spawned-app processes; it never closes or kills connected or relay browsers.
 - Headless orphan cleanup is best-effort: if a worker dies before closing its page, the supervisor searches browser targets by `targetId` and closes that page.
 - Console methods inside `run` do not appear in tool output; they are forwarded as debug/warn/error logs through the worker transport.
 - Raw page request interception is run-scoped. At run end the worker removes user `request` handlers, disables interception, and releases held requests; cleanup failure marks the tab for recovery.
