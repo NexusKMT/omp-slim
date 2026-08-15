@@ -112,6 +112,13 @@ describe("marked compatibility", () => {
 				["hr", "---\n"],
 			],
 		],
+		[
+			"lead\n   \n     deeper code\n",
+			[
+				["paragraph", "lead\n   \n"],
+				["code", "     deeper code\n"],
+			],
+		],
 	];
 	for (const [source, shape] of lazyBoundaryShapes) {
 		test(`keeps the lazy-continuation boundary shape for ${JSON.stringify(source)}`, () => {

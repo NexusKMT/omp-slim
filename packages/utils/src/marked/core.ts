@@ -1080,8 +1080,8 @@ function blockTokens(src: string, lexer: Lexer, output: Token[]): Token[] {
 		let prevBlankish = false;
 		while (i < lines.length) {
 			const next = lines[i]!;
-			const lazyIndent = !prevBlankish && next.trim() !== "" && /^ {4}/.test(next);
-			if (!lazyIndent && isBlockStart(lines, i)) break;
+			const indented = next.trim() !== "" && /^ {4}/.test(next);
+			if (indented ? prevBlankish : isBlockStart(lines, i)) break;
 			prevBlankish = next.trim() === "";
 			raw += next;
 			i++;
