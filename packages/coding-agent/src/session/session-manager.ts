@@ -59,7 +59,12 @@ import {
 	type UsageStatistics,
 } from "./session-entries";
 import { findMostRecentSession, listAllSessions, listSessions, type SessionInfo } from "./session-listing";
-import { loadEntriesFromFile, readTitleSlotFromFile, resolveBlobRefsInEntries } from "./session-loader";
+import {
+	loadEntriesFromFile,
+	readTitleSlotFromFile,
+	resolveBlobRefsInEntries,
+	visitEntriesFromFile,
+} from "./session-loader";
 import { generateId, migrateToCurrentVersion } from "./session-migrations";
 import {
 	computeDefaultSessionDir,
@@ -2638,15 +2643,7 @@ export class SessionManager {
 			advisor?: string;
 		} | null;
 	} | null> {
-		let loaded: FileEntry[];
-		try {
-			loaded = await loadEntriesFromFile(filePath, storage);
-		} catch {
-			return null;
-		}
-		// A missing/empty file has no usable session — nothing to revive from.
-		if (loaded.length === 0) return null;
-		const header = loaded.find(entry => entry.type === "session") as SessionHeader | undefined;
+		let header: SessionHeader | undefined;
 		let init: {
 			systemPrompt: string;
 			task: string;
@@ -2661,8 +2658,11 @@ export class SessionManager {
 			readSummarize?: boolean;
 			advisor?: string;
 		} | null = null;
-		for (let index = loaded.length - 1; index >= 0; index--) {
-			const entry = loaded[index];
+		const visit = (entry: FileEntry): void => {
+			if (entry.type === "session") {
+				header ??= entry;
+				return;
+			}
 			if (entry.type === "session_init") {
 				init = {
 					systemPrompt: entry.systemPrompt,
@@ -2678,10 +2678,17 @@ export class SessionManager {
 					spawns: entry.spawns,
 					advisor: entry.advisor,
 				};
-				break;
 			}
+		};
+
+		try {
+			await visitEntriesFromFile(filePath, visit, storage);
+		} catch {
+			return null;
 		}
-		return { cwd: header?.cwd ?? getProjectDir(), init };
+		// A missing, empty, or invalid file has no usable session.
+		if (!header) return null;
+		return { cwd: header.cwd ?? getProjectDir(), init };
 	}
 
 	/** Continue the most recent session, or create a new one if none exists. */

@@ -93,6 +93,27 @@ describe("loadEntriesFromFileStream (Bun.JSONL parity)", () => {
 		expect(titleSlot?.title).toBe("Visitor");
 		expect(entryIds(visited)).toEqual(["s1", "m1", "m2"]);
 	});
+
+	it("visits a large journal before reading its tail", async () => {
+		const largeText = "x".repeat(1024 * 1024);
+		const lines = [JSON.stringify(HEADER)];
+		for (let index = 1; index <= 9; index++) {
+			lines.push(JSON.stringify(msg(`m${index}`, index === 1 ? "s1" : `m${index - 1}`, largeText)));
+		}
+		const file = await writeTemp(`${lines.join("\n")}\n`);
+		expect(fs.statSync(file).size).toBeGreaterThan(8 * 1024 * 1024);
+
+		let visited = 0;
+		await sessionLoader.visitEntriesFromFile(file, () => {
+			visited++;
+			if (visited === 1) fs.truncateSync(file, 0);
+		});
+
+		// A collecting load reads the tail before the first callback and would
+		// still visit every in-memory entry after the file is truncated.
+		expect(visited).toBe(1);
+	});
+
 	it("does not revisit entries before a malformed line spanning stream chunks", async () => {
 		const content = [
 			JSON.stringify(HEADER),
@@ -138,6 +159,17 @@ describe("loadEntriesFromFileStream (Bun.JSONL parity)", () => {
 
 		await expect(
 			sessionLoader.visitEntriesFromFileStream(file, () => {
+				throw failure;
+			}),
+		).rejects.toBe(failure);
+	});
+
+	it("propagates ENOENT errors through the routed visitor", async () => {
+		const file = await writeTemp(`${JSON.stringify(HEADER)}\n`);
+		const failure = Object.assign(new Error("visitor failed"), { code: "ENOENT" });
+
+		await expect(
+			sessionLoader.visitEntriesFromFile(file, () => {
 				throw failure;
 			}),
 		).rejects.toBe(failure);

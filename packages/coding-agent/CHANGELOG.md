@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Reduced peak memory for persisted subagent revival probes by streaming large file-backed session journals instead of loading the complete journal ([#8117](https://github.com/can1357/oh-my-pi/issues/8117)).
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed
