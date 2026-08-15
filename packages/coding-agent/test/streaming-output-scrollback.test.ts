@@ -505,10 +505,10 @@ describe("streaming tool output never sprays duplicate scrollback banners", () =
 		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
 		tui.setScrollbackRebuild(false);
 		const transcript = new TranscriptContainer();
+		transcript.setToolActivityVisible(false);
 		transcript.addChild(new StaticBlock(["user: run the plan"]));
 
 		const todo = new ToolExecutionComponent("todo", { op: "init" }, {}, undefined, tui, process.cwd());
-		todo.setToolActivityVisible(false);
 		todo.updateResult(
 			{
 				content: [{ type: "text", text: "" }],
