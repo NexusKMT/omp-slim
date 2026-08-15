@@ -15,8 +15,8 @@ import {
 	isClaudeModelId,
 	isDeepseekModelIdOrName,
 	isGlm52ReasoningEffortModelId,
-	isGrokMultiAgentModelId,
 	isGrokReasoningEffortCapable,
+	isGrokXHighEffortCapable,
 	isKimiK3ModelId,
 	isKimiK26ModelId,
 	isKimiModelId,
@@ -178,11 +178,11 @@ const MIMO_REASONING_EFFORT_MAP: NonNullable<OpenAICompat["reasoningEffortMap"]>
 	xhigh: "high",
 };
 
-/** Shared `minimal → low` clamp. Multi-agent Grok keeps `xhigh` unmapped. */
+/** Shared `minimal → low` clamp. xhigh-capable Grok keeps `xhigh` unmapped. */
 const XAI_RESPONSES_MINIMAL_EFFORT_MAP: NonNullable<OpenAICompat["reasoningEffortMap"]> = {
 	minimal: "low",
 };
-/** Non-multi-agent Grok: leftover `xhigh`/`max` clamp to `high` (4.5 has no 16-agent mode). */
+/** Grok 4.5 / 4.3 / 3-mini: leftover `xhigh`/`max` clamp to `high`. */
 const XAI_RESPONSES_CLAMPED_EFFORT_MAP: NonNullable<OpenAICompat["reasoningEffortMap"]> = {
 	minimal: "low",
 	xhigh: "high",
@@ -191,7 +191,7 @@ const XAI_RESPONSES_CLAMPED_EFFORT_MAP: NonNullable<OpenAICompat["reasoningEffor
 
 /** Wire effort remap for first-party xAI Responses. */
 export function xaiResponsesReasoningEffortMap(modelId: string): NonNullable<OpenAICompat["reasoningEffortMap"]> {
-	return isGrokMultiAgentModelId(modelId) ? XAI_RESPONSES_MINIMAL_EFFORT_MAP : XAI_RESPONSES_CLAMPED_EFFORT_MAP;
+	return isGrokXHighEffortCapable(modelId) ? XAI_RESPONSES_MINIMAL_EFFORT_MAP : XAI_RESPONSES_CLAMPED_EFFORT_MAP;
 }
 
 function mergeModelReasoningEffortMap(
@@ -793,8 +793,8 @@ export function buildOpenAIResponsesCompat(spec: OpenAIResponsesSpecLike): Resol
 	if (isXaiHost) {
 		const canonical = xaiResponsesReasoningEffortMap(id);
 		compat.reasoningEffortMap = { ...compat.reasoningEffortMap, ...canonical };
-		// Multi-agent Grok advertises unmapped `xhigh`; drop a stale clamp from
-		// previous snapshots so 16-agent mode is not rewritten to `high`.
+		// xhigh-capable Grok advertises unmapped `xhigh`; drop a stale clamp
+		// from previous snapshots so 4.6 / 16-agent mode is not rewritten to `high`.
 		for (const key of ["xhigh", "max"] as const) {
 			if (!(key in canonical)) {
 				delete compat.reasoningEffortMap[key];

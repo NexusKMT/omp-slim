@@ -19,6 +19,14 @@ const XAI_MODELS_DEV_FIXTURE = {
 				limit: { context: 500_000, output: 500_000 },
 				cost: { input: 2, output: 6, cache_read: 0.3 },
 			},
+			"grok-4.6": {
+				name: "Grok 4.6",
+				tool_call: true,
+				reasoning: true,
+				modalities: { input: ["text", "image"] },
+				limit: { context: 500_000, output: 500_000 },
+				cost: { input: 2, output: 6, cache_read: 0.5 },
+			},
 			"grok-code-fast-1": {
 				name: "Grok Code Fast 1",
 				tool_call: true,
@@ -109,6 +117,18 @@ describe("paid xAI Responses thinking policy", () => {
 			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
 			effortMap: { minimal: "low" },
 		});
+		expect(byId["grok-4.6"]?.thinking).toEqual({
+			mode: "effort",
+			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
+			effortMap: { minimal: "low" },
+		});
+		expect(byId["grok-4.6"]?.compat).toMatchObject({
+			supportsReasoningEffort: true,
+			reasoningEffortMap: { minimal: "low" },
+		});
+		expect(byId["grok-4.6"]?.compat).not.toMatchObject({
+			reasoningEffortMap: { xhigh: "high" },
+		});
 		expect(byId["grok-4.20-multi-agent-beta-latest"]?.thinking).toEqual({
 			mode: "effort",
 			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
@@ -140,6 +160,10 @@ describe("paid xAI Responses thinking policy", () => {
 		expect(bundled["grok-4.5"]?.thinking?.efforts).toEqual([Effort.Minimal, Effort.Low, Effort.Medium, Effort.High]);
 		expect(bundled["grok-4.5"]?.thinking?.efforts).not.toContain(Effort.XHigh);
 		expect(bundled["grok-4.5"]?.compat?.supportsReasoningEffort).toBe(true);
+		expect(bundled["grok-4.6"]?.thinking?.efforts).toContain(Effort.XHigh);
+		expect(bundled["grok-4.6"]?.compat).not.toMatchObject({
+			reasoningEffortMap: { xhigh: "high" },
+		});
 		expect(bundled["grok-4.20-multi-agent-beta-latest"]?.thinking?.efforts).toContain(Effort.XHigh);
 		expect(bundled["grok-4.20-multi-agent-beta-latest"]?.compat).not.toMatchObject({
 			reasoningEffortMap: { xhigh: "high" },
