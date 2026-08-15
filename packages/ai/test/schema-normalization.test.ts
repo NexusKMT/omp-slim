@@ -630,6 +630,28 @@ describe("sanitizeSchemaForOpenAIResponses", () => {
 		});
 	});
 
+	it("does not flatten nested exclusive-required anyOf (xAI only rejects the tool root)", () => {
+		const schema = {
+			type: "object",
+			properties: {
+				outputSchema: {
+					type: "object",
+					properties: {
+						paths: { type: "array", items: { type: "string" } },
+						scopes: { type: "array", items: { type: "string" } },
+					},
+					anyOf: [{ required: ["paths"] }, { required: ["scopes"] }],
+				},
+			},
+			required: ["outputSchema"],
+		};
+		const sanitized = sanitizeSchemaForOpenAIResponses(schema);
+		expect(sanitized.anyOf).toBeUndefined();
+		const outputSchema = (sanitized.properties as Record<string, unknown>).outputSchema as Record<string, unknown>;
+		expect(outputSchema.anyOf).toEqual([{ required: ["paths"] }, { required: ["scopes"] }]);
+	});
+
+
 });
 
 // ---------------------------------------------------------------------------

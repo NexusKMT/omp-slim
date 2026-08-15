@@ -105,6 +105,29 @@ describe("toolWireSchema — raw JSON Schema normalization", () => {
 		expect(wire.required).toEqual(["project"]);
 	});
 
+	it("does not flatten nested exclusive-required anyOf (only the tool root 400s xAI)", () => {
+		const wire = toolWireSchema(
+			jsonTool({
+				type: "object",
+				properties: {
+					outputSchema: {
+						type: "object",
+						properties: {
+							paths: { type: "array", items: { type: "string" } },
+							scopes: { type: "array", items: { type: "string" } },
+						},
+						anyOf: [{ required: ["paths"] }, { required: ["scopes"] }],
+					},
+				},
+				required: ["outputSchema"],
+			}),
+		);
+		expect(wire.anyOf).toBeUndefined();
+		const outputSchema = (wire.properties as Record<string, unknown>).outputSchema as Record<string, unknown>;
+		expect(outputSchema.anyOf).toEqual([{ required: ["paths"] }, { required: ["scopes"] }]);
+	});
+
+
 
 	it("preserves raw JSON Schema required defaults and safe-integer bounds", () => {
 		const wire = toolWireSchema(

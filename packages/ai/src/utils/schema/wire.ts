@@ -114,6 +114,9 @@ const kStrippedSchema = Symbol("pi.schema.descriptions.stripped");
 
 function postProcessJsonSchema(schema: Record<string, unknown>): Record<string, unknown> {
 	walk(schema);
+	// xAI 400s only when the *tool root* is object + typeless exclusive-required
+	// anyOf. Nested unions (task.outputSchema, etc.) must stay intact.
+	flattenExclusiveRequiredUnion(schema);
 	normalizeArkPropertyComments(schema);
 	normalizeEmptySchemas(schema);
 	return schema;
@@ -440,7 +443,6 @@ function walk(node: unknown): void {
 	if (!node || typeof node !== "object") return;
 	const obj = node as Record<string, unknown>;
 	rewriteNullableScalarAnyOf(obj);
-	flattenExclusiveRequiredUnion(obj);
 	inferBareEnumScalarType(obj);
 	collapseConstUnionAnyOf(obj);
 	for (const k in obj) walk(obj[k]);

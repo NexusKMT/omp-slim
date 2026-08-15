@@ -1472,7 +1472,11 @@ const OPENAI_RESPONSES_SCHEMA_VALUE_KEYS = new Set([
  * would not survive).
  */
 export function sanitizeSchemaForOpenAIResponses(schema: JsonObject): JsonObject {
-	return normalizeOpenAIResponsesSchemaNode(schema, new WeakMap()) as JsonObject;
+	const sanitized = normalizeOpenAIResponsesSchemaNode(schema, new WeakMap()) as JsonObject;
+	if (isJsonObject(sanitized)) {
+		flattenOpenAIResponsesObjectConstraintUnion(sanitized);
+	}
+	return sanitized;
 }
 
 /**
@@ -1572,10 +1576,6 @@ function normalizeOpenAIResponsesSchemaNode(value: unknown, cache: WeakMap<JsonO
 	// properties requirement.
 	if (declaresObjectType(value.type) && !Object.hasOwn(value, "properties")) {
 		output.properties = {};
-		changed = true;
-	}
-
-	if (flattenOpenAIResponsesObjectConstraintUnion(output)) {
 		changed = true;
 	}
 

@@ -35,7 +35,7 @@
 - Stopped runaway exact response cycles across model providers and kept persistent loops fail-closed after bounded guarded retries ([#8669](https://github.com/can1357/oh-my-pi/pull/8669) by [@pstarkgit](https://github.com/pstarkgit)).
 ### Fixed
 
-- Fixed OpenAI Responses / Completions and xAI tool conversion 400ing the whole turn on MCP schemas whose root is an object plus a typeless exclusive-required `anyOf` (e.g. codebase-memory `check_index_coverage`). Those fragments now flatten in `toolWireSchema` so every other tool stays callable.
+- Fixed OpenAI Responses / Completions and xAI tool conversion 400ing the whole turn on MCP schemas whose root is an object plus a typeless exclusive-required `anyOf` (e.g. codebase-memory `check_index_coverage`). Flatten only the **tool root** — nested unions (e.g. `task.outputSchema`) stay intact so Grok still sees valid `task`/`edit` schemas.
 
 
 ## [17.3.4] - 2026-08-14
