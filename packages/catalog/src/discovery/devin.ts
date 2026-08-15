@@ -1,3 +1,4 @@
+import { logger } from "@oh-my-pi/pi-utils";
 import { Effort, THINKING_EFFORTS } from "../effort";
 import type { DevinCompat, FetchImpl, ModelCost, ModelSpec } from "../types";
 import { discoveryFetch } from "../utils";
@@ -317,6 +318,14 @@ export async function fetchDevinModels(
 		if (!decoded) {
 			return null;
 		}
+		if (decoded.clientModelConfigs.length === 0) {
+			// The backend gates the native catalog on the pinned CLI identity; an
+			// empty-but-200 response is the failure signature of a stale version
+			// pin (there is no explicit error), so leave a trail for diagnosis.
+			logger.warn("Devin returned an empty native model catalog; the pinned CLI identity may be stale", {
+				metadata: devinDiscoveryMetadata(undefined),
+			});
+		}
 
 		return normalizeDevinModels(decoded.clientModelConfigs, options.baseUrl);
 	} catch {
@@ -326,6 +335,18 @@ export async function fetchDevinModels(
 	}
 }
 
+/**
+ * Wire uids whose configs advertise `supports_images` but whose backend
+ * silently drops the `ChatMessagePrompt.images` field. Verified live
+ * (2026-08-14, native CLI identity): SWE-1.6 and SWE-1.6 Fast answer as if no
+ * image was attached, while SWE-1.7, SWE-1.7 Lightning, and every proxied
+ * frontier model (Claude/Gemini/GPT/Kimi) read the same field correctly.
+ * Declaring text-only lets clients use their image fallback path instead of
+ * silently losing attachments ([#6072](https://github.com/can1357/oh-my-pi/issues/6072)).
+ * Remove entries if Devin ever wires SWE-1.6 vision up.
+ */
+const DEVIN_IMAGE_BLIND_UIDS = new Set(["swe-1-6", "swe-1-6-fast"]);
+
 /** One config as a raw (pre-collapse) spec keyed on its wire uid. */
 function devinModelSpec(
 	config: ClientModelConfig,
@@ -334,7 +355,8 @@ function devinModelSpec(
 	isRouter: boolean,
 ): ModelSpec<"devin-agent"> {
 	const features = config.modelInfo?.modelFeatures;
-	const supportsImages = features !== undefined ? features.supportsImages : config.supportsImages;
+	const supportsImages =
+		(features !== undefined ? features.supportsImages : config.supportsImages) && !DEVIN_IMAGE_BLIND_UIDS.has(uid);
 	const input: ("text" | "image")[] = supportsImages ? ["text", "image"] : ["text"];
 	const compat: DevinCompat = {};
 	if (isRouter) compat.modelRouter = true;

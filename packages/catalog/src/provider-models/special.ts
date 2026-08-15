@@ -193,7 +193,7 @@ export interface DevinModelManagerConfig {
  * bundle would misstate every other account's entitlements and leave zombie
  * rows behind (see CREDENTIAL_SCOPED_PROVIDERS in generate-models.ts). Both
  * SWE-1.6 lanes are verified live against `GetCliModelConfigs`; the
- * descriptor's `defaultModel` (`swe-1-6-fast`) must resolve synchronously at
+ * descriptor's `defaultModel` (`swe-1-6`) must resolve synchronously at
  * boot, before credential-scoped runtime discovery replaces the seed. Field
  * shape mirrors `devinModelSpec` so seeded and discovered rows are
  * indistinguishable downstream.
@@ -206,7 +206,9 @@ export const DEVIN_STATIC_MODELS: readonly ModelSpec<"devin-agent">[] = [
 		provider: "devin",
 		baseUrl: DEVIN_DEFAULT_BASE_URL,
 		reasoning: true,
-		input: ["text", "image"],
+		// SWE-1.6 lanes ignore inline images despite upstream `supports_images`
+		// (see DEVIN_IMAGE_BLIND_UIDS in ../discovery/devin.ts).
+		input: ["text"],
 		supportsTools: true,
 		cost: { input: 0.3, output: 1.5, cacheRead: 0.03, cacheWrite: 0 },
 		contextWindow: 200_000,
@@ -220,7 +222,7 @@ export const DEVIN_STATIC_MODELS: readonly ModelSpec<"devin-agent">[] = [
 		provider: "devin",
 		baseUrl: DEVIN_DEFAULT_BASE_URL,
 		reasoning: true,
-		input: ["text", "image"],
+		input: ["text"],
 		supportsTools: true,
 		// Included in the Coding Plan: upstream reports no cost dimensions.
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

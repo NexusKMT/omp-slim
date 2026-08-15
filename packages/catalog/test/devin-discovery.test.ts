@@ -253,6 +253,18 @@ const FIXTURE_CONFIGS: readonly ClientModelConfig[] = [
 		isBeta: true,
 		isRecommended: true,
 	}),
+	// Live-verified quirk: SWE-1.6 lanes advertise `supports_images` while the
+	// backend drops `ChatMessagePrompt.images` (#6072).
+	config({
+		uid: "swe-1-6",
+		label: "SWE-1.6",
+		features: { supportsThinking: true, supportsToolCalls: true, supportsImages: true },
+	}),
+	config({
+		uid: "swe-1-6-fast",
+		label: "SWE-1.6 Fast",
+		features: { supportsToolCalls: true, supportsImages: true },
+	}),
 ];
 
 let models: ModelSpec<"devin-agent">[];
@@ -354,6 +366,11 @@ describe("devin server metadata normalization", () => {
 		expect(model("legacy-thinking").reasoning).toBe(true);
 		expect(model("legacy-thinking").input).toEqual(["text", "image"]);
 		expect(model("legacy-plain").reasoning).toBe(false);
+	});
+
+	it("strips the image modality from the SWE-1.6 lanes despite the server flag", () => {
+		expect(model("swe-1-6").input).toEqual(["text"]);
+		expect(model("swe-1-6-fast").input).toEqual(["text"]);
 	});
 
 	it("keeps the server's blurb and badges, and leaves them unset otherwise", () => {
@@ -462,7 +479,7 @@ describe("devin server-declared family collapsing", () => {
 describe("devin catalog seed", () => {
 	it("seeds both live SWE-1.6 lanes so the descriptor default resolves offline", () => {
 		const descriptor = CATALOG_PROVIDERS.find(entry => entry.id === "devin");
-		expect(descriptor?.defaultModel).toBe("swe-1-6-fast");
+		expect(descriptor?.defaultModel).toBe("swe-1-6");
 		expect(DEVIN_STATIC_MODELS.map(model => model.id)).toEqual(["swe-1-6-fast", "swe-1-6"]);
 		expect(DEVIN_STATIC_MODELS.some(model => model.id === descriptor?.defaultModel)).toBe(true);
 
@@ -471,6 +488,8 @@ describe("devin catalog seed", () => {
 		expect(fast.contextWindow).toBe(200_000);
 		expect(fast.maxTokens).toBe(128_000);
 		expect(fast.compat.supportsParallelToolCalls).toBe(true);
+		// Image-blind lanes ship text-only (see DEVIN_IMAGE_BLIND_UIDS).
+		expect(fast.input).toEqual(["text"]);
 		// One wire uid per lane: Cascade encodes effort in the uid, so a seeded
 		// lane reasons without exposing a selectable ladder.
 		expect(fast.thinking).toBeUndefined();
