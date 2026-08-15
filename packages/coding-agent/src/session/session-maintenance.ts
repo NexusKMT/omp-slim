@@ -315,8 +315,9 @@ export class SessionMaintenance {
 	}
 
 	/**
-	 * Emit a compaction lifecycle event. Mid-turn callers pass `detach` so a
-	 * hung extension/UI handler cannot pin the live loop after history rewrite.
+	 * Emit a compaction lifecycle event. Mid-turn callers detach only the
+	 * post-commit `auto_compaction_end` / `session_compact` fan-out so a hung
+	 * handler cannot pin the next provider call after history rewrite.
 	 */
 	#emitLifecycleEvent(event: AgentSessionEvent, detach: boolean): Promise<void> {
 		const emit = this.#host.emitSessionEvent(event);
@@ -2273,7 +2274,7 @@ export class SessionMaintenance {
 			// a message typed as the compaction loader appears must land in the compaction
 			// queue, not the core steering queue (which handoff's agent.reset() would wipe).
 			const startEvent = { type: "auto_compaction_start" as const, reason, action };
-			await this.#emitLifecycleEvent(startEvent, options.detachPostCommit === true);
+			await this.#emitLifecycleEvent(startEvent, false);
 			if (action === "handoff") {
 				let handoffSwitchCancelled = false;
 				const handoffFocus = AUTO_HANDOFF_THRESHOLD_FOCUS;
@@ -3048,7 +3049,7 @@ export class SessionMaintenance {
 		this.#autoCompactionAbortController = controller;
 		const signal = controller.signal;
 		try {
-			await this.#emitLifecycleEvent({ type: "auto_compaction_start", reason, action }, detachPostCommit);
+			await this.#emitLifecycleEvent({ type: "auto_compaction_start", reason, action }, false);
 			const result = await this.#host.shake("elide", { config: DEFAULT_SHAKE_CONFIG, signal });
 			if (signal.aborted) {
 				await this.#emitLifecycleEvent(

@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed mid-run auto-compaction waiting on `auto_compaction_end` extension handlers before the next provider call, which could hang the live loop after a snapcompact or context-full pass.
+- Fixed mid-run auto-compaction waiting on `auto_compaction_end` / `session_compact` extension handlers before the next provider call, which could hang the live loop after a snapcompact or context-full pass. Mid-run those handlers now run concurrently with the next turn; `auto_compaction_start` is still awaited.
 
 ## [17.3.4] - 2026-08-14
 
