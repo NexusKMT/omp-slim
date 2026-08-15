@@ -119,10 +119,20 @@ function buildRequestsLimits(payload: UmansUsagePayload, provider: string): Usag
 		...(resetsAt !== undefined ? { resetsAt, resetLabel: "tick" } : {}),
 	};
 
-	// Payloads without weighted counters predate the soft/hard split; keep the
-	// legacy single row keyed off raw counts.
-	if (weightedUsed === undefined) {
-		const amount = buildAmount({ used: rawUsed, limit, remaining: rawRemaining, unit: "requests" });
+	// Single row: either payloads without weighted counters (legacy) or payloads
+	// that report weighted usage but no burst ceiling (`hard_cap`). Without a
+	// burst ceiling there is no hard row to defer exhaustion to, so the
+	// authoritative counter — weighted when available, else raw — drives the
+	// single row and CAN exhaust at the limit. Raw burst traffic above the
+	// limit still never drives exhaustion on its own: weighted headroom stays
+	// decisive (https://github.com/can1357/oh-my-pi/issues/7858).
+	if (weightedUsed === undefined || hardCap === undefined) {
+		const amount = buildAmount({
+			used: weightedUsed ?? rawUsed,
+			limit,
+			remaining: weightedUsed !== undefined ? weightedRemaining : rawRemaining,
+			unit: "requests",
+		});
 		return [
 			{
 				id: "umans:requests",

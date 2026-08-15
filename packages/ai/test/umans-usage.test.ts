@@ -174,6 +174,90 @@ describe("umans usage provider", () => {
 		expect(report?.limits.some(l => l.status === "exhausted")).toBe(false);
 	});
 
+	it("collapses to a single weighted requests row that can exhaust when no burst ceiling is reported", async () => {
+		// Weighted counters present but `hard_cap` absent: without a burst
+		// ceiling there is no hard row to defer exhaustion to, so the weighted
+		// effective-request budget is the operative ceiling — the single row
+		// must be able to report `exhausted` or a spent account could never
+		// trigger the usage-aware fallback.
+		const report = await umansUsageProvider.fetchUsage(
+			{
+				provider: "umans",
+				credential: { type: "api_key", apiKey: "sk-test" },
+			},
+			{
+				fetch: fakeFetch(
+					umansPayload({
+						limits: {
+							requests: { limit: 200, window_seconds: 18000 },
+							concurrency: { limit: 4, hard_cap: 8, burst_pct: 1.0 },
+						},
+						usage: {
+							requests_in_window: 400,
+							remaining_requests: 0,
+							weighted_in_window: 200,
+							weighted_remaining_requests: 0,
+							concurrent_sessions: 0,
+							tokens_in: 0,
+							tokens_out: 0,
+							priority: { low: false },
+						},
+					}),
+				),
+			},
+		);
+		const requests = report?.limits.find(l => l.id === "umans:requests");
+		expect(requests).toBeDefined();
+		// No soft/hard split without a reported burst ceiling.
+		expect(report?.limits.some(l => l.id.startsWith("umans:requests:"))).toBe(false);
+		// Weighted effective requests are authoritative: raw 400 overshoots the
+		// 200 limit, but it is the weighted 200/200 that reports exhausted.
+		expect(requests?.amount.used).toBe(200);
+		expect(requests?.amount.limit).toBe(200);
+		expect(requests?.amount.usedFraction).toBe(1);
+		expect(requests?.status).toBe("exhausted");
+	});
+
+	it("keeps weighted headroom decisive when no burst ceiling is reported", async () => {
+		// Same #7858 shape (raw usage over the soft limit, weighted headroom
+		// remaining) but with no `hard_cap` in the payload: the weighted counter
+		// must still decide, so raw burst traffic cannot fabricate an exhausted
+		// state even when there is no hard row to buffer it.
+		const report = await umansUsageProvider.fetchUsage(
+			{
+				provider: "umans",
+				credential: { type: "api_key", apiKey: "sk-test" },
+			},
+			{
+				fetch: fakeFetch(
+					umansPayload({
+						limits: {
+							requests: { limit: 200, window_seconds: 18000 },
+							concurrency: { limit: 4, hard_cap: 8, burst_pct: 1.0 },
+						},
+						usage: {
+							requests_in_window: 300,
+							remaining_requests: 0,
+							weighted_in_window: 100,
+							weighted_remaining_requests: 100,
+							concurrent_sessions: 0,
+							tokens_in: 0,
+							tokens_out: 0,
+							priority: { low: false },
+						},
+					}),
+				),
+			},
+		);
+		const requests = report?.limits.find(l => l.id === "umans:requests");
+		expect(requests).toBeDefined();
+		expect(requests?.amount.used).toBe(100);
+		expect(requests?.amount.remaining).toBe(100);
+		expect(requests?.amount.usedFraction).toBeCloseTo(0.5, 5);
+		expect(requests?.status).toBe("ok");
+		expect(report?.limits.some(l => l.status === "exhausted")).toBe(false);
+	});
+
 	it("reserves exhausted for the burst ceiling and warns at the soft cap", async () => {
 		const report = await umansUsageProvider.fetchUsage(
 			{
