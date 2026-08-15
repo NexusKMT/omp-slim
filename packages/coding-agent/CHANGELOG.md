@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Kept streaming edit previews responsive for large diffs by selecting and highlighting only the visible tail instead of scanning the discarded prefix on every update.
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed
