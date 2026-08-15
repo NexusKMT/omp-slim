@@ -328,7 +328,7 @@ import {
 	SessionMaintenance,
 	type SessionMaintenanceHost,
 } from "./session-maintenance";
-import { cleanupEmptyMoveSession, type SessionManager } from "./session-manager";
+import { cleanupEmptyMoveSession, copySessionArtifacts, type SessionManager } from "./session-manager";
 import { SessionMemory, type SessionMemoryHost } from "./session-memory";
 import { buildSessionMetadata } from "./session-metadata";
 import { SessionProviderBoundary, type SessionProviderBoundaryHost } from "./session-provider-boundary";
@@ -6701,24 +6701,7 @@ export class AgentSession {
 			// under a fresh id, so the work already produced is still this session's.
 			this.#recovery.reanchorServedAttribution(previousSessionId);
 
-			// Copy artifacts directory if it exists
-			const oldArtifactDir = forkResult.oldSessionFile.slice(0, -6);
-			const newArtifactDir = forkResult.newSessionFile.slice(0, -6);
-
-			try {
-				const oldDirStat = await fs.promises.stat(oldArtifactDir);
-				if (oldDirStat.isDirectory()) {
-					await fs.promises.cp(oldArtifactDir, newArtifactDir, { recursive: true });
-				}
-			} catch (err) {
-				if (!isEnoent(err)) {
-					logger.warn("Failed to copy artifacts during fork", {
-						oldArtifactDir,
-						newArtifactDir,
-						error: err instanceof Error ? err.message : String(err),
-					});
-				}
-			}
+			await copySessionArtifacts(forkResult.oldSessionFile, forkResult.newSessionFile);
 
 			// Update agent session ID
 			this.#freshProviderSessionId = undefined;

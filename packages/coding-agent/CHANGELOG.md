@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `omp --fork` omitting the source session's artifact directory, so CLI-created forks now preserve `artifact://` references like interactive `/fork`.
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed

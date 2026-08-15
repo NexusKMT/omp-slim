@@ -100,6 +100,28 @@ function artifactsDirectoryFor(sessionFile: string | undefined): string | null {
 	return sessionFile ? sessionFile.slice(0, -JSONL_SUFFIX_LENGTH) : null;
 }
 
+/** Copy a session's artifact directory to another session, matching interactive `/fork`. */
+export async function copySessionArtifacts(sourceSessionFile: string, destinationSessionFile: string): Promise<void> {
+	const sourceArtifactsDir = artifactsDirectoryFor(sourceSessionFile)!;
+	const destinationArtifactsDir = artifactsDirectoryFor(destinationSessionFile)!;
+	if (path.resolve(sourceArtifactsDir) === path.resolve(destinationArtifactsDir)) return;
+
+	try {
+		const sourceStat = await fs.promises.stat(sourceArtifactsDir);
+		if (sourceStat.isDirectory()) {
+			await fs.promises.cp(sourceArtifactsDir, destinationArtifactsDir, { recursive: true });
+		}
+	} catch (error) {
+		if (!isEnoent(error)) {
+			logger.warn("Failed to copy artifacts during fork", {
+				sourceArtifactsDir,
+				destinationArtifactsDir,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+}
+
 /**
  * Resolve a breadcrumb's recorded session file to its interactive root. Subagent
  * (and other artifact) sessions live inside a parent session's artifacts dir —
@@ -2533,16 +2555,16 @@ export class SessionManager {
 	 * session file while creating a fresh session file in this sessionDir.
 	 *
 	 * `options.sessionFile` pins the new session's file path (default: an
-	 * auto-named `<timestamp>_<id>.jsonl` in `sessionDir`). Callers that register
-	 * the fork as a named agent (e.g. `/tan`) pass `<agentId>.jsonl` so the
-	 * persisted-subagent scan keys the agent by the same id the live ref uses.
+	 * auto-named `<timestamp>_<id>.jsonl` in `sessionDir`). Artifacts are copied
+	 * recursively by default; nested agents that deliberately share their parent's
+	 * artifact root may disable this with `copyArtifacts: false`.
 	 */
 	static async forkFrom(
 		sourcePath: string,
 		cwd: string,
 		sessionDir?: string,
 		storage: SessionStorage = new FileSessionStorage(),
-		options?: { suppressBreadcrumb?: boolean; sessionFile?: string },
+		options?: { copyArtifacts?: boolean; suppressBreadcrumb?: boolean; sessionFile?: string },
 	): Promise<SessionManager> {
 		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
 		const manager = new SessionManager(cwd, dir, true, storage);
@@ -2575,6 +2597,9 @@ export class SessionManager {
 		manager.sanitizeLoadedOpenAIResponsesReplayMetadata();
 		manager.#forceFileCreation = true;
 		await manager.#rewriteAtomically();
+		if (options?.copyArtifacts !== false) {
+			await copySessionArtifacts(sourcePath, manager.#sessionFile!);
+		}
 		return manager;
 	}
 

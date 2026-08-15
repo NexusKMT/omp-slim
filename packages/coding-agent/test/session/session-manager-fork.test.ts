@@ -87,4 +87,35 @@ describe("SessionManager.forkFrom", () => {
 			setAgentDir(previousAgentDir);
 		}
 	});
+
+	it("copies source artifacts recursively into the fork by default", async () => {
+		using tempDir = TempDir.createSync("@omp-session-fork-artifacts-");
+		const cwd = path.join(tempDir.path(), "project");
+		const sessionDir = path.join(tempDir.path(), "sessions");
+		const sourceFile = path.join(sessionDir, "source.jsonl");
+		const sourceArtifactsDir = sourceFile.slice(0, -".jsonl".length);
+		const timestamp = new Date().toISOString();
+		const sourceHeader: SessionHeader = {
+			type: "session",
+			version: CURRENT_SESSION_VERSION,
+			id: "source-with-artifacts",
+			timestamp,
+			cwd,
+		};
+		await fs.mkdir(path.join(sourceArtifactsDir, "nested"), { recursive: true });
+		await Bun.write(sourceFile, `${JSON.stringify(sourceHeader)}\n`);
+		await Bun.write(path.join(sourceArtifactsDir, "1.read.log"), "tool output");
+		await Bun.write(path.join(sourceArtifactsDir, "nested", "result.txt"), "nested output");
+
+		const forked = await SessionManager.forkFrom(sourceFile, cwd, sessionDir, undefined, {
+			suppressBreadcrumb: true,
+		});
+		const forkFile = forked.getSessionFile();
+		if (!forkFile) throw new Error("expected forked session file");
+		const forkArtifactsDir = forkFile.slice(0, -".jsonl".length);
+
+		expect(await Bun.file(path.join(forkArtifactsDir, "1.read.log")).text()).toBe("tool output");
+		expect(await Bun.file(path.join(forkArtifactsDir, "nested", "result.txt")).text()).toBe("nested output");
+		expect(await Bun.file(path.join(sourceArtifactsDir, "1.read.log")).text()).toBe("tool output");
+	});
 });
