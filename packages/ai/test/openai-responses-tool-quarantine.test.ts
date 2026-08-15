@@ -54,6 +54,28 @@ describe("findStrictToolSchemaViolation (#2652)", () => {
 		// enum without a declared type cannot contradict anything.
 		expect(findStrictToolSchemaViolation({ enum: ["x"] })).toBeNull();
 	});
+
+	test("flags a root anyOf whose branches are not objects (xAI root-union 400)", () => {
+		expect(
+			findStrictToolSchemaViolation({
+				type: "object",
+				properties: { project: { type: "string" } },
+				anyOf: [{ required: ["paths"] }, { required: ["scopes"] }],
+			}),
+		).toBe("#/anyOf");
+	});
+
+	test("accepts a root anyOf of typed object branches", () => {
+		expect(
+			findStrictToolSchemaViolation({
+				anyOf: [
+					{ type: "object", properties: { a: { type: "string" } } },
+					{ type: "object", properties: { b: { type: "number" } } },
+				],
+			}),
+		).toBeNull();
+	});
+
 });
 
 const badTool: Tool = {
@@ -90,6 +112,30 @@ describe("convertTools quarantine (#2652)", () => {
 	test("emits every tool when all schemas are valid", () => {
 		expect(convertTools([goodTool], true, makeModel())).toHaveLength(1);
 	});
+
+	test("keeps an exclusive-required MCP tool after Responses flatten", () => {
+		const coverageTool: Tool = {
+			name: "mcp__codebase_memory_check_index_coverage",
+			description: "coverage",
+			parameters: {
+				type: "object",
+				properties: {
+					project: { type: "string" },
+					paths: { type: "array", items: { type: "string" } },
+					scopes: { type: "array", items: { type: "string" } },
+				},
+				required: ["project"],
+				anyOf: [{ required: ["paths"] }, { required: ["scopes"] }],
+			} as unknown as Tool["parameters"],
+		};
+		const out = convertTools([coverageTool, goodTool], true, makeModel()) as Array<{
+			name: string;
+			parameters: { anyOf?: unknown };
+		}>;
+		expect(out.map(t => t.name)).toEqual(["mcp__codebase_memory_check_index_coverage", "read_file"]);
+		expect(out[0]?.parameters.anyOf).toBeUndefined();
+	});
+
 
 	test("reports the hidden tool name and the offending schema path", () => {
 		const dropped: Array<{ name: string; path: string }> = [];

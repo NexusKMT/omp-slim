@@ -204,6 +204,53 @@ function rewriteNullableScalarAnyOf(schema: Record<string, unknown>): void {
 	schema.type = [scalarType, "null"];
 }
 
+function isTypelessObjectConstraintBranch(branch: unknown): boolean {
+	if (!isSchemaRecord(branch)) return false;
+	if (Object.hasOwn(branch, "type")) return false;
+	for (const key in branch) {
+		if (!Object.hasOwn(branch, key)) continue;
+		if (
+			key === "required" ||
+			key === "properties" ||
+			key === "additionalProperties" ||
+			key === "description" ||
+			key === "title"
+		) {
+			continue;
+		}
+		return false;
+	}
+	return (
+		Object.hasOwn(branch, "required") ||
+		Object.hasOwn(branch, "properties") ||
+		Object.hasOwn(branch, "additionalProperties")
+	);
+}
+
+function flattenExclusiveRequiredUnion(schema: Record<string, unknown>): void {
+	const unionKey = Array.isArray(schema.anyOf) ? "anyOf" : Array.isArray(schema.oneOf) ? "oneOf" : undefined;
+	if (!unionKey) return;
+	const union = schema[unionKey];
+	if (!Array.isArray(union) || union.length === 0) return;
+	const typedObject = schema.type === "object" || (Array.isArray(schema.type) && schema.type.includes("object"));
+	if (!typedObject && !isSchemaRecord(schema.properties)) return;
+	if (!union.every(isTypelessObjectConstraintBranch)) return;
+
+	const properties = isSchemaRecord(schema.properties) ? schema.properties : {};
+	for (const branch of union) {
+		if (!isSchemaRecord(branch) || !isSchemaRecord(branch.properties)) continue;
+		for (const name in branch.properties) {
+			if (!Object.hasOwn(branch.properties, name)) continue;
+			if (!Object.hasOwn(properties, name)) properties[name] = branch.properties[name];
+		}
+	}
+	if (!isSchemaRecord(schema.properties) && Object.keys(properties).length > 0) {
+		schema.properties = properties;
+	}
+	delete schema[unionKey];
+}
+
+
 /** Keys whose values are a single JSON Schema (not an array or map). */
 const SCHEMA_VALUE_KEYS = [
 	"additionalProperties",
@@ -393,6 +440,7 @@ function walk(node: unknown): void {
 	if (!node || typeof node !== "object") return;
 	const obj = node as Record<string, unknown>;
 	rewriteNullableScalarAnyOf(obj);
+	flattenExclusiveRequiredUnion(obj);
 	inferBareEnumScalarType(obj);
 	collapseConstUnionAnyOf(obj);
 	for (const k in obj) walk(obj[k]);

@@ -2,11 +2,12 @@
  * Detects tool-parameter schemas that pass structural JSON-Schema validation
  * (so {@link isValidJsonSchema} accepts them) yet make OpenAI-style providers
  * reject the whole request with HTTP 400 — namely an `enum`/`const` whose
- * value(s) cannot satisfy the node's declared `type`. MCP servers emit these
- * when a nullable/array branch is built incorrectly (e.g. a non-null `enum`
- * copied onto a `type: "null"` branch, or an `enum` placed on an `array`
- * schema instead of its `items`). One such tool 400s the entire turn, so
- * callers quarantine just the offending tool. See issue #2652.
+ * value(s) cannot satisfy the node's declared `type`, or a root `anyOf`/`oneOf`
+ * whose branches are not objects (xAI: "tool parameter root must be an object
+ * type"). MCP servers emit these when a nullable/array branch is built
+ * incorrectly, or when exclusive-required is encoded as a typeless union.
+ * One such tool 400s the entire turn, so callers quarantine just the offending
+ * tool. See issue #2652.
  */
 
 type JsonRecord = Record<string, unknown>;
@@ -90,6 +91,23 @@ export function findStrictToolSchemaViolation(schema: unknown, path = "#"): stri
 			return `${path}/const`;
 		}
 	}
+
+	// xAI rejects the whole request when the *root* schema is typed as object
+	// (or has properties) AND still carries an anyOf/oneOf with a typeless or
+	// non-object branch. Nested unions and pure root unions are not this error.
+	if (path === "#" && (types.includes("object") || (node.properties !== undefined && typeof node.properties === "object"))) {
+		for (const key of ["anyOf", "oneOf"] as const) {
+			const arr = node[key];
+			if (!Array.isArray(arr) || arr.length === 0) continue;
+			const hasNonObjectBranch = arr.some(branch => {
+				if (typeof branch !== "object" || branch === null || Array.isArray(branch)) return true;
+				const branchTypes = declaredTypes(branch as JsonRecord);
+				return !branchTypes.includes("object");
+			});
+			if (hasNonObjectBranch) return `${path}/${key}`;
+		}
+	}
+
 
 	for (const key of CHILD_MAP_KEYS) {
 		const sub = node[key];

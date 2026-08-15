@@ -87,6 +87,25 @@ describe("toolWireSchema — raw JSON Schema normalization", () => {
 		});
 	});
 
+	it("flattens exclusive-required anyOf so xAI completions accept the tool", () => {
+		const wire = toolWireSchema(
+			jsonTool({
+				type: "object",
+				properties: {
+					project: { type: "string" },
+					paths: { type: "array", items: { type: "string" } },
+					scopes: { type: "array", items: { type: "string" } },
+				},
+				required: ["project"],
+				anyOf: [{ required: ["paths"] }, { required: ["scopes"] }],
+			}),
+		);
+		expect(wire.anyOf).toBeUndefined();
+		expect(wire.type).toBe("object");
+		expect(wire.required).toEqual(["project"]);
+	});
+
+
 	it("preserves raw JSON Schema required defaults and safe-integer bounds", () => {
 		const wire = toolWireSchema(
 			jsonTool({

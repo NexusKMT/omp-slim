@@ -1575,6 +1575,11 @@ function normalizeOpenAIResponsesSchemaNode(value: unknown, cache: WeakMap<JsonO
 		changed = true;
 	}
 
+	if (flattenOpenAIResponsesObjectConstraintUnion(output)) {
+		changed = true;
+	}
+
+
 	// Safe to overwrite the seed: any cyclic re-entry above already observed
 	// the seeded partial and set `changed = true` for that node, so a node
 	// that finishes with `changed === false` is provably non-cyclic and
@@ -1582,6 +1587,56 @@ function normalizeOpenAIResponsesSchemaNode(value: unknown, cache: WeakMap<JsonO
 	const result = changed ? (isJsonObjectEmpty(output) ? true : output) : value;
 	cache.set(value, result);
 	return result;
+}
+
+
+/**
+ * xAI (and some OpenAI-compat hosts) reject a tool whose *root* schema is an
+ * `anyOf`/`oneOf` with a typeless or non-object branch — even when the node
+ * also declares `type: "object"` and `properties`. MCP servers emit this as
+ * an exclusive-required pair (`anyOf: [{required:["paths"]},{required:["scopes"]}]`).
+ * Fold those object-constraint fragments into the parent object so the tool
+ * stays on the wire; exclusive-required becomes both-optional (server still
+ * enforces the OR).
+ */
+function isTypelessObjectConstraintBranch(branch: unknown): boolean {
+	if (!isJsonObject(branch)) return false;
+	if (Object.hasOwn(branch, "type")) return false;
+	for (const key in branch) {
+		if (!Object.hasOwn(branch, key)) continue;
+		if (key === "required" || key === "properties" || key === "additionalProperties" || key === "description" || key === "title") {
+			continue;
+		}
+		return false;
+	}
+	return (
+		Object.hasOwn(branch, "required") ||
+		Object.hasOwn(branch, "properties") ||
+		Object.hasOwn(branch, "additionalProperties")
+	);
+}
+
+function flattenOpenAIResponsesObjectConstraintUnion(output: JsonObject): boolean {
+	const unionKey = Array.isArray(output.anyOf) ? "anyOf" : Array.isArray(output.oneOf) ? "oneOf" : undefined;
+	if (!unionKey) return false;
+	const union = output[unionKey];
+	if (!Array.isArray(union) || union.length === 0) return false;
+	if (!declaresObjectType(output.type) && !isJsonObject(output.properties)) return false;
+	if (!union.every(isTypelessObjectConstraintBranch)) return false;
+
+	const properties = isJsonObject(output.properties) ? output.properties : {};
+	for (const branch of union) {
+		if (!isJsonObject(branch) || !isJsonObject(branch.properties)) continue;
+		for (const name in branch.properties) {
+			if (!Object.hasOwn(branch.properties, name)) continue;
+			if (!Object.hasOwn(properties, name)) properties[name] = branch.properties[name];
+		}
+	}
+	if (!isJsonObject(output.properties) && Object.keys(properties).length > 0) {
+		output.properties = properties;
+	}
+	delete output[unionKey];
+	return true;
 }
 
 function declaresObjectType(type: unknown): boolean {

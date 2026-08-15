@@ -606,6 +606,30 @@ describe("sanitizeSchemaForOpenAIResponses", () => {
 		expect(properties.self).toBe(sanitized as unknown as object);
 		expect((sanitized as { type: unknown }).type).toBe("object");
 	});
+
+	it("flattens exclusive-required anyOf into the parent object (xAI root-union 400)", () => {
+		const schema = {
+			type: "object",
+			properties: {
+				project: { type: "string" },
+				paths: { type: "array", items: { type: "string" } },
+				scopes: { type: "array", items: { type: "string" } },
+			},
+			required: ["project"],
+			anyOf: [{ required: ["paths"] }, { required: ["scopes"] }],
+		};
+
+		expect(sanitizeSchemaForOpenAIResponses(schema)).toEqual({
+			type: "object",
+			properties: {
+				project: { type: "string" },
+				paths: { type: "array", items: { type: "string" } },
+				scopes: { type: "array", items: { type: "string" } },
+			},
+			required: ["project"],
+		});
+	});
+
 });
 
 // ---------------------------------------------------------------------------
