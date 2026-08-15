@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed marker-bearing focused components falling back from direct row writes to full TUI renders, while preserving hardware-cursor position and native scrollback across marker changes ([#8646](https://github.com/can1357/oh-my-pi/issues/8646)).
+
 ## [17.3.4] - 2026-08-14
 
 ### Fixed
