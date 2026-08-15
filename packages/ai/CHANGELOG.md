@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserved opaque Chat Completions tool-call IDs during same-model replay so custom gateways retain provider correlation state ([#8641](https://github.com/can1357/oh-my-pi/issues/8641)).
+
 ## [17.3.4] - 2026-08-14
 
 ### Fixed

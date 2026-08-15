@@ -1808,16 +1808,19 @@ export function convertMessages(
 			? 40
 			: undefined;
 	const duplicateToolCallIdSuffixPrefix = compat.requiresMistralToolIds ? "dup" : undefined;
-	const normalizeToolCallId = (id: string): string => {
+	const normalizeToolCallId = (id: string, source?: AssistantMessage): string => {
 		if (compat.requiresMistralToolIds) return normalizeMistralToolId(id, true);
 
-		// Handle pipe-separated IDs from OpenAI Responses API
-		// Format: {call_id}|{id} where {id} can be 400+ chars with special chars (+, /, =)
-		// These come from providers like github-copilot, openai-codex, opencode
-		// Extract just the call_id part and normalize it
-		if (id.includes("|")) {
+		const isSameModelSource =
+			source !== undefined &&
+			source.provider === model.provider &&
+			source.api === model.api &&
+			source.model === model.id;
+		// Cross-model replay converts OpenAI Responses composite IDs from
+		// `{call_id}|{item_id}` to the Chat Completions `call_id`. Same-model
+		// Chat Completions IDs are provider-issued opaque correlation tokens.
+		if (!isSameModelSource && id.includes("|")) {
 			const [callId] = id.split("|");
-			// Sanitize to allowed chars and truncate to 40 chars (OpenAI limit)
 			return callId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
 		}
 
@@ -1827,7 +1830,7 @@ export function convertMessages(
 	const transformedMessages = transformMessages(
 		context.messages,
 		model,
-		id => normalizeToolCallId(id),
+		(id, _target, source) => normalizeToolCallId(id, source),
 		maxNormalizedToolCallIdLength,
 		duplicateToolCallIdSuffixPrefix,
 		compat,
@@ -1859,8 +1862,8 @@ export function convertMessages(
 		return nextId;
 	};
 
-	const ensureToolCallId = (rawId: string, seed: string): string => {
-		const normalized = normalizeToolCallId(rawId);
+	const ensureToolCallId = (rawId: string, seed: string, source?: AssistantMessage): string => {
+		const normalized = normalizeToolCallId(rawId, source);
 		if (normalized.trim().length > 0) return normalized;
 		return generateFallbackToolCallId(seed);
 	};
@@ -2142,7 +2145,7 @@ export function convertMessages(
 			}
 			if (toolCalls.length > 0) {
 				assistantMsg.tool_calls = toolCalls.map((tc, toolCallIndex) => {
-					const toolCallId = ensureToolCallId(tc.id, `${i}:${toolCallIndex}:${tc.name}`);
+					const toolCallId = ensureToolCallId(tc.id, `${i}:${toolCallIndex}:${tc.name}`, msg);
 					rememberToolCallId(tc.id, toolCallId);
 					return {
 						id: normalizeMistralToolId(toolCallId, compat.requiresMistralToolIds),
