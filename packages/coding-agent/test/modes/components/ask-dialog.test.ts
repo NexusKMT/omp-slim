@@ -1252,7 +1252,8 @@ describe("AskDialogComponent", () => {
 
 	it("wraps long option labels onto indented continuation lines instead of truncating", () => {
 		const onSubmit = vi.fn();
-		const longLabel = "This is a deliberately long option label ".repeat(4).trim();
+		const tail = "UNIQUE_TAIL_MARKER_8654";
+		const longLabel = `${"This is a deliberately long option label ".repeat(4)}${tail}`;
 		const questions: ExtensionAskDialogQuestion[] = [
 			{
 				id: "q1",
@@ -1268,8 +1269,8 @@ describe("AskDialogComponent", () => {
 		});
 
 		const output = render(component);
-		// The label tail must be present — no ellipsis truncation.
-		expect(output).toContain("deliberately long option label");
+		// The unique label tail must be present — no ellipsis truncation.
+		expect(output).toContain(tail);
 		expect(output).not.toContain("…");
 		// The first line carries the cursor glyph; continuation lines are
 		// indented under the marker so the cursor stays visually anchored.
@@ -1278,6 +1279,16 @@ describe("AskDialogComponent", () => {
 		const continuation = lines.find(line => line.includes("option label") && !line.includes("❯")) ?? "";
 		expect(first).toMatch(/│ ❯/);
 		expect(continuation).toMatch(/│ {3}/);
+	});
+
+	it("does not wrap an option label that fits the dialog content width", () => {
+		const component = new AskDialogComponent(
+			[{ id: "q1", question: "Pick one?", options: [{ label: "x".repeat(70) }] }],
+			{ onSubmit: vi.fn(), onCancel: vi.fn(), onPrompt: vi.fn() },
+		);
+
+		const output = render(component);
+		expect(output.split("\n").filter(line => line.includes("x"))).toHaveLength(1);
 	});
 
 	it("Other editor cancel returns to the option list without submitting", async () => {

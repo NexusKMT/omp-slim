@@ -317,14 +317,12 @@ function renderRowLabel(
 	const cursor = selected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
 	const label = renderInlineMarkdown(rowItem.label, mdTheme, t => theme.fg(color, t));
 	const noteMarker = state.note && state.noteRowKey === rowItem.key ? theme.fg("success", "  ✎ note") : "";
-	// Wrap the label onto continuation lines indented under the marker so the
-	// cursor stays visually anchored and the full label stays readable (the
-	// body ScrollView carries vertical overflow). The note marker is reserved
-	// on the first line; the label wraps to the remaining width. The row()
-	// chrome (borders + insets) consumes 4 columns, so the label must fit
-	// `width - 4` or the outer fit() re-truncates it with an ellipsis.
+	// `width` is already the inner content width consumed by row(); when a
+	// scrollbar is needed, renderRows() calls this again with one less column.
+	// Keep the cursor, option marker, first wrapped label line, and optional
+	// note marker within that budget so the outer fit() never truncates them.
 	const noteWidth = noteMarker ? visibleWidth(noteMarker) : 0;
-	const labelWidth = Math.max(1, width - 4 - visibleWidth(cursor) - visibleWidth(marker) - noteWidth);
+	const labelWidth = Math.max(1, width - visibleWidth(cursor) - visibleWidth(marker) - noteWidth);
 	const wrappedLabel = wrapTextWithAnsi(label, labelWidth);
 	const indent = padding(visibleWidth(cursor) + visibleWidth(marker));
 	const lines = [`${cursor}${marker}${wrappedLabel[0] ?? ""}${noteMarker}`];
