@@ -63,6 +63,7 @@
 ### Removed
 
 - Removed legacy local request-cost estimation machinery and database schemas previously used for OpenCode Go estimates.
+- Fixed Anthropic-compatible streams dropping thinking bytes supplied by `content_block_start`, which invalidated signed-thinking replay ([#8319](https://github.com/can1357/oh-my-pi/pull/8319) by [@max12525k](https://github.com/max12525k)).
 
 ## [17.2.15] - 2026-08-12
 

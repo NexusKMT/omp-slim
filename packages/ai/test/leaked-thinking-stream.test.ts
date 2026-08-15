@@ -659,6 +659,43 @@ describe("leaked thinking healing through stream()", () => {
 		return Object.assign(fn, { preconnect: fetch.preconnect });
 	}
 
+	function anthropicThinkingFetch(): FetchImpl {
+		const body = [
+			sseFrame("message_start", {
+				type: "message_start",
+				message: { id: "msg_thinking_prefix", usage: { input_tokens: 5, output_tokens: 0 } },
+			}),
+			sseFrame("content_block_start", {
+				type: "content_block_start",
+				index: 0,
+				content_block: { type: "thinking", thinking: "Summary prefix" },
+			}),
+			sseFrame("content_block_delta", {
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "thinking_delta", thinking: " summary tail" },
+			}),
+			sseFrame("content_block_delta", {
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "signature_delta", signature: "sig_thinking" },
+			}),
+			sseFrame("content_block_stop", { type: "content_block_stop", index: 0 }),
+			sseFrame("message_delta", {
+				type: "message_delta",
+				delta: { stop_reason: "end_turn" },
+				usage: { input_tokens: 5, output_tokens: 4 },
+			}),
+			sseFrame("message_stop", { type: "message_stop" }),
+		].join("");
+		const fn = async (_input: string | URL | Request, _init?: RequestInit): Promise<Response> =>
+			new Response(body, {
+				status: 200,
+				headers: { "content-type": "text/event-stream", "request-id": "req_thinking_prefix" },
+			});
+		return Object.assign(fn, { preconnect: fetch.preconnect });
+	}
+
 	function anthropicModel(overrides: Partial<Model<"anthropic-messages">> = {}): Model<"anthropic-messages"> {
 		return buildModel({
 			id: "claude-sonnet-4-5",
@@ -709,6 +746,25 @@ describe("leaked thinking healing through stream()", () => {
 			.join("");
 		expect(thinking).toContain("Deliberate.");
 		expect(texts(result).join("").trim()).toBe("Final answer.");
+	});
+
+	it("preserves thinking bytes from content_block_start through a non-official endpoint", async () => {
+		const result = await stream(
+			anthropicModel({ provider: "zai", baseUrl: "https://api.z.ai/api/anthropic" }),
+			context,
+			{
+				apiKey: "test",
+				fetch: anthropicThinkingFetch(),
+			},
+		).result();
+
+		expect(thinks(result)).toEqual([
+			{
+				type: "thinking",
+				thinking: "Summary prefix summary tail",
+				thinkingSignature: "sig_thinking",
+			},
+		]);
 	});
 
 	it("replays native web-search history on a custom Anthropic continuation", async () => {

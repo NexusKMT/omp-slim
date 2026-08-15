@@ -2416,6 +2416,14 @@ const streamAnthropicOnce = (
 									contentIndex,
 									partial: output,
 								});
+								if (block.thinking) {
+									stream.push({
+										type: "thinking_delta",
+										contentIndex,
+										delta: block.thinking,
+										partial: output,
+									});
+								}
 							} else if (event.content_block.type === "redacted_thinking") {
 								streamedReplayUnsafeContent = true;
 								const block: Block = {
