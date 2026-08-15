@@ -21,8 +21,8 @@ import { resolveModelThinking } from "../src/model-thinking";
 import { isOllamaCloudOutputCapped, OLLAMA_CLOUD_MAX_OUTPUT_TOKENS } from "../src/provider-models/ollama";
 import {
 	ALIBABA_TOKEN_PLAN_STATIC_MODELS,
-	OPENAI_GPT_56_LONG_CONTEXT_COSTS,
 	applyXaiResponsesThinkingPolicy,
+	OPENAI_GPT_56_LONG_CONTEXT_COSTS,
 	resolveWaferServerlessThinkingFormat,
 } from "../src/provider-models/openai-compat";
 import type { Api, LongContextTokenCost, Model, ModelSpec } from "../src/types";
