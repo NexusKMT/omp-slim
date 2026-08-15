@@ -1427,8 +1427,11 @@ export function convertTools(
 		// Quarantine a tool whose emitted schema carries a provider-rejecting
 		// enum/const-vs-type contradiction: dropping just that tool keeps the rest
 		// of the request valid instead of letting one bad MCP schema 400 the whole
-		// turn (#2652). Other tools and built-ins are unaffected.
-		const violation = findStrictToolSchemaViolation(parameters);
+		// turn (#2652). Other tools and built-ins are unaffected. Leftover
+		// object-root unions are an xAI-only 400; OpenAI/Azure/Codex keep them.
+		const violation = findStrictToolSchemaViolation(parameters, "#", {
+			rejectXaiRootObjectUnion: model.provider === "xai" || model.provider === "xai-oauth",
+		});
 		if (violation) {
 			onQuarantine(tool.name, violation);
 			continue;
