@@ -62,7 +62,6 @@ import { findMostRecentSession, listAllSessions, listSessions, type SessionInfo 
 import {
 	loadEntriesFromFile,
 	loadSessionFile,
-	readTitleSlotFromFile,
 	resolveBlobRefsInEntries,
 	type SessionLoadResult,
 	visitEntriesFromFile,
