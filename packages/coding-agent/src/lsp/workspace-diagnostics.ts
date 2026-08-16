@@ -146,10 +146,25 @@ export async function runWorkspaceDiagnostics(
 				new Response(proc.stdout).text(),
 				new Response(proc.stderr).text(),
 			]);
-			await proc.exited;
+			const exitCode = await proc.exited;
 			throwIfAborted(signal);
 			const combined = (stdout + stderr).trim();
 			if (!combined) {
+				// A checker that exits non-zero without writing a single byte never
+				// inspected the workspace: it failed to start (missing toolchain),
+				// crashed, or was killed (OOM). Reporting "No issues found" there
+				// tells the agent the workspace is clean when nothing actually
+				// checked it. A non-zero exit *with* output is the normal way
+				// tsc/cargo/pyright report diagnostics and still falls through to
+				// the branch below. Mirrors the exit-status gate
+				// `resolveGoWorkspaceDiagnosticsCommand` already applies above.
+				if (exitCode !== 0) {
+					const detail = proc.signalCode ? `was killed by ${proc.signalCode}` : `exited with code ${exitCode}`;
+					return {
+						output: `Failed to run ${projectType.command.join(" ")}: the checker ${detail} without reporting anything, so the workspace was not verified`,
+						projectType,
+					};
+				}
 				return { output: "No issues found", projectType };
 			}
 			// Limit output length
