@@ -187,7 +187,7 @@ describe("AskDialogComponent", () => {
 		]);
 	});
 
-	it("multi-select: Space and Enter both toggle without advancing; Submit tab confirms", () => {
+	it("multi-select: Space toggles options; Enter submits the current selection", () => {
 		const onSubmit = vi.fn();
 		const onCancel = vi.fn();
 		const onPrompt = vi.fn();
@@ -207,22 +207,24 @@ describe("AskDialogComponent", () => {
 			onPrompt,
 		});
 
-		// Space on Option A - toggles without advancing
+		// Space toggles without submitting.
 		component.handleInput(SPACE);
 		expect(onSubmit).not.toHaveBeenCalled();
 
-		// Down to Option B, Enter - toggles B, still no submit and no movement
-		component.handleInput(DOWN);
-		component.handleInput(ENTER);
+		// Space again toggles the same option back off.
+		component.handleInput(SPACE);
 		expect(onSubmit).not.toHaveBeenCalled();
 
-		// Tab to the Submit tab (present even for a single multi question),
-		// Enter confirms the selection.
-		component.handleInput(TAB);
+		// Space once more re-selects it.
+		component.handleInput(SPACE);
+		expect(onSubmit).not.toHaveBeenCalled();
+
+		// Enter submits the current selection without toggling the focused
+		// option (issue #8252).
 		component.handleInput(ENTER);
 
 		expect(onSubmit).toHaveBeenCalledTimes(1);
-		expect(onSubmit.mock.calls[0][0].results[0].selectedOptions).toEqual(["Option A", "Option B"]);
+		expect(onSubmit.mock.calls[0][0].results[0].selectedOptions).toEqual(["Option A"]);
 	});
 
 	it("tab-state persistence: answer question 0, Tab forward, Tab back, answer still present", () => {
@@ -596,6 +598,69 @@ describe("AskDialogComponent", () => {
 		expect(onSubmit.mock.calls[0][0].results[0].customInput).toBe("custom detail");
 	});
 
+	it("multi-question, multi-select: Enter on a plain option advances, does not submit", () => {
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+		const onPrompt = vi.fn();
+
+		const questions: ExtensionAskDialogQuestion[] = [
+			{
+				id: "q1",
+				question: "Choose multiple?",
+				options: [{ label: "Option A" }, { label: "Option B" }],
+				multi: true,
+			},
+			{
+				id: "q2",
+				question: "Second question?",
+				options: [{ label: "Option C" }, { label: "Option D" }],
+			},
+		];
+
+		const component = new AskDialogComponent(questions, {
+			onSubmit,
+			onCancel,
+			onPrompt,
+		});
+
+		// Space toggles Option A; Enter on the plain option row confirms and
+		// advances to Q2 instead of submitting the whole dialog (#8265 review).
+		component.handleInput(SPACE);
+		component.handleInput(ENTER);
+		expect(onSubmit).not.toHaveBeenCalled();
+
+		// On Q2: Down to Option D and Enter advances to the Submit tab.
+		component.handleInput(DOWN);
+		component.handleInput(ENTER);
+		expect(onSubmit).not.toHaveBeenCalled();
+
+		// On the Submit tab Enter submits once with both answers.
+		component.handleInput(ENTER);
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit.mock.calls[0][0].results).toEqual([
+			{
+				id: "q1",
+				question: "Choose multiple?",
+				options: ["Option A", "Option B"],
+				multi: true,
+				selectedOptions: ["Option A"],
+				customInput: undefined,
+				note: undefined,
+				timedOut: undefined,
+			},
+			{
+				id: "q2",
+				question: "Second question?",
+				options: ["Option C", "Option D"],
+				multi: false,
+				selectedOptions: ["Option D"],
+				customInput: undefined,
+				note: undefined,
+				timedOut: undefined,
+			},
+		]);
+	});
+
 	it("defers a timeout that fires during a pending prompt and honors the resolved custom input", async () => {
 		vi.useFakeTimers();
 		const deferred = Promise.withResolvers<string | undefined>();
@@ -933,7 +998,7 @@ describe("AskDialogComponent", () => {
 		}
 	});
 
-	it("single-question multi-select: Enter toggles instead of submitting", () => {
+	it("single-question multi-select: Enter submits the current selection immediately", () => {
 		const onSubmit = vi.fn();
 		const questions: ExtensionAskDialogQuestion[] = [
 			{
@@ -950,42 +1015,34 @@ describe("AskDialogComponent", () => {
 			onPrompt: vi.fn(),
 		});
 
-		// Enter on Option B toggles it — no submit, no tab movement.
-		component.handleInput(DOWN);
-		component.handleInput(ENTER);
-		expect(onSubmit).not.toHaveBeenCalled();
-
-		// The toggle registered: Submit tab confirms only Option B.
-		component.handleInput(TAB);
-		component.handleInput(ENTER);
-		expect(onSubmit).toHaveBeenCalledTimes(1);
-		expect(onSubmit.mock.calls[0][0].results[0].selectedOptions).toEqual(["Option B"]);
-	});
-
-	it("multi-select: Enter on a checked option toggles it off; empty answer submits from Submit tab", () => {
-		const onSubmit = vi.fn();
-		const questions: ExtensionAskDialogQuestion[] = [
-			{
-				id: "q1",
-				question: "Choose multiple?",
-				options: [{ label: "Option A" }, { label: "Option B" }],
-				multi: true,
-			},
-		];
-
-		const component = new AskDialogComponent(questions, {
-			onSubmit,
-			onCancel: vi.fn(),
-			onPrompt: vi.fn(),
-		});
-
-		// Space checks Option A, Enter on the same row unchecks it.
+		// Space selects Option A; Enter submits right away — no need to
+		// discover the Submit tab (issue #8252).
 		component.handleInput(SPACE);
 		component.handleInput(ENTER);
 
-		// Submit tab warns about the unanswered question but still submits.
-		component.handleInput(TAB);
-		expect(render(component).toLowerCase()).toContain("unanswered");
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit.mock.calls[0][0].results[0].selectedOptions).toEqual(["Option A"]);
+	});
+
+	it("multi-select: Enter submits an empty selection instead of dead-ending", () => {
+		const onSubmit = vi.fn();
+		const questions: ExtensionAskDialogQuestion[] = [
+			{
+				id: "q1",
+				question: "Choose multiple?",
+				options: [{ label: "Option A" }, { label: "Option B" }],
+				multi: true,
+			},
+		];
+
+		const component = new AskDialogComponent(questions, {
+			onSubmit,
+			onCancel: vi.fn(),
+			onPrompt: vi.fn(),
+		});
+
+		// Enter with nothing selected submits the empty selection rather than
+		// toggling or blocking on the Submit tab.
 		component.handleInput(ENTER);
 
 		expect(onSubmit).toHaveBeenCalledTimes(1);

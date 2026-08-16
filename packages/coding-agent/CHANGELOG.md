@@ -186,6 +186,10 @@
 
 - Added `externalThinking` setting for private scratchpad reasoning via the new `think` tool
 
+### Fixed
+
+- Fixed the ask dialog's multi-select mode dead-ending on Enter: Space toggles options and Enter submits the current selection (matching single-select), instead of Enter silently toggling the focused option with the only submit path hidden behind the Submit tab ([#8252](https://github.com/can1357/oh-my-pi/issues/8252)).
+
 ## [17.2.13] - 2026-08-11
 
 ### Added

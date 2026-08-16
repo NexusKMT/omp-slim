@@ -753,7 +753,8 @@ function formatSingleQuestionResponse(result: {
 				: `User added note: ${result.note}`,
 		);
 	}
-	return responseParts.length > 0 ? responseParts.join("\n") : "User cancelled the selection";
+	if (responseParts.length > 0) return responseParts.join("\n");
+	return result.multi ? "User did not select any options" : "User cancelled the selection";
 }
 
 // =============================================================================
@@ -949,9 +950,15 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 				}
 				if (params.questions.length === 1) {
 					const result = results[0];
+					// An empty multi-select submission is a valid "select none"
+					// answer (#8265 review); only a truly empty single-select
+					// result counts as cancellation.
 					if (
 						!result ||
-						(!result.timedOut && result.selectedOptions.length === 0 && result.customInput === undefined)
+						(!result.timedOut &&
+							!result.multi &&
+							result.selectedOptions.length === 0 &&
+							result.customInput === undefined)
 					) {
 						context.abort();
 						throw new ToolAbortError("Ask tool was cancelled by the user");

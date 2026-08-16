@@ -1607,6 +1607,43 @@ describe("AskTool rich ask dialog", () => {
 		expect(abort).toHaveBeenCalledTimes(1);
 	});
 
+	it("accepts an empty multi-select submission instead of aborting", async () => {
+		const tool = new AskTool(createSession());
+		const abort = vi.fn();
+		const askDialog = vi.fn().mockResolvedValue({
+			kind: "submit",
+			results: [
+				{
+					id: "q1",
+					question: "Choose?",
+					options: ["A", "B"],
+					multi: true,
+					selectedOptions: [],
+					customInput: undefined,
+					timedOut: undefined,
+				},
+			],
+		});
+		const context = createContext({ askDialog, abort });
+
+		const result = await tool.execute(
+			"call-empty-multi",
+			{
+				questions: [{ id: "q1", question: "Choose?", options: [{ label: "A" }, { label: "B" }], multi: true }],
+			},
+			undefined,
+			undefined,
+			context,
+		);
+
+		expect(abort).not.toHaveBeenCalled();
+		expect(result.details?.selectedOptions).toEqual([]);
+		expect(result.content[0]?.type).toBe("text");
+		if (result.content[0]?.type === "text") {
+			expect(stripAnsi(result.content[0].text)).toContain("User did not select any options");
+		}
+	});
+
 	it("returns chat redirect result when askDialog returns kind chat", async () => {
 		const tool = new AskTool(createSession());
 		const abort = vi.fn();
