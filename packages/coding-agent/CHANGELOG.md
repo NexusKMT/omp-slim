@@ -57,6 +57,9 @@
 ### Fixed
 
 - Fixed focused `ultrathink`, `orchestrate`, and `workflowz` shimmer frames repainting the full TUI every 70 ms, causing high CPU usage while composing prompts on WSL2 ([#8646](https://github.com/can1357/oh-my-pi/issues/8646)).
+### Fixed
+
+- Fixed the `/debug` report bundle including unrelated historic sessions: subagent transcripts were collected by scanning the entire sessions directory, leaking other sessions' `.jsonl` files and bloating archives to tens of MB. The bundle now captures only the current session's own artifacts subtree ([#8648](https://github.com/can1357/oh-my-pi/issues/8648)).
 
 ## [17.3.4] - 2026-08-14
 
