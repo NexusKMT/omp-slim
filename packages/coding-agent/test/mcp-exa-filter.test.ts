@@ -63,4 +63,17 @@ describe("Exa MCP filtering", () => {
 
 		expect(Object.keys(result.configs)).toEqual(["exa"]);
 	});
+
+	test("keeps a stdio exa server with a separate tools argument", () => {
+		const configs: Record<string, MCPServerConfig> = {
+			exa: {
+				type: "stdio",
+				command: "npx",
+				args: ["-y", "exa-mcp-server", "--tools", "web_search_exa,web_fetch_exa"],
+			},
+		};
+		const result = filterExaMCPServers(configs, { exa: SOURCE });
+
+		expect(Object.keys(result.configs)).toEqual(["exa"]);
+	});
 });

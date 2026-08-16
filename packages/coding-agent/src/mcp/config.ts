@@ -244,8 +244,10 @@ function getRequestedExaMcpTools(config: MCPServerConfig): string[] | null {
 		}
 		if (!config.type || config.type === "stdio") {
 			const stdioConfig = config as { args?: string[] };
-			for (const arg of stdioConfig.args ?? []) {
-				const match = arg.match(/(?:^|[\s?&])tools=([^&\s]+)/i) ?? arg.match(/--?tools[=\s]([^\s]+)/i);
+			const args = stdioConfig.args ?? [];
+			for (let i = 0; i < args.length; i++) {
+				if (/^--?tools$/i.test(args[i])) return args[i + 1];
+				const match = args[i].match(/(?:^|[\s?&])tools=([^&\s]+)/i) ?? args[i].match(/--?tools[=\s]([^\s]+)/i);
 				if (match) return match[1];
 			}
 		}
