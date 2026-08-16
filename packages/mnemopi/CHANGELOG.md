@@ -19,6 +19,9 @@
 ### Changed
 
 - Updated internal LRU cache implementation.
+### Fixed
+
+- Fixed transient provider failures collapsing to `null` in the configured-completion and remote-LLM paths, which made an Anthropic overload or rate limit indistinguishable from "the model returned nothing". Both now retry transient failures before falling back.
 
 ## [17.2.6] - 2026-08-03
 

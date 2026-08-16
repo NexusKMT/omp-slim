@@ -140,6 +140,9 @@
 - Fixed OpenAI Codex usage telemetry blocking explicitly allowed ChatGPT Team credentials when a weekly `used_percent` rounded to 100, which could route multi-account sessions to an actually exhausted sibling instead ([#7617](https://github.com/can1357/oh-my-pi/issues/7617)).
 - Fixed OpenAI Codex GPT-5.x requests sending optional `reasoning.summary`, `reasoning.context`, and `text.verbosity` controls by default, reducing Codex `server_error` disconnects from unsupported request shapes. ([#4949](https://github.com/can1357/oh-my-pi/issues/4949))
 - Classified concurrent-request caps separately from quota exhaustion so they use a short retry backoff without burning a credential, and rotate credentials for account-scoped 403 caps such as Devin's overall message limit.
+### Added
+
+- Added `retryTransientCompletion` for oneshot (non-agent-loop) LLM calls. `completeSimple` reports a transient provider failure — Anthropic `overloaded_error` / `rate_limit_error`, HTTP 429/500/502/503/529 — by **resolving** with `stopReason: "error"` rather than throwing, so callers that wrapped it in a try/catch-based retry never actually retried. The helper handles both shapes (resolved error-stop and thrown error), classifies with the existing `AIError` predicates so the retryable set stays defined in one place, honors `retry-after` / `x-ratelimit-reset*` from response headers (supplied via `getResponseHeaders`, since an `AssistantMessage` carries none) or from the error text, and returns/rethrows the failure unchanged once attempts are exhausted so existing caller fallbacks keep working. Aborts surface immediately.
 
 ## [17.2.7] - 2026-08-03
 

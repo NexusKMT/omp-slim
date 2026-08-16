@@ -338,7 +338,7 @@ export async function generateBranchSummary(
 		model,
 		{ systemPrompt: [SUMMARIZATION_SYSTEM_PROMPT], messages: summarizationMessages },
 		{ apiKey, signal, maxTokens: 2048, metadata },
-		{ telemetry: options.telemetry, oneshotKind: "branch_summary", completeImpl: options.completeImpl },
+		{ telemetry: options.telemetry, oneshotKind: "branch_summary", completeImpl: options.completeImpl, retry: {} },
 	);
 
 	// Check if aborted or errored
