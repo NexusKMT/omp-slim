@@ -2490,8 +2490,10 @@ export class SessionManager {
 			this.#entries = this.#entries.filter(candidate => candidate.id !== entryId);
 			this.#index.rebuild(this.#entries);
 		}
-		this.#index.setLeaf(leafId);
-		this.appendCustomEntry(DISCARDED_ENTRY_BRANCH_MARKER, { discardedEntryId: entryId });
+		this.branchWithSummary(leafId, "", {
+			kind: DISCARDED_ENTRY_BRANCH_MARKER,
+			discardedEntryId: entryId,
+		});
 		await this.rewriteEntries();
 	}
 

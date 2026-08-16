@@ -384,8 +384,9 @@ describe("SessionManager JSONL software-crash durability", () => {
 		expect(branch.some(entry => entry.id === discardedId)).toBe(false);
 		expect(branch).toContainEqual(expect.objectContaining({ id: serviceTierId, parentId: priorId }));
 		expect(branch.at(-1)).toMatchObject({
-			type: "custom",
-			customType: "discarded-entry-branch",
+			type: "branch_summary",
+			summary: "",
+			details: { kind: "discarded-entry-branch", discardedEntryId: discardedId },
 			parentId: serviceTierId,
 		});
 		await reloaded.close();
@@ -414,8 +415,9 @@ describe("SessionManager JSONL software-crash durability", () => {
 		expect(reloaded.getEntries()).toContainEqual(expect.objectContaining({ id: contentChildId }));
 		expect(branch.some(entry => entry.id === discardedId || entry.id === contentChildId)).toBe(false);
 		expect(branch.at(-1)).toMatchObject({
-			type: "custom",
-			customType: "discarded-entry-branch",
+			type: "branch_summary",
+			summary: "",
+			details: { kind: "discarded-entry-branch", discardedEntryId: discardedId },
 			parentId: priorId,
 		});
 		await reloaded.close();

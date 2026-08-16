@@ -406,7 +406,11 @@ describe("AgentSession empty stop guard", () => {
 			.map(entry => entry.message as AgentMessage);
 		expect(emptyAssistantStops(journalMessages)).toHaveLength(0);
 		const lastJournalEntry = session.sessionManager.getEntries().at(-1);
-		expect(lastJournalEntry).toMatchObject({ type: "custom", customType: "discarded-entry-branch" });
+		expect(lastJournalEntry).toMatchObject({
+			type: "branch_summary",
+			summary: "",
+			details: { kind: "discarded-entry-branch" },
+		});
 	});
 
 	it("waits for capped empty-stop persistence before removing the active branch entry", async () => {
