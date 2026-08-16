@@ -615,7 +615,7 @@ export class AskDialogComponent implements Component {
 		}
 		const question = this.#questions[this.#currentQuestionIndex()];
 		// Enter advances in multi-question dialogs and submits single-question ones.
-		const enterAction = this.#hasSubmitTab() ? "next" : "submit";
+		const enterAction = this.#questions.length > 1 ? "next" : "submit";
 		const action = question?.multi ? `Space toggle · Enter ${enterAction}` : "Enter select · n note";
 		const tabs = this.#hasSubmitTab() ? " · Tab/←/→" : "";
 		if (this.#questionCanPage && indicator) {

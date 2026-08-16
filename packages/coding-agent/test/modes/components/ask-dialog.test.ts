@@ -622,6 +622,7 @@ describe("AskDialogComponent", () => {
 			onCancel,
 			onPrompt,
 		});
+		expect(render(component)).toContain("Space toggle · Enter next");
 
 		// Space toggles Option A; Enter on the plain option row confirms and
 		// advances to Q2 instead of submitting the whole dialog (#8265 review).
@@ -1014,6 +1015,7 @@ describe("AskDialogComponent", () => {
 			onCancel: vi.fn(),
 			onPrompt: vi.fn(),
 		});
+		expect(render(component)).toContain("Space toggle · Enter submit");
 
 		// Space selects Option A; Enter submits right away — no need to
 		// discover the Submit tab (issue #8252).
