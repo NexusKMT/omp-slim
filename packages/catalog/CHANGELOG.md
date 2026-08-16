@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Changed the paid xAI (XAI_API_KEY) and SuperGrok (xai-oauth) default models to grok-4.6.
+
+
 ## [17.3.5] - 2026-08-16
 
 ### Added

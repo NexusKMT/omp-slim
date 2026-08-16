@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Updated the default model for XAI_API_KEY (xai) and SuperGrok OAuth (xai-oauth) to grok-4.6. Automatic model selection continues to prefer paid xai/grok-4.6 when only XAI_API_KEY is set, with xai-oauth/grok-4.6 still available explicitly.
+
+
 ## [17.3.5] - 2026-08-16
 
 ### Added
