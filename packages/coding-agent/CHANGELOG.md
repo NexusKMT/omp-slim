@@ -81,6 +81,9 @@
 ### Fixed
 
 - Fixed `browser open` failing with "Shared browser daemon unavailable" when `HTTP_PROXY`/`HTTPS_PROXY` is set (e.g. a local Clash proxy), because the shared-browser CDP liveness probes routed loopback `127.0.0.1` requests through the proxy, which 502'd them and killed the healthy daemon. The probes now talk to the endpoint over raw TCP and never touch a proxy ([#8567](https://github.com/can1357/oh-my-pi/issues/8567)).
+### Fixed
+
+- Fixed `defaultThinkingLevel: auto` skipping classification for user-invoked `/skill:<name>` turns, which left the effort stuck on pending `auto`; user-attributed skill prompts now classify like any user turn while agent/autoload injections stay excluded ([#8554](https://github.com/can1357/oh-my-pi/issues/8554)).
 
 ## [17.3.4] - 2026-08-14
 
