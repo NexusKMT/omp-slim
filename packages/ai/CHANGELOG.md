@@ -15,6 +15,8 @@
 
 - Fixed `omp usage invalidate` to discard stale OAuth and API-key usage snapshots, then force a cache-bypassing, per-provider serialized refresh with a broker request budget sized for the full unfiltered account batch, so upgraded subscriptions do not silently retain pre-change quota data.
 - Fixed quota reporting and Cookie capture guidance for China (Beijing) Alibaba Token Plan credentials ([#8509](https://github.com/can1357/oh-my-pi/issues/8509)).
+- Fixed `omp usage invalidate` to discard stale OAuth and API-key usage snapshots, then force a cache-bypassing, per-provider serialized refresh so upgraded subscriptions do not silently retain pre-change quota data.
+- Classified Cursor HTTP/2 `NGHTTP2_INTERNAL_ERROR` / `NGHTTP2_REFUSED_STREAM` stream closes as transient so session recovery can continue instead of treating the RST as a hard stop.
 
 ## [17.3.3] - 2026-08-14
 

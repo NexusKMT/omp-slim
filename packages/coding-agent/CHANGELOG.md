@@ -41,6 +41,9 @@
 
 - Fixed interrupted `vibe_wait` calls being reported as elapsed timeout windows while preserving the per-call wait timeout.
 - Optimized checkpoint/rewind prompt rendering: the rewind instruction moved from the permanent checkpoint tool result (stale after rewind) into a transient `<system-notice>` that is branch-cut away on rewind, leaving only the goal; the rewind-report prompt is now forward-looking with no negation guard; the rewind tool description collapsed to one line. ([#8499](https://github.com/can1357/oh-my-pi/issues/8499))
+### Fixed
+
+- Continued Cursor turns that died with `NGHTTP2_INTERNAL_ERROR` / `NGHTTP2_REFUSED_STREAM` after tool calls already had results, instead of leaving the agent idle until the user typed "continue". HTTP/2 stream resets now use the same preserve-and-continue path as idle stream stalls, without requiring the Cursor exec-resolved marker that MCP/todo blocks never carry.
 
 ## [17.3.3] - 2026-08-14
 
