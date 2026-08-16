@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Extension bare imports of workspace members now resolve inside installed git-dependency monorepo plugins (the walk recognizes `workspaces` roots; installed node_modules copies still shadow members)
+
 ### Changed
 
 - Routed paid xAI models (`XAI_API_KEY` / `xai/…`) through the Responses API used by SuperGrok OAuth instead of Chat Completions.
