@@ -54,6 +54,9 @@
 ### Fixed
 
 - Kept the welcome screen's Tips, LSP Servers, and Recent sessions visible when a long model name still leaves enough terminal width for both columns ([#8657](https://github.com/can1357/oh-my-pi/issues/8657)).
+### Fixed
+
+- Fixed focused `ultrathink`, `orchestrate`, and `workflowz` shimmer frames repainting the full TUI every 70 ms, causing high CPU usage while composing prompts on WSL2 ([#8646](https://github.com/can1357/oh-my-pi/issues/8646)).
 
 ## [17.3.4] - 2026-08-14
 
