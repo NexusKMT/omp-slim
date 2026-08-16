@@ -471,8 +471,8 @@ function computeMessageTokens(message: AgentMessage, options?: { excludeEncrypte
 					if (!options?.excludeEncryptedReasoning) fragments.push(block.data);
 				} else if (block.type === "anthropicServerTool") {
 					// Native Anthropic server-tool call/result replayed verbatim on the
-					// wire (server_tool_use input, web_search_tool_result
-					// encrypted_content). Opaque provider-replay state the provider still
+					// wire (server_tool_use input and opaque result content). This opaque
+					// provider-replay state the provider still
 					// bills for on same-provider replay; excluded from the compaction
 					// floor like other encrypted reasoning because its local byte size
 					// diverges from provider billing.
