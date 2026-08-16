@@ -107,6 +107,10 @@
 
 - Fixed Nix standalone binaries retaining Bun's build-time package in their runtime closure.
 
+### Fixed
+
+- Fixed birch user/custom message card contrast on dark terminals: `userMessageText` and `customMessageText` were empty and inherited the terminal default foreground over light paper card backgrounds, so chat bubbles could render light-on-light. Those tokens now use `forestFloor`. Selection chrome and shared `toolTitle` stay adaptive (terminal-default) so light terminals and unpainted inline tool rows are not regressed.
+
 ## [17.3.0] - 2026-08-13
 
 ### Breaking Changes
