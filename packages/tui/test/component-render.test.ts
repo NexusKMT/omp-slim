@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
 	type Component,
 	Container,
+	CURSOR_MARKER,
 	Editor,
 	type Focusable,
 	type NativeScrollbackCommittedRows,
@@ -70,6 +71,10 @@ class AnchoredStatusContainer extends Container implements NativeScrollbackLiveR
 	getNativeScrollbackLiveRegionStart(): number | undefined {
 		const hasAnchoredRows = this.children.length > 0;
 		return hasAnchoredRows ? 0 : undefined;
+	}
+
+	isNativeScrollbackLiveRegionPinned(): boolean {
+		return true;
 	}
 }
 
@@ -346,6 +351,46 @@ describe("TUI.requestComponentRender", () => {
 			expect(duplicated).toEqual([]);
 			const observed = Array.from(buffer.matchAll(/ROW-\d{3}/g), match => match[0]);
 			expect(observed).toEqual(markers);
+		} finally {
+			tui.stop();
+			await term.flush();
+		}
+	});
+	it("keeps removed pinned panels and repeated transcript copies out of scrollback", async () => {
+		const term = new VirtualTerminal(40, 8, 1_000);
+		const scheduler = new StressRenderScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		const markers = Array.from({ length: 5 }, (_unused, index) => `HIST-${index}`);
+		const transcript = new CountingLines(markers);
+		const status = new AnchoredStatusContainer();
+		const editor = new CountingLines([`editor${CURSOR_MARKER}`]);
+		tui.addChild(transcript);
+		tui.addChild(status);
+		tui.addChild(editor);
+
+		try {
+			tui.start();
+			await scheduler.drain(term);
+			for (let cycle = 1; cycle <= 3; cycle++) {
+				const panel = new CountingLines([`panel-${cycle}-0`]);
+				status.addChild(panel);
+				tui.requestRender();
+				await scheduler.drain(term);
+				for (let tick = 1; tick <= 8; tick++) {
+					panel.set(Array.from({ length: tick + 1 }, (_row, index) => `panel-${cycle}-${tick}-${index}`));
+					tui.requestComponentRender(panel);
+					await scheduler.drain(term);
+				}
+				status.clear();
+				tui.requestRender();
+				await scheduler.drain(term);
+			}
+
+			const buffer = strip(term.getScrollBuffer()).join("\n");
+			for (const marker of markers) {
+				expect(buffer.split(marker)).toHaveLength(2);
+			}
+			expect(buffer).not.toContain("panel-");
 		} finally {
 			tui.stop();
 			await term.flush();

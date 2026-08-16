@@ -31,6 +31,9 @@
 - Reduced peak memory for persisted subagent revival probes by streaming large file-backed session journals instead of loading the complete journal ([#8117](https://github.com/can1357/oh-my-pi/issues/8117)).
 - Kept streaming edit previews responsive for large diffs by selecting and highlighting only the visible tail instead of scanning the discarded prefix on every update.
 
+### Fixed
+
+- Fixed repeated `/btw` panels committing transient frames to native scrollback and replaying conversation history after dismissal.
 ## [17.3.4] - 2026-08-14
 
 ### Changed
