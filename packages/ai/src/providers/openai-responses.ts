@@ -1421,9 +1421,7 @@ export function convertTools(
 		// subschemas ("property schema … must be an object"), so the Moonshot
 		// pass re-coerces them last.
 		const sanitized = sanitizeSchemaForOpenAIResponses(baseParameters);
-		const providerParameters = rejectXaiRootObjectUnion
-			? flattenExclusiveRequiredRootUnion(sanitized)
-			: sanitized;
+		const providerParameters = rejectXaiRootObjectUnion ? flattenExclusiveRequiredRootUnion(sanitized) : sanitized;
 		const responseParameters =
 			model.compat.toolSchemaFlavor === "moonshot-mfjs"
 				? (normalizeSchemaForMoonshot(providerParameters) as Record<string, unknown>)

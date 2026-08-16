@@ -45,54 +45,27 @@
 - Fixed transient Anthropic failures (`overloaded_error`, `rate_limit_error`, 429/500/502/503/529) aborting or silently degrading side-effect-free oneshot LLM calls. Session title generation, TTS speech enhancement, commit-message generation, the auto-thinking and unexpected-stop classifiers, memory extraction/consolidation, the commit analysis/summary/changelog/map/reduce passes, and the mnemopi LLM callback now retry with backoff that honors `retry-after`, instead of failing on the first blip or returning `null` — which made a transient overload indistinguishable from a legitimate empty result.
 - Fixed the commit analysis, summary, changelog and reduce passes feeding a provider error message straight into their response parsers: they never checked `stopReason`, so a failed request produced garbage output instead of surfacing the error.
 - Fixed the commit map phase never retrying transient failures: its retry helper only caught thrown errors, so a `stopReason: "error"` response bypassed it entirely.
-### Fixed
-
 - Fixed the shared headless browser daemon launching from the macOS system Google Chrome bundle (`com.google.Chrome`), which let macOS LaunchServices route the user's link clicks to the automation daemon and silently swallow them; the daemon now prefers the isolated Chrome for Testing binary (`com.google.chrome.for.testing`) on macOS and falls back to system Chrome only when Chrome for Testing cannot be obtained ([#8673](https://github.com/can1357/oh-my-pi/issues/8673)).
-### Fixed
-
 - Reclaimed abandoned daemon runtime directories under `~/.omp/run/daemons/`: each broker now prunes sibling scopes with a dead/absent `broker.pid`, no live client presence, and past a short stale grace on startup, removing the leftover Chromium profiles and broker state that grew unbounded from short-lived project directories ([#8674](https://github.com/can1357/oh-my-pi/issues/8674)).
-### Fixed
-
 - Kept the welcome screen's Tips, LSP Servers, and Recent sessions visible when a long model name still leaves enough terminal width for both columns ([#8657](https://github.com/can1357/oh-my-pi/issues/8657)).
-### Fixed
-
 - Fixed focused `ultrathink`, `orchestrate`, and `workflowz` shimmer frames repainting the full TUI every 70 ms, causing high CPU usage while composing prompts on WSL2 ([#8646](https://github.com/can1357/oh-my-pi/issues/8646)).
-### Fixed
-
 - Fixed the `/debug` report bundle including unrelated historic sessions: subagent transcripts were collected by scanning the entire sessions directory, leaking other sessions' `.jsonl` files and bloating archives to tens of MB. The bundle now captures only the current session's own artifacts subtree ([#8648](https://github.com/can1357/oh-my-pi/issues/8648)).
-### Fixed
-
 - Fixed adopted keep-alive agents remaining `running` in the registry after deferred turn settlement, and prevented stale detached or non-streaming refs from sustaining bare `hub wait` calls indefinitely ([#8634](https://github.com/can1357/oh-my-pi/issues/8634)).
-### Fixed
-
 - Expanded home-relative marketplace catalog paths before cache access, preventing updates from writing into a literal `~` directory under the process working directory ([#8627](https://github.com/can1357/oh-my-pi/issues/8627)).
-### Fixed
-
 - Fixed broker-owned headless Chromium opening and retaining an unowned blank foreground window on Windows ([#8615](https://github.com/can1357/oh-my-pi/issues/8615)).
-### Fixed
-
 - Fixed the `auto` thinking classifier failing every turn on Anthropic models served through LiteLLM/Vertex with `max_tokens must be greater than thinking.budget_tokens`. The classifier's disabled-reasoning request is downgraded to the lowest reasoning effort on the `openai-completions` transport, which the proxy translates to an Anthropic thinking budget of at least 1024 tokens; the classifier now reserves enough output room (4096) to clear that budget instead of capping at exactly 1024 ([#8610](https://github.com/can1357/oh-my-pi/issues/8610)).
-### Fixed
-
 - Fixed `always-ask` approval prompts bypassing edit preview readiness when a built-in tool executes under its wire-level alias, such as `edit` running as `apply_patch` ([#8607](https://github.com/can1357/oh-my-pi/issues/8607)).
-### Fixed
-
 - Fixed `lsp reload` crashing non-rust-analyzer language servers (e.g. Roslyn/`roslyn-language-server`) by sending the rust-analyzer-specific `rust-analyzer/reloadWorkspace` request to every server; the request is now gated on the server being rust-analyzer, and all other servers reload via `workspace/didChangeConfiguration` directly ([#8571](https://github.com/can1357/oh-my-pi/issues/8571)).
-### Fixed
-
 - Fixed `browser open` failing with "Shared browser daemon unavailable" when `HTTP_PROXY`/`HTTPS_PROXY` is set (e.g. a local Clash proxy), because the shared-browser CDP liveness probes routed loopback `127.0.0.1` requests through the proxy, which 502'd them and killed the healthy daemon. The probes now talk to the endpoint over raw TCP and never touch a proxy ([#8567](https://github.com/can1357/oh-my-pi/issues/8567)).
-### Fixed
-
 - Fixed `defaultThinkingLevel: auto` skipping classification for user-invoked `/skill:<name>` turns, which left the effort stuck on pending `auto`; user-attributed skill prompts now classify like any user turn while agent/autoload injections stay excluded ([#8554](https://github.com/can1357/oh-my-pi/issues/8554)).
-### Fixed
-
 - Fixed custom-tool and other directory discovery recursing into subtrees despite a non-recursive default: `loadFilesFromDir` built a top-level-only glob pattern but never forwarded its `recursive` flag to the native glob (which defaults to recursive), so `~/.codex/tools` scans descended into a Python venv's `site-packages` and imported browser-only frontend assets as tools, crashing startup on an unhandled `window` rejection ([#8552](https://github.com/can1357/oh-my-pi/issues/8552)).
-### Fixed
-
 - Repaired torn session JSONL appends after disk-write failures, rewrote malformed resumed files before their next append, retried transient persistence failures, and surfaced failures in the TUI ([#8596](https://github.com/can1357/oh-my-pi/issues/8596)).
-### Fixed
-
 - Prevented Anthropic model fallback from replaying model-bound thinking blocks across models, and surfaced immutable-thinking `invalid_request_error` responses without retrying the unchanged invalid turn ([#8558](https://github.com/can1357/oh-my-pi/issues/8558)).
+- Fixed the capped empty-stop failure always naming the context/`/shake images` hint even when the provider billed output tokens. A zero-block `stop` (no content blocks) with billed output beyond any provider-reported reasoning usage means content was generated and dropped downstream (a filter/refusal flattened to `finish_reason: "stop"` by a proxy, or a lossy API translation), so the message now reports the billed output-token count and points at a provider-side filter/translation instead of a context problem, and logs `outputTokens` alongside the existing warning fields. Thinking-only and known reasoning-only stops retain the context hint ([#8511](https://github.com/can1357/oh-my-pi/issues/8511)).
+- Fixed a parked, session-less agent-registry entry with no reviver permanently poisoning its agent id for the process lifetime: a fresh subagent spawn reusing that id died post-registration with `already owned by another session generation`, and messages to it failed with `is parked and cannot be revived`. Such dead corpses (left by an isolated run's park or an interrupted construction) are now reclaimed on a fresh-spawn collision so the id becomes reusable; the corpse's transcript remains readable at `history://<id>` ([#8490](https://github.com/can1357/oh-my-pi/issues/8490)).
+- Made extension tool-call timeouts configurable and paused them during user dialogs.
+- Fixed `/vibe` cancellation leaving an in-flight model turn unaware that Vibe mode and its tools were removed ([#8326](https://github.com/can1357/oh-my-pi/issues/8326)).
+- Fixed empty local-model stops lingering on the persisted active branch after retries; discarded turns now durably select their parent, preserve safe metadata children, and cannot resurface after reload or a mid-retry process kill. ([#5179](https://github.com/can1357/oh-my-pi/issues/5179))
 
 ## [17.3.4] - 2026-08-14
 
@@ -106,9 +79,6 @@
 - Fixed Streamable HTTP MCP sessions being invalidated by opening the optional GET SSE stream before sending `notifications/initialized`, which prevented Figma Dev Mode MCP from connecting ([#8514](https://github.com/can1357/oh-my-pi/issues/8514)).
 - Fixed the `/hotkeys` table describing Ctrl+D (`app.exit`) as "Exit (when editor is empty)" when it actually exits unconditionally and saves the current prompt as a resumable draft ([#8530](https://github.com/can1357/oh-my-pi/issues/8530)).
 - Fixed Ctrl+G external editors failing to launch on Windows because Bun re-quoted the embedded `cmd.exe /c` command line ([#8544](https://github.com/can1357/oh-my-pi/issues/8544)).
-### Fixed
-
-- Fixed the capped empty-stop failure always naming the context/`/shake images` hint even when the provider billed output tokens. A zero-block `stop` (no content blocks) with billed output beyond any provider-reported reasoning usage means content was generated and dropped downstream (a filter/refusal flattened to `finish_reason: "stop"` by a proxy, or a lossy API translation), so the message now reports the billed output-token count and points at a provider-side filter/translation instead of a context problem, and logs `outputTokens` alongside the existing warning fields. Thinking-only and known reasoning-only stops retain the context hint ([#8511](https://github.com/can1357/oh-my-pi/issues/8511)).
 
 ## [17.3.3] - 2026-08-14
 
@@ -117,9 +87,6 @@
 - Automatically continued Gemini turns that stopped after thinking without final output, using a bounded final-answer reminder instead of exhausting generic retries.
 - Retried Gemini `MALFORMED_FUNCTION_CALL` failures when every emitted tool call was proven unexecuted, while preserving real tool-result and visible-output replay guards.
 - Kept current terminal retry errors in one pinned banner with attempt context while surfacing local continuation failures instead of stale provider errors.
-### Fixed
-
-- Fixed a parked, session-less agent-registry entry with no reviver permanently poisoning its agent id for the process lifetime: a fresh subagent spawn reusing that id died post-registration with `already owned by another session generation`, and messages to it failed with `is parked and cannot be revived`. Such dead corpses (left by an isolated run's park or an interrupted construction) are now reclaimed on a fresh-spawn collision so the id becomes reusable; the corpse's transcript remains readable at `history://<id>` ([#8490](https://github.com/can1357/oh-my-pi/issues/8490)).
 
 ## [17.3.2] - 2026-08-13
 
@@ -140,9 +107,6 @@
 - Fixed omp plugin install failing with cloning errors for legacy Pi extensions whose tool schemas use legacy-typebox builders.
 - Fixed omp update aborting with chmod ENOENT when concurrent update runs overlapped by using unique download temporary paths.
 - Fixed the browser tool executable probe launching the user's installed GUI Chromium on Windows: the `--version` version probe from ecb22957 was Linux-scoped but ran for every platform candidate, so on Windows it could hand off to a running `chrome.exe`, open a normal browser window, then reject the candidate and fall back to cached Chrome for Testing. The probe is now confined to Linux ([#8445](https://github.com/can1357/oh-my-pi/issues/8445)).
-### Fixed
-
-- Made extension tool-call timeouts configurable and paused them during user dialogs.
 
 ## [17.3.0] - 2026-08-13
 
@@ -185,9 +149,6 @@
 - Fixed retry-fallback selection switching to a fallback model with a context window too small to hold the current session context.
 - Fixed OpenCode discovery ignoring `opencode.jsonc` files and rejecting comments in `opencode.json`.
 - Fixed WSL2 startup hanging forever when the Windows interop pipe is wedged: the WSL host-home discovery probes (`cmd.exe`, `wslpath`) now run under a 500ms hard timeout and fall back to the Linux `$HOME`/`~/.omp` candidates ([#8402](https://github.com/can1357/oh-my-pi/issues/8402)).
-### Fixed
-
-- Fixed `/vibe` cancellation leaving an in-flight model turn unaware that Vibe mode and its tools were removed ([#8326](https://github.com/can1357/oh-my-pi/issues/8326)).
 
 ## [17.2.15] - 2026-08-12
 
@@ -1797,9 +1758,6 @@
 - Fixed agents getting stuck waiting for messages from peers that have already stopped running.
 - Fixed compiled Linux binary extension loading when bundled web-search header generation cannot read `header-generator` data files from the build-time path. ([#5178](https://github.com/can1357/oh-my-pi/issues/5178))
 - Fixed plugin custom tool loading to skip and report invalid feature entries instead of crashing startup when a plugin dependency tree leaves one feature unresolved. ([#5189](https://github.com/can1357/oh-my-pi/issues/5189))
-### Fixed
-
-- Fixed empty local-model stops lingering on the persisted active branch after retries; discarded turns now durably select their parent, preserve safe metadata children, and cannot resurface after reload or a mid-retry process kill. ([#5179](https://github.com/can1357/oh-my-pi/issues/5179))
 
 ## [16.4.4] - 2026-07-11
 

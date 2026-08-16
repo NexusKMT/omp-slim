@@ -124,10 +124,7 @@ function makeModel(baseUrl: string): Model<"cursor-agent"> {
 const context: Context = { messages: [{ role: "user", content: "hello", timestamp: 1 }] };
 
 /** Drain a stream and return its terminal event (done / error). */
-async function runToEnd(
-	baseUrl: string,
-	sessionId: string,
-): Promise<{ type: "done" | "error"; message?: string }> {
+async function runToEnd(baseUrl: string, sessionId: string): Promise<{ type: "done" | "error"; message?: string }> {
 	const stream = streamCursor(makeModel(baseUrl), context, { apiKey: "test-token", sessionId });
 	let terminal: { type: "done" | "error"; message?: string } = { type: "done" };
 	for await (const event of stream) {
@@ -190,7 +187,12 @@ describe("Cursor conversationId rotation (issue #8345)", () => {
 		const r1 = await runToEnd(baseUrl, "sess-sticky");
 		const r2 = await runToEnd(baseUrl, "sess-sticky");
 		const r3 = await runToEnd(baseUrl, "sess-sticky");
-		console.log("[test] results:", JSON.stringify([r1.type, r1.message, r2.type, r2.message, r3.type, r3.message]), "seen:", JSON.stringify(seenConversationIds));
+		console.log(
+			"[test] results:",
+			JSON.stringify([r1.type, r1.message, r2.type, r2.message, r3.type, r3.message]),
+			"seen:",
+			JSON.stringify(seenConversationIds),
+		);
 
 		expect(seenConversationIds).toHaveLength(3);
 		expect(seenConversationIds[0]).toBe("sess-sticky");

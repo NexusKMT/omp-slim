@@ -1584,7 +1584,6 @@ function normalizeOpenAIResponsesSchemaNode(value: unknown, cache: WeakMap<JsonO
 	return result;
 }
 
-
 function declaresObjectType(type: unknown): boolean {
 	if (type === "object") return true;
 	if (!Array.isArray(type)) return false;

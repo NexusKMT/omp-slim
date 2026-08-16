@@ -776,12 +776,7 @@ export class AgentSession {
 	 *  the agent responds to the peer. Skip only when a queued steer/follow-up will itself drive a
 	 *  resume turn whose aside poll already consumes these (no double-wake). */
 	#resumeStrandedIrcAsides(): void {
-		if (
-			this.#modeExitDrainSuppressionDepth > 0 ||
-			this.#isDisposed ||
-			this.isStreaming ||
-			!this.#irc.hasPending()
-		) {
+		if (this.#modeExitDrainSuppressionDepth > 0 || this.#isDisposed || this.isStreaming || !this.#irc.hasPending()) {
 			return;
 		}
 		if (this.#canAutoContinueForFollowUp() && this.agent.hasQueuedMessages()) return;
@@ -7093,7 +7088,6 @@ export class AgentSession {
 		}
 		return undefined;
 	}
-
 
 	#enforceRewindBeforeYield(): boolean {
 		if (!this.#checkpointState || this.#pendingRewindReport) {

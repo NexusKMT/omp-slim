@@ -1762,9 +1762,7 @@ describe("ExtensionRunner", () => {
 			const notify: ExtensionUIContext["notify"] = message => {
 				if (message === "Factory started") factoryStarted.resolve();
 			};
-			const custom: ExtensionUIContext["custom"] = async <T>(
-				...args: Parameters<ExtensionUIContext["custom"]>
-			) => {
+			const custom: ExtensionUIContext["custom"] = async <T>(...args: Parameters<ExtensionUIContext["custom"]>) => {
 				await args[0](undefined as never, undefined as never, undefined as never, () => {});
 				return undefined as T;
 			};
