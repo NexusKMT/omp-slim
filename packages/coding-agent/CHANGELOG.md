@@ -12,6 +12,10 @@
 - Kept automatic model selection on paid `xai/grok-4.5` when only `XAI_API_KEY` is set, instead of preferring SuperGrok `xai-oauth/grok-4.5`. Explicit `xai-oauth/grok-4.5` still works with that paid key.
 - Stopped sending presence/frequency penalties and stop sequences to xAI reasoning models such as `grok-4.5`, which reject them.
 
+### Fixed
+
+- Fixed the Biome linter client silently dropping every diagnostic because `#parseJsonOutput` expected an outdated `--reporter=json` schema (`location.path.file`, byte-offset `span`, `description`); it now reads Biome 2.x's string `location.path`, 1-indexed `location.start`/`location.end`, and `message`, and warns when a non-empty diagnostics array has no recognizable location ([#8694](https://github.com/can1357/oh-my-pi/issues/8694)).
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed
