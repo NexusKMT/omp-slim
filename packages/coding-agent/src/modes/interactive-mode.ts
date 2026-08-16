@@ -4447,10 +4447,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			return;
 		}
 
-		this.#welcomeComponent.setModel(
-			this.session.model?.name ?? "Unknown",
-			this.session.model?.provider ?? "Unknown",
-		);
+		this.#welcomeComponent.setModel(this.session.model?.name ?? "Unknown", this.session.model?.provider ?? "Unknown");
 		this.ui.requestRender();
 	}
 

@@ -177,8 +177,7 @@ export async function retryTransientCompletion(
 					? thrown.message
 					: String(thrown)
 				: ((message as AssistantMessage).errorMessage ?? "unknown error");
-		const errorStatus =
-			thrown !== undefined ? AIError.status(thrown) : (message as AssistantMessage).errorStatus;
+		const errorStatus = thrown !== undefined ? AIError.status(thrown) : (message as AssistantMessage).errorStatus;
 		const lastAttempt = attempt >= maxAttempts;
 		if (lastAttempt || !isRetryableOneshotFailure(errorId, errorStatus, errorMessage)) {
 			if (thrown !== undefined) throw thrown;

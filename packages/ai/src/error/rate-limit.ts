@@ -86,8 +86,7 @@ const DASHSCOPE_TOKEN_LIMIT_MESSAGE_PATTERN =
 /** True for DashScope/Bailian's documented OpenAI-compatible TPM/TPS throttle. */
 export function isDashScopeTokenLimitText(errorMessage: string): boolean {
 	return (
-		DASHSCOPE_TOKEN_LIMIT_DOC_PATTERN.test(errorMessage) &&
-		DASHSCOPE_TOKEN_LIMIT_MESSAGE_PATTERN.test(errorMessage)
+		DASHSCOPE_TOKEN_LIMIT_DOC_PATTERN.test(errorMessage) && DASHSCOPE_TOKEN_LIMIT_MESSAGE_PATTERN.test(errorMessage)
 	);
 }
 

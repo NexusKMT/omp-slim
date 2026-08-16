@@ -11,7 +11,6 @@
  * round-trip once.
  */
 import { randomUUID } from "node:crypto";
-import { prompt } from "@oh-my-pi/pi-utils";
 import {
 	type BlockResolution,
 	buildCompactDiffPreview,
@@ -29,6 +28,7 @@ import {
 	UnseenLinesError,
 } from "@oh-my-pi/hashline";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
+import { prompt } from "@oh-my-pi/pi-utils";
 import type { FileDiagnosticsResult, WritethroughCallback, WritethroughDeferredHandle } from "../../lsp";
 import type { ToolSession } from "../../tools";
 import { outputMeta, resolveArtifactSpillThresholdBytes } from "../../tools/output-meta";
