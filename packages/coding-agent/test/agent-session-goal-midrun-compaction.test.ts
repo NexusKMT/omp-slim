@@ -496,22 +496,27 @@ describe("AgentSession mid-run threshold compaction", () => {
 		expect(JSON.stringify(session.messages)).not.toContain("display-variant");
 	});
 
-	it("does not wait for auto_compaction_end handlers before the next provider call", async () => {
-		const releaseCompactionEnd = Promise.withResolvers<void>();
-		const compactionEndEntered = Promise.withResolvers<void>();
+	it.each([
+		["auto_compaction_end", "context-full"],
+		["session_compact", "context-full"],
+		["auto_compaction_end", "shake"],
+		["session_compact", "shake"],
+	] as const)("hung %s handlers do not pin the mid-run %s loop", async (handlerType, strategy) => {
+		const releaseHandler = Promise.withResolvers<void>();
+		const handlerEntered = Promise.withResolvers<void>();
 		const nextProviderCall = Promise.withResolvers<void>();
 		const extensionRunner = {
-			hasHandlers: vi.fn((eventType: string) => eventType === "auto_compaction_end"),
+			hasHandlers: vi.fn((eventType: string) => eventType === handlerType),
 			emitBeforeAgentStart: vi.fn(async () => undefined),
 			emit: vi.fn(async (event: { type: string }) => {
-				if (event.type === "auto_compaction_end") {
-					compactionEndEntered.resolve();
-					await releaseCompactionEnd.promise;
+				if (event.type === handlerType) {
+					handlerEntered.resolve();
+					await releaseHandler.promise;
 				}
 			}),
 		} as unknown as ExtensionRunner;
 		const { session, observedContexts } = await createHarness(
-			{},
+			{ "compaction.strategy": strategy },
 			{
 				extensionRunner,
 				onProviderCall: index => {
@@ -519,34 +524,41 @@ describe("AgentSession mid-run threshold compaction", () => {
 				},
 			},
 		);
-		const compactSpy = mockCompaction("MID-RUN-COMPACTED-WITHOUT-WAITING-ON-END");
+		const shakeSpy =
+			strategy === "shake"
+				? vi
+						.spyOn(session, "shake")
+						.mockResolvedValue({ mode: "elide", toolResultsDropped: 0, blocksDropped: 0, tokensFreed: 0 })
+				: undefined;
+		const compactSpy = mockCompaction("MID-RUN-COMPACTED-WITHOUT-WAITING-ON-LIFECYCLE");
 
 		const prompt = session.prompt("work on the release");
-		const compactionEndOutcome = await raceWithTimeout(
-			compactionEndEntered.promise.then(() => "entered" as const),
+		const handlerOutcome = await raceWithTimeout(
+			handlerEntered.promise.then(() => "entered" as const),
 			2_000,
 			"blocked" as const,
 		);
 		const providerOutcome =
-			compactionEndOutcome === "entered"
+			handlerOutcome === "entered"
 				? await raceWithTimeout(
 						nextProviderCall.promise.then(() => "dispatched" as const),
 						2_000,
 						"blocked" as const,
 					)
 				: "blocked";
-		releaseCompactionEnd.resolve();
 		const promptOutcome = await raceWithTimeout(
 			prompt.then(() => "settled" as const),
 			2_000,
 			"blocked" as const,
 		);
+		releaseHandler.resolve();
 
-		expect(compactionEndOutcome).toBe("entered");
+		expect(handlerOutcome).toBe("entered");
 		expect(providerOutcome).toBe("dispatched");
 		expect(promptOutcome).toBe("settled");
 		expect(compactSpy).toHaveBeenCalledTimes(1);
-		expect(observedContexts[1].join("\n")).toContain("MID-RUN-COMPACTED-WITHOUT-WAITING-ON-END");
+		if (shakeSpy) expect(shakeSpy).toHaveBeenCalledTimes(1);
+		expect(observedContexts[1].join("\n")).toContain("MID-RUN-COMPACTED-WITHOUT-WAITING-ON-LIFECYCLE");
 	});
 
 	it("does not compact mid-run outside goal mode when disabled", async () => {

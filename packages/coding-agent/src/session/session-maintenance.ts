@@ -196,7 +196,7 @@ export interface SessionMaintenanceHost {
 	planReferencePath(): string;
 	nonMessageTokenSource(): NonMessageTokenSource;
 	memoryBackendSession(): MemoryBackendOperationContext["session"];
-	emitSessionEvent(event: AgentSessionEvent): Promise<void>;
+	emitSessionEvent(event: AgentSessionEvent, options?: { detachExtensions?: boolean }): Promise<void>;
 	emitNotice(level: "info" | "warning" | "error", message: string, source?: string): void;
 	schedulePostPromptTask(
 		task: (signal: AbortSignal) => Promise<void>,
@@ -315,20 +315,12 @@ export class SessionMaintenance {
 	}
 
 	/**
-	 * Emit a compaction lifecycle event. Mid-turn callers detach only the
-	 * post-commit `auto_compaction_end` / `session_compact` fan-out so a hung
-	 * handler cannot pin the next provider call after history rewrite.
+	 * Emit a compaction lifecycle event. Mid-turn callers detach only extension
+	 * fan-out for post-commit events; ordered subscriber delivery still completes
+	 * before maintenance returns.
 	 */
 	#emitLifecycleEvent(event: AgentSessionEvent, detach: boolean): Promise<void> {
-		const emit = this.#host.emitSessionEvent(event);
-		if (!detach) return emit;
-		void emit.catch(error => {
-			logger.warn("Detached compaction lifecycle emit failed", {
-				type: event.type,
-				error: error instanceof Error ? error.message : String(error),
-			});
-		});
-		return Promise.resolve();
+		return this.#host.emitSessionEvent(event, detach ? { detachExtensions: true } : undefined);
 	}
 	/**
 	 * Append plan-read protection to a prune/shake config so the active plan
