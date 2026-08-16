@@ -133,7 +133,7 @@ function resolveBrowserKind(params: BrowserParams, session: ToolSession): Browse
 /**
  * Browser tool: stateful, multi-tab. Three actions:
  * - `open`  → acquire/create a named tab on a browser kind (headless | spawned | connected) and optionally goto a url.
- * - `close` → release a named tab handle (or all handles); attached/spawned/relay pages remain open.
+ * - `close` → release a named tab handle (or all handles); attached/relay pages remain open, and spawned pages remain unless killed.
  * - `run`   → execute JS code against an existing tab with `page`/`browser`/`tab` helpers in scope.
  */
 export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolDetails> {

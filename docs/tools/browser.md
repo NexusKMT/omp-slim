@@ -65,7 +65,7 @@
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `all` | `boolean` | No | Release every known managed tab. Omitted releases only `name`. Tool-owned headless pages and owned cmux surfaces close; spawned, connected, and relay pages remain open. |
+| `all` | `boolean` | No | Release every known managed tab. Omitted releases only `name`. Tool-owned headless pages and owned cmux surfaces close; spawned, connected, and relay pages remain open unless `kill: true` terminates a spawned browser. |
 | `kill` | `boolean` | No | When a tab release drops a spawned-app browser handle to refcount 0, also terminate its process tree. Has no effect on headless shutdown; connected and relay browsers are only disconnected. |
 
 ### `action: "run"`
