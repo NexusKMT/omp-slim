@@ -60,6 +60,9 @@
 ### Fixed
 
 - Fixed the `/debug` report bundle including unrelated historic sessions: subagent transcripts were collected by scanning the entire sessions directory, leaking other sessions' `.jsonl` files and bloating archives to tens of MB. The bundle now captures only the current session's own artifacts subtree ([#8648](https://github.com/can1357/oh-my-pi/issues/8648)).
+### Fixed
+
+- Fixed adopted keep-alive agents remaining `running` in the registry after deferred turn settlement, and prevented stale detached or non-streaming refs from sustaining bare `hub wait` calls indefinitely ([#8634](https://github.com/can1357/oh-my-pi/issues/8634)).
 
 ## [17.3.4] - 2026-08-14
 
