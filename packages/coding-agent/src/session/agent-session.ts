@@ -776,7 +776,14 @@ export class AgentSession {
 	 *  the agent responds to the peer. Skip only when a queued steer/follow-up will itself drive a
 	 *  resume turn whose aside poll already consumes these (no double-wake). */
 	#resumeStrandedIrcAsides(): void {
-		if (this.#isDisposed || this.isStreaming || !this.#irc.hasPending()) return;
+		if (
+			this.#modeExitDrainSuppressionDepth > 0 ||
+			this.#isDisposed ||
+			this.isStreaming ||
+			!this.#irc.hasPending()
+		) {
+			return;
+		}
 		if (this.#canAutoContinueForFollowUp() && this.agent.hasQueuedMessages()) return;
 		const records = this.#irc.drainPending();
 		if (this.#planModeState?.enabled) {
@@ -805,6 +812,10 @@ export class AgentSession {
 	 *  because #canAutoContinueForFollowUp suppresses follow-up auto-resume while a user interrupt is
 	 *  in effect, even though the wake left a provider-valid tail. */
 	#wakeForIrc(records: CustomMessage[]): void {
+		if (this.#modeExitDrainSuppressionDepth > 0) {
+			this.#irc.deferWake(records);
+			return;
+		}
 		// Park only a *blocked* follow-up (one a user interrupt is intentionally holding); an
 		// already-resumable follow-up can ride the wake turn normally without reordering.
 		const parkedFollowUps =
@@ -5969,6 +5980,7 @@ export class AgentSession {
 			this.#modeExitDrainSuppressionDepth--;
 			if (this.#modeExitDrainSuppressionDepth === 0) {
 				this.#scheduleIdleQueueDrain();
+				this.#resumeStrandedIrcAsides();
 			}
 		}
 	}

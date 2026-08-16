@@ -250,6 +250,64 @@ describe("InteractiveMode vibe mode toggle", () => {
 		expect(session.getToolByName("vibe_spawn")).toBeUndefined();
 	});
 
+	it("holds IRC wakes during Vibe teardown until the tools are removed", async () => {
+		const toolNamesPerCall: string[][] = [];
+		const firstStarted = Promise.withResolvers<void>();
+		streamFn = (_model, context, options) => {
+			toolNamesPerCall.push((context.tools ?? []).map(tool => tool.name));
+			const isFirst = toolNamesPerCall.length === 1;
+			const stream = new AssistantMessageEventStream();
+			queueMicrotask(() => {
+				stream.push({ type: "start", partial: createAssistantMessage("") });
+				if (isFirst) {
+					options?.signal?.addEventListener(
+						"abort",
+						() => stream.push({ type: "error", reason: "aborted", error: createAssistantMessage("Aborted") }),
+						{ once: true },
+					);
+					firstStarted.resolve();
+				} else {
+					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("Resumed") });
+				}
+			});
+			return stream;
+		};
+
+		await mode.handleVibeModeCommand();
+		const prompt = session.prompt("Delegate this");
+		await firstStarted.promise;
+		await session.deliverIrcMessage({ id: "m1", from: "peer", to: "me", body: "first", ts: Date.now() });
+
+		const abortSettled = Promise.withResolvers<void>();
+		const releaseTeardown = Promise.withResolvers<void>();
+		const abort = session.abort.bind(session);
+		vi.spyOn(session, "abort").mockImplementation(async options => {
+			await abort(options);
+			abortSettled.resolve();
+			await releaseTeardown.promise;
+		});
+		const exit = mode.handleVibeModeCommand();
+		await abortSettled.promise;
+		await session.deliverIrcMessage({ id: "m2", from: "peer", to: "me", body: "second", ts: Date.now() });
+		for (let index = 0; index < 5; index++) await Promise.resolve();
+		expect(toolNamesPerCall).toHaveLength(1);
+		releaseTeardown.resolve();
+
+		await exit;
+		await prompt;
+		await session.waitForIdle();
+
+		expect(toolNamesPerCall).toHaveLength(2);
+		for (const name of VIBE_TOOL_NAMES) {
+			expect(toolNamesPerCall[1]).not.toContain(name);
+		}
+		expect(
+			session.agent.state.messages.filter(
+				message => message.role === "custom" && message.customType === "irc:incoming",
+			),
+		).toHaveLength(2);
+	});
+
 	it("keeps a same-named non-built-in Todo tool unavailable in Vibe mode", async () => {
 		const model = session.model;
 		if (!model) throw new Error("Expected active model");
