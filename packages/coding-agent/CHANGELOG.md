@@ -48,6 +48,9 @@
 ### Fixed
 
 - Fixed the shared headless browser daemon launching from the macOS system Google Chrome bundle (`com.google.Chrome`), which let macOS LaunchServices route the user's link clicks to the automation daemon and silently swallow them; the daemon now prefers the isolated Chrome for Testing binary (`com.google.chrome.for.testing`) on macOS and falls back to system Chrome only when Chrome for Testing cannot be obtained ([#8673](https://github.com/can1357/oh-my-pi/issues/8673)).
+### Fixed
+
+- Reclaimed abandoned daemon runtime directories under `~/.omp/run/daemons/`: each broker now prunes sibling scopes with a dead/absent `broker.pid`, no live client presence, and past a short stale grace on startup, removing the leftover Chromium profiles and broker state that grew unbounded from short-lived project directories ([#8674](https://github.com/can1357/oh-my-pi/issues/8674)).
 
 ## [17.3.4] - 2026-08-14
 
