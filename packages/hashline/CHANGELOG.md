@@ -2,11 +2,6 @@
 
 ## [Unreleased]
 
-## [17.3.3] - 2026-08-14
-
-### Fixed
-
-- Recovered dangling range separators in hunk headers (`PUT 244.=:`, `CUT 5.=`) as single-line ranges (`N.=N`) instead of rejecting the header as an orphan payload line.
 ### Added
 
 - Added structured `UnseenLinesError.retryable` metadata so hosts can offer compact retry continuations only when every unseen anchor was revealed in full.
@@ -14,6 +9,12 @@
 ### Fixed
 
 - Distinguished absent seen-line provenance from an explicitly observed empty set, so transformed writes can require a fresh read without weakening the guard.
+
+## [17.3.3] - 2026-08-14
+
+### Fixed
+
+- Recovered dangling range separators in hunk headers (`PUT 244.=:`, `CUT 5.=`) as single-line ranges (`N.=N`) instead of rejecting the header as an orphan payload line.
 
 ## [17.3.0] - 2026-08-13
 

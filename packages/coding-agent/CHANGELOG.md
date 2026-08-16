@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+
 - Fixed llama.cpp model discovery producing `baseUrl` without the `/v1` prefix for non-Qwen models, causing 404 errors on OpenAI-compatible endpoints (`/v1/responses`, `/v1/chat/completions`). The fix ensures all discovered llama.cpp models include `/v1` in their `baseUrl`, matching the behavior already applied to Qwen models.
 
 ### Changed
@@ -12,31 +13,38 @@
 - Replayed encrypted xAI reasoning on follow-up Responses turns for `xai` and `xai-oauth`.
 - Kept automatic model selection on paid `xai/grok-4.5` when only `XAI_API_KEY` is set, instead of preferring SuperGrok `xai-oauth/grok-4.5`. Explicit `xai-oauth/grok-4.5` still works with that paid key.
 - Stopped sending presence/frequency penalties and stop sequences to xAI reasoning models such as `grok-4.5`, which reject them.
+
 ### Fixed
 
 - Fixed prompt caching on open-weight providers (DeepSeek, Qwen, GLM, …) by moving the per-request date/cwd line out of the system prompt into a `<system-reminder>` block on the first user turn, so the tool schemas rendered after the system content stay cached across directory changes and midnight rollovers ([#7404](https://github.com/can1357/oh-my-pi/issues/7404)).
 - Kept completed edit previews within their collapsed line limit for oversized single hunks and cached header change statistics across terminal repaints.
-### Fixed
-
 - Fixed `omp --fork` omitting the source session's artifact directory, so CLI-created forks now preserve `artifact://` references like interactive `/fork`.
-### Fixed
-
 - Fixed long `ask` option labels being hard-truncated at the terminal width with no way to read the clipped tail; the rich ask dialog now wraps labels onto indented continuation lines, matching the legacy selector ([#1243](https://github.com/can1357/oh-my-pi/issues/1243), [#8594](https://github.com/can1357/oh-my-pi/issues/8594)).
-### Fixed
-
 - Fixed toggling `display.showTokenUsage` from `/settings` leaving existing token-usage rows stale until the transcript was rebuilt.
-### Fixed
-
 - Fixed mid-run auto-compaction waiting on `auto_compaction_end` / `session_compact` extension handlers before the next provider call, which could hang the live loop after a snapcompact or context-full pass. Mid-run those handlers now run concurrently with the next turn; `auto_compaction_start` is still awaited.
 - Reduced peak memory for persisted subagent revival probes by streaming large file-backed session journals instead of loading the complete journal ([#8117](https://github.com/can1357/oh-my-pi/issues/8117)).
 - Kept streaming edit previews responsive for large diffs by selecting and highlighting only the visible tail instead of scanning the discarded prefix on every update.
-
-### Fixed
-
 - Fixed repeated `/btw` panels committing transient frames to native scrollback and replaying conversation history after dismissal.
-### Fixed
-
 - Clarified that closing browser tool sessions releases managed handles without closing pages in spawned, CDP-connected, or relay browsers.
+- Fixed interrupted `vibe_wait` calls being reported as elapsed timeout windows while preserving the per-call wait timeout.
+- Optimized checkpoint/rewind prompt rendering: the rewind instruction moved from the permanent checkpoint tool result (stale after rewind) into a transient `<system-notice>` that is branch-cut away on rewind, leaving only the goal; the rewind-report prompt is now forward-looking with no negation guard; the rewind tool description collapsed to one line. ([#8499](https://github.com/can1357/oh-my-pi/issues/8499))
+- Continued Cursor turns that died with `NGHTTP2_INTERNAL_ERROR` / `NGHTTP2_REFUSED_STREAM` after tool calls already had results, instead of leaving the agent idle until the user typed "continue". HTTP/2 stream resets now use the same preserve-and-continue path as idle stream stalls, without requiring the Cursor exec-resolved marker that MCP/todo blocks never carry.
+- Stopped mixed-case plugin tool names from being lowercased during tool-set refresh, which unmounted them from `xd://` whenever MCP tools connected.
+- Kept Exa MCP servers mounted when their config explicitly requests tools the native Exa integration does not provide (`web_fetch_exa`, `web_search_advanced_exa`), instead of filtering them out so `/mcp reconnect exa` could never connect.
+- Fixed seen-line guard retries forcing agents to resend entire unchanged patches. Complete inline reveals now issue one-shot `RETRY <token>` continuations that rerun validation against live files, while numbered lines in successful edit output join the returned snapshot's seen-line provenance only when the written content exactly matches that output.
+- Fixed Claude Code custom tool discovery attempting to import non-module files from `.claude/tools` ([#8471](https://github.com/can1357/oh-my-pi/pull/8471) by [@Kigbnajd](https://github.com/Kigbnajd)).
+- Fixed Agent Hub parking a mid-spawn child JSONL (title + session header only) so `task` then fails with `already owned by another session generation` and the row cannot be revived.
+- Fixed the welcome banner displaying a stale model name when the session's active model changes after startup (e.g. after a delayed config load or an explicit `/model` switch). The banner now subscribes to `model_changed` events and calls `WelcomeComponent.setModel()`, which already existed but was never wired up.
+- Fixed Nix standalone binaries retaining Bun's build-time package in their runtime closure.
+- Fixed birch user/custom message card contrast on dark terminals: `userMessageText` and `customMessageText` were empty and inherited the terminal default foreground over light paper card backgrounds, so chat bubbles could render light-on-light. Those tokens now use `forestFloor`. Selection chrome and shared `toolTitle` stay adaptive (terminal-default) so light terminals and unpainted inline tool rows are not regressed.
+- Fixed hidden tool snapshots preventing long streamed assistant responses from entering terminal scrollback ([#8285](https://github.com/can1357/oh-my-pi/pull/8285) by [@dannyboy-ai](https://github.com/dannyboy-ai)).
+- Prevented `omp models` from loading ambient hook factories while preserving extension-contributed providers ([#8414](https://github.com/can1357/oh-my-pi/pull/8414) by [@starlink-awaken](https://github.com/starlink-awaken)).
+- Fixed the ask dialog's multi-select mode dead-ending on Enter: Space toggles options and Enter submits the current selection (matching single-select), instead of Enter silently toggling the focused option with the only submit path hidden behind the Submit tab ([#8252](https://github.com/can1357/oh-my-pi/issues/8252)).
+- Fixed workspace diagnostics reporting a clean workspace when its checker crashed without producing output ([#8386](https://github.com/can1357/oh-my-pi/issues/8386)).
+- Fixed manual `/compact` failing outright when a summarization request hit a transient provider overload. The auto-compaction path is unchanged: it keeps its own retry loop and now explicitly opts out of the inner one.
+- Fixed transient Anthropic failures (`overloaded_error`, `rate_limit_error`, 429/500/502/503/529) aborting or silently degrading side-effect-free oneshot LLM calls. Session title generation, TTS speech enhancement, commit-message generation, the auto-thinking and unexpected-stop classifiers, memory extraction/consolidation, the commit analysis/summary/changelog/map/reduce passes, and the mnemopi LLM callback now retry with backoff that honors `retry-after`, instead of failing on the first blip or returning `null` — which made a transient overload indistinguishable from a legitimate empty result.
+- Fixed the commit analysis, summary, changelog and reduce passes feeding a provider error message straight into their response parsers: they never checked `stopReason`, so a failed request produced garbage output instead of surfacing the error.
+- Fixed the commit map phase never retrying transient failures: its retry helper only caught thrown errors, so a `stopReason: "error"` response bypassed it entirely.
 
 ## [17.3.4] - 2026-08-14
 
@@ -50,21 +58,6 @@
 - Fixed Streamable HTTP MCP sessions being invalidated by opening the optional GET SSE stream before sending `notifications/initialized`, which prevented Figma Dev Mode MCP from connecting ([#8514](https://github.com/can1357/oh-my-pi/issues/8514)).
 - Fixed the `/hotkeys` table describing Ctrl+D (`app.exit`) as "Exit (when editor is empty)" when it actually exits unconditionally and saves the current prompt as a resumable draft ([#8530](https://github.com/can1357/oh-my-pi/issues/8530)).
 - Fixed Ctrl+G external editors failing to launch on Windows because Bun re-quoted the embedded `cmd.exe /c` command line ([#8544](https://github.com/can1357/oh-my-pi/issues/8544)).
-### Fixed
-
-- Fixed interrupted `vibe_wait` calls being reported as elapsed timeout windows while preserving the per-call wait timeout.
-- Optimized checkpoint/rewind prompt rendering: the rewind instruction moved from the permanent checkpoint tool result (stale after rewind) into a transient `<system-notice>` that is branch-cut away on rewind, leaving only the goal; the rewind-report prompt is now forward-looking with no negation guard; the rewind tool description collapsed to one line. ([#8499](https://github.com/can1357/oh-my-pi/issues/8499))
-### Fixed
-
-- Continued Cursor turns that died with `NGHTTP2_INTERNAL_ERROR` / `NGHTTP2_REFUSED_STREAM` after tool calls already had results, instead of leaving the agent idle until the user typed "continue". HTTP/2 stream resets now use the same preserve-and-continue path as idle stream stalls, without requiring the Cursor exec-resolved marker that MCP/todo blocks never carry.
-
-### Fixed
-
-- Stopped mixed-case plugin tool names from being lowercased during tool-set refresh, which unmounted them from `xd://` whenever MCP tools connected.
-
-### Fixed
-
-- Kept Exa MCP servers mounted when their config explicitly requests tools the native Exa integration does not provide (`web_fetch_exa`, `web_search_advanced_exa`), instead of filtering them out so `/mcp reconnect exa` could never connect.
 
 ## [17.3.3] - 2026-08-14
 
@@ -82,14 +75,6 @@
 - Fixed `omp update` misclassifying foreign npm/bun bin aliases while preserving package-manager ownership for globally linked checkouts ([#8468](https://github.com/can1357/oh-my-pi/issues/8468)).
 - Fixed `read` hashline headers collapsing nested in-workspace paths to the bare basename, which let a same-basename file at the session cwd capture a verbatim follow-up `edit` and deterministically reject it with `hash is not from this session`. Headers now retain the workspace-relative path (e.g. `[src/settings.json#0063]`) ([#8482](https://github.com/can1357/oh-my-pi/issues/8482)).
 
-### Fixed
-
-- Fixed seen-line guard retries forcing agents to resend entire unchanged patches. Complete inline reveals now issue one-shot `RETRY <token>` continuations that rerun validation against live files, while numbered lines in successful edit output join the returned snapshot's seen-line provenance only when the written content exactly matches that output.
-
-### Fixed
-
-- Fixed Claude Code custom tool discovery attempting to import non-module files from `.claude/tools` ([#8471](https://github.com/can1357/oh-my-pi/pull/8471) by [@Kigbnajd](https://github.com/Kigbnajd)).
-
 ## [17.3.1] - 2026-08-13
 
 ### Fixed
@@ -101,19 +86,6 @@
 - Fixed omp plugin install failing with cloning errors for legacy Pi extensions whose tool schemas use legacy-typebox builders.
 - Fixed omp update aborting with chmod ENOENT when concurrent update runs overlapped by using unique download temporary paths.
 - Fixed the browser tool executable probe launching the user's installed GUI Chromium on Windows: the `--version` version probe from ecb22957 was Linux-scoped but ran for every platform candidate, so on Windows it could hand off to a running `chrome.exe`, open a normal browser window, then reject the candidate and fall back to cached Chrome for Testing. The probe is now confined to Linux ([#8445](https://github.com/can1357/oh-my-pi/issues/8445)).
-### Fixed
-
-- Fixed Agent Hub parking a mid-spawn child JSONL (title + session header only) so `task` then fails with `already owned by another session generation` and the row cannot be revived.
-### Fixed
-
-- Fixed the welcome banner displaying a stale model name when the session's active model changes after startup (e.g. after a delayed config load or an explicit `/model` switch). The banner now subscribes to `model_changed` events and calls `WelcomeComponent.setModel()`, which already existed but was never wired up.
-### Fixed
-
-- Fixed Nix standalone binaries retaining Bun's build-time package in their runtime closure.
-
-### Fixed
-
-- Fixed birch user/custom message card contrast on dark terminals: `userMessageText` and `customMessageText` were empty and inherited the terminal default foreground over light paper card backgrounds, so chat bubbles could render light-on-light. Those tokens now use `forestFloor`. Selection chrome and shared `toolTitle` stay adaptive (terminal-default) so light terminals and unpainted inline tool rows are not regressed.
 
 ## [17.3.0] - 2026-08-13
 
@@ -156,13 +128,6 @@
 - Fixed retry-fallback selection switching to a fallback model with a context window too small to hold the current session context.
 - Fixed OpenCode discovery ignoring `opencode.jsonc` files and rejecting comments in `opencode.json`.
 - Fixed WSL2 startup hanging forever when the Windows interop pipe is wedged: the WSL host-home discovery probes (`cmd.exe`, `wslpath`) now run under a 500ms hard timeout and fall back to the Linux `$HOME`/`~/.omp` candidates ([#8402](https://github.com/can1357/oh-my-pi/issues/8402)).
-### Fixed
-
-- Fixed hidden tool snapshots preventing long streamed assistant responses from entering terminal scrollback ([#8285](https://github.com/can1357/oh-my-pi/pull/8285) by [@dannyboy-ai](https://github.com/dannyboy-ai)).
-
-### Fixed
-
-- Prevented `omp models` from loading ambient hook factories while preserving extension-contributed providers ([#8414](https://github.com/can1357/oh-my-pi/pull/8414) by [@starlink-awaken](https://github.com/starlink-awaken)).
 
 ## [17.2.15] - 2026-08-12
 
@@ -193,10 +158,6 @@
 ### Added
 
 - Added `externalThinking` setting for private scratchpad reasoning via the new `think` tool
-
-### Fixed
-
-- Fixed the ask dialog's multi-select mode dead-ending on Enter: Space toggles options and Enter submits the current selection (matching single-select), instead of Enter silently toggling the focused option with the only submit path hidden behind the Submit tab ([#8252](https://github.com/can1357/oh-my-pi/issues/8252)).
 
 ## [17.2.13] - 2026-08-11
 
@@ -254,10 +215,6 @@
 
 - Removed the `resolveAgentModelSource` model-resolver export, whose only use was being fed to `resolveExplicitModelRole`. Replaced by `resolveAgentModelSelection`, which returns the expanded `patterns` and the pre-expansion `role` together so a spawn path cannot derive one without the other ([#7910](https://github.com/can1357/oh-my-pi/pull/7910) by [@enieuwy](https://github.com/enieuwy)).
 - A run is now attributed to the model that actually produced its output, not whichever model the session was last pointed at. A retry fallback that errored on its first request — an exhausted quota, a hard provider error — was credited with the whole run in the Agent Hub row and the settled task result, even when the previous model did every turn. Sessions expose the serving model directly, holding the last model that produced output while a candidate is armed but unproven, and transcript-derived history stops at the newest turn that produced output.
-
-### Fixed
-
-- Fixed workspace diagnostics reporting a clean workspace when its checker crashed without producing output ([#8386](https://github.com/can1357/oh-my-pi/issues/8386)).
 
 ## [17.2.12] - 2026-08-08
 
@@ -410,12 +367,6 @@
 ### Changed
 
 - Upgraded the bundled omptype schema engine: intersection and pipe operators, bigint and RegExp literals in the string DSL, Standard Schema V1 interop, JSON Schema import via fromJsonSchema(), and richer union/collection error reporting.
-### Fixed
-
-- Fixed manual `/compact` failing outright when a summarization request hit a transient provider overload. The auto-compaction path is unchanged: it keeps its own retry loop and now explicitly opts out of the inner one.
-- Fixed transient Anthropic failures (`overloaded_error`, `rate_limit_error`, 429/500/502/503/529) aborting or silently degrading side-effect-free oneshot LLM calls. Session title generation, TTS speech enhancement, commit-message generation, the auto-thinking and unexpected-stop classifiers, memory extraction/consolidation, the commit analysis/summary/changelog/map/reduce passes, and the mnemopi LLM callback now retry with backoff that honors `retry-after`, instead of failing on the first blip or returning `null` — which made a transient overload indistinguishable from a legitimate empty result.
-- Fixed the commit analysis, summary, changelog and reduce passes feeding a provider error message straight into their response parsers: they never checked `stopReason`, so a failed request produced garbage output instead of surfacing the error.
-- Fixed the commit map phase never retrying transient failures: its retry helper only caught thrown errors, so a `stopReason: "error"` response bypassed it entirely.
 
 ## [17.2.7] - 2026-08-03
 

@@ -2,12 +2,25 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `retryTransientCompletion` for oneshot (non-agent-loop) LLM calls. `completeSimple` reports a transient provider failure — Anthropic `overloaded_error` / `rate_limit_error`, HTTP 429/500/502/503/529 — by **resolving** with `stopReason: "error"` rather than throwing, so callers that wrapped it in a try/catch-based retry never actually retried. The helper handles both shapes (resolved error-stop and thrown error), classifies with the existing `AIError` predicates so the retryable set stays defined in one place, honors `retry-after` / `x-ratelimit-reset*` from response headers (supplied via `getResponseHeaders`, since an `AssistantMessage` carries none) or from the error text, and returns/rethrows the failure unchanged once attempts are exhausted so existing caller fallbacks keep working. Aborts surface immediately.
+
 ### Fixed
 
 - Stopped treating `XAI_API_KEY` as SuperGrok (`xai-oauth`) sign-in for availability, so paid-key-only setups default to `xai/grok-4.5` instead of the zero-cost SuperGrok catalog path. Explicit `xai-oauth/…` selectors still accept the paid key via the existing env fallback.
 - Omitted unsupported `reasoning.summary` on paid xAI Responses requests (`xai/grok-4.5`), matching SuperGrok, so a thinking level no longer serializes `summary: "auto"`.
 - Omitted presence/frequency penalties on all first-party xAI Responses models, including non-reasoning ids such as `xai/grok-2`.
 - Fixed Umans usage reporting computing utilization from raw request counts instead of the model-weighted "effective requests", falsely reporting the quota as exhausted while the account still had weighted headroom. The request limit is now split into a weighted soft-cap row (warns, never exhausts) and a raw burst-ceiling row (exhausted only where throttling actually starts), and the rolling 5h window's absolute `resets_at` is surfaced as a countdown ([#7858](https://github.com/can1357/oh-my-pi/issues/7858)). Payloads without a reported burst ceiling collapse to a single weighted `umans:requests` row that can exhaust, so request exhaustion is never unreportable.
+- Fixed `omp usage invalidate` to discard stale OAuth and API-key usage snapshots, then force a cache-bypassing, per-provider serialized refresh so upgraded subscriptions do not silently retain pre-change quota data.
+- Classified Cursor HTTP/2 `NGHTTP2_INTERNAL_ERROR` / `NGHTTP2_REFUSED_STREAM` stream closes as transient so session recovery can continue instead of treating the RST as a hard stop.
+- Fixed OpenAI-compatible streams that close without a `finish_reason` chunk (connection dropped mid-generation, e.g. DeepSeek's `insufficient_system_resource` interruption) being silently finalized as a clean `stop`; the truncated turn now surfaces as a retryable incomplete-stream error instead of halting mid-sentence.
+- Fixed DeepSeek's `insufficient_system_resource` finish reason mapping to a non-retryable error; it now matches the session retry classifier's transient-transport pattern so the turn is auto-retried.
+
+### Removed
+
+- Fixed Alibaba DashScope/Bailian per-minute token throttle (`429 Throttling.AllocationQuota`, "You exceeded your current quota, please check your plan and billing details. … error-code#token-limit", `type=insufficient_quota`) being misclassified as `QUOTA_EXHAUSTED`. The OpenAI-compatible billing wording (and the `insufficient_quota` payload code) matched the usage-limit classifier, so a transient TPM/TPS cap — which Bailian's docs document as clearing within the minute window — blocked the credential and stalled the session for the 30-minute quota backoff instead of retrying with a short backoff on the same credential. Bodies linking the `error-code#token-limit` anchor now classify as `RATE_LIMIT_EXCEEDED` and stay in the transient lane; the identical wording without the anchor (OpenAI's real account-quota error) is unchanged.
+- Fixed Anthropic-compatible streams dropping thinking bytes supplied by `content_block_start`, which invalidated signed-thinking replay ([#8319](https://github.com/can1357/oh-my-pi/pull/8319) by [@max12525k](https://github.com/max12525k)).
 
 ## [17.3.4] - 2026-08-14
 
@@ -15,8 +28,6 @@
 
 - Fixed `omp usage invalidate` to discard stale OAuth and API-key usage snapshots, then force a cache-bypassing, per-provider serialized refresh with a broker request budget sized for the full unfiltered account batch, so upgraded subscriptions do not silently retain pre-change quota data.
 - Fixed quota reporting and Cookie capture guidance for China (Beijing) Alibaba Token Plan credentials ([#8509](https://github.com/can1357/oh-my-pi/issues/8509)).
-- Fixed `omp usage invalidate` to discard stale OAuth and API-key usage snapshots, then force a cache-bypassing, per-provider serialized refresh so upgraded subscriptions do not silently retain pre-change quota data.
-- Classified Cursor HTTP/2 `NGHTTP2_INTERNAL_ERROR` / `NGHTTP2_REFUSED_STREAM` stream closes as transient so session recovery can continue instead of treating the RST as a hard stop.
 
 ## [17.3.3] - 2026-08-14
 
@@ -35,7 +46,6 @@
 
 - Removed the Antigravity identity-prompt injection (`ANTIGRAVITY_SYSTEM_INSTRUCTION` and `shouldInjectAntigravitySystemInstruction`): Cloud Code Assist accepts arbitrary system instructions on gemini-3.x and Claude routes (verified live), and the injected stub never matched the real client's system prompt anyway. User system prompts are now sent unmodified (still tagged `role: "user"`).
 - Fixed Antigravity `auto` mode not failing over to the sandbox endpoint when the daily endpoint returned a thinking-only `STOP`, which caused Advisor turns to be falsely recorded as empty-response failures ([#8480](https://github.com/can1357/oh-my-pi/issues/8480)).
-- Fixed Alibaba DashScope/Bailian per-minute token throttle (`429 Throttling.AllocationQuota`, "You exceeded your current quota, please check your plan and billing details. … error-code#token-limit", `type=insufficient_quota`) being misclassified as `QUOTA_EXHAUSTED`. The OpenAI-compatible billing wording (and the `insufficient_quota` payload code) matched the usage-limit classifier, so a transient TPM/TPS cap — which Bailian's docs document as clearing within the minute window — blocked the credential and stalled the session for the 30-minute quota backoff instead of retrying with a short backoff on the same credential. Bodies linking the `error-code#token-limit` anchor now classify as `RATE_LIMIT_EXCEEDED` and stay in the transient lane; the identical wording without the anchor (OpenAI's real account-quota error) is unchanged.
 
 ## [17.3.0] - 2026-08-13
 
@@ -50,8 +60,6 @@
 
 ### Fixed
 
-- Fixed OpenAI-compatible streams that close without a `finish_reason` chunk (connection dropped mid-generation, e.g. DeepSeek's `insufficient_system_resource` interruption) being silently finalized as a clean `stop`; the truncated turn now surfaces as a retryable incomplete-stream error instead of halting mid-sentence.
-- Fixed DeepSeek's `insufficient_system_resource` finish reason mapping to a non-retryable error; it now matches the session retry classifier's transient-transport pattern so the turn is auto-retried.
 - Fixed Ollama chat adapter to correctly forward sampling parameters like temperature and topP to the provider.
 - Fixed OpenAI agent turns ending prematurely after a web search with no visible answer, ensuring the agent continues processing the search results.
 - Fixed a resource leak where completed model streams retained provider concurrency permits longer than necessary.
@@ -66,7 +74,6 @@
 ### Removed
 
 - Removed legacy local request-cost estimation machinery and database schemas previously used for OpenCode Go estimates.
-- Fixed Anthropic-compatible streams dropping thinking bytes supplied by `content_block_start`, which invalidated signed-thinking replay ([#8319](https://github.com/can1357/oh-my-pi/pull/8319) by [@max12525k](https://github.com/max12525k)).
 
 ## [17.2.15] - 2026-08-12
 
@@ -140,9 +147,6 @@
 - Fixed OpenAI Codex usage telemetry blocking explicitly allowed ChatGPT Team credentials when a weekly `used_percent` rounded to 100, which could route multi-account sessions to an actually exhausted sibling instead ([#7617](https://github.com/can1357/oh-my-pi/issues/7617)).
 - Fixed OpenAI Codex GPT-5.x requests sending optional `reasoning.summary`, `reasoning.context`, and `text.verbosity` controls by default, reducing Codex `server_error` disconnects from unsupported request shapes. ([#4949](https://github.com/can1357/oh-my-pi/issues/4949))
 - Classified concurrent-request caps separately from quota exhaustion so they use a short retry backoff without burning a credential, and rotate credentials for account-scoped 403 caps such as Devin's overall message limit.
-### Added
-
-- Added `retryTransientCompletion` for oneshot (non-agent-loop) LLM calls. `completeSimple` reports a transient provider failure — Anthropic `overloaded_error` / `rate_limit_error`, HTTP 429/500/502/503/529 — by **resolving** with `stopReason: "error"` rather than throwing, so callers that wrapped it in a try/catch-based retry never actually retried. The helper handles both shapes (resolved error-stop and thrown error), classifies with the existing `AIError` predicates so the retryable set stays defined in one place, honors `retry-after` / `x-ratelimit-reset*` from response headers (supplied via `getResponseHeaders`, since an `AssistantMessage` carries none) or from the error text, and returns/rethrows the failure unchanged once attempts are exhausted so existing caller fallbacks keep working. Aborts surface immediately.
 
 ## [17.2.7] - 2026-08-03
 
