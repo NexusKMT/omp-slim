@@ -95,6 +95,20 @@ const badTool: Tool = {
 		additionalProperties: false,
 	} as unknown as Tool["parameters"],
 };
+const coverageTool: Tool = {
+	name: "mcp__codebase_memory_check_index_coverage",
+	description: "coverage",
+	parameters: {
+		type: "object",
+		properties: {
+			project: { type: "string" },
+			paths: { type: "array", items: { type: "string" } },
+			scopes: { type: "array", items: { type: "string" } },
+		},
+		required: ["project"],
+		anyOf: [{ required: ["paths"] }, { required: ["scopes"] }],
+	} as unknown as Tool["parameters"],
+};
 const goodTool: Tool = {
 	name: "read_file",
 	description: "read a file",
@@ -120,27 +134,22 @@ describe("convertTools quarantine (#2652)", () => {
 		expect(convertTools([goodTool], true, makeModel())).toHaveLength(1);
 	});
 
-	test("keeps an exclusive-required MCP tool after Responses flatten", () => {
-		const coverageTool: Tool = {
-			name: "mcp__codebase_memory_check_index_coverage",
-			description: "coverage",
-			parameters: {
-				type: "object",
-				properties: {
-					project: { type: "string" },
-					paths: { type: "array", items: { type: "string" } },
-					scopes: { type: "array", items: { type: "string" } },
-				},
-				required: ["project"],
-				anyOf: [{ required: ["paths"] }, { required: ["scopes"] }],
-			} as unknown as Tool["parameters"],
-		};
-		const out = convertTools([coverageTool, goodTool], true, makeModel()) as Array<{
+	test("flattens an exclusive-required MCP tool on xAI Responses", () => {
+		const out = convertTools([coverageTool, goodTool], true, makeModel("xai-oauth")) as Array<{
 			name: string;
 			parameters: { anyOf?: unknown };
 		}>;
 		expect(out.map(t => t.name)).toEqual(["mcp__codebase_memory_check_index_coverage", "read_file"]);
 		expect(out[0]?.parameters.anyOf).toBeUndefined();
+	});
+
+	test("preserves an exclusive-required MCP tool on OpenAI Responses", () => {
+		const out = convertTools([coverageTool, goodTool], true, makeModel()) as Array<{
+			name: string;
+			parameters: { anyOf?: unknown };
+		}>;
+		expect(out.map(t => t.name)).toEqual(["mcp__codebase_memory_check_index_coverage", "read_file"]);
+		expect(out[0]?.parameters.anyOf).toHaveLength(2);
 	});
 
 	test("keeps a leftover object-root union on OpenAI Responses", () => {

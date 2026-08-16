@@ -87,7 +87,7 @@ describe("toolWireSchema — raw JSON Schema normalization", () => {
 		});
 	});
 
-	it("flattens exclusive-required anyOf so xAI completions accept the tool", () => {
+	it("preserves exclusive-required anyOf for provider-specific handling", () => {
 		const wire = toolWireSchema(
 			jsonTool({
 				type: "object",
@@ -100,7 +100,7 @@ describe("toolWireSchema — raw JSON Schema normalization", () => {
 				anyOf: [{ required: ["paths"] }, { required: ["scopes"] }],
 			}),
 		);
-		expect(wire.anyOf).toBeUndefined();
+		expect(wire.anyOf).toEqual([{ required: ["paths"] }, { required: ["scopes"] }]);
 		expect(wire.type).toBe("object");
 		expect(wire.required).toEqual(["project"]);
 	});

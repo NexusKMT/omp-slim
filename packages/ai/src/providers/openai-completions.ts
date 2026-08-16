@@ -45,6 +45,7 @@ import { callWithCopilotModelRetry } from "../utils/retry";
 import {
 	adaptSchemaForStrict,
 	findStrictToolSchemaViolation,
+	flattenExclusiveRequiredRootUnion,
 	NO_STRICT,
 	normalizeSchemaForMoonshot,
 	sanitizeSchemaForGrammar,
@@ -2308,9 +2309,12 @@ function convertTools(
 	toolStrictModeOverride?: ToolStrictModeOverride,
 	provider?: string,
 ): BuiltOpenAICompletionTools {
+	const rejectXaiRootObjectUnion = provider === "xai" || provider === "xai-oauth";
 	const adaptedTools = tools.map(tool => {
 		const strict = !NO_STRICT && compat.supportsStrictMode !== false && tool.strict !== false;
-		const baseParameters = toolWireSchema(tool);
+		const baseParameters = rejectXaiRootObjectUnion
+			? flattenExclusiveRequiredRootUnion(toolWireSchema(tool))
+			: toolWireSchema(tool);
 		const adapted = adaptSchemaForStrict(baseParameters, strict);
 		return {
 			tool,
@@ -2329,7 +2333,6 @@ function convertTools(
 					? "all_strict"
 					: "none"
 				: "mixed";
-	const rejectXaiRootObjectUnion = provider === "xai" || provider === "xai-oauth";
 
 	const wireTools: ChatCompletionTool[] = [];
 	let anyStrictEmitted = false;

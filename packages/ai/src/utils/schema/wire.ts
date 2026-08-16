@@ -114,9 +114,6 @@ const kStrippedSchema = Symbol("pi.schema.descriptions.stripped");
 
 function postProcessJsonSchema(schema: Record<string, unknown>): Record<string, unknown> {
 	walk(schema);
-	// xAI 400s only when the *tool root* is object + typeless exclusive-required
-	// anyOf. Nested unions (task.outputSchema, etc.) must stay intact.
-	flattenExclusiveRequiredUnion(schema);
 	normalizeArkPropertyComments(schema);
 	normalizeEmptySchemas(schema);
 	return schema;
@@ -220,15 +217,22 @@ function isExclusiveRequiredBranch(branch: unknown): boolean {
 	return true;
 }
 
-function flattenExclusiveRequiredUnion(schema: Record<string, unknown>): void {
+/**
+ * Return an xAI-compatible copy of an object-root schema whose union consists
+ * only of typeless required-key fragments. Other providers must retain the
+ * union because it is a real model-facing constraint.
+ */
+export function flattenExclusiveRequiredRootUnion(schema: Record<string, unknown>): Record<string, unknown> {
 	const unionKey = Array.isArray(schema.anyOf) ? "anyOf" : Array.isArray(schema.oneOf) ? "oneOf" : undefined;
-	if (!unionKey) return;
+	if (!unionKey) return schema;
 	const union = schema[unionKey];
-	if (!Array.isArray(union) || union.length === 0) return;
+	if (!Array.isArray(union) || union.length === 0) return schema;
 	const typedObject = schema.type === "object" || (Array.isArray(schema.type) && schema.type.includes("object"));
-	if (!typedObject && !isSchemaRecord(schema.properties)) return;
-	if (!union.every(isExclusiveRequiredBranch)) return;
-	delete schema[unionKey];
+	if (!typedObject && !isSchemaRecord(schema.properties)) return schema;
+	if (!union.every(isExclusiveRequiredBranch)) return schema;
+	const flattened = { ...schema };
+	delete flattened[unionKey];
+	return flattened;
 }
 
 /** Keys whose values are a single JSON Schema (not an array or map). */

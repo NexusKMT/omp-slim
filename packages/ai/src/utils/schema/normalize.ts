@@ -1472,11 +1472,7 @@ const OPENAI_RESPONSES_SCHEMA_VALUE_KEYS = new Set([
  * would not survive).
  */
 export function sanitizeSchemaForOpenAIResponses(schema: JsonObject): JsonObject {
-	const sanitized = normalizeOpenAIResponsesSchemaNode(schema, new WeakMap()) as JsonObject;
-	if (isJsonObject(sanitized)) {
-		flattenOpenAIResponsesObjectConstraintUnion(sanitized);
-	}
-	return sanitized;
+	return normalizeOpenAIResponsesSchemaNode(schema, new WeakMap()) as JsonObject;
 }
 
 /**
@@ -1588,38 +1584,6 @@ function normalizeOpenAIResponsesSchemaNode(value: unknown, cache: WeakMap<JsonO
 	return result;
 }
 
-/**
- * xAI (and some OpenAI-compat hosts) reject a tool whose *root* schema is an
- * `anyOf`/`oneOf` with a typeless or non-object branch — even when the node
- * also declares `type: "object"` and `properties`. MCP servers emit this as
- * an exclusive-required pair (`anyOf: [{required:["paths"]},{required:["scopes"]}]`).
- * Fold those object-constraint fragments into the parent object so the tool
- * stays on the wire; exclusive-required becomes both-optional (server still
- * enforces the OR).
- */
-function isExclusiveRequiredBranch(branch: unknown): boolean {
-	if (!isJsonObject(branch)) return false;
-	if (Object.hasOwn(branch, "type")) return false;
-	if (!Array.isArray(branch.required) || branch.required.length === 0) return false;
-	if (!branch.required.every(name => typeof name === "string" && name.length > 0)) return false;
-	for (const key in branch) {
-		if (!Object.hasOwn(branch, key)) continue;
-		if (key === "required" || key === "description" || key === "title") continue;
-		return false;
-	}
-	return true;
-}
-
-function flattenOpenAIResponsesObjectConstraintUnion(output: JsonObject): boolean {
-	const unionKey = Array.isArray(output.anyOf) ? "anyOf" : Array.isArray(output.oneOf) ? "oneOf" : undefined;
-	if (!unionKey) return false;
-	const union = output[unionKey];
-	if (!Array.isArray(union) || union.length === 0) return false;
-	if (!declaresObjectType(output.type) && !isJsonObject(output.properties)) return false;
-	if (!union.every(isExclusiveRequiredBranch)) return false;
-	delete output[unionKey];
-	return true;
-}
 
 function declaresObjectType(type: unknown): boolean {
 	if (type === "object") return true;

@@ -88,10 +88,16 @@ function toolNames(payload: ChatCompletionsPayload): Array<string | undefined> {
 }
 
 describe("openai-completions xAI leftover-union quarantine", () => {
-	it("keeps an exclusive-required MCP tool after wire flatten on paid xAI", async () => {
+	it("keeps an exclusive-required MCP tool after xAI flatten on paid xAI", async () => {
 		const payload = await capturePayload("xai", [coverageTool, goodTool]);
 		expect(toolNames(payload)).toEqual(["mcp__codebase_memory_check_index_coverage", "read_file"]);
 		expect(payload.tools?.[0]?.function?.parameters?.anyOf).toBeUndefined();
+	});
+
+	it("preserves an exclusive-required MCP tool on OpenAI Completions", async () => {
+		const payload = await capturePayload("openai", [coverageTool, goodTool]);
+		expect(toolNames(payload)).toEqual(["mcp__codebase_memory_check_index_coverage", "read_file"]);
+		expect(payload.tools?.[0]?.function?.parameters?.anyOf).toHaveLength(2);
 	});
 
 	it("keeps a leftover object-root union on OpenAI Completions", async () => {
