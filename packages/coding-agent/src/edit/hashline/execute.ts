@@ -11,6 +11,7 @@
  * round-trip once.
  */
 import { randomUUID } from "node:crypto";
+import { prompt } from "@oh-my-pi/pi-utils";
 import {
 	type BlockResolution,
 	buildCompactDiffPreview,
@@ -41,6 +42,7 @@ import { nativeBlockResolver } from "./block-resolver";
 import { HashlineFilesystem } from "./filesystem";
 import { hashPatchInput, NOOP_HARD_LIMIT, recordNoopEdit, resetNoopEdit } from "./noop-loop-guard";
 import { type HashlineParams, hashlineEditParamsSchema } from "./params";
+import seenLineRetryPrompt from "./seen-line-retry.md" with { type: "text" };
 
 export interface ExecuteHashlineSingleOptions {
 	session: ToolSession;
@@ -88,13 +90,7 @@ async function prepareWithSeenLineRetry(
 		if (!(error instanceof UnseenLinesError) || !error.retryable) throw error;
 		const token = randomUUID();
 		pendingSeenLineRetries.set(session, { token, input });
-		throw new ToolError(
-			`${error.message}\n\n` +
-				"The original patch is stored for a one-shot retry. After verifying the revealed lines match your intent, " +
-				"call edit with only:\n" +
-				`RETRY ${token}\n` +
-				"If your intent changed, submit a revised full patch instead. The retry revalidates the live files.",
-		);
+		throw new ToolError(prompt.render(seenLineRetryPrompt, { error: error.message, token }));
 	}
 }
 
