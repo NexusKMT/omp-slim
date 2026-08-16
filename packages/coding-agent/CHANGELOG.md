@@ -12,6 +12,10 @@
 - Kept automatic model selection on paid `xai/grok-4.5` when only `XAI_API_KEY` is set, instead of preferring SuperGrok `xai-oauth/grok-4.5`. Explicit `xai-oauth/grok-4.5` still works with that paid key.
 - Stopped sending presence/frequency penalties and stop sequences to xAI reasoning models such as `grok-4.5`, which reject them.
 
+### Fixed
+
+- Preserved MCP `ImageContent` tool-result blocks so vision-capable models and the TUI can inspect returned images instead of receiving only a text placeholder ([#8687](https://github.com/can1357/oh-my-pi/issues/8687)).
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed
