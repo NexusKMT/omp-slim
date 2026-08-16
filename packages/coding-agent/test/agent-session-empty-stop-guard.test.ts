@@ -57,7 +57,18 @@ function emptyStop(): MockResponse {
 	return {
 		content: [],
 		stopReason: "stop",
-		usage: { output: 1, cacheRead: 100 },
+		usage: { output: 0, cacheRead: 100 },
+	};
+}
+
+// A zero-block `stop` for which the provider still billed output tokens: content
+// was generated and dropped downstream (e.g. a filter/refusal flattened to
+// `finish_reason: "stop"` by a proxy), so the context/`/shake images` hint is wrong.
+function filteredEmptyStop(): MockResponse {
+	return {
+		content: [],
+		stopReason: "stop",
+		usage: { output: 126, cacheRead: 100 },
 	};
 }
 
@@ -461,6 +472,56 @@ describe("AgentSession empty stop guard", () => {
 			attempt: 3,
 		});
 		expect(retryEndEvents[0]?.finalError).toContain("/shake images");
+	});
+
+	it("names billed output tokens instead of the context hint when a capped empty stop billed output", async () => {
+		const { session, mock } = await createHarness([
+			filteredEmptyStop(),
+			filteredEmptyStop(),
+			filteredEmptyStop(),
+			filteredEmptyStop(),
+		]);
+		const retryEndEvents: Array<Extract<AgentSessionEvent, { type: "auto_retry_end" }>> = [];
+		session.subscribe(event => {
+			if (event.type === "auto_retry_end") {
+				retryEndEvents.push(event);
+			}
+		});
+
+		await expectPromptCompletes(session.prompt("answer that gets filtered"));
+		await session.waitForIdle();
+
+		expect(mock.calls).toHaveLength(4);
+		expect(retryEndEvents).toHaveLength(1);
+		expect(retryEndEvents[0]?.success).toBe(false);
+		const finalError = retryEndEvents[0]?.finalError ?? "";
+		expect(finalError).toContain("billed 126 output tokens");
+		expect(finalError).not.toContain("/shake images");
+	});
+
+	it("keeps the context hint for a capped thinking-only stop even though it billed output", async () => {
+		const { session, mock } = await createHarness([
+			thinkingOnlyStop(),
+			thinkingOnlyStop(),
+			thinkingOnlyStop(),
+			thinkingOnlyStop(),
+		]);
+		const retryEndEvents: Array<Extract<AgentSessionEvent, { type: "auto_retry_end" }>> = [];
+		session.subscribe(event => {
+			if (event.type === "auto_retry_end") {
+				retryEndEvents.push(event);
+			}
+		});
+
+		await expectPromptCompletes(session.prompt("think without answering"));
+		await session.waitForIdle();
+
+		expect(mock.calls).toHaveLength(4);
+		expect(retryEndEvents).toHaveLength(1);
+		expect(retryEndEvents[0]?.success).toBe(false);
+		const finalError = retryEndEvents[0]?.finalError ?? "";
+		expect(finalError).toContain("/shake images");
+		expect(finalError).not.toContain("billed");
 	});
 
 	it("ends auto-retry state when empty stop retries hit the cap", async () => {
