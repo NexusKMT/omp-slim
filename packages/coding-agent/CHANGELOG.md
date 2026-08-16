@@ -84,6 +84,9 @@
 ### Fixed
 
 - Fixed `defaultThinkingLevel: auto` skipping classification for user-invoked `/skill:<name>` turns, which left the effort stuck on pending `auto`; user-attributed skill prompts now classify like any user turn while agent/autoload injections stay excluded ([#8554](https://github.com/can1357/oh-my-pi/issues/8554)).
+### Fixed
+
+- Fixed custom-tool and other directory discovery recursing into subtrees despite a non-recursive default: `loadFilesFromDir` built a top-level-only glob pattern but never forwarded its `recursive` flag to the native glob (which defaults to recursive), so `~/.codex/tools` scans descended into a Python venv's `site-packages` and imported browser-only frontend assets as tools, crashing startup on an unhandled `window` rejection ([#8552](https://github.com/can1357/oh-my-pi/issues/8552)).
 
 ## [17.3.4] - 2026-08-14
 
