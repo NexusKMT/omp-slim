@@ -625,6 +625,11 @@ function getSpillConfig(s: Settings | undefined) {
 	};
 }
 
+/** Resolve the byte threshold above which ordinary tool output spills to an artifact. */
+export function resolveArtifactSpillThresholdBytes(s: Settings | undefined): number {
+	return getSpillConfig(s).threshold;
+}
+
 /**
  * Resolve the OutputSink `headBytes` budget from session settings.
  * Exposed so streaming executors (bash/python/ssh/eval) can opt into

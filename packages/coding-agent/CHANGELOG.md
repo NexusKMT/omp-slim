@@ -78,6 +78,10 @@
 - Fixed `omp update` misclassifying foreign npm/bun bin aliases while preserving package-manager ownership for globally linked checkouts ([#8468](https://github.com/can1357/oh-my-pi/issues/8468)).
 - Fixed `read` hashline headers collapsing nested in-workspace paths to the bare basename, which let a same-basename file at the session cwd capture a verbatim follow-up `edit` and deterministically reject it with `hash is not from this session`. Headers now retain the workspace-relative path (e.g. `[src/settings.json#0063]`) ([#8482](https://github.com/can1357/oh-my-pi/issues/8482)).
 
+### Fixed
+
+- Fixed seen-line guard retries forcing agents to resend entire unchanged patches. Complete inline reveals now issue one-shot `RETRY <token>` continuations that rerun validation against live files, while numbered lines in successful edit output join the returned snapshot's seen-line provenance only when the written content exactly matches that output.
+
 ## [17.3.1] - 2026-08-13
 
 ### Fixed
