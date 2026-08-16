@@ -288,12 +288,13 @@ describe("LoopWatchdog long-block classification", () => {
 		expect(warnSpy).not.toHaveBeenCalled();
 	});
 
-	test("reports a long block that spent most, but not all, of the gap on CPU", () => {
+	test("reports a long CPU-bound block when the process is CPU throttled", () => {
 		const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
 		const h = cpuHarness();
 
 		h.wd.start();
-		h.set(120_250, 90_000);
+		// Ten percent CPU is still real work, not suspension.
+		h.set(82_641, 8_200);
 		h.fireTick();
 
 		expect(warnSpy).toHaveBeenCalledTimes(1);

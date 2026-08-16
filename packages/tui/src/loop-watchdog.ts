@@ -6,7 +6,7 @@ export interface LoopWatchdogOptions {
 	intervalMs?: number;
 	/** A tick later than this past its deadline counts as a block. Default 250. */
 	thresholdMs?: number;
-	/** Overshoot beyond this is suppressed only when the process also burned no CPU. Default 60_000. */
+	/** Overshoot beyond this is suppressed only when the process burned negligible CPU. Default 60_000. */
 	sleepMs?: number;
 	/** Monotonic clock source; injectable for tests. Default `performance.now`. */
 	now?: () => number;
@@ -26,13 +26,13 @@ interface LoopWatchdogTimer {
 }
 
 /**
- * Fraction of a missed interval that must show up as CPU time for the overshoot
- * to count as a synchronous stall rather than system sleep. A suspended process
- * resumes having burned essentially nothing; a wedged one burned the interval on
- * a core. Half leaves room for a gap that is partly sleep and partly work, which
- * is still worth reporting.
+ * Fraction of a missed interval that may be process CPU time while the gap is
+ * still treated as system sleep. Keep this near zero: cgroup throttling and
+ * scheduler contention can make a CPU-bound loop consume far less CPU than wall
+ * time. One percent allows a little measurement/background jitter while erring
+ * toward reporting a severe stall instead of hiding it.
  */
-const CPU_BUSY_RATIO = 0.5;
+const CPU_BUSY_RATIO = 0.01;
 
 /**
  * Always-on event-loop lag probe. Each tick is scheduled `intervalMs` ahead of
@@ -51,7 +51,8 @@ const CPU_BUSY_RATIO = 0.5;
  * A long overshoot is classified by CPU time rather than by duration. System
  * sleep and a CPU-bound wedge both produce an arbitrarily large gap, so duration
  * alone cannot tell them apart, and suppressing on duration discards exactly the
- * worst stalls. Only a gap the process did not spend CPU on is treated as sleep.
+ * worst stalls. Only a gap the process spent negligible CPU on is treated as
+ * sleep. CPU accounting is process-wide, so worker activity errs toward logging.
  */
 export class LoopWatchdog {
 	#intervalMs: number;
