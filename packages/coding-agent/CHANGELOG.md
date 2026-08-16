@@ -63,6 +63,9 @@
 ### Fixed
 
 - Fixed adopted keep-alive agents remaining `running` in the registry after deferred turn settlement, and prevented stale detached or non-streaming refs from sustaining bare `hub wait` calls indefinitely ([#8634](https://github.com/can1357/oh-my-pi/issues/8634)).
+### Fixed
+
+- Expanded home-relative marketplace catalog paths before cache access, preventing updates from writing into a literal `~` directory under the process working directory ([#8627](https://github.com/can1357/oh-my-pi/issues/8627)).
 
 ## [17.3.4] - 2026-08-14
 
