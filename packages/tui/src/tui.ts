@@ -706,12 +706,18 @@ export class Container
 		}
 		for (let leadingIndex = 0; leadingIndex < marker.leading.length; leadingIndex++) {
 			const captured = marker.leading[leadingIndex]!;
-			const currentRows = this.#memoChildLines[leadingIndex]!;
+			// Resolution runs only inside a width epoch, where a leading child's
+			// physical row count legitimately changes with the new wrap — comparing
+			// it to the captured count conflates reflow with mutation and fails
+			// resolution for every wrapping revisionless child. Identity plus the
+			// width-independent revision (when the component reports one) is the
+			// stability proof; a revisionless leading child that mutated in the
+			// settle window degrades to the accepted stale-history tradeoff, the
+			// same as any off-window mutation of committed rows.
 			if (
 				this.#memoChildren[leadingIndex] !== captured.component ||
-				(captured.revision === undefined
-					? currentRows.length !== captured.rowCount
-					: getNativeScrollbackWidthEpochRevision(captured.component) !== captured.revision)
+				(captured.revision !== undefined &&
+					getNativeScrollbackWidthEpochRevision(captured.component) !== captured.revision)
 			) {
 				return undefined;
 			}
@@ -1528,11 +1534,17 @@ export class TUI extends Container {
 		for (let index = 0; index < marker.leading.length; index++) {
 			const captured = marker.leading[index]!;
 			const current = this.#frameSegments[index];
+			// Width epoch context: a leading root child's row count legitimately
+			// changes with the new wrap (the startup banner and warning texts wrap
+			// differently per width), so a captured-vs-current row count comparison
+			// conflates reflow with mutation and forces the conservative replay on
+			// every width change. Identity plus the width-independent revision
+			// (when reported) proves stability; a revisionless leading child that
+			// mutated inside the settle window degrades to the accepted
+			// stale-history tradeoff instead of failing resolution.
 			if (
 				current?.component !== captured.component ||
-				(captured.revision === undefined
-					? current.rowCount !== captured.rowCount
-					: current.widthEpochRevision !== captured.revision)
+				(captured.revision !== undefined && current.widthEpochRevision !== captured.revision)
 			) {
 				return undefined;
 			}

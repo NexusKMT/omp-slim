@@ -833,9 +833,17 @@ export class InteractiveMode implements InteractiveModeContext {
 		};
 		this.editor.setShimmerRepaintHandler(() => this.ui.requestDirectWrite(this.editor));
 		this.#syncEditorMaxHeight();
+		// Sync editor geometry only; never request a render here. This listener is
+		// registered before ProcessTerminal's own stdout "resize" listener (added in
+		// tui.start()), so it runs first on every SIGWINCH. The TUI's resize path
+		// already owns the repaint on every route (viewport fast path + settle,
+		// multiplexer debounce, alt-overlay repaint) and its settled render picks up
+		// the new editor max height. Requesting an ordinary render here additionally
+		// marked every resize as "render pending" (TUI hasPendingRender), which forced
+		// the multiplexer width epoch's conservative full-transcript replay — one
+		// duplicated transcript copy in pane history per tmux width change.
 		this.#resizeHandler = () => {
 			this.#syncEditorMaxHeight();
-			this.ui.requestRender();
 		};
 		process.stdout.on("resize", this.#resizeHandler);
 		try {
