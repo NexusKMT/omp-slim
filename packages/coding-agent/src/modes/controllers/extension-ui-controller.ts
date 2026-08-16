@@ -1057,12 +1057,13 @@ export class ExtensionUiController {
 		let component: (Component & { dispose?(): void }) | undefined;
 		let overlayHandle: OverlayHandle | undefined;
 		let closed = false;
+		let editorReplaced = false;
 
 		const cleanup = () => {
 			component?.dispose?.();
 			overlayHandle?.hide();
 			overlayHandle = undefined;
-			if (!options?.overlay) {
+			if (editorReplaced) {
 				this.ctx.editorContainer.clear();
 				this.ctx.editorContainer.addChild(this.ctx.editor);
 				this.ctx.editor.setText(savedText);
@@ -1112,6 +1113,7 @@ export class ExtensionUiController {
 					options.onHandle?.(overlayHandle);
 					return;
 				}
+				editorReplaced = true;
 				this.ctx.editorContainer.clear();
 				this.ctx.editorContainer.addChild(component);
 				this.ctx.ui.setFocus(component);

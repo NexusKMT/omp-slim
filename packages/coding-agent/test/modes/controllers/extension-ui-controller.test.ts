@@ -331,12 +331,14 @@ describe("ExtensionUiController custom overlay", () => {
 	it("aborts a pending custom factory and disposes its late component", async () => {
 		const harness = makeHarness();
 		const ui = await harness.init();
+		harness.editor.setText("draft before factory");
 		const controller = new AbortController();
 		const factory = Promise.withResolvers<Container>();
 		const component = new Container() as Container & { dispose: Mock<() => void> };
 		component.dispose = vi.fn();
 
 		const pending = ui.custom(() => factory.promise, { signal: controller.signal });
+		harness.editor.setText("draft typed while factory is pending");
 		controller.abort();
 
 		await expect(pending).rejects.toBe(controller.signal.reason);
@@ -345,5 +347,6 @@ describe("ExtensionUiController custom overlay", () => {
 
 		expect(component.dispose).toHaveBeenCalledTimes(1);
 		expect(harness.editorContainer.children).toEqual([harness.editor]);
+		expect(harness.editor.getText()).toBe("draft typed while factory is pending");
 	});
 });
