@@ -69,6 +69,9 @@
 ### Fixed
 
 - Fixed broker-owned headless Chromium opening and retaining an unowned blank foreground window on Windows ([#8615](https://github.com/can1357/oh-my-pi/issues/8615)).
+### Fixed
+
+- Fixed the `auto` thinking classifier failing every turn on Anthropic models served through LiteLLM/Vertex with `max_tokens must be greater than thinking.budget_tokens`. The classifier's disabled-reasoning request is downgraded to the lowest reasoning effort on the `openai-completions` transport, which the proxy translates to an Anthropic thinking budget of at least 1024 tokens; the classifier now reserves enough output room (4096) to clear that budget instead of capping at exactly 1024 ([#8610](https://github.com/can1357/oh-my-pi/issues/8610)).
 
 ## [17.3.4] - 2026-08-14
 
