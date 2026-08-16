@@ -65,20 +65,6 @@ const SEEN_LINE_REVEAL_CAP = 40;
  */
 const SEEN_LINE_REVEAL_MAX_COLUMNS = 512;
 
-/**
- * Seen-line rejection metadata for hosts that can offer an explicit retry
- * continuation after presenting the revealed source to the caller.
- */
-export class UnseenLinesError extends Error {
-	constructor(
-		message: string,
-		readonly retryable: boolean,
-	) {
-		super(message);
-		this.name = "UnseenLinesError";
-	}
-}
-
 export interface PatcherOptions {
 	/** Storage backend used for all reads and writes. */
 	fs: Filesystem;
@@ -569,7 +555,7 @@ export class Patcher {
 		// false "drift" purely from BOM/line-ending restoration asymmetry.
 		const recorded = normalizeToLF(stripBom(write.text).text);
 		const driftedOnWrite = recorded !== after;
-		const fileHash = this.#recordFullSnapshot(canonicalPath, recorded, driftedOnWrite ? [] : undefined);
+		const fileHash = this.#recordFullSnapshot(canonicalPath, recorded);
 		const allWarnings = driftedOnWrite ? [...warnings, writeDriftWarning(section.path)] : warnings;
 
 		return {
@@ -604,19 +590,18 @@ export class Patcher {
 		}
 	}
 
-	#recordFullSnapshot(canonicalPath: string, normalized: string, seenLines?: Iterable<number>): string {
-		return this.snapshots.record(canonicalPath, normalized, seenLines);
+	#recordFullSnapshot(canonicalPath: string, normalized: string): string {
+		return this.snapshots.record(canonicalPath, normalized);
 	}
 
 	/**
 	 * Reject an anchored edit that references a line the read which minted
 	 * `expected` never displayed. `matchedSnapshot` is the store version whose
 	 * text equals the live normalized content — the exact snapshot the model
-	 * anchored against. A missing snapshot or undefined `seenLines` means no
-	 * provenance was recorded (the tag was externally minted or aged out), so
-	 * the edit applies as before. An empty set means provenance is active but no
-	 * exact lines were displayed, so every anchor remains guarded. Only runs on
-	 * the no-drift path, where anchor line numbers index the tagged content 1:1.
+	 * anchored against. Absent means no provenance was recorded (the tag was
+	 * externally minted or aged out), so the edit applies as before. Only runs
+	 * on the no-drift path, where anchor line numbers index the tagged content
+	 * 1:1.
 	 *
 	 * The rejection inlines the actual file content at the unseen anchor lines
 	 * (from `matchedSnapshot.text`, which by definition equals the live
@@ -636,7 +621,7 @@ export class Patcher {
 	 */
 	#assertSeenLines(section: PatchSection, expected: string, matchedSnapshot: Snapshot | null): void {
 		const seen = matchedSnapshot?.seenLines;
-		if (seen === undefined) return;
+		if (!seen || seen.size === 0) return;
 		const unseen = section.collectAnchorLines().filter(line => !seen.has(line));
 		if (unseen.length === 0) return;
 		const sourceLines = matchedSnapshot?.text.split("\n") ?? [];
@@ -665,10 +650,7 @@ export class Patcher {
 		if (!truncated) {
 			for (const { line } of revealed) seen.add(line);
 		}
-		throw new UnseenLinesError(
-			unseenLinesMessage(section.path, unseen, expected, { lines: revealed, truncated }),
-			!truncated,
-		);
+		throw new Error(unseenLinesMessage(section.path, unseen, expected, { lines: revealed, truncated }));
 	}
 	#mismatchError(
 		section: PatchSection,

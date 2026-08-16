@@ -12,7 +12,6 @@ import {
 	NodeFilesystem,
 	Patch,
 	Patcher,
-	UnseenLinesError,
 	type WriteResult,
 } from "@oh-my-pi/hashline";
 
@@ -193,13 +192,9 @@ describe("Patcher snapshot tag stays honest across a write-time content transfor
 		// what turned a one-line edit into unexplained whole-file corruption.
 		expect(section.warnings.some(w => w.includes(PATH) && /reformatted it on save/.test(w))).toBe(true);
 
-		// The returned tag must still resolve against the real drifted file.
-		// Because no exact persisted lines were displayed after the transform,
-		// the seen-line guard first reveals the anchor, then the same-tag retry
-		// succeeds instead of failing a stale-tag mismatch.
-		const followUp = `[${PATH}#${section.fileHash}]\nPUT 1-1:\n+function g() {`;
-		await expect(patcher.apply(Patch.parse(followUp))).rejects.toThrow(/never displayed/);
-		await patcher.apply(Patch.parse(followUp));
+		// A follow-up edit anchored on the returned tag must succeed against
+		// the real (drifted) file instead of failing a stale-tag mismatch.
+		await patcher.apply(Patch.parse(`[${PATH}#${section.fileHash}]\nPUT 1-1:\n+function g() {`));
 		expect(fs.get(PATH)).toBe("function g() {\n\treturn 2;\n}\n");
 	});
 });
@@ -277,13 +272,9 @@ describe("Patcher seen-line provenance", () => {
 		const tag = snapshots.record(PATH, CONTENT, [1, 2]);
 		const patcher = new Patcher({ fs, snapshots });
 
-		const error = await patcher
-			.apply(Patch.parse(`[${PATH}#${tag}]\nPUT 4-4:\n+L4`))
-			.then(() => undefined)
-			.catch((cause: unknown) => cause);
-		expect(error).toBeInstanceOf(UnseenLinesError);
-		expect((error as UnseenLinesError).retryable).toBe(true);
-		expect((error as Error).message).toMatch(/never displayed \(it showed/);
+		await expect(patcher.apply(Patch.parse(`[${PATH}#${tag}]\nPUT 4-4:\n+L4`))).rejects.toThrow(
+			/never displayed \(it showed/,
+		);
 		expect(fs.get(PATH)).toBe(CONTENT);
 	});
 
@@ -419,18 +410,6 @@ describe("Patcher seen-line provenance", () => {
 		expect(retryMessage).toMatch(/2:a{512}…/);
 		expect(retryMessage).not.toContain("a".repeat(513));
 		expect(fs.get(PATH)).toBe(wideContent);
-	});
-
-	it("guards every anchor when provenance recorded no displayed lines", async () => {
-		const fs = new InMemoryFilesystem([[PATH, CONTENT]]);
-		const snapshots = new InMemorySnapshotStore();
-		const tag = snapshots.record(PATH, CONTENT, []);
-		const patcher = new Patcher({ fs, snapshots });
-
-		await expect(patcher.apply(Patch.parse(`[${PATH}#${tag}]\nPUT 4-4:\n+L4`))).rejects.toThrow(
-			/never displayed \(it showed/,
-		);
-		expect(fs.get(PATH)).toBe(CONTENT);
 	});
 
 	it("skips the check when no seen lines were recorded (absent → allow)", async () => {

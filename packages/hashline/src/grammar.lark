@@ -1,9 +1,6 @@
-start: retry_patch | begin_patch file_patch+ end_patch
+start: begin_patch file_patch+ end_patch
 begin_patch: "*** Begin Patch" LF
 end_patch:   "*** End Patch" LF?
-retry_patch: "RETRY " UUID LF?
-UUID: /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/
-
 
 file_patch: file_header hunk+
 file_header: "[" filename "#" file_hash "]" LF
