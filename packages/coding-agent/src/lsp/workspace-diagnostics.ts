@@ -114,6 +114,17 @@ async function detectProjectType(cwd: string, signal?: AbortSignal): Promise<Pro
 	return { type: "unknown", description: "Unknown project type" };
 }
 
+/** Interpret an empty checker result without mistaking a crash for a clean workspace. */
+export function interpretEmptyDiagnosticsResult(
+	exitCode: number,
+	signalCode: string | null,
+	command: readonly string[],
+): string {
+	if (exitCode === 0) return "No issues found";
+	const detail = signalCode ? `was killed by ${signalCode}` : `exited with code ${exitCode}`;
+	return `Failed to run ${command.join(" ")}: the checker ${detail} without reporting anything, so the workspace was not verified`;
+}
+
 /** Run workspace diagnostics command and parse output */
 export async function runWorkspaceDiagnostics(
 	cwd: string,
@@ -158,14 +169,10 @@ export async function runWorkspaceDiagnostics(
 				// tsc/cargo/pyright report diagnostics and still falls through to
 				// the branch below. Mirrors the exit-status gate
 				// `resolveGoWorkspaceDiagnosticsCommand` already applies above.
-				if (exitCode !== 0) {
-					const detail = proc.signalCode ? `was killed by ${proc.signalCode}` : `exited with code ${exitCode}`;
-					return {
-						output: `Failed to run ${projectType.command.join(" ")}: the checker ${detail} without reporting anything, so the workspace was not verified`,
-						projectType,
-					};
-				}
-				return { output: "No issues found", projectType };
+				return {
+					output: interpretEmptyDiagnosticsResult(exitCode, proc.signalCode, projectType.command),
+					projectType,
+				};
 			}
 			// Limit output length
 			const lines = combined.split("\n");
