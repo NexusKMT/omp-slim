@@ -55,6 +55,10 @@
 
 - Stopped mixed-case plugin tool names from being lowercased during tool-set refresh, which unmounted them from `xd://` whenever MCP tools connected.
 
+### Fixed
+
+- Kept Exa MCP servers mounted when their config explicitly requests tools the native Exa integration does not provide (`web_fetch_exa`, `web_search_advanced_exa`), instead of filtering them out so `/mcp reconnect exa` could never connect.
+
 ## [17.3.3] - 2026-08-14
 
 ### Fixed
