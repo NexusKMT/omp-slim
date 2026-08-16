@@ -241,7 +241,7 @@ describe("branch summarization", () => {
 			get reason() {
 				return aborted ? reason : undefined;
 			},
-			addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+			addEventListener(type: string, listener: ((event: Event) => void) | { handleEvent(event: Event): void }) {
 				if (type !== "abort") return;
 				aborted = true;
 				const event = new Event("abort");
