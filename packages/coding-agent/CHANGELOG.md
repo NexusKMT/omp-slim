@@ -160,6 +160,10 @@
 
 - Fixed hidden tool snapshots preventing long streamed assistant responses from entering terminal scrollback ([#8285](https://github.com/can1357/oh-my-pi/pull/8285) by [@dannyboy-ai](https://github.com/dannyboy-ai)).
 
+### Fixed
+
+- Prevented `omp models` from loading ambient hook factories while preserving extension-contributed providers ([#8414](https://github.com/can1357/oh-my-pi/pull/8414) by [@starlink-awaken](https://github.com/starlink-awaken)).
+
 ## [17.2.15] - 2026-08-12
 
 ### Added

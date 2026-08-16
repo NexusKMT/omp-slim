@@ -25,6 +25,7 @@ let extPath: string;
 let explicitPackagePath: string;
 let ambientExtPath: string;
 let ambientHookMarkerPath: string;
+let configuredHookMarkerPath: string;
 let dbPath: string;
 let shutdownExtPath: string;
 let shutdownPath: string;
@@ -67,7 +68,9 @@ beforeAll(async () => {
 	explicitPackagePath = tmp.join("explicit-package");
 	ambientExtPath = tmp.join("ambient.ts");
 	ambientHookMarkerPath = tmp.join("ambient-hook-loaded");
+	configuredHookMarkerPath = tmp.join("configured-hook-loaded");
 	await fs.mkdir(tmp.join("explicit-package", "src"), { recursive: true });
+	await fs.mkdir(tmp.join("explicit-package", "hooks", "pre"), { recursive: true });
 	const hookDir = path.join(getProjectAgentDir(tmp.path()), "hooks", "pre");
 	await fs.mkdir(hookDir, { recursive: true });
 	await fs.writeFile(
@@ -79,6 +82,12 @@ export default function () {}
 	await fs.writeFile(
 		tmp.join("explicit-package", "package.json"),
 		JSON.stringify({ name: "explicit-package", omp: { extensions: ["./src/main.ts"] } }),
+	);
+	await fs.writeFile(
+		tmp.join("explicit-package", "hooks", "pre", "models-poison.ts"),
+		`await Bun.write(${JSON.stringify(configuredHookMarkerPath)}, "loaded");
+export default function () {}
+`,
 	);
 	await fs.writeFile(
 		tmp.join("explicit-package", "src", "main.ts"),
@@ -174,16 +183,17 @@ test("omp models does not execute ambient hooks while retaining explicit provide
 				modelRegistry,
 				cwd: tmp.path(),
 				action: "ls",
-				additionalExtensionPaths: [extPath],
+				additionalExtensionPaths: [explicitPackagePath],
 			});
 		} finally {
 			process.stdout.write = originalWrite;
 		}
 
 		const output = captured.join("");
-		expect(output).toContain("test-gw");
-		expect(output).toContain("test-model");
+		expect(output).toContain("explicit-gw");
+		expect(output).toContain("explicit-model");
 		expect(await Bun.file(ambientHookMarkerPath).exists()).toBe(false);
+		expect(await Bun.file(configuredHookMarkerPath).exists()).toBe(false);
 	} finally {
 		authStorage.close();
 	}
