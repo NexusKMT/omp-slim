@@ -34,6 +34,10 @@
 ### Fixed
 
 - Fixed repeated `/btw` panels committing transient frames to native scrollback and replaying conversation history after dismissal.
+### Fixed
+
+- Clarified that closing browser tool sessions releases managed handles without closing pages in spawned, CDP-connected, or relay browsers.
+
 ## [17.3.4] - 2026-08-14
 
 ### Changed
