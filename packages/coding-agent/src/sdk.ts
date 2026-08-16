@@ -3037,6 +3037,20 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			options.expectedAgentRef === undefined
 				? agentRegistry.register(registrationInput)
 				: agentRegistry.registerIfAvailable(registrationInput, options.expectedAgentRef);
+		if (!registeredAgentRef && options.expectedAgentRef === null) {
+			// A fresh spawn collided with an existing id. If that id is held by a
+			// provably-dead parked corpse — no live session, no reviver — reclaim it
+			// so this new generation can take the id instead of failing forever at
+			// construction. Without this, one such corpse (isolated-run park,
+			// interrupted construction) poisons the id for the whole process (#8490).
+			// The reclaim is gated by the lifecycle owner and only touches the
+			// registry it manages; the corpse's transcript stays at history://.
+			const stale = agentRegistry.get(resolvedAgentId);
+			const lifecycle = AgentLifecycleManager.global();
+			if (stale && lifecycle.manages(agentRegistry) && (await lifecycle.reclaimDeadCorpse(resolvedAgentId, stale))) {
+				registeredAgentRef = agentRegistry.registerIfAvailable(registrationInput, null);
+			}
+		}
 		if (!registeredAgentRef) {
 			throw new Error(`Agent "${resolvedAgentId}" is already owned by another session generation.`);
 		}
