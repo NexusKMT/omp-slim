@@ -51,6 +51,9 @@
 ### Fixed
 
 - Reclaimed abandoned daemon runtime directories under `~/.omp/run/daemons/`: each broker now prunes sibling scopes with a dead/absent `broker.pid`, no live client presence, and past a short stale grace on startup, removing the leftover Chromium profiles and broker state that grew unbounded from short-lived project directories ([#8674](https://github.com/can1357/oh-my-pi/issues/8674)).
+### Fixed
+
+- Kept the welcome screen's Tips, LSP Servers, and Recent sessions visible when a long model name still leaves enough terminal width for both columns ([#8657](https://github.com/can1357/oh-my-pi/issues/8657)).
 
 ## [17.3.4] - 2026-08-14
 
