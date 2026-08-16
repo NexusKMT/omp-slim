@@ -864,6 +864,7 @@ function renderSingleFileResult(
 
 	let diffSectionRenderDiffFn: ((t: string, o?: { filePath?: string }) => string) | undefined;
 	const diffSectionCache = createRenderedStringCache();
+	const statsSuffixCache = createRenderedStringCache();
 
 	return framedBlock(uiTheme, width => {
 		const { expanded, renderContext } = options;
@@ -887,7 +888,11 @@ function renderSingleFileResult(
 		// Change stats ride inline on the header bar next to the path.
 		const previewDiff = editDiffPreview && !("error" in editDiffPreview) ? editDiffPreview.diff : undefined;
 		const headerDiff = isError ? undefined : details?.diff || previewDiff;
-		const statsSuffix = headerDiff ? formatDiffStatsSuffix(headerDiff, uiTheme) : "";
+		const statsSuffix = headerDiff
+			? cachedRenderedString(statsSuffixCache, uiTheme, false, "", headerDiff, () =>
+					formatDiffStatsSuffix(headerDiff, uiTheme),
+				)
+			: "";
 		const header = renderEditHeader(width, uiTheme, {
 			icon: isError ? "error" : "success",
 			iconOverride: !isError && !options.isPartial ? uiTheme.styledSymbol("tool.edit", "accent") : undefined,

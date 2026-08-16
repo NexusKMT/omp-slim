@@ -255,6 +255,19 @@ describe("editToolRenderer", () => {
 	it("caches completed diff rendering across stable frame renders", async () => {
 		const uiTheme = await getUiTheme();
 		let renderDiffCalls = 0;
+		let statsColorCalls = 0;
+		const countingTheme = new Proxy(uiTheme, {
+			get(target, property) {
+				if (property === "fg") {
+					return (color: Parameters<themeModule.Theme["fg"]>[0], text: string): string => {
+						if (color === "toolDiffAdded" && text === "+1") statsColorCalls++;
+						return target.fg(color, text);
+					};
+				}
+				const value = Reflect.get(target, property, target) as unknown;
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
 		const options = {
 			expanded: false,
 			isPartial: false,
@@ -275,17 +288,19 @@ describe("editToolRenderer", () => {
 				},
 			},
 			options,
-			uiTheme,
+			countingTheme,
 			{ file_path: "src/example.ts" },
 		);
 
 		component.render(160);
 		component.render(120);
 		expect(renderDiffCalls).toBe(1);
+		expect(statsColorCalls).toBe(1);
 
 		options.expanded = true;
 		component.render(120);
 		expect(renderDiffCalls).toBe(2);
+		expect(statsColorCalls).toBe(1);
 	});
 
 	it("computes the hashline preview diff once a single-line edit finishes streaming", async () => {
@@ -418,6 +433,27 @@ describe("editToolRenderer", () => {
 		// below the header (no blank line, no lone lang-icon metadata row).
 		expect(lines[1]).toContain("115│ ctx");
 		expect(lines.filter(line => line.includes("+2/-1"))).toHaveLength(1);
+	});
+
+	it("bounds a completed diff that contains one oversized change hunk", async () => {
+		const uiTheme = await getUiTheme();
+		const diff = Array.from({ length: 1_000 }, (_, i) => `+${i + 1}│line ${i}`).join("\n");
+		const component = editToolRenderer.renderResult(
+			{
+				content: [{ type: "text", text: "Updated demo.ts" }],
+				details: { diff, op: "update" },
+			},
+			{ expanded: false, isPartial: false, renderContext: { editMode: "hashline" } },
+			uiTheme,
+			{ file_path: "demo.ts" },
+		);
+
+		const lines = component.render(160).map(line => Bun.stripANSI(line));
+		const rendered = lines.join("\n");
+		expect(lines.filter(line => line.includes("│line "))).toHaveLength(40);
+		expect(rendered).toContain("+40│line 39");
+		expect(rendered).not.toContain("+41│line 40");
+		expect(rendered).toContain("960 more lines");
 	});
 
 	it("renders completed edit gutters without inherited frame padding", async () => {
