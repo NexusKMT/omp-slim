@@ -232,6 +232,9 @@ describe("tool-owned dynamic approval declarations", () => {
 			"rm --force --recursive /",
 			"rm -rf --no-preserve-root /",
 			"rm --no-preserve-root -rf /",
+			"rm -rf -v /",
+			"rm -rf -i /",
+			"rm -v -rf /",
 		]) {
 			expect(bashApproval(command)).toEqual({ tier: "exec", override: true, reason: "Critical pattern detected" });
 		}
@@ -247,6 +250,7 @@ describe("tool-owned dynamic approval declarations", () => {
 			"tee /var/log/app.log",
 			"rm -rf -- ./build",
 			"rm --recursive --force ./dist",
+			"rm -v /tmp/scratch",
 		]) {
 			expect(bashApproval(command)).toBe("exec");
 		}

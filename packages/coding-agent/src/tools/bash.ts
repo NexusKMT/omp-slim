@@ -166,10 +166,10 @@ function shellBuiltinsDisabled(settings: Settings): boolean {
  */
 export const CRITICAL_BASH_PATTERNS = [
 	// Recursive destruction.
-	// Flag clusters, GNU long options and `--` may appear in any order before the target, so the
-	// separator is repeated rather than assuming the path follows one cluster: `rm -rf /`,
-	// `rm -fr /`, `rm -rf -- /`, `rm --recursive --force /`.
-	/\brm\s+(?:(?:-[a-z]*[rRfF][a-z]*|--(?:recursive|force|no-preserve-root|one-file-system)|--)\s+)+\//i,
+	// Options may sit on either side of the recursive/force flag, so only that flag is pinned and
+	// any other options are skipped: `rm -rf /`, `rm -rf -- /`, `rm --recursive --force /`,
+	// `rm -rf -v /`, `rm -v -rf /`. An absolute target is still required.
+	/\brm\s+(?:-\S+\s+)*(?:-[a-z]*[rRfF][a-z]*|--recursive|--force)\s+(?:-\S+\s+)*\//i,
 	// `--no-preserve-root` defeats coreutils' own refusal to recurse on `/`, so it is critical
 	// wherever it appears — including forms this list would otherwise reach only via the target.
 	/\brm\s+(?:-\S+\s+)*--no-preserve-root\b/i,
