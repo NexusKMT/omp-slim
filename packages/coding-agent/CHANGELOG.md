@@ -66,6 +66,9 @@
 ### Fixed
 
 - Expanded home-relative marketplace catalog paths before cache access, preventing updates from writing into a literal `~` directory under the process working directory ([#8627](https://github.com/can1357/oh-my-pi/issues/8627)).
+### Fixed
+
+- Fixed broker-owned headless Chromium opening and retaining an unowned blank foreground window on Windows ([#8615](https://github.com/can1357/oh-my-pi/issues/8615)).
 
 ## [17.3.4] - 2026-08-14
 
