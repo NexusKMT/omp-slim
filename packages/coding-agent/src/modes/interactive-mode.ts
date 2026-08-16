@@ -1177,6 +1177,9 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		this.#eventBusUnsubscribers.push(
 			this.session.subscribe(event => {
+				if (event.type === "model_changed") {
+					this.#updateWelcomeModel();
+				}
 				void this.#handleGoalSessionEvent(event);
 			}),
 			onStatusLineSessionAccentChanged(() => {
@@ -1184,6 +1187,11 @@ export class InteractiveMode implements InteractiveModeContext {
 				this.#handleSessionAccentInputsChanged();
 			}),
 		);
+		// Resync the welcome banner to the live model: init-time reconciliations
+		// (#reconcileModeFromSession, #enterPlanMode for plan.defaultOnStartup)
+		// can change the model before this subscription exists, so the
+		// model_changed events they emit are never observed by the handler above.
+		this.#updateWelcomeModel();
 		this.#eventBusUnsubscribers.push(
 			onModelRolesChanged(() => {
 				void this.#reapplyPlanModeModelOnRoleChange();
@@ -4428,6 +4436,18 @@ export class InteractiveMode implements InteractiveModeContext {
 				fileTypes: server.fileTypes,
 			})) ?? []
 		);
+	}
+
+	#updateWelcomeModel(): void {
+		if (!this.#welcomeComponent) {
+			return;
+		}
+
+		this.#welcomeComponent.setModel(
+			this.session.model?.name ?? "Unknown",
+			this.session.model?.provider ?? "Unknown",
+		);
+		this.ui.requestRender();
 	}
 
 	#updateWelcomeLspServers(): void {
