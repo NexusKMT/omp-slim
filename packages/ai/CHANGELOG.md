@@ -30,6 +30,9 @@
 ### Fixed
 
 - Fixed Anthropic custom signing-proxy continuations dropping native tool-search call/result blocks from signed assistant history, preserving interleaved thinking for byte-identical replay ([#8559](https://github.com/can1357/oh-my-pi/issues/8559)).
+### Fixed
+
+- Stopped runaway exact response cycles across model providers and kept persistent loops fail-closed after bounded guarded retries ([#8669](https://github.com/can1357/oh-my-pi/pull/8669) by [@pstarkgit](https://github.com/pstarkgit)).
 
 ## [17.3.4] - 2026-08-14
 
