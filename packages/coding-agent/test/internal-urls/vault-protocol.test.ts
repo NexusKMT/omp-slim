@@ -462,6 +462,9 @@ describe("VaultProtocolHandler", () => {
 			// Whatever the spelling of `root`, both paths must return the
 			// same spelling for the same physical file.
 			const asyncSource = resource.sourcePath;
+			if (asyncSource === undefined) {
+				throw new Error("Resolved vault resource is missing its source path");
+			}
 			const syncPath = resolveVaultUrlToPath("vault://Work/Folder/note.md");
 
 			// The sync bash path and the async read path must yield the same
