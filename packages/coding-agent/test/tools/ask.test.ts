@@ -1644,6 +1644,47 @@ describe("AskTool rich ask dialog", () => {
 		}
 	});
 
+	it("formats an empty multi-select answer in a multi-question response as an empty selection", async () => {
+		const tool = new AskTool(createSession());
+		const askDialog = vi.fn().mockResolvedValue({
+			kind: "submit",
+			results: [
+				{
+					id: "q1",
+					question: "Choose any?",
+					options: ["A", "B"],
+					multi: true,
+					selectedOptions: [],
+				},
+				{
+					id: "q2",
+					question: "Choose one?",
+					options: ["C", "D"],
+					multi: false,
+					selectedOptions: ["C"],
+				},
+			],
+		});
+
+		const result = await tool.execute(
+			"call-empty-multi-among-many",
+			{
+				questions: [
+					{ id: "q1", question: "Choose any?", options: [{ label: "A" }, { label: "B" }], multi: true },
+					{ id: "q2", question: "Choose one?", options: [{ label: "C" }, { label: "D" }] },
+				],
+			},
+			undefined,
+			undefined,
+			createContext({ askDialog }),
+		);
+
+		expect(result.content[0]?.type).toBe("text");
+		if (result.content[0]?.type === "text") {
+			expect(stripAnsi(result.content[0].text)).toBe("User answers:\nq1: []\nq2: C");
+		}
+	});
+
 	it("returns chat redirect result when askDialog returns kind chat", async () => {
 		const tool = new AskTool(createSession());
 		const abort = vi.fn();
