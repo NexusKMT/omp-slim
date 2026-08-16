@@ -4,8 +4,8 @@
 
 ### Fixed
 
-- Fixed the native `xargs` builtin panicking in `-I`/`-i` replace mode when stdin is empty; it now exits successfully without running the command, matching GNU behavior ([#8595](https://github.com/can1357/oh-my-pi/issues/8595)).
-- Fixed inline-code foreground color carrying into plain text when a Markdown codespan ended exactly at a soft-wrap boundary ([#8582](https://github.com/can1357/oh-my-pi/issues/8582)).
+- Fixed the native `xargs` builtin panicking in `-I`/`-i` replace mode when stdin is empty; it now exits successfully without running the command, matching GNU behavior.
+- Fixed inline-code foreground color incorrectly carrying into plain text when a Markdown codespan ended exactly at a soft-wrap boundary.
 
 ## [17.3.4] - 2026-08-14
 

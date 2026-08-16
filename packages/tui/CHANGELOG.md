@@ -4,8 +4,8 @@
 
 ### Fixed
 
-- Fixed long CPU-bound event-loop stalls being misclassified as system sleep and omitted from `ui.loop-blocked` diagnostics ([#8442](https://github.com/can1357/oh-my-pi/pull/8442) by [@Mustaqeem66](https://github.com/Mustaqeem66)).
-- Fixed marker-bearing focused components falling back from direct row writes to full TUI renders, while preserving hardware-cursor position and native scrollback across marker changes ([#8646](https://github.com/can1357/oh-my-pi/issues/8646)).
+- Fixed long CPU-bound event-loop stalls being misclassified as system sleep and omitted from loop-blocked diagnostics.
+- Fixed focused components with markers falling back to full-screen redraws instead of direct row updates, preserving cursor position and native scrollback across marker changes.
 
 ## [17.3.4] - 2026-08-14
 

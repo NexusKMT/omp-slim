@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed transient provider failures collapsing to `null` in the configured-completion and remote-LLM paths, which made an Anthropic overload or rate limit indistinguishable from "the model returned nothing". Both now retry transient failures before falling back.
+- Fixed an issue where transient provider failures (such as Anthropic overload or rate limit errors) were incorrectly treated as empty responses; these failures are now retried automatically before falling back.
 
 ## [17.3.4] - 2026-08-14
 

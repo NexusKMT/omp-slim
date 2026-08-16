@@ -4,12 +4,11 @@
 
 ### Added
 
-- Added an opt-in `retry` option to `instrumentedCompleteSimple` (`InstrumentedChatSpanOptions.retry`) that re-issues a oneshot completion on transient Anthropic failures. Opt-in rather than default-on because `oneshotKind` is free-form and callers may pass arbitrary `ctx.tools`, so the funnel cannot itself prove a request is replay-safe. Response headers are captured per attempt and cleared between attempts, so a stale `retry-after` can never be reused for a later failure.
+- Added automatic retry support for transient provider failures during one-shot completions, allowing callers such as compaction to opt in to resilient request handling.
 
 ### Fixed
 
-- Fixed `/handoff`, branch summarization and manual `/compact` aborting on the first transient provider blip. Each is a single, side-effect-free completion whose result is parsed after it resolves, so an Anthropic `overloaded_error` / 429 / 529 now retries instead of failing the whole operation — previously one blip left the user's context full.
-- Added `SummaryOptions.oneshotRetry` so the compaction summarization oneshots can be retried by the caller that needs it without inflating the caller that does not. Manual `/compact` has no outer loop and gets retry by default; auto-compaction passes `false` because `session-maintenance` already retries the whole attempt, and nesting would multiply the request budget (10 outer x 3 inner) while stacking each outer wait on an inner backoff.
+- Fixed /handoff, branch summarization, and manual /compact failing outright on transient provider errors (e.g. Anthropic overloaded/429/529 responses); these operations now retry automatically instead of leaving the user's context full.
 
 ## [17.3.4] - 2026-08-14
 

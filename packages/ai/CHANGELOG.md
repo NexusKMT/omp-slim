@@ -4,29 +4,25 @@
 
 ### Added
 
-- Added `retryTransientCompletion` for oneshot (non-agent-loop) LLM calls. `completeSimple` reports a transient provider failure — Anthropic `overloaded_error` / `rate_limit_error`, HTTP 429/500/502/503/529 — by **resolving** with `stopReason: "error"` rather than throwing, so callers that wrapped it in a try/catch-based retry never actually retried. The helper handles both shapes (resolved error-stop and thrown error), classifies with the existing `AIError` predicates so the retryable set stays defined in one place, honors `retry-after` / `x-ratelimit-reset*` from response headers (supplied via `getResponseHeaders`, since an `AssistantMessage` carries none) or from the error text, and returns/rethrows the failure unchanged once attempts are exhausted so existing caller fallbacks keep working. Aborts surface immediately.
+- Added retryable oneshot completion support (`retryTransientCompletion`) so non-agent LLM calls correctly retry on transient provider failures (Anthropic overload/rate-limit errors, HTTP 429/500/502/503/529), honoring provider-supplied retry-after timing before giving up.
 
 ### Fixed
 
-- Stopped treating `XAI_API_KEY` as SuperGrok (`xai-oauth`) sign-in for availability, so paid-key-only setups default to `xai/grok-4.5` instead of the zero-cost SuperGrok catalog path. Explicit `xai-oauth/…` selectors still accept the paid key via the existing env fallback.
-- Omitted unsupported `reasoning.summary` on paid xAI Responses requests (`xai/grok-4.5`), matching SuperGrok, so a thinking level no longer serializes `summary: "auto"`.
-- Omitted presence/frequency penalties on all first-party xAI Responses models, including non-reasoning ids such as `xai/grok-2`.
-- Fixed Umans usage reporting computing utilization from raw request counts instead of the model-weighted "effective requests", falsely reporting the quota as exhausted while the account still had weighted headroom. The request limit is now split into a weighted soft-cap row (warns, never exhausts) and a raw burst-ceiling row (exhausted only where throttling actually starts), and the rolling 5h window's absolute `resets_at` is surfaced as a countdown ([#7858](https://github.com/can1357/oh-my-pi/issues/7858)). Payloads without a reported burst ceiling collapse to a single weighted `umans:requests` row that can exhaust, so request exhaustion is never unreportable.
-- Fixed `omp usage invalidate` to discard stale OAuth and API-key usage snapshots, then force a cache-bypassing, per-provider serialized refresh so upgraded subscriptions do not silently retain pre-change quota data.
-- Classified Cursor HTTP/2 `NGHTTP2_INTERNAL_ERROR` / `NGHTTP2_REFUSED_STREAM` stream closes as transient so session recovery can continue instead of treating the RST as a hard stop.
-- Fixed OpenAI-compatible streams that close without a `finish_reason` chunk (connection dropped mid-generation, e.g. DeepSeek's `insufficient_system_resource` interruption) being silently finalized as a clean `stop`; the truncated turn now surfaces as a retryable incomplete-stream error instead of halting mid-sentence.
-- Fixed DeepSeek's `insufficient_system_resource` finish reason mapping to a non-retryable error; it now matches the session retry classifier's transient-transport pattern so the turn is auto-retried.
-- Preserved opaque Chat Completions tool-call IDs during same-model replay so custom gateways retain provider correlation state ([#8641](https://github.com/can1357/oh-my-pi/issues/8641)).
-- Fixed Kimi Code multi-account routing to rank OAuth credentials by 5-hour and 7-day quota headroom, retain usage-limit blocks until reset, and preserve JWT account identity across token refreshes for stable usage labels and history ([#8630](https://github.com/can1357/oh-my-pi/issues/8630)).
-- Fixed Anthropic custom signing-proxy continuations dropping native tool-search call/result blocks from signed assistant history, preserving interleaved thinking for byte-identical replay ([#8559](https://github.com/can1357/oh-my-pi/issues/8559)).
-- Stopped runaway exact response cycles across model providers and kept persistent loops fail-closed after bounded guarded retries ([#8669](https://github.com/can1357/oh-my-pi/pull/8669) by [@pstarkgit](https://github.com/pstarkgit)).
-- Fixed xAI 400ing the whole turn on MCP schemas whose tool root is an object plus a typeless exclusive-required `anyOf` (e.g. codebase-memory `check_index_coverage`). Flatten only that root fragment — nested unions and branch property/`additionalProperties` constraints stay intact. Leftover object-root unions quarantine that one tool on paid xAI Completions and xAI OAuth Responses, not on OpenAI/Azure/Codex.
-
-### Removed
-
-- Fixed Alibaba DashScope/Bailian per-minute token throttle (`429 Throttling.AllocationQuota`, "You exceeded your current quota, please check your plan and billing details. … error-code#token-limit", `type=insufficient_quota`) being misclassified as `QUOTA_EXHAUSTED`. The OpenAI-compatible billing wording (and the `insufficient_quota` payload code) matched the usage-limit classifier, so a transient TPM/TPS cap — which Bailian's docs document as clearing within the minute window — blocked the credential and stalled the session for the 30-minute quota backoff instead of retrying with a short backoff on the same credential. Bodies linking the `error-code#token-limit` anchor now classify as `RATE_LIMIT_EXCEEDED` and stay in the transient lane; the identical wording without the anchor (OpenAI's real account-quota error) is unchanged.
-- Fixed Anthropic-compatible streams dropping thinking bytes supplied by `content_block_start`, which invalidated signed-thinking replay ([#8319](https://github.com/can1357/oh-my-pi/pull/8319) by [@max12525k](https://github.com/max12525k)).
-- Updated the Alibaba Coding Plan China login to open Bailian API-key management after the DashScope console was retired ([#8691](https://github.com/can1357/oh-my-pi/issues/8691)).
+- Fixed xAI availability detection so paid-key-only setups correctly default to `xai/grok-4.5` instead of the free SuperGrok catalog; explicit `xai-oauth/…` selectors still work as before.
+- Fixed xAI Responses requests sending unsupported parameters (reasoning summary, presence/frequency penalties) that some models rejected.
+- Fixed Umans usage reporting incorrectly marking quota as exhausted based on raw request counts instead of actual weighted usage, and improved the usage display to show both a soft-cap warning and a hard exhaustion limit with an accurate countdown to reset.
+- Fixed `omp usage invalidate` to fully clear stale usage data and force a fresh refresh, so upgraded subscriptions no longer show outdated quota information.
+- Improved session recovery to correctly treat certain Cursor HTTP/2 connection errors as transient instead of ending the session.
+- Fixed OpenAI-compatible streams (e.g. DeepSeek) that are cut off mid-generation being silently treated as a completed response instead of being retried.
+- Fixed DeepSeek resource-exhaustion interruptions not being automatically retried.
+- Fixed tool-call IDs being lost during same-model replay, which could break correlation with custom gateways.
+- Fixed Kimi Code multi-account routing to prefer accounts with more available quota, respect usage-limit cooldowns, and keep consistent usage history across token refreshes.
+- Fixed Anthropic custom signing-proxy conversations losing tool-search results and thinking content during replay.
+- Fixed rare runaway response loops across model providers so they now fail gracefully instead of repeating indefinitely.
+- Fixed xAI rejecting entire turns due to certain MCP tool schema shapes, restoring compatibility while isolating any remaining incompatible tools rather than failing the whole request.
+- Fixed Alibaba DashScope/Bailian transient per-minute rate limits being misclassified as full quota exhaustion, causing unnecessary long backoffs instead of quick retries.
+- Fixed Anthropic-compatible streams dropping thinking content, which broke replay of prior reasoning.
+- Updated the Alibaba Coding Plan China login flow to point to the current Bailian API-key management console.
 
 ## [17.3.4] - 2026-08-14
 
