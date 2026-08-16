@@ -94,6 +94,7 @@ describe("loadEntriesFromFileStream (Bun.JSONL parity)", () => {
 		expect(titleSlot?.title).toBe("Visitor");
 		expect(entryIds(visited)).toEqual(["s1", "m1", "m2"]);
 		expect(visited[0]).toMatchObject({ title: "Visitor", titleSource: "user" });
+		expect((await sessionLoader.loadEntriesFromFileStream(file)).malformedRecords).toBe(1);
 	});
 
 	it("visits a large journal before reading its tail", async () => {
@@ -199,6 +200,7 @@ describe("loadEntriesFromFileStream (Bun.JSONL parity)", () => {
 		expect(entryTypes(stream.entries)).toEqual(["session", "message", "message"]);
 		const ids = messageIds(stream.entries);
 		expect(ids).toEqual(["m1", "m2"]); // valid entries kept in order, malformed skipped
+		expect(stream.malformedRecords).toBe(1);
 	});
 
 	it("matches parseSessionContent when there is no title slot (header is the first line)", async () => {
@@ -249,5 +251,6 @@ describe("loadEntriesFromFileStream (Bun.JSONL parity)", () => {
 		const stream = await sessionLoader.loadEntriesFromFileStream(missing);
 		expect(stream.entries).toEqual([]);
 		expect(stream.titleSlot).toBeUndefined();
+		expect(stream.malformedRecords).toBe(0);
 	});
 });

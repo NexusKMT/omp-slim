@@ -87,6 +87,9 @@
 ### Fixed
 
 - Fixed custom-tool and other directory discovery recursing into subtrees despite a non-recursive default: `loadFilesFromDir` built a top-level-only glob pattern but never forwarded its `recursive` flag to the native glob (which defaults to recursive), so `~/.codex/tools` scans descended into a Python venv's `site-packages` and imported browser-only frontend assets as tools, crashing startup on an unhandled `window` rejection ([#8552](https://github.com/can1357/oh-my-pi/issues/8552)).
+### Fixed
+
+- Repaired torn session JSONL appends after disk-write failures, rewrote malformed resumed files before their next append, retried transient persistence failures, and surfaced failures in the TUI ([#8596](https://github.com/can1357/oh-my-pi/issues/8596)).
 
 ## [17.3.4] - 2026-08-14
 
