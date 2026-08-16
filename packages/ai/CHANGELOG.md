@@ -24,6 +24,9 @@
 ### Fixed
 
 - Preserved opaque Chat Completions tool-call IDs during same-model replay so custom gateways retain provider correlation state ([#8641](https://github.com/can1357/oh-my-pi/issues/8641)).
+### Fixed
+
+- Fixed Kimi Code multi-account routing to rank OAuth credentials by 5-hour and 7-day quota headroom, retain usage-limit blocks until reset, and preserve JWT account identity across token refreshes for stable usage labels and history ([#8630](https://github.com/can1357/oh-my-pi/issues/8630)).
 
 ## [17.3.4] - 2026-08-14
 
