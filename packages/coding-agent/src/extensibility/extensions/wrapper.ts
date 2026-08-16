@@ -205,15 +205,18 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 		let effectiveParams = params;
 		if (!loopEmittedToolCall && this.runner.hasHandlers("tool_call")) {
 			try {
-				const callResult = (await this.runner.emitToolCall({
-					type: "tool_call",
-					toolName: this.tool.name,
-					toolCallId,
-					input: normalizeToolEventInput(
-						this.tool.name,
-						resolveToolEventInput(this.tool, toolEventArgs(params, context)),
-					),
-				})) as ToolCallEventResult | undefined;
+				const callResult = (await this.runner.emitToolCall(
+					{
+						type: "tool_call",
+						toolName: this.tool.name,
+						toolCallId,
+						input: normalizeToolEventInput(
+							this.tool.name,
+							resolveToolEventInput(this.tool, toolEventArgs(params, context)),
+						),
+					},
+					signal,
+				)) as ToolCallEventResult | undefined;
 
 				if (callResult?.block) {
 					const reason = callResult.reason || "Tool execution was blocked by an extension";

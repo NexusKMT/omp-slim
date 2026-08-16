@@ -5494,6 +5494,18 @@ export const SETTINGS_SCHEMA = {
 
 	"commit.changelogMaxDiffChars": { type: "number", default: 120000 },
 
+	"extensionHandlers.toolCallTimeoutMs": {
+		type: "number",
+		default: 30_000,
+		ui: {
+			tab: "tools",
+			group: "Extensions",
+			label: "Tool Call Handler Timeout (ms)",
+			description:
+				"Positive finite active-work timeout for extension tool_call handlers; invalid values use 30000ms, and time awaiting OMP-owned dialogs does not count",
+		},
+	},
+
 	"dev.autoqa": {
 		type: "boolean",
 		default: true,
