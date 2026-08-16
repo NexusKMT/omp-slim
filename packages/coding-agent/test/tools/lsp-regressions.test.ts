@@ -3720,6 +3720,7 @@ describe("lsp regressions", () => {
 					if (message.method === "initialize") {
 						srv.send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
 					} else if (message.method === "rust-analyzer/reloadWorkspace") {
+						expect(message.params).toBeUndefined();
 						srv.send(methodNotFound(message.id));
 					} else if (message.method === "shutdown") {
 						srv.send({ jsonrpc: "2.0", id: message.id, result: null });

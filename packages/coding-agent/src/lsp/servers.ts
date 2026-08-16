@@ -266,10 +266,7 @@ export async function reloadServer(client: LspClient, serverName: string, signal
 	// unsupported method and swallowed into a bogus "Restarted" (issue #6369).
 	if (isRustAnalyzerClient(client) || serverName === "rust-analyzer") {
 		try {
-			// Pass an empty object, not null: JSON-RPC structured params must be an
-			// object or array, and servers that validate this (Roslyn) reject a null
-			// before returning method-not-found (dotnet/roslyn#84890).
-			await sendRequest(client, "rust-analyzer/reloadWorkspace", {}, signal);
+			await sendRequest(client, "rust-analyzer/reloadWorkspace", undefined, signal);
 			return `Reloaded ${serverName}`;
 		} catch (err) {
 			throwIfAborted(signal);
