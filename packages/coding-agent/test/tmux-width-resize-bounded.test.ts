@@ -16,10 +16,15 @@ import { VirtualTerminal } from "../../tui/test/virtual-terminal";
 //   row counts, which change on every rewrap;
 // - the app resize listener marked every SIGWINCH as "render pending",
 //   arming the conservative replay-from-row-zero fallback.
-// These tests pin the repaired contract: a settled multiplexer width resize
-// must stay viewport-scale (no off-viewport row re-emission, no duplicate
-// committed content), while queued growth and unresolvable structural
-// changes stay lossless.
+// These tests pin the repaired contracts. Resolution must succeed for real
+// component trees (first describe). What the settled resize then does to
+// native history is governed by `tui.resizeScrollback`: the default `append`
+// re-emits ONE clean current-width transcript copy per settled resize (the
+// host rewraps old-width rows naively, so without a refresh scrollback stays
+// width-shredded), `rebuild` clears pane history first so exactly one copy
+// remains, and `preserve` keeps the v1 viewport-scale/zero-growth behavior.
+// Queued growth and unresolvable structural changes stay lossless in every
+// mode.
 
 type DrainableScheduler = {
 	now(): number;
@@ -82,8 +87,11 @@ class VersionedBlock extends StaticBlock {
 	}
 }
 
-// Revisionless leading root child whose row count is width-dependent — the
-// startup-banner shape that used to fail resolution on every width change.
+// Revisionless block whose single logical line re-wraps at the terminal
+// width. As a leading root child it is the startup-banner shape that used to
+// fail resolution on every width change; as a transcript block its rendered
+// rows prove which width a history copy was emitted at (the host's naive
+// rewrap of old rows cannot produce the new-width row lengths).
 class WrappingLeaf implements Component {
 	#text: string;
 	constructor(text: string) {
@@ -131,15 +139,29 @@ function markerLines(tag: string, count: number): string[] {
 	return Array.from({ length: count }, (_, i) => `hist-${tag}-${String(i).padStart(3, "0")}`);
 }
 
+// The whole tape, each physical row exactly once: getScrollBuffer() already
+// returns clamped history followed by the active grid, so appending
+// getViewport() would double-count every on-screen row.
 function combinedRows(term: VirtualTerminal): string[] {
-	return [...term.getScrollBuffer(), ...term.getViewport()].map(row => Bun.stripANSI(row).trimEnd());
+	return term.getScrollBuffer().map(row => Bun.stripANSI(row).trimEnd());
 }
 
 function rowCount(rows: string[], marker: string): number {
 	return rows.filter(row => row === marker).length;
 }
 
+function byteOccurrences(bytes: string, marker: string): number {
+	return bytes.split(marker).length - 1;
+}
+
 const ED3 = "\x1b[3J";
+
+// A 150-column logical line: at width 100 it renders as [100, 50] cells, at
+// width 80 as [80, 70]. A 70-cell `w` row can only come from a fresh
+// current-width emission; a 50-cell one only from the old-width copy.
+const WIDE_LINE = `wide ${"w".repeat(145)}`;
+const WIDE_TAIL_AT_80 = "w".repeat(70);
+const WIDE_TAIL_AT_100 = "w".repeat(50);
 
 describe("multiplexer width-epoch resolution honors the versionless-finalized contract", () => {
 	test("resolves a real-session transcript (versionless finalized blocks before the epoch segment)", () => {
@@ -217,72 +239,74 @@ describe("multiplexer width-epoch resolution honors the versionless-finalized co
 	});
 });
 
-describe("settled tmux width resize stays viewport-scale", () => {
-	let previousTmux: string | undefined;
-	beforeAll(async () => {
-		resetSettingsForTest();
-		await Settings.init({ inMemory: true, cwd: process.cwd() });
-		await initTheme();
-		previousTmux = Bun.env.TMUX;
-		Bun.env.TMUX = "issue-8193";
+let previousTmux: string | undefined;
+beforeAll(async () => {
+	resetSettingsForTest();
+	await Settings.init({ inMemory: true, cwd: process.cwd() });
+	await initTheme();
+	previousTmux = Bun.env.TMUX;
+	Bun.env.TMUX = "issue-8193";
+});
+afterAll(() => {
+	resetSettingsForTest();
+	if (previousTmux === undefined) delete Bun.env.TMUX;
+	else Bun.env.TMUX = previousTmux;
+});
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
+type Fixture = {
+	term: VirtualTerminal;
+	scheduler: DrainableScheduler;
+	tui: TUI;
+	transcript: TranscriptContainer;
+};
+async function buildSettledSession(blocks: Component[]): Promise<Fixture> {
+	const term = new VirtualTerminal(100, 30, 2_000);
+	const scheduler = makeDrainableScheduler();
+	const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+	// Leading root children ahead of the transcript, like the startup banner:
+	// one revisionless width-wrapping leaf and one Text (revision-bearing).
+	tui.addChild(new WrappingLeaf(`banner ${"b".repeat(150)}`));
+	tui.addChild(new Text(`tip: ${"t".repeat(140)}`, 1, 0));
+	const transcript = new TranscriptContainer();
+	for (const block of blocks) transcript.addChild(block);
+	tui.addChild(transcript);
+	tui.addChild(new Footer(3));
+	tui.start();
+	scheduler.flush();
+	await term.flush();
+	return { term, scheduler, tui, transcript };
+}
+
+async function settle(fixture: Fixture): Promise<void> {
+	fixture.scheduler.flush();
+	await fixture.term.flush();
+}
+
+function spyWrites(fixture: Fixture): string[] {
+	const writes: string[] = [];
+	const write = fixture.term.write.bind(fixture.term);
+	vi.spyOn(fixture.term, "write").mockImplementation(data => {
+		writes.push(data);
+		write(data);
 	});
-	afterAll(() => {
-		resetSettingsForTest();
-		if (previousTmux === undefined) delete Bun.env.TMUX;
-		else Bun.env.TMUX = previousTmux;
-	});
-	afterEach(() => {
-		vi.restoreAllMocks();
-	});
+	return writes;
+}
 
-	type Fixture = {
-		term: VirtualTerminal;
-		scheduler: DrainableScheduler;
-		tui: TUI;
-		transcript: TranscriptContainer;
-	};
-	async function buildSettledSession(blocks: Component[]): Promise<Fixture> {
-		const term = new VirtualTerminal(100, 30, 2_000);
-		const scheduler = makeDrainableScheduler();
-		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
-		// Leading root children ahead of the transcript, like the startup banner:
-		// one revisionless width-wrapping leaf and one Text (revision-bearing).
-		tui.addChild(new WrappingLeaf(`banner ${"b".repeat(150)}`));
-		tui.addChild(new Text(`tip: ${"t".repeat(140)}`, 1, 0));
-		const transcript = new TranscriptContainer();
-		for (const block of blocks) transcript.addChild(block);
-		tui.addChild(transcript);
-		tui.addChild(new Footer(3));
-		tui.start();
-		scheduler.flush();
-		await term.flush();
-		return { term, scheduler, tui, transcript };
-	}
-
-	async function settle(fixture: Fixture): Promise<void> {
-		fixture.scheduler.flush();
-		await fixture.term.flush();
-	}
-
-	function spyWrites(fixture: Fixture): string[] {
-		const writes: string[] = [];
-		const write = fixture.term.write.bind(fixture.term);
-		vi.spyOn(fixture.term, "write").mockImplementation(data => {
-			writes.push(data);
-			write(data);
-		});
-		return writes;
-	}
-
+describe("settled tmux width resize stays viewport-scale in `preserve` mode", () => {
 	test("idle width shrink+grow re-emits no off-viewport rows and duplicates nothing", async () => {
-		// #given a settled idle session taller than the viewport, all history
-		// blocks finalized and versionless (the measured production shape)
+		// #given a settled idle session in `preserve` mode, taller than the
+		// viewport, all history blocks finalized and versionless (the measured
+		// production shape)
 		const fixture = await buildSettledSession([
 			new StaticBlock(markerLines("a", 30)),
 			new StaticBlock(markerLines("b", 30)),
 			new VersionedBlock(markerLines("c", 30)),
 		]);
 		try {
+			fixture.tui.setResizeScrollback("preserve");
 			const writes = spyWrites(fixture);
 
 			// #when the app-style resize echo marks a render pending and the pane
@@ -329,7 +353,8 @@ describe("settled tmux width resize stays viewport-scale", () => {
 	});
 
 	test("growth queued during the resize debounce commits exactly once (no loss, no replay)", async () => {
-		// #given a settled session streaming into a Markdown-backed live block
+		// #given a settled session in `preserve` mode streaming into a
+		// Markdown-backed live block
 		const streaming = new StreamingMarkdownBlock(
 			markerLines("s", 20)
 				.map(line => `${line}`)
@@ -341,6 +366,7 @@ describe("settled tmux width resize stays viewport-scale", () => {
 			streaming,
 		]);
 		try {
+			fixture.tui.setResizeScrollback("preserve");
 			const writes = spyWrites(fixture);
 
 			// #when a width change arrives with a render pending and more output
@@ -370,13 +396,14 @@ describe("settled tmux width resize stays viewport-scale", () => {
 	});
 
 	test("an unresolvable structural change keeps the lossless replay fallback", async () => {
-		// #given a settled session
+		// #given a settled session in `preserve` mode
 		const fixture = await buildSettledSession([
 			new StaticBlock(markerLines("a", 30)),
 			new StaticBlock(markerLines("b", 30)),
 			new VersionedBlock(markerLines("c", 20)),
 		]);
 		try {
+			fixture.tui.setResizeScrollback("preserve");
 			const writes = spyWrites(fixture);
 
 			// #when a block is inserted before the epoch segment inside the debounce
@@ -395,6 +422,180 @@ describe("settled tmux width resize stays viewport-scale", () => {
 				expect(rowCount(rows, marker)).toBeGreaterThanOrEqual(1);
 			}
 			expect(writes.join("")).not.toContain(ED3);
+		} finally {
+			fixture.tui.stop();
+			await fixture.term.flush();
+		}
+	});
+});
+
+describe("settled tmux width resize refreshes stale-width scrollback (tui.resizeScrollback)", () => {
+	test("the default `tui.resizeScrollback` setting is `append`: one fresh current-width copy per settled resize, without ED3", async () => {
+		// #given a settled idle session running the product default (the boot
+		// path applies settings.get("tui.resizeScrollback") onto the engine)
+		// whose transcript holds a width-wrapping line; regressing this leaves
+		// pane scrollback wrapped at the old width forever after a resize
+		const fixture = await buildSettledSession([
+			new StaticBlock(markerLines("a", 30)),
+			new WrappingLeaf(WIDE_LINE),
+			new StaticBlock(markerLines("b", 30)),
+			new VersionedBlock(markerLines("c", 20)),
+		]);
+		try {
+			const defaultMode = Settings.instance.get("tui.resizeScrollback");
+			expect(defaultMode).toBe("append");
+			fixture.tui.setResizeScrollback(defaultMode);
+			const writes = spyWrites(fixture);
+
+			// #when the pane width shrinks and settles once
+			fixture.tui.requestRender();
+			fixture.term.resize(80, 30);
+			await settle(fixture);
+			const shrinkBytes = writes.join("");
+
+			// #then exactly one clean replay ran (off-viewport history re-emitted
+			// once — a storm or a second copy per settle re-emits it more) and no
+			// ED3 reached the pane
+			expect(shrinkBytes).not.toContain(ED3);
+			expect(byteOccurrences(shrinkBytes, "hist-a-000")).toBe(1);
+			// #then history now holds the fresh current-width wrap (the host's
+			// rewrap of the old copy cannot produce a 70-cell row)
+			const rowsAfterShrink = combinedRows(fixture.term);
+			expect(rowCount(rowsAfterShrink, WIDE_TAIL_AT_80)).toBe(1);
+			// #then duplication is bounded to exactly the one fresh copy
+			expect(rowCount(rowsAfterShrink, "hist-a-000")).toBe(2);
+			expect(rowCount(rowsAfterShrink, "hist-c-019")).toBeGreaterThanOrEqual(1);
+			expect(rowCount(rowsAfterShrink, "hist-c-019")).toBeLessThanOrEqual(2);
+
+			// #when a second resize settles
+			writes.length = 0;
+			fixture.tui.requestRender();
+			fixture.term.resize(110, 30);
+			await settle(fixture);
+
+			// #then growth stays monotonic at one copy per settle (no compounding)
+			expect(byteOccurrences(writes.join(""), "hist-a-000")).toBe(1);
+			expect(rowCount(combinedRows(fixture.term), "hist-a-000")).toBe(3);
+		} finally {
+			fixture.tui.stop();
+			await fixture.term.flush();
+		}
+	});
+
+	test("`rebuild` clears pane history with a single ED3 and leaves exactly one current-width copy", async () => {
+		// #given a settled idle session in `rebuild` mode; regressing this either
+		// duplicates the transcript (ED3 missing) or storms (ED3 repeated)
+		const fixture = await buildSettledSession([
+			new StaticBlock(markerLines("a", 30)),
+			new WrappingLeaf(WIDE_LINE),
+			new StaticBlock(markerLines("b", 30)),
+			new VersionedBlock(markerLines("c", 20)),
+		]);
+		try {
+			fixture.tui.setResizeScrollback("rebuild");
+			const writes = spyWrites(fixture);
+
+			// #when the pane width shrinks and settles once
+			fixture.tui.requestRender();
+			fixture.term.resize(80, 30);
+			await settle(fixture);
+			const bytes = writes.join("");
+
+			// #then exactly one ED3 fired and history holds the transcript exactly
+			// once, at the current width — the old-width rows are gone
+			expect(byteOccurrences(bytes, ED3)).toBe(1);
+			const rows = combinedRows(fixture.term);
+			expect(rowCount(rows, "hist-a-000")).toBe(1);
+			expect(rowCount(rows, "hist-b-015")).toBe(1);
+			expect(rowCount(rows, "hist-c-019")).toBe(1);
+			expect(rowCount(rows, WIDE_TAIL_AT_80)).toBe(1);
+			expect(rowCount(rows, WIDE_TAIL_AT_100)).toBe(0);
+		} finally {
+			fixture.tui.stop();
+			await fixture.term.flush();
+		}
+	});
+
+	test("a width epoch settled under a visible overlay latches the refresh for the first uncovered render", async () => {
+		// #given a settled session in `append` mode with a visible overlay;
+		// regressing the latch leaves stale old-width history forever when no
+		// second resize arrives after the overlay closes
+		const fixture = await buildSettledSession([
+			new StaticBlock(markerLines("a", 30)),
+			new WrappingLeaf(WIDE_LINE),
+			new StaticBlock(markerLines("b", 30)),
+			new VersionedBlock(markerLines("c", 20)),
+		]);
+		try {
+			fixture.tui.setResizeScrollback("append");
+			const overlay = fixture.tui.showOverlay(new StaticBlock(["overlay-body"]), {
+				anchor: "top-left",
+				row: 0,
+				col: 0,
+			});
+			await settle(fixture);
+			const writes = spyWrites(fixture);
+
+			// #when the width settles while the overlay is visible
+			fixture.tui.requestRender();
+			fixture.term.resize(80, 30);
+			await settle(fixture);
+
+			// #then the refresh defers (overlays freeze commits): no replay, no ED3
+			const coveredBytes = writes.join("");
+			expect(coveredBytes).not.toContain("hist-a-000");
+			expect(coveredBytes).not.toContain(ED3);
+
+			// #when the overlay closes with no further resize
+			writes.length = 0;
+			overlay.hide();
+			await settle(fixture);
+
+			// #then the first uncovered render consumes the latched refresh: one
+			// clean current-width copy lands in history
+			expect(byteOccurrences(writes.join(""), "hist-a-000")).toBe(1);
+			const rows = combinedRows(fixture.term);
+			expect(rowCount(rows, WIDE_TAIL_AT_80)).toBe(1);
+			expect(rowCount(rows, "hist-a-000")).toBe(2);
+		} finally {
+			fixture.tui.stop();
+			await fixture.term.flush();
+		}
+	});
+
+	test("`append` replay carries growth queued during the debounce exactly once", async () => {
+		// #given a settled session in `append` mode streaming into a
+		// Markdown-backed live block; regressing this drops or duplicates rows
+		// that streamed inside the settle window
+		const streaming = new StreamingMarkdownBlock(markerLines("s", 20).join("\n\n"));
+		const fixture = await buildSettledSession([
+			new StaticBlock(markerLines("a", 30)),
+			new StaticBlock(markerLines("b", 30)),
+			streaming,
+		]);
+		try {
+			fixture.tui.setResizeScrollback("append");
+			const writes = spyWrites(fixture);
+
+			// #when a width change arrives and more output streams in during the
+			// debounce window
+			fixture.tui.requestRender();
+			fixture.term.resize(80, 30);
+			streaming.md.setText(`${markerLines("s", 20).join("\n\n")}\n\nhist-q-000\n\nhist-q-001`);
+			fixture.tui.requestRender();
+			await settle(fixture);
+			const bytes = writes.join("");
+
+			// #then the queued rows surface exactly once (delivered by the replay's
+			// viewport; the pinned live region stays uncommitted until finalize)
+			const rows = combinedRows(fixture.term);
+			expect(rowCount(rows, "hist-q-000")).toBe(1);
+			expect(rowCount(rows, "hist-q-001")).toBe(1);
+			// #then finalized history was re-emitted exactly once, without ED3, and
+			// nothing was lost
+			expect(bytes).not.toContain(ED3);
+			expect(byteOccurrences(bytes, "hist-a-000")).toBe(1);
+			expect(rowCount(rows, "hist-a-000")).toBe(2);
 		} finally {
 			fixture.tui.stop();
 			await fixture.term.flush();

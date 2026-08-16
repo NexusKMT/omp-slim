@@ -360,6 +360,27 @@ export interface RenderRequestOptions {
 	clearScrollback?: boolean;
 }
 
+/**
+ * What a settled in-place width resize (multiplexer pane or an in-place-latched
+ * direct terminal) does to native scrollback, which the host rewrapped at the
+ * old width:
+ * - `append`: replay the transcript at the current width below the old-wrap
+ *   history — one fresh copy per settled resize, nothing destroyed.
+ * - `rebuild`: clear native history first (ED3) and replay — history holds the
+ *   transcript exactly once at the current width. Requires a host that honors
+ *   an inner ED3 (tmux does; GNU screen ignores it, degrading to `append`),
+ *   and erases pre-session pane history.
+ * - `preserve`: repaint the viewport only — zero history growth; scrollback
+ *   keeps the old-width wrap until content next scrolls off.
+ *
+ * The raw engine defaults to `preserve` (append-only native scrollback, the
+ * engine's baseline contract); `PI_TUI_RESIZE_SCROLLBACK` overrides that
+ * initial value. The coding agent applies its `tui.resizeScrollback` setting
+ * (default `append`) on top at startup, so interactive sessions refresh
+ * stale-width history out of the box.
+ */
+export type ResizeScrollbackMode = "rebuild" | "append" | "preserve";
+
 /** Type guard to check if a component implements Focusable */
 export function isFocusable(component: Component | null): component is Component & Focusable {
 	return component !== null && "focused" in component;
@@ -1363,6 +1384,20 @@ export class TUI extends Container {
 	#hasEverRendered = false;
 	#scrollbackRebuildEnabled =
 		Bun.env.PI_TUI_SCROLLBACK_REBUILD === "1" || Bun.env.PI_TUI_SCROLLBACK_REBUILD === "true";
+	#resizeScrollbackMode: ResizeScrollbackMode = TUI.#initialResizeScrollbackMode();
+	static #initialResizeScrollbackMode(): ResizeScrollbackMode {
+		const raw = Bun.env.PI_TUI_RESIZE_SCROLLBACK;
+		return raw === "rebuild" || raw === "preserve" || raw === "append" ? raw : "preserve";
+	}
+	// A width epoch settled while a visible overlay froze commits, so the
+	// resize-scrollback refresh could not run. Consumed by the first uncovered
+	// authoritative normal-screen render so the stale old-width history is
+	// repaired even if no further resize arrives. Any full paint clears it,
+	// including one that fires while an overlay is still visible (session
+	// replace, divergence rebuild): a full paint re-emits the committed prefix
+	// from the recomposed current-width frame, which is exactly the refresh
+	// this latch is waiting for — it supersedes the pending replay.
+	#resizeScrollbackReplayPending = false;
 	// Set by the terminal resize callback; consumed by the next render. A resize
 	// event invalidates the committed screen even when the dimensions net out
 	// unchanged by render time (e.g. a 6→4→6 round trip coalesced into one frame
@@ -1948,6 +1983,22 @@ export class TUI extends Container {
 	 */
 	setScrollbackRebuild(enabled: boolean): void {
 		this.#scrollbackRebuildEnabled = enabled;
+	}
+
+	/**
+	 * Get how a settled in-place width resize refreshes native scrollback.
+	 */
+	getResizeScrollback(): ResizeScrollbackMode {
+		return this.#resizeScrollbackMode;
+	}
+
+	/**
+	 * Set how a settled in-place width resize refreshes native scrollback
+	 * (see {@link ResizeScrollbackMode}; engine default `preserve` — the coding
+	 * agent applies its `tui.resizeScrollback` setting, default `append`).
+	 */
+	setResizeScrollback(mode: ResizeScrollbackMode): void {
+		this.#resizeScrollbackMode = mode;
 	}
 
 	getShowHardwareCursor(): boolean {
@@ -3739,6 +3790,13 @@ export class TUI extends Container {
 		if (widthEpochReset && hasVisibleOverlay && this.#widthEpochOverlayBoundary === undefined) {
 			this.#widthEpochOverlayBoundary = capturedWidthEpochBoundary;
 		}
+		// A width epoch settled while an overlay covered the transcript: the
+		// scrollback refresh cannot run now (overlays freeze commits), and no
+		// second width resize may ever come. Latch it and consume it on the
+		// first uncovered authoritative normal-screen render.
+		if (widthEpochReset && hasVisibleOverlay && this.#resizeScrollbackMode !== "preserve") {
+			this.#resizeScrollbackReplayPending = true;
+		}
 		const replayUnresolvedOverlayFrame = widthEpochReset && this.#widthEpochOverlayReplayPending;
 		const replayUnresolvedWidthEpoch =
 			replayUnresolvedOverlayFrame ||
@@ -3772,7 +3830,21 @@ export class TUI extends Container {
 			!geometryChanged &&
 			!isMultiplexerSession() &&
 			(committedRowsResynced || frameLength <= this.#committedRows);
-		const fullPaint = firstPaint || replaceRequested || geometryRebuild || divergenceRebuild;
+		// A settled in-place width resize left native history wrapped at the old
+		// width (the host rewraps its own scrollback; long lines stay shredded at
+		// the old boundaries). Unless the mode is `preserve`, refresh it with one
+		// full paint of the recomposed current-width frame: `append` leaves the
+		// old-wrap copy above (one fresh copy per settled resize, never loss);
+		// `rebuild` clears native history first so it holds the transcript
+		// exactly once. Epochs settled under a visible overlay keep the deferred
+		// bounded path for that frame and consume the latched refresh here once
+		// the overlay closes.
+		const resizeScrollbackReplay =
+			(widthEpochReset || this.#resizeScrollbackReplayPending) &&
+			!hasVisibleOverlay &&
+			this.#resizeScrollbackMode !== "preserve";
+		const fullPaint =
+			firstPaint || replaceRequested || geometryRebuild || divergenceRebuild || resizeScrollbackReplay;
 		let windowTop: number;
 		let chunkTo: number;
 		let widthEpochAppendFrom = 0;
@@ -3903,7 +3975,10 @@ export class TUI extends Container {
 		const intent: RenderIntent = fullPaint
 			? {
 					kind: "fullPaint",
-					clearScrollback: divergenceRebuild || ((replaceRequested || geometryRebuild) && !isMultiplexerSession()),
+					clearScrollback:
+						divergenceRebuild ||
+						(resizeScrollbackReplay && this.#resizeScrollbackMode === "rebuild") ||
+						((replaceRequested || geometryRebuild) && !isMultiplexerSession()),
 				}
 			: { kind: "update", chunkTo, windowTop };
 		this.#logRedraw(intent, frameLength, height);
@@ -3931,7 +4006,15 @@ export class TUI extends Container {
 		// re-emission. Width epochs retain an opaque native-row ledger, so close
 		// the old placement-coordinate epoch with its captured seam on reset and
 		// use the current-width commit seam calculated below thereafter.
-		if (widthEpochReset) {
+		// An `append` scrollback replay is exactly such a reset: the old-width
+		// attach rows must not be compared against the current-width commit seam,
+		// so the coordinate epoch transitions here and the full paint re-anchors
+		// placements at current-width rows (archived cells keep their identity
+		// and advance their placement id on the next emit). Only the ED3
+		// `rebuild` replay skips this: the clear destroys every placement cell
+		// and the emitter restarts the epochs via `resetPlacementEpochs()`, same
+		// as a direct-terminal geometry rebuild.
+		if (widthEpochReset && !(intent.kind === "fullPaint" && intent.clearScrollback)) {
 			this.#imageBudget.observeCommitWatermark(placementEpochWatermark);
 			this.#imageBudget.beginPlacementCoordinateEpoch();
 		} else if (intent.kind === "fullPaint" || this.#widthEpochBaselineRows === undefined) {
@@ -3947,7 +4030,9 @@ export class TUI extends Container {
 				cursorTrackingLineCount,
 				boundConptyPaint: !unboundedConptyPaint,
 				leadingSequence: deferredAltExit,
-				copyScreenToScrollback: true,
+				// A width-epoch replay must not push the invalidated old-width
+				// viewport into native history on terminals that support it.
+				copyScreenToScrollback: !resizeScrollbackReplay,
 			});
 			this.#pendingAltExit = "";
 			this.#committedPrefix = rawFrame.slice(0, chunkTo);
@@ -3959,6 +4044,7 @@ export class TUI extends Container {
 			this.#widthEpochOverlayReplayPending = false;
 			this.#widthEpochOverlayBoundary = undefined;
 			this.#widthEpochCommittedPrefix = undefined;
+			this.#resizeScrollbackReplayPending = false;
 			this.#publishCommittedRows();
 			if (!firstPaint && frameLength > height) this.#armPostFullPaintSettle();
 			return;
