@@ -161,6 +161,7 @@ import type { PlanModeState } from "../plan-mode/state";
 import goalModeContextPrompt from "../prompts/goals/goal-mode-context.md" with { type: "text" };
 import goalTodoContextPrompt from "../prompts/goals/goal-todo-context.md" with { type: "text" };
 import autoContinuePrompt from "../prompts/system/auto-continue.md" with { type: "text" };
+import checkpointActiveNoticeTemplate from "../prompts/system/checkpoint-active-notice.md" with { type: "text" };
 import interruptedThinkingTemplate from "../prompts/system/interrupted-thinking.md" with { type: "text" };
 import planModeActivePrompt from "../prompts/system/plan-mode-active.md" with { type: "text" };
 import planModeReferencePrompt from "../prompts/system/plan-mode-reference.md" with { type: "text" };
@@ -285,6 +286,7 @@ import {
 import {
 	type BashExecutionMessage,
 	buildReplanTitleContext,
+	CHECKPOINT_ACTIVE_REMINDER_TYPE,
 	type CustomMessage,
 	type CustomMessagePayload,
 	convertToLlm,
@@ -2340,6 +2342,34 @@ export class AgentSession {
 		}
 	}
 
+	/**
+	 * Builds the transient checkpoint-active reminder for a successful
+	 * checkpoint tool result, or undefined otherwise. The reminder is appended
+	 * to agent.state synchronously in the message_end handler (before any
+	 * await) so the next provider call within the same tool loop sees it, and
+	 * is persisted via #persistMessageEnd. Because the entry sits after the
+	 * checkpoint entry, the rewind branch cut drops it from the active path.
+	 */
+	#checkpointActiveReminderFor(
+		message: AgentMessage,
+	): CustomMessage<{ goal?: string; startedAt?: string }> | undefined {
+		if (message.role !== "toolResult" || message.isError) return undefined;
+		const semanticResult = semanticToolResult(message.toolName, message);
+		if (semanticResult?.toolName !== "checkpoint") return undefined;
+		const details = isRecord(semanticResult.details) ? semanticResult.details : undefined;
+		const goal = details ? stringProperty(details, "goal") : undefined;
+		const startedAt = details ? stringProperty(details, "startedAt") : undefined;
+		return {
+			role: "custom",
+			customType: CHECKPOINT_ACTIVE_REMINDER_TYPE,
+			content: prompt.render(checkpointActiveNoticeTemplate),
+			display: false,
+			details: { goal, startedAt },
+			attribution: "agent",
+			timestamp: Date.now(),
+		};
+	}
+
 	#persistMessageEnd(message: AgentMessage): void {
 		if (message.role === "hookMessage" || message.role === "custom") {
 			// Prewalk's plan nudge is a one-run steering instruction. Persisting it would
@@ -2497,6 +2527,37 @@ export class AgentSession {
 			this.agent.appendMessage(interruptedThinkingMessage);
 		}
 
+		// Same pre-await visibility requirement as the interrupted-thinking
+		// message: agent-core invokes message_end listeners fire-and-forget, so
+		// the next provider call can start before any awaited session-event
+		// emission or persistence below settles. The checkpoint-active reminder
+		// must already be in agent.state for that call — append it synchronously
+		// here and persist it later (see #persistMessageEnd). It sits after the
+		// checkpoint entry, so the rewind branch cut
+		// (branchWithSummary(checkpointEntryId)) drops it from the active path
+		const checkpointReminder =
+			event.type === "message_end" && event.message.role === "toolResult"
+				? this.#checkpointActiveReminderFor(event.message)
+				: undefined;
+		if (checkpointReminder) {
+			// Set #checkpointState synchronously too: the reminder is now visible to
+			// the very next provider call, so a model that immediately calls `rewind`
+			// must find an active checkpoint in RewindTool.execute(). The entry id is
+			// backfilled post-await (see the toolResult handler) once the checkpoint
+			// toolResult entry is persisted; #applyRewind runs on a later rewind turn,
+			// never before that backfill.
+			this.#checkpointState = {
+				checkpointMessageCount: this.agent.state.messages.length,
+				checkpointEntryId: null,
+				startedAt:
+					(checkpointReminder.details && stringProperty(checkpointReminder.details, "startedAt")) ??
+					new Date().toISOString(),
+			};
+			this.#pendingRewindReport = undefined;
+			this.#lastCompletedRewind = undefined;
+			this.agent.appendMessage(checkpointReminder);
+		}
+
 		const messageEndPersistence =
 			event.type === "message_end" ? this.#createMessageEndPersistenceSlot(event.message) : undefined;
 
@@ -2616,6 +2677,15 @@ export class AgentSession {
 					interruptedThinkingMessage.attribution,
 				);
 			}
+			if (checkpointReminder) {
+				this.sessionManager.appendCustomMessageEntry(
+					checkpointReminder.customType,
+					checkpointReminder.content,
+					checkpointReminder.display,
+					checkpointReminder.details,
+					checkpointReminder.attribution,
+				);
+			}
 			// Other message types (bashExecution, compactionSummary, branchSummary) are persisted elsewhere
 
 			if (event.message.role === "assistant") {
@@ -2703,15 +2773,24 @@ export class AgentSession {
 					);
 				}
 				if (semanticResult?.toolName === "checkpoint" && !isError) {
-					const checkpointEntryId = this.sessionManager.getEntries().at(-1)?.id ?? null;
-					this.#checkpointState = {
-						checkpointMessageCount: this.agent.state.messages.length,
-						checkpointEntryId,
-						startedAt:
-							(semanticDetails && stringProperty(semanticDetails, "startedAt")) ?? new Date().toISOString(),
-					};
-					this.#pendingRewindReport = undefined;
-					this.#lastCompletedRewind = undefined;
+					// Backfill the checkpoint entry id now that the toolResult entry is
+					// persisted. #checkpointState was set synchronously pre-await (with a
+					// null entry id) so an immediate `rewind` still finds an active
+					// checkpoint; locate the toolResult's own entry by identity since the
+					// transient reminder entry follows it (last-entry would branch-cut the
+					// reminder instead of leaving it on the active path).
+					const entries = this.sessionManager.getEntries();
+					let checkpointEntryId: string | null = null;
+					for (let i = entries.length - 1; i >= 0; i--) {
+						const entry = entries[i];
+						if (entry.type === "message" && entry.message === event.message) {
+							checkpointEntryId = entry.id;
+							break;
+						}
+					}
+					if (this.#checkpointState) {
+						this.#checkpointState.checkpointEntryId = checkpointEntryId;
+					}
 				}
 				if (semanticResult?.toolName === "rewind" && !isError && this.#checkpointState) {
 					const detailReport = semanticDetails ? (stringProperty(semanticDetails, "report")?.trim() ?? "") : "";
