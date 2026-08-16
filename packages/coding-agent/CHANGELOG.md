@@ -86,6 +86,10 @@
 
 - Fixed seen-line guard retries forcing agents to resend entire unchanged patches. Complete inline reveals now issue one-shot `RETRY <token>` continuations that rerun validation against live files, while numbered lines in successful edit output join the returned snapshot's seen-line provenance only when the written content exactly matches that output.
 
+### Fixed
+
+- Fixed Claude Code custom tool discovery attempting to import non-module files from `.claude/tools` ([#8471](https://github.com/can1357/oh-my-pi/pull/8471) by [@Kigbnajd](https://github.com/Kigbnajd)).
+
 ## [17.3.1] - 2026-08-13
 
 ### Fixed
