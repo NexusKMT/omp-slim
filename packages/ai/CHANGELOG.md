@@ -46,6 +46,8 @@
 
 ### Fixed
 
+- Fixed OpenAI-compatible streams that close without a `finish_reason` chunk (connection dropped mid-generation, e.g. DeepSeek's `insufficient_system_resource` interruption) being silently finalized as a clean `stop`; the truncated turn now surfaces as a retryable incomplete-stream error instead of halting mid-sentence.
+- Fixed DeepSeek's `insufficient_system_resource` finish reason mapping to a non-retryable error; it now matches the session retry classifier's transient-transport pattern so the turn is auto-retried.
 - Fixed Ollama chat adapter to correctly forward sampling parameters like temperature and topP to the provider.
 - Fixed OpenAI agent turns ending prematurely after a web search with no visible answer, ensuring the agent continues processing the search results.
 - Fixed a resource leak where completed model streams retained provider concurrency permits longer than necessary.
