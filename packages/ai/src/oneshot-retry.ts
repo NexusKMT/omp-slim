@@ -87,6 +87,7 @@ const DEFAULT_BASE_DELAY_MS = 500;
 const DEFAULT_MAX_DELAY_MS = 30_000;
 /** Cap on pure backoff growth. A provider hint may still exceed this, up to `maxDelayMs`. */
 const BACKOFF_CEILING_MS = 8_000;
+const RETRY_AFTER_MS_SUFFIX = /(?:^|\s)retry-after-ms=([0-9]+(?:\.[0-9]+)?)(?=\s|$)/i;
 
 function backoffDelayMs(attempt: number, baseDelayMs: number): number {
 	const growth = Math.min(baseDelayMs * 2 ** (attempt - 1), BACKOFF_CEILING_MS);
@@ -96,8 +97,13 @@ function backoffDelayMs(attempt: number, baseDelayMs: number): number {
 }
 
 /** Retryable when the provider says transient, or when it says "wait, then retry". */
-function isRetryableOneshotFailure(errorId: number): boolean {
+function isRetryableOneshotFailure(errorId: number, errorStatus: number | undefined, errorMessage: string): boolean {
+	// llama.cpp reports deterministic tool-call JSON parse failures as HTTP 500.
+	// Replaying the same prompt produces the same malformed output.
+	if (AIError.LLAMA_CPP_TOOL_CALL_PARSE_PATTERN.test(errorMessage)) return false;
+	if (AIError.is(errorId, AIError.Flag.ContentBlocked)) return false;
 	return (
+		AIError.isTransientStatus(errorStatus) ||
 		AIError.is(errorId, AIError.Flag.Transient) ||
 		AIError.is(errorId, AIError.Flag.UsageLimit) ||
 		AIError.retriable(errorId)
@@ -171,8 +177,10 @@ export async function retryTransientCompletion(
 					? thrown.message
 					: String(thrown)
 				: ((message as AssistantMessage).errorMessage ?? "unknown error");
+		const errorStatus =
+			thrown !== undefined ? AIError.status(thrown) : (message as AssistantMessage).errorStatus;
 		const lastAttempt = attempt >= maxAttempts;
-		if (lastAttempt || !isRetryableOneshotFailure(errorId)) {
+		if (lastAttempt || !isRetryableOneshotFailure(errorId, errorStatus, errorMessage)) {
 			if (thrown !== undefined) throw thrown;
 			return message as AssistantMessage;
 		}
@@ -183,7 +191,17 @@ export async function retryTransientCompletion(
 		// errors (e.g. AnthropicApiError) carry their own headers.
 		const headers: HeadersLike = thrown !== undefined ? getHeadersFromError(thrown) : options?.getResponseHeaders?.();
 		const headerHintMs = getRetryAfterMsFromHeaders(headers);
-		const textHintMs = extractRetryHint(undefined, errorMessage);
+		const extractedTextHintMs = extractRetryHint(undefined, errorMessage);
+		const suffixValue = RETRY_AFTER_MS_SUFFIX.exec(errorMessage)?.[1];
+		const parsedSuffixMs = suffixValue === undefined ? undefined : Number(suffixValue);
+		const suffixHintMs =
+			parsedSuffixMs !== undefined && Number.isFinite(parsedSuffixMs) && parsedSuffixMs > 0
+				? Math.ceil(parsedSuffixMs)
+				: undefined;
+		const textHintMs =
+			extractedTextHintMs === undefined && suffixHintMs === undefined
+				? undefined
+				: Math.max(extractedTextHintMs ?? 0, suffixHintMs ?? 0);
 		const hintMs =
 			headerHintMs === undefined && textHintMs === undefined
 				? undefined
