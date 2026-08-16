@@ -7094,6 +7094,7 @@ export class AgentSession {
 		return undefined;
 	}
 
+
 	#enforceRewindBeforeYield(): boolean {
 		if (!this.#checkpointState || this.#pendingRewindReport) {
 			return false;

@@ -409,8 +409,8 @@ export class TurnRecovery {
 		return this.#handleUnexpectedAssistantStop(message);
 	}
 
-	/** Removes a persisted failed assistant turn after its persistence slot settles. */
-	dropPersistedAssistantTurn(message: AssistantMessage): Promise<void> {
+	/** Removes a persisted failed assistant turn after its persistence slot settles; returns the dropped branch entry id. */
+	dropPersistedAssistantTurn(message: AssistantMessage): Promise<string | undefined> {
 		return this.#dropPersistedAssistantTurn(message);
 	}
 
@@ -720,10 +720,14 @@ export class TurnRecovery {
 			// provider usage can anchor the next prompt at the full failed-request size
 			// and re-trigger compaction at the same boundary. Remove every capped
 			// empty output; toolUse orphans still need this for Anthropic history.
-			await this.dropPersistedAssistantTurn(assistantMessage);
+			await this.#dropAssistantTurnDurably(assistantMessage);
 			return "terminal";
 		}
-		this.discardAssistantTurn(assistantMessage);
+		// The reparented leaf must be durably persisted before the retry continues:
+		// the loader rebuilds the active branch from the last physical entry, so an
+		// in-memory-only reparent lets the empty stop resurface on reload or after
+		// a mid-retry process kill.
+		await this.#dropAssistantTurnDurably(assistantMessage);
 		this.#host.agent.appendMessage({
 			role: "developer",
 			content: [{ type: "text", text: this.#emptyStopRetryReminder() }],
@@ -846,9 +850,19 @@ export class TurnRecovery {
 	 * replays the failed turn, while no-recovery paths leave the persisted entry
 	 * (and the user-visible transcript line) in place.
 	 */
-	async #dropPersistedAssistantTurn(assistantMessage: AssistantMessage): Promise<void> {
+	async #dropPersistedAssistantTurn(assistantMessage: AssistantMessage): Promise<string | undefined> {
 		await this.#host.waitForSessionMessagePersistence(assistantMessage);
-		this.discardAssistantTurn(assistantMessage);
+		return this.discardAssistantTurn(assistantMessage);
+	}
+
+	/**
+	 * Drop the failed turn from active context and the persisted branch, then
+	 * durably persist the reparented leaf so the empty stop cannot resurface on
+	 * reload or after a mid-retry process kill.
+	 */
+	async #dropAssistantTurnDurably(assistantMessage: AssistantMessage): Promise<void> {
+		const droppedEntryId = await this.#dropPersistedAssistantTurn(assistantMessage);
+		if (droppedEntryId) await this.#host.sessionManager.discardEntryDurably(droppedEntryId);
 	}
 
 	/**
@@ -940,7 +954,7 @@ export class TurnRecovery {
 	 * the Gemini header-runaway interrupt, which must not replay a partial,
 	 * loop-fueling thinking block.
 	 */
-	discardAssistantTurn(assistantMessage: AssistantMessage): void {
+	discardAssistantTurn(assistantMessage: AssistantMessage): string | undefined {
 		this.removeAssistantMessageFromActiveContext(assistantMessage);
 
 		const branch = this.#host.sessionManager.getBranch();
@@ -962,7 +976,7 @@ export class TurnRecovery {
 						this.#isSameAssistantMessage(entry.message as AssistantMessage, assistantMessage),
 				);
 		if (!branchEntry) {
-			return;
+			return undefined;
 		}
 		this.#host.withBashBranchTransition(() => {
 			if (branchEntry.parentId === null) {
@@ -971,6 +985,7 @@ export class TurnRecovery {
 				this.#host.sessionManager.branch(branchEntry.parentId);
 			}
 		});
+		return branchEntry.id;
 	}
 
 	#isSameAssistantMessage(left: AssistantMessage, right: AssistantMessage): boolean {

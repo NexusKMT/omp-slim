@@ -90,6 +90,7 @@ import {
 
 const JSONL_SUFFIX_LENGTH = ".jsonl".length;
 const DRAFT_ONLY_SESSION_MARKER = ".draft-only-session";
+const DISCARDED_ENTRY_BRANCH_MARKER = "discarded-entry-branch";
 
 function mintSessionId(): string {
 	return Bun.randomUUIDv7();
@@ -2463,6 +2464,35 @@ export class SessionManager {
 	/** Reset the leaf to null so the next append creates a new root entry. */
 	resetLeaf(): void {
 		this.#setLeaf(null);
+	}
+
+	/**
+	 * Durably move the active branch past a discarded entry.
+	 *
+	 * The loader reconstructs the active branch from the last physical journal
+	 * entry, so changing the in-memory leaf alone is lost on reload. Known
+	 * metadata children are chained onto the discarded entry's parent before the
+	 * entry is removed. If any child may carry content, the subtree is preserved
+	 * off-branch instead. Both paths append a metadata-only branch marker and
+	 * rewrite the journal, making the selected path durable.
+	 */
+	async discardEntryDurably(entryId: string): Promise<void> {
+		const entry = this.#index.get(entryId);
+		if (!entry) return;
+		const children = this.#index.childrenOf(entryId);
+		const canReparentChildren = children.every(child => child.type === "service_tier_change");
+		let leafId = entry.parentId;
+		if (canReparentChildren) {
+			for (const child of children) {
+				child.parentId = leafId;
+				leafId = child.id;
+			}
+			this.#entries = this.#entries.filter(candidate => candidate.id !== entryId);
+			this.#index.rebuild(this.#entries);
+		}
+		this.#index.setLeaf(leafId);
+		this.appendCustomEntry(DISCARDED_ENTRY_BRANCH_MARKER, { discardedEntryId: entryId });
+		await this.rewriteEntries();
 	}
 
 	/** Like branch(), but also records a branch_summary of the abandoned path. */

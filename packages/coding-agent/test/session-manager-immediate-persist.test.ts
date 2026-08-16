@@ -365,4 +365,59 @@ describe("SessionManager JSONL software-crash durability", () => {
 			writeSpy.mockRestore();
 		}
 	});
+
+	it("reparents metadata children when durably discarding an entry", async () => {
+		const cwd = makeTempDir("@pi-discard-metadata-cwd-");
+		const sessionDir = path.join(cwd, "sessions");
+		const manager = SessionManager.create(cwd, sessionDir);
+		const sessionFile = manager.getSessionFile();
+		if (!sessionFile) throw new Error("Expected a persisted session file path");
+
+		const priorId = manager.appendMessage(assistantMessage("prior turn"));
+		const discardedId = manager.appendMessage(assistantMessage(""));
+		const serviceTierId = manager.appendServiceTierChange(null);
+		await manager.discardEntryDurably(discardedId);
+		await manager.close();
+
+		const reloaded = await SessionManager.open(sessionFile, sessionDir);
+		const branch = reloaded.getBranch();
+		expect(branch.some(entry => entry.id === discardedId)).toBe(false);
+		expect(branch).toContainEqual(expect.objectContaining({ id: serviceTierId, parentId: priorId }));
+		expect(branch.at(-1)).toMatchObject({
+			type: "custom",
+			customType: "discarded-entry-branch",
+			parentId: serviceTierId,
+		});
+		await reloaded.close();
+	});
+
+	it("persists a branch marker when a discarded entry has content children", async () => {
+		const cwd = makeTempDir("@pi-discard-content-cwd-");
+		const sessionDir = path.join(cwd, "sessions");
+		const manager = SessionManager.create(cwd, sessionDir);
+		const sessionFile = manager.getSessionFile();
+		if (!sessionFile) throw new Error("Expected a persisted session file path");
+
+		const priorId = manager.appendMessage(assistantMessage("prior turn"));
+		const discardedId = manager.appendMessage(assistantMessage(""));
+		const contentChildId = manager.appendMessage({
+			role: "user",
+			content: "preserve off branch",
+			timestamp: Date.now(),
+		});
+		await manager.discardEntryDurably(discardedId);
+		await manager.close();
+
+		const reloaded = await SessionManager.open(sessionFile, sessionDir);
+		const branch = reloaded.getBranch();
+		expect(reloaded.getEntries()).toContainEqual(expect.objectContaining({ id: discardedId }));
+		expect(reloaded.getEntries()).toContainEqual(expect.objectContaining({ id: contentChildId }));
+		expect(branch.some(entry => entry.id === discardedId || entry.id === contentChildId)).toBe(false);
+		expect(branch.at(-1)).toMatchObject({
+			type: "custom",
+			customType: "discarded-entry-branch",
+			parentId: priorId,
+		});
+		await reloaded.close();
+	});
 });

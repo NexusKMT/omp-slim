@@ -247,7 +247,7 @@ export interface SessionMaintenanceHost {
 	dropImages(): Promise<{ removed: number }>;
 	runHandoff(customInstructions?: string, options?: SessionHandoffOptions): Promise<HandoffResult | undefined>;
 	removeAssistantMessageFromActiveContext(message: AssistantMessage): void;
-	dropPersistedAssistantTurn(message: AssistantMessage): Promise<void>;
+	dropPersistedAssistantTurn(message: AssistantMessage): Promise<string | undefined>;
 	runRecoveryCompactionWithRollback(
 		reason: "overflow" | "incomplete",
 		message: AssistantMessage,

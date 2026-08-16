@@ -231,6 +231,10 @@ describe("AgentSession empty stop guard", () => {
 			.filter(entry => entry.type === "message")
 			.map(entry => entry.message as AgentMessage);
 		expect(emptyAssistantStops(activeBranchMessages)).toHaveLength(0);
+		// A discarded empty stop is physically removed from the journal, not just
+		// reparented off the active branch: it must never be able to resurface as
+		// the active leaf on reload (the loader rebuilds from the last physical
+		// entry) if the process is killed before the recovery turn lands.
 		expect(
 			emptyAssistantStops(
 				session.sessionManager
@@ -238,7 +242,7 @@ describe("AgentSession empty stop guard", () => {
 					.filter(entry => entry.type === "message")
 					.map(entry => entry.message as AgentMessage),
 			),
-		).toHaveLength(1);
+		).toHaveLength(0);
 	});
 
 	it("retries a tool-use stop that has no tool call or text", async () => {
@@ -392,6 +396,17 @@ describe("AgentSession empty stop guard", () => {
 			.filter(entry => entry.type === "message")
 			.map(entry => entry.message as AgentMessage);
 		expect(emptyAssistantStops(activeBranchMessages)).toHaveLength(0);
+
+		// The loader reconstructs the active branch from the last physical journal
+		// entry. The empty stop is removed from history and a marker durably
+		// selects its parent, so reload cannot reactivate the discarded turn.
+		const journalMessages = session.sessionManager
+			.getEntries()
+			.filter(entry => entry.type === "message")
+			.map(entry => entry.message as AgentMessage);
+		expect(emptyAssistantStops(journalMessages)).toHaveLength(0);
+		const lastJournalEntry = session.sessionManager.getEntries().at(-1);
+		expect(lastJournalEntry).toMatchObject({ type: "custom", customType: "discarded-entry-branch" });
 	});
 
 	it("waits for capped empty-stop persistence before removing the active branch entry", async () => {
