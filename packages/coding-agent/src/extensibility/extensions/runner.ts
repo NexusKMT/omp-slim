@@ -161,13 +161,29 @@ function createHandlerUIContext(
 			? (questions, dialogOptions) =>
 					runDialog(() => askDialog.call(ui, questions, attachHandlerSignal(dialogOptions, handlerSignal)))
 			: undefined,
-		custom: (factory, options) =>
-			runDialog(() =>
-				ui.custom(factory, {
-					...options,
-					signal: options?.signal ? AbortSignal.any([options.signal, handlerSignal]) : handlerSignal,
-				}),
-			),
+		custom: async (factory, options) => {
+			let customSettled = false;
+			let componentReady = false;
+			try {
+				return await ui.custom(
+					async (...args) => {
+						const component = await factory(...args);
+						if (!customSettled) {
+							timeoutBudget?.pause();
+							componentReady = true;
+						}
+						return component;
+					},
+					{
+						...options,
+						signal: options?.signal ? AbortSignal.any([options.signal, handlerSignal]) : handlerSignal,
+					},
+				);
+			} finally {
+				customSettled = true;
+				if (componentReady) timeoutBudget?.resume();
+			}
+		},
 		editor: (title, prefill, dialogOptions, editorOptions) =>
 			runDialog(() => ui.editor(title, prefill, attachHandlerSignal(dialogOptions, handlerSignal), editorOptions)),
 	} satisfies Pick<ExtensionUIContext, "select" | "confirm" | "input" | "askDialog" | "custom" | "editor">;

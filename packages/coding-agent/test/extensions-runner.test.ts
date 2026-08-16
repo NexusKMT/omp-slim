@@ -1669,6 +1669,7 @@ describe("ExtensionRunner", () => {
 			let customSignal: AbortSignal | undefined;
 			const custom: ExtensionUIContext["custom"] = async <T>(...args: Parameters<ExtensionUIContext["custom"]>) => {
 				customSignal = args[1]?.signal;
+				await args[0](undefined as never, undefined as never, undefined as never, () => {});
 				customStarted.resolve();
 				await customDialog.promise;
 				return undefined as T;
@@ -1729,6 +1730,78 @@ describe("ExtensionRunner", () => {
 				await expect(execution).rejects.toThrow(`Extension ${extensionPath} timed out after 25ms`);
 			} finally {
 				performanceNow.mockRestore();
+				vi.useRealTimers();
+			}
+		});
+
+		it("charges async custom factory setup to the handler timeout until the dialog is presented", async () => {
+			const extensionPath = path.join(tempDir.path(), "pending-custom-factory.ts");
+			fs.writeFileSync(
+				extensionPath,
+				`
+					export default function(pi) {
+						pi.on("tool_call", async (_event, ctx) => {
+							await ctx.ui.custom(async () => {
+								ctx.ui.notify("Factory started");
+								await Promise.withResolvers().promise;
+							});
+						});
+					}
+				`,
+			);
+
+			const result = await loadTestExtensions([extensionPath]);
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const factoryStarted = Promise.withResolvers<void>();
+			const notify: ExtensionUIContext["notify"] = message => {
+				if (message === "Factory started") factoryStarted.resolve();
+			};
+			const custom: ExtensionUIContext["custom"] = async <T>(
+				...args: Parameters<ExtensionUIContext["custom"]>
+			) => {
+				await args[0](undefined as never, undefined as never, undefined as never, () => {});
+				return undefined as T;
+			};
+			const uiPrototype = Object.create(runner.getUIContext(), {
+				custom: { value: custom },
+				notify: { value: notify },
+			});
+			const uiContext: ExtensionUIContext = Object.create(uiPrototype);
+			initializeRunner(runner, uiContext);
+			vi.useFakeTimers();
+			try {
+				testSetExtensionHandlerTimeoutMs(10);
+				let settled = false;
+				const decision = runner
+					.emitToolCall({
+						type: "tool_call",
+						toolName: "guarded",
+						toolCallId: "pending-custom-factory",
+						input: {},
+					})
+					.then(value => {
+						settled = true;
+						return value;
+					});
+
+				await factoryStarted.promise;
+				vi.advanceTimersByTime(10);
+				for (let i = 0; i < 3; i++) await Promise.resolve();
+				vi.advanceTimersByTime(0);
+				for (let i = 0; i < 5; i++) await Promise.resolve();
+
+				expect(settled).toBe(true);
+				expect(await decision).toEqual({
+					block: true,
+					reason: `Extension ${extensionPath} timed out after 10ms`,
+				});
+			} finally {
 				vi.useRealTimers();
 			}
 		});
