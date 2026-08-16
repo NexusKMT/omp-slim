@@ -7,6 +7,7 @@
 - Stopped treating `XAI_API_KEY` as SuperGrok (`xai-oauth`) sign-in for availability, so paid-key-only setups default to `xai/grok-4.5` instead of the zero-cost SuperGrok catalog path. Explicit `xai-oauth/…` selectors still accept the paid key via the existing env fallback.
 - Omitted unsupported `reasoning.summary` on paid xAI Responses requests (`xai/grok-4.5`), matching SuperGrok, so a thinking level no longer serializes `summary: "auto"`.
 - Omitted presence/frequency penalties on all first-party xAI Responses models, including non-reasoning ids such as `xai/grok-2`.
+- Fixed Umans usage reporting computing utilization from raw request counts instead of the model-weighted "effective requests", falsely reporting the quota as exhausted while the account still had weighted headroom. The request limit is now split into a weighted soft-cap row (warns, never exhausts) and a raw burst-ceiling row (exhausted only where throttling actually starts), and the rolling 5h window's absolute `resets_at` is surfaced as a countdown ([#7858](https://github.com/can1357/oh-my-pi/issues/7858)). Payloads without a reported burst ceiling collapse to a single weighted `umans:requests` row that can exhaust, so request exhaustion is never unreportable.
 
 ## [17.3.4] - 2026-08-14
 
