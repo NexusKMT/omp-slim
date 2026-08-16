@@ -61,6 +61,17 @@ describe("pruneDeadDaemonRuntimeDirs", () => {
 		expect(remaining.has("global")).toBe(true); // global container skipped
 	});
 
+	it("does not sweep sibling machine-global service runtimes", async () => {
+		using tempDir = TempDir.createSync("@omp-daemon-prune-global-");
+		const globalRoot = path.join(tempDir.path(), "run", "daemons", "global");
+		const current = await scope(globalRoot, "current-service", { pid: "dead", stale: true });
+		const sibling = await scope(globalRoot, "persistent-service", { pid: "dead", stale: true });
+
+		await pruneDeadDaemonRuntimeDirs(current);
+
+		expect(await fs.exists(sibling)).toBe(true);
+	});
+
 	it("does nothing when the runtime root does not exist", async () => {
 		using tempDir = TempDir.createSync("@omp-daemon-prune-missing-");
 		const current = path.join(tempDir.path(), "run", "daemons", "hash0000000000000");

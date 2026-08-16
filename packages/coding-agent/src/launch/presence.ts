@@ -122,6 +122,7 @@ async function hasLiveDaemonBroker(runtimeDir: string): Promise<boolean> {
  */
 export async function pruneDeadDaemonRuntimeDirs(currentRuntimeDir: string): Promise<void> {
 	const root = path.dirname(currentRuntimeDir);
+	if (path.basename(root) === GLOBAL_DAEMON_DIR) return;
 	const current = path.resolve(currentRuntimeDir);
 	let entries: Dirent[];
 	try {
