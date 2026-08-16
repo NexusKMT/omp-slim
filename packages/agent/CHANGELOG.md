@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.5] - 2026-08-16
+
 ### Added
 
 - Added automatic retry support for transient provider failures during one-shot completions, allowing callers such as compaction to opt in to resilient request handling.

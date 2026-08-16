@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+
+## [17.3.5] - 2026-08-16
+
 ### Added
 
 - Added Extensions tab group to settings schema

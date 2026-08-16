@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.5] - 2026-08-16
+
 ### Added
 
 - Added support for GLM-5.3 on the z.AI provider, featuring a unified low/high/max reasoning-effort ladder across all hosts, mandatory thinking mode, 1M context, and default-model status for the z.AI provider.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.5] - 2026-08-16
+
 ### Fixed
 
 - Fixed long CPU-bound event-loop stalls being misclassified as system sleep and omitted from loop-blocked diagnostics.

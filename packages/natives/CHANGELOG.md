@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.5] - 2026-08-16
+
 ### Fixed
 
 - Fixed the native `xargs` builtin panicking in `-I`/`-i` replace mode when stdin is empty; it now exits successfully without running the command, matching GNU behavior.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.5] - 2026-08-16
+
 ### Added
 
 - Added retryable oneshot completion support (`retryTransientCompletion`) so non-agent LLM calls correctly retry on transient provider failures (Anthropic overload/rate-limit errors, HTTP 429/500/502/503/529), honoring provider-supplied retry-after timing before giving up.
