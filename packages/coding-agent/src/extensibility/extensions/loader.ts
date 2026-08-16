@@ -613,6 +613,8 @@ async function discoverHooksInPackageRoot(root: string): Promise<string[]> {
 export interface DiscoverExtensionPathOptions {
 	/** Include ambient native extensions, hooks, and installed plugins. */
 	ambient?: boolean;
+	/** Include ambient hook factories. Disable for read-only catalog commands. */
+	includeAmbientHooks?: boolean;
 }
 
 export async function discoverExtensionPaths(
@@ -664,7 +666,7 @@ export async function discoverExtensionPaths(
 	// runner, which owns the current runtime event bus. Non-ambient discovery
 	// scans only this invocation's configured package roots; it must not consult
 	// settings, installed packages, or process-global CLI injection state.
-	if (ambient) {
+	if (ambient && options.includeAmbientHooks !== false) {
 		const hooks = await loadCapability<Hook>(hookCapability.id, loadOptions);
 		for (const hookPath of hooks.items
 			.map(hook => hook.path)
