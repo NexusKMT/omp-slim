@@ -15,6 +15,9 @@
 
 - Fixed prompt caching on open-weight providers (DeepSeek, Qwen, GLM, …) by moving the per-request date/cwd line out of the system prompt into a `<system-reminder>` block on the first user turn, so the tool schemas rendered after the system content stay cached across directory changes and midnight rollovers ([#7404](https://github.com/can1357/oh-my-pi/issues/7404)).
 - Kept completed edit previews within their collapsed line limit for oversized single hunks and cached header change statistics across terminal repaints.
+### Fixed
+
+- Fixed `omp --fork` omitting the source session's artifact directory, so CLI-created forks now preserve `artifact://` references like interactive `/fork`.
 
 ## [17.3.4] - 2026-08-14
 
