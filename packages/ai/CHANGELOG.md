@@ -35,6 +35,7 @@
 
 - Removed the Antigravity identity-prompt injection (`ANTIGRAVITY_SYSTEM_INSTRUCTION` and `shouldInjectAntigravitySystemInstruction`): Cloud Code Assist accepts arbitrary system instructions on gemini-3.x and Claude routes (verified live), and the injected stub never matched the real client's system prompt anyway. User system prompts are now sent unmodified (still tagged `role: "user"`).
 - Fixed Antigravity `auto` mode not failing over to the sandbox endpoint when the daily endpoint returned a thinking-only `STOP`, which caused Advisor turns to be falsely recorded as empty-response failures ([#8480](https://github.com/can1357/oh-my-pi/issues/8480)).
+- Fixed Alibaba DashScope/Bailian per-minute token throttle (`429 Throttling.AllocationQuota`, "You exceeded your current quota, please check your plan and billing details. … error-code#token-limit", `type=insufficient_quota`) being misclassified as `QUOTA_EXHAUSTED`. The OpenAI-compatible billing wording (and the `insufficient_quota` payload code) matched the usage-limit classifier, so a transient TPM/TPS cap — which Bailian's docs document as clearing within the minute window — blocked the credential and stalled the session for the 30-minute quota backoff instead of retrying with a short backoff on the same credential. Bodies linking the `error-code#token-limit` anchor now classify as `RATE_LIMIT_EXCEEDED` and stay in the transient lane; the identical wording without the anchor (OpenAI's real account-quota error) is unchanged.
 
 ## [17.3.0] - 2026-08-13
 
