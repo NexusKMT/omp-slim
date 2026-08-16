@@ -102,7 +102,7 @@
 - Fixed Ctrl+G external editors failing to launch on Windows because Bun re-quoted the embedded `cmd.exe /c` command line ([#8544](https://github.com/can1357/oh-my-pi/issues/8544)).
 ### Fixed
 
-- Fixed the capped empty-stop failure always naming the context/`/shake images` hint even when the provider billed output tokens. A zero-block `stop` (no content blocks) with `usage.output > 0` means content was generated and dropped downstream (a filter/refusal flattened to `finish_reason: "stop"` by a proxy, or a lossy API translation), so the message now reports the billed output-token count and points at a provider-side filter/translation instead of a context problem, and logs `outputTokens` alongside the existing warning fields. Thinking-only stops keep a thinking block (and bill output for it), so they retain the context hint ([#8511](https://github.com/can1357/oh-my-pi/issues/8511)).
+- Fixed the capped empty-stop failure always naming the context/`/shake images` hint even when the provider billed output tokens. A zero-block `stop` (no content blocks) with billed output beyond any provider-reported reasoning usage means content was generated and dropped downstream (a filter/refusal flattened to `finish_reason: "stop"` by a proxy, or a lossy API translation), so the message now reports the billed output-token count and points at a provider-side filter/translation instead of a context problem, and logs `outputTokens` alongside the existing warning fields. Thinking-only and known reasoning-only stops retain the context hint ([#8511](https://github.com/can1357/oh-my-pi/issues/8511)).
 
 ## [17.3.3] - 2026-08-14
 

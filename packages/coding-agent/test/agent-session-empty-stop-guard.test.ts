@@ -72,6 +72,14 @@ function filteredEmptyStop(): MockResponse {
 	};
 }
 
+function reasoningOnlyEmptyStop(): MockResponse {
+	return {
+		content: [],
+		stopReason: "stop",
+		usage: { output: 126, reasoningTokens: 126, cacheRead: 100 },
+	};
+}
+
 function orphanedToolUseStop(): MockResponse {
 	return {
 		content: [{ type: "thinking", thinking: "I should call a tool next." }],
@@ -497,6 +505,31 @@ describe("AgentSession empty stop guard", () => {
 		const finalError = retryEndEvents[0]?.finalError ?? "";
 		expect(finalError).toContain("billed 126 output tokens");
 		expect(finalError).not.toContain("/shake images");
+	});
+
+	it("keeps the context hint when a capped zero-block stop billed only reasoning tokens", async () => {
+		const { session, mock } = await createHarness([
+			reasoningOnlyEmptyStop(),
+			reasoningOnlyEmptyStop(),
+			reasoningOnlyEmptyStop(),
+			reasoningOnlyEmptyStop(),
+		]);
+		const retryEndEvents: Array<Extract<AgentSessionEvent, { type: "auto_retry_end" }>> = [];
+		session.subscribe(event => {
+			if (event.type === "auto_retry_end") {
+				retryEndEvents.push(event);
+			}
+		});
+
+		await expectPromptCompletes(session.prompt("think without delivering an answer"));
+		await session.waitForIdle();
+
+		expect(mock.calls).toHaveLength(4);
+		expect(retryEndEvents).toHaveLength(1);
+		expect(retryEndEvents[0]?.success).toBe(false);
+		const finalError = retryEndEvents[0]?.finalError ?? "";
+		expect(finalError).toContain("/shake images");
+		expect(finalError).not.toContain("billed");
 	});
 
 	it("keeps the context hint for a capped thinking-only stop even though it billed output", async () => {

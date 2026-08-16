@@ -678,16 +678,20 @@ export class TurnRecovery {
 		if (this.#emptyStopRetryCount > EMPTY_STOP_MAX_RETRIES) {
 			const attempts = this.#emptyStopRetryCount - 1;
 			const outputTokens = assistantMessage.usage.output;
+			const outputTokensExcludingKnownReasoning = Math.max(
+				0,
+				outputTokens - (assistantMessage.usage.reasoningTokens ?? 0),
+			);
 			let finalError: string;
 			if (providerEmptyOutput) {
 				finalError = "Assistant returned no final output after retry cap; try switching models";
-			} else if (outputTokens > 0 && assistantMessage.content.length === 0) {
-				// Billed output on a truly zero-block stop means content was generated and
-				// then dropped downstream (a filter/refusal flattened to
+			} else if (outputTokensExcludingKnownReasoning > 0 && assistantMessage.content.length === 0) {
+				// Billed non-reasoning output on a truly zero-block stop means content was
+				// generated and then dropped downstream (a filter/refusal flattened to
 				// `finish_reason: "stop"` by a proxy, or a lossy API translation) — the
 				// context/`/shake images` hint is wrong here, so name the billed output
-				// instead. Thinking-only stops keep a thinking block (and bill output for
-				// it), so they fall through to the context hint rather than this path.
+				// instead. Known reasoning-only usage is not evidence that deliverable
+				// content was dropped, and thinking-only stops retain a thinking block.
 				finalError = `Assistant returned an empty stop after retry cap, but the provider billed ${outputTokens} output token${outputTokens === 1 ? "" : "s"} for it; content was generated and then dropped before delivery, which usually points to a provider-side content filter or a lossy API translation rather than a context problem`;
 			} else {
 				finalError =
