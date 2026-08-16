@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the vendored Markdown lexer letting an indented code block interrupt a paragraph: a 4-space-indented line directly attached to paragraph text (e.g. a box-drawing tree child under a `└──` branch) now stays a lazy continuation of that paragraph, matching marked/CommonMark, instead of rendering the rest of the message section as a raw code block ([#8557](https://github.com/can1357/oh-my-pi/pull/8557) by [@chan1103](https://github.com/chan1103)).
+
 ## [17.3.2] - 2026-08-13
 
 ### Fixed
