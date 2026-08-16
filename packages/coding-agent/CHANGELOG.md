@@ -45,6 +45,9 @@
 - Fixed transient Anthropic failures (`overloaded_error`, `rate_limit_error`, 429/500/502/503/529) aborting or silently degrading side-effect-free oneshot LLM calls. Session title generation, TTS speech enhancement, commit-message generation, the auto-thinking and unexpected-stop classifiers, memory extraction/consolidation, the commit analysis/summary/changelog/map/reduce passes, and the mnemopi LLM callback now retry with backoff that honors `retry-after`, instead of failing on the first blip or returning `null` — which made a transient overload indistinguishable from a legitimate empty result.
 - Fixed the commit analysis, summary, changelog and reduce passes feeding a provider error message straight into their response parsers: they never checked `stopReason`, so a failed request produced garbage output instead of surfacing the error.
 - Fixed the commit map phase never retrying transient failures: its retry helper only caught thrown errors, so a `stopReason: "error"` response bypassed it entirely.
+### Fixed
+
+- Fixed the shared headless browser daemon launching from the macOS system Google Chrome bundle (`com.google.Chrome`), which let macOS LaunchServices route the user's link clicks to the automation daemon and silently swallow them; the daemon now prefers the isolated Chrome for Testing binary (`com.google.chrome.for.testing`) on macOS and falls back to system Chrome only when Chrome for Testing cannot be obtained ([#8673](https://github.com/can1357/oh-my-pi/issues/8673)).
 
 ## [17.3.4] - 2026-08-14
 
