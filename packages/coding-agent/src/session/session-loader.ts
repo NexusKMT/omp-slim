@@ -42,21 +42,22 @@ function splitTitleSlot(content: string): { body: string; slot: SessionTitleUpda
 	return { body: content.slice(newlineIndex + 1), slot };
 }
 
-function foldTitleSlot(entries: FileEntry[], slot: SessionTitleUpdate | undefined): FileEntry[] {
-	if (!slot || entries.length === 0) return entries;
-	const header = entries[0] as SessionHeader;
-	if (header.type !== "session" || typeof header.id !== "string") return entries;
+function isValidSessionHeader(entry: FileEntry | undefined): entry is SessionHeader {
+	return entry?.type === "session" && typeof entry.id === "string";
+}
+
+function applyTitleSlot(entry: FileEntry | undefined, slot: SessionTitleUpdate | undefined): void {
+	if (!slot || !isValidSessionHeader(entry)) return;
 	if (slot.title && slot.title.length > 0) {
-		header.title = slot.title;
+		entry.title = slot.title;
 	} else {
-		delete header.title;
+		delete entry.title;
 	}
 	if (slot.source) {
-		header.titleSource = slot.source;
+		entry.titleSource = slot.source;
 	} else {
-		delete header.titleSource;
+		delete entry.titleSource;
 	}
-	return entries;
 }
 
 /** Parse session JSONL while stripping and folding the optional fixed title slot. */
@@ -66,7 +67,8 @@ export function parseSessionContent(content: string): {
 } {
 	const { body, slot } = splitTitleSlot(content);
 	const entries = parseJsonlLenient<RawFileEntry>(body) as FileEntry[];
-	return { entries: foldTitleSlot(entries, slot), titleSlot: slot };
+	applyTitleSlot(entries[0], slot);
+	return { entries, titleSlot: slot };
 }
 
 /** Parse session JSONL and visit each entry without retaining prior entries. */
@@ -77,6 +79,7 @@ export async function visitEntriesFromFileStream(
 ): Promise<SessionTitleUpdate | undefined> {
 	let titleSlot: SessionTitleUpdate | undefined;
 	let sawFirstLine = false;
+	let sawFirstEntry = false;
 	let bytesSinceYield = 0;
 	let entriesSinceYield = 0;
 	let recordsSeen = 0;
@@ -121,8 +124,13 @@ export async function visitEntriesFromFileStream(
 					stopped = true;
 					break;
 				}
+				const entry = value as FileEntry;
+				if (!sawFirstEntry) {
+					sawFirstEntry = true;
+					applyTitleSlot(entry, titleSlot);
+				}
 				try {
-					if (visit(value as FileEntry) === false) {
+					if (visit(entry) === false) {
 						stopped = true;
 						break;
 					}
@@ -211,7 +219,7 @@ export async function loadEntriesFromFileStream(filePath: string): Promise<{
 	const titleSlot = await visitEntriesFromFileStream(filePath, entry => {
 		entries.push(entry);
 	});
-	return { entries: foldTitleSlot(entries, titleSlot), titleSlot };
+	return { entries, titleSlot };
 }
 
 /** Read only the fixed-size head window to detect a physical title slot. */
@@ -235,32 +243,56 @@ export function parseSessionEntries(content: string): FileEntry[] {
 	return parseSessionContent(content).entries;
 }
 
+function shouldStreamEntries(storage: SessionStorage, size: number): boolean {
+	return storage instanceof FileSessionStorage && size >= STREAM_LOAD_THRESHOLD_BYTES;
+}
+
+async function loadEntriesWithKnownSize(filePath: string, storage: SessionStorage, size: number): Promise<FileEntry[]> {
+	const loaded = shouldStreamEntries(storage, size)
+		? await loadEntriesFromFileStream(filePath)
+		: parseSessionContent(await storage.readText(filePath));
+	const { entries } = loaded;
+	return isValidSessionHeader(entries[0]) ? entries : [];
+}
+
 /** Exported for testing */
 export async function loadEntriesFromFile(
 	filePath: string,
 	storage: SessionStorage = new FileSessionStorage(),
 ): Promise<FileEntry[]> {
-	let loaded: { entries: FileEntry[]; titleSlot: SessionTitleUpdate | undefined };
 	try {
-		const stat = storage.statSync(filePath);
-		loaded =
-			storage instanceof FileSessionStorage && stat.size >= STREAM_LOAD_THRESHOLD_BYTES
-				? await loadEntriesFromFileStream(filePath)
-				: parseSessionContent(await storage.readText(filePath));
+		return await loadEntriesWithKnownSize(filePath, storage, storage.statSync(filePath).size);
 	} catch (err) {
 		if (isEnoent(err)) return [];
 		throw err;
 	}
-	const { entries } = loaded;
+}
 
-	// Validate session header
-	if (entries.length === 0) return entries;
-	const header = entries[0] as SessionHeader;
-	if (header.type !== "session" || typeof header.id !== "string") {
-		return [];
+/**
+ * Visit session entries, using bounded streaming for large file-backed journals.
+ * Small files and non-file backends keep the existing full-load path.
+ */
+export async function visitEntriesFromFile(
+	filePath: string,
+	visit: (entry: FileEntry) => void | boolean,
+	storage: SessionStorage = new FileSessionStorage(),
+): Promise<void> {
+	const size = storage.statSync(filePath).size;
+	if (shouldStreamEntries(storage, size)) {
+		let sawFirstEntry = false;
+		await visitEntriesFromFileStream(filePath, entry => {
+			if (!sawFirstEntry) {
+				sawFirstEntry = true;
+				if (!isValidSessionHeader(entry)) return false;
+			}
+			return visit(entry);
+		});
+		return;
 	}
 
-	return entries;
+	for (const entry of await loadEntriesWithKnownSize(filePath, storage, size)) {
+		if (visit(entry) === false) return;
+	}
 }
 
 /**
