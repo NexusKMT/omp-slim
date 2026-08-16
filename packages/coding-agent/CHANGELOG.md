@@ -65,9 +65,6 @@
 - Made extension tool-call timeouts configurable and paused them during user dialogs.
 - Fixed `/vibe` cancellation leaving an in-flight model turn unaware that Vibe mode and its tools were removed ([#8326](https://github.com/can1357/oh-my-pi/issues/8326)).
 - Fixed empty local-model stops lingering on the persisted active branch after retries; discarded turns now durably select their parent, preserve safe metadata children, and cannot resurface after reload or a mid-retry process kill. ([#5179](https://github.com/can1357/oh-my-pi/issues/5179))
-
-### Fixed
-
 - Fixed the Biome linter client silently dropping every diagnostic because `#parseJsonOutput` expected an outdated `--reporter=json` schema (`location.path.file`, byte-offset `span`, `description`); it now reads Biome 2.x's string `location.path`, 1-indexed `location.start`/`location.end`, and `message`, and warns when a non-empty diagnostics array has no recognizable location ([#8694](https://github.com/can1357/oh-my-pi/issues/8694)).
 
 ## [17.3.4] - 2026-08-14

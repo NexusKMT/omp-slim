@@ -42,7 +42,7 @@ describe("registerPersistedSubagents mid-spawn stubs", () => {
 		await Bun.write(path.join(dir, "main.jsonl"), `${sessionHeader("main")}\n`);
 		await Bun.write(
 			path.join(dir, "main", "Worker.jsonl"),
-			[
+			`${[
 				sessionHeader("worker"),
 				JSON.stringify({
 					type: "session_init",
@@ -54,7 +54,7 @@ describe("registerPersistedSubagents mid-spawn stubs", () => {
 					tools: ["read"],
 					agent: "adversarial-reviewer",
 				}),
-			].join("\n") + "\n",
+			].join("\n")}\n`,
 		);
 
 		const registry = await registerFrom(dir);
@@ -68,7 +68,7 @@ describe("registerPersistedSubagents mid-spawn stubs", () => {
 		await Bun.write(path.join(dir, "main.jsonl"), `${sessionHeader("main")}\n`);
 		await Bun.write(
 			path.join(dir, "main", "Legacy.jsonl"),
-			[
+			`${[
 				sessionHeader("legacy"),
 				JSON.stringify({
 					type: "message",
@@ -77,7 +77,7 @@ describe("registerPersistedSubagents mid-spawn stubs", () => {
 					timestamp: "2026-08-13T17:14:49.000Z",
 					message: { role: "user", content: "hello", timestamp: 1 },
 				}),
-			].join("\n") + "\n",
+			].join("\n")}\n`,
 		);
 
 		const registry = await registerFrom(dir);
@@ -91,7 +91,7 @@ describe("registerPersistedSubagents mid-spawn stubs", () => {
 		await Bun.write(path.join(dir, "main.jsonl"), `${sessionHeader("main")}\n`);
 		await Bun.write(
 			childFile,
-			[
+			`${[
 				sessionHeader("worker"),
 				JSON.stringify({
 					type: "session_init",
@@ -102,7 +102,7 @@ describe("registerPersistedSubagents mid-spawn stubs", () => {
 					task: "review the diff",
 					tools: ["read"],
 				}),
-			].join("\n") + "\n",
+			].join("\n")}\n`,
 		);
 
 		const registry = new AgentRegistry();
