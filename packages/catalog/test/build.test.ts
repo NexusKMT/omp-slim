@@ -296,13 +296,7 @@ describe("xAI Responses reasoning-effort suppression", () => {
 		const model = buildModel(grokResponsesSpec("grok-4.6"));
 		expect(model.compat.supportsReasoningEffort).toBe(true);
 		expect(model.compat.omitReasoningEffort).toBe(false);
-		expect(model.thinking?.efforts).toEqual([
-			Effort.Minimal,
-			Effort.Low,
-			Effort.Medium,
-			Effort.High,
-			Effort.XHigh,
-		]);
+		expect(model.thinking?.efforts).toEqual([Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh]);
 		expect(model.thinking?.efforts).not.toContain(Effort.Max);
 	});
 
