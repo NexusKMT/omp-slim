@@ -3681,15 +3681,19 @@ export function basetenModelManagerOptions(
 			const features = Array.isArray(raw.supported_features) ? raw.supported_features : [];
 			const modalities = Array.isArray(raw.input_modalities) ? raw.input_modalities : [];
 
-			// Baseten's reasoning router accepts only the high/max
-			// effort tiers for its GLM-5.2 and gpt-oss routes.
-			const isEffortReasoning =
+			// Baseten's discovery flags are not enough to enable OMP reasoning for every
+			// model. Only models with a verified Baseten reasoning policy are enabled
+			// here; an unknown model may use a different reasoning wire shape or effort
+			// vocabulary, which OMP must not guess.
+			const isSupportedBasetenReasoningModel =
+				isKimiK3ModelId(defaults.id) ||
 				defaults.id === "openai/gpt-oss-120b" ||
+				defaults.id === "deepseek-ai/DeepSeek-V4-Pro" ||
 				defaults.id === "zai-org/GLM-5.2" ||
 				defaults.id === "zai-org/GLM-5.2-Fast";
-			const isBasetenNativeReasoning = isEffortReasoning || defaults.id === "deepseek-ai/DeepSeek-V4-Pro";
 			const reasoning =
-				isBasetenNativeReasoning && (features.includes("reasoning") || features.includes("reasoning_effort"));
+				isSupportedBasetenReasoningModel &&
+				(features.includes("reasoning") || features.includes("reasoning_effort"));
 			const supportsTools = features.includes("tools") ? undefined : false;
 			const vision = modalities.includes("image") || (reference?.input.includes("image") ?? false);
 
@@ -3703,14 +3707,7 @@ export function basetenModelManagerOptions(
 
 			const contextWindow = toPositiveNumber(raw.context_length, reference?.contextWindow ?? defaults.contextWindow);
 			const maxTokens = toPositiveNumber(raw.max_completion_tokens, reference?.maxTokens ?? defaults.maxTokens);
-
 			const baseModel = mapWithBundledReference(entry, defaults, reference);
-			const thinking = isEffortReasoning
-				? {
-						mode: "effort" as const,
-						efforts: [Effort.High, Effort.Max],
-					}
-				: undefined;
 
 			return {
 				...baseModel,
@@ -3719,7 +3716,6 @@ export function basetenModelManagerOptions(
 				cost,
 				contextWindow,
 				maxTokens,
-				...(thinking ? { thinking } : {}),
 				...(supportsTools === false ? { supportsTools } : {}),
 			};
 		},
