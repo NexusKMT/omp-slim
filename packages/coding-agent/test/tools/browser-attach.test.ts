@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { ToolSession } from "@oh-my-pi/pi-coding-agent/sdk";
+import { BrowserTool } from "@oh-my-pi/pi-coding-agent/tools/browser";
 import {
 	pickElectronTarget,
 	shouldPreserveConnectedBrowserFocus,
@@ -9,12 +12,22 @@ import {
 	normalizeConnectedCdpUrl,
 	releaseBrowser,
 } from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
-import { acquireTab, releaseTab } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
+import { acquireTab } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import type { Browser, Page, Target } from "puppeteer-core";
 import { chromiumAvailable } from "./chromium-probe";
 
 const CHROMIUM_AVAILABLE = await chromiumAvailable();
 let sharedHeadless: BrowserHandle | undefined;
+
+function makeSession(): ToolSession {
+	return {
+		cwd: process.cwd(),
+		hasUI: false,
+		getSessionFile: () => null,
+		getSessionSpawns: () => "*",
+		settings: Settings.isolated({ "browser.headless": true }),
+	};
+}
 
 interface FakePageOptions {
 	url: string;
@@ -121,32 +134,34 @@ describe("pickElectronTarget", () => {
 
 	// Launches real headless Chromium; skipped where Chrome's system libraries are absent.
 	test.skipIf(!CHROMIUM_AVAILABLE)(
-		"navigates a fresh attached tab to the requested URL",
+		"navigates a fresh attached tab and releases its handle without closing the target",
 		async () => {
 			const launched = sharedHeadless;
 			if (!launched || !("browser" in launched)) throw new Error("Expected a shared Puppeteer browser");
 			const endpoint = new URL(launched.browser.wsEndpoint());
-			let attached: BrowserHandle | undefined;
+			const tool = new BrowserTool(makeSession());
 			let opened = false;
 			const tabName = `attach-navigation-${process.pid}-${Math.random().toString(36).slice(2)}`;
 			const requested = "data:text/html,<title>attached-navigation-target</title>";
+			const targetPage = (await launched.browser.pages())[0];
+			if (!targetPage) throw new Error("Expected the launched browser to expose a page target");
 
 			try {
-				attached = await acquireBrowser(
-					{ kind: "connected", cdpUrl: `http://${endpoint.host}` },
-					{ cwd: process.cwd() },
-				);
-				const { tab } = await acquireTab(tabName, attached, {
+				await tool.execute("open", {
+					action: "open",
+					name: tabName,
 					url: requested,
-					waitUntil: "domcontentloaded",
-					timeoutMs: 10_000,
+					app: { cdp_url: `http://${endpoint.host}` },
 				});
 				opened = true;
 
-				expect(tab.info.url).toBe(requested);
+				const closeResult = await tool.execute("close", { action: "close", name: tabName });
+				opened = false;
+				expect(closeResult.content).toEqual([{ type: "text", text: `Released managed tab "${tabName}"` }]);
+				expect(targetPage.isClosed()).toBe(false);
+				expect(targetPage.url()).toBe(requested);
 			} finally {
-				if (opened) await releaseTab(tabName, { kill: false });
-				else if (attached) await releaseBrowser(attached, { kill: false });
+				if (opened) await tool.execute("close", { action: "close", name: tabName });
 			}
 		},
 		30_000,
