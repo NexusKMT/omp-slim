@@ -78,6 +78,9 @@
 ### Fixed
 
 - Fixed the welcome banner displaying a stale model name when the session's active model changes after startup (e.g. after a delayed config load or an explicit `/model` switch). The banner now subscribes to `model_changed` events and calls `WelcomeComponent.setModel()`, which already existed but was never wired up.
+### Fixed
+
+- Fixed Nix standalone binaries retaining Bun's build-time package in their runtime closure.
 
 ## [17.3.0] - 2026-08-13
 
