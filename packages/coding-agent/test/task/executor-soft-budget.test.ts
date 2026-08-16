@@ -93,6 +93,7 @@ function createMockSession(
 		setIrcWakeTurnObserver: observer => {
 			ircWakeTurnObserver = observer;
 		},
+		subscribeRunState: () => () => {},
 		deliverIrcMessage: async msg => {
 			const record: CustomMessage = {
 				role: "custom",

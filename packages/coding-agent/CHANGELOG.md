@@ -1,8 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Added
 
-- Fixed llama.cpp model discovery producing `baseUrl` without the `/v1` prefix for non-Qwen models, causing 404 errors on OpenAI-compatible endpoints (`/v1/responses`, `/v1/chat/completions`). The fix ensures all discovered llama.cpp models include `/v1` in their `baseUrl`, matching the behavior already applied to Qwen models.
+- Added Extensions tab group to settings schema
 
 ### Changed
 
@@ -12,6 +13,8 @@
 
 ### Fixed
 
+- Fixed `hub` job and wait lists hiding stale running subagent registrations that have no turn in flight, ensuring they remain visible so operators can cancel them
+- Fixed external thinking scratchpads running alongside native reasoning on xAI Grok 4 and other reasoning-only Responses models that reject `reasoning.effort`
 - Fixed llama.cpp model discovery producing a baseUrl without the /v1 prefix for non-Qwen models, causing 404 errors on OpenAI-compatible endpoints.
 - Fixed prompt caching on open-weight providers (DeepSeek, Qwen, GLM, …) so tool schemas stay cached across directory changes and midnight rollovers.
 - Fixed omp --fork omitting the source session's artifact directory, so CLI-created forks now preserve artifact:// references like interactive /fork.
@@ -60,6 +63,9 @@
 - Fixed /vibe cancellation leaving an in-flight model turn unaware that Vibe mode and its tools were removed.
 - Fixed empty local-model stops lingering on the persisted active branch after retries, preventing them from resurfacing after reload or a mid-retry process kill.
 - Fixed the Biome linter client silently dropping every diagnostic due to an outdated JSON output schema; it now supports Biome 2.x's diagnostic format.
+- Fixed `hub jobs` and empty `hub wait` snapshots hiding running subagents that have no live turn, which removed the only way to discover and `hub cancel` a stale registration; such agents are listed again and flagged as having no turn in flight.
+- Fixed external thinking being offered on xAI reasoning-only Responses models (grok-4 family) that reject `reasoning.effort`, where the private scratchpad ran alongside native reasoning instead of replacing it.
+- Fixed the extension tool-call handler timeout rendering outside a titled section in `/settings` by registering its Extensions group on the Tools tab.
 
 ## [17.3.4] - 2026-08-14
 
