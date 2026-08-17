@@ -450,7 +450,7 @@ Removing a file is a different primitive from writing one, and it has its own se
 
 ```ts
 pi.registerFileDeleteFallback(async (req, ctx) => {
-  // req: { dst: string; cause: unknown; confirmedFile: boolean } — no `content`.
+  // req: { dst; cause; confirmedFile; sessionId } — no `content`.
   return await myPrivilegedWriter.unlink(req.dst);
 });
 ```
