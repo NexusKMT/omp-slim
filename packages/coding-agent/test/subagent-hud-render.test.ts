@@ -130,6 +130,17 @@ describe("subagent HUD lines", () => {
 		expect(echoed).toMatch(/HindsightMcpFunnel.*scout/);
 		expect(echoed).not.toContain("HindsightMcpFunnel: HindsightMcpFunnel");
 
+		const collision = render([
+			makeSession({
+				id: "HindsightMcpFunnel-3",
+				agent: "scout",
+				description: "HindsightMcpFunnel",
+			}),
+		]);
+		expect(collision).toContain("HindsightMcpFunnel-3");
+		expect(collision).toMatch(/HindsightMcpFunnel-3.*scout/);
+		expect(collision).not.toContain("HindsightMcpFunnel-3: HindsightMcpFunnel");
+
 		const defaultWorker = render([makeSession({ id: "AuthLoader", agent: "task", description: "Refactor auth" })]);
 		expect(defaultWorker).toContain("AuthLoader: Refactor auth");
 		expect(defaultWorker).not.toMatch(/AuthLoader.*task/);
