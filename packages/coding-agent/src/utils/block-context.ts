@@ -22,6 +22,14 @@ export interface LineSpan {
 export interface BlockContextSource {
 	path?: string;
 	lang?: string;
+	/**
+	 * The whole source `fullLines` was split from, when the caller still holds it.
+	 * Supplying it skips re-joining every line into a fresh whole-file string on
+	 * the way to the parser. It MUST be the same content as `fullLines`; a
+	 * differing trailing newline is the only tolerated variation, since it moves
+	 * no node's line number.
+	 */
+	text?: string;
 }
 
 export type LineEntry = { kind: "line"; lineNumber: number; text: string; context: boolean } | { kind: "ellipsis" };
@@ -105,7 +113,7 @@ function nativeBlockContext(
 	let boundaries: number[] | null;
 	try {
 		boundaries = enclosingBlockBoundaries({
-			code: fullLines.join("\n"),
+			code: source.text ?? fullLines.join("\n"),
 			path: source.path,
 			lang: source.lang,
 			ranges,
