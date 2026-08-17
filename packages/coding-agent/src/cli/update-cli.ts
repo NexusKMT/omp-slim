@@ -15,7 +15,12 @@ import chalk from "@oh-my-pi/pi-utils/chalk";
 import { withFileLock } from "@oh-my-pi/pi-utils/file-lock";
 import { $ } from "bun";
 import { theme } from "../modes/theme/theme";
-import { isTimeoutError, withTimeoutSignal } from "../utils/fetch-timeout";
+import {
+	isTimeoutError,
+	isUnsupportedProxyError,
+	unsupportedProxyMessage,
+	withTimeoutSignal,
+} from "../utils/fetch-timeout";
 
 const REPO = "can1357/oh-my-pi";
 const PACKAGE = "@oh-my-pi/pi-coding-agent";
@@ -248,6 +253,7 @@ async function getReleaseBinaryAsset(
 		if (isTimeoutError(err)) {
 			throw new Error("Timed out fetching GitHub release metadata after 30s", { cause: err });
 		}
+		if (isUnsupportedProxyError(err)) throw new Error(unsupportedProxyMessage(), { cause: err });
 		throw err;
 	}
 	if ((response.status === 403 && !githubToken) || response.status === 429) {
@@ -287,6 +293,7 @@ export async function downloadVerifiedBinary(options: VerifiedBinaryDownloadOpti
 		if (isTimeoutError(err)) {
 			throw new Error("Timed out downloading release binary after 15 minutes", { cause: err });
 		}
+		if (isUnsupportedProxyError(err)) throw new Error(unsupportedProxyMessage(), { cause: err });
 		throw err;
 	}
 	if (!response.ok || !response.body) {
@@ -326,6 +333,7 @@ export async function downloadVerifiedBinary(options: VerifiedBinaryDownloadOpti
 		if (isTimeoutError(err)) {
 			throw new Error("Timed out downloading release binary after 15 minutes", { cause: err });
 		}
+		if (isUnsupportedProxyError(err)) throw new Error(unsupportedProxyMessage(), { cause: err });
 		throw err;
 	}
 }
@@ -672,6 +680,7 @@ async function fetchLatestManifest(
 				cause: err,
 			});
 		}
+		if (isUnsupportedProxyError(err)) throw new Error(unsupportedProxyMessage(), { cause: err });
 		throw err;
 	}
 	if (!response.ok) {
