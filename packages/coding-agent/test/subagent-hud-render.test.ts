@@ -107,6 +107,34 @@ describe("subagent HUD lines", () => {
 		expect(out).toContain("SchemaMigrator: Migrating the users table");
 	});
 
+	it("shows a non-default role badge and hides descriptions that only echo the id", () => {
+		const withRole = render([
+			makeSession({
+				id: "HindsightMcpFunnel",
+				agent: "scout",
+				description: "Audit MCP funnel wiring",
+			}),
+		]);
+		expect(withRole).toContain("HindsightMcpFunnel");
+		expect(withRole).toMatch(/HindsightMcpFunnel.*scout/);
+		expect(withRole).toContain("Audit MCP funnel wiring");
+
+		const echoed = render([
+			makeSession({
+				id: "HindsightMcpFunnel",
+				agent: "scout",
+				description: "HindsightMcpFunnel",
+			}),
+		]);
+		expect(echoed).toContain("HindsightMcpFunnel");
+		expect(echoed).toMatch(/HindsightMcpFunnel.*scout/);
+		expect(echoed).not.toContain("HindsightMcpFunnel: HindsightMcpFunnel");
+
+		const defaultWorker = render([makeSession({ id: "AuthLoader", agent: "task", description: "Refactor auth" })]);
+		expect(defaultWorker).toContain("AuthLoader: Refactor auth");
+		expect(defaultWorker).not.toMatch(/AuthLoader.*task/);
+	});
+
 	it("only shows active subagents and clears once everything finished", () => {
 		const finishedStates = ["completed", "failed", "aborted"] as const;
 		const sessions: ObservableSession[] = [
