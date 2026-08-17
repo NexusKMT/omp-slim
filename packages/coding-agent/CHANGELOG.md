@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the Subagents HUD role display and restored generated task labels by keeping spawn handles separate from UI descriptions.
+
 ## [17.3.7] - 2026-08-17
 
 ### Changed
@@ -21,11 +25,6 @@
 ### Fixed
 
 - Fixed `omp stats` and `/stats` dashboards being unreachable from container hosts by accepting an explicit `--host` bind address while preserving the `127.0.0.1` default.
-### Fixed
-
-- Fixed the anchored Subagents HUD omitting the spawned agent role and repeating the spawn id as `Name: Name` when the generated label echoed the handle.
-- Stopped the task tool from using the spawn handle as the HUD description, which blocked tiny-model label generation and produced `Name: Name`.
-
 
 ## [17.3.5] - 2026-08-16
 
