@@ -10,12 +10,14 @@
 
 use std::collections::BTreeSet;
 
-use anyhow::{Result, anyhow};
-use ast_grep_core::tree_sitter::LanguageExt;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use tree_sitter::{Parser, Point, TreeCursor};
+use tree_sitter::{Point, TreeCursor};
 
-use crate::summary::{node_content_end_line, node_start_line, resolve_language};
+use crate::{
+	parse_cache::parse_cached,
+	summary::{node_content_end_line, node_start_line, resolve_language},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockRangeOptions {
@@ -68,11 +70,7 @@ pub fn block_range_at(options: BlockRangeOptions) -> Result<Option<BlockRange>> 
 		return Ok(None);
 	};
 
-	let mut parser = Parser::new();
-	parser
-		.set_language(&language.get_ts_language())
-		.map_err(|err| anyhow!("Failed to load tree-sitter language: {err}"))?;
-	let Some(tree) = parser.parse(&code, None) else {
+	let Some(tree) = parse_cached(&code, language)? else {
 		return Ok(None);
 	};
 	let root = tree.root_node();
@@ -240,11 +238,7 @@ pub fn enclosing_block_boundaries(options: EnclosingBoundaryOptions) -> Result<O
 	let Some(language) = resolve_language(lang.as_deref(), path.as_deref()) else {
 		return Ok(None);
 	};
-	let mut parser = Parser::new();
-	parser
-		.set_language(&language.get_ts_language())
-		.map_err(|err| anyhow!("Failed to load tree-sitter language: {err}"))?;
-	let Some(tree) = parser.parse(&code, None) else {
+	let Some(tree) = parse_cached(&code, language)? else {
 		return Ok(None);
 	};
 	let root = tree.root_node();
@@ -578,5 +572,140 @@ mod tests {
 	fn markdown_blank_line_resolves_to_nothing() {
 		// A blank separator line opens no section.
 		assert_eq!(resolve(MD_DOC, "plan.md", 3), None);
+	}
+
+	// ── parse cache ───────────────────────────────────────────────────────────
+	//
+	// These cover the process-global cache end to end. The cache is shared with
+	// the rest of this crate's suite running in parallel, so nothing here
+	// asserts on occupancy or counters — only on boundary values, which must
+	// come out identical no matter what else happens to be resident. Occupancy,
+	// eviction, and LRU order are asserted deterministically on private `Cache`
+	// instances in `parse_cache::tests`.
+
+	use crate::parse_cache::{MAX_ENTRIES, clear_parse_cache};
+
+	#[test]
+	fn repeat_query_yields_identical_boundaries() {
+		clear_parse_cache();
+		let first = boundaries(TS_FN, "x.ts", &[(1, 1)]);
+		let second = boundaries(TS_FN, "x.ts", &[(1, 1)]);
+
+		assert_eq!(first, Some(vec![6]));
+		assert_eq!(second, first, "identical input must yield identical boundaries");
+
+		// A different window over the same bytes must still be answered per
+		// window: the cache holds the tree, not the boundary list, which is why
+		// a result cache would not have worked.
+		assert_eq!(boundaries(TS_FN, "x.ts", &[(6, 6)]), Some(vec![1]));
+		assert_eq!(boundaries(TS_FN, "x.ts", &[(3, 4)]), Some(vec![]));
+		assert_eq!(boundaries(TS_FN, "x.ts", &[(1, 1)]), first);
+	}
+
+	#[test]
+	fn same_bytes_under_two_languages_do_not_share_a_tree() {
+		// Valid Python, a syntax error as TypeScript. If the language were not
+		// part of the cache key, whichever call ran first would answer for both.
+		let code = "def greet(name):\n    a = 1\n    return a\n";
+
+		clear_parse_cache();
+		let py_cold = boundaries(code, "x.py", &[(1, 1)]);
+		clear_parse_cache();
+		let ts_cold = boundaries(code, "x.ts", &[(1, 1)]);
+		assert_eq!(py_cold, Some(vec![3]));
+		assert_eq!(ts_cold, None);
+
+		clear_parse_cache();
+		assert_eq!(boundaries(code, "x.py", &[(1, 1)]), py_cold);
+		assert_eq!(boundaries(code, "x.ts", &[(1, 1)]), ts_cold);
+
+		// Reverse order, to rule out an order-dependent answer.
+		clear_parse_cache();
+		assert_eq!(boundaries(code, "x.ts", &[(1, 1)]), ts_cold);
+		assert_eq!(boundaries(code, "x.py", &[(1, 1)]), py_cold);
+	}
+
+	#[test]
+	fn single_byte_difference_yields_different_boundaries() {
+		// Equal length, one byte apart: the second form replaces the newline
+		// after `a()` with `;`, folding four lines into three. The `len` field in
+		// the cache key cannot separate these — only the content hash and the
+		// verified byte comparison can.
+		let four_lines = "function f() {\n  a()\n  b()\n}\n";
+		let three_lines = "function f() {\n  a();  b()\n}\n";
+		assert_eq!(four_lines.len(), three_lines.len(), "fixtures must be equal length");
+		assert_eq!(
+			four_lines
+				.bytes()
+				.zip(three_lines.bytes())
+				.filter(|(a, b)| a != b)
+				.count(),
+			1,
+			"fixtures must differ by exactly one byte"
+		);
+
+		clear_parse_cache();
+		assert_eq!(boundaries(four_lines, "x.ts", &[(1, 1)]), Some(vec![4]));
+		assert_eq!(boundaries(three_lines, "x.ts", &[(1, 1)]), Some(vec![3]));
+		// Again with both resident, in the opposite order.
+		assert_eq!(boundaries(three_lines, "x.ts", &[(1, 1)]), Some(vec![3]));
+		assert_eq!(boundaries(four_lines, "x.ts", &[(1, 1)]), Some(vec![4]));
+	}
+
+	#[test]
+	fn syntax_error_stays_none_across_repeat_calls() {
+		// The error tree *is* cached, so repeated "does this parse" probes get
+		// the speedup too; `None` comes from the caller's own `has_error()` check
+		// reading that tree, not from refusing to cache it.
+		let code = "function broken() {\n  if (y) {\n";
+		clear_parse_cache();
+		assert_eq!(boundaries(code, "b.ts", &[(1, 1)]), None, "first call");
+		assert_eq!(boundaries(code, "b.ts", &[(1, 1)]), None, "second call");
+		assert_eq!(boundaries(code, "b.ts", &[(1, 2)]), None, "different window, still none");
+	}
+
+	#[test]
+	fn cached_error_tree_matches_uncached_verdicts_for_both_callers() {
+		// `enclosing_block_boundaries` rejects any file-level error;
+		// `block_range_at` rejects only errors inside the resolved subtree. Both
+		// now read that verdict off one shared cached tree, so each must still
+		// reach the answer it reached from its own cold parse.
+		let code = "function ok() {\n  a();\n}\nfunction broken( {\n";
+
+		clear_parse_cache();
+		let cold_boundaries = boundaries(code, "x.ts", &[(1, 1)]);
+		clear_parse_cache();
+		let cold_range = resolve(code, "x.ts", 1);
+		assert_eq!(cold_boundaries, None, "a file-level error disables boundaries");
+
+		clear_parse_cache();
+		for pass in 0..2 {
+			assert_eq!(boundaries(code, "x.ts", &[(1, 1)]), cold_boundaries, "pass {pass}");
+			assert_eq!(resolve(code, "x.ts", 1), cold_range, "pass {pass}");
+		}
+	}
+
+	#[test]
+	fn keys_evicted_past_the_cache_bound_still_answer_correctly() {
+		// `f{i}` with `i + 1` body lines closes on line `i + 3`, so the expected
+		// boundary for a window on line 1 is a function of `i` — a neighbouring
+		// entry's tree would produce a visibly wrong answer.
+		let sources: Vec<String> = (0..MAX_ENTRIES * 2)
+			.map(|i| format!("function f{i}() {{\n{}}}\n", "  step();\n".repeat(i + 1)))
+			.collect();
+		let expect = |i: usize| Some(vec![i as u32 + 3]);
+
+		clear_parse_cache();
+		for (i, source) in sources.iter().enumerate() {
+			assert_eq!(boundaries(source, "x.ts", &[(1, 1)]), expect(i), "cold pass {i}");
+		}
+
+		// Source 0 was evicted well before the loop ended (twice `MAX_ENTRIES`
+		// distinct sources went through a cache holding `MAX_ENTRIES`), so this
+		// re-parses. It must answer correctly rather than serve a survivor.
+		assert_eq!(boundaries(&sources[0], "x.ts", &[(1, 1)]), expect(0), "evicted key");
+		// And the tail, still resident, must not have been disturbed.
+		let last = sources.len() - 1;
+		assert_eq!(boundaries(&sources[last], "x.ts", &[(1, 1)]), expect(last), "resident key");
 	}
 }
