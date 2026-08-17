@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Regenerated the Cursor agent protobufs to model hosted WebFetch permission queries (`interaction_query` / `interaction_response` field 9) and the matching `ToolCall` variant (field 37).
+
 ## [17.3.6] - 2026-08-17
 
 ### Changed
