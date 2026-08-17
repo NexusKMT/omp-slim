@@ -481,7 +481,8 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
 				const badge = agentTypeBadge(role, theme);
 				let line = `${dot} ${theme.fg("accent", theme.bold(displayId))}${badge}`;
 				const description = session.description?.trim() || session.progress?.description?.trim();
-				const distinctDescription = description && !labelEchoesHandle(session.id, description) ? description : undefined;
+				const distinctDescription =
+					description && !labelEchoesHandle(session.id, description) ? description : undefined;
 				if (distinctDescription) {
 					const budget = Math.max(
 						TRUNCATE_LENGTHS.SHORT,

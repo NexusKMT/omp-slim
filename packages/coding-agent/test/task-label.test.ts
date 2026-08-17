@@ -93,6 +93,4 @@ describe("task label generation", () => {
 		);
 		expect(labeled).toBe("Sleep then reply done");
 	});
-
-
 });
