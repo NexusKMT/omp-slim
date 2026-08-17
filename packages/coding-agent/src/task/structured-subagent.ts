@@ -393,7 +393,10 @@ function buildExecutorOptions(
 		assignment: request.assignment.trim(),
 		context: request.context?.trim() || undefined,
 		planReference: undefined,
-		description: trimToUndefined(request.identity?.label),
+		// Task `name` is the spawn handle (id allocation). Eval `label` is a
+		// real UI description. Copy it only for eval so generateTaskLabel can run.
+		description:
+			request.invocationKind === "eval" ? trimToUndefined(request.identity?.label) : undefined,
 		index: request.index ?? 0,
 		parentToolCallId: request.parentToolCallId,
 		detached: request.detached,
@@ -476,7 +479,8 @@ function buildFailureResult(
 			agentSource: policy.agent.source,
 			task: renderSubagentPrompt(request.assignment),
 			assignment: request.assignment.trim(),
-			description: trimToUndefined(request.identity?.label),
+			description:
+				request.invocationKind === "eval" ? trimToUndefined(request.identity?.label) : undefined,
 			exitCode: 1,
 			output: "",
 			stderr: message,

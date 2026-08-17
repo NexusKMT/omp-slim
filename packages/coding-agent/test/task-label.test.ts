@@ -65,4 +65,34 @@ describe("task label generation", () => {
 		expect(requestSignal).toBe(controller.signal);
 		expect(await label).toBeNull();
 	});
+
+	it("rejects a generated label that only echoes the spawn handle", async () => {
+		const model = getModelOrThrow("claude-sonnet-4-5");
+		vi.spyOn(ai, "completeSimple").mockResolvedValue({
+			stopReason: "stop",
+			content: [{ type: "text", text: "<title>AuthLoader</title>" }],
+		} as never);
+
+		const echoed = await generateTaskLabel(
+			"Sleep forty seconds then reply done",
+			createRegistry(model),
+			createSettings(model),
+			"AuthLoader",
+		);
+		expect(echoed).toBeNull();
+
+		vi.spyOn(ai, "completeSimple").mockResolvedValue({
+			stopReason: "stop",
+			content: [{ type: "text", text: "<title>Sleep then reply done</title>" }],
+		} as never);
+		const labeled = await generateTaskLabel(
+			"Sleep forty seconds then reply done",
+			createRegistry(model),
+			createSettings(model),
+			"AuthLoader",
+		);
+		expect(labeled).toBe("Sleep then reply done");
+	});
+
+
 });

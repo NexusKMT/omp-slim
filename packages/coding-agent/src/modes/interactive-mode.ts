@@ -117,6 +117,7 @@ import { BUILTIN_SLASH_COMMAND_RESERVED_NAMES, buildTuiBuiltinSlashCommands } fr
 import { formatDuration } from "../slash-commands/helpers/format";
 import { STTController, type SttState } from "../stt";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "../system-prompt";
+import { labelEchoesHandle } from "../task/label";
 import { agentTypeBadge, formatTaskId } from "../task/render";
 import type { ConfiguredThinkingLevel } from "../thinking";
 import { tinyTitleClient } from "../tiny/title-client";
@@ -450,13 +451,6 @@ const MODEL_CYCLE_TRACK_CLEAR_MS = 4000;
 const SUBAGENT_HUD_VISIBLE_LIMIT = 8;
 const SUBAGENT_OBSERVER_UI_COALESCE_MS = 100;
 
-/** True when `label` is the spawn handle, including collision suffixes (`Name-2`). */
-function hudLabelEchoesId(id: string, label: string): boolean {
-	if (label.localeCompare(id, undefined, { sensitivity: "accent" }) === 0) return true;
-	const suffix = id.startsWith(`${label}-`) ? id.slice(label.length + 1) : "";
-	return /^\d+$/.test(suffix);
-}
-
 /**
  * Build the anchored subagent HUD block: a bold accent "Subagents" header plus
  * a bounded set of running-agent rows in the same `Id ⟨role⟩: description` shape
@@ -487,7 +481,7 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
 				const badge = agentTypeBadge(role, theme);
 				let line = `${dot} ${theme.fg("accent", theme.bold(displayId))}${badge}`;
 				const description = session.description?.trim() || session.progress?.description?.trim();
-				const distinctDescription = description && !hudLabelEchoesId(session.id, description) ? description : undefined;
+				const distinctDescription = description && !labelEchoesHandle(session.id, description) ? description : undefined;
 				if (distinctDescription) {
 					const budget = Math.max(
 						TRUNCATE_LENGTHS.SHORT,
@@ -498,7 +492,7 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
 					// No spawn description: fall back to a muted task preview, same as
 					// the inline task rows when a row has no label.
 					const taskPreview = session.progress?.task?.trim();
-					if (taskPreview && !hudLabelEchoesId(session.id, taskPreview)) {
+					if (taskPreview && !labelEchoesHandle(session.id, taskPreview)) {
 						line += ` ${theme.fg("muted", truncateToWidth(replaceTabs(taskPreview), TRUNCATE_LENGTHS.SHORT))}`;
 					}
 				}
