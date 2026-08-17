@@ -64,4 +64,54 @@ describe("cursor onPayload replacement", () => {
 		expect(message.case).toBe("runRequest");
 		expect(message.value.customSystemPrompt).toBeUndefined();
 	});
+
+	it("applies customSystemPrompt when onPayload returns undefined", async () => {
+		const { requestBytes } = await buildGrpcRequest(
+			model,
+			context,
+			{ customSystemPrompt: "from-options", onPayload: async () => undefined },
+			{ conversationId: "conv-1", blobStore: new Map() },
+		);
+
+		const message = decodeRunRequest(requestBytes);
+		expect(message.value.customSystemPrompt).toBe("from-options");
+	});
+
+	it("lets the onPayload replacement drop customSystemPrompt (replacement is final)", async () => {
+		const { requestBytes } = await buildGrpcRequest(
+			model,
+			context,
+			{
+				customSystemPrompt: "from-options",
+				onPayload: async payload => {
+					const { customSystemPrompt: _dropped, ...rest } = payload as Record<string, unknown>;
+					return rest;
+				},
+			},
+			{ conversationId: "conv-1", blobStore: new Map() },
+		);
+
+		const message = decodeRunRequest(requestBytes);
+		// The hook saw customSystemPrompt already applied (set before the hook) and
+		// returned a replacement that does not carry it — that replacement is final.
+		expect(message.value.customSystemPrompt).toBeUndefined();
+	});
+
+	it("lets the onPayload replacement override customSystemPrompt", async () => {
+		const { requestBytes } = await buildGrpcRequest(
+			model,
+			context,
+			{
+				customSystemPrompt: "from-options",
+				onPayload: async payload => ({
+					...(payload as Record<string, unknown>),
+					customSystemPrompt: "from-hook",
+				}),
+			},
+			{ conversationId: "conv-1", blobStore: new Map() },
+		);
+
+		const message = decodeRunRequest(requestBytes);
+		expect(message.value.customSystemPrompt).toBe("from-hook");
+	});
 });
