@@ -110,40 +110,40 @@ describe("subagent HUD lines", () => {
 	it("shows a non-default role badge and hides descriptions that only echo the id", () => {
 		const withRole = render([
 			makeSession({
-				id: "HindsightMcpFunnel",
+				id: "AuthLoader",
 				agent: "scout",
-				description: "Audit MCP funnel wiring",
+				description: "Refactor the auth flow",
 			}),
 		]);
-		expect(withRole).toContain("HindsightMcpFunnel");
-		expect(withRole).toMatch(/HindsightMcpFunnel.*scout/);
-		expect(withRole).toContain("Audit MCP funnel wiring");
+		expect(withRole).toContain("AuthLoader");
+		expect(withRole).toMatch(/AuthLoader.*scout/);
+		expect(withRole).toContain("Refactor the auth flow");
 
 		const echoed = render([
 			makeSession({
-				id: "HindsightMcpFunnel",
+				id: "AuthLoader",
 				agent: "scout",
-				description: "HindsightMcpFunnel",
+				description: "AuthLoader",
 			}),
 		]);
-		expect(echoed).toContain("HindsightMcpFunnel");
-		expect(echoed).toMatch(/HindsightMcpFunnel.*scout/);
-		expect(echoed).not.toContain("HindsightMcpFunnel: HindsightMcpFunnel");
+		expect(echoed).toContain("AuthLoader");
+		expect(echoed).toMatch(/AuthLoader.*scout/);
+		expect(echoed).not.toContain("AuthLoader: AuthLoader");
 
 		const collision = render([
 			makeSession({
-				id: "HindsightMcpFunnel-3",
+				id: "AuthLoader-3",
 				agent: "scout",
-				description: "HindsightMcpFunnel",
+				description: "AuthLoader",
 			}),
 		]);
-		expect(collision).toContain("HindsightMcpFunnel-3");
-		expect(collision).toMatch(/HindsightMcpFunnel-3.*scout/);
-		expect(collision).not.toContain("HindsightMcpFunnel-3: HindsightMcpFunnel");
+		expect(collision).toContain("AuthLoader-3");
+		expect(collision).toMatch(/AuthLoader-3.*scout/);
+		expect(collision).not.toContain("AuthLoader-3: AuthLoader");
 
-		const defaultWorker = render([makeSession({ id: "AuthLoader", agent: "task", description: "Refactor auth" })]);
-		expect(defaultWorker).toContain("AuthLoader: Refactor auth");
-		expect(defaultWorker).not.toMatch(/AuthLoader.*task/);
+		const defaultWorker = render([makeSession({ id: "SchemaMigrator", agent: "task", description: "Migrate users" })]);
+		expect(defaultWorker).toContain("SchemaMigrator: Migrate users");
+		expect(defaultWorker).not.toMatch(/SchemaMigrator.*task/);
 	});
 
 	it("only shows active subagents and clears once everything finished", () => {
