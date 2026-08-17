@@ -160,9 +160,24 @@ interface BufferedFileText {
 }
 
 /**
- * Read `absolutePath` once and derive every view of it the read path needs.
- * Returns `undefined` when the bytes cannot be read, which drops the caller
- * back to the streaming reader and reproduces today's error surface.
+ * Read the whole file, or `undefined` when the bytes cannot be read — which
+ * drops the caller back to the streaming reader and reproduces today's error
+ * surface.
+ *
+ * Kept separate from {@link deriveBufferedFileText} so the binary sniff can run
+ * on the bytes first: a file that decodes to mojibake is refused, and building
+ * three string views of it before finding that out would be pure waste.
+ */
+async function readWholeFile(absolutePath: string): Promise<Buffer | undefined> {
+	try {
+		return await fs.readFile(absolutePath);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Derive every view of `bytes` the read path needs, decoding exactly once.
  *
  * `Bun.file(path).text()` strips a leading BOM while `Buffer.toString` keeps it,
  * and the snapshot store plus the patcher's live-file read both go through the
@@ -170,13 +185,7 @@ interface BufferedFileText {
  * that decode for hashing while {@link BufferedFileText.rawText} stays verbatim
  * for the emitted lines and their byte accounting.
  */
-async function loadBufferedFileText(absolutePath: string): Promise<BufferedFileText | undefined> {
-	let bytes: Buffer;
-	try {
-		bytes = await fs.readFile(absolutePath);
-	} catch {
-		return undefined;
-	}
+function deriveBufferedFileText(bytes: Buffer): BufferedFileText {
 	const rawText = bytes.toString("utf-8");
 	const strippedText = rawText.charCodeAt(0) === 0xfeff ? rawText.slice(1) : rawText;
 	// `normalizeToLF` allocates a copy; skip it outright for the common LF file.
@@ -1345,7 +1354,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			// the rendered window, bracket context and the snapshot hash all want
 			// the same bytes; past the snapshot cap nothing wants the whole file,
 			// so the streaming reader keeps that case cheap.
-			const buffered = fileSize <= SNAPSHOT_MAX_BYTES ? await loadBufferedFileText(absolutePath) : undefined;
+			const wholeFileBytes = fileSize <= SNAPSHOT_MAX_BYTES ? await readWholeFile(absolutePath) : undefined;
 
 			// Binary sniff before any UTF-8 text materialization. A binary file
 			// (font, object, archive, packed blob) decodes to NUL/control bytes and
@@ -1356,8 +1365,8 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			// covers both the multi-range and single-range disk paths below.
 			const looksBinary =
 				!isRawSelector(parsed) &&
-				(buffered
-					? isProbablyBinaryHeader(buffered.bytes.subarray(0, BINARY_SNIFF_BYTES))
+				(wholeFileBytes
+					? isProbablyBinaryHeader(wholeFileBytes.subarray(0, BINARY_SNIFF_BYTES))
 					: await isProbablyBinary(absolutePath));
 			if (looksBinary) {
 				return toolResult<ReadToolDetails>({ resolvedPath: absolutePath, suffixResolution })
@@ -1370,6 +1379,8 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					.sourcePath(absolutePath)
 					.done();
 			}
+			// Decode only what survived the sniff.
+			const buffered = wholeFileBytes ? deriveBufferedFileText(wholeFileBytes) : undefined;
 
 			if (
 				parsed.kind === "none" &&
@@ -1905,7 +1916,8 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		if (isMultiRange(parsedSel) && parsedSel.kind === "lines") {
 			// Bracket context and per-range slicing both want the whole artifact, so
 			// materialize it once exactly as the plain-file path does.
-			const buffered = artifact.size <= SNAPSHOT_MAX_BYTES ? await loadBufferedFileText(artifact.path) : undefined;
+			const artifactBytes = artifact.size <= SNAPSHOT_MAX_BYTES ? await readWholeFile(artifact.path) : undefined;
+			const buffered = artifactBytes ? deriveBufferedFileText(artifactBytes) : undefined;
 			const read = await this.#readLocalFileMultiRange(
 				artifact.path,
 				parsedSel.ranges,

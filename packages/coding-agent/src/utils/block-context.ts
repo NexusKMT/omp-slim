@@ -28,6 +28,12 @@ export interface BlockContextSource {
 	 * the way to the parser. It MUST be the same content as `fullLines`; a
 	 * differing trailing newline is the only tolerated variation, since it moves
 	 * no node's line number.
+	 *
+	 * Every current supplier derives both from one buffer in the same breath, so
+	 * the two cannot drift. Do NOT set it on a source object that is reused
+	 * across two different line arrays — a before/after diff pair, say — because
+	 * the boundary lines tree-sitter reports would then be indexed into the wrong
+	 * array and surface off-by-N context rows.
 	 */
 	text?: string;
 }
