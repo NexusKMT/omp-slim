@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import * as ai from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { generateTaskLabel } from "@oh-my-pi/pi-coding-agent/task/label";
+import { generateTaskLabel, labelEchoesHandle } from "@oh-my-pi/pi-coding-agent/task/label";
 
 function getModelOrThrow(id: string): Model<Api> {
 	const model = getBundledModel("anthropic", id);
@@ -92,5 +92,12 @@ describe("task label generation", () => {
 			"AuthLoader",
 		);
 		expect(labeled).toBe("Sleep then reply done");
+	});
+
+	it("treats a case-insensitive Name-N collision as an echoed handle", () => {
+		expect(labelEchoesHandle("AuthLoader-3", "authloader")).toBe(true);
+		expect(labelEchoesHandle("AuthLoader-3", "AuthLoader")).toBe(true);
+		expect(labelEchoesHandle("AuthLoader", "authloader")).toBe(true);
+		expect(labelEchoesHandle("AuthLoader-3", "Migrate users")).toBe(false);
 	});
 });

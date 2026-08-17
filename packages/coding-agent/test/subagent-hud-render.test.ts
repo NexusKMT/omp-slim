@@ -141,6 +141,16 @@ describe("subagent HUD lines", () => {
 		expect(collision).toMatch(/AuthLoader-3.*scout/);
 		expect(collision).not.toContain("AuthLoader-3: AuthLoader");
 
+		const mixedCase = render([
+			makeSession({
+				id: "AuthLoader-3",
+				agent: "scout",
+				description: "authloader",
+			}),
+		]);
+		expect(mixedCase).toContain("AuthLoader-3");
+		expect(mixedCase).not.toContain("AuthLoader-3: authloader");
+
 		const defaultWorker = render([
 			makeSession({ id: "SchemaMigrator", agent: "task", description: "Migrate users" }),
 		]);
