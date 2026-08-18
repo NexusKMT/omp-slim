@@ -3983,7 +3983,12 @@ export class AuthStorage {
 				}
 				if (!report) return { credentialId: entry.id, credentialType, state: "unknown" };
 
-				const limits = this.#getScopedUsageLimits(strategy, report, rankingContext);
+				// Reserve health is opt-in and non-destructive: prefer the strategy's
+				// reserve scoping, which may expose mapped model/tier rows that the
+				// hard-block scoper withholds until confirmed exhaustion.
+				const limits =
+					strategy.scopeLimitsForReserve?.(report, rankingContext) ??
+					this.#getScopedUsageLimits(strategy, report, rankingContext);
 				if (limits.length === 0) return { credentialId: entry.id, credentialType, state: "unknown" };
 
 				const currentLimits = limits.filter(limit => {
