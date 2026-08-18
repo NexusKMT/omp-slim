@@ -1271,7 +1271,26 @@ export function prepareCompaction(
 		prevCompactionIndex = i;
 		break;
 	}
-	const boundaryStart = prevCompactionIndex + 1;
+
+	// Honor the latest `/clear` reset boundary. `/clear` records a
+	// `reset_boundary` marker and reports the model context empty, so compaction
+	// must not resurrect the dropped pre-clear turns into its summary — matching
+	// how buildSessionContext starts the model-context rebuild after the boundary.
+	// A boundary after the last reusable compaction supersedes it: the pre-reset
+	// summary was cleared too, so drop the previous-compaction reuse and start
+	// fresh after the boundary. A boundary at or before that compaction is already
+	// superseded by it, so only scan newer entries.
+	let resetBoundaryIndex = -1;
+	for (let i = pathEntries.length - 1; i > prevCompactionIndex; i--) {
+		if (pathEntries[i].type === "reset_boundary") {
+			resetBoundaryIndex = i;
+			break;
+		}
+	}
+	if (resetBoundaryIndex > prevCompactionIndex) {
+		prevCompactionIndex = -1;
+	}
+	const boundaryStart = Math.max(prevCompactionIndex, resetBoundaryIndex) + 1;
 	const boundaryEnd = pathEntries.length;
 
 	const lastUsage = getLastAssistantUsage(pathEntries);
