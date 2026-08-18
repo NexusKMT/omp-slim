@@ -43,7 +43,7 @@ const TINY_TITLE_SYSTEM_PROMPT = prompt.render(titleSystemPrompt);
 const tinyModelDevicePreference = resolveTinyModelDevicePreference();
 const tinyModelDtypeOverride = resolveTinyModelDtypeOverride();
 
-interface TransformersRuntime extends TransformersRuntimeMetadata {
+export interface TransformersRuntime extends TransformersRuntimeMetadata {
 	env: {
 		cacheDir?: string;
 		allowLocalModels?: boolean;
@@ -80,7 +80,13 @@ function getTinyTitleRuntimeDir(): string {
 	);
 }
 
-function createStopOnTextCriteria(
+/** Stops generation at the first occurrence of `text` in the *generated* tokens.
+ *
+ *  The window must be anchored to the generation boundary, not to the end of the
+ *  whole sequence: a prompt that itself contains the stop string (chat-level
+ *  few-shot examples ending in `</title>`, for instance) would otherwise match on
+ *  prompt tokens and stop before the model emits anything. */
+export function createStopOnTextCriteria(
 	transformers: TransformersRuntime,
 	tokenizer: TextGenerationPipeline["tokenizer"],
 	text: string,
@@ -88,6 +94,8 @@ function createStopOnTextCriteria(
 	class StopOnTextCriteria extends transformers.StoppingCriteria {
 		#tokenizer: TextGenerationPipeline["tokenizer"];
 		#text: string;
+		/** First generated index per batch entry, captured on the first call. */
+		#generatedStarts: number[] = [];
 
 		constructor() {
 			super();
@@ -96,8 +104,10 @@ function createStopOnTextCriteria(
 		}
 
 		override _call(inputIds: number[][]): boolean[] {
-			return inputIds.map(ids => {
-				const tail = ids.slice(-STOP_DECODE_WINDOW_TOKENS);
+			return inputIds.map((ids, index) => {
+				const generatedStart = this.#generatedStarts[index] ?? Math.max(0, ids.length - 1);
+				this.#generatedStarts[index] = generatedStart;
+				const tail = ids.slice(Math.max(generatedStart, ids.length - STOP_DECODE_WINDOW_TOKENS));
 				const decoded = this.#tokenizer.decode(tail, {
 					skip_special_tokens: false,
 					clean_up_tokenization_spaces: false,

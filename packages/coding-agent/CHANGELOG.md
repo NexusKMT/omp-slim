@@ -43,6 +43,9 @@
 ### Fixed
 
 - Fixed memory extraction sending its instructions, few-shot examples, and the user's message as a single user turn, which caused small local models to echo the examples instead of extracting facts; instructions now travel as a system turn and the raw text as the user turn
+### Fixed
+
+- Fixed local title generation stopping on a stop string that appeared in the prompt instead of the generated tokens
 
 ## [17.3.7] - 2026-08-17
 
