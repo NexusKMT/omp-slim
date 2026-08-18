@@ -704,6 +704,13 @@ describe("parseModelPattern", () => {
 			expect(result.model).toBeUndefined();
 		});
 
+		test("the provider lock is case-insensitive (Anthropic/Claude-Opus-5 still fails closed)", () => {
+			// The matcher compares ids case-insensitively, so the lock must too —
+			// otherwise case variance silently re-enables the aggregator shadow.
+			const result = parseModelPattern("Anthropic/Claude-Opus-5", [openRouterOpus5]);
+			expect(result.model).toBeUndefined();
+		});
+
 		test("anthropic/claude-opus-5 resolves to the anthropic provider when it is available", () => {
 			const result = parseModelPattern("anthropic/claude-opus-5", [anthropicOpus5, openRouterOpus5]);
 			expect(result.model?.provider).toBe("anthropic");

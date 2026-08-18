@@ -22,7 +22,7 @@ import { modelMatchesHost } from "@oh-my-pi/pi-catalog/hosts";
 import { buildModelProviderPriorityRank } from "@oh-my-pi/pi-catalog/identity";
 import { stripThinkingVariantToken } from "@oh-my-pi/pi-catalog/identity/family";
 import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";
-import { type GeneratedProvider, getBundledModel, modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
+import { type GeneratedProvider, getBundledModels, modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { DEFAULT_MODEL_PER_PROVIDER } from "@oh-my-pi/pi-catalog/provider-models";
 import { resolveBareVariantAlias, resolveVariantAlias } from "@oh-my-pi/pi-catalog/variant-collapse";
 import { fuzzyMatch } from "@oh-my-pi/pi-tui";
@@ -619,12 +619,15 @@ function isProviderLockedCrossMatch(pattern: string, matchedModel: Model<Api>): 
 	if (slashIdx <= 0) {
 		return false;
 	}
-	const provider = pattern.slice(0, slashIdx);
-	const modelId = pattern.slice(slashIdx + 1);
-	if (matchedModel.provider.toLowerCase() === provider.toLowerCase()) {
+	const provider = pattern.slice(0, slashIdx).toLowerCase();
+	const modelId = pattern.slice(slashIdx + 1).toLowerCase();
+	if (matchedModel.provider.toLowerCase() === provider) {
 		return false;
 	}
-	return getBundledModel(provider as GeneratedProvider, modelId) !== undefined;
+	// Case-insensitive on both halves: the surrounding matcher lowercases the
+	// selector before comparing ids, so the lock must not evaporate on case
+	// variance (catalog provider keys are lowercase; model ids may not be).
+	return getBundledModels(provider as GeneratedProvider).some(m => m.id.toLowerCase() === modelId);
 }
 
 /**
