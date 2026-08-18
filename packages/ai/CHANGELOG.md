@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Answer Cursor `interaction_query` permission gates (hosted web search, Exa, unnamed field-9 WebFetch) so the Run RPC continues instead of sitting silent until the 300s idle watchdog.
+
 ## [17.3.7] - 2026-08-17
 
 ### Changed
