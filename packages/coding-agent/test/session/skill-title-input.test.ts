@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { formatTitleConversationContext } from "../../src/tiny/message-preproc";
 import { skillPromptTitleInput, titleTextFromSkillPrompt } from "../../src/session/skill-title-input";
+import { formatTitleConversationContext } from "../../src/tiny/message-preproc";
 
 describe("skillPromptTitleInput", () => {
 	it("uses the operator /skill chip when present", () => {

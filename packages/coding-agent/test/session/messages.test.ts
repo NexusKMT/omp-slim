@@ -2,8 +2,8 @@ import { describe, expect, it } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import {
-	type CustomMessage,
 	buildReplanTitleContext,
+	type CustomMessage,
 	convertToLlm,
 	INTERRUPTED_THINKING_MESSAGE_TYPE,
 	replaceLlmImagesWithText,
@@ -289,7 +289,7 @@ describe("buildReplanTitleContext", () => {
 			role: "custom",
 			customType: SKILL_PROMPT_MESSAGE_TYPE,
 			content:
-				"[IMPORTANT: User invoked the \"implement\" skill]\n\nImplement the work described by the user.\n\nUse this skill.",
+				'[IMPORTANT: User invoked the "implement" skill]\n\nImplement the work described by the user.\n\nUse this skill.',
 			display: true,
 			details: {
 				name: "implement",
@@ -310,7 +310,7 @@ describe("buildReplanTitleContext", () => {
 
 	it("does not feed an autoloaded skill prompt into title context", () => {
 		const skill = customMessage(SKILL_PROMPT_MESSAGE_TYPE, "agent");
-		skill.details = { ...skill.details, args: "issues/07-manual-llm.md" };
+		skill.details = { name: "atomic-commit", path: "/tmp/SKILL.md", lineCount: 1, args: "issues/07-manual-llm.md" };
 
 		expect(buildReplanTitleContext([skill])).toBe("");
 	});
