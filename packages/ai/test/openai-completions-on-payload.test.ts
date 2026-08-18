@@ -48,18 +48,14 @@ type Body = Record<string, any>;
 describe("openai-completions onPayload replacement", () => {
 	it("sends an async onPayload replacement body", async () => {
 		let captured: Body | undefined;
-		const result = await streamOpenAICompletions(
-			completionsModel,
-			baseContext(),
-			{
-				apiKey: "test-key",
-				fetch: createSseFetch(body => (captured = body as Body)),
-				onPayload: async payload => ({
-					...(payload as Record<string, unknown>),
-					messages: [{ role: "user", content: "replacement" }],
-				}),
-			},
-		).result();
+		const result = await streamOpenAICompletions(completionsModel, baseContext(), {
+			apiKey: "test-key",
+			fetch: createSseFetch(body => (captured = body as Body)),
+			onPayload: async payload => ({
+				...(payload as Record<string, unknown>),
+				messages: [{ role: "user", content: "replacement" }],
+			}),
+		}).result();
 
 		expect(result.stopReason).toBe("stop");
 		expect(captured?.messages).toEqual([{ role: "user", content: "replacement" }]);

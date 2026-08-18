@@ -12,9 +12,6 @@ import {
 	AgentServerMessageSchema,
 	AgentStoreConflictErrorSchema,
 	AgentStoreConflictResultSchema,
-	AskQuestionInteractionResponseSchema,
-	AskQuestionRejectedSchema,
-	AskQuestionResultSchema,
 	AssistantMessageSchema,
 	BackgroundShellSpawnResultSchema,
 	CanvasDiagnosticsErrorSchema,
@@ -29,9 +26,6 @@ import {
 	ConversationStateStructureSchema,
 	ConversationStepSchema,
 	ConversationTurnStructureSchema,
-	CreatePlanErrorSchema,
-	CreatePlanRequestResponseSchema,
-	CreatePlanResultSchema,
 	DeleteErrorSchema,
 	DeleteRejectedSchema,
 	DeleteResultSchema,
@@ -40,10 +34,6 @@ import {
 	DiagnosticsRejectedSchema,
 	DiagnosticsResultSchema,
 	DiagnosticsSuccessSchema,
-	ExaFetchRequestResponse_ApprovedSchema,
-	ExaFetchRequestResponseSchema,
-	ExaSearchRequestResponse_ApprovedSchema,
-	ExaSearchRequestResponseSchema,
 	ExecClientControlMessageSchema,
 	type ExecClientMessage,
 	ExecClientMessageSchema,
@@ -69,9 +59,6 @@ import {
 	GrepSuccessSchema,
 	type GrepUnionResult,
 	GrepUnionResultSchema,
-	type InteractionQuery,
-	type InteractionResponse,
-	InteractionResponseSchema,
 	KvClientMessageSchema,
 	type KvServerMessage,
 	ListMcpResourcesErrorSchema,
@@ -122,8 +109,6 @@ import {
 	SelectedContextSchema,
 	SelectedImageSchema,
 	SetBlobResultSchema,
-	SetupVmEnvironmentResultSchema,
-	SetupVmEnvironmentSuccessSchema,
 	ShellAllowlistPrecheckResultSchema,
 	type ShellArgs,
 	ShellFailureSchema,
@@ -143,17 +128,11 @@ import {
 	SubagentAwaitResultSchema,
 	SubagentErrorSchema,
 	SubagentResultSchema,
-	SwitchModeRequestResponse_RejectedSchema,
-	SwitchModeRequestResponseSchema,
 	ThinkingMessageSchema,
 	ToolCallSchema,
 	UserMessageActionSchema,
 	UserMessageSchema,
 	WebFetchAllowlistPrecheckResultSchema,
-	WebFetchRequestResponse_ApprovedSchema,
-	WebFetchRequestResponseSchema,
-	WebSearchRequestResponse_ApprovedSchema,
-	WebSearchRequestResponseSchema,
 	WriteErrorSchema,
 	WriteRejectedSchema,
 	WriteResultSchema,
@@ -1059,122 +1038,6 @@ export async function handleServerMessage(
 	}
 }
 
-function handleInteractionQuery(query: InteractionQuery, h2Request: http2.ClientHttp2Stream): void {
-	const queryCase = query.query.case;
-	log("interactionQuery", queryCase, query.query.value);
-	if (!queryCase) {
-		// Newer Cursor builds add query variants this proto has not named yet
-		// (WebFetch was field 9). The server still blocks on a same-number
-		// InteractionResponse. Permission-shaped queries use Approved/Rejected
-		// like Exa fetch; answering `approved` unblocks the turn.
-		const unknown = protoUnknownFields(query).find(field => field.wireType === 2 && field.no >= 2);
-		if (unknown) {
-			log("warn", "unknownInteractionQueryApproved", { id: query.id, field: unknown.no });
-			sendUnknownApprovedInteractionResponse(h2Request, query.id, unknown.no);
-			return;
-		}
-		log("warn", "unknownInteractionQuery", { id: query.id });
-		return;
-	}
-
-	switch (queryCase) {
-		case "webSearchRequestQuery":
-			// Permission gate, not "please run the search". Approve so Cursor
-			// performs the hosted search and the turn continues.
-			sendInteractionResponse(h2Request, query.id, {
-				case: "webSearchRequestResponse",
-				value: create(WebSearchRequestResponseSchema, {
-					result: { case: "approved", value: create(WebSearchRequestResponse_ApprovedSchema, {}) },
-				}),
-			});
-			return;
-		case "exaSearchRequestQuery":
-			sendInteractionResponse(h2Request, query.id, {
-				case: "exaSearchRequestResponse",
-				value: create(ExaSearchRequestResponseSchema, {
-					result: { case: "approved", value: create(ExaSearchRequestResponse_ApprovedSchema, {}) },
-				}),
-			});
-			return;
-		case "exaFetchRequestQuery":
-			sendInteractionResponse(h2Request, query.id, {
-				case: "exaFetchRequestResponse",
-				value: create(ExaFetchRequestResponseSchema, {
-					result: { case: "approved", value: create(ExaFetchRequestResponse_ApprovedSchema, {}) },
-				}),
-			});
-			return;
-		case "webFetchRequestQuery":
-			// Hosted WebFetch permission prompt. Field 9 is what cursor-grok-4.6-xhigh
-			// sends after "I'll fetch the page…"; answering lets the server continue.
-			sendInteractionResponse(h2Request, query.id, {
-				case: "webFetchRequestResponse",
-				value: create(WebFetchRequestResponseSchema, {
-					result: { case: "approved", value: create(WebFetchRequestResponse_ApprovedSchema, {}) },
-				}),
-			});
-			return;
-		case "askQuestionInteractionQuery":
-			sendInteractionResponse(h2Request, query.id, {
-				case: "askQuestionInteractionResponse",
-				value: create(AskQuestionInteractionResponseSchema, {
-					result: create(AskQuestionResultSchema, {
-						result: {
-							case: "rejected",
-							value: create(AskQuestionRejectedSchema, {
-								reason: `Interactive questions are ${NOT_IMPLEMENTED_SUFFIX}`,
-							}),
-						},
-					}),
-				}),
-			});
-			return;
-		case "switchModeRequestQuery":
-			sendInteractionResponse(h2Request, query.id, {
-				case: "switchModeRequestResponse",
-				value: create(SwitchModeRequestResponseSchema, {
-					result: {
-						case: "rejected",
-						value: create(SwitchModeRequestResponse_RejectedSchema, {
-							reason: `Mode switches are ${NOT_IMPLEMENTED_SUFFIX}`,
-						}),
-					},
-				}),
-			});
-			return;
-		case "createPlanRequestQuery":
-			sendInteractionResponse(h2Request, query.id, {
-				case: "createPlanRequestResponse",
-				value: create(CreatePlanRequestResponseSchema, {
-					result: create(CreatePlanResultSchema, {
-						result: {
-							case: "error",
-							value: create(CreatePlanErrorSchema, {
-								error: `Plan files are ${NOT_IMPLEMENTED_SUFFIX}`,
-							}),
-						},
-					}),
-				}),
-			});
-			return;
-		case "setupVmEnvironmentArgs":
-			// Result oneof has only `success`. Answering is still required: silence
-			// strands the query id the same way an unanswered search approval does.
-			log("warn", "setupVmEnvironmentApprovedEmpty", { id: query.id });
-			sendInteractionResponse(h2Request, query.id, {
-				case: "setupVmEnvironmentResult",
-				value: create(SetupVmEnvironmentResultSchema, {
-					result: { case: "success", value: create(SetupVmEnvironmentSuccessSchema, {}) },
-				}),
-			});
-			return;
-		default: {
-			const _exhaustive: never = queryCase;
-			log("warn", "unhandledInteractionQuery", { queryCase: _exhaustive, id: query.id });
-		}
-	}
-}
-
 type ProtoUnknownField = { no: number; wireType: number; data: Uint8Array };
 
 type HostedFetchCall = {
@@ -1221,40 +1084,6 @@ function describeHostedFetchResult(call: HostedFetchCall | undefined): { text: s
 function protoUnknownFields(message: object): ProtoUnknownField[] {
 	const raw = (message as { $unknown?: ProtoUnknownField[] }).$unknown;
 	return Array.isArray(raw) ? raw : [];
-}
-
-function sendUnknownApprovedInteractionResponse(
-	h2Request: http2.ClientHttp2Stream,
-	queryId: number,
-	fieldNo: number,
-): void {
-	// `approved {}` on the matching response oneof: field 1, empty message.
-	// Unknown LEN fields carry their raw wire bytes INCLUDING the length
-	// varint (that is what BinaryReader.skip captures and what
-	// BinaryWriter.raw replays verbatim after the tag), so the payload is
-	// `02` (length) `0a 00` (field 1, empty submessage).
-	const response = create(InteractionResponseSchema, { id: queryId });
-	(response as { $unknown?: ProtoUnknownField[] }).$unknown = [
-		{ no: fieldNo, wireType: 2, data: new Uint8Array([0x02, 0x0a, 0x00]) },
-	];
-	const clientMessage = create(AgentClientMessageSchema, {
-		message: { case: "interactionResponse", value: response },
-	});
-	h2Request.write(frameConnectMessage(toBinary(AgentClientMessageSchema, clientMessage)));
-	log("interactionResponse", "unknownApproved", { id: queryId, field: fieldNo });
-}
-
-function sendInteractionResponse(
-	h2Request: http2.ClientHttp2Stream,
-	queryId: number,
-	result: InteractionResponse["result"],
-): void {
-	const response = create(InteractionResponseSchema, { id: queryId, result });
-	const clientMessage = create(AgentClientMessageSchema, {
-		message: { case: "interactionResponse", value: response },
-	});
-	h2Request.write(frameConnectMessage(toBinary(AgentClientMessageSchema, clientMessage)));
-	log("interactionResponse", result.case, { id: queryId });
 }
 
 function handleKvServerMessage(

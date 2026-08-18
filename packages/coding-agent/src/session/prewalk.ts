@@ -11,8 +11,8 @@ import prewalkChecklistPrompt from "../prompts/system/prewalk-checklist.md" with
 import prewalkContinuePrompt from "../prompts/system/prewalk-continue.md" with { type: "text" };
 import prewalkPlanPrompt from "../prompts/system/prewalk-plan.md" with { type: "text" };
 import { type ConfiguredThinkingLevel, prewalkWouldBeNoop } from "../thinking";
-import type { PlanProposalHandler } from "../tools/resolve";
 import { isMCPToolName } from "../tools/builtin-names";
+import type { PlanProposalHandler } from "../tools/resolve";
 import { ToolError } from "../tools/tool-errors";
 import type { PlanYolo, Prewalk } from "./agent-session-types";
 import { PREWALK_PLAN_MESSAGE_TYPE } from "./messages";

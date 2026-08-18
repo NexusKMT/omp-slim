@@ -1022,7 +1022,10 @@ export async function generateSummary(
 			// the rejection proves the plan was fiction, so converging on the real
 			// cap must not spend a call per level of an imaginary ladder.
 			const halved = Math.floor(Math.min(window.budgetTokens, windowTokens) / 2);
-			if (!AIError.is(AIError.classify(error), AIError.Flag.ContextOverflow) || halved < minSummaryInputTokens(model)) {
+			if (
+				!AIError.is(AIError.classify(error), AIError.Flag.ContextOverflow) ||
+				halved < minSummaryInputTokens(model)
+			) {
 				throw error;
 			}
 			pending.splice(

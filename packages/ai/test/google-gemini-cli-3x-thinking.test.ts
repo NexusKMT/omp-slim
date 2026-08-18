@@ -181,5 +181,4 @@ describe("google-gemini-cli Gemini 3.x thinking mapping", () => {
 		expect(parsed.model).toBe("gemini-3.7-flash-low");
 		expect(parsed.request?.generationConfig?.thinkingConfig?.thinkingLevel).toBe("LOW");
 	});
-
 });

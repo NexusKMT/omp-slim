@@ -29,14 +29,20 @@ const context: Context = {
 // Capture the serialized body the provider sends. The response is an empty
 // event stream: the fetch (and thus the body capture) happens before any
 // response parsing, and the stream's outcome is irrelevant to the assertion.
-async function captureSentBody(onPayload: (payload: unknown) => unknown | Promise<unknown>): Promise<Record<string, any>> {
+async function captureSentBody(
+	onPayload: (payload: unknown) => unknown | Promise<unknown>,
+): Promise<Record<string, any>> {
 	const { promise, resolve } = Promise.withResolvers<Record<string, any>>();
 	const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
 		const body = init?.body;
 		const text = body instanceof Uint8Array ? new TextDecoder().decode(body) : String(body);
 		resolve(JSON.parse(text));
 		return new Response(
-			new ReadableStream<Uint8Array>({ start(controller) { controller.close(); } }),
+			new ReadableStream<Uint8Array>({
+				start(controller) {
+					controller.close();
+				},
+			}),
 			{ status: 200, headers: { "content-type": "application/vnd.amazon.eventstream" } },
 		);
 	}) as unknown as typeof fetch;

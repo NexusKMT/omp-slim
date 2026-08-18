@@ -382,7 +382,6 @@ describe("model thinking derivation", () => {
 		expect(mapEffortToGoogleThinkingLevel(Effort.Minimal)).toBe("MINIMAL");
 	});
 
-
 	it("bakes requiresEffort for Gemini 3.x on any provider and backfills explicit metadata", () => {
 		// Derivation: aggregator-hosted Gemini 3.5 gets the flag, 2.5 does not.
 		const openRouterFlash = createModel({

@@ -25,7 +25,11 @@ describe("validateProviderConfiguration (models-config auth)", () => {
 
 	test("explicit auth: apiKey with apiKey set passes", () => {
 		expect(() =>
-			validateProviderConfiguration("custom", { baseUrl, auth: "apiKey", apiKey: "sk-test", models }, "models-config"),
+			validateProviderConfiguration(
+				"custom",
+				{ baseUrl, auth: "apiKey", apiKey: "sk-test", models },
+				"models-config",
+			),
 		).not.toThrow();
 	});
 });

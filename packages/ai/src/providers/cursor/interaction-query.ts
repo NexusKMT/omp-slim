@@ -17,6 +17,8 @@ import {
 	InteractionResponseSchema,
 	SwitchModeRequestResponse_RejectedSchema,
 	SwitchModeRequestResponseSchema,
+	WebFetchRequestResponse_ApprovedSchema,
+	WebFetchRequestResponseSchema,
 	WebSearchRequestResponse_ApprovedSchema,
 	WebSearchRequestResponseSchema,
 } from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
@@ -141,6 +143,16 @@ export function handleInteractionQuery(query: InteractionQuery, h2Request: http2
 				case: "exaFetchRequestResponse",
 				value: create(ExaFetchRequestResponseSchema, {
 					result: { case: "approved", value: create(ExaFetchRequestResponse_ApprovedSchema, {}) },
+				}),
+			});
+			return;
+		case "webFetchRequestQuery":
+			// Hosted WebFetch permission prompt. Field 9 is what cursor-grok-4.6-xhigh
+			// sends after "I'll fetch the page…"; answering lets the server continue.
+			sendInteractionResponse(h2Request, query.id, {
+				case: "webFetchRequestResponse",
+				value: create(WebFetchRequestResponseSchema, {
+					result: { case: "approved", value: create(WebFetchRequestResponse_ApprovedSchema, {}) },
 				}),
 			});
 			return;

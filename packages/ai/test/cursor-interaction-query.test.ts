@@ -153,8 +153,14 @@ describe("cursor interaction query handshake", () => {
 			throw new Error("expected interactionResponse");
 		}
 		expect(client.message.value.id).toBe(18);
-		const responseBag: ProtoUnknownBag = client.message.value;
-		expect(responseBag.$unknown?.some(field => field.no === 9 && field.wireType === 2)).toBe(true);
+		// The raw same-field reply must round-trip: under the current proto,
+		// field 9 is named, so a correctly length-prefixed `approved {}` payload
+		// decodes as an approved webFetchRequestResponse. A missing LEN prefix
+		// would fail this decode (regression contract for the wire framing).
+		expect(client.message.value.result).toMatchObject({
+			case: "webFetchRequestResponse",
+			value: { result: { case: "approved" } },
+		});
 	});
 
 	it("rejects interactive ask / switch-mode / create-plan queries", async () => {
