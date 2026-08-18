@@ -527,7 +527,7 @@ describe("listClaudePluginRoots", () => {
 		);
 	});
 
-	test("expands env placeholders in marketplace plugin MCP url and headers", async () => {
+	test("expands env placeholders throughout marketplace plugin MCP configuration", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const pluginPath = path.join(tempDir, "plugins", "context7");
 		const originalApiKey = process.env.OMP_PLUGIN_MCP_API_KEY;
@@ -566,6 +566,14 @@ describe("listClaudePluginRoots", () => {
 							CONTEXT7_API_KEY: envPlaceholder("OMP_PLUGIN_MCP_API_KEY"),
 						},
 					},
+					local: {
+						type: "stdio",
+						command: "${CLAUDE_PLUGIN_ROOT}/bin/server",
+						env: {
+							API_KEY: envPlaceholder("OMP_PLUGIN_MCP_API_KEY"),
+							CONFIG_PATH: "${CLAUDE_PLUGIN_ROOT}/config.json",
+						},
+					},
 				}),
 			);
 
@@ -577,6 +585,12 @@ describe("listClaudePluginRoots", () => {
 
 			expect(server?.url).toBe("https://mcp.context7.example/mcp");
 			expect(server?.headers).toEqual({ CONTEXT7_API_KEY: "ctx7sk-test-key" });
+			const localServer = result.all.find(item => item.name === "context7:local");
+			expect(localServer?.command).toBe(path.join(pluginPath, "bin", "server"));
+			expect(localServer?.env).toEqual({
+				API_KEY: "ctx7sk-test-key",
+				CONFIG_PATH: path.join(pluginPath, "config.json"),
+			});
 		} finally {
 			if (originalApiKey === undefined) delete process.env.OMP_PLUGIN_MCP_API_KEY;
 			else process.env.OMP_PLUGIN_MCP_API_KEY = originalApiKey;
