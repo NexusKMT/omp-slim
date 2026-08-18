@@ -1229,9 +1229,13 @@ function sendUnknownApprovedInteractionResponse(
 	fieldNo: number,
 ): void {
 	// `approved {}` on the matching response oneof: field 1, empty message.
+	// Unknown LEN fields carry their raw wire bytes INCLUDING the length
+	// varint (that is what BinaryReader.skip captures and what
+	// BinaryWriter.raw replays verbatim after the tag), so the payload is
+	// `02` (length) `0a 00` (field 1, empty submessage).
 	const response = create(InteractionResponseSchema, { id: queryId });
 	(response as { $unknown?: ProtoUnknownField[] }).$unknown = [
-		{ no: fieldNo, wireType: 2, data: new Uint8Array([0x0a, 0x00]) },
+		{ no: fieldNo, wireType: 2, data: new Uint8Array([0x02, 0x0a, 0x00]) },
 	];
 	const clientMessage = create(AgentClientMessageSchema, {
 		message: { case: "interactionResponse", value: response },
