@@ -1375,7 +1375,10 @@ mod tests {
 					.count()
 			};
 			let (zero, oh) = (mid_ink(0), mid_ink(cw));
-			assert!(zero > oh, "cell {cw}x{ch}: zero must ink its middle more than O (zero={zero}, O={oh})");
+			assert!(
+				zero > oh,
+				"cell {cw}x{ch}: zero must ink its middle more than O (zero={zero}, O={oh})"
+			);
 		}
 	}
 
