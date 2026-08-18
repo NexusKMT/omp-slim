@@ -10,6 +10,9 @@
 ### Fixed
 
 - Cloud Code Assist Gemini 3.6/3.7 Flash no longer maps user `minimal` to wire `thinkingLevel: MINIMAL` when that effort is aliased onto the `-low` SKU. The request now sends `LOW`, which those SKUs accept.
+### Added
+
+- Regenerated the Cursor agent protobufs to model hosted WebFetch permission queries (`interaction_query` / `interaction_response` field 9) and the matching `ToolCall` variant (field 37).
 
 ## [17.3.6] - 2026-08-17
 
