@@ -8,6 +8,7 @@
 
 - Fixed OpenAI Completions, Amazon Bedrock, and Cursor providers ignoring `onPayload` replacement payloads. The hook now transforms the actual request body sent upstream on these providers, matching the Anthropic/Gemini/OpenAI Responses replacement contract. `devin-agent` still does not fire the hook (its payload is a protobuf object).
 - Fixed Codex requests failing outright when the signed-in ChatGPT account is not entitled to the requested model; the exact model denial is now classified as an account-policy error so credential rotation can reach an entitled sibling account
+- Fixed Perplexity email-OTP login after its verification response renamed the encrypted session token from `token` to `challenge_token`.
 
 ## [17.3.7] - 2026-08-17
 
