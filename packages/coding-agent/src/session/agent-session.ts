@@ -535,7 +535,7 @@ export class AgentSession {
 	 *  the session cwd changes. */
 	#titleSystemPrompt: string | undefined;
 	#titleGenerationStart: (() => void) | undefined;
-	#titleGenerationInFlight = false;
+	#titleGenerationInFlightFor: string | undefined;
 	#titleGenerationAbortController = new AbortController();
 	#toolChoiceQueue = new ToolChoiceQueue();
 
@@ -6550,26 +6550,31 @@ export class AgentSession {
 			this.#extensionRunner?.getCommand(
 				extensionCommandSpace === -1 ? firstMessage.slice(1) : firstMessage.slice(1, extensionCommandSpace),
 			) !== undefined;
+		const sessionId = this.sessionManager.getSessionId();
 		if (
 			isLocalExtensionCommand ||
 			this.sessionName ||
-			this.#titleGenerationInFlight ||
+			this.#titleGenerationInFlightFor === sessionId ||
 			$env.PI_NO_TITLE ||
 			isLowSignalTitleInput(firstMessage)
 		) {
 			return;
 		}
-		this.#titleGenerationInFlight = true;
+		this.#titleGenerationInFlightFor = sessionId;
 		try {
 			(onStart ?? this.#titleGenerationStart)?.();
 		} catch (error) {
-			this.#titleGenerationInFlight = false;
+			if (this.#titleGenerationInFlightFor === sessionId) {
+				this.#titleGenerationInFlightFor = undefined;
+			}
 			throw error;
 		}
 		this.generateTitle(firstMessage)
 			.then(async title => {
-				// Re-check after generation so concurrent attempts cannot replace
-				// the first title that completed.
+				// Re-check after generation so a later completion cannot replace
+				// the first title, and a request from a replaced session cannot
+				// name the current one.
+				if (this.sessionManager.getSessionId() !== sessionId) return;
 				if (title && !this.sessionName) {
 					await this.sessionManager.setSessionName(title, "auto");
 				}
@@ -6582,7 +6587,9 @@ export class AgentSession {
 				});
 			})
 			.finally(() => {
-				this.#titleGenerationInFlight = false;
+				if (this.#titleGenerationInFlightFor === sessionId) {
+					this.#titleGenerationInFlightFor = undefined;
+				}
 			});
 	}
 
