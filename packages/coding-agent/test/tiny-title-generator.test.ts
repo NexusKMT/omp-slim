@@ -30,6 +30,7 @@ import {
 import type { TinyTitleWorkerInbound, TinyTitleWorkerOutbound } from "@oh-my-pi/pi-coding-agent/tiny/title-protocol";
 import { generateSessionTitle } from "@oh-my-pi/pi-coding-agent/utils/title-generator";
 import type { Subprocess } from "bun";
+import { buildCompletionPrompt } from "../src/tiny/completion-prompt";
 
 function getModelOrThrow(id: string): Model<Api> {
 	const model = getBundledModel("anthropic", id);
@@ -245,6 +246,51 @@ function createFakeTinyWorker(): FakeTinyWorker {
 	};
 	return worker;
 }
+
+describe("tiny memory completion prompts", () => {
+	it("renders extraction instructions as a system turn separate from user input", () => {
+		const applyChatTemplate = vi.fn(() => "rendered prompt");
+		const tokenizer = { apply_chat_template: applyChatTemplate };
+
+		expect(buildCompletionPrompt(tokenizer as never, "actual user input", " extraction instructions ")).toBe(
+			"rendered prompt",
+		);
+		expect(applyChatTemplate).toHaveBeenCalledWith(
+			[
+				{ role: "system", content: "extraction instructions" },
+				{ role: "user", content: "actual user input" },
+			],
+			{
+				add_generation_prompt: true,
+				tokenize: false,
+				enable_thinking: false,
+			},
+		);
+	});
+
+	it("carries the extraction system prompt over the worker protocol", async () => {
+		const worker = createFakeTinyWorker();
+		const client = new TinyTitleClient(() => worker.handle);
+
+		const completion = client.complete("lfm2-1.2b", "actual user input", {
+			maxTokens: 64,
+			systemPrompt: "extraction instructions",
+		});
+		const request = worker.sent.find(message => message.type === "complete");
+		expect(request).toEqual({
+			type: "complete",
+			id: expect.any(String),
+			modelKey: "lfm2-1.2b",
+			prompt: "actual user input",
+			maxTokens: 64,
+			systemPrompt: "extraction instructions",
+		});
+		worker.emit({ type: "completion", id: request?.id ?? "", text: "extracted fact" });
+
+		expect(await completion).toBe("extracted fact");
+		await client.terminate();
+	});
+});
 
 describe("tiny title prewarm", () => {
 	it("spawns one idle worker that the first generate reuses (issue #6462)", async () => {
