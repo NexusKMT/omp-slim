@@ -657,9 +657,11 @@ export function resolveUpdateTargetFromPath(
 /**
  * Resolve how the running install should be updated.
  *
- * `allowPackageManagers: false` skips the `bun pm bin -g` / `npm prefix -g`
- * probes entirely — used for binary-only releases, where routing through a
- * package manager is never valid and the probes would be wasted subprocesses.
+ * `allowPackageManagers: false` disables bun/npm routing — used for
+ * binary-only releases, where reinstalling through a package manager is never
+ * valid. The `bun pm bin -g` / `npm prefix -g` probes are then skipped unless
+ * the launcher is a symlink, whose bin dirs distinguish a manager launcher
+ * (taken over in place) from a foreign symlink (resolved to its real binary).
  * Homebrew/mise detection always runs: both managers install GitHub release
  * binaries and stay valid regardless of how the release is distributed.
  */
