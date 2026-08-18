@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -166,7 +167,15 @@ def test_list_pr_files_parses_changed_file_summary() -> None:
         assert request.url.params.get("per_page") == "100"
         return httpx.Response(
             200,
-            json=[{"filename": "src/app.py", "status": "modified", "additions": 5, "deletions": 2}],
+            json=[
+                {
+                    "filename": "src/app.py",
+                    "status": "modified",
+                    "additions": 5,
+                    "deletions": 2,
+                    "patch": "@@ -8,3 +8,5 @@\n ctx\n+added\n ctx2",
+                }
+            ],
         )
 
     client = GitHubClient("tok", transport=httpx.MockTransport(handler))
@@ -175,6 +184,20 @@ def test_list_pr_files_parses_changed_file_summary() -> None:
     assert files[0].path == "src/app.py"
     assert files[0].additions == 5
     assert files[0].deletions == 2
+    assert files[0].patch.startswith("@@ -8,3 +8,5")
+
+
+def test_list_pr_files_defaults_missing_patch_to_empty() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/repos/octo/widget/pulls/9/files"
+        return httpx.Response(
+            200,
+            json=[{"filename": "src/app.py", "status": "modified", "additions": 5, "deletions": 2}],
+        )
+
+    client = GitHubClient("tok", transport=httpx.MockTransport(handler))
+    files = _run_async(client.list_pr_files("octo/widget", 9))
+    assert files[0].patch == ""
 
 
 def test_list_pr_files_paginates_past_first_page() -> None:
@@ -245,6 +268,48 @@ def test_submit_pr_review_posts_comment_event_and_inline_comments() -> None:
         "body": "summary",
         "event": "COMMENT",
         "comments": [{"path": "src/app.py", "line": 12, "side": "RIGHT", "body": "finding"}],
+    }
+
+
+def test_submit_pr_review_forgejo_uses_new_position_payload() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["path"] = request.url.path
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": 44,
+                "user": {"login": "robomp-bot"},
+                "body": "summary",
+                "state": "COMMENTED",
+                "submitted_at": "t",
+            },
+        )
+
+    client = GitHubClient("tok", transport=httpx.MockTransport(handler), platform="forgejo")
+    review = _run_async(
+        client.submit_pr_review(
+            repo="octo/widget",
+            pr_number=9,
+            body="summary",
+            event="COMMENT",
+            comments=[
+                {"path": "src/app.py", "line": 12, "side": "RIGHT", "body": "finding"},
+                {"path": "src/old.py", "line": 5, "side": "LEFT", "body": "removed-line finding"},
+            ],
+        )
+    )
+    assert review.id == 44
+    assert captured["path"] == "/repos/octo/widget/pulls/9/reviews"
+    assert captured["body"] == {
+        "body": "summary",
+        "event": "COMMENT",
+        "comments": [
+            {"path": "src/app.py", "body": "finding", "new_position": 12},
+            {"path": "src/old.py", "body": "removed-line finding", "old_position": 5},
+        ],
     }
 
 

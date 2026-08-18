@@ -62,6 +62,28 @@ def _stub_repo() -> RepoInfo:
     )
 
 
+# Unified diff whose anchorable lines are RIGHT {10..14} / LEFT {9..12};
+# line 15+ is a gap (unanchorable) and RIGHT line 9 is before the hunk.
+_PATCH = (
+    "@@ -9,5 +10,6 @@ def f():\n"
+    " ctx1\n"
+    "-old10\n"
+    "+new11\n"
+    " ctx2\n"
+    "+new13\n"
+    " ctx3\n"
+)
+
+
+def _pr_files_response(request: httpx.Request, patch: str = _PATCH, *, status: int = 200) -> httpx.Response:
+    if status != 200:
+        return httpx.Response(status, json={"message": "files fetch failed"})
+    return httpx.Response(
+        200,
+        json=[{"filename": "src/app.py", "status": "modified", "additions": 1, "deletions": 1, "patch": patch}],
+    )
+
+
 def _make_loop_in_background() -> tuple[asyncio.AbstractEventLoop, threading.Thread]:
     loop = asyncio.new_event_loop()
     t = threading.Thread(target=loop.run_forever, daemon=True)
@@ -1234,6 +1256,8 @@ def test_pr_review_comment_stages_and_submit_flushes_one_comment_review(db: Data
     captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
         if request.url.path.endswith("/reviews"):
             captured["path"] = request.url.path
             captured["body"] = json.loads(request.content)
@@ -1315,11 +1339,12 @@ def test_submit_pr_review_posts_summary_only_when_no_staged_comments(db: Databas
 
 
 def test_submit_pr_review_failure_keeps_staged_comments(db: Database, tmp_path: Path) -> None:
-    bindings, loop, t = _review_bindings(
-        db,
-        tmp_path,
-        httpx.MockTransport(lambda _request: httpx.Response(422, json={"message": "Validation failed"})),
-    )
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        return httpx.Response(403, json={"message": "forbidden"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
     try:
         stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
         submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
@@ -1332,6 +1357,320 @@ def test_submit_pr_review_failure_keeps_staged_comments(db: Database, tmp_path: 
     rows = db.list_staged_review_comments(bindings.issue_key)
     assert len(rows) == 1
     assert rows[0].path == "src/app.py"
+
+
+def test_submit_pr_review_drops_unanchorable_comment_and_folds_into_summary(db: Database, tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        if request.url.path.endswith("/reviews"):
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "id": 44,
+                    "user": {"login": "robomp-bot"},
+                    "body": captured["body"]["body"],
+                    "state": "COMMENTED",
+                    "submitted_at": "t",
+                },
+            )
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/app.py", "line": 12, "body": "in-hunk finding"}, _ctx())
+        stage_tool.execute({"path": "src/app.py", "line": 15, "body": "gap finding"}, _ctx())
+        result = submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    assert captured["body"]["body"] == "summary\n\n## Not anchored to diff\n- **`src/app.py:15`** — gap finding"
+    assert captured["body"]["comments"] == [
+        {"path": "src/app.py", "line": 12, "side": "RIGHT", "body": "in-hunk finding"}
+    ]
+    assert "submitted PR review" in result
+    assert "dropped=1" in result
+    assert db.list_staged_review_comments(bindings.issue_key) == []
+
+
+def test_submit_pr_review_drops_all_comments_submits_summary_only(db: Database, tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        if request.url.path.endswith("/reviews"):
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "id": 44,
+                    "user": {"login": "robomp-bot"},
+                    "body": "ok",
+                    "state": "COMMENTED",
+                    "submitted_at": "t",
+                },
+            )
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/app.py", "line": 15, "body": "gap finding"}, _ctx())
+        result = submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    assert captured["body"]["comments"] == []
+    assert captured["body"]["body"].endswith("## Not anchored to diff\n- **`src/app.py:15`** — gap finding")
+    assert "comments=0" in result
+    assert "dropped=1" in result
+    assert db.list_staged_review_comments(bindings.issue_key) == []
+
+
+def test_submit_pr_review_drops_comment_for_path_not_in_diff(db: Database, tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        if request.url.path.endswith("/reviews"):
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "id": 44,
+                    "user": {"login": "robomp-bot"},
+                    "body": "ok",
+                    "state": "COMMENTED",
+                    "submitted_at": "t",
+                },
+            )
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/other.py", "line": 3, "body": "stale path finding"}, _ctx())
+        result = submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    assert captured["body"]["comments"] == []
+    assert captured["body"]["body"].endswith("## Not anchored to diff\n- **`src/other.py:3`** — stale path finding")
+    assert "dropped=1" in result
+    assert db.list_staged_review_comments(bindings.issue_key) == []
+
+
+def test_submit_pr_review_skips_validation_when_files_fetch_fails(db: Database, tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request, status=500)
+        if request.url.path.endswith("/reviews"):
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "id": 44,
+                    "user": {"login": "robomp-bot"},
+                    "body": "ok",
+                    "state": "COMMENTED",
+                    "submitted_at": "t",
+                },
+            )
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/app.py", "line": 15, "body": "gap finding"}, _ctx())
+        result = submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    assert captured["body"]["comments"] == [
+        {"path": "src/app.py", "line": 15, "side": "RIGHT", "body": "gap finding"}
+    ]
+    assert captured["body"]["body"] == "summary"
+    assert "comments=1" in result
+    assert "dropped" not in result
+
+
+def test_submit_pr_review_422_falls_back_to_issue_comments(db: Database, tmp_path: Path) -> None:
+    comment_bodies: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        if request.url.path.endswith("/reviews"):
+            return httpx.Response(422, json={"message": "Validation failed"})
+        if request.url.path == "/repos/octo/widget/issues/99/comments":
+            body = json.loads(request.content)["body"]
+            comment_bodies.append(body)
+            return httpx.Response(200, json={"id": len(comment_bodies), "body": body})
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/app.py", "line": 12, "body": "finding"}, _ctx())
+        result = submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    assert "posted summary + 1 inline comment(s) as issue comments" in result
+    assert comment_bodies == ["summary", "**`src/app.py:12`**\n\nfinding"]
+    assert db.list_staged_review_comments(bindings.issue_key) == []
+
+
+def test_submit_pr_review_500_falls_back_to_issue_comments(db: Database, tmp_path: Path) -> None:
+    """A 500 from Forgejo's reviews endpoint triggers the same fallback as 422.
+
+    Without this, the 500 propagates to the model, causing a retry-and-degrade
+    loop where the model strips newlines from subsequent review bodies.
+    """
+    comment_bodies: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        if request.url.path.endswith("/reviews"):
+            return httpx.Response(500, json={"message": "github error"})
+        if request.url.path == "/repos/octo/widget/issues/99/comments":
+            body = json.loads(request.content)["body"]
+            comment_bodies.append(body)
+            return httpx.Response(200, json={"id": len(comment_bodies), "body": body})
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/app.py", "line": 12, "body": "finding"}, _ctx())
+        result = submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    assert "posted summary + 1 inline comment(s) as issue comments" in result
+    assert comment_bodies == ["summary", "**`src/app.py:12`**\n\nfinding"]
+    assert db.list_staged_review_comments(bindings.issue_key) == []
+
+
+def test_submit_pr_review_range_requires_both_endpoints_anchorable(db: Database, tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        if request.url.path.endswith("/reviews"):
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "id": 44,
+                    "user": {"login": "robomp-bot"},
+                    "body": "ok",
+                    "state": "COMMENTED",
+                    "submitted_at": "t",
+                },
+            )
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        # Reversed range: start_line (15) > line (14) — dropped.
+        stage_tool.execute(
+            {
+                "path": "src/app.py",
+                "line": 14,
+                "start_line": 15,
+                "start_side": "RIGHT",
+                "side": "RIGHT",
+                "body": "reversed range",
+            },
+            _ctx(),
+        )
+        # Valid range: both endpoints (10, 12) are context lines in the hunk — kept.
+        stage_tool.execute(
+            {
+                "path": "src/app.py",
+                "line": 12,
+                "start_line": 10,
+                "start_side": "RIGHT",
+                "side": "RIGHT",
+                "body": "valid range",
+            },
+            _ctx(),
+        )
+        # Cross-side range: start_side LEFT with side RIGHT — dropped.
+        stage_tool.execute(
+            {
+                "path": "src/app.py",
+                "line": 11,
+                "start_line": 10,
+                "start_side": "LEFT",
+                "side": "RIGHT",
+                "body": "cross-side range",
+            },
+            _ctx(),
+        )
+        result = submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    assert captured["body"]["comments"] == [
+        {
+            "path": "src/app.py",
+            "line": 12,
+            "side": "RIGHT",
+            "body": "valid range",
+            "start_line": 10,
+            "start_side": "RIGHT",
+        }
+    ]
+    assert "src/app.py:14" in captured["body"]["body"]
+    assert "src/app.py:11" in captured["body"]["body"]
+    assert "dropped=2" in result
+
+
+def test_diff_anchorable_lines_parses_hunk_sides() -> None:
+    right, left = host_tools._diff_anchorable_lines(_PATCH)
+    assert right == frozenset({10, 11, 12, 13, 14})
+    assert left == frozenset({9, 10, 11, 12})
+
+    # Gap between hunks: line 30 in the old file / 29..30 in the new file are
+    # unanchorable (the PR 1111 smtp.go:106 failure shape).
+    right, left = host_tools._diff_anchorable_lines(
+        "@@ -1,2 +1,3 @@\n a\n+x\n b\n@@ -30,2 +31,2 @@\n c\n d\n"
+    )
+    assert right >= frozenset({1, 2, 3, 31, 32})
+    assert right.isdisjoint(range(4, 31))
+
+    assert host_tools._diff_anchorable_lines("") == (frozenset(), frozenset())
+    assert host_tools._diff_anchorable_lines("\0Binary files differ") == (frozenset(), frozenset())
+
+    right, left = host_tools._diff_anchorable_lines("@@ -9 +10 @@ x\n+a\n b\n")
+    assert right == frozenset({10, 11})
+    assert left == frozenset({9})
+
+    # `\ No newline at end of file` markers are ignored.
+    right, _ = host_tools._diff_anchorable_lines(
+        "@@ -1,2 +1,3 @@\n a\n+b\n\\ No newline at end of file\n"
+    )
+    assert right == frozenset({1, 2})
 
 
 def test_review_tools_reject_outside_review_mode(db: Database, tmp_path: Path) -> None:
