@@ -821,6 +821,7 @@ export function requireSupportedEffort<TApi extends Api>(model: ApiModel<TApi>, 
  * (Antigravity Gemini 3.6/3.7 Flash), emit `LOW` — Cloud Code Assist rejects
  * `MINIMAL` on those `-low` SKUs.
  */
+export function mapEffortToGoogleThinkingLevel<TApi extends Api>(
 	effort: Effort,
 	model?: ApiModel<TApi>,
 ): "MINIMAL" | "LOW" | "MEDIUM" | "HIGH" {
