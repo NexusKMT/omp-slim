@@ -80,10 +80,10 @@ describe("tree selector Shift+Enter fallback (issue #8821)", () => {
 		expect(records).toEqual([{ entryId: responseEntry.id, options: { summarize: true } }]);
 	});
 
-	it("leaves the legacy CSI ~ form alone (parsed as shift+f3, not Enter)", () => {
+	it("treats the legacy CSI ~ form as Shift+Enter (summarize-and-switch), matching the composer", () => {
 		const records: SelectRecord[] = [];
 		const { selector } = selectorWithOnSelect([userEntry, responseEntry], records);
 		selector.handleInput("\u001b[13;2~");
-		expect(records).toEqual([]);
+		expect(records).toEqual([{ entryId: responseEntry.id, options: { summarize: true } }]);
 	});
 });

@@ -852,7 +852,8 @@ class TreeList implements Component {
 		} else if (
 			matchesKey(keyData, "shift+enter") ||
 			matchesKey(keyData, "shift+return") ||
-			keyData === "\n" // Shift+Enter delivered as bare LF (iTerm2 legacy mapping) — matches the composer (issue #8821)
+			keyData === "\n" || // Shift+Enter delivered as bare LF (iTerm2 legacy mapping) — matches the composer (issue #8821)
+			keyData === "\x1b[13;2~" // Shift+Enter legacy CSI ~ form — also accepted by the composer (editor.ts:1466)
 		) {
 			// Summarize-and-switch: fork with a branch summary without the extra prompt.
 			const selected = this.#filteredNodes[this.#selectedIndex];
