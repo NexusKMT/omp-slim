@@ -46,6 +46,9 @@
 ### Fixed
 
 - Fixed local title generation stopping on a stop string that appeared in the prompt instead of the generated tokens
+### Fixed
+
+- Fixed the Subagents HUD role display and restored generated task labels by keeping spawn handles separate from UI descriptions.
 
 ## [17.3.7] - 2026-08-17
 
