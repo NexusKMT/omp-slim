@@ -895,8 +895,18 @@ function createSnapcompactArchiveMigrationMessage(archiveText: string): Message 
  */
 const DEFAULT_SUMMARY_INPUT_WINDOW = 200_000;
 
-/** Floor for one summarization window, so a tiny model still makes progress. */
+/**
+ * Floor for one summarization window, so a tiny model still makes progress.
+ * Scaled down (never below 1k) for models whose window cannot host the full
+ * floor next to the carried summary and output reserves.
+ */
 const MIN_SUMMARY_INPUT_TOKENS = 16_384;
+
+/** Smallest window worth planning for `model`; below this, overflow recovery gives up. */
+function minSummaryInputTokens(model: Model): number {
+	const window = model.contextWindow && model.contextWindow > 0 ? model.contextWindow : DEFAULT_SUMMARY_INPUT_WINDOW;
+	return Math.min(MIN_SUMMARY_INPUT_TOKENS, Math.max(1_024, Math.floor(window / 8)));
+}
 
 /**
  * Usable conversation input for ONE summarization call: the summarizer's window
@@ -909,7 +919,7 @@ function summaryInputBudgetTokens(model: Model, maxTokens: number): number {
 	// 0.8, not "window minus reserves": provider tokenizers disagree with the
 	// local cl100k estimate by a few percent, and being wrong here is a hard
 	// 400 on the one call that is supposed to rescue an oversized session.
-	return Math.max(MIN_SUMMARY_INPUT_TOKENS, Math.floor(window * 0.8) - maxTokens - MAX_SUMMARY_TOKENS);
+	return Math.max(minSummaryInputTokens(model), Math.floor(window * 0.8) - maxTokens - MAX_SUMMARY_TOKENS);
 }
 
 /**
@@ -1012,7 +1022,7 @@ export async function generateSummary(
 			// the rejection proves the plan was fiction, so converging on the real
 			// cap must not spend a call per level of an imaginary ladder.
 			const halved = Math.floor(Math.min(window.budgetTokens, windowTokens) / 2);
-			if (!AIError.is(AIError.classify(error), AIError.Flag.ContextOverflow) || halved < MIN_SUMMARY_INPUT_TOKENS) {
+			if (!AIError.is(AIError.classify(error), AIError.Flag.ContextOverflow) || halved < minSummaryInputTokens(model)) {
 				throw error;
 			}
 			pending.splice(
