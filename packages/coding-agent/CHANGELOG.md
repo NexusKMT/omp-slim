@@ -11,6 +11,9 @@
 ### Fixed
 
 - Fixed task and eval subagents discovering newly added agent definitions while resolving their role aliases from stale startup settings. Subagent preflight now atomically reloads persisted settings before agent discovery while preserving live runtime overrides.
+### Fixed
+
+- Fixed images returned by tools mounted under `xd://` rendering only as file links instead of inline terminal graphics.
 
 ## [17.3.7] - 2026-08-17
 
