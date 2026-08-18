@@ -32,10 +32,18 @@ const CODEX_GPT_5_6_1M_SLUGS: ReadonlySet<string> = new Set(["gpt-5.6-luna", "gp
  * unresolvable except via fuzzy fallback onto the `-wm` row — which this user's
  * ChatGPT account rejects. The compatibility rule, scoped to Codex discovery:
  * a `-wm` slug whose plain counterpart exists in the bundled Codex catalog is
- * ALSO registered under its plain id (re-derived, not cloned, so the 1M-window
- * floor and daybreak pricing keyed on the plain slug still apply). Models
- * without a bundled plain counterpart stay verbatim, preserving authoritative
- * discovery for genuinely distinct `-wm` SKUs.
+ * ALSO registered under its plain id. Both listings derive their base-model
+ * metadata (1M-window floor, daybreak pricing, context fallback) from the
+ * canonical plain slug — the suffix is a routing variant, not a different
+ * model, so the `-wm` row no longer keeps stale backend-parsed capability
+ * values while its plain listing is enriched.
+ *
+ * Deliberate boundary: the "safe" gate is the bundled Codex catalog. A `-wm`
+ * slug whose plain counterpart is only a user-local models.yml entry (not
+ * bundled) stays verbatim — authoritative discovery for genuinely distinct
+ * `-wm` SKUs is preserved, and a hidden plain backend entry can be re-surfaced
+ * through its advertised `-wm` row because the configured plain slug must
+ * resolve.
  */
 const CODEX_WORKER_SUFFIX = "-wm";
 const CODEX_REMOTE_COMPACTION = {
@@ -221,15 +229,19 @@ function normalizeCodexModels(payload: unknown, baseUrl: string): ModelSpec<"ope
 	// A worker `-wm` slug gets an extra plain-id route only when the bundled
 	// catalog ships the plain SKU (the "safe" precondition); the backend's own
 	// plain slug wins over any synthesized clone, and unknown `-wm` SKUs stay
-	// verbatim.
+	// verbatim. Both listings of a safe `-wm` model carry the same base-model
+	// metadata (context-window floor, daybreak pricing) derived from the
+	// canonical plain slug — the suffix is a routing variant, not a different
+	// model.
 	const advertisedSlugs = new Set(parsedEntries.map(parsed => parsed.slug));
 	const bundledCodexModelIds = getBundledCodexModelIds();
 	const normalized: NormalizedCodexModel[] = [];
 	for (const parsed of parsedEntries) {
-		normalized.push(buildNormalizedCodexModel(parsed, parsed.slug, baseUrl));
-		const plainSlug = plainCounterpartForWorkerSlug(parsed.slug, bundledCodexModelIds);
+		const canonicalSlug = plainCounterpartForWorkerSlug(parsed.slug, bundledCodexModelIds) ?? parsed.slug;
+		normalized.push(buildNormalizedCodexModel(parsed, parsed.slug, canonicalSlug, baseUrl));
+		const plainSlug = canonicalSlug !== parsed.slug ? canonicalSlug : null;
 		if (plainSlug && !advertisedSlugs.has(plainSlug)) {
-			normalized.push(buildNormalizedCodexModel(parsed, plainSlug, baseUrl));
+			normalized.push(buildNormalizedCodexModel(parsed, plainSlug, canonicalSlug, baseUrl));
 		}
 	}
 
@@ -302,23 +314,35 @@ function parseCodexModelEntry(entry: unknown): ParsedCodexModelEntry | null {
 	};
 }
 
-function buildNormalizedCodexModel(parsed: ParsedCodexModelEntry, slug: string, baseUrl: string): NormalizedCodexModel {
+/**
+ * Build a normalized Codex model spec. `slug` is the registered id (either the
+ * advertised slug or a synthesized plain counterpart); `canonicalSlug` names
+ * the model's bundled SKU (`slug` itself for plain/unknown rows, the plain
+ * counterpart for a safe `-wm` row) and owns the base-model metadata derivation
+ * so both listings of a model report the same context window and pricing.
+ */
+function buildNormalizedCodexModel(
+	parsed: ParsedCodexModelEntry,
+	slug: string,
+	canonicalSlug: string,
+	baseUrl: string,
+): NormalizedCodexModel {
 	// Codex discovery historically omitted `context_window` for GPT-5.6-family
 	// SKUs (#5705); luna/sol/terra additionally floor the reported value because
-	// the registry still declares the pre-1M 272000 window. Re-derived from the
-	// effective `slug` so a synthesized plain route gets the same treatment as
-	// one actually advertised under that id.
-	const parsedKnown = parseKnownModel(slug);
+	// the registry still declares the pre-1M 272000 window. Keyed on the
+	// canonical slug so a safe `gpt-5.6-luna-wm` row gets the same floor as its
+	// plain listing.
+	const parsedKnown = parseKnownModel(canonicalSlug);
 	const fallbackContextWindow =
 		parsedKnown.family === "openai" && semverEqual(parsedKnown.version, "5.6")
 			? GPT_5_6_CONTEXT_WINDOW
 			: DEFAULT_CONTEXT_WINDOW;
 	const reportedContextWindow = parsed.contextWindow ?? fallbackContextWindow;
-	const contextWindow = CODEX_GPT_5_6_1M_SLUGS.has(slug)
+	const contextWindow = CODEX_GPT_5_6_1M_SLUGS.has(canonicalSlug)
 		? Math.max(reportedContextWindow, GPT_5_6_1M_CONTEXT_WINDOW)
 		: reportedContextWindow;
 	const maxTokens = Math.min(DEFAULT_MAX_TOKENS, contextWindow);
-	const daybreakCost = resolveOpenAIDaybreakStandardCost(slug);
+	const daybreakCost = resolveOpenAIDaybreakStandardCost(canonicalSlug);
 
 	return {
 		priority: parsed.priority,

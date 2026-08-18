@@ -11,6 +11,7 @@ import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { openaiCodexModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/special";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import { resolveProviderModelReference } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 
 describe("Codex model discovery", () => {
 	it("marks discovered models for provider-native V2 compaction", async () => {
@@ -567,29 +568,20 @@ describe("Codex model discovery", () => {
 		});
 
 		// The authoritative `-wm` row stays surfaced verbatim…
-		expect(result?.models.some(model => model.id === "gpt-5.6-luna-wm")).toBe(true);
+		const workerModel = result?.models.find(model => model.id === "gpt-5.6-luna-wm");
+		expect(workerModel).toBeDefined();
 		// …and the configured plain slug must also resolve to a real route.
 		const plainModel = result?.models.find(model => model.id === "gpt-5.6-luna");
 		expect(plainModel).toBeDefined();
-		// The plain route is re-derived for the plain slug, so the 1M floor applies.
-		expect(plainModel?.contextWindow).toBe(1_000_000);
 		expect(plainModel?.provider).toBe("openai-codex");
+		// Both rows are the same model: the worker variant shares the plain
+		// SKU's base metadata, so the 1M window floor applies to both.
+		expect(workerModel?.contextWindow).toBe(1_000_000);
+		expect(plainModel?.contextWindow).toBe(1_000_000);
 	});
 
 	it("keeps the plain route through authoritative discovery that advertises only the `-wm` slug", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-codex-luna-wm-"));
-		const bundledLuna: ModelSpec<"openai-codex-responses"> = {
-			id: "gpt-5.6-luna",
-			name: "GPT-5.6 Luna",
-			api: "openai-codex-responses",
-			provider: "openai-codex",
-			baseUrl: "https://chatgpt.com/backend-api",
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 1_000_000,
-			maxTokens: 128_000,
-		};
 		const fetchFn: typeof fetch = Object.assign(
 			async () =>
 				new Response(
@@ -613,16 +605,26 @@ describe("Codex model discovery", () => {
 				resolveAccounts: async () => [{ accessToken: "test-token" }],
 				fetch: fetchFn,
 			});
+			// No artificial static input: the bundled Codex catalog is the real
+			// gate that licenses the plain-route synthesis.
 			const result = await resolveProviderModels(
-				{ ...options, staticModels: [bundledLuna], cacheDbPath: path.join(tempDir, "models.db") },
+				{ ...options, cacheDbPath: path.join(tempDir, "models.db") },
 				"online",
 			);
 
 			const ids = result.models.map(model => model.id);
-			// The exact-id resolution the resolver performs for
-			// `openai-codex/gpt-5.6-luna` needs this row present.
 			expect(ids).toContain("gpt-5.6-luna");
 			expect(ids).toContain("gpt-5.6-luna-wm");
+
+			// Same engine the runtime uses: resolving the configured
+			// `openai-codex/gpt-5.6-luna` must bind to the plain route by exact
+			// id, not fall through to the `-wm` fuzzy match.
+			const resolved = resolveProviderModelReference("openai-codex", "gpt-5.6-luna", result.models);
+			expect(resolved?.id).toBe("gpt-5.6-luna");
+			expect(resolved?.provider).toBe("openai-codex");
+			// An explicitly configured worker slug still resolves verbatim.
+			const resolvedWm = resolveProviderModelReference("openai-codex", "gpt-5.6-luna-wm", result.models);
+			expect(resolvedWm?.id).toBe("gpt-5.6-luna-wm");
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
