@@ -68,4 +68,42 @@ describe("AgentSession title generation disposal", () => {
 		expect(requestSignal?.aborted).toBe(true);
 		expect(await generation).toBeNull();
 	});
+
+	it("does not start a second auto-title request while the first is still in flight", async () => {
+		authStorage = await AuthStorage.create(":memory:");
+		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
+
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"providers.tinyModel": "online",
+		});
+		settings.overrideModelRoles({ smol: `${model.provider}/${model.id}` });
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: createMockModel({ responses: [{ content: ["Done"] }] }).stream,
+		});
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry: new ModelRegistry(authStorage),
+		});
+		const started = Promise.withResolvers<void>();
+		const response = Promise.withResolvers<ai.AssistantMessage>();
+		const completeSimple = vi.spyOn(ai, "completeSimple").mockImplementation(() => {
+			started.resolve();
+			return response.promise;
+		});
+
+		session.maybeStartTitleGeneration("/skill:implement issues/07-manual-llm.md");
+		await started.promise;
+		session.maybeStartTitleGeneration("/skill:implement issues/08-app-settings.md");
+		expect(completeSimple).toHaveBeenCalledTimes(1);
+
+		response.resolve(createAssistantMessage("<title>manual llm</title>"));
+		await response.promise;
+	});
 });

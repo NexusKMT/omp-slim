@@ -535,6 +535,7 @@ export class AgentSession {
 	 *  the session cwd changes. */
 	#titleSystemPrompt: string | undefined;
 	#titleGenerationStart: (() => void) | undefined;
+	#titleGenerationInFlight = false;
 	#titleGenerationAbortController = new AbortController();
 	#toolChoiceQueue = new ToolChoiceQueue();
 
@@ -6549,10 +6550,22 @@ export class AgentSession {
 			this.#extensionRunner?.getCommand(
 				extensionCommandSpace === -1 ? firstMessage.slice(1) : firstMessage.slice(1, extensionCommandSpace),
 			) !== undefined;
-		if (isLocalExtensionCommand || this.sessionName || $env.PI_NO_TITLE || isLowSignalTitleInput(firstMessage)) {
+		if (
+			isLocalExtensionCommand ||
+			this.sessionName ||
+			this.#titleGenerationInFlight ||
+			$env.PI_NO_TITLE ||
+			isLowSignalTitleInput(firstMessage)
+		) {
 			return;
 		}
-		(onStart ?? this.#titleGenerationStart)?.();
+		this.#titleGenerationInFlight = true;
+		try {
+			(onStart ?? this.#titleGenerationStart)?.();
+		} catch (error) {
+			this.#titleGenerationInFlight = false;
+			throw error;
+		}
 		this.generateTitle(firstMessage)
 			.then(async title => {
 				// Re-check after generation so concurrent attempts cannot replace
@@ -6567,6 +6580,9 @@ export class AgentSession {
 					reason: "uncaught-auto-title-error",
 					error: err instanceof Error ? err.message : String(err),
 				});
+			})
+			.finally(() => {
+				this.#titleGenerationInFlight = false;
 			});
 	}
 
