@@ -220,6 +220,7 @@ import {
 	piReadPathHasRange,
 	piTimeout,
 } from "./cursor/exec-modern";
+import { handleInteractionQuery } from "./cursor/interaction-query";
 
 export const CURSOR_API_URL = "https://api2.cursor.sh";
 export const CURSOR_CLIENT_VERSION = "cli-2026.07.23-e383d2b";
@@ -1024,6 +1025,8 @@ export async function handleServerMessage(
 				state,
 			),
 		);
+	} else if (msgCase === "interactionQuery") {
+		handleInteractionQuery(msg.message.value, h2Request);
 	} else if (msgCase === "conversationCheckpointUpdate") {
 		handleConversationCheckpointUpdate(msg.message.value, output, usageState, onConversationCheckpoint);
 	}
