@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+
+### Fixed
+
+- Cloud Code Assist Gemini 3.6/3.7 Flash no longer maps user `minimal` to wire `thinkingLevel: MINIMAL` when that effort is aliased onto the `-low` SKU. The request now sends `LOW`, which those SKUs accept.
+
 ## [17.3.6] - 2026-08-17
 
 ### Changed

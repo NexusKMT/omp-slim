@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+
+### Fixed
+
+- Cloud Code Assist Gemini 3.6/3.7 Flash requests at `minimal` now send `thinkingLevel: LOW` on the aliased `-low` SKU instead of `MINIMAL`, which the API rejects with HTTP 400.
+
 ## [17.3.7] - 2026-08-17
 
 ### Changed
