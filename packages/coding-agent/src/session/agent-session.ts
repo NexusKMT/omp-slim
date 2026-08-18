@@ -1011,8 +1011,13 @@ export class AgentSession {
 			emitNotice: (level, message, source) => this.emitNotice(level, message, source),
 			setModelTemporary: (model, thinkingLevel, options) => this.setModelTemporary(model, thinkingLevel, options),
 			setActiveToolsByName: names => this.setActiveToolsByName(names),
+			setActiveToolPresentation: (toolNames, mountedToolNames) =>
+				this.setActiveToolPresentation(toolNames, mountedToolNames),
+			runToolRegistryMutation: mutation => this.runToolRegistryMutation(mutation),
 			getActiveToolNames: () => this.getActiveToolNames(),
 			getEnabledToolNames: () => this.getEnabledToolNames(),
+			getSelectedMCPToolNames: () => this.getSelectedMCPToolNames(),
+			getMountedXdevToolNames: () => this.getMountedXdevToolNames(),
 			hasBuiltInTool: name => this.hasBuiltInTool(name),
 			getPlanModeState: () => this.getPlanModeState(),
 			setPlanModeState: state => this.setPlanModeState(state),
