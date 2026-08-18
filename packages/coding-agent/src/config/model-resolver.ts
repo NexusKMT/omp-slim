@@ -22,7 +22,7 @@ import { modelMatchesHost } from "@oh-my-pi/pi-catalog/hosts";
 import { buildModelProviderPriorityRank } from "@oh-my-pi/pi-catalog/identity";
 import { stripThinkingVariantToken } from "@oh-my-pi/pi-catalog/identity/family";
 import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";
-import { getBundledModel, modelsAreEqual, type GeneratedProvider } from "@oh-my-pi/pi-catalog/models";
+import { type GeneratedProvider, getBundledModel, modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { DEFAULT_MODEL_PER_PROVIDER } from "@oh-my-pi/pi-catalog/provider-models";
 import { resolveBareVariantAlias, resolveVariantAlias } from "@oh-my-pi/pi-catalog/variant-collapse";
 import { fuzzyMatch } from "@oh-my-pi/pi-tui";
@@ -1755,9 +1755,7 @@ function findExactCliModel(
 	const lower = selector.toLowerCase();
 	const isFlatMatch = (model: Model<Api>) =>
 		model.id.toLowerCase() === lower || formatModelString(model).toLowerCase() === lower;
-	const preferred = availableModels.find(
-		m => isFlatMatch(m) && !isProviderLockedCrossMatch(selector, m),
-	);
+	const preferred = availableModels.find(m => isFlatMatch(m) && !isProviderLockedCrossMatch(selector, m));
 	if (preferred) return preferred;
 	// The unauthenticated catalog fallback is a weak match: a bare id like
 	// `default` collides with the bundled `cursor/default` model, which must not
