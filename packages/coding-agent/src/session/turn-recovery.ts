@@ -1660,6 +1660,9 @@ export class TurnRecovery {
 		if (AIError.isContextOverflow(message, model.contextWindow ?? 0)) return false;
 		if (AIError.is(id, AIError.Flag.UsageLimit)) return false;
 		if (AIError.is(id, AIError.Flag.AuthFailed)) return false;
+		// A thinking loop is a same-model resample signal, not a router fault, so a
+		// base-model swap would abandon the loop-guard redirect (issue #8760).
+		if (AIError.is(id, AIError.Flag.ThinkingLoop)) return false;
 		return this.#host.modelRegistry.find("fireworks", toFireworksBaseModelId(model.id)) !== undefined;
 	}
 
@@ -1969,10 +1972,23 @@ export class TurnRecovery {
 			);
 			if (switchedCredential) delayMs = 0;
 		}
+		// A thinking-loop abort is not a provider failure — it is the loop guard
+		// asking for a same-model resample, paired with a hidden
+		// `thinking-loop-redirect` notice that only makes sense on the model that
+		// looped. Walking `fallbackChains` (or parking the selector on a cooldown)
+		// would swap a healthy planning turn to another family based on chain
+		// contents, not model health (issue #8760). Keep it on the same model; the
+		// retry budget still bounds a genuinely stuck stream.
+		const thinkingLoop = AIError.is(id, AIError.Flag.ThinkingLoop);
 		if (!staleOpenAIResponsesReplayError && !switchedCredential && currentSelector) {
 			// A refusal chain stops at the retry budget: the exhausted-attempt
 			// last resort is for provider failures, not classifier decisions.
-			if (allowModelFallback && retrySettings.modelFallback && !(retryBudgetExhausted && classifierRefusal)) {
+			if (
+				allowModelFallback &&
+				retrySettings.modelFallback &&
+				!thinkingLoop &&
+				!(retryBudgetExhausted && classifierRefusal)
+			) {
 				if (!classifierRefusal) {
 					this.noteRetryFallbackCooldown(currentSelector, parsedRetryAfterMs, errorMessage);
 				}
