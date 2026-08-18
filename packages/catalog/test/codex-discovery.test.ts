@@ -538,4 +538,148 @@ describe("Codex model discovery", () => {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
 	});
+
+	it("registers a plain route when the backend advertises only the worker `-wm` slug", async () => {
+		const fetchFn: typeof fetch = Object.assign(
+			async () =>
+				new Response(
+					JSON.stringify({
+						models: [
+							{
+								slug: "gpt-5.6-luna-wm",
+								display_name: "GPT-5.6 Luna",
+								context_window: 272_000,
+								default_reasoning_level: "medium",
+								supported_reasoning_levels: ["low", "medium", "high"],
+								input_modalities: ["text", "image"],
+								supported_in_api: true,
+							},
+						],
+					}),
+				),
+			{ preconnect() {} },
+		);
+		const result = await fetchCodexModels({
+			accessToken: "test-token",
+			baseUrl: "https://codex.example/backend-api",
+			clientVersion: "0.99.0",
+			fetchFn,
+		});
+
+		// The authoritative `-wm` row stays surfaced verbatim…
+		expect(result?.models.some(model => model.id === "gpt-5.6-luna-wm")).toBe(true);
+		// …and the configured plain slug must also resolve to a real route.
+		const plainModel = result?.models.find(model => model.id === "gpt-5.6-luna");
+		expect(plainModel).toBeDefined();
+		// The plain route is re-derived for the plain slug, so the 1M floor applies.
+		expect(plainModel?.contextWindow).toBe(1_000_000);
+		expect(plainModel?.provider).toBe("openai-codex");
+	});
+
+	it("keeps the plain route through authoritative discovery that advertises only the `-wm` slug", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-codex-luna-wm-"));
+		const bundledLuna: ModelSpec<"openai-codex-responses"> = {
+			id: "gpt-5.6-luna",
+			name: "GPT-5.6 Luna",
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			baseUrl: "https://chatgpt.com/backend-api",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1_000_000,
+			maxTokens: 128_000,
+		};
+		const fetchFn: typeof fetch = Object.assign(
+			async () =>
+				new Response(
+					JSON.stringify({
+						models: [
+							{
+								slug: "gpt-5.6-luna-wm",
+								display_name: "GPT-5.6 Luna",
+								default_reasoning_level: "medium",
+								supported_reasoning_levels: ["low", "medium", "high"],
+								input_modalities: ["text", "image"],
+								supported_in_api: true,
+							},
+						],
+					}),
+				),
+			{ preconnect() {} },
+		);
+		try {
+			const options = openaiCodexModelManagerOptions({
+				resolveAccounts: async () => [{ accessToken: "test-token" }],
+				fetch: fetchFn,
+			});
+			const result = await resolveProviderModels(
+				{ ...options, staticModels: [bundledLuna], cacheDbPath: path.join(tempDir, "models.db") },
+				"online",
+			);
+
+			const ids = result.models.map(model => model.id);
+			// The exact-id resolution the resolver performs for
+			// `openai-codex/gpt-5.6-luna` needs this row present.
+			expect(ids).toContain("gpt-5.6-luna");
+			expect(ids).toContain("gpt-5.6-luna-wm");
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps a `-wm` slug verbatim when it has no bundled plain counterpart", async () => {
+		const fetchFn: typeof fetch = Object.assign(
+			async () =>
+				new Response(
+					JSON.stringify({
+						models: [
+							{
+								slug: "gpt-9.9-mystery-wm",
+								display_name: "GPT-9.9 Mystery (worker)",
+								input_modalities: ["text"],
+								supported_in_api: true,
+							},
+						],
+					}),
+				),
+			{ preconnect() {} },
+		);
+		const result = await fetchCodexModels({
+			accessToken: "test-token",
+			baseUrl: "https://codex.example/backend-api",
+			clientVersion: "0.99.0",
+			fetchFn,
+		});
+		// No bundled `gpt-9.9-mystery` entry, so no phantom plain route is made up.
+		expect(result?.models.map(model => model.id)).toEqual(["gpt-9.9-mystery-wm"]);
+	});
+
+	it("leaves a non-worker slug untouched by the worker-mapping rule", async () => {
+		const fetchFn: typeof fetch = Object.assign(
+			async () =>
+				new Response(
+					JSON.stringify({
+						models: [
+							{
+								slug: "gpt-5.6-luna",
+								display_name: "GPT-5.6 Luna",
+								default_reasoning_level: "medium",
+								supported_reasoning_levels: ["low", "medium", "high"],
+								input_modalities: ["text", "image"],
+								supported_in_api: true,
+							},
+						],
+					}),
+				),
+			{ preconnect() {} },
+		);
+		const result = await fetchCodexModels({
+			accessToken: "test-token",
+			baseUrl: "https://codex.example/backend-api",
+			clientVersion: "0.99.0",
+			fetchFn,
+		});
+		expect(result?.models.map(model => model.id)).toEqual(["gpt-5.6-luna"]);
+	});
 });
