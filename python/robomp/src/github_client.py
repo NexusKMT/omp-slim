@@ -69,6 +69,7 @@ class PullRequestInfo:
     head_repo: str = ""
     title: str = ""
     body: str = ""
+    head_sha: str = ""
 
 
 @dataclass(slots=True, frozen=True)
@@ -592,7 +593,7 @@ class GitHubClient:
     def _review_comments_payload(self, comments: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
         """Adapt canonical host-tool comment shape to the wire schema for this platform.
 
-        GitHub keeps line/side/start_line/start_side; Forgejo/Gitea only reads
+        GitHub keeps line/side/start_line/start_side; Forgejo only reads
         path/body/new_position (+old_position), so github-only keys are dropped
         and `line` is mapped to `new_position` for RIGHT-side comments or
         `old_position` for LEFT-side (removed-line) comments.
@@ -798,6 +799,7 @@ def _pr_from_payload(repo: str, data: Mapping[str, Any]) -> PullRequestInfo:
         head_repo=str(head_repo.get("full_name") or "") if isinstance(head_repo, Mapping) else "",
         title=str(data.get("title") or ""),
         body=str(data.get("body") or ""),
+        head_sha=str(head.get("sha") or "") if isinstance(head, Mapping) else "",
     )
 
 

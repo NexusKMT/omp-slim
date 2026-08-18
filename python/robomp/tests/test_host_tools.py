@@ -64,15 +64,7 @@ def _stub_repo() -> RepoInfo:
 
 # Unified diff whose anchorable lines are RIGHT {10..14} / LEFT {9..12};
 # line 15+ is a gap (unanchorable) and RIGHT line 9 is before the hunk.
-_PATCH = (
-    "@@ -9,5 +10,6 @@ def f():\n"
-    " ctx1\n"
-    "-old10\n"
-    "+new11\n"
-    " ctx2\n"
-    "+new13\n"
-    " ctx3\n"
-)
+_PATCH = "@@ -9,5 +10,6 @@ def f():\n ctx1\n-old10\n+new11\n ctx2\n+new13\n ctx3\n"
 
 
 def _pr_files_response(request: httpx.Request, patch: str = _PATCH, *, status: int = 200) -> httpx.Response:
@@ -1134,9 +1126,13 @@ def _pr_bindings(
 
 
 def _review_bindings(
-    db: Database, tmp_path: Path, transport: httpx.MockTransport
+    db: Database,
+    tmp_path: Path,
+    transport: httpx.MockTransport,
+    *,
+    platform: str = "github",
 ) -> tuple[ToolBindings, asyncio.AbstractEventLoop, threading.Thread]:
-    github = GitHubClient("token", transport=transport)
+    github = GitHubClient("token", transport=transport, platform=platform)
     loop, thread = _make_loop_in_background()
     issue = IssueInfo(
         repo="octo/widget",
@@ -1498,9 +1494,7 @@ def test_submit_pr_review_skips_validation_when_files_fetch_fails(db: Database, 
     finally:
         _stop_loop(loop, t)
 
-    assert captured["body"]["comments"] == [
-        {"path": "src/app.py", "line": 15, "side": "RIGHT", "body": "gap finding"}
-    ]
+    assert captured["body"]["comments"] == [{"path": "src/app.py", "line": 15, "side": "RIGHT", "body": "gap finding"}]
     assert captured["body"]["body"] == "summary"
     assert "comments=1" in result
     assert "dropped" not in result
@@ -1646,6 +1640,204 @@ def test_submit_pr_review_range_requires_both_endpoints_anchorable(db: Database,
     assert "dropped=2" in result
 
 
+def test_submit_pr_review_forgejo_fetches_commit_id(db: Database, tmp_path: Path) -> None:
+    """Forgejo anchors inline comments by commit: submit must fetch the PR and
+    include the head sha as commit_id in the reviews POST body."""
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99":
+            return httpx.Response(
+                200,
+                json={
+                    "number": 99,
+                    "html_url": "https://x/octo/widget/pull/99",
+                    "head": {"ref": "fix-crash", "sha": "abc123456789"},
+                    "base": {"ref": "main"},
+                    "state": "open",
+                    "user": {"login": "alice"},
+                },
+            )
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        if request.url.path.endswith("/reviews"):
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "id": 44,
+                    "user": {"login": "robomp-bot"},
+                    "body": "ok",
+                    "state": "COMMENTED",
+                    "submitted_at": "t",
+                },
+            )
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler), platform="forgejo")
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/app.py", "line": 12, "body": "in-hunk finding"}, _ctx())
+        result = submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    assert "submitted PR review" in result
+    assert captured["body"]["commit_id"] == "abc123456789"
+
+
+def test_submit_pr_review_forgejo_commit_id_fetch_failure_is_swallowed(
+    db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the PR fetch fails the commit_id is omitted (fail open) and the
+    review still submits without it."""
+    monkeypatch.setattr(GitHubClient, "_TRANSIENT_RETRY_DELAYS", (0.01, 0.01))
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99":
+            return httpx.Response(500, json={"message": "internal error"})
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        if request.url.path.endswith("/reviews"):
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "id": 44,
+                    "user": {"login": "robomp-bot"},
+                    "body": "ok",
+                    "state": "COMMENTED",
+                    "submitted_at": "t",
+                },
+            )
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler), platform="forgejo")
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/app.py", "line": 12, "body": "in-hunk finding"}, _ctx())
+        result = submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    assert "submitted PR review" in result
+    assert "commit_id" not in captured["body"]
+
+
+def test_submit_pr_review_422_and_fallback_comment_failure_raises_and_keeps_staged(
+    db: Database,
+    tmp_path: Path,
+) -> None:
+    """When the reviews endpoint AND the issue-comments fallback both fail, the
+    tool raises and the staged comments survive for a later retry."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        if request.url.path.endswith("/reviews"):
+            return httpx.Response(422, json={"message": "Validation failed"})
+        if request.url.path == "/repos/octo/widget/issues/99/comments":
+            return httpx.Response(500, json={"message": "internal error"})
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/app.py", "line": 12, "body": "finding"}, _ctx())
+        with pytest.raises(RpcCommandError, match="fallback comment posting failed"):
+            submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    rows = db.list_staged_review_comments(bindings.issue_key)
+    assert len(rows) == 1
+    assert rows[0].path == "src/app.py"
+
+
+def test_submit_pr_review_empty_patch_fails_open(db: Database, tmp_path: Path) -> None:
+    """A file whose patch the platform omitted is not a rejection reason: the
+    comment is kept rather than folded into a 'Not anchored to diff' section."""
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request, patch="")
+        if request.url.path.endswith("/reviews"):
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "id": 44,
+                    "user": {"login": "robomp-bot"},
+                    "body": "ok",
+                    "state": "COMMENTED",
+                    "submitted_at": "t",
+                },
+            )
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/app.py", "line": 12, "body": "binary finding"}, _ctx())
+        result = submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    assert "submitted PR review" in result
+    assert "dropped" not in result
+    assert captured["body"]["comments"] == [
+        {"path": "src/app.py", "line": 12, "side": "RIGHT", "body": "binary finding"}
+    ]
+    assert "Not anchored to diff" not in captured["body"]["body"]
+
+
+def test_submit_pr_review_left_side_single_line_anchoring(db: Database, tmp_path: Path) -> None:
+    """LEFT-side comments anchor against the old file's hunk lines
+    (_PATCH: LEFT {9..12}): an in-hunk line is kept, an out-of-hunk line is
+    dropped and folded into the summary."""
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/pulls/99/files":
+            return _pr_files_response(request)
+        if request.url.path.endswith("/reviews"):
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "id": 44,
+                    "user": {"login": "robomp-bot"},
+                    "body": "ok",
+                    "state": "COMMENTED",
+                    "submitted_at": "t",
+                },
+            )
+        return httpx.Response(404, json={"message": "unrouted"})
+
+    bindings, loop, t = _review_bindings(db, tmp_path, httpx.MockTransport(handler))
+    try:
+        stage_tool = next(x for x in build(bindings) if x.name == "pr_review_comment")
+        submit_tool = next(x for x in build(bindings) if x.name == "submit_pr_review")
+        stage_tool.execute({"path": "src/app.py", "line": 10, "side": "LEFT", "body": "old line finding"}, _ctx())
+        stage_tool.execute({"path": "src/app.py", "line": 13, "side": "LEFT", "body": "gap finding"}, _ctx())
+        result = submit_tool.execute({"body": "summary"}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    assert "dropped=1" in result
+    assert captured["body"]["comments"] == [
+        {"path": "src/app.py", "line": 10, "side": "LEFT", "body": "old line finding"}
+    ]
+    assert "## Not anchored to diff" in captured["body"]["body"]
+    assert "**`src/app.py:13`** — gap finding" in captured["body"]["body"]
+
+
 def test_diff_anchorable_lines_parses_hunk_sides() -> None:
     right, left = host_tools._diff_anchorable_lines(_PATCH)
     assert right == frozenset({10, 11, 12, 13, 14})
@@ -1653,9 +1845,7 @@ def test_diff_anchorable_lines_parses_hunk_sides() -> None:
 
     # Gap between hunks: line 30 in the old file / 29..30 in the new file are
     # unanchorable (the PR 1111 smtp.go:106 failure shape).
-    right, left = host_tools._diff_anchorable_lines(
-        "@@ -1,2 +1,3 @@\n a\n+x\n b\n@@ -30,2 +31,2 @@\n c\n d\n"
-    )
+    right, left = host_tools._diff_anchorable_lines("@@ -1,2 +1,3 @@\n a\n+x\n b\n@@ -30,2 +31,2 @@\n c\n d\n")
     assert right >= frozenset({1, 2, 3, 31, 32})
     assert right.isdisjoint(range(4, 31))
 
@@ -1667,10 +1857,29 @@ def test_diff_anchorable_lines_parses_hunk_sides() -> None:
     assert left == frozenset({9})
 
     # `\ No newline at end of file` markers are ignored.
-    right, _ = host_tools._diff_anchorable_lines(
-        "@@ -1,2 +1,3 @@\n a\n+b\n\\ No newline at end of file\n"
-    )
+    right, _ = host_tools._diff_anchorable_lines("@@ -1,2 +1,3 @@\n a\n+b\n\\ No newline at end of file\n")
     assert right == frozenset({1, 2})
+
+    # File-creation hunk boundary: everything is added, nothing exists on the
+    # LEFT; file-deletion hunk: everything is removed, RIGHT is empty.
+    right, left = host_tools._diff_anchorable_lines("@@ -0,0 +1,2 @@\n+a\n+b\n")
+    assert right == frozenset({1, 2})
+    assert left == frozenset()
+
+    right, left = host_tools._diff_anchorable_lines("@@ -5,3 +5,0 @@\n-a\n-b\n-c\n")
+    assert right == frozenset()
+    assert left == frozenset({5, 6, 7})
+
+
+def test_diff_anchorable_lines_in_hunk_plus_minus_content() -> None:
+    """Added lines whose content starts with `++` and removed lines starting
+    with `--` must be treated as diff content, not file headers — otherwise
+    the line counters desync (the `+++ b/...` skip used to swallow them)."""
+    patch = "+++ b/src/app.py\n--- a/src/app.py\n@@ -1,2 +1,3 @@\n ctx\n tail\n--- removed\n+++ added\n"
+    # Old file: ctx(1), tail(2), --- removed(3). New file: ctx(1), tail(2), +++ added(3).
+    right, left = host_tools._diff_anchorable_lines(patch)
+    assert right == frozenset({1, 2, 3})
+    assert left == frozenset({1, 2, 3})
 
 
 def test_review_tools_reject_outside_review_mode(db: Database, tmp_path: Path) -> None:

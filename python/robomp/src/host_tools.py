@@ -1760,9 +1760,15 @@ def _diff_anchorable_lines(patch: str) -> tuple[frozenset[int], frozenset[int]]:
             old_line = int(m.group(1))
             new_line = int(m.group(2))
             continue
-        if raw.startswith("+++") or raw.startswith("---") or raw.startswith("\\"):
+        if raw.startswith("\\"):
             continue
-        if new_line is None or old_line is None:
+        # `+++`/`---` are file headers only before the first hunk. Inside a
+        # hunk a diff line's *content* may start with `++` (added) or `--`
+        # (removed), and those lines must advance the counters.
+        in_hunk = new_line is not None and old_line is not None
+        if raw.startswith(("+++", "---")) and not in_hunk:
+            continue
+        if not in_hunk:
             continue
         if raw.startswith("+"):
             right.add(new_line)
@@ -1778,9 +1784,7 @@ def _diff_anchorable_lines(patch: str) -> tuple[frozenset[int], frozenset[int]]:
     return frozenset(right), frozenset(left)
 
 
-def _filter_anchorable_comments(
-    staged: list[Any], files: list[PullRequestFileInfo]
-) -> tuple[list[Any], list[Any]]:
+def _filter_anchorable_comments(staged: list[Any], files: list[PullRequestFileInfo]) -> tuple[list[Any], list[Any]]:
     """Partition staged comments into (anchorable, dropped) by diff hunk membership."""
     by_path = {f.path: f for f in files}
     cache: dict[str, tuple[frozenset[int], frozenset[int]]] = {}

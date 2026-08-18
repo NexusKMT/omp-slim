@@ -124,7 +124,11 @@ def test_get_pull_request_parses_head_repo_and_author() -> None:
             json={
                 "number": 9,
                 "html_url": "https://github.com/octo/widget/pull/9",
-                "head": {"ref": "farm/abc12345/fix", "repo": {"full_name": "octo/widget"}},
+                "head": {
+                    "ref": "farm/abc12345/fix",
+                    "sha": "abc1234567890123456789012345678901234567",
+                    "repo": {"full_name": "octo/widget"},
+                },
                 "base": {"ref": "main"},
                 "state": "open",
                 "user": {"login": "robomp-bot"},
@@ -134,6 +138,7 @@ def test_get_pull_request_parses_head_repo_and_author() -> None:
     client = GitHubClient("tok", transport=httpx.MockTransport(handler))
     pr = _run_async(client.get_pull_request("octo/widget", 9))
     assert pr.head_ref == "farm/abc12345/fix"
+    assert pr.head_sha == "abc1234567890123456789012345678901234567"
     assert pr.head_repo == "octo/widget"
     assert pr.author == "robomp-bot"
 
