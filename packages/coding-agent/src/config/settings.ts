@@ -370,6 +370,8 @@ export class Settings {
 	#savePromise?: Promise<void>;
 	#projectSaveTimer?: NodeJS.Timeout;
 	#projectSavePromise?: Promise<void>;
+	/** Coalesces concurrent persisted-layer refreshes into one atomic reload. */
+	#reloadFromDiskPromise?: Promise<void>;
 
 	/** Whether to persist changes */
 	#persist: boolean;
@@ -622,6 +624,67 @@ export class Settings {
 		cloned.#rebuildMerged();
 		cloned.#fireAllHooks();
 		return cloned;
+	}
+
+	/**
+	 * Re-read the current global, project, and explicit overlay layers from disk
+	 * without replacing this instance or discarding runtime overrides.
+	 *
+	 * All sources are loaded before any live layer is replaced, so readers never
+	 * observe a partially refreshed configuration. Concurrent callers share the
+	 * same reload.
+	 */
+	async reloadFromDisk(): Promise<void> {
+		if (!this.#persist) return;
+		if (this.#reloadFromDiskPromise) return this.#reloadFromDiskPromise;
+
+		const reload = this.#reloadPersistedLayers();
+		this.#reloadFromDiskPromise = reload;
+		try {
+			await reload;
+		} finally {
+			if (this.#reloadFromDiskPromise === reload) {
+				this.#reloadFromDiskPromise = undefined;
+			}
+		}
+	}
+
+	async #reloadPersistedLayers(): Promise<void> {
+		await this.flush();
+		const previousSignaledValues = {
+			modelRoles: this.get("modelRoles"),
+			sessionAccent: this.get("statusLine.sessionAccent"),
+		};
+		const previousHookValues = new Map<SettingPath, unknown>();
+		for (const key of Object.keys(SETTING_HOOKS) as SettingPath[]) {
+			previousHookValues.set(key, this.get(key));
+		}
+
+		const [globalResult, projectResult, overlayResult] = await Promise.allSettled([
+			this.#loadExistingMainYaml(),
+			this.#loadProjectSettings(),
+			this.#loadConfigOverlays(),
+		]);
+		if (globalResult.status === "rejected") throw globalResult.reason;
+		if (projectResult.status === "rejected") throw projectResult.reason;
+		if (overlayResult.status === "rejected") throw overlayResult.reason;
+
+		this.#global = globalResult.value ?? {};
+		this.#project = projectResult.value;
+		this.#configOverlay = overlayResult.value;
+		this.#rebuildMerged();
+		this.#fireEffectiveSettingChanged("modelRoles", this.get("modelRoles"), previousSignaledValues.modelRoles);
+		this.#fireEffectiveSettingChanged(
+			"statusLine.sessionAccent",
+			this.get("statusLine.sessionAccent"),
+			previousSignaledValues.sessionAccent,
+		);
+		for (const [key, previous] of previousHookValues) {
+			const next = this.get(key);
+			if (!Object.is(next, previous)) {
+				SETTING_HOOKS[key]?.(next, previous);
+			}
+		}
 	}
 
 	/**
