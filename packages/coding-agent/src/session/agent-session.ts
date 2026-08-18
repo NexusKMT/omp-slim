@@ -308,6 +308,7 @@ import {
 	sanitizeAssistantForReparentedHistory,
 	USER_INTERRUPT_LABEL,
 } from "./messages";
+import { skillPromptTitleInput } from "./skill-title-input";
 import { ModelControls, type ModelControlsHost } from "./model-controls";
 import { isPrewalkPlanNudge, PrewalkCoordinator, type PrewalkCoordinatorHost } from "./prewalk";
 import {
@@ -5466,11 +5467,20 @@ export class AgentSession {
 		let keywordNotices: CustomMessage[] = [];
 		if (message.customType === SKILL_PROMPT_MESSAGE_TYPE && message.attribution === "user") {
 			const details = message.details;
+			let skillName: string | undefined;
 			let skillArgs = "";
-			if (details && typeof details === "object" && "args" in details && typeof details.args === "string") {
-				skillArgs = details.args;
+			if (details && typeof details === "object") {
+				if ("name" in details && typeof details.name === "string") skillName = details.name;
+				if ("args" in details && typeof details.args === "string") skillArgs = details.args;
 			}
 			keywordNotices = this.#createMagicKeywordNotices(skillArgs);
+			this.maybeStartTitleGeneration(
+				skillPromptTitleInput({
+					name: skillName,
+					args: skillArgs,
+					queueChipText: options?.queueChipText,
+				}),
+			);
 		}
 
 		if (options?.queueOnly) {
