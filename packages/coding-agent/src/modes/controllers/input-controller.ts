@@ -173,6 +173,11 @@ export class InputController {
 		},
 	) {}
 
+	/** Session-level title starts (user `/skill:` via promptCustomMessage) reuse this UI. */
+	notifyTitleGenerationStart(): void {
+		this.#showTinyTitleDownloadProgress(this.ctx.settings.get("providers.tinyModel"));
+	}
+
 	#enhancedPaste?: EnhancedPasteController;
 	#focusedLeftTapListenerInstalled = false;
 	#focusedPasteListenerInstalled = false;

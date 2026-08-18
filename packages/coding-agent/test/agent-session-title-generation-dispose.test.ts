@@ -68,4 +68,103 @@ describe("AgentSession title generation disposal", () => {
 		expect(requestSignal?.aborted).toBe(true);
 		expect(await generation).toBeNull();
 	});
+
+	it("does not start a second auto-title request while the first is still in flight", async () => {
+		authStorage = await AuthStorage.create(":memory:");
+		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
+
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"providers.tinyModel": "online",
+		});
+		settings.overrideModelRoles({ smol: `${model.provider}/${model.id}` });
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: createMockModel({ responses: [{ content: ["Done"] }] }).stream,
+		});
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry: new ModelRegistry(authStorage),
+		});
+		const started = Promise.withResolvers<void>();
+		const response = Promise.withResolvers<ai.AssistantMessage>();
+		const completeSimple = vi.spyOn(ai, "completeSimple").mockImplementation(() => {
+			started.resolve();
+			return response.promise;
+		});
+
+		session.maybeStartTitleGeneration("/skill:implement issues/07-manual-llm.md");
+		await started.promise;
+		session.maybeStartTitleGeneration("/skill:implement issues/08-app-settings.md");
+		expect(completeSimple).toHaveBeenCalledTimes(1);
+
+		response.resolve(createAssistantMessage("<title>manual llm</title>"));
+		await response.promise;
+	});
+
+	it("lets a replacement session title itself and ignores the previous request", async () => {
+		authStorage = await AuthStorage.create(":memory:");
+		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
+
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"providers.tinyModel": "online",
+		});
+		settings.overrideModelRoles({ smol: `${model.provider}/${model.id}` });
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: createMockModel({ responses: [{ content: ["Done"] }] }).stream,
+		});
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry: new ModelRegistry(authStorage),
+		});
+		const firstStarted = Promise.withResolvers<void>();
+		const secondStarted = Promise.withResolvers<void>();
+		const firstResponse = Promise.withResolvers<ai.AssistantMessage>();
+		const secondResponse = Promise.withResolvers<ai.AssistantMessage>();
+		let titleCalls = 0;
+		const completeSimple = vi.spyOn(ai, "completeSimple").mockImplementation(() => {
+			titleCalls += 1;
+			if (titleCalls === 1) {
+				firstStarted.resolve();
+				return firstResponse.promise;
+			}
+			secondStarted.resolve();
+			return secondResponse.promise;
+		});
+		const generateTitle = vi.spyOn(session, "generateTitle");
+		const setSessionName = vi.spyOn(session.sessionManager, "setSessionName");
+		const firstSessionId = session.sessionManager.getSessionId();
+
+		session.maybeStartTitleGeneration("/skill:implement issues/07-manual-llm.md");
+		await firstStarted.promise;
+		expect(await session.newSession()).toBe(true);
+		expect(session.sessionManager.getSessionId()).not.toBe(firstSessionId);
+
+		session.maybeStartTitleGeneration("name the replacement session");
+		await secondStarted.promise;
+		expect(completeSimple).toHaveBeenCalledTimes(2);
+
+		firstResponse.resolve(createAssistantMessage("<title>old skill</title>"));
+		expect(await generateTitle.mock.results[0]?.value).toBe("old skill");
+		await Promise.resolve();
+		expect(setSessionName).not.toHaveBeenCalled();
+		expect(session.sessionName).toBeUndefined();
+
+		secondResponse.resolve(createAssistantMessage("<title>replacement session</title>"));
+		expect(await generateTitle.mock.results[1]?.value).toBe("replacement session");
+		await setSessionName.mock.results[0]?.value;
+		expect(session.sessionName).toBe("replacement session");
+	});
 });
