@@ -71,7 +71,7 @@ export function validateProviderConfiguration(
 			throw new Error(
 				mode === "runtime-register"
 					? `Provider ${providerName}: "apiKey" or "oauth" is required when defining models.`
-					: `Provider ${providerName}: "apiKey" is required when defining custom models unless auth is "none".`,
+					: `Provider ${providerName}: "apiKey" is required when defining custom models unless auth is "none" or "oauth".`,
 			);
 		}
 	}
