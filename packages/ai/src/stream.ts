@@ -2174,7 +2174,7 @@ function mapOptionsForApi<TApi extends Api>(
 					serviceTier: options?.serviceTier,
 					thinking: {
 						enabled: true,
-						level: mapEffortToGoogleThinkingLevel(effort),
+						level: mapEffortToGoogleThinkingLevel(effort, googleModel),
 					},
 					hideThinkingSummary: options?.hideThinkingSummary,
 					toolChoice: mapGoogleToolChoice(options?.toolChoice),
@@ -2207,7 +2207,7 @@ function mapOptionsForApi<TApi extends Api>(
 						requestModelId: resolveWireModelId(model, effort),
 						thinking: {
 							enabled: true,
-							level: mapEffortToGoogleThinkingLevel(effort),
+							level: mapEffortToGoogleThinkingLevel(effort, model),
 						},
 						hideThinkingSummary: options?.hideThinkingSummary,
 						toolChoice,
@@ -2279,7 +2279,7 @@ function mapOptionsForApi<TApi extends Api>(
 					serviceTier: options?.serviceTier,
 					thinking: {
 						enabled: true,
-						level: mapEffortToGoogleThinkingLevel(effort),
+						level: mapEffortToGoogleThinkingLevel(effort, model),
 					},
 					hideThinkingSummary: options?.hideThinkingSummary,
 					toolChoice: mapGoogleToolChoice(options?.toolChoice),

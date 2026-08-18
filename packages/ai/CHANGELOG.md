@@ -10,6 +10,10 @@
 - Fixed Codex requests failing outright when the signed-in ChatGPT account is not entitled to the requested model; the exact model denial is now classified as an account-policy error so credential rotation can reach an entitled sibling account
 - Fixed Perplexity email-OTP login after its verification response renamed the encrypted session token from `token` to `challenge_token`.
 
+### Fixed
+
+- Cloud Code Assist Gemini 3.6/3.7 Flash requests at `minimal` now send `thinkingLevel: LOW` on the aliased `-low` SKU instead of `MINIMAL`, which the API rejects with HTTP 400.
+
 ## [17.3.7] - 2026-08-17
 
 ### Changed
