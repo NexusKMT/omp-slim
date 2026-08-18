@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Resume Cursor idle-stall turns after completed MCP/todo tool results. The watchdog already closes the Connect stream, so unmarked blocks no longer need the `exec-resolved` marker to continue.
+
 ## [17.3.7] - 2026-08-17
 
 ### Changed
