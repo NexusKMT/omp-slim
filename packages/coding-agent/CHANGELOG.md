@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed images returned by tools mounted under `xd://` rendering only as file links instead of inline terminal graphics.
+
 ## [17.3.7] - 2026-08-17
 
 ### Changed

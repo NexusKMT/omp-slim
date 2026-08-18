@@ -14,7 +14,7 @@ import {
 	Text,
 	type TUI,
 } from "@oh-my-pi/pi-tui";
-import { getProjectDir, logger, sanitizeText } from "@oh-my-pi/pi-utils";
+import { getProjectDir, isRecord, logger, sanitizeText } from "@oh-my-pi/pi-utils";
 import { EDIT_MODE_STRATEGIES, type EditMode, type PerFileDiffPreview } from "../../edit";
 import type { Theme } from "../../modes/theme/theme";
 import { getThemeEpoch, theme } from "../../modes/theme/theme";
@@ -70,6 +70,21 @@ function isTodoToolDetails(details: unknown): details is TodoToolDetails {
 		details !== null &&
 		"phases" in details &&
 		Array.isArray((details as { phases?: unknown }).phases)
+	);
+}
+
+interface ToolImageBlock {
+	data?: string;
+	mimeType?: string;
+}
+
+function imageBlocksFromDetails(details: unknown): ToolImageBlock[] {
+	if (!isRecord(details) || !Array.isArray(details.images)) return [];
+	return details.images.filter(
+		(image): image is ToolImageBlock =>
+			isRecord(image) &&
+			(image.data === undefined || typeof image.data === "string") &&
+			(image.mimeType === undefined || typeof image.mimeType === "string"),
 	);
 }
 
@@ -617,14 +632,18 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	}
 
 	/**
-	 * Get all image blocks from result content and details.images.
-	 * Some tools (like generate_image) store images in details to avoid bloating model context.
+	 * Get all image blocks from result content and details.
+	 * Some tools (like generate_image) store images in details to avoid bloating
+	 * model context. Xdev-dispatched tools preserve those details under
+	 * details.xdev.inner.
 	 */
-	#getAllImageBlocks(): Array<{ data?: string; mimeType?: string }> {
+	#getAllImageBlocks(): ToolImageBlock[] {
 		if (!this.#result) return [];
-		const contentImages = this.#result.content?.filter((c: any) => c.type === "image") || [];
-		const detailImages = this.#result.details?.images || [];
-		return [...contentImages, ...detailImages];
+		const contentImages = this.#result.content.filter(block => block.type === "image");
+		const details = this.#result.details;
+		const detailImages = imageBlocksFromDetails(details);
+		const xdevImages = isRecord(details) && isRecord(details.xdev) ? imageBlocksFromDetails(details.xdev.inner) : [];
+		return [...contentImages, ...detailImages, ...xdevImages];
 	}
 
 	/**
