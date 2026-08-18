@@ -3,14 +3,14 @@ import { skillPromptTitleInput, titleTextFromSkillPrompt } from "../../src/sessi
 import { formatTitleConversationContext } from "../../src/tiny/message-preproc";
 
 describe("skillPromptTitleInput", () => {
-	it("uses the operator /skill chip when present", () => {
-		expect(
-			skillPromptTitleInput({
-				name: "implement",
-				args: "issues/07-manual-llm.md",
-				queueChipText: "/skill:implement issues/08-app-settings.md",
-			}),
-		).toBe("/skill:implement issues/08-app-settings.md");
+	it("prefers the operator chip over reconstructed skill args", () => {
+		const text = skillPromptTitleInput({
+			name: "implement",
+			args: "issues/07-manual-llm.md",
+			queueChipText: "/skill:implement issues/08-app-settings.md",
+		});
+		expect(text.includes("08-app-settings.md")).toBe(true);
+		expect(text.includes("07-manual-llm.md")).toBe(false);
 	});
 
 	it("reconstructs /skill:name args when the chip was stripped", () => {
