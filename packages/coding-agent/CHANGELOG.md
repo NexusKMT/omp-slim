@@ -9,6 +9,8 @@
 ### Changed
 
 - `/settings` rows can now carry a risk note: a warning glyph on the row plus a warning-colored line above the description. `External Thinking` (`externalThinking`, `--external-thinking`) is the first user — providers have flagged the request shape it produces as abuse, up to account-level enforcement, so both the settings entry and `--help` now say so.
+- Token counting is now scoped to the model being billed rather than to a process-global tokenizer: session maintenance, stats, advisors, `/context`, snapcompact inline imaging, and `compress` each count through the owning agent's `Tokenizer` (`agent.tokenizer`). Message counting is `Tokenizer.countMessage`/`countMessages` (replacing the free `estimateTokens(message, tokenizer)` helper; the legacy shim keeps a compat `estimateTokens` export for legacy pi extensions). `estimateToolSchemaTokens`, `estimateSkillsTokens`, `computeNonMessageTokens`, and `computeNonMessageBreakdown` take an explicit tokenizer; `scripts/measure-prompt-tokens.ts` accepts an optional model id (argv) so its numbers match what that model is charged.
+- The advisor runtime's `maintainContext` hook now receives the pending update as a message instead of a pre-computed token count — sizing it needs the advisor model's tokenizer, which the host owns.
 
 ## [17.3.8] - 2026-08-19
 

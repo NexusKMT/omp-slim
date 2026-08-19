@@ -634,9 +634,10 @@ export declare function cosineSimilarityPairs(vectors: Float64Array, count: numb
  * pool is available). Always returns a single token total — use this for any
  * aggregate budget question without paying a per-element napi crossing.
  *
- * Uses ordinary encoding (no special-token handling), which is the right
- * choice for measuring user/model content rather than wire-protocol tokens.
- * Defaults to `o200k_base`; pass `Cl100kBase` for older `OpenAI` models.
+ * Measures user/model content, not wire-protocol tokens: BPE encodings use
+ * ordinary encoding (no special-token handling) and the Claude encodings
+ * count message content without the fixed per-message frame. Defaults to
+ * `o200k_base`; pass a `Claude*` encoding for exact Claude counts.
  */
 export declare function countTokens(input: string | Array<string>, encoding?: Encoding | undefined | null): number
 
@@ -853,7 +854,15 @@ export declare enum Encoding {
   /** GPT-4o / o1 / GPT-5 (default). */
   O200kBase = 'O200kBase',
   /** GPT-3.5 / GPT-4 / older. */
-  Cl100kBase = 'Cl100kBase'
+  Cl100kBase = 'Cl100kBase',
+  /** Claude 3 … Opus 4.6 (ctok v3 reconstruction). */
+  ClaudeV3 = 'ClaudeV3',
+  /** Claude Opus 4.7–4.9 (ctok v4.7 reconstruction). */
+  ClaudeV47 = 'ClaudeV47',
+  /** Claude Opus 5+ (ctok v5 reconstruction). */
+  ClaudeV5 = 'ClaudeV5',
+  /** Claude Sonnet/Fable 5+ (live-measured non-opus v5 frame). */
+  ClaudeV5Sonnet = 'ClaudeV5Sonnet'
 }
 
 /**

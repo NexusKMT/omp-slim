@@ -18,6 +18,8 @@ rust_shared_library(
     compile_data = glob([
         "src/syntaxes/*.sublime-syntax",
         "src/fonts/*",
+        "src/ctok/data/*.bin",
+        "src/ctok/testdata/*.json",
     ]),
     crate_features = [],
     edition = "2024",

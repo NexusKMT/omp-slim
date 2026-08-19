@@ -37,6 +37,7 @@ import {
 } from "./agent-loop";
 import type { AppendOnlyContextManager } from "./append-only-context";
 import { isProviderRefusalMessage } from "./replay-policy";
+import { claudeEncodingForModel, Tokenizer } from "./tokenizer";
 import type {
 	AgentBeforeModelCall,
 	AgentContext,
@@ -363,7 +364,7 @@ export class Agent {
 		pendingToolCalls: new Set<string>(),
 		error: undefined,
 	};
-
+	#tokenizer = new Tokenizer(this.#state.model?.id);
 	#listeners = new Set<(e: AgentEvent) => void>();
 	#abortController?: AbortController;
 	#convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
@@ -459,6 +460,7 @@ export class Agent {
 		if (opts.initialState?.messages) this.#state.messages = opts.initialState.messages.slice();
 		if (opts.initialState?.pendingToolCalls)
 			this.#state.pendingToolCalls = new Set(opts.initialState.pendingToolCalls);
+		this.#syncTokenizer(this.#state.model?.id);
 		this.#convertToLlm = opts.convertToLlm || defaultConvertToLlm;
 		this.#transformContext = opts.transformContext;
 		this.#steeringMode = opts.steeringMode || "one-at-a-time";
@@ -720,9 +722,27 @@ export class Agent {
 	set maxRetryDelayMs(value: number | undefined) {
 		this.#maxRetryDelayMs = value;
 	}
-
 	get state(): AgentState {
 		return this.#state;
+	}
+
+	/**
+	 * Tokenizer for the active model. The instance is replaced whenever the
+	 * active model's encoding changes (see {@link setModel}), so callers must
+	 * not cache it across model switches.
+	 */
+	get tokenizer(): Tokenizer {
+		return this.#tokenizer;
+	}
+
+	/**
+	 * Swap the tokenizer only when the encoding actually changes, so the warm
+	 * per-message memo survives same-encoding model switches.
+	 */
+	#syncTokenizer(modelId: string | null | undefined): void {
+		if ((modelId ? claudeEncodingForModel(modelId) : null) !== this.#tokenizer.encoding) {
+			this.#tokenizer = new Tokenizer(modelId);
+		}
 	}
 
 	get appendOnlyContext(): AppendOnlyContextManager | undefined {
@@ -904,6 +924,7 @@ export class Agent {
 
 	setModel(m: Model) {
 		this.#state.model = m;
+		this.#syncTokenizer(m?.id);
 	}
 
 	setThinkingLevel(l: Effort | undefined) {

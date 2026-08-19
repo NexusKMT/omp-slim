@@ -101,6 +101,10 @@ export const Ellipsis = {
 export const Encoding = {
 	O200kBase: "O200kBase",
 	Cl100kBase: "Cl100kBase",
+	ClaudeV3: "ClaudeV3",
+	ClaudeV47: "ClaudeV47",
+	ClaudeV5: "ClaudeV5",
+	ClaudeV5Sonnet: "ClaudeV5Sonnet",
 };
 export const FileType = {
 	File: 1,

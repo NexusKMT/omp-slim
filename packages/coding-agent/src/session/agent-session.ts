@@ -49,7 +49,6 @@ import {
 	type CompactionResult,
 	calculatePromptTokens,
 	collectEntriesForBranchSummary,
-	estimateTokens,
 	generateBranchSummary,
 	type ShakeConfig,
 } from "@oh-my-pi/pi-agent-core/compaction";
@@ -2368,7 +2367,8 @@ export class AgentSession {
 			if (assistantMsg.stopReason !== "aborted" && assistantMsg.stopReason !== "error" && assistantMsg.usage) {
 				assistantMsg.contextSnapshot = {
 					promptTokens: calculatePromptTokens(assistantMsg.usage),
-					nonMessageTokens: this.#stats.pendingNonMessageTokens ?? computeNonMessageTokens(this),
+					nonMessageTokens:
+						this.#stats.pendingNonMessageTokens ?? computeNonMessageTokens(this, this.agent.tokenizer),
 					compactionEpoch: this.#stats.compactionEpoch,
 				};
 			}
@@ -5725,14 +5725,14 @@ export class AgentSession {
 			}
 
 			const agentPromptOptions = options?.toolChoice ? { toolChoice: options.toolChoice } : undefined;
-			const nonMessageTokens = computeNonMessageTokens(this);
+			const nonMessageTokens = computeNonMessageTokens(this, this.agent.tokenizer);
 			const contextWindow = this.model?.contextWindow ?? 0;
 			const breakdown = this.getContextBreakdown({ contextWindow, pendingMessages: messages });
 			const promptTokens =
 				breakdown?.usedTokens ??
 				nonMessageTokens +
-					this.messages.reduce((sum, msg) => sum + estimateTokens(msg), 0) +
-					messages.reduce((sum, msg) => sum + estimateTokens(msg), 0);
+					this.agent.tokenizer.countMessages(this.messages) +
+					this.agent.tokenizer.countMessages(messages);
 			this.#stats.setPendingSnapshot({
 				promptTokens,
 				nonMessageTokens,

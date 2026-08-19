@@ -5,7 +5,6 @@ import {
 	type Agent,
 	type AgentMessage,
 	type AgentTurnEndContext,
-	countTokens,
 	resolveTelemetry,
 	type StreamFn,
 	type ThinkingLevel,
@@ -25,8 +24,7 @@ import {
 	createCompactionSummaryMessage,
 	DEFAULT_SHAKE_CONFIG,
 	effectiveReserveTokens,
-	estimateTokens,
-	hasContextTokenUsage,
+	isTranscriptUsageAnchor,
 	NativeCompactionError,
 	prepareCompaction,
 	RESCUE_SHAKE_CONFIG,
@@ -292,6 +290,10 @@ export class SessionMaintenance {
 		return this.#host.model();
 	}
 
+	get #tokenizer() {
+		return this.#host.agent.tokenizer;
+	}
+
 	get #goalModeState(): GoalModeState | undefined {
 		return this.#host.goalModeState();
 	}
@@ -338,6 +340,7 @@ export class SessionMaintenance {
 		const keepBoundaryId = getLatestCompactionEntry(branchEntries)?.firstKeptEntryId;
 		const result = pruneToolOutputs(
 			branchEntries,
+			this.#tokenizer,
 			this.#withPlanProtection({
 				...DEFAULT_PRUNE_CONFIG,
 				pruneUseless: this.#host.settings.getGroup("compaction").dropUseless,
@@ -380,6 +383,7 @@ export class SessionMaintenance {
 		const keepBoundaryId = getLatestCompactionEntry(branchEntries)?.firstKeptEntryId;
 		const result = pruneSupersededToolResults(
 			branchEntries,
+			this.#tokenizer,
 			this.#withPlanProtection({
 				supersedeKey: supersedeReads ? readToolSupersedeKey : undefined,
 				pruneUseless: dropUseless,
@@ -482,7 +486,7 @@ export class SessionMaintenance {
 			// the active model cannot replay still hides its prefix from the prompt.
 			keepBoundaryId: latestCompaction?.firstKeptEntryId,
 		});
-		const regions = collectShakeRegions(branchEntries, config);
+		const regions = collectShakeRegions(branchEntries, this.#tokenizer, config);
 		if (regions.length === 0) {
 			return { mode, toolResultsDropped: 0, blocksDropped: 0, tokensFreed: 0 };
 		}
@@ -495,17 +499,9 @@ export class SessionMaintenance {
 		let anchorIndex = -1;
 		for (let index = branchEntries.length - 1; index > compactionIndex; index--) {
 			const entry = branchEntries[index];
-			if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-			const assistant = entry.message;
-			if (
-				assistant.stopReason !== "aborted" &&
-				assistant.stopReason !== "error" &&
-				assistant.usage &&
-				hasContextTokenUsage(assistant.usage)
-			) {
-				anchorIndex = index;
-				break;
-			}
+			if (entry.type !== "message" || !isTranscriptUsageAnchor(entry.message)) continue;
+			anchorIndex = index;
+			break;
 		}
 		const entryIndexes = new Map(branchEntries.map((entry, index) => [entry, index]));
 
@@ -519,7 +515,7 @@ export class SessionMaintenance {
 			else blocksDropped++;
 			originalTokens += region.tokens;
 			const replacement = replacements[index];
-			const replacementTokenCount = replacement.length > 0 ? countTokens(replacement) : 0;
+			const replacementTokenCount = replacement.length > 0 ? this.#tokenizer.countTokens(replacement) : 0;
 			replacementTokens += replacementTokenCount;
 			const entryIndex = entryIndexes.get(region.entry) ?? -1;
 			if (
@@ -638,7 +634,7 @@ export class SessionMaintenance {
 				compactionCandidates = this.#getCompactionModelCandidates(availableModels);
 			}
 			const pathEntries = this.#host.sessionManager.getBranch();
-			const preparation = prepareCompaction(pathEntries, effectiveSettings, this.#model);
+			const preparation = prepareCompaction(pathEntries, effectiveSettings, this.#model, this.#tokenizer);
 			if (!preparation) {
 				// Check why we can't compact
 				const lastEntry = pathEntries[pathEntries.length - 1];
@@ -999,15 +995,17 @@ export class SessionMaintenance {
 	 * suppress it.
 	 */
 	#estimateStoredContextTokens(pendingMessages: AgentMessage[] = []): number {
-		// Exclude encrypted reasoning (thinkingSignature / redactedThinking): its
-		// local byte size diverges from what the provider bills, so counting it here
-		// would let a thinking-heavy turn falsely trip the floor. The provider usage
-		// (the other arm of compactionContextTokens) already accounts for it.
+		// Local counting is the whole point of this arm: provider usage is
+		// exactly what it must not trust. Exclude encrypted reasoning
+		// (thinkingSignature / redactedThinking) too — its local byte size
+		// diverges from what the provider bills, so counting it would let a
+		// thinking-heavy turn falsely trip the floor. The provider usage (the
+		// other arm of compactionContextTokens) already accounts for it.
 		const opts = { excludeEncryptedReasoning: true } as const;
 		return (
-			computeNonMessageTokens(this.#host.nonMessageTokenSource()) +
-			this.#host.messages().reduce((sum, msg) => sum + estimateTokens(msg, opts), 0) +
-			pendingMessages.reduce((sum, msg) => sum + estimateTokens(msg, opts), 0)
+			computeNonMessageTokens(this.#host.nonMessageTokenSource(), this.#tokenizer) +
+			this.#tokenizer.countMessages(this.#host.messages(), opts) +
+			this.#tokenizer.countMessages(pendingMessages, opts)
 		);
 	}
 
@@ -1032,7 +1030,8 @@ export class SessionMaintenance {
 		if (!shouldCompact(contextTokens, contextWindow, compactionSettings)) return;
 		if (
 			pendingMidTurnDeadEnd &&
-			prepareCompaction(this.#host.sessionManager.getBranch(), compactionSettings, model) === undefined
+			prepareCompaction(this.#host.sessionManager.getBranch(), compactionSettings, model, this.#tokenizer) ===
+				undefined
 		) {
 			// The prior tool loop already attempted the rescue and warned for this
 			// persisted oversized turn. Only a later persisted cut point makes a
@@ -1131,7 +1130,8 @@ export class SessionMaintenance {
 			// soon as one appears.
 			if (
 				!model ||
-				prepareCompaction(this.#host.sessionManager.getBranch(), compactionSettings, model) === undefined
+				prepareCompaction(this.#host.sessionManager.getBranch(), compactionSettings, model, this.#tokenizer) ===
+					undefined
 			) {
 				return;
 			}
@@ -1717,16 +1717,14 @@ export class SessionMaintenance {
 		const ctxWindow = this.#model?.contextWindow ?? 0;
 		if (ctxWindow <= 0) return Math.min(snapcompact.MAX_FRAMES_DEFAULT, snapcompact.maxFramesForDataBudget());
 		const reserve = effectiveReserveTokens(ctxWindow, settings);
-		let baseTokens = computeNonMessageTokens(this.#host.nonMessageTokenSource());
-		for (const message of preparation.recentMessages) {
-			baseTokens += estimateTokens(message);
-		}
+		let baseTokens = computeNonMessageTokens(this.#host.nonMessageTokenSource(), this.#tokenizer);
+		baseTokens += this.#tokenizer.countMessages(preparation.recentMessages);
 		const totalBudget = ctxWindow - reserve;
 		// Skip iff there is no headroom whatsoever; a text-only archive costs
 		// far less than the cap reserve below, so any positive residual is
 		// worth attempting and the projection guard catches actual overflow.
 		if (baseTokens >= totalBudget) return 0;
-		// Cap reserve mirrors what `estimateTokens(summaryMessage)` will charge
+		// Cap reserve mirrors what `countMessage(summaryMessage)` will charge
 		// when frames > 0: `countTokens(summaryTemplate ‖ textHead ‖ textTail)`
 		// plus `numFrames × FRAME_TOKEN_ESTIMATE`. Resolve the shape this
 		// snapcompact pass will actually use (matches the `shape` argument
@@ -1788,10 +1786,10 @@ export class SessionMaintenance {
 			undefined,
 			blocks,
 		);
-		let tokens = computeNonMessageTokens(this.#host.nonMessageTokenSource()) + estimateTokens(summaryMessage);
-		for (const message of preparation.recentMessages) {
-			tokens += estimateTokens(message);
-		}
+		let tokens =
+			computeNonMessageTokens(this.#host.nonMessageTokenSource(), this.#tokenizer) +
+			this.#tokenizer.countMessage(summaryMessage);
+		tokens += this.#tokenizer.countMessages(preparation.recentMessages);
 		return tokens;
 	}
 
@@ -1860,9 +1858,9 @@ export class SessionMaintenance {
 		if (contextWindow <= 0) return true;
 		const activeExcludedMessage =
 			excludedMessage && this.#host.messages().includes(excludedMessage) ? excludedMessage : undefined;
-		const providerExcludedTokens = activeExcludedMessage ? estimateTokens(activeExcludedMessage) : 0;
+		const providerExcludedTokens = activeExcludedMessage ? this.#tokenizer.countMessage(activeExcludedMessage) : 0;
 		const storedExcludedTokens = activeExcludedMessage
-			? estimateTokens(activeExcludedMessage, { excludeEncryptedReasoning: true })
+			? this.#tokenizer.countMessage(activeExcludedMessage, { excludeEncryptedReasoning: true })
 			: 0;
 		const compactionSettings = this.#host.settings.getGroup("compaction");
 		const residualTokens = compactionContextTokens(
@@ -1998,7 +1996,7 @@ export class SessionMaintenance {
 		if (ctxWindow <= 0) return Math.min(snapcompact.MAX_FRAMES_DEFAULT, snapcompact.maxFramesForDataBudget());
 		const thresholdTokens = resolveThresholdTokens(ctxWindow, settings);
 		const recoveryBandTokens = Math.floor(thresholdTokens * COMPACTION_RECOVERY_BAND);
-		const baseTokens = computeNonMessageTokens(this.#host.nonMessageTokenSource());
+		const baseTokens = computeNonMessageTokens(this.#host.nonMessageTokenSource(), this.#tokenizer);
 		const shape = snapcompact.resolveShape(this.#model, this.#host.settings.get("snapcompact.shape"));
 		const edgeCap = snapcompact.geometry(shape).capacity;
 		const textEdgeTokens = Math.ceil((2 * edgeCap * 1.15) / 4);
@@ -2069,7 +2067,7 @@ export class SessionMaintenance {
 			}
 			if (!inKeptRegion) continue;
 			const message = (entry as { message?: AgentMessage }).message;
-			if (message) keptTailTokens += estimateTokens(message);
+			if (message) keptTailTokens += this.#tokenizer.countMessage(message);
 		}
 		const archive = snapcompact.getPreservedArchive(staleEntry.preserveData);
 		if (!archive || archive.frames.length <= 1) return undefined;
@@ -2359,7 +2357,12 @@ export class SessionMaintenance {
 			const pathEntries = this.#host.sessionManager.getBranch();
 
 			let pathEntriesForCompaction = pathEntries;
-			let preparation = prepareCompaction(pathEntriesForCompaction, compactionSettings, this.#model);
+			let preparation = prepareCompaction(
+				pathEntriesForCompaction,
+				compactionSettings,
+				this.#model,
+				this.#tokenizer,
+			);
 			if (!preparation) {
 				// prepareCompaction found nothing to summarize because the kept region
 				// is a single oversized recent turn — findCutPoint never cuts inside a
@@ -2409,7 +2412,12 @@ export class SessionMaintenance {
 								// branch has been rewritten either way.
 								rescueRewroteHistory = true;
 								pathEntriesForCompaction = this.#host.sessionManager.getBranch();
-								preparation = prepareCompaction(pathEntriesForCompaction, compactionSettings, this.#model);
+								preparation = prepareCompaction(
+									pathEntriesForCompaction,
+									compactionSettings,
+									this.#model,
+									this.#tokenizer,
+								);
 								return preparation !== undefined;
 							},
 						});

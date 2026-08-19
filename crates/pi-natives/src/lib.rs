@@ -28,6 +28,7 @@ pub mod audio;
 pub mod block;
 pub mod clipboard;
 pub mod crash_handler;
+pub mod ctok;
 pub mod desktop;
 pub mod devicecheck;
 pub mod diff;
