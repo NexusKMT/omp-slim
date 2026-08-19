@@ -2673,23 +2673,18 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		for (const tool of toolRegistry.values()) {
 			toolRegistry.set(tool.name, new ExtensionToolWrapper(tool, extensionRunner));
 		}
-		// Cursor's own client owns file edits, so `edit` is not advertised to the
-		// model (commit 8ba0498eb: full-file `write` is used instead). The exec
-		// bridge is a different consumer: the server sends native `pi_edit`
-		// frames regardless of the advertised catalog, and answering them needs
-		// a real tool.
+		// Hashline `edit` stays in the registry so Cursor can call it as MCP.
+		// Native StrReplace arrives as `editToolCall` and materializes through
+		// exec `readArgs`/`writeArgs`; `pi_edit` still needs a `replace`-mode
+		// instance because `PiEditExecArgs` carries `old_string`/`new_string`,
+		// which is exactly `replace`'s schema and nothing else's. The registry
+		// instance follows the session's configured mode, so the bridge builds
+		// its own and serves it through `getEditReplaceTool` — not `getTool`,
+		// which doubles as the agent loop's fallback for unadvertised calls.
 		//
-		// It must be a `replace`-mode instance. `PiEditExecArgs` carries
-		// `old_string`/`new_string` replacements, which is exactly `replace`'s schema and
-		// nothing else's — under the default `hashline` mode the frame's args do
-		// not match the tool's parameters at all. The registry instance follows
-		// the session's configured mode, so the bridge builds its own.
-		//
-		// The grant is captured HERE, before the Cursor branch below deletes
-		// `edit` from the registry, and independently of the session's provider:
+		// The grant is captured here, independently of the session's provider:
 		// a session that starts on another provider can switch to Cursor later,
-		// and the roster is built once, at session creation. Reading the registry
-		// at frame time would see the switched-to state, not the grant.
+		// and the roster is built once, at session creation.
 		const editWasGranted = toolRegistry.has("edit");
 		// Built on first use rather than eagerly: a session that never reaches
 		// Cursor never constructs it.
@@ -2710,10 +2705,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// resource-download frames that mutate files without running a registry
 		// tool, so it needs the grant as the session actually made it.
 		const cursorCanMutateFiles = editWasGranted || toolRegistry.has("write");
-		if (model?.provider === "cursor") {
-			toolRegistry.delete("edit");
-			builtInRegistryToolNames.delete("edit");
-		}
 
 		let writeRegistration: Promise<boolean> | undefined;
 		const ensureWriteRegistered = (): Promise<boolean> => {

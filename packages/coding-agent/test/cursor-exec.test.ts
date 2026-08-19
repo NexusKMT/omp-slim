@@ -327,13 +327,13 @@ describe("bridge tool resolution beyond the model-facing registry", () => {
 	});
 
 	it("edits a real file from a pi_edit frame when `edit` is withheld from the model", async () => {
-		// For Cursor the session drops `edit` from the tool registry so the model
-		// is steered to full-file `write`. The native `pi_edit` frame arrives
-		// regardless of the advertised catalog, so the bridge must still reach a
-		// real edit tool through `getEditReplaceTool` — otherwise every modern
-		// edit answers "Tool \"edit\" not available" and the file is untouched.
-		// (Not the `getTool` fallback: that resolver also serves the agent loop's
-		// unadvertised calls, so it stays device-only.)
+		// A restricted roster omits `edit`. Native `pi_edit` still arrives, so
+		// the bridge must reach a real replace-mode tool through
+		// `getEditReplaceTool` — otherwise every modern edit answers
+		// `Tool "edit" not available` and the file is untouched.
+		// (Not the `getTool` fallback: that resolver also serves the agent
+		// loop's unadvertised calls, so it stays device-only.)
+
 		const target = path.join(cwd, "sample.txt");
 		await Bun.write(target, "alpha\nbeta\n");
 		// Build it exactly as the session does. Both bridge callsites go through
@@ -395,13 +395,11 @@ describe("bridge tool resolution beyond the model-facing registry", () => {
 	});
 
 	it("runs the replace-mode instance even when the registry still holds another mode", async () => {
-		// The state a session reaches by starting on a non-Cursor provider and
-		// switching to Cursor: `edit` was never deleted from the registry (that
-		// only happens for a session created on Cursor) and the roster is not
-		// rebuilt on switch, so the configured-mode instance is still there.
-		// `executeTool` prefers the map over the `getTool` fallback, so without
-		// an explicit replace-mode accessor every native edit after the switch
-		// fails validation against the wrong schema.
+		// Hashline `edit` stays advertised as MCP. `executeTool` prefers the map
+		// over the `getTool` fallback, so without an explicit replace-mode
+		// accessor every native `pi_edit` fails validation against the hashline
+		// schema.
+
 		const target = path.join(cwd, "sample.txt");
 		await Bun.write(target, "alpha\nbeta\n");
 		const session = createTestSession(cwd);

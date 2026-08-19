@@ -63,10 +63,10 @@ export function createBridgeEditTool(session: ToolSession, extensionRunner: Exte
  * (issue #5680). The granted map is never mutated: an unsubstituted result is a
  * copy, so a caller without an `edit` grant cannot accidentally gain one.
  *
- * The advisor roster passes its granted map here; the primary session keeps its
- * instance out of the registry entirely (Cursor does not advertise `edit`) and
- * serves it through the bridge's `getEditReplaceTool` accessor instead — not
- * the `getTool` fallback, which doubles as the agent loop's resolver for
+ * The advisor roster passes its granted map here. The primary session
+ * advertises hashline `edit` as MCP and still serves the replace-mode
+ * instance through the bridge's `getEditReplaceTool` accessor — not the
+ * `getTool` fallback, which doubles as the agent loop's resolver for
  * unadvertised calls and must stay device-only.
  */
 export function bridgeToolMap(

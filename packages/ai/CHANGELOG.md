@@ -2,7 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Cursor native StrReplace (`editToolCall`) being dropped: the interaction stream now opens a single `edit` block, materialization `readArgs` return raw file bytes instead of hashline-formatted text, and the following `writeArgs` pair onto that block instead of synthesizing a full-file write.
+
 ## [17.3.8] - 2026-08-19
+
 
 ### Changed
 
