@@ -1313,6 +1313,8 @@ export class AuthStorage {
 	 */
 	#persistedBlockStoreDamaged = false;
 	#usageProviderResolver?: (provider: Provider) => UsageProvider | undefined;
+	/** Runtime extension providers take precedence over this configured/default resolver. */
+	#runtimeUsageProviderOverrides: Map<Provider, UsageProvider> = new Map();
 	#rankingStrategyResolver?: (provider: Provider) => CredentialRankingStrategy | undefined;
 	#usageCache: UsageCache;
 	#usageCacheEpoch = 0;
@@ -1490,6 +1492,27 @@ export class AuthStorage {
 	 */
 	removeRuntimeApiKey(provider: string): void {
 		this.#runtimeOverrides.delete(provider);
+	}
+
+	/**
+	 * Install a runtime usage provider override (not persisted to disk).
+	 *
+	 * Runtime overrides are checked before the configured resolver, including its
+	 * built-in fallback. Removing the override restores that resolver unchanged.
+	 */
+	setRuntimeUsageProvider(provider: Provider, usageProvider: UsageProvider): void {
+		this.#runtimeUsageProviderOverrides.set(provider, usageProvider);
+		this.#invalidateUsageReportCacheForProvider(provider);
+	}
+
+	/** Remove a runtime usage provider override and restore configured/default resolution. */
+	removeRuntimeUsageProvider(provider: Provider): void {
+		if (!this.#runtimeUsageProviderOverrides.delete(provider)) return;
+		this.#invalidateUsageReportCacheForProvider(provider);
+	}
+
+	#resolveUsageProvider(provider: Provider): UsageProvider | undefined {
+		return this.#runtimeUsageProviderOverrides.get(provider) ?? this.#usageProviderResolver?.(provider);
 	}
 
 	/**
@@ -3216,10 +3239,7 @@ export class AuthStorage {
 	}
 
 	async #fetchUsageUncached(request: UsageRequestDescriptor, timeoutMs?: number): Promise<UsageReport | null> {
-		const resolver = this.#usageProviderResolver;
-		if (!resolver) return null;
-
-		const providerImpl = resolver(request.provider);
+		const providerImpl = this.#resolveUsageProvider(request.provider);
 		if (!providerImpl) return null;
 
 		const timeoutSignal =
@@ -3363,7 +3383,7 @@ export class AuthStorage {
 			// value through transient failures. Session-cookie providers can opt out
 			// so an expired login does not display stale quota indefinitely.
 			const retainLastGood =
-				!forceRefresh && this.#usageProviderResolver?.(request.provider)?.retainLastGoodOnFailure !== false;
+				!forceRefresh && this.#resolveUsageProvider(request.provider)?.retainLastGoodOnFailure !== false;
 			const lastGood = retainLastGood
 				? (this.#usageCache.getStale<UsageReport | null>(cacheKey)?.value ?? null)
 				: null;
@@ -3479,7 +3499,7 @@ export class AuthStorage {
 		options?: { sessionId?: string; baseUrl?: string },
 	): boolean {
 		if (this.#fetchUsageReportsOverride) return false;
-		const parseHeaders = this.#usageProviderResolver?.(provider)?.parseRateLimitHeaders;
+		const parseHeaders = this.#resolveUsageProvider(provider)?.parseRateLimitHeaders;
 		if (!parseHeaders) return false;
 
 		const credential = this.#resolveActiveOAuthCredential(provider, options?.sessionId);
@@ -3559,18 +3579,16 @@ export class AuthStorage {
 	async #collectUsageRequests(options?: {
 		baseUrlResolver?: (provider: Provider) => string | undefined;
 	}): Promise<UsageRequestDescriptor[]> {
-		const resolver = this.#usageProviderResolver;
-		if (!resolver) return [];
-
 		const requests: UsageRequestDescriptor[] = [];
 		const providers = new Set<string>([
 			...this.#data.keys(),
+			...this.#runtimeUsageProviderOverrides.keys(),
 			...DEFAULT_USAGE_PROVIDERS.map(provider => provider.id),
 		]);
 
 		for (const providerId of providers) {
 			const provider = providerId as Provider;
-			const providerImpl = resolver(provider);
+			const providerImpl = this.#resolveUsageProvider(provider);
 			if (!providerImpl) continue;
 			const baseUrl = options?.baseUrlResolver?.(provider);
 			let entries = this.#getStoredCredentials(providerId);
@@ -3608,7 +3626,7 @@ export class AuthStorage {
 			if (entries.length === 0) {
 				const runtimeKey = this.#runtimeOverrides.get(providerId);
 				const envKey = getEnvApiKey(providerId);
-				const apiKey = runtimeKey ?? envKey;
+				const apiKey = runtimeKey ?? this.#configOverrides.get(providerId) ?? envKey;
 				if (!apiKey) continue;
 				const request = this.#buildUsageRequest(provider, { type: "api_key", apiKey }, baseUrl);
 				if (providerImpl.supports && !providerImpl.supports(request)) continue;
@@ -3864,7 +3882,7 @@ export class AuthStorage {
 	 * providers without a usage API) — the latter never warrants a usage row.
 	 */
 	usageProviderFor(provider: Provider): UsageProvider | undefined {
-		return this.#usageProviderResolver?.(provider);
+		return this.#resolveUsageProvider(provider);
 	}
 
 	/**
@@ -4115,7 +4133,7 @@ export class AuthStorage {
 			if (shouldReconcileStoreHookReports && reports) this.#reconcileCodexUsageBlocksFromReports(reports);
 			return reports;
 		}
-		if (!this.#usageProviderResolver) return null;
+		if (!this.#usageProviderResolver && this.#runtimeUsageProviderOverrides.size === 0) return null;
 
 		const requests = await this.#collectUsageRequests(options);
 		if (requests.length === 0) return [];
@@ -4206,7 +4224,7 @@ export class AuthStorage {
 	async checkCredentials(options?: CheckCredentialsOptions): Promise<CredentialHealthResult[]> {
 		options?.signal?.throwIfAborted();
 		const stored = this.#store.listAuthCredentials();
-		const resolver = this.#usageProviderResolver;
+
 		const timeoutMs = options?.timeoutMs ?? this.#usageRequestTimeoutMs;
 		const completionProbe = options?.completionProbe;
 		const completionTimeoutMs = options?.completionTimeoutMs ?? timeoutMs;
@@ -4307,7 +4325,7 @@ export class AuthStorage {
 				continue;
 			}
 
-			const providerImpl = resolver?.(row.provider as Provider);
+			const providerImpl = this.#resolveUsageProvider(row.provider as Provider);
 			if (!providerImpl) {
 				base.reason = `no usage probe configured for provider ${row.provider}`;
 			} else if (providerImpl.supports && !providerImpl.supports(initialRequest)) {
@@ -5888,6 +5906,26 @@ export class AuthStorage {
 			);
 			const existing = this.#usageCache.getStale<UsageReport | null>(cacheKey);
 			this.#usageCache.set(cacheKey, { value: existing?.value ?? null, expiresAt: expired });
+		}
+	}
+
+	/**
+	 * Expire cached reports for a provider after its runtime usage implementation changes.
+	 * This keeps a newly installed extension provider from serving a built-in snapshot.
+	 */
+	#invalidateUsageReportCacheForProvider(provider: Provider): void {
+		this.#usageCacheEpoch += 1;
+		const expired = Date.now() - 1;
+		const prefix = `report:${this.#usageCacheProviderKey(provider)}:`;
+		if (this.#usageCache.deletePrefix(prefix)) return;
+		for (const entry of this.#getStoredCredentials(provider)) {
+			this.#usageCache.set(
+				this.#buildUsageReportCacheKey({
+					provider,
+					credential: this.#buildUsageCredential(entry.credential),
+				}),
+				{ value: null, expiresAt: expired },
+			);
 		}
 	}
 
