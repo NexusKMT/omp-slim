@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed LM Studio models keeping their architectural `max_context_length` after a JIT load served a smaller `loaded_context_length`, so context accounting and compaction ran against a window larger than the backend actually served. `ModelRegistry.refreshSelectedModelMetadata` only re-probed runtime metadata for llama.cpp; it now also re-probes LM Studio's native `/api/v0/models` for the selected model (via the existing `loaded_context_length`-preferring resolution) on selection/first use, and re-derives the window on a later unload rather than retaining the stale runtime value ([#9001](https://github.com/can1357/oh-my-pi/issues/9001)).
+
 ## [17.3.8] - 2026-08-19
 
 ### Added

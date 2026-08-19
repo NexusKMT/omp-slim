@@ -60,6 +60,7 @@ import {
 	type DiscoveryContext,
 	type DiscoveryProviderConfig,
 	discoverLlamaCppModelRuntimeMetadata,
+	discoverLmStudioModelRuntimeMetadata,
 	discoverModelsByProviderType,
 	ensureLlamaCppV1BaseUrl,
 	getImplicitOllamaBaseUrl,
@@ -333,20 +334,35 @@ export class ModelRegistry {
 
 	/**
 	 * Refresh dynamic metadata that can appear only after a local model loads.
+	 *
+	 * llama.cpp exposes `meta.n_ctx` once a lazy-loaded instance is up
+	 * (#3310/#3311); LM Studio exposes `loaded_context_length` once it JIT-loads
+	 * the model on first inference (#9001). Both are captured only as a snapshot
+	 * at discovery time, so re-probe the selected model's native runtime metadata
+	 * and patch its context window to what the backend actually serves.
 	 */
 	async refreshSelectedModelMetadata(model: Model<Api>): Promise<Model<Api>> {
-		const llamaCppDiscoveryConfig = this.#discoverableProviders.find(
-			providerConfig => providerConfig.provider === model.provider && providerConfig.discovery.type === "llama.cpp",
+		const discoveryConfig = this.#discoverableProviders.find(
+			providerConfig =>
+				providerConfig.provider === model.provider &&
+				(providerConfig.discovery.type === "llama.cpp" || providerConfig.discovery.type === "lm-studio"),
 		);
-		if (!llamaCppDiscoveryConfig) {
+		if (!discoveryConfig) {
 			return model;
 		}
 		this.#ensureFullSnapshot();
-		const runtimeMetadata = await discoverLlamaCppModelRuntimeMetadata(
-			model,
-			this.#nonResolvingDiscoveryContext(),
-			llamaCppDiscoveryConfig.discovery.timeoutMs,
-		);
+		const runtimeMetadata =
+			discoveryConfig.discovery.type === "lm-studio"
+				? await discoverLmStudioModelRuntimeMetadata(
+						model,
+						this.#nonResolvingDiscoveryContext(),
+						discoveryConfig.discovery.timeoutMs,
+					)
+				: await discoverLlamaCppModelRuntimeMetadata(
+						model,
+						this.#nonResolvingDiscoveryContext(),
+						discoveryConfig.discovery.timeoutMs,
+					);
 		if (runtimeMetadata === undefined) {
 			return this.find(model.provider, model.id) ?? model;
 		}

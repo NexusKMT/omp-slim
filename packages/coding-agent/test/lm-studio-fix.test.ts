@@ -140,4 +140,57 @@ describe("ModelRegistry LM Studio Fixes", () => {
 			}
 		}
 	});
+
+	test("refreshSelectedModelMetadata tracks the LM Studio JIT-load lifecycle", async () => {
+		let state: "not-loaded" | "loaded" = "not-loaded";
+		const fetchMock: FetchImpl = input => {
+			const url = String(input);
+			if (url === "http://127.0.0.1:1234/api/v0/models") {
+				return Promise.resolve(
+					new Response(
+						JSON.stringify({
+							data: [
+								{
+									id: "big-model",
+									type: "llm",
+									state,
+									max_context_length: 262144,
+									loaded_context_length: state === "loaded" ? 81920 : null,
+								},
+							],
+						}),
+						{ status: 200, headers: { "Content-Type": "application/json" } },
+					),
+				);
+			}
+			if (url === "http://127.0.0.1:1234/v1/models") {
+				return Promise.resolve(
+					new Response(JSON.stringify({ data: [{ id: "big-model", object: "model" }] }), {
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					}),
+				);
+			}
+			return Promise.resolve(new Response(null, { status: 404 }));
+		};
+
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+		await registry.refresh();
+
+		// Discovery while unloaded records the architectural ceiling.
+		const discovered = registry.find("lm-studio", "big-model");
+		expect(discovered?.contextWindow).toBe(262144);
+
+		// JIT load: refreshing the selected model adopts the loaded window.
+		state = "loaded";
+		const loaded = await registry.refreshSelectedModelMetadata(discovered!);
+		expect(loaded.contextWindow).toBe(81920);
+		expect(registry.find("lm-studio", "big-model")?.contextWindow).toBe(81920);
+
+		// Unload: the runtime-derived window is not retained; it falls back to max.
+		state = "not-loaded";
+		const unloaded = await registry.refreshSelectedModelMetadata(loaded);
+		expect(unloaded.contextWindow).toBe(262144);
+		expect(registry.find("lm-studio", "big-model")?.contextWindow).toBe(262144);
+	});
 });
