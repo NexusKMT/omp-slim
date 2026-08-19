@@ -20,7 +20,6 @@ import { getCustomApi } from "./api-registry";
 import { createAuthRetryKeyState, isApiKeyResolver, resolveNextAuthRetryKey } from "./auth-retry";
 import * as AIError from "./error";
 import { ProviderHttpError } from "./error";
-import { isInvalidatedOAuthTokenError } from "./error/auth-classify";
 import { isConcurrencyCapExclusion, isUsageLimitOutcome } from "./error/rate-limit";
 import type { BedrockOptions } from "./providers/amazon-bedrock";
 import type { AnthropicOptions } from "./providers/anthropic";
@@ -1086,6 +1085,7 @@ function extractStatusFromAssistantError(message: AssistantMessage): number | un
 }
 
 function isRetryableUpstreamError(error: unknown, status: number | undefined, message: string | undefined): boolean {
+	if (AIError.isAuthRetryableError(error)) return true;
 	// 401 means the credential is bad; 403 is its valid-token twin (access
 	// denied by plan, model policy, or org restriction — a sibling account may
 	// not share it). Explicit account-scoped policy errors such as Codex
@@ -1100,9 +1100,6 @@ function isRetryableUpstreamError(error: unknown, status: number | undefined, me
 	// credential block. Transient 429s ("Too many requests", per-minute caps)
 	// classify as RATE_LIMIT_EXCEEDED in `parseRateLimitReason` and stay in the
 	// provider's own backoff layer instead of burning siblings.
-	if (AIError.isAccountPolicyError(error)) return true;
-	if (AIError.isUsageLimit(error)) return true;
-	if (isInvalidatedOAuthTokenError(error)) return true;
 	if (status === 401 || (status === 403 && !isConcurrencyCapExclusion(status, message))) return true;
 	return isUsageLimitOutcome(status, message);
 }

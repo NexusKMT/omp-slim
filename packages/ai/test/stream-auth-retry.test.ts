@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { ApiKeyResolveContext } from "@oh-my-pi/pi-ai";
 import { registerCustomApi, unregisterCustomApis } from "@oh-my-pi/pi-ai";
-import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
+import { OAuthError, ProviderHttpError } from "@oh-my-pi/pi-ai/error";
 import { classify } from "@oh-my-pi/pi-ai/error/flags";
 import { streamSimple } from "@oh-my-pi/pi-ai/stream";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "@oh-my-pi/pi-ai/types";
@@ -118,6 +118,45 @@ describe("streamSimple resolver auth retry", () => {
 		]);
 		expect(contexts[1]).toBeDefined();
 		expect((contexts[1]!.error as { status?: number }).status).toBe(401);
+	});
+
+	it("refreshes the credential when a provider requests token refresh before the first event", async () => {
+		const keys: unknown[] = [];
+		const contexts: ApiKeyResolveContext[] = [];
+		registerCustomApi(
+			API,
+			(_model: Model<Api>, _context: Context, options?: SimpleStreamOptions) => {
+				pushKey(keys, options);
+				const stream = new AssistantMessageEventStream();
+				queueMicrotask(() =>
+					keys.length === 1
+						? stream.fail(
+								new OAuthError("OAuth token expired before request", {
+									kind: "token-refresh",
+									provider: "google-antigravity",
+								}),
+							)
+						: ok(stream),
+				);
+				return stream;
+			},
+			SOURCE_ID,
+		);
+
+		const stream = streamSimple(model(), context, {
+			apiKey: async ctx => {
+				contexts.push(ctx);
+				return ctx.error === undefined ? "expired-key" : "fresh-key";
+			},
+		});
+		for await (const _event of stream) {
+			// drain
+		}
+
+		expect((await stream.result()).content).toEqual([{ type: "text", text: "ok" }]);
+		expect(keys).toEqual(["expired-key", "fresh-key"]);
+		expect(contexts).toHaveLength(2);
+		expect(contexts[1]?.error).toBeInstanceOf(OAuthError);
 	});
 
 	it("surfaces a 403 concurrency cap for transient backoff without rotating credentials", async () => {
