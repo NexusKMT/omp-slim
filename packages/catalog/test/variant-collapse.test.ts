@@ -728,6 +728,68 @@ describe("Cursor Grok tier routing (issue #8803)", () => {
 	});
 });
 
+describe("Cursor GPT-5.6 tier routing (issue #9025)", () => {
+	function cursorMemberSpec(id: string): ModelSpec<"cursor-agent"> {
+		return {
+			id,
+			name: id,
+			api: "cursor-agent",
+			provider: "cursor",
+			baseUrl: "https://api2.cursor.sh",
+			// Live GetUsableModels marks these reasoning:false; the effort route
+			// must still promote the collapsed family to reasoning.
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 200_000,
+			maxTokens: 64_000,
+		};
+	}
+
+	const TIERS = ["none", "low", "medium", "high", "xhigh", "max"];
+	const RAW_SIBLINGS = ["luna", "sol", "terra"].flatMap(variant =>
+		TIERS.flatMap(tier => [`gpt-5.6-${variant}-${tier}`, `gpt-5.6-${variant}-${tier}-fast`]),
+	);
+
+	it("collapses the 36 effort siblings into six logical models, split by the -fast lane", () => {
+		expect(RAW_SIBLINGS).toHaveLength(36);
+		const collapsed = collapseEffortVariants(RAW_SIBLINGS.map(cursorMemberSpec), CURSOR_VARIANT_COLLAPSE_TABLE);
+		expect(collapsed.map(model => model.id).sort()).toEqual([
+			"gpt-5.6-luna",
+			"gpt-5.6-luna-fast",
+			"gpt-5.6-sol",
+			"gpt-5.6-sol-fast",
+			"gpt-5.6-terra",
+			"gpt-5.6-terra-fast",
+		]);
+
+		const luna = collapsed.find(model => model.id === "gpt-5.6-luna");
+		if (!luna) throw new Error("gpt-5.6-luna did not collapse");
+		expect(luna.name).toBe("GPT-5.6 Luna");
+		// Effort route forces reasoning even though every member said false.
+		expect(luna.reasoning).toBe(true);
+		expect(luna.thinking?.mode).toBe("effort");
+		expect(luna.thinking?.efforts).toEqual([Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max]);
+	});
+
+	it("routes each user effort onto the live sibling wire id per service-tier lane", () => {
+		const collapsed = collapseEffortVariants(RAW_SIBLINGS.map(cursorMemberSpec), CURSOR_VARIANT_COLLAPSE_TABLE);
+		const model = (id: string) => {
+			const found = collapsed.find(m => m.id === id);
+			if (!found) throw new Error(`${id} did not collapse`);
+			return buildModel(found as ModelSpec<"cursor-agent">);
+		};
+
+		// `-none` is the thinking-off tier; efforts route onto the standard lane.
+		expect(resolveWireModelId(model("gpt-5.6-sol"), undefined)).toBe("gpt-5.6-sol-none");
+		expect(resolveWireModelId(model("gpt-5.6-sol"), Effort.Max)).toBe("gpt-5.6-sol-max");
+		expect(resolveWireModelId(model("gpt-5.6-sol"), Effort.Low)).toBe("gpt-5.6-sol-low");
+		// The -fast lane is a distinct SKU routing onto its own sibling ids.
+		expect(resolveWireModelId(model("gpt-5.6-terra-fast"), Effort.High)).toBe("gpt-5.6-terra-high-fast");
+		expect(resolveWireModelId(model("gpt-5.6-terra-fast"), Effort.XHigh)).toBe("gpt-5.6-terra-xhigh-fast");
+	});
+});
+
 describe("variant aliases", () => {
 	it("resolves members and recycled ids per provider", () => {
 		expect(resolveVariantAlias("google-antigravity", "gemini-3.5-flash-low")).toBe("gemini-3.5-flash");
