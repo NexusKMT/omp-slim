@@ -19,6 +19,7 @@
 - Cloud Code Assist Gemini 3.6/3.7 Flash requests at `minimal` now send `thinkingLevel: LOW` on the aliased `-low` SKU instead of `MINIMAL`, which the API rejects with HTTP 400.
 - Answer Cursor `interaction_query` permission gates (hosted web search, Exa, unnamed field-9 WebFetch) so the Run RPC continues instead of sitting silent until the 300s idle watchdog.
 - Fixed provider tool calls arriving with flattened array argument paths (e.g. Gemini's `questions[0].id`) being stripped and rejected by argument validation; well-formed flattened paths are now rebuilt into the nested arrays the tool schema expects ([#8886](https://github.com/can1357/oh-my-pi/issues/8886)).
+- Fixed OAuth login (Codex `localhost:1455`, and any `localhost` callback flow) failing on hosts with IPv6 disabled at the kernel (`ipv6.disable=1`). The `::1` companion listener added in #8081 fails there with Bun's generic "Is port X in use?" message (oven-sh/bun#7187), which the in-use check misread as a real collision — tearing down the healthy IPv4 listener and surfacing a bogus "port 1455 is in use" error. The dual-bind path now detects the missing IPv6 loopback up front and serves IPv4 alone ([#8814](https://github.com/can1357/oh-my-pi/issues/8814)).
 
 ## [17.3.7] - 2026-08-17
 
