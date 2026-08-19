@@ -333,6 +333,25 @@ export class ModelRegistry {
 	}
 
 	/**
+	 * True when the provider's models expose context metadata that only appears
+	 * after a lazy load — llama.cpp's `meta.n_ctx` once a cold instance spins up
+	 * (#3310/#3311), LM Studio's `loaded_context_length` once it JIT-loads the
+	 * model on the first inference (#9001). Callers use this to decide whether a
+	 * post-first-response refresh is worth a native probe.
+	 */
+	hasLazyRuntimeMetadata(provider: string): boolean {
+		return this.#findLazyRuntimeDiscovery(provider) !== undefined;
+	}
+
+	#findLazyRuntimeDiscovery(provider: string): DiscoveryProviderConfig | undefined {
+		return this.#discoverableProviders.find(
+			providerConfig =>
+				providerConfig.provider === provider &&
+				(providerConfig.discovery.type === "llama.cpp" || providerConfig.discovery.type === "lm-studio"),
+		);
+	}
+
+	/**
 	 * Refresh dynamic metadata that can appear only after a local model loads.
 	 *
 	 * llama.cpp exposes `meta.n_ctx` once a lazy-loaded instance is up
@@ -342,11 +361,7 @@ export class ModelRegistry {
 	 * and patch its context window to what the backend actually serves.
 	 */
 	async refreshSelectedModelMetadata(model: Model<Api>): Promise<Model<Api>> {
-		const discoveryConfig = this.#discoverableProviders.find(
-			providerConfig =>
-				providerConfig.provider === model.provider &&
-				(providerConfig.discovery.type === "llama.cpp" || providerConfig.discovery.type === "lm-studio"),
-		);
+		const discoveryConfig = this.#findLazyRuntimeDiscovery(model.provider);
 		if (!discoveryConfig) {
 			return model;
 		}

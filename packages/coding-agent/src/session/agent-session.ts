@@ -60,6 +60,7 @@ import type {
 	Message,
 	Model,
 	OAuthAccountIdentity,
+	ProviderResponseMetadata,
 	ProviderSessionState,
 	ResetCreditAccountStatus,
 	ResetCreditRedeemOutcome,
@@ -613,6 +614,13 @@ export class AgentSession {
 	#transformContext: (messages: AgentMessage[], signal?: AbortSignal) => AgentMessage[] | Promise<AgentMessage[]>;
 	#onPayload: SimpleStreamOptions["onPayload"] | undefined;
 	#onResponse: SimpleStreamOptions["onResponse"] | undefined;
+	/**
+	 * Providers/models (`${provider}/${id}`) whose runtime context window has
+	 * already been re-probed after their first successful inference this session,
+	 * so a lazy-load local model (LM Studio JIT, llama.cpp cold start) is
+	 * refreshed exactly once rather than on every response (#9001).
+	 */
+	#lazyContextRefreshed = new Set<string>();
 	#onSseEvent: SimpleStreamOptions["onSseEvent"] | undefined;
 	#sideStreamFn: StreamFn;
 	#preferWebsockets: boolean | undefined;
@@ -1191,11 +1199,15 @@ export class AgentSession {
 			? async (response, model) => {
 					this.rawSseDebugBuffer.recordResponse(response, model);
 					this.#stats.ingestProviderUsageHeaders(response, model);
+					await this.#maybeRefreshLazyLocalContext(response, model);
 					await configuredOnResponse(response, model);
 				}
 			: (response, model) => {
 					this.rawSseDebugBuffer.recordResponse(response, model);
 					this.#stats.ingestProviderUsageHeaders(response, model);
+					// Returns void (no allocation) unless a one-time lazy-model
+					// refresh is actually due, preserving the sync fast path.
+					return this.#maybeRefreshLazyLocalContext(response, model);
 				};
 		const configuredOnSseEvent = config.onSseEvent;
 		this.#onSseEvent = configuredOnSseEvent
@@ -4304,6 +4316,49 @@ export class AgentSession {
 	/** Current model (may be undefined if not yet selected) */
 	get model(): Model | undefined {
 		return this.agent.state.model;
+	}
+
+	/**
+	 * On the first successful response from a lazy-load local model, re-probe its
+	 * runtime context window and fold the result into the live session model.
+	 *
+	 * Discovery snapshots a not-yet-loaded LM Studio model with its architectural
+	 * `max_context_length`; the runtime `loaded_context_length` only exists once
+	 * the model JIT-loads on the first inference (llama.cpp has the same cold-start
+	 * gap for `meta.n_ctx`). A 2xx here means the load completed, so the probe now
+	 * returns the window the backend actually serves. Compaction and the context
+	 * bar read `agent.state.model` every turn, so `agent.setModel` propagates it
+	 * immediately without a provider-session reset (#9001).
+	 *
+	 * Returns `void` synchronously when nothing is due — the common case — so the
+	 * no-callback `#onResponse` fast path stays allocation-free.
+	 */
+	#maybeRefreshLazyLocalContext(response: ProviderResponseMetadata, model: Model | undefined): void | Promise<void> {
+		if (!model || response.status < 200 || response.status >= 300) return;
+		const key = `${model.provider}/${model.id}`;
+		if (this.#lazyContextRefreshed.has(key)) return;
+		if (!this.#modelRegistry.hasLazyRuntimeMetadata(model.provider)) return;
+		this.#lazyContextRefreshed.add(key);
+		return this.#refreshLazyLocalContext(model);
+	}
+
+	async #refreshLazyLocalContext(model: Model): Promise<void> {
+		try {
+			const refreshed = await this.#modelRegistry.refreshSelectedModelMetadata(model);
+			const current = this.model;
+			// Skip if the user switched models mid-stream, or the runtime window
+			// matches what the session already holds.
+			if (!current || !modelsAreEqual(current, refreshed) || refreshed.contextWindow === current.contextWindow) {
+				return;
+			}
+			this.agent.setModel(refreshed);
+		} catch (error) {
+			logger.debug("Lazy local model context refresh failed", {
+				provider: model.provider,
+				model: model.id,
+				error,
+			});
+		}
 	}
 
 	/**
