@@ -1995,7 +1995,7 @@ export class ModelRegistry {
 		// provider lifetime. #clearRuntimeProviderState removes this override when
 		// the owning extension is unregistered or replaced.
 		if (config.usage) {
-			this.authStorage.setRuntimeUsageProvider(providerName, config.usage);
+			this.authStorage.setRuntimeUsageProvider(providerName, config.usage, config.apiKey);
 		}
 		if (config.apiKey) {
 			this.#installProviderApiKey(providerName, config.apiKey);

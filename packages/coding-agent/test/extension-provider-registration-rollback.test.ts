@@ -238,7 +238,15 @@ describe("extension provider registration rollback", () => {
 
 	test("uses extension usage providers and restores built-in resolution on unregister", async () => {
 		const tempDir = TempDir.createSync("@extension-usage-provider-");
-		const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+		let usageFetchCalls = 0;
+		const usageFetch: typeof fetch = Object.assign(
+			async (..._args: Parameters<typeof fetch>) => {
+				usageFetchCalls += 1;
+				return new Response(null, { status: 500 });
+			},
+			{ preconnect: fetch.preconnect },
+		);
+		const authStorage = await AuthStorage.create(tempDir.join("auth.db"), { usageFetch });
 		const provider = "extension-usage-provider";
 		const report: UsageReport = {
 			provider,
@@ -277,9 +285,15 @@ describe("extension provider registration rollback", () => {
 			);
 			for (const registration of runtime.pendingProviderRegistrations) {
 				modelRegistry.registerProvider(registration.name, registration.config, registration.sourceId);
+				modelRegistry.registerProvider("synthetic", { apiKey: "must-not-be-probed" });
 			}
 
-			await expect(authStorage.fetchUsageReports()).resolves.toEqual([report]);
+			await expect(
+				authStorage.fetchUsageReports().then(reports => {
+					expect(usageFetchCalls).toBe(0);
+					return reports;
+				}),
+			).resolves.toEqual([report]);
 			expect(authStorage.usageProviderFor(provider)).toBe(extensionUsage);
 
 			modelRegistry.unregisterProvider(provider);
