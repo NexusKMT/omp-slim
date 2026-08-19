@@ -19,6 +19,9 @@
 - `qwenTemplateReasoningEffort` in `models.yml` `compat` to disable the Qwen 3.8+ reasoning-effort template parameter for strict local servers.
 - Click-to-toggle and drag-to-reorder for list-valued editors in `/settings`.
 - `icon.subscription` and `icon.advisor` symbol-theme tokens (Nerd Font, Unicode, ASCII).
+- ACP clients that advertise form elicitation can now expose `ask` as a single interactive form, including single-choice, multi-select, recommended, and free-text answers.
+
+- Added `qwenTemplateReasoningEffort` to the `models.yml` `compat` schema, so the auto-enabled Qwen 3.8+ template effort dialect (`chat_template_kwargs.reasoning_effort`) can be switched off per provider/model for strict local servers that reject unknown `chat_template_kwargs`.
 
 ### Changed
 

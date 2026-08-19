@@ -159,6 +159,8 @@ export interface ToolSession {
 	additionalDirectories?: string[];
 	/** Whether UI is available */
 	hasUI: boolean;
+	/** Whether `ask` can reach a human. Defaults to `hasUI`. */
+	canPromptUser?: boolean;
 	/** Whether this session has begun disposal. */
 	isDisposed?: () => boolean;
 	/**

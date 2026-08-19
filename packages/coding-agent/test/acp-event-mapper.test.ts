@@ -918,7 +918,10 @@ describe("ACP event mapper", () => {
 				async (sessionCwd: string) => {
 					const session = new ReplayTestSession(sessionCwd, sessionDir);
 					sessions.push(session);
-					return session as unknown as AgentSession;
+					return {
+						session: session as unknown as AgentSession,
+						setToolUIContext: () => {},
+					};
 				},
 				new ReplayTestSession(cwd, initialSessionDir) as unknown as AgentSession,
 			);
