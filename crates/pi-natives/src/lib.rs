@@ -39,6 +39,7 @@ pub mod grep;
 pub mod highlight;
 pub mod html;
 pub mod iofs;
+pub mod js;
 pub mod keys;
 pub mod live;
 /// PDF inspection and Markdown conversion.

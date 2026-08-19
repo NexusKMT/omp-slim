@@ -2662,6 +2662,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hash32"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47d60b12902ba28e2730cd37e95b8c9223af2808df9e902d4df49588d1470606"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2694,6 +2703,16 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+
+[[package]]
+name = "heapless"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25ba4bd83f9415b58b4ed8dc5714c76e626a105be4646c02630ad730ad3b5aa4"
+dependencies = [
+ "hash32",
+ "stable_deref_trait",
+]
 
 [[package]]
 name = "heck"
@@ -5026,10 +5045,10 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "unicode-width 0.2.2",
  "uucore",
  "uutils_term_grid",
  "windows-sys 0.61.2",
+ "xutf",
  "yansi",
 ]
 
@@ -5069,6 +5088,7 @@ dependencies = [
  "grep-pcre2",
  "grep-regex",
  "grep-searcher",
+ "heapless",
  "html-to-markdown-rs",
  "icy_sixel",
  "ignore",
@@ -5107,11 +5127,6 @@ dependencies = [
  "tokio-util",
  "toml",
  "uiautomation",
- "unicode-normalization",
- "unicode-properties",
- "unicode-script",
- "unicode-segmentation",
- "unicode-width 0.2.2",
  "windows-sys 0.61.2",
  "winreg 0.56.0",
  "x11rb",
@@ -7528,12 +7543,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e70f2a8b45122e719eb623c01822704c4e0907e7e426a05927e1a1cfff5b75d0"
 
 [[package]]
-name = "unicode-script"
-version = "0.5.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fb421b350c9aff471779e262955939f565ec18b86c15364e6bdf0d662ca7c1f"
-
-[[package]]
 name = "unicode-segmentation"
 version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8843,9 +8852,9 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xutf"
-version = "1.2.0"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa2ab198275c47f70ceb92678c000b1bb9468a52297c5ce20c5ab5e99fa2c33d"
+checksum = "a14f3ca7038796715a5f5fd1c22aac21423b4f86fd9ef5585ef1744a5cfc573e"
 
 [[package]]
 name = "xxhash-rust"

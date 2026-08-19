@@ -624,7 +624,7 @@ mod filter {
 			});
 			Block::new(idx, labels).unwrap().map_code(|c| {
 				let c = c.replace('\t', "    ");
-				let w = unicode_width::UnicodeWidthStr::width(&*c);
+				let w = xutf::width_str(&c);
 				CodeWidth::new(c, core::cmp::max(w, 1))
 			})
 		}

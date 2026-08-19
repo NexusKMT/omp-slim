@@ -512,10 +512,21 @@ fn unwrap_transparent_background_wrapper(pipeline: &ast::Pipeline) -> Option<ast
 	};
 	let mut unwrapped = simple_cmd.clone();
 	let suffix = unwrapped.suffix.as_mut()?;
-	let operand_index = suffix
+	let mut operand_index = suffix
 		.0
 		.iter()
 		.position(|item| matches!(item, CommandPrefixOrSuffixItem::Word(_)))?;
+	// A leading `--` only terminates the wrapper's own options
+	// (`nohup -- cmd &`): drop it and take the next word as the operand.
+	if let CommandPrefixOrSuffixItem::Word(word) = &suffix.0[operand_index]
+		&& word.value == "--"
+	{
+		suffix.0.remove(operand_index);
+		operand_index = suffix
+			.0
+			.iter()
+			.position(|item| matches!(item, CommandPrefixOrSuffixItem::Word(_)))?;
+	}
 	let CommandPrefixOrSuffixItem::Word(operand_word) = suffix.0.remove(operand_index) else {
 		return None;
 	};
