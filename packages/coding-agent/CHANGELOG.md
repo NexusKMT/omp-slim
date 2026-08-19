@@ -5,6 +5,8 @@
 ### Fixed
 
 - Fixed Cursor sessions hiding hashline `edit`, which left the model with only native StrReplace (dropped) or bash/python string replacement after the server injected Cursor CLI tool instructions.
+- Fixed Cursor MCP calls named `StrReplace`/`Edit` (or `edit` with `old_string`/`new_string`) 404ing after the server injected CLI tool instructions: those names now run the replace-mode bridge `edit` instead of falling through to bash/python.
+
 
 ## [17.3.8] - 2026-08-19
 
