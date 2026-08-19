@@ -186,7 +186,9 @@ describe("transcript live-region fuzz: finalized rows never vanish", () => {
 			for (let seed = 1; seed <= 40; seed++) {
 				const missing = await fuzz(seed, mux);
 				if (missing.length > 0) {
-					throw new Error(`seed=${seed} mux=${mux} lost ${missing.length} rows: ${missing.slice(0, 8).join(", ")}`);
+					throw new Error(
+						`seed=${seed} mux=${mux} lost ${missing.length} rows: ${missing.slice(0, 8).join(", ")}`,
+					);
 				}
 			}
 			expect(true).toBe(true);

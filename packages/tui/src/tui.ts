@@ -1372,6 +1372,13 @@ export class TUI extends Container {
 	#multiplexerResizeTimer: RenderTimer | undefined;
 	#deferredForcedClearScrollback = false;
 	#multiplexerResizeHasPendingRender = false;
+	// Rows a mux pane pushed into its own scrollback on a height-only shrink
+	// without the engine committing them, plus the commit seam at push time.
+	// A later height grow pulls the pane's scrollback tail back into the grid:
+	// the pushed rows come out first — but only while no commit has buried
+	// them — and only the remainder of the pull removes committed rows.
+	#muxPushedRows = 0;
+	#muxPushSeam = 0;
 	// True from the first SIGWINCH of a non-multiplexer drag until the settle
 	// timer fires. While set, every `#doRender` short-circuits to the viewport
 	// fast path (`#renderResizeViewport`) instead of an authoritative full
@@ -3761,22 +3768,36 @@ export class TUI extends Container {
 			!isMultiplexerSession() &&
 			(committedRowsResynced || frameLength <= this.#committedRows);
 		const fullPaint = firstPaint || replaceRequested || geometryRebuild || divergenceRebuild;
-		// A height-only grow makes the pane pull committed rows back out of its
-		// scrollback into the enlarged grid, where the forced in-place window
-		// rewrite overwrites them — gone from history. Drop the commit seam by
-		// the pulled count so those rows re-commit. The pane only pulls when the
-		// grid was full of content; a short frame gains blank rows instead.
-		if (
-			!fullPaint &&
+		// Height-only mux resizes move rows between the pane's scrollback and its
+		// grid. A shrink with a full grid pushes the grid-top rows into pane
+		// scrollback without a commit; a grow pulls the scrollback tail back into
+		// the grid, where the forced in-place window rewrite overwrites it — gone
+		// from history. The scrollback is a stack: pushed rows sit at the tail
+		// only until the next commit buries them, so they shield a pull only
+		// while the commit seam has not moved since the push. The unshielded
+		// remainder removes committed rows — drop the commit seam by it and let
+		// the next chunk re-commit them. A short frame gains blank rows instead
+		// of pulling.
+		if (fullPaint || widthChanged) {
+			this.#muxPushedRows = 0;
+		} else if (
 			geometryChanged &&
-			!widthChanged &&
 			this.#previousHeight > 0 &&
-			height > this.#previousHeight &&
 			this.#previousFrameLength - this.#windowTopRow >= this.#previousHeight
 		) {
-			const pulled = Math.min(height - this.#previousHeight, this.#committedRows);
-			this.#committedRows -= pulled;
-			this.#committedPrefix.length = this.#committedRows;
+			if (this.#committedRows !== this.#muxPushSeam) this.#muxPushedRows = 0;
+			if (height < this.#previousHeight) {
+				this.#muxPushedRows += this.#previousHeight - height;
+				this.#muxPushSeam = this.#committedRows;
+			} else if (height > this.#previousHeight) {
+				const pull = height - this.#previousHeight;
+				const fromPushed = Math.min(pull, this.#muxPushedRows);
+				this.#muxPushedRows -= fromPushed;
+				const fromCommitted = Math.min(pull - fromPushed, this.#committedRows);
+				this.#committedRows -= fromCommitted;
+				this.#committedPrefix.length = this.#committedRows;
+				this.#muxPushSeam = this.#committedRows;
+			}
 		}
 		let windowTop: number;
 		let chunkTo: number;
