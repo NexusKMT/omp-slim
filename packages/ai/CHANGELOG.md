@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Google Cloud Code Assist / Antigravity rejecting MCP tool schemas with `400 Invalid JSON payload received. Unknown name "x-mcp-header"`: the MCP 2026-07-28 `x-mcp-header` transport annotation (which mirrors a parameter into an `Mcp-Param-*` HTTP header) is now stripped from the Google/CCA wire schema by `normalizeSchemaForGoogle` / `normalizeSchemaForCCA`, while remaining available to the MCP transport/execution layer ([#9016](https://github.com/can1357/oh-my-pi/issues/9016)).
+
 ## [17.3.8] - 2026-08-19
 
 ### Changed
