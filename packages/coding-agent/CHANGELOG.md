@@ -9,6 +9,7 @@
 ### Changed
 
 - `/settings` rows can now carry a risk note: a warning glyph on the row plus a warning-colored line above the description. `External Thinking` (`externalThinking`, `--external-thinking`) is the first user — providers have flagged the request shape it produces as abuse, up to account-level enforcement, so both the settings entry and `--help` now say so.
+- Added `isProjectTrusted()` to `ExtensionContext`, a compatibility shim for extensions written against upstream `@earendil-works/pi-coding-agent`'s per-directory trust gate (e.g. Plannotator). It always returns `true`, truthfully reflecting that OMP already loads project-local inputs (`.omp/extensions`, `.omp/config.yml`) unconditionally.
 
 ## [17.3.8] - 2026-08-19
 
