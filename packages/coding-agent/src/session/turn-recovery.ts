@@ -1310,10 +1310,10 @@ export class TurnRecovery {
 		);
 	}
 
-	/** Session role that owns the live model. Ephemeral fallback hops are not a role. */
-	#liveRetryRoleHint(): string {
+	/** Live session role for chain lookup. Ephemeral hops and missing managers are not a role. */
+	#liveRetryRoleHint(): string | undefined {
 		const role = this.#host.sessionManager?.getLastModelChangeRole?.();
-		if (!role || role === EPHEMERAL_MODEL_CHANGE_ROLE) return "default";
+		if (!role || role === EPHEMERAL_MODEL_CHANGE_ROLE) return undefined;
 		return role;
 	}
 
