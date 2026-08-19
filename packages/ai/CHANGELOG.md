@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Cursor AgentService discarding OMP always-apply rules because `requestContext.rules` was always sent empty. System-prompt entries are now mapped to global `CursorRule`s so reconstructed model prompts keep them.
+
 ## [17.3.8] - 2026-08-19
 
 ### Changed

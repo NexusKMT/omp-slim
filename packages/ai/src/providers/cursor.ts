@@ -3,7 +3,11 @@ import * as fs from "node:fs/promises";
 import http2 from "node:http2";
 import { create, fromBinary, fromJson, type JsonValue, toBinary, toJson } from "@bufbuild/protobuf";
 import { ValueSchema } from "@bufbuild/protobuf/wkt";
-import type { ConversationStep, McpToolDefinition } from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
+import type {
+	ConversationStep,
+	CursorRule,
+	McpToolDefinition,
+} from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
 import {
 	AgentClientMessageSchema,
 	AgentConversationTurnStructureSchema,
@@ -26,6 +30,10 @@ import {
 	ConversationStateStructureSchema,
 	ConversationStepSchema,
 	ConversationTurnStructureSchema,
+	CursorRuleSchema,
+	CursorRuleSource,
+	CursorRuleTypeGlobalSchema,
+	CursorRuleTypeSchema,
 	DeleteErrorSchema,
 	DeleteRejectedSchema,
 	DeleteResultSchema,
@@ -623,6 +631,7 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 			});
 			conversationStateCache.set(conversationId, conversationState);
 			const requestContextTools = buildMcpToolDefinitions(context.tools);
+			const requestContextRules = buildCursorRequestContextRules(context.systemPrompt);
 
 			const baseUrl = model.baseUrl || CURSOR_API_URL;
 			const requestPath = "/agent.v1.AgentService/Run";
@@ -780,6 +789,7 @@ export const streamCursor: StreamFunction<"cursor-agent"> = (
 							options?.onToolResult,
 							usageState!,
 							requestContextTools,
+							requestContextRules,
 							onConversationCheckpoint,
 						).catch(error => {
 							log("error", "handleServerMessage", { error: String(error) });
@@ -998,6 +1008,7 @@ export async function handleServerMessage(
 	onToolResult: CursorToolResultHandler | undefined,
 	usageState: UsageState,
 	requestContextTools: McpToolDefinition[],
+	requestContextRules: CursorRule[] = [],
 	onConversationCheckpoint?: (checkpoint: ConversationStateStructure) => void,
 ): Promise<void> {
 	const msgCase = msg.message.case;
@@ -1020,6 +1031,7 @@ export async function handleServerMessage(
 				execHandlers,
 				onToolResult,
 				requestContextTools,
+				requestContextRules,
 				output,
 				stream,
 				state,
@@ -1437,6 +1449,7 @@ async function handleExecServerMessage(
 	execHandlers: CursorExecHandlers | undefined,
 	onToolResult: CursorToolResultHandler | undefined,
 	requestContextTools: McpToolDefinition[],
+	requestContextRules: CursorRule[],
 	output: AssistantMessage,
 	stream: AssistantMessageEventStream,
 	state: BlockState,
@@ -1445,7 +1458,7 @@ async function handleExecServerMessage(
 	log("exec", "dispatch", { execCase, execId: execMsg.execId, hasHandlers: !!execHandlers });
 	if (execCase === "requestContextArgs") {
 		const requestContext = create(RequestContextSchema, {
-			rules: [],
+			rules: requestContextRules,
 			repositoryInfo: [],
 			tools: requestContextTools,
 			gitRepos: [],
@@ -4175,6 +4188,28 @@ function readCursorBlob(blobStore: Map<string, Uint8Array>, blobId: Uint8Array):
 		throw new AIError.ValidationError("Cursor blob not found");
 	}
 	return data;
+}
+
+/**
+ * Cursor AgentService reconstructs the model prompt from `requestContext.rules`,
+ * not from the client-supplied `rootPromptMessagesJson` system blobs. Map each
+ * OMP system-prompt entry to a global CursorRule so always-apply rules survive
+ * that reconstruction.
+ */
+export function buildCursorRequestContextRules(systemPrompt: readonly string[] | undefined): CursorRule[] {
+	return normalizeSystemPrompts(systemPrompt).map((content, index) =>
+		create(CursorRuleSchema, {
+			fullPath: `/omp/system-prompt/${index}.mdc`,
+			content,
+			source: CursorRuleSource.USER,
+			type: create(CursorRuleTypeSchema, {
+				type: {
+					case: "global",
+					value: create(CursorRuleTypeGlobalSchema, {}),
+				},
+			}),
+		}),
+	);
 }
 
 /**
