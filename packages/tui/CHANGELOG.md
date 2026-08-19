@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.8] - 2026-08-19
+
 ### Fixed
 
 - Fixed images rendering as the `[Image: …]` text card on SIXEL terminals that expose no identifying environment variable (foot, xterm, contour): the graphics probe no longer requires Windows Terminal, and no longer reads an XTSMGRAPHICS success reply as a failure.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.3.8] - 2026-08-19
+
 ### Fixed
 
 - Fixed `/compact` (and automatic compaction) resurrecting pre-`/clear` conversation turns: `prepareCompaction` now honors the latest `reset_boundary`, so a compaction after an in-place `/clear` only summarizes messages created after the reset ([#8718](https://github.com/can1357/oh-my-pi/issues/8718)).
