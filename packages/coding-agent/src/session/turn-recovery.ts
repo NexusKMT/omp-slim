@@ -1306,8 +1306,15 @@ export class TurnRecovery {
 			this.#getRetryFallbackResolutionContext(),
 			currentSelector,
 			currentModel,
-			roleHint,
+			roleHint ?? this.#liveRetryRoleHint(),
 		);
+	}
+
+	/** Session role that owns the live model. Ephemeral fallback hops are not a role. */
+	#liveRetryRoleHint(): string {
+		const role = this.#host.sessionManager.getLastModelChangeRole();
+		if (!role || role === EPHEMERAL_MODEL_CHANGE_ROLE) return "default";
+		return role;
 	}
 
 	/** Finds fallback candidates that follow the active selector. */

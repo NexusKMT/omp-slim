@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- Fixed retry fallback walking `retry.fallbackChains` role keys in yaml insertion order, so a default-role session whose model was also assigned to a later-listed role (for example `vision`) took that role's chain instead of `default`. The live session role now wins; when several roles share the same model, `default` wins unless the session is actually on the other role.
 - Fixed Claude Code marketplace plugins ignoring the `enabledPlugins` switch in `~/.claude/settings.json` and `.claude/settings(.local).json`: a plugin turned off for a project no longer loads there, and a local-scope install enabled for a project loads even when its recorded `projectPath` is a different directory
 - Fixed task and eval subagents discovering newly added agent definitions while resolving their role aliases from stale startup settings. Subagent preflight now atomically reloads persisted settings before agent discovery while preserving live runtime overrides.
 - Fixed images returned by tools mounted under `xd://` rendering only as file links instead of inline terminal graphics.
