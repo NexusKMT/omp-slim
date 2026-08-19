@@ -630,16 +630,17 @@ export declare function cosineSimilarityPairs(vectors: Float64Array, count: numb
  * Count tokens in `input`.
  *
  * `input` may be a single string or an array of strings; an array returns
- * the sum across all elements (encoded in parallel via rayon when the global
- * pool is available). Always returns a single token total — use this for any
+ * the sum across all elements (counted in parallel when the global rayon pool
+ * is available). Always returns a single token total — use this for any
  * aggregate budget question without paying a per-element napi crossing.
  *
- * Measures user/model content, not wire-protocol tokens: BPE encodings use
- * ordinary encoding (no special-token handling) and the Claude encodings
- * count message content without the fixed per-message frame. Defaults to
- * `o200k_base`; pass a `Claude*` encoding for exact Claude counts.
+ * Measures user/model content, not wire-protocol tokens: BPE encodings
+ * use ordinary encoding (no special-token handling) and the Claude
+ * encodings count message content without the fixed per-message frame.
+ * Defaults to `o200k_base`; pass a `Claude*` encoding for exact Claude
+ * counts, or the matching family encoding for Qwen/DeepSeek/Kimi/GLM.
  */
-export declare function countTokens(input: string | Array<string>, encoding?: Encoding | undefined | null): number
+export declare function countTokens(input: string | string[], encoding?: Encoding | undefined | null): number
 
 export interface DesktopCapabilities {
   backend: string
@@ -862,7 +863,15 @@ export declare enum Encoding {
   /** Claude Opus 5+ (ctok v5 reconstruction). */
   ClaudeV5 = 'ClaudeV5',
   /** Claude Sonnet/Fable 5+ (live-measured non-opus v5 frame). */
-  ClaudeV5Sonnet = 'ClaudeV5Sonnet'
+  ClaudeV5Sonnet = 'ClaudeV5Sonnet',
+  /** Qwen 3.5 / 3.6 / 3.8 (248k vocabulary). */
+  Qwen3 = 'Qwen3',
+  /** `DeepSeek` V3 … V4 (identical base BPE). */
+  DeepSeekV3 = 'DeepSeekV3',
+  /** Kimi K2 … K3. */
+  KimiK2 = 'KimiK2',
+  /** GLM-5.x exact; GLM-4.x near-exact. */
+  Glm5 = 'Glm5'
 }
 
 /**

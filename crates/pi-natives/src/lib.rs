@@ -28,7 +28,6 @@ pub mod audio;
 pub mod block;
 pub mod clipboard;
 pub mod crash_handler;
-pub mod ctok;
 pub mod desktop;
 pub mod devicecheck;
 pub mod diff;
@@ -46,6 +45,7 @@ pub mod live;
 pub mod pdf;
 pub mod sixel;
 pub mod snapcompact;
+pub mod utok;
 pub use pi_ast::language;
 
 pub mod power;

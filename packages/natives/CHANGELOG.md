@@ -5,6 +5,7 @@
 ### Added
 
 - Added `ClaudeV3`/`ClaudeV47`/`ClaudeV5` encodings to `countTokens`: a Rust rewrite of [ctok](https://github.com/sanderland/ctok) by Sander Land (MIT), reconstructing Anthropic's `count_tokens` offline. Counts are exact on ctok's ~3.4M-response measurement corpora; the port is validated against 493 Python-ctok reference fixtures covering all three families. The pipeline is byte-level throughout — markers occupy one byte, normalization borrows text no rule touches, ASCII and ideographs skip the Unicode tables, and pieces are matched with one Aho-Corasick transition per byte instead of a per-position vocabulary descent — which counts English prose at 64 MiB/s, markdown at 73 MiB/s, source code at 35 MiB/s and CJK at 49 MiB/s per core: 1.5× (CJK, already cheap per byte) to 5.5× (prose, markdown, digits) a straightforward character-level implementation of the same model, which is held to byte-for-byte identical counts across 2.4M randomized differential comparisons.
+- Added zstd-embedded exact content tokenizers for Qwen 3.5+/3.6+/3.8, DeepSeek V3/V4/R1, Kimi K2/K3, and GLM-5 alongside the rebuilt OpenAI o200k/cl100k and Claude reconstructions. `countTokens` now reads JavaScript strings through a reusable UTF-16 buffer, so native counting does not allocate a UTF-8 temporary.
 
 ## [17.3.8] - 2026-08-19
 

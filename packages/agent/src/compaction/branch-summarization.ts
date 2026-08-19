@@ -313,7 +313,7 @@ export async function generateBranchSummary(
 	// Token budget = context window minus reserved space for prompt + response
 	const contextWindow = model.contextWindow || 128000;
 	const tokenBudget = contextWindow - reserveTokens;
-	const tokenizer = new Tokenizer(model.id);
+	const tokenizer = new Tokenizer(model);
 
 	const { messages, fileOps } = prepareBranchEntries(entries, tokenizer, tokenBudget);
 

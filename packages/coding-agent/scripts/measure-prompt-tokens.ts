@@ -14,10 +14,9 @@ function est(s: string): number {
 await Settings.init({ inMemory: true, cwd: process.cwd() });
 const settings = Settings.isolated({});
 
-// Optional model id (argv[2]) scopes the counter to that model's tokenizer, so
-// the numbers match what the agent will actually be charged. Without it the
-// counts are the fast byte estimate the runtime uses for non-Claude models.
-const tokenizer = new Tokenizer(process.argv[2]);
+// This standalone inspection script has no resolved catalog Model; its counts
+// therefore intentionally use the runtime's default estimate policy.
+const tokenizer = new Tokenizer();
 
 const session: ToolSession = {
 	cwd: process.cwd(),

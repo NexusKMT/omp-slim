@@ -1,4 +1,5 @@
-import { bareModelId, parseAnthropicModel, semverGte } from "@oh-my-pi/pi-catalog/identity";
+import type { Model } from "@oh-my-pi/pi-ai";
+import type { ModelTokenizer } from "@oh-my-pi/pi-catalog/types";
 import { countTokens as countTokensNat, Encoding } from "@oh-my-pi/pi-natives";
 import { stringifyJson } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
@@ -8,38 +9,29 @@ import type { AgentMessage } from "./types";
 const testEnv = Bun.env.NODE_ENV === "test";
 const accurate = process.env.PI_TOKENIZER_ACCURATE === "1" && !testEnv;
 
-/**
- * ctok encoding for a Claude model id, or `null` for non-Claude models.
- *
- * Family routing mirrors the ctok reconstruction plus live measurement:
- * Claude 3 through Opus 4.6 (and every non-opus Claude below 5) count with
- * v3, Opus 4.7–4.9 with v4.7, Opus 5+ with v5, and the non-opus 5-series
- * (sonnet/fable/mythos) with the sonnet-5 frame variant. Ids
- * `parseAnthropicModel` cannot classify (e.g. haiku) fall back to v3, which
- * covers every such model shipped to date.
- */
-export function claudeEncodingForModel(modelId: string): Encoding | null {
-	const bare = bareModelId(modelId);
-	const parsed = parseAnthropicModel(bare);
-	if (parsed) {
-		if (parsed.kind === "opus") {
-			if (semverGte(parsed.version, "5")) return Encoding.ClaudeV5;
-			if (semverGte(parsed.version, "4.7")) return Encoding.ClaudeV47;
-			return Encoding.ClaudeV3;
-		}
-		// Sonnet, Fable, and Mythos: the 4.7 family is opus-only, and their
-		// 5-series message frame differs from opus-5's (measured live).
-		return semverGte(parsed.version, "5") ? Encoding.ClaudeV5Sonnet : Encoding.ClaudeV3;
-	}
-	return /(^|[-/.:])claude([-.:]|$)/i.test(bare) ? Encoding.ClaudeV3 : null;
+const NATIVE_ENCODING: Record<ModelTokenizer, Encoding> = {
+	"claude-v3": Encoding.ClaudeV3,
+	"claude-v47": Encoding.ClaudeV47,
+	"claude-v5": Encoding.ClaudeV5,
+	"claude-v5-sonnet": Encoding.ClaudeV5Sonnet,
+	qwen3: Encoding.Qwen3,
+	"deepseek-v3": Encoding.DeepSeekV3,
+	"kimi-k2": Encoding.KimiK2,
+	glm5: Encoding.Glm5,
+};
+
+/** Maps the catalog-resolved tokenizer family to its native implementation. */
+export function tokenizerEncodingForModel(model: Pick<Model, "tokenizer"> | null | undefined): Encoding | null {
+	return model?.tokenizer ? NATIVE_ENCODING[model.tokenizer] : null;
 }
 
 /**
- * `strict` always pays for an exact native count (Claude ctok when the model
- * is Claude, o200k_base otherwise). `approximate` and `upperbound` prefer the
- * same exact count when a Claude encoding is known or `PI_TOKENIZER_ACCURATE=1`
- * is set, and otherwise fall back to a cheap heuristic: `approximate` a
- * bytes/4 guess, `upperbound` the raw byte length (never undercounts).
+ * `strict` always pays for an exact native count (the catalog-resolved
+ * tokenizer when known, o200k_base otherwise). `approximate` and
+ * `upperbound` prefer the same exact count for known tokenizer families or
+ * when `PI_TOKENIZER_ACCURATE=1` is set; otherwise they use a cheap heuristic:
+ * `approximate` a bytes/4 guess, `upperbound` the raw byte length (never
+ * undercounts).
  */
 export type TokenCountMode = "strict" | "approximate" | "upperbound";
 
@@ -103,13 +95,13 @@ interface MessageEstimate {
 }
 
 /**
- * Model-aware local token counter. Immutable: the encoding is fixed at
- * construction, so a cached count can never straddle two encodings. An `Agent`
- * owns one for its active model (swapping the instance when the model's
- * encoding changes) and exposes it as `agent.tokenizer`; one-shot flows
- * (summarization, snapcompact sizing) construct their own for the model that
- * will be billed. Claude models get exact native ctok counts; everything else
- * keeps the fast byte estimate (or o200k when `PI_TOKENIZER_ACCURATE=1`).
+ * Model-aware local token counter. Immutable: the catalog-resolved encoding
+ * is fixed at construction, so a cached count can never straddle two
+ * encodings. An `Agent` owns one for its active model (swapping the instance
+ * when the model's encoding changes); one-shot flows construct their own for
+ * the model that will be billed. Known tokenizer families use exact native
+ * counts; unknown models keep the fast byte estimate (or o200k when
+ * `PI_TOKENIZER_ACCURATE=1`).
  */
 export class Tokenizer {
 	readonly #encoding: Encoding | null;
@@ -124,8 +116,8 @@ export class Tokenizer {
 	 */
 	#estimates = new WeakMap<AgentMessage, MessageEstimate>();
 
-	constructor(modelId?: string | null) {
-		this.#encoding = modelId ? claudeEncodingForModel(modelId) : null;
+	constructor(model?: Pick<Model, "tokenizer"> | null) {
+		this.#encoding = tokenizerEncodingForModel(model);
 	}
 
 	get encoding(): Encoding | null {

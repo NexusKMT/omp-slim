@@ -1,17 +1,18 @@
 /**
- * Regenerates the compact ctok vocabulary data embedded by the Rust ctok port
- * (crates/pi-natives/src/ctok/data/ctok_*.bin).
+ * Regenerates compact ctok vocabulary data for `src/utok/claude/`
+ * (`tools/cache/ctok_*.bin`).
  *
  * Source of truth is the measured vocabulary of sanderland/ctok (MIT), pinned
  * to a release revision. Compaction drops the per-piece witness metadata,
- * parses the public `⟨bow⟩the⟨eow⟩` notation into the single-glyph internal
- * form, adds the glued contraction spellings, and emits the front-coded
- * binary format below — cutting ~4.7 MB of upstream JSON to ~350 KB of
- * embedded data. If the pin moves, also regenerate
- * crates/pi-natives/src/ctok/testdata/fixtures.json against the same ctok
- * release (`uv run --with ctok …`; see the fixture doc in ctok/mod.rs).
+ * parses the public `⟨bow⟩the⟨eow⟩` notation into C0 marker bytes, adds the
+ * glued contraction spellings, and emits the version-2 front-coded binary
+ * format below — cutting ~4.7 MB of upstream JSON to ~254 KB of embedded
+ * data. If the pin moves, also regenerate
+ * `src/utok/claude/testdata/fixtures.json` against the same ctok release
+ * (`uv run --with ctok …`; see the fixture doc in `src/utok/claude/mod.rs`).
  *
- * Format (little-endian; parsed by `VocabCore::parse` in ctok/engine.rs):
+ * Format (little-endian; parsed by `VocabCore::parse` in
+ * `src/utok/claude/engine.rs`):
  *
  *   magic            b"CTOK"
  *   version          u8 = 2
@@ -35,7 +36,7 @@ import * as path from "node:path";
 const CTOK_REV = "df3b59b5e645289a5eadc8e24036b99d39c333c4";
 const UPSTREAM = `https://raw.githubusercontent.com/sanderland/ctok/${CTOK_REV}/ctok/data`;
 
-const DATA_DIR = path.join(import.meta.dir, "../../../crates/pi-natives/src/ctok/data");
+const DATA_DIR = path.join(import.meta.dir, "cache");
 
 /** Marker glyphs of ctok's internal marked form, keyed by public atom. */
 const ATOMS: Record<string, string> = {

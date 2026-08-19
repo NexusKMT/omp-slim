@@ -75,13 +75,12 @@ export class CompressProtocol {
 	#verdict: string | undefined;
 
 	/**
-	 * `modelId` scopes the token counter to the compressing model. Metrics are
-	 * source-vs-draft ratios measured with one counter, so they stay coherent
-	 * even when the model is unknown at construction time (the session that
-	 * resolves it is built from this protocol).
+	 * Metrics measure source-vs-draft ratios with the default estimate. The
+	 * compress session resolves its model after this ledger is constructed, so
+	 * no catalog model is available here.
 	 */
-	constructor(source: string, modelId?: string | null) {
-		this.#tokenizer = new Tokenizer(modelId);
+	constructor(source: string) {
+		this.#tokenizer = new Tokenizer();
 		this.#sourceWords = words(source);
 		this.#sourceTokens = this.#tokenizer.countTokens(source);
 	}

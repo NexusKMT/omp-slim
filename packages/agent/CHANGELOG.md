@@ -14,7 +14,7 @@
 
 ### Changed
 
-- Claude models get exact native ctok counts instead of the bytes/4 estimate: the tokenizer family is resolved per model (v3 for Claude 3 … Opus 4.6, v4.7 for Opus 4.7–4.9, v5 for Opus 5+, the sonnet-5 frame variant for the non-opus 5-series). Non-Claude models keep the fast estimate (or o200k with `PI_TOKENIZER_ACCURATE=1`).
+- Catalog-resolved tokenizer families now drive exact native counts: Claude, Qwen 3.5+, DeepSeek V3/V4/R1, Kimi K2/K3, and GLM-5+ use their matching embedded tokenizer; unknown models retain the fast estimate (or o200k with `PI_TOKENIZER_ACCURATE=1`). `Tokenizer` now takes the resolved catalog `Model`, never a raw model id.
 
 ## [17.3.8] - 2026-08-19
 

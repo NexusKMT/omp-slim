@@ -4,8 +4,9 @@
 //! by [ctok](https://github.com/sanderland/ctok): the algorithm port and its
 //! optimizations are this repository's; the measured vocabulary *data* is
 //! Sander Land's (MIT — see `data/LICENSE.ctok`), pinned at upstream revision
-//! `df3b59b` (v1.0.0) and embedded in the front-coded binary form produced by
-//! `packages/natives/scripts/gen-ctok-vocab.ts`. The research behind the
+//! `df3b59b` (v1.0.0), embedded in the front-coded binary form produced by
+//! pi-natives' `gen-ctok-vocab.ts` and zstd-compressed by `tools/pack-ctok.ts`
+//! into `data/ctok_*.bin.zst`. The research behind the
 //! model is described in "On the biology of Claude's tokenizer"
 //! (<https://tokencontributions.substack.com/p/on-the-biology-of-claudes-tokenizer>).
 //!
@@ -22,9 +23,12 @@
 //!    fallback, matching pieces with one Aho-Corasick transition per byte;
 //! 4. add the measured message frame.
 //!
-//! Nothing in the pipeline materializes decoded characters: the stream, the
-//! vocabulary and the tiling are all byte-level, and Unicode tables are read
-//! only for the non-ASCII, non-ideograph characters whose class needs them.
+//! Nothing in the pipeline materializes decoded characters for valid UTF-8
+//! input: the stream, the vocabulary and the tiling are all byte-level, and
+//! Unicode tables are read only for the non-ASCII, non-ideograph characters
+//! whose class needs them. UTF-16/UTF-32 (and malformed UTF-8) input decodes
+//! permissively into the normalization stream (utf.rs semantics), so valid
+//! text counts flavor-invariantly.
 //!
 //! Exactness inherited from upstream: 0 mismatches on ~3.4 M recorded
 //! `count_tokens` responses across the v3 and v4.7 corpora. The port is
@@ -37,7 +41,9 @@ mod normalize;
 use std::sync::LazyLock;
 
 use engine::VocabCore;
-use normalize::{FrameParams, nfc, raw_head_space, stream_norm};
+use normalize::{FrameParams, nfc_units, raw_head_space_units, stream_norm, trim_end_ws};
+
+use crate::utok::utf::Unit;
 
 /// One reconstructed tokenizer generation.
 ///
@@ -66,11 +72,17 @@ pub enum Family {
 	V5Sonnet,
 }
 
-static CORE_V3: LazyLock<VocabCore> =
-	LazyLock::new(|| VocabCore::parse(include_bytes!("data/ctok_v3.bin")));
+static CORE_V3: LazyLock<VocabCore> = LazyLock::new(|| {
+	let raw = zstd::decode_all(&include_bytes!("../../../data/ctok_v3.bin.zst")[..])
+		.expect("utoken: ctok v3 zstd decode failed");
+	VocabCore::parse(&raw)
+});
 
-static CORE_V47: LazyLock<VocabCore> =
-	LazyLock::new(|| VocabCore::parse(include_bytes!("data/ctok_v4_7.bin")));
+static CORE_V47: LazyLock<VocabCore> = LazyLock::new(|| {
+	let raw = zstd::decode_all(&include_bytes!("../../../data/ctok_v4_7.bin.zst")[..])
+		.expect("utoken: ctok v4.7 zstd decode failed");
+	VocabCore::parse(&raw)
+});
 
 impl Family {
 	fn core(self) -> &'static VocabCore {
@@ -107,18 +119,21 @@ impl Family {
 	}
 }
 
-/// Token count of `text` as message *content*: the min-cost tiling of the
-/// marked stream, without the fixed per-message frame. This is the right
-/// quantity for budget estimates that sum fragments.
-pub fn content_token_count(text: &str, family: Family) -> u32 {
+/// Token count of `units` (any UTF flavor) as message *content*: the
+/// min-cost tiling of the marked stream, without the fixed per-message
+/// frame. This is the right quantity for budget estimates that sum
+/// fragments. Valid text counts flavor-invariantly; malformed units decode
+/// permissively as U+FFFD (utf.rs semantics).
+pub fn content_token_count<U: Unit>(units: &[U], family: Family) -> u32 {
 	let core = family.core();
 	let p = family.params();
+	let head_space = raw_head_space_units(units);
 	if p.ladder {
-		let norm = nfc(text, p.fold_quotes);
+		let norm = nfc_units(units, p.fold_quotes);
 		// The frame appends newline(s) and one token can span into them: read
 		// the content-final newline run before `stream_norm` strips it.
 		let n_tail = norm.bytes().rev().take_while(|&b| b == b'\n').count();
-		let stream = stream_norm(&norm, &p, raw_head_space(text));
+		let stream = stream_norm(&norm, &p, head_space);
 		let tail = core.ladder_tail_cost(n_tail, family.appended_newlines());
 		if stream.is_empty() {
 			return tail;
@@ -127,9 +142,9 @@ pub fn content_token_count(text: &str, family: Family) -> u32 {
 	} else {
 		// The v5 frame absorbs raw ASCII whitespace, so strip before NFC:
 		// NFC folds NBSP etc. to U+0020, and those are not free at the end.
-		let stripped = text.trim_end_matches([' ', '\t', '\n', '\r', '\u{0b}', '\u{0c}']);
-		let norm = nfc(stripped, p.fold_quotes);
-		let stream = stream_norm(&norm, &p, raw_head_space(text));
+		let stripped = trim_end_ws(units);
+		let norm = nfc_units(stripped, p.fold_quotes);
+		let stream = stream_norm(&norm, &p, head_space);
 		if stream.is_empty() {
 			0
 		} else {
@@ -138,10 +153,12 @@ pub fn content_token_count(text: &str, family: Family) -> u32 {
 	}
 }
 
-/// Reconstructed `count_tokens` value for `text` as a single user message:
+/// Reconstructed `count_tokens` value for `units` as a single user message:
 /// content tiling plus the measured message frame (ctok's `token_count`).
-pub fn message_token_count(text: &str, family: Family) -> u32 {
-	content_token_count(text, family) + family.params().message_overhead
+// Exercised by the fixture tests; `lib.rs` only routes content counts.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn message_token_count<U: Unit>(units: &[U], family: Family) -> u32 {
+	content_token_count(units, family) + family.params().message_overhead
 }
 
 #[cfg(test)]
@@ -170,7 +187,7 @@ mod tests {
 		let mut checked = 0usize;
 		for f in fixtures() {
 			for (family, want) in [(Family::V3, f.v3), (Family::V47, f.v4_7), (Family::V5, f.v5)] {
-				let got = message_token_count(&f.text, family);
+				let got = message_token_count(f.text.as_bytes(), family);
 				assert_eq!(got, want, "family {family:?} text {:?}", f.text);
 				checked += 1;
 			}
@@ -194,7 +211,7 @@ mod tests {
 		assert!(rows.len() >= 50, "live corpus unexpectedly small: {}", rows.len());
 		for row in rows {
 			assert_eq!(
-				message_token_count(&row.text, Family::V5Sonnet),
+				message_token_count(row.text.as_bytes(), Family::V5Sonnet),
 				row.count,
 				"text {:?}",
 				row.text
@@ -206,14 +223,14 @@ mod tests {
 	fn content_count_is_message_minus_frame() {
 		// The public split every consumer relies on: summing fragments must
 		// never include per-message frame overhead.
-		assert_eq!(content_token_count("", Family::V5), 0);
+		assert_eq!(content_token_count("".as_bytes(), Family::V5), 0);
 		for (family, overhead) in
 			[(Family::V3, 7), (Family::V47, 11), (Family::V5, 6), (Family::V5Sonnet, 6)]
 		{
 			let text = "hello, world";
 			assert_eq!(
-				message_token_count(text, family),
-				content_token_count(text, family) + overhead,
+				message_token_count(text.as_bytes(), family),
+				content_token_count(text.as_bytes(), family) + overhead,
 			);
 		}
 	}
@@ -242,9 +259,36 @@ mod tests {
 			let families = [Family::V3, Family::V47, Family::V5, Family::V5Sonnet];
 			for (family, &expected) in families.into_iter().zip(want) {
 				assert_eq!(
-					message_token_count(text, family),
+					message_token_count(text.as_bytes(), family),
 					expected,
 					"family {family:?} text {text:?}"
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn utf16_and_utf32_flavor_parity() {
+		// Valid text must count identically in every input flavor: the
+		// UTF-16/UTF-32 paths decode into the same normalization stream the
+		// &str/u8 path sees.
+		let families = [Family::V3, Family::V47, Family::V5, Family::V5Sonnet];
+		for f in fixtures() {
+			let u16s: Vec<u16> = f.text.encode_utf16().collect();
+			let u32s: Vec<u32> = f.text.chars().map(u32::from).collect();
+			for family in families {
+				let want = content_token_count(f.text.as_bytes(), family);
+				assert_eq!(
+					content_token_count(&u16s, family),
+					want,
+					"utf16 family {family:?} text {:?}",
+					f.text
+				);
+				assert_eq!(
+					content_token_count(&u32s, family),
+					want,
+					"utf32 family {family:?} text {:?}",
+					f.text
 				);
 			}
 		}

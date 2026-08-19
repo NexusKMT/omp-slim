@@ -791,7 +791,7 @@ export async function requestOpenAiRemoteCompaction(
 	const requestModel = resolveOpenAiCompactModel(model);
 	const trimmed = trimRemoteCompactionInputToContextWindow(
 		compactInput,
-		new Tokenizer(model.id),
+		new Tokenizer(model),
 		model.contextWindow,
 		instructions,
 	);

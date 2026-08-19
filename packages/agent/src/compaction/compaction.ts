@@ -860,7 +860,7 @@ export async function generateSummary(
 	// Convert to LLM messages first (handles custom app messages when caller provides a transformer).
 	const llmMessages = (options?.convertToLlm ?? defaultConvertToLlm)(currentMessages);
 	const dialect = preferredDialect(model.id);
-	const tokenizer = new Tokenizer(model.id);
+	const tokenizer = new Tokenizer(model);
 	const wholeConversation = serializeConversationForSummary(llmMessages, dialect);
 	const budgetTokens = summaryInputBudgetTokens(model, maxTokens);
 	// A span that outgrew the summarizer's window is summarized as a fold: each
@@ -1316,7 +1316,7 @@ export function prepareCompaction(
 	pathEntries: SessionEntry[],
 	settings: CompactionSettings,
 	activeModel?: Model,
-	tokenizer: Tokenizer = new Tokenizer(activeModel?.id),
+	tokenizer: Tokenizer = new Tokenizer(activeModel),
 ): CompactionPreparation | undefined {
 	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction") {
 		return undefined;
@@ -1596,7 +1596,7 @@ export async function compact(
 					: undefined;
 				const trimmed = trimRemoteCompactionInputToContextWindow(
 					remoteHistory,
-					new Tokenizer(model.id),
+					new Tokenizer(model),
 					model.contextWindow,
 					instructions,
 					tools,

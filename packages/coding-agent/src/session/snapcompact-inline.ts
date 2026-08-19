@@ -282,7 +282,7 @@ export function estimateInlineSavings(input: {
 	}
 
 	const shape = snapcompact.resolveShape(model, options.shape);
-	const tokenizer = new Tokenizer(model.id);
+	const tokenizer = new Tokenizer(model);
 	let existingImages = 0;
 	for (const message of input.messages) {
 		if (!Array.isArray(message.content)) continue;
@@ -421,7 +421,7 @@ export class SnapcompactInlineTransformer {
 		if (!model.input.includes("image")) return context;
 
 		const shape = snapcompact.resolveShape(model, this.options.shape);
-		const tokenizer = new Tokenizer(model.id);
+		const tokenizer = new Tokenizer(model);
 		const budget = snapcompact.providerImageBudget(model.provider) - countContextImages(context);
 		if (budget <= 0) return context;
 

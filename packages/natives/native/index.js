@@ -105,6 +105,10 @@ export const Encoding = {
 	ClaudeV47: "ClaudeV47",
 	ClaudeV5: "ClaudeV5",
 	ClaudeV5Sonnet: "ClaudeV5Sonnet",
+	Qwen3: "Qwen3",
+	DeepSeekV3: "DeepSeekV3",
+	KimiK2: "KimiK2",
+	Glm5: "Glm5",
 };
 export const FileType = {
 	File: 1,

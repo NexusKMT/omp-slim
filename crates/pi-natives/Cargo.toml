@@ -60,13 +60,15 @@ serde.workspace = true
 serde_json.workspace = true
 smallvec.workspace = true
 syntect.workspace = true
-tiktoken-rs.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 toml.workspace = true
 unicode-segmentation.workspace = true
 unicode-normalization.workspace = true
 unicode-properties.workspace = true
+unicode-script.workspace = true
+xutf.workspace = true
+zstd.workspace = true
 unicode-width.workspace = true
 xxhash-rust.workspace = true
 
@@ -76,6 +78,8 @@ atspi = { version = "=0.30.0", features = ["tokio", "zbus"] }
 pipewire = { version = "=0.9.2", optional = true }
 reis = { version = "=0.5.0", features = ["tokio"] }
 x11rb = { version = "=0.13.2", features = ["randr", "xinput", "xtest"] }
+fancy-regex.workspace = true # utok scanner differential oracle
+tiktoken-rs.workspace = true # utok openai differential oracle
 xkeysym = "=0.2.1"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
@@ -102,6 +106,8 @@ uiautomation = "=0.25.0"
 winreg.workspace = true
 
 [dev-dependencies]
+fancy-regex.workspace = true # utok scanner differential oracle
+tiktoken-rs.workspace = true # utok openai differential oracle
 xkeysym = "=0.2.1"
 
 [build-dependencies]

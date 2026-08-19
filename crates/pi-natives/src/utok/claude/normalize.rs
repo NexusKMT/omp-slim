@@ -19,14 +19,17 @@
 
 use std::borrow::Cow;
 
-use unicode_normalization::{UnicodeNormalization, char::canonical_combining_class};
-use unicode_properties::{GeneralCategory, GeneralCategoryGroup, UnicodeGeneralCategory};
+use xutf::{
+	GeneralCategory, GeneralCategoryGroup, IntoUnicodeNormalized, ToUnicodeNormalized, Ucd,
+	canonical_combining_class, is_nfc, is_nfc_codepoints,
+};
 
 use super::constants::{
 	BOW, CAPS, EOW, NON_SEPARATOR, SHIFT, fold_quote, in_separator_ranges, is_contraction_suffix,
 	is_funny_space, is_punct_sym, is_stripped_control, is_stripped_private, is_symbol_letter,
 	is_variation_selector,
 };
+use crate::utok::utf::Unit;
 
 /// The stream class of one codepoint.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -150,8 +153,20 @@ pub fn nfc(text: &str, fold_quotes: bool) -> Cow<'_, str> {
 		}
 		return Cow::Owned(out);
 	}
-	let mut out = String::with_capacity(text.len());
-	for c in text.chars().nfc() {
+	if is_nfc(text) {
+		// Quick-check: composing is a no-op, fold straight off the input.
+		return Cow::Owned(fold_chars(text.chars(), fold_quotes, text.len()));
+	}
+	let composed = text.to_nfc();
+	let folded = fold_chars(composed.chars(), fold_quotes, composed.len());
+	Cow::Owned(folded)
+}
+
+/// The post-NFC folding loop over an already-composed codepoint stream:
+/// every fold [`nfc`] documents. `cap` is a capacity hint in bytes.
+fn fold_chars(chars: impl Iterator<Item = char>, fold_quotes: bool, cap: usize) -> String {
+	let mut out = String::with_capacity(cap);
+	for c in chars {
 		if is_stripped_control(c) {
 			continue;
 		}
@@ -169,7 +184,50 @@ pub fn nfc(text: &str, fold_quotes: bool) -> Cow<'_, str> {
 		let c = if fold_quotes { fold_quote(c) } else { c };
 		out.push(if is_funny_space(c) { ' ' } else { c });
 	}
-	Cow::Owned(out)
+	out
+}
+
+/// `units` reinterpreted as `&str` when the flavor is UTF-8 and the bytes are
+/// valid — the common case, which keeps [`nfc`]'s borrowed fast path.
+fn as_str<U: Unit>(units: &[U]) -> Option<&str> {
+	std::str::from_utf8(U::as_utf8(units)?).ok()
+}
+
+/// Codepoints decoded permissively off raw units (utf.rs semantics: malformed
+/// sequences and lone surrogates yield U+FFFD, consuming minimally).
+struct UnitChars<'a, U: Unit> {
+	units: &'a [U],
+	pos:   usize,
+}
+
+impl<U: Unit> Iterator for UnitChars<'_, U> {
+	type Item = char;
+
+	#[inline]
+	fn next(&mut self) -> Option<char> {
+		if self.pos >= self.units.len() {
+			return None;
+		}
+		let (c, n) = U::decode(self.units, self.pos);
+		self.pos += n;
+		Some(c)
+	}
+}
+
+/// [`nfc`] over any input flavor. Valid UTF-8 keeps the borrowed fast path;
+/// UTF-16/UTF-32 (and malformed UTF-8) decode permissively straight into the
+/// folding loop when the stream is already NFC (the common case, one pass);
+/// only NFC-dirty input pays a materialize-and-compose round.
+pub fn nfc_units<U: Unit>(units: &[U], fold_quotes: bool) -> Cow<'_, str> {
+	if let Some(text) = as_str(units) {
+		return nfc(text, fold_quotes);
+	}
+	if is_nfc_codepoints(UnitChars { units, pos: 0 }.map(u32::from)) {
+		return Cow::Owned(fold_chars(UnitChars { units, pos: 0 }, fold_quotes, units.len()));
+	}
+	let composed: String = UnitChars { units, pos: 0 }.collect::<String>().into_nfc();
+	let folded = fold_chars(composed.chars(), fold_quotes, composed.len());
+	Cow::Owned(folded)
 }
 
 /// Whether a codepoint uses the isolated character path for letters.
@@ -196,7 +254,7 @@ pub fn is_separator(c: char) -> bool {
 }
 
 fn is_separator_general(c: char) -> bool {
-	(canonical_combining_class(c) == 9 && c != NON_SEPARATOR) || in_separator_ranges(c as u32)
+	(canonical_combining_class(c as u32) == 9 && c != NON_SEPARATOR) || in_separator_ranges(c as u32)
 }
 
 /// Stream class of every ASCII codepoint: the fast path of [`classify`], since
@@ -304,7 +362,7 @@ fn is_stray_mark_general(c: char) -> bool {
 	if is_syriac_vowel(c) {
 		return false; // a baseless Syriac vowel is a word-forming letter instead
 	}
-	canonical_combining_class(c) != 0 && !is_separator(c)
+	canonical_combining_class(c as u32) != 0 && !is_separator(c)
 }
 
 /// Whether a digit receives a border marker: ASCII digits take none, every
@@ -661,10 +719,31 @@ fn contraction_seam(s: &str, runs: &[Run], i: usize) -> bool {
 	i < 2 || !takes_right_border(s, &runs[i - 2])
 }
 
-/// Whether raw (pre-normalization) text supplies the leading space the frame
+/// Whether raw (pre-normalization) units supply the leading space the frame
 /// absorbs. A space a fold produced or exposed is not absorbed.
-pub fn raw_head_space(text: &str) -> bool {
-	text.starts_with(' ')
+pub fn raw_head_space_units<U: Unit>(units: &[U]) -> bool {
+	!units.is_empty() && U::decode(units, 0).0 == ' '
+}
+
+/// `units` with the trailing ASCII-whitespace run removed (the v5 frame
+/// absorbs it raw, before normalization). An ASCII-valued unit is a
+/// standalone character in every flavor — never a UTF-8 continuation byte or
+/// half a surrogate pair — so suffix trimming equals trimming decoded text.
+pub fn trim_end_ws<U: Unit>(units: &[U]) -> &[U] {
+	let Some(&last) = units.last() else {
+		return units;
+	};
+	let mut buf = [last; 4];
+	let ws: [U; 6] = [' ', '\t', '\n', '\r', '\u{0b}', '\u{0c}'].map(|c| {
+		let n = U::encode(c, &mut buf);
+		debug_assert_eq!(n, 1, "ASCII must encode as one unit");
+		buf[0]
+	});
+	let mut end = units.len();
+	while end > 0 && ws.contains(&units[end - 1]) {
+		end -= 1;
+	}
+	&units[..end]
 }
 
 /// Byte offset where the character before `at` starts (`at` is a character
