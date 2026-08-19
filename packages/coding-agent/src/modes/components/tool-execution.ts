@@ -317,6 +317,19 @@ function unregisterSpinnerBlock(block: ToolExecutionComponent): void {
 	}
 }
 
+/** Stop the shared spinner ticker and drop every registered live block.
+ *  Called on interactive-mode teardown so a stray live block cannot keep the
+ *  process-wide 80ms interval alive past shutdown (lingering event-loop
+ *  handles pin the process; cf. `postmortem.quit`). Test files that assert on
+ *  ticker arming also use this to start from a clean slate. */
+export function stopSharedSpinnerTicker(): void {
+	liveSpinnerBlocks.clear();
+	if (sharedSpinnerTimer) {
+		clearInterval(sharedSpinnerTimer);
+		sharedSpinnerTimer = undefined;
+	}
+}
+
 // Stable per-instance counter so each tool execution's inline images get a
 // graphics id that survives child re-creation (the image budget keys off it).
 let toolExecutionInstanceSeq = 0;

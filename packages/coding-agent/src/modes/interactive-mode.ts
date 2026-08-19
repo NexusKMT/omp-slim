@@ -166,7 +166,7 @@ import type { HookInputComponent } from "./components/hook-input";
 import type { HookSelectorComponent, HookSelectorSlider } from "./components/hook-selector";
 import { type PlanReviewAnnotationState, PlanReviewOverlay } from "./components/plan-review-overlay";
 import { StatusLineComponent } from "./components/status-line";
-import type { ToolExecutionHandle } from "./components/tool-execution";
+import { stopSharedSpinnerTicker, type ToolExecutionHandle } from "./components/tool-execution";
 import { TranscriptContainer } from "./components/transcript-container";
 import { WelcomeComponent, type LspServerInfo as WelcomeLspServerInfo } from "./components/welcome";
 import { BtwController } from "./controllers/btw-controller";
@@ -4160,6 +4160,9 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#stopLoadingAnimation(false);
 		}
 		this.#cleanupMicAnimation();
+		// Stop the shared tool-spinner ticker: a live block missed by per-component
+		// stopAnimation would otherwise keep an 80ms interval pinning the process.
+		stopSharedSpinnerTicker();
 		this.#liveCommandController.dispose();
 		this.#cancelTodoAutoClearTimer();
 		this.#cancelObserverUiSyncTimer();

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import * as ai from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
@@ -12,8 +12,19 @@ import { createAssistantMessage } from "./helpers/agent-session-setup";
 
 let session: AgentSession | undefined;
 let authStorage: AuthStorage | undefined;
+// Earlier full-suite files that boot main() in ACP/RPC mode set PI_NO_TITLE=1
+// process-wide (main.ts) and never restore it; maybeStartTitleGeneration gates
+// on it, so these tests would silently skip titling and time out.
+let previousNoTitle: string | undefined;
+
+beforeEach(() => {
+	previousNoTitle = Bun.env.PI_NO_TITLE;
+	delete Bun.env.PI_NO_TITLE;
+});
 
 afterEach(async () => {
+	if (previousNoTitle === undefined) delete Bun.env.PI_NO_TITLE;
+	else Bun.env.PI_NO_TITLE = previousNoTitle;
 	vi.restoreAllMocks();
 	await session?.dispose();
 	authStorage?.close();

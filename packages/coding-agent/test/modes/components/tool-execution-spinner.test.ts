@@ -1,7 +1,8 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
 import {
 	SPINNER_RENDER_INTERVAL_MS,
+	stopSharedSpinnerTicker,
 	ToolExecutionComponent,
 } from "@oh-my-pi/pi-coding-agent/modes/components/tool-execution";
 import { TranscriptContainer } from "@oh-my-pi/pi-coding-agent/modes/components/transcript-container";
@@ -15,6 +16,13 @@ import type { TUI } from "@oh-my-pi/pi-tui";
 describe("ToolExecutionComponent live preview spinners", () => {
 	beforeAll(async () => {
 		await initTheme();
+	});
+
+	// Earlier test files may leak live blocks (components never stopAnimation'd),
+	// which keeps the shared ticker armed on a REAL interval and makes these
+	// fake-timer assertions observe a pre-existing timer instead of a fresh one.
+	beforeEach(() => {
+		stopSharedSpinnerTicker();
 	});
 
 	afterEach(() => {
