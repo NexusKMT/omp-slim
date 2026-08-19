@@ -120,16 +120,18 @@ describe("streamSimple resolver auth retry", () => {
 		expect((contexts[1]!.error as { status?: number }).status).toBe(401);
 	});
 
-	it("refreshes the credential when a provider requests token refresh before the first event", async () => {
+	it("replays exactly once after a provider requests token refresh, then succeeds", async () => {
 		const keys: unknown[] = [];
 		const contexts: ApiKeyResolveContext[] = [];
+		let providerCalls = 0;
 		registerCustomApi(
 			API,
 			(_model: Model<Api>, _context: Context, options?: SimpleStreamOptions) => {
+				providerCalls += 1;
 				pushKey(keys, options);
 				const stream = new AssistantMessageEventStream();
 				queueMicrotask(() =>
-					keys.length === 1
+					providerCalls === 1
 						? stream.fail(
 								new OAuthError("OAuth token expired before request", {
 									kind: "token-refresh",
@@ -154,9 +156,94 @@ describe("streamSimple resolver auth retry", () => {
 		}
 
 		expect((await stream.result()).content).toEqual([{ type: "text", text: "ok" }]);
+		expect(providerCalls).toBe(2);
 		expect(keys).toEqual(["expired-key", "fresh-key"]);
 		expect(contexts).toHaveLength(2);
 		expect(contexts[1]?.error).toBeInstanceOf(OAuthError);
+	});
+
+	it("propagates a second token-refresh request without rotating to a third key", async () => {
+		const keys: unknown[] = [];
+		const contexts: ApiKeyResolveContext[] = [];
+		const firstError = new OAuthError("First token expired before request", {
+			kind: "token-refresh",
+			provider: "google-antigravity",
+		});
+		const secondError = new OAuthError("Refreshed token also expired before request", {
+			kind: "token-refresh",
+			provider: "google-antigravity",
+		});
+		let providerCalls = 0;
+		registerCustomApi(
+			API,
+			(_model: Model<Api>, _context: Context, options?: SimpleStreamOptions) => {
+				providerCalls += 1;
+				pushKey(keys, options);
+				const stream = new AssistantMessageEventStream();
+				queueMicrotask(() => stream.fail(providerCalls === 1 ? firstError : secondError));
+				return stream;
+			},
+			SOURCE_ID,
+		);
+
+		const offeredKeys = ["expired-key", "fresh-key", "third-key"];
+		const stream = streamSimple(model(), context, {
+			apiKey: async ctx => {
+				const key = offeredKeys[contexts.length];
+				contexts.push(ctx);
+				return key;
+			},
+		});
+		await expect(
+			(async () => {
+				for await (const _event of stream) {
+					// drain
+				}
+			})(),
+		).rejects.toBe(secondError);
+
+		expect(providerCalls).toBe(2);
+		expect(keys).toEqual(["expired-key", "fresh-key"]);
+		expect(contexts).toHaveLength(2);
+	});
+
+	it("propagates typed OAuth configuration errors without resolving a retry key", async () => {
+		const keys: unknown[] = [];
+		const contexts: ApiKeyResolveContext[] = [];
+		const configurationError = new OAuthError("OAuth provider is misconfigured", {
+			kind: "configuration",
+			provider: "google-antigravity",
+		});
+		let providerCalls = 0;
+		registerCustomApi(
+			API,
+			(_model: Model<Api>, _context: Context, options?: SimpleStreamOptions) => {
+				providerCalls += 1;
+				pushKey(keys, options);
+				const stream = new AssistantMessageEventStream();
+				queueMicrotask(() => stream.fail(configurationError));
+				return stream;
+			},
+			SOURCE_ID,
+		);
+
+		const stream = streamSimple(model(), context, {
+			apiKey: async ctx => {
+				contexts.push(ctx);
+				return ctx.error === undefined ? "initial-key" : "unexpected-retry-key";
+			},
+		});
+		await expect(
+			(async () => {
+				for await (const _event of stream) {
+					// drain
+				}
+			})(),
+		).rejects.toBe(configurationError);
+
+		expect(providerCalls).toBe(1);
+		expect(keys).toEqual(["initial-key"]);
+		expect(contexts).toHaveLength(1);
 	});
 
 	it("surfaces a 403 concurrency cap for transient backoff without rotating credentials", async () => {

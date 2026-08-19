@@ -543,6 +543,32 @@ describe("withOAuthAccess", () => {
 		expect(storage.calls).toEqual([{ forceRefresh: undefined }, { forceRefresh: true }]);
 	});
 
+	it("allows one token-refresh replay without rotating to a sibling", async () => {
+		const storage = fakeStorage({
+			initial: access("stale", { credentialId: 7 }),
+			forced: access("fresh", { credentialId: 7 }),
+			rotated: access("sibling", { credentialId: 8 }),
+		});
+		const firstError = new OAuthError("First token expired before request", {
+			kind: "token-refresh",
+			provider: "prov",
+		});
+		const secondError = new OAuthError("Refreshed token also expired before request", {
+			kind: "token-refresh",
+			provider: "prov",
+		});
+		const attempts: string[] = [];
+		await expect(
+			withOAuthAccess(storage, "prov", async a => {
+				attempts.push(a.accessToken);
+				throw attempts.length === 1 ? firstError : secondError;
+			}),
+		).rejects.toBe(secondError);
+
+		expect(attempts).toEqual(["stale", "fresh"]);
+		expect(storage.calls).toEqual([{ forceRefresh: undefined }, { forceRefresh: true }]);
+	});
+
 	it("tries a refreshed bearer for the same credential id on 401 before rotating", async () => {
 		const storage = fakeStorage({
 			initial: access("stale", { credentialId: 7 }),
