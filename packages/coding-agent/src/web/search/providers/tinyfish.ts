@@ -146,11 +146,12 @@ function siteHosts(sites: readonly string[]): string[] {
 /**
  * Derive TinyFish `location` (ISO 3166-1 alpha-2, uppercase) and `language`
  * (ISO 639-1, lowercase) from a parsed `lang:` directive. The region subtag is
- * optional: `lang:it` yields language only, `lang:it-it` yields both.
+ * optional: `lang:it` yields language only, `lang:it-it` yields both. Non-region
+ * subtags (e.g. the script in `zh-hans`) never become a location.
  */
 function tinyFishLocale(lang: string | undefined): { location?: string; language?: string } {
 	if (!lang) return {};
-	const match = /^([a-z]{2})(?:[-_]([a-z]{2}))?/.exec(lang.toLowerCase());
+	const match = /^([a-z]{2})(?:[-_]([a-z]{2}))?(?:[-_]|$)/.exec(lang.toLowerCase());
 	if (!match) return {};
 	return { language: match[1], location: match[2]?.toUpperCase() };
 }
