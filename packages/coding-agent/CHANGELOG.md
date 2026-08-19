@@ -10,6 +10,10 @@
 
 - `/settings` rows can now carry a risk note: a warning glyph on the row plus a warning-colored line above the description. `External Thinking` (`externalThinking`, `--external-thinking`) is the first user — providers have flagged the request shape it produces as abuse, up to account-level enforcement, so both the settings entry and `--help` now say so.
 
+### Fixed
+
+- Fixed the session resume hint dropping the active `--profile`, so the `omp --resume <id>` command printed on exit (and the fatal-recovery hint) failed with `Session "<id>" not found` for sessions started under a named profile. The hint now carries `--profile <name>` when a profile is active ([#9018](https://github.com/can1357/oh-my-pi/issues/9018)).
+
 ## [17.3.8] - 2026-08-19
 
 ### Added
