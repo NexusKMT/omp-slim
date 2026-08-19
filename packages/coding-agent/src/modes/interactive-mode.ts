@@ -124,7 +124,7 @@ import type { ConfiguredThinkingLevel } from "../thinking";
 import { tinyTitleClient } from "../tiny/title-client";
 import type { LspStartupServerInfo } from "../tools";
 import { normalizeLocalScheme } from "../tools/path-utils";
-import { replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../tools/render-utils";
+import { formatMoreItems, replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../tools/render-utils";
 import { setAutoQaConsentHandler } from "../tools/report-tool-issue";
 import {
 	formatPhaseDisplayName,
@@ -2298,7 +2298,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		const multiPhase = phases.length > 1;
 		const activeIdx = phases.indexOf(this.#getActivePhase(phases) ?? phases[0]);
 		// Fixed budgets keep the HUD bounded regardless of plan size / progress.
-		const subsequentStageCap = 4; // stages shown after the active one (header count implies the rest)
+		const subsequentStageCap = 4; // stages shown after the active one (a trailing summary row covers the rest)
 		const activeTaskCap = 5; // open tasks previewed for the active stage
 
 		const activeDescs = this.#getActiveSubagentDescriptions();
@@ -2336,7 +2336,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		// One phase node. The active stage is highlighted with normal-brightness task
 		// progress; other stages render their whole row (name + progress) in the
-		// brighter muted gray. The root header carries overall stage progression.
+		// brighter muted gray. The root header carries the summed progress bar.
 		const renderPhase = (phase: TodoPhase, oneBased: number, isActive: boolean): string | string[] => {
 			const label = multiPhase ? formatPhaseDisplayName(phase.name, oneBased) : phase.name;
 			// Closed, not just completed: the collapsed task window hides abandoned
@@ -2351,24 +2351,35 @@ export class InteractiveMode implements InteractiveModeContext {
 			return [header, ...renderTasks(phase)];
 		};
 
-		// Collapsed: active stage + a bounded number of following stages (the
-		// header's "n/total" count implies any not shown). Expanded: every stage
+		// Collapsed: active stage + a bounded number of following stages, with a
+		// "… n more stages" row for anything past the cap. Expanded: every stage
 		// from the top. Roman numerals stay tied to the real phase index.
 		const baseIdx = expanded ? 0 : activeIdx;
 		const phaseSlice = expanded ? phases.slice(baseIdx) : phases.slice(baseIdx, baseIdx + 1 + subsequentStageCap);
+		const hiddenStages = phases.length - baseIdx - phaseSlice.length;
 		const phaseTreeLines = renderTreeList(
 			{
 				items: phaseSlice,
-				expanded: true,
+				expanded,
+				trailingSummary: hiddenStages > 0 ? formatMoreItems(hiddenStages, "stage") : "",
 				renderItem: (phase, ctx) => renderPhase(phase, baseIdx + ctx.index + 1, baseIdx + ctx.index === activeIdx),
 			},
 			theme,
 		);
 
-		// Header carries overall stage progression, e.g. "Todos · 1/8".
-		const root =
-			theme.bold(theme.fg("accent", "Todos")) +
-			(multiPhase ? theme.fg("dim", ` · ${activeIdx + 1}/${phases.length}`) : "");
+		// Header: overall task progress summed across every stage — a bar plus
+		// closed/total counts. Per-stage rows carry their own counts.
+		const totalTasks = phases.reduce((sum, phase) => sum + phase.tasks.length, 0);
+		const closedTasks = phases.reduce((sum, phase) => sum + phase.tasks.filter(isClosedTodo).length, 0);
+		const barWidth = 20;
+		// Clamp so any progress shows a sliver and only 100% fills the bar.
+		let filledWidth = Math.round((closedTasks / totalTasks) * barWidth);
+		if (closedTasks > 0) filledWidth = Math.max(filledWidth, 1);
+		if (closedTasks < totalTasks) filledWidth = Math.min(filledWidth, barWidth - 1);
+		const bar =
+			theme.fg("accent", theme.progress.filled.repeat(filledWidth)) +
+			theme.fg("dim", theme.progress.empty.repeat(barWidth - filledWidth));
+		const root = `${theme.bold(theme.fg("accent", "Todos"))} ${bar} ${theme.fg("dim", `${closedTasks}/${totalTasks}`)}`;
 		const lines = ["", root, ...phaseTreeLines.map(line => ` ${line}`)];
 		this.todoContainer.addChild(new Text(lines.join("\n"), 1, 0));
 	}
