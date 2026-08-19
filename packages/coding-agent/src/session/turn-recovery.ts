@@ -1327,12 +1327,13 @@ export class TurnRecovery {
 	 * alternate models instead of looping in place, and every hop still spends a
 	 * retry attempt, so the budget terminates either way.
 	 */
-	#retryFallbackChainKeys(
+	retryFallbackChainKeys(
 		currentSelector: string,
 		currentModel: Model | null | undefined = this.#host.model(),
+		options?: { pinnedRole?: string; roleHint?: string },
 	): string[] {
-		const pinned = this.#activeRetryFallback?.role;
-		const current = this.resolveRetryFallbackRole(currentSelector, currentModel);
+		const pinned = options?.pinnedRole ?? this.#activeRetryFallback?.role;
+		const current = this.resolveRetryFallbackRole(currentSelector, currentModel, options?.roleHint);
 		if (!pinned) return current ? [current] : [];
 		return current && current !== pinned ? [pinned, current] : [pinned];
 	}
@@ -1414,7 +1415,7 @@ export class TurnRecovery {
 
 		let fallback: { role: string; selector: RetryFallbackSelector; apiKey: string } | undefined;
 		const ceiling = this.#host.thinkingLevelCeiling();
-		const chainKeys = this.#retryFallbackChainKeys(currentSelector, currentModel);
+		const chainKeys = this.retryFallbackChainKeys(currentSelector, currentModel);
 		for (const role of chainKeys) {
 			for (const candidate of this.findRetryFallbackCandidates(role, currentSelector, currentModel)) {
 				if (this.isRetryFallbackSelectorSuppressed(candidate)) continue;
@@ -1608,7 +1609,7 @@ export class TurnRecovery {
 		const latestAssistant = this.#host.agent.state.messages.findLast(
 			(message): message is AssistantMessage => message.role === "assistant" && message !== failedMessage,
 		);
-		for (const role of this.#retryFallbackChainKeys(currentSelector)) {
+		for (const role of this.retryFallbackChainKeys(currentSelector)) {
 			for (const selector of this.findRetryFallbackCandidates(role, currentSelector)) {
 				if (this.isRetryFallbackSelectorSuppressed(selector)) continue;
 				const resolved = resolveModelOverride([selector.raw], this.#host.modelRegistry, this.#host.settings);
@@ -1713,7 +1714,7 @@ export class TurnRecovery {
 		if (AIError.isContextOverflow(message, model.contextWindow ?? 0)) return false;
 		if (this.#hasReplayUnsafeOutput(message)) return false;
 		const currentSelector = formatRetryFallbackSelector(model, this.#host.thinkingLevel());
-		return this.#retryFallbackChainKeys(currentSelector).some(
+		return this.retryFallbackChainKeys(currentSelector).some(
 			role => this.findRetryFallbackCandidates(role, currentSelector).length > 0,
 		);
 	}
