@@ -6,6 +6,10 @@
 
 - `/settings` rows can now carry a risk note: a warning glyph on the row plus a warning-colored line above the description. `External Thinking` (`externalThinking`, `--external-thinking`) is the first user — providers have flagged the request shape it produces as abuse, up to account-level enforcement, so both the settings entry and `--help` now say so.
 
+### Fixed
+
+- Fixed an advisor enabled in config staying inactive (`no_model`, gray `++`) after a fresh session start until `/advisor on` was run, when its configured model came from a discovery-backed provider (e.g. GitHub Copilot). `SessionAdvisors` resolved the advisor role once at construction against a catalog that background discovery had not finished populating; the advisor now retries once the initial model refresh settles and activates without a manual toggle ([#9010](https://github.com/can1357/oh-my-pi/issues/9010)).
+
 ## [17.3.8] - 2026-08-19
 
 ### Added

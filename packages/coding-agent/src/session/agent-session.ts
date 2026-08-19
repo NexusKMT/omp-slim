@@ -1635,6 +1635,14 @@ export class AgentSession {
 		// Re-evaluate append-only context mode when the setting changes at runtime.
 		this.#unsubscribeAppendOnly = onAppendOnlyModeChanged(_value => this.#syncAppendOnlyContext(this.model));
 		this.#unsubscribeModelRoles = onModelRolesChanged(() => this.#advisors.onModelRolesChanged());
+
+		// An advisor enabled in config resolves its role against the model catalog
+		// as it stands at construction. Discovery-backed providers (e.g. GitHub
+		// Copilot) may not be populated yet — background discovery is started
+		// fire-and-forget before the session is built — so a valid configured model
+		// can land as `no_model`. Retry once the initial refresh settles so the
+		// advisor activates without a manual /advisor toggle. See #9010.
+		void this.#retryInactiveAdvisorAfterModelDiscovery();
 	}
 	/** Model registry for API key resolution and model discovery */
 	get modelRegistry(): ModelRegistry {
@@ -9346,6 +9354,19 @@ export class AgentSession {
 	 */
 	setAdvisorEnabled(enabled: boolean): boolean {
 		return this.#advisors.setAdvisorEnabled(enabled);
+	}
+
+	/**
+	 * Reactivate an advisor that resolved to `no_model` at construction because a
+	 * discovery-backed provider had not populated the model registry yet. Awaits
+	 * the initial background refresh, then rebuilds the advisor and emits
+	 * `model_changed` so the status line reflects the now-active advisor. See #9010.
+	 */
+	async #retryInactiveAdvisorAfterModelDiscovery(): Promise<void> {
+		if (this.#isDisposed || !this.#advisors.hasInactiveNoModelAdvisor()) return;
+		await this.#modelRegistry.awaitBackgroundRefresh();
+		if (this.#isDisposed) return;
+		if (this.#advisors.retryAfterModelDiscovery()) this.#emit({ type: "model_changed" });
 	}
 
 	/**
