@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- Fixed isolated `task` subagents crashing the whole host (bun `SIGTRAP` / `Out of memory`) when spawned in a working tree carrying multiple GB of uncommitted content. `captureBaseline` buffered every untracked file's binary diff into one in-memory string before any backend clone, so a multi-GB tree exhausted the heap and trapped the process — taking the TUI and all in-process subagents down. Baseline capture now sizes untracked content up front and refuses an over-budget snapshot with an actionable error (commit/gitignore the bulk, or set `task.isolation.mode: none`) instead of buffering gigabytes, and the isolation preflight no longer mislabels these failures as "requires a git repository" ([#8939](https://github.com/can1357/oh-my-pi/issues/8939)).
 - Fixed Claude Code marketplace plugins ignoring the `enabledPlugins` switch in `~/.claude/settings.json` and `.claude/settings(.local).json`: a plugin turned off for a project no longer loads there, and a local-scope install enabled for a project loads even when its recorded `projectPath` is a different directory
 - Fixed task and eval subagents discovering newly added agent definitions while resolving their role aliases from stale startup settings. Subagent preflight now atomically reloads persisted settings before agent discovery while preserving live runtime overrides.
 - Fixed images returned by tools mounted under `xd://` rendering only as file links instead of inline terminal graphics.
