@@ -10,6 +10,10 @@
 
 - `/settings` rows can now carry a risk note: a warning glyph on the row plus a warning-colored line above the description. `External Thinking` (`externalThinking`, `--external-thinking`) is the first user — providers have flagged the request shape it produces as abuse, up to account-level enforcement, so both the settings entry and `--help` now say so.
 
+### Fixed
+
+- Fixed Claude Code marketplace plugins installed with `scope: "project"` loading outside their recorded `projectPath`, so foreign projects no longer inherit their MCP servers, hooks, tools, commands, skills, or agents ([#9043](https://github.com/can1357/oh-my-pi/issues/9043)).
+
 ## [17.3.8] - 2026-08-19
 
 ### Added
