@@ -12,6 +12,10 @@
 - Token counting is now scoped to the model being billed rather than to a process-global tokenizer: session maintenance, stats, advisors, `/context`, snapcompact inline imaging, and `compress` each count through the owning agent's `Tokenizer` (`agent.tokenizer`). Message counting is `Tokenizer.countMessage`/`countMessages` (replacing the free `estimateTokens(message, tokenizer)` helper; the legacy shim keeps a compat `estimateTokens` export for legacy pi extensions). `estimateToolSchemaTokens`, `estimateSkillsTokens`, `computeNonMessageTokens`, and `computeNonMessageBreakdown` take an explicit tokenizer; `scripts/measure-prompt-tokens.ts` accepts an optional model id (argv) so its numbers match what that model is charged.
 - The advisor runtime's `maintainContext` hook now receives the pending update as a message instead of a pre-computed token count — sizing it needs the advisor model's tokenizer, which the host owns.
 
+### Fixed
+
+- Fixed a prompt cancelled during turn setup (Esc while the pre-stream spinner is up, after dispatch had started) vanishing entirely: it was never persisted to the session — so the `/tree` and `/branch` selectors had nothing to rewind to — and was not returned to the editor either, while its optimistic transcript row kept lingering. A prompt dropped before reaching the agent (abort or usage-preflight denial racing setup) is now handed back: the stale transcript row is removed and the typed text and image attachments are restored to the editor for editing.
+
 ## [17.3.8] - 2026-08-19
 
 ### Added
