@@ -3762,6 +3762,23 @@ export class TUI extends Container {
 			!isMultiplexerSession() &&
 			(committedRowsResynced || frameLength <= this.#committedRows);
 		const fullPaint = firstPaint || replaceRequested || geometryRebuild || divergenceRebuild;
+		// A height-only grow makes the pane pull committed rows back out of its
+		// scrollback into the enlarged grid, where the forced in-place window
+		// rewrite overwrites them — gone from history. Drop the commit seam by
+		// the pulled count so those rows re-commit. The pane only pulls when the
+		// grid was full of content; a short frame gains blank rows instead.
+		if (
+			!fullPaint &&
+			geometryChanged &&
+			!widthChanged &&
+			this.#previousHeight > 0 &&
+			height > this.#previousHeight &&
+			this.#previousFrameLength - this.#windowTopRow >= this.#previousHeight
+		) {
+			const pulled = Math.min(height - this.#previousHeight, this.#committedRows);
+			this.#committedRows -= pulled;
+			this.#committedPrefix.length = this.#committedRows;
+		}
 		let windowTop: number;
 		let chunkTo: number;
 		let widthEpochAppendFrom = 0;
@@ -3829,11 +3846,23 @@ export class TUI extends Container {
 			// the viewport. Rebase the commit seam to that exposed frame tail before
 			// the forced rewrite; flooring at the old seam would paint only the live
 			// suffix followed by blanks, then preserve that gap on every stream tick.
-			committedPrefixResliced = true;
 			windowTop = Math.max(0, frameLength - height);
 			chunkTo = windowTop;
 			this.#committedRows = windowTop;
-			this.#committedPrefix = rawFrame.slice(0, windowTop);
+			if (widthChanged) {
+				// A rewrap invalidated the recorded bytes: re-base the audit prefix
+				// at the new width so the accepted wrap drift does not read as a
+				// violation on the next ordinary frame.
+				committedPrefixResliced = true;
+				this.#committedPrefix = rawFrame.slice(0, windowTop);
+			} else {
+				// Height-only reflow: the pane did not rewrap, so the recorded
+				// bytes are still the true tape record. Truncate instead of
+				// reslicing from the current frame — replacing the record with
+				// live content would bless drifted frozen snapshots as verified
+				// and skip their finalize-time recommit (rows lost from history).
+				this.#committedPrefix.length = Math.min(this.#committedPrefix.length, windowTop);
+			}
 		} else {
 			// Re-anchor to the frame tail, floored at the committed boundary: a
 			// shrink (or overlay close) pulls the window back down, but never
@@ -3846,8 +3875,8 @@ export class TUI extends Container {
 			// record; nothing that was painted may vanish. Overlays freeze
 			// commits: composited rows must never enter history, and the hidden
 			// gap backfills via the chunk once the overlay closes. A multiplexer
-			// resize also commits nothing — the pane keeps its own (old-wrap)
-			// history — and re-bases the audit prefix at the new width so the
+			// resize also commits nothing — the pane keeps its own history — and
+			// a width rewrap re-bases the audit prefix at the new width so the
 			// accepted wrap drift does not read as a violation on the next
 			// ordinary frame.
 			chunkTo =
@@ -3856,7 +3885,7 @@ export class TUI extends Container {
 					: liveRegionPinned
 						? Math.min(windowTop, Math.max(this.#committedRows, finalBoundary))
 						: windowTop;
-			if (geometryChanged) {
+			if (widthChanged) {
 				committedPrefixResliced = true;
 				this.#committedPrefix = rawFrame.slice(0, this.#committedRows);
 			}

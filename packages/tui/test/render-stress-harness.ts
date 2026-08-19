@@ -1160,6 +1160,9 @@ class StressDriver {
 	#shadowWidthEpochBaselineRows = 0;
 	#shadowFrameGeometryChanged = false;
 	#shadowResizePending = false;
+	// Pending height-grow pull (see the render mirror): committed rows the pane
+	// pulled back into the grid this frame, to un-commit in the write hook.
+	#shadowHeightPull = 0;
 	#shadowAltActive = false;
 	// Every byte the renderer wrote to the terminal, in order. The sync-output
 	// discipline oracle audits bracket balance incrementally from #writeLogScanned
@@ -1221,6 +1224,19 @@ class StressDriver {
 				(this.#shadowFrameWidth > 0 &&
 					(this.#shadowFrameWidthChanged || this.#term.rows !== this.#shadowFrameHeight));
 			this.#shadowResizePending = false;
+			// Mirror the engine's height-grow pull accounting (tui.ts window/commit
+			// math): a height-only grow with a full grid pulls committed rows back
+			// out of pane scrollback; the engine drops its seam by the pulled count
+			// so they re-commit. Computed here against the pre-frame geometry and
+			// consumed by the write hook's geometry branch.
+			this.#shadowHeightPull =
+				this.#shadowFrameGeometryChanged &&
+				this.#shadowFrameWidth === width &&
+				this.#shadowFrameHeight > 0 &&
+				this.#term.rows > this.#shadowFrameHeight &&
+				this.#shadowFrame.length - this.#shadowWindowTop >= this.#shadowFrameHeight
+					? this.#term.rows - this.#shadowFrameHeight
+					: 0;
 			// Markers are engine-internal sentinels; the engine strips them from
 			// this same array immediately after render returns, and its commit
 			// ledger (prefix + audit) only ever sees stripped rows — mirror that
@@ -2701,6 +2717,15 @@ class StressDriver {
 		}
 		// drift, mirrored from the engine).
 		if (this.#shadowFrameGeometryChanged) {
+			// Height-grow pull computed by the render mirror: the pane pulled these
+			// committed rows back into the grid, and the engine dropped its seam to
+			// re-commit them — un-commit them here so the ledger agrees.
+			if (this.#shadowHeightPull > 0) {
+				const pulled = Math.min(this.#shadowHeightPull, this.#shadowCommitted);
+				this.#shadowHeightPull = 0;
+				this.#shadowTape.length = Math.max(0, this.#shadowTape.length - pulled);
+				this.#shadowCommitted -= pulled;
+			}
 			if (tail < this.#shadowCommitted) {
 				// Pane growth pulls committed rows back out of multiplexer
 				// scrollback into the grid (tmux screen_resize_y takes lines
@@ -2714,7 +2739,13 @@ class StressDriver {
 				this.#shadowCommitted = tail;
 			}
 			this.#shadowWindowTop = Math.max(this.#shadowCommitted, tail);
-			this.#shadowRawPrefix = raw.slice(0, this.#shadowCommitted);
+			// The engine re-bases its recorded prefix from the current frame only
+			// on a width rewrap; height-only frames keep the recorded bytes.
+			if (this.#shadowFrameWidthChanged) {
+				this.#shadowRawPrefix = raw.slice(0, this.#shadowCommitted);
+			} else {
+				this.#shadowRawPrefix.length = Math.min(this.#shadowRawPrefix.length, this.#shadowCommitted);
+			}
 			return;
 		}
 		const windowTop = Math.max(this.#shadowCommitted, tail);
