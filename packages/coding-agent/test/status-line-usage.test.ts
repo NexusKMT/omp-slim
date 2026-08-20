@@ -18,11 +18,15 @@ afterAll(() => {
 
 function makeComponent(
 	reports: unknown,
-	options: { provider?: string; activeIdentity?: { accountId?: string; email?: string; projectId?: string } } = {},
+	options: {
+		provider?: string;
+		modelId?: string;
+		activeIdentity?: { accountId?: string; email?: string; projectId?: string };
+	} = {},
 ): StatusLineComponent {
 	const component = new StatusLineComponent({
-		state: { messages: [], model: { contextWindow: 1000, provider: options.provider } },
-		model: { contextWindow: 1000, provider: options.provider },
+		state: { messages: [], model: { id: options.modelId, contextWindow: 1000, provider: options.provider } },
+		model: { id: options.modelId, contextWindow: 1000, provider: options.provider },
 		sessionManager: {
 			getUsageStatistics: () => ({
 				input: 0,
@@ -110,7 +114,49 @@ describe("usage status-line segment", () => {
 		expect(content).toContain("8%");
 	});
 
-	it("prefers untiered windows and labels the displayed tiered window", async () => {
+	it("selects one coherent scope for the active model", async () => {
+		const reports = [
+			{
+				provider: "openai-codex",
+				limits: [
+					{
+						scope: { windowId: "5h", tier: "spark", modelId: "GPT-5.3-Codex-Spark" },
+						amount: { usedFraction: 0 },
+					},
+					{ scope: { windowId: "7d" }, amount: { usedFraction: 0.08 } },
+					{
+						scope: { windowId: "7d", tier: "spark", modelId: "GPT-5.3-Codex-Spark" },
+						amount: { usedFraction: 0 },
+					},
+				],
+			},
+		];
+		const component = makeComponent(reports, { provider: "openai-codex", modelId: "gpt-5.6-sol" });
+
+		component.refreshUsageInBackground();
+		await flushUsageRefresh();
+		const content = stripVTControlCharacters(component.getTopBorder(200).content);
+
+		expect(content).not.toContain("spark");
+		expect(content).not.toContain("5h");
+		expect(content).toContain("7d");
+		expect(content).toContain("8%");
+
+		const sparkComponent = makeComponent(reports, {
+			provider: "openai-codex",
+			modelId: "gpt-5.3-codex-spark",
+		});
+		sparkComponent.refreshUsageInBackground();
+		await flushUsageRefresh();
+		const sparkContent = stripVTControlCharacters(sparkComponent.getTopBorder(200).content);
+
+		expect(sparkContent).toContain("spark");
+		expect(sparkContent).toContain("5h");
+		expect(sparkContent).toContain("7d");
+		expect(sparkContent).not.toContain("8%");
+	});
+
+	it("keeps windows within the preferred untiered scope", async () => {
 		const component = makeComponent([
 			{
 				limits: [
@@ -125,12 +171,12 @@ describe("usage status-line segment", () => {
 		await flushUsageRefresh();
 		const content = stripVTControlCharacters(component.getTopBorder(200).content);
 
-		expect(content).toContain("prolite");
+		expect(content).not.toContain("prolite");
 		expect(content).not.toContain("stale");
 		expect(content).toContain("5h");
 		expect(content).toContain("24%");
-		expect(content).toContain("7d");
-		expect(content).toContain("8%");
+		expect(content).not.toContain("7d");
+		expect(content).not.toContain("8%");
 	});
 
 	it("scopes fetched usage reports to the active provider and account", async () => {

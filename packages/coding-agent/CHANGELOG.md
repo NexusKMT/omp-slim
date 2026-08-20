@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Status-line usage no longer combines quota windows scoped to different models or tiers ([#9138](https://github.com/can1357/oh-my-pi/issues/9138)).
+
 ## [17.4.0] - 2026-08-20
 
 ### Added
