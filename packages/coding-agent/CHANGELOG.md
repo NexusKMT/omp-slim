@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed retry fallback chains stopping when the last fallback owns another chain, which repeatedly retried the failing model until the retry budget was exhausted instead of continuing through the nested chain. The same chain-hop behavior now applies to advisor retries.
+
 ### Added
 
 - Sloppy edits now support inline replacements — `⟪old│new⟫` (with `⟪old│⟫` delete and `⟪│new⟫` insert) rewrites in place, keeping the `»` REWRITE block as the whole-span escape hatch
@@ -18,6 +22,7 @@
 
 ### Fixed
 
+- Fixed the streaming sloppy-edit call header showing a bare `…` instead of the target file path (and missing the `(+N more)` multi-file count); the header now reads paths from the payload's `[path]` section headers mid-stream
 - Fixed the built-in `grep` and `rg` printing `Broken pipe (os error 32)` diagnostics and failing when a downstream pipeline reader exited early (e.g. `cargo clippy | grep -E … | head -30`), a regression from concurrent pipeline stages; they now exit silently with 141 (128+SIGPIPE) like the real binaries.
 ### Changed
 
