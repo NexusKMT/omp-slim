@@ -160,7 +160,14 @@ interface SSHArgsOptions {
 	allowStdin?: boolean;
 }
 
-function ensureControlDir() {
+/**
+ * Create the shared SSH ControlMaster directory and enforce its trust boundary.
+ *
+ * Both direct SSH connections and sshfs mounts MUST call this before launching
+ * OpenSSH so the bounded `/tmp` fallback cannot bypass the symlink, owner, or
+ * mode checks.
+ */
+export function ensureSshControlDir(): void {
 	fs.mkdirSync(CONTROL_DIR, { recursive: true, mode: 0o700 });
 	if (CONTROL_DIR_SHARED) {
 		assertOwnerPrivateDir(CONTROL_DIR);
@@ -715,7 +722,7 @@ export async function ensureConnection(host: SSHConnectionTarget): Promise<void>
 
 	const promise = (async () => {
 		ensureSshBinary();
-		ensureControlDir();
+		ensureSshControlDir();
 		await validateKeyPermissions(host.keyPath);
 
 		if (!registered) {
