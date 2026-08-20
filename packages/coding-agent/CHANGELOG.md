@@ -128,9 +128,13 @@
 - Fixed the session resume hint dropping the active `--profile`, so the `omp --resume <id>` command printed on exit (and the fatal-recovery hint) failed with `Session "<id>" not found` for sessions started under a named profile. The hint now carries `--profile <name>` when a profile is active ([#9018](https://github.com/can1357/oh-my-pi/issues/9018)).
 - Added `isProjectTrusted()` to `ExtensionContext`, a compatibility shim for extensions written against upstream `@earendil-works/pi-coding-agent`'s per-directory trust gate (e.g. Plannotator). It always returns `true`, truthfully reflecting that OMP already loads project-local inputs (`.omp/extensions`, `.omp/config.yml`) unconditionally.
 - Fixed LM Studio models keeping their architectural `max_context_length` after a JIT load served a smaller `loaded_context_length`, so context accounting and compaction ran against a window larger than the backend actually served. `ModelRegistry.refreshSelectedModelMetadata` now re-probes LM Studio's native `/api/v0/models` (via the existing `loaded_context_length`-preferring resolution) in addition to llama.cpp, and — because a model is still unloaded at selection time and only JIT-loads during the first request — the session now re-probes and folds the runtime window into the live model after the first successful inference of a lazy-load local model, without a provider-session reset ([#9001](https://github.com/can1357/oh-my-pi/issues/9001)).
+- Fixed Cursor sessions hiding hashline `edit`, which left the model with only native StrReplace (dropped) or bash/python string replacement after the server injected Cursor CLI tool instructions.
+- Fixed Cursor MCP calls named `StrReplace`/`Edit` (or `edit` with `old_string`/`new_string`) 404ing after the server injected CLI tool instructions: those names now run the replace-mode bridge `edit` instead of falling through to bash/python.
+
 
 ## [17.3.8] - 2026-08-19
 - Fixed unquoted internal URLs in `bash` commands consuming adjacent shell operators into the resolved filesystem path.
+
 
 ### Added
 
