@@ -307,6 +307,10 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 	get summary(): string {
 		return summarizeEvalLanguages(this.#enabledLanguages());
 	}
+
+	supportsCodeModeTransport(): boolean {
+		return this.#enabledLanguages().includes("js");
+	}
 	readonly loadMode = "essential";
 	readonly label = "Eval";
 	get description(): string {
@@ -343,6 +347,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 			setting: session.settings.get("providers.openai-codex.codeMode"),
 			extraDirectTools: session.settings.get("providers.openai-codex.codeModeDirectTools"),
 			enabledToolNames,
+			evalTransportAvailable: this.supportsCodeModeTransport(),
 		});
 		if (!codeMode.active) return undefined;
 		const declarations = generateCodeModeDeclarations(

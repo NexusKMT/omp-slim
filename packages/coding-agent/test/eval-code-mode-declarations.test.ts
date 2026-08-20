@@ -106,3 +106,22 @@ test("EvalTool description renders the Code Mode guidance and declarations block
 	expect(inactive).not.toContain("Codex Code Mode is active");
 	expect(inactive).not.toContain("exec tool declarations:");
 });
+
+test("EvalTool omits JavaScript Code Mode guidance when the JS backend is disabled", () => {
+	const read = { name: "read", parameters: type({ path: "string" }) };
+	const session = {
+		cwd: "/tmp",
+		hasUI: false,
+		getSessionFile: () => null,
+		settings: Settings.isolated({
+			"eval.js": false,
+			"eval.py": true,
+			"providers.openai-codex.codeMode": "on",
+		}),
+		getActiveModel: () => ({ provider: "openai-codex" }),
+		toolRegistry: new Map([["read", read]]),
+		getEvalBridgeToolNames: () => ["eval", "read"],
+	} as unknown as ToolSession;
+
+	expect(new EvalTool(session).description).not.toContain("Codex Code Mode is active");
+});

@@ -19,10 +19,12 @@ export function resolveCodeMode(args: {
 	setting: "off" | "on" | "auto";
 	extraDirectTools?: readonly string[];
 	enabledToolNames: readonly string[];
+	evalTransportAvailable: boolean;
 }): CodeModeResolution {
 	const active =
 		args.provider === "openai-codex" &&
 		args.enabledToolNames.includes("eval") &&
+		args.evalTransportAvailable &&
 		(args.setting === "on" || (args.setting === "auto" && args.toolMode === "code_mode_only"));
 	if (!active) return { active: false, directToolNames: new Set(args.enabledToolNames) };
 	const direct = new Set<string>();

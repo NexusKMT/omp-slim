@@ -24,6 +24,7 @@ describe("resolveCodeMode", () => {
 			toolMode: "code_mode_only",
 			setting: "off",
 			enabledToolNames: ENABLED,
+			evalTransportAvailable: true,
 		});
 		expect(r.active).toBe(false);
 		expect(r.directToolNames).toEqual(new Set(ENABLED));
@@ -34,20 +35,40 @@ describe("resolveCodeMode", () => {
 			toolMode: "code_mode_only",
 			setting: "auto",
 			enabledToolNames: ENABLED,
+			evalTransportAvailable: true,
 		});
 		expect(r.active).toBe(true);
 		expect([...r.directToolNames].sort()).toEqual(["ask", "eval", "todo", "yield"]);
 	});
 	test("auto without flag: inactive", () => {
-		expect(resolveCodeMode({ provider: "openai-codex", setting: "auto", enabledToolNames: ENABLED }).active).toBe(
-			false,
-		);
+		expect(
+			resolveCodeMode({
+				provider: "openai-codex",
+				setting: "auto",
+				enabledToolNames: ENABLED,
+				evalTransportAvailable: true,
+			}).active,
+		).toBe(false);
 	});
 	test("on: active without catalog flag", () => {
-		expect(resolveCodeMode({ provider: "openai-codex", setting: "on", enabledToolNames: ENABLED }).active).toBe(true);
+		expect(
+			resolveCodeMode({
+				provider: "openai-codex",
+				setting: "on",
+				enabledToolNames: ENABLED,
+				evalTransportAvailable: true,
+			}).active,
+		).toBe(true);
 	});
 	test("non-codex provider: inactive even when on", () => {
-		expect(resolveCodeMode({ provider: "anthropic", setting: "on", enabledToolNames: ENABLED }).active).toBe(false);
+		expect(
+			resolveCodeMode({
+				provider: "anthropic",
+				setting: "on",
+				enabledToolNames: ENABLED,
+				evalTransportAvailable: true,
+			}).active,
+		).toBe(false);
 	});
 	test("inactive when eval is unavailable", () => {
 		expect(
@@ -56,6 +77,18 @@ describe("resolveCodeMode", () => {
 				toolMode: "code_mode_only",
 				setting: "auto",
 				enabledToolNames: ["read", "bash"],
+				evalTransportAvailable: true,
+			}).active,
+		).toBe(false);
+	});
+	test("inactive when the eval transport lacks JavaScript", () => {
+		expect(
+			resolveCodeMode({
+				provider: "openai-codex",
+				toolMode: "code_mode_only",
+				setting: "auto",
+				enabledToolNames: ["eval", "read"],
+				evalTransportAvailable: false,
 			}).active,
 		).toBe(false);
 	});
@@ -66,6 +99,7 @@ describe("resolveCodeMode", () => {
 			setting: "auto",
 			extraDirectTools: ["read", "nonexistent"],
 			enabledToolNames: ENABLED,
+			evalTransportAvailable: true,
 		});
 		expect(r.directToolNames.has("read")).toBe(true);
 		expect(r.directToolNames.has("nonexistent")).toBe(false);
@@ -76,6 +110,7 @@ describe("resolveCodeMode", () => {
 			toolMode: "code_mode_only",
 			setting: "auto",
 			enabledToolNames: ["eval", "read"],
+			evalTransportAvailable: true,
 		});
 		expect([...r.directToolNames]).toEqual(["eval"]);
 	});
@@ -224,6 +259,16 @@ describe("Code Mode session reconciliation", () => {
 
 		expect(session.getActiveToolNames()).toEqual(["eval"]);
 		expect(session.getEnabledToolNames()).toEqual(["read", "eval"]);
+		expect(session.getToolForEvalBridge("read")?.name).toBe("read");
+	});
+
+	test("Vibe teardown preserves bridge-enabled Code Mode tools", async () => {
+		const { session } = createSession(Settings.isolated({ "providers.openai-codex.codeMode": "auto" }));
+		await session.setActiveToolsByName(["eval", "read"]);
+
+		await session.removeVibeToolsPreservingActive();
+
+		expect(session.getEnabledToolNames()).toEqual(["eval", "read"]);
 		expect(session.getToolForEvalBridge("read")?.name).toBe("read");
 	});
 

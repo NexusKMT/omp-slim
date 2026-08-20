@@ -394,6 +394,14 @@ export class SessionTools {
 		return this.getEnabledToolNames();
 	}
 
+	#hasCodeModeEvalTransport(): boolean {
+		const evalTool = this.#toolRegistry.get("eval") as
+			| (AgentTool & { supportsCodeModeTransport?: () => boolean })
+			| undefined;
+		if (!evalTool) return false;
+		return evalTool.supportsCodeModeTransport?.() ?? true;
+	}
+
 	/**
 	 * Whether a registry entry came from a built-in factory.
 	 *
@@ -548,8 +556,8 @@ export class SessionTools {
 		return this.runToolRegistryMutation(async () => {
 			const removed = new Set(this.#installedVibeToolNames);
 			this.#uninstallVibeTools();
-			const nextActive = this.getActiveToolNames().filter(name => !removed.has(name));
-			await this.#applyActiveToolsByName(nextActive);
+			const nextEnabled = this.getEnabledToolNames().filter(name => !removed.has(name));
+			await this.#applyActiveToolsByName(nextEnabled);
 		});
 	}
 
@@ -635,6 +643,7 @@ export class SessionTools {
 				setting,
 				extraDirectTools,
 				enabledToolNames,
+				evalTransportAvailable: this.#hasCodeModeEvalTransport(),
 			});
 		const previous = resolve(previousModel);
 		const next = resolve(nextModel);
@@ -797,6 +806,7 @@ export class SessionTools {
 			setting: this.#host.settings.get("providers.openai-codex.codeMode"),
 			extraDirectTools: this.#host.settings.get("providers.openai-codex.codeModeDirectTools"),
 			enabledToolNames: codeModeToolNames,
+			evalTransportAvailable: this.#hasCodeModeEvalTransport(),
 		});
 		if (codeMode.active) toolNames = codeModeToolNames;
 		let builtInWriteAvailable = this.#builtInToolNames.has("write");
