@@ -75,6 +75,7 @@ class FakeDapClient {
 			attachErrorDelayMs?: number;
 			configurationDoneError?: string;
 			supportsConfigurationDone?: boolean;
+			deferInitialized?: boolean;
 			rejectStopWaiters?: boolean;
 			stopAfterLaunch?: boolean;
 		},
@@ -95,8 +96,14 @@ class FakeDapClient {
 	}
 
 	async initialize(): Promise<DapCapabilities> {
-		queueMicrotask(() => this.#emit("initialized", {}));
+		if (!this.options.deferInitialized) {
+			queueMicrotask(() => this.#emit("initialized", {}));
+		}
 		return { supportsConfigurationDoneRequest: this.options.supportsConfigurationDone ?? true };
+	}
+
+	emitInitialized(): void {
+		this.#emit("initialized", {});
 	}
 
 	async sendRequest(command: string, args?: unknown): Promise<unknown> {
@@ -227,7 +234,10 @@ describe("DAP launch failure handling", () => {
 			attachDefaults: { request: "attach", skipAttachRequest: true },
 		};
 		const manager = new DapSessionManager();
-		const fake = new FakeDapClient(adapter, process.cwd(), { supportsConfigurationDone: false });
+		const fake = new FakeDapClient(adapter, process.cwd(), {
+			supportsConfigurationDone: false,
+			deferInitialized: true,
+		});
 		spyOn(DapClient, "spawn").mockResolvedValue(fake as unknown as DapClient);
 
 		const summary = await manager.attach({ adapter, cwd: process.cwd() });
@@ -235,6 +245,8 @@ describe("DAP launch failure handling", () => {
 		expect(fake.requests.map(request => request.command)).toEqual([]);
 		expect(summary.status).toBe("running");
 		expect(summary.needsConfigurationDone).toBe(false);
+		fake.emitInitialized();
+		expect(manager.getActiveSession()?.status).toBe("running");
 	});
 
 	it("does not emit an unhandled rejection when launch fails before initial stop watchers settle", async () => {

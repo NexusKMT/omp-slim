@@ -1408,7 +1408,9 @@ export class DapSessionManager {
 		});
 		client.onEvent("initialized", () => {
 			session.initializedSeen = true;
-			session.status = session.configurationDoneSent ? session.status : "configuring";
+			if (!session.configurationDoneSent && session.status === "launching") {
+				session.status = "configuring";
+			}
 		});
 		client.onEvent("stopped", body => {
 			this.#handleStoppedEvent(session, body as DapStoppedEventBody);
