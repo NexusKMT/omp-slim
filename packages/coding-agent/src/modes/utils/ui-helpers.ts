@@ -2,6 +2,7 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, Usage } from "@oh-my-pi/pi-ai";
 import { getStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { type Component, Spacer, Text, TruncatedText } from "@oh-my-pi/pi-tui";
+import { logger } from "@oh-my-pi/pi-utils";
 import type { AdvisorMessageDetails } from "../../advisor";
 import { COLLAB_PROMPT_MESSAGE_TYPE, type CollabPromptDetails } from "../../collab/protocol";
 import { settings } from "../../config/settings";
@@ -72,6 +73,18 @@ interface RenderInitialMessagesOptions {
 
 const TRANSCRIPT_RENDER_CHUNK_MESSAGES = 32;
 const TRANSCRIPT_RENDER_CHUNK_MS = 8;
+/**
+ * Upper bound on full-transcript replay restarts inside
+ * {@link UiHelpers.renderInitialMessages}. Each restart discards the staged
+ * tree and replays every message from scratch, so on a large resumed session
+ * (issue #7811: ~6k entries) a single pass takes longer than the interval
+ * between entries persisted by background sources — the restart condition
+ * becomes permanently true and an unbounded loop livelocks at 100% CPU (and,
+ * on the synchronous mid-stream path, blocks the event loop so not even
+ * SIGTERM can run). Entries that land after the final accepted pass are
+ * durable in the session file and reach the display on the next rebuild.
+ */
+const TRANSCRIPT_REPLAY_MAX_ATTEMPTS = 5;
 
 function waitForImmediate(): Promise<void> {
 	const { promise, resolve } = Promise.withResolvers<void>();
@@ -769,6 +782,7 @@ export class UiHelpers {
 			populateHistory: false,
 		};
 		let committed = false;
+		let replayAttempts = 0;
 		this.ctx.initialChatRendered = false;
 		try {
 			while (true) {
@@ -782,6 +796,23 @@ export class UiHelpers {
 				if (this.ctx.viewSession.sessionManager.getEntries().length === replayEntryCount) {
 					break;
 				}
+				replayAttempts++;
+				if (replayAttempts >= TRANSCRIPT_REPLAY_MAX_ATTEMPTS) {
+					// A source keeps persisting entries faster than a full replay pass
+					// completes. Accept the transcript just replayed instead of
+					// restarting forever (see TRANSCRIPT_REPLAY_MAX_ATTEMPTS).
+					logger.warn("renderInitialMessages: transcript replay did not converge; accepting current replay", {
+						attempts: replayAttempts,
+						replayEntryCount,
+						currentEntryCount: this.ctx.viewSession.sessionManager.getEntries().length,
+					});
+					break;
+				}
+				// Yield between passes so a restarted replay — including the fully
+				// synchronous mid-stream branch above — can never wedge the event
+				// loop: signal handlers, timers, and terminal input keep running
+				// while the replay is retried.
+				await waitForImmediate();
 
 				// An extension persisted a display message while the transcript replay
 				// yielded. The display callback stayed gated by initialChatRendered;
