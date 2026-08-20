@@ -142,6 +142,7 @@ describe("Code Mode session reconciliation", () => {
 		rebuildSystemPrompt: (names: string[]) => Promise<{ systemPrompt: string[] }> = async names => ({
 			systemPrompt: [`tools:${names.join(",")}`],
 		}),
+		setActiveToolNames?: (names: Iterable<string>) => void,
 	): { session: AgentSession; directModel: Model; codeModel: Model } {
 		const codeModel = model("openai-codex", "code_mode_only");
 		const directModel = model("openai");
@@ -159,6 +160,7 @@ describe("Code Mode session reconciliation", () => {
 			toolRegistry: new Map(tools.map(value => [value.name, value])),
 			builtInToolNames: tools.map(value => value.name),
 			rebuildSystemPrompt,
+			setActiveToolNames,
 		});
 		sessions.push(session);
 		return { session, directModel, codeModel };
@@ -198,6 +200,21 @@ describe("Code Mode session reconciliation", () => {
 		expect(session.getActiveToolNames()).toEqual(["eval"]);
 		expect(session.getEnabledToolNames()).toEqual(["read", "eval"]);
 		expect(session.getToolForEvalBridge("read")?.name).toBe("read");
+	});
+
+	test("prompt refresh preserves the full Code Mode tool predicate", async () => {
+		const predicateUpdates: string[][] = [];
+		const { session } = createSession(
+			Settings.isolated({ "providers.openai-codex.codeMode": "auto" }),
+			undefined,
+			names => predicateUpdates.push([...names]),
+		);
+		await session.setActiveToolsByName(["eval", "read"]);
+		expect(predicateUpdates.at(-1)).toEqual(["eval", "read"]);
+
+		await session.refreshBaseSystemPrompt();
+
+		expect(predicateUpdates.at(-1)).toEqual(["eval", "read"]);
 	});
 
 	test("failed tool application leaves Code Mode namespace metadata unchanged", async () => {

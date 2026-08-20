@@ -325,15 +325,14 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 				autoBackgroundEnabled: this.session.settings.get("eval.autoBackground.enabled"),
 			});
 		}
-		const codeModeBlock = this.#codeModeDeclarationsBlock();
-		return codeModeBlock ? `${base}\n\n${codeModeBlock}` : base;
+		return this.#codeModeDescription(base) ?? base;
 	}
 
 	/**
 	 * Codex Code Mode advertisement, pulled from the session on every read so
 	 * the description can never drift from the active model or tool registry.
 	 */
-	#codeModeDeclarationsBlock(): string | undefined {
+	#codeModeDescription(baseDescription: string): string | undefined {
 		const session = this.session;
 		if (!session) return undefined;
 		const model = session.getActiveModel?.();
@@ -353,7 +352,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 				return tool ? [{ name, parameters: (tool as { parameters?: unknown }).parameters }] : [];
 			}),
 		);
-		return prompt.render(evalCodeModeDescription, { declarations });
+		return prompt.render(evalCodeModeDescription, { baseDescription, declarations });
 	}
 	/** All reuse-chain examples; the `examples` getter filters by enabled languages. */
 	private static readonly ALL_EXAMPLES: readonly ToolExample<typeof evalSchema.infer>[] = [
