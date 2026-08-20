@@ -184,8 +184,10 @@ describe("issue #2761: unconfigured local providers in the Model Hub sidebar", (
 		const probed: string[] = [];
 		const hub = createHub(
 			makeRegistry({
-				models: () =>
-					serving ? [makeModel("prov-a", "model-a"), makeModel("lm-studio", "local-model")] : [makeModel("prov-a", "model-a")],
+				models: () => {
+					if (serving) return [makeModel("prov-a", "model-a"), makeModel("lm-studio", "local-model")];
+					return [makeModel("prov-a", "model-a")];
+				},
 				discoverable: ["lm-studio"],
 				discovery: id => discoveryState(id, serving ? "ok" : "unavailable"),
 				refreshProvider: async (id, mode) => {
