@@ -124,8 +124,7 @@ export class PluginManager {
 	// Runtime Config Management
 	// ==========================================================================
 
-	async #loadRuntimeConfig(): Promise<PluginRuntimeConfig> {
-		const lockPath = getPluginsLockfile();
+	async #readRuntimeConfigAt(lockPath: string): Promise<PluginRuntimeConfig> {
 		try {
 			return normalizePluginRuntimeConfig(await Bun.file(lockPath).json());
 		} catch (err) {
@@ -133,6 +132,10 @@ export class PluginManager {
 			logger.warn("Failed to load plugin runtime config", { path: lockPath, error: String(err) });
 			return normalizePluginRuntimeConfig({});
 		}
+	}
+
+	async #loadRuntimeConfig(): Promise<PluginRuntimeConfig> {
+		return this.#readRuntimeConfigAt(getPluginsLockfile());
 	}
 
 	async #ensureConfigLoaded(): Promise<PluginRuntimeConfig> {
@@ -682,55 +685,52 @@ export class PluginManager {
 	 * Resolve one installed plugin, including a marketplace runtime package that
 	 * is intentionally omitted from {@link list}.
 	 *
-	 * Resolution order: an explicit trusted `options.path` (marketplace registry
-	 * entry) wins; otherwise the user plugin root; otherwise the active project's
-	 * marketplace registry, so `--scope project` installs resolve when the CLI
-	 * runs inside that project.
+	 * Resolution order mirrors {@link getEnabledPlugins}: an explicit trusted
+	 * `options.path` (marketplace registry entry) wins; otherwise the active
+	 * project plugin root shadows the user root — so inside a project where the
+	 * same package name exists in both scopes, config reads and writes act on the
+	 * project copy's manifest rather than the inactive user copy.
 	 */
 	async getPlugin(name: string, options: { path?: string } = {}): Promise<InstalledPlugin | undefined> {
-		const [deps, config, projectOverrides] = await Promise.all([
-			this.#readDeps(getPluginsPackageJson()),
-			this.#ensureConfigLoaded(),
-			this.#loadProjectOverrides(),
-		]);
+		const [config, projectOverrides] = await Promise.all([this.#ensureConfigLoaded(), this.#loadProjectOverrides()]);
 		if (options.path) {
 			return this.#resolvePlugin(name, options.path, config, projectOverrides);
 		}
+		const projectPlugin = await this.#resolvePluginAtActiveProjectRoot(name, projectOverrides);
+		if (projectPlugin) {
+			return projectPlugin;
+		}
+		const deps = await this.#readDeps(getPluginsPackageJson());
 		if (this.#collectInstalledNames(deps, config).has(name)) {
 			return this.#resolvePlugin(name, path.join(getPluginsNodeModules(), name), config, projectOverrides);
-		}
-		const projectPath = await this.#resolveProjectMarketplaceInstallPath(name);
-		if (projectPath) {
-			return this.#resolvePlugin(name, projectPath, config, projectOverrides);
 		}
 		return undefined;
 	}
 
 	/**
-	 * Locate a project-scoped marketplace plugin's cached install path by package
-	 * name. Project marketplace installs register their runtime symlink and
-	 * lockfile under the project root — invisible to the user-root lookup above —
-	 * so match each active-project registry entry against its resolved package
-	 * name (`package.json` `name`, falling back to the plugin-id segment).
+	 * Resolve a plugin from the active project plugin root
+	 * (`<anchor>/.omp/plugins`). Project npm/link/marketplace installs all record
+	 * their runtime state and `node_modules` symlink there — invisible to the
+	 * user-root lookup — so this reads the project's own `package.json`
+	 * dependencies plus `omp-plugins.lock.json`, and resolves the package from
+	 * the project `node_modules`. Returns undefined when there is no active
+	 * project, when it coincides with the user root, or when the package is not
+	 * installed there.
 	 */
-	async #resolveProjectMarketplaceInstallPath(name: string): Promise<string | undefined> {
+	async #resolvePluginAtActiveProjectRoot(
+		name: string,
+		projectOverrides: ProjectPluginOverrides,
+	): Promise<InstalledPlugin | undefined> {
 		const registryPath = await resolveActiveProjectRegistryPath(this.#cwd);
 		if (!registryPath) return undefined;
-		const registry = await readInstalledPluginsRegistry(registryPath);
-		for (const pluginId in registry.plugins) {
-			const fallbackName = parsePluginId(pluginId)?.name ?? pluginId;
-			for (const entry of registry.plugins[pluginId]) {
-				let packageName = fallbackName;
-				try {
-					const pkg: RuntimePackageJson = await Bun.file(path.join(entry.installPath, "package.json")).json();
-					if (typeof pkg.name === "string" && pkg.name.length > 0) packageName = pkg.name;
-				} catch (err) {
-					if (!isEnoent(err)) throw err;
-				}
-				if (packageName === name) return entry.installPath;
-			}
-		}
-		return undefined;
+		const projectRoot = path.dirname(registryPath);
+		if (path.resolve(projectRoot) === path.resolve(getPluginsDir())) return undefined;
+		const [projectDeps, projectConfig] = await Promise.all([
+			this.#readDeps(path.join(projectRoot, "package.json")),
+			this.#readRuntimeConfigAt(path.join(projectRoot, "omp-plugins.lock.json")),
+		]);
+		if (!this.#collectInstalledNames(projectDeps, projectConfig).has(name)) return undefined;
+		return this.#resolvePlugin(name, path.join(projectRoot, "node_modules", name), projectConfig, projectOverrides);
 	}
 
 	/**

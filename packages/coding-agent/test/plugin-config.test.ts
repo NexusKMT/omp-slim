@@ -113,45 +113,62 @@ describe("plugin config", () => {
 		expect(await manager.getPluginSettings(pluginName)).toEqual({ mainBranchProtection: false });
 	});
 
-	test("resolves project-scoped marketplace plugin via the active project registry", async () => {
-		const pluginName = "omp-commit";
-		const installPath = path.join(tmpRoot, "cache", "omp-commit-project");
+	async function writeManifest(dir: string, manifest: Record<string, unknown>): Promise<void> {
 		await Bun.write(
-			path.join(installPath, "package.json"),
-			JSON.stringify({
-				name: pluginName,
+			path.join(dir, "package.json"),
+			JSON.stringify({ name: "omp-commit", version: "2.0.0", ...manifest }),
+		);
+	}
+
+	async function installProjectMarketplacePlugin(schemaDefault: string): Promise<string> {
+		const installPath = path.join(tmpRoot, "cache", `omp-commit-project-${schemaDefault}`);
+		await writeManifest(installPath, {
+			omp: {
 				version: "2.0.0",
-				omp: {
-					version: "2.0.0",
-					settings: {
-						splitMode: { type: "enum", values: ["auto", "manual"], default: "auto" },
-					},
-				},
-			}),
-		);
-		// Project anchor (.omp/) plus a project-scoped marketplace registry entry —
-		// none of it registered in the user plugin root.
-		await fs.mkdir(path.join(tmpRoot, ".omp", "plugins"), { recursive: true });
+				settings: { splitMode: { type: "enum", values: ["auto", "manual"], default: schemaDefault } },
+			},
+		});
+		const projectRoot = path.join(tmpRoot, ".omp", "plugins");
+		await fs.mkdir(path.join(projectRoot, "node_modules"), { recursive: true });
+		await fs.symlink(installPath, path.join(projectRoot, "node_modules", "omp-commit"), "dir");
 		await Bun.write(
-			path.join(tmpRoot, ".omp", "plugins", "installed_plugins.json"),
+			path.join(projectRoot, "omp-plugins.lock.json"),
 			JSON.stringify({
-				version: 2,
-				plugins: {
-					"omp-commit@market": [
-						{
-							scope: "project",
-							installPath,
-							version: "2.0.0",
-							installedAt: "2026-08-20T00:00:00.000Z",
-							lastUpdated: "2026-08-20T00:00:00.000Z",
-						},
-					],
-				},
+				plugins: { "omp-commit": { version: "2.0.0", enabledFeatures: null, enabled: true } },
+				settings: {},
 			}),
 		);
+		return installPath;
+	}
+
+	test("resolves a project-scoped marketplace plugin absent from the user root", async () => {
+		await installProjectMarketplacePlugin("auto");
 
 		const manager = new PluginManager(tmpRoot);
 		expect(await manager.list()).toEqual([]);
-		expect((await manager.getPlugin(pluginName))?.manifest.settings?.splitMode?.default).toBe("auto");
+		expect((await manager.getPlugin("omp-commit"))?.manifest.settings?.splitMode?.default).toBe("auto");
+	});
+
+	test("prefers the active project plugin over a same-named user install", async () => {
+		// User install: same package name, different schema default.
+		const userPkg = path.join(pluginsDir, "node_modules", "omp-commit");
+		await writeManifest(userPkg, {
+			omp: {
+				version: "1.0.0",
+				settings: { splitMode: { type: "enum", values: ["auto", "manual"], default: "manual" } },
+			},
+		});
+		await Bun.write(
+			lockfile,
+			JSON.stringify({
+				plugins: { "omp-commit": { version: "1.0.0", enabledFeatures: null, enabled: true } },
+				settings: {},
+			}),
+		);
+		// Project install shadows it with default "auto".
+		await installProjectMarketplacePlugin("auto");
+
+		const manager = new PluginManager(tmpRoot);
+		expect((await manager.getPlugin("omp-commit"))?.manifest.settings?.splitMode?.default).toBe("auto");
 	});
 });
