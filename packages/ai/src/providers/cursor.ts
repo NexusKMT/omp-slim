@@ -199,6 +199,7 @@ import { AssistantMessageEventStream } from "../utils/event-stream";
 import { connectProxiedSocket, getProxyForProvider, shouldBypassProxy } from "../utils/proxy";
 import { createRequestDebugSession, isRequestDebugEnabled, type RequestDebugResponseLog } from "../utils/request-debug";
 import { toolWireSchema } from "../utils/schema/wire";
+import { formatConnectEndStreamError } from "./connect-error-detail";
 import {
 	buildMcpStateResult,
 	buildNeutralHookResult,
@@ -369,9 +370,7 @@ function parseConnectEndStream(data: Uint8Array): Error | null {
 		const payload = JSON.parse(new TextDecoder().decode(data));
 		const error = payload?.error;
 		if (error) {
-			const code = typeof error.code === "string" ? error.code : "unknown";
-			const message = typeof error.message === "string" ? error.message : "Unknown error";
-			return new AIError.ProviderResponseError(`Connect error ${code}: ${message}`, { kind: "envelope" });
+			return new AIError.ProviderResponseError(formatConnectEndStreamError(error), { kind: "envelope" });
 		}
 		return null;
 	} catch {
