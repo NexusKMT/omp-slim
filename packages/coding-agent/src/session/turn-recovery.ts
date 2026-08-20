@@ -1306,7 +1306,7 @@ export class TurnRecovery {
 			this.#getRetryFallbackResolutionContext(),
 			currentSelector,
 			currentModel,
-			roleHint ?? this.#liveRetryRoleHint(),
+			roleHint ?? this.#liveRetryRoleHint(currentModel),
 		);
 	}
 
@@ -1338,11 +1338,14 @@ export class TurnRecovery {
 		return current && current !== pinned ? [pinned, current] : [pinned];
 	}
 
-	/** Live session role for chain lookup. Ephemeral hops and missing managers are not a role. */
-	#liveRetryRoleHint(): string | undefined {
+	/** Live session role for chain lookup, provided its assignment still matches the active model. */
+	#liveRetryRoleHint(currentModel: Model | null | undefined): string | undefined {
 		const role = this.#host.sessionManager?.getLastModelChangeRole?.();
-		if (!role || role === EPHEMERAL_MODEL_CHANGE_ROLE) return undefined;
-		return role;
+		if (!role || role === EPHEMERAL_MODEL_CHANGE_ROLE || !currentModel) return undefined;
+		const configured = this.#host.settings.getModelRole(role);
+		if (!configured) return undefined;
+		const resolved = resolveModelOverride([configured], this.#host.modelRegistry, this.#host.settings);
+		return resolved.model && modelsAreEqual(resolved.model, currentModel) ? role : undefined;
 	}
 
 	/** Finds fallback candidates that follow the active selector. */

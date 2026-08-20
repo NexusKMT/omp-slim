@@ -686,6 +686,26 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		expect(recovery.resolveRetryFallbackRole(selector, model)).toBe("vision");
 	});
 
+	it("ignores a recorded role whose assignment no longer matches the active model", () => {
+		const vision = getBundledModel("openai", "gpt-4o-mini");
+		if (!vision) throw new Error("Expected bundled model gpt-4o-mini");
+		const selector = `${model.provider}/${model.id}`;
+		const recovery = new TurnRecovery(
+			createHost(model, modelRegistry, {
+				lastModelChangeRole: "vision",
+				modelRoles: {
+					default: selector,
+					vision: `${vision.provider}/${vision.id}`,
+				},
+				fallbackChains: {
+					vision: [`${vision.provider}/${vision.id}`],
+					default: [`${vision.provider}/${vision.id}`],
+				},
+			}),
+		);
+		expect(recovery.resolveRetryFallbackRole(selector, model)).toBe("default");
+	});
+
 	it("does not attach the default chain to a model that is not default's primary", () => {
 		const other = getBundledModel("openai", "gpt-4o-mini");
 		if (!other) throw new Error("Expected bundled model gpt-4o-mini");
