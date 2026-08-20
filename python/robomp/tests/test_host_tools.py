@@ -14,9 +14,11 @@ import pytest
 from omp_rpc import HostToolContext, RpcCommandError
 
 from robomp import host_tools
+from robomp.config import Settings
 from robomp.db import Database
+from robomp.git_ops import PushResult
 from robomp.github_client import GitHubClient, IssueIndexEntry, IssueInfo, RepoInfo
-from robomp.host_tools import AbortController, ToolBindings, build
+from robomp.host_tools import AbortController, ReleaseToolContext, ToolBindings, build
 from robomp.sandbox import LocalGitTransport, Workspace
 
 
@@ -4555,3 +4557,389 @@ def test_gh_post_comment_skips_suffix_when_feature_disabled(db: Database, tmp_pa
 
     assert captured["body"] == {"body": "Here's the answer"}
     assert db.get_pending_closure(bindings.issue_key) is None
+
+
+class _RecordingReleaseTransport(LocalGitTransport):
+    """Local release transport that records publication attempts."""
+
+    __slots__ = ("calls",)
+
+    def __init__(self) -> None:
+        super().__init__(token=None)
+        self.calls: list[dict[str, Any]] = []
+
+    def push_release(
+        self,
+        *,
+        repo: str,
+        workspace_key: str,
+        repo_dir: Path,
+        branch: str,
+        tag: str,
+        expected_head: str,
+        slot_uid: int | None = None,
+    ) -> PushResult:
+        self.calls.append(
+            {
+                "repo": repo,
+                "workspace_key": workspace_key,
+                "repo_dir": repo_dir,
+                "branch": branch,
+                "tag": tag,
+                "expected_head": expected_head,
+                "slot_uid": slot_uid,
+            }
+        )
+        return super().push_release(
+            repo=repo,
+            workspace_key=workspace_key,
+            repo_dir=repo_dir,
+            branch=branch,
+            tag=tag,
+            expected_head=expected_head,
+            slot_uid=slot_uid,
+        )
+
+
+def _release_git(*args: str, cwd: Path | None = None) -> str:
+    command = ["git"]
+    if cwd is not None:
+        command.extend(["-C", str(cwd)])
+    command.extend(args)
+    proc = subprocess.run(command, check=True, capture_output=True, text=True)
+    return proc.stdout.strip()
+
+
+def _release_bindings(
+    db: Database,
+    tmp_path: Path,
+    settings: Settings,
+    *,
+    subject: str = "chore: bump version to 1.2.3",
+    author_name: str = "robomp-bot",
+    author_email: str = "robomp-bot@example.invalid",
+    dirty: bool = False,
+    remote_tag_sha: str | None = None,
+    create_fix: bool = True,
+) -> tuple[
+    ToolBindings,
+    asyncio.AbstractEventLoop,
+    threading.Thread,
+    _RecordingReleaseTransport,
+    str,
+    Path,
+]:
+    bare = tmp_path / "release-origin.git"
+    seed = tmp_path / "release-seed"
+    _release_git("init", "--bare", "--initial-branch=main", str(bare))
+    _release_git("init", "--initial-branch=main", str(seed))
+    (seed / "README.md").write_text("release\n", encoding="utf-8")
+    _release_git("add", "README.md", cwd=seed)
+    _release_git(
+        "-c",
+        "user.name=release-owner",
+        "-c",
+        "user.email=release-owner@example.invalid",
+        "commit",
+        "-m",
+        "chore: bump version to 1.2.3",
+        cwd=seed,
+    )
+    expected_sha = _release_git("rev-parse", "HEAD", cwd=seed)
+    _release_git("remote", "add", "origin", str(bare), cwd=seed)
+    _release_git("push", "origin", "main", f"{expected_sha}:refs/tags/v1.2.3", cwd=seed)
+
+    root = tmp_path / "release-workspace"
+    root.mkdir()
+    repo_dir = root / "repo"
+    _release_git("clone", "--branch", "main", str(bare), str(repo_dir))
+    _release_git("config", "user.name", "robomp-bot", cwd=repo_dir)
+    _release_git("config", "user.email", "robomp-bot@example.invalid", cwd=repo_dir)
+    if create_fix:
+        (repo_dir / "fix.txt").write_text("fixed\n", encoding="utf-8")
+        _release_git("add", "fix.txt", cwd=repo_dir)
+        _release_git(
+            "-c",
+            f"user.name={author_name}",
+            "-c",
+            f"user.email={author_email}",
+            "commit",
+            "-m",
+            subject,
+            cwd=repo_dir,
+        )
+    if dirty:
+        (repo_dir / "fix.txt").write_text("uncommitted\n", encoding="utf-8")
+
+    session_dir = root / ".omp-session-v1.2.3"
+    context_dir = root / "context"
+    artifacts_dir = root / "artifacts"
+    for directory in (session_dir, context_dir, context_dir / "repro", artifacts_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    workspace = Workspace(
+        root=root,
+        repo_dir=repo_dir,
+        session_dir=session_dir,
+        context_dir=context_dir,
+        artifacts_dir=artifacts_dir,
+        branch="main",
+        repo_full_name="octo/widget",
+        issue_number="release",
+    )
+    key = "octo/widget#v1.2.3"
+    db.upsert_release(
+        repo="octo/widget",
+        tag="v1.2.3",
+        version="1.2.3",
+        current_sha=expected_sha,
+        session_dir=str(session_dir),
+    )
+    db.bump_release_round(key, failed_sha=expected_sha)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octo/widget/git/ref/tags/v1.2.3":
+            return httpx.Response(
+                200,
+                json={
+                    "object": {
+                        "type": "commit",
+                        "sha": expected_sha if remote_tag_sha is None else remote_tag_sha,
+                    }
+                },
+            )
+        return httpx.Response(500, json={"message": f"unexpected {request.url.path}"})
+
+    loop, thread = _make_loop_in_background()
+    transport = _RecordingReleaseTransport()
+    release = ReleaseToolContext(
+        repo="octo/widget",
+        tag="v1.2.3",
+        version="1.2.3",
+        key=key,
+        expected_sha=expected_sha,
+        default_branch="main",
+    )
+    bindings = ToolBindings(
+        db=db,
+        github=GitHubClient("token", transport=httpx.MockTransport(handler)),
+        git_transport=transport,
+        repo=RepoInfo(
+            full_name="octo/widget",
+            default_branch="main",
+            clone_url=str(bare),
+            private=False,
+        ),
+        issue=None,
+        workspace=workspace,
+        loop=loop,
+        author_name="robomp-bot",
+        author_email="robomp-bot@example.invalid",
+        settings=settings,
+        abort=AbortController(),
+        release=release,
+    )
+    return bindings, loop, thread, transport, expected_sha, bare
+
+
+def test_release_retag_refuses_dirty_tree(db: Database, tmp_path: Path, settings: Settings) -> None:
+    bindings, loop, thread, transport, _, _ = _release_bindings(db, tmp_path, settings, dirty=True)
+    try:
+        tool = next(item for item in build(bindings) if item.name == "release_retag")
+        with pytest.raises(RpcCommandError, match="working tree is dirty"):
+            tool.execute({"summary": "fixed release"}, _ctx())
+    finally:
+        _stop_loop(loop, thread)
+    assert transport.calls == []
+
+
+def test_release_retag_requires_release_subject_prefix(db: Database, tmp_path: Path, settings: Settings) -> None:
+    bindings, loop, thread, transport, _, _ = _release_bindings(
+        db,
+        tmp_path,
+        settings,
+        subject="fix(ci): repair release",
+    )
+    try:
+        tool = next(item for item in build(bindings) if item.name == "release_retag")
+        with pytest.raises(RpcCommandError) as exc:
+            tool.execute({"summary": "fixed release"}, _ctx())
+    finally:
+        _stop_loop(loop, thread)
+    assert str(exc.value).startswith("refusing to retag: HEAD subject must start with 'chore: bump version to '")
+    assert "#2564" in str(exc.value)
+    assert transport.calls == []
+
+
+def test_release_retag_refuses_wrong_author(db: Database, tmp_path: Path, settings: Settings) -> None:
+    bindings, loop, thread, transport, _, _ = _release_bindings(
+        db,
+        tmp_path,
+        settings,
+        author_name="wrong",
+        author_email="wrong@example.invalid",
+    )
+    try:
+        tool = next(item for item in build(bindings) if item.name == "release_retag")
+        with pytest.raises(RpcCommandError, match="commit author identity mismatch"):
+            tool.execute({"summary": "fixed release"}, _ctx())
+    finally:
+        _stop_loop(loop, thread)
+    assert transport.calls == []
+
+
+def test_release_retag_refuses_remote_tag_drift(db: Database, tmp_path: Path, settings: Settings) -> None:
+    bindings, loop, thread, transport, _, _ = _release_bindings(
+        db,
+        tmp_path,
+        settings,
+        remote_tag_sha="human-retagged-sha",
+    )
+    try:
+        tool = next(item for item in build(bindings) if item.name == "release_retag")
+        with pytest.raises(RpcCommandError, match="tag moved remotely"):
+            tool.execute({"summary": "fixed release"}, _ctx())
+    finally:
+        _stop_loop(loop, thread)
+    assert transport.calls == []
+
+
+def test_release_retag_atomically_publishes_and_awaits_ci(db: Database, tmp_path: Path, settings: Settings) -> None:
+    bindings, loop, thread, transport, expected_sha, bare = _release_bindings(db, tmp_path, settings)
+    new_head = _release_git("rev-parse", "HEAD", cwd=bindings.workspace.repo_dir)
+    assert new_head != expected_sha
+    try:
+        tool = next(item for item in build(bindings) if item.name == "release_retag")
+        result = tool.execute({"summary": "fixed the failing check"}, _ctx())
+    finally:
+        _stop_loop(loop, thread)
+
+    assert result == {"pushed": new_head, "tag": "v1.2.3", "round": 1}
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["workspace_key"] == "octo__widget__release"
+    row = db.get_release("octo/widget#v1.2.3")
+    assert row is not None
+    assert row.state == "awaiting_ci"
+    assert row.current_sha == new_head
+    assert _release_git("--git-dir", str(bare), "rev-parse", "refs/heads/main") == new_head
+    assert _release_git("--git-dir", str(bare), "rev-parse", "refs/tags/v1.2.3") == new_head
+
+
+def test_abort_task_marks_release_failed(db: Database, tmp_path: Path, settings: Settings) -> None:
+    bindings, loop, thread, _, _, _ = _release_bindings(
+        db,
+        tmp_path,
+        settings,
+        create_fix=False,
+    )
+    try:
+        tool = next(item for item in build(bindings) if item.name == "abort_task")
+        assert tool.execute({"reason": "runner credentials require human repair"}, _ctx()) == "aborted"
+    finally:
+        _stop_loop(loop, thread)
+
+    row = db.get_release("octo/widget#v1.2.3")
+    assert row is not None
+    assert row.state == "failed"
+    assert row.last_error == "runner credentials require human repair"
+    assert bindings.abort is not None and bindings.abort.triggered
+
+
+def test_release_status_and_job_log_are_scoped_to_expected_sha(
+    db: Database, tmp_path: Path, settings: Settings
+) -> None:
+    expected_sha = "a" * 40
+    seen: list[tuple[str, str]] = []
+    log_lines = [f"line-{index}" for index in range(1005)]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, request.url.query.decode()))
+        if request.url.path == "/repos/octo/widget/actions/runs":
+            return httpx.Response(
+                200,
+                json={
+                    "workflow_runs": [
+                        {
+                            "id": 10,
+                            "name": "CI",
+                            "event": "push",
+                            "status": "completed",
+                            "conclusion": "failure",
+                            "head_branch": "main",
+                            "head_sha": expected_sha,
+                            "html_url": "https://example.invalid/runs/10",
+                            "run_attempt": 1,
+                        }
+                    ]
+                },
+            )
+        if request.url.path == "/repos/octo/widget/actions/runs/10/jobs":
+            return httpx.Response(
+                200,
+                json={
+                    "jobs": [
+                        {
+                            "id": 20,
+                            "run_id": 10,
+                            "name": "check",
+                            "status": "completed",
+                            "conclusion": "failure",
+                            "html_url": "https://example.invalid/jobs/20",
+                            "steps": [
+                                {"name": "install", "conclusion": "success"},
+                                {"name": "bun check", "conclusion": "failure"},
+                            ],
+                        }
+                    ]
+                },
+            )
+        if request.url.path == "/repos/octo/widget/actions/jobs/20/logs":
+            return httpx.Response(200, text="\n".join(log_lines))
+        return httpx.Response(500, json={"message": f"unexpected {request.url.path}"})
+
+    workspace = _stub_workspace(tmp_path)
+    workspace.branch = "main"
+    workspace.issue_number = "release"
+    key = "octo/widget#v1.2.3"
+    db.upsert_release(
+        repo="octo/widget",
+        tag="v1.2.3",
+        version="1.2.3",
+        current_sha=expected_sha,
+        session_dir=str(workspace.session_dir),
+    )
+    loop, thread = _make_loop_in_background()
+    bindings = ToolBindings(
+        db=db,
+        github=GitHubClient("token", transport=httpx.MockTransport(handler)),
+        git_transport=LocalGitTransport(token=None),
+        repo=_stub_repo(),
+        issue=None,
+        workspace=workspace,
+        loop=loop,
+        author_name="robomp-bot",
+        author_email="robomp-bot@example.invalid",
+        settings=settings,
+        release=ReleaseToolContext(
+            repo="octo/widget",
+            tag="v1.2.3",
+            version="1.2.3",
+            key=key,
+            expected_sha=expected_sha,
+            default_branch="main",
+        ),
+    )
+    try:
+        status_tool = next(item for item in build(bindings) if item.name == "release_ci_status")
+        log_tool = next(item for item in build(bindings) if item.name == "release_job_log")
+        status = json.loads(status_tool.execute({}, _ctx()))
+        log_tail = log_tool.execute({"job_id": 20, "tail_lines": 5000}, _ctx())
+    finally:
+        _stop_loop(loop, thread)
+
+    assert status["sha"] == expected_sha
+    assert status["runs"][0]["failed_jobs"][0]["failed_steps"] == ["bun check"]
+    assert seen[0] == (
+        "/repos/octo/widget/actions/runs",
+        f"head_sha={expected_sha}&per_page=100",
+    )
+    assert log_tail.splitlines() == log_lines[-1000:]
