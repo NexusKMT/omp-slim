@@ -67,7 +67,7 @@ describe("summarizeConnectErrorDetails", () => {
 
 	it("joins typed entries", () => {
 		expect(summarizeConnectErrorDetails([{ type: "a.b.C", debug: "why" }, { type: "d.e.F" }])).toBe(
-			'a.b.C: "why"; d.e.F',
+			"a.b.C: why; d.e.F",
 		);
 	});
 });
