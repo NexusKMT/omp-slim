@@ -108,7 +108,7 @@ export {
 
 import { ModelsConfigFile, type ProviderValidationModel, validateProviderConfiguration } from "./models-config";
 import type { ModelOverride, ModelsConfig, ProviderAuthMode } from "./models-config-schema";
-import { settings, type Settings } from "./settings";
+import { type Settings, settings } from "./settings";
 
 // DeviceCheck attestation (`x-oai-attestation`) for ChatGPT-OAuth Codex
 // requests; the pi-ai provider resolves it just-in-time per request.

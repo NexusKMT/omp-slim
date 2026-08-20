@@ -1251,9 +1251,13 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	// / session would silently miss credential_disabled events.
 	const modelRegistry =
 		options.modelRegistry ??
-		new ModelRegistry(options.authStorage ?? (await logger.time("discoverModels", discoverAuthStorage, agentDir)), undefined, {
-			settings,
-		});
+		new ModelRegistry(
+			options.authStorage ?? (await logger.time("discoverModels", discoverAuthStorage, agentDir)),
+			undefined,
+			{
+				settings,
+			},
+		);
 	// Track whether we internally created the authStorage so we can close it
 	// if construction fails before the session takes ownership.
 	const ownsAuthStorage = !options.authStorage && !options.modelRegistry;
