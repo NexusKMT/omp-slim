@@ -1498,4 +1498,16 @@ describe("data URL elision", () => {
 		expect(text).toContain("[data URL omitted: image/png, 908 base64 chars]");
 		expect(text).not.toMatch(recognizableDataUrl);
 	});
+
+	it("prevents unmatched Markdown brackets from stalling tool-result compaction", () => {
+		// Unmatched `[` plus `;base64,` used to stall tool-result compaction in
+		// the data-URL matcher before the 2,000-character cap could apply.
+		const text = `${"[".repeat(80_000)};base64,`;
+		const out = snapcompact.serializeConversation([createToolResultMessage(text)]);
+		const marker = "[…78008ch elided…]";
+		expect(out).toContain(marker);
+		expect(out).toContain(
+			`${snapcompact.DIM_ON}${"[".repeat(1200)} ${marker} ${"[".repeat(792)};base64,${snapcompact.DIM_OFF}`,
+		);
+	}, 2_000);
 });

@@ -783,22 +783,22 @@ const ELIDED_MARKER = String.raw`\[(?:…|\.{3})\d+ch elided(?:…|\.{3})\]`;
  *  Quoted-string values (RFC 822) are out of scope. */
 const MEDIA_TYPE_TOKEN = String.raw`[\w!#$%&'*+.^|~-]+`;
 
-/** An inline base64 data URL, optionally wrapped in a Markdown image/link
- *  atom. The payload may be empty or carry one embedded elision marker so
- *  fragments left by pre-guard slices — including a cut landing exactly on
- *  `;base64,` — still match. RFC 2397 allows `*( ";" parameter )` between
- *  type/subtype and the terminal `;base64`; unquoted tokens are matched,
+/** An inline base64 data URL. The payload may be empty or carry one embedded
+ *  elision marker so fragments left by pre-guard slices — including a cut
+ *  landing exactly on `;base64,` — still match. RFC 2397 allows `*( ";" parameter )`
+ *  between type/subtype and the terminal `;base64`; unquoted tokens are matched,
  *  quoted-string values are out of scope. `data:` and `base64` match
- *  case-insensitively (`gi`). */
+ *  case-insensitively (`gi`). Matching starts at `data:`; Markdown wrappers are
+ *  recovered by {@link adjacentMarkdownOpenerStart} after each hit. */
 const DATA_URL_ATOM = new RegExp(
-	String.raw`(!?\[[^\]\n]*\]\(\s*)?` +
-		String.raw`data:([A-Za-z][\w.+-]*\/[\w.+-]+(?:;${MEDIA_TYPE_TOKEN}=${MEDIA_TYPE_TOKEN})*);base64,` +
+	String.raw`data:([A-Za-z][\w.+-]*\/[\w.+-]+(?:;${MEDIA_TYPE_TOKEN}=${MEDIA_TYPE_TOKEN})*);base64,` +
 		String.raw`([A-Za-z0-9+/=]*(?:\s*${ELIDED_MARKER}\s*[A-Za-z0-9+/=]*)?)` +
 		String.raw`(\s*\))?`,
 	"gi",
 );
 
 const ELIDED_MARKER_RE = new RegExp(String.raw`\s*${ELIDED_MARKER}\s*`);
+const MARKDOWN_WHITESPACE_CHAR = /\s/;
 
 /** Canonical base64: 4-char groups with valid terminal padding. */
 const CANONICAL_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)$/;
@@ -814,6 +814,26 @@ const DAMAGED_PAYLOAD_MIN_CHARS = 40;
  *  any offset — even 0–39 chars past `;base64,` — so every recognized prefix
  *  is suspect and is always elided. */
 type DataUrlContext = "source" | "archive";
+
+/** Start of `!?[label](\s*` immediately before `dataIndex`, or `undefined`.
+ *  The opener must lie in `[cursor, dataIndex)`. Nested `[` in the label is
+ *  kept (the old `[^\]\n]*` class allowed it) by taking the earliest `[` after
+ *  a prior `]`, newline, or `cursor`; the scan never walks already-emitted
+ *  text, so repeated `](data:...)` stays linear. */
+function adjacentMarkdownOpenerStart(text: string, dataIndex: number, cursor: number): number | undefined {
+	let i = dataIndex;
+	while (i > cursor && MARKDOWN_WHITESPACE_CHAR.test(text.charAt(i - 1))) i--;
+	// `](` and any following whitespace must sit in [cursor, dataIndex).
+	if (i - 2 < cursor || text.charAt(i - 1) !== "(" || text.charAt(i - 2) !== "]") return undefined;
+	let opener = -1;
+	for (let j = i - 3; j >= cursor; j--) {
+		const c = text.charAt(j);
+		if (c === "]" || c === "\n") break;
+		if (c === "[") opener = j;
+	}
+	if (opener < 0) return undefined;
+	return opener > cursor && text.charAt(opener - 1) === "!" ? opener - 1 : opener;
+}
 
 /** Replace every inline base64 data URL atomically with a deterministic
  *  placeholder. A character cap that slices inside a base64 payload leaves a
@@ -832,32 +852,53 @@ type DataUrlContext = "source" | "archive";
  *  function of the captured text. */
 function elideDataUrls(text: string, context: DataUrlContext = "source"): string {
 	if (!/;base64,/i.test(text)) return text;
-	return text.replace(
-		DATA_URL_ATOM,
-		(
-			match: string,
-			opener: string | undefined,
-			mime: string,
-			payload: string,
-			closer: string | undefined,
-		): string => {
-			const marker = ELIDED_MARKER_RE.exec(payload);
-			const isAtom =
-				context === "archive" ||
-				marker !== null ||
-				CANONICAL_BASE64.test(payload) ||
-				payload.length >= DAMAGED_PAYLOAD_MIN_CHARS;
-			if (!isAtom) return match;
+	DATA_URL_ATOM.lastIndex = 0;
+	let match = DATA_URL_ATOM.exec(text);
+	if (match === null) return text;
+	const out: string[] = [];
+	let cursor = 0;
+	while (match !== null) {
+		const urlStart = match.index;
+		const urlEnd = urlStart + match[0].length;
+		const mime = match[1] ?? "";
+		const payload = match[2] ?? "";
+		const closer = match[3];
+		const marker = ELIDED_MARKER_RE.exec(payload);
+		const isAtom =
+			context === "archive" ||
+			marker !== null ||
+			CANONICAL_BASE64.test(payload) ||
+			payload.length >= DAMAGED_PAYLOAD_MIN_CHARS;
+		if (!isAtom) {
+			// Advance through short prose too, so a later wrapper cannot swallow
+			// a data URL already copied out of its Markdown label.
+			out.push(text.slice(cursor, urlEnd));
+			cursor = urlEnd;
+		} else {
 			const b64Chars = marker
 				? payload.length - marker[0].length + Number(/\d+/.exec(marker[0])?.[0] ?? 0)
 				: payload.length;
 			const placeholder = `[data URL omitted: ${mime}, ${b64Chars} base64 chars]`;
+			const foundOpener = adjacentMarkdownOpenerStart(text, urlStart, cursor);
+			const openerStart = foundOpener !== undefined && foundOpener >= cursor ? foundOpener : undefined;
+			const emitStart = openerStart ?? urlStart;
+			out.push(text.slice(cursor, emitStart));
 			// Swallow the Markdown wrapper only when both delimiters matched;
-			// otherwise re-emit whichever half was captured untouched.
-			if (opener !== undefined && closer !== undefined) return placeholder;
-			return `${opener ?? ""}${placeholder}${closer ?? ""}`;
-		},
-	);
+			// otherwise re-emit whichever half was captured untouched. An opener
+			// that starts before the already-emitted cursor would overlap a prior
+			// replacement, so that URL is treated as bare.
+			if (openerStart !== undefined && closer !== undefined) {
+				out.push(placeholder);
+			} else {
+				const opener = openerStart !== undefined ? text.slice(openerStart, urlStart) : "";
+				out.push(opener, placeholder, closer ?? "");
+			}
+			cursor = urlEnd;
+		}
+		match = DATA_URL_ATOM.exec(text);
+	}
+	out.push(text.slice(cursor));
+	return out.join("");
 }
 
 const DIM_MARKERS = /[\u000e\u000f]/g;
