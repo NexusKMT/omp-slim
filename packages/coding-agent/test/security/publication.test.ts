@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { SecurityScanPlan } from "../../src/security";
+import type { SecurityPublishParams, SecurityScanPlan } from "../../src/security";
 import { createSecurityPublicationTool, SecurityStore } from "../../src/security";
 
 let temporaryRoot = "";
@@ -44,10 +44,12 @@ afterEach(async () => {
 	await fs.rm(temporaryRoot, { recursive: true, force: true });
 });
 
-function publishableFinding(overrides: Record<string, unknown>): Record<string, unknown> {
+type SecurityFindingInput = SecurityPublishParams["findings"][number];
+
+function publishableFinding(
+	overrides: Partial<SecurityFindingInput> & Pick<SecurityFindingInput, "rule_id" | "title" | "locations">,
+): SecurityFindingInput {
 	return {
-		rule_id: "fixture.rule",
-		title: "Fixture finding",
 		summary: "Fixture summary",
 		severity: "high",
 		confidence: "high",
