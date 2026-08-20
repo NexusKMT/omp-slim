@@ -78,15 +78,6 @@ describe("startup model cache header restoration (#5780)", () => {
 		await primedRegistry.refreshProvider("probe", "online");
 		expect(primedRegistry.find("probe", "probe-model")?.headers?.Authorization).toBe("Bearer test-key");
 		const cacheDbPath = path.join(tempDir, "models.db");
-		const cacheDb = new Database(cacheDbPath);
-		const cacheRow = cacheDb
-			.query<{ unrestorable_header_model_ids: string }, []>(
-				"SELECT unrestorable_header_model_ids FROM model_cache WHERE provider_id LIKE 'probe:%'",
-			)
-			.get();
-		expect(cacheRow?.unrestorable_header_model_ids).toBe("[]");
-		cacheDb.close();
-
 		const restartedRegistry = new ModelRegistry(authStorage, modelsPath, {
 			fetch: () => Promise.reject(new Error("offline")),
 		});
@@ -101,5 +92,13 @@ describe("startup model cache header restoration (#5780)", () => {
 			fetch: () => Promise.reject(new Error("offline")),
 		});
 		expect(upgradedRegistry.find("probe", "probe-model")?.headers?.Authorization).toBe("Bearer test-key");
+		upgradedRegistry.refreshInBackground();
+		await upgradedRegistry.awaitBackgroundRefresh();
+		expect(upgradedRegistry.find("probe", "probe-model")?.headers?.Authorization).toBe("Bearer test-key");
+
+		const nextRestartRegistry = new ModelRegistry(authStorage, modelsPath, {
+			fetch: () => Promise.reject(new Error("offline")),
+		});
+		expect(nextRestartRegistry.find("probe", "probe-model")?.headers?.Authorization).toBe("Bearer test-key");
 	});
 });

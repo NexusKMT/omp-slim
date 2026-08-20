@@ -16,7 +16,7 @@ import type {
 } from "@oh-my-pi/pi-ai/types";
 import type { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { readModelCache } from "@oh-my-pi/pi-catalog/model-cache";
+import { readModelCache, writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import {
 	createModelManager,
 	type ModelManagerOptions,
@@ -793,18 +793,14 @@ export class ModelRegistry {
 		const override = this.#providerOverrides.get(providerId);
 		if (override?.authHeader !== true || !override.apiKey) return undefined;
 		const headers = mergeAuthHeaderSources([override.headers], override.authHeader, override.apiKey);
-		return headers && Object.keys(headers).length > 0 ? headers : undefined;
+		return headers?.Authorization ? headers : undefined;
 	}
 
 	#loadCachedDiscoverableModels(): Model<Api>[] {
 		const cachedModels: Model<Api>[] = [];
 		for (const providerConfig of this.#discoverableProviders) {
-			const cache = readModelCache<Api>(
-				this.#configuredDiscoveryCacheProviderId(providerConfig),
-				24 * 60 * 60 * 1000,
-				Date.now,
-				this.#cacheDbPath,
-			);
+			const cacheProviderId = this.#configuredDiscoveryCacheProviderId(providerConfig);
+			const cache = readModelCache<Api>(cacheProviderId, 24 * 60 * 60 * 1000, Date.now, this.#cacheDbPath);
 			if (!cache) {
 				this.#providerDiscoveryStates.set(providerConfig.provider, {
 					provider: providerConfig.provider,
@@ -831,6 +827,18 @@ export class ModelRegistry {
 								omittedHeaderIds.has(model.id) ? { ...model, headers: { ...restorableHeaderFallback } } : model,
 							)
 						: cache.models.filter(model => !omittedHeaderIds.has(model.id));
+			if (restorableHeaderFallback && cache.unrestorableHeaderModelIds.length > 0) {
+				writeModelCache(
+					cacheProviderId,
+					cache.updatedAt,
+					usableCacheModels.map(model => buildModel(model)),
+					cache.authoritative,
+					cache.staticFingerprint,
+					this.#cacheDbPath,
+					[],
+					restorableHeaderFallback,
+				);
+			}
 			const models = this.#applyProviderModelOverrides(
 				providerConfig.provider,
 				this.#normalizeDiscoverableModels(
