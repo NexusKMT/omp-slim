@@ -1,6 +1,9 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
+	assertOwnerPrivateDir,
 	controlDirGuardError,
 	controlPathFitsBudget,
 	getControlDir,
@@ -109,6 +112,45 @@ describe("controlDirGuardError", () => {
 
 	it("skips the owner check when the process has no uid", () => {
 		expect(controlDirGuardError({ ...ok, uid: 999 }, undefined)).toBeNull();
+	});
+});
+
+describe("assertOwnerPrivateDir", () => {
+	let scratch: string;
+
+	afterEach(() => {
+		if (scratch) fs.rmSync(scratch, { recursive: true, force: true });
+	});
+
+	const mkScratch = () => {
+		scratch = fs.mkdtempSync(path.join(os.tmpdir(), "omp-ssh-guard-"));
+		return scratch;
+	};
+
+	it("accepts a real owner-private directory and normalizes loose perms in place", () => {
+		const dir = path.join(mkScratch(), "ctl");
+		fs.mkdirSync(dir, { mode: 0o755 });
+		fs.chmodSync(dir, 0o755);
+		expect(() => assertOwnerPrivateDir(dir)).not.toThrow();
+		expect(fs.statSync(dir).mode & 0o777).toBe(0o700);
+	});
+
+	it("refuses a symlinked final component without following it (TOCTOU swap guard)", () => {
+		const root = mkScratch();
+		const victim = path.join(root, "victim");
+		fs.mkdirSync(victim, { mode: 0o700 });
+		const link = path.join(root, "ctl");
+		fs.symlinkSync(victim, link);
+		// A symlink pointing at an otherwise-valid 0700 directory must still be
+		// rejected: O_NOFOLLOW refuses the link itself, so a later re-target cannot
+		// slip a foreign directory past the guard.
+		expect(() => assertOwnerPrivateDir(link)).toThrow("is a symlink");
+	});
+
+	it("refuses a non-directory", () => {
+		const file = path.join(mkScratch(), "ctl");
+		fs.writeFileSync(file, "");
+		expect(() => assertOwnerPrivateDir(file)).toThrow("is not a directory");
 	});
 });
 

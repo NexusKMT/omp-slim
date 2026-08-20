@@ -181,29 +181,58 @@ export function ensureSshControlDir(): void {
 }
 
 /**
- * Harden a control directory pulled from a shared temp base ({@link CONTROL_DIR_SHARED}):
- * normalize perms on our own real directory, then refuse a symlink, a
- * non-directory, a foreign owner, or lingering group/other access via
- * {@link controlDirGuardError}. Guards the `/tmp` fallback against another local
- * user pre-planting the predictable path (#9070).
+ * Harden a control directory pulled from a shared temp base ({@link CONTROL_DIR_SHARED}).
+ *
+ * Opens the final path component with `O_NOFOLLOW | O_DIRECTORY` so a symlink or
+ * non-directory is refused atomically at open time, then inspects and normalizes
+ * that one pinned inode through the fd (`fstat`/`fchmod`) — never a second
+ * pathname lookup. This closes the swap window where another local user could
+ * replace the entry with a symlink between two `stat`s and slip a victim-owned
+ * 0700 target past the checks (#9070). Rejects a symlink, a non-directory, a
+ * foreign owner, or lingering group/other access via {@link controlDirGuardError}.
+ * Exported as a test seam.
  */
-function assertOwnerPrivateDir(dir: string): void {
-	const lst = fs.lstatSync(dir);
+export function assertOwnerPrivateDir(dir: string): void {
 	const uid = process.getuid?.();
-	if (!lst.isSymbolicLink() && lst.isDirectory() && (uid === undefined || lst.uid === uid)) {
-		try {
-			fs.chmodSync(dir, 0o700);
-		} catch (err) {
-			logger.debug("SSH control dir chmod failed", { path: dir, error: String(err) });
+	let fd: number;
+	try {
+		fd = fs.openSync(dir, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_DIRECTORY);
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException).code;
+		// O_NOFOLLOW rejects a symlinked final component; kernels report it as
+		// either ELOOP or (with O_DIRECTORY) ENOTDIR. Either way the entry is
+		// already refused — we only lstat here to label the failure precisely, so
+		// a swap after this point cannot weaken the (already-final) rejection.
+		if (code === "ELOOP" || code === "ENOTDIR") {
+			let isSymlink = false;
+			try {
+				isSymlink = fs.lstatSync(dir).isSymbolicLink();
+			} catch {}
+			throw new Error(`SSH control directory ${dir} ${isSymlink ? "is a symlink" : "is not a directory"}`);
 		}
+		throw err;
 	}
-	const st = lst.isSymbolicLink() ? lst : fs.statSync(dir);
-	const reason = controlDirGuardError(
-		{ isSymlink: lst.isSymbolicLink(), isDir: st.isDirectory(), uid: st.uid, mode: st.mode },
-		uid,
-	);
-	if (reason) {
-		throw new Error(`SSH control directory ${dir} ${reason}`);
+	try {
+		let st = fs.fstatSync(fd);
+		// Normalize perms on the pinned inode only when it is ours; never fchmod a
+		// directory another user owns.
+		if ((uid === undefined || st.uid === uid) && (st.mode & 0o777) !== 0o700) {
+			try {
+				fs.fchmodSync(fd, 0o700);
+				st = fs.fstatSync(fd);
+			} catch (err) {
+				logger.debug("SSH control dir chmod failed", { path: dir, error: String(err) });
+			}
+		}
+		const reason = controlDirGuardError(
+			{ isSymlink: false, isDir: st.isDirectory(), uid: st.uid, mode: st.mode },
+			uid,
+		);
+		if (reason) {
+			throw new Error(`SSH control directory ${dir} ${reason}`);
+		}
+	} finally {
+		fs.closeSync(fd);
 	}
 }
 
