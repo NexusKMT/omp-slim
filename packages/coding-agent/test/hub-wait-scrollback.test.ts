@@ -139,6 +139,16 @@ function waitPartial(tick: number) {
 	};
 }
 
+function settledWait(tick: number) {
+	return {
+		content: [{ type: "text" as const, text: "" }],
+		details: {
+			op: "wait" as const,
+			jobs: runningJobs(tick).map(job => ({ ...job, status: "completed" as const })),
+		},
+	};
+}
+
 const VISIBLE_JOBS = ["ApprovalTests", "ConfigNotify", "FeishuAdapter"] as const;
 
 function expectEachJobOnce(buffer: string[]): void {
@@ -302,7 +312,7 @@ describe("hub wait poll never sprays duplicate job rows into scrollback", () => 
 	}, 30_000);
 
 	test("a poll taller than the remaining viewport still records each job once", async () => {
-		const rows = 12;
+		const rows = 8;
 		stubStdoutRows(rows);
 		const term = new VirtualTerminal(80, rows);
 		const scheduler = makeDrainableScheduler();
@@ -322,7 +332,7 @@ describe("hub wait poll never sprays duplicate job rows into scrollback", () => 
 		);
 		transcript.addChild(hub);
 		tui.addChild(transcript);
-		tui.addChild(new Footer(5));
+		tui.addChild(new Footer(4));
 
 		try {
 			hub.updateResult(waitPartial(0), true);
@@ -339,6 +349,12 @@ describe("hub wait poll never sprays duplicate job rows into scrollback", () => 
 
 			expect(hub.isDisplaceableBlock()).toBe(true);
 			expect(transcript.isNativeScrollbackLiveRegionPinned()).toBe(true);
+
+			hub.updateResult(settledWait(13), false);
+			term.scrollLines(1000);
+			tui.requestRender();
+			scheduler.flush();
+			await term.flush();
 
 			const buffer = plainScrollBuffer(term);
 			expectEachJobOnce(buffer);
