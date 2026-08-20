@@ -38,6 +38,7 @@
 - MCP tool names longer than 64 characters (e.g. `chrome-devtools-mcp`'s `performance_analyze_insight`) are now capped at 64 with a deterministic hash suffix, so strict validators like Meta/OpenAI Responses no longer reject every turn with HTTP 400 `name must be at most 64 characters` ([#9130](https://github.com/can1357/oh-my-pi/issues/9130)).
 - Fixed Codex chat and `generate_image` requests returning HTTP 401 `Workspace is not authorized in this region.` when an enterprise ChatGPT workspace is pinned to a data-residency region and the request egresses from another region (VPN or proxy). The residency the OAuth token already carries is now declared on the request, so no configuration is needed.
 - Fixed Codex chat, web search, and `generate_image` requests returning HTTP 401 `Workspace is not authorized in this region.` when an enterprise ChatGPT workspace is pinned to a data-residency region and the request egresses from another region (VPN or proxy). The residency the OAuth token already carries is now declared on the request, so no configuration is needed.
+- Nix-packaged builds no longer fail to load the on-demand `onnxruntime-node`/`sherpa-onnx` addons with `libstdc++.so.6: cannot open shared object file` (STT, TTS, tiny-model and mnemopi workers) — the package advertises its C++ runtime library dirs and the agent injects them into the inference worker subprocesses only.
 
 ## [17.4.0] - 2026-08-20
 
