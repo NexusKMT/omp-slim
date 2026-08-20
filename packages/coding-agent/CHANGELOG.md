@@ -107,6 +107,10 @@
 - Fixed macOS `top`-style single-dash long options in the `top` shell builtin: `top -l 2 -pid 56943 -stats pid,cpu,th,mem,pstate` previously failed with `invalid value 'id' for '--pid <PIDS>'` because clap read `-pid` as `-p id`. Single-dash long spellings now parse, and `-stats` selects and orders output columns using macOS stat keys (`pid`, `cpu`, `th`, `mem`, `pstate`, ...).
 - Fixed a sweep of GNU/BSD compatibility gaps in the built-in shell utilities, found by auditing every builtin against its real counterpart: `timeout` gained `-s`/`-k`/`--preserve-status`/`--foreground`/`-v`, GNU exit codes (124/125/137), signal delivery to the child process group with `-k` SIGKILL escalation, and `timeout 0` disabling the limit; `diff` gained normal-format default output, `-w`/`-b`/`-B`/`-i`/`-x`/`-L`/`-s`/`--strip-trailing-cr`, context format (`-c`/`-C`), bundled flags (`-ru`, `-urN`), timestamped unified headers, and no longer recurses directories without `-r`; `find` fixed inverted `-newerXY` timestamp comparisons, anchored `-regex` to whole paths, and gained BSD `-perm +mode`, `-type f,d` lists, `-size` `T`/`P` suffixes, ISO dates in `-newermt`, and BSD leading flags `-E`/`-x`/`-s`; `date` gained BSD `-r <epoch>`, `-v` adjustments, and `-j -f` strptime parsing, and `-I` no longer swallows a following `+FORMAT`; `tail`/`head` accept obsolete `-N`/`+N` counts at any argv position with any file count, `tail -r -n N` works, and `head` continues past per-file I/O errors with GNU header/separator placement; `rg` resolves `-s`/`-i`/`-S` by last occurrence, accepts `--no-config`/`-j`/`--threads`/`--no-column`, implements `--path-separator`, and emits clean NUL-delimited output under `-0`/`-l0`; `stat` prints integer epochs for `%X`/`%Y`/`%Z` (bash arithmetic on `stat -c %Y` works) and gained BSD `-s`/`-x` output modes plus `-t` time formatting; `cksum` is now registered (multi-algorithm `cksum -a sha256`); `truncate` implements `-o`/`--io-blocks` (previously silently truncated to the raw byte count), accepts `b` (512-byte) suffix and BSD `=` prefix; `sleep`/`timeout` accept `infinity` and keep sub-millisecond precision; `yes` and `errno` accept hyphen-prefixed operands (`yes -n`, `errno -2`); `nohup -- cmd` no longer tries to run `--` (including backgrounded via the brush wrapper); `which` gained BSD `-s` and errors on zero operands; `kill` accepts attached values (`-s9`, `-sKILL`, `-l9`) and maps exit statuses above 128 (`kill -l 137` → `KILL`).
 
+### Fixed
+
+- Fixed Task tool guidance promising automatic resolution of concurrent same-file edits when shared and isolated execution can expose real conflicts.
+
 ## [17.3.8] - 2026-08-19
 
 ### Added
@@ -275,9 +279,6 @@
 - Automatically continued Gemini turns that stopped after thinking without final output, using a bounded final-answer reminder instead of exhausting generic retries.
 - Retried Gemini `MALFORMED_FUNCTION_CALL` failures when every emitted tool call was proven unexecuted, while preserving real tool-result and visible-output replay guards.
 - Kept current terminal retry errors in one pinned banner with attempt context while surfacing local continuation failures instead of stale provider errors.
-### Fixed
-
-- Fixed Task tool guidance promising automatic resolution of concurrent same-file edits when shared and isolated execution can expose real conflicts.
 
 ## [17.3.2] - 2026-08-13
 
