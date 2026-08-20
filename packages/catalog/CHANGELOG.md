@@ -8,6 +8,9 @@
 ### Added
 
 - `getCodexResidency` reads an enterprise ChatGPT workspace's pinned data-residency region from a Codex OAuth access token, `OPENAI_HEADERS.RESIDENCY` names the header that declares it to the Codex backend, and `applyCodexResidencyHeader` adds it without replacing configured headers.
+### Fixed
+
+- Fixed Vercel AI Gateway Muse Spark 1.2 Contributor requests failing with HTTP 400 by capping the advertised output allowance to the model's 131K output limit.
 
 ## [17.4.0] - 2026-08-20
 
