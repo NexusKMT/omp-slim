@@ -107,6 +107,9 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 	beforeAll(async () => {
 		tempDir = TempDir.createSync("@pi-turn-recovery-replay-");
 		authStorage = await AuthStorage.create(tempDir.join("testauth.db"));
+		// Live-role resolution (#liveRetryRoleHint) filters by provider auth;
+		// pin a runtime key so the test does not depend on host env credentials.
+		authStorage.setRuntimeApiKey("anthropic", "test-key");
 		modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
 	});
 
