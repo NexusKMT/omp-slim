@@ -31,15 +31,14 @@ FROM rust:1.86-slim-bookworm AS natives-builder
 
 ARG BUN_VERSION
 
-# The addon is built with cargo/napi-rs (OMP_NATIVE_BUILD_BACKEND=cargo)
-# instead of Bazel: the image is one fixed host target, so Bazel's hermetic
-# cross toolchains and crate_universe splice buy nothing while costing a
-# bazelisk download plus a full analysis phase on every build. `ci` profile =
-# release codegen, thin LTO, stripped.
+# The addon is built with the default cargo/napi-rs host backend, not Bazel:
+# the image is one fixed host target, so Bazel's hermetic cross toolchains
+# and crate_universe splice buy nothing while costing a bazelisk download
+# plus a full analysis phase on every build. `ci` profile = release codegen,
+# thin LTO, stripped.
 ENV BUN_INSTALL=/opt/bun \
     PATH=/opt/bun/bin:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin \
     CARGO_TERM_COLOR=never \
-    OMP_NATIVE_BUILD_BACKEND=cargo \
     OMP_NATIVE_CARGO_PROFILE=ci
 
 # clang/libclang-dev: bindgen for pipewire-sys/libspa-sys (Linux desktop capture);

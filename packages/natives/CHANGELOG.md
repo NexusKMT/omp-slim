@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `bun run build:native` (the `host` target of `scripts/bazel-natives.ts`) now builds through the local cargo/napi-rs backend by default; Bazel is opt-in via `OMP_NATIVE_BUILD_BACKEND=bazel` or extra bazel args after `--`. Explicit `//:natives-*` targets (the CI/release path) still build through bazelisk.
+
 ## [17.4.0] - 2026-08-20
 
 ### Added
