@@ -1,9 +1,9 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { setProjectDir } from "@oh-my-pi/pi-utils";
+import { logger, setProjectDir } from "@oh-my-pi/pi-utils";
 import { applyProviderGlobalsFromSettings } from "../config/provider-globals";
 import { memoryStatsUnavailableMessage, resolveMemoryBackend } from "../memory-backend";
-import type { FreshSessionResult } from "../session/agent-session";
+import type { FreshSessionResult, HandoffResult } from "../session/agent-session";
 import { COMPACT_MODES, parseCompactArgs } from "../session/compact-modes";
 import { resolveResumableSession } from "../session/session-listing";
 import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
@@ -196,8 +196,44 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	{
 		name: "handoff",
 		description: "Hand off session context to a new session",
+		acpDescription: "Summarize the session into a handoff document and compact in place",
 		inlineHint: "[focus instructions]",
 		allowArgs: true,
+		handle: async (command, runtime) => {
+			if (runtime.session.isStreaming) {
+				return usage("Wait for the current response to finish or abort it before handing off.", runtime);
+			}
+			if (runtime.session.isGeneratingHandoff) {
+				return usage("Handoff generation is already in progress.", runtime);
+			}
+			let result: HandoffResult | undefined;
+			try {
+				result = await runtime.session.handoff(command.args || undefined);
+			} catch (err) {
+				const message = errorMessage(err);
+				// `session.handoff()` normalizes genuine cancellations to this exact
+				// message; every other throw is a real failure (no model selected,
+				// nothing to hand off, already compacted, provider error) and is
+				// surfaced verbatim behind the same "<verb> failed:" prefix `/compact`
+				// uses.
+				if (message === "Handoff cancelled") {
+					return usage("Handoff cancelled.", runtime);
+				}
+				// Persist the real failure so it stays debuggable after the client
+				// message scrolls away (same rationale as the TUI path, #7993).
+				logger.error("Handoff failed", { error: message });
+				return usage(`Handoff failed: ${message}`, runtime);
+			}
+			if (!result) {
+				return usage("Handoff cancelled.", runtime);
+			}
+			const lines = ["Context handed off and compacted in place."];
+			if (result.savedPath) {
+				lines.push(`Handoff document saved to: ${result.savedPath}`);
+			}
+			await runtime.output(lines.join("\n"));
+			return commandConsumed();
+		},
 		handleTui: async (command, runtime) => {
 			const customInstructions = command.args || undefined;
 			runtime.ctx.editor.setText("");
@@ -281,6 +317,24 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 	{
 		name: "retry",
 		description: "Retry the last failed agent turn",
+		handle: async (_command, runtime) => {
+			if (runtime.session.isStreaming) {
+				return usage("Wait for the current response to finish or abort it before retrying.", runtime);
+			}
+			const didRetry = await runtime.session.retry();
+			if (!didRetry) {
+				return usage("Nothing to retry.", runtime);
+			}
+			await runtime.output("Retrying the last failed turn.");
+			// `AgentSession.retry()` only schedules the continuation as a
+			// post-prompt task; it returns before the retried turn streams. The
+			// ACP prompt turn must stay open across that turn: `AcpAgent.prompt`
+			// installs the event subscription before running the command and
+			// `#finishPrompt` unsubscribes, so returning here would silently
+			// swallow the entire retried turn (model output and tool calls).
+			await runtime.session.waitForIdle();
+			return commandConsumed();
+		},
 		handleTui: async (_command, runtime) => {
 			const didRetry = await runtime.ctx.session.retry();
 			if (!didRetry) {

@@ -147,6 +147,8 @@ class FakeAgentSession {
 	waitForIdleBlocker: (() => Promise<void>) | undefined;
 	asyncJobDrain: ((options?: { timeoutMs?: number }) => Promise<boolean>) | undefined;
 	usageFallbackConfirmer: ((confirmation: UsageFallbackConfirmation) => Promise<boolean>) | undefined;
+	retryResult = false;
+	retryCalls = 0;
 	#listeners = new Set<(event: AgentSessionEvent) => void>();
 
 	constructor(
@@ -246,6 +248,11 @@ class FakeAgentSession {
 		}
 		this.isStreaming = false;
 		return true;
+	}
+
+	async retry(): Promise<boolean> {
+		this.retryCalls++;
+		return this.retryResult;
 	}
 
 	async waitForIdle(): Promise<void> {
@@ -1749,6 +1756,7 @@ describe("ACP agent", () => {
 				: [],
 		);
 		expect(names).toContain("fast");
+		expect(names).toContain("retry");
 		expect(names).toContain("force");
 		expect(names).toContain("skill:sample");
 		expect(names).not.toContain("settings");
@@ -1757,7 +1765,7 @@ describe("ACP agent", () => {
 		expect(names).not.toContain("loop");
 		expect(names).not.toContain("login");
 		expect(names).not.toContain("new");
-		expect(names).not.toContain("handoff");
+		expect(names).toContain("handoff");
 		expect(names).not.toContain("fork");
 		expect(names).not.toContain("btw");
 		expect(names).not.toContain("drop");
@@ -2021,6 +2029,58 @@ describe("ACP agent", () => {
 			harness.abortController.abort();
 			await Bun.sleep(0);
 		}
+	});
+
+	it("streams the retried turn inside the /retry prompt turn", async () => {
+		const harness = await createHarness();
+		const created = await harness.agent.newSession({ cwd: harness.cwdA, mcpServers: [] });
+		const session = harness.findSession(created.sessionId)!;
+		session.retryResult = true;
+
+		let emitted = false;
+		session.waitForIdleBlocker = async () => {
+			// One-shot: `#waitForAcpPromptIdle` calls `session.waitForIdle()` again
+			// while handling the retried turn's own `agent_end`, so an unguarded
+			// blocker would re-enter and recurse forever.
+			if (emitted) return;
+			emitted = true;
+			const assistantMessage = makeAssistantMessage("Recovered answer.");
+			for (const listener of session.listeners()) {
+				listener({
+					type: "message_update",
+					message: assistantMessage,
+					assistantMessageEvent: { type: "text_delta", delta: "Recovered answer." },
+				} as AgentSessionEvent);
+			}
+			session.sessionManager.appendMessage(assistantMessage);
+			for (const listener of session.listeners()) {
+				listener({ type: "agent_end", messages: [assistantMessage] } as AgentSessionEvent);
+			}
+		};
+
+		const response = await harness.agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{ type: "text", text: "/retry" }],
+		});
+
+		expect(response.stopReason).toBe("end_turn");
+		expect(session.retryCalls).toBe(1);
+
+		const chunkTexts = harness.updates
+			.filter(
+				update =>
+					update.sessionId === created.sessionId &&
+					update.update.sessionUpdate === "agent_message_chunk" &&
+					update.update.content.type === "text",
+			)
+			.map(update => (update.update as { content: { type: "text"; text: string } }).content.text);
+		expect(chunkTexts).toEqual(["Retrying the last failed turn.", "Recovered answer."]);
+
+		expect(session.waitForIdleCalls).toBeGreaterThanOrEqual(1);
+		expectAcpNotifications(harness.updates);
+
+		harness.abortController.abort();
+		await Bun.sleep(0);
 	});
 
 	it("drains async job deliveries before completing the ACP prompt", async () => {
