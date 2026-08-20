@@ -710,6 +710,7 @@ const USAGE_REPORT_CACHE_KEY_VERSION_OVERRIDES: Partial<Record<Provider, number>
 	anthropic: 3,
 };
 const DEFAULT_OAUTH_REFRESH_TIMEOUT_MS = 10_000;
+const OAUTH_REFRESH_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
 /**
  * Refresh OAuth access tokens this many ms before their stated expiry. The
  * skew exists so callers downstream of {@link AuthStorage} (stream providers,
@@ -4853,6 +4854,7 @@ export class AuthStorage {
 					.map(idx => credentials[idx])
 					.filter((selection): selection is { credential: OAuthCredential; index: number } => Boolean(selection))
 					.map(selection => ({ selection, usage: null, usageChecked: false }));
+		const preflightFailures = new Set<OAuthCandidate>();
 
 		// On the warm skip path the candidate list follows the round-robin `order`, not the pin, so
 		// hoist the pinned credential to the front to actually reuse it. When ranking ran, the pin is
@@ -4896,8 +4898,8 @@ export class AuthStorage {
 					candidate.selection.credential = latestCredential;
 					return;
 				}
+				const credentialId = this.#getStoredCredentials(provider)[candidate.selection.index]?.id;
 				try {
-					const credentialId = this.#getStoredCredentials(provider)[candidate.selection.index]?.id;
 					// Hand #refreshOAuthCredential a stale clone (expires:0) so its
 					// not-yet-expired short-circuit doesn't suppress the forced
 					// re-mint; an in-flight peer refresh is still awaited via the
@@ -4924,10 +4926,23 @@ export class AuthStorage {
 						this.#replaceCredentialAt(provider, candidate.selection.index, updated);
 					}
 				} catch (error) {
-					// Recovery for definitive failures (incl. peer rotation) lives in
-					// #tryOAuthCredential; log instead of swallowing silently — a bare
-					// catch here hid stale-refresh-token replays from concurrent
-					// sessions (one-turn 401 "Invalid authentication credentials").
+					// A failed preflight already exercised the provider refresh path.
+					// Do not replay the same refresh token in the final candidate pass.
+					if (credentialId !== undefined) {
+						const latestIndex = this.#getStoredCredentials(provider).findIndex(
+							entry => entry.id === credentialId,
+						);
+						if (latestIndex !== -1) {
+							this.#markCredentialBlocked(
+								provider,
+								providerKey,
+								latestIndex,
+								Date.now() + OAUTH_REFRESH_FAILURE_BACKOFF_MS,
+								blockScope,
+							);
+						}
+					}
+					preflightFailures.add(candidate);
 					logger.debug("OAuth preflight refresh failed", {
 						provider,
 						index: candidate.selection.index,
@@ -4975,6 +4990,7 @@ export class AuthStorage {
 
 		for (const pass of passes) {
 			for (const candidate of candidates) {
+				if (preflightFailures.has(candidate)) continue;
 				const resolved = await this.#tryOAuthCredential(
 					provider,
 					candidate.selection,
@@ -5048,8 +5064,19 @@ export class AuthStorage {
 						credentialId,
 						signal && refreshSignal ? AbortSignal.any([signal, refreshSignal]) : (signal ?? refreshSignal),
 					),
+				isDefinitiveFailure: error => AIError.isDefinitiveOAuthFailure(String(error)),
+				disabledCause: error => `oauth refresh failed: ${String(error)}`,
 			});
-			if (result.credential) return result.credential;
+			if (result.credential) {
+				if (Date.now() < result.credential.expires) return result.credential;
+				throw new AIError.OAuthError(
+					`OAuth refresh did not produce a usable credential for provider: ${provider}`,
+					{
+						kind: "token-refresh",
+						provider,
+					},
+				);
+			}
 			throw new AIError.OAuthError(`OAuth credential no longer exists for provider: ${provider}`, {
 				kind: "token-refresh",
 				provider,
@@ -5081,9 +5108,9 @@ export class AuthStorage {
 						provider,
 					});
 				}
-				refreshPromise = customProvider.refreshToken(credential);
+				refreshPromise = customProvider.refreshToken(credential, signal);
 			} else {
-				refreshPromise = refreshOAuthToken(provider as OAuthProvider, credential);
+				refreshPromise = refreshOAuthToken(provider as OAuthProvider, credential, signal);
 			}
 		}
 		// Bound the refresh so a slow/hanging token endpoint cannot stall credential selection.
@@ -5379,14 +5406,19 @@ export class AuthStorage {
 						index: selection.index,
 					});
 					await this.reload();
-					if (allowFallback) return this.#resolveOAuthSelection(provider, sessionId, options);
+					return undefined;
 				}
 				if (this.#getCredentialsForProvider(provider).some(credential => credential.type === "oauth")) {
 					if (allowFallback) return this.#resolveOAuthSelection(provider, sessionId, options);
 				}
 			} else {
 				// Block temporarily for transient failures (5 minutes)
-				this.#markCredentialBlocked(provider, providerKey, selection.index, Date.now() + 5 * 60 * 1000);
+				this.#markCredentialBlocked(
+					provider,
+					providerKey,
+					selection.index,
+					Date.now() + OAUTH_REFRESH_FAILURE_BACKOFF_MS,
+				);
 			}
 		}
 

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed concurrent xAI OAuth refreshes revoking shared grants or repeatedly retrying dead refresh tokens when multiple processes use the same credential database.
+
 ## [17.4.0] - 2026-08-20
 
 ### Added
