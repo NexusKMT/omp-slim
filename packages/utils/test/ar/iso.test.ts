@@ -168,3 +168,18 @@ test("enforces metadata, entry, member, and path limits", async () => {
 		readIso(memoryByteSource(bytes), { limits: { ...DEFAULT_ARCHIVE_LIMITS, maxPathBytes: 5 } }),
 	).rejects.toThrow("member name exceeds 5 bytes");
 });
+
+test("accepts zero-length records with junk extents (bsdtar symlink Joliet entries)", async () => {
+	// bsdtar's Joliet record for a Rock Ridge symlink is a zero-length file
+	// whose extent points at an unallocated block; 7-Zip and bsdtar accept
+	// these, and the Rock Ridge merge must still surface the link.
+	const entries = await readIso(memoryByteSource(await arFixture("minimal-symlink.iso")), {
+		limits: DEFAULT_ARCHIVE_LIMITS,
+	});
+	const link = findEntry(entries, "link.txt");
+	expect(link.storage?.type).toBe("link");
+	if (link.storage?.type !== "link") throw new Error("unreachable");
+	expect(link.storage.targetPath).toBe("real.txt");
+	const real = findEntry(entries, "real.txt");
+	expect(textDecoder.decode(await readMember(real))).toBe("target\n");
+});

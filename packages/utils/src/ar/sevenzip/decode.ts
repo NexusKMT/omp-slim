@@ -81,13 +81,6 @@ function read32LE(bytes: Uint8Array, offset: number): number {
 	return (bytes[offset]! | (bytes[offset + 1]! << 8) | (bytes[offset + 2]! << 16) | (bytes[offset + 3]! << 24)) >>> 0;
 }
 
-function write32LE(bytes: Uint8Array, offset: number, value: number): void {
-	bytes[offset] = value;
-	bytes[offset + 1] = value >>> 8;
-	bytes[offset + 2] = value >>> 16;
-	bytes[offset + 3] = value >>> 24;
-}
-
 function deltaDecode(bytes: Uint8Array, distance: number): void {
 	const history = new Uint8Array(256);
 	let position = 0;

@@ -469,7 +469,6 @@ function parseLzhHeader(bytes: Uint8Array, offset: number, options: FormatReadOp
 	let crc = 0;
 	let legacyFilename: string | undefined;
 	let mtimeMs: number | undefined;
-	let mode: number | undefined;
 	let osId = 0;
 	let dataStart: number;
 	const fields: LzhExtendedFields = {};
@@ -564,7 +563,7 @@ function parseLzhHeader(bytes: Uint8Array, offset: number, options: FormatReadOp
 
 	size = fields.size ?? size;
 	mtimeMs = fields.mtimeMs ?? mtimeMs;
-	mode = fields.mode;
+	const mode = fields.mode;
 	if (fields.commonCrc !== undefined) {
 		const relative = fields.commonCrcOffset! - offset;
 		if (crc16WithZeroRange(bytes.subarray(offset, dataStart), relative, relative + 2) !== fields.commonCrc) {
