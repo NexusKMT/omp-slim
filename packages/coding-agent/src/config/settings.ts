@@ -580,7 +580,11 @@ export class Settings {
 		if (path === "modelRoles") {
 			modelRolesSignal.fire();
 		}
-		if (path === "providers.openai-codex.codeMode" || path === "providers.openai-codex.codeModeDirectTools") {
+		if (
+			path === "providers.openai-codex.codeMode" ||
+			path === "providers.openai-codex.codeModeDirectTools" ||
+			path === "eval.js"
+		) {
 			codeModeSignal.fire();
 		}
 	}

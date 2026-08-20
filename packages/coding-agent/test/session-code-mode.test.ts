@@ -207,7 +207,8 @@ describe("Code Mode session reconciliation", () => {
 	): { session: AgentSession; directModel: Model; codeModel: Model } {
 		const codeModel = model("openai-codex", "code_mode_only");
 		const directModel = model("openai");
-		const tools = [tool("eval"), tool("read"), ...extraTools];
+		const evalTool = { ...tool("eval"), supportsCodeModeTransport: () => settings.get("eval.js") };
+		const tools = [evalTool, tool("read"), ...extraTools];
 		const session = new AgentSession({
 			agent: new Agent({ initialState: { model: codeModel, systemPrompt: [], tools } }),
 			sessionManager: SessionManager.inMemory(),
@@ -281,6 +282,24 @@ describe("Code Mode session reconciliation", () => {
 		expect(session.agent.state.tools.map(value => value.name)).toEqual(["eval", "read"]);
 	});
 
+	test("runtime eval.js changes reconcile Code Mode transport availability", async () => {
+		const settings = Settings.isolated();
+		settings.set("eval.js", true);
+		settings.set("providers.openai-codex.codeMode", "auto");
+		const { session } = createSession(settings);
+		await session.setActiveToolsByName(["eval", "read"]);
+		expect(session.getActiveToolNames()).toEqual(["eval"]);
+
+		settings.set("eval.js", false);
+		await session.runToolRegistryMutation(async () => undefined);
+		expect(session.getActiveToolNames()).toEqual(["eval", "read"]);
+		expect(session.codeModeNamespacesInfo).toBeUndefined();
+
+		settings.set("eval.js", true);
+		await session.runToolRegistryMutation(async () => undefined);
+		expect(session.getActiveToolNames()).toEqual(["eval"]);
+	});
+
 	test("reduced tool sets retain eval as the Code Mode transport", async () => {
 		const { session } = createSession(Settings.isolated({ "providers.openai-codex.codeMode": "auto" }));
 
@@ -289,6 +308,20 @@ describe("Code Mode session reconciliation", () => {
 		expect(session.getActiveToolNames()).toEqual(["eval"]);
 		expect(session.getEnabledToolNames()).toEqual(["read", "eval"]);
 		expect(session.getToolForEvalBridge("read")?.name).toBe("read");
+	});
+
+	test("Code Mode deactivation removes transport-injected eval", async () => {
+		const settings = Settings.isolated();
+		settings.set("providers.openai-codex.codeMode", "auto");
+		const { session } = createSession(settings);
+		await session.setActiveToolsByName(["read"]);
+		expect(session.getEnabledToolNames()).toEqual(["read", "eval"]);
+
+		settings.set("providers.openai-codex.codeMode", "off");
+		await session.runToolRegistryMutation(async () => undefined);
+
+		expect(session.getActiveToolNames()).toEqual(["read"]);
+		expect(session.getEnabledToolNames()).toEqual(["read"]);
 	});
 
 	test("Vibe teardown preserves bridge-enabled Code Mode tools", async () => {

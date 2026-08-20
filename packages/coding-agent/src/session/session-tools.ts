@@ -224,6 +224,8 @@ export class SessionTools {
 	#toolPredicateNames: readonly string[] | undefined;
 	/** Wire-name snapshot for the direct Code Mode tools last applied successfully. */
 	#codeModeDirectWireSignature: string | undefined;
+	/** Whether eval was added only as the current Code Mode transport. */
+	#codeModeInjectedEval = false;
 	/**
 	 * `xd://` device names the current base system prompt renders in its catalog
 	 * (the last rebuild's {@link BuildSystemPromptResult.xdevCatalogNames}). Consulted
@@ -674,7 +676,10 @@ export class SessionTools {
 
 	/** Reapplies the preserved enabled set after model or Code Mode setting changes. */
 	reconcileCodeMode(): Promise<void> {
-		return this.applyActiveToolsByName(this.getEnabledToolNames());
+		const enabledToolNames = this.getEnabledToolNames();
+		return this.applyActiveToolsByName(
+			this.#codeModeInjectedEval ? enabledToolNames.filter(name => name !== "eval") : enabledToolNames,
+		);
 	}
 
 	/** Enabled MCP tools in their current presentation partition. */
@@ -814,8 +819,8 @@ export class SessionTools {
 	async #applyActiveToolsByName(toolNames: string[], forcePromptRefresh = false, signal?: AbortSignal): Promise<void> {
 		signal?.throwIfAborted();
 		toolNames = normalizeToolNames(toolNames);
-		const codeModeToolNames =
-			this.#toolRegistry.has("eval") && !toolNames.includes("eval") ? [...toolNames, "eval"] : toolNames;
+		const injectEval = this.#toolRegistry.has("eval") && !toolNames.includes("eval");
+		const codeModeToolNames = injectEval ? [...toolNames, "eval"] : toolNames;
 		const codeMode = resolveCodeMode({
 			provider: this.#host.model()?.provider ?? "",
 			toolMode: this.#host.model()?.toolMode,
@@ -824,6 +829,7 @@ export class SessionTools {
 			enabledToolNames: codeModeToolNames,
 			evalTransportAvailable: this.#hasCodeModeEvalTransport(),
 		});
+		const nextCodeModeInjectedEval = codeMode.active && injectEval;
 		if (codeMode.active) toolNames = codeModeToolNames;
 		let builtInWriteAvailable = this.#builtInToolNames.has("write");
 		if (toolNames.includes("write") && !builtInWriteAvailable) {
@@ -956,6 +962,7 @@ export class SessionTools {
 		this.#codeModeDirectWireSignature = codeMode.active
 			? this.#computeCodeModeDirectWireSignature(appliedNames)
 			: undefined;
+		this.#codeModeInjectedEval = nextCodeModeInjectedEval;
 		if (rebuiltSystemPrompt && rebuiltSignature) {
 			if (this.#lastAppliedToolSignature !== undefined) this.#host.clearInheritedProviderPromptCacheKey();
 			this.#baseSystemPrompt = rebuiltSystemPrompt;
