@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `opencode-go/deepseek-v4-flash` exposing the generic `minimal`/`low`/`medium`/`high`/`xhigh` thinking ladder instead of DeepSeek V4's real `low`/`high`/`max` tiers. The model is pinned to the Responses transport (the Go gateway serves it only at `/responses`), which the DeepSeek effort branch did not admit, so it fell through to the default ladder; the branch now covers the `openai-responses` transport like every other host ([#9134](https://github.com/can1357/oh-my-pi/issues/9134)).
+
 ## [17.4.0] - 2026-08-20
 
 ### Added

@@ -314,6 +314,30 @@ describe("model thinking derivation", () => {
 		expect(getSupportedEfforts(v32)).toEqual([Effort.High, Effort.Max]);
 	});
 
+	it("applies the DeepSeek effort contract to opencode-go openai-responses flash (issue #9134)", () => {
+		// opencode-go/deepseek-v4-flash is pinned to the Responses transport
+		// (the Go gateway serves it only at /responses), but the effort ladder
+		// is a model property: it must expose low/high/max like the pro sibling
+		// on chat completions, not the generic minimal..xhigh fallback.
+		const flash = createModel({
+			id: "deepseek-v4-flash",
+			api: "openai-responses",
+			provider: "opencode-go",
+			baseUrl: "https://opencode.ai/zen/go/v1",
+		});
+		const pro = createModel({
+			id: "deepseek-v4-pro",
+			api: "openai-completions",
+			provider: "opencode-go",
+			baseUrl: "https://opencode.ai/zen/go/v1",
+		});
+
+		expect(getSupportedEfforts(flash)).toEqual([Effort.Low, Effort.High, Effort.Max]);
+		expect(flash.thinking?.effortMap).toBeUndefined();
+		expect(() => requireSupportedEffort(flash, Effort.Medium)).toThrow(/Supported efforts: low, high, max/);
+		expect(getSupportedEfforts(pro)).toEqual([Effort.Low, Effort.High, Effort.Max]);
+	});
+
 	it("grants the low/high/max ladder to OpenRouter deepseek-v4-pro-0813 but not the undated route (issue #8517)", () => {
 		// OpenRouter's /models advertises reasoning.supported_efforts
 		// [low, high, max] for the dated SKU; the discovered ladder is baked
