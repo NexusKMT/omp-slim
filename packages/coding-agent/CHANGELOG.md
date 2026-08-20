@@ -130,6 +130,7 @@
 - Fixed LM Studio models keeping their architectural `max_context_length` after a JIT load served a smaller `loaded_context_length`, so context accounting and compaction ran against a window larger than the backend actually served. `ModelRegistry.refreshSelectedModelMetadata` now re-probes LM Studio's native `/api/v0/models` (via the existing `loaded_context_length`-preferring resolution) in addition to llama.cpp, and — because a model is still unloaded at selection time and only JIT-loads during the first request — the session now re-probes and folds the runtime window into the live model after the first successful inference of a lazy-load local model, without a provider-session reset ([#9001](https://github.com/can1357/oh-my-pi/issues/9001)).
 
 ## [17.3.8] - 2026-08-19
+- Fixed unquoted internal URLs in `bash` commands consuming adjacent shell operators into the resolved filesystem path.
 
 ### Added
 
