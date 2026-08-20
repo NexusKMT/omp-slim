@@ -203,10 +203,11 @@ describe("Code Mode session reconciliation", () => {
 			systemPrompt: [`tools:${names.join(",")}`],
 		}),
 		setActiveToolNames?: (names: Iterable<string>) => void,
+		extraTools: AgentTool[] = [],
 	): { session: AgentSession; directModel: Model; codeModel: Model } {
 		const codeModel = model("openai-codex", "code_mode_only");
 		const directModel = model("openai");
-		const tools = [tool("eval"), tool("read")];
+		const tools = [tool("eval"), tool("read"), ...extraTools];
 		const session = new AgentSession({
 			agent: new Agent({ initialState: { model: codeModel, systemPrompt: [], tools } }),
 			sessionManager: SessionManager.inMemory(),
@@ -238,6 +239,34 @@ describe("Code Mode session reconciliation", () => {
 
 		await session.setModel(codeModel);
 		expect(session.agent.state.tools.map(value => value.name)).toEqual(["eval"]);
+	});
+
+	test("model switches refresh direct wire-name metadata", async () => {
+		let wireName: string | undefined = "apply_patch";
+		const edit = {
+			...tool("edit"),
+			get customWireName() {
+				return wireName;
+			},
+		};
+		const { session, codeModel } = createSession(
+			Settings.isolated({
+				"providers.openai-codex.codeMode": "auto",
+				"providers.openai-codex.codeModeDirectTools": ["edit"],
+			}),
+			undefined,
+			undefined,
+			[edit],
+		);
+		await session.setActiveToolsByName(["eval", "edit"]);
+		expect((session.codeModeNamespacesInfo as ToolNamespacesInfo).functions.functions.apply_patch).toBeDefined();
+
+		wireName = undefined;
+		await session.setModel({ ...codeModel, id: `${codeModel.id}-next` });
+
+		const info = session.codeModeNamespacesInfo as ToolNamespacesInfo;
+		expect(info.functions.functions.edit).toBeDefined();
+		expect(info.functions.functions.apply_patch).toBeUndefined();
 	});
 
 	test("runtime setting changes immediately reconcile the Code Mode surface", async () => {

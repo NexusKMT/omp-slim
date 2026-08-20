@@ -222,6 +222,8 @@ export class SessionTools {
 	#enabledToolNames = new Set<string>();
 	/** Names currently exposed through tool-session `isToolActive` predicates. */
 	#toolPredicateNames: readonly string[] | undefined;
+	/** Wire-name snapshot for the direct Code Mode tools last applied successfully. */
+	#codeModeDirectWireSignature: string | undefined;
 	/**
 	 * `xd://` device names the current base system prompt renders in its catalog
 	 * (the last rebuild's {@link BuildSystemPromptResult.xdevCatalogNames}). Consulted
@@ -656,6 +658,20 @@ export class SessionTools {
 		return false;
 	}
 
+	codeModeDirectWireMetadataChanged(): boolean {
+		if (this.#codeModeDirectWireSignature === undefined) return false;
+		return this.#codeModeDirectWireSignature !== this.#computeCodeModeDirectWireSignature(this.getActiveToolNames());
+	}
+
+	#computeCodeModeDirectWireSignature(toolNames: readonly string[]): string {
+		let signature = "";
+		for (const name of toolNames) {
+			const tool = this.#toolRegistry.get(name);
+			signature += `${name}\u0000${tool?.customWireName ?? name}\u0001`;
+		}
+		return signature;
+	}
+
 	/** Reapplies the preserved enabled set after model or Code Mode setting changes. */
 	reconcileCodeMode(): Promise<void> {
 		return this.applyActiveToolsByName(this.getEnabledToolNames());
@@ -937,6 +953,9 @@ export class SessionTools {
 		this.#notifyXdevMountDelta(previousMounted);
 		this.#host.agent.setTools(appliedTools);
 		this.#host.setCodeModeNamespacesInfo?.(nextCodeModeNamespacesInfo);
+		this.#codeModeDirectWireSignature = codeMode.active
+			? this.#computeCodeModeDirectWireSignature(appliedNames)
+			: undefined;
 		if (rebuiltSystemPrompt && rebuiltSignature) {
 			if (this.#lastAppliedToolSignature !== undefined) this.#host.clearInheritedProviderPromptCacheKey();
 			this.#baseSystemPrompt = rebuiltSystemPrompt;

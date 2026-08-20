@@ -98,6 +98,7 @@ test("EvalTool description renders the Code Mode guidance and declarations block
 	expect(active).toContain("exec tool declarations:");
 	expect(active).toContain("declare const tool: {");
 	expect(active).toContain("  read(args:");
+	expect(active).toContain("parallel([() => tool.");
 
 	const inactive = new EvalTool({
 		...baseSession,
