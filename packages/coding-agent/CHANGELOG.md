@@ -43,6 +43,7 @@
 - Improved markdown code-fence header contrast on affected dark themes so language tags and citation paths remain readable ([#9118](https://github.com/can1357/oh-my-pi/pull/9118) by [@Mustaqeem66](https://github.com/Mustaqeem66)).
 - Configured discovery providers with `authHeader` keep cached models available across restarts ([#9112](https://github.com/can1357/oh-my-pi/issues/9112)).
 - Marketplace-installed plugins with manifest settings can now be configured through `omp plugin config` and Settings → Plugins ([#9106](https://github.com/can1357/oh-my-pi/issues/9106)).
+- Explicit DAP adapters can attach without a PID or port when their `attachDefaults` provide the adapter-specific target arguments.
 
 ## [17.4.0] - 2026-08-20
 
