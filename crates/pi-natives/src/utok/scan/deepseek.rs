@@ -129,9 +129,10 @@ fn main_end<U: Unit>(units: &[U], pos: usize) -> Option<usize> {
 	if c != '\r' && c != '\n' && !is_ps(c) {
 		// Not L (checked above), not P/S, not CR/LF: prefix-eligible.
 		if let Some((c2, n2)) = decode_at(units, pos + n)
-			&& is_lm(c2) {
-				return Some(lm_run_end(units, pos + n + n2));
-			}
+			&& is_lm(c2)
+		{
+			return Some(lm_run_end(units, pos + n + n2));
+		}
 	}
 
 	// ` ?[\p{P}\p{S}]+[\r\n]*`

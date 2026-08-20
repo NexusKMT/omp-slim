@@ -339,14 +339,14 @@ fn piece_bytes<'a, U: Unit>(piece: &'a [U], buf: &'a mut Vec<u8>) -> &'a [u8] {
 		// (dominant for code/English u16 input, cf. xutf's ASCII kernels;
 		// the trivial loop autovectorizes).
 		if let Some(b) = piece[i].ascii() {
-  				buf.push(b);
-  				i += 1;
-  			} else {
-  				let (c, n) = U::decode(piece, i);
-  				i += n;
-  				let mut tmp = [0u8; 4];
-  				buf.extend_from_slice(c.encode_utf8(&mut tmp).as_bytes());
-  			}
+			buf.push(b);
+			i += 1;
+		} else {
+			let (c, n) = U::decode(piece, i);
+			i += n;
+			let mut tmp = [0u8; 4];
+			buf.extend_from_slice(c.encode_utf8(&mut tmp).as_bytes());
+		}
 	}
 	buf
 }
