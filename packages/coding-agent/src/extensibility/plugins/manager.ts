@@ -11,6 +11,7 @@ import {
 	isEnoent,
 	logger,
 } from "@oh-my-pi/pi-utils";
+import { resolveActiveProjectRegistryPath } from "../../discovery/helpers";
 import { loadExtensions } from "../extensions/loader";
 import { refreshBunGitCache } from "./bun-git-cache";
 import { type GitSource, parseGitUrl } from "./git-url";
@@ -681,7 +682,10 @@ export class PluginManager {
 	 * Resolve one installed plugin, including a marketplace runtime package that
 	 * is intentionally omitted from {@link list}.
 	 *
-	 * `options.path` is the trusted install path from the marketplace registry.
+	 * Resolution order: an explicit trusted `options.path` (marketplace registry
+	 * entry) wins; otherwise the user plugin root; otherwise the active project's
+	 * marketplace registry, so `--scope project` installs resolve when the CLI
+	 * runs inside that project.
 	 */
 	async getPlugin(name: string, options: { path?: string } = {}): Promise<InstalledPlugin | undefined> {
 		const [deps, config, projectOverrides] = await Promise.all([
@@ -689,15 +693,44 @@ export class PluginManager {
 			this.#ensureConfigLoaded(),
 			this.#loadProjectOverrides(),
 		]);
-		if (!options.path && !this.#collectInstalledNames(deps, config).has(name)) {
-			return undefined;
+		if (options.path) {
+			return this.#resolvePlugin(name, options.path, config, projectOverrides);
 		}
-		return this.#resolvePlugin(
-			name,
-			options.path ?? path.join(getPluginsNodeModules(), name),
-			config,
-			projectOverrides,
-		);
+		if (this.#collectInstalledNames(deps, config).has(name)) {
+			return this.#resolvePlugin(name, path.join(getPluginsNodeModules(), name), config, projectOverrides);
+		}
+		const projectPath = await this.#resolveProjectMarketplaceInstallPath(name);
+		if (projectPath) {
+			return this.#resolvePlugin(name, projectPath, config, projectOverrides);
+		}
+		return undefined;
+	}
+
+	/**
+	 * Locate a project-scoped marketplace plugin's cached install path by package
+	 * name. Project marketplace installs register their runtime symlink and
+	 * lockfile under the project root — invisible to the user-root lookup above —
+	 * so match each active-project registry entry against its resolved package
+	 * name (`package.json` `name`, falling back to the plugin-id segment).
+	 */
+	async #resolveProjectMarketplaceInstallPath(name: string): Promise<string | undefined> {
+		const registryPath = await resolveActiveProjectRegistryPath(this.#cwd);
+		if (!registryPath) return undefined;
+		const registry = await readInstalledPluginsRegistry(registryPath);
+		for (const pluginId in registry.plugins) {
+			const fallbackName = parsePluginId(pluginId)?.name ?? pluginId;
+			for (const entry of registry.plugins[pluginId]) {
+				let packageName = fallbackName;
+				try {
+					const pkg: RuntimePackageJson = await Bun.file(path.join(entry.installPath, "package.json")).json();
+					if (typeof pkg.name === "string" && pkg.name.length > 0) packageName = pkg.name;
+				} catch (err) {
+					if (!isEnoent(err)) throw err;
+				}
+				if (packageName === name) return entry.installPath;
+			}
+		}
+		return undefined;
 	}
 
 	/**
