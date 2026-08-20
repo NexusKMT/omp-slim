@@ -1,0 +1,25 @@
+name: omp-patch-4218
+on:
+  push:
+    branches: [fix/4218-devin-trailer-evidence]
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patches, self-delete, push
+        run: |
+          set -euo pipefail
+          if [ ! -f scripts/omp-patch-4218.py ]; then
+            echo "patch script already consumed; nothing to do"
+            exit 0
+          fi
+          python3 scripts/omp-patch-4218.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -q .github/workflows/omp-patch-4218.yml scripts/omp-patch-4218.py
+          git add -A
+          git commit -m "fix(ai): capture Devin Connect trailer evidence for invalid_argument rejections"
+          git push
