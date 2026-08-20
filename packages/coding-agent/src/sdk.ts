@@ -2146,9 +2146,13 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						settings,
 						preferences: matchPreferences,
 					});
-					return Boolean(
-						resolved.model || (resolved.configuredPatterns && resolved.configuredPatterns.length > 0),
-					);
+					// Only a concretely resolved model counts as a runtime match. A role
+					// alias that expanded to `configuredPatterns` but resolved no model
+					// (its discoverable provider hasn't been fetched yet) must NOT
+					// short-circuit the fallback refresh below — otherwise `@role`
+					// selectors pointing at discovery-backed models never trigger the
+					// fetch and fail with `Model "@role" not found`.
+					return Boolean(resolved.model);
 				}),
 			);
 			if (!runtimeResolved && modelRegistry.getDiscoverableProviders().length > 0) {
