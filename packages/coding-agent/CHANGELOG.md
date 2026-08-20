@@ -123,6 +123,10 @@
 
 - Fixed Claude Code marketplace plugins installed with `scope: "project"` loading outside their recorded `projectPath`, so foreign projects no longer inherit their MCP servers, hooks, tools, commands, skills, or agents ([#9043](https://github.com/can1357/oh-my-pi/issues/9043)).
 
+### Fixed
+
+- Fixed the session resume hint dropping the active `--profile`, so the `omp --resume <id>` command printed on exit (and the fatal-recovery hint) failed with `Session "<id>" not found` for sessions started under a named profile. The hint now carries `--profile <name>` when a profile is active ([#9018](https://github.com/can1357/oh-my-pi/issues/9018)).
+
 ## [17.3.8] - 2026-08-19
 
 ### Added
