@@ -51,6 +51,7 @@ function makeSession(opts: { messages: unknown[]; contextWindow?: number; usage?
 		agent: { state: { tools: [] } },
 		skills: [],
 		model: { id: "test-model", contextWindow },
+		modelRegistry: { isUsingOAuth: () => false },
 		state: { messages: opts.messages, model: { contextWindow } },
 		sessionManager: {
 			getUsageStatistics: () => ({
@@ -68,6 +69,7 @@ function makeSession(opts: { messages: unknown[]; contextWindow?: number; usage?
 			getSessionName: () => "test",
 		},
 		getAsyncJobSnapshot: () => ({ running: [] }),
+		isFastModeActive: () => false,
 		getContextUsage: () => {
 			calls++;
 			return usage;
@@ -203,7 +205,7 @@ describe("StatusLineComponent context breakdown", () => {
 		expect(breakdown.contextWindow).toBe(128_000);
 	});
 
-	it("does not query usage when no context segment is rendered", () => {
+	it("memoizes usage queries so repeated renders query only once", () => {
 		const { session, usageCalls } = makeSession({ messages: [userMessage("hi")] });
 		const comp = new StatusLineComponent(session);
 		comp.updateSettings({
@@ -213,9 +215,11 @@ describe("StatusLineComponent context breakdown", () => {
 			separator: "powerline-thin",
 		});
 
-		const border = comp.getTopBorder(80);
-		expect(border.content.length).toBeGreaterThan(0);
-		expect(usageCalls()).toBe(0);
+		const border1 = comp.getTopBorder(80);
+		const border2 = comp.getTopBorder(80);
+		expect(border1.content.length).toBeGreaterThan(0);
+		expect(border2.content.length).toBeGreaterThan(0);
+		expect(usageCalls()).toBe(1);
 	});
 
 	it("renders the anchored percent against the (sub-)budget window in the context segment", () => {
@@ -270,5 +274,39 @@ describe("StatusLineComponent context breakdown", () => {
 		const plain = comp.getTopBorder(80).content.replaceAll(/\x1b\[[0-9;]*m/g, "");
 		expect(plain).toContain("5K/?");
 		expect(plain).not.toContain("0.0%/0");
+	});
+
+	it("dims the unused portion of the gap fill between left and right segments based on context usage", () => {
+		const { session } = makeSession({
+			messages: [userMessage("hi"), assistantMessage("done")],
+			usage: { tokens: 50_000, contextWindow: 100_000, percent: 50 },
+		});
+		const comp = new StatusLineComponent(session);
+		comp.updateSettings({
+			preset: "custom",
+			leftSegments: ["pi"],
+			rightSegments: ["session_name"],
+			separator: "none",
+			sessionAccent: false,
+		});
+
+		const border = comp.getTopBorder(80).content;
+		// With 50% context usage, the gap fill contains a faint sequence \x1b[2m for the right half
+		expect(border).toContain("\x1b[2m");
+		expect(border).toContain("\x1b[22m");
+	});
+
+	it("renders standalone status line when setStandalone is true", () => {
+		const { session } = makeSession({
+			messages: [userMessage("hi")],
+			usage: { tokens: 1000, contextWindow: 100_000, percent: 1 },
+		});
+		const comp = new StatusLineComponent(session);
+		expect(comp.render(80)).toHaveLength(0); // Not standalone -> no main status in render()
+
+		comp.setStandalone(true);
+		const lines = comp.render(80);
+		expect(lines).toHaveLength(1); // Standalone -> renders main status line
+		expect(lines[0]).toContain("pi");
 	});
 });

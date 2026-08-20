@@ -385,6 +385,7 @@ export interface EditorTheme {
 	/** Style function for inline hint/ghost text (dim text after cursor) */
 	hintStyle?: (text: string) => string;
 }
+export type EditorBorderStyle = "box" | "claude" | "pi" | "borderless";
 
 export interface EditorTopBorder {
 	/** The status content (already styled) */
@@ -523,7 +524,7 @@ export class Editor implements Component, Focusable {
 	#topBorderProviderSignature: string | undefined;
 	#topBorderProviderRevision: number | undefined;
 	#borderVisible = true;
-
+	#borderStyle: EditorBorderStyle = "box";
 	constructor(theme: EditorTheme) {
 		this.#theme = theme;
 		this.borderColor = theme.borderColor;
@@ -580,6 +581,15 @@ export class Editor implements Component, Focusable {
 
 	setPromptGutter(promptGutter: string | undefined): void {
 		this.#promptGutter = promptGutter;
+	}
+	getBorderStyle(): EditorBorderStyle {
+		return this.#borderStyle;
+	}
+
+	setBorderStyle(style: EditorBorderStyle): void {
+		if (this.#borderStyle === style) return;
+		this.#borderStyle = style;
+		this.#widthEpochRevision++;
 	}
 
 	/**
@@ -724,31 +734,48 @@ export class Editor implements Component, Focusable {
 		// No cached state to invalidate currently
 	}
 
+	#isBorderVisible(): boolean {
+		return this.#borderVisible && this.#borderStyle !== "borderless";
+	}
+
+	#getEffectivePromptGutter(): string | undefined {
+		if (this.#promptGutter !== undefined) return this.#promptGutter;
+		if (this.#borderStyle === "claude" || this.#borderStyle === "borderless") return "❯ ";
+		if (this.#borderStyle === "pi") return "> ";
+		return undefined;
+	}
+
 	#getEditorPaddingX(): number {
-		const padding = this.#paddingXOverride ?? this.#theme.editorPaddingX ?? 2;
+		if (this.#paddingXOverride !== undefined) return Math.max(0, this.#paddingXOverride);
+		if (this.#borderStyle === "claude" || this.#borderStyle === "borderless") return 0;
+		if (this.#borderStyle === "pi") return 1;
+		const padding = this.#theme.editorPaddingX ?? 2;
 		return Math.max(0, padding);
 	}
 
 	#getHorizontalChromeWidth(paddingX: number): number {
-		return this.#borderVisible ? paddingX + 1 : 0;
+		if (!this.#isBorderVisible() || this.#borderStyle === "claude") return 0;
+		return paddingX + 1;
 	}
 
 	#getPromptGutterWidth(width: number, paddingX: number): number {
-		if (this.#borderVisible || !this.#promptGutter) return 0;
+		const gutter = this.#getEffectivePromptGutter();
+		if (!gutter) return 0;
 		const chromeWidth = 2 * this.#getHorizontalChromeWidth(paddingX);
 		const availableWidth = Math.max(0, width - chromeWidth);
-		return Math.min(visibleWidth(this.#promptGutter), availableWidth);
+		return Math.min(visibleWidth(gutter), availableWidth);
 	}
 
 	#getPromptGutter(
 		width: number,
 		paddingX: number,
 	): { firstLine: string; continuation: string; width: number } | undefined {
-		if (this.#borderVisible || !this.#promptGutter) return undefined;
+		const gutter = this.#getEffectivePromptGutter();
+		if (!gutter) return undefined;
 		const gutterWidth = this.#getPromptGutterWidth(width, paddingX);
 		if (gutterWidth === 0) return undefined;
 		return {
-			firstLine: sliceByColumn(this.#promptGutter, 0, gutterWidth, true),
+			firstLine: sliceByColumn(gutter, 0, gutterWidth, true),
 			continuation: padding(gutterWidth),
 			width: gutterWidth,
 		};
@@ -761,17 +788,17 @@ export class Editor implements Component, Focusable {
 
 	#getLayoutWidth(width: number, paddingX: number): number {
 		const contentWidth = this.#getContentWidth(width, paddingX);
-		const cursorReserve = this.#borderVisible && paddingX === 0 ? 1 : 0;
+		const isBox = this.#isBorderVisible() && this.#borderStyle !== "claude";
+		const cursorReserve = isBox && paddingX === 0 ? 1 : 0;
 		// Keep cursor/scroll layout addressable even when a borderless prompt gutter consumes every visible column.
 		return Math.max(1, contentWidth - cursorReserve);
 	}
 
 	#getVisibleContentHeight(contentLines: number): number {
 		if (this.#maxHeight === undefined) return contentLines;
-		const verticalChrome = this.#borderVisible ? 2 : 0;
+		const verticalChrome = !this.#isBorderVisible() ? 0 : 2;
 		return Math.max(1, this.#maxHeight - verticalChrome);
 	}
-
 	/** Apply the optional input decorator to a plain (ANSI-free) text segment.
 	 *  Decoration only adds zero-width SGR codes, so visible width is unchanged.
 	 *  Splits around CURSOR_MARKER so each user-text segment is decorated in
@@ -883,7 +910,9 @@ export class Editor implements Component, Focusable {
 
 	render(width: number): readonly string[] {
 		const paddingX = this.#getEditorPaddingX();
-		const borderVisible = this.#borderVisible;
+		const borderVisible = this.#isBorderVisible();
+		const borderStyle = this.#borderStyle;
+		const isSideBordered = borderVisible && borderStyle !== "claude";
 		const promptGutter = this.#getPromptGutter(width, paddingX);
 		const contentAreaWidth = this.#getContentWidth(width, paddingX);
 		const layoutWidth = this.#getLayoutWidth(width, paddingX);
@@ -922,47 +951,48 @@ export class Editor implements Component, Focusable {
 		}
 
 		if (borderVisible) {
-			// Render top border: ╭─ [status content] ────────────────╮
-			const topFillWidth = Math.max(0, width - borderWidth * 2);
-			// Provider (lazy) wins over eager content — a host that installs both
-			// wants the coalesced path; falling back to eager keeps existing
-			// setTopBorder callers working unchanged.
-			let topBorder: EditorTopBorder | undefined;
-			if (this.#topBorderProvider) {
-				const previousWidth = this.#topBorderProviderWidth;
-				topBorder = this.#topBorderProvider(topFillWidth);
-				const signature = topBorder ? `${topBorder.width}\0${topBorder.content}` : "";
-				const revision = topBorder?.revision;
-				if (
-					(previousWidth !== undefined &&
-						revision !== undefined &&
-						this.#topBorderProviderRevision !== undefined &&
-						revision !== this.#topBorderProviderRevision) ||
-					(previousWidth === topFillWidth && signature !== this.#topBorderProviderSignature)
-				) {
-					this.#widthEpochRevision++;
-				}
-				this.#topBorderProviderWidth = topFillWidth;
-				this.#topBorderProviderSignature = signature;
-				this.#topBorderProviderRevision = revision;
-			} else {
-				topBorder = this.#topBorderContent;
-			}
-			if (topBorder) {
-				const { content, width: statusWidth } = topBorder;
-				if (statusWidth <= topFillWidth) {
-					// Status fits - add fill after it
-					const fillWidth = topFillWidth - statusWidth;
-					result.push(topLeft + content + this.borderColor(box.horizontal.repeat(fillWidth)) + topRight);
-				} else {
-					// Status too long - truncate it
-					const truncated = truncateToWidth(content, Math.max(0, topFillWidth - 1));
-					const truncatedWidth = visibleWidth(truncated);
-					const fillWidth = Math.max(0, topFillWidth - truncatedWidth);
-					result.push(topLeft + truncated + this.borderColor(box.horizontal.repeat(fillWidth)) + topRight);
-				}
-			} else {
+			if (borderStyle === "claude") {
+				result.push(this.borderColor(box.horizontal.repeat(width)));
+			} else if (borderStyle === "pi") {
+				const topFillWidth = Math.max(0, width - borderWidth * 2);
 				result.push(topLeft + horizontal.repeat(topFillWidth) + topRight);
+			} else {
+				const topFillWidth = Math.max(0, width - borderWidth * 2);
+				let topBorder: EditorTopBorder | undefined;
+				if (this.#topBorderProvider) {
+					const previousWidth = this.#topBorderProviderWidth;
+					topBorder = this.#topBorderProvider(topFillWidth);
+					const signature = topBorder ? `${topBorder.width}\0${topBorder.content}` : "";
+					const revision = topBorder?.revision;
+					if (
+						(previousWidth !== undefined &&
+							revision !== undefined &&
+							this.#topBorderProviderRevision !== undefined &&
+							revision !== this.#topBorderProviderRevision) ||
+						(previousWidth === topFillWidth && signature !== this.#topBorderProviderSignature)
+					) {
+						this.#widthEpochRevision++;
+					}
+					this.#topBorderProviderWidth = topFillWidth;
+					this.#topBorderProviderSignature = signature;
+					this.#topBorderProviderRevision = revision;
+				} else {
+					topBorder = this.#topBorderContent;
+				}
+				if (topBorder) {
+					const { content, width: statusWidth } = topBorder;
+					if (statusWidth <= topFillWidth) {
+						const fillWidth = topFillWidth - statusWidth;
+						result.push(topLeft + content + this.borderColor(box.horizontal.repeat(fillWidth)) + topRight);
+					} else {
+						const truncated = truncateToWidth(content, Math.max(0, topFillWidth - 1));
+						const truncatedWidth = visibleWidth(truncated);
+						const fillWidth = Math.max(0, topFillWidth - truncatedWidth);
+						result.push(topLeft + truncated + this.borderColor(box.horizontal.repeat(fillWidth)) + topRight);
+					}
+				} else {
+					result.push(topLeft + horizontal.repeat(topFillWidth) + topRight);
+				}
 			}
 		}
 
@@ -991,12 +1021,12 @@ export class Editor implements Component, Focusable {
 			const hasCursor = layoutLine.hasCursor && layoutLine.cursorPos !== undefined;
 			const marker = emitCursorMarker ? CURSOR_MARKER : "";
 
-			if (!borderVisible && displayWidth > lineContentWidth) {
+			if (!isSideBordered && displayWidth > lineContentWidth) {
 				displayText = sliceByColumn(displayText, 0, lineContentWidth, true);
 				displayWidth = visibleWidth(displayText);
 			}
 
-			if (!borderVisible && lineContentWidth === 0) {
+			if (!isSideBordered && lineContentWidth === 0) {
 				if (hasCursor && !this.#useTerminalCursor) {
 					const zeroWidthCursorBudget = visibleWidth(gutterText);
 					const zeroWidthCursorReplacement = this.cursorOverride
@@ -1039,7 +1069,7 @@ export class Editor implements Component, Focusable {
 				if (marker) {
 					const before = displayText.slice(0, layoutLine.cursorPos);
 					const after = displayText.slice(layoutLine.cursorPos);
-					if (this.#imeSafeCursorLayout && after.length === 0 && borderVisible) {
+					if (this.#imeSafeCursorLayout && after.length === 0 && isSideBordered) {
 						// Terminal frontends render IME marked text locally before committed bytes
 						// reach the application. Keep the end-of-input cursor row empty to its
 						// right so that insertion cannot shift box chrome onto the next row.
@@ -1050,7 +1080,7 @@ export class Editor implements Component, Focusable {
 						const hintText = hintStyle(truncateToWidth(inlineHint, availWidth));
 						displayText = before + marker + hintText;
 						displayWidth += Math.min(visibleWidth(inlineHint), availWidth);
-					} else if (after.length === 0 && !borderVisible && displayWidth >= lineContentWidth) {
+					} else if (after.length === 0 && !isSideBordered && displayWidth >= lineContentWidth) {
 						displayText = this.#renderTerminalCursorMarker(before, marker, lineContentWidth);
 					} else {
 						displayText = before + marker + after;
@@ -1076,7 +1106,7 @@ export class Editor implements Component, Focusable {
 				} else if (this.cursorOverride) {
 					// Cursor override replaces the normal end-of-text cursor glyph
 					const overrideWidth = this.cursorOverrideWidth ?? 1;
-					if (!borderVisible && displayWidth + overrideWidth > lineContentWidth) {
+					if (!isSideBordered && displayWidth + overrideWidth > lineContentWidth) {
 						// Borderless editors have no spare padding cell for an end-of-line cursor glyph.
 						// Preserve cursorOverride by replacing the tail of the line with it.
 						const widthLimitedCursor = this.#renderEndOfLineCursorAtWidthLimit(before, marker, lineContentWidth, {
@@ -1097,7 +1127,7 @@ export class Editor implements Component, Focusable {
 				} else {
 					// Cursor is at the end - add thin cursor glyph
 					const { text: cursor, width: cursorWidth } = this.#getStyledInputCursor();
-					if (!borderVisible && displayWidth + cursorWidth > lineContentWidth) {
+					if (!isSideBordered && displayWidth + cursorWidth > lineContentWidth) {
 						// Borderless editors have no spare padding cell for an end-of-line cursor glyph.
 						// Highlight the last grapheme so the cursor stays visible without consuming width.
 						const widthLimitedCursor = this.#renderEndOfLineCursorAtWidthLimit(before, marker, lineContentWidth);
@@ -1136,8 +1166,18 @@ export class Editor implements Component, Focusable {
 
 			const linePad = padding(Math.max(0, lineContentWidth - displayWidth));
 
-			if (!borderVisible) {
+			if (!isSideBordered) {
 				result.push(gutterText + displayText + linePad);
+				continue;
+			}
+
+			const rightChromeCells = Math.max(1, paddingX + 1 - cursorPaddingOverflow);
+			if (borderStyle === "pi") {
+				const leftBorder = this.borderColor(`${box.vertical}${padding(paddingX)}`);
+				const inThumb = scrollbarThumb && visibleIndex >= scrollbarThumb.start && visibleIndex < scrollbarThumb.end;
+				const rightGlyph = inThumb ? "█" : box.vertical;
+				const rightBorder = this.borderColor(`${padding(Math.max(0, rightChromeCells - 1))}${rightGlyph}`);
+				result.push(leftBorder + gutterText + displayText + linePad + rightBorder);
 				continue;
 			}
 
@@ -1146,7 +1186,6 @@ export class Editor implements Component, Focusable {
 			// right chrome by the exact overflow count: drop padding spaces first, then the
 			// trailing `─`, but never the corner/vertical bar itself.
 			const isLastLine = visibleIndex === visibleLayoutLines.length - 1;
-			const rightChromeCells = Math.max(1, paddingX + 1 - cursorPaddingOverflow);
 			if (isLastLine && imeSafeCursorTail) {
 				const leftBorder = this.borderColor(`${box.vertical}${padding(paddingX)}`);
 				const bottomBorder = this.borderColor(
@@ -1171,6 +1210,16 @@ export class Editor implements Component, Focusable {
 				const rightGlyph = inThumb ? "█" : box.vertical;
 				const rightBorder = this.borderColor(`${padding(Math.max(0, rightChromeCells - 1))}${rightGlyph}`);
 				result.push(leftBorder + displayText + linePad + rightBorder);
+			}
+		}
+
+		if (borderVisible) {
+			if (borderStyle === "claude") {
+				result.push(this.borderColor(box.horizontal.repeat(width)));
+			} else if (borderStyle === "pi") {
+				result.push(
+					this.borderColor(`${box.bottomLeft}${box.horizontal.repeat(Math.max(0, width - 2))}${box.bottomRight}`),
+				);
 			}
 		}
 

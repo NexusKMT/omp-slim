@@ -81,6 +81,9 @@ import {
 
 export type ModelRoleStorage = "global" | "project";
 
+export type ComposerShape = "box" | "claude" | "pi" | "borderless";
+export const COMPOSER_SHAPE_VALUES = ["box", "claude", "pi", "borderless"] as const;
+
 export type SettingTab =
 	| "appearance"
 	| "model"
@@ -130,7 +133,7 @@ export const TAB_METADATA: Record<SettingTab, { label: string; icon: `tab.${stri
  * Ungrouped settings render first, before any section heading.
  */
 export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
-	appearance: ["Theme", "Status Line", "Display", "Images"],
+	appearance: ["Theme", "Composer", "Status Line", "Display", "Images"],
 	model: ["Thinking", "Sampling", "Prompt", "Retry & Fallback", "Advisor", "Prewalk", "Vision"],
 	interaction: [
 		"Input",
@@ -631,6 +634,40 @@ export const SETTINGS_SCHEMA = {
 			group: "Theme",
 			label: "Color-Blind Mode",
 			description: "Use blue instead of green for diff additions",
+		},
+	},
+	// Composer
+	"composer.shape": {
+		type: "enum",
+		values: COMPOSER_SHAPE_VALUES,
+		default: "box",
+		ui: {
+			tab: "appearance",
+			group: "Composer",
+			label: "Composer Shape",
+			description: "Visual layout of the input editor and status line",
+			options: [
+				{
+					value: "box",
+					label: "Rounded Box (Default)",
+					description: "Status line embedded in top border, compact 2-line prompt",
+				},
+				{
+					value: "claude",
+					label: "Claude Code",
+					description: "Full-width horizontal rules above and below, status line at bottom",
+				},
+				{
+					value: "pi",
+					label: "Pi",
+					description: "Framed rounded box with prompt glyph, status line at bottom",
+				},
+				{
+					value: "borderless",
+					label: "Borderless",
+					description: "Clean prompt glyph with status line at bottom, no box borders",
+				},
+			],
 		},
 	},
 

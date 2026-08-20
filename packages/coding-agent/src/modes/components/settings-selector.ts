@@ -35,6 +35,7 @@ import {
 	validateProviderMaxInFlightRequests,
 } from "../../config/settings";
 import type {
+	ComposerShape,
 	SettingTab,
 	StatusLinePreset,
 	StatusLineSegmentId,
@@ -44,6 +45,7 @@ import { SETTING_TABS, TAB_METADATA } from "../../config/settings-schema";
 import { getCurrentThemeName, getSelectListTheme, getSettingsListTheme, theme } from "../../modes/theme/theme";
 import { AUTO_THINKING, type ConfiguredThinkingLevel } from "../../thinking";
 import { getTabBarTheme } from "../shared";
+import { ComposerShapePreview } from "./composer-shape-preview";
 import { bottomBorder, divider, row, topBorder } from "./overlay-box";
 import { handleInputOrEscape, PluginSettingsComponent } from "./plugin-settings";
 import { getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
@@ -1124,8 +1126,13 @@ export class SettingsSelectorComponent implements Component {
 			});
 			onPreview = value => shapePreview.setValue(value);
 			footer = shapePreview;
+		} else if (def.path === "composer.shape") {
+			const shapePreview = new ComposerShapePreview(currentValue as ComposerShape, {
+				requestRender: this.context.requestRender,
+			});
+			onPreview = value => shapePreview.setValue(value as ComposerShape);
+			footer = shapePreview;
 		}
-
 		// Provide status line preview for theme selection
 		const isThemeSetting = def.path === "theme.dark" || def.path === "theme.light";
 		const getPreview = isThemeSetting ? this.callbacks.getStatusLinePreview : undefined;

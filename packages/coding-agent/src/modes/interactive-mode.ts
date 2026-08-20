@@ -67,6 +67,7 @@ import {
 	Settings,
 	settings,
 } from "../config/settings";
+import type { ComposerShape } from "../config/settings-schema";
 import { clearClaudePluginRootsCache } from "../discovery/helpers";
 import type {
 	AutocompleteProviderFactory,
@@ -1105,11 +1106,12 @@ export class InteractiveMode implements InteractiveModeContext {
 		// HUDs, just above the editor's hook-widget top margin — so it reads next to
 		// the prompt while keeping the one-line gap above the editor.
 		this.ui.addChild(this.statusContainer);
-		this.ui.addChild(this.statusLine); // Only renders hook statuses (main status in editor border)
 		this.ui.addChild(this.hookWidgetContainerAbove);
 		this.ui.addChild(this.editorContainer);
 		this.ui.addChild(this.hookWidgetContainerBelow);
+		this.ui.addChild(this.statusLine);
 		this.ui.setFocus(this.editor);
+		this.syncComposerShape();
 
 		this.#inputController.setupKeyHandlers();
 		this.#inputController.setupEditorSubmitHandler();
@@ -1919,6 +1921,20 @@ export class InteractiveMode implements InteractiveModeContext {
 			segmentOptions: settings.get("statusLine.segmentOptions"),
 			compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
 		});
+	}
+	syncComposerShape(): void {
+		const shape = (settings.get("composer.shape") as ComposerShape) ?? "box";
+		this.editor.setBorderStyle(shape);
+		if (shape === "box") {
+			this.editor.setTopBorderProvider(availableWidth => this.statusLine.getTopBorder(availableWidth));
+			this.statusLine.setStandalone(false);
+		} else {
+			this.editor.setTopBorderProvider(undefined);
+			this.editor.setTopBorder(undefined);
+			this.statusLine.setStandalone(true);
+		}
+		this.updateEditorBorderColor();
+		this.ui.requestRender();
 	}
 
 	#handleSessionAccentInputsChanged(): void {
@@ -4470,7 +4486,8 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.ui.requestRender();
 		};
 		nextEditor.setShimmerRepaintHandler(() => this.ui.requestDirectWrite(nextEditor));
-		nextEditor.setTopBorderProvider(availableWidth => this.statusLine.getTopBorder(availableWidth));
+		this.editor = nextEditor;
+		this.syncComposerShape();
 		nextEditor.setMaxHeight(this.#computeEditorMaxHeight());
 		if (this.historyStorage) {
 			nextEditor.setHistoryStorage(this.historyStorage);

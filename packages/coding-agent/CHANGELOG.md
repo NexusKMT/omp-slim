@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added `composer.shape` setting (`/settings` → Appearance → Composer) to customize the editor's visual layout, including live layout previews in settings and the setup wizard
 - Added `omp ps` for inspecting and controlling daemon-broker supervised processes from outside the harness: an interactive alt-screen monitor on TTYs (live table, info/logs views, stop/kill/restart, all-scopes toggle) plus static `--plain`/`--json` listings and `info`/`logs`/`stop`/`kill`/`restart` subactions with `--all`, `--dir`, and `--global` scope selectors. Brokers now record their project directory in `scope.json` so runtime scopes can be mapped back to projects offline.
 - Added `qwenTemplateReasoningEffort` to the `models.yml` `compat` schema, so the auto-enabled Qwen 3.8+ template effort dialect (`chat_template_kwargs.reasoning_effort`) can be switched off per provider/model for strict local servers that reject unknown `chat_template_kwargs`.
 - Added `tokenizer` to custom model and `modelOverrides` configuration. It overrides the catalog-resolved local tokenizer family for a model when a proxy serves a known model id with a different tokenizer.

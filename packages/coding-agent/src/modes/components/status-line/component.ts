@@ -291,6 +291,7 @@ function hasGitBackedSegment(segments: readonly StatusLineSegmentId[]): boolean 
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class StatusLineComponent implements Component {
+	#standalone = false;
 	#widthEpochRevision = 0;
 	#settings: StatusLineSettings = {};
 	#effectiveSettings: EffectiveStatusLineSettings | undefined;
@@ -1537,7 +1538,7 @@ export class StatusLineComponent implements Component {
 			return { usedTokens: cache.usedTokens, contextWindow: cache.contextWindow };
 		}
 
-		const usage = this.session.getContextUsage();
+		const usage = typeof this.session.getContextUsage === "function" ? this.session.getContextUsage() : undefined;
 		const usedTokens = usage?.tokens ?? 0;
 		const contextWindow = usage?.contextWindow ?? modelContextWindow;
 		this.#contextUsageCache = {
@@ -1559,7 +1560,6 @@ export class StatusLineComponent implements Component {
 		width: number,
 		segmentOptions: StatusLineSettings["segmentOptions"],
 		includePath: boolean,
-		includeContext: boolean,
 		includeGit: boolean,
 		includePr: boolean,
 	): SegmentContext {
@@ -1587,15 +1587,10 @@ export class StatusLineComponent implements Component {
 		};
 
 		let contextWindow = state.model?.contextWindow ?? this.session.model?.contextWindow ?? 0;
-		let contextPercent: number | null = 0;
-		let contextTokens = 0;
-		if (includeContext) {
-			const breakdown = this.getCachedContextBreakdown();
-			contextTokens = breakdown.usedTokens;
-			contextWindow = breakdown.contextWindow || contextWindow;
-			contextPercent = contextWindow > 0 ? (breakdown.usedTokens / contextWindow) * 100 : null;
-		}
-
+		const breakdown = this.getCachedContextBreakdown();
+		let contextTokens = breakdown.usedTokens;
+		contextWindow = breakdown.contextWindow || contextWindow;
+		let contextPercent: number | null = contextWindow > 0 ? (breakdown.usedTokens / contextWindow) * 100 : null;
 		// Collab guest: context comes from the host's state frames — the local
 		// replica does no accounting of its own.
 		const collabState = this.#collabStatus?.stateOverride;
@@ -1717,8 +1712,6 @@ export class StatusLineComponent implements Component {
 		const effectiveSettings = this.#resolveSettings();
 		const includePath =
 			hasPathSegment(effectiveSettings.leftSegments) || hasPathSegment(effectiveSettings.rightSegments);
-		const includeContext =
-			hasContextSegment(effectiveSettings.leftSegments) || hasContextSegment(effectiveSettings.rightSegments);
 		const gitEnabled = this.#gitEnabled();
 		const includeGit =
 			gitEnabled &&
@@ -1729,7 +1722,6 @@ export class StatusLineComponent implements Component {
 			width,
 			effectiveSettings.segmentOptions,
 			includePath,
-			includeContext,
 			includeGit,
 			includePr,
 		);
@@ -1891,8 +1883,17 @@ export class StatusLineComponent implements Component {
 		const accentHex = sessionName
 			? getSessionAccentHex(sessionName, theme.getMajorThemeColorHexes(), theme.accentSurfaceLuminance)
 			: undefined;
-		const gapColor = getSessionAccentAnsi(accentHex) ?? theme.getFgAnsi("border");
-		const gapFill = `${gapColor}${theme.boxRound.horizontal.repeat(gapWidth)}\x1b[39m`;
+		const gapColor = getSessionAccentAnsi(accentHex) ?? theme.getFgAnsi("borderAccent");
+		const unusedColor = theme.getFgAnsi("border");
+		let usedCount = gapWidth;
+		if (ctx.contextPercent !== null && ctx.contextPercent !== undefined) {
+			const clampedPct = Math.min(100, Math.max(0, ctx.contextPercent));
+			usedCount = Math.min(gapWidth, Math.max(0, Math.round((clampedPct / 100) * gapWidth)));
+		}
+		const unusedCount = gapWidth - usedCount;
+		const usedFill = usedCount > 0 ? `${gapColor}${theme.boxRound.horizontal.repeat(usedCount)}` : "";
+		const unusedFill = unusedCount > 0 ? `${unusedColor}${theme.boxRound.horizontal.repeat(unusedCount)}` : "";
+		const gapFill = `\x1b[49m${usedFill}${unusedFill}\x1b[39m`;
 		return leftGroup + gapFill + rightGroup;
 	}
 
@@ -1909,16 +1910,28 @@ export class StatusLineComponent implements Component {
 			revision: this.#widthEpochRevision,
 		};
 	}
+	setStandalone(standalone: boolean): void {
+		this.#standalone = standalone;
+	}
 
 	render(width: number): readonly string[] {
-		// Only render hook statuses - main status is in editor's top border
-		const showHooks = this.#settings.showHookStatus ?? true;
-		if (!showHooks || this.#hookStatuses.size === 0) {
-			return [];
+		const lines: string[] = [];
+		if (this.#standalone) {
+			let content = this.#buildStatusLine(width);
+			if (content) {
+				if (this.#focusedAgentId) {
+					content = `\x1b[2m${content.replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")}\x1b[22m`;
+				}
+				lines.push(content);
+			}
 		}
-
-		return Array.from(this.#hookStatuses.entries())
-			.sort(([a], [b]) => a.localeCompare(b))
-			.map(([, text]) => truncateToWidth(sanitizeStatusText(text), width));
+		const showHooks = this.#settings.showHookStatus ?? true;
+		if (showHooks && this.#hookStatuses.size > 0) {
+			const hookLines = Array.from(this.#hookStatuses.entries())
+				.sort(([a], [b]) => a.localeCompare(b))
+				.map(([, text]) => truncateToWidth(sanitizeStatusText(text), width));
+			lines.push(...hookLines);
+		}
+		return lines;
 	}
 }

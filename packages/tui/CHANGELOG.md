@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added support for customizable editor border styles including box, claude, pi, and borderless
 - Added support for warning risk notes and row markers in settings lists
 
 ## [17.3.8] - 2026-08-19
