@@ -971,6 +971,7 @@ export class SessionMaintenance {
 				details,
 				fromExtension,
 				preserveData,
+				method: fromExtension ? undefined : selectedMethod,
 				codexCompaction,
 				advisorResetReason: "compact",
 			});
@@ -1101,6 +1102,7 @@ export class SessionMaintenance {
 			details,
 			fromExtension: false,
 			preserveData: undefined,
+			method: "handoff",
 			codexCompaction: undefined,
 			advisorResetReason: "handoff",
 		});
@@ -1310,6 +1312,7 @@ export class SessionMaintenance {
 		details: unknown;
 		fromExtension: boolean;
 		preserveData: Record<string, unknown> | undefined;
+		method: CompactionMethod | undefined;
 		codexCompaction: CodexCompactionContext | undefined;
 		advisorResetReason: string;
 		detachExtensionEmit?: boolean;
@@ -1319,9 +1322,13 @@ export class SessionMaintenance {
 			args.shortSummary,
 			args.firstKeptEntryId,
 			args.tokensBefore,
-			args.details,
-			args.fromExtension,
-			args.preserveData,
+			{
+				details: args.details,
+				fromExtension: args.fromExtension,
+				preserveData: args.preserveData,
+				method: args.method,
+				tokensAfter: this.#projectCompactedContextTokens(args),
+			},
 		);
 		const newEntries = this.#host.sessionManager.getEntries();
 		const sessionContext = this.#host.buildDisplaySessionContext();
@@ -2164,15 +2171,49 @@ export class SessionMaintenance {
 			result.summary,
 			result.tokensBefore,
 			new Date().toISOString(),
-			result.shortSummary,
-			undefined,
-			undefined,
-			blocks,
+			{
+				shortSummary: result.shortSummary,
+				blocks,
+			},
 		);
 		let tokens =
 			computeNonMessageTokens(this.#host.nonMessageTokenSource(), this.#tokenizer) +
 			this.#tokenizer.countMessage(summaryMessage);
 		tokens += this.#tokenizer.countMessages(preparation.recentMessages);
+		return tokens;
+	}
+
+	/**
+	 * Estimated context tokens after a compaction commit: fixed non-message
+	 * overhead + the summary message (with any snapcompact frames re-attached)
+	 * + every message from `firstKeptEntryId` to the branch leaf. Mirrors the
+	 * post-commit context rebuild; persisted as `tokensAfter` on the entry so
+	 * the transcript divider can show the before → after amounts.
+	 */
+	#projectCompactedContextTokens(args: {
+		summary: string;
+		shortSummary: string | undefined;
+		tokensBefore: number;
+		firstKeptEntryId: string;
+		preserveData: Record<string, unknown> | undefined;
+	}): number {
+		const archive = snapcompact.getPreservedArchive(args.preserveData);
+		const blocks = archive
+			? snapcompact.historyBlocks(archive, { maxFrameDataBytes: snapcompact.FRAME_DATA_BYTES_BUDGET })
+			: undefined;
+		const summaryMessage = createCompactionSummaryMessage(args.summary, args.tokensBefore, new Date().toISOString(), {
+			shortSummary: args.shortSummary,
+			blocks,
+		});
+		let tokens =
+			computeNonMessageTokens(this.#host.nonMessageTokenSource(), this.#tokenizer) +
+			this.#tokenizer.countMessage(summaryMessage);
+		let inKeptRegion = false;
+		for (const entry of this.#host.sessionManager.getBranch()) {
+			if (entry.id === args.firstKeptEntryId) inKeptRegion = true;
+			if (!inKeptRegion) continue;
+			if (entry.type === "message") tokens += this.#tokenizer.countMessage(entry.message);
+		}
 		return tokens;
 	}
 
@@ -2499,9 +2540,18 @@ export class SessionMaintenance {
 			result.shortSummary,
 			result.firstKeptEntryId,
 			result.tokensBefore,
-			result.details,
-			false,
-			result.preserveData,
+			{
+				details: result.details,
+				preserveData: result.preserveData,
+				method: "snapcompact",
+				tokensAfter: this.#projectCompactedContextTokens({
+					summary: result.summary,
+					shortSummary: result.shortSummary,
+					tokensBefore: result.tokensBefore,
+					firstKeptEntryId: result.firstKeptEntryId,
+					preserveData: result.preserveData,
+				}),
+			},
 		);
 		const sessionContext = this.#host.buildDisplaySessionContext();
 		this.#host.agent.replaceMessages(sessionContext.messages);
@@ -2698,6 +2748,7 @@ export class SessionMaintenance {
 					preserveData: armedSpec.result.preserveData,
 					fromExtension: false,
 					codexCompaction: armedSpec.codexCompaction,
+					method: armedSpec.method,
 					action,
 					reason,
 					willRetry,
@@ -3284,6 +3335,7 @@ export class SessionMaintenance {
 				preserveData,
 				fromExtension,
 				codexCompaction,
+				method: fromExtension ? undefined : method,
 				action,
 				reason,
 				willRetry,
@@ -3375,6 +3427,7 @@ export class SessionMaintenance {
 		preserveData: Record<string, unknown> | undefined;
 		fromExtension: boolean;
 		codexCompaction: CodexCompactionContext | undefined;
+		method: CompactionMethod | undefined;
 		action: "context-full" | "handoff" | "snapcompact" | "remote";
 		reason: "overflow" | "threshold" | "idle" | "incomplete";
 		willRetry: boolean;
@@ -3412,6 +3465,7 @@ export class SessionMaintenance {
 			fromExtension: args.fromExtension,
 			preserveData: args.preserveData,
 			codexCompaction: args.codexCompaction,
+			method: args.method,
 			advisorResetReason: "auto-compaction",
 			detachExtensionEmit: detachPostCommit,
 		});

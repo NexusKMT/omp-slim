@@ -1501,7 +1501,7 @@ export class SessionAdvisors {
 		// only assistants appended afterward can become the next usage anchor.
 		const advisorUsageAnchorStartIndex = preparation.recentMessages.length + 1;
 		const summaryMessage = {
-			...createCompactionSummaryMessage(summary, tokensBefore, new Date().toISOString(), shortSummary),
+			...createCompactionSummaryMessage(summary, tokensBefore, new Date().toISOString(), { shortSummary }),
 			firstKeptEntryId,
 			advisorUsageAnchorStartIndex,
 		} satisfies AdvisorCompactionSummaryMessage;

@@ -16,6 +16,7 @@
 ### Changed
 
 - Expanded native tokenizer support across catalog models, adding exact embedded token counting for Claude, Qwen 3.5+, DeepSeek V3/V4/R1, Kimi K2/K3, and GLM-5+ models. `Tokenizer` now constructs from a resolved catalog `Model`.
+- `createCompactionSummaryMessage` takes an options object after `(summary, tokensBefore, timestamp)`; `CompactionSummaryMessage` gained optional `method` and `tokensAfter` display metadata.
 
 ## [17.3.8] - 2026-08-19
 
