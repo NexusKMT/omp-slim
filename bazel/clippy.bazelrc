@@ -33,6 +33,7 @@ build:clippy-strict --@rules_rust//rust/settings:clippy_flag=-Aclippy::needless_
 build:clippy-strict --@rules_rust//rust/settings:clippy_flag=-Aclippy::option_if_let_else
 build:clippy-strict --@rules_rust//rust/settings:clippy_flag=-Aclippy::ptr_as_ptr
 build:clippy-strict --@rules_rust//rust/settings:clippy_flag=-Aclippy::redundant_closure_for_method_calls
+build:clippy-strict --@rules_rust//rust/settings:clippy_flag=-Aclippy::redundant_pub_crate
 build:clippy-strict --@rules_rust//rust/settings:clippy_flag=-Aclippy::ref_as_ptr
 build:clippy-strict --@rules_rust//rust/settings:clippy_flag=-Aclippy::return_self_not_must_use
 build:clippy-strict --@rules_rust//rust/settings:clippy_flag=-Aclippy::significant_drop_tightening
