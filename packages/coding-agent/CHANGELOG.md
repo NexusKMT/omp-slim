@@ -126,6 +126,7 @@
 ### Fixed
 
 - Fixed the session resume hint dropping the active `--profile`, so the `omp --resume <id>` command printed on exit (and the fatal-recovery hint) failed with `Session "<id>" not found` for sessions started under a named profile. The hint now carries `--profile <name>` when a profile is active ([#9018](https://github.com/can1357/oh-my-pi/issues/9018)).
+- Added `isProjectTrusted()` to `ExtensionContext`, a compatibility shim for extensions written against upstream `@earendil-works/pi-coding-agent`'s per-directory trust gate (e.g. Plannotator). It always returns `true`, truthfully reflecting that OMP already loads project-local inputs (`.omp/extensions`, `.omp/config.yml`) unconditionally.
 
 ## [17.3.8] - 2026-08-19
 
