@@ -56,13 +56,15 @@ function makeEmptyContext(): SessionContext {
 	};
 }
 
-/** Build a minimal InteractiveModeContext mock, returning spies for assertions. */
-function makeCtx(): {
+interface RenderInitialMessagesTestContext {
 	ctx: InteractiveModeContext;
 	transcriptSpy: Mock<(options?: { collapseCompactedHistory?: boolean }) => SessionContext>;
 	llmContextSpy: Mock<() => SessionContext>;
 	renderSessionContextSpy: Mock<(...args: unknown[]) => Promise<void>>;
-} {
+}
+
+/** Build a minimal InteractiveModeContext mock, returning spies for assertions. */
+function makeCtx(): RenderInitialMessagesTestContext {
 	const transcriptSpy = vi.fn(() => makeEmptyContext());
 	const llmContextSpy = vi.fn(() => makeEmptyContext());
 	const renderSessionContextSpy = vi.fn(async () => {});
@@ -738,7 +740,7 @@ describe("UiHelpers.renderSessionContext — mid-stream tool call rebuild", () =
 describe("UiHelpers.renderInitialMessages — replay convergence (issue #7811)", () => {
 	/** getEntries mock whose returned array grows on every call, simulating a
 	 * source that persists a new session entry during every replay pass. */
-	function growingEntriesCtx(): ReturnType<typeof makeCtx> & { getEntriesCalls: () => number } {
+	function growingEntriesCtx(): RenderInitialMessagesTestContext {
 		const made = makeCtx();
 		let calls = 0;
 		const getEntries = vi.fn(() => {
@@ -747,7 +749,7 @@ describe("UiHelpers.renderInitialMessages — replay convergence (issue #7811)",
 		});
 		(made.ctx.viewSession.sessionManager as unknown as { getEntries: unknown }).getEntries = getEntries;
 		(made.ctx.sessionManager as unknown as { getEntries: unknown }).getEntries = getEntries;
-		return { ...made, getEntriesCalls: () => calls };
+		return made;
 	}
 
 	it("terminates when entries are persisted during every replay pass", async () => {
@@ -759,16 +761,10 @@ describe("UiHelpers.renderInitialMessages — replay convergence (issue #7811)",
 		await Settings.init({ inMemory: true });
 		const { ctx, transcriptSpy } = growingEntriesCtx();
 
-		let settled = false;
-		const replay = new UiHelpers(ctx).renderInitialMessages().then(() => {
-			settled = true;
-		});
-		const timeout = new Promise<void>(resolve => setTimeout(resolve, 5_000));
-		await Promise.race([replay, timeout]);
+		await new UiHelpers(ctx).renderInitialMessages();
 
-		expect(settled).toBeTrue();
-		// Bounded restarts: one initial context build plus at most the restart cap.
-		expect(transcriptSpy.mock.calls.length).toBeLessThanOrEqual(6);
+		// The initial pass plus four retries reaches the five-attempt cap.
+		expect(transcriptSpy).toHaveBeenCalledTimes(5);
 		expect(ctx.initialChatRendered).toBeTrue();
 	});
 

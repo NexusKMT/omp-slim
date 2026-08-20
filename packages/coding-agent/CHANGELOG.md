@@ -44,6 +44,7 @@
 - Configured discovery providers with `authHeader` keep cached models available across restarts ([#9112](https://github.com/can1357/oh-my-pi/issues/9112)).
 - Marketplace-installed plugins with manifest settings can now be configured through `omp plugin config` and Settings → Plugins ([#9106](https://github.com/can1357/oh-my-pi/issues/9106)).
 - Explicit DAP adapters can attach without a PID or port when their `attachDefaults` provide the adapter-specific target arguments.
+- Fixed `omp --resume` replaying a transcript forever at 100% CPU when session entries keep arriving during the initial render ([#7811](https://github.com/can1357/oh-my-pi/issues/7811)).
 
 ## [17.4.0] - 2026-08-20
 

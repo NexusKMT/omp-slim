@@ -80,9 +80,8 @@ const TRANSCRIPT_RENDER_CHUNK_MS = 8;
  * tree and replays every message from scratch, so on a large resumed session
  * (issue #7811: ~6k entries) a single pass takes longer than the interval
  * between entries persisted by background sources — the restart condition
- * becomes permanently true and an unbounded loop livelocks at 100% CPU (and,
- * on the synchronous mid-stream path, blocks the event loop so not even
- * SIGTERM can run). Entries that land after the final accepted pass are
+ * becomes permanently true and an unbounded loop livelocks at 100% CPU.
+ * Entries that land after the final accepted pass are
  * durable in the session file and reach the display on the next rebuild.
  */
 const TRANSCRIPT_REPLAY_MAX_ATTEMPTS = 5;
@@ -803,12 +802,6 @@ export class UiHelpers {
 					});
 					break;
 				}
-				// Yield between passes so a restarted replay — including the fully
-				// synchronous mid-stream branch above — can never wedge the event
-				// loop: signal handlers, timers, and terminal input keep running
-				// while the replay is retried.
-				await waitForImmediate();
-
 				// An extension persisted a display message while the transcript replay
 				// yielded. The display callback stayed gated by initialChatRendered;
 				// discard the stale partial tree and replay the current session once
