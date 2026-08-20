@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Nix-packaged builds no longer fail to load the on-demand `onnxruntime-node`/`sherpa-onnx` addons with `libstdc++.so.6: cannot open shared object file` (STT, TTS, tiny-model and mnemopi workers) — the package advertises its C++ runtime library dirs and the agent injects them into the inference worker subprocesses only.
+
 ## [17.4.0] - 2026-08-20
 
 ### Added
