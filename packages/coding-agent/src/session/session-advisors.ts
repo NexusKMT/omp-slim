@@ -360,6 +360,38 @@ export class SessionAdvisors {
 		this.#buildAdvisorRuntime(true);
 	}
 
+	/**
+	 * True when the enabled advisor roster still has an entry left at `no_model`.
+	 *
+	 * At construction the advisor role is resolved against whatever the model
+	 * catalog holds at that instant. Discovery-backed providers (e.g. GitHub
+	 * Copilot) may not have populated the registry yet, so a valid configured
+	 * model can transiently fail to resolve and record `no_model`. See #9010.
+	 */
+	hasInactiveNoModelAdvisor(): boolean {
+		if (!this.#advisorEnabled) return false;
+		for (const entry of this.#advisorStatuses.values()) {
+			if (entry.status === "no_model") return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Reactivate an enabled advisor stuck at `no_model` after the initial
+	 * background model discovery settles, so a valid configured model that was
+	 * merely late to the catalog starts without a manual `/advisor` toggle. The
+	 * rebuild is quiet (no warnings) because a warning was already emitted at
+	 * construction. Returns true when the rebuild brought an advisor online so the
+	 * caller can refresh the status line. See #9010.
+	 */
+	retryAfterModelDiscovery(): boolean {
+		if (this.#host.isDisposed() || !this.hasInactiveNoModelAdvisor()) return false;
+		const before = this.#advisors.length;
+		if (before > 0 && !this.#advisorRuntimeMatchesCurrentConfig()) this.#stopAdvisorRuntime();
+		this.#buildAdvisorRuntime(true, false);
+		return this.#advisors.length > before;
+	}
+
 	/** Starts configured advisor runtimes when they are eligible. */
 	buildRuntime(seedToCurrent = false): boolean {
 		return this.#buildAdvisorRuntime(seedToCurrent);
@@ -657,7 +689,7 @@ export class SessionAdvisors {
 		return true;
 	}
 
-	#buildAdvisorRuntime(seedToCurrent = false): boolean {
+	#buildAdvisorRuntime(seedToCurrent = false, emitWarnings = true): boolean {
 		if (this.#host.isDisposed()) return false;
 		if (this.#advisors.length > 0) return true;
 		if (!this.#advisorEnabled) return false;
@@ -667,7 +699,7 @@ export class SessionAdvisors {
 		// entry (`paused`/`no_model`/`running`) in roster order; the build loop
 		// below confirms `running` for successfully built advisors.
 		this.#advisorStatuses.clear();
-		const descriptors = this.#resolveAdvisorRuntimeDescriptors(true);
+		const descriptors = this.#resolveAdvisorRuntimeDescriptors(emitWarnings);
 
 		// Advisor service tier (`tier.advisor`): "none" (default) runs the advisor
 		// on standard processing; "inherit" tracks the session's live per-family
