@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { create } from "@bufbuild/protobuf";
+import { create } from "@oh-my-pi/pi-catalog/discovery/protobuf";
 import {
 	type BlockState,
 	flushOpenToolCalls,
@@ -25,7 +25,7 @@ import {
 	ReadArgsSchema,
 	ToolCallSchema,
 	WriteArgsSchema,
-} from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
+} from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
 
 const EDIT_ID = "tool_7aef3020-f275-4579-887c-34106e146f7";
 const ENVELOPE_ID = "call-edit-1";
