@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Vercel AI Gateway Muse Spark 1.2 Contributor requests failing with HTTP 400 by capping the advertised output allowance to the model's 131K output limit.
+
 ## [17.4.0] - 2026-08-20
 
 ### Added
