@@ -14,10 +14,10 @@
  * redraw — that per-event recompute is what previously froze large sessions.
  */
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ContextUsage } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import { StatusLineComponent } from "@oh-my-pi/pi-coding-agent/modes/components/status-line";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { initTheme, setSymbolPreset, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 
 beforeAll(async () => {
@@ -40,7 +40,12 @@ interface Fake {
 	setRevision: (n: number) => void;
 }
 
-function makeSession(opts: { messages: unknown[]; contextWindow?: number; usage?: ContextUsage | undefined }): Fake {
+function makeSession(opts: {
+	messages: unknown[];
+	contextWindow?: number;
+	usage?: ContextUsage | undefined;
+	settings?: AgentSession["settings"];
+}): Fake {
 	const contextWindow = opts.contextWindow ?? 200_000;
 	let usage: ContextUsage | undefined = "usage" in opts ? opts.usage : { tokens: 1234, contextWindow, percent: 0.6 };
 	let calls = 0;
@@ -53,6 +58,7 @@ function makeSession(opts: { messages: unknown[]; contextWindow?: number; usage?
 		model: { id: "test-model", contextWindow },
 		modelRegistry: { isUsingOAuth: () => false },
 		state: { messages: opts.messages, model: { contextWindow } },
+		settings: opts.settings,
 		sessionManager: {
 			getUsageStatistics: () => ({
 				input: 0,
@@ -276,7 +282,7 @@ describe("StatusLineComponent context breakdown", () => {
 		expect(plain).not.toContain("0.0%/0");
 	});
 
-	it("dims the unused portion of the gap fill between left and right segments based on context usage", () => {
+	it("splits the gap gauge into used (accent) and unused (border) portions", () => {
 		const { session } = makeSession({
 			messages: [userMessage("hi"), assistantMessage("done")],
 			usage: { tokens: 50_000, contextWindow: 100_000, percent: 50 },
@@ -288,25 +294,158 @@ describe("StatusLineComponent context breakdown", () => {
 			rightSegments: ["session_name"],
 			separator: "none",
 			sessionAccent: false,
+			contextLine: "percentage",
 		});
 
 		const border = comp.getTopBorder(80).content;
-		// With 50% context usage, the gap fill contains a faint sequence \x1b[2m for the right half
-		expect(border).toContain("\x1b[2m");
-		expect(border).toContain("\x1b[22m");
+		// The gauge resets the background and paints the used half in the accent
+		// border color, the remainder in the plain border color.
+		expect(border).toContain("\x1b[49m");
+		expect(border).toContain(theme.getFgAnsi("borderAccent"));
+		expect(border).toContain(theme.getFgAnsi("border"));
 	});
 
-	it("renders standalone status line when setStandalone is true", () => {
+	it("contextLine off renders a solid accent gauge without the unused split", () => {
+		const { session } = makeSession({
+			messages: [userMessage("hi"), assistantMessage("done")],
+			usage: { tokens: 50_000, contextWindow: 100_000, percent: 50 },
+		});
+		const comp = new StatusLineComponent(session);
+		comp.updateSettings({
+			preset: "custom",
+			leftSegments: ["pi"],
+			rightSegments: ["session_name"],
+			separator: "none",
+			sessionAccent: false,
+			contextLine: "off",
+		});
+
+		const border = comp.getTopBorder(80).content;
+		expect(border).toContain(theme.getFgAnsi("borderAccent"));
+		expect(border).not.toContain(`${theme.getFgAnsi("border")}─`);
+	});
+
+	it("loads embedded mode on the initial render and absorbs configured context segments", () => {
+		const { session } = makeSession({
+			messages: [userMessage("hi"), assistantMessage("done")],
+			usage: { tokens: 80_000, contextWindow: 1_000_000, percent: 8 },
+		});
+		settings.override("statusLine.preset", "custom");
+		settings.override("statusLine.leftSegments", ["pi", "context_pct"]);
+		settings.override("statusLine.rightSegments", ["context_total", "session_name"]);
+		settings.override("statusLine.contextLine", "embedded");
+
+		try {
+			const comp = new StatusLineComponent(session);
+			const border = comp.getTopBorder(120);
+			const plain = border.content.replaceAll(/\x1b\[[0-9;]*m/g, "");
+			const percentIndex = plain.indexOf("8%");
+			const speculationIndex = plain.indexOf("╎");
+			const compactionIndex = plain.indexOf("┃");
+			const windowIndex = plain.indexOf("1M");
+			expect(border.width).toBe(120);
+			expect(plain).not.toContain("8.0%/1M");
+			expect(percentIndex).toBeGreaterThanOrEqual(0);
+			expect(speculationIndex).toBeGreaterThan(percentIndex);
+			expect(compactionIndex).toBeGreaterThan(speculationIndex);
+			expect(windowIndex).toBeGreaterThan(compactionIndex);
+			expect(plain.indexOf("1M", windowIndex + 1)).toBe(-1);
+		} finally {
+			settings.clearOverride("statusLine.contextLine");
+			settings.clearOverride("statusLine.rightSegments");
+			settings.clearOverride("statusLine.leftSegments");
+			settings.clearOverride("statusLine.preset");
+		}
+	});
+	it("uses semantic Nerd Font markers for async speculation and compaction boundaries", async () => {
+		const { session } = makeSession({
+			messages: [userMessage("hi"), assistantMessage("done")],
+			usage: { tokens: 50_000, contextWindow: 100_000, percent: 50 },
+			settings,
+		});
+		const comp = new StatusLineComponent(session);
+		comp.updateSettings({
+			preset: "custom",
+			leftSegments: ["pi"],
+			rightSegments: ["session_name"],
+			separator: "none",
+			sessionAccent: false,
+			contextLine: "annotated",
+		});
+
+		await setSymbolPreset("nerd");
+		try {
+			const nerd = comp.getTopBorder(80).content.replaceAll(/\x1b\[[0-9;]*m/g, "");
+			const speculationIndex = nerd.indexOf("󰕝");
+			const compactionIndex = nerd.indexOf("󰁨");
+			expect(speculationIndex).toBeGreaterThanOrEqual(0);
+			expect(compactionIndex).toBeGreaterThanOrEqual(0);
+			expect(speculationIndex).toBeLessThan(compactionIndex);
+			expect(nerd).not.toContain("╎");
+			expect(nerd).not.toContain("┃");
+
+			await setSymbolPreset("unicode");
+			const unicode = comp.getTopBorder(80).content.replaceAll(/\x1b\[[0-9;]*m/g, "");
+			expect(unicode).toContain("╎");
+			expect(unicode).toContain("┃");
+			expect(unicode).not.toContain("󰕝");
+			expect(unicode).not.toContain("󰁨");
+		} finally {
+			await initTheme();
+		}
+	});
+
+	it("standalone mode renders a plain bottom bar without powerline chrome", () => {
 		const { session } = makeSession({
 			messages: [userMessage("hi")],
 			usage: { tokens: 1000, contextWindow: 100_000, percent: 1 },
 		});
 		const comp = new StatusLineComponent(session);
-		expect(comp.render(80)).toHaveLength(0); // Not standalone -> no main status in render()
+		expect(comp.render(80)).toHaveLength(0); // box mode: main status lives in the editor border
 
-		comp.setStandalone(true);
+		comp.setStandalone("full");
 		const lines = comp.render(80);
-		expect(lines).toHaveLength(1); // Standalone -> renders main status line
-		expect(lines[0]).toContain("pi");
+		expect(lines).toHaveLength(1);
+		// Plain bar: transparent background, no powerline caps or bg fill.
+		expect(lines[0]).not.toContain("\x1b[48;");
+		expect(lines[0]).toContain("\x1b[49m");
+	});
+
+	it("standalone bar yields to the autocomplete menu via the probe", () => {
+		const { session } = makeSession({
+			messages: [userMessage("hi")],
+			usage: { tokens: 1000, contextWindow: 100_000, percent: 1 },
+		});
+		const comp = new StatusLineComponent(session);
+		comp.setStandalone("full");
+		let menuOpen = true;
+		comp.setAutocompleteActiveProbe(() => menuOpen);
+		expect(comp.render(80)).toHaveLength(0);
+		menuOpen = false;
+		expect(comp.render(80)).toHaveLength(1);
+	});
+
+	it("claude layout splits groups: left-only bottom bar, right group as top-rule chip", () => {
+		const { session } = makeSession({
+			messages: [userMessage("hi")],
+			usage: { tokens: 1000, contextWindow: 100_000, percent: 1 },
+		});
+		const comp = new StatusLineComponent(session);
+		comp.updateSettings({
+			preset: "custom",
+			leftSegments: ["pi"],
+			rightSegments: ["session_name"],
+			separator: "none",
+			sessionAccent: false,
+		});
+		comp.setStandalone("left-only");
+
+		const bottom = comp.render(80);
+		expect(bottom).toHaveLength(1);
+		expect(bottom[0]).not.toContain("test"); // session name lives in the chip, not the bottom bar
+
+		const chip = comp.getStandaloneTopBorder(80);
+		expect(chip.width).toBeGreaterThan(0);
+		expect(chip.content).toContain("test");
 	});
 });

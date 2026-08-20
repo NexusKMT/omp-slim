@@ -84,6 +84,9 @@ export type ModelRoleStorage = "global" | "project";
 export type ComposerShape = "box" | "claude" | "pi" | "borderless";
 export const COMPOSER_SHAPE_VALUES = ["box", "claude", "pi", "borderless"] as const;
 
+export type ContextLineMode = "off" | "percentage" | "annotated" | "embedded";
+export const CONTEXT_LINE_MODE_VALUES = ["off", "percentage", "annotated", "embedded"] as const;
+
 export type SettingTab =
 	| "appearance"
 	| "model"
@@ -710,6 +713,36 @@ export const SETTINGS_SCHEMA = {
 				{ value: "block", label: "Block", description: "Solid blocks" },
 				{ value: "none", label: "None", description: "Space only" },
 				{ value: "ascii", label: "ASCII", description: "Greater-than signs" },
+			],
+		},
+	},
+
+	"statusLine.contextLine": {
+		type: "enum",
+		values: CONTEXT_LINE_MODE_VALUES,
+		default: "annotated",
+		ui: {
+			tab: "appearance",
+			group: "Status Line",
+			label: "Context-Reactive Line",
+			description: "How the line between the left and right segments reflects context usage (box composer only)",
+			options: [
+				{ value: "off", label: "Off", description: "Solid accent line, no context feedback" },
+				{
+					value: "percentage",
+					label: "Percentage",
+					description: "Used portion in accent color, remainder dimmed",
+				},
+				{
+					value: "annotated",
+					label: "Annotated",
+					description: "Percentage plus ticks at the speculative and auto-compaction boundaries",
+				},
+				{
+					value: "embedded",
+					label: "Embedded",
+					description: "Annotated line with the context percentage and window embedded in the gauge",
+				},
 			],
 		},
 	},

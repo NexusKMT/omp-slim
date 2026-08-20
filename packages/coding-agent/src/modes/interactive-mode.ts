@@ -26,6 +26,7 @@ import type {
 import {
 	Container,
 	clearRenderCache,
+	getComposerStyle,
 	Loader,
 	Markdown,
 	ProcessTerminal,
@@ -1920,19 +1921,29 @@ export class InteractiveMode implements InteractiveModeContext {
 			transparent: settings.get("statusLine.transparent"),
 			segmentOptions: settings.get("statusLine.segmentOptions"),
 			compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
+			contextLine: settings.get("statusLine.contextLine"),
 		});
 	}
 	syncComposerShape(): void {
 		const shape = (settings.get("composer.shape") as ComposerShape) ?? "box";
+		const style = getComposerStyle(shape);
 		this.editor.setBorderStyle(shape);
-		if (shape === "box") {
-			this.editor.setTopBorderProvider(availableWidth => this.statusLine.getTopBorder(availableWidth));
-			this.statusLine.setStandalone(false);
-		} else {
-			this.editor.setTopBorderProvider(undefined);
-			this.editor.setTopBorder(undefined);
-			this.statusLine.setStandalone(true);
+		this.statusLine.setAutocompleteActiveProbe(() => this.editor.isAutocompleteActive());
+		switch (style.statusAttachment) {
+			case "top-border":
+				this.editor.setTopBorderProvider(availableWidth => this.statusLine.getTopBorder(availableWidth));
+				break;
+			case "top-rule-chip":
+				this.editor.setTopBorderProvider(availableWidth => this.statusLine.getStandaloneTopBorder(availableWidth));
+				break;
+			case "none":
+				this.editor.setTopBorderProvider(undefined);
+				this.editor.setTopBorder(undefined);
+				break;
 		}
+		this.statusLine.setStandalone(
+			style.bottomBar === "none" ? false : style.bottomBar === "left" ? "left-only" : "full",
+		);
 		this.updateEditorBorderColor();
 		this.ui.requestRender();
 	}

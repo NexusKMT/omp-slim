@@ -23,6 +23,17 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../utils";
+import {
+	borderlessComposerStyle,
+	type ComposerChromeContext,
+	type ComposerStyle,
+	type EditorBorderStyle,
+	type EditorTopBorder,
+	getComposerStyle,
+} from "./composer";
+
+export type { EditorBorderStyle, EditorTopBorder };
+
 import { type SelectItem, SelectList, type SelectListLayoutOptions, type SelectListTheme } from "./select-list";
 
 const AUTOCOMPLETE_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
@@ -385,16 +396,6 @@ export interface EditorTheme {
 	/** Style function for inline hint/ghost text (dim text after cursor) */
 	hintStyle?: (text: string) => string;
 }
-export type EditorBorderStyle = "box" | "claude" | "pi" | "borderless";
-
-export interface EditorTopBorder {
-	/** The status content (already styled) */
-	content: string;
-	/** Visible width of the content */
-	width: number;
-	/** Optional logical revision that changes independently of available width. */
-	revision?: number;
-}
 
 interface HistoryEntry {
 	prompt: string;
@@ -592,6 +593,11 @@ export class Editor implements Component, Focusable {
 		this.#widthEpochRevision++;
 	}
 
+	/** True while the autocomplete/slash-command menu is open below the editor. */
+	isAutocompleteActive(): boolean {
+		return this.#autocompleteState !== null;
+	}
+
 	/**
 	 * Get the available width for top border content given a total terminal width.
 	 * Accounts for the border characters and horizontal padding when visible.
@@ -734,28 +740,30 @@ export class Editor implements Component, Focusable {
 		// No cached state to invalidate currently
 	}
 
-	#isBorderVisible(): boolean {
-		return this.#borderVisible && this.#borderStyle !== "borderless";
+	/** Active chrome style; a hidden border collapses every shape to borderless. */
+	#effectiveStyle(): ComposerStyle {
+		return this.#borderVisible ? getComposerStyle(this.#borderStyle) : borderlessComposerStyle;
 	}
 
 	#getEffectivePromptGutter(): string | undefined {
+		const style = this.#effectiveStyle();
+		// The box frame never renders a gutter; hosts that set one expect it only
+		// in borderless contexts (hook editors, agents hub).
+		if (style.sideBorders) return undefined;
 		if (this.#promptGutter !== undefined) return this.#promptGutter;
-		if (this.#borderStyle === "claude" || this.#borderStyle === "borderless") return "❯ ";
-		if (this.#borderStyle === "pi") return "> ";
-		return undefined;
+		// Legacy `setBorderVisible(false)` callers control the gutter themselves;
+		// only an explicitly selected composer shape gets the style default.
+		if (!this.#borderVisible) return undefined;
+		return style.defaultPromptGutter;
 	}
 
 	#getEditorPaddingX(): number {
 		if (this.#paddingXOverride !== undefined) return Math.max(0, this.#paddingXOverride);
-		if (this.#borderStyle === "claude" || this.#borderStyle === "borderless") return 0;
-		if (this.#borderStyle === "pi") return 1;
-		const padding = this.#theme.editorPaddingX ?? 2;
-		return Math.max(0, padding);
+		return this.#effectiveStyle().defaultPaddingX(this.#theme.editorPaddingX);
 	}
 
 	#getHorizontalChromeWidth(paddingX: number): number {
-		if (!this.#isBorderVisible() || this.#borderStyle === "claude") return 0;
-		return paddingX + 1;
+		return this.#effectiveStyle().sideChromeWidth(paddingX);
 	}
 
 	#getPromptGutterWidth(width: number, paddingX: number): number {
@@ -788,16 +796,14 @@ export class Editor implements Component, Focusable {
 
 	#getLayoutWidth(width: number, paddingX: number): number {
 		const contentWidth = this.#getContentWidth(width, paddingX);
-		const isBox = this.#isBorderVisible() && this.#borderStyle !== "claude";
-		const cursorReserve = isBox && paddingX === 0 ? 1 : 0;
+		const cursorReserve = this.#effectiveStyle().sideBorders && paddingX === 0 ? 1 : 0;
 		// Keep cursor/scroll layout addressable even when a borderless prompt gutter consumes every visible column.
 		return Math.max(1, contentWidth - cursorReserve);
 	}
 
 	#getVisibleContentHeight(contentLines: number): number {
 		if (this.#maxHeight === undefined) return contentLines;
-		const verticalChrome = !this.#isBorderVisible() ? 0 : 2;
-		return Math.max(1, this.#maxHeight - verticalChrome);
+		return Math.max(1, this.#maxHeight - this.#effectiveStyle().verticalChrome);
 	}
 	/** Apply the optional input decorator to a plain (ANSI-free) text segment.
 	 *  Decoration only adds zero-width SGR codes, so visible width is unchanged.
@@ -909,22 +915,16 @@ export class Editor implements Component, Focusable {
 	}
 
 	render(width: number): readonly string[] {
+		const style = this.#effectiveStyle();
 		const paddingX = this.#getEditorPaddingX();
-		const borderVisible = this.#isBorderVisible();
-		const borderStyle = this.#borderStyle;
-		const isSideBordered = borderVisible && borderStyle !== "claude";
+		const isSideBordered = style.sideBorders;
 		const promptGutter = this.#getPromptGutter(width, paddingX);
 		const contentAreaWidth = this.#getContentWidth(width, paddingX);
 		const layoutWidth = this.#getLayoutWidth(width, paddingX);
 		this.#lastLayoutWidth = layoutWidth;
 
-		// Box-drawing characters for rounded corners
 		const box = this.#theme.symbols.boxRound;
 		const borderWidth = this.#getHorizontalChromeWidth(paddingX);
-		const topLeft = this.borderColor(`${box.topLeft}${box.horizontal.repeat(paddingX)}`);
-		const topRight = this.borderColor(`${box.horizontal.repeat(paddingX)}${box.topRight}`);
-		const bottomLeft = this.borderColor(`${box.bottomLeft}${box.horizontal}${padding(Math.max(0, paddingX - 1))}`);
-		const horizontal = this.borderColor(box.horizontal);
 
 		// Layout the text
 		const layoutLines = this.#layoutText(layoutWidth);
@@ -950,51 +950,44 @@ export class Editor implements Component, Focusable {
 			scrollbarThumb = { start, end: start + thumbSize };
 		}
 
-		if (borderVisible) {
-			if (borderStyle === "claude") {
-				result.push(this.borderColor(box.horizontal.repeat(width)));
-			} else if (borderStyle === "pi") {
-				const topFillWidth = Math.max(0, width - borderWidth * 2);
-				result.push(topLeft + horizontal.repeat(topFillWidth) + topRight);
+		// Resolve the custom top-border content once per frame; the style decides
+		// how (and whether) to draw it. Provider caching stays editor-owned so
+		// per-event rebuilds keep coalescing to one per painted frame.
+		const topFillWidth = Math.max(0, width - borderWidth * 2);
+		let topBorder: EditorTopBorder | undefined;
+		if (style.statusAttachment !== "none") {
+			if (this.#topBorderProvider) {
+				const previousWidth = this.#topBorderProviderWidth;
+				topBorder = this.#topBorderProvider(topFillWidth);
+				const signature = topBorder ? `${topBorder.width}\0${topBorder.content}` : "";
+				const revision = topBorder?.revision;
+				if (
+					(previousWidth !== undefined &&
+						revision !== undefined &&
+						this.#topBorderProviderRevision !== undefined &&
+						revision !== this.#topBorderProviderRevision) ||
+					(previousWidth === topFillWidth && signature !== this.#topBorderProviderSignature)
+				) {
+					this.#widthEpochRevision++;
+				}
+				this.#topBorderProviderWidth = topFillWidth;
+				this.#topBorderProviderSignature = signature;
+				this.#topBorderProviderRevision = revision;
 			} else {
-				const topFillWidth = Math.max(0, width - borderWidth * 2);
-				let topBorder: EditorTopBorder | undefined;
-				if (this.#topBorderProvider) {
-					const previousWidth = this.#topBorderProviderWidth;
-					topBorder = this.#topBorderProvider(topFillWidth);
-					const signature = topBorder ? `${topBorder.width}\0${topBorder.content}` : "";
-					const revision = topBorder?.revision;
-					if (
-						(previousWidth !== undefined &&
-							revision !== undefined &&
-							this.#topBorderProviderRevision !== undefined &&
-							revision !== this.#topBorderProviderRevision) ||
-						(previousWidth === topFillWidth && signature !== this.#topBorderProviderSignature)
-					) {
-						this.#widthEpochRevision++;
-					}
-					this.#topBorderProviderWidth = topFillWidth;
-					this.#topBorderProviderSignature = signature;
-					this.#topBorderProviderRevision = revision;
-				} else {
-					topBorder = this.#topBorderContent;
-				}
-				if (topBorder) {
-					const { content, width: statusWidth } = topBorder;
-					if (statusWidth <= topFillWidth) {
-						const fillWidth = topFillWidth - statusWidth;
-						result.push(topLeft + content + this.borderColor(box.horizontal.repeat(fillWidth)) + topRight);
-					} else {
-						const truncated = truncateToWidth(content, Math.max(0, topFillWidth - 1));
-						const truncatedWidth = visibleWidth(truncated);
-						const fillWidth = Math.max(0, topFillWidth - truncatedWidth);
-						result.push(topLeft + truncated + this.borderColor(box.horizontal.repeat(fillWidth)) + topRight);
-					}
-				} else {
-					result.push(topLeft + horizontal.repeat(topFillWidth) + topRight);
-				}
+				topBorder = this.#topBorderContent;
 			}
 		}
+
+		const chromeCtx: ComposerChromeContext = {
+			width,
+			paddingX,
+			borderColor: (str: string) => this.borderColor(str),
+			box,
+			topBorder,
+		};
+
+		const topRow = style.renderTop(chromeCtx);
+		if (topRow !== undefined) result.push(topRow);
 
 		// Render each layout line
 		// Keep the hardware cursor at the text insertion point while autocomplete
@@ -1166,62 +1159,23 @@ export class Editor implements Component, Focusable {
 
 			const linePad = padding(Math.max(0, lineContentWidth - displayWidth));
 
-			if (!isSideBordered) {
-				result.push(gutterText + displayText + linePad);
-				continue;
-			}
-
-			const rightChromeCells = Math.max(1, paddingX + 1 - cursorPaddingOverflow);
-			if (borderStyle === "pi") {
-				const leftBorder = this.borderColor(`${box.vertical}${padding(paddingX)}`);
-				const inThumb = scrollbarThumb && visibleIndex >= scrollbarThumb.start && visibleIndex < scrollbarThumb.end;
-				const rightGlyph = inThumb ? "█" : box.vertical;
-				const rightBorder = this.borderColor(`${padding(Math.max(0, rightChromeCells - 1))}${rightGlyph}`);
-				result.push(leftBorder + gutterText + displayText + linePad + rightBorder);
-				continue;
-			}
-
-			// All lines have consistent borders based on padding. When the end-of-line cursor
-			// glyph (or a wide trailing grapheme) extends past `lineContentWidth`, shrink the
-			// right chrome by the exact overflow count: drop padding spaces first, then the
-			// trailing `─`, but never the corner/vertical bar itself.
-			const isLastLine = visibleIndex === visibleLayoutLines.length - 1;
-			if (isLastLine && imeSafeCursorTail) {
-				const leftBorder = this.borderColor(`${box.vertical}${padding(paddingX)}`);
-				const bottomBorder = this.borderColor(
-					`${box.bottomLeft}${box.horizontal.repeat(Math.max(0, width - 2))}${box.bottomRight}`,
-				);
-				result.push(leftBorder + displayText);
-				result.push(bottomBorder);
-				continue;
-			}
-			if (isLastLine) {
-				const rightPad = Math.max(0, rightChromeCells - 2);
-				const includeHorizontal = rightChromeCells >= 2;
-				const bottomRightAdjusted = this.borderColor(
-					`${padding(rightPad)}${includeHorizontal ? box.horizontal : ""}${box.bottomRight}`,
-				);
-				result.push(`${bottomLeft}${displayText}${linePad}${bottomRightAdjusted}`);
-			} else {
-				const leftBorder = this.borderColor(`${box.vertical}${padding(paddingX)}`);
-				// When scrollbar is active, replace the right border vertical with a
-				// thumb glyph (█) on lines inside the thumb range, keeping the track (│) elsewhere.
-				const inThumb = scrollbarThumb && visibleIndex >= scrollbarThumb.start && visibleIndex < scrollbarThumb.end;
-				const rightGlyph = inThumb ? "█" : box.vertical;
-				const rightBorder = this.borderColor(`${padding(Math.max(0, rightChromeCells - 1))}${rightGlyph}`);
-				result.push(leftBorder + displayText + linePad + rightBorder);
-			}
+			result.push(
+				...style.renderRow({
+					...chromeCtx,
+					text: displayText,
+					pad: linePad,
+					gutter: gutterText,
+					isLastRow: visibleIndex === visibleLayoutLines.length - 1,
+					cursorOverflow: cursorPaddingOverflow,
+					imeSafeCursorTail,
+					scrollbarThumb:
+						scrollbarThumb !== null && visibleIndex >= scrollbarThumb.start && visibleIndex < scrollbarThumb.end,
+				}),
+			);
 		}
 
-		if (borderVisible) {
-			if (borderStyle === "claude") {
-				result.push(this.borderColor(box.horizontal.repeat(width)));
-			} else if (borderStyle === "pi") {
-				result.push(
-					this.borderColor(`${box.bottomLeft}${box.horizontal.repeat(Math.max(0, width - 2))}${box.bottomRight}`),
-				);
-			}
-		}
+		const bottomRow = style.renderBottom(chromeCtx);
+		if (bottomRow !== undefined) result.push(bottomRow);
 
 		// Add autocomplete list if active
 		if (this.#autocompleteState && this.#autocompleteList) {

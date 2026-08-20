@@ -85,6 +85,7 @@ import { getLatestCompactionEntry, getOpenAiRemoteCompactionPayload } from "./se
 import type { CompactionEntry, SessionEntry } from "./session-entries";
 import type { SessionManager } from "./session-manager";
 import type { ShakeMode, ShakeResult } from "./shake-types";
+import { resolveSpeculationLeadTokens, SPECULATION_LEAD_MIN_TOKENS } from "./speculation-lead";
 
 export type CompactionCheckResult = Readonly<{
 	deferredHandoff: boolean;
@@ -206,27 +207,6 @@ const PRUNE_IDLE_FLUSH_MS = 90 * 60_000;
  * most-recent kept turn already exceeds the threshold (the snapcompact thrash).
  */
 const COMPACTION_RECOVERY_BAND = 0.8;
-
-/**
- * Speculative-compaction lead: how far below the compaction threshold the
- * background summarizer starts. Derived from the threshold instead of a second
- * user-facing knob so the band scales with the window — a fixed percentage gap
- * would be 200k tokens on a 1M model and useless on a 32k one. The floor keeps
- * tiny windows from speculating every turn; the cap bounds how much history the
- * armed summary misses (the kept tail grows by at most ~lead tokens between
- * compute and apply).
- */
-const SPECULATION_LEAD_FRACTION = 0.125;
-const SPECULATION_LEAD_MIN_TOKENS = 8_192;
-const SPECULATION_LEAD_MAX_TOKENS = 32_000;
-
-/** Tokens the threshold band spans: speculation fires inside `[threshold − lead, threshold)`. */
-function resolveSpeculationLeadTokens(thresholdTokens: number): number {
-	return Math.min(
-		SPECULATION_LEAD_MAX_TOKENS,
-		Math.max(SPECULATION_LEAD_MIN_TOKENS, Math.floor(thresholdTokens * SPECULATION_LEAD_FRACTION)),
-	);
-}
 
 /** A speculation-produced compaction result, ready to commit at threshold. */
 interface ArmedSpeculation {

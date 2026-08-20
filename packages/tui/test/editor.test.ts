@@ -2960,15 +2960,16 @@ describe("Editor component", () => {
 			expect(lines[2]).toBe("─".repeat(20));
 		});
 
-		it("renders pi style with framed box, prompt gutter, and separate bottom border", () => {
+		it("renders pi style with full-width rules, padded content, and no prompt gutter", () => {
 			const editor = new Editor(unicodeTheme);
 			editor.setBorderStyle("pi");
 			editor.setText("hello");
 			const lines = editor.render(20);
-			expect(lines.length).toBe(3); // top border, content, bottom border
-			expect(lines[0]).toBe(`╭${"─".repeat(18)}╮`);
-			expect(lines[1]).toContain("> hello");
-			expect(lines[2]).toBe(`╰${"─".repeat(18)}╯`);
+			expect(lines.length).toBe(3); // top rule, content, bottom rule
+			expect(lines[0]).toBe("─".repeat(20));
+			expect(lines[1]).toStartWith(" hello");
+			expect(lines[1]).not.toContain(">");
+			expect(lines[2]).toBe("─".repeat(20));
 		});
 
 		it("renders borderless style without box borders", () => {

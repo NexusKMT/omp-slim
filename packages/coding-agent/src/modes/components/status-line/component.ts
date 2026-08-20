@@ -1,8 +1,15 @@
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
-import { type Component, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
-import { getProjectDir } from "@oh-my-pi/pi-utils";
+import {
+	type Component,
+	type ComposerStyle,
+	claudeComposerStyle,
+	padding,
+	truncateToWidth,
+	visibleWidth,
+} from "@oh-my-pi/pi-tui";
+import { formatNumber, getProjectDir } from "@oh-my-pi/pi-utils";
 import { settings } from "../../../config/settings";
 import type { AgentSession } from "../../../session/agent-session";
 import type { OAuthAccountIdentity } from "../../../session/auth-storage";
@@ -14,6 +21,7 @@ import { getSessionAccentAnsi, getSessionAccentHex } from "../../../utils/sessio
 import { calculateTokensPerSecond } from "../../../utils/token-rate";
 import { sanitizeStatusText } from "../../shared";
 import { theme } from "../../theme/theme";
+import { type CompactionBoundaries, computeCompactionBoundaries } from "../../utils/context-usage";
 import {
 	type CodexResetFireworksEvent,
 	type CodexResetUsageSnapshot,
@@ -268,8 +276,36 @@ const EMPTY_MESSAGES: readonly AgentMessage[] = [];
 const STATUS_USAGE_START_DELAY_MS = 0;
 const STATUS_USAGE_REFRESH_TIMEOUT_MS = 2_000;
 
+function isContextSegment(segment: StatusLineSegmentId): boolean {
+	return segment === "context_pct" || segment === "context_total";
+}
+
 function hasContextSegment(segments: readonly StatusLineSegmentId[]): boolean {
 	return segments.includes("context_pct") || segments.includes("context_total");
+}
+
+function hasNonContextSegment(segments: readonly StatusLineSegmentId[]): boolean {
+	for (const segment of segments) {
+		if (!isContextSegment(segment)) return true;
+	}
+	return false;
+}
+
+function removeContextSegments(parts: string[], segments: StatusLineSegmentId[]): void {
+	let writeIndex = 0;
+	for (let readIndex = 0; readIndex < segments.length; readIndex++) {
+		const segment = segments[readIndex];
+		if (isContextSegment(segment)) continue;
+		parts[writeIndex] = parts[readIndex];
+		segments[writeIndex] = segment;
+		writeIndex++;
+	}
+	parts.length = writeIndex;
+	segments.length = writeIndex;
+}
+
+function formatEmbeddedContextPercent(percent: number): string {
+	return `${percent > 0 && percent < 1 ? percent.toFixed(1) : Math.round(percent)}%`;
 }
 function hasGitSegment(segments: readonly StatusLineSegmentId[]): boolean {
 	return segments.includes("git");
@@ -291,7 +327,8 @@ function hasGitBackedSegment(segments: readonly StatusLineSegmentId[]): boolean 
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class StatusLineComponent implements Component {
-	#standalone = false;
+	#standalone: false | "full" | "left-only" = false;
+	#autocompleteActiveProbe: (() => boolean) | undefined;
 	#widthEpochRevision = 0;
 	#settings: StatusLineSettings = {};
 	#effectiveSettings: EffectiveStatusLineSettings | undefined;
@@ -430,6 +467,7 @@ export class StatusLineComponent implements Component {
 			sessionAccent: settings.get("statusLine.sessionAccent"),
 			transparent: settings.get("statusLine.transparent"),
 			compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
+			contextLine: settings.get("statusLine.contextLine"),
 		};
 	}
 	#gitEnabled(): boolean {
@@ -1708,8 +1746,19 @@ export class StatusLineComponent implements Component {
 		return theme.fg("statusLineSubagents", `${theme.icon.agents} ${this.#subagentCount} ${noun}`);
 	}
 
-	#buildStatusLine(width: number): string {
+	/**
+	 * Build the status bar for one of four layouts:
+	 * - `box`: powerline groups joined by the context-reactive gauge line
+	 *   (embedded in the editor's top border).
+	 * - `plain-full`: no background, no powerline caps, dot separators, gap is
+	 *   plain spaces — the standalone bottom bar for pi/borderless composers.
+	 * - `plain-left`: left segments only (claude composer; the right group
+	 *   lives in the editor's top rule).
+	 * - `plain-right`: right segments only (claude composer's top rule).
+	 */
+	#buildStatusLine(width: number, layout: "box" | "plain-full" | "plain-left" | "plain-right" = "box"): string {
 		const effectiveSettings = this.#resolveSettings();
+		const plain = layout !== "box";
 		const includePath =
 			hasPathSegment(effectiveSettings.leftSegments) || hasPathSegment(effectiveSettings.rightSegments);
 		const gitEnabled = this.#gitEnabled();
@@ -1725,7 +1774,9 @@ export class StatusLineComponent implements Component {
 			includeGit,
 			includePr,
 		);
-		const separatorDef = getSeparator(effectiveSettings.separator ?? "powerline-thin", theme);
+		const separatorDef = plain
+			? { left: "·", right: "·" }
+			: getSeparator(effectiveSettings.separator ?? "powerline-thin", theme);
 
 		// `transparent` reuses the empty-string sentinel (`\x1b[49m`) so the bar
 		// inherits the terminal's default background, matching custom themes that
@@ -1734,7 +1785,10 @@ export class StatusLineComponent implements Component {
 		// stray glyphs, so the cap renderer drops them when the fill is empty.
 		const TRANSPARENT_BG_ANSI = "\x1b[49m";
 		const themeBgAnsi = theme.getBgAnsi("statusLineBg");
-		const bgAnsi = effectiveSettings.transparent ? TRANSPARENT_BG_ANSI : themeBgAnsi;
+		// Plain bottom bars drop the background entirely; the claude top-rule
+		// chip (`plain-right`) keeps it so the group reads as a chip on the rule.
+		const transparentLayout = layout === "plain-full" || layout === "plain-left";
+		const bgAnsi = transparentLayout || effectiveSettings.transparent ? TRANSPARENT_BG_ANSI : themeBgAnsi;
 		const transparentBg = bgAnsi === TRANSPARENT_BG_ANSI;
 		const fgAnsi = theme.getFgAnsi("text");
 		const sepAnsi = theme.getFgAnsi("statusLineSep");
@@ -1743,7 +1797,8 @@ export class StatusLineComponent implements Component {
 		// Collect visible segment contents
 		const leftParts: string[] = [];
 		const leftSegIds: StatusLineSegmentId[] = [];
-		for (const segId of effectiveSettings.leftSegments) {
+		const leftSegmentIds = layout === "plain-right" ? [] : effectiveSettings.leftSegments;
+		for (const segId of leftSegmentIds) {
 			if (subagentBadge && segId === "subagents") continue;
 			const rendered = renderSegment(segId, ctx);
 			if (rendered.visible && rendered.content) {
@@ -1753,20 +1808,39 @@ export class StatusLineComponent implements Component {
 		}
 
 		const rightParts: string[] = [];
-		for (const segId of effectiveSettings.rightSegments) {
+		const rightSegIds: StatusLineSegmentId[] = [];
+		const rightSegmentIds = layout === "plain-left" ? [] : effectiveSettings.rightSegments;
+		for (const segId of rightSegmentIds) {
 			if (subagentBadge && segId === "subagents") continue;
 			const rendered = renderSegment(segId, ctx);
 			if (rendered.visible && rendered.content) {
 				rightParts.push(rendered.content);
+				rightSegIds.push(segId);
 			}
 		}
 
-		const runningBackgroundJobs = this.session.getAsyncJobSnapshot()?.running.length ?? 0;
-		if (runningBackgroundJobs > 0) {
-			rightParts.unshift(theme.fg("statusLineSubagents", `${theme.icon.job} ${runningBackgroundJobs}`));
+		const embedContext =
+			!plain &&
+			effectiveSettings.contextLine === "embedded" &&
+			ctx.contextPercent !== null &&
+			ctx.contextPercent !== undefined &&
+			ctx.contextWindow > 0 &&
+			(hasContextSegment(leftSegIds) || hasContextSegment(rightSegIds)) &&
+			hasNonContextSegment(leftSegIds) &&
+			hasNonContextSegment(rightSegIds);
+		if (embedContext) {
+			removeContextSegments(leftParts, leftSegIds);
+			removeContextSegments(rightParts, rightSegIds);
 		}
-		if (subagentBadge) {
-			rightParts.unshift(subagentBadge);
+
+		if (layout !== "plain-left") {
+			const runningBackgroundJobs = this.session.getAsyncJobSnapshot()?.running.length ?? 0;
+			if (runningBackgroundJobs > 0) {
+				rightParts.unshift(theme.fg("statusLineSubagents", `${theme.icon.job} ${runningBackgroundJobs}`));
+			}
+			if (subagentBadge) {
+				rightParts.unshift(subagentBadge);
+			}
 		}
 		const topFillWidth = Math.max(0, width);
 		const left = [...leftParts];
@@ -1878,23 +1952,141 @@ export class StatusLineComponent implements Component {
 		}
 
 		const gapWidth = Math.max(1, topFillWidth - leftWidth - rightWidth);
+		if (plain) {
+			// Standalone composers: no gauge line between the groups, just air.
+			return leftGroup + padding(gapWidth) + rightGroup;
+		}
+		return leftGroup + this.#buildContextGaugeFill(gapWidth, ctx, effectiveSettings, embedContext) + rightGroup;
+	}
+
+	/**
+	 * The gauge line bridging the left and right groups in box layout. Driven
+	 * by `statusLine.contextLine`:
+	 * - `off`: solid accent line (no context feedback).
+	 * - `percentage`: used portion in accent, remainder in the border color.
+	 * - `annotated` (default): percentage plus preset-aware markers where
+	 *   speculative compaction starts and where auto-compaction fires.
+	 * - `embedded`: annotated markers plus percentage/window labels absorbed
+	 *   from configured context segments.
+	 */
+	#buildContextGaugeFill(
+		gapWidth: number,
+		ctx: SegmentContext,
+		effectiveSettings: EffectiveStatusLineSettings,
+		embedContext: boolean,
+	): string {
 		const sessionName =
 			effectiveSettings.sessionAccent !== false ? this.session.sessionManager?.getSessionName() : undefined;
 		const accentHex = sessionName
 			? getSessionAccentHex(sessionName, theme.getMajorThemeColorHexes(), theme.accentSurfaceLuminance)
 			: undefined;
-		const gapColor = getSessionAccentAnsi(accentHex) ?? theme.getFgAnsi("borderAccent");
-		const unusedColor = theme.getFgAnsi("border");
-		let usedCount = gapWidth;
-		if (ctx.contextPercent !== null && ctx.contextPercent !== undefined) {
-			const clampedPct = Math.min(100, Math.max(0, ctx.contextPercent));
-			usedCount = Math.min(gapWidth, Math.max(0, Math.round((clampedPct / 100) * gapWidth)));
+		const usedColor = getSessionAccentAnsi(accentHex) ?? theme.getFgAnsi("borderAccent");
+		const horizontal = theme.boxRound.horizontal;
+		const mode = effectiveSettings.contextLine ?? "annotated";
+		const pct = ctx.contextPercent;
+		if (mode === "off" || pct === null || pct === undefined) {
+			return `\x1b[49m${usedColor}${horizontal.repeat(gapWidth)}\x1b[39m`;
 		}
-		const unusedCount = gapWidth - usedCount;
-		const usedFill = usedCount > 0 ? `${gapColor}${theme.boxRound.horizontal.repeat(usedCount)}` : "";
-		const unusedFill = unusedCount > 0 ? `${unusedColor}${theme.boxRound.horizontal.repeat(unusedCount)}` : "";
-		const gapFill = `\x1b[49m${usedFill}${unusedFill}\x1b[39m`;
-		return leftGroup + gapFill + rightGroup;
+
+		const clampedPct = Math.min(100, Math.max(0, pct));
+		let percentLabel = "";
+		let windowLabel = "";
+		let percentStart = -1;
+		let windowStart = -1;
+		let scaleWidth = gapWidth;
+		if (embedContext) {
+			const candidatePercent = formatEmbeddedContextPercent(clampedPct);
+			const candidateWindow = formatNumber(ctx.contextWindow);
+			if (gapWidth >= candidatePercent.length + candidateWindow.length + 4) {
+				percentLabel = candidatePercent;
+				windowLabel = candidateWindow;
+				windowStart = gapWidth - windowLabel.length - 1;
+				scaleWidth = windowStart;
+			}
+		}
+
+		const usedCount = Math.min(scaleWidth, Math.max(0, Math.round((clampedPct / 100) * scaleWidth)));
+		const unusedColor = theme.getFgAnsi("border");
+
+		// Boundary markers are only meaningful when auto-compaction can fire and
+		// the line is long enough for the markers to read as positions.
+		let speculationIdx = -1;
+		let thresholdIdx = -1;
+		if ((mode === "annotated" || mode === "embedded") && ctx.autoCompactEnabled && gapWidth >= 8) {
+			const boundaries = this.#compactionBoundaries(ctx.contextWindow);
+			if (boundaries) {
+				const cellFor = (percent: number) =>
+					Math.min(scaleWidth - 1, Math.max(0, Math.round((percent / 100) * scaleWidth)));
+				thresholdIdx = cellFor(boundaries.thresholdPercent);
+				speculationIdx = cellFor(boundaries.speculationPercent);
+				if (speculationIdx === thresholdIdx) speculationIdx = -1; // threshold wins the cell
+			}
+		}
+
+		if (percentLabel) {
+			const maxStart = scaleWidth - percentLabel.length - 1;
+			const preferredStart = Math.min(maxStart, Math.max(1, usedCount));
+			const overlapsBoundary = (start: number): boolean => {
+				const end = start + percentLabel.length;
+				return (speculationIdx >= start && speculationIdx < end) || (thresholdIdx >= start && thresholdIdx < end);
+			};
+			for (let distance = 0; distance <= maxStart; distance++) {
+				const left = preferredStart - distance;
+				if (left >= 1 && !overlapsBoundary(left)) {
+					percentStart = left;
+					break;
+				}
+				if (distance === 0) continue;
+				const right = preferredStart + distance;
+				if (right <= maxStart && !overlapsBoundary(right)) {
+					percentStart = right;
+					break;
+				}
+			}
+		}
+
+		const speculationGlyph = theme.symbol("context.speculation");
+		const thresholdGlyph = theme.symbol("context.compaction");
+		const speculationColor = theme.getFgAnsi("muted");
+		const thresholdColor = theme.getFgAnsi("warning");
+
+		let out = "\x1b[49m";
+		let activeColor = "";
+		for (let i = 0; i < gapWidth; i++) {
+			let color = i < usedCount ? usedColor : unusedColor;
+			let glyph = horizontal;
+			if (percentStart >= 0 && i >= percentStart && i < percentStart + percentLabel.length) {
+				color = usedColor;
+				glyph = percentLabel.charAt(i - percentStart);
+			} else if (i === thresholdIdx) {
+				color = thresholdColor;
+				glyph = thresholdGlyph;
+			} else if (i === speculationIdx) {
+				color = speculationColor;
+				glyph = speculationGlyph;
+			} else if (windowStart >= 0 && i >= windowStart && i < windowStart + windowLabel.length) {
+				color = unusedColor;
+				glyph = windowLabel.charAt(i - windowStart);
+			}
+			if (color !== activeColor) {
+				out += color;
+				activeColor = color;
+			}
+			out += glyph;
+		}
+		return `${out}\x1b[39m`;
+	}
+
+	/** Auto-compaction boundary percents, or null when unavailable (disabled, no window). */
+	#compactionBoundaries(contextWindow: number): CompactionBoundaries | null {
+		// Collab-guest replicas and test mocks have no session-scoped settings;
+		// the global store carries the same compaction knobs.
+		const source = typeof this.session.settings?.getGroup === "function" ? this.session.settings : settings;
+		try {
+			return computeCompactionBoundaries(source, contextWindow);
+		} catch {
+			return null;
+		}
 	}
 
 	getTopBorder(width: number): { content: string; width: number; revision: number } {
@@ -1910,20 +2102,89 @@ export class StatusLineComponent implements Component {
 			revision: this.#widthEpochRevision,
 		};
 	}
-	setStandalone(standalone: boolean): void {
+	/**
+	 * Standalone bar placement for non-box composer shapes. `"full"` renders
+	 * both groups on the bottom bar (pi/borderless); `"left-only"` renders just
+	 * the left group there — the right group attaches to the editor's top rule
+	 * via {@link getStandaloneTopBorder} (claude). `false` returns the bar to
+	 * the box composer's embedded top border.
+	 */
+	setStandalone(standalone: false | "full" | "left-only"): void {
 		this.#standalone = standalone;
+	}
+
+	/** While true, the standalone bar yields its row to the editor's autocomplete menu. */
+	setAutocompleteActiveProbe(probe: (() => boolean) | undefined): void {
+		this.#autocompleteActiveProbe = probe;
+	}
+
+	/** Plain right-group content for the claude composer's top rule. */
+	getStandaloneTopBorder(width: number): { content: string; width: number; revision: number } {
+		let content = this.#buildStatusLine(width, "plain-right");
+		if (this.#focusedAgentId && content) {
+			content = `\x1b[2m${content.replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")}\x1b[22m`;
+		}
+		return {
+			content,
+			width: visibleWidth(content),
+			revision: this.#widthEpochRevision,
+		};
+	}
+
+	/**
+	 * The plain standalone bottom bar through the real segment/gauge pipeline —
+	 * `groups` picks which segment groups it carries. Used by the live render
+	 * loop and by composer previews (which inject a candidate layout instead of
+	 * the active one).
+	 */
+	renderBottomBar(width: number, groups: "left" | "full"): string {
+		let content = this.#buildStatusLine(width, groups === "left" ? "plain-left" : "plain-full");
+		if (this.#focusedAgentId && content) {
+			content = `\x1b[2m${content.replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")}\x1b[22m`;
+		}
+		return content;
+	}
+
+	/**
+	 * Status bar lines for a composer layout, rendered through the real
+	 * pipeline — the single source for the /settings appearance preview.
+	 * `style` overrides the layout (candidate composer shape); omitted, the
+	 * active layout is used. Ignores the autocomplete probe: previews always
+	 * render.
+	 */
+	getPreviewLines(width: number, style?: Pick<ComposerStyle, "statusAttachment" | "bottomBar">): string[] {
+		const attachment =
+			style?.statusAttachment ??
+			(this.#standalone === false ? "top-border" : this.#standalone === "left-only" ? "top-rule-chip" : "none");
+		const bottomBar =
+			style?.bottomBar ?? (this.#standalone === false ? "none" : this.#standalone === "left-only" ? "left" : "full");
+		const lines: string[] = [];
+		if (attachment === "top-border") {
+			const border = this.getTopBorder(width);
+			if (border.content) lines.push(border.content);
+		} else if (attachment === "top-rule-chip") {
+			// Render the chip on its rule exactly as the claude composer does.
+			const rule = claudeComposerStyle.renderTop({
+				width,
+				paddingX: 0,
+				borderColor: str => theme.fg("border", str),
+				box: theme.boxRound,
+				topBorder: this.getStandaloneTopBorder(width),
+			});
+			if (rule !== undefined) lines.push(rule);
+		}
+		if (bottomBar !== "none") {
+			const main = this.renderBottomBar(width, bottomBar);
+			if (main) lines.push(main);
+		}
+		return lines;
 	}
 
 	render(width: number): readonly string[] {
 		const lines: string[] = [];
-		if (this.#standalone) {
-			let content = this.#buildStatusLine(width);
-			if (content) {
-				if (this.#focusedAgentId) {
-					content = `\x1b[2m${content.replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")}\x1b[22m`;
-				}
-				lines.push(content);
-			}
+		if (this.#standalone && !this.#autocompleteActiveProbe?.()) {
+			const content = this.renderBottomBar(width, this.#standalone === "left-only" ? "left" : "full");
+			if (content) lines.push(content);
 		}
 		const showHooks = this.#settings.showHookStatus ?? true;
 		if (showHooks && this.#hookStatuses.size > 0) {

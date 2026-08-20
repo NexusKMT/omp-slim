@@ -4,7 +4,6 @@ import { COMPOSER_SHAPE_VALUES, type ComposerShape } from "@oh-my-pi/pi-coding-a
 import {
 	ComposerShapePreview,
 	renderComposerShapePreview,
-	renderMockStatusLine,
 } from "@oh-my-pi/pi-coding-agent/modes/components/composer-shape-preview";
 import { SettingsSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/settings-selector";
 import { initTheme, setTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
@@ -58,12 +57,38 @@ describe("composer shape preview", () => {
 		expect(nextLines.some(l => l.includes("Preview:"))).toBe(true);
 	});
 
-	it("renders mock status line with powerline separator and status elements", async () => {
+	it("borrows status rows from the live status source per shape layout", async () => {
 		await setTheme("dark");
-		const rendered = renderMockStatusLine(80);
-		expect(rendered).toContain("sonnet");
-		expect(rendered).toContain("~/project");
-		expect(rendered).toContain("42%");
+		const calls: string[] = [];
+		const status = {
+			getTopBorder: (width: number) => {
+				calls.push(`top:${width}`);
+				return { content: "TOPBAR", width: 6 };
+			},
+			getStandaloneTopBorder: (width: number) => {
+				calls.push(`chip:${width}`);
+				return { content: "CHIP", width: 4 };
+			},
+			renderBottomBar: (_width: number, groups: "left" | "full") => {
+				calls.push(`bottom:${groups}`);
+				return `BOTTOM-${groups.toUpperCase()}`;
+			},
+		};
+
+		const box = renderComposerShapePreview("box", 80, status).join("\n");
+		expect(box).toContain("TOPBAR"); // embedded in the top border
+		expect(box).not.toContain("BOTTOM"); // box has no standalone bottom bar
+
+		const claude = renderComposerShapePreview("claude", 80, status).join("\n");
+		expect(claude).toContain("CHIP"); // right group chips onto the top rule
+		expect(claude).toContain("BOTTOM-LEFT"); // left group only on the bottom bar
+
+		const pi = renderComposerShapePreview("pi", 80, status).join("\n");
+		expect(pi).not.toContain("CHIP");
+		expect(pi).toContain("BOTTOM-FULL"); // both groups on the bottom bar
+
+		const borderless = renderComposerShapePreview("borderless", 80, status).join("\n");
+		expect(borderless).toContain("BOTTOM-FULL");
 	});
 
 	it("renders preview inside SettingsSelectorComponent submenu without crashing", async () => {

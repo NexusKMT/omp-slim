@@ -79,7 +79,7 @@ class ComposerSceneController implements SetupSceneController {
 		const budget = maxLines ?? Number.POSITIVE_INFINITY;
 		const lines = [theme.fg("muted", "Select a layout; live preview updates below. Press Enter to confirm."), ""];
 
-		const previewLines = renderComposerShapePreview(this.#currentShape, width);
+		const previewLines = renderComposerShapePreview(this.#currentShape, width, this.host.ctx.statusLine);
 		if (budget - lines.length - previewLines.length - 2 >= COMPOSER_ITEMS.length) {
 			lines.push(theme.fg("muted", "Preview:"), ...previewLines, "");
 		}

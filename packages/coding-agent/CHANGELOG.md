@@ -15,6 +15,8 @@
 
 ### Changed
 
+- The context-reactive status line gained an Embedded mode that absorbs configured context segments into in-gauge percentage/window labels. Annotated and Embedded gauges use `󰕝` for the async-speculation boundary and `󰁨` for the compaction boundary under the Nerd Font symbol preset; Unicode and ASCII keep their existing boundary ticks.
+
 - Unified inline overlay chrome on the rounded-box style used by the model picker/hub and `/settings`: selectors (theme, thinking, queue mode, show images, login/logout, reset usage, session account, plugins, MCP wizard, history search, branch-from-message, sessions, session tree, debug tools) and the `/cleanse`, `/omfg`, `/btw` run panels now render inside a titled `╭─╮│ │╰─╯` box (new shared `OverlayPanel` container) instead of two full-width horizontal rules.
 - `omp cleanse` and the `/cleanse` slash command now render a live interactive status board with running checkers, repair subagents, tool counts, token/cost totals, and live scrollback in both the CLI and interactive terminal modes
 - Replaced the single `compaction.strategy` / `compaction.remoteEnabled` policy with ordered `compaction.methodOrder` preferences. The default now tries OpenAI-compatible server compaction, snapcompact, handoff, shake, then soft compaction; unavailable or failed methods advance through that list.

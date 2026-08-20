@@ -7,6 +7,7 @@ import { formatNumber } from "@oh-my-pi/pi-utils";
 import type { Skill } from "../../extensibility/skills";
 import type { AgentSession } from "../../session/agent-session";
 import { estimateInlineSavings, type SnapcompactSavingsEstimate } from "../../session/snapcompact-inline";
+import { resolveSpeculationLeadTokens } from "../../session/speculation-lead";
 import type { Tool } from "../../tools";
 import type { theme as Theme } from "../theme/theme";
 
@@ -39,6 +40,35 @@ export interface ContextBreakdown {
 	freeTokens: number;
 	/** Estimated snapcompact wire savings; set when requested and a snapcompact.* setting is enabled. */
 	snapcompact?: SnapcompactSavingsEstimate;
+}
+
+/** Percent positions (0–100 of the context window) for the auto-compaction boundaries. */
+export interface CompactionBoundaries {
+	/** Where auto-compaction fires. */
+	thresholdPercent: number;
+	/** Where the background speculative summarizer starts (threshold − lead). */
+	speculationPercent: number;
+}
+
+/**
+ * Boundary positions for the status line's annotated context gauge. `null`
+ * when compaction is disabled/off or the window is unknown — the gauge then
+ * renders without markers.
+ */
+export function computeCompactionBoundaries(
+	settings: AgentSession["settings"],
+	contextWindow: number,
+): CompactionBoundaries | null {
+	if (!(contextWindow > 0)) return null;
+	const compactionSettings = settings.getGroup("compaction") as CompactionSettings;
+	if (!compactionSettings.enabled || compactionSettings.strategy === "off") return null;
+	const thresholdTokens = resolveThresholdTokens(contextWindow, compactionSettings);
+	if (!(thresholdTokens > 0) || thresholdTokens > contextWindow) return null;
+	const leadTokens = resolveSpeculationLeadTokens(thresholdTokens);
+	return {
+		thresholdPercent: (thresholdTokens / contextWindow) * 100,
+		speculationPercent: (Math.max(0, thresholdTokens - leadTokens) / contextWindow) * 100,
+	};
 }
 
 /** Stable inputs used to cache non-message token estimates. */

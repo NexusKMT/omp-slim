@@ -35,6 +35,9 @@ export type SymbolKey =
 	// Progress Bar
 	| "progress.filled"
 	| "progress.empty"
+	// Context gauge boundaries
+	| "context.speculation"
+	| "context.compaction"
 	// Box Drawing - Rounded
 	| "boxRound.topLeft"
 	| "boxRound.topRight"
@@ -248,6 +251,9 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	// Progress bar
 	"progress.filled": "━",
 	"progress.empty": "─",
+	// Context gauge boundaries
+	"context.speculation": "╎",
+	"context.compaction": "┃",
 	// Box (rounded)
 	"boxRound.topLeft": "╭",
 	"boxRound.topRight": "╮",
@@ -483,6 +489,9 @@ const NERD_SYMBOLS: SymbolMap = {
 	"progress.filled": "━",
 	// pick: ─ | alt: ▱ ▯ ╌
 	"progress.empty": "─",
+	// Context gauge boundaries — vector intersection starts async speculation; auto-fix applies compaction.
+	"context.speculation": "\u{f055d}",
+	"context.compaction": "\u{f0068}",
 	// Box Drawing - Rounded (same as unicode)
 	// pick: ╭ | alt: ┌ ┏ ╔
 	"boxRound.topLeft": "╭",
@@ -776,6 +785,9 @@ const ASCII_SYMBOLS: SymbolMap = {
 	// Progress Bar
 	"progress.filled": "=",
 	"progress.empty": "-",
+	// Context gauge boundaries
+	"context.speculation": ":",
+	"context.compaction": "|",
 	// Box Drawing - Rounded (ASCII fallback)
 	"boxRound.topLeft": "+",
 	"boxRound.topRight": "+",

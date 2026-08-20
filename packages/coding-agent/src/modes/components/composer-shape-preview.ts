@@ -1,78 +1,101 @@
-import { type Component, padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
+/**
+ * Live preview for the `composer.shape` setting and the setup-wizard composer
+ * scene. Chrome is rendered through the same {@link ComposerStyle} objects the
+ * real editor uses, and status rows come from the live
+ * {@link ComposerPreviewStatusSource} (the session's StatusLineComponent) —
+ * nothing about the preview is a re-implementation, so it cannot drift from
+ * the real composer. Only the prompt text is a stand-in.
+ */
+import {
+	type Component,
+	type ComposerChromeContext,
+	type EditorTopBorder,
+	getComposerStyle,
+	padding,
+	truncateToWidth,
+	visibleWidth,
+} from "@oh-my-pi/pi-tui";
 import type { ComposerShape } from "../../config/settings-schema";
 import { theme } from "../theme/theme";
 
+/**
+ * Real status renderer the preview borrows rows from — structurally satisfied
+ * by {@link StatusLineComponent}. Layout is parameterized so a preview can
+ * render a candidate shape's placement instead of the active one.
+ */
+export interface ComposerPreviewStatusSource {
+	/** Powerline bar with the context gauge (box top border content). */
+	getTopBorder(width: number): { content: string; width: number };
+	/** Plain right-group chip (claude top rule content). */
+	getStandaloneTopBorder(width: number): { content: string; width: number };
+	/** Plain standalone bottom bar carrying the given segment groups. */
+	renderBottomBar(width: number, groups: "left" | "full"): string;
+}
+
 export interface ComposerShapePreviewOptions {
 	requestRender?: () => void;
+	/** Live status renderer; omitted (tests), the chrome renders without status rows. */
+	status?: ComposerPreviewStatusSource;
 }
 
-function fitLine(line: string, width: number): string {
-	const truncated = truncateToWidth(line, width);
-	return truncated + padding(Math.max(0, width - visibleWidth(truncated)));
-}
-
-export function renderMockStatusLine(width: number): string {
-	const sep = theme.fg("statusLineSep", ` ${theme.sep.powerlineThin} `);
-	const leftContent = [
-		theme.fg("statusLineModel", `${theme.icon.model} sonnet`),
-		theme.fg("statusLinePath", "~/project"),
-		theme.fg("statusLineGitDirty", `${theme.icon.git} main +2`),
-	].join(sep);
-	const rightContent = [
-		theme.fg("statusLineContext", `${theme.icon.context} 42%`),
-		theme.fg("statusLineCost", `${theme.icon.cost} 0.18`),
-	].join(sep);
-	const bgAnsi = theme.getBgAnsi("statusLineBg");
-	const isTransparent = bgAnsi === "\x1b[49m" || !bgAnsi;
-	const capAnsi = isTransparent ? "" : bgAnsi.replace("\x1b[48;", "\x1b[38;");
-	const leftCap = isTransparent ? "" : `${capAnsi}${theme.sep.powerline}\x1b[39m`;
-	const rightCap = isTransparent ? "" : `${capAnsi}${theme.sep.powerlineLeft}\x1b[39m`;
-	const leftGroup = `${theme.bg("statusLineBg", ` ${leftContent} `)}${leftCap}`;
-	const rightGroup = `${rightCap}${theme.bg("statusLineBg", ` ${rightContent} `)}`;
-	const leftWidth = visibleWidth(leftGroup);
-	const rightWidth = visibleWidth(rightGroup);
-	const gapWidth = Math.max(1, width - leftWidth - rightWidth);
-	const usedCount = Math.round(0.42 * gapWidth);
-	const unusedCount = gapWidth - usedCount;
-	const usedFill = usedCount > 0 ? theme.fg("borderAccent", theme.boxRound.horizontal.repeat(usedCount)) : "";
-	const unusedFill = unusedCount > 0 ? theme.fg("border", theme.boxRound.horizontal.repeat(unusedCount)) : "";
-	const gap = `\x1b[49m${usedFill}${unusedFill}\x1b[39m`;
-	return `${leftGroup}${gap}${rightGroup}`;
-}
-
-export function renderComposerShapePreview(shape: ComposerShape, width: number): readonly string[] {
+export function renderComposerShapePreview(
+	shape: ComposerShape,
+	width: number,
+	status?: ComposerPreviewStatusSource,
+): readonly string[] {
 	const previewWidth = Math.max(24, Math.min(width, 76));
-	const box = theme.boxRound;
-	const innerWidth = Math.max(1, previewWidth - 2);
-	const promptText = "Ask anything, edit files, run tools";
+	const style = getComposerStyle(shape);
+	const paddingX = style.defaultPaddingX(undefined);
+	const chromeWidth = style.sideChromeWidth(paddingX);
 
-	switch (shape) {
-		case "box": {
-			const statusContent = renderMockStatusLine(innerWidth);
-			const top = `${theme.fg("borderAccent", `${box.topLeft}${box.horizontal}`)} ${statusContent} ${theme.fg("borderAccent", `${box.horizontal}${box.topRight}`)}`;
-			const bottomInner = `${promptText} `;
-			const bottomFill = box.horizontal.repeat(Math.max(0, innerWidth - visibleWidth(bottomInner) - 2));
-			const bottom = `${theme.fg("borderAccent", `${box.bottomLeft}${box.horizontal} `)}${theme.fg("text", promptText)}${theme.inverse(" ")}${theme.fg("borderAccent", ` ${bottomFill}${box.bottomRight}`)}`;
-			return [top, bottom];
-		}
-		case "claude": {
-			const rule = theme.fg("borderAccent", box.horizontal.repeat(previewWidth));
-			const prompt = `${theme.fg("accent", "❯")} ${theme.fg("text", promptText)}${theme.inverse(" ")}`;
-			return [rule, prompt, rule, renderMockStatusLine(previewWidth)];
-		}
-		case "pi": {
-			const horizontal = box.horizontal.repeat(innerWidth);
-			const top = theme.fg("borderAccent", `${box.topLeft}${horizontal}${box.topRight}`);
-			const prompt = `${theme.fg("accent", ">")} ${theme.fg("text", promptText)}${theme.inverse(" ")}`;
-			const content = `${theme.fg("borderAccent", box.vertical)} ${fitLine(prompt, innerWidth - 2)} ${theme.fg("borderAccent", box.vertical)}`;
-			const bottom = theme.fg("borderAccent", `${box.bottomLeft}${horizontal}${box.bottomRight}`);
-			return [top, content, bottom, renderMockStatusLine(previewWidth)];
-		}
-		case "borderless": {
-			const prompt = `${theme.fg("accent", "❯")} ${theme.fg("text", promptText)}${theme.inverse(" ")}`;
-			return [prompt, renderMockStatusLine(previewWidth)];
+	let topBorder: EditorTopBorder | undefined;
+	if (status) {
+		if (style.statusAttachment === "top-border") {
+			const availableWidth = Math.max(1, previewWidth - chromeWidth * 2);
+			topBorder = status.getTopBorder(availableWidth);
+		} else if (style.statusAttachment === "top-rule-chip") {
+			topBorder = status.getStandaloneTopBorder(previewWidth);
 		}
 	}
+
+	const ctx: ComposerChromeContext = {
+		width: previewWidth,
+		paddingX,
+		borderColor: (str: string) => theme.fg("borderAccent", str),
+		box: theme.boxRound,
+		topBorder,
+	};
+
+	const gutter = style.defaultPromptGutter ?? "";
+	const contentWidth = Math.max(1, previewWidth - chromeWidth * 2 - visibleWidth(gutter));
+	const promptText = truncateToWidth("Ask anything, edit files, run tools", Math.max(1, contentWidth - 1));
+	const text = `${theme.fg("text", promptText)}${theme.inverse(" ")}`;
+	const pad = padding(Math.max(0, contentWidth - visibleWidth(promptText) - 1));
+	const styledGutter = gutter ? theme.fg("accent", gutter) : "";
+
+	const lines: string[] = [];
+	const top = style.renderTop(ctx);
+	if (top !== undefined) lines.push(top);
+	lines.push(
+		...style.renderRow({
+			...ctx,
+			text,
+			pad,
+			gutter: styledGutter,
+			isLastRow: true,
+			cursorOverflow: 0,
+			imeSafeCursorTail: false,
+			scrollbarThumb: false,
+		}),
+	);
+	const bottom = style.renderBottom(ctx);
+	if (bottom !== undefined) lines.push(bottom);
+
+	if (style.bottomBar !== "none" && status) {
+		const bar = status.renderBottomBar(previewWidth, style.bottomBar);
+		if (bar) lines.push(bar);
+	}
+	return lines;
 }
 
 export class ComposerShapePreview implements Component {
@@ -91,7 +114,7 @@ export class ComposerShapePreview implements Component {
 	}
 
 	render(width: number): readonly string[] {
-		const lines = renderComposerShapePreview(this.#shape, width);
+		const lines = renderComposerShapePreview(this.#shape, width, this.#options.status);
 		return ["", theme.fg("muted", "Preview:"), ...lines];
 	}
 }

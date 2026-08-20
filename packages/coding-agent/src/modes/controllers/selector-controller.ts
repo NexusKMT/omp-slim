@@ -202,6 +202,7 @@ export class SelectorController {
 					model: this.ctx.session.model,
 					imageBudget: this.ctx.ui.imageBudget,
 					requestRender: () => this.ctx.ui.requestRender(),
+					composerPreviewStatus: this.ctx.statusLine,
 				},
 				{
 					onChange: (id, value) => this.handleSettingChange(id, value),
@@ -224,14 +225,16 @@ export class SelectorController {
 							sessionAccent: settings.get("statusLine.sessionAccent"),
 							transparent: settings.get("statusLine.transparent"),
 							compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
+							contextLine: settings.get("statusLine.contextLine"),
 							...previewSettings,
 						});
 						this.ctx.ui.requestRender();
 					},
 					getStatusLinePreview: () => {
-						// Return the rendered status line for inline preview
+						// The bar exactly as the active composer shape renders it (box top
+						// border, claude rule + chip, or the plain standalone bottom bar).
 						const availableWidth = this.ctx.editor.getTopBorderAvailableWidth(this.ctx.ui.terminal.columns);
-						return this.ctx.statusLine.getTopBorder(availableWidth).content;
+						return this.ctx.statusLine.getPreviewLines(availableWidth).join("\n");
 					},
 					onPluginsChanged: async () => {
 						const projectPath = await resolveActiveProjectRegistryPath(this.ctx.sessionManager.getCwd());
@@ -253,6 +256,7 @@ export class SelectorController {
 							sessionAccent: settings.get("statusLine.sessionAccent"),
 							transparent: settings.get("statusLine.transparent"),
 							compactThinkingLevel: settings.get("statusLine.compactThinkingLevel"),
+							contextLine: settings.get("statusLine.contextLine"),
 						});
 						this.ctx.ui.requestRender();
 					},
