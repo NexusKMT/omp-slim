@@ -229,7 +229,7 @@ describe("DAP launch failure handling", () => {
 		const fake = new FakeDapClient(adapter, process.cwd(), {});
 		spyOn(DapClient, "spawn").mockResolvedValue(fake as unknown as DapClient);
 
-		const summary = await manager.attach({ adapter, cwd: process.cwd(), pid: 123 });
+		const summary = await manager.attach({ adapter, cwd: process.cwd() });
 
 		expect(fake.requests.map(request => request.command)).toEqual(["configurationDone"]);
 		expect(summary.status).toBe("running");

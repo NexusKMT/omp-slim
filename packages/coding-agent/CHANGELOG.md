@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Explicit DAP adapters can attach without a PID or port when their `attachDefaults` provide the adapter-specific target arguments.
+
 ## [17.4.0] - 2026-08-20
 
 ### Added
