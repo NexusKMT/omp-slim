@@ -559,6 +559,7 @@ describe("LiteLLM provider discovery", () => {
 						{
 							model_group: "example-real-model",
 							model_name: "Example Real Model",
+							providers: ["anthropic"],
 							max_input_tokens: 96_000,
 							max_output_tokens: 8_000,
 							supports_function_calling: true,
@@ -685,6 +686,70 @@ describe("LiteLLM provider discovery", () => {
 
 		expect(models?.find(model => model.id === "aliased-openai")?.api).toBe("openai-responses");
 		expect(models?.find(model => model.id === "mixed-backend")?.api).toBe("openai-completions");
+	});
+
+	test("continues rich discovery when API routing is unknown despite complete vision metadata", async () => {
+		const calls: string[] = [];
+		const fetchMock = vi.fn(async (input: string | URL | Request) => {
+			const url = inputUrl(input);
+			calls.push(url);
+			if (url === MODELS_DEV_URL) {
+				return Response.json({});
+			}
+			if (url === "http://primary:4000/model_group/info") {
+				return Response.json({
+					data: [{ model_group: "opaque-alias", supports_vision: false }],
+				});
+			}
+			if (url === "http://primary:4000/v2/model/info") {
+				return Response.json({
+					data: [
+						{
+							model_name: "opaque-alias",
+							litellm_params: { custom_llm_provider: "openai", model: "internal-model-name" },
+							model_info: { supports_vision: false },
+						},
+					],
+				});
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		}) as FetchImpl;
+		const models = await litellmModelManagerOptions({
+			apiKey: "sk-rich",
+			baseUrl: "http://primary:4000/v1",
+			fetch: fetchMock,
+		}).fetchDynamicModels?.();
+
+		expect(calls).toContain("http://primary:4000/v2/model/info");
+		expect(models?.find(model => model.id === "opaque-alias")?.api).toBe("openai-responses");
+	});
+
+	test("merges mixed-provider routing evidence within one rich endpoint", async () => {
+		const fetchMock = vi.fn(async (input: string | URL | Request) => {
+			const url = inputUrl(input);
+			if (url === MODELS_DEV_URL) {
+				return Response.json({});
+			}
+			if (url === "http://primary:4000/model_group/info") {
+				return Response.json({
+					data: [
+						{ model_group: "openai-last", providers: ["anthropic"], supports_vision: false },
+						{ model_group: "openai-last", providers: ["openai"], supports_vision: false },
+						{ model_group: "openai-first", providers: ["openai"], supports_vision: false },
+						{ model_group: "openai-first", providers: ["anthropic"], supports_vision: false },
+					],
+				});
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		}) as FetchImpl;
+		const models = await litellmModelManagerOptions({
+			apiKey: "sk-rich",
+			baseUrl: "http://primary:4000/v1",
+			fetch: fetchMock,
+		}).fetchDynamicModels?.();
+
+		expect(models?.find(model => model.id === "openai-last")?.api).toBe("openai-completions");
+		expect(models?.find(model => model.id === "openai-first")?.api).toBe("openai-completions");
 	});
 
 	test("continues to LiteLLM model info when model_group omits vision metadata", async () => {

@@ -4981,6 +4981,37 @@ function mapLiteLLMRichEntry<TApi extends Api>(
 	};
 }
 
+function mergeLiteLLMRichEndpointModels<TApi extends Api>(
+	existing: LiteLLMRichEndpointModel<TApi>,
+	next: LiteLLMRichEndpointModel<TApi>,
+): LiteLLMRichEndpointModel<TApi> {
+	const apiRoute =
+		existing.apiRoute === "other" || next.apiRoute === "other"
+			? "other"
+			: existing.apiRoute === "openai" || next.apiRoute === "openai"
+				? "openai"
+				: "unknown";
+	const api = next.apiRoute === apiRoute ? next.model.api : existing.model.api;
+	const model: ModelSpec<TApi> = {
+		...existing.model,
+		api,
+		name: next.model.name === next.model.id ? existing.model.name : next.model.name,
+		contextWindow: next.hasContextWindow ? next.model.contextWindow : existing.model.contextWindow,
+		maxTokens: next.hasMaxTokens ? next.model.maxTokens : existing.model.maxTokens,
+		input:
+			next.supportsVision === true || next.supportsVision === false
+				? next.model.input
+				: existing.model.input,
+		reasoning: typeof next.supportsReasoning === "boolean" ? next.model.reasoning : existing.model.reasoning,
+		cost: next.hasCost ? next.model.cost : existing.model.cost,
+		compat: next.hasSupportedOpenAIParams ? next.model.compat : existing.model.compat,
+	};
+	if (next.hasToolMetadata) {
+		model.supportsTools = next.model.supportsTools;
+	}
+	return { ...next, apiRoute, model };
+}
+
 async function fetchLiteLLMRichEndpoint<TApi extends Api>(
 	endpoint: string,
 	options: FetchLiteLLMRichModelsOptions<TApi>,
@@ -5020,7 +5051,6 @@ async function fetchLiteLLMRichEndpoint<TApi extends Api>(
 		return null;
 	}
 	const deduped = new Map<string, LiteLLMRichEndpointModel<TApi>>();
-	let incompleteVisionMetadata = false;
 	for (const entry of entries) {
 		const model = mapLiteLLMRichEntry(entry, options, runtimeBaseUrl);
 		if (model) {
@@ -5028,10 +5058,7 @@ async function fetchLiteLLMRichEndpoint<TApi extends Api>(
 			const supportsReasoning = getLiteLLMMetadataValue(entry, "supports_reasoning");
 			const supportsFunctionCalling = getLiteLLMMetadataValue(entry, "supports_function_calling");
 			const supportedOpenAIParams = getSupportedOpenAIParams(entry);
-			if (supportsVision !== true && supportsVision !== false) {
-				incompleteVisionMetadata = true;
-			}
-			deduped.set(model.id, {
+			const next: LiteLLMRichEndpointModel<TApi> = {
 				model,
 				apiRoute: classifyLiteLLMApiRoute(entry, model.id),
 				supportsVision,
@@ -5044,15 +5071,20 @@ async function fetchLiteLLMRichEndpoint<TApi extends Api>(
 					supportedOpenAIParams !== undefined,
 				hasSupportedOpenAIParams: supportedOpenAIParams !== undefined,
 				hasCost: getLiteLLMCost(entry) !== undefined,
-			});
+			};
+			const existing = deduped.get(model.id);
+			deduped.set(model.id, existing ? mergeLiteLLMRichEndpointModels(existing, next) : next);
 		}
 	}
 	if (deduped.size === 0) {
 		return null;
 	}
+	const models = Array.from(deduped.values()).sort((left, right) => left.model.id.localeCompare(right.model.id));
 	return {
-		models: Array.from(deduped.values()).sort((left, right) => left.model.id.localeCompare(right.model.id)),
-		incompleteVisionMetadata,
+		models,
+		incompleteVisionMetadata: models.some(
+			entry => entry.supportsVision !== true && entry.supportsVision !== false,
+		),
 	};
 }
 
@@ -5096,40 +5128,19 @@ async function fetchLiteLLMRichModelsInternal<TApi extends Api>(
 					}
 					continue;
 				}
-				const apiRoute =
-					existing.apiRoute === "other" || next.apiRoute === "other"
-						? "other"
-						: existing.apiRoute === "openai" || next.apiRoute === "openai"
-							? "openai"
-							: "unknown";
-				const api = next.apiRoute === apiRoute ? next.model.api : existing.model.api;
-				const model: ModelSpec<TApi> = {
-					...existing.model,
-					api,
-					name: next.model.name === next.model.id ? existing.model.name : next.model.name,
-					contextWindow: next.hasContextWindow ? next.model.contextWindow : existing.model.contextWindow,
-					maxTokens: next.hasMaxTokens ? next.model.maxTokens : existing.model.maxTokens,
-					input:
-						next.supportsVision === true || next.supportsVision === false
-							? next.model.input
-							: existing.model.input,
-					reasoning: typeof next.supportsReasoning === "boolean" ? next.model.reasoning : existing.model.reasoning,
-					cost: next.hasCost ? next.model.cost : existing.model.cost,
-					compat: next.hasSupportedOpenAIParams ? next.model.compat : existing.model.compat,
-				};
-				if (next.hasToolMetadata) {
-					model.supportsTools = next.model.supportsTools;
-				}
-				deduped.set(next.model.id, { ...next, apiRoute, model });
+				deduped.set(next.model.id, mergeLiteLLMRichEndpointModels(existing, next));
 			}
-			let hasIncompleteVisionMetadata = false;
+			let needsMoreMetadata = false;
 			for (const entry of deduped.values()) {
-				if (entry.supportsVision !== true && entry.supportsVision !== false) {
-					hasIncompleteVisionMetadata = true;
+				if (
+					(entry.supportsVision !== true && entry.supportsVision !== false) ||
+					(options.resolveApi !== undefined && entry.apiRoute === "unknown")
+				) {
+					needsMoreMetadata = true;
 					break;
 				}
 			}
-			if (!hasIncompleteVisionMetadata) {
+			if (!needsMoreMetadata) {
 				break;
 			}
 		}
