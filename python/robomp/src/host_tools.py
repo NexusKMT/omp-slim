@@ -44,6 +44,7 @@ from robomp.sandbox import (
 log = logging.getLogger(__name__)
 _PRE_PR_FIX_COMMAND = ("bun", "run", "fix")
 _PRE_PR_CHECK_COMMAND = ("bun", "check")
+_PRE_PR_TEST_COMMAND = ("bun", "run", "test")
 _BUN_INSTALL_COMMAND = ("bun", "install", "--frozen-lockfile", "--ignore-scripts")
 _BUN_INSTALL_TIMEOUT_SECONDS = 300.0
 _REPO_COMMAND_SCRUBBED_ENV_KEYS: tuple[str, ...] = (
@@ -57,6 +58,10 @@ _AGENT_HOME = Path("/srv/agent-home")
 _PRE_PR_FIX_TIMEOUT_SECONDS = 600.0
 _PRE_PR_CHECK_TIMEOUT_SECONDS = 600.0
 _PRE_PR_CHECK_MAX_OUTPUT = 12_000
+# The suite is the slowest gate by an order of magnitude — CI splits this repo's
+# run across five 20-25 minute jobs — so it gets its own budget rather than
+# sharing the formatter/typecheck one.
+_PRE_PR_TEST_TIMEOUT_SECONDS = 3600.0
 _DIFF_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
@@ -529,6 +534,59 @@ def _run_pre_publish_bun_check(
         _raise_command(msg)
 
 
+def _run_pre_publish_bun_test(
+    bindings: ToolBindings,
+    args: Mapping[str, Any],
+    *,
+    tool_name: str,
+    stage: str,
+    skip_checks: bool = False,
+) -> None:
+    """Run `bun run test` before opening a PR.
+
+    Same shape as the `bun check` gate: no-op when the repository defines no
+    `scripts.test`, bypassed by `skip_checks=True` for breakage the agent's
+    diff did not cause, and any failure comes back to the agent as a
+    `RpcCommandError` instead of becoming a red PR.
+    """
+    if skip_checks:
+        _audit(
+            bindings,
+            tool_name,
+            args,
+            result={"skipped": "bun_run_test", "reason": "skip_checks=true"},
+        )
+        return
+    if not _has_bun_script(bindings.workspace.repo_dir, "test"):
+        return
+    try:
+        proc = _run_repo_command(bindings, _PRE_PR_TEST_COMMAND, timeout=_PRE_PR_TEST_TIMEOUT_SECONDS)
+    except FileNotFoundError:
+        msg = f"refusing to {stage}: `bun run test` is required before {stage}, but `bun` is not on PATH."
+        _audit(bindings, tool_name, args, error=msg)
+        _raise_command(msg)
+    except subprocess.TimeoutExpired as exc:
+        output = _format_process_output(exc.stdout, exc.stderr)
+        msg = (
+            f"refusing to {stage}: `bun run test` timed out after "
+            f"{_PRE_PR_TEST_TIMEOUT_SECONDS:.0f}s.\n"
+            f"{output}\n\n"
+            f"Investigate the hang (a test that never exits blocks every future run), "
+            f"rerun `bun run test`, and retry."
+        )
+        _audit(bindings, tool_name, args, error=msg)
+        _raise_command(msg)
+    if proc.returncode != 0:
+        output = _format_process_output(proc.stdout, proc.stderr)
+        msg = (
+            f"refusing to {stage}: `bun run test` failed before {stage} (exit {proc.returncode}).\n"
+            f"{output}\n\n"
+            f"Fix the failing tests, commit, and retry — no PR is opened while the suite is red."
+        )
+        _audit(bindings, tool_name, args, error=msg)
+        _raise_command(msg)
+
+
 _AUTOCLOSE_INELIGIBLE_STATES: frozenset[str] = frozenset({"closed", "merged", "needs_info", "abandoned"})
 
 
@@ -881,6 +939,9 @@ def _build_push_branch(bindings: ToolBindings) -> HostTool[Any, Any]:
         # pass auto-commits any formatter diff so the push includes it.
         # `skip_checks=true` bypasses the formatter/check (e.g. when `main`
         # itself is broken); dirty-tree gate still runs unconditionally.
+        # The suite itself is gated at `gh_open_pr`, not here: a push is not
+        # yet a PR, and running it on every intermediate push would cost an
+        # hour each time.
         _run_pre_publish_bun_fix(bindings, args, tool_name="gh_push_branch", stage="push", skip_checks=skip)
         _run_pre_publish_bun_check(bindings, args, tool_name="gh_push_branch", stage="push", skip_checks=skip)
         head = _guarded_push_branch(bindings, args, "gh_push_branch", branch)
@@ -941,6 +1002,9 @@ def _build_open_pr(bindings: ToolBindings) -> HostTool[Any, Any]:
         skip = bool(args.get("skip_checks", False))
         _run_pre_publish_bun_fix(bindings, args, tool_name="gh_open_pr", stage="open PR", skip_checks=skip)
         _run_pre_publish_bun_check(bindings, args, tool_name="gh_open_pr", stage="open PR", skip_checks=skip)
+        # Last and slowest: the suite runs against the tree that is actually
+        # published, after the formatter amend, so a red PR cannot be created.
+        _run_pre_publish_bun_test(bindings, args, tool_name="gh_open_pr", stage="open PR", skip_checks=skip)
         # Make sure the branch is pushed (idempotent) using the same preflight as gh_push_branch.
         _guarded_push_branch(bindings, args, "gh_open_pr", bindings.workspace.branch)
         base = args.get("base") or bindings.repo.default_branch

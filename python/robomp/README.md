@@ -153,9 +153,13 @@ The integration test spawns a real `omp --mode rpc` against an
   to real newlines — message-only, trees/identities/dates preserved.
 - Pre-PR gates (`gh_open_pr`): when the repo defines them, `bun run fix`
   runs first (any diff amended into the agent's HEAD commit — no
-  standalone `style:` noise commits) and then
-  `bun check`. A failing `bun check` returns to the agent as
-  `RpcCommandError` for iteration.
+  standalone `style:` noise commits), then `bun check`, then the repo's
+  full `bun run test` (1h budget). Any failure returns to the agent as
+  `RpcCommandError` for iteration and no PR is created — the suite runs
+  after the formatter amend, so it validates the exact tree being
+  published. `skip_checks=true` bypasses all three and the bypass is
+  recorded in `tool_calls`. `gh_push_branch` runs fix + check only; the
+  suite is gated once, at PR creation.
 - `gh_open_pr` validates `## Repro` / `## Cause` / `## Fix` /
   `## Verification` headers and a `Fixes`/`Closes`/`Resolves #N`
   reference before opening.
@@ -189,6 +193,7 @@ The integration test spawns a real `omp --mode rpc` against an
 | `refusing to push: commit author identity mismatch` | Some commit not authored as `ROBOMP_GIT_AUTHOR_*`. The error lists the offending shas; `git commit --amend --reset-author --no-edit`. |
 | `refusing to push: working tree is dirty` | Uncommitted agent edits. Or just call `gh_open_pr`, which auto-commits `bun run fix` output. |
 | `bun check failed before PR creation` | Fix the reported failure and retry `gh_open_pr`. |
+| `refusing to open PR: \`bun run test\` failed before open PR` | The repo suite is red at HEAD. Fix and commit, or `skip_checks=true` if the failure pre-exists on the default branch. |
 | `Failed to load pi_natives` | Wrong arch / missing native. `bun run pi:image` then `bun run robomp:build`. |
 | `No API key found for <provider>` | `~/.omp/agent/models.container.yml` mount missing or provider id mismatch with `ROBOMP_MODEL`. |
 

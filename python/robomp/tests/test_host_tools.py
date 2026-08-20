@@ -2780,6 +2780,69 @@ def test_gh_open_pr_refuses_failed_bun_check_before_push_or_pr(
     assert "TypeError: property missing" in row["error"]
 
 
+def test_gh_open_pr_refuses_failed_bun_run_test_before_push_or_pr(
+    db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A red suite aborts PR creation: `bun run test` runs after `bun check`,
+    and its failure output comes back to the agent instead of becoming a PR."""
+    import os
+
+    opened_pr = False
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal opened_pr
+        opened_pr = True
+        return httpx.Response(
+            201,
+            json={
+                "number": 7,
+                "html_url": "https://github.com/octo/widget/pull/7",
+                "head": {"ref": "farm/abc12345/some-issue"},
+                "base": {"ref": "main"},
+            },
+        )
+
+    bindings, loop, t = _bindings(db, tmp_path, httpx.MockTransport(handler))
+    db.set_issue_classification(bindings.issue_key, "bug")
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    fake_bun = fakebin / "bun"
+    fake_bun.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "check" ]; then exit 0; fi\n'
+        'if [ "$1" = "run" ] && [ "$2" = "test" ]; then\n'
+        '    printf "1 fail\\nexpect(received).toBe(expected)\\n" >&2\n'
+        "    exit 1\n"
+        "fi\n"
+        'printf "unexpected bun call: %s\\n" "$*" >&2\n'
+        "exit 2\n",
+        encoding="utf-8",
+    )
+    fake_bun.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fakebin}{os.pathsep}{os.environ['PATH']}")
+    (bindings.workspace.repo_dir / "package.json").write_text(
+        json.dumps({"scripts": {"check": "tsc --noEmit", "test": "bun test"}}) + "\n",
+        encoding="utf-8",
+    )
+
+    try:
+        tool = next(x for x in build(bindings) if x.name == "gh_open_pr")
+        body = "## Repro\nrepro\n\n## Cause\ncause\n\n## Fix\nfix\n\n## Verification\nran tests\n\nFixes #42\n"
+        with pytest.raises(RpcCommandError) as exc:
+            tool.execute({"title": "fix: x", "body": body}, _ctx())
+    finally:
+        _stop_loop(loop, t)
+
+    msg = str(exc.value)
+    assert "refusing to open PR" in msg
+    assert "`bun run test` failed before open PR" in msg
+    assert "expect(received).toBe(expected)" in msg
+    assert not opened_pr
+    row = db._conn.execute("SELECT error FROM tool_calls WHERE tool='gh_open_pr' ORDER BY id DESC LIMIT 1").fetchone()
+    assert row is not None
+    assert "expect(received).toBe(expected)" in row["error"]
+
+
 def test_gh_push_branch_rejects_dirty_worktree(db: Database, tmp_path: Path) -> None:
     """Pre-push gate refuses if the working tree has uncommitted changes."""
     import os
@@ -3863,6 +3926,156 @@ def test_gh_open_pr_runs_fix_then_check_and_amends_formatter_diff(
         check=True,
     )
     assert f"refs/heads/{ws.branch}" in refs.stdout.splitlines()
+
+
+def test_gh_open_pr_skip_checks_bypasses_failing_bun_run_test(
+    db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`skip_checks=true` bypasses the suite alongside fix/check.
+
+    Models pre-existing breakage on `main`: every bun stage would fail, yet the
+    PR opens and each skipped gate is recorded in the audit trail.
+    """
+    import os
+    import subprocess
+
+    bare = tmp_path / "upstream.git"
+    bare.mkdir()
+    subprocess.run(["git", "init", "--bare", "--initial-branch=main", str(bare)], check=True, capture_output=True)
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    env = os.environ | {
+        "GIT_AUTHOR_NAME": "robomp-bot",
+        "GIT_AUTHOR_EMAIL": "robomp-bot@example.invalid",
+        "GIT_COMMITTER_NAME": "robomp-bot",
+        "GIT_COMMITTER_EMAIL": "robomp-bot@example.invalid",
+    }
+    subprocess.run(["git", "init", "--initial-branch=main", str(seed)], check=True, capture_output=True)
+    (seed / "README.md").write_text("init\n")
+    for cmd in (
+        ["git", "-C", str(seed), "add", "."],
+        [
+            "git",
+            "-C",
+            str(seed),
+            "-c",
+            "user.email=robomp-bot@example.invalid",
+            "-c",
+            "user.name=robomp-bot",
+            "commit",
+            "-m",
+            "init",
+        ],
+        ["git", "-C", str(seed), "remote", "add", "origin", str(bare)],
+        ["git", "-C", str(seed), "push", "origin", "main"],
+    ):
+        subprocess.run(cmd, check=True, capture_output=True, env=env)
+
+    from robomp.sandbox import SandboxManager
+
+    mgr = SandboxManager(tmp_path / "workspaces")
+    ws = mgr.ensure_workspace(
+        repo="octo/widget",
+        number=42,
+        title="skip checks bypasses tests",
+        clone_url=str(bare),
+        default_branch="main",
+        author_name="robomp-bot",
+        author_email="robomp-bot@example.invalid",
+    )
+
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    bun_invocations = fakebin / "bun.log"
+    fake_bun = fakebin / "bun"
+    fake_bun.write_text(f'#!/bin/sh\necho "$@" >> "{bun_invocations}"\nexit 1\n', encoding="utf-8")
+    fake_bun.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fakebin}{os.pathsep}{os.environ['PATH']}")
+
+    (ws.repo_dir / "package.json").write_text(
+        json.dumps({"scripts": {"fix": "biome", "check": "tsc --noEmit", "test": "bun test"}}) + "\n",
+        encoding="utf-8",
+    )
+    (ws.repo_dir / "feature.txt").write_text("feature\n")
+    subprocess.run(
+        ["git", "-C", str(ws.repo_dir), "add", "package.json", "feature.txt"], check=True, capture_output=True
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(ws.repo_dir),
+            "-c",
+            "user.email=robomp-bot@example.invalid",
+            "-c",
+            "user.name=robomp-bot",
+            "commit",
+            "-m",
+            "fix: something",
+        ],
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            201,
+            json={
+                "number": 7,
+                "html_url": "https://github.com/octo/widget/pull/7",
+                "head": {"ref": ws.branch},
+                "base": {"ref": "main"},
+                "state": "open",
+            },
+        )
+
+    github = GitHubClient("tok", transport=httpx.MockTransport(handler))
+    loop, thread = _make_loop_in_background()
+    try:
+        bindings = ToolBindings(
+            db=db,
+            github=github,
+            git_transport=LocalGitTransport(token=None),
+            repo=_stub_repo(),
+            issue=IssueInfo(
+                repo="octo/widget",
+                number=42,
+                title="t",
+                body="",
+                state="open",
+                author="alice",
+                labels=(),
+                is_pull_request=False,
+            ),
+            workspace=ws,
+            loop=loop,
+            author_name="robomp-bot",
+            author_email="robomp-bot@example.invalid",
+        )
+        db.upsert_issue(
+            key=bindings.issue_key,
+            repo="octo/widget",
+            number=42,
+            state="reproducing",
+            branch=ws.branch,
+            session_dir=str(ws.session_dir),
+        )
+        db.set_issue_classification(bindings.issue_key, "bug")
+        tool = next(x for x in build(bindings) if x.name == "gh_open_pr")
+        body = "## Repro\nrepro\n\n## Cause\ncause\n\n## Fix\nfix\n\n## Verification\n`bun run test` red on main\n\nFixes #42\n"
+        result = tool.execute({"title": "fix: x", "body": body, "skip_checks": True}, _ctx())
+    finally:
+        _stop_loop(loop, thread)
+
+    assert "opened #7" in result
+    # No bun stage ran at all — fix, check and test were all short-circuited.
+    assert not bun_invocations.exists(), bun_invocations.read_text()
+    rows = db._conn.execute("SELECT result_json FROM tool_calls WHERE tool='gh_open_pr' ORDER BY id").fetchall()
+    skipped = [json.loads(r["result_json"] or "{}") for r in rows]
+    assert any(s.get("skipped") == "bun_run_fix" for s in skipped)
+    assert any(s.get("skipped") == "bun_check" for s in skipped)
+    assert any(s.get("skipped") == "bun_run_test" for s in skipped)
 
 
 def test_gh_open_pr_refuses_dirty_worktree_before_fix(
