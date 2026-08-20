@@ -132,6 +132,16 @@ describe("task.batch schema gating", () => {
 		expect(itemProperties.schemaMode).toBeDefined();
 	});
 
+	it("requires coordination instead of promising same-file auto-resolution", async () => {
+		mockDiscovery();
+		const tool = await TaskTool.create(createSession({ settings: { "task.batch": true } }));
+
+		expect(tool.description).toContain("Same-file edits are not guaranteed to merge");
+		expect(tool.description).toContain("coordinate through `hub` before editing shared files");
+		expect(tool.description).toContain("Name one integration owner");
+		expect(tool.description).not.toContain("Concurrent edits to the same files auto-resolve");
+	});
+
 	it("hides effort by default and exposes it when task.enableEffort is enabled", async () => {
 		mockDiscovery();
 
