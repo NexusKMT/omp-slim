@@ -541,12 +541,15 @@ const OPENAI_NON_RESPONSES_PREFIXES = [
 	"gpt-realtime",
 ] as const;
 
-function isLikelyOpenAIResponsesModelId(id: string, references: Map<string, ModelSpec<"openai-responses">>): boolean {
+function isLikelyOpenAIResponsesModelId(
+	id: string,
+	references?: ReadonlyMap<string, ModelSpec<"openai-responses">>,
+): boolean {
 	const trimmed = id.trim();
 	if (!trimmed) {
 		return false;
 	}
-	if (references.has(trimmed)) {
+	if (references?.has(trimmed)) {
 		return true;
 	}
 	const normalized = trimmed.toLowerCase();
@@ -4629,11 +4632,14 @@ export interface FetchLiteLLMRichModelsOptions<TApi extends Api> {
 	signal?: AbortSignal;
 	timeoutMs?: number;
 	referenceResolver?: (modelId: string) => ModelSpec<TApi> | undefined;
+	resolveApi?: (entry: Record<string, unknown>, modelId: string) => TApi;
 }
 
 type LiteLLMRichModelEntry = Record<string, unknown>;
+type LiteLLMApiRoute = "openai" | "other" | "unknown";
 type LiteLLMRichEndpointModel<TApi extends Api> = {
 	model: ModelSpec<TApi>;
+	apiRoute: LiteLLMApiRoute;
 	supportsVision: unknown;
 	supportsReasoning: unknown;
 	hasContextWindow: boolean;
@@ -4714,14 +4720,15 @@ function toLiteLLMDisplayName(modelName: string | undefined, referenceName: stri
 	return referenceName ? stripLiteLLMResellerUsageSuffix(referenceName) : id;
 }
 
-function mapLiteLLMOpenAICompatibleModel<TApi extends Api>(
+function mapLiteLLMOpenAICompatibleModel(
 	entry: OpenAICompatibleModelRecord,
-	defaults: ModelSpec<TApi>,
-	reference: ModelSpec<TApi> | undefined,
-): ModelSpec<TApi> {
+	defaults: ModelSpec<Api>,
+	reference: ModelSpec<Api> | undefined,
+): ModelSpec<Api> {
 	const model = mapWithBundledReference(entry, defaults, reference);
 	return {
 		...model,
+		api: resolveLiteLLMApi(undefined, model.id),
 		name: stripLiteLLMResellerUsageSuffix(model.name),
 	};
 }
@@ -4806,6 +4813,55 @@ function getSupportedOpenAIParams(entry: LiteLLMRichModelEntry): string[] | unde
 		return undefined;
 	}
 	return value.flatMap(item => (typeof item === "string" ? [item] : []));
+}
+
+function getLiteLLMProviders(entry: LiteLLMRichModelEntry): string[] | undefined {
+	if (!Array.isArray(entry.providers)) {
+		return undefined;
+	}
+	const providers = entry.providers.flatMap(provider => {
+		const normalized = toNonEmptyString(provider)?.toLowerCase();
+		return normalized ? [normalized] : [];
+	});
+	return providers.length > 0 ? providers : undefined;
+}
+
+function classifyLiteLLMApiRoute(entry: LiteLLMRichModelEntry | undefined, id: string): LiteLLMApiRoute {
+	if (entry) {
+		const providers = getLiteLLMProviders(entry);
+		if (providers) {
+			return providers.every(provider => provider === "openai") ? "openai" : "other";
+		}
+
+		const params = getLiteLLMParams(entry);
+		const configuredProvider = toNonEmptyString(params?.custom_llm_provider)?.toLowerCase();
+		if (configuredProvider) {
+			return configuredProvider === "openai" ? "openai" : "other";
+		}
+
+		const backendModel = toNonEmptyString(params?.model);
+		const backendSeparator = backendModel?.indexOf("/") ?? -1;
+		if (backendModel && backendSeparator > 0) {
+			return backendModel.slice(0, backendSeparator).toLowerCase() === "openai" ? "openai" : "other";
+		}
+
+		const baseModel = toNonEmptyString(getLiteLLMMetadataValue(entry, "base_model"));
+		const baseSeparator = baseModel?.indexOf("/") ?? -1;
+		if (baseModel && baseSeparator > 0) {
+			return baseModel.slice(0, baseSeparator).toLowerCase() === "openai" ? "openai" : "other";
+		}
+	}
+
+	const modelId = id.toLowerCase().startsWith("openai/") ? id.slice("openai/".length) : id;
+	return isLikelyOpenAIResponsesModelId(modelId) ? "openai" : "unknown";
+}
+
+export function resolveLiteLLMApi(
+	entry: Record<string, unknown> | undefined,
+	id: string,
+	fallbackApi: Api = "openai-completions",
+): Api {
+	return classifyLiteLLMApiRoute(entry, id) === "openai" ? "openai-responses" : fallbackApi;
 }
 
 function isLiteLLMUnusableSentinelPlaceholder(entry: LiteLLMRichModelEntry): boolean {
@@ -4900,7 +4956,7 @@ function mapLiteLLMRichEntry<TApi extends Api>(
 	return {
 		id,
 		name: toLiteLLMDisplayName(modelName, reference?.name, id),
-		api: options.api,
+		api: options.resolveApi?.(entry, id) ?? options.api,
 		provider: options.provider,
 		baseUrl: runtimeBaseUrl,
 		contextWindow,
@@ -4971,6 +5027,7 @@ async function fetchLiteLLMRichEndpoint<TApi extends Api>(
 			}
 			deduped.set(model.id, {
 				model,
+				apiRoute: classifyLiteLLMApiRoute(entry, model.id),
 				supportsVision,
 				supportsReasoning,
 				hasContextWindow: toPositiveNumber(getLiteLLMMetadataValue(entry, "max_input_tokens"), null) !== null,
@@ -4993,7 +5050,7 @@ async function fetchLiteLLMRichEndpoint<TApi extends Api>(
 	};
 }
 
-export async function fetchLiteLLMRichModels<TApi extends Api>(
+async function fetchLiteLLMRichModelsInternal<TApi extends Api>(
 	options: FetchLiteLLMRichModelsOptions<TApi>,
 ): Promise<ModelSpec<TApi>[] | null> {
 	const managementBaseUrl = normalizeLiteLLMManagementBaseUrl(options.baseUrl);
@@ -5033,8 +5090,16 @@ export async function fetchLiteLLMRichModels<TApi extends Api>(
 					}
 					continue;
 				}
+				const apiRoute =
+					existing.apiRoute === "other" || next.apiRoute === "other"
+						? "other"
+						: existing.apiRoute === "openai" || next.apiRoute === "openai"
+							? "openai"
+							: "unknown";
+				const api = next.apiRoute === apiRoute ? next.model.api : existing.model.api;
 				const model: ModelSpec<TApi> = {
 					...existing.model,
+					api,
 					name: next.model.name === next.model.id ? existing.model.name : next.model.name,
 					contextWindow: next.hasContextWindow ? next.model.contextWindow : existing.model.contextWindow,
 					maxTokens: next.hasMaxTokens ? next.model.maxTokens : existing.model.maxTokens,
@@ -5049,7 +5114,7 @@ export async function fetchLiteLLMRichModels<TApi extends Api>(
 				if (next.hasToolMetadata) {
 					model.supportsTools = next.model.supportsTools;
 				}
-				deduped.set(next.model.id, { ...next, model });
+				deduped.set(next.model.id, { ...next, apiRoute, model });
 			}
 			let hasIncompleteVisionMetadata = false;
 			for (const entry of deduped.values()) {
@@ -5078,40 +5143,45 @@ export async function fetchLiteLLMRichModels<TApi extends Api>(
 	return options.timeoutMs !== undefined ? withCatalogDiscoveryTimeout(options.timeoutMs, fetchModels) : fetchModels();
 }
 
-export function litellmModelManagerOptions(
-	config?: LiteLLMModelManagerConfig,
-): ModelManagerOptions<"openai-completions"> {
+export async function fetchLiteLLMRichModels<TApi extends Api>(
+	options: FetchLiteLLMRichModelsOptions<TApi>,
+): Promise<ModelSpec<TApi>[] | null> {
+	return fetchLiteLLMRichModelsInternal(options);
+}
+
+export function litellmModelManagerOptions(config?: LiteLLMModelManagerConfig): ModelManagerOptions<Api> {
 	const apiKey = config?.apiKey;
 	const baseUrl = config?.baseUrl ?? getDefaultModelDiscoveryBaseUrl("litellm")!;
 	return {
 		providerId: "litellm",
-		// rich-v5 invalidates rows cached before rich metadata pricing was mapped.
+		// rich-v6 invalidates rows cached before OpenAI models moved to Responses.
 		// Earlier versions added bundled reference fallback, continued discovery
 		// past incomplete `/model_group/info`, stripped reseller usage suffixes,
-		// and filtered placeholder-only `all-team-models` rows. Bump the version
-		// whenever the mappers below change, or warm authoritative caches keep
-		// serving pre-change rows for the full TTL.
+		// filtered placeholder-only `all-team-models` rows, and mapped rich pricing.
+		// Bump the version whenever the mappers below change, or warm authoritative
+		// caches keep serving pre-change rows for the full TTL.
 		cacheProviderId: resolveModelCacheProviderId("litellm", { baseUrl }),
 		// litellm is a local-only proxy and is never bundled in models.json (that
 		// would leak the machine's localhost catalog). Prefer the proxy's richer
 		// management metadata, then enrich ids against models.dev with the bundled
 		// catalog as a fallback before using /v1/models.
 		fetchDynamicModels: async () => {
-			const modelsDevReferences = await loadModelsDevReferences<"openai-completions">(config?.fetch);
+			const modelsDevReferences = await loadModelsDevReferences<Api>(config?.fetch);
 			const resolveReference = createReferenceResolver(modelsDevReferences);
-			const richModels = await fetchLiteLLMRichModels({
+			const richModels = await fetchLiteLLMRichModels<Api>({
 				api: "openai-completions",
 				provider: "litellm",
 				baseUrl,
 				apiKey,
 				fetch: config?.fetch,
 				referenceResolver: resolveReference,
+				resolveApi: resolveLiteLLMApi,
 				timeoutMs: 10_000,
 			});
 			if (richModels && richModels.length > 0) {
 				return richModels;
 			}
-			return fetchOpenAICompatibleModels({
+			return fetchOpenAICompatibleModels<Api>({
 				api: "openai-completions",
 				provider: "litellm",
 				baseUrl,

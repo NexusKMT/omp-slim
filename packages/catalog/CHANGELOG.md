@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- LiteLLM-discovered OpenAI models now use the Responses API, so reasoning summaries appear in thinking blocks while other model groups remain on Chat Completions ([#9085](https://github.com/can1357/oh-my-pi/pull/9085) by [@jbkkd](https://github.com/jbkkd)).
+
 ## [17.4.0] - 2026-08-20
 
 ### Added
