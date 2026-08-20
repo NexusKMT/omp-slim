@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP tool names longer than 64 characters (e.g. `chrome-devtools-mcp`'s `performance_analyze_insight`) are now capped at 64 with a deterministic hash suffix, so strict validators like Meta/OpenAI Responses no longer reject every turn with HTTP 400 `name must be at most 64 characters` ([#9130](https://github.com/can1357/oh-my-pi/issues/9130)).
+
 ## [17.4.0] - 2026-08-20
 
 ### Added
