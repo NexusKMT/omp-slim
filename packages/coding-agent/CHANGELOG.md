@@ -191,6 +191,9 @@
 - Fixed OMP panicking at startup when the host environment contains a non-UTF-8 variable value; such entries are now skipped when copying the host environment into the shell ([#8925](https://github.com/can1357/oh-my-pi/issues/8925)).
 - Fixed `/mcp reauth` refusing to run the OAuth flow for HTTP MCP servers that allow unauthenticated `initialize` but require auth for `tools/call`; endpoint discovery now runs against the server URL before giving up ([#8922](https://github.com/can1357/oh-my-pi/issues/8922)).
 - Fixed `--model @<role>` failing with `Model "@<role>" not found` when the role maps to a model on a discovery-backed provider (oMLX, Ollama, llama-swap). Deferred resolution treated a role's expanded `configuredPatterns` as a resolved runtime match, skipping the discoverable-provider refresh so the model was never fetched; only a concretely resolved model now short-circuits that refresh ([#8863](https://github.com/can1357/oh-my-pi/issues/8863)).
+### Fixed
+
+- Fixed unquoted internal URLs in `bash` commands consuming adjacent shell operators into the resolved filesystem path.
 
 ## [17.3.7] - 2026-08-17
 
