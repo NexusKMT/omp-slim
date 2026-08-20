@@ -115,6 +115,10 @@
 
 - Fixed Task descriptions mislabeling restrictive spawn-policy defaults as general-purpose workers.
 
+### Fixed
+
+- Fixed SSH guidance recommending retired `search` and standalone `ssh` routes.
+
 ## [17.3.8] - 2026-08-19
 
 ### Added

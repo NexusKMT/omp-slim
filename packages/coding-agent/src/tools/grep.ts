@@ -814,7 +814,7 @@ async function resolveInternalSearchInputs(opts: {
 		// misleading. Local/skill/vault dir resources set `sourcePath` and skip this.
 		if (resource.isDirectory && !resource.sourcePath) {
 			throw new ToolError(
-				`search cannot recurse the directory listing at ${rawPath}; search a specific file under it (e.g. ${rawPath.replace(/\/+$/, "")}/<file>) or read ${rawPath} to list its entries`,
+				`grep cannot recurse the directory listing at ${rawPath}; grep a specific file under it (e.g. ${rawPath.replace(/\/+$/, "")}/<file>) or read ${rawPath} to list its entries`,
 			);
 		}
 		if (resource.sourcePath) {
