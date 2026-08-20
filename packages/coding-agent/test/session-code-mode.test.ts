@@ -137,7 +137,12 @@ describe("Code Mode session reconciliation", () => {
 		};
 	}
 
-	function createSession(settings: Settings): { session: AgentSession; directModel: Model; codeModel: Model } {
+	function createSession(
+		settings: Settings,
+		rebuildSystemPrompt: (names: string[]) => Promise<{ systemPrompt: string[] }> = async names => ({
+			systemPrompt: [`tools:${names.join(",")}`],
+		}),
+	): { session: AgentSession; directModel: Model; codeModel: Model } {
 		const codeModel = model("openai-codex", "code_mode_only");
 		const directModel = model("openai");
 		const tools = [tool("eval"), tool("read")];
@@ -153,7 +158,7 @@ describe("Code Mode session reconciliation", () => {
 			} as never,
 			toolRegistry: new Map(tools.map(value => [value.name, value])),
 			builtInToolNames: tools.map(value => value.name),
-			rebuildSystemPrompt: async names => ({ systemPrompt: [`tools:${names.join(",")}`] }),
+			rebuildSystemPrompt,
 		});
 		sessions.push(session);
 		return { session, directModel, codeModel };
@@ -183,6 +188,27 @@ describe("Code Mode session reconciliation", () => {
 		settings.set("providers.openai-codex.codeMode", "off");
 		await session.runToolRegistryMutation(async () => undefined);
 		expect(session.agent.state.tools.map(value => value.name)).toEqual(["eval", "read"]);
+	});
+
+	test("reduced tool sets retain eval as the Code Mode transport", async () => {
+		const { session } = createSession(Settings.isolated({ "providers.openai-codex.codeMode": "auto" }));
+
+		await session.setActiveToolsByName(["read"]);
+
+		expect(session.getActiveToolNames()).toEqual(["eval"]);
+		expect(session.getEnabledToolNames()).toEqual(["read", "eval"]);
+		expect(session.getToolForEvalBridge("read")?.name).toBe("read");
+	});
+
+	test("failed tool application leaves Code Mode namespace metadata unchanged", async () => {
+		const { session } = createSession(Settings.isolated({ "providers.openai-codex.codeMode": "auto" }), async () => {
+			throw new Error("rebuild failed");
+		});
+
+		await expect(session.setActiveToolsByName(["eval", "read"])).rejects.toThrow("rebuild failed");
+
+		expect(session.codeModeNamespacesInfo).toBeUndefined();
+		expect(session.getActiveToolNames()).toEqual(["eval", "read"]);
 	});
 });
 
