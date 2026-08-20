@@ -999,6 +999,18 @@ describe("TranscriptContainer seal-on-commit", () => {
 		expect(container.isBlockUncommitted(card)).toBe(true);
 	});
 
+	it("does not seal when only the container-owned separator has committed", () => {
+		const { container, card } = cardAfterHistory();
+		// live-region start is row 2; the engine's pin ceiling commits [0, 2)
+		// (history + the blank separator). That blank is not a card body row.
+		expect(container.getNativeScrollbackLiveRegionStart()).toBe(2);
+		container.setNativeScrollbackCommittedRows(2);
+		container.render(W);
+		expect(card.sealCount).toBe(0);
+		expect(container.isBlockUncommitted(card)).toBe(true);
+		expect(container.getNativeScrollbackLiveRegionStart()).toBe(2);
+	});
+
 	it("never seals across same-value or decreasing republishes above the block", () => {
 		const { container, card } = cardAfterHistory();
 		// The engine republishes the committed count every frame (compose and

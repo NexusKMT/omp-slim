@@ -377,7 +377,7 @@ export class TranscriptContainer
 	isBlockUncommitted(component: Component): boolean {
 		for (const segment of this.#segments) {
 			if (segment.component !== component) continue;
-			return segment.rowCount === 0 || segment.startRow >= this.#committedRows;
+			return segment.rowCount === 0 || segment.startRow + segment.sep >= this.#committedRows;
 		}
 		return true;
 	}
@@ -467,7 +467,13 @@ export class TranscriptContainer
 		for (let i = 0; i < count && i < this.#segments.length; i++) {
 			const previous = this.#segments[i];
 			if (previous === undefined) continue;
-			if (previous.startRow >= this.#committedRows) break;
+			// The leading separator is container-owned spacing and sits in the
+			// committed prefix (live-region start is `startRow + sep`). Sealing
+			// on `startRow` would freeze a pinned hub-wait/todo card the moment
+			// that blank committed — then duration/shimmer ticks smear into
+			// native scrollback.
+			const bodyStart = previous.startRow + previous.sep;
+			if (bodyStart >= this.#committedRows) break;
 			if (previous.rowCount === 0 || previous.component !== this.children[i]) continue;
 			sealCommittedSnapshot(previous.component);
 		}
