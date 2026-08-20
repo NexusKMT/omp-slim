@@ -1241,12 +1241,19 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	registerSshCleanup();
 	registerEvalCleanup();
 
+	const settings = await (options.settings ??
+		options.settingsManager ??
+		logger.time("settings", Settings.init, { cwd, agentDir }));
+	logger.time("initializeWithSettings", initializeWithSettings, settings);
+
 	// Pin authStorage to modelRegistry.authStorage: ModelRegistry.getApiKey() routes refresh
 	// failures through that instance, so any divergent storage handed to the bridge / mcpManager
 	// / session would silently miss credential_disabled events.
 	const modelRegistry =
 		options.modelRegistry ??
-		new ModelRegistry(options.authStorage ?? (await logger.time("discoverModels", discoverAuthStorage, agentDir)));
+		new ModelRegistry(options.authStorage ?? (await logger.time("discoverModels", discoverAuthStorage, agentDir)), undefined, {
+			settings,
+		});
 	// Track whether we internally created the authStorage so we can close it
 	// if construction fails before the session takes ownership.
 	const ownsAuthStorage = !options.authStorage && !options.modelRegistry;
@@ -1270,10 +1277,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			startupCredentialDisabledEvents.push(event);
 		}
 	});
-	const settings = await (options.settings ??
-		options.settingsManager ??
-		logger.time("settings", Settings.init, { cwd, agentDir }));
-	logger.time("initializeWithSettings", initializeWithSettings, settings);
 	if (!options.modelRegistry) {
 		modelRegistry.refreshInBackground();
 	}

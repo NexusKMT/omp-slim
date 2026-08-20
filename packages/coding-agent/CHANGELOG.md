@@ -11,6 +11,7 @@
 - Backgroundable Python — `eval` cells can run async and auto-background like `bash`, with configurable thresholds.
 - Local Claude token counting — Anthropic-family tokens now count via a native local tokenizer, and every counter (session maintenance, advisor, stats, context tools) uses the active model's own tokenizer.
 - `extendedContext` setting — pick whether models with premium long-context pricing (272K/1M tiers on Codex-class models) use the extended window or compact early and stay on standard pricing.
+- `/extended-context` — toggle premium long-context windows without leaving the session.
 - Speculative compaction — with `compaction.asyncEnabled`, all compaction modes compact in parallel while the session continues, then splice the result in instantly.
 - `tokenizer` property on custom models and `modelOverrides` to pin the tokenizer family for proxy models.
 - `qwenTemplateReasoningEffort` in `models.yml` `compat` to disable the Qwen 3.8+ reasoning-effort template parameter for strict local servers.

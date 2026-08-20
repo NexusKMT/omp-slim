@@ -108,7 +108,7 @@ export {
 
 import { ModelsConfigFile, type ProviderValidationModel, validateProviderConfiguration } from "./models-config";
 import type { ModelOverride, ModelsConfig, ProviderAuthMode } from "./models-config-schema";
-import { settings } from "./settings";
+import { settings, type Settings } from "./settings";
 
 // DeviceCheck attestation (`x-oai-attestation`) for ChatGPT-OAuth Codex
 // requests; the pi-ai provider resolves it just-in-time per request.
@@ -132,21 +132,21 @@ interface CustomModelsResult {
  */
 type ModifyModelsHook = (models: Model<Api>[], credentials: OAuthCredentials) => Model<Api>[];
 
-function getDisabledProviderIdsFromSettings(): Set<string> {
+function getDisabledProviderIdsFromSettings(settingsInstance?: Settings): Set<string> {
 	try {
-		return new Set(settings.get("disabledProviders"));
+		return new Set((settingsInstance ?? settings).get("disabledProviders"));
 	} catch {
 		return new Set();
 	}
 }
 
 /**
- * Whether premium long-context windows are enabled. Defaults to true when the
- * settings singleton is not initialized (SDK embedding, early boot).
+ * Whether premium long-context windows are enabled. Defaults to true when no
+ * settings source is available (SDK embedding, early boot).
  */
-function isExtendedContextEnabledFromSettings(): boolean {
+function isExtendedContextEnabledFromSettings(settingsInstance?: Settings): boolean {
 	try {
-		return settings.get("extendedContext");
+		return (settingsInstance ?? settings).get("extendedContext");
 	} catch {
 		return true;
 	}
@@ -209,6 +209,7 @@ export class ModelRegistry {
 	#runtimeModelManagers: Map<string, { options: ModelManagerOptions<Api>; sourceId: string }> = new Map();
 	#ignoreLocalModelConfig: boolean;
 	#fetch: FetchImpl;
+	#settings: Settings | undefined;
 
 	#resolveCommandBackedApiKey(provider: string, options?: { forceCommandRefresh?: boolean }): CommandApiKeyResolution {
 		const keyConfig = this.#customProviderApiKeys.get(provider);
@@ -252,10 +253,13 @@ export class ModelRegistry {
 			 * must never apply client-side credential or routing overrides.
 			 */
 			ignoreLocalModelConfig?: boolean;
+			/** Settings source for availability and context-window policies. */
+			settings?: Settings;
 			fetch?: FetchImpl;
 		},
 	) {
 		this.#ignoreLocalModelConfig = options?.ignoreLocalModelConfig ?? false;
+		this.#settings = options?.settings;
 		this.#fetch =
 			options?.fetch ??
 			(isBunTestRuntime()
@@ -886,7 +890,7 @@ export class ModelRegistry {
 	}
 
 	#addImplicitDiscoverableProviders(configuredProviders: Set<string>): void {
-		const disabledProviders = getDisabledProviderIdsFromSettings();
+		const disabledProviders = getDisabledProviderIdsFromSettings(this.#settings);
 		if (!configuredProviders.has("ollama") && !disabledProviders.has("ollama")) {
 			this.#discoverableProviders.push({
 				provider: "ollama",
@@ -1058,7 +1062,7 @@ export class ModelRegistry {
 		strategy: ModelRefreshStrategy,
 		providerFilter?: ReadonlySet<string>,
 	): Promise<void> {
-		const disabledProviders = getDisabledProviderIdsFromSettings();
+		const disabledProviders = getDisabledProviderIdsFromSettings(this.#settings);
 		const selectedDiscoverableProviders = (
 			providerFilter
 				? this.#discoverableProviders.filter(provider => providerFilter.has(provider.provider))
@@ -1367,7 +1371,7 @@ export class ModelRegistry {
 					}),
 			},
 		];
-		const disabledProviders = getDisabledProviderIdsFromSettings();
+		const disabledProviders = getDisabledProviderIdsFromSettings(this.#settings);
 		const standardProviderDescriptors = PROVIDER_DESCRIPTORS.filter(descriptor => {
 			if (disabledProviders.has(descriptor.providerId)) return false;
 			if (configuredDiscoveryProviders.has(descriptor.providerId)) return false;
@@ -1592,7 +1596,7 @@ export class ModelRegistry {
 		});
 	}
 	#applyHardcodedModelPolicies(models: Model<Api>[]): Model<Api>[] {
-		const extendedContext = isExtendedContextEnabledFromSettings();
+		const extendedContext = isExtendedContextEnabledFromSettings(this.#settings);
 		return models.map(model => {
 			// Extended context off: cap models with a premium long-context price
 			// tier (e.g. GPT-5.6 bills 2x input above 272K) at the standard-pricing
@@ -1683,7 +1687,7 @@ export class ModelRegistry {
 	 * full bundled catalog (thousands of models, ~50 providers).
 	 */
 	#createProviderAvailabilityCheck(): (provider: string) => boolean {
-		const disabledProviders = getDisabledProviderIdsFromSettings();
+		const disabledProviders = getDisabledProviderIdsFromSettings(this.#settings);
 		const byProvider = new Map<string, boolean>();
 		return provider => {
 			let available = byProvider.get(provider);
@@ -1752,7 +1756,7 @@ export class ModelRegistry {
 	}
 
 	getDiscoverableProviders(): string[] {
-		const disabledProviders = getDisabledProviderIdsFromSettings();
+		const disabledProviders = getDisabledProviderIdsFromSettings(this.#settings);
 		return this.#discoverableProviders
 			.filter(provider => !disabledProviders.has(provider.provider))
 			.map(provider => provider.provider);
@@ -1770,7 +1774,7 @@ export class ModelRegistry {
 	hasProvider(providerId: string): boolean {
 		const providerModels = this.#hasFullSnapshot ? this.#models : this.#composeStaticModels(new Set([providerId]));
 		if (providerModels.some(model => model.provider === providerId)) return true;
-		if (getDisabledProviderIdsFromSettings().has(providerId)) return false;
+		if (getDisabledProviderIdsFromSettings(this.#settings).has(providerId)) return false;
 		return (
 			this.#discoverableProviders.some(provider => provider.provider === providerId) ||
 			this.#runtimeModelManagers.has(providerId)
