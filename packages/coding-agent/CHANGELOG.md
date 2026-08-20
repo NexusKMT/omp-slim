@@ -51,6 +51,7 @@
 - Fixed dark-theme contrast issues on markdown code-fence headers.
 - Fixed prompt guidance and descriptions for Task tools and SSH usage.
 - ACP editor clients that support elicitation forms (Zed) can now use `ask`, so the agent can pose single-choice, multi-select, and free-text questions inline instead of guessing.
+- `/retry` and `/handoff` now work over ACP, so editor clients (Zed) list them and can run them instead of sending the text to the model.
 
 ## [17.4.0] - 2026-08-20
 

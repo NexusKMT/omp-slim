@@ -960,6 +960,16 @@ export class AcpAgent implements Agent {
 			output: output => this.#emitCommandOutput(record, output),
 			refreshCommands: () => this.#emitAvailableCommandsUpdate(record),
 			reloadPlugins: () => this.#reloadPluginState(record),
+			keepTurnOpenUntilIdle: async () => {
+				await record.session.waitForIdle();
+				// `AgentSession.#emit()` does not await listeners, so the retried
+				// turn's `agent_end` handler — which emits the trailing chunks and
+				// end-of-turn updates — can still be in flight once the session is
+				// idle. Drain the tracked handlers too, or the prompt response can
+				// overtake its own updates. Same pairing as the `!agentInvoked`
+				// path below.
+				await this.#waitForPromptEventHandlers(record);
+			},
 			notifyTitleChanged: async () => {
 				await this.#connection.sessionUpdate({
 					sessionId: record.session.sessionId,
