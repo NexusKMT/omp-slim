@@ -11,6 +11,9 @@
 ### Fixed
 
 - Fixed Vercel AI Gateway Muse Spark 1.2 Contributor requests failing with HTTP 400 by capping the advertised output allowance to the model's 131K output limit.
+### Fixed
+
+- LiteLLM-discovered OpenAI models now use the Responses API, so reasoning summaries appear in thinking blocks while other model groups remain on Chat Completions ([#9085](https://github.com/can1357/oh-my-pi/pull/9085) by [@jbkkd](https://github.com/jbkkd)).
 
 ## [17.4.0] - 2026-08-20
 
