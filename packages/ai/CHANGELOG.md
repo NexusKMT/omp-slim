@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed Bedrock Converse resending unsigned reasoning content on the request path for non-Claude reasoning models (Amazon Nova and any model addressed via an opaque application-inference-profile ARN): `convertMessages` assumed a model that *streams* `reasoningContent` also *accepts* it echoed back unsigned, which holds for Claude (only after it later gains a signature) but not Nova — Nova rejects the echo with `Bedrock HTTP 400: "User messages cannot contain reasoning content. Please remove the reasoning content and try again."` on every turn after the first, wedging the agent loop. Thinking blocks without a captured signature are now always demoted to plain text on replay, matching how Anthropic, Google, and OpenAI-compatible providers already handle reasoning they can't safely resend.
+- Fixed Bedrock Converse resending unsigned reasoning content on the request path, which made Amazon Nova reject every turn after the first with `User messages cannot contain reasoning content` and wedge the agent loop. Thinking blocks without a captured signature are now demoted to plain text on replay, matching the other providers.
 
 ## [17.4.0] - 2026-08-20
 
