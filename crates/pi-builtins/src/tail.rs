@@ -1330,7 +1330,7 @@ mod follow {
 		use std::{
 			collections::{HashMap, hash_map::Keys},
 			fs::{File, Metadata},
-			io::{BufRead, BufReader, BufWriter, Write},
+			io::{BufRead, BufReader, Write},
 			path::{Path, PathBuf},
 		};
 		
@@ -1480,8 +1480,7 @@ mod follow {
 						self.header_printer.print(display_name.as_str(), writer);
 					}
 		
-					let mut writer = BufWriter::new(writer);
-					chunks.print(&mut writer).map_err(crate::tail::map_output_error)?;
+					chunks.print(writer).map_err(crate::tail::map_output_error)?;
 					writer.flush().map_err(crate::tail::map_output_error)?;
 		
 					self.last.replace(path.to_owned());
@@ -1565,7 +1564,7 @@ mod follow {
 		use brush_core::openfiles::OpenFile;
 		
 		use crate::{
-			host::Host,
+			host::{Host, StreamWriter},
 			tail::{
 				TailError,
 				TailResult,
@@ -1656,7 +1655,7 @@ mod follow {
 			pub files:      FileHandling,
 		
 			pub pid: platform::Pid,
-			pub stdout: OpenFile,
+			pub stdout: StreamWriter,
 			pub stderr: OpenFile,
 			pub cancel: Arc<AtomicBool>,
 		}
@@ -1668,7 +1667,7 @@ mod follow {
 				use_polling: bool,
 				files: FileHandling,
 				pid: platform::Pid,
-				stdout: OpenFile,
+				stdout: StreamWriter,
 				stderr: OpenFile,
 				cancel: Arc<AtomicBool>,
 			) -> Self {
@@ -1694,7 +1693,7 @@ mod follow {
 		
 			pub fn from(
 				settings: &Settings,
-				stdout: OpenFile,
+				stdout: StreamWriter,
 				stderr: OpenFile,
 				cancel: Arc<AtomicBool>,
 			) -> Self {
@@ -2807,7 +2806,7 @@ use std::{
 	cmp::Ordering,
 	ffi::OsString,
 	fs::File,
-	io::{self, BufReader, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write},
+	io::{self, BufReader, ErrorKind, Read, Seek, SeekFrom, Write},
 	path::{Path, PathBuf},
 };
 
@@ -3075,6 +3074,7 @@ fn reverse_main(settings: &Settings, all_lines: bool, host: &mut Host) -> TailRe
 		unreachable!("-r with -c is rejected before dispatch");
 	};
 	let (signum, sep) = (*signum, *sep);
+	let mut stdout = host.stdout_writer();
 	let mut printer = HeaderPrinter::new(settings.verbose, true);
 	for input in &settings.inputs {
 		let path = match input.kind() {
@@ -3087,7 +3087,7 @@ fn reverse_main(settings: &Settings, all_lines: bool, host: &mut Host) -> TailRe
 		if let Some(path) = path {
 			if path.is_dir() {
 				host.fail(1);
-				printer.print_input(input, &mut host.stdout);
+				printer.print_input(input, &mut stdout);
 				let _ = writeln!(
 					host.stderr,
 					"tail: error reading '{}': Is a directory",
@@ -3097,7 +3097,7 @@ fn reverse_main(settings: &Settings, all_lines: bool, host: &mut Host) -> TailRe
 			}
 			match File::open(path) {
 				Ok(mut file) => {
-					printer.print_input(input, &mut host.stdout);
+					printer.print_input(input, &mut stdout);
 					file.read_to_end(&mut data)?;
 				},
 				Err(error) if error.kind() == ErrorKind::NotFound => {
@@ -3120,11 +3120,12 @@ fn reverse_main(settings: &Settings, all_lines: bool, host: &mut Host) -> TailRe
 				},
 			}
 		} else {
-			printer.print_input(input, &mut host.stdout);
+			printer.print_input(input, &mut stdout);
 			host.stdin.read_to_end(&mut data)?;
 		}
-		write_reversed_lines(&data, signum, sep, all_lines, &mut host.stdout)?;
+		write_reversed_lines(&data, signum, sep, all_lines, &mut stdout)?;
 	}
+	stdout.flush()?;
 	Ok(())
 }
 
@@ -3164,7 +3165,6 @@ fn write_reversed_lines(
 			},
 		}
 	};
-	let mut writer = BufWriter::new(writer);
 	for segment in keep.iter().rev() {
 		writer.write_all(segment)?;
 	}
@@ -3192,7 +3192,7 @@ fn uu_tail(settings: &Settings, host: &mut Host) -> TailResult<()> {
 	let mut printer = HeaderPrinter::new(settings.verbose, true);
 	let mut observer = Observer::from(
 		settings,
-		host.stdout_clone(),
+		host.stdout_writer(),
 		host.stderr_clone(),
 		host.cancel_flag(),
 	);
@@ -3219,6 +3219,7 @@ fn uu_tail(settings: &Settings, host: &mut Host) -> TailResult<()> {
 			},
 		}
 	}
+	observer.stdout.flush()?;
 
 	if settings.follow.is_some() {
 		/*
@@ -3574,16 +3575,15 @@ fn unbounded_tail<T: Read>(
 	settings: &Settings,
 	writer: &mut impl Write,
 ) -> io::Result<()> {
-	let mut writer = BufWriter::new(writer);
 	match &settings.mode {
 		FilterMode::Lines(Signum::Negative(count), sep) => {
 			let mut chunks = chunks::LinesChunkBuffer::new(*sep, *count);
 			chunks.fill(reader)?;
-			chunks.write(&mut writer)?;
+			chunks.write(&mut *writer)?;
 		},
 
 		FilterMode::Lines(Signum::PlusZero | Signum::Positive(1), _) => {
-			io::copy(reader, &mut writer)?;
+			io::copy(reader, &mut *writer)?;
 		},
 		FilterMode::Lines(Signum::Positive(count), sep) => {
 			let mut num_skip = *count - 1;
@@ -3597,22 +3597,22 @@ fn unbounded_tail<T: Read>(
 				}
 			}
 			if chunk.has_data() {
-				chunk.write_lines(&mut writer, num_skip as usize)?;
-				io::copy(reader, &mut writer)?;
+				chunk.write_lines(&mut *writer, num_skip as usize)?;
+				io::copy(reader, &mut *writer)?;
 			}
 		},
 		FilterMode::Bytes(Signum::Negative(count)) => {
 			let mut chunks = chunks::BytesChunkBuffer::new(*count);
 			chunks.fill(reader)?;
-			chunks.print(&mut writer)?;
+			chunks.print(&mut *writer)?;
 		},
 		FilterMode::Lines(Signum::MinusZero, sep) => {
 			let mut chunks = chunks::LinesChunkBuffer::new(*sep, 0);
 			chunks.fill(reader)?;
-			chunks.write(&mut writer)?;
+			chunks.write(&mut *writer)?;
 		},
 		FilterMode::Bytes(Signum::PlusZero | Signum::Positive(1)) => {
-			io::copy(reader, &mut writer)?;
+			io::copy(reader, &mut *writer)?;
 		},
 		FilterMode::Bytes(Signum::Positive(count)) => {
 			let mut num_skip = *count - 1;
@@ -3635,7 +3635,7 @@ fn unbounded_tail<T: Read>(
 				}
 			}
 
-			io::copy(reader, &mut writer)?;
+			io::copy(reader, &mut *writer)?;
 		},
 		_ => {},
 	}

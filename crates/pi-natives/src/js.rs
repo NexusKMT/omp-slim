@@ -47,7 +47,8 @@ struct Arena {
 	/// Stored as `u16` units purely for the 2-alignment UTF-16 fills need;
 	/// UTF-8 fills reinterpret the same bytes at alignment 1.
 	buf:    UnsafeCell<[u16; SCRATCH_LEN / 2]>,
-	/// Bytes handed out. Fills bump it; drops roll it back (see [`Self::release`]).
+	/// Bytes handed out. Fills bump it; drops roll it back (see
+	/// [`Self::release`]).
 	offset: Cell<usize>,
 	/// Live scratch-backed guards. Hitting zero resets `offset`, so a non-LIFO
 	/// drop order leaks at most until the last guard goes away.
@@ -179,10 +180,7 @@ pub fn utf16(value: JsString<'_>) -> Result<Utf16> {
 			napi::check_status!(status, "Failed to read JavaScript string")?;
 			if written < avail - 1 {
 				arena.commit(start, written * 2);
-				return Ok(Utf16(TextRepr::Scratch {
-					ptr: NonNull::new(ptr).unwrap(),
-					len: written,
-				}));
+				return Ok(Utf16(TextRepr::Scratch { ptr: NonNull::new(ptr).unwrap(), len: written }));
 			}
 		}
 
@@ -236,10 +234,7 @@ pub fn utf8(value: JsString<'_>) -> Result<Utf8> {
 					return Err(Error::new(Status::InvalidArg, error.to_string()));
 				}
 				arena.commit(start, written);
-				return Ok(Utf8(TextRepr::Scratch {
-					ptr: NonNull::new(ptr).unwrap(),
-					len: written,
-				}));
+				return Ok(Utf8(TextRepr::Scratch { ptr: NonNull::new(ptr).unwrap(), len: written }));
 			}
 		}
 

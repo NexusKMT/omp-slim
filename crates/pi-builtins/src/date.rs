@@ -763,7 +763,7 @@ use std::{
 	collections::HashMap,
 	ffi::OsString,
 	fs::File,
-	io::{BufRead, BufReader, BufWriter, Read, Write},
+	io::{BufRead, BufReader, Read, Write},
 	path::{Path, PathBuf},
 	sync::LazyLock,
 };
@@ -1541,6 +1541,7 @@ fn date_main(host: &mut Host, matches: &ArgMatches) -> Result<(), DateError> {
 	let cancel = host.cancel_flag();
 	let mut had_error = false;
 	let mut debug_stderr = host.stderr_clone();
+	let mut stdout = host.stdout_writer();
 	let reader_stderr = host.stderr_clone();
 	let dates: Box<dyn Iterator<Item = _>> = match &settings.date_source {
 		DateSource::Human(input) => {
@@ -1732,7 +1733,6 @@ fn date_main(host: &mut Host, matches: &ArgMatches) -> Result<(), DateError> {
 	};
 
 	let format_string = make_format_string(&settings);
-	let mut stdout = BufWriter::new(&mut host.stdout);
 
 	// Format all the dates
 	let config = Config::new().custom(PosixCustom::new()).lenient(true);

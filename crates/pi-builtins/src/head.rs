@@ -5,7 +5,7 @@
 use std::{
 	ffi::OsString,
 	fs::File,
-	io::{self, BufWriter, Read, Seek, SeekFrom, Write},
+	io::{self, Read, Seek, SeekFrom, Write},
 	num::TryFromIntError,
 	path::PathBuf,
 };
@@ -1166,9 +1166,8 @@ fn read_n_lines(
 	separator: u8,
 ) -> io::Result<u64> {
 	let mut reader = take_lines(input, n, separator);
-	let mut writer = BufWriter::with_capacity(BUF_SIZE, output);
-	let bytes_written = io::copy(&mut reader, &mut writer).map_err(wrap_in_stdout_error)?;
-	writer.flush().map_err(wrap_in_stdout_error)?;
+	let bytes_written = io::copy(&mut reader, output).map_err(wrap_in_stdout_error)?;
+	output.flush().map_err(wrap_in_stdout_error)?;
 	Ok(bytes_written)
 }
 
@@ -1394,23 +1393,24 @@ impl Utility for Head {
 			let _ = out.write_all(b" <==\n");
 			*first = false;
 		}
+		let mut out = host.stdout_writer();
 		for file in &options.files {
 			let result = if file == "-" {
 				if print_headers {
-					print_header(&mut host.stdout, b"standard input", &mut first);
+					print_header(&mut out, b"standard input", &mut first);
 				}
 				let mut input = io::BufReader::with_capacity(BUF_SIZE, &mut host.stdin);
 				match options.mode {
-					Mode::FirstBytes(n) => read_n_bytes(&mut input, &mut host.stdout, n),
+					Mode::FirstBytes(n) => read_n_bytes(&mut input, &mut out, n),
 					Mode::AllButLastBytes(n) => {
-						read_but_last_n_bytes(&mut input, &mut host.stdout, n)
+						read_but_last_n_bytes(&mut input, &mut out, n)
 					},
 					Mode::FirstLines(n) => {
-						read_n_lines(&mut input, &mut host.stdout, n, options.line_ending.into())
+						read_n_lines(&mut input, &mut out, n, options.line_ending.into())
 					},
 					Mode::AllButLastLines(n) => read_but_last_n_lines(
 						&mut input,
-						&mut host.stdout,
+						&mut out,
 						n,
 						options.line_ending.into(),
 					),
@@ -1421,7 +1421,7 @@ impl Utility for Head {
 					// GNU prints the header before reporting the read error,
 					// and that header counts as produced output.
 					if print_headers {
-						print_header(&mut host.stdout, file.as_encoded_bytes(), &mut first);
+						print_header(&mut out, file.as_encoded_bytes(), &mut first);
 					}
 					host.error(format!("error reading {}: Is a directory", file.quote()), 1);
 					continue;
@@ -1434,9 +1434,9 @@ impl Utility for Head {
 					},
 				};
 				if print_headers {
-					print_header(&mut host.stdout, file.as_encoded_bytes(), &mut first);
+					print_header(&mut out, file.as_encoded_bytes(), &mut first);
 				}
-				head_file(&mut input, &mut host.stdout, &options)
+				head_file(&mut input, &mut out, &options)
 			};
 			if let Err(err) = result {
 				let name = if file == "-" {
@@ -1452,6 +1452,9 @@ impl Utility for Head {
 					return 1;
 				}
 			}
+		}
+		if let Err(err) = out.flush() {
+			host.error(wrap_in_stdout_error(err), 1);
 		}
 		host.exit_code()
 	}

@@ -12,11 +12,10 @@
 use std::{
 	ffi::{OsStr, OsString},
 	fs::File,
-	io::{self, BufWriter, Read, Write},
+	io::{self, Read, Write},
 	path::{Path, PathBuf},
 };
 
-use brush_core::openfiles::OpenFile;
 use clap::{ArgAction, Parser, ValueEnum};
 use grep_cli::DecompressionReaderBuilder;
 use grep_matcher::{Captures, LineTerminator, Matcher};
@@ -26,7 +25,7 @@ use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::{
 	BinaryDetection, Encoding, Searcher, SearcherBuilder, Sink, SinkContext, SinkFinish, SinkMatch,
 };
-use crate::host::{Host, Utility};
+use crate::host::{Host, StreamWriter, Utility};
 
 use ignore::{
 	Match,
@@ -496,27 +495,6 @@ enum RegexEngine {
 enum CompiledMatcher {
 	Rust(RegexMatcher),
 	Pcre(PcreMatcher),
-}
-
-enum RgOutput {
-	Buffered(BufWriter<OpenFile>),
-	Direct(OpenFile),
-}
-
-impl Write for RgOutput {
-	fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-		match self {
-			Self::Buffered(output) => output.write(bytes),
-			Self::Direct(output) => output.write(bytes),
-		}
-	}
-
-	fn flush(&mut self) -> io::Result<()> {
-		match self {
-			Self::Buffered(output) => output.flush(),
-			Self::Direct(output) => output.flush(),
-		}
-	}
 }
 
 struct SearchOptions {
@@ -1840,9 +1818,11 @@ impl Utility for Rg {
 		return 2;
 	}
 	let mut out = if cli.line_buffered && !cli.no_line_buffered {
-		RgOutput::Direct(host.stdout_clone())
+		StreamWriter::line(host.stdout_clone())
+	} else if cli.no_line_buffered {
+		StreamWriter::block(host.stdout_clone())
 	} else {
-		RgOutput::Buffered(BufWriter::new(host.stdout_clone()))
+		host.stdout_writer()
 	};
 	let (patterns, mut paths) = match resolve_patterns(host, &cli) {
 		Ok(resolved) => resolved,
