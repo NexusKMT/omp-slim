@@ -5,6 +5,10 @@
 ### Fixed
 
 - Fixed character-based truncation splitting inline base64 data URLs: the elision marker landed inside the payload of archived tool results/args (and `planArchive()` edge slices could split URLs in any message text), leaving a recognizable-but-undecodable image reference that persisted in the archive and was rejected as invalid image input by OpenAI-dialect providers on every later request. Inline data URLs are now replaced atomically with a deterministic `[data URL omitted: <mime>, <n> base64 chars]` placeholder before any cap runs; re-compaction and `historyBlocks` reconstruction heal archives corrupted before the guard existed.
+### Added
+
+- Restored `providerFrameBudget()` (image budget clamped to `MAX_FRAMES_DEFAULT`) so callers can size archives to what the provider will actually send.
+
 
 ## [17.3.8] - 2026-08-19
 
