@@ -336,7 +336,6 @@ export interface HandoffResult {
 export interface SessionHandoffOptions {
 	autoTriggered?: boolean;
 	signal?: AbortSignal;
-	onSwitchCancelled?: () => void;
 }
 
 /** Result from cycleModel(). */

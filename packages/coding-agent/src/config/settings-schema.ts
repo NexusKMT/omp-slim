@@ -2274,6 +2274,18 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"compaction.asyncEnabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "context",
+			group: "Compaction",
+			label: "Async Compaction",
+			description:
+				"Speculatively summarize in the background as context nears the compaction threshold, then splice the ready result in when the threshold is crossed",
+		},
+	},
+
 	// No default: an unset reserve tells the compaction layer the user never
 	// chose one, so small-window recovery may swap in the proportional reserve
 	// (see resolveBudgetReserveTokens). A materialized 16384 here would make
@@ -5715,6 +5727,7 @@ export interface CompactionSettings {
 	reserveTokens: number | undefined;
 	keepRecentTokens: number;
 	midTurnEnabled: boolean;
+	asyncEnabled: boolean;
 	handoffSaveToDisk: boolean;
 	autoContinue: boolean;
 	remoteEndpoint: string | undefined;

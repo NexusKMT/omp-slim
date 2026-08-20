@@ -1567,7 +1567,8 @@ export class AgentSession {
 			getContextUsage: options => this.getContextUsage(options),
 			shake: (mode, options) => this.shake(mode, options),
 			dropImages: () => this.dropImages(),
-			runHandoff: (customInstructions, options) => this.handoff(customInstructions, options),
+			generateHandoffDocument: (customInstructions, options) =>
+				this.#handoff.generateDocument(customInstructions, options),
 			removeAssistantMessageFromActiveContext: message =>
 				this.#recovery.removeAssistantMessageFromActiveContext(message),
 			dropPersistedAssistantTurn: message => this.#recovery.dropPersistedAssistantTurn(message),
@@ -1585,15 +1586,12 @@ export class AgentSession {
 			sessionManager: this.sessionManager,
 			settings: this.settings,
 			modelRegistry: this.#modelRegistry,
-			extensionRunner: this.#extensionRunner,
 			sideStreamFn: this.#sideStreamFn,
 			obfuscator: this.#obfuscator,
 			model: () => this.model,
 			thinkingLevel: () => this.thinkingLevel,
 			sessionId: () => this.sessionId,
-			sessionFile: () => this.sessionFile,
 			baseSystemPrompt: () => this.#tools.baseSystemPrompt,
-			assertVibeSessionTransitionAllowed: action => this.#assertVibeSessionTransitionAllowed(action),
 			setSkipPostTurnMaintenance: timestamp => {
 				this.#maintenance.skipPostTurnMaintenanceAssistantTimestamp = timestamp;
 			},
@@ -1602,32 +1600,6 @@ export class AgentSession {
 			convertMessagesToLlm: (messages, signal) => this.convertMessagesToLlm(messages, signal),
 			prepareSimpleStreamOptions: (options, provider) => this.prepareSimpleStreamOptions(options, provider),
 			effectiveServiceTier: model => this.#models.effectiveServiceTier(model),
-			flushPendingBash: () => this.#bash.flushPending(),
-			beginBashSessionTransition: () => this.#bash.beginSessionTransition(),
-			markBashSessionTransition: transition => this.#bash.markSessionTransition(transition),
-			finishBashSessionTransition: (transition, success) => this.#bash.finishSessionTransition(transition, success),
-			cancelOwnAsyncJobs: () => this.#cancelOwnAsyncJobs(),
-			clearCheckpointRuntimeState: () => this.#clearCheckpointRuntimeState(),
-			clearSessionScopedToolState: () => this.#clearSessionScopedToolState(),
-			clearFreshProviderSessionId: () => {
-				this.#freshProviderSessionId = undefined;
-			},
-			syncAgentSessionId: () => this.#syncAgentSessionId(),
-			rekeyMemoryForCurrentSessionId: () => {
-				this.#memory.rekeyForCurrentSessionId();
-			},
-			resetMemoryContextForNewTranscript: () => this.#memory.resetContextForNewTranscript(),
-			clearPendingNextTurnMessages: () => {
-				this.#pendingNextTurnMessages = [];
-				this.#scheduledHiddenNextTurnGeneration = undefined;
-			},
-			resetTodoCycle: () => this.#todo.resetCycle(),
-			buildDisplaySessionContext: () => this.buildDisplaySessionContext(),
-			resetAdvisorSessionState: () => this.#advisors.resetSessionState(),
-			drainAndDetachAdvisorRecorders: () => this.#advisors.drainAndDetachRecorders(),
-			reattachAdvisorRecorderFeeds: () => this.#advisors.reattachRecorderFeeds(),
-			clearAdvisorCost: () => this.#advisors.clearCost(),
-			syncTodoPhasesFromBranch: () => this.#todo.syncFromBranch(),
 		};
 		this.#handoff = new SessionHandoff(handoffHost);
 
@@ -4089,6 +4061,7 @@ export class AgentSession {
 		await cleanupEmptyMoveSession(this.sessionManager, this.#movedFromEmptySessionFile);
 		this.#movedFromEmptySessionFile = undefined;
 		this.#closeAllProviderSessions("dispose");
+		this.#maintenance.cancelSpeculation();
 		this.setHindsightSessionState(undefined);
 		hindsightState?.dispose();
 		this.#disconnectFromAgent();
@@ -4711,6 +4684,10 @@ export class AgentSession {
 		return this.#maintenance.isCompacting;
 	}
 
+	/** Background speculative-compaction state, for UI indicators. */
+	get compactionSpeculation(): "idle" | "running" | "armed" {
+		return this.#maintenance.speculationState;
+	}
 	/** Strip image content from the current branch and persist the rewrite. */
 	dropImages(): Promise<{ removed: number }> {
 		return this.#maintenance.dropImages();
@@ -7121,14 +7098,16 @@ export class AgentSession {
 	}
 
 	/**
-	 * Generate a handoff document with a oneshot LLM call, then start a new session with it.
+	 * Generate a handoff document with a oneshot LLM call and commit it as a
+	 * compaction entry on the current session (the document becomes the summary;
+	 * recent history is kept).
 	 *
 	 * @param customInstructions Optional focus for the handoff document
 	 * @param options Handoff execution options
 	 * @returns The handoff document text, or undefined if cancelled/failed
 	 */
 	handoff(customInstructions?: string, options?: SessionHandoffOptions): Promise<HandoffResult | undefined> {
-		return this.#handoff.handoff(customInstructions, options);
+		return this.#maintenance.handoff(customInstructions, options);
 	}
 
 	#isTerminalYieldToolResult(event: { toolName: string; isError?: boolean; result?: { details?: unknown } }): boolean {
@@ -9316,9 +9295,9 @@ export class AgentSession {
 	}
 	/**
 	 * Get text content of the most recent visible handoff message.
-	 * Fresh handoff sessions store the handoff context as a custom message, not
-	 * an assistant message, so callers that copy the "last" message can use this
-	 * as a fallback before the new session has an assistant response.
+	 * Sessions created by older versions injected the handoff document as a
+	 * custom message at the top of a fresh session; callers that copy the
+	 * "last" message use this as a fallback while no assistant response exists.
 	 */
 	getLastVisibleHandoffText(): string | undefined {
 		for (let i = this.messages.length - 1; i >= 0; i--) {

@@ -11,6 +11,7 @@
 
 - Added `Tokenizer.checkTokenBudget(text, budget)`: a cheap-first budget probe. Byte length is a hard upper bound on token count, so text whose raw bytes already fit answers "fits" without tokenizing at all; only text that busts the bound pays for an exact count (and that count is returned, so a proportional clamp gets the denominator it needs). Since the bound overshoots ~4x on prose, the common "comfortably under budget" answer is free. Compaction's summary-window fit check and OpenAI remote-compaction trimming now route through it.
 - Added provider-anchored transcript accounting (`findTranscriptUsageAnchor`, `isTranscriptUsageAnchor`, `estimateTranscriptTokens`). Every settled assistant turn carries `usage` covering the exact prompt it was sent, so transcript sizing charges that report for the prefix and tokenizes only the tail appended after it — counting proportional to one turn instead of the whole history, every turn. The four hand-rolled copies of the anchor trust rules (session stats ×3, shake) now share one predicate, and the deliberately provider-independent compaction floor counts every message locally via `tokenizer.countMessages`.
+- Exported `remotePreserveReusable(preserveData, activeModel, settings)` — whether a prior remote compaction's provider-native replay payload is still readable by the active model — so hosts can validate speculatively produced compaction results before committing them.
 
 ### Changed
 

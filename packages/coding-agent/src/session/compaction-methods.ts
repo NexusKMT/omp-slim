@@ -15,7 +15,7 @@ export const COMPACTION_METHOD_CHOICES = [
 	{
 		value: "handoff",
 		label: "Handoff",
-		description: "Generate a handoff document and continue in a new session",
+		description: "Generate a handoff document and continue from it as the compaction summary",
 	},
 	{
 		value: "soft",

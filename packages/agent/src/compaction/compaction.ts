@@ -1268,7 +1268,7 @@ export interface CompactionPreparation {
  * let the active model replay it, so keying reuse on "any candidate shares the
  * provider" left a provider-switched session permanently context-less (#6343).
  */
-function remotePreserveReusable(
+export function remotePreserveReusable(
 	preserveData: Record<string, unknown> | undefined,
 	activeModel: Model,
 	settings: CompactionSettings,

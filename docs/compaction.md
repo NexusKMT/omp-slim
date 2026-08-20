@@ -126,7 +126,7 @@ The automatic paths are intentionally different:
   - Tool-output pruning can reduce the measured token count before threshold comparison.
   - Context promotion is tried before post-turn compaction.
   - If promotion is unavailable, auto maintenance walks `compaction.methodOrder` with `reason: "threshold"` and `willRetry: false`.
-  - When `handoff` is the next runnable method, post-turn threshold maintenance normally schedules a post-prompt auto-handoff task instead of writing a compaction entry; pre-prompt and mid-turn checks run inline to avoid racing the next turn. Mid-turn checks skip handoff and advance to the next preference.
+  - When `handoff` is the next runnable method, post-turn threshold maintenance normally schedules a post-prompt task that generates the handoff document and commits it as a compaction entry; pre-prompt and mid-turn checks run all methods inline to avoid racing the next turn.
   - On success, if `compaction.autoContinue !== false`, post-turn maintenance schedules an agent-authored developer auto-continue prompt from `prompts/system/auto-continue.md`; mid-turn maintenance never schedules a separate continuation because the core loop already owns the next provider request.
 
 - **Idle maintenance**
@@ -259,7 +259,7 @@ Remote summarization modes:
 
 `packages/agent/src/compaction/compaction.ts` also exports `generateHandoff(...)`. Handoff generation uses the same `completeSimple(...)` oneshot style as summarization, but it preserves the live agent cache prefix by sending the active system prompt, tool array, and real LLM message history, then appending one agent-attributed `user` message containing the handoff prompt. It forces `toolChoice: "none"` and returns joined text blocks directly.
 
-Handoff does not write a `CompactionEntry`. `AgentSession.handoff()` owns the session transition: it starts a new session, injects the generated document as a visible `custom_message` with `customType: "handoff"`, and rebuilds agent messages from that new session.
+Handoff commits a regular `CompactionEntry` on the current session: `SessionMaintenance.handoff()` (manual `/handoff`) and the auto-maintenance `handoff` method both generate the document via `SessionHandoff.generateDocument()` and store it as the compaction summary with `firstKeptEntryId` from `prepareCompaction`, so recent history is kept and the session id, transcript, and provider cache key are unchanged.
 
 When `compaction.handoffSaveToDisk` is enabled, an **automatically triggered** handoff also writes `handoff-<ISO timestamp>.md` in the persisted session's artifact directory. Manual handoffs are not written by this setting, and non-persisted sessions have no artifact directory.
 
@@ -295,7 +295,7 @@ Legacy `<read-files>`/`<modified-files>` tags from summaries written by earlier 
 
 After summary generation (or hook-provided summary), agent session:
 
-1. Appends `CompactionEntry` with `appendCompaction(...)` for context-full maintenance; handoff strategy creates a new session and injects a handoff `custom_message` instead.
+1. Appends `CompactionEntry` with `appendCompaction(...)`; the handoff method commits the generated document as the entry's summary on the same session.
 2. Rebuilds display context from the active leaf via `buildDisplaySessionContext()`.
 3. Replaces live agent messages with rebuilt context.
 4. Synchronizes active todo phases from the rebuilt branch and closes provider sessions whose history was rewritten.
@@ -419,11 +419,13 @@ From `settings-schema.ts`:
 
 - `compaction.enabled` = `true`
 - `compaction.methodOrder` = `["remote", "snapcompact", "handoff", "shake", "soft"]`. `remote` uses provider-native OpenAI-compatible server compaction when available; unavailable or failed methods advance to the next preference.
+- `compaction.asyncEnabled` = `true`. Async (speculative) compaction: when context enters the pre-threshold band `[threshold − lead, threshold)` (lead = `clamp(threshold × 0.125, 8192, 32000)`), maintenance starts a background summarization for the first configured LLM-backed method (`remote`, `handoff`, or `soft`) off a branch snapshot, isolated from the live turn by a side session id. The armed result is committed instantly when the threshold is actually crossed, hiding summarization latency; post-snapshot turns are appended after the summary unchanged. Armed results are discarded when the branch prefix changes (new compaction, reset boundary, `/tree` navigation), when a provider-native replay payload is no longer readable by the active model, or when context grows past `keepRecentTokens` since compute (a fresh speculation replaces it). Speculation is skipped while an extension registers `session_before_compact`. The status line pulses the auto-compact icon while a speculation runs and holds it in accent when a result is armed.
 - `compaction.reserveTokens` is unset by default. The compaction layer normally applies a `16384`-token floor and at least 15% of the context window; on small windows where that default would be impractical, budget checks use the 15% proportional reserve. An explicit configured reserve is honored.
 - `compaction.keepRecentTokens` = `20000`
 - `compaction.autoContinue` = `true`
 - `compaction.midTurnEnabled` = `true`
 - `compaction.handoffSaveToDisk` = `false`
+- The `handoff` method generates a handoff document through the live-cache side-request pipeline and commits it as a compaction entry on the current session (no new session is created); `/handoff` does the same manually.
 - `compaction.remoteEndpoint` = `undefined`
 - `compaction.remoteStreamingV2Enabled` = `true`
 - `compaction.v2RetainedMessageBudget` = `64000`

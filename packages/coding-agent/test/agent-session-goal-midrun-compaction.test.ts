@@ -220,20 +220,6 @@ describe("AgentSession mid-run threshold compaction", () => {
 		expect(observedContexts[1].join("\n")).toContain("ACTIVE-GOAL-MID-RUN-COMPACTED");
 	});
 
-	it("falls back to in-place compaction for mid-run handoff strategy", async () => {
-		const { session, observedContexts } = await createHarness({ "compaction.methodOrder": ["handoff", "soft"] });
-		const handoffSpy = vi.spyOn(session, "handoff").mockImplementation(async () => {
-			throw new Error("mid-run compaction must not reset the session through handoff");
-		});
-		const compactSpy = mockCompaction("HANDOFF-MID-RUN-COMPACTED-IN-PLACE");
-
-		await session.prompt("work on the release");
-
-		expect(handoffSpy).not.toHaveBeenCalled();
-		expect(compactSpy).toHaveBeenCalledTimes(1);
-		expect(observedContexts[1].join("\n")).toContain("HANDOFF-MID-RUN-COMPACTED-IN-PLACE");
-	});
-
 	it("does not wait for message persistence below the mid-run threshold", async () => {
 		const releaseMessageEnd = Promise.withResolvers<void>();
 		const messageEndEntered = Promise.withResolvers<void>();
