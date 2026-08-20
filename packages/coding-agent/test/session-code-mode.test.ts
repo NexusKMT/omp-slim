@@ -200,6 +200,16 @@ describe("buildToolNamespacesInfo", () => {
 		}
 	});
 
+	test("an exact direct name wins over a colliding direct alias", () => {
+		const tools = [{ name: "edit", customWireName: "apply_patch" }, { name: "apply_patch" }];
+		const direct = new Set(["edit", "apply_patch"]);
+
+		for (const ordered of [tools, [...tools].reverse()]) {
+			const info = buildToolNamespacesInfo({ tools: ordered, directToolNames: direct });
+			expect(info.functions.functions.apply_patch?.code_mode_name).toBe("apply_patch");
+		}
+	});
+
 	test("a tool losing its wire name stays reachable through the bridge", () => {
 		// The metadata advertises one callable per wire name, so the loser is
 		// unadvertised there - but the bridge resolves by real tool name, and the

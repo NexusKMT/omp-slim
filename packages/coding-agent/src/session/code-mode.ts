@@ -84,17 +84,19 @@ export function buildToolNamespacesInfo(args: {
 		const direct = args.directToolNames.has(tool.name);
 		const wireName = direct ? (tool.customWireName ?? tool.name) : tool.name;
 		const existing = functions[wireName];
-		// A direct tool's wire alias can collide with another enabled tool's own
-		// name (built-in `edit` as `apply_patch` beside a literal `apply_patch`).
-		// One wire name can only denote one callable, so the direct exposure wins
-		// regardless of registry order rather than whichever tool came last.
-		if (existing && (existing.direct || !direct)) {
+		// One wire name can only denote one callable. Direct exposure beats a
+		// bridged entry; between two direct entries, the exact tool name beats an
+		// alias, matching the agent-loop dispatcher's exact-name-first lookup.
+		if (existing) {
+			const existingExact = existing.code_mode_name === wireName;
+			const candidateExact = tool.name === wireName;
+			const replace = direct && (!existing.direct || (candidateExact && !existingExact));
 			logger.warn("Code Mode wire name collision", {
 				wireName,
-				kept: existing.code_mode_name,
-				dropped: tool.name,
+				kept: replace ? tool.name : existing.code_mode_name,
+				dropped: replace ? existing.code_mode_name : tool.name,
 			});
-			continue;
+			if (!replace) continue;
 		}
 		functions[wireName] = {
 			name: wireName,
