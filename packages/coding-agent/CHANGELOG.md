@@ -50,6 +50,7 @@
 - Fixed `hub wait` duplicating frozen rows into native scrollback during viewport overflow.
 - Fixed dark-theme contrast issues on markdown code-fence headers.
 - Fixed prompt guidance and descriptions for Task tools and SSH usage.
+- ACP editor clients that support elicitation forms (Zed) can now use `ask`, so the agent can pose single-choice, multi-select, and free-text questions inline instead of guessing.
 
 ## [17.4.0] - 2026-08-20
 

@@ -1,11 +1,18 @@
 import * as stream from "node:stream";
 import { postmortem } from "@oh-my-pi/pi-utils";
 import { AgentSideConnection, ndJsonStream, type Stream } from "@oh-my-pi/pi-utils/acp";
+import type { ExtensionUIContext } from "../../extensibility/extensions/types";
 import type { AgentSession } from "../../session/agent-session";
 import { AcpAgent } from "./acp-agent";
 
+/** Session and deferred tool UI hook created for an ACP client workspace. */
+export interface AcpSessionHandle {
+	session: AgentSession;
+	setToolUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
+}
+
 /** Creates sessions requested by an ACP client. */
-export type AcpSessionFactory = (cwd: string) => Promise<AgentSession>;
+export type AcpSessionFactory = (cwd: string, options?: { interactivePrompts?: boolean }) => Promise<AcpSessionHandle>;
 
 /** Creates an ACP connection and exposes its agent when process-level teardown must own it. */
 export function createAcpConnection(
