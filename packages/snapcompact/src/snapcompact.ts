@@ -848,7 +848,9 @@ function elideDataUrls(text: string, context: DataUrlContext = "source"): string
 				CANONICAL_BASE64.test(payload) ||
 				payload.length >= DAMAGED_PAYLOAD_MIN_CHARS;
 			if (!isAtom) return match;
-			const b64Chars = marker ? payload.length - marker[0].length : payload.length;
+			const b64Chars = marker
+				? payload.length - marker[0].length + Number(/\d+/.exec(marker[0])?.[0] ?? 0)
+				: payload.length;
 			const placeholder = `[data URL omitted: ${mime}, ${b64Chars} base64 chars]`;
 			// Swallow the Markdown wrapper only when both delimiters matched;
 			// otherwise re-emit whichever half was captured untouched.
@@ -1699,7 +1701,7 @@ export function archiveSourceText(archive: Archive): string | undefined {
 		[archive.textHead, archive.textTail]
 			.filter((part): part is string => typeof part === "string" && part.length > 0)
 			.join(NEWLINE_GLYPH);
-	return text.length > 0 ? toPlainText(text) : undefined;
+	return text.length > 0 ? elideDataUrls(toPlainText(text), "archive") : undefined;
 }
 
 /** Build the text used to choose and preflight a font-aware snapcompact shape. */

@@ -1486,4 +1486,16 @@ describe("data URL elision", () => {
 			}
 		}
 	});
+
+	it("prevents archive migration text from replaying invalid image input to summarizers/providers", () => {
+		const poisoned = "data:image/png;base64,QUFB [...900ch elided...] QUFB";
+		const text = snapcompact.archiveSourceText({
+			frames: [],
+			totalChars: poisoned.length,
+			truncatedChars: 0,
+			textHead: poisoned,
+		});
+		expect(text).toContain("[data URL omitted: image/png, 908 base64 chars]");
+		expect(text).not.toMatch(recognizableDataUrl);
+	});
 });
