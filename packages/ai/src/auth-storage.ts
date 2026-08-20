@@ -5068,7 +5068,11 @@ export class AuthStorage {
 				disabledCause: error => `oauth refresh failed: ${String(error)}`,
 			});
 			if (result.credential) {
-				if (Date.now() < result.credential.expires) return result.credential;
+				// Match #refreshOAuthCredential's freshness contract: a reloaded
+				// credential within the refresh skew still counts as needing refresh,
+				// so returning it here would make the final candidate pass refresh the
+				// same row again and replay the token we just failed on.
+				if (Date.now() + OAUTH_REFRESH_SKEW_MS < result.credential.expires) return result.credential;
 				throw new AIError.OAuthError(
 					`OAuth refresh did not produce a usable credential for provider: ${provider}`,
 					{
