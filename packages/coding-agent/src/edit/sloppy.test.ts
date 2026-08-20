@@ -187,7 +187,9 @@ describe("sloppy v8", () => {
 			message = error instanceof Error ? error.message : String(error);
 		}
 
-		expect(message).toMatch(/reads as the » separator, leaving REWRITE empty[\s\S]*«\*\nenwlineIndex\n»\n<final text>/);
+		expect(message).toMatch(
+			/reads as the » separator, leaving REWRITE empty[\s\S]*«\*\nenwlineIndex\n»\n<final text>/,
+		);
 		expect(message).not.toContain(`enwlineIndex\n${M.put}1`);
 	});
 
