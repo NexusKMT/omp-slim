@@ -1388,6 +1388,13 @@ export class TUI extends Container {
 	#multiplexerResizeTimer: RenderTimer | undefined;
 	#deferredForcedClearScrollback = false;
 	#multiplexerResizeHasPendingRender = false;
+	// Rows a mux pane pushed into its own scrollback on a height-only shrink
+	// without the engine committing them, plus the commit seam at push time.
+	// A later height grow pulls the pane's scrollback tail back into the grid:
+	// the pushed rows come out first — but only while no commit has buried
+	// them — and only the remainder of the pull removes committed rows.
+	#muxPushedRows = 0;
+	#muxPushSeam = 0;
 	// True from the first SIGWINCH of a non-multiplexer drag until the settle
 	// timer fires. While set, every `#doRender` short-circuits to the viewport
 	// fast path (`#renderResizeViewport`) instead of an authoritative full
@@ -3789,6 +3796,37 @@ export class TUI extends Container {
 			!isMultiplexerSession() &&
 			(committedRowsResynced || frameLength <= this.#committedRows);
 		const fullPaint = firstPaint || replaceRequested || geometryRebuild || divergenceRebuild;
+		// Height-only mux resizes move rows between the pane's scrollback and its
+		// grid. A shrink with a full grid pushes the grid-top rows into pane
+		// scrollback without a commit; a grow pulls the scrollback tail back into
+		// the grid, where the forced in-place window rewrite overwrites it — gone
+		// from history. The scrollback is a stack: pushed rows sit at the tail
+		// only until the next commit buries them, so they shield a pull only
+		// while the commit seam has not moved since the push. The unshielded
+		// remainder removes committed rows — drop the commit seam by it and let
+		// the next chunk re-commit them. A short frame gains blank rows instead
+		// of pulling.
+		if (fullPaint || widthChanged) {
+			this.#muxPushedRows = 0;
+		} else if (
+			geometryChanged &&
+			this.#previousHeight > 0 &&
+			this.#previousFrameLength - this.#windowTopRow >= this.#previousHeight
+		) {
+			if (this.#committedRows !== this.#muxPushSeam) this.#muxPushedRows = 0;
+			if (height < this.#previousHeight) {
+				this.#muxPushedRows += this.#previousHeight - height;
+				this.#muxPushSeam = this.#committedRows;
+			} else if (height > this.#previousHeight) {
+				const pull = height - this.#previousHeight;
+				const fromPushed = Math.min(pull, this.#muxPushedRows);
+				this.#muxPushedRows -= fromPushed;
+				const fromCommitted = Math.min(pull - fromPushed, this.#committedRows);
+				this.#committedRows -= fromCommitted;
+				this.#committedPrefix.length = this.#committedRows;
+				this.#muxPushSeam = this.#committedRows;
+			}
+		}
 		let windowTop: number;
 		let chunkTo: number;
 		let widthEpochAppendFrom = 0;
@@ -3856,11 +3894,23 @@ export class TUI extends Container {
 			// the viewport. Rebase the commit seam to that exposed frame tail before
 			// the forced rewrite; flooring at the old seam would paint only the live
 			// suffix followed by blanks, then preserve that gap on every stream tick.
-			committedPrefixResliced = true;
 			windowTop = Math.max(0, frameLength - height);
 			chunkTo = windowTop;
 			this.#committedRows = windowTop;
-			this.#committedPrefix = rawFrame.slice(0, windowTop);
+			if (widthChanged) {
+				// A rewrap invalidated the recorded bytes: re-base the audit prefix
+				// at the new width so the accepted wrap drift does not read as a
+				// violation on the next ordinary frame.
+				committedPrefixResliced = true;
+				this.#committedPrefix = rawFrame.slice(0, windowTop);
+			} else {
+				// Height-only reflow: the pane did not rewrap, so the recorded
+				// bytes are still the true tape record. Truncate instead of
+				// reslicing from the current frame — replacing the record with
+				// live content would bless drifted frozen snapshots as verified
+				// and skip their finalize-time recommit (rows lost from history).
+				this.#committedPrefix.length = Math.min(this.#committedPrefix.length, windowTop);
+			}
 		} else {
 			// Re-anchor to the frame tail, floored at the committed boundary: a
 			// shrink (or overlay close) pulls the window back down, but never
@@ -3873,15 +3923,15 @@ export class TUI extends Container {
 			// record; nothing that was painted may vanish. Overlays freeze
 			// commits: composited rows must never enter history, and the hidden
 			// gap backfills via the chunk once the overlay closes. A multiplexer
-			// resize also commits nothing — the pane keeps its own (old-wrap)
-			// history — and re-bases the audit prefix at the new width so the
+			// resize also commits nothing — the pane keeps its own history — and
+			// a width rewrap re-bases the audit prefix at the new width so the
 			// accepted wrap drift does not read as a violation on the next
 			// ordinary frame.
 			chunkTo =
 				hasVisibleOverlay || geometryChanged
 					? this.#committedRows
 					: Math.min(windowTop, Math.max(this.#committedRows, commitCeiling));
-			if (geometryChanged) {
+			if (widthChanged) {
 				committedPrefixResliced = true;
 				this.#committedPrefix = rawFrame.slice(0, this.#committedRows);
 			}
