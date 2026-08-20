@@ -19,8 +19,6 @@
       "@babel/traverse": "^7.29.7",
       "@babel/types": "^7.29.7",
       "@biomejs/biome": "^2.5.3",
-      "@bufbuild/protobuf": "^2.12.1",
-      "@bufbuild/protoc-gen-es": "^2.12.1",
       "@huggingface/transformers": "^4.2.0",
       "@napi-rs/cli": "3.7.2",
       "@oh-my-pi/hashline": "17.3.8",

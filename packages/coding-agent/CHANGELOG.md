@@ -25,6 +25,7 @@
 - Compaction method priorities — `compaction.methodOrder` takes an ordered preference list (e.g. `[remote, snap]` uses remote compaction where the provider supports it, such as OpenAI, and snap everywhere else), replacing `compaction.strategy`/`compaction.remoteEnabled`.
 - Unified inline overlays and selectors (model picker, settings, `/cleanse`) into one titled rounded-box panel style.
 - Risk badges and warnings on `/settings` rows, starting with External Thinking.
+- Faster CLI Startup
 
 ### Fixed
 

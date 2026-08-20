@@ -2021,13 +2021,22 @@ export class StatusLineComponent implements Component {
 		let percentStart = -1;
 		let windowStart = -1;
 		let scaleWidth = gapWidth;
+		// >100%: usage anchored past the active window (e.g. model switch to a
+		// smaller window). The bar clamps full, but the embedded label breaks
+		// past the window label — `──200K─120%` with the percent in error color.
+		const percentOverflow = pct > 100;
 		if (embedContext) {
-			const candidatePercent = formatEmbeddedContextPercent(clampedPct);
+			const candidatePercent = formatEmbeddedContextPercent(percentOverflow ? pct : clampedPct);
 			const candidateWindow = formatNumber(ctx.contextWindow);
 			if (gapWidth >= candidatePercent.length + candidateWindow.length + 4) {
 				percentLabel = candidatePercent;
 				windowLabel = candidateWindow;
-				windowStart = gapWidth - windowLabel.length - 1;
+				if (percentOverflow) {
+					percentStart = gapWidth - percentLabel.length;
+					windowStart = percentStart - 1 - windowLabel.length;
+				} else {
+					windowStart = gapWidth - windowLabel.length - 1;
+				}
 				scaleWidth = windowStart;
 			}
 		}
@@ -2054,7 +2063,7 @@ export class StatusLineComponent implements Component {
 			}
 		}
 
-		if (percentLabel) {
+		if (percentLabel && percentStart < 0) {
 			const maxStart = scaleWidth - percentLabel.length - 1;
 			const preferredStart = Math.min(maxStart, Math.max(1, usedCount));
 			const overlapsBoundary = (start: number): boolean => {
@@ -2079,6 +2088,7 @@ export class StatusLineComponent implements Component {
 		const speculationGlyph = theme.symbol("context.speculation");
 		const thresholdGlyph = theme.symbol("context.compaction");
 		const speculationColor = theme.getFgAnsi("muted");
+		const overflowColor = theme.getFgAnsi("error");
 		const rawAccentHex = accentHex ?? theme.getColorHex("borderAccent");
 		const dimmedAccentHex = adjustHsv(rawAccentHex, { s: 0.7, v: 0.75 });
 		const thresholdColor = getSessionAccentAnsi(dimmedAccentHex) ?? usedColor;
@@ -2089,7 +2099,7 @@ export class StatusLineComponent implements Component {
 			let color = i < usedCount ? usedColor : unusedColor;
 			let glyph = horizontal;
 			if (percentStart >= 0 && i >= percentStart && i < percentStart + percentLabel.length) {
-				color = usedColor;
+				color = percentOverflow ? overflowColor : usedColor;
 				glyph = percentLabel.charAt(i - percentStart);
 			} else if (i === thresholdIdx) {
 				color = thresholdColor;

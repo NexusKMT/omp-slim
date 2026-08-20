@@ -364,6 +364,36 @@ describe("StatusLineComponent context breakdown", () => {
 			settings.clearOverride("statusLine.preset");
 		}
 	});
+	it("embedded overflow (>100%) breaks the raw percent past the window label in error color", () => {
+		const { session } = makeSession({
+			messages: [userMessage("hi"), assistantMessage("done")],
+			contextWindow: 200_000,
+			usage: { tokens: 240_000, contextWindow: 200_000, percent: 120 },
+		});
+		settings.override("statusLine.preset", "custom");
+		settings.override("statusLine.leftSegments", ["pi", "context_pct"]);
+		settings.override("statusLine.rightSegments", ["context_total", "session_name"]);
+		settings.override("statusLine.contextLine", "embedded");
+
+		try {
+			const comp = new StatusLineComponent(session);
+			const border = comp.getTopBorder(120);
+			const plain = border.content.replaceAll(/\x1b\[[0-9;]*m/g, "");
+			const windowIndex = plain.indexOf("200K");
+			const percentIndex = plain.indexOf("120%");
+			expect(border.width).toBe(120);
+			expect(windowIndex).toBeGreaterThanOrEqual(0);
+			expect(percentIndex).toBeGreaterThan(windowIndex);
+			// The clamped label must not render alongside the overflow one.
+			expect(plain).not.toContain("100%");
+			expect(border.content).toContain(`${theme.getFgAnsi("error")}120%`);
+		} finally {
+			settings.clearOverride("statusLine.contextLine");
+			settings.clearOverride("statusLine.rightSegments");
+			settings.clearOverride("statusLine.leftSegments");
+			settings.clearOverride("statusLine.preset");
+		}
+	});
 	it("uses semantic Nerd Font markers for async speculation and compaction boundaries", async () => {
 		const { session } = makeSession({
 			messages: [userMessage("hi"), assistantMessage("done")],

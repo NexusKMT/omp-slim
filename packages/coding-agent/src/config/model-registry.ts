@@ -31,6 +31,7 @@ import {
 	resolveModelCacheProviderId,
 	resolveOllamaModelCacheProviderId,
 } from "@oh-my-pi/pi-catalog/provider-models";
+import { toModelSpec } from "@oh-my-pi/pi-catalog/provider-models/bundled-references";
 import { collapseBuiltModelVariants } from "@oh-my-pi/pi-catalog/variant-collapse";
 import { getAgentDir, isBunTestRuntime, logger, wrapFetchForExtraCa } from "@oh-my-pi/pi-utils";
 import { resolveProviderModelReference } from "../config/model-resolver";
@@ -80,7 +81,6 @@ import {
 	mergeRemoteCompactionConfig,
 	type ProviderOverride,
 	providersWithAuthoritativeProjectCatalog,
-	toModelSpec,
 } from "./model-patch";
 import {
 	BUILT_IN_DISCOVERY_CACHE_TTL_MS,
@@ -646,7 +646,7 @@ export class ModelRegistry {
 
 			return models.map(m => {
 				if (!providerOverride) return m;
-				const withTransportOverride = this.#applyProviderTransportOverride(m, providerOverride);
+				const withTransportOverride = this.#applyProviderTransportOverride(toModelSpec(m), providerOverride);
 				return buildModel({
 					...withTransportOverride,
 					compat: mergeCompat(m.compatConfig, providerOverride.compat),

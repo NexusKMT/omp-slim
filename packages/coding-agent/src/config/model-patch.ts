@@ -165,15 +165,6 @@ export function mergeProviderRemoteCompactionConfig(
 }
 
 /**
- * Project a built model back to spec shape for the model-manager/cache
- * boundary: sparse compat comes from `compatConfig`, never from the resolved
- * record.
- */
-export function toModelSpec<TApi extends Api>(model: Model<TApi>): ModelSpec<TApi> {
-	return { ...model, compat: model.compatConfig } as ModelSpec<TApi>;
-}
-
-/**
  * The patchable subset of `Model` fields shared by `modelOverrides` entries,
  * custom model definitions, and parsed custom-model overlays. `undefined`
  * always means "leave the base value alone".

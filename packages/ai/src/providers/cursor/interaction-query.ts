@@ -1,5 +1,5 @@
 import type http2 from "node:http2";
-import { create, toBinary } from "@bufbuild/protobuf";
+import { create, toBinary } from "@oh-my-pi/pi-catalog/discovery/protobuf";
 import {
 	AgentClientMessageSchema,
 	AskQuestionInteractionResponseSchema,
@@ -21,7 +21,7 @@ import {
 	WebFetchRequestResponseSchema,
 	WebSearchRequestResponse_ApprovedSchema,
 	WebSearchRequestResponseSchema,
-} from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
+} from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
 import { $env } from "@oh-my-pi/pi-utils";
 
 const NOT_IMPLEMENTED_SUFFIX = "not implemented by this client";

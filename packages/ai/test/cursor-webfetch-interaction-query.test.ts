@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
+import { create, fromBinary, toBinary } from "@oh-my-pi/pi-catalog/discovery/protobuf";
 import { type BlockState, handleServerMessage, type ToolCallState } from "@oh-my-pi/pi-ai/providers/cursor";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai/types";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import type { InteractionQuery, InteractionResponse } from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
+import type { InteractionQuery, InteractionResponse } from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
 import {
 	type AgentClientMessage,
 	AgentClientMessageSchema,
@@ -20,7 +20,7 @@ import {
 	WebFetchRequestQuerySchema,
 	WebSearchArgsSchema,
 	WebSearchRequestQuerySchema,
-} from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
+} from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
 
 function cursorAssistantMessage(): AssistantMessage {
 	return {
