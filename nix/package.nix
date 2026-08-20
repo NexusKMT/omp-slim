@@ -195,6 +195,22 @@ stdenv.mkDerivation {
     remove-references-to -t ${bun} "$out/bin/omp"
   '';
 
+  # The compiled binary lazily downloads prebuilt npm addons on first use
+  # (onnxruntime-node for the tiny-title worker, @img/sharp-* for image
+  # processing). They NEED libstdc++.so.6 but are never present at build
+  # time, and NixOS provides no default search path for it, so the dlopen
+  # fails and no session title is generated. Force libstdc++ to load at
+  # process start via DT_NEEDED: afterwards every dlopen'd addon resolves
+  # libstdc++.so.6 / libgcc_s.so.1 by soname from the already-loaded set,
+  # regardless of the addon's own DT_RUNPATH. An LD_LIBRARY_PATH wrapper
+  # would also work but leaks into every spawned child process (including
+  # toolchains the user builds with), so it is deliberately avoided.
+  # stdenv.cc.cc.lib is already in buildInputs, so the autoPatchelfHook
+  # pass that follows resolves the new dependency and sets the RPATH.
+  postFixup = lib.optionalString stdenv.hostPlatform.isLinux ''
+    patchelf --add-needed libstdc++.so.6 "$out/bin/omp"
+  '';
+
   disallowedReferences = [ bun ];
 
   doInstallCheck = true;
@@ -203,6 +219,11 @@ stdenv.mkDerivation {
     HOME="$TMPDIR" "$out/bin/omp" --smoke-test | grep -q "smoke-test: ok"
     BUN_BE_BUN=1 "$out/bin/omp" -e \
       'if (Bun.version !== "${bun.version}" || typeof Bun.Image !== "function") process.exit(1)'
+    ${lib.optionalString stdenv.hostPlatform.isLinux ''
+      # The libstdc++ preload (see postFixup) must survive: without it the
+      # runtime-downloaded tiny-title/sharp addons fail to dlopen on NixOS.
+      patchelf --print-needed "$out/bin/omp" | grep -q '^libstdc++\.so\.6$'
+    ''}
     runHook postInstallCheck
   '';
 
