@@ -9,7 +9,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
-import { formatNumber, getProjectDir } from "@oh-my-pi/pi-utils";
+import { adjustHsv, formatNumber, getProjectDir } from "@oh-my-pi/pi-utils";
 import { settings } from "../../../config/settings";
 import type { AgentSession } from "../../../session/agent-session";
 import type { OAuthAccountIdentity } from "../../../session/auth-storage";
@@ -1601,6 +1601,7 @@ export class StatusLineComponent implements Component {
 		includePath: boolean,
 		includeGit: boolean,
 		includePr: boolean,
+		previewTitle?: string,
 	): SegmentContext {
 		const state = this.session.state;
 
@@ -1668,6 +1669,7 @@ export class StatusLineComponent implements Component {
 			session: this.session,
 			focusedAgentId: this.#focusedAgentId,
 			sessionAccent: this.#resolveSettings().sessionAccent !== false,
+			previewTitle,
 			activeRepo: activeRepoCache.activeRepo,
 			width,
 			options: segmentOptions ?? {},
@@ -1756,8 +1758,15 @@ export class StatusLineComponent implements Component {
 	 * - `plain-left`: left segments only (claude composer; the right group
 	 *   lives in the editor's top rule).
 	 * - `plain-right`: right segments only (claude composer's top rule).
+	 *
+	 * `previewTitle` is a stand-in session title for composer previews; the
+	 * `session_name` segment renders it when the session is unnamed.
 	 */
-	#buildStatusLine(width: number, layout: "box" | "plain-full" | "plain-left" | "plain-right" = "box"): string {
+	#buildStatusLine(
+		width: number,
+		layout: "box" | "plain-full" | "plain-left" | "plain-right" = "box",
+		previewTitle?: string,
+	): string {
 		const effectiveSettings = this.#resolveSettings();
 		const plain = layout !== "box";
 		const includePath =
@@ -1774,6 +1783,7 @@ export class StatusLineComponent implements Component {
 			includePath,
 			includeGit,
 			includePr,
+			previewTitle,
 		);
 		const separatorDef = plain
 			? { left: "·", right: "·" }
@@ -1866,6 +1876,22 @@ export class StatusLineComponent implements Component {
 		const totalWidth = () => leftWidth + rightWidth + (left.length > 0 && right.length > 0 ? 1 : 0);
 
 		if (topFillWidth > 0) {
+			// Truncate the session-name segment before dropping right segments —
+			// the title is the only elastic one on the right, and dropping it
+			// wholesale left narrow bars (and the ≤76-col composer previews)
+			// without any title.
+			const nameSegIdx = rightSegIds.indexOf("session_name");
+			if (nameSegIdx >= 0 && totalWidth() > topFillWidth) {
+				// Badge/job parts were unshifted ahead of the tracked segment ids.
+				const nameIdx = nameSegIdx + (right.length - rightSegIds.length);
+				const currentNameVW = visibleWidth(right[nameIdx]);
+				const minNameVW = 8;
+				const shrinkBy = Math.min(Math.max(0, currentNameVW - minNameVW), totalWidth() - topFillWidth);
+				if (shrinkBy > 0) {
+					right[nameIdx] = truncateToWidth(right[nameIdx], currentNameVW - shrinkBy);
+					rightWidth = groupWidth(right, rightCapWidth, rightSepWidth);
+				}
+			}
 			while (totalWidth() > topFillWidth && right.length > 0) {
 				right.pop();
 				rightWidth = groupWidth(right, rightCapWidth, rightSepWidth);
@@ -2021,7 +2047,9 @@ export class StatusLineComponent implements Component {
 				const cellFor = (percent: number) =>
 					Math.min(scaleWidth - 1, Math.max(0, Math.round((percent / 100) * scaleWidth)));
 				thresholdIdx = cellFor(boundaries.thresholdPercent);
-				speculationIdx = cellFor(boundaries.speculationPercent);
+				// null = no background speculation will run (async disabled or the
+				// first available method is local/instant) — no tick to show.
+				if (boundaries.speculationPercent !== null) speculationIdx = cellFor(boundaries.speculationPercent);
 				if (speculationIdx === thresholdIdx) speculationIdx = -1; // threshold wins the cell
 			}
 		}
@@ -2051,7 +2079,9 @@ export class StatusLineComponent implements Component {
 		const speculationGlyph = theme.symbol("context.speculation");
 		const thresholdGlyph = theme.symbol("context.compaction");
 		const speculationColor = theme.getFgAnsi("muted");
-		const thresholdColor = theme.getFgAnsi("warning");
+		const rawAccentHex = accentHex ?? theme.getColorHex("borderAccent");
+		const dimmedAccentHex = adjustHsv(rawAccentHex, { s: 0.7, v: 0.75 });
+		const thresholdColor = getSessionAccentAnsi(dimmedAccentHex) ?? usedColor;
 
 		let out = "\x1b[49m";
 		let activeColor = "";
@@ -2085,15 +2115,18 @@ export class StatusLineComponent implements Component {
 		// Collab-guest replicas and test mocks have no session-scoped settings;
 		// the global store carries the same compaction knobs.
 		const source = typeof this.session.settings?.getGroup === "function" ? this.session.settings : settings;
+		// The active model gates which compaction method a real pass would run
+		// (and therefore whether a speculation tick is meaningful).
+		const model = this.session.state?.model ?? this.session.model;
 		try {
-			return computeCompactionBoundaries(source, contextWindow);
+			return computeCompactionBoundaries(source, contextWindow, model);
 		} catch {
 			return null;
 		}
 	}
 
-	getTopBorder(width: number): { content: string; width: number; revision: number } {
-		let content = this.#buildStatusLine(width);
+	getTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {
+		let content = this.#buildStatusLine(width, "box", previewTitle);
 		if (this.#focusedAgentId && content) {
 			// Dim the whole bar while focus-proxied. Group/cap terminators emit full
 			// `\x1b[0m` resets that would cancel faint mid-bar, so re-open it after each.
@@ -2125,8 +2158,8 @@ export class StatusLineComponent implements Component {
 	}
 
 	/** Plain right-group content for the claude composer's top rule. */
-	getStandaloneTopBorder(width: number): { content: string; width: number; revision: number } {
-		let content = this.#buildStatusLine(width, "plain-right");
+	getStandaloneTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {
+		let content = this.#buildStatusLine(width, "plain-right", previewTitle);
 		if (this.#focusedAgentId && content) {
 			content = `\x1b[2m${content.replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")}\x1b[22m`;
 		}
@@ -2143,8 +2176,8 @@ export class StatusLineComponent implements Component {
 	 * loop and by composer previews (which inject a candidate layout instead of
 	 * the active one).
 	 */
-	renderBottomBar(width: number, groups: "left" | "full"): string {
-		let content = this.#buildStatusLine(width, groups === "left" ? "plain-left" : "plain-full");
+	renderBottomBar(width: number, groups: "left" | "full", previewTitle?: string): string {
+		let content = this.#buildStatusLine(width, groups === "left" ? "plain-left" : "plain-full", previewTitle);
 		if (this.#focusedAgentId && content) {
 			content = `\x1b[2m${content.replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")}\x1b[22m`;
 		}

@@ -35,7 +35,6 @@ import {
 	validateProviderMaxInFlightRequests,
 } from "../../config/settings";
 import type {
-	ComposerShape,
 	ContextLineMode,
 	SettingTab,
 	StatusLinePreset,

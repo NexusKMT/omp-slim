@@ -63,6 +63,8 @@ export interface SegmentContext {
 	focusedAgentId?: string | undefined;
 	/** Effective `statusLine.sessionAccent`; `false` disables hash-derived accent colors, while `true` or omission enables them. */
 	sessionAccent?: boolean;
+	/** Stand-in session title for previews; `session_name` renders it when the session is unnamed. */
+	previewTitle?: string;
 	activeRepo: ActiveRepoContext | null;
 	width: number;
 	options: StatusLineSegmentOptions;

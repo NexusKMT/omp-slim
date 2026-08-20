@@ -21,7 +21,7 @@
 
 - Revamped the todo HUD — overall progress renders along the tree-spine connector with smooth completion transitions.
 - `/handoff` (and automatic handoff compaction) now compacts in place, replacing the session context instead of forking a new session.
-- Replaced `compaction.strategy`/`compaction.remoteEnabled` with the ordered `compaction.methodOrder` fallback list.
+- Compaction method priorities — `compaction.methodOrder` takes an ordered preference list (e.g. `[remote, snap]` uses remote compaction where the provider supports it, such as OpenAI, and snap everywhere else), replacing `compaction.strategy`/`compaction.remoteEnabled`.
 - Unified inline overlays and selectors (model picker, settings, `/cleanse`) into one titled rounded-box panel style.
 - Risk badges and warnings on `/settings` rows, starting with External Thinking.
 

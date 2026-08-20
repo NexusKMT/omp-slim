@@ -70,8 +70,11 @@ import type { ContextUsageBreakdown, HandoffResult, SessionHandoffOptions } from
 import { findCompactMode } from "./compact-modes";
 import {
 	type CompactionMethod,
+	canUseRemoteCompaction,
 	DEFAULT_COMPACTION_METHOD_ORDER,
 	resolveCompactionMethodOrder,
+	resolveMethodSettings,
+	resolveSpeculationMethod,
 } from "./compaction-methods";
 import { convertToLlm, stripImagesFromMessage } from "./messages";
 import { isTerminalTextAssistantAnswer } from "./queued-messages";
@@ -112,38 +115,6 @@ const COMPACTION_CHECK_BLOCK_AUTOMATIC_CONTINUATION: CompactionCheckResult = {
 	continuationScheduled: false,
 	automaticContinuationBlocked: true,
 };
-
-const STRATEGY_BY_COMPACTION_METHOD: Record<CompactionMethod, "context-full" | "handoff" | "shake" | "snapcompact"> = {
-	remote: "context-full",
-	snapcompact: "snapcompact",
-	handoff: "handoff",
-	soft: "context-full",
-	shake: "shake",
-};
-
-/**
- * Convert the selected preference into the engine's compact operation flags.
- * The engine intentionally remains usable by SDK consumers that do not expose
- * the coding agent's preference list.
- */
-function resolveMethodSettings(
-	settings: ConfiguredCompactionSettings,
-	method: CompactionMethod,
-): EngineCompactionSettings {
-	return {
-		...settings,
-		strategy: STRATEGY_BY_COMPACTION_METHOD[method],
-		remoteEnabled: method === "remote",
-	};
-}
-
-/** Whether server compaction has either a configured endpoint or an active native route. */
-function canUseRemoteCompaction(model: Model | null | undefined, settings: EngineCompactionSettings): boolean {
-	return (
-		(typeof settings.remoteEndpoint === "string" && settings.remoteEndpoint.length > 0) ||
-		(model !== null && model !== undefined && shouldUseProviderNativeCompaction(model, settings))
-	);
-}
 
 /** Whether a configured preference list contains at least one automatic method. */
 function hasConfiguredCompactionMethod(settings: ConfiguredCompactionSettings): boolean {
@@ -1169,7 +1140,7 @@ export class SessionMaintenance {
 		}
 		const model = this.#model;
 		if (!model) return;
-		const method = this.#resolveSpeculationMethod(model, settings);
+		const method = resolveSpeculationMethod(model, settings);
 		if (!method) return;
 		const controller = new AbortController();
 		const run: SpeculationRun = { controller, promise: Promise.resolve(), contextTokensAtStart: contextTokens };
@@ -1181,24 +1152,6 @@ export class SessionMaintenance {
 			});
 			if (this.#speculation === run) this.#speculation = undefined;
 		});
-	}
-
-	/** First configured method a threshold pass would run, or undefined when it is local (nothing to speculate). */
-	#resolveSpeculationMethod(
-		model: Model,
-		settings: ConfiguredCompactionSettings,
-	): "remote" | "handoff" | "soft" | undefined {
-		for (const candidate of resolveCompactionMethodOrder(settings.methodOrder)) {
-			const available =
-				candidate === "remote"
-					? canUseRemoteCompaction(model, resolveMethodSettings(settings, candidate))
-					: candidate === "snapcompact"
-						? model.input.includes("image")
-						: true;
-			if (!available) continue;
-			return candidate === "remote" || candidate === "handoff" || candidate === "soft" ? candidate : undefined;
-		}
-		return undefined;
 	}
 
 	/** Produce and arm one speculative compaction result off a branch snapshot. */
@@ -2644,7 +2597,10 @@ export class SessionMaintenance {
 		// in the background. Claiming consumes the slot either way: an in-flight
 		// run is aborted (this real pass supersedes it) and an armed result is
 		// returned only when still valid for the current branch/model/settings.
-		const armedSpec = this.#claimArmedSpeculation();
+		// Snapcompact is local and instant, so an armed LLM summary (possible
+		// only when settings/model changed since arming) never overrides it.
+		const claimedSpec = this.#claimArmedSpeculation();
+		const armedSpec = method === "snapcompact" ? undefined : claimedSpec;
 
 		const effectiveSettings = resolveMethodSettings(compactionSettings, method);
 		const fallbackFromShake = options.fallbackFromShake === true;

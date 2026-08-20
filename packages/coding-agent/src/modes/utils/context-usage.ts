@@ -6,6 +6,7 @@ import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { formatNumber } from "@oh-my-pi/pi-utils";
 import type { Skill } from "../../extensibility/skills";
 import type { AgentSession } from "../../session/agent-session";
+import { resolveSpeculationMethod } from "../../session/compaction-methods";
 import { estimateInlineSavings, type SnapcompactSavingsEstimate } from "../../session/snapcompact-inline";
 import { resolveSpeculationLeadTokens } from "../../session/speculation-lead";
 import type { Tool } from "../../tools";
@@ -46,28 +47,36 @@ export interface ContextBreakdown {
 export interface CompactionBoundaries {
 	/** Where auto-compaction fires. */
 	thresholdPercent: number;
-	/** Where the background speculative summarizer starts (threshold − lead). */
-	speculationPercent: number;
+	/**
+	 * Where the background speculative summarizer starts (threshold − lead), or
+	 * `null` when no speculation will run (async compaction disabled, or the
+	 * first available method is local — snapcompact/shake — and thus instant).
+	 */
+	speculationPercent: number | null;
 }
 
 /**
  * Boundary positions for the status line's annotated context gauge. `null`
  * when compaction is disabled/off or the window is unknown — the gauge then
- * renders without markers.
+ * renders without markers. `model` resolves which configured method a real
+ * pass would run; without it, model-gated methods count as unavailable.
  */
 export function computeCompactionBoundaries(
 	settings: AgentSession["settings"],
 	contextWindow: number,
+	model?: Model | null,
 ): CompactionBoundaries | null {
 	if (!(contextWindow > 0)) return null;
-	const compactionSettings = settings.getGroup("compaction") as CompactionSettings;
-	if (!compactionSettings.enabled || compactionSettings.strategy === "off") return null;
+	const configured = settings.getGroup("compaction");
+	const compactionSettings = configured as CompactionSettings;
+	if (!configured.enabled || compactionSettings.strategy === "off") return null;
 	const thresholdTokens = resolveThresholdTokens(contextWindow, compactionSettings);
 	if (!(thresholdTokens > 0) || thresholdTokens > contextWindow) return null;
+	const speculates = configured.asyncEnabled !== false && resolveSpeculationMethod(model, configured) !== undefined;
 	const leadTokens = resolveSpeculationLeadTokens(thresholdTokens);
 	return {
 		thresholdPercent: (thresholdTokens / contextWindow) * 100,
-		speculationPercent: (Math.max(0, thresholdTokens - leadTokens) / contextWindow) * 100,
+		speculationPercent: speculates ? (Math.max(0, thresholdTokens - leadTokens) / contextWindow) * 100 : null,
 	};
 }
 

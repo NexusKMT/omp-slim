@@ -1,7 +1,7 @@
 import { routeSelectListMouse, type SelectItem, SelectList, type SgrMouseEvent } from "@oh-my-pi/pi-tui";
 import type { ComposerShape } from "../../../config/settings-schema";
-import { getComposerShapeOptions } from "../../components/composer-shape-registry";
 import { renderComposerShapePreview } from "../../components/composer-shape-preview";
+import { getComposerShapeOptions } from "../../components/composer-shape-registry";
 import { getSelectListTheme, theme } from "../../theme/theme";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 

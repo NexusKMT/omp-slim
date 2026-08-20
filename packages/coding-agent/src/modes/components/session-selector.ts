@@ -329,23 +329,26 @@ class SessionList implements Component {
 	}
 
 	/**
-	 * Number of sessions to show at once, sized so the whole picker fits the
-	 * current viewport instead of pushing its header/search off the top.
+	 * Session-row line budget for one render, sized so the whole picker fits
+	 * the current viewport instead of pushing its header/search off the top.
 	 *
-	 * Budget = rows − chrome − reserve, divided by the worst-case per-session
-	 * height. Chrome (11) is the rounded panel and surrounding spacers/footer
-	 * (6) plus the list's search line, blank, scroll indicator, blank, and hint
-	 * (5). A titled session is the tallest item at 4 lines (title + preview +
-	 * metadata + blank); budgeting for that guarantees no overflow even when
-	 * every visible entry has a title. The reserve covers below-editor hook
-	 * widgets / cursor.
+	 * Chrome (7) is the panel's top border, one spacer, the list's search line
+	 * and its blank, and the pinned footer minus its leading blank (hint,
+	 * blank, bottom border) — the last visible session's separator blank is
+	 * never rendered, so the footer's own blank stands in for it. The reserve
+	 * covers below-editor hook widgets / cursor. The floor of 8 always admits
+	 * two titled sessions (the tallest item at 4 lines: title + preview +
+	 * metadata + separator).
 	 */
-	#visibleCount(): number {
-		const CHROME = 11;
-		const PER_SESSION = 4;
+	#lineBudget(): number {
+		const CHROME = 7;
 		const RESERVE = 1;
-		const budget = this.#getTerminalRows() - CHROME - RESERVE;
-		return Math.max(2, Math.floor(budget / PER_SESSION));
+		return Math.max(8, this.#getTerminalRows() - CHROME - RESERVE);
+	}
+
+	/** PageUp/PageDown jump, approximated from the worst-case session height. */
+	#pageSize(): number {
+		return Math.max(2, Math.floor(this.#lineBudget() / 4));
 	}
 
 	/** Replace the visible dataset, e.g. when toggling folder/all-projects scope. */
@@ -556,21 +559,36 @@ class SessionList implements Component {
 			return date.toLocaleDateString();
 		};
 
-		// Calculate visible range with scrolling. The window is sized to the
-		// current viewport so the picker never overflows past the top.
-		const maxVisible = this.#visibleCount();
-		const startIndex = Math.max(
-			0,
-			Math.min(this.#selectedIndex - Math.floor(maxVisible / 2), this.#filteredSessions.length - maxVisible),
-		);
-		const endIndex = Math.min(startIndex + maxVisible, this.#filteredSessions.length);
+		// Pack the window around the selection by actual line height (3 lines
+		// per session, 4 when a title adds a preview line) until the viewport
+		// budget is spent, so short sessions never strand blank rows a
+		// worst-case count-based window would leave (then padded by
+		// fill-height).
+		const filtered = this.#filteredSessions;
+		const itemHeight = (session: SessionInfo): number => (session.title ? 4 : 3);
+		const budget = this.#lineBudget();
+		let startIndex = this.#selectedIndex;
+		let endIndex = this.#selectedIndex + 1;
+		let used = itemHeight(filtered[this.#selectedIndex]!);
+		// Alternate growth below/above the selection to keep it roughly centered.
+		for (let preferDown = true; ; preferDown = !preferDown) {
+			const canDown = endIndex < filtered.length && used + itemHeight(filtered[endIndex]!) <= budget;
+			const canUp = startIndex > 0 && used + itemHeight(filtered[startIndex - 1]!) <= budget;
+			if (!canDown && !canUp) break;
+			if (canDown && (preferDown || !canUp)) {
+				used += itemHeight(filtered[endIndex]!);
+				endIndex++;
+			} else {
+				startIndex--;
+				used += itemHeight(filtered[startIndex]!);
+			}
+		}
 
-		// Render visible sessions (3 lines, or 4 when a title adds a preview line).
 		// Each session block is built into sessionLines, then wrapped by ScrollView
 		// so the right-edge scrollbar is proportional at the physical-line level.
 		const sessionLines: string[] = [];
 		const sessionRowIndex: number[] = [];
-		const overflow = this.#filteredSessions.length > maxVisible;
+		const overflow = startIndex > 0 || endIndex < filtered.length;
 		const rowWidth = Math.max(0, width - (overflow ? 1 : 0));
 		for (let i = startIndex; i < endIndex; i++) {
 			const blockStart = sessionLines.length;
@@ -622,20 +640,31 @@ class SessionList implements Component {
 			const metadataLine = truncateToWidth(metadata, rowWidth);
 
 			sessionLines.push(metadataLine);
-			sessionLines.push(""); // Blank line between sessions
+			// Blank separator between sessions; the last block ends flush against
+			// the footer, whose leading blank provides the same gap.
+			if (i < endIndex - 1) sessionLines.push("");
 			for (let k = blockStart; k < sessionLines.length; k++) sessionRowIndex[k] = i;
 		}
 
-		// Wrap the rendered window in a ScrollView for a proportional right-edge bar.
-		const visibleCount = endIndex - startIndex;
-		const linesPerItem = visibleCount > 0 ? sessionLines.length / visibleCount : 1;
+		// Wrap the rendered window in a ScrollView for a proportional right-edge
+		// bar, with exact physical-line totals from the per-session heights.
+		let totalRows = 0;
+		let offsetRows = 0;
+		for (let i = 0; i < filtered.length; i++) {
+			if (i === startIndex) offsetRows = totalRows;
+			totalRows += itemHeight(filtered[i]!);
+		}
+		// The last session's separator blank is never rendered (see the block
+		// loop above), so exclude it or a fully visible list would still show a
+		// scrollbar.
+		totalRows -= 1;
 		const sv = new ScrollView(sessionLines, {
 			height: sessionLines.length,
 			scrollbar: "auto",
-			totalRows: Math.round(this.#filteredSessions.length * linesPerItem),
+			totalRows,
 			theme: { track: t => theme.fg("muted", t), thumb: t => theme.fg("accent", t) },
 		});
-		sv.setScrollOffset(Math.round(startIndex * linesPerItem));
+		sv.setScrollOffset(offsetRows);
 		const sessionRegionStart = lines.length;
 		const svLines = sv.render(width);
 		for (let k = 0; k < svLines.length; k++) this.#hitRows[sessionRegionStart + k] = sessionRowIndex[k];
@@ -677,13 +706,13 @@ class SessionList implements Component {
 		// Page up - jump up by maxVisible items
 		if (matchesKey(keyData, "pageUp")) {
 			this.#selectionMoved = true;
-			this.#selectedIndex = Math.max(0, this.#selectedIndex - this.#visibleCount());
+			this.#selectedIndex = Math.max(0, this.#selectedIndex - this.#pageSize());
 			return;
 		}
 		// Page down - jump down by maxVisible items
 		if (matchesKey(keyData, "pageDown")) {
 			this.#selectionMoved = true;
-			this.#selectedIndex = Math.min(this.#filteredSessions.length - 1, this.#selectedIndex + this.#visibleCount());
+			this.#selectedIndex = Math.min(this.#filteredSessions.length - 1, this.#selectedIndex + this.#pageSize());
 			return;
 		}
 		// Enter
@@ -799,10 +828,8 @@ export class SessionSelectorComponent extends OverlayPanel {
 		this.#title = options.title ?? "Resume Session";
 		this.#scopeLabel = options.scopeLabel;
 		this.title = this.#headerLabel();
-		// Keep the existing breathing room; OverlayPanel supplies the two outer
+		// One spacer of breathing room; OverlayPanel supplies the two outer
 		// border rows and the horizontal inset.
-		this.addChild(new Spacer(1));
-		this.addChild(new Spacer(1));
 		this.addChild(new Spacer(1));
 		this.addChild(this.#messageContainer);
 		// Create session list in folder scope; the empty-state hint invites the

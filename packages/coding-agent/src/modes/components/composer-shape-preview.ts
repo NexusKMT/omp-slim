@@ -3,8 +3,9 @@
  * scene. Chrome is rendered through the same {@link ComposerStyle} objects the
  * real editor uses, and status rows come from the live
  * {@link ComposerPreviewStatusSource} (the session's StatusLineComponent) —
- * nothing about the preview is a re-implementation, so it cannot drift from
- * the real composer. Only the prompt text is a stand-in.
+ * nothing about the preview is a re-implementation. Prompt text is a preview
+ * stand-in, and the `session_name` segment falls back to a stand-in title
+ * (passed via `previewTitle`) when the session is unnamed.
  */
 import {
 	type Component,
@@ -25,11 +26,11 @@ import { theme } from "../theme/theme";
  */
 export interface ComposerPreviewStatusSource {
 	/** Powerline bar with the context gauge (box top border content). */
-	getTopBorder(width: number): { content: string; width: number };
+	getTopBorder(width: number, previewTitle?: string): { content: string; width: number };
 	/** Plain right-group chip (claude top rule content). */
-	getStandaloneTopBorder(width: number): { content: string; width: number };
+	getStandaloneTopBorder(width: number, previewTitle?: string): { content: string; width: number };
 	/** Plain standalone bottom bar carrying the given segment groups. */
-	renderBottomBar(width: number, groups: "left" | "full"): string;
+	renderBottomBar(width: number, groups: "left" | "full", previewTitle?: string): string;
 }
 
 export interface ComposerShapePreviewOptions {
@@ -37,13 +38,15 @@ export interface ComposerShapePreviewOptions {
 	/** Live status renderer; omitted (tests), the chrome renders without status rows. */
 	status?: ComposerPreviewStatusSource;
 }
+/** Stand-in session title shown while the previewed session is unnamed. */
+const PREVIEW_TITLE = "omp";
 
 export function renderComposerShapePreview(
 	shape: ComposerShape,
 	width: number,
 	status?: ComposerPreviewStatusSource,
 ): readonly string[] {
-	const previewWidth = Math.max(24, Math.min(width, 76));
+	const previewWidth = Math.max(24, Math.min(width, 96));
 	const style = getComposerStyle(shape);
 	const paddingX = style.defaultPaddingX(undefined);
 	const chromeWidth = style.sideChromeWidth(paddingX);
@@ -51,10 +54,9 @@ export function renderComposerShapePreview(
 	let topBorder: EditorTopBorder | undefined;
 	if (status) {
 		if (style.statusAttachment === "top-border") {
-			const availableWidth = Math.max(1, previewWidth - chromeWidth * 2);
-			topBorder = status.getTopBorder(availableWidth);
+			topBorder = status.getTopBorder(Math.max(1, previewWidth - chromeWidth * 2), PREVIEW_TITLE);
 		} else if (style.statusAttachment === "top-rule-chip") {
-			topBorder = status.getStandaloneTopBorder(previewWidth);
+			topBorder = status.getStandaloneTopBorder(previewWidth, PREVIEW_TITLE);
 		}
 	}
 
@@ -94,7 +96,7 @@ export function renderComposerShapePreview(
 	if (bottom !== undefined) lines.push(bottom);
 
 	if (style.bottomBar !== "none" && status) {
-		const bar = status.renderBottomBar(previewWidth, style.bottomBar);
+		const bar = status.renderBottomBar(previewWidth, style.bottomBar, PREVIEW_TITLE);
 		if (bar) {
 			if (style.bottomBarGap) lines.push("");
 			lines.push(bar);
