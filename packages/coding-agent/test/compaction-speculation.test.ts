@@ -6,8 +6,10 @@ import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import type { CompactionMethod } from "@oh-my-pi/pi-coding-agent/session/compaction-methods";
 import { SessionMaintenance, type SessionMaintenanceHost } from "@oh-my-pi/pi-coding-agent/session/session-maintenance";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import * as snapcompactModule from "@oh-my-pi/snapcompact";
 
 const CONTEXT_WINDOW = 100_000;
 const THRESHOLD = 50_000;
@@ -53,18 +55,23 @@ describe("async speculative compaction", () => {
 		sessionManager.appendMessage(assistantMessage("final response", model));
 	}
 
-	function createMaintenance(asyncEnabled = true): SessionMaintenance {
+	let maintenanceSettings: Settings;
+
+	function createMaintenance(
+		options: { asyncEnabled?: boolean; methodOrder?: CompactionMethod[] } = {},
+	): SessionMaintenance {
 		const agent = new Agent({
 			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
 		});
 		const settings = Settings.isolated({
 			"compaction.enabled": true,
-			"compaction.asyncEnabled": asyncEnabled,
-			"compaction.methodOrder": ["soft"],
+			"compaction.asyncEnabled": options.asyncEnabled ?? true,
+			"compaction.methodOrder": options.methodOrder ?? ["soft"],
 			"compaction.thresholdPercent": 50,
 			"compaction.keepRecentTokens": 1,
 			"compaction.autoContinue": false,
 		});
+		maintenanceSettings = settings;
 		const host = {
 			agent,
 			sessionManager,
@@ -218,13 +225,52 @@ describe("async speculative compaction", () => {
 	});
 
 	it("does not start speculative work when async compaction is disabled", () => {
-		maintenance = createMaintenance(false);
+		maintenance = createMaintenance({ asyncEnabled: false });
 		const compactSpy = vi.spyOn(compactionModule, "compact");
 
 		maintenance.maybeStartSpeculativeCompaction(SPECULATION_BAND_START, CONTEXT_WINDOW);
 
 		expect(maintenance.speculationState).toBe("idle");
 		expect(compactSpy).not.toHaveBeenCalled();
+	});
+
+	it("does not speculate when snapcompact leads the configured methods", () => {
+		// Snapcompact is local and effectively instant — there is no
+		// summarization latency to hide, so no background run may start.
+		const compactSpy = vi.spyOn(compactionModule, "compact");
+		maintenance = createMaintenance({ methodOrder: ["snapcompact", "soft"] });
+
+		maintenance.maybeStartSpeculativeCompaction(SPECULATION_BAND_START, CONTEXT_WINDOW);
+
+		expect(maintenance.speculationState).toBe("idle");
+		expect(compactSpy).not.toHaveBeenCalled();
+	});
+
+	it("discards an armed summary when the real pass resolves to snapcompact", async () => {
+		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => ({
+			summary: "armed summary",
+			firstKeptEntryId: preparation.firstKeptEntryId,
+			tokensBefore: preparation.tokensBefore,
+			details: {},
+		}));
+		const snapSpy = vi.spyOn(snapcompactModule, "compact").mockImplementation(async preparation => ({
+			summary: "snapcompact archive",
+			firstKeptEntryId: preparation.firstKeptEntryId,
+			tokensBefore: preparation.tokensBefore,
+		}));
+		maintenance.maybeStartSpeculativeCompaction(SPECULATION_BAND_START, CONTEXT_WINDOW);
+		await waitForState("armed");
+		// Method order changed after arming: the real pass now runs the instant
+		// local method, and the stale LLM summary must not override it.
+		maintenanceSettings.override("compaction.methodOrder", ["snapcompact"]);
+
+		await maintenance.runAutoCompaction("threshold", false, false, false, { triggerContextTokens: THRESHOLD });
+
+		expect(snapSpy).toHaveBeenCalledTimes(1);
+		const entry = sessionManager.getEntries().findLast(item => item.type === "compaction");
+		expect(entry?.type === "compaction" ? entry.summary : undefined).toBe("snapcompact archive");
+		// Exactly the speculation's summarizer call — the pass never re-summarized.
+		expect(compactSpy).toHaveBeenCalledTimes(1);
 	});
 
 	it("clears an armed speculation when manual compaction starts", async () => {

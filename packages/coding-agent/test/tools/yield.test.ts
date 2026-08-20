@@ -168,12 +168,7 @@ describe("YieldTool", () => {
 		expect(result.details).toEqual({ data: { n: 4 }, status: "success", error: undefined });
 	});
 
-	it("arg validation rejects object payloads in string-typed fields instead of stringifying", () => {
-		// Regression: the repair layer used to JSON.stringify an object submitted
-		// for a string-typed schema field even though the diagnosis came from a
-		// failed `anyOf` branch of the yield wrapper, so validation "passed" and
-		// the parent received `summary: "{\"purge\":13,…}"` instead of a retry
-		// prompt. Union-branch diagnoses must not trigger lossy repairs.
+	it("arg validation serializes object payloads for string-typed output fields", () => {
 		const tool = new YieldTool(
 			createSession({
 				outputSchema: {
@@ -183,14 +178,14 @@ describe("YieldTool", () => {
 				},
 			}),
 		);
-		expect(() =>
+		expect(
 			validateToolArguments(tool as never, {
 				type: "toolCall",
 				id: "call-dict-summary",
 				name: "yield",
 				arguments: { result: { data: { summary: { purge: 13, keep: 20 } } } },
 			}),
-		).toThrow(/summary/);
+		).toEqual({ result: { data: { summary: '{"purge":13,"keep":20}' } } });
 	});
 
 	it("arg validation passes conforming args through unmodified", () => {

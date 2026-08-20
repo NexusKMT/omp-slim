@@ -64,45 +64,53 @@ describe("composer shape preview", () => {
 
 	it("borrows status rows from the live status source per shape layout", async () => {
 		await setTheme("dark");
-		const calls: string[] = [];
+		// Echo mocks: the stand-in title must be forwarded as a prop to every
+		// title-bearing status call, not glued onto the rendered content.
 		const status = {
-			getTopBorder: (width: number) => {
-				calls.push(`top:${width}`);
-				return { content: "TOPBAR", width: 6 };
+			getTopBorder: (_width: number, previewTitle?: string) => {
+				const content = `TOPBAR ${previewTitle ?? ""}`;
+				return { content, width: content.length };
 			},
-			getStandaloneTopBorder: (width: number) => {
-				calls.push(`chip:${width}`);
-				return { content: "CHIP", width: 4 };
+			getStandaloneTopBorder: (_width: number, previewTitle?: string) => {
+				const content = `CHIP ${previewTitle ?? ""}`;
+				return { content, width: content.length };
 			},
-			renderBottomBar: (_width: number, groups: "left" | "full") => {
-				calls.push(`bottom:${groups}`);
-				return `BOTTOM-${groups.toUpperCase()}`;
-			},
+			renderBottomBar: (_width: number, groups: "left" | "full", previewTitle?: string) =>
+				`BOTTOM-${groups.toUpperCase()} ${previewTitle ?? ""}`,
 		};
 
 		const box = renderComposerShapePreview("box", 80, status).join("\n");
 		expect(box).toContain("TOPBAR"); // embedded in the top border
+		expect(box).toContain("omp"); // stand-in title forwarded to the status source
 		expect(box).not.toContain("BOTTOM"); // box has no standalone bottom bar
 
 		const claude = renderComposerShapePreview("claude", 80, status).join("\n");
 		expect(claude).toContain("CHIP"); // right group chips onto the top rule
+		expect(claude).toContain("omp");
 		expect(claude).toContain("BOTTOM-LEFT"); // left group only on the bottom bar
 
-		const rule = renderComposerShapePreview("rule", 80, status).join("\n");
-		expect(rule).toContain("CHIP");
-		expect(rule).toContain("BOTTOM-LEFT");
+		const rule = renderComposerShapePreview("rule", 80, status);
+		expect(rule.join("\n")).toContain("CHIP");
+		expect(rule.join("\n")).toContain("omp");
+		expect(rule.join("\n")).toContain("BOTTOM-LEFT");
+		expect(rule[rule.length - 2]).toBe(""); // spacer row: rule has no bottom chrome
 
-		const pi = renderComposerShapePreview("pi", 80, status).join("\n");
-		expect(pi).not.toContain("CHIP");
-		expect(pi).toContain("BOTTOM-FULL"); // both groups on the bottom bar
+		const pi = renderComposerShapePreview("pi", 80, status);
+		expect(pi.join("\n")).not.toContain("CHIP");
+		expect(pi.join("\n")).toContain("omp");
+		expect(pi.join("\n")).toContain("BOTTOM-FULL"); // both groups on the bottom bar
+		expect(pi[pi.length - 2]).not.toBe(""); // bottom rule already separates the bar
 
 		const borderless = renderComposerShapePreview("borderless", 80, status).join("\n");
+		expect(borderless).toContain("omp");
 		expect(borderless).toContain("BOTTOM-FULL");
 
 		for (const shape of ["field", "rail"]) {
-			const rendered = renderComposerShapePreview(shape, 80, status).join("\n");
-			expect(rendered).not.toContain("CHIP");
-			expect(rendered).toContain("BOTTOM-FULL");
+			const rendered = renderComposerShapePreview(shape, 80, status);
+			expect(rendered.join("\n")).not.toContain("CHIP");
+			expect(rendered.join("\n")).toContain("omp");
+			expect(rendered.join("\n")).toContain("BOTTOM-FULL");
+			expect(rendered[rendered.length - 2]).toBe(""); // spacer row before the bar
 		}
 	});
 

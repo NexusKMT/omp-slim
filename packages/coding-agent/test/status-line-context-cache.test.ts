@@ -19,6 +19,8 @@ import type { ContextUsage } from "@oh-my-pi/pi-coding-agent/extensibility/exten
 import { StatusLineComponent } from "@oh-my-pi/pi-coding-agent/modes/components/status-line";
 import { initTheme, setSymbolPreset, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { getSessionAccentAnsi } from "@oh-my-pi/pi-coding-agent/utils/session-color";
+import { adjustHsv } from "@oh-my-pi/pi-utils";
 
 beforeAll(async () => {
 	resetSettingsForTest();
@@ -45,8 +47,13 @@ function makeSession(opts: {
 	contextWindow?: number;
 	usage?: ContextUsage | undefined;
 	settings?: AgentSession["settings"];
+	/** Model input modalities; gates snapcompact availability in boundary math. */
+	modelInput?: string[];
 }): Fake {
 	const contextWindow = opts.contextWindow ?? 200_000;
+	const model = opts.modelInput
+		? { id: "test-model", contextWindow, input: opts.modelInput }
+		: { id: "test-model", contextWindow };
 	let usage: ContextUsage | undefined = "usage" in opts ? opts.usage : { tokens: 1234, contextWindow, percent: 0.6 };
 	let calls = 0;
 	let revision = 0;
@@ -55,9 +62,9 @@ function makeSession(opts: {
 		systemPrompt: ["You are a helpful assistant."],
 		agent: { state: { tools: [] } },
 		skills: [],
-		model: { id: "test-model", contextWindow },
+		model,
 		modelRegistry: { isUsingOAuth: () => false },
-		state: { messages: opts.messages, model: { contextWindow } },
+		state: { messages: opts.messages, model },
 		settings: opts.settings,
 		sessionManager: {
 			getUsageStatistics: () => ({
@@ -375,7 +382,8 @@ describe("StatusLineComponent context breakdown", () => {
 
 		await setSymbolPreset("nerd");
 		try {
-			const nerd = comp.getTopBorder(80).content.replaceAll(/\x1b\[[0-9;]*m/g, "");
+			const border = comp.getTopBorder(80).content;
+			const nerd = border.replaceAll(/\x1b\[[0-9;]*m/g, "");
 			const speculationIndex = nerd.indexOf("󰕝");
 			const compactionIndex = nerd.indexOf("󰁨");
 			expect(speculationIndex).toBeGreaterThanOrEqual(0);
@@ -383,7 +391,9 @@ describe("StatusLineComponent context breakdown", () => {
 			expect(speculationIndex).toBeLessThan(compactionIndex);
 			expect(nerd).not.toContain("╎");
 			expect(nerd).not.toContain("┃");
-
+			const expectedDimmed = getSessionAccentAnsi(adjustHsv(theme.getColorHex("borderAccent"), { s: 0.7, v: 0.75 }));
+			expect(border).toContain(`${expectedDimmed}󰁨`);
+			expect(border).not.toContain(`${theme.getFgAnsi("warning")}󰁨`);
 			await setSymbolPreset("unicode");
 			const unicode = comp.getTopBorder(80).content.replaceAll(/\x1b\[[0-9;]*m/g, "");
 			expect(unicode).toContain("╎");
@@ -393,6 +403,51 @@ describe("StatusLineComponent context breakdown", () => {
 		} finally {
 			await initTheme();
 		}
+	});
+
+	it("hides the speculation tick when the leading method is instant snapcompact", () => {
+		// A vision model with snapcompact first never speculates (local, instant),
+		// so the gauge shows only the auto-compaction boundary.
+		const { session } = makeSession({
+			messages: [userMessage("hi"), assistantMessage("done")],
+			usage: { tokens: 50_000, contextWindow: 100_000, percent: 50 },
+			settings: Settings.isolated({ "compaction.methodOrder": ["snapcompact", "soft"] }),
+			modelInput: ["text", "image"],
+		});
+		const comp = new StatusLineComponent(session);
+		comp.updateSettings({
+			preset: "custom",
+			leftSegments: ["pi"],
+			rightSegments: ["session_name"],
+			separator: "none",
+			sessionAccent: false,
+			contextLine: "annotated",
+		});
+
+		const plain = comp.getTopBorder(80).content.replaceAll(/\x1b\[[0-9;]*m/g, "");
+		expect(plain).toContain("┃");
+		expect(plain).not.toContain("╎");
+	});
+
+	it("hides the speculation tick when async compaction is disabled", () => {
+		const { session } = makeSession({
+			messages: [userMessage("hi"), assistantMessage("done")],
+			usage: { tokens: 50_000, contextWindow: 100_000, percent: 50 },
+			settings: Settings.isolated({ "compaction.asyncEnabled": false }),
+		});
+		const comp = new StatusLineComponent(session);
+		comp.updateSettings({
+			preset: "custom",
+			leftSegments: ["pi"],
+			rightSegments: ["session_name"],
+			separator: "none",
+			sessionAccent: false,
+			contextLine: "annotated",
+		});
+
+		const plain = comp.getTopBorder(80).content.replaceAll(/\x1b\[[0-9;]*m/g, "");
+		expect(plain).toContain("┃");
+		expect(plain).not.toContain("╎");
 	});
 
 	it("standalone mode renders a plain bottom bar without powerline chrome", () => {
