@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added model metadata fields (`context_length`, `max_output_tokens`, `input_modalities`, etc.) to auth gateway model listing responses
 - Added `Tool.coerceArguments` (default `true`): setting it `false` opts a tool out of every LLM-quirk argument repair pass (JSON-string parsing, object→string stringification, unrecognized-key dropping, singleton array wrapping) so validation runs verbatim. Tools whose arguments are the deliverable payload — like the subagent `yield` tool — use it to keep lossy repairs from silently corrupting data their own validate-and-retry loop is designed to correct.
 
 ### Fixed
