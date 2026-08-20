@@ -484,6 +484,19 @@ describe("advisor", () => {
 			expect(onAdvice).toHaveBeenCalledWith(note, "concern");
 		});
 
+		it("retains the highest severity when duplicate deferred advice escalates", async () => {
+			const onAdvice = vi.fn();
+			const tool = new AdviseTool(onAdvice);
+
+			tool.beginUpdate(true);
+			await tool.execute("tc-1", { note: "Same point raised repeatedly.", severity: "nit" });
+			await tool.execute("tc-2", { note: "Same   point raised repeatedly.", severity: "concern" });
+
+			tool.beginUpdate(false);
+			expect(onAdvice).toHaveBeenCalledTimes(1);
+			expect(onAdvice).toHaveBeenCalledWith("Same point raised repeatedly.", "concern");
+		});
+
 		it("validates parameters using ArkType", () => {
 			const onAdvice = vi.fn();
 			const tool = new AdviseTool(onAdvice);

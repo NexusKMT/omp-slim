@@ -188,7 +188,7 @@ export class AdviseTool implements AgentTool<typeof adviseSchema, AdviseDetails>
 	 *  depend on the advisor model choosing to re-raise (it may not, since the
 	 *  tool previously returned "Recorded." for a note that was never routed).
 	 *  Cleared on `resetDeliveredNotes` alongside the delivered-rank map. */
-	#deferredNotes: { note: string; severity?: AdviseDetails["severity"] }[] = [];
+	#deferredNotes: { key: string; note: string; severity?: AdviseDetails["severity"] }[] = [];
 
 	constructor(private readonly onAdvice: (note: string, severity?: AdviseDetails["severity"]) => void) {}
 
@@ -232,8 +232,12 @@ export class AdviseTool implements AgentTool<typeof adviseSchema, AdviseDetails>
 			// advisor the truth — the previous "Recorded." made it believe the note
 			// reached the primary, so it never re-raised and the advice was lost.
 			const key = advisorNoteDedupeKey(args.note);
-			const alreadyPending = this.#deferredNotes.some(p => advisorNoteDedupeKey(p.note) === key);
-			if (!alreadyPending) this.#deferredNotes.push({ note: args.note, severity: args.severity });
+			const pending = this.#deferredNotes.find(item => item.key === key);
+			if (!pending) {
+				this.#deferredNotes.push({ key, note: args.note, severity: args.severity });
+			} else if (advisorSeverityRank(args.severity) > advisorSeverityRank(pending.severity)) {
+				pending.severity = args.severity;
+			}
 			return {
 				content: [
 					{
