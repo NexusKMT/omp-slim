@@ -11,6 +11,7 @@
 ### Changed
 
 - Archive parsing moved to the shared `@oh-my-pi/pi-utils/ar` engine; `src/utils/zip.ts` was removed.
+- Supervised process completion notices now render as compact one-line rows (like background job completions) instead of a full-width message card.
 
 ### Fixed
 

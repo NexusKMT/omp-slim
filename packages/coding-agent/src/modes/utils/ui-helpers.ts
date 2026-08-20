@@ -59,6 +59,7 @@ import {
 	buildAsyncResultBlock,
 	buildFileMentionBlock,
 	buildIrcMessageCard,
+	buildLaunchCompletionBlock,
 	normalizeToolArgs,
 	resolveAssistantErrorPresentation,
 	splitAssistantMessageToolTimeline,
@@ -187,13 +188,7 @@ export class UiHelpers {
 						break;
 					}
 					if (message.customType === LAUNCH_COMPLETION_MESSAGE_TYPE) {
-						const messageComponent = new CustomMessageComponent(
-							message as CustomMessage<unknown>,
-							this.ctx.viewSession.extensionRunner?.getMessageRenderer(message.customType),
-						);
-						messageComponent.setExpanded(this.ctx.toolOutputExpanded);
-						const component = new ToolActivityContainer(messageComponent);
-						this.ctx.chatContainer.addChild(component);
+						this.ctx.chatContainer.addChild(buildLaunchCompletionBlock(message));
 						break;
 					}
 					if (message.customType === COLLAB_PROMPT_MESSAGE_TYPE) {
