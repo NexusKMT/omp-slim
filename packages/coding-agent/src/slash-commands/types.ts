@@ -85,6 +85,13 @@ export interface SlashCommandRuntime {
 	 * is waiting on.
 	 */
 	keepTurnOpenUntilIdle?: () => Promise<void>;
+	/**
+	 * Start a local command operation without holding the host's prompt response.
+	 *
+	 * RPC provides this for provider-backed commands because its prompt API must
+	 * return immediately and leave the serialized queue free for `abort`.
+	 */
+	runCommandInBackground?: (task: () => Promise<void>) => void;
 	notifyTitleChanged?: () => Promise<void> | void;
 	notifyConfigChanged?: () => Promise<void> | void;
 }

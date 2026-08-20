@@ -207,41 +207,51 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 			if (runtime.session.isGeneratingHandoff) {
 				return usage("Handoff generation is already in progress.", runtime);
 			}
-			let result: HandoffResult | undefined;
-			try {
-				result = await runtime.session.handoff(command.args || undefined);
-			} catch (err) {
-				const message = errorMessage(err);
-				// A user interrupt (ACP `session/cancel`, TUI Esc) already settled the
-				// owning turn: `AgentSession.abort()` forwards its reason into the
-				// handoff abort controller, and `throwIfHandoffAborted` rethrows a
-				// reasoned abort verbatim — so the throw arrives as
-				// `USER_INTERRUPT_LABEL`, not "Handoff cancelled". Emitting anything
-				// here would append an out-of-turn chunk after the client already saw
-				// `stopReason: "cancelled"`, so consume silently.
-				if (message === USER_INTERRUPT_LABEL) {
-					return commandConsumed();
+			const runHandoff = async (): Promise<void> => {
+				let result: HandoffResult | undefined;
+				try {
+					result = await runtime.session.handoff(command.args || undefined);
+				} catch (err) {
+					const message = errorMessage(err);
+					// A user interrupt (ACP `session/cancel`, TUI Esc) already settled the
+					// owning turn: `AgentSession.abort()` forwards its reason into the
+					// handoff abort controller, and `throwIfHandoffAborted` rethrows a
+					// reasoned abort verbatim — so the throw arrives as
+					// `USER_INTERRUPT_LABEL`, not "Handoff cancelled". Emitting anything
+					// here would append an out-of-turn chunk after the client already saw
+					// `stopReason: "cancelled"`, so consume silently.
+					if (message === USER_INTERRUPT_LABEL) {
+						return;
+					}
+					// `session.handoff()` normalizes an unreasoned cancellation to this
+					// exact message; every other throw is a real failure (no model
+					// selected, nothing to hand off, already compacted, provider error)
+					// and is surfaced verbatim behind the same "<verb> failed:" prefix
+					// `/compact` uses.
+					if (message === "Handoff cancelled") {
+						await runtime.output("Handoff cancelled.");
+						return;
+					}
+					// Persist the real failure so it stays debuggable after the client
+					// message scrolls away (same rationale as the TUI path, #7993).
+					logger.error("Handoff failed", { error: message });
+					await runtime.output(`Handoff failed: ${message}`);
+					return;
 				}
-				// `session.handoff()` normalizes an unreasoned cancellation to this
-				// exact message; every other throw is a real failure (no model
-				// selected, nothing to hand off, already compacted, provider error)
-				// and is surfaced verbatim behind the same "<verb> failed:" prefix
-				// `/compact` uses.
-				if (message === "Handoff cancelled") {
-					return usage("Handoff cancelled.", runtime);
+				if (!result) {
+					await runtime.output("Handoff cancelled.");
+					return;
 				}
-				// Persist the real failure so it stays debuggable after the client
-				// message scrolls away (same rationale as the TUI path, #7993).
-				logger.error("Handoff failed", { error: message });
-				return usage(`Handoff failed: ${message}`, runtime);
+				// `savedPath` is deliberately not reported: `SessionHandoff` only writes
+				// the document to disk when `options.autoTriggered` is set, which the
+				// user-invoked path never passes.
+				await runtime.output("Context handed off and compacted in place.");
+			};
+			if (runtime.runCommandInBackground) {
+				runtime.runCommandInBackground(runHandoff);
+				return commandConsumed();
 			}
-			if (!result) {
-				return usage("Handoff cancelled.", runtime);
-			}
-			// `savedPath` is deliberately not reported: `SessionHandoff` only writes
-			// the document to disk when `options.autoTriggered` is set, which the
-			// user-invoked path never passes.
-			await runtime.output("Context handed off and compacted in place.");
+			await runHandoff();
 			return commandConsumed();
 		},
 		handleTui: async (command, runtime) => {

@@ -54,6 +54,29 @@ describe("/handoff dispatch (ACP)", () => {
 		expect(h2.handoff).toHaveBeenCalledWith(undefined);
 	});
 
+	it("leaves the RPC command queue free while handoff generation runs", async () => {
+		const handoffStarted = Promise.withResolvers<void>();
+		const handoffFinished = Promise.withResolvers<{ document: string }>();
+		const h = acpRuntime({});
+		h.handoff.mockImplementation(async () => {
+			handoffStarted.resolve();
+			return await handoffFinished.promise;
+		});
+		const backgroundTasks: Promise<void>[] = [];
+		h.runtime.runCommandInBackground = task => {
+			backgroundTasks.push(task());
+		};
+
+		const result = await executeAcpBuiltinSlashCommand("/handoff", h.runtime);
+		await handoffStarted.promise;
+		expect(result).toEqual({ consumed: true });
+		expect(h.output).not.toHaveBeenCalled();
+
+		handoffFinished.resolve({ document: "doc" });
+		await Promise.all(backgroundTasks);
+		expect(h.output).toHaveBeenCalledWith("Context handed off and compacted in place.");
+	});
+
 	it("reports success as a single line and never reports a saved path", async () => {
 		// `SessionHandoff` only writes the document to disk under
 		// `options.autoTriggered`, which the user-invoked path never passes, so
