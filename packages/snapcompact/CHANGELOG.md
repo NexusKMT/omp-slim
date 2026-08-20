@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Restored `providerFrameBudget()` (image budget clamped to `MAX_FRAMES_DEFAULT`) so callers can size archives to what the provider will actually send.
+
+
 ## [17.3.8] - 2026-08-19
 
 ### Fixed

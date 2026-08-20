@@ -1213,9 +1213,13 @@ describe("archive helpers", () => {
 		expect(snapcompact.providerImageBudget(undefined)).toBe(snapcompact.DEFAULT_PROVIDER_IMAGE_BUDGET);
 		expect(snapcompact.providerImageBudget("some-new-router")).toBe(snapcompact.DEFAULT_PROVIDER_IMAGE_BUDGET);
 		expect(snapcompact.providerImageBudget("openai-codex")).toBe(200);
-		// The default frame budget must stay under the Anthropic image wire cap:
-		// compaction no longer clamps the archive per provider, so a default above
-		// the cap would silently drop frames or error on large-window Claude.
+		expect(snapcompact.providerFrameBudget("some-new-router")).toBe(snapcompact.DEFAULT_PROVIDER_IMAGE_BUDGET);
+		expect(snapcompact.providerFrameBudget("umans")).toBe(10);
+		expect(snapcompact.providerFrameBudget("anthropic")).toBe(snapcompact.MAX_FRAMES_DEFAULT);
+		// Anthropic's image cap is the high-water mark the default frame count
+		// must stay under; unknown providers are clamped separately via
+		// providerFrameBudget so their lower image floors cannot archive frames
+		// the send path will drop.
 		expect(snapcompact.MAX_FRAMES_DEFAULT).toBeLessThanOrEqual(snapcompact.providerImageBudget("anthropic"));
 	});
 });
