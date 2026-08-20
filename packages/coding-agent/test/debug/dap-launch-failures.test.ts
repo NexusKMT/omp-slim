@@ -836,6 +836,21 @@ describe("DebugTool launch validation", () => {
 		}
 	});
 
+	it("validates missing attach targets before adapter discovery", async () => {
+		const selectAttachSpy = spyOn(dapModule, "selectAttachAdapter").mockReturnValue(null);
+		const session: ToolSession = {
+			cwd: process.cwd(),
+			hasUI: false,
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+			settings: Settings.isolated({ "debug.enabled": true }),
+		};
+		const tool = new DebugTool(session);
+
+		await expect(tool.execute("call", { action: "attach" })).rejects.toThrow("attach requires pid or port");
+		expect(selectAttachSpy).not.toHaveBeenCalled();
+	});
+
 	it("allows explicit adapters with target attach defaults to attach without pid or port", async () => {
 		const adapter: DapResolvedAdapter = {
 			...TEST_ADAPTER,
