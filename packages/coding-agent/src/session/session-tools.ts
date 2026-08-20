@@ -931,9 +931,19 @@ export class SessionTools {
 		let rebuiltXdevCatalogNames: readonly string[] | undefined;
 		try {
 			if (this.#rebuildSystemPrompt) {
-				const signature = this.#computeAppliedToolSignature(appliedNames, appliedTools);
+				// The provider receives only `appliedNames`, but prompt capability and
+				// safety gates must see every enabled tool that remains callable via
+				// the Code Mode eval bridge.
+				const promptToolNames = codeMode.active ? [...this.#enabledToolNames] : appliedNames;
+				const promptTools = codeMode.active
+					? promptToolNames.flatMap(name => {
+							const tool = this.#toolRegistry.get(name);
+							return tool ? [tool] : [];
+						})
+					: appliedTools;
+				const signature = this.#computeAppliedToolSignature(promptToolNames, promptTools);
 				if (forcePromptRefresh || signature !== this.#lastAppliedToolSignature) {
-					const built = await untilAborted(signal, this.#rebuildSystemPrompt(appliedNames, this.#toolRegistry));
+					const built = await untilAborted(signal, this.#rebuildSystemPrompt(promptToolNames, this.#toolRegistry));
 					rebuiltSystemPrompt = built.systemPrompt;
 					rebuiltSignature = signature;
 					rebuiltXdevCatalogNames = built.xdevCatalogNames;
@@ -1466,9 +1476,11 @@ export class SessionTools {
 	async #refreshBaseSystemPrompt(): Promise<void> {
 		if (this.#host.isDisposed() || !this.#rebuildSystemPrompt) return;
 		const activeToolNames = this.getActiveToolNames();
+		const promptToolNames =
+			this.#codeModeDirectWireSignature === undefined ? activeToolNames : this.getEnabledToolNames();
 		this.#setActiveToolNames?.(this.#toolPredicateNames ?? activeToolNames);
 		const previousBaseSystemPrompt = this.#baseSystemPrompt;
-		const built = await this.#rebuildSystemPrompt(activeToolNames, this.#toolRegistry);
+		const built = await this.#rebuildSystemPrompt(promptToolNames, this.#toolRegistry);
 		if (this.#host.isDisposed()) return;
 		this.#baseSystemPrompt = built.systemPrompt;
 		this.#basePromptXdevNames = new Set(built.xdevCatalogNames);
@@ -1484,10 +1496,10 @@ export class SessionTools {
 		// Refresh the cached signature so a subsequent `applyActiveToolsByName` with
 		// the same tool set does not re-rebuild on top of the explicit refresh we
 		// just performed (and conversely, a different set forces a fresh rebuild).
-		const activeTools = activeToolNames
+		const promptTools = promptToolNames
 			.map(name => this.#toolRegistry.get(name))
 			.filter((tool): tool is AgentTool => tool != null);
-		this.#lastAppliedToolSignature = this.#computeAppliedToolSignature(activeToolNames, activeTools);
+		this.#lastAppliedToolSignature = this.#computeAppliedToolSignature(promptToolNames, promptTools);
 	}
 
 	/** Applies one-turn memory prompt injection before an agent run. */

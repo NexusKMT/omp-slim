@@ -2584,12 +2584,6 @@ const extendedContextSignal = new SettingSignal("extendedContext");
  */
 export const onExtendedContextChanged = (cb: () => void) => extendedContextSignal.on(cb);
 
-/** Fires when Code Mode activation or its direct keep-set changes at runtime. */
-const codeModeSignal = new SettingSignal("providers.openai-codex.codeMode");
-
-/** Subscribe to Code Mode setting changes. Returns an unsubscribe function. */
-export const onCodeModeChanged = (cb: () => void) => codeModeSignal.on(cb);
-
 /** Fires when `statusLine.sessionAccent` changes at runtime. */
 const statusLineSessionAccentSignal = new SettingSignal("statusLine.sessionAccent");
 
