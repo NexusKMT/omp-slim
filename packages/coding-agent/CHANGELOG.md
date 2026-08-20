@@ -46,6 +46,7 @@
 - Explicit DAP adapters can attach without a PID or port when their `attachDefaults` provide the adapter-specific target arguments.
 - Fixed `omp --resume` replaying a transcript forever at 100% CPU when session entries keep arriving during the initial render ([#7811](https://github.com/can1357/oh-my-pi/issues/7811)).
 - MCP OAuth: authorization requests now use the RFC 9728 protected-resource `scopes_supported` instead of the authorization server's broad catalogue, so pre-registered clients provisioned for a subset of scopes are no longer rejected ([#9099](https://github.com/can1357/oh-my-pi/issues/9099)).
+- External editor (Ctrl+G, plan review/annotation, `/todo edit`) now spawns with `stdio: "inherit"` again, so emacsclient-based `$EDITOR` renders in the visible pane instead of an invisible terminal ([#9077](https://github.com/can1357/oh-my-pi/issues/9077)).
 
 ## [17.4.0] - 2026-08-20
 
