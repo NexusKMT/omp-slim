@@ -2098,7 +2098,7 @@ export class StatusLineComponent implements Component {
 				color = speculationColor;
 				glyph = speculationGlyph;
 			} else if (windowStart >= 0 && i >= windowStart && i < windowStart + windowLabel.length) {
-				color = unusedColor;
+				color = thresholdColor;
 				glyph = windowLabel.charAt(i - windowStart);
 			}
 			if (color !== activeColor) {
