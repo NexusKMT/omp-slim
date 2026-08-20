@@ -823,6 +823,42 @@ describe("DebugTool launch validation", () => {
 		}
 	});
 
+	it("allows explicit preattached adapters to attach without pid or port", async () => {
+		const adapter: DapResolvedAdapter = {
+			...TEST_ADAPTER,
+			name: "pico-openocd",
+			attachDefaults: { request: "attach", skipAttachRequest: true },
+		};
+		const selectAttachSpy = spyOn(dapModule, "selectAttachAdapter").mockReturnValue(adapter);
+		const sessionAttachSpy = spyOn(dapModule.dapSessionManager, "attach").mockImplementation(async opts => {
+			throw Object.assign(new Error("captured attach"), { capturedOptions: opts });
+		});
+		try {
+			const session: ToolSession = {
+				cwd: process.cwd(),
+				hasUI: false,
+				getSessionFile: () => null,
+				getSessionSpawns: () => "*",
+				settings: Settings.isolated({ "debug.enabled": true }),
+			};
+			const tool = new DebugTool(session);
+
+			await expect(tool.execute("call", { action: "attach", adapter: "pico-openocd" })).rejects.toThrow(
+				/captured attach/,
+			);
+			expect(selectAttachSpy).toHaveBeenCalledWith(process.cwd(), "pico-openocd", undefined);
+			expect(sessionAttachSpy).toHaveBeenCalledTimes(1);
+			const [opts] = sessionAttachSpy.mock.calls[0]!;
+			expect(opts.adapter).toBe(adapter);
+			expect(opts.adapter.attachDefaults.skipAttachRequest).toBe(true);
+			expect(opts.pid).toBeUndefined();
+			expect(opts.port).toBeUndefined();
+		} finally {
+			sessionAttachSpy.mockRestore();
+			selectAttachSpy.mockRestore();
+		}
+	});
+
 	it("throws targeted 'python not found in PATH' when adapter:'debugpy' is unresolvable for attach", async () => {
 		const attachSpy = spyOn(dapModule, "selectAttachAdapter").mockReturnValue(null);
 		try {
