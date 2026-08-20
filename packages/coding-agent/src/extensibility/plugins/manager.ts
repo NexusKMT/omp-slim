@@ -103,6 +103,9 @@ interface PluginPackageSnapshot {
 
 interface RuntimePackageJson {
 	name?: unknown;
+	version: string;
+	omp?: PluginManifest;
+	pi?: PluginManifest;
 }
 // =============================================================================
 // Plugin Manager
@@ -222,6 +225,39 @@ export class PluginManager {
 			installedNames.add(name);
 		}
 		return installedNames;
+	}
+	async #resolvePlugin(
+		fallbackName: string,
+		pluginPath: string,
+		config: PluginRuntimeConfig,
+		projectOverrides: ProjectPluginOverrides,
+	): Promise<InstalledPlugin | undefined> {
+		let pluginPkg: RuntimePackageJson;
+		try {
+			pluginPkg = await Bun.file(path.join(pluginPath, "package.json")).json();
+		} catch (err) {
+			if (isEnoent(err)) return undefined;
+			throw err;
+		}
+
+		const name = typeof pluginPkg.name === "string" && pluginPkg.name.length > 0 ? pluginPkg.name : fallbackName;
+		const manifest: PluginManifest = pluginPkg.omp || pluginPkg.pi || { version: pluginPkg.version };
+		manifest.version = pluginPkg.version;
+		const runtimeState = config.plugins[name] || {
+			version: pluginPkg.version,
+			enabledFeatures: null,
+			enabled: true,
+		};
+		const isDisabledInProject = projectOverrides.disabled?.includes(name) ?? false;
+
+		return {
+			name,
+			version: pluginPkg.version,
+			path: pluginPath,
+			manifest,
+			enabledFeatures: projectOverrides.features?.[name] ?? runtimeState.enabledFeatures,
+			enabled: runtimeState.enabled && !isDisabledInProject,
+		};
 	}
 	async #collectMarketplaceRuntimePackageRealpaths(): Promise<Map<string, Set<string>>> {
 		const registry = await readInstalledPluginsRegistry(getInstalledPluginsRegistryPath());
@@ -642,6 +678,29 @@ export class PluginManager {
 	}
 
 	/**
+	 * Resolve one installed plugin, including a marketplace runtime package that
+	 * is intentionally omitted from {@link list}.
+	 *
+	 * `options.path` is the trusted install path from the marketplace registry.
+	 */
+	async getPlugin(name: string, options: { path?: string } = {}): Promise<InstalledPlugin | undefined> {
+		const [deps, config, projectOverrides] = await Promise.all([
+			this.#readDeps(getPluginsPackageJson()),
+			this.#ensureConfigLoaded(),
+			this.#loadProjectOverrides(),
+		]);
+		if (!options.path && !this.#collectInstalledNames(deps, config).has(name)) {
+			return undefined;
+		}
+		return this.#resolvePlugin(
+			name,
+			options.path ?? path.join(getPluginsNodeModules(), name),
+			config,
+			projectOverrides,
+		);
+	}
+
+	/**
 	 * List all installed plugins.
 	 */
 	async list(): Promise<InstalledPlugin[]> {
@@ -664,34 +723,10 @@ export class PluginManager {
 		for (const name of installedNames) {
 			const pluginPath = path.join(getPluginsNodeModules(), name);
 			if (await this.#isMarketplaceRuntimeLink(name, deps, marketplaceRuntimeRealpaths, pluginPath)) continue;
-			const pluginPkgPath = path.join(pluginPath, "package.json");
-			let pluginPkg: { version: string; omp?: PluginManifest; pi?: PluginManifest };
-			try {
-				pluginPkg = await Bun.file(pluginPkgPath).json();
-			} catch (err) {
-				if (isEnoent(err)) continue;
-				throw err;
+			const plugin = await this.#resolvePlugin(name, pluginPath, config, projectOverrides);
+			if (plugin) {
+				plugins.push(plugin);
 			}
-			const manifest: PluginManifest = pluginPkg.omp || pluginPkg.pi || { version: pluginPkg.version };
-			manifest.version = pluginPkg.version;
-
-			const runtimeState = config.plugins[name] || {
-				version: pluginPkg.version,
-				enabledFeatures: null,
-				enabled: true,
-			};
-
-			const isDisabledInProject = projectOverrides.disabled?.includes(name) ?? false;
-			const projectFeatures = projectOverrides.features?.[name];
-
-			plugins.push({
-				name,
-				version: pluginPkg.version,
-				path: pluginPath,
-				manifest,
-				enabledFeatures: projectFeatures ?? runtimeState.enabledFeatures,
-				enabled: runtimeState.enabled && !isDisabledInProject,
-			});
 		}
 
 		return plugins;

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Marketplace-installed plugins with manifest settings can now be configured through `omp plugin config` and Settings → Plugins ([#9106](https://github.com/can1357/oh-my-pi/issues/9106)).
+
 ## [17.4.0] - 2026-08-20
 
 ### Added

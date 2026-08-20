@@ -55,4 +55,61 @@ describe("plugin config", () => {
 
 		await expect(new PluginManager(tmpRoot).getPluginSettings(pluginName)).resolves.toEqual({});
 	});
+
+	test("resolves marketplace settings without restoring duplicate list entries", async () => {
+		const pluginName = "omp-commit";
+		const installPath = path.join(pluginsDir, "cache", pluginName);
+		const pluginPath = path.join(pluginsDir, "node_modules", pluginName);
+		await Bun.write(
+			path.join(installPath, "package.json"),
+			JSON.stringify({
+				name: pluginName,
+				version: "1.0.0",
+				omp: {
+					version: "1.0.0",
+					settings: {
+						mainBranchProtection: {
+							type: "boolean",
+							default: true,
+						},
+					},
+				},
+			}),
+		);
+		await fs.mkdir(path.dirname(pluginPath), { recursive: true });
+		await fs.symlink(installPath, pluginPath, "dir");
+		await Bun.write(
+			path.join(pluginsDir, "installed_plugins.json"),
+			JSON.stringify({
+				version: 2,
+				plugins: {
+					"omp-commit@market": [
+						{
+							scope: "user",
+							installPath,
+							version: "1.0.0",
+							installedAt: "2026-08-20T00:00:00.000Z",
+							lastUpdated: "2026-08-20T00:00:00.000Z",
+						},
+					],
+				},
+			}),
+		);
+		await Bun.write(
+			lockfile,
+			JSON.stringify({
+				plugins: {
+					[pluginName]: { version: "1.0.0", enabledFeatures: null, enabled: true },
+				},
+				settings: {},
+			}),
+		);
+
+		const manager = new PluginManager(tmpRoot);
+		expect(await manager.list()).toEqual([]);
+		expect((await manager.getPlugin(pluginName))?.manifest.settings?.mainBranchProtection?.default).toBe(true);
+
+		await manager.setPluginSetting(pluginName, "mainBranchProtection", false);
+		expect(await manager.getPluginSettings(pluginName)).toEqual({ mainBranchProtection: false });
+	});
 });

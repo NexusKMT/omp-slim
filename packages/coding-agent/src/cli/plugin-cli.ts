@@ -763,8 +763,7 @@ async function handleConfig(
 		process.exit(1);
 	}
 
-	const plugins = await manager.list();
-	const plugin = plugins.find(p => p.name === pluginName);
+	const plugin = await manager.getPlugin(pluginName);
 
 	if (!plugin) {
 		console.error(chalk.red(`Plugin "${pluginName}" not found`));
