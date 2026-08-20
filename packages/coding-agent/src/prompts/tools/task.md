@@ -11,7 +11,7 @@ Agents marked BLOCKING run inline — results return in this call; non-blocking 
 {{/if}}
 
 # Task Design
-- **Agent typing:** Pick each item's `agent` type.{{#if scoutAvailable}} Read-only research MUST use `agent: "scout"` (faster model).{{/if}} Use default worker only when no specialist fits.
+- **Agent typing:** Pick each item's most specific available agent.{{#if scoutAvailable}} Read-only research MUST run on `scout` (faster model).{{/if}} Omit `agent` when the spawn-policy default is the best fit; otherwise pass the specialist explicitly.
 - **No overhead:** Each `task` MUST instruct its agent to skip formatters, linters, and project-wide test suites. Run those once at the end.
 - **One-pass:** Prefer agents that investigate AND edit in one pass;{{#if scoutAvailable}} spin a read-only scout only when affected files are genuinely unknown.{{/if}}
 - **Overlap:** Parallelize independent ownership. Same-file edits are not guaranteed to merge.{{#if ircEnabled}} Have siblings coordinate through `hub` before editing shared files.{{/if}} Name one integration owner and serialize only the irreducibly shared mutation boundary. Every concurrent batch has two prerequisites:
@@ -78,7 +78,7 @@ Pass large payloads via `local://<path>` URIs, NEVER inline text.
 {{#if spawningDisabled}}
 Agent spawning is currently disabled.
 {{else}}
-Pick the most specific agent; use default worker only when no specialist fits.
+Pick the most specific agent. Omit `agent` only when the spawn-policy default is that agent.
 {{#list agents join="\n"}}
 ### {{name}}{{#if readOnly}} (READ-ONLY){{/if}}{{#if blocking}} (BLOCKING: inline result){{/if}}
 {{description}}

@@ -157,6 +157,8 @@ describe("task.batch schema gating", () => {
 
 		expect(tool.description).toContain("spawn-policy default (`scout`)");
 		expect(tool.description).not.toContain("general-purpose worker");
+		expect(tool.description).not.toContain("default worker");
+		expect(tool.description).toContain("Omit `agent` when the spawn-policy default is the best fit");
 		expect(tool.description).toContain("### scout (READ-ONLY)");
 	});
 
