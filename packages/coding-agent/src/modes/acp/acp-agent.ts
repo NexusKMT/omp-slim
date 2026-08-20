@@ -217,13 +217,22 @@ type MCPSourceMap = {
 	[name: string]: MCPSource;
 };
 
+type AcpSessionHandle = {
+	session: AgentSession;
+	setToolUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
+};
+
 type CreateAcpSession = (
 	cwd: string,
 	options?: { interactivePrompts?: boolean },
-) => Promise<{
+) => Promise<AgentSession | AcpSessionHandle>;
+
+function normalizeCreatedAcpSession(created: AgentSession | AcpSessionHandle): {
 	session: AgentSession;
-	setToolUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
-}>;
+	setToolUIContext: AcpSessionHandle["setToolUIContext"] | undefined;
+} {
+	return "session" in created ? created : { session: created, setToolUIContext: undefined };
+}
 
 type AcpSpeechOption = {
 	value: string;
@@ -1182,9 +1191,11 @@ export class AcpAgent implements Agent {
 	}
 
 	async #createNewSessionRecord(cwd: string, mcpServers: McpServer[]): Promise<ManagedSessionRecord> {
-		const { session, setToolUIContext } = await this.#createSession(path.resolve(cwd), {
-			interactivePrompts: this.#clientCapabilities?.elicitation?.form != null,
-		});
+		const { session, setToolUIContext } = normalizeCreatedAcpSession(
+			await this.#createSession(path.resolve(cwd), {
+				interactivePrompts: this.#clientCapabilities?.elicitation?.form != null,
+			}),
+		);
 		try {
 			await session.sessionManager.ensureOnDisk();
 		} catch (error) {
@@ -1226,9 +1237,11 @@ export class AcpAgent implements Agent {
 
 	async #forkManagedSession(params: ForkSessionRequest): Promise<ManagedSessionRecord> {
 		const sourcePath = await this.#resolveForkSourceSessionPath(params.sessionId);
-		const { session, setToolUIContext } = await this.#createSession(path.resolve(params.cwd), {
-			interactivePrompts: this.#clientCapabilities?.elicitation?.form != null,
-		});
+		const { session, setToolUIContext } = normalizeCreatedAcpSession(
+			await this.#createSession(path.resolve(params.cwd), {
+				interactivePrompts: this.#clientCapabilities?.elicitation?.form != null,
+			}),
+		);
 		try {
 			const success = await session.switchSession(sourcePath);
 			if (!success) {
@@ -1251,9 +1264,11 @@ export class AcpAgent implements Agent {
 		mcpServers: McpServer[],
 		sessionId: string,
 	): Promise<ManagedSessionRecord> {
-		const { session, setToolUIContext } = await this.#createSession(path.resolve(cwd), {
-			interactivePrompts: this.#clientCapabilities?.elicitation?.form != null,
-		});
+		const { session, setToolUIContext } = normalizeCreatedAcpSession(
+			await this.#createSession(path.resolve(cwd), {
+				interactivePrompts: this.#clientCapabilities?.elicitation?.form != null,
+			}),
+		);
 		try {
 			const success = await session.switchSession(sessionPath);
 			if (!success) {
@@ -1269,7 +1284,7 @@ export class AcpAgent implements Agent {
 	async #registerPreparedSession(
 		session: AgentSession,
 		mcpServers: McpServer[],
-		setToolUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void,
+		setToolUIContext: ((uiContext: ExtensionUIContext, hasUI: boolean) => void) | undefined,
 	): Promise<ManagedSessionRecord> {
 		const record = this.#createManagedSessionRecord(session, setToolUIContext);
 		session.setClientBridge(createAcpClientBridge(this.#connection, session.sessionId, this.#clientCapabilities));

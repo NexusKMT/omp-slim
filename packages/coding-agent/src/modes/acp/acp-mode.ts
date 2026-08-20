@@ -11,8 +11,16 @@ export interface AcpSessionHandle {
 	setToolUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
 }
 
-/** Creates sessions requested by an ACP client. */
-export type AcpSessionFactory = (cwd: string, options?: { interactivePrompts?: boolean }) => Promise<AcpSessionHandle>;
+/**
+ * Creates sessions requested by an ACP client.
+ *
+ * Session-only results remain supported for embedders that do not need the
+ * deferred interactive-prompt bridge.
+ */
+export type AcpSessionFactory = (
+	cwd: string,
+	options?: { interactivePrompts?: boolean },
+) => Promise<AgentSession | AcpSessionHandle>;
 
 /** Creates an ACP connection and exposes its agent when process-level teardown must own it. */
 export function createAcpConnection(
