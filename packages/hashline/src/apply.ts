@@ -153,6 +153,26 @@ function bucketAnchorEditsByLine(edits: IndexedEdit[]): Map<number, IndexedEdit[
 /** A line that is nothing but closing delimiters: `}`, `)`, `];`, `})`, `},`. */
 export const STRUCTURAL_CLOSER_RE = /^\s*[)\]}]+[;,]?\s*$/;
 
+/**
+ * A row that is nothing but an attribute or decorator: `#[napi]`,
+ * `#![allow(dead_code)]`, `@Injectable()`, `@property`. Statements may repeat
+ * verbatim on adjacent lines by intent, but annotations on one item never do —
+ * an exact adjacent copy is a boundary echo. This is the extra evidence that
+ * lets one-sided echo normalization act on single-line ranges (the
+ * doc-restoration incident: a `PUT N.=N` landed one line high and its body
+ * restated the `#[napi]` surviving just below the range, duplicating the
+ * attribute — a result that parses, so no syntax probe could catch it).
+ */
+const ANNOTATION_ROW_RE = /^\s*(?:#!?\[.+\]|@[A-Za-z_$][\w$.]*(?:\(.*\))?)\s*$/;
+
+/** Every payload row in `[start, end)` is an annotation row. */
+function isAnnotationEchoRun(payload: readonly string[], start: number, end: number): boolean {
+	for (let i = start; i < end; i++) {
+		if (!ANNOTATION_ROW_RE.test(payload[i])) return false;
+	}
+	return true;
+}
+
 interface ReplacementGroup {
 	/** Positions in the edit array of the payload inserts, in payload order. */
 	insertIndices: number[];
@@ -328,11 +348,13 @@ interface TextualBoundaryNormalization {
  * Normalize exact boundary echoes without interpreting language tokens.
  *
  * Two-sided echoes are removed when stripping both copies leaves one payload
- * row per deleted range line. One-sided echoes on multi-line ranges are
- * removed when the remaining payload still covers the full range; an
- * under-filled one-sided echo is recorded as ambiguous so the syntax-probe
- * search gets first chance to resolve it, then rejected rather than silently
- * dropping unique range content.
+ * row per deleted range line. One-sided echoes are removed when the remaining
+ * payload still covers the full range — on multi-line ranges from line
+ * equality alone, on single-line ranges only when every echoed row is an
+ * annotation ({@link ANNOTATION_ROW_RE}), where an adjacent duplicate is never
+ * intentional. An under-filled one-sided echo is recorded as ambiguous so the
+ * syntax-probe search gets first chance to resolve it, then rejected rather
+ * than silently dropping unique range content.
  */
 function normalizeTextualBoundaryEchoes(
 	edits: readonly AppliedEdit[],
@@ -361,7 +383,7 @@ function normalizeTextualBoundaryEchoes(
 				dropLeading = leading;
 				dropTrailing = trailing;
 			}
-		} else if (leading > 0 && rangeLength > 1) {
+		} else if (leading > 0 && (rangeLength > 1 || isAnnotationEchoRun(group.payload, 0, leading))) {
 			if (group.payload.length - leading >= rangeLength) {
 				dropLeading = leading;
 			} else {
@@ -372,7 +394,10 @@ function normalizeTextualBoundaryEchoes(
 					count: leading,
 				});
 			}
-		} else if (trailing > 0 && rangeLength > 1) {
+		} else if (
+			trailing > 0 &&
+			(rangeLength > 1 || isAnnotationEchoRun(group.payload, group.payload.length - trailing, group.payload.length))
+		) {
 			if (group.payload.length - trailing >= rangeLength) {
 				dropTrailing = trailing;
 			} else {

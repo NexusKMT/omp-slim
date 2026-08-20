@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Dropped one-sided boundary echoes on single-line replacement ranges when every echoed row is an attribute/decorator (`#[napi]`, `@Injectable()`): the authored result parses, so the syntax probe never fired and the attribute was silently duplicated. Under-filled annotation echoes are now rejected instead of applied.
+- Raised the default snapshot-store path capacity from 30 to 256 so tags minted early in a wide session no longer age out of the LRU and degrade a recoverable stale-tag mismatch into the misleading "hash is not from this session" rejection.
+
 ## [17.3.3] - 2026-08-14
 
 ### Fixed
