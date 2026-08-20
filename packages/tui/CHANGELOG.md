@@ -4,8 +4,8 @@
 
 ### Added
 
-- Added composer border styles (box, claude, pi, borderless) as per-style `ComposerStyle` objects (`getComposerStyle`) owning chrome geometry, top/bottom/row rendering, and status-bar attachment metadata — shared by the editor and host previews so they cannot drift
-- Added support for warning risk notes and row markers in settings lists
+- Added composer border styles (`box`, `claude`, `pi`, `borderless`) via `ComposerStyle` objects and `getComposerStyle`, unifying chrome geometry and rendering across the editor and previews.
+- Added support for warning risk notes and row markers in settings lists.
 
 ## [17.3.8] - 2026-08-19
 
