@@ -96,3 +96,25 @@ export function getCodexResidency(accessToken: string): string | undefined {
 		return undefined;
 	}
 }
+
+/**
+ * Adds the token's workspace residency to Codex request headers without
+ * replacing a caller-supplied value.
+ */
+export function applyCodexResidencyHeader(
+	headers: Headers | Record<string, string>,
+	accessToken: string,
+): void {
+	const headerName = OPENAI_HEADERS.RESIDENCY;
+	if (headers instanceof Headers) {
+		if (headers.has(headerName)) return;
+		const residency = getCodexResidency(accessToken);
+		if (residency) headers.set(headerName, residency);
+		return;
+	}
+	for (const configuredName in headers) {
+		if (configuredName.toLowerCase() === headerName) return;
+	}
+	const residency = getCodexResidency(accessToken);
+	if (residency) headers[headerName] = residency;
+}

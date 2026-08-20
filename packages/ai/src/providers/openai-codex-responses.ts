@@ -2,10 +2,10 @@ import { scheduler } from "node:timers/promises";
 import { type } from "@oh-my-pi/omptype";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import {
+	applyCodexResidencyHeader,
 	CODEX_BASE_URL,
 	CODEX_CLIENT_VERSION,
 	getCodexAccountId,
-	getCodexResidency,
 	OPENAI_HEADER_VALUES,
 	OPENAI_HEADERS,
 } from "@oh-my-pi/pi-catalog/wire/codex";
@@ -4261,10 +4261,7 @@ function createCodexHeaders(
 	// the client did not declare the workspace's residency. The access token
 	// already carries it, so this needs no configuration. A caller-supplied
 	// header still wins: a proxy fronting Codex may want a different value.
-	if (!headers.has(OPENAI_HEADERS.RESIDENCY)) {
-		const residency = getCodexResidency(accessToken);
-		if (residency) headers.set(OPENAI_HEADERS.RESIDENCY, residency);
-	}
+	applyCodexResidencyHeader(headers, accessToken);
 	if (attestation) {
 		headers.set(OPENAI_HEADERS.ATTESTATION, attestation);
 	} else {

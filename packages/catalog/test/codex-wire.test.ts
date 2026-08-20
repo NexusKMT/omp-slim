@@ -1,5 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { getCodexAccountId, getCodexResidency, JWT_CLAIM_PATH } from "@oh-my-pi/pi-catalog/wire/codex";
+import {
+	applyCodexResidencyHeader,
+	getCodexAccountId,
+	getCodexResidency,
+	JWT_CLAIM_PATH,
+	OPENAI_HEADERS,
+} from "@oh-my-pi/pi-catalog/wire/codex";
 
 function codexToken(auth: Record<string, unknown>): string {
 	const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" }), "utf8").toString("base64url");
@@ -44,5 +50,16 @@ describe("getCodexResidency", () => {
 	it("returns undefined for opaque non-JWT keys used by Codex-compatible proxies", () => {
 		expect(getCodexResidency("opaque-proxy-key")).toBeUndefined();
 		expect(getCodexResidency("not.a.jwt")).toBeUndefined();
+	});
+
+	it("applies residency without replacing caller-supplied Headers or record values", () => {
+		const token = codexToken({ chatgpt_data_residency: "us" });
+		const headers = new Headers();
+		applyCodexResidencyHeader(headers, token);
+		expect(headers.get(OPENAI_HEADERS.RESIDENCY)).toBe("us");
+
+		const configured = { "X-OpenAI-Internal-Codex-Residency": "eu" };
+		applyCodexResidencyHeader(configured, token);
+		expect(configured).toEqual({ "X-OpenAI-Internal-Codex-Residency": "eu" });
 	});
 });

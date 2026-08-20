@@ -4,9 +4,9 @@ import { type } from "@oh-my-pi/omptype";
 import { type ApiKey, type FetchImpl, getEnvApiKey, getOpenRouterHeaders, type Model, withAuth } from "@oh-my-pi/pi-ai";
 import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
 import {
+	applyCodexResidencyHeader,
 	CODEX_BASE_URL,
 	getCodexAccountId,
-	getCodexResidency,
 	OPENAI_HEADER_VALUES,
 	OPENAI_HEADERS,
 	URL_PATHS,
@@ -897,10 +897,7 @@ function buildOpenAIImageHeaders(model: Model, apiKey: string, sessionId: string
 			headers.set(OPENAI_HEADERS.ACCOUNT_ID, accountId);
 		}
 		// Same region gate as the chat transport; the token carries the value.
-		if (!headers.has(OPENAI_HEADERS.RESIDENCY)) {
-			const residency = getCodexResidency(apiKey);
-			if (residency) headers.set(OPENAI_HEADERS.RESIDENCY, residency);
-		}
+		applyCodexResidencyHeader(headers, apiKey);
 		headers.set(OPENAI_HEADERS.BETA, OPENAI_HEADER_VALUES.BETA_RESPONSES);
 		headers.set(OPENAI_HEADERS.ORIGINATOR, OPENAI_HEADER_VALUES.ORIGINATOR_CODEX);
 		headers.set("User-Agent", USER_AGENT);
