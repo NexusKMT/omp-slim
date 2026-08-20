@@ -4951,7 +4951,28 @@ export class AuthStorage {
 				} catch (error) {
 					// A failed preflight already exercised the provider refresh path.
 					// Do not replay the same refresh token in the final candidate pass.
-					if (credentialId !== undefined) {
+					const errorMsg = String(error);
+					const isDefinitiveFailure = AIError.isDefinitiveOAuthFailure(errorMsg);
+					logger.debug("OAuth preflight refresh failed", {
+						provider,
+						index: candidate.selection.index,
+						error: errorMsg,
+						isDefinitiveFailure,
+					});
+					if (isDefinitiveFailure) {
+						// A dead grant discovered during preflight must be disabled here too —
+						// the final candidate pass below skips every `preflightFailures` entry,
+						// so if this branch only blocked the row (like the transient case), the
+						// definitive failure would never reach `#tryOAuthCredential`'s own
+						// disable logic and the row would be retried forever instead of torn down.
+						await this.#disableDefinitiveOAuthFailure(
+							provider,
+							credentialId,
+							candidate.selection.credential,
+							candidate.selection.index,
+							errorMsg,
+						);
+					} else if (credentialId !== undefined) {
 						const latestIndex = this.#getStoredCredentials(provider).findIndex(
 							entry => entry.id === credentialId,
 						);
@@ -4966,11 +4987,6 @@ export class AuthStorage {
 						}
 					}
 					preflightFailures.add(candidate);
-					logger.debug("OAuth preflight refresh failed", {
-						provider,
-						index: candidate.selection.index,
-						error: String(error),
-					});
 				}
 			}),
 		);
@@ -5040,6 +5056,73 @@ export class AuthStorage {
 		return undefined;
 	}
 
+	/**
+	 * Handles a definitively-dead OAuth grant discovered during refresh (`invalid_grant`,
+	 * `revoked`, …): checks for a peer rotation that raced the failure, then CAS-disables
+	 * the row and emits `credential_disabled`. Shared by the eager preflight refresh in
+	 * {@link AuthStorage.#resolveOAuthSelection} and the final-candidate refresh in
+	 * {@link AuthStorage.#tryOAuthCredential} so both actually disable the credential — not
+	 * just temporarily block it — on a definitive failure.
+	 *
+	 * Returns `"disabled"` once the row is torn down, `"peer-rotated"` when a concurrent
+	 * process refreshed the same row first (the persisted refresh token no longer matches
+	 * what we attempted — the caller should reload and retry with the new credential), or
+	 * `"cas-lost"` when the disable itself lost a race and the caller should reload before
+	 * continuing.
+	 */
+	async #disableDefinitiveOAuthFailure(
+		provider: string,
+		credentialId: number | undefined,
+		attemptedCredential: OAuthCredential,
+		index: number,
+		errorMsg: string,
+	): Promise<"disabled" | "peer-rotated" | "cas-lost"> {
+		// The credential at this index may have been rotated by another process between
+		// our in-memory snapshot and the refresh attempt: Anthropic rotates refresh
+		// tokens on every use, so the peer's success leaves our stored token invalid.
+		// Re-read the row from disk before marking it disabled — if the persisted
+		// refresh token has changed, the peer rotation succeeded and we should pick
+		// up the new credential instead of soft-deleting the row that the peer just
+		// updated.
+		if (credentialId !== undefined) {
+			const latestRow = this.#store.listAuthCredentials(provider).find(row => row.id === credentialId);
+			const latestCredential = latestRow?.credential;
+			if (latestCredential?.type === "oauth" && latestCredential.refresh !== attemptedCredential.refresh) {
+				logger.debug("OAuth refresh race detected; another process rotated token first", {
+					provider,
+					index,
+					credentialId,
+				});
+				await this.reload();
+				return "peer-rotated";
+			}
+		}
+		// Permanently disable invalid credentials with an explicit cause for inspection/debugging.
+		// Use a CAS-style disable conditioned on the row still containing the stale credential
+		// we tried to refresh, so a peer rotation that lands between the pre-check above and
+		// this disable doesn't soft-delete the freshly-rotated row.
+		const disabled =
+			credentialId !== undefined
+				? this.#disableCredentialByIdIfMatches(
+						provider,
+						credentialId,
+						attemptedCredential,
+						`oauth refresh failed: ${errorMsg}`,
+					)
+				: this.#tryDisableCredentialAtIfMatches(
+						provider,
+						index,
+						attemptedCredential,
+						`oauth refresh failed: ${errorMsg}`,
+					);
+		if (!disabled) {
+			logger.debug("OAuth refresh disable lost CAS; reloading after peer rotation", { provider, index });
+			await this.reload();
+			return "cas-lost";
+		}
+		return "disabled";
+	}
+
 	async #refreshOAuthCredential(
 		provider: Provider,
 		credential: OAuthCredential,
@@ -5091,11 +5174,19 @@ export class AuthStorage {
 				disabledCause: error => `oauth refresh failed: ${String(error)}`,
 			});
 			if (result.credential) {
-				// Match #refreshOAuthCredential's freshness contract: a reloaded
-				// credential within the refresh skew still counts as needing refresh,
-				// so returning it here would make the final candidate pass refresh the
-				// same row again and replay the token we just failed on.
-				if (Date.now() + OAUTH_REFRESH_SKEW_MS < result.credential.expires) return result.credential;
+				if (result.refreshed) {
+					// We performed this refresh ourselves — trust the provider's new token
+					// even when its lifetime is shorter than the refresh skew (some grants
+					// are legitimately short-lived); the next resolve simply treats it as
+					// due for refresh again instead of rejecting a token we just minted.
+					if (Date.now() < result.credential.expires) return result.credential;
+				} else if (Date.now() + OAUTH_REFRESH_SKEW_MS < result.credential.expires) {
+					// Reloaded (not refreshed by us) credential — match #refreshOAuthCredential's
+					// freshness contract: a reload within the refresh skew still counts as
+					// needing refresh, so returning it here would make the final candidate pass
+					// refresh the same row again and replay the token we just failed on.
+					return result.credential;
+				}
 				throw new AIError.OAuthError(
 					`OAuth refresh did not produce a usable credential for provider: ${provider}`,
 					{
@@ -5389,52 +5480,18 @@ export class AuthStorage {
 			});
 
 			if (isDefinitiveFailure) {
-				// The credential at this index may have been rotated by another process between
-				// our in-memory snapshot and the refresh attempt: Anthropic rotates refresh
-				// tokens on every use, so the peer's success leaves our stored token invalid.
-				// Re-read the row from disk before marking it disabled — if the persisted
-				// refresh token has changed, the peer rotation succeeded and we should pick
-				// up the new credential instead of soft-deleting the row that the peer just
-				// updated.
-				if (credentialId !== undefined) {
-					const latestRow = this.#store.listAuthCredentials(provider).find(row => row.id === credentialId);
-					const latestCredential = latestRow?.credential;
-					if (latestCredential?.type === "oauth" && latestCredential.refresh !== selection.credential.refresh) {
-						logger.debug("OAuth refresh race detected; another process rotated token first", {
-							provider,
-							index: selection.index,
-							credentialId,
-						});
-						await this.reload();
-						if (allowFallback) return this.#resolveOAuthSelection(provider, sessionId, options);
-					}
-				}
-				// Permanently disable invalid credentials with an explicit cause for inspection/debugging.
-				// Use a CAS-style disable conditioned on the row still containing the stale credential
-				// we tried to refresh, so a peer rotation that lands between the pre-check above and
-				// this disable doesn't soft-delete the freshly-rotated row.
-				const disabled =
-					credentialId !== undefined
-						? this.#disableCredentialByIdIfMatches(
-								provider,
-								credentialId,
-								selection.credential,
-								`oauth refresh failed: ${errorMsg}`,
-							)
-						: this.#tryDisableCredentialAtIfMatches(
-								provider,
-								selection.index,
-								selection.credential,
-								`oauth refresh failed: ${errorMsg}`,
-							);
-				if (!disabled) {
-					logger.debug("OAuth refresh disable lost CAS; reloading after peer rotation", {
-						provider,
-						index: selection.index,
-					});
-					await this.reload();
+				const outcome = await this.#disableDefinitiveOAuthFailure(
+					provider,
+					credentialId,
+					selection.credential,
+					selection.index,
+					errorMsg,
+				);
+				if (outcome === "peer-rotated") {
+					if (allowFallback) return this.#resolveOAuthSelection(provider, sessionId, options);
 					return undefined;
 				}
+				if (outcome === "cas-lost") return undefined;
 				if (this.#getCredentialsForProvider(provider).some(credential => credential.type === "oauth")) {
 					if (allowFallback) return this.#resolveOAuthSelection(provider, sessionId, options);
 				}
