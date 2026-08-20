@@ -1,0 +1,28 @@
+// Canonical grammar for the sloppy edit payload (constrained decoding).
+//
+// Shape:
+//   [path]            file header
+//   «                 start MATCH (or «* to change every match)
+//   <match lines>     sparse pattern: literals, … gaps, ⟪selection⟫ markers
+//   »                 start REWRITE (omit everything below for whole-match ops)
+//   <rewrite lines>   final text; »N re-emits op N's deleted text; … re-emits gaps
+//   «                 next operation; a new [path] line opens another file
+start: section+
+section: header op+
+header: "[" PATH "]" LF
+PATH: /[^\]\n]+/
+op: match_header match_line+ rewrite?
+
+match_header: "«" ALL? LF
+ALL: "*"
+
+rewrite: rewrite_sep rewrite_line*
+rewrite_sep: "»" LF
+rewrite_line: reemit_line | content_line | blank_line
+
+match_line: content_line | blank_line
+content_line: /[^«»\n][^\n]*/ LF
+reemit_line: "»" /[1-9][0-9]*/ LF
+blank_line: LF
+
+%import common.LF

@@ -4,8 +4,9 @@
 
 ### Added
 
+- Added repeat read warning hint after identical content reads
 - `read` can now list and extract members from `.rar`, `.7z`, `.iso`, `.cab`, `.deb`, `.rpm`, `.cpio`, `.ar`/`.a`, `.lzh`, `.arj`, compressed tars (`.tar.bz2`/`.tar.xz`/`.tar.zst`/`.tar.Z`), more ZIP-family packages (`.whl`, `.ipa`, `.xpi`, `.vsix`, `.nupkg`, `.cbz`, `.cbr`), and single-file `.gz`/`.bz2`/`.xz`/`.zst` streams via `archive.ext:path`, exposing non-tar gzip files as single-member pseudo-archives.
-- `write` can now edit entries inside `.asar` archives and create `.tar.zst` archives; unsupported (read-only) archive formats fail with a clear error.
+- `write` can now edit entries inside `.asar` archives, create `.tar.zst` archives, and perform lenient anchor-based sloppy edits; unsupported (read-only) archive formats fail with a clear error.
 - Electron `.asar` archives can now be listed and read by member path, including unpacked members.
 
 ### Changed
