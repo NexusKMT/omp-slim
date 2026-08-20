@@ -4,13 +4,26 @@
  * bridge, mirroring codex-rs ToolMode::CodeModeOnly.
  */
 
-/** Tool names that always stay directly model-visible under code mode. */
+import { logger } from "@oh-my-pi/pi-utils";
+
+/**
+ * Tool names that always stay directly model-visible under code mode. The
+ * `__*__` names are the eval bridge's own internal operations (declared in
+ * `eval/*-bridge.ts`, spelled out here to keep this module free of eval
+ * imports): `callSessionTool` consumes them before the registry, so a
+ * registered tool sharing one of those names is only reachable while it stays
+ * on the direct surface.
+ */
 export const CODE_MODE_KEEP_TOOLS: Record<string, true> = {
 	eval: true,
 	ask: true,
 	todo: true,
 	yield: true,
 	think: true,
+	__agent__: true,
+	__budget__: true,
+	__completion__: true,
+	__concurrency__: true,
 };
 
 export interface CodeModeResolution {
@@ -64,10 +77,25 @@ export function buildToolNamespacesInfo(args: {
 	tools: ReadonlyArray<{ name: string; customWireName?: string; loadMode?: string; mcpServerName?: string }>;
 	directToolNames: ReadonlySet<string>;
 }): ToolNamespacesInfo {
-	const functions: Record<string, ToolNamespaceFunctionInfo> = {};
+	// Null prototype: a tool named `toString` or `__proto__` must land as an own
+	// entry instead of reading or replacing an inherited member.
+	const functions: Record<string, ToolNamespaceFunctionInfo> = Object.create(null);
 	for (const tool of args.tools) {
 		const direct = args.directToolNames.has(tool.name);
 		const wireName = direct ? (tool.customWireName ?? tool.name) : tool.name;
+		const existing = functions[wireName];
+		// A direct tool's wire alias can collide with another enabled tool's own
+		// name (built-in `edit` as `apply_patch` beside a literal `apply_patch`).
+		// One wire name can only denote one callable, so the direct exposure wins
+		// regardless of registry order rather than whichever tool came last.
+		if (existing && (existing.direct || !direct)) {
+			logger.warn("Code Mode wire name collision", {
+				wireName,
+				kept: existing.code_mode_name,
+				dropped: tool.name,
+			});
+			continue;
+		}
 		functions[wireName] = {
 			name: wireName,
 			direct,
