@@ -5,6 +5,9 @@
 ### Changed
 
 - Codex model discovery now preserves the API's advertised `tool_mode` (e.g. `code_mode_only` for GPT-5.6 Code Mode models) on catalog models and types, so downstream consumers can route those models through a programmatic tool surface ([#9069](https://github.com/can1357/oh-my-pi/pull/9069) by [@MilesCranmerBot](https://github.com/MilesCranmerBot)).
+### Added
+
+- `getCodexResidency` reads an enterprise ChatGPT workspace's pinned data-residency region from a Codex OAuth access token, and `OPENAI_HEADERS.RESIDENCY` names the header that declares it to the Codex backend.
 
 ## [17.4.0] - 2026-08-20
 

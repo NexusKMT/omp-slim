@@ -29,6 +29,8 @@ export const OPENAI_HEADERS = {
 	RESPONSES_LITE: "x-openai-internal-codex-responses-lite",
 	/** DeviceCheck attestation envelope (codex-rs `X_OAI_ATTESTATION_HEADER`); sent on ChatGPT-OAuth requests. */
 	ATTESTATION: "x-oai-attestation",
+	/** Client-declared data residency for region-pinned enterprise workspaces. */
+	RESIDENCY: "x-openai-internal-codex-residency",
 } as const;
 
 export const OPENAI_HEADER_VALUES = {
@@ -57,6 +59,39 @@ export function getCodexAccountId(accessToken: string): string | undefined {
 		const payload = JSON.parse(decoded) as Record<string, unknown>;
 		const auth = payload[JWT_CLAIM_PATH] as { chatgpt_account_id?: string } | undefined;
 		return auth?.chatgpt_account_id ?? undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Extract the account's data residency from a Codex JWT access token.
+ *
+ * Enterprise ChatGPT workspaces can be pinned to a region. Such a workspace
+ * rejects a Codex request whose egress does not match it — HTTP 401
+ * `Workspace is not authorized in this region.` — unless the client declares
+ * the residency itself. The token already carries it, so no configuration is
+ * needed: `chatgpt_data_residency` is the authoritative claim, with
+ * `chatgpt_compute_residency` as the fallback for tokens that only carry that.
+ *
+ * Returns undefined for a non-JWT token, or for the (common) accounts whose
+ * claims omit residency entirely — those workspaces are not region-pinned.
+ */
+export function getCodexResidency(accessToken: string): string | undefined {
+	try {
+		const parts = accessToken.split(".");
+		if (parts.length !== 3) return undefined;
+		const decoded = Buffer.from(parts[1] ?? "", "base64").toString("utf-8");
+		const payload = JSON.parse(decoded) as Record<string, unknown>;
+		const auth = payload[JWT_CLAIM_PATH] as
+			| { chatgpt_data_residency?: unknown; chatgpt_compute_residency?: unknown }
+			| undefined;
+		for (const claim of [auth?.chatgpt_data_residency, auth?.chatgpt_compute_residency]) {
+			if (typeof claim !== "string") continue;
+			const residency = claim.trim();
+			if (residency.length > 0) return residency;
+		}
+		return undefined;
 	} catch {
 		return undefined;
 	}

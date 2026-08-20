@@ -6,6 +6,7 @@ import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
 import {
 	CODEX_BASE_URL,
 	getCodexAccountId,
+	getCodexResidency,
 	OPENAI_HEADER_VALUES,
 	OPENAI_HEADERS,
 	URL_PATHS,
@@ -894,6 +895,11 @@ function buildOpenAIImageHeaders(model: Model, apiKey: string, sessionId: string
 		headers.delete("x-api-key");
 		if (accountId) {
 			headers.set(OPENAI_HEADERS.ACCOUNT_ID, accountId);
+		}
+		// Same region gate as the chat transport; the token carries the value.
+		if (!headers.has(OPENAI_HEADERS.RESIDENCY)) {
+			const residency = getCodexResidency(apiKey);
+			if (residency) headers.set(OPENAI_HEADERS.RESIDENCY, residency);
 		}
 		headers.set(OPENAI_HEADERS.BETA, OPENAI_HEADER_VALUES.BETA_RESPONSES);
 		headers.set(OPENAI_HEADERS.ORIGINATOR, OPENAI_HEADER_VALUES.ORIGINATOR_CODEX);
