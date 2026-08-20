@@ -11,6 +11,7 @@
 
 ### Changed
 
+- `omp cleanse` now renders a live status board on interactive terminals instead of a single static completion bar: a spinner for model resolution and checker discovery, one row per running checker, and one row per repair subagent showing its latest activity, tool count, token/cost totals, and elapsed time. Finished checkers and agents are promoted to permanent `✓`/`●`/`✗` scrollback lines as they settle. Non-TTY output keeps the previous plain-line protocol.
 - Replaced the single `compaction.strategy` / `compaction.remoteEnabled` policy with ordered `compaction.methodOrder` preferences. The default now tries OpenAI-compatible server compaction, snapcompact, handoff, shake, then soft compaction; unavailable or failed methods advance through that list.
 - `/settings` rows can now carry a risk note: a warning glyph on the row plus a warning-colored line above the description. `External Thinking` (`externalThinking`, `--external-thinking`) is the first user — providers have flagged the request shape it produces as abuse, up to account-level enforcement, so both the settings entry and `--help` now say so.
 - The todo HUD header now draws a summed progress bar counting closed/total tasks across every stage. Once all tasks close, the bar smoothly collapses before the row disappears.

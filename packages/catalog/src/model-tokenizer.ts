@@ -35,9 +35,7 @@ function deepSeekTokenizer(modelId: string): ModelTokenizer | undefined {
 	const lower = modelId.toLowerCase();
 	if (lower.includes("distill")) return undefined;
 	if (DEEPSEEK_V3_ALIASES[lower]) return "deepseek-v3";
-	return /(?:^|[-_.:])(?:v?[34]|r1)(?:[-_.:]|$)/.test(lower) && lower.includes("deepseek")
-		? "deepseek-v3"
-		: undefined;
+	return /(?:^|[-_.:])(?:v?[34]|r1)(?:[-_.:]|$)/.test(lower) && lower.includes("deepseek") ? "deepseek-v3" : undefined;
 }
 
 function kimiTokenizer(modelId: string): ModelTokenizer | undefined {

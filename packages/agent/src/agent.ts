@@ -37,7 +37,7 @@ import {
 } from "./agent-loop";
 import type { AppendOnlyContextManager } from "./append-only-context";
 import { isProviderRefusalMessage } from "./replay-policy";
-import { tokenizerEncodingForModel, Tokenizer } from "./tokenizer";
+import { Tokenizer, tokenizerEncodingForModel } from "./tokenizer";
 import type {
 	AgentBeforeModelCall,
 	AgentContext,

@@ -1,12 +1,17 @@
-import { getProjectDir, sanitizeText } from "@oh-my-pi/pi-utils";
+import { getProjectDir } from "@oh-my-pi/pi-utils";
 import { pickCleanseTarget, promptCleanseRequest } from "../cli/cleanse-picker";
-import { createProgressReporter } from "../cli/progress-reporter";
 import { shortenPath } from "../tools/render-utils";
 import { type CleanseAgentHooks, type CleanseAgentRuntime, createCleanseAgentRuntime } from "./agent";
 import { groupDiagnosticsByFile } from "./balance";
-import { buildCustomCleanseSuite, type CleanseDiagnosticSuite, discoverCleanseDiagnosticSuite } from "./checkers";
+import { createCleanseStatusBoard } from "./board";
+import {
+	buildCustomCleanseSuite,
+	type CleanseCheckerRunEvents,
+	type CleanseDiagnosticSuite,
+	discoverCleanseDiagnosticSuite,
+} from "./checkers";
 import { runCleanseLoop } from "./loop";
-import type { CleanseAgentOutcome, CleanseAssignment, CleanseDiagnosticReport, CleanseLoopResult } from "./types";
+import type { CleanseDiagnosticReport, CleanseLoopResult } from "./types";
 
 const DEFAULT_MODEL = "@smol";
 const DISPLAY_FILE_LIMIT = 50;
@@ -42,33 +47,26 @@ export async function runCleanseCommand(options: CleanseCommandOptions = {}): Pr
 	process.once("SIGTERM", abort);
 	let runtime: CleanseAgentRuntime | undefined;
 	let loopResult: CleanseLoopResult | undefined;
-	const progress = createProgressReporter("Repairing");
-	const interactiveFailures: CleanseAgentOutcome[] = [];
-	let interactiveFailuresPrinted = false;
-	const printInteractiveFailures = (): void => {
-		if (!progress.interactive || interactiveFailuresPrinted) return;
-		interactiveFailuresPrinted = true;
-		for (const outcome of interactiveFailures) printAgentOutcome(outcome);
-	};
+	const board = createCleanseStatusBoard();
 	const hooks: CleanseAgentHooks = {
-		onStart(name, assignment) {
-			if (progress.interactive) return;
-			process.stdout.write(`[start] ${name}: ${formatAssignmentFiles(assignment)} (weight ${assignment.weight})\n`);
-		},
-		onFinish(outcome) {
-			progress.complete();
-			if (progress.interactive) {
-				if (!outcome.success) interactiveFailures.push(outcome);
-				return;
-			}
-			printAgentOutcome(outcome);
-		},
+		onStart: (name, assignment) => board.agentStarted(name, assignment),
+		onProgress: (name, _assignment, progress) => board.agentProgress(name, progress),
+		onFinish: (outcome, assignment) => board.agentFinished(outcome, assignment),
+	};
+	const checkerEvents: CleanseCheckerRunEvents = {
+		onCheckerStart: checker => board.checkerStarted(checker),
+		onCheckerEnd: (check, durationMs) => board.checkerFinished(check, durationMs),
 	};
 	const ensureRuntime = async (): Promise<CleanseAgentRuntime> => {
 		if (runtime) return runtime;
-		process.stdout.write(`Resolving model ${model}...\n`);
-		runtime = await createCleanseAgentRuntime({ cwd, model, hooks });
-		process.stdout.write(`Model: ${runtime.model}\nSession: ${shortenPath(runtime.sessionFile)}\n`);
+		board.phase(`Resolving model ${model}...`);
+		try {
+			runtime = await createCleanseAgentRuntime({ cwd, model, hooks });
+		} finally {
+			board.phase(undefined);
+		}
+		board.log(`Model: ${runtime.model}`);
+		board.log(`Session: ${shortenPath(runtime.sessionFile)}`);
 		return runtime;
 	};
 
@@ -76,8 +74,9 @@ export async function runCleanseCommand(options: CleanseCommandOptions = {}): Pr
 		let request = options.request?.trim() || undefined;
 		let suite: CleanseDiagnosticSuite | undefined;
 		if (!request) {
-			process.stdout.write("Detecting configured project checkers...\n");
+			board.phase("Detecting configured project checkers...");
 			suite = await discoverCleanseDiagnosticSuite(cwd, { includeTests: options.includeTests });
+			board.phase(undefined);
 			const interactive = options.all !== true && process.stdin.isTTY === true && process.stdout.isTTY === true;
 			if (interactive) {
 				if (suite.checkers.length > 0) {
@@ -113,11 +112,15 @@ export async function runCleanseCommand(options: CleanseCommandOptions = {}): Pr
 		}
 		if (request) {
 			const activeRuntime = await ensureRuntime();
-			process.stdout.write(`Discovering checkers for "${request}"...\n`);
-			const specs = await activeRuntime.discoverCheckers(request, abortController.signal);
-			suite = await buildCustomCleanseSuite(cwd, specs);
+			board.phase(`Discovering checkers for "${request}"...`);
+			try {
+				const specs = await activeRuntime.discoverCheckers(request, abortController.signal);
+				suite = await buildCustomCleanseSuite(cwd, specs);
+			} finally {
+				board.phase(undefined);
+			}
 			for (const checker of suite.checkers) {
-				process.stdout.write(`[checker] ${checker.label}: ${checker.command}\n`);
+				board.log(`[checker] ${checker.label}: ${checker.command}`);
 			}
 		}
 		if (!suite || suite.checkers.length === 0) {
@@ -130,8 +133,9 @@ export async function runCleanseCommand(options: CleanseCommandOptions = {}): Pr
 			);
 			return { exitCode: 1, status: "unsupported", report, sessionFile: runtime?.sessionFile };
 		}
-		const initialReport = await suite.run(abortController.signal);
-		printCheckReport(initialReport);
+		const initialReport = await suite.run(abortController.signal, checkerEvents);
+		if (board.interactive) printSkippedChecks(initialReport);
+		else printCheckReport(initialReport);
 		if (initialReport.diagnostics.length === 0) {
 			process.stdout.write(
 				`Clean: ${initialReport.checks.length} checker${initialReport.checks.length === 1 ? "" : "s"} passed.\n`,
@@ -142,33 +146,29 @@ export async function runCleanseCommand(options: CleanseCommandOptions = {}): Pr
 		const assignments = groupDiagnosticsByFile(initialReport.diagnostics);
 		const agentCount = Math.min(maxAgents, assignments.length);
 		const fileCount = assignments.filter(group => group.file !== undefined).length;
-		process.stdout.write(
-			`Found ${initialReport.diagnostics.length} diagnostic${initialReport.diagnostics.length === 1 ? "" : "s"} across ${fileCount} file${fileCount === 1 ? "" : "s"}; launching ${agentCount} subagent${agentCount === 1 ? "" : "s"}.\n`,
+		board.log(
+			`Found ${initialReport.diagnostics.length} diagnostic${initialReport.diagnostics.length === 1 ? "" : "s"} across ${fileCount} file${fileCount === 1 ? "" : "s"}; launching ${agentCount} subagent${agentCount === 1 ? "" : "s"}.`,
 		);
 		const activeRuntime = await ensureRuntime();
 		const activeSuite = suite;
 		loopResult = await runCleanseLoop(
 			{ maxAgents, initialReport, signal: abortController.signal },
 			{
-				collect: signal => activeSuite.run(signal),
+				collect: signal => activeSuite.run(signal, checkerEvents),
 				dispatch: (batch, wave, report, signal) => activeRuntime.dispatch(batch, wave, report, signal),
 				onWave(_wave, batch) {
-					process.stdout.write(
-						`Dispatching ${batch.length} weighted assignment${batch.length === 1 ? "" : "s"}...\n`,
-					);
-					progress.start(batch.length);
+					board.log(`Dispatching ${batch.length} weighted assignment${batch.length === 1 ? "" : "s"}...`);
+					board.waveStarted(batch.length);
 				},
 				onReport(_wave, report) {
-					progress.finish();
-					printInteractiveFailures();
-					process.stdout.write(
-						`Verification: ${report.diagnostics.length} diagnostic${report.diagnostics.length === 1 ? "" : "s"} remaining.\n`,
+					board.waveFinished();
+					board.log(
+						`Verification: ${report.diagnostics.length} diagnostic${report.diagnostics.length === 1 ? "" : "s"} remaining.`,
 					);
 				},
 			},
 		);
-		progress.finish();
-		printInteractiveFailures();
+		board.close();
 		await activeRuntime.close(loopResult);
 		if (loopResult.status === "cancelled") {
 			process.stderr.write("Cleanse cancelled.\n");
@@ -188,28 +188,15 @@ export async function runCleanseCommand(options: CleanseCommandOptions = {}): Pr
 	} catch (error) {
 		if (!abortController.signal.aborted) throw error;
 		const report: CleanseDiagnosticReport = loopResult?.report ?? { checks: [], diagnostics: [], skipped: [] };
-		progress.finish();
-		printInteractiveFailures();
+		board.close();
 		process.stderr.write("Cleanse cancelled.\n");
 		return { exitCode: 130, status: "cancelled", report, sessionFile: runtime?.sessionFile };
 	} finally {
-		progress.finish();
-		printInteractiveFailures();
+		board.close();
 		process.off("SIGINT", abort);
 		process.off("SIGTERM", abort);
 		await runtime?.close(loopResult);
 	}
-}
-
-function printAgentOutcome(outcome: CleanseAgentOutcome): void {
-	if (outcome.success) {
-		process.stdout.write(`[done] ${outcome.name}${outcome.resolvedModel ? ` (${outcome.resolvedModel})` : ""}\n`);
-		return;
-	}
-	const error = sanitizeText(outcome.error ?? "subagent failed")
-		.replace(/\s+/g, " ")
-		.slice(0, 300);
-	process.stderr.write(`[fail] ${outcome.name}: ${error}\n`);
 }
 
 function printCheckReport(report: CleanseDiagnosticReport): void {
@@ -224,10 +211,6 @@ function printSkippedChecks(report: CleanseDiagnosticReport): void {
 	for (const skipped of report.skipped) {
 		process.stdout.write(`- ${skipped.label}: skipped (${skipped.reason})\n`);
 	}
-}
-
-function formatAssignmentFiles(assignment: CleanseAssignment): string {
-	return assignment.groups.map(group => group.file ?? "<project>").join(", ");
 }
 
 function printRemaining(report: CleanseDiagnosticReport): void {

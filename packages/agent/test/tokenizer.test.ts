@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Encoding } from "@oh-my-pi/pi-natives";
-import { tokenizerEncodingForModel, Tokenizer } from "../src/tokenizer";
+import { Tokenizer, tokenizerEncodingForModel } from "../src/tokenizer";
 
 // Contract: the catalog resolves model identity once as Model.tokenizer; the
 // agent maps that catalog property to the matching native counter. A wrong
