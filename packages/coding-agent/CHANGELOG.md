@@ -119,6 +119,10 @@
 
 - Fixed SSH guidance recommending retired `search` and standalone `ssh` routes.
 
+### Fixed
+
+- Fixed Claude Code marketplace plugins installed with `scope: "project"` loading outside their recorded `projectPath`, so foreign projects no longer inherit their MCP servers, hooks, tools, commands, skills, or agents ([#9043](https://github.com/can1357/oh-my-pi/issues/9043)).
+
 ## [17.3.8] - 2026-08-19
 
 ### Added
