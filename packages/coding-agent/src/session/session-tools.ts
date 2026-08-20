@@ -789,17 +789,16 @@ export class SessionTools {
 	async #applyActiveToolsByName(toolNames: string[], forcePromptRefresh = false, signal?: AbortSignal): Promise<void> {
 		signal?.throwIfAborted();
 		toolNames = normalizeToolNames(toolNames);
+		const codeModeToolNames =
+			this.#toolRegistry.has("eval") && !toolNames.includes("eval") ? [...toolNames, "eval"] : toolNames;
 		const codeMode = resolveCodeMode({
 			provider: this.#host.model()?.provider ?? "",
 			toolMode: this.#host.model()?.toolMode,
 			setting: this.#host.settings.get("providers.openai-codex.codeMode"),
 			extraDirectTools: this.#host.settings.get("providers.openai-codex.codeModeDirectTools"),
-			enabledToolNames: toolNames,
+			enabledToolNames: codeModeToolNames,
 		});
-		if (codeMode.active && this.#toolRegistry.has("eval") && !toolNames.includes("eval")) {
-			toolNames.push("eval");
-			codeMode.directToolNames.add("eval");
-		}
+		if (codeMode.active) toolNames = codeModeToolNames;
 		let builtInWriteAvailable = this.#builtInToolNames.has("write");
 		if (toolNames.includes("write") && !builtInWriteAvailable) {
 			const writeRegistration = this.#ensureWriteRegistered?.();
@@ -874,6 +873,7 @@ export class SessionTools {
 					return [
 						{
 							name,
+							customWireName: tool.customWireName,
 							loadMode: "loadMode" in tool && typeof tool.loadMode === "string" ? tool.loadMode : undefined,
 							mcpServerName:
 								"mcpServerName" in tool && typeof tool.mcpServerName === "string"

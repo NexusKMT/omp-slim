@@ -22,6 +22,7 @@ export function resolveCodeMode(args: {
 }): CodeModeResolution {
 	const active =
 		args.provider === "openai-codex" &&
+		args.enabledToolNames.includes("eval") &&
 		(args.setting === "on" || (args.setting === "auto" && args.toolMode === "code_mode_only"));
 	if (!active) return { active: false, directToolNames: new Set(args.enabledToolNames) };
 	const direct = new Set<string>();
@@ -52,14 +53,16 @@ export interface ToolNamespacesInfo {
 }
 
 export function buildToolNamespacesInfo(args: {
-	tools: ReadonlyArray<{ name: string; loadMode?: string; mcpServerName?: string }>;
+	tools: ReadonlyArray<{ name: string; customWireName?: string; loadMode?: string; mcpServerName?: string }>;
 	directToolNames: ReadonlySet<string>;
 }): ToolNamespacesInfo {
 	const functions: Record<string, ToolNamespaceFunctionInfo> = {};
 	for (const tool of args.tools) {
-		functions[tool.name] = {
-			name: tool.name,
-			direct: args.directToolNames.has(tool.name),
+		const direct = args.directToolNames.has(tool.name);
+		const wireName = direct ? (tool.customWireName ?? tool.name) : tool.name;
+		functions[wireName] = {
+			name: wireName,
+			direct,
 			code_mode_name: tool.name,
 			deferred: tool.loadMode === "discoverable",
 			source: tool.mcpServerName ? { kind: "mcp", server_name: tool.mcpServerName } : { kind: "harness" },

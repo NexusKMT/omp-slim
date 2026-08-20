@@ -49,6 +49,16 @@ describe("resolveCodeMode", () => {
 	test("non-codex provider: inactive even when on", () => {
 		expect(resolveCodeMode({ provider: "anthropic", setting: "on", enabledToolNames: ENABLED }).active).toBe(false);
 	});
+	test("inactive when eval is unavailable", () => {
+		expect(
+			resolveCodeMode({
+				provider: "openai-codex",
+				toolMode: "code_mode_only",
+				setting: "auto",
+				enabledToolNames: ["read", "bash"],
+			}).active,
+		).toBe(false);
+	});
 	test("extra direct tools honored only when enabled", () => {
 		const r = resolveCodeMode({
 			provider: "openai-codex",
@@ -99,6 +109,21 @@ describe("buildToolNamespacesInfo", () => {
 		});
 		expect(info.functions.functions.browser.deferred).toBe(true);
 		expect(info.functions.functions.mcp__gmail__search.source).toEqual({ kind: "mcp", server_name: "gmail" });
+	});
+	test("direct tools use wire names while retaining bridge names", () => {
+		const info = buildToolNamespacesInfo({
+			tools: [{ name: "edit", customWireName: "apply_patch" }],
+			directToolNames: new Set(["edit"]),
+		});
+
+		expect(info.functions.functions.apply_patch).toEqual({
+			name: "apply_patch",
+			direct: true,
+			code_mode_name: "edit",
+			deferred: false,
+			source: { kind: "harness" },
+		});
+		expect(info.functions.functions.edit).toBeUndefined();
 	});
 });
 

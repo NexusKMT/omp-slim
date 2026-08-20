@@ -71,7 +71,7 @@ test("EvalTool advertises only tools authorized for its bridge", () => {
 			["read", read],
 			["write", write],
 		]),
-		getEvalBridgeToolNames: () => ["read"],
+		getEvalBridgeToolNames: () => ["eval", "read"],
 	} as unknown as ToolSession;
 
 	const description = new EvalTool(session).description;
@@ -88,7 +88,7 @@ test("EvalTool description renders the Code Mode guidance and declarations block
 		getSessionFile: () => null,
 		getActiveModel: () => ({ provider: "openai-codex" }),
 		toolRegistry: new Map([["read", read]]),
-		getEvalBridgeToolNames: () => ["read"],
+		getEvalBridgeToolNames: () => ["eval", "read"],
 	};
 	const active = new EvalTool({
 		...baseSession,
