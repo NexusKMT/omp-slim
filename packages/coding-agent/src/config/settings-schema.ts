@@ -3652,6 +3652,22 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"eval.autoBackground.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "shell",
+			group: "Eval & Runtimes",
+			label: "Eval Auto-Background",
+			description: "Automatically background long-running eval cells and deliver the result later",
+		},
+	},
+
+	"eval.autoBackground.thresholdMs": {
+		type: "number",
+		default: 60_000,
+	},
+
 	// Runtime knobs (consumed by eval backends and the /python slash command)
 	"python.kernelMode": {
 		type: "enum",

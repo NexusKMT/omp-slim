@@ -155,6 +155,8 @@ const RPC_BACKGROUND_DEFAULTED_SETTING_PATHS: SettingPath[] = [
 	"async.maxJobs",
 	"bash.autoBackground.enabled",
 	"bash.autoBackground.thresholdMs",
+	"eval.autoBackground.enabled",
+	"eval.autoBackground.thresholdMs",
 ];
 
 // Protocol-mode hosts opt into a small set of paths whose host-default we
