@@ -287,4 +287,53 @@ describe("async speculative compaction", () => {
 
 		expect(maintenance.speculationState).toBe("idle");
 	});
+
+	it("defers a threshold pass that jumped past the band, then commits the armed result for free", async () => {
+		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => ({
+			summary: "grace summary",
+			firstKeptEntryId: preparation.firstKeptEntryId,
+			tokensBefore: preparation.tokensBefore,
+			details: {},
+		}));
+
+		// One large turn skipped the pre-threshold band entirely: deferral must
+		// start the speculation itself and keep the pass non-blocking.
+		expect(maintenance.deferThresholdCompactionToSpeculation(THRESHOLD + 1_000, CONTEXT_WINDOW)).toBe(true);
+		expect(maintenance.speculationState).toBe("running");
+		// While the run is in flight, later boundaries inside the band keep deferring.
+		expect(maintenance.deferThresholdCompactionToSpeculation(THRESHOLD + 1_500, CONTEXT_WINDOW)).toBe(true);
+		await waitForState("armed");
+
+		// Armed: deferral ends so the real pass splices the result in immediately.
+		expect(maintenance.deferThresholdCompactionToSpeculation(THRESHOLD + 2_000, CONTEXT_WINDOW)).toBe(false);
+		await maintenance.runAutoCompaction("threshold", false, false, false, {
+			triggerContextTokens: THRESHOLD + 2_000,
+		});
+
+		const entry = sessionManager.getEntries().findLast(item => item.type === "compaction");
+		expect(entry?.type === "compaction" ? entry.summary : undefined).toBe("grace summary");
+		expect(compactSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it("stops deferring at the grace cap so the blocking pass reclaims context", () => {
+		const compactSpy = vi.spyOn(compactionModule, "compact");
+
+		// Lead floor (8192) bounds the band for a 50K threshold: at the cap the
+		// blocking pass must own the recovery again.
+		const graceCap = THRESHOLD + 8_192;
+		expect(maintenance.deferThresholdCompactionToSpeculation(graceCap, CONTEXT_WINDOW)).toBe(false);
+		expect(maintenance.speculationState).toBe("idle");
+		expect(compactSpy).not.toHaveBeenCalled();
+	});
+
+	it("never defers when async compaction is disabled or a local method leads", () => {
+		maintenance = createMaintenance({ asyncEnabled: false });
+		expect(maintenance.deferThresholdCompactionToSpeculation(THRESHOLD + 1, CONTEXT_WINDOW)).toBe(false);
+		expect(maintenance.speculationState).toBe("idle");
+
+		// Snapcompact is local and effectively instant — blocking on it is fine.
+		maintenance = createMaintenance({ methodOrder: ["snapcompact", "soft"] });
+		expect(maintenance.deferThresholdCompactionToSpeculation(THRESHOLD + 1, CONTEXT_WINDOW)).toBe(false);
+		expect(maintenance.speculationState).toBe("idle");
+	});
 });

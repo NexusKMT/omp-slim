@@ -1144,6 +1144,11 @@ export class SessionMaintenance {
 		if (!model) return;
 		const method = resolveSpeculationMethod(model, settings);
 		if (!method) return;
+		this.#startSpeculationRun(contextTokens, method);
+	}
+
+	/** Install and launch one background speculation run for `method`. */
+	#startSpeculationRun(contextTokens: number, method: "remote" | "handoff" | "soft"): void {
 		const controller = new AbortController();
 		const run: SpeculationRun = { controller, promise: Promise.resolve(), contextTokensAtStart: contextTokens };
 		this.#speculation = run;
@@ -1154,6 +1159,49 @@ export class SessionMaintenance {
 			});
 			if (this.#speculation === run) this.#speculation = undefined;
 		});
+	}
+
+	/**
+	 * Grace band above the compaction threshold: when a single turn jumps past
+	 * the threshold before the background speculation armed (or even started),
+	 * the threshold pass keeps serving the user instead of blocking on a
+	 * synchronous summarization — the speculation finishes in the background
+	 * and the next maintenance boundary splices it in for free. Returns true
+	 * while deferral is in effect (a run was live, or one was started here);
+	 * the caller MUST skip its blocking compaction then.
+	 *
+	 * Deferral ends — and the blocking pass resumes — once context grows past
+	 * `threshold + lead`, clamped to keep {@link SPECULATION_LEAD_MIN_TOKENS}
+	 * of headroom below the window. A provider overflow inside the band is
+	 * recovered by the existing overflow path (compact + retry). Never defers
+	 * for local-first method orders (shake/snapcompact are instant), when
+	 * async compaction is disabled, or when a `session_before_compact`
+	 * extension must keep exact blocking semantics.
+	 */
+	deferThresholdCompactionToSpeculation(contextTokens: number, contextWindow: number): boolean {
+		if (contextWindow <= 0 || this.#host.isDisposed()) return false;
+		const settings = this.#host.settings.getGroup("compaction");
+		if (!settings.enabled || settings.asyncEnabled === false || !hasConfiguredCompactionMethod(settings))
+			return false;
+		if (this.isCompacting || this.#host.isGeneratingHandoff()) return false;
+		if (this.#host.extensionRunner?.hasHandlers("session_before_compact")) return false;
+		const model = this.#model;
+		if (!model) return false;
+		const method = resolveSpeculationMethod(model, settings);
+		if (!method) return false;
+		const thresholdTokens = resolveThresholdTokens(contextWindow, settings);
+		const graceCapTokens = Math.min(
+			thresholdTokens + resolveSpeculationLeadTokens(thresholdTokens),
+			contextWindow - SPECULATION_LEAD_MIN_TOKENS,
+		);
+		if (contextTokens >= graceCapTokens) return false;
+		const run = this.#speculation;
+		if (run) {
+			if (run.armed) return false; // ready — the real pass splices it in now
+			return true; // still summarizing in the background
+		}
+		this.#startSpeculationRun(contextTokens, method);
+		return true;
 	}
 
 	/** Produce and arm one speculative compaction result off a branch snapshot. */
@@ -1425,6 +1473,16 @@ export class SessionMaintenance {
 			// pre-prompt retry useful; the new agent loop may warn for its own turn.
 			return;
 		}
+		// Grace band: a live (or just-started) background speculation absorbs the
+		// blocking summarization; the user's prompt goes out immediately and the
+		// armed result is spliced in at the next boundary.
+		if (this.deferThresholdCompactionToSpeculation(contextTokens, contextWindow)) {
+			logger.debug("Pre-prompt threshold deferred to speculative compaction", {
+				contextTokens,
+				contextWindow,
+			});
+			return;
+		}
 
 		// Auto-promote first: switching to a larger-context model avoids compacting
 		// the history at all. The post-turn threshold path already promotes before
@@ -1502,6 +1560,16 @@ export class SessionMaintenance {
 		const contextTokens = compactionContextTokens(billedContextTokens, storedContextTokens);
 		if (!shouldCompact(contextTokens, contextWindow, compactionSettings)) {
 			this.maybeStartSpeculativeCompaction(contextTokens, contextWindow);
+			return;
+		}
+		// Grace band: keep the tool loop moving while a background speculation
+		// (live or started here) produces the summary; checked before the
+		// persistence barrier so deferred boundaries never await the journal.
+		if (this.deferThresholdCompactionToSpeculation(contextTokens, contextWindow)) {
+			logger.debug("Mid-run threshold deferred to speculative compaction", {
+				contextTokens,
+				contextWindow,
+			});
 			return;
 		}
 
@@ -1794,6 +1862,17 @@ export class SessionMaintenance {
 			contextPromotionEnabled: this.#host.settings.get("contextPromotion.enabled") === true,
 		});
 		if (shouldThresholdCompact) {
+			// Grace band: a live (or just-started) background speculation absorbs
+			// the blocking summarization; the session stays responsive and the
+			// armed result lands at the next boundary. Deferral delays promotion
+			// by at most the band — the eventual real pass still promotes first.
+			if (this.deferThresholdCompactionToSpeculation(postMaintenanceContextTokens, contextWindow)) {
+				logger.debug("Post-turn threshold deferred to speculative compaction", {
+					postMaintenanceContextTokens,
+					contextWindow,
+				});
+				return COMPACTION_CHECK_NONE;
+			}
 			// Try promotion first — if a larger model is available, switch instead of compacting
 			const promoted = await this.#tryContextPromotion(assistantMessage);
 			if (!promoted) {
