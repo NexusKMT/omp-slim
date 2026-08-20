@@ -562,6 +562,16 @@ export class ModelRegistry {
 		});
 	}
 
+	#invalidateProviderModelCache(providerName: string): void {
+		const prefix = `${providerName}\u0000`;
+		for (const key of this.#internedStaticModels.keys()) {
+			if (key.startsWith(prefix)) {
+				this.#internedStaticModels.delete(key);
+			}
+		}
+		this.#providerLookupSnapshots.delete(providerName);
+	}
+
 	/**
 	 * Re-apply the credential-aware projections registered by extension providers.
 	 *
@@ -2091,7 +2101,7 @@ export class ModelRegistry {
 				this.#runtimeModelModifiers.delete(providerName);
 			}
 			this.#models = this.#applyRuntimeModelModifiers(this.#unprojectedModels);
-			this.#providerLookupSnapshots.clear();
+			this.#invalidateProviderModelCache(providerName);
 			return;
 		}
 
@@ -2167,7 +2177,7 @@ export class ModelRegistry {
 				}),
 			);
 			this.#models = this.#applyRuntimeModelModifiers(this.#unprojectedModels);
-			this.#providerLookupSnapshots.clear();
+			this.#invalidateProviderModelCache(providerName);
 		}
 	}
 

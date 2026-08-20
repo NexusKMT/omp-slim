@@ -1117,6 +1117,8 @@ export class SessionMaintenance {
 	 * (remote/handoff/soft) are speculated — shake and snapcompact are local
 	 * and effectively instant. Never rewrites history itself; stale results are
 	 * discarded by apply-time branch validation in {@link #claimArmedSpeculation}.
+	 * A turn that jumps past the threshold before a run armed is handled by
+	 * {@link deferThresholdCompactionToSpeculation}'s grace band instead.
 	 */
 	maybeStartSpeculativeCompaction(contextTokens: number, contextWindow: number): void {
 		if (contextWindow <= 0 || this.#host.isDisposed()) return;

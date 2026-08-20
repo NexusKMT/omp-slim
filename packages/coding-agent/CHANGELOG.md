@@ -20,6 +20,7 @@
 
 ### Changed
 
+- Typing anywhere in the /models UI now immediately focuses the model list for instant search and arrow navigation.
 - Revamped the todo HUD — overall progress renders along the tree-spine connector with smooth completion transitions.
 - Compaction divider now names the maintenance method that fired (`remote-compacted`, `soft-compacted`, `handed-off`, `snap-compacted`) and shows the before → after context size (e.g. `256K→20K`).
 - `/handoff` (and automatic handoff compaction) now compacts in place, replacing the session context instead of forking a new session.
@@ -30,6 +31,7 @@
 
 ### Fixed
 
+- `/models` keeps `auto` thinking on non-default roles such as `task` instead of changing the active model and displaying the role as `max`.
 - Subagent `yield` structured results no longer get corrupted by lossy argument repairs; prompt guidance improved for weak callers.
 - GitHub `file_read` returns proper image blocks and direct view URLs for image/binary files.
 - Cancelled prompts during pre-stream turn setup restore the text and image attachments to the editor.
