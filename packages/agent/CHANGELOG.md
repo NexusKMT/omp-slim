@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed Codex remote compaction requests failing for region-pinned enterprise ChatGPT workspaces when the request egresses from another region.
+- Fixed Codex remote compaction requests failing for region-pinned enterprise ChatGPT workspaces when requests egress from a different region.
 
 ## [17.4.0] - 2026-08-20
 

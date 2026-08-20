@@ -5019,10 +5019,7 @@ function mergeLiteLLMRichEndpointModels<TApi extends Api>(
 		name: next.model.name === next.model.id ? existing.model.name : next.model.name,
 		contextWindow: next.hasContextWindow ? next.model.contextWindow : existing.model.contextWindow,
 		maxTokens: next.hasMaxTokens ? next.model.maxTokens : existing.model.maxTokens,
-		input:
-			next.supportsVision === true || next.supportsVision === false
-				? next.model.input
-				: existing.model.input,
+		input: next.supportsVision === true || next.supportsVision === false ? next.model.input : existing.model.input,
 		reasoning: typeof next.supportsReasoning === "boolean" ? next.model.reasoning : existing.model.reasoning,
 		cost: next.hasCost ? next.model.cost : existing.model.cost,
 		compat: next.hasSupportedOpenAIParams ? next.model.compat : existing.model.compat,
@@ -5103,9 +5100,7 @@ async function fetchLiteLLMRichEndpoint<TApi extends Api>(
 	const models = Array.from(deduped.values()).sort((left, right) => left.model.id.localeCompare(right.model.id));
 	return {
 		models,
-		incompleteVisionMetadata: models.some(
-			entry => entry.supportsVision !== true && entry.supportsVision !== false,
-		),
+		incompleteVisionMetadata: models.some(entry => entry.supportsVision !== true && entry.supportsVision !== false),
 	};
 }
 

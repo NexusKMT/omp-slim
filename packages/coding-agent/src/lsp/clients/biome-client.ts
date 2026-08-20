@@ -131,7 +131,12 @@ export class BiomeClient implements LinterClient {
 
 	async lint(filePath: string, signal?: AbortSignal): Promise<Diagnostic[]> {
 		// Run biome lint with JSON reporter
-		const result = await runBiome(["lint", "--reporter=json", filePath], this.cwd, this.config.resolvedCommand, signal);
+		const result = await runBiome(
+			["lint", "--reporter=json", filePath],
+			this.cwd,
+			this.config.resolvedCommand,
+			signal,
+		);
 
 		// Biome exits non-zero when diagnostics are found, so only an empty
 		// stdout signals an actual run failure (missing binary, CLI error).

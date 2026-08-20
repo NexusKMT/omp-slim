@@ -2,18 +2,25 @@
 
 ## [Unreleased]
 
-### Changed
-
-- Codex model discovery now preserves the API's advertised `tool_mode` (e.g. `code_mode_only` for GPT-5.6 Code Mode models) on catalog models and types, so downstream consumers can route those models through a programmatic tool surface ([#9069](https://github.com/can1357/oh-my-pi/pull/9069) by [@MilesCranmerBot](https://github.com/MilesCranmerBot)).
 ### Added
 
-- `getCodexResidency` reads an enterprise ChatGPT workspace's pinned data-residency region from a Codex OAuth access token, `OPENAI_HEADERS.RESIDENCY` names the header that declares it to the Codex backend, and `applyCodexResidencyHeader` adds it without replacing configured headers.
+- Added helper functions and constants for reading enterprise ChatGPT workspace data-residency regions from Codex OAuth access tokens and forwarding the residency header to Codex backend endpoints.
+
+### Changed
+
+- Preserved API-advertised `tool_mode` metadata (such as `code_mode_only` for GPT-5.6 Code Mode models) on Codex catalog models and types ([#9069](https://github.com/can1357/oh-my-pi/pull/9069)).
+- Added an optional `tokenizer` family field across bundled, discovered, and custom catalog models (`claude-v3`/`v47`/`v5`, Qwen 3.5+, DeepSeek V3/V4/R1, Kimi K2/K3, and GLM-5+), which can also be explicitly overridden in model configuration.
+- Updated subscription Codex GPT-5.6 Sol, Terra, and Luna models to include first-party `cost.longContext` pricing tiers for token inputs exceeding 272K tokens.
+
 ### Fixed
 
-- Fixed Vercel AI Gateway Muse Spark 1.2 Contributor requests failing with HTTP 400 by capping the advertised output allowance to the model's 131K output limit.
-### Fixed
-
-- LiteLLM-discovered OpenAI models now use the Responses API, so reasoning summaries appear in thinking blocks while other model groups remain on Chat Completions ([#9085](https://github.com/can1357/oh-my-pi/pull/9085) by [@jbkkd](https://github.com/jbkkd)).
+- Fixed Vercel AI Gateway Muse Spark 1.2 Contributor requests failing with HTTP 400 errors by capping advertised output allowances to the model's 131K limit.
+- Fixed LiteLLM model discovery to route OpenAI models through the Responses API for reasoning summaries in thinking blocks ([#9085](https://github.com/can1357/oh-my-pi/pull/9085)).
+- Fixed OpenCode Console Go and Zen Responses providers rejecting forced tool choices by automatically downgrading forced or named tool selections to `auto`.
+- Fixed OpenCode Go Muse Spark 1.2 and Muse Spark 1.2 Contributor models failing during tool calls or missing reasoning effort levels, ensuring they correctly route to the Responses API with full thinking, context, and multimodal support ([#8957](https://github.com/can1357/oh-my-pi/issues/8957)).
+- Improved OpenCode gateway model discovery to automatically infer the Responses API route for unlisted models from sibling gateways and billing base variants.
+- Fixed Cursor GPT-5.6 (Luna, Sol, and Terra) model discovery creating duplicate rows for each thinking tier by collapsing tiers into unified models with configurable reasoning effort ([#9025](https://github.com/can1357/oh-my-pi/issues/9025)).
+- Fixed Google Gemini CLI model discovery failing with `403 PERMISSION_DENIED` by directing catalog refresh requests to the appropriate Antigravity discovery endpoints ([#8885](https://github.com/can1357/oh-my-pi/issues/8885)).
 
 ## [17.4.0] - 2026-08-20
 
@@ -25,19 +32,10 @@
 ### Changed
 
 - Bundled model metadata is prebuilt during generation, reducing catalog startup work.
-- Models now materialize an optional `tokenizer` family in the catalog (`claude-v3`/`v47`/`v5`, Qwen 3.5+, DeepSeek V3/V4/R1, Kimi K2/K3, and GLM-5+). The field follows `requestModelId`, applies to bundled, discovered, and custom models, and can be explicitly overridden in model configuration.
-- Subscription Codex GPT-5.6 Sol/Terra/Luna now carry the same `cost.longContext` tier as their first-party API siblings (2x input / 1.5x output above 272K input tokens, [openai/codex#32486](https://github.com/openai/codex/issues/32486)), so cost attribution reflects the higher rating above the threshold and downstream consumers can locate the standard-pricing boundary.
 
 ### Fixed
 
 - Fixed tool-call turn failures for `opencode-go/muse-spark-1.2` and related variants by ensuring API transport pins apply to live discovery and automatically inferring response routes for gateway-first OpenCode models ([#8957](https://github.com/can1357/oh-my-pi/issues/8957)).
-- Fixed OpenCode Console Go and Zen Responses (`opencode-go` / `opencode-zen`) rejecting forced `tool_choice` (including External Thinking's named `think`) with HTTP 400 `param=tool_choice`. `buildOpenAIResponsesCompat` now sets `supportsForcedToolChoice` false for those providers so the request mapper downgrades forced/named choices to `auto`.
-- Fixed `opencode-go/muse-spark-1.2` and `muse-spark-1.2-contributor` still failing every tool-call turn with `OpenAI completions stream closed before a finish_reason was received` on 17.3.8. The earlier pin only covered the models.dev resolver, but models.dev omits these ids under `opencode-go` entirely, so live `/zen/go/v1/models` discovery had no bundled reference and defaulted them to chat completions. The per-id API pins now also apply inside the discovery mapper, and pinned ids invalidate cached routes written before the pin ([#8957](https://github.com/can1357/oh-my-pi/issues/8957)).
-- Future gateway-first OpenCode models (ids the gateway serves before models.dev lists them, like muse-spark-1.2 was) no longer default to chat completions blindly: discovery now borrows the `openai-responses` route from the sibling gateway's catalog or the billing-variant base id (`-free`/`-contributor`). Only the responses signal is borrowed — anthropic transports genuinely diverge across the gateways (e.g. `minimax-m2.5`) and are never inferred.
-- Fixed Cursor GPT-5.6 (Luna/Sol/Terra) discovery exploding into ~36 rows in `/models`: `GetUsableModels` serves each thinking tier (`gpt-5.6-luna-none|low|medium|high|xhigh|max`) and its `-fast` service-tier lane as its own id, but the Cursor variant-collapse table only covered the Grok families. The table now folds each family into one logical model per lane (`gpt-5.6-luna`, `gpt-5.6-luna-fast`, …) with effort routing onto the live wire ids, so thinking works like every other provider; the `-fast` lane and 1M/Max Mode SKUs stay separate rows ([#9025](https://github.com/can1357/oh-my-pi/issues/9025)).
-### Fixed
-
-- Fixed `opencode-go/muse-spark-1.2` and `muse-spark-1.2-contributor` exposing no thinking levels. Live `/zen/go/v1/models` discovery returns bare ids with no capability metadata, and neither id has a bundled `opencode-go` row, so discovery fell back to generic defaults (`reasoning: false` on chat completions) and the effort picker stayed empty. Both ids now resolve to the Responses route with the documented Muse Spark surface (thinking-off plus `minimal`/`low`/`medium`/`high`/`xhigh`, 1M context, 131K max output, and image input), and the OpenCode model-cache namespace is bumped so rows already cached as non-reasoning are refetched.
 
 ## [17.3.8] - 2026-08-19
 
@@ -49,7 +47,6 @@
 ### Fixed
 
 - Fixed a physically corrupt `models.db` (`SQLITE_CORRUPT*` / `SQLITE_NOTADB`, "database disk image is malformed") permanently disabling the model cache. The shared read/write paths swallowed unrecoverable SQLite corruption as a best-effort miss and cached the broken handle, so a successful live catalog could never overwrite the corrupt cache and every later process repeated the miss — a runtime provider extension with no bundled catalog was left with only its bootstrap model. Corruption now self-heals: the cache closes the handle, quarantines `models.db`(+`-wal`/`-shm`) aside, recreates a fresh database, and retries the operation once; `SQLITE_BUSY`, permission, and unrelated errors keep their existing best-effort paths ([#8867](https://github.com/can1357/oh-my-pi/issues/8867)).
-- Fixed `google-gemini-cli` model refresh posting Antigravity's `fetchAvailableModels` request to the inference-only `cloudcode-pa.googleapis.com` endpoint, which returned `403 PERMISSION_DENIED` and prevented newly available Gemini models from being discovered. Discovery now uses Antigravity's daily endpoints, keeps inference on `cloudcode-pa`, and excludes Antigravity-only model families ([#8885](https://github.com/can1357/oh-my-pi/issues/8885)).
 - Fixed local Qwen 3.8+ models (llama.cpp, vLLM, loopback custom providers) exposing the generic `minimal..high` thinking ladder instead of the chat template's real `low`/`medium`/`xhigh` `reasoning_effort` tiers. The derived metadata now marks thinking as mandatory (the official 3.8 template raises on `enable_thinking: false`), vLLM-served Qwen routes through the `chat_template_kwargs` dialect (top-level `enable_thinking` is ignored by vLLM), and vLLM discovery lights up the reasoning dial for Qwen 3.8+ ids its `/v1/models` endpoint reports as non-reasoning.
 - Fixed `deepseek-v4-pro-0813` surfacing from Alibaba Token Plan discovery with `contextWindow`/`maxTokens` of `null`. The dated DeepSeek V4 Pro snapshot was missing from `ALIBABA_TOKEN_PLAN_DISCOVERED_MODEL_LIMITS`, so unlike its `deepseek-v4-flash-0731` sibling it fell through to unknown limits ([#8847](https://github.com/can1357/oh-my-pi/issues/8847)).
 - Cloud Code Assist Gemini 3.6/3.7 Flash no longer maps user `minimal` to wire `thinkingLevel: MINIMAL` when that effort is aliased onto the `-low` SKU. The request now sends `LOW`, which those SKUs accept.

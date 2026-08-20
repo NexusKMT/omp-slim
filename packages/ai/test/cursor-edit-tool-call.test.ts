@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test";
-import { create } from "@oh-my-pi/pi-catalog/discovery/protobuf";
 import {
 	type BlockState,
 	flushOpenToolCalls,
@@ -14,7 +13,6 @@ import type {
 	ToolResultMessage,
 } from "@oh-my-pi/pi-ai/types";
 import { kCursorExecResolved, kStreamingBlockKind } from "@oh-my-pi/pi-ai/utils/block-symbols";
-
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import {
 	AgentServerMessageSchema,
@@ -26,6 +24,7 @@ import {
 	ToolCallSchema,
 	WriteArgsSchema,
 } from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
+import { create } from "@oh-my-pi/pi-catalog/discovery/protobuf";
 
 const EDIT_ID = "tool_7aef3020-f275-4579-887c-34106e146f7";
 const ENVELOPE_ID = "call-edit-1";

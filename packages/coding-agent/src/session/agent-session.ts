@@ -5935,6 +5935,8 @@ export class AgentSession {
 			cwd: this.sessionManager.getCwd(),
 			sessionManager: this.sessionManager,
 			modelRegistry: this.#modelRegistry,
+			isProjectTrusted: () => true,
+
 			model: this.model ?? undefined,
 			models: createExtensionModelQuery(this.#modelRegistry, this.settings, () => this.model ?? undefined),
 			isIdle: () => !this.isStreaming,

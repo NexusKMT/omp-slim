@@ -572,10 +572,7 @@ describe("withOAuthAccess", () => {
 	it("honors a token-refresh request after an earlier 401 refresh", async () => {
 		const attempts: string[] = [];
 		const calls: Array<{ forceRefresh: boolean | undefined } | "rotate"> = [];
-		const forced = [
-			access("fresh-but-expired", { credentialId: 7 }),
-			access("renewed", { credentialId: 7 }),
-		];
+		const forced = [access("fresh-but-expired", { credentialId: 7 }), access("renewed", { credentialId: 7 })];
 		const storage: OAuthAccessSource = {
 			async getOAuthAccess(_provider, _sessionId, options) {
 				calls.push({ forceRefresh: options?.forceRefresh });
@@ -601,11 +598,7 @@ describe("withOAuthAccess", () => {
 
 		expect(result).toBe("ok");
 		expect(attempts).toEqual(["stale", "fresh-but-expired", "renewed"]);
-		expect(calls).toEqual([
-			{ forceRefresh: undefined },
-			{ forceRefresh: true },
-			{ forceRefresh: true },
-		]);
+		expect(calls).toEqual([{ forceRefresh: undefined }, { forceRefresh: true }, { forceRefresh: true }]);
 	});
 
 	it("tries a refreshed bearer for the same credential id on 401 before rotating", async () => {

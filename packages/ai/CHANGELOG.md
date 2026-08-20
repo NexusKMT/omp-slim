@@ -2,36 +2,35 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Fixed Antigravity OAuth login to mirror native project discovery and free-tier onboarding against the daily Cloud Code Assist endpoint.
 ### Added
 
-- Added Codex Responses support for Code Mode ([#9050](https://github.com/can1357/oh-my-pi/issues/9050)): the client preserves the model's advertised `tool_mode` through Codex Responses requests and emits the `tool_namespaces_info` turn metadata snapshot when the session restricts its direct tool surface. The snapshot rides the request body's `client_metadata` envelope only — the `x-codex-turn-metadata` header keeps the fixed-size identity projection, since the Codex backend caps HTTP headers at 100KB and a large tool surface serializes past that on its own ([#9069](https://github.com/can1357/oh-my-pi/pull/9069) by [@MilesCranmerBot](https://github.com/MilesCranmerBot)).
-- Fixed OpenAI Codex requests failing with HTTP 401 `Workspace is not authorized in this region.` on enterprise ChatGPT workspaces pinned to a data-residency region whenever the request egressed from a different region (VPN, proxy, or a relocated machine). Codex requests now declare the workspace residency carried by the OAuth access token (`chatgpt_data_residency`, falling back to `chatgpt_compute_residency`) via `x-openai-internal-codex-residency` on both the SSE and WebSocket transports. Accounts without the claim, and opaque non-JWT keys used by Codex-compatible proxies, are unaffected; a caller-supplied header of the same name still wins.
-- Fixed concurrent xAI OAuth refreshes revoking shared grants or repeatedly retrying dead refresh tokens when multiple processes use the same credential database.
-- Fixed Bedrock Converse resending unsigned reasoning content on the request path, which made Amazon Nova reject every turn after the first with `User messages cannot contain reasoning content` and wedge the agent loop. Thinking blocks without a captured signature are now demoted to plain text on replay, matching the other providers.
-- Fixed multi-turn Bedrock conversations failing when Nova or another model returns unsigned reasoning content.
+- Added Codex Responses support for Code Mode, preserving tool modes and passing tool namespace metadata during sessions.
+
+### Fixed
+
+- Fixed OpenAI Codex requests failing with HTTP 401 data residency errors on enterprise ChatGPT workspaces when connecting from a different region via VPN or proxy.
+- Fixed concurrent xAI OAuth token refreshes revoking shared credentials across multiple processes.
+- Fixed Amazon Bedrock Converse multi-turn conversations failing on models like Amazon Nova due to unsigned reasoning content in replayed turns.
+- Fixed Antigravity OAuth login handling for project discovery and free-tier onboarding against Cloud Code Assist endpoints.
+- Fixed provider-detected OAuth access token expiration terminating active turns instead of automatically refreshing credentials and replaying the request.
+- Fixed compatibility issues with OpenAI-compatible servers (such as NInfer and vLLM) rejecting `reasoning_effort` inside `chat_template_kwargs`.
+- Fixed Google Cloud Code Assist and Antigravity rejecting MCP tool schemas with unsupported annotations (`x-mcp-header`, `deprecated`, `readOnly`, `writeOnly`, `$comment`).
+- Fixed Cursor provider issues with native file edit streaming (`editToolCall`) and ensuring always-apply system rules are properly preserved.
+- Fixed Cursor HTTP/2 requests ignoring standard proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`).
 
 ## [17.4.0] - 2026-08-20
 
 ### Added
 
 - Added model metadata fields (`context_length`, `max_output_tokens`, `input_modalities`, etc.) to auth gateway model listing responses
+
 ### Fixed
 
 - Fixed tool-argument repair applying lossy transformations (such as stringifying objects or stripping unrecognized keys) when validating union schemas (`anyOf`/`oneOf`), preventing corrupted tool call and subagent payloads
 - Fixed 400 errors when communicating with local OpenAI-compatible inference servers that reject `chat_template_kwargs.reasoning_effort` by improving reasoning effort parameter fallback and compatibility handling
 - Fixed DeepSeek-family models on hosts like Fireworks losing reasoning whenever tools were offered: a redundant `tool_choice: "auto"` is now omitted so the provider keeps thinking enabled; forced and `"none"` selectors still take priority ([#1207](https://github.com/can1357/oh-my-pi/issues/1207))
-- Fixed provider-detected OAuth access-token expiry ending an otherwise healthy turn instead of asking `AuthStorage` to refresh the credential and replay the request once.
-
-- Fixed local OpenAI-compatible servers with strict `chat_template_kwargs` whitelists (e.g. NInfer) failing every Qwen 3.8+ turn with `400 chat_template_kwargs.reasoning_effort is not supported` after the effort routing fix: the reasoning-effort fallback now recognizes a rejection of the kwargs spelling itself, retries with the kwarg stripped while keeping the effort on the standard top-level `reasoning_effort` field (hoisting it there for the kwargs-only vLLM dialect), and remembers the shape for the rest of the session. Value-level rejections and drops now also update the `chat_template_kwargs.reasoning_effort` twin instead of leaving a stale effort for kwargs-reading renderers, and unknown-parameter 400s naming `reasoning_effort` are recognized as effort rejections.
-- Fixed Google Cloud Code Assist / Antigravity rejecting MCP tool schemas with `400 Invalid JSON payload received. Unknown name "x-mcp-header"`: the MCP 2026-07-28 `x-mcp-header` transport annotation (which mirrors a parameter into an `Mcp-Param-*` HTTP header) is now stripped from the Google/CCA wire schema by `normalizeSchemaForGoogle` / `normalizeSchemaForCCA`, while remaining available to the MCP transport/execution layer ([#9016](https://github.com/can1357/oh-my-pi/issues/9016)).
-- Fixed Cursor native StrReplace (`editToolCall`) being dropped: the interaction stream now opens a single `edit` block, materialization `readArgs` return raw file bytes instead of hashline-formatted text, and the following `writeArgs` pair onto that block instead of synthesizing a full-file write.
-- Fixed Cursor AgentService discarding OMP always-apply rules because `requestContext.rules` was always sent empty. System-prompt entries are now mapped to global `CursorRule`s so reconstructed model prompts keep them.
 
 ## [17.3.8] - 2026-08-19
-
 
 ### Changed
 
@@ -43,7 +42,6 @@
 
 ### Fixed
 
-- Fixed Cloud Code Assist and Google tool-schema requests failing when MCP parameters use unsupported `deprecated`, `readOnly`, `writeOnly`, or `$comment` annotations ([#8994](https://github.com/can1357/oh-my-pi/pull/8994) by [@daviddatuX25](https://github.com/daviddatuX25)).
 - Fixed thinking effort selections being ignored for local Qwen 3.8+ models on llama.cpp and vLLM: the Qwen chat-completions dialects only toggled `enable_thinking`, so the chat template always reasoned at its `xhigh` default no matter which level was selected. The encoder now routes the requested effort onto the template's `reasoning_effort` kwarg (`chat_template_kwargs` for both Qwen dialects, plus the top-level field newer llama.cpp builds map natively).
 - Fixed OpenAI Completions, Amazon Bedrock, and Cursor providers ignoring `onPayload` replacement payloads. The hook now transforms the actual request body sent upstream on these providers, matching the Anthropic/Gemini/OpenAI Responses replacement contract. `devin-agent` still does not fire the hook (its payload is a protobuf object).
 - Fixed Codex requests failing outright when the signed-in ChatGPT account is not entitled to the requested model; the exact model denial is now classified as an account-policy error so credential rotation can reach an entitled sibling account
@@ -54,7 +52,6 @@
 - Fixed opencode-go (Console Go) rejecting Responses turns with `400 No tool output found for tool call …` (naming a random call of the batch on each retry) when a model streamed a trailing text/thinking block after its tool calls: `buildResponsesInput` emitted that block as an assistant `message` item wedged between the `function_call` batch and its `function_call_output` items. Such interleaved messages are now hoisted ahead of their call batch (canonical `message(s) → calls → outputs`), which the strict gateway validator accepts; content is unchanged ([#8789](https://github.com/can1357/oh-my-pi/issues/8789)).
 - Fixed the OpenAI-wire transport sleeping on a LiteLLM concurrency-admission 429 (`rate_limit_type: max_parallel_requests`, `Retry-After: 60`) and retrying it up to 6 times (~300s) before session recovery saw the error. Because a 60s hint equals the transport's `maxDelayMs` cap, `fetchWithRetry` kept sleeping and retrying; the request now surfaces on the first attempt so `TurnRecovery`'s concurrency backoff/model fallback runs promptly. Genuine RPM/quota 429s (no such marker) still honor `Retry-After` ([#8854](https://github.com/can1357/oh-my-pi/issues/8854)).
 - Fixed OAuth login (Codex `localhost:1455`, and any `localhost` callback flow) failing on hosts with IPv6 disabled at the kernel (`ipv6.disable=1`). The `::1` companion listener added in #8081 fails there with Bun's generic "Is port X in use?" message (oven-sh/bun#7187), which the in-use check misread as a real collision — tearing down the healthy IPv4 listener and surfacing a bogus "port 1455 is in use" error. The dual-bind path now detects the missing IPv6 loopback up front and serves IPv4 alone ([#8814](https://github.com/can1357/oh-my-pi/issues/8814)).
-- Fixed the Cursor HTTP/2 run path ignoring the standard `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` environment variables — it only read `PI_PROXY`/`PI_PROXY_CURSOR`, so on networks where reaching `api2.cursor.sh` requires a proxy (e.g. region-restricted egress that blocks US-provider models) runs connected direct and failed with a bare `resource_exhausted` while native Cursor models still worked. The run now resolves the proxy through `getProxyForUrl`, matching the Codex transport and honoring `NO_PROXY` ([#8894](https://github.com/can1357/oh-my-pi/issues/8894)).
 
 ## [17.3.7] - 2026-08-17
 

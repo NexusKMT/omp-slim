@@ -24,15 +24,12 @@ const MIN_CONTRAST = 2.4;
 describe("code fence border contrast (#6334)", () => {
 	for (const name of AFFECTED_THEMES) {
 		test(`${name}: mdCodeBlockBorder is legible against the theme page background`, async () => {
-			const [theme, themeJson] = await Promise.all([
-				loadTheme(name, { mode: "truecolor" }),
-				loadThemeJson(name),
-			]);
+			const [theme, themeJson] = await Promise.all([loadTheme(name, { mode: "truecolor" }), loadThemeJson(name)]);
 			const border = theme.getColorHex("mdCodeBlockBorder");
 			const pageBgToken = themeJson.export?.pageBg;
 			expect(pageBgToken).toBeDefined();
 			if (pageBgToken === undefined) throw new Error(`${name} does not define export.pageBg`);
-			const pageBg = resolveVarRefs(pageBgToken, themeJson.vars);
+			const pageBg = resolveVarRefs(pageBgToken, themeJson.vars ?? {});
 			expect(typeof pageBg).toBe("string");
 			if (typeof pageBg !== "string") throw new Error(`${name} export.pageBg is not an RGB color`);
 
@@ -44,8 +41,7 @@ describe("code fence border contrast (#6334)", () => {
 				throw new Error(`${name} has an invalid code-fence border or page background color`);
 			}
 			const ratio =
-				(Math.max(borderLuminance, pageBgLuminance) + 0.05) /
-				(Math.min(borderLuminance, pageBgLuminance) + 0.05);
+				(Math.max(borderLuminance, pageBgLuminance) + 0.05) / (Math.min(borderLuminance, pageBgLuminance) + 0.05);
 			expect(ratio).toBeGreaterThanOrEqual(MIN_CONTRAST);
 		});
 	}

@@ -472,7 +472,6 @@ describe("openai-completions wire-quirk compat detection", () => {
 		).toBe(true);
 	});
 
-
 	it("requires a synthetic assistant bridge after tool results only for Mistral hosts", () => {
 		// Mistral/Devstral reject a user message directly after a tool result; the chat
 		// builder bridges it with a synthetic assistant turn, keyed on the Mistral host.
