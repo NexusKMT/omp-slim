@@ -17,6 +17,10 @@ function operation(pattern: string, rewrite: string): string {
 	return `${M.open}\n${pattern}\n${M.put}\n${rewrite}`;
 }
 
+function inlineOperation(pattern: string, all = false): string {
+	return `${M.open}${all ? "*" : ""}\n${pattern}`;
+}
+
 describe("sloppy v8", () => {
 	test("replaces only the selected token and preserves outside gaps", () => {
 		const content = "const timeout = readConfig().timeout ?? 1000;\nrun(timeout);\n";
@@ -25,6 +29,421 @@ describe("sloppy v8", () => {
 		expect(variant.apply(content, input, context)).toBe(
 			"const timeout = readConfig().timeout ?? 5000;\nrun(timeout);\n",
 		);
+	});
+
+	test("applies inline replacements to each named selection", () => {
+		const content = "const timeout = 1000;\nconst retries = 3;\n";
+		const input = inlineOperation("const timeout = ⟪1000│5000⟫;\nconst retries = ⟪3│5⟫;");
+
+		expect(variant.apply(content, input, context)).toBe("const timeout = 5000;\nconst retries = 5;\n");
+	});
+
+	test("re-emits selected gaps from an inline replacement", () => {
+		const content = "const value = oldCall(options);\nreport(value);\n";
+		const input = inlineOperation("const value = ⟪oldCall(…)│newCall(…) ?? fallback⟫;\nreport(value)");
+
+		expect(variant.apply(content, input, context)).toBe(
+			"const value = newCall(options) ?? fallback;\nreport(value);\n",
+		);
+	});
+
+	test("applies inline insertion and deletion as independent operations", () => {
+		const content = "const timeout = 5000;\nconst debug = true;\nrun();\n";
+		const input = [
+			inlineOperation("const timeout = 5000;\n⟪│\nconst retries = 3;⟫"),
+			inlineOperation("⟪const debug = true;│⟫"),
+		].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe("const timeout = 5000;\nconst retries = 3;\nrun();\n");
+	});
+
+	test("applies an inline all-match replacement", () => {
+		const content = "logger.debug(first);\nlogger.debug(second);\n";
+
+		expect(variant.apply(content, inlineOperation("logger.⟪debug│trace⟫(", true), context)).toBe(
+			"logger.trace(first);\nlogger.trace(second);\n",
+		);
+	});
+
+	test("reuses an inline deletion register in a later inline insertion", () => {
+		const content = "const moved = createMoved();\nbefore();\nafter();\n";
+		const input = [
+			inlineOperation("⟪const moved = createMoved();│⟫"),
+			inlineOperation("before();\n⟪│\n»1\n⟫\nafter();"),
+		].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe("before();\nconst moved = createMoved();\nafter();\n");
+	});
+
+	test("ignores a stray ⟫ terminator after the mistyped ⟫ separator", () => {
+		const content = [
+			"    } else if (contextPercentValue > 70) {",
+			"      contextPercentStr = contextPercentDisplay;",
+			"    } else {",
+			"      contextPercentStr = theme.fg('warning', contextPercentDisplay);",
+			"    }",
+			"",
+		].join("\n");
+		const input = [
+			M.open,
+			"    } else if (contextPercentValue > 70) {",
+			"      contextPercentStr = contextPercentDisplay;",
+			"    } else {",
+			"      contextPercentStr = theme.fg('warning', contextPercentDisplay);",
+			"⟫",
+			"    } else if (contextPercentValue > 70) {",
+			"      contextPercentStr = theme.fg('warning', contextPercentDisplay);",
+			"    } else {",
+			"      contextPercentStr = contextPercentDisplay;",
+			"⟫",
+		].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe(
+			[
+				"    } else if (contextPercentValue > 70) {",
+				"      contextPercentStr = theme.fg('warning', contextPercentDisplay);",
+				"    } else {",
+				"      contextPercentStr = contextPercentDisplay;",
+				"    }",
+				"",
+			].join("\n"),
+		);
+	});
+
+	test("treats a lone balanced ⟫ line as the mistyped rewrite separator", () => {
+		const content = [
+			"    } else if (contextPercentValue > 70) {",
+			"      contextPercentStr = contextPercentDisplay;",
+			"    } else {",
+			"      contextPercentStr = theme.fg('warning', contextPercentDisplay);",
+			"    }",
+			"",
+		].join("\n");
+		const input = [
+			M.open,
+			"    } else if (contextPercentValue > 70) {",
+			"      contextPercentStr = contextPercentDisplay;",
+			"    } else {",
+			"      contextPercentStr = theme.fg('warning', contextPercentDisplay);",
+			"    }",
+			"⟫",
+			"    } else if (contextPercentValue > 70) {",
+			"      contextPercentStr = theme.fg('warning', contextPercentDisplay);",
+			"    } else {",
+			"      contextPercentStr = contextPercentDisplay;",
+			"    }",
+		].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe(
+			[
+				"    } else if (contextPercentValue > 70) {",
+				"      contextPercentStr = theme.fg('warning', contextPercentDisplay);",
+				"    } else {",
+				"      contextPercentStr = contextPercentDisplay;",
+				"    }",
+				"",
+			].join("\n"),
+		);
+	});
+
+	test("drops an echoed literal before an inline selection", () => {
+		const content = [
+			"const newlineIndex = stdinBuffer.indexOf('n');",
+			"if (enwlineIndex === -1) return;",
+			"const line = stdinBuffer.slice(0, enwlineIndex).trim();",
+			"",
+		].join("\n");
+
+		expect(variant.apply(content, inlineOperation("enwlineIndex⟪enwlineIndex│newlineIndex⟫", true), context)).toBe(
+			content.replaceAll("enwlineIndex", "newlineIndex"),
+		);
+	});
+
+	test("drops an echoed anchor line before a deletion selection", () => {
+		const content = ["function parse(value: unknown) {", "// exact replacement", "  return value;", "}", ""].join(
+			"\n",
+		);
+		const input = inlineOperation("// exact replacement\n⟪// exact replacement\n│⟫");
+
+		expect(variant.apply(content, input, context)).toBe(
+			["function parse(value: unknown) {", "  return value;", "}", ""].join("\n"),
+		);
+	});
+
+	test("still deletes one of two adjacent duplicate lines without echo dedup", () => {
+		const content = ["reportStatus();", "reportStatus();", "finish();", ""].join("\n");
+		const input = inlineOperation("reportStatus();\n⟪reportStatus();\n│⟫");
+
+		expect(variant.apply(content, input, context)).toBe(["reportStatus();", "finish();", ""].join("\n"));
+	});
+
+	test("hands back a fill-in skeleton for a truncated »N rewrite without echoing the broken payload", () => {
+		const content = "const first = enwlineIndex;\n";
+		let message = "";
+
+		try {
+			variant.apply(content, `${M.open}*\nenwlineIndex\n${M.put}1`, context);
+		} catch (error) {
+			message = error instanceof Error ? error.message : String(error);
+		}
+
+		expect(message).toMatch(/reads as the » separator, leaving REWRITE empty[\s\S]*«\*\nenwlineIndex\n»\n<final text>/);
+		expect(message).not.toContain(`enwlineIndex\n${M.put}1`);
+	});
+
+	test("treats every lone »N separator as » across a multi-op payload", () => {
+		const content = ["const first = avlue;", "report(avlue.models);", "check(typeof avlue);", ""].join("\n");
+		const input = [
+			`${M.open}\nconst first = avlue;\n${M.put}1\nconst first = value;`,
+			`${M.open}\nreport(avlue.models);\n${M.put}1\nreport(value.models);`,
+			`${M.open}\ncheck(typeof avlue);\n${M.put}1\ncheck(typeof value);`,
+		].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe(content.replaceAll("avlue", "value"));
+	});
+
+	test("treats a lone self-referencing »N after MATCH as the rewrite separator", () => {
+		const content = "const first = avlue;\nconst second = avlue;\n";
+		const input = `${M.open}*\navlue\n${M.put}1\nvalue`;
+
+		expect(variant.apply(content, input, context)).toBe("const first = value;\nconst second = value;\n");
+	});
+
+	test("ignores a trailing self-referencing »N after an inline operation", () => {
+		const content = "  switch (reason) {\n    case 'pause_turn':\n      return 'stop';\n  }\n";
+		const input = `${M.open}\n  switch (reason) {\n    ⟪case 'pause_turn':│case 'end_turn':\n    case 'pause_turn':⟫\n${M.put}1`;
+
+		expect(variant.apply(content, input, context)).toBe(
+			"  switch (reason) {\n    case 'end_turn':\n    case 'pause_turn':\n      return 'stop';\n  }\n",
+		);
+	});
+
+	test("strips a bare // annotation line from the top of a REWRITE", () => {
+		const content = [
+			"    } else if (contextPercentValue > 70) {",
+			"      contextPercentStr = contextPercentDisplay;",
+			"    } else {",
+			"      contextPercentStr = theme.fg('warning', contextPercentDisplay);",
+			"    }",
+			"",
+		].join("\n");
+		const rewrite = [
+			"//",
+			"    } else if (contextPercentValue > 70) {",
+			"      contextPercentStr = theme.fg('warning', contextPercentDisplay);",
+			"    } else {",
+			"      contextPercentStr = contextPercentDisplay;",
+			"    }",
+		].join("\n");
+		const pattern = content.trimEnd();
+
+		expect(variant.apply(content, operation(pattern, rewrite), context)).toBe(
+			[
+				"    } else if (contextPercentValue > 70) {",
+				"      contextPercentStr = theme.fg('warning', contextPercentDisplay);",
+				"    } else {",
+				"      contextPercentStr = contextPercentDisplay;",
+				"    }",
+				"",
+			].join("\n"),
+		);
+	});
+
+	test("keeps a worded comment line at the top of a REWRITE", () => {
+		const content = "return cached;\n";
+
+		expect(variant.apply(content, operation("return cached;", "// Fast path\nreturn cached;"), context)).toBe(
+			"// Fast path\nreturn cached;\n",
+		);
+	});
+
+	test("relocates an anchored selection line even when it would fuzzy-match elsewhere", () => {
+		const content = [
+			"function fillRandomBytes(bytes) {",
+			"  if (globalThis.crypto.getRandomValues) {",
+			"    globalThis.crypto?.getRandomValues(bytes);",
+			"  }",
+			"}",
+			"",
+		].join("\n");
+		const input = [
+			inlineOperation(
+				"  if (globalThis.crypto.getRandomValues) {\n⟪globalThis.crypto.getRandomValues│globalThis.crypto?.getRandomValues⟫",
+			),
+			inlineOperation(
+				"    globalThis.crypto?.getRandomValues(bytes);\n⟪globalThis.crypto?.getRandomValues│globalThis.crypto.getRandomValues⟫",
+			),
+		].join("\n");
+
+		expect(variant.apply(content, input, context)).toBe(
+			[
+				"function fillRandomBytes(bytes) {",
+				"  if (globalThis.crypto?.getRandomValues) {",
+				"    globalThis.crypto.getRandomValues(bytes);",
+				"  }",
+				"}",
+				"",
+			].join("\n"),
+		);
+	});
+
+	test("relocates a selection-only line into its echoed anchor line", () => {
+		const content = "      .run(...materializedStateValues(createEmptyMaterializedState(), options.sessionId));\n";
+		const input = inlineOperation(
+			"      .run(...materializedStateValues(createEmptyMaterializedState(), options.sessionId));\n      ⟪materializedStateValues(createEmptyMaterializedState(), options.sessionId)│materializedStateValues(options.sessionId, createEmptyMaterializedState())⟫",
+		);
+
+		expect(variant.apply(content, input, context)).toBe(
+			"      .run(...materializedStateValues(options.sessionId, createEmptyMaterializedState()));\n",
+		);
+	});
+
+	test("drops an echoed anchor line above an embedded selection", () => {
+		const content = "    if (entryRow)\n      throw invalidSession(entryId);\n";
+		const input = inlineOperation("    if (entryRow)\n    if (⟪entryRow│!entryRow⟫)");
+
+		expect(variant.apply(content, input, context)).toBe("    if (!entryRow)\n      throw invalidSession(entryId);\n");
+	});
+
+	test("trims a boundary character double-typed between literal and selection", () => {
+		const content = "  if (globalThis.crypto.? .getRandomValues) {\n    globalThis.crypto.getRandomValues(bytes);\n";
+		const input = inlineOperation("  if (globalThis.crypto.⟪.? .get│?.get⟫RandomValues) {");
+
+		expect(variant.apply(content, input, context)).toBe(
+			"  if (globalThis.crypto.?.getRandomValues) {\n    globalThis.crypto.getRandomValues(bytes);\n",
+		);
+	});
+
+	test("treats a sole trailing empty inline selection as whole-match deletion", () => {
+		const content = [
+			"  prepare();",
+			"",
+			"  const parseAnsiRgb = (ansi: string): [number, number, number] | null => {",
+			"    const match = ansi.match(/x/);",
+			"    return match ? [1, 2, 3] : null;",
+			"  };",
+			"",
+			"  run();",
+			"",
+		].join("\n");
+		const input = inlineOperation(
+			[
+				"  const parseAnsiRgb = (ansi: string): [number, number, number] | null => {",
+				"    const match = ansi.match(/x/);",
+				"    return match ? [1, 2, 3] : null;",
+				"  };",
+				"⟪│⟫",
+			].join("\n"),
+		);
+
+		expect(variant.apply(content, input, context)).toBe(["  prepare();", "", "  run();", ""].join("\n"));
+	});
+
+	test("keeps a genuine empty inline insertion anchored to a neighbor line as a no-op error", () => {
+		const content = "before();\nafter();\n";
+
+		expect(() => variant.apply(content, inlineOperation("⟪│⟫before();"), context)).toThrow(/makes no change/);
+	});
+
+	test("collapses a duplicated block when the rewrite equals the match", () => {
+		const block = "  await db.exec(`\nCREATE TABLE IF NOT EXISTS migrations (\n\tid TEXT PRIMARY KEY\n);\n`);";
+		const content = `async function ensureMigrationsTable() {\n${block}\n\n${block}\n}\n`;
+		const input = operation(`${block}\n}`, `${block}\n}`);
+
+		expect(variant.apply(content, input, context)).toBe(`async function ensureMigrationsTable() {\n${block}\n}\n`);
+	});
+
+	test("applies a pattern-only block as the delete half of a move", () => {
+		const block = [
+			"  const parseAnsiRgb = (ansi: string): [number, number, number] | null => {",
+			"    return null;",
+			"  };",
+		].join("\n");
+		const content = `  const first = 0;\n\n${block}\n\n  const other = 1;\n\n  const getContrast = () => 2;\n`;
+		const input = [
+			`${M.open}\n${block}`,
+			`${M.open}\n  const getContrast = () => 2;\n${M.put}\n${block}\n\n  const getContrast = () => 2;`,
+		].join("\n");
+		const notes: string[] = [];
+
+		expect(variant.apply(content, input, { path: context.path, notes })).toBe(
+			`  const first = 0;\n\n  const other = 1;\n\n${block}\n\n  const getContrast = () => 2;\n`,
+		);
+		expect(notes.join("\n")).toContain("move deletion");
+	});
+
+	test("never adopts a gap-only remainder as rewrite text", () => {
+		const content = [
+			"  const getContrastVsBlack = (colorName: string): string => {",
+			"    const ansi = theme.getFgAnsi(colorName);",
+			"    return ansi;",
+			"  };",
+			"",
+		].join("\n");
+		const input = `${M.open}\n  const getContrastVsBlack = (colorName: string): string => {\n…`;
+
+		expect(() => variant.apply(content, input, context)).toThrow(/needs »/);
+	});
+
+	test("still rejects a pattern-only block no other operation re-emits", () => {
+		const content = "  const kept = 1;\n  const alpha = compute();\n  const beta = alpha + 1;\n";
+		const input = `${M.open}\n  const alpha = compute();\n  const beta = alpha + 1;`;
+
+		expect(() => variant.apply(content, input, context)).toThrow(/needs »/);
+	});
+
+	test("reports deletions in apply notes", () => {
+		const content = "keep();\ndebugLog(request);\nfinish();\n";
+		const notes: string[] = [];
+
+		expect(variant.apply(content, operation("debugLog(request);", ""), { path: context.path, notes })).toBe(
+			"keep();\nfinish();\n",
+		);
+		expect(notes.join("\n")).toMatch(/operation 1 deleted 1 line/i);
+	});
+
+	test("gap-joins listed-only lines that are not consecutive", () => {
+		const content = [
+			"      if (enwlineIndex === -1) {",
+			"        return;",
+			"      }",
+			"      const line = stdinBuffer.slice(0, enwlineIndex).trim();",
+			"      stdinBuffer = stdinBuffer.slice(enwlineIndex + 1);",
+			"",
+		].join("\n");
+		const input = inlineOperation(
+			[
+				"      if (⟪enwlineIndex│newlineIndex⟫ === -1) {",
+				"      const line = stdinBuffer.slice(0, ⟪enwlineIndex│newlineIndex⟫).trim();",
+				"      stdinBuffer = stdinBuffer.slice(⟪enwlineIndex│newlineIndex⟫ + 1);",
+			].join("\n"),
+			true,
+		);
+
+		expect(variant.apply(content, input, context)).toBe(content.replaceAll("enwlineIndex", "newlineIndex"));
+	});
+
+	test("names identical inline sides in the no-op error", () => {
+		const content = "const flag = a || b;\n";
+
+		expect(() => variant.apply(content, inlineOperation("const flag = ⟪a || b│a || b⟫;"), context)).toThrow(
+			/identical ⟪current│desired⟫ sides never change the file[\s\S]*do not drop the operation/,
+		);
+	});
+
+	test("rejects mixed inline rewrite forms", () => {
+		const content = "const value = oldValue;\nconst other = oldOther;\n";
+
+		expect(() =>
+			variant.apply(content, `${inlineOperation("const value = ⟪oldValue│newValue⟫;")}\n${M.put}\nignored`, context),
+		).toThrow(/mixes inline replacements with a » rewrite/);
+		expect(() =>
+			variant.apply(
+				content,
+				inlineOperation("const value = ⟪oldValue│newValue⟫;\nconst other = ⟪oldOther⟫;"),
+				context,
+			),
+		).toThrow(/mixes inline and bare selections/);
 	});
 
 	test("substitutes multiple selections positionally when REWRITE has one line per selection", () => {

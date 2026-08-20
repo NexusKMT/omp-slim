@@ -2,11 +2,15 @@
 //
 // Shape:
 //   [path]            file header
-//   «                 start MATCH (or «* to change every match)
-//   <match lines>     sparse pattern: literals, … gaps, ⟪selection⟫ markers
-//   »                 start REWRITE (omit everything below for whole-match ops)
-//   <rewrite lines>   final text; »N re-emits op N's deleted text; … re-emits gaps
-//   «                 next operation; a new [path] line opens another file
+//   « / «*            start MATCH (one/every match)
+//   <match lines>     current-text pattern with … gaps and selections
+//                      Preferred selection: ⟪old│new⟫; no » follows.
+//                      Legacy selection: ⟪old⟫; a » starts whole REWRITE.
+//   »                 optional legacy REWRITE separator
+//   <rewrite lines>   final text; »N re-emits earlier deleted text
+//
+// A »N line is accepted in MATCH for an inline desired side; runtime checks
+// its placement and rejects legacy MATCH references.
 start: section+
 section: header op+
 header: "[" PATH "]" LF
@@ -20,7 +24,7 @@ rewrite: rewrite_sep rewrite_line*
 rewrite_sep: "»" LF
 rewrite_line: reemit_line | content_line | blank_line
 
-match_line: content_line | blank_line
+match_line: reemit_line | content_line | blank_line
 content_line: /[^«»\n][^\n]*/ LF
 reemit_line: "»" /[1-9][0-9]*/ LF
 blank_line: LF

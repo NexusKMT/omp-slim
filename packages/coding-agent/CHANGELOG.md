@@ -4,6 +4,8 @@
 
 ### Added
 
+- Sloppy edits now support inline replacements — `⟪old│new⟫` (with `⟪old│⟫` delete and `⟪│new⟫` insert) rewrites in place, keeping the `»` REWRITE block as the whole-span escape hatch
+- Sloppy edits recover common payload mistakes without a retry: a lone `⟫` or `»N` line mistyped for the `»` separator, a bare `//` annotation atop a REWRITE, a selection's old text echoed as adjacent context (`X⟪X│new⟫`), an anchor line retyped above the selection that edits it, boundary text double-typed on both a selection and its adjacent literal, a lone `»N` line used as the `»` separator, listed-only edit lines gap-joined when not consecutive, and a no-op rewrite beside a duplicated block collapsing two copies to one; a sole trailing `⟪│⟫` reads as whole-match deletion, a pattern-only block applies as the delete half of a move when a later op re-emits it, and deletions are called out in the success text
 - Added repeat read warning hint after identical content reads
 - `read` can now list and extract members from `.rar`, `.7z`, `.iso`, `.cab`, `.deb`, `.rpm`, `.cpio`, `.ar`/`.a`, `.lzh`, `.arj`, compressed tars (`.tar.bz2`/`.tar.xz`/`.tar.zst`/`.tar.Z`), more ZIP-family packages (`.whl`, `.ipa`, `.xpi`, `.vsix`, `.nupkg`, `.cbz`, `.cbr`), and single-file `.gz`/`.bz2`/`.xz`/`.zst` streams via `archive.ext:path`, exposing non-tar gzip files as single-member pseudo-archives.
 - `write` can now edit entries inside `.asar` archives, create `.tar.zst` archives, and perform lenient anchor-based sloppy edits; unsupported (read-only) archive formats fail with a clear error.
