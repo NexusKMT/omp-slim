@@ -9,6 +9,7 @@
 
 - Added Codex Responses support for Code Mode ([#9050](https://github.com/can1357/oh-my-pi/issues/9050)): the client preserves the model's advertised `tool_mode` through Codex Responses requests and emits the `tool_namespaces_info` turn metadata snapshot when the session restricts its direct tool surface. The snapshot rides the request body's `client_metadata` envelope only — the `x-codex-turn-metadata` header keeps the fixed-size identity projection, since the Codex backend caps HTTP headers at 100KB and a large tool surface serializes past that on its own ([#9069](https://github.com/can1357/oh-my-pi/pull/9069) by [@MilesCranmerBot](https://github.com/MilesCranmerBot)).
 - Fixed OpenAI Codex requests failing with HTTP 401 `Workspace is not authorized in this region.` on enterprise ChatGPT workspaces pinned to a data-residency region whenever the request egressed from a different region (VPN, proxy, or a relocated machine). Codex requests now declare the workspace residency carried by the OAuth access token (`chatgpt_data_residency`, falling back to `chatgpt_compute_residency`) via `x-openai-internal-codex-residency` on both the SSE and WebSocket transports. Accounts without the claim, and opaque non-JWT keys used by Codex-compatible proxies, are unaffected; a caller-supplied header of the same name still wins.
+- Fixed concurrent xAI OAuth refreshes revoking shared grants or repeatedly retrying dead refresh tokens when multiple processes use the same credential database.
 
 ## [17.4.0] - 2026-08-20
 
