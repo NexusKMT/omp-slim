@@ -357,8 +357,14 @@ fn run_pty_sync(
 	if let Some(callback) = on_start.as_ref() {
 		callback.call(Ok(child_process_id.unwrap_or(0)), ThreadsafeFunctionCallMode::NonBlocking);
 	}
-	ct.heartbeat()
-		.map_err(|err| Error::from_reason(format!("PTY setup cancelled before reader: {err}")))?;
+	// No heartbeat check here: `child` now owns a real, already-`exec`'d OS
+	// process, and bailing out via `?` at this point would drop `pair`
+	// (closing the pty master) without ever killing or reaping it — the
+	// master hangup delivers SIGHUP to the child (it's the pty's session
+	// leader), which kills it almost immediately, but nothing calls
+	// wait()/try_wait() afterward, so it leaks as a permanent zombie. A
+	// cancellation here is instead picked up on the main loop's first
+	// iteration below, which already kills and reaps correctly.
 
 	let master = pair.master;
 	let mut writer = master
@@ -528,37 +534,34 @@ fn run_pty_sync(
 		}
 	}
 	if exit_code.is_none() {
-		if terminate_requested {
-			if let Some(status) = child
-				.try_wait()
-				.map_err(|err| Error::from_reason(format!("Failed checking PTY status: {err}")))?
-			{
-				exit_code = Some(i32::try_from(status.exit_code()).unwrap_or(i32::MAX));
-			}
-		} else {
-			// On Windows, child.wait() can hang indefinitely in ConPTY.
-			// Poll try_wait() with a short timeout instead.
-			#[cfg(windows)]
-			{
-				let wait_start = Instant::now();
-				while exit_code.is_none() && wait_start.elapsed() < Duration::from_secs(5) {
-					if let Some(status) = child
-						.try_wait()
-						.map_err(|err| Error::from_reason(format!("Failed checking PTY status: {err}")))?
-					{
-						exit_code = Some(i32::try_from(status.exit_code()).unwrap_or(i32::MAX));
-						break;
-					}
-					std::thread::sleep(Duration::from_millis(50));
+		// Reaping here must be unconditional, even after `terminate_requested`
+		// already sent SIGKILL: `std::process::Child` (which `portable-pty`
+		// wraps on Unix) never waits on Drop, so a single missed try_wait()
+		// leaks the process as a permanent zombie once `child` goes out of
+		// scope below.
+		//
+		// On Windows, child.wait() can hang indefinitely in ConPTY.
+		// Poll try_wait() with a short timeout instead.
+		#[cfg(windows)]
+		{
+			let wait_start = Instant::now();
+			while exit_code.is_none() && wait_start.elapsed() < Duration::from_secs(5) {
+				if let Some(status) = child
+					.try_wait()
+					.map_err(|err| Error::from_reason(format!("Failed checking PTY status: {err}")))?
+				{
+					exit_code = Some(i32::try_from(status.exit_code()).unwrap_or(i32::MAX));
+					break;
 				}
+				std::thread::sleep(Duration::from_millis(50));
 			}
-			#[cfg(not(windows))]
-			{
-				let status = child
-					.wait()
-					.map_err(|err| Error::from_reason(format!("Failed waiting PTY process: {err}")))?;
-				exit_code = Some(i32::try_from(status.exit_code()).unwrap_or(i32::MAX));
-			}
+		}
+		#[cfg(not(windows))]
+		{
+			let status = child
+				.wait()
+				.map_err(|err| Error::from_reason(format!("Failed waiting PTY process: {err}")))?;
+			exit_code = Some(i32::try_from(status.exit_code()).unwrap_or(i32::MAX));
 		}
 	}
 	// --- Teardown ---
@@ -630,5 +633,113 @@ fn run_pty_sync(
 fn emit_chunk(text: &str, callback: Option<&ThreadsafeFunction<String>>) {
 	if let Some(callback) = callback {
 		callback.call(Ok(text.to_string()), ThreadsafeFunctionCallMode::NonBlocking);
+	}
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod zombie_repro_tests {
+	//! Reproduces the leaked-zombie race fixed above: a PTY session cancelled
+	//! (timed out) very soon after spawn used to fall back to a single
+	//! non-blocking `try_wait()` with no retry. Under scheduler contention that
+	//! single check can race the kernel actually reaping the SIGKILL'd child,
+	//! and `child` (a `std::process::Child`, which never waits on `Drop`) then
+	//! leaks the process as a permanent zombie.
+	//!
+	//! This test is marked `#[ignore]` because it intentionally saturates all
+	//! CPU cores with contention to trigger scheduler races — it must run
+	//! isolated, not alongside other tests. Run with `cargo test -- --ignored
+	//! --test-threads=1 zombie_repro_tests`.
+
+	use std::{
+		sync::{
+			Arc,
+			atomic::{AtomicBool, Ordering},
+		},
+		thread,
+	};
+
+	use super::*;
+
+	/// Count zombie children directly parented to this test process.
+	fn zombie_child_count() -> usize {
+		let my_pid = std::process::id();
+		let Ok(entries) = std::fs::read_dir("/proc") else {
+			return 0;
+		};
+		let mut count = 0;
+		for entry in entries.flatten() {
+			let Some(pid_str) = entry.file_name().to_str().map(str::to_owned) else {
+				continue;
+			};
+			if pid_str.parse::<u32>().is_err() {
+				continue;
+			}
+			let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid_str}/stat")) else {
+				continue;
+			};
+			let Some(last_paren) = stat.rfind(')') else {
+				continue;
+			};
+			let fields: Vec<&str> = stat[last_paren + 1..].split_whitespace().collect();
+			// fields[0] = state, fields[1] = ppid (see proc(5); comm itself was
+			// already skipped by slicing past the last `)`).
+			let (Some(state), Some(ppid)) = (fields.first(), fields.get(1)) else {
+				continue;
+			};
+			if *state == "Z" && ppid.parse::<u32>() == Ok(my_pid) {
+				count += 1;
+			}
+		}
+		count
+	}
+
+	/// Run `iterations` PTY sessions that get cancelled ~1ms after spawn while
+	/// `nproc` busy threads keep every core contended, then report how many
+	/// zombie children are left over.
+	fn run_cancel_storm(iterations: usize) -> usize {
+		let stop = Arc::new(AtomicBool::new(false));
+		let busy: Vec<_> = (0..thread::available_parallelism().map_or(8, |n| n.get()))
+			.map(|_| {
+				let stop = Arc::clone(&stop);
+				thread::spawn(move || {
+					while !stop.load(Ordering::Relaxed) {
+						std::hint::spin_loop();
+					}
+				})
+			})
+			.collect();
+
+		for _ in 0..iterations {
+			let (_tx, rx) = flume::unbounded();
+			let ct = task::CancelToken::new(Some(1), None);
+			let config = PtyRunConfig {
+				command: PtyCommand::Argv {
+					application: "sleep".to_string(),
+					args:        vec!["5".to_string()],
+				},
+				cwd:     None,
+				env:     None,
+				cols:    80,
+				rows:    24,
+			};
+			let _ = run_pty_sync(config, None, None, rx, ct);
+		}
+
+		stop.store(true, Ordering::Relaxed);
+		for handle in busy {
+			let _ = handle.join();
+		}
+		// Give a genuinely-slow reap a moment to land before we count, so we
+		// only count processes truly abandoned by `run_pty_sync`, not ones
+		// mid-flight.
+		thread::sleep(Duration::from_millis(200));
+		zombie_child_count()
+	}
+
+	#[test]
+	#[ignore]
+	fn cancelled_pty_sessions_do_not_leak_zombies() {
+		let leaked = run_cancel_storm(60);
+		assert_eq!(leaked, 0, "cancelled PTY sessions leaked {leaked} zombie process(es)");
 	}
 }
