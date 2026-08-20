@@ -16,6 +16,7 @@ import {
 	isGrokReasoningEffortCapable,
 	isKimiK3ModelId,
 	isKimiModelId,
+	isMuseSparkModelId,
 	isQwen38PlusTemplateEffortModelId,
 	isReasoningGlmModelId,
 } from "../identity/family";
@@ -2624,6 +2625,26 @@ function openCodeModelManagerOptions(
 							fallbackApi(defaults.id, base) ??
 							defaults.api;
 						const baseUrl = openCodeBaseUrlForApi(api, basePath);
+						if (isMuseSparkModelId(defaults.id)) {
+							// Gateway lists these as bare ids with no capability
+							// metadata and no local bundled row, so the generic
+							// defaults would hide the effort dial
+							// (`reasoning: false`). Keep the pinned/fallback route
+							// and restore the documented thinking surface.
+							return {
+								...(reference ?? defaults),
+								id: defaults.id,
+								name,
+								api,
+								provider: providerId,
+								baseUrl,
+								reasoning: true,
+								input: reference?.input ?? ["text", "image"],
+								thinking: reference?.thinking ?? META_MUSE_SPARK_THINKING,
+								contextWindow: toPositiveNumber(entry.context_length, reference?.contextWindow ?? 1_048_576),
+								maxTokens: toPositiveNumber(entry.max_completion_tokens, reference?.maxTokens ?? 131_072),
+							};
+						}
 						if (!reference) {
 							return { ...defaults, name, api, baseUrl };
 						}
