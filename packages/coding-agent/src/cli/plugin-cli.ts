@@ -871,8 +871,8 @@ async function handleConfig(
  * Enumerate every installed plugin to validate — npm/link plugins from
  * {@link PluginManager.list} plus marketplace runtime packages, which `list()`
  * intentionally omits. Marketplace summaries are resolved through their trusted
- * install path; deduped by resolved package name so a project install shadows a
- * same-named user install (project summaries are enumerated first).
+ * install path; deduped by resolved package name using the same active-scope
+ * precedence as runtime loading.
  */
 async function collectPluginsForValidation(manager: PluginManager): Promise<InstalledPlugin[]> {
 	const byName = new Map<string, InstalledPlugin>();
@@ -885,9 +885,8 @@ async function collectPluginsForValidation(manager: PluginManager): Promise<Inst
 		if (!entry) continue;
 		const fallbackName = parsePluginId(summary.id)?.name ?? summary.id;
 		const resolved = await manager.getPlugin(fallbackName, { path: entry.installPath });
-		if (resolved && !byName.has(resolved.name)) {
-			byName.set(resolved.name, resolved);
-		}
+		if (!resolved) continue;
+		byName.set(resolved.name, (await manager.getPlugin(resolved.name)) ?? resolved);
 	}
 	return [...byName.values()];
 }

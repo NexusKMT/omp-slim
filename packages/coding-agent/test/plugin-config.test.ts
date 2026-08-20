@@ -120,7 +120,7 @@ describe("plugin config", () => {
 		);
 	}
 
-	async function installProjectMarketplacePlugin(schemaDefault: string): Promise<string> {
+	async function installProjectMarketplacePlugin(schemaDefault: string, enabled = true): Promise<string> {
 		const installPath = path.join(tmpRoot, "cache", `omp-commit-project-${schemaDefault}`);
 		await writeManifest(installPath, {
 			omp: {
@@ -134,7 +134,7 @@ describe("plugin config", () => {
 		await Bun.write(
 			path.join(projectRoot, "omp-plugins.lock.json"),
 			JSON.stringify({
-				plugins: { "omp-commit": { version: "2.0.0", enabledFeatures: null, enabled: true } },
+				plugins: { "omp-commit": { version: "2.0.0", enabledFeatures: null, enabled } },
 				settings: {},
 			}),
 		);
@@ -170,5 +170,26 @@ describe("plugin config", () => {
 
 		const manager = new PluginManager(tmpRoot);
 		expect((await manager.getPlugin("omp-commit"))?.manifest.settings?.splitMode?.default).toBe("auto");
+	});
+
+	test("falls back to an enabled user plugin when the project copy is disabled", async () => {
+		const userPkg = path.join(pluginsDir, "node_modules", "omp-commit");
+		await writeManifest(userPkg, {
+			omp: {
+				version: "1.0.0",
+				settings: { splitMode: { type: "enum", values: ["auto", "manual"], default: "manual" } },
+			},
+		});
+		await Bun.write(
+			lockfile,
+			JSON.stringify({
+				plugins: { "omp-commit": { version: "1.0.0", enabledFeatures: null, enabled: true } },
+				settings: {},
+			}),
+		);
+		await installProjectMarketplacePlugin("auto", false);
+
+		const manager = new PluginManager(tmpRoot);
+		expect((await manager.getPlugin("omp-commit"))?.manifest.settings?.splitMode?.default).toBe("manual");
 	});
 });

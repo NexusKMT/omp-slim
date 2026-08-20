@@ -687,9 +687,9 @@ export class PluginManager {
 	 *
 	 * Resolution order mirrors {@link getEnabledPlugins}: an explicit trusted
 	 * `options.path` (marketplace registry entry) wins; otherwise the active
-	 * project plugin root shadows the user root — so inside a project where the
-	 * same package name exists in both scopes, config reads and writes act on the
-	 * project copy's manifest rather than the inactive user copy.
+	 * enabled project plugin root shadows the user root — so inside a project
+	 * where the same package name exists in both scopes, config reads and writes
+	 * act on the package copy active at runtime.
 	 */
 	async getPlugin(name: string, options: { path?: string } = {}): Promise<InstalledPlugin | undefined> {
 		const [config, projectOverrides] = await Promise.all([this.#ensureConfigLoaded(), this.#loadProjectOverrides()]);
@@ -697,14 +697,14 @@ export class PluginManager {
 			return this.#resolvePlugin(name, options.path, config, projectOverrides);
 		}
 		const projectPlugin = await this.#resolvePluginAtActiveProjectRoot(name, projectOverrides);
-		if (projectPlugin) {
+		const deps = await this.#readDeps(getPluginsPackageJson());
+		const userPlugin = this.#collectInstalledNames(deps, config).has(name)
+			? await this.#resolvePlugin(name, path.join(getPluginsNodeModules(), name), config, projectOverrides)
+			: undefined;
+		if (projectPlugin?.enabled || !userPlugin) {
 			return projectPlugin;
 		}
-		const deps = await this.#readDeps(getPluginsPackageJson());
-		if (this.#collectInstalledNames(deps, config).has(name)) {
-			return this.#resolvePlugin(name, path.join(getPluginsNodeModules(), name), config, projectOverrides);
-		}
-		return undefined;
+		return userPlugin;
 	}
 
 	/**

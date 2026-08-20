@@ -74,4 +74,55 @@ describe("runPluginCommand({ action: 'config', args: ['validate'] })", () => {
 		expect(report.valid).toBe(false);
 		expect(report.errors).toContainEqual(expect.objectContaining({ plugin: "omp-commit", key: "splitMode" }));
 	});
+
+	test("validates against the active project schema over a same-named user plugin", async () => {
+		const userPlugin: InstalledPlugin = {
+			name: "omp-commit",
+			version: "1.0.0",
+			path: "/user/omp-commit",
+			manifest: {
+				version: "1.0.0",
+				settings: { splitMode: { type: "enum", values: ["legacy"], default: "legacy" } },
+			},
+			enabledFeatures: null,
+			enabled: true,
+		};
+		const projectPlugin: InstalledPlugin = {
+			...userPlugin,
+			version: "2.0.0",
+			path: "/project/omp-commit",
+			manifest: {
+				version: "2.0.0",
+				settings: { splitMode: { type: "enum", values: ["auto", "manual"], default: "auto" } },
+			},
+		};
+		const summary: InstalledPluginSummary = {
+			id: "omp-commit@market",
+			scope: "project",
+			entries: [
+				{
+					scope: "project",
+					installPath: projectPlugin.path,
+					version: projectPlugin.version,
+					installedAt: "2026-08-20T00:00:00.000Z",
+					lastUpdated: "2026-08-20T00:00:00.000Z",
+				},
+			],
+		};
+
+		spyOn(PluginManager.prototype, "list").mockResolvedValue([userPlugin]);
+		spyOn(MarketplaceManager.prototype, "listInstalledPlugins").mockResolvedValue([summary]);
+		const getPlugin = spyOn(PluginManager.prototype, "getPlugin").mockResolvedValue(projectPlugin);
+		spyOn(PluginManager.prototype, "getPluginSettings").mockResolvedValue({ splitMode: "legacy" });
+
+		await runPluginCommand({ action: "config", args: ["validate"], flags: { json: true } });
+
+		expect(getPlugin).toHaveBeenCalledWith("omp-commit");
+		const report = JSON.parse(output.join("\n")) as {
+			valid: boolean;
+			errors: Array<{ plugin: string; key: string }>;
+		};
+		expect(report.valid).toBe(false);
+		expect(report.errors).toContainEqual(expect.objectContaining({ plugin: "omp-commit", key: "splitMode" }));
+	});
 });
