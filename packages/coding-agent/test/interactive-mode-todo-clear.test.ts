@@ -158,6 +158,7 @@ describe("InteractiveMode todo HUD persistence", () => {
 
 		vi.advanceTimersByTime(999);
 		expect(renderTodos(mode)).toContain("done task");
+		expect(renderTodos(mode)).toContain("TODO");
 
 		vi.advanceTimersByTime(1);
 		expect(renderTodos(mode)).not.toContain("done task");

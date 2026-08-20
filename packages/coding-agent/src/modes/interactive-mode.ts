@@ -453,11 +453,6 @@ const MODEL_CYCLE_TRACK_CLEAR_MS = 4000;
 
 const SUBAGENT_HUD_VISIBLE_LIMIT = 8;
 const SUBAGENT_OBSERVER_UI_COALESCE_MS = 100;
-// Instant, independent of `tasks.todoClearDelay`: fires the moment every todo
-// closes, shrinking the header bar to nothing before the row is dropped. The
-// phase/task tree below is unaffected and keeps following the clear delay.
-const TODO_BAR_COLLAPSE_DURATION_MS = 260;
-const TODO_BAR_COLLAPSE_TICK_MS = 1000 / 30;
 
 /**
  * Build the anchored subagent HUD block: a bold accent "Subagents" header plus
@@ -564,10 +559,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	loopLimit: LoopLimitRuntime | undefined = undefined;
 	#loopAutoSubmitTimer: NodeJS.Timeout | undefined;
 	#todoAutoClearTimer: NodeJS.Timeout | undefined;
-	#todoBarCollapseTimer: NodeJS.Timeout | undefined;
-	#todoBarCollapseStartedAt: number | undefined;
-	#todoBarCollapsed = false;
-	#todoListWasSettled = false;
 	#modelCycleClearTimer: NodeJS.Timeout | undefined;
 	#nextAppearanceRequestToken = 1;
 	#appearanceRefreshRequest: { token: TerminalAppearanceRequestToken; deadline: number } | undefined;
@@ -2254,40 +2245,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#todoAutoClearTimer.unref?.();
 	}
 
-	#cancelTodoBarCollapseAnimation(): void {
-		if (!this.#todoBarCollapseTimer) return;
-		clearInterval(this.#todoBarCollapseTimer);
-		this.#todoBarCollapseTimer = undefined;
-	}
-
-	#todoBarCollapseFraction(): number {
-		if (this.#todoBarCollapseStartedAt === undefined) return 0;
-		const elapsed = Date.now() - this.#todoBarCollapseStartedAt;
-		return Math.min(1, Math.max(0, elapsed / TODO_BAR_COLLAPSE_DURATION_MS));
-	}
-
-	/**
-	 * Fires once, the instant the todo list first fully closes: drains the
-	 * accent from the tree spine over `TODO_BAR_COLLAPSE_DURATION_MS` and then
-	 * drops the `TODO` header row. Independent of `tasks.todoClearDelay`, which
-	 * governs when the remaining phase/task tree disappears — the tree is
-	 * untouched here.
-	 */
-	#startTodoBarCollapseAnimation(): void {
-		this.#cancelTodoBarCollapseAnimation();
-		this.#todoBarCollapsed = false;
-		this.#todoBarCollapseStartedAt = Date.now();
-		this.#todoBarCollapseTimer = setInterval(() => {
-			if (this.#todoBarCollapseFraction() >= 1) {
-				this.#todoBarCollapsed = true;
-				this.#cancelTodoBarCollapseAnimation();
-			}
-			this.#renderTodoList();
-			this.ui.requestRender();
-		}, TODO_BAR_COLLAPSE_TICK_MS);
-		this.#todoBarCollapseTimer.unref?.();
-	}
-
 	/**
 	 * Render the ctrl+p model-role cycle chip track into its own anchored
 	 * container (just above the editor), mirroring the todo HUD: the container is
@@ -2366,23 +2323,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	#renderTodoList(): void {
 		this.todoContainer.clear();
 		const phases = this.todoPhases.filter(phase => phase.tasks.length > 0);
-		if (phases.length === 0) {
-			this.#cancelTodoBarCollapseAnimation();
-			this.#todoBarCollapsed = false;
-			this.#todoBarCollapseStartedAt = undefined;
-			this.#todoListWasSettled = false;
-			return;
-		}
-		const settled = this.#isTodoListSettled(phases);
-		if (settled && !this.#todoListWasSettled) {
-			this.#startTodoBarCollapseAnimation();
-		} else if (!settled && this.#todoListWasSettled) {
-			this.#cancelTodoBarCollapseAnimation();
-			this.#todoBarCollapsed = false;
-			this.#todoBarCollapseStartedAt = undefined;
-		}
-		this.#todoListWasSettled = settled;
-
+		if (phases.length === 0) return;
 		const expanded = this.todoExpanded;
 		const multiPhase = phases.length > 1;
 		const activeIdx = phases.indexOf(this.#getActivePhase(phases) ?? phases[0]);
@@ -2477,31 +2418,16 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		// Overall progress (summed across every stage) fills the path in reading
 		// order: down the spine, around the bend, out along the tail.
-		// Clamped so any progress lights at least one cell and only a fully
-		// closed list fills the whole path. Once the list fully closes,
-		// `#startTodoBarCollapseAnimation` drains the accent back to nothing over
-		// `TODO_BAR_COLLAPSE_DURATION_MS` and the `TODO` header row is then
-		// dropped — the phase/task tree keeps its own per-stage counts until the
-		// separate `tasks.todoClearDelay` timer fires.
+		// Clamp so partial progress lights at least one cell; a closed plan fills
+		// the entire path until the configured auto-clear removes the HUD.
 		const totalTasks = phases.reduce((sum, phase) => sum + phase.tasks.length, 0);
 		const closedTasks = phases.reduce((sum, phase) => sum + phase.tasks.filter(isClosedTodo).length, 0);
-		const collapseFraction = this.#todoBarCollapseFraction();
 		const pathLen = contentLines.length + tailLen;
-		let filled: number;
-		if (this.#todoBarCollapsed) {
-			filled = 0;
-		} else if (collapseFraction > 0) {
-			filled = Math.round((1 - collapseFraction) * pathLen);
-		} else {
-			filled = Math.round((closedTasks / totalTasks) * pathLen);
-			if (closedTasks > 0) filled = Math.max(filled, 1);
-			if (closedTasks < totalTasks) filled = Math.min(filled, pathLen - 1);
-		}
+		let filled = Math.round((closedTasks / totalTasks) * pathLen);
+		if (closedTasks > 0) filled = Math.max(filled, 1);
+		if (closedTasks < totalTasks) filled = Math.min(filled, pathLen - 1);
 
-		const lines: string[] = [""];
-		if (!this.#todoBarCollapsed) {
-			lines.push(theme.bold(theme.fg("accent", "TODO")));
-		}
+		const lines = ["", theme.bold(theme.fg("accent", "TODO"))];
 		for (let i = 0; i < contentLines.length; i++) {
 			lines.push(` ${theme.fg(i < filled ? "accent" : "dim", spineGlyphs[i]!)}${contentLines[i]}`);
 		}
@@ -4379,7 +4305,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		stopSharedSpinnerTicker();
 		this.#liveCommandController.dispose();
 		this.#cancelTodoAutoClearTimer();
-		this.#cancelTodoBarCollapseAnimation();
 		this.#cancelObserverUiSyncTimer();
 		this.#cancelGoalContinuation();
 		if (this.#sttController) {
