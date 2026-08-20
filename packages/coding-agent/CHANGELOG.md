@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Codex chat and `generate_image` requests returning HTTP 401 `Workspace is not authorized in this region.` when an enterprise ChatGPT workspace is pinned to a data-residency region and the request egresses from another region (VPN or proxy). The residency the OAuth token already carries is now declared on the request, so no configuration is needed.
+
 ## [17.4.0] - 2026-08-20
 
 ### Added

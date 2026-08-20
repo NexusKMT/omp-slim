@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `getCodexResidency` reads an enterprise ChatGPT workspace's pinned data-residency region from a Codex OAuth access token, and `OPENAI_HEADERS.RESIDENCY` names the header that declares it to the Codex backend.
+
 ## [17.4.0] - 2026-08-20
 
 ### Added
