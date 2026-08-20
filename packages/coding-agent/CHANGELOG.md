@@ -40,6 +40,7 @@
 - Fixed Codex chat, web search, and `generate_image` requests returning HTTP 401 `Workspace is not authorized in this region.` when an enterprise ChatGPT workspace is pinned to a data-residency region and the request egresses from another region (VPN or proxy). The residency the OAuth token already carries is now declared on the request, so no configuration is needed.
 - Nix-packaged builds no longer fail to load the on-demand `onnxruntime-node`/`sherpa-onnx` addons with `libstdc++.so.6: cannot open shared object file` (STT, TTS, tiny-model and mnemopi workers) — the package advertises its C++ runtime library dirs and the agent injects them into the inference worker subprocesses only.
 - Fixed `hub wait` stacking frozen copies of the same running-job rows into native scrollback once the transcript outgrew the viewport. The live-region pin now starts at the poll body (not the blank separator before it) and still applies when an earlier unpinned live block sits above the wait.
+- Improved markdown code-fence header contrast on affected dark themes so language tags and citation paths remain readable ([#9118](https://github.com/can1357/oh-my-pi/pull/9118) by [@Mustaqeem66](https://github.com/Mustaqeem66)).
 
 ## [17.4.0] - 2026-08-20
 
