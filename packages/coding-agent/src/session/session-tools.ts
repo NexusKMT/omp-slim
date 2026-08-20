@@ -624,11 +624,8 @@ export class SessionTools {
 	/** Whether a model transition crosses a Code Mode presentation boundary. */
 	codeModeChangesBetween(previousModel: Model | undefined, nextModel: Model): boolean {
 		const enabledToolNames = this.getEnabledToolNames();
-		const setting =
-			(this.#host.settings.get("providers.openai-codex.codeMode") as "off" | "on" | "auto" | undefined) ?? "off";
-		const extraDirectTools = this.#host.settings.get("providers.openai-codex.codeModeDirectTools") as
-			| string[]
-			| undefined;
+		const setting = this.#host.settings.get("providers.openai-codex.codeMode");
+		const extraDirectTools = this.#host.settings.get("providers.openai-codex.codeModeDirectTools");
 		const resolve = (model: Model | undefined) =>
 			resolveCodeMode({
 				provider: model?.provider ?? "",
@@ -816,11 +813,8 @@ export class SessionTools {
 		const codeMode = resolveCodeMode({
 			provider: this.#host.model()?.provider ?? "",
 			toolMode: this.#host.model()?.toolMode,
-			setting:
-				(this.#host.settings.get("providers.openai-codex.codeMode") as "off" | "on" | "auto" | undefined) ?? "off",
-			extraDirectTools: this.#host.settings.get("providers.openai-codex.codeModeDirectTools") as
-				| string[]
-				| undefined,
+			setting: this.#host.settings.get("providers.openai-codex.codeMode"),
+			extraDirectTools: this.#host.settings.get("providers.openai-codex.codeModeDirectTools"),
 			enabledToolNames: toolNames,
 		});
 		// Demoted tools stay reachable through the eval bridge, so nothing is

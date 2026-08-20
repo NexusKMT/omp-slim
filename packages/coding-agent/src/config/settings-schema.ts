@@ -593,7 +593,7 @@ export const SETTINGS_SCHEMA = {
 
 	"providers.openai-codex.codeMode": {
 		type: "enum",
-		values: ["off", "on", "auto"],
+		values: ["off", "on", "auto"] as const,
 		default: "off",
 		ui: {
 			tab: "providers",
