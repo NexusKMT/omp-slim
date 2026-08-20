@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Eval-bridge nested `tool.<name>()` calls now resolve through the same ACP permission gate and enabled-tool allowlist as direct tool calls for every provider — previously they bypassed the gate entirely, so a nested bash/write/edit could execute without the permission prompt a direct call would have triggered ([#9069](https://github.com/can1357/oh-my-pi/pull/9069) by [@MilesCranmerBot](https://github.com/MilesCranmerBot)).
+
+### Added
+
+- Added Code Mode for Codex `code_mode_only` models ([#9050](https://github.com/can1357/oh-my-pi/issues/9050)), mirroring codex-rs: the `providers.openai-codex.codeMode` setting (`off`/`on`/`auto`, default `off`; `auto` follows the model catalog's `tool_mode` flag) collapses the direct tool surface to the eval/ask/todo/yield keep-set (plus `providers.openai-codex.codeModeDirectTools`) whenever an openai-codex model matches, demoting every other enabled tool to the eval bridge with generated TypeScript `tool.<name>()` declarations in the eval tool description. Turn metadata carries codex-rs's `tool_namespaces_info` exposure snapshot while active, model and setting changes reconcile the surface in place, and startup applies it before the first provider turn ([#9069](https://github.com/can1357/oh-my-pi/pull/9069) by [@MilesCranmerBot](https://github.com/MilesCranmerBot)).
+
 ## [17.4.0] - 2026-08-20
 
 ### Added
@@ -30,7 +38,6 @@
 - Unified inline overlays and selectors (model picker, settings, `/cleanse`) into one titled rounded-box panel style.
 - Risk badges and warnings on `/settings` rows, starting with External Thinking.
 - Faster CLI Startup
-- Added Code Mode for Codex `code_mode_only` models ([#9050](https://github.com/can1357/oh-my-pi/issues/9050)), mirroring codex-rs: the `providers.openai-codex.codeMode` setting (`off`/`on`/`auto`, default `off`; `auto` follows the model catalog's `tool_mode` flag) collapses the direct tool surface to the eval/ask/todo/yield keep-set (plus `providers.openai-codex.codeModeDirectTools`) whenever an openai-codex model matches, demoting every other enabled tool to the eval bridge with generated TypeScript `tool.<name>()` declarations in the eval tool description. Turn metadata carries codex-rs's `tool_namespaces_info` exposure snapshot while active, model and setting changes reconcile the surface in place, and startup applies it before the first provider turn ([#9069](https://github.com/can1357/oh-my-pi/pull/9069) by [@MilesCranmerBot](https://github.com/MilesCranmerBot)).
 - Added `qwenTemplateReasoningEffort` to the `models.yml` `compat` schema, so the auto-enabled Qwen 3.8+ template effort dialect (`chat_template_kwargs.reasoning_effort`) can be switched off per provider/model for strict local servers that reject unknown `chat_template_kwargs`.
 - Added `tokenizer` to custom model and `modelOverrides` configuration. It overrides the catalog-resolved local tokenizer family for a model when a proxy serves a known model id with a different tokenizer.
 - Added `extendedContext` setting (`/settings` → Context → General, default on). When off, models with a premium long-context price tier (OpenAI GPT-5.6 Sol/Terra/Luna bill 2x input / 1.5x output above 272K input tokens, on both the API and subscription Codex) are capped at the standard-pricing threshold — they appear as 272K again and compaction fires before a request crosses into premium billing. Toggling mid-session re-clamps or restores the active model's window immediately. Anthropic Claude 4.6+ serves its full 1M window at standard pricing, so no Anthropic model is affected.
@@ -39,7 +46,6 @@
 
 ### Changed
 
-- Eval-bridge nested `tool.<name>()` calls now resolve through the same ACP permission gate and enabled-tool allowlist as direct tool calls for every provider — previously they bypassed the gate entirely, so a nested bash/write/edit could execute without the permission prompt a direct call would have triggered ([#9069](https://github.com/can1357/oh-my-pi/pull/9069) by [@MilesCranmerBot](https://github.com/MilesCranmerBot)).
 - `omp cleanse` and the `/cleanse` slash command now render a live interactive status board with running checkers, repair subagents, tool counts, token/cost totals, and live scrollback in both the CLI and interactive terminal modes
 - Replaced the single `compaction.strategy` / `compaction.remoteEnabled` policy with ordered `compaction.methodOrder` preferences. The default now tries OpenAI-compatible server compaction, snapcompact, handoff, shake, then soft compaction; unavailable or failed methods advance through that list.
 - `/settings` rows can now carry a risk note: a warning glyph on the row plus a warning-colored line above the description. `External Thinking` (`externalThinking`, `--external-thinking`) is the first user — providers have flagged the request shape it produces as abuse, up to account-level enforcement, so both the settings entry and `--help` now say so.

@@ -204,10 +204,11 @@ describe("Code Mode session reconciliation", () => {
 		}),
 		setActiveToolNames?: (names: Iterable<string>) => void,
 		extraTools: AgentTool[] = [],
+		evalOverride?: AgentTool,
 	): { session: AgentSession; directModel: Model; codeModel: Model } {
 		const codeModel = model("openai-codex", "code_mode_only");
 		const directModel = model("openai");
-		const evalTool = { ...tool("eval"), supportsCodeModeTransport: () => settings.get("eval.js") };
+		const evalTool = evalOverride ?? { ...tool("eval"), supportsCodeModeTransport: () => settings.get("eval.js") };
 		const tools = [evalTool, tool("read"), ...extraTools];
 		const session = new AgentSession({
 			agent: new Agent({ initialState: { model: codeModel, systemPrompt: [], tools } }),
@@ -240,6 +241,20 @@ describe("Code Mode session reconciliation", () => {
 
 		await session.setModel(codeModel);
 		expect(session.agent.state.tools.map(value => value.name)).toEqual(["eval"]);
+	});
+
+	test("an eval replacement that cannot state transport support keeps the direct surface", async () => {
+		const { session } = createSession(
+			Settings.isolated({ "providers.openai-codex.codeMode": "auto" }),
+			undefined,
+			undefined,
+			[],
+			tool("eval"),
+		);
+		await session.setActiveToolsByName(["eval", "read"]);
+
+		expect(session.getActiveToolNames()).toEqual(["eval", "read"]);
+		expect(session.codeModeNamespacesInfo).toBeUndefined();
 	});
 
 	test("model switches refresh direct wire-name metadata", async () => {

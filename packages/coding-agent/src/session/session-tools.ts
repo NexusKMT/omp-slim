@@ -403,7 +403,10 @@ export class SessionTools {
 			| (AgentTool & { supportsCodeModeTransport?: () => boolean })
 			| undefined;
 		if (!evalTool) return false;
-		return evalTool.supportsCodeModeTransport?.() ?? true;
+		// A replacement `eval` that cannot state the capability cannot be assumed
+		// to run `tool.<name>()`; demoting the direct surface behind it would
+		// leave every other tool unreachable.
+		return evalTool.supportsCodeModeTransport?.() ?? false;
 	}
 
 	/**
