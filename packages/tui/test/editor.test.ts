@@ -2989,5 +2989,45 @@ describe("Editor component", () => {
 			expect(lines[0]).toContain("╭");
 			expect(lines[1]).toContain("╰─ hello");
 		});
+
+		it("renders rule style as a top-rule dock without closing chrome", () => {
+			const editor = new Editor(unicodeTheme);
+			editor.setBorderStyle("rule");
+			editor.setText("hello");
+			const lines = editor.render(20);
+			expect(lines).toHaveLength(2);
+			expect(lines[0]).toBe("─".repeat(20));
+			expect(lines[1]).toStartWith("❯ hello");
+		});
+
+		it("renders field style as one filled row with accent caps", () => {
+			const editor = new Editor({
+				...unicodeTheme,
+				accentColor: text => `\x1b[35m${text}\x1b[39m`,
+				surfaceColor: text => `\x1b[44m${text}\x1b[49m`,
+			});
+			editor.setBorderStyle("field");
+			editor.setText("hello");
+			const [line] = editor.render(20);
+			expect(stripVTControlCharacters(line)).toStartWith("▐ hello");
+			expect(stripVTControlCharacters(line)).toEndWith("▌");
+			expect(visibleWidth(line)).toBe(20);
+			expect(line).toContain("\x1b[44m");
+		});
+
+		it("renders rail style as a full-width surface with one accent edge", () => {
+			const editor = new Editor({
+				...unicodeTheme,
+				accentColor: text => `\x1b[35m${text}\x1b[39m`,
+				surfaceColor: text => `\x1b[44m${text}\x1b[49m`,
+			});
+			editor.setBorderStyle("rail");
+			editor.setText("hello");
+			const [line] = editor.render(20);
+			expect(stripVTControlCharacters(line)).toStartWith("▎ hello");
+			expect(stripVTControlCharacters(line)).not.toContain("▌");
+			expect(visibleWidth(line)).toBe(20);
+			expect(line).toContain("\x1b[44m");
+		});
 	});
 });

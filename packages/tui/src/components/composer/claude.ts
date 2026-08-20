@@ -5,6 +5,7 @@
  * plain standalone bottom bar that yields its row to the autocomplete menu.
  */
 import type { ComposerChromeContext, ComposerRowContext, ComposerStyle } from "./types";
+import { renderTopRule } from "./rule";
 
 export const claudeComposerStyle: ComposerStyle = {
 	id: "claude",
@@ -12,6 +13,7 @@ export const claudeComposerStyle: ComposerStyle = {
 	verticalChrome: 2,
 	statusAttachment: "top-rule-chip",
 	bottomBar: "left",
+	bottomBarGap: false,
 	defaultPromptGutter: "❯ ",
 
 	defaultPaddingX(): number {
@@ -23,14 +25,7 @@ export const claudeComposerStyle: ComposerStyle = {
 	},
 
 	renderTop(ctx: ComposerChromeContext): string {
-		const { box, width, borderColor, topBorder } = ctx;
-		// Attach the status chip near the right edge, one trailing rule cell:
-		// `─────────────── hi ─`.
-		if (topBorder && topBorder.width > 0 && topBorder.width <= width - 2) {
-			const leftFill = Math.max(0, width - topBorder.width - 1);
-			return borderColor(box.horizontal.repeat(leftFill)) + topBorder.content + borderColor(box.horizontal);
-		}
-		return borderColor(box.horizontal.repeat(width));
+		return renderTopRule(ctx);
 	},
 
 	renderRow(ctx: ComposerRowContext): string[] {

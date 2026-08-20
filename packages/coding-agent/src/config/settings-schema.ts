@@ -81,8 +81,50 @@ import {
 
 export type ModelRoleStorage = "global" | "project";
 
-export type ComposerShape = "box" | "claude" | "pi" | "borderless";
-export const COMPOSER_SHAPE_VALUES = ["box", "claude", "pi", "borderless"] as const;
+/** Composer shape id; extensions may register additional values at runtime. */
+export type ComposerShape = string;
+
+/** Built-in composer choices and their shared settings/setup copy. */
+export const BUILTIN_COMPOSER_SHAPES = [
+	{
+		value: "box",
+		label: "Rounded Box (Default)",
+		description: "Status line embedded in top border, compact 2-line prompt",
+	},
+	{
+		value: "claude",
+		label: "Claude Code",
+		description: "Full-width horizontal rules above and below, status line at bottom",
+	},
+	{
+		value: "pi",
+		label: "Pi",
+		description: "Framed horizontal rules with status line at bottom",
+	},
+	{
+		value: "borderless",
+		label: "Borderless",
+		description: "Clean prompt glyph with status line at bottom, no box borders",
+	},
+	{
+		value: "rule",
+		label: "Top Rule Dock",
+		description: "Single top rule with status docked onto it and below",
+	},
+	{
+		value: "field",
+		label: "Compact Field",
+		description: "Filled one-row field with accent end caps",
+	},
+	{
+		value: "rail",
+		label: "Accent Rail",
+		description: "Filled one-row field anchored by a single accent rail",
+	},
+] as const;
+
+/** Built-in composer ids used by tests and non-runtime consumers. */
+export const COMPOSER_SHAPE_VALUES = BUILTIN_COMPOSER_SHAPES.map(shape => shape.value);
 
 export type ContextLineMode = "off" | "percentage" | "annotated" | "embedded";
 export const CONTEXT_LINE_MODE_VALUES = ["off", "percentage", "annotated", "embedded"] as const;
@@ -641,36 +683,14 @@ export const SETTINGS_SCHEMA = {
 	},
 	// Composer
 	"composer.shape": {
-		type: "enum",
-		values: COMPOSER_SHAPE_VALUES,
+		type: "string",
 		default: "box",
 		ui: {
 			tab: "appearance",
 			group: "Composer",
 			label: "Composer Shape",
 			description: "Visual layout of the input editor and status line",
-			options: [
-				{
-					value: "box",
-					label: "Rounded Box (Default)",
-					description: "Status line embedded in top border, compact 2-line prompt",
-				},
-				{
-					value: "claude",
-					label: "Claude Code",
-					description: "Full-width horizontal rules above and below, status line at bottom",
-				},
-				{
-					value: "pi",
-					label: "Pi",
-					description: "Framed rounded box with prompt glyph, status line at bottom",
-				},
-				{
-					value: "borderless",
-					label: "Borderless",
-					description: "Clean prompt glyph with status line at bottom, no box borders",
-				},
-			],
+			options: "runtime",
 		},
 	},
 

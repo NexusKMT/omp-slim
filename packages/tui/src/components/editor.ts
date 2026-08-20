@@ -36,6 +36,8 @@ export type { EditorBorderStyle, EditorTopBorder };
 
 import { type SelectItem, SelectList, type SelectListLayoutOptions, type SelectListTheme } from "./select-list";
 
+const PASSTHROUGH_COLOR = (text: string): string => text;
+
 const AUTOCOMPLETE_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	overflowSearch: false,
 };
@@ -390,6 +392,10 @@ interface WrapEntry {
 
 export interface EditorTheme {
 	borderColor: (str: string) => string;
+	/** Stable accent for composer chrome that should not follow the mutable border state. */
+	accentColor?: (str: string) => string;
+	/** Background fill used by filled composer styles. */
+	surfaceColor?: (str: string) => string;
 	selectList: SelectListTheme;
 	symbols: SymbolTheme;
 	editorPaddingX?: number;
@@ -982,6 +988,8 @@ export class Editor implements Component, Focusable {
 			width,
 			paddingX,
 			borderColor: (str: string) => this.borderColor(str),
+			accentColor: this.#theme.accentColor ?? this.borderColor,
+			surfaceColor: this.#theme.surfaceColor ?? PASSTHROUGH_COLOR,
 			box,
 			topBorder,
 		};

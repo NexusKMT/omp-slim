@@ -1,53 +1,41 @@
 import { routeSelectListMouse, type SelectItem, SelectList, type SgrMouseEvent } from "@oh-my-pi/pi-tui";
 import type { ComposerShape } from "../../../config/settings-schema";
+import { getComposerShapeOptions } from "../../components/composer-shape-registry";
 import { renderComposerShapePreview } from "../../components/composer-shape-preview";
 import { getSelectListTheme, theme } from "../../theme/theme";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
-
-const COMPOSER_SHAPES: readonly ComposerShape[] = ["box", "claude", "pi", "borderless"];
-
-const COMPOSER_LABELS: Readonly<Record<ComposerShape, string>> = {
-	box: "Rounded Box (Default)",
-	claude: "Claude Code",
-	pi: "Pi",
-	borderless: "Borderless",
-};
-
-const COMPOSER_DESCRIPTIONS: Readonly<Record<ComposerShape, string>> = {
-	box: "Status line integrated in top border, compact 2-line prompt",
-	claude: "Full-width horizontal rules above and below, status line at bottom",
-	pi: "Framed rounded box with prompt glyph, status line at bottom",
-	borderless: "Clean prompt glyph with status line at bottom, no box borders",
-};
-
-const COMPOSER_ITEMS: readonly SelectItem[] = COMPOSER_SHAPES.map((shape, index) => ({
-	value: shape,
-	label: `${index + 1}  ${COMPOSER_LABELS[shape]}`,
-	description: COMPOSER_DESCRIPTIONS[shape],
-}));
 
 class ComposerSceneController implements SetupSceneController {
 	title = "Choose composer shape";
 	subtitle = "Pick the prompt and status line layout for your workflow.";
 	#selectList: SelectList;
+	#shapes: readonly ComposerShape[];
+	#items: readonly SelectItem[];
 	#currentShape: ComposerShape = "box";
 	#committing = false;
 	#listRowStart = 0;
 
 	constructor(private readonly host: SetupSceneHost) {
-		const configuredShape = host.ctx.settings.get("composer.shape") as ComposerShape;
-		const initialShape = COMPOSER_SHAPES.includes(configuredShape) ? configuredShape : "box";
+		const choices = getComposerShapeOptions();
+		this.#shapes = choices.map(choice => choice.value);
+		this.#items = choices.map((choice, index) => ({
+			value: choice.value,
+			label: `${index + 1}  ${choice.label}`,
+			description: choice.description,
+		}));
+		const configuredShape = host.ctx.settings.get("composer.shape") ?? "box";
+		const initialShape = this.#shapes.includes(configuredShape) ? configuredShape : "box";
 		this.#currentShape = initialShape;
-		const initialIndex = Math.max(0, COMPOSER_SHAPES.indexOf(initialShape));
+		const initialIndex = Math.max(0, this.#shapes.indexOf(initialShape));
 
 		const selectListTheme = getSelectListTheme();
-		this.#selectList = new SelectList(COMPOSER_ITEMS, COMPOSER_ITEMS.length, selectListTheme);
+		this.#selectList = new SelectList(this.#items, this.#items.length, selectListTheme);
 		this.#selectList.setSelectedIndex(initialIndex);
 		this.#selectList.onSelectionChange = item => {
-			this.#preview(item.value as ComposerShape);
+			this.#preview(item.value);
 		};
 		this.#selectList.onSelect = item => {
-			void this.#commit(item.value as ComposerShape);
+			void this.#commit(item.value);
 		};
 		this.#selectList.onCancel = () => {
 			// Esc skips the scene without saving; the configured shape stays untouched.
@@ -61,10 +49,10 @@ class ComposerSceneController implements SetupSceneController {
 
 	handleInput(data: string): void {
 		if (this.#committing) return;
-		const quickIndex = data >= "1" && data <= "4" ? Number(data) - 1 : -1;
-		if (quickIndex >= 0 && quickIndex < COMPOSER_ITEMS.length) {
+		const quickIndex = data.length === 1 ? Number(data) - 1 : -1;
+		if (Number.isInteger(quickIndex) && quickIndex >= 0 && quickIndex < this.#items.length) {
 			this.#selectList.setSelectedIndex(quickIndex);
-			this.#preview(COMPOSER_SHAPES[quickIndex] ?? "box");
+			this.#preview(this.#shapes[quickIndex] ?? "box");
 			return;
 		}
 		this.#selectList.handleInput(data);
@@ -80,7 +68,7 @@ class ComposerSceneController implements SetupSceneController {
 		const lines = [theme.fg("muted", "Select a layout; live preview updates below. Press Enter to confirm."), ""];
 
 		const previewLines = renderComposerShapePreview(this.#currentShape, width, this.host.ctx.statusLine);
-		if (budget - lines.length - previewLines.length - 2 >= COMPOSER_ITEMS.length) {
+		if (budget - lines.length - previewLines.length - 2 >= this.#items.length) {
 			lines.push(theme.fg("muted", "Preview:"), ...previewLines, "");
 		}
 

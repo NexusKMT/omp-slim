@@ -12,6 +12,7 @@ export const boxComposerStyle: ComposerStyle = {
 	verticalChrome: 2,
 	statusAttachment: "top-border",
 	bottomBar: "none",
+	bottomBarGap: false,
 	defaultPromptGutter: undefined,
 
 	defaultPaddingX(themePaddingX: number | undefined): number {

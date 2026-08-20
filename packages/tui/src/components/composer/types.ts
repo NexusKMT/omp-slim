@@ -11,9 +11,14 @@ import type { SymbolTheme } from "../../symbols";
 /** Box-drawing glyph set used for composer chrome (the theme's `boxRound`). */
 export type ComposerBox = SymbolTheme["boxRound"];
 
-/** Available composer shapes. `box` is the classic rounded frame with the
- *  status line embedded in its top border. */
-export type EditorBorderStyle = "box" | "claude" | "pi" | "borderless";
+/** Built-in composer shape identifiers shipped by pi-tui. */
+export const BUILTIN_EDITOR_BORDER_STYLES = ["box", "claude", "pi", "borderless", "rule", "field", "rail"] as const;
+
+/** Identifier for a built-in composer shape. */
+export type BuiltinEditorBorderStyle = (typeof BUILTIN_EDITOR_BORDER_STYLES)[number];
+
+/** Composer shape identifier; extensions may register additional strings. */
+export type EditorBorderStyle = string;
 
 /** Pre-rendered status content injected into the top chrome. */
 export interface EditorTopBorder {
@@ -32,10 +37,14 @@ export interface ComposerChromeContext {
 	/** Horizontal padding inside the side chrome. */
 	paddingX: number;
 	borderColor: (str: string) => string;
+	/** Stable accent used by shape-defining chrome such as field caps and rails. */
+	accentColor: (str: string) => string;
+	/** Background fill for composer surfaces; preserves the fill across nested SGR resets. */
+	surfaceColor: (str: string) => string;
 	/** Box-drawing glyph set (theme's `boxRound`). */
 	box: ComposerBox;
-	/** Status content for the top chrome; box embeds it after the corner,
-	 *  claude chips it against the right edge, other styles ignore it. */
+	/** Status content for the top chrome; box embeds it after the corner while
+	 * rule-based styles dock it against the right edge. */
 	topBorder?: EditorTopBorder;
 }
 
@@ -63,13 +72,16 @@ export interface ComposerStyle {
 	 *  column, IME-safe layout, and the right-border scrollbar. */
 	readonly sideBorders: boolean;
 	/** Rows consumed by top+bottom chrome (drives maxHeight budgeting). */
-	readonly verticalChrome: 0 | 2;
-	/** Where the host should attach the status bar: embedded in the top border
-	 *  (box), chipped onto the top rule (claude), or detached (rule/borderless
-	 *  styles render it as a standalone bottom bar). */
+	readonly verticalChrome: 0 | 1 | 2;
+	/** Where the host should attach the status bar: embedded in the top border,
+	 * docked onto a top rule, or detached into a standalone bottom bar. */
 	readonly statusAttachment: "top-border" | "top-rule-chip" | "none";
 	/** Which segment groups the standalone bottom status bar shows. */
 	readonly bottomBar: "none" | "left" | "full";
+	/** Insert a blank spacer row between the editor and the standalone bottom
+	 * bar. Styles without bottom chrome need it so the bar doesn't sit flush
+	 * against the last input row. */
+	readonly bottomBarGap: boolean;
 	/** Default prompt gutter when the host sets none. */
 	readonly defaultPromptGutter: string | undefined;
 	/** Default horizontal padding; `themePaddingX` is the theme's request. */

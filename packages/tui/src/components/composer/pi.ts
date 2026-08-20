@@ -12,6 +12,7 @@ export const piComposerStyle: ComposerStyle = {
 	verticalChrome: 2,
 	statusAttachment: "none",
 	bottomBar: "full",
+	bottomBarGap: false,
 	defaultPromptGutter: undefined,
 
 	defaultPaddingX(): number {

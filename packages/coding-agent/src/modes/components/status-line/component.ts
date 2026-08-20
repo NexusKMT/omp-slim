@@ -328,6 +328,7 @@ function hasGitBackedSegment(segments: readonly StatusLineSegmentId[]): boolean 
 
 export class StatusLineComponent implements Component {
 	#standalone: false | "full" | "left-only" = false;
+	#standaloneGap = false;
 	#autocompleteActiveProbe: (() => boolean) | undefined;
 	#widthEpochRevision = 0;
 	#settings: StatusLineSettings = {};
@@ -2105,14 +2106,17 @@ export class StatusLineComponent implements Component {
 		};
 	}
 	/**
-	 * Standalone bar placement for non-box composer shapes. `"full"` renders
-	 * both groups on the bottom bar (pi/borderless); `"left-only"` renders just
-	 * the left group there — the right group attaches to the editor's top rule
-	 * via {@link getStandaloneTopBorder} (claude). `false` returns the bar to
-	 * the box composer's embedded top border.
+	 * Standalone bar placement derived from the composer style. `bottomBar`
+	 * `"full"` renders both groups on the bottom bar (pi/borderless/field/rail);
+	 * `"left"` renders just the left group there — the right group attaches to
+	 * the editor's top rule via {@link getStandaloneTopBorder} (claude/rule);
+	 * `"none"` returns the bar to the box composer's embedded top border.
+	 * `bottomBarGap` inserts a blank spacer row above the bar for styles whose
+	 * editor has no bottom chrome.
 	 */
-	setStandalone(standalone: false | "full" | "left-only"): void {
-		this.#standalone = standalone;
+	setComposerStyle(style: Pick<ComposerStyle, "bottomBar" | "bottomBarGap">): void {
+		this.#standalone = style.bottomBar === "none" ? false : style.bottomBar === "left" ? "left-only" : "full";
+		this.#standaloneGap = style.bottomBarGap;
 	}
 
 	/** While true, the standalone bar yields its row to the editor's autocomplete menu. */
@@ -2170,6 +2174,8 @@ export class StatusLineComponent implements Component {
 				width,
 				paddingX: 0,
 				borderColor: str => theme.fg("border", str),
+				accentColor: str => theme.fg("accent", str),
+				surfaceColor: str => theme.bgFill("userMessageBg", str),
 				box: theme.boxRound,
 				topBorder: this.getStandaloneTopBorder(width),
 			});
@@ -2186,7 +2192,10 @@ export class StatusLineComponent implements Component {
 		const lines: string[] = [];
 		if (this.#standalone && !this.#autocompleteActiveProbe?.()) {
 			const content = this.renderBottomBar(width, this.#standalone === "left-only" ? "left" : "full");
-			if (content) lines.push(content);
+			if (content) {
+				if (this.#standaloneGap) lines.push("");
+				lines.push(content);
+			}
 		}
 		const showHooks = this.#settings.showHookStatus ?? true;
 		if (showHooks && this.#hookStatuses.size > 0) {

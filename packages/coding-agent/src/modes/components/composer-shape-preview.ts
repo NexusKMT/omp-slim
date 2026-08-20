@@ -62,6 +62,8 @@ export function renderComposerShapePreview(
 		width: previewWidth,
 		paddingX,
 		borderColor: (str: string) => theme.fg("borderAccent", str),
+		accentColor: (str: string) => theme.fg("accent", str),
+		surfaceColor: (str: string) => theme.bgFill("userMessageBg", str),
 		box: theme.boxRound,
 		topBorder,
 	};
@@ -93,7 +95,10 @@ export function renderComposerShapePreview(
 
 	if (style.bottomBar !== "none" && status) {
 		const bar = status.renderBottomBar(previewWidth, style.bottomBar);
-		if (bar) lines.push(bar);
+		if (bar) {
+			if (style.bottomBarGap) lines.push("");
+			lines.push(bar);
+		}
 	}
 	return lines;
 }

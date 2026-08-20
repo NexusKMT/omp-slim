@@ -12,6 +12,7 @@ export const borderlessComposerStyle: ComposerStyle = {
 	verticalChrome: 0,
 	statusAttachment: "none",
 	bottomBar: "full",
+	bottomBarGap: false,
 	defaultPromptGutter: "❯ ",
 
 	defaultPaddingX(): number {

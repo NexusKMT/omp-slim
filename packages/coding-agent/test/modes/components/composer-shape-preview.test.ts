@@ -5,8 +5,13 @@ import {
 	ComposerShapePreview,
 	renderComposerShapePreview,
 } from "@oh-my-pi/pi-coding-agent/modes/components/composer-shape-preview";
+import {
+	getComposerShapeOptions,
+	installExtensionComposerShape,
+} from "@oh-my-pi/pi-coding-agent/modes/components/composer-shape-registry";
 import { SettingsSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/settings-selector";
 import { initTheme, setTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import type { ComposerStyle } from "@oh-my-pi/pi-tui";
 
 beforeAll(async () => {
 	await initTheme();
@@ -83,12 +88,61 @@ describe("composer shape preview", () => {
 		expect(claude).toContain("CHIP"); // right group chips onto the top rule
 		expect(claude).toContain("BOTTOM-LEFT"); // left group only on the bottom bar
 
+		const rule = renderComposerShapePreview("rule", 80, status).join("\n");
+		expect(rule).toContain("CHIP");
+		expect(rule).toContain("BOTTOM-LEFT");
+
 		const pi = renderComposerShapePreview("pi", 80, status).join("\n");
 		expect(pi).not.toContain("CHIP");
 		expect(pi).toContain("BOTTOM-FULL"); // both groups on the bottom bar
 
 		const borderless = renderComposerShapePreview("borderless", 80, status).join("\n");
 		expect(borderless).toContain("BOTTOM-FULL");
+
+		for (const shape of ["field", "rail"]) {
+			const rendered = renderComposerShapePreview(shape, 80, status).join("\n");
+			expect(rendered).not.toContain("CHIP");
+			expect(rendered).toContain("BOTTOM-FULL");
+		}
+	});
+
+	it("installs extension shapes into both selectors and live rendering", async () => {
+		await setTheme("dark");
+		const style: ComposerStyle = {
+			id: "extension-dock",
+			sideBorders: false,
+			verticalChrome: 1,
+			statusAttachment: "none",
+			bottomBar: "full",
+			bottomBarGap: false,
+			defaultPromptGutter: "EXT ",
+			defaultPaddingX: () => 0,
+			sideChromeWidth: () => 0,
+			renderTop: context => context.borderColor("=".repeat(context.width)),
+			renderRow: context => [context.gutter + context.text + context.pad],
+			renderBottom: () => undefined,
+		};
+		const dispose = installExtensionComposerShape({
+			label: "Extension Dock",
+			description: "Custom extension composer",
+			style,
+		});
+
+		try {
+			expect(getComposerShapeOptions().at(-1)).toEqual({
+				value: "extension-dock",
+				label: "Extension Dock",
+				description: "Custom extension composer",
+			});
+			const rendered = renderComposerShapePreview("extension-dock", 76).join("\n");
+			expect(rendered).toContain("=".repeat(76));
+			expect(rendered).toContain("EXT ");
+			expect(rendered).toContain("Ask anything");
+		} finally {
+			dispose();
+		}
+
+		expect(getComposerShapeOptions().some(option => option.value === "extension-dock")).toBe(false);
 	});
 
 	it("renders preview inside SettingsSelectorComponent submenu without crashing", async () => {

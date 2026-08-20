@@ -403,12 +403,20 @@ describe("StatusLineComponent context breakdown", () => {
 		const comp = new StatusLineComponent(session);
 		expect(comp.render(80)).toHaveLength(0); // box mode: main status lives in the editor border
 
-		comp.setStandalone("full");
+		comp.setComposerStyle({ bottomBar: "full", bottomBarGap: false });
 		const lines = comp.render(80);
 		expect(lines).toHaveLength(1);
 		// Plain bar: transparent background, no powerline caps or bg fill.
 		expect(lines[0]).not.toContain("\x1b[48;");
 		expect(lines[0]).toContain("\x1b[49m");
+
+		// Styles without bottom chrome (rule/field/rail) request a spacer row so
+		// the bar doesn't sit flush against the last input row.
+		comp.setComposerStyle({ bottomBar: "full", bottomBarGap: true });
+		const gapped = comp.render(80);
+		expect(gapped).toHaveLength(2);
+		expect(gapped[0]).toBe("");
+		expect(gapped[1]).toBe(lines[0]);
 	});
 
 	it("standalone bar yields to the autocomplete menu via the probe", () => {
@@ -417,12 +425,12 @@ describe("StatusLineComponent context breakdown", () => {
 			usage: { tokens: 1000, contextWindow: 100_000, percent: 1 },
 		});
 		const comp = new StatusLineComponent(session);
-		comp.setStandalone("full");
+		comp.setComposerStyle({ bottomBar: "full", bottomBarGap: true });
 		let menuOpen = true;
 		comp.setAutocompleteActiveProbe(() => menuOpen);
 		expect(comp.render(80)).toHaveLength(0);
 		menuOpen = false;
-		expect(comp.render(80)).toHaveLength(1);
+		expect(comp.render(80)).toHaveLength(2); // spacer + bar return together
 	});
 
 	it("claude layout splits groups: left-only bottom bar, right group as top-rule chip", () => {
@@ -438,7 +446,7 @@ describe("StatusLineComponent context breakdown", () => {
 			separator: "none",
 			sessionAccent: false,
 		});
-		comp.setStandalone("left-only");
+		comp.setComposerStyle({ bottomBar: "left", bottomBarGap: false });
 
 		const bottom = comp.render(80);
 		expect(bottom).toHaveLength(1);

@@ -68,7 +68,6 @@ import {
 	Settings,
 	settings,
 } from "../config/settings";
-import type { ComposerShape } from "../config/settings-schema";
 import { clearClaudePluginRootsCache } from "../discovery/helpers";
 import type {
 	AutocompleteProviderFactory,
@@ -1925,7 +1924,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		});
 	}
 	syncComposerShape(): void {
-		const shape = (settings.get("composer.shape") as ComposerShape) ?? "box";
+		const shape = settings.get("composer.shape") ?? "box";
 		const style = getComposerStyle(shape);
 		this.editor.setBorderStyle(shape);
 		this.statusLine.setAutocompleteActiveProbe(() => this.editor.isAutocompleteActive());
@@ -1941,9 +1940,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				this.editor.setTopBorder(undefined);
 				break;
 		}
-		this.statusLine.setStandalone(
-			style.bottomBar === "none" ? false : style.bottomBar === "left" ? "left-only" : "full",
-		);
+		this.statusLine.setComposerStyle(style);
 		this.updateEditorBorderColor();
 		this.ui.requestRender();
 	}
@@ -4391,6 +4388,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		this.#extensionUiController.clearExtensionTerminalInputListeners();
 		this.#extensionUiController.clearHookWidgets();
+		this.#extensionUiController.disposeComposerShapes();
 		for (const unsubscribe of this.#eventBusUnsubscribers) {
 			unsubscribe();
 		}

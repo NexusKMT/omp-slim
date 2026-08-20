@@ -47,6 +47,7 @@ import { getCurrentThemeName, getSelectListTheme, getSettingsListTheme, theme } 
 import { AUTO_THINKING, type ConfiguredThinkingLevel } from "../../thinking";
 import { getTabBarTheme } from "../shared";
 import { type ComposerPreviewStatusSource, ComposerShapePreview } from "./composer-shape-preview";
+import { getComposerShapeOptions } from "./composer-shape-registry";
 import { bottomBorder, divider, row, topBorder } from "./overlay-box";
 import { handleInputOrEscape, PluginSettingsComponent } from "./plugin-settings";
 import { getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
@@ -1077,8 +1078,9 @@ export class SettingsSelectorComponent implements Component {
 			});
 		} else if (def.path === "theme.dark" || def.path === "theme.light") {
 			options = this.context.availableThemes.map(t => ({ value: t, label: t }));
+		} else if (def.path === "composer.shape") {
+			options = getComposerShapeOptions();
 		}
-
 		// Preview handlers
 		let onPreview: ((value: string) => void | Promise<void>) | undefined;
 		let onPreviewCancel: (() => void) | undefined;
@@ -1138,11 +1140,11 @@ export class SettingsSelectorComponent implements Component {
 			onPreview = value => shapePreview.setValue(value);
 			footer = shapePreview;
 		} else if (def.path === "composer.shape") {
-			const shapePreview = new ComposerShapePreview(currentValue as ComposerShape, {
+			const shapePreview = new ComposerShapePreview(String(currentValue ?? "box"), {
 				requestRender: this.context.requestRender,
 				status: this.context.composerPreviewStatus,
 			});
-			onPreview = value => shapePreview.setValue(value as ComposerShape);
+			onPreview = value => shapePreview.setValue(value);
 			footer = shapePreview;
 		}
 		// Provide status line preview for theme selection
