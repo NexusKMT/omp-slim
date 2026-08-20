@@ -220,6 +220,22 @@ describe("DAP launch failure handling", () => {
 		expect(message).toContain("configurationDone: Expected process to be stopped.");
 	});
 
+	it("completes configuration without sending attach for preattached adapters", async () => {
+		const adapter: DapResolvedAdapter = {
+			...TEST_ADAPTER,
+			attachDefaults: { request: "attach", skipAttachRequest: true },
+		};
+		const manager = new DapSessionManager();
+		const fake = new FakeDapClient(adapter, process.cwd(), {});
+		spyOn(DapClient, "spawn").mockResolvedValue(fake as unknown as DapClient);
+
+		const summary = await manager.attach({ adapter, cwd: process.cwd(), pid: 123 });
+
+		expect(fake.requests.map(request => request.command)).toEqual(["configurationDone"]);
+		expect(summary.status).toBe("running");
+		expect(summary.needsConfigurationDone).toBe(false);
+	});
+
 	it("does not emit an unhandled rejection when launch fails before initial stop watchers settle", async () => {
 		const manager = new DapSessionManager();
 		const fake = new FakeDapClient(TEST_ADAPTER, process.cwd(), {
