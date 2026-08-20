@@ -2259,10 +2259,11 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	/**
-	 * Fires once, the instant the todo list first fully closes: shrinks the
-	 * header bar to nothing over `TODO_BAR_COLLAPSE_DURATION_MS` and then drops
-	 * the whole row. Independent of `tasks.todoClearDelay`, which governs when
-	 * the remaining phase/task tree disappears — the tree is untouched here.
+	 * Fires once, the instant the todo list first fully closes: drains the
+	 * accent from the tree spine over `TODO_BAR_COLLAPSE_DURATION_MS` and then
+	 * drops the `TODO` header row. Independent of `tasks.todoClearDelay`, which
+	 * governs when the remaining phase/task tree disappears — the tree is
+	 * untouched here.
 	 */
 	#startTodoBarCollapseAnimation(): void {
 		this.#cancelTodoBarCollapseAnimation();
@@ -2416,7 +2417,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		// One phase node. The active stage is highlighted with normal-brightness task
 		// progress; other stages render their whole row (name + progress) in the
-		// brighter muted gray. The root header carries the summed progress bar.
+		// brighter muted gray. Overall progress lives in the tree spine (below).
 		const renderPhase = (phase: TodoPhase, oneBased: number, isActive: boolean): string | string[] => {
 			const label = multiPhase ? formatPhaseDisplayName(phase.name, oneBased) : phase.name;
 			// Closed, not just completed: the collapsed task window hides abandoned
@@ -2437,44 +2438,67 @@ export class InteractiveMode implements InteractiveModeContext {
 		const baseIdx = expanded ? 0 : activeIdx;
 		const phaseSlice = expanded ? phases.slice(baseIdx) : phases.slice(baseIdx, baseIdx + 1 + subsequentStageCap);
 		const hiddenStages = phases.length - baseIdx - phaseSlice.length;
-		const phaseTreeLines = renderTreeList(
-			{
-				items: phaseSlice,
-				expanded,
-				trailingSummary: hiddenStages > 0 ? formatMoreItems(hiddenStages, "stage") : "",
-				renderItem: (phase, ctx) => renderPhase(phase, baseIdx + ctx.index + 1, baseIdx + ctx.index === activeIdx),
-			},
-			theme,
-		);
 
-		// Header: overall task progress as a bar summed across every stage (no
-		// trailing count — the bar itself carries the signal). Once the list
-		// fully closes, `#startTodoBarCollapseAnimation` shrinks the bar to
-		// nothing over `TODO_BAR_COLLAPSE_DURATION_MS` and the whole row is then
-		// dropped — the phase/task tree below is untouched and keeps its own
-		// per-stage counts until the separate `tasks.todoClearDelay` timer fires.
-		const headerLines: string[] = [""];
-		if (!this.#todoBarCollapsed) {
-			const barWidth = 20;
-			const collapseFraction = this.#todoBarCollapseFraction();
-			let bar: string;
-			if (collapseFraction > 0) {
-				const shrunkWidth = Math.max(0, Math.round(barWidth * (1 - collapseFraction)));
-				bar = theme.fg("accent", theme.progress.filled.repeat(shrunkWidth));
-			} else {
-				const totalTasks = phases.reduce((sum, phase) => sum + phase.tasks.length, 0);
-				const closedTasks = phases.reduce((sum, phase) => sum + phase.tasks.filter(isClosedTodo).length, 0);
-				// Clamp so any progress shows a sliver and only 100% fills the bar.
-				let filledWidth = Math.round((closedTasks / totalTasks) * barWidth);
-				if (closedTasks > 0) filledWidth = Math.max(filledWidth, 1);
-				if (closedTasks < totalTasks) filledWidth = Math.min(filledWidth, barWidth - 1);
-				bar =
-					theme.fg("accent", theme.progress.filled.repeat(filledWidth)) +
-					theme.fg("dim", theme.progress.empty.repeat(barWidth - filledWidth));
+		// Flatten the stage tree into content rows plus a per-row top-level spine
+		// glyph (`├─` for stage rows, `│` for continuations). The spine never
+		// closes downward — a short elbow tail (`└────`) ends the block instead,
+		// so spine + bend + tail form one continuous progress path.
+		const spineGlyphs: string[] = [];
+		const contentLines: string[] = [];
+		const pushBlock = (block: string | string[]): void => {
+			const rows = Array.isArray(block) ? block : [block];
+			if (rows.length === 0) return;
+			spineGlyphs.push(`${theme.tree.branch} `);
+			contentLines.push(replaceTabs(rows[0]!));
+			for (let i = 1; i < rows.length; i++) {
+				spineGlyphs.push(`${theme.tree.vertical}  `);
+				contentLines.push(replaceTabs(rows[i]!));
 			}
-			headerLines.push(`${theme.bold(theme.fg("accent", "TODO"))} ${bar}`);
+		};
+		for (let i = 0; i < phaseSlice.length; i++) {
+			pushBlock(renderPhase(phaseSlice[i], baseIdx + i + 1, baseIdx + i === activeIdx));
 		}
-		const lines = [...headerLines, ...phaseTreeLines.map(line => ` ${line}`)];
+		if (hiddenStages > 0) {
+			pushBlock(theme.fg("muted", formatMoreItems(hiddenStages, "stage")));
+		}
+
+		// Closing tail: hook + a few horizontals. Every tail cell is 1 column in
+		// both glyph sets, so string slicing below splits it by visible cells.
+		const tailLen = 6;
+		const tail = theme.tree.hook + theme.tree.horizontal.repeat(Math.max(0, tailLen - visibleWidth(theme.tree.hook)));
+
+		// Overall progress (summed across every stage) fills the path in reading
+		// order: down the spine, around the bend, out along the tail.
+		// Clamped so any progress lights at least one cell and only a fully
+		// closed list fills the whole path. Once the list fully closes,
+		// `#startTodoBarCollapseAnimation` drains the accent back to nothing over
+		// `TODO_BAR_COLLAPSE_DURATION_MS` and the `TODO` header row is then
+		// dropped — the phase/task tree keeps its own per-stage counts until the
+		// separate `tasks.todoClearDelay` timer fires.
+		const totalTasks = phases.reduce((sum, phase) => sum + phase.tasks.length, 0);
+		const closedTasks = phases.reduce((sum, phase) => sum + phase.tasks.filter(isClosedTodo).length, 0);
+		const collapseFraction = this.#todoBarCollapseFraction();
+		const pathLen = contentLines.length + tailLen;
+		let filled: number;
+		if (this.#todoBarCollapsed) {
+			filled = 0;
+		} else if (collapseFraction > 0) {
+			filled = Math.round((1 - collapseFraction) * pathLen);
+		} else {
+			filled = Math.round((closedTasks / totalTasks) * pathLen);
+			if (closedTasks > 0) filled = Math.max(filled, 1);
+			if (closedTasks < totalTasks) filled = Math.min(filled, pathLen - 1);
+		}
+
+		const lines: string[] = [""];
+		if (!this.#todoBarCollapsed) {
+			lines.push(theme.bold(theme.fg("accent", "TODO")));
+		}
+		for (let i = 0; i < contentLines.length; i++) {
+			lines.push(` ${theme.fg(i < filled ? "accent" : "dim", spineGlyphs[i]!)}${contentLines[i]}`);
+		}
+		const tailFilled = Math.max(0, Math.min(filled - contentLines.length, tail.length));
+		lines.push(` ${theme.fg("accent", tail.slice(0, tailFilled))}${theme.fg("dim", tail.slice(tailFilled))}`);
 		this.todoContainer.addChild(new Text(lines.join("\n"), 1, 0));
 	}
 
