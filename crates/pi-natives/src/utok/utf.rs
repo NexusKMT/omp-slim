@@ -119,7 +119,7 @@ impl Unit for u32 {
 
 	#[inline]
 	fn encode(cp: char, out: &mut [Self]) -> usize {
-		out[0] = cp as u32;
+		out[0] = cp as Self;
 		1
 	}
 
@@ -203,7 +203,7 @@ pub struct Cursor<'a, U: Unit> {
 
 impl<'a, U: Unit> Cursor<'a, U> {
 	#[inline]
-	pub fn new(units: &'a [U]) -> Self {
+	pub const fn new(units: &'a [U]) -> Self {
 		Self { units, pos: 0 }
 	}
 
@@ -221,7 +221,7 @@ impl<'a, U: Unit> Cursor<'a, U> {
 	}
 
 	#[inline]
-	pub fn advance(&mut self, n: usize) {
+	pub const fn advance(&mut self, n: usize) {
 		self.pos += n;
 	}
 }

@@ -10,7 +10,7 @@
 //! | `Cl100kBase` | GPT-3.5 / GPT-4 | byte-level BPE |
 //! | `ClaudeV3` / `ClaudeV47` / `ClaudeV5` / `ClaudeV5Sonnet` | Claude generations | ctok count reconstruction (count-only) |
 //! | `Qwen3` | Qwen 3.5 / 3.6 / 3.8 (248k vocab) | byte-level BPE + NFC |
-//! | `DeepSeekV3` | DeepSeek V3 … V4 | byte-level BPE, 3-stage split chain |
+//! | `DeepSeekV3` | `DeepSeek` V3 … V4 | byte-level BPE, 3-stage split chain |
 //! | `KimiK2` | Kimi K2 … K3 | byte-level BPE (tiktoken ranks) |
 //! | `Glm5` | GLM-5.x (exact), GLM-4.x (near-exact) | byte-level BPE, `ignore_merges` |
 //!
@@ -41,9 +41,9 @@ pub use self::{
 /// process-wide tables (first use pays one zstd decode of ~0.5–1 MB).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Encoding {
-	/// GPT-4o / o1 / GPT-5 (OpenAI default).
+	/// GPT-4o / o1 / GPT-5 (`OpenAI` default).
 	O200kBase,
-	/// GPT-3.5 / GPT-4 / older OpenAI.
+	/// GPT-3.5 / GPT-4 / older `OpenAI`.
 	Cl100kBase,
 	/// Claude 3 through Opus 4.6 (and every non-opus Claude < 5).
 	ClaudeV3,
@@ -55,7 +55,7 @@ pub enum Encoding {
 	ClaudeV5Sonnet,
 	/// Qwen 3.5 / 3.6 / 3.8 (248,044-token vocabulary, NFC input).
 	Qwen3,
-	/// DeepSeek V3 / V3.1 / V3.2 / R1 / V4 (identical base BPE).
+	/// `DeepSeek` V3 / V3.1 / V3.2 / R1 / V4 (identical base BPE).
 	DeepSeekV3,
 	/// Kimi K2 / K2.5 / K3 (163,584-token base vocabulary).
 	KimiK2,

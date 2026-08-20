@@ -64,7 +64,7 @@ pub mod cls {
 	}
 
 	#[inline]
-	pub fn is_ws(c: char) -> bool {
+	pub const fn is_ws(c: char) -> bool {
 		c.is_whitespace()
 	}
 

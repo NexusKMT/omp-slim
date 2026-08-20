@@ -6,7 +6,7 @@
 //! decompression in [`tables`](crate::utok::tables).
 //!
 //! Input is encoding-generic: [`BpeEncoding::count`]/[`encode`]
-//! (BpeEncoding::encode) take `&[U: Unit]`. Pre-tokenization scans the
+//! (`BpeEncoding::encode`) take `&[U: Unit]`. Pre-tokenization scans the
 //! units natively; each piece is then UTF-8-encoded into a reused buffer
 //! for the byte-keyed rank table (`str` input skips that copy entirely,
 //! non-UTF-8 flavors narrow ASCII runs 1:1). Steady state performs no
@@ -31,7 +31,7 @@ use crate::utok::{
 };
 
 /// Firefox/rustc Fx hash: multiplicative word-at-a-time mixing. Rank
-/// lookups hash short byte keys on every merge step; SipHash is the
+/// lookups hash short byte keys on every merge step; `SipHash` is the
 /// dominant cost there (~30% end-to-end at the default hasher).
 #[derive(Default)]
 struct FxHasher(u64);
@@ -102,7 +102,7 @@ fn pack(key: &[u8]) -> Option<u128> {
 /// - other ≤15 bytes — [`pack`]ed `u128` keys in an Fx map: KV inline in the
 ///   table, no `Box` pointer chase, no byte-wise compare.
 /// - >15 bytes — plain byte-keyed Fx map (~3% of vocab; spans this long are
-///   almost always misses).
+///   > almost always misses).
 pub struct RankTable {
 	/// Rank of 2-byte token `[a, b]` at `a << 8 | b`; `u32::MAX` where
 	/// absent (ranks are vocab indices, far below the sentinel).
@@ -190,7 +190,7 @@ impl RankTable {
 				self
 					.rank(&piece[start..end])
 					.expect("utoken: unreachable merge state"),
-			)
+			);
 		});
 	}
 
@@ -270,7 +270,7 @@ pub struct BpeEncoding {
 	/// (GLM-5). The engine already short-circuits whole-piece hits, which
 	/// is proven equivalent for GLM-5 (see GLM tests); flag kept for
 	/// documentation and any future divergence.
-	#[allow(dead_code)]
+	#[allow(dead_code, reason = "retained to document the GLM-5 tokenizer behavior")]
 	pub ignore_merges: bool,
 }
 
@@ -301,8 +301,12 @@ impl BpeEncoding {
 			return self.scan(bytes, f);
 		}
 		// Non-UTF-8 flavors: owned UTF-8 needed only when NFC actually has
-		// work to do, or while the family is still on the regex splitter.
-		if (self.nfc && !nfc_quick(units)) || self.splitter.is_regex() {
+		// work to do, or while the test-only regex oracle is active.
+		#[cfg(test)]
+		let regex_splitter = self.splitter.is_regex();
+		#[cfg(not(test))]
+		let regex_splitter = false;
+		if (self.nfc && !nfc_quick(units)) || regex_splitter {
 			let s = decode_lossy(units);
 			let s = match pretoken::nfc(&s) {
 				Cow::Owned(o) if self.nfc => o,
@@ -310,7 +314,7 @@ impl BpeEncoding {
 			};
 			return self.scan(s.as_bytes(), f);
 		}
-		self.scan(units, f)
+		self.scan(units, f);
 	}
 
 	fn scan<U: Unit>(&self, units: &[U], f: &mut impl FnMut(&RankTable, &[u8])) {
@@ -334,18 +338,15 @@ fn piece_bytes<'a, U: Unit>(piece: &'a [U], buf: &'a mut Vec<u8>) -> &'a [u8] {
 		// ASCII runs narrow 1:1 without the decode/encode round-trip
 		// (dominant for code/English u16 input, cf. xutf's ASCII kernels;
 		// the trivial loop autovectorizes).
-		match piece[i].ascii() {
-			Some(b) => {
-				buf.push(b);
-				i += 1;
-			},
-			None => {
-				let (c, n) = U::decode(piece, i);
-				i += n;
-				let mut tmp = [0u8; 4];
-				buf.extend_from_slice(c.encode_utf8(&mut tmp).as_bytes());
-			},
-		}
+		if let Some(b) = piece[i].ascii() {
+  				buf.push(b);
+  				i += 1;
+  			} else {
+  				let (c, n) = U::decode(piece, i);
+  				i += n;
+  				let mut tmp = [0u8; 4];
+  				buf.extend_from_slice(c.encode_utf8(&mut tmp).as_bytes());
+  			}
 	}
 	buf
 }

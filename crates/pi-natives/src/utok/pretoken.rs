@@ -18,7 +18,7 @@ pub enum Splitter {
 	O200k,
 	/// tiktoken `cl100k_base` scanner.
 	Cl100k,
-	/// DeepSeek V3..V4 three-stage chain scanner.
+	/// `DeepSeek` V3..V4 three-stage chain scanner.
 	DeepSeek,
 	/// Kimi K2/K3 scanner.
 	Kimi,
@@ -40,14 +40,10 @@ impl Splitter {
 	}
 
 	/// Whether this splitter needs `&str` input (the engine transcodes
-	/// non-UTF-8 flavors before calling in). Always false at runtime; only
-	/// the test-only regex oracle transcodes.
-	pub fn is_regex(&self) -> bool {
-		#[cfg(test)]
-		if matches!(self, Self::Regex(_)) {
-			return true;
-		}
-		false
+	/// non-UTF-8 flavors before calling in).
+	#[cfg(test)]
+	pub const fn is_regex(&self) -> bool {
+		matches!(self, Self::Regex(_))
 	}
 
 	/// Feed every piece of `units` to `f`, in order, covering the input

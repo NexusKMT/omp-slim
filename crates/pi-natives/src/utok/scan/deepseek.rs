@@ -1,4 +1,4 @@
-//! DeepSeek V3..V4 pre-tokenizer: hand-written codepoint scanner over `&[U]`.
+//! `DeepSeek` V3..V4 pre-tokenizer: hand-written codepoint scanner over `&[U]`.
 //!
 //! Faithful port of the three-stage HF `Split(Isolated)` chain (see
 //! `DEEPSEEK_STAGE_*` in `tables.rs`). Every stage applies to each piece
@@ -10,7 +10,7 @@
 //! 2. `[一-龥぀-ゟ゠-ヿ]+` — Han U+4E00–9FA5 plus the contiguous
 //!    hiragana/katakana blocks U+3040–30FF.
 //! 3. The main pattern:
-//!    - `[!"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~][A-Za-z]+` (one ASCII
+//!    - ``[!"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~][A-Za-z]+`` (one ASCII
 //!      punctuation codepoint glued to ASCII letters, e.g. `.NET`, `(foo`)
 //!    - `[^\r\n\p{L}\p{P}\p{S}]?[\p{L}\p{M}]+`
 //!    - ` ?[\p{P}\p{S}]+[\r\n]*`
@@ -72,7 +72,7 @@ fn isolated<U: Unit>(
 
 /// `[一-龥぀-ゟ゠-ヿ]`.
 #[inline]
-fn is_cjk(c: char) -> bool {
+const fn is_cjk(c: char) -> bool {
 	matches!(c as u32, 0x3040..=0x30FF | 0x4E00..=0x9FA5)
 }
 
@@ -128,11 +128,10 @@ fn main_end<U: Unit>(units: &[U], pos: usize) -> Option<usize> {
 	}
 	if c != '\r' && c != '\n' && !is_ps(c) {
 		// Not L (checked above), not P/S, not CR/LF: prefix-eligible.
-		if let Some((c2, n2)) = decode_at(units, pos + n) {
-			if is_lm(c2) {
+		if let Some((c2, n2)) = decode_at(units, pos + n)
+			&& is_lm(c2) {
 				return Some(lm_run_end(units, pos + n + n2));
 			}
-		}
 	}
 
 	// ` ?[\p{P}\p{S}]+[\r\n]*`

@@ -413,58 +413,61 @@ impl<const N: usize> ToNapiValue for InlineStr<N> {
 mod tests {
 	use super::*;
 
-	fn arena() -> Arena {
-		Arena {
-			buf:    UnsafeCell::new([0; SCRATCH_LEN / 2]),
-			offset: Cell::new(0),
-			live:   Cell::new(0),
-		}
+	fn with_arena(test: impl FnOnce(&Arena)) {
+		ARENA.with(test);
 	}
 
 	/// Live guards own disjoint ranges; overlap would alias the derefs (UB).
 	#[test]
 	fn commits_never_overlap_live_ranges() {
-		let a = arena();
-		let (s1, _) = a.tail(1);
-		a.commit(s1, 100);
-		let (s2, _) = a.tail(2);
-		assert!(s2 >= s1 + 100);
-		a.commit(s2, 50);
-		let (s3, _) = a.tail(1);
-		assert!(s3 >= s2 + 50);
+		with_arena(|a| {
+			let (s1, _) = a.tail(1);
+			a.commit(s1, 100);
+			let (s2, _) = a.tail(2);
+			assert!(s2 >= s1 + 100);
+			a.commit(s2, 50);
+			let (s3, _) = a.tail(1);
+			assert!(s3 >= s2 + 50);
+			a.release(s2, s2 + 50);
+			a.release(s1, s1 + 100);
+		});
 	}
 
 	/// LIFO drops recycle immediately; the next fill reuses the range.
 	#[test]
 	fn lifo_release_rolls_back() {
-		let a = arena();
-		a.commit(0, 100);
-		a.commit(100, 50);
-		a.release(100, 150);
-		assert_eq!(a.tail(1).0, 100);
-		a.release(0, 100);
-		assert_eq!(a.tail(1).0, 0);
+		with_arena(|a| {
+			a.commit(0, 100);
+			a.commit(100, 50);
+			a.release(100, 150);
+			assert_eq!(a.tail(1).0, 100);
+			a.release(0, 100);
+			assert_eq!(a.tail(1).0, 0);
+		});
 	}
 
 	/// Non-LIFO drops strand bytes only until the last guard goes away.
 	#[test]
 	fn arena_resets_when_last_guard_drops() {
-		let a = arena();
-		a.commit(0, 100);
-		a.commit(100, 50);
-		a.release(0, 100);
-		assert_eq!(a.tail(1).0, 150, "inner range stays stranded while a guard is live");
-		a.release(100, 150);
-		assert_eq!(a.tail(1).0, 0);
+		with_arena(|a| {
+			a.commit(0, 100);
+			a.commit(100, 50);
+			a.release(0, 100);
+			assert_eq!(a.tail(1).0, 150, "inner range stays stranded while a guard is live");
+			a.release(100, 150);
+			assert_eq!(a.tail(1).0, 0);
+		});
 	}
 
 	/// A utf16 fill after an odd utf8 commit must get a 2-aligned range.
 	#[test]
 	fn utf16_tail_is_aligned() {
-		let a = arena();
-		a.commit(0, 7);
-		let (start, len) = a.tail(2);
-		assert_eq!(start, 8);
-		assert_eq!(len, SCRATCH_LEN - 8);
+		with_arena(|a| {
+			a.commit(0, 7);
+			let (start, len) = a.tail(2);
+			assert_eq!(start, 8);
+			assert_eq!(len, SCRATCH_LEN - 8);
+			a.release(0, 7);
+		});
 	}
 }

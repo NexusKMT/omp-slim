@@ -1,6 +1,6 @@
 //! Qwen3 (3.5/3.6/3.8) split pattern as a codepoint scanner.
 //!
-//! Reference (qwen3.8.tokenizer.json pre_tokenizer, = families.json qwen3):
+//! Reference (qwen3.8.tokenizer.json `pre_tokenizer`, = families.json qwen3):
 //! ```text
 //! (?i:'s|'t|'re|'ve|'m|'ll|'d)
 //! |[^\r\n\p{L}\p{N}]?[\p{L}\p{M}]+
