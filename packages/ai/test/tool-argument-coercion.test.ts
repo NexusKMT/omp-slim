@@ -56,11 +56,7 @@ describe("Tool argument coercion", () => {
 
 		expect(result.payload).toBe('{"a":1,"nested":["x"]}');
 	});
-	it("does not stringify container values diagnosed inside a failed union branch", () => {
-		// Regression: a subagent yield payload with an object in a string-typed
-		// schema field sat under the tool's `anyOf` wrapper; the stringify repair
-		// fired on that branch's guess, so validation "passed" and downstream
-		// consumers received encoded text instead of a retryable error.
+	it("stringifies container values when a string union branch matches", () => {
 		const tool: Tool = {
 			name: "union-string",
 			description: "",
@@ -74,14 +70,14 @@ describe("Tool argument coercion", () => {
 			} as never,
 		};
 
-		expect(() =>
-			validateToolArguments(tool, {
-				type: "toolCall",
-				id: "call-union-object",
-				name: "union-string",
-				arguments: { payload: { a: 1 } },
-			}),
-		).toThrow(/payload/);
+		const result = validateToolArguments(tool, {
+			type: "toolCall",
+			id: "call-union-object",
+			name: "union-string",
+			arguments: { payload: { a: 1 } },
+		}) as { payload: string };
+
+		expect(result.payload).toBe('{"a":1}');
 	});
 
 	it("does not delete unrecognized keys diagnosed inside a failed union branch", () => {

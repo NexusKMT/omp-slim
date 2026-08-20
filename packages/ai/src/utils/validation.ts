@@ -1593,12 +1593,9 @@ function coerceArgsFromIssues(args: unknown, issues: FlatIssue[]): { value: unkn
 	// a type coercion actually needs to write into a leaf.
 	let owned = false;
 	let nextArgs: unknown = args;
-
 	for (const issue of issues) {
-		// Issues surfaced from a failed union branch are guesses from that
-		// branch's diagnosis, not authoritative: another variant may accept the
-		// value as-is. Lossy repairs (key deletion, container stringification,
-		// singleton wrapping) stay off for them; lossless repairs still apply.
+		// Failed union branches still contribute schema-directed type repairs.
+		// Container-to-string conversion remains enabled for string branches.
 		if (issue.keyword === "unrecognized") {
 			if (issue.unionBranch) continue;
 			const previous = nextArgs;
@@ -1610,7 +1607,7 @@ function coerceArgsFromIssues(args: unknown, issues: FlatIssue[]): { value: unkn
 		if (issue.expectedTypes.length === 0) continue;
 
 		const currentValue = getValueAtPointer(nextArgs, issue.instancePath);
-		const result = tryCoerceForExpectedTypes(currentValue, issue.expectedTypes, !issue.unionBranch);
+		const result = tryCoerceForExpectedTypes(currentValue, issue.expectedTypes, true);
 		let coercedValue = result.changed ? result.value : undefined;
 		if (
 			coercedValue === undefined &&
