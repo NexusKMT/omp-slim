@@ -199,9 +199,27 @@ describe("security publication", () => {
 		);
 		expect(result.details?.findingCount).toBe(1);
 		expect(result.details?.droppedFindings).toEqual([
-			{ ruleId: "ghost-file", title: "Cites a file that does not exist", path: "src/does-not-exist.ts", startLine: 42, reason: "path_absent" },
-			{ ruleId: "ghost-line", title: "Cites a line past end of file", path: "real.ts", startLine: 9999, reason: "line_out_of_range" },
-			{ ruleId: "ghost-end-line", title: "Cites an end line past end of file", path: "real.ts", startLine: 1, reason: "line_out_of_range" },
+			{
+				ruleId: "ghost-file",
+				title: "Cites a file that does not exist",
+				path: "src/does-not-exist.ts",
+				startLine: 42,
+				reason: "path_absent",
+			},
+			{
+				ruleId: "ghost-line",
+				title: "Cites a line past end of file",
+				path: "real.ts",
+				startLine: 9999,
+				reason: "line_out_of_range",
+			},
+			{
+				ruleId: "ghost-end-line",
+				title: "Cites an end line past end of file",
+				path: "real.ts",
+				startLine: 1,
+				reason: "line_out_of_range",
+			},
 		]);
 		const persisted = await Bun.file(path.join(plan.output.root, "findings.json")).text();
 		expect(persisted).toContain("grounded");
@@ -248,7 +266,13 @@ describe("security publication", () => {
 		);
 		expect(result.details?.findingCount).toBe(1);
 		expect(result.details?.droppedFindings).toEqual([
-			{ ruleId: "live-only", title: "Exists only in the live tree", path: "live-only.ts", startLine: 1, reason: "path_absent" },
+			{
+				ruleId: "live-only",
+				title: "Exists only in the live tree",
+				path: "live-only.ts",
+				startLine: 1,
+				reason: "path_absent",
+			},
 		]);
 		const persisted = await Bun.file(path.join(plan.output.root, "findings.json")).text();
 		expect(persisted).toContain("worktree-grounded");
@@ -289,7 +313,13 @@ describe("security publication", () => {
 		);
 		expect(result.details?.findingCount).toBe(0);
 		expect(result.details?.droppedFindings).toEqual([
-			{ ruleId: "ghost-evidence", title: "Grounded location but ghost evidence citation", path: "missing-evidence.ts", startLine: 7, reason: "path_absent" },
+			{
+				ruleId: "ghost-evidence",
+				title: "Grounded location but ghost evidence citation",
+				path: "missing-evidence.ts",
+				startLine: 7,
+				reason: "path_absent",
+			},
 		]);
 	});
 });
