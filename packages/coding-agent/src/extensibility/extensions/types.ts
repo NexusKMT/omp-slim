@@ -36,6 +36,7 @@ import type {
 	Static,
 	TextContent,
 	TSchema,
+	UsageProvider,
 } from "@oh-my-pi/pi-ai";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
 import type {
@@ -1535,6 +1536,8 @@ export interface ProviderConfig {
 	authHeader?: boolean;
 	/** Models to register. If provided, replaces all existing models for this provider. */
 	models?: ProviderModelConfig[];
+	/** Optional normalized usage fetcher used by AuthStorage for this provider. */
+	usage?: UsageProvider;
 	/** OAuth provider for /login support. */
 	oauth?: {
 		/** Display name in login UI. */
