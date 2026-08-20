@@ -474,7 +474,11 @@ afterEach(async () => {
 });
 
 async function createHarness(
-	options: { elicitationHandler?: (req: CreateElicitationRequest) => Promise<CreateElicitationResponse> } = {},
+	options: {
+		elicitationHandler?: (req: CreateElicitationRequest) => Promise<CreateElicitationResponse>;
+		/** Runs before a notification is recorded, so a test can delay one delivery. */
+		sessionUpdateHook?: (notification: SessionNotification) => Promise<void> | void;
+	} = {},
 ): Promise<AgentHarness> {
 	const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omp-acp-test-"));
 	cleanupRoots.push(root);
@@ -492,6 +496,9 @@ async function createHarness(
 	const sessions: FakeAgentSession[] = [];
 	const connection = {
 		sessionUpdate: async (notification: SessionNotification) => {
+			// Only await when a hook is configured: `await undefined` would insert a
+			// microtask before the push and perturb ordering-sensitive tests.
+			if (options.sessionUpdateHook) await options.sessionUpdateHook(notification);
 			updates.push(notification);
 		},
 		unstable_createElicitation: options.elicitationHandler
@@ -2081,6 +2088,79 @@ describe("ACP agent", () => {
 
 		harness.abortController.abort();
 		await Bun.sleep(0);
+	});
+
+	it("drains in-flight ACP event handlers before closing a /retry turn with no agent_end", async () => {
+		// `AgentSession.#emit()` does not await listeners, so a retried turn's
+		// update can still be in delivery once the session reports idle. When the
+		// scheduled continuation never emits `agent_end` (e.g. a generation
+		// mismatch skips it), `#runPromptOrCommand`'s trailing `#finishPrompt` is
+		// what closes the turn — so the turn-holding hook must drain
+		// `record.promptEventHandlers` first or the response overtakes its chunk.
+		const deliveryBlocked = Promise.withResolvers<void>();
+		const deliveryRelease = Promise.withResolvers<void>();
+		let held = false;
+		const harness = await createHarness({
+			sessionUpdateHook: async notification => {
+				if (
+					held ||
+					notification.update.sessionUpdate !== "agent_message_chunk" ||
+					notification.update.content.type !== "text" ||
+					notification.update.content.text !== "Recovered answer."
+				) {
+					return;
+				}
+				held = true;
+				deliveryBlocked.resolve();
+				await deliveryRelease.promise;
+			},
+		});
+		const created = await harness.agent.newSession({ cwd: harness.cwdA, mcpServers: [] });
+		const session = harness.findSession(created.sessionId)!;
+		session.retryResult = true;
+
+		let emitted = false;
+		session.waitForIdleBlocker = async () => {
+			if (emitted) return;
+			emitted = true;
+			// Deliberately no `agent_end`: this exercises the trailing-finishPrompt
+			// path rather than the `#handlePromptEvent` one.
+			const assistantMessage = makeAssistantMessage("Recovered answer.");
+			for (const listener of session.listeners()) {
+				listener({
+					type: "message_update",
+					message: assistantMessage,
+					assistantMessageEvent: { type: "text_delta", delta: "Recovered answer." },
+				} as AgentSessionEvent);
+			}
+		};
+
+		const prompt = harness.agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{ type: "text", text: "/retry" }],
+		});
+		await deliveryBlocked.promise;
+
+		try {
+			const resolvedEarly = await Promise.race([prompt.then(() => true), Bun.sleep(0).then(() => false)]);
+			expect(resolvedEarly).toBe(false);
+
+			deliveryRelease.resolve();
+			const response = await prompt;
+			expect(response.stopReason).toBe("end_turn");
+			expect(
+				harness.updates.some(
+					update =>
+						update.update.sessionUpdate === "agent_message_chunk" &&
+						update.update.content.type === "text" &&
+						update.update.content.text === "Recovered answer.",
+				),
+			).toBe(true);
+		} finally {
+			deliveryRelease.resolve();
+			harness.abortController.abort();
+			await Bun.sleep(0);
+		}
 	});
 
 	it("drains async job deliveries before completing the ACP prompt", async () => {

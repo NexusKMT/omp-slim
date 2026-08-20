@@ -346,7 +346,9 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 			// stream the continuation through their own session subscription, and
 			// blocking their command queue here would strand a follow-up `abort`.
 			await runtime.keepTurnOpenUntilIdle?.();
-			return commandConsumed();
+			// `retry()` returned true, so a real agent turn is now scheduled — RPC
+			// hosts must not be told this was local-only work.
+			return commandConsumed({ agentInvoked: true });
 		},
 		handleTui: async (_command, runtime) => {
 			const didRetry = await runtime.ctx.session.retry();
