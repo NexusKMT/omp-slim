@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP OAuth: authorization requests now use the RFC 9728 protected-resource `scopes_supported` instead of the authorization server's broad catalogue, so pre-registered clients provisioned for a subset of scopes are no longer rejected ([#9099](https://github.com/can1357/oh-my-pi/issues/9099)).
+
 ## [17.4.0] - 2026-08-20
 
 ### Added
