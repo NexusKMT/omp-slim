@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.4.0] - 2026-08-20
+
 ### Added
 
 - Added an opener-escape landing correction for insertions anchored on a construct's opening line to place shallower sibling constructs after the enclosing block rather than splitting the opener from its body.

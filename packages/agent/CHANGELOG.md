@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.4.0] - 2026-08-20
+
 ### Breaking Changes
 
 - Replaced global token counting functions (`countTokens`, `countTokensConservatively`, `setTokenizerModel`, and `estimateTokens`) with model-scoped, immutable `Tokenizer` instances (`agent.tokenizer`). Use `tokenizer.countTokens(text, mode?)`, `tokenizer.countMessage(message)`, or `tokenizer.countMessages(messages)`.

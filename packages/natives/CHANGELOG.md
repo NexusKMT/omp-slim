@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.4.0] - 2026-08-20
+
 ### Added
 
 - Added offline `countTokens` support for Anthropic Claude families (`ClaudeV3`, `ClaudeV47`, `ClaudeV5`) via a high-performance native port of `ctok`.

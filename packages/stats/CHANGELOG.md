@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [17.4.0] - 2026-08-20
+
 ### Changed
 
 - Window token estimates now incorporate broker-reported fleet token burn when an auth broker is configured, accurately tracking fleet-wide usage instead of undercounting with local-only statistics.
