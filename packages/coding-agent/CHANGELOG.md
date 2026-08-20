@@ -111,6 +111,10 @@
 
 - Fixed Task tool guidance promising automatic resolution of concurrent same-file edits when shared and isolated execution can expose real conflicts.
 
+### Fixed
+
+- Fixed Task descriptions mislabeling restrictive spawn-policy defaults as general-purpose workers.
+
 ## [17.3.8] - 2026-08-19
 
 ### Added
