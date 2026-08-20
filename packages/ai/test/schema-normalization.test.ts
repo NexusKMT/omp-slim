@@ -961,6 +961,31 @@ describe("normalizeSchemaForCCA", () => {
 		});
 	});
 
+	it("strips annotation keywords (deprecated, readOnly, writeOnly, $comment) that Cloud Code Assist rejects", () => {
+		// MCP servers (e.g. Stitch's screen tools) annotate parameters with
+		// `deprecated: true`; CCA's protojson has no such Schema field and
+		// rejects the whole request with 400 "Cannot find field".
+		const sanitized = normalizeSchemaForCCA({
+			type: "object",
+			properties: {
+				projectId: { type: "string", deprecated: true, readOnly: true },
+				screenId: { type: "string", writeOnly: true, $comment: "internal id" },
+				name: { type: "string" },
+			},
+			required: ["name"],
+		});
+
+		expect(sanitized).toEqual({
+			type: "object",
+			properties: {
+				projectId: { type: "string" },
+				screenId: { type: "string" },
+				name: { type: "string" },
+			},
+			required: ["name"],
+		});
+	});
+
 	it("lifts stripped validation keywords into description", () => {
 		const normalized = normalizeSchemaForCCA({
 			type: "string",
