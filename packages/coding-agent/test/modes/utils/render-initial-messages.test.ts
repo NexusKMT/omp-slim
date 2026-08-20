@@ -734,3 +734,64 @@ describe("UiHelpers.renderSessionContext — mid-stream tool call rebuild", () =
 		expect(rendered).toContain("GROWN_TAIL_SENTINEL");
 	});
 });
+
+describe("UiHelpers.renderInitialMessages — replay convergence (issue #7811)", () => {
+	/** getEntries mock whose returned array grows on every call, simulating a
+	 * source that persists a new session entry during every replay pass. */
+	function growingEntriesCtx(): ReturnType<typeof makeCtx> & { getEntriesCalls: () => number } {
+		const made = makeCtx();
+		let calls = 0;
+		const getEntries = vi.fn(() => {
+			calls++;
+			return Array.from({ length: calls }, () => ({ type: "message" }));
+		});
+		(made.ctx.viewSession.sessionManager as unknown as { getEntries: unknown }).getEntries = getEntries;
+		(made.ctx.sessionManager as unknown as { getEntries: unknown }).getEntries = getEntries;
+		return { ...made, getEntriesCalls: () => calls };
+	}
+
+	it("terminates when entries are persisted during every replay pass", async () => {
+		// Regression: the replay restart loop was unbounded. A source persisting
+		// one entry per pass made the entry-count check permanently false, so a
+		// large resumed session replayed from scratch forever at 100% CPU
+		// (issue #7811). The loop must give up after a bounded number of
+		// restarts and accept the transcript it just replayed.
+		await Settings.init({ inMemory: true });
+		const { ctx, transcriptSpy } = growingEntriesCtx();
+
+		let settled = false;
+		const replay = new UiHelpers(ctx).renderInitialMessages().then(() => {
+			settled = true;
+		});
+		const timeout = new Promise<void>(resolve => setTimeout(resolve, 5_000));
+		await Promise.race([replay, timeout]);
+
+		expect(settled).toBeTrue();
+		// Bounded restarts: one initial context build plus at most the restart cap.
+		expect(transcriptSpy.mock.calls.length).toBeLessThanOrEqual(6);
+		expect(ctx.initialChatRendered).toBeTrue();
+	});
+
+	it("still replays once more when a single entry lands mid-replay", async () => {
+		// The intended reconciliation must survive the cap: one entry persisted
+		// during the first pass triggers exactly one restart against the fresh
+		// context, then the stable entry count exits the loop.
+		await Settings.init({ inMemory: true });
+		const { ctx, transcriptSpy } = makeCtx();
+		const lengths = [0, 1, 1, 1, 1, 1, 1, 1];
+		let call = 0;
+		const getEntries = vi.fn(() => {
+			const length = lengths[Math.min(call, lengths.length - 1)]!;
+			call++;
+			return Array.from({ length }, () => ({ type: "message" }));
+		});
+		(ctx.viewSession.sessionManager as unknown as { getEntries: unknown }).getEntries = getEntries;
+		(ctx.sessionManager as unknown as { getEntries: unknown }).getEntries = getEntries;
+
+		await new UiHelpers(ctx).renderInitialMessages();
+
+		// Initial context build + exactly one reconciliation restart.
+		expect(transcriptSpy).toHaveBeenCalledTimes(2);
+		expect(ctx.initialChatRendered).toBeTrue();
+	});
+});
