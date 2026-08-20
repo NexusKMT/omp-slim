@@ -8,7 +8,7 @@ import {
 	withAuth,
 	withOAuthAccess,
 } from "@oh-my-pi/pi-ai";
-import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
+import { OAuthError, ProviderHttpError } from "@oh-my-pi/pi-ai/error";
 
 function authError(status = 401): Error & { status: number } {
 	return Object.assign(new Error(`${status} authentication_error`), { status });
@@ -45,6 +45,25 @@ describe("isApiKeyResolver / resolveApiKeyOnce", () => {
 });
 
 describe("isAuthRetryableError", () => {
+	it("retries typed token-refresh requests without treating other OAuth failures as retryable", () => {
+		expect(
+			isAuthRetryableError(
+				new OAuthError("OAuth token expired before request", {
+					kind: "token-refresh",
+					provider: "google-antigravity",
+				}),
+			),
+		).toBe(true);
+		expect(
+			isAuthRetryableError(
+				new OAuthError("OAuth provider is misconfigured", {
+					kind: "configuration",
+					provider: "google-antigravity",
+				}),
+			),
+		).toBe(false);
+	});
+
 	it("treats 401/403 and usage-limit phrasing as retryable, everything else as not", () => {
 		expect(isAuthRetryableError(authError(401))).toBe(true);
 		expect(isAuthRetryableError(usageLimitError())).toBe(true);
@@ -521,6 +540,32 @@ describe("withOAuthAccess", () => {
 		});
 		expect(result).toBe("proj-2");
 		expect(attempts.map(a => a.accessToken)).toEqual(["stale", "fresh"]);
+		expect(storage.calls).toEqual([{ forceRefresh: undefined }, { forceRefresh: true }]);
+	});
+
+	it("allows one token-refresh replay without rotating to a sibling", async () => {
+		const storage = fakeStorage({
+			initial: access("stale", { credentialId: 7 }),
+			forced: access("fresh", { credentialId: 7 }),
+			rotated: access("sibling", { credentialId: 8 }),
+		});
+		const firstError = new OAuthError("First token expired before request", {
+			kind: "token-refresh",
+			provider: "prov",
+		});
+		const secondError = new OAuthError("Refreshed token also expired before request", {
+			kind: "token-refresh",
+			provider: "prov",
+		});
+		const attempts: string[] = [];
+		await expect(
+			withOAuthAccess(storage, "prov", async a => {
+				attempts.push(a.accessToken);
+				throw attempts.length === 1 ? firstError : secondError;
+			}),
+		).rejects.toBe(secondError);
+
+		expect(attempts).toEqual(["stale", "fresh"]);
 		expect(storage.calls).toEqual([{ forceRefresh: undefined }, { forceRefresh: true }]);
 	});
 
