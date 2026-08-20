@@ -5,6 +5,7 @@ import { applyProviderGlobalsFromSettings } from "../config/provider-globals";
 import { memoryStatsUnavailableMessage, resolveMemoryBackend } from "../memory-backend";
 import type { FreshSessionResult, HandoffResult } from "../session/agent-session";
 import { COMPACT_MODES, parseCompactArgs } from "../session/compact-modes";
+import { USER_INTERRUPT_LABEL } from "../session/messages";
 import { resolveResumableSession } from "../session/session-listing";
 import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
 import { resolveToCwd } from "../tools/path-utils";
@@ -211,11 +212,21 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 				result = await runtime.session.handoff(command.args || undefined);
 			} catch (err) {
 				const message = errorMessage(err);
-				// `session.handoff()` normalizes genuine cancellations to this exact
-				// message; every other throw is a real failure (no model selected,
-				// nothing to hand off, already compacted, provider error) and is
-				// surfaced verbatim behind the same "<verb> failed:" prefix `/compact`
-				// uses.
+				// A user interrupt (ACP `session/cancel`, TUI Esc) already settled the
+				// owning turn: `AgentSession.abort()` forwards its reason into the
+				// handoff abort controller, and `throwIfHandoffAborted` rethrows a
+				// reasoned abort verbatim — so the throw arrives as
+				// `USER_INTERRUPT_LABEL`, not "Handoff cancelled". Emitting anything
+				// here would append an out-of-turn chunk after the client already saw
+				// `stopReason: "cancelled"`, so consume silently.
+				if (message === USER_INTERRUPT_LABEL) {
+					return commandConsumed();
+				}
+				// `session.handoff()` normalizes an unreasoned cancellation to this
+				// exact message; every other throw is a real failure (no model
+				// selected, nothing to hand off, already compacted, provider error)
+				// and is surfaced verbatim behind the same "<verb> failed:" prefix
+				// `/compact` uses.
 				if (message === "Handoff cancelled") {
 					return usage("Handoff cancelled.", runtime);
 				}
@@ -227,11 +238,10 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 			if (!result) {
 				return usage("Handoff cancelled.", runtime);
 			}
-			const lines = ["Context handed off and compacted in place."];
-			if (result.savedPath) {
-				lines.push(`Handoff document saved to: ${result.savedPath}`);
-			}
-			await runtime.output(lines.join("\n"));
+			// `savedPath` is deliberately not reported: `SessionHandoff` only writes
+			// the document to disk when `options.autoTriggered` is set, which the
+			// user-invoked path never passes.
+			await runtime.output("Context handed off and compacted in place.");
 			return commandConsumed();
 		},
 		handleTui: async (command, runtime) => {
@@ -327,12 +337,15 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 			}
 			await runtime.output("Retrying the last failed turn.");
 			// `AgentSession.retry()` only schedules the continuation as a
-			// post-prompt task; it returns before the retried turn streams. The
-			// ACP prompt turn must stay open across that turn: `AcpAgent.prompt`
-			// installs the event subscription before running the command and
-			// `#finishPrompt` unsubscribes, so returning here would silently
-			// swallow the entire retried turn (model output and tool calls).
-			await runtime.session.waitForIdle();
+			// post-prompt task; it returns before the retried turn streams. Hosts
+			// whose prompt turn owns the event subscription (ACP) must stay open
+			// across that turn — `AcpAgent.prompt` installs the subscription
+			// before running the command and `#finishPrompt` unsubscribes, so
+			// returning early would silently swallow the entire retried turn
+			// (model output and tool calls). RPC and TUI omit this hook: they
+			// stream the continuation through their own session subscription, and
+			// blocking their command queue here would strand a follow-up `abort`.
+			await runtime.keepTurnOpenUntilIdle?.();
 			return commandConsumed();
 		},
 		handleTui: async (_command, runtime) => {

@@ -823,6 +823,7 @@ export class AcpAgent implements Agent {
 			output: output => this.#emitCommandOutput(record, output),
 			refreshCommands: () => this.#emitAvailableCommandsUpdate(record),
 			reloadPlugins: () => this.#reloadPluginState(record),
+			keepTurnOpenUntilIdle: () => record.session.waitForIdle(),
 			notifyTitleChanged: async () => {
 				await this.#connection.sessionUpdate({
 					sessionId: record.session.sessionId,

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `/retry` and `/handoff` now work over ACP, so editor clients (Zed) list them and can run them instead of sending the text to the model.
+
 ## [17.4.0] - 2026-08-20
 
 ### Added

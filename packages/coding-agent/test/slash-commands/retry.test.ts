@@ -49,15 +49,24 @@ describe("/retry slash command", () => {
 	});
 });
 
-function acpRuntime({ isStreaming = false, retryResult = false }: { isStreaming?: boolean; retryResult?: boolean }) {
+function acpRuntime({
+	isStreaming = false,
+	retryResult = false,
+	withKeepOpen = true,
+}: {
+	isStreaming?: boolean;
+	retryResult?: boolean;
+	withKeepOpen?: boolean;
+}) {
 	const retry = vi.fn(async () => retryResult);
-	const waitForIdle = vi.fn(async () => {});
+	const keepTurnOpenUntilIdle = vi.fn(async () => {});
 	const output = vi.fn();
 	const runtime = {
-		session: { isStreaming, retry, waitForIdle },
+		session: { isStreaming, retry },
 		output,
+		...(withKeepOpen ? { keepTurnOpenUntilIdle } : {}),
 	} as unknown as SlashCommandRuntime;
-	return { retry, waitForIdle, output, runtime };
+	return { retry, keepTurnOpenUntilIdle, output, runtime };
 }
 
 describe("/retry dispatch (ACP)", () => {
@@ -73,15 +82,26 @@ describe("/retry dispatch (ACP)", () => {
 		const h = acpRuntime({ retryResult: false });
 		const result = await executeAcpBuiltinSlashCommand("/retry", h.runtime);
 		expect(h.output).toHaveBeenCalledWith("Nothing to retry.");
-		expect(h.waitForIdle).not.toHaveBeenCalled();
+		expect(h.keepTurnOpenUntilIdle).not.toHaveBeenCalled();
 		expect(result).toEqual({ consumed: true });
 	});
 
-	it("announces the retry and waits for the retried turn to settle", async () => {
+	it("announces the retry and holds the ACP turn open for the retried turn", async () => {
 		const h = acpRuntime({ retryResult: true });
 		const result = await executeAcpBuiltinSlashCommand("/retry", h.runtime);
 		expect(h.output.mock.calls[0]?.[0]).toBe("Retrying the last failed turn.");
-		expect(h.waitForIdle).toHaveBeenCalledTimes(1);
+		expect(h.keepTurnOpenUntilIdle).toHaveBeenCalledTimes(1);
+		expect(result).toEqual({ consumed: true });
+	});
+
+	it("returns immediately for hosts that stream the continuation themselves (RPC/TUI)", async () => {
+		// RPC's `prompt` awaits this dispatcher before responding and serializes
+		// later frames, so blocking here would break `RpcClient.prompt()`'s
+		// documented immediate return and strand a follow-up `abort`.
+		const h = acpRuntime({ retryResult: true, withKeepOpen: false });
+		const result = await executeAcpBuiltinSlashCommand("/retry", h.runtime);
+		expect(h.retry).toHaveBeenCalledTimes(1);
+		expect(h.output.mock.calls[0]?.[0]).toBe("Retrying the last failed turn.");
 		expect(result).toEqual({ consumed: true });
 	});
 

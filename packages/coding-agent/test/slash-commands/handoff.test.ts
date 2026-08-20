@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "bun:test";
+import { USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
 import {
 	ACP_BUILTIN_SLASH_COMMANDS,
 	executeAcpBuiltinSlashCommand,
@@ -53,19 +54,14 @@ describe("/handoff dispatch (ACP)", () => {
 		expect(h2.handoff).toHaveBeenCalledWith(undefined);
 	});
 
-	it("reports success with no saved path as a single line", async () => {
-		const h = acpRuntime({ handoffResult: { document: "doc" } });
-		await executeAcpBuiltinSlashCommand("/handoff", h.runtime);
-		expect(h.output).toHaveBeenCalledWith("Context handed off and compacted in place.");
-	});
-
-	it("includes the saved path when present, in one output call", async () => {
+	it("reports success as a single line and never reports a saved path", async () => {
+		// `SessionHandoff` only writes the document to disk under
+		// `options.autoTriggered`, which the user-invoked path never passes, so
+		// `savedPath` is unreachable here even when the type allows it.
 		const h = acpRuntime({ handoffResult: { document: "doc", savedPath: "/tmp/handoff.md" } });
 		await executeAcpBuiltinSlashCommand("/handoff", h.runtime);
 		expect(h.output).toHaveBeenCalledTimes(1);
-		const text = h.output.mock.calls[0]?.[0] as string;
-		expect(text).toContain("Context handed off and compacted in place.");
-		expect(text).toContain("Handoff document saved to: /tmp/handoff.md");
+		expect(h.output).toHaveBeenCalledWith("Context handed off and compacted in place.");
 	});
 
 	it("reports cancellation when the handoff resolves undefined", async () => {
@@ -78,6 +74,17 @@ describe("/handoff dispatch (ACP)", () => {
 		const h = acpRuntime({ handoffError: new Error("Handoff cancelled") });
 		await executeAcpBuiltinSlashCommand("/handoff", h.runtime);
 		expect(h.output).toHaveBeenCalledWith("Handoff cancelled.");
+	});
+
+	it("stays silent when the owning turn was cancelled by the user", async () => {
+		// ACP `session/cancel` aborts with USER_INTERRUPT_LABEL, which
+		// `throwIfHandoffAborted` rethrows verbatim. The turn has already
+		// resolved as `cancelled`, so any output here would be an out-of-turn
+		// chunk reporting a false failure.
+		const h = acpRuntime({ handoffError: new Error(USER_INTERRUPT_LABEL) });
+		const result = await executeAcpBuiltinSlashCommand("/handoff", h.runtime);
+		expect(h.output).not.toHaveBeenCalled();
+		expect(result).toEqual({ consumed: true });
 	});
 
 	it("surfaces other failures behind the Handoff failed prefix", async () => {

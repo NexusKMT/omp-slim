@@ -70,6 +70,21 @@ export interface SlashCommandRuntime {
 	 * consistent view after plugin or project-scope changes.
 	 */
 	reloadPlugins: () => Promise<void>;
+	/**
+	 * Keep the host's prompt turn open until the session goes idle.
+	 *
+	 * Provided only by the ACP dispatcher, whose prompt turn owns the event
+	 * subscription and settles as soon as a builtin reports consumed: work a
+	 * command merely *schedules* (e.g. `/retry`'s post-prompt continuation)
+	 * would otherwise stream into an already-unsubscribed turn and be dropped.
+	 *
+	 * Deliberately absent in RPC and TUI: both observe the continuation through
+	 * their own always-on session subscription, and `RpcClient.prompt()`
+	 * documents an immediate return — blocking it there would also park the
+	 * serialized command queue, so a client could not `abort` the very turn it
+	 * is waiting on.
+	 */
+	keepTurnOpenUntilIdle?: () => Promise<void>;
 	notifyTitleChanged?: () => Promise<void> | void;
 	notifyConfigChanged?: () => Promise<void> | void;
 }
