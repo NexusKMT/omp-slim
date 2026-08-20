@@ -166,6 +166,8 @@ interface Operation {
 	all: boolean;
 	/** Pattern-only op applied as a deletion; justified only when another op re-emits the block. */
 	assumedDeletion?: boolean;
+	/** Post-apply advisory for a formally invalid payload recovered at parse time. */
+	recoveryNote?: string;
 }
 
 interface LiteralToken {
@@ -469,6 +471,66 @@ function relocateSelectionLines(patternText: string): string {
 	return lines.join("\n");
 }
 
+/**
+ * Reconcile an operation that pairs inline current/desired replacements with
+ * an explicit REWRITE — formally one form too many, but usually redundant
+ * rather than contradictory. When the REWRITE is empty or merely restates the
+ * inline result, the current text, or the desired sides, the inline
+ * replacements win and the REWRITE is dropped; otherwise the REWRITE states
+ * the final text and the current sides become a plain MATCH.
+ */
+function recoverMixedRewriteForms(
+	sourcePatternText: string,
+	rewriteText: string,
+	all: boolean,
+	operationNumber: number,
+): Operation {
+	const inline = parseInlinePattern(sourcePatternText, operationNumber);
+	let currentText = "";
+	let desiredText = "";
+	let replacementIndex = 0;
+	for (let index = 0; index < inline.patternText.length; ) {
+		const open = inline.patternText.indexOf(SELECT_OPEN, index);
+		if (open === -1) {
+			const tail = inline.patternText.slice(index);
+			currentText += tail;
+			desiredText += tail;
+			break;
+		}
+		const close = inline.patternText.indexOf(SELECT_CLOSE, open + SELECT_OPEN.length);
+		const between = inline.patternText.slice(index, open);
+		const selected = inline.patternText.slice(open + SELECT_OPEN.length, close);
+		currentText += between + selected;
+		desiredText += between + (inline.replacements[replacementIndex++] ?? selected);
+		index = close + SELECT_CLOSE.length;
+	}
+	const normalizedRewrite = normalizeText(rewriteText).text;
+	const normalizedDesired = normalizeText(desiredText).text;
+	const rewriteLines = rewriteText
+		.split("\n")
+		.map(line => normalizeText(line).text)
+		.filter(line => line !== "");
+	const echoesDesiredSides =
+		rewriteLines.length > 0 &&
+		rewriteLines.length === inline.replacements.length &&
+		rewriteLines.every((line, lineIndex) => line === normalizeText(inline.replacements[lineIndex]).text);
+	const rewriteIsRedundant =
+		normalizedRewrite === "" ||
+		normalizedRewrite === normalizedDesired ||
+		normalizedRewrite === normalizeText(currentText).text ||
+		normalizedDesired.includes(normalizedRewrite) ||
+		echoesDesiredSides;
+	const mixedForms = `Note: operation ${operationNumber} combined ${SELECT_OPEN}current${SELECT_DIVIDER}desired${SELECT_CLOSE} replacements with a ${REWRITE_HEADER} REWRITE`;
+	if (rewriteIsRedundant) {
+		const operation = createOperation(sourcePatternText, "", all, operationNumber, false);
+		operation.recoveryNote = `${mixedForms}; the REWRITE only restated the inline result and was ignored. Use one form per operation.`;
+		return operation;
+	}
+	const operation = createOperation(currentText, rewriteText, all, operationNumber, true);
+	operation.recoveryNote = `${mixedForms}; the ${REWRITE_HEADER} REWRITE was applied as the final text for the match. Use one form per operation.`;
+	return operation;
+}
+
 function patternReference(pattern: string): RegExpMatchArray | undefined {
 	for (const line of pattern.split("\n")) {
 		const reference = line.trim().match(/^»([1-9]\d*)$/u);
@@ -486,9 +548,7 @@ function createOperation(
 ): Operation {
 	if (hasInlineSelection(sourcePatternText)) {
 		if (hasExplicitRewrite) {
-			throw new Error(
-				`Operation ${operationNumber} mixes inline replacements with a ${REWRITE_HEADER} rewrite.\nUse one form or the other.`,
-			);
+			return recoverMixedRewriteForms(sourcePatternText, rewriteText, all, operationNumber);
 		}
 		const inline = parseInlinePattern(sourcePatternText, operationNumber);
 		// A sole `⟪│⟫` on its own line at the end of MATCH states "match becomes
@@ -2447,9 +2507,12 @@ function applyOperations(content: string, input: string, context: SloppyApplyCon
 	const removedByOperation: Array<string | undefined> = [];
 	const planned: PlannedEdit[] = [];
 	const deletionNotes = new Map<number, string>();
+	const recoveryNotes: string[] = [];
 	let lastMatchOffset = 0;
 	for (let index = 0; index < operations.length; index++) {
 		const operationNumber = index + 1;
+		const parsedNote = operations[index].recoveryNote;
+		if (parsedNote !== undefined) recoveryNotes.push(parsedNote);
 		const located = locateWithEchoRecovery(content, operations[index], operationNumber, context.path);
 		const operation = located.operation;
 		const pattern = located.pattern;
@@ -2685,7 +2748,7 @@ function applyOperations(content: string, input: string, context: SloppyApplyCon
 	}
 	if (result === content) throwNoOp(undefined, { content, offset: lastMatchOffset });
 	noOpByPath.delete(context.path);
-	context.notes?.push(...deletionNotes.values());
+	context.notes?.push(...recoveryNotes, ...deletionNotes.values());
 	return result;
 }
 

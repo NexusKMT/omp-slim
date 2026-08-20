@@ -433,12 +433,45 @@ describe("sloppy v8", () => {
 		);
 	});
 
-	test("rejects mixed inline rewrite forms", () => {
+	test("drops a » rewrite that restates an inline replacement's result", () => {
+		const content = "const value = oldValue;\nconst other = keep;\n";
+		const notes: string[] = [];
+		const input = `${inlineOperation("const value = ⟪oldValue│newValue⟫;")}\n${M.put}\nconst value = newValue;`;
+
+		expect(variant.apply(content, input, { path: context.path, notes })).toBe(
+			"const value = newValue;\nconst other = keep;\n",
+		);
+		expect(notes.join("\n")).toMatch(/operation 1 combined [\s\S]* REWRITE only restated the inline result/);
+	});
+
+	test("drops a » rewrite that only echoes the desired sides", () => {
+		const content = "url = https://a.example/repo.git\n";
+		const input = `${inlineOperation("url = ⟪https://a.example/repo.git│https://b.example/repo.git⟫")}\n${M.put}\nhttps://b.example/repo.git`;
+
+		expect(variant.apply(content, input, context)).toBe("url = https://b.example/repo.git\n");
+	});
+
+	test("drops an empty » rewrite trailing an inline replacement", () => {
+		const content = "const value = oldValue;\n";
+		const input = `${inlineOperation("const value = ⟪oldValue│newValue⟫;")}\n${M.put}`;
+
+		expect(variant.apply(content, input, context)).toBe("const value = newValue;\n");
+	});
+
+	test("applies a diverging » rewrite as final text over the inline current sides", () => {
+		const content = "const value = oldValue;\nconst other = keep;\n";
+		const notes: string[] = [];
+		const input = `${inlineOperation("const value = ⟪oldValue│newValue⟫;")}\n${M.put}\nconst value = newValue; // updated\nconst added = 1;`;
+
+		expect(variant.apply(content, input, { path: context.path, notes })).toBe(
+			"const value = newValue; // updated\nconst added = 1;\nconst other = keep;\n",
+		);
+		expect(notes.join("\n")).toMatch(/operation 1 combined [\s\S]* applied as the final text/);
+	});
+
+	test("rejects mixed inline and bare selections", () => {
 		const content = "const value = oldValue;\nconst other = oldOther;\n";
 
-		expect(() =>
-			variant.apply(content, `${inlineOperation("const value = ⟪oldValue│newValue⟫;")}\n${M.put}\nignored`, context),
-		).toThrow(/mixes inline replacements with a » rewrite/);
 		expect(() =>
 			variant.apply(
 				content,
