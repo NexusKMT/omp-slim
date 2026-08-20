@@ -503,6 +503,17 @@ describe("Settings", () => {
 				expect(settings.get("eval.js")).toBe(false);
 				expect(settings.get("providers.openai-codex.codeModeDirectTools")).toEqual(["bash"]);
 				expect(signalCount).toBe(2);
+
+				// `edit.mode` renames the direct edit tool on the wire.
+				await writeSettings({
+					providers: { "openai-codex": { codeMode: "on", codeModeDirectTools: ["bash"] } },
+					eval: { js: false },
+					edit: { mode: "apply_patch" },
+				});
+				await settings.reloadFromDisk();
+
+				expect(settings.get("edit.mode")).toBe("apply_patch");
+				expect(signalCount).toBe(3);
 			} finally {
 				unsubscribe();
 			}

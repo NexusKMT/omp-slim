@@ -2558,11 +2558,16 @@ export const onModelRolesChanged: (cb: () => void) => () => void = modelRolesSig
 /** Fires when Code Mode activation or its direct keep-set changes at runtime. */
 const codeModeSignal = new SettingSignal("providers.openai-codex.codeMode");
 
-/** Settings whose effective value changes the Code Mode tool partition. */
+/**
+ * Settings whose effective value changes the Code Mode tool partition. `edit.mode`
+ * belongs here because it renames `EditTool` on the wire (`apply_patch` vs `edit`),
+ * which the namespace metadata is keyed by.
+ */
 const CODE_MODE_SIGNAL_PATHS: readonly SettingPath[] = [
 	"providers.openai-codex.codeMode",
 	"providers.openai-codex.codeModeDirectTools",
 	"eval.js",
+	"edit.mode",
 ];
 
 /** Subscribe to Code Mode setting changes. Returns an unsubscribe function. */
