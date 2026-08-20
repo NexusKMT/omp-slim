@@ -1490,6 +1490,9 @@ export class DapSessionManager {
 			if (session.parentSessionId) {
 				await this.#applyRootBreakpointsToSession(session, signal, timeoutMs);
 			}
+			if (session.status === "launching" || session.status === "configuring") {
+				session.status = "running";
+			}
 			return;
 		}
 		// Wait for the initialized event if we haven't seen it yet.
