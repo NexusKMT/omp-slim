@@ -52,35 +52,106 @@ interface RunningAgent {
 	progress?: AgentProgress;
 }
 
+/**
+ * Live-view state for one cleanse run, shared by the CLI stdout board and the
+ * interactive-mode overlay panel so both surfaces render identical rows.
+ *
+ * Mutators mirror {@link CleanseStatusBoard}; the finish mutators return the
+ * permanent line the surface should log above the live area.
+ */
+export class CleanseBoardModel {
+	#phaseText: string | undefined;
+	readonly #checkers = new Map<string, RunningChecker>();
+	readonly #agents = new Map<string, RunningAgent>();
+	/** Lifetime token/cost totals per agent; survives row removal for the header sums. */
+	readonly #totals = new Map<string, { tokens: number; cost: number }>();
+	#waveTotal = 0;
+	#waveDone = 0;
+	#waveStartedAt = 0;
+
+	phase(text: string | undefined): void {
+		this.#phaseText = text;
+	}
+
+	checkerStarted(checker: CleanseCheckerDescriptor): void {
+		this.#checkers.set(checker.id, { label: checker.label, startedAt: Date.now() });
+	}
+
+	/** Drop the checker's live row and build its permanent verdict line. */
+	checkerFinished(check: CleanseCheckResult, durationMs: number): string {
+		this.#checkers.delete(check.id);
+		const count = check.diagnostics.length;
+		const verdict = count === 0 ? chalk.green("clean") : chalk.yellow(`${count} issue${count === 1 ? "" : "s"}`);
+		const glyph = count === 0 ? chalk.green("✓") : chalk.yellow("●");
+		return `${glyph} ${check.label} ${verdict} ${chalk.dim(`· ${formatDuration(durationMs)}`)}`;
+	}
+
+	waveStarted(total: number): void {
+		this.#waveTotal = Math.max(total, 0);
+		this.#waveDone = 0;
+		this.#waveStartedAt = Date.now();
+		this.#agents.clear();
+		this.#totals.clear();
+	}
+
+	waveFinished(): void {
+		this.#waveTotal = 0;
+		this.#agents.clear();
+	}
+
+	agentStarted(name: string, assignment: CleanseAssignment): void {
+		this.#agents.set(name, { assignment, startedAt: Date.now() });
+	}
+
+	agentProgress(name: string, progress: AgentProgress): void {
+		this.#totals.set(name, { tokens: progress.tokens, cost: progress.cost });
+		const agent = this.#agents.get(name);
+		if (agent) agent.progress = progress;
+	}
+
+	/** Drop the agent's live row, advance the wave bar, and build its permanent outcome line. */
+	agentFinished(outcome: CleanseAgentOutcome, assignment: CleanseAssignment): string {
+		const agent = this.#agents.get(outcome.name);
+		this.#agents.delete(outcome.name);
+		this.#waveDone = Math.min(this.#waveDone + 1, this.#waveTotal);
+		return renderOutcomeLine(outcome, assignment, agent, this.#totals.get(outcome.name));
+	}
+
+	/** Render the transient live rows for the current spinner frame. */
+	renderLive(spinner: string): string[] {
+		const lines: string[] = [];
+		if (this.#phaseText) lines.push(`${chalk.yellow(spinner)} ${this.#phaseText}`);
+		for (const checker of this.#checkers.values()) {
+			const elapsed = formatDuration(Date.now() - checker.startedAt);
+			lines.push(`${chalk.yellow(spinner)} ${checker.label} ${chalk.dim(`· ${elapsed}`)}`);
+		}
+		if (this.#waveTotal > 0) {
+			lines.push(
+				renderWaveHeader(
+					spinner,
+					this.#waveTotal,
+					this.#waveDone,
+					this.#agents.size,
+					this.#totals,
+					this.#waveStartedAt,
+				),
+			);
+			const rows = [...this.#agents.entries()].sort(
+				(left, right) => left[1].assignment.index - right[1].assignment.index,
+			);
+			for (const [name, agent] of rows) lines.push(renderAgentRow(spinner, name, agent));
+		}
+		return lines;
+	}
+}
+
 /** Create the cleanse status board bound to `output` (default `process.stdout`). */
 export function createCleanseStatusBoard(
 	output: LiveBoardOutput = process.stdout,
 	errors: LiveBoardOutput = process.stderr,
 ): CleanseStatusBoard {
-	let phaseText: string | undefined;
-	const checkers = new Map<string, RunningChecker>();
-	const agents = new Map<string, RunningAgent>();
-	/** Lifetime token/cost totals per agent; survives row removal for the header sums. */
-	const totals = new Map<string, { tokens: number; cost: number }>();
-	let waveTotal = 0;
-	let waveDone = 0;
-	let waveStartedAt = 0;
-
-	const render = (spinner: string): string[] => {
-		const lines: string[] = [];
-		if (phaseText) lines.push(`${chalk.yellow(spinner)} ${phaseText}`);
-		for (const checker of checkers.values()) {
-			const elapsed = formatDuration(Date.now() - checker.startedAt);
-			lines.push(`${chalk.yellow(spinner)} ${checker.label} ${chalk.dim(`· ${elapsed}`)}`);
-		}
-		if (waveTotal > 0) {
-			lines.push(renderWaveHeader(spinner, waveTotal, waveDone, agents.size, totals, waveStartedAt));
-			const rows = [...agents.entries()].sort((left, right) => left[1].assignment.index - right[1].assignment.index);
-			for (const [name, agent] of rows) lines.push(renderAgentRow(spinner, name, agent));
-		}
-		return lines;
-	};
-	const board = createLiveBoard(render, output);
+	const model = new CleanseBoardModel();
+	const board = createLiveBoard(spinner => model.renderLive(spinner), output);
 
 	return {
 		interactive: board.interactive,
@@ -90,33 +161,24 @@ export function createCleanseStatusBoard(
 				if (text) output.write(`${text}\n`);
 				return;
 			}
-			phaseText = text;
+			model.phase(text);
 			board.repaint();
 		},
 		checkerStarted(checker) {
 			if (!board.interactive) return;
-			checkers.set(checker.id, { label: checker.label, startedAt: Date.now() });
+			model.checkerStarted(checker);
 			board.repaint();
 		},
 		checkerFinished(check, durationMs) {
 			if (!board.interactive) return;
-			checkers.delete(check.id);
-			const count = check.diagnostics.length;
-			const verdict = count === 0 ? chalk.green("clean") : chalk.yellow(`${count} issue${count === 1 ? "" : "s"}`);
-			const glyph = count === 0 ? chalk.green("✓") : chalk.yellow("●");
-			board.log(`${glyph} ${check.label} ${verdict} ${chalk.dim(`· ${formatDuration(durationMs)}`)}`);
+			board.log(model.checkerFinished(check, durationMs));
 		},
 		waveStarted(total) {
-			waveTotal = Math.max(total, 0);
-			waveDone = 0;
-			waveStartedAt = Date.now();
-			agents.clear();
-			totals.clear();
+			model.waveStarted(total);
 			board.repaint();
 		},
 		waveFinished() {
-			waveTotal = 0;
-			agents.clear();
+			model.waveFinished();
 			board.repaint();
 		},
 		agentStarted(name, assignment) {
@@ -125,17 +187,15 @@ export function createCleanseStatusBoard(
 				output.write(`[start] ${name}: ${files} (weight ${assignment.weight})\n`);
 				return;
 			}
-			agents.set(name, { assignment, startedAt: Date.now() });
+			model.agentStarted(name, assignment);
 			board.repaint();
 		},
 		agentProgress(name, progress) {
-			totals.set(name, { tokens: progress.tokens, cost: progress.cost });
-			if (!board.interactive) return;
-			const agent = agents.get(name);
-			if (agent) agent.progress = progress;
+			model.agentProgress(name, progress);
 		},
 		agentFinished(outcome, assignment) {
 			if (!board.interactive) {
+				model.agentFinished(outcome, assignment);
 				if (outcome.success) {
 					output.write(`[done] ${outcome.name}${outcome.resolvedModel ? ` (${outcome.resolvedModel})` : ""}\n`);
 				} else {
@@ -143,10 +203,7 @@ export function createCleanseStatusBoard(
 				}
 				return;
 			}
-			const agent = agents.get(outcome.name);
-			agents.delete(outcome.name);
-			waveDone = Math.min(waveDone + 1, waveTotal);
-			board.log(renderOutcomeLine(outcome, assignment, agent, totals.get(outcome.name)));
+			board.log(model.agentFinished(outcome, assignment));
 		},
 		close: board.close,
 	};
