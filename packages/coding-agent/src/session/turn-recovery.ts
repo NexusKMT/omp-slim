@@ -1306,7 +1306,7 @@ export class TurnRecovery {
 			this.#getRetryFallbackResolutionContext(),
 			currentSelector,
 			currentModel,
-			roleHint,
+			roleHint ?? this.#liveRetryRoleHint(),
 		);
 	}
 
@@ -1336,6 +1336,13 @@ export class TurnRecovery {
 		const current = this.resolveRetryFallbackRole(currentSelector, currentModel, options?.roleHint);
 		if (!pinned) return current ? [current] : [];
 		return current && current !== pinned ? [pinned, current] : [pinned];
+	}
+
+	/** Live session role for chain lookup. Ephemeral hops and missing managers are not a role. */
+	#liveRetryRoleHint(): string | undefined {
+		const role = this.#host.sessionManager?.getLastModelChangeRole?.();
+		if (!role || role === EPHEMERAL_MODEL_CHANGE_ROLE) return undefined;
+		return role;
 	}
 
 	/** Finds fallback candidates that follow the active selector. */
