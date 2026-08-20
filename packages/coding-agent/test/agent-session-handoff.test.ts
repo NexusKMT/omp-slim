@@ -491,7 +491,7 @@ describe("AgentSession handoff", () => {
 	});
 
 	it("obfuscates the previous compaction summary but preserves opaque replay data", async () => {
-		session.settings.set("compaction.strategy", "context-full");
+		session.settings.set("compaction.methodOrder", ["soft"]);
 		const placeholder = obfuscator.obfuscate(HANDOFF_SECRET);
 		const entries = sessionManager.getBranch();
 		const lastEntryId = entries[entries.length - 1]?.id;
@@ -534,7 +534,7 @@ describe("AgentSession handoff", () => {
 	});
 
 	it("obfuscates migrated snapcompact archive text but preserves opaque replay data", async () => {
-		session.settings.set("compaction.strategy", "context-full");
+		session.settings.set("compaction.methodOrder", ["soft"]);
 		const placeholder = obfuscator.obfuscate(HANDOFF_SECRET);
 		const entries = sessionManager.getBranch();
 		const lastEntryId = entries[entries.length - 1]?.id;
@@ -618,8 +618,8 @@ describe("AgentSession handoff", () => {
 		expect(compactSpy).not.toHaveBeenCalled();
 	});
 
-	it("downgrades auto snapcompact to context-full when local preflight rejects the transcript", async () => {
-		session.settings.set("compaction.strategy", "snapcompact");
+	it("advances from auto snapcompact to soft compaction when local preflight rejects the transcript", async () => {
+		session.settings.set("compaction.methodOrder", ["snapcompact", "soft"]);
 		const entries = sessionManager.getBranch();
 		const lastEntryId = entries[entries.length - 1]?.id;
 		if (!lastEntryId) throw new Error("Expected a seeded entry id");
@@ -652,11 +652,9 @@ describe("AgentSession handoff", () => {
 
 		const endEvent = events.find(
 			(event): event is Extract<AgentSessionEvent, { type: "auto_compaction_end" }> =>
-				event.type === "auto_compaction_end",
+				event.type === "auto_compaction_end" && event.action === "context-full",
 		);
 		expect(compactSpy).toHaveBeenCalled();
-		// The start event fires before the in-try preflight downgrades action, so it
-		// still reports "snapcompact"; the end event reflects the downgraded action.
 		expect(events).toContainEqual({ type: "auto_compaction_start", reason: "idle", action: "snapcompact" });
 		expect(endEvent).toMatchObject({
 			type: "auto_compaction_end",
@@ -669,7 +667,7 @@ describe("AgentSession handoff", () => {
 				event.source === "compaction" &&
 				event.message.startsWith("snapcompact disabled: unsupported characters for selected snapcompact font"),
 		);
-		expect(downgradeNotice?.message).toContain("using context-full auto-compaction instead.");
+		expect(downgradeNotice?.message).toContain("trying the next preferred compaction method.");
 	});
 
 	it("strips hook-supplied snapcompact data when persisting context-full compaction", async () => {
@@ -722,7 +720,7 @@ describe("AgentSession handoff", () => {
 			settings: Settings.isolated({
 				"compaction.enabled": true,
 				"compaction.autoContinue": false,
-				"compaction.strategy": "context-full",
+				"compaction.methodOrder": ["soft"],
 			}),
 			modelRegistry,
 			extensionRunner,
@@ -795,7 +793,7 @@ describe("AgentSession handoff", () => {
 			settings: Settings.isolated({
 				"compaction.enabled": true,
 				"compaction.autoContinue": false,
-				"compaction.strategy": "context-full",
+				"compaction.methodOrder": ["soft"],
 			}),
 			modelRegistry,
 			extensionRunner,
@@ -819,7 +817,7 @@ describe("AgentSession handoff", () => {
 	});
 
 	it("runs context maintenance before sending an oversized pending prompt", async () => {
-		session.settings.set("compaction.strategy", "context-full");
+		session.settings.set("compaction.methodOrder", ["soft"]);
 		session.settings.set("compaction.thresholdTokens", 50);
 		session.settings.set("compaction.keepRecentTokens", 1);
 		session.settings.set("contextPromotion.enabled", false);
@@ -849,7 +847,7 @@ describe("AgentSession handoff", () => {
 	});
 
 	it("falls back after one auto-compaction timeout instead of retrying the same model", async () => {
-		session.settings.set("compaction.strategy", "context-full");
+		session.settings.set("compaction.methodOrder", ["soft"]);
 		session.settings.set("compaction.thresholdTokens", 50);
 		session.settings.set("compaction.keepRecentTokens", 1);
 		session.settings.set("contextPromotion.enabled", false);
@@ -969,7 +967,7 @@ describe("AgentSession handoff", () => {
 			settings: Settings.isolated({
 				"compaction.enabled": true,
 				"compaction.autoContinue": false,
-				"compaction.strategy": "context-full",
+				"compaction.methodOrder": ["soft"],
 				"compaction.thresholdTokens": 8_000,
 				"contextPromotion.enabled": false,
 			}),
@@ -1054,7 +1052,7 @@ describe("AgentSession handoff", () => {
 			settings: Settings.isolated({
 				"compaction.enabled": true,
 				"compaction.autoContinue": false,
-				"compaction.strategy": "context-full",
+				"compaction.methodOrder": ["soft"],
 				"compaction.thresholdTokens": 8_000,
 				"contextPromotion.enabled": false,
 			}),
@@ -1136,7 +1134,7 @@ describe("AgentSession handoff", () => {
 			settings: Settings.isolated({
 				"compaction.enabled": true,
 				"compaction.autoContinue": false,
-				"compaction.strategy": "context-full",
+				"compaction.methodOrder": ["soft"],
 				"compaction.thresholdTokens": 8_000,
 				"compaction.keepRecentTokens": 1,
 				"contextPromotion.enabled": false,
@@ -1222,7 +1220,7 @@ describe("AgentSession handoff", () => {
 			settings: Settings.isolated({
 				"compaction.enabled": false,
 				"compaction.autoContinue": false,
-				"compaction.strategy": "context-full",
+				"compaction.methodOrder": ["soft"],
 				"compaction.thresholdTokens": 9_500,
 				"contextPromotion.enabled": false,
 			}),
@@ -1251,7 +1249,7 @@ describe("AgentSession handoff", () => {
 		expect(mock.calls).toHaveLength(2);
 	});
 	it("does not run auto maintenance after final yield", async () => {
-		session.settings.set("compaction.strategy", "handoff");
+		session.settings.set("compaction.methodOrder", ["handoff", "soft"]);
 		session.settings.set("compaction.thresholdPercent", 1);
 		session.settings.set("contextPromotion.enabled", false);
 
@@ -1352,7 +1350,7 @@ describe("AgentSession handoff", () => {
 	});
 
 	it("does not run auto maintenance when strategy is off", async () => {
-		session.settings.set("compaction.strategy", "off");
+		session.settings.set("compaction.methodOrder", []);
 		session.settings.set("compaction.thresholdPercent", 1);
 		session.settings.set("contextPromotion.enabled", false);
 
@@ -1389,18 +1387,24 @@ describe("AgentSession handoff", () => {
 		expect(events.filter(event => event.type === "auto_compaction_end")).toHaveLength(0);
 	});
 
-	it("restores default strategy when enabling auto-compaction from off strategy", () => {
+	it("restores default methods when enabling auto-compaction from an empty order", () => {
 		session.settings.set("compaction.enabled", true);
-		session.settings.set("compaction.strategy", "off");
+		session.settings.set("compaction.methodOrder", []);
 
 		expect(session.autoCompactionEnabled).toBe(false);
 		session.setAutoCompactionEnabled(true);
-		expect(session.settings.get("compaction.strategy")).toBe("snapcompact");
+		expect(session.settings.get("compaction.methodOrder")).toEqual([
+			"remote",
+			"snapcompact",
+			"handoff",
+			"shake",
+			"soft",
+		]);
 		expect(session.autoCompactionEnabled).toBe(true);
 	});
 
 	it("falls back to context-full maintenance for overflow when strategy is handoff", async () => {
-		session.settings.set("compaction.strategy", "handoff");
+		session.settings.set("compaction.methodOrder", ["handoff", "soft"]);
 		session.settings.set("contextPromotion.enabled", false);
 
 		const model = session.model;
@@ -1444,7 +1448,7 @@ describe("AgentSession handoff", () => {
 	});
 
 	it("uses handoff strategy for threshold-triggered auto maintenance", async () => {
-		session.settings.set("compaction.strategy", "handoff");
+		session.settings.set("compaction.methodOrder", ["handoff", "soft"]);
 		session.settings.set("compaction.thresholdPercent", 1);
 		session.settings.set("contextPromotion.enabled", false);
 
@@ -1580,7 +1584,7 @@ describe("AgentSession handoff", () => {
 			settings: Settings.isolated({
 				"compaction.enabled": true,
 				"compaction.autoContinue": false,
-				"compaction.strategy": "handoff",
+				"compaction.methodOrder": ["handoff", "soft"],
 				"compaction.thresholdPercent": 1,
 				"contextPromotion.enabled": false,
 			}),
@@ -1611,7 +1615,7 @@ describe("AgentSession handoff", () => {
 		// schedules a deferred handoff and returns. The handler used to fall through to
 		// #checkTodoCompletion, which scheduled agent.continue() — both fired concurrently,
 		// rendering as "Auto-handoff" loader + an assistant message still streaming.
-		session.settings.set("compaction.strategy", "handoff");
+		session.settings.set("compaction.methodOrder", ["handoff", "soft"]);
 		session.settings.set("compaction.thresholdPercent", 1);
 		session.settings.set("contextPromotion.enabled", false);
 		session.settings.set("todo.enabled", true);
@@ -1663,7 +1667,7 @@ describe("AgentSession handoff", () => {
 		// Reproduces /exit / Ctrl+C-double-tap hanging when a deferred handoff is awaiting
 		// the LLM call: dispose() now aborts the handoff controller before draining post-prompt
 		// tasks, so Promise.allSettled() in #cancelPostPromptTasks can resolve.
-		session.settings.set("compaction.strategy", "handoff");
+		session.settings.set("compaction.methodOrder", ["handoff", "soft"]);
 		session.settings.set("compaction.thresholdPercent", 1);
 		session.settings.set("contextPromotion.enabled", false);
 
@@ -1723,8 +1727,8 @@ describe("AgentSession handoff", () => {
 		resolveHandoff("handoff");
 	});
 
-	it("falls back to context-full when handoff strategy returns no document", async () => {
-		session.settings.set("compaction.strategy", "handoff");
+	it("advances to soft compaction when handoff returns no document", async () => {
+		session.settings.set("compaction.methodOrder", ["handoff", "soft"]);
 		session.settings.set("compaction.thresholdPercent", 1);
 		session.settings.set("contextPromotion.enabled", false);
 
@@ -1755,24 +1759,30 @@ describe("AgentSession handoff", () => {
 
 		session.agent.emitExternalEvent({ type: "message_end", message: assistantMessage });
 		session.agent.emitExternalEvent({ type: "agent_end", messages: [assistantMessage] });
-		await waitFor(() => events.filter(event => event.type === "auto_compaction_end").length === 1);
+		await waitFor(() =>
+			events.some(event => event.type === "auto_compaction_end" && event.action === "context-full"),
+		);
 
 		expect(handoffSpy).toHaveBeenCalledTimes(1);
 		const endEvents = events.filter(event => event.type === "auto_compaction_end");
-		expect(endEvents).toHaveLength(1);
+		expect(endEvents).toHaveLength(2);
 		expect(endEvents[0]).toMatchObject({
+			type: "auto_compaction_end",
+			action: "handoff",
+			aborted: false,
+			willRetry: false,
+			errorMessage: "Auto-handoff returned no document; trying the next preferred compaction method.",
+		});
+		expect(endEvents[1]).toMatchObject({
 			type: "auto_compaction_end",
 			action: "context-full",
 			aborted: false,
 			willRetry: false,
 		});
-		expect(endEvents[0]).not.toMatchObject({
-			errorMessage: "Auto-handoff failed: no handoff document was generated",
-		});
 	});
 
 	it("treats a vetoed auto-handoff switch as cancelled instead of falling back", async () => {
-		session.settings.set("compaction.strategy", "handoff");
+		session.settings.set("compaction.methodOrder", ["handoff", "soft"]);
 		session.settings.set("compaction.thresholdPercent", 1);
 		session.settings.set("contextPromotion.enabled", false);
 

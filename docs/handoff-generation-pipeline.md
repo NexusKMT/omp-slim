@@ -166,9 +166,9 @@ Auto-triggered handoffs can additionally write a timestamped `handoff-*.md` arti
 
 ### Automatic handoff
 
-Manual `/handoff` works regardless of the context-maintenance strategy. To use this pipeline for automatic maintenance, set `compaction.strategy: handoff` (the strategy default is `snapcompact`). Normal threshold-triggered handoffs defer to a post-prompt task; an `incomplete` output recovery may hand off inline. Input `overflow` always falls back to in-place context-full maintenance because the handoff request would carry the same oversized input.
+Manual `/handoff` works regardless of the context-maintenance method order. To use this pipeline automatically, include `handoff` in `compaction.methodOrder` (the default order is `remote`, `snapcompact`, `handoff`, `shake`, `soft`). Normal threshold-triggered handoffs defer to a post-prompt task; an `incomplete` output recovery may hand off inline. Input `overflow` skips handoff because the request would carry the same oversized input.
 
-If auto generation returns no document, maintenance falls back to context-full compaction. An abort or a `session_before_switch` hook cancellation does not trigger that fallback. `compaction.handoffSaveToDisk` defaults to `false`; when enabled, only auto-triggered handoffs write the extra markdown artifact.
+If auto generation returns no document, maintenance advances to the next configured method. An abort or a `session_before_switch` hook cancellation does not trigger that fallback. `compaction.handoffSaveToDisk` defaults to `false`; when enabled, only auto-triggered handoffs write the extra markdown artifact.
 
 ## Controller/UI behavior
 

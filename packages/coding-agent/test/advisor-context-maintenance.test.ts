@@ -66,7 +66,7 @@ describe("AgentSession advisor context maintenance", () => {
 		const settings = Settings.isolated({
 			"advisor.syncBacklog": "1",
 			"compaction.enabled": true,
-			"compaction.strategy": "context-full",
+			"compaction.methodOrder": ["soft"],
 			"contextPromotion.enabled": contextPromotionEnabled,
 		});
 		const agent = new Agent({
@@ -153,7 +153,7 @@ describe("AgentSession advisor context maintenance", () => {
 		const settings = Settings.isolated({
 			"advisor.syncBacklog": "1",
 			"compaction.enabled": true,
-			"compaction.strategy": "context-full",
+			"compaction.methodOrder": ["soft"],
 			"contextPromotion.enabled": false,
 		});
 		settings.setModelRole("advisor", `${nativeModel.provider}/${nativeModel.id}`);
@@ -349,7 +349,7 @@ describe("AgentSession advisor context maintenance", () => {
 		const settings = Settings.isolated({
 			"advisor.syncBacklog": "1",
 			"compaction.enabled": true,
-			"compaction.strategy": "context-full",
+			"compaction.methodOrder": ["soft"],
 			"contextPromotion.enabled": false,
 		});
 		const agent = new Agent({

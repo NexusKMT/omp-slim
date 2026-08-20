@@ -108,7 +108,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 		const modelRegistry = sharedModelRegistry;
 		const settings = Settings.isolated({
 			"compaction.enabled": true,
-			"compaction.strategy": "context-full",
+			"compaction.methodOrder": ["soft"],
 			"compaction.autoContinue": true,
 			"compaction.midTurnEnabled": true,
 			"compaction.thresholdTokens": 1000,
@@ -221,7 +221,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 	});
 
 	it("falls back to in-place compaction for mid-run handoff strategy", async () => {
-		const { session, observedContexts } = await createHarness({ "compaction.strategy": "handoff" });
+		const { session, observedContexts } = await createHarness({ "compaction.methodOrder": ["handoff", "soft"] });
 		const handoffSpy = vi.spyOn(session, "handoff").mockImplementation(async () => {
 			throw new Error("mid-run compaction must not reset the session through handoff");
 		});
@@ -497,11 +497,11 @@ describe("AgentSession mid-run threshold compaction", () => {
 	});
 
 	it.each([
-		["auto_compaction_end", "context-full"],
-		["session_compact", "context-full"],
-		["auto_compaction_end", "shake"],
-		["session_compact", "shake"],
-	] as const)("hung %s handlers do not pin the mid-run %s loop", async (handlerType, strategy) => {
+		["auto_compaction_end", "context-full", ["soft"]],
+		["session_compact", "context-full", ["soft"]],
+		["auto_compaction_end", "shake", ["shake", "soft"]],
+		["session_compact", "shake", ["shake", "soft"]],
+	] as const)("hung %s handlers do not pin the mid-run %s loop", async (handlerType, action, methodOrder) => {
 		const releaseHandler = Promise.withResolvers<void>();
 		const handlerEntered = Promise.withResolvers<void>();
 		const nextProviderCall = Promise.withResolvers<void>();
@@ -516,7 +516,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 			}),
 		} as unknown as ExtensionRunner;
 		const { session, observedContexts } = await createHarness(
-			{ "compaction.strategy": strategy },
+			{ "compaction.methodOrder": methodOrder },
 			{
 				extensionRunner,
 				onProviderCall: index => {
@@ -525,7 +525,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 			},
 		);
 		const shakeSpy =
-			strategy === "shake"
+			action === "shake"
 				? vi
 						.spyOn(session, "shake")
 						.mockResolvedValue({ mode: "elide", toolResultsDropped: 0, blocksDropped: 0, tokensFreed: 0 })
