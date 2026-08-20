@@ -1,15 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import {
-	$which,
-	getConfigRootDir,
-	getRemoteHostDir,
-	getSshControlDir,
-	isEnoent,
-	logger,
-	postmortem,
-	ptree,
-} from "@oh-my-pi/pi-utils";
+import { $which, getRemoteHostDir, getSshControlDir, isEnoent, logger, postmortem, ptree } from "@oh-my-pi/pi-utils";
 import { buildSshTarget, sanitizeHostName } from "./utils";
 
 export interface SSHConnectionTarget {
@@ -76,17 +67,18 @@ export function controlPathFitsBudget(controlDir: string, platform: SshPlatform)
 }
 
 /**
- * Deterministic, depth-bounded control directory used when the profile-rooted
- * one would overflow `sun_path` (named profiles on macOS, #9070). The digest
- * keys both uid and canonical config root, separated by NUL so their boundaries
- * are unambiguous: distinct users and profiles keep isolated masters without
- * spending variable path bytes on the decimal uid.
+ * Deterministic, depth-bounded control directory used when the canonical
+ * control directory would overflow `sun_path` (#9070). The digest keys both
+ * uid and the fully resolved canonical control directory, separated by NUL so
+ * their boundaries are unambiguous. This preserves isolation when the same
+ * profile resolves through different XDG state roots without spending variable
+ * path bytes on the decimal uid.
  */
-export function sshControlFallbackDir(configRoot: string, uid: number, tmpBase = "/tmp"): string {
+export function sshControlFallbackDir(canonicalDir: string, uid: number, tmpBase = "/tmp"): string {
 	const key = new Bun.CryptoHasher("sha256")
 		.update(String(uid))
 		.update("\0")
-		.update(configRoot)
+		.update(canonicalDir)
 		.digest("hex")
 		.slice(0, 20);
 	return path.join(tmpBase, `omp-${key}`);
@@ -106,15 +98,14 @@ interface ControlDirChoice {
  */
 export function resolveSshControlDir(opts: {
 	canonicalDir: string;
-	configRoot: string;
 	platform: SshPlatform;
 	uid: number | undefined;
 	tmpBase?: string;
 }): ControlDirChoice {
-	const { canonicalDir, configRoot, platform, uid, tmpBase } = opts;
+	const { canonicalDir, platform, uid, tmpBase } = opts;
 	if (!supportsSshControlMaster(platform) || uid === undefined) return { dir: canonicalDir, shared: false };
 	if (controlPathFitsBudget(canonicalDir, platform)) return { dir: canonicalDir, shared: false };
-	return { dir: sshControlFallbackDir(configRoot, uid, tmpBase), shared: true };
+	return { dir: sshControlFallbackDir(canonicalDir, uid, tmpBase), shared: true };
 }
 
 interface ControlDirGuardStat {
@@ -142,7 +133,6 @@ export function controlDirGuardError(stat: ControlDirGuardStat, expectedUid: num
 
 const { dir: CONTROL_DIR, shared: CONTROL_DIR_SHARED } = resolveSshControlDir({
 	canonicalDir: getSshControlDir(),
-	configRoot: getConfigRootDir(),
 	platform: process.platform,
 	uid: process.getuid?.(),
 });

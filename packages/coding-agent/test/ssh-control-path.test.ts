@@ -42,11 +42,11 @@ describe("SSH control-path budget (#9070)", () => {
 
 describe("sshControlFallbackDir", () => {
 	it("is deterministic and leaves 11 bytes of macOS sun_path slack", () => {
-		const root = "/Users/arthur/.omp/profiles/upstream";
-		const a = sshControlFallbackDir(root, 501);
-		const b = sshControlFallbackDir(root, 501);
+		const canonicalDir = "/Users/arthur/.omp/profiles/upstream/ssh-control";
+		const a = sshControlFallbackDir(canonicalDir, 501);
+		const b = sshControlFallbackDir(canonicalDir, 501);
 		expect(a).toBe(b);
-		expect(a).toBe("/tmp/omp-eab7c36f6b3b52ea9bb3");
+		expect(a).toBe("/tmp/omp-5434354bc38f9a50fbbd");
 		expect(Buffer.byteLength(a)).toBe(29);
 		const tempBind = path.join(a, `${"a".repeat(40)}.sock.${"b".repeat(16)}`);
 		expect(Buffer.byteLength(tempBind)).toBe(92);
@@ -54,42 +54,58 @@ describe("sshControlFallbackDir", () => {
 		expect(controlPathFitsBudget(a, "darwin")).toBe(true);
 	});
 
-	it("isolates distinct config roots and uids", () => {
-		const base = "/Users/arthur/.omp";
-		expect(sshControlFallbackDir(base, 501)).not.toBe(sshControlFallbackDir(`${base}/profiles/x`, 501));
+	it("isolates distinct canonical control directories and uids", () => {
+		const base = "/Users/arthur/.omp/ssh-control";
+		expect(sshControlFallbackDir(base, 501)).not.toBe(
+			sshControlFallbackDir("/different/xdg/state/omp/ssh-control", 501),
+		);
 		expect(sshControlFallbackDir(base, 501)).not.toBe(sshControlFallbackDir(base, 502));
 	});
 });
 
 describe("resolveSshControlDir", () => {
-	const configRoot = "/Users/arthur/.omp/profiles/upstream";
-
 	it("keeps the canonical dir when it fits", () => {
 		const canonicalDir = "/Users/arthur/.omp/ssh-control";
-		expect(resolveSshControlDir({ canonicalDir, configRoot, platform: "darwin", uid: 501 })).toEqual({
+		expect(resolveSshControlDir({ canonicalDir, platform: "darwin", uid: 501 })).toEqual({
 			dir: canonicalDir,
 			shared: false,
 		});
 	});
 
 	it("relocates to the bounded shared fallback when the canonical dir overflows", () => {
-		const canonicalDir = `${configRoot}/ssh-control`;
-		const choice = resolveSshControlDir({ canonicalDir, configRoot, platform: "darwin", uid: 501, tmpBase: "/tmp" });
-		expect(choice).toEqual({ dir: "/tmp/omp-eab7c36f6b3b52ea9bb3", shared: true });
+		const canonicalDir = "/Users/arthur/.omp/profiles/upstream/ssh-control";
+		const choice = resolveSshControlDir({ canonicalDir, platform: "darwin", uid: 501, tmpBase: "/tmp" });
+		expect(choice).toEqual({ dir: "/tmp/omp-5434354bc38f9a50fbbd", shared: true });
 		expect(controlPathFitsBudget(choice.dir, "darwin")).toBe(true);
 	});
 
+	it("keeps distinct fallback masters for the same profile under different XDG state roots", () => {
+		const a = resolveSshControlDir({
+			canonicalDir: "/very/long/xdg-state-a/omp/profiles/upstream/ssh-control",
+			platform: "darwin",
+			uid: 501,
+		});
+		const b = resolveSshControlDir({
+			canonicalDir: "/very/long/xdg-state-b/omp/profiles/upstream/ssh-control",
+			platform: "darwin",
+			uid: 501,
+		});
+		expect(a.shared).toBe(true);
+		expect(b.shared).toBe(true);
+		expect(a.dir).not.toBe(b.dir);
+	});
+
 	it("never relocates on Windows (ControlMaster unused) even for a long path", () => {
-		const canonicalDir = `${configRoot}/ssh-control`;
-		expect(resolveSshControlDir({ canonicalDir, configRoot, platform: "win32", uid: 501 })).toEqual({
+		const canonicalDir = "/Users/arthur/.omp/profiles/upstream/ssh-control";
+		expect(resolveSshControlDir({ canonicalDir, platform: "win32", uid: 501 })).toEqual({
 			dir: canonicalDir,
 			shared: false,
 		});
 	});
 
 	it("keeps the canonical dir when there is no uid to key the fallback", () => {
-		const canonicalDir = `${configRoot}/ssh-control`;
-		expect(resolveSshControlDir({ canonicalDir, configRoot, platform: "darwin", uid: undefined })).toEqual({
+		const canonicalDir = "/Users/arthur/.omp/profiles/upstream/ssh-control";
+		expect(resolveSshControlDir({ canonicalDir, platform: "darwin", uid: undefined })).toEqual({
 			dir: canonicalDir,
 			shared: false,
 		});
