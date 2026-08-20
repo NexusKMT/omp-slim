@@ -41,6 +41,7 @@
 - Nix-packaged builds no longer fail to load the on-demand `onnxruntime-node`/`sherpa-onnx` addons with `libstdc++.so.6: cannot open shared object file` (STT, TTS, tiny-model and mnemopi workers) — the package advertises its C++ runtime library dirs and the agent injects them into the inference worker subprocesses only.
 - Fixed `hub wait` stacking frozen copies of the same running-job rows into native scrollback once the transcript outgrew the viewport. The live-region pin now starts at the poll body (not the blank separator before it) and still applies when an earlier unpinned live block sits above the wait.
 - Improved markdown code-fence header contrast on affected dark themes so language tags and citation paths remain readable ([#9118](https://github.com/can1357/oh-my-pi/pull/9118) by [@Mustaqeem66](https://github.com/Mustaqeem66)).
+- Configured discovery providers with `authHeader` keep cached models available across restarts ([#9112](https://github.com/can1357/oh-my-pi/issues/9112)).
 
 ## [17.4.0] - 2026-08-20
 
