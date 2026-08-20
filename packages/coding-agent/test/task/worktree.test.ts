@@ -107,6 +107,21 @@ describe("worktree isolation helpers", () => {
 		expect((error as Error).message).toContain("task.isolation.mode: none");
 	});
 
+	it("sizes an untracked symlink itself rather than its target", async () => {
+		if (process.platform === "win32") return;
+		const repo = await createGitRepo();
+		const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-worktree-symlink-target-"));
+		tempDirs.push(targetDir);
+		const target = path.join(targetDir, "large.bin");
+		await fs.writeFile(target, "");
+		await fs.truncate(target, ISOLATION_BASELINE_MAX_CONTENT_BYTES + 1);
+		await fs.symlink(target, path.join(repo, "large-link.bin"));
+
+		const baseline = await captureBaseline(repo);
+		expect(baseline.root.untracked).toEqual(["large-link.bin"]);
+		expect(baseline.root.untrackedPatch).toContain(target);
+	});
+
 	// Real git worktree/stash/merge I/O is the contract under test and cannot be
 	// faked. One initialized fixture repo is built once in `beforeAll` (whose time
 	// is excluded from per-test body time) and shared: the costly `git init`,

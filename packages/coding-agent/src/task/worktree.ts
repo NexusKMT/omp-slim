@@ -129,12 +129,12 @@ export class IsolationBaselineTooLargeError extends Error {
 	}
 }
 
-/** Sum the on-disk size of untracked files, skipping entries that vanished. */
+/** Sum untracked entry sizes without following symlinks, skipping entries that vanished. */
 async function sumUntrackedBytes(repoRoot: string, untracked: readonly string[]): Promise<number> {
 	if (untracked.length === 0) return 0;
 	const { results } = await mapWithConcurrencyLimit([...untracked], 16, async entry => {
 		try {
-			const stat = await fs.stat(path.join(repoRoot, entry));
+			const stat = await fs.lstat(path.join(repoRoot, entry));
 			return stat.isFile() ? stat.size : 0;
 		} catch {
 			return 0;
