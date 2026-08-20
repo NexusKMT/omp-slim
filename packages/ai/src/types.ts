@@ -1213,6 +1213,16 @@ export interface Tool<TParameters extends TSchema = TSchema> {
 	/** If true, tool is strictly typed and validated against the parameters schema before execution */
 	strict?: boolean;
 	/**
+	 * If false, argument validation runs verbatim: none of the LLM-quirk
+	 * normalization/repair passes (JSON-string parsing, object→string
+	 * stringification, unrecognized-key dropping, singleton array wrapping)
+	 * are applied. For tools whose arguments ARE the deliverable payload —
+	 * e.g. a subagent's `yield` — lossy repairs silently corrupt data that
+	 * the tool's own validation/retry loop is designed to correct instead.
+	 * Defaults to true.
+	 */
+	coerceArguments?: boolean;
+	/**
 	 * Optional grammar constraint for OpenAI custom-tool emission.
 	 * When set, providers that support grammar-constrained tools (currently only
 	 * `openai-responses` against models with the right capability flag) may emit

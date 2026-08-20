@@ -56,6 +56,49 @@ describe("Tool argument coercion", () => {
 
 		expect(result.payload).toBe('{"a":1,"nested":["x"]}');
 	});
+	it("coerceArguments: false rejects object values for string fields instead of stringifying", () => {
+		const tool: Tool = {
+			name: "verbatim",
+			description: "",
+			coerceArguments: false,
+			parameters: type({ payload: type("string") }),
+		};
+
+		expect(() =>
+			validateToolArguments(tool, {
+				type: "toolCall",
+				id: "call-verbatim-object",
+				name: "verbatim",
+				arguments: { payload: { a: 1 } },
+			}),
+		).toThrow(/payload/);
+	});
+
+	it("coerceArguments: false still passes conforming args and rejects invalid JSON buffers", () => {
+		const tool: Tool = {
+			name: "verbatim-ok",
+			description: "",
+			coerceArguments: false,
+			parameters: type({ payload: type("string") }),
+		};
+
+		const result = validateToolArguments(tool, {
+			type: "toolCall",
+			id: "call-verbatim-ok",
+			name: "verbatim-ok",
+			arguments: { payload: "fine" },
+		}) as { payload: string };
+		expect(result.payload).toBe("fine");
+
+		expect(() =>
+			validateToolArguments(tool, {
+				type: "toolCall",
+				id: "call-verbatim-parse-error",
+				name: "verbatim-ok",
+				arguments: { __parseError: "Unexpected token", __rawJson: '{"payload": ' },
+			}),
+		).toThrow(/not valid JSON/);
+	});
 
 	it("stringifies array values when schema expects string", () => {
 		const tool: Tool = {

@@ -1923,6 +1923,18 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): ToolCall[
 		);
 	}
 	const ctx = getValidationContext(tool);
+	// Verbatim mode: the tool opted out of every repair pass because its
+	// arguments are payload, not plumbing. Validate as-is; on failure the
+	// caller's lenient path (if any) hands the raw args to the tool, whose
+	// own error messaging drives the model's retry.
+	if (tool.coerceArguments === false) {
+		const verbatim = validateContext(ctx, originalArgs);
+		if (verbatim.success) return verbatim.value as ToolCall["arguments"];
+		const errors = verbatim.messages.join("\n") || "Unknown validation error";
+		throw new AIError.ValidationError(
+			`Validation failed for tool "${toolCall.name}":\n${errors}\n\nReceived arguments:\n${JSON.stringify(truncateArgsForError(originalArgs), null, 2)}`,
+		);
+	}
 	const { json } = ctx;
 
 	// Always normalize first — strip null/string "null" from optional fields,

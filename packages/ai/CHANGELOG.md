@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `Tool.coerceArguments` (default `true`): setting it `false` opts a tool out of every LLM-quirk argument repair pass (JSON-string parsing, object→string stringification, unrecognized-key dropping, singleton array wrapping) so validation runs verbatim. Tools whose arguments are the deliverable payload — like the subagent `yield` tool — use it to keep lossy repairs from silently corrupting data their own validate-and-retry loop is designed to correct.
+
 ### Fixed
 
 - Fixed local OpenAI-compatible servers with strict `chat_template_kwargs` whitelists (e.g. NInfer) failing every Qwen 3.8+ turn with `400 chat_template_kwargs.reasoning_effort is not supported` after the effort routing fix: the reasoning-effort fallback now recognizes a rejection of the kwargs spelling itself, retries with the kwarg stripped while keeping the effort on the standard top-level `reasoning_effort` field (hoisting it there for the kwargs-only vLLM dialect), and remembers the shape for the rest of the session. Value-level rejections and drops now also update the `chat_template_kwargs.reasoning_effort` twin instead of leaving a stale effort for kwargs-reading renderers, and unknown-parameter 400s naming `reasoning_effort` are recognized as effort rejections.
