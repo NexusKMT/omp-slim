@@ -2005,7 +2005,9 @@ export class StatusLineComponent implements Component {
 			}
 		}
 
-		const usedCount = Math.min(scaleWidth, Math.max(0, Math.round((clampedPct / 100) * scaleWidth)));
+		// At least one accent cell: a fresh session still shows the session-accent
+		// line starting at the left instead of a fully dim bar.
+		const usedCount = Math.min(scaleWidth, Math.max(1, Math.round((clampedPct / 100) * scaleWidth)));
 		const unusedColor = theme.getFgAnsi("border");
 
 		// Boundary markers are only meaningful when auto-compaction can fire and

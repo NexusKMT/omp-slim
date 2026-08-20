@@ -89,6 +89,8 @@ export type SymbolKey =
 	| "icon.tokens"
 	| "icon.context"
 	| "icon.cost"
+	| "icon.subscription"
+	| "icon.advisor"
 	| "icon.time"
 	| "icon.pi"
 	| "icon.ghost"
@@ -305,6 +307,8 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"icon.tokens": "🪙",
 	"icon.context": "◫",
 	"icon.cost": "💲",
+	"icon.subscription": "(sub)",
+	"icon.advisor": "👁",
 	"icon.time": "⏱",
 	"icon.pi": "π",
 	"icon.ghost": "👻",
@@ -588,6 +592,10 @@ const NERD_SYMBOLS: SymbolMap = {
 	"icon.context": "\ue70f",
 	// pick:  | alt: $ ¢
 	"icon.cost": "\uf155",
+	// pick: 󰙺 (nf-md-currency_usd_off)
+	"icon.subscription": "\u{f067a}",
+	// pick:  (nf-cod-eye)
+	"icon.advisor": "\uea70",
 	// pick:  | alt: ◷ ◴
 	"icon.time": "\uf017",
 	// pick:  | alt: π ∏ ∑
@@ -839,6 +847,8 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"icon.tokens": "tok:",
 	"icon.context": "ctx:",
 	"icon.cost": "$",
+	"icon.subscription": "(sub)",
+	"icon.advisor": "(adv)",
 	"icon.time": "t:",
 	"icon.pi": "pi",
 	"icon.ghost": "@",

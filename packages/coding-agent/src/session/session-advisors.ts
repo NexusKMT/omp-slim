@@ -1679,6 +1679,14 @@ export class SessionAdvisors {
 		for (const advisorCost of this.#advisorCosts.values()) cost += advisorCost;
 		return cost;
 	}
+	/** Return whether any active or configured advisor is running on an OAuth/subscription model. */
+	isUsingSubscription(): boolean {
+		if (this.#advisors.length > 0) {
+			return this.#advisors.some(a => this.#host.modelRegistry.isUsingOAuth(a.model));
+		}
+		const sel = resolveAdvisorRoleSelection(this.#host.settings, this.#host.modelRegistry.getAvailable());
+		return sel ? this.#host.modelRegistry.isUsingOAuth(sel.model) : false;
+	}
 	/**
 	 * Return structured advisor stats for the status command and TUI panel.
 	 */

@@ -501,6 +501,8 @@ export class Theme {
 			tokens: this.#symbols["icon.tokens"],
 			context: this.#symbols["icon.context"],
 			cost: this.#symbols["icon.cost"],
+			subscription: this.#symbols["icon.subscription"],
+			advisor: this.#symbols["icon.advisor"],
 			time: this.#symbols["icon.time"],
 			pi: this.#symbols["icon.pi"],
 			ghost: this.#symbols["icon.ghost"],
