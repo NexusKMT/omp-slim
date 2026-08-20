@@ -13,7 +13,6 @@ import { EVAL_AGENT_BRIDGE_NAME } from "../src/eval/agent-bridge";
 import { EVAL_BUDGET_BRIDGE_NAME } from "../src/eval/budget-bridge";
 import { EVAL_COMPLETION_BRIDGE_NAME } from "../src/eval/completion-bridge";
 import { EVAL_CONCURRENCY_BRIDGE_NAME } from "../src/eval/concurrency-bridge";
-import planModeActive from "../src/prompts/system/plan-mode-active.md" with { type: "text" };
 import { createAgentSession } from "../src/sdk";
 import { AgentSession } from "../src/session/agent-session";
 import type { ToolNamespacesInfo } from "../src/session/code-mode";
@@ -512,15 +511,14 @@ describe("Code Mode session reconciliation", () => {
 	});
 
 	test("plan guidance keeps task delegation after Code Mode demotes the tool", async () => {
-		async function planPrompt(extraTools: AgentTool[], names: string[]): Promise<string> {
+		async function planPrompt(codeMode: "on" | "off", extraTools: AgentTool[], names: string[]): Promise<string> {
 			const { session } = createSession(
-				Settings.isolated({ "providers.openai-codex.codeMode": "on" }),
+				Settings.isolated({ "providers.openai-codex.codeMode": codeMode }),
 				undefined,
 				undefined,
 				extraTools,
 			);
 			await session.setActiveToolsByName(names);
-			expect(session.getActiveToolNames()).not.toContain("task");
 			session.setPlanModeState({ enabled: true, planFilePath: "local://PLAN.md" });
 			await session.sendPlanModeContext();
 			const planMessage = session.state.messages.find(
@@ -529,22 +527,15 @@ describe("Code Mode session reconciliation", () => {
 			return String((planMessage as { content?: string })?.content);
 		}
 
-		// `task` is bridge-reachable but demoted off the direct surface, so the
-		// guidance must still cover delegation: the capability gate reads the
-		// enabled set, not the model-visible one.
-		const withTask = await planPrompt([tool("task")], ["eval", "task"]);
-		const withoutTask = await planPrompt([], ["eval"]);
-		// Derived from the template, not transcribed: every segment the template
-		// gates on `taskAvailable` must survive the demotion, and none may appear
-		// once `task` is absent from the enabled set.
-		const gated = [...planModeActive.matchAll(/\{\{#if taskAvailable\}\}([\s\S]*?)\{\{\/if\}\}/gu)].map(
-			match => match[1] ?? "",
-		);
-		expect(gated.length).toBeGreaterThan(0);
-		for (const segment of gated) {
-			expect(withTask).toContain(segment);
-			expect(withoutTask).not.toContain(segment);
-		}
+		// The contract is invariance: demoting `task` off the direct surface is a
+		// transport change, so the guidance must match a session where `task` is
+		// directly callable, and must differ from one that cannot delegate at all.
+		const demoted = await planPrompt("on", [tool("task")], ["eval", "task"]);
+		const direct = await planPrompt("off", [tool("task")], ["eval", "task"]);
+		const unavailable = await planPrompt("on", [], ["eval"]);
+
+		expect(demoted).toBe(direct);
+		expect(demoted).not.toBe(unavailable);
 	});
 });
 
