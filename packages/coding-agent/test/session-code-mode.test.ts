@@ -13,11 +13,13 @@ import { EVAL_AGENT_BRIDGE_NAME } from "../src/eval/agent-bridge";
 import { EVAL_BUDGET_BRIDGE_NAME } from "../src/eval/budget-bridge";
 import { EVAL_COMPLETION_BRIDGE_NAME } from "../src/eval/completion-bridge";
 import { EVAL_CONCURRENCY_BRIDGE_NAME } from "../src/eval/concurrency-bridge";
+import planModeActive from "../src/prompts/system/plan-mode-active.md" with { type: "text" };
 import { createAgentSession } from "../src/sdk";
 import { AgentSession } from "../src/session/agent-session";
 import type { ToolNamespacesInfo } from "../src/session/code-mode";
 import { buildToolNamespacesInfo, CODE_MODE_KEEP_TOOLS, resolveCodeMode } from "../src/session/code-mode";
 import { SessionManager } from "../src/session/session-manager";
+import { generateCodeModeDeclarations } from "../src/tools/eval-format/code-mode-declarations";
 
 const ENABLED = ["eval", "ask", "todo", "yield", "think", "read", "bash", "edit", "mcp__gmail__search"];
 
@@ -203,6 +205,21 @@ describe("buildToolNamespacesInfo", () => {
 		}
 	});
 
+	test("a tool losing its wire name stays reachable through the bridge", () => {
+		// The metadata advertises one callable per wire name, so the loser is
+		// unadvertised there - but the bridge resolves by real tool name, and the
+		// eval declarations are generated from the bridge names, so it stays
+		// callable as `tool.apply_patch()`.
+		const info = buildToolNamespacesInfo({
+			tools: [{ name: "edit", customWireName: "apply_patch" }, { name: "apply_patch" }],
+			directToolNames: new Set(["edit"]),
+		});
+		expect(Object.keys(info.functions.functions)).toEqual(["apply_patch"]);
+
+		const declarations = generateCodeModeDeclarations([{ name: "apply_patch", parameters: undefined }]);
+		expect(declarations).toContain("apply_patch(args: unknown): Promise<unknown>;");
+	});
+
 	test("prototype-named tools land as own entries", () => {
 		const info = buildToolNamespacesInfo({
 			tools: [{ name: "toString" }, { name: "__proto__" }],
@@ -217,6 +234,7 @@ describe("buildToolNamespacesInfo", () => {
 		expect(wire.get("__proto__")?.code_mode_name).toBe("__proto__");
 	});
 });
+
 describe("Code Mode session reconciliation", () => {
 	const sessions: AgentSession[] = [];
 
@@ -516,7 +534,17 @@ describe("Code Mode session reconciliation", () => {
 		// enabled set, not the model-visible one.
 		const withTask = await planPrompt([tool("task")], ["eval", "task"]);
 		const withoutTask = await planPrompt([], ["eval"]);
-		expect(withTask).not.toBe(withoutTask);
+		// Derived from the template, not transcribed: every segment the template
+		// gates on `taskAvailable` must survive the demotion, and none may appear
+		// once `task` is absent from the enabled set.
+		const gated = [...planModeActive.matchAll(/\{\{#if taskAvailable\}\}([\s\S]*?)\{\{\/if\}\}/gu)].map(
+			match => match[1] ?? "",
+		);
+		expect(gated.length).toBeGreaterThan(0);
+		for (const segment of gated) {
+			expect(withTask).toContain(segment);
+			expect(withoutTask).not.toContain(segment);
+		}
 	});
 });
 
