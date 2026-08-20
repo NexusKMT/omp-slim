@@ -26,6 +26,7 @@
 - Fixed provider-detected OAuth access-token expiry ending an otherwise healthy turn instead of asking `AuthStorage` to refresh the credential and replay the request once.
 
 - Fixed local OpenAI-compatible servers with strict `chat_template_kwargs` whitelists (e.g. NInfer) failing every Qwen 3.8+ turn with `400 chat_template_kwargs.reasoning_effort is not supported` after the effort routing fix: the reasoning-effort fallback now recognizes a rejection of the kwargs spelling itself, retries with the kwarg stripped while keeping the effort on the standard top-level `reasoning_effort` field (hoisting it there for the kwargs-only vLLM dialect), and remembers the shape for the rest of the session. Value-level rejections and drops now also update the `chat_template_kwargs.reasoning_effort` twin instead of leaving a stale effort for kwargs-reading renderers, and unknown-parameter 400s naming `reasoning_effort` are recognized as effort rejections.
+- Fixed Google Cloud Code Assist / Antigravity rejecting MCP tool schemas with `400 Invalid JSON payload received. Unknown name "x-mcp-header"`: the MCP 2026-07-28 `x-mcp-header` transport annotation (which mirrors a parameter into an `Mcp-Param-*` HTTP header) is now stripped from the Google/CCA wire schema by `normalizeSchemaForGoogle` / `normalizeSchemaForCCA`, while remaining available to the MCP transport/execution layer ([#9016](https://github.com/can1357/oh-my-pi/issues/9016)).
 
 ## [17.3.8] - 2026-08-19
 

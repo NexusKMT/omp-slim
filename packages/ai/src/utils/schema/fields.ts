@@ -40,6 +40,11 @@ export const UNSUPPORTED_SCHEMA_FIELDS: Record<string, true> = {
 	dependencies: true,
 	dependentSchemas: true,
 	dependentRequired: true,
+	// MCP 2026-07-28 transport annotation (mirrors a param into an `Mcp-Param-*`
+	// HTTP header on the Streamable HTTP transport); not a JSON Schema keyword.
+	// Google Cloud Code Assist 400s on the unknown field name, so strip it from
+	// the wire schema. MCP transport/execution reads it from the raw tool schema.
+	"x-mcp-header": true,
 };
 
 /**
