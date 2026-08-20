@@ -25,9 +25,10 @@ describe("generateCodeModeDeclarations", () => {
 				},
 			},
 		]);
-		expect(out).toContain("declare const tool: {");
-		expect(out).toContain("read(args: { path: string; limit?: number }): Promise<unknown>;");
-		expect(out).toContain("grep(args: { pattern: string; case?: boolean }): Promise<unknown>;");
+		expect(out.split("\n")).toEqual([
+			"  read(args: { path: string; limit?: number }): Promise<unknown>;",
+			"  grep(args: { pattern: string; case?: boolean }): Promise<unknown>;",
+		]);
 	});
 	test("enums become literal unions", () => {
 		const out = generateCodeModeDeclarations([
@@ -77,4 +78,31 @@ test("EvalTool advertises only tools authorized for its bridge", () => {
 
 	expect(description).toContain("read(args:");
 	expect(description).not.toContain("write(args:");
+});
+
+test("EvalTool description renders the Code Mode guidance and declarations block only when active", () => {
+	const read = { name: "read", parameters: type({ path: "string" }) };
+	const baseSession = {
+		cwd: "/tmp",
+		hasUI: false,
+		getSessionFile: () => null,
+		getActiveModel: () => ({ provider: "openai-codex" }),
+		toolRegistry: new Map([["read", read]]),
+		getEvalBridgeToolNames: () => ["read"],
+	};
+	const active = new EvalTool({
+		...baseSession,
+		settings: Settings.isolated({ "providers.openai-codex.codeMode": "on" }),
+	} as unknown as ToolSession).description;
+	expect(active).toContain("Codex Code Mode is active");
+	expect(active).toContain("exec tool declarations:");
+	expect(active).toContain("declare const tool: {");
+	expect(active).toContain("  read(args:");
+
+	const inactive = new EvalTool({
+		...baseSession,
+		settings: Settings.isolated({ "providers.openai-codex.codeMode": "off" }),
+	} as unknown as ToolSession).description;
+	expect(inactive).not.toContain("Codex Code Mode is active");
+	expect(inactive).not.toContain("exec tool declarations:");
 });

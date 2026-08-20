@@ -1,6 +1,7 @@
 /**
- * Generate the TypeScript declaration block advertising eval-bridged tools
- * under Codex Code Mode, mirroring codex-rs augment_tool_spec_for_code_mode.
+ * Generate the TypeScript method signatures advertising eval-bridged tools
+ * under Codex Code Mode (spliced into the `eval-code-mode.md` prompt),
+ * mirroring codex-rs augment_tool_spec_for_code_mode.
  */
 import { arkToWireSchema, isArkSchema } from "@oh-my-pi/pi-ai/utils/schema/wire";
 
@@ -52,5 +53,5 @@ export function generateCodeModeDeclarations(tools: ReadonlyArray<{ name: string
 		const args = wire?.type === "object" && wire.properties ? tsType(wire, 0) : "unknown";
 		return `  ${printedName}(args: ${args}): Promise<unknown>;`;
 	});
-	return ["exec tool declarations:", "```ts", "declare const tool: {", ...lines, "};", "```"].join("\n");
+	return lines.join("\n");
 }

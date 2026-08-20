@@ -15,6 +15,7 @@ import { IdleTimeout } from "../eval/idle-timeout";
 import { defaultEvalSessionId } from "../eval/session-id";
 import type { EvalCellResult, EvalDisplayOutput, EvalLanguage, EvalStatusEvent, EvalToolDetails } from "../eval/types";
 import evalDescription from "../prompts/tools/eval.md" with { type: "text" };
+import evalCodeModeDescription from "../prompts/tools/eval-code-mode.md" with { type: "text" };
 import { resolveCodeMode } from "../session/code-mode";
 import { DEFAULT_MAX_BYTES, OutputSink, type OutputSummary, TailBuffer } from "../session/streaming-output";
 import { resolveSpawnPolicy } from "../task/spawn-policy";
@@ -340,9 +341,8 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 		const codeMode = resolveCodeMode({
 			provider: model?.provider ?? "",
 			toolMode: model?.toolMode,
-			setting:
-				(session.settings.get("providers.openai-codex.codeMode") as "off" | "on" | "auto" | undefined) ?? "off",
-			extraDirectTools: session.settings.get("providers.openai-codex.codeModeDirectTools") as string[] | undefined,
+			setting: session.settings.get("providers.openai-codex.codeMode"),
+			extraDirectTools: session.settings.get("providers.openai-codex.codeModeDirectTools"),
 			enabledToolNames,
 		});
 		if (!codeMode.active) return undefined;
@@ -353,14 +353,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 				return tool ? [{ name, parameters: (tool as { parameters?: unknown }).parameters }] : [];
 			}),
 		);
-		return [
-			"Codex Code Mode is active: this tool is your primary work surface and the direct tool surface is restricted.",
-			"Plan multiple operations into ONE cell whenever the next steps are known, calling session tools via `await tool.<name>(args)`;",
-			"use `parallel([...])` for independent calls. Prefer `tool.*` calls over raw `Bun.file`/fs so operations flow through the session tool pipeline.",
-			"Reserve separate cells for steps that must inspect earlier results.",
-			"",
-			declarations,
-		].join("\n");
+		return prompt.render(evalCodeModeDescription, { declarations });
 	}
 	/** All reuse-chain examples; the `examples` getter filters by enabled languages. */
 	private static readonly ALL_EXAMPLES: readonly ToolExample<typeof evalSchema.infer>[] = [
