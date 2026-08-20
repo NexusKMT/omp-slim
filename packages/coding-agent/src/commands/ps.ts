@@ -26,6 +26,7 @@ export default class Ps extends Command {
 	static flags = {
 		all: Flags.boolean({ char: "a", description: "List every project and global service scope (list)" }),
 		json: Flags.boolean({ char: "j", description: "Emit machine-readable JSON" }),
+		plain: Flags.boolean({ description: "Static listing instead of the interactive monitor (list)" }),
 		dir: Flags.string({ description: "Target another project directory instead of the current one" }),
 		global: Flags.string({ description: "Target a machine-global service scope (e.g. browser-relay)" }),
 		follow: Flags.boolean({ char: "f", description: "Keep streaming new output (logs)" }),
@@ -52,6 +53,7 @@ export default class Ps extends Command {
 			flags: {
 				all: flags.all ?? false,
 				json: flags.json ?? false,
+				plain: flags.plain ?? false,
 				dir: flags.dir,
 				global: flags.global,
 				follow: flags.follow ?? false,
