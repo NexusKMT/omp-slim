@@ -19,6 +19,7 @@
 - Cloud Code Assist Gemini 3.6/3.7 Flash requests at `minimal` now send `thinkingLevel: LOW` on the aliased `-low` SKU instead of `MINIMAL`, which the API rejects with HTTP 400.
 - Answer Cursor `interaction_query` permission gates (hosted web search, Exa, unnamed field-9 WebFetch) so the Run RPC continues instead of sitting silent until the 300s idle watchdog.
 - Fixed provider tool calls arriving with flattened array argument paths (e.g. Gemini's `questions[0].id`) being stripped and rejected by argument validation; well-formed flattened paths are now rebuilt into the nested arrays the tool schema expects ([#8886](https://github.com/can1357/oh-my-pi/issues/8886)).
+- Fixed the Cursor HTTP/2 run path ignoring the standard `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` environment variables — it only read `PI_PROXY`/`PI_PROXY_CURSOR`, so on networks where reaching `api2.cursor.sh` requires a proxy (e.g. region-restricted egress that blocks US-provider models) runs connected direct and failed with a bare `resource_exhausted` while native Cursor models still worked. The run now resolves the proxy through `getProxyForUrl`, matching the Codex transport and honoring `NO_PROXY` ([#8894](https://github.com/can1357/oh-my-pi/issues/8894)).
 
 ## [17.3.7] - 2026-08-17
 
