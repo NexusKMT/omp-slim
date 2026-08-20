@@ -886,17 +886,31 @@ describe("antigravity discovery collapsing", () => {
 		});
 	});
 
-	it("keeps collapsed routing through the gemini-cli re-provision", async () => {
+	it("discovers Gemini models through Antigravity before provisioning Cloud Code Assist", async () => {
+		const requestedUrls: string[] = [];
+		const geminiCliFetcher = Object.assign(
+			(input: string | URL | Request, _init?: RequestInit) => {
+				const url = String(input);
+				requestedUrls.push(url);
+				if (!url.startsWith(ANTIGRAVITY_PRIMARY_ENDPOINT)) {
+					return Promise.resolve(new Response("Forbidden", { status: 403 }));
+				}
+				return Promise.resolve(new Response(JSON.stringify(payload), { status: 200 }));
+			},
+			{ preconnect: fetch.preconnect },
+		);
 		const options = googleGeminiCliModelManagerOptions({
 			oauthToken: "t",
 			endpoint: "https://cca.test",
-			fetch: fetcher,
+			fetch: geminiCliFetcher,
 		});
 		const models = await options.fetchDynamicModels?.();
 
+		expect(requestedUrls).toContain(`${ANTIGRAVITY_PRIMARY_ENDPOINT}/v1internal:fetchAvailableModels`);
+		expect(models?.some(m => m.id === "claude-sonnet-4-6")).toBe(false);
+		expect(models?.every(m => m.baseUrl === "https://cca.test")).toBe(true);
 		const flash = models?.find(m => m.id === "gemini-3.5-flash");
 		expect(flash?.provider).toBe("google-gemini-cli");
-		expect(flash?.baseUrl).toBe("https://cca.test");
 		expect(flash?.requestModelId).toBe("gemini-3.5-flash-extra-low");
 		expect(flash?.thinking?.effortRouting?.off).toBe("gemini-3.5-flash-extra-low");
 		const flash37 = models?.find(m => m.id === "gemini-3.7-flash");

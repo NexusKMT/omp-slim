@@ -923,7 +923,7 @@ Google Cloud Code Assist (Gemini CLI) (`google-gemini-cli`) is Google's OAuth-au
 
 ### Catalog model handling
 - **Provider Descriptor**: Registered in `CATALOG_PROVIDERS` (`packages/catalog/src/provider-models/descriptors.ts`) with `defaultModel: "gemini-3.1-pro-preview"` and `specialModelManager: true`, bypassing standard model factories.
-- **Model Resolution & Discovery**: `googleGeminiCliModelManagerOptions` (`packages/catalog/src/provider-models/google.ts`) configures runtime discovery by calling `fetchAntigravityDiscoveryModels` (`packages/catalog/src/discovery/antigravity.ts`) with `GEMINI_CLI_VARIANT_COLLAPSE_TABLE`, rewriting model providers to `google-gemini-cli` and base URL to `https://cloudcode-pa.googleapis.com`.
+- **Model Resolution & Discovery**: `googleGeminiCliModelManagerOptions` (`packages/catalog/src/provider-models/google.ts`) calls `fetchAntigravityDiscoveryModels` (`packages/catalog/src/discovery/antigravity.ts`) against the Antigravity daily endpoints with `GEMINI_CLI_VARIANT_COLLAPSE_TABLE`, filters the result to Gemini models, then rewrites providers to `google-gemini-cli` and inference base URLs to `https://cloudcode-pa.googleapis.com`.
 - **Generator Integration & Priority**: Serves as fallback OAuth token provider in `fetchAntigravityModels` (`packages/catalog/scripts/generate-models.ts`) if `google-antigravity` access is unavailable. Ranked second in provider priority (`packages/catalog/src/identity/priority.ts`).
 
 ## Groq (`groq`)
