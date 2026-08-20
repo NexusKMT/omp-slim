@@ -569,6 +569,45 @@ describe("withOAuthAccess", () => {
 		expect(storage.calls).toEqual([{ forceRefresh: undefined }, { forceRefresh: true }]);
 	});
 
+	it("honors a token-refresh request after an earlier 401 refresh", async () => {
+		const attempts: string[] = [];
+		const calls: Array<{ forceRefresh: boolean | undefined } | "rotate"> = [];
+		const forced = [
+			access("fresh-but-expired", { credentialId: 7 }),
+			access("renewed", { credentialId: 7 }),
+		];
+		const storage: OAuthAccessSource = {
+			async getOAuthAccess(_provider, _sessionId, options) {
+				calls.push({ forceRefresh: options?.forceRefresh });
+				if (options?.forceRefresh) return forced.shift();
+				return access("stale", { credentialId: 7 });
+			},
+			async rotateSessionCredential() {
+				calls.push("rotate");
+				return true;
+			},
+		};
+		const refreshRequest = new OAuthError("Refreshed token expired before request", {
+			kind: "token-refresh",
+			provider: "prov",
+		});
+
+		const result = await withOAuthAccess(storage, "prov", async a => {
+			attempts.push(a.accessToken);
+			if (a.accessToken === "stale") throw authError();
+			if (a.accessToken === "fresh-but-expired") throw refreshRequest;
+			return "ok";
+		});
+
+		expect(result).toBe("ok");
+		expect(attempts).toEqual(["stale", "fresh-but-expired", "renewed"]);
+		expect(calls).toEqual([
+			{ forceRefresh: undefined },
+			{ forceRefresh: true },
+			{ forceRefresh: true },
+		]);
+	});
+
 	it("tries a refreshed bearer for the same credential id on 401 before rotating", async () => {
 		const storage = fakeStorage({
 			initial: access("stale", { credentialId: 7 }),

@@ -353,10 +353,30 @@ export async function withOAuthAccess<T>(
 	while (true) {
 		let next: OAuthAccess | undefined;
 		if (signal?.aborted || attemptCount >= AUTH_RETRY_MAX_ATTEMPTS) break;
-		const directRotation = isDirectCredentialRotationError(lastError);
 		const tokenRefreshReplay = lastError instanceof AIError.OAuthError && lastError.kind === "token-refresh";
-		if (tokenRefreshReplay && tokenRefreshReplayUsed) break;
-		if (tokenRefreshReplay) tokenRefreshReplayUsed = true;
+		if (tokenRefreshReplay) {
+			if (tokenRefreshReplayUsed) break;
+			tokenRefreshReplayUsed = true;
+			refreshedCurrent = true;
+			try {
+				next = await storage.getOAuthAccess(provider, sessionId, { forceRefresh: true, signal });
+			} catch {
+				next = undefined;
+			}
+			if (signal?.aborted || !next) break;
+			const bearer = next.accessToken;
+			if (attemptedBearers.has(bearer) || attemptCount >= AUTH_RETRY_MAX_ATTEMPTS) break;
+			attemptedCredentialIdentities.add(oauthCredentialIdentity(next));
+			attemptedBearers.add(bearer);
+			attemptCount += 1;
+			lastAccess = next;
+			attemptResult = await runOAuthAttempt(next, attempt, isAuthError);
+			if (attemptResult.ok) return attemptResult.result;
+			lastError = attemptResult.error;
+			continue;
+		}
+
+		const directRotation = isDirectCredentialRotationError(lastError);
 		if (!directRotation) {
 			if (legacyAuthSwitchUsed) break;
 			if (!refreshedCurrent) {
@@ -382,7 +402,6 @@ export async function withOAuthAccess<T>(
 				}
 			}
 		}
-		if (tokenRefreshReplay) break;
 
 		if (signal?.aborted || attemptCount >= AUTH_RETRY_MAX_ATTEMPTS) break;
 		try {
