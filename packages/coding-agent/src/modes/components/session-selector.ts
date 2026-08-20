@@ -18,8 +18,8 @@ import { theme } from "../../modes/theme/theme";
 import { matchesAppInterrupt, matchesSelectDown, matchesSelectUp } from "../../modes/utils/keybinding-matchers";
 import type { SessionInfo, SessionStatus } from "../../session/session-listing";
 import { shortenPath } from "../../tools/render-utils";
-import { DynamicBorder } from "./dynamic-border";
 import { HookSelectorComponent } from "./hook-selector";
+import { bottomBorder, OverlayPanel, row, topBorder } from "./overlay-box";
 
 /**
  * Themed glyph + colored label for a session's lifecycle status, or `undefined`
@@ -333,14 +333,15 @@ class SessionList implements Component {
 	 * current viewport instead of pushing its header/search off the top.
 	 *
 	 * Budget = rows − chrome − reserve, divided by the worst-case per-session
-	 * height. Chrome (12) is the surrounding spacers/borders/header (7) plus the
-	 * list's search line, blank, scroll indicator, blank, and hint (5). A titled
-	 * session is the tallest item at 4 lines (title + preview + metadata +
-	 * blank); budgeting for that guarantees no overflow even when every visible
-	 * entry has a title. The reserve covers below-editor hook widgets / cursor.
+	 * height. Chrome (11) is the rounded panel and surrounding spacers/footer
+	 * (6) plus the list's search line, blank, scroll indicator, blank, and hint
+	 * (5). A titled session is the tallest item at 4 lines (title + preview +
+	 * metadata + blank); budgeting for that guarantees no overflow even when
+	 * every visible entry has a title. The reserve covers below-editor hook
+	 * widgets / cursor.
 	 */
 	#visibleCount(): number {
-		const CHROME = 12;
+		const CHROME = 11;
 		const PER_SESSION = 4;
 		const RESERVE = 1;
 		const budget = this.#getTerminalRows() - CHROME - RESERVE;
@@ -528,12 +529,11 @@ class SessionList implements Component {
 
 		if (this.#filteredSessions.length === 0) {
 			if (this.#showCwd) {
-				// "All" scope - no sessions anywhere that match filter
-				lines.push(truncateToWidth(theme.fg("muted", "  No sessions found"), width));
+				lines.push(truncateToWidth(theme.fg("muted", "No sessions found"), width));
 			} else {
 				// "Current folder" scope - hint to try "all"
 				lines.push(
-					truncateToWidth(theme.fg("muted", "  No sessions in current folder. Press Tab to view all."), width),
+					truncateToWidth(theme.fg("muted", "No sessions in current folder. Press Tab to view all."), width),
 				);
 			}
 			return lines;
@@ -747,7 +747,7 @@ export interface SessionSelectorOptions {
 /**
  * Component that renders a session selector with optional confirmation dialog
  */
-export class SessionSelectorComponent extends Container {
+export class SessionSelectorComponent extends OverlayPanel {
 	#sessionList: SessionList;
 	#confirmationDialog: HookSelectorComponent | null = null;
 	// Hosts whichever of `#sessionList` / `#confirmationDialog` is live this
@@ -758,7 +758,6 @@ export class SessionSelectorComponent extends Container {
 	// scrollback, stranding it above the viewport once the dialog closed).
 	#contentSlot: Container;
 	#messageContainer: Container;
-	#headerText: Text;
 	#onDelete?: (session: SessionInfo) => Promise<boolean>;
 	#onRequestRender?: () => void;
 	readonly #loadAllSessions?: () => Promise<SessionInfo[]>;
@@ -778,7 +777,6 @@ export class SessionSelectorComponent extends Container {
 	#footerStart = 0;
 	readonly #getTerminalRows: () => number;
 	readonly #fillHeight: boolean;
-	readonly #bottomBorder = new DynamicBorder();
 	readonly #title: string;
 	readonly #scopeLabel: string | false | undefined;
 
@@ -789,7 +787,7 @@ export class SessionSelectorComponent extends Container {
 		onExit: () => void,
 		options: SessionSelectorOptions = {},
 	) {
-		super();
+		super(options.title ?? "Resume Session");
 
 		this.#messageContainer = new Container();
 		this.#onDelete = options.onDelete;
@@ -800,12 +798,11 @@ export class SessionSelectorComponent extends Container {
 		this.#fillHeight = options.fillHeight ?? false;
 		this.#title = options.title ?? "Resume Session";
 		this.#scopeLabel = options.scopeLabel;
-		// Add header
+		this.title = this.#headerLabel();
+		// Keep the existing breathing room; OverlayPanel supplies the two outer
+		// border rows and the horizontal inset.
 		this.addChild(new Spacer(1));
-		this.#headerText = new Text(this.#headerLabel(), 1, 0);
-		this.addChild(this.#headerText);
 		this.addChild(new Spacer(1));
-		this.addChild(new DynamicBorder());
 		this.addChild(new Spacer(1));
 		this.addChild(this.#messageContainer);
 		// Create session list in folder scope; the empty-state hint invites the
@@ -846,9 +843,9 @@ export class SessionSelectorComponent extends Container {
 	}
 
 	#headerLabel(): string {
-		if (this.#scopeLabel === false) return theme.bold(this.#title);
+		if (this.#scopeLabel === false) return this.#title;
 		const scopeLabel = this.#scopeLabel ?? (this.#scope === "all" ? "all projects" : "current folder");
-		return `${theme.bold(this.#title)} ${theme.fg("muted", `(${scopeLabel})`)}`;
+		return `${this.#title} (${scopeLabel})`;
 	}
 
 	/**
@@ -864,7 +861,7 @@ export class SessionSelectorComponent extends Container {
 				if (!this.#loadAllSessions) return;
 				this.#toggling = true;
 				this.#messageContainer.clear();
-				this.#messageContainer.addChild(new Text(theme.fg("muted", "  Loading all projects…"), 1, 0));
+				this.#messageContainer.addChild(new Text(theme.fg("muted", "Loading all projects…"), 0, 0));
 				this.#onRequestRender?.();
 				try {
 					global = await this.#loadAllSessions();
@@ -884,7 +881,7 @@ export class SessionSelectorComponent extends Container {
 			this.#scope = "folder";
 			this.#sessionList.setSessions(this.#folderSessions, false);
 		}
-		this.#headerText.setText(this.#headerLabel());
+		this.title = this.#headerLabel();
 		this.#onRequestRender?.();
 	}
 
@@ -916,7 +913,7 @@ export class SessionSelectorComponent extends Container {
 
 	#showError(message: string): void {
 		this.#messageContainer.clear();
-		this.#messageContainer.addChild(new Text(theme.fg("error", `Error: ${replaceTabs(message)}`), 1, 0));
+		this.#messageContainer.addChild(new Text(theme.fg("error", `Error: ${replaceTabs(message)}`), 0, 0));
 		this.#messageContainer.addChild(new Spacer(1));
 	}
 
@@ -961,28 +958,23 @@ export class SessionSelectorComponent extends Container {
 	}
 
 	/**
-	 * Concatenate the children's renders (like {@link Container}) while recording
-	 * the line where the session list begins, so the fullscreen picker can hit-
-	 * test mouse rows against the live list window. SessionList rebuilds its lines
-	 * every frame, so Container's reference-memoization never applied here.
-	 *
-	 * In fill-height mode the body is padded (or, on a cramped terminal, trimmed)
-	 * to leave exactly enough room for the footer at the screen bottom, so the
-	 * footer is always visible and never drifts as the list window resizes. The
-	 * in-editor selector just appends the footer directly.
+	 * Render the panel directly so fill-height mode can keep its footer pinned
+	 * while sharing OverlayPanel's exact rounded-box chrome. Children receive
+	 * the panel's inner width before their rows are wrapped.
 	 */
 	override render(width: number): readonly string[] {
-		const lines: string[] = [];
+		const innerWidth = Math.max(1, width - 4);
+		const lines: string[] = [topBorder(width, this.title)];
 		for (const child of this.children) {
-			const childLines = child.render(width);
+			const childLines = child.render(innerWidth);
 			if (child === this.#contentSlot) this.#listLineOffset = lines.length;
-			for (const line of childLines) lines.push(line);
+			for (const line of childLines) lines.push(row(line, width));
 		}
 		const footer = this.#footerLines(width);
 		if (this.#fillHeight) {
 			const target = Math.max(0, this.#getTerminalRows() - footer.length);
 			if (lines.length > target) lines.length = target;
-			else for (let i = lines.length; i < target; i++) lines.push("");
+			else for (let i = lines.length; i < target; i++) lines.push(row("", width));
 		}
 		this.#footerStart = lines.length;
 		for (const line of footer) lines.push(line);
@@ -992,8 +984,8 @@ export class SessionSelectorComponent extends Container {
 	/** Blank · keybinding hint · bottom border. Rendered by {@link render}. */
 	#footerLines(width: number): string[] {
 		const scopeHint = this.#scope === "all" ? "current folder" : "all projects";
-		const hint = theme.fg("muted", `  [Del/⌫ delete · Enter select · Tab ${scopeHint} · Esc cancel]`);
-		return ["", hint, "", ...this.#bottomBorder.render(width)];
+		const hint = theme.fg("muted", `[Del/⌫ delete · Enter select · Tab ${scopeHint} · Esc cancel]`);
+		return [row("", width), row(hint, width), row("", width), bottomBorder(width)];
 	}
 
 	handleInput(keyData: string): void {
