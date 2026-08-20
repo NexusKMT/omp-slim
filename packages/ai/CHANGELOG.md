@@ -11,6 +11,7 @@
 - Fixed OpenAI Codex requests failing with HTTP 401 `Workspace is not authorized in this region.` on enterprise ChatGPT workspaces pinned to a data-residency region whenever the request egressed from a different region (VPN, proxy, or a relocated machine). Codex requests now declare the workspace residency carried by the OAuth access token (`chatgpt_data_residency`, falling back to `chatgpt_compute_residency`) via `x-openai-internal-codex-residency` on both the SSE and WebSocket transports. Accounts without the claim, and opaque non-JWT keys used by Codex-compatible proxies, are unaffected; a caller-supplied header of the same name still wins.
 - Fixed concurrent xAI OAuth refreshes revoking shared grants or repeatedly retrying dead refresh tokens when multiple processes use the same credential database.
 - Fixed Bedrock Converse resending unsigned reasoning content on the request path, which made Amazon Nova reject every turn after the first with `User messages cannot contain reasoning content` and wedge the agent loop. Thinking blocks without a captured signature are now demoted to plain text on replay, matching the other providers.
+- Fixed multi-turn Bedrock conversations failing when Nova or another model returns unsigned reasoning content.
 
 ## [17.4.0] - 2026-08-20
 
