@@ -105,7 +105,12 @@ import type { ResolvedModelRoleValue } from "../config/model-resolver";
 import { expandPromptTemplate, type PromptTemplate } from "../config/prompt-templates";
 import { buildServiceTierByFamily } from "../config/service-tier";
 import type { Settings, SkillsSettings } from "../config/settings";
-import { onAppendOnlyModeChanged, onExtendedContextChanged, onModelRolesChanged } from "../config/settings";
+import {
+	onAppendOnlyModeChanged,
+	onCodeModeChanged,
+	onExtendedContextChanged,
+	onModelRolesChanged,
+} from "../config/settings";
 import { RawSseDebugBuffer } from "../debug/raw-sse-buffer";
 import { getFileSnapshotStore } from "../edit/file-snapshot-store";
 import type { PythonResult } from "../eval/py/executor";
@@ -490,6 +495,7 @@ export class AgentSession {
 	#unsubscribeAppendOnly?: () => void;
 	#unsubscribeModelRoles?: () => void;
 	#unsubscribeExtendedContext?: () => void;
+	#unsubscribeCodeMode?: () => void;
 	/** Last (enable, providerId) tuple resolved by `#syncAppendOnlyContext` — used to skip no-op invalidations. */
 	#lastAppendOnlyResolution?: { enable: boolean; providerId: string | undefined };
 	#eventListeners: AgentSessionEventListener[] = [];
@@ -968,8 +974,11 @@ export class AgentSession {
 		return listPlanFiles({ localProtocolOptions: this.#localProtocolOptions() });
 	}
 
+	#codeModeState: { namespacesInfo?: unknown };
+
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
+		this.#codeModeState = config.codeModeState ?? {};
 		this.sessionManager = config.sessionManager;
 		this.settings = config.settings;
 		this.#modelRegistry = config.modelRegistry;
@@ -1048,6 +1057,7 @@ export class AgentSession {
 			promptGeneration: () => this.#promptGeneration,
 			hasPendingAsyncWake: () => this.#hasPendingAsyncWake(),
 			getActiveToolNames: () => this.getActiveToolNames(),
+			getEnabledToolNames: () => this.getEnabledToolNames(),
 			toolRegistry: () => this.#tools.registry,
 			planModeEnabled: () => this.#planModeState?.enabled === true,
 			consumeLastServedToolChoiceLabel: () => this.#toolChoiceQueue.consumeLastServedLabel(),
@@ -1294,6 +1304,9 @@ export class AgentSession {
 			queuedMessageCount: () => this.queuedMessageCount,
 			planModeEnabled: () => this.#planModeState?.enabled === true,
 			model: () => this.model,
+			setCodeModeNamespacesInfo: info => {
+				this.#codeModeState.namespacesInfo = info;
+			},
 			memoryBackendSession: () => this,
 			clearInheritedProviderPromptCacheKey: () => this.#clearInheritedProviderPromptCacheKey(),
 			clearMemoryPromotionSnapshot: () => this.#memory.clearPromotionSnapshot(),
@@ -1616,6 +1629,11 @@ export class AgentSession {
 		// restores) premium long-context windows, and the live model object must
 		// follow so compaction thresholds and context display react immediately.
 		this.#unsubscribeExtendedContext = onExtendedContextChanged(() => void this.#reapplyExtendedContextPolicy());
+		this.#unsubscribeCodeMode = onCodeModeChanged(() => {
+			void this.#tools.reconcileCodeMode().catch(error => {
+				logger.warn("Code Mode reconcile after setting change failed", { error: String(error) });
+			});
+		});
 	}
 	/** Model registry for API key resolution and model discovery */
 	get modelRegistry(): ModelRegistry {
@@ -4077,6 +4095,10 @@ export class AgentSession {
 			this.#unsubscribeExtendedContext();
 			this.#unsubscribeExtendedContext = undefined;
 		}
+		if (this.#unsubscribeCodeMode) {
+			this.#unsubscribeCodeMode();
+			this.#unsubscribeCodeMode = undefined;
+		}
 		this.#eventListeners = [];
 		this.#runStateListeners.clear();
 		this.#sessionChangeCallbacks.clear();
@@ -4491,6 +4513,16 @@ export class AgentSession {
 		return this.#tools.getToolByName(name);
 	}
 
+	/** Looks up an enabled eval-bridge tool with the session's permission gate applied. */
+	getToolForEvalBridge(name: string): AgentTool | undefined {
+		return this.#tools.getToolForEvalBridge(name);
+	}
+
+	/** Names currently authorized through the eval bridge. */
+	getEvalBridgeToolNames(): string[] {
+		return this.#tools.getEvalBridgeToolNames();
+	}
+
 	/** Whether a registry entry came from a built-in factory. */
 	hasBuiltInTool(name: string): boolean {
 		return this.#tools.hasBuiltInTool(name);
@@ -4576,6 +4608,29 @@ export class AgentSession {
 	/** Rediscovers reloadable skills and refreshes prompt metadata. */
 	refreshSkills(): Promise<void> {
 		return this.#tools.refreshSkills();
+	}
+
+	/**
+	 * Applies Code Mode at session startup: when the initial model activates
+	 * it (`codeMode` `on`, or `auto` matching a `code_mode_only` catalog flag),
+	 * the initial tool surface is routed through the Code Mode-aware path so
+	 * the restricted direct surface and namespaces snapshot exist before the
+	 * first provider turn instead of waiting for an unrelated reconciliation.
+	 *
+	 * Inactive sessions keep their initial surface untouched: re-applying an
+	 * unchanged set would seed the prompt-rebuild signature cache and suppress
+	 * the first late tool registration's rebuild (non-MCP `xd://` mounts are
+	 * deliberately not part of that signature).
+	 */
+	initializeCodeMode(): Promise<void> {
+		const model = this.model;
+		if (!model || !this.#tools.codeModeChangesBetween(undefined, model)) return Promise.resolve();
+		return this.#tools.reconcileCodeMode();
+	}
+
+	/** Current Code Mode `tool_namespaces_info` snapshot, or `undefined` when inactive. */
+	get codeModeNamespacesInfo(): unknown {
+		return this.#codeModeState.namespacesInfo;
 	}
 
 	/** Selects enabled tools, ignoring names absent from the registry. */
@@ -5266,14 +5321,14 @@ export class AgentSession {
 			});
 		}
 		if (this.#magicKeywordEnabled("orchestrate") && containsOrchestrate(text)) {
-			const activeToolNames = this.getActiveToolNames();
+			const enabledToolNames = this.getEnabledToolNames();
 			// The contract is entirely about `task` subagent dispatch; without the
 			// task tool the notice would demand an unavailable capability.
-			if (activeToolNames.includes("task")) {
+			if (enabledToolNames.includes("task")) {
 				keywordNotices.push({
 					role: "custom",
 					customType: "orchestrate-notice",
-					content: renderOrchestrateNotice({ tools: activeToolNames }),
+					content: renderOrchestrateNotice({ tools: enabledToolNames }),
 					display: false,
 					attribution: "user",
 					timestamp,
@@ -5281,8 +5336,8 @@ export class AgentSession {
 			}
 		}
 		if (this.#magicKeywordEnabled("workflow") && containsWorkflow(text)) {
-			const activeToolNames = this.getActiveToolNames();
-			if (activeToolNames.includes("task") && activeToolNames.includes("eval")) {
+			const enabledToolNames = this.getEnabledToolNames();
+			if (enabledToolNames.includes("task") && enabledToolNames.includes("eval")) {
 				keywordNotices.push({
 					role: "custom",
 					customType: "workflow-notice",
@@ -7331,6 +7386,7 @@ export class AgentSession {
 	async #setModelWithProviderSessionReset(model: Model): Promise<void> {
 		const currentModel = this.model;
 		const isChanging = !currentModel || !modelsAreEqual(currentModel, model);
+		const codeModeChanged = this.#tools.codeModeChangesBetween(currentModel, model);
 		if (currentModel) {
 			this.#closeProviderSessionsForModelSwitch(currentModel, model);
 			if (isChanging) {
@@ -7357,6 +7413,14 @@ export class AgentSession {
 
 		// Re-evaluate append-only context mode — provider or setting may have changed
 		this.#syncAppendOnlyContext(model);
+
+		if (codeModeChanged || this.#tools.codeModeDirectWireMetadataChanged()) {
+			try {
+				await this.#tools.reconcileCodeMode();
+			} catch (error) {
+				logger.warn("Code Mode reconcile after model change failed", { error: String(error) });
+			}
+		}
 
 		// inspect_image auto mode keys off model image capability. Reconcile
 		// centrally here so retry-fallback model changes (turn-recovery.ts),
