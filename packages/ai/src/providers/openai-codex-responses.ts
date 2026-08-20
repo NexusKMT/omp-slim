@@ -495,12 +495,15 @@ interface CodexCompatibilityIdentity {
 	sessionId: string;
 	threadId: string;
 	windowId: string;
-	turnMetadataJson?: string;
+	/** Header projection: identity fields only, never the Code Mode snapshot. */
+	turnMetadataHeaderJson?: string;
 }
 
 interface CodexRequestMetadata extends CodexCompatibilityIdentity {
 	turnId: string;
+	/** Canonical body projection, including `tool_namespaces_info` when present. */
 	turnMetadataJson: string;
+	turnMetadataHeaderJson: string;
 	clientMetadata: Record<string, string>;
 }
 
@@ -638,11 +641,18 @@ function createCodexRequestMetadata(
 	if (session.turnStartedAtUnixMs !== undefined) {
 		turnMetadata.turn_started_at_unix_ms = session.turnStartedAtUnixMs;
 	}
+	for (const key in extra) turnMetadata[key] = extra[key];
+	// The `x-codex-turn-metadata` header is capped at 100KB by the Codex
+	// backend, while `tool_namespaces_info` grows with the session's tool count
+	// (409 tools ~ 100KB on its own). The body's `client_metadata` is the
+	// canonical envelope, so the snapshot rides there only and the header keeps
+	// the fixed-size identity projection.
+	const turnMetadataHeaderJson = toAsciiJsonString(turnMetadata);
+	let turnMetadataJson = turnMetadataHeaderJson;
 	if (options.toolNamespacesInfo !== undefined) {
 		turnMetadata.tool_namespaces_info = options.toolNamespacesInfo;
+		turnMetadataJson = toAsciiJsonString(turnMetadata);
 	}
-	for (const key in extra) turnMetadata[key] = extra[key];
-	const turnMetadataJson = toAsciiJsonString(turnMetadata);
 	const clientMetadata: Record<string, string> = {
 		[OPENAI_HEADERS.INSTALLATION_ID]: identity.installationId,
 		session_id: identity.sessionId,
@@ -658,6 +668,7 @@ function createCodexRequestMetadata(
 		...identity,
 		turnId: session.turnId,
 		turnMetadataJson,
+		turnMetadataHeaderJson,
 		clientMetadata,
 	};
 }
@@ -666,8 +677,8 @@ function applyCodexCompatibilityHeaders(headers: Headers, metadata: CodexCompati
 	headers.set(OPENAI_HEADERS.SCOPED_SESSION_ID, metadata.sessionId);
 	headers.set(OPENAI_HEADERS.THREAD_ID, metadata.threadId);
 	headers.set(OPENAI_HEADERS.WINDOW_ID, metadata.windowId);
-	if (metadata.turnMetadataJson) {
-		headers.set(OPENAI_HEADERS.TURN_METADATA, metadata.turnMetadataJson);
+	if (metadata.turnMetadataHeaderJson) {
+		headers.set(OPENAI_HEADERS.TURN_METADATA, metadata.turnMetadataHeaderJson);
 	} else {
 		headers.delete(OPENAI_HEADERS.TURN_METADATA);
 	}

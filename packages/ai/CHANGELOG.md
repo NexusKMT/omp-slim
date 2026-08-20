@@ -9,7 +9,7 @@
 - Added model metadata fields (`context_length`, `max_output_tokens`, `input_modalities`, etc.) to auth gateway model listing responses
 ### Added
 
-- Added Codex Responses support for Code Mode ([#9050](https://github.com/can1357/oh-my-pi/issues/9050)): the client preserves the model's advertised `tool_mode` through Codex Responses requests and emits the `tool_namespaces_info` turn metadata snapshot when the session restricts its direct tool surface ([#9069](https://github.com/can1357/oh-my-pi/pull/9069) by [@MilesCranmerBot](https://github.com/MilesCranmerBot)).
+- Added Codex Responses support for Code Mode ([#9050](https://github.com/can1357/oh-my-pi/issues/9050)): the client preserves the model's advertised `tool_mode` through Codex Responses requests and emits the `tool_namespaces_info` turn metadata snapshot when the session restricts its direct tool surface. The snapshot rides the request body's `client_metadata` envelope only — the `x-codex-turn-metadata` header keeps the fixed-size identity projection, since the Codex backend caps HTTP headers at 100KB and a large tool surface serializes past that on its own ([#9069](https://github.com/can1357/oh-my-pi/pull/9069) by [@MilesCranmerBot](https://github.com/MilesCranmerBot)).
 
 ### Fixed
 
