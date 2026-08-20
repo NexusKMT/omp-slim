@@ -33,7 +33,7 @@ import type { Diagnostic, LinterClient, ServerConfig } from "@oh-my-pi/pi-coding
 function hungLinterConfig(): ServerConfig {
 	const client: LinterClient = {
 		format: async (_filePath, content) => content,
-		lint: () => new Promise<Diagnostic[]>(() => {}),
+		lint: () => Promise.withResolvers<Diagnostic[]>().promise,
 	};
 	return {
 		command: "hung-linter-4910",
@@ -74,6 +74,41 @@ describe("issue #4910: diagnostics pipeline is wall-clock bounded", () => {
 		// Bounded promptly by the budget, not by any multi-second default.
 		// Generous ceiling to stay robust on slow CI machines.
 		expect(elapsed).toBeLessThan(5_000);
+	});
+
+	test("passes the pipeline deadline to cancellable linter work", async () => {
+		let aborted = false;
+		const pending = Promise.withResolvers<Diagnostic[]>();
+		const client: LinterClient = {
+			format: async (_filePath, content) => content,
+			lint: (_filePath, signal) => {
+				signal?.addEventListener(
+					"abort",
+					() => {
+						aborted = true;
+						pending.reject(signal.reason);
+					},
+					{ once: true },
+				);
+				return pending.promise;
+			},
+		};
+		const config: ServerConfig = {
+			command: "cancellable-linter-4910",
+			fileTypes: [".py"],
+			rootMarkers: [],
+			createClient: () => client,
+		};
+
+		const result = await getDiagnosticsForFile(
+			"/tmp/issue-4910/falcon_emu.py",
+			"/tmp/issue-4910",
+			[["cancellable-linter-4910", config]],
+			{ pipelineBudgetMs: 50 },
+		);
+
+		expect(result).toBeUndefined();
+		expect(aborted).toBe(true);
 	});
 
 	test("a healthy linter still reports normally under the same budget", async () => {

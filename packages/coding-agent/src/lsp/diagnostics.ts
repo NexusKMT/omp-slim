@@ -402,7 +402,7 @@ export async function getDiagnosticsForFile(
 				// Use custom linter client if configured
 				if (serverConfig.createClient) {
 					const linterClient = getLinterClient(serverName, serverConfig, cwd);
-					const diagnostics = await linterClient.lint(absolutePath);
+					const diagnostics = await linterClient.lint(absolutePath, boundSignal);
 					return { serverName, serverConfig, diagnostics };
 				}
 
