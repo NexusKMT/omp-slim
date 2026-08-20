@@ -775,11 +775,7 @@ export class DebugTool implements AgentTool<typeof debugSchema, DebugToolDetails
 						`No debugger adapter available. Installed adapters: ${getConfiguredAdapters(commandCwd)}`,
 					);
 				}
-				if (
-					params.pid === undefined &&
-					params.port === undefined &&
-					(!params.adapter || adapter.attachDefaults.skipAttachRequest !== true)
-				) {
+				if (params.pid === undefined && params.port === undefined && !params.adapter) {
 					throw new ToolError("attach requires pid or port");
 				}
 				const snapshot = await dapSessionManager.attach(

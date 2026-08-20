@@ -170,7 +170,7 @@ Side-channel artifacts outside the model tool result:
     - `fileTypes`: lowercase file extensions used for launch auto-selection.
     - `rootMarkers`: files/directories used to rank adapters for a project.
     - `launchDefaults`: default DAP launch arguments merged before the selected program/cwd/args.
-    - `attachDefaults`: default DAP attach arguments. Set `skipAttachRequest: true` for a preconnected adapter; explicit `debug attach` then needs no PID or port.
+    - `attachDefaults`: default DAP attach arguments. An explicit adapter may attach without a PID or port; its adapter validates these arguments.
     - `connectMode`: `"stdio"` (default), `"socket"` (Delve-style platform-dependent socket/callback), or `"tcp"` (spawn a local DAP server with `${port}` substituted into `args`).
     - `acceptsDirectoryProgram`: set `true` for adapters such as `dlv` that can launch a package/project directory.
 
@@ -198,7 +198,7 @@ Example `.omp/dap.json`:
 }
 ```
 
-Preconnected GDB example for an OpenOCD remote target:
+GDB example for an OpenOCD remote target:
 
 ```json
 {
@@ -209,20 +209,16 @@ Preconnected GDB example for an OpenOCD remote target:
         "-q",
         "-ex",
         "file zig-out/firmware/gc9a01-test.elf",
-        "-ex",
-        "target extended-remote :3334",
         "-i",
         "dap"
       ],
       "attachDefaults": {
-        "skipAttachRequest": true
+        "target": ":3334"
       }
     }
   }
 }
 ```
-
-Use this only when GDB establishes the GDB Remote Serial Protocol connection through its startup arguments. Calling `attach` after that connection is incompatible with GDB's DAP mode.
 - **Transport**
   - `stdio`: direct adapter `stdin`/`stdout` framing.
   - `socket`: Unix domain socket on Linux; adapter callback to a local TCP listener on macOS/other.

@@ -823,11 +823,11 @@ describe("DebugTool launch validation", () => {
 		}
 	});
 
-	it("allows explicit preattached adapters to attach without pid or port", async () => {
+	it("allows explicit adapters with target attach defaults to attach without pid or port", async () => {
 		const adapter: DapResolvedAdapter = {
 			...TEST_ADAPTER,
 			name: "pico-openocd",
-			attachDefaults: { request: "attach", skipAttachRequest: true },
+			attachDefaults: { target: ":3334" },
 		};
 		const selectAttachSpy = spyOn(dapModule, "selectAttachAdapter").mockReturnValue(adapter);
 		const sessionAttachSpy = spyOn(dapModule.dapSessionManager, "attach").mockImplementation(async opts => {
@@ -850,7 +850,7 @@ describe("DebugTool launch validation", () => {
 			expect(sessionAttachSpy).toHaveBeenCalledTimes(1);
 			const [opts] = sessionAttachSpy.mock.calls[0]!;
 			expect(opts.adapter).toBe(adapter);
-			expect(opts.adapter.attachDefaults.skipAttachRequest).toBe(true);
+			expect(opts.adapter.attachDefaults.target).toBe(":3334");
 			expect(opts.pid).toBeUndefined();
 			expect(opts.port).toBeUndefined();
 		} finally {
