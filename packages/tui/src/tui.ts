@@ -216,6 +216,13 @@ export interface NativeScrollbackLiveRegion {
 	getNativeScrollbackLiveRegionStart(): number | undefined;
 	/** Keeps the mutable suffix viewport-local instead of recording frozen snapshots. */
 	isNativeScrollbackLiveRegionPinned?(): boolean;
+	/**
+	 * Local row where viewport pinning begins. When omitted, pinning (if
+	 * reported) starts at {@link getNativeScrollbackLiveRegionStart}. A nested
+	 * transcript uses this to keep an earlier unpinned live seam while still
+	 * capping commits at a later pinned dashboard (hub wait, todo snapshot).
+	 */
+	getNativeScrollbackLiveRegionPinnedStart?(): number | undefined;
 }
 
 export interface NativeScrollbackCommittedRows {
@@ -276,6 +283,13 @@ function isOverlayFocusTarget(owner: Component, component: Component | null): bo
 
 function getNativeScrollbackLiveRegionStart(component: Component): number | undefined {
 	return (component as Component & Partial<NativeScrollbackLiveRegion>).getNativeScrollbackLiveRegionStart?.();
+}
+
+function getNativeScrollbackLiveRegionPinnedStart(component: Component): number | undefined {
+	const start = (
+		component as Component & Partial<NativeScrollbackLiveRegion>
+	).getNativeScrollbackLiveRegionPinnedStart?.();
+	return start === undefined || !Number.isFinite(start) ? undefined : start;
 }
 
 /**
@@ -901,6 +915,8 @@ interface FrameSegment {
 	widthEpochRevision?: number;
 	liveLocalStart?: number;
 	liveRegionPinned: boolean;
+	/** Local pin start; when omitted, pinning begins at `liveLocalStart`. */
+	liveRegionPinnedStart?: number;
 }
 
 /** Depth-first identity search through `Container`-shaped children. */
@@ -1661,12 +1677,14 @@ export class TUI extends Container {
 			let childLines: readonly string[];
 			let liveLocalStart: number | undefined;
 			let liveRegionPinned = false;
+			let liveRegionPinnedStart: number | undefined;
 			let widthEpochRevision: number | undefined;
 			let reported: number | undefined;
 			if (reuse) {
 				childLines = previous.lines;
 				liveLocalStart = previous.liveLocalStart;
 				liveRegionPinned = previous.liveRegionPinned;
+				liveRegionPinnedStart = previous.liveRegionPinnedStart;
 				widthEpochRevision = previous.widthEpochRevision;
 			} else {
 				// Feed the engine's committed-row claim (from the previous frame's
@@ -1697,6 +1715,15 @@ export class TUI extends Container {
 					liveRegionPinned =
 						(child as Component & Partial<NativeScrollbackLiveRegion>).isNativeScrollbackLiveRegionPinned?.() ===
 						true;
+					if (liveRegionPinned) {
+						const pinStart = getNativeScrollbackLiveRegionPinnedStart(child);
+						if (pinStart !== undefined) {
+							liveRegionPinnedStart = Math.max(
+								liveLocalStart,
+								Math.min(childLines.length, Math.trunc(pinStart)),
+							);
+						}
+					}
 				}
 				// Consume the stability report unconditionally for implementers:
 				// reading re-bases the component's baseline to the state this
@@ -1722,7 +1749,7 @@ export class TUI extends Container {
 				// even when an earlier unpinned seam won the topmost merge above:
 				// its rows (a growing anchored panel) must never reach scrollback.
 				if (liveRegionPinned && this.#nativeScrollbackPinnedBoundary === undefined) {
-					this.#nativeScrollbackPinnedBoundary = start;
+					this.#nativeScrollbackPinnedBoundary = offset + (liveRegionPinnedStart ?? liveLocalStart);
 				}
 			}
 			if (chainStable) {
@@ -1754,6 +1781,7 @@ export class TUI extends Container {
 				widthEpochRevision,
 				liveLocalStart,
 				liveRegionPinned,
+				liveRegionPinnedStart,
 			};
 			offset += childLines.length;
 		}

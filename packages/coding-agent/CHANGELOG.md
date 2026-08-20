@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `hub wait` stacking frozen copies of the same running-job rows into native scrollback once the transcript outgrew the viewport. The live-region pin now starts at the poll body (not the blank separator before it) and still applies when an earlier unpinned live block sits above the wait.
+
 ## [17.4.0] - 2026-08-20
 
 ### Added

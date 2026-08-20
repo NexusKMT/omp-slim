@@ -139,6 +139,14 @@ function waitPartial(tick: number) {
 	};
 }
 
+const VISIBLE_JOBS = ["ApprovalTests", "ConfigNotify", "FeishuAdapter"] as const;
+
+function expectEachJobOnce(buffer: string[]): void {
+	for (const label of VISIBLE_JOBS) {
+		expect(buffer.filter(line => line.includes(label)).length).toBe(1);
+	}
+}
+
 describe("hub wait poll never sprays duplicate job rows into scrollback", () => {
 	beforeAll(async () => {
 		resetSettingsForTest();
@@ -189,11 +197,8 @@ describe("hub wait poll never sprays duplicate job rows into scrollback", () => 
 			expect(transcript.isNativeScrollbackLiveRegionPinned()).toBe(true);
 
 			const buffer = plainScrollBuffer(term);
-			const joined = buffer.join("\n");
-			expect(joined).toContain("waiting on 6 jobs");
-			for (const label of ["ApprovalTests", "ConfigNotify", "FeishuAdapter"] as const) {
-				expect(buffer.filter(line => line.includes(label)).length).toBeLessThanOrEqual(1);
-			}
+			expect(buffer.join("\n")).toContain("waiting on 6 jobs");
+			expectEachJobOnce(buffer);
 		} finally {
 			hub.stopAnimation();
 			tui.stop();
@@ -209,6 +214,9 @@ describe("hub wait poll never sprays duplicate job rows into scrollback", () => 
 		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
 		tui.setScrollbackRebuild(false);
 		const transcript = new TranscriptContainer();
+		transcript.addChild(
+			new StaticBlock(Array.from({ length: 20 }, (_, i) => `history-line-${String(i).padStart(2, "0")}`)),
+		);
 		const hub = new ToolExecutionComponent(
 			"hub",
 			{ op: "wait", timeoutMs: 600_000 },
@@ -221,9 +229,10 @@ describe("hub wait poll never sprays duplicate job rows into scrollback", () => 
 		transcript.addChild(hub);
 		tui.addChild(transcript);
 		tui.addChild(new AnchoredHud());
-		tui.addChild(new Footer(4));
+		tui.addChild(new Footer(5));
 
 		try {
+			hub.updateResult(waitPartial(0), true);
 			tui.start();
 			scheduler.flush();
 			await term.flush();
@@ -235,10 +244,12 @@ describe("hub wait poll never sprays duplicate job rows into scrollback", () => 
 				await term.flush();
 			}
 
+			expect(transcript.isNativeScrollbackLiveRegionPinned()).toBe(true);
+			expect(transcript.getNativeScrollbackLiveRegionPinnedStart()).toBeGreaterThan(
+				transcript.getNativeScrollbackLiveRegionStart() ?? 0,
+			);
 			const buffer = plainScrollBuffer(term);
-			for (const label of ["ApprovalTests", "ConfigNotify", "FeishuAdapter"] as const) {
-				expect(buffer.filter(line => line.includes(label)).length).toBeLessThanOrEqual(1);
-			}
+			expectEachJobOnce(buffer);
 		} finally {
 			hub.stopAnimation();
 			tui.stop();
@@ -282,9 +293,7 @@ describe("hub wait poll never sprays duplicate job rows into scrollback", () => 
 			}
 
 			const buffer = plainScrollBuffer(term);
-			for (const label of ["ApprovalTests", "ConfigNotify", "FeishuAdapter"] as const) {
-				expect(buffer.filter(line => line.includes(label)).length).toBeLessThanOrEqual(1);
-			}
+			expectEachJobOnce(buffer);
 		} finally {
 			hub.stopAnimation();
 			tui.stop();
@@ -293,7 +302,7 @@ describe("hub wait poll never sprays duplicate job rows into scrollback", () => 
 	}, 30_000);
 
 	test("a poll taller than the remaining viewport still records each job once", async () => {
-		const rows = 8;
+		const rows = 12;
 		stubStdoutRows(rows);
 		const term = new VirtualTerminal(80, rows);
 		const scheduler = makeDrainableScheduler();
@@ -313,7 +322,7 @@ describe("hub wait poll never sprays duplicate job rows into scrollback", () => 
 		);
 		transcript.addChild(hub);
 		tui.addChild(transcript);
-		tui.addChild(new Footer(4));
+		tui.addChild(new Footer(5));
 
 		try {
 			hub.updateResult(waitPartial(0), true);
@@ -332,8 +341,7 @@ describe("hub wait poll never sprays duplicate job rows into scrollback", () => 
 			expect(transcript.isNativeScrollbackLiveRegionPinned()).toBe(true);
 
 			const buffer = plainScrollBuffer(term);
-			const approval = buffer.filter(line => line.includes("ApprovalTests")).length;
-			expect(approval).toBeLessThanOrEqual(1);
+			expectEachJobOnce(buffer);
 		} finally {
 			hub.stopAnimation();
 			tui.stop();
@@ -374,9 +382,7 @@ describe("hub wait poll never sprays duplicate job rows into scrollback", () => 
 			}
 
 			const buffer = plainScrollBuffer(term);
-			for (const label of ["ApprovalTests", "ConfigNotify", "FeishuAdapter"] as const) {
-				expect(buffer.filter(line => line.includes(label)).length).toBeLessThanOrEqual(1);
-			}
+			expectEachJobOnce(buffer);
 		} finally {
 			hub.stopAnimation();
 			tui.stop();

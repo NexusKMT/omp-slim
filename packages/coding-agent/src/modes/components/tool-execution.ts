@@ -100,7 +100,7 @@ function displaceableToolName(
 }
 
 function isHubWaitArgs(args: unknown): boolean {
-	return !!args && typeof args === "object" && (args as { op?: unknown }).op === "wait";
+	return isRecord(args) && args.op === "wait";
 }
 
 function stabilizeStreamingPreviews(previews: PerFileDiffPreview[]): PerFileDiffPreview[] {
