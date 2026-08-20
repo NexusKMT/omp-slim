@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- New unified archive API `@oh-my-pi/pi-utils/ar`: one `openArchive`/`ArchiveReader` boundary over ZIP (incl. ZIP64), tar (ustar/GNU/pax, gz/bz2/xz/zst-compressed), ASAR, RAR 4/5, 7z, ISO 9660 (Joliet/Rock Ridge), CAB, cpio, RPM, Unix ar, Debian packages, LZH, ARJ, and single-stream `.gz`/`.bz2`/`.xz`/`.zst`/`.Z`/`.lzma` files, with lazy ranged reads (local files or HTTP range requests via `httpByteSource`), attacker-controlled-size limits, symlink-safe extraction, and deterministic `zip`/`tar`/`tar.gz`/`tar.zst`/`asar` writing.
+
+### Changed
+
+- DOCX conversion and browser installs now use the unified archive API; the private DOCX ZIP reader and the browsers ZIP extractor were removed.
+
 ## [17.3.8] - 2026-08-19
 
 ### Added

@@ -2,9 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- `read` can now list and extract members from `.rar`, `.7z`, `.iso`, `.cab`, `.deb`, `.rpm`, `.cpio`, `.ar`/`.a`, `.lzh`, `.arj`, compressed tars (`.tar.bz2`/`.tar.xz`/`.tar.zst`/`.tar.Z`), more ZIP-family packages (`.whl`, `.ipa`, `.xpi`, `.vsix`, `.nupkg`, `.cbz`, `.cbr`), and single-file `.gz`/`.bz2`/`.xz`/`.zst` streams via `archive.ext:path`.
+- `write` can now edit entries inside `.asar` archives and create `.tar.zst` archives; unsupported (read-only) archive formats fail with a clear error.
+- Electron `.asar` archives can now be listed and read by member path, including unpacked members.
+
 ### Fixed
 
 - Fixed the built-in `grep` and `rg` printing `Broken pipe (os error 32)` diagnostics and failing when a downstream pipeline reader exited early (e.g. `cargo clippy | grep -E … | head -30`), a regression from concurrent pipeline stages; they now exit silently with 141 (128+SIGPIPE) like the real binaries.
+
+### Changed
+
+- Archive parsing moved to the shared `@oh-my-pi/pi-utils/ar` engine; `src/utils/zip.ts` was removed.
 
 ## [17.4.0] - 2026-08-20
 
