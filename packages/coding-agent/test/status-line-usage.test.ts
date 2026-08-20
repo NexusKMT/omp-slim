@@ -284,6 +284,77 @@ describe("usage status-line segment", () => {
 		expect(refreshed).toContain("24%");
 	});
 
+	it("invalidates cached usage when the active model changes within a provider", async () => {
+		const model = { id: "gpt-5.6-sol", contextWindow: 1000, provider: "openai-codex" };
+		const reports = [
+			{
+				provider: "openai-codex",
+				metadata: { accountId: "active-account" },
+				limits: [
+					{ scope: { windowId: "7d" }, amount: { usedFraction: 0.08 } },
+					{
+						scope: { windowId: "5h", tier: "spark", modelId: "GPT-5.3-Codex-Spark" },
+						amount: { usedFraction: 0.42 },
+					},
+					{
+						scope: { windowId: "7d", tier: "spark", modelId: "GPT-5.3-Codex-Spark" },
+						amount: { usedFraction: 0.11 },
+					},
+				],
+			},
+		];
+		const session = {
+			state: { messages: [], model },
+			model,
+			sessionManager: {
+				getUsageStatistics: () => ({
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					orchestrationInput: 0,
+					orchestrationOutput: 0,
+					orchestrationCacheRead: 0,
+					premiumRequests: 0,
+					cost: 0,
+				}),
+			},
+			fetchUsageReports: async () => reports,
+			modelRegistry: {
+				authStorage: {
+					getOAuthAccountIdentity: (requestedProvider: string) =>
+						requestedProvider === "openai-codex" ? { accountId: "active-account" } : undefined,
+				},
+			},
+			getAsyncJobSnapshot: () => ({ running: [] }),
+			getContextUsage: () => undefined,
+		} as unknown as ConstructorParameters<typeof StatusLineComponent>[0];
+		const component = new StatusLineComponent(session);
+		component.updateSettings({
+			preset: "custom",
+			leftSegments: [],
+			rightSegments: ["usage"],
+			sessionAccent: false,
+		});
+
+		component.refreshUsageInBackground();
+		await flushUsageRefresh();
+		const solContent = stripVTControlCharacters(component.getTopBorder(200).content);
+		expect(solContent).not.toContain("spark");
+		expect(solContent).not.toContain("5h");
+		expect(solContent).toContain("8%");
+
+		model.id = "gpt-5.3-codex-spark";
+		const immediate = stripVTControlCharacters(component.getTopBorder(200).content);
+		expect(immediate).not.toContain("8%");
+		await flushUsageRefresh();
+		const sparkContent = stripVTControlCharacters(component.getTopBorder(200).content);
+		expect(sparkContent).toContain("spark");
+		expect(sparkContent).toContain("5h");
+		expect(sparkContent).toContain("42%");
+	});
+
 	it("keeps active-provider rate-limit header reports with account metadata", async () => {
 		const component = makeComponent(
 			[

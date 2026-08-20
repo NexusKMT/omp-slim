@@ -1266,7 +1266,12 @@ export class StatusLineComponent implements Component {
 		const identity = activeProvider
 			? session.modelRegistry?.authStorage?.getOAuthAccountIdentity(activeProvider, session.sessionId)
 			: undefined;
-		return this.#formatUsageContextKey(activeProvider, identity);
+		// Model id is part of the invalidation key (but not the account-scoped
+		// fireworks key): normalized usage now selects a model-scoped window group,
+		// so switching models must drop the previous model's cached scope instead
+		// of showing it for the rest of the TTL.
+		const activeModelId = session.state.model?.id ?? session.model?.id ?? "";
+		return `${this.#formatUsageContextKey(activeProvider, identity)}\0${activeModelId}`;
 	}
 
 	/**
