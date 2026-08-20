@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the built-in `grep` and `rg` printing `Broken pipe (os error 32)` diagnostics and failing when a downstream pipeline reader exited early (e.g. `cargo clippy | grep -E … | head -30`), a regression from concurrent pipeline stages; they now exit silently with 141 (128+SIGPIPE) like the real binaries.
+
 ## [17.4.0] - 2026-08-20
 
 ### Added
