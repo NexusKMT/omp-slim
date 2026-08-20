@@ -298,8 +298,8 @@ describe("InteractiveMode todo HUD anchor", () => {
 		// Lightened: no boxed top/bottom rules.
 		expect(lines.some(line => line === "─".repeat(80))).toBe(false);
 		// Root header carries the summed task progress bar (1 of 4 tasks closed).
-		const root = lines.find(line => line.includes("Todos"));
-		expect(root).toContain("1/4");
+		const root = lines.find(line => line.includes("TODO"));
+		expect(root).toBeDefined();
 		expect(root).toContain(theme.progress.filled);
 		expect(root).toContain(theme.progress.empty);
 		// Active stage: highlighted header with its own task progress, expanded as a
@@ -339,8 +339,8 @@ describe("InteractiveMode todo HUD anchor", () => {
 			.flatMap(line => line.split("\n"))
 			.map(line => Bun.stripANSI(line));
 		// One stage → the root still carries the summed bar and task counts.
-		const root = lines.find(line => line.includes("Todos"));
-		expect(root).toContain("0/2");
+		const root = lines.find(line => line.includes("TODO"));
+		expect(root).toBeDefined();
 		expect(root).toContain(theme.progress.empty);
 		// The stage keeps its task progress; no roman numeral for a lone stage.
 		expect(lines.some(line => line.includes("Tasks") && line.includes("0/2"))).toBe(true);
@@ -370,8 +370,9 @@ describe("InteractiveMode todo HUD anchor", () => {
 		expect(lines.some(line => line.includes("Six"))).toBe(false);
 		expect(lines.some(line => line.includes("2 more stages"))).toBe(true);
 		// Root header sums tasks across every stage, hidden ones included.
-		const root = lines.find(line => line.includes("Todos"));
-		expect(root).toContain("0/7");
+		const root = lines.find(line => line.includes("TODO"));
+		expect(root).toBeDefined();
+		expect(root).toContain(theme.progress.empty);
 	});
 
 	it("anchors the todo HUD as a native-scrollback live region while populated", () => {

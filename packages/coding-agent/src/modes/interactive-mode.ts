@@ -2456,7 +2456,7 @@ export class InteractiveMode implements InteractiveModeContext {
 					theme.fg("accent", theme.progress.filled.repeat(filledWidth)) +
 					theme.fg("dim", theme.progress.empty.repeat(barWidth - filledWidth));
 			}
-			headerLines.push(`${theme.bold(theme.fg("accent", "Todos"))} ${bar}`);
+			headerLines.push(`${theme.bold(theme.fg("accent", "TODO"))} ${bar}`);
 		}
 		const lines = [...headerLines, ...phaseTreeLines.map(line => ` ${line}`)];
 		this.todoContainer.addChild(new Text(lines.join("\n"), 1, 0));
