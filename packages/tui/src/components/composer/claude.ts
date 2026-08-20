@@ -4,8 +4,9 @@
  * bg chip near the right edge (`─────── hi ─`); the left group renders as a
  * plain standalone bottom bar that yields its row to the autocomplete menu.
  */
-import type { ComposerChromeContext, ComposerRowContext, ComposerStyle } from "./types";
+
 import { renderTopRule } from "./rule";
+import type { ComposerChromeContext, ComposerRowContext, ComposerStyle } from "./types";
 
 export const claudeComposerStyle: ComposerStyle = {
 	id: "claude",
