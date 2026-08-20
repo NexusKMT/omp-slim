@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Antigravity OAuth login to mirror native project discovery and free-tier onboarding against the daily Cloud Code Assist endpoint.
+
 ## [17.4.0] - 2026-08-20
 
 ### Added
