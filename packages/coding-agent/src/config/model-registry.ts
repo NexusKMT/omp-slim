@@ -789,6 +789,13 @@ export class ModelRegistry {
 		return { models: cachedModels, authoritativeFreshProviders };
 	}
 
+	#configuredDiscoveryHeaderFallback(providerId: string): Record<string, string> | undefined {
+		const override = this.#providerOverrides.get(providerId);
+		if (override?.authHeader !== true || !override.apiKey) return undefined;
+		const headers = mergeAuthHeaderSources([override.headers], override.authHeader, override.apiKey);
+		return headers && Object.keys(headers).length > 0 ? headers : undefined;
+	}
+
 	#loadCachedDiscoverableModels(): Model<Api>[] {
 		const cachedModels: Model<Api>[] = [];
 		for (const providerConfig of this.#discoverableProviders) {
@@ -809,13 +816,21 @@ export class ModelRegistry {
 				continue;
 			}
 			const configStale = this.#isDiscoveryCacheOlderThanModelsConfig(cache.updatedAt);
-			// Cached rows never persist headers (#5780); models that had live
-			// headers cannot be rebuilt here, so exclude them and mark the
-			// discovery stale to force a refetch instead of returning models
-			// missing required transport headers.
+			// Cached rows never persist headers (#5780). A pinned models.yml
+			// authHeader is re-derived from the current config; this also repairs
+			// rows written before the discovery manager knew that fallback, when
+			// every header-bearing model was marked unrestorable.
+			const restorableHeaderFallback = this.#configuredDiscoveryHeaderFallback(providerConfig.provider);
 			const omittedHeaderIds = new Set(cache.headerOmittedModelIds);
+			const hasUnrestoredHeaders = omittedHeaderIds.size > 0 && !restorableHeaderFallback;
 			const usableCacheModels =
-				omittedHeaderIds.size > 0 ? cache.models.filter(model => !omittedHeaderIds.has(model.id)) : cache.models;
+				omittedHeaderIds.size === 0
+					? cache.models
+					: restorableHeaderFallback
+						? cache.models.map(model =>
+								omittedHeaderIds.has(model.id) ? { ...model, headers: { ...restorableHeaderFallback } } : model,
+							)
+						: cache.models.filter(model => !omittedHeaderIds.has(model.id));
 			const models = this.#applyProviderModelOverrides(
 				providerConfig.provider,
 				this.#normalizeDiscoverableModels(
@@ -836,7 +851,7 @@ export class ModelRegistry {
 					!cache.fresh ||
 					!cache.authoritative ||
 					configStale ||
-					omittedHeaderIds.size > 0,
+					hasUnrestoredHeaders,
 				fetchedAt: cache.updatedAt,
 				models: models.map(model => model.id),
 			});
@@ -1197,6 +1212,7 @@ export class ModelRegistry {
 			cacheProviderId,
 			cacheTtlMs: 24 * 60 * 60 * 1000,
 			fetchDynamicModels,
+			restorableHeaderFallback: this.#configuredDiscoveryHeaderFallback(providerId),
 		});
 		const result = await manager.refresh(effectiveStrategy);
 		const status = discoveryError

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Configured discovery providers with `authHeader` keep cached models available across restarts ([#9112](https://github.com/can1357/oh-my-pi/issues/9112)).
+
 ## [17.4.0] - 2026-08-20
 
 ### Added
