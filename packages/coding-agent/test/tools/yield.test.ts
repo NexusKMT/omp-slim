@@ -168,11 +168,12 @@ describe("YieldTool", () => {
 		expect(result.details).toEqual({ data: { n: 4 }, status: "success", error: undefined });
 	});
 
-	it("verbatim arg validation rejects object payloads in string-typed fields instead of stringifying", () => {
-		// Regression: the generic tool-arg repair layer used to JSON.stringify an
-		// object submitted for a string-typed schema field, so validation
-		// "passed" and the parent received `summary: "{\"purge\":13,…}"` instead
-		// of a retry prompt. `coerceArguments = false` must surface the mismatch.
+	it("arg validation rejects object payloads in string-typed fields instead of stringifying", () => {
+		// Regression: the repair layer used to JSON.stringify an object submitted
+		// for a string-typed schema field even though the diagnosis came from a
+		// failed `anyOf` branch of the yield wrapper, so validation "passed" and
+		// the parent received `summary: "{\"purge\":13,…}"` instead of a retry
+		// prompt. Union-branch diagnoses must not trigger lossy repairs.
 		const tool = new YieldTool(
 			createSession({
 				outputSchema: {
@@ -182,7 +183,6 @@ describe("YieldTool", () => {
 				},
 			}),
 		);
-		expect(tool.coerceArguments).toBe(false);
 		expect(() =>
 			validateToolArguments(tool as never, {
 				type: "toolCall",
@@ -193,7 +193,7 @@ describe("YieldTool", () => {
 		).toThrow(/summary/);
 	});
 
-	it("verbatim arg validation passes conforming args through unmodified", () => {
+	it("arg validation passes conforming args through unmodified", () => {
 		const tool = new YieldTool(
 			createSession({
 				outputSchema: {

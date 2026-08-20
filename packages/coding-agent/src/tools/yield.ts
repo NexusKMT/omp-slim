@@ -268,14 +268,6 @@ export class YieldTool implements AgentTool<TSchema, YieldDetails> {
 	strict = true;
 	readonly intent = "omit" as const;
 	lenientArgValidation = true;
-	/**
-	 * The args ARE the subagent's deliverable: the generic repair layer's lossy
-	 * coercions (object→string stringification, unrecognized-key deletion) would
-	 * silently corrupt the payload and bypass this tool's own validate-and-retry
-	 * loop. Verbatim validation + `lenientArgValidation` routes every mismatch
-	 * through `execute()`'s salvage/retry messaging instead.
-	 */
-	coerceArguments = false;
 
 	readonly #validate?: (value: unknown) => JsonSchemaValidationResult;
 	readonly #validateSection?: ReadonlyMap<string, (value: unknown) => JsonSchemaValidationResult>;

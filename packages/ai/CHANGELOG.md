@@ -5,10 +5,10 @@
 ### Added
 
 - Added model metadata fields (`context_length`, `max_output_tokens`, `input_modalities`, etc.) to auth gateway model listing responses
-- Added `Tool.coerceArguments` (default `true`): setting it `false` opts a tool out of every LLM-quirk argument repair pass (JSON-string parsing, object→string stringification, unrecognized-key dropping, singleton array wrapping) so validation runs verbatim. Tools whose arguments are the deliverable payload — like the subagent `yield` tool — use it to keep lossy repairs from silently corrupting data their own validate-and-retry loop is designed to correct.
 
 ### Fixed
 
+- Fixed the tool-argument repair layer applying lossy repairs on union-branch diagnoses: when a value failed every `anyOf`/`oneOf` variant, the first failing branch's issues were treated as authoritative, so object payloads got JSON-stringified into string-typed fields and unrecognized keys were silently deleted — corrupting subagent `yield` payloads (validation "passed" and parents received `summary: "{\"purge\":13,…}"` instead of a retryable error). Issues surfaced from a failed union branch are now marked at every depth and only receive lossless repairs (JSON-string parsing, boolean spellings, scalar coercion); container stringification, key deletion, and singleton-array wrapping require an authoritative non-union diagnosis.
 - Fixed local OpenAI-compatible servers with strict `chat_template_kwargs` whitelists (e.g. NInfer) failing every Qwen 3.8+ turn with `400 chat_template_kwargs.reasoning_effort is not supported` after the effort routing fix: the reasoning-effort fallback now recognizes a rejection of the kwargs spelling itself, retries with the kwarg stripped while keeping the effort on the standard top-level `reasoning_effort` field (hoisting it there for the kwargs-only vLLM dialect), and remembers the shape for the rest of the session. Value-level rejections and drops now also update the `chat_template_kwargs.reasoning_effort` twin instead of leaving a stale effort for kwargs-reading renderers, and unknown-parameter 400s naming `reasoning_effort` are recognized as effort rejections.
 
 ## [17.3.8] - 2026-08-19

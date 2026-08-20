@@ -136,12 +136,20 @@ function tryCoerceBooleanToNumber(value: unknown, expectedTypes: string[]): { va
 	return { value: value ? 1 : 0, changed: true };
 }
 
-function tryCoerceString(value: unknown, expectedTypes: string[]): { value: unknown; changed: boolean } {
+function tryCoerceString(
+	value: unknown,
+	expectedTypes: string[],
+	allowLossy: boolean,
+): { value: unknown; changed: boolean } {
 	if (!expectedTypes.includes("string") || typeof value === "string" || value === null || value === undefined) {
 		return { value, changed: false };
 	}
 
 	if (Array.isArray(value) || typeof value === "object") {
+		// JSON.stringify is irreversible (downstream consumers receive encoded
+		// text where they expected structure), so it requires an authoritative
+		// diagnosis — never a union-branch guess.
+		if (!allowLossy) return { value, changed: false };
 		try {
 			const stringified = JSON.stringify(value);
 			if (stringified === undefined) return { value, changed: false };
@@ -158,7 +166,16 @@ function tryCoerceString(value: unknown, expectedTypes: string[]): { value: unkn
 	return { value: String(value), changed: true };
 }
 
-function tryCoerceForExpectedTypes(value: unknown, expectedTypes: string[]): { value: unknown; changed: boolean } {
+/**
+ * Schema-directed value repair for a single type issue. `allowLossy` gates the
+ * irreversible repairs (container→string stringification); lossless repairs
+ * (JSON parsing, boolean spellings, scalar stringification) always apply.
+ */
+function tryCoerceForExpectedTypes(
+	value: unknown,
+	expectedTypes: string[],
+	allowLossy: boolean,
+): { value: unknown; changed: boolean } {
 	if (typeof value === "string") {
 		const parsed = tryParseJsonForTypes(value, expectedTypes);
 		if (parsed.changed) return parsed;
@@ -171,7 +188,7 @@ function tryCoerceForExpectedTypes(value: unknown, expectedTypes: string[]): { v
 	const numericCoercion = tryCoerceBooleanToNumber(value, expectedTypes);
 	if (numericCoercion.changed) return numericCoercion;
 
-	return tryCoerceString(value, expectedTypes);
+	return tryCoerceString(value, expectedTypes, allowLossy);
 }
 
 function tryParseLeadingJsonContainer(value: string): unknown | undefined {
@@ -1578,7 +1595,12 @@ function coerceArgsFromIssues(args: unknown, issues: FlatIssue[]): { value: unkn
 	let nextArgs: unknown = args;
 
 	for (const issue of issues) {
+		// Issues surfaced from a failed union branch are guesses from that
+		// branch's diagnosis, not authoritative: another variant may accept the
+		// value as-is. Lossy repairs (key deletion, container stringification,
+		// singleton wrapping) stay off for them; lossless repairs still apply.
 		if (issue.keyword === "unrecognized") {
+			if (issue.unionBranch) continue;
 			const previous = nextArgs;
 			nextArgs = deleteValueAtPointer(nextArgs, issue.instancePath);
 			if (nextArgs !== previous) changed = true;
@@ -1588,7 +1610,7 @@ function coerceArgsFromIssues(args: unknown, issues: FlatIssue[]): { value: unkn
 		if (issue.expectedTypes.length === 0) continue;
 
 		const currentValue = getValueAtPointer(nextArgs, issue.instancePath);
-		const result = tryCoerceForExpectedTypes(currentValue, issue.expectedTypes);
+		const result = tryCoerceForExpectedTypes(currentValue, issue.expectedTypes, !issue.unionBranch);
 		let coercedValue = result.changed ? result.value : undefined;
 		if (
 			coercedValue === undefined &&
@@ -1923,18 +1945,6 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): ToolCall[
 		);
 	}
 	const ctx = getValidationContext(tool);
-	// Verbatim mode: the tool opted out of every repair pass because its
-	// arguments are payload, not plumbing. Validate as-is; on failure the
-	// caller's lenient path (if any) hands the raw args to the tool, whose
-	// own error messaging drives the model's retry.
-	if (tool.coerceArguments === false) {
-		const verbatim = validateContext(ctx, originalArgs);
-		if (verbatim.success) return verbatim.value as ToolCall["arguments"];
-		const errors = verbatim.messages.join("\n") || "Unknown validation error";
-		throw new AIError.ValidationError(
-			`Validation failed for tool "${toolCall.name}":\n${errors}\n\nReceived arguments:\n${JSON.stringify(truncateArgsForError(originalArgs), null, 2)}`,
-		);
-	}
 	const { json } = ctx;
 
 	// Always normalize first — strip null/string "null" from optional fields,

@@ -56,48 +56,91 @@ describe("Tool argument coercion", () => {
 
 		expect(result.payload).toBe('{"a":1,"nested":["x"]}');
 	});
-	it("coerceArguments: false rejects object values for string fields instead of stringifying", () => {
+	it("does not stringify container values diagnosed inside a failed union branch", () => {
+		// Regression: a subagent yield payload with an object in a string-typed
+		// schema field sat under the tool's `anyOf` wrapper; the stringify repair
+		// fired on that branch's guess, so validation "passed" and downstream
+		// consumers received encoded text instead of a retryable error.
 		const tool: Tool = {
-			name: "verbatim",
+			name: "union-string",
 			description: "",
-			coerceArguments: false,
-			parameters: type({ payload: type("string") }),
+			parameters: {
+				type: "object",
+				additionalProperties: false,
+				properties: {
+					payload: { anyOf: [{ type: "string" }, { type: "number" }] },
+				},
+				required: ["payload"],
+			} as never,
 		};
 
 		expect(() =>
 			validateToolArguments(tool, {
 				type: "toolCall",
-				id: "call-verbatim-object",
-				name: "verbatim",
+				id: "call-union-object",
+				name: "union-string",
 				arguments: { payload: { a: 1 } },
 			}),
 		).toThrow(/payload/);
 	});
 
-	it("coerceArguments: false still passes conforming args and rejects invalid JSON buffers", () => {
+	it("does not delete unrecognized keys diagnosed inside a failed union branch", () => {
 		const tool: Tool = {
-			name: "verbatim-ok",
+			name: "union-closed",
 			description: "",
-			coerceArguments: false,
-			parameters: type({ payload: type("string") }),
+			parameters: {
+				type: "object",
+				additionalProperties: false,
+				properties: {
+					op: {
+						anyOf: [
+							{
+								type: "object",
+								additionalProperties: false,
+								properties: { kind: { type: "string" }, value: { type: "number" } },
+								required: ["kind", "value"],
+							},
+							{ type: "string" },
+						],
+					},
+				},
+				required: ["op"],
+			} as never,
+		};
+
+		// `extra` fails the closed object variant; deleting it would silently
+		// drop payload data on a branch guess. Must surface as a validation error.
+		expect(() =>
+			validateToolArguments(tool, {
+				type: "toolCall",
+				id: "call-union-extra-key",
+				name: "union-closed",
+				arguments: { op: { kind: "set", value: 1, extra: "keep me" } },
+			}),
+		).toThrow(/op/);
+	});
+
+	it("still applies lossless repairs inside union branches", () => {
+		const tool: Tool = {
+			name: "union-lossless",
+			description: "",
+			parameters: {
+				type: "object",
+				additionalProperties: false,
+				properties: {
+					payload: { anyOf: [{ type: "number" }, { type: "boolean" }] },
+				},
+				required: ["payload"],
+			} as never,
 		};
 
 		const result = validateToolArguments(tool, {
 			type: "toolCall",
-			id: "call-verbatim-ok",
-			name: "verbatim-ok",
-			arguments: { payload: "fine" },
-		}) as { payload: string };
-		expect(result.payload).toBe("fine");
-
-		expect(() =>
-			validateToolArguments(tool, {
-				type: "toolCall",
-				id: "call-verbatim-parse-error",
-				name: "verbatim-ok",
-				arguments: { __parseError: "Unexpected token", __rawJson: '{"payload": ' },
-			}),
-		).toThrow(/not valid JSON/);
+			id: "call-union-numeric-string",
+			name: "union-lossless",
+			arguments: { payload: "300" },
+		}) as { payload: number };
+		expect(result.payload).toBe(300);
 	});
 
 	it("stringifies array values when schema expects string", () => {
