@@ -6,6 +6,10 @@
 
 - Eval-bridge nested `tool.<name>()` calls now resolve through the same ACP permission gate and enabled-tool allowlist as direct tool calls for every provider — previously they bypassed the gate entirely, so a nested bash/write/edit could execute without the permission prompt a direct call would have triggered ([#9069](https://github.com/can1357/oh-my-pi/pull/9069) by [@MilesCranmerBot](https://github.com/MilesCranmerBot)).
 
+### Fixed
+
+- Eval `tool.<name>()` calls that return images (e.g. `tool.read` on a PNG) now surface them as real image display outputs instead of an unused base64 field, so vision models can inspect bridged image results ([#9069](https://github.com/can1357/oh-my-pi/pull/9069) by [@MilesCranmerBot](https://github.com/MilesCranmerBot)).
+
 ### Added
 
 - Added Code Mode for Codex `code_mode_only` models ([#9050](https://github.com/can1357/oh-my-pi/issues/9050)), mirroring codex-rs: the `providers.openai-codex.codeMode` setting (`off`/`on`/`auto`, default `off`; `auto` follows the model catalog's `tool_mode` flag) collapses the direct tool surface to the eval/ask/todo/yield keep-set (plus `providers.openai-codex.codeModeDirectTools`) whenever an openai-codex model matches, demoting every other enabled tool to the eval bridge with generated TypeScript `tool.<name>()` declarations in the eval tool description. Turn metadata carries codex-rs's `tool_namespaces_info` exposure snapshot while active, model and setting changes reconcile the surface in place, and startup applies it before the first provider turn ([#9069](https://github.com/can1357/oh-my-pi/pull/9069) by [@MilesCranmerBot](https://github.com/MilesCranmerBot)).

@@ -199,7 +199,11 @@ describe("Code Mode session reconciliation", () => {
 
 	function createSession(
 		settings: Settings,
-		rebuildSystemPrompt: (names: string[]) => Promise<{ systemPrompt: string[] }> = async names => ({
+		rebuildSystemPrompt: (
+			names: string[],
+			tools?: Map<string, AgentTool>,
+			options?: { directToolNames?: readonly string[] },
+		) => Promise<{ systemPrompt: string[] }> = async names => ({
 			systemPrompt: [`tools:${names.join(",")}`],
 		}),
 		setActiveToolNames?: (names: Iterable<string>) => void,
@@ -228,6 +232,22 @@ describe("Code Mode session reconciliation", () => {
 		sessions.push(session);
 		return { session, directModel, codeModel };
 	}
+	test("prompt rebuilds receive the direct keep-set for the tool inventory", async () => {
+		const directCalls: Array<readonly string[] | undefined> = [];
+		const { session, directModel } = createSession(
+			Settings.isolated({ "providers.openai-codex.codeMode": "auto" }),
+			async (names, _tools, options) => {
+				directCalls.push(options?.directToolNames);
+				return { systemPrompt: [`tools:${names.join(",")}`] };
+			},
+		);
+		await session.setActiveToolsByName(["eval", "read"]);
+		expect(directCalls.at(-1)).toEqual(["eval"]);
+
+		await session.setModel(directModel);
+		expect(directCalls.at(-1)).toBeUndefined();
+	});
+
 	test("model switches reapply the full enabled set across Code Mode boundaries", async () => {
 		const { session, directModel, codeModel } = createSession(
 			Settings.isolated({ "providers.openai-codex.codeMode": "auto" }),
