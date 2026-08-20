@@ -1,5 +1,4 @@
 import { gunzipSync } from "node:zlib";
-import { create, fromBinary, toBinary } from "./protobuf";
 import type { FetchImpl, ModelSpec } from "../types";
 import { discoveryFetch } from "../utils";
 import {
@@ -8,6 +7,7 @@ import {
 	GetCliModelConfigsResponseSchema,
 	MetadataSchema,
 } from "./devin-proto";
+import { create, fromBinary, toBinary } from "./protobuf";
 
 const DEVIN_DEFAULT_BASE_URL = "https://server.codeium.com";
 const DEVIN_GET_CLI_MODEL_CONFIGS_PATH = "/exa.api_server_pb.ApiServerService/GetCliModelConfigs";
