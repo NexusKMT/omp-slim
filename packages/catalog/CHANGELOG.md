@@ -5,6 +5,7 @@
 ### Added
 
 - Models now materialize an optional `tokenizer` family in the catalog (`claude-v3`/`v47`/`v5`, Qwen 3.5+, DeepSeek V3/V4/R1, Kimi K2/K3, and GLM-5+). The field follows `requestModelId`, applies to bundled, discovered, and custom models, and can be explicitly overridden in model configuration.
+- Subscription Codex GPT-5.6 Sol/Terra/Luna now carry the same `cost.longContext` tier as their first-party API siblings (2x input / 1.5x output above 272K input tokens, [openai/codex#32486](https://github.com/openai/codex/issues/32486)), so cost attribution reflects the higher rating above the threshold and downstream consumers can locate the standard-pricing boundary.
 
 ### Fixed
 

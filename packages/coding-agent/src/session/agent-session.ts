@@ -105,7 +105,7 @@ import type { ResolvedModelRoleValue } from "../config/model-resolver";
 import { expandPromptTemplate, type PromptTemplate } from "../config/prompt-templates";
 import { buildServiceTierByFamily } from "../config/service-tier";
 import type { Settings, SkillsSettings } from "../config/settings";
-import { onAppendOnlyModeChanged, onModelRolesChanged } from "../config/settings";
+import { onAppendOnlyModeChanged, onExtendedContextChanged, onModelRolesChanged } from "../config/settings";
 import { RawSseDebugBuffer } from "../debug/raw-sse-buffer";
 import { getFileSnapshotStore } from "../edit/file-snapshot-store";
 import type { PythonResult } from "../eval/py/executor";
@@ -489,6 +489,7 @@ export class AgentSession {
 	#exitRecorded = false;
 	#unsubscribeAppendOnly?: () => void;
 	#unsubscribeModelRoles?: () => void;
+	#unsubscribeExtendedContext?: () => void;
 	/** Last (enable, providerId) tuple resolved by `#syncAppendOnlyContext` — used to skip no-op invalidations. */
 	#lastAppendOnlyResolution?: { enable: boolean; providerId: string | undefined };
 	#eventListeners: AgentSessionEventListener[] = [];
@@ -1638,6 +1639,11 @@ export class AgentSession {
 		// Re-evaluate append-only context mode when the setting changes at runtime.
 		this.#unsubscribeAppendOnly = onAppendOnlyModeChanged(_value => this.#syncAppendOnlyContext(this.model));
 		this.#unsubscribeModelRoles = onModelRolesChanged(() => this.#advisors.onModelRolesChanged());
+		// Re-derive the active model's effective context window when the
+		// extended-context setting flips at runtime: the registry re-clamps (or
+		// restores) premium long-context windows, and the live model object must
+		// follow so compaction thresholds and context display react immediately.
+		this.#unsubscribeExtendedContext = onExtendedContextChanged(() => void this.#reapplyExtendedContextPolicy());
 	}
 	/** Model registry for API key resolution and model discovery */
 	get modelRegistry(): ModelRegistry {
@@ -4093,6 +4099,10 @@ export class AgentSession {
 		if (this.#unsubscribeModelRoles) {
 			this.#unsubscribeModelRoles();
 			this.#unsubscribeModelRoles = undefined;
+		}
+		if (this.#unsubscribeExtendedContext) {
+			this.#unsubscribeExtendedContext();
+			this.#unsubscribeExtendedContext = undefined;
 		}
 		this.#eventListeners = [];
 		this.#runStateListeners.clear();
@@ -7317,6 +7327,26 @@ export class AgentSession {
 			onSkip: () => this.#toolChoiceQueue.removeByLabel("plan-mode-decision"),
 		});
 		return true;
+	}
+
+	/**
+	 * Rebuild the model catalog after an `extendedContext` toggle and rebind the
+	 * active model when its effective context window changed. Same-model rebinds
+	 * skip provider-session resets (`modelsAreEqual` sees no change), so this
+	 * only refreshes metadata consumers (compaction thresholds, context display).
+	 */
+	async #reapplyExtendedContextPolicy(): Promise<void> {
+		try {
+			await this.#modelRegistry.reapplyModelPolicies();
+			const currentModel = this.model;
+			if (!currentModel || this.#isDisposed) return;
+			const updated = this.#modelRegistry.find(currentModel.provider, currentModel.id);
+			if (updated && updated.contextWindow !== currentModel.contextWindow) {
+				await this.#setModelWithProviderSessionReset(updated);
+			}
+		} catch (error) {
+			logger.warn("extended-context policy reapply failed", { error: String(error) });
+		}
 	}
 
 	async #setModelWithProviderSessionReset(model: Model): Promise<void> {
