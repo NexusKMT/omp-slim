@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- External editor (Ctrl+G, plan review/annotation, `/todo edit`) now spawns with `stdio: "inherit"` again, so emacsclient-based `$EDITOR` renders in the visible pane instead of an invisible terminal ([#9077](https://github.com/can1357/oh-my-pi/issues/9077)).
+
 ## [17.4.0] - 2026-08-20
 
 ### Added
