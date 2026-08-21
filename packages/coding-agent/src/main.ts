@@ -7,8 +7,8 @@
 import * as fsSync from "node:fs";
 import * as os from "node:os";
 import { createInterface } from "node:readline/promises";
-import { EventLoopKeepalive } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import { EventLoopKeepalive, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
 import {
 	$env,
 	directoryExists,
@@ -707,25 +707,103 @@ async function switchToResumedProject(
 
 /**
  * Resolve the effective model allow-list from an explicit `--models` scope or,
- * failing that, the active project's `enabledModels`. Re-run after a resume
- * switches projects so the destination project's settings-derived scope wins
- * over the launch directory's.
+ * failing that, the active project's `enabledModels`. A totally collapsed scope
+ * gets one cache-aware discovery pass before session construction: otherwise an
+ * all-discovery `--models` launch can select an unrelated static model before the
+ * later background rebuild activates the requested scope. The pass only helps
+ * providers already known to be discoverable (models.yml `discovery:`, runtime
+ * managers); a scope naming only extension-supplied models stays empty here
+ * because those providers register during `createAgentSession` — that case is
+ * covered by deferring to the SDK's `modelPattern` resolution in
+ * {@link buildSessionOptions}. Re-run after a resume switches projects so the
+ * destination project's settings-derived scope wins over the launch directory's.
  */
-async function resolveScopedModels(
+export async function resolveScopedModels(
 	parsed: Args,
-	modelRegistry: ModelRegistry,
+	modelRegistry: Pick<ModelRegistry, "getAvailable" | "getDiscoverableProviders" | "refresh">,
 	activeSettings: Settings,
 ): Promise<ScopedModel[]> {
 	const modelPatterns = parsed.models ?? activeSettings.get("enabledModels");
 	if (!modelPatterns || modelPatterns.length === 0) {
 		return [];
 	}
-	return await resolveModelScope(
-		modelPatterns,
+	const preferences = getModelMatchPreferences(activeSettings);
+	const scopedModels = await resolveModelScope(modelPatterns, modelRegistry, preferences, activeSettings);
+	if (scopedModels.length > 0 || modelRegistry.getDiscoverableProviders().length === 0) {
+		return scopedModels;
+	}
+	await modelRegistry.refresh("online-if-uncached");
+	return await resolveModelScope(modelPatterns, modelRegistry, preferences, activeSettings);
+}
+
+/**
+ * Map resolver scope entries to the session's Ctrl+P cycle shape, filling in the
+ * configured default thinking level for entries without an explicit `:level`
+ * suffix. `auto` is session-level only, so it is coerced to a concrete default here.
+ */
+export function toSessionScopedModels(
+	scopedModels: readonly ScopedModel[],
+	activeSettings: Settings,
+): Array<{ model: Model; thinkingLevel?: ThinkingLevel }> {
+	if (scopedModels.length === 0) return [];
+	const defaultThinkingLevel = concreteThinkingLevel(
+		parseConfiguredThinkingLevel(activeSettings.get("defaultThinkingLevel")),
+	);
+	return scopedModels.map(scopedModel => ({
+		model: scopedModel.model,
+		thinkingLevel: scopedModel.explicitThinkingLevel
+			? (scopedModel.thinkingLevel ?? defaultThinkingLevel)
+			: defaultThinkingLevel,
+	}));
+}
+
+/** Whether two scope lists reference the same set of models (order-independent). */
+function sameScopedModelSet(a: ReadonlyArray<{ model: Model }>, b: ReadonlyArray<{ model: Model }>): boolean {
+	if (a.length !== b.length) return false;
+	const keys = new Set(a.map(entry => `${entry.model.provider}/${entry.model.id}`));
+	return b.every(entry => keys.has(`${entry.model.provider}/${entry.model.id}`));
+}
+
+/** Minimal session surface the post-discovery scope rebuild mutates. */
+export interface ScopedModelSink {
+	readonly isDisposed: boolean;
+	readonly scopedModels: ReadonlyArray<{ model: Model; thinkingLevel?: ThinkingLevel }>;
+	setScopedModels(scopedModels: Array<{ model: Model; thinkingLevel?: ThinkingLevel }>): void;
+}
+
+/**
+ * Startup resolves the `--models`/`enabledModels` scope from the model registry
+ * before background provider discovery runs — `createSession` fires
+ * `refreshInBackground()` only after the session is built — so a scoped selector
+ * whose model first materializes through runtime discovery (e.g.
+ * `opencode-go/ox-alpha-free` on a fresh launch with no cache row) is absent from
+ * the frozen scoped `/models` list even though it is in `enabledModels`, invokable
+ * via `--model`, and listed by `omp models find`. Once the initial refresh settles,
+ * re-resolve the scope and, when the set changed, push the fuller list into the
+ * session so the scoped picker and Ctrl+P cycle include it. A scope that resolved
+ * to zero models may become active here when the startup discovery pass returned
+ * no models but the background pass succeeded. Fire-and-forget — never blocks the
+ * prompt on background discovery latency. Issue #9220.
+ */
+export async function rebuildScopedModelsAfterDiscovery(
+	session: ScopedModelSink,
+	parsed: Args,
+	modelRegistry: Pick<ModelRegistry, "getAvailable" | "awaitBackgroundRefresh">,
+	activeSettings: Settings,
+): Promise<void> {
+	const patterns = parsed.models ?? activeSettings.get("enabledModels");
+	if (!patterns || patterns.length === 0) return;
+	await modelRegistry.awaitBackgroundRefresh();
+	if (session.isDisposed) return;
+	const rebuilt = await resolveModelScope(
+		patterns,
 		modelRegistry,
 		getModelMatchPreferences(activeSettings),
 		activeSettings,
 	);
+	const mapped = toSessionScopedModels(rebuilt, activeSettings);
+	if (mapped.length === 0 || sameScopedModelSet(session.scopedModels, mapped)) return;
+	session.setScopedModels(mapped);
 }
 
 async function getChangelogForDisplay(
@@ -1047,6 +1125,17 @@ export async function buildSessionOptions(
 		// escape it — keep pinning the first scoped model there.
 		deferredDefaultRole = !options.model && Boolean(remembered) && !((parsed.models?.length ?? 0) > 0);
 		if (!options.model && !deferredDefaultRole) options.model = scopedModels[0].model;
+	} else if ((parsed.models?.length ?? 0) > 0 && !restoringSession) {
+		// A CLI `--models` scope that resolved to zero models at startup: its
+		// selectors name only models supplied by extension providers (or discovery)
+		// that register during createAgentSession, so nothing matched the
+		// pre-session catalog and `getDiscoverableProviders()` did not yet list the
+		// provider for resolveScopedModels' pre-refresh. Defer the choice to the
+		// SDK's post-extension resolution — the same `modelPattern` path a deferred
+		// `--model` uses — so the initial model is picked from the requested scope
+		// instead of an unrelated fallback. The fire-and-forget rebuild then
+		// activates the scoped list once discovery settles (issue #9220).
+		options.modelPattern = parsed.models;
 	}
 
 	if (parsed.noPrewalk && (parsed.prewalk || parsed.prewalkInto !== undefined)) {
@@ -1115,19 +1204,9 @@ export async function buildSessionOptions(
 		options.thinkingLevel = scopedModels[0].thinkingLevel;
 	}
 
-	// Scoped models for Ctrl+P cycling - fill in default thinking levels when not explicit
+	// Scoped models for Ctrl+P cycling — fill in default thinking levels when not explicit.
 	if (scopedModels.length > 0) {
-		// `auto` is a session-level concept only; per-scoped-model (Ctrl+P) thinking
-		// overrides stay concrete, so coerce the auto default to "unset" here.
-		const defaultThinkingLevel = concreteThinkingLevel(
-			parseConfiguredThinkingLevel(activeSettings.get("defaultThinkingLevel")),
-		);
-		options.scopedModels = scopedModels.map(scopedModel => ({
-			model: scopedModel.model,
-			thinkingLevel: scopedModel.explicitThinkingLevel
-				? (scopedModel.thinkingLevel ?? defaultThinkingLevel)
-				: defaultThinkingLevel,
-		}));
+		options.scopedModels = toSessionScopedModels(scopedModels, activeSettings);
 	}
 
 	// API key from CLI - set in authStorage
@@ -1746,6 +1825,19 @@ export async function runRootCommand(
 		);
 		if (parsedArgs.apiKey && !sessionOptions.model && session.model) {
 			authStorage.setRuntimeApiKey(session.model.provider, parsedArgs.apiKey);
+		}
+
+		// Runtime provider discovery (opencode-go, models.yml `discovery:`, proxies)
+		// populates the registry AFTER the scope was snapshotted at startup; re-resolve
+		// once it settles so newly-discovered configured models join the scoped
+		// /models list and Ctrl+P cycle, including scopes that initially resolved
+		// empty (issue #9220). Fire-and-forget: the prompt must never block on the
+		// background pass.
+		const configuredScope = parsedArgs.models ?? settingsInstance.get("enabledModels");
+		if (isInteractive && configuredScope.length > 0) {
+			void rebuildScopedModelsAfterDiscovery(session, parsedArgs, modelRegistry, settingsInstance).catch(error =>
+				logger.warn("Scoped model rebuild after discovery failed", { error: String(error) }),
+			);
 		}
 
 		if (modelFallbackMessage) {
