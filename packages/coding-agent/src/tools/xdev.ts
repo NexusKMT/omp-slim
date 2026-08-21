@@ -25,8 +25,9 @@
  * `read xd://<tool>` remains for on-demand re-fetch.
  *
  * Rendering: the write renderer draws NOTHING until the streamed `path` is
- * known and provably does not target `xd://`; device writes then delegate to
- * the wrapped tool's own renderer with the decoded inner args.
+ * known and provably does not target `xd://`. Device writes then show as
+ * queued/planning until `tool_execution_start`, and only then delegate to the
+ * wrapped tool's own renderer with the decoded inner args.
  */
 import type { AgentToolContext, AgentToolResult, AgentToolUpdateCallback, ToolLoadMode } from "@oh-my-pi/pi-agent-core";
 import { type Tool as AiTool, jsonSchemaToTypeScript, toolWireSchema, validateToolArguments } from "@oh-my-pi/pi-ai";
@@ -492,10 +493,47 @@ function resolveDeviceRenderer(
 	return rendererLookup?.(name);
 }
 
+/** Human label for a device write: mounted tool label, else `server/tool` for MCP names. */
+function displayDeviceLabel(name: string, mounted?: { label?: string }): string {
+	if (mounted?.label) return mounted.label;
+	if (name.startsWith("mcp__")) {
+		const rest = name.slice("mcp__".length);
+		const split = rest.indexOf("_");
+		if (split > 0) return `${rest.slice(0, split)}/${rest.slice(split + 1)}`;
+	}
+	return name;
+}
+
+/** Drop the streaming-decode bookkeeping key before showing inner args. */
+function displayDeviceArgs(args: Record<string, unknown>): Record<string, unknown> {
+	const { __partialJson: _partial, ...rest } = args;
+	return rest;
+}
+
+/** Pre-execution card so a streamed `xd://` write does not look like a hung MCP call. */
+function renderQueuedXdevCall(
+	label: string,
+	args: Record<string, unknown>,
+	options: RenderResultOptions,
+	theme: Theme,
+): Component {
+	return renderDefaultToolExecution(
+		{
+			label: `queued ${label}`,
+			args: displayDeviceArgs(args),
+			options: { ...options, isPartial: true, spinnerFrame: undefined },
+		},
+		theme,
+	);
+}
+
 /**
- * Streaming-safe call preview for an `xd://` write: forwards the decoded inner
- * args to the mounted tool's renderer (session instance first, then the static
- * map). Returns `undefined` (render nothing) when no renderer produces output.
+ * Streaming-safe call preview for an `xd://` write. Until the write actually
+ * executes (`argsComplete` / `tool_execution_start`), show a queued/planning
+ * card so Grok-style think-after-toolcall stalls do not look like a hung
+ * inner tool. Once execution starts, forward the decoded inner args to the
+ * mounted tool's renderer (session instance first, then the static map).
+ * Returns `undefined` (render nothing) when no renderer produces output.
  */
 export function renderXdevCall(
 	name: string,
@@ -505,8 +543,11 @@ export function renderXdevCall(
 	resolveMounted?: (name: string) => Tool | undefined,
 ): Component | undefined {
 	const mounted = resolveMounted?.(name);
-	const renderer = resolveDeviceRenderer(name, mounted);
 	const args = decodeInnerArgs(content);
+	if (!options.argsComplete) {
+		return renderQueuedXdevCall(displayDeviceLabel(name, mounted), args, options, theme);
+	}
+	const renderer = resolveDeviceRenderer(name, mounted);
 	if (renderer?.renderCall) {
 		return renderer.renderCall(args, options, theme);
 	}

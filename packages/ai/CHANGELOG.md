@@ -28,6 +28,7 @@
 
 ### Fixed
 
+- Fixed thinking-loop detection going silent after the first streamed tool call, so Grok/xAI reasoning loops that continue after a tool call starts still abort and retry instead of spinning until you press Esc.
 - Fixed OpenAI Codex requests failing with HTTP 401 data residency errors on enterprise ChatGPT workspaces when connecting from a different region via VPN or proxy.
 - Fixed concurrent xAI OAuth token refreshes revoking shared credentials across multiple processes.
 - Fixed Amazon Bedrock Converse multi-turn conversations failing on models like Amazon Nova due to unsigned reasoning content in replayed turns.

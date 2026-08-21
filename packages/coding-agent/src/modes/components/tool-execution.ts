@@ -448,10 +448,12 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		spinnerFrame?: number;
 		expanded: boolean;
 		isPartial: boolean;
+		argsComplete?: boolean;
 		renderContext?: Record<string, unknown>;
 	} = {
 		expanded: false,
 		isPartial: true,
+		argsComplete: false,
 	};
 
 	constructor(
@@ -522,9 +524,13 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	 * This triggers an immediate final diff computation for edit-like tools.
 	 */
 	setArgsComplete(_toolCallId?: string): void {
+		const alreadyComplete = this.#argsComplete;
 		this.#argsComplete = true;
 		this.#updateSpinnerAnimation();
 		this.#schedulePreviewDiff();
+		if (alreadyComplete) return;
+		this.#displayInputVersion++;
+		this.#updateDisplay();
 	}
 
 	/**
@@ -1004,7 +1010,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		// TUI startup, so a result rendered before it lands must re-shape once it
 		// does (it gates Image children vs text fallback in #rebuildDisplay); keyed
 		// here for the same reason markdown.ts keys its render cache on it.
-		const key = `${this.#resultVersion}|${this.#expanded}|${this.#isPartial}|${this.#spinnerFrame ?? "-"}|${this.#showImages}|${getThemeEpoch()}|${this.#displayInputVersion}|${this.#backgroundTaskFrozenStyled}|${TERMINAL.imageProtocol ?? "-"}|${this.#imageSizeKey()}`;
+		const key = `${this.#resultVersion}|${this.#expanded}|${this.#isPartial}|${this.#argsComplete ? "1" : "0"}|${this.#spinnerFrame ?? "-"}|${this.#showImages}|${getThemeEpoch()}|${this.#displayInputVersion}|${this.#backgroundTaskFrozenStyled}|${TERMINAL.imageProtocol ?? "-"}|${this.#imageSizeKey()}`;
 		if (key === this.#lastDisplayKey && this.#displayBuilt) return;
 		this.#lastDisplayKey = key;
 
@@ -1072,6 +1078,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		// Sync shared mutable render state for component closures
 		this.#renderState.expanded = this.#expanded;
 		this.#renderState.isPartial = this.#isPartial;
+		this.#renderState.argsComplete = this.#argsComplete;
 		this.#renderState.spinnerFrame = this.#spinnerFrame;
 
 		// Non-self-framing tools (custom/extension renderers and the generic

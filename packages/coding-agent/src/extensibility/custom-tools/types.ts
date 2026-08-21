@@ -160,6 +160,12 @@ export interface RenderResultOptions {
 	isPartial: boolean;
 	/** Current spinner frame index for animated elements (0-9, only provided during partial results) */
 	spinnerFrame?: number;
+	/**
+	 * True once arguments are final and the tool is about to execute
+	 * (`tool_execution_start` / `setArgsComplete`). Streamed call previews
+	 * before this should not look like a live in-flight call.
+	 */
+	argsComplete?: boolean;
 }
 
 export type CustomToolResult<TDetails = any> = AgentToolResult<TDetails>;
