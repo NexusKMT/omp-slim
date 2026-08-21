@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import http2 from "node:http2";
-import type { ConversationStep, CursorRule, McpToolDefinition } from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
+import type {
+	ConversationStep,
+	CursorRule,
+	McpToolDefinition,
+	RequestedModel_ModelParameterbytes,
+} from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
 import {
 	AgentClientMessageSchema,
 	AgentConversationTurnStructureSchema,
@@ -106,6 +111,7 @@ import {
 	RequestContextResultSchema,
 	RequestContextSchema,
 	RequestContextSuccessSchema,
+	RequestedModel_ModelParameterbytesSchema,
 	RequestedModelSchema,
 	ResumeActionSchema,
 	SelectedContextSchema,
@@ -151,7 +157,8 @@ import {
 	toBinary,
 	toJson,
 } from "@oh-my-pi/pi-catalog/discovery/protobuf";
-import { isKimiK3ModelId } from "@oh-my-pi/pi-catalog/identity";
+import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
+import { isKimiK3ModelId, parseOpenAIModel } from "@oh-my-pi/pi-catalog/identity";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import {
 	$env,
@@ -5011,6 +5018,44 @@ function extractImages(content: (TextContent | ImageContent)[]) {
 		);
 }
 
+/**
+ * Resolve the Cursor Run wire model id and its parameter list.
+ *
+ * Cursor's `GetUsableModels` lists reasoning models as per-effort sibling
+ * slugs (`gpt-5.4-mini-low`, `gpt-5.6-sol-high`), and OMP copies those ids 1:1.
+ * The Run endpoint rejects a sibling slug as the wire `model_id` with
+ * `resource_exhausted` (errorId 528384); the official `cursor-agent` splits the
+ * slug into its base model id plus a `reasoning` effort parameter. Mirror that
+ * for OpenAI-family ids: strip a trailing effort tier and emit
+ * `{ id: "reasoning", value: <effort> }`.
+ *
+ * Non-OpenAI ids pass through unchanged — Cursor-native ids (`composer-*`,
+ * `cursor-grok-*`, `default`) carry no effort suffix, and Claude/other siblings
+ * need additional parameters (`thinking`, `context`) whose per-model values are
+ * not exposed by the decoded `GetUsableModels` schema, so guessing them would
+ * re-trigger 528384.
+ */
+function resolveCursorWireModel(model: Model<"cursor-agent">): {
+	modelId: string;
+	parameters: RequestedModel_ModelParameterbytes[];
+} {
+	const wireModelId = model.requestModelId ?? model.id;
+	// Split a trailing effort tier (`-low`, `-high`, `-xhigh`, …) off the id and
+	// translate it only when the remaining base parses as an OpenAI model.
+	const idx = wireModelId.lastIndexOf("-");
+	const effort = idx > 0 ? wireModelId.slice(idx + 1) : "";
+	if (effort && (THINKING_EFFORTS as readonly string[]).includes(effort)) {
+		const base = wireModelId.slice(0, idx);
+		if (parseOpenAIModel(base) !== null) {
+			return {
+				modelId: base,
+				parameters: [create(RequestedModel_ModelParameterbytesSchema, { id: "reasoning", value: effort })],
+			};
+		}
+	}
+	return { modelId: wireModelId, parameters: [] };
+}
+
 export async function buildGrpcRequest(
 	model: Model<"cursor-agent">,
 	context: Context,
@@ -5117,7 +5162,7 @@ export async function buildGrpcRequest(
 		turns,
 	});
 
-	const wireModelId = model.requestModelId ?? model.id;
+	const { modelId: wireModelId, parameters: wireParameters } = resolveCursorWireModel(model);
 	const cursorMaxMode = model.cursorMaxMode === true;
 	const modelDetails = create(ModelDetailsSchema, {
 		modelId: wireModelId,
@@ -5128,6 +5173,7 @@ export async function buildGrpcRequest(
 	const requestedModel = create(RequestedModelSchema, {
 		modelId: wireModelId,
 		maxMode: cursorMaxMode,
+		parameters: wireParameters,
 	});
 
 	let runRequest = create(AgentRunRequestSchema, {
