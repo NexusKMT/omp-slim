@@ -124,4 +124,40 @@ describe("interactive /mcp test", () => {
 		expect(disconnectServer).toHaveBeenCalledWith(connection);
 		expect(requestRender).toHaveBeenCalled();
 	});
+
+	it("claims Esc ownership before the awaited server lookup", async () => {
+		const connection = {
+			name: "github",
+			config: { type: "stdio" as const, command: "github-mcp-server", args: ["serve"] },
+			transport: { connected: true, request: vi.fn(), notify: vi.fn(), close: vi.fn(async () => {}) },
+			serverInfo: { name: "GitHub MCP", version: "1.0.0" },
+			capabilities: {},
+		};
+		vi.spyOn(mcpClient, "connectToServer").mockResolvedValue(connection);
+		vi.spyOn(mcpClient, "listTools").mockResolvedValue([{ name: "search_issues" }] as never);
+		vi.spyOn(mcpClient, "disconnectServer").mockResolvedValue();
+		const mcpTestEscapeHandlers = new Set<() => void>();
+		const controller = new MCPCommandController({
+			mcpTestEscapeHandlers,
+			chatContainer: { addChild: vi.fn() },
+			present: vi.fn(),
+			presentCommandOutput: vi.fn(),
+			ui: { requestRender: vi.fn() },
+			editor: {},
+			showError: vi.fn(),
+			showStatus: vi.fn(),
+			session: { refreshMCPTools: vi.fn() },
+			mcpManager: {
+				prepareConfig: vi.fn(async config => config),
+				getConnectionStatus: vi.fn(() => "connected"),
+			},
+		} as never);
+
+		// Do not await: the handler must be registered synchronously, before the
+		// awaited `#resolveServerForAuth()` config read can suspend and let Esc
+		// fall through to aborting the agent turn.
+		const pending = controller.handle("/mcp test github");
+		expect(mcpTestEscapeHandlers).toHaveLength(1);
+		await pending;
+	});
 });

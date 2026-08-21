@@ -1577,11 +1577,17 @@ export class MCPCommandController {
 		const abortController = new AbortController();
 		const handleEscape = (): void => abortController.abort();
 
+		// Claim Esc before the first await: a slow `#resolveServerForAuth()` (e.g.
+		// config on a network filesystem) must not let Esc fall through to the
+		// agent-turn abort while the command is already running.
+		this.ctx.mcpTestEscapeHandlers.add(handleEscape);
+
 		let connection: MCPServerConnection | undefined;
 		try {
 			const found = await this.#resolveServerForAuth(name);
 
 			if (!found) {
+				this.ctx.mcpTestEscapeHandlers.delete(handleEscape);
 				this.ctx.showError(
 					`Server "${name}" not found.\n\nTip: Run ${theme.fg("accent", "/mcp list")} to see available servers.`,
 				);
@@ -1590,11 +1596,10 @@ export class MCPCommandController {
 
 			const { config } = found;
 			if (config.enabled === false) {
+				this.ctx.mcpTestEscapeHandlers.delete(handleEscape);
 				this.ctx.showError(`Server "${name}" is disabled. Run /mcp enable ${name} first.`);
 				return;
 			}
-
-			this.ctx.mcpTestEscapeHandlers.add(handleEscape);
 
 			this.#showMessage(
 				["", theme.fg("muted", `Testing connection to "${name}"... (esc to cancel)`), ""].join("\n"),
