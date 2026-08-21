@@ -32,7 +32,7 @@
  * generator, and the model-manager merge point.
  */
 import { buildCompat, buildModel } from "./build";
-import { Effort } from "./effort";
+import { Effort, THINKING_EFFORTS } from "./effort";
 import { stripThinkingVariantToken } from "./identity/family";
 import { resolveModelThinking } from "./model-thinking";
 import type { Api, Model, ModelSpec, Provider, ThinkingConfig } from "./types";
@@ -775,6 +775,118 @@ export const CURSOR_VARIANT_COLLAPSE_TABLE: VariantCollapseTable = {
 	],
 };
 
+type CursorTierToken = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
+interface CursorTierMember<TSpec extends VariantSpecLike> {
+	baseId: string;
+	fast: boolean;
+	spec: TSpec;
+	tier: CursorTierToken;
+}
+
+const CURSOR_TIER_ID_PATTERN = /^(.*)-(none|minimal|low|medium|high|xhigh|max)(-fast)?$/;
+const CURSOR_TIER_BASE_PATTERN = /-(none|minimal|low|medium|high|xhigh|max)$/;
+const CURSOR_THINKING_TOKEN_PATTERN = /(^|-)thinking($|-)/;
+const CURSOR_TIER_BY_TOKEN: Readonly<Record<string, CursorTierToken | undefined>> = {
+	none: "none",
+	minimal: "minimal",
+	low: "low",
+	medium: "medium",
+	high: "high",
+	xhigh: "xhigh",
+	max: "max",
+};
+
+/**
+ * Derive safe Cursor per-effort families from live wire ids. A family is
+ * intentionally left expanded when its base is also a live SKU, any member
+ * already has a thinking ladder, member metadata differs, or a tier token is
+ * also part of a product name.
+ */
+function deriveCursorEffortFamilies<TSpec extends VariantSpecLike>(specs: readonly TSpec[]): EffortVariantFamily[] {
+	const byId = new Map<string, TSpec>();
+	const groups = new Map<string, CursorTierMember<TSpec>[]>();
+	const candidateBases = new Set<string>();
+
+	for (const spec of specs) {
+		if (!byId.has(spec.id)) byId.set(spec.id, spec);
+		const match = CURSOR_TIER_ID_PATTERN.exec(spec.id);
+		if (!match) continue;
+		const baseId = match[1];
+		const tier = CURSOR_TIER_BY_TOKEN[match[2] ?? ""];
+		const fast = match[3] !== undefined;
+		if (!baseId || !tier) continue;
+		const member = { baseId, fast, spec, tier };
+		const key = `${baseId}\0${fast ? "fast" : "standard"}`;
+		const group = groups.get(key);
+		if (group) {
+			group.push(member);
+		} else {
+			groups.set(key, [member]);
+		}
+		candidateBases.add(baseId);
+	}
+
+	const unsafeBases = new Set<string>();
+	for (const group of groups.values()) {
+		const first = group[0];
+		if (!first) continue;
+		const { baseId } = first;
+		if (
+			byId.has(baseId) ||
+			byId.has(`${baseId}-fast`) ||
+			CURSOR_TIER_BASE_PATTERN.test(baseId) ||
+			CURSOR_THINKING_TOKEN_PATTERN.test(baseId) ||
+			candidateBases.has(`${baseId}-thinking`) ||
+			byId.has(`${baseId}-thinking`) ||
+			byId.has(`${baseId}-thinking-fast`) ||
+			byId.has(`${baseId}-fast-thinking`) ||
+			group.some(member => member.spec.thinking !== undefined || member.spec.requestModelId !== undefined) ||
+			group.some(member => candidateBases.has(`${baseId}-${member.tier}`))
+		) {
+			unsafeBases.add(baseId);
+		}
+	}
+
+	const families: EffortVariantFamily[] = [];
+	for (const group of groups.values()) {
+		const first = group[0];
+		if (!first || group.length < 2 || unsafeBases.has(first.baseId)) continue;
+		if (
+			group.some(
+				member =>
+					member.spec.api !== first.spec.api ||
+					member.spec.baseUrl !== first.spec.baseUrl ||
+					member.spec.contextWindow !== first.spec.contextWindow ||
+					member.spec.maxTokens !== first.spec.maxTokens ||
+					member.spec.cursorMaxMode !== first.spec.cursorMaxMode ||
+					!Bun.deepEquals(member.spec.cost, first.spec.cost) ||
+					!Bun.deepEquals(member.spec.compat, first.spec.compat),
+			)
+		) {
+			continue;
+		}
+
+		const routes: TierRoutes = {};
+		for (const member of group) {
+			if (member.tier === "none") {
+				routes.off = member.spec.id;
+			} else {
+				routes[member.tier] = member.spec.id;
+			}
+		}
+		const efforts = THINKING_EFFORTS.filter(effort => routes[effort] !== undefined);
+		if (efforts.length === 0) continue;
+		const strippedName = first.spec.name
+			.replace(/\s+(none|minimal|low|medium|high|xhigh|max)(\s+fast)?$/i, "")
+			.trim();
+		const baseName = strippedName === first.spec.id ? first.baseId : strippedName || first.baseId;
+		const suffix = first.fast ? "-fast" : "";
+		families.push(tierFamily(`${first.baseId}${suffix}`, `${baseName}${first.fast ? " Fast" : ""}`, routes, efforts));
+	}
+	return families;
+}
+
 /** Provider id → hand collapse table. The CCA providers diverge on thinking transport. */
 export const VARIANT_COLLAPSE_TABLES: Readonly<Record<string, VariantCollapseTable>> = {
 	"google-antigravity": ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
@@ -1160,10 +1272,11 @@ export function collapseEffortVariants<TSpec extends VariantSpecLike>(
 }
 
 /**
- * Collapse a full mixed-provider list: per provider, the hand table (when
- * registered) plus the automatic `X`/`X-thinking` pair rule. Used by the
- * catalog generator; the runtime equivalent lives at the model-manager merge
- * point. Output is regrouped by provider — callers re-sort.
+ * Collapse a full mixed-provider list: per provider, the hand table, Cursor's
+ * conservative live effort-sibling rule, and the automatic `X`/`X-thinking`
+ * pair rule. Used by the catalog generator; the runtime equivalent lives at
+ * the model-manager merge point. Output is regrouped by provider — callers
+ * re-sort.
  */
 export function collapseEffortVariantsAcrossProviders<TSpec extends VariantSpecLike>(specs: readonly TSpec[]): TSpec[] {
 	const byProvider = new Map<string, TSpec[]>();
@@ -1179,6 +1292,12 @@ export function collapseEffortVariantsAcrossProviders<TSpec extends VariantSpecL
 	for (const [provider, slice] of byProvider) {
 		const table = VARIANT_COLLAPSE_TABLES[provider];
 		let result = table ? collapseEffortVariants(slice, table) : slice;
+		if (provider === "cursor") {
+			const cursorDerived = deriveCursorEffortFamilies(result);
+			if (cursorDerived.length > 0) {
+				result = collapseEffortVariants(result, { families: cursorDerived });
+			}
+		}
 		const derived = deriveThinkingPairFamilies(result, table);
 		if (derived.length > 0) {
 			result = collapseEffortVariants(result, { families: derived });
