@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { Agent, CompactionCancelledError } from "@oh-my-pi/pi-agent-core";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -110,18 +110,28 @@ describe("AgentSession compaction cancellation source", () => {
 		expect(error.cause).toBeUndefined();
 	});
 
-	it("carries the user-interrupt reason from the real abort path", async () => {
+	it("waits for manual compaction cleanup before starting a replacement prompt", async () => {
 		const started = Promise.withResolvers<void>();
 		const gate = Promise.withResolvers<void>();
 		session = await createSession("park", started.resolve, gate.promise);
 
-		const compactPromise = session.compact();
+		const cancellation = cancellationFrom(session.compact());
 		await started.promise;
-		const abortPromise = session.abort({ reason: USER_INTERRUPT_LABEL });
-		gate.resolve();
-		await abortPromise;
+		const prompt = vi.spyOn(session, "prompt").mockResolvedValue(true);
+		const abortAndPrompt = session
+			.abort({ reason: USER_INTERRUPT_LABEL })
+			.then(() => session.prompt("replacement prompt"));
 
-		const error = await cancellationFrom(compactPromise);
+		await Promise.resolve();
+		expect(prompt).not.toHaveBeenCalled();
+		expect(session.isCompacting).toBe(true);
+
+		gate.resolve();
+		await abortAndPrompt;
+		expect(session.isCompacting).toBe(false);
+		expect(prompt).toHaveBeenCalledWith("replacement prompt");
+
+		const error = await cancellation;
 		expect(error.cause).toBe(USER_INTERRUPT_LABEL);
 	});
 });

@@ -320,6 +320,8 @@ export interface SessionMaintenanceHost {
 /** Owns compaction, pruning, shake, promotion, and automatic context maintenance. */
 export class SessionMaintenance {
 	#compactionAbortController: AbortController | undefined;
+	/** Resolves after an active manual compaction has reconnected the agent subscription. */
+	#manualCompactionCleanup: Promise<void> | undefined;
 	#autoCompactionAbortController: AbortController | undefined;
 	/**
 	 * Live tool-loop contexts parked after mid-turn maintenance hit a no-progress
@@ -674,8 +676,10 @@ export class SessionMaintenance {
 		let compactionCommitted = false;
 		let methodAttempted = false;
 		const compactionAbortController = retryController ?? new AbortController();
+		const manualCompactionCleanup = ownsCompactionController ? Promise.withResolvers<void>() : undefined;
 		if (ownsCompactionController) {
 			this.#compactionAbortController = compactionAbortController;
+			this.#manualCompactionCleanup = manualCompactionCleanup?.promise;
 		}
 		// A manual pass supersedes any background speculation; running both would
 		// double-bill the summarizer and race the commit.
@@ -1025,6 +1029,10 @@ export class SessionMaintenance {
 				// queues, so nothing else resumes them: re-drain now that the listener is back
 				// and `isCompacting` is false, or the queued turn hangs until the next prompt.
 				this.#host.drainStrandedQueuedMessages();
+				if (this.#manualCompactionCleanup === manualCompactionCleanup?.promise) {
+					this.#manualCompactionCleanup = undefined;
+				}
+				manualCompactionCleanup?.resolve();
 			}
 		}
 	}
@@ -1055,11 +1063,16 @@ export class SessionMaintenance {
 		}
 	}
 
-	/** Cancel in-progress context maintenance, preserving an optional source reason. */
-	abortCompaction(reason?: unknown): void {
+	/**
+	 * Cancel in-progress context maintenance and return the active manual pass's
+	 * cleanup barrier. The barrier resolves only after its agent subscription reconnects.
+	 */
+	abortCompaction(reason?: unknown): Promise<void> | undefined {
+		const manualCompactionCleanup = this.#manualCompactionCleanup;
 		this.#compactionAbortController?.abort(reason);
 		this.#autoCompactionAbortController?.abort(reason);
 		this.#host.abortHandoff();
+		return manualCompactionCleanup;
 	}
 
 	/** Cancel only automatic maintenance while preserving a manual compaction. */
