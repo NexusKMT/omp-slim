@@ -1326,14 +1326,11 @@ function escapeGlobMetachars(value: string): string {
 	return value.replace(/[*?[{]/g, "[$&]");
 }
 
-/**
- * Find a unique workspace entry whose trailing path matches a missing authored path.
- * Returns `null` for no match, ambiguity, timeout, or scan failure.
- */
-export async function findUniqueWorkspaceSuffix(
+async function findUniqueWorkspaceSuffixWithGlob(
 	rawPath: string,
 	cwd: string,
-	signal?: AbortSignal,
+	signal: AbortSignal | undefined,
+	globImpl: typeof glob,
 ): Promise<{ absolutePath: string; displayPath: string } | null> {
 	const normalized = rawPath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
 	if (!normalized) return null;
@@ -1343,13 +1340,14 @@ export async function findUniqueWorkspaceSuffix(
 
 	let matches: string[];
 	try {
-		const result = await glob({
+		const result = await globImpl({
 			pattern: `**/${escapeGlobMetachars(normalized)}`,
 			path: cwd,
 			hidden: true,
 			signal: combinedSignal,
 			timeoutMs: WORKSPACE_SUFFIX_TIMEOUT_MS,
 		});
+		if (signal?.aborted) throw new ToolAbortError();
 		matches = result.matches.map(match => match.path);
 	} catch {
 		if (signal?.aborted) throw new ToolAbortError();
@@ -1361,6 +1359,28 @@ export async function findUniqueWorkspaceSuffix(
 		absolutePath: path.resolve(cwd, matches[0]),
 		displayPath: matches[0],
 	};
+}
+
+/**
+ * Find a unique workspace entry whose trailing path matches a missing authored path.
+ * Returns `null` for no match, ambiguity, timeout, or scan failure.
+ */
+export async function findUniqueWorkspaceSuffix(
+	rawPath: string,
+	cwd: string,
+	signal?: AbortSignal,
+): Promise<{ absolutePath: string; displayPath: string } | null> {
+	return findUniqueWorkspaceSuffixWithGlob(rawPath, cwd, signal, glob);
+}
+
+/** Exercise the post-native cancellation boundary without a real filesystem walk. */
+export async function findUniqueWorkspaceSuffixWithGlobForTest(
+	rawPath: string,
+	cwd: string,
+	signal: AbortSignal | undefined,
+	globImpl: typeof glob,
+): Promise<{ absolutePath: string; displayPath: string } | null> {
+	return findUniqueWorkspaceSuffixWithGlob(rawPath, cwd, signal, globImpl);
 }
 
 // =============================================================================

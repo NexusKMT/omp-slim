@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
+import { FileType } from "@oh-my-pi/pi-natives";
 import { Settings } from "../../src/config/settings";
 import type { ToolSession } from "../../src/tools";
 import { GlobTool } from "../../src/tools/glob";
+import { findUniqueWorkspaceSuffixWithGlobForTest } from "../../src/tools/path-utils";
 import { ToolAbortError, ToolError } from "../../src/tools/tool-errors";
 
 function createSession(cwd = process.cwd()): ToolSession {
@@ -39,6 +41,41 @@ describe("GlobTool.execute", () => {
 		await expectRootSearchRejected(searchPath);
 	});
 
+	test("rejects a caller abort during preparation without launching a native scan", async () => {
+		const controller = new AbortController();
+		const statStarted = Promise.withResolvers<void>();
+		const releaseStat = Promise.withResolvers<void>();
+		const statSettled = Promise.withResolvers<void>();
+		let nativeStarted = false;
+		const tool = new GlobTool(createSession(), {
+			stat: async () => {
+				statStarted.resolve();
+				try {
+					await releaseStat.promise;
+					throw new Error("Released blocked stat");
+				} finally {
+					statSettled.resolve();
+				}
+			},
+			nativeGlob: async () => {
+				nativeStarted = true;
+				return { matches: [], totalMatches: 0 };
+			},
+		});
+		const execution = tool.execute("glob-preparation-abort", { path: "." }, controller.signal);
+
+		await statStarted.promise;
+		try {
+			controller.abort();
+			await expect(execution).rejects.toThrow("Aborted");
+			expect(nativeStarted).toBe(false);
+		} finally {
+			releaseStat.resolve();
+			await statSettled.promise;
+		}
+		expect(nativeStarted).toBe(false);
+	});
+
 	test("does not finish a timeout until the native scan has stopped", async () => {
 		const started = Promise.withResolvers<void>();
 		const timeoutObserved = Promise.withResolvers<void>();
@@ -47,12 +84,12 @@ describe("GlobTool.execute", () => {
 		const tool = new GlobTool(createSession(), {
 			timeoutMs: 100,
 			nativeGlob: async options => {
-				const nativeSignal = options.signal as AbortSignal | undefined;
-				if (!nativeSignal) {
+				if (!(options.signal instanceof AbortSignal)) {
 					started.resolve();
 					timeoutObserved.resolve();
 					throw new Error("Missing native cancellation signal");
 				}
+				const nativeSignal = options.signal;
 				nativeSignal.addEventListener("abort", () => timeoutObserved.resolve(), { once: true });
 				started.resolve();
 				await timeoutObserved.promise;
@@ -93,8 +130,8 @@ describe("GlobTool.execute", () => {
 		const tool = new GlobTool(createSession(), {
 			timeoutMs: 5000,
 			nativeGlob: async options => {
-				const nativeSignal = options.signal as AbortSignal | undefined;
-				if (!nativeSignal) throw new Error("Missing native cancellation signal");
+				if (!(options.signal instanceof AbortSignal)) throw new Error("Missing native cancellation signal");
+				const nativeSignal = options.signal;
 				const abortObserved = Promise.withResolvers<void>();
 				nativeSignal.addEventListener(
 					"abort",
@@ -134,5 +171,28 @@ describe("GlobTool.execute", () => {
 		release.resolve();
 		await expect(execution).rejects.toBeInstanceOf(ToolAbortError);
 		expect(settledCount).toBe(2);
+	});
+	test("suffix recovery rejects a caller abort after native completion", async () => {
+		const controller = new AbortController();
+		const nativeCompleted = Promise.withResolvers<void>();
+		const releaseResult = Promise.withResolvers<void>();
+		const execution = findUniqueWorkspaceSuffixWithGlobForTest(
+			"target.ts",
+			"/workspace",
+			controller.signal,
+			async () => {
+				nativeCompleted.resolve();
+				await releaseResult.promise;
+				return {
+					matches: [{ path: "nested/target.ts", fileType: FileType.File }],
+					totalMatches: 1,
+				};
+			},
+		);
+
+		await nativeCompleted.promise;
+		controller.abort();
+		releaseResult.resolve();
+		await expect(execution).rejects.toBeInstanceOf(ToolAbortError);
 	});
 });

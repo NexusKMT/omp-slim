@@ -96,6 +96,8 @@ export interface GlobToolOptions {
 	rootPathAlias?: boolean;
 	/** Native glob binding. Override only in tests. */
 	nativeGlob?: typeof natives.glob;
+	/** Filesystem stat used before native scans. Override only in tests. */
+	stat?: typeof fs.promises.stat;
 	/** Native and user-facing scan timeout. Override only in tests. */
 	timeoutMs?: number;
 }
@@ -104,6 +106,11 @@ interface GlobTarget {
 	searchPath: string;
 	globPattern: string;
 	hasGlob: boolean;
+}
+
+interface NativePreparedTarget {
+	target: GlobTarget;
+	result?: Array<{ path: string; mtime: number }>;
 }
 
 export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
@@ -144,6 +151,7 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 	readonly #customOps?: GlobOperations;
 	readonly #rootPathAlias: boolean;
 	readonly #nativeGlob: typeof natives.glob;
+	readonly #stat: typeof fs.promises.stat;
 	readonly #timeoutMs: number;
 
 	constructor(
@@ -153,6 +161,7 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 		this.#customOps = options?.operations;
 		this.#rootPathAlias = options?.rootPathAlias === true;
 		this.#nativeGlob = options?.nativeGlob ?? natives.glob;
+		this.#stat = options?.stat ?? fs.promises.stat;
 		this.#timeoutMs = options?.timeoutMs ?? DEFAULT_GLOB_TIMEOUT_MS;
 		if (!Number.isFinite(this.#timeoutMs) || this.#timeoutMs <= 0) {
 			throw new TypeError("Glob timeout must be a positive number");
@@ -169,11 +178,18 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 		const { path: pathInput, limit, hidden, gitignore } = params;
 
 		throwIfAborted(signal);
-		// Native scans receive the abort signal directly and must settle before
-		// execute returns. Custom operations have no signal API, so retain their
-		// immediate-abort wrapper.
-		const immediateAbortSignal = this.#customOps?.glob ? signal : undefined;
-		return untilAborted(immediateAbortSignal, async () => {
+		// Preparation still rejects immediately on caller abort. Once every
+		// filesystem stat has settled, detach this proxy before launching native
+		// scans so execute can drain each worker through the real caller signal.
+		// Custom operations have no signal API and keep immediate abort coverage
+		// for their entire execution.
+		const preparationController = !this.#customOps?.glob && signal ? new AbortController() : undefined;
+		const abortPreparation = (): void => preparationController?.abort();
+		if (preparationController && signal) {
+			signal.addEventListener("abort", abortPreparation, { once: true });
+		}
+		const immediateAbortSignal = this.#customOps?.glob ? signal : preparationController?.signal;
+		const execution = untilAborted(immediateAbortSignal, async () => {
 			const formatScopePath = (targetPath: string): string => formatPathRelativeToCwd(targetPath, this.session.cwd);
 			const scopedPaths = toPathList(pathInput);
 			const effectivePaths = scopedPaths.length > 0 ? scopedPaths : ["."];
@@ -391,6 +407,40 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 				return buildResult(merged);
 			}
 
+			const preparedTargets: NativePreparedTarget[] = await Promise.all(
+				targets.map(async target => {
+					throwIfAborted(signal);
+					let stat: fs.Stats;
+					try {
+						stat = await this.#stat(target.searchPath);
+					} catch (err) {
+						// ENAMETOOLONG can never name a real target; surface a clean
+						// "Path not found" instead of leaking the raw errno (issue #7597).
+						if (isEnoent(err) || hasFsCode(err, "ENAMETOOLONG")) {
+							if (isSingle) throw new ToolError(`Path not found: ${scopePath}`);
+							return { target, result: [] };
+						}
+						throw err;
+					}
+					if (!target.hasGlob && stat.isFile()) {
+						return {
+							target,
+							result: [{ path: formatScopePath(target.searchPath), mtime: stat.mtimeMs }],
+						};
+					}
+					if (!stat.isDirectory()) {
+						if (isSingle) throw new ToolError(`Path is not a directory: ${target.searchPath}`);
+						return { target, result: [] };
+					}
+					return { target };
+				}),
+			);
+			const nativeScanPending = preparedTargets.some(prepared => prepared.result === undefined);
+			if (nativeScanPending && preparationController && signal) {
+				signal.removeEventListener("abort", abortPreparation);
+			}
+			throwIfAborted(signal);
+
 			const onUpdateMatches: string[] = [];
 			const onUpdateMtimes: number[] = [];
 			const updateIntervalMs = 200;
@@ -425,27 +475,9 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 				};
 
 			let timedOut = false;
-			const runTarget = async (target: GlobTarget): Promise<Array<{ path: string; mtime: number }>> => {
-				throwIfAborted(signal);
-				let stat: fs.Stats;
-				try {
-					stat = await fs.promises.stat(target.searchPath);
-				} catch (err) {
-					// ENAMETOOLONG can never name a real target; surface a clean
-					// "Path not found" instead of leaking the raw errno (issue #7597).
-					if (isEnoent(err) || hasFsCode(err, "ENAMETOOLONG")) {
-						if (isSingle) throw new ToolError(`Path not found: ${scopePath}`);
-						return [];
-					}
-					throw err;
-				}
-				if (!target.hasGlob && stat.isFile()) {
-					return [{ path: formatScopePath(target.searchPath), mtime: stat.mtimeMs }];
-				}
-				if (!stat.isDirectory()) {
-					if (isSingle) throw new ToolError(`Path is not a directory: ${target.searchPath}`);
-					return [];
-				}
+			const runTarget = async (prepared: NativePreparedTarget): Promise<Array<{ path: string; mtime: number }>> => {
+				if (prepared.result) return prepared.result;
+				const { target } = prepared;
 				try {
 					const result = await this.#nativeGlob(
 						{
@@ -495,7 +527,7 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 				}
 			};
 
-			const settledTargets = await Promise.allSettled(targets.map(runTarget));
+			const settledTargets = await Promise.allSettled(preparedTargets.map(runTarget));
 			const perTarget = settledTargets.map(result => {
 				if (result.status === "rejected") throw result.reason;
 				return result.value;
@@ -534,6 +566,9 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 			}
 			merged.sort((a, b) => b.mtime - a.mtime);
 			return buildResult(merged.map(entry => entry.path));
+		});
+		return execution.finally(() => {
+			signal?.removeEventListener("abort", abortPreparation);
 		});
 	}
 }
