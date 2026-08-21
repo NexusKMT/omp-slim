@@ -16,6 +16,7 @@ import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import {
 	ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
 	CURSOR_VARIANT_COLLAPSE_TABLE,
+	collapseBuiltModelVariants,
 	collapseEffortVariants,
 	collapseEffortVariantsAcrossProviders,
 	DEVIN_VARIANT_COLLAPSE_TABLE,
@@ -868,6 +869,20 @@ describe("Cursor generic tier routing (issue #9237)", () => {
 		expect(collapseEffortVariantsAcrossProviders(ids.map(id => cursorMemberSpec(id))).map(model => model.id)).toEqual(
 			ids,
 		);
+	});
+
+	it("dedupes live tiers beside matching collapsed static rows", () => {
+		const raw = ["low", "high"].flatMap(tier => [
+			buildModel(cursorMemberSpec(`review-merged-9237-${tier}`)),
+			buildModel(cursorMemberSpec(`review-merged-9237-${tier}-fast`)),
+		]);
+		const staticModels = collapseBuiltModelVariants(raw);
+		const merged = collapseBuiltModelVariants([...staticModels, ...raw]);
+
+		expect(merged.map(model => model.id).sort()).toEqual(["review-merged-9237", "review-merged-9237-fast"]);
+		const standard = merged.find(model => model.id === "review-merged-9237");
+		if (!standard) throw new Error("Standard merged family did not collapse");
+		expect(resolveWireModelId(standard, Effort.High)).toBe("review-merged-9237-high");
 	});
 
 	it("retargets internal model references whose destination tier collapses", () => {

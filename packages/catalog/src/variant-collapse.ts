@@ -797,11 +797,32 @@ const CURSOR_TIER_BY_TOKEN: Readonly<Record<string, CursorTierToken | undefined>
 	max: "max",
 };
 
+/** Whether an existing logical row already routes every live member in `members`. */
+function collapsedCursorLogicalMatches<TSpec extends VariantSpecLike>(
+	spec: TSpec,
+	members: readonly CursorTierMember<TSpec>[],
+): boolean {
+	const routing = spec.thinking?.effortRouting;
+	if (!routing) return false;
+	for (const member of members) {
+		if (spec.requestModelId === member.spec.id) continue;
+		let matched = false;
+		for (const effort of VARIANT_ROUTING_KEYS) {
+			if (routing[effort] === member.spec.id) {
+				matched = true;
+				break;
+			}
+		}
+		if (!matched) return false;
+	}
+	return true;
+}
+
 /**
  * Derive safe Cursor per-effort families from live wire ids. A family is
- * intentionally left expanded when its base is also a live SKU, any member
- * already has a thinking ladder, member metadata differs, or a tier token is
- * also part of a product name.
+ * intentionally left expanded when its base is an independent live SKU, any
+ * member already has a thinking ladder, member metadata differs, or a tier
+ * token is also part of a product name.
  */
 function deriveCursorEffortFamilies<TSpec extends VariantSpecLike>(specs: readonly TSpec[]): EffortVariantFamily[] {
 	const byId = new Map<string, TSpec>();
@@ -832,9 +853,15 @@ function deriveCursorEffortFamilies<TSpec extends VariantSpecLike>(specs: readon
 		const first = group[0];
 		if (!first) continue;
 		const { baseId } = first;
+		const standardGroup = groups.get(`${baseId}\0standard`) ?? [];
+		const standardBase = byId.get(baseId);
+		const laneBase = byId.get(`${baseId}${first.fast ? "-fast" : ""}`);
+		const independentStandardBase =
+			standardBase !== undefined && !collapsedCursorLogicalMatches(standardBase, standardGroup);
+		const independentLaneBase = laneBase !== undefined && !collapsedCursorLogicalMatches(laneBase, group);
 		if (
-			byId.has(baseId) ||
-			byId.has(`${baseId}-fast`) ||
+			independentStandardBase ||
+			independentLaneBase ||
 			CURSOR_TIER_BASE_PATTERN.test(baseId) ||
 			CURSOR_THINKING_TOKEN_PATTERN.test(baseId) ||
 			candidateBases.has(`${baseId}-thinking`) ||
