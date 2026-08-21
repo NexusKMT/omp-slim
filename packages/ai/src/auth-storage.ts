@@ -4965,13 +4965,25 @@ export class AuthStorage {
 						// so if this branch only blocked the row (like the transient case), the
 						// definitive failure would never reach `#tryOAuthCredential`'s own
 						// disable logic and the row would be retried forever instead of torn down.
-						await this.#disableDefinitiveOAuthFailure(
+						const outcome = await this.#disableDefinitiveOAuthFailure(
 							provider,
 							credentialId,
 							candidate.selection.credential,
 							candidate.selection.index,
 							errorMsg,
 						);
+						if (outcome !== "disabled") {
+							// A peer rotated this row (or won the disable CAS) between our
+							// snapshot and the refresh, so the helper reloaded storage and left
+							// the row intact — it now holds a valid, freshly rotated credential.
+							// Re-sync the candidate onto it and leave it eligible so the final
+							// pass retries with the live token instead of stranding it (mirrors
+							// #tryOAuthCredential's peer-rotated re-resolve).
+							if (credentialId !== undefined) {
+								this.#syncOAuthSelectionFromStore(provider, candidate.selection, credentialId);
+							}
+							return;
+						}
 					} else if (credentialId !== undefined) {
 						const latestIndex = this.#getStoredCredentials(provider).findIndex(
 							entry => entry.id === credentialId,
