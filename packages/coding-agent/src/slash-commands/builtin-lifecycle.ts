@@ -144,12 +144,12 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 				try {
 					await runtime.session.compact(parsed.instructions, parsed.mode ? { mode: parsed.mode } : undefined);
 				} catch (err) {
-					// A user interrupt (RPC `abort`, ACP `session/cancel`) aborts the
-					// in-flight compaction, surfacing as CompactionCancelledError. The
-					// client already saw the interrupt it sent; emitting anything here
-					// would append an out-of-turn chunk, so stay silent — mirroring
-					// /handoff's USER_INTERRUPT_LABEL path.
-					if (err instanceof CompactionCancelledError) return;
+					// RPC `abort` and ACP `session/cancel` propagate their explicit
+					// USER_INTERRUPT_LABEL through the compaction abort signal. The client
+					// already saw the interrupt it sent; emitting anything here would
+					// append an out-of-turn chunk. Other cancellations (including an
+					// extension veto) remain visible.
+					if (err instanceof CompactionCancelledError && err.cause === USER_INTERRUPT_LABEL) return;
 					// Compaction precondition failures (no model, already compacted, too
 					// small) and provider errors propagate as plain Errors; surface them
 					// via runtime.output so they don't fail the ACP prompt turn.

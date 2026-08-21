@@ -3,6 +3,7 @@ import { CompactionCancelledError } from "@oh-my-pi/pi-agent-core/compaction";
 import type { CompactOptions } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import type { CompactMode } from "@oh-my-pi/pi-coding-agent/session/compact-modes";
+import { USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
 import {
 	ACP_BUILTIN_SLASH_COMMANDS,
 	executeAcpBuiltinSlashCommand,
@@ -95,7 +96,7 @@ describe("/compact dispatch (ACP)", () => {
 	it("stays silent when compaction is cancelled by a user interrupt", async () => {
 		const h = acpRuntime();
 		h.compact.mockImplementation(async () => {
-			throw new CompactionCancelledError();
+			throw new CompactionCancelledError(undefined, { cause: USER_INTERRUPT_LABEL });
 		});
 		const backgroundTasks: Promise<void>[] = [];
 		h.runtime.runCommandInBackground = task => {
@@ -106,6 +107,16 @@ describe("/compact dispatch (ACP)", () => {
 		expect(result).toEqual({ consumed: true });
 		await Promise.all(backgroundTasks);
 		expect(h.output).not.toHaveBeenCalled();
+	});
+
+	it("surfaces extension cancellation instead of treating it as a user interrupt", async () => {
+		const h = acpRuntime();
+		h.compact.mockImplementation(async () => {
+			throw new CompactionCancelledError();
+		});
+
+		await executeAcpBuiltinSlashCommand("/compact", h.runtime);
+		expect(h.output).toHaveBeenCalledWith("Compaction failed: Compaction cancelled");
 	});
 
 	it("surfaces other failures behind the Compaction failed prefix", async () => {
