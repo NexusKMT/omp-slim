@@ -5436,6 +5436,112 @@ describe("openai-codex streaming", () => {
 		expect(requestTurnStates).toEqual([null, "turn-state-1", "turn-state-1", null]);
 	});
 
+	it("isolates turn-state by credential, backend, model, and Responses Lite mode", async () => {
+		const tempDir = TempDir.createSync("@pi-codex-stream-");
+		setAgentDir(tempDir.path());
+		const firstModel: Model<"openai-codex-responses"> = {
+			...createCodexTestModel("https://chatgpt.com/backend-api"),
+			preferWebsockets: false,
+		};
+		const firstApiKey = createCodexTestToken("account-a");
+		const variants: Array<{
+			name: string;
+			model: Model<"openai-codex-responses">;
+			apiKey: string;
+			responsesLite: boolean;
+		}> = [
+			{
+				name: "credential",
+				model: firstModel,
+				apiKey: createCodexTestToken("account-b"),
+				responsesLite: false,
+			},
+			{
+				name: "backend",
+				model: { ...firstModel, baseUrl: "https://codex.example/backend-api" },
+				apiKey: firstApiKey,
+				responsesLite: false,
+			},
+			{
+				name: "model",
+				model: { ...firstModel, id: "gpt-5.4-codex", name: "GPT-5.4 Codex" },
+				apiKey: firstApiKey,
+				responsesLite: false,
+			},
+			{
+				name: "Responses Lite mode",
+				model: firstModel,
+				apiKey: firstApiKey,
+				responsesLite: true,
+			},
+		];
+
+		for (const [index, variant] of variants.entries()) {
+			const requestTurnStates: Array<string | null> = [];
+			let requestCount = 0;
+			const fetchMock = vi.fn(async (_input: string | URL, init?: RequestInit) => {
+				const headers = init?.headers instanceof Headers ? init.headers : new Headers(init?.headers);
+				requestTurnStates.push(headers.get("x-codex-turn-state"));
+				const sse =
+					requestCount === 0
+						? `${[
+								`data: ${JSON.stringify({ type: "response.output_item.added", item: { type: "function_call", id: "fc_identity", call_id: "call_identity", name: "read_file", arguments: "" } })}`,
+								`data: ${JSON.stringify({ type: "response.output_item.done", item: { type: "function_call", id: "fc_identity", call_id: "call_identity", name: "read_file", arguments: '{"path":"README.md"}' } })}`,
+								`data: ${JSON.stringify({ type: "response.completed", response: { status: "completed", usage: DEFAULT_USAGE } })}`,
+							].join("\n\n")}\n\n`
+						: createCompletedCodexSse("Done");
+				requestCount += 1;
+				const responseHeaders = new Headers({ "content-type": "text/event-stream" });
+				if (requestCount === 1) responseHeaders.set("x-codex-turn-state", "account-a-turn-state");
+				return new Response(sse, { status: 200, headers: responseHeaders });
+			});
+			const providerSessionState = new Map<string, ProviderSessionState>();
+			const sessionId = `turn-state-identity-${index}`;
+			const firstUser = { role: "user" as const, content: "Read the file", timestamp: Date.now() };
+			const first = await streamOpenAICodexResponses(
+				firstModel,
+				{ systemPrompt: ["You are a helpful assistant."], messages: [firstUser] },
+				{
+					apiKey: firstApiKey,
+					fetch: fetchMock as FetchImpl,
+					sessionId,
+					providerSessionState,
+					responsesLite: false,
+				},
+			).result();
+			const toolCall = first.content.find(
+				(c): c is Extract<(typeof first.content)[number], { type: "toolCall" }> => c.type === "toolCall",
+			);
+			await streamOpenAICodexResponses(
+				variant.model,
+				{
+					systemPrompt: ["You are a helpful assistant."],
+					messages: [
+						firstUser,
+						first,
+						{
+							role: "toolResult",
+							toolCallId: toolCall!.id,
+							toolName: toolCall!.name,
+							content: [{ type: "text", text: "file contents" }],
+							isError: false,
+							timestamp: Date.now(),
+						},
+					],
+				},
+				{
+					apiKey: variant.apiKey,
+					fetch: fetchMock as FetchImpl,
+					sessionId,
+					providerSessionState,
+					responsesLite: variant.responsesLite,
+				},
+			).result();
+
+			expect({ [variant.name]: requestTurnStates }).toEqual({ [variant.name]: [null, null] });
+		}
+	});
+
 	it("isolates standalone compaction from a live turn-state", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
 		setAgentDir(tempDir.path());

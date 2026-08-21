@@ -491,7 +491,7 @@ interface CodexMetadataSessionState {
 	turnStartedAtUnixMs?: number;
 	compactionOperationId?: string;
 	reuseTurnForNextRequest?: boolean;
-	turnState: CodexTurnStateCell;
+	turnStates: Map<string, CodexTurnStateCell>;
 }
 
 interface CodexCompatibilityIdentity {
@@ -544,7 +544,7 @@ function createCodexMetadataSessionState(sessionId: string): CodexMetadataSessio
 		sessionId,
 		threadId: crypto.randomUUID(),
 		windowId: crypto.randomUUID(),
-		turnState: {},
+		turnStates: new Map(),
 	};
 }
 
@@ -557,6 +557,18 @@ function getOrCreateCodexMetadataSessionState(
 	if (existing) return existing;
 	const created = createCodexMetadataSessionState(sessionId);
 	providerState.metadataSessions.set(sessionId, created);
+	return created;
+}
+
+function getOrCreateCodexTurnState(
+	session: CodexMetadataSessionState,
+	compatibilityKey: string | undefined,
+): CodexTurnStateCell {
+	if (!compatibilityKey) return {};
+	const existing = session.turnStates.get(compatibilityKey);
+	if (existing) return existing;
+	const created: CodexTurnStateCell = {};
+	session.turnStates.set(compatibilityKey, created);
 	return created;
 }
 
@@ -1456,12 +1468,13 @@ function createCodexRequestContext(
 	const metadataSessionId = transportSessionId ?? crypto.randomUUID();
 	const metadataSession = getOrCreateCodexMetadataSessionState(metadataSessionId, providerSessionState);
 	const compaction = options?.codexCompaction;
-	// Standalone compaction owns a throwaway turn. Pre-turn compaction starts
-	// the live turn that the next sampling request deliberately reuses.
-	const turnState = compaction?.phase === "standalone_turn" ? {} : metadataSession.turnState;
 	const requestKind: OpenAICodexRequestKind = compaction ? "compaction" : "turn";
 	const startNewTurn = resolveCodexStartNewTurn(metadataSession, requestKind, compaction, contextOptions.startNewTurn);
-	if (startNewTurn) turnState.value = undefined;
+	const standaloneCompaction = compaction?.phase === "standalone_turn";
+	if (startNewTurn && !standaloneCompaction) metadataSession.turnStates.clear();
+	// Standalone compaction owns a throwaway turn. Every live cell is isolated by
+	// the same credential/backend/model/Lite key as its transport session.
+	const turnState = standaloneCompaction ? {} : getOrCreateCodexTurnState(metadataSession, sessionKey);
 	const requestMetadata = createCodexRequestMetadata(metadataSession, requestKind, {
 		startNewTurn,
 		turnStartedAtUnixMs: compaction
@@ -3000,6 +3013,7 @@ export async function prewarmOpenAICodexResponses(
 		transportSessionId ?? crypto.randomUUID(),
 		providerSessionState,
 	);
+	const turnState = getOrCreateCodexTurnState(metadataSession, sessionKey);
 	const codexClientVersion = CODEX_CLIENT_VERSION;
 	const requestIdentity = createCodexCompatibilityIdentity(metadataSession);
 	const attestation = await getCodexAttestationHeader(accountId);
@@ -3013,7 +3027,7 @@ export async function prewarmOpenAICodexResponses(
 		promptCacheKey,
 		"websocket",
 		state,
-		metadataSession.turnState,
+		turnState,
 		responsesLite,
 		requestIdentity,
 		attestation,
@@ -3022,7 +3036,7 @@ export async function prewarmOpenAICodexResponses(
 		"prewarmCodex:establishWs",
 		getOrCreateCodexWebSocketConnection,
 		state,
-		metadataSession.turnState,
+		turnState,
 		toWebSocketUrl(url),
 		headers,
 		model.provider,
@@ -3181,8 +3195,17 @@ export function getOpenAICodexTransportDetails(
 	const state = getCodexWebSocketStateForPublicSession(model, options);
 	const providerSessionState = getCodexProviderSessionState(options?.providerSessionState);
 	const sessionId = normalizeOpenAIPromptCacheKey(options?.sessionId);
-	const hasTurnState =
-		sessionId !== undefined && providerSessionState?.metadataSessions.get(sessionId)?.turnState.value !== undefined;
+	let hasTurnState = false;
+	if (sessionId) {
+		const metadataSession = providerSessionState?.metadataSessions.get(sessionId);
+		if (metadataSession) {
+			for (const cell of metadataSession.turnStates.values()) {
+				if (cell.value === undefined) continue;
+				hasTurnState = true;
+				break;
+			}
+		}
+	}
 
 	return {
 		websocketPreferred,
