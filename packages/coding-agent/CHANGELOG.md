@@ -5,7 +5,6 @@
 ### Added
 
 - Added an opt-in image URL broker (`images.urls.enabled`) that publishes outgoing images through an ordered chain of backends instead of sending inline base64 to URL-fetching providers
-- Added an opt-in image URL broker (`images.urls.enabled`): outgoing images become short unguessable URLs instead of inline base64 for URL-fetching providers, via a selectable exposure — Cloudflare quick tunnel, ngrok, Tailscale Funnel, ssh reverse forward, direct serving, a custom upload command (e.g. `pasta -b -f {file}`), or any ShareX custom-uploader (`.sxcu`) config. The broker runs in the project-shared daemon so every omp process reuses one exposure and one URL per image, snapcompact frames render lazily only when a provider actually fetches them, and requests fall back to inline automatically when the exposure, an upload, or a provider fetch fails. Locally served links live for a limited window (`images.urls.ttlHours`, default 72h) measured from the last time a conversation sent them, are backed by the content-addressed session blob store on disk instead of memory, and survive restarts: resuming a conversation re-registers its images at the same URLs.
 
 ### Changed
 

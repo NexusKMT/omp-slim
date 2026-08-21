@@ -3149,7 +3149,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// URL-mirrored images: providers that fetch image URLs get a broker URL
 		// instead of inline base64. Decoration runs LAST among image transforms so
 		// the served bytes are exactly the bytes that would have shipped inline.
-		const blobBroker = createImageUrlServiceFromSettings(settings, sessionManager.getCwd());
+		const blobBroker = createImageUrlServiceFromSettings(settings, sessionManager.getCwd(), model =>
+			modelRegistry.getApiKey(model, providerSessionId),
+		);
 		blobBroker?.prewarm();
 		const snapcompactSystemPromptMode = settings.get("snapcompact.systemPrompt");
 		const snapcompactInline =
