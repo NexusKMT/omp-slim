@@ -94,6 +94,10 @@ export interface GlobToolOptions {
 	operations?: GlobOperations;
 	/** Remap slash-only paths to the session cwd before root-search validation. */
 	rootPathAlias?: boolean;
+	/** Native glob binding. Override only in tests. */
+	nativeGlob?: typeof natives.glob;
+	/** Native and user-facing scan timeout. Override only in tests. */
+	timeoutMs?: number;
 }
 
 interface GlobTarget {
@@ -139,6 +143,8 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 
 	readonly #customOps?: GlobOperations;
 	readonly #rootPathAlias: boolean;
+	readonly #nativeGlob: typeof natives.glob;
+	readonly #timeoutMs: number;
 
 	constructor(
 		private readonly session: ToolSession,
@@ -146,6 +152,11 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 	) {
 		this.#customOps = options?.operations;
 		this.#rootPathAlias = options?.rootPathAlias === true;
+		this.#nativeGlob = options?.nativeGlob ?? natives.glob;
+		this.#timeoutMs = options?.timeoutMs ?? DEFAULT_GLOB_TIMEOUT_MS;
+		if (!Number.isFinite(this.#timeoutMs) || this.#timeoutMs <= 0) {
+			throw new TypeError("Glob timeout must be a positive number");
+		}
 	}
 
 	async execute(
@@ -157,7 +168,12 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 	): Promise<AgentToolResult<GlobToolDetails>> {
 		const { path: pathInput, limit, hidden, gitignore } = params;
 
-		return untilAborted(signal, async () => {
+		throwIfAborted(signal);
+		// Native scans receive the abort signal directly and must settle before
+		// execute returns. Custom operations have no signal API, so retain their
+		// immediate-abort wrapper.
+		const immediateAbortSignal = this.#customOps?.glob ? signal : undefined;
+		return untilAborted(immediateAbortSignal, async () => {
 			const formatScopePath = (targetPath: string): string => formatPathRelativeToCwd(targetPath, this.session.cwd);
 			const scopedPaths = toPathList(pathInput);
 			const effectivePaths = scopedPaths.length > 0 ? scopedPaths : ["."];
@@ -269,7 +285,7 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 			const effectiveLimit = Math.min(MAX_LIMIT, Math.max(1, Math.floor(requestedLimit)));
 			const includeHidden = hidden ?? true;
 			const useGitignore = gitignore ?? true;
-			const timeoutMs = DEFAULT_GLOB_TIMEOUT_MS;
+			const timeoutMs = this.#timeoutMs;
 			const timeoutSignal = AbortSignal.timeout(timeoutMs);
 			const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 			const formatMatchPath = (matchPath: string, base: string, fileType?: natives.FileType): string => {
@@ -431,26 +447,25 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 					return [];
 				}
 				try {
-					const result = await untilAborted(combinedSignal, () =>
-						natives.glob(
-							{
-								pattern: target.globPattern,
-								path: target.searchPath,
-								hidden: includeHidden,
-								maxResults: effectiveLimit,
-								sortByMtime: true,
-								gitignore: useGitignore,
-								// parseFindPattern explicitly prepends "**/" when the user's
-								// pattern begins with a glob (so `*.ts` becomes `**/*.ts`).
-								// Anything that arrives here without "**/" was scoped to a
-								// single directory by the user (e.g. `dir/*`); disable the
-								// native auto-recursion so `dir/*` does not silently match
-								// `dir/sub/nested.ts`.
-								recursive: false,
-								signal: combinedSignal,
-							},
-							makeOnMatch(target.searchPath),
-						),
+					const result = await this.#nativeGlob(
+						{
+							pattern: target.globPattern,
+							path: target.searchPath,
+							hidden: includeHidden,
+							maxResults: effectiveLimit,
+							sortByMtime: true,
+							gitignore: useGitignore,
+							// parseFindPattern explicitly prepends "**/" when the user's
+							// pattern begins with a glob (so `*.ts` becomes `**/*.ts`).
+							// Anything that arrives here without "**/" was scoped to a
+							// single directory by the user (e.g. `dir/*`); disable the
+							// native auto-recursion so `dir/*` does not silently match
+							// `dir/sub/nested.ts`.
+							recursive: false,
+							signal: combinedSignal,
+							timeoutMs,
+						},
+						makeOnMatch(target.searchPath),
 					);
 					throwIfAborted(signal);
 					const out: Array<{ path: string; mtime: number }> = [];
@@ -463,8 +478,14 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 					}
 					return out;
 				} catch (error) {
-					if (error instanceof Error && error.name === "AbortError") {
-						if (timeoutSignal.aborted && !signal?.aborted) {
+					const nativeAbort =
+						error instanceof Error &&
+						(error.name === "AbortError" || error.name === "TimeoutError" || error.message.includes("Aborted:"));
+					if (nativeAbort) {
+						if (
+							!signal?.aborted &&
+							(timeoutSignal.aborted || (error instanceof Error && error.message.includes("Aborted: Timeout")))
+						) {
 							timedOut = true;
 							return [];
 						}
@@ -474,7 +495,11 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 				}
 			};
 
-			const perTarget = await Promise.all(targets.map(runTarget));
+			const settledTargets = await Promise.allSettled(targets.map(runTarget));
+			const perTarget = settledTargets.map(result => {
+				if (result.status === "rejected") throw result.reason;
+				return result.value;
+			});
 
 			if (timedOut) {
 				// Drain the partial matches accumulated during streaming and return them
