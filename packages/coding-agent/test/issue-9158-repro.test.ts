@@ -27,10 +27,9 @@ describe("issue #9158 — malformed worker IPC frame must not terminate the pare
 			'require("node:fs").writeSync(3, Buffer.from([2, 4, 0, 0, 0, 0xde, 0xad, 0xbe, 0xef])); process.exit(0);';
 		// Runs in a spawned `bun -e` parent: importing worker-client pulls in the
 		// postmortem module, which installs the global uncaughtException handler
-		// under test. A dynamic import is required — the module graph belongs to
-		// the child process, so a static import here cannot reach it.
+		// under test.
 		const wrapperScript = `
-			const { createWorkerSubprocess } = await import("@oh-my-pi/pi-coding-agent/subprocess/worker-client");
+			import { createWorkerSubprocess } from "@oh-my-pi/pi-coding-agent/subprocess/worker-client";
 			const worker = createWorkerSubprocess({
 				spawnCommand: { cmd: [process.execPath, "-e", ${JSON.stringify(childScript)}] },
 				env: {},
