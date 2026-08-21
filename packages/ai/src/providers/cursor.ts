@@ -5037,23 +5037,26 @@ function extractImages(content: (TextContent | ImageContent)[]) {
  * not exposed by the decoded `GetUsableModels` schema, so guessing them would
  * re-trigger 528384.
  */
-function resolveCursorWireModel(model: Model<"cursor-agent">): {
+function resolveCursorWireModel(model: Model<"cursor-agent">, requestModelId?: string): {
 	modelId: string;
 	parameters: RequestedModel_ModelParameterbytes[];
 } {
-	const wireModelId = model.requestModelId ?? model.id;
-	// Split a trailing effort tier (`-low`, `-high`, `-xhigh`, …) off the id and
-	// translate it only when the remaining base parses as an OpenAI model.
-	const idx = wireModelId.lastIndexOf("-");
-	const effort = idx > 0 ? wireModelId.slice(idx + 1) : "";
-	if (effort && (THINKING_EFFORTS as readonly string[]).includes(effort)) {
-		const base = wireModelId.slice(0, idx);
-		if (parseOpenAIModel(base) !== null) {
-			return {
-				modelId: base,
-				parameters: [create(RequestedModel_ModelParameterbytesSchema, { id: "reasoning", value: effort })],
-			};
-		}
+	const wireModelId = requestModelId ?? model.requestModelId ?? model.id;
+	// Cursor's fast lane follows the effort token (`-high-fast`), while the
+	// standard lane ends at it (`-high`). Preserve the lane in the base id.
+	const match = /^(.*)-(minimal|low|medium|high|xhigh|max)(-fast)?$/.exec(wireModelId);
+	const base = match?.[1];
+	const effort = match?.[2];
+	if (
+		base &&
+		effort &&
+		(THINKING_EFFORTS as readonly string[]).includes(effort) &&
+		parseOpenAIModel(base) !== null
+	) {
+		return {
+			modelId: `${base}${match[3] ?? ""}`,
+			parameters: [create(RequestedModel_ModelParameterbytesSchema, { id: "reasoning", value: effort })],
+		};
 	}
 	return { modelId: wireModelId, parameters: [] };
 }
@@ -5164,7 +5167,7 @@ export async function buildGrpcRequest(
 		turns,
 	});
 
-	const { modelId: wireModelId, parameters: wireParameters } = resolveCursorWireModel(model);
+	const { modelId: wireModelId, parameters: wireParameters } = resolveCursorWireModel(model, options?.wireModelId);
 	const cursorMaxMode = model.cursorMaxMode === true;
 	const modelDetails = create(ModelDetailsSchema, {
 		modelId: wireModelId,
