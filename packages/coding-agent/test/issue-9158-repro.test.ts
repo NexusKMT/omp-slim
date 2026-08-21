@@ -9,11 +9,13 @@
  * code 1, defeating the entire point of isolating worker failures in a subprocess.
  *
  * The fix teaches the postmortem `uncaughtException` handler to recognize that
- * specific Bun decode error (`isWorkerIpcDeserializeError`) and contain it to the
- * offending worker: log and continue instead of exiting. This test spawns a real
- * parent process (which installs the postmortem handler on import) whose worker
- * emits a bad frame, and pins that the parent SURVIVES and the failure still
- * reaches the worker's own error channel.
+ * specific Bun decode error (`isWorkerIpcDeserializeError`), keep the session
+ * alive, and fault every active advanced-IPC worker so its owning client rejects
+ * in-flight requests and recycles. This test spawns a real parent process (which
+ * installs the postmortem handler on import) whose worker emits a bad frame and
+ * then STAYS ALIVE — proving the malformed frame itself faults the worker's error
+ * channel rather than a coincidental clean exit — and pins that the parent
+ * survives.
  */
 import { describe, expect, it } from "bun:test";
 import * as path from "node:path";
@@ -22,9 +24,10 @@ describe("issue #9158 — malformed worker IPC frame must not terminate the pare
 	it("contains an advanced-serialization decode failure to the worker instead of exiting the session", async () => {
 		const repoRoot = path.resolve(import.meta.dir, "..");
 		// Bun advanced-IPC frame with an invalid structured-clone body, written
-		// raw to the IPC fd (3) — the same shape the issue reporter used.
+		// raw to the IPC fd (3), then the child blocks forever. Staying alive is
+		// the point: the malformed frame — not an exit — must fault the worker.
 		const childScript =
-			'require("node:fs").writeSync(3, Buffer.from([2, 4, 0, 0, 0, 0xde, 0xad, 0xbe, 0xef])); process.exit(0);';
+			'require("node:fs").writeSync(3, Buffer.from([2, 4, 0, 0, 0, 0xde, 0xad, 0xbe, 0xef])); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);';
 		// Runs in a spawned `bun -e` parent: importing worker-client pulls in the
 		// postmortem module, which installs the global uncaughtException handler
 		// under test.
@@ -34,15 +37,14 @@ describe("issue #9158 — malformed worker IPC frame must not terminate the pare
 				spawnCommand: { cmd: [process.execPath, "-e", ${JSON.stringify(childScript)}] },
 				env: {},
 				exitLabel: "malformed IPC child",
-				reportCleanExit: true,
 				unref: false,
 			});
 			const { promise: errored, resolve } = Promise.withResolvers();
 			worker.errors.add(resolve);
-			// Deterministic: the bad frame is contained, then the clean child exit
-			// (reportCleanExit) faults the worker's own error channel.
-			await errored;
-			process.stdout.write("SURVIVED_WITH_ERROR");
+			// The bad frame is contained and faults the worker's error channel even
+			// though the child never exits on its own.
+			const err = await errored;
+			process.stdout.write("FAULTED:" + err.message);
 		`;
 		const proc = Bun.spawn([process.execPath, "-e", wrapperScript], {
 			cwd: repoRoot,
@@ -52,9 +54,10 @@ describe("issue #9158 — malformed worker IPC frame must not terminate the pare
 		});
 		const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
 		// Before the fix the postmortem handler exited the parent with code 1 and
-		// no "SURVIVED" marker ever printed.
+		// no marker ever printed.
 		expect(exitCode).toBe(0);
-		expect(stdout).toBe("SURVIVED_WITH_ERROR");
+		expect(stdout).toContain("FAULTED:");
+		expect(stdout).toContain("worker sent a malformed IPC frame");
 	}, 20_000);
 
 	it("still faults on an unrelated TypeError with the same message but a real stack", async () => {
