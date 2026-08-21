@@ -710,9 +710,13 @@ async function switchToResumedProject(
  * failing that, the active project's `enabledModels`. A totally collapsed scope
  * gets one cache-aware discovery pass before session construction: otherwise an
  * all-discovery `--models` launch can select an unrelated static model before the
- * later background rebuild activates the requested scope. Re-run after a resume
- * switches projects so the destination project's settings-derived scope wins
- * over the launch directory's.
+ * later background rebuild activates the requested scope. The pass only helps
+ * providers already known to be discoverable (models.yml `discovery:`, runtime
+ * managers); a scope naming only extension-supplied models stays empty here
+ * because those providers register during `createAgentSession` — that case is
+ * covered by deferring to the SDK's `modelPattern` resolution in
+ * {@link buildSessionOptions}. Re-run after a resume switches projects so the
+ * destination project's settings-derived scope wins over the launch directory's.
  */
 export async function resolveScopedModels(
 	parsed: Args,
@@ -1121,6 +1125,17 @@ export async function buildSessionOptions(
 		// escape it — keep pinning the first scoped model there.
 		deferredDefaultRole = !options.model && Boolean(remembered) && !((parsed.models?.length ?? 0) > 0);
 		if (!options.model && !deferredDefaultRole) options.model = scopedModels[0].model;
+	} else if ((parsed.models?.length ?? 0) > 0 && !restoringSession) {
+		// A CLI `--models` scope that resolved to zero models at startup: its
+		// selectors name only models supplied by extension providers (or discovery)
+		// that register during createAgentSession, so nothing matched the
+		// pre-session catalog and `getDiscoverableProviders()` did not yet list the
+		// provider for resolveScopedModels' pre-refresh. Defer the choice to the
+		// SDK's post-extension resolution — the same `modelPattern` path a deferred
+		// `--model` uses — so the initial model is picked from the requested scope
+		// instead of an unrelated fallback. The fire-and-forget rebuild then
+		// activates the scoped list once discovery settles (issue #9220).
+		options.modelPattern = parsed.models;
 	}
 
 	if (parsed.noPrewalk && (parsed.prewalk || parsed.prewalkInto !== undefined)) {

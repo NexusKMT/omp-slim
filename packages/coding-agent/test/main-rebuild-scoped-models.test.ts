@@ -1,16 +1,21 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Api, Model } from "@oh-my-pi/pi-ai";
+import type { Api, AuthStorage, Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resolveModelScope } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
+	buildSessionOptions,
 	rebuildScopedModelsAfterDiscovery,
 	resolveScopedModels,
 	type ScopedModelSink,
 	toSessionScopedModels,
 } from "@oh-my-pi/pi-coding-agent/main";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { TempDir } from "@oh-my-pi/pi-utils";
+import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
 function model(id: string): Model<Api> {
 	return buildModel({
@@ -154,5 +159,53 @@ describe("resolveScopedModels", () => {
 
 		expect(registry.refreshCalls).toBe(1);
 		expect(scoped.map(entry => entry.model.id)).toEqual(["b"]);
+	});
+});
+
+describe("buildSessionOptions --models scope selection", () => {
+	let tempDir: TempDir;
+	let authStorage: AuthStorage;
+
+	beforeAll(async () => {
+		tempDir = await TempDir.create("@main-rebuild-scoped-models-");
+		authStorage = createInMemoryAuthStorage();
+	});
+
+	afterAll(async () => {
+		authStorage.close();
+		await tempDir.remove();
+	});
+
+	function registry(): ModelRegistry {
+		return new ModelRegistry(authStorage, tempDir.join("models.yml"));
+	}
+
+	it("defers a --models scope that resolved empty to the SDK modelPattern path", async () => {
+		const parsed = parseArgs(["--models", "extprov/model-x,extprov/model-y"]);
+
+		// Empty `scopedModels` mimics an all-extension scope: the provider is not
+		// registered until createAgentSession, so nothing matched at startup.
+		const options = await buildSessionOptions(parsed, [], SessionManager.inMemory(), registry(), Settings.isolated());
+
+		expect(options.model).toBeUndefined();
+		expect(options.modelPattern).toEqual(["extprov/model-x", "extprov/model-y"]);
+		expect(options.scopedModels).toBeUndefined();
+	});
+
+	it("pins the first scoped model and sets no deferred pattern when the scope resolved", async () => {
+		const parsed = parseArgs(["--models", "prov/a"]);
+		const scoped = await resolveModelScope(["prov/a"], { getAvailable: () => [model("a")] }, undefined);
+
+		const options = await buildSessionOptions(
+			parsed,
+			scoped,
+			SessionManager.inMemory(),
+			registry(),
+			Settings.isolated(),
+		);
+
+		expect(options.modelPattern).toBeUndefined();
+		expect(options.model?.id).toBe("a");
+		expect(options.scopedModels?.map(entry => entry.model.id)).toEqual(["a"]);
 	});
 });
