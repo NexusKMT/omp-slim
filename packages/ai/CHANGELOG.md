@@ -27,6 +27,7 @@
 - Fixed Google Cloud Code Assist and Antigravity rejecting MCP tool schemas with unsupported annotations (`x-mcp-header`, `deprecated`, `readOnly`, `writeOnly`, `$comment`).
 - Fixed Cursor provider issues with native file edit streaming (`editToolCall`) and ensuring always-apply system rules are properly preserved.
 - Fixed Cursor HTTP/2 requests ignoring standard proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`).
+- Fixed Cursor reasoning-sibling models (e.g. `gpt-5.4-mini-low`, `gpt-5.6-sol-xhigh`) failing with `resource_exhausted` (errorId 528384): the per-effort GPT slug is now split into its base model id plus a `{ id: "reasoning", value: <effort> }` request parameter, matching the official `cursor-agent` wire shape, instead of sending the sibling slug as the wire model id with no parameters ([#9164](https://github.com/can1357/oh-my-pi/issues/9164)).
 
 ## [17.4.0] - 2026-08-20
 
