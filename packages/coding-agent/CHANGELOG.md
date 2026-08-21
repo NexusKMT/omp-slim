@@ -15,6 +15,7 @@
 - Fixed status text retaining hidden DCS, PM, and APC payloads after escape-sequence sanitization.
 - Fixed extension load errors truncating explicitly excluded package import specifiers.
 - Fixed subagents crashing before their first turn when an extension contributed a tool or skill without a `description`; the context-breakdown token estimate now coalesces missing descriptions and system-prompt sections instead of passing `undefined` to the tokenizer ([#9331](https://github.com/can1357/oh-my-pi/issues/9331)).
+- Hidden custom tools (`hidden: true`) stay out of the parent session's active set and `/tools` unless `--tools` or an agent `tools:` list names them. They used to be always-included.
 
 ## [18.0.0] - 2026-08-22
 
