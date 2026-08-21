@@ -725,6 +725,9 @@ export class UiHelpers {
 		if (this.ctx.viewSession.isStreaming) {
 			for (const [toolCallId, component] of this.ctx.pendingTools) {
 				component.setArgsComplete(toolCallId);
+				if (this.ctx.eventController?.hasToolExecutionStarted(toolCallId)) {
+					component.setExecutionStarted(toolCallId);
+				}
 			}
 		} else {
 			for (const component of this.ctx.pendingTools.values()) {

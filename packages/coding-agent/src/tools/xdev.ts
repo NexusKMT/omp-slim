@@ -35,6 +35,7 @@ import { type Component, Container, Text } from "@oh-my-pi/pi-tui";
 import { parseStreamingJson } from "@oh-my-pi/pi-utils";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { XD_URL_PREFIX } from "../internal-urls/xd-protocol";
+import { parseMCPToolName } from "../mcp/tool-bridge";
 import type { Theme } from "../modes/theme/theme";
 import { truncateHeadBytes } from "../session/streaming-output";
 import { resolveToolTier, type ToolTier } from "./approval";
@@ -496,11 +497,8 @@ function resolveDeviceRenderer(
 /** Human label for a device write: mounted tool label, else `server/tool` for MCP names. */
 function displayDeviceLabel(name: string, mounted?: { label?: string }): string {
 	if (mounted?.label) return mounted.label;
-	if (name.startsWith("mcp__")) {
-		const rest = name.slice("mcp__".length);
-		const split = rest.indexOf("_");
-		if (split > 0) return `${rest.slice(0, split)}/${rest.slice(split + 1)}`;
-	}
+	const parsed = parseMCPToolName(name);
+	if (parsed) return `${parsed.serverName}/${parsed.toolName}`;
 	return name;
 }
 
@@ -529,11 +527,13 @@ function renderQueuedXdevCall(
 
 /**
  * Streaming-safe call preview for an `xd://` write. Until the write actually
- * executes (`argsComplete` / `tool_execution_start`), show a queued/planning
+ * executes (`executionStarted` / `tool_execution_start`), show a queued/planning
  * card so Grok-style think-after-toolcall stalls do not look like a hung
- * inner tool. Once execution starts, forward the decoded inner args to the
- * mounted tool's renderer (session instance first, then the static map).
- * Returns `undefined` (render nothing) when no renderer produces output.
+ * inner tool. `argsComplete` alone is not enough: exclusive writes can sit
+ * complete at `message_end` while an earlier call still runs. Once execution
+ * starts, forward the decoded inner args to the mounted tool's renderer
+ * (session instance first, then the static map). Returns `undefined` (render
+ * nothing) when no renderer produces output.
  */
 export function renderXdevCall(
 	name: string,
@@ -544,7 +544,7 @@ export function renderXdevCall(
 ): Component | undefined {
 	const mounted = resolveMounted?.(name);
 	const args = decodeInnerArgs(content);
-	if (!options.argsComplete) {
+	if (!options.executionStarted) {
 		return renderQueuedXdevCall(displayDeviceLabel(name, mounted), args, options, theme);
 	}
 	const renderer = resolveDeviceRenderer(name, mounted);

@@ -608,6 +608,33 @@ describe("withThinkingLoopGuard (thinking after toolcall)", () => {
 		const result = await guarded.result();
 		expect(result.stopReason).toBe("stop");
 	});
+
+	test("does not latch thinking off on text_start before any visible answer text", async () => {
+		const model = { api: "openai-responses", provider: "xai-oauth", id: "grok-4.6" } as unknown as Model<Api>;
+		const partial = { role: "assistant", content: [] } as unknown as AssistantMessage;
+
+		const guarded = withThinkingLoopGuard(model, undefined, () => {
+			const inner = new AssistantMessageEventStream();
+			const events: AssistantMessageEvent[] = [
+				{ type: "start", partial },
+				{ type: "toolcall_start", contentIndex: 0, partial },
+				{ type: "text_start", contentIndex: 1, partial },
+				{ type: "thinking_start", contentIndex: 2, partial },
+				{ type: "thinking_delta", contentIndex: 2, delta: nearDuplicateLoop(12), partial },
+				{ type: "thinking_end", contentIndex: 2, content: "", partial },
+				{ type: "done", reason: "stop", message: { ...partial, stopReason: "stop" } },
+			];
+			for (const event of events) inner.push(event);
+			inner.end({ ...partial, stopReason: "stop" });
+			return inner;
+		});
+
+		const result = await guarded.result();
+		expect(result.stopReason).toBe("error");
+		expect(result.content).toEqual([]);
+		expect(result.errorMessage).toContain(THINKING_LOOP_ERROR_MARKER);
+		expect(AIError.is(result.errorId, AIError.Flag.ThinkingLoop)).toBe(true);
+	});
 });
 
 describe("isLoopGuardedModel", () => {

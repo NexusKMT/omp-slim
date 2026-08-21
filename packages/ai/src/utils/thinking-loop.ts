@@ -407,10 +407,15 @@ export function guardThinkingLoopStream(
 					if (thinkingArmed) {
 						detail = thinkingDetector.flush();
 					}
-				} else if (event.type === "text_start" || event.type === "text_delta") {
-					thinkingArmed = false;
-					textStarted = true;
-					if (textArmed && event.type === "text_delta") {
+				} else if (event.type === "text_start") {
+					// Responses emits this as soon as an empty message item is added.
+					// No visible answer text yet — do not latch the thinking detector.
+				} else if (event.type === "text_delta") {
+					if (event.delta.length > 0) {
+						thinkingArmed = false;
+						textStarted = true;
+					}
+					if (textArmed) {
 						detail = textDetector.push(event.delta);
 					}
 				} else if (event.type === "toolcall_start" || event.type === "toolcall_delta") {

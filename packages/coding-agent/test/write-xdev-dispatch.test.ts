@@ -319,11 +319,20 @@ describe("read and write route xd:// device URLs", () => {
 		expect(queuedText).toContain("queued");
 		expect(queuedText).toContain("ast_edit");
 
+		// Args can be final at message_end while an earlier exclusive write still
+		// runs — keep the queued card until this call's tool_execution_start.
+		const argsCompleteOnly = writeToolRenderer.renderCall(
+			{ path: "xd://ast_edit", content },
+			{ ...options, argsComplete: true },
+			uiTheme,
+		);
+		expect(Bun.stripANSI(argsCompleteOnly!.render(80).join("\n"))).toContain("queued");
+
 		// Same payload after tool_execution_start: delegate to the inner renderer
 		// instead of throwing ReferenceError inside a generic Write frame.
 		const executing = writeToolRenderer.renderCall(
 			{ path: "xd://ast_edit", content },
-			{ ...options, argsComplete: true },
+			{ ...options, argsComplete: true, executionStarted: true },
 			uiTheme,
 		);
 		expect(executing).toBeDefined();
