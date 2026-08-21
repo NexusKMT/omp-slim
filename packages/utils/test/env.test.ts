@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
 	$envExact,
+	filterChildShellEnv,
 	filterProcessEnv,
 	getDbBusyTimeoutMs,
 	parseEnvFile,
@@ -165,6 +166,26 @@ describe("filterProcessEnv", () => {
 			"ProgramFiles(x86)": "C:\\Program Files (x86)",
 			"CommonProgramFiles(x86)": "C:\\Program Files (x86)\\Common Files",
 		});
+	});
+});
+
+describe("filterChildShellEnv", () => {
+	it("drops values Bun loaded from the default mode-local dotenv file", () => {
+		const cwd = path.dirname(writeTempEnv(""));
+		fs.writeFileSync(
+			path.join(cwd, ".env.development.local"),
+			"OMP_DOTENV_REPRO_MARKER=synthetic-mode-local-value\n",
+		);
+
+		const child = filterChildShellEnv(
+			{
+				OMP_DOTENV_REPRO_MARKER: "synthetic-mode-local-value",
+				UNCHANGED: "parent-value",
+			},
+			cwd,
+		);
+
+		expect(child).toEqual({ UNCHANGED: "parent-value" });
 	});
 });
 

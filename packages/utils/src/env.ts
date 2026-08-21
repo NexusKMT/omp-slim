@@ -105,11 +105,13 @@ export function filterChildShellEnv(
 	const nodeEnvName = `.env.${env.NODE_ENV || "development"}`;
 	const modeEnv = parseEnvFile(path.join(cwd, nodeEnvName));
 	const localEnv = parseEnvFile(path.join(cwd, ".env.local"));
-	const launchEnv = { ...projectEnv, ...modeEnv, ...localEnv };
+	const modeLocalEnv = parseEnvFile(path.join(cwd, `${nodeEnvName}.local`));
+	const launchEnv = { ...projectEnv, ...modeEnv, ...localEnv, ...modeLocalEnv };
 	const expandedLaunchEnv = {
 		...expandDotenvValues(projectEnv, result),
 		...expandDotenvValues(modeEnv, result),
 		...expandDotenvValues(localEnv, result),
+		...expandDotenvValues(modeLocalEnv, result),
 	};
 	for (const key in launchEnv) {
 		const launchValue = launchEnvValues?.get(key);
