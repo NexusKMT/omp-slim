@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed expanded compaction summaries claiming context grew from zero tokens when the provider did not report pre-compaction usage ([#9293](https://github.com/can1357/oh-my-pi/issues/9293)).
+
 ## [17.4.3] - 2026-08-21
 
 ### Fixed
