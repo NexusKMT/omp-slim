@@ -572,6 +572,21 @@ function getOrCreateCodexTurnState(
 	return created;
 }
 
+/**
+ * Drop every compatibility-scoped sticky-routing token when a fresh logical
+ * turn begins, mirroring codex-rs's per-turn `OnceLock`. Standalone compaction
+ * owns a throwaway cell, so it never disturbs the live turn's tokens. Runs on
+ * every entry path that opens a turn — the normal stream (`createCodexRequestContext`)
+ * and the raw compaction routes (`createOpenAICodexCompatibilityMetadata`).
+ */
+function clearCodexTurnStatesForNewTurn(
+	session: CodexMetadataSessionState,
+	startNewTurn: boolean,
+	compaction: CodexCompactionRequestContext | undefined,
+): void {
+	if (startNewTurn && compaction?.phase !== "standalone_turn") session.turnStates.clear();
+}
+
 function createCodexCompatibilityIdentity(session: CodexMetadataSessionState): CodexCompatibilityIdentity {
 	return {
 		installationId: getInstallId(),
@@ -717,6 +732,7 @@ export function createOpenAICodexCompatibilityMetadata(
 		options.compaction,
 		options.startNewTurn,
 	);
+	clearCodexTurnStatesForNewTurn(session, startNewTurn, options.compaction);
 	const metadata = createCodexRequestMetadata(session, options.requestKind, {
 		startNewTurn,
 		turnStartedAtUnixMs: options.turnStartedAtUnixMs ?? (startNewTurn || !session.turnId ? Date.now() : undefined),
@@ -1471,7 +1487,7 @@ function createCodexRequestContext(
 	const requestKind: OpenAICodexRequestKind = compaction ? "compaction" : "turn";
 	const startNewTurn = resolveCodexStartNewTurn(metadataSession, requestKind, compaction, contextOptions.startNewTurn);
 	const standaloneCompaction = compaction?.phase === "standalone_turn";
-	if (startNewTurn && !standaloneCompaction) metadataSession.turnStates.clear();
+	clearCodexTurnStatesForNewTurn(metadataSession, startNewTurn, compaction);
 	// Standalone compaction owns a throwaway turn. Every live cell is isolated by
 	// the same credential/backend/model/Lite key as its transport session.
 	const turnState = standaloneCompaction ? {} : getOrCreateCodexTurnState(metadataSession, sessionKey);

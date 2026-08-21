@@ -3,6 +3,7 @@ import { scheduler } from "node:timers/promises";
 import { streamSimple } from "@oh-my-pi/pi-ai";
 import {
 	buildTransformedCodexRequestBody,
+	createOpenAICodexCompatibilityMetadata,
 	getOpenAICodexTransportDetails,
 	getOpenAICodexWebSocketDebugStats,
 	prewarmOpenAICodexResponses,
@@ -5623,6 +5624,87 @@ describe("openai-codex streaming", () => {
 		).result();
 
 		expect(requestTurnStates).toEqual([null, null, "live-turn-state"]);
+	});
+
+	it("drops stale turn-state when direct pre-turn compaction opens the next turn", async () => {
+		const tempDir = TempDir.createSync("@pi-codex-stream-");
+		setAgentDir(tempDir.path());
+		const requestTurnStates: Array<string | null> = [];
+		let requestCount = 0;
+		const fetchMock = vi.fn(async (_input: string | URL, init?: RequestInit) => {
+			const headers = init?.headers instanceof Headers ? init.headers : new Headers(init?.headers);
+			requestTurnStates.push(headers.get("x-codex-turn-state"));
+			const sse =
+				requestCount === 0
+					? `${[
+							`data: ${JSON.stringify({ type: "response.output_item.added", item: { type: "function_call", id: "fc_live", call_id: "call_live", name: "read_file", arguments: "" } })}`,
+							`data: ${JSON.stringify({ type: "response.output_item.done", item: { type: "function_call", id: "fc_live", call_id: "call_live", name: "read_file", arguments: '{"path":"README.md"}' } })}`,
+							`data: ${JSON.stringify({ type: "response.completed", response: { status: "completed", usage: DEFAULT_USAGE } })}`,
+						].join("\n\n")}\n\n`
+					: createCompletedCodexSse("Done");
+			requestCount += 1;
+			const responseHeaders = new Headers({ "content-type": "text/event-stream" });
+			if (requestCount === 1) responseHeaders.set("x-codex-turn-state", "stale-turn-state");
+			return new Response(sse, { status: 200, headers: responseHeaders });
+		});
+		const model = { ...createCodexTestModel("https://chatgpt.com/backend-api"), preferWebsockets: false };
+		const providerSessionState = new Map<string, ProviderSessionState>();
+		const sessionId = "direct-pre-turn-compaction-session";
+		const options = {
+			apiKey: createCodexTestToken(),
+			fetch: fetchMock as FetchImpl,
+			sessionId,
+			providerSessionState,
+		};
+		const firstUser = { role: "user" as const, content: "Read the file", timestamp: Date.now() };
+		const first = await streamOpenAICodexResponses(
+			model,
+			{ systemPrompt: ["You are a helpful assistant."], messages: [firstUser] },
+			options,
+		).result();
+		const toolCall = first.content.find(
+			(c): c is Extract<(typeof first.content)[number], { type: "toolCall" }> => c.type === "toolCall",
+		);
+		// Direct `/responses/compact` compaction reuses the compatibility helper
+		// instead of the stream request-context path.
+		const compaction: CodexCompactionRequestContext = {
+			operationId: "direct-pre-turn-operation",
+			trigger: "auto",
+			reason: "context_limit",
+			implementation: "responses_compact",
+			phase: "pre_turn",
+			strategy: "memento",
+		};
+		createOpenAICodexCompatibilityMetadata({
+			sessionId,
+			providerSessionState,
+			requestKind: "compaction",
+			compaction,
+		});
+		resetOpenAICodexHistoryAfterCompaction({ providerSessionState, sessionId, compaction });
+		// The post-compaction sampling turn reuses the compaction turn; it must not
+		// replay the previous turn's sticky token.
+		await streamOpenAICodexResponses(
+			model,
+			{
+				systemPrompt: ["You are a helpful assistant."],
+				messages: [
+					firstUser,
+					first,
+					{
+						role: "toolResult",
+						toolCallId: toolCall!.id,
+						toolName: toolCall!.name,
+						content: [{ type: "text", text: "file contents" }],
+						isError: false,
+						timestamp: Date.now(),
+					},
+				],
+			},
+			options,
+		).result();
+
+		expect(requestTurnStates).toEqual([null, null]);
 	});
 
 	it("captures x-codex-turn-state from response.metadata event headers", async () => {
