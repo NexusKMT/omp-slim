@@ -55,7 +55,7 @@
 - `/retry` and `/handoff` now work over ACP, so editor clients (Zed) list them and can run them instead of sending the text to the model.
 ### Fixed
 
-- Fixed a crash (`Error: Failed to measure JavaScript string`) that killed read-only subagents (`scout`, restricted-tool custom agents) at their first prompt when an extension registered tools with ArkType parameters. Tool proxying no longer strips callable schemas, and token accounting tolerates unserializable schemas.
+- Fixed read-only subagents (`scout`, restricted-tool custom agents) crashing before their first prompt when extensions register callable tool schemas.
 
 ## [17.4.0] - 2026-08-20
 

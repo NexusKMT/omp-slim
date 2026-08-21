@@ -56,17 +56,16 @@ describe("estimateToolSchemaTokens", () => {
 		// subagent at first prompt. The proxied schema must keep counting as
 		// its wire JSON Schema, identical to the pre-converted equivalent.
 		const schema = bindCapableSchema();
+		const unwrapped = { name: "ext", description: "ext tool", parameters: schema };
 		const wrapper: Record<string, unknown> = {};
-		applyToolProxy({ name: "ext", description: "ext tool", parameters: schema }, wrapper);
+		applyToolProxy(unwrapped, wrapper);
 		const proxied = wrapper as { name: string; description: string; parameters: unknown };
-		const estimate = estimateToolSchemaTokens([proxied as never], tokenizer);
-		expect(estimate).toBe(
-			estimateToolSchemaTokens(
-				[{ name: "ext", description: "ext tool", parameters: arkToWireSchema(schema as never) } as never],
-				tokenizer,
-			),
+		// The proxied tool must keep counting exactly like the unwrapped tool:
+		// old code fed `undefined` into the tokenizer here and crashed.
+		expect(estimateToolSchemaTokens([proxied as never], tokenizer)).toBe(
+			estimateToolSchemaTokens([unwrapped as never], tokenizer),
 		);
-		expect(estimate).toBeGreaterThan(0);
+		expect(estimateToolSchemaTokens([proxied as never], tokenizer)).toBeGreaterThan(0);
 	});
 
 	it("runs the full non-message breakdown on a proxied extension tool", () => {
@@ -80,15 +79,15 @@ describe("estimateToolSchemaTokens", () => {
 		expect(breakdown.toolsTokens).toBeGreaterThan(0);
 	});
 
-	it("skips a parameters value that stringifies to undefined instead of crashing", () => {
+	it("skips a parameters value that stringifies to undefined, counting exactly name + description", () => {
 		// A plain function is neither an arktype schema nor JSON-serializable:
-		// the independent unserializable-schema fallback must skip it and still
-		// count the tool's own strings.
+		// the independent unserializable-schema fallback must skip it while the
+		// tool's own strings still contribute their exact token share.
 		const estimate = estimateToolSchemaTokens(
 			[{ name: "odd", description: "odd tool", parameters: function bareSchema() {} } as never],
 			tokenizer,
 		);
-		expect(estimate).toBeGreaterThan(0);
+		expect(estimate).toBe(estimateToolSchemaTokens([{ name: "odd", description: "odd tool" } as never], tokenizer));
 	});
 
 	it("skips non-string name/description fragments", () => {
