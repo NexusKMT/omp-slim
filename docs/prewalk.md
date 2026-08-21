@@ -39,7 +39,7 @@ At startup, OMP resolves the target with the normal model-role and model-matchin
 
 ## Handoff trigger
 
-An armed prewalk injects a planning nudge. When the `todo` tool is active, the handoff stays gated until the agent has successfully created or updated the todo list. OMP then switches models after the first completed `edit` or `write` call.
+An armed prewalk injects a planning nudge. When the `todo` tool is active, any successful `todo` call—including the read-only `view` operation—opens the handoff gate. OMP then switches models after the first completed `edit` or `write` call.
 
 Calls to other tools do not trigger the handoff. A read-only `xd://` device request routed through `write`, such as LSP navigation, also does not count; only device operations classified as workspace writes or execution count.
 
