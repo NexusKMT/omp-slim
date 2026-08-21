@@ -6,6 +6,7 @@
 import * as path from "node:path";
 import { type Component, replaceTabs, Spacer, Text } from "@oh-my-pi/pi-tui";
 import { getMCPConfigPath, getProjectDir } from "@oh-my-pi/pi-utils";
+import { clearCache as clearFsCache } from "../../capability/fs";
 import type { SourceMeta } from "../../capability/types";
 import { expandEnvVarsDeep } from "../../discovery/helpers";
 import {
@@ -2077,6 +2078,9 @@ export class MCPCommandController {
 		// removed/disabled servers cannot leave stale `/server:prompt` entries;
 		// newly loaded prompts repopulate them through the manager callback.
 		this.ctx.session.setMCPPromptCommands([]);
+		// External edits to mcp.json (not via writeMCPConfigFile) otherwise
+		// keep stale env/command after reload.
+		clearFsCache();
 
 		// Rediscover and connect, mirroring startup's discovery filters.
 		const result = await this.ctx.mcpManager.discoverAndConnect({
