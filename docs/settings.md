@@ -692,7 +692,7 @@ For a custom status line, set `statusLine.preset: custom` and configure `statusL
 | `doubleEscapeAction`   | enum    | `tree`          | `branch`, `tree`, `none`.                                                                               |
 | `autoResume`           | boolean | `false`         | Auto-resume the most recent session in the cwd.                                                         |
 | `plan.enabled`         | boolean | `true`          | Enable plan mode.                                                                                       |
-| `plan.defaultOnStartup` | boolean | `false`         | Start each new session in plan mode when plan mode is enabled.                                          |
+| `plan.defaultOnStartup` | boolean | `false`         | Start each fresh interactive session in plan mode when plan mode is enabled. Print/JSON (`--print`) mode ignores this and prints a note; use `--plan-yolo` for a headless plan flow. |
 | `ask.timeout`          | number  | `0`             | Seconds before an `ask` prompt times out; `0` = no timeout. (Legacy ms values are migrated to seconds.) |
 | `ask.notify`           | enum    | `on`            | `on`, `off`.                                                                                            |
 
