@@ -1272,6 +1272,31 @@ export function collapseEffortVariants<TSpec extends VariantSpecLike>(
 }
 
 /**
+ * Re-key model-to-model configuration after collapse removes a referenced
+ * member id. Qualified targets keep their provider; bare targets remain bare.
+ */
+function retargetCollapsedModelReferences<TSpec extends VariantSpecLike>(specs: TSpec[]): void {
+	for (let index = 0; index < specs.length; index++) {
+		const spec = specs[index];
+		if (!spec) continue;
+		const contextPromotionTarget = resolveCollapsedModelReference(spec.contextPromotionTarget, spec.provider);
+		const compactionModel = resolveCollapsedModelReference(spec.compactionModel, spec.provider);
+		if (contextPromotionTarget === spec.contextPromotionTarget && compactionModel === spec.compactionModel) continue;
+		specs[index] = { ...spec, contextPromotionTarget, compactionModel };
+	}
+}
+
+function resolveCollapsedModelReference(target: string | undefined, currentProvider: Provider): string | undefined {
+	if (target === undefined) return undefined;
+	const separator = target.indexOf("/");
+	const provider = separator >= 0 ? target.slice(0, separator) : currentProvider;
+	const modelId = separator >= 0 ? target.slice(separator + 1) : target;
+	const alias = resolveRegisteredVariantAlias(provider, modelId.trim().toLowerCase());
+	if (alias === undefined) return target;
+	return separator >= 0 ? `${provider}/${alias}` : alias;
+}
+
+/**
  * Collapse a full mixed-provider list: per provider, the hand table, Cursor's
  * conservative live effort-sibling rule, and the automatic `X`/`X-thinking`
  * pair rule. Used by the catalog generator; the runtime equivalent lives at
@@ -1305,6 +1330,7 @@ export function collapseEffortVariantsAcrossProviders<TSpec extends VariantSpecL
 		registerCollapsedVariantAliases(provider, result);
 		out.push(...result);
 	}
+	retargetCollapsedModelReferences(out);
 	return out;
 }
 

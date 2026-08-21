@@ -869,6 +869,23 @@ describe("Cursor generic tier routing (issue #9237)", () => {
 			ids,
 		);
 	});
+
+	it("retargets internal model references whose destination tier collapses", () => {
+		const sourceOverrides = {
+			contextPromotionTarget: "cursor/review-promotion-target-low",
+			compactionModel: "review-promotion-target-high",
+		};
+		const collapsed = collapseEffortVariantsAcrossProviders([
+			cursorMemberSpec("review-promotion-target-low"),
+			cursorMemberSpec("review-promotion-target-high"),
+			cursorMemberSpec("review-promotion-source-none", sourceOverrides),
+			cursorMemberSpec("review-promotion-source-high", sourceOverrides),
+		]);
+		const source = collapsed.find(model => model.id === "review-promotion-source");
+
+		expect(source?.contextPromotionTarget).toBe("cursor/review-promotion-target");
+		expect(source?.compactionModel).toBe("review-promotion-target");
+	});
 });
 
 describe("variant aliases", () => {
