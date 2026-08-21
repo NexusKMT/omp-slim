@@ -97,6 +97,10 @@ function decodeRunRequest(frame: Buffer): AgentRunRequest {
 	return clientMessage.message.value;
 }
 
+function isAgentRunRequest(payload: unknown): payload is AgentRunRequest {
+	return payload !== null && typeof payload === "object" && "$typeName" in payload;
+}
+
 async function startServer(): Promise<string> {
 	server = http2.createServer();
 	server.on("session", session => {
@@ -233,6 +237,40 @@ describe("Cursor discovered effort wire fallback", () => {
 
 		expect(result.stopReason).toBe("error");
 		expect(requests).toHaveLength(1);
+	});
+
+	it("does not retry when onPayload replaced the normalized effort model", async () => {
+		responses = [{ kind: "error", code: "not_found", message: "hook model unavailable" }];
+		const baseUrl = await startServer();
+		let hookCalls = 0;
+		const stream = streamCursor(makeModel(baseUrl), context, {
+			apiKey: "test-token",
+			sessionId: crypto.randomUUID(),
+			wireModelId: "gpt-5.6-sol-medium",
+			onPayload: payload => {
+				hookCalls++;
+				if (!isAgentRunRequest(payload)) throw new Error("expected Cursor AgentRunRequest payload");
+				return {
+					...payload,
+					requestedModel: payload.requestedModel
+						? { ...payload.requestedModel, modelId: "hook-selected-model" }
+						: undefined,
+					modelDetails: payload.modelDetails
+						? { ...payload.modelDetails, modelId: "hook-selected-model" }
+						: undefined,
+				};
+			},
+		});
+		for await (const _event of stream) {
+			// drain to completion
+		}
+		const result = await stream.result();
+
+		expect(result.stopReason).toBe("error");
+		expect(hookCalls).toBe(1);
+		expect(requests).toHaveLength(1);
+		expect(requests[0].requestedModel?.modelId).toBe("hook-selected-model");
+		expect(requests[0].modelDetails?.modelId).toBe("hook-selected-model");
 	});
 
 	it("attempts the discovered sibling at most once", async () => {

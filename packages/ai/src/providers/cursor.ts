@@ -357,6 +357,11 @@ interface CursorGrpcRequest {
 	conversationState: ConversationStateStructure;
 }
 
+interface CursorTransportRequest extends CursorGrpcRequest {
+	/** Exact discovery id eligible for a retry because the normalized effort payload was serialized unchanged. */
+	fallbackWireModelId?: string;
+}
+
 const CONNECT_END_STREAM_FLAG = 0b00000010;
 
 interface CursorLogEntry {
@@ -645,6 +650,7 @@ function streamCursorWithWireMode(
 		let baseConversationId: string | undefined;
 		let conversationId: string | undefined;
 		let usageState: UsageState | undefined;
+		let serializedFallbackWireModelId: string | undefined;
 		try {
 			const apiKey = options?.apiKey;
 			if (!apiKey) {
@@ -656,7 +662,7 @@ function streamCursorWithWireMode(
 			const blobStore = conversationBlobStores.get(conversationId) ?? new Map<string, Uint8Array>();
 			conversationBlobStores.set(conversationId, blobStore);
 			const cachedState = conversationStateCache.get(conversationId);
-			const { requestBytes, conversationState } = await buildGrpcRequestForWireMode(
+			const builtRequest = await buildGrpcRequestForWireMode(
 				model,
 				context,
 				options,
@@ -667,6 +673,8 @@ function streamCursorWithWireMode(
 				},
 				wireMode,
 			);
+			const { requestBytes, conversationState } = builtRequest;
+			serializedFallbackWireModelId = builtRequest.fallbackWireModelId;
 			conversationStateCache.set(conversationId, conversationState);
 			const requestContextTools = buildMcpToolDefinitions(context.tools);
 			const requestContextRules = buildCursorRequestContextRules(context.systemPrompt);
@@ -919,16 +927,12 @@ function streamCursorWithWireMode(
 			});
 			stream.end();
 		} catch (error) {
-			const discoveredWireModelId = options?.wireModelId ?? model.requestModelId ?? model.id;
-			const normalizedWireModel = resolveCursorWireModel(model, options?.wireModelId, "normalized");
 			const fallbackWireModelId =
 				wireMode === "normalized" &&
 				!sawServerMessage &&
 				error instanceof Error &&
-				CURSOR_MODEL_NOT_FOUND_PATTERN.test(error.message) &&
-				normalizedWireModel.parameters.length > 0 &&
-				normalizedWireModel.modelId !== discoveredWireModelId
-					? discoveredWireModelId
+				CURSOR_MODEL_NOT_FOUND_PATTERN.test(error.message)
+					? serializedFallbackWireModelId
 					: undefined;
 			if (fallbackWireModelId !== undefined) {
 				if (heartbeatTimer) {
@@ -5133,7 +5137,7 @@ async function buildGrpcRequestForWireMode(
 	options: CursorOptions | undefined,
 	state: CursorRequestState,
 	wireMode: CursorWireMode,
-): Promise<CursorGrpcRequest> {
+): Promise<CursorTransportRequest> {
 	const blobStore = state.blobStore;
 
 	const systemPromptIds = buildCursorSystemPromptJsons(context.systemPrompt).map(json =>
@@ -5264,6 +5268,21 @@ async function buildGrpcRequestForWireMode(
 	const replacementRequest = await options?.onPayload?.(runRequest, model);
 	if (replacementRequest !== undefined) runRequest = replacementRequest as typeof runRequest;
 
+	const discoveredWireModelId = options?.wireModelId ?? model.requestModelId ?? model.id;
+	const serializedParameters = runRequest.requestedModel?.parameters;
+	const normalizedEffortPayloadSerialized =
+		wireMode === "normalized" &&
+		wireParameters.length > 0 &&
+		wireModelId !== discoveredWireModelId &&
+		runRequest.requestedModel?.modelId === wireModelId &&
+		runRequest.modelDetails?.modelId === wireModelId &&
+		serializedParameters?.length === wireParameters.length &&
+		serializedParameters.every((parameter, index) => {
+			const expected = wireParameters[index];
+			return expected !== undefined && parameter.id === expected.id && parameter.value === expected.value;
+		});
+	const fallbackWireModelId = normalizedEffortPayloadSerialized ? discoveredWireModelId : undefined;
+
 	const clientMessage = create(AgentClientMessageSchema, {
 		message: { case: "runRequest", value: runRequest },
 	});
@@ -5282,7 +5301,7 @@ async function buildGrpcRequestForWireMode(
 		detail: detail || undefined,
 	});
 
-	return { requestBytes, blobStore, conversationState };
+	return { requestBytes, blobStore, conversationState, fallbackWireModelId };
 }
 
 /** Builds the normalized Cursor Run request used by transport callers and request inspection hooks. */
