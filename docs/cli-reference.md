@@ -11,10 +11,10 @@ routes to the default [`launch`](#launch-the-default-command) command and treats
 the arguments as the initial prompt. So `omp "fix the build"` launches a session
 with that message, while `omp models` runs the `models` subcommand.
 
-Every command and flag is discoverable at runtime:
+Runtime help is also available:
 
-- `omp --help` lists all subcommands.
-- `omp <command> --help` prints that command's flags and examples.
+- `omp --help` lists user-facing subcommands and common launch flags.
+- `omp <command> --help` prints that command's public flags and examples.
 
 This page is the consolidated reference for the shared **launch surface** (the
 flags accepted by `omp` / `omp launch`) and every top-level **subcommand**.
