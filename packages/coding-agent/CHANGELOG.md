@@ -53,6 +53,9 @@
 - Fixed prompt guidance and descriptions for Task tools and SSH usage.
 - ACP editor clients that support elicitation forms (Zed) can now use `ask`, so the agent can pose single-choice, multi-select, and free-text questions inline instead of guessing.
 - `/retry` and `/handoff` now work over ACP, so editor clients (Zed) list them and can run them instead of sending the text to the model.
+### Fixed
+
+- Fixed every read-only subagent (e.g. `scout`, restricted-tool custom agents) crashing at first prompt with `Error: Failed to measure JavaScript string` when an extension registers tools whose `parameters` is a bind-capable callable schema (an ArkType `Type` from the extension's own bundled arktype). `applyToolProxy` bound the schema, stripping its `toJsonSchema`/`assert` surface, so `toolWireSchema` returned the bare bound function, `JSON.stringify` yielded `undefined`, and the poisoned fragment list crashed the native tokenizer inside pre-prompt context accounting. Callable schemas now pass through the tool proxy unbound, and `estimateToolSchemaTokens` skips non-string fragments so token accounting can never take down a session on an exotic schema.
 
 ## [17.4.0] - 2026-08-20
 
