@@ -1583,6 +1583,10 @@ export class MCPCommandController {
 		this.ctx.mcpTestEscapeHandlers.add(handleEscape);
 
 		let connection: MCPServerConnection | undefined;
+		// The grace window only applies once the "(esc to cancel)" hint is on
+		// screen; a pre-hint failure must release Esc immediately so it is not
+		// swallowed for a prompt the user never saw.
+		let hintShown = false;
 		try {
 			const found = await this.#resolveServerForAuth(name);
 
@@ -1604,6 +1608,7 @@ export class MCPCommandController {
 			this.#showMessage(
 				["", theme.fg("muted", `Testing connection to "${name}"... (esc to cancel)`), ""].join("\n"),
 			);
+			hintShown = true;
 
 			// Resolve auth config if needed
 			let resolvedConfig: MCPServerConfig;
@@ -1666,10 +1671,14 @@ export class MCPCommandController {
 			this.ctx.showError(`Failed to connect to "${name}": ${errorMsg}${helpText}`);
 		} finally {
 			if (this.ctx.mcpTestEscapeHandlers.has(handleEscape)) {
-				const timer = setTimeout(() => {
+				if (hintShown) {
+					const timer = setTimeout(() => {
+						this.ctx.mcpTestEscapeHandlers.delete(handleEscape);
+					}, MCP_TEST_ESCAPE_GRACE_MS);
+					timer.unref();
+				} else {
 					this.ctx.mcpTestEscapeHandlers.delete(handleEscape);
-				}, MCP_TEST_ESCAPE_GRACE_MS);
-				timer.unref();
+				}
 			}
 			if (connection) {
 				// Best-effort: don't block UI on cleanup.

@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as mcpClient from "@oh-my-pi/pi-coding-agent/mcp/client";
+import * as mcpConfigWriter from "@oh-my-pi/pi-coding-agent/mcp/config-writer";
 import { MCPCommandController } from "@oh-my-pi/pi-coding-agent/modes/controllers/mcp-command-controller";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { getConfigRootDir, getProjectDir, removeWithRetries, setAgentDir, setProjectDir } from "@oh-my-pi/pi-utils";
@@ -159,5 +160,35 @@ describe("interactive /mcp test", () => {
 		const pending = controller.handle("/mcp test github");
 		expect(mcpTestEscapeHandlers).toHaveLength(1);
 		await pending;
+	});
+
+	it("releases Esc immediately when lookup fails before the hint is shown", async () => {
+		vi.spyOn(mcpConfigWriter, "readMCPConfigFile").mockRejectedValue(new Error("EACCES: config unreadable"));
+		const connectToServer = vi.spyOn(mcpClient, "connectToServer");
+		const showError = vi.fn();
+		const mcpTestEscapeHandlers = new Set<() => void>();
+		const controller = new MCPCommandController({
+			mcpTestEscapeHandlers,
+			chatContainer: { addChild: vi.fn() },
+			present: vi.fn(),
+			presentCommandOutput: vi.fn(),
+			ui: { requestRender: vi.fn() },
+			editor: {},
+			showError,
+			showStatus: vi.fn(),
+			session: { refreshMCPTools: vi.fn() },
+			mcpManager: {
+				getServerConfig: vi.fn(() => undefined),
+				getSource: vi.fn(() => undefined),
+			},
+		} as never);
+
+		await controller.handle("/mcp test github");
+
+		// The "(esc to cancel)" hint never rendered, so no grace window applies:
+		// Esc must be free again immediately instead of being swallowed for 5s.
+		expect(mcpTestEscapeHandlers).toHaveLength(0);
+		expect(connectToServer).not.toHaveBeenCalled();
+		expect(showError).toHaveBeenCalled();
 	});
 });
