@@ -1,9 +1,11 @@
 // Regression (#9246): the cursor transport hard-pinned every request to
 // `model.requestModelId` (the collapsed `-none` off tier), so thinking-effort
 // selection never reached the wire. `mapOptionsForApi` now resolves the effort
-// to a routed wire id and `buildGrpcRequest` sends `options.wireModelId` on both
-// `requestedModel` and `modelDetails`, keeping the logical id only as the
-// display id. buildGrpcRequest is exercised directly (the transport is HTTP/2)
+// to a routed wire id; `buildGrpcRequest` splits an OpenAI effort suffix off
+// `options.wireModelId` into a `reasoning` parameter (suffixed sibling ids
+// trigger Cursor's 528384) and sends the base id on both `requestedModel` and
+// `modelDetails`, keeping the logical id only as the display id.
+// buildGrpcRequest is exercised directly (the transport is HTTP/2)
 // and the serialized run request is decoded back from the wire bytes.
 import { describe, expect, it } from "bun:test";
 import { buildGrpcRequest } from "@oh-my-pi/pi-ai/providers/cursor";
@@ -70,8 +72,11 @@ function captureStreamPayload(reasoning: Effort): Promise<AgentRunRequest> {
 describe("cursor effort routing", () => {
 	it("routes stream reasoning through to the Cursor payload", async () => {
 		const run = await captureStreamPayload(Effort.Medium);
-		expect(run.requestedModel?.modelId).toBe("gpt-5.6-terra-medium");
-		expect(run.modelDetails?.modelId).toBe("gpt-5.6-terra-medium");
+		expect(run.requestedModel?.modelId).toBe("gpt-5.6-terra");
+		expect(run.requestedModel?.parameters).toEqual([
+			expect.objectContaining({ id: "reasoning", value: "medium" }),
+		]);
+		expect(run.modelDetails?.modelId).toBe("gpt-5.6-terra");
 	});
 	it("sends the effort-routed wire id, not the collapsed off tier", async () => {
 		const { requestBytes } = await buildGrpcRequest(
@@ -81,9 +86,11 @@ describe("cursor effort routing", () => {
 			{ conversationId: "conv-1", blobStore: new Map() },
 		);
 		const run = decodeRunRequest(requestBytes).value;
-		expect(run.requestedModel.modelId).toBe("gpt-5.6-terra-medium");
-		expect(run.modelDetails.modelId).toBe("gpt-5.6-terra-medium");
-		// Logical id stays as the display id for local attribution.
+		expect(run.requestedModel.modelId).toBe("gpt-5.6-terra");
+		expect(run.modelDetails.modelId).toBe("gpt-5.6-terra");
+		expect(run.requestedModel.parameters).toEqual([expect.objectContaining({ id: "reasoning", value: "medium" })]);
+		
+// Logical id stays as the display id for local attribution.
 		expect(run.modelDetails.displayModelId).toBe("gpt-5.6-terra");
 	});
 
