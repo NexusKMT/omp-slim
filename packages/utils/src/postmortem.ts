@@ -147,6 +147,26 @@ export function isIpcSendEpipe(err: Error): boolean {
 }
 
 /**
+ * Detect Bun's advanced-serialization (structured-clone) IPC decode failure.
+ *
+ * When a worker subprocess spawned with `serialization: "advanced"` sends a
+ * malformed or truncated frame, Bun raises the decode failure as a
+ * process-level `uncaughtException` in the *parent* rather than routing it to
+ * the channel's `ipc()` callback (oven-sh/bun#37287). The error is a bare
+ * `TypeError: Unable to deserialize data.` with no `code`, `syscall`, or stack.
+ *
+ * Every advanced-serialization channel in this process is an optional worker
+ * subsystem (TTS, STT, tiny-title, mnemopi embeddings, JS eval), so one
+ * worker's bad frame must fault only that worker — via its own `onExit`/error
+ * path — never tear down the whole session. Callers log-and-continue instead of
+ * taking the fatal path. Mirrors {@link classifyBrokenPipe} for the send side
+ * (#2997, #9158).
+ */
+export function isWorkerIpcDeserializeError(err: unknown): boolean {
+	return err instanceof TypeError && err.message === "Unable to deserialize data.";
+}
+
+/**
  * Treat unhandled stdout EPIPE rejections as a graceful peer disconnect.
  *
  * Stdio protocol servers call this for their process lifetime so a closed
@@ -281,6 +301,17 @@ if (isMainThread) {
 		.on("uncaughtException", async err => {
 			if (isExpectedCleanupError(err)) {
 				logger.warn("Ignoring expected cleanup exception", { err });
+				return;
+			}
+			// A malformed advanced-serialization frame from a worker subprocess
+			// surfaces here as a process-level uncaughtException (oven-sh/bun#37287)
+			// rather than in the channel's ipc() callback. It is a worker-local
+			// fault on the subprocess-isolation boundary, so contain it to that
+			// worker: log and continue, letting the owning client detect the dead
+			// worker via its own onExit/error path instead of exiting the whole
+			// session. Mirrors the ipc-send EPIPE containment below (#9158, #2997).
+			if (isWorkerIpcDeserializeError(err)) {
+				logger.warn("Ignoring malformed worker IPC frame; optional subsystem will self-recover", { err });
 				return;
 			}
 			await exitAfterFatal("Uncaught Exception", "Uncaught exception", err, Reason.UNCAUGHT_EXCEPTION);
