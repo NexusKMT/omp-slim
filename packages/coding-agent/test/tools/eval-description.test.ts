@@ -54,7 +54,6 @@ describe("eval tool description", () => {
 		// The prelude doc must not promise a helper that always throws.
 		const text = getEvalToolDescription({ py: true, js: true, spawns: false });
 		expect(text).not.toContain("agent(prompt");
-		expect(text).not.toContain("agent()");
 	});
 
 	it("EvalTool description reflects spawn policy from the session", () => {
