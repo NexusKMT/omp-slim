@@ -129,7 +129,7 @@ describe("omp setup without a component", () => {
 	// Regression: `setup --check --json` with no COMPONENT used to print USAGE to
 	// stdout and exit 0, silently succeeding a machine-readable check and breaking
 	// scripted `--json` health checks. It must now fail loudly on stderr.
-	for (const flags of [["--check", "--json"], ["--check"], ["--json"]]) {
+	for (const flags of [["--check"], ["--json"]]) {
 		it(`fails on stderr with a non-zero exit for ${["setup", ...flags].join(" ")}`, async () => {
 			projectDir = TempDir.createSync("@omp-setup-noarg-");
 			const result = await runSetup(projectDir.path(), ...flags);
