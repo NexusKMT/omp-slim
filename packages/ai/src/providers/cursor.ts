@@ -618,7 +618,11 @@ function streamCursorWithWireMode(
 		let h2Settled = false;
 		let sawTurnEnded = false;
 		let endStreamError: Error | null = null;
-		let sawServerMessage = false;
+		// Blocks the discovered-id retry once the turn produced observable output or
+		// ran a side effect (streamed content/tool call, exec bridge, permission
+		// reply). Pure keepalive heartbeats never set it, so a `not_found` that
+		// arrives after a heartbeat but before any real work still falls back.
+		let sawProgressOrSideEffect = false;
 		// Reachable from the catch: a stream that dies mid-turn must still close
 		// and pair the blocks it left open, and `state` itself is scoped to the
 		// try below.
@@ -815,10 +819,14 @@ function streamCursorWithWireMode(
 
 					try {
 						const serverMessage = fromBinary(AgentServerMessageSchema, messageBytes);
-						sawServerMessage = true;
-						const isTurnEnded =
-							serverMessage.message.case === "interactionUpdate" &&
-							serverMessage.message.value.message?.case === "turnEnded";
+						const interaction =
+							serverMessage.message.case === "interactionUpdate" ? serverMessage.message.value : undefined;
+						const interactionCase = interaction?.message?.case;
+						// A heartbeat is a pure keepalive `processInteractionUpdate` ignores;
+						// every other frame is progress or a side effect that must block the
+						// discovered-id retry.
+						if (interactionCase !== "heartbeat") sawProgressOrSideEffect = true;
+						const isTurnEnded = interactionCase === "turnEnded";
 						// Dispatch is fire-and-forget so the socket keeps draining while a
 						// handler runs, but the promise is tracked: `done` must not be
 						// pushed while an exec handler is still resolving, or the Agent
@@ -929,7 +937,7 @@ function streamCursorWithWireMode(
 		} catch (error) {
 			const fallbackWireModelId =
 				wireMode === "normalized" &&
-				!sawServerMessage &&
+				!sawProgressOrSideEffect &&
 				error instanceof Error &&
 				CURSOR_MODEL_NOT_FOUND_PATTERN.test(error.message)
 					? serializedFallbackWireModelId

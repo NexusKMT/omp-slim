@@ -8,6 +8,7 @@ import {
 	type AgentRunRequest,
 	AgentServerMessageSchema,
 	ExecServerMessageSchema,
+	HeartbeatUpdateSchema,
 	InteractionUpdateSchema,
 	ReadArgsSchema,
 	TextDeltaUpdateSchema,
@@ -19,7 +20,7 @@ import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 const CONNECT_END_STREAM_FLAG = 0b00000010;
 
 type Response =
-	| { kind: "error"; code: string; message: string; partialText?: string }
+	| { kind: "error"; code: string; message: string; partialText?: string; heartbeat?: boolean }
 	| { kind: "success"; text: string }
 	| { kind: "exec-success" };
 
@@ -59,6 +60,21 @@ function turnEndedFrame(): Buffer {
 				message: {
 					case: "turnEnded",
 					value: create(TurnEndedUpdateSchema, {}),
+				},
+			}),
+		},
+	});
+	return frameConnectMessage(toBinary(AgentServerMessageSchema, message));
+}
+
+function heartbeatFrame(): Buffer {
+	const message = create(AgentServerMessageSchema, {
+		message: {
+			case: "interactionUpdate",
+			value: create(InteractionUpdateSchema, {
+				message: {
+					case: "heartbeat",
+					value: create(HeartbeatUpdateSchema, {}),
 				},
 			}),
 		},
@@ -136,7 +152,8 @@ async function startServer(): Promise<string> {
 				stream.end(Buffer.concat([execReadRequestFrame(), turnEndedFrame()]));
 				return;
 			}
-			const frames = response.partialText ? [textDeltaFrame(response.partialText)] : [];
+			const frames = response.heartbeat ? [heartbeatFrame()] : [];
+			if (response.partialText) frames.push(textDeltaFrame(response.partialText));
 			frames.push(connectErrorFrame(response.code, response.message));
 			stream.end(Buffer.concat(frames));
 		};
@@ -224,6 +241,19 @@ describe("Cursor discovered effort wire fallback", () => {
 		expect(requests[1].requestedModel?.modelId).toBe("gpt-5.6-sol-medium");
 		expect(requests[1].requestedModel?.parameters).toEqual([]);
 		expect(requests[1].modelDetails?.modelId).toBe("gpt-5.6-sol-medium");
+	});
+
+	it("still retries when a heartbeat precedes the not_found", async () => {
+		responses = [
+			{ kind: "error", code: "not_found", message: "Error", heartbeat: true },
+			{ kind: "success", text: "OK" },
+		];
+		const baseUrl = await startServer();
+		const { result } = await runStream(baseUrl);
+
+		expect(result.stopReason).toBe("stop");
+		expect(requests).toHaveLength(2);
+		expect(requests[1].requestedModel?.modelId).toBe("gpt-5.6-sol-medium");
 	});
 
 	it.each([
