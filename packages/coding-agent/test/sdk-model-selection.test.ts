@@ -253,6 +253,57 @@ describe("createAgentSession deferred model pattern resolution", () => {
 		}
 	});
 
+	test("rehydrates credential-scoped caches after credentials change", async () => {
+		const authStorage = createInMemoryAuthStorage();
+		authStoragesToClose.push(authStorage);
+		const provider = "opencode-go";
+		const baseUrl = "https://opencode.ai/zen/go/v1";
+		const cacheDbPath = path.join(tempDir, "models.db");
+		const firstModel = buildModel({
+			id: "first-credential-model",
+			name: "First Credential Model",
+			api: "openai-responses",
+			provider,
+			baseUrl,
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128_000,
+			maxTokens: 16_384,
+		});
+		authStorage.setRuntimeApiKey(provider, "first-key");
+		writeModelCache(
+			resolveModelCacheProviderId(provider, { apiKey: "first-key" }),
+			Date.now(),
+			[firstModel],
+			true,
+			"",
+			cacheDbPath,
+		);
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"));
+
+		await modelRegistry.hydrateCredentialScopedModelCaches();
+		expect(modelRegistry.find(provider, firstModel.id)).toBeDefined();
+
+		const secondModel = buildModel({
+			...firstModel,
+			id: "second-credential-model",
+			name: "Second Credential Model",
+		});
+		authStorage.setRuntimeApiKey(provider, "second-key");
+		writeModelCache(
+			resolveModelCacheProviderId(provider, { apiKey: "second-key" }),
+			Date.now(),
+			[secondModel],
+			true,
+			"",
+			cacheDbPath,
+		);
+
+		await modelRegistry.hydrateCredentialScopedModelCaches();
+		expect(modelRegistry.find(provider, secondModel.id)).toBeDefined();
+	});
+
 	test("does not silently fallback when explicit modelPattern is unresolved", async () => {
 		const { session, modelFallbackMessage } = await createAgentSession(
 			buildSessionOptions("missing-provider/missing-model"),

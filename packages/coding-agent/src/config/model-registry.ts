@@ -295,7 +295,7 @@ export class ModelRegistry {
 	 * The synchronous constructor cannot resolve credentials, so session startup
 	 * awaits this local-only, best-effort pass before validating model selectors.
 	 */
-	hydrateCredentialScopedModelCaches(): Promise<void> {
+	async hydrateCredentialScopedModelCaches(): Promise<void> {
 		if (!this.#credentialScopedCacheHydration) {
 			const providerIds = new Set<string>();
 			for (const providerId of STARTUP_MODEL_CACHE_PROVIDER_IDS) {
@@ -307,7 +307,14 @@ export class ModelRegistry {
 				});
 			});
 		}
-		return this.#credentialScopedCacheHydration;
+		const hydration = this.#credentialScopedCacheHydration;
+		try {
+			await hydration;
+		} finally {
+			if (this.#credentialScopedCacheHydration === hydration) {
+				this.#credentialScopedCacheHydration = undefined;
+			}
+		}
 	}
 
 	/**
