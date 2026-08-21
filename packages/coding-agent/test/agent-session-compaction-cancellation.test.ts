@@ -134,4 +134,34 @@ describe("AgentSession compaction cancellation source", () => {
 		const error = await cancellation;
 		expect(error.cause).toBe(USER_INTERRUPT_LABEL);
 	});
+
+	it("blocks an ordinary prompt until manual compaction cleanup resolves", async () => {
+		const started = Promise.withResolvers<void>();
+		const gate = Promise.withResolvers<void>();
+		session = await createSession("park", started.resolve, gate.promise);
+
+		// The turn dispatch seam: prompt() must not reach it while compaction holds
+		// the agent subscription disconnected.
+		const agentPrompt = vi.spyOn(session.agent, "prompt").mockImplementation(async () => {});
+
+		const compaction = session.compact();
+		await started.promise;
+
+		let promptSettled = false;
+		const promptPromise = session.prompt("normal prompt").then(result => {
+			promptSettled = true;
+			return result;
+		});
+
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(session.isCompacting).toBe(true);
+		expect(agentPrompt).not.toHaveBeenCalled();
+		expect(promptSettled).toBe(false);
+
+		gate.resolve();
+		await compaction;
+		await promptPromise;
+		expect(agentPrompt).toHaveBeenCalledTimes(1);
+	});
 });
