@@ -87,6 +87,7 @@ import { AgentsHubComponent } from "../components/agents-hub";
 import { AssistantMessageComponent } from "../components/assistant-message";
 import { CopySelectorComponent } from "../components/copy-selector";
 import { ExtensionDashboard } from "../components/extensions";
+import type { LiveToolRecord } from "../components/extensions/inspector-model";
 import { HistorySearchComponent } from "../components/history-search";
 import { LoginDialogComponent } from "../components/login-dialog";
 import { LogoutAccountSelectorComponent } from "../components/logout-account-selector";
@@ -108,6 +109,22 @@ import type { SessionObserverRegistry } from "../session-observer-registry";
 import { buildCopyTargets } from "../utils/copy-targets";
 
 const MANUAL_LOGIN_PROMPT = "Paste the authorization code (or full redirect URL), then press Enter:";
+
+function liveToolRecordFromSession(
+	session: InteractiveModeContext["session"],
+	name: string,
+): LiveToolRecord | undefined {
+	const tool = session.getToolByName(name);
+	if (!tool) return undefined;
+	return {
+		name: tool.name,
+		label: tool.label,
+		description: tool.description,
+		parameters: tool.parameters,
+		hidden: tool.hidden,
+		loadMode: tool.loadMode,
+	};
+}
 
 export class SelectorController {
 	constructor(private ctx: InteractiveModeContext) {}
@@ -372,7 +389,24 @@ export class SelectorController {
 	 * Replaces /status with a unified view of all providers and extensions.
 	 */
 	async showExtensionsDashboard(): Promise<void> {
-		const dashboard = await ExtensionDashboard.create(getProjectDir(), this.ctx.settings, this.ctx.ui.terminal.rows);
+		const dashboard = await ExtensionDashboard.create({
+			cwd: getProjectDir(),
+			settings: this.ctx.settings,
+			terminalHeight: this.ctx.ui.terminal.rows,
+			mcpManager: this.ctx.mcpManager,
+			eventBus: this.ctx.eventBus,
+			toolSource: {
+				getLiveTool: name => liveToolRecordFromSession(this.ctx.session, name),
+				listLiveTools: () => {
+					const tools: LiveToolRecord[] = [];
+					for (const info of this.ctx.session.getAllToolInfos()) {
+						const live = liveToolRecordFromSession(this.ctx.session, info.name);
+						if (live) tools.push(live);
+					}
+					return tools;
+				},
+			},
+		});
 		// Fullscreen dashboard on the alternate screen (the /settings idiom): the
 		// overlay borrows the terminal's alt buffer and enables mouse tracking for
 		// its lifetime, leaving the transcript untouched underneath.
@@ -384,6 +418,7 @@ export class SelectorController {
 			fullscreen: true,
 		});
 		dashboard.onClose = () => {
+			dashboard.dispose();
 			overlay.hide();
 			this.focusActiveEditorArea();
 			this.ctx.ui.requestRender();
