@@ -717,9 +717,7 @@ provider:
 
 exa:
   enabled: true
-  enableSearch: true
-  enableResearcher: false
-  enableWebsets: false
+  searchDelayMs: 1000
 
 searxng:
   endpoint: https://search.example.com
