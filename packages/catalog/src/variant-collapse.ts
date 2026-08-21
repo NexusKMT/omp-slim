@@ -1302,6 +1302,7 @@ export function collapseEffortVariantsAcrossProviders<TSpec extends VariantSpecL
 		if (derived.length > 0) {
 			result = collapseEffortVariants(result, { families: derived });
 		}
+		registerCollapsedVariantAliases(provider, result);
 		out.push(...result);
 	}
 	return out;
@@ -1327,10 +1328,13 @@ interface VariantAliasIndex {
 	/** lowercased retired id → replacement model id. */
 	forward: Map<string, string>;
 	/** replacement model id → retired ids that resolve to it. */
-	reverse: Map<string, readonly string[]>;
-	/** Collapsed logical ids declared by the table. */
+	reverse: Map<string, string[]>;
+	/** Collapsed logical ids declared by the table or observed at runtime. */
 	familyIds: Set<string>;
 }
+
+const dynamicAliasIndexes = new Map<string, VariantAliasIndex>();
+const VARIANT_ROUTING_KEYS: readonly (Effort | "off")[] = ["off", ...THINKING_EFFORTS];
 
 const kAliasIndex = Symbol("variant-collapse.aliasIndex");
 
@@ -1338,72 +1342,111 @@ interface TableWithAliasIndex extends VariantCollapseTable {
 	[kAliasIndex]?: VariantAliasIndex;
 }
 
+function createAliasIndex(): VariantAliasIndex {
+	return {
+		forward: new Map<string, string>(),
+		reverse: new Map<string, string[]>(),
+		familyIds: new Set<string>(),
+	};
+}
+
+function addVariantAlias(index: VariantAliasIndex, from: string, to: string): boolean {
+	if (from === to || index.forward.has(from.toLowerCase())) return false;
+	index.forward.set(from.toLowerCase(), to);
+	const sources = index.reverse.get(to);
+	if (sources) {
+		sources.push(from);
+	} else {
+		index.reverse.set(to, [from]);
+	}
+	return true;
+}
+
+/**
+ * Persist aliases embedded in collapsed routing so generated catalog rows and
+ * newly discovered families expose the same selector migrations as hand tables.
+ */
+function registerCollapsedVariantAliases(provider: Provider, specs: readonly VariantSpecLike[]): void {
+	const providerId = provider.toLowerCase();
+	let index = dynamicAliasIndexes.get(providerId);
+	for (const spec of specs) {
+		const routing = spec.thinking?.effortRouting;
+		if (!routing) continue;
+		let registered = false;
+		for (const effort of VARIANT_ROUTING_KEYS) {
+			const source = routing[effort];
+			if (!source || source === spec.id) continue;
+			index ??= createAliasIndex();
+			registered = addVariantAlias(index, source, spec.id) || registered;
+		}
+		if (spec.requestModelId && spec.requestModelId !== spec.id) {
+			index ??= createAliasIndex();
+			registered = addVariantAlias(index, spec.requestModelId, spec.id) || registered;
+		}
+		if (registered) index?.familyIds.add(spec.id);
+	}
+	if (index) dynamicAliasIndexes.set(providerId, index);
+}
+
+function resolveRegisteredVariantAlias(provider: Provider, normalizedModelId: string): string | undefined {
+	const providerId = provider.toLowerCase();
+	const table = VARIANT_COLLAPSE_TABLES[provider] ?? VARIANT_COLLAPSE_TABLES[providerId];
+	return (
+		(table ? getAliasIndex(table).forward.get(normalizedModelId) : undefined) ??
+		dynamicAliasIndexes.get(providerId)?.forward.get(normalizedModelId)
+	);
+}
+
 function getAliasIndex(table: VariantCollapseTable): VariantAliasIndex {
 	const tagged = table as TableWithAliasIndex;
 	const cached = tagged[kAliasIndex];
 	if (cached) return cached;
-	const forward = new Map<string, string>();
-	const reverse = new Map<string, string[]>();
-	const add = (from: string, to: string) => {
-		if (from === to) return;
-		forward.set(from.toLowerCase(), to);
-		const sources = reverse.get(to);
-		if (sources) {
-			sources.push(from);
-		} else {
-			reverse.set(to, [from]);
-		}
-	};
-	const familyIds = new Set<string>();
+	const index = createAliasIndex();
 	for (const family of table.families) {
-		familyIds.add(family.id);
-		for (const member of family.members) add(member, family.id);
-		for (const alias of family.extraAliases ?? []) add(alias, family.id);
+		index.familyIds.add(family.id);
+		for (const member of family.members) addVariantAlias(index, member, family.id);
+		for (const alias of family.extraAliases ?? []) addVariantAlias(index, alias, family.id);
 	}
-	const index: VariantAliasIndex = { forward, reverse, familyIds };
 	tagged[kAliasIndex] = index;
 	return index;
 }
 
 /**
  * Resolve a retired effort-tier variant id (collapsed member, recycled id) to
- * its replacement model id for `provider` via the hand table. Returns
- * `undefined` when the id is not a known alias; derived `X-thinking` members
- * resolve through `stripThinkingVariantToken` instead. Callers must try an
- * exact model lookup first — a live model always wins over an alias.
+ * its replacement model id for `provider` via hand-table or registered live
+ * aliases. Returns `undefined` when the id is not a known alias; derived
+ * `X-thinking` members also resolve through `stripThinkingVariantToken`.
+ * Callers must try an exact model lookup first — a live model always wins over
+ * an alias.
  */
 export function resolveVariantAlias(provider: Provider, modelId: string): string | undefined {
-	const table = VARIANT_COLLAPSE_TABLES[provider] ?? VARIANT_COLLAPSE_TABLES[provider.toLowerCase()];
-	if (!table) return undefined;
-	return getAliasIndex(table).forward.get(modelId.trim().toLowerCase());
+	return resolveRegisteredVariantAlias(provider, modelId.trim().toLowerCase());
 }
 
 /** Bare-id alias hit: replacement id plus the providers declaring it. */
 export interface BareVariantAliasHit {
 	id: string;
-	/** Providers whose table declares the alias — candidates from these win ties. */
+	/** Providers declaring the alias — candidates from these win ties. */
 	providers: readonly Provider[];
 }
 
 /**
- * Provider-agnostic hand-table alias lookup for bare-id selectors. Returns
- * the declaring providers so callers can prefer their models when the
- * replacement id exists on unrelated providers too (e.g. a retired Cursor
- * tier id must not resolve to `openai/gpt-5.4`).
+ * Provider-agnostic alias lookup for bare-id selectors. Returns the declaring
+ * providers so callers can prefer their models when the replacement id exists
+ * on unrelated providers too (e.g. a retired Cursor tier id must not resolve
+ * to `openai/gpt-5.4`).
  */
 export function resolveBareVariantAlias(modelId: string): BareVariantAliasHit | undefined {
 	const normalized = modelId.trim().toLowerCase();
-	for (const provider in VARIANT_COLLAPSE_TABLES) {
-		const table = VARIANT_COLLAPSE_TABLES[provider] as VariantCollapseTable;
-		const hit = getAliasIndex(table).forward.get(normalized);
+	const providerIds = new Set<string>();
+	for (const provider in VARIANT_COLLAPSE_TABLES) providerIds.add(provider);
+	for (const provider of dynamicAliasIndexes.keys()) providerIds.add(provider);
+	for (const provider of providerIds) {
+		const hit = resolveRegisteredVariantAlias(provider, normalized);
 		if (hit === undefined) continue;
 		const providers: Provider[] = [];
-		for (const candidate in VARIANT_COLLAPSE_TABLES) {
-			// Match by resolved alias target, not table identity: the CCA providers
-			// now hold distinct table objects that still share these aliases.
-			if (
-				getAliasIndex(VARIANT_COLLAPSE_TABLES[candidate] as VariantCollapseTable).forward.get(normalized) === hit
-			) {
+		for (const candidate of providerIds) {
+			if (resolveRegisteredVariantAlias(candidate, normalized) === hit) {
 				providers.push(candidate);
 			}
 		}
@@ -1414,14 +1457,18 @@ export function resolveBareVariantAlias(modelId: string): BareVariantAliasHit | 
 
 /**
  * Reverse alias lookup: the retired ids that resolve to `modelId` for
- * `provider` via the hand table. Used to re-key config keyed by raw member
- * ids (models.yml `modelOverrides`, suppressed selectors) onto the collapsed
- * model. Empty for providers without a table.
+ * `provider` via hand-table or registered live aliases. Used to re-key config
+ * keyed by raw member ids (models.yml `modelOverrides`, suppressed selectors)
+ * onto the collapsed model.
  */
 export function getVariantAliasSources(provider: Provider, modelId: string): readonly string[] {
-	const table = VARIANT_COLLAPSE_TABLES[provider] ?? VARIANT_COLLAPSE_TABLES[provider.toLowerCase()];
-	if (!table) return [];
-	return getAliasIndex(table).reverse.get(modelId) ?? [];
+	const providerId = provider.toLowerCase();
+	const table = VARIANT_COLLAPSE_TABLES[provider] ?? VARIANT_COLLAPSE_TABLES[providerId];
+	const staticSources = table ? getAliasIndex(table).reverse.get(modelId) : undefined;
+	const dynamicSources = dynamicAliasIndexes.get(providerId)?.reverse.get(modelId);
+	if (!staticSources) return dynamicSources ?? [];
+	if (!dynamicSources) return staticSources;
+	return [...new Set([...staticSources, ...dynamicSources])];
 }
 
 function maxOrNull(values: ReadonlyArray<number | null>): number | null {

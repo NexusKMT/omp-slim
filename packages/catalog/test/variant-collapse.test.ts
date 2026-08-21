@@ -897,6 +897,32 @@ describe("variant aliases", () => {
 		expect(getVariantAliasSources("openai", "gpt-4o")).toEqual([]);
 	});
 
+	it("registers selector aliases for dynamically collapsed Cursor tier families", () => {
+		const ids = [
+			"review-model-9237-low",
+			"review-model-9237-high",
+			"review-model-9237-low-fast",
+			"review-model-9237-high-fast",
+		];
+		const collapsed = collapseEffortVariantsAcrossProviders(ids.map(id => cursorMemberSpec(id)));
+		expect(collapsed.map(model => model.id).sort()).toEqual(["review-model-9237", "review-model-9237-fast"]);
+
+		expect(resolveVariantAlias("cursor", "review-model-9237-high")).toBe("review-model-9237");
+		expect(resolveVariantAlias("CURSOR", "review-model-9237-low-fast")).toBe("review-model-9237-fast");
+		expect(resolveBareVariantAlias("review-model-9237-high")).toEqual({
+			id: "review-model-9237",
+			providers: ["cursor"],
+		});
+		expect(getVariantAliasSources("cursor", "review-model-9237")).toEqual([
+			"review-model-9237-low",
+			"review-model-9237-high",
+		]);
+		expect(getVariantAliasSources("cursor", "review-model-9237-fast")).toEqual([
+			"review-model-9237-low-fast",
+			"review-model-9237-high-fast",
+		]);
+	});
+
 	it("scopes collapsed-spec detection to routing and hand-table families", () => {
 		const collapsed = collapseEffortVariants(
 			[memberSpec("gemini-3.5-flash-low")],
