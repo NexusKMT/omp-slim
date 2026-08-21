@@ -47,6 +47,7 @@
 - Fixed retry fallback chains stopping prematurely when encountering nested fallback configurations, and fixed session role priority during fallback chain selection.
 - Fixed cancelled prompts disappearing upon abort during turn setup, properly restoring user text and attachments to the input editor.
 - Fixed built-in shell utilities (`grep`, `rg`, `diff`, `find`, `timeout`, `top`, `date`, `head`, `tail`, `stat`, `truncate`, `kill`) across numerous POSIX/GNU/BSD compatibility edge cases and early-pipeline SIGPIPE handling.
+- Fixed Eval guidance that implied `agent()` children share parent kernel state and advertised them when spawning was disabled.
 - Fixed Cursor sessions missing standard string-replacement edit tooling after server tool injection.
 - Fixed `hub wait` duplicating frozen rows into native scrollback during viewport overflow.
 - Fixed dark-theme contrast issues on markdown code-fence headers.
@@ -268,9 +269,6 @@
 - Automatically continued Gemini turns that stopped after thinking without final output, using a bounded final-answer reminder instead of exhausting generic retries.
 - Retried Gemini `MALFORMED_FUNCTION_CALL` failures when every emitted tool call was proven unexecuted, while preserving real tool-result and visible-output replay guards.
 - Kept current terminal retry errors in one pinned banner with attempt context while surfacing local continuation failures instead of stale provider errors.
-### Fixed
-
-- Fixed the Eval tool description implying that `agent()` children share parent kernel state; only `task` subagents inherit Eval state.
 
 ## [17.3.2] - 2026-08-13
 
