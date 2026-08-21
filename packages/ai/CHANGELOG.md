@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed completed Anthropic turns remaining busy when the provider sent `message_stop` but kept the SSE connection open, which stranded tool execution and queued steering until timeout.
+
 ## [17.4.2] - 2026-08-21
 
 ### Added
