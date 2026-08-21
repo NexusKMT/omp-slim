@@ -7,6 +7,7 @@ import { resolveModelScope } from "@oh-my-pi/pi-coding-agent/config/model-resolv
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
 	rebuildScopedModelsAfterDiscovery,
+	resolveScopedModels,
 	type ScopedModelSink,
 	toSessionScopedModels,
 } from "@oh-my-pi/pi-coding-agent/main";
@@ -26,16 +27,29 @@ function model(id: string): Model<Api> {
 	});
 }
 
-/** Mutable stand-in for {@link ModelRegistry}: `available` grows to mimic a background discovery pass. */
+/** Mutable stand-in for {@link ModelRegistry}: `available` grows to mimic provider discovery. */
 class FakeRegistry {
 	available: Model<Api>[];
-	constructor(initial: Model<Api>[]) {
+	discoverableProviders = ["prov"];
+	refreshCalls = 0;
+	onRefresh: (() => void) | undefined;
+	constructor(initial: Model<Api>[], onRefresh?: () => void) {
 		this.available = initial;
+		this.onRefresh = onRefresh;
 	}
 	getAvailable(): Model<Api>[] {
 		return this.available;
 	}
-	async awaitBackgroundRefresh(): Promise<void> {}
+	getDiscoverableProviders(): string[] {
+		return this.discoverableProviders;
+	}
+	async refresh(): Promise<void> {
+		this.refreshCalls += 1;
+		this.onRefresh?.();
+	}
+	async awaitBackgroundRefresh(): Promise<void> {
+		this.onRefresh?.();
+	}
 }
 
 class FakeSession implements ScopedModelSink {
@@ -89,19 +103,18 @@ describe("rebuildScopedModelsAfterDiscovery", () => {
 		expect(session.scopedModels).toBe(before);
 	});
 
-	it("does not promote an empty (collapsed) scope into a scoped session", async () => {
+	it("activates a scope that resolved empty once background discovery finds its model", async () => {
 		const settings = Settings.isolated({ enabledModels: ["prov/b"] });
 		const registry = new FakeRegistry([model("a")]);
-		// `prov/b` matches nothing at startup, so no scope is active.
+		// `prov/b` matches nothing at startup, so the session initially looks unscoped.
 		const session = new FakeSession(await startupScope(["prov/b"], registry, settings));
 		expect(session.scopedModels).toHaveLength(0);
 
 		registry.available = [model("a"), model("b")];
 		await rebuildScopedModelsAfterDiscovery(session, parseArgs([]), registry, settings);
 
-		// Turning a collapsed scope into a live one is the SDK discovery-fallback's job.
-		expect(session.setCalls).toBe(0);
-		expect(session.scopedModels).toHaveLength(0);
+		expect(session.setCalls).toBe(1);
+		expect(session.scopedModels.map(s => s.model.id)).toEqual(["b"]);
 	});
 
 	it("re-resolves an explicit --models scope against the discovery-backed catalog", async () => {
@@ -127,5 +140,19 @@ describe("rebuildScopedModelsAfterDiscovery", () => {
 
 		expect(session.setCalls).toBe(0);
 		expect(session.scopedModels.map(s => s.model.id)).toEqual(["a"]);
+	});
+});
+
+describe("resolveScopedModels", () => {
+	it("refreshes a collapsed all-discovery --models scope before session model selection", async () => {
+		const settings = Settings.isolated();
+		const registry = new FakeRegistry([], () => {
+			registry.available = [model("b")];
+		});
+
+		const scoped = await resolveScopedModels(parseArgs(["--models", "prov/b"]), registry, settings);
+
+		expect(registry.refreshCalls).toBe(1);
+		expect(scoped.map(entry => entry.model.id)).toEqual(["b"]);
 	});
 });

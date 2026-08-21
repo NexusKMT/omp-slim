@@ -707,25 +707,29 @@ async function switchToResumedProject(
 
 /**
  * Resolve the effective model allow-list from an explicit `--models` scope or,
- * failing that, the active project's `enabledModels`. Re-run after a resume
+ * failing that, the active project's `enabledModels`. A totally collapsed scope
+ * gets one cache-aware discovery pass before session construction: otherwise an
+ * all-discovery `--models` launch can select an unrelated static model before the
+ * later background rebuild activates the requested scope. Re-run after a resume
  * switches projects so the destination project's settings-derived scope wins
  * over the launch directory's.
  */
-async function resolveScopedModels(
+export async function resolveScopedModels(
 	parsed: Args,
-	modelRegistry: ModelRegistry,
+	modelRegistry: Pick<ModelRegistry, "getAvailable" | "getDiscoverableProviders" | "refresh">,
 	activeSettings: Settings,
 ): Promise<ScopedModel[]> {
 	const modelPatterns = parsed.models ?? activeSettings.get("enabledModels");
 	if (!modelPatterns || modelPatterns.length === 0) {
 		return [];
 	}
-	return await resolveModelScope(
-		modelPatterns,
-		modelRegistry,
-		getModelMatchPreferences(activeSettings),
-		activeSettings,
-	);
+	const preferences = getModelMatchPreferences(activeSettings);
+	const scopedModels = await resolveModelScope(modelPatterns, modelRegistry, preferences, activeSettings);
+	if (scopedModels.length > 0 || modelRegistry.getDiscoverableProviders().length === 0) {
+		return scopedModels;
+	}
+	await modelRegistry.refresh("online-if-uncached");
+	return await resolveModelScope(modelPatterns, modelRegistry, preferences, activeSettings);
 }
 
 /**
@@ -772,10 +776,10 @@ export interface ScopedModelSink {
  * the frozen scoped `/models` list even though it is in `enabledModels`, invokable
  * via `--model`, and listed by `omp models find`. Once the initial refresh settles,
  * re-resolve the scope and, when the set changed, push the fuller list into the
- * session so the scoped picker and Ctrl+P cycle include it. Only augments an
- * already-active scope; a scope that resolved to zero models is left to the SDK's
- * discovery fallback. Fire-and-forget — never blocks the prompt on discovery
- * latency. Issue #9220.
+ * session so the scoped picker and Ctrl+P cycle include it. A scope that resolved
+ * to zero models may become active here when the startup discovery pass returned
+ * no models but the background pass succeeded. Fire-and-forget — never blocks the
+ * prompt on background discovery latency. Issue #9220.
  */
 export async function rebuildScopedModelsAfterDiscovery(
 	session: ScopedModelSink,
@@ -783,7 +787,6 @@ export async function rebuildScopedModelsAfterDiscovery(
 	modelRegistry: Pick<ModelRegistry, "getAvailable" | "awaitBackgroundRefresh">,
 	activeSettings: Settings,
 ): Promise<void> {
-	if (session.scopedModels.length === 0) return;
 	const patterns = parsed.models ?? activeSettings.get("enabledModels");
 	if (!patterns || patterns.length === 0) return;
 	await modelRegistry.awaitBackgroundRefresh();
@@ -1811,10 +1814,12 @@ export async function runRootCommand(
 
 		// Runtime provider discovery (opencode-go, models.yml `discovery:`, proxies)
 		// populates the registry AFTER the scope was snapshotted at startup; re-resolve
-		// once it settles so a newly-discovered enabledModels model joins the scoped
-		// /models list and Ctrl+P cycle (issue #9220). Fire-and-forget: the prompt must
-		// never block on discovery latency.
-		if (isInteractive && scopedModels.length > 0) {
+		// once it settles so newly-discovered configured models join the scoped
+		// /models list and Ctrl+P cycle, including scopes that initially resolved
+		// empty (issue #9220). Fire-and-forget: the prompt must never block on the
+		// background pass.
+		const configuredScope = parsedArgs.models ?? settingsInstance.get("enabledModels");
+		if (isInteractive && configuredScope.length > 0) {
 			void rebuildScopedModelsAfterDiscovery(session, parsedArgs, modelRegistry, settingsInstance).catch(error =>
 				logger.warn("Scoped model rebuild after discovery failed", { error: String(error) }),
 			);
