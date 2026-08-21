@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Auto-continue turns that die mid-tool-call with `OpenAI completions stream closed before a finish_reason was received` (and the Responses/Azure "closed before a terminal response event" variants): premature gateway stream closes now classify like idle stalls and HTTP/2 resets, so a resolved tool turn is continued after its preserved partial output instead of surfacing the error.
+
 ## [17.4.1] - 2026-08-21
 
 ### Added
