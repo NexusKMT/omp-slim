@@ -70,6 +70,7 @@ import { groupBySource, parseRemoveArgs, readScopeFlag, showCommandMessage } fro
 
 const MCP_MANUAL_INPUT_PROVIDER_ID = "mcp";
 const MCP_MANUAL_LOGIN_TIP = "Headless? Paste the redirect URL or code with /login <value>.";
+const MCP_TEST_ESCAPE_GRACE_MS = 5_000;
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string, onTimeout?: () => void): Promise<T> {
 	const { promise: timeoutPromise, reject } = Promise.withResolvers<T>();
 	const timer = setTimeout(() => {
@@ -1573,11 +1574,9 @@ export class MCPCommandController {
 			return;
 		}
 
-		const originalOnEscape = this.ctx.editor.onEscape;
 		const abortController = new AbortController();
-		this.ctx.editor.onEscape = () => {
-			abortController.abort();
-		};
+		const handleEscape = (): void => abortController.abort();
+		let escapeHandlerInstalled = false;
 
 		let connection: MCPServerConnection | undefined;
 		try {
@@ -1595,6 +1594,9 @@ export class MCPCommandController {
 				this.ctx.showError(`Server "${name}" is disabled. Run /mcp enable ${name} first.`);
 				return;
 			}
+
+			this.ctx.mcpTestEscapeHandler = handleEscape;
+			escapeHandlerInstalled = true;
 
 			this.#showMessage(
 				["", theme.fg("muted", `Testing connection to "${name}"... (esc to cancel)`), ""].join("\n"),
@@ -1660,7 +1662,14 @@ export class MCPCommandController {
 
 			this.ctx.showError(`Failed to connect to "${name}": ${errorMsg}${helpText}`);
 		} finally {
-			this.ctx.editor.onEscape = originalOnEscape;
+			if (escapeHandlerInstalled) {
+				const timer = setTimeout(() => {
+					if (this.ctx.mcpTestEscapeHandler === handleEscape) {
+						this.ctx.mcpTestEscapeHandler = undefined;
+					}
+				}, MCP_TEST_ESCAPE_GRACE_MS);
+				timer.unref();
+			}
 			if (connection) {
 				// Best-effort: don't block UI on cleanup.
 				void disconnectServer(connection);

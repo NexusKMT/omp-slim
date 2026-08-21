@@ -442,6 +442,20 @@ describe("InputController escape behavior", () => {
 		expect(spies.abort).not.toHaveBeenCalled();
 	});
 
+	it("keeps /mcp test Esc from aborting an overlapping stream", () => {
+		const { ctx, editor, spies } = createContext();
+		mutableSessionState(ctx).isStreaming = true;
+		const mcpTestEscapeHandler = vi.fn();
+		ctx.mcpTestEscapeHandler = mcpTestEscapeHandler;
+		const controller = new InputController(ctx);
+
+		controller.setupKeyHandlers();
+		editor.onEscape?.();
+
+		expect(mcpTestEscapeHandler).toHaveBeenCalledTimes(1);
+		expect(spies.abort).not.toHaveBeenCalled();
+	});
+
 	it("dismisses an active /btw panel before aborting the main stream", () => {
 		const { ctx, editor, spies } = createContext();
 		(ctx.session as { isStreaming: boolean }).isStreaming = true;

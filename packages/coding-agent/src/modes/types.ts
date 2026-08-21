@@ -215,6 +215,8 @@ export interface InteractiveModeContext {
 	locallySubmittedUserSignatures: Set<string>;
 	lastSigintTime: number;
 	lastEscapeTime: number;
+	/** Owns Esc while `/mcp test` is cancellable or its cancellation hint may still be visible. */
+	mcpTestEscapeHandler?: () => void;
 	lastLeftTapTime: number;
 	shutdownRequested: boolean;
 	/** True once `shutdown()` has started. Read-only from the context;

@@ -11,7 +11,7 @@ const originalProjectDir = getProjectDir();
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
 
-describe("issue #956: interactive /mcp test", () => {
+describe("interactive /mcp test", () => {
 	let projectDir = "";
 	let agentDir = "";
 
@@ -44,6 +44,7 @@ describe("issue #956: interactive /mcp test", () => {
 	});
 
 	afterEach(async () => {
+		vi.useRealTimers();
 		vi.restoreAllMocks();
 		setProjectDir(originalProjectDir);
 		if (originalAgentDir) {
@@ -56,7 +57,8 @@ describe("issue #956: interactive /mcp test", () => {
 		await removeWithRetries(agentDir);
 	});
 
-	it("tests a connected server discovered from standalone .mcp.json", async () => {
+	it("tests a discovered server and keeps its advertised Esc cancellation grace", async () => {
+		vi.useFakeTimers();
 		const transport = {
 			connected: true,
 			request: vi.fn(),
@@ -78,7 +80,14 @@ describe("issue #956: interactive /mcp test", () => {
 		const connectToServer = vi.spyOn(mcpClient, "connectToServer").mockResolvedValue(connection);
 		const listTools = vi.spyOn(mcpClient, "listTools").mockResolvedValue([{ name: "search_issues" }] as never);
 		const disconnectServer = vi.spyOn(mcpClient, "disconnectServer").mockResolvedValue();
+		let mcpTestEscapeHandler: (() => void) | undefined;
 		const controller = new MCPCommandController({
+			get mcpTestEscapeHandler() {
+				return mcpTestEscapeHandler;
+			},
+			set mcpTestEscapeHandler(handler: (() => void) | undefined) {
+				mcpTestEscapeHandler = handler;
+			},
 			chatContainer: { addChild },
 			present: (content: unknown) => {
 				for (const item of Array.isArray(content) ? content : [content]) addChild(item);
@@ -100,6 +109,15 @@ describe("issue #956: interactive /mcp test", () => {
 		} as never);
 
 		await controller.handle("/mcp test github");
+		const signal = connectToServer.mock.calls[0]?.[2]?.signal;
+		expect(signal?.aborted).toBe(false);
+		expect(mcpTestEscapeHandler).toEqual(expect.any(Function));
+		mcpTestEscapeHandler?.();
+		expect(signal?.aborted).toBe(true);
+		vi.advanceTimersByTime(4_999);
+		expect(mcpTestEscapeHandler).toEqual(expect.any(Function));
+		vi.advanceTimersByTime(1);
+		expect(mcpTestEscapeHandler).toBeUndefined();
 
 		expect(showError).not.toHaveBeenCalled();
 		expect(connectToServer).toHaveBeenCalledWith(
