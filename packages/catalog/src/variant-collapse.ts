@@ -1305,23 +1305,46 @@ export function collapseEffortVariants<TSpec extends VariantSpecLike>(
  * member id. Qualified targets keep their provider; bare targets remain bare.
  */
 function retargetCollapsedModelReferences<TSpec extends VariantSpecLike>(specs: TSpec[]): void {
+	const liveIdsByProvider = new Map<string, Set<string>>();
+	for (const spec of specs) {
+		const provider = spec.provider.toLowerCase();
+		let liveIds = liveIdsByProvider.get(provider);
+		if (!liveIds) {
+			liveIds = new Set<string>();
+			liveIdsByProvider.set(provider, liveIds);
+		}
+		liveIds.add(spec.id.toLowerCase());
+	}
+
 	for (let index = 0; index < specs.length; index++) {
 		const spec = specs[index];
 		if (!spec) continue;
-		const contextPromotionTarget = resolveCollapsedModelReference(spec.contextPromotionTarget, spec.provider);
-		const compactionModel = resolveCollapsedModelReference(spec.compactionModel, spec.provider);
+		const contextPromotionTarget = resolveCollapsedModelReference(
+			spec.contextPromotionTarget,
+			spec.provider,
+			liveIdsByProvider,
+		);
+		const compactionModel = resolveCollapsedModelReference(spec.compactionModel, spec.provider, liveIdsByProvider);
 		if (contextPromotionTarget === spec.contextPromotionTarget && compactionModel === spec.compactionModel) continue;
 		specs[index] = { ...spec, contextPromotionTarget, compactionModel };
 	}
 }
 
-function resolveCollapsedModelReference(target: string | undefined, currentProvider: Provider): string | undefined {
+function resolveCollapsedModelReference(
+	target: string | undefined,
+	currentProvider: Provider,
+	liveIdsByProvider: ReadonlyMap<string, ReadonlySet<string>>,
+): string | undefined {
 	if (target === undefined) return undefined;
 	const separator = target.indexOf("/");
 	const provider = separator >= 0 ? target.slice(0, separator) : currentProvider;
+	const providerId = provider.toLowerCase();
 	const modelId = separator >= 0 ? target.slice(separator + 1) : target;
-	const alias = resolveRegisteredVariantAlias(provider, modelId.trim().toLowerCase());
-	if (alias === undefined) return target;
+	const normalizedModelId = modelId.trim().toLowerCase();
+	const liveIds = liveIdsByProvider.get(providerId);
+	if (liveIds?.has(normalizedModelId)) return target;
+	const alias = resolveRegisteredVariantAlias(provider, normalizedModelId);
+	if (alias === undefined || !liveIds?.has(alias.toLowerCase())) return target;
 	return separator >= 0 ? `${provider}/${alias}` : alias;
 }
 
