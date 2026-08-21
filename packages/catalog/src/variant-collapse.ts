@@ -784,8 +784,8 @@ interface CursorTierMember<TSpec extends VariantSpecLike> {
 	tier: CursorTierToken;
 }
 
-const CURSOR_TIER_ID_PATTERN = /^(.*)-(none|minimal|low|medium|high|xhigh|max)(-fast)?$/;
-const CURSOR_TIER_BASE_PATTERN = /-(none|minimal|low|medium|high|xhigh|max)$/;
+const CURSOR_TIER_ID_PATTERN = /^(.+?)-(extra-high|none|minimal|low|medium|high|xhigh|max)(-fast)?$/;
+const CURSOR_TIER_BASE_PATTERN = /-(extra-high|none|minimal|low|medium|high|xhigh|max)$/;
 const CURSOR_THINKING_TOKEN_PATTERN = /(^|-)thinking($|-)/;
 const CURSOR_TIER_BY_TOKEN: Readonly<Record<string, CursorTierToken | undefined>> = {
 	none: "none",
@@ -793,6 +793,7 @@ const CURSOR_TIER_BY_TOKEN: Readonly<Record<string, CursorTierToken | undefined>
 	low: "low",
 	medium: "medium",
 	high: "high",
+	"extra-high": "xhigh",
 	xhigh: "xhigh",
 	max: "max",
 };
@@ -862,6 +863,7 @@ function deriveCursorEffortFamilies<TSpec extends VariantSpecLike>(specs: readon
 		if (
 			independentStandardBase ||
 			independentLaneBase ||
+			new Set(group.map(member => member.tier)).size !== group.length ||
 			CURSOR_TIER_BASE_PATTERN.test(baseId) ||
 			CURSOR_THINKING_TOKEN_PATTERN.test(baseId) ||
 			candidateBases.has(`${baseId}-thinking`) ||
@@ -905,7 +907,7 @@ function deriveCursorEffortFamilies<TSpec extends VariantSpecLike>(specs: readon
 		const efforts = THINKING_EFFORTS.filter(effort => routes[effort] !== undefined);
 		if (efforts.length === 0) continue;
 		const strippedName = first.spec.name
-			.replace(/\s+(none|minimal|low|medium|high|xhigh|max)(\s+fast)?$/i, "")
+			.replace(/\s+(extra-high|none|minimal|low|medium|high|xhigh|max)(\s+fast)?$/i, "")
 			.trim();
 		const baseName = strippedName === first.spec.id ? first.baseId : strippedName || first.baseId;
 		const suffix = first.fast ? "-fast" : "";

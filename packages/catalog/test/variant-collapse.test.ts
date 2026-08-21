@@ -814,6 +814,19 @@ describe("Cursor generic tier routing (issue #9237)", () => {
 		expect(resolveWireModelId(buildModel(fast), Effort.Max)).toBe("gpt-5.5-max-fast");
 	});
 
+	it("maps Cursor's extra-high suffix to xhigh", () => {
+		const raw = ["none", "low", "extra-high"].map(tier =>
+			cursorMemberSpec(`gpt-5.5-${tier}`, { name: `GPT-5.5 ${tier}` }),
+		);
+		const collapsed = collapseEffortVariantsAcrossProviders(raw);
+
+		expect(collapsed.map(model => model.id)).toEqual(["gpt-5.5"]);
+		const model = collapsed[0];
+		if (!model) throw new Error("GPT-5.5 did not collapse");
+		expect(model.thinking?.efforts).toEqual([Effort.Low, Effort.XHigh]);
+		expect(resolveWireModelId(buildModel(model), Effort.XHigh)).toBe("gpt-5.5-extra-high");
+	});
+
 	it("keeps a reference-backed base and its existing thinking ladders intact", () => {
 		const raw = [
 			cursorMemberSpec("gpt-5.2", {
