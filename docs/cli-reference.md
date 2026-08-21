@@ -46,7 +46,8 @@ omp --continue "What did we discuss?"
 Argument handling:
 
 - `@<path>` attaches a file or image to the initial message.
-- A lone `-` is read as the stdin marker (piped prompt).
+- Non-TTY stdin is read automatically as the initial prompt; do not add a `-`
+  marker.
 - `--` ends flag parsing; everything after it is literal message text, even if it
   looks like a flag.
 
@@ -176,7 +177,7 @@ omp -p --print-thoughts "Explain your reasoning for this refactor"
 omp -p --mode json "List every TODO in src/" > todos.json
 
 # Pipe a prompt via stdin
-echo "review this diff" | omp -p -
+echo "review this diff" | omp -p
 ```
 
 Related flags for headless runs:
