@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Agent Hub aborted rows failing to open their read-only transcript when selected with Enter.
+
 ## [17.4.4] - 2026-08-22
 
 ### Added
