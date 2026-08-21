@@ -303,10 +303,10 @@ export class InputController {
 			});
 		}
 		this.ctx.editor.onEscape = () => {
-			// `/mcp test` advertises Esc until its post-settlement grace expires.
-			// Consume it before any overlapping main-turn or side-channel action.
-			if (this.ctx.mcpTestEscapeHandler) {
-				this.ctx.mcpTestEscapeHandler();
+			// `/mcp test` advertises Esc until each owner's post-settlement grace expires.
+			// Cancel every overlapping test before any main-turn or side-channel action.
+			if (this.ctx.mcpTestEscapeHandlers.size > 0) {
+				for (const handler of this.ctx.mcpTestEscapeHandlers) handler();
 				return;
 			}
 

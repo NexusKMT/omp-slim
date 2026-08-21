@@ -80,14 +80,9 @@ describe("interactive /mcp test", () => {
 		const connectToServer = vi.spyOn(mcpClient, "connectToServer").mockResolvedValue(connection);
 		const listTools = vi.spyOn(mcpClient, "listTools").mockResolvedValue([{ name: "search_issues" }] as never);
 		const disconnectServer = vi.spyOn(mcpClient, "disconnectServer").mockResolvedValue();
-		let mcpTestEscapeHandler: (() => void) | undefined;
+		const mcpTestEscapeHandlers = new Set<() => void>();
 		const controller = new MCPCommandController({
-			get mcpTestEscapeHandler() {
-				return mcpTestEscapeHandler;
-			},
-			set mcpTestEscapeHandler(handler: (() => void) | undefined) {
-				mcpTestEscapeHandler = handler;
-			},
+			mcpTestEscapeHandlers,
 			chatContainer: { addChild },
 			present: (content: unknown) => {
 				for (const item of Array.isArray(content) ? content : [content]) addChild(item);
@@ -111,13 +106,13 @@ describe("interactive /mcp test", () => {
 		await controller.handle("/mcp test github");
 		const signal = connectToServer.mock.calls[0]?.[2]?.signal;
 		expect(signal?.aborted).toBe(false);
-		expect(mcpTestEscapeHandler).toEqual(expect.any(Function));
-		mcpTestEscapeHandler?.();
+		expect(mcpTestEscapeHandlers).toHaveLength(1);
+		for (const handler of mcpTestEscapeHandlers) handler();
 		expect(signal?.aborted).toBe(true);
 		vi.advanceTimersByTime(4_999);
-		expect(mcpTestEscapeHandler).toEqual(expect.any(Function));
+		expect(mcpTestEscapeHandlers).toHaveLength(1);
 		vi.advanceTimersByTime(1);
-		expect(mcpTestEscapeHandler).toBeUndefined();
+		expect(mcpTestEscapeHandlers).toHaveLength(0);
 
 		expect(showError).not.toHaveBeenCalled();
 		expect(connectToServer).toHaveBeenCalledWith(

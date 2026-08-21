@@ -1576,7 +1576,6 @@ export class MCPCommandController {
 
 		const abortController = new AbortController();
 		const handleEscape = (): void => abortController.abort();
-		let escapeHandlerInstalled = false;
 
 		let connection: MCPServerConnection | undefined;
 		try {
@@ -1595,8 +1594,7 @@ export class MCPCommandController {
 				return;
 			}
 
-			this.ctx.mcpTestEscapeHandler = handleEscape;
-			escapeHandlerInstalled = true;
+			this.ctx.mcpTestEscapeHandlers.add(handleEscape);
 
 			this.#showMessage(
 				["", theme.fg("muted", `Testing connection to "${name}"... (esc to cancel)`), ""].join("\n"),
@@ -1662,11 +1660,9 @@ export class MCPCommandController {
 
 			this.ctx.showError(`Failed to connect to "${name}": ${errorMsg}${helpText}`);
 		} finally {
-			if (escapeHandlerInstalled) {
+			if (this.ctx.mcpTestEscapeHandlers.has(handleEscape)) {
 				const timer = setTimeout(() => {
-					if (this.ctx.mcpTestEscapeHandler === handleEscape) {
-						this.ctx.mcpTestEscapeHandler = undefined;
-					}
+					this.ctx.mcpTestEscapeHandlers.delete(handleEscape);
 				}, MCP_TEST_ESCAPE_GRACE_MS);
 				timer.unref();
 			}
