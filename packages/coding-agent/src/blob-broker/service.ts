@@ -15,8 +15,8 @@ import * as snapcompact from "@oh-my-pi/snapcompact";
 import type { Settings } from "../config/settings";
 import { type BlobBackend, LocalBlobBackend } from "./broker";
 import {
-	contextHasImageUrls,
 	contextHasImages,
+	contextHasImageUrls,
 	contextHasProviderFiles,
 	decorateContextImages,
 	inlineContextImages,
@@ -26,8 +26,7 @@ import {
 import { connectDaemonBlobBackend, type RenderCallbackHost } from "./daemon";
 import type { BlobBrokerWorkerConfig } from "./protocol";
 import { RENDER_CALLBACK_PATH, RENDER_CALLBACK_TOKEN_HEADER } from "./protocol";
-import { ProviderFileCache } from "./provider-file-types";
-import { ProviderFileManager, type ProviderFileCredentialResolver } from "./provider-files";
+import type { ProviderFileManager } from "./provider-files";
 import type { BlobPublication } from "./publication";
 import type { LazyBlobFetcher } from "./store";
 import type { DestinationOptionValue } from "./uploader-runtime";
@@ -129,7 +128,10 @@ export class ImageUrlService {
 		if (configs.length > 0) void this.#ensureBackend(configs, key);
 	}
 
-	#ensureBackend(configs: readonly BlobBrokerWorkerConfig[] = this.#configs, key = "all"): Promise<BlobBackend | null> {
+	#ensureBackend(
+		configs: readonly BlobBrokerWorkerConfig[] = this.#configs,
+		key = "all",
+	): Promise<BlobBackend | null> {
 		let pending = this.#backendPromises.get(key);
 		if (!pending) {
 			pending = this.#resolveBackend(configs);
@@ -245,11 +247,7 @@ export class ImageUrlService {
 		configs: readonly BlobBrokerWorkerConfig[],
 		backendKey: string,
 	): Promise<Context> {
-		if (
-			configs.length === 0 ||
-			this.#quarantined.has(model.provider) ||
-			!supportsRemoteImageUrls(model)
-		) {
+		if (configs.length === 0 || this.#quarantined.has(model.provider) || !supportsRemoteImageUrls(model)) {
 			return context;
 		}
 		const backend = await this.#ensureBackend(configs, backendKey);

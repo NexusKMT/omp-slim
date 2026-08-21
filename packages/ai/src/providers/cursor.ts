@@ -5037,7 +5037,10 @@ function extractImages(content: (TextContent | ImageContent)[]) {
  * not exposed by the decoded `GetUsableModels` schema, so guessing them would
  * re-trigger 528384.
  */
-function resolveCursorWireModel(model: Model<"cursor-agent">, requestModelId?: string): {
+function resolveCursorWireModel(
+	model: Model<"cursor-agent">,
+	requestModelId?: string,
+): {
 	modelId: string;
 	parameters: RequestedModel_ModelParameterbytes[];
 } {
@@ -5047,12 +5050,7 @@ function resolveCursorWireModel(model: Model<"cursor-agent">, requestModelId?: s
 	const match = /^(.*)-(minimal|low|medium|high|xhigh|max)(-fast)?$/.exec(wireModelId);
 	const base = match?.[1];
 	const effort = match?.[2];
-	if (
-		base &&
-		effort &&
-		(THINKING_EFFORTS as readonly string[]).includes(effort) &&
-		parseOpenAIModel(base) !== null
-	) {
+	if (base && effort && (THINKING_EFFORTS as readonly string[]).includes(effort) && parseOpenAIModel(base) !== null) {
 		return {
 			modelId: `${base}${match[3] ?? ""}`,
 			parameters: [create(RequestedModel_ModelParameterbytesSchema, { id: "reasoning", value: effort })],

@@ -2,14 +2,14 @@ import type { Context, ImageContent, Model } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
 import { contextHasImages, decorateContextProviderFiles } from "./context-images";
 import {
-	ProviderFileCache,
 	hashProviderFileContent,
 	hashProviderFileCredential,
-	toProviderFileReference,
+	type ProviderFileCache,
 	type ProviderFileCacheEntry,
 	type ProviderFileCacheStatus,
 	type ProviderFileClient,
 	type ProviderFileHandle,
+	toProviderFileReference,
 } from "./provider-file-types";
 import { createAnthropicFileClient } from "./provider-files-anthropic";
 import { createGeminiProviderFileClient } from "./provider-files-gemini";

@@ -40,18 +40,22 @@ function capture(model: Model<"cursor-agent">): Promise<AgentRunRequest> {
 
 function captureSimple(model: Model<"cursor-agent">, reasoning?: Effort): Promise<AgentRunRequest> {
 	const { promise, resolve, reject } = Promise.withResolvers<AgentRunRequest>();
-	streamSimple(model, { messages: [{ role: "user", content: "pong", timestamp: 0 }] }, {
-		apiKey: "test-token",
-		reasoning,
-		onPayload: payload => {
-			if (payload && typeof payload === "object" && "$typeName" in payload) {
-				resolve(payload as AgentRunRequest);
-			} else {
-				reject(new Error("Cursor payload was not an AgentRunRequest"));
-			}
-			throw new Error("stop after capturing Cursor payload");
+	streamSimple(
+		model,
+		{ messages: [{ role: "user", content: "pong", timestamp: 0 }] },
+		{
+			apiKey: "test-token",
+			reasoning,
+			onPayload: payload => {
+				if (payload && typeof payload === "object" && "$typeName" in payload) {
+					resolve(payload as AgentRunRequest);
+				} else {
+					reject(new Error("Cursor payload was not an AgentRunRequest"));
+				}
+				throw new Error("stop after capturing Cursor payload");
+			},
 		},
-	});
+	);
 	return promise;
 }
 
@@ -112,9 +116,7 @@ describe("Cursor requestedModel wire shape", () => {
 	it("preserves the fast lane while splitting its effort token", async () => {
 		const payload = await captureSimple(collapsedCursorModel(true), Effort.High);
 		expect(payload.requestedModel?.modelId).toBe("gpt-5.6-sol-fast");
-		expect(payload.requestedModel?.parameters).toEqual([
-			expect.objectContaining({ id: "reasoning", value: "high" }),
-		]);
+		expect(payload.requestedModel?.parameters).toEqual([expect.objectContaining({ id: "reasoning", value: "high" })]);
 	});
 
 	it("leaves Cursor-native ids untouched with no parameters", async () => {

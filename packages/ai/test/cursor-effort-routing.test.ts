@@ -12,8 +12,8 @@ import { buildGrpcRequest } from "@oh-my-pi/pi-ai/providers/cursor";
 import { streamSimple } from "@oh-my-pi/pi-ai/stream";
 import type { Context, Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { AgentClientMessageSchema } from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
 import type { AgentRunRequest } from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
+import { AgentClientMessageSchema } from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
 import { fromBinary } from "@oh-my-pi/pi-catalog/discovery/protobuf";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 
@@ -73,9 +73,7 @@ describe("cursor effort routing", () => {
 	it("routes stream reasoning through to the Cursor payload", async () => {
 		const run = await captureStreamPayload(Effort.Medium);
 		expect(run.requestedModel?.modelId).toBe("gpt-5.6-terra");
-		expect(run.requestedModel?.parameters).toEqual([
-			expect.objectContaining({ id: "reasoning", value: "medium" }),
-		]);
+		expect(run.requestedModel?.parameters).toEqual([expect.objectContaining({ id: "reasoning", value: "medium" })]);
 		expect(run.modelDetails?.modelId).toBe("gpt-5.6-terra");
 	});
 	it("sends the effort-routed wire id, not the collapsed off tier", async () => {
@@ -89,8 +87,8 @@ describe("cursor effort routing", () => {
 		expect(run.requestedModel.modelId).toBe("gpt-5.6-terra");
 		expect(run.modelDetails.modelId).toBe("gpt-5.6-terra");
 		expect(run.requestedModel.parameters).toEqual([expect.objectContaining({ id: "reasoning", value: "medium" })]);
-		
-// Logical id stays as the display id for local attribution.
+
+		// Logical id stays as the display id for local attribution.
 		expect(run.modelDetails.displayModelId).toBe("gpt-5.6-terra");
 	});
 

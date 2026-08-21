@@ -63,7 +63,7 @@ function channelOf(context: Context): "native" | "url" | "inline" {
 	const first = context.messages[0];
 	if (!first || !Array.isArray(first.content)) throw new Error("missing image message");
 	const image = first.content.find(part => part.type === "image");
-	if (!image || image.type !== "image") throw new Error("missing image");
+	if (image?.type !== "image") throw new Error("missing image");
 	if (image.providerFile) return "native";
 	return image.url ? "url" : "inline";
 }
