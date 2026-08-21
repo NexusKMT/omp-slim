@@ -7,7 +7,9 @@ import {
 	AgentClientMessageSchema,
 	type AgentRunRequest,
 	AgentServerMessageSchema,
+	ExecServerMessageSchema,
 	InteractionUpdateSchema,
+	ReadArgsSchema,
 	TextDeltaUpdateSchema,
 	TurnEndedUpdateSchema,
 } from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
@@ -18,7 +20,8 @@ const CONNECT_END_STREAM_FLAG = 0b00000010;
 
 type Response =
 	| { kind: "error"; code: string; message: string; partialText?: string }
-	| { kind: "success"; text: string };
+	| { kind: "success"; text: string }
+	| { kind: "exec-success" };
 
 let server: http2.Http2Server | undefined;
 const sessions = new Set<http2.Http2Session>();
@@ -56,6 +59,23 @@ function turnEndedFrame(): Buffer {
 				message: {
 					case: "turnEnded",
 					value: create(TurnEndedUpdateSchema, {}),
+				},
+			}),
+		},
+	});
+	return frameConnectMessage(toBinary(AgentServerMessageSchema, message));
+}
+
+function execReadRequestFrame(): Buffer {
+	const message = create(AgentServerMessageSchema, {
+		message: {
+			case: "execServerMessage",
+			value: create(ExecServerMessageSchema, {
+				id: 1,
+				execId: "exec-fallback",
+				message: {
+					case: "readArgs",
+					value: create(ReadArgsSchema, { path: "/tmp/fallback", toolCallId: "call-fallback" }),
 				},
 			}),
 		},
@@ -106,6 +126,10 @@ async function startServer(): Promise<string> {
 			});
 			if (response.kind === "success") {
 				stream.end(Buffer.concat([textDeltaFrame(response.text), turnEndedFrame()]));
+				return;
+			}
+			if (response.kind === "exec-success") {
+				stream.end(Buffer.concat([execReadRequestFrame(), turnEndedFrame()]));
 				return;
 			}
 			const frames = response.partialText ? [textDeltaFrame(response.partialText)] : [];
@@ -232,5 +256,49 @@ describe("Cursor discovered effort wire fallback", () => {
 		expect(result.stopReason).toBe("error");
 		expect(result.content).toEqual([expect.objectContaining({ type: "text", text: "partial" })]);
 		expect(requests).toHaveLength(1);
+	});
+
+	it("keeps the fallback turn's exec bridge busy state on the watched outer stream", async () => {
+		responses = [{ kind: "error", code: "not_found", message: "Error" }, { kind: "exec-success" }];
+		const baseUrl = await startServer();
+		const execStarted = Promise.withResolvers<void>();
+		const releaseExec = Promise.withResolvers<void>();
+		const stream = streamCursor(makeModel(baseUrl), context, {
+			apiKey: "test-token",
+			sessionId: crypto.randomUUID(),
+			wireModelId: "gpt-5.6-sol-medium",
+			execHandlers: {
+				async read() {
+					execStarted.resolve();
+					await releaseExec.promise;
+					return {
+						role: "toolResult",
+						toolCallId: "call-fallback",
+						toolName: "read",
+						content: [{ type: "text", text: "file body" }],
+						isError: false,
+						timestamp: 1,
+					};
+				},
+			},
+		});
+		const drain = (async () => {
+			for await (const _event of stream) {
+				// drain to completion
+			}
+			return stream.result();
+		})();
+
+		await execStarted.promise;
+		// The watchdog reads the outer stream; the exec bridge marked the inner
+		// fallback stream busy. Without forwarding, this would read false and the
+		// idle watchdog would abort a healthy tool run.
+		expect(stream.hasPendingLocalWork).toBe(true);
+		releaseExec.resolve();
+
+		const result = await drain;
+		expect(result.stopReason).toBe("stop");
+		expect(stream.hasPendingLocalWork).toBe(false);
+		expect(requests).toHaveLength(2);
 	});
 });

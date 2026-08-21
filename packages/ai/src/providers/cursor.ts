@@ -939,12 +939,21 @@ function streamCursorWithWireMode(
 				h2Client?.close();
 
 				const fallbackStream = streamCursorWithWireMode(model, context, options, "discovered");
-				for await (const event of fallbackStream) {
-					if (event.type === "start") continue;
-					stream.push(event);
+				// The lazy watchdog observes THIS outer stream; the fallback's exec
+				// bridge marks the inner stream busy via `trackLocalWork`. Forward
+				// that busy state so a local tool on the retry turn is not aborted as
+				// a stalled provider stream (#4593 protection must survive the retry).
+				stream.forwardLocalWorkFrom(fallbackStream);
+				try {
+					for await (const event of fallbackStream) {
+						if (event.type === "start") continue;
+						stream.push(event);
+					}
+					const fallbackResult = await fallbackStream.result();
+					if (!stream.resultSettled) stream.end(fallbackResult);
+				} finally {
+					stream.forwardLocalWorkFrom(undefined);
 				}
-				const fallbackResult = await fallbackStream.result();
-				if (!stream.resultSettled) stream.end(fallbackResult);
 				return;
 			}
 			// Same reason as the success path: the Agent finalizes the synthesized
