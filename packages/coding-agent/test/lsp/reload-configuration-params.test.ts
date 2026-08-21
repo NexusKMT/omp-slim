@@ -1,3 +1,5 @@
+// Regression coverage for issue #8383: `lsp reload` must re-send the configured
+// settings instead of an empty object.
 import { describe, expect, test } from "bun:test";
 import { reloadConfigurationParams } from "@oh-my-pi/pi-coding-agent/lsp/servers";
 import type { ServerConfig } from "@oh-my-pi/pi-coding-agent/lsp/types";
