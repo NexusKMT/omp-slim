@@ -153,7 +153,11 @@ export function isIpcSendEpipe(err: Error): boolean {
  * malformed or truncated frame, Bun raises the decode failure as a
  * process-level `uncaughtException` in the *parent* rather than routing it to
  * the channel's `ipc()` callback (oven-sh/bun#37287). The error is a bare
- * `TypeError: Unable to deserialize data.` with no `code`, `syscall`, or stack.
+ * `TypeError: Unable to deserialize data.` whose only own property is `message`
+ * — it carries no `code`, no `syscall`, and no `stack`. Matching all four traits
+ * keeps unrelated application `TypeError`s (which always carry a populated
+ * multi-frame stack) on the fatal path, so a genuine bug is never silently
+ * swallowed.
  *
  * Every advanced-serialization channel in this process is an optional worker
  * subsystem (TTS, STT, tiny-title, mnemopi embeddings, JS eval), so one
@@ -163,7 +167,13 @@ export function isIpcSendEpipe(err: Error): boolean {
  * (#2997, #9158).
  */
 export function isWorkerIpcDeserializeError(err: unknown): boolean {
-	return err instanceof TypeError && err.message === "Unable to deserialize data.";
+	return (
+		err instanceof TypeError &&
+		err.message === "Unable to deserialize data." &&
+		!err.stack &&
+		!("code" in err) &&
+		!("syscall" in err)
+	);
 }
 
 /**

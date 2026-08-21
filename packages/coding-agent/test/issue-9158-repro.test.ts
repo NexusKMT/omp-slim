@@ -56,4 +56,25 @@ describe("issue #9158 — malformed worker IPC frame must not terminate the pare
 		expect(exitCode).toBe(0);
 		expect(stdout).toBe("SURVIVED_WITH_ERROR");
 	}, 20_000);
+
+	it("still faults on an unrelated TypeError with the same message but a real stack", async () => {
+		// Guards the narrowed matcher: an application-thrown `TypeError` carrying
+		// this exact message but a populated stack must stay on the fatal path,
+		// so a genuine bug is never silently swallowed as a worker IPC frame.
+		const repoRoot = path.resolve(import.meta.dir, "..");
+		const wrapperScript = `
+			import "@oh-my-pi/pi-coding-agent/subprocess/worker-client";
+			process.stdout.write("BEFORE_THROW");
+			queueMicrotask(() => { throw new TypeError("Unable to deserialize data."); });
+		`;
+		const proc = Bun.spawn([process.execPath, "-e", wrapperScript], {
+			cwd: repoRoot,
+			stdout: "pipe",
+			stderr: "pipe",
+			env: { ...process.env, PI_TEST_RUNTIME: "0" },
+		});
+		const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+		expect(exitCode).toBe(1);
+		expect(stdout).toBe("BEFORE_THROW");
+	}, 20_000);
 });
