@@ -223,6 +223,7 @@
 - Shadowed `/extensions` rows are informational only, including same-name MCP configs that share the winner's `mcp:<name>` id even when disablement wins display state (`enabled: false` + `_shadowed`).
 - `/extensions` joins custom tools by originating file first: a same-name builtin/MCP/SDK tool is not treated as the custom file, and a factory that also exports the file stem still lists every sibling. Project list hints accept Windows `.omp` paths.
 - Incremental `/mcp enable` and `/extensions` MCP enable keep already-connected servers' tools in `MCPManager.getTools()`; `connectServers()` merges per-server ownership instead of replacing the whole registry.
+- `/extensions` custom-tool inspector rows now join live tools by the originating file path carried through `getAllToolInfos()`, so `git.ts` and `git_commit.ts` stay separate while a multi-export factory like `systemd.ts` still groups siblings.
 - `/extensions` Ctrl+O expand follows the selected row (`id` + path). Changing selection collapses again; a live refresh of the same row keeps the expand state.
 
 

@@ -204,12 +204,6 @@ function sameToolPath(left: string, right: string): boolean {
 	return normalizePathForComparison(left) === normalizePathForComparison(right);
 }
 
-function isFactoryExportName(extensionName: string, toolName: string): boolean {
-	return (
-		toolName === extensionName || toolName.startsWith(`${extensionName}_`) || toolName.startsWith(`${extensionName}-`)
-	);
-}
-
 export function liveToolsForExtension(ext: Extension, source: ToolRuntimeSource | undefined): LiveToolRecord[] {
 	if (!source || isShadowedExtension(ext)) return [];
 	const exact = source.getLiveTool(ext.name);
@@ -228,11 +222,16 @@ export function liveToolsForExtension(ext: Extension, source: ToolRuntimeSource 
 	if (candidates.some(tool => tool.sourcePath && isFilesystemToolPath(tool.sourcePath))) {
 		return [];
 	}
-	return candidates.filter(tool => {
-		if (!isFactoryExportName(ext.name, tool.name)) return false;
-		if (tool.source === "builtin" || tool.source === "mcp" || tool.source === "sdk") return false;
-		return true;
-	});
+	if (
+		exact &&
+		exact.name === ext.name &&
+		exact.source !== "builtin" &&
+		exact.source !== "mcp" &&
+		exact.source !== "sdk"
+	) {
+		return [exact];
+	}
+	return [];
 }
 
 export function liveToolDetail(live: LiveToolRecord | undefined): string | undefined {

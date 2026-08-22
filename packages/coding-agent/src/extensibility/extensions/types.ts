@@ -629,6 +629,8 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	mcpServerName?: string;
 	/** Original MCP tool name for discovery/search metadata. */
 	mcpToolName?: string;
+	/** Authoritative originating file for a discovered custom-tool module. */
+	sourcePath?: string;
 	/** Execute the tool. */
 	execute(
 		toolCallId: string,

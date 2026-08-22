@@ -41,10 +41,11 @@ function systemdExtension(): Extension {
 	};
 }
 
-function systemdFactory() {
+function systemdFactory(sourcePath = "/home/sf/.omp/agent/tools/systemd.ts") {
 	return [
 		{
 			name: "systemd_inspect",
+			sourcePath,
 			label: "systemd inspect",
 			description: "Read systemd state. Inspect first.",
 			parameters: {
@@ -56,6 +57,7 @@ function systemdFactory() {
 		},
 		{
 			name: "systemd_control",
+			sourcePath,
 			label: "systemd control",
 			description: "Mutate running or enablement state of write-prefix units.",
 			parameters: {
@@ -66,6 +68,7 @@ function systemdFactory() {
 		},
 		{
 			name: "systemd_author",
+			sourcePath,
 			label: "systemd author",
 			description: "Create, update, or retire MCP-managed definitions.",
 			parameters: {
@@ -77,8 +80,8 @@ function systemdFactory() {
 	];
 }
 
-function systemdSource() {
-	const tools = systemdFactory();
+function systemdSource(sourcePath?: string) {
+	const tools = systemdFactory(sourcePath);
 	return {
 		getLiveTool: (name: string) => tools.find(tool => tool.name === name),
 		listLiveTools: () => tools,
@@ -355,7 +358,7 @@ describe("tool inspector", () => {
 		expect(text).not.toContain("args");
 	});
 
-	test("joins a multi-export factory by filename prefix without authoring changes", () => {
+	test("joins a multi-export factory by originating source file", () => {
 		const panel = new InspectorPanel();
 		panel.setToolSource(systemdSource());
 		panel.setExtension(systemdExtension());
@@ -385,7 +388,7 @@ describe("tool inspector", () => {
 					source: projectSource(),
 				},
 			],
-			{ toolSource: systemdSource() },
+			{ toolSource: systemdSource("/home/sf/worlds/personal/.omp/tools/systemd.ts") },
 		);
 		list.setFocused(true);
 		const text = Bun.stripANSI(list.render(80).join("\n"));
@@ -477,6 +480,94 @@ describe("tool inspector", () => {
 		expect(text).toContain("systemd");
 		expect(text).toContain("systemd_control");
 		expect(text).toContain("Mutate write-prefix units");
+	});
+
+	test("does not treat a separately-filed prefix-named tool as a factory sibling", () => {
+		const gitPath = "/tmp/tools/git.ts";
+		const commitPath = "/tmp/tools/git_commit.ts";
+		const tools = [
+			{
+				name: "git",
+				description: "git tool",
+				source: "extension" as const,
+				sourcePath: gitPath,
+				parameters: { type: "object", properties: {} },
+			},
+			{
+				name: "git_commit",
+				description: "commit tool",
+				source: "extension" as const,
+				sourcePath: commitPath,
+				parameters: { type: "object", properties: {} },
+			},
+		];
+		const source = {
+			getLiveTool: (name: string) => tools.find(tool => tool.name === name),
+			listLiveTools: () => tools,
+		};
+		const gitExt: Extension = {
+			id: "tool:git",
+			kind: "tool",
+			name: "git",
+			displayName: "git",
+			description: "git custom tool",
+			path: gitPath,
+			source: userSource(),
+			state: "active",
+			raw: { name: "git", description: "git custom tool", path: gitPath },
+		};
+		const commitExt: Extension = {
+			...gitExt,
+			id: "tool:git_commit",
+			name: "git_commit",
+			displayName: "git_commit",
+			description: "git_commit custom tool",
+			path: commitPath,
+			raw: { name: "git_commit", description: "git_commit custom tool", path: commitPath },
+		};
+		expect(liveToolsForExtension(gitExt, source).map(tool => tool.name)).toEqual(["git"]);
+		expect(liveToolsForExtension(commitExt, source).map(tool => tool.name)).toEqual(["git_commit"]);
+
+		const panel = new InspectorPanel();
+		panel.setToolSource(source);
+		panel.setExtension(gitExt);
+		const text = render(panel);
+		expect(text).toContain("git");
+		expect(text).not.toContain("git_commit");
+		expect(text).not.toContain("commit tool");
+	});
+
+	test("does not prefix-group extension tools that lack a source file", () => {
+		const tools = [
+			{
+				name: "git",
+				description: "git tool",
+				source: "extension" as const,
+				parameters: { type: "object", properties: {} },
+			},
+			{
+				name: "git_commit",
+				description: "commit tool",
+				source: "extension" as const,
+				parameters: { type: "object", properties: {} },
+			},
+		];
+		const gitExt: Extension = {
+			id: "tool:git",
+			kind: "tool",
+			name: "git",
+			displayName: "git",
+			path: "/tmp/tools/git.ts",
+			source: userSource(),
+			state: "active",
+			raw: { name: "git", path: "/tmp/tools/git.ts" },
+		};
+		expect(
+			liveToolsForExtension(gitExt, {
+				getLiveTool: name => tools.find(tool => tool.name === name),
+				listLiveTools: () => tools,
+			}).map(tool => tool.name),
+		).toEqual(["git"]);
 	});
 
 	test("does not adopt builtin tools that only share a name prefix", () => {
