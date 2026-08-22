@@ -47,6 +47,11 @@
 - Fixed Google Cloud Code Assist and Antigravity rejecting MCP tool schemas with unsupported annotations (`x-mcp-header`, `deprecated`, `readOnly`, `writeOnly`, `$comment`).
 - Fixed Cursor provider issues with native file edit streaming (`editToolCall`) and ensuring always-apply system rules are properly preserved.
 - Fixed Cursor HTTP/2 requests ignoring standard proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`).
+### Fixed
+
+- Fixed `PI_PROXY` covering only provider streams: OAuth token refresh and login, usage probes, and model discovery went out through the bare global `fetch` and ignored it, so a region-blocked token endpoint answered `403 Request not allowed` (Anthropic `/v1/oauth/token`) and disabled the credential while the proxied stream itself worked. `installGlobalProxyFetch()` now routes the process-wide `fetch` through `PI_PROXY`; a per-request proxy such as `PI_PROXY_<PROVIDER>` still wins, and loopback / private-range / `NO_PROXY` targets stay direct.
+- Fixed Anthropic inference ignoring every proxy setting. `coworkFetch` runs on `node:https`, whose Bun shim discards both `agent.createConnection` and `options.createConnection`: the CONNECT tunnel to `PI_PROXY` was built, TLS-negotiated, then abandoned, and the request dialed `api.anthropic.com` on the default route (measured at the proxy: 581 bytes of handshake, zero request bytes). On a region-blocked egress that returned `403 {"type":"forbidden","message":"Request not allowed"}` with the proxy apparently configured. Proxied requests now go through Bun's own `fetch`, which honors `init.proxy`, trading the Cowork TLS/header profile for a proxy that actually carries the traffic; the dead tunnel plumbing is gone from the transport. `node:http2` (Cursor) does honor `createConnection` and is unaffected.
+- Fixed `cowork-fetch` capturing `globalThis.fetch` at module load, so a proxy wrapper installed later in startup was ignored on its fallback path.
 
 ## [17.4.0] - 2026-08-20
 

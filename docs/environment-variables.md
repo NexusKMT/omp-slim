@@ -129,6 +129,20 @@ Provider HTTP fetches resolve proxies in this order after applying `NO_PROXY` / 
 
 Provider proxy lookups are cached for the process lifetime. Localhost targets bypass the provider fetch wrapper.
 
+Scope differs between the two `PI_PROXY` forms:
+
+- `PI_PROXY` is installed on the process-wide `fetch` at CLI startup, so it also
+  covers requests made outside the provider fetch wrapper — OAuth token refresh
+  and login, usage probes, model discovery. Without that, a region-blocked token
+  endpoint returns `403 Request not allowed` on refresh even though the stream
+  itself is proxied.
+- `PI_PROXY_<PROVIDER>` applies only to that provider's requests, and overrides
+  `PI_PROXY` for them. It does not cover the non-provider-scoped calls above; set
+  `PI_PROXY` too if the provider blocks your region.
+
+Loopback, link-local, private-range (`10/8`, `172.16/12`, `192.168/16`), and
+`NO_PROXY` targets always bypass, so local model servers and MCP hosts stay direct.
+
 ### Anthropic Foundry Gateway (Azure / enterprise proxy)
 
 When `CLAUDE_CODE_USE_FOUNDRY` is enabled, Anthropic requests switch to Foundry mode:
