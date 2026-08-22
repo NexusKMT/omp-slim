@@ -3,6 +3,8 @@
 //! `AppleSpell` exposes UTF-16 ranges through [`NSSpellChecker`]. JavaScript
 //! strings use the same indexing unit, so ranges cross N-API without remapping.
 //! Other platforms expose the same API as an unavailable, no-op backend.
+//! All `AppKit` work runs serially on one lazily spawned, dedicated spelling
+//! thread so the singleton keeps a stable thread identity.
 
 use napi_derive::napi;
 
@@ -26,6 +28,20 @@ mod platform {
 
 	use super::SpellingRange;
 
+	type Job = Box<dyn FnOnce() + Send + 'static>;
+
+	static SPELLING_THREAD: LazyLock<flume::Sender<Job>> = LazyLock::new(|| {
+		let (sender, receiver) = flume::unbounded::<Job>();
+		std::thread::Builder::new()
+			.name("pi-native-spelling".into())
+			.spawn(move || {
+				while let Ok(job) = receiver.recv() {
+					job();
+				}
+			})
+			.expect("failed to spawn the native spelling thread");
+		sender
+	});
 	static APP_KIT_LOADED: LazyLock<bool> = LazyLock::new(|| {
 		// SAFETY: AppKit documents `NSApplicationLoad` as process-global and
 		// idempotent; `LazyLock` guarantees this process calls it at most once.
@@ -45,6 +61,22 @@ mod platform {
 		let checker = NSSpellChecker::sharedSpellChecker();
 		checker.setAutomaticallyIdentifiesLanguages(true);
 		Ok(checker)
+	}
+
+	pub async fn run<T>(work: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T>
+	where
+		T: Send + 'static,
+	{
+		let (reply, result) = flume::bounded(1);
+		SPELLING_THREAD
+			.send(Box::new(move || {
+				let _ = reply.send(work());
+			}))
+			.map_err(|_| Error::new(Status::GenericFailure, "native spelling thread stopped"))?;
+		result
+			.recv_async()
+			.await
+			.map_err(|_| Error::new(Status::GenericFailure, "native spelling thread stopped"))?
 	}
 
 	fn ns_range(start: u32, length: u32) -> Result<NSRange> {
@@ -129,11 +161,12 @@ pub fn macos_spell_checker_available() -> bool {
 /// Find every misspelled word using the active macOS dictionaries.
 ///
 /// Returns an empty list when Apple's spelling service is unavailable.
+/// On macOS, the check runs on the dedicated spelling thread.
 #[napi(js_name = "macOSCheckSpelling")]
-pub fn macos_check_spelling(text: String) -> napi::Result<Vec<SpellingRange>> {
+pub async fn macos_check_spelling(text: String) -> napi::Result<Vec<SpellingRange>> {
 	#[cfg(target_os = "macos")]
 	{
-		platform::check(&text)
+		platform::run(move || platform::check(&text)).await
 	}
 	#[cfg(not(target_os = "macos"))]
 	{
@@ -145,11 +178,16 @@ pub fn macos_check_spelling(text: String) -> napi::Result<Vec<SpellingRange>> {
 /// Return macOS dictionary completions for one partial-word range.
 ///
 /// Returns an empty list when Apple's spelling service is unavailable.
+/// On macOS, the lookup runs on the dedicated spelling thread.
 #[napi(js_name = "macOSCompleteWord")]
-pub fn macos_complete_word(text: String, start: u32, length: u32) -> napi::Result<Vec<String>> {
+pub async fn macos_complete_word(
+	text: String,
+	start: u32,
+	length: u32,
+) -> napi::Result<Vec<String>> {
 	#[cfg(target_os = "macos")]
 	{
-		platform::completions(&text, start, length)
+		platform::run(move || platform::completions(&text, start, length)).await
 	}
 	#[cfg(not(target_os = "macos"))]
 	{
@@ -162,15 +200,16 @@ pub fn macos_complete_word(text: String, start: u32, length: u32) -> napi::Resul
 ///
 /// Returns `null` when no confident correction exists or the service is
 /// unavailable.
+/// On macOS, the lookup runs on the dedicated spelling thread.
 #[napi(js_name = "macOSAutocorrectWord")]
-pub fn macos_autocorrect_word(
+pub async fn macos_autocorrect_word(
 	text: String,
 	start: u32,
 	length: u32,
 ) -> napi::Result<Option<String>> {
 	#[cfg(target_os = "macos")]
 	{
-		platform::correction(&text, start, length)
+		platform::run(move || platform::correction(&text, start, length)).await
 	}
 	#[cfg(not(target_os = "macos"))]
 	{
@@ -181,11 +220,16 @@ pub fn macos_autocorrect_word(
 /// Return macOS replacement guesses for one misspelled-word range.
 ///
 /// Returns an empty list when Apple's spelling service is unavailable.
+/// On macOS, the lookup runs on the dedicated spelling thread.
 #[napi(js_name = "macOSSpellingGuesses")]
-pub fn macos_spelling_guesses(text: String, start: u32, length: u32) -> napi::Result<Vec<String>> {
+pub async fn macos_spelling_guesses(
+	text: String,
+	start: u32,
+	length: u32,
+) -> napi::Result<Vec<String>> {
 	#[cfg(target_os = "macos")]
 	{
-		platform::guesses(&text, start, length)
+		platform::run(move || platform::guesses(&text, start, length)).await
 	}
 	#[cfg(not(target_os = "macos"))]
 	{

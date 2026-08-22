@@ -446,9 +446,17 @@ export interface EditorTextAssistProvider {
 	/** Return ghost-text suffix for the partial word at the cursor, or `null`. */
 	getWordCompletion?(lines: string[], cursorLine: number, cursorCol: number): string | null;
 	/** Return a correction after one single-character insertion, or `null`. */
-	tryAutocorrect?(lines: string[], cursorLine: number, cursorCol: number): EditorInlineReplacement | null;
+	tryAutocorrect?(
+		lines: string[],
+		cursorLine: number,
+		cursorCol: number,
+	): EditorInlineReplacement | null | Promise<EditorInlineReplacement | null>;
 	/** Return replacement candidates for the misspelled word at the cursor. */
-	getWordReplacements?(lines: string[], cursorLine: number, cursorCol: number): EditorWordReplacements | null;
+	getWordReplacements?(
+		lines: string[],
+		cursorLine: number,
+		cursorCol: number,
+	): EditorWordReplacements | null | Promise<EditorWordReplacements | null>;
 }
 
 type HistoryCursorAnchor = "start" | "end";
@@ -522,6 +530,8 @@ export class Editor implements Component, Focusable {
 	#autocompleteRequestId: number = 0;
 	#autocompleteMaxVisible: number = 10;
 	onAutocompleteUpdate?: () => void;
+	/** Called after an async text-assist result mutates the document outside an input event, so hosts can schedule a repaint. */
+	onTextAssistApplied?: () => void;
 	/** Terminal height source for clamping the autocomplete dropdown. Hosts wire this to their Terminal's rows. */
 	viewportRowsProvider?: () => number;
 
@@ -1375,7 +1385,7 @@ export class Editor implements Component, Focusable {
 		}
 
 		if (kb.matchesCanonical(canonical, "tui.editor.spellingSuggestions")) {
-			this.#showSpellingSuggestions();
+			void this.#showSpellingSuggestions();
 			return;
 		}
 
@@ -1541,7 +1551,7 @@ export class Editor implements Component, Focusable {
 
 		// Tab key - context-aware completion (but not when already autocompleting)
 		if (kb.matchesCanonical(canonical, "tui.input.tab") && !this.#autocompleteState) {
-			this.#handleTabCompletion();
+			void this.#handleTabCompletion();
 			return;
 		}
 
@@ -2184,12 +2194,27 @@ export class Editor implements Component, Focusable {
 			const textBeforeCursor = replaceLine.slice(0, this.#state.cursorCol);
 			const inlineReplacement = this.#autocompleteProvider?.trySyncInlineReplace?.(textBeforeCursor);
 			if (inlineReplacement && this.#applyInlineReplacement(inlineReplacement)) return;
-			const autocorrection = this.#textAssistProvider?.tryAutocorrect?.(
-				this.#state.lines,
-				this.#state.cursorLine,
-				this.#state.cursorCol,
-			);
-			if (autocorrection && this.#applyInlineReplacement(autocorrection)) return;
+			const cursorLine = this.#state.cursorLine;
+			const cursorCol = this.#state.cursorCol;
+			const currentLine = this.#state.lines[cursorLine] ?? "";
+			const autocorrection = this.#textAssistProvider?.tryAutocorrect?.(this.#state.lines, cursorLine, cursorCol);
+			if (autocorrection instanceof Promise) {
+				autocorrection
+					.then(replacement => {
+						if (
+							replacement &&
+							this.#state.cursorLine === cursorLine &&
+							this.#state.cursorCol === cursorCol &&
+							this.#state.lines[cursorLine] === currentLine &&
+							this.#applyInlineReplacement(replacement)
+						) {
+							this.onTextAssistApplied?.();
+						}
+					})
+					.catch(() => {});
+			} else if (autocorrection && this.#applyInlineReplacement(autocorrection)) {
+				return;
+			}
 		}
 
 		// Check if we should trigger or update autocomplete
@@ -3420,7 +3445,9 @@ export class Editor implements Component, Focusable {
 	async #handleTabCompletion(): Promise<void> {
 		const wordCompletion = this.#getWordCompletion();
 		if (wordCompletion) {
-			this.#insertTextAtCursor(wordCompletion);
+			const currentLine = this.#state.lines[this.#state.cursorLine] ?? "";
+			const after = currentLine.slice(this.#state.cursorCol);
+			this.#insertTextAtCursor(wordCompletion + (/^[\s.,;:!?"\])}]/.test(after) ? "" : " "));
 			return;
 		}
 		if (!this.#autocompleteProvider) return;
@@ -3439,14 +3466,17 @@ export class Editor implements Component, Focusable {
 			await this.#forceFileAutocomplete();
 		}
 	}
-	#showSpellingSuggestions(): void {
-		const replacements = this.#textAssistProvider?.getWordReplacements?.(
-			this.#state.lines,
-			this.#state.cursorLine,
-			this.#state.cursorCol,
-		);
+	async #showSpellingSuggestions(): Promise<void> {
+		const cursorLine = this.#state.cursorLine;
+		const cursorCol = this.#state.cursorCol;
+		const lines = [...this.#state.lines];
+		const result = this.#textAssistProvider?.getWordReplacements?.(lines, cursorLine, cursorCol);
+		const replacements = result instanceof Promise ? await result.catch(() => null) : result;
 		if (
 			!replacements ||
+			this.#state.cursorLine !== cursorLine ||
+			this.#state.cursorCol !== cursorCol ||
+			this.#state.lines[replacements.line] !== lines[replacements.line] ||
 			replacements.line < 0 ||
 			replacements.line >= this.#state.lines.length ||
 			replacements.startCol < 0 ||

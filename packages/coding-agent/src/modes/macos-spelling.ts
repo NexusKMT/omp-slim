@@ -36,10 +36,10 @@ export interface SpellingDecorationContext {
 /** Native spelling operations used by {@link MacOSSpellingProvider}. */
 export interface SpellingBackend {
 	isAvailable(): boolean;
-	checkSpelling(text: string): readonly native.SpellingRange[];
-	completeWord(text: string, start: number, length: number): readonly string[];
-	autocorrectWord(text: string, start: number, length: number): string | null;
-	spellingGuesses(text: string, start: number, length: number): readonly string[];
+	checkSpelling(text: string): Promise<readonly native.SpellingRange[]>;
+	completeWord(text: string, start: number, length: number): Promise<readonly string[]>;
+	autocorrectWord(text: string, start: number, length: number): Promise<string | null>;
+	spellingGuesses(text: string, start: number, length: number): Promise<readonly string[]>;
 }
 
 const NATIVE_BACKEND: SpellingBackend = {
@@ -83,10 +83,17 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 	#features: SpellingFeatures = { typoDetection: false, autocomplete: false, autocorrect: false };
 	#available: boolean;
 	#availabilityChecked = false;
+	#cacheGeneration = 0;
 	#typoCache = new Map<string, readonly native.SpellingRange[]>();
+	#typoInFlight = new Map<string, Promise<readonly native.SpellingRange[]>>();
+	#completionCache = new Map<string, string | null>();
+	#completionInFlight = new Set<string>();
 	#sourceText = "";
 	#sourceMask = "";
 	#sourceLineOffsets: number[] = [];
+
+	/** Invoked when an asynchronous spelling result can change rendered output. */
+	onUpdate: (() => void) | undefined;
 
 	constructor(private readonly backend: SpellingBackend = NATIVE_BACKEND) {
 		this.#available = false;
@@ -106,7 +113,7 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 			this.#availabilityChecked = true;
 			this.#available = typeof this.backend.isAvailable === "function" && this.backend.isAvailable();
 		}
-		this.#typoCache.clear();
+		this.#clearCaches();
 	}
 
 	/** Add red undercurls to misspellings while preserving visible text width. */
@@ -119,7 +126,11 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 		if (!this.#sourceRangeIsProse(context, context.startCol, context.startCol + text.length)) {
 			return decorate(text);
 		}
-		const ranges = this.#getTypoRanges(text);
+		const ranges = this.#typoCache.get(text);
+		if (!ranges) {
+			void this.#loadTypoRanges(text);
+			return decorate(text);
+		}
 		if (ranges.length === 0) return decorate(text);
 		let rendered = "";
 		let cursor = 0;
@@ -135,7 +146,7 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 		return rendered + decorate(text.slice(cursor));
 	}
 
-	/** Return the macOS completion suffix for the word ending at the cursor. */
+	/** Return the cached macOS completion suffix for the word ending at the cursor. */
 	getWordCompletion(lines: string[], cursorLine: number, cursorCol: number): string | null {
 		if (!this.#available || !this.#features.autocomplete) return null;
 		const line = lines[cursorLine] ?? "";
@@ -147,22 +158,20 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 		if (!isProseWord(line, masked, start, cursorCol)) return null;
 		const context = this.#context(lines, cursorLine);
 		if (!this.#sourceRangeIsProse(context, start, cursorCol)) return null;
+
 		const prefix = match[0];
-		const lowerPrefix = prefix.toLocaleLowerCase();
-		try {
-			for (const completion of this.backend.completeWord(line, start, prefix.length)) {
-				if (completion.length > prefix.length && completion.toLocaleLowerCase().startsWith(lowerPrefix)) {
-					return completion.slice(prefix.length);
-				}
-			}
-		} catch (error) {
-			this.#disable(error);
-		}
+		const key = `${start}:${prefix.length}:${line}`;
+		if (this.#completionCache.has(key)) return this.#completionCache.get(key) ?? null;
+		this.#scheduleWordCompletion(key, line, start, prefix);
 		return null;
 	}
 
 	/** Return the confident macOS correction after a completed prose word. */
-	tryAutocorrect(lines: string[], cursorLine: number, cursorCol: number): EditorInlineReplacement | null {
+	async tryAutocorrect(
+		lines: string[],
+		cursorLine: number,
+		cursorCol: number,
+	): Promise<EditorInlineReplacement | null> {
 		if (!this.#available || !this.#features.autocorrect) return null;
 		const textBeforeCursor = (lines[cursorLine] ?? "").slice(0, cursorCol);
 		const match = COMPLETED_WORD.exec(textBeforeCursor);
@@ -175,7 +184,7 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 		const context = this.#context(lines, cursorLine);
 		if (!this.#sourceRangeIsProse(context, start, start + word.length)) return null;
 		try {
-			const correction = this.backend.autocorrectWord(textBeforeCursor, start, word.length);
+			const correction = await this.backend.autocorrectWord(textBeforeCursor, start, word.length);
 			if (!correction || correction === word) return null;
 			return { replaceLen: word.length + boundary.length, insert: correction + boundary };
 		} catch (error) {
@@ -185,13 +194,18 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 	}
 
 	/** Return macOS replacement guesses for the misspelled word at the cursor. */
-	getWordReplacements(lines: string[], cursorLine: number, cursorCol: number): EditorWordReplacements | null {
+	async getWordReplacements(
+		lines: string[],
+		cursorLine: number,
+		cursorCol: number,
+	): Promise<EditorWordReplacements | null> {
 		if (!this.#available || !this.#features.typoDetection) return null;
 
 		const line = lines[cursorLine] ?? "";
 		const context = this.#context(lines, cursorLine);
 		if (!this.#sourceRangeIsProse(context, 0, line.length)) return null;
-		const range = this.#getTypoRanges(line).find(candidate => {
+		const ranges = this.#typoCache.get(line) ?? (await this.#loadTypoRanges(line));
+		const range = ranges.find(candidate => {
 			const end = candidate.start + candidate.length;
 			return (
 				cursorCol >= candidate.start &&
@@ -199,11 +213,11 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 				this.#sourceRangeIsProse(context, candidate.start, end)
 			);
 		});
-		if (!range) return null;
+		if (!range || !this.#available || !this.#features.typoDetection) return null;
 		try {
 			const seen = new Set<string>();
 			const items: string[] = [];
-			for (const guess of this.backend.spellingGuesses(line, range.start, range.length)) {
+			for (const guess of await this.backend.spellingGuesses(line, range.start, range.length)) {
 				if (!guess || seen.has(guess)) continue;
 				seen.add(guess);
 				items.push(guess);
@@ -222,22 +236,82 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 		}
 	}
 
-	#getTypoRanges(text: string): readonly native.SpellingRange[] {
+	#loadTypoRanges(text: string): Promise<readonly native.SpellingRange[]> {
 		const cached = this.#typoCache.get(text);
-		if (cached) return cached;
-		let ranges: readonly native.SpellingRange[] = [];
+		if (cached) return Promise.resolve(cached);
+		const pending = this.#typoInFlight.get(text);
+		if (pending) return pending;
+
+		const generation = this.#cacheGeneration;
+		const request = this.#fetchTypoRanges(text, generation);
+		this.#typoInFlight.set(text, request);
+		void request.then(
+			() => {
+				if (this.#typoInFlight.get(text) === request) this.#typoInFlight.delete(text);
+			},
+			() => {
+				if (this.#typoInFlight.get(text) === request) this.#typoInFlight.delete(text);
+			},
+		);
+		return request;
+	}
+
+	async #fetchTypoRanges(text: string, generation: number): Promise<readonly native.SpellingRange[]> {
+		let checked: readonly native.SpellingRange[];
 		try {
-			const masked = maskNonProse(text);
-			ranges = this.backend
-				.checkSpelling(text)
-				.filter(range => isProseWord(text, masked, range.start, range.start + range.length))
-				.toSorted((left, right) => left.start - right.start);
+			checked = await this.backend.checkSpelling(text);
 		} catch (error) {
 			this.#disable(error);
+			return [];
 		}
+		if (generation !== this.#cacheGeneration || !this.#available) return [];
+
+		const masked = maskNonProse(text);
+		const ranges = checked
+			.filter(range => isProseWord(text, masked, range.start, range.start + range.length))
+			.toSorted((left, right) => left.start - right.start);
 		if (this.#typoCache.size >= CACHE_LIMIT) this.#typoCache.clear();
 		this.#typoCache.set(text, ranges);
+		// An empty result leaves the already-undecorated render correct; only a
+		// range that will add undercurls is worth a repaint.
+		if (ranges.length > 0) this.onUpdate?.();
 		return ranges;
+	}
+
+	#scheduleWordCompletion(key: string, line: string, start: number, prefix: string): void {
+		if (this.#completionInFlight.has(key)) return;
+		this.#completionInFlight.add(key);
+		const generation = this.#cacheGeneration;
+		void this.#fetchWordCompletion(key, line, start, prefix, generation);
+	}
+
+	async #fetchWordCompletion(
+		key: string,
+		line: string,
+		start: number,
+		prefix: string,
+		generation: number,
+	): Promise<void> {
+		try {
+			const completions = await this.backend.completeWord(line, start, prefix.length);
+			if (generation !== this.#cacheGeneration || !this.#available) return;
+			const lowerPrefix = prefix.toLocaleLowerCase();
+			let suffix: string | null = null;
+			for (const completion of completions) {
+				if (completion.length > prefix.length && completion.toLocaleLowerCase().startsWith(lowerPrefix)) {
+					suffix = completion.slice(prefix.length);
+					break;
+				}
+			}
+			if (this.#completionCache.size >= CACHE_LIMIT) this.#completionCache.clear();
+			this.#completionCache.set(key, suffix);
+			// A null suffix means no ghost text; the current paint is already right.
+			if (suffix !== null) this.onUpdate?.();
+		} catch (error) {
+			this.#disable(error);
+		} finally {
+			if (generation === this.#cacheGeneration) this.#completionInFlight.delete(key);
+		}
 	}
 
 	#context(lines: readonly string[], line: number): SpellingDecorationContext {
@@ -268,10 +342,18 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 		}
 	}
 
+	#clearCaches(): void {
+		this.#cacheGeneration++;
+		this.#typoCache.clear();
+		this.#typoInFlight.clear();
+		this.#completionCache.clear();
+		this.#completionInFlight.clear();
+	}
+
 	#disable(error: unknown): void {
 		if (!this.#available) return;
 		this.#available = false;
-		this.#typoCache.clear();
+		this.#clearCaches();
 		logger.warn("macOS spelling service failed; disabling editor spelling assistance", { error: String(error) });
 	}
 }
