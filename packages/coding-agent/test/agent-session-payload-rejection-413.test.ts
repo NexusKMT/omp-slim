@@ -53,7 +53,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		authStorage?.close();
 	});
 
-	async function createSession(contextWindow: number, seed?: { toolText: string }): Promise<void> {
+	async function createSession(contextWindow: number | null, seed?: { toolText: string }): Promise<void> {
 		// The payload-rejection tests exercise SessionMaintenance's overflow
 		// routing, not extension discovery. Keep the production hook boundary
 		// while short-circuiting summarization, mirroring the progress-guard
@@ -79,7 +79,13 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		if (!bundled) {
 			throw new Error("Expected built-in anthropic model to exist");
 		}
-		const model = { ...bundled, contextWindow, maxTokens: Math.min(64_000, Math.floor(contextWindow / 2)) };
+		const model = {
+			...bundled,
+			contextWindow,
+			// Custom/discovered models legitimately carry `contextWindow: null`;
+			// keep the bundled maxTokens there instead of deriving NaN.
+			maxTokens: contextWindow ? Math.min(64_000, Math.floor(contextWindow / 2)) : bundled.maxTokens,
+		};
 
 		// Seed the LIVE agent messages (not just branch entries): the honest-skip
 		// arbitration reads #estimateStoredContextTokens, which counts
@@ -279,9 +285,47 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		// Precedence pin: token evidence wins over the low-token gauge — the
 		// standard overflow recovery runs and no payload notice appears.
 		expect(startCount()).toBeGreaterThanOrEqual(1);
+
 		expect(prepareSpy).toHaveBeenCalled();
 		expect(notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413")).length).toBe(0);
 		expect(promptSpy).not.toHaveBeenCalled();
 		expect(continueSpy).not.toHaveBeenCalled();
+	});
+
+	it("treats a payload-only 413 as terminal without a local context window", async () => {
+		await createSession(null);
+		const checkSpy = vi.spyOn(SessionMaintenance.prototype, "checkCompaction");
+		const prepareSpy = vi.spyOn(compactionModule, "prepareCompaction");
+		const promptSpy = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined as never);
+		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
+
+		const notices = collectNotices();
+		const endCount = countCompactionEvents("auto_compaction_end");
+
+		const assistantMsg = payloadRejectionAssistant();
+		session.agent.emitExternalEvent({ type: "message_end", message: assistantMsg });
+		session.agent.emitExternalEvent({ type: "agent_end", messages: [assistantMsg] });
+
+		await session.waitForIdle();
+
+		// A missing gauge (custom/discovered models carry contextWindow: null)
+		// must not resurrect the ineffective-compaction path: the unambiguous
+		// payload rejection still surfaces and blocks the resend.
+		expect(endCount()).toBe(0);
+		expect(prepareSpy).not.toHaveBeenCalled();
+		expect(promptSpy).not.toHaveBeenCalled();
+		expect(continueSpy).not.toHaveBeenCalled();
+
+		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
+		expect(payloadNotices.length).toBe(1);
+		expect(payloadNotices[0].level).toBe("warning");
+		// Gauge-less notice variant: no headroom claim, no dead-end fragment.
+		expect(payloadNotices[0].message).not.toContain("headroom");
+		expect(payloadNotices[0].message).not.toContain(NO_PROGRESS_FRAGMENT);
+
+		const checkResults = await Promise.all(
+			checkSpy.mock.results.map(r => r.value as { automaticContinuationBlocked?: boolean }),
+		);
+		expect(checkResults.some(r => r.automaticContinuationBlocked === true)).toBe(true);
 	});
 });

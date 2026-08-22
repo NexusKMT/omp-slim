@@ -142,11 +142,15 @@ function compactionDeadEndWarning(remedies: string): string {
  * do (shrink bytes or image budgets), and the actions left to the user.
  */
 function payloadRejectionNotice(storedTokens: number, contextWindow: number): string {
+	const remedies =
+		"Token compaction cannot shrink bytes or image budgets; reduce or remove archived image frames (e.g. switch compaction.methodOrder away from snapcompact) or raise the server/proxy body limit.";
+	if (contextWindow <= 0) {
+		// Custom/discovered models may carry `contextWindow: null`; without a
+		// local gauge there is no headroom claim to make.
+		return `The provider rejected the request size or media budget (HTTP 413), and this model has no known context window to compare against — this is NOT a token-context problem. ${remedies}`;
+	}
 	const headroom = Math.max(0, Math.floor(contextWindow - storedTokens));
-	return (
-		`The provider rejected the request size or media budget (HTTP 413), but ~${headroom.toLocaleString("en-US")} tokens of headroom remain locally — this is NOT a token-context problem. ` +
-		"Token compaction cannot shrink bytes or image budgets; reduce or remove archived image frames (e.g. switch compaction.methodOrder away from snapcompact) or raise the server/proxy body limit."
-	);
+	return `The provider rejected the request size or media budget (HTTP 413), but ~${headroom.toLocaleString("en-US")} tokens of headroom remain locally — this is NOT a token-context problem. ${remedies}`;
 }
 
 /** Creates one provider-scoped compaction lifecycle descriptor. */
@@ -1774,19 +1778,24 @@ export class SessionMaintenance {
 		const errorIsFromBeforeCompaction =
 			compactionEntry !== null && assistantMessage.timestamp < new Date(compactionEntry.timestamp).getTime();
 		// A byte/media-driven HTTP 413 (request-body size or provider
-		// vision-media budget, #9235) cannot be fixed by token compaction:
-		// when the local gauge shows real headroom, surface the rejection
-		// honestly instead of compacting. Bare "413 (no body)" sets BOTH
-		// ContextOverflow and PayloadRejected (proxy ambiguity) — this
-		// headroom arbitration decides for it too. With no local headroom
-		// the provider's token accounting may be right after all, so the
-		// error falls through to normal overflow recovery below.
+		// vision-media budget, #9235) cannot be fixed by token compaction.
+		// Arbitration goes by classification shape:
+		// - PayloadRejected-ONLY bodies name a size/media cause and carry no
+		//   token-context wording, so they are terminal whenever local
+		//   evidence agrees (real headroom) or is absent (custom/discovered
+		//   models carry `contextWindow: null`, normalized to 0 below).
+		// - Dual-flag bodies (`413 (no body)` proxy ambiguity) carry no
+		//   reliable body evidence; with a gauge the headroom ceiling
+		//   arbitrates, without one they fall through to recovery below —
+		//   the provider's token accounting may be right after all.
 		const payloadRejection =
 			sameModel && !errorIsFromBeforeCompaction && AIError.isPayloadRejection(assistantMessage);
+		const ambiguousPayloadRejection =
+			payloadRejection && AIError.is(assistantMessage.errorId, AIError.Flag.ContextOverflow);
 		const storedTokens = payloadRejection && contextWindow > 0 ? this.#estimateStoredContextTokens() : 0;
 		const trustedPayloadRejection =
 			payloadRejection && contextWindow > 0 && storedTokens < contextWindow * PAYLOAD_REJECTION_OCCUPANCY_CEILING;
-		if (trustedPayloadRejection) {
+		if ((payloadRejection && !ambiguousPayloadRejection && contextWindow <= 0) || trustedPayloadRejection) {
 			this.#host.removeAssistantMessageFromActiveContext(assistantMessage);
 			this.#host.emitNotice("warning", payloadRejectionNotice(storedTokens, contextWindow), "compaction");
 			logger.debug("Payload-shaped 413 withheld from token compaction", {

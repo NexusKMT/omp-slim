@@ -68,6 +68,18 @@ describe("isContextOverflow/isPayloadRejection - HTTP 413 variants", () => {
 		expect(isPayloadRejection(message)).toBe(false);
 	});
 
+	it("keeps other payload phrases with token-count evidence classified as overflow", () => {
+		const message = createErrorMessage("413 Payload too large: maximum context length is 100 tokens");
+		expect(isContextOverflow(message)).toBe(true);
+		expect(isPayloadRejection(message)).toBe(false);
+	});
+
+	it("keeps entity-too-large with token limit digits classified as overflow", () => {
+		const message = createErrorMessage("entity too large: exceeds the limit of 200000 tokens");
+		expect(isContextOverflow(message)).toBe(true);
+		expect(isPayloadRejection(message)).toBe(false);
+	});
+
 	it("flags Anthropic 'maximum size' wording as payload rejection", () => {
 		const message = createErrorMessage("Request exceeds the maximum size allowed by this model");
 		expect(isPayloadRejection(message)).toBe(true);

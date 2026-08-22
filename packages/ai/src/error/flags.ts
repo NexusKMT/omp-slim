@@ -124,20 +124,18 @@ const PAYLOAD_REJECTION_PATTERNS = [
 	/request exceeds the maximum (?:size|number of bytes)/i,
 ] as const;
 
-const REQUEST_TOO_LARGE_PATTERN = /request_too_large/i;
-
 function matchesPayloadRejectionText(text: string): boolean {
 	if (!PAYLOAD_REJECTION_PATTERNS.some(p => p.test(text))) return false;
-	// Bare `request_too_large` is payload-flavored, but when the body ALSO
-	// carries token-context wording (OVERFLOW_PATTERNS are all token-context
-	// entries), the overflow classification wins and no payload flag is set —
-	// otherwise local gauge drift could withhold compaction from a genuine
-	// consults OVERFLOW_NO_BODY_PATTERN, and no-body hybrids must keep their
-	// consults OVERFLOW_NO_BODY_PATTERN, and no-body hybrids must keep their
-	// dual flag for maintenance-layer headroom arbitration.
-	if (REQUEST_TOO_LARGE_PATTERN.test(text) && OVERFLOW_PATTERNS.some(p => p.test(text))) {
-		return false;
-	}
+	// Payload patterns describe body-carrying 413-family rejections, but when
+	// the body ALSO carries token-context evidence (every OVERFLOW_PATTERNS
+	// entry is a token-context wording), the overflow classification wins and
+	// no payload flag is set — otherwise local gauge drift could withhold
+	// compaction from a genuine token overflow. The check is order-agnostic
+	// and covers every payload phrase, not just `request_too_large`. The
+	// `(no body)` entry cannot overlap OVERFLOW_PATTERNS, so bare
+	// `413 (no body)` keeps its deliberate dual flag for maintenance-layer
+	// headroom arbitration.
+	if (OVERFLOW_PATTERNS.some(p => p.test(text))) return false;
 	return true;
 }
 
