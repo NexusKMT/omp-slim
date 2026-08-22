@@ -162,6 +162,7 @@
 - Fixed cancelled prompts disappearing upon abort during turn setup, properly restoring user text and attachments to the input editor.
 - Fixed built-in shell utilities (`grep`, `rg`, `diff`, `find`, `timeout`, `top`, `date`, `head`, `tail`, `stat`, `truncate`, `kill`) across numerous POSIX/GNU/BSD compatibility edge cases and early-pipeline SIGPIPE handling.
 - Fixed Eval guidance that implied `agent()` children share parent kernel state and advertised them when spawning was disabled.
+- Fixed Bash guidance that implied raising `timeout` extends foreground execution beyond the auto-background threshold.
 - Fixed Cursor sessions missing standard string-replacement edit tooling after server tool injection.
 - Fixed `hub wait` duplicating frozen rows into native scrollback during viewport overflow.
 - Fixed dark-theme contrast issues on markdown code-fence headers.
