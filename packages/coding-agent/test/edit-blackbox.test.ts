@@ -43,7 +43,7 @@ beforeEach(async () => {
 		cwd: tempDir,
 		agentDir,
 		inMemory: true,
-		overrides: { "edit.enforceSeenLines": false },
+		overrides: { "edit.enforceSeenLines": false, "edit.blackbox.enabled": true },
 	});
 	session = makeSession(tempDir, settings);
 });
@@ -60,6 +60,26 @@ async function writeFixture(name: string): Promise<string> {
 }
 
 describe("edit parse-regression blackbox", () => {
+	test("is disabled by default", async () => {
+		const disabledSettings = await Settings.loadIsolated({
+			cwd: tempDir,
+			agentDir,
+			inMemory: true,
+			overrides: { "edit.enforceSeenLines": false },
+		});
+		const disabledSession = makeSession(tempDir, disabledSettings);
+		const filePath = await writeFixture("disabled.ts");
+
+		await new EditTool(disabledSession, "replace").execute("disabled", {
+			path: "disabled.ts",
+			old_string: "return 1;",
+			new_string: "return (;",
+		});
+
+		expect(await Bun.file(filePath).text()).toContain("return (;");
+		expect(await Bun.file(logPath).exists()).toBe(false);
+	});
+
 	test("appends valid-to-invalid transitions from every edit variant", async () => {
 		await fs.appendFile(logPath, '{"seed":true}\n');
 		const expected: Array<{

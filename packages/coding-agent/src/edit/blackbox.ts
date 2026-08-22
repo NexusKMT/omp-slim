@@ -27,8 +27,13 @@ function parses(code: string, filePath: string): boolean {
 	return summarizeCode({ code: parseSource, path: filePath }).parsed;
 }
 
-/** Create the per-tool-call observer that records newly introduced AST parse failures. */
-export function createEditBlackboxObserver(session: ToolSession, variant: EditMode, arg: unknown): AppliedEditObserver {
+/** Create the enabled per-tool-call observer that records newly introduced AST parse failures. */
+export function createEditBlackboxObserver(
+	session: ToolSession,
+	variant: EditMode,
+	arg: unknown,
+): AppliedEditObserver | undefined {
+	if (!session.settings.get("edit.blackbox.enabled")) return undefined;
 	const logPath = path.join(session.settings.getAgentDir(), EDIT_BLACKBOX_FILE);
 	const model = session.getActiveModelString?.() ?? "unknown";
 
