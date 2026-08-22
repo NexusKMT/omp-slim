@@ -5,6 +5,7 @@
 ### Added
 
 - Added icon support to autocomplete and select lists, with customizable theming
+- `MarkdownTheme.createHighlightStream` lets themes supply a stateful incremental highlighter; streaming Markdown now syntax-highlights the completed lines of any open code fence (previously only diff/patch fences), and a fence highlights whole-block as soon as it closes
 - `SelectList` layouts accept `maxDescriptionRows` to cap wrapped descriptions with a trailing ellipsis
 - `CombinedAutocompleteProvider` accepts a `commandUsage` callback that ranks equal-score slash matches by usage frequency
 - `Editor.viewportRowsProvider` lets hosts clamp the autocomplete dropdown to the live terminal height

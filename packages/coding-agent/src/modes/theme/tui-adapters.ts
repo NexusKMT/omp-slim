@@ -1,5 +1,6 @@
 import {
 	type HighlightColors as NativeHighlightColors,
+	HighlightStream as NativeHighlightStream,
 	highlightCode as nativeHighlightCode,
 	supportsLanguage as nativeSupportsLanguage,
 } from "@oh-my-pi/pi-natives";
@@ -194,6 +195,11 @@ export function getMarkdownTheme(): MarkdownTheme {
 			const highlighted = highlightCached(code, validLang, theme);
 			if (highlighted !== null) return highlighted.split("\n");
 			return code.split("\n").map(line => theme.fg("mdCodeBlock", line));
+		},
+		createHighlightStream: (lang?: string) => {
+			const validLang = lang && nativeSupportsLanguage(lang) ? lang : undefined;
+			if (!validLang) return null;
+			return new NativeHighlightStream(validLang, getHighlightColors(theme));
 		},
 	};
 	cachedMarkdownTheme = markdownTheme;

@@ -32,6 +32,7 @@
 
 ### Fixed
 
+- Code blocks now syntax-highlight live while the response streams instead of staying plain until the block settles
 - Fixed `/shake thinking` reporting "Nothing to shake" after removing reasoning; it now reports the dropped count and leaves thinking-only turns empty.
 - Fixed session teardown occasionally losing pending input drafts during shutdown
 - Fixed streaming edit failures caused by trailing partial lines
