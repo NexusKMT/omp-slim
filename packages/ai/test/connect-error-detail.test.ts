@@ -47,14 +47,10 @@ describe("formatConnectEndStreamError", () => {
 		expect(formatted).toBe("Connect error invalid_argument: tools[3].parameters is not an object");
 	});
 
-	it("truncates oversized detail payloads", () => {
-		const formatted = formatConnectEndStreamError({
-			code: "invalid_argument",
-			message: "Error",
-			details: [{ type: "t", debug: "x".repeat(2000) }],
-		});
-		expect(formatted.length).toBeLessThan(600);
-		expect(formatted).toContain("…");
+	it("caps oversized detail payloads at the documented bound", () => {
+		const detail = summarizeConnectErrorDetails([{ type: "t", debug: "x".repeat(2000) }]);
+		expect(detail?.length).toBe(400);
+		expect(detail).toEndWith("…");
 	});
 });
 

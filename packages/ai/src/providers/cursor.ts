@@ -405,12 +405,24 @@ function frameConnectMessage(data: Uint8Array, flags = 0): Buffer {
 	return frame;
 }
 
+class ConnectEndStreamError extends AIError.ProviderResponseError {
+	readonly diagnosticMessage: string;
+
+	constructor(classificationMessage: string, diagnosticMessage: string) {
+		super(classificationMessage, { kind: "envelope" });
+		this.diagnosticMessage = diagnosticMessage;
+	}
+}
+
 function parseConnectEndStream(data: Uint8Array): Error | null {
 	try {
 		const payload = JSON.parse(new TextDecoder().decode(data));
 		const error = payload?.error;
 		if (error) {
-			return new AIError.ProviderResponseError(formatConnectEndStreamError(error), { kind: "envelope" });
+			const code = typeof error.code === "string" ? error.code : "unknown";
+			const message = typeof error.message === "string" ? error.message : "Unknown error";
+			const classificationMessage = `Connect error ${code}: ${message}`;
+			return new ConnectEndStreamError(classificationMessage, formatConnectEndStreamError(error));
 		}
 		return null;
 	} catch {
@@ -1024,7 +1036,12 @@ function streamCursorWithWireMode(
 			output.stopReason = result.stopReason;
 			output.errorStatus = result.status;
 			output.errorId = result.id;
-			output.errorMessage = result.message;
+			if (error instanceof ConnectEndStreamError) {
+				output.errorClassificationMessage = result.message;
+				output.errorMessage = error.diagnosticMessage;
+			} else {
+				output.errorMessage = result.message;
+			}
 			output.duration = performance.now() - startTime;
 			if (firstTokenTime) output.ttft = firstTokenTime - startTime;
 			stream.push({ type: "error", reason: output.stopReason, error: output });

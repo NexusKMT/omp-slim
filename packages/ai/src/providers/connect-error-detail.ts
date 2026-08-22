@@ -1,3 +1,5 @@
+import { truncate } from "@oh-my-pi/pi-utils";
+
 /**
  * Connect-protocol end-stream error formatting.
  *
@@ -18,10 +20,6 @@ const GENERIC_CONNECT_ERROR_MESSAGES = new Set(["", "error", "unknown", "unknown
 
 /** Upper bound for appended trailer context so errors stay log-line sized. */
 const MAX_EXTRA_DETAIL_CHARS = 400;
-
-function truncate(text: string, max = MAX_EXTRA_DETAIL_CHARS): string {
-	return text.length > max ? `${text.slice(0, max)}…` : text;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -48,12 +46,14 @@ export function summarizeConnectErrorDetails(details: unknown): string | undefin
 		if (!isRecord(entry)) continue;
 		const type = typeof entry.type === "string" && entry.type ? entry.type : undefined;
 		const debug = entry.debug !== undefined ? safeJson(entry.debug) : undefined;
-		if (type && debug) parts.push(`${type}: ${debug}`);
+		const value = entry.value !== undefined ? safeJson(entry.value) : undefined;
+		const diagnostic = debug ?? value;
+		if (type && diagnostic) parts.push(`${type}: ${diagnostic}`);
 		else if (type) parts.push(type);
-		else if (debug) parts.push(debug);
+		else if (diagnostic) parts.push(diagnostic);
 	}
 	if (parts.length === 0) return undefined;
-	return truncate(parts.join("; "));
+	return truncate(parts.join("; "), MAX_EXTRA_DETAIL_CHARS);
 }
 
 /**
@@ -77,7 +77,7 @@ export function formatConnectEndStreamError(error: unknown): string {
 			extras[key] = value;
 		}
 		const raw = Object.keys(extras).length > 0 ? safeJson(extras) : undefined;
-		if (raw && raw !== "{}") parts.push(`[trailer: ${truncate(raw)}]`);
+		if (raw && raw !== "{}") parts.push(`[trailer: ${truncate(raw, MAX_EXTRA_DETAIL_CHARS)}]`);
 	}
 	return parts.join(" ");
 }
