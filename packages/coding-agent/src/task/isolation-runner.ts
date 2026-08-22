@@ -65,17 +65,22 @@ function rememberAgentArtifacts(result: SingleResult): SingleResult {
  *
  * `revList.range` throws when the branch does not exist, which is the common
  * "commitToBranch failed before it created anything" path; that is treated as
- * "nothing to rescue".
+ * "nothing to rescue" only after confirming the ref is absent. Other probe
+ * failures preserve the branch because deleting it could lose the only reachable
+ * copy of the agent's commits.
  */
 async function rescueTaskBranch(repoRoot: string, branchName: string, baseSha: string): Promise<string | undefined> {
-	let carriedCommits = 0;
 	try {
-		carriedCommits = (await git.revList.range(repoRoot, baseSha, branchName)).length;
+		const carriedCommits = (await git.revList.range(repoRoot, baseSha, branchName)).length;
+		if (carriedCommits > 0) return branchName;
 	} catch {
-		// Branch missing, or the baseline is unreadable — nothing to rescue.
-		carriedCommits = 0;
+		try {
+			if (await git.ref.exists(repoRoot, `refs/heads/${branchName}`)) return branchName;
+		} catch {
+			// An inconclusive recovery probe must never risk deleting the only ref.
+			return branchName;
+		}
 	}
-	if (carriedCommits > 0) return branchName;
 	await git.branch.tryDelete(repoRoot, branchName);
 	return undefined;
 }

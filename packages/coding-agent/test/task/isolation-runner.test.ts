@@ -118,6 +118,7 @@ describe("runIsolatedSubprocess", () => {
 		});
 		// No branch was ever created, so the rescue probe finds nothing to keep.
 		vi.spyOn(gitModule.revList, "range").mockRejectedValue(new Error("unknown revision"));
+		vi.spyOn(gitModule.ref, "exists").mockResolvedValue(false);
 		const deleteSpy = vi.spyOn(gitModule.branch, "tryDelete").mockResolvedValue(true);
 
 		const outcome = await runIsolatedSubprocess({
@@ -193,7 +194,8 @@ describe("runIsolatedSubprocess", () => {
 			session: null,
 			status: "parked",
 		});
-		const rangeSpy = vi.spyOn(gitModule.revList, "range").mockResolvedValue(["commit-a", "commit-b"]);
+		const rangeSpy = vi.spyOn(gitModule.revList, "range").mockRejectedValue(new Error("object database unavailable"));
+		const refSpy = vi.spyOn(gitModule.ref, "exists").mockResolvedValue(true);
 		const deleteSpy = vi.spyOn(gitModule.branch, "tryDelete").mockResolvedValue(true);
 
 		const outcome = await runIsolatedSubprocess({
@@ -218,6 +220,7 @@ describe("runIsolatedSubprocess", () => {
 		});
 
 		expect(rangeSpy).toHaveBeenCalledWith(repoRoot, "base", "omp/task/RescueBranchCommits");
+		expect(refSpy).toHaveBeenCalledWith(repoRoot, "refs/heads/omp/task/RescueBranchCommits");
 		expect(deleteSpy).not.toHaveBeenCalled();
 		expect(outcome.error).toContain("git apply --3way failed");
 		expect(outcome.error).toContain("preserved on branch omp/task/RescueBranchCommits");
