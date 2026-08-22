@@ -732,6 +732,15 @@ describe("Cursor history encoding", () => {
 		expect(Object.hasOwn(args, "__proto__")).toBe(true);
 		expect(args["__proto__"]).toEqual({ polluted: true });
 		expect(args["safe"]).toBe("ok");
+
+		// The protobuf argument map must carry the same own keys — a plain `{}`
+		// map would retarget its prototype to the encoded bytes and replay
+		// inherited numeric indices instead of `__proto__`.
+		const step = history.turnStepMessagesJson[0][0] as {
+			toolCall: { mcpToolCall: { args: { args: Record<string, string> } } };
+		};
+		const encodedArgs = step.toolCall.mcpToolCall.args.args;
+		expect(Object.keys(encodedArgs).sort()).toEqual(["__proto__", "safe"]);
 	});
 
 	it("preserves same-model K3 thinking and paired tool structure in request history", () => {

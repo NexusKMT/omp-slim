@@ -4801,7 +4801,7 @@ function normalizeCursorMcpArguments(args: Record<string, unknown>): Record<stri
 }
 
 function encodeCursorMcpArguments(toolCall: ToolCall): Record<string, Uint8Array> {
-	const encoded: Record<string, Uint8Array> = {};
+	const encoded: Record<string, Uint8Array> = Object.create(null);
 	const normalized = normalizeCursorMcpArguments(toolCall.arguments);
 	for (const name in normalized) {
 		encoded[name] = encodeJsonValue(normalized[name]);
