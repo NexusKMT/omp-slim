@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added `/shake thinking` to remove model reasoning blocks from session history
 - Added icon support to slash command autocomplete, with unique visuals for actions, files, settings, and other command types
 - Slash-command autocomplete now ranks equally matching commands by how often you use them; usage counts persist across sessions in agent.db
 - Edit tool payloads now accept `＋`-prefixed add lines to insert whole lines in place (consecutive `＋` lines insert together, both marker indent styles supported), and the prompt documents multi-line inline selections for contained restructures.
@@ -31,6 +32,7 @@
 
 ### Fixed
 
+- Fixed `/shake thinking` reporting "Nothing to shake" after removing reasoning; it now reports the dropped count and leaves thinking-only turns empty.
 - Fixed session teardown occasionally losing pending input drafts during shutdown
 - Fixed streaming edit failures caused by trailing partial lines
 - Interrupting a Claude model mid-thinking no longer replays the partial reasoning as quoted conversation text on the next turn, which Anthropic's `reasoning_extraction` classifier refused.
