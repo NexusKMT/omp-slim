@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed glyph tokenization crashing with `entries is not a function` when `Context.systemPrompt` arrived as a bare string (e.g. from legacy earendil-works extensions); it is now normalized to an array before iterating, matching every provider path ([#9384](https://github.com/can1357/oh-my-pi/issues/9384)).
+
 ## [18.0.0] - 2026-08-22
 
 ### Added
