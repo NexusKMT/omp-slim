@@ -2219,12 +2219,13 @@ export class ModelRegistry {
 				nextModels.push(finalizeCustomModel(overlay, { useDefaults: true }));
 			}
 			const runtimeTransportOverride = this.#runtimeProviderOverrides.get(providerName);
-			this.#unprojectedModels = runtimeTransportOverride
+			const nextModelsWithTransport = runtimeTransportOverride
 				? nextModels.map(model => {
 						if (model.provider !== providerName) return model;
 						return this.#applyProviderTransportOverrideToModel(model, runtimeTransportOverride);
 					})
 				: nextModels;
+			this.#unprojectedModels = this.#applyProviderGuardrailOverrides(nextModelsWithTransport);
 
 			if (config.oauth?.modifyModels) {
 				this.#runtimeModelModifiers.set(providerName, config.oauth.modifyModels);
