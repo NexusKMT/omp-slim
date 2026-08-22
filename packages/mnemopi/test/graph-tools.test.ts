@@ -59,6 +59,10 @@ describe("EpisodicGraph gist location extraction", () => {
 			expect(graph.extractGist("We stored the summary in your loaded context plus.", "mem_loc_2").location).toBe(
 				null,
 			);
+		});
+	});
+});
+
 describe("EpisodicGraph non-Latin participants", () => {
 	it("extracts proper nouns from Greek and Cyrillic content (issue #7918)", () => {
 		withGraph(graph => {
