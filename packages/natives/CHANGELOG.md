@@ -4,13 +4,13 @@
 
 ### Added
 
-- Added `macOSAutocorrectWord`, `macOSCheckSpelling`, `macOSCompleteWord`, `macOSSpellingGuesses`, and `macOSSpellCheckerAvailable` — the four spelling operations are async and execute serially on one dedicated spelling thread so AppleSpell round trips never block the JS thread
-- Added `HighlightStream`, a stateful incremental syntax highlighter that carries parser state across pushes so chunked highlighting is byte-identical to whole-text highlighting
-- Added `TtyWriter`, an off-thread terminal output pump: enqueues frames without blocking the JS thread (UTF-16 scratch-arena read, xutf transcode straight into the shared back buffer), performs the blocking `write(2)` on a dedicated thread, and reports its backlog for renderer frame skipping
+- Added native macOS spellchecker APIs (`macOSAutocorrectWord`, `macOSCheckSpelling`, `macOSCompleteWord`, `macOSSpellingGuesses`, and `macOSSpellCheckerAvailable`) that run asynchronously without blocking the JavaScript thread.
+- Added `HighlightStream`, a stateful incremental syntax highlighter that supports chunked highlighting while maintaining parser state.
+- Added `TtyWriter`, an off-thread terminal output writer that performs non-blocking writes and tracks backlog metrics for renderer frame skipping.
 
 ### Changed
 
-- Word completion now automatically appends a space unless the cursor is followed by punctuation or whitespace
+- Word completion now automatically appends a space unless followed by punctuation or whitespace.
 
 ## [17.4.1] - 2026-08-21
 
