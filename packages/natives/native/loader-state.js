@@ -661,7 +661,11 @@ function isCompatiblePreSentinelNativeAddon(bindings, diskHasExpectedSentinel) {
 	return (
 		typeof bindings.countTokens === "function" &&
 		typeof bindings.executeShell === "function" &&
-		typeof bindings.visibleWidth === "function"
+		typeof bindings.visibleWidth === "function" &&
+		typeof bindings.DesktopSession === "function" &&
+		typeof bindings.DesktopSession.prototype?.capture === "function" &&
+		typeof bindings.DesktopSession.prototype?.execute === "function" &&
+		typeof bindings.DesktopSession.prototype?.close === "function"
 	);
 }
 

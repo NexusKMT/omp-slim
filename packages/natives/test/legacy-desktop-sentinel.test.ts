@@ -52,6 +52,12 @@ describe("legacy native addon loading", () => {
 			);
 		});
 	});
+	it("rejects a pre-sentinel core without the legacy desktop ABI", async () => {
+		const ctx = ctxFor("17.2.8");
+		await withCandidate("legacy native addon", candidate => {
+			expect(() => validateLoadedBindings(ctx, legacyCoreBindings, candidate)).toThrow("reinstall to re-sync");
+		});
+	});
 
 	it("keeps resident old addons restart-only", async () => {
 		const ctx = ctxFor("17.2.8");
