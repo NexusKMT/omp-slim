@@ -171,6 +171,8 @@ export interface AutocompleteItem {
 	value: string;
 	label: string;
 	description?: string;
+	/** Optional type-indicator glyph rendered in an aligned column before the label */
+	icon?: string;
 	/** Dim hint text shown inline after cursor when this item is selected */
 	hint?: string;
 }
@@ -181,6 +183,8 @@ export interface SlashCommand {
 	name: string;
 	aliases?: string[];
 	description?: string;
+	/** Optional type-indicator glyph shown before the command name in autocomplete */
+	icon?: string;
 	argumentHint?: string;
 	/** Whether the command consumes argument text after the command name. False means the full input stays normal prompt text once args are present. */
 	allowArgs?: boolean;
@@ -322,6 +326,7 @@ function buildSlashCommandCompletions(commands: CommandEntry[], lowerPrefix: str
 					value: name,
 					label: "name" in cmd ? cmd.name : cmd.label,
 					score: primaryScore,
+					...(cmd.icon && { icon: cmd.icon }),
 					...(fullDesc && { description: fullDesc }),
 				};
 			}
@@ -336,6 +341,7 @@ function buildSlashCommandCompletions(commands: CommandEntry[], lowerPrefix: str
 						value: alias,
 						label: alias,
 						score: aliasScore,
+						...(cmd.icon && { icon: cmd.icon }),
 						...(fullDesc && { description: fullDesc }),
 					};
 				}

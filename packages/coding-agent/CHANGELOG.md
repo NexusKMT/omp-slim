@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added icon support to slash command autocomplete, with unique visuals for actions, files, settings, and other command types
 - Edit tool payloads now accept `＋`-prefixed add lines to insert whole lines in place (consecutive `＋` lines insert together, both marker indent styles supported), and the prompt documents multi-line inline selections for contained restructures.
 - Edit tool now recovers common payload dialect slips instead of erroring: selections trailing their retyped line, elided unchanged lines in inline operations, guillemets used as brackets around old/new blocks, a stray trailing rewrite separator, rewrites written as replacement-directive lists, and apply-patch sentinels mixed into payloads.
 - Edit tool now defers ambiguous operations and resolves them against sibling operations' claimed spans, merges a pure deletion with a contained sibling rewrite into one union replace, reads a bare *** line as the rewrite separator, and strips split envelope sentinels plus decoding noise between an End sentinel and the next Begin.
