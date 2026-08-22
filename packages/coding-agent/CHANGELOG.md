@@ -45,6 +45,7 @@
 - Fixed edit tool section header paths not trimming surrounding whitespace, so a header with padded brackets failed with file-not-found.
 - Fixed transcript content disappearing from terminal scrollback below a live hub-wait/todo/jobs card: the card's viewport pin froze scrollback commits at its own rows, so everything the turn streamed below it scrolled off-screen without ever entering terminal history (and was lost for good when the session exited first). A displaceable card with content below it no longer holds the commit ceiling; its rows commit as they scroll off and the card seals in place, so the next poll stacks a fresh card instead of retracting history.
 - Fixed the composer attachment chip thumbnail showing an empty box for pasted images: the paste pipeline re-encodes images as JPEG/WebP, and transmitting those bytes as Kitty PNG data made the terminal reject them (blank placeholder cells). Non-PNG attachments now convert to PNG before the thumbnail transmit, like transcript images.
+- Added an immediately editable startup composer for plain interactive launches; drafts typed while session initialization runs transfer intact into the full UI.
 
 ## [17.4.4] - 2026-08-22
 
