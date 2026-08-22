@@ -11,6 +11,7 @@
 - Subagents in a shared working tree no longer run formatters, linters, or project-wide builds/test suites unless their assignment asks for it; validation runs once by the main agent.
 ### Fixed
 
+- Fixed blank `mnemopi.dbPath` settings silently creating volatile memory banks instead of using persistent agent storage ([#9360](https://github.com/can1357/oh-my-pi/issues/9360)).
 - Fixed Kitty text-sized Markdown headings activating before `tui.textSizing` is enabled.
 - Fixed status text retaining hidden DCS, PM, and APC payloads after escape-sequence sanitization.
 - Fixed extension load errors truncating explicitly excluded package import specifiers.
