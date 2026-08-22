@@ -244,7 +244,7 @@ export class StreamingEditGuard {
 		if (this.#abortTriggered) return;
 		const cached = this.#ensureFileCache(resolvedPath);
 		const content = await cached;
-		if (!content || this.#abortTriggered) return;
+		if (content === undefined || this.#abortTriggered) return;
 		// Cache was invalidated (edit landed / turn reset) while loading: drop this
 		// stale evaluation rather than judging outdated content.
 		if (this.#fileCache.get(resolvedPath) !== cached) return;
@@ -281,11 +281,14 @@ export class StreamingEditGuard {
 
 	/** Chains a removed-lines verification behind any in-flight one for the same file. */
 	#queueRemovedLinesCheck(toolCallId: string, filePath: string, resolvedPath: string, removedLines: string[]): void {
+		// Turn-scoped token: a check still queued when reset() runs must not start
+		// under the next turn and abort it with the previous turn's verdict.
+		const generation = this.#host.promptGeneration();
 		const prior = this.#verificationChain.get(resolvedPath) ?? Promise.resolve();
 		const next = prior
 			.catch(() => {})
 			.then(() => {
-				if (this.#abortTriggered) return;
+				if (this.#abortTriggered || this.#host.promptGeneration() !== generation) return;
 				return this.#checkRemovedLines(toolCallId, filePath, resolvedPath, removedLines);
 			})
 			.catch(() => {});

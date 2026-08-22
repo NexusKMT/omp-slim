@@ -636,7 +636,9 @@ it(
 		// Ambient control: identical pacing with no guard work. Under heavy machine
 		// load the drift monitor reports OS scheduling jitter for any process; the
 		// guard run may only exceed it by a small margin plus the absolute budget.
-		const ambientDriftMs = await measureMaxDrift(() => streamDiff(undefined, undefined, diff));
+		const ambientDriftMs = await measureMaxDrift(async () => {
+			await streamDiff(undefined, undefined, diff);
+		});
 
 		let maxSyncSpanMs = 0;
 		const maxDriftMs = await measureMaxDrift(async () => {
@@ -674,3 +676,99 @@ it(
 	},
 	STREAMING_EDIT_RANDOM_STREAM_TIMEOUT_MS,
 );
+
+function buildSmallTargetGuard(target: string, toolCallId: string, abortCalls: { count: number }) {
+	let generation = 0;
+	const guard = new StreamingEditGuard({
+		agent: {
+			abort() {
+				abortCalls.count += 1;
+			},
+		} as Agent,
+		settings: Settings.isolated({ "edit.streamingAbort": true }),
+		sessionManager: { getCwd: () => tempDir } as SessionManager,
+		obfuscator: undefined,
+		model: () => undefined,
+		isDisposed: () => false,
+		promptGeneration: () => generation,
+		localProtocolOptions: () => ({}),
+		emitNotice() {},
+		schedulePostPromptTask() {},
+		discardAssistantTurn() {},
+	});
+	const makeEvent = (eventType: "toolcall_start" | "toolcall_delta", streamedDiff: string): AgentEvent => {
+		const message = createAssistantMessage(
+			[createToolCall(toolCallId, { path: target, diff: streamedDiff })],
+			"stop",
+		);
+		return {
+			type: "message_update",
+			message,
+			assistantMessageEvent: { type: eventType, contentIndex: 0, delta: "", partial: message },
+		};
+	};
+	return {
+		guard,
+		makeEvent,
+		bumpGeneration: () => {
+			generation += 1;
+		},
+	};
+}
+
+it(
+	"aborts early when the streamed edit targets an existing empty file",
+	async () => {
+		const abortCalls = { count: 0 };
+		const target = path.join(tempDir, "empty.txt");
+		await Bun.write(target, "");
+		const { guard, makeEvent } = buildSmallTargetGuard(target, "call_edit_empty", abortCalls);
+		const diff = "@@\n-absent-from-empty-file\n+replacement\n";
+
+		await streamDiff(guard, makeEvent, diff);
+
+		expect(guard.abortTriggered).toBe(true);
+		expect(abortCalls.count).toBe(1);
+	},
+	STREAMING_EDIT_RANDOM_STREAM_TIMEOUT_MS,
+);
+
+// Drains N macrotask ticks deterministically (no wall-clock delay) so queued
+// promise callbacks and settled I/O continuations have all run.
+async function drainMacrotasks(ticks: number): Promise<void> {
+	for (let i = 0; i < ticks; i += 1) await new Promise<void>(resolve => setImmediate(resolve));
+}
+
+it("drops a queued removed-lines verification whose turn was reset before it started", async () => {
+	const abortCalls = { count: 0 };
+	const target = path.join(tempDir, "stale.txt");
+	await Bun.write(target, "alpha\nbeta\n");
+	const { guard, makeEvent, bumpGeneration } = buildSmallTargetGuard(target, "call_edit_stale", abortCalls);
+	const diff = "@@\n-missing-line-xyz\n+replacement\n";
+
+	// Hold the target's async load open so the queued verification is still
+	// pending when the turn ends: reset() clears turn state and the next
+	// prompt bumps the generation token. The stale check must not abort the
+	// new turn even once the load eventually settles.
+	const { promise: heldLoad, resolve: releaseLoad } = Promise.withResolvers<string>();
+	const realFile = Bun.file.bind(Bun);
+	const fileSpy = vi.spyOn(Bun, "file").mockImplementation(((pathLike: string) => ({
+		text: () => (pathLike === target ? heldLoad : realFile(pathLike).text()),
+	})) as typeof Bun.file);
+	try {
+		const event = makeEvent("toolcall_delta", diff);
+		guard.preCache(event);
+		guard.maybeAbort(event);
+		guard.reset();
+		bumpGeneration();
+		releaseLoad("alpha\nbeta\n");
+
+		await heldLoad;
+		await drainMacrotasks(10);
+
+		expect(guard.abortTriggered).toBe(false);
+		expect(abortCalls.count).toBe(0);
+	} finally {
+		fileSpy.mockRestore();
+	}
+});
