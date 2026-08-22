@@ -185,6 +185,7 @@
 
 - `/extensions` sanitizes untrusted MCP/tool display strings (`sanitizeText` then `replaceTabs`) before applying theme SGR, so OSC/BEL/ANSI from a server cannot leak into the TUI. List hints, origin paths, and schema `type`/`default` go through the same boundary.
 - Shadowed `/extensions` rows are informational only, including same-name MCP configs that share the winner's `mcp:<name>` id even when disablement wins display state (`enabled: false` + `_shadowed`).
+- `/extensions` joins custom tools by originating file first: a same-name builtin/MCP/SDK tool is not treated as the custom file, and a factory that also exports the file stem still lists every sibling. Project list hints accept Windows `.omp` paths.
 
 ## [17.4.4] - 2026-08-22
 

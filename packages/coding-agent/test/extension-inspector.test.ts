@@ -1,7 +1,11 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import * as os from "node:os";
 import { ExtensionList } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/extension-list";
-import { parseToolFileHeader } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/inspector-model";
+import {
+	liveToolsForExtension,
+	parseToolFileHeader,
+	projectListHint,
+} from "@oh-my-pi/pi-coding-agent/modes/components/extensions/inspector-model";
 import { InspectorPanel } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/inspector-panel";
 import type { Extension } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/types";
 import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
@@ -315,6 +319,15 @@ describe("tool inspector", () => {
 		expect(text).not.toContain("9 args");
 	});
 
+	test("project list hints work for Windows .omp paths", () => {
+		expect(
+			projectListHint({
+				...toolExtension(),
+				path: "C:\\repo\\.omp\\tools\\x.ts",
+			}),
+		).toBe("repo");
+	});
+
 	test("project-only tools show the project name instead of an arg count", () => {
 		const list = new ExtensionList([toolExtension()], {
 			toolSource: {
@@ -369,6 +382,92 @@ describe("tool inspector", () => {
 		const text = Bun.stripANSI(list.render(80).join("\n"));
 		expect(text).toContain("3 tools · personal");
 		expect(text).not.toContain("args");
+	});
+
+	test("does not join a builtin exact-name collision that lacks a source path", () => {
+		const ext: Extension = {
+			id: "tool:read",
+			kind: "tool",
+			name: "read",
+			displayName: "read",
+			description: "read custom tool",
+			path: "/tmp/read.ts",
+			source: userSource(),
+			state: "active",
+			raw: { name: "read", description: "read custom tool", path: "/tmp/read.ts" },
+		};
+		const lives = liveToolsForExtension(ext, {
+			getLiveTool: name =>
+				name === "read"
+					? {
+							name: "read",
+							description: "Read a file.",
+							source: "builtin",
+							parameters: { type: "object", properties: { path: { type: "string" } } },
+						}
+					: undefined,
+			listLiveTools: () => [],
+		});
+		expect(lives).toEqual([]);
+
+		const panel = new InspectorPanel();
+		panel.setToolSource({
+			getLiveTool: name =>
+				name === "read"
+					? {
+							name: "read",
+							description: "Read a file.",
+							source: "builtin",
+							parameters: { type: "object", properties: { path: { type: "string" } } },
+						}
+					: undefined,
+			listLiveTools: () => [],
+		});
+		panel.setExtension(ext);
+		const text = render(panel);
+		expect(text).not.toContain("Read a file.");
+		expect(text).not.toContain("Arguments");
+	});
+
+	test("keeps factory siblings when the exact export also exists", () => {
+		const filePath = "/x/systemd.ts";
+		const tools = [
+			{
+				name: "systemd",
+				description: "systemd factory entry.",
+				source: "extension" as const,
+				sourcePath: filePath,
+				parameters: { type: "object", properties: {} },
+			},
+			{
+				name: "systemd_control",
+				description: "Mutate write-prefix units.",
+				source: "extension" as const,
+				sourcePath: filePath,
+				parameters: { type: "object", properties: { action: { type: "string" } } },
+			},
+		];
+		const ext: Extension = {
+			...systemdExtension(),
+			path: filePath,
+			raw: { name: "systemd", description: "systemd custom tool", path: filePath },
+		};
+		const lives = liveToolsForExtension(ext, {
+			getLiveTool: name => tools.find(tool => tool.name === name),
+			listLiveTools: () => tools,
+		});
+		expect(lives.map(tool => tool.name)).toEqual(["systemd", "systemd_control"]);
+
+		const panel = new InspectorPanel();
+		panel.setToolSource({
+			getLiveTool: name => tools.find(tool => tool.name === name),
+			listLiveTools: () => tools,
+		});
+		panel.setExtension(ext);
+		const text = render(panel);
+		expect(text).toContain("systemd");
+		expect(text).toContain("systemd_control");
+		expect(text).toContain("Mutate write-prefix units");
 	});
 
 	test("does not adopt builtin tools that only share a name prefix", () => {

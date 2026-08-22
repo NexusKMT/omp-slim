@@ -213,21 +213,22 @@ function isFactoryExportName(extensionName: string, toolName: string): boolean {
 export function liveToolsForExtension(ext: Extension, source: ToolRuntimeSource | undefined): LiveToolRecord[] {
 	if (!source || isShadowedExtension(ext)) return [];
 	const exact = source.getLiveTool(ext.name);
-	if (exact) {
-		if (exact.sourcePath && isFilesystemToolPath(exact.sourcePath) && !sameToolPath(exact.sourcePath, ext.path)) {
-			return [];
-		}
-		return [exact];
-	}
 	const listed = source.listLiveTools?.() ?? [];
-	const fromSameFile = listed.filter(
+	const candidates: LiveToolRecord[] = [];
+	const seen = new Set<string>();
+	for (const tool of exact ? [exact, ...listed] : listed) {
+		if (seen.has(tool.name)) continue;
+		seen.add(tool.name);
+		candidates.push(tool);
+	}
+	const fromSameFile = candidates.filter(
 		tool => tool.sourcePath && isFilesystemToolPath(tool.sourcePath) && sameToolPath(tool.sourcePath, ext.path),
 	);
 	if (fromSameFile.length > 0) return fromSameFile;
-	if (listed.some(tool => tool.sourcePath && isFilesystemToolPath(tool.sourcePath))) {
+	if (candidates.some(tool => tool.sourcePath && isFilesystemToolPath(tool.sourcePath))) {
 		return [];
 	}
-	return listed.filter(tool => {
+	return candidates.filter(tool => {
 		if (!isFactoryExportName(ext.name, tool.name)) return false;
 		if (tool.source === "builtin" || tool.source === "mcp" || tool.source === "sdk") return false;
 		return true;
@@ -240,11 +241,20 @@ export function liveToolDetail(live: LiveToolRecord | undefined): string | undef
 	return undefined;
 }
 
+function pathSegments(filePath: string): string[] {
+	const winish = filePath.includes("\\") || /^[A-Za-z]:/.test(filePath);
+	const flavor = winish ? path.win32 : path.posix;
+	return filePath.split(flavor.sep).filter(part => part.length > 0);
+}
+
 /** Project-local items only. Uses the directory that contains `.omp`, when present. */
 export function projectListHint(ext: Extension): string | undefined {
 	if (ext.source.level !== "project") return undefined;
-	const omp = ext.path.match(/(?:^|\/)([^/]+)\/\.omp\//)?.[1];
-	return omp && omp.length > 0 ? omp : undefined;
+	const parts = pathSegments(ext.path);
+	const ompIndex = parts.lastIndexOf(".omp");
+	if (ompIndex <= 0) return undefined;
+	const parent = parts[ompIndex - 1];
+	return parent && parent !== "." ? parent : undefined;
 }
 
 export function joinListHints(...parts: Array<string | undefined>): string | undefined {

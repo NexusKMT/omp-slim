@@ -109,17 +109,11 @@ export class ExtensionDashboard implements Component {
 		private readonly onMcpToolsChanged?: (tools: CustomTool[]) => Promise<void> | void,
 	) {}
 
-	static async create(
-		cwdOrOptions: string | ExtensionDashboardOptions,
-		settings: Settings | null = null,
-		terminalHeight?: number,
-	): Promise<ExtensionDashboard> {
-		const options: ExtensionDashboardOptions =
-			typeof cwdOrOptions === "string" ? { cwd: cwdOrOptions, settings, terminalHeight } : cwdOrOptions;
+	static async create(options: ExtensionDashboardOptions): Promise<ExtensionDashboard> {
 		const dashboard = new ExtensionDashboard(
 			options.cwd,
-			options.settings ?? settings,
-			options.terminalHeight ?? terminalHeight ?? process.stdout.rows ?? 24,
+			options.settings ?? null,
+			options.terminalHeight ?? process.stdout.rows ?? 24,
 			options.mcpManager,
 			options.eventBus,
 			options.toolSource,
