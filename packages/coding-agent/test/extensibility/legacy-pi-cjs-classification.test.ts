@@ -73,14 +73,14 @@ describe("isCommonJsModulePath CJS classification (inheritedKind override fix)",
 				exports: {
 					".": {
 						import: "./index.mjs",
-						require: "./index.cjs",
+						require: "./index.js",
 					},
 				},
 			}),
-			"index.cjs": ["const core = require('./core.js');", "module.exports = core;"].join("\n"),
+			"index.js": ["const core = require('./core.js');", "module.exports = core;"].join("\n"),
 			"core.js": ["module.exports = { launch: () => 'launched', version: '1.0.0' };"].join("\n"),
 			"index.mjs": [
-				"import pkg from './index.cjs';",
+				"import pkg from './index.js';",
 				"export default pkg;",
 				"export const launch = pkg.launch;",
 			].join("\n"),
@@ -91,7 +91,7 @@ describe("isCommonJsModulePath CJS classification (inheritedKind override fix)",
 		await fs.mkdir(nodeModules, { recursive: true });
 		await fs.copyFile(path.join(dir, "package.json"), path.join(nodeModules, "package.json"));
 		await fs.copyFile(path.join(dir, "index.mjs"), path.join(nodeModules, "index.mjs"));
-		await fs.copyFile(path.join(dir, "index.cjs"), path.join(nodeModules, "index.cjs"));
+		await fs.copyFile(path.join(dir, "index.js"), path.join(nodeModules, "index.js"));
 		await fs.copyFile(path.join(dir, "core.js"), path.join(nodeModules, "core.js"));
 
 		const entry = path.join(dir, "consumer.mjs");
@@ -99,22 +99,31 @@ describe("isCommonJsModulePath CJS classification (inheritedKind override fix)",
 		expect(mod.result).toBe("launched");
 	});
 
-	it("does not false-positive on CJS patterns in comments", async () => {
-		// A file with CJS patterns only in comments should be classified
-		// via inheritedKind, not as CJS
+	it("does not treat CJS-looking text or shadowed bindings as CJS syntax", async () => {
 		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "cjs-comment-fp", version: "1.0.0" }),
-			"shim.js": [
-				"// module.exports = { value: 999 };",
-				"/* require('ignored') */",
-				"export const value = 42;",
+			"consumer.mjs": "import value from 'ambiguous-esm-pkg'; export const result = value;",
+			"node_modules/ambiguous-esm-pkg/package.json": JSON.stringify({
+				name: "ambiguous-esm-pkg",
+				version: "1.0.0",
+				exports: { ".": { import: "./index.mjs", require: "./index.cjs" } },
+			}),
+			"node_modules/ambiguous-esm-pkg/index.mjs":
+				"import './shim.js'; export default globalThis.__ompLegacyPiAmbiguousValue;",
+			"node_modules/ambiguous-esm-pkg/index.cjs": "module.exports = 'cjs';",
+			"node_modules/ambiguous-esm-pkg/shim.js": [
+				"const marker = 'module.exports';",
+				"// require('comment-only')",
+				"function ignored(require, module, exports) {",
+				"\trequire('shadowed'); module.exports = {}; exports.value = true;",
+				"}",
+				"await Promise.resolve();",
+				"globalThis.__ompLegacyPiAmbiguousValue = marker;",
 			].join("\n"),
-			"index.mjs": ["import { value } from './shim.js';", "export const result = value;"].join("\n"),
 		});
 
-		const entry = path.join(dir, "index.mjs");
-		const mod = (await loadLegacyPiModule(entry)) as { result: number };
-		expect(mod.result).toBe(42);
+		const mod = (await loadLegacyPiModule(path.join(dir, "consumer.mjs"))) as { result: string };
+		expect(mod.result).toBe("module.exports");
+		Reflect.deleteProperty(globalThis, "__ompLegacyPiAmbiguousValue");
 	});
 
 	it("detects CJS patterns outside comments", async () => {
@@ -133,40 +142,5 @@ describe("isCommonJsModulePath CJS classification (inheritedKind override fix)",
 		const entry = path.join(dir, "index.mjs");
 		const mod = (await loadLegacyPiModule(entry)) as { result: number };
 		expect(mod.result).toBe(99);
-	});
-});
-
-describe("comment stripping heuristics", () => {
-	it("does not false-positive on double-slash inside URL strings", async () => {
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "cjs-url-fp", version: "1.0.0" }),
-			"dep.js": [
-				'const api = "https://api.example.com/v1";',
-				'const backup = "http://backup.example.com";',
-				"module.exports = { api, backup };",
-			].join("\n"),
-			"index.mjs": ["import dep from './dep.js';", "export const api = dep.api;"].join("\n"),
-		});
-
-		const entry = path.join(dir, "index.mjs");
-		const mod = (await loadLegacyPiModule(entry)) as { api: string };
-		expect(mod.api).toBe("https://api.example.com/v1");
-	});
-
-	it("does not false-positive on double-slash in ftp/file/ssh URL strings", async () => {
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "cjs-url-proto", version: "1.0.0" }),
-			"dep.js": [
-				'const ftp = "ftp://files.example.com/data";',
-				'const file = "file:///local/path";',
-				'const ssh = "ssh://server.example.com";',
-				"module.exports = { ftp, file, ssh };",
-			].join("\n"),
-			"index.mjs": ["import dep from './dep.js';", "export const ftp = dep.ftp;"].join("\n"),
-		});
-
-		const entry = path.join(dir, "index.mjs");
-		const mod = (await loadLegacyPiModule(entry)) as { ftp: string };
-		expect(mod.ftp).toBe("ftp://files.example.com/data");
 	});
 });
