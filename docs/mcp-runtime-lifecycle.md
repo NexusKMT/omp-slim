@@ -98,7 +98,7 @@ For each discovered server in `connectServers()`:
 - performs MCP `initialize` using protocol version `2025-11-25` and advertises the `roots` capability,
 - answers server-to-client `ping` and `roots/list` requests; unsupported request methods return JSON-RPC `-32601`,
 - sends `notifications/initialized` before any further session traffic,
-- for HTTP/SSE, starts the background SSE listener only after `notifications/initialized`,
+- for Streamable HTTP, starts the background SSE listener only after `notifications/initialized`,
 - uses timeout precedence `OMP_MCP_TIMEOUT_MS`, then `config.timeout`, then 30s; `0` disables the client-side timeout,
 - closes transport on init failure.
 
