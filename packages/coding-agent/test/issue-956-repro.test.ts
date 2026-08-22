@@ -236,6 +236,76 @@ describe("interactive /mcp test", () => {
 		expect(presented[0]?.isTranscriptBlockFinalized()).toBe(true);
 	});
 
+	it("treats an abort landing during manager sync as a completed test", async () => {
+		const transport = {
+			connected: true,
+			request: vi.fn(),
+			notify: vi.fn(),
+			close: vi.fn(async () => {}),
+		};
+		const connection = {
+			name: "github",
+			config: { type: "stdio" as const, command: "github-mcp-server", args: ["serve"] },
+			transport,
+			serverInfo: { name: "GitHub MCP", version: "1.0.0" },
+			capabilities: {},
+		};
+		vi.spyOn(mcpClient, "connectToServer").mockResolvedValue(connection);
+		vi.spyOn(mcpClient, "listTools").mockResolvedValue([{ name: "search_issues" }] as never);
+		vi.spyOn(mcpClient, "disconnectServer").mockResolvedValue();
+		const showStatus = vi.fn();
+		const presented: RenderableBlock[] = [];
+		const { promise: hintPresented, resolve: hintResolve } = Promise.withResolvers<void>();
+		const { promise: syncStarted, resolve: syncStartedResolve } = Promise.withResolvers<void>();
+		const { promise: syncGate, resolve: syncResolve } = Promise.withResolvers<void>();
+		const mcpTestEscapeHandlers = new Set<() => void>();
+		const controller = new MCPCommandController({
+			mcpTestEscapeHandlers,
+			chatContainer: { addChild: vi.fn() },
+			present: vi.fn(),
+			presentCommandOutput: (content: unknown) => {
+				if (typeof (content as { render?: unknown }).render === "function") {
+					presented.push(content as RenderableBlock);
+					hintResolve();
+				}
+			},
+			ui: { requestRender: vi.fn() },
+			editor: {},
+			showError: vi.fn(),
+			showStatus,
+			session: { refreshMCPTools: vi.fn() },
+			mcpManager: {
+				prepareConfig: vi.fn(async config => config),
+				getConnectionStatus: vi.fn(() => "disconnected"),
+				connectServers: vi.fn(async () => {
+					syncStartedResolve();
+					await syncGate;
+					return {};
+				}),
+			},
+		} as never);
+
+		const pending = controller.handle("/mcp test github");
+		await hintPresented;
+
+		// Wait until the test is past listTools and inside #syncManagerConnection:
+		// an abort here does not observe the signal, so the flow still completes.
+		await syncStarted;
+		for (const handler of [...mcpTestEscapeHandlers]) {
+			mcpTestEscapeHandlers.delete(handler);
+			handler();
+		}
+		syncResolve({});
+		await pending;
+
+		const rendered = presented.map(block => block.render(80).join("\n")).join("\n");
+		expect(rendered).toContain(`Successfully connected to "github"`);
+		expect(rendered).toContain(`Tested connection to "github".`);
+		expect(rendered).not.toContain("Cancelled connection test");
+		expect(showStatus).not.toHaveBeenCalledWith(`Cancelled MCP test for "github"`);
+		expect(presented[0]?.isTranscriptBlockFinalized()).toBe(true);
+	});
+
 	it("aborts during the awaited lookup without ever advertising esc", async () => {
 		const { promise: lookup, resolve } = Promise.withResolvers<{
 			mcpServers: Record<string, { type: string; command: string; args: string[] }>;

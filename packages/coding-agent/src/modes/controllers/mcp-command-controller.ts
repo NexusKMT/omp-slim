@@ -1620,16 +1620,15 @@ export class MCPCommandController {
 		// read as if it completed.
 		let settleNote = `Tested connection to "${name}".`;
 		// Cancellation can land while later awaits (auth prepareConfig, connect)
-		// are still unwinding. Rewrite the hint the moment it happens: the
-		// dispatcher already consumed the ownership, so the hint must not keep
-		// advertising esc for a test that can no longer be cancelled.
+		// are still unwinding. Drop the esc affordance the moment it happens —
+		// the dispatcher already consumed the ownership — but claim no outcome:
+		// whether this abort actually stops the test is only known once the
+		// signal-observing awaits settle (e.g. an abort landing during
+		// #syncManagerConnection does not stop it).
 		abortController.signal.addEventListener("abort", () => {
-			if (settled) return;
-			settleNote = `Cancelled connection test for "${name}".`;
-			if (hintShown) {
-				hintText?.setText(theme.fg("muted", settleNote));
-				this.ctx.ui.requestRender();
-			}
+			if (settled || !hintShown) return;
+			hintText?.setText(theme.fg("muted", `Testing connection to "${name}"...`));
+			this.ctx.ui.requestRender();
 		});
 		try {
 			const found = await this.#resolveServerForAuth(name);
