@@ -10,13 +10,20 @@
 ### Added
 
 - Added spelling suggestion support; implement `getWordReplacements` to provide word choices
+- Added `Terminal.pendingOutputBytes` and an output-backpressure render gate: frames are not composed while the terminal still owes more than a frame budget of bytes, so a slow terminal receives only the latest frame instead of a queue of stale ones
 - Added `ctrl+.` keybinding to trigger spelling suggestions
 - Added `EditorTextAssistProvider` to support independent word completion and autocorrection
+- `EditorTextAssistProvider.tryAutocorrect` and `getWordReplacements` may return Promises; the editor applies async results only when the document is unchanged and reports applies through `Editor.onTextAssistApplied`
+- Added `deferInput` start option (`Terminal`/`TUI`/`TUIStartOptions`) and `enableInput()`: paint without owning stdin so the host tty's cooked-mode echo covers event-loop stalls, then adopt the kernel-buffered keystrokes
 - Added icon support to autocomplete and select lists, with customizable theming
 - `MarkdownTheme.createHighlightStream` lets themes supply a stateful incremental highlighter; streaming Markdown now syntax-highlights the completed lines of any open code fence (previously only diff/patch fences), and a fence highlights whole-block as soon as it closes
 - `SelectList` layouts accept `maxDescriptionRows` to cap wrapped descriptions with a trailing ellipsis
 - `CombinedAutocompleteProvider` accepts a `commandUsage` callback that ranks equal-score slash matches by usage frequency
 - `Editor.viewportRowsProvider` lets hosts clamp the autocomplete dropdown to the live terminal height
+
+### Fixed
+
+- Fixed the whole TUI freezing for as long as a slow, busy, or occluded terminal took to drain a repaint: `process.stdout.write` on a POSIX TTY blocks the event loop, so multi-MB full repaints (Esc-Esc `/tree` navigation, resume, theme change) could stall input, timers, and the agent for minutes. Stdout writes now flow through the off-thread `TtyWriter` pump from pi-natives and never block the render loop
 
 ### Changed
 

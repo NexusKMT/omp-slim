@@ -6,7 +6,7 @@
 
 - Added omp render command to replay session threads and benchmark transcript pipeline performance
 - Added independently configurable macOS typo detection (`Ctrl+.` suggestions), word autocomplete (Tab), and autocorrect in the prompt editor. Typo detection and autocomplete default on; autocorrect is opt-in.
-- Startup composer now renders welcome, theme, and status UI immediately using cached session/LSP info
+- Startup composer now renders welcome and theme UI immediately using cached session/LSP info; the status line fills in as real session data resolves
 - `omp bench` now runs a mixed suite of randomized built-in challenges by default (chat, prefill, generation); `--profile` isolates one kind
 - Added p50/p95 statistics, distinct input/output throughput metrics, and cost to benchmark output
 - Added live benchmark dashboard with progress tracking and real-time performance estimates
@@ -29,6 +29,8 @@
 
 - History rewinds (esc-esc branch, `/tree` navigation to an ancestor) now drop the transcript tail in place when it hasn't scrolled off screen, instead of always clearing scrollback and replaying the whole transcript
 - Switched fallback edit mode from replace to sloppy for models that do not support hashline
+- macOS spelling checks now run on a dedicated background thread instead of blocking the editor render and keystroke paths
+- Tab-accepted word completions now insert a trailing space unless whitespace or punctuation already follows the cursor
 - Autocomplete dropdown now shows up to 10 rows by default (was 5), clamped to the terminal height (`autocompleteMaxVisible` setting)
 - Long slash-command descriptions now truncate to two rows with an ellipsis in the autocomplete popup instead of wrapping in full
 - Sloppy edits now treat all authored whitespace as verbatim and require explicit `»` or `⟪⟫` markers for all operations, forbidding marker-less changes.
@@ -41,6 +43,7 @@
 ### Fixed
 
 - Benchmark input-token counts now include cache-read/cache-write prompt tokens, so prefill throughput is no longer understated on providers with automatic prompt caching
+- Typing during startup is no longer swallowed: the prepaint composer leaves the terminal's cooked-mode echo active while modules load, then replays the buffered keystrokes into the editor once settings resolve
 - Code blocks now syntax-highlight live while the response streams instead of staying plain until the block settles
 - Fixed `/shake thinking` reporting "Nothing to shake" after removing reasoning; it now reports the dropped count and leaves thinking-only turns empty.
 - Fixed session teardown occasionally losing pending input drafts during shutdown
