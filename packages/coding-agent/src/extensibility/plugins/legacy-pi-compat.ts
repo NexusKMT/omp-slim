@@ -1621,6 +1621,38 @@ async function isCommonJsModulePath(
 	if (parsedSourceType === "module") {
 		return false;
 	}
+	// Trust source-type detection only when the source contains CJS syntax.
+	// Under 'unambiguous', sourceType is 'script' for any file without static
+	// import/export — including empty files, dynamic-import shims, and
+	// side-effect-only modules that inheritedKind was designed to disambiguate.
+	//
+	// NOTE: An AST-based check for unshadowed require/module/exports would be
+	// more accurate, but regex with comment stripping is sufficient here.
+	// Comments are stripped before matching to avoid false positives from
+	// commented-out code. False positives from string literals are expected
+	// to be rare — side-effect-only .js files with no import/export that
+	// contain CJS patterns only in strings are uncommon, and the CJS bridge
+	// hook serves synthetic ESM which works for most files.
+	if (parsedSourceType === "script") {
+		const content = await Bun.file(modulePath).text();
+		// Strip comments before checking for CJS patterns to avoid false positives
+		// from commented-out code like "// module.exports = ...".
+		//
+		// Heuristics applied:
+		// 1. Skip stripping for minified code (avg line length > 2000) — minified
+		//    files typically have 1-5 lines with 10,000+ chars each, and naive
+		//    stripping could delete CJS markers inside string literals.
+		// 2. Use (?<!:) lookbehind to avoid matching "//" in URL schemes (://)
+		//    like "https://example.com" where "//"" is part of the string, not
+		//    a comment.
+		const lines = content.split("\n");
+		const avgLineLength = content.length / Math.max(lines.length, 1);
+		const stripped =
+			avgLineLength > 2000 ? content : content.replace(/(?<!:)\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+		if (/\brequire\s*\(/.test(stripped) || /\bmodule\.exports\b/.test(stripped) || /\bexports\./.test(stripped)) {
+			return true;
+		}
+	}
 	if (inheritedKind) {
 		return inheritedKind === "commonjs";
 	}
