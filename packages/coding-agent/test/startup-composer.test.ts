@@ -58,6 +58,9 @@ describe("Composer prepaint", () => {
 			resizeScrollback: settings.get("tui.resizeScrollback"),
 			imeSafeCursor: settings.get("tui.imeSafeCursor"),
 			autocompleteMaxVisible: settings.get("autocompleteMaxVisible"),
+			spellingTypoDetection: settings.get("spelling.typoDetection"),
+			spellingAutocomplete: settings.get("spelling.autocomplete"),
+			spellingAutocorrect: settings.get("spelling.autocorrect"),
 		};
 	});
 
@@ -342,6 +345,9 @@ describe("Composer prepaint", () => {
 			resizeScrollback: getDefault("tui.resizeScrollback"),
 			imeSafeCursor: getDefault("tui.imeSafeCursor"),
 			autocompleteMaxVisible: getDefault("autocompleteMaxVisible"),
+			spellingTypoDetection: getDefault("spelling.typoDetection"),
+			spellingAutocomplete: getDefault("spelling.autocomplete"),
+			spellingAutocorrect: getDefault("spelling.autocorrect"),
 		});
 	});
 	it("renders the complete interactive welcome scene on the first frame", async () => {
@@ -453,6 +459,9 @@ describe("Composer prepaint", () => {
 			resizeScrollback: config.resizeScrollback,
 			imeSafeCursor: config.imeSafeCursor,
 			autocompleteMaxVisible: config.autocompleteMaxVisible,
+			spellingTypoDetection: settings.get("spelling.typoDetection"),
+			spellingAutocomplete: settings.get("spelling.autocomplete"),
+			spellingAutocorrect: settings.get("spelling.autocorrect"),
 			theme: {},
 		});
 		await terminal.waitForRender();

@@ -129,6 +129,9 @@ export function applyStartupComposerPreferences(update: PrepaintComposerPreferen
 		resizeScrollback: update.resizeScrollback,
 		imeSafeCursor: update.imeSafeCursor,
 		autocompleteMaxVisible: update.autocompleteMaxVisible,
+		spellingTypoDetection: update.spellingTypoDetection,
+		spellingAutocomplete: update.spellingAutocomplete,
+		spellingAutocorrect: update.spellingAutocorrect,
 	};
 	pending.composer.setPreferences(preferences);
 	if (pending.cache) {

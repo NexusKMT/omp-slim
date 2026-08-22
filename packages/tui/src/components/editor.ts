@@ -413,6 +413,25 @@ interface HistoryStorage {
 	getRecent(limit: number): HistoryEntry[];
 }
 
+/** A synchronous replacement immediately before the editor cursor. */
+export interface EditorInlineReplacement {
+	/** UTF-16 code units to remove immediately before the cursor. */
+	replaceLen: number;
+	/** Literal text inserted where the removed suffix started. */
+	insert: string;
+}
+
+/**
+ * Optional prose assistance kept separate from command/file autocomplete.
+ * Hosts independently decide whether word completion and autocorrection are enabled.
+ */
+export interface EditorTextAssistProvider {
+	/** Return ghost-text suffix for the partial word at the cursor, or `null`. */
+	getWordCompletion?(lines: string[], cursorLine: number, cursorCol: number): string | null;
+	/** Return a correction after one single-character insertion, or `null`. */
+	tryAutocorrect?(textBeforeCursor: string): EditorInlineReplacement | null;
+}
+
 type HistoryCursorAnchor = "start" | "end";
 
 export class Editor implements Component, Focusable {
@@ -474,6 +493,7 @@ export class Editor implements Component, Focusable {
 
 	// Autocomplete support
 	#autocompleteProvider?: AutocompleteProvider;
+	#textAssistProvider?: EditorTextAssistProvider;
 	#autocompleteList?: SelectList;
 	#autocompleteState: "regular" | "force" | null = null;
 	#autocompletePrefix: string = "";
@@ -550,6 +570,12 @@ export class Editor implements Component, Focusable {
 
 	setAutocompleteProvider(provider: AutocompleteProvider): void {
 		this.#autocompleteProvider = provider;
+	}
+
+	/** Install prose assistance without changing command/file autocomplete. */
+	setTextAssistProvider(provider: EditorTextAssistProvider | undefined): void {
+		this.#textAssistProvider = provider;
+		this.#widthEpochRevision++;
 	}
 
 	/**
@@ -2020,6 +2046,27 @@ export class Editor implements Component, Focusable {
 	}
 
 	// All the editor methods from before...
+	#applyInlineReplacement(replacement: EditorInlineReplacement): boolean {
+		if (
+			!Number.isInteger(replacement.replaceLen) ||
+			replacement.replaceLen < 0 ||
+			replacement.replaceLen > this.#state.cursorCol
+		) {
+			return false;
+		}
+		const line = this.#state.lines[this.#state.cursorLine] || "";
+		const before = line.slice(0, this.#state.cursorCol - replacement.replaceLen);
+		const after = line.slice(this.#state.cursorCol);
+		this.#state.lines[this.#state.cursorLine] = before + replacement.insert + after;
+		this.#setCursorCol(before.length + replacement.insert.length);
+		this.onChange?.(this.getText());
+		if (this.#autocompleteState) {
+			this.#cancelAutocomplete();
+			this.onAutocompleteUpdate?.();
+		}
+		return true;
+	}
+
 	#insertCharacter(char: string): void {
 		this.#exitHistoryForEditing();
 		// Undo coalescing: consecutive word typing collapses into one undo unit
@@ -2045,24 +2092,13 @@ export class Editor implements Component, Focusable {
 		// Synchronous inline replacement (e.g. emoji shortcodes `:joy:` → 😂).
 		// Runs before autocomplete trigger so the popup doesn't briefly chase a
 		// prefix that's about to be rewritten.
-		if (char.length === 1 && this.#autocompleteProvider?.trySyncInlineReplace) {
+		if (char.length === 1) {
 			const replaceLine = this.#state.lines[this.#state.cursorLine] || "";
 			const textBeforeCursor = replaceLine.slice(0, this.#state.cursorCol);
-			const replacement = this.#autocompleteProvider.trySyncInlineReplace(textBeforeCursor);
-			if (replacement) {
-				const before = replaceLine.slice(0, this.#state.cursorCol - replacement.replaceLen);
-				const after = replaceLine.slice(this.#state.cursorCol);
-				this.#state.lines[this.#state.cursorLine] = before + replacement.insert + after;
-				this.#setCursorCol(before.length + replacement.insert.length);
-				if (this.onChange) {
-					this.onChange(this.getText());
-				}
-				if (this.#autocompleteState) {
-					this.#cancelAutocomplete();
-					this.onAutocompleteUpdate?.();
-				}
-				return;
-			}
+			const inlineReplacement = this.#autocompleteProvider?.trySyncInlineReplace?.(textBeforeCursor);
+			if (inlineReplacement && this.#applyInlineReplacement(inlineReplacement)) return;
+			const autocorrection = this.#textAssistProvider?.tryAutocorrect?.(textBeforeCursor);
+			if (autocorrection && this.#applyInlineReplacement(autocorrection)) return;
 		}
 
 		// Check if we should trigger or update autocomplete
@@ -3291,6 +3327,11 @@ export class Editor implements Component, Focusable {
 	}
 
 	async #handleTabCompletion(): Promise<void> {
+		const wordCompletion = this.#getWordCompletion();
+		if (wordCompletion) {
+			this.#insertTextAtCursor(wordCompletion);
+			return;
+		}
 		if (!this.#autocompleteProvider) return;
 
 		const currentLine = this.#state.lines[this.#state.cursorLine] || "";
@@ -3419,13 +3460,23 @@ export class Editor implements Component, Focusable {
 
 		// Fall back to provider's getInlineHint
 		if (this.#autocompleteProvider?.getInlineHint) {
-			return this.#autocompleteProvider.getInlineHint(
+			const hint = this.#autocompleteProvider.getInlineHint(
 				this.#state.lines,
 				this.#state.cursorLine,
 				this.#state.cursorCol,
 			);
+			if (hint) return hint;
 		}
 
-		return null;
+		return this.#getWordCompletion();
+	}
+	#getWordCompletion(): string | null {
+		return (
+			this.#textAssistProvider?.getWordCompletion?.(
+				this.#state.lines,
+				this.#state.cursorLine,
+				this.#state.cursorCol,
+			) ?? null
+		);
 	}
 }

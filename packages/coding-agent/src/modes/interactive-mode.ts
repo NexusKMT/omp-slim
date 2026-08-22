@@ -801,6 +801,9 @@ export class InteractiveMode implements InteractiveModeContext {
 			resizeScrollback: settings.get("tui.resizeScrollback"),
 			imeSafeCursor: settings.get("tui.imeSafeCursor"),
 			autocompleteMaxVisible: settings.get("autocompleteMaxVisible"),
+			spellingTypoDetection: settings.get("spelling.typoDetection"),
+			spellingAutocomplete: settings.get("spelling.autocomplete"),
+			spellingAutocorrect: settings.get("spelling.autocorrect"),
 		};
 		const wasStarted = composer?.started ?? false;
 		this.composer =
@@ -881,6 +884,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.editor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
 		this.editor.setImeSafeCursorLayout(settings.get("tui.imeSafeCursor"));
 		this.editor.setAutocompleteMaxVisible(settings.get("autocompleteMaxVisible"));
+		this.syncEditorSpelling();
 		this.editor.viewportRowsProvider = () => this.ui.terminal.rows;
 		this.editor.onAutocompleteCancel = () => {
 			this.ui.requestRender(true);
@@ -1975,6 +1979,14 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.editor.setMaxHeight(this.#computeEditorMaxHeight());
 	}
 
+	syncEditorSpelling(): void {
+		this.editor.setSpellingFeatures({
+			typoDetection: this.settings.get("spelling.typoDetection"),
+			autocomplete: this.settings.get("spelling.autocomplete"),
+			autocorrect: this.settings.get("spelling.autocorrect"),
+		});
+	}
+
 	#syncStatusLineSettings(): void {
 		this.statusLine.updateSettings({
 			preset: settings.get("statusLine.preset"),
@@ -1992,7 +2004,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	syncComposerShape(): void {
 		const shape = settings.get("composer.shape") ?? "box";
 		const style = getComposerStyle(shape);
-		this.editor.setBorderStyle(shape);
+		this.composer.setPreferences({ composerShape: shape });
 		this.statusLine.setAutocompleteActiveProbe(() => this.editor.isAutocompleteActive());
 		switch (style.statusAttachment) {
 			case "top-border":
@@ -4483,6 +4495,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		nextEditor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
 		nextEditor.setImeSafeCursorLayout(this.settings.get("tui.imeSafeCursor"));
 		nextEditor.setAutocompleteMaxVisible(this.settings.get("autocompleteMaxVisible"));
+		nextEditor.setSpellingFeatures({
+			typoDetection: this.settings.get("spelling.typoDetection"),
+			autocomplete: this.settings.get("spelling.autocomplete"),
+			autocorrect: this.settings.get("spelling.autocorrect"),
+		});
 		nextEditor.viewportRowsProvider = () => this.ui.terminal.rows;
 		nextEditor.magicKeywordsEnabled = () => this.settings.get("magicKeywords.enabled");
 		nextEditor.imageReferenceHyperlink = imageReferenceHyperlink;
@@ -4494,6 +4511,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		};
 		nextEditor.setShimmerRepaintHandler(() => this.ui.requestDirectWrite(nextEditor));
 		this.editor = nextEditor;
+		this.composer.setEditor(nextEditor);
 		this.syncComposerShape();
 		nextEditor.setMaxHeight(this.#computeEditorMaxHeight());
 		if (this.historyStorage) {
@@ -4502,7 +4520,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		nextEditor.setText(previousText);
 
 		this.editorContainer.clear();
-		this.editor = nextEditor;
 		this.editorContainer.addChild(nextEditor);
 		this.ui.setFocus(nextEditor);
 

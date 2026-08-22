@@ -21,6 +21,7 @@ import {
 } from "../composer-attachments";
 import { hasMagicKeyword, highlightMagicKeywords } from "../magic-keywords";
 import { isQueuedMessageList, parseQueueShorthand, QUEUE_LIST_MARKER_RE } from "../queue-input";
+import { MacOSSpellingProvider, type SpellingFeatures } from "../macos-spelling";
 import { fgOrPlain, theme } from "../theme/theme";
 
 type ConfigurableEditorAction = Extract<
@@ -401,6 +402,7 @@ export type ComposerChipDescriptor =
  * Custom editor that handles configurable app-level shortcuts for coding-agent.
  */
 export class CustomEditor extends Editor {
+	#spelling = new MacOSSpellingProvider();
 	imageLinks?: readonly (string | undefined)[];
 
 	/** Draft images pasted into the composer, consumed on submit. Co-located with
@@ -442,7 +444,13 @@ export class CustomEditor extends Editor {
 	 */
 	constructor(...args: readonly unknown[]) {
 		super(pickEditorTheme(args));
+		this.setTextAssistProvider(this.#spelling);
 		if (args[0] instanceof TUI) this.tui = args[0];
+	}
+
+	/** Independently configure typo detection, word autocomplete, and autocorrect. */
+	setSpellingFeatures(features: SpellingFeatures): void {
+		this.#spelling.setFeatures(features);
 	}
 
 	/** Clear the composer draft: optionally commit `historyText` to history, then
@@ -572,7 +580,9 @@ export class CustomEditor extends Editor {
 		}
 		return renderPlaceholders(text, {
 			renderText: value => {
-				const highlighted = highlightMagicKeywords(value, undefined, phase);
+				const highlighted = this.#spelling.decorateTypos(value, span =>
+					highlightMagicKeywords(span, undefined, phase),
+				);
 				if (this.#queueShorthandActive && (value.startsWith("->") || value.startsWith("=>"))) {
 					const icon = typeof theme === "undefined" ? "➤" : theme.nav.selected;
 					return `${fgOrPlain("dim", `Queueing ${icon}`)}${highlighted.slice(2)}`;

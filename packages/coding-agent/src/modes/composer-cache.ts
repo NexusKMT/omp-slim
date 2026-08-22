@@ -126,6 +126,9 @@ function readUiState(
 	const resizeScrollback = field(rawPreferences, "resizeScrollback");
 	const imeSafeCursor = field(rawPreferences, "imeSafeCursor");
 	const autocompleteMaxVisible = field(rawPreferences, "autocompleteMaxVisible");
+	const spellingTypoDetection = field(rawPreferences, "spellingTypoDetection");
+	const spellingAutocomplete = field(rawPreferences, "spellingAutocomplete");
+	const spellingAutocorrect = field(rawPreferences, "spellingAutocorrect");
 	if (
 		typeof quiet !== "boolean" ||
 		typeof composerShape !== "string" ||
@@ -134,7 +137,10 @@ function readUiState(
 		typeof scrollbackRebuild !== "boolean" ||
 		(resizeScrollback !== "append" && resizeScrollback !== "preserve" && resizeScrollback !== "rebuild") ||
 		typeof imeSafeCursor !== "boolean" ||
-		typeof autocompleteMaxVisible !== "number"
+		typeof autocompleteMaxVisible !== "number" ||
+		typeof spellingTypoDetection !== "boolean" ||
+		typeof spellingAutocomplete !== "boolean" ||
+		typeof spellingAutocorrect !== "boolean"
 	) {
 		return undefined;
 	}
@@ -163,6 +169,9 @@ function readUiState(
 			resizeScrollback,
 			imeSafeCursor,
 			autocompleteMaxVisible,
+			spellingTypoDetection,
+			spellingAutocomplete,
+			spellingAutocorrect,
 		},
 		theme: { symbolPreset, colorBlindMode, darkTheme, lightTheme },
 	};

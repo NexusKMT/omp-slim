@@ -1514,6 +1514,9 @@ export async function runRootCommand(
 			resizeScrollback: settingsInstance.get("tui.resizeScrollback"),
 			imeSafeCursor: settingsInstance.get("tui.imeSafeCursor"),
 			autocompleteMaxVisible: settingsInstance.get("autocompleteMaxVisible"),
+			spellingTypoDetection: settingsInstance.get("spelling.typoDetection"),
+			spellingAutocomplete: settingsInstance.get("spelling.autocomplete"),
+			spellingAutocorrect: settingsInstance.get("spelling.autocorrect"),
 			theme: {
 				symbolPreset: settingsInstance.get("symbolPreset"),
 				colorBlindMode: settingsInstance.get("colorBlindMode"),

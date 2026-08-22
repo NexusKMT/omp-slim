@@ -23,6 +23,9 @@ export interface ComposerPreferences {
 	readonly resizeScrollback: ResizeScrollbackMode;
 	readonly imeSafeCursor: boolean;
 	readonly autocompleteMaxVisible: number;
+	readonly spellingTypoDetection: boolean;
+	readonly spellingAutocomplete: boolean;
+	readonly spellingAutocorrect: boolean;
 }
 
 /** Settings-schema-compatible defaults used when constructing a dependency-free composer. */
@@ -35,6 +38,9 @@ export const COMPOSER_DEFAULTS: ComposerPreferences = {
 	resizeScrollback: "append",
 	imeSafeCursor: false,
 	autocompleteMaxVisible: 10,
+	spellingTypoDetection: false,
+	spellingAutocomplete: false,
+	spellingAutocorrect: false,
 };
 
 /** Welcome data that can be supplied initially or patched as startup resolves it. */
@@ -69,10 +75,9 @@ export interface ComposerStartOptions {
 export class Composer {
 	/** Terminal renderer shared with InteractiveMode after adoption. */
 	readonly ui: TUI;
-	/** Live editor whose draft survives startup and session adoption. */
-	readonly editor: CustomEditor;
-
+	#editor: CustomEditor;
 	readonly #header = new Container();
+	readonly #bootstrapInputGap = new Spacer(1);
 	readonly #exit: (code: number) => void;
 	readonly #now: () => number;
 	#preferences: ComposerPreferences;
@@ -103,11 +108,16 @@ export class Composer {
 		this.ui.setScrollbackRebuild(this.#preferences.scrollbackRebuild);
 		this.ui.setResizeScrollback(this.#preferences.resizeScrollback);
 
-		this.editor = new CustomEditor(getEditorTheme());
+		this.#editor = new CustomEditor(getEditorTheme());
 		this.editor.disableSubmit = true;
 		this.editor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
 		this.editor.setImeSafeCursorLayout(this.#preferences.imeSafeCursor);
 		this.editor.setAutocompleteMaxVisible(this.#preferences.autocompleteMaxVisible);
+		this.editor.setSpellingFeatures({
+			typoDetection: this.#preferences.spellingTypoDetection,
+			autocomplete: this.#preferences.spellingAutocomplete,
+			autocorrect: this.#preferences.spellingAutocorrect,
+		});
 		try {
 			this.editor.setBorderStyle(this.#preferences.composerShape);
 		} catch {
@@ -123,9 +133,15 @@ export class Composer {
 		if (!this.#preferences.quiet) this.#ensureWelcome();
 		this.#rebuildHeader();
 		this.ui.addChild(this.#header);
+		this.ui.addChild(this.#bootstrapInputGap);
 		this.ui.enableScopedInputRender(this.editor);
 		this.ui.addChild(this.editor);
 		this.ui.setFocus(this.editor);
+	}
+
+	/** Live editor whose draft survives startup and session adoption. */
+	get editor(): CustomEditor {
+		return this.#editor;
 	}
 
 	/** The welcome component currently mounted in the header, if quiet mode is off. */
@@ -164,6 +180,11 @@ export class Composer {
 		this.ui.setResizeScrollback(this.#preferences.resizeScrollback);
 		this.editor.setImeSafeCursorLayout(this.#preferences.imeSafeCursor);
 		this.editor.setAutocompleteMaxVisible(this.#preferences.autocompleteMaxVisible);
+		this.editor.setSpellingFeatures({
+			typoDetection: this.#preferences.spellingTypoDetection,
+			autocomplete: this.#preferences.spellingAutocomplete,
+			autocorrect: this.#preferences.spellingAutocorrect,
+		});
 
 		if (this.#preferences.quiet) {
 			this.#welcome?.stopIntro();
@@ -203,12 +224,18 @@ export class Composer {
 		this.ui.requestRender();
 	}
 
+	/** Update the canonical editor reference after InteractiveMode remounts a custom editor. */
+	setEditor(editor: CustomEditor): void {
+		this.#editor = editor;
+	}
+
 	/** Mount or replace session-aware root children while preserving the header component. */
 	setRuntimeChildren(children: readonly Component[]): void {
 		if (this.#stopped) return;
 		if (this.#runtimeMounted) {
 			for (const child of this.#runtimeChildren) this.ui.removeChild(child);
 		} else {
+			this.ui.removeChild(this.#bootstrapInputGap);
 			this.ui.removeChild(this.editor);
 			this.#runtimeMounted = true;
 		}

@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added native macOS spelling support, including real-time typo detection, autocomplete, and autocorrect
+- Added configuration settings for macOS spelling features under Interaction settings
 - Startup composer now renders the complete interactive welcome scene and theme immediately during launch with progressive fills for recent sessions and LSP servers.
 - `omp bench` now runs a mixed suite of randomized built-in challenges by default (chat, prefill, generation); `--profile` isolates one kind
 - Added p50/p95 statistics, distinct input/output throughput metrics, and cost to benchmark output
