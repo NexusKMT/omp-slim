@@ -18,6 +18,10 @@ describe("attributeSubagentError", () => {
 		expect(attributeSubagentError("   ", undefined)).toBe("Subagent failed");
 	});
 
+	it("preserves the provider's original error text", () => {
+		expect(attributeSubagentError("  first line\nsecond line  ", undefined)).toBe("  first line\nsecond line  ");
+	});
+
 	it("returns the bare message when no identity is known", () => {
 		expect(attributeSubagentError("boom", undefined)).toBe("boom");
 		expect(attributeSubagentError("boom", {})).toBe("boom");

@@ -29,7 +29,7 @@ export function attributeSubagentError(
 	source: FailedAssistantModelInfo | undefined,
 	fallback = "Subagent failed",
 ): string {
-	const text = message?.trim() || fallback;
+	const text = message?.trim() ? message : fallback;
 	const provider = source?.provider?.trim() || undefined;
 	const model = source?.model?.trim() || undefined;
 	const identity = provider && model ? `${provider}/${model}` : (provider ?? model);
