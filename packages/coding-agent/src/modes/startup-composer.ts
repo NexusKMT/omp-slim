@@ -19,8 +19,9 @@ export interface StartupComposerConfig {
 }
 
 /**
- * Mirrors the canonical settings schema without importing its full runtime graph
- * on the first-paint path. The startup composer test guards these values against drift.
+ * Mirrors the canonical settings-schema defaults without importing the settings
+ * runtime graph on the first-paint path. startup-composer.test.ts guards these
+ * values against schema drift.
  */
 export const STARTUP_COMPOSER_DEFAULTS: StartupComposerConfig = {
 	showHardwareCursor: true,
@@ -28,7 +29,7 @@ export const STARTUP_COMPOSER_DEFAULTS: StartupComposerConfig = {
 	scrollbackRebuild: false,
 	resizeScrollback: "append",
 	imeSafeCursor: false,
-	autocompleteMaxVisible: 5,
+	autocompleteMaxVisible: 10,
 };
 
 export interface StartupComposerOptions {
@@ -161,7 +162,12 @@ export class StartupComposer {
 	}
 
 	#requestExit(code: number): void {
-		if (this.#stopped || this.#transferred) return;
+		// Deliberately still live after handoff: InteractiveMode does not install the
+		// configured exit bindings until InputController.setupKeyHandlers() runs deep
+		// inside async init(), and a raw-mode user must be able to abort a stalled
+		// startup in that window. Once the interactive handlers are installed these
+		// callbacks become unreachable.
+		if (this.#stopped) return;
 		this.#stopped = true;
 		if (this.#started) this.ui.stop();
 		this.#exit(code);

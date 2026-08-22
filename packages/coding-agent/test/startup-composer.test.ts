@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { getDefault } from "@oh-my-pi/pi-coding-agent/config/settings-schema";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import {
 	beginStartupComposer,
+	STARTUP_COMPOSER_DEFAULTS,
 	StartupComposer,
 	type StartupComposerConfig,
 	StartupComposerLease,
@@ -306,5 +308,31 @@ describe("StartupComposer", () => {
 
 		expect(exit).toHaveBeenCalledWith(0);
 		expect(terminal.stops).toBe(1);
+	});
+	it("keeps emergency exit live after adoption until interactive handlers replace it", () => {
+		const terminal = new CountingTerminal();
+		const exit = vi.fn();
+		const composer = new StartupComposer(config, { terminal, exit });
+		composer.start();
+		const lease = new StartupComposerLease(composer);
+		lease.adopt();
+
+		// InputController.setupKeyHandlers() has not run yet; a stalled startup must
+		// still honor Ctrl+D so a raw-mode user can abort.
+		terminal.sendInput("\x04");
+
+		expect(exit).toHaveBeenCalledWith(0);
+		expect(terminal.stops).toBe(1);
+	});
+
+	it("first frame mirrors the canonical settings-schema defaults", () => {
+		expect(STARTUP_COMPOSER_DEFAULTS).toEqual({
+			showHardwareCursor: getDefault("showHardwareCursor"),
+			maxInlineImages: getDefault("tui.maxInlineImages"),
+			scrollbackRebuild: getDefault("tui.scrollbackRebuild"),
+			resizeScrollback: getDefault("tui.resizeScrollback"),
+			imeSafeCursor: getDefault("tui.imeSafeCursor"),
+			autocompleteMaxVisible: getDefault("autocompleteMaxVisible"),
+		});
 	});
 });
