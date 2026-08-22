@@ -81,4 +81,31 @@ describe("gemini-cli quota discovery fallback", () => {
 
 		expect(models).toBeNull();
 	});
+
+	it("forwards an explicit project id and skips project-less loadCodeAssist (#9316 review)", async () => {
+		const bodies: Record<string, unknown> = {};
+		let loadCodeAssistCalled = false;
+		const fetcher = Object.assign(
+			(input: string | URL | Request, init?: RequestInit) => {
+				const url = String(input);
+				const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+				if (url.includes(":loadCodeAssist")) {
+					loadCodeAssistCalled = true;
+					return Promise.resolve(new Response("{}", { status: 200 }));
+				}
+				if (url.includes(":retrieveUserQuota")) {
+					bodies.quota = body;
+					return Promise.resolve(new Response(JSON.stringify({ buckets: [{ modelId: "gemini-3.5-flash" }] }), { status: 200 }));
+				}
+				return Promise.resolve(new Response("nf", { status: 404 }));
+			},
+			{ preconnect: fetch.preconnect },
+		);
+
+		const models = await fetchGeminiCliQuotaModels({ token: "t", projectId: "workspace-gcp", endpoint: CCA, fetcher });
+
+		expect(loadCodeAssistCalled).toBe(false);
+		expect(bodies.quota).toEqual({ project: "workspace-gcp" });
+		expect(models?.map(m => m.id)).toEqual(["gemini-3.5-flash"]);
+	});
 });

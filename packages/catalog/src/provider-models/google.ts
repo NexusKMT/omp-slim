@@ -27,6 +27,8 @@ export interface GoogleAntigravityModelManagerConfig {
 
 export interface GoogleGeminiCliModelManagerConfig {
 	oauthToken?: string;
+	/** GCP project id required by Workspace/Standard credentials for quota discovery. */
+	projectId?: string;
 	endpoint?: string;
 	fetch?: FetchImpl;
 }
@@ -99,7 +101,7 @@ export function googleGeminiCliModelManagerOptions(
 						// Standard returns HTTP 403). Fall back to the account's own
 						// retrieveUserQuota list on Cloud Code Assist.
 						if (models === null) {
-							return fetchGeminiCliQuotaModels({ token, endpoint, fetcher });
+							return fetchGeminiCliQuotaModels({ token, projectId: config?.projectId, endpoint, fetcher });
 						}
 						return models
 							.filter(m => isGeminiModelId(m.id))
