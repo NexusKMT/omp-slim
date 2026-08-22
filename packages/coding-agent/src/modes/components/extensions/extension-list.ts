@@ -10,7 +10,7 @@ import { isProviderEnabled } from "../../../discovery";
 import { theme } from "../../../modes/theme/theme";
 import { matchesSelectDown, matchesSelectUp } from "../../utils/keybinding-matchers";
 import { clampSelection, contentRowWidth, renderScrollableList, searchableChar } from "../selector-helpers";
-import { sanitizeDisplayLine, sanitizeDisplayText } from "./display-text";
+import { sanitizeDisplayLine } from "./display-text";
 import {
 	formatExtensionListHint,
 	joinListHints,
@@ -275,7 +275,7 @@ export class ExtensionList implements Component {
 					: "muted";
 			const remainingWidth = width - visibleWidth(line) - 2;
 			if (remainingWidth > 5) {
-				line += `  ${truncateToWidth(theme.fg(triggerStyle, sanitizeDisplayText(hint)), remainingWidth)}`;
+				line += `  ${truncateToWidth(theme.fg(triggerStyle, sanitizeDisplayLine(hint)), remainingWidth)}`;
 			}
 		}
 
