@@ -13,6 +13,9 @@
 ### Fixed
 
 - Fixed completed Anthropic turns remaining busy when the provider sent `message_stop` but kept the SSE connection open, which stranded tool execution and queued steering until timeout.
+### Fixed
+
+- Fixed Codex continuations, retries, and compaction replacing or dropping the turn-scoped sticky-routing token ([#9277](https://github.com/can1357/oh-my-pi/issues/9277)).
 
 ## [17.4.2] - 2026-08-21
 
