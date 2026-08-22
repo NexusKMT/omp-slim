@@ -26,7 +26,7 @@
 
 ### Fixed
 
-- Fixed PTY command cancellation leaking zombie child processes: a race where cancellation after spawn only attempted a single non-blocking reap could miss processes still being reaped by the kernel, and an early heartbeat check that bailed out without killing or reaping the child. Cancellation now polls for the child briefly and hands any straggler to a detached reaper, so the process is always waited on without blocking the cancelled promise past its deadline.
+- Fixed PTY command cancellation leaking zombie child processes: a race where cancellation after spawn only attempted a single non-blocking reap could miss processes still being reaped by the kernel, and an early heartbeat check that bailed out without killing or reaping the child. On Unix, cancellation now polls for the child briefly and hands any straggler to a detached reaper, so the process is always waited on without an unbounded wait.
 
 ## [17.4.0] - 2026-08-20
 

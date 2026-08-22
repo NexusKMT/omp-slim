@@ -546,7 +546,7 @@ fn run_pty_sync(
 		// On Windows, child.wait() can hang indefinitely in ConPTY.
 		// Poll try_wait() with a short timeout instead.
 		#[cfg(windows)]
-		{
+		if !terminate_requested {
 			let wait_start = Instant::now();
 			while exit_code.is_none() && wait_start.elapsed() < Duration::from_secs(5) {
 				if let Some(status) = child
