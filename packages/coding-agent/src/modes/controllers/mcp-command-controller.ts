@@ -1721,6 +1721,8 @@ export class MCPCommandController {
 				helpText = "\n\nTip: Check that the server is running and the URL/port is correct.";
 			} else if (errorMsg.includes("timeout")) {
 				helpText = "\n\nTip: The server may be slow or unresponsive. Try increasing the timeout.";
+			} else if (errorMsg.includes("401") || errorMsg.includes("403")) {
+				helpText = "\n\nTip: Check your authentication credentials.";
 			}
 
 			settleNote = `Connection test for "${name}" failed.`;
