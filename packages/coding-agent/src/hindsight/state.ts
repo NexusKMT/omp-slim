@@ -313,10 +313,14 @@ export class HindsightSessionState {
 		}
 	}
 
-	#sessionSourceTimestamp(): string | undefined {
+	#sessionSourceTimestamp(): Date | undefined {
 		const header = this.session.sessionManager?.getHeader?.();
 		const timestamp = header?.timestamp;
-		return typeof timestamp === "string" && timestamp.trim().length > 0 ? timestamp : undefined;
+		if (typeof timestamp !== "string") return undefined;
+		const trimmed = timestamp.trim();
+		if (!trimmed) return undefined;
+		const parsed = new Date(trimmed);
+		return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 	}
 
 	async retainSession(messages: HindsightMessage[]): Promise<void> {

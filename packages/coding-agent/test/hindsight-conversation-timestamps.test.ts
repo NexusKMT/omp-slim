@@ -60,6 +60,12 @@ function firstItem(body: unknown): Record<string, unknown> {
 	return item as Record<string, unknown>;
 }
 
+function expectSameInstant(actual: unknown, isoUtc: string): void {
+	expect(typeof actual).toBe("string");
+	expect(String(actual)).not.toBe(isoUtc);
+	expect(Date.parse(String(actual))).toBe(Date.parse(isoUtc));
+}
+
 const SESSION_START = "2026-08-17T09:00:00.000Z";
 const USER_TS = "2026-08-17T10:00:00.000Z";
 const ASSISTANT_TS = "2026-08-17T10:00:05.000Z";
@@ -188,13 +194,44 @@ describe("Hindsight conversation source timestamps", () => {
 		await state.retainSession(extractMessages({ getEntries: () => laterEntries }));
 
 		expect(bodies).toHaveLength(2);
-		expect(firstItem(bodies[0]).timestamp).toBe(SESSION_START);
-		expect(firstItem(bodies[1]).timestamp).toBe(SESSION_START);
+		expectSameInstant(firstItem(bodies[0]).timestamp, SESSION_START);
+		expectSameInstant(firstItem(bodies[1]).timestamp, SESSION_START);
 		expect(String(firstItem(bodies[0]).content)).toContain("[timestamp: 2026-08-17T10:00:00.000Z]");
 		expect(String(firstItem(bodies[0]).content)).toContain("[timestamp: 2026-08-17T10:00:05.000Z]");
 		expect(String(firstItem(bodies[1]).content)).toContain("same conversation, later thursday turn");
 		expect(String(firstItem(bodies[1]).content)).not.toContain("internal monologue");
 		expect(String(firstItem(bodies[1]).content)).not.toContain("secret tool output");
 		expect(String(firstItem(bodies[1]).content)).not.toContain("<memories>");
+	});
+
+	it("falls back to retain-time when the session header timestamp is invalid", async () => {
+		const bodies = captureBodies();
+		const client = new HindsightApi({ baseUrl: "http://hindsight.local" });
+		const entries = conversationEntries();
+		const state = new HindsightSessionState({
+			sessionId: "sess-bad-ts",
+			client,
+			bankId: "personal",
+			config: makeConfig(),
+			session: {
+				sessionId: "sess-bad-ts",
+				sessionManager: {
+					getEntries: () => entries,
+					getHeader: () => ({
+						type: "session",
+						id: "sess-bad-ts",
+						timestamp: "not-a-date",
+						cwd: "/tmp",
+					}),
+				},
+				getHindsightSessionState: () => state,
+			} as object as AgentSession,
+			banksSet: new Set(["personal"]),
+		});
+
+		await state.retainSession(extractMessages({ getEntries: () => entries }));
+		expect(bodies).toHaveLength(1);
+		expect(firstItem(bodies[0]).timestamp).not.toBe("not-a-date");
+		expect(Number.isNaN(Date.parse(String(firstItem(bodies[0]).timestamp)))).toBe(false);
 	});
 });
