@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `visibleWidth` now measures APC sequences (Kitty graphics commands, cursor markers) as zero cells instead of counting their payload as printable text, matching the native width engine.
+- Kitty Unicode-placeholder rows with long styled prefixes (e.g. bordered thumbnail cards) are recognized as image lines again, keeping them on the verbatim render path instead of SGR coalescing/truncation.
+
 ## [17.4.2] - 2026-08-21
 
 ### Added

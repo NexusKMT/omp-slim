@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fixed the composer image chip painting its right border inside the card and mangling the thumbnail's first row: the Kitty placement prefix was counted as visible width, breaking the thumbnail centering.
 - Fixed edit-tool whole-line inserts (an insert selection alone on its own line) splicing into the anchor line instead of landing on a new line when the anchor was the last matched line, preceded a blank line, or sat at EOF.
 - Edit tool prompt now documents whole-line insert selections and that a REWRITE `…` with no captured MATCH gap is written to the file literally.
 
