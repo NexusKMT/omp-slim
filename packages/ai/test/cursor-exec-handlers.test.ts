@@ -708,6 +708,32 @@ describe("Cursor history encoding", () => {
 		});
 	});
 
+	it("keeps a __proto__ argument key as an own property during replay", () => {
+		// A JSON.parse'd object carries `__proto__` as an own enumerable data
+		// key. Building the normalized record with a plain `{}` would route the
+		// assignment through the prototype setter and drop the key.
+		const pollutedArguments = JSON.parse('{"__proto__":{"polluted":true},"safe":"ok"}') as Record<string, unknown>;
+		const messages: Context["messages"] = [
+			{ role: "user", content: "Run the MCP tool.", timestamp: 1 },
+			cursorAssistant(
+				"cursor-composer-2.5",
+				[{ type: "toolCall", id: "call-mcp", name: "mcp__example_tool", arguments: pollutedArguments }],
+				2,
+				"toolUse",
+			),
+			{ role: "user", content: "Continue.", timestamp: 3 },
+		];
+
+		const history = buildCursorHistoryForTest(messages);
+		const assistant = history.rootPromptMessagesJson[1] as {
+			content: { args: Record<string, unknown> }[];
+		};
+		const args = assistant.content[0].args;
+		expect(Object.hasOwn(args, "__proto__")).toBe(true);
+		expect(args["__proto__"]).toEqual({ polluted: true });
+		expect(args["safe"]).toBe("ok");
+	});
+
 	it("preserves same-model K3 thinking and paired tool structure in request history", () => {
 		const messages: Context["messages"] = [
 			{ role: "user", content: "Inspect package.json", timestamp: 1 },
