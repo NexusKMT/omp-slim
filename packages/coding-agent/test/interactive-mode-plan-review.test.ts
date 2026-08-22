@@ -14,7 +14,7 @@ import {
 	type PlanReviewAnnotationState,
 	PlanReviewOverlay,
 } from "@oh-my-pi/pi-coding-agent/modes/components/plan-review-overlay";
-import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
+import { InteractiveMode, planSaveFileName } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { SubmittedUserInput } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -662,7 +662,10 @@ describe("InteractiveMode plan review rendering", () => {
 			title: "DRAFT",
 		});
 
-		expect(generateTitle).toHaveBeenCalledWith("# Auto QA\nSave the final plan.\n## Verify\n- run focused tests");
+		expect(generateTitle).toHaveBeenCalledWith(
+			"# Auto QA\nSave the final plan.\n## Verify\n- run focused tests",
+			expect.any(String),
+		);
 		expect(await Bun.file(destination).text()).toBe(edited);
 		expect(clear).toHaveBeenCalledTimes(1);
 		expect(mode.planModeEnabled).toBe(false);
@@ -2132,6 +2135,24 @@ describe("AssistantMessageComponent aborted replay", () => {
 		const rendered = renderAssistant(message);
 		expect(rendered).not.toContain(USER_INTERRUPT_LABEL);
 		expect(rendered).not.toContain("Operation aborted");
+	});
+});
+
+describe("planSaveFileName", () => {
+	it("turns a short topic into <TOPIC>_PLAN.md", () => {
+		expect(planSaveFileName("PyO3 types")).toBe("PYO3_TYPES_PLAN.md");
+		expect(planSaveFileName("Auth storage plan")).toBe("AUTH_STORAGE_PLAN.md");
+	});
+
+	it("trims verbose fallback titles at a word boundary", () => {
+		expect(planSaveFileName("Split PyEnvironmentBackend request into PyO3 methods")).toBe(
+			"SPLIT_PYENVIRONMENTBACKEND_PLAN.md",
+		);
+	});
+
+	it("falls back to PLAN.md for empty or plan-only titles", () => {
+		expect(planSaveFileName("  ")).toBe("PLAN.md");
+		expect(planSaveFileName("Plan")).toBe("PLAN.md");
 	});
 });
 
