@@ -1,6 +1,6 @@
 //! macOS spelling, word-completion, and autocorrection services.
 //!
-//! AppleSpell exposes UTF-16 ranges through [`NSSpellChecker`]. JavaScript
+//! `AppleSpell` exposes UTF-16 ranges through [`NSSpellChecker`]. JavaScript
 //! strings use the same indexing unit, so ranges cross N-API without remapping.
 //! Other platforms expose the same API as an unavailable, no-op backend.
 
@@ -51,7 +51,7 @@ mod platform {
 		Ok(NSRange {
 			location: usize::try_from(start)
 				.map_err(|_| Error::new(Status::InvalidArg, "spelling range start is too large"))?,
-			length: usize::try_from(length)
+			length:   usize::try_from(length)
 				.map_err(|_| Error::new(Status::InvalidArg, "spelling range length is too large"))?,
 		})
 	}
@@ -70,7 +70,7 @@ mod platform {
 				break;
 			}
 			ranges.push(SpellingRange {
-				start: u32::try_from(range.location)
+				start:  u32::try_from(range.location)
 					.map_err(|_| Error::new(Status::InvalidArg, "spelling range start is too large"))?,
 				length: u32::try_from(range.length)
 					.map_err(|_| Error::new(Status::InvalidArg, "spelling range length is too large"))?,
@@ -93,6 +93,15 @@ mod platform {
 		let values = checker.completionsForPartialWordRange_inString_language_inSpellDocumentWithTag(
 			range, &text, None, 0,
 		);
+		Ok(strings(values))
+	}
+
+	pub fn guesses(text: &str, start: u32, length: u32) -> Result<Vec<String>> {
+		let checker = checker()?;
+		let text = NSString::from_str(text);
+		let range = ns_range(start, length)?;
+		let values = checker
+			.guessesForWordRange_inString_language_inSpellDocumentWithTag(range, &text, None, 0);
 		Ok(strings(values))
 	}
 
@@ -151,9 +160,14 @@ pub fn macos_complete_word(text: String, start: u32, length: u32) -> napi::Resul
 
 /// Return the autocorrection macOS chooses for one completed-word range.
 ///
-/// Returns `null` when no confident correction exists or the service is unavailable.
+/// Returns `null` when no confident correction exists or the service is
+/// unavailable.
 #[napi(js_name = "macOSAutocorrectWord")]
-pub fn macos_autocorrect_word(text: String, start: u32, length: u32) -> napi::Result<Option<String>> {
+pub fn macos_autocorrect_word(
+	text: String,
+	start: u32,
+	length: u32,
+) -> napi::Result<Option<String>> {
 	#[cfg(target_os = "macos")]
 	{
 		platform::correction(&text, start, length)
@@ -162,5 +176,20 @@ pub fn macos_autocorrect_word(text: String, start: u32, length: u32) -> napi::Re
 	{
 		let _ = (text, start, length);
 		Ok(None)
+	}
+}
+/// Return macOS replacement guesses for one misspelled-word range.
+///
+/// Returns an empty list when Apple's spelling service is unavailable.
+#[napi(js_name = "macOSSpellingGuesses")]
+pub fn macos_spelling_guesses(text: String, start: u32, length: u32) -> napi::Result<Vec<String>> {
+	#[cfg(target_os = "macos")]
+	{
+		platform::guesses(&text, start, length)
+	}
+	#[cfg(not(target_os = "macos"))]
+	{
+		let _ = (text, start, length);
+		Ok(Vec::new())
 	}
 }

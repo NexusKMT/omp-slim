@@ -1420,7 +1420,8 @@ export declare enum MacOSAppearance {
 /**
  * Return the autocorrection macOS chooses for one completed-word range.
  *
- * Returns `null` when no confident correction exists or the service is unavailable.
+ * Returns `null` when no confident correction exists or the service is
+ * unavailable.
  */
 export declare function macOSAutocorrectWord(text: string, start: number, length: number): string | null
 
@@ -1464,6 +1465,13 @@ export interface MacOSPowerAssertionOptions {
 
 /** Whether the host can use Apple's native spelling service. */
 export declare function macOSSpellCheckerAvailable(): boolean
+
+/**
+ * Return macOS replacement guesses for one misspelled-word range.
+ *
+ * Returns an empty list when Apple's spelling service is unavailable.
+ */
+export declare function macOSSpellingGuesses(text: string, start: number, length: number): Array<string>
 
 /** A single match in the content. */
 export interface Match {

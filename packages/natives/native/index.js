@@ -68,6 +68,7 @@ export const macOSAutocorrectWord = nativeBindings.macOSAutocorrectWord;
 export const macOSCheckSpelling = nativeBindings.macOSCheckSpelling;
 export const macOSCompleteWord = nativeBindings.macOSCompleteWord;
 export const macOSSpellCheckerAvailable = nativeBindings.macOSSpellCheckerAvailable;
+export const macOSSpellingGuesses = nativeBindings.macOSSpellingGuesses;
 export const matchesKey = nativeBindings.matchesKey;
 export const matchesKittySequence = nativeBindings.matchesKittySequence;
 export const matchesLegacySequence = nativeBindings.matchesLegacySequence;
