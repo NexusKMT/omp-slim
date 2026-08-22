@@ -2,9 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Fixed collapsed edit results with long wrapped diff lines growing beyond their rendered-row budget and corrupting native Windows terminal transcript layout ([#9302](https://github.com/can1357/oh-my-pi/issues/9302)).
 ### Added
 
 - Edit tool payloads now accept `＋`-prefixed add lines to insert whole lines in place (consecutive `＋` lines insert together, both marker indent styles supported), and the prompt documents multi-line inline selections for contained restructures.
@@ -18,6 +15,10 @@
 - Edit tool now collapses back-to-back duplicate blocks when a payload states the desired text once, drops overlapping fuzzy-match artifacts of the same operation, and removes a dangling blank line left directly above a closing delimiter after a block deletion.
 - Edit tool now resolves delimiter-garbled punctuation selections against the file, rejects matches that would rewrite part of a longer punctuation run, treats candidates with whitespace-equivalent outcomes as unambiguous, recovers a dropped seam between a selection and its following text, and cleans blank lines left beside opening or closing delimiters after deletions.
 
+### Changed
+
+- Switched fallback edit mode from replace to sloppy for models that do not support hashline
+
 ### Removed
 
 - Removed the experimental `wdiff` edit variant (git word-diff surface); `sloppy` is the single sparse-edit dialect.
@@ -25,6 +26,7 @@
 
 ### Fixed
 
+- Fixed collapsed edit results with long wrapped diff lines growing beyond their rendered-row budget and corrupting native Windows terminal transcript layout ([#9302](https://github.com/can1357/oh-my-pi/issues/9302)).
 - Fixed edit tool section header paths not trimming surrounding whitespace, so a header with padded brackets failed with file-not-found.
 - Fixed transcript content disappearing from terminal scrollback below a live hub-wait/todo/jobs card: the card's viewport pin froze scrollback commits at its own rows, so everything the turn streamed below it scrolled off-screen without ever entering terminal history (and was lost for good when the session exited first). A displaceable card with content below it no longer holds the commit ceiling; its rows commit as they scroll off and the card seals in place, so the next poll stacks a fresh card instead of retracting history.
 - Fixed the composer attachment chip thumbnail showing an empty box for pasted images: the paste pipeline re-encodes images as JPEG/WebP, and transmitting those bytes as Kitty PNG data made the terminal reject them (blank placeholder cells). Non-PNG attachments now convert to PNG before the thumbnail transmit, like transcript images.
