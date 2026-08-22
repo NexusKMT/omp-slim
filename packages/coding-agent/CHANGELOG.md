@@ -46,6 +46,7 @@
 - Benchmark input-token counts now include cache-read/cache-write prompt tokens, so prefill throughput is no longer understated on providers with automatic prompt caching
 - Typing during startup is no longer swallowed: the prepaint composer leaves the terminal's cooked-mode echo active while modules load, then replays the buffered keystrokes into the editor once settings resolve
 - Code blocks now syntax-highlight live while the response streams instead of staying plain until the block settles
+- Fixed edit results showing the D3.js Nerd Font icon for C# files instead of the C# icon ([#9323](https://github.com/can1357/oh-my-pi/issues/9323)).
 - Fixed `/shake thinking` reporting "Nothing to shake" after removing reasoning; it now reports the dropped count and leaves thinking-only turns empty.
 - Fixed session teardown occasionally losing pending input drafts during shutdown
 - Fixed streaming edit failures caused by trailing partial lines
