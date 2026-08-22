@@ -4781,6 +4781,7 @@ function normalizeCursorMcpArgument(value: unknown, seen: Set<object>): JsonValu
 		if (!isRecord(value)) return undefined;
 		const normalized: Record<string, JsonValue> = Object.create(null);
 		for (const key in value) {
+			if (!Object.hasOwn(value, key)) continue;
 			const normalizedItem = normalizeCursorMcpArgument(value[key], seen);
 			if (normalizedItem !== undefined) normalized[key] = normalizedItem;
 		}
@@ -4794,6 +4795,7 @@ function normalizeCursorMcpArguments(args: Record<string, unknown>): Record<stri
 	const normalized: Record<string, JsonValue> = Object.create(null);
 	const seen = new Set<object>();
 	for (const name in args) {
+		if (!Object.hasOwn(args, name)) continue;
 		const normalizedValue = normalizeCursorMcpArgument(args[name], seen);
 		if (normalizedValue !== undefined) normalized[name] = normalizedValue;
 	}

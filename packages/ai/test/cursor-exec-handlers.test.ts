@@ -743,6 +743,51 @@ describe("Cursor history encoding", () => {
 		expect(Object.keys(encodedArgs).sort()).toEqual(["__proto__", "safe"]);
 	});
 
+	it("excludes enumerable prototype properties from MCP history replay", () => {
+		const nested: Record<string, unknown> = Object.create({ inheritedNested: "drop" });
+		nested.own = "keep";
+		const inheritedArguments: Record<string, unknown> = Object.create({ admin: true });
+		inheritedArguments.safe = "ok";
+		inheritedArguments.nested = nested;
+		const messages: Context["messages"] = [
+			{ role: "user", content: "Run the MCP tool.", timestamp: 1 },
+			cursorAssistant(
+				"cursor-composer-2.5",
+				[{ type: "toolCall", id: "call-mcp", name: "mcp__example_tool", arguments: inheritedArguments }],
+				2,
+				"toolUse",
+			),
+			{ role: "user", content: "Continue.", timestamp: 3 },
+		];
+
+		const history = buildCursorHistoryForTest(messages);
+		expect(history.rootPromptMessagesJson[1]).toEqual({
+			role: "assistant",
+			content: [
+				{
+					type: "tool-call",
+					toolCallId: "call-mcp",
+					toolName: "mcp__example_tool",
+					args: { safe: "ok", nested: { own: "keep" } },
+				},
+			],
+		});
+		expect(history.turnStepMessagesJson[0][0]).toEqual({
+			toolCall: {
+				toolCallId: "call-mcp",
+				mcpToolCall: {
+					args: {
+						name: "mcp__example_tool",
+						args: { safe: expect.any(String), nested: expect.any(String) },
+						toolCallId: "call-mcp",
+						providerIdentifier: "pi-agent",
+						toolName: "mcp__example_tool",
+					},
+				},
+			},
+		});
+	});
+
 	it("preserves same-model K3 thinking and paired tool structure in request history", () => {
 		const messages: Context["messages"] = [
 			{ role: "user", content: "Inspect package.json", timestamp: 1 },
