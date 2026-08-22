@@ -243,6 +243,30 @@ export class MCPManager {
 	) {}
 
 	/**
+	 * Register a listener for MCP connection lifecycle events
+	 * (`connecting` / `connected` / `failed`).
+	 *
+	 * Returns an unsubscribe function. Listener failures are isolated — a
+	 * listener that throws does not prevent other listeners from firing.
+	 */
+	addConnectionStatusListener(listener: (event: McpConnectionStatusEvent) => void): () => void {
+		this.#connectionStatusListeners.add(listener);
+		return () => {
+			this.#connectionStatusListeners.delete(listener);
+		};
+	}
+
+	#emitConnectionStatus(event: McpConnectionStatusEvent): void {
+		for (const listener of this.#connectionStatusListeners) {
+			try {
+				listener(event);
+			} catch (error) {
+				logger.debug("MCP connection status listener threw", { error });
+			}
+		}
+	}
+
+	/**
 	 * Register a listener for server-initiated MCP notifications.
 	 *
 	 * The listener is called for every JSON-RPC notification received from any
@@ -266,23 +290,6 @@ export class MCPManager {
 	 * isolation — a listener that throws does not prevent other listeners from
 	 * firing.
 	 */
-	addConnectionStatusListener(listener: (event: McpConnectionStatusEvent) => void): () => void {
-		this.#connectionStatusListeners.add(listener);
-		return () => {
-			this.#connectionStatusListeners.delete(listener);
-		};
-	}
-
-	#emitConnectionStatus(event: McpConnectionStatusEvent): void {
-		for (const listener of this.#connectionStatusListeners) {
-			try {
-				listener(event);
-			} catch (error) {
-				logger.debug("MCP connection status listener threw", { error });
-			}
-		}
-	}
-
 	addNotificationListener(listener: (serverName: string, method: string, params: unknown) => void): () => void {
 		const wasEmpty = this.#notificationListeners.size === 0;
 		this.#notificationListeners.add(listener);
