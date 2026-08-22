@@ -17,7 +17,6 @@ import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import type {
 	AutocompleteProvider,
 	Component,
-	ComposerStyle,
 	EditorTheme,
 	LoaderMessageColorFn,
 	NativeScrollbackLiveRegion,
@@ -173,7 +172,7 @@ import { stopSharedSpinnerTicker, type ToolExecutionHandle } from "./components/
 import { TranscriptContainer } from "./components/transcript-container";
 import type { LspServerInfo as WelcomeLspServerInfo } from "./components/welcome";
 import { Composer } from "./composer";
-import { writeComposerStatusCache, writeComposerWelcomeCache } from "./composer-cache";
+import { writeComposerWelcomeCache } from "./composer-cache";
 import { BtwController } from "./controllers/btw-controller";
 import { CleanseCommandController } from "./controllers/cleanse-command-controller";
 import { CommandController } from "./controllers/command-controller";
@@ -1135,14 +1134,10 @@ export class InteractiveMode implements InteractiveModeContext {
 			headerAfter.push(new Spacer(1), new DynamicBorder());
 		}
 		this.composer.setHeaderExtras(headerBefore, headerAfter);
-		// Install the refresh callback before the first real status render starts
-		// async git/PR/usage hydration. Cached segments remain visible until all
-		// data needed by that render is authoritative.
 		this.statusLine.watchBranch(() => {
-			this.#persistComposerStatus();
 			this.ui.requestRender();
 		});
-		this.composer.setStatusComponent(this.statusLine, () => !this.statusLine.isHydrating());
+		this.composer.setStatusComponent(this.statusLine);
 
 		this.composer.setRuntimeChildren([
 			this.chatContainer,
@@ -1999,20 +1994,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.statusLine.setAutocompleteActiveProbe(() => this.editor.isAutocompleteActive());
 		switch (style.statusAttachment) {
 			case "top-border":
-				this.editor.setTopBorderProvider(availableWidth => {
-					const real = this.statusLine.getTopBorder(availableWidth);
-					return this.statusLine.isHydrating()
-						? (this.composer.getSpeculativeTopBorder(availableWidth) ?? real)
-						: real;
-				});
+				this.editor.setTopBorderProvider(availableWidth => this.statusLine.getTopBorder(availableWidth));
 				break;
 			case "top-rule-chip":
-				this.editor.setTopBorderProvider(availableWidth => {
-					const real = this.statusLine.getStandaloneTopBorder(availableWidth);
-					return this.statusLine.isHydrating()
-						? (this.composer.getSpeculativeTopBorder(availableWidth) ?? real)
-						: real;
-				});
+				this.editor.setTopBorderProvider(availableWidth => this.statusLine.getStandaloneTopBorder(availableWidth));
 				break;
 			case "none":
 				this.editor.setTopBorderProvider(undefined);
@@ -2021,51 +2006,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		this.statusLine.setComposerStyle(style);
 		this.updateEditorBorderColor();
-		this.#persistComposerStatus();
 		this.ui.requestRender();
-	}
-
-	#persistComposerStatus(): void {
-		const sessionFile = this.sessionManager.getSessionFile();
-		if (!sessionFile) return;
-		const shape = settings.get("composer.shape") ?? "box";
-		const style: ComposerStyle = getComposerStyle(shape);
-		const terminalWidth = this.ui.terminal.columns;
-		const availableWidth = this.editor.getTopBorderAvailableWidth(terminalWidth);
-		const topBorder =
-			style.statusAttachment === "top-border"
-				? this.statusLine.getTopBorder(availableWidth)
-				: style.statusAttachment === "top-rule-chip"
-					? this.statusLine.getStandaloneTopBorder(availableWidth)
-					: undefined;
-		const bottomLines: string[] = [];
-		if (style.bottomBar !== "none") {
-			const content = this.statusLine.renderBottomBar(terminalWidth, style.bottomBar === "left" ? "left" : "full");
-			if (content) {
-				if (style.bottomBarGap) bottomLines.push("");
-				bottomLines.push(content);
-			}
-		}
-		if (this.statusLine.isHydrating()) return;
-		const borderMarker = "\0";
-		const coloredBorderMarker = this.editor.borderColor(borderMarker);
-		const markerIndex = coloredBorderMarker.indexOf(borderMarker);
-		const snapshot = {
-			shape,
-			borderColor:
-				markerIndex < 0
-					? undefined
-					: {
-							prefix: coloredBorderMarker.slice(0, markerIndex),
-							suffix: coloredBorderMarker.slice(markerIndex + borderMarker.length),
-						},
-			topBorder: topBorder ? { content: topBorder.content, width: topBorder.width } : undefined,
-			bottomLines,
-		};
-		this.composer.setStatusSnapshot(snapshot);
-		void writeComposerStatusCache(this.sessionManager.getCwd(), snapshot).catch(error => {
-			logger.debug("composer status cache write failed", { error });
-		});
 	}
 
 	#handleSessionAccentInputsChanged(): void {
