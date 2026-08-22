@@ -4,6 +4,10 @@
 
 ### Added
 
+- Added benchmark profiles (`chat`, `prefill`, `generation`) to isolate performance characteristics
+- Added p50/p95 statistics, distinct input/output throughput metrics, and cost to benchmark output
+- Added live benchmark dashboard with progress tracking and real-time performance estimates
+- Added `--prefill-bytes` to configure synthetic input sizes for prefill benchmarks
 - Added `/shake thinking` to remove model reasoning blocks from session history
 - Added icon support to slash command autocomplete, with unique visuals for actions, files, settings, and other command types
 - Slash-command autocomplete now ranks equally matching commands by how often you use them; usage counts persist across sessions in agent.db

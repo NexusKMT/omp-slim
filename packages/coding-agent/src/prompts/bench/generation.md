@@ -1,0 +1,1 @@
+Write an uninterrupted stream of plain prose describing the history of computing, decade by decade, starting with the 1940s. No headings, lists, code fences, or preamble. Do not summarize or conclude early; keep adding new detail until the token limit cuts you off. Output the prose only.

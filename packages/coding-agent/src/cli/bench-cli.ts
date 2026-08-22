@@ -16,7 +16,7 @@ import type {
 import { resolveModelServiceTier, streamSimple } from "@oh-my-pi/pi-ai";
 import { buildModelProviderPriorityRank } from "@oh-my-pi/pi-catalog/identity";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
-import { formatDuration, getProjectDir, prompt } from "@oh-my-pi/pi-utils";
+import { formatDuration, formatNumber, getProjectDir, prompt } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import type { ApiKeyResolverModel } from "../config/api-key-resolver";
 import { ModelRegistry } from "../config/model-registry";
@@ -31,6 +31,8 @@ import { Settings } from "../config/settings";
 import cachePrefixTemplate from "../prompts/bench/cache-prefix.md" with { type: "text" };
 import cachePrefixChunk from "../prompts/bench/cache-prefix-chunk.md" with { type: "text" };
 import cacheSuffixTemplate from "../prompts/bench/cache-suffix.md" with { type: "text" };
+import generationPrompt from "../prompts/bench/generation.md" with { type: "text" };
+import prefillInstruction from "../prompts/bench/prefill-instruction.md" with { type: "text" };
 import benchPrompt from "../prompts/bench.md" with { type: "text" };
 import { discoverAuthStorage, loadCliExtensionProviders } from "../sdk";
 import {
@@ -39,22 +41,45 @@ import {
 	shouldDisableReasoning,
 	toReasoningEffort,
 } from "../thinking";
+import { createLiveBoard, type LiveBoardOutput } from "./live-board";
 
-const DEFAULT_RUNS = 10;
 const DEFAULT_PAR = 4;
-const DEFAULT_MAX_TOKENS = 512;
 const DEFAULT_CACHE_MAX_TOKENS = 64;
 const DEFAULT_CACHE_PREFIX_BYTES = 8_192;
 const DEFAULT_CACHE_PAIRS = 1;
 const DEFAULT_CACHE_CONCURRENCY = 1;
+const DEFAULT_PREFILL_BYTES = 32_768;
 const ERROR_WIDTH = 110;
-const BENCH_PROMPT = benchPrompt.trim();
 const UTF8_ENCODER = new TextEncoder();
 const UTF8_DECODER = new TextDecoder();
 const CACHE_PREFIX_CHUNK = cachePrefixChunk;
 const CACHE_PREFIX_PLACEHOLDER = "__OMP_CACHE_BENCH_RAW_PREFIX__";
 const CACHE_PREFIX_CHUNK_BYTES = UTF8_ENCODER.encode(CACHE_PREFIX_CHUNK).byteLength;
 const RESPONSE_CACHE_STATUS_HEADERS = ["cf-aig-cache-status"] as const;
+/** Workload shape a bench run measures. */
+export type BenchProfile = "chat" | "prefill" | "generation";
+
+interface BenchProfileSpec {
+	/** Default requests per model. */
+	runs: number;
+	/** Default max output tokens per request. */
+	maxTokens: number;
+	/** Default user prompt (`--prompt` overrides). */
+	prompt: string;
+}
+
+/**
+ * - `chat`: balanced prompt/output — the everyday latency + throughput picture.
+ * - `prefill`: large cache-busted input, tiny output — isolates input-token
+ *   processing (TTFT and prefill tok/s).
+ * - `generation`: tiny prompt, long forced output — isolates sustained decode
+ *   throughput.
+ */
+const BENCH_PROFILES: Record<BenchProfile, BenchProfileSpec> = {
+	chat: { runs: 10, maxTokens: 512, prompt: benchPrompt.trim() },
+	prefill: { runs: 5, maxTokens: 64, prompt: prefillInstruction.trim() },
+	generation: { runs: 5, maxTokens: 2048, prompt: generationPrompt.trim() },
+};
 
 export interface BenchCommandArgs {
 	models: string[];
@@ -66,6 +91,10 @@ export interface BenchCommandArgs {
 		serviceTier?: string;
 		json?: boolean;
 		par?: number;
+		/** Benchmark workload; default `chat`. */
+		profile?: string;
+		/** Synthetic input size for the prefill profile (default: 32768 bytes). */
+		prefillBytes?: number;
 		cache?: boolean;
 		cachePrefixFile?: string;
 		cachePrefixBytes?: number;
@@ -90,11 +119,25 @@ export interface BenchRuntime {
 
 export interface BenchRunSuccess {
 	ok: true;
+	/** Request start → first streamed token: queue + prefill window. */
 	ttftMs: number;
+	/** First streamed token → done: decode window (0 when the response arrived buffered). */
+	generationMs: number;
 	durationMs: number;
+	inputTokens: number;
 	outputTokens: number;
 	/** Output tokens/sec over the total request duration. */
 	tokensPerSecond: number;
+	/**
+	 * Output tokens/sec over the decode window. Inflated on providers that hide
+	 * reasoning until completion (tiny decode window); 0 for fully buffered
+	 * responses. Compare `tokensPerSecond` for a buffering-proof number.
+	 */
+	generationTps: number;
+	/** Input tokens/sec over the TTFT window (queue-inclusive prefill rate). */
+	prefillTps: number;
+	/** Priced cost of the request; 0 when pricing is unavailable. */
+	cost: number;
 }
 
 export interface BenchRunFailure {
@@ -142,11 +185,30 @@ export interface BenchCachePairReport {
 	payloadStructureStable: boolean | "unavailable";
 }
 
-export interface BenchAverages {
-	ttftMs: number;
-	durationMs: number;
+/** Distribution summary over successful runs. */
+export interface MetricStats {
+	mean: number;
+	min: number;
+	/** Median (nearest-rank). */
+	p50: number;
+	/** 95th percentile (nearest-rank). */
+	p95: number;
+	max: number;
+}
+
+/** Aggregates over successful runs. */
+export interface BenchStats {
+	ttftMs: MetricStats;
+	durationMs: MetricStats;
+	tokensPerSecond: MetricStats;
+	generationTps: MetricStats;
+	prefillTps: MetricStats;
+	/** Mean input tokens per successful run. */
+	inputTokens: number;
+	/** Mean output tokens per successful run. */
 	outputTokens: number;
-	tokensPerSecond: number;
+	/** Mean priced cost per successful run; 0 when pricing is unavailable. */
+	cost: number;
 }
 
 export interface BenchModelReport {
@@ -157,14 +219,16 @@ export interface BenchModelReport {
 	/** Explicit thinking level from a `:level` selector suffix; undefined = provider default. */
 	thinking?: ResolvedThinkingLevel;
 	results: BenchRunResult[];
-	/** Averages over successful runs; null when every run failed. */
-	average: BenchAverages | null;
+	/** Aggregates over successful runs; null when every run failed. */
+	stats: BenchStats | null;
 	cachePairs?: BenchCachePairReport[];
 }
 
 export interface BenchSummary {
 	runs: number;
 	maxTokens: number;
+	/** Benchmark workload; absent in `--cache` mode. */
+	profile?: BenchProfile;
 	models: BenchModelReport[];
 	failures: number;
 	/** Requested per-family service tiers, resolved per model before reaching the wire. */
@@ -269,6 +333,23 @@ function payloadStructure(payload: unknown): string {
 
 function asNonNegativeNumber(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+/** Nearest-rank distribution summary; `values` MUST be non-empty. */
+function metricStats(values: number[]): MetricStats {
+	const sorted = [...values].sort((a, b) => a - b);
+	const at = (q: number): number =>
+		sorted[Math.max(0, Math.min(sorted.length - 1, Math.ceil(q * sorted.length) - 1))]!;
+	return {
+		mean: sorted.reduce((sum, value) => sum + value, 0) / sorted.length,
+		min: sorted[0]!,
+		p50: at(0.5),
+		p95: at(0.95),
+		max: sorted[sorted.length - 1]!,
+	};
+}
+
+function mean(values: number[]): number {
+	return values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function captureUsage(message: AssistantMessage): BenchCacheUsage {
@@ -376,6 +457,21 @@ function cacheBenchmarkMessages(stablePrefix: string, suffix: string): Context["
 		{ role: "user", content: suffix, timestamp, attribution: "user" },
 	];
 }
+/**
+ * Prefill-profile request body: a per-run nonce leads so provider prefix
+ * caches can never reuse an earlier run's prefill, then the synthetic filler,
+ * then the tiny reply instruction.
+ */
+function prefillBenchmarkMessages(nonce: string, filler: string, instruction: string): Context["messages"] {
+	return [
+		{
+			role: "user",
+			content: `Benchmark run ${nonce}.\n\n${filler}\n\n${instruction}`,
+			timestamp: Date.now(),
+			attribution: "user",
+		},
+	];
+}
 
 async function runWithConcurrency<T>(
 	count: number,
@@ -394,7 +490,7 @@ async function runWithConcurrency<T>(
 	return results;
 }
 
-function formatCacheCost(cost: number): string {
+function formatCost(cost: number): string {
 	if (cost < 0.01) return `$${cost.toFixed(4)}`;
 	if (cost < 1) return `$${cost.toFixed(3)}`;
 	return `$${cost.toFixed(2)}`;
@@ -406,7 +502,7 @@ function formatCachePairLine(pair: BenchCachePairReport, index: number, total: n
 			return `${run.phase} failed: ${truncateToWidth(replaceTabs(run.result.error), ERROR_WIDTH)}`;
 		}
 		const usage = run.usage;
-		return `${run.phase}${alreadyWarm ? " (already warm)" : ""} ${run.observations.join(", ")} ${chalk.dim("input")} ${usage?.inputTokens ?? 0} ${chalk.dim("cache-read")} ${usage?.cacheReadTokens ?? 0} ${chalk.dim("cache-write")} ${usage?.cacheWriteTokens ?? 0} ${chalk.dim("output")} ${usage?.outputTokens ?? run.result.outputTokens} ${chalk.dim("total")} ${usage?.totalTokens ?? 0} ${chalk.dim("cost")} ${formatCacheCost(usage?.cost ?? 0)} ${chalk.dim("TTFT")} ${formatMs(run.result.ttftMs)} ${chalk.dim("duration")} ${formatMs(run.result.durationMs)} ${chalk.dim("throughput")} ${run.result.tokensPerSecond.toFixed(1)}/s`;
+		return `${run.phase}${alreadyWarm ? " (already warm)" : ""} ${run.observations.join(", ")} ${chalk.dim("input")} ${usage?.inputTokens ?? 0} ${chalk.dim("cache-read")} ${usage?.cacheReadTokens ?? 0} ${chalk.dim("cache-write")} ${usage?.cacheWriteTokens ?? 0} ${chalk.dim("output")} ${usage?.outputTokens ?? run.result.outputTokens} ${chalk.dim("total")} ${usage?.totalTokens ?? 0} ${chalk.dim("cost")} ${formatCost(usage?.cost ?? 0)} ${chalk.dim("TTFT")} ${formatMs(run.result.ttftMs)} ${chalk.dim("duration")} ${formatMs(run.result.durationMs)} ${chalk.dim("throughput")} ${run.result.tokensPerSecond.toFixed(1)}/s`;
 	};
 	return `  ${chalk.dim(`pair ${index + 1}/${total}`)} ${formatPhase(pair.cold, pair.coldAlreadyWarm)}; ${formatPhase(pair.warm)}`;
 }
@@ -516,10 +612,14 @@ async function runBenchRequest(
 			};
 		}
 		if (options.cacheCapture) options.cacheCapture.usage = captureUsage(message);
+		const inputTokens = asNonNegativeNumber(message.usage.input);
+		const generationMs = Math.max(0, durationMs - ttftMs);
 		return {
 			ok: true,
 			ttftMs,
+			generationMs,
 			durationMs,
+			inputTokens,
 			outputTokens,
 			// TPS over the TOTAL request duration, deliberately not the post-TTFT
 			// decode window: reasoning models can spend seconds generating hidden
@@ -527,6 +627,9 @@ async function runBenchRequest(
 			// byte, so "duration - TTFT" inflates TPS several-fold on providers
 			// that buffer or hide reasoning (e.g. google vs google-vertex).
 			tokensPerSecond: durationMs > 0 ? (outputTokens * 1000) / durationMs : 0,
+			generationTps: generationMs > 0 ? (outputTokens * 1000) / generationMs : 0,
+			prefillTps: ttftMs > 0 ? (inputTokens * 1000) / ttftMs : 0,
+			cost: asNonNegativeNumber(message.usage.cost?.total),
 		};
 	} catch (error) {
 		return { ok: false, error: getErrorMessage(error) };
@@ -542,16 +645,20 @@ function buildModelReport(
 	results: BenchRunResult[],
 ): BenchModelReport {
 	const successes = results.filter((result): result is BenchRunSuccess => result.ok);
-	const average =
+	const stats: BenchStats | null =
 		successes.length === 0
 			? null
 			: {
-					ttftMs: successes.reduce((sum, r) => sum + r.ttftMs, 0) / successes.length,
-					durationMs: successes.reduce((sum, r) => sum + r.durationMs, 0) / successes.length,
-					outputTokens: successes.reduce((sum, r) => sum + r.outputTokens, 0) / successes.length,
-					tokensPerSecond: successes.reduce((sum, r) => sum + r.tokensPerSecond, 0) / successes.length,
+					ttftMs: metricStats(successes.map(r => r.ttftMs)),
+					durationMs: metricStats(successes.map(r => r.durationMs)),
+					tokensPerSecond: metricStats(successes.map(r => r.tokensPerSecond)),
+					generationTps: metricStats(successes.map(r => r.generationTps)),
+					prefillTps: metricStats(successes.map(r => r.prefillTps)),
+					inputTokens: mean(successes.map(r => r.inputTokens)),
+					outputTokens: mean(successes.map(r => r.outputTokens)),
+					cost: mean(successes.map(r => r.cost)),
 				};
-	return { selector, model: formatModelString(model), thinking, results, average };
+	return { selector, model: formatModelString(model), thinking, results, stats };
 }
 
 function formatBenchModelLabel(report: BenchModelReport): string {
@@ -565,55 +672,111 @@ function formatMs(ms: number): string {
 function formatRunLine(result: BenchRunResult, index: number, total: number): string {
 	const prefix = chalk.dim(`run ${index + 1}/${total}`);
 	if (result.ok) {
-		return `  ${chalk.green("✓")} ${prefix} ${chalk.dim("TTFT")} ${formatMs(result.ttftMs)} ${chalk.dim("TPS")} ${result.tokensPerSecond.toFixed(1)}/s ${chalk.dim("tokens")} ${result.outputTokens} ${chalk.dim("total")} ${formatMs(result.durationMs)}`;
+		const gen = result.generationTps > 0 ? `${result.generationTps.toFixed(1)}/s` : "-";
+		return `  ${chalk.green("✓")} ${prefix} ${chalk.dim("TTFT")} ${formatMs(result.ttftMs)} ${chalk.dim("tok/s")} ${result.tokensPerSecond.toFixed(1)} ${chalk.dim("gen")} ${gen} ${chalk.dim("in")} ${formatNumber(result.inputTokens)} ${chalk.dim("out")} ${formatNumber(result.outputTokens)} ${chalk.dim("total")} ${formatMs(result.durationMs)}`;
 	}
 	return `  ${chalk.red("✗")} ${prefix} ${chalk.red(truncateToWidth(replaceTabs(result.error).replace(/\r?\n/g, " "), ERROR_WIDTH))}`;
 }
+/** Mutable per-model progress backing the live status line. */
+interface BenchLiveProgress {
+	label: string;
+	unit: "runs" | "pairs";
+	total: number;
+	completed: number;
+	failed: number;
+	inFlight: number;
+	okCount: number;
+	ttftSumMs: number;
+	tpsSum: number;
+}
 
-export function formatBenchTable(summary: BenchSummary): string {
-	const ranked = [...summary.models].sort((a, b) => {
-		if (a.average === null && b.average === null) return 0;
-		if (a.average === null) return 1;
-		if (b.average === null) return -1;
-		return b.average.tokensPerSecond - a.average.tokensPerSecond;
-	});
-	const rows = ranked.map(report => ({
-		model: formatBenchModelLabel(report),
-		ttft: report.average ? formatMs(report.average.ttftMs) : "-",
-		tps: report.average ? `${report.average.tokensPerSecond.toFixed(1)}/s` : "-",
-		tokens: report.average ? String(Math.round(report.average.outputTokens)) : "-",
-		total: report.average ? formatMs(report.average.durationMs) : "-",
-		failed: report.results.filter(result => !result.ok).length,
-	}));
-	const headers = { model: "model", ttft: "TTFT", tps: "TPS", tokens: "tokens", total: "total" } as const;
-	const width = (key: keyof typeof headers): number =>
-		Math.max(headers[key].length, ...rows.map(row => row[key].length));
-	const lines = [
-		[
-			headers.model.padEnd(width("model")),
-			headers.ttft.padEnd(width("ttft")),
-			headers.tps.padEnd(width("tps")),
-			headers.tokens.padEnd(width("tokens")),
-			headers.total.padEnd(width("total")),
-		]
-			.join("  ")
-			.trimEnd(),
+function renderBenchProgress(progress: BenchLiveProgress | undefined, spinner: string): string[] {
+	if (!progress || progress.completed >= progress.total) return [];
+	const parts = [`${progress.completed}/${progress.total} ${progress.unit}`];
+	if (progress.inFlight > 0) parts.push(`${progress.inFlight} in flight`);
+	if (progress.failed > 0) parts.push(chalk.red(`${progress.failed} failed`));
+	if (progress.okCount > 0) {
+		parts.push(`TTFT ~${formatMs(progress.ttftSumMs / progress.okCount)}`);
+		parts.push(`~${(progress.tpsSum / progress.okCount).toFixed(1)} tok/s`);
+	}
+	return [
+		`  ${chalk.yellow(spinner)} ${chalk.bold(progress.label)}${chalk.dim(" · ")}${parts.join(chalk.dim(" · "))}`,
 	];
-	for (const row of rows) {
-		const failedSuffix = row.failed > 0 ? `  ${chalk.red(`(${row.failed} failed)`)}` : "";
-		lines.push(
-			[
-				row.model.padEnd(width("model")),
-				row.ttft.padEnd(width("ttft")),
-				row.tps.padEnd(width("tps")),
-				row.tokens.padEnd(width("tokens")),
-				row.total.padEnd(width("total")),
-			]
-				.join("  ")
-				.trimEnd() + failedSuffix,
+}
+
+interface BenchTableColumn {
+	header: string;
+	value(report: BenchModelReport): string;
+}
+
+function benchTableColumns(profile: BenchProfile): BenchTableColumn[] {
+	const columns: BenchTableColumn[] = [
+		{ header: "model", value: formatBenchModelLabel },
+		{ header: "TTFT p50", value: r => (r.stats ? formatMs(r.stats.ttftMs.p50) : "-") },
+		{ header: "p95", value: r => (r.stats ? formatMs(r.stats.ttftMs.p95) : "-") },
+	];
+	if (profile === "prefill") {
+		columns.push(
+			{ header: "prefill tok/s", value: r => (r.stats ? r.stats.prefillTps.p50.toFixed(0) : "-") },
+			{ header: "in", value: r => (r.stats ? formatNumber(Math.round(r.stats.inputTokens)) : "-") },
+		);
+	} else {
+		columns.push(
+			{ header: "tok/s", value: r => (r.stats ? r.stats.tokensPerSecond.p50.toFixed(1) : "-") },
+			{
+				header: "gen",
+				value: r => (r.stats && r.stats.generationTps.p50 > 0 ? r.stats.generationTps.p50.toFixed(1) : "-"),
+			},
+			{ header: "out", value: r => (r.stats ? formatNumber(Math.round(r.stats.outputTokens)) : "-") },
 		);
 	}
-	return `${lines.map((line, index) => (index === 0 ? chalk.dim(line) : line)).join("\n")}\n`;
+	columns.push(
+		{ header: "total p50", value: r => (r.stats ? formatMs(r.stats.durationMs.p50) : "-") },
+		{ header: "cost/run", value: r => (r.stats && r.stats.cost > 0 ? formatCost(r.stats.cost) : "-") },
+	);
+	return columns;
+}
+
+/**
+ * Ranked comparison table over model reports. Prefill ranks by median prefill
+ * tok/s, other profiles by median total-window tok/s; the winner's model cell
+ * is highlighted. Medians (not means) so one queue hiccup cannot reorder rows.
+ */
+export function formatBenchTable(summary: BenchSummary): string {
+	const profile = summary.profile ?? "chat";
+	const rank = (report: BenchModelReport): number => {
+		if (!report.stats) return Number.NEGATIVE_INFINITY;
+		return profile === "prefill" ? report.stats.prefillTps.p50 : report.stats.tokensPerSecond.p50;
+	};
+	const ranked = [...summary.models].sort((a, b) => rank(b) - rank(a));
+	const columns = benchTableColumns(profile);
+	const rows = ranked.map(report => ({
+		cells: columns.map(column => column.value(report)),
+		failed: report.results.filter(result => !result.ok).length,
+		hasStats: report.stats !== null,
+	}));
+	const widths = columns.map((column, index) =>
+		Math.max(column.header.length, ...rows.map(row => row.cells[index]!.length)),
+	);
+	const lines = [
+		chalk.dim(
+			columns
+				.map((column, i) => column.header.padEnd(widths[i]!))
+				.join("  ")
+				.trimEnd(),
+		),
+	];
+	let winnerMarked = false;
+	for (const row of rows) {
+		const cells = row.cells.map((cell, i) => cell.padEnd(widths[i]!));
+		if (!winnerMarked && row.hasStats) {
+			cells[0] = chalk.green(cells[0]!);
+			winnerMarked = true;
+		}
+		const failedSuffix = row.failed > 0 ? `  ${chalk.red(`(${row.failed} failed)`)}` : "";
+		lines.push(cells.join("  ").trimEnd() + failedSuffix);
+	}
+	return `${lines.join("\n")}\n`;
 }
 
 async function createDefaultRuntime(): Promise<BenchRuntime> {
@@ -760,9 +923,24 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 	if (cacheMode && command.flags.runs !== undefined)
 		throw new Error("Use --cache-pairs instead of --runs with --cache");
 	if (cacheMode && command.flags.prompt !== undefined) throw new Error("--cache builds its own stable-prefix prompts");
+	if (cacheMode && command.flags.profile !== undefined) throw new Error("--profile cannot be combined with --cache");
 	if (cacheMode && (command.flags.par ?? 1) > 1) {
 		throw new Error("--par cannot parallelize cold/warm pairs; use --cache-concurrency instead");
 	}
+	const profileFlag = command.flags.profile;
+	if (
+		profileFlag !== undefined &&
+		profileFlag !== "chat" &&
+		profileFlag !== "prefill" &&
+		profileFlag !== "generation"
+	) {
+		throw new Error(`Unknown --profile "${profileFlag}" (expected chat, prefill, or generation)`);
+	}
+	const profile: BenchProfile = profileFlag ?? "chat";
+	if (command.flags.prefillBytes !== undefined && profile !== "prefill") {
+		throw new Error("--prefill-bytes requires --profile prefill");
+	}
+	const profileSpec = BENCH_PROFILES[profile];
 
 	const cachePairs = cacheMode
 		? normalizePositiveInteger("cache-pairs", command.flags.cachePairs, DEFAULT_CACHE_PAIRS)
@@ -770,15 +948,21 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 	const cacheConcurrency = cacheMode
 		? normalizePositiveInteger("cache-concurrency", command.flags.cacheConcurrency, DEFAULT_CACHE_CONCURRENCY)
 		: undefined;
-	const runs = cacheMode ? cachePairs! * 2 : normalizePositiveInteger("runs", command.flags.runs, DEFAULT_RUNS);
+	const runs = cacheMode ? cachePairs! * 2 : normalizePositiveInteger("runs", command.flags.runs, profileSpec.runs);
 	const maxTokens = normalizePositiveInteger(
 		"max-tokens",
 		command.flags.maxTokens,
-		cacheMode ? DEFAULT_CACHE_MAX_TOKENS : DEFAULT_MAX_TOKENS,
+		cacheMode ? DEFAULT_CACHE_MAX_TOKENS : profileSpec.maxTokens,
 	);
 	const par =
 		command.flags.par !== undefined ? normalizePositiveInteger("par", command.flags.par, DEFAULT_PAR) : DEFAULT_PAR;
-	const benchmarkPrompt = command.flags.prompt?.trim() || BENCH_PROMPT;
+	const benchmarkPrompt = command.flags.prompt?.trim() || profileSpec.prompt;
+	const prefillFiller =
+		!cacheMode && profile === "prefill"
+			? generatedCachePrefix(
+					normalizePositiveInteger("prefill-bytes", command.flags.prefillBytes, DEFAULT_PREFILL_BYTES),
+				)
+			: undefined;
 	const json = command.flags.json === true;
 	const randomSessionId = deps.randomSessionId ?? (() => Bun.randomUUIDv7());
 	const readTextFile = deps.readTextFile ?? readBoundedUtf8File;
@@ -796,6 +980,26 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 	if (command.models.length === 0) {
 		throw new Error("Pass at least one model selector, e.g. `omp bench opus gpt-5.2`");
 	}
+	let progress: BenchLiveProgress | undefined;
+	const board = json
+		? undefined
+		: createLiveBoard(spinner => renderBenchProgress(progress, spinner), {
+				isTTY: interactive,
+				get columns() {
+					return process.stdout.columns;
+				},
+				get rows() {
+					return process.stdout.rows;
+				},
+				write(text: string): boolean {
+					writeStdout(text);
+					return true;
+				},
+			} satisfies LiveBoardOutput);
+	const print = (text: string): void => {
+		if (board) board.log(text);
+		else writeStdout(`${text}\n`);
+	};
 
 	const runtime = await (deps.createRuntime ?? createDefaultRuntime)();
 	try {
@@ -812,13 +1016,25 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 					runtime.settings?.get("tier.anthropic") ?? "none",
 					runtime.settings?.get("tier.google") ?? "none",
 				);
-		if (!json && flagTier) writeStdout(`${chalk.dim(`service tier: ${flagTier}`)}\n`);
+		if (!json && flagTier) print(chalk.dim(`service tier: ${flagTier}`));
 		const reports: BenchModelReport[] = [];
 		for (const { selector, model, thinking } of targets) {
 			if (!json) {
 				const resolvedModel = formatModelSelectorValue(formatModelString(model), thinking);
 				const resolvedNote = selector === resolvedModel ? "" : chalk.dim(` (${selector})`);
-				writeStdout(`${chalk.bold(resolvedModel)}${resolvedNote}\n`);
+				print(`${chalk.bold(resolvedModel)}${resolvedNote}`);
+				progress = {
+					label: resolvedModel,
+					unit: cacheMode ? "pairs" : "runs",
+					total: cacheMode ? cachePairs! : runs,
+					completed: 0,
+					failed: 0,
+					inFlight: 0,
+					okCount: 0,
+					ttftSumMs: 0,
+					tpsSum: 0,
+				};
+				board?.repaint();
 			}
 			const results: BenchRunResult[] = [];
 
@@ -833,7 +1049,9 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 					error: `No credentials for provider "${model.provider}". Run \`omp\` and use /login, or set the provider API key.`,
 				};
 				results.push(failure);
-				if (!json) writeStdout(`${formatRunLine(failure, 0, runs)}\n`);
+				if (!json) print(formatRunLine(failure, 0, runs));
+				progress = undefined;
+				board?.repaint();
 				const report = buildModelReport(selector, model, thinking, results);
 				if (cacheMode) report.cachePairs = [];
 				reports.push(report);
@@ -847,6 +1065,10 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 					cacheConcurrency!,
 					async (pairIndex): Promise<BenchCachePairReport> => {
 						const cacheNamespace = randomSessionId();
+						if (progress) {
+							progress.inFlight++;
+							board?.repaint();
+						}
 						const promptCacheKey = `bench-cache:${cacheNamespace}`;
 						const stablePrefix = renderCacheBenchmarkPrefix(cachePrefix!, cacheNamespace);
 						const coldSuffix = prompt.render(cacheSuffixTemplate, { variant: "A" }).trim();
@@ -900,6 +1122,20 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 							streamFn,
 							now,
 						);
+						if (progress) {
+							progress.inFlight--;
+							progress.completed++;
+							for (const result of [coldResult, warmResult]) {
+								if (result.ok) {
+									progress.okCount++;
+									progress.ttftSumMs += result.ttftMs;
+									progress.tpsSum += result.tokensPerSecond;
+								} else {
+									progress.failed++;
+								}
+							}
+							board?.repaint();
+						}
 						return {
 							cold: cacheRunReport("cold", coldResult, coldCapture),
 							warm: cacheRunReport("warm", warmResult, warmCapture),
@@ -922,7 +1158,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 				reports.push(report);
 				if (!json) {
 					for (const [index, pair] of pairs.entries()) {
-						writeStdout(`${formatCachePairLine(pair, index, pairs.length)}\n`);
+						print(formatCachePairLine(pair, index, pairs.length));
 					}
 				}
 				continue;
@@ -939,6 +1175,10 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 						apiKey: runtime.modelRegistry.resolver(model, sessionId),
 						sessionId,
 						prompt: benchmarkPrompt,
+						contextMessages:
+							prefillFiller !== undefined
+								? prefillBenchmarkMessages(randomSessionId(), prefillFiller, benchmarkPrompt)
+								: undefined,
 						maxTokens,
 						reasoning: toReasoningEffort(thinking),
 						disableReasoning: shouldDisableReasoning(thinking) ? true : undefined,
@@ -954,11 +1194,27 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 			const processNext = async (): Promise<void> => {
 				if (queue.length === 0) return;
 				const index = queue.shift()!;
-				if (!json && interactive) writeStdout(chalk.dim(`  … run ${index + 1}/${runs} streaming\n`));
+				if (progress) {
+					progress.inFlight++;
+					board?.repaint();
+				}
 				await runWorker(index);
+				if (progress) {
+					progress.inFlight--;
+					progress.completed++;
+					const result = results[index]!;
+					if (result.ok) {
+						progress.okCount++;
+						progress.ttftSumMs += result.ttftMs;
+						progress.tpsSum += result.tokensPerSecond;
+					} else {
+						progress.failed++;
+					}
+					board?.repaint();
+				}
 				if (!json) {
 					while (nextToPrint < runs && results[nextToPrint] !== undefined) {
-						writeStdout(`${formatRunLine(results[nextToPrint], nextToPrint, runs)}\n`);
+						print(formatRunLine(results[nextToPrint], nextToPrint, runs));
 						nextToPrint++;
 					}
 				}
@@ -975,16 +1231,18 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 			models: reports,
 			failures,
 			serviceTierByFamily,
-			...(cacheMode ? { cache: { pairs: cachePairs!, concurrency: cacheConcurrency! } } : {}),
+			...(cacheMode ? { cache: { pairs: cachePairs!, concurrency: cacheConcurrency! } } : { profile }),
 		};
+		progress = undefined;
 		if (json) {
 			writeStdout(`${JSON.stringify(summary, null, 2)}\n`);
 		} else if (!cacheMode && (reports.length > 1 || runs > 1)) {
-			writeStdout(`\n${formatBenchTable(summary)}`);
+			print(`\n${formatBenchTable(summary)}`.trimEnd());
 		}
 		if (failures > 0) setExitCode(1);
 		return summary;
 	} finally {
+		board?.close();
 		runtime.close?.();
 	}
 }
