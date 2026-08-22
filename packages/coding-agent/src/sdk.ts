@@ -963,7 +963,7 @@ export function customToolToDefinition(tool: CustomTool): ToolDefinition {
 		description: tool.description,
 		parameters: tool.parameters,
 		hidden: tool.hidden,
-		defaultInactive: tool.defaultInactive === true || tool.hidden === true,
+		defaultInactive: tool.hidden === true,
 		loadMode: defaultLoadModeForToolName(tool.name, tool.loadMode),
 		deferrable: tool.deferrable,
 		approval: typeof tool.approval === "function" ? tool.approval.bind(tool) : tool.approval,
@@ -3019,12 +3019,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		}
 		const requestedToolNames = explicitlyRequestedToolNames ?? toolNamesFromRegistry;
 		const normalizedRequested = requestedToolNames.filter(name => toolRegistry.has(name));
-		const defaultInactiveToolNames = new Set([
-			...registeredTools
-				.filter(tool => tool.definition.defaultInactive || tool.definition.hidden)
-				.map(tool => tool.definition.name),
-			...sdkCustomTools.filter(t => Boolean(t.hidden || t.defaultInactive)).map(t => t.name),
-		]);
+		const defaultInactiveToolNames = new Set(
+			toolNamesFromRegistry.filter(name => {
+				const tool = toolRegistry.get(name);
+				return tool?.defaultInactive === true || tool?.hidden === true;
+			}),
+		);
 		const requestedActiveToolNames = normalizedRequested.filter(name => name !== "goal");
 		const explicitlyRequestedToolNameSet = explicitlyRequestedToolNames
 			? new Set(explicitlyRequestedToolNames)
@@ -3041,15 +3041,13 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		let initialToolNames = [...initialRequestedActiveToolNames];
 
 		// Custom tools and extension-registered tools are always included
-		// unless hidden / defaultInactive. Restricted callers own the list.
+		// unless the effective registry winner is hidden / defaultInactive. Restricted callers own the list.
 		const alwaysInclude: string[] = restrictToolNames
 			? []
 			: [
-					...sdkCustomTools.filter(t => !(t.hidden || t.defaultInactive)).map(t => t.name),
-					...registeredTools
-						.filter(t => !t.definition.defaultInactive && !t.definition.hidden)
-						.map(t => t.definition.name),
-				];
+					...sdkCustomTools.map(t => t.name),
+					...registeredTools.map(t => t.definition.name),
+				].filter(name => !defaultInactiveToolNames.has(name));
 		for (const name of alwaysInclude) {
 			if (toolRegistry.has(name) && !initialToolNames.includes(name)) {
 				initialToolNames.push(name);
@@ -3594,7 +3592,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				session.setToolBuiltIn(name, false);
 				session.setExtensionMCPTool(name, liveTool);
 				try {
-					if (registered.definition.defaultInactive && !explicitlyRequested) {
+					if ((registered.definition.defaultInactive || registered.definition.hidden) && !explicitlyRequested) {
 						if (!alreadyEnabled) return;
 						await session.setActiveToolPresentation(
 							enabled.filter(enabledName => enabledName !== name),
