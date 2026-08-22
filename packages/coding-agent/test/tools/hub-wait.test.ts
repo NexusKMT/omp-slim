@@ -151,9 +151,11 @@ describe("hub unified wait", () => {
 		// short-circuit the wait before the mailbox is ever consulted.
 		registry.register({ id: "Peer", displayName: "task", kind: "sub", session: null, status: "idle" });
 
-		const receipt = await IrcBus.global().send({ from: "Peer", to: SELF_ID, body: "picked up the lock" });
-		expect(receipt.outcome).toBe("failed");
-		expect(IrcBus.global().unreadCount(SELF_ID)).toBe(1);
+		const firstReceipt = await IrcBus.global().send({ from: "Peer", to: SELF_ID, body: "picked up the lock" });
+		const secondReceipt = await IrcBus.global().send({ from: "Peer", to: SELF_ID, body: "starting the edit" });
+		expect(firstReceipt.outcome).toBe("failed");
+		expect(secondReceipt.outcome).toBe("failed");
+		expect(IrcBus.global().unreadCount(SELF_ID)).toBe(2);
 
 		const manager = new AsyncJobManager({ onJobComplete: () => {} });
 		const result = await new HubTool(makeSession(manager)).execute("call_5", { op: "wait" });
@@ -162,7 +164,8 @@ describe("hub unified wait", () => {
 		expect(details.op).toBe("wait");
 		expect(details.waited?.from).toBe("Peer");
 		expect(details.waited?.body).toBe("picked up the lock");
-		// Consumed, not merely peeked.
-		expect(IrcBus.global().unreadCount(SELF_ID)).toBe(0);
+		// Consumed exactly one message, not merely peeked or drained the backlog.
+		expect(IrcBus.global().unreadCount(SELF_ID)).toBe(1);
+		expect(IrcBus.global().inbox(SELF_ID).map(message => message.body)).toEqual(["starting the edit"]);
 	});
 });
