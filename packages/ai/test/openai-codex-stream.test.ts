@@ -4934,7 +4934,7 @@ describe("openai-codex streaming", () => {
 		});
 		expect(details.websocketDisabled).toBe(false);
 		expect(fetchMock).not.toHaveBeenCalled();
-	});
+	}, 15_000); // real handshake join; 5s default flakes under full-suite load
 
 	it("surfaces a whitespace flood arriving after a delivered tool call instead of replaying", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
