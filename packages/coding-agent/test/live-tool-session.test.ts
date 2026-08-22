@@ -26,16 +26,16 @@ function info(
 	};
 }
 
-function tool(
-	name: string,
-	overrides: Partial<{
-		label: string;
-		description: string;
-		parameters: unknown;
-		hidden: boolean;
-		loadMode: "essential" | "discoverable";
-	}> = {},
-) {
+type FixtureTool = {
+	name: string;
+	label?: string;
+	description?: string;
+	parameters?: unknown;
+	hidden?: boolean;
+	loadMode?: "essential" | "discoverable";
+};
+
+function tool(name: string, overrides: Partial<FixtureTool> = {}): FixtureTool {
 	return {
 		name,
 		label: overrides.label ?? `${name} label`,
@@ -46,10 +46,7 @@ function tool(
 	};
 }
 
-function fakeSession(
-	infos: ToolInfo[],
-	tools: ReturnType<typeof tool>[],
-): LiveToolSessionLookup & { snapshotCalls: number } {
+function fakeSession(infos: ToolInfo[], tools: FixtureTool[]): LiveToolSessionLookup & { snapshotCalls: number } {
 	const byName = new Map(tools.map(entry => [entry.name, entry]));
 	let snapshotCalls = 0;
 	return {

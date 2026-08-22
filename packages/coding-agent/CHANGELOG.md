@@ -139,6 +139,7 @@
 - `/extensions` Ctrl+O expand follows the selected row (`id` + path). Changing selection collapses again; a live refresh of the same row keeps the expand state.
 - `/extensions` schema `type` and `default` values that land on one inspector parameter row go through `sanitizeDisplayLine`, so a newline in either field cannot inject an extra TUI row.
 - `/extensions` keeps Codex/OpenCode slash-command frontmatter (`description`, `argumentHint` / `argument-hint`) on the capability record after discovery strips it from `content`, so the inspector and search still see those fields. Providers that leave raw frontmatter in `content` still fall back to `commandPreview`.
+- `/extensions` command preview keeps an empty parsed body when a slash-command file is only frontmatter, so YAML is not shown as the template and `$ARGUMENTS` in frontmatter does not report as a body token.
 - `/extensions` builds the live tool list from one `getAllToolInfos()` snapshot instead of rebuilding that collection once per tool.
 - `/extensions` treats Windows UNC custom-tool paths as filesystem provenance so factory siblings on a share still join the same inspector row.
 - `/extensions` repaints live MCP health when `MCPManager` reconnects or trips its crash breaker, not only on EventBus connect-status events.

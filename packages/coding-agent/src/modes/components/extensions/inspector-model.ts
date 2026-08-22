@@ -99,12 +99,11 @@ export function commandPreview(content: string | undefined): CommandPreview {
 	}
 	const { frontmatter, body } = parseFrontmatter(content, { source: "slash-command" });
 	const display = slashCommandFrontmatterDisplay(frontmatter);
-	const text = body.length > 0 ? body : content;
 	return {
 		description: sanitizeDisplayField(display.description),
-		body: sanitizeDisplayText(text),
+		body: sanitizeDisplayText(body),
 		argumentHint: sanitizeDisplayField(display.argumentHint),
-		usesArguments: /\$ARGUMENTS\b/.test(text),
+		usesArguments: /\$ARGUMENTS\b/.test(body),
 	};
 }
 

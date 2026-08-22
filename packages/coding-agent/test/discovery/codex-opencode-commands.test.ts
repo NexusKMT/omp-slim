@@ -160,4 +160,17 @@ describe("Codex and OpenCode slash-command frontmatter", () => {
 
 		expect(applyFilter([ext], "Deploy a service").map(item => item.name)).toEqual(["deploy"]);
 	});
+
+	test("frontmatter-only command preview keeps an empty body", () => {
+		const preview = commandPreview(`---
+description: Deploy a service
+argument-hint: $ARGUMENTS
+---
+`);
+		expect(preview.description).toBe("Deploy a service");
+		expect(preview.argumentHint).toBe("$ARGUMENTS");
+		expect(preview.body).toBe("");
+		expect(preview.body).not.toContain("description:");
+		expect(preview.usesArguments).toBe(false);
+	});
 });

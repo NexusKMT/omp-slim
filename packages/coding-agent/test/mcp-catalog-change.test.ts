@@ -19,21 +19,21 @@ beforeAll(async () => {
 });
 
 function waitUntil(predicate: () => boolean, label: string, timeoutMs = 8_000): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const start = Date.now();
-		const tick = () => {
-			if (predicate()) {
-				resolve();
-				return;
-			}
-			if (Date.now() - start > timeoutMs) {
-				reject(new Error(`timed out waiting for ${label}`));
-				return;
-			}
-			setTimeout(tick, 15);
-		};
-		tick();
-	});
+	const { promise, resolve, reject } = Promise.withResolvers<void>();
+	const start = Date.now();
+	const tick = () => {
+		if (predicate()) {
+			resolve();
+			return;
+		}
+		if (Date.now() - start > timeoutMs) {
+			reject(new Error(`timed out waiting for ${label}`));
+			return;
+		}
+		setTimeout(tick, 15);
+	};
+	tick();
+	return promise;
 }
 
 describe("MCP catalog-change after connect", () => {
