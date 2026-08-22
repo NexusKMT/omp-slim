@@ -5,6 +5,7 @@ import {
 	liveToolsForExtension,
 	parseToolFileHeader,
 	projectListHint,
+	toolParamsFromSchema,
 } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/inspector-model";
 import { InspectorPanel } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/inspector-panel";
 import type { Extension } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/types";
@@ -280,6 +281,42 @@ describe("tool inspector", () => {
 		expect(text).toContain("Recipients, comma-separated");
 		expect(text).toContain("string");
 		expect(text).toContain("Default: nobody");
+	});
+
+	test("collapses newlines in schema defaults and types to one physical row", () => {
+		const params = toolParamsFromSchema({
+			type: "object",
+			properties: {
+				note: { type: "string\ninjected", default: "alpha\nbeta" },
+			},
+		});
+		expect(params).toHaveLength(1);
+		expect(params[0]?.type).toBe("string injected");
+		expect(params[0]?.type).not.toContain("\n");
+		expect(params[0]?.flag).toBe("Default: alpha beta");
+		expect(params[0]?.flag).not.toContain("\n");
+
+		const panel = new InspectorPanel();
+		panel.setToolSource({
+			getLiveTool: () => ({
+				name: "gmail_send",
+				description: "Send via gog",
+				parameters: {
+					type: "object",
+					properties: {
+						note: { type: "string\ninjected", default: "alpha\nbeta" },
+					},
+				},
+			}),
+		});
+		panel.setExtension(toolExtension());
+		const lines = panel.render(72).map(line => Bun.stripANSI(line));
+		const joined = lines.join("\n");
+		expect(joined).toContain("Default: alpha beta");
+		expect(joined).toContain("string injected");
+		expect(lines.some(line => line.trim() === "beta")).toBe(false);
+		expect(lines.some(line => line.trim() === "injected")).toBe(false);
+		expect(lines.filter(line => line.includes("alpha")).length).toBe(1);
 	});
 
 	test("strips control sequences from list hints and origin paths", () => {

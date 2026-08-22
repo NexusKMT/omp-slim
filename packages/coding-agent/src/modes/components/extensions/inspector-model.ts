@@ -169,7 +169,7 @@ function requiredFromSchema(schema: unknown): Set<string> {
 }
 
 function paramType(spec: Record<string, unknown>): string {
-	if (typeof spec.type === "string" && spec.type.length > 0) return sanitizeDisplayText(spec.type);
+	if (typeof spec.type === "string" && spec.type.length > 0) return sanitizeDisplayLine(spec.type);
 	if (Array.isArray(spec.enum) && spec.enum.length > 0) return "enum";
 	if (spec.anyOf || spec.oneOf) return "union";
 	return "any";
@@ -184,7 +184,7 @@ export function toolParamsFromSchema(schema: unknown): ToolParamView[] {
 		const record = spec && typeof spec === "object" ? (spec as Record<string, unknown>) : {};
 		const isRequired = required.has(name);
 		const defaultVal =
-			record.default !== undefined ? `Default: ${sanitizeDisplayText(String(record.default))}` : null;
+			record.default !== undefined ? `Default: ${sanitizeDisplayLine(String(record.default))}` : null;
 		params.push({
 			name: sanitizeDisplayLine(name),
 			type: paramType(record),
