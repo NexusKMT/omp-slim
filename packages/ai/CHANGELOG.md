@@ -1,9 +1,20 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Fixed
 
 - Captured bounded Devin Connect trailer details and request-shape evidence for diagnosing intermittent `invalid_argument` stream rejections ([#4218](https://github.com/can1357/oh-my-pi/issues/4218)).
+- Fixed Cursor GPT effort models failing with `not_found` on accounts that require the discovered effort-specific model id ([#9287](https://github.com/can1357/oh-my-pi/issues/9287)).
+- Fixed thinking-loop detection going silent after the first streamed tool call, so Grok/xAI reasoning loops that continue after a tool call starts still abort and retry instead of spinning until you press Esc.
+- Fixed Codex continuations, retries, and compaction replacing or dropping the turn-scoped sticky-routing token ([#9277](https://github.com/can1357/oh-my-pi/issues/9277)).
+- Fixed Codex Responses append chains falling back to full-context replay when replay-sanitized assistant items differ only by output-only IDs or lifecycle status.
+- Fixed Cursor usage reporting “no usage data” for plans without a numeric legacy request cap.
+- Fixed DeepSeek models rejecting requests with HTTP 400 `unknown variant \`image_url\`, expected \`text\`` when screenshots or image-producing tool results are present in conversation history or when `model.input` claims vision capability; `convertMessages` in `openai-completions` now strips `image_url` content parts and injects non-vision image placeholders for all DeepSeek endpoints.
+- Fixed `PI_PROXY` covering only provider streams: OAuth token refresh and login, usage probes, and model discovery went out through the bare global `fetch` and ignored it, so a region-blocked token endpoint answered `403 Request not allowed` (Anthropic `/v1/oauth/token`) and disabled the credential while the proxied stream itself worked. `installGlobalProxyFetch()` now routes the process-wide `fetch` through `PI_PROXY`; a per-request proxy such as `PI_PROXY_<PROVIDER>` still wins, and loopback / private-range / `NO_PROXY` targets stay direct.
+- Fixed Anthropic inference ignoring every proxy setting. `coworkFetch` runs on `node:https`, whose Bun shim discards both `agent.createConnection` and `options.createConnection`: the CONNECT tunnel to `PI_PROXY` was built, TLS-negotiated, then abandoned, and the request dialed `api.anthropic.com` on the default route (measured at the proxy: 581 bytes of handshake, zero request bytes). On a region-blocked egress that returned `403 {"type":"forbidden","message":"Request not allowed"}` with the proxy apparently configured. Proxied requests now go through Bun's own `fetch`, which honors `init.proxy`, trading the Cowork TLS/header profile for a proxy that actually carries the traffic; the dead tunnel plumbing is gone from the transport. `node:http2` (Cursor) does honor `createConnection` and is unaffected.
+- Fixed `cowork-fetch` capturing `globalThis.fetch` at module load, so a proxy wrapper installed later in startup was ignored on its fallback path.
+- Cursor Connect end-stream failures now surface bounded server trailer details instead of opaque generic errors ([#9137](https://github.com/can1357/oh-my-pi/pull/9137) by [@Mustaqeem66](https://github.com/Mustaqeem66))
 
 ## [18.0.0] - 2026-08-22
 
@@ -11,22 +22,11 @@
 
 - Added reversible private-use glyph tokenization for Claude-compatible provider requests, including prompt notices, streamed response decoding, and safe handling of unresolved model-authored glyph tokens.
 
-### Fixed
-
-- Fixed Cursor GPT effort models failing with `not_found` on accounts that require the discovered effort-specific model id ([#9287](https://github.com/can1357/oh-my-pi/issues/9287)).
-
-### Fixed
-
-- Fixed thinking-loop detection going silent after the first streamed tool call, so Grok/xAI reasoning loops that continue after a tool call starts still abort and retry instead of spinning until you press Esc.
-
 ## [17.4.3] - 2026-08-21
 
 ### Fixed
 
 - Fixed completed Anthropic turns remaining busy when the provider sent `message_stop` but kept the SSE connection open, which stranded tool execution and queued steering until timeout.
-### Fixed
-
-- Fixed Codex continuations, retries, and compaction replacing or dropping the turn-scoped sticky-routing token ([#9277](https://github.com/can1357/oh-my-pi/issues/9277)).
 
 ## [17.4.2] - 2026-08-21
 
@@ -48,9 +48,6 @@
 
 ### Fixed
 
-- Fixed Codex Responses append chains falling back to full-context replay when replay-sanitized assistant items differ only by output-only IDs or lifecycle status.
-- Fixed Cursor usage reporting “no usage data” for plans without a numeric legacy request cap.
-- Fixed DeepSeek models rejecting requests with HTTP 400 `unknown variant \`image_url\`, expected \`text\`` when screenshots or image-producing tool results are present in conversation history or when `model.input` claims vision capability; `convertMessages` in `openai-completions` now strips `image_url` content parts and injects non-vision image placeholders for all DeepSeek endpoints.
 - Fixed OpenAI Codex requests failing with HTTP 401 data residency errors on enterprise ChatGPT workspaces when connecting from a different region via VPN or proxy.
 - Fixed concurrent xAI OAuth token refreshes revoking shared credentials across multiple processes.
 - Fixed Amazon Bedrock Converse multi-turn conversations failing on models like Amazon Nova due to unsigned reasoning content in replayed turns.
@@ -60,15 +57,6 @@
 - Fixed Google Cloud Code Assist and Antigravity rejecting MCP tool schemas with unsupported annotations (`x-mcp-header`, `deprecated`, `readOnly`, `writeOnly`, `$comment`).
 - Fixed Cursor provider issues with native file edit streaming (`editToolCall`) and ensuring always-apply system rules are properly preserved.
 - Fixed Cursor HTTP/2 requests ignoring standard proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`).
-### Fixed
-
-- Fixed `PI_PROXY` covering only provider streams: OAuth token refresh and login, usage probes, and model discovery went out through the bare global `fetch` and ignored it, so a region-blocked token endpoint answered `403 Request not allowed` (Anthropic `/v1/oauth/token`) and disabled the credential while the proxied stream itself worked. `installGlobalProxyFetch()` now routes the process-wide `fetch` through `PI_PROXY`; a per-request proxy such as `PI_PROXY_<PROVIDER>` still wins, and loopback / private-range / `NO_PROXY` targets stay direct.
-- Fixed Anthropic inference ignoring every proxy setting. `coworkFetch` runs on `node:https`, whose Bun shim discards both `agent.createConnection` and `options.createConnection`: the CONNECT tunnel to `PI_PROXY` was built, TLS-negotiated, then abandoned, and the request dialed `api.anthropic.com` on the default route (measured at the proxy: 581 bytes of handshake, zero request bytes). On a region-blocked egress that returned `403 {"type":"forbidden","message":"Request not allowed"}` with the proxy apparently configured. Proxied requests now go through Bun's own `fetch`, which honors `init.proxy`, trading the Cowork TLS/header profile for a proxy that actually carries the traffic; the dead tunnel plumbing is gone from the transport. `node:http2` (Cursor) does honor `createConnection` and is unaffected.
-- Fixed `cowork-fetch` capturing `globalThis.fetch` at module load, so a proxy wrapper installed later in startup was ignored on its fallback path.
-
-### Fixed
-
-- Cursor Connect end-stream failures now surface bounded server trailer details instead of opaque generic errors ([#9137](https://github.com/can1357/oh-my-pi/pull/9137) by [@Mustaqeem66](https://github.com/Mustaqeem66))
 
 ## [17.4.0] - 2026-08-20
 
