@@ -21,6 +21,7 @@ import { usesCodexTaskPrompt } from "../task/prompt-policy";
 import { isMCPToolName, normalizeToolNames } from "../tools/builtin-names";
 import { computerExposureMode } from "../tools/computer/exposure";
 import { wrapToolWithMetaNotice } from "../tools/output-meta";
+import { isFilesystemSourcePath } from "../tools/path-utils";
 import { supportsExternalThinking } from "../tools/think";
 import { ToolAbortError, ToolError } from "../tools/tool-errors";
 import { isMountableUnderXdev, listXdevTools, type XdevState, xdevDocsFor, xdevEntries } from "../tools/xdev";
@@ -1788,10 +1789,6 @@ export class SessionTools {
 			throw error;
 		}
 	}
-}
-
-function isFilesystemSourcePath(value: string): boolean {
-	return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
 }
 
 function registeredFilesystemSourcePath(runner: ExtensionRunner | undefined, name: string): string | undefined {

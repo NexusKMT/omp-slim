@@ -489,6 +489,11 @@ export class ExtensionDashboard implements Component {
 					this.onRequestRender?.();
 				}),
 			);
+			this.#unsubscribers.push(
+				this.mcpManager.addConnectionStatusListener(() => {
+					this.onRequestRender?.();
+				}),
+			);
 		}
 	}
 

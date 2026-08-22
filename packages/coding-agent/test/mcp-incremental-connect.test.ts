@@ -96,4 +96,23 @@ describe("MCP incremental connectServers", () => {
 		expect(refreshed.at(-1)).toContain(TOOL_B);
 		expect(refreshed.at(-1)).toHaveLength(MANY_TOOL_COUNT * 2);
 	}, 20_000);
+
+	it("notifies connection-status listeners on connect and transport loss", async () => {
+		const events: Array<{ type: string; name?: string }> = [];
+		const stop = manager.addConnectionStatusListener(event => {
+			events.push({
+				type: event.type,
+				name: event.type === "connecting" ? event.serverNames[0] : event.serverName,
+			});
+		});
+		await manager.connectServers({ [SERVER_A]: fixtureConfig() }, {});
+		expect(events.some(event => event.type === "connecting" && event.name === SERVER_A)).toBe(true);
+		expect(events.some(event => event.type === "connected" && event.name === SERVER_A)).toBe(true);
+
+		const connection = manager.getConnection(SERVER_A);
+		expect(connection).toBeDefined();
+		connection?.transport.onClose?.();
+		expect(events.some(event => event.type === "connecting" && event.name === SERVER_A)).toBe(true);
+		stop();
+	}, 20_000);
 });

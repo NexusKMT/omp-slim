@@ -229,6 +229,7 @@ import { ToolContextStore } from "./tools/context";
 import { isIrcEnabled } from "./tools/hub";
 import { getImageGenTools } from "./tools/image-gen";
 import { wrapToolWithMetaNotice } from "./tools/output-meta";
+import { isFilesystemSourcePath } from "./tools/path-utils";
 import { isAutoQaEnabled } from "./tools/report-tool-issue";
 import { queueResolveHandler } from "./tools/resolve";
 import { USER_TODO_EDIT_CUSTOM_TYPE } from "./tools/todo";
@@ -956,10 +957,6 @@ function registerEvalCleanup(): void {
 	postmortem.register("python-cleanup", disposeAllKernelSessions);
 	postmortem.register("ruby-cleanup", disposeAllRubyKernelSessions);
 	postmortem.register("julia-cleanup", disposeAllJuliaKernelSessions);
-}
-
-function isFilesystemSourcePath(value: string): boolean {
-	return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
 }
 
 export function customToolToDefinition(tool: CustomTool, sourcePath?: string): ToolDefinition {

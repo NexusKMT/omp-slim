@@ -10,6 +10,7 @@ import { arkToWireSchema, isArkSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { normalizePathForComparison, parseFrontmatter } from "@oh-my-pi/pi-utils";
 import { parseRuleConditionAndScope } from "../../../capability/rule";
 import { slashCommandFrontmatterDisplay } from "../../../capability/slash-command";
+import { isFilesystemSourcePath } from "../../../tools/path-utils";
 import { sanitizeDisplayField, sanitizeDisplayLine, sanitizeDisplayText } from "./display-text";
 import { type Extension, type ExtensionState, isShadowedExtension } from "./types";
 
@@ -194,10 +195,6 @@ export function toolParamsFromSchema(schema: unknown): ToolParamView[] {
 	return params;
 }
 
-function isFilesystemToolPath(value: string): boolean {
-	return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
-}
-
 function sameToolPath(left: string, right: string): boolean {
 	return normalizePathForComparison(left) === normalizePathForComparison(right);
 }
@@ -214,10 +211,10 @@ export function liveToolsForExtension(ext: Extension, source: ToolRuntimeSource 
 		candidates.push(tool);
 	}
 	const fromSameFile = candidates.filter(
-		tool => tool.sourcePath && isFilesystemToolPath(tool.sourcePath) && sameToolPath(tool.sourcePath, ext.path),
+		tool => tool.sourcePath && isFilesystemSourcePath(tool.sourcePath) && sameToolPath(tool.sourcePath, ext.path),
 	);
 	if (fromSameFile.length > 0) return fromSameFile;
-	if (candidates.some(tool => tool.sourcePath && isFilesystemToolPath(tool.sourcePath))) {
+	if (candidates.some(tool => tool.sourcePath && isFilesystemSourcePath(tool.sourcePath))) {
 		return [];
 	}
 	if (

@@ -158,4 +158,30 @@ describe("listLiveToolRecords snapshot", () => {
 		liveToolRecordFromSession(session, "git");
 		expect(session.snapshotCalls).toBe(2);
 	});
+
+	test("joins factory siblings on a UNC source path", () => {
+		const unc = "\\\\server\\share\\.omp\\tools\\systemd.ts";
+		const infos = [info("systemd_inspect", "extension", unc), info("systemd_control", "extension", unc)];
+		const session = fakeSession(infos, [tool("systemd_inspect"), tool("systemd_control")]);
+		const listed = listLiveToolRecords(session);
+		expect(listed.every(entry => entry.sourcePath === unc)).toBe(true);
+		const row: Extension = {
+			id: "tool:systemd",
+			kind: "tool",
+			name: "systemd",
+			displayName: "systemd",
+			path: unc,
+			source: { provider: "native", providerName: "OMP", level: "user" },
+			state: "active",
+			raw: { name: "systemd", path: unc },
+		};
+		const toolSource = {
+			getLiveTool: (name: string) => listed.find(entry => entry.name === name),
+			listLiveTools: () => listed,
+		};
+		expect(liveToolsForExtension(row, toolSource).map(entry => entry.name)).toEqual([
+			"systemd_inspect",
+			"systemd_control",
+		]);
+	});
 });
