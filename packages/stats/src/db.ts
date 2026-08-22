@@ -353,29 +353,28 @@ function calculateCatalogCost(provider: string, modelId: string, tokens: CostTok
 	};
 }
 
+function normalizeUsageCost(cost: UsageCost): UsageCost {
+	const input = cost.input ?? 0;
+	const output = cost.output ?? 0;
+	const cacheRead = cost.cacheRead ?? 0;
+	const cacheWrite = cost.cacheWrite ?? 0;
+	const total = cost.total ?? input + output + cacheRead + cacheWrite;
+	return { input, output, cacheRead, cacheWrite, total };
+}
+
 function resolveStoredCost(stats: MessageStats): UsageCost {
 	// `usage.cost` was optional in older session files, and legacy payloads
 	// can carry a partially-populated cost object (e.g. only `total`). The
 	// messages table declares every cost_* column as REAL NOT NULL, so any
 	// missing field must be normalised here before binding into SQLite.
 	const raw: UsageCost | undefined = stats.usage.cost;
-	const normalize = (c: UsageCost | undefined): UsageCost => {
-		const input = c?.input ?? 0;
-		const output = c?.output ?? 0;
-		const cacheRead = c?.cacheRead ?? 0;
-		const cacheWrite = c?.cacheWrite ?? 0;
-		const total = c?.total ?? input + output + cacheRead + cacheWrite;
-		return { input, output, cacheRead, cacheWrite, total };
-	};
+	const storedCost = raw ? normalizeUsageCost(raw) : undefined;
 
-	if (raw && (raw.total ?? 0) !== 0) return normalize(raw);
+	// A missing total is derived from the stored components. An explicit zero
+	// remains the sentinel for catalog-based correction.
+	if (storedCost && (raw?.total ?? storedCost.total) !== 0) return storedCost;
 
-	const catalogCost = calculateCatalogCost(stats.provider, stats.model, stats.usage);
-	if (catalogCost) return normalize(catalogCost);
-
-	if (raw) return normalize(raw);
-
-	return ZERO_USAGE_COST;
+	return calculateCatalogCost(stats.provider, stats.model, stats.usage) ?? storedCost ?? ZERO_USAGE_COST;
 }
 
 function calculateNoCacheInputCost(provider: string, modelId: string, tokens: CostTokens): number | null {

@@ -104,6 +104,27 @@ describe("malformed session entries", () => {
 		const request = getRecentRequests(1)[0];
 		expect(request?.usage.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 1 });
 	});
+	it("preserves partial legacy cost components when total is missing", async () => {
+		const file = await writeSession([
+			assistantEntry("a1", {
+				content: [],
+				model: "claude-sonnet-4-6",
+				stopReason: "stop",
+				usage: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 10, cost: { input: 1 } },
+			}),
+		]);
+
+		const result = await parseSessionFile(file);
+		await initDb();
+		expect(insertMessageStats(result.stats)).toBe(1);
+		expect(getRecentRequests(1)[0]?.usage.cost).toEqual({
+			input: 1,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			total: 1,
+		});
+	});
 
 	it("skips assistant entries with no usage or model attribution", async () => {
 		const file = await writeSession([
