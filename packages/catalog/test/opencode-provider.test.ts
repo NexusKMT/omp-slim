@@ -126,16 +126,16 @@ describe("OpenCode provider discovery", () => {
 		try {
 			const options = opencodeZenModelManagerOptions({
 				apiKey: "zen-account-key",
-				fetch: async () => modelListResponse(["x-preview-f-free"]),
+				fetch: async () => modelListResponse(["brand-new-stencil-model"]),
 			});
 			const modelsDev = options.modelsDev;
 			if (!modelsDev) throw new Error("OpenCode model manager did not configure stencil fallback");
 			const catalog = {
 				opencode: {
 					models: {
-						"x-preview-f-free": {
-							id: "x-preview-f-free",
-							name: "Ox Alpha Free (Unlimited)",
+						"brand-new-stencil-model": {
+							id: "brand-new-stencil-model",
+							name: "Gateway First Test Model",
 							tool_call: true,
 							reasoning: true,
 							limit: { context: 1_000_000, output: 131_072 },
@@ -151,9 +151,9 @@ describe("OpenCode provider discovery", () => {
 				modelsDev: { ...modelsDev, fetch: async () => catalog },
 			};
 			const online = await resolveProviderModels(managerOptions, "online");
-			const model = online.models.find(candidate => candidate.id === "x-preview-f-free");
+			const model = online.models.find(candidate => candidate.id === "brand-new-stencil-model");
 			expect(model).toMatchObject({
-				name: "Ox Alpha Free (Unlimited)",
+				name: "Gateway First Test Model",
 				api: "openai-completions",
 				baseUrl: "https://opencode.ai/zen/v1",
 				contextWindow: 1_000_000,
