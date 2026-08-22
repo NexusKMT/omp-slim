@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed collapsed edit results with long wrapped diff lines growing beyond their rendered-row budget and corrupting native Windows terminal transcript layout ([#9302](https://github.com/can1357/oh-my-pi/issues/9302)).
+
 ## [17.4.4] - 2026-08-22
 
 ### Added
