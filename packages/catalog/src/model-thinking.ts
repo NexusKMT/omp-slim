@@ -400,9 +400,15 @@ function getModelDefinedEfforts<TApi extends Api>(
 		return QWEN38_TEMPLATE_REASONING_EFFORTS;
 	}
 	if (
-		(isOpenAICompatReasoningApi(spec.api) || (spec.api === "ollama-chat" && spec.provider === "ollama-cloud")) &&
+		(isOpenAICompatReasoningApi(spec.api) ||
+			spec.api === "openai-responses" ||
+			(spec.api === "ollama-chat" && spec.provider === "ollama-cloud")) &&
 		isDeepseekReasoningModel(spec)
 	) {
+		// The DeepSeek V4 effort ladder is a model property, not a transport one:
+		// `opencode-go/deepseek-v4-flash` is pinned to `openai-responses` (the Go
+		// gateway serves it only at /responses), yet carries the same wire-exact
+		// low/high/max scale — so the Responses transport is admitted here too.
 		// DeepSeek V4 (Flash and Pro) accepts the wire-exact low/high/max ladder
 		// on every first-party/aggregator host — the direct API, aggregators, and
 		// Ollama Cloud alike (medium/xhigh fold into high, max is a real wire
