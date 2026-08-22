@@ -98,11 +98,12 @@ const OVERFLOW_PATTERNS = [
 	/context[_ ]length[_ ]exceeded/i, // Generic fallback
 	/too many tokens/i, // Generic fallback
 	/token limit exceeded/i, // Generic fallback
-	// `request_too_large` WITH token-count evidence is a genuine context
-	// overflow. Without it, request_too_large / payload / entity-too-large are
-	// byte- or media-budget rejections (#9235) and classify as PayloadRejected
-	// via PAYLOAD_REJECTION_PATTERNS below.
+	// `request_too_large` with token-count evidence (either order) is a genuine
+	// context overflow; matchesPayloadRejectionText vetoes its payload flag via
+	// OVERFLOW_PATTERNS overlap. Without evidence it is a byte/media-budget
+	// rejection (#9235).
 	/request_too_large[^\n]*\btokens?\b/i,
+	/\btokens?\b[^\n]*request_too_large/i,
 	/model_context_window_exceeded/i, // z.ai non-standard finish_reason surfaced as error text
 	/prompt filled the context window/i, // Ollama OpenAI-compatible empty length completion
 ];
@@ -118,17 +119,26 @@ const OVERFLOW_NO_BODY_PATTERN = /\b4(00|13)\s*(status code)?\s*\(no body\)/i;
 const PAYLOAD_REJECTION_PATTERNS = [
 	/\b413\s*(?:status code\s*)?\(no body\)/i,
 	/\b413\b[^.\n]{0,120}\b(?:request|payload|entity|body)\b[^.\n]{0,60}\b(?:exceed|too large|limit)/i,
-	// Negative lookahead keeps token-evidenced request_too_large (a genuine
-	// overflow, matched by OVERFLOW_PATTERNS above) out of this table — a
-	// dual flag would let local gauge drift withhold compaction from a real
-	// token overflow at the maintenance-layer arbitration (#9235).
-	/request_too_large(?![^\n]*\btokens?\b)/i,
+	/request_too_large/i,
 	/(?:payload|entity) too large/i,
 	/request exceeds the maximum (?:size|number of bytes)/i,
 ] as const;
 
+const REQUEST_TOO_LARGE_PATTERN = /request_too_large/i;
+
 function matchesPayloadRejectionText(text: string): boolean {
-	return PAYLOAD_REJECTION_PATTERNS.some((p) => p.test(text));
+	if (!PAYLOAD_REJECTION_PATTERNS.some(p => p.test(text))) return false;
+	// Bare `request_too_large` is payload-flavored, but when the body ALSO
+	// carries token-context wording (OVERFLOW_PATTERNS are all token-context
+	// entries), the overflow classification wins and no payload flag is set —
+	// otherwise local gauge drift could withhold compaction from a genuine
+	// consults OVERFLOW_NO_BODY_PATTERN, and no-body hybrids must keep their
+	// consults OVERFLOW_NO_BODY_PATTERN, and no-body hybrids must keep their
+	// dual flag for maintenance-layer headroom arbitration.
+	if (REQUEST_TOO_LARGE_PATTERN.test(text) && OVERFLOW_PATTERNS.some(p => p.test(text))) {
+		return false;
+	}
+	return true;
 }
 
 const TIMEOUT_PATTERN = /\b(?:operation\s+)?timed?\s*out\b|\btimeout\b|\bstream stall\b/i;

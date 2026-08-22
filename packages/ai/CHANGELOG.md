@@ -9,7 +9,7 @@
 - Broker-backed startup no longer blocks on a broker round trip when the encrypted snapshot cache is fresh: the credential store starts from the cached snapshot and the background snapshot stream revalidates immediately (stale-while-revalidate). First launches and expired caches still fail fast with the actionable broker error.
 
 ### Fixed
-- HTTP 413s caused by request byte size or provider-side media budgets no longer masquerade as token-context overflows: they now classify as `payload-rejected`, so token compaction is not attempted against them (it can only dead-end with a misleading "Compaction freed too little context" warning). `request_too_large` wording carrying explicit token counts still classifies as overflow; body-less `413 (no body)` responses co-carry both flags and are arbitrated against local token headroom by session maintenance ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- HTTP 413s caused by request byte size or provider media budgets no longer classify as token-context overflows, so token compaction is no longer attempted against them ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
 
 - Captured bounded Devin Connect trailer details and request-shape evidence for diagnosing intermittent `invalid_argument` stream rejections ([#4218](https://github.com/can1357/oh-my-pi/issues/4218)).
 - Fixed abandoned `auth-broker-snapshot.enc.*.tmp` files accumulating in the cache directory when a process exited mid-write; stale temp files are now swept on each cache write.

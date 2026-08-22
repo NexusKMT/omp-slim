@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { isContextOverflow, isPayloadRejection } from "@oh-my-pi/pi-ai/error";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import { isContextOverflow, isPayloadRejection } from "@oh-my-pi/pi-ai/error";
 
 function createErrorMessage(errorMessage: string): AssistantMessage {
 	return {
@@ -58,6 +58,12 @@ describe("isContextOverflow/isPayloadRejection - HTTP 413 variants", () => {
 
 	it("keeps request_too_large carrying token-count evidence classified as overflow", () => {
 		const message = createErrorMessage("request_too_large: prompt is too long: 300000 tokens > 200000 maximum");
+		expect(isContextOverflow(message)).toBe(true);
+		expect(isPayloadRejection(message)).toBe(false);
+	});
+
+	it("keeps request_too_large with evidence-BEFORE token counts classified as overflow", () => {
+		const message = createErrorMessage("300000 tokens exceeds the context window: request_too_large");
 		expect(isContextOverflow(message)).toBe(true);
 		expect(isPayloadRejection(message)).toBe(false);
 	});

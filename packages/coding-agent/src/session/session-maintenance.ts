@@ -1773,7 +1773,39 @@ export class SessionMaintenance {
 		const compactionEntry = getLatestCompactionEntry(this.#host.sessionManager.getBranch());
 		const errorIsFromBeforeCompaction =
 			compactionEntry !== null && assistantMessage.timestamp < new Date(compactionEntry.timestamp).getTime();
-		if (sameModel && !errorIsFromBeforeCompaction && AIError.isContextOverflow(assistantMessage, contextWindow)) {
+		// A byte/media-driven HTTP 413 (request-body size or provider
+		// vision-media budget, #9235) cannot be fixed by token compaction:
+		// when the local gauge shows real headroom, surface the rejection
+		// honestly instead of compacting. Bare "413 (no body)" sets BOTH
+		// ContextOverflow and PayloadRejected (proxy ambiguity) — this
+		// headroom arbitration decides for it too. With no local headroom
+		// the provider's token accounting may be right after all, so the
+		// error falls through to normal overflow recovery below.
+		const payloadRejection =
+			sameModel && !errorIsFromBeforeCompaction && AIError.isPayloadRejection(assistantMessage);
+		const storedTokens = payloadRejection && contextWindow > 0 ? this.#estimateStoredContextTokens() : 0;
+		const trustedPayloadRejection =
+			payloadRejection && contextWindow > 0 && storedTokens < contextWindow * PAYLOAD_REJECTION_OCCUPANCY_CEILING;
+		if (trustedPayloadRejection) {
+			this.#host.removeAssistantMessageFromActiveContext(assistantMessage);
+			this.#host.emitNotice("warning", payloadRejectionNotice(storedTokens, contextWindow), "compaction");
+			logger.debug("Payload-shaped 413 withheld from token compaction", {
+				provider: assistantMessage.provider,
+				model: assistantMessage.model,
+				message: assistantMessage.errorMessage,
+				storedTokens,
+				contextWindow,
+			});
+			// Block automatic continuation: retrying would resend the same
+			// over-limit payload. The user must shrink bytes/frames or raise
+			// the limit first.
+			return COMPACTION_CHECK_BLOCK_AUTOMATIC_CONTINUATION;
+		}
+		if (
+			sameModel &&
+			!errorIsFromBeforeCompaction &&
+			(AIError.isContextOverflow(assistantMessage, contextWindow) || (payloadRejection && !trustedPayloadRejection))
+		) {
 			// Clear the failed turn from active context so neither the automatic
 			// continuation nor the next user prompt replays the failing turn.
 			// The persisted branch entry stays so the transcript keeps the only
@@ -1781,31 +1813,6 @@ export class SessionMaintenance {
 			// further down, but only on the paths that actually schedule a
 			// retry/compaction.
 			this.#host.removeAssistantMessageFromActiveContext(assistantMessage);
-			// A byte/media-driven HTTP 413 carries overflow-shaped text but no
-			// token-count evidence (#9235): token compaction cannot shrink bytes
-			// or vision-media budgets, so when the local gauge still shows real
-			// headroom, surface the rejection honestly instead of compacting.
-			// Bare "413 (no body)" sets BOTH ContextOverflow and PayloadRejected
-			// (proxy ambiguity) — this headroom arbitration decides for it too.
-			if (AIError.isPayloadRejection(assistantMessage)) {
-				const storedTokens = this.#estimateStoredContextTokens();
-				if (contextWindow > 0 && storedTokens < contextWindow * PAYLOAD_REJECTION_OCCUPANCY_CEILING) {
-					this.#host.emitNotice("warning", payloadRejectionNotice(storedTokens, contextWindow), "compaction");
-					logger.debug("Payload-shaped 413 withheld from token compaction", {
-						provider: assistantMessage.provider,
-						model: assistantMessage.model,
-						message: assistantMessage.errorMessage,
-						storedTokens,
-						contextWindow,
-					});
-					// Block automatic continuation: retrying would resend the
-					// same over-limit payload. The user must shrink bytes/frames
-					// or raise the limit first.
-					return COMPACTION_CHECK_BLOCK_AUTOMATIC_CONTINUATION;
-				}
-				// No local headroom ⇒ the provider's token accounting may be
-				// right after all; fall through to the normal overflow recovery.
-			}
 
 			// Try context promotion first - switch to a larger model and retry without compacting
 			const promoted = await this.#tryContextPromotion(assistantMessage);
@@ -2353,17 +2360,15 @@ export class SessionMaintenance {
 	}
 
 	/**
-	 * Dead-end remedies for the user-facing warning. When the latest compaction
-	 * entry holds archived image frames, those frames are what token
-	 * compaction cannot shrink (providers often bill vision media separately
-	 * from tokens), so name them first; otherwise return the caller's default
-	 * remedies verbatim.
+	 * Dead-end remedies for the user-facing warning. When the frame rebuild
+	 * provably ran and still left the context oversized, archived image
+	 * frames are what token compaction cannot shrink (providers often bill
+	 * vision media separately from tokens), so name them first; otherwise
+	 * return the caller's default remedies verbatim.
 	 */
-	#deadEndRemedies(defaultRemedies: string): string {
-		const entry = getLatestCompactionEntry(this.#host.sessionManager.getBranch());
-		const frames = snapcompact.getPreservedArchive(entry?.preserveData)?.frames.length ?? 0;
-		if (frames <= 0) return defaultRemedies;
-		return `reduce archived image frames (${frames} held) — providers often bill vision media separately from tokens; ${defaultRemedies}`;
+	#deadEndRemedies(defaultRemedies: string, implicatedFrames: number): string {
+		if (implicatedFrames <= 0) return defaultRemedies;
+		return `reduce archived image frames (${implicatedFrames} held) — providers often bill vision media separately from tokens; ${defaultRemedies}`;
 	}
 
 	/**
@@ -3085,8 +3090,14 @@ export class SessionMaintenance {
 				}
 				if (!preparation) {
 					const noProgressDeadEnd = reason !== "idle" && !frameRescueCreatedHeadroom;
+					const implicatedFrames =
+						frameRescueResult && !frameRescueCreatedHeadroom
+							? (snapcompact.getPreservedArchive(frameRescueResult.preserveData)?.frames.length ?? 0)
+							: 0;
 					const deadEndWarning = noProgressDeadEnd
-						? compactionDeadEndWarning(this.#deadEndRemedies("shrink it (e.g. clear large tool output)"))
+						? compactionDeadEndWarning(
+								this.#deadEndRemedies("shrink it (e.g. clear large tool output)", implicatedFrames),
+							)
 						: undefined;
 					// A rescue that appended a rebuilt archive without creating
 					// headroom must carry the dead-end badge on the entry the
@@ -3779,9 +3790,7 @@ export class SessionMaintenance {
 			}
 		}
 
-		const deadEndWarning = noProgressDeadEnd
-			? compactionDeadEndWarning(this.#deadEndRemedies("clear large tool output"))
-			: undefined;
+		const deadEndWarning = noProgressDeadEnd ? compactionDeadEndWarning("clear large tool output") : undefined;
 		if (deadEndWarning) {
 			// Stamp the divider: the compaction bar badges the dead-end and
 			// carries the full warning in its ctrl+o detail, so the pause

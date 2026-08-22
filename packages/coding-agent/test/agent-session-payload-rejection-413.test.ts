@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import { Agent } from "@oh-my-pi/pi-agent-core";
-import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import { Agent } from "@oh-my-pi/pi-agent-core";
+import type { CompactionPreparation } from "@oh-my-pi/pi-agent-core/compaction";
+import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -10,7 +11,6 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionMaintenance } from "@oh-my-pi/pi-coding-agent/session/session-maintenance";
-import type { CompactionPreparation } from "@oh-my-pi/pi-agent-core/compaction";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 
 /**
@@ -53,10 +53,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		authStorage?.close();
 	});
 
-	async function createSession(
-		contextWindow: number,
-		seed?: { toolText: string },
-	): Promise<void> {
+	async function createSession(contextWindow: number, seed?: { toolText: string }): Promise<void> {
 		// The payload-rejection tests exercise SessionMaintenance's overflow
 		// routing, not extension discovery. Keep the production hook boundary
 		// while short-circuiting summarization, mirroring the progress-guard
@@ -147,7 +144,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	}
 
 	function payloadRejectionAssistant(): AssistantMessage {
-		return {
+		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "" }],
 			api: "anthropic-messages",
@@ -155,12 +152,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 			model: "claude-sonnet-4-5",
 			stopReason: "error",
 			errorMessage: PAYLOAD_ERROR_MESSAGE,
-			// finalize()/classifyMessage() stamps errorId at the transport
-			// boundary; an ambiguous proxy 413 ("no body") co-classifies as
-			// BOTH ContextOverflow and PayloadRejected, which is the shape the
-			// session-maintenance headroom arbitration owns. Fabricated turns
-			// must carry it explicitly — nothing runs classify() on them.
-			errorId: AIError.Flag.ContextOverflow | AIError.Flag.PayloadRejected,
 			usage: {
 				input: 1000,
 				output: 0,
@@ -171,6 +162,14 @@ describe("AgentSession payload-rejection 413 handling", () => {
 			},
 			timestamp: Date.now(),
 		} as AssistantMessage;
+		// Stamp errorId exactly like the transport boundary does (finalize →
+		// classifyMessage) instead of hand-forging flags: the ninfer-style
+		// body classifies PayloadRejected-ONLY, which is precisely the shape
+		// the maintenance pre-gate must catch without an overflow flag
+		// (AGENTS.md: drive the real failure path, assert the surfaced
+		// contract).
+		message.errorId = AIError.classifyMessage(message);
+		return message;
 	}
 
 	it("honestly skips token compaction for a low-token payload-shaped 413", async () => {
