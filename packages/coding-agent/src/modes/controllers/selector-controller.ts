@@ -87,7 +87,7 @@ import { AgentsHubComponent } from "../components/agents-hub";
 import { AssistantMessageComponent } from "../components/assistant-message";
 import { CopySelectorComponent } from "../components/copy-selector";
 import { ExtensionDashboard } from "../components/extensions";
-import type { LiveToolRecord } from "../components/extensions/inspector-model";
+import { listLiveToolRecords, liveToolRecordFromSession } from "../components/extensions/live-tool-session";
 import { HistorySearchComponent } from "../components/history-search";
 import { LoginDialogComponent } from "../components/login-dialog";
 import { LogoutAccountSelectorComponent } from "../components/logout-account-selector";
@@ -109,28 +109,6 @@ import type { SessionObserverRegistry } from "../session-observer-registry";
 import { buildCopyTargets } from "../utils/copy-targets";
 
 const MANUAL_LOGIN_PROMPT = "Paste the authorization code (or full redirect URL), then press Enter:";
-
-function liveToolRecordFromSession(
-	session: InteractiveModeContext["session"],
-	name: string,
-): LiveToolRecord | undefined {
-	const tool = session.getToolByName(name);
-	if (!tool) return undefined;
-	const info = session.getAllToolInfos().find(entry => entry.name === name);
-	const origin = info?.sourceInfo.source;
-	const originPath = info?.sourceInfo.path;
-	return {
-		name: tool.name,
-		label: tool.label,
-		description: tool.description,
-		parameters: tool.parameters,
-		hidden: tool.hidden,
-		loadMode: tool.loadMode,
-		source:
-			origin === "builtin" || origin === "mcp" || origin === "sdk" || origin === "extension" ? origin : undefined,
-		sourcePath: originPath && !originPath.startsWith("<") ? originPath : undefined,
-	};
-}
 
 export class SelectorController {
 	constructor(private ctx: InteractiveModeContext) {}
@@ -403,14 +381,7 @@ export class SelectorController {
 			eventBus: this.ctx.eventBus,
 			toolSource: {
 				getLiveTool: name => liveToolRecordFromSession(this.ctx.session, name),
-				listLiveTools: () => {
-					const tools: LiveToolRecord[] = [];
-					for (const info of this.ctx.session.getAllToolInfos()) {
-						const live = liveToolRecordFromSession(this.ctx.session, info.name);
-						if (live) tools.push(live);
-					}
-					return tools;
-				},
+				listLiveTools: () => listLiveToolRecords(this.ctx.session),
 			},
 			onMcpToolsChanged: tools => this.ctx.session.refreshMCPTools(tools),
 		});
