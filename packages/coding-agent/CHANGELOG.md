@@ -207,6 +207,9 @@
 ### Fixed
 
 - Subagent failures now name the resolved provider and model that produced the error ([#9137](https://github.com/can1357/oh-my-pi/pull/9137) by [@Mustaqeem66](https://github.com/Mustaqeem66))
+### Fixed
+
+- Fixed read-only subagents (`scout`, restricted-tool custom agents) crashing before their first prompt when extensions register callable tool schemas.
 
 ## [17.4.0] - 2026-08-20
 
