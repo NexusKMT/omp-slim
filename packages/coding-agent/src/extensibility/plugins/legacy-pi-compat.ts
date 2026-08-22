@@ -1629,9 +1629,7 @@ async function isCommonJsModulePath(
 		).some(({ node, scope }) => {
 			if (isGlobalRequireCall(node, scope)) return true;
 			if (node.type !== "MemberExpression") return false;
-			return (
-				isUnshadowedExportsTarget(node, scope) || isUnshadowedExportsTarget(asAstNode(node.object), scope)
-			);
+			return isUnshadowedExportsTarget(node, scope) || isUnshadowedExportsTarget(asAstNode(node.object), scope);
 		});
 		if (hasUnshadowedCommonJsSyntax) {
 			return true;

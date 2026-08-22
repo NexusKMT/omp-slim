@@ -239,12 +239,9 @@ describe("LSP diagnostics freshness", () => {
 			["capable", failedClient.config],
 			["unsupported", unsupportedClient.config],
 		]);
-		const unsupported = await formatContent(
-			path.join(tempDir.path(), "unsupported.ts"),
-			content,
-			tempDir.path(),
-			[["unsupported", unsupportedClient.config]],
-		);
+		const unsupported = await formatContent(path.join(tempDir.path(), "unsupported.ts"), content, tempDir.path(), [
+			["unsupported", unsupportedClient.config],
+		]);
 
 		expect(failed).toEqual({ content, failed: true, unsupported: false });
 		expect(unsupported).toEqual({ content, failed: false, unsupported: true });

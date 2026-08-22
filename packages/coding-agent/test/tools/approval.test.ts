@@ -1,9 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentTool, ToolApproval } from "@oh-my-pi/pi-agent-core";
-import { Settings } from "../../src/config/settings";
-import { EditTool } from "../../src/edit";
 import { LSP_READONLY_ACTIONS } from "@oh-my-pi/pi-coding-agent/lsp";
-import type { ToolSession } from "../../src/tools";
 import {
 	type ApprovalMode,
 	formatApprovalPrompt,
@@ -13,6 +10,9 @@ import {
 } from "@oh-my-pi/pi-coding-agent/tools/approval";
 import { BashTool } from "@oh-my-pi/pi-coding-agent/tools/bash";
 import { DEBUG_READONLY_ACTIONS } from "@oh-my-pi/pi-coding-agent/tools/debug";
+import { Settings } from "../../src/config/settings";
+import { EditTool } from "../../src/edit";
+import type { ToolSession } from "../../src/tools";
 
 type ApprovalTool = Pick<AgentTool, "name" | "approval" | "formatApprovalDetails">;
 

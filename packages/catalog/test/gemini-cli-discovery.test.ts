@@ -95,14 +95,21 @@ describe("gemini-cli quota discovery fallback", () => {
 				}
 				if (url.includes(":retrieveUserQuota")) {
 					bodies.quota = body;
-					return Promise.resolve(new Response(JSON.stringify({ buckets: [{ modelId: "gemini-3.5-flash" }] }), { status: 200 }));
+					return Promise.resolve(
+						new Response(JSON.stringify({ buckets: [{ modelId: "gemini-3.5-flash" }] }), { status: 200 }),
+					);
 				}
 				return Promise.resolve(new Response("nf", { status: 404 }));
 			},
 			{ preconnect: fetch.preconnect },
 		);
 
-		const models = await fetchGeminiCliQuotaModels({ token: "t", projectId: "workspace-gcp", endpoint: CCA, fetcher });
+		const models = await fetchGeminiCliQuotaModels({
+			token: "t",
+			projectId: "workspace-gcp",
+			endpoint: CCA,
+			fetcher,
+		});
 
 		expect(loadCodeAssistCalled).toBe(false);
 		expect(bodies.quota).toEqual({ project: "workspace-gcp" });

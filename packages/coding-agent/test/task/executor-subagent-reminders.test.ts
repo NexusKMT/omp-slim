@@ -681,7 +681,7 @@ describe("runSubprocess yield reminders", () => {
 
 		expect(result.exitCode).toBe(1);
 		expect(result.error).toBe("[openai/mock] Connect error invalid_argument: Error");
-		expect(result.stderr).toBe(result.error);
+		expect(result.stderr).toBe("[openai/mock] Connect error invalid_argument: Error");
 	});
 
 	it("surfaces the assistant abort message instead of 'Cancelled by caller' on an internal turn abort", async () => {

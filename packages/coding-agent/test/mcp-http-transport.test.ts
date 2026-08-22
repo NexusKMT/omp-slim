@@ -124,21 +124,23 @@ describe("MCP Streamable HTTP transport timeouts", () => {
 		const caller = new AbortController();
 		const originalFetch = globalThis.fetch;
 		const jsonStarted = Promise.withResolvers<void>();
-		globalThis.fetch = async (_input, init) => {
+		globalThis.fetch = (async (_input, init) => {
 			const response = new Response(null, { headers: { "Content-Type": "application/json" } });
-			response.json = () => {
-				const { promise, reject } = Promise.withResolvers<unknown>();
-				const rejectBodyRead = () => {
-					caller.abort();
-					reject(new SyntaxError("Unexpected end of JSON input"));
-				};
-				if (init?.signal?.aborted) rejectBodyRead();
-				else init?.signal?.addEventListener("abort", rejectBodyRead, { once: true });
-				jsonStarted.resolve();
-				return promise;
-			};
+			Object.assign(response, {
+				json: () => {
+					const { promise, reject } = Promise.withResolvers<unknown>();
+					const rejectBodyRead = () => {
+						caller.abort();
+						reject(new SyntaxError("Unexpected end of JSON input"));
+					};
+					if (init?.signal?.aborted) rejectBodyRead();
+					else init?.signal?.addEventListener("abort", rejectBodyRead, { once: true });
+					jsonStarted.resolve();
+					return promise;
+				},
+			});
 			return response;
-		};
+		}) as typeof globalThis.fetch;
 		try {
 			const transport = new HttpTransport({
 				type: "http",
@@ -162,25 +164,24 @@ describe("MCP Streamable HTTP transport timeouts", () => {
 		const caller = new AbortController();
 		const originalFetch = globalThis.fetch;
 		const jsonStarted = Promise.withResolvers<void>();
-		globalThis.fetch = async (_input, init) => {
+		globalThis.fetch = (async (_input, init) => {
 			const response = new Response(null, { headers: { "Content-Type": "application/json" } });
-			response.json = () => {
-				const { promise, reject } = Promise.withResolvers<unknown>();
-				init?.signal?.addEventListener(
-					"abort",
-					() => {
-						setTimeout(
-							() => reject(new SyntaxError("Unexpected end of JSON input")),
-							REQUEST_TIMEOUT_MS + 20,
-						);
-					},
-					{ once: true },
-				);
-				jsonStarted.resolve();
-				return promise;
-			};
+			Object.assign(response, {
+				json: () => {
+					const { promise, reject } = Promise.withResolvers<unknown>();
+					init?.signal?.addEventListener(
+						"abort",
+						() => {
+							setTimeout(() => reject(new SyntaxError("Unexpected end of JSON input")), REQUEST_TIMEOUT_MS + 20);
+						},
+						{ once: true },
+					);
+					jsonStarted.resolve();
+					return promise;
+				},
+			});
 			return response;
-		};
+		}) as typeof globalThis.fetch;
 		try {
 			const transport = new HttpTransport({
 				type: "http",

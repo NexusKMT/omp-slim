@@ -29,8 +29,11 @@ class LegacyDesktopSession {
 		};
 	}
 
-	async execute(actions: Array<Record<string, unknown>>) {
+	async execute(
+		actions: Array<Record<string, unknown>>,
+	): Promise<{ width: number; height: number; data: Uint8Array } | undefined> {
 		this.actions.push(...actions);
+		return undefined;
 	}
 
 	async close() {
@@ -114,9 +117,7 @@ describe("legacy DesktopSession adapter", () => {
 					width: (this.options.maxWidth as number | undefined) ?? 40,
 					height: (this.options.maxHeight as number | undefined) ?? 20,
 					data: new Uint8Array(),
-					displays: [
-						{ id: "1", x: 0, y: 0, width: 20, height: 10, scale: 2, pixelWidth: 10, pixelHeight: 5 },
-					],
+					displays: [{ id: "1", x: 0, y: 0, width: 20, height: 10, scale: 2, pixelWidth: 10, pixelHeight: 5 }],
 				};
 			}
 		}

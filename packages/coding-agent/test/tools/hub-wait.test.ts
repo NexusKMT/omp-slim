@@ -166,6 +166,10 @@ describe("hub unified wait", () => {
 		expect(details.waited?.body).toBe("picked up the lock");
 		// Consumed exactly one message, not merely peeked or drained the backlog.
 		expect(IrcBus.global().unreadCount(SELF_ID)).toBe(1);
-		expect(IrcBus.global().inbox(SELF_ID).map(message => message.body)).toEqual(["starting the edit"]);
+		expect(
+			IrcBus.global()
+				.inbox(SELF_ID)
+				.map(message => message.body),
+		).toEqual(["starting the edit"]);
 	});
 });

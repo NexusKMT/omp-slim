@@ -22,6 +22,7 @@ import { describe, expect, it } from "bun:test";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import type { Context } from "@oh-my-pi/pi-ai/types";
 import { buildOpenAICompat } from "@oh-my-pi/pi-catalog/compat/openai";
+import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import type { FetchImpl, ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import { isRecord } from "@oh-my-pi/pi-utils";
@@ -112,7 +113,7 @@ describe("issue #9345 — Venice qwen thinking format", () => {
 		expect(model.baseUrl).toBe("https://api.venice.ai/api/v1");
 		expect(model.compat.thinkingFormat).toBe("openai");
 		expect(model.compat.reasoningDisableMode).toBe("venice-disable-thinking");
-		expect(model.thinking?.efforts).toEqual(["minimal", "low", "medium", "high"]);
+		expect(model.thinking?.efforts).toEqual([Effort.Minimal, Effort.Low, Effort.Medium, Effort.High]);
 		expect(body.enable_thinking).toBeUndefined();
 		expect(body.chat_template_kwargs).toBeUndefined();
 		expect(body.reasoning_effort).toBe("high");

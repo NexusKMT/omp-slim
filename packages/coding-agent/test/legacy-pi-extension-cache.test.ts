@@ -1,5 +1,5 @@
-import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { afterEach, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -8,7 +8,7 @@ const probePath = path.resolve(import.meta.dir, "fixtures", "legacy-pi-extension
 const tempDirs: TempDir[] = [];
 
 async function runProbe(cacheRoot: string): Promise<string> {
-	const env = { ...process.env, XDG_CACHE_HOME: cacheRoot };
+	const env: Record<string, string | undefined> = { ...process.env, XDG_CACHE_HOME: cacheRoot };
 	for (const key of ["PI_CODING_AGENT_DIR", "OMP_PROFILE", "PI_PROFILE", "PI_CONFIG_DIR"]) {
 		delete env[key];
 	}

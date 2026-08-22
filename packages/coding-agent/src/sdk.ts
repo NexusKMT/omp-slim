@@ -1682,7 +1682,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const fileMutationVersions = new Map<string, number>();
 		const disposeCallbacks = new Set<() => void>();
 		const activeToolNames = new Set<string>();
-		const toolRegistry = new Map<string, Tool>();
+		const toolRegistry = new Map<string, Tool & Pick<ToolDefinition, "defaultInactive">>();
 		const setActiveToolNames = (names: Iterable<string>): void => {
 			activeToolNames.clear();
 			for (const name of names) {
@@ -3044,10 +3044,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// unless the effective registry winner is hidden / defaultInactive. Restricted callers own the list.
 		const alwaysInclude: string[] = restrictToolNames
 			? []
-			: [
-					...sdkCustomTools.map(t => t.name),
-					...registeredTools.map(t => t.definition.name),
-				].filter(name => !defaultInactiveToolNames.has(name));
+			: [...sdkCustomTools.map(t => t.name), ...registeredTools.map(t => t.definition.name)].filter(
+					name => !defaultInactiveToolNames.has(name),
+				);
 		for (const name of alwaysInclude) {
 			if (toolRegistry.has(name) && !initialToolNames.includes(name)) {
 				initialToolNames.push(name);

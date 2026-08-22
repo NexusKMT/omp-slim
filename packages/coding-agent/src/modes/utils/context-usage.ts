@@ -127,7 +127,7 @@ export function estimateToolSchemaTokens(
 ): number {
 	const fragments: string[] = [];
 	for (const tool of tools) {
-// Extension-supplied tools may carry a non-string name/description or a
+		// Extension-supplied tools may carry a non-string name/description or a
 		// parameters value whose wire schema stringifies to `undefined` (e.g. a
 		// callable schema that escaped normalization). A non-string fragment is
 		// fatal inside the native tokenizer, so only real strings are counted.

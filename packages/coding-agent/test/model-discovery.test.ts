@@ -88,12 +88,7 @@ describe("ModelRegistry runtime discovery", () => {
 	}
 
 	function withEnv(
-		name:
-			| "LLAMA_CPP_BASE_URL"
-			| "LM_STUDIO_BASE_URL"
-			| "OLLAMA_BASE_URL"
-			| "OLLAMA_CONTEXT_LENGTH"
-			| "OLLAMA_HOST",
+		name: "LLAMA_CPP_BASE_URL" | "LM_STUDIO_BASE_URL" | "OLLAMA_BASE_URL" | "OLLAMA_CONTEXT_LENGTH" | "OLLAMA_HOST",
 		value: string | undefined,
 	) {
 		const original = Bun.env[name];
@@ -613,11 +608,9 @@ describe("ModelRegistry runtime discovery", () => {
 			const registry = new ModelRegistry(authStorage, modelsJsonPath);
 			await registry.refresh("offline");
 
-			expect(["ollama", "llama.cpp", "lm-studio"].map(id => registry.getProviderDiscoveryState(id)?.optional)).toEqual([
-				true,
-				true,
-				true,
-			]);
+			expect(
+				["ollama", "llama.cpp", "lm-studio"].map(id => registry.getProviderDiscoveryState(id)?.optional),
+			).toEqual([true, true, true]);
 		}
 
 		{
@@ -627,11 +620,9 @@ describe("ModelRegistry runtime discovery", () => {
 			const registry = new ModelRegistry(authStorage, modelsJsonPath);
 			await registry.refresh("offline");
 
-			expect(["ollama", "llama.cpp", "lm-studio"].map(id => registry.getProviderDiscoveryState(id)?.optional)).toEqual([
-				false,
-				false,
-				false,
-			]);
+			expect(
+				["ollama", "llama.cpp", "lm-studio"].map(id => registry.getProviderDiscoveryState(id)?.optional),
+			).toEqual([false, false, false]);
 		}
 	});
 

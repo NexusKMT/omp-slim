@@ -120,10 +120,7 @@ describe("dedupeContainedContextFiles", () => {
 		const project = "Shared rule.";
 		const files = [file("/project/AGENTS.md", project, 0), file("/home/user/.omp/AGENTS.md", user)];
 
-		expect(paths(dedupeContainedContextFiles(files))).toEqual([
-			"/home/user/.omp/AGENTS.md",
-			"/project/AGENTS.md",
-		]);
+		expect(paths(dedupeContainedContextFiles(files))).toEqual(["/home/user/.omp/AGENTS.md", "/project/AGENTS.md"]);
 	});
 
 	it("does not treat text inside a fenced code block as a contained instruction", () => {

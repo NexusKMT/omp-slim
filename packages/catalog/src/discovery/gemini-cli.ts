@@ -1,4 +1,5 @@
 import { type } from "@oh-my-pi/omptype";
+import type { FetchImpl } from "@oh-my-pi/pi-utils";
 import { parseGeminiModel, semverGte } from "../identity/classify";
 import { isGeminiModelId } from "../identity/family";
 import { createBundledReferenceMap } from "../provider-models/bundled-references";
@@ -162,7 +163,7 @@ export async function fetchGeminiCliQuotaModels(
 }
 
 async function loadProjectId(
-	fetcher: typeof fetch,
+	fetcher: FetchImpl,
 	endpoint: string,
 	headers: Record<string, string>,
 	signal: AbortSignal | undefined,

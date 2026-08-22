@@ -119,9 +119,9 @@ describe("streamDevin trailer evidence", () => {
 		});
 
 		expect(result.errorMessage?.length).toBeLessThanOrEqual(2100);
-		const warning = warnSpy.mock.calls.find(([message]) => message === "devin: stream rejected via Connect trailer")?.[1] as
-			| Record<string, unknown>
-			| undefined;
+		const warning = warnSpy.mock.calls.find(
+			([message]) => message === "devin: stream rejected via Connect trailer",
+		)?.[1] as Record<string, unknown> | undefined;
 		expect(warning).toMatchObject({
 			model: "devin-test",
 			code: "invalid_argument",
