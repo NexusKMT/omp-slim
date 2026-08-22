@@ -1580,7 +1580,8 @@ export const writeToolRenderer = {
 		const rawPath =
 			typeof args.file_path === "string" ? args.file_path : typeof args.path === "string" ? args.path : "";
 		// Render NOTHING until the streamed path arrives and provably is not an
-		// xd:// device; xd:// writes then delegate to the mounted tool's renderer.
+		// xd:// device. Device writes then render as queued until execution starts,
+		// after which they delegate to the mounted tool's renderer.
 		// A present-but-malformed path (array/object from a bad provider parse)
 		// is definitively not xd:// — fall through to the legacy frame.
 		if (args.path === undefined && args.file_path === undefined) return undefined;
