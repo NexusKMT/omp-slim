@@ -19,6 +19,9 @@
 ### Changed
 
 - Switched fallback edit mode from replace to sloppy for models that do not support hashline
+### Fixed
+
+- Sloppy edit `＋` inserts before an anchor line no longer double their typed indentation or flatten the anchor; the prompt now prescribes exact-depth indentation for all authored lines with tab-indented examples.
 
 ### Removed
 

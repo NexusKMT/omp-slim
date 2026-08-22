@@ -16,8 +16,8 @@ Move code by deleting it where it is (MATCH + `»` + empty REWRITE, or `⟪old l
 
 <rules>
 - MATCH MUST include a fragment of the changed line; context alone can hit the wrong place.
-- Every REWRITE/desired/`＋` line is written to the file verbatim — NEVER add annotation lines like `//`.
-- Indentation is content: MATCH forgives wrong leading whitespace; REWRITE lines land exactly as typed. Give every REWRITE line — the first included — its final file depth, in the file's indent character. A column-0 line amid indented ones is applied flattened, silently.
+- Copy MATCH lines byte-for-byte from the file as last read, indentation included. Matching tolerates indent drift, but exactly copied anchors keep the lines you author aligned; quoted code from markdown, diffs, or another agent has untrustworthy indentation — mirror the file, not the quote.
+- Every authored line — REWRITE, `＋`, and each desired-side line after a newline inside `⟪⟫` — is written verbatim: give it its exact final depth in the file's indent character. A desired side's first line inherits whatever precedes `⟪` on its line; continuation lines carry their full depth themselves. A column-0 line amid indented ones is applied flattened, silently. NEVER add annotation lines like `//`.
 - AVOID retyping unchanged lines; `…` re-emits them with their original indentation.
 - PREFER `⟪old│new⟫` selections and `＋` lines — unchanged lines or `…` between them — over a block REWRITE that retypes unchanged lines; use block form only for moves and large restructures.
 - NEVER combine `⟪old│new⟫` with a `»` REWRITE, or inline with bare `⟪old⟫`, in one operation.
@@ -44,11 +44,11 @@ logger.⟪debug│trace⟫(
 Several operations, one file — swaps and scattered edits stay inline:
 ```text
 §src/footer.ts
-} else if (percent > 70) {
-  str = ⟪display│warn(display)⟫;
-} else {
-  str = ⟪warn(display)│display⟫;
-}
+	} else if (percent > 70) {
+		str = ⟪display│warn(display)⟫;
+	} else {
+		str = ⟪warn(display)│display⟫;
+	}
 §
 const label = ⟪"pct"│"percent"⟫;
 ```
@@ -56,51 +56,55 @@ const label = ⟪"pct"│"percent"⟫;
 Contained restructure — one selection spanning the replaced lines:
 ```text
 §src/user.ts
-  ⟪if (!user) {
-    return fallback;
-  }
-  return user.name;│return user?.name ?? fallback;⟫
+	⟪if (!user) {
+		return fallback;
+	}
+	return user.name;│return user?.name ?? fallback;⟫
 }
 ```
 
-Insert new lines — `＋` lines, anchored by the surrounding lines:
+Insert new lines — `＋` lines typed at their final depth, anchored by the surrounding lines:
 ```text
-§Cargo.toml
-itertools = { workspace = true }
-＋jiff = { workspace = true }
-＋memchr = { workspace = true }
+§src/retry.ts
+export interface RetryPolicy {
+	limit: number;
+＋	/** Delay between attempts in ms */
+＋	delayMs: number;
+	jitter: boolean;
+}
 ```
 
 Large restructure — MATCH, `»`, final text:
 ```text
 §src/render.ts
 function legacyPipeline(input: Frame): Frame {
-  const staged = stage(input);
-  return commit(staged);
+	const staged = stage(input);
+	return commit(staged);
 }
 »
 const renderPipeline = (input: Frame): Frame => commit(stage(input));
 ```
 
-Move a block — delete at the source, re-state at the destination:
+Move a block — delete at the source, re-state it with `＋` lines at its destination:
 ```text
 §src/util.ts
 const helper = () => {
-  return 1;
+	return 1;
 };
 »
 §
 run(target);
 ＋const helper = () => {
-＋  return 1;
+＋	return 1;
 ＋};
 ```
 
-Sparse gaps carry untyped lines through:
+Sparse gaps carry untyped lines through; a multi-line desired side indents its own continuation lines:
 ```text
 §src/users.ts
 loadUser(…
-⟪const user = legacyStore.read(…);│const user = await database.users.read(…);⟫…
+	⟪const user = legacyStore.read(…);│const user = await database.users.read(…);
+	if (!user) throw new MissingUserError(id);⟫…
 }
 ```
 </example>
@@ -108,8 +112,8 @@ loadUser(…
 <critical>
 1. First line is `§relative/path.ts`; a bare `§` opens the next operation in the same file.
 2. Changes inside lines → `⟪old│new⟫`, several per op. New lines → `＋`. Moves and large restructures → MATCH + `»` + final text.
-3. REWRITE indentation is verbatim: every retyped line — anchors included — carries the exact leading whitespace it must have in the file; wrong depth or style applies silently.
+3. Authored indentation is verbatim: every REWRITE/`＋`/desired line — retyped anchors included — carries the exact leading whitespace it must have in the file; wrong depth or style applies silently. Tab-indented file → tab indents.
 4. Prove one unique match anchored on the changed line, or use `§*`.
 5. After an error, send the supplied corrected payload verbatim — nothing was applied; NEVER freestyle a new guess.
-6. Edit FIRST, straight from text already in the conversation: matching is fuzzy and every failure shows the current lines. Read only what neither the conversation nor an error shows.
+6. Edit FIRST, straight from text already in the conversation: matching is fuzzy and every failure shows the current lines. Read only what neither the conversation nor an error shows — a quote that lost its indentation is not a depth source.
 </critical>

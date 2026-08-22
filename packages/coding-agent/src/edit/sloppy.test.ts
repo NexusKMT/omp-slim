@@ -73,6 +73,19 @@ describe("sloppy v8", () => {
 		expect(variant.apply(content, columnZeroMarker, context)).toBe("fn main() {\n    setup();\n    run();\n}\n");
 	});
 
+	test("keeps typed depth for an indented add-line run before a following anchor", () => {
+		// Regression: the matcher anchored the insert after the following line's
+		// indent, so the typed indent doubled and the anchor line lost its own.
+		const content = "export interface RetryPolicy {\n\tlimit: number;\n\tjitter: boolean;\n}\n";
+		const input = inlineOperation(
+			"\tlimit: number;\n＋\t/** Delay between attempts in ms */\n＋\tdelayMs: number;\n\tjitter: boolean;",
+		);
+
+		expect(variant.apply(content, input, context)).toBe(
+			"export interface RetryPolicy {\n\tlimit: number;\n\t/** Delay between attempts in ms */\n\tdelayMs: number;\n\tjitter: boolean;\n}\n",
+		);
+	});
+
 	test("mixes add lines with inline replacements in one operation", () => {
 		const content = "const retries = 3;\nrun();\n";
 		const input = inlineOperation("const retries = ⟪3│5⟫;\n＋const backoff = 250;");

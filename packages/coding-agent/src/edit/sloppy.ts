@@ -2565,6 +2565,20 @@ function prepareInlineSelectionEdit(
 		const lineStart = content.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
 		if (lineStart < start && /^[ \t]+$/u.test(content.slice(lineStart, start))) start = lineStart;
 	}
+	// A whole-line insert authored with its own leading indent is likewise at
+	// absolute columns; the matcher anchored it after the following line's
+	// indent, so rehome it to that line's start and keep the typed depth.
+	// Left at the text start, the typed indent doubles behind the file indent
+	// and the following line's own indent is swallowed into the insert.
+	let absoluteColumnInsert = false;
+	if (start === end && selection.lineInsertion && /^[ \t]/u.test(rewrite)) {
+		const lineStart = content.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+		if (lineStart < start && /^[ \t]+$/u.test(content.slice(lineStart, start))) {
+			start = lineStart;
+			end = lineStart;
+			absoluteColumnInsert = true;
+		}
+	}
 	let candidate: Candidate = {
 		...located,
 		start,
@@ -2585,7 +2599,9 @@ function prepareInlineSelectionEdit(
 		desired !== "" &&
 		normalizeText(desired).text === normalizeText(content.slice(candidate.start, candidate.end)).text;
 	const adoptIndent =
-		!whitespaceOnlyChange && (!desired.includes("\n") || hasIndentAdoptionEvidence(content, candidate, desired));
+		!absoluteColumnInsert &&
+		!whitespaceOnlyChange &&
+		(!desired.includes("\n") || hasIndentAdoptionEvidence(content, candidate, desired));
 	const replacement = renderRewrite(
 		content,
 		candidate.start,
