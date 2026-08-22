@@ -29,6 +29,10 @@
 - Clarified that Mnemopi `/memory enqueue` only promotes working memories older than the configured consolidation gate (12 hours by default) and that normal shutdown does not run bank sleep ([#9356](https://github.com/can1357/oh-my-pi/issues/9356)).
 - Fixed asynchronous V2 remote compaction dropping user and tool messages added after its speculative snapshot ([#9351](https://github.com/can1357/oh-my-pi/issues/9351)).
 
+### Fixed
+
+- Fixed startup crashes when temporary Git worktrees point to repository metadata that the current user cannot access.
+
 ## [18.0.0] - 2026-08-22
 
 ### Added
