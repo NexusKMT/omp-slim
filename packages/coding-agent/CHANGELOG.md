@@ -42,6 +42,7 @@
 
 ### Fixed
 
+- Fixed status line context gauge disappearing or falling back to a chip in unnamed sessions
 - Benchmark input-token counts now include cache-read/cache-write prompt tokens, so prefill throughput is no longer understated on providers with automatic prompt caching
 - Typing during startup is no longer swallowed: the prepaint composer leaves the terminal's cooked-mode echo active while modules load, then replays the buffered keystrokes into the editor once settings resolve
 - Code blocks now syntax-highlight live while the response streams instead of staying plain until the block settles
