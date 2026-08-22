@@ -4935,6 +4935,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		await this.#uiHelpers.renderInitialMessages(options);
 	}
 
+	truncateTranscriptFromMessage(message: AgentMessage): boolean {
+		return this.#uiHelpers.truncateTranscriptFromMessage(message);
+	}
+
 	getUserMessageText(message: Message): string {
 		return this.#uiHelpers.getUserMessageText(message);
 	}

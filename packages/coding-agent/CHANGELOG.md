@@ -26,6 +26,7 @@
 
 ### Changed
 
+- History rewinds (esc-esc branch, `/tree` navigation to an ancestor) now drop the transcript tail in place when it hasn't scrolled off screen, instead of always clearing scrollback and replaying the whole transcript
 - Switched fallback edit mode from replace to sloppy for models that do not support hashline
 - Autocomplete dropdown now shows up to 10 rows by default (was 5), clamped to the terminal height (`autocompleteMaxVisible` setting)
 - Long slash-command descriptions now truncate to two rows with an ellipsis in the autocomplete popup instead of wrapping in full
