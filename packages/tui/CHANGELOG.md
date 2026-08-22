@@ -4,6 +4,7 @@
 
 ### Breaking Changes
 
+- Changed native macOS spelling and completion functions to return Promises
 - Changed `EditorTextAssistProvider.tryAutocorrect` signature to receive editor state instead of raw text
 - Changed `Editor.decorateText` signature to provide line and column context instead of raw text string
 
@@ -21,15 +22,15 @@
 - `CombinedAutocompleteProvider` accepts a `commandUsage` callback that ranks equal-score slash matches by usage frequency
 - `Editor.viewportRowsProvider` lets hosts clamp the autocomplete dropdown to the live terminal height
 
-### Fixed
-
-- Fixed the whole TUI freezing for as long as a slow, busy, or occluded terminal took to drain a repaint: `process.stdout.write` on a POSIX TTY blocks the event loop, so multi-MB full repaints (Esc-Esc `/tree` navigation, resume, theme change) could stall input, timers, and the agent for minutes. Stdout writes now flow through the off-thread `TtyWriter` pump from pi-natives and never block the render loop
-
 ### Changed
 
 - Increased default autocomplete dropdown height from 5 to 10 items
 - Changed the test `VirtualTerminal` engine from ghostty-web to `kitty-vt-wasm` (kitty's real screen.c/vt-parser.c). Retires the ghostty-web 0.4 crash workarounds (combining-mark input stripping, event-log replay/compaction, allocator-exhaustion engine rotation, full-clear ED3 recreate), gives the render-stress oracles exact default-color detection from typed cell snapshots, and lets full-clear/ED3 repaints exercise the engine natively instead of being masked by an engine recreate.
 - Added `Editor.setTheme()` so an adopted editor can switch from its lightweight startup theme to the configured interactive theme without replacing the editor or losing its draft.
+
+### Fixed
+
+- Fixed the whole TUI freezing for as long as a slow, busy, or occluded terminal took to drain a repaint: `process.stdout.write` on a POSIX TTY blocks the event loop, so multi-MB full repaints (Esc-Esc `/tree` navigation, resume, theme change) could stall input, timers, and the agent for minutes. Stdout writes now flow through the off-thread `TtyWriter` pump from pi-natives and never block the render loop
 
 ## [17.4.4] - 2026-08-22
 
