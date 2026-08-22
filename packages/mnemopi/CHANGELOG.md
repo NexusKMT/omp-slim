@@ -25,6 +25,9 @@
 ### Fixed
 
 - Fixed an issue where an interrupted local embedding model download could permanently corrupt the cache and silently disable semantic recall. The system now automatically detects incomplete model files, clears the corrupted cache, and retries the download.
+### Fixed
+
+- Fixed the heuristic gist `extractLocation` regex applying the `/i` flag over its `[A-Z]` proper-noun requirement, which nullified the capital-letter signal and let arbitrary lowercase mid-sentence prose (e.g. `"...in your loaded context plus"`) be stored as a location. ([#7917](https://github.com/can1357/oh-my-pi/issues/7917))
 
 ## [17.2.10] - 2026-08-06
 
