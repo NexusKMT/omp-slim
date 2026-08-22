@@ -213,7 +213,8 @@ export function computeNonMessageTokens(session: NonMessageTokenSource, tokenize
 	const systemPromptParts = session.systemPrompt ?? EMPTY_STRING_PARTS;
 	const tools = session.agent?.state?.tools ?? EMPTY_TOOLS;
 	const tokens =
-		tokenizer.countTokens(systemPromptParts.map(part => part ?? "")) + estimateToolSchemaTokens(tools, tokenizer);
+		tokenizer.countTokens(Array.from(systemPromptParts, part => part ?? "")) +
+		estimateToolSchemaTokens(tools, tokenizer);
 	entry.tokens = tokens;
 	return tokens;
 }
@@ -239,7 +240,7 @@ export function computeNonMessageBreakdown(
 	const skillsTokens = estimateSkillsTokens(renderedSkills(session.skills ?? EMPTY_SKILLS, tools), tokenizer);
 	const toolsTokens = estimateToolSchemaTokens(tools, tokenizer);
 	const systemPromptParts = session.systemPrompt ?? EMPTY_STRING_PARTS;
-	const systemContextTokens = tokenizer.countTokens(systemPromptParts.slice(1).map(part => part ?? ""));
+	const systemContextTokens = tokenizer.countTokens(Array.from(systemPromptParts.slice(1), part => part ?? ""));
 	const systemPromptTokens = Math.max(0, tokenizer.countTokens(systemPromptParts[0] ?? "") - skillsTokens);
 	const breakdown = { skillsTokens, toolsTokens, systemContextTokens, systemPromptTokens };
 	entry.breakdown = breakdown;
