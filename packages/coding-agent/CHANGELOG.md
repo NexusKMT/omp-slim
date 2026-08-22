@@ -1031,7 +1031,7 @@
 ### Changed
 
 - Context file deduplication now checks paragraph containment instead of byte-exact matching: a less-authoritative file whose normalized paragraphs appear contiguously within a more authoritative file is omitted, reducing redundant prompt context.
-- Context file containment dedup now sorts by depth descending internally, so authority is always derived from distance to cwd rather than caller array order — fixing a bug where concatenated multi-root arrays could drop a closer-to-cwd file in favor of a farther one.
+- Context file containment dedup now sorts by depth descending internally, treating files without a depth as least authoritative, so concatenated multi-root or user-level context cannot drop a closer-to-cwd file.
 - Paragraph splitting for containment comparison is now fenced-code-block-aware: text inside a fenced example in a more authoritative file no longer counts as a contained instruction, preventing active context rules from being discarded.
 
 ## [17.1.8] - 2026-07-28

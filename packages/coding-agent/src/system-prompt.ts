@@ -416,8 +416,8 @@ export function dedupeContainedContextFiles(
 	// authoritative) first, lower depth (closer to cwd, more authoritative)
 	// last. Stable sort preserves caller order among equal-depth files.
 	const sorted = [...contextFiles].sort((a, b) => {
-		const depthA = a.depth ?? -1;
-		const depthB = b.depth ?? -1;
+		const depthA = a.depth ?? Number.POSITIVE_INFINITY;
+		const depthB = b.depth ?? Number.POSITIVE_INFINITY;
 		return depthB - depthA;
 	});
 	const blocks = sorted.map(file => splitComparablePromptBlocks(file.content));
