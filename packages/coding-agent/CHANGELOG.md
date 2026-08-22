@@ -163,6 +163,7 @@
 - Fixed built-in shell utilities (`grep`, `rg`, `diff`, `find`, `timeout`, `top`, `date`, `head`, `tail`, `stat`, `truncate`, `kill`) across numerous POSIX/GNU/BSD compatibility edge cases and early-pipeline SIGPIPE handling.
 - Fixed Eval guidance that implied `agent()` children share parent kernel state and advertised them when spawning was disabled.
 - Fixed Bash guidance that implied raising `timeout` extends foreground execution beyond the auto-background threshold.
+- Fixed Bash and Eval guidance that implied raising `timeout` extends foreground execution beyond the auto-background threshold ([#9155](https://github.com/can1357/oh-my-pi/pull/9155) by [@MikeeI](https://github.com/MikeeI)).
 - Fixed Cursor sessions missing standard string-replacement edit tooling after server tool injection.
 - Fixed `hub wait` duplicating frozen rows into native scrollback during viewport overflow.
 - Fixed dark-theme contrast issues on markdown code-fence headers.
