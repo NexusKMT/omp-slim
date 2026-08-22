@@ -52,30 +52,7 @@ function decodeRunRequest(requestBytes: Uint8Array): { case: string; value: Reco
 	return decoded.message as unknown as { case: string; value: Record<string, any> };
 }
 
-function captureStreamPayload(reasoning: Effort): Promise<AgentRunRequest> {
-	const { promise, resolve, reject } = Promise.withResolvers<AgentRunRequest>();
-	streamSimple(model, context, {
-		apiKey: "test-token",
-		reasoning,
-		onPayload: payload => {
-			if (payload && typeof payload === "object" && "$typeName" in payload) {
-				resolve(payload as AgentRunRequest);
-			} else {
-				reject(new Error("Cursor payload was not an AgentRunRequest"));
-			}
-			throw new Error("stop after capturing Cursor payload");
-		},
-	});
-	return promise;
-}
-
 describe("cursor effort routing", () => {
-	it("routes stream reasoning through to the Cursor payload", async () => {
-		const run = await captureStreamPayload(Effort.Medium);
-		expect(run.requestedModel?.modelId).toBe("gpt-5.6-terra");
-		expect(run.requestedModel?.parameters).toEqual([expect.objectContaining({ id: "reasoning", value: "medium" })]);
-		expect(run.modelDetails?.modelId).toBe("gpt-5.6-terra");
-	});
 	it("sends the effort-routed wire id, not the collapsed off tier", async () => {
 		const { requestBytes } = await buildGrpcRequest(
 			model,

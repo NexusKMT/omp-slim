@@ -1,7 +1,8 @@
 import * as net from "node:net";
 import * as tls from "node:tls";
-import { logger } from "@oh-my-pi/pi-utils";
-import * as AIError from "../error";
+import * as logger from "@oh-my-pi/pi-utils/logger";
+import { AbortError } from "../error/abort";
+import { StreamTimeoutError, ValidationError } from "../error/validation";
 import type { FetchImpl } from "../types";
 
 /**
@@ -282,7 +283,7 @@ export async function connectProxiedSocket(
 	options?: ConnectProxiedSocketOptions,
 ): Promise<tls.TLSSocket> {
 	if (options?.signal?.aborted) {
-		throw new AIError.AbortError("Proxy tunnel aborted");
+		throw new AbortError("Proxy tunnel aborted");
 	}
 
 	const proxyUrl = new URL(proxyUrlStr);
@@ -339,7 +340,7 @@ export async function connectProxiedSocket(
 		cleanup();
 		resolve(socket);
 	};
-	const onAbort = (): void => rejectOnce(new AIError.AbortError("Proxy tunnel aborted"));
+	const onAbort = (): void => rejectOnce(new AbortError("Proxy tunnel aborted"));
 	const onRawError = (error: Error): void => rejectOnce(error);
 	const onTunnelError = (error: Error): void => rejectOnce(error);
 	const onTunnelReady = (): void => {
@@ -369,7 +370,7 @@ export async function connectProxiedSocket(
 			reply: firstLine,
 		});
 		if (!firstLine.includes(" 200 ")) {
-			rejectOnce(new AIError.ValidationError(`Proxy tunnel failed: ${firstLine}`));
+			rejectOnce(new ValidationError(`Proxy tunnel failed: ${firstLine}`));
 			return;
 		}
 
@@ -408,7 +409,7 @@ export async function connectProxiedSocket(
 	if (options?.timeoutMs !== undefined && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0) {
 		const timeoutMs = Math.trunc(options.timeoutMs);
 		timeout = setTimeout(() => {
-			rejectOnce(new AIError.StreamTimeoutError(`Proxy tunnel timed out after ${timeoutMs}ms`));
+			rejectOnce(new StreamTimeoutError(`Proxy tunnel timed out after ${timeoutMs}ms`));
 		}, timeoutMs);
 		timeout.unref?.();
 	}
