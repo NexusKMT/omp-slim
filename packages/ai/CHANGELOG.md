@@ -38,6 +38,7 @@
 ### Fixed
 
 - Fixed Codex Responses append chains falling back to full-context replay when replay-sanitized assistant items differ only by output-only IDs or lifecycle status.
+- Fixed Cursor usage reporting “no usage data” for plans without a numeric legacy request cap.
 - Fixed OpenAI Codex requests failing with HTTP 401 data residency errors on enterprise ChatGPT workspaces when connecting from a different region via VPN or proxy.
 - Fixed concurrent xAI OAuth token refreshes revoking shared credentials across multiple processes.
 - Fixed Amazon Bedrock Converse multi-turn conversations failing on models like Amazon Nova due to unsigned reasoning content in replayed turns.
