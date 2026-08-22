@@ -672,8 +672,8 @@ mod zombie_repro_tests {
 	//! as a permanent zombie.
 	//!
 	//! `#[ignore]`d: it saturates every core to provoke the scheduler races, so
-	//! it must run alone. `cargo test -- --ignored --test-threads=1
-	//! zombie_repro_tests`
+	//! it must run alone. `cargo nextest run --run-ignored ignored-only
+	//! --test-threads=1 -E 'test(zombie_repro_tests)'`
 
 	use std::{
 		collections::HashSet,
