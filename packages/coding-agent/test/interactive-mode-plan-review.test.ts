@@ -636,6 +636,38 @@ describe("InteractiveMode plan review rendering", () => {
 		expect(await Bun.file(resolvedPlanPath).text()).toContain("edited body");
 	});
 
+	it("saves the final plan to the chosen path and starts a new session", async () => {
+		const planFilePath = "local://PLAN.md";
+		const resolvedPlanPath = resolveLocalUrlToPath(planFilePath, {
+			getArtifactsDir: () => session.sessionManager.getArtifactsDir(),
+			getSessionId: () => session.sessionManager.getSessionId(),
+		});
+		await Bun.write(resolvedPlanPath, "# Draft plan\n\noriginal body\n");
+
+		mode.planModeEnabled = true;
+		mode.planModePlanFilePath = planFilePath;
+		const edited = "# Auto QA\n\nSave the final plan.\n\n## Verify\n\n- run focused tests\n";
+		vi.spyOn(mode, "showPlanReview").mockImplementation(async (_plan, _title, _options, dialogOptions) => {
+			dialogOptions?.onPlanEdited?.(edited);
+			return "Save and quit";
+		});
+		const generateTitle = vi.spyOn(session, "generateTitle").mockResolvedValue("Auto QA");
+		const destination = path.join(tempDir.path(), "AUTO_QA_PLAN.md");
+		vi.spyOn(mode, "showHookCustom").mockResolvedValue({ path: "AUTO_QA_PLAN.md" });
+		const clear = vi.spyOn(mode, "handleClearCommand").mockResolvedValue();
+
+		await mode.handlePlanApproval({
+			planFilePath,
+			planExists: true,
+			title: "DRAFT",
+		});
+
+		expect(generateTitle).toHaveBeenCalledWith("# Auto QA\nSave the final plan.\n## Verify\n- run focused tests");
+		expect(await Bun.file(destination).text()).toBe(edited);
+		expect(clear).toHaveBeenCalledTimes(1);
+		expect(mode.planModeEnabled).toBe(false);
+	});
+
 	it("carries pre-approval local artifacts into the fresh approve-and-execute session", async () => {
 		const planFilePath = "local://handoff-plan.md";
 		const localOptions = {
@@ -718,6 +750,7 @@ describe("InteractiveMode plan review rendering", () => {
 				"Approve and compact context",
 				"Approve and keep context (~7.3k / 10k)",
 				"Refine plan",
+				"Save and quit",
 			],
 			expect.any(Object),
 			expect.any(Object),
@@ -792,6 +825,7 @@ describe("InteractiveMode plan review rendering", () => {
 			"Approve and compact context",
 			`Approve and keep context (~${compactNumber(tokens)} / ${compactNumber(executionModel.contextWindow)})`,
 			"Refine plan",
+			"Save and quit",
 		]);
 	});
 
@@ -870,7 +904,13 @@ describe("InteractiveMode plan review rendering", () => {
 		expect(selector).toHaveBeenCalledWith(
 			expect.any(String),
 			"Plan mode - next step",
-			["Approve and execute", "Approve and compact context", "Approve and keep context", "Refine plan"],
+			[
+				"Approve and execute",
+				"Approve and compact context",
+				"Approve and keep context",
+				"Refine plan",
+				"Save and quit",
+			],
 			expect.any(Object),
 			expect.any(Object),
 		);
