@@ -12,6 +12,8 @@
 export interface HindsightMessage {
 	role: string;
 	content: string;
+	/** Original SessionEntry.timestamp; omitted when the source had none. */
+	timestamp?: string;
 }
 
 export interface RecallResultLike {
@@ -190,12 +192,20 @@ export interface RetentionTranscript {
  * Messages are tag-stripped before framing to break the recall→retain loop.
  * Returns `{ transcript: null }` when nothing meaningful survives.
  */
+function formatRetentionMessage(msg: HindsightMessage): string | null {
+	const content = stripMemoryTags(msg.content).trim();
+	if (!hasSubstantiveContent(content)) return null;
+	const header = `[role: ${msg.role}]`;
+	const timestamp = msg.timestamp?.trim();
+	const stamped = timestamp ? `${header}\n[timestamp: ${timestamp}]` : header;
+	return `${stamped}\n${content}\n[${msg.role}:end]`;
+}
+
 function formatRetentionMessages(messages: HindsightMessage[]): RetentionTranscript {
 	const parts: string[] = [];
 	for (const msg of messages) {
-		const content = stripMemoryTags(msg.content).trim();
-		if (!hasSubstantiveContent(content)) continue;
-		parts.push(`[role: ${msg.role}]\n${content}\n[${msg.role}:end]`);
+		const formatted = formatRetentionMessage(msg);
+		if (formatted) parts.push(formatted);
 	}
 
 	if (parts.length === 0) return { transcript: null, messageCount: 0 };

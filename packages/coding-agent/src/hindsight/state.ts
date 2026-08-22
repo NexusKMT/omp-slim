@@ -313,8 +313,15 @@ export class HindsightSessionState {
 		}
 	}
 
+	#sessionSourceTimestamp(): string | undefined {
+		const header = this.session.sessionManager?.getHeader?.();
+		const timestamp = header?.timestamp;
+		return typeof timestamp === "string" && timestamp.trim().length > 0 ? timestamp : undefined;
+	}
+
 	async retainSession(messages: HindsightMessage[]): Promise<void> {
 		const retainedAt = new Date();
+		const sourceTimestamp = this.#sessionSourceTimestamp() ?? retainedAt;
 		const retainFullWindow = this.config.retainMode === "full-session";
 		let documentId: string;
 		let transcript: string;
@@ -351,7 +358,7 @@ export class HindsightSessionState {
 			context: this.config.retainContext,
 			metadata: { session_id: this.sessionId },
 			tags: this.retainTags,
-			timestamp: retainedAt,
+			timestamp: sourceTimestamp,
 			async: true,
 		});
 		if (nextCachedTranscript !== undefined) {

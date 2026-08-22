@@ -11,6 +11,7 @@
 - Subagents in a shared working tree no longer run formatters, linters, or project-wide builds/test suites unless their assignment asks for it; validation runs once by the main agent.
 ### Fixed
 
+- Fixed Hindsight session retains stamping items with retain time instead of the conversation's source timestamps.
 - Fixed Kitty text-sized Markdown headings activating before `tui.textSizing` is enabled.
 - Fixed status text retaining hidden DCS, PM, and APC payloads after escape-sequence sanitization.
 - Fixed extension load errors truncating explicitly excluded package import specifiers.
