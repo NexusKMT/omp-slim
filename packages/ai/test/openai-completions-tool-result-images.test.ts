@@ -439,4 +439,86 @@ describe("openai-completions convertMessages", () => {
 			expect(imageParts.length).toBe(1);
 		}
 	});
+	it("strips image_url content for DeepSeek models on OpenAI-compatible endpoints", () => {
+		// DeepSeek API rejects `image_url` content parts with 400
+		// "unknown variant `image_url`, expected `text`". Even if a model entry
+		// or custom models.yml misconfigures `input: ["text", "image"]`,
+		// convertMessages must never forward `image_url` parts.
+		const deepseekModelIds = [
+			{ id: "deepseek-v4-pro", provider: "deepseek", baseUrl: "https://api.deepseek.com/v1" },
+			{ id: "deepseek-v4-flash", provider: "deepseek", baseUrl: "https://api.deepseek.com/v1" },
+			{ id: "deepseek-chat", provider: "deepseek", baseUrl: "https://api.deepseek.com" },
+			{ id: "deepseek-reasoner", provider: "deepseek", baseUrl: "https://api.deepseek.com" },
+			{ id: "deepseek-ai/DeepSeek-V4-Pro", provider: "custom-proxy", baseUrl: "https://llm-proxy.example.com/v1" },
+		];
+
+		const baseModel = getBundledModel("openai", "gpt-4o-mini") as Model<"openai-completions">;
+
+		for (const spec of deepseekModelIds) {
+			const model: Model<"openai-completions"> = {
+				...baseModel,
+				id: spec.id,
+				name: spec.id,
+				provider: spec.provider as Model<"openai-completions">["provider"],
+				baseUrl: spec.baseUrl,
+				api: "openai-completions",
+				input: ["text", "image"],
+			};
+
+			const now = Date.now();
+			const assistantMessage: AssistantMessage = {
+				role: "assistant",
+				content: [{ type: "toolCall", id: "tool-1", name: "browser", arguments: { action: "screenshot" } }],
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: emptyUsage,
+				stopReason: "toolUse",
+				timestamp: now,
+			};
+
+			const context: Context = {
+				messages: [
+					{
+						role: "user",
+						content: [
+							{ type: "text", text: "Take a screenshot" },
+							{ type: "image", data: "ZmFrZQ==", mimeType: "image/webp" },
+						],
+						timestamp: now - 2,
+					},
+					assistantMessage,
+					buildToolResult("tool-1", now + 1),
+				],
+			};
+
+			const messages = convertMessages(model, context, compat);
+
+			for (const m of messages) {
+				if (Array.isArray(m.content)) {
+					for (const part of m.content as Array<{ type?: string }>) {
+						expect(part?.type).not.toBe("image_url");
+					}
+				}
+			}
+
+			const userMessage = messages.find(m => m.role === "user");
+			expect(userMessage).toBeDefined();
+			const userContent = userMessage?.content;
+			const userText =
+				typeof userContent === "string"
+					? userContent
+					: (userContent as Array<{ type?: string; text?: string }>)
+							.filter(p => p?.type === "text")
+							.map(p => p?.text ?? "")
+							.join("\n");
+			expect(userText).toContain("Take a screenshot");
+			expect(userText).toContain(NON_VISION_IMAGE_PLACEHOLDER);
+
+			const toolMessage = messages.find(m => m.role === "tool");
+			expect(toolMessage).toBeDefined();
+			expect(typeof toolMessage?.content).toBe("string");
+			expect(toolMessage?.content as string).toContain(NON_VISION_IMAGE_PLACEHOLDER);
+		}
+	});
 });
