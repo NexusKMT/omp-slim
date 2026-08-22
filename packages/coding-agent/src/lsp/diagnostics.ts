@@ -518,7 +518,6 @@ export async function formatContent(
 	}
 
 	const uri = fileToUri(absolutePath);
-	let hadCapable = false;
 	let hadFailure = false;
 
 	for (const [serverName, serverConfig] of servers) {
@@ -527,22 +526,18 @@ export async function formatContent(
 			// Use custom linter client if configured
 			if (serverConfig.createClient) {
 				const linterClient = getLinterClient(serverName, serverConfig, cwd);
-				hadCapable = true;
 				const formattedContent = await linterClient.format(absolutePath, content);
 				return { content: formattedContent, failed: false, unsupported: false };
 			}
 
-			// Default: use LSP. Mark capable early so a configured formatter
-			// that crashes during init is still reported as FAILED rather than
-			// silently classified as UNSUPPORTED.
-			hadCapable = true;
+			// Default: use LSP. Initialization failures are formatter failures;
+			// a successfully initialized server without formatting support is unsupported.
 			const client = await getOrCreateClient(serverConfig, cwd, undefined, signal);
 			throwIfAborted(signal);
 
 			const caps = client.serverCapabilities;
 			if (!caps?.documentFormattingProvider) {
 				// Server exists but doesn't support formatting; not a failure
-				hadCapable = false;
 				continue;
 			}
 
@@ -570,12 +565,11 @@ export async function formatContent(
 		}
 	}
 
-	// After trying all servers:
-	// - If at least one was capable but all failed, report as failed
-	// - If none were capable (or empty list), report as unsupported
+	// A failure from any applicable server takes precedence over unsupported
+	// servers when no later formatter succeeds.
 	return {
 		content,
-		failed: hadCapable && hadFailure,
-		unsupported: !hadCapable,
+		failed: hadFailure,
+		unsupported: !hadFailure,
 	};
 }
