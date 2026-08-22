@@ -33,6 +33,7 @@ import {
 	isMinimaxM2FamilyModelId,
 	isMinimaxM3FamilyModelId,
 	isOpenAIGptOssModelId,
+	isQwenModelId,
 	supportsAdaptiveThinkingDisplay,
 } from "./identity/family";
 import type {
@@ -691,6 +692,13 @@ function inferFallbackEfforts<TApi extends Api>(spec: ModelSpec<TApi>, compat: C
 	}
 	if (isOpenAICompatReasoningApi(spec.api)) {
 		const resolved = compat as ResolvedOpenAICompat;
+		if (
+			resolved.thinkingFormat === "openai" &&
+			modelMatchesHost({ provider: spec.provider, baseUrl: spec.baseUrl ?? "" }, "venice") &&
+			isQwenModelId(spec.id)
+		) {
+			return DEFAULT_REASONING_EFFORTS;
+		}
 		if (resolved.thinkingFormat === "openai" && resolved.supportsReasoningEffort) {
 			return DEFAULT_REASONING_EFFORTS_WITH_XHIGH;
 		}

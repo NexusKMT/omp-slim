@@ -112,6 +112,7 @@ describe("issue #9345 — Venice qwen thinking format", () => {
 		expect(model.baseUrl).toBe("https://api.venice.ai/api/v1");
 		expect(model.compat.thinkingFormat).toBe("openai");
 		expect(model.compat.reasoningDisableMode).toBe("venice-disable-thinking");
+		expect(model.thinking?.efforts).toEqual(["minimal", "low", "medium", "high"]);
 		expect(body.enable_thinking).toBeUndefined();
 		expect(body.chat_template_kwargs).toBeUndefined();
 		expect(body.reasoning_effort).toBe("high");
