@@ -160,6 +160,20 @@
 - Word completions accepted via Tab now insert a trailing space when not immediately followed by whitespace or punctuation.
 - Increased default visible autocomplete dropdown rows to 10 and added the `autocompleteMaxVisible` configuration setting.
 - Slash-command descriptions in the autocomplete popup now truncate to two lines instead of wrapping indefinitely.
+- Switched fallback edit mode from replace to sloppy for models that do not support hashline
+- Autocomplete dropdown now shows up to 10 rows by default (was 5), clamped to the terminal height (`autocompleteMaxVisible` setting)
+- Long slash-command descriptions now truncate to two rows with an ellipsis in the autocomplete popup instead of wrapping in full
+- Sloppy edits now treat all authored whitespace as verbatim and require explicit `»` or `⟪⟫` markers for all operations, forbidding marker-less changes.
+- `/extensions` MCP enable/disable now disconnects or reconnects the live `MCPManager` and refreshes session MCP tools, matching `/mcp enable` / `/mcp disable`.
+- `/extensions` MCP status no longer means "enabled in config": a selected server shows Connected / Connecting / Not connected / Inactive from the live manager, matching `/mcp list`. The command/url is no longer used as the MCP description.
+- `/extensions` no longer leads with `Type:` / `Status:` plumbing. Enablement is the first fact after the name for every kind; MCP keeps live connection health in that slot.
+- `/extensions` MCP tools now show `inputSchema` arguments the same way custom tools do: three or fewer args inline, more than three collapsed until Ctrl+O. Server `initialize.instructions` sit under the description instead of as a footer; the duplicate Connection heading is gone (command/url/env remain as labeled rows). Descriptions and guidance longer than three wrapped lines collapse until Ctrl+O.
+- `/extensions` origin path is dim again, matching the pre-overhaul inspector.
+
+### Removed
+
+- Removed the experimental `wdiff` edit variant (git word-diff surface); `sloppy` is the single sparse-edit dialect.
+- Removed the experimental `mono` edit variant: its syntax and recoveries are now native to `sloppy`, which teaches `§relative/path` operation openers (bare `§` continues in the same file, `§*` for every match) instead of separate header lines, voices errors in the same vocabulary, and applies marker-less operations as desired text when the delta is punctuation-level or collapses an adjacent duplicate. Legacy bracket headers and guillemet openers remain accepted.
 
 ### Fixed
 
@@ -208,6 +222,8 @@
 - `/extensions` sanitizes untrusted MCP/tool display strings (`sanitizeText` then `replaceTabs`) before applying theme SGR, so OSC/BEL/ANSI from a server cannot leak into the TUI. List hints, origin paths, and schema `type`/`default` go through the same boundary.
 - Shadowed `/extensions` rows are informational only, including same-name MCP configs that share the winner's `mcp:<name>` id even when disablement wins display state (`enabled: false` + `_shadowed`).
 - `/extensions` joins custom tools by originating file first: a same-name builtin/MCP/SDK tool is not treated as the custom file, and a factory that also exports the file stem still lists every sibling. Project list hints accept Windows `.omp` paths.
+- Incremental `/mcp enable` and `/extensions` MCP enable keep already-connected servers' tools in `MCPManager.getTools()`; `connectServers()` merges per-server ownership instead of replacing the whole registry.
+
 
 ## [17.4.4] - 2026-08-22
 

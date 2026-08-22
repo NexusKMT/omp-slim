@@ -7,7 +7,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { arkToWireSchema, isArkSchema } from "@oh-my-pi/pi-ai/utils/schema";
-import { parseFrontmatter } from "@oh-my-pi/pi-utils";
+import { normalizePathForComparison, parseFrontmatter } from "@oh-my-pi/pi-utils";
 import { parseRuleConditionAndScope } from "../../../capability/rule";
 import { sanitizeDisplayField, sanitizeDisplayLine, sanitizeDisplayText } from "./display-text";
 import { type Extension, type ExtensionState, isShadowedExtension } from "./types";
@@ -201,7 +201,7 @@ function isFilesystemToolPath(value: string): boolean {
 }
 
 function sameToolPath(left: string, right: string): boolean {
-	return path.resolve(left) === path.resolve(right);
+	return normalizePathForComparison(left) === normalizePathForComparison(right);
 }
 
 function isFactoryExportName(extensionName: string, toolName: string): boolean {
@@ -244,7 +244,8 @@ export function liveToolDetail(live: LiveToolRecord | undefined): string | undef
 function pathSegments(filePath: string): string[] {
 	const winish = filePath.includes("\\") || /^[A-Za-z]:/.test(filePath);
 	const flavor = winish ? path.win32 : path.posix;
-	return filePath.split(flavor.sep).filter(part => part.length > 0);
+	const normalized = winish ? filePath.replaceAll("/", flavor.sep) : filePath;
+	return normalized.split(flavor.sep).filter(part => part.length > 0 && part !== ".");
 }
 
 /** Project-local items only. Uses the directory that contains `.omp`, when present. */

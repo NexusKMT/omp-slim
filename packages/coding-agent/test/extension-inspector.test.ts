@@ -328,6 +328,15 @@ describe("tool inspector", () => {
 		).toBe("repo");
 	});
 
+	test("project list hints work for Windows .omp paths with forward slashes", () => {
+		expect(
+			projectListHint({
+				...toolExtension(),
+				path: "C:/repo/.omp/tools/x.ts",
+			}),
+		).toBe("repo");
+	});
+
 	test("project-only tools show the project name instead of an arg count", () => {
 		const list = new ExtensionList([toolExtension()], {
 			toolSource: {
