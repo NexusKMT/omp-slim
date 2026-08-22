@@ -2620,6 +2620,23 @@ export class TUI extends Container {
 	}
 
 	/**
+	 * Paint a forced frame synchronously when startup must hand off an already
+	 * visible component tree before further async initialization. Uses the same
+	 * multiplexer debounce, output-backlog gate, image deferral, and forced-frame
+	 * preparation as {@link requestRender}; only the `setImmediate` hop is skipped.
+	 */
+	renderNow(options?: RenderRequestOptions): void {
+		if (this.#stopped) return;
+		if (this.#multiplexerResizeTimer) {
+			this.requestRender(true, options);
+			return;
+		}
+		this.#prepareForcedRender(options?.clearScrollback === true);
+		this.#renderRequested = false;
+		this.#executeRender();
+	}
+
+	/**
 	 * Opt `component` into subtree-only renders when input leaves focus stable.
 	 *
 	 * The host must explicitly request renders for every sibling mutated by the

@@ -1127,15 +1127,15 @@ export class InteractiveMode implements InteractiveModeContext {
 		const modelName = this.session.model?.name ?? "Unknown";
 		const providerName = this.session.model?.provider ?? "Unknown";
 
-		// Get recent sessions
-		const recentSessions = await logger.time("InteractiveMode.init:recentSessions", () =>
-			getRecentSessions(this.sessionManager.getSessionDir()).then(sessions =>
-				sessions.map(s => ({
-					name: s.name,
-					timeAgo: s.timeAgo,
-				})),
-			),
-		);
+		// Prepaint started this scan before the runtime module graph loaded. Only
+		// scan here when no startup composer exists (non-TTY/embedded hosts) or
+		// its best-effort load failed.
+		const recentSessions = await logger.time("InteractiveMode.init:recentSessions", async () => {
+			const preloaded = await options.recentSessions;
+			if (preloaded) return preloaded;
+			const sessions = await getRecentSessions(this.sessionManager.getSessionDir());
+			return sessions.map(s => ({ name: s.name, timeAgo: s.timeAgo }));
+		});
 		const startupQuiet = settings.get("startup.quiet");
 		this.composer.setPreferences({ quiet: startupQuiet });
 		this.composer.updateWelcome({
@@ -1214,7 +1214,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		setActiveTodoDescriptionsProvider(() => this.#getActiveSubagentDescriptions());
 
 		// Load initial todos
-		await this.#loadTodoList();
+		await logger.time("InteractiveMode.init:todos", () => this.#loadTodoList());
 
 		if (process.platform === "darwin" && TERMINAL.id === "wezterm" && !isInsideTerminalMultiplexer()) {
 			this.#eventBusUnsubscribers.push(startMacOSAppearanceReprobeFallback(this.ui.terminal));
@@ -1254,7 +1254,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		);
 		this.#syncEditorMaxHeight();
 		this.isInitialized = true;
-		this.ui.requestRender(true);
+		// The startup composer is already visible. Commit the complete runtime
+		// tree before session_start hooks/reconciliation continue; renderNow keeps
+		// TUI's multiplexer, output-backlog, and image safety gates.
+		this.ui.renderNow();
 
 		// Prewarm the local tiny-title worker off the submit hot path: spawn it
 		// now, idle and unref'd, so the first submit reuses a live subprocess
@@ -1270,7 +1273,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		});
 
 		// Initialize hooks with TUI-based UI context
-		await this.initHooksAndCustomTools();
+		await logger.time("InteractiveMode.init:hooks", () => this.initHooksAndCustomTools());
 
 		// Restore mode from session (e.g. plan mode on resume)
 		this.session.setSessionBeforeSwitchReconciler?.(async () => {
@@ -1278,7 +1281,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			await this.#quiesceVibeForSessionSwitch();
 		});
 		this.session.setSessionSwitchReconciler?.(() => this.#reconcileModeFromSession({ preserveActiveGoal: true }));
-		await this.#reconcileModeFromSession();
+		await logger.time("InteractiveMode.init:reconcileMode", () => this.#reconcileModeFromSession());
 
 		// Brand-new sessions optionally start in plan mode when the user has made it
 		// the startup default. "Brand-new" means the resolved branch carries no
@@ -1301,7 +1304,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// One-shot: consumeDraft removes the sidecar after read so the next
 		// resume does not re-restore the same text.
 		try {
-			const draft = await this.sessionManager.consumeDraft();
+			const draft = await logger.time("InteractiveMode.init:draft", () => this.sessionManager.consumeDraft());
 			if (draft && !this.editor.getText()) {
 				this.editor.setText(draft);
 				this.updateEditorBorderColor();

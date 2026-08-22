@@ -557,6 +557,24 @@ describe("Composer prepaint", () => {
 			.join("\n");
 		expect(output).toContain("rust-analyzer");
 	});
+	it("transfers the in-flight recent-session load across composer ownership", async () => {
+		const terminal = new CountingTerminal(80, 32);
+		const load = Promise.withResolvers<Array<{ name: string; timeAgo: string }>>();
+		beginStartupComposer({
+			preferences: config,
+			terminal,
+			version: "9.9.9",
+			cache: false,
+			recentSessions: () => load.promise,
+		});
+
+		const lease = takeStartupComposerLease();
+		expect(lease).toBeDefined();
+		const rows = [{ name: "already loading", timeAgo: "just now" }];
+		load.resolve(rows);
+		expect(await lease?.recentSessions).toEqual(rows);
+		lease?.dispose();
+	});
 	it("defers raw input until resolved settings arrive, adoption as fallback", async () => {
 		// Regression contract: losing the deferral re-blinds typing during the
 		// startup module-load stall; losing the enable leaves the keyboard dead
