@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the Projects dashboard folder endpoint running unrelated dashboard aggregations when loading folder statistics.
+
 ## [17.4.0] - 2026-08-20
 
 ### Changed
