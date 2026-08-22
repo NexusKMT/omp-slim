@@ -186,7 +186,9 @@ function fillThinkingWireDefaults<TApi extends Api>(
 		supportsAdaptiveThinkingDisplay(spec.id);
 	const needsRequiresEffort =
 		thinking.requiresEffort === undefined &&
-		(impliesMandatoryReasoning(parsed, spec.id) || isQwenTemplateReasoningEffortCompat(compat));
+		(impliesMandatoryReasoning(parsed, spec.id) ||
+			isQwenTemplateReasoningEffortCompat(compat) ||
+			isOpenCodeGatewayOxAlphaModel(spec));
 	const needsDefaultLevel =
 		thinking.defaultLevel === undefined && (isKimiK3ModelId(spec.id) || isGlm53ReasoningEffortModelId(spec.id));
 	if (!effortsChanged && !shouldReplaceEffortMap && !needsDisplay && !needsRequiresEffort && !needsDefaultLevel) {
@@ -239,7 +241,11 @@ export function deriveThinking<TApi extends Api>(spec: ModelSpec<TApi>, compat: 
 	) {
 		config.supportsDisplay = true;
 	}
-	if (impliesMandatoryReasoning(parsed, spec.id) || isQwenTemplateReasoningEffortCompat(compat)) {
+	if (
+		impliesMandatoryReasoning(parsed, spec.id) ||
+		isQwenTemplateReasoningEffortCompat(compat) ||
+		isOpenCodeGatewayOxAlphaModel(spec)
+	) {
 		config.requiresEffort = true;
 	}
 	return config;
@@ -357,6 +363,9 @@ function getModelDefinedEfforts<TApi extends Api>(
 		}
 	}
 	if (isKimiK3ModelId(spec.id)) {
+		return LOW_HIGH_MAX_REASONING_EFFORTS;
+	}
+	if (isOpenCodeGatewayOxAlphaModel(spec)) {
 		return LOW_HIGH_MAX_REASONING_EFFORTS;
 	}
 	if (isSakanaFuguReasoningModel(spec)) {
@@ -536,6 +545,22 @@ function inferDetectedEffortMap<TApi extends Api>(
 
 function isSakanaFuguReasoningModel<TApi extends Api>(spec: ModelSpec<TApi>): boolean {
 	return spec.provider === "sakana" && /^fugu(?:$|-)/i.test(spec.id);
+}
+
+/**
+ * "Ox Alpha" stealth models on the OpenCode gateways (`opencode-go` /
+ * `opencode-zen`) reason through the wire-exact `low`/`high`/`max` ladder with
+ * mandatory thinking: the gateway rejects `minimal`/`medium`/`xhigh`
+ * (`[1210] ... please use low, high, or max`), the same dialect it already
+ * serves for GLM-5.3 and Kimi K3. Other hosts proxying an `ox-alpha` SKU
+ * (Kilo, NanoGPT, Venice, OpenRouter) expose their own vocabularies and are
+ * left untouched. See issue #9349.
+ */
+function isOpenCodeGatewayOxAlphaModel<TApi extends Api>(spec: ModelSpec<TApi>): boolean {
+	return (
+		(spec.provider === "opencode-go" || spec.provider === "opencode-zen") &&
+		/(?:^|\/)ox-alpha(?:-|$)/i.test(bareModelId(spec.id))
+	);
 }
 
 function isDeepseekReasoningModel<TApi extends Api>(spec: ModelSpec<TApi>): boolean {
