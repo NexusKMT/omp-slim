@@ -78,6 +78,9 @@ export const psHelp = {
 export const readHelp = {
 	description: "Show what the read tool will return for a path, URL, or internal URI",
 } satisfies CommandMetadata;
+export const renderHelp = {
+	description: "Draw a session's entire thread through the production transcript pipeline (with repaint timing)",
+} satisfies CommandMetadata;
 
 export const sayHelp = {
 	description: "Synthesize text with the local TTS engine and play it through the speakers",

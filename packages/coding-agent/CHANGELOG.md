@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added omp render command to replay session threads and benchmark transcript pipeline performance
 - Added independently configurable macOS typo detection (`Ctrl+.` suggestions), word autocomplete (Tab), and autocorrect in the prompt editor. Typo detection and autocomplete default on; autocorrect is opt-in.
 - Startup composer now renders welcome, theme, and status UI immediately using cached session/LSP info
 - `omp bench` now runs a mixed suite of randomized built-in challenges by default (chat, prefill, generation); `--profile` isolates one kind
