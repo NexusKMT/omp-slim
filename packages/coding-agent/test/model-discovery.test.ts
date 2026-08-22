@@ -87,7 +87,15 @@ describe("ModelRegistry runtime discovery", () => {
 		return registry.getAll().filter(m => m.provider === provider);
 	}
 
-	function withEnv(name: "OLLAMA_BASE_URL" | "OLLAMA_CONTEXT_LENGTH" | "OLLAMA_HOST", value: string | undefined) {
+	function withEnv(
+		name:
+			| "LLAMA_CPP_BASE_URL"
+			| "LM_STUDIO_BASE_URL"
+			| "OLLAMA_BASE_URL"
+			| "OLLAMA_CONTEXT_LENGTH"
+			| "OLLAMA_HOST",
+		value: string | undefined,
+	) {
 		const original = Bun.env[name];
 		if (value === undefined) {
 			delete Bun.env[name];
@@ -525,6 +533,37 @@ describe("ModelRegistry runtime discovery", () => {
 		}
 	});
 
+	test("only marks unconfigured implicit local endpoints as optional", async () => {
+		{
+			using _ollamaBaseUrl = withEnv("OLLAMA_BASE_URL", undefined);
+			using _ollamaHost = withEnv("OLLAMA_HOST", undefined);
+			using _llamaCpp = withEnv("LLAMA_CPP_BASE_URL", undefined);
+			using _lmStudio = withEnv("LM_STUDIO_BASE_URL", undefined);
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+			await registry.refresh("offline");
+
+			expect(["ollama", "llama.cpp", "lm-studio"].map(id => registry.getProviderDiscoveryState(id)?.optional)).toEqual([
+				true,
+				true,
+				true,
+			]);
+		}
+
+		{
+			using _ollama = withEnv("OLLAMA_BASE_URL", "http://ollama.example:11434");
+			using _llamaCpp = withEnv("LLAMA_CPP_BASE_URL", "http://llama-cpp.example:8080");
+			using _lmStudio = withEnv("LM_STUDIO_BASE_URL", "http://lm-studio.example:1234/v1");
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+			await registry.refresh("offline");
+
+			expect(["ollama", "llama.cpp", "lm-studio"].map(id => registry.getProviderDiscoveryState(id)?.optional)).toEqual([
+				false,
+				false,
+				false,
+			]);
+		}
+	});
+
 	test("uses OLLAMA_HOST for implicit ollama discovery", async () => {
 		using _baseUrl = withEnv("OLLAMA_BASE_URL", undefined);
 		using _host = withEnv("OLLAMA_HOST", "ollama.lan:12345");
@@ -534,6 +573,7 @@ describe("ModelRegistry runtime discovery", () => {
 
 		const model = registry.find("ollama", "phi4-mini");
 		expect(model?.baseUrl).toBe("http://ollama.lan:12345/v1");
+		expect(registry.getProviderDiscoveryState("ollama")?.optional).toBe(false);
 	});
 
 	test("keeps OLLAMA_BASE_URL precedence over OLLAMA_HOST", async () => {
@@ -545,6 +585,7 @@ describe("ModelRegistry runtime discovery", () => {
 
 		const model = registry.find("ollama", "phi4-mini");
 		expect(model?.baseUrl).toBe("http://omp-ollama.example:2222/v1");
+		expect(registry.getProviderDiscoveryState("ollama")?.optional).toBe(false);
 	});
 
 	test("refreshes implicit Ollama discovery when the configured endpoint changes", async () => {
