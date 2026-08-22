@@ -7,6 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { TranscriptContainer } from "@oh-my-pi/pi-coding-agent/modes/components/transcript-container";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
@@ -42,13 +43,13 @@ function userMessage(text: string): AgentMessage {
 	} as AgentMessage;
 }
 
-function assistantMessage(text: string, input: number): AgentMessage {
+function assistantMessage(text: string, input: number): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
 		usage: { input, output: 1, cacheRead: 0, cacheWrite: 0 },
 		timestamp: Date.now(),
-	} as unknown as AgentMessage;
+	} as unknown as AssistantMessage;
 }
 
 /**
