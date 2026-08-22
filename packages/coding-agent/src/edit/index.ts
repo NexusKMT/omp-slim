@@ -384,6 +384,9 @@ function extractApprovalPath(args: unknown): string {
 
 		const applyPatchMatch = /^\*\*\* (?:Add|Update|Delete) File:\s*(.+)$/m.exec(input);
 		if (applyPatchMatch?.[1]) return applyPatchMatch[1].trim();
+
+		const sloppyPath = splitSloppySections(input)[0]?.path;
+		if (sloppyPath) return sloppyPath;
 	}
 
 	const targetPath = record.path;

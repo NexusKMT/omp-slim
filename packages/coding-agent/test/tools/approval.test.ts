@@ -1,6 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentTool, ToolApproval } from "@oh-my-pi/pi-agent-core";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { EditTool } from "@oh-my-pi/pi-coding-agent/edit";
 import { LSP_READONLY_ACTIONS } from "@oh-my-pi/pi-coding-agent/lsp";
+import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import {
 	type ApprovalMode,
 	formatApprovalPrompt,
@@ -163,6 +166,20 @@ describe("MCP fallback and prompt formatting", () => {
 	it("truncates prompt details without touching short strings", () => {
 		expect(truncateForPrompt("hello", 10)).toBe("hello");
 		expect(truncateForPrompt("abcdefgh", 5)).toBe("abcde[…3ch elided…]");
+	});
+
+	it("shows the file from a sloppy edit section header", () => {
+		const session: ToolSession = {
+			cwd: ".",
+			hasUI: false,
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+			settings: Settings.isolated(),
+		};
+		const editTool = new EditTool(session, "sloppy");
+		const input = "§src/config.go\n§\nold\n»\nnew";
+
+		expect(formatApprovalPrompt(editTool, { input })).toBe("Allow tool: edit\nFile: src/config.go");
 	});
 });
 
