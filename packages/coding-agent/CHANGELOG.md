@@ -132,6 +132,8 @@
 ### Fixed
 
 - Incremental `/mcp enable` and `/extensions` MCP enable keep already-connected servers' tools in `MCPManager.getTools()`; `connectServers()` merges per-server ownership instead of replacing the whole registry.
+- `/extensions` provider master-disable disconnects that provider's live MCP servers and rebinds session tools without rewriting `mcp.json`; re-enable does not auto-connect.
+- `/extensions` custom-tool factory names and labels on a single inspector row go through `sanitizeDisplayLine`, so embedded newlines cannot inject extra TUI rows.
 - `/extensions` list hints collapse newlines (`sanitizeDisplayLine`) so a rule glob or hook trigger cannot inject extra TUI rows and desync scrolling.
 - `/extensions` MCP enable loads configs with the same discovery filters as startup (`mcp.enableProjectConfig`, Exa, builtin-browser), so toggling a filtered-out row does not start a server session init skipped.
 - Shadowed `/extensions` rows are informational only, including same-name MCP configs that share the winner's `mcp:<name>` id even when disablement wins display state (`enabled: false` + `_shadowed`).

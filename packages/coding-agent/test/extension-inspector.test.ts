@@ -319,6 +319,36 @@ describe("tool inspector", () => {
 		expect(lines.filter(line => line.includes("alpha")).length).toBe(1);
 	});
 
+	test("collapses newlines in factory names and labels to one physical row", () => {
+		const panel = new InspectorPanel();
+		panel.setToolSource({
+			getLiveTool: () => undefined,
+			listLiveTools: () => [
+				{
+					name: "systemd_inspect\ninjected",
+					sourcePath: "/home/sf/.omp/agent/tools/systemd.ts",
+					label: "inspect\nlabel",
+					description: "Read systemd state.",
+					parameters: { type: "object", properties: {} },
+				},
+				{
+					name: "systemd_control",
+					sourcePath: "/home/sf/.omp/agent/tools/systemd.ts",
+					description: "Mutate units.",
+					parameters: { type: "object", properties: {} },
+				},
+			],
+		});
+		panel.setExtension(systemdExtension());
+		const lines = panel.render(72).map(line => Bun.stripANSI(line));
+		const joined = lines.join("\n");
+		expect(joined).toContain("systemd_inspect injected");
+		expect(joined).toContain("inspect label");
+		expect(lines.some(line => line.trim() === "injected")).toBe(false);
+		expect(lines.some(line => line.trim() === "label")).toBe(false);
+		expect(lines.filter(line => line.includes("systemd_inspect")).length).toBe(1);
+	});
+
 	test("strips control sequences from list hints and origin paths", () => {
 		const list = new ExtensionList([
 			{

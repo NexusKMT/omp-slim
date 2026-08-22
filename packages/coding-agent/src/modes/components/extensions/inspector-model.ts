@@ -11,7 +11,12 @@ import { normalizePathForComparison, parseFrontmatter } from "@oh-my-pi/pi-utils
 import { parseRuleConditionAndScope } from "../../../capability/rule";
 import { slashCommandFrontmatterDisplay } from "../../../capability/slash-command";
 import { isFilesystemSourcePath } from "../../../tools/path-utils";
-import { sanitizeDisplayField, sanitizeDisplayLine, sanitizeDisplayText } from "./display-text";
+import {
+	sanitizeDisplayField,
+	sanitizeDisplayLine,
+	sanitizeDisplayLineField,
+	sanitizeDisplayText,
+} from "./display-text";
 import { type Extension, type ExtensionState, isShadowedExtension } from "./types";
 
 export interface LiveToolRecord {
@@ -306,8 +311,8 @@ export function toolInspectorData(
 			runtimeDetail: `${lives.length} tools`,
 			factory: lives.map(live => ({
 				...live,
-				name: sanitizeDisplayText(live.name),
-				label: sanitizeDisplayField(live.label),
+				name: sanitizeDisplayLine(live.name),
+				label: sanitizeDisplayLineField(live.label),
 				description: sanitizeDisplayField(live.description),
 			})),
 		};

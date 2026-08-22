@@ -295,8 +295,56 @@ export class ExtensionDashboard implements Component {
 	}
 
 	#handleProviderToggle(providerId: string): void {
+		const enabling = this.#state.tabs.find(tab => tab.id === providerId)?.enabled === false;
 		toggleProvider(providerId);
+		if (!enabling) {
+			void this.#disconnectProviderMcpServers(providerId);
+			return;
+		}
 		void this.#refreshFromState();
+	}
+
+	/**
+	 * Provider disable is discovery-only: do not rewrite mcp.json. Disconnect
+	 * live MCP servers owned by this provider so their tools leave the session.
+	 * Re-enable does not auto-connect — startup/reload still owns that.
+	 */
+	async #disconnectProviderMcpServers(providerId: string): Promise<void> {
+		const names = [
+			...new Set(
+				this.#state.extensions
+					.filter(
+						ext =>
+							ext.kind === "mcp" &&
+							ext.source.provider === providerId &&
+							!isShadowedExtension(ext) &&
+							this.mcpManager?.getConnectionStatus(ext.name) !== "disconnected",
+					)
+					.map(ext => ext.name),
+			),
+		];
+		for (const name of names) {
+			try {
+				await applyMcpToggleRuntime({
+					name,
+					enabled: false,
+					cwd: this.cwd,
+					manager: this.mcpManager,
+					session: this.onMcpToolsChanged ? { refreshMCPTools: this.onMcpToolsChanged } : undefined,
+					onStatus: event => {
+						this.eventBus?.emit(MCP_CONNECTION_STATUS_EVENT_CHANNEL, event);
+						this.onRequestRender?.();
+					},
+				});
+			} catch (error) {
+				logger.warn("Failed to disconnect MCP server after provider disable", {
+					name,
+					providerId,
+					error: String(error),
+				});
+			}
+		}
+		await this.#refreshFromState();
 	}
 
 	#handleExtensionToggle(extensionId: string, enabled: boolean): void {
