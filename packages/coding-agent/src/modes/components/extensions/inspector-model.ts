@@ -9,6 +9,7 @@ import * as path from "node:path";
 import { arkToWireSchema, isArkSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { normalizePathForComparison, parseFrontmatter } from "@oh-my-pi/pi-utils";
 import { parseRuleConditionAndScope } from "../../../capability/rule";
+import { slashCommandFrontmatterDisplay } from "../../../capability/slash-command";
 import { sanitizeDisplayField, sanitizeDisplayLine, sanitizeDisplayText } from "./display-text";
 import { type Extension, type ExtensionState, isShadowedExtension } from "./types";
 
@@ -96,15 +97,12 @@ export function commandPreview(content: string | undefined): CommandPreview {
 		return { body: "", usesArguments: false };
 	}
 	const { frontmatter, body } = parseFrontmatter(content, { source: "slash-command" });
-	const description = typeof frontmatter.description === "string" ? frontmatter.description.trim() : "";
-	const argumentHintRaw =
-		frontmatter.argumentHint ?? ("argument-hint" in frontmatter ? frontmatter["argument-hint"] : undefined);
-	const argumentHint = typeof argumentHintRaw === "string" ? argumentHintRaw.trim() : "";
+	const display = slashCommandFrontmatterDisplay(frontmatter);
 	const text = body.length > 0 ? body : content;
 	return {
-		description: description.length > 0 ? sanitizeDisplayField(description) : undefined,
+		description: sanitizeDisplayField(display.description),
 		body: sanitizeDisplayText(text),
-		argumentHint: argumentHint.length > 0 ? sanitizeDisplayField(argumentHint) : undefined,
+		argumentHint: sanitizeDisplayField(display.argumentHint),
 		usesArguments: /\$ARGUMENTS\b/.test(text),
 	};
 }
@@ -401,10 +399,11 @@ export function commandInspectorData(ext: Extension): {
 	runtimeDetail?: string;
 } {
 	const raw = asRecord(ext.raw) ?? {};
-	const preview = commandPreview(stringField(raw, "content"));
+	const preview = commandPreview(typeof raw.content === "string" ? raw.content : undefined);
 	return {
 		...preview,
-		description: preview.description ?? sanitizeDisplayField(ext.description),
+		description: stringField(raw, "description") ?? preview.description ?? sanitizeDisplayField(ext.description),
+		argumentHint: stringField(raw, "argumentHint") ?? stringField(raw, "argument-hint") ?? preview.argumentHint,
 		runtimeDetail: ext.trigger ?? `/${sanitizeDisplayText(ext.name)}`,
 	};
 }

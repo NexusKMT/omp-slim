@@ -226,7 +226,10 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[]): P
 	try {
 		const commands = await loadCapability<SlashCommand>("slash-commands", loadOpts);
 		addItems(commands.all, "slash-command", {
-			getDescription: c => commandPreview(c.content).description,
+			getDescription: c => {
+				const preserved = typeof c.description === "string" ? c.description.trim() : "";
+				return preserved.length > 0 ? preserved : commandPreview(c.content).description;
+			},
 			getTrigger: c => `/${c.name}`,
 		});
 	} catch (error) {

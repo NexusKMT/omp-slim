@@ -152,7 +152,6 @@
 - `/extensions` uses one inspector grammar across kinds (identity → enablement/runtime → description → origin → kind surface → contents → config). Tools join live session schemas, rules show apply-when plus body, skills show discovery semantics plus instruction preview, and slash commands parse frontmatter description/`$ARGUMENTS` instead of dumping the raw markdown file.
 - Truncated `/extensions` inspector sections (`… N more`) expand in place with Ctrl+O (the existing `app.tools.expand` binding). Long inspector lines wrap instead of ellipsizing, the inspector leaves a scrollbar gutter, and truncated previews fill leftover viewport height while reserving the hint row. Custom-tool factories that export several tools from one file stay grouped (e.g. `systemd.ts` → `systemd_inspect`/`systemd_control`/`systemd_author`); args stay collapsed until Ctrl+O, and the file's leading JSDoc is the bundle description. List hints show `hidden` for hidden tools/skills, omit default arg counts / `discoverable` / `listed`, and label project-level items with the directory that contains `.omp` when present. Skill discovery sits under Active only when the skill is hidden. Shadowed MCP configs do not join the winner's live connection.
 
-- Added an immediately editable startup composer for plain interactive launches; drafts typed while session initialization runs transfer intact into the full UI.
 
 ### Changed
 
@@ -206,6 +205,7 @@
 - Fixed edit tool section header paths not trimming surrounding whitespace, so a header with padded brackets failed with file-not-found.
 - Fixed transcript content disappearing from terminal scrollback below a live hub-wait/todo/jobs card: the card's viewport pin froze scrollback commits at its own rows, so everything the turn streamed below it scrolled off-screen without ever entering terminal history (and was lost for good when the session exited first). A displaceable card with content below it no longer holds the commit ceiling; its rows commit as they scroll off and the card seals in place, so the next poll stacks a fresh card instead of retracting history.
 - Fixed the composer attachment chip thumbnail showing an empty box for pasted images: the paste pipeline re-encodes images as JPEG/WebP, and transmitting those bytes as Kitty PNG data made the terminal reject them (blank placeholder cells). Non-PNG attachments now convert to PNG before the thumbnail transmit, like transcript images.
+- Added an immediately editable startup composer for plain interactive launches; drafts typed while session initialization runs transfer intact into the full UI.
 - `/extensions` sanitizes untrusted MCP/tool display strings (`sanitizeText` then `replaceTabs`) before applying theme SGR, so OSC/BEL/ANSI from a server cannot leak into the TUI. List hints, origin paths, and schema `type`/`default` go through the same boundary.
 - Shadowed `/extensions` rows are informational only, including same-name MCP configs that share the winner's `mcp:<name>` id even when disablement wins display state (`enabled: false` + `_shadowed`).
 - `/extensions` joins custom tools by originating file first: a same-name builtin/MCP/SDK tool is not treated as the custom file, and a factory that also exports the file stem still lists every sibling. Project list hints accept Windows `.omp` paths.
@@ -213,6 +213,7 @@
 - `/extensions` custom-tool inspector rows now join live tools by the originating file path carried through `getAllToolInfos()`, so `git.ts` and `git_commit.ts` stay separate while a multi-export factory like `systemd.ts` still groups siblings.
 - `/extensions` Ctrl+O expand follows the selected row (`id` + path). Changing selection collapses again; a live refresh of the same row keeps the expand state.
 - `/extensions` schema `type` and `default` values that land on one inspector parameter row go through `sanitizeDisplayLine`, so a newline in either field cannot inject an extra TUI row.
+- `/extensions` keeps Codex/OpenCode slash-command frontmatter (`description`, `argumentHint` / `argument-hint`) on the capability record after discovery strips it from `content`, so the inspector and search still see those fields. Providers that leave raw frontmatter in `content` still fall back to `commandPreview`.
 
 
 ## [17.4.4] - 2026-08-22
