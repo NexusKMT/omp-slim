@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed startup crashes when temporary Git worktrees point to repository metadata that the current user cannot access.
+
 ## [18.0.0] - 2026-08-22
 
 ### Added
