@@ -48,7 +48,7 @@ export function resolveCodeMode(args: {
 	if (!active) return { active: false, directToolNames: new Set(args.enabledToolNames) };
 	const direct = new Set<string>();
 	for (const name of args.enabledToolNames) {
-		if (CODE_MODE_KEEP_TOOLS[name]) direct.add(name);
+		if (CODE_MODE_KEEP_TOOLS[name] === true) direct.add(name);
 	}
 	for (const name of args.extraDirectTools ?? []) {
 		if (args.enabledToolNames.includes(name)) direct.add(name);

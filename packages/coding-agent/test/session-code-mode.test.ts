@@ -119,6 +119,16 @@ describe("resolveCodeMode", () => {
 		});
 		expect([...r.directToolNames]).toEqual(["eval"]);
 	});
+	test("prototype-named tools do not bypass the keep-set", () => {
+		const r = resolveCodeMode({
+			provider: "openai-codex",
+			toolMode: "code_mode_only",
+			setting: "auto",
+			enabledToolNames: ["eval", "toString", "__proto__"],
+			evalTransportAvailable: true,
+		});
+		expect([...r.directToolNames]).toEqual(["eval"]);
+	});
 	test("reserved eval bridge names stay direct", () => {
 		// `callSessionTool` consumes these before the registry, so demoting a tool
 		// that shares one of those names would make it unreachable.
