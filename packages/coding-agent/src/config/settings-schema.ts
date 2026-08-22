@@ -2013,7 +2013,7 @@ export const SETTINGS_SCHEMA = {
 
 	autocompleteMaxVisible: {
 		type: "number",
-		default: 5,
+		default: 10,
 		ui: {
 			tab: "interaction",
 			group: "Input",

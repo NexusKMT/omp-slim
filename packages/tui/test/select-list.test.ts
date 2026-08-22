@@ -86,6 +86,25 @@ describe("SelectList", () => {
 		expect(list.render(40)).toEqual(["> run"]);
 	});
 
+	it("caps wrapped descriptions at maxDescriptionRows with a trailing ellipsis", () => {
+		const longDescription = Array.from({ length: 12 }, (_, i) => `chunk${i} filler words`).join(" ");
+		const items = [
+			{ value: "long", label: "long", description: longDescription },
+			{ value: "short", label: "short", description: "fits" },
+		];
+
+		const list = new SelectList(items, 10, testTheme, {
+			wrapDescription: true,
+			maxDescriptionRows: 2,
+			maxPrimaryColumnWidth: 12,
+		});
+		const rendered = list.render(60);
+
+		// One capped item (2 rows) + one single-row item.
+		expect(rendered.length).toBe(3);
+		expect(rendered[1]).toContain("…");
+	});
+
 	it("reserves one icon column so labels and descriptions align across icon and iconless rows", () => {
 		const items = [
 			{ value: "changelog", label: "changelog", icon: "★", description: "Show changelog entries" },

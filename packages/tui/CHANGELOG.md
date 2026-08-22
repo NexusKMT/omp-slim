@@ -5,9 +5,13 @@
 ### Added
 
 - Added icon support to autocomplete and select lists, with customizable theming
+- `SelectList` layouts accept `maxDescriptionRows` to cap wrapped descriptions with a trailing ellipsis
+- `CombinedAutocompleteProvider` accepts a `commandUsage` callback that ranks equal-score slash matches by usage frequency
+- `Editor.viewportRowsProvider` lets hosts clamp the autocomplete dropdown to the live terminal height
 
 ### Changed
 
+- Increased default autocomplete dropdown height from 5 to 10 items
 - Changed the test `VirtualTerminal` engine from ghostty-web to `kitty-vt-wasm` (kitty's real screen.c/vt-parser.c). Retires the ghostty-web 0.4 crash workarounds (combining-mark input stripping, event-log replay/compaction, allocator-exhaustion engine rotation, full-clear ED3 recreate), gives the render-stress oracles exact default-color detection from typed cell snapshots, and lets full-clear/ED3 repaints exercise the engine natively instead of being masked by an engine recreate.
 
 ## [17.4.4] - 2026-08-22

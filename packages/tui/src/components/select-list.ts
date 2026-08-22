@@ -68,6 +68,11 @@ export interface SelectListLayoutOptions {
 	 * wrap unevenly.
 	 */
 	wrapDescription?: boolean;
+	/**
+	 * Cap wrapped descriptions at this many visual rows; the last kept row is
+	 * ellipsized. Only meaningful with `wrapDescription`.
+	 */
+	maxDescriptionRows?: number;
 }
 
 type SelectItemLayout =
@@ -310,7 +315,7 @@ export class SelectList implements Component, MouseRoutable {
 		if (layout.kind === "description") {
 			const { descriptionSingleLine, descriptionStart, remainingWidth } = layout;
 			if (this.layout.wrapDescription) {
-				const wrapped = wrapTextWithAnsi(descriptionSingleLine, remainingWidth);
+				const wrapped = this.#wrapDescription(descriptionSingleLine, remainingWidth);
 				if (wrapped.length === 0) wrapped.push("");
 				const indent = padding(descriptionStart);
 				const first = wrapped[0] ?? "";
@@ -346,8 +351,17 @@ export class SelectList implements Component, MouseRoutable {
 		// keep the cheap path uniform for items outside the visible window.
 		const layout = this.#computeItemLayout(item, false, width, primaryColumnWidth, iconColumnWidth);
 		if (layout.kind !== "description") return 1;
-		const wrapped = wrapTextWithAnsi(layout.descriptionSingleLine, layout.remainingWidth);
+		const wrapped = this.#wrapDescription(layout.descriptionSingleLine, layout.remainingWidth);
 		return Math.max(1, wrapped.length);
+	}
+	/** Wrap a description, capping it at `maxDescriptionRows` with a trailing ellipsis. */
+	#wrapDescription(description: string, width: number): string[] {
+		const wrapped = wrapTextWithAnsi(description, width);
+		const cap = this.layout.maxDescriptionRows;
+		if (cap === undefined || cap < 1 || wrapped.length <= cap) return wrapped;
+		const kept = wrapped.slice(0, cap);
+		kept[cap - 1] = truncateToWidth(`${kept[cap - 1]} …`, width, Ellipsis.Unicode);
+		return kept;
 	}
 
 	/**

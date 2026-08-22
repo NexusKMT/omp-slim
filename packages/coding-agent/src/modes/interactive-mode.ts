@@ -841,6 +841,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.editor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
 		this.editor.setImeSafeCursorLayout(settings.get("tui.imeSafeCursor"));
 		this.editor.setAutocompleteMaxVisible(settings.get("autocompleteMaxVisible"));
+		this.editor.viewportRowsProvider = () => this.ui.terminal.rows;
 		this.editor.onAutocompleteCancel = () => {
 			this.ui.requestRender(true);
 		};
@@ -4441,6 +4442,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		nextEditor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
 		nextEditor.setImeSafeCursorLayout(this.settings.get("tui.imeSafeCursor"));
 		nextEditor.setAutocompleteMaxVisible(this.settings.get("autocompleteMaxVisible"));
+		nextEditor.viewportRowsProvider = () => this.ui.terminal.rows;
 		nextEditor.onAutocompleteCancel = () => {
 			this.ui.requestRender(true);
 		};

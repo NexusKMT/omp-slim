@@ -26,7 +26,7 @@ import { buildSkillCommandPrompt, isKnownSkillCommand } from "../../modes/skill-
 import type { InteractiveModeContext } from "../../modes/types";
 import manualContinuePrompt from "../../prompts/system/manual-continue.md" with { type: "text" };
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
-import { executeBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
+import { executeBuiltinSlashCommand, lookupBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
 import { parseSlashCommand } from "../../slash-commands/helpers/parse";
 import { isTinyTitleLocalModelKey } from "../../tiny/models";
 import { tinyTitleClient } from "../../tiny/title-client";
@@ -39,6 +39,7 @@ import {
 	readMacFileUrlsFromClipboard,
 	readTextFromClipboard,
 } from "../../utils/clipboard";
+import { getSlashCommandUsage, loadSlashCommandUsage, recordSlashCommandUsage } from "../../utils/command-usage";
 import { EnhancedPasteController } from "../../utils/enhanced-paste";
 import { getEditorCommand, openInEditor } from "../../utils/external-editor";
 import { ensureSupportedImageInput, ImageInputTooLargeError, loadImageInput } from "../../utils/image-loading";
@@ -786,6 +787,7 @@ export class InputController {
 
 			// Handle built-in slash commands
 			if (text) {
+				this.#recordSlashCommandUsage(text);
 				const input =
 					(inputImages?.length ?? 0) > 0 || (inputImageLinks?.length ?? 0) > 0
 						? { images: inputImages, imageLinks: inputImageLinks }
@@ -1906,10 +1908,38 @@ export class InputController {
 		}
 	}
 
+	/**
+	 * Record a usage hit for a submitted known slash command so autocomplete
+	 * can rank frequent commands first. Builtin aliases canonicalize to the
+	 * primary name; skill/custom/file/template commands record their full
+	 * first token (which may contain `:`).
+	 */
+	#recordSlashCommandUsage(text: string): void {
+		if (!text.startsWith("/")) return;
+		const token = text.slice(1).split(/\s+/, 1)[0] ?? "";
+		if (!token) return;
+		const session = this.ctx.session;
+		const knownToken =
+			this.ctx.skillCommands.has(token) ||
+			this.ctx.fileSlashCommands.has(token) ||
+			session.extensionRunner?.getCommand(token) !== undefined ||
+			session.customCommands.some(loaded => loaded.command.name === token) ||
+			session.promptTemplates.some(template => template.name === token);
+		if (knownToken) {
+			recordSlashCommandUsage(token);
+			return;
+		}
+		const parsedName = parseSlashCommand(text)?.name;
+		const builtin = parsedName ? lookupBuiltinSlashCommand(parsedName) : undefined;
+		if (builtin) recordSlashCommandUsage(builtin.name);
+	}
+
 	createAutocompleteProvider(commands: SlashCommand[], basePath: string): AutocompleteProvider {
+		void loadSlashCommandUsage();
 		return createPromptActionAutocompleteProvider({
 			commands,
 			basePath,
+			commandUsage: getSlashCommandUsage,
 			keybindings: this.ctx.keybindings,
 			copyCurrentLine: () => this.handleCopyCurrentLine(),
 			copyPrompt: () => this.handleCopyPrompt(),

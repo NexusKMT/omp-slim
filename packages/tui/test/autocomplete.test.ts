@@ -823,6 +823,30 @@ describe("trySyncSlashCompletion", () => {
 		expect(result!.items.map(i => i.value)).toEqual(["model"]);
 	});
 
+	it("ranks equal-score prefix matches by usage frequency, keeping registry order for unused ones", async () => {
+		const commands = [
+			{ name: "setup", description: "Open provider setup" },
+			{ name: "settings", description: "Open settings menu" },
+			{ name: "session", description: "Session management" },
+		];
+		const usage: Record<string, number> = { settings: 4 };
+
+		const ranked = new CombinedAutocompleteProvider(commands, "/tmp", {
+			commandUsage: name => usage[name] ?? 0,
+		});
+		const result = await ranked.getSuggestions(["/se"], 0, 3);
+		expect(result?.items.map(i => i.value)).toEqual(["settings", "setup", "session"]);
+
+		// Exact text matches still outrank usage: /setup beats a frequent /settings.
+		const exact = await ranked.getSuggestions(["/setup"], 0, 6);
+		expect(exact?.items[0]?.value).toBe("setup");
+
+		// Without usage data, registry order is preserved.
+		const unranked = new CombinedAutocompleteProvider(commands, "/tmp");
+		const plain = await unranked.getSuggestions(["/se"], 0, 3);
+		expect(plain?.items.map(i => i.value)).toEqual(["setup", "settings", "session"]);
+	});
+
 	it("carries command icons into name and alias suggestion rows", async () => {
 		const provider = new CombinedAutocompleteProvider(
 			[

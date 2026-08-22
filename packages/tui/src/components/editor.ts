@@ -46,6 +46,7 @@ const SLASH_COMMAND_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 12,
 	maxPrimaryColumnWidth: 32,
 	wrapDescription: true,
+	maxDescriptionRows: 2,
 	overflowSearch: false,
 };
 
@@ -477,8 +478,10 @@ export class Editor implements Component, Focusable {
 	#autocompleteState: "regular" | "force" | null = null;
 	#autocompletePrefix: string = "";
 	#autocompleteRequestId: number = 0;
-	#autocompleteMaxVisible: number = 5;
+	#autocompleteMaxVisible: number = 10;
 	onAutocompleteUpdate?: () => void;
+	/** Terminal height source for clamping the autocomplete dropdown. Hosts wire this to their Terminal's rows. */
+	viewportRowsProvider?: () => number;
 
 	// Paste tracking for large pastes
 	#pastes: Map<number, string> = new Map();
@@ -658,7 +661,7 @@ export class Editor implements Component, Focusable {
 	}
 
 	setAutocompleteMaxVisible(maxVisible: number): void {
-		const newMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
+		const newMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 10;
 		if (this.#autocompleteMaxVisible !== newMaxVisible) {
 			this.#autocompleteMaxVisible = newMaxVisible;
 			if (this.#autocompleteState !== null) {
@@ -1190,6 +1193,12 @@ export class Editor implements Component, Focusable {
 
 		// Add autocomplete list if active
 		if (this.#autocompleteState && this.#autocompleteList) {
+			// Clamp the dropdown to the terminal viewport: the editor rows already
+			// rendered above plus a small reserve must stay visible.
+			const viewportRows = this.viewportRowsProvider?.() || process.stdout.rows || Number(Bun.env.LINES) || 24;
+			this.#autocompleteList.setMaxVisible(
+				Math.max(3, Math.min(this.#autocompleteMaxVisible, viewportRows - result.length - 2)),
+			);
 			const autocompleteResult = this.#autocompleteList.render(width);
 			result.push(...autocompleteResult);
 		}
