@@ -416,6 +416,14 @@ pub fn highlight_code(
 }
 
 fn highlight_code_impl(code: &str, lang: Option<&str>, colors: &HighlightColors) -> String {
+	let Some(lang) = lang else {
+		return code.to_owned();
+	};
+	let ss = get_syntax_set();
+	let Some(syntax) = find_syntax(ss, lang) else {
+		return code.to_owned();
+	};
+
 	let inserted = colors.inserted.as_deref().unwrap_or("");
 	let deleted = colors.deleted.as_deref().unwrap_or("");
 
@@ -433,15 +441,6 @@ fn highlight_code_impl(code: &str, lang: Option<&str>, colors: &HighlightColors)
 		inserted,             // 9
 		deleted,              // 10
 	];
-
-	let ss = get_syntax_set();
-
-	// Find syntax for the language
-	let syntax = match lang {
-		Some(l) => find_syntax(ss, l),
-		None => None,
-	}
-	.unwrap_or_else(|| ss.find_syntax_plain_text());
 
 	let mut parse_state = ParseState::new(syntax);
 	let mut scope_stack = ScopeStack::new();

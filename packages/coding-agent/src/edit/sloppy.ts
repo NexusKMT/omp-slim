@@ -527,13 +527,17 @@ function recoverBracketPairs(lines: string[], content: string): string[] | undef
 function hasInlineSelection(pattern: string): boolean {
 	let selected = false;
 	for (let index = 0; index < pattern.length; ) {
-		const codePoint = pattern.codePointAt(index);
-		if (codePoint === undefined) break;
-		const character = String.fromCodePoint(codePoint);
-		if (character === SELECT_OPEN) selected = true;
-		else if (character === SELECT_CLOSE) selected = false;
-		else if (character === SELECT_DIVIDER && selected) return true;
-		index += character.length;
+		if (pattern.startsWith(SELECT_OPEN, index)) {
+			selected = true;
+			index += SELECT_OPEN.length;
+		} else if (pattern.startsWith(SELECT_CLOSE, index)) {
+			selected = false;
+			index += SELECT_CLOSE.length;
+		} else if (selected && pattern.startsWith(SELECT_DIVIDER, index)) {
+			return true;
+		} else {
+			index++;
+		}
 	}
 	return false;
 }
@@ -1185,10 +1189,19 @@ function normalizeText(source: string): NormalizedText {
 	for (let index = 0; index < source.length; ) {
 		const codePoint = source.codePointAt(index);
 		if (codePoint === undefined) break;
-		const raw = String.fromCodePoint(codePoint);
-		const next = index + raw.length;
-		for (const character of normalizeUnicode(raw)) {
-			if (/\s/u.test(character)) continue;
+		if (codePoint <= 0x7f) {
+			const next = index + 1;
+			if (!((codePoint >= 0x09 && codePoint <= 0x0d) || codePoint === 0x20)) {
+				text += source[index];
+				starts.push(index);
+				ends.push(next);
+			}
+			index = next;
+			continue;
+		}
+
+		const next = index + (codePoint > 0xffff ? 2 : 1);
+		for (const character of normalizeUnicode(source.slice(index, next))) {
 			text += character;
 			// One entry per UTF-16 code unit: occurrence offsets index `text` by
 			// code unit, so astral characters must occupy two mapping slots.
@@ -1207,14 +1220,7 @@ function patternGapAt(source: string, offset: number): string | undefined {
 }
 
 function patternContainsGap(source: string): boolean {
-	for (let index = 0; index < source.length; ) {
-		const marker = patternGapAt(source, index);
-		if (marker) return true;
-		const codePoint = source.codePointAt(index);
-		if (codePoint === undefined) break;
-		index += String.fromCodePoint(codePoint).length;
-	}
-	return false;
+	return source.includes(GAP);
 }
 
 function parsePattern(pattern: string, operationNumber: number): ParsedPattern {
@@ -1388,34 +1394,54 @@ function exactOccurrences(content: string, pattern: string): Occurrence[] {
 	return occurrences;
 }
 
+const IDENTIFIER_RUN_RE = /[\p{L}\p{N}_$]+/gu;
+
 function operatorSignature(text: string): string {
-	return [...text].filter(character => !/[\p{L}\p{N}_$]/u.test(character)).join("");
+	return text.replace(IDENTIFIER_RUN_RE, "");
 }
 
 function differsByOnePunctuationInsertion(left: string, right: string): boolean {
-	const leftCharacters = [...left];
-	const rightCharacters = [...right];
-	if (Math.abs(leftCharacters.length - rightCharacters.length) !== 1) return false;
-	const shorter = leftCharacters.length < rightCharacters.length ? leftCharacters : rightCharacters;
-	const longer = leftCharacters.length < rightCharacters.length ? rightCharacters : leftCharacters;
+	let leftLength = 0;
+	for (let index = 0; index < left.length; leftLength++) {
+		const codePoint = left.codePointAt(index);
+		if (codePoint === undefined) break;
+		index += codePoint > 0xffff ? 2 : 1;
+	}
+	let rightLength = 0;
+	for (let index = 0; index < right.length; rightLength++) {
+		const codePoint = right.codePointAt(index);
+		if (codePoint === undefined) break;
+		index += codePoint > 0xffff ? 2 : 1;
+	}
+	if (Math.abs(leftLength - rightLength) !== 1) return false;
+
+	const shorter = leftLength < rightLength ? left : right;
+	const longer = leftLength < rightLength ? right : left;
 	let shortIndex = 0;
-	let inserted: string | undefined;
-	for (let longIndex = 0; longIndex < longer.length; longIndex++) {
-		if (shorter[shortIndex] === longer[longIndex]) {
-			shortIndex++;
+	let longIndex = 0;
+	let inserted: number | undefined;
+	while (longIndex < longer.length) {
+		const longCodePoint = longer.codePointAt(longIndex);
+		if (longCodePoint === undefined) break;
+		const shortCodePoint = shorter.codePointAt(shortIndex);
+		if (shortCodePoint === longCodePoint) {
+			shortIndex += shortCodePoint > 0xffff ? 2 : 1;
+			longIndex += longCodePoint > 0xffff ? 2 : 1;
 			continue;
 		}
 		if (inserted !== undefined) return false;
-		inserted = longer[longIndex];
+		inserted = longCodePoint;
+		longIndex += longCodePoint > 0xffff ? 2 : 1;
 	}
-	inserted ??= longer.at(-1);
-	return inserted !== undefined && !/[{}()[\]]/u.test(inserted);
-}
-
-function punctuationCompatible(pattern: string, candidate: string, allowSingleInsertion: boolean): boolean {
-	const expected = operatorSignature(pattern);
-	const actual = operatorSignature(candidate);
-	return expected === actual || (allowSingleInsertion && differsByOnePunctuationInsertion(expected, actual));
+	return (
+		inserted !== undefined &&
+		inserted !== 0x7b &&
+		inserted !== 0x7d &&
+		inserted !== 0x28 &&
+		inserted !== 0x29 &&
+		inserted !== 0x5b &&
+		inserted !== 0x5d
+	);
 }
 
 function fuzzyOccurrences(content: string, pattern: string, allowSinglePunctuationInsertion = false): Occurrence[] {
@@ -1449,9 +1475,12 @@ function fuzzyOccurrences(content: string, pattern: string, allowSinglePunctuati
 		for (let length = Math.max(1, pattern.length - limit); length <= pattern.length + limit; length++) {
 			if (start + length > content.length) continue;
 			const candidateText = content.slice(start, start + length);
+			const candidateSignature = operatorSignature(candidateText);
+			const punctuationEdits = candidateSignature === structural ? 0 : 1;
 			if (
-				operatorSignature(candidateText) !== structural &&
-				(!allowSinglePunctuationInsertion || !punctuationCompatible(pattern, candidateText, true))
+				punctuationEdits !== 0 &&
+				(!allowSinglePunctuationInsertion ||
+					!differsByOnePunctuationInsertion(structural, candidateSignature))
 			) {
 				continue;
 			}
@@ -1461,7 +1490,7 @@ function fuzzyOccurrences(content: string, pattern: string, allowSinglePunctuati
 				start,
 				end: start + length,
 				distance,
-				punctuationEdits: operatorSignature(candidateText) === structural ? 0 : 1,
+				punctuationEdits,
 			};
 		}
 		if (best) raw.push(best);
@@ -2829,16 +2858,15 @@ function dropSelectionEchoes(patternText: string): string | undefined {
 			runStart = index;
 			continue;
 		}
-		const codePoint = patternText.codePointAt(index);
-		if (codePoint === undefined) break;
-		const character = String.fromCodePoint(codePoint);
-		if (character !== SELECT_OPEN) {
-			index += character.length;
+		if (!patternText.startsWith(SELECT_OPEN, index)) {
+			const codePoint = patternText.codePointAt(index);
+			if (codePoint === undefined) break;
+			index += codePoint > 0xffff ? 2 : 1;
 			continue;
 		}
-		const close = patternText.indexOf(SELECT_CLOSE, index + character.length);
+		const close = patternText.indexOf(SELECT_CLOSE, index + SELECT_OPEN.length);
 		if (close === -1) return undefined;
-		const selected = patternText.slice(index + character.length, close);
+		const selected = patternText.slice(index + SELECT_OPEN.length, close);
 		const run = patternText.slice(runStart, index);
 		const runNormalized = normalizeText(run);
 		const oldNormalized = normalizeText(selected).text;

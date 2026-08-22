@@ -57,6 +57,7 @@ const highlightCache = new LRUCache<string, string>({ max: HIGHLIGHT_CACHE_MAX }
 let highlightCacheTheme: Theme | undefined;
 
 function highlightCached(code: string, validLang: string | undefined, highlightTheme: Theme): string | null {
+	if (validLang === undefined) return code;
 	if (highlightCacheTheme !== highlightTheme) {
 		highlightCache.clear();
 		highlightCacheTheme = highlightTheme;

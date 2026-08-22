@@ -2988,6 +2988,18 @@ export class TUI extends Container {
 		}
 	}
 
+	#runScheduledRender = (): void => {
+		this.#renderTimer = undefined;
+		if (this.#stopped || !this.#renderRequested) {
+			return;
+		}
+		this.#renderRequested = false;
+		this.#executeRender();
+		if (this.#renderRequested) {
+			this.#scheduleRender();
+		}
+	};
+
 	#scheduleRender(): void {
 		if (this.#stopped || this.#renderTimer || !this.#renderRequested) {
 			return;
@@ -3012,17 +3024,7 @@ export class TUI extends Container {
 		const adaptiveDelay = Math.max(0, adaptiveFloor - elapsed);
 		const inputGraceDelay = Math.max(0, this.#inputRenderGraceUntilMs - now);
 		const delay = Math.max(cadenceDelay, adaptiveDelay, inputGraceDelay);
-		this.#renderTimer = this.#renderScheduler.scheduleRender(() => {
-			this.#renderTimer = undefined;
-			if (this.#stopped || !this.#renderRequested) {
-				return;
-			}
-			this.#renderRequested = false;
-			this.#executeRender();
-			if (this.#renderRequested) {
-				this.#scheduleRender();
-			}
-		}, delay);
+		this.#renderTimer = this.#renderScheduler.scheduleRender(this.#runScheduledRender, delay);
 	}
 
 	/**

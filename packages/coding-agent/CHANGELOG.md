@@ -19,9 +19,6 @@
 ### Changed
 
 - Switched fallback edit mode from replace to sloppy for models that do not support hashline
-### Fixed
-
-- Sloppy edit `＋` inserts before an anchor line no longer double their typed indentation or flatten the anchor; the prompt now prescribes exact-depth indentation for all authored lines with tab-indented examples.
 
 ### Removed
 
@@ -30,6 +27,10 @@
 
 ### Fixed
 
+- Fixed session teardown occasionally losing pending input drafts during shutdown
+- Fixed streaming edit failures caused by trailing partial lines
+- Sloppy edit `＋` inserts before an anchor line no longer double their typed indentation or flatten the anchor; the prompt now prescribes exact-depth indentation for all authored lines with tab-indented examples.
+- Session restore no longer re-runs the edit-matching engine for every historical edit in the transcript; large sessions with many edits resume several times faster.
 - Fixed image requests to Kimi Code / Moonshot failing with 400 `unsupported image url`: their catalog api is openai-completions so the image URL mirror gate wrongly admitted them; Moonshot-native hosts now always receive inline base64 images.
 - Fixed Read failing with `unable to open database file` for cleanly closed WAL-mode SQLite databases without `-wal`/`-shm` sidecars.
 - Fixed collapsed edit results with long wrapped diff lines growing beyond their rendered-row budget and corrupting native Windows terminal transcript layout ([#9302](https://github.com/can1357/oh-my-pi/issues/9302)).
