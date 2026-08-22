@@ -20,9 +20,9 @@
  */
 import { describe, expect, it } from "bun:test";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
-import type { Context, Model } from "@oh-my-pi/pi-ai/types";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import type { Context } from "@oh-my-pi/pi-ai/types";
 import { buildOpenAICompat } from "@oh-my-pi/pi-catalog/compat/openai";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import type { FetchImpl, ModelSpec } from "@oh-my-pi/pi-catalog/types";
 
 function veniceQwenSpec(overrides: Partial<ModelSpec<"openai-completions">> = {}): ModelSpec<"openai-completions"> {
@@ -72,8 +72,11 @@ describe("issue #9345 — Venice qwen thinking format", () => {
 	});
 
 	it("emits reasoning_effort — never top-level enable_thinking — on the wire", async () => {
-		const model = buildModel(veniceQwenSpec());
+		const model = getBundledModel<"openai-completions">("venice", "qwen3-6-35b-a3b");
+		expect(model.provider).toBe("venice");
+		expect(model.baseUrl).toBe("https://api.venice.ai/api/v1");
 		expect(model.compat.thinkingFormat).toBe("openai");
+		expect(model.compat.reasoningDisableMode).toBe("lowest-effort");
 
 		const captured: { body: string | null } = { body: null };
 		const fetchMock: FetchImpl = async (_input, init) => {
@@ -84,7 +87,7 @@ describe("issue #9345 — Venice qwen thinking format", () => {
 		const context: Context = {
 			messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
 		};
-		const stream = streamOpenAICompletions(model as Model<"openai-completions">, context, {
+		const stream = streamOpenAICompletions(model, context, {
 			apiKey: "vn-test",
 			reasoning: "high",
 			fetch: fetchMock,
