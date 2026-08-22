@@ -1,5 +1,6 @@
 import { fetchAntigravityDiscoveryModels } from "../discovery/antigravity";
 import { fetchGeminiModels } from "../discovery/gemini";
+import { fetchGeminiCliQuotaModels } from "../discovery/gemini-cli";
 import { isGeminiModelId } from "../identity/family";
 import type { ModelManagerOptions } from "../model-manager";
 import type { FetchImpl } from "../types";
@@ -87,13 +88,18 @@ export function googleGeminiCliModelManagerOptions(
 		...(token
 			? {
 					fetchDynamicModels: async () => {
+						const fetcher = toDiscoveryFetch(config?.fetch);
 						const models = await fetchAntigravityDiscoveryModels({
 							token,
-							fetcher: toDiscoveryFetch(config?.fetch),
+							fetcher,
 							collapseTable: GEMINI_CLI_VARIANT_COLLAPSE_TABLE,
 						});
+						// Antigravity's fetchAvailableModels is unreachable for
+						// credentials without Antigravity entitlement (Code Assist
+						// Standard returns HTTP 403). Fall back to the account's own
+						// retrieveUserQuota list on Cloud Code Assist.
 						if (models === null) {
-							return null;
+							return fetchGeminiCliQuotaModels({ token, endpoint, fetcher });
 						}
 						return models
 							.filter(m => isGeminiModelId(m.id))
