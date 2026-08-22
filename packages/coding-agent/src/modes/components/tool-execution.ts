@@ -14,7 +14,7 @@ import {
 	Text,
 	type TUI,
 } from "@oh-my-pi/pi-tui";
-import { getProjectDir, logger, sanitizeText } from "@oh-my-pi/pi-utils";
+import { getProjectDir, isRecord, logger, sanitizeText } from "@oh-my-pi/pi-utils";
 import { EDIT_MODE_STRATEGIES, type EditMode, type PerFileDiffPreview } from "../../edit";
 import type { Theme } from "../../modes/theme/theme";
 import { getThemeEpoch, theme } from "../../modes/theme/theme";
@@ -23,7 +23,7 @@ import { formatDefaultToolExecution } from "../../tools/default-renderer";
 import { EVAL_DEFAULT_PREVIEW_LINES } from "../../tools/eval";
 import { isWaitingPollDetails } from "../../tools/hub";
 import { formatStatusIcon, replaceTabs, resolveImageOptions } from "../../tools/render-utils";
-import { type FirstResultViewportRepaint, toolRenderers } from "../../tools/renderers";
+import { type FirstResultViewportRepaint, type ToolRenderer, toolRenderers } from "../../tools/renderers";
 import { TODO_STRIKE_TOTAL_FRAMES, type TodoToolDetails } from "../../tools/todo";
 import type { XdevState } from "../../tools/xdev";
 import { isFramedBlockComponent, markFramedBlockComponent, renderStatusLine, WidthAwareText } from "../../tui";
@@ -73,6 +73,21 @@ function isTodoToolDetails(details: unknown): details is TodoToolDetails {
 	);
 }
 
+interface ToolImageBlock {
+	data?: string;
+	mimeType?: string;
+}
+
+function imageBlocksFromDetails(details: unknown): ToolImageBlock[] {
+	if (!isRecord(details) || !Array.isArray(details.images)) return [];
+	return details.images.filter(
+		(image): image is ToolImageBlock =>
+			isRecord(image) &&
+			(image.data === undefined || typeof image.data === "string") &&
+			(image.mimeType === undefined || typeof image.mimeType === "string"),
+	);
+}
+
 function displaceableToolName(
 	toolName: string,
 	result: { details?: unknown; isError?: boolean },
@@ -82,6 +97,10 @@ function displaceableToolName(
 	if (toolName === "hub" && isWaitingPollDetails(result.details)) return "hub";
 	if (toolName === "todo" && !isPartial && isTodoToolDetails(result.details)) return "todo";
 	return undefined;
+}
+
+function isHubWaitArgs(args: unknown): boolean {
+	return isRecord(args) && args.op === "wait";
 }
 
 function stabilizeStreamingPreviews(previews: PerFileDiffPreview[]): PerFileDiffPreview[] {
@@ -226,6 +245,8 @@ export interface ToolExecutionOptions {
 	/** Session-persistent edit clipboard register, forked per preview frame. */
 	clipboard?: Clipboard;
 	showImages?: boolean; // default: true (only used if terminal supports images)
+	/** Allow the name-keyed renderer registry only when the active tool is the built-in implementation. */
+	useBuiltInRenderer?: boolean;
 	editFuzzyThreshold?: number;
 	editAllowFuzzy?: boolean;
 	/** Live-region probe used to settle detached task progress once the block
@@ -267,6 +288,52 @@ export function sharedSpinnerFrame(frameCount: number, now: number = performance
 	return frameCount > 0 ? Math.floor(now / SPINNER_GLYPH_ADVANCE_MS) % frameCount : 0;
 }
 
+/** Live tool blocks currently driving a spinner. A single shared ticker (below)
+ * advances and repaints every registered block per glyph step, so N concurrent
+ * live/streaming blocks — e.g. parallel `task` subagents — cost one 80ms timer
+ * and one coalesced render frame per tick instead of N unsynchronized timers
+ * each independently waking the render scheduler (issue #8731). */
+const liveSpinnerBlocks = new Set<ToolExecutionComponent>();
+let sharedSpinnerTimer: NodeJS.Timeout | undefined;
+
+/** Arm the shared spinner ticker if it is not already running. */
+function ensureSharedSpinnerTicker(): void {
+	if (sharedSpinnerTimer) return;
+	sharedSpinnerTimer = setInterval(() => {
+		const frame = sharedSpinnerFrame(theme.spinnerFrames.length);
+		// Deleting the current block mid-iteration (freeze path) is safe on a Set.
+		for (const block of liveSpinnerBlocks) block.tickSpinner(frame);
+	}, SPINNER_RENDER_INTERVAL_MS);
+}
+
+/** Register a live block with the shared ticker, starting it on first use. */
+function registerSpinnerBlock(block: ToolExecutionComponent): void {
+	liveSpinnerBlocks.add(block);
+	ensureSharedSpinnerTicker();
+}
+
+/** Drop a block; stop the ticker once no live block remains. */
+function unregisterSpinnerBlock(block: ToolExecutionComponent): void {
+	if (!liveSpinnerBlocks.delete(block)) return;
+	if (liveSpinnerBlocks.size === 0 && sharedSpinnerTimer) {
+		clearInterval(sharedSpinnerTimer);
+		sharedSpinnerTimer = undefined;
+	}
+}
+
+/** Stop the shared spinner ticker and drop every registered live block.
+ *  Called on interactive-mode teardown so a stray live block cannot keep the
+ *  process-wide 80ms interval alive past shutdown (lingering event-loop
+ *  handles pin the process; cf. `postmortem.quit`). Test files that assert on
+ *  ticker arming also use this to start from a clean slate. */
+export function stopSharedSpinnerTicker(): void {
+	liveSpinnerBlocks.clear();
+	if (sharedSpinnerTimer) {
+		clearInterval(sharedSpinnerTimer);
+		sharedSpinnerTimer = undefined;
+	}
+}
+
 // Stable per-instance counter so each tool execution's inline images get a
 // graphics id that survives child re-creation (the image budget keys off it).
 let toolExecutionInstanceSeq = 0;
@@ -296,6 +363,12 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	#clipboard?: Clipboard;
 	#isPartial = true;
 	#resultVersion = 0;
+	// Post-finalize mutation counter (see FinalizableBlock.getTranscriptBlockVersion):
+	// a tool block can keep changing after isTranscriptBlockFinalized() first
+	// returns true — an async task's terminal result settlement, seal(), or an
+	// expansion toggle — and the transcript's width-epoch resolution and
+	// committed-render bypass must observe those mutations.
+	#blockVersion = 0;
 	#lastDisplayKey: string | undefined;
 	// Bumped whenever a render input that #rebuildDisplay consumes but the memo
 	// key cannot cheaply hash changes: streamed call args, the async edit-diff
@@ -312,6 +385,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	// forcing the common image-free result to re-shape on every resize tick.
 	#renderedImageCount = 0;
 	#tool?: AgentTool;
+	#renderer?: ToolRenderer;
 	#ui: ToolExecutionUi;
 	#cwd: string;
 	#result?: {
@@ -334,7 +408,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	#convertedImages: Map<number, { data: string; mimeType: string }> = new Map();
 	// Spinner animation for partial task results
 	#spinnerFrame?: number;
-	#spinnerInterval?: NodeJS.Timeout;
+	#spinnerActive = false;
 	// Todo write completion strikethrough reveal animation
 	#todoStrikeInterval?: NodeJS.Timeout;
 	// Track if args are still being streamed (for edit/write spinner)
@@ -398,6 +472,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		super();
 		this.#toolName = toolName;
 		this.#toolLabel = tool?.label ?? toolName;
+		this.#renderer = options.useBuiltInRenderer === false ? undefined : toolRenderers[toolName];
 		this.#showImages = options.showImages ?? true;
 		this.#editFuzzyThreshold = options.editFuzzyThreshold;
 		this.#editAllowFuzzy = options.editAllowFuzzy;
@@ -418,10 +493,9 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		this.#contentBox = new Box(0, 1);
 		this.#contentText = new WidthAwareText(contentWidth => this.#renderDefaultCard(contentWidth), 1, 1);
 
-		// Use Box for custom tools or built-in tools that have renderers
-		const hasRenderer = toolName in toolRenderers;
+		// Use Box for custom tools or built-in tools with rich renderers.
 		const hasCustomRenderer = !!(tool?.renderCall || tool?.renderResult);
-		this.#usesContentBox = hasCustomRenderer || hasRenderer;
+		this.#usesContentBox = hasCustomRenderer || this.#renderer !== undefined;
 		if (this.#usesContentBox) {
 			this.addChild(this.#contentBox);
 		} else {
@@ -481,6 +555,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	 * stream at the rate the diffs can sustain.
 	 */
 	#schedulePreviewDiff(): void {
+		if (!this.#editMode) return;
 		this.#editDiffDirty = true;
 		if (this.#editDiffInFlight) return;
 		this.#editDiffInFlight = this.#drainPreviewDiff().finally(() => {
@@ -489,13 +564,30 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	}
 
 	async #drainPreviewDiff(): Promise<void> {
+		// One microtask of deferral so a same-tick settled result (transcript
+		// rebuild: construct → updateResult within one sync replay chunk) cancels
+		// the compute before the edit engine runs instead of after. Session
+		// restore settles thousands of historical edit calls this way; without
+		// the deferral each one re-ran the full sloppy matcher + whole-file diff
+		// to produce a preview the renderer discards in favor of `details.diff`.
+		await undefined;
 		while (this.#editDiffDirty) {
 			this.#editDiffDirty = false;
 			await this.#computePreviewDiff();
 		}
 	}
 
+	/**
+	 * True once a terminal result makes the streaming preview moot: renderResult
+	 * prefers `details.diff` and renders errors from the result text, consulting
+	 * the computed preview only for a non-error result that carries no details.
+	 */
+	#previewDiffSettled(): boolean {
+		const result = this.#result;
+		return result !== undefined && !this.#isPartial && (result.isError === true || result.details != null);
+	}
 	async #computePreviewDiff(): Promise<void> {
+		if (this.#previewDiffSettled()) return;
 		const editMode = this.#editMode;
 		if (!editMode) return;
 		const strategy = EDIT_MODE_STRATEGIES[editMode];
@@ -506,9 +598,10 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 
 		const previewArgs = getArgsWithStreamedTextInput(args);
 		const partialJson = partialJsonOf(previewArgs);
+		const isStreaming = !this.#argsComplete;
 		let effectiveArgs: unknown;
 		try {
-			effectiveArgs = strategy.extractCompleteEdits(previewArgs, partialJson);
+			effectiveArgs = strategy.extractCompleteEdits(previewArgs, partialJson, isStreaming);
 		} catch {
 			effectiveArgs = previewArgs;
 		}
@@ -541,7 +634,6 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		this.#editDiffAbort = controller;
 
 		try {
-			const isStreaming = !this.#argsComplete;
 			if (editMode === "hashline" && !this.#snapshots) return;
 			const previews = await strategy.computeDiffPreview(effectiveArgs, {
 				cwd: this.#cwd,
@@ -595,11 +687,18 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		this.#partialResultShapePainted = false;
 		this.#result = result;
 		this.#resultVersion++;
+		this.#blockVersion++;
 		this.#isPartial = isPartial;
 		this.#displaceableByToolName = displaceableToolName(this.#toolName, result, isPartial);
 		// When tool is complete, ensure args are marked complete so spinner stops
 		if (!isPartial) {
 			this.#argsComplete = true;
+		}
+		if (this.#editMode && this.#previewDiffSettled()) {
+			// Stop the streaming-preview pipeline: a queued or in-flight compute
+			// would produce a diff the renderer ignores once details exist.
+			this.#editDiffDirty = false;
+			this.#editDiffAbort?.abort();
 		}
 		this.#updateSpinnerAnimation();
 		this.#updateTodoStrikeAnimation();
@@ -614,14 +713,18 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	}
 
 	/**
-	 * Get all image blocks from result content and details.images.
-	 * Some tools (like generate_image) store images in details to avoid bloating model context.
+	 * Get all image blocks from result content and details.
+	 * Some tools (like generate_image) store images in details to avoid bloating
+	 * model context. Xdev-dispatched tools preserve those details under
+	 * details.xdev.inner.
 	 */
-	#getAllImageBlocks(): Array<{ data?: string; mimeType?: string }> {
+	#getAllImageBlocks(): ToolImageBlock[] {
 		if (!this.#result) return [];
-		const contentImages = this.#result.content?.filter((c: any) => c.type === "image") || [];
-		const detailImages = this.#result.details?.images || [];
-		return [...contentImages, ...detailImages];
+		const contentImages = this.#result.content.filter(block => block.type === "image");
+		const details = this.#result.details;
+		const detailImages = imageBlocksFromDetails(details);
+		const xdevImages = isRecord(details) && isRecord(details.xdev) ? imageBlocksFromDetails(details.xdev.inner) : [];
+		return [...contentImages, ...detailImages, ...xdevImages];
 	}
 
 	/**
@@ -668,12 +771,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		const isStreamingArgs = !this.#argsComplete && (isEditLikeToolName(this.#toolName) || this.#toolName === "write");
 		const isBackgroundAsyncRunning =
 			(this.#result?.details as { async?: { state?: string } } | undefined)?.async?.state === "running";
-		const renderer = toolRenderers[this.#toolName] as
-			| {
-					animatedPendingPreview?: boolean | ((args: unknown) => boolean);
-					animatedPartialResult?: boolean | ((args: unknown) => boolean);
-			  }
-			| undefined;
+		const renderer = this.#renderer;
 		const pendingAnimation = renderer?.animatedPendingPreview;
 		const partialAnimation = renderer?.animatedPartialResult;
 		const pendingCallConsumesSpinner =
@@ -699,27 +797,16 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 			!isBackgroundAsyncRunning &&
 			(pendingCallConsumesSpinner || partialResultConsumesSpinner);
 		const needsSpinner = isStreamingArgs || isLivePartialTool || this.#displaceableByToolName === "hub";
-		if (needsSpinner && !this.#spinnerInterval) {
+		if (needsSpinner && !this.#spinnerActive) {
 			const frameCount = theme.spinnerFrames.length;
 			const frame = sharedSpinnerFrame(frameCount);
 			this.#spinnerFrame = frame;
 			this.#renderState.spinnerFrame = frame;
-			this.#spinnerInterval = setInterval(() => {
-				// If a detached task interval from an older render path is still live,
-				// stop it the instant the block leaves the repaintable region.
-				if (this.#maybeFreezeBackgroundTask()) return;
-				const now = performance.now();
-				const frameCount = theme.spinnerFrames.length;
-				this.#spinnerFrame = sharedSpinnerFrame(frameCount, now);
-				this.#renderState.spinnerFrame = this.#spinnerFrame;
-				// Component-scoped: a spinner tick only changes this tool block, so
-				// the TUI reuses every other root subtree instead of walking the
-				// whole tree (issue #4377).
-				this.#ui.requestComponentRender(this);
-			}, SPINNER_RENDER_INTERVAL_MS);
-		} else if (!needsSpinner && this.#spinnerInterval) {
-			clearInterval(this.#spinnerInterval);
-			this.#spinnerInterval = undefined;
+			this.#spinnerActive = true;
+			registerSpinnerBlock(this);
+		} else if (!needsSpinner && this.#spinnerActive) {
+			this.#spinnerActive = false;
+			unregisterSpinnerBlock(this);
 			// Clear the last drawn frame so a non-live renderCall (e.g. a write whose
 			// args just completed) stops showing a frozen spinner glyph. Skip when a
 			// todo strike owns the frame — it sets its own value right after this.
@@ -731,15 +818,30 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	}
 
 	/**
+	 * Advance to the shared spinner glyph and repaint just this block. Driven by
+	 * the single shared spinner ticker (see `registerSpinnerBlock`); the tick is
+	 * component-scoped so the TUI reuses every other root subtree (issue #4377).
+	 */
+	tickSpinner(frame: number): void {
+		// A detached task block that scrolled into native scrollback stops the
+		// instant it leaves the repaintable region.
+		if (this.#maybeFreezeBackgroundTask()) return;
+		this.#spinnerFrame = frame;
+		this.#renderState.spinnerFrame = frame;
+		this.#ui.requestComponentRender(this);
+	}
+
+	/**
 	 * Freeze a detached (`async.state === "running"`) task block once its rows
 	 * become native-scrollback history: the block left the transcript's live
 	 * region (a later block streams below it), or — while it is still the
 	 * live tail — its head rows were committed because the frame outgrew the
 	 * viewport. Committed rows are immutable, so from that point every further
-	 * partial snapshot is dropped. Rows restyle static gray only when nothing
-	 * is committed yet; otherwise the bytes stay exactly as painted. One-way —
-	 * blocks never re-enter the live region. Returns whether the block is
-	 * frozen.
+	 * partial snapshot is dropped. A hidden, wholly uncommitted block keeps
+	 * accepting snapshots so revealing it starts from current progress. Rows
+	 * restyle static gray only when nothing is committed yet; otherwise the
+	 * bytes stay exactly as painted. One-way — blocks never re-enter the live
+	 * region. Returns whether the block is frozen.
 	 */
 	#maybeFreezeBackgroundTask(): boolean {
 		if (this.#backgroundTaskFrozen) return true;
@@ -747,7 +849,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		const asyncState = (this.#result?.details as { async?: { state?: string } } | undefined)?.async?.state;
 		if (asyncState !== "running") return false;
 		const uncommitted = this.#liveRegion.isBlockUncommitted?.(this) ?? true;
-		if (uncommitted && this.#liveRegion.isBlockInLiveRegion(this)) return false;
+		if (uncommitted && (!this.#toolActivityVisible || this.#liveRegion.isBlockInLiveRegion(this))) return false;
 		this.#backgroundTaskFrozen = true;
 		this.#updateSpinnerAnimation();
 		if (uncommitted) {
@@ -791,7 +893,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 			clearInterval(this.#todoStrikeInterval);
 			this.#todoStrikeInterval = undefined;
 		}
-		if (!this.#spinnerInterval) {
+		if (!this.#spinnerActive) {
 			this.#spinnerFrame = undefined;
 			this.#renderState.spinnerFrame = undefined;
 		}
@@ -819,7 +921,14 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	 */
 	isNativeScrollbackLiveRegionPinned(): boolean {
 		if (this.isTranscriptBlockFinalized()) return false;
-		return this.#toolName === "vibe_wait" || this.#toolName === "task" || this.#displaceableByToolName !== undefined;
+		if (this.#toolName === "vibe_wait" || this.#toolName === "task" || this.#displaceableByToolName !== undefined) {
+			return true;
+		}
+		// A hub wait is the same self-replacing dashboard before the first
+		// progress snapshot arrives (`#displaceableByToolName` is set only once
+		// `details.jobs` exist). Pin the pending frame too so its rows cannot
+		// commit and force-seal the live poll.
+		return this.#toolName === "hub" && isHubWaitArgs(this.#args);
 	}
 
 	/**
@@ -827,10 +936,13 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	 * Reports `false` while it can still visually change so the
 	 * {@link TranscriptContainer} keeps it inside the repaintable live region:
 	 * a foreground tool awaiting its result, or one streaming partial output.
+	 * Hidden blocks render no rows, so they cannot gate later streaming content.
+	 * Visibility toggles reset and replay the transcript before revealing them.
 	 * A final (non-partial) result, a background-async tool the agent has moved
-	 * past, or an explicit {@link seal} flips it to `true`.
+	 * past, or an explicit {@link seal} also flips it to `true`.
 	 */
 	isTranscriptBlockFinalized(): boolean {
+		if (!this.#toolActivityVisible) return true;
 		if (this.#sealed) return true;
 		if (this.#result === undefined) return false;
 		// A displaceable snapshot stays live: its rows are kept out of native
@@ -843,6 +955,10 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		return (this.#result.details as { async?: { state?: string } } | undefined)?.async?.state === "running";
 	}
 
+	getTranscriptBlockVersion(): number {
+		return this.#blockVersion;
+	}
+
 	/**
 	 * Mark the tool terminal even though no result arrived (the turn aborted or
 	 * abandoned it) and stop animating, so it can freeze and stops pinning the
@@ -851,6 +967,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	seal(): void {
 		if (this.#sealed) return;
 		this.#sealed = true;
+		this.#blockVersion++;
 		this.#displaceableByToolName = undefined;
 		// A sealed detached task is abandoned history: settle its progress rows
 		// on static gray — but only while none of them are committed; a recolor
@@ -884,9 +1001,9 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	 * Stop spinner animation and cleanup resources.
 	 */
 	stopAnimation(): void {
-		if (this.#spinnerInterval) {
-			clearInterval(this.#spinnerInterval);
-			this.#spinnerInterval = undefined;
+		if (this.#spinnerActive) {
+			this.#spinnerActive = false;
+			unregisterSpinnerBlock(this);
 			this.#spinnerFrame = undefined;
 			this.#renderState.spinnerFrame = undefined;
 		}
@@ -899,6 +1016,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 	}
 
 	setExpanded(expanded: boolean): void {
+		if (this.#expanded !== expanded) this.#blockVersion++;
 		this.#expanded = expanded;
 		this.#updateDisplay();
 	}
@@ -933,7 +1051,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 
 	#rendererFlag(name: "forceResultViewportRepaintOnSettle"): boolean {
 		const toolValue = (this.#tool as Record<string, unknown> | undefined)?.[name];
-		const rendererValue = toolRenderers[this.#toolName]?.[name];
+		const rendererValue = this.#renderer?.[name];
 		return toolValue === true || (toolValue === undefined && rendererValue === true);
 	}
 
@@ -948,8 +1066,7 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 		if (this.#result !== undefined) return false;
 		const toolValue = (this.#tool as { forceFirstResultViewportRepaint?: FirstResultViewportRepaint } | undefined)
 			?.forceFirstResultViewportRepaint;
-		const value =
-			toolValue !== undefined ? toolValue : toolRenderers[this.#toolName]?.forceFirstResultViewportRepaint;
+		const value = toolValue !== undefined ? toolValue : this.#renderer?.forceFirstResultViewportRepaint;
 		if (typeof value === "function") return value(this.#args, this.#renderState);
 		return value === true;
 	}
@@ -1101,9 +1218,9 @@ export class ToolExecutionComponent extends Container implements NativeScrollbac
 			const customFramed = this.#contentBox.children.some(isFramedBlockComponent);
 			this.#contentBox.setPaddingX(customFramed ? 0 : 1);
 			this.#contentBox.setBgFn(customFramed ? undefined : stateBgFn);
-		} else if (this.#toolName in toolRenderers) {
-			// Built-in tools with renderers
-			const renderer = toolRenderers[this.#toolName];
+		} else if (this.#renderer) {
+			// The active registry entry is a built-in tool with a rich renderer.
+			const renderer = this.#renderer;
 
 			// Clean up previous multi-file boxes
 			for (const box of this.#multiFileBoxes) {

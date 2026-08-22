@@ -6,7 +6,7 @@ import { AssistantMessageComponent } from "@oh-my-pi/pi-coding-agent/modes/compo
 import { TranscriptContainer } from "@oh-my-pi/pi-coding-agent/modes/components/transcript-container";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
-import { type Component, Text } from "@oh-my-pi/pi-tui";
+import { type Component, Container, Text } from "@oh-my-pi/pi-tui";
 
 // Models a transcript block that re-lays-out (tool preview collapsing, assistant
 // message finalizing, late async result) after newer blocks were appended below
@@ -53,6 +53,19 @@ class StreamingBlock implements Component {
 	}
 }
 
+class UnfinalizedText extends Text {
+	isTranscriptBlockFinalized(): boolean {
+		return false;
+	}
+}
+
+/** Live dashboard that opts into viewport pinning (hub wait / todo snapshot). */
+class PinnedLiveBlock extends StreamingBlock {
+	isNativeScrollbackLiveRegionPinned(): boolean {
+		return !this.isTranscriptBlockFinalized();
+	}
+}
+
 // A still-live block that can declare a byte-stable rendered prefix. The
 // transcript container may commit only those declared rows before finalization.
 class DeclaredSettledStreamingBlock extends StreamingBlock {
@@ -69,6 +82,20 @@ class DeclaredSettledStreamingBlock extends StreamingBlock {
 
 	getTranscriptBlockSettledRows(): number {
 		return this.#settledRows;
+	}
+}
+
+class WidthEpochStreamingBlock extends DeclaredSettledStreamingBlock {
+	captureNativeScrollbackWidthEpoch(): unknown {
+		return {};
+	}
+
+	resolveNativeScrollbackWidthEpoch(_boundary: unknown): number | undefined {
+		return 1;
+	}
+
+	getNativeScrollbackWidthEpochRows(): number | undefined {
+		return 1;
 	}
 }
 
@@ -265,6 +292,183 @@ describe("TranscriptContainer", () => {
 		expect(container.getNativeScrollbackLiveRegionStart()).toBeUndefined();
 	});
 
+	it("resolves a finalized transcript tail at the settled width before appended blocks", () => {
+		const container = new TranscriptContainer();
+		container.addChild(new Text("first block with enough words to wrap after the pane narrows", 0, 0));
+		container.render(80);
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+
+		container.addChild(new Text("new block queued during resize", 0, 0));
+		container.render(24);
+		const previousRows = container.resolveNativeScrollbackWidthEpoch(boundary);
+		const currentRows = container.getNativeScrollbackWidthEpochRows();
+
+		expect(previousRows).toBeGreaterThan(0);
+		expect(currentRows).toBeGreaterThan(previousRows!);
+	});
+
+	it("does not invent a width-epoch boundary for an unfinalized block without a source watermark", () => {
+		const container = new TranscriptContainer();
+		container.addChild(new UnfinalizedText("width-dependent content that wraps after the pane narrows", 0, 0));
+		const oldRows = container.render(40).length;
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+
+		const newRows = container.render(17).length;
+
+		expect(newRows).toBeGreaterThan(oldRows);
+		expect(container.resolveNativeScrollbackWidthEpoch(boundary)).toBeUndefined();
+	});
+
+	it("maps a streaming Markdown source prefix without rendering the assistant twice", () => {
+		const container = new TranscriptContainer();
+		const assistant = new AssistantMessageComponent();
+		assistant.updateContent(
+			makeAssistantMessage({
+				content: [{ type: "text", text: "A streaming answer with a stable source prefix." }],
+			}),
+			{ transient: true },
+		);
+		container.addChild(assistant);
+		container.render(40);
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+		const settledRows = container.resolveNativeScrollbackWidthEpoch(boundary);
+		expect(container.getNativeScrollbackWidthEpochRows()).toBe(settledRows);
+
+		assistant.updateContent(
+			makeAssistantMessage({
+				content: [
+					{
+						type: "text",
+						text: "A streaming answer with a stable source prefix. More output arrived while the pane resized.",
+					},
+				],
+			}),
+			{ transient: true },
+		);
+		container.render(17);
+		const previousRows = container.resolveNativeScrollbackWidthEpoch(boundary);
+		const currentRows = container.getNativeScrollbackWidthEpochRows();
+
+		expect(previousRows).toBeGreaterThan(0);
+		expect(currentRows).toBeGreaterThan(previousRows!);
+	});
+
+	it("keeps a width epoch anchored to a live source above a finalized notice", () => {
+		const container = new TranscriptContainer();
+		const assistant = new AssistantMessageComponent();
+		assistant.updateContent(
+			makeAssistantMessage({ content: [{ type: "text", text: "A streaming answer with a stable prefix." }] }),
+			{ transient: true },
+		);
+		container.addChild(assistant);
+		container.addChild(new Text("Finalized notice", 0, 0));
+		container.render(40);
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+		expect(container.isNativeScrollbackWidthEpochAppendOnly(boundary)).toBe(false);
+		container.render(17);
+		const settledPreviousRows = container.resolveNativeScrollbackWidthEpoch(boundary);
+		expect(container.getNativeScrollbackWidthEpochRows()).toBe(settledPreviousRows);
+
+		assistant.updateContent(
+			makeAssistantMessage({
+				content: [
+					{
+						type: "text",
+						text: "A streaming answer with a stable prefix. More output arrived while the pane resized.",
+					},
+				],
+			}),
+			{ transient: true },
+		);
+		const rendered = container.render(17);
+		const previousRows = container.resolveNativeScrollbackWidthEpoch(boundary);
+		const currentRows = container.getNativeScrollbackWidthEpochRows();
+
+		expect(previousRows).toBeGreaterThan(0);
+		expect(currentRows).toBeLessThan(rendered.length);
+		expect(currentRows).toBeGreaterThan(previousRows!);
+		expect(rendered.at(-1)).toContain("Finalized notice");
+	});
+
+	it("trusts the version-omission contract for finalized history before a live source", () => {
+		// Per FinalizableBlock, omitting getTranscriptBlockVersion declares a block
+		// immutable post-finalize, so resolution treats it as stable across the
+		// epoch — failing here instead replayed the full transcript into pane
+		// history on every real tmux width resize (only AssistantMessageComponent
+		// implements the version). A block that violates the declaration falls to
+		// the committed-prefix audit's bounded repair; blocks that genuinely
+		// mutate post-finalize must report a version (see the versioned rejection
+		// case below).
+		const container = new TranscriptContainer();
+		const history = new CountingFinalizedBlock(["history"]);
+		const live = new WidthEpochStreamingBlock(["stable", "pending"], 1);
+		container.addChild(history);
+		container.addChild(live);
+		container.render(40);
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+
+		container.render(17);
+
+		expect(container.resolveNativeScrollbackWidthEpoch(boundary)).toBeGreaterThan(0);
+	});
+
+	it("rejects a width epoch when versioned finalized history before its live source grows", () => {
+		const container = new TranscriptContainer();
+		const history = new VersionedFinalizedBlock(["history"]);
+		const live = new WidthEpochStreamingBlock(["stable", "pending"], 1);
+		container.addChild(history);
+		container.addChild(live);
+		container.render(40);
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+		container.render(17);
+		expect(container.resolveNativeScrollbackWidthEpoch(boundary)).toBeGreaterThan(0);
+
+		history.mutate(["history", "late image"]);
+		container.render(17);
+
+		expect(container.resolveNativeScrollbackWidthEpoch(boundary)).toBeUndefined();
+	});
+
+	it("rejects a captured live tail that mutates while finalizing", () => {
+		const container = new TranscriptContainer();
+		const assistant = new AssistantMessageComponent();
+		assistant.updateContent(makeAssistantMessage({ content: [{ type: "text", text: "Stable source marker." }] }), {
+			transient: true,
+		});
+		const trailing = new StreamingBlock(["pending-tail"]);
+		container.addChild(assistant);
+		container.addChild(trailing);
+		container.render(40);
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+
+		trailing.finalize(["final-tail", "additional-final-row"]);
+		container.render(17);
+
+		expect(container.resolveNativeScrollbackWidthEpoch(boundary)).toBeUndefined();
+	});
+
+	it("propagates a nested child's non-prefix width transition", () => {
+		const container = new TranscriptContainer();
+		const nested = new Container();
+		const assistant = new AssistantMessageComponent();
+		assistant.updateContent(makeAssistantMessage({ content: [{ type: "text", text: "Nested live source." }] }), {
+			transient: true,
+		});
+		nested.addChild(assistant);
+		nested.addChild(new Text("Nested finalized notice", 0, 0));
+		container.addChild(nested);
+		container.render(40);
+		const boundary = container.captureNativeScrollbackWidthEpoch();
+
+		assistant.updateContent(
+			makeAssistantMessage({ content: [{ type: "text", text: `Nested live source. ${"growth ".repeat(20)}` }] }),
+			{ transient: true },
+		);
+		container.render(17);
+
+		expect(container.isNativeScrollbackWidthEpochAppendOnly(boundary)).toBe(false);
+	});
+
 	it("starts the live region at the earliest of several unfinalized blocks", () => {
 		const container = new TranscriptContainer();
 		const sealed = new StreamingBlock(["done"], true);
@@ -288,6 +492,21 @@ describe("TranscriptContainer", () => {
 		pending.finalize(["pending-final"]);
 		expect(container.render(40)).toEqual(["done-collapsed", "", "pending-final", "", "card"]);
 		expect(container.getNativeScrollbackLiveRegionStart()).toBeUndefined();
+	});
+
+	it("keeps the earliest live seam and pins from a later live dashboard", () => {
+		const container = new TranscriptContainer();
+		container.addChild(new MutableBlock(["history"]));
+		const pending = new StreamingBlock(["bash-pending"]);
+		const poll = new PinnedLiveBlock(["wait-header", "wait-body"]);
+		container.addChild(pending);
+		container.addChild(poll);
+		expect(container.render(40)).toEqual(["history", "", "bash-pending", "", "wait-header", "wait-body"]);
+		// history(0) sep(1) bash(2) sep(3) wait(4..) — live seam at bash,
+		// pin ceiling at the hub-wait body so bash can still commit.
+		expect(container.getNativeScrollbackLiveRegionStart()).toBe(2);
+		expect(container.isNativeScrollbackLiveRegionPinned()).toBe(true);
+		expect(container.getNativeScrollbackLiveRegionPinnedStart()).toBe(4);
 	});
 
 	it("stops the boundary at the first unfinalized block's first content row when no rows are settled", () => {
@@ -807,6 +1026,18 @@ describe("TranscriptContainer seal-on-commit", () => {
 		container.render(W);
 		expect(card.sealCount).toBe(0);
 		expect(container.isBlockUncommitted(card)).toBe(true);
+	});
+
+	it("does not seal when only the container-owned separator has committed", () => {
+		const { container, card } = cardAfterHistory();
+		// live-region start is row 2; the engine's pin ceiling commits [0, 2)
+		// (history + the blank separator). That blank is not a card body row.
+		expect(container.getNativeScrollbackLiveRegionStart()).toBe(2);
+		container.setNativeScrollbackCommittedRows(2);
+		container.render(W);
+		expect(card.sealCount).toBe(0);
+		expect(container.isBlockUncommitted(card)).toBe(true);
+		expect(container.getNativeScrollbackLiveRegionStart()).toBe(2);
 	});
 
 	it("never seals across same-value or decreasing republishes above the block", () => {

@@ -138,6 +138,8 @@ By default, native scrollback is append-only: committed frame rows are never rew
 
 The opt-in `tui.scrollbackRebuild` setting (default `false`) changes how a committed-prefix divergence is repaired. When finalized content replaces a scrolled-off preview, or a frame collapses into already committed rows, a direct terminal session clears native scrollback with ED3 and replays the current frame so the stale and final forms do not both remain. Multiplexer sessions never take this destructive path and retain the append/repair-below fallback. `PI_TUI_SCROLLBACK_REBUILD=1` initializes the low-level `TUI` flag, but `InteractiveMode` then applies the configured `tui.scrollbackRebuild` value; the setting is therefore the effective control in coding-agent.
 
+The `tui.resizeScrollback` setting (default `append`) controls what a settled in-place width resize (multiplexer panes, or direct terminals latched onto the in-place path) does to native scrollback, which the host rewrapped naively at the old width: `append` replays the transcript at the settled width below the old-wrap history (one fresh copy per settled resize), `rebuild` clears pane history first with ED3 so it holds exactly one current-width copy (tmux honors an inner ED3; GNU screen ignores it and degrades to `append`; erases pre-session pane history), and `preserve` repaints the viewport only, keeping the old-width wrap with zero history growth. `PI_TUI_RESIZE_SCROLLBACK` initializes the low-level `TUI` mode (engine default `preserve`), but `InteractiveMode` then applies the configured setting.
+
 Render writes use synchronized output mode (`CSI ? 2026 h/l`) when enabled; capability detection, DECRQM, or `PI_NO_SYNC_OUTPUT` can disable the wrappers while leaving autowrap discipline on.
 
 ## Render safety constraints
@@ -162,9 +164,11 @@ Resize events are event-driven from `ProcessTerminal` to `TUI.requestRender()`.
 
 Effects:
 
-- A resize is an explicit user gesture: outside multiplexers the engine erases and replays (`ED3` + full paint) so history rewraps at the new geometry; the commit ledger restarts from the replayed frame.
-- Inside terminal multiplexers, resize repaints the visible window in place after a settle debounce (issue #2088); pane history keeps its old wrap, like any shell output, because pane scrollback cannot be erased safely.
-- Terminals that re-report their size when the alternate screen buffer is toggled (Warp reports a height one row different for the alt buffer) take the in-place path too. The non-multiplexer fast path borrows the alternate screen for drag frames, so on these terminals each alt enter/leave emits a fresh resize event, which re-enters the fast path — a self-sustaining loop that floods ED3 full repaints with stable geometry. `resizeRepaintsInPlace()` (covering multiplexers and these terminals; overridable via `PI_TUI_RESIZE_IN_PLACE`) routes them through the in-place repaint, which never touches the alt buffer.
+- Direct HerdR panes follow the in-place multiplexer path: their host owns the
+  pane, and destructive `ED3` transcript replay produces visible flashes.
+- Inside terminal multiplexers, height-only resize retains the append ledger and repaints the visible window in place after the settle debounce (issue #2088). A width change instead terminates the physical-row epoch: old committed coordinates become opaque, pane history remains immutable at its authored wrap, and the settled render establishes a complete-frame baseline. Subsequent growth writes only current-width rows newly crossing the scrollback seam before repainting the bounded viewport.
+- Nested tmux, screen, Zellij, or cmux sessions inside HerdR use the same path.
+- Terminals that re-report their size when the alternate screen buffer is toggled (Warp reports a height one row different for the alt buffer) take the in-place path too. The non-multiplexer fast path borrows the alternate screen for drag frames, so on these terminals each alt enter/leave emits a fresh resize event, which re-enters the fast path — a self-sustaining loop that floods ED3 full repaints with stable geometry. `resizeRepaintsInPlace()` (covering ED3-unsafe multiplexers and these terminals; overridable via `PI_TUI_RESIZE_IN_PLACE`) routes them through the in-place repaint, which never touches the alt buffer.
 - Overlay visibility can depend on terminal dimensions (`OverlayOptions.visible`); focus is corrected when overlays become non-visible after resize.
 
 ## Streaming and incremental UI updates

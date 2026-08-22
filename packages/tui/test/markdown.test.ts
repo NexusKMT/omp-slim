@@ -11,7 +11,7 @@ import {
 import { setTerminalTextSizing, TERMINAL } from "@oh-my-pi/pi-tui/terminal-capabilities";
 import { type Component, TUI } from "@oh-my-pi/pi-tui/tui";
 import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
-import { Chalk } from "chalk";
+import { Chalk } from "@oh-my-pi/pi-utils/chalk";
 import { defaultMarkdownTheme } from "./test-themes.js";
 import { VirtualTerminal } from "./virtual-terminal.js";
 
@@ -67,9 +67,6 @@ describe("Markdown component", () => {
 			);
 
 			const lines = markdown.render(80);
-
-			// Check that we have content
-			expect(lines.length > 0).toBeTruthy();
 
 			// Strip ANSI codes for checking
 			const plainLines = lines.map(line => stripVTControlCharacters(line));
@@ -257,6 +254,91 @@ describe("Markdown component", () => {
 			expect(plainLines.some(line => line.includes("-"))).toBeTruthy();
 		});
 
+		it("recovers rich Markdown after a lone closing fence from Gemini", () => {
+			const markdown = new Markdown(
+				`=== PACED IP ROTATION SOAK RESULTS ===
+Total Queries: 20
+Average Latency: 1,240 ms
+\`\`\`
+
+---
+
+### Production Deployment Status
+
+| Workload | Pod Status |
+| :--- | :--- |
+| google-scraper | **1/1 Running** |`,
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
+			markdown.transientRenderCache = true;
+			markdown.render(80);
+
+			markdown.transientRenderCache = false;
+			const plainLines = markdown.render(80).map(line => stripVTControlCharacters(line).trimEnd());
+
+			expect(plainLines.some(line => line.includes("| :--- | :--- |"))).toBe(false);
+			expect(plainLines.filter(line => line.includes("+")).length).toBeGreaterThanOrEqual(2);
+			expect(plainLines.some(line => line.includes("google-scraper") && line.includes("1/1 Running"))).toBe(true);
+		});
+
+		it("keeps an intentional unclosed fenced Markdown example literal", () => {
+			const markdown = new Markdown(
+				`Markdown source:
+\`\`\`
+### Production Deployment Status
+
+| Workload | Pod Status |
+| :--- | :--- |
+| google-scraper | 1/1 Running |`,
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
+			const plainLines = markdown.render(80).map(line => stripVTControlCharacters(line).trimEnd());
+
+			expect(plainLines.some(line => line.includes("| :--- | :--- |"))).toBe(true);
+			expect(plainLines.filter(line => line.includes("+"))).toHaveLength(0);
+		});
+
+		it("keeps a four-space-indented tree child inside its paragraph", () => {
+			const markdown = new Markdown(
+				`Two verified cases:
+
+├── **case 1** — first branch
+│   └── each family has its own counter
+└── **case 3: unnumbered limits**
+    └── limits that carry **only a label** are dropped from the list`,
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
+			const plainLines = markdown.render(80).map(line => stripVTControlCharacters(line).trimEnd());
+
+			// The attached indented line is a lazy paragraph continuation, never an
+			// indented code block: no fence border rows, no literal bold markers.
+			expect(plainLines.filter(line => line.includes("```"))).toHaveLength(0);
+			expect(plainLines.some(line => line.includes("only a label"))).toBe(true);
+			expect(plainLines.some(line => line.includes("**"))).toBe(false);
+		});
+
+		it("keeps an unfinished code block with a rule and heading literal when no table follows", () => {
+			const markdown = new Markdown(
+				`The process printed this
+\`\`\`
+---
+### Still inside the unfinished block`,
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
+			const plainLines = markdown.render(80).map(line => stripVTControlCharacters(line).trimEnd());
+
+			expect(plainLines.some(line => line.includes("---"))).toBe(true);
+			expect(plainLines.some(line => line.includes("### Still inside the unfinished block"))).toBe(true);
+		});
+
 		it("should render row dividers between data rows", () => {
 			const markdown = new Markdown(
 				`| Name | Age |
@@ -337,9 +419,6 @@ describe("Markdown component", () => {
 			);
 
 			const lines = markdown.render(80);
-
-			// Should render without errors
-			expect(lines.length > 0).toBeTruthy();
 
 			const plainLines = lines.map(line => stripVTControlCharacters(line));
 			expect(plainLines.some(line => line.includes("Very long column header"))).toBeTruthy();
@@ -423,7 +502,6 @@ describe("Markdown component", () => {
 
 			// Borders should stay intact (exactly 2 vertical borders for a 1-col table)
 			const tableLines = plainLines.filter(line => line.startsWith("|"));
-			expect(tableLines.length > 0, "Expected table rows to render").toBeTruthy();
 			for (const line of tableLines) {
 				const borderCount = line.split("|").length - 1;
 				expect(borderCount, `Expected 2 borders, got ${borderCount}: "${line}"`).toBe(2);
@@ -466,6 +544,56 @@ describe("Markdown component", () => {
 			}
 		});
 
+		it("does not leak inline-code color into table borders when cells wrap", () => {
+			const markdown = new Markdown(
+				`| Command | Notes |
+| --- | --- |
+| \`config.setupgrading(pendingRequests, emptyFlag)\` | plain |
+| short | other |`,
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
+
+			// Narrow enough to force the long codespan to wrap mid-run.
+			const lines = markdown.render(24);
+			const joinedOutput = lines.join("\n");
+			expect(joinedOutput.includes("\x1b[33m"), "Inline code should be styled (yellow)").toBeTruthy();
+			expect(lines.filter(line => line.includes("|")).length).toBeGreaterThan(3);
+
+			// Walk SGR state through every table row: the "|" border glyphs (and
+			// everything after them on the line) must never be rendered under an
+			// open fg color or bold attribute.
+			for (const line of lines) {
+				if (!line.includes("|")) continue;
+				let bold = false;
+				let fgOpen = false;
+				let i = 0;
+				while (i < line.length) {
+					if (line[i] === "\x1b") {
+						const seq = line.slice(i).match(/^\x1b\[([0-9;]*)m/);
+						expect(seq, `unparseable SGR in: ${JSON.stringify(line)}`).not.toBeNull();
+						for (const p of seq![1]!.split(";")) {
+							if (p === "1") bold = true;
+							else if (p === "22") bold = false;
+							else if (p === "0") {
+								bold = false;
+								fgOpen = false;
+							} else if (p === "39") fgOpen = false;
+							else if (p === "38" || /^3[0-7]$/.test(p) || /^9[0-7]$/.test(p)) fgOpen = true;
+						}
+						i += seq![0].length;
+						continue;
+					}
+					if (line[i] === "|") {
+						expect(fgOpen, `Border inherits fg color in: ${JSON.stringify(line)}`).toBe(false);
+						expect(bold, `Border inherits bold in: ${JSON.stringify(line)}`).toBe(false);
+					}
+					i++;
+				}
+			}
+		});
+
 		it("should handle extremely narrow width gracefully", () => {
 			const markdown = new Markdown(
 				`| A | B | C |
@@ -479,9 +607,6 @@ describe("Markdown component", () => {
 			// Very narrow width
 			const lines = markdown.render(15);
 			const plainLines = lines.map(line => stripVTControlCharacters(line).trimEnd());
-
-			// Should not crash and should produce output
-			expect(lines.length > 0, "Should produce output").toBeTruthy();
 
 			// Lines should not exceed width
 			for (const line of plainLines) {
@@ -1892,7 +2017,7 @@ describe("Module-level LRU render cache", () => {
 		expect(l2Markdown.render(width)).toBe(first);
 	});
 
-	it("skips code-block highlighting for transient streaming renders", () => {
+	it("keeps an open non-diff fence plain during transient renders without a highlight stream", () => {
 		clearRenderCache();
 		let highlightCallCount = 0;
 		const themeWithSpy = {
@@ -1903,7 +2028,7 @@ describe("Module-level LRU render cache", () => {
 			},
 		};
 
-		const markdown = new Markdown("```ts\nconst streamed = true;\n```", 0, 0, themeWithSpy);
+		const markdown = new Markdown("```ts\nconst streamed = true;\n", 0, 0, themeWithSpy);
 		markdown.transientRenderCache = true;
 		const plain = stripVTControlCharacters(markdown.render(80).join("\n"));
 
@@ -1912,7 +2037,9 @@ describe("Module-level LRU render cache", () => {
 		expect(plain).not.toContain("HIGHLIGHTED");
 	});
 
-	it("re-renders code-block highlighting when a transient instance becomes stable", () => {
+	it("highlights a fence whole-block once it closes, even during transient renders", () => {
+		// Rows of a closed fence can enter native scrollback before the token
+		// freezes; they must carry the same bytes the finalized render emits.
 		clearRenderCache();
 		let highlightCallCount = 0;
 		const themeWithSpy = {
@@ -1925,34 +2052,75 @@ describe("Module-level LRU render cache", () => {
 
 		const markdown = new Markdown("```ts\nconst streamed = true;\n```", 0, 0, themeWithSpy);
 		markdown.transientRenderCache = true;
-		const plain = stripVTControlCharacters(markdown.render(80).join("\n"));
-		expect(highlightCallCount).toBe(0);
-		expect(plain).toContain("const streamed = true;");
+		const transient = stripVTControlCharacters(markdown.render(80).join("\n"));
+		expect(highlightCallCount).toBe(1);
+		expect(transient).toContain("HIGHLIGHTED");
 
 		markdown.transientRenderCache = false;
 		const highlighted = stripVTControlCharacters(markdown.render(80).join("\n"));
-		expect(highlightCallCount).toBe(1);
 		expect(highlighted).toContain("HIGHLIGHTED");
 	});
 
-	it("skips nested list code-block highlighting for transient streaming renders", () => {
+	it("streams completed-line highlighting through the theme's highlight stream", () => {
 		clearRenderCache();
-		let highlightCallCount = 0;
-		const themeWithSpy = {
+		const pushes: string[] = [];
+		const themeWithStream = {
 			...defaultMarkdownTheme,
-			highlightCode: (_code: string, _lang?: string): string[] => {
-				highlightCallCount++;
-				return ["HIGHLIGHTED"];
+			highlightCode: (code: string, _lang?: string): string[] => code.split("\n").map(line => `F<${line}>`),
+			createHighlightStream: (lang?: string) => {
+				if (lang !== "python") return null;
+				return {
+					push: (chunk: string): string => {
+						pushes.push(chunk);
+						return chunk
+							.split("\n")
+							.map((line, i, arr) => (i === arr.length - 1 ? line : `S<${line}>`))
+							.join("\n");
+					},
+				};
 			},
 		};
 
-		const markdown = new Markdown("- item\n\n  ```ts\n  const streamed = true;\n  ```", 0, 0, themeWithSpy);
+		const markdown = new Markdown("```python\ndef f():\n    x = 1", 0, 0, themeWithStream);
+		markdown.transientRenderCache = true;
+		const first = stripVTControlCharacters(markdown.render(80).join("\n"));
+		// Completed line highlighted through the stream; partial tail stays plain.
+		expect(first).toContain("S<def f():>");
+		expect(first).toContain("    x = 1");
+		expect(first).not.toContain("S<    x = 1");
+		expect(pushes).toEqual(["def f():\n"]);
+
+		// Append-only growth pushes only the newly completed lines — parser
+		// state carries across renders instead of re-feeding the fence.
+		markdown.setText("```python\ndef f():\n    x = 1\n    return x");
+		const second = stripVTControlCharacters(markdown.render(80).join("\n"));
+		expect(second).toContain("S<def f():>");
+		expect(second).toContain("S<    x = 1>");
+		expect(second).toContain("    return x");
+		expect(pushes).toEqual(["def f():\n", "    x = 1\n"]);
+
+		// Closing the fence switches to the whole-block highlightCode call the
+		// finalized render uses.
+		markdown.setText("```python\ndef f():\n    x = 1\n    return x\n```");
+		const closed = stripVTControlCharacters(markdown.render(80).join("\n"));
+		expect(closed).toContain("F<def f():>");
+		expect(pushes).toEqual(["def f():\n", "    x = 1\n"]);
+	});
+
+	it("keeps an open fence plain when the highlight stream factory rejects the language", () => {
+		clearRenderCache();
+		const themeWithStream = {
+			...defaultMarkdownTheme,
+			highlightCode: (code: string, _lang?: string): string[] => [`F<${code}>`],
+			createHighlightStream: (_lang?: string) => null,
+		};
+
+		const markdown = new Markdown("```someunknownlang\nplain text line\nmore", 0, 0, themeWithStream);
 		markdown.transientRenderCache = true;
 		const plain = stripVTControlCharacters(markdown.render(80).join("\n"));
-
-		expect(highlightCallCount).toBe(0);
-		expect(plain).toContain("const streamed = true;");
-		expect(plain).not.toContain("HIGHLIGHTED");
+		expect(plain).toContain("plain text line");
+		expect(plain).not.toContain("S<");
+		expect(plain).not.toContain("F<");
 	});
 });
 

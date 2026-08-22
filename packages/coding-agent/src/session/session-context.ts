@@ -8,6 +8,7 @@ import {
 	INTERRUPTED_THINKING_MESSAGE_TYPE,
 	isCustomMessageContent,
 	normalizeCustomMessagePayload,
+	PREWALK_PLAN_MESSAGE_TYPE,
 } from "./messages";
 import { type CompactionEntry, EPHEMERAL_MODEL_CHANGE_ROLE, type SessionEntry } from "./session-entries";
 
@@ -332,15 +333,12 @@ export function buildSessionContext(
 	const appendMessage = (entry: SessionEntry) => {
 		handleEntryResetTracking(entry);
 		if (entry.type === "message") {
-			if (
-				!options?.transcript &&
-				entry.message.role === "assistant" &&
-				entry.message.retryRecovery?.status === "recovered"
-			) {
+			if (!options?.transcript && entry.message.role === "assistant" && entry.message.retryRecovery) {
 				return;
 			}
 			pushMessage(entry.message);
 		} else if (entry.type === "custom_message") {
+			if (!options?.transcript && entry.customType === PREWALK_PLAN_MESSAGE_TYPE) return;
 			if (!isCustomMessageContent(entry.content)) return;
 			const normalized = normalizeCustomMessagePayload(entry);
 			const attribution = entry.attribution === undefined ? undefined : normalized.attribution;
@@ -374,11 +372,13 @@ export function buildSessionContext(
 						active ? entry.summary : SUPERSEDED_COMPACTION_SUMMARY,
 						entry.tokensBefore,
 						entry.timestamp,
-						active ? entry.shortSummary : SUPERSEDED_COMPACTION_SHORT_SUMMARY,
-						undefined,
-						undefined,
-						snapcompactHistoryBlocksForContext(snapcompactArchive, options),
-						entry.warning,
+						{
+							shortSummary: active ? entry.shortSummary : SUPERSEDED_COMPACTION_SHORT_SUMMARY,
+							blocks: snapcompactHistoryBlocksForContext(snapcompactArchive, options),
+							warning: entry.warning,
+							method: entry.method,
+							tokensAfter: entry.tokensAfter,
+						},
 					),
 				);
 			} else {
@@ -416,11 +416,14 @@ export function buildSessionContext(
 			compaction.summary,
 			compaction.tokensBefore,
 			compaction.timestamp,
-			compaction.shortSummary,
-			providerPayload,
-			undefined,
-			snapcompactHistoryBlocksForContext(snapcompactArchive, options),
-			compaction.warning,
+			{
+				shortSummary: compaction.shortSummary,
+				providerPayload,
+				blocks: snapcompactHistoryBlocksForContext(snapcompactArchive, options),
+				warning: compaction.warning,
+				method: compaction.method,
+				tokensAfter: compaction.tokensAfter,
+			},
 		);
 		// Agent context (non-transcript): summary first so the LLM sees the
 		// compacted context before recent messages.

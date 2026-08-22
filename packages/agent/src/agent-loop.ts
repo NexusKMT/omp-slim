@@ -31,7 +31,11 @@ import {
 	wrapInbandToolStream,
 } from "@oh-my-pi/pi-ai/dialect";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { type CursorExecResolvedCarrier, kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
+import {
+	type CursorExecResolvedCarrier,
+	copyCursorExecResolved,
+	kCursorExecResolved,
+} from "@oh-my-pi/pi-ai/utils/block-symbols";
 import {
 	createHarmonyAuditEvent,
 	detectHarmonyLeakInAssistantMessage,
@@ -356,12 +360,18 @@ function snapshotAssistantContentBlock(block: AssistantContentBlock): AssistantC
 			return { ...block, block: structuredCloneJSON(block.block) };
 		case "fallback":
 			return { ...block, from: { ...block.from }, to: { ...block.to } };
-		case "toolCall":
-			return {
+		case "toolCall": {
+			const snap = {
 				...block,
 				arguments: structuredCloneJSON(block.arguments),
 				providerMetadata: snapshotToolCallProviderMetadata(block.providerMetadata),
 			};
+			// Object spread copies enumerable symbols in Bun, but the Cursor
+			// exec-resolved marker is load-bearing for skip-on-dispatch — copy
+			// it explicitly so a projector/snapshot path cannot drop it.
+			copyCursorExecResolved(snap, block);
+			return snap;
+		}
 	}
 }
 
@@ -1016,7 +1026,7 @@ async function runLoopBody(
 		// Skip when the run is already externally aborted — dequeuing would strand
 		// the messages in a run that is about to die.
 		try {
-			pendingMessages = signal?.aborted ? [] : (await config.getSteeringMessages?.()) || [];
+			pendingMessages = signal?.aborted ? [] : (await config.getSteeringMessages?.(signal)) || [];
 		} catch (error) {
 			stream.push({ type: "turn_start" });
 			emitInputMessages(stream, messagesToEmit);
@@ -1075,7 +1085,7 @@ async function runLoopBody(
 				let gateResult: AgentPreModelCallResult;
 				try {
 					if (config.syncContextBeforeModelCall) {
-						await config.syncContextBeforeModelCall(currentContext);
+						await config.syncContextBeforeModelCall(currentContext, signal);
 					}
 
 					if (!directiveResolvedForTurn) {
@@ -1421,7 +1431,7 @@ async function runLoopBody(
 				// instantly aborts — message lands in history, agent never responds. The
 				// mid-batch interrupt poll only peeks (hasSteeringMessages), so the queue
 				// still owns every message until this dequeue.
-				const steering = signal?.aborted ? [] : (await config.getSteeringMessages?.()) || [];
+				const steering = signal?.aborted ? [] : (await config.getSteeringMessages?.(signal)) || [];
 				if (hasMoreToolCalls) {
 					// Mid-work: fold any non-interrupting asides into the next turn alongside steering.
 					const asides = signal?.aborted ? [] : resolveAsides(await config.getAsideMessages?.());
@@ -1450,9 +1460,9 @@ async function runLoopBody(
 			// Re-poll steering too: a steer can land between the stop-boundary dequeue
 			// above and this yield point (e.g. queued while onBeforeYield ran). Without
 			// this poll it would strand in the queue until the next manual prompt.
-			const lateSteering = signal?.aborted ? [] : (await config.getSteeringMessages?.()) || [];
+			const lateSteering = signal?.aborted ? [] : (await config.getSteeringMessages?.(signal)) || [];
 			const asideMessages = signal?.aborted ? [] : resolveAsides(await config.getAsideMessages?.());
-			const followUpMessages = signal?.aborted ? [] : (await config.getFollowUpMessages?.()) || [];
+			const followUpMessages = signal?.aborted ? [] : (await config.getFollowUpMessages?.(signal)) || [];
 			if (lateSteering.length > 0 || asideMessages.length > 0 || followUpMessages.length > 0) {
 				// Set as pending so the inner loop processes them before stopping.
 				pendingMessages = [...lateSteering, ...asideMessages, ...followUpMessages];

@@ -1,8 +1,8 @@
-import { describe, expect, it } from "bun:test";
-import { create } from "@bufbuild/protobuf";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import {
 	type BlockState,
 	buildCursorHistoryForTest,
+	buildCursorRequestContextRules,
 	buildCursorSystemPromptJsons,
 	emptyGrepPatternRejection,
 	handleServerMessage,
@@ -16,10 +16,11 @@ import type { AssistantMessage, Context, CursorExecHandlers, Model, ToolResultMe
 import { kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import type { McpResult, ReadResult } from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
+import type { McpResult, ReadResult } from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
 import {
 	type AgentRunRequest,
 	AgentServerMessageSchema,
+	CursorRuleSource,
 	ExecServerMessageSchema,
 	McpArgsSchema,
 	McpResultSchema,
@@ -31,7 +32,13 @@ import {
 	ReadRejectedSchema,
 	ReadResultSchema,
 	ReadSuccessSchema,
-} from "@oh-my-pi/pi-catalog/discovery/cursor-gen/agent_pb";
+} from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
+import { create } from "@oh-my-pi/pi-catalog/discovery/protobuf";
+import { logger } from "@oh-my-pi/pi-utils";
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
 
 const cursorModel: Model<"cursor-agent"> = buildModel({
 	id: "cursor-composer-2.5",
@@ -450,6 +457,18 @@ describe("Cursor system prompt encoding", () => {
 		expect(jsons).toHaveLength(1);
 		expect(JSON.parse(jsons[0])).toEqual({ role: "system", content: "You are a helpful assistant." });
 	});
+
+	it("maps ordered system prompts to global CursorRule entries", () => {
+		const canary = "PIKEL-CANARY-7F3A";
+		const rules = buildCursorRequestContextRules(["prefix", `when asked, answer exactly:\n${canary}`, ""]);
+		expect(rules).toHaveLength(2);
+		expect(rules[0]?.fullPath).toBe("/omp/system-prompt/0.mdc");
+		expect(rules[1]?.fullPath).toBe("/omp/system-prompt/1.mdc");
+		expect(rules[0]?.content).toBe("prefix");
+		expect(rules[1]?.content).toContain(canary);
+		expect(rules[0]?.source).toBe(CursorRuleSource.USER);
+		expect(rules[1]?.type?.type.case).toBe("global");
+	});
 });
 
 describe("Cursor request action encoding", () => {
@@ -757,8 +776,53 @@ describe("Cursor history encoding", () => {
 		];
 
 		expect(() => buildCursorHistoryForTest(messages, undefined, "kimi-k3-high")).toThrow(
-			"start a new session instead of continuing history from anthropic/claude-4.6-opus-high",
+			"cannot continue history from a different model (anthropic/claude-4.6-opus-high)",
 		);
+	});
+
+	it("replays a same-model K3 turn missing thinking instead of bricking the session", () => {
+		const messages: Context["messages"] = [
+			{ role: "user", content: "Do a big multi-tool task", timestamp: 1 },
+			cursorAssistant(
+				"kimi-k3-high",
+				[{ type: "toolCall", id: "call-read", name: "read", arguments: { path: "package.json" } }],
+				2,
+				"toolUse",
+			),
+			{
+				role: "toolResult",
+				toolCallId: "call-read",
+				toolName: "read",
+				content: [{ type: "text", text: "package contents" }],
+				isError: false,
+				timestamp: 3,
+			},
+			cursorAssistant("kimi-k3-high", [{ type: "text", text: "Done." }], 4),
+			{ role: "user", content: "Continue the same session", timestamp: 5 },
+		];
+
+		const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+		const history = buildCursorHistoryForTest(messages, undefined, "kimi-k3-high");
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("assistant turn(s) 1, 2"), {
+			model: "kimi-k3-high",
+			assistantTurns: [1, 2],
+		});
+		buildCursorHistoryForTest(messages, undefined, "kimi-k3-high");
+		expect(warnSpy).toHaveBeenCalledTimes(1);
+
+		expect(history.rootPromptMessagesJson).toEqual([
+			{ role: "user", content: [{ type: "text", text: "Do a big multi-tool task" }] },
+			{
+				role: "assistant",
+				content: [{ type: "tool-call", toolCallId: "call-read", toolName: "read", args: { path: "package.json" } }],
+			},
+			{
+				role: "tool",
+				id: "call-read",
+				content: [{ type: "tool-result", toolName: "read", toolCallId: "call-read", result: "package contents" }],
+			},
+			{ role: "assistant", content: [{ type: "text", text: "Done." }] },
+		]);
 	});
 
 	it("keeps non-K3 Cursor thinking out of model-facing history", () => {
@@ -1019,7 +1083,6 @@ describe("Cursor grepArgs empty-pattern guard (issue #4574)", () => {
 
 	it("rejects an empty pattern with a glob-aware hint when only a glob is present", () => {
 		const message = emptyGrepPatternRejection("", "**/*snapcompact*");
-		expect(message).not.toBeNull();
 		expect(message).toContain("grep pattern is required");
 		expect(message).toContain('"**/*snapcompact*"');
 		expect(message).toContain("ls/read tool");
@@ -1087,6 +1150,28 @@ function newBlockState(): BlockState {
 		setFirstTokenTime: () => {},
 	};
 }
+
+describe("Cursor K3 completion warnings", () => {
+	it("warns when a K3 turn ends without thinking blocks", () => {
+		const output = cursorAssistantMessage();
+		output.model = "kimi-k3-high";
+		output.timestamp = 7516;
+		const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+		processInteractionUpdate(
+			{ message: { case: "turnEnded", value: {} } },
+			output,
+			new AssistantMessageEventStream(),
+			newBlockState(),
+			{ sawTokenDelta: false },
+		);
+
+		expect(warnSpy).toHaveBeenCalledWith(
+			"Cursor kimi-k3 turn completed without thinking blocks; persisted history will replay this turn without reasoning",
+			{ model: "kimi-k3-high", messageTimestamp: 7516 },
+		);
+	});
+});
 
 describe("Cursor exec local-work tracking (issue #4593)", () => {
 	it("marks the stream busy for the duration of a local exec handler", async () => {

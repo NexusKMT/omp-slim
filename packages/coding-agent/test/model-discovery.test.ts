@@ -8,7 +8,7 @@ import type { OAuthCredentials } from "@oh-my-pi/pi-ai/oauth/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { resolveOllamaModelCacheProviderId } from "@oh-my-pi/pi-catalog/provider-models";
+import { resolveModelCacheProviderId, resolveOllamaModelCacheProviderId } from "@oh-my-pi/pi-catalog/provider-models";
 import type { ModelSpec, OpenAICompat } from "@oh-my-pi/pi-catalog/types";
 import {
 	applyLlamaCppQwenThinking,
@@ -494,7 +494,6 @@ describe("ModelRegistry runtime discovery", () => {
 
 			const zenmuxModels = getModelsForProvider(registry1, "zenmux");
 			const fable = zenmuxModels.find(m => m.id === "anthropic/claude-fable-5-free");
-			expect(fable).toBeDefined();
 			expect(fable?.api).toBe("anthropic-messages");
 			expect(fable?.baseUrl).toBe("https://zenmux.ai/api/anthropic");
 
@@ -515,7 +514,6 @@ describe("ModelRegistry runtime discovery", () => {
 
 			const offlineZenmuxModels = getModelsForProvider(registry2, "zenmux");
 			const offlineFable = offlineZenmuxModels.find(m => m.id === "anthropic/claude-fable-5-free");
-			expect(offlineFable).toBeDefined();
 			expect(offlineFable?.api).toBe("anthropic-messages");
 			expect(offlineFable?.baseUrl).toBe("https://zenmux.ai/api/anthropic");
 		} finally {
@@ -1039,7 +1037,6 @@ describe("ModelRegistry runtime discovery", () => {
 		expect(llamaModels.some(m => m.id === "llama-3.2:3b")).toBe(true);
 		const apiKey = await registry.getApiKey(llamaModels[0]);
 		expect(apiKey).toBe("test-llama-key");
-		expect(apiKey).not.toBe(kNoAuth);
 	});
 	test("llama.cpp discovery without API key is treated as keyless", async () => {
 		const fetchMock: FetchImpl = async (input, init) => {
@@ -1161,7 +1158,7 @@ describe("ModelRegistry runtime discovery", () => {
 		const plain = registry.find("llama.cpp", "llama-3.1-8b");
 		expect(plain?.reasoning).toBe(false);
 		expect(plain?.api).toBe("openai-responses");
-		expect(plain?.baseUrl).toBe("http://127.0.0.1:8080");
+		expect(plain?.baseUrl).toBe("http://127.0.0.1:8080/v1");
 		expect((plain?.compat as DialectFields | undefined)?.reasoningDisableMode).not.toBe("qwen-template-false");
 	});
 
@@ -2172,6 +2169,80 @@ providers:
 		expect(unknown?.reasoning).toBe(false);
 	});
 
+	test("openai-models-list discovery reads server-advertised input modalities for ids absent from the catalog", async () => {
+		writeRawModelsJson({
+			"openai-test": {
+				baseUrl: "http://127.0.0.1:9996",
+				api: "openai-completions",
+				auth: "none",
+				discovery: { type: "openai-models-list" },
+			},
+		});
+		const fetchMock: FetchImpl = async input => {
+			const url = String(input);
+			if (url === "http://127.0.0.1:9996/v1/models") {
+				// Custom virtual tier ids that are absent from the bundled
+				// catalog: their vision support can only come from the server row.
+				return new Response(
+					JSON.stringify({
+						data: [
+							{ id: "high", object: "model", input: ["text", "image"] },
+							{ id: "leftover", object: "model", architecture: { input_modalities: ["text", "image"] } },
+							{ id: "synthetic-tier", object: "model", input_modalities: ["text", "image"] },
+							{ id: "low", object: "model", input: ["text"] },
+							{ id: "medium", object: "model" },
+						],
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				);
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		};
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+		await registry.refresh();
+		// Direct `input`, top-level `input_modalities`, and OpenRouter-style
+		// `architecture.input_modalities` all surface vision support.
+		expect(registry.find("openai-test", "high")?.input).toEqual(["text", "image"]);
+		expect(registry.find("openai-test", "leftover")?.input).toEqual(["text", "image"]);
+		expect(registry.find("openai-test", "synthetic-tier")?.input).toEqual(["text", "image"]);
+		// Server explicitly reports text-only; no image support invented.
+		expect(registry.find("openai-test", "low")?.input).toEqual(["text"]);
+		// Silent server → default text-only fallback.
+		expect(registry.find("openai-test", "medium")?.input).toEqual(["text"]);
+	});
+
+	test("lm-studio discovery keeps native VLM modalities over a thin OpenAI row", async () => {
+		writeRawModelsJson({
+			"lm-studio-test": {
+				baseUrl: "http://127.0.0.1:9995",
+				api: "openai-completions",
+				auth: "none",
+				discovery: { type: "lm-studio" },
+			},
+		});
+		const fetchMock: FetchImpl = async input => {
+			const url = String(input);
+			if (url === "http://127.0.0.1:9995/v1/models") {
+				return new Response(JSON.stringify({ data: [{ id: "local-vlm", object: "model", input: ["text"] }] }), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			if (url === "http://127.0.0.1:9995/api/v0/models") {
+				return new Response(
+					JSON.stringify({
+						data: [{ id: "local-vlm", type: "vlm", capabilities: ["vision"], state: "loaded" }],
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				);
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		};
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+		await registry.refresh();
+		expect(registry.find("lm-studio-test", "local-vlm")?.input).toEqual(["text", "image"]);
+	});
+
 	test("proxy discovery honors API-reported context_length and endpoint routing", async () => {
 		writeRawModelsJson({
 			"proxy-test": {
@@ -2211,6 +2282,71 @@ providers:
 		expect(zeroCtx?.contextWindow).toBe(128000);
 	});
 
+	test("proxy discovery uses proxy-reported name over bundled placeholder", async () => {
+		writeRawModelsJson({
+			"proxy-test": {
+				baseUrl: "http://127.0.0.1:9998",
+				auth: "none",
+				discovery: { type: "proxy" },
+			},
+		});
+		const fetchMock: FetchImpl = async input => {
+			const url = String(input);
+			if (url === "http://127.0.0.1:9998/v1/models") {
+				return new Response(
+					JSON.stringify({
+						data: [
+							{
+								id: "act_two",
+								name: "Act Two",
+								supported_endpoint_types: ["openai"],
+								context_length: 65536,
+							},
+						],
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				);
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		};
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+		await registry.refresh();
+		const model = registry.find("proxy-test", "act_two");
+		expect(model?.name).toBe("Act Two");
+	});
+
+	test("proxy discovery falls back to bundled name when proxy reports none", async () => {
+		writeRawModelsJson({
+			"proxy-test": {
+				baseUrl: "http://127.0.0.1:9998",
+				auth: "none",
+				discovery: { type: "proxy" },
+			},
+		});
+		const fetchMock: FetchImpl = async input => {
+			const url = String(input);
+			if (url === "http://127.0.0.1:9998/v1/models") {
+				return new Response(
+					JSON.stringify({
+						data: [
+							{
+								id: "gpt-5",
+								supported_endpoint_types: ["openai"],
+								context_length: 128000,
+							},
+						],
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				);
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		};
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+		await registry.refresh();
+		const model = registry.find("proxy-test", "gpt-5");
+		expect(model?.name).toBe("GPT-5");
+	});
+
 	test("litellm discovery maps rich model metadata and keeps runtime /v1 baseUrl", async () => {
 		writeRawModelsJson({
 			"litellm-test": {
@@ -2227,6 +2363,7 @@ providers:
 					data: [
 						{
 							model_group: "gpt-big",
+							providers: ["openai"],
 							max_input_tokens: 262_144,
 							max_output_tokens: 16_384,
 							supports_vision: true,
@@ -2247,6 +2384,7 @@ providers:
 		expect(model?.maxTokens).toBe(16_384);
 		expect(model?.input).toEqual(["text", "image"]);
 		expect(model?.reasoning).toBe(true);
+		expect(model?.api).toBe("openai-responses");
 	});
 
 	test("litellm discovery enriches configured proxy models with bundled references", async () => {
@@ -2296,7 +2434,7 @@ providers:
 				return new Response("{}", { status: 404 });
 			}
 			if (url === "http://localhost:4000/v1/models") {
-				return Response.json({ data: [{ id: "default-litellm" }] });
+				return Response.json({ data: [{ id: "default-litellm" }, { id: "openai/gpt-5" }] });
 			}
 			throw new Error(`Unexpected URL: ${url}`);
 		};
@@ -2304,6 +2442,7 @@ providers:
 		await registry.refresh();
 
 		expect(registry.find("litellm-test", "default-litellm")?.baseUrl).toBe("http://localhost:4000/v1");
+		expect(registry.find("litellm-test", "openai/gpt-5")?.api).toBe("openai-responses");
 	});
 
 	test("litellm discovery reuses configured bearer on rich and fallback requests", async () => {
@@ -2406,7 +2545,7 @@ providers:
 		expect(registry.find("litellm-test", "deployment-id")).toBeUndefined();
 	});
 
-	test("startup restores a legacy stale-marked Copilot -1m variant via requestModelId", () => {
+	test("startup restores a legacy stale-marked Copilot -1m variant via requestModelId", async () => {
 		// Regression for #6037/#6284: a synthesized Copilot `-1m` long-context
 		// variant keeps the base model's transport headers via `requestModelId`.
 		// The v10 cache omits headers, and legacy rows written by the old id-only
@@ -2426,15 +2565,17 @@ providers:
 		});
 		// Emulate a legacy write: the variant has no same-id static header source,
 		// so it is flagged unrestorable even though its base carries the headers.
-		writeModelCache("github-copilot", Date.now(), [cachedVariant], true, "", cacheDbPath);
+		authStorage.setRuntimeApiKey("github-copilot", "ghp_test_token");
+		const cacheProviderId = resolveModelCacheProviderId("github-copilot", { apiKey: "ghp_test_token" });
+		writeModelCache(cacheProviderId, Date.now(), [cachedVariant], true, "", cacheDbPath);
 		const db = new Database(cacheDbPath);
-		db.run("UPDATE model_cache SET header_restore_version = 0 WHERE provider_id = ?", ["github-copilot"]);
+		db.run("UPDATE model_cache SET header_restore_version = 0 WHERE provider_id = ?", [cacheProviderId]);
 		db.close();
 
 		const registry = new ModelRegistry(authStorage, modelsJsonPath);
+		await registry.hydrateCredentialScopedModelCaches();
 
 		const restored = registry.find("github-copilot", "gpt-5.6-sol-1m");
-		expect(restored).toBeDefined();
 		expect(restored?.headers).toEqual(bundledBase.headers);
 	});
 
@@ -2450,7 +2591,8 @@ providers:
 			requestModelId: "gpt-5.6-sol",
 			headers: { "X-Tenant-Route": "tenant-a" },
 		});
-		writeModelCache("github-copilot", Date.now(), [cachedAlias], true, "", cacheDbPath, [bundledBase]);
+		const cacheProviderId = resolveModelCacheProviderId("github-copilot");
+		writeModelCache(cacheProviderId, Date.now(), [cachedAlias], true, "", cacheDbPath, [bundledBase]);
 
 		const registry = new ModelRegistry(authStorage, modelsJsonPath);
 

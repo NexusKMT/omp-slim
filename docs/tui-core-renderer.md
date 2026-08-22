@@ -66,8 +66,31 @@ needs to know whether the user has scrolled away from the tail.
 - A component tree that reports **no seam** gets shell semantics: whatever
   scrolls off is final. Shrinking such a frame into its committed prefix
   re-anchors the window and leaves the stale copy in history (§3).
-- Inside multiplexers, a resize leaves the pane history wrapped at the old
-  width (same as any shell output).
+- Inside terminal multiplexers, a width change terminates the physical-row
+  coordinate epoch. The renderer captures an opaque
+  `NativeScrollbackWidthEpoch` marker from the last emitted source state before
+  `SIGWINCH`, then resolves that same logical boundary after the settled-width
+  render. Host-reflowed history stays immutable. Output queued during
+  settlement is emitted only from the resolved old boundary to the current
+  source boundary at the terminal-owned viewport bottom; the settled viewport
+  then repaints in place. No old-width and new-width row counts are compared,
+  and no old viewport row is recommitted. Components without the source
+  contract retain the conservative physical-row fallback. Visible overlays
+  freeze the seam and pinned live regions clip advancement at their final
+  boundary. Height-only resizes retain the existing ledger. Direct HerdR panes
+  use this path because clearing and replaying scrollback flickers in its
+  host-owned pane. What the settled frame then does to native history is
+  governed by `ResizeScrollbackMode` (`setResizeScrollback`; engine default
+  `preserve`, and the coding agent applies its `tui.resizeScrollback`
+  setting, default `append`): `append` replays the transcript at the settled width below the
+  host-rewrapped history (one fresh copy per settled resize — the host's own
+  rewrap hard-breaks old-width rows, so without a replay scrollback stays
+  width-shredded); `rebuild` clears pane history first (ED3) so it holds the
+  transcript exactly once at the current width; `preserve` repaints the
+  viewport only and keeps the old-width wrap. The logical-boundary machinery
+  above stays load-bearing for `preserve` and for epochs settled under a
+  visible overlay, where the replay defers to the next uncovered width
+  settle.
 
 ---
 
@@ -81,7 +104,9 @@ needs to know whether the user has scrolled away from the tail.
    geometry frames). The detector samples the prefix tail (up to 8 non-blank
    rows in the last 24, SGR-stripped). A single in-place mismatch is accepted
    as stale history; a structural shift re-anchors at the first changed row,
-   favoring duplication over content loss.
+   favoring duplication over content loss. An in-place width change does not
+   audit or re-slice the prior epoch's physical coordinates; it resolves the
+   captured logical source marker in the settled-width frame.
 3. Classify the frame as a gesture-driven full paint, an opt-in divergence
    rebuild, or an ordinary update and calculate the window/commit chunk.
    Overlays freeze commits. A pinned live region clips its offscreen mutable
@@ -95,17 +120,18 @@ needs to know whether the user has scrolled away from the tail.
 | `#emitFullPaint`             | home + committed chunk + window rows; optional ED3 | initial paint, explicit geometry/session/reset gestures, or rebuild |
 | `#emitUpdate` scroll-append  | new bottom rows plus changed-row range             | rows leaving the screen are exactly the commit chunk                |
 | `#emitUpdate` in-window diff | relative move plus changed-row rewrite             | nothing scrolls or commits                                          |
-| `#emitUpdate` seam rewrite   | commit chunk plus full window rewrite              | commit/window re-anchor, hidden-gap backfill, or mux resize         |
+| `#emitUpdate` seam rewrite   | commit chunk plus full window rewrite              | commit/window re-anchor or hidden-gap backfill                      |
 
 **ED3 (`CSI 3 J`) is emitted in exactly one place** —
 `#emitFullPaint({ clearScrollback: true })`. The normal callers are explicit
 user gestures: session replace/branch/resume
 (`requestRender(true, { clearScrollback: true })`), resize outside a
-multiplexer, and `resetDisplay()` (the display-reset chord, `Alt+L` by
-default). It clears native history without `ED2` first; the replay overwrites
-every row from home so terminals without synchronized output do not expose a
-blank viewport. A gesture pins the user to the tail, so the history snap is
-acceptable.
+multiplexer, `resetDisplay()` (the display-reset chord, `Alt+L` by
+default), and a settled in-place width resize when the resize-scrollback
+mode is `rebuild`. It clears native history without `ED2` first; the replay
+overwrites every row from home so terminals without synchronized output do
+not expose a blank viewport. A gesture pins the user to the tail, so the
+history snap is acceptable.
 
 The second caller is an ordinary-render divergence when
 `tui.scrollbackRebuild` is enabled: if the committed prefix structurally
@@ -113,8 +139,9 @@ resynchronizes or the current frame collapses into committed rows, the renderer
 clears and replays the current frame to replace stale preview history with the
 final form. This path is disabled by default and never runs after the first
 paint, during an explicit replacement/geometry frame, or inside a multiplexer.
-Multiplexers never get ED3 (it is a no-op there and a replay would duplicate
-pane history).
+Multiplexers receive ED3 only through the opt-in `rebuild` resize-scrollback
+mode — tmux honors an inner ED3 and clears pane history; hosts that ignore it
+(GNU screen) degrade to the `append` behavior.
 
 The ordinary update path never emits ED2/ED3 or an absolute cursor home —
 several terminal families snap a scrolled reader to the bottom on those.
@@ -134,6 +161,14 @@ When multiple root children report a seam, the topmost seam wins because
 commits are prefix-only. `NativeScrollbackCommittedRows` lets containers pass
 the committed count down to children, and `NativeScrollbackReplay` lets
 components release layout locks before a destructive replay.
+
+`NativeScrollbackWidthEpoch` is the cross-width source contract. Capture reads
+only state that produced the last emitted frame. Resolve projects that source
+boundary into the newly rendered width, while the current-boundary method
+identifies the logical suffix queued during settlement. Containers propagate
+the marker through nested sources; Markdown snapshots its last rendered source
+text, so a streaming update received before `SIGWINCH` cannot masquerade as
+already-emitted output.
 
 `TranscriptContainer` implements the application seam. It scans for the first
 unfinalized transcript block. Finalized blocks before it are exact; that live
@@ -156,7 +191,8 @@ contract, not a terminal-specific optimization.
 
 1. **NEVER add a new `CSI 3 J` (ED3) callsite.** ED3 flows only through
    `#emitFullPaint({ clearScrollback: true })`, for explicit gestures or the
-   guarded opt-in divergence rebuild, and never inside multiplexers.
+   guarded opt-in divergence rebuild; inside multiplexers only via the opt-in
+   `rebuild` resize-scrollback mode.
 2. **Ordinary emitters NEVER rewrite a committed row.** They treat frame rows
    `< C` as immutable. A shrink or structural resync may re-anchor below the old
    commit point, but in default mode stale history remains and new bytes are
@@ -164,22 +200,41 @@ contract, not a terminal-specific optimization.
    deliberate exception: it clears and replays the complete current frame.
 3. **Commits are exactly the chunk.** Any byte shape that scrolls the screen
    must scroll only rows accounted for by the commit advance.
-4. **NEVER probe the viewport position or fork on platform in the update
+4. **A multiplexer width resize NEVER advances history from cross-width row
+   arithmetic.** The old committed physical-row coordinate is opaque after
+   reflow; no old-width and new-width row counts are ever compared. In
+   `append` (the coding agent's default setting) and opt-in `rebuild` modes
+   the settled frame hands the
+   whole recomposed current-width frame to the full-paint emitter — commits
+   re-base to exactly the replayed chunk. In `preserve` mode (and while a
+   visible overlay covers the settle) the resize leaves the host-reflowed
+   viewport in place and establishes a complete-frame baseline independent of
+   the native commit count. Subsequent growth writes the exact current-width
+   rows newly crossing the seam—not blank scroll commands—then repaints the
+   bounded viewport; only that slice advances commits. Visible overlays
+   advance neither the baseline nor the seam ledger; overlay exit backfills
+   the exact hidden slice. Pinned live regions advance only through their
+   final boundary; finalization releases the deferred mutable slice. During a
+   height shrink, only occupied old-frame rows actually moved into history by
+   the host are excluded from the append-owned seam; empty viewport rows do
+   not consume content-driven movement. Height-only resizes do not terminate
+   the epoch.
+5. **NEVER probe the viewport position or fork on platform in the update
    path.** win32 behaves like POSIX. The probe APIs are gone; do not
    reintroduce them.
-5. **Only declare rows exact when their bytes are stable.** Mutable transcript
+6. **Only declare rows exact when their bytes are stable.** Mutable transcript
    content may commit as an unpinned frozen snapshot, but rows before the seam
    remain under the exact-prefix audit.
-6. **Park the hardware cursor at real content bottom**, not the padded window
+7. **Park the hardware cursor at real content bottom**, not the padded window
    bottom, or height shrinks scroll live rows into history and duplicate them
    per resize step.
-7. **Cursor writes live inside the synchronized-output frame**, before ESU —
+8. **Cursor writes live inside the synchronized-output frame**, before ESU —
    never as a second frame after it.
-8. **NEVER throw in the render hot path.** Clamp over-wide lines
+9. **NEVER throw in the render hot path.** Clamp over-wide lines
    (`truncateToWidth`); a width mismatch is cosmetic, not fatal.
-9. **Multiplexers get no destructive clear and no history rewrap on resize** —
-   repaint the window in place; pane history keeps its old wrap.
-10. **Any change to the ledger math, the emitters, or the seam must be
+10. **Multiplexers get no destructive clear and no history rewrap on resize** —
+    repaint the window in place; pane history keeps its old wrap.
+11. **Any change to the ledger math, the emitters, or the seam must be
     validated by the stress harness (§6)** across its full scenario matrix,
     not by a single-terminal smoke test.
 
@@ -230,16 +285,16 @@ width models in measure-vs-slice produced crashes.
 
 **Rule:** any new measuring code routes through these helpers, and the hot
 path clamps instead of throwing. Known residual: combining-heavy scripts
-(Arabic harakat) survive painting verbatim, but ghostty-web's cell readback can
-migrate non-spacing marks across cells — the stress harness compares those rows
-with marks stripped (`sameLinesAllowingMarkDrift`).
+(Arabic harakat) survive painting verbatim, but kitty-vt-wasm's cell snapshots
+expose at most two combining marks per cell — the stress harness compares those
+rows with marks stripped (`sameLinesAllowingMarkDrift`).
 
 ---
 
 ## 6. The fidelity gate (use it)
 
 `packages/tui/test/render-stress-harness.ts` drives the renderer's **real
-emitted ANSI** into a ghostty-web `VirtualTerminal` across randomized op
+emitted ANSI** into a kitty-vt-wasm (kitty's real screen.c) `VirtualTerminal` across randomized op
 sequences and parameterized terminal shapes, and validates the contract with a
 **shadow commit ledger**: an independent reimplementation of §1's math, fed
 only by observed frames (a `render` wrap) and observed bytes (a `write` wrap).
@@ -311,6 +366,7 @@ default-on only for kitty/ghostty (`PI_NO_KITTY_PLACEHOLDERS` /
 | `PI_DEBUG_REDRAW=1`                                      | Log the chosen render intent + ledger state per frame to the debug log.                                                                                                     |
 | `PI_TUI_RESIZE_IN_PLACE=1\|0`                            | Force resize to repaint in place (no alt-screen borrow, no ED3 rewrap) on / off. Default-on for terminals that re-report size on alt-screen toggles (Warp).                 |
 | `PI_TUI_SCROLLBACK_REBUILD=1`                            | Initialize low-level `TUI` divergence rebuild on. Coding-agent subsequently applies `tui.scrollbackRebuild` (default `false`), so use the setting for interactive sessions. |
+| `PI_TUI_RESIZE_SCROLLBACK=rebuild\|append\|preserve`    | Initialize the low-level `TUI` resize-scrollback mode. Coding-agent subsequently applies `tui.resizeScrollback` (default `append`), so use the setting for interactive sessions.  |
 
 Removed with the old engine: `PI_TUI_ED3_SAFE` (no ED3-risk lever exists),
 `PI_CLEAR_ON_SHRINK`, and `PI_TUI_DEBUG` (per-render dump superseded by
@@ -321,8 +377,8 @@ Removed with the old engine: `PI_TUI_ED3_SAFE` (no ED3-risk lever exists),
 ## 10. Before you touch the render core — checklist
 
 - [ ] Are you about to emit `CSI 3 J` anywhere other than the existing
-      `clearScrollback` full-paint path for a gesture or guarded divergence
-      rebuild? **Stop.**
+      `clearScrollback` full-paint path for a gesture, guarded divergence
+      rebuild, or the `rebuild` resize-scrollback settle? **Stop.**
 - [ ] Could an ordinary emitter rewrite a row below `committedRows`? **Stop.**
 - [ ] Does your byte shape scroll rows not accounted for by the commit chunk?
       That breaks the append-only ledger.

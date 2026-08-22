@@ -1,16 +1,29 @@
-import { LRUCache } from "lru-cache/raw";
-import { Lexer, Marked, type Token, Tokenizer, type TokenizerAndRendererExtension, type Tokens } from "marked";
+import { LRUCache } from "@oh-my-pi/pi-utils/lru";
+import {
+	Lexer,
+	Marked,
+	type Token,
+	Tokenizer,
+	type TokenizerAndRendererExtension,
+	type Tokens,
+} from "@oh-my-pi/pi-utils/marked";
 import { latexToBlock } from "../latex-block";
 import { inlineMathSpanEnd, isBareMathEnvironment, latexToUnicode } from "../latex-to-unicode";
 import type { SymbolTheme } from "../symbols";
 import { TERMINAL } from "../terminal-capabilities";
-import type { Component, NativeScrollbackCommittedRows, NativeScrollbackReplay } from "../tui";
+import type {
+	Component,
+	NativeScrollbackCommittedRows,
+	NativeScrollbackReplay,
+	NativeScrollbackWidthEpoch,
+} from "../tui";
 import {
 	applyBackgroundToLine,
 	Ellipsis,
 	encodeTextSized,
 	getPaddingX,
 	getSegmenter,
+	isOsc66Line,
 	padding,
 	replaceTabs,
 	truncateToWidth,
@@ -30,16 +43,77 @@ function normalizeOsc8Terminators(text: string): string {
 	return text.replace(OSC8_ST_PREFIX_REGEX, "$1\x07");
 }
 
-// OSC 66 (Kitty text-sizing) heading spans are emitted as a single indivisible
-// unit by the H1 render path. Like image-protocol lines, they must bypass
-// ANSI wrapping and width padding: re-wrapping splits/normalizes the sized span
-// (recomputing the explicit `w=` cell count and hoisting SGR out of the OSC
-// payload), and padding would append trailing cells past the doubled glyph.
-const OSC66_LINE_PREFIX = "\x1b]66;";
+const MARKDOWN_FENCE_LINE = /^ {0,3}(`{3,}|~{3,})[ \t]*(.*)$/;
+const MARKDOWN_HEADING_LINE = /^ {0,3}#{1,6}[ \t]+\S/;
+const FENCED_SOURCE_INTRO = /\b(?:code|example|markdown|output|snippet|source)\s*:?\s*$/i;
 
-function isOsc66Line(line: string): boolean {
-	return line.includes(OSC66_LINE_PREFIX);
+function isGfmTableDelimiter(line: string, headerLine: string | undefined): boolean {
+	if (!headerLine || !line.includes("|") || !headerLine.includes("|")) return false;
+	const delimiterCells = line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|");
+	const headerCells = headerLine.trim().replace(/^\|/, "").replace(/\|$/, "").split("|");
+	return (
+		delimiterCells.length >= 2 &&
+		headerCells.length === delimiterCells.length &&
+		delimiterCells.every(cell => /^:?-{3,}:?$/.test(cell.trim())) &&
+		headerCells.every(cell => cell.trim().length > 0)
+	);
 }
+
+/**
+ * Gemini can emit a bare closing fence without its opener, then continue with
+ * headings and tables. CommonMark must interpret that lone fence as an opener,
+ * which turns the rest of an otherwise valid report into one raw code block.
+ *
+ * Repair only the unambiguous rich-document shape at final render: one
+ * unmatched bare fence after prose, followed by both an ATX heading and a GFM
+ * table delimiter. Keep ordinary incomplete code blocks, fenced Markdown
+ * examples, and every matched fence untouched.
+ */
+function repairOrphanClosingFence(text: string): string {
+	const lines = text.split("\n");
+	let open: { index: number; marker: string; info: string } | undefined;
+	for (let index = 0; index < lines.length; index++) {
+		const match = MARKDOWN_FENCE_LINE.exec(lines[index]!);
+		if (!match) continue;
+		const marker = match[1]!;
+		const info = match[2]!.trim();
+		if (!open) {
+			open = { index, marker, info };
+			continue;
+		}
+		if (marker[0] === open.marker[0] && marker.length >= open.marker.length && info === "") {
+			open = undefined;
+		}
+	}
+	if (open?.info !== "") return text;
+
+	let previous = "";
+	for (let index = open.index - 1; index >= 0; index--) {
+		previous = lines[index]!.trim();
+		if (previous) break;
+	}
+	if (!previous || previous.endsWith(":") || FENCED_SOURCE_INTRO.test(previous)) return text;
+
+	let hasHeading = false;
+	let hasTableDelimiter = false;
+	for (let index = open.index + 1; index < lines.length; index++) {
+		const line = lines[index]!;
+		hasHeading ||= MARKDOWN_HEADING_LINE.test(line);
+		hasTableDelimiter ||= isGfmTableDelimiter(line, lines[index - 1]);
+		if (hasHeading && hasTableDelimiter) {
+			lines.splice(open.index, 1);
+			return lines.join("\n");
+		}
+	}
+	return text;
+}
+
+// OSC 66 (Kitty text-sizing) heading spans are emitted as a single indivisible
+// unit by the H1 render path. Like image-protocol lines, they bypass ANSI
+// wrapping and width padding (see `isOsc66Line` in ../utils): re-wrapping
+// splits/normalizes the sized span (recomputing the explicit `w=` cell count
+// and hoisting SGR out of the OSC payload), and padding would append trailing
+// cells past the doubled glyph.
 
 function normalizeHtmlEntitiesForTerminal(raw: string): string {
 	const parseCodePoint = (value: number): string => {
@@ -804,11 +878,11 @@ markdownParser.use({
 // (no `m` flag), and stickiness only removes the futile later attempts. The
 // flags/anchor guard below skips any rule a future marked version changes.
 class AnchoredAtZero extends RegExp {
-	exec(str: string): RegExpExecArray | null {
+	override exec(str: string): RegExpExecArray | null {
 		this.lastIndex = 0; // sticky matches set lastIndex; rules are shared
 		return super.exec(str);
 	}
-	test(str: string): boolean {
+	override test(str: string): boolean {
 		this.lastIndex = 0;
 		return super.test(str);
 	}
@@ -1092,6 +1166,15 @@ export interface DefaultTextStyle {
 }
 
 /**
+ * Stateful incremental code highlighter carrying parser state across pushes.
+ * Produced per streaming fence by {@link MarkdownTheme.createHighlightStream}.
+ */
+export interface HighlightStreamSession {
+	/** Highlight the next chunk and advance parser state. */
+	push(chunk: string): string;
+}
+
+/**
  * Theme functions for markdown elements.
  * Each function takes text and returns styled text with ANSI codes.
  */
@@ -1111,6 +1194,14 @@ export interface MarkdownTheme {
 	strikethrough: (text: string) => string;
 	underline: (text: string) => string;
 	highlightCode?: (code: string, lang?: string) => string[];
+	/**
+	 * Create a stateful incremental highlighter for one streaming code fence.
+	 * `push` receives newline-terminated complete lines (only the final push
+	 * may omit the trailing newline) and must return highlighted ANSI text for
+	 * exactly the pushed chunk, byte-identical to highlighting the concatenated
+	 * text through `highlightCode`. Return null when `lang` is unsupported.
+	 */
+	createHighlightStream?: (lang?: string) => HighlightStreamSession | null;
 	/**
 	 * Resolve a mermaid ASCII rendering by fenced block source text.
 	 * Return null to fall back to fenced code rendering.
@@ -1381,10 +1472,21 @@ interface StreamPrefixLineCache extends RenderSignature {
 	lines: readonly string[];
 	tables: readonly TableRenderSpec[];
 }
-interface StreamingDiffLineCache extends RenderSignature {
+interface StreamingHighlightCache extends RenderSignature {
 	lang: string | undefined;
 	text: string;
 	lines: readonly string[];
+	stream: HighlightStreamSession;
+}
+
+/**
+ * Split a highlight-stream push result (newline-terminated lines) into
+ * per-line strings, dropping the empty tail produced by the final newline.
+ */
+function splitPushedHighlightLines(pushed: string): string[] {
+	const lines = pushed.split("\n");
+	lines.pop();
+	return lines;
 }
 
 interface TableLayoutLock {
@@ -1405,7 +1507,9 @@ interface RenderedTableLayout extends TableLayoutLock {
 	endRow: number;
 }
 
-export class Markdown implements Component, NativeScrollbackCommittedRows, NativeScrollbackReplay {
+export class Markdown
+	implements Component, NativeScrollbackCommittedRows, NativeScrollbackReplay, NativeScrollbackWidthEpoch
+{
 	#text: string;
 	#paddingX: number; // Left/right padding
 	#paddingY: number; // Top/bottom padding
@@ -1443,14 +1547,27 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 	// exposure to 0 and re-earns it — the exposure is hard-monotone within a
 	// text lineage.
 	#settledExposedText?: string;
+	// Semantic source state that produced the most recent render. Unlike #text,
+	// it does not advance when streaming updates arrive before the next paint.
+	#lastRenderedText?: string;
+	#lastRenderedTransientRenderCache = false;
+	#lastRenderedHasMutableTrailingRow = false;
+	#widthEpochBoundaries = new WeakMap<
+		object,
+		{ text: string; transientRenderCache: boolean; hasMutableTrailingRow: boolean }
+	>();
+
 	// True while #renderStreamingContentLines renders the frozen token range:
 	// frozen code blocks highlight even in transient mode so their bytes match
 	// the finalized render (they render once into the prefix line cache, so
-	// the FFI cost is amortized). The volatile tail normally stays
-	// unhighlighted; streaming diff fences line-highlight completed rows so
-	// semantic colors reach native scrollback before rows leave the viewport.
+	// the FFI cost is amortized). In the volatile tail, an open fence
+	// incrementally highlights its completed lines through a stateful
+	// highlight stream (falling back to per-line highlighting for diff-family
+	// fences when the theme lacks one) so semantic colors reach native
+	// scrollback before rows leave the viewport; only the trailing partial
+	// line stays unhighlighted.
 	#renderingFrozenPrefix = false;
-	#streamingDiffLineCache?: StreamingDiffLineCache;
+	#streamingHighlightCache?: StreamingHighlightCache;
 	#activeRenderSignature?: RenderSignature;
 	// Streaming tables may grow naturally while wholly repaintable. Once any
 	// physical row of a table enters native scrollback, its current column widths
@@ -1462,9 +1579,19 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 	#activeTableRenderSpecs?: TableRenderSpec[];
 
 	#ignoreTight = false;
+	// Width-independent mutation counter for the width-epoch leading-stability
+	// checks (getNativeScrollbackWidthEpochRevision): a Markdown that precedes an
+	// epoch source (startup changelog before the transcript, a thinking block
+	// before the streaming answer) would otherwise be validated by comparing
+	// width-dependent row counts, which conflates reflow with mutation and fails
+	// resolution on every width change. Bumped by every content-shape mutation.
+	#widthEpochRevision = 0;
 
 	setIgnoreTight(ignore: boolean): this {
-		if (this.#ignoreTight !== ignore) this.#clearTableLayouts();
+		if (this.#ignoreTight !== ignore) {
+			this.#clearTableLayouts();
+			this.#widthEpochRevision++;
+		}
 		this.#ignoreTight = ignore;
 		this.invalidate();
 		return this;
@@ -1505,8 +1632,13 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 			this.#streamPrefixLineCache = undefined;
 			this.#settledExposedText = undefined;
 		}
+		this.#widthEpochRevision++;
 		this.invalidate();
 		return true;
+	}
+
+	getNativeScrollbackWidthEpochRevision(): number {
+		return this.#widthEpochRevision;
 	}
 
 	invalidate(): void {
@@ -1522,6 +1654,7 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 		const next = value === true;
 		if (this.#transientRenderCache === next) return;
 		this.#transientRenderCache = next;
+		this.#widthEpochRevision++;
 		this.invalidate();
 	}
 
@@ -1536,6 +1669,56 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 	 */
 	getLastRenderSettledRows(): number {
 		return this.#lastRenderSettledRows;
+	}
+
+	captureNativeScrollbackWidthEpoch(): unknown {
+		if (this.#lastRenderedText === undefined) return undefined;
+		const marker = {};
+		this.#widthEpochBoundaries.set(marker, {
+			text: this.#lastRenderedText,
+			transientRenderCache: this.#lastRenderedTransientRenderCache,
+			hasMutableTrailingRow: this.#lastRenderedHasMutableTrailingRow,
+		});
+		return marker;
+	}
+
+	resolveNativeScrollbackWidthEpoch(boundary: unknown): number | undefined {
+		if (typeof boundary !== "object" || boundary === null || this.#cachedWidth === undefined) return undefined;
+		const captured = this.#widthEpochBoundaries.get(boundary);
+		if (captured === undefined) return undefined;
+		const snapshot = new Markdown(
+			captured.text,
+			this.#paddingX,
+			this.#paddingY,
+			this.#theme,
+			this.#defaultTextStyle,
+			this.#codeBlockIndent,
+		);
+		snapshot.#ignoreTight = this.#ignoreTight;
+		snapshot.#transientRenderCache = captured.transientRenderCache;
+		return Math.max(
+			0,
+			snapshot.render(this.#cachedWidth).length - this.#paddingY - (captured.hasMutableTrailingRow ? 1 : 0),
+		);
+	}
+
+	getNativeScrollbackWidthEpochRows(): number | undefined {
+		return this.#cachedLines === undefined ? undefined : this.#widthEpochRows(this.#cachedLines.length);
+	}
+
+	isNativeScrollbackWidthEpochAppendOnly(boundary: unknown): boolean {
+		if (typeof boundary !== "object" || boundary === null) return true;
+		return this.#widthEpochBoundaries.get(boundary)?.hasMutableTrailingRow !== true;
+	}
+
+	#widthEpochRows(renderedRows: number): number {
+		return Math.max(0, renderedRows - this.#paddingY - (this.#transientRenderCache ? 1 : 0));
+	}
+
+	#recordLastRenderedState(hasContentRows: boolean): void {
+		this.#lastRenderedText = this.#text;
+		this.#lastRenderedTransientRenderCache = this.#transientRenderCache;
+		this.#lastRenderedHasMutableTrailingRow = this.#transientRenderCache && hasContentRows;
 	}
 
 	/**
@@ -1637,6 +1820,7 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 		// Returning the cached reference is load-bearing: parents memoize their
 		// concatenation on reference equality.
 		if (this.#cachedLines && this.#cachedText === this.#text && this.#cachedWidth === width) {
+			this.#recordLastRenderedState(this.#cachedLines.length > 0);
 			return this.#cachedLines;
 		}
 
@@ -1653,11 +1837,14 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 			this.#cachedText = this.#text;
 			this.#cachedWidth = width;
 			this.#cachedLines = EMPTY_RENDER_LINES;
+			this.#recordLastRenderedState(false);
 			return EMPTY_RENDER_LINES;
 		}
 
 		// Replace tabs with 3 spaces for consistent rendering
-		const normalizedText = replaceTabs(this.#text);
+		const normalizedText = this.transientRenderCache
+			? replaceTabs(this.#text)
+			: repairOrphanClosingFence(replaceTabs(this.#text));
 		const signature = this.#renderSignature(width, paddingX);
 
 		// L2: module-level LRU — survives component disposal/recreation across
@@ -1688,6 +1875,7 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 				this.#cachedText = this.#text;
 				this.#cachedWidth = width;
 				this.#cachedLines = cached.lines;
+				this.#recordLastRenderedState(cached.lines.length > 0);
 				return cached.lines;
 			}
 		}
@@ -1731,6 +1919,7 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 				})),
 			});
 		}
+		this.#recordLastRenderedState(contentLines.length > 0);
 
 		return result;
 	}
@@ -1995,17 +2184,15 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 		const bodyLines: RenderedLine[] = [];
 		const tokenText = "text" in token && typeof token.text === "string" ? token.text : "";
 		const lang = "lang" in token && typeof token.lang === "string" ? token.lang : undefined;
-		const normalizedLang = lang?.toLowerCase();
-		const canStreamDiff =
-			this.transientRenderCache &&
-			!this.#renderingFrozenPrefix &&
-			this.#theme.highlightCode &&
-			(normalizedLang === "diff" || normalizedLang === "patch" || normalizedLang === "udiff");
 		const addBodyLine = (line: string): void => {
 			bodyLines.push(renderedLine(literalCode ? line : codeIndent + line, literalCode));
 		};
 
-		if (this.#theme.highlightCode && (!this.transientRenderCache || this.#renderingFrozenPrefix)) {
+		const streaming = this.transientRenderCache && !this.#renderingFrozenPrefix;
+		if (this.#theme.highlightCode && (!streaming || this.#codeTokenHasClosingFence(token))) {
+			// Finalized content — or a fence that closed mid-stream, which
+			// highlights through the same whole-block call the finalized render
+			// uses so rows entering native scrollback byte-match it.
 			const highlightedLines = this.#theme.highlightCode(tokenText, lang);
 			for (const hlLine of highlightedLines) {
 				addBodyLine(hlLine);
@@ -2013,18 +2200,18 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 			return bodyLines;
 		}
 
-		if (canStreamDiff) {
-			const closedFence = this.#codeTokenHasClosingFence(token);
+		if (streaming && this.#theme.highlightCode) {
+			// Open fence: highlight completed lines incrementally so semantic
+			// colors reach native scrollback before rows leave the viewport;
+			// only the trailing partial line stays unhighlighted.
 			const lineEnd = tokenText.lastIndexOf("\n");
-			if (closedFence || lineEnd >= 0) {
-				const completedText = closedFence ? tokenText : tokenText.slice(0, lineEnd);
-				for (const hlLine of this.#highlightStreamingDiffLines(completedText, lang)) {
+			const completedLines = lineEnd >= 0 ? this.#highlightStreamingLines(tokenText.slice(0, lineEnd), lang) : null;
+			if (completedLines) {
+				for (const hlLine of completedLines) {
 					addBodyLine(hlLine);
 				}
-				if (!closedFence) {
-					for (const codeLine of tokenText.slice(lineEnd + 1).split("\n")) {
-						addBodyLine(this.#theme.codeBlock(codeLine));
-					}
+				for (const codeLine of tokenText.slice(lineEnd + 1).split("\n")) {
+					addBodyLine(this.#theme.codeBlock(codeLine));
 				}
 				return bodyLines;
 			}
@@ -2067,11 +2254,17 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 		return false;
 	}
 
-	#highlightStreamingDiffLines(completedText: string, lang: string | undefined): readonly string[] {
-		const highlightCode = this.#theme.highlightCode;
-		if (!highlightCode) return [];
+	/**
+	 * Highlight the completed (newline-terminated) prefix of a streaming code
+	 * fence. Uses a stateful per-fence highlight stream so each render pushes
+	 * only the newly completed lines, with output byte-identical to the
+	 * whole-block `highlightCode` the finalized render performs. Returns null
+	 * when no stream is available for `lang` (caller falls back to plain
+	 * code-block styling).
+	 */
+	#highlightStreamingLines(completedText: string, lang: string | undefined): readonly string[] | null {
 		const signature = this.#activeRenderSignature;
-		const cache = this.#streamingDiffLineCache;
+		const cache = this.#streamingHighlightCache;
 		if (
 			signature &&
 			cache &&
@@ -2091,23 +2284,47 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 			cache.headingProbe === signature.headingProbe
 		) {
 			if (completedText.length === cache.text.length) return cache.lines;
-			const lines = cache.lines.slice();
+			// Invariant: the stream has consumed `cache.text + "\n"`, so pushing
+			// the added lines with a trailing newline advances it to
+			// `completedText + "\n"` — every fed line stays newline-terminated.
 			const addedText = completedText.slice(cache.text.length + 1);
-			for (const codeLine of addedText.split("\n")) {
-				lines.push(...highlightCode(codeLine, lang));
-			}
-			this.#streamingDiffLineCache = { ...signature, lang, text: completedText, lines };
+			const lines = cache.lines.concat(splitPushedHighlightLines(cache.stream.push(`${addedText}\n`)));
+			this.#streamingHighlightCache = { ...signature, lang, text: completedText, lines, stream: cache.stream };
 			return lines;
 		}
 
-		const lines: string[] = [];
-		for (const codeLine of completedText.split("\n")) {
-			lines.push(...highlightCode(codeLine, lang));
-		}
+		const stream = this.#createHighlightStream(lang);
+		if (!stream) return null;
+		const lines = splitPushedHighlightLines(stream.push(`${completedText}\n`));
 		if (signature) {
-			this.#streamingDiffLineCache = { ...signature, lang, text: completedText, lines };
+			this.#streamingHighlightCache = { ...signature, lang, text: completedText, lines, stream };
 		}
 		return lines;
+	}
+
+	/**
+	 * Resolve a highlight stream for `lang`. Prefers the theme's stateful
+	 * factory; without one, emulates a stream via per-line `highlightCode` for
+	 * diff-family fences only — that grammar is line-local, so per-line output
+	 * matches the whole-block render (other grammars carry cross-line state
+	 * and would diverge).
+	 */
+	#createHighlightStream(lang: string | undefined): HighlightStreamSession | null {
+		const factory = this.#theme.createHighlightStream;
+		if (factory) return factory(lang);
+		const highlightCode = this.#theme.highlightCode;
+		if (!highlightCode) return null;
+		const normalizedLang = lang?.toLowerCase();
+		if (normalizedLang !== "diff" && normalizedLang !== "patch" && normalizedLang !== "udiff") return null;
+		return {
+			push: chunk => {
+				const lines = chunk.split("\n");
+				const trailing = lines.pop() ?? "";
+				let out = "";
+				for (const line of lines) out += `${highlightCode(line, lang).join("\n")}\n`;
+				return trailing ? out + highlightCode(trailing, lang).join("\n") : out;
+			},
+		};
 	}
 
 	#renderEmptyPaddingLines(signature: RenderSignature): string[] {
@@ -2816,7 +3033,13 @@ export class Markdown implements Component, NativeScrollbackCommittedRows, Nativ
 		while (wrapped.length > 1 && wrapped[wrapped.length - 1] === "") {
 			wrapped.pop();
 		}
-		return wrapped;
+		// The native wrap deliberately leaves fg color and bold/italic open at
+		// line ends so continuation lines can re-open them. Table rows splice
+		// every cell line between unstyled border glyphs, so an open style
+		// (e.g. mdCode) would bleed into the "│" and the following cells.
+		// Terminate each line at default fg, clearing bold/italic but keeping
+		// any ambient background (message-bg rendering) intact.
+		return wrapped.map(line => `${line}\x1b[22m\x1b[23m\x1b[39m`);
 	}
 
 	/**

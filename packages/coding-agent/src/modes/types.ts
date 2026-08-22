@@ -8,6 +8,7 @@ import type { KeybindingsManager } from "../config/keybindings";
 import type { Settings } from "../config/settings";
 import type {
 	AutocompleteProviderFactory,
+	ExtensionCustomOptions,
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
 	ExtensionUISelectItem,
@@ -111,13 +112,17 @@ export interface InteractiveModeContext {
 	subagentContainer: Container;
 	btwContainer: Container;
 	omfgContainer: Container;
+	cleanseContainer: Container;
 	errorBannerContainer: Container;
 	modelCycleContainer: Container;
+	deferredCommandContainer: Container;
 	editor: CustomEditor;
 	editorContainer: Container;
 	hookWidgetContainerAbove: Container;
 	hookWidgetContainerBelow: Container;
 	statusLine: StatusLineComponent;
+	syncComposerShape(): void;
+	syncEditorSpelling(): void;
 
 	// Session access
 	session: AgentSession;
@@ -211,6 +216,8 @@ export interface InteractiveModeContext {
 	locallySubmittedUserSignatures: Set<string>;
 	lastSigintTime: number;
 	lastEscapeTime: number;
+	/** Owns Esc for every `/mcp test` that is active or whose cancellation hint may still be visible. */
+	mcpTestEscapeHandlers: Set<() => void>;
 	lastLeftTapTime: number;
 	shutdownRequested: boolean;
 	/** True once `shutdown()` has started. Read-only from the context;
@@ -269,7 +276,7 @@ export interface InteractiveModeContext {
 	showError(message: string): void;
 	showPinnedError(message: string): void;
 	clearPinnedError(): void;
-	showWarning(message: string): void;
+	showWarning(message: string, options?: { hideWithToolActivity?: boolean }): void;
 	showNewVersionNotification(newVersion: string): void;
 	clearEditor(): void;
 	updatePendingMessagesDisplay(): void;
@@ -311,6 +318,17 @@ export interface InteractiveModeContext {
 		message: AgentMessage,
 		options?: { imageLinks?: readonly (string | undefined)[] },
 	): void;
+	/** True while an optimistically-rendered `/skill:` row awaits its canonical `message_start`. */
+	optimisticSkillMessagePending: boolean;
+	/** Optimistically renders a user-invoked `/skill:` row before its awaited dispatch (issue #8895). */
+	renderOptimisticSkillMessage(
+		message: AgentMessage,
+		options?: { imageLinks?: readonly (string | undefined)[] },
+	): void;
+	/** Swaps the optimistic `/skill:` row for the canonical message emitted by the session. */
+	reconcileOptimisticSkillMessage(message: AgentMessage): void;
+	/** Drops the optimistic `/skill:` row when dispatch fails or bails before reaching the agent. */
+	clearOptimisticSkillMessage(): void;
 	isKnownSlashCommand(text: string): boolean;
 	addMessageToChat(
 		message: AgentMessage,
@@ -321,7 +339,20 @@ export interface InteractiveModeContext {
 		},
 	): Component[];
 	renderSessionContext(sessionContext: SessionContext, options?: RenderSessionContextOptions): void;
-	renderInitialMessages(options?: { preserveExistingChat?: boolean; clearTerminalHistory?: boolean }): void;
+	/** Render a session context in bounded chunks so terminal input runs between transcript paints. */
+	renderSessionContextIncrementally(
+		sessionContext: SessionContext,
+		options: RenderSessionContextOptions,
+		renderChunk?: () => void,
+	): Promise<void>;
+	renderInitialMessages(options?: { preserveExistingChat?: boolean; clearTerminalHistory?: boolean }): Promise<void>;
+	/**
+	 * In-place transcript rewind: drop the rendered components at/after
+	 * `message` when none of their rows reached native scrollback. Returns
+	 * false when the caller must fall back to a destructive
+	 * `renderInitialMessages({ clearTerminalHistory: true })` replay.
+	 */
+	truncateTranscriptFromMessage(message: AgentMessage): boolean;
 	getUserMessageText(message: Message): string;
 	findLastAssistantMessage(): AssistantMessage | undefined;
 	extractAssistantText(message: AssistantMessage): string;
@@ -431,17 +462,24 @@ export interface InteractiveModeContext {
 	handleOmfgCommand(complaint: string): Promise<void>;
 	hasActiveOmfg(): boolean;
 	handleOmfgEscape(): boolean;
+	handleCleanseCommand(args: string): Promise<void>;
+	hasActiveCleanse(): boolean;
+	handleCleanseEscape(): boolean;
 	cycleThinkingLevel(): void;
 	cycleRoleModel(direction?: "forward" | "backward"): Promise<void>;
 	toggleToolOutputExpansion(): void;
 	setToolsExpanded(expanded: boolean): void;
 	toggleThinkingBlockVisibility(): void;
-	openExternalEditor(): void;
-	registerExtensionShortcuts(): void;
-	handlePlanModeCommand(initialPrompt?: string): Promise<void>;
-	handleVibeModeCommand(initialPrompt?: string): Promise<void>;
-	handleGoalModeCommand(rest?: string): Promise<void>;
-	handleGuidedGoalCommand(rest?: string): Promise<void>;
+	handlePlanModeCommand(
+		initialPrompt?: string,
+		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+	): Promise<boolean>;
+	handleVibeModeCommand(
+		initialPrompt?: string,
+		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+	): Promise<boolean>;
+	handleGoalModeCommand(rest?: string, input?: Pick<SubmittedUserInput, "images" | "imageLinks">): Promise<boolean>;
+	handleGuidedGoalCommand(rest?: string, input?: Pick<SubmittedUserInput, "images" | "imageLinks">): Promise<boolean>;
 	handleLoopCommand(args?: string): Promise<string | undefined>;
 	setLoopPrompt(prompt: string): void;
 	disableLoopMode(): void;
@@ -487,7 +525,7 @@ export interface InteractiveModeContext {
 			keybindings: KeybindingsManager,
 			done: (result: T) => void,
 		) => (Component & { dispose?(): void }) | Promise<Component & { dispose?(): void }>,
-		options?: { overlay?: boolean },
+		options?: ExtensionCustomOptions,
 	): Promise<T>;
 	showExtensionError(extensionPath: string, error: string): void;
 	showToolError(toolName: string, error: string): void;

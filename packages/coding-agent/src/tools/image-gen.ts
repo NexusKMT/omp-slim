@@ -1,9 +1,10 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
-import { type ApiKey, type FetchImpl, getEnvApiKey, type Model, withAuth } from "@oh-my-pi/pi-ai";
+import { type ApiKey, type FetchImpl, getEnvApiKey, getOpenRouterHeaders, type Model, withAuth } from "@oh-my-pi/pi-ai";
 import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
 import {
+	applyCodexResidencyHeader,
 	CODEX_BASE_URL,
 	getCodexAccountId,
 	OPENAI_HEADER_VALUES,
@@ -19,13 +20,13 @@ import {
 	ptree,
 	readSseJson,
 	Snowflake,
+	USER_AGENT,
 	untilAborted,
 } from "@oh-my-pi/pi-utils";
-import packageJson from "../../package.json" with { type: "json" };
 import { isAuthenticated, type ModelRegistry } from "../config/model-registry";
 import { settings } from "../config/settings";
 import type { CustomTool } from "../extensibility/custom-tools/types";
-import { ohMyPiXAIUserAgent, resolveXAIHttpCredentials } from "../lib/xai-http";
+import { resolveXAIHttpCredentials } from "../lib/xai-http";
 import imageGenDescription from "../prompts/tools/image-gen.md" with { type: "text" };
 import { AUTO_IMAGE_PROVIDER_ORDER, type ImageProvider, isImageProviderId } from "./image-providers";
 import { resolveReadPath } from "./path-utils";
@@ -895,9 +896,11 @@ function buildOpenAIImageHeaders(model: Model, apiKey: string, sessionId: string
 		if (accountId) {
 			headers.set(OPENAI_HEADERS.ACCOUNT_ID, accountId);
 		}
+		// Same region gate as the chat transport; the token carries the value.
+		applyCodexResidencyHeader(headers, apiKey);
 		headers.set(OPENAI_HEADERS.BETA, OPENAI_HEADER_VALUES.BETA_RESPONSES);
 		headers.set(OPENAI_HEADERS.ORIGINATOR, OPENAI_HEADER_VALUES.ORIGINATOR_CODEX);
-		headers.set("User-Agent", `pi/${packageJson.version} (${os.platform()} ${os.release()}; ${os.arch()})`);
+		headers.set("User-Agent", USER_AGENT);
 		if (sessionId) {
 			headers.set(OPENAI_HEADERS.CONVERSATION_ID, sessionId);
 			headers.set(OPENAI_HEADERS.SESSION_ID, sessionId);
@@ -1389,7 +1392,7 @@ export const imageGenTool: CustomTool<typeof imageGenSchema, ImageGenToolDetails
 									headers: {
 										Authorization: `Bearer ${key}`,
 										"Content-Type": "application/json",
-										"User-Agent": ohMyPiXAIUserAgent(),
+										"User-Agent": USER_AGENT,
 									},
 									body: JSON.stringify(xaiBody),
 									signal: requestSignal,
@@ -1479,9 +1482,7 @@ export const imageGenTool: CustomTool<typeof imageGenSchema, ImageGenToolDetails
 									headers: {
 										"Content-Type": "application/json",
 										Authorization: `Bearer ${key}`,
-										"HTTP-Referer": "https://omp.sh/",
-										"X-OpenRouter-Title": "Oh-My-Pi",
-										"X-OpenRouter-Categories": "cli-agent",
+										...getOpenRouterHeaders(),
 									},
 									body: JSON.stringify(requestBody),
 									signal: requestSignal,

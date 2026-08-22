@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, describe, expect, it } from "bun:test";
 import type { Model } from "@oh-my-pi/pi-ai";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import type { CustomToolContext } from "@oh-my-pi/pi-coding-agent/extensibility/custom-tools";
@@ -9,13 +9,16 @@ import {
 	imageGenTool,
 	setImageProviderOrder,
 } from "@oh-my-pi/pi-coding-agent/tools/image-gen";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { removeWithRetries, USER_AGENT } from "@oh-my-pi/pi-utils";
 
 const originalOpenRouterKey = Bun.env.OPENROUTER_API_KEY;
 const generatedImagePaths: string[] = [];
 
-afterEach(async () => {
-	await Promise.all(generatedImagePaths.splice(0).map(imagePath => removeWithRetries(imagePath)));
+afterAll(async () => {
+	await Promise.all(generatedImagePaths.map(imagePath => removeWithRetries(imagePath)));
+});
+
+afterEach(() => {
 	if (originalOpenRouterKey === undefined) {
 		delete Bun.env.OPENROUTER_API_KEY;
 	} else {
@@ -496,17 +499,21 @@ describe("imageGenTool", () => {
 		expect(requestUrl).toBe("https://example-proxy.invalid/backend-api/codex/responses");
 		expect(requestHeaders?.get("authorization")).toBe("Bearer opaque-proxy-key");
 		expect(requestHeaders?.has("chatgpt-account-id")).toBe(false);
+		expect(requestHeaders?.has("x-openai-internal-codex-residency")).toBe(false);
 		expect(requestHeaders?.get("OpenAI-Beta")).toBe("responses=experimental");
 		expect(requestHeaders?.get("originator")).toBe("pi");
 		expect(result.details?.provider).toBe("openai-codex");
 		expect(result.details?.imageCount).toBe(1);
 	});
 
-	it("adds Codex account headers when the bearer token exposes an account id", async () => {
+	it("adds Codex account and residency headers from bearer token claims", async () => {
 		let requestHeaders: Headers | undefined;
 		const tokenPayload = Buffer.from(
 			JSON.stringify({
-				"https://api.openai.com/auth": { chatgpt_account_id: "acc_test" },
+				"https://api.openai.com/auth": {
+					chatgpt_account_id: "acc_test",
+					chatgpt_data_residency: "us",
+				},
 			}),
 		).toString("base64");
 		const codexJwt = `header.${tokenPayload}.signature`;
@@ -566,6 +573,7 @@ describe("imageGenTool", () => {
 
 		expect(requestHeaders?.get("authorization")).toBe(`Bearer ${codexJwt}`);
 		expect(requestHeaders?.get("chatgpt-account-id")).toBe("acc_test");
+		expect(requestHeaders?.get("x-openai-internal-codex-residency")).toBe("us");
 		expect(result.details?.imageCount).toBe(1);
 	});
 	it("routes xAI image generation with xAI-only aspect ratios", async () => {
@@ -618,7 +626,7 @@ describe("imageGenTool", () => {
 
 		expect(requestUrl).toBe("https://api.x.ai/v1/images/generations");
 		expect(captured.authorization).toBe("Bearer test-xai-token");
-		expect(captured.userAgent).toBe("oh-my-pi/xai");
+		expect(captured.userAgent).toBe(USER_AGENT);
 		expect(requestBody).toMatchObject({
 			model: "grok-imagine-image",
 			prompt: "a cat.",
