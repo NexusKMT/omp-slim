@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `opencode-go/ox-alpha-free` sending `reasoning_effort: "xhigh"` for the top thinking tier, which the OpenCode Go gateway rejects; the model now uses the gateway's wire-exact `low`/`high`/`max` ladder with mandatory thinking so `--thinking max` reaches the real max tier ([#9349](https://github.com/can1357/oh-my-pi/issues/9349)).
+
 ## [18.0.0] - 2026-08-22
 
 ### Added

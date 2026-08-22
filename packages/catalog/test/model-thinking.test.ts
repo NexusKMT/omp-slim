@@ -342,6 +342,54 @@ describe("model thinking derivation", () => {
 		expect(clampThinkingLevelForModel(bare, Effort.Max)).toBe(Effort.High);
 	});
 
+	it("normalizes OpenCode gateway ox-alpha onto the low/high/max ladder with mandatory thinking (issue #9349)", () => {
+		// The OpenCode Go gateway rejects minimal/medium/xhigh for ox-alpha
+		// (`[1210] ... please use low, high, or max`), so the stale
+		// minimal..xhigh surface the catalog shipped made the top tier
+		// unreachable: `max` clamped to `xhigh` and 400'd upstream.
+		const staleThinking = {
+			mode: "effort" as const,
+			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
+		};
+		const oxAlpha = createModel({
+			id: "ox-alpha-free",
+			api: "openai-completions",
+			provider: "opencode-go",
+			baseUrl: "https://opencode.ai/zen/go/v1",
+			thinking: staleThinking,
+		});
+
+		expect(oxAlpha.thinking).toEqual({
+			mode: "effort",
+			efforts: [Effort.Low, Effort.High, Effort.Max],
+			requiresEffort: true,
+		});
+		// The top tier now reaches the gateway's real `max` wire value instead
+		// of the rejected `xhigh`, and no selection can produce a rejected tier.
+		expect(oxAlpha.thinking?.effortMap).toBeUndefined();
+		expect(requireSupportedEffort(oxAlpha, Effort.Max)).toBe(Effort.Max);
+		expect(clampThinkingLevelForModel(oxAlpha, Effort.XHigh)).toBe(Effort.High);
+		expect(clampThinkingLevelForModel(oxAlpha, Effort.Medium)).toBe(Effort.Low);
+
+		// Other hosts proxying an ox-alpha SKU expose their own vocabularies and
+		// must not inherit the gateway ladder.
+		const kiloOxAlpha = createModel({
+			id: "stealth/ox-alpha",
+			api: "openai-completions",
+			provider: "kilo",
+			baseUrl: "https://api.kilo.ai/api/gateway",
+			thinking: staleThinking,
+		});
+		expect(getSupportedEfforts(kiloOxAlpha)).toEqual([
+			Effort.Minimal,
+			Effort.Low,
+			Effort.Medium,
+			Effort.High,
+			Effort.XHigh,
+		]);
+		expect(kiloOxAlpha.thinking?.requiresEffort).toBeUndefined();
+	});
+
 	it("encodes the Gemini 3 Pro effort gap and mandatory reasoning in metadata", () => {
 		const model = createModel({
 			id: "gemini-3-pro-preview",
