@@ -28,6 +28,9 @@
 ### Fixed
 
 - Fixed the heuristic gist `extractLocation` regex applying the `/i` flag over its `[A-Z]` proper-noun requirement, which nullified the capital-letter signal and let arbitrary lowercase mid-sentence prose (e.g. `"...in your loaded context plus"`) be stored as a location. ([#7917](https://github.com/can1357/oh-my-pi/issues/7917))
+### Fixed
+
+- Made episodic gist participant extraction Unicode-aware so proper nouns in non-Latin cased scripts (Greek, Cyrillic, …) are captured; the previous ASCII-only `[A-Z][a-z]+`/`\b` regex extracted zero participants from any non-English memory. ([#7918](https://github.com/can1357/oh-my-pi/issues/7918))
 
 ## [17.2.10] - 2026-08-06
 
