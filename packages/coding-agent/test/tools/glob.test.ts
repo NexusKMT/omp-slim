@@ -100,16 +100,19 @@ describe("GlobTool.execute", () => {
 		});
 
 		const execution = tool.execute("glob-timeout-cleanup", { path: "." });
+		let executionSettled = false;
+		void execution.then(
+			() => {
+				executionSettled = true;
+			},
+			() => {
+				executionSettled = true;
+			},
+		);
 		await started.promise;
 		await timeoutObserved.promise;
-		const stateBeforeCleanup = await Promise.race([
-			execution.then(
-				() => "settled",
-				() => "settled",
-			),
-			Promise.resolve("pending"),
-		]);
-		expect(stateBeforeCleanup).toBe("pending");
+		await new Promise<void>(resolve => setImmediate(resolve));
+		expect(executionSettled).toBe(false);
 
 		release.resolve();
 		const result = await execution;
@@ -155,18 +158,21 @@ describe("GlobTool.execute", () => {
 			{ path: `.; ${path.dirname(process.cwd())}` },
 			controller.signal,
 		);
+		let executionSettled = false;
+		void execution.then(
+			() => {
+				executionSettled = true;
+			},
+			() => {
+				executionSettled = true;
+			},
+		);
 
 		await allStarted.promise;
 		controller.abort();
 		await allAborted.promise;
-		const stateBeforeCleanup = await Promise.race([
-			execution.then(
-				() => "settled",
-				() => "settled",
-			),
-			Promise.resolve("pending"),
-		]);
-		expect(stateBeforeCleanup).toBe("pending");
+		await new Promise<void>(resolve => setImmediate(resolve));
+		expect(executionSettled).toBe(false);
 
 		release.resolve();
 		await expect(execution).rejects.toBeInstanceOf(ToolAbortError);
