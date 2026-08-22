@@ -99,13 +99,17 @@ describe("getDashboardStats time range", () => {
 	});
 
 	it("returns range-filtered folder stats through the HTTP API", async () => {
-		await initDb();
+		const db = await initDb();
 
 		const now = Date.now();
 		insertMessageStats([
 			makeMessage(now, "api-folder-within-24h", "/tmp/current-project"),
 			makeMessage(now - 48 * 60 * 60 * 1000, "api-folder-outside-24h", "/tmp/older-project"),
 		]);
+
+		// The legacy dashboard path reads this in getStatsByAgentType; the folder query does not.
+		db.run("DROP INDEX idx_messages_timestamp_agent_type");
+		db.run("ALTER TABLE messages DROP COLUMN agent_type");
 
 		const folders = await readFolderStats(
 			await handleApi(new Request("http://stats.test/api/stats/folders?range=24h")),
