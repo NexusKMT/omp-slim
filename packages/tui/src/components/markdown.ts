@@ -1773,9 +1773,9 @@ export class Markdown
 		const hasPrefix =
 			prefix !== undefined && prefixTokens !== undefined && text.length > prefix.length && text.startsWith(prefix);
 		const refDefText = hasPrefix ? text.slice(prefix.length) : text;
-		const canStream = !HAS_REF_DEF.test(refDefText) && !text.includes("\r");
+		const canStream = !HAS_REF_DEF.test(refDefText) && !refDefText.includes("\r");
 		if (canStream && hasPrefix) {
-			const tailTokens = lexDocument(text.slice(prefix.length));
+			const tailTokens = lexDocument(refDefText);
 			const tokens = [...prefixTokens, ...tailTokens];
 			this.#freezeStablePrefix(text, tokens, { preserveExisting: true });
 			return tokens;
