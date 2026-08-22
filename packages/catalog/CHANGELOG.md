@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Venice-hosted Qwen models (e.g. `venice/qwen3-6-35b-a3b`) failing with `400 Invalid request parameters`. Venice's chat-completions schema rejects DashScope's top-level `enable_thinking` boolean; reasoning now rides the OpenAI-style `reasoning_effort` field Venice accepts ([#9345](https://github.com/can1357/oh-my-pi/issues/9345)).
+
 ## [18.0.0] - 2026-08-22
 
 ### Added

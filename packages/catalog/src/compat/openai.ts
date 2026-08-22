@@ -312,6 +312,7 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 		modelMatchesHost(hostModel, "anthropic") || isClaudeModelId(spec.id) || isAnthropicNamespacedModelId(spec.id);
 	const isAlibaba = modelMatchesHost(hostModel, "alibabaDashscope");
 	const isNvidiaNim = modelMatchesHost(hostModel, "nvidia");
+	const isVenice = modelMatchesHost(hostModel, "venice");
 	const isQwen = isQwenModelId(spec.id);
 	// DeepSeek V4 (and other reasoning-capable DeepSeek models) reject follow-up requests in
 	// thinking mode unless prior assistant tool-call turns include `reasoning_content`. The
@@ -467,7 +468,7 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 				? "openrouter"
 				: isQwen && (isNvidiaNim || provider === "vllm")
 					? "qwen-chat-template"
-					: isQwen && isFireworks
+					: isQwen && (isFireworks || isVenice)
 						? "openai"
 						: isAlibaba || isQwen
 							? "qwen"
