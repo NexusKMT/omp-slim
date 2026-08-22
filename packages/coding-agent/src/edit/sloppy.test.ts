@@ -331,16 +331,12 @@ describe("sloppy v8", () => {
 		);
 	});
 
-	test("applies mono marker-less desired text against the fuzzy-matched block", () => {
-		// Desired-state habit: the model writes the edited line plainly; the
-		// fuzzy match finds the near-identical original and is replaced.
+	test("rejects marker-less desired text instead of inferring indentation", () => {
 		const content = "    if (!entryRow)\n      throw invalid();\n";
-		const notes: string[] = [];
 
-		expect(applySloppy(content, "§\n    if (entryRow)\n      throw invalid();", { path: "i.ts", notes })).toBe(
-			"    if (entryRow)\n      throw invalid();\n",
-		);
-		expect(notes.join("\n")).toMatch(/desired text without markers/);
+		expect(() =>
+			applySloppy(content, "§\n    if (entryRow)\n      throw invalid();", { path: "i.ts", notes: [] }),
+		).toThrow(/needs »/);
 	});
 
 	test("collapses a duplicated block stated once as mono desired text", () => {
@@ -1018,8 +1014,10 @@ describe("sloppy v8", () => {
 			"}",
 			"",
 		].join("\n");
-		const pattern = "loadUser(…\n⟪const cached = …\nconst user = legacyStore.read(…);\nreturn user;⟫\n…}";
-		const rewrite = "const cached = …\nconst user = await database.users.read(…);\nreturn user;";
+		const pattern =
+			`loadUser(${M.gap}\n  ${M.selectOpen}const cached = ${M.gap}\n` +
+			`  const user = legacyStore.read(${M.gap});\n  return user;${M.selectClose}\n${M.gap}}`;
+		const rewrite = `const cached = ${M.gap}\n  const user = await database.users.read(${M.gap});\n  return user;`;
 
 		expect(variant.apply(content, operation(pattern, rewrite), context)).toBe(
 			[
@@ -1033,7 +1031,6 @@ describe("sloppy v8", () => {
 			].join("\n"),
 		);
 	});
-
 	test("allows zero rewrite gaps to replace a selection containing gaps", () => {
 		const content = "function choose() {\n  if (legacy) {\n    return oldValue;\n  }\n}\n";
 		const pattern = "choose() …\n⟪if (legacy) {…\nreturn oldValue;…\n}⟫\n…}";
@@ -1053,15 +1050,16 @@ describe("sloppy v8", () => {
 		);
 	});
 
-	test("inserts at a single-marker point and adopts tab indentation", () => {
+	test("inserts add lines at their authored tab depth", () => {
 		const content = "function dispatch(request: Request) {\n\treturn send(request);\n}\n";
-		const pattern = "function dispatch(…\n⟪⟫return send(request);";
+		const input = inlineOperation(
+			"function dispatch(request: Request) {\n＋\tvalidate(request);\n\treturn send(request);",
+		);
 
-		expect(variant.apply(content, operation(pattern, "validate(request);"), context)).toBe(
+		expect(variant.apply(content, input, context)).toBe(
 			"function dispatch(request: Request) {\n\tvalidate(request);\n\treturn send(request);\n}\n",
 		);
 	});
-
 	test("keeps a same-line insertion inline", () => {
 		const content = "const value = compute(input);\nreport(value);\n";
 		const pattern = "const value = …⟪⟫compute(input)…\nreport(value)";
@@ -1220,13 +1218,15 @@ describe("sloppy v8", () => {
 
 	test("maps provided rewrite gaps positionally and drops omitted later gaps", () => {
 		const content = "function load() {\n  const a = first();\n  const b = legacy(id);\n}\n";
-		const pattern = "load() …\n⟪const a = …\nconst b = legacy(…);⟫\n…}";
+		const pattern =
+			`load() ${M.gap}\n  ${M.selectOpen}const a = ${M.gap}\n` +
+			`  const b = legacy(${M.gap});${M.selectClose}\n${M.gap}}`;
+		const rewrite = `const a = ${M.gap}\n  const b = modern(id);`;
 
-		expect(variant.apply(content, operation(pattern, "const a = …\nconst b = modern(id);"), context)).toBe(
+		expect(variant.apply(content, operation(pattern, rewrite), context)).toBe(
 			"function load() {\n  const a = first();\n  const b = modern(id);\n}\n",
 		);
 	});
-
 	test("accepts marker-free verbatim replacement", () => {
 		const content = "const timeout = 1000;\nrun(timeout);\n";
 		const pattern = "const timeout = 1000;";
@@ -1321,14 +1321,9 @@ describe("sloppy v8", () => {
 			"}",
 			"",
 		].join("\n");
-		const input = [
-			M.open,
-			"function mapStopReason(reason: string) {",
-			"  switch (reason) {",
-			"⟪⟫    case 'pause_turn':",
-			`${M.put}    case 'end_turn':`,
-			"    case 'pause_turn':",
-		].join("\n");
+		const input = [M.open, "    case 'pause_turn':", `${M.put}    case 'end_turn':`, "    case 'pause_turn':"].join(
+			"\n",
+		);
 
 		expect(variant.apply(content, input, context)).toBe(
 			[
@@ -1343,11 +1338,9 @@ describe("sloppy v8", () => {
 			].join("\n"),
 		);
 	});
-
-	test("splits an indented rewrite separator glued to its content and adopts depth", () => {
-		// Luna run rb-nehdxas1: `  »  private _kittyProtocolActive = false;` inside
-		// an op body — indent before the glued separator must not turn the line
-		// into an invalid control line; the single-line rewrite re-adopts depth.
+	test("preserves authored depth after an indented glued rewrite separator", () => {
+		// The separator split retains the two authored leading spaces; the
+		// rewrite engine does not infer depth from the matched class member.
 		const content = "class T {\n  private _kittyProtocolActive = true;\n}\n";
 		const input = "§t.ts\n  private _kittyProtocolActive = true;\n  »  private _kittyProtocolActive = false;";
 
@@ -1538,16 +1531,15 @@ describe("sloppy v8", () => {
 		expect(variant.apply(content, input, context)).toBe("if (newlineIndex === -1) {\n  return;\n}\n");
 	});
 
-	test("uniformly shifts a de-indented multiline rewrite to the matched block", () => {
+	test("applies a de-indented multiline rewrite verbatim", () => {
 		const content = "function outer() {\n  if (ready) {\n    oldCall();\n    keep();\n  }\n}\n";
 		const match = "  if (ready) {\n    oldCall();\n    keep();\n  }";
 		const rewrite = "if (ready) {\n  newCall();\n  keep();\n}";
 
 		expect(variant.apply(content, operation(match, rewrite), context)).toBe(
-			"function outer() {\n  if (ready) {\n    newCall();\n    keep();\n  }\n}\n",
+			"function outer() {\nif (ready) {\n  newCall();\n  keep();\n}\n}\n",
 		);
 	});
-
 	test("applies an authored indentation-only replacement verbatim", () => {
 		const content = "function run() {\n    const getContrastVsWhite = () => value;\n}\n";
 		const input = operation(
@@ -1674,7 +1666,7 @@ describe("sloppy v8", () => {
 		expect(variant.apply(content, input, context)).toBe("before();\nafter();\n");
 	});
 
-	test("moves code with a delete then insertion in one batch", () => {
+	test("moves code with authored add lines in one batch", () => {
 		const content = [
 			"function run() {",
 			"  const target = () => 2;",
@@ -1686,8 +1678,10 @@ describe("sloppy v8", () => {
 			"",
 		].join("\n");
 		const input = [
-			operation("const helper = () => {\n  return 1;\n};", ""),
-			operation("⟪⟫const target = () => 2;", `${M.put}1`),
+			operation("  const helper = () => {\n    return 1;\n  };", ""),
+			inlineOperation(
+				"function run() {\n＋  const helper = () => {\n＋    return 1;\n＋  };\n  const target = () => 2;",
+			),
 		].join("\n");
 
 		expect(variant.apply(content, input, context)).toBe(
@@ -1703,7 +1697,6 @@ describe("sloppy v8", () => {
 			].join("\n"),
 		);
 	});
-
 	test("trusts authored move indentation when the destination anchor has a different indent", () => {
 		const content = [
 			"function run() {",
@@ -1718,7 +1711,7 @@ describe("sloppy v8", () => {
 		].join("\n");
 		const input = [
 			operation("  const helper = () => {\n    return 1;\n  };", ""),
-			operation("  const target = () => 2;", `${M.put}1\n\n  const target = () => 2;`),
+			operation("    const target = () => 2;", `${M.put}1\n\n  const target = () => 2;`),
 		].join("\n");
 
 		expect(variant.apply(content, input, context)).toBe(
@@ -1730,50 +1723,6 @@ describe("sloppy v8", () => {
 				"",
 				"  const target = () => 2;",
 				"    finish();",
-				"}",
-				"",
-			].join("\n"),
-		);
-	});
-	test("adopts destination indent when an unindented move rewrite repeats its anchor", () => {
-		const content = [
-			"function cmdTheme() {",
-			"  initTheme();",
-			"",
-			"  const getContrastVsWhite = (colorName: string): string => {",
-			"    return colorName;",
-			"  };",
-			"}",
-			"",
-		].join("\n");
-		const rewrite = [
-			"const parseAnsiRgb = (ansi: string): [number, number, number] | null => {",
-			"  const match = ansi.match(/38;2;(\\d+);(\\d+);(\\d+)/);",
-			"  return match ? [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)] : null;",
-			"};",
-			"",
-			"const getContrastVsWhite = (colorName: string): string => {",
-		].join("\n");
-
-		expect(
-			variant.apply(
-				content,
-				operation("const getContrastVsWhite = (colorName: string): string => {", rewrite),
-				context,
-			),
-		).toBe(
-			[
-				"function cmdTheme() {",
-				"  initTheme();",
-				"",
-				"  const parseAnsiRgb = (ansi: string): [number, number, number] | null => {",
-				"    const match = ansi.match(/38;2;(\\d+);(\\d+);(\\d+)/);",
-				"    return match ? [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)] : null;",
-				"  };",
-				"",
-				"  const getContrastVsWhite = (colorName: string): string => {",
-				"    return colorName;",
-				"  };",
 				"}",
 				"",
 			].join("\n"),
@@ -2137,9 +2086,9 @@ describe("directional selection markers", () => {
 		);
 	});
 
-	test("supports empty directional selection ⟪⟫ as insertion point", () => {
+	test("supports an empty directional selection at the exact line boundary", () => {
 		const content = "function run() {\n  finish();\n}\n";
-		const input = operation("function run() {\n  ⟪⟫finish();\n}", "start();\n  ");
+		const input = operation("function run() {\n⟪⟫  finish();\n}", "  start();\n");
 		expect(variant.apply(content, input, context)).toBe("function run() {\n  start();\n  finish();\n}\n");
 	});
 });

@@ -16,12 +16,12 @@ Move code by deleting it where it is (MATCH + `»` + empty REWRITE, or `⟪old l
 
 <rules>
 - MATCH MUST include a fragment of the changed line; context alone can hit the wrong place.
-- Copy MATCH lines byte-for-byte from the file as last read, indentation included. Matching tolerates indent drift, but exactly copied anchors keep the lines you author aligned; quoted code from markdown, diffs, or another agent has untrustworthy indentation — mirror the file, not the quote.
-- Every authored line — REWRITE, `＋`, and each desired-side line after a newline inside `⟪⟫` — is written verbatim: give it its exact final depth in the file's indent character. A desired side's first line inherits whatever precedes `⟪` on its line; continuation lines carry their full depth themselves. A column-0 line amid indented ones is applied flattened, silently. NEVER add annotation lines like `//`.
+- Copy MATCH lines byte-for-byte from the file as last read, indentation included. Exact anchors make the engine splice at the authored byte boundaries; quoted code from markdown, diffs, or another agent has untrustworthy indentation — mirror the file, not the quote.
+- Every authored line — REWRITE, `＋`, and each desired-side line after a newline inside `⟪⟫` — is written verbatim: give it its exact final depth in the file's indent character. A desired side's first line inherits whatever precedes `⟪` on its line; continuation lines carry their full depth themselves. A column-0 line amid indented ones is applied flattened, silently. The engine NEVER infers, converts, or repairs indentation. NEVER add annotation lines like `//`.
 - AVOID retyping unchanged lines; `…` re-emits them with their original indentation.
 - PREFER `⟪old│new⟫` selections and `＋` lines — unchanged lines or `…` between them — over a block REWRITE that retypes unchanged lines; use block form only for moves and large restructures.
 - NEVER combine `⟪old│new⟫` with a `»` REWRITE, or inline with bare `⟪old⟫`, in one operation.
-- Operations address the original file; earlier ops never shift later anchors. Matching forgives whitespace and identifier typos; operators and delimiters MUST match exactly.
+- Operations address the original file; earlier ops never shift later anchors. A fuzzy location fallback may tolerate textual drift, but it NEVER repairs authored whitespace; operators and delimiters MUST match exactly.
 - A failure applies nothing and includes a copy-ready corrected payload: send that verbatim.
 - "No change" means the anchor already reads as your final text; look elsewhere.
 - To write markers (`§»⟪│⟫`) or a line starting with `＋` literally, use `write`.
@@ -112,8 +112,8 @@ loadUser(…
 <critical>
 1. First line is `§relative/path.ts`; a bare `§` opens the next operation in the same file.
 2. Changes inside lines → `⟪old│new⟫`, several per op. New lines → `＋`. Moves and large restructures → MATCH + `»` + final text.
-3. Authored indentation is verbatim: every REWRITE/`＋`/desired line — retyped anchors included — carries the exact leading whitespace it must have in the file; wrong depth or style applies silently. Tab-indented file → tab indents.
+3. Authored indentation is verbatim: every REWRITE/`＋`/desired line — retyped anchors included — carries the exact leading whitespace it must have in the file; wrong depth or style applies silently. Tab-indented file → tab indents; the engine NEVER reindents.
 4. Prove one unique match anchored on the changed line, or use `§*`.
 5. After an error, send the supplied corrected payload verbatim — nothing was applied; NEVER freestyle a new guess.
-6. Edit FIRST, straight from text already in the conversation: matching is fuzzy and every failure shows the current lines. Read only what neither the conversation nor an error shows — a quote that lost its indentation is not a depth source.
+6. Edit FIRST only from a verbatim file read or edit-error payload. Markdown, diffs, and agent summaries are not indentation sources; re-read the exact region before authoring whole lines.
 </critical>

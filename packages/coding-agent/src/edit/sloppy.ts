@@ -10,14 +10,7 @@ import { outputMeta } from "../tools/output-meta";
 import { enforcePlanModeWrite, resolvePlanPath } from "../tools/plan-mode-guard";
 import { type DiffError, type DiffResult, generateDiffString } from "./diff";
 import { levenshteinDistance } from "./modes/replace";
-import {
-	detectIndentChar,
-	detectLineEnding,
-	normalizeToLF,
-	normalizeUnicode,
-	restoreLineEndings,
-	stripBom,
-} from "./normalize";
+import { detectLineEnding, normalizeToLF, normalizeUnicode, restoreLineEndings, stripBom } from "./normalize";
 import { readEditFileText, serializeEditFileText } from "./read-file";
 import type { EditToolDetails, EditToolPerFileResult, LspBatchRequest } from "./renderer";
 import sloppyGrammarSource from "./sloppy.lark" with { type: "text" };
@@ -776,8 +769,13 @@ function embedAddLines(patternText: string): string {
 			out[out.length - 1] = `${SELECT_OPEN}${anchor}${SELECT_DIVIDER}${added[0]}${SELECT_CLOSE}`;
 			index--;
 		} else {
-			out.push(`${SELECT_OPEN}${SELECT_DIVIDER}${added.join("\n")}\n${SELECT_CLOSE}`);
-			index--;
+			const insertion = `${SELECT_OPEN}${SELECT_DIVIDER}${added.join("\n")}\n${SELECT_CLOSE}`;
+			if (index < lines.length) {
+				out.push(insertion + lines[index]);
+			} else {
+				out.push(insertion);
+				index--;
+			}
 		}
 	}
 	return out.join("\n");
@@ -976,12 +974,9 @@ function parseOperations(input: string, content: string): Operation[] {
 			operations.push(diffFallback);
 			return;
 		}
-		// Desired-state habit: marker-less lines state the intended final text;
-		// the fuzzy matcher finds the near-matching block and the authored text
-		// replaces it. Only punctuation/whitespace-level deltas apply (identical
-		// word tokens); identifier-level fuzz and exact non-duplicate matches
-		// fall through so move-deletions and the missing-separator diagnosis
-		// keep their meaning. Gap or add markers mean the op is not marker-less.
+		// Preserve the narrow duplicate-collapse recovery for marker-less text.
+		// Near-match replacement is intentionally unsupported: without explicit
+		// markers, fuzzy location cannot provide trustworthy byte boundaries.
 		if (!sourcePatternText.includes(GAP)) {
 			try {
 				const desired = createOperation(
@@ -1013,12 +1008,7 @@ function parseOperations(input: string, content: string): Operation[] {
 					return;
 				}
 				const matched = located?.[0];
-				const wordTokens = (text: string): string => (text.match(/[\p{L}\p{N}_$]+/gu) ?? []).join("\u0000");
 				const matchedText = matched === undefined ? undefined : content.slice(matched.matchStart, matched.matchEnd);
-				const delta =
-					matchedText !== undefined &&
-					normalizeText(matchedText).text !== normalizeText(desired.patternText).text &&
-					wordTokens(matchedText) === wordTokens(desired.patternText);
 				const matchedNormalized = matchedText === undefined ? "" : normalizeText(matchedText).text;
 				let neighborsDuplicate = false;
 				if (matched !== undefined && matchedNormalized.length >= 8) {
@@ -1030,7 +1020,7 @@ function parseOperations(input: string, content: string): Operation[] {
 							after.startsWith(matchedNormalized.slice(-overlap));
 					}
 				}
-				if (delta || neighborsDuplicate) {
+				if (neighborsDuplicate) {
 					desired.recoveryNote = `Note: operation ${operations.length + 1} stated desired text without markers; the closest matching block was replaced with it. Mark changes explicitly with ${SELECT_OPEN}old${SELECT_DIVIDER}new${SELECT_CLOSE}.`;
 					operations.push(desired);
 					return;
@@ -1523,12 +1513,15 @@ function followingLiteral(tokens: PatternToken[], boundary: number): number | un
 	return undefined;
 }
 
+type CandidateMatchMode = "raw" | "normalized" | "fuzzy";
+
 function resolveBoundary(
 	boundary: number,
 	kind: "start" | "end" | "empty",
 	tokens: PatternToken[],
 	matches: ReadonlyMap<number, Occurrence>,
 	normalized: NormalizedText,
+	mode: CandidateMatchMode,
 	lineInsertContent?: string,
 ): number {
 	const previousIndex = precedingLiteral(tokens, boundary);
@@ -1537,10 +1530,13 @@ function resolveBoundary(
 	const next = nextIndex === undefined ? undefined : matches.get(nextIndex);
 	const immediatePrevious = boundary > 0 && tokens[boundary - 1]?.kind === "literal";
 	const immediateNext = boundary < tokens.length && tokens[boundary]?.kind === "literal";
+	const raw = mode === "raw";
+	const startAt = (offset: number, fallback: number) => (raw ? offset : sourceStart(normalized, offset, fallback));
+	const endAt = (offset: number, fallback: number) => (raw ? offset : sourceEnd(normalized, offset, fallback));
 	if (kind === "empty") {
-		if (next) return sourceStart(normalized, next.start, normalized.text.length);
+		if (next) return startAt(next.start, raw ? (lineInsertContent?.length ?? 0) : normalized.text.length);
 		if (previous) {
-			const offset = sourceEnd(normalized, previous.end, normalized.text.length);
+			const offset = endAt(previous.end, raw ? (lineInsertContent?.length ?? 0) : normalized.text.length);
 			// A whole-line insert anchored only on the text above lands at the
 			// end of that text — before its newline — and would splice into the
 			// anchor line. Snap forward to the start of the following line.
@@ -1552,13 +1548,16 @@ function resolveBoundary(
 		}
 	}
 	if (kind === "start") {
-		if (immediateNext && next) return sourceStart(normalized, next.start, normalized.text.length);
-		if (previous) return sourceEnd(normalized, previous.end, normalized.text.length);
-		if (next) return sourceStart(normalized, next.start, normalized.text.length);
+		if (immediateNext && next)
+			return startAt(next.start, raw ? (lineInsertContent?.length ?? 0) : normalized.text.length);
+		if (previous) return endAt(previous.end, raw ? (lineInsertContent?.length ?? 0) : normalized.text.length);
+		if (next) return startAt(next.start, raw ? (lineInsertContent?.length ?? 0) : normalized.text.length);
 	}
-	if (immediatePrevious && previous) return sourceEnd(normalized, previous.end, normalized.text.length);
-	if (next) return sourceStart(normalized, next.start, normalized.text.length);
-	if (previous) return sourceEnd(normalized, previous.end, normalized.text.length);
+	if (immediatePrevious && previous) {
+		return endAt(previous.end, raw ? (lineInsertContent?.length ?? 0) : normalized.text.length);
+	}
+	if (next) return startAt(next.start, raw ? (lineInsertContent?.length ?? 0) : normalized.text.length);
+	if (previous) return endAt(previous.end, raw ? (lineInsertContent?.length ?? 0) : normalized.text.length);
 	return 0;
 }
 
@@ -1566,18 +1565,22 @@ function collectCandidates(
 	content: string,
 	normalized: NormalizedText,
 	pattern: ParsedPattern,
-	fuzzy: boolean,
+	mode: CandidateMatchMode,
 	allowSinglePunctuationInsertion = false,
 ): CandidateResult {
+	const raw = mode === "raw";
+	const sourceAtStart = (offset: number, fallback: number) =>
+		raw ? offset : sourceStart(normalized, offset, fallback);
+	const sourceAtEnd = (offset: number, fallback: number) => (raw ? offset : sourceEnd(normalized, offset, fallback));
 	const literalIndices = pattern.tokens.flatMap((token, index) => (token.kind === "literal" ? [index] : []));
 	const occurrences = new Map<number, Occurrence[]>();
 	for (const index of literalIndices) {
 		const token = pattern.tokens[index] as LiteralToken;
 		occurrences.set(
 			index,
-			fuzzy
+			mode === "fuzzy"
 				? fuzzyOccurrences(normalized.text, token.normalized, allowSinglePunctuationInsertion)
-				: exactOccurrences(normalized.text, token.normalized),
+				: exactOccurrences(raw ? content : normalized.text, raw ? token.text : token.normalized),
 		);
 	}
 	if (literalIndices.some(index => occurrences.get(index)?.length === 0)) return { candidates: [], overflow: false };
@@ -1606,6 +1609,7 @@ function collectCandidates(
 				pattern.tokens,
 				chosen,
 				normalized,
+				mode,
 				pattern.lineInsertion ? content : undefined,
 			);
 			const end = resolveBoundary(
@@ -1614,6 +1618,7 @@ function collectCandidates(
 				pattern.tokens,
 				chosen,
 				normalized,
+				mode,
 				pattern.lineInsertion ? content : undefined,
 			);
 			const first = chosen.get(literalIndices[0]);
@@ -1628,8 +1633,8 @@ function collectCandidates(
 				const before = beforeIndex === undefined ? undefined : chosen.get(beforeIndex);
 				const after = afterIndex === undefined ? undefined : chosen.get(afterIndex);
 				if (!before || !after) return;
-				const captureStart = sourceEnd(normalized, before.end, content.length);
-				const captureEnd = sourceStart(normalized, after.start, content.length);
+				const captureStart = sourceAtEnd(before.end, content.length);
+				const captureEnd = sourceAtStart(after.start, content.length);
 				captures[token.captureIndex] = content.slice(captureStart, captureEnd);
 			}
 			const selectionSpans = pattern.selectionPairs.map(range => {
@@ -1642,6 +1647,7 @@ function collectCandidates(
 						pattern.tokens,
 						chosen,
 						normalized,
+						mode,
 						lineInsertContent,
 					),
 					end: resolveBoundary(
@@ -1650,6 +1656,7 @@ function collectCandidates(
 						pattern.tokens,
 						chosen,
 						normalized,
+						mode,
 						lineInsertContent,
 					),
 				};
@@ -1658,8 +1665,8 @@ function collectCandidates(
 			const candidate: Candidate = {
 				start,
 				end,
-				matchStart: sourceStart(normalized, first.start, 0),
-				matchEnd: sourceEnd(normalized, last.end, content.length),
+				matchStart: sourceAtStart(first.start, 0),
+				matchEnd: sourceAtEnd(last.end, content.length),
 				captures,
 				tuple: literalIndices.map(index => chosen.get(index)?.start ?? -1),
 				selectionSpans,
@@ -1696,8 +1703,8 @@ function collectCandidates(
 		for (const occurrence of occurrences.get(tokenIndex) ?? []) {
 			if (previous && (hasGap ? occurrence.start < previous.end : occurrence.start !== previous.end)) continue;
 			if (previous && gapTokens.some(token => token.lineBounded)) {
-				const gapStart = sourceEnd(normalized, previous.end, content.length);
-				const gapEnd = sourceStart(normalized, occurrence.start, content.length);
+				const gapStart = sourceAtEnd(previous.end, content.length);
+				const gapEnd = sourceAtStart(occurrence.start, content.length);
 				if (content.slice(gapStart, gapEnd).includes("\n")) continue;
 			}
 			chosen.set(tokenIndex, occurrence);
@@ -1762,8 +1769,8 @@ function operationPayload(operation: Operation, target: "*" | "" = "", patternTe
 
 function exactAndFuzzyCandidates(content: string, pattern: ParsedPattern): CandidateResult {
 	const normalized = normalizeText(content);
-	const exact = collectCandidates(content, normalized, pattern, false);
-	const fuzzy = collectCandidates(content, normalized, pattern, true);
+	const exact = collectCandidates(content, normalized, pattern, "normalized");
+	const fuzzy = collectCandidates(content, normalized, pattern, "fuzzy");
 	const candidates = [...exact.candidates];
 	for (const candidate of fuzzy.candidates) {
 		if (
@@ -2066,7 +2073,16 @@ function locate(
 	exclusions?: ReadonlyArray<{ start: number; end: number }>,
 ): Candidate[] {
 	const normalized = normalizeText(content);
-	if (pattern.literalFallback) {
+	const raw = collectCandidates(content, normalized, pattern, "raw");
+	if (raw.overflow) {
+		throw new Error(`Operation ${operationNumber} pattern is too broad; add another distinctive ${GAP} fragment.`);
+	}
+	if (raw.candidates.length === 0 && hasAddLines(operation.sourcePatternText)) {
+		throw new Error(
+			`Operation ${operationNumber} adds whole lines but MATCH did not match byte-for-byte. Re-read the region and copy its exact indentation.`,
+		);
+	}
+	if (raw.candidates.length === 0 && pattern.literalFallback) {
 		const exact = exactOccurrences(normalized.text, pattern.literalFallback.normalized);
 		if (exact.length > 0 && (operation.all || exact.length === 1)) {
 			const fallbackCandidates = exact.map(occurrence => {
@@ -2097,11 +2113,11 @@ function locate(
 			return operation.all ? fallbackCandidates : [fallbackCandidates[0]];
 		}
 	}
-	let result = collectCandidates(content, normalized, pattern, false);
+	let result = raw.candidates.length > 0 ? raw : collectCandidates(content, normalized, pattern, "normalized");
 	if (result.candidates.length === 0 && !result.overflow) {
-		result = collectCandidates(content, normalized, pattern, true);
+		result = collectCandidates(content, normalized, pattern, "fuzzy");
 		if (result.candidates.length === 0 && !result.overflow && !operation.all) {
-			const punctuationTolerant = collectCandidates(content, normalized, pattern, true, true);
+			const punctuationTolerant = collectCandidates(content, normalized, pattern, "fuzzy", true);
 			if (!punctuationTolerant.overflow && punctuationTolerant.candidates.length === 1) {
 				result = punctuationTolerant;
 			}
@@ -2261,106 +2277,11 @@ function distinguishingContext(
 	return undefined;
 }
 
-function commonIndent(lines: string[]): number {
-	let minimum = Number.POSITIVE_INFINITY;
-	for (const line of lines) {
-		if (line.trim() === "") continue;
-		minimum = Math.min(minimum, line.length - line.trimStart().length);
-	}
-	return minimum === Number.POSITIVE_INFINITY ? 0 : minimum;
-}
-
-function spaceIndentUnit(content: string): number {
-	let unit = 0;
-	for (const line of content.split("\n")) {
-		const indent = line.match(/^ +/)?.[0].length ?? 0;
-		if (indent === 0) continue;
-		let left = unit;
-		let right = indent;
-		while (right !== 0) {
-			const remainder = left % right;
-			left = right;
-			right = remainder;
-		}
-		unit = left;
-	}
-	return unit || 4;
-}
-
-function adaptRelativeIndent(line: string, fileIndent: string, spaceUnit: number): string {
-	const indent = line.match(/^[ \t]+/)?.[0] ?? "";
-	if (indent === "") return line;
-	const rest = line.slice(indent.length);
-	if (fileIndent === "\t" && !indent.includes("\t")) {
-		const levels = Math.max(1, Math.round(indent.length / Math.max(1, spaceUnit)));
-		return "\t".repeat(levels) + rest;
-	}
-	if (fileIndent === " " && indent.includes("\t") && !indent.includes(" ")) {
-		return " ".repeat(indent.length * spaceUnit) + rest;
-	}
-	return line;
-}
-
-function reindentReplacement(content: string, start: number, replacement: string): string {
-	if (replacement === "") return replacement;
-	const lineStart = content.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
-	const baseIndent = content.slice(lineStart, start);
-	if (!/^[ \t]*$/.test(baseIndent)) return replacement;
-	const lines = replacement.split("\n");
-	const remove = commonIndent(lines);
-	const stripped = lines.map(line => (line.trim() === "" ? "" : line.slice(Math.min(remove, line.length))));
-	const fileIndent = baseIndent[0] ?? detectIndentChar(content);
-	const unit = spaceIndentUnit(content);
-	return stripped
-		.map((line, index) => {
-			const adapted = adaptRelativeIndent(line, fileIndent, unit);
-			if (index === 0) return adapted;
-			if (line === "" && index < stripped.length - 1) return "";
-			return baseIndent + adapted;
-		})
-		.join("\n");
-}
-
-function hasIndentAdoptionEvidence(content: string, candidate: Candidate, replacement: string): boolean {
-	if (replacement === "") return false;
-	const sourceLineStart = content.lastIndexOf("\n", Math.max(0, candidate.matchStart - 1)) + 1;
-	const sourceLines = content.slice(sourceLineStart, candidate.matchEnd).split("\n");
-	const rewriteLines = replacement.split("\n");
-	const deltas: number[] = [];
-	let sourceIndex = 0;
-	for (const rewriteLine of rewriteLines) {
-		if (rewriteLine.trim() === "") continue;
-		let aligned = -1;
-		for (let index = sourceIndex; index < sourceLines.length; index++) {
-			if (sourceLines[index].trim() === rewriteLine.trim()) {
-				aligned = index;
-				break;
-			}
-		}
-		if (aligned === -1) continue;
-		const sourceIndent = sourceLines[aligned].length - sourceLines[aligned].trimStart().length;
-		const rewriteIndent = rewriteLine.length - rewriteLine.trimStart().length;
-		deltas.push(sourceIndent - rewriteIndent);
-		sourceIndex = aligned + 1;
-	}
-	const repeatedBoundaryAnchor =
-		sourceLines.length === 1 &&
-		rewriteLines.filter(line => line.trim() !== "").length >= 2 &&
-		commonIndent(rewriteLines) === 0 &&
-		deltas.length === 1 &&
-		deltas[0] > 0 &&
-		(rewriteLines[0]?.trim() === sourceLines[0].trim() || rewriteLines.at(-1)?.trim() === sourceLines[0].trim());
-	return repeatedBoundaryAnchor || (deltas.length >= 2 && deltas[0] > 0 && deltas.every(delta => delta === deltas[0]));
-}
-
 function renderRewrite(
-	content: string,
-	start: number,
 	rewrite: string,
 	selectedCaptureIndices: number[],
 	captures: string[],
 	operationNumber: number,
-	adoptIndent: boolean,
 ): string {
 	if (rewrite.includes(SELECT_OPEN) || rewrite.includes(SELECT_CLOSE)) {
 		throw new Error(
@@ -2384,19 +2305,14 @@ function renderRewrite(
 		marked += character;
 		index += character.length;
 	}
-	const indent = (value: string) => (adoptIndent ? reindentReplacement(content, start, value) : value);
-	if (markerIndex === 0 || sentinels.length === 0) return indent(marked);
-	let rendered = indent(marked);
+	if (markerIndex === 0 || sentinels.length === 0) return marked;
+	let rendered = marked;
 	for (let index = 0; index < sentinels.length; index++) {
 		const sentinel = sentinels[index];
 		const capture = captures[selectedCaptureIndices[index]] ?? "";
 		const sentinelAt = rendered.indexOf(sentinel);
 		if (sentinelAt === -1) continue;
-		let before = rendered.slice(0, sentinelAt);
-		let after = rendered.slice(sentinelAt + sentinel.length);
-		if (/^\s/u.test(capture) && /\s$/u.test(before)) before = before.replace(/\s+$/u, "");
-		if (/\s$/u.test(capture) && /^\s/u.test(after)) after = after.replace(/^\s+/u, "");
-		rendered = before + capture + after;
+		rendered = rendered.slice(0, sentinelAt) + capture + rendered.slice(sentinelAt + sentinel.length);
 	}
 	return rendered;
 }
@@ -2510,34 +2426,14 @@ function prepareCandidateEdit(
 	content: string,
 	candidate: Candidate,
 	pattern: ParsedPattern,
-	operation: Operation,
 	rewrite: string,
 	operationNumber: number,
 ): { candidate: Candidate; replacement: string; deletedText: string | undefined } {
-	const lineStart = content.lastIndexOf("\n", Math.max(0, candidate.start - 1)) + 1;
-	const leadingSourceWhitespace = content.slice(lineStart, candidate.start);
-	const controlsWholeIndent =
-		!(operation.patternText.includes(SELECT_OPEN) || operation.patternText.includes(SELECT_CLOSE)) &&
-		/^[ \t]*$/u.test(leadingSourceWhitespace);
-	const authoredStart = controlsWholeIndent ? lineStart : candidate.start;
-	const authoredSource = content.slice(authoredStart, candidate.end);
-	const whitespaceOnly =
-		authoredSource !== rewrite && normalizeText(authoredSource).text === normalizeText(rewrite).text;
-	const adoptIndent =
-		!whitespaceOnly &&
-		!(operation.patternText.includes(SELECT_OPEN) || operation.patternText.includes(SELECT_CLOSE)) &&
-		hasIndentAdoptionEvidence(content, candidate, rewrite);
-	if (controlsWholeIndent && !adoptIndent && lineStart < candidate.start) {
-		candidate = { ...candidate, start: lineStart, matchStart: Math.min(lineStart, candidate.matchStart) };
-	}
 	let replacement = renderRewrite(
-		content,
-		candidate.start,
 		rewrite,
 		candidate.captures.length === 0 ? [] : pattern.selectedCaptureIndices,
 		candidate.captures,
 		operationNumber,
-		adoptIndent || operation.patternText.includes(SELECT_OPEN) || operation.patternText.includes(SELECT_CLOSE),
 	);
 	replacement = alignBoundaryEchoes(content, candidate, replacement);
 	let deletedText: string | undefined;
@@ -2587,27 +2483,6 @@ function prepareInlineSelectionEdit(
 		while (start < end && /[ \t]/u.test(content[start])) start++;
 		while (end > start && /[ \t]/u.test(content[end - 1])) end--;
 	}
-	// A multi-line desired side carrying its own leading indent is authored at
-	// absolute file columns; the whitespace-forgiving matcher anchored the span
-	// after the file indent, so claim the indent to avoid doubling it.
-	if (start < end && rewrite.includes("\n") && /^[ \t]/u.test(rewrite)) {
-		const lineStart = content.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
-		if (lineStart < start && /^[ \t]+$/u.test(content.slice(lineStart, start))) start = lineStart;
-	}
-	// A whole-line insert authored with its own leading indent is likewise at
-	// absolute columns; the matcher anchored it after the following line's
-	// indent, so rehome it to that line's start and keep the typed depth.
-	// Left at the text start, the typed indent doubles behind the file indent
-	// and the following line's own indent is swallowed into the insert.
-	let absoluteColumnInsert = false;
-	if (start === end && selection.lineInsertion && /^[ \t]/u.test(rewrite)) {
-		const lineStart = content.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
-		if (lineStart < start && /^[ \t]+$/u.test(content.slice(lineStart, start))) {
-			start = lineStart;
-			end = lineStart;
-			absoluteColumnInsert = true;
-		}
-	}
 	let candidate: Candidate = {
 		...located,
 		start,
@@ -2619,26 +2494,11 @@ function prepareInlineSelectionEdit(
 		candidate.start === candidate.end && rewrite.startsWith("\n") && content[candidate.start - 1] === "\n";
 	const desired = strippedLeadingBlank ? rewrite.slice(1) : rewrite;
 	const blankSeparated = strippedLeadingBlank && candidate.start >= 2 && content[candidate.start - 2] === "\n";
-	// Multi-line desired text may be authored at absolute file columns (it
-	// visually continues the pattern) or relative to the selection; reuse the
-	// legacy alignment evidence to decide instead of always re-indenting.
-	// A desired side that differs from the current span only by whitespace is
-	// an intentional indentation change; re-indenting would erase it.
-	const whitespaceOnlyChange =
-		desired !== "" &&
-		normalizeText(desired).text === normalizeText(content.slice(candidate.start, candidate.end)).text;
-	const adoptIndent =
-		!absoluteColumnInsert &&
-		!whitespaceOnlyChange &&
-		(!desired.includes("\n") || hasIndentAdoptionEvidence(content, candidate, desired));
 	const replacement = renderRewrite(
-		content,
-		candidate.start,
 		selection.lineInsertion ? frameLineInsertion(content, candidate.start, desired, blankSeparated) : desired,
 		selection.captureIndices,
 		candidate.captures,
 		operationNumber,
-		adoptIndent,
 	);
 	if (replacement === "" && candidate.start !== candidate.end) {
 		const deletedText = content.slice(candidate.start, candidate.end);
@@ -2652,7 +2512,6 @@ function wouldChangeHint(
 	content: string,
 	chosen: Candidate,
 	pattern: ParsedPattern,
-	operation: Operation,
 	rewrite: string,
 	operationNumber: number,
 ): string | undefined {
@@ -2668,7 +2527,7 @@ function wouldChangeHint(
 		) {
 			continue;
 		}
-		const prepared = prepareCandidateEdit(content, alternative, pattern, operation, rewrite, operationNumber);
+		const prepared = prepareCandidateEdit(content, alternative, pattern, rewrite, operationNumber);
 		if (content.slice(prepared.candidate.start, prepared.candidate.end) === prepared.replacement) continue;
 		const line = lineNumberAt(content, prepared.candidate.start);
 		return `Line ${line} also matches and WOULD change — target it by adding context unique to it.`;
@@ -3507,7 +3366,7 @@ function applyOperations(content: string, input: string, context: SloppyApplyCon
 			const rewrite = pattern.lineInsertion
 				? frameLineInsertion(content, candidate.start, resolvedCandidateRewrite)
 				: resolvedCandidateRewrite;
-			const prepared = prepareCandidateEdit(content, candidate, pattern, operation, rewrite, operationNumber);
+			const prepared = prepareCandidateEdit(content, candidate, pattern, rewrite, operationNumber);
 			candidate = prepared.candidate;
 			const replacement = prepared.replacement;
 			if (prepared.deletedText !== undefined && candidates.length === 1) {
@@ -3545,7 +3404,7 @@ function applyOperations(content: string, input: string, context: SloppyApplyCon
 				}
 				const hint =
 					loneReference === null
-						? wouldChangeHint(content, located, pattern, operation, rewrite, operationNumber)
+						? wouldChangeHint(content, located, pattern, rewrite, operationNumber)
 						: undefined;
 				throwNoOp(operationNumber, { content, offset: candidate.matchStart }, undefined, hint);
 			}
@@ -3558,7 +3417,7 @@ function applyOperations(content: string, input: string, context: SloppyApplyCon
 				: baseResolvedRewrite;
 			const hint =
 				loneReference === null
-					? wouldChangeHint(content, candidates[0], pattern, operation, rewrite, operationNumber)
+					? wouldChangeHint(content, candidates[0], pattern, rewrite, operationNumber)
 					: undefined;
 			throwNoOp(operationNumber, { content, offset: candidates[0].matchStart }, candidates.length, hint);
 		}

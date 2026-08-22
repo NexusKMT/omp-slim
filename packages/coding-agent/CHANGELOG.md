@@ -23,7 +23,7 @@
 - Switched fallback edit mode from replace to sloppy for models that do not support hashline
 - Autocomplete dropdown now shows up to 10 rows by default (was 5), clamped to the terminal height (`autocompleteMaxVisible` setting)
 - Long slash-command descriptions now truncate to two rows with an ellipsis in the autocomplete popup instead of wrapping in full
-- Sloppy edits now splice exact authored whitespace without engine-side indentation inference or tab/space conversion; indentation-sensitive edits require exact file anchors.
+- Sloppy edits now treat all authored whitespace as verbatim and require explicit `»` or `⟪⟫` markers for all operations, forbidding marker-less changes.
 
 ### Removed
 
