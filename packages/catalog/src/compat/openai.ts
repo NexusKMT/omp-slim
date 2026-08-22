@@ -529,7 +529,7 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 		// (issue #2299).
 		thinkingFormat,
 		kimiApiFormat: undefined,
-		reasoningDisableMode: resolveReasoningDisableMode(thinkingFormat),
+		reasoningDisableMode: isVenice ? "venice-disable-thinking" : resolveReasoningDisableMode(thinkingFormat),
 		omitReasoningEffort: false,
 		includeEncryptedReasoning: true,
 		filterReasoningHistory: isOpenRouter && isAnthropicModel,
@@ -649,7 +649,9 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 			? "omit"
 			: isDirectDeepseekReasoning
 				? "zai-thinking-disabled"
-				: resolveReasoningDisableMode(compat.thinkingFormat);
+				: isVenice
+					? "venice-disable-thinking"
+					: resolveReasoningDisableMode(compat.thinkingFormat);
 	}
 	if (spec.compat?.omitReasoningEffort === undefined && !compat.supportsReasoningEffort) {
 		compat.omitReasoningEffort = true;
@@ -667,7 +669,9 @@ export function buildOpenAICompat(spec: ModelSpec<"openai-completions">): Resolv
 		const variant: ResolvedOpenAICompat = { ...compat };
 		applyCompatOverrides(variant, whenThinkingPolicy);
 		if (whenThinkingPolicy.reasoningDisableMode === undefined) {
-			variant.reasoningDisableMode = resolveReasoningDisableMode(variant.thinkingFormat);
+			variant.reasoningDisableMode = isVenice
+				? "venice-disable-thinking"
+				: resolveReasoningDisableMode(variant.thinkingFormat);
 		}
 		if (whenThinkingPolicy.omitReasoningEffort === undefined && !variant.supportsReasoningEffort) {
 			variant.omitReasoningEffort = true;

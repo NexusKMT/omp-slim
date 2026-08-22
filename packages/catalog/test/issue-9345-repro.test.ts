@@ -24,6 +24,7 @@ import type { Context } from "@oh-my-pi/pi-ai/types";
 import { buildOpenAICompat } from "@oh-my-pi/pi-catalog/compat/openai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import type { FetchImpl, ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import { isRecord } from "@oh-my-pi/pi-utils";
 
 function veniceQwenSpec(overrides: Partial<ModelSpec<"openai-completions">> = {}): ModelSpec<"openai-completions"> {
 	return {
@@ -46,6 +47,40 @@ function sseDoneResponse(): Response {
 		status: 200,
 		headers: { "content-type": "text/event-stream" },
 	});
+}
+interface VeniceReasoningOptions {
+	reasoning?: "high";
+	disableReasoning?: boolean;
+}
+
+async function captureVeniceQwenBody(options: VeniceReasoningOptions) {
+	const bundled = getBundledModel<"openai-completions">("venice", "qwen3-6-35b-a3b");
+	const model = {
+		...bundled,
+		compat: {
+			...bundled.compat,
+			extraBody: { venice_parameters: { include_venice_system_prompt: false } },
+		},
+	};
+	const captured: { body: string | null } = { body: null };
+	const fetchMock: FetchImpl = async (_input, init) => {
+		captured.body = typeof init?.body === "string" ? init.body : null;
+		return sseDoneResponse();
+	};
+	const context: Context = {
+		messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
+	};
+	const stream = streamOpenAICompletions(model, context, {
+		apiKey: "vn-test",
+		...options,
+		fetch: fetchMock,
+	});
+	for await (const _ of stream) {
+		// drain
+	}
+	const body: unknown = JSON.parse(captured.body ?? "{}");
+	if (!isRecord(body)) throw new Error("Captured Venice request body was not an object");
+	return { body, model };
 }
 
 describe("issue #9345 — Venice qwen thinking format", () => {
@@ -72,36 +107,25 @@ describe("issue #9345 — Venice qwen thinking format", () => {
 	});
 
 	it("emits reasoning_effort — never top-level enable_thinking — on the wire", async () => {
-		const model = getBundledModel<"openai-completions">("venice", "qwen3-6-35b-a3b");
+		const { body, model } = await captureVeniceQwenBody({ reasoning: "high" });
 		expect(model.provider).toBe("venice");
 		expect(model.baseUrl).toBe("https://api.venice.ai/api/v1");
 		expect(model.compat.thinkingFormat).toBe("openai");
-		expect(model.compat.reasoningDisableMode).toBe("lowest-effort");
+		expect(model.compat.reasoningDisableMode).toBe("venice-disable-thinking");
+		expect(body.enable_thinking).toBeUndefined();
+		expect(body.chat_template_kwargs).toBeUndefined();
+		expect(body.reasoning_effort).toBe("high");
+		expect(body.venice_parameters).toEqual({ include_venice_system_prompt: false });
+	});
 
-		const captured: { body: string | null } = { body: null };
-		const fetchMock: FetchImpl = async (_input, init) => {
-			captured.body = typeof init?.body === "string" ? init.body : null;
-			return sseDoneResponse();
-		};
-
-		const context: Context = {
-			messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
-		};
-		const stream = streamOpenAICompletions(model, context, {
-			apiKey: "vn-test",
-			reasoning: "high",
-			fetch: fetchMock,
+	it("emits Venice's explicit disable flag when reasoning is off", async () => {
+		const { body } = await captureVeniceQwenBody({ disableReasoning: true });
+		expect(body.reasoning_effort).toBeUndefined();
+		expect(body.enable_thinking).toBeUndefined();
+		expect(body.chat_template_kwargs).toBeUndefined();
+		expect(body.venice_parameters).toEqual({
+			include_venice_system_prompt: false,
+			disable_thinking: true,
 		});
-		for await (const _ of stream) {
-			// drain
-		}
-
-		expect(captured.body).not.toBeNull();
-		const parsed = JSON.parse(captured.body ?? "{}") as Record<string, unknown>;
-		// Issue #9345: Venice 400s on the top-level `enable_thinking` boolean it
-		// does not define; reasoning must ride the OpenAI-style `reasoning_effort`.
-		expect(parsed.enable_thinking).toBeUndefined();
-		expect(parsed.chat_template_kwargs).toBeUndefined();
-		expect(parsed.reasoning_effort).toBe("high");
 	});
 });

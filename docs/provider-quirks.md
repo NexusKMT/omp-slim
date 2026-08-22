@@ -1472,7 +1472,8 @@ Umans AI Coding Plan is a proxy service for AI coding models, operating via the 
 Venice is a privacy-focused AI platform delivering uncensored and open-source models. It operates over the OpenAI Chat Completions transport (`api: "openai-completions"`) with default base URL `https://api.venice.ai/api/v1`.
 
 ### Special casings
-- Nothing beyond the OpenAI Chat Completions pipeline.
+- **Qwen Reasoning Dialect**: Venice's strict chat-completions schema rejects DashScope's top-level `enable_thinking`. `buildOpenAICompat` identifies Venice by provider or `api.venice.ai` base URL and routes Qwen reasoning levels through OpenAI-style `reasoning_effort`.
+- **Explicit Thinking Off**: `reasoningDisableMode: "venice-disable-thinking"` encodes an explicit off selection as `venice_parameters.disable_thinking: true`, preserving sibling Venice settings such as `include_venice_system_prompt`.
 
 ### Auth & usage
 - **API Key Login & Validation**: `loginVenice` in `packages/ai/src/registry/venice.ts` uses `createApiKeyLogin` (`packages/ai/src/registry/api-key-login.ts`) to direct users to `https://venice.ai/settings/api` for API keys (`vapi_...` placeholder prefix) and validates credentials via a lightweight `chat-completions` request using validation model `qwen3-4b`. Registered as `veniceProvider` in `packages/ai/src/registry/registry.ts`.
