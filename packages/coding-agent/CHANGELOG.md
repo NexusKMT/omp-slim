@@ -233,6 +233,21 @@
 - Fixed accurate benchmark input token counts on providers with automatic prompt caching.
 - Fixed C# files incorrectly displaying D3.js icons in edit results ([#9323](https://github.com/can1357/oh-my-pi/issues/9323)).
 - Fixed incorrect token delta reporting in expanded context compaction summaries when pre-compaction usage was omitted by the provider ([#9293](https://github.com/can1357/oh-my-pi/issues/9293)).
+- Code blocks now syntax-highlight live while the response streams instead of staying plain until the block settles
+- Fixed `/shake thinking` reporting "Nothing to shake" after removing reasoning; it now reports the dropped count and leaves thinking-only turns empty.
+- Fixed session teardown occasionally losing pending input drafts during shutdown
+- Fixed streaming edit failures caused by trailing partial lines
+- Interrupting a Claude model mid-thinking no longer replays the partial reasoning as quoted conversation text on the next turn, which Anthropic's `reasoning_extraction` classifier refused.
+- Sloppy edit `＋` inserts before an anchor line no longer double their typed indentation or flatten the anchor.
+- Session restore no longer re-runs the edit-matching engine for every historical edit in the transcript; large sessions with many edits resume several times faster.
+- Fixed image requests to Kimi Code / Moonshot failing with 400 `unsupported image url`: their catalog api is openai-completions so the image URL mirror gate wrongly admitted them; Moonshot-native hosts now always receive inline base64 images.
+- Fixed Read failing with `unable to open database file` for cleanly closed WAL-mode SQLite databases without `-wal`/`-shm` sidecars.
+- Fixed collapsed edit results with long wrapped diff lines growing beyond their rendered-row budget and corrupting native Windows terminal transcript layout ([#9302](https://github.com/can1357/oh-my-pi/issues/9302)).
+- Fixed edit tool section header paths not trimming surrounding whitespace, so a header with padded brackets failed with file-not-found.
+- Fixed transcript content disappearing from terminal scrollback below a live hub-wait/todo/jobs card: the card's viewport pin froze scrollback commits at its own rows, so everything the turn streamed below it scrolled off-screen without ever entering terminal history (and was lost for good when the session exited first). A displaceable card with content below it no longer holds the commit ceiling; its rows commit as they scroll off and the card seals in place, so the next poll stacks a fresh card instead of retracting history.
+- Fixed the composer attachment chip thumbnail showing an empty box for pasted images: the paste pipeline re-encodes images as JPEG/WebP, and transmitting those bytes as Kitty PNG data made the terminal reject them (blank placeholder cells). Non-PNG attachments now convert to PNG before the thumbnail transmit, like transcript images.
+- Added an immediately editable startup composer for plain interactive launches; drafts typed while session initialization runs transfer intact into the full UI.
+- Fixed the browser tool's first `open` timing out after 30 s on a slow or cold host: tab startup now runs under its own budget inside the caller's timeout, falls back to the inline worker in time, and no longer leaves an orphan page behind ([#9271](https://github.com/can1357/oh-my-pi/pull/9271) by [@CaptainArni](https://github.com/CaptainArni))
 
 ## [17.4.4] - 2026-08-22
 
