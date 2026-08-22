@@ -208,9 +208,11 @@ export interface CustomTool<TParams extends TSchema = TSchema, TDetails = any> {
 	description: string;
 	/** Parameter schema (arktype, TypeBox, or legacy formats). */
 	parameters: TParams;
-	/** If true, tool is excluded unless explicitly listed in --tools or agent's tools field */
+	/** If true, tool is excluded unless explicitly listed in --tools or agent's tools field. Also treated as defaultInactive. */
 	hidden?: boolean;
-	/** How this tool is presented when enabled. See {@link ToolLoadMode}. Custom tools default to `"discoverable"`; set `"essential"` to stay top-level. */
+	/** If true, registered but not in the parent session's initial active set unless listed. */
+	defaultInactive?: boolean;
+	/** How this tool is presented when enabled. See {@link ToolLoadMode}. Custom tools default to `"discoverable"`. Do not set `"essential"` on navigator-only tools. */
 	loadMode?: ToolLoadMode;
 	/** If true, tool may stage deferred changes that require explicit resolve/discard. */
 	deferrable?: boolean;

@@ -32,6 +32,7 @@
 ### Fixed
 
 - Fixed startup crashes when temporary Git worktrees point to repository metadata that the current user cannot access.
+- Hidden custom tools (`hidden: true`) stay out of the parent session's active set and `/tools` unless `--tools` or an agent `tools:` list names them. They used to be always-included.
 
 ## [18.0.0] - 2026-08-22
 
