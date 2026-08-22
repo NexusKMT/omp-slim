@@ -4,7 +4,8 @@
 
 ### Added
 
-- Added benchmark profiles (`chat`, `prefill`, `generation`) to isolate performance characteristics
+- Startup composer now renders the complete interactive welcome scene and theme immediately during launch with progressive fills for recent sessions and LSP servers.
+- `omp bench` now runs a mixed suite of randomized built-in challenges by default (chat, prefill, generation); `--profile` isolates one kind
 - Added p50/p95 statistics, distinct input/output throughput metrics, and cost to benchmark output
 - Added live benchmark dashboard with progress tracking and real-time performance estimates
 - Added `--prefill-bytes` to configure synthetic input sizes for prefill benchmarks
@@ -36,11 +37,13 @@
 
 ### Fixed
 
+- Benchmark input-token counts now include cache-read/cache-write prompt tokens, so prefill throughput is no longer understated on providers with automatic prompt caching
 - Code blocks now syntax-highlight live while the response streams instead of staying plain until the block settles
 - Fixed `/shake thinking` reporting "Nothing to shake" after removing reasoning; it now reports the dropped count and leaves thinking-only turns empty.
 - Fixed session teardown occasionally losing pending input drafts during shutdown
 - Fixed streaming edit failures caused by trailing partial lines
 - Interrupting a Claude model mid-thinking no longer replays the partial reasoning as quoted conversation text on the next turn, which Anthropic's `reasoning_extraction` classifier refused.
+- Sloppy edits now ignore whitespace on otherwise blank MATCH rows and preserve omitted source rows when corresponding explicit MATCH/REWRITE lines are uniquely ordered but non-consecutive.
 - Sloppy edit `＋` inserts before an anchor line no longer double their typed indentation or flatten the anchor.
 - Session restore no longer re-runs the edit-matching engine for every historical edit in the transcript; large sessions with many edits resume several times faster.
 - Fixed image requests to Kimi Code / Moonshot failing with 400 `unsupported image url`: their catalog api is openai-completions so the image URL mirror gate wrongly admitted them; Moonshot-native hosts now always receive inline base64 images.

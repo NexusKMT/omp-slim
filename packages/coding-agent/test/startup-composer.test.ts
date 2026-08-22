@@ -2,13 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { getDefault } from "@oh-my-pi/pi-coding-agent/config/settings-schema";
+import {
+	COMPOSER_DEFAULTS,
+	Composer,
+	type ComposerPreferences,
+} from "@oh-my-pi/pi-coding-agent/modes/composer";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import {
+	applyStartupComposerPreferences,
 	beginStartupComposer,
-	STARTUP_COMPOSER_DEFAULTS,
-	StartupComposer,
-	type StartupComposerConfig,
-	StartupComposerLease,
+	ComposerLease,
+	setStartupComposerLspServers,
 	stopPendingStartupComposer,
 	takeStartupComposerLease,
 } from "@oh-my-pi/pi-coding-agent/modes/startup-composer";
@@ -37,15 +41,17 @@ class ThrowingStartTerminal extends CountingTerminal {
 	}
 }
 
-describe("StartupComposer", () => {
+describe("Composer prepaint", () => {
 	let settings: Settings;
 
-	let config: StartupComposerConfig;
+	let config: ComposerPreferences;
 	beforeEach(async () => {
 		resetSettingsForTest();
 		await initTheme();
 		settings = await Settings.init({ inMemory: true });
 		config = {
+			quiet: settings.get("startup.quiet"),
+			composerShape: settings.get("composer.shape") ?? "box",
 			showHardwareCursor: settings.get("showHardwareCursor"),
 			maxInlineImages: settings.get("tui.maxInlineImages"),
 			scrollbackRebuild: settings.get("tui.scrollbackRebuild"),
@@ -62,7 +68,7 @@ describe("StartupComposer", () => {
 
 	it("keeps one live editor and terminal across handoff", () => {
 		const terminal = new CountingTerminal();
-		const composer = new StartupComposer(config, { terminal });
+		const composer = new Composer({ preferences: config, terminal });
 		const submit = vi.fn();
 		composer.editor.onSubmit = submit;
 
@@ -74,22 +80,21 @@ describe("StartupComposer", () => {
 		expect(submit).not.toHaveBeenCalled();
 		expect(terminal.starts).toBe(1);
 
-		const surface = composer.handoff();
+		composer.transfer();
 		composer.stop();
 		terminal.sendInput(" beta");
 
-		expect(surface.editor).toBe(composer.editor);
-		expect(surface.editor.getExpandedText()).toBe("alpha beta");
+		expect(composer.editor.getExpandedText()).toBe("alpha beta");
 		expect(terminal.starts).toBe(1);
 		expect(terminal.stops).toBe(0);
 
-		surface.ui.stop();
+		composer.ui.stop();
 		expect(terminal.stops).toBe(1);
 	});
 
 	it("adopts the live draft with final theme, keybindings, and submit behavior", async () => {
 		const terminal = new CountingTerminal();
-		const composer = new StartupComposer(config, { terminal });
+		const composer = new Composer({ preferences: config, terminal });
 		composer.start();
 		terminal.sendInput("alpha ");
 		terminal.sendInput("\x1b[200~one\ntwo\x1b[201~");
@@ -98,8 +103,8 @@ describe("StartupComposer", () => {
 
 		const expectedDraft = composer.editor.getExpandedText();
 		const expectedCursor = composer.editor.getCursor();
-		const lease = new StartupComposerLease(composer);
-		const surface = lease.surface;
+		const lease = new ComposerLease(composer);
+		const adoptedComposer = lease.composer;
 		const testSession = await createTestSession({
 			inMemory: true,
 			settingsOverrides: { symbolPreset: "ascii" },
@@ -117,17 +122,17 @@ describe("StartupComposer", () => {
 				undefined,
 				undefined,
 				undefined,
-				surface,
+				adoptedComposer,
 			);
 			lease.adopt();
 			vi.spyOn(mode.statusLine, "watchBranch").mockImplementation(() => {});
 
-			expect(mode.ui).toBe(surface.ui);
-			expect(mode.editor).toBe(surface.editor);
+			expect(mode.ui).toBe(adoptedComposer.ui);
+			expect(mode.editor).toBe(adoptedComposer.editor);
 			await mode.init({ suppressWelcomeIntro: true });
 
-			expect(mode.ui).toBe(surface.ui);
-			expect(mode.editor).toBe(surface.editor);
+			expect(mode.ui).toBe(adoptedComposer.ui);
+			expect(mode.editor).toBe(adoptedComposer.editor);
 			expect(mode.editor.getExpandedText()).toBe(expectedDraft);
 			expect(mode.editor.getCursor()).toEqual(expectedCursor);
 			expect(terminal.starts).toBe(1);
@@ -160,9 +165,9 @@ describe("StartupComposer", () => {
 
 	it("keeps submit gated while initialization and loop readiness are pending", async () => {
 		const terminal = new CountingTerminal();
-		const composer = new StartupComposer(config, { terminal });
+		const composer = new Composer({ preferences: config, terminal });
 		composer.start();
-		const lease = new StartupComposerLease(composer);
+		const lease = new ComposerLease(composer);
 		const testSession = await createTestSession({ inMemory: true });
 		const mode = new InteractiveMode(
 			testSession.session,
@@ -172,7 +177,7 @@ describe("StartupComposer", () => {
 			undefined,
 			undefined,
 			undefined,
-			lease.surface,
+			lease.composer,
 		);
 		lease.adopt();
 		const enteredInit = Promise.withResolvers<void>();
@@ -215,27 +220,29 @@ describe("StartupComposer", () => {
 
 	it("tracks terminal ownership until a lease is adopted", () => {
 		const abandonedTerminal = new CountingTerminal();
-		const abandonedComposer = new StartupComposer(config, { terminal: abandonedTerminal });
+		const abandonedComposer = new Composer({ preferences: config, terminal: abandonedTerminal });
 		abandonedComposer.start();
-		const abandonedLease = new StartupComposerLease(abandonedComposer);
+		const abandonedLease = new ComposerLease(abandonedComposer);
 		abandonedLease.dispose();
 		abandonedLease.dispose();
 		expect(abandonedTerminal.stops).toBe(1);
 
 		const adoptedTerminal = new CountingTerminal();
-		const adoptedComposer = new StartupComposer(config, { terminal: adoptedTerminal });
+		const adoptedComposer = new Composer({ preferences: config, terminal: adoptedTerminal });
 		adoptedComposer.start();
-		const adoptedLease = new StartupComposerLease(adoptedComposer);
+		const adoptedLease = new ComposerLease(adoptedComposer);
 		adoptedLease.adopt();
 		adoptedLease.dispose();
 		expect(adoptedTerminal.stops).toBe(0);
-		adoptedLease.surface.ui.stop();
+		adoptedLease.composer.ui.stop();
 		expect(adoptedTerminal.stops).toBe(1);
 	});
 
 	it("restores a partially started terminal and leaves no pending owner", () => {
 		const terminal = new ThrowingStartTerminal();
-		expect(() => beginStartupComposer(config, { terminal })).toThrow("terminal start failed");
+		expect(() => beginStartupComposer({ preferences: config, terminal, cache: false })).toThrow(
+			"terminal start failed",
+		);
 		expect(terminal.starts).toBe(1);
 		expect(terminal.stops).toBe(1);
 		expect(takeStartupComposerLease()).toBeUndefined();
@@ -243,14 +250,14 @@ describe("StartupComposer", () => {
 
 	it("bounds a tall startup draft after adoption in a short terminal", async () => {
 		const terminal = new CountingTerminal(80, 8);
-		const composer = new StartupComposer(config, { terminal });
+		const composer = new Composer({ preferences: config, terminal });
 		composer.start();
 		for (let index = 0; index < 18; index += 1) {
 			terminal.sendInput(`line-${index}`);
 			if (index < 17) terminal.sendInput("\n");
 		}
 		const draft = composer.editor.getExpandedText();
-		const lease = new StartupComposerLease(composer);
+		const lease = new ComposerLease(composer);
 		const testSession = await createTestSession({ inMemory: true });
 		const mode = new InteractiveMode(
 			testSession.session,
@@ -260,7 +267,7 @@ describe("StartupComposer", () => {
 			undefined,
 			undefined,
 			undefined,
-			lease.surface,
+			lease.composer,
 		);
 		lease.adopt();
 		vi.spyOn(mode.statusLine, "watchBranch").mockImplementation(() => {});
@@ -284,7 +291,7 @@ describe("StartupComposer", () => {
 		const terminal = new CountingTerminal();
 		const exit = vi.fn();
 		let now = 1_000;
-		const composer = new StartupComposer(config, { terminal, exit, now: () => now });
+		const composer = new Composer({ preferences: config, terminal, exit, now: () => now });
 		composer.start();
 
 		terminal.sendInput("draft");
@@ -300,7 +307,7 @@ describe("StartupComposer", () => {
 	it("uses standard emergency exit before interactive keybindings load", () => {
 		const terminal = new CountingTerminal();
 		const exit = vi.fn();
-		const composer = new StartupComposer(config, { terminal, exit });
+		const composer = new Composer({ preferences: config, terminal, exit });
 		composer.start();
 
 		terminal.sendInput("draft");
@@ -312,9 +319,9 @@ describe("StartupComposer", () => {
 	it("keeps emergency exit live after adoption until interactive handlers replace it", () => {
 		const terminal = new CountingTerminal();
 		const exit = vi.fn();
-		const composer = new StartupComposer(config, { terminal, exit });
+		const composer = new Composer({ preferences: config, terminal, exit });
 		composer.start();
-		const lease = new StartupComposerLease(composer);
+		const lease = new ComposerLease(composer);
 		lease.adopt();
 
 		// InputController.setupKeyHandlers() has not run yet; a stalled startup must
@@ -326,7 +333,9 @@ describe("StartupComposer", () => {
 	});
 
 	it("first frame mirrors the canonical settings-schema defaults", () => {
-		expect(STARTUP_COMPOSER_DEFAULTS).toEqual({
+		expect(COMPOSER_DEFAULTS).toEqual({
+			quiet: getDefault("startup.quiet"),
+			composerShape: getDefault("composer.shape") ?? "box",
 			showHardwareCursor: getDefault("showHardwareCursor"),
 			maxInlineImages: getDefault("tui.maxInlineImages"),
 			scrollbackRebuild: getDefault("tui.scrollbackRebuild"),
@@ -334,5 +343,157 @@ describe("StartupComposer", () => {
 			imeSafeCursor: getDefault("tui.imeSafeCursor"),
 			autocompleteMaxVisible: getDefault("autocompleteMaxVisible"),
 		});
+	});
+	it("renders the complete interactive welcome scene on the first frame", async () => {
+		const terminal = new CountingTerminal(80, 32);
+		const composer = new Composer({
+			preferences: config,
+			terminal,
+			welcome: {
+				version: "9.9.9",
+				recentSessions: [{ name: "prior work", timeAgo: "5m ago" }],
+			},
+		});
+		composer.start();
+		await terminal.waitForRender(() =>
+			terminal.getViewport().some(row => Bun.stripANSI(row).includes("Welcome back!")),
+		);
+
+		const output = terminal
+			.getViewport()
+			.map(r => Bun.stripANSI(r))
+			.join("\n");
+		expect(output).toContain("Welcome back!");
+		expect(output).toContain("omp");
+		expect(output).toContain("9.9.9");
+		expect(output).toContain("prior work");
+		expect(output).not.toContain("Starting OMP");
+		expect(output).toContain("╭");
+		composer.stop();
+	});
+
+	it("adopted welcome survives handoff with authoritative data", async () => {
+		const terminal = new CountingTerminal(80, 32);
+		const composer = new Composer({
+			preferences: config,
+			terminal,
+			welcome: {
+				version: "9.9.9",
+				recentSessions: [{ name: "prior work", timeAgo: "5m ago" }],
+			},
+		});
+		composer.start();
+		await terminal.waitForRender(() =>
+			terminal.getViewport().some(row => Bun.stripANSI(row).includes("Welcome back!")),
+		);
+
+		terminal.sendInput("draft message");
+		const lease = new ComposerLease(composer);
+		const testSession = await createTestSession({ inMemory: true });
+		let mode: InteractiveMode | undefined;
+
+		try {
+			mode = new InteractiveMode(
+				testSession.session,
+				"9.9.9",
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				lease.composer,
+			);
+			lease.adopt();
+			vi.spyOn(mode.statusLine, "watchBranch").mockImplementation(() => {});
+			await mode.init({ suppressWelcomeIntro: true });
+			await terminal.waitForRender();
+
+			expect(terminal.starts).toBe(1);
+			expect(mode.editor.getExpandedText()).toBe("draft message");
+			const output = terminal
+				.getViewport()
+				.map(r => Bun.stripANSI(r))
+				.join("\n");
+			const modelName = testSession.session.model?.name ?? "";
+			expect(output).toContain(modelName);
+			const welcomeMatches = (output.match(/Welcome back!/g) || []).length;
+			expect(welcomeMatches).toBe(1);
+		} finally {
+			mode?.stop();
+			lease.dispose();
+			await testSession.cleanup();
+			vi.restoreAllMocks();
+		}
+	});
+
+	it("preferences feed applies quiet mode", async () => {
+		const terminal = new CountingTerminal(80, 32);
+		beginStartupComposer({
+			preferences: config,
+			terminal,
+			version: "9.9.9",
+			cache: false,
+		});
+		await terminal.waitForRender(() =>
+			terminal.getViewport().some(row => Bun.stripANSI(row).includes("Welcome back!")),
+		);
+		expect(
+			terminal
+				.getViewport()
+				.map(r => Bun.stripANSI(r))
+				.join("\n"),
+		).toContain("Welcome back!");
+
+		applyStartupComposerPreferences({
+			quiet: true,
+			composerShape: "box",
+			showHardwareCursor: config.showHardwareCursor,
+			maxInlineImages: config.maxInlineImages,
+			scrollbackRebuild: config.scrollbackRebuild,
+			resizeScrollback: config.resizeScrollback,
+			imeSafeCursor: config.imeSafeCursor,
+			autocompleteMaxVisible: config.autocompleteMaxVisible,
+			theme: {},
+		});
+		await terminal.waitForRender();
+
+		const output = terminal
+			.getViewport()
+			.map(r => Bun.stripANSI(r))
+			.join("\n");
+		expect(output).not.toContain("Welcome back!");
+
+		terminal.sendInput("still editable");
+		await terminal.waitForRender();
+		expect(
+			terminal
+				.getViewport()
+				.map(r => Bun.stripANSI(r))
+				.join("\n"),
+		).toContain("still editable");
+	});
+
+	it("LSP feed fills the welcome rows", async () => {
+		const terminal = new CountingTerminal(80, 32);
+		beginStartupComposer({
+			preferences: config,
+			terminal,
+			version: "9.9.9",
+			cache: false,
+		});
+		await terminal.waitForRender(() =>
+			terminal.getViewport().some(row => Bun.stripANSI(row).includes("Welcome back!")),
+		);
+
+		setStartupComposerLspServers([{ name: "rust-analyzer", status: "connecting", fileTypes: [".rs"] }]);
+		await terminal.waitForRender(() =>
+			terminal.getViewport().some(row => Bun.stripANSI(row).includes("rust-analyzer")),
+		);
+
+		const output = terminal
+			.getViewport()
+			.map(r => Bun.stripANSI(r))
+			.join("\n");
+		expect(output).toContain("rust-analyzer");
 	});
 });
