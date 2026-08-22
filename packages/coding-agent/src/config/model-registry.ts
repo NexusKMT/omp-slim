@@ -88,7 +88,6 @@ import {
 	BUILT_IN_DISCOVERY_CACHE_TTL_MS,
 	BUILT_IN_DISCOVERY_NON_AUTHORITATIVE_RETRY_MS,
 	type BuiltInDiscoveryResult,
-	extractGoogleOAuthProjectId,
 	extractGoogleOAuthToken,
 	getOAuthCredentialsForProvider,
 	isAuthenticated,
@@ -1423,6 +1422,22 @@ export class ModelRegistry {
 		}
 	}
 
+	/**
+	 * Resolve the GCP project id for Gemini CLI quota discovery from the stored
+	 * OAuth credential. The discovery fast path (unexpired token) returns only
+	 * the raw access token via `peekApiKey`, stripping the structured identity,
+	 * so the project id must come from the credential matched to the token in
+	 * use — not the API-key string. Workspace/Standard accounts require it
+	 * because project-less `loadCodeAssist` cannot resolve one.
+	 */
+	#resolveGeminiCliDiscoveryProjectId(oauthToken: string): string | undefined {
+		const credentials = getOAuthCredentialsForProvider(this.authStorage, "google-gemini-cli");
+		const matched = credentials.find(credential => credential.access === oauthToken);
+		const source = matched ?? (credentials.length === 1 ? credentials[0] : undefined);
+		const projectId = source?.projectId?.trim();
+		return projectId ? projectId : undefined;
+	}
+
 	async #collectBuiltInModelManagerOptions(
 		strategy: ModelRefreshStrategy,
 		providerFilter: ReadonlySet<string> | undefined,
@@ -1432,7 +1447,7 @@ export class ModelRegistry {
 			providerId: string;
 			authoritative: boolean;
 			resolveKey: (value: string | undefined) => string | undefined;
-			createOptions: (key: string, raw: string | undefined) => ModelManagerOptions<Api>;
+			createOptions: (key: string) => ModelManagerOptions<Api>;
 		}> = [
 			{
 				providerId: "google-antigravity",
@@ -1449,10 +1464,10 @@ export class ModelRegistry {
 				providerId: "google-gemini-cli",
 				authoritative: false,
 				resolveKey: extractGoogleOAuthToken,
-				createOptions: (oauthToken, raw) =>
+				createOptions: oauthToken =>
 					googleGeminiCliModelManagerOptions({
 						oauthToken,
-						projectId: extractGoogleOAuthProjectId(raw),
+						projectId: this.#resolveGeminiCliDiscoveryProjectId(oauthToken),
 						endpoint: this.#descriptorBaseUrl("google-gemini-cli"),
 						fetch: this.#fetch,
 					}),
@@ -1528,7 +1543,7 @@ export class ModelRegistry {
 			if (!isAuthenticated(key)) {
 				continue;
 			}
-			options.push(descriptor.createOptions(key, specialKeys[i]));
+			options.push(descriptor.createOptions(key));
 		}
 		// Append runtime model managers registered by extensions via fetchDynamicModels.
 		for (const { options: managerOpts } of this.#runtimeModelManagers.values()) {

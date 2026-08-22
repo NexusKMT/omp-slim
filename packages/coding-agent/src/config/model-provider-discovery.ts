@@ -91,25 +91,6 @@ export function extractGoogleOAuthToken(value: string | undefined): string | und
 	return value;
 }
 
-/**
- * Pull the GCP project id out of a Google structured OAuth discovery key.
- * Workspace/Standard credentials retain an explicit `projectId` because
- * project-less `loadCodeAssist` cannot resolve one; discovery must forward it.
- */
-export function extractGoogleOAuthProjectId(value: string | undefined): string | undefined {
-	if (!isAuthenticated(value)) return undefined;
-	try {
-		const parsed = JSON.parse(value) as { projectId?: unknown };
-		if (typeof parsed.projectId === "string") {
-			const projectId = parsed.projectId.trim();
-			return projectId.length > 0 ? projectId : undefined;
-		}
-	} catch {
-		// Raw (non-JSON) tokens carry no project id.
-	}
-	return undefined;
-}
-
 export function getOAuthCredentialsForProvider(authStorage: AuthStorage, provider: string): OAuthCredential[] {
 	const providerEntry = authStorage.getAll()[provider];
 	if (!providerEntry) {
