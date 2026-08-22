@@ -11,6 +11,10 @@
 
 - Added reversible private-use glyph tokenization for Claude-compatible provider requests, including prompt notices, streamed response decoding, and safe handling of unresolved model-authored glyph tokens.
 
+### Fixed
+
+- Fixed Cursor GPT effort models failing with `not_found` on accounts that require the discovered effort-specific model id ([#9287](https://github.com/can1357/oh-my-pi/issues/9287)).
+
 ## [17.4.3] - 2026-08-21
 
 ### Fixed
