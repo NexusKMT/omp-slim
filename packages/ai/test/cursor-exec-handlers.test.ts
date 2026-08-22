@@ -33,7 +33,7 @@ import {
 	ReadResultSchema,
 	ReadSuccessSchema,
 } from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
-import { create } from "@oh-my-pi/pi-catalog/discovery/protobuf";
+import { create, encodeJsonValue } from "@oh-my-pi/pi-catalog/discovery/protobuf";
 import { logger } from "@oh-my-pi/pi-utils";
 
 afterEach(() => {
@@ -666,6 +666,48 @@ describe("Cursor history encoding", () => {
 		]);
 	});
 
+	it("normalizes non-JSON MCP arguments instead of aborting history replay", () => {
+		const messages: Context["messages"] = [
+			{ role: "user", content: "Run the MCP tool.", timestamp: 1 },
+			cursorAssistant(
+				"cursor-composer-2.5",
+				[
+					{
+						type: "toolCall",
+						id: "call-mcp",
+						name: "mcp__example_tool",
+						arguments: {
+							expectedHash: Number.POSITIVE_INFINITY,
+							notANumber: Number.NaN,
+							counter: 10n,
+							nested: { value: Number.NEGATIVE_INFINITY, list: [1, 2n, Number.NaN] },
+						},
+					},
+				],
+				2,
+				"toolUse",
+			),
+			{ role: "user", content: "Continue.", timestamp: 3 },
+		];
+
+		const history = buildCursorHistoryForTest(messages);
+		expect(history.rootPromptMessagesJson[1]).toEqual({
+			role: "assistant",
+			content: [
+				{
+					type: "tool-call",
+					toolCallId: "call-mcp",
+					toolName: "mcp__example_tool",
+					args: {
+						expectedHash: null,
+						notANumber: null,
+						nested: { value: null, list: [1, null, null] },
+					},
+				},
+			],
+		});
+	});
+
 	it("preserves same-model K3 thinking and paired tool structure in request history", () => {
 		const messages: Context["messages"] = [
 			{ role: "user", content: "Inspect package.json", timestamp: 1 },
@@ -1239,7 +1281,7 @@ describe("Cursor exec local-work tracking (issue #4593)", () => {
 		expect(written.length).toBe(1);
 	});
 
-	it("synthesizes an MCP call when the exec frame precedes its streamed block", async () => {
+	it("synthesizes an MCP call while preserving opaque string arguments", async () => {
 		const output = cursorAssistantMessage();
 		const stream = new AssistantMessageEventStream();
 		const state = newBlockState();
@@ -1257,7 +1299,16 @@ describe("Cursor exec local-work tracking (issue #4593)", () => {
 							toolName: "mcp__fixture_report",
 							toolCallId: "call-mcp-1",
 							providerIdentifier: "pi-agent",
-							args: { query: new TextEncoder().encode(JSON.stringify("latest chess news")) },
+							args: {
+								query: new TextEncoder().encode(JSON.stringify("latest chess news")),
+								numericHash: encodeJsonValue("57785654"),
+								exponentHash: encodeJsonValue("1e234567"),
+								booleanToken: encodeJsonValue("true"),
+								nullToken: encodeJsonValue("null"),
+								nested: encodeJsonValue('{"enabled":true}'),
+								array: encodeJsonValue("[1,2]"),
+								quoted: encodeJsonValue('"label"'),
+							},
 						}),
 					},
 				}),
@@ -1304,7 +1355,16 @@ describe("Cursor exec local-work tracking (issue #4593)", () => {
 			type: "toolCall",
 			id: "call-mcp-1",
 			name: "mcp__fixture_report",
-			arguments: { query: "latest chess news" },
+			arguments: {
+				query: "latest chess news",
+				numericHash: "57785654",
+				exponentHash: "1e234567",
+				booleanToken: "true",
+				nullToken: "null",
+				nested: { enabled: true },
+				array: [1, 2],
+				quoted: "label",
+			},
 		});
 		expect(output.content[1]).toMatchObject({ type: "text", text: "Final synthesized answer" });
 		expect(state.resolvedMcpToolCallIds.has("call-mcp-1")).toBe(true);
