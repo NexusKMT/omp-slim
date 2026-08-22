@@ -35,6 +35,10 @@ describe("muxServerKey", () => {
 		const tuned = muxServerKey({ ...base, env: { NODE_OPTIONS: "--max-old-space-size=8192" } });
 		expect(tuned).not.toBe(muxServerKey(base));
 	});
+	it("does not expose environment values in the externally visible key", () => {
+		const secret = "secret-language-server-token";
+		expect(muxServerKey({ ...base, env: { LANGUAGE_SERVER_TOKEN: secret } })).not.toContain(secret);
+	});
 
 	it("treats env key order as irrelevant", () => {
 		const forward = muxServerKey({ ...base, env: { A: "1", B: "2" } });

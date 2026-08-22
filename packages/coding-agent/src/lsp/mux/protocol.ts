@@ -103,8 +103,12 @@ export interface MuxConnectResult {
  * Env keys are sorted so object insertion order never splits one identity in
  * two, and the parts are JSON-encoded so no separator can be forged from a
  * value (`["--log-level", "4"]` stays distinct from `["--log-level 4"]`).
+ * The canonical identity is SHA-256 hashed because the key is returned over
+ * the handshake and included in mux logs; raw environment values can contain
+ * credentials and must not leak through either surface.
  */
 export function muxServerKey(params: MuxConnectParams): string {
 	const envEntries = Object.entries(params.env ?? {}).sort((a, b) => (a[0] < b[0] ? -1 : 1));
-	return JSON.stringify([params.command, params.args, params.cwd, envEntries]);
+	const identity = JSON.stringify([params.command, params.args, params.cwd, envEntries]);
+	return `sha256:${Bun.SHA256.hash(identity, "hex")}`;
 }
