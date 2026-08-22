@@ -319,7 +319,12 @@ export class InputController {
 			// `/mcp test` advertises Esc until each owner's post-settlement grace expires.
 			// Cancel every overlapping test before any main-turn or side-channel action.
 			if (this.ctx.mcpTestEscapeHandlers.size > 0) {
-				for (const handler of this.ctx.mcpTestEscapeHandlers) handler();
+				// One Esc cancels every advertised /mcp test and consumes the ownership;
+				// the next Esc must reach the actions below instead of being swallowed
+				// by a stale registration or grace timer.
+				const handlers = [...this.ctx.mcpTestEscapeHandlers];
+				this.ctx.mcpTestEscapeHandlers.clear();
+				for (const handler of handlers) handler();
 				return;
 			}
 

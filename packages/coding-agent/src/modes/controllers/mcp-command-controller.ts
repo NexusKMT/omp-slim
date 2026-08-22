@@ -61,6 +61,7 @@ import { copyToClipboard } from "../../utils/clipboard";
 import { isTimeoutError } from "../../utils/fetch-timeout";
 import { openPath } from "../../utils/open";
 import { ChatBlock } from "../components/chat-block";
+import { DynamicBorder } from "../components/dynamic-border";
 import { MCPAddWizard } from "../components/mcp-add-wizard";
 import { TranscriptBlock } from "../components/transcript-container";
 import { parseCommandArgs } from "../shared";
@@ -1575,7 +1576,14 @@ export class MCPCommandController {
 		}
 
 		const abortController = new AbortController();
-		const handleEscape = (): void => abortController.abort();
+		let settled = false;
+		const handleEscape = (): void => {
+			if (settled) {
+				this.ctx.showStatus(`MCP test for "${name}" already finished`);
+				return;
+			}
+			abortController.abort();
+		};
 
 		// Claim Esc before the first await: a slow `#resolveServerForAuth()` (e.g.
 		// config on a network filesystem) must not let Esc fall through to the
@@ -1587,6 +1595,7 @@ export class MCPCommandController {
 		// screen; a pre-hint failure must release Esc immediately so it is not
 		// swallowed for a prompt the user never saw.
 		let hintShown = false;
+		let hintText: Text | undefined;
 		try {
 			const found = await this.#resolveServerForAuth(name);
 
@@ -1605,9 +1614,13 @@ export class MCPCommandController {
 				return;
 			}
 
-			this.#showMessage(
-				["", theme.fg("muted", `Testing connection to "${name}"... (esc to cancel)`), ""].join("\n"),
-			);
+			const hintBlock = new TranscriptBlock();
+			hintBlock.addChild(new DynamicBorder());
+			const text = new Text(`Testing connection to "${name}"... (esc to cancel)`, 1, 1);
+			hintBlock.addChild(text);
+			hintBlock.addChild(new DynamicBorder());
+			this.ctx.presentCommandOutput(hintBlock);
+			hintText = text;
 			hintShown = true;
 
 			// Resolve auth config if needed
@@ -1670,6 +1683,14 @@ export class MCPCommandController {
 
 			this.ctx.showError(`Failed to connect to "${name}": ${errorMsg}${helpText}`);
 		} finally {
+			settled = true;
+			if (hintShown) {
+				// The test can no longer be cancelled: stop advertising Esc so a
+				// later press cannot be mistaken for test cancellation and abort
+				// the running agent turn after the grace expires.
+				hintText?.setText(`Tested connection to "${name}".`);
+				this.ctx.ui.requestRender();
+			}
 			if (this.ctx.mcpTestEscapeHandlers.has(handleEscape)) {
 				if (hintShown) {
 					const timer = setTimeout(() => {
