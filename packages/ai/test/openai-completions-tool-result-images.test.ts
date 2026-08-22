@@ -521,4 +521,30 @@ describe("openai-completions convertMessages", () => {
 			expect(toolMessage?.content as string).toContain(NON_VISION_IMAGE_PLACEHOLDER);
 		}
 	});
+	it("preserves image_url for the multimodal DeepSeek OCR model", () => {
+		const model = getBundledModel("novita", "deepseek/deepseek-ocr-2") as Model<"openai-completions">;
+		const context: Context = {
+			messages: [
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "Read this document" },
+						{ type: "image", data: "ZmFrZQ==", mimeType: "image/png" },
+					],
+					timestamp: Date.now(),
+				},
+			],
+		};
+
+		const messages = convertMessages(model, context, compat);
+
+		expect(messages).toHaveLength(1);
+		expect(messages[0].content).toEqual([
+			{ type: "text", text: "Read this document" },
+			{
+				type: "image_url",
+				image_url: { url: "data:image/png;base64,ZmFrZQ==" },
+			},
+		]);
+	});
 });
