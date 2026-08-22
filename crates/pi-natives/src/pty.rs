@@ -107,6 +107,12 @@ const CONTROL_MESSAGES_PER_TICK: usize = 64;
 const READER_EVENTS_PER_TICK: usize = 256;
 const POST_CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_millis(300);
 const POST_EXIT_DRAIN_TIMEOUT: Duration = Duration::from_millis(300);
+/// How long a cancelled run polls for its SIGKILL'd child before handing the
+/// reap off to a detached thread rather than blocking the PTY promise.
+#[cfg(not(windows))]
+const CANCEL_REAP_TIMEOUT: Duration = Duration::from_millis(500);
+#[cfg(not(windows))]
+const CANCEL_REAP_POLL_INTERVAL: Duration = Duration::from_millis(5);
 #[cfg(not(windows))]
 const FINAL_READER_DRAIN_TIMEOUT: Duration = Duration::from_millis(50);
 
@@ -534,11 +540,8 @@ fn run_pty_sync(
 		}
 	}
 	if exit_code.is_none() {
-		// Reaping here must be unconditional, even after `terminate_requested`
-		// already sent SIGKILL: `std::process::Child` (which `portable-pty`
-		// wraps on Unix) never waits on Drop, so a single missed try_wait()
-		// leaks the process as a permanent zombie once `child` goes out of
-		// scope below.
+		// `std::process::Child` (what `portable-pty` wraps on Unix) never waits on
+		// `Drop`, so a child left unwaited here leaks as a permanent zombie.
 		//
 		// On Windows, child.wait() can hang indefinitely in ConPTY.
 		// Poll try_wait() with a short timeout instead.
@@ -557,7 +560,32 @@ fn run_pty_sync(
 			}
 		}
 		#[cfg(not(windows))]
-		{
+		if terminate_requested {
+			// SIGKILL does not guarantee a prompt exit — a child wedged in
+			// uninterruptible I/O never reaps, and a kill that failed leaves it
+			// running — so blocking here would pin this `spawn_blocking` worker
+			// and the promise well past the caller's deadline. Poll briefly, then
+			// hand the reap to a detached thread so cancellation still returns.
+			let deadline = Instant::now() + CANCEL_REAP_TIMEOUT;
+			while exit_code.is_none() {
+				if let Some(status) = child
+					.try_wait()
+					.map_err(|err| Error::from_reason(format!("Failed checking PTY status: {err}")))?
+				{
+					exit_code = Some(i32::try_from(status.exit_code()).unwrap_or(i32::MAX));
+					break;
+				}
+				if Instant::now() >= deadline {
+					break;
+				}
+				std::thread::sleep(CANCEL_REAP_POLL_INTERVAL);
+			}
+			if exit_code.is_none() {
+				std::thread::spawn(move || {
+					let _ = child.wait();
+				});
+			}
+		} else {
 			let status = child
 				.wait()
 				.map_err(|err| Error::from_reason(format!("Failed waiting PTY process: {err}")))?;
@@ -639,18 +667,16 @@ fn emit_chunk(text: &str, callback: Option<&ThreadsafeFunction<String>>) {
 #[cfg(all(test, target_os = "linux"))]
 mod zombie_repro_tests {
 	//! Reproduces the leaked-zombie race fixed above: a PTY session cancelled
-	//! (timed out) very soon after spawn used to fall back to a single
-	//! non-blocking `try_wait()` with no retry. Under scheduler contention that
-	//! single check can race the kernel actually reaping the SIGKILL'd child,
-	//! and `child` (a `std::process::Child`, which never waits on `Drop`) then
-	//! leaks the process as a permanent zombie.
+	//! (timed out) shortly after spawn used to abandon its child unreaped, and
+	//! `std::process::Child` never waits on `Drop`, so the process stuck around
+	//! as a permanent zombie.
 	//!
-	//! This test is marked `#[ignore]` because it intentionally saturates all
-	//! CPU cores with contention to trigger scheduler races — it must run
-	//! isolated, not alongside other tests. Run with `cargo test -- --ignored
-	//! --test-threads=1 zombie_repro_tests`.
+	//! `#[ignore]`d: it saturates every core to provoke the scheduler races, so
+	//! it must run alone. `cargo test -- --ignored --test-threads=1
+	//! zombie_repro_tests`
 
 	use std::{
+		collections::HashSet,
 		sync::{
 			Arc,
 			atomic::{AtomicBool, Ordering},
@@ -660,43 +686,56 @@ mod zombie_repro_tests {
 
 	use super::*;
 
-	/// Count zombie children directly parented to this test process.
-	fn zombie_child_count() -> usize {
+	const STORM_CHILD_COMM: &str = "sleep";
+
+	/// Zombie PIDs parented to this test process and spawned as
+	/// `STORM_CHILD_COMM`. The comm filter keeps a sibling test's
+	/// exited-before-wait child from counting as a leak here.
+	fn zombie_child_pids() -> HashSet<u32> {
 		let my_pid = std::process::id();
+		let mut pids = HashSet::new();
 		let Ok(entries) = std::fs::read_dir("/proc") else {
-			return 0;
+			return pids;
 		};
-		let mut count = 0;
 		for entry in entries.flatten() {
-			let Some(pid_str) = entry.file_name().to_str().map(str::to_owned) else {
+			let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
 				continue;
 			};
-			if pid_str.parse::<u32>().is_err() {
+			let Ok(pid) = name.parse::<u32>() else {
+				continue;
+			};
+			let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+				continue;
+			};
+			// `/proc/[pid]/stat` is `pid (comm) state ppid ...`; comm can itself
+			// contain spaces and parens, so bound it by the first `(` and last `)`.
+			let (Some(open), Some(close)) = (stat.find('('), stat.rfind(')')) else {
+				continue;
+			};
+			if stat.get(open + 1..close) != Some(STORM_CHILD_COMM) {
 				continue;
 			}
-			let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid_str}/stat")) else {
-				continue;
-			};
-			let Some(last_paren) = stat.rfind(')') else {
-				continue;
-			};
-			let fields: Vec<&str> = stat[last_paren + 1..].split_whitespace().collect();
-			// fields[0] = state, fields[1] = ppid (see proc(5); comm itself was
-			// already skipped by slicing past the last `)`).
+			let fields: Vec<&str> = stat[close + 1..].split_whitespace().collect();
 			let (Some(state), Some(ppid)) = (fields.first(), fields.get(1)) else {
 				continue;
 			};
 			if *state == "Z" && ppid.parse::<u32>() == Ok(my_pid) {
-				count += 1;
+				pids.insert(pid);
 			}
 		}
-		count
+		pids
 	}
 
-	/// Run `iterations` PTY sessions that get cancelled ~1ms after spawn while
-	/// `nproc` busy threads keep every core contended, then report how many
-	/// zombie children are left over.
-	fn run_cancel_storm(iterations: usize) -> usize {
+	struct StormOutcome {
+		leaked:  usize,
+		spawned: usize,
+	}
+
+	/// Run `iterations` PTY sessions cancelled ~1ms after spawn while every core
+	/// is kept contended.
+	fn run_cancel_storm(iterations: usize) -> StormOutcome {
+		let before = zombie_child_pids();
+
 		let stop = Arc::new(AtomicBool::new(false));
 		let busy: Vec<_> = (0..thread::available_parallelism().map_or(8, |n| n.get()))
 			.map(|_| {
@@ -709,12 +748,13 @@ mod zombie_repro_tests {
 			})
 			.collect();
 
+		let mut spawned = 0;
 		for _ in 0..iterations {
 			let (_tx, rx) = flume::unbounded();
 			let ct = task::CancelToken::new(Some(1), None);
 			let config = PtyRunConfig {
 				command: PtyCommand::Argv {
-					application: "sleep".to_string(),
+					application: STORM_CHILD_COMM.to_string(),
 					args:        vec!["5".to_string()],
 				},
 				cwd:     None,
@@ -722,24 +762,35 @@ mod zombie_repro_tests {
 				cols:    80,
 				rows:    24,
 			};
-			let _ = run_pty_sync(config, None, None, rx, ct);
+			// Pre-spawn heartbeats bail with `Err`, so `Ok` means this iteration
+			// reached the post-spawn cancellation path.
+			if run_pty_sync(config, None, None, rx, ct).is_ok() {
+				spawned += 1;
+			}
 		}
 
 		stop.store(true, Ordering::Relaxed);
 		for handle in busy {
 			let _ = handle.join();
 		}
-		// Give a genuinely-slow reap a moment to land before we count, so we
-		// only count processes truly abandoned by `run_pty_sync`, not ones
-		// mid-flight.
+		// Let a slow reap land so only truly abandoned processes are counted.
 		thread::sleep(Duration::from_millis(200));
-		zombie_child_count()
+		let leaked = zombie_child_pids().difference(&before).count();
+		StormOutcome { leaked, spawned }
 	}
 
 	#[test]
 	#[ignore]
 	fn cancelled_pty_sessions_do_not_leak_zombies() {
-		let leaked = run_cancel_storm(60);
+		const ITERATIONS: usize = 60;
+		let StormOutcome { leaked, spawned } = run_cancel_storm(ITERATIONS);
 		assert_eq!(leaked, 0, "cancelled PTY sessions leaked {leaked} zombie process(es)");
+		// Checked second so a real leak reports as one: a clean run only proves
+		// something if children were actually spawned to begin with.
+		assert!(
+			spawned >= ITERATIONS / 3,
+			"only {spawned}/{ITERATIONS} iterations reached the post-spawn cancellation path; the \
+			 storm is not exercising the reap"
+		);
 	}
 }
