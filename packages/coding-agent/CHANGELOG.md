@@ -19,6 +19,7 @@
 
 ### Fixed
 
+- Fixed prompt history being flooded with duplicate entries and bloated into persistent storage on every session resume or transcript rebuild.
 - `/models` no longer shows dead sidebar tabs for unconfigured Ollama, llama.cpp, and LM Studio endpoints; explicitly configured endpoints remain visible for diagnosis ([#2761](https://github.com/can1357/oh-my-pi/issues/2761)).
 - Fixed prompt input lag under CPU load while file and macOS spelling completions are active.
 - Fixed blank `mnemopi.dbPath` settings silently creating volatile memory banks instead of using persistent agent storage ([#9360](https://github.com/can1357/oh-my-pi/issues/9360)).
