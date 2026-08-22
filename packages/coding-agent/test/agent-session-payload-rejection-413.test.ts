@@ -5,10 +5,11 @@ import type { CompactionPreparation } from "@oh-my-pi/pi-agent-core/compaction";
 import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionMaintenance } from "@oh-my-pi/pi-coding-agent/session/session-maintenance";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -37,6 +38,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	beforeAll(async () => {
 		authStorage = await AuthStorage.create(":memory:");
 		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		authStorage.setRuntimeApiKey("openai", "openai-test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 	});
 
@@ -52,8 +54,14 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	afterAll(() => {
 		authStorage?.close();
 	});
-
-	async function createSession(contextWindow: number | null, seed?: { toolText: string }): Promise<void> {
+	async function createSession(
+		contextWindow: number | null,
+		seed?: { toolText: string },
+		options?: {
+			streamFn?: NonNullable<ConstructorParameters<typeof Agent>[0]>["streamFn"];
+			extraSettings?: Parameters<typeof Settings.isolated>[0];
+		},
+	): Promise<void> {
 		// The payload-rejection tests exercise SessionMaintenance's overflow
 		// routing, not extension discovery. Keep the production hook boundary
 		// while short-circuiting summarization, mirroring the progress-guard
@@ -115,6 +123,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 				tools: [],
 				messages: initialMessages,
 			},
+			...(options?.streamFn ? { streamFn: options.streamFn } : {}),
 		});
 
 		session = new AgentSession({
@@ -125,6 +134,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 				// Promotion would silently absorb the overflow before compaction
 				// could run; these tests pin the compaction-vs-honest-skip fork.
 				"contextPromotion.enabled": false,
+				...options?.extraSettings,
 			}),
 			modelRegistry,
 			extensionRunner: extensionRunner as never,
@@ -327,5 +337,102 @@ describe("AgentSession payload-rejection 413 handling", () => {
 			checkSpy.mock.results.map(r => r.value as { automaticContinuationBlocked?: boolean }),
 		);
 		expect(checkResults.some(r => r.automaticContinuationBlocked === true)).toBe(true);
+	});
+
+	function activateOngoingGoal(id: string): void {
+		const now = Date.now();
+		session.setGoalModeState({
+			enabled: true,
+			mode: "active",
+			goal: {
+				id,
+				objective: "finish the ongoing work",
+				status: "active",
+				tokensUsed: 0,
+				timeUsedSeconds: 0,
+				createdAt: now,
+				updatedAt: now,
+			},
+		});
+	}
+
+	it("consults a configured fallback chain in goal mode before the BLOCK stands", async () => {
+		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
+		if (!fallbackModel) {
+			throw new Error("Expected bundled openai fallback model to exist");
+		}
+
+		const requestedModels: string[] = [];
+		// One mock per model identity: the mock stamps its own id/provider
+		// onto emitted AssistantMessages, and `sameModel` arbitration in
+		// checkCompaction compares those against the session model.
+		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const fallbackMock = createMockModel({ id: fallbackModel.id, provider: fallbackModel.provider });
+		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
+		await createSession(200_000, undefined, {
+			streamFn: (model, context, options) => {
+				requestedModels.push(`${model.provider}/${model.id}`);
+				if (model.provider === "anthropic") {
+					primaryMock.push({ throw: PAYLOAD_ERROR_MESSAGE });
+					return primaryMock.stream(model, context, options);
+				}
+				fallbackMock.push({ content: ["recovered on configured fallback"] });
+				return fallbackMock.stream(model, context, options);
+			},
+			extraSettings: {
+				"retry.baseDelayMs": 5,
+				"retry.modelFallback": true,
+				"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
+			},
+		});
+		activateOngoingGoal("goal-fallback");
+		session.subscribe(event => {
+			if (event.type === "retry_fallback_applied") fallbackEvents.push(event);
+		});
+
+		const notices = collectNotices();
+		const endCount = countCompactionEvents("auto_compaction_end");
+
+		await session.prompt("work on the goal");
+		await session.waitForIdle();
+
+		// The honest-skip still surfaces the payload rejection and no
+		// compaction runs…
+		expect(endCount()).toBe(0);
+		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
+		expect(payloadNotices.length).toBe(1);
+		// …but the terminal BLOCK must not pre-empt the user-configured chain:
+		// active goals get the same fallback opportunity as the non-goal
+		// recovery ladder.
+		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5", `${fallbackModel.provider}/${fallbackModel.id}`]);
+		expect(fallbackEvents).toHaveLength(1);
+		expect(fallbackEvents[0].to).toBe(`${fallbackModel.provider}/${fallbackModel.id}`);
+		expect(session.model?.provider).toBe(fallbackModel.provider);
+	});
+
+	it("keeps the goal-mode BLOCK terminal when no fallback chain is configured", async () => {
+		const requestedModels: string[] = [];
+		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		await createSession(200_000, undefined, {
+			streamFn: (model, context, options) => {
+				requestedModels.push(`${model.provider}/${model.id}`);
+				primaryMock.push({ throw: PAYLOAD_ERROR_MESSAGE });
+				return primaryMock.stream(model, context, options);
+			},
+		});
+		activateOngoingGoal("goal-terminal");
+
+		const notices = collectNotices();
+
+		await session.prompt("work on the goal");
+		await session.waitForIdle();
+
+		// Without a configured chain there is no fresh chance to grant: the
+		// payload rejection stays terminal — exactly one request, honest
+		// warning surfaced, no resend and no compaction detour.
+		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5"]);
+		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
+		expect(payloadNotices.length).toBe(1);
+		expect(payloadNotices[0].level).toBe("warning");
 	});
 });

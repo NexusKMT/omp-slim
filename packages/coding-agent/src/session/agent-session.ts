@@ -3023,6 +3023,19 @@ export class AgentSession {
 				compactionResult = await compactionTask;
 				checkedCompaction = true;
 				const compactionContinues = compactionResult.deferredHandoff || compactionResult.continuationScheduled;
+				// A configured hard-error fallback is a fresh chance that an
+				// automatic-continuation BLOCK must not pre-empt (#9235 review):
+				// outside goal mode the recovery ladder consults the chain before
+				// compaction can make a payload-shaped 413 terminal, so goal mode
+				// must honor the same user configuration. Only an exhausted or
+				// declining chain leaves the BLOCK standing.
+				if (compactionResult.automaticContinuationBlocked && this.#recovery.isHardErrorFallbackEligible(msg)) {
+					const didRetry = await this.#recovery.handleRetryableError(msg, { hardErrorFallback: true });
+					if (didRetry) {
+						await emitAgentEndNotification({ willContinue: true });
+						return;
+					}
+				}
 				if (compactionContinues || compactionResult.automaticContinuationBlocked) {
 					maintenanceRoute("active-goal-pre-empt-compaction-handled", {
 						deferredHandoff: compactionResult.deferredHandoff,
