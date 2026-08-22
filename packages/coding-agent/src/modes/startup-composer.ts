@@ -4,13 +4,7 @@ import { getRecentSessions } from "../session/session-listing";
 import { computeDefaultSessionDir } from "../session/session-paths";
 import { FileSessionStorage } from "../session/session-storage";
 import type { LspServerInfo, RecentSession } from "./components/welcome";
-import {
-	COMPOSER_DEFAULTS,
-	Composer,
-	type ComposerPreferences,
-	type ComposerStatusSnapshot,
-	type ComposerWelcomeUpdate,
-} from "./composer";
+import { COMPOSER_DEFAULTS, Composer, type ComposerPreferences, type ComposerWelcomeUpdate } from "./composer";
 import {
 	type ComposerThemePreferences,
 	readComposerStartupCache,
@@ -29,7 +23,6 @@ export interface PrepaintComposerOptions {
 	readonly cwd?: string;
 	readonly preferences?: Partial<ComposerPreferences>;
 	readonly theme?: ComposerThemePreferences;
-	readonly status?: ComposerStatusSnapshot;
 	readonly recentSessions?: () => Promise<RecentSession[]>;
 	readonly cache?: boolean;
 }
@@ -59,6 +52,9 @@ export class ComposerLease {
 	/** Transfer terminal ownership exactly once. */
 	adopt(): void {
 		if (this.#adopted) return;
+		// Safety net: startup paths that never applied resolved settings must
+		// still hand InteractiveMode a raw-input terminal.
+		this.composer.enableInput();
 		this.composer.transfer();
 		this.#adopted = true;
 	}
@@ -82,7 +78,6 @@ export function beginStartupComposer(options: PrepaintComposerOptions = {}): voi
 				welcome: undefined,
 				recentSessions: [],
 				lspServers: [],
-				status: undefined,
 			};
 	const theme = { ...cached.theme, ...options.theme };
 	initThemeSync(theme.symbolPreset, theme.colorBlindMode, theme.darkTheme, theme.lightTheme);
@@ -100,10 +95,9 @@ export function beginStartupComposer(options: PrepaintComposerOptions = {}): voi
 		now: options.now,
 		preferences,
 		welcome,
-		status: options.status ?? cached.status,
 	});
 	try {
-		composer.start({ clearScrollback: true });
+		composer.start({ clearScrollback: true, deferInput: true });
 	} catch (error) {
 		try {
 			composer.stop();
@@ -146,6 +140,10 @@ export function applyStartupComposerPreferences(update: PrepaintComposerPreferen
 		spellingAutocorrect: update.spellingAutocorrect,
 	};
 	pending.composer.setPreferences(preferences);
+	// Settings resolved means the module graph is loaded and the event loop is
+	// responsive again: take raw-input ownership now. The kernel echoed (and
+	// buffered) everything typed during the load; the editor replays it here.
+	pending.composer.enableInput();
 	if (pending.cache) {
 		void writeComposerUiCache(pending.cwd, preferences, update.theme).catch(error => {
 			logger.debug("composer UI cache write failed", { error });
