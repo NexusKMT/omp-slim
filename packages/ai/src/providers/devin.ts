@@ -713,11 +713,12 @@ function truncateTrailerEvidence(text: string): string {
  */
 function summarizeTrailerDetails(details: unknown): string | undefined {
 	if (!Array.isArray(details) || details.length === 0) return undefined;
-	const parts: string[] = [];
+	let summary = "";
 	for (const entry of details) {
 		if (!entry || typeof entry !== "object") continue;
 		const record = entry as Record<string, unknown>;
 		const type = typeof record.type === "string" && record.type ? record.type : undefined;
+		const value = typeof record.value === "string" && record.value ? record.value : undefined;
 		let debug: string | undefined;
 		if (record.debug !== undefined) {
 			try {
@@ -726,10 +727,16 @@ function summarizeTrailerDetails(details: unknown): string | undefined {
 				debug = undefined;
 			}
 		}
-		if (type && debug) parts.push(`${type}: ${debug}`);
-		else if (type) parts.push(type);
-		else if (debug) parts.push(debug);
+		const boundedType = type ? truncateTrailerEvidence(type) : undefined;
+		const evidence = debug ?? value;
+		const boundedEvidence = evidence ? truncateTrailerEvidence(evidence) : undefined;
+		let part: string | undefined;
+		if (boundedType && boundedEvidence) part = `${boundedType}: ${boundedEvidence}`;
+		else part = boundedType ?? boundedEvidence;
+		if (!part) continue;
+		const next = summary ? `${summary}; ${part}` : part;
+		if (next.length > MAX_TRAILER_EVIDENCE_CHARS) return truncateTrailerEvidence(next);
+		summary = next;
 	}
-	if (parts.length === 0) return undefined;
-	return parts.join("; ");
+	return summary || undefined;
 }

@@ -1,9 +1,14 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { streamDevin } from "@oh-my-pi/pi-ai/providers/devin";
 import type { Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { GetUserJwtResponseSchema } from "@oh-my-pi/pi-catalog/discovery/devin-proto";
 import { create, toBinary } from "@oh-my-pi/pi-catalog/discovery/protobuf";
+import { logger } from "@oh-my-pi/pi-utils";
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
 
 const CONNECT_END_STREAM_FLAG = 0x02;
 
@@ -94,5 +99,42 @@ describe("streamDevin trailer evidence", () => {
 		expect(result.stopReason).toBe("error");
 		expect(result.errorMessage).toContain("an internal error occurred (trace ID: evidence)");
 		expect(result.errorMessage).toContain("[details: trace]");
+	});
+	it("uses a detail value when no debug rendering is available", async () => {
+		const result = await runTrailer({
+			code: "invalid_argument",
+			message: "Error",
+			details: [{ type: "google.rpc.ErrorInfo", value: "encoded-evidence" }],
+		});
+
+		expect(result.errorMessage).toContain("[details: google.rpc.ErrorInfo: encoded-evidence]");
+	});
+
+	it("bounds details and raw trailer evidence in the warning", async () => {
+		const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+		const result = await runTrailer({
+			code: "invalid_argument",
+			message: "Error",
+			details: [{ type: "google.rpc.DebugInfo", debug: { detail: "x".repeat(10_000) } }],
+		});
+
+		expect(result.errorMessage?.length).toBeLessThanOrEqual(2100);
+		const warning = warnSpy.mock.calls.find(([message]) => message === "devin: stream rejected via Connect trailer")?.[1] as
+			| Record<string, unknown>
+			| undefined;
+		expect(warning).toMatchObject({
+			model: "devin-test",
+			code: "invalid_argument",
+			message: "Error",
+			requestBytes: expect.any(Number),
+			compressedBytes: expect.any(Number),
+			tools: 0,
+			messages: 1,
+			hadOutput: false,
+		});
+		expect(warning?.detail).toHaveLength(2001);
+		expect(warning?.rawTrailer).toHaveLength(2001);
+		expect(warning?.detail).toEndWith("…");
+		expect(warning?.rawTrailer).toEndWith("…");
 	});
 });

@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+
+- Captured bounded Devin Connect trailer details and request-shape evidence for diagnosing intermittent `invalid_argument` stream rejections ([#4218](https://github.com/can1357/oh-my-pi/issues/4218)).
 
 ## [18.0.0] - 2026-08-22
 
