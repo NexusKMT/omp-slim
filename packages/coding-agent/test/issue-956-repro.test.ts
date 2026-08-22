@@ -295,7 +295,7 @@ describe("interactive /mcp test", () => {
 			mcpTestEscapeHandlers.delete(handler);
 			handler();
 		}
-		syncResolve({});
+		syncResolve();
 		await pending;
 
 		const rendered = presented.map(block => block.render(80).join("\n")).join("\n");
