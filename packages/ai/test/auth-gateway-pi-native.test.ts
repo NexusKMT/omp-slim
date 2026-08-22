@@ -188,6 +188,23 @@ describe("pi-native parseRequest", () => {
 		expect(parsed.options.serviceTier).toBe("priority");
 		expect(parsed.options.cacheRetention).toBe("long");
 	});
+	it("preserves Bedrock guardrails in the canonical options bag", () => {
+		const parsed = parseRequest({
+			modelId: "amazon-bedrock/amazon.nova-lite-v1:0",
+			context: baseContext,
+			options: {
+				guardrailIdentifier: "arn:aws:bedrock:eu-west-1:123456789012:guardrail/example",
+				guardrailVersion: "7",
+				guardrailTrace: "enabled_full",
+			},
+		});
+
+		expect(parsed.options).toMatchObject({
+			guardrailIdentifier: "arn:aws:bedrock:eu-west-1:123456789012:guardrail/example",
+			guardrailVersion: "7",
+			guardrailTrace: "enabled_full",
+		});
+	});
 
 	it("forwards the explicit prompt-cache policy through the canonical options bag", () => {
 		const parsed = parseRequest({
