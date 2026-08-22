@@ -216,8 +216,8 @@ export class WelcomeComponent implements Component {
 	}
 
 	/**
-	 * Redirect a running intro's render callback to a new target (used when the
-	 * startup composer hands this component to InteractiveMode mid-animation).
+	 * Redirect a running intro's render callback to a new target when a host
+	 * remounts this component mid-animation.
 	 * Returns true while the intro is still animating; false = no-op (settled).
 	 */
 	retargetIntro(requestRender: () => void): boolean {

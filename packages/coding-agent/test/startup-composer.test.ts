@@ -2,11 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { getDefault } from "@oh-my-pi/pi-coding-agent/config/settings-schema";
-import {
-	COMPOSER_DEFAULTS,
-	Composer,
-	type ComposerPreferences,
-} from "@oh-my-pi/pi-coding-agent/modes/composer";
+import { COMPOSER_DEFAULTS, Composer, type ComposerPreferences } from "@oh-my-pi/pi-coding-agent/modes/composer";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import {
 	applyStartupComposerPreferences,
@@ -375,6 +371,23 @@ describe("Composer prepaint", () => {
 		expect(output).toContain("prior work");
 		expect(output).not.toContain("Starting OMP");
 		expect(output).toContain("╭");
+		const initialEditorRow = terminal
+			.getViewport()
+			.map(row => Bun.stripANSI(row))
+			.findLastIndex(row => row.startsWith("╭"));
+		composer.updateWelcome({
+			modelName: "provider/model-with-an-authoritative-name-that-is-longer-than-the-left-column",
+			providerName: "provider-with-a-long-name",
+			lspServers: [{ name: "rust-analyzer", status: "connecting", fileTypes: [".rs"] }],
+		});
+		await terminal.waitForRender(() =>
+			terminal.getViewport().some(row => Bun.stripANSI(row).includes("rust-analyzer")),
+		);
+		const updatedEditorRow = terminal
+			.getViewport()
+			.map(row => Bun.stripANSI(row))
+			.findLastIndex(row => row.startsWith("╭"));
+		expect(updatedEditorRow).toBe(initialEditorRow);
 		composer.stop();
 	});
 
@@ -385,13 +398,27 @@ describe("Composer prepaint", () => {
 			terminal,
 			welcome: {
 				version: "9.9.9",
+				modelName: "Claude Fable 5",
+				providerName: "anthropic",
 				recentSessions: [{ name: "prior work", timeAgo: "5m ago" }],
+			},
+			status: {
+				shape: "box",
+				borderColor: { prefix: "\u001b[34m", suffix: "\u001b[39m" },
+				topBorder: { content: "cached model · branch", width: 21 },
+				bottomLines: [],
 			},
 		});
 		composer.start();
 		await terminal.waitForRender(() =>
 			terminal.getViewport().some(row => Bun.stripANSI(row).includes("Welcome back!")),
 		);
+		expect(composer.editor.render(80).join("\n")).toContain("\u001b[34m");
+		const prepaintRows = terminal.getViewport().map(row => Bun.stripANSI(row));
+		expect(prepaintRows.join("\n")).toContain("Claude Fable 5");
+		expect(prepaintRows.join("\n")).toContain("anthropic");
+		expect(prepaintRows.join("\n")).toContain("cached model · branch");
+		const prepaintEditorRow = prepaintRows.findLastIndex(row => row.startsWith("╭"));
 
 		terminal.sendInput("draft message");
 		const lease = new ComposerLease(composer);
@@ -411,19 +438,52 @@ describe("Composer prepaint", () => {
 			);
 			lease.adopt();
 			vi.spyOn(mode.statusLine, "watchBranch").mockImplementation(() => {});
+			const realTopBorder = vi
+				.spyOn(mode.statusLine, "getTopBorder")
+				.mockReturnValue({ content: "real incomplete", width: 15, revision: 1 });
+			const hydrating = vi.spyOn(mode.statusLine, "isHydrating").mockReturnValue(true);
+			terminal.sendInput(" between");
+			expect(mode.editor.getExpandedText()).toBe("draft message between");
+			await terminal.waitForRender();
+			expect(mode.editor.render(80).join("\n")).toContain("\u001b[34m");
+			const handoffOutput = terminal
+				.getViewport()
+				.map(row => Bun.stripANSI(row))
+				.join("\n");
+			expect(handoffOutput).toContain("cached model · branch");
+			expect(handoffOutput).not.toContain("real incomplete");
 			await mode.init({ suppressWelcomeIntro: true });
 			await terminal.waitForRender();
 
 			expect(terminal.starts).toBe(1);
-			expect(mode.editor.getExpandedText()).toBe("draft message");
+			expect(mode.editor.getExpandedText()).toBe("draft message between");
 			const output = terminal
 				.getViewport()
 				.map(r => Bun.stripANSI(r))
 				.join("\n");
 			const modelName = testSession.session.model?.name ?? "";
 			expect(output).toContain(modelName);
+			expect(output).toContain("cached model · branch");
+			expect(output).not.toContain("real incomplete");
+			hydrating.mockReturnValue(false);
+			realTopBorder.mockReturnValue({ content: "real complete *18 ?5", width: 20, revision: 2 });
+			mode.ui.requestRender();
+			await terminal.waitForRender(() =>
+				terminal.getViewport().some(row => Bun.stripANSI(row).includes("real complete *18 ?5")),
+			);
+			const completedOutput = terminal
+				.getViewport()
+				.map(row => Bun.stripANSI(row))
+				.join("\n");
+			expect(completedOutput).toContain("real complete *18 ?5");
+			expect(completedOutput).not.toContain("real incomplete");
 			const welcomeMatches = (output.match(/Welcome back!/g) || []).length;
 			expect(welcomeMatches).toBe(1);
+			const adoptedEditorRow = terminal
+				.getViewport()
+				.map(row => Bun.stripANSI(row))
+				.findLastIndex(row => row.startsWith("╭"));
+			expect(adoptedEditorRow).toBe(prepaintEditorRow);
 		} finally {
 			mode?.stop();
 			lease.dispose();

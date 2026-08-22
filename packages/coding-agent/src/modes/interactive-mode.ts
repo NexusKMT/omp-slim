@@ -17,6 +17,7 @@ import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import type {
 	AutocompleteProvider,
 	Component,
+	ComposerStyle,
 	EditorTheme,
 	LoaderMessageColorFn,
 	NativeScrollbackLiveRegion,
@@ -29,13 +30,12 @@ import {
 	getComposerStyle,
 	Loader,
 	Markdown,
-	ProcessTerminal,
 	Spacer,
 	setTerminalTextSizing,
 	setTuiTight,
 	TERMINAL,
 	Text,
-	TUI,
+	type TUI,
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import type { TerminalAppearanceRequestToken } from "@oh-my-pi/pi-tui/terminal";
@@ -171,7 +171,9 @@ import { type PlanReviewAnnotationState, PlanReviewOverlay } from "./components/
 import { StatusLineComponent } from "./components/status-line";
 import { stopSharedSpinnerTicker, type ToolExecutionHandle } from "./components/tool-execution";
 import { TranscriptContainer } from "./components/transcript-container";
-import { WelcomeComponent, type LspServerInfo as WelcomeLspServerInfo } from "./components/welcome";
+import type { LspServerInfo as WelcomeLspServerInfo } from "./components/welcome";
+import { Composer } from "./composer";
+import { writeComposerStatusCache, writeComposerWelcomeCache } from "./composer-cache";
 import { BtwController } from "./controllers/btw-controller";
 import { CleanseCommandController } from "./controllers/cleanse-command-controller";
 import { CommandController } from "./controllers/command-controller";
@@ -206,7 +208,6 @@ import {
 import { createSessionTeardown, type SessionTeardown } from "./session-teardown";
 import { runProviderSetupWizard } from "./setup-wizard/lazy";
 import { interruptHint } from "./shared";
-import { Composer } from "./composer";
 import { invokeSkillCommandFromText, isKnownSkillCommand } from "./skill-command";
 import { clearMermaidCache } from "./theme/mermaid-cache";
 import { type ShimmerPalette, shimmerEnabled, shimmerSegments, shimmerText } from "./theme/shimmer";
@@ -776,7 +777,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	#mcpPendingServers = new Set<string>();
 	#mcpConnectedServers = new Set<string>();
 	#mcpFailedServers = new Map<string, { error: string; sourcePath?: string }>();
-	#welcomeComponent?: WelcomeComponent;
 	readonly #chatHost: ChatBlockHost = { requestRender: () => this.ui.requestRender() };
 
 	constructor(
@@ -827,7 +827,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.editor.magicKeywordsEnabled = () => this.settings.get("magicKeywords.enabled");
 		this.editor.imageReferenceHyperlink = imageReferenceHyperlink;
 		this.#ownsStartedUi = wasStarted;
-		this.#startupSubmitGated = wasStarted;
+		this.#startupSubmitGated = true;
 		this.keybindings = KeybindingsManager.inMemory();
 		this.agent = session.agent;
 		this.#version = version;
@@ -940,12 +940,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.statusLine.setVibeWorkerTokenRateProvider(() =>
 			aggregateVibeWorkerTokensPerSecond(this.session.getAgentId() ?? MAIN_AGENT_ID),
 		);
-		// Lazy provider — the top border rebuild coalesces to at most one
-		// invocation per painted frame instead of firing on every session event
-		// (#4145). The TUI throttles renders at ~30fps, so a long-running eval
-		// spraying events no longer runs `getTopBorder` synchronously in the
-		// hot path where the render never gets to paint the result.
-		this.editor.setTopBorderProvider(availableWidth => this.statusLine.getTopBorder(availableWidth));
 
 		this.hideToolActivity = settings.get("display.hideToolActivity");
 		this.chatContainer.setToolActivityVisible(!this.hideToolActivity);
@@ -1117,8 +1111,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			recentSessions,
 			lspServers: this.#getWelcomeLspServers(),
 		});
-		this.#welcomeComponent = startupQuiet ? undefined : this.composer.welcome;
-
+		this.#persistComposerWelcome(modelName, providerName);
 		const headerBefore: Component[] = [];
 		for (const warning of this.session.configWarnings) {
 			headerBefore.push(new Text(theme.fg("warning", `Warning: ${warning}`), 1, 0), new Spacer(1));
@@ -1137,13 +1130,19 @@ export class InteractiveMode implements InteractiveModeContext {
 				);
 				headerAfter.push(new Text(summary, 1, 0));
 			} else {
-				headerAfter.push(
-					new Markdown(this.#startupChangelog.markdown?.trim() ?? "", 1, 0, getMarkdownTheme()),
-				);
+				headerAfter.push(new Markdown(this.#startupChangelog.markdown?.trim() ?? "", 1, 0, getMarkdownTheme()));
 			}
 			headerAfter.push(new Spacer(1), new DynamicBorder());
 		}
 		this.composer.setHeaderExtras(headerBefore, headerAfter);
+		// Install the refresh callback before the first real status render starts
+		// async git/PR/usage hydration. Cached segments remain visible until all
+		// data needed by that render is authoritative.
+		this.statusLine.watchBranch(() => {
+			this.#persistComposerStatus();
+			this.ui.requestRender();
+		});
+		this.composer.setStatusComponent(this.statusLine, () => !this.statusLine.isHydrating());
 
 		this.composer.setRuntimeChildren([
 			this.chatContainer,
@@ -1164,7 +1163,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.hookWidgetContainerAbove,
 			this.editorContainer,
 			this.hookWidgetContainerBelow,
-			this.statusLine,
 		]);
 		this.ui.setFocus(this.editor);
 		this.syncComposerShape();
@@ -1371,13 +1369,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			// change, commit that change so theme loading performs a second full
 			// replay with the newly detected palette.
 			onTerminalAppearanceChange(mode, appearanceRefreshWasRequested ? {} : undefined);
-		});
-
-		// A branch change (checkout, worktree switch, `git switch`) invalidates
-		// the status-line git segments; the lazy top-border provider picks up
-		// the fresh branch on the next painted frame.
-		this.statusLine.watchBranch(() => {
-			this.ui.requestRender();
 		});
 	}
 
@@ -2008,10 +1999,20 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.statusLine.setAutocompleteActiveProbe(() => this.editor.isAutocompleteActive());
 		switch (style.statusAttachment) {
 			case "top-border":
-				this.editor.setTopBorderProvider(availableWidth => this.statusLine.getTopBorder(availableWidth));
+				this.editor.setTopBorderProvider(availableWidth => {
+					const real = this.statusLine.getTopBorder(availableWidth);
+					return this.statusLine.isHydrating()
+						? (this.composer.getSpeculativeTopBorder(availableWidth) ?? real)
+						: real;
+				});
 				break;
 			case "top-rule-chip":
-				this.editor.setTopBorderProvider(availableWidth => this.statusLine.getStandaloneTopBorder(availableWidth));
+				this.editor.setTopBorderProvider(availableWidth => {
+					const real = this.statusLine.getStandaloneTopBorder(availableWidth);
+					return this.statusLine.isHydrating()
+						? (this.composer.getSpeculativeTopBorder(availableWidth) ?? real)
+						: real;
+				});
 				break;
 			case "none":
 				this.editor.setTopBorderProvider(undefined);
@@ -2020,7 +2021,51 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		this.statusLine.setComposerStyle(style);
 		this.updateEditorBorderColor();
+		this.#persistComposerStatus();
 		this.ui.requestRender();
+	}
+
+	#persistComposerStatus(): void {
+		const sessionFile = this.sessionManager.getSessionFile();
+		if (!sessionFile) return;
+		const shape = settings.get("composer.shape") ?? "box";
+		const style: ComposerStyle = getComposerStyle(shape);
+		const terminalWidth = this.ui.terminal.columns;
+		const availableWidth = this.editor.getTopBorderAvailableWidth(terminalWidth);
+		const topBorder =
+			style.statusAttachment === "top-border"
+				? this.statusLine.getTopBorder(availableWidth)
+				: style.statusAttachment === "top-rule-chip"
+					? this.statusLine.getStandaloneTopBorder(availableWidth)
+					: undefined;
+		const bottomLines: string[] = [];
+		if (style.bottomBar !== "none") {
+			const content = this.statusLine.renderBottomBar(terminalWidth, style.bottomBar === "left" ? "left" : "full");
+			if (content) {
+				if (style.bottomBarGap) bottomLines.push("");
+				bottomLines.push(content);
+			}
+		}
+		if (this.statusLine.isHydrating()) return;
+		const borderMarker = "\0";
+		const coloredBorderMarker = this.editor.borderColor(borderMarker);
+		const markerIndex = coloredBorderMarker.indexOf(borderMarker);
+		const snapshot = {
+			shape,
+			borderColor:
+				markerIndex < 0
+					? undefined
+					: {
+							prefix: coloredBorderMarker.slice(0, markerIndex),
+							suffix: coloredBorderMarker.slice(markerIndex + borderMarker.length),
+						},
+			topBorder: topBorder ? { content: topBorder.content, width: topBorder.width } : undefined,
+			bottomLines,
+		};
+		this.composer.setStatusSnapshot(snapshot);
+		void writeComposerStatusCache(this.sessionManager.getCwd(), snapshot).catch(error => {
+			logger.debug("composer status cache write failed", { error });
+		});
 	}
 
 	#handleSessionAccentInputsChanged(): void {
@@ -4689,16 +4734,21 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	#updateWelcomeModel(): void {
-		this.composer.updateWelcome({
-			modelName: this.session.model?.name ?? "Unknown",
-			providerName: this.session.model?.provider ?? "Unknown",
+		const modelName = this.session.model?.name ?? "Unknown";
+		const providerName = this.session.model?.provider ?? "Unknown";
+		this.composer.updateWelcome({ modelName, providerName });
+		this.#persistComposerWelcome(modelName, providerName);
+	}
+
+	#persistComposerWelcome(modelName: string, providerName: string): void {
+		if (!this.sessionManager.getSessionFile()) return;
+		void writeComposerWelcomeCache(this.sessionManager.getCwd(), { modelName, providerName }).catch(error => {
+			logger.debug("composer welcome cache write failed", { error });
 		});
-		this.#welcomeComponent = this.composer.welcome;
 	}
 
 	#updateWelcomeLspServers(): void {
 		this.composer.updateWelcome({ lspServers: this.#getWelcomeLspServers() });
-		this.#welcomeComponent = this.composer.welcome;
 	}
 
 	#clearWorkingMessageAccentCache(): void {

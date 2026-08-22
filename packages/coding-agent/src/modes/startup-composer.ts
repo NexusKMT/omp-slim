@@ -3,20 +3,21 @@ import { logger } from "@oh-my-pi/pi-utils";
 import { getRecentSessions } from "../session/session-listing";
 import { computeDefaultSessionDir } from "../session/session-paths";
 import { FileSessionStorage } from "../session/session-storage";
-import {
-	readComposerStartupCache,
-	type ComposerThemePreferences,
-	writeComposerLspCache,
-	writeComposerRecentSessionsCache,
-	writeComposerUiCache,
-} from "./composer-cache";
+import type { LspServerInfo, RecentSession } from "./components/welcome";
 import {
 	COMPOSER_DEFAULTS,
 	Composer,
 	type ComposerPreferences,
+	type ComposerStatusSnapshot,
 	type ComposerWelcomeUpdate,
 } from "./composer";
-import type { LspServerInfo, RecentSession } from "./components/welcome";
+import {
+	type ComposerThemePreferences,
+	readComposerStartupCache,
+	writeComposerLspCache,
+	writeComposerRecentSessionsCache,
+	writeComposerUiCache,
+} from "./composer-cache";
 import { initThemeSync } from "./theme/theme";
 
 /** Inputs available at the CLI prepaint boundary before command modules load. */
@@ -28,6 +29,7 @@ export interface PrepaintComposerOptions {
 	readonly cwd?: string;
 	readonly preferences?: Partial<ComposerPreferences>;
 	readonly theme?: ComposerThemePreferences;
+	readonly status?: ComposerStatusSnapshot;
 	readonly recentSessions?: () => Promise<RecentSession[]>;
 	readonly cache?: boolean;
 }
@@ -74,12 +76,21 @@ export function beginStartupComposer(options: PrepaintComposerOptions = {}): voi
 	const useCache = options.cache !== false;
 	const cached = useCache
 		? readComposerStartupCache(cwd)
-		: { preferences: undefined, theme: undefined, recentSessions: [], lspServers: [] };
+		: {
+				preferences: undefined,
+				theme: undefined,
+				welcome: undefined,
+				recentSessions: [],
+				lspServers: [],
+				status: undefined,
+			};
 	const theme = { ...cached.theme, ...options.theme };
 	initThemeSync(theme.symbolPreset, theme.colorBlindMode, theme.darkTheme, theme.lightTheme);
 	const preferences = { ...COMPOSER_DEFAULTS, ...cached.preferences, ...options.preferences };
 	const welcome: ComposerWelcomeUpdate = {
 		version: options.version ?? "",
+		modelName: cached.welcome?.modelName,
+		providerName: cached.welcome?.providerName,
 		recentSessions: cached.recentSessions,
 		lspServers: cached.lspServers,
 	};
@@ -89,6 +100,7 @@ export function beginStartupComposer(options: PrepaintComposerOptions = {}): voi
 		now: options.now,
 		preferences,
 		welcome,
+		status: options.status ?? cached.status,
 	});
 	try {
 		composer.start({ clearScrollback: true });

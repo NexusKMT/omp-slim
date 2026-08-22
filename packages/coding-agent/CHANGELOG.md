@@ -5,7 +5,7 @@
 ### Added
 
 - Added independently configurable macOS typo detection (`Ctrl+.` suggestions), word autocomplete (Tab), and autocorrect in the prompt editor. Typo detection and autocomplete default on; autocorrect is opt-in.
-- Startup composer now renders the complete interactive welcome scene and theme immediately during launch with progressive fills for recent sessions and LSP servers.
+- Startup composer now renders welcome, theme, and status UI immediately using cached session/LSP info
 - `omp bench` now runs a mixed suite of randomized built-in challenges by default (chat, prefill, generation); `--profile` isolates one kind
 - Added p50/p95 statistics, distinct input/output throughput metrics, and cost to benchmark output
 - Added live benchmark dashboard with progress tracking and real-time performance estimates

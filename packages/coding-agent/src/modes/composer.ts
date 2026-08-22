@@ -1,11 +1,14 @@
 import {
 	type Component,
 	Container,
+	type EditorTopBorder,
 	ProcessTerminal,
 	type ResizeScrollbackMode,
 	Spacer,
 	type Terminal,
 	TUI,
+	truncateToWidth,
+	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import { CustomEditor } from "./components/custom-editor";
 import { type LspServerInfo, type RecentSession, WelcomeComponent } from "./components/welcome";
@@ -38,8 +41,8 @@ export const COMPOSER_DEFAULTS: ComposerPreferences = {
 	resizeScrollback: "append",
 	imeSafeCursor: false,
 	autocompleteMaxVisible: 10,
-	spellingTypoDetection: false,
-	spellingAutocomplete: false,
+	spellingTypoDetection: true,
+	spellingAutocomplete: true,
 	spellingAutocorrect: false,
 };
 
@@ -52,11 +55,25 @@ export interface ComposerWelcomeUpdate {
 	readonly lspServers?: readonly LspServerInfo[];
 }
 
+/** Last resolved status-line chrome reused speculatively on the next first frame. */
+export interface ComposerStatusSnapshot {
+	readonly shape: string;
+	readonly borderColor?: {
+		readonly prefix: string;
+		readonly suffix: string;
+	};
+	readonly topBorder?: {
+		readonly content: string;
+		readonly width: number;
+	};
+	readonly bottomLines: readonly string[];
+}
 /** Optional dependencies and initial state for a standalone composer. */
 export interface ComposerOptions {
 	readonly terminal?: Terminal;
 	readonly preferences?: Partial<ComposerPreferences>;
 	readonly welcome?: ComposerWelcomeUpdate;
+	readonly status?: ComposerStatusSnapshot;
 	readonly exit?: (code: number) => void;
 	readonly now?: () => number;
 }
@@ -67,6 +84,34 @@ export interface ComposerStartOptions {
 	readonly playWelcomeIntro?: boolean;
 }
 
+class StatusHost implements Component {
+	#lines: readonly string[] = [];
+	#rendered: readonly string[] = [];
+	#width = -1;
+	#component: Component | undefined;
+	#ready: (() => boolean) | undefined;
+
+	setLines(lines: readonly string[]): void {
+		this.#lines = lines;
+		this.#width = -1;
+	}
+
+	setComponent(component: Component, ready: () => boolean): void {
+		this.#component = component;
+		this.#ready = ready;
+	}
+
+	render(width: number): readonly string[] {
+		const realLines = this.#component?.render(width);
+		if (realLines && (this.#lines.length === 0 || this.#ready?.())) return realLines;
+		if (width === this.#width) return this.#rendered;
+		const rendered: string[] = [];
+		for (const line of this.#lines) rendered.push(truncateToWidth(line, width));
+		this.#rendered = rendered;
+		this.#width = width;
+		return rendered;
+	}
+}
 /**
  * Canonical interactive composer, usable before session/settings exist and updatable in place.
  * It owns the terminal, welcome header, and editor; InteractiveMode later supplies authoritative
@@ -78,6 +123,7 @@ export class Composer {
 	#editor: CustomEditor;
 	readonly #header = new Container();
 	readonly #bootstrapInputGap = new Spacer(1);
+	readonly #statusHost = new StatusHost();
 	readonly #exit: (code: number) => void;
 	readonly #now: () => number;
 	#preferences: ComposerPreferences;
@@ -90,6 +136,7 @@ export class Composer {
 	#headerBefore: readonly Component[] = [];
 	#headerAfter: readonly Component[] = [];
 	#runtimeChildren: readonly Component[] = [];
+	#statusSnapshot: ComposerStatusSnapshot | undefined;
 	#runtimeMounted = false;
 	#lastInterruptAt = 0;
 	#started = false;
@@ -101,6 +148,7 @@ export class Composer {
 		this.#exit = options.exit ?? (code => process.exit(code));
 		this.#now = options.now ?? Date.now;
 		this.#preferences = { ...COMPOSER_DEFAULTS, ...options.preferences };
+		this.#statusSnapshot = options.status;
 		this.#applyWelcomeUpdate(options.welcome ?? {});
 
 		this.ui = new TUI(options.terminal ?? new ProcessTerminal(), this.#preferences.showHardwareCursor);
@@ -123,6 +171,7 @@ export class Composer {
 		} catch {
 			// Extension-defined styles arrive with the session; InteractiveMode reapplies them.
 		}
+		this.#applyStatusSnapshot();
 		// Emergency controls stay active until InteractiveMode installs configured bindings.
 		this.editor.setActionKeys("app.clear", ["ctrl+c"]);
 		this.editor.setActionKeys("app.exit", ["ctrl+d"]);
@@ -136,6 +185,7 @@ export class Composer {
 		this.ui.addChild(this.#bootstrapInputGap);
 		this.ui.enableScopedInputRender(this.editor);
 		this.ui.addChild(this.editor);
+		this.ui.addChild(this.#statusHost);
 		this.ui.setFocus(this.editor);
 	}
 
@@ -185,6 +235,7 @@ export class Composer {
 			autocomplete: this.#preferences.spellingAutocomplete,
 			autocorrect: this.#preferences.spellingAutocorrect,
 		});
+		this.#applyStatusSnapshot();
 
 		if (this.#preferences.quiet) {
 			this.#welcome?.stopIntro();
@@ -229,9 +280,32 @@ export class Composer {
 		this.#editor = editor;
 	}
 
-	/** Mount or replace session-aware root children while preserving the header component. */
+	/** Replace the speculative status chrome before the session-aware status line mounts. */
+	setStatusSnapshot(snapshot: ComposerStatusSnapshot | undefined): void {
+		this.#statusSnapshot = snapshot;
+		this.#statusHost.setLines(snapshot?.shape === this.#preferences.composerShape ? snapshot.bottomLines : []);
+		if (!this.#runtimeMounted) this.#applyStatusSnapshot();
+		this.ui.requestRender();
+	}
+
+	/** Keep speculative status rows mounted until the real status component finishes hydrating. */
+	setStatusComponent(component: Component, ready: () => boolean): void {
+		this.#statusHost.setComponent(component, ready);
+	}
+
+	/** Render the cached top-border segments at the current editor width. */
+	getSpeculativeTopBorder(availableWidth: number): EditorTopBorder | undefined {
+		const snapshot = this.#statusSnapshot;
+		const border = snapshot?.shape === this.#preferences.composerShape ? snapshot.topBorder : undefined;
+		if (!border) return undefined;
+		const content = truncateToWidth(border.content, availableWidth);
+		return { content, width: visibleWidth(content) };
+	}
+
+	/** Mount or replace session-aware root children while preserving the header and status hosts. */
 	setRuntimeChildren(children: readonly Component[]): void {
 		if (this.#stopped) return;
+		this.ui.removeChild(this.#statusHost);
 		if (this.#runtimeMounted) {
 			for (const child of this.#runtimeChildren) this.ui.removeChild(child);
 		} else {
@@ -241,6 +315,7 @@ export class Composer {
 		}
 		this.#runtimeChildren = children;
 		for (const child of children) this.ui.addChild(child);
+		this.ui.addChild(this.#statusHost);
 		this.ui.requestRender();
 	}
 
@@ -281,6 +356,23 @@ export class Composer {
 			this.#recentSessions,
 			this.#lspServers,
 		);
+	}
+
+	#applyStatusSnapshot(): void {
+		const snapshot = this.#statusSnapshot;
+		if (!snapshot || snapshot.shape !== this.#preferences.composerShape) {
+			this.editor.setTopBorderProvider(undefined);
+			this.#statusHost.setLines([]);
+			return;
+		}
+		if (snapshot.borderColor) {
+			const { prefix, suffix } = snapshot.borderColor;
+			this.editor.borderColor = text => `${prefix}${text}${suffix}`;
+		}
+		this.editor.setTopBorderProvider(
+			snapshot.topBorder ? availableWidth => this.getSpeculativeTopBorder(availableWidth) : undefined,
+		);
+		this.#statusHost.setLines(snapshot.bottomLines);
 	}
 
 	#rebuildHeader(): void {
