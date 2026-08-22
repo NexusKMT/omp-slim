@@ -340,6 +340,7 @@
 ### Fixed
 
 - Fixed `omp stats` and `/stats` dashboards being unreachable from container hosts by accepting an explicit `--host` bind address while preserving the `127.0.0.1` default.
+- Fixed smart paste dropping text from X11 clipboard owners whose image read fails instead of reporting no image.
 
 ## [17.3.5] - 2026-08-16
 
