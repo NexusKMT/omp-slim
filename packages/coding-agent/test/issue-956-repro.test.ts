@@ -12,6 +12,11 @@ const originalProjectDir = getProjectDir();
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
 
+type RenderableBlock = {
+	render: (width: number) => readonly string[];
+	isTranscriptBlockFinalized: () => boolean;
+};
+
 describe("interactive /mcp test", () => {
 	let projectDir = "";
 	let agentDir = "";
@@ -167,13 +172,24 @@ describe("interactive /mcp test", () => {
 			return promise;
 		});
 		vi.spyOn(mcpClient, "disconnectServer").mockResolvedValue();
+		const { promise: lookup, resolve: resolveLookup } = Promise.withResolvers<{
+			mcpServers: Record<string, { type: string; command: string; args: string[] }>;
+		}>();
+		vi.spyOn(mcpConfigWriter, "readMCPConfigFile").mockReturnValue(lookup as never);
 		const showStatus = vi.fn();
+		const presented: RenderableBlock[] = [];
+		const { promise: hintPresented, resolve: hintResolve } = Promise.withResolvers<void>();
 		const mcpTestEscapeHandlers = new Set<() => void>();
 		const controller = new MCPCommandController({
 			mcpTestEscapeHandlers,
 			chatContainer: { addChild: vi.fn() },
 			present: vi.fn(),
-			presentCommandOutput: vi.fn(),
+			presentCommandOutput: (content: unknown) => {
+				if (typeof (content as { render?: unknown }).render === "function") {
+					presented.push(content as RenderableBlock);
+					hintResolve();
+				}
+			},
 			ui: { requestRender: vi.fn() },
 			editor: {},
 			showError: vi.fn(),
@@ -188,6 +204,15 @@ describe("interactive /mcp test", () => {
 		const pending = controller.handle("/mcp test github");
 		expect(mcpTestEscapeHandlers).toHaveLength(1);
 
+		resolveLookup({
+			mcpServers: { github: { type: "stdio", command: "github-mcp-server", args: ["serve"] } },
+		});
+		// Let the hint render before cancelling: this exercises the post-hint
+		// cancellation path (connect still pending), not the pre-hint bailout.
+		await hintPresented;
+		// keeps re-rendering it (post-settlement rewrite stays visible).
+		expect(presented[0]?.isTranscriptBlockFinalized()).toBe(false);
+
 		// Consume like InputController does: clear the set, then fire.
 		for (const handler of [...mcpTestEscapeHandlers]) {
 			mcpTestEscapeHandlers.delete(handler);
@@ -201,6 +226,59 @@ describe("interactive /mcp test", () => {
 		// a 5s grace window that would silently swallow the next Esc.
 		expect(mcpTestEscapeHandlers).toHaveLength(0);
 		expect(connectToServer).toHaveBeenCalledTimes(1);
+
+		// The hint must stop advertising esc immediately on cancellation, read
+		// as cancelled (not completed), and be sealed for scrollback history.
+		expect(presented).toHaveLength(1);
+		const rendered = presented.map(block => block.render(80).join("\n")).join("\n");
+		expect(rendered).toContain(`Cancelled connection test for "github".`);
+		expect(rendered).not.toContain("(esc to cancel)");
+		expect(presented[0]?.isTranscriptBlockFinalized()).toBe(true);
+	});
+
+	it("aborts during the awaited lookup without ever advertising esc", async () => {
+		const { promise: lookup, resolve } = Promise.withResolvers<{
+			mcpServers: Record<string, { type: string; command: string; args: string[] }>;
+		}>();
+		vi.spyOn(mcpConfigWriter, "readMCPConfigFile").mockReturnValue(lookup as never);
+		const presentCommandOutput = vi.fn();
+		const showStatus = vi.fn();
+		const mcpTestEscapeHandlers = new Set<() => void>();
+		const controller = new MCPCommandController({
+			mcpTestEscapeHandlers,
+			chatContainer: { addChild: vi.fn() },
+			present: vi.fn(),
+			presentCommandOutput,
+			ui: { requestRender: vi.fn() },
+			editor: {},
+			showError: vi.fn(),
+			showStatus,
+			session: { refreshMCPTools: vi.fn() },
+			mcpManager: {
+				getServerConfig: vi.fn(() => undefined),
+				getSource: vi.fn(() => undefined),
+				prepareConfig: vi.fn(async config => config),
+				getConnectionStatus: vi.fn(() => "connected"),
+			},
+		} as never);
+
+		const pending = controller.handle("/mcp test github");
+		expect(mcpTestEscapeHandlers).toHaveLength(1);
+
+		// Esc lands while the config lookup is still awaiting: the dispatcher
+		// consumes ownership, and the resumed handler must not render a hint.
+		for (const handler of [...mcpTestEscapeHandlers]) {
+			mcpTestEscapeHandlers.delete(handler);
+			handler();
+		}
+		resolve({
+			mcpServers: { github: { type: "stdio", command: "github-mcp-server", args: ["serve"] } },
+		});
+		await pending;
+
+		expect(presentCommandOutput).not.toHaveBeenCalled();
+		expect(showStatus).toHaveBeenCalledWith(`Cancelled MCP test for "github"`);
+		expect(mcpTestEscapeHandlers).toHaveLength(0);
 	});
 
 	it("claims Esc ownership before the awaited server lookup", async () => {
