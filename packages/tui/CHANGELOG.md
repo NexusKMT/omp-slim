@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- Collapsed individual skill commands into a `/skill:` namespace entry to declutter suggestions
+
+### Changed
+
+- Improved slash command autocompletion to chain suggestions after selecting a namespace
+
+### Fixed
+
+- Fixed Kitty OSC 66 headings activating before the host explicitly enables text sizing.
+
 ## [18.0.0] - 2026-08-22
 
 ### Breaking Changes
