@@ -37,6 +37,7 @@
 - Paragraph splitting for containment comparison is now fenced-code-block-aware: text inside a fenced example in a more authoritative file no longer counts as a contained instruction, preventing active context rules from being discarded.
 
 ### Fixed
+- Fixed byte-size and media-budget HTTP 413 rejections (e.g. a provider vision budget rejecting archived image frames) being misrouted into token-context compaction, which cannot shrink bytes or image budgets and dead-ends with the misleading "Compaction freed too little context to make progress" warning. Session maintenance now withholds compaction while real token headroom remains locally, blocks automatic continuation of the identical failing payload, and surfaces an honest warning naming the request-size/media-budget rejection with remedies (reduce image frames via `compaction.methodOrder`, or raise the server/proxy body limit). Compaction dead-end warnings now also name archived image frames when those are what bloats the context ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
 
 - Fixed UI jitter in the edit tool gutter by reserving space for line counts
 - Edit-tool add lines written directly above a `` gap now insert under their anchor line instead of splicing at the post-gap anchor, often mid-line without a newline.

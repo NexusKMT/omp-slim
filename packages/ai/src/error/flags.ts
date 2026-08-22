@@ -40,6 +40,11 @@ export const Flag = {
 	FastModeUnsupported: 0x2000_0000,
 	/** OAuth refresh failed definitively — the stored grant is dead, re-login required. */
 	OAuthExpiry: 0x4000_0000,
+	/** Provider rejected the request's byte size or media/vision budget (HTTP 413
+	 *  family) without token-context evidence. Token compaction cannot shrink
+	 *  bytes or provider multimodal budgets (#9235), so this must never route
+	 *  into context-overflow recovery. */
+	PayloadRejected: 0x8000_0000,
 } as const;
 
 export type Flag = (typeof Flag)[keyof typeof Flag];
@@ -57,6 +62,7 @@ const KIND_MASK =
 	Flag.AccountPolicy |
 	Flag.ContextOverflow |
 	Flag.AuthFailed |
+	Flag.PayloadRejected |
 	Flag.SilentAbort |
 	Flag.UserInterrupt |
 	Flag.Abort |
@@ -92,16 +98,39 @@ const OVERFLOW_PATTERNS = [
 	/context[_ ]length[_ ]exceeded/i, // Generic fallback
 	/too many tokens/i, // Generic fallback
 	/token limit exceeded/i, // Generic fallback
-	/request_too_large/i, // Anthropic 413 (request body too large)
-	/request exceeds the maximum size/i, // Anthropic 413 variant
-	/payload too large/i, // Generic HTTP 413 variant
-	/entity too large/i, // Generic HTTP 413 variant
-	/\b413\b.*\b(request|payload|entity)\b.*\btoo large\b/i, // "413 Request Entity Too Large" variants
+	// `request_too_large` WITH token-count evidence is a genuine context
+	// overflow. Without it, request_too_large / payload / entity-too-large are
+	// byte- or media-budget rejections (#9235) and classify as PayloadRejected
+	// via PAYLOAD_REJECTION_PATTERNS below.
+	/request_too_large[^\n]*\btokens?\b/i,
 	/model_context_window_exceeded/i, // z.ai non-standard finish_reason surfaced as error text
 	/prompt filled the context window/i, // Ollama OpenAI-compatible empty length completion
 ];
 
 const OVERFLOW_NO_BODY_PATTERN = /\b4(00|13)\s*(status code)?\s*\(no body\)/i;
+// HTTP 413-family rejections driven by request BYTES or provider media budgets
+// rather than token context (#9235): ninfer maps a Qwen vision attention-pair
+// budget overrun to a generic `request_too_large` 413; proxies enforce byte
+// caps as bare `payload too large` / `entity too large`. None of these can be
+// fixed by token compaction. Bare `413 (no body)` deliberately appears in BOTH
+// tables: proxies strip bodies on genuine overflows too, so it co-classifies
+// and session maintenance arbitrates against local token headroom.
+const PAYLOAD_REJECTION_PATTERNS = [
+	/\b413\s*(?:status code\s*)?\(no body\)/i,
+	/\b413\b[^.\n]{0,120}\b(?:request|payload|entity|body)\b[^.\n]{0,60}\b(?:exceed|too large|limit)/i,
+	// Negative lookahead keeps token-evidenced request_too_large (a genuine
+	// overflow, matched by OVERFLOW_PATTERNS above) out of this table — a
+	// dual flag would let local gauge drift withhold compaction from a real
+	// token overflow at the maintenance-layer arbitration (#9235).
+	/request_too_large(?![^\n]*\btokens?\b)/i,
+	/(?:payload|entity) too large/i,
+	/request exceeds the maximum (?:size|number of bytes)/i,
+] as const;
+
+function matchesPayloadRejectionText(text: string): boolean {
+	return PAYLOAD_REJECTION_PATTERNS.some((p) => p.test(text));
+}
+
 const TIMEOUT_PATTERN = /\b(?:operation\s+)?timed?\s*out\b|\btimeout\b|\bstream stall\b/i;
 const TRANSIENT_ENVELOPE_PATTERN = /anthropic stream envelope error:/i;
 const TRANSIENT_ENVELOPE_BEFORE_START_PATTERN = /before message_start/i;
@@ -240,6 +269,7 @@ const ERROR_KIND_LABELS: readonly [Flag, string][] = [
 	[Flag.ContentBlocked, "content-blocked"],
 	[Flag.AccountPolicy, "account-policy"],
 	[Flag.ContextOverflow, "context-overflow"],
+	[Flag.PayloadRejected, "payload-rejected"],
 	[Flag.AuthFailed, "auth-failed"],
 	[Flag.SilentAbort, "silent-abort"],
 	[Flag.UserInterrupt, "user-interrupt"],
@@ -384,6 +414,7 @@ function classifyText(
 	let kinds = 0;
 	if (errorMessage) {
 		if (matchesOverflowText(errorMessage)) kinds |= Flag.ContextOverflow;
+		if (matchesPayloadRejectionText(errorMessage)) kinds |= Flag.PayloadRejected;
 		if (isMalformedFunctionCallText(errorMessage)) kinds |= Flag.MalformedFunctionCall;
 		if (isProviderFinishErrorText(errorMessage)) kinds |= Flag.ProviderFinishError;
 		if (EMPTY_RESPONSE_PATTERN.test(errorMessage)) kinds |= Flag.EmptyResponse | Flag.Transient;
@@ -664,6 +695,20 @@ export function isContextOverflow(message: AssistantMessage, contextWindow?: num
 		if (inputTokens > contextWindow) return true;
 	}
 	return message.stopReason === "error" && !!message.errorMessage && matchesOverflowText(message.errorMessage);
+}
+
+/**
+ * Whether an error classifies as an HTTP 413-family request-size/media-budget
+ * rejection rather than token-context overflow (#9235). May co-occur with
+ * {@link isContextOverflow} for evidence-free bodies (`413 no body`); callers
+ * with local token state should prefer skipping compaction when this returns
+ * true and real headroom remains.
+ */
+export function isPayloadRejection(message: AssistantMessage): boolean {
+	if (is(message.errorId, Flag.PayloadRejected)) return true;
+	const { errorMessage } = message;
+	if (message.stopReason !== "error" || !errorMessage) return false;
+	return matchesPayloadRejectionText(errorMessage);
 }
 
 export function stringify(id: number | undefined): string {

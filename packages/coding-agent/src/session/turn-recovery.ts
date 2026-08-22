@@ -1708,6 +1708,9 @@ export class TurnRecovery {
 		// A thinking loop is a same-model resample signal, not a router fault, so a
 		// base-model swap would abandon the loop-guard redirect (issue #8760).
 		if (AIError.is(id, AIError.Flag.ThinkingLoop)) return false;
+		// Byte-size / media-budget 413s (#9235) fail identically on the base
+		// model — swapping cannot fix them.
+		if (AIError.isPayloadRejection(message)) return false;
 		return this.#host.modelRegistry.find("fireworks", toFireworksBaseModelId(model.id)) !== undefined;
 	}
 
@@ -1739,6 +1742,9 @@ export class TurnRecovery {
 		const id = this.#classifyRetryMessage(message);
 		if (AIError.is(id, AIError.Flag.Abort) || AIError.is(id, AIError.Flag.UserInterrupt)) return false;
 		if (AIError.isContextOverflow(message, model.contextWindow ?? 0)) return false;
+		// A byte-size / media-budget 413 (#9235) is not fixable by ANY model
+		// fallback chain and surface it with maintenance's honest notice.
+		if (AIError.isPayloadRejection(message)) return false;
 		if (this.#hasReplayUnsafeOutput(message)) return false;
 		const currentSelector = formatRetryFallbackSelector(model, this.#host.thinkingLevel());
 		return this.retryFallbackChainKeys(currentSelector).some(

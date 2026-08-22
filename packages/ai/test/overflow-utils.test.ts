@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
+import { isContextOverflow, isPayloadRejection } from "@oh-my-pi/pi-ai/error";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { isContextOverflow } from "@oh-my-pi/pi-ai/error";
 
 function createErrorMessage(errorMessage: string): AssistantMessage {
 	return {
@@ -41,23 +41,38 @@ describe("isContextOverflow - model_context_window_exceeded", () => {
 	});
 });
 
-describe("isContextOverflow - HTTP 413 variants", () => {
-	it("detects generic 413 payload-too-large errors", () => {
+describe("isContextOverflow/isPayloadRejection - HTTP 413 variants", () => {
+	it("classifies byte/media-driven 413s as payload rejection, not overflow (#9235)", () => {
 		const message = createErrorMessage("413 Request Entity Too Large: payload too large for request body");
-		expect(isContextOverflow(message)).toBe(true);
+		expect(isContextOverflow(message)).toBe(false);
+		expect(isPayloadRejection(message)).toBe(true);
 	});
 
-	it("detects Anthropic request size overflow wording", () => {
+	it("classifies ninfer-style param=request_too_large bodies as payload rejection (#9235)", () => {
+		const message = createErrorMessage(
+			"413 request body exceeds the configured payload limit (type=invalid_request_error param=request_too_large)",
+		);
+		expect(isContextOverflow(message)).toBe(false);
+		expect(isPayloadRejection(message)).toBe(true);
+	});
+
+	it("keeps request_too_large carrying token-count evidence classified as overflow", () => {
+		const message = createErrorMessage("request_too_large: prompt is too long: 300000 tokens > 200000 maximum");
+		expect(isContextOverflow(message)).toBe(true);
+		expect(isPayloadRejection(message)).toBe(false);
+	});
+
+	it("flags Anthropic 'maximum size' wording as payload rejection", () => {
 		const message = createErrorMessage("Request exceeds the maximum size allowed by this model");
-		expect(isContextOverflow(message)).toBe(true);
+		expect(isPayloadRejection(message)).toBe(true);
 	});
 
-	it("does not classify unrelated 413 errors as overflow", () => {
+	it("does not classify unrelated 413 errors as overflow or payload rejection", () => {
 		const message = createErrorMessage("413 Forbidden");
 		expect(isContextOverflow(message)).toBe(false);
+		expect(isPayloadRejection(message)).toBe(false);
 	});
 });
-
 describe("isContextOverflow - 400/413 no-body (Cerebras, Mistral, proxy wrappers)", () => {
 	it("detects bare '400 status code (no body)'", () => {
 		expect(isContextOverflow(createErrorMessage("400 status code (no body)"))).toBe(true);
@@ -90,5 +105,22 @@ describe("isContextOverflow - 400/413 no-body (Cerebras, Mistral, proxy wrappers
 
 	it("does not classify 429 (rate limit) as overflow", () => {
 		expect(isContextOverflow(createErrorMessage("429 status code (no body)"))).toBe(false);
+	});
+});
+
+describe("isPayloadRejection - ambiguous no-body statuses", () => {
+	it("co-flags bare '413 status code (no body)' as payload rejection while staying overflow", () => {
+		// Proxies strip bodies on genuine token overflows AND on byte-limit hits;
+		// text alone cannot arbitrate, so both flags set and session maintenance
+		// arbitrates against local token headroom (#9235).
+		const message = createErrorMessage("413 status code (no body)");
+		expect(isContextOverflow(message)).toBe(true);
+		expect(isPayloadRejection(message)).toBe(true);
+	});
+
+	it("does not co-flag bare '400 status code (no body)'", () => {
+		const message = createErrorMessage("400 status code (no body)");
+		expect(isContextOverflow(message)).toBe(true);
+		expect(isPayloadRejection(message)).toBe(false);
 	});
 });
