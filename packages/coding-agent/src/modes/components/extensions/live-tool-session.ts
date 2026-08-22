@@ -1,5 +1,5 @@
 import type { ToolInfo } from "../../../extensibility/extensions/types";
-import type { LiveToolRecord } from "./inspector-model";
+import type { LiveToolRecord, ToolRuntimeSource } from "./inspector-model";
 
 /** Session methods the `/extensions` live-tool join actually uses. */
 export interface LiveToolSessionLookup {
@@ -49,4 +49,16 @@ export function listLiveToolRecords(session: LiveToolSessionLookup): LiveToolRec
 		if (live) tools.push(live);
 	}
 	return tools;
+}
+
+/** One list snapshot for a dashboard/list/inspector render. Not a persistent cache. */
+export function snapshotToolRuntimeSource(source: ToolRuntimeSource | undefined): ToolRuntimeSource | undefined {
+	if (!source) return undefined;
+	if (!source.listLiveTools) return source;
+	const listed = source.listLiveTools();
+	const byName = new Map(listed.map(entry => [entry.name, entry]));
+	return {
+		getLiveTool: name => byName.get(name),
+		listLiveTools: () => listed,
+	};
 }

@@ -201,11 +201,13 @@ function sameToolPath(left: string, right: string): boolean {
 
 export function liveToolsForExtension(ext: Extension, source: ToolRuntimeSource | undefined): LiveToolRecord[] {
 	if (!source || isShadowedExtension(ext)) return [];
-	const exact = source.getLiveTool(ext.name);
-	const listed = source.listLiveTools?.() ?? [];
+	const listed = source.listLiveTools?.();
+	const fromList = listed?.find(tool => tool.name === ext.name);
+	const exact = fromList ?? (listed === undefined || listed.length === 0 ? source.getLiveTool(ext.name) : undefined);
+	const pool = listed ?? [];
 	const candidates: LiveToolRecord[] = [];
 	const seen = new Set<string>();
-	for (const tool of exact ? [exact, ...listed] : listed) {
+	for (const tool of exact ? [exact, ...pool] : pool) {
 		if (seen.has(tool.name)) continue;
 		seen.add(tool.name);
 		candidates.push(tool);

@@ -38,6 +38,7 @@ import type { EventBus } from "../../../utils/event-bus";
 import { bottomBorder, divider, row, topBorder } from "../overlay-box";
 import { ExtensionList } from "./extension-list";
 import { InspectorPanel, type ToolRuntimeSource } from "./inspector-panel";
+import { snapshotToolRuntimeSource } from "./live-tool-session";
 import { applyMcpToggleRuntime } from "./mcp-runtime";
 import {
 	applyDisabledExtensionsToState,
@@ -193,6 +194,9 @@ export class ExtensionDashboard implements Component {
 
 		this.#mainList.setMaxVisible(Math.max(3, contentRows - 2));
 		this.#body.setMaxHeight(contentRows);
+		const toolFrame = snapshotToolRuntimeSource(this.toolSource);
+		this.#mainList.setToolSource(toolFrame);
+		this.#inspector.setToolSource(toolFrame);
 		const bodyLines = this.#body.render(innerWidth);
 
 		const out: string[] = [];

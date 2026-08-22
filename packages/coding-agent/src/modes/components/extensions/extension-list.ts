@@ -18,6 +18,7 @@ import {
 	projectListHint,
 	type ToolRuntimeSource,
 } from "./inspector-model";
+import { snapshotToolRuntimeSource } from "./live-tool-session";
 import {
 	formatMcpListHint,
 	isDiscoveredMcpServer,
@@ -58,6 +59,7 @@ export class ExtensionList implements Component {
 	#visibleCount = 0;
 	#mcpSource: MCPRuntimeSource | undefined;
 	#toolSource: ToolRuntimeSource | undefined;
+	#toolFrame: ToolRuntimeSource | undefined;
 
 	constructor(
 		private extensions: Extension[],
@@ -135,6 +137,7 @@ export class ExtensionList implements Component {
 	invalidate(): void {}
 
 	render(width: number): readonly string[] {
+		this.#toolFrame = snapshotToolRuntimeSource(this.#toolSource);
 		const lines: string[] = [];
 		this.#visibleCount = 0;
 
@@ -261,7 +264,7 @@ export class ExtensionList implements Component {
 
 		const hint = mcpSnap
 			? joinListHints(formatMcpListHint(mcpSnap), projectListHint(ext))
-			: formatExtensionListHint(ext, ext.kind === "tool" ? liveToolsForExtension(ext, this.#toolSource) : []);
+			: formatExtensionListHint(ext, ext.kind === "tool" ? liveToolsForExtension(ext, this.#toolFrame) : []);
 		if (hint) {
 			const triggerStyle = effectivelyDisabled
 				? "dim"

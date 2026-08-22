@@ -30,6 +30,7 @@ import {
 	toolInspectorData,
 	toolParamsFromSchema,
 } from "./inspector-model";
+import { snapshotToolRuntimeSource } from "./live-tool-session";
 import {
 	formatMcpHealthLabel,
 	isDiscoveredMcpServer,
@@ -65,6 +66,7 @@ export class InspectorPanel implements Component {
 	#extensionKey: string | null = null;
 	#mcpSource: MCPRuntimeSource | undefined;
 	#toolSource: ToolRuntimeSource | undefined;
+	#toolFrame: ToolRuntimeSource | undefined;
 	#expanded = false;
 	#width = 72;
 	#height = 0;
@@ -106,6 +108,7 @@ export class InspectorPanel implements Component {
 			return [theme.fg("muted", "Select an extension"), theme.fg("dim", "to view details")];
 		}
 		this.#width = width;
+		this.#toolFrame = snapshotToolRuntimeSource(this.#toolSource);
 		return this.#renderExtension(this.#extension, width);
 	}
 
@@ -270,7 +273,7 @@ export class InspectorPanel implements Component {
 
 	#toolKind(ext: Extension): KindView {
 		const width = this.#width;
-		const lives = liveToolsForExtension(ext, this.#toolSource);
+		const lives = liveToolsForExtension(ext, this.#toolFrame);
 		const data = toolInspectorData(ext, lives);
 		const surface: string[] = [];
 		if (data.factory.length > 1) {

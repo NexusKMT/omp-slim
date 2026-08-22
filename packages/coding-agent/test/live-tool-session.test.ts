@@ -1,12 +1,16 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import type { ToolInfo } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
+import { ExtensionList } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/extension-list";
 import { liveToolsForExtension } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/inspector-model";
+import { InspectorPanel } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/inspector-panel";
 import {
 	type LiveToolSessionLookup,
 	listLiveToolRecords,
 	liveToolRecordFromSession,
+	snapshotToolRuntimeSource,
 } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/live-tool-session";
 import type { Extension } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/types";
+import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 
 function info(
 	name: string,
@@ -61,6 +65,10 @@ function fakeSession(
 		},
 	};
 }
+
+beforeAll(async () => {
+	await initTheme(false);
+});
 
 describe("listLiveToolRecords snapshot", () => {
 	test("lists every tool from one getAllToolInfos call", () => {
@@ -180,6 +188,65 @@ describe("listLiveToolRecords snapshot", () => {
 			listLiveTools: () => listed,
 		};
 		expect(liveToolsForExtension(row, toolSource).map(entry => entry.name)).toEqual([
+			"systemd_inspect",
+			"systemd_control",
+		]);
+	});
+
+	test("one listLiveTools call for many rows and the inspector", () => {
+		const systemdPath = "/tmp/tools/systemd.ts";
+		const gitPath = "/tmp/tools/git.ts";
+		const infos = [
+			info("git", "extension", gitPath),
+			info("systemd_inspect", "extension", systemdPath),
+			info("systemd_control", "extension", systemdPath),
+		];
+		const session = fakeSession(infos, [tool("git"), tool("systemd_inspect"), tool("systemd_control")]);
+		const production = {
+			getLiveTool: (name: string) => liveToolRecordFromSession(session, name),
+			listLiveTools: () => listLiveToolRecords(session),
+		};
+		let listCalls = 0;
+		const counting = {
+			getLiveTool: (name: string) => production.getLiveTool(name),
+			listLiveTools: () => {
+				listCalls += 1;
+				return production.listLiveTools();
+			},
+		};
+		const frame = snapshotToolRuntimeSource(counting);
+		const rows: Extension[] = [
+			{
+				id: "tool:git",
+				kind: "tool",
+				name: "git",
+				displayName: "git",
+				path: gitPath,
+				source: { provider: "native", providerName: "OMP", level: "user" },
+				state: "active",
+				raw: { name: "git", path: gitPath },
+			},
+			{
+				id: "tool:systemd",
+				kind: "tool",
+				name: "systemd",
+				displayName: "systemd",
+				path: systemdPath,
+				source: { provider: "native", providerName: "OMP", level: "user" },
+				state: "active",
+				raw: { name: "systemd", path: systemdPath },
+			},
+		];
+		const list = new ExtensionList(rows, { toolSource: frame });
+		list.render(80);
+		const panel = new InspectorPanel();
+		panel.setToolSource(frame);
+		panel.setExtension(rows[1]!);
+		panel.render(72);
+		expect(listCalls).toBe(1);
+		expect(session.snapshotCalls).toBe(1);
+		expect(liveToolsForExtension(rows[0]!, frame).map(entry => entry.name)).toEqual(["git"]);
+		expect(liveToolsForExtension(rows[1]!, frame).map(entry => entry.name)).toEqual([
 			"systemd_inspect",
 			"systemd_control",
 		]);
