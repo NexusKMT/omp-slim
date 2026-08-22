@@ -217,6 +217,7 @@
 - `/extensions` builds the live tool list from one `getAllToolInfos()` snapshot instead of rebuilding that collection once per tool.
 - `/extensions` treats Windows UNC custom-tool paths as filesystem provenance so factory siblings on a share still join the same inspector row.
 - `/extensions` repaints live MCP health when `MCPManager` reconnects or trips its crash breaker, not only on EventBus connect-status events.
+- `/extensions` repaints when MCP resource/prompt catalogs finish loading after `connected`, instead of keeping empty counts until unrelated input.
 
 
 ## [17.4.4] - 2026-08-22

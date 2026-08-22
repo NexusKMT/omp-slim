@@ -36,6 +36,9 @@ import {
 } from "./oauth-credentials";
 import type { MCPStoredOAuthCredential } from "./oauth-flow";
 import type { McpConnectionStatusEvent } from "./startup-events";
+
+export type McpCatalogChangeEvent = { serverName: string; kind: "resources" | "prompts" };
+
 import type { MCPToolDetails } from "./tool-bridge";
 import { DeferredMCPTool, MCPTool } from "./tool-bridge";
 import type { MCPToolCache } from "./tool-cache";
@@ -213,6 +216,7 @@ export class MCPManager {
 	#authHandler?: MCPAuthHandler;
 	#notificationListeners = new Set<(serverName: string, method: string, params: unknown) => void>();
 	#connectionStatusListeners = new Set<(event: McpConnectionStatusEvent) => void>();
+	#catalogChangeListeners = new Set<(event: McpCatalogChangeEvent) => void>();
 	/**
 	 * Notifications received before any listener attached, to be drained on
 	 * the first {@link addNotificationListener} call. Bounded by
@@ -262,6 +266,32 @@ export class MCPManager {
 				listener(event);
 			} catch (error) {
 				logger.debug("MCP connection status listener threw", { error });
+			}
+		}
+	}
+
+	/**
+	 * Register a listener for MCP catalog refreshes (`resources` / `prompts`).
+	 *
+	 * Connection lifecycle stays on {@link addConnectionStatusListener}. This
+	 * fires after a successful catalog refresh so `/extensions` can repaint
+	 * without treating catalog load as another `connected` event.
+	 *
+	 * Returns an unsubscribe function. Listener failures are isolated.
+	 */
+	addCatalogChangeListener(listener: (event: McpCatalogChangeEvent) => void): () => void {
+		this.#catalogChangeListeners.add(listener);
+		return () => {
+			this.#catalogChangeListeners.delete(listener);
+		};
+	}
+
+	#emitCatalogChange(event: McpCatalogChangeEvent): void {
+		for (const listener of this.#catalogChangeListeners) {
+			try {
+				listener(event);
+			} catch (error) {
+				logger.debug("MCP catalog change listener threw", { error });
 			}
 		}
 	}
@@ -1231,8 +1261,7 @@ export class MCPManager {
 
 		if (serverSupportsPrompts(connection.capabilities)) {
 			try {
-				await listPrompts(connection);
-				this.#onPromptsChanged?.(name);
+				await this.refreshServerPrompts(name);
 			} catch (error) {
 				logger.debug("Failed to load MCP prompts", { path: `mcp:${name}`, error });
 			}
@@ -1339,12 +1368,16 @@ export class MCPManager {
 			}
 		};
 
-		const promise = doRefresh().finally(() => {
-			const pending = this.#pendingResourceRefresh.get(name);
-			if (pending?.promise === promise) {
-				this.#pendingResourceRefresh.delete(name);
-			}
-		});
+		const promise = doRefresh()
+			.then(() => {
+				this.#emitCatalogChange({ serverName: name, kind: "resources" });
+			})
+			.finally(() => {
+				const pending = this.#pendingResourceRefresh.get(name);
+				if (pending?.promise === promise) {
+					this.#pendingResourceRefresh.delete(name);
+				}
+			});
 		this.#pendingResourceRefresh.set(name, { connection, promise });
 		return promise;
 	}
@@ -1371,6 +1404,7 @@ export class MCPManager {
 		await listPrompts(connection);
 
 		this.#onPromptsChanged?.(name);
+		this.#emitCatalogChange({ serverName: name, kind: "prompts" });
 	}
 
 	/**
