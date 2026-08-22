@@ -1,9 +1,11 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import * as os from "node:os";
 import { ExtensionList } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/extension-list";
 import { parseToolFileHeader } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/inspector-model";
 import { InspectorPanel } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/inspector-panel";
 import type { Extension } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/types";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { shortenPath } from "@oh-my-pi/pi-coding-agent/tools/render-utils";
 
 beforeAll(async () => {
 	await initTheme(false);
@@ -192,6 +194,13 @@ describe("shared inspector chrome", () => {
 		expect(text.indexOf("Active")).toBeLessThan(text.indexOf("Origin:"));
 		expect(text).not.toContain("Type:");
 		expect(text).not.toMatch(/Status:\s+/);
+	});
+
+	test("dims the origin path like the pre-overhaul inspector", () => {
+		const panel = new InspectorPanel();
+		panel.setExtension(ruleExtension());
+		const raw = panel.render(72).join("\n");
+		expect(raw).toContain(theme.fg("dim", shortenPath(ruleExtension().path, os.homedir())));
 	});
 });
 

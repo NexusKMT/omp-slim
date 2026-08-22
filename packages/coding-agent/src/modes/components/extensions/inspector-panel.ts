@@ -501,7 +501,7 @@ export class InspectorPanel implements Component {
 			width,
 			"  ",
 		);
-		this.#pushWrapped(lines, sanitizeDisplayText(shortenPath(ext.path, os.homedir())), width, "  ");
+		this.#pushWrapped(lines, theme.fg("dim", sanitizeDisplayText(shortenPath(ext.path, os.homedir()))), width, "  ");
 		lines.push("");
 	}
 

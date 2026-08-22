@@ -179,6 +179,7 @@
 - `/extensions` MCP status no longer means "enabled in config": a selected server shows Connected / Connecting / Not connected / Inactive from the live manager, matching `/mcp list`. The command/url is no longer used as the MCP description.
 - `/extensions` no longer leads with `Type:` / `Status:` plumbing. Enablement is the first fact after the name for every kind; MCP keeps live connection health in that slot.
 - `/extensions` MCP tools now show `inputSchema` arguments the same way custom tools do: three or fewer args inline, more than three collapsed until Ctrl+O. Server `initialize.instructions` sit under the description instead of as a footer; the duplicate Connection heading is gone (command/url/env remain as labeled rows). Descriptions and guidance longer than three wrapped lines collapse until Ctrl+O.
+- `/extensions` origin path is dim again, matching the pre-overhaul inspector.
 
 ### Fixed
 
