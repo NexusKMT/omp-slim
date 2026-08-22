@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.0] - 2026-08-22
+
 ### Fixed
 
 - Fixed false-positive location extraction in episodic gists by properly enforcing capitalization constraints for proper nouns.

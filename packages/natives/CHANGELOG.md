@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.0] - 2026-08-22
+
 ### Added
 
 - Added native macOS spellchecker APIs (`macOSAutocorrectWord`, `macOSCheckSpelling`, `macOSCompleteWord`, `macOSSpellingGuesses`, and `macOSSpellCheckerAvailable`) that run asynchronously without blocking the JavaScript thread.

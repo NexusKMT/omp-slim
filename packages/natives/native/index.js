@@ -31,7 +31,7 @@ export const TtyWriter = nativeBindings.TtyWriter;
 
 // functions
 export const __ompInstallTokioRuntime = nativeBindings.__ompInstallTokioRuntime;
-export const __piNativesV17_4_4 = nativeBindings.__piNativesV17_4_4;
+export const __piNativesV18_0_0 = nativeBindings.__piNativesV18_0_0;
 export const astEdit = nativeBindings.astEdit;
 export const astGrep = nativeBindings.astGrep;
 export const astMatch = nativeBindings.astMatch;

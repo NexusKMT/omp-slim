@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.0] - 2026-08-22
+
 ### Added
 
 - Added the `omp render` command to replay session threads and benchmark transcript pipeline performance.

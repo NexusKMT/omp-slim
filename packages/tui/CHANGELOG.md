@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.0] - 2026-08-22
+
 ### Breaking Changes
 
 - Changed native macOS spelling and completion functions to return Promises.
