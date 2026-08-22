@@ -301,19 +301,22 @@ describe("sloppy v8", () => {
 		);
 	});
 
-	test("returns one fill-in payload when a marker-less operation needs a rewrite", () => {
-		const content = "keep();\nconst limit = options.limit;\n";
+	test("returns the complete atomic payload when a marker-less operation needs a rewrite", () => {
+		const content = "const a = 1;\nkeep();\n";
+		const input = "§\nconst a = ⟪1│2⟫;\n§\nkeep();";
 		let message = "";
 
 		try {
-			applySloppy(content, "§\nkeep();\n§\nconst limit = options⟪.│?.⟫limit;", { path: "i.ts", notes: [] });
+			applySloppy(content, input, { path: "i.ts", notes: [] });
 		} catch (error) {
 			message = error instanceof Error ? error.message : String(error);
 		}
 
-		expect(message).toContain("Operation 1 needs ».");
+		expect(message).toContain("Operation 2 needs ».");
 		expect(message.match(/Copy-ready corrected payload/g)).toHaveLength(1);
-		expect(message).toContain("Copy-ready corrected payload (fill in the new text):\n§\nkeep();\n»\n<new text>");
+		expect(message).toContain(
+			"Copy-ready corrected payload (fill in the new text):\n§i.ts\nconst a = ⟪1│2⟫;\n§\nkeep();\n»\n<new text>",
+		);
 	});
 
 	test("collapses back-to-back duplicates when desired text matches both copies", () => {

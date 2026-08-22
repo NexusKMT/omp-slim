@@ -51,10 +51,10 @@ import { invalidateFsScanAfterWrite } from "./fs-cache-invalidation";
 import { type OutputMeta, outputMeta } from "./output-meta";
 import {
 	formatPathRelativeToCwd,
-	isInternalUrlPath,
 	pathTargetsSsh,
 	peelWriteUrlSelector,
 	probeLiteralPathExists,
+	resolveFileWriteApprovalTier,
 	splitPathAndSel,
 } from "./path-utils";
 import { enforcePlanModeWrite, resolvePlanPath, unwrapHashlineHeaderPath } from "./plan-mode-guard";
@@ -549,14 +549,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 		// gate them like the exec-tier `ssh` tool, ahead of the handler-write
 		// logic. Substring match also covers selector-suffixed targets.
 		if (pathTargetsSsh(path)) return "exec";
-		if (!isInternalUrlPath(path)) return "write";
-		// Internal URLs are usually session-local artifacts (read tier), but a
-		// scheme whose handler exposes a `write` hook mutates handler-owned user
-		// data (e.g. vault:// notes) and must take the write tier so always-ask
-		// mode actually prompts.
-		const match = /^([a-z][a-z0-9+.-]*):\/\//i.exec(path.trim());
-		const handler = match ? InternalUrlRouter.instance().getHandler(match[1]!.toLowerCase()) : undefined;
-		return handler?.write ? "write" : "read";
+		return resolveFileWriteApprovalTier(path);
 	};
 	readonly formatApprovalDetails = (args: unknown): string[] => {
 		const params = args as Partial<WriteParams>;

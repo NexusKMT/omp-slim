@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentTool, ToolApproval } from "@oh-my-pi/pi-agent-core";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { EditTool } from "@oh-my-pi/pi-coding-agent/edit";
+import { Settings } from "../../src/config/settings";
+import { EditTool } from "../../src/edit";
 import { LSP_READONLY_ACTIONS } from "@oh-my-pi/pi-coding-agent/lsp";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import type { ToolSession } from "../../src/tools";
 import {
 	type ApprovalMode,
 	formatApprovalPrompt,
@@ -200,6 +200,18 @@ describe("MCP fallback and prompt formatting", () => {
 	it("keeps an all-internal sloppy payload at read tier", () => {
 		const input = "§local://notes\n§\nold\n»\nnew\n§local://scratch\n§\nold\n»\nnew";
 		expect(sloppyEditTool().approval?.({ input })).toBe("read");
+	});
+
+	it("keeps a writable internal sloppy target at write tier", () => {
+		const input = "§vault://notes/test.md\n§\nold\n»\nnew";
+		expect(sloppyEditTool().approval?.({ input })).toBe("write");
+	});
+
+	it("uses only sloppy section headers for sloppy approval tiering", () => {
+		const editTool = sloppyEditTool();
+		const input = "§src/config.go\n§\n[local://notes]\n»\nupdated";
+		expect(editTool.approval?.({ input })).toBe("write");
+		expect(formatApprovalPrompt(editTool, { input })).toBe("Allow tool: edit\nFile: src/config.go");
 	});
 });
 
