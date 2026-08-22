@@ -10,6 +10,7 @@ import {
 	prepareUserRetentionTranscript,
 	sliceLastTurnsByUserBoundary,
 	stripMemoryTags,
+	stripRetentionProtocolMarkers,
 	truncateRecallQuery,
 } from "@oh-my-pi/pi-coding-agent/hindsight/content";
 
@@ -246,7 +247,7 @@ describe("prepareRetentionTranscript", () => {
 				timestamp: "2026-08-17T10:00:05.000Z",
 			},
 		];
-		const { transcript, messageCount } = prepareRetentionTranscript(messages, true);
+		const { transcript, messageCount } = prepareRetentionTranscript(messages, true, { includeTimestamps: true });
 		expect(messageCount).toBe(2);
 		expect(transcript).toContain(
 			"[role: user]\n[timestamp: 2026-08-17T10:00:00.000Z]\ni stopped doing that yesterday\n[user:end]",
@@ -264,11 +265,29 @@ describe("prepareRetentionTranscript", () => {
 				timestamp: "2026-08-17T10:00:00.000Z",
 			},
 		];
-		const { transcript } = prepareRetentionTranscript(messages, true);
+		const { transcript } = prepareRetentionTranscript(messages, true, { includeTimestamps: true });
 		expect(transcript).not.toContain("<memories>");
 		expect(transcript).not.toContain("recalled fact about user");
 		expect(transcript).toContain("[timestamp: 2026-08-17T10:00:00.000Z]");
 		expect(transcript).toContain("user-real-question-here");
+	});
+
+	it("keeps timestamp framing opt-in so shared Mnemopi formatting stays marker-only", () => {
+		const messages: HindsightMessage[] = [
+			{
+				role: "user",
+				content: "i stopped doing that yesterday",
+				timestamp: "2026-08-17T10:00:00.000Z",
+			},
+		];
+		const { transcript } = prepareRetentionTranscript(messages, true);
+		expect(transcript).toBe("[role: user]\ni stopped doing that yesterday\n[user:end]");
+		expect(transcript).not.toContain("[timestamp:");
+	});
+
+	it("strips timestamp protocol markers from recalled stored transcripts", () => {
+		const stored = "[role: user]\n[timestamp: 2026-08-17T10:00:00.000Z]\ni stopped doing that yesterday\n[user:end]";
+		expect(stripRetentionProtocolMarkers(stored)).toBe("i stopped doing that yesterday");
 	});
 });
 

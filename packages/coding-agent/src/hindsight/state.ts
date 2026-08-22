@@ -193,7 +193,7 @@ function retentionPrefixKey(messages: HindsightMessage[], count: number): string
 	for (let i = 0; i < count; i++) {
 		const m = messages[i];
 		if (m === undefined) break;
-		key = Bun.hash(`${key}\u0000${m.role}\u0000${m.content}`).toString(36);
+		key = Bun.hash(`${key}\u0000${m.role}\u0000${m.content}\u0000${m.timestamp ?? ""}`).toString(36);
 	}
 	return key;
 }
@@ -336,7 +336,7 @@ export class HindsightSessionState {
 				this.#lastRetainedPrefixKey = "";
 			}
 			const newMessages = messages.slice(this.#lastRetainedMessageIndex);
-			const { transcript: newPart } = prepareRetentionTranscript(newMessages, true);
+			const { transcript: newPart } = prepareRetentionTranscript(newMessages, true, { includeTimestamps: true });
 			if (!newPart) return;
 			nextCachedTranscript = this.#cachedTranscript ? `${this.#cachedTranscript}\n\n${newPart}` : newPart;
 			transcript = nextCachedTranscript;
@@ -347,7 +347,7 @@ export class HindsightSessionState {
 			this.#lastRetainedMessageIndex = 0;
 			this.#cachedTranscript = "";
 			this.#lastRetainedPrefixKey = "";
-			const { transcript: windowTranscript } = prepareRetentionTranscript(target, true);
+			const { transcript: windowTranscript } = prepareRetentionTranscript(target, true, { includeTimestamps: true });
 			if (!windowTranscript) return;
 			transcript = windowTranscript;
 		}

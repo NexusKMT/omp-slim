@@ -27,7 +27,7 @@ const LEGACY_HINDSIGHT_MEMORIES_REGEX = /<hindsight_memories>[\s\S]*?<\/hindsigh
 const LEGACY_RELEVANT_MEMORIES_REGEX = /<relevant_memories>[\s\S]*?<\/relevant_memories>/g;
 const MENTAL_MODELS_REGEX = /<mental_models>[\s\S]*?<\/mental_models>/g;
 
-const RETENTION_PROTOCOL_MARKER_REGEX = /^\[(?:role:\s*[-_a-zA-Z0-9]+|[-_a-zA-Z0-9]+:end)\]$/;
+const RETENTION_PROTOCOL_MARKER_REGEX = /^\[(?:role:\s*[-_a-zA-Z0-9]+|[-_a-zA-Z0-9]+:end|timestamp:\s+.+)\]$/;
 /**
  * Strip `<memories>`, `<mental_models>`, and legacy memory blocks.
  *
@@ -192,19 +192,19 @@ export interface RetentionTranscript {
  * Messages are tag-stripped before framing to break the recall→retain loop.
  * Returns `{ transcript: null }` when nothing meaningful survives.
  */
-function formatRetentionMessage(msg: HindsightMessage): string | null {
+function formatRetentionMessage(msg: HindsightMessage, includeTimestamps = false): string | null {
 	const content = stripMemoryTags(msg.content).trim();
 	if (!hasSubstantiveContent(content)) return null;
 	const header = `[role: ${msg.role}]`;
-	const timestamp = msg.timestamp?.trim();
+	const timestamp = includeTimestamps ? msg.timestamp?.trim() : undefined;
 	const stamped = timestamp ? `${header}\n[timestamp: ${timestamp}]` : header;
 	return `${stamped}\n${content}\n[${msg.role}:end]`;
 }
 
-function formatRetentionMessages(messages: HindsightMessage[]): RetentionTranscript {
+function formatRetentionMessages(messages: HindsightMessage[], includeTimestamps = false): RetentionTranscript {
 	const parts: string[] = [];
 	for (const msg of messages) {
-		const formatted = formatRetentionMessage(msg);
+		const formatted = formatRetentionMessage(msg, includeTimestamps);
 		if (formatted) parts.push(formatted);
 	}
 
@@ -245,6 +245,7 @@ export function stripRetentionProtocolMarkers(content: string): string {
 export function prepareRetentionTranscript(
 	messages: HindsightMessage[],
 	retainFullWindow = false,
+	options?: { includeTimestamps?: boolean },
 ): RetentionTranscript {
 	if (messages.length === 0) return { transcript: null, messageCount: 0 };
 
@@ -263,7 +264,7 @@ export function prepareRetentionTranscript(
 		targetMessages = messages.slice(lastUserIdx);
 	}
 
-	return formatRetentionMessages(targetMessages);
+	return formatRetentionMessages(targetMessages, options?.includeTimestamps === true);
 }
 
 /** Format all retention messages without protocol markers for embedding, FTS, and recall display. */
