@@ -153,6 +153,36 @@
 - Fixed accurate benchmark input token counts on providers with automatic prompt caching.
 - Fixed C# files incorrectly displaying D3.js icons in edit results ([#9323](https://github.com/can1357/oh-my-pi/issues/9323)).
 - Fixed incorrect token delta reporting in expanded context compaction summaries when pre-compaction usage was omitted by the provider ([#9293](https://github.com/can1357/oh-my-pi/issues/9293)).
+- Benchmark input-token counts now include cache-read/cache-write prompt tokens, so prefill throughput is no longer understated on providers with automatic prompt caching
+- Code blocks now syntax-highlight live while the response streams instead of staying plain until the block settles
+- Fixed `/shake thinking` reporting "Nothing to shake" after removing reasoning; it now reports the dropped count and leaves thinking-only turns empty.
+- Fixed session teardown occasionally losing pending input drafts during shutdown
+- Fixed streaming edit failures caused by trailing partial lines
+- Interrupting a Claude model mid-thinking no longer replays the partial reasoning as quoted conversation text on the next turn, which Anthropic's `reasoning_extraction` classifier refused.
+- Sloppy edits now ignore whitespace on otherwise blank MATCH rows and preserve omitted source rows when corresponding explicit MATCH/REWRITE lines are uniquely ordered but non-consecutive.
+- Sloppy edit `＋` inserts before an anchor line no longer double their typed indentation or flatten the anchor.
+- Session restore no longer re-runs the edit-matching engine for every historical edit in the transcript; large sessions with many edits resume several times faster.
+- Fixed image requests to Kimi Code / Moonshot failing with 400 `unsupported image url`: their catalog api is openai-completions so the image URL mirror gate wrongly admitted them; Moonshot-native hosts now always receive inline base64 images.
+- Fixed Read failing with `unable to open database file` for cleanly closed WAL-mode SQLite databases without `-wal`/`-shm` sidecars.
+- Fixed collapsed edit results with long wrapped diff lines growing beyond their rendered-row budget and corrupting native Windows terminal transcript layout ([#9302](https://github.com/can1357/oh-my-pi/issues/9302)).
+- Fixed edit tool section header paths not trimming surrounding whitespace, so a header with padded brackets failed with file-not-found.
+- Fixed transcript content disappearing from terminal scrollback below a live hub-wait/todo/jobs card: the card's viewport pin froze scrollback commits at its own rows, so everything the turn streamed below it scrolled off-screen without ever entering terminal history (and was lost for good when the session exited first). A displaceable card with content below it no longer holds the commit ceiling; its rows commit as they scroll off and the card seals in place, so the next poll stacks a fresh card instead of retracting history.
+- Fixed the composer attachment chip thumbnail showing an empty box for pasted images: the paste pipeline re-encodes images as JPEG/WebP, and transmitting those bytes as Kitty PNG data made the terminal reject them (blank placeholder cells). Non-PNG attachments now convert to PNG before the thumbnail transmit, like transcript images.
+- Added an immediately editable startup composer for plain interactive launches; drafts typed while session initialization runs transfer intact into the full UI.
+- `/extensions` now joins live `MCPManager` state into MCP rows and the inspector: connection health, `serverInfo` title/description, tool/resource/prompt catalogs, and server instructions, with transport/command last. MCP protocol typings now include 2025-11-25 implementation and tool display metadata (`title`, `description`, `websiteUrl`, `icons`, tool `annotations`).
+- `/extensions` uses one inspector grammar across kinds (identity → enablement/runtime → description → origin → kind surface → contents → config). Tools join live session schemas, rules show apply-when plus body, skills show discovery semantics plus instruction preview, and slash commands parse frontmatter description/`$ARGUMENTS` instead of dumping the raw markdown file.
+- Truncated `/extensions` inspector sections (`… N more`) expand in place with Ctrl+O (the existing `app.tools.expand` binding). Long inspector lines wrap instead of ellipsizing, the inspector leaves a scrollbar gutter, and truncated previews fill leftover viewport height while reserving the hint row. Custom-tool factories that export several tools from one file stay grouped (e.g. `systemd.ts` → `systemd_inspect`/`systemd_control`/`systemd_author`); args stay collapsed until Ctrl+O, and the file's leading JSDoc is the bundle description. List hints show `hidden` for hidden tools/skills, omit default arg counts / `discoverable` / `listed`, and label project-level items with the directory that contains `.omp` when present. Skill discovery sits under Active only when the skill is hidden. Shadowed MCP configs do not join the winner's live connection.
+
+### Changed
+
+- `/extensions` MCP enable/disable now disconnects or reconnects the live `MCPManager` and refreshes session MCP tools, matching `/mcp enable` / `/mcp disable`.
+- `/extensions` MCP status no longer means "enabled in config": a selected server shows Connected / Connecting / Not connected / Inactive from the live manager, matching `/mcp list`. The command/url is no longer used as the MCP description.
+- `/extensions` no longer leads with `Type:` / `Status:` plumbing. Enablement is the first fact after the name for every kind; MCP keeps live connection health in that slot.
+
+### Fixed
+
+- `/extensions` sanitizes untrusted MCP/tool display strings (`sanitizeText` then `replaceTabs`) before applying theme SGR, so OSC/BEL/ANSI from a server cannot leak into the TUI. List hints, origin paths, and schema `type`/`default` go through the same boundary.
+- Shadowed `/extensions` rows are informational only, including same-name MCP configs that share the winner's `mcp:<name>` id even when disablement wins display state (`enabled: false` + `_shadowed`).
 
 ## [17.4.4] - 2026-08-22
 
@@ -203,22 +233,6 @@
 - Pasted images and large text pastes appear in the composer as compact icon tokens instead of bracketed markers; the bracketed form remains the outgoing/stored format, and the transcript renders it back as the compact chip.
 - Deleting an attachment's inline token now removes the attachment from the submission (surviving image markers are renumbered).
 - Restored prompts (esc-esc, `/tree`, branch, queued-message dequeue, failed-submit recovery) collapse image markers back into clickable atomic chip tokens and re-materialize their file links instead of degrading to dead text.
-### Added
-
-- `/extensions` now joins live `MCPManager` state into MCP rows and the inspector: connection health, `serverInfo` title/description, tool/resource/prompt catalogs, and server instructions, with transport/command last. MCP protocol typings now include 2025-11-25 implementation and tool display metadata (`title`, `description`, `websiteUrl`, `icons`, tool `annotations`).
-- `/extensions` uses one inspector grammar across kinds (identity → enablement/runtime → description → origin → kind surface → contents → config). Tools join live session schemas, rules show apply-when plus body, skills show discovery semantics plus instruction preview, and slash commands parse frontmatter description/`$ARGUMENTS` instead of dumping the raw markdown file.
-- Truncated `/extensions` inspector sections (`… N more`) expand in place with Ctrl+O (the existing `app.tools.expand` binding). Long inspector lines wrap instead of ellipsizing, the inspector leaves a scrollbar gutter, and truncated previews fill leftover viewport height while reserving the hint row. Custom-tool factories that export several tools from one file stay grouped (e.g. `systemd.ts` → `systemd_inspect`/`systemd_control`/`systemd_author`); args stay collapsed until Ctrl+O, and the file's leading JSDoc is the bundle description. List hints show `hidden` for hidden tools/skills, omit default arg counts / `discoverable` / `listed`, and label project-level items with the directory that contains `.omp` when present. Skill discovery sits under Active only when the skill is hidden. Shadowed MCP configs do not join the winner's live connection.
-
-### Changed
-
-- `/extensions` MCP enable/disable now disconnects or reconnects the live `MCPManager` and refreshes session MCP tools, matching `/mcp enable` / `/mcp disable`.
-- `/extensions` MCP status no longer means "enabled in config": a selected server shows Connected / Connecting / Not connected / Inactive from the live manager, matching `/mcp list`. The command/url is no longer used as the MCP description.
-- `/extensions` no longer leads with `Type:` / `Status:` plumbing. Enablement is the first fact after the name for every kind; MCP keeps live connection health in that slot.
-
-### Fixed
-
-- `/extensions` sanitizes untrusted MCP/tool display strings (`sanitizeText` then `replaceTabs`) before applying theme SGR, so OSC/BEL/ANSI from a server cannot leak into the TUI. List hints, origin paths, and schema `type`/`default` go through the same boundary.
-- Shadowed `/extensions` rows are informational only, including same-name MCP configs that share the winner's `mcp:<name>` id even when disablement wins display state (`enabled: false` + `_shadowed`).
 
 ## [17.4.1] - 2026-08-21
 
@@ -234,6 +248,7 @@
 - Configured discovery providers with `authHeader` now preserve cached models across application restarts.
 - Added repeat read warning hints when identical file content is read multiple times.
 - Explicit DAP adapters can now attach without a PID or port when `attachDefaults` provide the target arguments.
+- Added `isProjectTrusted()` compatibility shim to `ExtensionContext` for extensions targeting upstream per-directory trust gates.
 
 ### Changed
 
