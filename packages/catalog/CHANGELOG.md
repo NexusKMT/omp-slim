@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed `opencode-go/ox-alpha-free` sending `reasoning_effort: "xhigh"` for the top thinking tier, which the OpenCode Go gateway rejects; the model now uses the gateway's wire-exact `low`/`high`/`max` ladder with mandatory thinking so `--thinking max` reaches the real max tier ([#9349](https://github.com/can1357/oh-my-pi/issues/9349)).
+- Fixed Venice-hosted Qwen models (e.g. `venice/qwen3-6-35b-a3b`) failing with `400 Invalid request parameters`. Reasoning levels now use the accepted OpenAI-style `reasoning_effort` field, while Thinking Off sends Venice's explicit `venice_parameters.disable_thinking` flag ([#9345](https://github.com/can1357/oh-my-pi/issues/9345)).
 
 ## [18.0.0] - 2026-08-22
 
