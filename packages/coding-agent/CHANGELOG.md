@@ -117,11 +117,16 @@
 - Fixed `formatContent` reporting no-formatter as unchanged: when no configured server supports formatting, the result is now correctly classified as `FileFormatResult.UNSUPPORTED` ([#8388](https://github.com/can1357/oh-my-pi/issues/8388)).
 - Fixed MCP request timeouts surfacing as `Unexpected end of JSON input` instead of `Request timeout after Nms` when the abort lands mid-JSON-body read.
 - Fixed CJS modules being misclassified as ESM when imported from an ESM parent module. The extension loader now identifies unshadowed CommonJS syntax from Babel's parsed AST before deferring to the importer's module kind. This resolves `SyntaxError: Missing 'default' export` for packages with conditional exports (e.g. playwright-core) where an ESM wrapper re-exports from a CJS entry, while ambiguous files continue to inherit their importer's classification.
+- Added the `/pin` slash command to pin and unpin sessions so they stay at the top of the `--resume` picker UI.
+
 - `/extensions` now joins live `MCPManager` state into MCP rows and the inspector: connection health, `serverInfo` title/description, tool/resource/prompt catalogs, and server instructions, with transport/command last. MCP protocol typings now include 2025-11-25 implementation and tool display metadata (`title`, `description`, `websiteUrl`, `icons`, tool `annotations`).
 - `/extensions` uses one inspector grammar across kinds (identity → enablement/runtime → description → origin → kind surface → contents → config). Tools join live session schemas, rules show apply-when plus body, skills show discovery semantics plus instruction preview, and slash commands parse frontmatter description/`$ARGUMENTS` instead of dumping the raw markdown file.
 - Truncated `/extensions` inspector sections (`… N more`) expand in place with Ctrl+O (the existing `app.tools.expand` binding). Long inspector lines wrap instead of ellipsizing, the inspector leaves a scrollbar gutter, and truncated previews fill leftover viewport height while reserving the hint row. Custom-tool factories that export several tools from one file stay grouped (e.g. `systemd.ts` → `systemd_inspect`/`systemd_control`/`systemd_author`); args stay collapsed until Ctrl+O, and the file's leading JSDoc is the bundle description. List hints show `hidden` for hidden tools/skills, omit default arg counts / `discoverable` / `listed`, and label project-level items with the directory that contains `.omp` when present. Skill discovery sits under Active only when the skill is hidden. Shadowed MCP configs do not join the winner's live connection.
 
 ### Changed
+
+- Slash-command autocomplete now collapses skills into a single `/skill:` row; the individual skills list once the prefix reaches `/skill:` (accepting the row with Tab/Enter expands it in place).
+- Subagents in a shared working tree no longer run formatters, linters, or project-wide builds/test suites unless their assignment asks for it; validation runs once by the main agent.
 
 - `/extensions` MCP enable/disable now disconnects or reconnects the live `MCPManager` and refreshes session MCP tools, matching `/mcp enable` / `/mcp disable`.
 - `/extensions` MCP status no longer means "enabled in config": a selected server shows Connected / Connecting / Not connected / Inactive from the live manager, matching `/mcp list`. The command/url is no longer used as the MCP description.
@@ -130,6 +135,11 @@
 - `/extensions` origin path is dim again, matching the pre-overhaul inspector.
 
 ### Fixed
+
+- Fixed Kitty text-sized Markdown headings activating before `tui.textSizing` is enabled.
+- Fixed status text retaining hidden DCS, PM, and APC payloads after escape-sequence sanitization.
+- Fixed extension load errors truncating explicitly excluded package import specifiers.
+- Fixed subagents crashing before their first turn when an extension contributed a tool or skill without a `description`; the context-breakdown token estimate now coalesces missing descriptions and system-prompt sections instead of passing `undefined` to the tokenizer ([#9331](https://github.com/can1357/oh-my-pi/issues/9331)).
 
 - Incremental `/mcp enable` and `/extensions` MCP enable keep already-connected servers' tools in `MCPManager.getTools()`; `connectServers()` merges per-server ownership instead of replacing the whole registry.
 - `/extensions` provider master-disable disconnects that provider's live MCP servers and rebinds session tools without rewriting `mcp.json`; re-enable does not auto-connect.
