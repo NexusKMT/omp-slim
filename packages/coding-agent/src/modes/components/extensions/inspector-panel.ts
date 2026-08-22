@@ -32,7 +32,6 @@ import {
 } from "./inspector-model";
 import {
 	formatMcpHealthLabel,
-	inferMcpTransport,
 	isDiscoveredMcpServer,
 	type MCPConnectionHealth,
 	type MCPRuntimeSource,
@@ -46,6 +45,8 @@ export type { ToolRuntimeSource };
 interface KindView {
 	title?: string;
 	description?: string;
+	/** MCP `initialize.instructions`. Rendered under description, not as a footer. */
+	guidance?: string;
 	runtimeLine?: string;
 	runtimeExtra?: string[];
 	surface: string[];
@@ -56,6 +57,8 @@ interface KindView {
 
 const PREVIEW_LINE_BUDGET = PREVIEW_LIMITS.EXPANDED_LINES;
 const MCP_TOOL_BUDGET = PREVIEW_LIMITS.COLLAPSED_ITEMS;
+const MCP_INLINE_ARG_LIMIT = 3;
+const MCP_INLINE_DESC_LINES = 3;
 
 export class InspectorPanel implements Component {
 	#extension: Extension | null = null;
@@ -108,6 +111,7 @@ export class InspectorPanel implements Component {
 		this.#pushIdentity(lines, ext, kind.title);
 		this.#pushRuntime(lines, ext, kind);
 		this.#pushDescription(lines, kind.description, width);
+		this.#pushGuidance(lines, kind.guidance, width);
 		this.#pushOrigin(lines, ext, width);
 		if (kind.surface.length > 0) lines.push(...kind.surface);
 		if (kind.contents.length > 0) lines.push(...kind.contents);
@@ -157,14 +161,10 @@ export class InspectorPanel implements Component {
 				: undefined;
 		if (shadowed) {
 			const config: string[] = [];
-			const transport = isDiscoveredMcpServer(ext.raw) ? inferMcpTransport(ext.raw) : "stdio";
-			config.push(theme.fg("muted", "Connection"));
-			config.push(this.#rule());
-			this.#pushLabeled(config, "Transport", transport, width);
 			if (isDiscoveredMcpServer(ext.raw) && ext.raw.command) {
 				this.#pushLabeled(config, "Command", shortenPath(ext.raw.command, os.homedir()), width, "success");
 			}
-			config.push("");
+			if (config.length > 0) config.push("");
 			return { description: undefined, surface: [], contents: [], config };
 		}
 		const health: MCPConnectionHealth = snap?.health ?? "disconnected";
@@ -180,26 +180,32 @@ export class InspectorPanel implements Component {
 		const contents: string[] = [];
 		const config: string[] = [];
 
-		const toolCount = snap?.tools.length ?? 0;
-		const resourceCount = snap?.resources.length ?? 0;
-		const promptCount = snap?.prompts.length ?? 0;
-		surface.push(theme.fg("muted", "Capabilities"));
-		surface.push(
-			`  ${theme.fg("accent", String(toolCount))} Tools    ${theme.fg("accent", String(resourceCount))} Resources    ${theme.fg("accent", String(promptCount))} Prompts`,
-		);
-		surface.push("");
-
 		if (snap && snap.tools.length > 0) {
 			contents.push(theme.fg("muted", "Tools"));
 			contents.push(this.#rule());
 			const { shown, hidden } = visibleMcpTools(snap.tools, this.#expanded ? snap.tools.length : MCP_TOOL_BUDGET);
+			let collapsedArgs = false;
 			for (const tool of shown) {
 				contents.push(`  ${theme.fg("accent", tool.name)}`);
+				if (tool.title && tool.title !== tool.name) {
+					contents.push(`    ${theme.fg("muted", tool.title)}`);
+				}
 				if (tool.description) this.#pushWrapped(contents, tool.description, width, "    ");
+				const params = toolParamsFromSchema(tool.parameters);
+				const inline = this.#expanded || params.length <= MCP_INLINE_ARG_LIMIT;
+				if (inline) {
+					this.#pushParams(contents, params, width, "    ");
+				} else if (params.length > 0) {
+					collapsedArgs = true;
+					contents.push(`    ${theme.fg("dim", `${params.length} args`)}`);
+				}
 				contents.push("");
 			}
 			if (hidden > 0) {
 				contents.push(theme.fg("dim", `  … ${hidden} more (${expandKeyHint()} to expand)`));
+				contents.push("");
+			} else if (collapsedArgs) {
+				contents.push(theme.fg("dim", `  … args (${expandKeyHint()} to expand)`));
 				contents.push("");
 			}
 		}
@@ -236,16 +242,6 @@ export class InspectorPanel implements Component {
 			contents.push("");
 		}
 
-		if (snap?.instructions) {
-			contents.push(theme.fg("muted", "Server guidance"));
-			contents.push(this.#rule());
-			this.#pushPreview(contents, snap.instructions, width, PREVIEW_LINE_BUDGET);
-			contents.push("");
-		}
-
-		config.push(theme.fg("muted", "Connection"));
-		config.push(this.#rule());
-		this.#pushLabeled(config, "Transport", transport, width);
 		if (snap?.command)
 			this.#pushLabeled(config, "Command", shortenPath(snap.command, os.homedir()), width, "success");
 		if (snap?.url) this.#pushLabeled(config, "URL", snap.url, width, "success");
@@ -253,11 +249,12 @@ export class InspectorPanel implements Component {
 		if (snap && snap.envCount > 0) {
 			this.#pushLabeled(config, "Env vars", `${snap.envCount} defined`, width, "dim");
 		}
-		config.push("");
+		if (config.length > 0) config.push("");
 
 		return {
 			title: snap?.title,
 			description: snap?.description,
+			guidance: snap?.instructions,
 			runtimeLine,
 			runtimeExtra,
 			surface,
@@ -274,6 +271,7 @@ export class InspectorPanel implements Component {
 		if (data.factory.length > 1) {
 			surface.push(theme.fg("muted", "Tools"));
 			surface.push(this.#rule());
+			let collapsedArgs = false;
 			for (const tool of data.factory) {
 				surface.push(`  ${theme.fg("accent", tool.name)}`);
 				if (tool.label && tool.label !== tool.name) {
@@ -281,14 +279,16 @@ export class InspectorPanel implements Component {
 				}
 				if (tool.description) this.#pushWrapped(surface, tool.description, width, "    ");
 				const params = toolParamsFromSchema(tool.parameters);
-				if (this.#expanded) {
+				const inline = this.#expanded || params.length <= MCP_INLINE_ARG_LIMIT;
+				if (inline) {
 					this.#pushParams(surface, params, width, "    ");
 				} else if (params.length > 0) {
-					surface.push(`    ${theme.fg("dim", `${params.length} arg${params.length === 1 ? "" : "s"}`)}`);
+					collapsedArgs = true;
+					surface.push(`    ${theme.fg("dim", `${params.length} args`)}`);
 				}
 				surface.push("");
 			}
-			if (!this.#expanded && data.factory.some(tool => toolParamsFromSchema(tool.parameters).length > 0)) {
+			if (collapsedArgs) {
 				surface.push(theme.fg("dim", `  … args (${expandKeyHint()} to expand)`));
 				surface.push("");
 			}
@@ -465,9 +465,30 @@ export class InspectorPanel implements Component {
 	}
 
 	#pushDescription(lines: string[], description: string | undefined, width: number): void {
-		const text = sanitizeDisplayField(description);
+		this.#pushShortText(lines, description, width);
+	}
+
+	#pushGuidance(lines: string[], guidance: string | undefined, width: number): void {
+		this.#pushShortText(lines, guidance, width);
+	}
+
+	#pushShortText(lines: string[], value: string | undefined, width: number): void {
+		const text = sanitizeDisplayField(value);
 		if (!text) return;
-		this.#pushWrapped(lines, text, width);
+		const wrapped: string[] = [];
+		for (const raw of sanitizeDisplayText(text).split("\n")) {
+			const folded = wrapTextWithAnsi(replaceTabs(raw), Math.max(8, width));
+			if (folded.length === 0) wrapped.push("");
+			else wrapped.push(...folded);
+		}
+		if (this.#expanded || wrapped.length <= MCP_INLINE_DESC_LINES) {
+			lines.push(...wrapped);
+		} else {
+			lines.push(...wrapped.slice(0, MCP_INLINE_DESC_LINES));
+			lines.push(
+				theme.fg("dim", `  … ${wrapped.length - MCP_INLINE_DESC_LINES} more (${expandKeyHint()} to expand)`),
+			);
+		}
 		lines.push("");
 	}
 

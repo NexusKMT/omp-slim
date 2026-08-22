@@ -33,6 +33,8 @@ export interface MCPRuntimeCatalogItem {
 	name: string;
 	title?: string;
 	description?: string;
+	/** MCP `inputSchema` / bridged `parameters`. Rendered on expand. */
+	parameters?: unknown;
 }
 
 export interface MCPRuntimeSnapshot {
@@ -62,6 +64,7 @@ export interface MCPRuntimeSource {
 		mcpToolName?: string;
 		description?: string;
 		label?: string;
+		parameters?: unknown;
 	}>;
 	getServerResources?(name: string): { resources: MCPResource[]; templates: MCPResourceTemplate[] } | undefined;
 	getServerPrompts?(name: string): MCPPrompt[] | undefined;
@@ -148,7 +151,7 @@ export function inferMcpTransport(server: MCPServer | MCPServerConfig): "stdio" 
 	return "stdio";
 }
 
-function catalogItem(name: string, title?: string, description?: string): MCPRuntimeCatalogItem {
+function catalogItem(name: string, title?: string, description?: string, parameters?: unknown): MCPRuntimeCatalogItem {
 	const cleanName = sanitizeDisplayLine(name);
 	const cleanTitle = sanitizeDisplayLineField(title);
 	const cleanDescription = sanitizeDisplayField(description);
@@ -156,6 +159,7 @@ function catalogItem(name: string, title?: string, description?: string): MCPRun
 		name: cleanName,
 		...(cleanTitle && cleanTitle !== cleanName ? { title: cleanTitle } : {}),
 		...(cleanDescription ? { description: cleanDescription } : {}),
+		...(parameters !== undefined ? { parameters } : {}),
 	};
 }
 
@@ -167,7 +171,7 @@ function toolsFromManager(manager: MCPRuntimeSource, serverName: string): MCPRun
 		const name = tool.mcpToolName ?? tool.label?.split("/").pop() ?? tool.label;
 		if (!name || seen[name]) continue;
 		seen[name] = true;
-		items.push(catalogItem(name, undefined, tool.description));
+		items.push(catalogItem(name, undefined, tool.description, tool.parameters));
 	}
 	return items;
 }
@@ -235,7 +239,7 @@ export function snapshotMcpRuntime(
 	const connection = manager.getConnection(server.name);
 	const identity = identityFrom(connection?.serverInfo, server.name);
 	const connectedTools = (connection?.tools ?? []).map(tool =>
-		catalogItem(tool.name, tool.title ?? tool.annotations?.title, tool.description),
+		catalogItem(tool.name, tool.title ?? tool.annotations?.title, tool.description, tool.inputSchema),
 	);
 	const tools = connectedTools.length > 0 ? connectedTools : toolsFromManager(manager, server.name);
 

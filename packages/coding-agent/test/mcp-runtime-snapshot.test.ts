@@ -75,7 +75,14 @@ function connection(overrides: Partial<MCPServerConnection> = {}): MCPServerConn
 			{
 				name: "search_code",
 				description: "Search code across GitHub repositories.",
-				inputSchema: { type: "object" },
+				inputSchema: {
+					type: "object",
+					required: ["query"],
+					properties: {
+						query: { type: "string", description: "Search query" },
+						language: { type: "string", description: "Optional language filter" },
+					},
+				},
 			},
 			{ name: "get_pull_request", description: "Get pull request details.", inputSchema: { type: "object" } },
 		],
@@ -121,12 +128,19 @@ describe("snapshotMcpRuntime", () => {
 		expect(snap.implementationVersion).toBe("0.19.0");
 		expect(snap.tools.map(t => t.name)).toEqual(["search_code", "get_pull_request"]);
 		expect(snap.tools[0]?.description).toBe("Search code across GitHub repositories.");
+		expect(snap.tools[0]?.parameters).toEqual({
+			type: "object",
+			required: ["query"],
+			properties: {
+				query: { type: "string", description: "Search query" },
+				language: { type: "string", description: "Optional language filter" },
+			},
+		});
 		expect(snap.resources).toHaveLength(1);
 		expect(snap.prompts).toHaveLength(1);
 		expect(snap.instructions).toBe("Prefer search_code over cloning.");
 		expect(formatMcpListHint(snap)).toBe("2 tools · 1 resource · 1 prompt");
 	});
-
 	test("maps connecting and inactive separately from enabled-in-config", () => {
 		expect(snapshotMcpRuntime(server(), sourceFor("connecting")).health).toBe("connecting");
 		expect(snapshotMcpRuntime(server(), sourceFor("disconnected")).health).toBe("disconnected");

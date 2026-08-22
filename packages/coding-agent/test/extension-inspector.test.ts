@@ -333,11 +333,12 @@ describe("tool inspector", () => {
 		expect(collapsed).toContain("systemd_control");
 		expect(collapsed).toContain("systemd_author");
 		expect(collapsed).toContain("Read systemd state");
-		expect(collapsed).toContain("1 arg");
-		expect(collapsed).toMatch(/args \(.* to expand\)/);
+		expect(collapsed).toMatch(/action\s+string/);
+		expect(collapsed).toContain("Required");
+		expect(collapsed).not.toContain("1 arg");
+		expect(collapsed).not.toMatch(/args \(.* to expand\)/);
 		expect(collapsed).not.toContain("systemd custom tool");
 		expect(collapsed).not.toContain("(no arguments)");
-		expect(collapsed).not.toMatch(/action\s+string/);
 
 		panel.toggleExpanded();
 		const expanded = render(panel);

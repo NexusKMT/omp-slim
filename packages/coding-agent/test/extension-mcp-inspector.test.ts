@@ -72,9 +72,24 @@ function connectedSource(): MCPRuntimeSource {
 			{
 				name: "search_code",
 				description: "Search code across GitHub repositories.",
-				inputSchema: { type: "object" },
+				inputSchema: {
+					type: "object",
+					required: ["query"],
+					properties: {
+						query: { type: "string", description: "Search query" },
+						language: { type: "string" },
+					},
+				},
 			},
-			{ name: "create_issue", description: "Create a new issue in a repository.", inputSchema: { type: "object" } },
+			{
+				name: "create_issue",
+				description: "Create a new issue in a repository.",
+				inputSchema: {
+					type: "object",
+					required: ["title"],
+					properties: { title: { type: "string", description: "Issue title" } },
+				},
+			},
 		],
 		resources: [{ uri: "github://repo", name: "repo" }],
 		instructions: "Prefer search_code over cloning.",
@@ -108,16 +123,64 @@ describe("MCP inspector runtime join", () => {
 		expect(text).toContain("github-mcp-server 0.19.0");
 		expect(text).toContain("search_code");
 		expect(text).toContain("Search code across GitHub repositories.");
-		expect(text).toContain("Server guidance");
 		expect(text).toContain("Prefer search_code over cloning.");
-		expect(text).toContain("Connection");
+		expect(text).not.toContain("Server guidance");
+		expect(text).not.toContain("Connection");
 		expect(text).toContain("/usr/bin/github-mcp-server");
 
 		expect(text).not.toContain("Type: mcp");
 		expect(text).not.toMatch(/Status:\s+.*Active/);
-		expect(text.indexOf("Access GitHub")).toBeLessThan(text.indexOf("Connection"));
+		expect(text.indexOf("Access GitHub")).toBeLessThan(text.indexOf("Command"));
+		expect(text.indexOf("Prefer search_code")).toBeLessThan(text.indexOf("Origin"));
+		expect(text.indexOf("Prefer search_code")).toBeLessThan(text.indexOf("search_code"));
 		expect(text.indexOf("search_code")).toBeLessThan(text.indexOf("Command"));
 		expect(text).not.toMatch(/^.*github-mcp-server\n.*Type:/s);
+	});
+
+	test("inlines short MCP tool args and keeps long schemas collapsed", () => {
+		const panel = new InspectorPanel();
+		panel.setMcpSource(connectedSource());
+		panel.setExtension(mcpExtension());
+		const collapsed = Bun.stripANSI(panel.render(72).join("\n"));
+		expect(collapsed).toContain("search_code");
+		expect(collapsed).toContain("query");
+		expect(collapsed).toContain("Search query");
+		expect(collapsed).toContain("title");
+		expect(collapsed).toContain("Issue title");
+		expect(collapsed).not.toContain("1 arg");
+		expect(collapsed).not.toMatch(/args \(.* to expand\)/);
+
+		const long = connectedSource();
+		const conn = long.getConnection("github")!;
+		conn.tools = [
+			{
+				name: "search_code",
+				description: "Search code across GitHub repositories.",
+				inputSchema: {
+					type: "object",
+					required: ["query"],
+					properties: {
+						query: { type: "string" },
+						a: { type: "string" },
+						b: { type: "string" },
+						c: { type: "string" },
+						d: { type: "string" },
+					},
+				},
+			},
+		];
+		const longPanel = new InspectorPanel();
+		longPanel.setMcpSource(long);
+		longPanel.setExtension(mcpExtension());
+		const longCollapsed = Bun.stripANSI(longPanel.render(72).join("\n"));
+		expect(longCollapsed).toContain("5 args");
+		expect(longCollapsed).toMatch(/args \(.* to expand\)/);
+		expect(longCollapsed).not.toMatch(/query\s+string/);
+
+		longPanel.toggleExpanded();
+		const expanded = Bun.stripANSI(longPanel.render(72).join("\n"));
+		expect(expanded).toMatch(/query\s+string/);
+		expect(expanded).toContain("Required");
 	});
 
 	test("does not present a dead server as Active", () => {
@@ -145,10 +208,11 @@ describe("MCP inspector runtime join", () => {
 			},
 		});
 		const text = Bun.stripANSI(panel.render(42).join("\n"));
-		const connection = text.slice(text.indexOf("Connection"));
-		expect(connection.split("\n").some(line => line.includes("…") || line.endsWith("..."))).toBe(false);
-		expect(connection.replace(/\s+/g, "")).toContain("gog-mcp-readonly");
-		expect(connection).toContain("Command");
+		const command = text.slice(text.indexOf("Command"));
+		expect(command.split("\n").some(line => line.includes("…") || line.endsWith("..."))).toBe(false);
+		expect(command.replace(/\s+/g, "")).toContain("gog-mcp-readonly");
+		expect(command).toContain("Command");
+		expect(text).not.toContain("Connection");
 	});
 
 	test("collapses large resource and prompt catalogs until expand", () => {
