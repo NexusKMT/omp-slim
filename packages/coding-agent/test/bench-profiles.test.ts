@@ -43,12 +43,18 @@ function streamOf(message: AssistantMessage): AssistantMessageEventStream {
 	return Object.assign(iterator, { result: async () => message }) as unknown as AssistantMessageEventStream;
 }
 
-function message(overrides: { ttft?: number; duration?: number; input?: number; output?: number }): AssistantMessage {
+function message(overrides: {
+	ttft?: number;
+	duration?: number;
+	input?: number;
+	output?: number;
+	cacheWrite?: number;
+}): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text: "hi" }],
 		stopReason: "stop",
-		usage: { input: overrides.input ?? 5, output: overrides.output ?? 20 },
+		usage: { input: overrides.input ?? 5, output: overrides.output ?? 20, cacheWrite: overrides.cacheWrite ?? 0 },
 		duration: overrides.duration ?? 120,
 		ttft: overrides.ttft ?? 30,
 	} as unknown as AssistantMessage;
@@ -73,6 +79,7 @@ async function runProfiled(flags: Record<string, unknown>, messages?: AssistantM
 				return streamOf(msg);
 			},
 			now: () => 0,
+			random: () => 0,
 			stdoutIsTTY: false,
 		},
 	);
@@ -82,10 +89,11 @@ async function runProfiled(flags: Record<string, unknown>, messages?: AssistantM
 describe("bench run metrics", () => {
 	it("splits prefill and decode windows and derives per-window throughput", async () => {
 		// ttft 30ms, total 120ms → 90ms decode; 20 output tokens, 5 input tokens.
-		const { summary } = await runProfiled({ runs: 1, par: 1 });
+		const { summary } = await runProfiled({ profile: "chat", runs: 1, par: 1 });
 		const run = summary.models[0].results[0];
 		expect(run.ok).toBe(true);
 		if (!run.ok) return;
+		expect(run.challenge).toBe("chat");
 		expect(run.ttftMs).toBe(30);
 		expect(run.generationMs).toBe(90);
 		expect(run.inputTokens).toBe(5);
@@ -94,10 +102,22 @@ describe("bench run metrics", () => {
 		expect(run.prefillTps).toBeCloseTo(166.67, 1);
 	});
 
+	it("counts cache-written prompt tokens toward input size", async () => {
+		// Anthropic auto-caching reports most of the prompt as cacheWrite, not input.
+		const { summary } = await runProfiled({ profile: "prefill", runs: 1, par: 1 }, [
+			message({ input: 3, cacheWrite: 8000 }),
+		]);
+		const run = summary.models[0].results[0];
+		expect(run.ok).toBe(true);
+		if (!run.ok) return;
+		expect(run.inputTokens).toBe(8003);
+		expect(run.prefillTps).toBeCloseTo((8003 * 1000) / 30, 0);
+	});
+
 	it("aggregates nearest-rank percentiles over successful runs", async () => {
 		const durations = [100, 200, 300, 400, 500];
 		const { summary } = await runProfiled(
-			{ runs: 5, par: 1 },
+			{ profile: "chat", runs: 5, par: 1 },
 			durations.map(duration => message({ duration })),
 		);
 		const stats = summary.models[0].stats;
@@ -111,11 +131,19 @@ describe("bench run metrics", () => {
 	});
 });
 
-describe("bench profiles", () => {
-	it("defaults to the chat profile", async () => {
-		const { summary, captured } = await runProfiled({ runs: 1, par: 1 });
-		expect(summary.profile).toBe("chat");
-		expect(captured[0].options?.maxTokens).toBe(512);
+describe("bench challenge mix", () => {
+	it("defaults to mix and rotates challenge kinds with per-kind output budgets", async () => {
+		const { summary, captured } = await runProfiled({ runs: 3, par: 1 });
+		expect(summary.profile).toBe("mix");
+		expect(summary.models[0].results.map(run => run.challenge)).toEqual(["chat", "prefill", "generation"]);
+		expect(captured.map(request => request.options?.maxTokens)).toEqual([512, 64, 2048]);
+		// Per-kind aggregates exist for every kind that ran.
+		expect(Object.keys(summary.models[0].byChallenge).sort()).toEqual(["chat", "generation", "prefill"]);
+	});
+
+	it("--max-tokens overrides every challenge kind", async () => {
+		const { captured } = await runProfiled({ runs: 3, par: 1, maxTokens: 128 });
+		expect(captured.map(request => request.options?.maxTokens)).toEqual([128, 128, 128]);
 	});
 
 	it("prefill sends a large input with a unique cache-busting nonce per run", async () => {
@@ -145,17 +173,15 @@ describe("bench profiles", () => {
 		expect(text.length).toBeLessThan(8192);
 	});
 
-	it("generation raises the output budget to force sustained decode", async () => {
-		const { summary, captured } = await runProfiled({ profile: "generation", runs: 1, par: 1 });
-		expect(summary.profile).toBe("generation");
-		expect(captured[0].options?.maxTokens).toBe(2048);
-	});
-
 	it("rejects --profile combined with --cache", async () => {
 		await expect(runProfiled({ profile: "generation", cache: true })).rejects.toThrow("--cache");
 	});
 
-	it("rejects --prefill-bytes without the prefill profile", async () => {
-		await expect(runProfiled({ prefillBytes: 1024 })).rejects.toThrow("--prefill-bytes");
+	it("rejects --prefill-bytes when no prefill challenge can run", async () => {
+		await expect(runProfiled({ profile: "chat", prefillBytes: 1024 })).rejects.toThrow("--prefill-bytes");
+	});
+
+	it("rejects --prompt when challenges are mixed", async () => {
+		await expect(runProfiled({ prompt: "hello" })).rejects.toThrow("--prompt");
 	});
 });
