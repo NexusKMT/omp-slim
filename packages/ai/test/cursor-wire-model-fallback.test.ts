@@ -19,10 +19,11 @@ import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 
 const CONNECT_END_STREAM_FLAG = 0b00000010;
 
-type Response =
+type Response = (
 	| { kind: "error"; code: string; message: string; partialText?: string; heartbeat?: boolean }
 	| { kind: "success"; text: string }
-	| { kind: "exec-success" };
+	| { kind: "exec-success" }
+) & { delayMs?: number };
 
 let server: http2.Http2Server | undefined;
 const sessions = new Set<http2.Http2Session>();
@@ -125,7 +126,7 @@ async function startServer(): Promise<string> {
 	});
 	server.on("stream", (stream: http2.ServerHttp2Stream) => {
 		let pending: Buffer = Buffer.alloc(0);
-		const onData = (chunk: Buffer): void => {
+		const onData = async (chunk: Buffer): Promise<void> => {
 			pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
 			if (pending.length < 5) return;
 			const length = pending.readUInt32BE(1);
@@ -140,6 +141,9 @@ async function startServer(): Promise<string> {
 				return;
 			}
 
+			// This HTTP/2 integration fixture verifies reported performance.now()
+			// latency; fake timers would also stall the transport events under test.
+			if (response.delayMs) await Bun.sleep(response.delayMs);
 			stream.respond({
 				":status": 200,
 				"content-type": "application/connect+proto",
@@ -254,6 +258,49 @@ describe("Cursor discovered effort wire fallback", () => {
 		expect(result.stopReason).toBe("stop");
 		expect(requests).toHaveLength(2);
 		expect(requests[1].requestedModel?.modelId).toBe("gpt-5.6-sol-medium");
+	});
+
+	it("does not start the fallback after the request is canceled", async () => {
+		responses = [
+			{ kind: "error", code: "not_found", message: "Error" },
+			{ kind: "success", text: "must not be requested" },
+		];
+		const baseUrl = await startServer();
+		const controller = new AbortController();
+		// Model cancellation at the exact retry boundary without a timer race:
+		// once the fixture receives attempt one, the signal is already aborted
+		// when the not_found catch decides whether to launch attempt two.
+		Object.defineProperty(controller.signal, "aborted", {
+			configurable: true,
+			get: () => requests.length > 0,
+		});
+		const stream = streamCursor(makeModel(baseUrl), context, {
+			apiKey: "test-token",
+			sessionId: crypto.randomUUID(),
+			wireModelId: "gpt-5.6-sol-medium",
+			signal: controller.signal,
+		});
+		for await (const _event of stream) {
+			// drain to completion
+		}
+		const result = await stream.result();
+
+		expect(result.stopReason).toBe("aborted");
+		expect(requests).toHaveLength(1);
+	});
+
+	it("reports latency across both wire attempts", async () => {
+		responses = [
+			{ kind: "error", code: "not_found", message: "Error", delayMs: 40 },
+			{ kind: "success", text: "OK", delayMs: 20 },
+		];
+		const baseUrl = await startServer();
+		const { result } = await runStream(baseUrl);
+
+		expect(result.stopReason).toBe("stop");
+		expect(result.duration).toBeGreaterThanOrEqual(50);
+		expect(result.ttft).toBeGreaterThanOrEqual(50);
+		expect(requests).toHaveLength(2);
 	});
 
 	it.each([

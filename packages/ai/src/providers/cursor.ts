@@ -345,6 +345,11 @@ export interface CursorOptions extends StreamOptions {
 
 type CursorWireMode = "normalized" | "discovered";
 
+interface CursorStreamTiming {
+	startTime: number;
+	timestamp: number;
+}
+
 interface CursorRequestState {
 	conversationId: string;
 	blobStore: Map<string, Uint8Array>;
@@ -552,11 +557,12 @@ function streamCursorWithWireMode(
 	context: Context,
 	options: CursorOptions | undefined,
 	wireMode: CursorWireMode,
+	timing?: CursorStreamTiming,
 ): AssistantMessageEventStream {
 	const stream = new AssistantMessageEventStream();
 
 	(async () => {
-		const startTime = performance.now();
+		const startTime = timing?.startTime ?? performance.now();
 		let firstTokenTime: number | undefined;
 
 		const output: AssistantMessage = {
@@ -574,7 +580,7 @@ function streamCursorWithWireMode(
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
 			stopReason: "stop",
-			timestamp: Date.now(),
+			timestamp: timing?.timestamp ?? Date.now(),
 		};
 
 		// Declared outside the `try` because BOTH exits must drain it: an exec
@@ -938,6 +944,7 @@ function streamCursorWithWireMode(
 			const fallbackWireModelId =
 				wireMode === "normalized" &&
 				!sawProgressOrSideEffect &&
+				!options?.signal?.aborted &&
 				error instanceof Error &&
 				CURSOR_MODEL_NOT_FOUND_PATTERN.test(error.message)
 					? serializedFallbackWireModelId
@@ -950,7 +957,10 @@ function streamCursorWithWireMode(
 				h2Request?.close();
 				h2Client?.close();
 
-				const fallbackStream = streamCursorWithWireMode(model, context, options, "discovered");
+				const fallbackStream = streamCursorWithWireMode(model, context, options, "discovered", {
+					startTime,
+					timestamp: output.timestamp,
+				});
 				// The lazy watchdog observes THIS outer stream; the fallback's exec
 				// bridge marks the inner stream busy via `trackLocalWork`. Forward
 				// that busy state so a local tool on the retry turn is not aborted as
