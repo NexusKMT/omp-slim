@@ -61,6 +61,7 @@ import { copyToClipboard } from "../../utils/clipboard";
 import { isTimeoutError } from "../../utils/fetch-timeout";
 import { openPath } from "../../utils/open";
 import { ChatBlock } from "../components/chat-block";
+import { DynamicBorder } from "../components/dynamic-border";
 import { MCPAddWizard } from "../components/mcp-add-wizard";
 import { TranscriptBlock } from "../components/transcript-container";
 import { parseCommandArgs } from "../shared";
@@ -71,6 +72,25 @@ import { groupBySource, parseRemoveArgs, readScopeFlag, showCommandMessage } fro
 const MCP_MANUAL_INPUT_PROVIDER_ID = "mcp";
 const MCP_MANUAL_LOGIN_TIP = "Headless? Paste the redirect URL or code with /login <value>.";
 const MCP_TEST_ESCAPE_GRACE_MS = 5_000;
+
+/**
+ * Hint block for an in-flight `/mcp test`. Stays unfinalized (so
+ * TranscriptContainer keeps re-rendering it, even once scrolled into the
+ * native-scrollback live-region seam) until settlement seals its final text.
+ * A plain TranscriptBlock would be treated as immutable after finalize and a
+ * settled rewrite could be lost to committed-history replay.
+ */
+class MutableHintBlock extends TranscriptBlock {
+	#sealed = false;
+
+	isTranscriptBlockFinalized(): boolean {
+		return this.#sealed;
+	}
+
+	seal(): void {
+		this.#sealed = true;
+	}
+}
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string, onTimeout?: () => void): Promise<T> {
 	const { promise: timeoutPromise, reject } = Promise.withResolvers<T>();
 	const timer = setTimeout(() => {
@@ -1575,7 +1595,14 @@ export class MCPCommandController {
 		}
 
 		const abortController = new AbortController();
-		const handleEscape = (): void => abortController.abort();
+		let settled = false;
+		const handleEscape = (): void => {
+			if (settled) {
+				this.ctx.showStatus(`MCP test for "${name}" already finished`);
+				return;
+			}
+			abortController.abort();
+		};
 
 		// Claim Esc before the first await: a slow `#resolveServerForAuth()` (e.g.
 		// config on a network filesystem) must not let Esc fall through to the
@@ -1587,6 +1614,22 @@ export class MCPCommandController {
 		// screen; a pre-hint failure must release Esc immediately so it is not
 		// swallowed for a prompt the user never saw.
 		let hintShown = false;
+		let hintText: Text | undefined;
+		let hintBlock: MutableHintBlock | undefined;
+		// Outcome-branched settled text: a cancelled or failed test must not
+		// read as if it completed.
+		let settleNote = `Tested connection to "${name}".`;
+		// Cancellation can land while later awaits (auth prepareConfig, connect)
+		// are still unwinding. Drop the esc affordance the moment it happens —
+		// the dispatcher already consumed the ownership — but claim no outcome:
+		// whether this abort actually stops the test is only known once the
+		// signal-observing awaits settle (e.g. an abort landing during
+		// #syncManagerConnection does not stop it).
+		abortController.signal.addEventListener("abort", () => {
+			if (settled || !hintShown) return;
+			hintText?.setText(theme.fg("muted", `Testing connection to "${name}"...`));
+			this.ctx.ui.requestRender();
+		});
 		try {
 			const found = await this.#resolveServerForAuth(name);
 
@@ -1605,9 +1648,22 @@ export class MCPCommandController {
 				return;
 			}
 
-			this.#showMessage(
-				["", theme.fg("muted", `Testing connection to "${name}"... (esc to cancel)`), ""].join("\n"),
-			);
+			// Esc may have been consumed during the awaited lookup, before any
+			// hint existed. Bail out instead of advertising a cancellation that
+			// is already gone.
+			if (abortController.signal.aborted) {
+				this.ctx.mcpTestEscapeHandlers.delete(handleEscape);
+				this.ctx.showStatus(`Cancelled MCP test for "${name}"`);
+				return;
+			}
+
+			hintBlock = new MutableHintBlock();
+			hintBlock.addChild(new DynamicBorder());
+			const text = new Text(theme.fg("muted", `Testing connection to "${name}"... (esc to cancel)`), 1, 1);
+			hintBlock.addChild(text);
+			hintBlock.addChild(new DynamicBorder());
+			this.ctx.presentCommandOutput(hintBlock);
+			hintText = text;
 			hintShown = true;
 
 			// Resolve auth config if needed
@@ -1648,6 +1704,7 @@ export class MCPCommandController {
 			this.#showMessage(lines.join("\n"));
 		} catch (error) {
 			if (abortController.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
+				settleNote = `Cancelled connection test for "${name}".`;
 				this.ctx.showStatus(`Cancelled MCP test for "${name}"`);
 				return;
 			}
@@ -1664,12 +1721,22 @@ export class MCPCommandController {
 				helpText = "\n\nTip: Check that the server is running and the URL/port is correct.";
 			} else if (errorMsg.includes("timeout")) {
 				helpText = "\n\nTip: The server may be slow or unresponsive. Try increasing the timeout.";
-			} else if (errorMsg.includes("401") || errorMsg.includes("403")) {
-				helpText = "\n\nTip: Check your authentication credentials.";
 			}
 
+			settleNote = `Connection test for "${name}" failed.`;
 			this.ctx.showError(`Failed to connect to "${name}": ${errorMsg}${helpText}`);
 		} finally {
+			settled = true;
+			if (hintShown) {
+				// The test can no longer be cancelled: stop advertising Esc so a
+				// later press cannot be mistaken for test cancellation and abort
+				// the running agent turn after the grace expires. Sealing the
+				// block after the final text lets TranscriptContainer treat it
+				// as immutable history from here on.
+				hintText?.setText(theme.fg("muted", settleNote));
+				this.ctx.ui.requestRender();
+				hintBlock?.seal();
+			}
 			if (this.ctx.mcpTestEscapeHandlers.has(handleEscape)) {
 				if (hintShown) {
 					const timer = setTimeout(() => {

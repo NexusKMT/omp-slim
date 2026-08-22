@@ -447,7 +447,7 @@ describe("InputController escape behavior", () => {
 		expect(spies.abort).not.toHaveBeenCalled();
 	});
 
-	it("keeps every overlapping /mcp test cancellable before aborting the stream", () => {
+	it("keeps every overlapping /mcp test cancellable and consumes ownership on dispatch", () => {
 		const { ctx, editor, spies } = createContext();
 		mutableSessionState(ctx).isStreaming = true;
 		const firstTestEscapeHandler = vi.fn();
@@ -462,13 +462,16 @@ describe("InputController escape behavior", () => {
 		expect(firstTestEscapeHandler).toHaveBeenCalledTimes(1);
 		expect(latestTestEscapeHandler).toHaveBeenCalledTimes(1);
 		expect(spies.abort).not.toHaveBeenCalled();
+		// One press consumes the ownership: the next Esc must reach the stream
+		// abort below instead of being swallowed by stale registrations.
+		expect(ctx.mcpTestEscapeHandlers.size).toBe(0);
 
-		ctx.mcpTestEscapeHandlers.delete(latestTestEscapeHandler);
 		editor.onEscape?.();
 
-		expect(firstTestEscapeHandler).toHaveBeenCalledTimes(2);
+		expect(firstTestEscapeHandler).toHaveBeenCalledTimes(1);
 		expect(latestTestEscapeHandler).toHaveBeenCalledTimes(1);
-		expect(spies.abort).not.toHaveBeenCalled();
+		expect(spies.abort).toHaveBeenCalledTimes(1);
+		expect(spies.abort).toHaveBeenCalledWith({ reason: USER_INTERRUPT_LABEL });
 	});
 
 	it("dismisses an active /btw panel before aborting the main stream", () => {

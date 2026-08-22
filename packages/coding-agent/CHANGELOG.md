@@ -71,6 +71,7 @@
 ### Fixed
 
 - Fixed Agent Hub aborted rows failing to open their read-only transcript when selected with Enter.
+- Fixed `/mcp test` leaving a stale "(esc to cancel)" hint after the test finished and swallowing Esc presses during the grace window; the hint now stops advertising Esc once the test settles, a late Esc shows an "already finished" status instead of silently doing nothing, and one Esc press consumes the cancellation ownership so the next Esc reaches the running turn ([#9173](https://github.com/can1357/oh-my-pi/issues/9173)).
 
 ## [17.4.4] - 2026-08-22
 
