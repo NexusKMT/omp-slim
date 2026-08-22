@@ -350,6 +350,11 @@ export class ExtensionDashboard implements Component {
 				name,
 				enabled,
 				cwd: this.cwd,
+				discovery: {
+					enableProjectConfig: sm.get("mcp.enableProjectConfig") ?? true,
+					filterExa: true,
+					filterBrowser: sm.get("browser.enabled") ?? false,
+				},
 				manager: this.mcpManager,
 				session: this.onMcpToolsChanged ? { refreshMCPTools: this.onMcpToolsChanged } : undefined,
 				onStatus: event => {

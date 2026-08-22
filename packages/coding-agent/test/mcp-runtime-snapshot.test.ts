@@ -269,4 +269,37 @@ describe("applyMcpToggleRuntime", () => {
 		expect(connected).toEqual([{ github: { command: "github-mcp-server" } }]);
 		expect(refreshed).toEqual([tools]);
 	});
+
+	test("enable passes startup discovery filters into config load", async () => {
+		const loads: Array<{ cwd: string; options: unknown }> = [];
+		const connected: string[] = [];
+		await applyMcpToggleRuntime({
+			name: "project-only",
+			enabled: true,
+			cwd: "/tmp/project",
+			discovery: { enableProjectConfig: false, filterExa: true, filterBrowser: true },
+			loadConfigs: async (cwd, options) => {
+				loads.push({ cwd, options });
+				return { configs: {}, sources: {}, exaApiKeys: [] };
+			},
+			manager: {
+				getConnectionStatus: () => "disconnected",
+				getTools: () => [],
+				disconnectServer: async () => {
+					throw new Error("enable must not disconnect");
+				},
+				connectServers: async configs => {
+					connected.push(...Object.keys(configs));
+					return { errors: new Map() };
+				},
+			},
+		});
+		expect(loads).toEqual([
+			{
+				cwd: "/tmp/project",
+				options: { enableProjectConfig: false, filterExa: true, filterBrowser: true },
+			},
+		]);
+		expect(connected).toEqual([]);
+	});
 });

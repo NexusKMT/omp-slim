@@ -8,7 +8,7 @@
 import type { MCPServer } from "../../../capability/mcp";
 import type { SourceMeta } from "../../../capability/types";
 import type { CustomTool } from "../../../extensibility/custom-tools/types";
-import { loadAllMCPConfigs } from "../../../mcp/config";
+import { type LoadMCPConfigsOptions, loadAllMCPConfigs } from "../../../mcp/config";
 import type { MCPLoadResult, MCPManager } from "../../../mcp/manager";
 import type { McpConnectionStatusEvent } from "../../../mcp/startup-events";
 import type {
@@ -92,6 +92,8 @@ export interface ApplyMcpToggleRuntimeOptions {
 	cwd: string;
 	manager?: MCPToggleManager;
 	session?: MCPToggleSession;
+	/** Same discovery filters as session startup (`sdk.ts` / `/mcp reload`). */
+	discovery?: LoadMCPConfigsOptions;
 	loadConfigs?: typeof loadAllMCPConfigs;
 	onStatus?: (event: McpConnectionStatusEvent) => void;
 }
@@ -102,7 +104,7 @@ export interface ApplyMcpToggleRuntimeOptions {
  * already do. Config persistence stays in `setMcpServerEnabled`.
  */
 export async function applyMcpToggleRuntime(options: ApplyMcpToggleRuntimeOptions): Promise<void> {
-	const { name, enabled, cwd, manager, session, loadConfigs = loadAllMCPConfigs, onStatus } = options;
+	const { name, enabled, cwd, manager, session, discovery, loadConfigs = loadAllMCPConfigs, onStatus } = options;
 	if (!manager) return;
 
 	if (!enabled) {
@@ -116,7 +118,7 @@ export async function applyMcpToggleRuntime(options: ApplyMcpToggleRuntimeOption
 		return;
 	}
 
-	const { configs, sources } = await loadConfigs(cwd);
+	const { configs, sources } = await loadConfigs(cwd, discovery);
 	const config = configs[name];
 	if (!config) {
 		await session?.refreshMCPTools(manager.getTools());
