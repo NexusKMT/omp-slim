@@ -75,6 +75,9 @@
 - Edit tool prompt now documents whole-line insert selections and that a REWRITE `…` with no captured MATCH gap is written to the file literally.
 - Fixed multiplexer width resizes (tmux/screen/Zellij/cmux/Herdr panes) replaying the entire transcript into pane history — one duplicated transcript copy and seconds of visible scrolling per width change. The width-epoch boundary now resolves for real transcripts: finalized blocks without `getTranscriptBlockVersion` are treated as immutable per the documented contract, Container-derived blocks without a nested epoch source fall back to whole-segment stability instead of failing, and bash/eval/tool/read-group blocks report a block version for their genuine post-finalize mutations. The interactive resize listener no longer marks every SIGWINCH as "render pending", which forced the conservative replay-from-row-zero fallback on every settled resize ([#8193](https://github.com/can1357/oh-my-pi/issues/8193), [#7026](https://github.com/can1357/oh-my-pi/issues/7026)).
 - Edit tool prompt now documents whole-line insert selections, steers multi-line edits toward inline selections instead of block rewrites that retype unchanged lines, and warns that a REWRITE gap with nothing captured in MATCH is written to the file literally.
+### Fixed
+
+- Fixed expanded compaction summaries claiming context grew from zero tokens when the provider did not report pre-compaction usage ([#9293](https://github.com/can1357/oh-my-pi/issues/9293)).
 
 ## [17.4.3] - 2026-08-21
 
