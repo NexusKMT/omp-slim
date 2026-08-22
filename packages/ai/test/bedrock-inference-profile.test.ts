@@ -268,6 +268,24 @@ describe("Bedrock cross-region inference-profile geo routing", () => {
 		);
 	});
 
+	test("uses a same-geo guardrail ARN region for a geo profile without AWS region", async () => {
+		await withEnv(
+			{
+				AWS_REGION: undefined,
+				AWS_DEFAULT_REGION: undefined,
+				AWS_PROFILE: undefined,
+				AWS_SDK_LOAD_CONFIG: undefined,
+			},
+			async () => {
+				expect(
+					await capturedRequestHost(bedrockModel("eu.anthropic.claude-opus-4-8"), {
+						guardrailIdentifier: "arn:aws:bedrock:eu-west-2:123456789012:guardrail/abcd1234",
+					}),
+				).toBe("bedrock-runtime.eu-west-2.amazonaws.com");
+			},
+		);
+	});
+
 	test("honors an explicit region over the guardrail ARN region", async () => {
 		await withEnv(
 			{

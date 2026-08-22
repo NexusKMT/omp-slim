@@ -164,24 +164,27 @@ function regionServesGeo(region: string, geo: string): boolean {
 
 /**
  * Resolve the Bedrock runtime region for a request. An explicit per-request
- * region and an ARN-embedded region win outright. Otherwise, for a geo-prefixed
- * cross-region inference profile (`us.`/`eu.`/`apac.`/`au.`/`jp.`/`us-gov.`), an
- * ambient region (`AWS_REGION` / `AWS_DEFAULT_REGION`) is honored only when it
- * can serve the profile's geo; a mismatched or absent ambient region is
- * corrected to the geo default so an `eu.`/`apac.` profile never POSTs to a `us`
- * endpoint (and vice versa). `global.` profiles have no geo entry, so the ambient
- * region (or, when absent, a guardrail ARN's region or `us-east-1`) is used unchanged.
+ * region and an ARN-embedded model region win outright. Otherwise, for a
+ * geo-prefixed cross-region inference profile (`us.`/`eu.`/`apac.`/`au.`/`jp.`/
+ * `us-gov.`), an ambient region (`AWS_REGION` / `AWS_DEFAULT_REGION`) is
+ * honored only when it can serve the profile's geo. If the ambient region is
+ * absent or mismatched, a same-geo guardrail ARN region is used when available;
+ * otherwise the geo default is used. `global.` profiles have no geo entry, so
+ * the ambient region (or, when absent, a guardrail ARN's region or
+ * `us-east-1`) is used unchanged.
  */
 function resolveBedrockRegion(modelId: string, options: BedrockOptions): string {
 	const explicit = options.region || inferRegionFromBedrockArn(modelId);
 	if (explicit) return explicit;
 	const ambient = resolveAwsAmbientRegion(options.profile);
+	const guardrailRegion = inferRegionFromBedrockArn(options.guardrailIdentifier ?? "");
 	const geo = inferenceProfileGeo(modelId);
 	if (geo) {
 		if (ambient && regionServesGeo(ambient, geo)) return ambient;
+		if (guardrailRegion && regionServesGeo(guardrailRegion, geo)) return guardrailRegion;
 		return INFERENCE_PROFILE_GEO_DEFAULT_REGION[geo];
 	}
-	return ambient || inferRegionFromBedrockArn(options.guardrailIdentifier ?? "") || "us-east-1";
+	return ambient || guardrailRegion || "us-east-1";
 }
 
 type Block = (TextContent | ThinkingContent | ToolCall) & {
