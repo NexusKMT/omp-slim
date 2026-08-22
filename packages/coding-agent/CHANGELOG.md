@@ -4,7 +4,9 @@
 
 ### Added
 
+- Plan review can save a plan to a chosen path and start a new session.
 - Added the `/pin` slash command to pin and unpin sessions so they stay at the top of the `--resume` picker UI.
+- Edit operations that turn parseable source into invalid syntax now append the before/after content, model, variant, and arguments to `~/.omp/agent/edit-blackbox.jsonl`.
 ### Changed
 
 - Slash-command autocomplete now collapses skills into a single `/skill:` row; the individual skills list once the prefix reaches `/skill:` (accepting the row with Tab/Enter expands it in place).
@@ -12,6 +14,8 @@
 ### Fixed
 
 - Fixed Kitty text-sized Markdown headings activating before `tui.textSizing` is enabled.
+- Fixed the edit tool corrupting files on unified-diff-shaped payloads: missing-separator recovery no longer hijacks `-`/`+` bodies (which deleted matched anchors and duplicated the surrounding block); they now flow to the unified-diff reinterpretation.
+- Fixed the edit tool writing literal `…` lines: a whole-line rewrite gap with no captured MATCH gap now fails closed with guidance instead of splicing an ellipsis into the file.
 - Fixed status text retaining hidden DCS, PM, and APC payloads after escape-sequence sanitization.
 - Fixed extension load errors truncating explicitly excluded package import specifiers.
 - Fixed subagents crashing before their first turn when an extension contributed a tool or skill without a `description`; the context-breakdown token estimate now coalesces missing descriptions and system-prompt sections instead of passing `undefined` to the tokenizer ([#9331](https://github.com/can1357/oh-my-pi/issues/9331)).
