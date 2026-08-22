@@ -212,7 +212,8 @@ export function computeNonMessageTokens(session: NonMessageTokenSource, tokenize
 	if (entry.tokens !== undefined) return entry.tokens;
 	const systemPromptParts = session.systemPrompt ?? EMPTY_STRING_PARTS;
 	const tools = session.agent?.state?.tools ?? EMPTY_TOOLS;
-	const tokens = tokenizer.countTokens(systemPromptParts) + estimateToolSchemaTokens(tools, tokenizer);
+	const tokens =
+		tokenizer.countTokens(systemPromptParts.map(part => part ?? "")) + estimateToolSchemaTokens(tools, tokenizer);
 	entry.tokens = tokens;
 	return tokens;
 }
