@@ -1043,7 +1043,7 @@ function parseOperations(input: string, content: string): Operation[] {
 				// No block resembles the desired text; keep the fail-closed error.
 			}
 		}
-		const needsSeparator = `Operation ${operations.length + 1} needs ${REWRITE_HEADER}. Retry:\n${OPENER}\n${patternLines.join("\n")}\n${REWRITE_HEADER}\n<new text>`;
+		const needsSeparator = `Operation ${operations.length + 1} needs ${REWRITE_HEADER}.\nCopy-ready corrected payload (fill in the new text):\n${OPENER}\n${patternLines.join("\n")}\n${REWRITE_HEADER}\n<new text>`;
 		// A multiline pattern-only block may be the delete half of a move; assume
 		// deletion now, justified post-parse only when another op re-emits it.
 		const normalizedPattern = normalizeText(sourcePatternText).text;

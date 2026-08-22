@@ -1,6 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentTool, ToolApproval } from "@oh-my-pi/pi-agent-core";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { EditTool } from "@oh-my-pi/pi-coding-agent/edit";
 import { LSP_READONLY_ACTIONS } from "@oh-my-pi/pi-coding-agent/lsp";
+import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import {
 	type ApprovalMode,
 	formatApprovalPrompt,
@@ -163,6 +166,40 @@ describe("MCP fallback and prompt formatting", () => {
 	it("truncates prompt details without touching short strings", () => {
 		expect(truncateForPrompt("hello", 10)).toBe("hello");
 		expect(truncateForPrompt("abcdefgh", 5)).toBe("abcde[…3ch elided…]");
+	});
+
+	function sloppyEditTool(): EditTool {
+		const session: ToolSession = {
+			cwd: ".",
+			hasUI: false,
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+			settings: Settings.isolated(),
+		};
+		return new EditTool(session, "sloppy");
+	}
+
+	it("shows the file from a sloppy edit section header", () => {
+		const input = "§src/config.go\n§\nold\n»\nnew";
+		expect(formatApprovalPrompt(sloppyEditTool(), { input })).toBe("Allow tool: edit\nFile: src/config.go");
+	});
+
+	it("keeps a mixed internal+workspace sloppy payload at write tier", () => {
+		const editTool = sloppyEditTool();
+		const input = "§local://notes\n§\nold\n»\nnew\n§src/config.go\n§\nold\n»\nnew";
+		// Section 0 is internal; the workspace section must still force write tier
+		// and an always-ask prompt because executeSloppy writes both.
+		expect(editTool.approval?.({ input })).toBe("write");
+		expect(formatApprovalPrompt(editTool, { input }).split("\n")).toEqual([
+			"Allow tool: edit",
+			"File: local://notes",
+			"File: src/config.go",
+		]);
+	});
+
+	it("keeps an all-internal sloppy payload at read tier", () => {
+		const input = "§local://notes\n§\nold\n»\nnew\n§local://scratch\n§\nold\n»\nnew";
+		expect(sloppyEditTool().approval?.({ input })).toBe("read");
 	});
 });
 

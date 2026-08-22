@@ -301,14 +301,19 @@ describe("sloppy v8", () => {
 		);
 	});
 
-	test("fails closed on a marker-less op that already matches the file", () => {
-		// A restated unchanged line asserts nothing; the merged dialect keeps the
-		// fail-closed separator diagnosis instead of silently skipping.
+	test("returns one fill-in payload when a marker-less operation needs a rewrite", () => {
 		const content = "keep();\nconst limit = options.limit;\n";
+		let message = "";
 
-		expect(() =>
-			applySloppy(content, "§\nkeep();\n§\nconst limit = options⟪.│?.⟫limit;", { path: "i.ts", notes: [] }),
-		).toThrow(/needs »/);
+		try {
+			applySloppy(content, "§\nkeep();\n§\nconst limit = options⟪.│?.⟫limit;", { path: "i.ts", notes: [] });
+		} catch (error) {
+			message = error instanceof Error ? error.message : String(error);
+		}
+
+		expect(message).toContain("Operation 1 needs ».");
+		expect(message.match(/Copy-ready corrected payload/g)).toHaveLength(1);
+		expect(message).toContain("Copy-ready corrected payload (fill in the new text):\n§\nkeep();\n»\n<new text>");
 	});
 
 	test("collapses back-to-back duplicates when desired text matches both copies", () => {
