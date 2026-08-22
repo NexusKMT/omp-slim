@@ -62,6 +62,7 @@ const MCP_INLINE_DESC_LINES = 3;
 
 export class InspectorPanel implements Component {
 	#extension: Extension | null = null;
+	#extensionKey: string | null = null;
 	#mcpSource: MCPRuntimeSource | undefined;
 	#toolSource: ToolRuntimeSource | undefined;
 	#expanded = false;
@@ -69,8 +70,12 @@ export class InspectorPanel implements Component {
 	#height = 0;
 
 	setExtension(extension: Extension | null): void {
+		const key = inspectorExtensionKey(extension);
+		if (key !== this.#extensionKey) {
+			this.#expanded = false;
+			this.#extensionKey = key;
+		}
 		this.#extension = extension;
-		this.#expanded = false;
 	}
 
 	setMcpSource(source: MCPRuntimeSource | undefined): void {
@@ -621,4 +626,9 @@ export class InspectorPanel implements Component {
 				return theme.fg("warning", `${theme.status.shadowed} ${enablementLabel(state, reason, shadowedBy)}`);
 		}
 	}
+}
+
+function inspectorExtensionKey(extension: Extension | null): string | null {
+	if (!extension) return null;
+	return `${extension.kind}:${extension.id}:${extension.path}`;
 }

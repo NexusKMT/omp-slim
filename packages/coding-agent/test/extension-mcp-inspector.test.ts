@@ -251,6 +251,91 @@ describe("MCP inspector runtime join", () => {
 		expect(expanded).toContain("resource_19");
 		expect(expanded).toContain("prompt_11");
 	});
+
+	test("expand is per selected extension, not a session-wide toggle", () => {
+		const resources = Array.from({ length: 20 }, (_, i) => ({
+			uri: `github://repo/${i}`,
+			name: `resource_${i}`,
+		}));
+		const otherResources = Array.from({ length: 20 }, (_, i) => ({
+			uri: `linear://issue/${i}`,
+			name: `issue_${i}`,
+		}));
+		const panel = new InspectorPanel();
+		panel.setMcpSource({
+			getConnectionStatus: name => (name === "github" || name === "linear" ? "connected" : "disconnected"),
+			getConnection: name => {
+				if (name === "github") {
+					return {
+						name: "github",
+						config: { command: "/usr/bin/github-mcp-server" },
+						transport: transport(),
+						serverInfo: { name: "github-mcp-server", version: "0.19.0" },
+						capabilities: { resources: {} },
+						tools: [],
+						resources,
+					};
+				}
+				if (name === "linear") {
+					return {
+						name: "linear",
+						config: { command: "/usr/bin/linear-mcp" },
+						transport: transport(),
+						serverInfo: { name: "linear-mcp", version: "1.0.0" },
+						capabilities: { resources: {} },
+						tools: [],
+						resources: otherResources,
+					};
+				}
+				return undefined;
+			},
+			getTools: () => [],
+			getServerResources: name =>
+				name === "linear" ? { resources: otherResources, templates: [] } : { resources, templates: [] },
+			getServerPrompts: () => [],
+		});
+		panel.setExtension(mcpExtension());
+		panel.toggleExpanded();
+		expect(Bun.stripANSI(panel.render(72).join("\n"))).toContain("resource_19");
+
+		panel.setExtension({
+			id: "mcp:linear",
+			kind: "mcp",
+			name: "linear",
+			displayName: "linear",
+			path: "/home/sf/.omp/agent/mcp.json",
+			source: {
+				provider: "native",
+				providerName: "OMP (User)",
+				level: "user",
+			},
+			state: "active",
+			raw: {
+				name: "linear",
+				command: "/usr/bin/linear-mcp",
+				transport: "stdio",
+				_source: {
+					provider: "native",
+					providerName: "OMP (User)",
+					path: "/home/sf/.omp/agent/mcp.json",
+					level: "user",
+				},
+			},
+		});
+		const other = Bun.stripANSI(panel.render(72).join("\n"));
+		expect(other).toContain("issue_0");
+		expect(other).not.toContain("issue_19");
+		expect(other).toMatch(/more \(.* to expand\)/);
+
+		panel.setExtension({ ...mcpExtension() });
+		const back = Bun.stripANSI(panel.render(72).join("\n"));
+		expect(back).toContain("resource_0");
+		expect(back).not.toContain("resource_19");
+
+		panel.toggleExpanded();
+		panel.setExtension({ ...mcpExtension() });
+		expect(Bun.stripANSI(panel.render(72).join("\n"))).toContain("resource_19");
+	});
 });
 
 describe("MCP list runtime join", () => {
