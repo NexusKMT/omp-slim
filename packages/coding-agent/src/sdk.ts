@@ -2180,24 +2180,33 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				// The saved candidates weren't in the static+cached catalog. If any
 				// belongs to a discovery-backed provider that hasn't been fetched
 				// yet (models.yml `discovery:` — openai-models-list/litellm/proxy/…),
-				// trigger one cache-aware discovery pass and retry before resume
-				// silently downgrades to the default role. Mirrors the deferred
-				// `--model` (resolveModelDiscoveryFallbackNonRuntime) and default-role
-				// fallback paths, which already refresh discoverable providers.
+				// trigger a cache-aware discovery pass and retry before resume
+				// silently downgrades to the default role. Scope the refresh to the
+				// saved candidates' providers via `refreshProvider`: a full
+				// `refresh()` would preflight every configured provider (an
+				// unreachable OAuth broker could hang resume) and duplicate the
+				// runtime discovery already started above.
 				const discoverableProviders = new Set(modelRegistry.getDiscoverableProviders());
-				const hasDiscoverableCandidate =
-					discoverableProviders.size > 0 &&
-					sessionModelStrings.slice(0, sessionRetryLimit).some(sessionModelStr => {
+				const candidateProviders = new Set<string>();
+				if (discoverableProviders.size > 0) {
+					for (const sessionModelStr of sessionModelStrings.slice(0, sessionRetryLimit)) {
 						const parsedModel = parseModelString(sessionModelStr, {
 							allowMaxSuffix: true,
 							allowAutoAlias: true,
 							isLiteralModelId: (provider, id) => modelRegistry.find(provider, id) !== undefined,
 						});
-						return parsedModel ? discoverableProviders.has(parsedModel.provider) : false;
-					});
-				if (hasDiscoverableCandidate) {
+						if (parsedModel && discoverableProviders.has(parsedModel.provider)) {
+							candidateProviders.add(parsedModel.provider);
+						}
+					}
+				}
+				if (candidateProviders.size > 0) {
 					await logger.time("restoreSessionModelDiscoveryFallback", () =>
-						modelRegistry.refresh("online-if-uncached"),
+						Promise.all(
+							[...candidateProviders].map(provider =>
+								modelRegistry.refreshProvider(provider, "online-if-uncached"),
+							),
+						),
 					);
 					restoreSessionModel();
 				}
