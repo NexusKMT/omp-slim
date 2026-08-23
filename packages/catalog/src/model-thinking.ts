@@ -927,3 +927,25 @@ export function minimumSupportedEffort<TApi extends Api>(model: ApiModel<TApi>):
 	}
 	return efforts[0];
 }
+
+/**
+ * Clamp target for effort-less requests on `thinking.requiresEffort` models:
+ * the effort whose wire route equals the model's default wire id
+ * (`requestModelId`), so a collapsed row clamps to the tier it already
+ * advertises as its default rather than the numerically lowest supported tier
+ * (e.g. Cursor Grok 4.5/4.6 default to `medium`, the only tier the Start plan
+ * serves). Falls back to {@link minimumSupportedEffort} when no route matches
+ * the default id — families whose default already is the minimum, or that
+ * expose no routing, are unaffected.
+ */
+export function defaultSupportedEffort<TApi extends Api>(model: ApiModel<TApi>): Effort | undefined {
+	const routing = model.thinking?.effortRouting;
+	const defaultWireId = model.requestModelId;
+	if (routing !== undefined && defaultWireId !== undefined) {
+		const efforts = model.thinking?.efforts;
+		for (const effort of THINKING_EFFORTS) {
+			if (efforts?.includes(effort) && routing[effort] === defaultWireId) return effort;
+		}
+	}
+	return minimumSupportedEffort(model);
+}

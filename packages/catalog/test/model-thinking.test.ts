@@ -3,6 +3,7 @@ import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import {
 	clampThinkingLevelForModel,
+	defaultSupportedEffort,
 	getSupportedEfforts,
 	mapEffortToAnthropicAdaptiveEffort,
 	mapEffortToGoogleThinkingLevel,
@@ -1155,6 +1156,47 @@ describe("Qwen 3.8 local template effort ladder", () => {
 		expect(clampThinkingLevelForModel(llamaCpp, Effort.High)).toBe(Effort.Medium);
 		expect(clampThinkingLevelForModel(llamaCpp, Effort.Minimal)).toBe(Effort.Low);
 		expect(minimumSupportedEffort(llamaCpp)).toBe(Effort.Low);
+	});
+
+	it("defaults an effort-less clamp to the tier routing to requestModelId, else the floor (issue #9478)", () => {
+		// A collapsed row whose default wire id is a non-floor tier clamps to the
+		// effort that routes there, not the numeric minimum.
+		const grok = buildModel({
+			id: "cursor-grok-4.6",
+			name: "Grok 4.6",
+			api: "cursor-agent",
+			provider: "cursor",
+			baseUrl: "https://api2.cursor.sh",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 200_000,
+			maxTokens: 64_000,
+			requestModelId: "cursor-grok-4.6-medium",
+			thinking: {
+				mode: "effort",
+				efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
+				requiresEffort: true,
+				effortRouting: {
+					[Effort.Low]: "cursor-grok-4.6-low",
+					[Effort.Medium]: "cursor-grok-4.6-medium",
+					[Effort.High]: "cursor-grok-4.6-high",
+					[Effort.XHigh]: "cursor-grok-4.6-xhigh",
+				},
+			},
+		});
+		expect(defaultSupportedEffort(grok)).toBe(Effort.Medium);
+		expect(minimumSupportedEffort(grok)).toBe(Effort.Low);
+
+		// Families whose default already is the floor are unchanged.
+		const floorDefault = createModel({
+			id: "custom-reasoner",
+			api: "openai-codex-responses",
+			provider: "custom",
+			baseUrl: "https://example.com",
+			thinking: { mode: "effort", efforts: [Effort.Medium, Effort.High] },
+		});
+		expect(defaultSupportedEffort(floorDefault)).toBe(minimumSupportedEffort(floorDefault));
 	});
 
 	it("normalizes a stale cached generic ladder to the template ladder", () => {
