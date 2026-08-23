@@ -15,6 +15,7 @@ function createModel<TApi extends Api>(overrides: {
 	id: string;
 	api: TApi;
 	provider: Provider;
+	name?: string;
 	reasoning?: boolean;
 	baseUrl?: string;
 	compat?: ModelSpec<TApi>["compat"];
@@ -22,7 +23,7 @@ function createModel<TApi extends Api>(overrides: {
 }): Model<TApi> {
 	return buildModel({
 		id: overrides.id,
-		name: overrides.id,
+		name: overrides.name ?? overrides.id,
 		api: overrides.api,
 		provider: overrides.provider,
 		baseUrl: overrides.baseUrl ?? "",
@@ -395,6 +396,42 @@ describe("model thinking derivation", () => {
 		expect(clampThinkingLevelForModel(oxAlpha, Effort.XHigh)).toBe(Effort.High);
 		expect(clampThinkingLevelForModel(oxAlpha, Effort.Medium)).toBe(Effort.Low);
 
+		// Zen serves the same SKU under an unrelated aliased id; the stencil
+		// display name carries the signal and must normalize identically so
+		// `max` is reachable instead of clamping to rejected `xhigh`.
+		const zenAlias = createModel({
+			id: "x-preview-f-free",
+			name: "Ox Alpha Free (Unlimited)",
+			api: "openai-completions",
+			provider: "opencode-zen",
+			baseUrl: "https://opencode.ai/zen/v1",
+			thinking: staleThinking,
+		});
+		expect(zenAlias.thinking).toEqual({
+			mode: "effort",
+			efforts: [Effort.Low, Effort.High, Effort.Max],
+			requiresEffort: true,
+		});
+		expect(requireSupportedEffort(zenAlias, Effort.Max)).toBe(Effort.Max);
+		expect(clampThinkingLevelForModel(zenAlias, Effort.XHigh)).toBe(Effort.High);
+
+		// A zen id with no ox-alpha signal keeps its shipped ladder untouched.
+		const zenOther = createModel({
+			id: "hy3-preview-free",
+			api: "openai-completions",
+			provider: "opencode-zen",
+			baseUrl: "https://opencode.ai/zen/v1",
+			thinking: staleThinking,
+		});
+		expect(getSupportedEfforts(zenOther)).toEqual([
+			Effort.Minimal,
+			Effort.Low,
+			Effort.Medium,
+			Effort.High,
+			Effort.XHigh,
+		]);
+		expect(zenOther.thinking?.requiresEffort).toBeUndefined();
+
 		// Other hosts proxying an ox-alpha SKU expose their own vocabularies and
 		// must not inherit the gateway ladder.
 		const kiloOxAlpha = createModel({
@@ -412,6 +449,24 @@ describe("model thinking derivation", () => {
 			Effort.XHigh,
 		]);
 		expect(kiloOxAlpha.thinking?.requiresEffort).toBeUndefined();
+
+		// The name match needs a trailing boundary too: "Ox Alphabet" merely
+		// shares the prefix and must keep its shipped ladder.
+		const oxAlphabet = createModel({
+			id: "hy3-preview-free",
+			name: "Ox Alphabet",
+			api: "openai-completions",
+			provider: "opencode-zen",
+			baseUrl: "https://opencode.ai/zen/v1",
+			thinking: staleThinking,
+		});
+		expect(getSupportedEfforts(oxAlphabet)).toEqual([
+			Effort.Minimal,
+			Effort.Low,
+			Effort.Medium,
+			Effort.High,
+			Effort.XHigh,
+		]);
 	});
 
 	it("encodes the Gemini 3 Pro effort gap and mandatory reasoning in metadata", () => {

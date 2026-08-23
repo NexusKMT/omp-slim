@@ -559,15 +559,19 @@ function isSakanaFuguReasoningModel<TApi extends Api>(spec: ModelSpec<TApi>): bo
  * `opencode-zen`) reason through the wire-exact `low`/`high`/`max` ladder with
  * mandatory thinking: the gateway rejects `minimal`/`medium`/`xhigh`
  * (`[1210] ... please use low, high, or max`), the same dialect it already
- * serves for GLM-5.3 and Kimi K3. Other hosts proxying an `ox-alpha` SKU
- * (Kilo, NanoGPT, Venice, OpenRouter) expose their own vocabularies and are
- * left untouched. See issue #9349.
+ * serves for GLM-5.3 and Kimi K3. The SKU also ships under unrelated aliased
+ * ids (`opencode-zen/x-preview-f-free`), so the stencil display name is
+ * matched as well. Other hosts proxying an `ox-alpha` SKU (Kilo, NanoGPT,
+ * Venice, OpenRouter) expose their own vocabularies and are left untouched.
+ * See issue #9349.
  */
 function isOpenCodeGatewayOxAlphaModel<TApi extends Api>(spec: ModelSpec<TApi>): boolean {
-	return (
-		(spec.provider === "opencode-go" || spec.provider === "opencode-zen") &&
-		/(?:^|\/)ox-alpha(?:-|$)/i.test(bareModelId(spec.id))
-	);
+	if (spec.provider !== "opencode-go" && spec.provider !== "opencode-zen") return false;
+	if (/(?:^|\/)ox-alpha(?:-|$)/i.test(bareModelId(spec.id))) return true;
+	// Aliased gateway ids surface the same SKU under an unrelated id; the
+	// display name ("Ox Alpha …") is the stable cross-id signal. Anchored on
+	// both sides so "Box Alpha"/"Ox Alphabet" cannot false-positive.
+	return /\box[ _-]?alpha\b/i.test(spec.name ?? "");
 }
 
 function isDeepseekReasoningModel<TApi extends Api>(spec: ModelSpec<TApi>): boolean {
