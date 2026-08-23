@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+
+## [18.0.3] - 2026-08-23
+
 ### Fixed
 
 - Fixed inline images vanishing from the transcript and scrollback when the session exits: stop no longer deletes transmitted Kitty images from the terminal's graphics store.
