@@ -1,10 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Changed
 
 - Files without carriage returns no longer pay a full scan-and-copy during line-ending normalization, removing multi-millisecond stalls on large LF-only files.
-
 
 ## [17.4.0] - 2026-08-20
 

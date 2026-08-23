@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Streaming markdown renders now cache rendered+wrapped rows for unchanged tokens in the unfrozen tail and splice byte-identical rows, re-rendering only the changed suffix each frame — O(delta) tail render instead of O(tail) per tick, −26.6% median frame cost on tight 128KB streaming docs ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
+
+### Fixed
+
+- Fixed Markdown render aborting the TUI when `createHighlightStream` throws; open fences now fall back to the unhighlighted path.
+- Fixed Korean IME cursor drift in Orca by matching its two-cell Hangul Compatibility Jamo rendering ([#9397](https://github.com/can1357/oh-my-pi/issues/9397)).
+- Markdown streaming renderer now resumes the stable-block-boundary walk at the first tail token instead of re-walking the frozen prefix every frame (boundary walk 241µs → 0.9µs/frame at 128KB, −99.6%) ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
+- Markdown streaming renderer now memoizes the ref-def/CR guard scan: while text grows append-only, only the delta is inspected for the characters a reference definition or CR needs, and a clean delta reuses the previous verdict. Guard cost drops from ~265µs to ~0.1µs per frame on a 128KB tight document ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
+- The Markdown streaming renderer now normalizes OSC 8 hyperlink terminators only in the pending append region instead of re-scanning the whole document on every frame, cutting per-frame OSC8 scan cost from ~25µs to sub-µs at 128KB documents ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
+
 ## [18.0.3] - 2026-08-23
 
 ### Fixed
@@ -9,9 +21,6 @@
 - Fixed inline images vanishing from the transcript and scrollback when the session exits: stop no longer deletes transmitted Kitty images from the terminal's graphics store.
 
 ## [18.0.2] - 2026-08-23
-### Changed
-
-- Streaming markdown renders now cache rendered+wrapped rows for unchanged tokens in the unfrozen tail and splice byte-identical rows, re-rendering only the changed suffix each frame — O(delta) tail render instead of O(tail) per tick, −26.6% median frame cost on tight 128KB streaming docs ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
 
 ### Fixed
 
@@ -33,7 +42,6 @@
 
 ### Fixed
 
-- Fixed Markdown render aborting the TUI when `createHighlightStream` throws; open fences now fall back to the unhighlighted path.
 - Fixed consecutive prompt submissions being skipped by persistent history, allowing the latest project metadata to replace the previous entry without duplicating editor navigation history.
 - Fixed the history drain stalling on idle screens: accepting a batch now pumps the next frame, so a large resumed transcript retires to terminal history instead of pinning the live viewport in its emergency aggregate.
 - Fixed fuzzy matching so a qualifying whole-word hit is not hidden by an earlier mid-word occurrence ([#8465](https://github.com/can1357/oh-my-pi/pull/8465) by [@Mustaqeem66](https://github.com/Mustaqeem66)).
@@ -42,10 +50,6 @@
 - Fixed pasting an image in kitty occasionally spraying base64 text into the composer alongside the image attachment: a kitty OSC 5522 clipboard packet torn by the incomplete-escape flush is now discarded up to its terminator instead of being replayed as keystrokes.
 - Fixed Kitty OSC 66 headings activating before the host explicitly enables text sizing.
 - Markdown streaming renderer now scans only the mutable tail (not the full document) for reference-link definitions and CR on every frame, eliminating the O(n²) `RegExp.test` cost that accounted for ~26% CPU during active streaming ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
-- Fixed Korean IME cursor drift in Orca by matching its two-cell Hangul Compatibility Jamo rendering ([#9397](https://github.com/can1357/oh-my-pi/issues/9397)).
-- Markdown streaming renderer now resumes the stable-block-boundary walk at the first tail token instead of re-walking the frozen prefix every frame (boundary walk 241µs → 0.9µs/frame at 128KB, −99.6%) ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
-- Markdown streaming renderer now memoizes the ref-def/CR guard scan: while text grows append-only, only the delta is inspected for the characters a reference definition or CR needs, and a clean delta reuses the previous verdict. Guard cost drops from ~265µs to ~0.1µs per frame on a 128KB tight document ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
-- The Markdown streaming renderer now normalizes OSC 8 hyperlink terminators only in the pending append region instead of re-scanning the whole document on every frame, cutting per-frame OSC8 scan cost from ~25µs to sub-µs at 128KB documents ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
 
 ## [18.0.0] - 2026-08-22
 

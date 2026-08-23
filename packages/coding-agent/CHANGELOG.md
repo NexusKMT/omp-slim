@@ -1,45 +1,55 @@
 # Changelog
 
 ## [Unreleased]
-### Fixed
-
-- Fixed clean-cutover instructions conflicting with deletion safety by explicitly allowing removal of code made obsolete by the requested cutover.
-
-### Fixed
-
-- Eval runtime-availability probes (Python/Ruby/Julia) no longer inherit the host stdin handle and are now bounded by the eval call's timeout and abort signal, so a probe that hangs during backend resolution — e.g. the native-Windows inherited-stdin wedge — returns a clear error instead of wedging the whole turn indefinitely ([#9466](https://github.com/can1357/oh-my-pi/issues/9466)).
-
-### Fixed
-
-- Subagent advisors now review the final `yield`: the yield turn is delivered to the advisor and its review is drained before the subagent session is disposed, instead of being abandoned at teardown ([#9505](https://github.com/can1357/oh-my-pi/issues/9505)).
 
 ### Changed
 
 - Cap streaming markdown renders at the reveal cadence when reveal is caught up; provider deltas accumulate and flush per tick instead of rendering per token.
-
-### Changed
-
 - Streaming thinking display stays smooth on long sessions: appending to large thinking blocks no longer re-processes the whole text on every tick.
+- Streamed-edit guard no longer blocks the event loop while streaming: edit-target reads are async and removed-line verification is memoized per file, cutting precheck stalls on large files from tens of milliseconds (seconds cumulative) to low single-digit milliseconds.
 
 ### Fixed
 
+- Fixed clean-cutover instructions conflicting with deletion safety by explicitly allowing removal of code made obsolete by the requested cutover.
+- Eval runtime-availability probes (Python/Ruby/Julia) no longer inherit the host stdin handle and are now bounded by the eval call's timeout and abort signal, so a probe that hangs during backend resolution — e.g. the native-Windows inherited-stdin wedge — returns a clear error instead of wedging the whole turn indefinitely ([#9466](https://github.com/can1357/oh-my-pi/issues/9466)).
+- Subagent advisors now review the final `yield`: the yield turn is delivered to the advisor and its review is drained before the subagent session is disposed, instead of being abandoned at teardown ([#9505](https://github.com/can1357/oh-my-pi/issues/9505)).
 - ACP `hub wait` (and other structured tool progress) no longer renders a raw JSON envelope as the tool row: an empty-text result envelope whose data already rides the frame as `rawOutput` no longer falls back to serializing the whole value into a `content` text block ([#9511](https://github.com/can1357/oh-my-pi/issues/9511)).
-
-### Fixed
-
 - Fixed the sticky Todo HUD being permanently collapsed; `/todo expand` now shows every phase and task, and `/todo collapse` restores the bounded preview ([#9493](https://github.com/can1357/oh-my-pi/issues/9493)).
-
-### Fixed
-
 - Fixed finalized transcript blocks rendering as runs of blank lines under viewport pressure: empty live blocks (hidden tool activity, content-less streaming blocks) no longer reserve viewport rows or emit blank rows ([#9483](https://github.com/can1357/oh-my-pi/issues/9483)).
-
-### Fixed
-
 - Fixed retired welcome-screen rows disappearing from terminal history after a resize.
-
-### Fixed
-
 - `omp --resume`/`--continue` now restores discovery-backed session models (models.yml `discovery:` providers such as `openai-models-list`/`litellm`) instead of silently falling back to the default role ([#9502](https://github.com/can1357/oh-my-pi/issues/9502)).
+- Dual-flag bare-413 goal dead ends (status-only with no body, low occupancy) now persist their terminal error turn so reopened sessions know why the goal stopped, matching the behaviour already in place for pure payload rejections.
+- Persisted terminal empty error turns are now excluded from provider context on session reload; they appear only in the display transcript.
+- Fixed byte-size and media-budget HTTP 413 rejections (e.g. provider vision budgets rejecting archived image frames) dead-ending token compaction with a misleading "freed too little context" warning: with real token headroom the rejection now surfaces honestly and automatic retries of the failing payload are blocked ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- Status-only HTTP 413 rejections (opaque reason phrase or empty body) and media-budget numeric-limit rejections (`image count exceeds the limit of N`) now surface the honest payload-rejection warning and block automatic resends instead of dead-ending in token compaction ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- Ambiguous HTTP 413 rejections (bare status with no body, media-budget numeric limits) now consult a configured model-fallback chain before any maintenance outcome stands: a different provider's larger byte or media budget can accept the request the primary rejected ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- Payload-worded HTTP 413 rejections whose provider-reported token usage exceeds the model's context window are no longer eligible for configured fallback-chain switches: maintenance's authoritative-usage arbitration owns them like pure context overflows ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- Goal mode now preserves the intrinsic Fireworks Fast→base degradation precedence over configured hard-error fallback chains: the pre-compaction chain consult is scoped to payload rejections ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- Advisor turn recovery now applies the same payload/usage arbitration as the main loop's fallback eligibility: a dual-classified media-budget 413 with no reported token excess switches the advisor to its configured fallback chain instead of marking it unavailable, while usage-backed overflows keep the veto ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- When a payload-worded 413 dead ends with provider-reported input tokens above the model's window, the warning now diagnoses a token-context problem (enable compaction, reduce usage, or switch models) instead of contradicting the accounting with "NOT a token-context problem" ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- A payload-rejection 413 that dead ends an active goal is now persisted to the session JSONL before the automatic-continuation block returns, so a reopened session keeps the provider's terminal error instead of ending at the last tool result ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- A streamed-edit removed-lines verification still pending across a turn boundary or completed edit no longer starts later and aborts the agent based on stale content.
+- Fixed the TUI crashing with `undefined is not a constructor` while streaming a highlighted code fence against a stale local `pi-natives` addon that does not export `HighlightStream`.
+- Fixed Hindsight session retains stamping items with retain time instead of the conversation's source timestamps.
+- Fixed streamed `xd://` device writes (including MCP tools) looking like a hung in-flight call while the model is still thinking; they now show as queued until the tool actually starts.
+- Applied registered extension shell environments to interactive `!` commands.
+- Fixed clearing the transcript or switching sessions while a tool was still running leaving spinner animation work active for the rest of the process ([#8733](https://github.com/can1357/oh-my-pi/pull/8733) follow-up).
+- Code blocks now syntax-highlight live while the response streams instead of staying plain until the block settles
+- Fixed `/shake thinking` reporting "Nothing to shake" after removing reasoning; it now reports the dropped count and leaves thinking-only turns empty.
+- Fixed session teardown occasionally losing pending input drafts during shutdown
+- Fixed streaming edit failures caused by trailing partial lines
+- Interrupting a Claude model mid-thinking no longer replays the partial reasoning as quoted conversation text on the next turn, which Anthropic's `reasoning_extraction` classifier refused.
+- Sloppy edit `＋` inserts before an anchor line no longer double their typed indentation or flatten the anchor.
+- Session restore no longer re-runs the edit-matching engine for every historical edit in the transcript; large sessions with many edits resume several times faster.
+- Fixed image requests to Kimi Code / Moonshot failing with 400 `unsupported image url`: their catalog api is openai-completions so the image URL mirror gate wrongly admitted them; Moonshot-native hosts now always receive inline base64 images.
+- Fixed Read failing with `unable to open database file` for cleanly closed WAL-mode SQLite databases without `-wal`/`-shm` sidecars.
+- Fixed collapsed edit results with long wrapped diff lines growing beyond their rendered-row budget and corrupting native Windows terminal transcript layout ([#9302](https://github.com/can1357/oh-my-pi/issues/9302)).
+- Fixed edit tool section header paths not trimming surrounding whitespace, so a header with padded brackets failed with file-not-found.
+- Fixed transcript content disappearing from terminal scrollback below a live hub-wait/todo/jobs card: the card's viewport pin froze scrollback commits at its own rows, so everything the turn streamed below it scrolled off-screen without ever entering terminal history (and was lost for good when the session exited first). A displaceable card with content below it no longer holds the commit ceiling; its rows commit as they scroll off and the card seals in place, so the next poll stacks a fresh card instead of retracting history.
+- Fixed the composer attachment chip thumbnail showing an empty box for pasted images: the paste pipeline re-encodes images as JPEG/WebP, and transmitting those bytes as Kitty PNG data made the terminal reject them (blank placeholder cells). Non-PNG attachments now convert to PNG before the thumbnail transmit, like transcript images.
+- Added an immediately editable startup composer for plain interactive launches; drafts typed while session initialization runs transfer intact into the full UI.
+- Fixed the browser tool's first `open` timing out after 30 s on a slow or cold host: tab startup now runs under its own budget inside the caller's timeout, falls back to the inline worker in time, and no longer leaves an orphan page behind ([#9271](https://github.com/can1357/oh-my-pi/pull/9271) by [@CaptainArni](https://github.com/CaptainArni))
+- Fixed eval kernel shutdown leaking detached runner descendants when direct-process termination could not confirm exit.
 
 ## [18.0.3] - 2026-08-23
 
@@ -54,10 +64,6 @@
 - Python/Ruby/Julia eval cells that hit their wall-clock timeout during a `parallel()`/`agent()`/`tool.*` fan-out no longer get their kernel force-killed (losing all session state): the timeout now aborts in-flight bridge calls so the runner unwinds as a clean KeyboardInterrupt and the kernel survives.
 - Multi-select ask options whose labels end in `(Recommended)` now show their checked state and avoid duplicate recommendation suffixes ([#9452](https://github.com/can1357/oh-my-pi/issues/9452)).
 
-### Fixed
-
-- Dual-flag bare-413 goal dead ends (status-only with no body, low occupancy) now persist their terminal error turn so reopened sessions know why the goal stopped, matching the behaviour already in place for pure payload rejections.
-- Persisted terminal empty error turns are now excluded from provider context on session reload; they appear only in the display transcript.
 ## [18.0.2] - 2026-08-23
 
 ### Added
@@ -113,27 +119,13 @@
 - Context file containment dedup now sorts by depth descending internally, treating files without a depth as least authoritative, so concatenated multi-root or user-level context cannot drop a closer-to-cwd file.
 - Paragraph splitting for containment comparison is now fenced-code-block-aware: text inside a fenced example in a more authoritative file no longer counts as a contained instruction, preventing active context rules from being discarded.
 
-### Changed
-
-- Streamed-edit guard no longer blocks the event loop while streaming: edit-target reads are async and removed-line verification is memoized per file, cutting precheck stalls on large files from tens of milliseconds (seconds cumulative) to low single-digit milliseconds.
-
 ### Fixed
-- Fixed byte-size and media-budget HTTP 413 rejections (e.g. provider vision budgets rejecting archived image frames) dead-ending token compaction with a misleading "freed too little context" warning: with real token headroom the rejection now surfaces honestly and automatic retries of the failing payload are blocked ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Status-only HTTP 413 rejections (opaque reason phrase or empty body) and media-budget numeric-limit rejections (`image count exceeds the limit of N`) now surface the honest payload-rejection warning and block automatic resends instead of dead-ending in token compaction ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Ambiguous HTTP 413 rejections (bare status with no body, media-budget numeric limits) now consult a configured model-fallback chain before any maintenance outcome stands: a different provider's larger byte or media budget can accept the request the primary rejected ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Payload-worded HTTP 413 rejections whose provider-reported token usage exceeds the model's context window are no longer eligible for configured fallback-chain switches: maintenance's authoritative-usage arbitration owns them like pure context overflows ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Goal mode now preserves the intrinsic Fireworks Fast→base degradation precedence over configured hard-error fallback chains: the pre-compaction chain consult is scoped to payload rejections ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Advisor turn recovery now applies the same payload/usage arbitration as the main loop's fallback eligibility: a dual-classified media-budget 413 with no reported token excess switches the advisor to its configured fallback chain instead of marking it unavailable, while usage-backed overflows keep the veto ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- When a payload-worded 413 dead ends with provider-reported input tokens above the model's window, the warning now diagnoses a token-context problem (enable compaction, reduce usage, or switch models) instead of contradicting the accounting with "NOT a token-context problem" ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- A payload-rejection 413 that dead ends an active goal is now persisted to the session JSONL before the automatic-continuation block returns, so a reopened session keeps the provider's terminal error instead of ending at the last tool result ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
 
-- A streamed-edit removed-lines verification still pending across a turn boundary or completed edit no longer starts later and aborts the agent based on stale content.
 - Fixed UI jitter in the edit tool gutter by reserving space for line counts
 - Edit-tool add lines written directly above a `` gap now insert under their anchor line instead of splicing at the post-gap anchor, often mid-line without a newline.
 - Edit-tool add lines may contain literal selection-marker glyphs; such payloads previously failed with an unusable corrected payload.
 - A bare edit selection whose REWRITE restates the whole line now replaces the full line instead of duplicating the line's prefix and suffix around the span.
 - A mid-line `…` in an edit REWRITE no longer re-emits a multi-line capture, so literal ellipses inside strings survive.
-- Fixed the TUI crashing with `undefined is not a constructor` while streaming a highlighted code fence against a stale local `pi-natives` addon that does not export `HighlightStream`.
 - Fixed double-Esc (session tree / branch selector) appearing dead on long sessions: opening it no longer replays the entire transcript through the terminal (which blocked for tens of seconds on PTY backpressure and cleared native scrollback), only the viewport repaints.
 - Fixed prompt history whitespace duplicates: prompts are normalized on save (CRLF folded, per-line trailing padding stripped) so terminal-copy resubmissions upsert instead of adding a near-identical row, and a one-time pass collapses existing padded duplicates keeping the latest submission's metadata.
 - Fixed prompt history duplicates: each prompt is now stored once with its latest project path, session ID, and submission time, and session resume or transcript rebuilds no longer repopulate persistent history.
@@ -141,8 +133,6 @@
 - Fixed prompt input lag under CPU load while file and macOS spelling completions are active.
 - Fixed blank `mnemopi.dbPath` settings silently creating volatile memory banks instead of using persistent agent storage ([#9360](https://github.com/can1357/oh-my-pi/issues/9360)).
 - Fixed legacy Pi extensions being reparsed on every startup because their persistent parse cache could not be created ([#9339](https://github.com/can1357/oh-my-pi/pull/9339) by [@walodayeet](https://github.com/walodayeet)).
-- Fixed Hindsight session retains stamping items with retain time instead of the conversation's source timestamps.
-- Fixed streamed `xd://` device writes (including MCP tools) looking like a hung in-flight call while the model is still thinking; they now show as queued until the tool actually starts.
 - Fixed Kitty text-sized Markdown headings activating before `tui.textSizing` is enabled.
 - Fixed terminal-title updates racing the TUI's off-thread output pump, which could tear an escape sequence mid-frame and print the title (e.g. `0;π ∴ <session title>`) into the editor line as if typed.
 - Fixed the edit tool corrupting files on unified-diff-shaped payloads: missing-separator recovery no longer hijacks `-`/`+` bodies (which deleted matched anchors and duplicated the surrounding block); they now flow to the unified-diff reinterpretation.
@@ -190,14 +180,6 @@
 - Fixed MCP request timeouts surfacing as `Unexpected end of JSON input` instead of `Request timeout after Nms` when the abort lands mid-JSON-body read.
 - Fixed CJS modules being misclassified as ESM when imported from an ESM parent module. The extension loader now identifies unshadowed CommonJS syntax from Babel's parsed AST before deferring to the importer's module kind. This resolves `SyntaxError: Missing 'default' export` for packages with conditional exports (e.g. playwright-core) where an ESM wrapper re-exports from a CJS entry, while ambiguous files continue to inherit their importer's classification.
 
-### Fixed
-
-- Applied registered extension shell environments to interactive `!` commands.
-
-### Fixed
-
-- Fixed clearing the transcript or switching sessions while a tool was still running leaving spinner animation work active for the rest of the process ([#8733](https://github.com/can1357/oh-my-pi/pull/8733) follow-up).
-
 ## [18.0.0] - 2026-08-22
 
 ### Added
@@ -233,21 +215,6 @@
 - Fixed accurate benchmark input token counts on providers with automatic prompt caching.
 - Fixed C# files incorrectly displaying D3.js icons in edit results ([#9323](https://github.com/can1357/oh-my-pi/issues/9323)).
 - Fixed incorrect token delta reporting in expanded context compaction summaries when pre-compaction usage was omitted by the provider ([#9293](https://github.com/can1357/oh-my-pi/issues/9293)).
-- Code blocks now syntax-highlight live while the response streams instead of staying plain until the block settles
-- Fixed `/shake thinking` reporting "Nothing to shake" after removing reasoning; it now reports the dropped count and leaves thinking-only turns empty.
-- Fixed session teardown occasionally losing pending input drafts during shutdown
-- Fixed streaming edit failures caused by trailing partial lines
-- Interrupting a Claude model mid-thinking no longer replays the partial reasoning as quoted conversation text on the next turn, which Anthropic's `reasoning_extraction` classifier refused.
-- Sloppy edit `＋` inserts before an anchor line no longer double their typed indentation or flatten the anchor.
-- Session restore no longer re-runs the edit-matching engine for every historical edit in the transcript; large sessions with many edits resume several times faster.
-- Fixed image requests to Kimi Code / Moonshot failing with 400 `unsupported image url`: their catalog api is openai-completions so the image URL mirror gate wrongly admitted them; Moonshot-native hosts now always receive inline base64 images.
-- Fixed Read failing with `unable to open database file` for cleanly closed WAL-mode SQLite databases without `-wal`/`-shm` sidecars.
-- Fixed collapsed edit results with long wrapped diff lines growing beyond their rendered-row budget and corrupting native Windows terminal transcript layout ([#9302](https://github.com/can1357/oh-my-pi/issues/9302)).
-- Fixed edit tool section header paths not trimming surrounding whitespace, so a header with padded brackets failed with file-not-found.
-- Fixed transcript content disappearing from terminal scrollback below a live hub-wait/todo/jobs card: the card's viewport pin froze scrollback commits at its own rows, so everything the turn streamed below it scrolled off-screen without ever entering terminal history (and was lost for good when the session exited first). A displaceable card with content below it no longer holds the commit ceiling; its rows commit as they scroll off and the card seals in place, so the next poll stacks a fresh card instead of retracting history.
-- Fixed the composer attachment chip thumbnail showing an empty box for pasted images: the paste pipeline re-encodes images as JPEG/WebP, and transmitting those bytes as Kitty PNG data made the terminal reject them (blank placeholder cells). Non-PNG attachments now convert to PNG before the thumbnail transmit, like transcript images.
-- Added an immediately editable startup composer for plain interactive launches; drafts typed while session initialization runs transfer intact into the full UI.
-- Fixed the browser tool's first `open` timing out after 30 s on a slow or cold host: tab startup now runs under its own budget inside the caller's timeout, falls back to the inline worker in time, and no longer leaves an orphan page behind ([#9271](https://github.com/can1357/oh-my-pi/pull/9271) by [@CaptainArni](https://github.com/CaptainArni))
 
 ## [17.4.4] - 2026-08-22
 
@@ -333,7 +300,6 @@
 
 ### Fixed
 
-- Fixed eval kernel shutdown leaking detached runner descendants when direct-process termination could not confirm exit.
 - Fixed regional HTTP 401 data-residency errors during Codex chat, web search, and image generation requests by passing token residency metadata on requests.
 - Fixed macOS SSH ControlMaster socket creation failures caused by `sun_path` length limits when using named profiles.
 - Fixed an issue where Nix-packaged builds failed to load on-demand native addons (`onnxruntime-node`/`sherpa-onnx`) due to missing shared C++ runtime library paths.

@@ -5,15 +5,13 @@
 ### Fixed
 
 - Fixed effort-less `cursor/cursor-grok-4.5` and `cursor/cursor-grok-4.6` requests being clamped to the `-low` tier, which Cursor's Start plan refuses (`ERROR_RATE_LIMITED_CHANGEABLE`), making the models unusable without an explicit `medium` — including through `omp auth-gateway`, where OpenAI-compatible clients send no effort. The collapsed row now defaults to and clamps to the `-medium` tier the plan serves ([#9478](https://github.com/can1357/oh-my-pi/issues/9478)).
+- Fixed aliased OpenCode Zen Ox Alpha ids (e.g. `opencode-zen/x-preview-f-free`) exposing the generic `minimal`/`low`/`medium`/`high`/`xhigh` ladder instead of the gateway's wire-exact `low`/`high`/`max` tiers, leaving the real `max` tier unreachable; alias detection now also matches the SKU's stencil display name ([#9349](https://github.com/can1357/oh-my-pi/issues/9349)).
 
 ## [18.0.2] - 2026-08-23
 
 ### Fixed
 
 - Fixed OpenRouter auxiliary requests (e.g. session-title generation) failing with `400 Reasoning is mandatory for this endpoint and cannot be disabled` on mandatory-reasoning models such as `stealth/ox-alpha`. Live discovery now honors the endpoint's `reasoning.mandatory` flag, clamping thinking-off to the lowest supported effort instead of sending `reasoning: { enabled: false }` ([#9415](https://github.com/can1357/oh-my-pi/issues/9415)).
-### Fixed
-
-- Fixed aliased OpenCode Zen Ox Alpha ids (e.g. `opencode-zen/x-preview-f-free`) exposing the generic `minimal`/`low`/`medium`/`high`/`xhigh` ladder instead of the gateway's wire-exact `low`/`high`/`max` tiers, leaving the real `max` tier unreachable; alias detection now also matches the SKU's stencil display name ([#9349](https://github.com/can1357/oh-my-pi/issues/9349)).
 
 ## [18.0.1] - 2026-08-23
 
