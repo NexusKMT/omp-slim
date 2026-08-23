@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Copilot Grok 4.6 Responses streams that repeatedly close after thinking now stop after one same-model retry instead of consuming the full retry budget ([#9427](https://github.com/can1357/oh-my-pi/issues/9427)).
+
 ## [18.0.1] - 2026-08-23
 
 ### Added
