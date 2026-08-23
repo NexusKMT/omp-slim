@@ -1237,10 +1237,13 @@ export class SessionAdvisors {
 				})
 			: AIError.classify(error, currentModel.api);
 		if (AIError.is(errorId, AIError.Flag.Abort) || AIError.is(errorId, AIError.Flag.UserInterrupt)) return false;
-		if (
-			AIError.is(errorId, AIError.Flag.ContextOverflow) ||
-			(assistantFailure && AIError.isContextOverflow(assistantFailure, currentModel.contextWindow ?? 0))
-		) {
+		// Text-ambiguous overflows waive the veto; usage-backed do not — see AIError.isTextAmbiguousContextOverflow (#9235).
+		const contextWindow = currentModel.contextWindow ?? 0;
+		const overflowVeto =
+			(AIError.is(errorId, AIError.Flag.ContextOverflow) ||
+				(assistantFailure !== undefined && AIError.isContextOverflow(assistantFailure, contextWindow))) &&
+			!AIError.isTextAmbiguousContextOverflow(errorId, assistantFailure, contextWindow);
+		if (overflowVeto) {
 			return false;
 		}
 

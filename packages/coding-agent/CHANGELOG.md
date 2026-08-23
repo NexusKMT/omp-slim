@@ -34,6 +34,10 @@
 - Python/Ruby/Julia eval cells that hit their wall-clock timeout during a `parallel()`/`agent()`/`tool.*` fan-out no longer get their kernel force-killed (losing all session state): the timeout now aborts in-flight bridge calls so the runner unwinds as a clean KeyboardInterrupt and the kernel survives.
 - Multi-select ask options whose labels end in `(Recommended)` now show their checked state and avoid duplicate recommendation suffixes ([#9452](https://github.com/can1357/oh-my-pi/issues/9452)).
 
+### Fixed
+
+- Dual-flag bare-413 goal dead ends (status-only with no body, low occupancy) now persist their terminal error turn so reopened sessions know why the goal stopped, matching the behaviour already in place for pure payload rejections.
+- Persisted terminal empty error turns are now excluded from provider context on session reload; they appear only in the display transcript.
 ## [18.0.2] - 2026-08-23
 
 ### Added
@@ -94,6 +98,14 @@
 - Streamed-edit guard no longer blocks the event loop while streaming: edit-target reads are async and removed-line verification is memoized per file, cutting precheck stalls on large files from tens of milliseconds (seconds cumulative) to low single-digit milliseconds.
 
 ### Fixed
+- Fixed byte-size and media-budget HTTP 413 rejections (e.g. provider vision budgets rejecting archived image frames) dead-ending token compaction with a misleading "freed too little context" warning: with real token headroom the rejection now surfaces honestly and automatic retries of the failing payload are blocked ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- Status-only HTTP 413 rejections (opaque reason phrase or empty body) and media-budget numeric-limit rejections (`image count exceeds the limit of N`) now surface the honest payload-rejection warning and block automatic resends instead of dead-ending in token compaction ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- Ambiguous HTTP 413 rejections (bare status with no body, media-budget numeric limits) now consult a configured model-fallback chain before any maintenance outcome stands: a different provider's larger byte or media budget can accept the request the primary rejected ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- Payload-worded HTTP 413 rejections whose provider-reported token usage exceeds the model's context window are no longer eligible for configured fallback-chain switches: maintenance's authoritative-usage arbitration owns them like pure context overflows ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- Goal mode now preserves the intrinsic Fireworks Fast→base degradation precedence over configured hard-error fallback chains: the pre-compaction chain consult is scoped to payload rejections ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- Advisor turn recovery now applies the same payload/usage arbitration as the main loop's fallback eligibility: a dual-classified media-budget 413 with no reported token excess switches the advisor to its configured fallback chain instead of marking it unavailable, while usage-backed overflows keep the veto ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- When a payload-worded 413 dead ends with provider-reported input tokens above the model's window, the warning now diagnoses a token-context problem (enable compaction, reduce usage, or switch models) instead of contradicting the accounting with "NOT a token-context problem" ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- A payload-rejection 413 that dead ends an active goal is now persisted to the session JSONL before the automatic-continuation block returns, so a reopened session keeps the provider's terminal error instead of ending at the last tool result ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
 
 - A streamed-edit removed-lines verification still pending across a turn boundary or completed edit no longer starts later and aborts the agent based on stale content.
 - Fixed UI jitter in the edit tool gutter by reserving space for line counts

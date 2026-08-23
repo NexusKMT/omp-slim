@@ -3020,6 +3020,14 @@ export class AgentSession {
 			let compactionResult = COMPACTION_CHECK_NONE;
 			let checkedCompaction = false;
 			if (activeGoal) {
+				// Payload rejections get a pre-compaction chain consult; checkCompaction()'s overflow path commits a remedy before returning (#9235).
+				if (AIError.isPayloadRejection(msg) && this.#recovery.isHardErrorFallbackEligible(msg)) {
+					const didRetry = await this.#recovery.handleRetryableError(msg, { hardErrorFallback: true });
+					if (didRetry) {
+						await emitAgentEndNotification({ willContinue: true });
+						return;
+					}
+				}
 				maintenanceRoute("active-goal-pre-empt-checkCompaction");
 				const compactionTask = this.#maintenance.checkCompaction(msg);
 				this.#trackPostPromptTask(compactionTask);
@@ -3027,6 +3035,13 @@ export class AgentSession {
 				checkedCompaction = true;
 				const compactionContinues = compactionResult.deferredHandoff || compactionResult.continuationScheduled;
 				if (compactionContinues || compactionResult.automaticContinuationBlocked) {
+					// Early return skips the error tail; persist the terminal 413 so the JSONL records why the goal stopped (#9235).
+					if (
+						compactionResult.automaticContinuationBlocked &&
+						(AIError.isPayloadRejection(msg) || !AIError.isContextOverflow(msg, this.model?.contextWindow ?? 0))
+					) {
+						await this.#recovery.persistTerminalEmptyErrorTurn(msg);
+					}
 					maintenanceRoute("active-goal-pre-empt-compaction-handled", {
 						deferredHandoff: compactionResult.deferredHandoff,
 						continuationScheduled: compactionResult.continuationScheduled,
