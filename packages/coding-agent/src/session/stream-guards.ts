@@ -52,6 +52,9 @@ export class StreamingEditGuard {
 	// Serializes per-file verifications: interleaved delta checks must not stack
 	// their time-sliced scans within a single event-loop tick.
 	#verificationChain = new Map<string, Promise<void>>();
+	// Per-file invalidation token: queued checks from before an edit result must
+	// not validate their old diff against the newly written file.
+	#fileEpoch = new Map<string, number>();
 	#lastToolCallId: string | undefined;
 	// Internal invalidation token, bumped by reset(). Unlike the session's
 	// promptGeneration — which only advances on abort/session-reset — this moves
@@ -76,6 +79,7 @@ export class StreamingEditGuard {
 		this.#fileCache.clear();
 		this.#confirmedRemovedLines.clear();
 		this.#verificationChain.clear();
+		this.#fileEpoch.clear();
 		this.#epoch += 1;
 	}
 
@@ -116,6 +120,8 @@ export class StreamingEditGuard {
 		if (resolvedPath === undefined) return;
 		this.#fileCache.delete(resolvedPath);
 		this.#confirmedRemovedLines.delete(resolvedPath);
+		this.#verificationChain.delete(resolvedPath);
+		this.#fileEpoch.set(resolvedPath, (this.#fileEpoch.get(resolvedPath) ?? 0) + 1);
 	}
 
 	/** Aborts a streamed edit whose completed patch preview cannot apply. */
@@ -292,11 +298,18 @@ export class StreamingEditGuard {
 		// guard's own epoch moves at every turn boundary, unlike promptGeneration,
 		// which only advances on abort/session-reset.
 		const epoch = this.#epoch;
+		const fileEpoch = this.#fileEpoch.get(resolvedPath) ?? 0;
 		const prior = this.#verificationChain.get(resolvedPath) ?? Promise.resolve();
 		const next = prior
 			.catch(() => {})
 			.then(() => {
-				if (this.#abortTriggered || this.#epoch !== epoch) return;
+				if (
+					this.#abortTriggered ||
+					this.#epoch !== epoch ||
+					(this.#fileEpoch.get(resolvedPath) ?? 0) !== fileEpoch
+				) {
+					return;
+				}
 				return this.#checkRemovedLines(toolCallId, filePath, resolvedPath, removedLines);
 			})
 			.catch(() => {});

@@ -723,11 +723,22 @@ it(
 		await Bun.write(target, "");
 		const { guard, makeEvent } = buildSmallTargetGuard(target, "call_edit_empty", abortCalls);
 		const diff = "@@\n-absent-from-empty-file\n+replacement\n";
+		const { promise: heldLoad, resolve: releaseLoad } = Promise.withResolvers<string>();
+		const realFile = Bun.file.bind(Bun);
+		const fileSpy = vi.spyOn(Bun, "file").mockImplementation(((pathLike: string) => ({
+			text: () => (pathLike === target ? heldLoad : realFile(pathLike).text()),
+		})) as typeof Bun.file);
+		try {
+			await streamDiff(guard, makeEvent, diff);
+			releaseLoad("");
+			await heldLoad;
+			await drainMacrotasks(2);
 
-		await streamDiff(guard, makeEvent, diff);
-
-		expect(guard.abortTriggered).toBe(true);
-		expect(abortCalls.count).toBe(1);
+			expect(guard.abortTriggered).toBe(true);
+			expect(abortCalls.count).toBe(1);
+		} finally {
+			fileSpy.mockRestore();
+		}
 	},
 	STREAMING_EDIT_RANDOM_STREAM_TIMEOUT_MS,
 );
@@ -735,7 +746,11 @@ it(
 // Drains N macrotask ticks deterministically (no wall-clock delay) so queued
 // promise callbacks and settled I/O continuations have all run.
 async function drainMacrotasks(ticks: number): Promise<void> {
-	for (let i = 0; i < ticks; i += 1) await new Promise<void>(resolve => setImmediate(resolve));
+	for (let i = 0; i < ticks; i += 1) {
+		const { promise, resolve } = Promise.withResolvers<void>();
+		setImmediate(resolve);
+		await promise;
+	}
 }
 
 it("drops a queued removed-lines verification whose turn was reset before it started", async () => {
@@ -766,6 +781,48 @@ it("drops a queued removed-lines verification whose turn was reset before it sta
 		await heldLoad;
 		await drainMacrotasks(10);
 
+		expect(guard.abortTriggered).toBe(false);
+		expect(abortCalls.count).toBe(0);
+	} finally {
+		fileSpy.mockRestore();
+	}
+});
+
+it("drops queued removed-lines verifications when the edited file is invalidated", async () => {
+	const abortCalls = { count: 0 };
+	const target = path.join(tempDir, "invalidated.txt");
+	await Bun.write(target, "alpha\nbeta\n");
+	const { guard, makeEvent } = buildSmallTargetGuard(target, "call_edit_invalidated", abortCalls);
+
+	// Queue two checks behind a held pre-edit read. Once the edit lands, neither
+	// old check may start a fresh read and judge its old removals against the
+	// post-edit content.
+	const { promise: heldLoad, resolve: releaseLoad } = Promise.withResolvers<string>();
+	const realFile = Bun.file.bind(Bun);
+	let targetReads = 0;
+	const fileSpy = vi.spyOn(Bun, "file").mockImplementation(((pathLike: string) => ({
+		text: () => {
+			if (pathLike !== target) return realFile(pathLike).text();
+			targetReads += 1;
+			return targetReads === 1 ? heldLoad : realFile(pathLike).text();
+		},
+	})) as typeof Bun.file);
+	try {
+		const first = makeEvent("toolcall_delta", "@@\n-alpha\n+replacement\n");
+		guard.preCache(first);
+		guard.maybeAbort(first);
+		const second = makeEvent("toolcall_delta", "@@\n-alpha\n-beta\n+replacement\n");
+		guard.preCache(second);
+		guard.maybeAbort(second);
+
+		await Bun.write(target, "replacement\n");
+		guard.invalidate(target);
+		releaseLoad("alpha\nbeta\n");
+
+		await heldLoad;
+		await drainMacrotasks(10);
+
+		expect(targetReads).toBe(1);
 		expect(guard.abortTriggered).toBe(false);
 		expect(abortCalls.count).toBe(0);
 	} finally {
