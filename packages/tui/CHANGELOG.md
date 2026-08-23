@@ -42,6 +42,7 @@
 - Fixed Korean IME cursor drift in Orca by matching its two-cell Hangul Compatibility Jamo rendering ([#9397](https://github.com/can1357/oh-my-pi/issues/9397)).
 - Markdown streaming renderer now resumes the stable-block-boundary walk at the first tail token instead of re-walking the frozen prefix every frame (boundary walk 241µs → 0.9µs/frame at 128KB, −99.6%) ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
 - Markdown streaming renderer now memoizes the ref-def/CR guard scan: while text grows append-only, only the delta is inspected for the characters a reference definition or CR needs, and a clean delta reuses the previous verdict. Guard cost drops from ~265µs to ~0.1µs per frame on a 128KB tight document ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
+- The Markdown streaming renderer now normalizes OSC 8 hyperlink terminators only in the pending append region instead of re-scanning the whole document on every frame, cutting per-frame OSC8 scan cost from ~25µs to sub-µs at 128KB documents ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
 
 ## [18.0.0] - 2026-08-22
 
