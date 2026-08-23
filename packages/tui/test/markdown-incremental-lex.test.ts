@@ -101,8 +101,8 @@ const TABLE = (() => {
 	// tokens, so these frames exercise the exclusion path under
 	// assertIdenticalGrowthTransient).
 	const para = "Intro paragraph before the table streams in, with a `code span` and **bold** for flavor. ";
-	let out = `${para}\n\n`;
-	for (let i = 1; i <= 4; i++) out += `| col_a_${i} | col_b_${i} |\n`;
+	let out = `${para}\n\n| col_a | col_b |\n| ----- | ----- |\n`;
+	for (let i = 1; i <= 4; i++) out += `| row_${i}_a | row_${i}_b |\n`;
 	out += "\n\nTrailing prose after the table keeps growing with more sentences.";
 	return out;
 })();
