@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { RunOutput } from "@oh-my-pi/pi-coding-agent/tools/browser/run-output";
-import { formatSelectorMatchHint, toActionableHandle } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-worker";
+import {
+	formatSelectorMatchHint,
+	type HandleOpGuard,
+	toActionableHandle,
+} from "@oh-my-pi/pi-coding-agent/tools/browser/tab-worker";
 import type { ElementHandle } from "puppeteer-core";
 
 // Regression coverage for the invisible-output failure mode: `display("string")`,
@@ -81,6 +85,86 @@ describe("browser handle enrichment — fill()", () => {
 		expect(calls).toEqual(["evaluate", "type"]);
 		expect(node.focused).toBe(true);
 		expect(node.value).toBe("fresh");
+	});
+});
+
+// Regression (#9535): handles from tab.id()/tab.ref()/tab.waitFor() used to return raw
+// puppeteer methods that ran outside the per-op guard, so a stalled `(await tab.id(n)).click()`
+// consumed the whole 30s cell instead of failing fast with a named per-op error. A guard now
+// routes each interactive method through the same fail-fast wrapper as tab.click(selector).
+describe("browser handle enrichment — guarded actions", () => {
+	// Minimal stand-in for #runOp: names the op, installs a per-op deadline, and rewrites an
+	// abort into the same `<label> timed out after <ms>ms` shape the real guard surfaces.
+	const makeGuard = (perOpMs: number): { guard: HandleOpGuard; labels: string[] } => {
+		const labels: string[] = [];
+		const guard: HandleOpGuard = (label, fn) => {
+			labels.push(label);
+			const timeout = AbortSignal.timeout(perOpMs);
+			return fn(timeout).catch((err: unknown) => {
+				if (timeout.aborted) throw new Error(`${label} timed out after ${perOpMs}ms`);
+				throw err;
+			});
+		};
+		return { guard, labels };
+	};
+
+	it("fails a stalled handle.click() fast with a named error instead of hanging", async () => {
+		const stub = {
+			click: () => new Promise<void>(() => {}), // never settles — a busy popup/navigation stall
+			type: async () => {},
+			evaluate: async () => {},
+		} as unknown as ElementHandle;
+		const { guard, labels } = makeGuard(50);
+
+		await expect(toActionableHandle(stub, guard).click()).rejects.toThrow("handle.click() timed out after 50ms");
+		expect(labels).toEqual(["handle.click()"]);
+	});
+
+	it("passes arguments and return values through the guarded method unchanged", async () => {
+		let calls = 0;
+		const stub = {
+			select: async (...values: string[]) => {
+				calls++;
+				return values;
+			},
+			type: async () => {},
+			evaluate: async () => {},
+		} as unknown as ElementHandle;
+		const { guard, labels } = makeGuard(1_000);
+
+		expect(await toActionableHandle(stub, guard).select("a", "b")).toEqual(["a", "b"]);
+		expect(calls).toBe(1);
+		expect(labels).toEqual(["handle.select()"]);
+	});
+
+	it("runs the guarded fill as a single op without re-entering the wrapped type()", async () => {
+		const node = { value: "old", focused: false };
+		const stub = {
+			evaluate: async (fn: (el: unknown) => unknown) => {
+				fn({
+					get value() {
+						return node.value;
+					},
+					set value(v: string) {
+						node.value = v;
+					},
+					focus: () => {
+						node.focused = true;
+					},
+				});
+			},
+			type: async (text: string) => {
+				node.value += text;
+			},
+		} as unknown as ElementHandle;
+		const { guard, labels } = makeGuard(1_000);
+
+		await toActionableHandle(stub, guard).fill("fresh");
+
+		expect(node.value).toBe("fresh");
+		expect(node.focused).toBe(true);
+		// fill() drives type() internally via the raw method, so it is guarded once, not nested.
+		expect(labels).toEqual(["handle.fill()"]);
 	});
 });
 

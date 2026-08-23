@@ -320,18 +320,70 @@ function asElementHandle(handle: unknown): ElementHandle | null {
 export type ActionableHandle = ElementHandle & { fill(value: string): Promise<void> };
 
 /**
- * Attach `fill()` to a puppeteer ElementHandle before handing it to user code.
- * Puppeteer handles expose `type()` but no `fill()`; the semantics mirror the
- * selector-based `tab.fill()`: focus, clear any existing value, then type.
+ * A named per-op guard: runs `fn` inside the active run's fail-fast deadline and
+ * in-flight tracking (the same wrapper `tab.click(selector)` uses), so a stalled
+ * handle action rejects with a named error before the cell budget instead of
+ * hanging on puppeteer's protocol timeout.
  */
-export function toActionableHandle(handle: ElementHandle): ActionableHandle {
+export type HandleOpGuard = <T>(label: string, fn: (signal: AbortSignal) => Promise<T>) => Promise<T>;
+
+/**
+ * Interactive `ElementHandle` methods that dispatch input or navigation and can
+ * stall on a busy page. When {@link toActionableHandle} is given a guard, each is
+ * routed through the per-op fail-fast wrapper; without it the inherited puppeteer
+ * method runs outside the op map and a stall consumes the whole cell (issue #9535).
+ */
+const GUARDED_HANDLE_METHODS = [
+	"click",
+	"type",
+	"hover",
+	"tap",
+	"focus",
+	"press",
+	"select",
+	"uploadFile",
+	"scrollIntoView",
+] as const satisfies readonly (keyof ElementHandle)[];
+
+/**
+ * Attach `fill()` to a puppeteer ElementHandle before handing it to user code and,
+ * when a `guard` is supplied, route every interactive method ({@link GUARDED_HANDLE_METHODS})
+ * through the same fail-fast per-op wrapper as the selector-based helpers — so
+ * `(await tab.id(n)).click()` fails fast with `handle.click() timed out after …ms`
+ * instead of stalling until the whole browser cell expires. Puppeteer handles expose
+ * `type()` but no `fill()`; the `fill()` semantics mirror the selector-based
+ * `tab.fill()`: focus, clear any existing value, then type.
+ */
+export function toActionableHandle(handle: ElementHandle, guard?: HandleOpGuard): ActionableHandle {
 	const enriched = handle as ActionableHandle;
-	enriched.fill = value => fillViaHandle(enriched, value);
+	if (!guard) {
+		enriched.fill = value => fillViaHandle(enriched, value);
+		return enriched;
+	}
+	// Capture the raw typer before shadowing so the guarded fill runs as a single op
+	// rather than re-entering the guard through the now-wrapped `type`.
+	const rawType = enriched.type.bind(enriched);
+	const methods = enriched as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+	for (const method of GUARDED_HANDLE_METHODS) {
+		const raw = methods[method];
+		if (typeof raw !== "function") continue;
+		const bound = raw.bind(enriched);
+		methods[method] = (...args) => guard(`handle.${method}()`, signal => untilAborted(signal, () => bound(...args)));
+	}
+	enriched.fill = value =>
+		guard<void>("handle.fill()", signal =>
+			fillViaHandle(enriched, value, signal, text => rawType(text, { delay: 0 })),
+		);
 	return enriched;
 }
 
 /** Focus, clear any existing value, then retype — shared by `tab.fill(aria-ref)` and enriched handles. */
-async function fillViaHandle(handle: ElementHandle, value: string, signal?: AbortSignal): Promise<void> {
+async function fillViaHandle(
+	handle: ElementHandle,
+	value: string,
+	signal?: AbortSignal,
+	type: (text: string) => Promise<unknown> = text => handle.type(text, { delay: 0 }),
+): Promise<void> {
 	await untilAborted(signal, () =>
 		handle.evaluate(el => {
 			const node = el as unknown as { value?: string; focus?: () => void };
@@ -339,7 +391,7 @@ async function fillViaHandle(handle: ElementHandle, value: string, signal?: Abor
 			if ("value" in node) node.value = "";
 		}),
 	);
-	await untilAborted(signal, () => handle.type(value, { delay: 0 }));
+	await untilAborted(signal, () => type(value));
 }
 
 /**
@@ -1352,6 +1404,10 @@ export class WorkerCore {
 			fn: (sig: AbortSignal) => Promise<T>,
 			selectorOpts?: { selector?: string; zeroMatchAfterMs?: number },
 		): Promise<T> => markHandled(this.#runOp(active, label, signal, perOpMs, fn, selectorOpts));
+		// Hand user-facing handles the fail-fast per-op guard so their interactive
+		// methods (`.click()`, `.type()`, …) can't outrun the cell budget (issue #9535).
+		const enrich = (handle: ElementHandle): ActionableHandle =>
+			toActionableHandle(handle, (label, fn) => op(label, actionOpMs, fn));
 		return {
 			name,
 			page,
@@ -1506,7 +1562,7 @@ export class WorkerCore {
 				return op(
 					`tab.waitFor(${JSON.stringify(selector)})`,
 					w,
-					async sig => toActionableHandle(await this.#resolveActionHandle(selector, w, sig)),
+					async sig => enrich(await this.#resolveActionHandle(selector, w, sig)),
 					{ selector, zeroMatchAfterMs: opts?.timeout === undefined ? ZERO_MATCH_FAIL_FAST_MS : undefined },
 				);
 			},
@@ -1516,8 +1572,7 @@ export class WorkerCore {
 					`tab.waitForSelector(${JSON.stringify(selector)})`,
 					w,
 					async sig => {
-						if (parseAriaRefSelector(selector) !== null)
-							return toActionableHandle(await this.#resolveAriaRef(selector));
+						if (parseAriaRefSelector(selector) !== null) return enrich(await this.#resolveAriaRef(selector));
 						const handle = (await untilAborted(sig, () =>
 							page.waitForSelector(normalizeSelector(selector), {
 								timeout: w,
@@ -1526,7 +1581,7 @@ export class WorkerCore {
 								signal: sig,
 							}),
 						)) as ElementHandle | null;
-						return handle ? toActionableHandle(handle) : null;
+						return handle ? enrich(handle) : null;
 					},
 					{
 						selector,
@@ -1597,8 +1652,8 @@ export class WorkerCore {
 				const w = waitMs(opts?.timeout);
 				return op("tab.waitForResponse()", w, sig => this.#waitForResponse(pattern, w, sig));
 			},
-			id: async id => toActionableHandle(await this.#resolveCachedHandle(id)),
-			ref: async id => toActionableHandle(await this.#resolveAriaRef(id)),
+			id: async id => enrich(await this.#resolveCachedHandle(id)),
+			ref: async id => enrich(await this.#resolveAriaRef(id)),
 		};
 	}
 
