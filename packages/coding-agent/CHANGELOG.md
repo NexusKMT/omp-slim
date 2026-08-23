@@ -42,6 +42,8 @@
 
 ### Fixed
 
+- Restored red/green and syntax highlighting in edit-tool result bodies ([#9439](https://github.com/can1357/oh-my-pi/issues/9439)).
+
 - Fixed UI jitter in the edit tool gutter by reserving space for line counts
 - Edit-tool add lines written directly above a `` gap now insert under their anchor line instead of splicing at the post-gap anchor, often mid-line without a newline.
 - Edit-tool add lines may contain literal selection-marker glyphs; such payloads previously failed with an unusable corrected payload.

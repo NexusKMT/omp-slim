@@ -171,10 +171,6 @@ export interface EditRenderContext {
 
 const EDIT_STREAMING_PREVIEW_LINES = 12;
 
-function plainDiffRender(diffText: string): string {
-	return diffText;
-}
-
 /**
  * Lazily grown per-file preview cache slots: the file count of a streaming
  * multi-file patch is discovered mid-stream, so a fixed-size array would
@@ -1005,7 +1001,7 @@ function renderSingleFileResult(
 		// for an empty-diff delete/move/no-op result mislabels the card. Fall
 		// back to the preview only when no details exist yet.
 		const editDiffPreview = details ? undefined : renderContext?.editDiffPreview;
-		const renderDiffFn = renderContext?.renderDiff ?? plainDiffRender;
+		const renderDiffFn = renderContext?.renderDiff ?? renderDiffColored;
 
 		if (diffSectionRenderDiffFn !== renderDiffFn) {
 			diffSectionRenderDiffFn = renderDiffFn;
