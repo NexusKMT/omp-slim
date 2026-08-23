@@ -33,6 +33,10 @@
 
 - Fixed finalized transcript blocks rendering as runs of blank lines under viewport pressure: empty live blocks (hidden tool activity, content-less streaming blocks) no longer reserve viewport rows or emit blank rows ([#9483](https://github.com/can1357/oh-my-pi/issues/9483)).
 
+### Fixed
+
+- Fixed retired welcome-screen rows disappearing from terminal history after a resize.
+
 ## [18.0.3] - 2026-08-23
 
 ### Added
