@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+
+- Fixed clean-cutover instructions conflicting with deletion safety by explicitly allowing removal of code made obsolete by the requested cutover.
 
 ## [18.0.3] - 2026-08-23
 
