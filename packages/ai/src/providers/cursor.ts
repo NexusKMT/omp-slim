@@ -4260,7 +4260,7 @@ export function processInteractionUpdate(
 					// what the exec channel pairs its result under. Diverging here would
 					// name the block one thing and its result another.
 					name: args.toolName || args.name || "",
-					arguments: {},
+					arguments: decodeMcpArgsMap(args.args) ?? {},
 					[kStreamingBlockIndex]: output.content.length,
 					[kStreamingPartialJson]: "",
 					[kStreamingBlockKind]: "mcp",
@@ -4385,7 +4385,7 @@ export function processInteractionUpdate(
 				// Authoritative full parse of the accumulated argument buffer; the delta
 				// path throttles mid-stream parses, so `arguments` may lag the buffer.
 				const partial = settled[kStreamingPartialJson];
-				if (partial !== undefined) {
+				if (partial) {
 					settled.arguments = parseStreamingJson(partial);
 				}
 				const decodedArgs = decodeMcpArgsMap(selectMcpCall(toolCall)?.args?.args);

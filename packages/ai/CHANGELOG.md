@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Cursor tool calls through the OpenAI-compatible auth gateway losing their arguments when Cursor announced the complete argument map without streaming argument deltas ([#9479](https://github.com/can1357/oh-my-pi/issues/9479)).
+
 ## [18.0.3] - 2026-08-23
 
 ### Fixed
