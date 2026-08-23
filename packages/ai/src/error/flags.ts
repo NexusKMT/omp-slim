@@ -771,6 +771,23 @@ export function classifyMessage(message: {
 	);
 
 	let kinds = ((existingId ?? 0) | textId) & KIND_MASK;
+	// Two-phase finalization: an adapter may throw a bare status-bearing error
+	// (e.g. Ollama's `HTTP 413 from …`) and only attach the captured response
+	// body during message formatting. The pre-body classify() then stamped a
+	// status-INFERRED payload bit that OR-merging cannot revoke — even once the
+	// final text carries explicit token-overflow evidence. When that final text
+	// proves token overflow but does not itself establish a payload rejection,
+	// any surviving payload bit is stale status inference: drop it (#9235
+	// review). Media-budget/byte-size bodies keep theirs via the table hit in
+	// `textId`.
+	if (
+		currentStatus === 413 &&
+		classificationMessage &&
+		hasTokenContextOverflowEvidence(classificationMessage) &&
+		!(textId & Flag.PayloadRejected)
+	) {
+		kinds &= ~Flag.PayloadRejected;
+	}
 	if (classificationMessage && LLAMA_CPP_TOOL_CALL_PARSE_PATTERN.test(classificationMessage)) {
 		// Deterministic local-model tool-call JSON parse failure: HTTP 500 is misleading
 		// because the same prompt reproduces the same malformed output, so the agent-level

@@ -248,3 +248,35 @@ describe("classify - token evidence arbitrates the status fallback across cause 
 		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(true);
 	});
 });
+
+describe("classifyMessage - final text clears the status-inferred payload bit (#9235 review)", () => {
+	it("drops the pre-body payload inference once formatting attaches a token-overflow body", () => {
+		// Ollama-style two-phase finalization: throw a bare `HTTP 413 from …`
+		// (status-only inference stamps PayloadRejected), then append the
+		// captured body during message formatting. The enriched text proves
+		// token overflow and no payload wording, so the stale bit must go.
+		const error = new AIError.OllamaApiError("HTTP 413 from http://localhost:11434/api/chat", 413);
+		const earlyId = AIError.classify(error);
+		expect(AIError.is(earlyId, AIError.Flag.PayloadRejected)).toBe(true);
+		const id = AIError.classifyMessage({
+			errorId: earlyId,
+			errorMessage: "HTTP 413 from http://localhost:11434/api/chat\nmaximum context length is 128000 tokens",
+			errorStatus: 413,
+		});
+		expect(AIError.is(id, AIError.Flag.ContextOverflow)).toBe(true);
+		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(false);
+	});
+
+	it("keeps the payload flag when the attached body names a media budget", () => {
+		// The body independently establishes a payload rejection via the
+		// evidence table; nothing stale to clear.
+		const error = new AIError.OllamaApiError("HTTP 413 from http://localhost:11434/api/chat", 413);
+		const id = AIError.classifyMessage({
+			errorId: AIError.classify(error),
+			errorMessage: "HTTP 413 from http://localhost:11434/api/chat\nimage count exceeds the limit of 20",
+			errorStatus: 413,
+		});
+		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(true);
+		expect(AIError.is(id, AIError.Flag.ContextOverflow)).toBe(true);
+	});
+});
