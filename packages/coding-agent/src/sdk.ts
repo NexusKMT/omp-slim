@@ -2180,12 +2180,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				// The saved candidates weren't in the static+cached catalog. If any
 				// belongs to a discovery-backed provider that hasn't been fetched
 				// yet (models.yml `discovery:` — openai-models-list/litellm/proxy/…),
-				// trigger a cache-aware discovery pass and retry before resume
-				// silently downgrades to the default role. Scope the refresh to the
-				// saved candidates' providers via `refreshProvider`: a full
-				// `refresh()` would preflight every configured provider (an
-				// unreachable OAuth broker could hang resume) and duplicate the
-				// runtime discovery already started above.
+				// trigger a cache-aware, provider-scoped discovery pass and retry
+				// before resume silently downgrades to the default role. The
+				// registry coalesces this with any matching request already running
+				// in the SDK's startup background refresh.
 				const discoverableProviders = new Set(modelRegistry.getDiscoverableProviders());
 				const candidateProviders = new Set<string>();
 				if (discoverableProviders.size > 0) {
@@ -2201,11 +2199,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					}
 				}
 				if (candidateProviders.size > 0) {
-					// Scoped to just these providers: `refreshDiscoverableProviders`
-					// skips the static reload and the all-other-runtime restore that
-					// `refreshProvider` performs, so resume never waits on (or
-					// double-fetches) an unrelated runtime provider already being
-					// discovered by `startRuntimeDiscovery` above.
+					// This skips the static reload and all-other-runtime restore
+					// performed by `refreshProvider`, so unrelated runtime providers
+					// continue independently.
 					await logger.time("restoreSessionModelDiscoveryFallback", () =>
 						modelRegistry.refreshDiscoverableProviders(candidateProviders, "online-if-uncached"),
 					);

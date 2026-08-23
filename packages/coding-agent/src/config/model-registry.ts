@@ -208,6 +208,7 @@ export class ModelRegistry {
 	#suppressedSelectors: Map<string, number> = new Map();
 	#backgroundRefresh?: Promise<void>;
 	#credentialScopedCacheHydration?: Promise<void>;
+	#configuredDiscoveryInFlight: Map<string, Promise<Model<Api>[]>> = new Map();
 	#policyReapply?: Promise<void>;
 	#lastDiscoveryWarnings: Map<string, string> = new Map();
 	// Runtime extension model overlays — persist across refresh() cycles so that
@@ -1254,7 +1255,9 @@ export class ModelRegistry {
 			selectedDiscoverableProviders.length === 0
 				? Promise.resolve<Model<Api>[]>([])
 				: Promise.all(
-						selectedDiscoverableProviders.map(provider => this.#discoverProviderModels(provider, strategy)),
+						selectedDiscoverableProviders.map(provider =>
+							this.#discoverProviderModelsCoalesced(provider, strategy),
+						),
 					).then(results => results.flat());
 		const [configuredDiscovered, builtInDiscovery] = await Promise.all([
 			configuredDiscoveriesPromise,
@@ -1310,6 +1313,27 @@ export class ModelRegistry {
 			this.#applyRuntimeProviderOverrides(withProviderGuardrails),
 		);
 		this.#models = this.#applyRuntimeModelModifiers(this.#unprojectedModels);
+	}
+
+	/**
+	 * Share a configured provider's discovery request between concurrent full
+	 * and provider-scoped refreshes using the same cache/network strategy.
+	 */
+	#discoverProviderModelsCoalesced(
+		providerConfig: DiscoveryProviderConfig,
+		strategy: ModelRefreshStrategy,
+	): Promise<Model<Api>[]> {
+		const key = `${providerConfig.provider}\0${strategy}`;
+		const inFlight = this.#configuredDiscoveryInFlight.get(key);
+		if (inFlight) return inFlight;
+
+		const discovery = this.#discoverProviderModels(providerConfig, strategy).finally(() => {
+			if (this.#configuredDiscoveryInFlight.get(key) === discovery) {
+				this.#configuredDiscoveryInFlight.delete(key);
+			}
+		});
+		this.#configuredDiscoveryInFlight.set(key, discovery);
+		return discovery;
 	}
 
 	#configuredDiscoveryCacheProviderId(providerConfig: DiscoveryProviderConfig): string {
