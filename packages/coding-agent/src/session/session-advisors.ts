@@ -1236,10 +1236,22 @@ export class SessionAdvisors {
 				})
 			: AIError.classify(error, currentModel.api);
 		if (AIError.is(errorId, AIError.Flag.Abort) || AIError.is(errorId, AIError.Flag.UserInterrupt)) return false;
-		if (
-			AIError.is(errorId, AIError.Flag.ContextOverflow) ||
-			(assistantFailure && AIError.isContextOverflow(assistantFailure, currentModel.contextWindow ?? 0))
-		) {
+		// Bare 413s and media-budget numeric limits classify with BOTH
+		// PayloadRejected and ContextOverflow (deliberately ambiguous): the
+		// payload co-flag is provider evidence that the request itself was
+		// rejected — something a different provider's larger byte/media budget
+		// CAN accept — so only those text-ambiguous overflows waive the veto
+		// and reach the fallback walk below. Usage-backed overflows (reported
+		// tokens above the window) are authoritative evidence that the prompt
+		// exceeds THIS model's window, so they keep the veto exactly like pure
+		// overflows (#9235 review; mirrors TurnRecovery's hard-fallback
+		// eligibility arbitration).
+		const contextWindow = currentModel.contextWindow ?? 0;
+		const overflowVeto =
+			(AIError.is(errorId, AIError.Flag.ContextOverflow) ||
+				(assistantFailure !== undefined && AIError.isContextOverflow(assistantFailure, contextWindow))) &&
+			!AIError.isTextAmbiguousContextOverflow(errorId, assistantFailure, contextWindow);
+		if (overflowVeto) {
 			return false;
 		}
 

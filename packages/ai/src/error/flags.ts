@@ -838,6 +838,30 @@ export function isPayloadRejection(message: AssistantMessage): boolean {
 	return matchesPayloadRejectionText(errorMessage);
 }
 
+/**
+ * Whether an overflow classification is the deliberately ambiguous dual shape
+ * (`PayloadRejected` + `ContextOverflow`, e.g. a bare `413 (no body)` or a
+ * numeric media budget) with no provider-reported token excess (#9235
+ * review). The payload co-flag is evidence that the request itself was
+ * rejected — something a different provider's larger byte/media budget CAN
+ * accept — so fallback/model-switching callers may treat it as switchable.
+ * Usage-backed overflows are authoritative evidence that the prompt exceeds
+ * THIS model's window and are never ambiguous. `errorId` must be freshly
+ * classified (classify/classifyMessage) so the flag check matches the text
+ * tables; `message` supplies usage and stop-reason evidence when available.
+ */
+export function isTextAmbiguousContextOverflow(
+	errorId: number,
+	message: AssistantMessage | undefined,
+	contextWindow?: number,
+): boolean {
+	const overflowFlagged =
+		is(errorId, Flag.ContextOverflow) || (message !== undefined && isContextOverflow(message, contextWindow));
+	if (!overflowFlagged) return false;
+	if (!is(errorId, Flag.PayloadRejected)) return false;
+	return !(message !== undefined && isUsageBackedContextOverflow(message, contextWindow));
+}
+
 export function stringify(id: number | undefined): string {
 	if (!id) return "none";
 	if (!isClassified(id)) return `status:${id}`;

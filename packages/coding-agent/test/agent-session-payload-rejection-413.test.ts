@@ -243,6 +243,32 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		return message;
 	}
 
+	function usageBackedMediaBudgetAssistant(): AssistantMessage {
+		const message = {
+			role: "assistant",
+			content: [{ type: "text", text: "" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet-4-5",
+			stopReason: "error",
+			errorMessage: "request_too_large: image count exceeds the limit of 20",
+			usage: {
+				input: 250_000,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 250_000,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+		} as AssistantMessage;
+		// Same media-budget body as mediaBudgetPayloadAssistant, but the
+		// provider accounting reports input tokens above the model window:
+		// authoritative overflow evidence that outranks the payload wording.
+		message.errorId = AIError.classifyMessage(message);
+		return message;
+	}
+
 	it("honestly skips token compaction for a low-token payload-shaped 413", async () => {
 		await createSession(200_000);
 		const checkSpy = vi.spyOn(SessionMaintenance.prototype, "checkCompaction");
@@ -387,6 +413,41 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		// Gauge-less notice variant: no headroom claim, no dead-end fragment.
 		expect(payloadNotices[0].message).not.toContain("headroom");
 		expect(payloadNotices[0].message).not.toContain(NO_PROGRESS_FRAGMENT);
+
+		const checkResults = await Promise.all(
+			checkSpy.mock.results.map(r => r.value as { automaticContinuationBlocked?: boolean }),
+		);
+		expect(checkResults.some(r => r.automaticContinuationBlocked === true)).toBe(true);
+	});
+
+	it("reports a usage-backed payload-shaped dead end as a token-context problem", async () => {
+		// Media-budget wording (dual-classified) with provider-reported input
+		// tokens above the window: the accounting routes this into overflow
+		// recovery, and with no promotion target and compaction disabled the
+		// dead-end notice must diagnose token context — not parrot the payload
+		// wording's "NOT a token-context problem" (#9235 review).
+		await createSession(200_000, undefined, { extraSettings: { "compaction.enabled": false } });
+		const checkSpy = vi.spyOn(SessionMaintenance.prototype, "checkCompaction");
+		const prepareSpy = vi.spyOn(compactionModule, "prepareCompaction");
+		const promptSpy = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined as never);
+		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
+
+		const notices = collectNotices();
+
+		const assistantMsg = usageBackedMediaBudgetAssistant();
+		session.agent.emitExternalEvent({ type: "message_end", message: assistantMsg });
+		session.agent.emitExternalEvent({ type: "agent_end", messages: [assistantMsg] });
+
+		await session.waitForIdle();
+
+		expect(prepareSpy).not.toHaveBeenCalled();
+		expect(promptSpy).not.toHaveBeenCalled();
+		expect(continueSpy).not.toHaveBeenCalled();
+
+		const deadEndNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.level === "warning");
+		expect(deadEndNotices.length).toBe(1);
+		expect(deadEndNotices[0].message).toContain("IS a token-context problem");
+		expect(deadEndNotices[0].message).not.toContain("NOT a token-context problem");
 
 		const checkResults = await Promise.all(
 			checkSpy.mock.results.map(r => r.value as { automaticContinuationBlocked?: boolean }),

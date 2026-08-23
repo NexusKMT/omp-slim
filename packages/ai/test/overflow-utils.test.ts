@@ -280,3 +280,65 @@ describe("classifyMessage - final text clears the status-inferred payload bit (#
 		expect(AIError.is(id, AIError.Flag.ContextOverflow)).toBe(true);
 	});
 });
+
+describe("isTextAmbiguousContextOverflow - dual-flag arbitration shared by fallback callers (#9235 review)", () => {
+	function mediaBudgetMessage(usage?: { input: number }) {
+		const message: AssistantMessage = {
+			role: "assistant",
+			content: [],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet-4-5",
+			stopReason: "error",
+			errorMessage: "request_too_large: image count exceeds the limit of 20",
+			usage: {
+				input: usage?.input ?? 1_000,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: usage?.input ?? 1_000,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+		};
+		AIError.classifyMessage(message);
+		return message;
+	}
+
+	it("treats a low-usage dual-classified media budget as switchable", () => {
+		const message = mediaBudgetMessage();
+		// Fixture sanity: genuinely dual-classified by the text tables.
+		expect(AIError.is(message.errorId, AIError.Flag.PayloadRejected)).toBe(true);
+		expect(AIError.is(message.errorId, AIError.Flag.ContextOverflow)).toBe(true);
+		expect(AIError.isTextAmbiguousContextOverflow(AIError.classifyMessage(message), message, 200_000)).toBe(true);
+	});
+
+	it("never treats a provider-reported token excess as ambiguous", () => {
+		const message = mediaBudgetMessage({ input: 250_000 });
+		expect(AIError.isUsageBackedContextOverflow(message, 200_000)).toBe(true);
+		expect(AIError.isTextAmbiguousContextOverflow(AIError.classifyMessage(message), message, 200_000)).toBe(false);
+	});
+
+	it("keeps pure token overflows and payload-only rejections unambiguous", () => {
+		const overflowOnly = createErrorMessage("prompt is too long: 300000 tokens > 200000 maximum");
+		overflowOnly.errorId = AIError.classifyMessage(overflowOnly);
+		expect(AIError.isTextAmbiguousContextOverflow(overflowOnly.errorId, overflowOnly, 200_000)).toBe(false);
+
+		const payloadOnly = createErrorMessage(
+			"413 request body exceeds the configured payload limit (type=invalid_request_error param=request_too_large)",
+		);
+		payloadOnly.errorId = AIError.classifyMessage(payloadOnly);
+		expect(AIError.is(payloadOnly.errorId, AIError.Flag.ContextOverflow)).toBe(false);
+		expect(AIError.isTextAmbiguousContextOverflow(payloadOnly.errorId, payloadOnly, 200_000)).toBe(false);
+	});
+
+	it("arbitrates from flags alone when no assistant message is available", () => {
+		const error = new Error("request_too_large: image count exceeds the limit of 20");
+		const id = AIError.classify(error);
+		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(true);
+		expect(AIError.is(id, AIError.Flag.ContextOverflow)).toBe(true);
+		// No usage evidence exists without a message: the dual flag alone
+		// keeps the rejection switchable.
+		expect(AIError.isTextAmbiguousContextOverflow(id, undefined, 200_000)).toBe(true);
+	});
+});

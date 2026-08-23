@@ -153,6 +153,21 @@ function payloadRejectionNotice(storedTokens: number, contextWindow: number): st
 	return `The provider rejected the request size or media budget (HTTP 413), but ~${headroom.toLocaleString("en-US")} tokens of headroom remain locally — this is NOT a token-context problem. ${remedies}`;
 }
 
+/**
+ * User-facing notice for a dead end that IS token overflow (#9235 review):
+ * the provider's reported usage proves the request exceeded the window, but no
+ * runnable recovery exists (no promotion target, compaction disabled or
+ * method-less). Mirrors {@link payloadRejectionNotice}'s tone with the
+ * corrected diagnosis and the actions that actually help.
+ */
+function usageOverflowDeadEndNotice(reportedInputTokens: number, contextWindow: number): string {
+	const windowLabel = contextWindow > 0 ? contextWindow.toLocaleString("en-US") : "unknown";
+	return (
+		`The provider reports ~${reportedInputTokens.toLocaleString("en-US")} input tokens against a ${windowLabel}-token context window — this IS a token-context problem, but automatic compaction is unavailable to shrink it. ` +
+		"Enable a compaction method (compaction.enabled with a configured methodOrder), reduce the conversation's token usage, or switch to a larger-context model."
+	);
+}
+
 /** Creates one provider-scoped compaction lifecycle descriptor. */
 export function createCodexCompactionContext(options: {
 	trigger: CodexCompactionContext["trigger"];
@@ -1858,7 +1873,18 @@ export class SessionMaintenance {
 				// body)" entries where overflowEvidence is also true; only
 				// genuine overflow-only failures keep the legacy NONE fall-
 				// through (their dead-end handling is separate machinery).
-				this.#host.emitNotice("warning", payloadRejectionNotice(storedTokens, contextWindow), "compaction");
+				// When the provider's own token accounting proves the overflow
+				// (#9235 review), the payload notice's "NOT a token-context
+				// problem" diagnosis would be false advertising: surface the
+				// overflow dead-end guidance instead.
+				const usageBackedOverflow = AIError.isUsageBackedContextOverflow(assistantMessage, contextWindow);
+				this.#host.emitNotice(
+					"warning",
+					usageBackedOverflow
+						? usageOverflowDeadEndNotice(reportedInputTokens, contextWindow)
+						: payloadRejectionNotice(storedTokens, contextWindow),
+					"compaction",
+				);
 				logger.debug("Payload-shaped 413 has no runnable recovery; blocking automatic continuation", {
 					provider: assistantMessage.provider,
 					model: assistantMessage.model,

@@ -1751,12 +1751,8 @@ export class TurnRecovery {
 		// owns them exactly like pure overflows, so a reported-usage excess
 		// must not leak into model switching (#9235 review).
 		const contextWindow = model.contextWindow ?? 0;
-		const overflowFlagged = AIError.isContextOverflow(message, contextWindow);
-		const textAmbiguousOverflow =
-			overflowFlagged &&
-			AIError.isPayloadRejection(message) &&
-			!AIError.isUsageBackedContextOverflow(message, contextWindow);
-		if (overflowFlagged && !textAmbiguousOverflow) {
+		const textAmbiguousOverflow = AIError.isTextAmbiguousContextOverflow(id, message, contextWindow);
+		if (!textAmbiguousOverflow && AIError.isContextOverflow(message, contextWindow)) {
 			return false;
 		}
 		if (this.#hasReplayUnsafeOutput(message)) return false;
