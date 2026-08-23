@@ -1510,6 +1510,25 @@ export class Markdown implements Component {
 	#streamPrefixText?: string;
 	#streamPrefixTokens?: Token[];
 	#streamPrefixLineCache?: StreamPrefixLineCache;
+	// Guard-scan memo (PoC C): the ref-def/CR verdict with the exact text
+	// length it was checked on. Reuse is sound only while setText has been
+	// append-only since (tracked via the startsWith that setText performs): a
+	// FALSE verdict stays valid — appending cannot remove an offending ref or
+	// CR; a TRUE verdict can flip only when the delta gains a "[" at a fresh
+	// line or a "]" / ":" completing a dangling "[…" that straddles the scan
+	// edge, or "\n" / "\r". Byte-identity of the checked region: replaceTabs
+	// is a per-char map and normalizeOsc8Terminators changes old bytes only
+	// when an OSC8 terminator straddles the boundary (which breaks startsWith
+	// — the flag then reads non-append), so transient-mode appends are
+	// byte-identical. Non-transient repairOrphanClosingFence can additionally
+	// delete a bare fence line; its triggers (heading + table lines) always
+	// bring "\n" with them, so such frames take the suspicious-delta path,
+	// and a deletion that shortens the text trips the length gate — either
+	// way the verdict is re-derived, never reused across the deletion.
+	#lastScanLength = -1;
+	#lastScanCanStream = false;
+	#lastScanValid = false;
+	#appendOnlySinceLastScan = true;
 	// True while #renderStreamingContentLines renders the frozen token range:
 	// frozen code blocks highlight even in transient mode so their bytes match
 	// the finalized render (they render once into the prefix line cache, so
@@ -1552,6 +1571,11 @@ export class Markdown implements Component {
 		// full lex + wrap runs per re-emit — one of the top CPU hotspots during
 		// streaming (issue #4353). Mirrors `Text.setText`'s guard.
 		if (text === this.#text) return false;
+		if (!text.startsWith(this.#text)) {
+			// Non-append edit: the previous frame's guard verdict cannot be
+			// reused — the checked region may have changed anywhere.
+			this.#appendOnlySinceLastScan = false;
+		}
 		this.#text = text;
 		if (!text.trim()) {
 			// Blank replacement: render() early-returns before #lexTokens can see
@@ -1578,6 +1602,11 @@ export class Markdown implements Component {
 		const next = value === true;
 		if (this.#transientRenderCache === next) return;
 		this.#transientRenderCache = next;
+		// The mode switch changes which normalization applies to the raw text
+		// (transient: replaceTabs; final: repairOrphanClosingFence(replaceTabs)),
+		// so a memo computed on the other mode's buffer must not be reused —
+		// re-derive on the next frame instead.
+		this.#appendOnlySinceLastScan = false;
 		this.invalidate();
 	}
 
@@ -1592,13 +1621,52 @@ export class Markdown implements Component {
 		// frozen (#freezeStablePrefix only runs when canStream was true). The prefix
 		// ends at a "\n\n" block boundary (stableBlockBoundary), so the tail starts
 		// at a fresh line — scanning only the tail for ref defs is sufficient and
-		// avoids re-scanning the growing prefix every frame (O(n²) → O(n) overall).
+		// avoids re-scanning the grown prefix every frame (O(n²) → O(n) overall).
 		const prefix = this.#streamPrefixText;
 		const prefixTokens = this.#streamPrefixTokens;
 		const hasPrefix =
 			prefix !== undefined && prefixTokens !== undefined && text.length > prefix.length && text.startsWith(prefix);
 		const refDefText = hasPrefix ? text.slice(prefix.length) : text;
-		const canStream = !HAS_REF_DEF.test(refDefText) && !refDefText.includes("\r");
+		// Guard-scan memo (PoC C): while setText has been append-only and the
+		// grown delta introduces no "[", "]", ":", "\n" or "\r", the previous
+		// verdict stays valid — the checked region is byte-identical (OSC8/tab
+		// normalization is prefix-stable on appends) and none of the chars a
+		// ref-def or CR needs crossed the scan edge. A false verdict is monotone
+		// (appends cannot delete an existing ref def or CR), so it is reused
+		// even when the delta is suspicious; only a true verdict on a suspicious
+		// delta re-runs the tail scan (PR #9303). The tail scan is also the
+		// cold path after non-append edits, which clear the memo. A FALSE
+		// verdict is monotone under appends alone (transient mode: no repair,
+		// appends cannot delete a ref-def or CR), so there it is reused even
+		// on a suspicious delta. Final mode is the exception: render() detects
+		// repairOrphanClosingFence deletions (the normalized buffer shrank)
+		// and invalidates the memo on the affected frame, so the re-derive
+		// happens exactly when the CR/ref-def trigger behind a false verdict
+		// may have been deleted — never left stale, and never re-scanned on
+		// frames where the memo is sound.
+		let canStream: boolean;
+		if (this.#lastScanValid && this.#appendOnlySinceLastScan && text.length > this.#lastScanLength) {
+			const delta = text.slice(this.#lastScanLength);
+			if (
+				!delta.includes("[") &&
+				!delta.includes("]") &&
+				!delta.includes(":") &&
+				!delta.includes("\n") &&
+				!delta.includes("\r")
+			) {
+				canStream = this.#lastScanCanStream;
+			} else if (this.#lastScanCanStream) {
+				canStream = !HAS_REF_DEF.test(refDefText) && !refDefText.includes("\r");
+			} else {
+				canStream = false;
+			}
+		} else {
+			canStream = !HAS_REF_DEF.test(refDefText) && !refDefText.includes("\r");
+		}
+		this.#lastScanLength = text.length;
+		this.#lastScanCanStream = canStream;
+		this.#lastScanValid = true;
+		this.#appendOnlySinceLastScan = true;
 		if (canStream && hasPrefix) {
 			const tailTokens = lexDocument(refDefText);
 			const tokens = [...prefixTokens, ...tailTokens];
@@ -1671,10 +1739,17 @@ export class Markdown implements Component {
 			return EMPTY_RENDER_LINES;
 		}
 
-		// Replace tabs with 3 spaces for consistent rendering
-		const normalizedText = this.transientRenderCache
-			? replaceTabs(this.#text)
-			: repairOrphanClosingFence(replaceTabs(this.#text));
+		// Replace tabs with spaces, then repair orphan fences in final mode.
+		const tabbed = replaceTabs(this.#text);
+		const normalizedText = this.transientRenderCache ? tabbed : repairOrphanClosingFence(tabbed);
+		if (!this.transientRenderCache && normalizedText.length < tabbed.length) {
+			// repairOrphanClosingFence deleted bytes this frame (orphan fence
+			// removed): the guard-scan memo's checked region is no longer
+			// byte-identical, and a cached false verdict may have been based
+			// on the very CR/ref-def line that was deleted. Invalidate so the
+			// next #lexTokens re-derives on the repaired buffer.
+			this.#lastScanValid = false;
+		}
 		const signature = this.#renderSignature(width, paddingX);
 
 		// L2: module-level LRU — survives component disposal/recreation across
