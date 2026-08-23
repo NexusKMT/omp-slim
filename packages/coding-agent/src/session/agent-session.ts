@@ -3035,7 +3035,7 @@ export class AgentSession {
 					// Early return skips the error tail; persist the terminal 413 so the JSONL records why the goal stopped (#9235).
 					if (
 						compactionResult.automaticContinuationBlocked &&
-						!AIError.isContextOverflow(msg, this.model?.contextWindow ?? 0)
+						(AIError.isPayloadRejection(msg) || !AIError.isContextOverflow(msg, this.model?.contextWindow ?? 0))
 					) {
 						await this.#recovery.persistTerminalEmptyErrorTurn(msg);
 					}

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Dual-flag bare-413 goal dead ends (status-only with no body, low occupancy) now persist their terminal error turn so reopened sessions know why the goal stopped, matching the behaviour already in place for pure payload rejections.
+- Persisted terminal empty error turns are now excluded from provider context on session reload; they appear only in the display transcript.
+
 ## [18.0.1] - 2026-08-23
 
 ### Added

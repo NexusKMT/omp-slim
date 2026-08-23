@@ -784,6 +784,10 @@ describe("AgentSession payload-rejection 413 handling", () => {
 			.filter(message => message?.role === "assistant" && message.stopReason === "error");
 		expect(terminalErrors).toHaveLength(1);
 		expect(terminalErrors[0]?.errorMessage).toContain("413");
+		const providerCtx = sessionManager.buildSessionContext().messages;
+		expect(providerCtx.some(m => m.role === "assistant" && (m as AssistantMessage).stopReason === "error")).toBe(
+			false,
+		);
 	});
 	it("blocks dual-flag bare-413 dead ends even though overflow evidence is present", async () => {
 		const requestedModels: string[] = [];
@@ -814,6 +818,17 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		expect(payloadNotices.length).toBe(1);
 		expect(payloadNotices[0].level).toBe("warning");
 		expect(startCount()).toBe(0);
+		const terminalErrors = sessionManager
+			.getBranch()
+			.filter(entry => entry.type === "message")
+			.map(entry => (entry as { message?: AssistantMessage }).message)
+			.filter(message => message?.role === "assistant" && message.stopReason === "error");
+		expect(terminalErrors).toHaveLength(1);
+		expect(terminalErrors[0]?.errorMessage).toContain("413");
+		const providerCtx = sessionManager.buildSessionContext().messages;
+		expect(providerCtx.some(m => m.role === "assistant" && (m as AssistantMessage).stopReason === "error")).toBe(
+			false,
+		);
 	});
 
 	it("blocks status-only Content Too Large rejections with no context window", async () => {
