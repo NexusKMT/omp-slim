@@ -37,6 +37,10 @@
 
 - Fixed retired welcome-screen rows disappearing from terminal history after a resize.
 
+### Fixed
+
+- `omp --resume`/`--continue` now restores discovery-backed session models (models.yml `discovery:` providers such as `openai-models-list`/`litellm`) instead of silently falling back to the default role ([#9502](https://github.com/can1357/oh-my-pi/issues/9502)).
+
 ## [18.0.3] - 2026-08-23
 
 ### Added
