@@ -138,7 +138,7 @@ describe("executePython (per-call)", () => {
 				}
 				if (!signal.aborted) {
 					const cancellation = Promise.withResolvers<void>();
-					signal.addEventListener("abort", cancellation.resolve, { once: true });
+					signal.addEventListener("abort", () => cancellation.resolve(), { once: true });
 					await cancellation.promise;
 				}
 				return {
