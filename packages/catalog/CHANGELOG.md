@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed aliased OpenCode Zen Ox Alpha ids (e.g. `opencode-zen/x-preview-f-free`) exposing the generic `minimal`/`low`/`medium`/`high`/`xhigh` ladder instead of the gateway's wire-exact `low`/`high`/`max` tiers, leaving the real `max` tier unreachable; alias detection now also matches the SKU's stencil display name ([#9349](https://github.com/can1357/oh-my-pi/issues/9349)).
+
 ## [18.0.1] - 2026-08-23
 
 ### Added
