@@ -78,10 +78,8 @@ const RETRIABLE_KINDS =
 	Flag.ProviderFinishError |
 	Flag.EmptyResponse;
 
-// Token-context overflow evidence: wording that names token/prompt/context
-// accounting — failures token compaction CAN fix. Drives overflow
-// classification (together with GENERIC_LIMIT_OVERFLOW_PATTERN below) and the
-// payload-rejection veto in matchesPayloadRejectionText.
+// Token-context overflow evidence: wording naming token/prompt/context accounting — failures
+// token compaction CAN fix (#9235).
 const CONTEXT_OVERFLOW_EVIDENCE_PATTERNS = [
 	/prompt is too long/i, // Anthropic
 	/input is too long for requested model/i, // Amazon Bedrock
@@ -101,45 +99,34 @@ const CONTEXT_OVERFLOW_EVIDENCE_PATTERNS = [
 	/context[_ ]length[_ ]exceeded/i, // Generic fallback
 	/too many tokens/i, // Generic fallback
 	/token limit exceeded/i, // Generic fallback
-	// `request_too_large` with token-count evidence (either order) is a genuine
-	// context overflow; matchesPayloadRejectionText vetoes its payload flag via
-	// this table. Without evidence it is a byte/media-budget rejection (#9235).
+	// `request_too_large` with token-count evidence (either order) is genuine overflow —
+	// matchesPayloadRejectionText vetoes its payload flag via this table (#9235).
 	/request_too_large[^\n]*\btokens?\b/i,
 	/\btokens?\b[^\n]*request_too_large/i,
 	/model_context_window_exceeded/i, // z.ai non-standard finish_reason surfaced as error text
 	/prompt filled the context window/i, // Ollama OpenAI-compatible empty length completion
-	// "exceeds the limit of <N> tokens" names the token budget itself, unlike
-	// GENERIC_LIMIT_OVERFLOW_PATTERN below whose bare numeric limit also fits
-	// media budgets (#9235 review).
+	// Names the token budget itself, unlike GENERIC_LIMIT_OVERFLOW_PATTERN whose bare numeric
+	// limit also fits media budgets (#9235 review).
 	/exceeds the limit of \d+ tokens?\b/i,
 ] as const;
-// Numeric-limit wording with NO token semantics (#9235 review): GitHub
-// Copilot reports genuine token overruns this way, but media budgets use the
-// identical shape (`image count exceeds the limit of 20`). It may classify
-// plain overflow, but must never veto a payload flag — a media budget is
-// precisely the failure token compaction cannot fix.
+// Numeric-limit wording with NO token semantics (#9235 review): Copilot reports genuine token
+// overruns this way, but media budgets share the shape — must never veto a payload flag.
 const GENERIC_LIMIT_OVERFLOW_PATTERN = /exceeds the limit of \d+/i;
 const OVERFLOW_PATTERNS = [...CONTEXT_OVERFLOW_EVIDENCE_PATTERNS, GENERIC_LIMIT_OVERFLOW_PATTERN];
 
 /**
- * Token-context overflow evidence ONLY — deliberately excludes
- * GENERIC_LIMIT_OVERFLOW_PATTERN. Media/byte budgets ("image count exceeds
- * the limit of 20", "request body exceeds the limit of 10 MB") share that
- * generic shape but are exactly the rejections token compaction cannot fix,
- * so they must count as payload evidence, not as a reason to strip the
- * payload flag (#9235 review).
+ * Token-context overflow evidence ONLY — deliberately excludes GENERIC_LIMIT_OVERFLOW_PATTERN,
+ * whose generic shape media/byte budgets also match; those count as payload evidence instead
+ * (#9235 review).
  */
 function hasTokenContextOverflowEvidence(text: string): boolean {
 	return CONTEXT_OVERFLOW_EVIDENCE_PATTERNS.some(p => p.test(text));
 }
 
 /**
- * Token-context overflow evidence on ANY link of an error's cause chain
- * (#9235 review). The status-only payload inference must arbitrate across
- * the whole chain: a generic wrapper whose nested 413 carries provider token
- * wording ("maximum context length is N tokens") is a pure overflow — the
- * wrapper's recursively-derived 413 status must not co-flag PayloadRejected
- * and steer a low-occupancy session away from compaction.
+ * Token-context overflow evidence on ANY cause-chain link (#9235 review): status-only payload
+ * inference arbitrates across the chain, so a wrapper whose nested 413 names the token budget
+ * stays a pure overflow without a derived PayloadRejected co-flag.
  */
 function hasCauseTokenContextOverflowEvidence(error: unknown): boolean {
 	const seen = new Set<object>();
@@ -165,13 +152,8 @@ function hasCauseTokenContextOverflowEvidence(error: unknown): boolean {
 }
 
 const OVERFLOW_NO_BODY_PATTERN = /\b4(00|13)\s*(status code)?\s*\(no body\)/i;
-// HTTP 413-family rejections driven by request BYTES or provider media budgets
-// rather than token context (#9235): ninfer maps a Qwen vision attention-pair
-// budget overrun to a generic `request_too_large` 413; proxies enforce byte
-// caps as bare `payload too large` / `entity too large`. None of these can be
-// fixed by token compaction. Bare `413 (no body)` deliberately appears in BOTH
-// tables: proxies strip bodies on genuine overflows too, so it co-classifies
-// and session maintenance arbitrates against local token headroom.
+// HTTP 413-family byte/media-budget rejections (#9235): none fixable by token compaction.
+// Bare `413 (no body)` is deliberately dual-flagged — session maintenance arbitrates headroom.
 const PAYLOAD_REJECTION_PATTERNS = [
 	/\b413\s*(?:status code\s*)?\(no body\)/i,
 	/\b413\b[^.\n]{0,120}\b(?:request|payload|entity|body)\b[^.\n]{0,60}\b(?:exceed|too large|limit)/i,
@@ -182,17 +164,9 @@ const PAYLOAD_REJECTION_PATTERNS = [
 
 function matchesPayloadRejectionText(text: string): boolean {
 	if (!PAYLOAD_REJECTION_PATTERNS.some(p => p.test(text))) return false;
-	// Payload patterns describe body-carrying 413-family rejections, but when
-	// the body ALSO carries token-context evidence, the overflow
-	// classification wins and no payload flag is set — otherwise local gauge
-	// drift could withhold compaction from a genuine token overflow. The
-	// check is order-agnostic and covers every payload phrase, not just
-	// `request_too_large`. Only token-context wording counts as evidence:
-	// GENERIC_LIMIT_OVERFLOW_PATTERN also matches media budgets ("image
-	// count exceeds the limit of 20"), which are exactly the rejections
-	// compaction cannot fix (#9235 review). The `(no body)` entry cannot
-	// overlap either table, so bare `413 (no body)` keeps its deliberate
-	// dual flag for maintenance-layer headroom arbitration.
+	// Token-context evidence vetoes the payload flag, order-agnostic across every phrase —
+	// otherwise gauge drift could withhold compaction from a genuine overflow. Only token
+	// wording counts: the generic limit pattern also matches media budgets (#9235 review).
 	if (hasTokenContextOverflowEvidence(text)) return false;
 	return true;
 }
@@ -362,11 +336,8 @@ export function is(id: number | undefined, flag: Flag): boolean {
 
 export function retriable(id: number | undefined, opts?: { replayUnsafe?: boolean }): boolean {
 	if (is(id, Flag.ContentBlocked)) return false;
-	// A payload rejection names the request bytes as the problem: resending
-	// them to the same model can never succeed, even when gateway transport
-	// wording ("Provider returned error: 413 ...") co-flags Transient.
-	// Recovery belongs to the cross-provider fallback chain and session
-	// maintenance arbitration (#9235), never to a same-model resend.
+	// A payload rejection can never succeed on a same-model resend — recovery belongs to
+	// the cross-provider fallback chain and session maintenance arbitration (#9235).
 	if (is(id, Flag.PayloadRejected)) return false;
 	if (opts?.replayUnsafe) return false;
 	if (is(id, Flag.MalformedFunctionCall)) return true;
@@ -542,15 +513,9 @@ function classifyText(
 		if (matchesStrictToolsRejection(cleanMessage, statusClean)) kinds |= Flag.Grammar;
 		if (matchesFastModeUnsupported(cleanMessage, statusClean)) kinds |= Flag.FastModeUnsupported;
 	}
-	// Status-only 413 fallback (#9235 review): adapters surface request-size
-	// rejections as a bare status with an opaque/generic reason phrase
-	// ("Content Too Large") or none at all — shapes the text tables above
-	// cannot see. Resending identical bytes cannot succeed, so classify as a
-	// payload rejection unless token-context evidence appears — in this body
-	// or anywhere on the error's cause chain, so a generic wrapper whose
-	// nested 413 names the token budget stays a pure overflow instead of
-	// gaining an inference-derived payload co-flag. Other statuses stay
-	// untouched: a bare 400/401/403 proves nothing about payload size.
+	// Status-only 413 fallback (#9235 review): bare statuses/opaque reason phrases are shapes
+	// the text tables cannot see; resending identical bytes cannot succeed, so infer payload
+	// rejection unless token-context evidence appears anywhere on the cause chain.
 	const statusEvidence = errorStatus ?? (errorMessage ? status({ message: errorMessage }) : undefined);
 	if (
 		statusEvidence === 413 &&
@@ -771,15 +736,9 @@ export function classifyMessage(message: {
 	);
 
 	let kinds = ((existingId ?? 0) | textId) & KIND_MASK;
-	// Two-phase finalization: an adapter may throw a bare status-bearing error
-	// (e.g. Ollama's `HTTP 413 from …`) and only attach the captured response
-	// body during message formatting. The pre-body classify() then stamped a
-	// status-INFERRED payload bit that OR-merging cannot revoke — even once the
-	// final text carries explicit token-overflow evidence. When that final text
-	// proves token overflow but does not itself establish a payload rejection,
-	// any surviving payload bit is stale status inference: drop it (#9235
-	// review). Media-budget/byte-size bodies keep theirs via the table hit in
-	// `textId`.
+	// Two-phase finalization (#9235 review): adapters may attach the response body only during
+	// message formatting, so an earlier status-inferred payload bit survives OR-merging even once
+	// the final text proves token overflow without payload wording — drop that stale bit there.
 	if (
 		currentStatus === 413 &&
 		classificationMessage &&
@@ -806,11 +765,8 @@ export function attach<E extends object>(error: E, id: number): E {
 }
 
 /**
- * Whether provider-reported token usage alone proves the request exceeded the
- * model's context window (#9235 review). This is authoritative overflow
- * evidence — independent of any body wording — so callers arbitrating between
- * compaction and model switching must treat it as compaction-owned, unlike the
- * deliberately ambiguous 413 text co-classification.
+ * Provider-reported token usage alone proves context-window excess (#9235 review) — authoritative,
+ * compaction-owned evidence, unlike the deliberately ambiguous 413 text co-classification.
  */
 export function isUsageBackedContextOverflow(message: AssistantMessage, contextWindow?: number): boolean {
 	if (!contextWindow) return false;
@@ -825,11 +781,9 @@ export function isContextOverflow(message: AssistantMessage, contextWindow?: num
 }
 
 /**
- * Whether an error classifies as an HTTP 413-family request-size/media-budget
- * rejection rather than token-context overflow (#9235). May co-occur with
- * {@link isContextOverflow} for evidence-free bodies (`413 no body`); callers
- * with local token state should prefer skipping compaction when this returns
- * true and real headroom remains.
+ * HTTP 413-family request-size/media-budget rejection rather than token-context overflow (#9235);
+ * may co-occur with {@link isContextOverflow} for evidence-free bodies (`413 no body`). Callers
+ * with local token state should prefer skipping compaction when true and real headroom remains.
  */
 export function isPayloadRejection(message: AssistantMessage): boolean {
 	if (is(message.errorId, Flag.PayloadRejected)) return true;
@@ -839,16 +793,10 @@ export function isPayloadRejection(message: AssistantMessage): boolean {
 }
 
 /**
- * Whether an overflow classification is the deliberately ambiguous dual shape
- * (`PayloadRejected` + `ContextOverflow`, e.g. a bare `413 (no body)` or a
- * numeric media budget) with no provider-reported token excess (#9235
- * review). The payload co-flag is evidence that the request itself was
- * rejected — something a different provider's larger byte/media budget CAN
- * accept — so fallback/model-switching callers may treat it as switchable.
- * Usage-backed overflows are authoritative evidence that the prompt exceeds
- * THIS model's window and are never ambiguous. `errorId` must be freshly
- * classified (classify/classifyMessage) so the flag check matches the text
- * tables; `message` supplies usage and stop-reason evidence when available.
+ * Deliberately ambiguous dual shape (`PayloadRejected` + `ContextOverflow`, e.g. bare `413 (no body)`
+ * or numeric media budget) with no provider-reported token excess (#9235 review): the co-flag proves
+ * the request was rejected, so another provider's larger budget may accept it; usage-backed overflows
+ * exceed THIS model's window and are never ambiguous. `errorId` must be freshly classified.
  */
 export function isTextAmbiguousContextOverflow(
 	errorId: number,

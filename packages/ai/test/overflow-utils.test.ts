@@ -58,10 +58,6 @@ describe("isContextOverflow/isPayloadRejection - HTTP 413 variants", () => {
 	});
 
 	it("keeps media-budget numeric limits carrying a payload flag (#9235 review)", () => {
-		// `request_too_large` plus a bare numeric limit is the media-budget
-		// shape ("image count exceeds the limit of 20"). The generic limit
-		// pattern must not veto the payload flag, or sessions run token
-		// compaction that cannot shrink a vision-media budget.
 		const message = createErrorMessage("request_too_large: image count exceeds the limit of 20");
 		expect(isContextOverflow(message)).toBe(true);
 		expect(isPayloadRejection(message)).toBe(true);
@@ -145,9 +141,6 @@ describe("isContextOverflow - 400/413 no-body (Cerebras, Mistral, proxy wrappers
 
 describe("isPayloadRejection - ambiguous no-body statuses", () => {
 	it("co-flags bare '413 status code (no body)' as payload rejection while staying overflow", () => {
-		// Proxies strip bodies on genuine token overflows AND on byte-limit hits;
-		// text alone cannot arbitrate, so both flags set and session maintenance
-		// arbitrates against local token headroom (#9235).
 		const message = createErrorMessage("413 status code (no body)");
 		expect(isContextOverflow(message)).toBe(true);
 		expect(isPayloadRejection(message)).toBe(true);
@@ -177,9 +170,6 @@ describe("retriable - transient-wrapped payload rejections (#9235 review)", () =
 
 describe("classifyMessage - status-only 413 responses (#9235 review)", () => {
 	it("classifies a bare 413 status with an opaque reason phrase as payload rejection", () => {
-		// Adapters surface request-size rejections as a status plus a generic
-		// reason phrase; no text names tokens, but resending identical bytes
-		// cannot succeed, so the payload flag must gate retries.
 		const id = AIError.classifyMessage({ errorStatus: 413, errorMessage: "Content Too Large" });
 		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(true);
 		expect(AIError.is(id, AIError.Flag.ContextOverflow)).toBe(false);
@@ -197,8 +187,6 @@ describe("classifyMessage - status-only 413 responses (#9235 review)", () => {
 	});
 
 	it("keeps token-context evidence outranking the status fallback", () => {
-		// A 413 whose body carries genuine token wording stays on the
-		// compaction path — provider token accounting beats the bare status.
 		const id = AIError.classifyMessage({
 			errorStatus: 413,
 			errorMessage: "maximum context length is 128000 tokens",
@@ -207,10 +195,6 @@ describe("classifyMessage - status-only 413 responses (#9235 review)", () => {
 		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(false);
 	});
 	it("keeps the payload flag for a status-413 media-budget body", () => {
-		// The generic numeric pattern also matches media budgets, but those
-		// are exactly the rejections token compaction cannot fix: with no
-		// token-context wording in the body, the 413 status alone is payload
-		// evidence and must not be stripped (#9235 review).
 		const id = AIError.classifyMessage({
 			errorStatus: 413,
 			errorMessage: "image count exceeds the limit of 20",
@@ -231,9 +215,7 @@ describe("classifyMessage - status-only 413 responses (#9235 review)", () => {
 
 describe("classify - token evidence arbitrates the status fallback across cause links (#9235 review)", () => {
 	it("keeps a wrapped token overflow pure when the wrapper's status comes from a nested 413", () => {
-		// status() recurses into causes, so a generic wrapper gains a 413 from
-		// its nested link; when that link names the token budget, the payload
-		// inference must lose to the provider's explicit overflow evidence.
+		// status() recurses into causes: the wrapper inherits the nested link's 413 (#9235 review).
 		const inner = Object.assign(new Error("Error: maximum context length is 128000 tokens"), { status: 413 });
 		const id = AIError.classify(new Error("Provider returned error", { cause: inner }));
 		expect(AIError.is(id, AIError.Flag.ContextOverflow)).toBe(true);
@@ -241,8 +223,6 @@ describe("classify - token evidence arbitrates the status fallback across cause 
 	});
 
 	it("keeps the status-derived payload flag for an opaque nested 413", () => {
-		// No link carries token wording: the recursively-derived 413 remains
-		// valid request-size evidence.
 		const inner = Object.assign(new Error("Content Too Large"), { status: 413 });
 		const id = AIError.classify(new Error("Provider returned error", { cause: inner }));
 		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(true);
@@ -251,10 +231,6 @@ describe("classify - token evidence arbitrates the status fallback across cause 
 
 describe("classifyMessage - final text clears the status-inferred payload bit (#9235 review)", () => {
 	it("drops the pre-body payload inference once formatting attaches a token-overflow body", () => {
-		// Ollama-style two-phase finalization: throw a bare `HTTP 413 from …`
-		// (status-only inference stamps PayloadRejected), then append the
-		// captured body during message formatting. The enriched text proves
-		// token overflow and no payload wording, so the stale bit must go.
 		const error = new AIError.OllamaApiError("HTTP 413 from http://localhost:11434/api/chat", 413);
 		const earlyId = AIError.classify(error);
 		expect(AIError.is(earlyId, AIError.Flag.PayloadRejected)).toBe(true);
@@ -268,8 +244,6 @@ describe("classifyMessage - final text clears the status-inferred payload bit (#
 	});
 
 	it("keeps the payload flag when the attached body names a media budget", () => {
-		// The body independently establishes a payload rejection via the
-		// evidence table; nothing stale to clear.
 		const error = new AIError.OllamaApiError("HTTP 413 from http://localhost:11434/api/chat", 413);
 		const id = AIError.classifyMessage({
 			errorId: AIError.classify(error),
@@ -307,7 +281,6 @@ describe("isTextAmbiguousContextOverflow - dual-flag arbitration shared by fallb
 
 	it("treats a low-usage dual-classified media budget as switchable", () => {
 		const message = mediaBudgetMessage();
-		// Fixture sanity: genuinely dual-classified by the text tables.
 		expect(AIError.is(message.errorId, AIError.Flag.PayloadRejected)).toBe(true);
 		expect(AIError.is(message.errorId, AIError.Flag.ContextOverflow)).toBe(true);
 		expect(AIError.isTextAmbiguousContextOverflow(AIError.classifyMessage(message), message, 200_000)).toBe(true);
@@ -337,8 +310,6 @@ describe("isTextAmbiguousContextOverflow - dual-flag arbitration shared by fallb
 		const id = AIError.classify(error);
 		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(true);
 		expect(AIError.is(id, AIError.Flag.ContextOverflow)).toBe(true);
-		// No usage evidence exists without a message: the dual flag alone
-		// keeps the rejection switchable.
 		expect(AIError.isTextAmbiguousContextOverflow(id, undefined, 200_000)).toBe(true);
 	});
 });

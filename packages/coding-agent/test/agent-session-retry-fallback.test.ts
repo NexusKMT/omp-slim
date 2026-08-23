@@ -1711,11 +1711,7 @@ describe("AgentSession retry fallback", () => {
 				const selector = `${model.provider}/${model.id}`;
 				requestedAdvisorModels.push(selector);
 				if (selector === advisorPrimarySelector) {
-					// Error-stop assistant message (not a thrown stream error):
-					// the recovery hook sees assistantFailure and arbitrates on
-					// its classification plus reported usage. Dual-classified
-					// media budget with low usage is text-ambiguous, so the
-					// configured cross-provider fallback must be consulted.
+					// Error-stop assistant message (not a thrown stream error): dual-classified media budget with low usage is text-ambiguous, so the configured fallback must be consulted.
 					advisorMock.push({
 						stopReason: "error",
 						errorMessage: "request_too_large: image count exceeds the limit of 20",
@@ -1797,10 +1793,7 @@ describe("AgentSession retry fallback", () => {
 				const selector = `${model.provider}/${model.id}`;
 				requestedAdvisorModels.push(selector);
 				if (selector === advisorPrimarySelector) {
-					// Same dual-classified body as the switchable row above,
-					// but provider-reported input tokens exceed THIS model's
-					// window: authoritative overflow evidence keeps the veto,
-					// so the advisor dies without consulting the fallback.
+					// Same dual-classified body as the switchable row above, but reported input tokens exceed THIS model's window — authoritative overflow evidence keeps the veto.
 					advisorMock.push({
 						stopReason: "error",
 						errorMessage: "request_too_large: image count exceeds the limit of 20",

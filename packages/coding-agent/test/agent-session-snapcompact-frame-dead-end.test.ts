@@ -402,8 +402,7 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 		const noProgress = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes(NO_PROGRESS_FRAGMENT));
 		expect(noProgress.length).toBe(1);
 		expect(noProgress[0].level).toBe("warning");
-		// The archived frames are what bloats this context shape: the remedies
-		// must name the image-frame reduction, not just generic tool output.
+		// Archived frames are what bloats this context shape; remedies must name image-frame reduction (#9235).
 		expect(noProgress[0].message).toContain(IMAGE_REMEDY_FRAGMENT);
 		// The dead-end badge must live on the ACTIVE (rebuilt) entry — the
 		// collapsed transcript only shows the latest compaction divider.

@@ -321,12 +321,9 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 			usage: { ...USAGE, input: (model.contextWindow ?? 0) + 1_000 },
 		} as AssistantMessage;
 		message.errorId = AIError.classifyMessage(message);
-		// Fixture sanity: genuinely dual-classified AND usage-backed.
 		expect(AIError.isPayloadRejection(message)).toBe(true);
 		expect(AIError.isUsageBackedContextOverflow(message, model.contextWindow ?? 0)).toBe(true);
-		// Provider-reported tokens above the window are authoritative overflow
-		// evidence: maintenance's arbitration owns it like a pure overflow, so
-		// the payload co-flag must not buy a chain switch (#9235 review).
+		// Authoritative overflow evidence: arbitration owns it like a pure overflow, so the payload co-flag buys no chain switch (#9235 review).
 		expect(recovery.isHardErrorFallbackEligible(message)).toBe(false);
 	});
 
@@ -338,9 +335,7 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 			errorMessage: "request_too_large: image count exceeds the limit of 20",
 		} as AssistantMessage;
 		message.errorId = AIError.classifyMessage(message);
-		// Same dual classification as the usage-backed row above, but with no
-		// reported token excess: the byte/media-budget wording stays ambiguous,
-		// and a different provider's larger budget can accept this request.
+		// Same dual classification, but no reported token excess: byte/media wording stays ambiguous and a larger-budget provider may accept it.
 		expect(AIError.isContextOverflow(message, model.contextWindow ?? 0)).toBe(true);
 		expect(recovery.isHardErrorFallbackEligible(message)).toBe(true);
 	});

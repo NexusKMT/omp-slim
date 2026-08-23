@@ -15,12 +15,8 @@ import { SessionMaintenance } from "@oh-my-pi/pi-coding-agent/session/session-ma
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 
 /**
- * Regression tests for #9235: a byte/media-driven HTTP 413 ("request body
- * exceeds the configured payload limit ... param=request_too_large") carries
- * overflow-shaped text, so it used to be routed into token-context compaction —
- * which cannot shrink bytes or vision-media budgets. When the local token gauge
- * still shows real headroom, the payload rejection must be surfaced honestly
- * (a warning naming image frames / body limits) instead of compacting.
+ * #9235 regression: byte/media-driven HTTP 413s carry overflow-shaped text but must not be routed
+ * into token-context compaction — with local headroom, surface the honest payload warning instead.
  */
 
 const PAYLOAD_ERROR_MESSAGE =
@@ -49,9 +45,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 
 	afterEach(async () => {
 		await session?.dispose();
-		// Fallback cooldowns are recorded on the shared ModelRegistry with a
-		// 5-minute TTL; without this reset one test's retry bookkeeping would
-		// suppress selectors for every later test in the file.
+		// Reset shared-registry fallback cooldowns (5-minute TTL) so one test's bookkeeping doesn't suppress later selectors.
 		modelRegistry.clearSuppressedSelectors();
 		vi.restoreAllMocks();
 	});
@@ -67,10 +61,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 			extraSettings?: Parameters<typeof Settings.isolated>[0];
 		},
 	): Promise<void> {
-		// The payload-rejection tests exercise SessionMaintenance's overflow
-		// routing, not extension discovery. Keep the production hook boundary
-		// while short-circuiting summarization, mirroring the progress-guard
-		// harness.
+		// Short-circuit summarization while keeping the production hook boundary, mirroring the progress-guard harness.
 		const extensionRunner = {
 			hasHandlers: (type: string) => type === "session_before_compact",
 			emit: async (event: { type: string; preparation?: CompactionPreparation }) => {
@@ -95,14 +86,11 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const model = {
 			...bundled,
 			contextWindow,
-			// Custom/discovered models legitimately carry `contextWindow: null`;
-			// keep the bundled maxTokens there instead of deriving NaN.
+			// Custom/discovered models legitimately carry contextWindow: null — keep bundled maxTokens rather than derive NaN.
 			maxTokens: contextWindow ? Math.min(64_000, Math.floor(contextWindow / 2)) : bundled.maxTokens,
 		};
 
-		// Seed the LIVE agent messages (not just branch entries): the honest-skip
-		// arbitration reads #estimateStoredContextTokens, which counts
-		// agent-state messages plus non-message overhead.
+		// Seed LIVE agent messages, not just branch entries: honest-skip arbitration counts agent-state messages (#estimateStoredContextTokens).
 		const initialMessages: AgentMessage[] = [
 			{ role: "user", content: "hello", timestamp: Date.now() } as AgentMessage,
 			...(seed
@@ -136,8 +124,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 			sessionManager,
 			settings: Settings.isolated({
 				"compaction.autoContinue": true,
-				// Promotion would silently absorb the overflow before compaction
-				// could run; these tests pin the compaction-vs-honest-skip fork.
+				// Promotion would silently absorb the overflow before compaction runs; these tests pin the compaction-vs-honest-skip fork.
 				"contextPromotion.enabled": false,
 				...options?.extraSettings,
 			}),
@@ -183,12 +170,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 			},
 			timestamp: Date.now(),
 		} as AssistantMessage;
-		// Stamp errorId exactly like the transport boundary does (finalize →
-		// classifyMessage) instead of hand-forging flags: the ninfer-style
-		// body classifies PayloadRejected-ONLY, which is precisely the shape
-		// the maintenance pre-gate must catch without an overflow flag
-		// (AGENTS.md: drive the real failure path, assert the surfaced
-		// contract).
+		// Stamp errorId like the transport boundary (finalize → classifyMessage): body classifies PayloadRejected-only (#9235).
 		message.errorId = AIError.classifyMessage(message);
 		return message;
 	}
@@ -213,9 +195,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 			},
 			timestamp: Date.now(),
 		} as AssistantMessage;
-		// Stamp exactly like the transport boundary: classifyMessage consumes
-		// errorStatus, so the bare reason phrase classifies PayloadRejected
-		// via the status fallback under test.
+		// classifyMessage consumes errorStatus: bare reason phrase classifies PayloadRejected via the status fallback under test.
 		message.errorId = AIError.classifyMessage(message);
 		return message;
 	}
@@ -262,9 +242,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 			},
 			timestamp: Date.now(),
 		} as AssistantMessage;
-		// Same media-budget body as mediaBudgetPayloadAssistant, but the
-		// provider accounting reports input tokens above the model window:
-		// authoritative overflow evidence that outranks the payload wording.
+		// Same media-budget body as mediaBudgetPayloadAssistant, but provider usage reports authoritative overflow evidence.
 		message.errorId = AIError.classifyMessage(message);
 		return message;
 	}
@@ -285,8 +263,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 
 		await session.waitForIdle();
 
-		// No recovery compaction ran at all: the local gauge has headroom, so a
-		// token-context pass cannot address a byte/media budget.
 		expect(endCount()).toBe(0);
 		expect(prepareSpy).not.toHaveBeenCalled();
 		expect(promptSpy).not.toHaveBeenCalled();
@@ -297,8 +273,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		expect(payloadNotices[0].level).toBe("warning");
 		expect(payloadNotices[0].message).not.toContain(NO_PROGRESS_FRAGMENT);
 
-		// The honest-skip blocks automatic continuation of the identical
-		// failing payload.
 		const checkResults = await Promise.all(
 			checkSpy.mock.results.map(r => r.value as { automaticContinuationBlocked?: boolean }),
 		);
@@ -307,9 +281,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 
 	it("falls through to overflow recovery when the local gauge shows no headroom", async () => {
 		await createSession(8_000, { toolText: "y".repeat(60_000) });
-		// ~15k estimated tokens against the 8k window — over the 90% headroom
-		// bar, so the provider's accounting may still be right: trust it and
-		// run the normal overflow recovery instead of skipping.
 
 		const prepareSpy = vi.spyOn(compactionModule, "prepareCompaction");
 		const promptSpy = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined as never);
@@ -329,7 +300,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await compactionDone;
 		await session.waitForIdle();
 
-		// Recovery compaction ran; no payload-specific notice fired.
 		expect(startCount()).toBeGreaterThanOrEqual(1);
 		expect(prepareSpy).toHaveBeenCalled();
 		expect(notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413")).length).toBe(0);
@@ -373,8 +343,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await compactionDone;
 		await session.waitForIdle();
 
-		// Precedence pin: token evidence wins over the low-token gauge — the
-		// standard overflow recovery runs and no payload notice appears.
 		expect(startCount()).toBeGreaterThanOrEqual(1);
 
 		expect(prepareSpy).toHaveBeenCalled();
@@ -399,9 +367,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 
 		await session.waitForIdle();
 
-		// A missing gauge (custom/discovered models carry contextWindow: null)
-		// must not resurrect the ineffective-compaction path: the unambiguous
-		// payload rejection still surfaces and blocks the resend.
 		expect(endCount()).toBe(0);
 		expect(prepareSpy).not.toHaveBeenCalled();
 		expect(promptSpy).not.toHaveBeenCalled();
@@ -410,7 +375,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
 		expect(payloadNotices.length).toBe(1);
 		expect(payloadNotices[0].level).toBe("warning");
-		// Gauge-less notice variant: no headroom claim, no dead-end fragment.
 		expect(payloadNotices[0].message).not.toContain("headroom");
 		expect(payloadNotices[0].message).not.toContain(NO_PROGRESS_FRAGMENT);
 
@@ -421,11 +385,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	});
 
 	it("reports a usage-backed payload-shaped dead end as a token-context problem", async () => {
-		// Media-budget wording (dual-classified) with provider-reported input
-		// tokens above the window: the accounting routes this into overflow
-		// recovery, and with no promotion target and compaction disabled the
-		// dead-end notice must diagnose token context — not parrot the payload
-		// wording's "NOT a token-context problem" (#9235 review).
 		await createSession(200_000, undefined, { extraSettings: { "compaction.enabled": false } });
 		const checkSpy = vi.spyOn(SessionMaintenance.prototype, "checkCompaction");
 		const prepareSpy = vi.spyOn(compactionModule, "prepareCompaction");
@@ -479,9 +438,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		}
 
 		const requestedModels: string[] = [];
-		// One mock per model identity: the mock stamps its own id/provider
-		// onto emitted AssistantMessages, and `sameModel` arbitration in
-		// checkCompaction compares those against the session model.
+		// One mock per model identity: mocks stamp their id/provider onto AssistantMessages, compared by checkCompaction's sameModel arbitration.
 		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
 		const fallbackMock = createMockModel({ id: fallbackModel.id, provider: fallbackModel.provider });
 		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
@@ -512,10 +469,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await session.prompt("work on the goal");
 		await session.waitForIdle();
 
-		// The chain consult happens BEFORE checkCompaction, mirroring the
-		// non-goal ladder: a successful switch means maintenance never runs,
-		// so no honest-skip notice fires (parity with non-goal mode) and no
-		// compaction ever starts.
+		// Chain consult happens BEFORE checkCompaction: a successful switch means maintenance never runs (#9235).
 		expect(endCount()).toBe(0);
 		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
 		expect(payloadNotices.length).toBe(0);
@@ -526,11 +480,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	});
 
 	it("consults a configured fallback chain for dual-flag bare-413 rejections", async () => {
-		// Bare "413 status code (no body)" classifies as BOTH PayloadRejected
-		// and ContextOverflow. The overflow co-flag must not bar model
-		// switching: a different provider's byte budget can accept the very
-		// request the primary rejected, so the configured chain is consulted
-		// before any maintenance outcome stands (#9235 review).
+		// Bare "413 (no body)" is dual-flagged ON PURPOSE (see AIError.isPayloadRejection); the overflow co-flag must not bar switching (#9235 review).
 		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
 		if (!fallbackModel) {
 			throw new Error("Expected bundled openai fallback model to exist");
@@ -577,11 +527,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	});
 
 	it("routes goal-mode transient failures exactly like the non-goal ladder", async () => {
-		// The pre-compaction chain consult is scoped to payload rejections
-		// (#9235 review): every other failure follows the standard ladder, so a
-		// transient 5xx in goal mode reaches handleRetryableError through the
-		// retryable rung and gets the same configured-chain consult the non-goal
-		// path applies — the early consult must neither add nor skip rungs.
 		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
 		if (!fallbackModel) {
 			throw new Error("Expected bundled openai fallback model to exist");
@@ -611,8 +556,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await session.prompt("work on the goal");
 		await session.waitForIdle();
 
-		// Same-model request first, then the configured candidate — identical
-		// to the non-goal ladder for this error class.
 		expect(requestedModels.slice(0, 2)).toEqual([
 			"anthropic/claude-sonnet-4-5",
 			`${fallbackModel.provider}/${fallbackModel.id}`,
@@ -621,10 +564,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	});
 
 	it("keeps usage-backed payload overflows off the configured chain", async () => {
-		// Provider-reported input tokens above the window are authoritative
-		// overflow evidence: maintenance's arbitration owns them like pure
-		// overflows, so payload wording must not convert a token excess into a
-		// model switch when a viable chain candidate exists (#9235 review).
 		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
 		if (!fallbackModel) {
 			throw new Error("Expected bundled openai fallback model to exist");
@@ -667,8 +606,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 
 		expect(fallbackEvents).toHaveLength(0);
 		expect(requestedModels.every(m => m.startsWith("anthropic/"))).toBe(true);
-		// Maintenance actually ran its overflow remedy instead of ceding the
-		// turn to the configured chain.
 		expect(startCount()).toBeGreaterThanOrEqual(1);
 	});
 
@@ -689,19 +626,13 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await session.prompt("work on the goal");
 		await session.waitForIdle();
 
-		// Without a configured chain there is no fresh chance to grant: the
-		// payload rejection stays terminal — exactly one request, honest
-		// warning surfaced, no resend and no compaction detour.
 		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5"]);
 		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
 		expect(payloadNotices.length).toBe(1);
 		expect(payloadNotices[0].level).toBe("warning");
 	});
 	it("does not blind-resend a transient-wrapped payload rejection before maintenance sees it", async () => {
-		// "Provider returned error: 413 ..." classifies as PayloadRejected +
-		// Transient. The transient flag must not buy a same-model retry: the
-		// unchanged oversized request cannot succeed, so the failure must fall
-		// through the retry ladder straight into payload arbitration.
+		// Classifies PayloadRejected + Transient; the transient flag must not buy a retry of an unchanged oversized request (#9235).
 		const requestedModels: string[] = [];
 		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
 		await createSession(
@@ -738,14 +669,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
 		const fallbackMock = createMockModel({ id: fallbackModel.id, provider: fallbackModel.provider });
 		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
-		// Stored context far above 90% of the tiny window forces the
-		// payload-only 413 down checkCompaction's overflow gate (not the
-		// trusted-BLOCK pre-gate). That gate applies its remedy — here a
-		// context-promotion model switch — BEFORE returning a continuation
-		// result, so goal mode must consult the configured chain before
-		// calling checkCompaction at all; consulting on the result would let
-		// promotion absorb the failure first, an ordering non-goal mode
-		// never applies (its ladder consults the chain pre-compaction).
+		// High occupancy forces checkCompaction's overflow gate, so goal mode must consult the chain BEFORE calling it or promotion absorbs the failure (#9235).
 		await createSession(
 			2_000,
 			{ toolText: "x".repeat(40_000) },
@@ -763,16 +687,9 @@ describe("AgentSession payload-rejection 413 handling", () => {
 					"retry.baseDelayMs": 5,
 					"retry.modelFallback": true,
 					"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
-					// The larger-window candidate is also a valid promotion
-					// target; the chain must win the race from INSIDE the
-					// goal branch (fallback event proves it was the chain,
-					// not promotion, that switched models).
+					// Larger-window candidate is also a promotion target; the fallback event proves the chain, not promotion, switched.
 					"contextPromotion.enabled": true,
-					// Compaction fully off: the tiny window would otherwise fire
-					// independent threshold passes (their trigger clamps to
-					// window-1, so no threshold value can silence them). With
-					// compaction off, any auto_compaction event seen below can
-					// only come from the post-error remedy ordering under test.
+					// Compaction fully off: the tiny window fires unstoppable threshold passes (trigger clamps to window-1), so any auto_compaction event below is the post-error remedy under test.
 					"compaction.enabled": false,
 				},
 			},
@@ -787,9 +704,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await session.prompt("work on the goal");
 		await session.waitForIdle();
 
-		// The chain wins before any overflow remedy can: switched via the
-		// configured candidate, no compaction started or finished, and no
-		// maintenance notice surfaced.
 		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5", `${fallbackModel.provider}/${fallbackModel.id}`]);
 		expect(fallbackEvents).toHaveLength(1);
 		expect(session.model?.provider).toBe(fallbackModel.provider);
@@ -806,8 +720,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 			{
 				streamFn: (model, context, options) => {
 					requestedModels.push(`${model.provider}/${model.id}`);
-					// In-run error (not `throw`): only this shape carries the
-					// provider-reported usage through to the assistant message.
+					// In-run error (not `throw`): only this shape carries provider-reported usage through to the assistant message.
 					primaryMock.push({
 						stopReason: "error",
 						errorMessage: PAYLOAD_ERROR_MESSAGE,
@@ -825,9 +738,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await session.prompt("trigger usage-backed overflow");
 		await session.waitForIdle();
 
-		// Reported usage (250k > 200k window) is authoritative overflow
-		// evidence: the failure must route into the recovery gate instead of
-		// the terminal payload BLOCK, with no payload notice surfaced.
 		expect(requestedModels[0]).toBe("anthropic/claude-sonnet-4-5");
 		expect(overflowStarts.length).toBeGreaterThanOrEqual(1);
 		expect(notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"))).toHaveLength(0);
@@ -846,11 +756,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 					return primaryMock.stream(model, context, options);
 				},
 				extraSettings: {
-					// No remedy may exist: compaction off, no promotion
-					// target, no fallback chain. The BLOCK (with its honest
-					// warning) is then the only correct outcome — a silent
-					// NONE would let an automatic goal continuation resend
-					// the identical rejected payload forever.
+					// No remedy exists (compaction off, no promotion target, no chain), so BLOCK with its honest warning is the only correct outcome.
 					"compaction.enabled": false,
 					"contextPromotion.enabled": false,
 				},
@@ -869,10 +775,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		expect(startCount()).toBe(0);
 	});
 	it("persists the terminal payload 413 when an active goal dead ends", async () => {
-		// #9235 review: the goal-mode BLOCK early return skips the standard
-		// error tail that records skipped empty error turns — without an
-		// explicit persist, the session JSONL ends at the last tool result and
-		// a reopened session shows no trace of why the run stopped.
+		// Goal-mode BLOCK skips the standard error tail; persist explicitly or a reopened session shows no trace of the stop (#9235 review).
 		const requestedModels: string[] = [];
 		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
 		await createSession(
@@ -904,11 +807,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		expect(terminalErrors[0]?.errorMessage).toContain("413");
 	});
 	it("blocks dual-flag bare-413 dead ends even though overflow evidence is present", async () => {
-		// Bare "413 status code (no body)" classifies as BOTH PayloadRejected
-		// and ContextOverflow. High occupancy forces the gate entry and
-		// overflowEvidence is true, but with no runnable remedy the failure
-		// must still BLOCK: resending is futile regardless of which truth
-		// the ambiguity hides.
+		// Dual-flagged bare 413 (see AIError.isPayloadRejection); no runnable remedy means BLOCK despite overflowEvidence (#9235).
 		const requestedModels: string[] = [];
 		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
 		await createSession(
@@ -940,10 +839,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	});
 
 	it("blocks status-only Content Too Large rejections with no context window", async () => {
-		// Adapters that surface request-size rejections as HTTP 413 plus an
-		// opaque reason phrase classify PayloadRejected via the status
-		// fallback; the identical request must never be blind-resent
-		// (#9235 review).
+		// Adapters surfacing 413 plus an opaque reason phrase classify via the status fallback; never blind-resend (#9235 review).
 		await createSession(null);
 		const checkSpy = vi.spyOn(SessionMaintenance.prototype, "checkCompaction");
 		const prepareSpy = vi.spyOn(compactionModule, "prepareCompaction");
@@ -972,10 +868,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	});
 
 	it("honestly skips compaction for media-budget numeric-limit rejections", async () => {
-		// "request_too_large + image count exceeds the limit of 20" keeps its
-		// payload flag now that generic numeric limits no longer veto it, and
-		// local usage shows real headroom: no compaction may run against a
-		// budget token compaction cannot shrink (#9235 review).
+		// Keeps its payload flag now that generic numeric limits no longer veto it; local headroom bars compaction (#9235 review).
 		await createSession(200_000);
 		const checkSpy = vi.spyOn(SessionMaintenance.prototype, "checkCompaction");
 		const prepareSpy = vi.spyOn(compactionModule, "prepareCompaction");

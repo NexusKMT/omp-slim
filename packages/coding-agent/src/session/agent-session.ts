@@ -3017,23 +3017,11 @@ export class AgentSession {
 			let compactionResult = COMPACTION_CHECK_NONE;
 			let checkedCompaction = false;
 			if (activeGoal) {
-				// A configured hard-error fallback is a fresh chance that no goal-
-				// mode maintenance outcome may pre-empt (#9235 review) — but only
-				// for payload rejections, the #9235 family whose maintenance
-				// outcomes (honest skips, context removal, continuations) would
-				// otherwise stand in front of the chain. Other hard failures keep
-				// the non-goal ladder's precedence: below, the intrinsic Fireworks
-				// Fast→base degradation and the retryable path get first claim,
-				// and the chain is consulted at its usual rung. The consult must
-				// still precede checkCompaction() itself: its overflow path
-				// applies its remedy (context promotion or rolled-back compaction)
-				// before returning, so consulting only after seeing a result could
-				// stack remedies or undo a promotion. Eligibility already vetoes
-				// context overflow (including usage-backed excesses), classifier
-				// refusals, aborts, usage-preflight blocks, and replay-unsafe
-				// turns, and is false outright when no chain candidates exist;
-				// only an exhausted or declining chain falls through to
-				// maintenance below.
+				// Payload rejections alone get this pre-compaction chain consult (#9235
+				// review): isHardErrorFallbackEligible already vetoes context overflow,
+				// refusals, aborts, and replay-unsafe turns, and other hard failures keep
+				// the non-goal ladder's precedence. The consult must precede
+				// checkCompaction(): its overflow path applies its remedy before returning.
 				if (AIError.isPayloadRejection(msg) && this.#recovery.isHardErrorFallbackEligible(msg)) {
 					const didRetry = await this.#recovery.handleRetryableError(msg, { hardErrorFallback: true });
 					if (didRetry) {
@@ -3048,13 +3036,10 @@ export class AgentSession {
 				checkedCompaction = true;
 				const compactionContinues = compactionResult.deferredHandoff || compactionResult.continuationScheduled;
 				if (compactionContinues || compactionResult.automaticContinuationBlocked) {
-					// A BLOCK means maintenance dead-ended the failed turn and
-					// removed it from provider context, but this early return
-					// skips the standard error tail below that persists skipped
-					// empty error turns — durably record the terminal 413 so the
-					// session JSONL keeps why the goal stopped (#9235 review).
-					// Same overflow guard as the tail: content-less overflow
-					// rejections stay live-UI only.
+					// This early return skips the standard error tail that persists skipped
+					// empty error turns — durably record the terminal 413 so the session
+					// JSONL keeps why the goal stopped (#9235 review). Content-less overflow
+					// rejections stay live-UI only, same as the tail.
 					if (
 						compactionResult.automaticContinuationBlocked &&
 						!AIError.isContextOverflow(msg, this.model?.contextWindow ?? 0)

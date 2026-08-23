@@ -149,9 +149,6 @@ describe("retryTransientCompletion", () => {
 	});
 
 	it("does not retry a transient-wrapped payload rejection", async () => {
-		// "Provider returned error: 413 ..." co-flags Transient, but a oneshot
-		// replays a FIXED prompt: the identical oversized body fails on every
-		// attempt, so the retries only burn the caller's deadline.
 		let calls = 0;
 		const final = await retryTransientCompletion(
 			() => {
