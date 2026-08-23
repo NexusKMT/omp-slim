@@ -6415,7 +6415,8 @@ export class AuthStorage {
 		const error = options?.error;
 		const status = AIError.status(error);
 		const message = error instanceof Error ? error.message : typeof error === "string" ? error : undefined;
-		const accountPolicy = AIError.isAccountPolicyError(error);
+		const exactCursorModelPolicy = AIError.isCursorPlanAccountPolicyError(error, provider);
+		const accountPolicy = exactCursorModelPolicy || AIError.isAccountPolicyError(error);
 		if (!accountPolicy && (AIError.isUsageLimit(error) || isUsageLimitOutcome(status, message))) {
 			// Thread the provider-specified reset window (e.g. Devin "Your limit
 			// will reset in 13 minutes") into the block duration so the credential
@@ -6441,7 +6442,6 @@ export class AuthStorage {
 		const deniedModel = AIError.codexChatGPTAccountPolicyModel(error);
 		const exactCodexModelPolicy =
 			deniedModel !== undefined && AIError.isCodexChatGPTAccountPolicyError(error, provider, options?.modelId);
-		const exactCursorModelPolicy = AIError.isCursorPlanAccountPolicyError(error, provider);
 		const exactModelPolicy = exactCodexModelPolicy || exactCursorModelPolicy;
 		// The exact sentence is provider-controlled input. A non-Codex provider,
 		// absent request model, or mismatched model must not turn it into either a

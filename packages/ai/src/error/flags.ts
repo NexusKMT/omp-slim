@@ -458,7 +458,7 @@ function classifyText(
 		if (
 			ACCOUNT_POLICY_PATTERN.test(errorMessage) ||
 			isCodexChatGPTAccountPolicyText(errorMessage, provider, modelId) ||
-			isCursorPlanPolicyText(errorMessage)
+			(provider === "cursor" && isCursorPlanPolicyText(errorMessage))
 		) {
 			kinds |= Flag.AccountPolicy | Flag.ContentBlocked;
 		}

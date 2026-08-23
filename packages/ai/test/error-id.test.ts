@@ -165,6 +165,14 @@ describe("error-id classification", () => {
 			expect(AIError.retriable(id)).toBe(false);
 		}
 
+		const relayedMessage =
+			'Connect error resource_exhausted: Error [details: {"error":"ERROR_RATE_LIMITED_CHANGEABLE","details":{"title":"Named models unavailable","detail":"Free plans can only use Auto."}}]';
+		const relayedId = AIError.classifyMessage(
+			message({ provider: "openrouter", model: "cursor-grok-4.6", errorMessage: relayedMessage }),
+		);
+		expect(AIError.is(relayedId, AIError.Flag.AccountPolicy)).toBe(false);
+		expect(AIError.is(relayedId, AIError.Flag.ContentBlocked)).toBe(false);
+
 		for (const errorMessage of [
 			"Connect error resource_exhausted: Error",
 			'Connect error resource_exhausted: Error [details: {"details":{"title":"Named models unavailable"}}]',
