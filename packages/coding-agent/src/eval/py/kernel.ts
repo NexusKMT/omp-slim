@@ -9,9 +9,9 @@
  */
 import * as path from "node:path";
 import { $flag, isBunTestRuntime, logger, Snowflake } from "@oh-my-pi/pi-utils";
-import { $ } from "bun";
 import { Settings } from "../../config/settings";
 import { BaseKernel, getRemainingTimeMs, type KernelStartOptions } from "../kernel-base";
+import { type BackendProbeOptions, runBoundedProbe } from "../probe";
 import { stageRunnerScript } from "../runner-cache";
 import { PYTHON_PRELUDE } from "./prelude";
 import RUNNER_SCRIPT from "./runner.py" with { type: "text" };
@@ -64,7 +64,7 @@ const availabilityCache = new Map<string, Promise<PythonKernelAvailability>>();
 export async function checkPythonKernelAvailability(
 	cwd: string,
 	interpreter?: string,
-	options?: { forceProbe?: boolean },
+	options?: { forceProbe?: boolean } & BackendProbeOptions,
 ): Promise<PythonKernelAvailability> {
 	if (!options?.forceProbe && (isBunTestRuntime() || $flag("PI_PYTHON_SKIP_CHECK"))) {
 		return { ok: true };
@@ -73,7 +73,7 @@ export async function checkPythonKernelAvailability(
 	const key = `${resolvedCwd}\0${interpreter ?? ""}`;
 	const cached = availabilityCache.get(key);
 	if (cached) return await cached;
-	const probe = probePythonKernelAvailability(resolvedCwd, interpreter);
+	const probe = probePythonKernelAvailability(resolvedCwd, interpreter, options);
 	availabilityCache.set(key, probe);
 	const result = await probe;
 	if (!result.ok && availabilityCache.get(key) === probe) {
@@ -82,7 +82,11 @@ export async function checkPythonKernelAvailability(
 	return result;
 }
 
-async function probePythonKernelAvailability(cwd: string, interpreter?: string): Promise<PythonKernelAvailability> {
+async function probePythonKernelAvailability(
+	cwd: string,
+	interpreter?: string,
+	probeOpts?: BackendProbeOptions,
+): Promise<PythonKernelAvailability> {
 	try {
 		const settings = await Settings.init();
 		const { env } = settings.getShellConfig();
@@ -100,15 +104,23 @@ async function probePythonKernelAvailability(cwd: string, interpreter?: string):
 		const failures: string[] = [];
 		for (const runtime of runtimes) {
 			try {
-				const probe = await $`${runtime.pythonPath} -c "import sys;sys.exit(0)"`
-					.quiet()
-					.nothrow()
-					.cwd(cwd)
-					.env(runtime.env);
+				const probe = await runBoundedProbe([runtime.pythonPath, "-c", "import sys;sys.exit(0)"], {
+					cwd,
+					env: runtime.env,
+					signal: probeOpts?.signal,
+					timeoutMs: probeOpts?.timeoutMs,
+				});
 				if (probe.exitCode === 0) {
 					return { ok: true, pythonPath: runtime.pythonPath, runtime };
 				}
-				failures.push(`${runtime.pythonPath} (exit code ${probe.exitCode})`);
+				if (probe.aborted) {
+					return { ok: false, pythonPath: runtime.pythonPath, reason: "Python availability probe was cancelled." };
+				}
+				failures.push(
+					probe.timedOut
+						? `${runtime.pythonPath} (probe timed out)`
+						: `${runtime.pythonPath} (exit code ${probe.exitCode})`,
+				);
 			} catch (err) {
 				failures.push(`${runtime.pythonPath} (${err instanceof Error ? err.message : String(err)})`);
 			}

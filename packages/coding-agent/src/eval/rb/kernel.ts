@@ -10,9 +10,9 @@
  */
 import * as path from "node:path";
 import { $flag, isBunTestRuntime, logger, Snowflake } from "@oh-my-pi/pi-utils";
-import { $ } from "bun";
 import { Settings } from "../../config/settings";
 import { BaseKernel, getRemainingTimeMs, type KernelRuntimeEnv, type KernelStartOptions } from "../kernel-base";
+import { type BackendProbeOptions, runBoundedProbe } from "../probe";
 import type { KernelDisplayOutput } from "../py/display";
 import { hostHasInheritableConsole, shouldDetachKernel, shouldHideKernelWindow } from "../py/spawn-options";
 import { stageRunnerScript } from "../runner-cache";
@@ -64,7 +64,11 @@ export interface RubyKernelAvailability {
 // not cached so installing Ruby mid-session is picked up on the next attempt.
 const availabilityCache = new Map<string, Promise<RubyKernelAvailability>>();
 
-export async function checkRubyKernelAvailability(cwd: string, interpreter?: string): Promise<RubyKernelAvailability> {
+export async function checkRubyKernelAvailability(
+	cwd: string,
+	interpreter?: string,
+	options?: BackendProbeOptions,
+): Promise<RubyKernelAvailability> {
 	if (isBunTestRuntime() || $flag("PI_RUBY_SKIP_CHECK")) {
 		return { ok: true };
 	}
@@ -72,7 +76,7 @@ export async function checkRubyKernelAvailability(cwd: string, interpreter?: str
 	const key = `${resolvedCwd}\0${interpreter ?? ""}`;
 	const cached = availabilityCache.get(key);
 	if (cached) return await cached;
-	const probe = probeRubyKernelAvailability(resolvedCwd, interpreter);
+	const probe = probeRubyKernelAvailability(resolvedCwd, interpreter, options);
 	availabilityCache.set(key, probe);
 	const result = await probe;
 	if (!result.ok && availabilityCache.get(key) === probe) {
@@ -81,7 +85,11 @@ export async function checkRubyKernelAvailability(cwd: string, interpreter?: str
 	return result;
 }
 
-async function probeRubyKernelAvailability(cwd: string, interpreter?: string): Promise<RubyKernelAvailability> {
+async function probeRubyKernelAvailability(
+	cwd: string,
+	interpreter?: string,
+	probeOpts?: BackendProbeOptions,
+): Promise<RubyKernelAvailability> {
 	try {
 		const settings = await Settings.init();
 		const { env } = settings.getShellConfig();
@@ -93,11 +101,23 @@ async function probeRubyKernelAvailability(cwd: string, interpreter?: string): P
 		const failures: string[] = [];
 		for (const runtime of runtimes) {
 			try {
-				const probe = await $`${runtime.rubyPath} -e ${"exit 0"}`.quiet().nothrow().cwd(cwd).env(runtime.env);
+				const probe = await runBoundedProbe([runtime.rubyPath, "-e", "exit 0"], {
+					cwd,
+					env: runtime.env,
+					signal: probeOpts?.signal,
+					timeoutMs: probeOpts?.timeoutMs,
+				});
 				if (probe.exitCode === 0) {
 					return { ok: true, rubyPath: runtime.rubyPath, runtime };
 				}
-				failures.push(`${runtime.rubyPath} (exit code ${probe.exitCode})`);
+				if (probe.aborted) {
+					return { ok: false, rubyPath: runtime.rubyPath, reason: "Ruby availability probe was cancelled." };
+				}
+				failures.push(
+					probe.timedOut
+						? `${runtime.rubyPath} (probe timed out)`
+						: `${runtime.rubyPath} (exit code ${probe.exitCode})`,
+				);
 			} catch (err) {
 				failures.push(`${runtime.rubyPath} (${err instanceof Error ? err.message : String(err)})`);
 			}

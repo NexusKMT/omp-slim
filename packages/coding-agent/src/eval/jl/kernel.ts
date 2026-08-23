@@ -7,9 +7,9 @@
  */
 import * as path from "node:path";
 import { $flag, Snowflake } from "@oh-my-pi/pi-utils";
-import { $ } from "bun";
 import { Settings } from "../../config/settings";
 import { BaseKernel, getRemainingTimeMs, type KernelStartOptions } from "../kernel-base";
+import { type BackendProbeOptions, runBoundedProbe } from "../probe";
 import type { KernelDisplayOutput } from "../py/display";
 import { hostHasInheritableConsole, shouldDetachKernel, shouldHideKernelWindow } from "../py/spawn-options";
 import { stageRunnerScript } from "../runner-cache";
@@ -59,11 +59,12 @@ const availabilityCache = new Map<string, Promise<JuliaKernelAvailability>>();
 export async function checkJuliaKernelAvailability(
 	cwd: string,
 	interpreter?: string,
+	options?: BackendProbeOptions,
 ): Promise<JuliaKernelAvailability> {
 	const cacheKey = `${path.resolve(cwd)}::${interpreter ?? ""}`;
 	let cached = availabilityCache.get(cacheKey);
 	if (!cached) {
-		cached = probeJuliaKernelAvailability(cwd, interpreter);
+		cached = probeJuliaKernelAvailability(cwd, interpreter, options);
 		availabilityCache.set(cacheKey, cached);
 	}
 	const result = await cached;
@@ -73,7 +74,11 @@ export async function checkJuliaKernelAvailability(
 	return result;
 }
 
-async function probeJuliaKernelAvailability(cwd: string, interpreter?: string): Promise<JuliaKernelAvailability> {
+async function probeJuliaKernelAvailability(
+	cwd: string,
+	interpreter?: string,
+	probeOpts?: BackendProbeOptions,
+): Promise<JuliaKernelAvailability> {
 	const { env: shellEnv } = (await Settings.init()).getShellConfig();
 	const baseEnv = filterEnv(shellEnv);
 	const runtimes = enumerateJuliaRuntimes(cwd, baseEnv, interpreter);
@@ -88,11 +93,23 @@ async function probeJuliaKernelAvailability(cwd: string, interpreter?: string): 
 	const failures: string[] = [];
 	for (const runtime of runtimes) {
 		try {
-			const probe = await $`${runtime.juliaPath} -e "exit(0)"`.quiet().nothrow().cwd(cwd).env(runtime.env);
+			const probe = await runBoundedProbe([runtime.juliaPath, "-e", "exit(0)"], {
+				cwd,
+				env: runtime.env,
+				signal: probeOpts?.signal,
+				timeoutMs: probeOpts?.timeoutMs,
+			});
 			if (probe.exitCode === 0) {
 				return { ok: true, juliaPath: runtime.juliaPath, runtime };
 			}
-			failures.push(`${runtime.juliaPath} (exit code ${probe.exitCode})`);
+			if (probe.aborted) {
+				return { ok: false, juliaPath: runtime.juliaPath, reason: "Julia availability probe was cancelled." };
+			}
+			failures.push(
+				probe.timedOut
+					? `${runtime.juliaPath} (probe timed out)`
+					: `${runtime.juliaPath} (exit code ${probe.exitCode})`,
+			);
 		} catch (err) {
 			failures.push(`${runtime.juliaPath} (${err instanceof Error ? err.message : String(err)})`);
 		}

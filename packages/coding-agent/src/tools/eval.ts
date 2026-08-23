@@ -12,6 +12,7 @@ import { jsBackend, juliaBackend, pythonBackend, rubyBackend } from "../eval";
 import type { ExecutorBackend, ExecutorBackendResult } from "../eval/backend";
 import { EVAL_TIMEOUT_PAUSE_OP, EVAL_TIMEOUT_RESUME_OP } from "../eval/bridge-timeout";
 import { IdleTimeout } from "../eval/idle-timeout";
+import type { BackendProbeOptions } from "../eval/probe";
 import { defaultEvalSessionId } from "../eval/session-id";
 import type { EvalCellResult, EvalDisplayOutput, EvalLanguage, EvalStatusEvent, EvalToolDetails } from "../eval/types";
 import evalDescription from "../prompts/tools/eval.md" with { type: "text" };
@@ -233,7 +234,11 @@ function detailsNotice(cells: ResolvedEvalCell[]): string | undefined {
 	return notices.length > 0 ? notices.join(" ") : undefined;
 }
 
-async function resolveBackend(session: ToolSession, language: EvalLanguage): Promise<ResolvedBackend> {
+async function resolveBackend(
+	session: ToolSession,
+	language: EvalLanguage,
+	probeOpts?: BackendProbeOptions,
+): Promise<ResolvedBackend> {
 	const backends = resolveEvalBackends(session);
 	const allowPy = backends.python;
 	const allowJs = backends.js;
@@ -242,7 +247,7 @@ async function resolveBackend(session: ToolSession, language: EvalLanguage): Pro
 
 	if (language === "python") {
 		if (!allowPy) throw new ToolError("Python backend is disabled (PI_PY=0 or eval.py = false).");
-		if (!(await pythonBackend.isAvailable(session))) {
+		if (!(await pythonBackend.isAvailable(session, probeOpts))) {
 			const alternatives = [allowJs ? '"js"' : null, allowRb ? '"rb"' : null, allowJl ? '"jl"' : null].filter(
 				Boolean,
 			);
@@ -256,7 +261,7 @@ async function resolveBackend(session: ToolSession, language: EvalLanguage): Pro
 	}
 	if (language === "ruby") {
 		if (!allowRb) throw new ToolError("Ruby backend is disabled (PI_RB=0 or eval.rb = false).");
-		if (!(await rubyBackend.isAvailable(session))) {
+		if (!(await rubyBackend.isAvailable(session, probeOpts))) {
 			const alternatives = [allowJs ? '"js"' : null, allowPy ? '"py"' : null, allowJl ? '"jl"' : null].filter(
 				Boolean,
 			);
@@ -270,7 +275,7 @@ async function resolveBackend(session: ToolSession, language: EvalLanguage): Pro
 	}
 	if (language === "julia") {
 		if (!allowJl) throw new ToolError("Julia backend is disabled (PI_JL=0 or eval.jl = false).");
-		if (!(await juliaBackend.isAvailable(session))) {
+		if (!(await juliaBackend.isAvailable(session, probeOpts))) {
 			const alternatives = [allowJs ? '"js"' : null, allowPy ? '"py"' : null, allowRb ? '"rb"' : null].filter(
 				Boolean,
 			);
@@ -461,13 +466,17 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 					: params.language === "jl"
 						? "julia"
 						: "js";
-		const resolved = await resolveBackend(session, cellLanguage);
+		// Bound backend discovery by the eval cell's own timeout and abort signal:
+		// the cell IdleTimeout is armed only later in #runCells, so a hung runtime
+		// probe would otherwise wedge the whole turn (issue #9466).
+		const cellTimeoutMs = (params.timeout ?? 30) * 1000;
+		const resolved = await resolveBackend(session, cellLanguage, { signal, timeoutMs: cellTimeoutMs });
 		const cells: ResolvedEvalCell[] = [
 			{
 				index: 0,
 				title: params.title,
 				code: params.code,
-				timeoutMs: (params.timeout ?? 30) * 1000,
+				timeoutMs: cellTimeoutMs,
 				reset: params.reset ?? false,
 				resolved,
 			},
@@ -512,11 +521,11 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 		// is runtime work (it pauses across agent()/tool bridge calls), so a cell
 		// can legitimately outlive it in wall time — exactly the case
 		// backgrounding exists for.
-		const cellTimeoutMs =
+		const clampedCellTimeoutMs =
 			cells[0].timeoutMs === 0
 				? undefined
 				: clampTimeout("eval", cells[0].timeoutMs / 1000, session.settings.get("tools.maxTimeout")) * 1000;
-		const autoBackgroundWaitMs = resolveAutoBackgroundWaitMs(thresholdMs, cellTimeoutMs);
+		const autoBackgroundWaitMs = resolveAutoBackgroundWaitMs(thresholdMs, clampedCellTimeoutMs);
 		const startBackgrounded = autoBackgroundWaitMs === 0;
 
 		const rawLabel = params.title?.trim() || params.code.trim().split("\n", 1)[0] || "eval cell";
