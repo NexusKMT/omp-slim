@@ -1145,7 +1145,7 @@ export const SETTINGS_SCHEMA = {
 			tab: "appearance",
 			group: "Display",
 			label: "Resize Scrollback",
-			description: "How a settled width resize refreshes transcript rows retained in terminal scrollback",
+			description: "How a settled terminal resize refreshes transcript rows retained in terminal scrollback",
 			options: [
 				{
 					value: "append",

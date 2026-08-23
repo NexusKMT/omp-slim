@@ -411,7 +411,7 @@ export class ToolExecutionComponent extends Container {
 	// late result can update its streaming preview.
 	#sealed = false;
 	// Tool result snapshots that may be superseded by a later same-tool call
-	// while active. `hub` uses this for repeated all-running polls; `todo` uses
+	// while still in the mutable viewport. `hub` uses this for repeated all-running polls; `todo` uses
 	// it for per-turn state snapshots so only the latest list remains visible.
 	#displaceableByToolName: DisplaceableToolName | undefined;
 	// Execution start on the presentation clock (performance.now domain, the

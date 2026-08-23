@@ -87,6 +87,36 @@ class WidthReplayProvider implements TerminalFrameProvider {
 	}
 }
 
+class HeightReplayProvider implements TerminalFrameProvider {
+	#nextHistoryId = 1;
+	#retired = false;
+	resetCount = 0;
+
+	renderFrame(viewport: ViewportSize): TerminalFramePlan {
+		return {
+			history: this.#retired
+				? undefined
+				: { id: this.#nextHistoryId, rows: ["real-todo-block", "real-read-block", "real-bash-block"] },
+			viewport: ["dot-live-one", "dot-live-two", "editor"].slice(-viewport.rows),
+		};
+	}
+
+	renderResizeFrame(): readonly string[] {
+		return ["resize frame"];
+	}
+
+	acknowledgeHistory(id: number): void {
+		if (id !== this.#nextHistoryId) return;
+		this.#nextHistoryId++;
+		this.#retired = true;
+	}
+
+	resetHistory(): void {
+		this.#retired = false;
+		this.resetCount++;
+	}
+}
+
 function plainBuffer(terminal: VirtualTerminal): string[] {
 	return terminal.getScrollBuffer().map(row => Bun.stripANSI(row).trimEnd());
 }
@@ -157,6 +187,7 @@ describe("terminal frame plans", () => {
 		).toEqual(["welcome", "editor"]);
 
 		renderScheduler.settle();
+		renderScheduler.settle();
 		expect(
 			terminal
 				.getViewport()
@@ -165,42 +196,35 @@ describe("terminal frame plans", () => {
 		).toEqual(["welcome", "editor"]);
 		tui.stop();
 	});
-	it("keeps live viewport rows out of scrollback during a drag shrink", () => {
+	it("keeps live viewport rows out of scrollback during a height shrink", () => {
 		// Committed history above a pressured live tail (compact placeholder
-		// rows). A multi-step drag shrink pushes screen rows into scrollback,
-		// but only committed history and blanks may leave the screen — live
-		// placeholder rows must never become permanent scrollback bytes (their
-		// real blocks commit through the ordered history path instead).
+		// rows). The terminal can push a placeholder before the resize callback runs,
+		// so rebuild the semantic history after every geometry change: only real
+		// finalized blocks become permanent scrollback bytes.
 		const terminal = new VirtualTerminal(20, 6);
-		const provider: TerminalFrameProvider = {
-			renderFrame: (viewport: ViewportSize) => ({
-				history: { id: 1, rows: ["hist-1", "hist-2", "hist-3"] },
-				viewport: ["dot-live-one", "dot-live-two", "editor"].slice(-viewport.rows),
-			}),
-			renderResizeFrame: () => ["resize frame"],
-			acknowledgeHistory: () => {},
-		};
+		const provider = new HeightReplayProvider();
 		const renderScheduler = new ResizeScheduler();
 		const tui = new TUI(terminal, undefined, { renderScheduler });
 		tui.setFrameProvider(provider);
+		tui.setResizeScrollback("rebuild");
 		tui.start();
 		expect(terminal.getViewport().map(row => row.trimEnd())).toEqual([
-			"hist-1",
-			"hist-2",
-			"hist-3",
+			"real-todo-block",
+			"real-read-block",
+			"real-bash-block",
 			"dot-live-one",
 			"dot-live-two",
 			"editor",
 		]);
 
-		terminal.resize(20, 5); // first drag step: the terminal reflows before the app reacts
-		terminal.resize(20, 2); // live region already erased on alt entry: only history/blanks push
+		terminal.resize(20, 2); // a single large shrink can push live rows before the callback runs
 		renderScheduler.settle(); // restore the normal buffer, start the anchor probe
 		renderScheduler.settle(); // probe timeout → settled repaint
 
 		const scrollback = plainBuffer(terminal).slice(0, terminal.getBufferPosition().baseY);
 		expect(scrollback.some(row => row.includes("dot-live"))).toBe(false);
-		expect(scrollback).toContain("hist-1");
+		expect(scrollback).toEqual(["real-todo-block", "real-read-block", "real-bash-block"]);
+		expect(provider.resetCount).toBe(1);
 		tui.stop();
 	});
 

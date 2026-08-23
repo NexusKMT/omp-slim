@@ -796,7 +796,7 @@ describe("TUI inline-image budget", () => {
 		}
 	});
 
-	it("transmits image data only once; a later full redraw re-emits just the placement", async () => {
+	it("retransmits current images after a destructive redraw", async () => {
 		const term = new VirtualTerminal(40, 12);
 		const writes: string[] = [];
 		const realWrite = term.write.bind(term);
@@ -822,15 +822,15 @@ describe("TUI inline-image budget", () => {
 			tui.requestRender(true, { clearScrollback: true });
 			await settle(term);
 
-			// The repaint re-emits the placement but never re-sends the base64.
+			// The repaint re-sends the base64.
 			const repaint = writes.join("");
 			expect(repaint).toContain("\x1b_Ga=p");
-			expect(repaint).not.toContain(BASE64_ONE_PIXEL_PNG);
+			expect(repaint).toContain(BASE64_ONE_PIXEL_PNG);
 		} finally {
 			tui.stop();
 		}
 	});
-	it("deletes stale kitty placement registry entries on a destructive display reset", async () => {
+	it("deletes every kitty image on a destructive display reset", async () => {
 		const originalGraphics = { ...getKittyGraphics() };
 		const term = new VirtualTerminal(40, 12);
 		const writes: string[] = [];
@@ -844,7 +844,6 @@ describe("TUI inline-image budget", () => {
 		const tui = new TUI(term);
 		tui.setMaxInlineImages(3);
 		tui.addChild(makeImage(tui.imageBudget, "only"));
-		const id = tui.imageBudget.acquireId("only");
 
 		try {
 			tui.start();
@@ -854,15 +853,16 @@ describe("TUI inline-image budget", () => {
 			tui.resetDisplay();
 			await settle(term);
 
-			// ED2/ED3 erase text but Kitty keeps placements registered — the reset
-			// must delete every epoch the image placed (`d=i`, data retained) and
-			// then re-place it in the viewport replay.
+			// ED2/ED3 erase text but leave graphics untouched. d=A also removes
+			// untracked placements; current images must be re-sent and re-placed.
 			const repaint = writes.join("");
-			const deleteIndex = repaint.indexOf(`\x1b_Ga=d,d=i,i=${id},p=1,q=2\x1b\\`);
+			const deleteIndex = repaint.indexOf("\x1b_Ga=d,d=A,q=2\x1b\\");
 			expect(deleteIndex).toBeGreaterThanOrEqual(0);
-			const placeIndex = repaint.indexOf("\x1b_Ga=p", deleteIndex);
-			expect(placeIndex).toBeGreaterThan(deleteIndex);
-			expect(repaint).not.toContain(BASE64_ONE_PIXEL_PNG);
+			const transmitIndex = repaint.indexOf("\x1b_Ga=t", deleteIndex);
+			const placeIndex = repaint.indexOf("\x1b_Ga=p", transmitIndex);
+			expect(transmitIndex).toBeGreaterThan(deleteIndex);
+			expect(placeIndex).toBeGreaterThan(transmitIndex);
+			expect(repaint).toContain(BASE64_ONE_PIXEL_PNG);
 		} finally {
 			tui.stop();
 			setKittyGraphics(originalGraphics);

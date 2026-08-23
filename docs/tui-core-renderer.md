@@ -75,8 +75,9 @@ state because the user action establishes a new display boundary. Ordinary
 renders never clear history.
 
 A resize invalidates viewport geometry and repaints the viewport at the new
-width and height. After a settled width change, `ResizeScrollbackMode` selects
-how old-width history is handled:
+width and height. After a settled resize, `ResizeScrollbackMode` selects
+how retained history is handled (including cleanup of live rows a height
+shrink may have pushed before the resize callback ran):
 
 - `rebuild` clears native history and replays one current-width transcript;
 - `append` retains native history and appends a current-width transcript copy;
@@ -140,7 +141,7 @@ image environment settings.
    id; it never derives history from viewport row position.
 3. Ordinary frames diff and repaint the viewport only. They never rewrite,
    audit, clear, or replay retained history.
-4. Settled width resizes follow the configured replay mode without deriving
+4. Settled resizes follow the configured replay mode without deriving
    history from cross-width physical row arithmetic.
 5. Only explicit display resets and `rebuild` resize mode destructively clear
    native history.
