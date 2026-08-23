@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Format streaming thinking blocks incrementally — O(1) per append tick instead of O(text²) full re-scan.
+
 ## [18.0.3] - 2026-08-23
 
 ### Added
