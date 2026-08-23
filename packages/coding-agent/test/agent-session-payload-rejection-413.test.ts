@@ -861,7 +861,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		expect(providerCtx.some(m => m.role === "assistant" && m.stopReason === "error")).toBe(false);
 	});
 	it("blocks status-only Content Too Large rejections with no context window", async () => {
-
 		await createSession(null);
 		const checkSpy = vi.spyOn(SessionMaintenance.prototype, "checkCompaction");
 		const prepareSpy = vi.spyOn(compactionModule, "prepareCompaction");

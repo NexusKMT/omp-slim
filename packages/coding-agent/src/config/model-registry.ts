@@ -208,10 +208,8 @@ export class ModelRegistry {
 	#suppressedSelectors: Map<string, number> = new Map();
 	#backgroundRefresh?: Promise<void>;
 	#credentialScopedCacheHydration?: Promise<void>;
-	#configuredDiscoveryInFlight: Map<
-		DiscoveryProviderConfig,
-		Map<ModelRefreshStrategy, Promise<Model<Api>[]>>
-	> = new Map();
+	#configuredDiscoveryInFlight: Map<DiscoveryProviderConfig, Map<ModelRefreshStrategy, Promise<Model<Api>[]>>> =
+		new Map();
 	#policyReapply?: Promise<void>;
 	#lastDiscoveryWarnings: Map<string, string> = new Map();
 	// Runtime extension model overlays — persist across refresh() cycles so that
