@@ -8,12 +8,24 @@ import { probeCandidates, runBoundedProbe } from "../../src/eval/probe";
 // A cross-platform "hangs forever" command: re-invoke the running Bun to sleep.
 const bun = process.execPath;
 const HANG = [bun, "-e", "await Bun.sleep(60_000)"];
+const IGNORE_TERM = [bun, "-e", 'process.on("SIGTERM", () => {}); await Bun.sleep(60_000)'];
 const baseEnv = (): Record<string, string | undefined> => ({ ...process.env });
 
 describe("runBoundedProbe", () => {
 	test("a hung probe is bounded by its timeout instead of hanging (regression: #9466)", async () => {
 		const start = Date.now();
 		const result = await runBoundedProbe(HANG, { cwd: process.cwd(), env: baseEnv(), timeoutMs: 300 });
+		expect(result).toEqual({ exitCode: null, timedOut: true, aborted: false });
+		expect(Date.now() - start).toBeLessThan(5_000);
+	});
+
+	test("force-kills a probe that ignores SIGTERM when its timeout expires", async () => {
+		const start = Date.now();
+		const result = await runBoundedProbe(IGNORE_TERM, {
+			cwd: process.cwd(),
+			env: baseEnv(),
+			timeoutMs: 300,
+		});
 		expect(result).toEqual({ exitCode: null, timedOut: true, aborted: false });
 		expect(Date.now() - start).toBeLessThan(5_000);
 	});

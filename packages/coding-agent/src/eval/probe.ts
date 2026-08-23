@@ -77,20 +77,22 @@ export async function runBoundedProbe(
 	});
 	let timedOut = false;
 	let aborted = false;
-	const kill = (): void => {
+	const forceKill = (): void => {
 		try {
-			proc.kill();
+			// Availability probes own no persistent state. Use SIGKILL directly:
+			// a shim that ignores SIGTERM must not outlive the discovery bound.
+			proc.kill("SIGKILL");
 		} catch {
 			// Already exited; nothing to reap.
 		}
 	};
 	const timer = setTimeout(() => {
 		timedOut = true;
-		kill();
+		forceKill();
 	}, bound);
 	const onAbort = (): void => {
 		aborted = true;
-		kill();
+		forceKill();
 	};
 	signal?.addEventListener("abort", onAbort, { once: true });
 	try {
