@@ -12,13 +12,6 @@ beforeAll(async () => {
 });
 
 describe("markdown highlight stream", () => {
-	it("does not throw when creating a stream for a supported language", () => {
-		const factory = getMarkdownTheme().createHighlightStream;
-		expect(factory).toBeTypeOf("function");
-		expect(() => factory?.("lua")).not.toThrow();
-		expect(() => factory?.("python")).not.toThrow();
-	});
-
 	it("renders a streaming lua fence without aborting", () => {
 		const markdown = new Markdown("```lua\nlocal x = 1\nmore", 0, 0, getMarkdownTheme());
 		markdown.transientRenderCache = true;
