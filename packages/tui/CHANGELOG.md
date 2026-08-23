@@ -9,11 +9,13 @@
 - Fixed inline images vanishing from the transcript and scrollback when the session exits: stop no longer deletes transmitted Kitty images from the terminal's graphics store.
 
 ## [18.0.2] - 2026-08-23
+### Changed
+
+- Streaming markdown renders now cache rendered+wrapped rows for the unfrozen tail (keyed on token identity) and splice byte-identical rows, re-rendering only the changed last token each frame — O(delta) tail render instead of O(tail) per tick, −26.6% median frame cost on tight 128KB streaming docs ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
 
 ### Fixed
 
 - Fixed visible history being erased when enlarging the terminal.
-
 ## [18.0.1] - 2026-08-23
 
 ### Added
