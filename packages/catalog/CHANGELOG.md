@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed effort-less `cursor/cursor-grok-4.5` and `cursor/cursor-grok-4.6` requests being clamped to the `-low` tier, which Cursor's Start plan refuses (`ERROR_RATE_LIMITED_CHANGEABLE`), making the models unusable without an explicit `medium` — including through `omp auth-gateway`, where OpenAI-compatible clients send no effort. The collapsed row now defaults to and clamps to the `-medium` tier the plan serves ([#9478](https://github.com/can1357/oh-my-pi/issues/9478)).
+
 ## [18.0.2] - 2026-08-23
 
 ### Fixed

@@ -10,7 +10,7 @@ import {
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { stripThinkingVariantToken } from "@oh-my-pi/pi-catalog/identity/family";
 import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
-import { resolveWireModelId } from "@oh-my-pi/pi-catalog/model-thinking";
+import { defaultSupportedEffort, resolveWireModelId } from "@oh-my-pi/pi-catalog/model-thinking";
 import { googleGeminiCliModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/google";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import {
@@ -731,6 +731,54 @@ describe("Cursor Grok tier routing (issue #8803)", () => {
 		expect(resolveWireModelId(model("cursor-grok-4.5"), Effort.Medium)).toBe("cursor-grok-4.5-medium");
 		// 4.5 has no xhigh sibling: the ceiling stays at high.
 		expect(model("cursor-grok-4.5").thinking?.efforts).toEqual([Effort.Low, Effort.Medium, Effort.High]);
+	});
+
+	it("defaults the collapsed row to -medium and clamps effort-less to -medium (issue #9478)", () => {
+		const collapsed = collapseEffortVariants(
+			RAW_SIBLINGS.map(id => cursorMemberSpec(id)),
+			CURSOR_VARIANT_COLLAPSE_TABLE,
+		);
+		const g46 = collapsed.find(m => m.id === "cursor-grok-4.6");
+		const g46fast = collapsed.find(m => m.id === "cursor-grok-4.6-fast");
+		if (!g46 || !g46fast) throw new Error("cursor grok did not collapse");
+		// The Start plan refuses the -low floor; the collapsed default and the
+		// effort-less clamp target must both be the -medium fixed-settings tier.
+		expect(g46.requestModelId).toBe("cursor-grok-4.6-medium");
+		expect(g46fast.requestModelId).toBe("cursor-grok-4.6-medium-fast");
+		const model = buildModel(g46 as ModelSpec<"cursor-agent">);
+		expect(defaultSupportedEffort(model)).toBe(Effort.Medium);
+		expect(resolveWireModelId(model, defaultSupportedEffort(model))).toBe("cursor-grok-4.6-medium");
+	});
+
+	it("re-points a stale collapsed snapshot pinned to -low back to -medium (issue #9478)", () => {
+		const stale: ModelSpec<"cursor-agent"> = {
+			...cursorMemberSpec("cursor-grok-4.6"),
+			name: "Grok 4.6",
+			reasoning: true,
+			requestModelId: "cursor-grok-4.6-low",
+			thinking: {
+				mode: "effort",
+				efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
+				requiresEffort: true,
+				effortRouting: {
+					[Effort.Low]: "cursor-grok-4.6-low",
+					[Effort.Medium]: "cursor-grok-4.6-medium",
+					[Effort.High]: "cursor-grok-4.6-high",
+					[Effort.XHigh]: "cursor-grok-4.6-xhigh",
+				},
+			},
+		};
+		// Bundled/cache row (no live siblings) — the offline pass-through path.
+		const offline = collapseBuiltModelVariants([buildModel(stale)]);
+		expect(offline.find(m => m.id === "cursor-grok-4.6")?.requestModelId).toBe("cursor-grok-4.6-medium");
+		// Bundled row merged with live siblings — the online discovery path.
+		const online = collapseBuiltModelVariants([
+			buildModel(stale),
+			...RAW_SIBLINGS.filter(id => id.startsWith("cursor-grok-4.6-") && !id.endsWith("-fast")).map(id =>
+				buildModel(cursorMemberSpec(id)),
+			),
+		]);
+		expect(online.find(m => m.id === "cursor-grok-4.6")?.requestModelId).toBe("cursor-grok-4.6-medium");
 	});
 });
 
