@@ -76,12 +76,10 @@ export async function checkRubyKernelAvailability(
 	const key = `${resolvedCwd}\0${interpreter ?? ""}`;
 	const cached = availabilityCache.get(key);
 	if (cached) return await cached;
-	const probe = probeRubyKernelAvailability(resolvedCwd, interpreter, options);
-	availabilityCache.set(key, probe);
-	const result = await probe;
-	if (!result.ok && availabilityCache.get(key) === probe) {
-		availabilityCache.delete(key);
-	}
+	// Probe controls belong to one caller. Do not share an in-flight promise:
+	// aborting one eval must not cancel a concurrent session's availability check.
+	const result = await probeRubyKernelAvailability(resolvedCwd, interpreter, options);
+	if (result.ok) availabilityCache.set(key, Promise.resolve(result));
 	return result;
 }
 

@@ -475,7 +475,10 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 		// Bound backend discovery by the eval cell's own timeout and abort signal:
 		// the cell IdleTimeout is armed only later in #runCells, so a hung runtime
 		// probe would otherwise wedge the whole turn (issue #9466).
-		const cellTimeoutMs = (params.timeout ?? 30) * 1000;
+		const cellTimeoutMs =
+			params.timeout === 0
+				? 0
+				: clampTimeout("eval", params.timeout, session.settings.get("tools.maxTimeout")) * 1000;
 		const resolved = await resolveBackend(session, cellLanguage, { signal, timeoutMs: cellTimeoutMs });
 		const cells: ResolvedEvalCell[] = [
 			{

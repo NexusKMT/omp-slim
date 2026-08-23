@@ -67,6 +67,7 @@ export async function runBoundedProbe(
 		return { exitCode: null, timedOut: false, aborted: true };
 	}
 	const bound = Math.min(timeoutMs && timeoutMs > 0 ? timeoutMs : DEFAULT_PROBE_TIMEOUT_MS, DEFAULT_PROBE_TIMEOUT_MS);
+	const detached = process.platform !== "win32";
 	const proc = Bun.spawn(command, {
 		cwd,
 		env,
@@ -74,17 +75,54 @@ export async function runBoundedProbe(
 		stdout: "ignore",
 		stderr: "ignore",
 		windowsHide: true,
+		detached,
 	});
 	let timedOut = false;
 	let aborted = false;
-	const forceKill = (): void => {
+	const killDirectChild = (): void => {
 		try {
-			// Availability probes own no persistent state. Use SIGKILL directly:
-			// a shim that ignores SIGTERM must not outlive the discovery bound.
 			proc.kill("SIGKILL");
 		} catch {
 			// Already exited; nothing to reap.
 		}
+	};
+	const forceKill = (): void => {
+		// Availability probes own no persistent state. Kill their whole process
+		// tree so a shim cannot strand the real interpreter after the bound.
+		if (detached) {
+			try {
+				process.kill(-proc.pid, "SIGKILL");
+				return;
+			} catch (error) {
+				if (typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH") return;
+				// Fall back to the direct child if the group signal is denied.
+			}
+		} else {
+			try {
+				const killer = Bun.spawn(["taskkill.exe", "/PID", String(proc.pid), "/T", "/F"], {
+					stdin: "ignore",
+					stdout: "ignore",
+					stderr: "ignore",
+					windowsHide: true,
+				});
+				const fallback = setTimeout(killDirectChild, 1_000);
+				fallback.unref();
+				void killer.exited.then(
+					exitCode => {
+						clearTimeout(fallback);
+						if (exitCode !== 0) killDirectChild();
+					},
+					() => {
+						clearTimeout(fallback);
+						killDirectChild();
+					},
+				);
+				return;
+			} catch {
+				// taskkill unavailable; at least bound the direct child.
+			}
+		}
+		killDirectChild();
 	};
 	const timer = setTimeout(() => {
 		timedOut = true;

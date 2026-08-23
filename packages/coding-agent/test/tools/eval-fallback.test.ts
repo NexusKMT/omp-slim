@@ -92,6 +92,19 @@ describe("EvalTool language dispatch", () => {
 		expect(jsExecuteSpy).not.toHaveBeenCalled();
 	});
 
+	it("bounds backend probing by the effective global eval timeout", async () => {
+		const settings = Settings.isolated();
+		settings.set("tools.maxTimeout", 1);
+		const probeSpy = vi.spyOn(evalIndex.pythonBackend, "isAvailable").mockResolvedValue(false);
+
+		const tool = new EvalTool(makeSession(settings));
+		await expect(tool.execute("call-py-probe-timeout", { language: "py", code: "never runs" })).rejects.toThrow(
+			/Python backend is unavailable/,
+		);
+
+		expect(probeSpy.mock.calls[0]?.[1]).toMatchObject({ timeoutMs: 1_000 });
+	});
+
 	for (const testCase of [
 		{ language: "py", backend: evalIndex.pythonBackend },
 		{ language: "rb", backend: evalIndex.rubyBackend },

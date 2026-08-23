@@ -3,6 +3,9 @@
 // advance a child process's execution or resolve its `exited` promise, so the
 // real-timer exception in ts-no-test-timers applies here.
 import { describe, expect, test } from "bun:test";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { probeCandidates, runBoundedProbe } from "../../src/eval/probe";
 
 // A cross-platform "hangs forever" command: re-invoke the running Bun to sleep.
@@ -28,6 +31,44 @@ describe("runBoundedProbe", () => {
 		});
 		expect(result).toEqual({ exitCode: null, timedOut: true, aborted: false });
 		expect(Date.now() - start).toBeLessThan(5_000);
+	});
+
+	test("kills descendants spawned by an interpreter shim", async () => {
+		const pidFile = join(tmpdir(), `omp-probe-grandchild-${process.pid}-${Date.now()}.pid`);
+		let grandchildPid: number | undefined;
+		const wrapper = [
+			bun,
+			"-e",
+			`const child=Bun.spawn([process.execPath,"-e","await Bun.sleep(60_000)"],{stdin:"ignore",stdout:"ignore",stderr:"ignore"});await Bun.write(${JSON.stringify(pidFile)},String(child.pid));await child.exited`,
+		];
+		try {
+			const result = await runBoundedProbe(wrapper, {
+				cwd: process.cwd(),
+				env: baseEnv(),
+				timeoutMs: 1_000,
+			});
+			expect(result).toEqual({ exitCode: null, timedOut: true, aborted: false });
+			grandchildPid = Number(await Bun.file(pidFile).text());
+			const deadline = Date.now() + 2_000;
+			while (Date.now() < deadline) {
+				try {
+					process.kill(grandchildPid, 0);
+					await Bun.sleep(25);
+				} catch {
+					break;
+				}
+			}
+			expect(() => process.kill(grandchildPid!, 0)).toThrow();
+		} finally {
+			if (grandchildPid !== undefined) {
+				try {
+					process.kill(grandchildPid, "SIGKILL");
+				} catch {
+					// Expected when the process-tree teardown succeeded.
+				}
+			}
+			await rm(pidFile, { force: true });
+		}
 	});
 
 	test("an already-aborted signal short-circuits without spawning", async () => {

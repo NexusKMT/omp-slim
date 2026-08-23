@@ -62,15 +62,12 @@ export async function checkJuliaKernelAvailability(
 	options?: BackendProbeOptions,
 ): Promise<JuliaKernelAvailability> {
 	const cacheKey = `${path.resolve(cwd)}::${interpreter ?? ""}`;
-	let cached = availabilityCache.get(cacheKey);
-	if (!cached) {
-		cached = probeJuliaKernelAvailability(cwd, interpreter, options);
-		availabilityCache.set(cacheKey, cached);
-	}
-	const result = await cached;
-	if (!result.ok) {
-		availabilityCache.delete(cacheKey);
-	}
+	const cached = availabilityCache.get(cacheKey);
+	if (cached) return await cached;
+	// Probe controls belong to one caller. Do not share an in-flight promise:
+	// aborting one eval must not cancel a concurrent session's availability check.
+	const result = await probeJuliaKernelAvailability(cwd, interpreter, options);
+	if (result.ok) availabilityCache.set(cacheKey, Promise.resolve(result));
 	return result;
 }
 
