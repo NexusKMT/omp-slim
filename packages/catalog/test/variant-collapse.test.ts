@@ -11,6 +11,7 @@ import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { stripThinkingVariantToken } from "@oh-my-pi/pi-catalog/identity/family";
 import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
 import { defaultSupportedEffort, resolveWireModelId } from "@oh-my-pi/pi-catalog/model-thinking";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { googleGeminiCliModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/google";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import {
@@ -748,6 +749,20 @@ describe("Cursor Grok tier routing (issue #8803)", () => {
 		const model = buildModel(g46 as ModelSpec<"cursor-agent">);
 		expect(defaultSupportedEffort(model)).toBe(Effort.Medium);
 		expect(resolveWireModelId(model, defaultSupportedEffort(model))).toBe("cursor-grok-4.6-medium");
+	});
+
+	it("bundles -medium defaults for direct catalog consumers (issue #9478)", () => {
+		const defaults = [
+			["cursor-grok-4.5", "cursor-grok-4.5-medium"],
+			["cursor-grok-4.5-fast", "cursor-grok-4.5-medium-fast"],
+			["cursor-grok-4.6", "cursor-grok-4.6-medium"],
+			["cursor-grok-4.6-fast", "cursor-grok-4.6-medium-fast"],
+		] as const;
+		for (const [id, requestModelId] of defaults) {
+			const model = getBundledModel<"cursor-agent">("cursor", id);
+			expect(model.requestModelId).toBe(requestModelId);
+			expect(resolveWireModelId(model, defaultSupportedEffort(model))).toBe(requestModelId);
+		}
 	});
 
 	it("re-points a stale collapsed snapshot pinned to -low back to -medium (issue #9478)", () => {
