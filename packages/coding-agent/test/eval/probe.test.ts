@@ -3,7 +3,7 @@
 // advance a child process's execution or resolve its `exited` promise, so the
 // real-timer exception in ts-no-test-timers applies here.
 import { describe, expect, test } from "bun:test";
-import { runBoundedProbe } from "../../src/eval/probe";
+import { probeCandidates, runBoundedProbe } from "../../src/eval/probe";
 
 // A cross-platform "hangs forever" command: re-invoke the running Bun to sleep.
 const bun = process.execPath;
@@ -53,5 +53,36 @@ describe("runBoundedProbe", () => {
 			timeoutMs: 5_000,
 		});
 		expect(failing).toEqual({ exitCode: 3, timedOut: false, aborted: false });
+	});
+});
+
+describe("probeCandidates", () => {
+	test("shares one discovery deadline across hung candidates instead of paying it per candidate", async () => {
+		const start = Date.now();
+		const result = await probeCandidates(
+			[
+				{ command: HANG, env: baseEnv(), label: "cand-a" },
+				{ command: HANG, env: baseEnv(), label: "cand-b" },
+				{ command: HANG, env: baseEnv(), label: "cand-c" },
+			],
+			{ cwd: process.cwd(), timeoutMs: 300 },
+		);
+		const elapsed = Date.now() - start;
+		expect(result).toEqual({ ok: false, aborted: false, failures: expect.any(Array) });
+		// One 300ms budget total, not 3×: the whole discovery stays well under the
+		// combined per-candidate cost it would incur without a shared deadline.
+		expect(elapsed).toBeLessThan(900);
+	});
+
+	test("returns the first candidate that exits 0 and skips the rest", async () => {
+		const result = await probeCandidates(
+			[
+				{ command: [bun, "-e", "process.exit(1)"], env: baseEnv(), label: "bad" },
+				{ command: [bun, "-e", "process.exit(0)"], env: baseEnv(), label: "good" },
+				{ command: HANG, env: baseEnv(), label: "would-hang" },
+			],
+			{ cwd: process.cwd(), timeoutMs: 5_000 },
+		);
+		expect(result).toEqual({ ok: true, index: 1 });
 	});
 });

@@ -11,7 +11,7 @@ import * as path from "node:path";
 import { $flag, isBunTestRuntime, logger, Snowflake } from "@oh-my-pi/pi-utils";
 import { Settings } from "../../config/settings";
 import { BaseKernel, getRemainingTimeMs, type KernelStartOptions } from "../kernel-base";
-import { type BackendProbeOptions, runBoundedProbe } from "../probe";
+import { type BackendProbeOptions, probeCandidates } from "../probe";
 import { stageRunnerScript } from "../runner-cache";
 import { PYTHON_PRELUDE } from "./prelude";
 import RUNNER_SCRIPT from "./runner.py" with { type: "text" };
@@ -97,38 +97,25 @@ async function probePythonKernelAvailability(
 		if (runtimes.length === 0) {
 			return { ok: false, reason: "Python executable not found on PATH" };
 		}
-		// Probe each candidate in priority order and use the first that actually
-		// runs. A managed env left behind by a removed `uv` install can exist on
-		// disk yet fail to execute; falling through to the next candidate lets a
-		// working system Python take over instead of failing the whole session.
-		const failures: string[] = [];
-		for (const runtime of runtimes) {
-			try {
-				const probe = await runBoundedProbe([runtime.pythonPath, "-c", "import sys;sys.exit(0)"], {
-					cwd,
-					env: runtime.env,
-					signal: probeOpts?.signal,
-					timeoutMs: probeOpts?.timeoutMs,
-				});
-				if (probe.exitCode === 0) {
-					return { ok: true, pythonPath: runtime.pythonPath, runtime };
-				}
-				if (probe.aborted) {
-					return { ok: false, pythonPath: runtime.pythonPath, reason: "Python availability probe was cancelled." };
-				}
-				failures.push(
-					probe.timedOut
-						? `${runtime.pythonPath} (probe timed out)`
-						: `${runtime.pythonPath} (exit code ${probe.exitCode})`,
-				);
-			} catch (err) {
-				failures.push(`${runtime.pythonPath} (${err instanceof Error ? err.message : String(err)})`);
-			}
+		const result = await probeCandidates(
+			runtimes.map(runtime => ({
+				command: [runtime.pythonPath, "-c", "import sys;sys.exit(0)"],
+				env: runtime.env,
+				label: runtime.pythonPath,
+			})),
+			{ cwd, signal: probeOpts?.signal, timeoutMs: probeOpts?.timeoutMs },
+		);
+		if (result.ok) {
+			const runtime = runtimes[result.index];
+			return { ok: true, pythonPath: runtime.pythonPath, runtime };
+		}
+		if (result.aborted) {
+			return { ok: false, pythonPath: runtimes[0].pythonPath, reason: "Python availability probe was cancelled." };
 		}
 		return {
 			ok: false,
 			pythonPath: runtimes[0].pythonPath,
-			reason: `No working Python interpreter found. Tried: ${failures.join("; ")}`,
+			reason: `No working Python interpreter found. Tried: ${result.failures.join("; ")}`,
 		};
 	} catch (err) {
 		return { ok: false, reason: err instanceof Error ? err.message : String(err) };

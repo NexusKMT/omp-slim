@@ -101,3 +101,61 @@ export async function runBoundedProbe(
 		signal?.removeEventListener("abort", onAbort);
 	}
 }
+
+/** A single interpreter candidate to probe, plus the label used in failure messages. */
+export interface ProbeCandidate {
+	/** Full argv to spawn, e.g. `[pythonPath, "-c", "import sys;sys.exit(0)"]`. */
+	command: string[];
+	/** Filtered environment for this candidate. */
+	env: Record<string, string | undefined>;
+	/** Human-readable identifier (typically the interpreter path). */
+	label: string;
+}
+
+/** Outcome of probing an ordered candidate list under one shared deadline. */
+export type CandidateProbeResult = { ok: true; index: number } | { ok: false; aborted: boolean; failures: string[] };
+
+/**
+ * Probe candidates in priority order and return the first that exits 0, sharing
+ * ONE discovery deadline across the whole list. Each candidate is bounded by the
+ * budget still remaining, so N hung candidates can never consume N× the eval
+ * timeout (issue #9466 review). A fast failure (wrong exit code, ENOENT) barely
+ * touches the budget, so healthy fallbacks still get their turn.
+ */
+export async function probeCandidates(
+	candidates: ProbeCandidate[],
+	{ cwd, signal, timeoutMs }: BackendProbeOptions & { cwd: string },
+): Promise<CandidateProbeResult> {
+	const bound = Math.min(timeoutMs && timeoutMs > 0 ? timeoutMs : DEFAULT_PROBE_TIMEOUT_MS, DEFAULT_PROBE_TIMEOUT_MS);
+	const deadline = Date.now() + bound;
+	const failures: string[] = [];
+	for (let index = 0; index < candidates.length; index++) {
+		const candidate = candidates[index];
+		if (signal?.aborted) return { ok: false, aborted: true, failures };
+		const remaining = deadline - Date.now();
+		if (remaining <= 0) {
+			// Discovery budget exhausted by earlier candidates; stop rather than
+			// let each remaining candidate spend the full timeout again.
+			failures.push(`${candidate.label} (probe budget exhausted)`);
+			break;
+		}
+		try {
+			const probe = await runBoundedProbe(candidate.command, {
+				cwd,
+				env: candidate.env,
+				signal,
+				timeoutMs: remaining,
+			});
+			if (probe.exitCode === 0) return { ok: true, index };
+			if (probe.aborted) return { ok: false, aborted: true, failures };
+			failures.push(
+				probe.timedOut
+					? `${candidate.label} (probe timed out)`
+					: `${candidate.label} (exit code ${probe.exitCode})`,
+			);
+		} catch (err) {
+			failures.push(`${candidate.label} (${err instanceof Error ? err.message : String(err)})`);
+		}
+	}
+	return { ok: false, aborted: false, failures };
+}

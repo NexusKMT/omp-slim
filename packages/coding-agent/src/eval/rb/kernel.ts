@@ -12,7 +12,7 @@ import * as path from "node:path";
 import { $flag, isBunTestRuntime, logger, Snowflake } from "@oh-my-pi/pi-utils";
 import { Settings } from "../../config/settings";
 import { BaseKernel, getRemainingTimeMs, type KernelRuntimeEnv, type KernelStartOptions } from "../kernel-base";
-import { type BackendProbeOptions, runBoundedProbe } from "../probe";
+import { type BackendProbeOptions, probeCandidates } from "../probe";
 import type { KernelDisplayOutput } from "../py/display";
 import { hostHasInheritableConsole, shouldDetachKernel, shouldHideKernelWindow } from "../py/spawn-options";
 import { stageRunnerScript } from "../runner-cache";
@@ -98,34 +98,25 @@ async function probeRubyKernelAvailability(
 		if (runtimes.length === 0) {
 			return { ok: false, reason: "Ruby executable not found on PATH" };
 		}
-		const failures: string[] = [];
-		for (const runtime of runtimes) {
-			try {
-				const probe = await runBoundedProbe([runtime.rubyPath, "-e", "exit 0"], {
-					cwd,
-					env: runtime.env,
-					signal: probeOpts?.signal,
-					timeoutMs: probeOpts?.timeoutMs,
-				});
-				if (probe.exitCode === 0) {
-					return { ok: true, rubyPath: runtime.rubyPath, runtime };
-				}
-				if (probe.aborted) {
-					return { ok: false, rubyPath: runtime.rubyPath, reason: "Ruby availability probe was cancelled." };
-				}
-				failures.push(
-					probe.timedOut
-						? `${runtime.rubyPath} (probe timed out)`
-						: `${runtime.rubyPath} (exit code ${probe.exitCode})`,
-				);
-			} catch (err) {
-				failures.push(`${runtime.rubyPath} (${err instanceof Error ? err.message : String(err)})`);
-			}
+		const result = await probeCandidates(
+			runtimes.map(runtime => ({
+				command: [runtime.rubyPath, "-e", "exit 0"],
+				env: runtime.env,
+				label: runtime.rubyPath,
+			})),
+			{ cwd, signal: probeOpts?.signal, timeoutMs: probeOpts?.timeoutMs },
+		);
+		if (result.ok) {
+			const runtime = runtimes[result.index];
+			return { ok: true, rubyPath: runtime.rubyPath, runtime };
+		}
+		if (result.aborted) {
+			return { ok: false, rubyPath: runtimes[0].rubyPath, reason: "Ruby availability probe was cancelled." };
 		}
 		return {
 			ok: false,
 			rubyPath: runtimes[0].rubyPath,
-			reason: `No working Ruby interpreter found. Tried: ${failures.join("; ")}`,
+			reason: `No working Ruby interpreter found. Tried: ${result.failures.join("; ")}`,
 		};
 	} catch (err) {
 		return { ok: false, reason: err instanceof Error ? err.message : String(err) };
