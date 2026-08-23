@@ -29,6 +29,10 @@
 
 - Fixed the sticky Todo HUD being permanently collapsed; `/todo expand` now shows every phase and task, and `/todo collapse` restores the bounded preview ([#9493](https://github.com/can1357/oh-my-pi/issues/9493)).
 
+### Fixed
+
+- Fixed finalized transcript blocks rendering as runs of blank lines under viewport pressure: empty live blocks (hidden tool activity, content-less streaming blocks) no longer reserve viewport rows or emit blank rows ([#9483](https://github.com/can1357/oh-my-pi/issues/9483)).
+
 ## [18.0.3] - 2026-08-23
 
 ### Added
