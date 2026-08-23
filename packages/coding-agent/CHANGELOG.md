@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Format streaming thinking blocks incrementally — O(1) per append tick instead of O(text²) full re-scan.
+- Format streaming thinking blocks incrementally — append ticks resume the fold over only the appended suffix instead of a full O(text²) re-scan, with exact prefix verification at memcmp speed and an 8 KiB resume cap that degrades pathological no-newline streams to the exact-match memo.
 
 ## [18.0.3] - 2026-08-23
 
