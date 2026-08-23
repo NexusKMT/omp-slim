@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
 	type BlockState,
+	flushOpenToolCalls,
 	mergeCursorMcpToolCallArgs,
 	processInteractionUpdate,
 	synthesizeCursorExecToolCall,
@@ -247,6 +248,24 @@ describe("processInteractionUpdate args_text_delta handling", () => {
 			name: "get_weather",
 			arguments: { city: "Paris" },
 		});
+		expect(h.captured.map(event => event.type)).toEqual(["toolcall_start", "toolcall_end"]);
+	});
+
+	it("preserves announced args when the stream ends before tool completion", () => {
+		const h = newHarness();
+		startMcpToolCall(h, "get_weather", "call-weather", {
+			city: new TextEncoder().encode(`"Paris"`),
+		});
+
+		flushOpenToolCalls(h.output, h.stream, h.state);
+
+		expect(h.output.content[0]).toMatchObject({
+			type: "toolCall",
+			id: "call-weather",
+			name: "get_weather",
+			arguments: { city: "Paris" },
+		});
+		expect(h.state.currentToolCall).toBeNull();
 		expect(h.captured.map(event => event.type)).toEqual(["toolcall_start", "toolcall_end"]);
 	});
 

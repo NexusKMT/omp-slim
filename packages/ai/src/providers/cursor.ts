@@ -4262,7 +4262,6 @@ export function processInteractionUpdate(
 					name: args.toolName || args.name || "",
 					arguments: decodeMcpArgsMap(args.args) ?? {},
 					[kStreamingBlockIndex]: output.content.length,
-					[kStreamingPartialJson]: "",
 					[kStreamingBlockKind]: "mcp",
 					[kStreamingEnvelopeId]: update.message.value.callId || undefined,
 				};
