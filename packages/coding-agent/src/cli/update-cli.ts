@@ -1145,7 +1145,8 @@ async function verifyInstalledVersion(expectedVersion: string): Promise<Installe
 }
 
 function printVerifiedVersion(expectedVersion: string): void {
-	console.log(chalk.green(`\n${theme.status.success} Updated to ${expectedVersion}`));
+	const icon = theme?.status?.success ?? "✔";
+	console.log(chalk.green(`\n${icon} Updated to ${expectedVersion}`));
 }
 
 function formatVerificationFailure(result: InstalledVersionVerification, expectedVersion: string): string {
@@ -1920,7 +1921,8 @@ export async function runUpdateCommand(opts: {
 	const comparison = compareVersions(release.version, VERSION);
 
 	if (comparison <= 0 && !opts.force && !isChannelSwitch) {
-		console.log(chalk.green(`${theme.status.success} Already up to date`));
+		const icon = theme?.status?.success ?? "✔";
+		console.log(chalk.green(`${icon} Already up to date`));
 		return;
 	}
 
