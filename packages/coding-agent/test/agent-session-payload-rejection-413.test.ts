@@ -854,7 +854,10 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const terminalErrors = sessionManager
 			.getBranch()
 			.flatMap(entry => (entry.type === "message" ? [entry.message] : []))
-			.filter(message => message.role === "assistant" && message.stopReason === "error");
+			.filter(
+				(message): message is AgentMessage & { role: "assistant" } =>
+					message.role === "assistant" && message.stopReason === "error",
+			);
 		expect(terminalErrors).toHaveLength(1);
 		expect(terminalErrors[0]?.errorMessage).toContain("413");
 		const providerCtx = sessionManager.buildSessionContext().messages;

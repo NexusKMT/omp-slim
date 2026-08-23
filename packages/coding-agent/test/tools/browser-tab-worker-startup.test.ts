@@ -187,6 +187,7 @@ describe("browser init deadline carry-over", () => {
 					},
 				);
 				await releaseBrowser(launched, { kill: false });
+				if (!("browser" in launched)) throw new Error("Expected a puppeteer-backed browser handle");
 				const connectedAfterCallerRelease = launched.browser.connected;
 				try {
 					await acquisition;

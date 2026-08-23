@@ -1027,7 +1027,8 @@ function streamCursorWithWireMode(
 			// side-state: pendingToolCalls from a mid-turn checkpoint re-poison
 			// the new id. One rotation per failure streak; a new rotation is
 			// allowed only after the current rotated id completed a turn.
-			const currentRotated = rotatedConversationIds.get(baseConversationId);
+			const currentRotated =
+				baseConversationId === undefined ? undefined : rotatedConversationIds.get(baseConversationId);
 			const canRotate = currentRotated === undefined || successfulRotatedConversationIds.has(currentRotated);
 			if (
 				conversationId !== undefined &&

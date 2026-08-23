@@ -311,7 +311,7 @@ export class AppendOnlyContextManager {
 	#messageDigest(msg: unknown): number {
 		if (!msg || typeof msg !== "object") return 0;
 		const m = msg as Record<string, unknown>;
-		const version = messageEstimateVersion(m as AgentMessage);
+		const version = messageEstimateVersion(msg as AgentMessage);
 		const cached = this.#digestMemo.get(m);
 		if (cached !== undefined && cached.version === version) return cached.digest;
 		const payload = JSON.stringify({

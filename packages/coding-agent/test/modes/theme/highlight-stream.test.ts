@@ -15,7 +15,7 @@ describe("markdown highlight stream", () => {
 	it("renders a streaming lua fence without aborting", () => {
 		const markdown = new Markdown("```lua\nlocal x = 1\nmore", 0, 0, getMarkdownTheme());
 		markdown.transientRenderCache = true;
-		let lines: string[] = [];
+		let lines: readonly string[] = [];
 		expect(() => {
 			lines = markdown.render(80);
 		}).not.toThrow();
