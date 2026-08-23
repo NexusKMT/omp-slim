@@ -57,6 +57,22 @@ describe("isContextOverflow/isPayloadRejection - HTTP 413 variants", () => {
 		expect(isPayloadRejection(message)).toBe(true);
 	});
 
+	it("keeps media-budget numeric limits carrying a payload flag (#9235 review)", () => {
+		// `request_too_large` plus a bare numeric limit is the media-budget
+		// shape ("image count exceeds the limit of 20"). The generic limit
+		// pattern must not veto the payload flag, or sessions run token
+		// compaction that cannot shrink a vision-media budget.
+		const message = createErrorMessage("request_too_large: image count exceeds the limit of 20");
+		expect(isContextOverflow(message)).toBe(true);
+		expect(isPayloadRejection(message)).toBe(true);
+	});
+
+	it("keeps plain numeric-limit bodies without payload phrases classified as overflow", () => {
+		const message = createErrorMessage("input exceeds the limit of 200000");
+		expect(isContextOverflow(message)).toBe(true);
+		expect(isPayloadRejection(message)).toBe(false);
+	});
+
 	it("keeps request_too_large carrying token-count evidence classified as overflow", () => {
 		const message = createErrorMessage("request_too_large: prompt is too long: 300000 tokens > 200000 maximum");
 		expect(isContextOverflow(message)).toBe(true);
@@ -156,5 +172,38 @@ describe("retriable - transient-wrapped payload rejections (#9235 review)", () =
 		const id = AIError.classifyMessage({ errorMessage: "503 service unavailable" });
 		expect(AIError.is(id, AIError.Flag.Transient)).toBe(true);
 		expect(AIError.retriable(id)).toBe(true);
+	});
+});
+
+describe("classifyMessage - status-only 413 responses (#9235 review)", () => {
+	it("classifies a bare 413 status with an opaque reason phrase as payload rejection", () => {
+		// Adapters surface request-size rejections as a status plus a generic
+		// reason phrase; no text names tokens, but resending identical bytes
+		// cannot succeed, so the payload flag must gate retries.
+		const id = AIError.classifyMessage({ errorStatus: 413, errorMessage: "Content Too Large" });
+		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(true);
+		expect(AIError.is(id, AIError.Flag.ContextOverflow)).toBe(false);
+		expect(AIError.retriable(id)).toBe(false);
+	});
+
+	it("classifies a completely body-less 413 as payload rejection", () => {
+		const id = AIError.classifyMessage({ errorStatus: 413 });
+		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(true);
+	});
+
+	it("does not promote other statuses to payload rejection", () => {
+		const id = AIError.classifyMessage({ errorStatus: 400, errorMessage: "Content Too Large" });
+		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(false);
+	});
+
+	it("keeps token-context evidence outranking the status fallback", () => {
+		// A 413 whose body carries genuine token wording stays on the
+		// compaction path — provider token accounting beats the bare status.
+		const id = AIError.classifyMessage({
+			errorStatus: 413,
+			errorMessage: "maximum context length is 128000 tokens",
+		});
+		expect(AIError.is(id, AIError.Flag.ContextOverflow)).toBe(true);
+		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(false);
 	});
 });

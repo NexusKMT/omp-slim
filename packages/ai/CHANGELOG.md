@@ -11,6 +11,7 @@
 ### Fixed
 - HTTP 413s caused by request byte size or provider media budgets no longer classify as token-context overflows, so token compaction is no longer attempted against them ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
 - Transient-wrapped payload rejections (`Provider returned error: 413 …`) are no longer retried against the same model; recovery goes through the fallback chain and honest 413 handling instead ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- Bare HTTP 413 statuses with opaque or empty bodies (e.g. the `Content Too Large` reason phrase) now classify as payload rejections instead of falling through unclassified, and media-budget numeric limits (`image count exceeds the limit of 20`) keep their payload classification rather than being vetoed into token-compaction routing ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
 
 - Captured bounded Devin Connect trailer details and request-shape evidence for diagnosing intermittent `invalid_argument` stream rejections ([#4218](https://github.com/can1357/oh-my-pi/issues/4218)).
 - Fixed abandoned `auth-broker-snapshot.enc.*.tmp` files accumulating in the cache directory when a process exited mid-write; stale temp files are now swept on each cache write.

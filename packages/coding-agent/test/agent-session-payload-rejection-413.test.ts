@@ -188,6 +188,56 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		return message;
 	}
 
+	function statusOnlyPayloadAssistant(): AssistantMessage {
+		const message = {
+			role: "assistant",
+			content: [{ type: "text", text: "" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet-4-5",
+			stopReason: "error",
+			errorStatus: 413,
+			errorMessage: "Content Too Large",
+			usage: {
+				input: 1000,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 1000,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+		} as AssistantMessage;
+		// Stamp exactly like the transport boundary: classifyMessage consumes
+		// errorStatus, so the bare reason phrase classifies PayloadRejected
+		// via the status fallback under test.
+		message.errorId = AIError.classifyMessage(message);
+		return message;
+	}
+
+	function mediaBudgetPayloadAssistant(): AssistantMessage {
+		const message = {
+			role: "assistant",
+			content: [{ type: "text", text: "" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet-4-5",
+			stopReason: "error",
+			errorMessage: "request_too_large: image count exceeds the limit of 20",
+			usage: {
+				input: 1000,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 1000,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+		} as AssistantMessage;
+		message.errorId = AIError.classifyMessage(message);
+		return message;
+	}
+
 	it("honestly skips token compaction for a low-token payload-shaped 413", async () => {
 		await createSession(200_000);
 		const checkSpy = vi.spyOn(SessionMaintenance.prototype, "checkCompaction");
@@ -639,5 +689,69 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		expect(payloadNotices.length).toBe(1);
 		expect(payloadNotices[0].level).toBe("warning");
 		expect(startCount()).toBe(0);
+	});
+
+	it("blocks status-only Content Too Large rejections with no context window", async () => {
+		// Adapters that surface request-size rejections as HTTP 413 plus an
+		// opaque reason phrase classify PayloadRejected via the status
+		// fallback; the identical request must never be blind-resent
+		// (#9235 review).
+		await createSession(null);
+		const checkSpy = vi.spyOn(SessionMaintenance.prototype, "checkCompaction");
+		const prepareSpy = vi.spyOn(compactionModule, "prepareCompaction");
+		const promptSpy = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined as never);
+		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
+
+		const notices = collectNotices();
+		const startCount = countCompactionEvents("auto_compaction_start");
+
+		const assistantMsg = statusOnlyPayloadAssistant();
+		session.agent.emitExternalEvent({ type: "message_end", message: assistantMsg });
+		session.agent.emitExternalEvent({ type: "agent_end", messages: [assistantMsg] });
+
+		await session.waitForIdle();
+
+		expect(startCount()).toBe(0);
+		expect(prepareSpy).not.toHaveBeenCalled();
+		expect(promptSpy).not.toHaveBeenCalled();
+		expect(continueSpy).not.toHaveBeenCalled();
+		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
+		expect(payloadNotices.length).toBe(1);
+		const checkResults = await Promise.all(
+			checkSpy.mock.results.map(r => r.value as { automaticContinuationBlocked?: boolean }),
+		);
+		expect(checkResults.some(r => r.automaticContinuationBlocked === true)).toBe(true);
+	});
+
+	it("honestly skips compaction for media-budget numeric-limit rejections", async () => {
+		// "request_too_large + image count exceeds the limit of 20" keeps its
+		// payload flag now that generic numeric limits no longer veto it, and
+		// local usage shows real headroom: no compaction may run against a
+		// budget token compaction cannot shrink (#9235 review).
+		await createSession(200_000);
+		const checkSpy = vi.spyOn(SessionMaintenance.prototype, "checkCompaction");
+		const prepareSpy = vi.spyOn(compactionModule, "prepareCompaction");
+		const promptSpy = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined as never);
+		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
+
+		const notices = collectNotices();
+		const startCount = countCompactionEvents("auto_compaction_start");
+
+		const assistantMsg = mediaBudgetPayloadAssistant();
+		session.agent.emitExternalEvent({ type: "message_end", message: assistantMsg });
+		session.agent.emitExternalEvent({ type: "agent_end", messages: [assistantMsg] });
+
+		await session.waitForIdle();
+
+		expect(startCount()).toBe(0);
+		expect(prepareSpy).not.toHaveBeenCalled();
+		expect(promptSpy).not.toHaveBeenCalled();
+		expect(continueSpy).not.toHaveBeenCalled();
+		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
+		expect(payloadNotices.length).toBe(1);
+		const checkResults = await Promise.all(
+			checkSpy.mock.results.map(r => r.value as { automaticContinuationBlocked?: boolean }),
+		);
+		expect(checkResults.some(r => r.automaticContinuationBlocked === true)).toBe(true);
 	});
 });
