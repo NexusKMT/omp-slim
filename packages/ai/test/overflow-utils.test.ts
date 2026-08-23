@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import * as AIError from "@oh-my-pi/pi-ai/error";
 import { isContextOverflow, isPayloadRejection } from "@oh-my-pi/pi-ai/error";
 
 function createErrorMessage(errorMessage: string): AssistantMessage {
@@ -140,5 +141,20 @@ describe("isPayloadRejection - ambiguous no-body statuses", () => {
 		const message = createErrorMessage("400 status code (no body)");
 		expect(isContextOverflow(message)).toBe(true);
 		expect(isPayloadRejection(message)).toBe(false);
+	});
+});
+
+describe("retriable - transient-wrapped payload rejections (#9235 review)", () => {
+	it("keeps transient-wrapped payload rejections non-retryable", () => {
+		const id = AIError.classifyMessage({ errorMessage: "Provider returned error: 413 Payload Too Large" });
+		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(true);
+		expect(AIError.is(id, AIError.Flag.Transient)).toBe(true);
+		expect(AIError.retriable(id)).toBe(false);
+	});
+
+	it("keeps plain transport failures retryable", () => {
+		const id = AIError.classifyMessage({ errorMessage: "503 service unavailable" });
+		expect(AIError.is(id, AIError.Flag.Transient)).toBe(true);
+		expect(AIError.retriable(id)).toBe(true);
 	});
 });

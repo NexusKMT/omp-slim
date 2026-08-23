@@ -434,6 +434,37 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		expect(payloadNotices.length).toBe(1);
 		expect(payloadNotices[0].level).toBe("warning");
 	});
+	it("does not blind-resend a transient-wrapped payload rejection before maintenance sees it", async () => {
+		// "Provider returned error: 413 ..." classifies as PayloadRejected +
+		// Transient. The transient flag must not buy a same-model retry: the
+		// unchanged oversized request cannot succeed, so the failure must fall
+		// through the retry ladder straight into payload arbitration.
+		const requestedModels: string[] = [];
+		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		await createSession(
+			200_000,
+			{ toolText: "seed" },
+			{
+				streamFn: (model, context, options) => {
+					requestedModels.push(`${model.provider}/${model.id}`);
+					primaryMock.push({ throw: "Provider returned error: 413 Payload Too Large" });
+					return primaryMock.stream(model, context, options);
+				},
+				extraSettings: { "retry.baseDelayMs": 5 },
+			},
+		);
+
+		const notices = collectNotices();
+		const startCount = countCompactionEvents("auto_compaction_start");
+		await session.prompt("hello");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5"]);
+		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
+		expect(payloadNotices.length).toBe(1);
+		expect(payloadNotices[0].level).toBe("warning");
+		expect(startCount()).toBe(0);
+	});
 	it("consults the chain before overflow maintenance absorbs a high-occupancy payload rejection", async () => {
 		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
 		if (!fallbackModel) {

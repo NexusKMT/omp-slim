@@ -304,6 +304,12 @@ export function is(id: number | undefined, flag: Flag): boolean {
 
 export function retriable(id: number | undefined, opts?: { replayUnsafe?: boolean }): boolean {
 	if (is(id, Flag.ContentBlocked)) return false;
+	// A payload rejection names the request bytes as the problem: resending
+	// them to the same model can never succeed, even when gateway transport
+	// wording ("Provider returned error: 413 ...") co-flags Transient.
+	// Recovery belongs to the cross-provider fallback chain and session
+	// maintenance arbitration (#9235), never to a same-model resend.
+	if (is(id, Flag.PayloadRejected)) return false;
 	if (opts?.replayUnsafe) return false;
 	if (is(id, Flag.MalformedFunctionCall)) return true;
 	return ((id ?? 0) & RETRIABLE_KINDS) !== 0;
