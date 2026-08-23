@@ -370,15 +370,17 @@ export abstract class BaseKernel<TExecuteOptions extends KernelExecuteOptions = 
 			// signal above never reaches anything it spawned. Sweep the group too.
 			killProcessGroup(proc.pid, "SIGTERM");
 			result = await this.#waitForExitWithTimeout(timeoutMs);
-		}
-		if (!result) {
-			try {
-				proc.kill("SIGKILL");
-			} catch {
-				/* ignore */
+			if (!result) {
+				try {
+					proc.kill("SIGKILL");
+				} catch {
+					/* ignore */
+				}
 			}
+			// The leader exiting after SIGTERM does not prove its descendants did.
+			// Always finish an attempted group shutdown with a SIGKILL sweep.
 			killProcessGroup(proc.pid, "SIGKILL");
-			result = await this.#waitForExitWithTimeout(timeoutMs);
+			if (!result) result = await this.#waitForExitWithTimeout(timeoutMs);
 		}
 
 		const confirmed = !!result;
