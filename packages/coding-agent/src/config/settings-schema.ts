@@ -3749,7 +3749,7 @@ export const SETTINGS_SCHEMA = {
 
 	"bash.autoBackground.enabled": {
 		type: "boolean",
-		default: false,
+		default: true,
 		ui: {
 			tab: "shell",
 			group: "Bash",
