@@ -1177,20 +1177,24 @@ function refreshCollapsedThinking<TSpec extends VariantSpecLike>(
  * re-points when the target is a live route in the snapshot's own
  * `effortRouting`. Returns `spec` by reference when unchanged.
  */
-function reconcileDefaultMember<TSpec extends VariantSpecLike>(spec: TSpec, family: EffortVariantFamily): TSpec {
+function reconcileDefaultMember<TSpec extends VariantSpecLike>(
+	spec: TSpec,
+	family: EffortVariantFamily,
+	presentMembers?: ReadonlySet<string>,
+): TSpec {
 	const defaultMember = family.defaultMember;
-	if (defaultMember === undefined || defaultMember === spec.id || spec.requestModelId === defaultMember) return spec;
+	if (defaultMember === undefined || defaultMember === spec.id) return spec;
+	const target =
+		presentMembers === undefined || presentMembers.has(defaultMember)
+			? defaultMember
+			: family.members.find(id => presentMembers.has(id));
+	if (target === undefined || spec.requestModelId === target) return spec;
 	const routing = spec.thinking?.effortRouting;
 	if (routing === undefined) return spec;
-	let routed = false;
 	for (const key in routing) {
-		if (routing[key as Effort | "off"] === defaultMember) {
-			routed = true;
-			break;
-		}
+		if (routing[key as Effort | "off"] === target) return { ...spec, requestModelId: target };
 	}
-	if (!routed) return spec;
-	return { ...spec, requestModelId: defaultMember };
+	return spec;
 }
 
 /**
@@ -1246,10 +1250,11 @@ export function collapseEffortVariants<TSpec extends VariantSpecLike>(
 		if (existing) familyIdBySpecId.set(family.id, family.id);
 
 		if (existingCollapsed) {
-			// Mixed input: the collapsed entry (live truth) wins; stale raw
-			// members are deduped away. Retired targets are re-pointed first, then
-			// the default wire id is re-pointed to the family's preferred member.
-			replacement.set(family.id, reconcileDefaultMember(reconciled as TSpec, family));
+			// Mixed input: the collapsed entry wins; stale raw members are deduped
+			// away. Retired targets are re-pointed first, then the default wire id
+			// prefers the family's declared member when live and otherwise falls
+			// back to the first member the account actually advertised.
+			replacement.set(family.id, reconcileDefaultMember(reconciled as TSpec, family, new Set(rawPresent)));
 			continue;
 		}
 

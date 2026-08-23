@@ -785,6 +785,15 @@ describe("Cursor Grok tier routing (issue #8803)", () => {
 			),
 		]);
 		expect(online.find(m => m.id === "cursor-grok-4.6")?.requestModelId).toBe("cursor-grok-4.6-medium");
+
+		// Account-specific discovery can omit the preferred tier. Do not route
+		// effort-less requests to a sibling the account did not advertise.
+		const withoutMedium = collapseBuiltModelVariants([
+			buildModel({ ...stale, requestModelId: "cursor-grok-4.6-medium" }),
+			buildModel(cursorMemberSpec("cursor-grok-4.6-low")),
+			buildModel(cursorMemberSpec("cursor-grok-4.6-high")),
+		]);
+		expect(withoutMedium.find(m => m.id === "cursor-grok-4.6")?.requestModelId).toBe("cursor-grok-4.6-low");
 	});
 });
 
