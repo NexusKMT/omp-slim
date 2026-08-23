@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed retired welcome-screen rows disappearing from terminal history after a resize.
+
 ## [18.0.3] - 2026-08-23
 
 ### Added
