@@ -459,6 +459,57 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		expect(session.model?.provider).toBe(fallbackModel.provider);
 	});
 
+	it("consults a configured fallback chain for dual-flag bare-413 rejections", async () => {
+		// Bare "413 status code (no body)" classifies as BOTH PayloadRejected
+		// and ContextOverflow. The overflow co-flag must not bar model
+		// switching: a different provider's byte budget can accept the very
+		// request the primary rejected, so the configured chain is consulted
+		// before any maintenance outcome stands (#9235 review).
+		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
+		if (!fallbackModel) {
+			throw new Error("Expected bundled openai fallback model to exist");
+		}
+
+		const requestedModels: string[] = [];
+		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const fallbackMock = createMockModel({ id: fallbackModel.id, provider: fallbackModel.provider });
+		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
+		await createSession(200_000, undefined, {
+			streamFn: (model, context, options) => {
+				requestedModels.push(`${model.provider}/${model.id}`);
+				if (model.provider === "anthropic") {
+					primaryMock.push({ throw: "413 status code (no body)" });
+					return primaryMock.stream(model, context, options);
+				}
+				fallbackMock.push({ content: ["recovered on configured fallback"] });
+				return fallbackMock.stream(model, context, options);
+			},
+			extraSettings: {
+				"retry.baseDelayMs": 5,
+				"retry.modelFallback": true,
+				"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
+			},
+		});
+		activateOngoingGoal("goal-dual-flag-fallback");
+		session.subscribe(event => {
+			if (event.type === "retry_fallback_applied") fallbackEvents.push(event);
+		});
+
+		const notices = collectNotices();
+		const endCount = countCompactionEvents("auto_compaction_end");
+
+		await session.prompt("work on the goal");
+		await session.waitForIdle();
+
+		expect(endCount()).toBe(0);
+		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
+		expect(payloadNotices.length).toBe(0);
+		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5", `${fallbackModel.provider}/${fallbackModel.id}`]);
+		expect(fallbackEvents).toHaveLength(1);
+		expect(fallbackEvents[0].to).toBe(`${fallbackModel.provider}/${fallbackModel.id}`);
+		expect(session.model?.provider).toBe(fallbackModel.provider);
+	});
+
 	it("keeps the goal-mode BLOCK terminal when no fallback chain is configured", async () => {
 		const requestedModels: string[] = [];
 		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });

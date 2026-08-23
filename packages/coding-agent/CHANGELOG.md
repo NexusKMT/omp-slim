@@ -39,6 +39,7 @@
 ### Fixed
 - Fixed byte-size and media-budget HTTP 413 rejections (e.g. provider vision budgets rejecting archived image frames) dead-ending token compaction with a misleading "freed too little context" warning: with real token headroom the rejection now surfaces honestly and automatic retries of the failing payload are blocked ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
 - Status-only HTTP 413 rejections (opaque reason phrase or empty body) and media-budget numeric-limit rejections (`image count exceeds the limit of N`) now surface the honest payload-rejection warning and block automatic resends instead of dead-ending in token compaction ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- Ambiguous HTTP 413 rejections (bare status with no body, media-budget numeric limits) now consult a configured model-fallback chain before any maintenance outcome stands: a different provider's larger byte or media budget can accept the request the primary rejected ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
 
 - Fixed UI jitter in the edit tool gutter by reserving space for line counts
 - Edit-tool add lines written directly above a `` gap now insert under their anchor line instead of splicing at the post-gap anchor, often mid-line without a newline.

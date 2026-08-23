@@ -152,7 +152,6 @@ function matchesPayloadRejectionText(text: string): boolean {
 	// dual flag for maintenance-layer headroom arbitration.
 	if (CONTEXT_OVERFLOW_EVIDENCE_PATTERNS.some(p => p.test(text))) return false;
 	return true;
-
 }
 
 const TIMEOUT_PATTERN = /\b(?:operation\s+)?timed?\s*out\b|\btimeout\b|\bstream stall\b/i;

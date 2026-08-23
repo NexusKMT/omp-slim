@@ -1741,7 +1741,15 @@ export class TurnRecovery {
 		if (this.isClassifierRefusal(message)) return false;
 		const id = this.#classifyRetryMessage(message);
 		if (AIError.is(id, AIError.Flag.Abort) || AIError.is(id, AIError.Flag.UserInterrupt)) return false;
-		if (AIError.isContextOverflow(message, model.contextWindow ?? 0)) return false;
+		// Bare 413s and media-budget numeric limits classify with BOTH
+		// PayloadRejected and ContextOverflow (deliberately ambiguous). The
+		// payload co-flag is provider evidence that the request itself was
+		// rejected — something a different provider's larger byte/media
+		// budget CAN accept — so only PURE context overflows are barred
+		// from model switching; those belong to compaction (#9235 review).
+		if (AIError.isContextOverflow(message, model.contextWindow ?? 0) && !AIError.isPayloadRejection(message)) {
+			return false;
+		}
 		if (this.#hasReplayUnsafeOutput(message)) return false;
 		const currentSelector = formatRetryFallbackSelector(model, this.#host.thinkingLevel());
 		return this.retryFallbackChainKeys(currentSelector).some(
