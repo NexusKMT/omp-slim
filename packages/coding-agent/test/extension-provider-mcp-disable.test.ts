@@ -22,6 +22,7 @@ import { loadAllExtensions } from "@oh-my-pi/pi-coding-agent/modes/components/ex
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { __resetDirsFromEnvForTests, removeSyncWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 import { MANY_TOOL_COUNT, manyToolName } from "./fixtures/many-tools-mcp";
+import { restoreEnvValue } from "./helpers/settings-test-state";
 
 const FIXTURE_PATH = path.join(import.meta.dir, "fixtures", "many-tools-mcp.ts");
 const SERVER = "bravo";
@@ -58,6 +59,7 @@ describe("provider master-disable disconnects live MCP", () => {
 	let projectDir = "";
 	let userAgentDir = "";
 	let manager: MCPManager;
+	let originalAgentDirEnv: string | undefined;
 	let vscodeConfigPath = "";
 
 	beforeEach(async () => {
@@ -65,6 +67,7 @@ describe("provider master-disable disconnects live MCP", () => {
 		enableProvider(PROVIDER);
 		projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-provider-mcp-"));
 		userAgentDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-provider-mcp-user-"));
+		originalAgentDirEnv = process.env.PI_CODING_AGENT_DIR;
 		setAgentDir(userAgentDir);
 		vscodeConfigPath = path.join(projectDir, ".vscode", "mcp.json");
 		fs.mkdirSync(path.dirname(vscodeConfigPath), { recursive: true });
@@ -88,6 +91,8 @@ describe("provider master-disable disconnects live MCP", () => {
 	afterEach(async () => {
 		enableProvider(PROVIDER);
 		resetSettingsForTest();
+		restoreEnvValue("PI_CODING_AGENT_DIR", originalAgentDirEnv);
+
 		__resetDirsFromEnvForTests();
 		await manager.disconnectAll();
 		removeSyncWithRetries(projectDir);

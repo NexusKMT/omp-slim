@@ -8,6 +8,7 @@ import { initializeWithSettings, reset as resetDiscoveryCache } from "@oh-my-pi/
 import { ExtensionDashboard } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/extension-dashboard";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { __resetDirsFromEnvForTests, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
+import { restoreEnvValue } from "./helpers/settings-test-state";
 
 const PAGE_UP = "\x1b[5~";
 const PAGE_DOWN = "\x1b[6~";
@@ -22,6 +23,7 @@ describe("ExtensionDashboard inspector keyboard scroll", () => {
 	let projectDir = "";
 	let userAgentDir = "";
 	let originalHome: string | undefined;
+	let originalAgentDirEnv: string | undefined;
 	let originalRows: number | undefined;
 
 	beforeEach(async () => {
@@ -29,6 +31,7 @@ describe("ExtensionDashboard inspector keyboard scroll", () => {
 		resetDiscoveryCache();
 		resetSettingsForTest();
 		originalHome = process.env.HOME;
+		originalAgentDirEnv = process.env.PI_CODING_AGENT_DIR;
 		originalRows = process.stdout.rows;
 		Object.defineProperty(process.stdout, "rows", { configurable: true, value: 18 });
 		projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-ext-inspector-scroll-"));
@@ -48,6 +51,7 @@ describe("ExtensionDashboard inspector keyboard scroll", () => {
 		resetSettingsForTest();
 		resetDiscoveryCache();
 		clearFsCache();
+		restoreEnvValue("PI_CODING_AGENT_DIR", originalAgentDirEnv);
 		__resetDirsFromEnvForTests();
 		if (originalHome === undefined) delete process.env.HOME;
 		else process.env.HOME = originalHome;
