@@ -190,6 +190,10 @@
 
 - Applied registered extension shell environments to interactive `!` commands.
 
+### Fixed
+
+- Fixed clearing the transcript or switching sessions while a tool was still running leaving spinner animation work active for the rest of the process ([#8733](https://github.com/can1357/oh-my-pi/pull/8733) follow-up).
+
 ## [18.0.0] - 2026-08-22
 
 ### Added
