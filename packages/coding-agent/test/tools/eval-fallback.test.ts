@@ -5,6 +5,7 @@ import * as pyKernel from "@oh-my-pi/pi-coding-agent/eval/py/kernel";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { EvalTool } from "@oh-my-pi/pi-coding-agent/tools/eval";
 import { resolveEvalBackends } from "@oh-my-pi/pi-coding-agent/tools/eval-backends";
+import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 
 let originalPiPy: string | undefined;
 let originalPiJs: string | undefined;
@@ -90,6 +91,32 @@ describe("EvalTool language dispatch", () => {
 		expect(pythonExecuteSpy).toHaveBeenCalledTimes(1);
 		expect(jsExecuteSpy).not.toHaveBeenCalled();
 	});
+
+	for (const testCase of [
+		{ language: "py", backend: evalIndex.pythonBackend },
+		{ language: "rb", backend: evalIndex.rubyBackend },
+		{ language: "jl", backend: evalIndex.juliaBackend },
+	] as const) {
+		it(`preserves caller cancellation during ${testCase.language} availability probing`, async () => {
+			const settings = Settings.isolated();
+			if (testCase.language === "rb") settings.set("eval.rb", true);
+			if (testCase.language === "jl") settings.set("eval.jl", true);
+			const controller = new AbortController();
+			vi.spyOn(testCase.backend, "isAvailable").mockImplementation(async () => {
+				controller.abort();
+				return false;
+			});
+
+			const tool = new EvalTool(makeSession(settings));
+			await expect(
+				tool.execute(
+					`call-${testCase.language}-abort`,
+					{ language: testCase.language, code: "never runs" },
+					controller.signal,
+				),
+			).rejects.toBeInstanceOf(ToolAbortError);
+		});
+	}
 
 	it("dispatches each call to the backend named by its language", async () => {
 		vi.spyOn(pyKernel, "checkPythonKernelAvailability").mockResolvedValue({ ok: true });
