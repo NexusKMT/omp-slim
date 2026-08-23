@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { acquireBrowser, type BrowserHandle, releaseBrowser } from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
+import {
+	acquireBrowser,
+	type BrowserHandle,
+	holdBrowser,
+	releaseBrowser,
+} from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
 import type { ReadyInfo, WorkerInbound, WorkerOutbound } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-protocol";
 import { acquireTab, initializeTabWorkerForTest } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import { chromiumAvailable } from "./chromium-probe";
@@ -166,17 +171,30 @@ describe("browser init deadline carry-over", () => {
 				// the original init error — never the wrapped inline-fallback error.
 				const deadlineStart = performance.now() - 60_000;
 				const started = performance.now();
-				try {
-					await acquireTab(`deadline-carry-${process.pid}-${Math.random().toString(36).slice(2)}`, launched, {
+				// Mirror BrowserTool's outer acquisition lease. Its timeout can
+				// release this lease before acquireTab spends the supervisor's
+				// phase floors, but acquireTab must retain its own hold so target
+				// cleanup still has a connected Puppeteer handle.
+				holdBrowser(launched);
+				const acquisition = acquireTab(
+					`deadline-carry-${process.pid}-${Math.random().toString(36).slice(2)}`,
+					launched,
+					{
 						url: `http://127.0.0.1:${server.port}/hang`,
 						waitUntil: "domcontentloaded",
 						timeoutMs: 5_000,
 						deadlineStartMs: deadlineStart,
-					});
+					},
+				);
+				await releaseBrowser(launched, { kill: false });
+				const connectedAfterCallerRelease = launched.browser.connected;
+				try {
+					await acquisition;
 				} catch (error) {
 					failure = error;
 				}
 				const elapsed = performance.now() - started;
+				expect(connectedAfterCallerRelease).toBeTrue();
 				expect(failure).toBeDefined();
 				expect(String((failure as Error).message)).not.toContain("inline fallback also failed");
 				// Only the first attempt's floors are spent (setup floor 2 s + ready

@@ -199,8 +199,24 @@ export function getTab(name: string): TabSession | undefined {
 }
 
 export function acquireTab(name: string, browser: BrowserHandle, opts: AcquireTabOptions): Promise<AcquireTabResult> {
+	// Keep the supervisor's Puppeteer handle connected until initialization,
+	// worker termination, and abandoned-target cleanup have all been scheduled.
+	// The tool caller's outer timeout can release its own lease before this
+	// promise settles; without an acquisition-owned hold, cleanup would then
+	// run through a disconnected handle and leave the worker's page behind.
+	holdBrowser(browser);
 	const prior = acquireChains.get(name) ?? Promise.resolve();
-	const result = prior.then(() => acquireTabImpl(name, browser, opts));
+	const acquisition = prior.then(() => acquireTabImpl(name, browser, opts));
+	const result = acquisition.then(
+		async value => {
+			await releaseBrowser(browser, { kill: false });
+			return value;
+		},
+		async error => {
+			await releaseBrowser(browser, { kill: false }).catch(() => undefined);
+			throw error;
+		},
+	);
 	const tail = result.then(
 		() => undefined,
 		() => undefined,
@@ -931,17 +947,21 @@ async function forceKillTab(name: string, reason: string): Promise<void> {
 }
 
 /**
- * Best-effort close of a specific page target in the browser. A gone target
- * or a released browser is skipped: per-target lookups and the page close are
- * individually caught.
+ * Best-effort close of a specific page target in the browser. Close through
+ * the browser CDP session rather than `page.close()`: a page whose navigation
+ * wedged during initialization can make Puppeteer's page close wait for the
+ * protocol timeout, retaining the cleanup hold for tens of seconds.
  */
 async function closeTargetById(browser: PuppeteerBrowserHandle, targetId: string): Promise<void> {
-	const targets = browser.browser.targets();
-	for (const target of targets) {
-		if ((await targetIdForTarget(target).catch(() => "")) !== targetId) continue;
-		const page = await target.page().catch(() => null);
-		await page?.close().catch(() => undefined);
-		return;
+	const session = await browser.browser
+		.target()
+		.createCDPSession()
+		.catch(() => null);
+	if (!session) return;
+	try {
+		await session.send("Target.closeTarget", { targetId }).catch(() => undefined);
+	} finally {
+		await session.detach().catch(() => undefined);
 	}
 }
 
@@ -957,11 +977,9 @@ async function closeOrphanTarget(tab: WorkerTabSession): Promise<void> {
 
 /**
  * Close the page a worker created (page-created) before dying during init.
- * Fire-and-forget: the caller has already timed out, so the close must not
- * delay error propagation — `page.close()` on a page still stuck in the
- * navigation that caused the timeout waits about as long again. A killed worker
- * can't clean up after itself; a shared browser's other targets must never be
- * touched.
+ * Fire-and-forget: the caller has already timed out, so cleanup must not delay
+ * error propagation. A killed worker can't clean up after itself; a shared
+ * browser's other targets must never be touched.
  */
 function closeAbandonedWorkerPage(browser: PuppeteerBrowserHandle, worker: WorkerHandle): void {
 	const targetId = workerPageTargets.get(worker);

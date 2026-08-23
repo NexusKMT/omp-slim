@@ -500,9 +500,14 @@ function replyError(payload: RunErrorPayload): Error {
 	return err;
 }
 
-async function targetIdForTarget(target: Target): Promise<string> {
+function privateTargetId(target: Target): string | undefined {
 	const raw = target as unknown as { _targetId?: unknown };
-	if (typeof raw._targetId === "string") return raw._targetId;
+	return typeof raw._targetId === "string" ? raw._targetId : undefined;
+}
+
+async function targetIdForTarget(target: Target): Promise<string> {
+	const fastTargetId = privateTargetId(target);
+	if (fastTargetId) return fastTargetId;
 	const session = await target.createCDPSession();
 	try {
 		const info = (await session.send("Target.getTargetInfo")) as { targetInfo?: { targetId?: string } };
@@ -515,6 +520,26 @@ async function targetIdForTarget(target: Target): Promise<string> {
 
 async function targetIdForPage(page: Page): Promise<string> {
 	return await targetIdForTarget(page.target());
+}
+
+async function createTrackedHeadlessPage(browser: Browser, reportTarget: (targetId: string) => void): Promise<Page> {
+	const session = await browser.target().createCDPSession();
+	let targetId: string;
+	try {
+		({ targetId } = await session.send("Target.createTarget", { url: "about:blank" }));
+		reportTarget(targetId);
+	} finally {
+		await session.detach().catch(() => undefined);
+	}
+	const existing = browser.targets().find(target => privateTargetId(target) === targetId);
+	const target =
+		existing ??
+		(await browser.waitForTarget(candidate => privateTargetId(candidate) === targetId, {
+			timeout: BROWSER_PROTOCOL_TIMEOUT_MS,
+		}));
+	const page = await target.page();
+	if (!page) throw new ToolError(`Created headless target ${targetId} did not expose a page`);
+	return page;
 }
 
 async function collectObservationEntries(
@@ -879,16 +904,12 @@ export class WorkerCore {
 			// wait.
 			this.#transport.send({ type: "setup" });
 			if (payload.mode === "headless") {
-				this.#page = await this.#browser.newPage();
-				// Report the new target before the potentially slow post-creation CDP work
-				// (stealth, viewport): if this worker is killed during init, the supervisor
-				// closes exactly this target — a killed worker can't clean up after itself.
-				// Private-field peek, no CDP round-trip; the supervisor's targetIdForTarget
-				// relies on the same fast path.
-				const createdTarget = this.#page.target() as unknown as { _targetId?: unknown };
-				if (typeof createdTarget._targetId === "string") {
-					this.#transport.send({ type: "page-created", targetId: createdTarget._targetId });
-				}
+				// Create the target directly so its id is reportable before
+				// Puppeteer waits for target/page initialization. If that wait
+				// wedges, the supervisor can still close the created target.
+				this.#page = await createTrackedHeadlessPage(this.#browser, targetId => {
+					this.#transport.send({ type: "page-created", targetId });
+				});
 				this.#observeDialogs();
 				await applyStealthPatches(this.#browser, this.#page, { browserSession: null, override: null });
 				await applyViewport(this.#page, payload.viewport);
