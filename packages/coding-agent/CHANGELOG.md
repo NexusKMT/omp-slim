@@ -9,6 +9,10 @@
 
 - Eval runtime-availability probes (Python/Ruby/Julia) no longer inherit the host stdin handle and are now bounded by the eval call's timeout and abort signal, so a probe that hangs during backend resolution — e.g. the native-Windows inherited-stdin wedge — returns a clear error instead of wedging the whole turn indefinitely ([#9466](https://github.com/can1357/oh-my-pi/issues/9466)).
 
+### Fixed
+
+- Subagent advisors now review the final `yield`: the yield turn is delivered to the advisor and its review is drained before the subagent session is disposed, instead of being abandoned at teardown ([#9505](https://github.com/can1357/oh-my-pi/issues/9505)).
+
 ## [18.0.3] - 2026-08-23
 
 ### Added
