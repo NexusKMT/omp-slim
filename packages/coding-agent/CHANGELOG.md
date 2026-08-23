@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Cap streaming markdown renders at the reveal cadence when reveal is caught up; provider deltas accumulate and flush per tick instead of rendering per token.
+
 ## [18.0.3] - 2026-08-23
 
 ### Added
