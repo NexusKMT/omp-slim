@@ -1201,7 +1201,7 @@ describe("Settings", () => {
 			expect(settings.get("features.unexpectedStopDetection")).toBe("smart");
 		});
 
-		it("drops legacy features.unexpectedStopDetection=false so the none default applies", async () => {
+		it("maps legacy features.unexpectedStopDetection=false to none", async () => {
 			await writeSettings({ features: { unexpectedStopDetection: false } });
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
@@ -1209,8 +1209,27 @@ describe("Settings", () => {
 			expect(settings.get("features.unexpectedStopDetection")).toBe("none");
 		});
 
+		it("resolves unconfigured features.unexpectedStopDetection to the mechanical default", async () => {
+			await writeSettings({});
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+
+			expect(settings.get("features.unexpectedStopDetection")).toBe("mechanical");
+		});
+
 		it("normalizes a quoted-dotted legacy unexpected-stop boolean", async () => {
 			await Bun.write(getConfigPath(), '"features.unexpectedStopDetection": true\n');
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+
+			expect(settings.get("features.unexpectedStopDetection")).toBe("smart");
+		});
+
+		it("keeps an explicit unexpected-stop mode over a legacy dotted boolean", async () => {
+			await Bun.write(
+				getConfigPath(),
+				'"features.unexpectedStopDetection": false\nfeatures:\n  unexpectedStopDetection: smart\n',
+			);
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 

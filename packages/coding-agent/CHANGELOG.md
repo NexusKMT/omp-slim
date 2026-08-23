@@ -2,13 +2,9 @@
 
 ## [Unreleased]
 
-### Added
-
-- Added "Mechanical" mode for unexpected stop detection, allowing retries based solely on structural signals
-
 ### Changed
 
-- Updated "Unexpected Stops" setting to support "None", "Mechanical", and "Smart" modes instead of a simple boolean
+- Unexpected Stops now offers None, Mechanical (default), and Smart modes; Smart adds small-model classification to recover text-only stops.
 
 ### Fixed
 

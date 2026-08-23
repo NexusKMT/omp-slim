@@ -1607,7 +1607,8 @@ export class Settings {
 
 		// features.unexpectedStopDetection (boolean) -> enum none|mechanical|smart.
 		// `true` reproduced the previous small-model-classified behavior, which is
-		// now "smart"; `false` drops the key so the schema's "none" default applies.
+		// now "smart"; `false` maps to "none" so explicitly disabled configs remain
+		// off rather than inheriting the new "mechanical" default.
 		// Handles nested and quoted-dotted sources, like inspect_image above.
 		const featuresObj = isRecord(raw.features) ? (raw.features as Record<string, unknown>) : undefined;
 		const legacyUnexpectedStop =
@@ -1622,14 +1623,9 @@ export class Settings {
 			}
 			const target = raw.features as Record<string, unknown>;
 			const current = target.unexpectedStopDetection;
-			if (
-				legacyUnexpectedStop &&
-				!(typeof current === "string" && ["none", "mechanical", "smart"].includes(current))
-			) {
-				target.unexpectedStopDetection = "smart";
-			} else if (!legacyUnexpectedStop) {
-				// false -> schema default ("none"); drop the key entirely.
-				delete target.unexpectedStopDetection;
+			const currentIsMode = typeof current === "string" && ["none", "mechanical", "smart"].includes(current);
+			if (!currentIsMode) {
+				target.unexpectedStopDetection = legacyUnexpectedStop ? "smart" : "none";
 			}
 			delete raw["features.unexpectedStopDetection"];
 		}

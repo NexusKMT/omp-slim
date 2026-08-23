@@ -762,22 +762,24 @@ export class TurnRecovery {
 			.filter((content): content is TextContent => content.type === "text")
 			.map(content => content.text)
 			.join("\n");
-		// Thinking-only stops carry their signal in the thinking block (a trapped
-		// response or a truncated fragment); classify on that when there is no text.
-		if (!hasNonWhitespace(text)) {
+		const hasTextContent = hasNonWhitespace(text);
+
+		// A thinking-only terminal turn has no visible assistant message, so both
+		// mechanical and smart modes retry it directly. Tool-call turns never reach
+		// this path: isUnexpectedStopCandidate excludes them, including forced tools.
+		if (!hasTextContent) {
 			text = assistantMessage.content
 				.filter((content): content is ThinkingContent => content.type === "thinking")
 				.map(content => content.thinking)
 				.join("\n");
-		}
-		if (!hasNonWhitespace(text)) {
+			if (!hasNonWhitespace(text)) {
+				this.#unexpectedStopRetryCount = 0;
+				return false;
+			}
+		} else if (mode === "mechanical") {
 			this.#unexpectedStopRetryCount = 0;
 			return false;
-		}
-
-		// Smart mode adds small-model classification on top of the structural
-		// candidate check; mechanical mode retries on the structural signal alone.
-		if (mode === "smart") {
+		} else {
 			const controller = new AbortController();
 			const timeout = setTimeout(() => controller.abort(), UNEXPECTED_STOP_TIMEOUT_MS);
 			let classification: boolean | undefined;

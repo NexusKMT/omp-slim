@@ -5520,21 +5520,25 @@ export const SETTINGS_SCHEMA = {
 	"features.unexpectedStopDetection": {
 		type: "enum",
 		values: ["none", "mechanical", "smart"] as const,
-		default: "none",
+		default: "mechanical",
 		ui: {
 			tab: "interaction",
 			group: "Agent",
 			label: "Unexpected Stops",
 			description:
-				"Detect when the assistant ends its turn without acting and automatically prompt it to continue. Mechanical uses structural signals only; Smart adds a small-model classification of the stop text.",
+				"Automatically recover when the assistant stops without a visible message. Smart also classifies text-only stops with a small model.",
 			options: [
 				{ value: "none", label: "None", description: "Disabled" },
 				{
 					value: "mechanical",
 					label: "Mechanical",
-					description: "Retry on structural unexpected-stop signals (no tool call, turn ends mid-task)",
+					description: "Retry stops with no visible assistant message; tool calls are excluded (default)",
 				},
-				{ value: "smart", label: "Smart", description: "Mechanical + small-model classification of the stop text" },
+				{
+					value: "smart",
+					label: "Smart",
+					description: "Mechanical + small-model classification of text-only stops",
+				},
 			],
 		},
 	},
@@ -5547,8 +5551,8 @@ export const SETTINGS_SCHEMA = {
 			group: "Tiny Model",
 			label: "Unexpected Stop Model",
 			description:
-				"Classifier for unexpected-stop detection: online (the TINY role from /models, else smol) by default, or a local on-device model.",
-			condition: "unexpectedStopDetection",
+				"Classifier for Smart unexpected-stop detection: online (the TINY role from /models, else smol) by default, or a local on-device model.",
+			condition: "unexpectedStopSmart",
 			options: TINY_MEMORY_MODEL_OPTIONS,
 		},
 	},

@@ -147,9 +147,9 @@ const CONDITIONS: Record<string, () => boolean> = {
 			return false;
 		}
 	},
-	unexpectedStopDetection: () => {
+	unexpectedStopSmart: () => {
 		try {
-			return Settings.instance.get("features.unexpectedStopDetection") !== "none";
+			return Settings.instance.get("features.unexpectedStopDetection") === "smart";
 		} catch {
 			return false;
 		}
