@@ -1236,8 +1236,7 @@ export class SessionAdvisors {
 				})
 			: AIError.classify(error, currentModel.api);
 		if (AIError.is(errorId, AIError.Flag.Abort) || AIError.is(errorId, AIError.Flag.UserInterrupt)) return false;
-		// Only text-ambiguous overflows waive the veto below (#9235) — see
-		// AIError.isTextAmbiguousContextOverflow's JSDoc for the dual-flag rationale.
+		// Text-ambiguous overflows waive the veto; usage-backed do not — see AIError.isTextAmbiguousContextOverflow (#9235).
 		const contextWindow = currentModel.contextWindow ?? 0;
 		const overflowVeto =
 			(AIError.is(errorId, AIError.Flag.ContextOverflow) ||

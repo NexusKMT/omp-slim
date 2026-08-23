@@ -3017,11 +3017,7 @@ export class AgentSession {
 			let compactionResult = COMPACTION_CHECK_NONE;
 			let checkedCompaction = false;
 			if (activeGoal) {
-				// Payload rejections alone get this pre-compaction chain consult (#9235
-				// review): isHardErrorFallbackEligible already vetoes context overflow,
-				// refusals, aborts, and replay-unsafe turns, and other hard failures keep
-				// the non-goal ladder's precedence. The consult must precede
-				// checkCompaction(): its overflow path applies its remedy before returning.
+				// Payload rejections get a pre-compaction chain consult; checkCompaction()'s overflow path commits a remedy before returning (#9235).
 				if (AIError.isPayloadRejection(msg) && this.#recovery.isHardErrorFallbackEligible(msg)) {
 					const didRetry = await this.#recovery.handleRetryableError(msg, { hardErrorFallback: true });
 					if (didRetry) {
@@ -3036,10 +3032,7 @@ export class AgentSession {
 				checkedCompaction = true;
 				const compactionContinues = compactionResult.deferredHandoff || compactionResult.continuationScheduled;
 				if (compactionContinues || compactionResult.automaticContinuationBlocked) {
-					// This early return skips the standard error tail that persists skipped
-					// empty error turns — durably record the terminal 413 so the session
-					// JSONL keeps why the goal stopped (#9235 review). Content-less overflow
-					// rejections stay live-UI only, same as the tail.
+					// Early return skips the error tail; persist the terminal 413 so the JSONL records why the goal stopped (#9235).
 					if (
 						compactionResult.automaticContinuationBlocked &&
 						!AIError.isContextOverflow(msg, this.model?.contextWindow ?? 0)

@@ -135,26 +135,18 @@ function compactionDeadEndWarning(remedies: string): string {
 	);
 }
 
-/**
- * User-facing notice for a payload-shaped HTTP 413 compaction was correctly
- * withheld from; mirrors {@link compactionDeadEndWarning}'s tone (#9235).
- */
+/** Honest-skip notice for a payload-shaped HTTP 413 where compaction was correctly withheld (#9235). */
 function payloadRejectionNotice(storedTokens: number, contextWindow: number): string {
 	const remedies =
 		"Token compaction cannot shrink bytes or image budgets; reduce or remove archived image frames (e.g. switch compaction.methodOrder away from snapcompact) or raise the server/proxy body limit.";
 	if (contextWindow <= 0) {
-		// Custom/discovered models may carry `contextWindow: null`; without a
-		// local gauge there is no headroom claim to make.
 		return `The provider rejected the request size or media budget (HTTP 413), and this model has no known context window to compare against — this is NOT a token-context problem. ${remedies}`;
 	}
 	const headroom = Math.max(0, Math.floor(contextWindow - storedTokens));
 	return `The provider rejected the request size or media budget (HTTP 413), but ~${headroom.toLocaleString("en-US")} tokens of headroom remain locally — this is NOT a token-context problem. ${remedies}`;
 }
 
-/**
- * User-facing notice for a dead end that IS token overflow (#9235 review):
- * reported usage proves the window excess but no runnable recovery exists.
- */
+/** Dead-end notice when provider-reported usage proves context overflow but no recovery exists (#9235). */
 function usageOverflowDeadEndNotice(reportedInputTokens: number, contextWindow: number): string {
 	const windowLabel = contextWindow > 0 ? contextWindow.toLocaleString("en-US") : "unknown";
 	return (
@@ -208,12 +200,8 @@ const PRUNE_IDLE_FLUSH_MS = 90 * 60_000;
  */
 const COMPACTION_RECOVERY_BAND = 0.8;
 
-/**
- * Payload-shaped 413s classify as context overflow via shared text patterns,
- * but token compaction cannot shrink bytes or vision-media billing (#9235).
- * Local token estimates drift against provider accounting, so trust the
- * provider unless local occupancy stays under this ceiling (≥10% headroom).
- */
+/** Payload-shaped 413s share text patterns with overflow; trust the payload classification when local
+ *  occupancy stays under this ceiling (≥10% headroom) and reported usage stays within the window (#9235). */
 const PAYLOAD_REJECTION_OCCUPANCY_CEILING = 0.9;
 
 /** A speculation-produced compaction result, ready to commit at threshold. */
@@ -1783,11 +1771,6 @@ export class SessionMaintenance {
 		const compactionEntry = getLatestCompactionEntry(this.#host.sessionManager.getBranch());
 		const errorIsFromBeforeCompaction =
 			compactionEntry !== null && assistantMessage.timestamp < new Date(compactionEntry.timestamp).getTime();
-		// Arbitration by classification shape (#9235): provider-reported input usage
-		// always outranks body text; PayloadRejected-ONLY bodies are terminal whenever
-		// the local gauge agrees or is absent (`contextWindow: null` → 0 below);
-		// dual-flag bodies (`413 (no body)`) arbitrate via the headroom ceiling with
-		// a gauge and fall through to recovery without one.
 		const payloadRejection =
 			sameModel && !errorIsFromBeforeCompaction && AIError.isPayloadRejection(assistantMessage);
 		const ambiguousPayloadRejection =
@@ -1810,14 +1793,11 @@ export class SessionMaintenance {
 				storedTokens,
 				contextWindow,
 			});
-			// BLOCK automatic continuation: retrying would resend the same over-limit payload.
 			return COMPACTION_CHECK_BLOCK_AUTOMATIC_CONTINUATION;
 		}
 		const overflowEvidence =
 			sameModel && !errorIsFromBeforeCompaction && AIError.isContextOverflow(assistantMessage, contextWindow);
 		if (overflowEvidence || (payloadRejection && !trustedPayloadRejection)) {
-			// Clear the failing turn from active context so no continuation replays it;
-			// the persisted branch entry stays until a retry/compaction path drops it.
 			this.#host.removeAssistantMessageFromActiveContext(assistantMessage);
 
 			// Try context promotion first - switch to a larger model and retry without compacting
@@ -1837,9 +1817,6 @@ export class SessionMaintenance {
 				});
 			}
 			if (payloadRejection) {
-				// Nothing can run and resending cannot succeed — BLOCK so an automatic goal
-				// continuation does not blind-resend the rejected payload (#9235).
-				// Usage-backed overflow gets the overflow notice instead of the payload one.
 				const usageBackedOverflow = AIError.isUsageBackedContextOverflow(assistantMessage, contextWindow);
 				this.#host.emitNotice(
 					"warning",
@@ -2386,9 +2363,6 @@ export class SessionMaintenance {
 		return archive ? snapcompact.frameDataBytes(archive.frames) : 0;
 	}
 
-	/**
-	 * When archived image frames caused the dead end, name them first (#9235).
-	 */
 	#deadEndRemedies(defaultRemedies: string, implicatedFrames: number): string {
 		if (implicatedFrames <= 0) return defaultRemedies;
 		return `reduce archived image frames (${implicatedFrames} held) — providers often bill vision media separately from tokens; ${defaultRemedies}`;

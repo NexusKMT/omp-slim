@@ -1708,8 +1708,7 @@ export class TurnRecovery {
 		// A thinking loop is a same-model resample signal, not a router fault, so a
 		// base-model swap would abandon the loop-guard redirect (issue #8760).
 		if (AIError.is(id, AIError.Flag.ThinkingLoop)) return false;
-		// Byte-size / media-budget 413s (#9235) fail identically on the base
-		// model — swapping cannot fix them.
+		// Byte/media budget 413s fail identically on the base model — swapping cannot fix them (#9235).
 		if (AIError.isPayloadRejection(message)) return false;
 		return this.#host.modelRegistry.find("fireworks", toFireworksBaseModelId(model.id)) !== undefined;
 	}
@@ -1741,8 +1740,7 @@ export class TurnRecovery {
 		if (this.isClassifierRefusal(message)) return false;
 		const id = this.#classifyRetryMessage(message);
 		if (AIError.is(id, AIError.Flag.Abort) || AIError.is(id, AIError.Flag.UserInterrupt)) return false;
-		// Only text-ambiguous overflows waive the veto below (#9235) — see
-		// AIError.isTextAmbiguousContextOverflow's JSDoc for the dual-flag rationale.
+		// Text-ambiguous overflows waive the veto; usage-backed do not — see AIError.isTextAmbiguousContextOverflow (#9235).
 		const contextWindow = model.contextWindow ?? 0;
 		const textAmbiguousOverflow = AIError.isTextAmbiguousContextOverflow(id, message, contextWindow);
 		if (!textAmbiguousOverflow && AIError.isContextOverflow(message, contextWindow)) {

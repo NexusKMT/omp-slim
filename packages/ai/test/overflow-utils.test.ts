@@ -215,7 +215,6 @@ describe("classifyMessage - status-only 413 responses (#9235 review)", () => {
 
 describe("classify - token evidence arbitrates the status fallback across cause links (#9235 review)", () => {
 	it("keeps a wrapped token overflow pure when the wrapper's status comes from a nested 413", () => {
-		// status() recurses into causes: the wrapper inherits the nested link's 413 (#9235 review).
 		const inner = Object.assign(new Error("Error: maximum context length is 128000 tokens"), { status: 413 });
 		const id = AIError.classify(new Error("Provider returned error", { cause: inner }));
 		expect(AIError.is(id, AIError.Flag.ContextOverflow)).toBe(true);
