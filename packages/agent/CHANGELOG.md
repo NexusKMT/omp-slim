@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- `onTurnEnd` now runs for a turn stopped by a terminal-tool-result abort (e.g. a subagent's final `yield`) instead of being skipped as an external abort, so per-turn bookkeeping observes the yield turn.
+
 ## [18.0.0] - 2026-08-22
 
 ### Fixed
