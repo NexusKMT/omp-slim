@@ -166,6 +166,34 @@ describe("browser handle enrichment — guarded actions", () => {
 		// fill() drives type() internally via the raw method, so it is guarded once, not nested.
 		expect(labels).toEqual(["handle.fill()"]);
 	});
+
+	it("rewraps a cached handle from its original methods for each browser run", async () => {
+		let clicks = 0;
+		const stub = {
+			click: async () => {
+				clicks++;
+			},
+			type: async () => {},
+			evaluate: async () => {},
+		} as unknown as ElementHandle;
+		const firstLabels: string[] = [];
+		const firstGuard: HandleOpGuard = (label, fn) => {
+			firstLabels.push(label);
+			return fn(AbortSignal.abort(new Error("first run ended")));
+		};
+		const secondLabels: string[] = [];
+		const secondGuard: HandleOpGuard = (label, fn) => {
+			secondLabels.push(label);
+			return fn(new AbortController().signal);
+		};
+
+		toActionableHandle(stub, firstGuard);
+		await toActionableHandle(stub, secondGuard).click();
+
+		expect(clicks).toBe(1);
+		expect(firstLabels).toEqual([]);
+		expect(secondLabels).toEqual(["handle.click()"]);
+	});
 });
 
 // A selector op's fail-fast timeout must diagnose *why*: a missing element (consent

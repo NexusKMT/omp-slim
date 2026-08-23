@@ -345,35 +345,64 @@ const GUARDED_HANDLE_METHODS = [
 	"scrollIntoView",
 ] as const satisfies readonly (keyof ElementHandle)[];
 
+type GuardedHandleMethod = (typeof GUARDED_HANDLE_METHODS)[number];
+type RawHandleMethod = (...args: unknown[]) => Promise<unknown>;
+
+interface RawHandleMethods {
+	interactive: Partial<Record<GuardedHandleMethod, RawHandleMethod>>;
+	type: ElementHandle["type"];
+}
+
+/** Symbol-keyed original methods travel with each cached handle without enumerating or colliding. */
+const RAW_HANDLE_METHODS = Symbol("browser.rawHandleMethods");
+
+type HandleWithRawMethods = ActionableHandle & { [RAW_HANDLE_METHODS]?: RawHandleMethods };
+
 /**
  * Attach `fill()` to a puppeteer ElementHandle before handing it to user code and,
  * when a `guard` is supplied, route every interactive method ({@link GUARDED_HANDLE_METHODS})
  * through the same fail-fast per-op wrapper as the selector-based helpers — so
  * `(await tab.id(n)).click()` fails fast with `handle.click() timed out after …ms`
- * instead of stalling until the whole browser cell expires. Puppeteer handles expose
+ * instead of stalling until the whole browser cell expires. Repeated enrichment is
+ * idempotent: cached handles are always rewrapped from their original bound methods,
+ * never from wrappers retaining an earlier run's guard. Puppeteer handles expose
  * `type()` but no `fill()`; the `fill()` semantics mirror the selector-based
  * `tab.fill()`: focus, clear any existing value, then type.
  */
 export function toActionableHandle(handle: ElementHandle, guard?: HandleOpGuard): ActionableHandle {
-	const enriched = handle as ActionableHandle;
+	const enriched = handle as HandleWithRawMethods;
+	const methods = enriched as unknown as Partial<Record<GuardedHandleMethod, RawHandleMethod>>;
+	const preserved = enriched[RAW_HANDLE_METHODS];
 	if (!guard) {
-		enriched.fill = value => fillViaHandle(enriched, value);
+		if (preserved) {
+			for (const method of GUARDED_HANDLE_METHODS) {
+				const original = preserved.interactive[method];
+				if (original) methods[method] = original;
+			}
+		}
+		enriched.fill = value => fillViaHandle(enriched, value, undefined, preserved?.type);
 		return enriched;
 	}
-	// Capture the raw typer before shadowing so the guarded fill runs as a single op
-	// rather than re-entering the guard through the now-wrapped `type`.
-	const rawType = enriched.type.bind(enriched);
-	const methods = enriched as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+
+	let originals = preserved;
+	if (!originals) {
+		const interactive: Partial<Record<GuardedHandleMethod, RawHandleMethod>> = {};
+		for (const method of GUARDED_HANDLE_METHODS) {
+			const original = methods[method];
+			if (typeof original === "function") interactive[method] = original.bind(enriched);
+		}
+		originals = { interactive, type: enriched.type.bind(enriched) };
+		enriched[RAW_HANDLE_METHODS] = originals;
+	}
+
 	for (const method of GUARDED_HANDLE_METHODS) {
-		const raw = methods[method];
-		if (typeof raw !== "function") continue;
-		const bound = raw.bind(enriched);
-		methods[method] = (...args) => guard(`handle.${method}()`, signal => untilAborted(signal, () => bound(...args)));
+		const original = originals.interactive[method];
+		if (!original) continue;
+		methods[method] = (...args) =>
+			guard(`handle.${method}()`, signal => untilAborted(signal, () => original(...args)));
 	}
 	enriched.fill = value =>
-		guard<void>("handle.fill()", signal =>
-			fillViaHandle(enriched, value, signal, text => rawType(text, { delay: 0 })),
-		);
+		guard<void>("handle.fill()", signal => fillViaHandle(enriched, value, signal, originals.type));
 	return enriched;
 }
 
