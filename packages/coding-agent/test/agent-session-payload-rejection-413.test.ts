@@ -831,7 +831,37 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		);
 	});
 
+	it("persists a blocked dual-flag 413 outside goal mode", async () => {
+		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		await createSession(
+			2_000,
+			{ toolText: "x".repeat(40_000) },
+			{
+				streamFn: (model, context, options) => {
+					primaryMock.push({ throw: "413 status code (no body)" });
+					return primaryMock.stream(model, context, options);
+				},
+				extraSettings: {
+					"compaction.enabled": false,
+					"contextPromotion.enabled": false,
+				},
+			},
+		);
+
+		await session.prompt("continue normally");
+		await session.waitForIdle();
+
+		const terminalErrors = sessionManager
+			.getBranch()
+			.flatMap(entry => (entry.type === "message" ? [entry.message] : []))
+			.filter(message => message.role === "assistant" && message.stopReason === "error");
+		expect(terminalErrors).toHaveLength(1);
+		expect(terminalErrors[0]?.errorMessage).toContain("413");
+		const providerCtx = sessionManager.buildSessionContext().messages;
+		expect(providerCtx.some(m => m.role === "assistant" && m.stopReason === "error")).toBe(false);
+	});
 	it("blocks status-only Content Too Large rejections with no context window", async () => {
+
 		await createSession(null);
 		const checkSpy = vi.spyOn(SessionMaintenance.prototype, "checkCompaction");
 		const prepareSpy = vi.spyOn(compactionModule, "prepareCompaction");

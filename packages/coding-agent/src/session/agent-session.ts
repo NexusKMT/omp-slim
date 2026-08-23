@@ -3145,6 +3145,9 @@ export class AgentSession {
 				this.#trackPostPromptTask(compactionTask);
 				compactionResult = await compactionTask;
 			}
+			if (compactionResult.automaticContinuationBlocked && AIError.isPayloadRejection(msg)) {
+				await this.#recovery.persistTerminalEmptyErrorTurn(msg);
+			}
 			await this.#recovery.onErrorSettledWithoutRetry(msg, compactionResult);
 			// Stop-time todo reconciliation only fires at a text-only final stop. A run
 			// that ends still mid-tool-use (deadline hit, context full, etc.) skips the
