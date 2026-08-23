@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Thinking-only length stops that overlap speculative handoff now resume compaction recovery instead of leaving the autonomous run idle.
+
 ## [18.0.3] - 2026-08-23
 
 ### Added
