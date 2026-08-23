@@ -206,4 +206,25 @@ describe("classifyMessage - status-only 413 responses (#9235 review)", () => {
 		expect(AIError.is(id, AIError.Flag.ContextOverflow)).toBe(true);
 		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(false);
 	});
+	it("keeps the payload flag for a status-413 media-budget body", () => {
+		// The generic numeric pattern also matches media budgets, but those
+		// are exactly the rejections token compaction cannot fix: with no
+		// token-context wording in the body, the 413 status alone is payload
+		// evidence and must not be stripped (#9235 review).
+		const id = AIError.classifyMessage({
+			errorStatus: 413,
+			errorMessage: "image count exceeds the limit of 20",
+		});
+		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(true);
+		expect(AIError.is(id, AIError.Flag.ContextOverflow)).toBe(true);
+		expect(AIError.retriable(id)).toBe(false);
+	});
+
+	it("keeps the payload flag for a status-413 byte-size body", () => {
+		const id = AIError.classifyMessage({
+			errorStatus: 413,
+			errorMessage: "request body exceeds the limit of 10 MB",
+		});
+		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(true);
+	});
 });

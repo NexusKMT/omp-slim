@@ -121,6 +121,18 @@ const CONTEXT_OVERFLOW_EVIDENCE_PATTERNS = [
 const GENERIC_LIMIT_OVERFLOW_PATTERN = /exceeds the limit of \d+/i;
 const OVERFLOW_PATTERNS = [...CONTEXT_OVERFLOW_EVIDENCE_PATTERNS, GENERIC_LIMIT_OVERFLOW_PATTERN];
 
+/**
+ * Token-context overflow evidence ONLY — deliberately excludes
+ * GENERIC_LIMIT_OVERFLOW_PATTERN. Media/byte budgets ("image count exceeds
+ * the limit of 20", "request body exceeds the limit of 10 MB") share that
+ * generic shape but are exactly the rejections token compaction cannot fix,
+ * so they must count as payload evidence, not as a reason to strip the
+ * payload flag (#9235 review).
+ */
+function hasTokenContextOverflowEvidence(text: string): boolean {
+	return CONTEXT_OVERFLOW_EVIDENCE_PATTERNS.some(p => p.test(text));
+}
+
 const OVERFLOW_NO_BODY_PATTERN = /\b4(00|13)\s*(status code)?\s*\(no body\)/i;
 // HTTP 413-family rejections driven by request BYTES or provider media budgets
 // rather than token context (#9235): ninfer maps a Qwen vision attention-pair
@@ -150,7 +162,7 @@ function matchesPayloadRejectionText(text: string): boolean {
 	// compaction cannot fix (#9235 review). The `(no body)` entry cannot
 	// overlap either table, so bare `413 (no body)` keeps its deliberate
 	// dual flag for maintenance-layer headroom arbitration.
-	if (CONTEXT_OVERFLOW_EVIDENCE_PATTERNS.some(p => p.test(text))) return false;
+	if (hasTokenContextOverflowEvidence(text)) return false;
 	return true;
 }
 
@@ -507,7 +519,7 @@ function classifyText(
 	// statuses stay untouched: a bare 400/401/403 proves nothing about
 	// payload size.
 	const statusEvidence = errorStatus ?? (errorMessage ? status({ message: errorMessage }) : undefined);
-	if (statusEvidence === 413 && !(errorMessage && matchesOverflowText(errorMessage))) {
+	if (statusEvidence === 413 && !(errorMessage && hasTokenContextOverflowEvidence(errorMessage))) {
 		kinds |= Flag.PayloadRejected;
 	}
 	if (kinds !== 0) return create(kinds);
