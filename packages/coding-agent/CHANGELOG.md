@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Failed `browser.open` calls now terminate OMP-spawned app process trees when no tab can be acquired.
+
 ## [18.0.3] - 2026-08-23
 
 ### Added
