@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the sticky Todo HUD being permanently collapsed; `/todo expand` now shows every phase and task, and `/todo collapse` restores the bounded preview ([#9493](https://github.com/can1357/oh-my-pi/issues/9493)).
+
 ## [18.0.3] - 2026-08-23
 
 ### Added
