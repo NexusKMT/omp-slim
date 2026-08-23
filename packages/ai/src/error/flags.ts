@@ -118,6 +118,12 @@ const ACCOUNT_POLICY_PATTERN = /\bcyber_policy\b|trusted access for cyber/i;
 const CODEX_CHATGPT_ACCOUNT_MODEL_POLICY_PATTERN =
 	/\bThe ['"]([^'"\r\n]+)['"] model is not supported when using Codex with a ChatGPT account\./i;
 const CODEX_CHATGPT_ACCOUNT_MODEL_MAX_LENGTH = 256;
+const CURSOR_PLAN_POLICY_MARKER_PATTERN = /\bERROR_RATE_LIMITED_CHANGEABLE\b/i;
+const CURSOR_PLAN_POLICY_PATTERN = /\bNamed models unavailable\b|\bModel unavailable on\b|\bFree plans can only use\b/i;
+
+function isCursorPlanPolicyText(text: string): boolean {
+	return CURSOR_PLAN_POLICY_MARKER_PATTERN.test(text) && CURSOR_PLAN_POLICY_PATTERN.test(text);
+}
 
 function normalizeCodexChatGPTAccountPolicyModel(modelId: string | undefined): string | undefined {
 	if (typeof modelId !== "string") return undefined;
@@ -399,7 +405,8 @@ function classifyText(
 		if (isContentBlockedText(errorMessage)) kinds |= Flag.ContentBlocked;
 		if (
 			ACCOUNT_POLICY_PATTERN.test(errorMessage) ||
-			isCodexChatGPTAccountPolicyText(errorMessage, provider, modelId)
+			isCodexChatGPTAccountPolicyText(errorMessage, provider, modelId) ||
+			isCursorPlanPolicyText(errorMessage)
 		) {
 			kinds |= Flag.AccountPolicy | Flag.ContentBlocked;
 		}
@@ -584,6 +591,22 @@ export function isCodexChatGPTAccountPolicyError(
 	const deniedIdentity = normalizeCodexChatGPTAccountPolicyModel(deniedModel);
 	const requestedIdentity = normalizeCodexChatGPTAccountPolicyModel(modelId);
 	return provider === "openai-codex" && deniedIdentity !== undefined && deniedIdentity === requestedIdentity;
+}
+
+/** Whether Cursor returned a non-retryable plan entitlement denial for this account. */
+export function isCursorPlanAccountPolicyError(error: unknown, provider: string, depth = 0): boolean {
+	if (provider !== "cursor" || depth > 6) return false;
+	if (typeof error === "string") return isCursorPlanPolicyText(error);
+	if (!error || typeof error !== "object") return false;
+	if (
+		"errorMessage" in error &&
+		typeof error.errorMessage === "string" &&
+		isCursorPlanPolicyText(error.errorMessage)
+	) {
+		return true;
+	}
+	if ("message" in error && typeof error.message === "string" && isCursorPlanPolicyText(error.message)) return true;
+	return "cause" in error && isCursorPlanAccountPolicyError(error.cause, provider, depth + 1);
 }
 
 /**
