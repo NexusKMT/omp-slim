@@ -3017,25 +3017,31 @@ export class AgentSession {
 			let compactionResult = COMPACTION_CHECK_NONE;
 			let checkedCompaction = false;
 			if (activeGoal) {
-				maintenanceRoute("active-goal-pre-empt-checkCompaction");
-				const compactionTask = this.#maintenance.checkCompaction(msg);
-				this.#trackPostPromptTask(compactionTask);
-				compactionResult = await compactionTask;
-				checkedCompaction = true;
-				const compactionContinues = compactionResult.deferredHandoff || compactionResult.continuationScheduled;
-				// A configured hard-error fallback is a fresh chance that an
-				// automatic-continuation BLOCK must not pre-empt (#9235 review):
-				// outside goal mode the recovery ladder consults the chain before
-				// compaction can make a payload-shaped 413 terminal, so goal mode
-				// must honor the same user configuration. Only an exhausted or
-				// declining chain leaves the BLOCK standing.
-				if (compactionResult.automaticContinuationBlocked && this.#recovery.isHardErrorFallbackEligible(msg)) {
+				// A configured hard-error fallback is a fresh chance that no goal-
+				// mode maintenance outcome may pre-empt (#9235 review). Outside
+				// goal mode the recovery ladder consults the chain before compaction
+				// runs; goal mode must honor the same configuration. The consult
+				// must precede checkCompaction() itself: its overflow path applies
+				// its remedy (context promotion or rolled-back compaction) before
+				// returning, so consulting only after seeing a result could stack
+				// remedies or undo a promotion. Eligibility already vetoes genuine
+				// context overflow, classifier refusals, aborts, usage-preflight
+				// blocks, and replay-unsafe turns, and is false outright when no
+				// chain candidates exist; only an exhausted or declining chain
+				// falls through to maintenance below.
+				if (this.#recovery.isHardErrorFallbackEligible(msg)) {
 					const didRetry = await this.#recovery.handleRetryableError(msg, { hardErrorFallback: true });
 					if (didRetry) {
 						await emitAgentEndNotification({ willContinue: true });
 						return;
 					}
 				}
+				maintenanceRoute("active-goal-pre-empt-checkCompaction");
+				const compactionTask = this.#maintenance.checkCompaction(msg);
+				this.#trackPostPromptTask(compactionTask);
+				compactionResult = await compactionTask;
+				checkedCompaction = true;
+				const compactionContinues = compactionResult.deferredHandoff || compactionResult.continuationScheduled;
 				if (compactionContinues || compactionResult.automaticContinuationBlocked) {
 					maintenanceRoute("active-goal-pre-empt-compaction-handled", {
 						deferredHandoff: compactionResult.deferredHandoff,

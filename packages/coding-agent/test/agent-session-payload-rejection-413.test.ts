@@ -356,7 +356,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		});
 	}
 
-	it("consults a configured fallback chain in goal mode before the BLOCK stands", async () => {
+	it("consults a configured fallback chain in goal mode before any maintenance outcome stands", async () => {
 		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
 		if (!fallbackModel) {
 			throw new Error("Expected bundled openai fallback model to exist");
@@ -396,14 +396,13 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await session.prompt("work on the goal");
 		await session.waitForIdle();
 
-		// The honest-skip still surfaces the payload rejection and no
-		// compaction runs…
+		// The chain consult happens BEFORE checkCompaction, mirroring the
+		// non-goal ladder: a successful switch means maintenance never runs,
+		// so no honest-skip notice fires (parity with non-goal mode) and no
+		// compaction ever starts.
 		expect(endCount()).toBe(0);
 		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
-		expect(payloadNotices.length).toBe(1);
-		// …but the terminal BLOCK must not pre-empt the user-configured chain:
-		// active goals get the same fallback opportunity as the non-goal
-		// recovery ladder.
+		expect(payloadNotices.length).toBe(0);
 		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5", `${fallbackModel.provider}/${fallbackModel.id}`]);
 		expect(fallbackEvents).toHaveLength(1);
 		expect(fallbackEvents[0].to).toBe(`${fallbackModel.provider}/${fallbackModel.id}`);
@@ -434,5 +433,74 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
 		expect(payloadNotices.length).toBe(1);
 		expect(payloadNotices[0].level).toBe("warning");
+	});
+	it("consults the chain before overflow maintenance absorbs a high-occupancy payload rejection", async () => {
+		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
+		if (!fallbackModel) {
+			throw new Error("Expected bundled openai fallback model to exist");
+		}
+
+		const requestedModels: string[] = [];
+		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const fallbackMock = createMockModel({ id: fallbackModel.id, provider: fallbackModel.provider });
+		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
+		// Stored context far above 90% of the tiny window forces the
+		// payload-only 413 down checkCompaction's overflow gate (not the
+		// trusted-BLOCK pre-gate). That gate applies its remedy — here a
+		// context-promotion model switch — BEFORE returning a continuation
+		// result, so goal mode must consult the configured chain before
+		// calling checkCompaction at all; consulting on the result would let
+		// promotion absorb the failure first, an ordering non-goal mode
+		// never applies (its ladder consults the chain pre-compaction).
+		await createSession(
+			2_000,
+			{ toolText: "x".repeat(40_000) },
+			{
+				streamFn: (model, context, options) => {
+					requestedModels.push(`${model.provider}/${model.id}`);
+					if (model.provider === "anthropic") {
+						primaryMock.push({ throw: PAYLOAD_ERROR_MESSAGE });
+						return primaryMock.stream(model, context, options);
+					}
+					fallbackMock.push({ content: ["recovered on configured fallback"] });
+					return fallbackMock.stream(model, context, options);
+				},
+				extraSettings: {
+					"retry.baseDelayMs": 5,
+					"retry.modelFallback": true,
+					"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
+					// The larger-window candidate is also a valid promotion
+					// target; the chain must win the race from INSIDE the
+					// goal branch (fallback event proves it was the chain,
+					// not promotion, that switched models).
+					"contextPromotion.enabled": true,
+					// Compaction fully off: the tiny window would otherwise fire
+					// independent threshold passes (their trigger clamps to
+					// window-1, so no threshold value can silence them). With
+					// compaction off, any auto_compaction event seen below can
+					// only come from the post-error remedy ordering under test.
+					"compaction.enabled": false,
+				},
+			},
+		);
+		activateOngoingGoal("goal-high-occupancy");
+		session.subscribe(event => {
+			if (event.type === "retry_fallback_applied") fallbackEvents.push(event);
+		});
+		const notices = collectNotices();
+		const startCount = countCompactionEvents("auto_compaction_start");
+		const endCount = countCompactionEvents("auto_compaction_end");
+		await session.prompt("work on the goal");
+		await session.waitForIdle();
+
+		// The chain wins before any overflow remedy can: switched via the
+		// configured candidate, no compaction started or finished, and no
+		// maintenance notice surfaced.
+		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5", `${fallbackModel.provider}/${fallbackModel.id}`]);
+		expect(fallbackEvents).toHaveLength(1);
+		expect(session.model?.provider).toBe(fallbackModel.provider);
+		expect(startCount()).toBe(0);
+		expect(endCount()).toBe(0);
+		expect(notices.filter(n => n.source === NOTICE_SOURCE)).toHaveLength(0);
 	});
 });
