@@ -120,6 +120,12 @@ const PRIORITY_PREMIUM_REQUESTS_BACKFILL_KEY = "premium_requests_priority_v1";
 const AGENT_TYPE_BACKFILL_KEY = "agent_type_v1";
 const FORK_DEDUPE_KEY = "fork_dedupe_v1";
 const TOOL_CALLS_BACKFILL_KEY = "tool_calls_v1";
+// Older ingests dropped `Usage.orchestration` (never a stored column) when
+// pricing, so subscription models billed on orchestration tokens — multi-agent
+// Grok most notably — were priced from conversation buckets alone and could not
+// reach the inclusive 200K tier. A one-time full re-parse repairs them through
+// the cost-refreshing UPSERT in `insertMessageStats`.
+const COST_REINGEST_BACKFILL_KEY = "messages_cost_reingest_v1";
 function shouldResetBackfill(value: string | undefined): boolean {
 	return value !== BACKFILL_COMPLETE && value !== BACKFILL_PENDING;
 }
@@ -322,6 +328,7 @@ export async function initDb(): Promise<Database> {
 	}
 	backfillUserMessages(db);
 	backfillToolCalls(db);
+	backfillReingestCosts(db);
 	repairUserMessageLinks(db);
 	backfillPriorityPremiumRequests(db);
 	backfillAgentType(db);
@@ -510,8 +517,9 @@ export function setFileOffset(sessionFile: string, offset: number, lastModified:
  * aggregate. The `WHERE NOT EXISTS` clause skips inserts whose
  * `(entry_id, timestamp)` already exists under a different `session_file` —
  * first-write-wins across the lineage. Same-file re-syncs still hit the
- * `ON CONFLICT(session_file, entry_id)` upsert below so historical
- * `premium_requests` fix-ups continue to work.
+ * `ON CONFLICT(session_file, entry_id)` upsert below, which re-derives the
+ * stored cost (orchestration-aware) and keeps `premium_requests` monotonic, so
+ * a forced re-parse repairs historical `premium_requests` and cost fix-ups.
  */
 export function insertMessageStats(stats: MessageStats[]): number {
 	if (!db || stats.length === 0) return 0;
@@ -529,8 +537,13 @@ export function insertMessageStats(stats: MessageStats[]): number {
 			WHERE entry_id = ? AND timestamp = ? AND session_file <> ?
 		)
 		ON CONFLICT(session_file, entry_id) DO UPDATE SET
-			premium_requests = excluded.premium_requests
-		WHERE messages.premium_requests < excluded.premium_requests
+			premium_requests = MAX(messages.premium_requests, excluded.premium_requests),
+			cost_input = excluded.cost_input,
+			cost_output = excluded.cost_output,
+			cost_cache_read = excluded.cost_cache_read,
+			cost_cache_write = excluded.cost_cache_write,
+			cost_total = excluded.cost_total,
+			cost_no_cache_input = excluded.cost_no_cache_input
 	`);
 
 	let inserted = 0;
@@ -1254,6 +1267,29 @@ function backfillToolCalls(database: Database): void {
 }
 
 /**
+ * One-shot `file_offsets` wipe so the next sync re-parses every session and
+ * re-prices `messages` from source. Pre-fix ingests priced subscription rows
+ * from the four stored token buckets only, dropping `Usage.orchestration`
+ * (never a stored column), so multi-agent Grok and any other orchestration-
+ * billed model were understated and could not reach the inclusive 200K tier.
+ * The re-parse reruns the orchestration-aware pricing in `resolveStoredCost`
+ * and the cost-refreshing UPSERT in {@link insertMessageStats} writes it back.
+ * `messages`/`user_messages`/`tool_calls` re-inserts are idempotent, so the
+ * offset reset is safe. Same sentinel protocol as {@link backfillToolCalls}.
+ */
+function backfillReingestCosts(database: Database): void {
+	const row = database.prepare("SELECT value FROM meta WHERE key = ?").get(COST_REINGEST_BACKFILL_KEY) as
+		| { value: string }
+		| undefined;
+	if (!shouldResetBackfill(row?.value)) return;
+
+	database.run("DELETE FROM file_offsets");
+	database
+		.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)")
+		.run(COST_REINGEST_BACKFILL_KEY, BACKFILL_PENDING);
+}
+
+/**
  * Reclassify pre-existing `messages` rows by agent type once, after the
  * `agent_type` column is added to an older database (every prior row defaulted
  * to 'main' on the ALTER). Classification is purely path-based — derived from
@@ -1378,6 +1414,7 @@ export function markSessionBackfillsComplete(): void {
 			TOOL_CALLS_BACKFILL_KEY,
 			USER_MESSAGE_LINKS_REPAIR_KEY,
 			PRIORITY_PREMIUM_REQUESTS_BACKFILL_KEY,
+			COST_REINGEST_BACKFILL_KEY,
 		]) {
 			markComplete.run(key, BACKFILL_COMPLETE);
 		}
