@@ -483,8 +483,11 @@ describe("editToolRenderer", () => {
 		expect(rendered).toContain("plain streamed text");
 	});
 
-	it("colors completed diff rows when the injected diff renderer is unavailable", async () => {
-		const uiTheme = await getUiTheme();
+	it("uses the supplied theme when the injected diff renderer is unavailable", async () => {
+		const activeTheme = await getUiTheme();
+		const uiTheme = await themeModule.getThemeByName("light");
+		if (!uiTheme) throw new Error("Built-in light theme is unavailable");
+		expect(uiTheme.fg("toolDiffAdded", "COLOR")).not.toBe(activeTheme.fg("toolDiffAdded", "COLOR"));
 		const component = editToolRenderer.renderResult(
 			{
 				content: [{ type: "text", text: "Updated demo.ts" }],
