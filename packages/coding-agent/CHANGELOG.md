@@ -73,8 +73,13 @@
 - Context file containment dedup now sorts by depth descending internally, treating files without a depth as least authoritative, so concatenated multi-root or user-level context cannot drop a closer-to-cwd file.
 - Paragraph splitting for containment comparison is now fenced-code-block-aware: text inside a fenced example in a more authoritative file no longer counts as a contained instruction, preventing active context rules from being discarded.
 
+### Changed
+
+- Streamed-edit guard no longer blocks the event loop while streaming: edit-target reads are async and removed-line verification is memoized per file, cutting precheck stalls on large files from tens of milliseconds (seconds cumulative) to low single-digit milliseconds.
+
 ### Fixed
 
+- A streamed-edit removed-lines verification still pending across a turn boundary no longer starts under the next turn (turn resets don't advance the session prompt generation) and abort it based on the previous turn's edit.
 - Fixed UI jitter in the edit tool gutter by reserving space for line counts
 - Edit-tool add lines written directly above a `` gap now insert under their anchor line instead of splicing at the post-gap anchor, often mid-line without a newline.
 - Edit-tool add lines may contain literal selection-marker glyphs; such payloads previously failed with an unusable corrected payload.
