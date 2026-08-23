@@ -427,7 +427,7 @@ function matchesOverflowText(text: string): boolean {
 function classifyText(
 	errorMessage: string | undefined,
 	errorStatus: number | undefined,
-	causeTokenEvidence = false,
+	priorTokenOverflowEvidence = false,
 	api?: Api,
 	provider?: string,
 	modelId?: string,
@@ -490,11 +490,11 @@ function classifyText(
 		if (matchesStrictToolsRejection(cleanMessage, statusClean)) kinds |= Flag.Grammar;
 		if (matchesFastModeUnsupported(cleanMessage, statusClean)) kinds |= Flag.FastModeUnsupported;
 	}
-	// Status-only 413: infer PayloadRejected unless the cause chain carries token-context evidence (#9235).
+	// Status-only 413: infer PayloadRejected unless prior classification carries token-context evidence (#9235).
 	const statusEvidence = errorStatus ?? (errorMessage ? status({ message: errorMessage }) : undefined);
 	if (
 		statusEvidence === 413 &&
-		!causeTokenEvidence &&
+		!priorTokenOverflowEvidence &&
 		!(errorMessage && hasTokenContextOverflowEvidence(errorMessage))
 	) {
 		kinds |= Flag.PayloadRejected;
@@ -698,11 +698,13 @@ export function classifyMessage(message: {
 }): number {
 	const existingId = message.errorId;
 	const currentStatus = message.errorStatus ?? statusFromId(existingId);
+	const existingOverflowOnly =
+		existingId !== undefined && is(existingId, Flag.ContextOverflow) && !is(existingId, Flag.PayloadRejected);
 	const classificationMessage = message.errorClassificationMessage ?? message.errorMessage;
 	const textId = classifyText(
 		classificationMessage,
 		currentStatus,
-		false,
+		existingOverflowOnly,
 		message.api,
 		message.provider,
 		message.model,
