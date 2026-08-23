@@ -87,6 +87,7 @@ import { AgentsHubComponent } from "../components/agents-hub";
 import { AssistantMessageComponent } from "../components/assistant-message";
 import { CopySelectorComponent } from "../components/copy-selector";
 import { ExtensionDashboard } from "../components/extensions";
+import { listLiveToolRecords, liveToolRecordFromSession } from "../components/extensions/live-tool-session";
 import { HistorySearchComponent } from "../components/history-search";
 import { LoginDialogComponent } from "../components/login-dialog";
 import { LogoutAccountSelectorComponent } from "../components/logout-account-selector";
@@ -372,7 +373,18 @@ export class SelectorController {
 	 * Replaces /status with a unified view of all providers and extensions.
 	 */
 	async showExtensionsDashboard(): Promise<void> {
-		const dashboard = await ExtensionDashboard.create(getProjectDir(), this.ctx.settings, this.ctx.ui.terminal.rows);
+		const dashboard = await ExtensionDashboard.create({
+			cwd: getProjectDir(),
+			settings: this.ctx.settings,
+			terminalHeight: this.ctx.ui.terminal.rows,
+			mcpManager: this.ctx.mcpManager,
+			eventBus: this.ctx.eventBus,
+			toolSource: {
+				getLiveTool: name => liveToolRecordFromSession(this.ctx.session, name),
+				listLiveTools: () => listLiveToolRecords(this.ctx.session),
+			},
+			onMcpToolsChanged: tools => this.ctx.session.refreshMCPTools(tools),
+		});
 		// Fullscreen dashboard on the alternate screen (the /settings idiom): the
 		// overlay borrows the terminal's alt buffer and enables mouse tracking for
 		// its lifetime, leaving the transcript untouched underneath.
@@ -384,6 +396,7 @@ export class SelectorController {
 			fullscreen: true,
 		});
 		dashboard.onClose = () => {
+			dashboard.dispose();
 			overlay.hide();
 			this.focusActiveEditorArea();
 			this.ctx.ui.requestRender();

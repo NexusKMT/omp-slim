@@ -641,6 +641,8 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	mcpToolName?: string;
 	/** Optional environment hook applied when the interactive user shell invokes this tool's shell surface. */
 	shellEnv?: ToolShellEnvironmentHook;
+	/** Authoritative originating file for a discovered custom-tool module. */
+	sourcePath?: string;
 	/** Execute the tool. */
 	execute(
 		toolCallId: string,

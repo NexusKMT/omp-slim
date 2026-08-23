@@ -63,6 +63,42 @@
 - Squeezed transcript tool rows no longer render as a bare unstyled `╭─ Hub` frame: a squeezed block keeps its real render whenever it fits the allocated rows, and blocks that genuinely overflow fold to a themed frame that names the tool's activity (e.g. `Hub · send → Main`).
 - Python/Ruby/Julia eval cells that hit their wall-clock timeout during a `parallel()`/`agent()`/`tool.*` fan-out no longer get their kernel force-killed (losing all session state): the timeout now aborts in-flight bridge calls so the runner unwinds as a clean KeyboardInterrupt and the kernel survives.
 - Multi-select ask options whose labels end in `(Recommended)` now show their checked state and avoid duplicate recommendation suffixes ([#9452](https://github.com/can1357/oh-my-pi/issues/9452)).
+### Added
+
+- `/extensions` now joins live `MCPManager` state into MCP rows and the inspector: connection health, `serverInfo` title/description, tool/resource/prompt catalogs, and server instructions, with transport/command last. MCP protocol typings now include 2025-11-25 implementation and tool display metadata (`title`, `description`, `websiteUrl`, `icons`, tool `annotations`).
+- `/extensions` uses one inspector grammar across kinds (identity → enablement/runtime → description → origin → kind surface → contents → config). Tools join live session schemas, rules show apply-when plus body, skills show discovery semantics plus instruction preview, and slash commands parse frontmatter description/`$ARGUMENTS` instead of dumping the raw markdown file.
+- Truncated `/extensions` inspector sections (`… N more`) expand in place with Ctrl+O (the existing `app.tools.expand` binding). Long inspector lines wrap instead of ellipsizing, the inspector leaves a scrollbar gutter, and truncated previews fill leftover viewport height while reserving the hint row. Custom-tool factories that export several tools from one file stay grouped (e.g. `systemd.ts` → `systemd_inspect`/`systemd_control`/`systemd_author`); args stay collapsed until Ctrl+O, and the file's leading JSDoc is the bundle description. List hints show `hidden` for hidden tools/skills, omit default arg counts / `discoverable` / `listed`, and label project-level items with the directory that contains `.omp` when present. Skill discovery sits under Active only when the skill is hidden. Shadowed MCP configs do not join the winner's live connection.
+
+### Changed
+
+- `/extensions` MCP enable/disable now disconnects or reconnects the live `MCPManager` and refreshes session MCP tools, matching `/mcp enable` / `/mcp disable`.
+- `/extensions` MCP status no longer means "enabled in config": a selected server shows Connected / Connecting / Not connected / Inactive from the live manager, matching `/mcp list`. The command/url is no longer used as the MCP description.
+- `/extensions` no longer leads with `Type:` / `Status:` plumbing. Enablement is the first fact after the name for every kind; MCP keeps live connection health in that slot.
+- `/extensions` MCP tools now show `inputSchema` arguments the same way custom tools do: three or fewer args inline, more than three collapsed until Ctrl+O. Server `initialize.instructions` sit under the description instead of as a footer; the duplicate Connection heading is gone (command/url/env remain as labeled rows). Descriptions and guidance longer than three wrapped lines collapse until Ctrl+O.
+- `/extensions` origin path is dim again, matching the pre-overhaul inspector.
+
+### Fixed
+
+- Incremental `/mcp enable` and `/extensions` MCP enable keep already-connected servers' tools in `MCPManager.getTools()`; `connectServers()` merges per-server ownership instead of replacing the whole registry.
+- `/extensions` provider master-disable disconnects that provider's live MCP servers and rebinds session tools without rewriting `mcp.json`; re-enable does not auto-connect.
+- `/extensions` custom-tool factory names and labels on a single inspector row go through `sanitizeDisplayLine`, so embedded newlines cannot inject extra TUI rows.
+- `/extensions` list hints collapse newlines (`sanitizeDisplayLine`) so a rule glob or hook trigger cannot inject extra TUI rows and desync scrolling.
+- `/extensions` MCP enable loads configs with the same discovery filters as startup (`mcp.enableProjectConfig`, Exa, builtin-browser), so toggling a filtered-out row does not start a server session init skipped.
+- Shadowed `/extensions` rows are informational only, including same-name MCP configs that share the winner's `mcp:<name>` id even when disablement wins display state (`enabled: false` + `_shadowed`).
+- `/extensions` sanitizes untrusted MCP/tool display strings (`sanitizeText` then `replaceTabs`) before applying theme SGR, so OSC/BEL/ANSI from a server cannot leak into the TUI. List hints, origin paths, and schema `type`/`default` go through the same boundary.
+- `/extensions` joins custom tools by originating file first: a same-name builtin/MCP/SDK tool is not treated as the custom file, and a factory that also exports the file stem still lists every sibling. Project list hints accept Windows `.omp` paths.
+- `/extensions` custom-tool inspector rows now join live tools by the originating file path carried through `getAllToolInfos()`, so `git.ts` and `git_commit.ts` stay separate while a multi-export factory like `systemd.ts` still groups siblings.
+- `/extensions` Ctrl+O expand follows the selected row (`id` + path). Changing selection collapses again; a live refresh of the same row keeps the expand state.
+- `/extensions` schema `type` and `default` values that land on one inspector parameter row go through `sanitizeDisplayLine`, so a newline in either field cannot inject an extra TUI row.
+- `/extensions` keeps Codex/OpenCode slash-command frontmatter (`description`, `argumentHint` / `argument-hint`) on the capability record after discovery strips it from `content`, so the inspector and search still see those fields. Providers that leave raw frontmatter in `content` still fall back to `commandPreview`.
+- `/extensions` command preview keeps an empty parsed body when a slash-command file is only frontmatter, so YAML is not shown as the template and `$ARGUMENTS` in frontmatter does not report as a body token.
+- `/extensions` builds the live tool list from one `getAllToolInfos()` snapshot instead of rebuilding that collection once per tool.
+- `/extensions` treats Windows UNC custom-tool paths as filesystem provenance so factory siblings on a share still join the same inspector row.
+- `/extensions` repaints live MCP health when `MCPManager` reconnects or trips its crash breaker, not only on EventBus connect-status events.
+- `/extensions` repaints when MCP resource/prompt catalogs finish loading after `connected`, instead of keeping empty counts until unrelated input.
+- `/extensions` joins live custom tools from one ToolInfo snapshot per dashboard render; list rows and the inspector reuse that snapshot instead of rebuilding it per row.
+- `/extensions` PageUp/PageDown scroll an overflowed inspector pane; Up/Down still move the list.
+- `/extensions` (the Extension Control Center) now opens as a fullscreen window on the terminal's alternate screen, matching `/settings`: it borrows the alt buffer for its lifetime (the transcript is untouched underneath) and uses the same modern chrome — a titled rounded frame, the shared `TabBar` for provider switching, and a divider/footer layout. The dashboard is now mouse-aware: the wheel scrolls the list (and the detail inspector, which gained its own scroll viewport), hovering highlights tabs and rows, and clicking selects a row or — when it is already selected — toggles it; clicking a provider tab switches to it. Empty enabled providers are unselectable while disabled providers stay selectable so their master switch can re-enable them.
 
 ## [18.0.2] - 2026-08-23
 
