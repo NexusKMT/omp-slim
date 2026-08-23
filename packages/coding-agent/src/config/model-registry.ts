@@ -1819,9 +1819,12 @@ export class ModelRegistry {
 			// Extended context off: cap models with a premium long-context price
 			// tier (e.g. GPT-5.6 bills 2x input above 272K) at the standard-pricing
 			// threshold so compaction fires before a request crosses into the tier.
-			// Explicit per-model `contextWindow` overrides reapply later in
-			// composition and win over this cap.
-			if (!extendedContext) {
+			// xai-oauth carries public xAI prices only for API-equivalent stats;
+			// SuperGrok requests remain subscription-backed, so its estimated tier
+			// must not constrain the runtime context window. Explicit per-model
+			// `contextWindow` overrides reapply later in composition and win over
+			// this cap.
+			if (!extendedContext && model.provider !== "xai-oauth") {
 				const threshold = model.cost.longContext?.inputThreshold;
 				if (threshold !== undefined && model.contextWindow !== null && model.contextWindow > threshold) {
 					model = applyModelOverride(model, { contextWindow: threshold });
