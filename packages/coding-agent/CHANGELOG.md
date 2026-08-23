@@ -25,6 +25,10 @@
 
 - ACP `hub wait` (and other structured tool progress) no longer renders a raw JSON envelope as the tool row: an empty-text result envelope whose data already rides the frame as `rawOutput` no longer falls back to serializing the whole value into a `content` text block ([#9511](https://github.com/can1357/oh-my-pi/issues/9511)).
 
+### Fixed
+
+- Fixed the sticky Todo HUD being permanently collapsed; `/todo expand` now shows every phase and task, and `/todo collapse` restores the bounded preview ([#9493](https://github.com/can1357/oh-my-pi/issues/9493)).
+
 ## [18.0.3] - 2026-08-23
 
 ### Added
