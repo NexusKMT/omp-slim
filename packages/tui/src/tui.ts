@@ -2043,6 +2043,10 @@ export class TUI extends Container {
 		if (history !== undefined) {
 			this.#acceptedHistoryBatchId = history.id;
 			provider?.acknowledgeHistory(history.id);
+			// Draining is one batch per frame; the provider may hold further
+			// finalized prefixes (large resumed transcripts). Pump the next frame
+			// instead of waiting for an unrelated render request.
+			this.requestRender();
 		}
 	}
 
