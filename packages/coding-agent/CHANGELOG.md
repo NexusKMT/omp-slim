@@ -4,7 +4,7 @@
 
 ### Changed
 
- - Format streaming thinking blocks incrementally — append ticks re-fold only the appended suffix instead of a full O(text²) re-scan; each delta is verified against the previous text via exact prefix comparison (O(accumulated) at native memcmp speed), and an 8 KiB resume cap degrades pathological no-newline streams to the exact-match memo.
+- Format streaming thinking blocks incrementally: append ticks resume the fold over only the appended suffix (O(delta)), with exact prefix verification at memcmp speed (O(previous text), negligible at realistic sizes), and streams stuck past an 8 KiB partial-line cap fall back to the identity memo.
 
 ## [18.0.3] - 2026-08-23
 
