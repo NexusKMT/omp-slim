@@ -133,6 +133,37 @@ function hasTokenContextOverflowEvidence(text: string): boolean {
 	return CONTEXT_OVERFLOW_EVIDENCE_PATTERNS.some(p => p.test(text));
 }
 
+/**
+ * Token-context overflow evidence on ANY link of an error's cause chain
+ * (#9235 review). The status-only payload inference must arbitrate across
+ * the whole chain: a generic wrapper whose nested 413 carries provider token
+ * wording ("maximum context length is N tokens") is a pure overflow — the
+ * wrapper's recursively-derived 413 status must not co-flag PayloadRejected
+ * and steer a low-occupancy session away from compaction.
+ */
+function hasCauseTokenContextOverflowEvidence(error: unknown): boolean {
+	const seen = new Set<object>();
+	let link: unknown = error;
+	while (link !== undefined && link !== null) {
+		if (typeof link !== "object") {
+			if (typeof link === "string" && hasTokenContextOverflowEvidence(link)) return true;
+			break;
+		}
+		if (seen.has(link)) break;
+		seen.add(link);
+		if ("message" in link) {
+			const message: unknown = link.message;
+			if (typeof message === "string" && hasTokenContextOverflowEvidence(message)) return true;
+		}
+		if ("cause" in link) {
+			link = link.cause;
+			continue;
+		}
+		break;
+	}
+	return false;
+}
+
 const OVERFLOW_NO_BODY_PATTERN = /\b4(00|13)\s*(status code)?\s*\(no body\)/i;
 // HTTP 413-family rejections driven by request BYTES or provider media budgets
 // rather than token context (#9235): ninfer maps a Qwen vision attention-pair
@@ -448,6 +479,7 @@ function matchesOverflowText(text: string): boolean {
 function classifyText(
 	errorMessage: string | undefined,
 	errorStatus: number | undefined,
+	causeTokenEvidence = false,
 	api?: Api,
 	provider?: string,
 	modelId?: string,
@@ -514,12 +546,17 @@ function classifyText(
 	// rejections as a bare status with an opaque/generic reason phrase
 	// ("Content Too Large") or none at all — shapes the text tables above
 	// cannot see. Resending identical bytes cannot succeed, so classify as a
-	// payload rejection unless the body itself carries token-context
-	// evidence, which keeps genuine overflows on the compaction path. Other
-	// statuses stay untouched: a bare 400/401/403 proves nothing about
-	// payload size.
+	// payload rejection unless token-context evidence appears — in this body
+	// or anywhere on the error's cause chain, so a generic wrapper whose
+	// nested 413 names the token budget stays a pure overflow instead of
+	// gaining an inference-derived payload co-flag. Other statuses stay
+	// untouched: a bare 400/401/403 proves nothing about payload size.
 	const statusEvidence = errorStatus ?? (errorMessage ? status({ message: errorMessage }) : undefined);
-	if (statusEvidence === 413 && !(errorMessage && hasTokenContextOverflowEvidence(errorMessage))) {
+	if (
+		statusEvidence === 413 &&
+		!causeTokenEvidence &&
+		!(errorMessage && hasTokenContextOverflowEvidence(errorMessage))
+	) {
 		kinds |= Flag.PayloadRejected;
 	}
 	if (kinds !== 0) return create(kinds);
@@ -531,6 +568,9 @@ function classifyText(
 export function classify(error: unknown, api?: Api): number {
 	let kinds = 0;
 	const seen = new Set<object>();
+	// Chain-wide arbitration input for the status-only payload inference
+	// (#9235 review): token evidence on any cause link suppresses it everywhere.
+	const causeTokenEvidence = hasCauseTokenContextOverflowEvidence(error);
 	let link: unknown = error;
 	while (link !== undefined && link !== null) {
 		if (typeof link === "object") {
@@ -604,7 +644,7 @@ export function classify(error: unknown, api?: Api): number {
 			linkMessage = (link as { message: string }).message;
 		}
 
-		const textId = classifyText(linkMessage, status(link), api);
+		const textId = classifyText(linkMessage, status(link), causeTokenEvidence, api);
 		kinds |= textId & KIND_MASK;
 
 		link = typeof link === "object" && "cause" in link ? (link as { cause: unknown }).cause : undefined;
@@ -721,7 +761,14 @@ export function classifyMessage(message: {
 	const existingId = message.errorId;
 	const currentStatus = message.errorStatus ?? statusFromId(existingId);
 	const classificationMessage = message.errorClassificationMessage ?? message.errorMessage;
-	const textId = classifyText(classificationMessage, currentStatus, message.api, message.provider, message.model);
+	const textId = classifyText(
+		classificationMessage,
+		currentStatus,
+		false,
+		message.api,
+		message.provider,
+		message.model,
+	);
 
 	let kinds = ((existingId ?? 0) | textId) & KIND_MASK;
 	if (classificationMessage && LLAMA_CPP_TOOL_CALL_PARSE_PATTERN.test(classificationMessage)) {

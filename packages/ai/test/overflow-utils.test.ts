@@ -228,3 +228,23 @@ describe("classifyMessage - status-only 413 responses (#9235 review)", () => {
 		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(true);
 	});
 });
+
+describe("classify - token evidence arbitrates the status fallback across cause links (#9235 review)", () => {
+	it("keeps a wrapped token overflow pure when the wrapper's status comes from a nested 413", () => {
+		// status() recurses into causes, so a generic wrapper gains a 413 from
+		// its nested link; when that link names the token budget, the payload
+		// inference must lose to the provider's explicit overflow evidence.
+		const inner = Object.assign(new Error("Error: maximum context length is 128000 tokens"), { status: 413 });
+		const id = AIError.classify(new Error("Provider returned error", { cause: inner }));
+		expect(AIError.is(id, AIError.Flag.ContextOverflow)).toBe(true);
+		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(false);
+	});
+
+	it("keeps the status-derived payload flag for an opaque nested 413", () => {
+		// No link carries token wording: the recursively-derived 413 remains
+		// valid request-size evidence.
+		const inner = Object.assign(new Error("Content Too Large"), { status: 413 });
+		const id = AIError.classify(new Error("Provider returned error", { cause: inner }));
+		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(true);
+	});
+});
