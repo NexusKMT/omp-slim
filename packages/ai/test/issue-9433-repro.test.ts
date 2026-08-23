@@ -44,27 +44,30 @@ async function run(frames: readonly unknown[]) {
 describe("issue #9433 — [DONE]-terminated completions without finish_reason", () => {
 	// Each shape is a real OpenAI-compatible host behavior that previously threw
 	// incomplete-stream; all three reach `[DONE]` and must finalize as a clean stop.
-	const doneTerminated: readonly (readonly [string, readonly unknown[]])[] = [
+	const doneTerminated: readonly (readonly [string, readonly unknown[], string])[] = [
 		[
 			"no terminal finish chunk, just [DONE]",
 			[{ choices: [{ delta: { content: "Hel" } }] }, { choices: [{ delta: { content: "lo" } }] }, "[DONE]"],
+			"Hello",
 		],
 		[
 			"trailing finish_reason:null then [DONE]",
 			[{ choices: [{ delta: { content: "Hel" } }] }, { choices: [{ delta: {}, finish_reason: null }] }, "[DONE]"],
+			"Hel",
 		],
 		[
 			"trailing empty choices:[] then [DONE]",
 			[{ choices: [{ delta: { content: "Hel" } }] }, { choices: [] }, "[DONE]"],
+			"Hel",
 		],
 	];
 
-	for (const [label, frames] of doneTerminated) {
+	for (const [label, frames, expectedText] of doneTerminated) {
 		it(`finalizes as a clean stop with content preserved (${label})`, async () => {
 			const result = await run(frames);
 			expect(result.stopReason).toBe("stop");
 			expect(result.errorMessage).toBeUndefined();
-			expect(result.text.length).toBeGreaterThan(0);
+			expect(result.text).toBe(expectedText);
 		});
 	}
 
