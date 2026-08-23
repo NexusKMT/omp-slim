@@ -2144,33 +2144,62 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// honors the last active role in either case.
 		const sessionRetryLimit = restoredSessionModelIndex >= 0 ? restoredSessionModelIndex : sessionModelStrings.length;
 		if (!hasExplicitModel && sessionRetryLimit > 0) {
-			for (let i = 0; i < sessionRetryLimit; i++) {
-				const sessionModelStr = sessionModelStrings[i];
-				const parsedModel = parseModelString(sessionModelStr, {
-					allowMaxSuffix: true,
-					allowAutoAlias: true,
-					isLiteralModelId: (provider, id) => modelRegistry.find(provider, id) !== undefined,
-				});
-				if (!parsedModel) continue;
-				const restoredModel = modelRegistry.find(parsedModel.provider, parsedModel.id);
-				if (restoredModel && hasModelAuth(restoredModel)) {
-					model = restoredModel;
-					modelFallbackMessage = undefined;
-					restoredSessionModelIndex = i;
-					restoredSessionThinkingLevel = parsedModel.thinkingLevel;
-					// Recompute thinking-level from scratch against the reclaimed
-					// model: any value derived from the earlier fallback model's
-					// `thinking.defaultLevel` must not become sticky.
-					thinkingLevel = pickInitialThinkingLevel(restoredModel);
-					autoThinking = thinkingLevel === AUTO_THINKING;
-					effectiveThinkingLevel = concreteThinkingLevel(thinkingLevel);
-					effectiveThinkingLevel = logger.time("resolveThinkingLevelForModel", () =>
-						autoThinking
-							? resolveProvisionalAutoLevel(restoredModel)
-							: resolveThinkingLevelForModel(restoredModel, effectiveThinkingLevel),
+			const restoreSessionModel = (): boolean => {
+				for (let i = 0; i < sessionRetryLimit; i++) {
+					const sessionModelStr = sessionModelStrings[i];
+					const parsedModel = parseModelString(sessionModelStr, {
+						allowMaxSuffix: true,
+						allowAutoAlias: true,
+						isLiteralModelId: (provider, id) => modelRegistry.find(provider, id) !== undefined,
+					});
+					if (!parsedModel) continue;
+					const restoredModel = modelRegistry.find(parsedModel.provider, parsedModel.id);
+					if (restoredModel && hasModelAuth(restoredModel)) {
+						model = restoredModel;
+						modelFallbackMessage = undefined;
+						restoredSessionModelIndex = i;
+						restoredSessionThinkingLevel = parsedModel.thinkingLevel;
+						// Recompute thinking-level from scratch against the reclaimed
+						// model: any value derived from the earlier fallback model's
+						// `thinking.defaultLevel` must not become sticky.
+						thinkingLevel = pickInitialThinkingLevel(restoredModel);
+						autoThinking = thinkingLevel === AUTO_THINKING;
+						effectiveThinkingLevel = concreteThinkingLevel(thinkingLevel);
+						effectiveThinkingLevel = logger.time("resolveThinkingLevelForModel", () =>
+							autoThinking
+								? resolveProvisionalAutoLevel(restoredModel)
+								: resolveThinkingLevelForModel(restoredModel, effectiveThinkingLevel),
+						);
+						preconnectModelHost(restoredModel.baseUrl);
+						return true;
+					}
+				}
+				return false;
+			};
+			if (!restoreSessionModel()) {
+				// The saved candidates weren't in the static+cached catalog. If any
+				// belongs to a discovery-backed provider that hasn't been fetched
+				// yet (models.yml `discovery:` — openai-models-list/litellm/proxy/…),
+				// trigger one cache-aware discovery pass and retry before resume
+				// silently downgrades to the default role. Mirrors the deferred
+				// `--model` (resolveModelDiscoveryFallbackNonRuntime) and default-role
+				// fallback paths, which already refresh discoverable providers.
+				const discoverableProviders = new Set(modelRegistry.getDiscoverableProviders());
+				const hasDiscoverableCandidate =
+					discoverableProviders.size > 0 &&
+					sessionModelStrings.slice(0, sessionRetryLimit).some(sessionModelStr => {
+						const parsedModel = parseModelString(sessionModelStr, {
+							allowMaxSuffix: true,
+							allowAutoAlias: true,
+							isLiteralModelId: (provider, id) => modelRegistry.find(provider, id) !== undefined,
+						});
+						return parsedModel ? discoverableProviders.has(parsedModel.provider) : false;
+					});
+				if (hasDiscoverableCandidate) {
+					await logger.time("restoreSessionModelDiscoveryFallback", () =>
+						modelRegistry.refresh("online-if-uncached"),
 					);
-					preconnectModelHost(restoredModel.baseUrl);
-					break;
+					restoreSessionModel();
 				}
 			}
 		}
