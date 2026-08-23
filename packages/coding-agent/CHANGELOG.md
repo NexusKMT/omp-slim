@@ -13,6 +13,10 @@
 
 - Subagent advisors now review the final `yield`: the yield turn is delivered to the advisor and its review is drained before the subagent session is disposed, instead of being abandoned at teardown ([#9505](https://github.com/can1357/oh-my-pi/issues/9505)).
 
+### Changed
+
+- Cap streaming markdown renders at the reveal cadence when reveal is caught up; provider deltas accumulate and flush per tick instead of rendering per token.
+
 ## [18.0.3] - 2026-08-23
 
 ### Added
