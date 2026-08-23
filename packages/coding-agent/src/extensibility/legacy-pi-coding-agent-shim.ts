@@ -488,13 +488,13 @@ export function createBashToolDefinition(cwd: string, options?: BashToolOptions)
 	const spawnHook = options?.spawnHook;
 	const shellEnv = spawnHook
 		? (spawn: ToolShellEnvironmentContext): Record<string, string> => {
+				const baseline = { ...spawn.env };
 				const result = spawnHook(spawn);
 				// Legacy hooks conventionally return `{ ...context.env, EXTRA }`.
 				// The consumer applies this as per-command overrides on an already
 				// filtered base env, so forwarding the whole object would reintroduce
 				// everything filterChildShellEnv removed. Forward only entries the
 				// hook added or changed relative to the env it was handed.
-				const baseline = spawn.env;
 				return Object.fromEntries(
 					Object.entries(result.env).filter(
 						(entry): entry is [string, string] => typeof entry[1] === "string" && baseline[entry[0]] !== entry[1],

@@ -448,4 +448,19 @@ describe("legacy spawnHook shellEnv adapter", () => {
 		});
 		expect(result).toEqual({ EXTRA: "1", CHANGED: "new" });
 	});
+	it("forwards changes when the hook mutates its environment in place", () => {
+		const definition = createBashTool(process.cwd(), {
+			spawnHook: context => {
+				context.env.EXTRA = "1";
+				context.env.CHANGED = "new";
+				return context;
+			},
+		});
+		const result = definition.shellEnv?.({
+			command: "true",
+			cwd: process.cwd(),
+			env: { KEPT: "kept", CHANGED: "old" },
+		});
+		expect(result).toEqual({ EXTRA: "1", CHANGED: "new" });
+	});
 });
