@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.1] - 2026-08-23
+
 ### Added
 
 - Plan review can save a plan to a chosen path and start a new session.

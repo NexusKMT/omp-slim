@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.1] - 2026-08-23
+
 ### Added
 
 - Collapsed individual skill commands into a `/skill:` namespace entry to declutter suggestions

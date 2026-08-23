@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.1] - 2026-08-23
+
 ### Changed
 
 - Broker-backed startup no longer blocks on a broker round trip when the encrypted snapshot cache is fresh: the credential store starts from the cached snapshot and the background snapshot stream revalidates immediately (stale-while-revalidate). First launches and expired caches still fail fast with the actionable broker error.
