@@ -103,6 +103,36 @@ describe("paid xai (XAI_API_KEY) Responses contract", () => {
 		expect(usage.cost.cacheRead).toBeCloseTo(0.06, 10);
 	});
 
+	it("bridges the SuperGrok multi-agent alias to its public xAI catalog price", () => {
+		// Paid catalog uses `grok-4.20-multi-agent-beta-latest`; SuperGrok exposes
+		// the same model as `grok-4.20-multi-agent-0309`, so an exact-ID fallback
+		// misses it. The alias bridge must copy the paid price (and its 200K tier).
+		const paidSpec: ModelSpec<"openai-responses"> = {
+			...XAI_RESPONSES_SPEC,
+			id: "grok-4.20-multi-agent-beta-latest",
+			name: "Grok 4.20 (Multi-Agent)",
+			cost: { input: 2, output: 6, cacheRead: 0.2, cacheWrite: 0 },
+		};
+		const oauthSpec: ModelSpec<"openai-responses"> = {
+			...paidSpec,
+			id: "grok-4.20-multi-agent-0309",
+			provider: "xai-oauth",
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		};
+		const [paid, oauth] = applyXaiCatalogPricing([paidSpec, oauthSpec]);
+		if (!paid || !oauth) throw new Error("xAI pricing policy dropped a model");
+
+		expect(paid.cost.longContext).toEqual({
+			inputThreshold: 200_000,
+			inputThresholdInclusive: true,
+			input: 4,
+			output: 12,
+			cacheRead: 0.4,
+			cacheWrite: 0,
+		});
+		expect(oauth.cost).toEqual(paid.cost);
+	});
+
 	it("drops stale Chat Completions cache rows so Responses takes effect immediately", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-xai-completions-cache-"));
 		const dbPath = path.join(tempDir, "models.db");
