@@ -162,16 +162,6 @@ describe("buildModel", () => {
 		expect(model.compat?.supportsStrictMode).toBe(true);
 	});
 
-	it("loads mandatory reasoning for bundled OpenRouter ox-alpha", () => {
-		const model = getBundledModel<"openrouter">("openrouter", "stealth/ox-alpha");
-
-		expect(model.thinking).toMatchObject({
-			efforts: [Effort.Low, Effort.High, Effort.Max],
-			defaultLevel: Effort.Max,
-			requiresEffort: true,
-		});
-	});
-
 	it("strips gateway author prefixes and extrinsic tags from display names", () => {
 		const cases: [string, string][] = [
 			["Anthropic: Claude Opus 4.6 (Fast) ($$$$)", "Claude Opus 4.6 (Fast)"],

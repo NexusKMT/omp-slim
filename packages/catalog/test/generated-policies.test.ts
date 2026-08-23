@@ -94,7 +94,7 @@ describe("generated model policies", () => {
 	it("preserves OpenRouter's mandatory provider-authored effort ladder", () => {
 		const models: ModelSpec<Api>[] = [
 			createSpec({
-				id: "stealth/ox-alpha",
+				id: "mandatory-model",
 				api: "openrouter",
 				provider: "openrouter",
 				thinking: {
