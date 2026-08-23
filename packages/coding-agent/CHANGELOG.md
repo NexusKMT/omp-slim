@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- ACP `hub wait` (and other structured tool progress) no longer renders a raw JSON envelope as the tool row: an empty-text result envelope whose data already rides the frame as `rawOutput` no longer falls back to serializing the whole value into a `content` text block ([#9511](https://github.com/can1357/oh-my-pi/issues/9511)).
+
 ## [18.0.3] - 2026-08-23
 
 ### Added
