@@ -44,6 +44,7 @@
 - Goal mode now preserves the intrinsic Fireworks Fast→base degradation precedence over configured hard-error fallback chains: the pre-compaction chain consult is scoped to payload rejections ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
 - Advisor turn recovery now applies the same payload/usage arbitration as the main loop's fallback eligibility: a dual-classified media-budget 413 with no reported token excess switches the advisor to its configured fallback chain instead of marking it unavailable, while usage-backed overflows keep the veto ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
 - When a payload-worded 413 dead ends with provider-reported input tokens above the model's window, the warning now diagnoses a token-context problem (enable compaction, reduce usage, or switch models) instead of contradicting the accounting with "NOT a token-context problem" ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- A payload-rejection 413 that dead ends an active goal is now persisted to the session JSONL before the automatic-continuation block returns, so a reopened session keeps the provider's terminal error instead of ending at the last tool result ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
 
 - Fixed UI jitter in the edit tool gutter by reserving space for line counts
 - Edit-tool add lines written directly above a `` gap now insert under their anchor line instead of splicing at the post-gap anchor, often mid-line without a newline.

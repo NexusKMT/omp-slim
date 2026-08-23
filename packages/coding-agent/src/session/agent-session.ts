@@ -3048,6 +3048,19 @@ export class AgentSession {
 				checkedCompaction = true;
 				const compactionContinues = compactionResult.deferredHandoff || compactionResult.continuationScheduled;
 				if (compactionContinues || compactionResult.automaticContinuationBlocked) {
+					// A BLOCK means maintenance dead-ended the failed turn and
+					// removed it from provider context, but this early return
+					// skips the standard error tail below that persists skipped
+					// empty error turns — durably record the terminal 413 so the
+					// session JSONL keeps why the goal stopped (#9235 review).
+					// Same overflow guard as the tail: content-less overflow
+					// rejections stay live-UI only.
+					if (
+						compactionResult.automaticContinuationBlocked &&
+						!AIError.isContextOverflow(msg, this.model?.contextWindow ?? 0)
+					) {
+						await this.#recovery.persistTerminalEmptyErrorTurn(msg);
+					}
 					maintenanceRoute("active-goal-pre-empt-compaction-handled", {
 						deferredHandoff: compactionResult.deferredHandoff,
 						continuationScheduled: compactionResult.continuationScheduled,

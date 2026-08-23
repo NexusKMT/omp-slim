@@ -868,6 +868,41 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		expect(payloadNotices[0].level).toBe("warning");
 		expect(startCount()).toBe(0);
 	});
+	it("persists the terminal payload 413 when an active goal dead ends", async () => {
+		// #9235 review: the goal-mode BLOCK early return skips the standard
+		// error tail that records skipped empty error turns — without an
+		// explicit persist, the session JSONL ends at the last tool result and
+		// a reopened session shows no trace of why the run stopped.
+		const requestedModels: string[] = [];
+		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		await createSession(
+			2_000,
+			{ toolText: "x".repeat(40_000) },
+			{
+				streamFn: (model, context, options) => {
+					requestedModels.push(`${model.provider}/${model.id}`);
+					primaryMock.push({ throw: PAYLOAD_ERROR_MESSAGE });
+					return primaryMock.stream(model, context, options);
+				},
+				extraSettings: {
+					"compaction.enabled": false,
+					"contextPromotion.enabled": false,
+				},
+			},
+		);
+		activateOngoingGoal("goal-persist-terminal-413");
+		await session.prompt("work on the goal");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5"]);
+		const terminalErrors = sessionManager
+			.getBranch()
+			.filter(entry => entry.type === "message")
+			.map(entry => (entry as { message?: AssistantMessage }).message)
+			.filter(message => message?.role === "assistant" && message.stopReason === "error");
+		expect(terminalErrors).toHaveLength(1);
+		expect(terminalErrors[0]?.errorMessage).toContain("413");
+	});
 	it("blocks dual-flag bare-413 dead ends even though overflow evidence is present", async () => {
 		// Bare "413 status code (no body)" classifies as BOTH PayloadRejected
 		// and ContextOverflow. High occupancy forces the gate entry and
