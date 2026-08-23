@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed Cursor tool calls through the OpenAI-compatible auth gateway losing their arguments when Cursor announced the complete argument map without streaming argument deltas ([#9479](https://github.com/can1357/oh-my-pi/issues/9479)).
+- Fixed Cursor plan-entitlement refusals repeatedly reselecting an account that cannot serve the requested model; denied credentials are now blocked only for that model and rotation converges on an eligible sibling ([#9488](https://github.com/can1357/oh-my-pi/issues/9488)).
 
 ## [18.0.3] - 2026-08-23
 
