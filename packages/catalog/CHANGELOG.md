@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed public xAI and matching SuperGrok models missing xAI's higher rate card for prompts reaching 200K tokens ([#9512](https://github.com/can1357/oh-my-pi/issues/9512)).
+
 ## [18.0.2] - 2026-08-23
 
 ### Fixed

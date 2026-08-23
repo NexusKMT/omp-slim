@@ -1315,6 +1315,93 @@ export interface XaiModelManagerConfig {
 	fetch?: FetchImpl;
 }
 
+const XAI_LONG_CONTEXT_COSTS: Readonly<Record<string, LongContextTokenCost>> = {
+	"grok-4.3": {
+		inputThreshold: 200_000,
+		inputThresholdInclusive: true,
+		input: 2.5,
+		output: 5,
+		cacheRead: 0.4,
+		cacheWrite: 0,
+	},
+	"grok-4.5": {
+		inputThreshold: 200_000,
+		inputThresholdInclusive: true,
+		input: 4,
+		output: 12,
+		cacheRead: 0.6,
+		cacheWrite: 0,
+	},
+	"grok-4.6": {
+		inputThreshold: 200_000,
+		inputThresholdInclusive: true,
+		input: 4,
+		output: 12,
+		cacheRead: 1,
+		cacheWrite: 0,
+	},
+	"grok-4.20-0309-reasoning": {
+		inputThreshold: 200_000,
+		inputThresholdInclusive: true,
+		input: 2.5,
+		output: 5,
+		cacheRead: 0.4,
+		cacheWrite: 0,
+	},
+	"grok-4.20-0309-non-reasoning": {
+		inputThreshold: 200_000,
+		inputThresholdInclusive: true,
+		input: 2.5,
+		output: 5,
+		cacheRead: 0.4,
+		cacheWrite: 0,
+	},
+	"grok-4.20-multi-agent-0309": {
+		inputThreshold: 200_000,
+		inputThresholdInclusive: true,
+		input: 2.5,
+		output: 5,
+		cacheRead: 0.4,
+		cacheWrite: 0,
+	},
+	"grok-build-0.1": {
+		inputThreshold: 200_000,
+		inputThresholdInclusive: true,
+		input: 2,
+		output: 4,
+		cacheRead: 0.4,
+		cacheWrite: 0,
+	},
+};
+
+function hasTokenPrice(model: ModelSpec): boolean {
+	const cost = model.cost;
+	return cost.input !== 0 || cost.output !== 0 || cost.cacheRead !== 0 || cost.cacheWrite !== 0;
+}
+
+/**
+ * Applies xAI's long-context rate card and mirrors exact public-model prices
+ * onto matching SuperGrok catalog rows.
+ */
+export function applyXaiCatalogPricing(models: readonly ModelSpec[]): ModelSpec[] {
+	const pricedModels = models.map(model => {
+		if (model.provider !== "xai") return model;
+		const longContext = XAI_LONG_CONTEXT_COSTS[model.id];
+		return longContext ? { ...model, cost: { ...model.cost, longContext } } : model;
+	});
+	const publicCosts = new Map(
+		pricedModels
+			.filter(model => model.provider === "xai" && hasTokenPrice(model))
+			.map(model => [model.id, model.cost]),
+	);
+
+	return pricedModels.map(model => {
+		if (model.provider !== "xai-oauth" || hasTokenPrice(model)) return model;
+		const publicCost = publicCosts.get(model.id);
+		return publicCost ? { ...model, cost: { ...publicCost } } : model;
+	});
+}
+
 export function xaiModelManagerOptions(config?: XaiModelManagerConfig): ModelManagerOptions<"openai-responses"> {
 	return {
 		...createOpenAICompatibleModelManagerOptions({
