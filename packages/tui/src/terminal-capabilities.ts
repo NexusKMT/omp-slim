@@ -108,7 +108,7 @@ export class TerminalInfo {
 		/** Renders the Kitty OSC 66 text-sizing protocol (scaled spans). Kitty only. */
 		public readonly supportsTextSizing: boolean = false,
 		/**
-		 * Hangul Compatibility Jamo (U+3131..=U+318E) cell width. Ghostty follows
+		 * Hangul Compatibility Jamo (U+3131..=U+318E) cell width. Ghostty and Orca follow
 		 * UAX#11 (2 cells); Warp paints 1; "platform" keeps the OS default
 		 * (macOS narrow, otherwise UAX#11).
 		 */
