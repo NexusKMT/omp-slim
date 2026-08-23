@@ -283,6 +283,9 @@ export class StreamingRevealController {
 		if (!this.#component) return;
 		if (!this.#smoothStreaming) {
 			const total = this.#visibleUnits(message);
+			this.#revealed = total;
+			this.#targetDirty = false;
+			this.#stopTimer();
 			this.#component.updateContent(this.#build(message, total), { transient: true });
 			return;
 		}

@@ -500,6 +500,30 @@ describe("frame-skip coalescing", () => {
 		vi.advanceTimersByTime(STREAMING_REVEAL_FRAME_MS * 5);
 		expect(component.messages.length).toBe(before + 1);
 	});
+	it("cancels a pending drain when smooth streaming is turned off", () => {
+		vi.useFakeTimers();
+		let smooth = true;
+		const component = new RecordingComponent();
+		const controller = new StreamingRevealController({
+			getSmoothStreaming: () => smooth,
+			getHideThinkingBlock: () => false,
+			getProseOnlyThinking: () => true,
+			requestRender: () => {},
+		});
+
+		controller.begin(component, makeMessage([{ type: "text", text: "" }]));
+		controller.setTarget(makeMessage([{ type: "text", text: "hi" }]));
+		vi.advanceTimersByTime(STREAMING_REVEAL_FRAME_MS);
+		controller.setTarget(makeMessage([{ type: "text", text: "yo" }]));
+
+		smooth = false;
+		controller.setTarget(makeMessage([{ type: "text", text: "abcdefghij" }]));
+		expect(textAt(latestMessage(component), 0)).toBe("abcdefghij");
+
+		vi.advanceTimersByTime(STREAMING_REVEAL_FRAME_MS);
+		expect(textAt(latestMessage(component), 0)).toBe("abcdefghij");
+		controller.stop();
+	});
 
 	it("flushes the trailing delta at the next tick and stops the timer", () => {
 		vi.useFakeTimers();
