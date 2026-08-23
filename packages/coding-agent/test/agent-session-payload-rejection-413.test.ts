@@ -503,4 +503,75 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		expect(endCount()).toBe(0);
 		expect(notices.filter(n => n.source === NOTICE_SOURCE)).toHaveLength(0);
 	});
+	it("believes provider-reported usage when it contradicts a payload-only body", async () => {
+		const requestedModels: string[] = [];
+		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		await createSession(
+			200_000,
+			{ toolText: "seed" },
+			{
+				streamFn: (model, context, options) => {
+					requestedModels.push(`${model.provider}/${model.id}`);
+					// In-run error (not `throw`): only this shape carries the
+					// provider-reported usage through to the assistant message.
+					primaryMock.push({
+						stopReason: "error",
+						errorMessage: PAYLOAD_ERROR_MESSAGE,
+						usage: { input: 250_000 },
+					});
+					return primaryMock.stream(model, context, options);
+				},
+			},
+		);
+		const overflowStarts: Array<Extract<AgentSessionEvent, { type: "auto_compaction_start" }>> = [];
+		session.subscribe(event => {
+			if (event.type === "auto_compaction_start" && event.reason === "overflow") overflowStarts.push(event);
+		});
+		const notices = collectNotices();
+		await session.prompt("trigger usage-backed overflow");
+		await session.waitForIdle();
+
+		// Reported usage (250k > 200k window) is authoritative overflow
+		// evidence: the failure must route into the recovery gate instead of
+		// the terminal payload BLOCK, with no payload notice surfaced.
+		expect(requestedModels[0]).toBe("anthropic/claude-sonnet-4-5");
+		expect(overflowStarts.length).toBeGreaterThanOrEqual(1);
+		expect(notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"))).toHaveLength(0);
+	});
+
+	it("blocks automatic continuation when a high-occupancy payload rejection has no runnable recovery", async () => {
+		const requestedModels: string[] = [];
+		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		await createSession(
+			2_000,
+			{ toolText: "x".repeat(40_000) },
+			{
+				streamFn: (model, context, options) => {
+					requestedModels.push(`${model.provider}/${model.id}`);
+					primaryMock.push({ throw: PAYLOAD_ERROR_MESSAGE });
+					return primaryMock.stream(model, context, options);
+				},
+				extraSettings: {
+					// No remedy may exist: compaction off, no promotion
+					// target, no fallback chain. The BLOCK (with its honest
+					// warning) is then the only correct outcome — a silent
+					// NONE would let an automatic goal continuation resend
+					// the identical rejected payload forever.
+					"compaction.enabled": false,
+					"contextPromotion.enabled": false,
+				},
+			},
+		);
+		activateOngoingGoal("goal-no-runnable-recovery");
+		const notices = collectNotices();
+		const startCount = countCompactionEvents("auto_compaction_start");
+		await session.prompt("work on the goal");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5"]);
+		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
+		expect(payloadNotices.length).toBe(1);
+		expect(payloadNotices[0].level).toBe("warning");
+		expect(startCount()).toBe(0);
+	});
 });

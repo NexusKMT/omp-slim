@@ -1783,7 +1783,9 @@ export class SessionMaintenance {
 		// - PayloadRejected-ONLY bodies name a size/media cause and carry no
 		//   token-context wording, so they are terminal whenever local
 		//   evidence agrees (real headroom) or is absent (custom/discovered
-		//   models carry `contextWindow: null`, normalized to 0 below).
+		//   models carry `contextWindow: null`, normalized to 0 below) —
+		//   never when provider-reported input usage exceeds the window:
+		//   the token accounting outranks the body text.
 		// - Dual-flag bodies (`413 (no body)` proxy ambiguity) carry no
 		//   reliable body evidence; with a gauge the headroom ceiling
 		//   arbitrates, without one they fall through to recovery below —
@@ -1793,8 +1795,18 @@ export class SessionMaintenance {
 		const ambiguousPayloadRejection =
 			payloadRejection && AIError.is(assistantMessage.errorId, AIError.Flag.ContextOverflow);
 		const storedTokens = payloadRejection && contextWindow > 0 ? this.#estimateStoredContextTokens() : 0;
+		// Provider-reported usage is authoritative overflow evidence even
+		// when the body text names a size/media cause (#9235 review): a
+		// gateway may answer with payload wording while its own accounting
+		// shows the request over the token window. Believe the accounting;
+		// only the local stored-context estimate arbitrates trust.
+		const reportedInputTokens =
+			assistantMessage.usage.input + assistantMessage.usage.cacheRead + assistantMessage.usage.cacheWrite;
 		const trustedPayloadRejection =
-			payloadRejection && contextWindow > 0 && storedTokens < contextWindow * PAYLOAD_REJECTION_OCCUPANCY_CEILING;
+			payloadRejection &&
+			contextWindow > 0 &&
+			reportedInputTokens <= contextWindow &&
+			storedTokens < contextWindow * PAYLOAD_REJECTION_OCCUPANCY_CEILING;
 		if ((payloadRejection && !ambiguousPayloadRejection && contextWindow <= 0) || trustedPayloadRejection) {
 			this.#host.removeAssistantMessageFromActiveContext(assistantMessage);
 			this.#host.emitNotice("warning", payloadRejectionNotice(storedTokens, contextWindow), "compaction");
@@ -1810,11 +1822,9 @@ export class SessionMaintenance {
 			// the limit first.
 			return COMPACTION_CHECK_BLOCK_AUTOMATIC_CONTINUATION;
 		}
-		if (
-			sameModel &&
-			!errorIsFromBeforeCompaction &&
-			(AIError.isContextOverflow(assistantMessage, contextWindow) || (payloadRejection && !trustedPayloadRejection))
-		) {
+		const overflowEvidence =
+			sameModel && !errorIsFromBeforeCompaction && AIError.isContextOverflow(assistantMessage, contextWindow);
+		if (overflowEvidence || (payloadRejection && !trustedPayloadRejection)) {
 			// Clear the failed turn from active context so neither the automatic
 			// continuation nor the next user prompt replays the failing turn.
 			// The persisted branch entry stays so the transcript keeps the only
@@ -1838,6 +1848,22 @@ export class SessionMaintenance {
 				return await this.#host.runRecoveryCompactionWithRollback("overflow", assistantMessage, allowDefer, {
 					autoContinue,
 				});
+			}
+			if (!overflowEvidence) {
+				// Payload-forced entry, but nothing can run: no promotion
+				// target and compaction is disabled or method-less. Return
+				// BLOCK anyway — resending the identical rejected payload
+				// cannot succeed, and an automatic goal continuation would
+				// otherwise blind-resend it (#9235 review).
+				this.#host.emitNotice("warning", payloadRejectionNotice(storedTokens, contextWindow), "compaction");
+				logger.debug("Payload-shaped 413 has no runnable recovery; blocking automatic continuation", {
+					provider: assistantMessage.provider,
+					model: assistantMessage.model,
+					message: assistantMessage.errorMessage,
+					storedTokens,
+					contextWindow,
+				});
+				return COMPACTION_CHECK_BLOCK_AUTOMATIC_CONTINUATION;
 			}
 			return COMPACTION_CHECK_NONE;
 		}
