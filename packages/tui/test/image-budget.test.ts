@@ -830,6 +830,44 @@ describe("TUI inline-image budget", () => {
 			tui.stop();
 		}
 	});
+	it("deletes stale kitty placement registry entries on a destructive display reset", async () => {
+		const originalGraphics = { ...getKittyGraphics() };
+		const term = new VirtualTerminal(40, 12);
+		const writes: string[] = [];
+		const realWrite = term.write.bind(term);
+		vi.spyOn(term, "write").mockImplementation((data: string) => {
+			writes.push(data);
+			realWrite(data);
+		});
+
+		setKittyGraphics({ unicodePlaceholders: false });
+		const tui = new TUI(term);
+		tui.setMaxInlineImages(3);
+		tui.addChild(makeImage(tui.imageBudget, "only"));
+		const id = tui.imageBudget.acquireId("only");
+
+		try {
+			tui.start();
+			await settle(term);
+			writes.length = 0;
+
+			tui.resetDisplay();
+			await settle(term);
+
+			// ED2/ED3 erase text but Kitty keeps placements registered — the reset
+			// must delete every epoch the image placed (`d=i`, data retained) and
+			// then re-place it in the viewport replay.
+			const repaint = writes.join("");
+			const deleteIndex = repaint.indexOf(`\x1b_Ga=d,d=i,i=${id},p=1,q=2\x1b\\`);
+			expect(deleteIndex).toBeGreaterThanOrEqual(0);
+			const placeIndex = repaint.indexOf("\x1b_Ga=p", deleteIndex);
+			expect(placeIndex).toBeGreaterThan(deleteIndex);
+			expect(repaint).not.toContain(BASE64_ONE_PIXEL_PNG);
+		} finally {
+			tui.stop();
+			setKittyGraphics(originalGraphics);
+		}
+	});
 
 	it("holds the first Ghostty image paint until the startup settle window passes", () => {
 		const originalId = terminal.id;

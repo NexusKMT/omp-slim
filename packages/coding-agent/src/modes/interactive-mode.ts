@@ -813,6 +813,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			composerShape: settings.get("composer.shape") ?? "box",
 			showHardwareCursor: settings.get("showHardwareCursor"),
 			maxInlineImages: settings.get("tui.maxInlineImages"),
+			resizeScrollback: settings.get("tui.resizeScrollback"),
 			imeSafeCursor: settings.get("tui.imeSafeCursor"),
 			autocompleteMaxVisible: settings.get("autocompleteMaxVisible"),
 			spellingTypoDetection: settings.get("spelling.typoDetection"),

@@ -7,8 +7,8 @@
  * acknowledgement) plus the complete mutable viewport. The writer anchors the
  * viewport directly below whatever history remains visible, diffs
  * viewport-only frames, and never infers finality from a row's position.
- * Destructive clears (ED3) happen only through explicit user gestures
- * (resetDisplay / requestRender with clearScrollback). Hosts without a
+ * Destructive clears (ED3) happen through explicit user gestures or configured
+ * settled-width rebuilds. Hosts without a
  * provider paint their composed children as a bounded viewport and never
  * touch history. See `docs/tui-core-renderer.md`.
  */
@@ -21,6 +21,7 @@ import { LoopWatchdog } from "./loop-watchdog";
 import { setAltScreenActive, type Terminal } from "./terminal";
 import {
 	encodeKittyDeleteImage,
+	encodeKittyDeletePlacement,
 	encodeKittyPlacementLine,
 	ImageProtocol,
 	isImageProtocolForced,
@@ -126,7 +127,7 @@ export interface TerminalFrameProvider {
 	acknowledgeHistory(id: number): void;
 	/** Full semantic viewport used only on the transient resize buffer. */
 	renderResizeFrame?(viewport: ViewportSize): readonly string[];
-	/** Re-offer finalized history after an explicit destructive display reset. */
+	/** Re-offer finalized history after a display reset or resize replay. */
 	resetHistory?(): void;
 }
 
@@ -245,6 +246,13 @@ export interface RenderRequestOptions {
 	/** Clear terminal scrollback for intentional transcript replacement. */
 	clearScrollback?: boolean;
 }
+/**
+ * Controls how a settled width resize refreshes history written at the old width.
+ *
+ * `append` replays the current transcript below retained history, `rebuild`
+ * clears history before replaying it, and `preserve` repaints only the viewport.
+ */
+export type ResizeScrollbackMode = "append" | "rebuild" | "preserve";
 
 /** Type guard to check if a component implements Focusable */
 export function isFocusable(component: Component | null): component is Component & Focusable {
@@ -737,6 +745,8 @@ export class TUI extends Container {
 	#resizeAltActive = false;
 	#resizeSettleTimer: RenderTimer | undefined;
 	#suppressResizeUntil = 0;
+	#resizeScrollbackMode: ResizeScrollbackMode = TUI.#initialResizeScrollbackMode();
+	#resizeReplayWidth: number | undefined;
 	// Holds an alternate-screen exit until its replacement full paint can emit it
 	// atomically. It must survive a deferred Ghostty image frame.
 	#pendingAltExit = "";
@@ -756,10 +766,16 @@ export class TUI extends Container {
 		this.#showHardwareCursor = showHardwareCursor === undefined ? this.#showHardwareCursor : showHardwareCursor;
 		this.#watchdog = new LoopWatchdog();
 	}
+	static #initialResizeScrollbackMode(): ResizeScrollbackMode {
+		const mode = Bun.env.PI_TUI_RESIZE_SCROLLBACK;
+		return mode === "append" || mode === "rebuild" || mode === "preserve" ? mode : "preserve";
+	}
+
 	/** Install the product-owned bounded frame provider. */
 	setFrameProvider(provider: TerminalFrameProvider | undefined): void {
 		this.#frameProvider = provider;
 		this.#providerWindow = [];
+		this.#resizeReplayWidth = undefined;
 		this.requestRender(true);
 	}
 
@@ -785,6 +801,15 @@ export class TUI extends Container {
 	 */
 	setMaxInlineImages(cap: number): void {
 		this.#imageBudget.setCap(cap);
+	}
+	/** Return how settled width resizes refresh native scrollback. */
+	getResizeScrollback(): ResizeScrollbackMode {
+		return this.#resizeScrollbackMode;
+	}
+
+	/** Set how settled width resizes refresh native scrollback. */
+	setResizeScrollback(mode: ResizeScrollbackMode): void {
+		this.#resizeScrollbackMode = mode;
 	}
 
 	/** Delete every tracked Kitty image from the terminal graphics store. */
@@ -1019,7 +1044,30 @@ export class TUI extends Container {
 			this.#altPreviousLines = [];
 			this.#forgetHardwareCursorState();
 			this.#recordHardwareCursorHidden();
-			this.terminal.write(`\x1b[?1049h${this.#keyboardEnhancementEnter()}`);
+			// Erase the mutable live viewport from the normal screen before borrowing
+			// the alt buffer. The terminal keeps reflowing the normal buffer during
+			// the drag, and a height shrink pushes its top rows into scrollback;
+			// with the live region blanked, only committed history rows (correct to
+			// push) or blanks can leave the screen — never live placeholder rows
+			// such as compact tool dots, whose real blocks must enter scrollback
+			// through the ordered history path. Cursor-relative addressing because
+			// the grid already reflowed: the parked cursor tracks its logical line,
+			// so moving up by the rewrapped row span of the window above it lands
+			// on the viewport's top row. That blank row then doubles as the anchor
+			// line for the settled CPR probe (empty window ⇒ staleRows 0).
+			let erase = "";
+			if (this.#hasEverRendered && this.#providerWindow.length > 0) {
+				const up = this.#reflowedRowCount(
+					this.#providerWindow,
+					0,
+					this.#parkedViewportOffset,
+					this.terminal.columns,
+				);
+				erase = `\x1b[?25l${up > 0 ? `\x1b[${up}A` : ""}\r\x1b[J`;
+				this.#providerWindow = [];
+				this.#parkedViewportOffset = 0;
+			}
+			this.terminal.write(`${erase}\x1b[?1049h${this.#keyboardEnhancementEnter()}`);
 		}
 		this.#resizeSettleTimer?.cancel();
 		this.#resizeSettleTimer = this.#renderScheduler.scheduleRender(() => {
@@ -1898,6 +1946,36 @@ export class TUI extends Container {
 		if (this.#maybeDeferGhosttyInitialImagePaint()) return;
 		this.#emitPlanFrame(width, height, viewport, plan.history, provider);
 	}
+	/**
+	 * Re-offer finalized history once after a settled width change.
+	 *
+	 * Append mode leaves the terminal's old-width copy in place and writes a
+	 * current-width copy below it. Rebuild mode routes through the destructive
+	 * reset latch so ED3 removes stale history before the same replay.
+	 */
+	#prepareResizeReplay(width: number): void {
+		if (
+			!this.#hasEverRendered ||
+			this.#previousWidth === width ||
+			this.#resizeReplayWidth === width ||
+			this.#resizeScrollbackMode === "preserve"
+		) {
+			return;
+		}
+		const provider = this.#frameProvider;
+		if (!provider?.resetHistory) return;
+		this.#resizeReplayWidth = width;
+		if (this.#clearScrollbackOnNextRender) {
+			this.#forceViewportRepaintOnNextRender = true;
+			return;
+		}
+		if (this.#resizeScrollbackMode === "rebuild") {
+			this.#prepareForcedRender(true);
+			return;
+		}
+		provider.resetHistory();
+		this.#forceViewportRepaintOnNextRender = true;
+	}
 
 	/**
 	 * Physical write transaction: append an unacknowledged history batch above
@@ -1924,10 +2002,9 @@ export class TUI extends Container {
 		const historyRows = history?.rows ?? [];
 		const preparedHistory = this.#prepareLinesArray(historyRows, width);
 		const rows = prepared.length;
-		// Destructive user-gesture reset (session replace, /tree, explicit clear):
-		// erase native history and the viewport, then repaint from row zero. Never
-		// reachable from ordinary rendering — only requestRender(clearScrollback)
-		// and resetDisplay set the latch.
+		// Destructive reset (session replace, /tree, explicit clear, or a settled
+		// width resize in rebuild mode): erase native history and the viewport,
+		// then repaint from row zero.
 		const destructiveReset = this.#clearScrollbackOnNextRender;
 		if (destructiveReset) {
 			this.#providerViewportTop = 0;
@@ -1952,7 +2029,20 @@ export class TUI extends Container {
 		} else {
 			this.#imageBudget.takePurgeIds();
 		}
-		if (destructiveReset) buffer += "\x1b[H\x1b[3J\x1b[2J";
+		if (destructiveReset) {
+			buffer += "\x1b[H\x1b[3J\x1b[2J";
+			// ED2/ED3 erase text cells but Kitty keeps image placements registered,
+			// so a reset would leave stale graphics painted over the cleared screen.
+			// Restart placement epochs and delete every registry entry each image
+			// ever placed (`d=i` keeps the transmitted data); the viewport rewrite
+			// below re-places visible images under epoch 1, and images absent from
+			// the replay lose even their epoch-1 entry.
+			for (const { imageId, lastEpoch } of this.#imageBudget.resetPlacementEpochs()) {
+				for (let placementId = 1; placementId <= lastEpoch; placementId++) {
+					buffer += encodeKittyDeletePlacement(imageId, placementId);
+				}
+			}
+		}
 		const diffable =
 			geometryStable &&
 			historyRows.length === 0 &&
@@ -2040,6 +2130,7 @@ export class TUI extends Container {
 		this.#clearScrollbackOnNextRender = false;
 		this.#forceViewportRepaintOnNextRender = false;
 		this.#hasEverRendered = true;
+		this.#resizeReplayWidth = undefined;
 		if (history !== undefined) {
 			this.#acceptedHistoryBatchId = history.id;
 			provider?.acknowledgeHistory(history.id);
@@ -2112,6 +2203,7 @@ export class TUI extends Container {
 			return;
 		}
 		if (this.#frameProvider !== undefined) {
+			this.#prepareResizeReplay(width);
 			this.#renderProviderFrame(width, height);
 			return;
 		}
