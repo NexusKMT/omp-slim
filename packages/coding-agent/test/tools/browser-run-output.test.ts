@@ -113,11 +113,76 @@ describe("browser handle enrichment — guarded actions", () => {
 			click: () => new Promise<void>(() => {}), // never settles — a busy popup/navigation stall
 			type: async () => {},
 			evaluate: async () => {},
+			dispose: async () => {},
 		} as unknown as ElementHandle;
 		const { guard, labels } = makeGuard(50);
 
 		await expect(toActionableHandle(stub, guard).click()).rejects.toThrow("handle.click() timed out after 50ms");
 		expect(labels).toEqual(["handle.click()"]);
+	});
+
+	it("invalidates a timed-out handle before rejecting and blocks a caught retry", async () => {
+		let clicks = 0;
+		let disposed = false;
+		let cacheCleared = false;
+		const stub = {
+			click: () => {
+				clicks++;
+				return new Promise<void>(() => {});
+			},
+			type: async () => {},
+			evaluate: async () => {},
+			dispose: async () => {
+				disposed = true;
+			},
+		} as unknown as ElementHandle;
+		const { guard } = makeGuard(50);
+		const handle = toActionableHandle(stub, guard, async () => {
+			cacheCleared = true;
+		});
+
+		await expect(handle.click()).rejects.toThrow("handle.click() timed out after 50ms");
+		expect(disposed).toBe(true);
+		expect(cacheCleared).toBe(true);
+		await expect(handle.click()).rejects.toThrow("this handle was invalidated after handle.click() timed out");
+		expect(clicks).toBe(1);
+	});
+
+	it("stops handle.type() before dispatching more characters after timeout", async () => {
+		const typed: string[] = [];
+		const firstStarted = Promise.withResolvers<void>();
+		const releaseFirst = Promise.withResolvers<void>();
+		const firstFinished = Promise.withResolvers<void>();
+		const stub = {
+			type: async () => {},
+			evaluate: async (fn: (el: unknown) => unknown) => {
+				fn({ focus: () => {} });
+			},
+			frame: {
+				page: () => ({
+					keyboard: {
+						type: async (character: string) => {
+							firstStarted.resolve();
+							await releaseFirst.promise;
+							typed.push(character);
+							firstFinished.resolve();
+						},
+					},
+				}),
+			},
+			dispose: async () => {},
+		} as unknown as ElementHandle;
+		const deadline = new AbortController();
+		const guard: HandleOpGuard = (_label, fn) => fn(deadline.signal);
+		const action = toActionableHandle(stub, guard).type("abc");
+
+		await firstStarted.promise;
+		deadline.abort(new Error("action deadline"));
+		await expect(action).rejects.toThrow("action deadline");
+		releaseFirst.resolve();
+		await firstFinished.promise;
+
+		expect(typed).toEqual(["a"]);
 	});
 
 	it("passes arguments and return values through the guarded method unchanged", async () => {
@@ -153,8 +218,15 @@ describe("browser handle enrichment — guarded actions", () => {
 					},
 				});
 			},
-			type: async (text: string) => {
-				node.value += text;
+			type: async () => {},
+			frame: {
+				page: () => ({
+					keyboard: {
+						type: async (text: string) => {
+							node.value += text;
+						},
+					},
+				}),
 			},
 		} as unknown as ElementHandle;
 		const { guard, labels } = makeGuard(1_000);
@@ -163,7 +235,7 @@ describe("browser handle enrichment — guarded actions", () => {
 
 		expect(node.value).toBe("fresh");
 		expect(node.focused).toBe(true);
-		// fill() drives type() internally via the raw method, so it is guarded once, not nested.
+		// fill() drives the signal-aware typer internally, so it is guarded once, not nested.
 		expect(labels).toEqual(["handle.fill()"]);
 	});
 
