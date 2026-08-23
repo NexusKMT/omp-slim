@@ -1487,7 +1487,7 @@ interface TailRowCache extends RenderSignature {
 	// Upper bound (exclusive) of absolute token indices covered by `rows`.
 	cachedThrough: number;
 	// Per-token final content rows (1:1 with the rendered content lines),
-	// indexed by absolute token index; undefined for uncacheable tokens.
+	// indexed relative to `tokenStart`; undefined for uncacheable tokens.
 	rows: (readonly string[] | undefined)[];
 	// Raw snapshot per token (string value gate).
 	raws: (string | undefined)[];
@@ -1498,7 +1498,7 @@ interface TailRowCache extends RenderSignature {
  * Mutable per-token record collector passed to #renderContentLines while
  * rendering the streaming tail. The render loop fills `raws`/`nextTypes`
  * per token as it goes and stores each token's final content rows into
- * `rows` (absolute token index), so the tail cache can splice byte-identical
+ * `rows` (relative to the render's `start`), so the tail cache can splice byte-identical
  * rows for every token whose raw text and following-token type match.
  */
 interface TailRenderRecorder {
@@ -1877,14 +1877,14 @@ export class Markdown implements Component {
 		if (cache !== undefined) {
 			spliceEnd = this.#tailSpliceEnd(cache, start, signature, tokens);
 			for (let i = start; i < spliceEnd; i++) {
-				out.push(...cache.rows[i]!);
+				out.push(...cache.rows[i - start]!);
 			}
 		}
 
 		const recorder: TailRenderRecorder = {
-			rows: new Array(tokens.length).fill(undefined),
-			raws: new Array(tokens.length).fill(undefined),
-			nextTypes: new Array(tokens.length).fill(undefined),
+			rows: new Array(tokens.length - spliceEnd).fill(undefined),
+			raws: new Array(tokens.length - spliceEnd).fill(undefined),
+			nextTypes: new Array(tokens.length - spliceEnd).fill(undefined),
 		};
 		const fresh = this.#renderContentLines(tokens, spliceEnd, tokens.length, contentWidth, signature, recorder);
 		out.push(...fresh);
@@ -1892,24 +1892,27 @@ export class Markdown implements Component {
 		// Refresh the cache: keep entries for spliced tokens (their raws stay
 		// valid), overlay the fresh entries, and re-derive the contiguous
 		// covered prefix (splicing stops at the first uncacheable or
-		// changed token).
-		const rows: (readonly string[] | undefined)[] = new Array(tokens.length).fill(undefined);
-		const raws: (string | undefined)[] = new Array(tokens.length).fill(undefined);
-		const nextTypes: (string | undefined)[] = new Array(tokens.length).fill(undefined);
+		// changed token). All arrays are tail-relative (index 0 = token
+		// `start`), so a mostly-frozen document allocates only for the
+		// unfrozen tail instead of the whole token list every frame.
+		const tailCount = tokens.length - start;
+		const rows: (readonly string[] | undefined)[] = new Array(tailCount).fill(undefined);
+		const raws: (string | undefined)[] = new Array(tailCount).fill(undefined);
+		const nextTypes: (string | undefined)[] = new Array(tailCount).fill(undefined);
 		if (cache !== undefined && cache.tokenStart === start) {
 			for (let i = start; i < Math.min(cache.cachedThrough, spliceEnd); i++) {
-				rows[i] = cache.rows[i];
-				raws[i] = cache.raws[i];
-				nextTypes[i] = cache.nextTypes[i];
+				rows[i - start] = cache.rows[i - start];
+				raws[i - start] = cache.raws[i - start];
+				nextTypes[i - start] = cache.nextTypes[i - start];
 			}
 		}
 		for (let i = spliceEnd; i < tokens.length; i++) {
-			rows[i] = recorder.rows[i];
-			raws[i] = recorder.raws[i];
-			nextTypes[i] = recorder.nextTypes[i];
+			rows[i - start] = recorder.rows[i - spliceEnd];
+			raws[i - start] = recorder.raws[i - spliceEnd];
+			nextTypes[i - start] = recorder.nextTypes[i - spliceEnd];
 		}
 		let cachedThrough = start;
-		while (cachedThrough < tokens.length && rows[cachedThrough] !== undefined) cachedThrough++;
+		while (cachedThrough < tokens.length && rows[cachedThrough - start] !== undefined) cachedThrough++;
 		this.#tailRowCache = {
 			...signature,
 			tokenStart: start,
@@ -1941,12 +1944,12 @@ export class Markdown implements Component {
 		if (cache.headingProbe !== signature.headingProbe) return start;
 		const limit = Math.min(cache.cachedThrough, tokens.length);
 		for (let i = start; i < limit; i++) {
-			if (cache.rows[i] === undefined) return i; // uncacheable token stops the splice
-			const cachedRaw = cache.raws[i];
+			if (cache.rows[i - start] === undefined) return i; // uncacheable token stops the splice
+			const cachedRaw = cache.raws[i - start];
 			const token = tokens[i];
 			if (cachedRaw === undefined || token === undefined) return start;
 			if (token.raw !== cachedRaw) return i; // changed/growing token: fresh-render from here
-			if ((tokens[i + 1]?.type ?? undefined) !== cache.nextTypes[i]) return i;
+			if ((tokens[i + 1]?.type ?? undefined) !== cache.nextTypes[i - start]) return i;
 		}
 		return limit;
 	}
@@ -2045,16 +2048,16 @@ export class Markdown implements Component {
 				const token = tokens[i]!;
 				const wrappedEnd = wrappedStart + tokenWrappedRowCounts[i]!;
 				const rowCount = wrappedEnd - wrappedStart;
-				raws[i] = token.raw;
-				nextTypes[i] = tokens[i + 1]?.type;
+				raws[i - start] = token.raw;
+				nextTypes[i - start] = tokens[i + 1]?.type;
 				// Tables are never cached: their layout depends on the whole
 				// token and the width budget, and the splice path is not
 				// covered by the byte-identity suite. Keep the raw/nextTypes
 				// gates but drop rows.
 				if (token.type === "table") {
-					rows[i] = undefined;
+					rows[i - start] = undefined;
 				} else {
-					rows[i] = contentLines.slice(contentCursor, contentCursor + rowCount);
+					rows[i - start] = contentLines.slice(contentCursor, contentCursor + rowCount);
 				}
 				contentCursor += rowCount;
 				wrappedStart = wrappedEnd;
