@@ -327,13 +327,15 @@ const warnedCursorKimiK3ReplayMessages = new Set<string>();
 /**
  * Base conversation id → rotated wire id (#8345). Cursor's backend can pin a
  * per-conversation rejection (bare `resource_exhausted`, zero tokens) to one
- * conversationId forever; the session is then unusable until /fork mints a
- * new id. On the first such failure the id is rotated once and the cached
- * state migrates, so the retry loop's next attempt starts a fresh
- * conversation — the same recovery /fork performs. Keyed by the base id the
- * caller derived, so a failed rotation is never repeated.
+ * conversationId forever. On such a failure the id is rotated and the next
+ * attempt rebuilds a fresh conversation from `context` (no cached-state
+ * migration). A failed rotation is not repeated, so real account exhaustion
+ * is not hidden. After the rotated id completes a turn, a later poison of
+ * that id is allowed to rotate again.
  */
 const rotatedConversationIds = new Map<string, string>();
+const successfulRotatedConversationIds = new Set<string>();
+const freshRotatedConversationIds = new Set<string>();
 
 export interface CursorOptions extends StreamOptions {
 	customSystemPrompt?: string;
@@ -355,6 +357,7 @@ interface CursorRequestState {
 	conversationId: string;
 	blobStore: Map<string, Uint8Array>;
 	conversationState?: ConversationStateStructure;
+	rotatedFresh?: boolean;
 }
 
 interface CursorGrpcRequest {
@@ -680,9 +683,10 @@ function streamCursorWithWireMode(
 
 			baseConversationId = options?.conversationId ?? options?.sessionId ?? crypto.randomUUID();
 			conversationId = rotatedConversationIds.get(baseConversationId) ?? baseConversationId;
+			const rotatedFresh = freshRotatedConversationIds.has(conversationId);
 			const blobStore = conversationBlobStores.get(conversationId) ?? new Map<string, Uint8Array>();
 			conversationBlobStores.set(conversationId, blobStore);
-			const cachedState = conversationStateCache.get(conversationId);
+			const cachedState = rotatedFresh ? undefined : conversationStateCache.get(conversationId);
 			const builtRequest = await buildGrpcRequestForWireMode(
 				model,
 				context,
@@ -691,6 +695,7 @@ function streamCursorWithWireMode(
 					conversationId,
 					blobStore,
 					conversationState: cachedState,
+					rotatedFresh,
 				},
 				wireMode,
 			);
@@ -872,6 +877,10 @@ function streamCursorWithWireMode(
 						// Application completion is not protocol success; wait for a clean HTTP/2 end.
 						if (isTurnEnded) {
 							sawTurnEnded = true;
+							if (conversationId && baseConversationId && conversationId !== baseConversationId) {
+								successfulRotatedConversationIds.add(conversationId);
+								freshRotatedConversationIds.delete(conversationId);
+							}
 						}
 					} catch (e) {
 						log("error", "parseServerMessage", { error: String(e) });
@@ -1013,25 +1022,29 @@ function streamCursorWithWireMode(
 			const result = await AIError.finalize(error, { api: model.api, signal: options?.signal });
 			// #8345: a server-side per-conversation rejection surfaces as a bare
 			// resource_exhausted with zero tokens — the conversation is poisoned,
-			// not the account (sibling conversations keep working). Rotate the
-			// wire id once and migrate the cached state so the next attempt (the
-			// caller's retry loop) starts a fresh conversation, exactly like
-			// /fork. Only the first failure rotates; repeated failures keep the
-			// rotated id so a genuine account-level exhaustion is not hidden.
+			// not the account. Rotate the wire id and rebuild from `context` on
+			// the next attempt (the caller's retry loop). Do not migrate cached
+			// side-state: pendingToolCalls from a mid-turn checkpoint re-poison
+			// the new id. One rotation per failure streak; a new rotation is
+			// allowed only after the current rotated id completed a turn.
+			const currentRotated = rotatedConversationIds.get(baseConversationId);
+			const canRotate = currentRotated === undefined || successfulRotatedConversationIds.has(currentRotated);
 			if (
 				conversationId !== undefined &&
 				baseConversationId !== undefined &&
 				usageState !== undefined &&
 				!usageState.sawTokenDelta &&
 				RESOURCE_EXHAUSTED_PATTERN.test(result.message) &&
-				!rotatedConversationIds.has(baseConversationId)
+				canRotate
 			) {
 				const rotated = crypto.randomUUID();
 				rotatedConversationIds.set(baseConversationId, rotated);
-				const state = conversationStateCache.get(conversationId);
-				if (state) conversationStateCache.set(rotated, state);
-				const blobs = conversationBlobStores.get(conversationId);
-				if (blobs) conversationBlobStores.set(rotated, blobs);
+				freshRotatedConversationIds.add(rotated);
+				logger.debug("cursor conversation rotated", {
+					base: baseConversationId,
+					from: conversationId,
+					to: rotated,
+				});
 			}
 			output.stopReason = result.stopReason;
 			output.errorStatus = result.status;
@@ -5210,10 +5223,18 @@ async function buildGrpcRequestForWireMode(
 		storeCursorBlob(blobStore, new TextEncoder().encode(json)),
 	);
 
-	const activeUserMessageIndex = context.messages.length - 1;
-	const activeMessage = context.messages[activeUserMessageIndex];
-	const activeUserMessage =
+	const lastUserMessageIndex = findLastUserMessageIndex(context.messages);
+	let activeUserMessageIndex = context.messages.length - 1;
+	let activeMessage = context.messages[activeUserMessageIndex];
+	let activeUserMessage =
 		activeMessage?.role === "user" || activeMessage?.role === "developer" ? activeMessage : undefined;
+	if (state.rotatedFresh && !activeUserMessage && lastUserMessageIndex >= 0) {
+		activeUserMessageIndex = lastUserMessageIndex;
+		const lastUser = context.messages[lastUserMessageIndex];
+		if (lastUser.role === "user" || lastUser.role === "developer") {
+			activeUserMessage = lastUser;
+		}
+	}
 	let userContent: string | (TextContent | ImageContent)[] | undefined;
 	let userText = "";
 	let hasUserImages = false;
