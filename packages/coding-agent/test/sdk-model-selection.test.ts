@@ -1153,16 +1153,29 @@ describe("createAgentSession deferred model pattern resolution", () => {
 						auth: "none",
 						discovery: { type: "openai-models-list" },
 					},
+					// An unrelated discovery provider: the saved model does not belong
+					// to it, so the scoped resume refresh must never fetch its endpoint.
+					"other-gateway": {
+						baseUrl: "http://127.0.0.1:9993",
+						api: "openai-completions",
+						auth: "none",
+						discovery: { type: "openai-models-list" },
+					},
 				},
 			}),
 		);
 
 		let modelListCalls = 0;
+		let otherListCalls = 0;
 		const fetchMock: FetchImpl = async input => {
 			const url = String(input);
 			if (url === "http://127.0.0.1:9994/v1/models") {
 				modelListCalls++;
 				return Response.json({ data: [{ id: "dynamic-model", context_length: 65_536 }] });
+			}
+			if (url === "http://127.0.0.1:9993/v1/models") {
+				otherListCalls++;
+				return Response.json({ data: [{ id: "other-model", context_length: 65_536 }] });
 			}
 			throw new Error(`Unexpected URL: ${url}`);
 		};
@@ -1213,6 +1226,7 @@ describe("createAgentSession deferred model pattern resolution", () => {
 
 		try {
 			expect(modelListCalls).toBeGreaterThan(0);
+			expect(otherListCalls).toBe(0);
 			expect(session.model?.provider).toBe("gateway");
 			expect(session.model?.id).toBe("dynamic-model");
 		} finally {

@@ -2201,12 +2201,13 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					}
 				}
 				if (candidateProviders.size > 0) {
+					// Scoped to just these providers: `refreshDiscoverableProviders`
+					// skips the static reload and the all-other-runtime restore that
+					// `refreshProvider` performs, so resume never waits on (or
+					// double-fetches) an unrelated runtime provider already being
+					// discovered by `startRuntimeDiscovery` above.
 					await logger.time("restoreSessionModelDiscoveryFallback", () =>
-						Promise.all(
-							[...candidateProviders].map(provider =>
-								modelRegistry.refreshProvider(provider, "online-if-uncached"),
-							),
-						),
+						modelRegistry.refreshDiscoverableProviders(candidateProviders, "online-if-uncached"),
 					);
 					restoreSessionModel();
 				}
