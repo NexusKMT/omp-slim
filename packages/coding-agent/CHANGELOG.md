@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `/mcp test` now reports cancellation immediately when Esc is pressed during a slow config lookup, instead of staying suspended until the read settles ([#9419](https://github.com/can1357/oh-my-pi/issues/9419)).
+
 ## [18.0.1] - 2026-08-23
 
 ### Added
