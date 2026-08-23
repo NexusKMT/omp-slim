@@ -61,6 +61,7 @@ function decodeConversationId(chunk: Buffer): string | undefined {
 type WireRequest = {
 	conversationId?: string;
 	action?: string;
+	userText?: string;
 	pendingToolCalls: number;
 };
 
@@ -68,9 +69,11 @@ function decodeRunRequest(chunk: Buffer): WireRequest | undefined {
 	const msg = fromBinary(AgentClientMessageSchema, chunk.subarray(5));
 	if (msg.message.case !== "runRequest") return undefined;
 	const req = msg.message.value;
+	const action = req.action?.action;
 	return {
 		conversationId: req.conversationId,
 		action: req.action?.action.case,
+		userText: action?.case === "userMessageAction" ? action.value.userMessage?.text : undefined,
 		pendingToolCalls: req.conversationState?.pendingToolCalls?.length ?? 0,
 	};
 }
@@ -109,7 +112,6 @@ function resumeContext(): Context {
 	};
 }
 
-
 /** First request ends with a bare resource_exhausted; later ones turn normally. */
 async function startServer(seenConversationIds: string[]): Promise<string> {
 	server = http2.createServer();
@@ -147,8 +149,11 @@ async function startServer(seenConversationIds: string[]): Promise<string> {
 	return `http://127.0.0.1:${address.port}`;
 }
 
-/** Scripted fixture: each entry is reject (grpc 8) or a normal turn. */
-async function startScriptedServer(seen: WireRequest[], script: Array<"reject" | "ok">): Promise<string> {
+/** Scripted fixture: each entry is a clean turn, rejection, or turn followed by a rejecting trailer. */
+async function startScriptedServer(
+	seen: WireRequest[],
+	script: Array<"reject" | "ok" | "turnEndedReject">,
+): Promise<string> {
 	server = http2.createServer();
 	server.on("session", session => {
 		sessions.add(session);
@@ -166,6 +171,13 @@ async function startScriptedServer(seen: WireRequest[], script: Array<"reject" |
 				stream.once("wantTrailers", () => {
 					stream.sendTrailers({ "grpc-status": "8", "grpc-message": "resource_exhausted" });
 				});
+				stream.end();
+			} else if (decision === "turnEndedReject") {
+				stream.respond({ ":status": 200, "content-type": "application/connect+proto" }, { waitForTrailers: true });
+				stream.once("wantTrailers", () => {
+					stream.sendTrailers({ "grpc-status": "8", "grpc-message": "resource_exhausted" });
+				});
+				stream.write(turnEndedFrame());
 				stream.end();
 			} else {
 				stream.respond({ ":status": 200, "content-type": "application/connect+proto" });
@@ -311,6 +323,7 @@ describe("Cursor conversationId rotation (issue #8345)", () => {
 		expect(seen[0]?.action).toBe("resumeAction");
 		expect(seen[1]?.conversationId).not.toBe(seen[0]?.conversationId);
 		expect(seen[1]?.action).toBe("userMessageAction");
+		expect(seen[1]?.userText).toBe("Use the read tool.");
 		expect(seen[1]?.pendingToolCalls).toBe(0);
 	});
 
@@ -335,4 +348,17 @@ describe("Cursor conversationId rotation (issue #8345)", () => {
 		expect(seen[3]?.conversationId).not.toBe(seen[0]?.conversationId);
 	});
 
+	it("does not re-rotate when turnEnded is followed by a rejecting trailer", async () => {
+		const seen: WireRequest[] = [];
+		const baseUrl = await startScriptedServer(seen, ["reject", "turnEndedReject", "reject"]);
+
+		expect((await runToEnd(baseUrl, "sess-failed-rotation")).type).toBe("error");
+		expect((await runToEnd(baseUrl, "sess-failed-rotation")).type).toBe("error");
+		expect((await runToEnd(baseUrl, "sess-failed-rotation")).type).toBe("error");
+
+		expect(seen).toHaveLength(3);
+		expect(seen[0]?.conversationId).toBe("sess-failed-rotation");
+		expect(seen[1]?.conversationId).not.toBe(seen[0]?.conversationId);
+		expect(seen[2]?.conversationId).toBe(seen[1]?.conversationId);
+	});
 });

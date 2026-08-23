@@ -33,6 +33,7 @@
 - Two-phase error finalization no longer leaves a stale status-inferred payload flag behind: when a provider throws a bare `HTTP 413 from …` and only appends the captured response body during formatting, final text carrying explicit token-overflow wording clears the earlier inference so token compaction owns the recovery ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
 - New `isTextAmbiguousContextOverflow` helper exposes the dual-classified (payload + overflow, no reported token excess) arbitration shared by fallback and model-switching callers, so TurnRecovery and advisor recovery cannot drift ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
 
+- Fixed Cursor conversation rotation after an abort or mid-turn restart rebuilding a poisoned resume request, so retries replay the last user message on a fresh conversation and can rotate again after a later successful turn.
 - Captured bounded Devin Connect trailer details and request-shape evidence for diagnosing intermittent `invalid_argument` stream rejections ([#4218](https://github.com/can1357/oh-my-pi/issues/4218)).
 - Fixed abandoned `auth-broker-snapshot.enc.*.tmp` files accumulating in the cache directory when a process exited mid-write; stale temp files are now swept on each cache write.
 - Fixed Cursor GPT effort models failing with `not_found` on accounts that require the discovered effort-specific model id ([#9287](https://github.com/can1357/oh-my-pi/issues/9287)).

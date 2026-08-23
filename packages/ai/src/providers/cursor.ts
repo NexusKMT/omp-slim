@@ -877,10 +877,6 @@ function streamCursorWithWireMode(
 						// Application completion is not protocol success; wait for a clean HTTP/2 end.
 						if (isTurnEnded) {
 							sawTurnEnded = true;
-							if (conversationId && baseConversationId && conversationId !== baseConversationId) {
-								successfulRotatedConversationIds.add(conversationId);
-								freshRotatedConversationIds.delete(conversationId);
-							}
 						}
 					} catch (e) {
 						log("error", "parseServerMessage", { error: String(e) });
@@ -938,6 +934,10 @@ function streamCursorWithWireMode(
 			h2Request.write(frameConnectMessage(requestBytes));
 			heartbeatTimer = setInterval(sendHeartbeat, 5000);
 			await h2Completion.promise;
+			if (conversationId && baseConversationId && conversationId !== baseConversationId) {
+				successfulRotatedConversationIds.add(conversationId);
+				freshRotatedConversationIds.delete(conversationId);
+			}
 			// The transport is done, but a handler decoded from the last chunk may
 			// still be running: exec handlers and `onToolResult` transformers are
 			// async. Pushing `done` now would let the Agent drain its Cursor result
@@ -1038,6 +1038,7 @@ function streamCursorWithWireMode(
 				canRotate
 			) {
 				const rotated = crypto.randomUUID();
+				if (currentRotated) successfulRotatedConversationIds.delete(currentRotated);
 				rotatedConversationIds.set(baseConversationId, rotated);
 				freshRotatedConversationIds.add(rotated);
 				logger.debug("cursor conversation rotated", {
@@ -5224,7 +5225,7 @@ async function buildGrpcRequestForWireMode(
 
 	const lastUserMessageIndex = findLastUserMessageIndex(context.messages);
 	let activeUserMessageIndex = context.messages.length - 1;
-	let activeMessage = context.messages[activeUserMessageIndex];
+	const activeMessage = context.messages[activeUserMessageIndex];
 	let activeUserMessage =
 		activeMessage?.role === "user" || activeMessage?.role === "developer" ? activeMessage : undefined;
 	if (state.rotatedFresh && !activeUserMessage && lastUserMessageIndex >= 0) {
