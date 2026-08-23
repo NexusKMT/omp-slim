@@ -208,7 +208,10 @@ export class ModelRegistry {
 	#suppressedSelectors: Map<string, number> = new Map();
 	#backgroundRefresh?: Promise<void>;
 	#credentialScopedCacheHydration?: Promise<void>;
-	#configuredDiscoveryInFlight: Map<string, Promise<Model<Api>[]>> = new Map();
+	#configuredDiscoveryInFlight: Map<
+		DiscoveryProviderConfig,
+		Map<ModelRefreshStrategy, Promise<Model<Api>[]>>
+	> = new Map();
 	#policyReapply?: Promise<void>;
 	#lastDiscoveryWarnings: Map<string, string> = new Map();
 	// Runtime extension model overlays — persist across refresh() cycles so that
@@ -1253,16 +1256,21 @@ export class ModelRegistry {
 		).filter(provider => !disabledProviders.has(provider.provider));
 		const configuredDiscoveriesPromise =
 			selectedDiscoverableProviders.length === 0
-				? Promise.resolve<Model<Api>[]>([])
+				? Promise.resolve<{ provider: DiscoveryProviderConfig; models: Model<Api>[] }[]>([])
 				: Promise.all(
-						selectedDiscoverableProviders.map(provider =>
-							this.#discoverProviderModelsCoalesced(provider, strategy),
-						),
-					).then(results => results.flat());
-		const [configuredDiscovered, builtInDiscovery] = await Promise.all([
+						selectedDiscoverableProviders.map(async provider => ({
+							provider,
+							models: await this.#discoverProviderModelsCoalesced(provider, strategy),
+						})),
+					);
+		const [configuredDiscoveryResults, builtInDiscovery] = await Promise.all([
 			configuredDiscoveriesPromise,
 			this.#discoverBuiltInProviderModels(strategy, providerFilter),
 		]);
+		const currentDiscoverableProviders = new Set(this.#discoverableProviders);
+		const configuredDiscovered = configuredDiscoveryResults
+			.filter(result => currentDiscoverableProviders.has(result.provider))
+			.flatMap(result => result.models);
 		const discovered = [...configuredDiscovered, ...builtInDiscovery.models];
 		if (discovered.length === 0 && builtInDiscovery.authoritativeProviders.size === 0) {
 			return;
@@ -1323,16 +1331,21 @@ export class ModelRegistry {
 		providerConfig: DiscoveryProviderConfig,
 		strategy: ModelRefreshStrategy,
 	): Promise<Model<Api>[]> {
-		const key = `${providerConfig.provider}\0${strategy}`;
-		const inFlight = this.#configuredDiscoveryInFlight.get(key);
+		let providerInFlight = this.#configuredDiscoveryInFlight.get(providerConfig);
+		const inFlight = providerInFlight?.get(strategy);
 		if (inFlight) return inFlight;
 
+		providerInFlight ??= new Map();
 		const discovery = this.#discoverProviderModels(providerConfig, strategy).finally(() => {
-			if (this.#configuredDiscoveryInFlight.get(key) === discovery) {
-				this.#configuredDiscoveryInFlight.delete(key);
+			if (providerInFlight.get(strategy) === discovery) {
+				providerInFlight.delete(strategy);
+				if (providerInFlight.size === 0) {
+					this.#configuredDiscoveryInFlight.delete(providerConfig);
+				}
 			}
 		});
-		this.#configuredDiscoveryInFlight.set(key, discovery);
+		providerInFlight.set(strategy, discovery);
+		this.#configuredDiscoveryInFlight.set(providerConfig, providerInFlight);
 		return discovery;
 	}
 
