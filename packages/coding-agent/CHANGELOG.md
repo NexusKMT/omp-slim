@@ -17,6 +17,10 @@
 
 - Cap streaming markdown renders at the reveal cadence when reveal is caught up; provider deltas accumulate and flush per tick instead of rendering per token.
 
+### Changed
+
+- Streaming thinking display stays smooth on long sessions: appending to large thinking blocks no longer re-processes the whole text on every tick.
+
 ## [18.0.3] - 2026-08-23
 
 ### Added
