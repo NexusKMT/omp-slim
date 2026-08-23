@@ -96,6 +96,11 @@ export class TranscriptContainer extends Container {
 	canRemoveBlock(component: Component): boolean {
 		return this.#entry(component)?.state === "active";
 	}
+	/** Lifecycle state per block in transcript order (diagnostics and tests). */
+	blockStates(): readonly BlockState[] {
+		this.#syncEntries();
+		return this.#entries.map(entry => entry.state);
+	}
 
 	/** Whether visible active capacity and live-block memory permit another admission. */
 	canAdmit(rows: number): boolean {
