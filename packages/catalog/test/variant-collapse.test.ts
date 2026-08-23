@@ -11,7 +11,6 @@ import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { stripThinkingVariantToken } from "@oh-my-pi/pi-catalog/identity/family";
 import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
 import { defaultSupportedEffort, resolveWireModelId } from "@oh-my-pi/pi-catalog/model-thinking";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { googleGeminiCliModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/google";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import {
@@ -739,19 +738,6 @@ describe("Cursor Grok tier routing (issue #8803)", () => {
 			RAW_SIBLINGS.map(id => cursorMemberSpec(id)),
 			CURSOR_VARIANT_COLLAPSE_TABLE,
 		);
-		const g46 = collapsed.find(m => m.id === "cursor-grok-4.6");
-		const g46fast = collapsed.find(m => m.id === "cursor-grok-4.6-fast");
-		if (!g46 || !g46fast) throw new Error("cursor grok did not collapse");
-		// The Start plan refuses the -low floor; the collapsed default and the
-		// effort-less clamp target must both be the -medium fixed-settings tier.
-		expect(g46.requestModelId).toBe("cursor-grok-4.6-medium");
-		expect(g46fast.requestModelId).toBe("cursor-grok-4.6-medium-fast");
-		const model = buildModel(g46 as ModelSpec<"cursor-agent">);
-		expect(defaultSupportedEffort(model)).toBe(Effort.Medium);
-		expect(resolveWireModelId(model, defaultSupportedEffort(model))).toBe("cursor-grok-4.6-medium");
-	});
-
-	it("bundles -medium defaults for direct catalog consumers (issue #9478)", () => {
 		const defaults = [
 			["cursor-grok-4.5", "cursor-grok-4.5-medium"],
 			["cursor-grok-4.5-fast", "cursor-grok-4.5-medium-fast"],
@@ -759,8 +745,13 @@ describe("Cursor Grok tier routing (issue #8803)", () => {
 			["cursor-grok-4.6-fast", "cursor-grok-4.6-medium-fast"],
 		] as const;
 		for (const [id, requestModelId] of defaults) {
-			const model = getBundledModel<"cursor-agent">("cursor", id);
-			expect(model.requestModelId).toBe(requestModelId);
+			const spec = collapsed.find(model => model.id === id);
+			if (!spec) throw new Error(`${id} did not collapse`);
+			// The Start plan refuses the -low floor; the collapsed default and
+			// effort-less clamp target must both be the fixed-settings tier.
+			expect(spec.requestModelId).toBe(requestModelId);
+			const model = buildModel(spec as ModelSpec<"cursor-agent">);
+			expect(defaultSupportedEffort(model)).toBe(Effort.Medium);
 			expect(resolveWireModelId(model, defaultSupportedEffort(model))).toBe(requestModelId);
 		}
 	});
