@@ -312,6 +312,52 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		);
 	});
 
+	it("bars usage-backed payload-shaped overflows from the hard-error fallback chain", () => {
+		const fallbackChains = { [`${model.provider}/${model.id}`]: ["openai/gpt-4o-mini"] };
+		const recovery = new TurnRecovery(createHost(model, modelRegistry, { fallbackChains }));
+		const message = {
+			...makeMessage([], model),
+			errorMessage: "request_too_large: image count exceeds the limit of 20",
+			usage: { ...USAGE, input: (model.contextWindow ?? 0) + 1_000 },
+		} as AssistantMessage;
+		message.errorId = AIError.classifyMessage(message);
+		// Fixture sanity: genuinely dual-classified AND usage-backed.
+		expect(AIError.isPayloadRejection(message)).toBe(true);
+		expect(AIError.isUsageBackedContextOverflow(message, model.contextWindow ?? 0)).toBe(true);
+		// Provider-reported tokens above the window are authoritative overflow
+		// evidence: maintenance's arbitration owns it like a pure overflow, so
+		// the payload co-flag must not buy a chain switch (#9235 review).
+		expect(recovery.isHardErrorFallbackEligible(message)).toBe(false);
+	});
+
+	it("keeps text-ambiguous media-budget 413s eligible for the configured chain", () => {
+		const fallbackChains = { [`${model.provider}/${model.id}`]: ["openai/gpt-4o-mini"] };
+		const recovery = new TurnRecovery(createHost(model, modelRegistry, { fallbackChains }));
+		const message = {
+			...makeMessage([], model),
+			errorMessage: "request_too_large: image count exceeds the limit of 20",
+		} as AssistantMessage;
+		message.errorId = AIError.classifyMessage(message);
+		// Same dual classification as the usage-backed row above, but with no
+		// reported token excess: the byte/media-budget wording stays ambiguous,
+		// and a different provider's larger budget can accept this request.
+		expect(AIError.isContextOverflow(message, model.contextWindow ?? 0)).toBe(true);
+		expect(recovery.isHardErrorFallbackEligible(message)).toBe(true);
+	});
+
+	it("keeps pure token-context overflows barred from the configured chain", () => {
+		const fallbackChains = { [`${model.provider}/${model.id}`]: ["openai/gpt-4o-mini"] };
+		const recovery = new TurnRecovery(createHost(model, modelRegistry, { fallbackChains }));
+		const message = {
+			...makeMessage([], model),
+			errorMessage: "prompt is too long: 250000 tokens > 200000 maximum",
+		} as AssistantMessage;
+		message.errorId = AIError.classifyMessage(message);
+		expect(AIError.isContextOverflow(message, model.contextWindow ?? 0)).toBe(true);
+		expect(AIError.isPayloadRejection(message)).toBe(false);
+		expect(recovery.isHardErrorFallbackEligible(message)).toBe(false);
+	});
+
 	it("treats a thinking-only partial turn as still retriable", () => {
 		const recovery = new TurnRecovery(createHost(model, modelRegistry));
 		const message = makeMessage([{ type: "thinking", thinking: "Let me reason about this step by step." }], model);

@@ -741,12 +741,22 @@ export function attach<E extends object>(error: E, id: number): E {
 	return error;
 }
 
+/**
+ * Whether provider-reported token usage alone proves the request exceeded the
+ * model's context window (#9235 review). This is authoritative overflow
+ * evidence — independent of any body wording — so callers arbitrating between
+ * compaction and model switching must treat it as compaction-owned, unlike the
+ * deliberately ambiguous 413 text co-classification.
+ */
+export function isUsageBackedContextOverflow(message: AssistantMessage, contextWindow?: number): boolean {
+	if (!contextWindow) return false;
+	const inputTokens = message.usage.input + message.usage.cacheRead + message.usage.cacheWrite;
+	return inputTokens > contextWindow;
+}
+
 export function isContextOverflow(message: AssistantMessage, contextWindow?: number): boolean {
 	if (is(message.errorId, Flag.ContextOverflow)) return true;
-	if (contextWindow) {
-		const inputTokens = message.usage.input + message.usage.cacheRead + message.usage.cacheWrite;
-		if (inputTokens > contextWindow) return true;
-	}
+	if (isUsageBackedContextOverflow(message, contextWindow)) return true;
 	return message.stopReason === "error" && !!message.errorMessage && matchesOverflowText(message.errorMessage);
 }
 

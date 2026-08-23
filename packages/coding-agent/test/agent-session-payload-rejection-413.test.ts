@@ -26,6 +26,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 const PAYLOAD_ERROR_MESSAGE =
 	"413 request body exceeds the configured payload limit (type=invalid_request_error param=request_too_large)";
 const NO_PROGRESS_FRAGMENT = "Compaction freed too little context to make progress";
+const TRANSIENT_ERROR_MESSAGE = "503 Service Unavailable: upstream connect error";
 
 describe("AgentSession payload-rejection 413 handling", () => {
 	let session: AgentSession;
@@ -48,6 +49,10 @@ describe("AgentSession payload-rejection 413 handling", () => {
 
 	afterEach(async () => {
 		await session?.dispose();
+		// Fallback cooldowns are recorded on the shared ModelRegistry with a
+		// 5-minute TTL; without this reset one test's retry bookkeeping would
+		// suppress selectors for every later test in the file.
+		modelRegistry.clearSuppressedSelectors();
 		vi.restoreAllMocks();
 	});
 
@@ -508,6 +513,102 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		expect(fallbackEvents).toHaveLength(1);
 		expect(fallbackEvents[0].to).toBe(`${fallbackModel.provider}/${fallbackModel.id}`);
 		expect(session.model?.provider).toBe(fallbackModel.provider);
+	});
+
+	it("routes goal-mode transient failures exactly like the non-goal ladder", async () => {
+		// The pre-compaction chain consult is scoped to payload rejections
+		// (#9235 review): every other failure follows the standard ladder, so a
+		// transient 5xx in goal mode reaches handleRetryableError through the
+		// retryable rung and gets the same configured-chain consult the non-goal
+		// path applies — the early consult must neither add nor skip rungs.
+		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
+		if (!fallbackModel) {
+			throw new Error("Expected bundled openai fallback model to exist");
+		}
+
+		const requestedModels: string[] = [];
+		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const chainMock = createMockModel({ id: fallbackModel.id, provider: fallbackModel.provider });
+		await createSession(200_000, undefined, {
+			streamFn: (model, context, options) => {
+				requestedModels.push(`${model.provider}/${model.id}`);
+				if (model.provider === "anthropic") {
+					primaryMock.push({ throw: TRANSIENT_ERROR_MESSAGE });
+					return primaryMock.stream(model, context, options);
+				}
+				chainMock.push({ content: ["recovered on configured fallback"] });
+				return chainMock.stream(model, context, options);
+			},
+			extraSettings: {
+				"retry.baseDelayMs": 5,
+				"retry.modelFallback": true,
+				"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
+			},
+		});
+		activateOngoingGoal("goal-transient-ladder");
+
+		await session.prompt("work on the goal");
+		await session.waitForIdle();
+
+		// Same-model request first, then the configured candidate — identical
+		// to the non-goal ladder for this error class.
+		expect(requestedModels.slice(0, 2)).toEqual([
+			"anthropic/claude-sonnet-4-5",
+			`${fallbackModel.provider}/${fallbackModel.id}`,
+		]);
+		expect(session.model?.provider).toBe(fallbackModel.provider);
+	});
+
+	it("keeps usage-backed payload overflows off the configured chain", async () => {
+		// Provider-reported input tokens above the window are authoritative
+		// overflow evidence: maintenance's arbitration owns them like pure
+		// overflows, so payload wording must not convert a token excess into a
+		// model switch when a viable chain candidate exists (#9235 review).
+		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
+		if (!fallbackModel) {
+			throw new Error("Expected bundled openai fallback model to exist");
+		}
+
+		const requestedModels: string[] = [];
+		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
+		let failedOnce = false;
+		await createSession(200_000, undefined, {
+			streamFn: (model, context, options) => {
+				requestedModels.push(`${model.provider}/${model.id}`);
+				primaryMock.push(
+					failedOnce
+						? { content: ["made progress after compaction"] }
+						: {
+								content: [],
+								stopReason: "error",
+								errorMessage: "request_too_large: image count exceeds the limit of 20",
+								usage: { input: 250_000 },
+							},
+				);
+				failedOnce = true;
+				return primaryMock.stream(model, context, options);
+			},
+			extraSettings: {
+				"retry.baseDelayMs": 5,
+				"retry.modelFallback": true,
+				"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
+			},
+		});
+		activateOngoingGoal("goal-usage-backed");
+		session.subscribe(event => {
+			if (event.type === "retry_fallback_applied") fallbackEvents.push(event);
+		});
+		const startCount = countCompactionEvents("auto_compaction_start");
+
+		await session.prompt("work on the goal");
+		await session.waitForIdle();
+
+		expect(fallbackEvents).toHaveLength(0);
+		expect(requestedModels.every(m => m.startsWith("anthropic/"))).toBe(true);
+		// Maintenance actually ran its overflow remedy instead of ceding the
+		// turn to the configured chain.
+		expect(startCount()).toBeGreaterThanOrEqual(1);
 	});
 
 	it("keeps the goal-mode BLOCK terminal when no fallback chain is configured", async () => {

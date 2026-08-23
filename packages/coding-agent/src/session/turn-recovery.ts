@@ -1742,12 +1742,21 @@ export class TurnRecovery {
 		const id = this.#classifyRetryMessage(message);
 		if (AIError.is(id, AIError.Flag.Abort) || AIError.is(id, AIError.Flag.UserInterrupt)) return false;
 		// Bare 413s and media-budget numeric limits classify with BOTH
-		// PayloadRejected and ContextOverflow (deliberately ambiguous). The
+		// PayloadRejected and ContextOverflow (deliberately ambiguous): the
 		// payload co-flag is provider evidence that the request itself was
 		// rejected — something a different provider's larger byte/media
-		// budget CAN accept — so only PURE context overflows are barred
-		// from model switching; those belong to compaction (#9235 review).
-		if (AIError.isContextOverflow(message, model.contextWindow ?? 0) && !AIError.isPayloadRejection(message)) {
+		// budget CAN accept — so only those text-ambiguous overflows waive
+		// the veto. Usage-backed overflows are authoritative evidence that
+		// the prompt exceeds THIS model's window: maintenance's arbitration
+		// owns them exactly like pure overflows, so a reported-usage excess
+		// must not leak into model switching (#9235 review).
+		const contextWindow = model.contextWindow ?? 0;
+		const overflowFlagged = AIError.isContextOverflow(message, contextWindow);
+		const textAmbiguousOverflow =
+			overflowFlagged &&
+			AIError.isPayloadRejection(message) &&
+			!AIError.isUsageBackedContextOverflow(message, contextWindow);
+		if (overflowFlagged && !textAmbiguousOverflow) {
 			return false;
 		}
 		if (this.#hasReplayUnsafeOutput(message)) return false;

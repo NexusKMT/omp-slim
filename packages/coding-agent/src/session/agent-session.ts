@@ -3018,18 +3018,23 @@ export class AgentSession {
 			let checkedCompaction = false;
 			if (activeGoal) {
 				// A configured hard-error fallback is a fresh chance that no goal-
-				// mode maintenance outcome may pre-empt (#9235 review). Outside
-				// goal mode the recovery ladder consults the chain before compaction
-				// runs; goal mode must honor the same configuration. The consult
-				// must precede checkCompaction() itself: its overflow path applies
-				// its remedy (context promotion or rolled-back compaction) before
-				// returning, so consulting only after seeing a result could stack
-				// remedies or undo a promotion. Eligibility already vetoes genuine
-				// context overflow, classifier refusals, aborts, usage-preflight
-				// blocks, and replay-unsafe turns, and is false outright when no
-				// chain candidates exist; only an exhausted or declining chain
-				// falls through to maintenance below.
-				if (this.#recovery.isHardErrorFallbackEligible(msg)) {
+				// mode maintenance outcome may pre-empt (#9235 review) — but only
+				// for payload rejections, the #9235 family whose maintenance
+				// outcomes (honest skips, context removal, continuations) would
+				// otherwise stand in front of the chain. Other hard failures keep
+				// the non-goal ladder's precedence: below, the intrinsic Fireworks
+				// Fast→base degradation and the retryable path get first claim,
+				// and the chain is consulted at its usual rung. The consult must
+				// still precede checkCompaction() itself: its overflow path
+				// applies its remedy (context promotion or rolled-back compaction)
+				// before returning, so consulting only after seeing a result could
+				// stack remedies or undo a promotion. Eligibility already vetoes
+				// context overflow (including usage-backed excesses), classifier
+				// refusals, aborts, usage-preflight blocks, and replay-unsafe
+				// turns, and is false outright when no chain candidates exist;
+				// only an exhausted or declining chain falls through to
+				// maintenance below.
+				if (AIError.isPayloadRejection(msg) && this.#recovery.isHardErrorFallbackEligible(msg)) {
 					const didRetry = await this.#recovery.handleRetryableError(msg, { hardErrorFallback: true });
 					if (didRetry) {
 						await emitAgentEndNotification({ willContinue: true });
