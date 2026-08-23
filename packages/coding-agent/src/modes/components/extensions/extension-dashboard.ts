@@ -10,7 +10,7 @@
  * - Tab/Shift+Tab or ←/→: switch provider tab
  * - Up/Down/j/k or wheel: move list selection
  * - Space/Enter or click: toggle selected item (or provider master switch)
- * - Wheel over the inspector: scroll the detail pane
+ * - Wheel over the inspector, or PageUp/PageDown when the inspector overflows: scroll the detail pane
  * - Esc: clear search (if active) then close
  */
 import {
@@ -32,7 +32,12 @@ import type { MCPManager } from "../../../mcp/manager";
 import { MCP_CONNECTION_STATUS_EVENT_CHANNEL } from "../../../mcp/startup-events";
 import { getTabBarTheme } from "../../../modes/shared";
 import { theme } from "../../../modes/theme/theme";
-import { matchesAppInterrupt, matchesAppToolsExpand } from "../../../modes/utils/keybinding-matchers";
+import {
+	matchesAppInterrupt,
+	matchesAppToolsExpand,
+	matchesSelectPageDown,
+	matchesSelectPageUp,
+} from "../../../modes/utils/keybinding-matchers";
 import { expandKeyHint } from "../../../tools/render-utils";
 import type { EventBus } from "../../../utils/event-bus";
 import { bottomBorder, divider, row, topBorder } from "../overlay-box";
@@ -61,7 +66,7 @@ export interface ExtensionDashboardOptions {
 }
 
 function extFooter(): string {
-	return ` ↑/↓: navigate · Space: toggle · ←/→: provider · ${expandKeyHint()}: expand · Esc: close`;
+	return ` ↑/↓: navigate · Space: toggle · ←/→: provider · PgUp/PgDn: inspector · ${expandKeyHint()}: expand · Esc: close`;
 }
 
 /**
@@ -510,6 +515,11 @@ export class ExtensionDashboard implements Component {
 			return;
 		}
 
+		if (this.#body.pageInspector(matchesSelectPageUp(data) ? -1 : matchesSelectPageDown(data) ? 1 : 0)) {
+			this.onRequestRender?.();
+			return;
+		}
+
 		// Tab/Shift+Tab or ←/→: switch provider tabs (fires onTabChange).
 		if (this.#tabBar.handleInput(data)) {
 			return;
@@ -602,6 +612,15 @@ class TwoColumnBody implements Component {
 	scrollInspector(delta: -1 | 1): void {
 		const max = Math.max(0, this.#rightTotal - this.#maxHeight);
 		this.#rightScroll = Math.max(0, Math.min(this.#rightScroll + delta, max));
+	}
+
+	pageInspector(delta: -1 | 0 | 1): boolean {
+		if (delta === 0 || this.#rightTotal <= this.#maxHeight) return false;
+		const before = this.#rightScroll;
+		const step = Math.max(1, this.#maxHeight - 1);
+		const max = Math.max(0, this.#rightTotal - this.#maxHeight);
+		this.#rightScroll = Math.max(0, Math.min(this.#rightScroll + delta * step, max));
+		return this.#rightScroll !== before;
 	}
 
 	render(width: number): readonly string[] {
