@@ -20,6 +20,7 @@ import {
 	pruneBunInstallCache,
 	type ReleaseInfo,
 	type RenameMigrationSteps,
+	type InstalledVersionVerification,
 	type ManagerUpdateSteps,
 	replaceBinaryForUpdate,
 	resolveBunGlobalNodeModulesDirFromLocations,
@@ -1217,6 +1218,29 @@ describe("update-cli script-shim takeover", () => {
 		expect(residue).toEqual([]);
 	});
 
+	it("drops bun's launcher metadata when the standalone binary takes the .exe over", async () => {
+		// After the takeover the launcher is no longer bun-managed. A leftover
+		// `omp.bunx` would keep classifying the install as bun-managed and send
+		// the next update through `bun install -g`, which cannot overwrite the
+		// running `.exe` and would pin the install to the old version.
+		const dir = await makeTempDir();
+		const targetPath = path.join(dir, "omp.exe");
+		const marker = path.join(dir, "omp.bunx");
+		await Bun.write(targetPath, "bun shim");
+		await Bun.write(marker, "bun launcher metadata");
+		const exe = `#!/bin/sh\necho omp/${version}\n`;
+
+		await updateViaBinaryAt(targetPath, version, {
+			binaryName,
+			fetchImpl: makeFetch(exe),
+			githubToken: "test-token",
+			verifyInstalledVersion: async () => ({ ok: true, actual: version, path: targetPath }),
+		});
+
+		expect(await Bun.file(targetPath).text()).toBe(exe);
+		expect(await Bun.file(marker).exists()).toBe(false);
+	});
+
 	it("restores the shims and removes the exe when the exe reports the wrong version", async () => {
 		const dir = await makeTempDir();
 		await writeShims(dir);
@@ -1413,5 +1437,114 @@ describe("update-cli concurrent binary updates", () => {
 		expect(await Bun.file(targetPath).bytes()).toEqual(new Uint8Array(payload));
 		const residue = (await fs.readdir(dir)).filter(name => name.endsWith(".bak") || name.endsWith(".new"));
 		expect(residue).toEqual([]);
+	});
+});
+
+describe("update-cli manager update recovery", () => {
+	const release: ReleaseInfo = {
+		tag: "v18.0.1",
+		version: "18.0.1",
+		packages: { pkg: "@oh-my-pi/pi-coding-agent", natives: "@oh-my-pi/pi-natives" },
+	};
+	const launcherPath = "C:/Users/test/AppData/Roaming/npm/omp.cmd";
+
+	function scriptedSteps(script: {
+		install: InstalledVersionVerification | Error | undefined;
+		verify?: InstalledVersionVerification;
+		repair?: Error;
+	}): { steps: ManagerUpdateSteps; calls: string[] } {
+		const calls: string[] = [];
+		return {
+			calls,
+			steps: {
+				manager: "npm",
+				async install() {
+					calls.push("install");
+					if (script.install instanceof Error) throw script.install;
+					return script.install;
+				},
+				async verify() {
+					calls.push("verify");
+					return script.verify ?? { ok: false };
+				},
+				async repair(target) {
+					calls.push(`repair:${target}`);
+					if (script.repair) throw script.repair;
+				},
+			},
+		};
+	}
+
+	it("takes the launcher over when the manager install left nothing on PATH", async () => {
+		// npm retires the global bin shims before unpacking and restores them
+		// only if its own rollback succeeds; a locked file (the loaded native
+		// addon on Windows) can leave the user with no `omp` at all.
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const { steps, calls } = scriptedSteps({ install: new Error("npm install failed with exit code 1") });
+
+		await updateViaManager(release, launcherPath, steps);
+
+		expect(calls).toEqual(["install", "verify", `repair:${launcherPath}`]);
+	});
+
+	it("takes the launcher over when it survives but can no longer report a version", async () => {
+		// bun aborts the whole install on the first file it cannot overwrite,
+		// leaving a half-replaced package the launcher cannot run.
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const { steps, calls } = scriptedSteps({ install: { ok: false, path: launcherPath } });
+
+		await updateViaManager(release, launcherPath, steps);
+
+		expect(calls).toEqual(["install", `repair:${launcherPath}`]);
+	});
+
+	it("leaves a working managed install on its manager when the new version did not land", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const { steps, calls } = scriptedSteps({ install: { ok: false, path: launcherPath, actual: "17.4.2" } });
+
+		await updateViaManager(release, launcherPath, steps);
+
+		expect(calls).toEqual(["install"]);
+	});
+
+	it("surfaces the install failure without a takeover when the previous launcher still runs", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const { steps, calls } = scriptedSteps({
+			install: new Error("npm install failed with exit code 1"),
+			verify: { ok: false, path: launcherPath, actual: "17.4.2" },
+		});
+
+		await expect(updateViaManager(release, launcherPath, steps)).rejects.toThrow("exit code 1");
+		expect(calls).toEqual(["install", "verify"]);
+	});
+
+	it("keeps a verified manager install untouched", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const { steps, calls } = scriptedSteps({ install: { ok: true, path: launcherPath, actual: release.version } });
+
+		await updateViaManager(release, launcherPath, steps);
+
+		expect(calls).toEqual(["install"]);
+	});
+
+	it("defers to a rename migration that already verified and reported its own result", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const { steps, calls } = scriptedSteps({ install: undefined });
+
+		await updateViaManager(release, launcherPath, steps);
+
+		expect(calls).toEqual(["install"]);
+	});
+
+	it("reports the failed repair with the install failure as its cause", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const { steps } = scriptedSteps({
+			install: new Error("npm install failed with exit code 1"),
+			repair: new Error("no binary asset"),
+		});
+
+		await expect(updateViaManager(release, launcherPath, steps)).rejects.toThrow(
+			"launcher could not be repaired: Error: no binary asset",
+		);
 	});
 });
