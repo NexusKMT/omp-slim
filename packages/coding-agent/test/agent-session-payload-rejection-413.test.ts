@@ -605,4 +605,39 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		expect(payloadNotices[0].level).toBe("warning");
 		expect(startCount()).toBe(0);
 	});
+	it("blocks dual-flag bare-413 dead ends even though overflow evidence is present", async () => {
+		// Bare "413 status code (no body)" classifies as BOTH PayloadRejected
+		// and ContextOverflow. High occupancy forces the gate entry and
+		// overflowEvidence is true, but with no runnable remedy the failure
+		// must still BLOCK: resending is futile regardless of which truth
+		// the ambiguity hides.
+		const requestedModels: string[] = [];
+		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		await createSession(
+			2_000,
+			{ toolText: "x".repeat(40_000) },
+			{
+				streamFn: (model, context, options) => {
+					requestedModels.push(`${model.provider}/${model.id}`);
+					primaryMock.push({ throw: "413 status code (no body)" });
+					return primaryMock.stream(model, context, options);
+				},
+				extraSettings: {
+					"compaction.enabled": false,
+					"contextPromotion.enabled": false,
+				},
+			},
+		);
+		activateOngoingGoal("goal-dual-flag-dead-end");
+		const notices = collectNotices();
+		const startCount = countCompactionEvents("auto_compaction_start");
+		await session.prompt("work on the goal");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5"]);
+		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
+		expect(payloadNotices.length).toBe(1);
+		expect(payloadNotices[0].level).toBe("warning");
+		expect(startCount()).toBe(0);
+	});
 });

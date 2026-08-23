@@ -106,6 +106,10 @@ function isRetryableOneshotFailure(errorId: number, errorStatus: number | undefi
 	// identically on every attempt. Retrying burns the caller's deadline instead
 	// of reaching the fallback that can actually shrink the input.
 	if (AIError.is(errorId, AIError.Flag.ContextOverflow)) return false;
+	// Same fixed-prompt reasoning for payload rejections: transient transport
+	// wording ("Provider returned error: 413 ...") co-flags Transient, but
+	// resending the identical oversized body fails identically every attempt.
+	if (AIError.is(errorId, AIError.Flag.PayloadRejected)) return false;
 	return (
 		AIError.isTransientStatus(errorStatus) ||
 		AIError.is(errorId, AIError.Flag.Transient) ||

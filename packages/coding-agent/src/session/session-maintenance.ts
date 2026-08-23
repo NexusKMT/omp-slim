@@ -1849,12 +1849,15 @@ export class SessionMaintenance {
 					autoContinue,
 				});
 			}
-			if (!overflowEvidence) {
-				// Payload-forced entry, but nothing can run: no promotion
-				// target and compaction is disabled or method-less. Return
-				// BLOCK anyway — resending the identical rejected payload
-				// cannot succeed, and an automatic goal continuation would
-				// otherwise blind-resend it (#9235 review).
+			if (payloadRejection) {
+				// Payload rejection and nothing can run: no promotion target,
+				// compaction disabled or method-less. Return BLOCK anyway —
+				// resending the identical rejected payload cannot succeed,
+				// and an automatic goal continuation would otherwise
+				// blind-resend it. This includes dual-flag bare "413 (no
+				// body)" entries where overflowEvidence is also true; only
+				// genuine overflow-only failures keep the legacy NONE fall-
+				// through (their dead-end handling is separate machinery).
 				this.#host.emitNotice("warning", payloadRejectionNotice(storedTokens, contextWindow), "compaction");
 				logger.debug("Payload-shaped 413 has no runnable recovery; blocking automatic continuation", {
 					provider: assistantMessage.provider,
