@@ -2,12 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added "Mechanical" mode for unexpected stop detection, allowing retries based solely on structural signals
+
+### Changed
+
+- Updated "Unexpected Stops" setting to support "None", "Mechanical", and "Smart" modes instead of a simple boolean
+
 ### Fixed
 
 - Ctrl+T now toggles every thinking block in the transcript, including blocks already retired to terminal history ([#9440](https://github.com/can1357/oh-my-pi/issues/9440)).
 - Copilot Grok 4.6 Responses streams that repeatedly close after thinking now stop after one same-model retry instead of consuming the full retry budget ([#9427](https://github.com/can1357/oh-my-pi/issues/9427)).
 - `/mcp test` now reports cancellation immediately when Esc is pressed during a slow config lookup, instead of staying suspended until the read settles ([#9419](https://github.com/can1357/oh-my-pi/issues/9419)).
 - Fixed remote browser relay endpoints advertising a client-local CDP WebSocket URL: `/json/version` now reflects a valid request `Host` and falls back to the relay's loopback address when it is absent or unusable.
+- Restored red/green and syntax highlighting in edit-tool result bodies ([#9439](https://github.com/can1357/oh-my-pi/issues/9439)).
 
 ## [18.0.1] - 2026-08-23
 
@@ -16,7 +25,6 @@
 - Plan review can save a plan to a chosen path and start a new session.
 - Edit results now warn when an edit leaves a previously parsing file unparseable, independent of the `edit.blackbox.enabled` recorder.
 - Added provider-wide Amazon Bedrock guardrail settings to models configuration, including custom models.
-
 - Added the `/pin` slash command to pin and unpin sessions so they stay at the top of the `--resume` picker UI.
 - Optional edit parse-regression capture appends the before/after content, model, variant, and arguments to `~/.omp/agent/edit-blackbox.jsonl` when `edit.blackbox.enabled` is enabled.
 
@@ -44,8 +52,6 @@
 - Paragraph splitting for containment comparison is now fenced-code-block-aware: text inside a fenced example in a more authoritative file no longer counts as a contained instruction, preventing active context rules from being discarded.
 
 ### Fixed
-
-- Restored red/green and syntax highlighting in edit-tool result bodies ([#9439](https://github.com/can1357/oh-my-pi/issues/9439)).
 
 - Fixed UI jitter in the edit tool gutter by reserving space for line counts
 - Edit-tool add lines written directly above a `` gap now insert under their anchor line instead of splicing at the post-gap anchor, often mid-line without a newline.

@@ -33,7 +33,6 @@
 
 - Added Amazon Bedrock Converse guardrail configuration with provider-scoped identifier, version, and trace settings.
 
-### Changed
 ## [18.0.0] - 2026-08-22
 
 ### Added

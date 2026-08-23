@@ -749,7 +749,8 @@ export class TurnRecovery {
 		});
 	}
 	async #handleUnexpectedAssistantStop(assistantMessage: AssistantMessage): Promise<boolean> {
-		if (!this.#host.settings.get("features.unexpectedStopDetection")) {
+		const mode = this.#host.settings.get("features.unexpectedStopDetection");
+		if (mode === "none") {
 			return false;
 		}
 		if (!isUnexpectedStopCandidate(assistantMessage)) {
@@ -774,24 +775,28 @@ export class TurnRecovery {
 			return false;
 		}
 
-		const controller = new AbortController();
-		const timeout = setTimeout(() => controller.abort(), UNEXPECTED_STOP_TIMEOUT_MS);
-		let classification: boolean | undefined;
-		try {
-			classification = await classifyUnexpectedStop(text, {
-				settings: this.#host.settings,
-				registry: this.#host.modelRegistry,
-				sessionId: this.#host.sessionId(),
-				metadataResolver: (provider: string) => this.#host.agent.metadataForProvider(provider),
-				signal: controller.signal,
-			});
-		} finally {
-			clearTimeout(timeout);
-		}
+		// Smart mode adds small-model classification on top of the structural
+		// candidate check; mechanical mode retries on the structural signal alone.
+		if (mode === "smart") {
+			const controller = new AbortController();
+			const timeout = setTimeout(() => controller.abort(), UNEXPECTED_STOP_TIMEOUT_MS);
+			let classification: boolean | undefined;
+			try {
+				classification = await classifyUnexpectedStop(text, {
+					settings: this.#host.settings,
+					registry: this.#host.modelRegistry,
+					sessionId: this.#host.sessionId(),
+					metadataResolver: (provider: string) => this.#host.agent.metadataForProvider(provider),
+					signal: controller.signal,
+				});
+			} finally {
+				clearTimeout(timeout);
+			}
 
-		if (classification !== true) {
-			this.#unexpectedStopRetryCount = 0;
-			return false;
+			if (classification !== true) {
+				this.#unexpectedStopRetryCount = 0;
+				return false;
+			}
 		}
 
 		this.#unexpectedStopRetryCount++;

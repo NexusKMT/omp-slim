@@ -153,6 +153,27 @@ describe("AgentSession unexpected stop guard", () => {
 		expect(reminderMessages(session.agent.state.messages)).toHaveLength(0);
 	});
 
+	it("mechanical mode retries on the structural signal without classification", async () => {
+		const spy = vi.spyOn(unexpectedStopClassifier, "classifyUnexpectedStop").mockResolvedValue(false);
+		const { session, mock } = await createHarness(
+			[
+				unexpectedStop("I should apply the same fix to the JS eval worker. Doing that now."),
+				{ content: ["done now"], stopReason: "stop" },
+			],
+			{
+				"features.unexpectedStopDetection": "mechanical",
+			},
+		);
+
+		await session.prompt("do the thing");
+		await session.waitForIdle();
+
+		expect(spy).not.toHaveBeenCalled();
+		expect(mock.calls).toHaveLength(2);
+		expect(assistantText(session.agent.state.messages)).toContain("done now");
+		expect(reminderMessages(session.agent.state.messages)).toHaveLength(1);
+	});
+
 	it("schedules a continuation when the classifier returns true", async () => {
 		let calls = 0;
 		const spy = vi.spyOn(unexpectedStopClassifier, "classifyUnexpectedStop").mockImplementation(async () => {
@@ -165,7 +186,7 @@ describe("AgentSession unexpected stop guard", () => {
 				{ content: ["done now"], stopReason: "stop" },
 			],
 			{
-				"features.unexpectedStopDetection": true,
+				"features.unexpectedStopDetection": "smart",
 				"providers.unexpectedStopModel": "online",
 			},
 		);
@@ -188,7 +209,7 @@ describe("AgentSession unexpected stop guard", () => {
 		const { session, mock } = await createHarness(
 			[thinkingOnlyStop(" 响应"), { content: ["done now"], stopReason: "stop" }],
 			{
-				"features.unexpectedStopDetection": true,
+				"features.unexpectedStopDetection": "smart",
 				"providers.unexpectedStopModel": "online",
 			},
 		);
@@ -208,7 +229,7 @@ describe("AgentSession unexpected stop guard", () => {
 		const { session, mock } = await createHarness(
 			[unexpectedStop("I should apply the same fix to the JS eval worker. Doing that now.")],
 			{
-				"features.unexpectedStopDetection": true,
+				"features.unexpectedStopDetection": "smart",
 				"providers.unexpectedStopModel": "online",
 			},
 		);
@@ -232,7 +253,7 @@ describe("AgentSession unexpected stop guard", () => {
 				unexpectedStop("I should fix this next."),
 			],
 			{
-				"features.unexpectedStopDetection": true,
+				"features.unexpectedStopDetection": "smart",
 				"providers.unexpectedStopModel": "online",
 			},
 		);
@@ -251,7 +272,7 @@ describe("AgentSession unexpected stop guard", () => {
 		const { session, mock } = await createHarness(
 			[recordCall("alpha", "call-record-alpha"), { content: ["tool path complete"], stopReason: "aborted" }],
 			{
-				"features.unexpectedStopDetection": true,
+				"features.unexpectedStopDetection": "smart",
 				"providers.unexpectedStopModel": "online",
 			},
 		);
@@ -269,7 +290,7 @@ describe("AgentSession unexpected stop guard", () => {
 		const { session, mock } = await createHarness(
 			[{ content: ["I should continue but hit the length limit"], stopReason: "length" }],
 			{
-				"features.unexpectedStopDetection": true,
+				"features.unexpectedStopDetection": "smart",
 				"providers.unexpectedStopModel": "online",
 			},
 		);

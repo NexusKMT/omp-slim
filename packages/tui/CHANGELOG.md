@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Fixed
 
 - Fixed visible history being erased when enlarging the terminal.

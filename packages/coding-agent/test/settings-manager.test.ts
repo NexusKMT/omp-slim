@@ -1192,6 +1192,31 @@ describe("Settings", () => {
 			expect(settings.get("todo.eager")).toBe("default");
 		});
 
+		it("migrates legacy features.unexpectedStopDetection=true to smart", async () => {
+			await writeSettings({ features: { unexpectedStopDetection: true } });
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+
+			// `true` reproduced the previous small-model-classified guard, now "smart".
+			expect(settings.get("features.unexpectedStopDetection")).toBe("smart");
+		});
+
+		it("drops legacy features.unexpectedStopDetection=false so the none default applies", async () => {
+			await writeSettings({ features: { unexpectedStopDetection: false } });
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+
+			expect(settings.get("features.unexpectedStopDetection")).toBe("none");
+		});
+
+		it("normalizes a quoted-dotted legacy unexpected-stop boolean", async () => {
+			await Bun.write(getConfigPath(), '"features.unexpectedStopDetection": true\n');
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+
+			expect(settings.get("features.unexpectedStopDetection")).toBe("smart");
+		});
+
 		it("moves legacy lastChangelogVersion out of config.yml into the marker file", async () => {
 			await writeSettings({ lastChangelogVersion: "0.40.0" });
 

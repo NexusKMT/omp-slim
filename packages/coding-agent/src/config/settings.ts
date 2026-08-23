@@ -1605,6 +1605,34 @@ export class Settings {
 			todoObj.eager = todoObj.eager ? "always" : "default";
 		}
 
+		// features.unexpectedStopDetection (boolean) -> enum none|mechanical|smart.
+		// `true` reproduced the previous small-model-classified behavior, which is
+		// now "smart"; `false` drops the key so the schema's "none" default applies.
+		// Handles nested and quoted-dotted sources, like inspect_image above.
+		const featuresObj = isRecord(raw.features) ? (raw.features as Record<string, unknown>) : undefined;
+		const legacyUnexpectedStop =
+			typeof featuresObj?.unexpectedStopDetection === "boolean"
+				? featuresObj.unexpectedStopDetection
+				: typeof raw["features.unexpectedStopDetection"] === "boolean"
+					? (raw["features.unexpectedStopDetection"] as boolean)
+					: undefined;
+		if (legacyUnexpectedStop !== undefined) {
+			if (!featuresObj) {
+				raw.features = {};
+			}
+			const target = raw.features as Record<string, unknown>;
+			const current = target.unexpectedStopDetection;
+			if (
+				legacyUnexpectedStop &&
+				!(typeof current === "string" && ["none", "mechanical", "smart"].includes(current))
+			) {
+				target.unexpectedStopDetection = "smart";
+			} else if (!legacyUnexpectedStop) {
+				// false -> schema default ("none"); drop the key entirely.
+				delete target.unexpectedStopDetection;
+			}
+			delete raw["features.unexpectedStopDetection"];
+		}
 		// task.isolation.mode: legacy values from before the pi-iso PAL refactor.
 		// `worktree` was git worktree → now lives under `rcopy`. `fuse-overlay`
 		// and `fuse-projfs` are now the platform-named `overlayfs` / `projfs`

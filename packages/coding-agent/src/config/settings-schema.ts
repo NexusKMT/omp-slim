@@ -5518,14 +5518,24 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 	"features.unexpectedStopDetection": {
-		type: "boolean",
-		default: false,
+		type: "enum",
+		values: ["none", "mechanical", "smart"] as const,
+		default: "none",
 		ui: {
 			tab: "interaction",
 			group: "Agent",
-			label: "Detect unexpected stops",
+			label: "Unexpected Stops",
 			description:
-				"Use a small model to detect when the assistant says it will continue but stops without tool calls; automatically prompt it to continue.",
+				"Detect when the assistant ends its turn without acting and automatically prompt it to continue. Mechanical uses structural signals only; Smart adds a small-model classification of the stop text.",
+			options: [
+				{ value: "none", label: "None", description: "Disabled" },
+				{
+					value: "mechanical",
+					label: "Mechanical",
+					description: "Retry on structural unexpected-stop signals (no tool call, turn ends mid-task)",
+				},
+				{ value: "smart", label: "Smart", description: "Mechanical + small-model classification of the stop text" },
+			],
 		},
 	},
 	"providers.unexpectedStopModel": {
