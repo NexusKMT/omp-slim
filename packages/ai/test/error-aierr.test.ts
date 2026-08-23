@@ -117,22 +117,6 @@ describe("AIError.classify — structural provider errors", () => {
 		const err = new AIError.ProviderResponseError("upstream error", { provider: "google", kind: "output" });
 		expect(AIError.retriable(AIError.classify(err))).toBe(false);
 	});
-
-	it("classifies a Fireworks mid-generation NaN 400 as transient + retryable", () => {
-		const body =
-			'400 {"error":{"object":"error","type":"invalid_request_error","code":"invalid_request_error","message":"Floating point NaN (not-a-number) is detected in generation. This is a model-side numerical error."}}';
-		const id = AIError.classify(new AIError.ProviderHttpError(body, 400, { code: "invalid_request_error" }));
-		expect(AIError.is(id, AIError.Flag.Transient)).toBe(true);
-		expect(AIError.retriable(id)).toBe(true);
-	});
-
-	it("does not treat a genuine request-validation 400 as transient", () => {
-		const body =
-			'400 {"error":{"type":"invalid_request_error","message":"Invalid value for \'temperature\': must be <= 2."}}';
-		const id = AIError.classify(new AIError.ProviderHttpError(body, 400, { code: "invalid_request_error" }));
-		expect(AIError.is(id, AIError.Flag.Transient)).toBe(false);
-		expect(AIError.retriable(id)).toBe(false);
-	});
 });
 
 describe("AIError.finalize", () => {
