@@ -76,6 +76,7 @@
 
 ### Fixed
 
+- A streamed-edit removed-lines verification still pending across a turn boundary no longer starts under the next turn (turn resets don't advance the session prompt generation) and abort it based on the previous turn's edit.
 - Fixed UI jitter in the edit tool gutter by reserving space for line counts
 - Edit-tool add lines written directly above a `` gap now insert under their anchor line instead of splicing at the post-gap anchor, often mid-line without a newline.
 - Edit-tool add lines may contain literal selection-marker glyphs; such payloads previously failed with an unusable corrected payload.

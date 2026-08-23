@@ -53,6 +53,11 @@ export class StreamingEditGuard {
 	// their time-sliced scans within a single event-loop tick.
 	#verificationChain = new Map<string, Promise<void>>();
 	#lastToolCallId: string | undefined;
+	// Internal invalidation token, bumped by reset(). Unlike the session's
+	// promptGeneration — which only advances on abort/session-reset — this moves
+	// at every turn boundary, so a removed-lines check queued before reset()
+	// cannot start under the next turn and abort it on the previous edit.
+	#epoch = 0;
 
 	constructor(host: StreamGuardsHost) {
 		this.#host = host;
@@ -63,7 +68,7 @@ export class StreamingEditGuard {
 		return this.#abortTriggered;
 	}
 
-	/** Clears all turn-scoped streaming edit state. */
+	/** Clears all turn-scoped streaming edit state and invalidates queued checks. */
 	reset(): void {
 		this.#abortTriggered = false;
 		this.#checkedLineCounts.clear();
@@ -71,6 +76,7 @@ export class StreamingEditGuard {
 		this.#fileCache.clear();
 		this.#confirmedRemovedLines.clear();
 		this.#verificationChain.clear();
+		this.#epoch += 1;
 	}
 
 	/** Pre-caches and validates a streamed edit as its arguments arrive. */
@@ -282,13 +288,15 @@ export class StreamingEditGuard {
 	/** Chains a removed-lines verification behind any in-flight one for the same file. */
 	#queueRemovedLinesCheck(toolCallId: string, filePath: string, resolvedPath: string, removedLines: string[]): void {
 		// Turn-scoped token: a check still queued when reset() runs must not start
-		// under the next turn and abort it with the previous turn's verdict.
-		const generation = this.#host.promptGeneration();
+		// under the next turn and abort it with the previous turn's verdict. The
+		// guard's own epoch moves at every turn boundary, unlike promptGeneration,
+		// which only advances on abort/session-reset.
+		const epoch = this.#epoch;
 		const prior = this.#verificationChain.get(resolvedPath) ?? Promise.resolve();
 		const next = prior
 			.catch(() => {})
 			.then(() => {
-				if (this.#abortTriggered || this.#host.promptGeneration() !== generation) return;
+				if (this.#abortTriggered || this.#epoch !== epoch) return;
 				return this.#checkRemovedLines(toolCallId, filePath, resolvedPath, removedLines);
 			})
 			.catch(() => {});
