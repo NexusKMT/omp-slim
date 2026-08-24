@@ -23,6 +23,7 @@
 - Fixed resize and display replays, ensuring stable rendering and full transcript flushing on agent shutdown
 - Fixed fast tool completions leaving a permanent running summary that blocked transcript retirement and squeezed later tool output.
 - Fixed `omp git` hunk navigation (`alt+↓`/`alt+↑`) appearing to do nothing while the file sidebar had focus: the diff cursor band now stays visible (dimmed) when the pane is unfocused.
+- Fixed `!command` config values (`auth.broker.url`, `auth.broker.token`, custom headers) leaking inherited file descriptors into the resolution child: the command now spawns with stdio pipes only, so a credential a launcher passed omp on a private descriptor can no longer be read back through `/proc/self/fd` or an fd dup. `!command` values now run under the platform shell (`/bin/sh`, `cmd.exe`) exactly like models.yml `apiKey` commands, instead of the natives brush shell.
 
 ## [18.0.4] - 2026-08-24
 

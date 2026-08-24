@@ -4,8 +4,11 @@
  * Note: command execution is async to avoid blocking the TUI.
  */
 
-import { executeShell } from "@oh-my-pi/pi-natives";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import { $envExact } from "@oh-my-pi/pi-utils";
+
+const execAsync = promisify(exec);
 
 /** Cache for successful shell command results (persists for process lifetime). */
 const commandResultCache = new Map<string, string>();
@@ -55,16 +58,15 @@ async function executeCommand(commandConfig: string): Promise<string | undefined
 
 async function runShellCommand(command: string, timeoutMs: number): Promise<string | undefined> {
 	try {
-		let output = "";
-		const result = await executeShell({ command, timeoutMs }, (err, chunk) => {
-			if (!err) {
-				output += chunk;
-			}
-		});
-		if (result.timedOut || result.exitCode !== 0) {
-			return undefined;
-		}
-		const trimmed = output.trim();
+		// child_process#exec spawns the command with stdio pipes only, so the
+		// child cannot read descriptors this process holds open — e.g. a
+		// credential a launcher passed us on a private fd. The previous
+		// executeShell() path ran the command through the natives brush shell,
+		// whose children inherit every inheritable descriptor. exec also
+		// matches the models.yml `!command` resolver (model-config-values.ts),
+		// which already uses child_process, and captures stdout only like it.
+		const { stdout } = await execAsync(command, { timeout: timeoutMs, encoding: "utf8", windowsHide: true });
+		const trimmed = stdout.trim();
 		return trimmed.length > 0 ? trimmed : undefined;
 	} catch {
 		return undefined;
