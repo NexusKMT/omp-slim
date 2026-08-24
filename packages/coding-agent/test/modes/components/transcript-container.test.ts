@@ -369,4 +369,29 @@ describe("TranscriptContainer", () => {
 		expect(transcript.peekFinalizedBatch(80, 10)?.rows).toEqual(["committed", ""]);
 		expect(transcript.renderViewport(80, 10, frame)).toEqual(["active"]);
 	});
+	it("renders exactly the trailing semantic rows without walking the full ledger", () => {
+		const transcript = new TranscriptContainer();
+		transcript.addChild(new Block(["a1", "a2"], true));
+		transcript.addChild(new Block([], true));
+		transcript.addChild(new AppendBlock(["b1", "b2"], ["b1"], true));
+		transcript.addChild(new Block(["c1"], false));
+
+		const full = transcript.render(80);
+		for (const cap of [1, 3, 4, full.length, full.length + 5]) {
+			expect(transcript.renderTail(80, cap)).toEqual(full.slice(-Math.min(cap, full.length)));
+		}
+		expect(transcript.renderTail(80, 0)).toEqual([]);
+	});
+
+	it("cancels a pending replay so shutdown flush emits only un-retired rows", () => {
+		const transcript = new TranscriptContainer();
+		transcript.addChild(new Block(["committed"], true));
+		const committed = transcript.peekFinalizedBatch(80, 0)!;
+		transcript.acknowledgeFinalizedBatch(committed.id);
+		transcript.addChild(new Block(["tail"], true));
+
+		transcript.beginReplay();
+		transcript.cancelReplay();
+		expect(transcript.peekFlushBatch(80)?.rows).toEqual(["tail", ""]);
+	});
 });

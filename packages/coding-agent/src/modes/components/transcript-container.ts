@@ -202,6 +202,15 @@ export class TranscriptContainer extends Container {
 		}
 		this.#startReplay();
 	}
+	/**
+	 * Drop a not-yet-offered replay so a shutdown flush emits only un-retired
+	 * rows. The terminal already holds the committed ledger; re-streaming it at
+	 * quit is pure write volume. An already offered replay batch stays valid.
+	 */
+	cancelReplay(): void {
+		this.#replayPending = false;
+		this.#replayRequested = false;
+	}
 
 	/** Total rows the live, un-emitted tail occupies at `width`. */
 	liveRowCount(width: number): number {
@@ -392,6 +401,28 @@ export class TranscriptContainer extends Container {
 		if (this.#replayRequested) this.#startReplay();
 	}
 
+	/**
+	 * Render only the trailing `maxRows` semantic rows, walking blocks bottom-up.
+	 * Used by the transient resize-buffer repaint, which needs one viewport of
+	 * tail rows per resize event — never the full committed ledger.
+	 */
+	renderTail(width: number, maxRows: number): readonly string[] {
+		this.#syncEntries();
+		const cap = Math.max(0, Math.trunc(maxRows));
+		if (cap === 0) return EMPTY_ROWS;
+		const rows: string[] = [];
+		for (let index = this.#entries.length - 1; index >= 0; index--) {
+			const entry = this.#entries[index]!;
+			this.#setAllocation(entry.component, Number.MAX_SAFE_INTEGER, this.#lastFrame);
+			const block = trimBlankEdges(entry.component.render(width));
+			if (block.length === 0) continue;
+			if (rows.length > 0) rows.unshift("");
+			rows.unshift(...block);
+			if (rows.length >= cap) break;
+		}
+		return rows.length > cap ? rows.slice(rows.length - cap) : rows;
+	}
+
 	/** Full semantic render used by exports and non-terminal commands. */
 	override render(width: number): readonly string[] {
 		this.#syncEntries();
@@ -445,7 +476,12 @@ export class TranscriptContainer extends Container {
 		for (let index = start; index < end; index++) {
 			const entry = this.#entries[index]!;
 			this.#setAllocation(entry.component, Number.MAX_SAFE_INTEGER, this.#lastFrame);
-			const rendered = this.#renderEntry(entry, width);
+			// Only the range head is sliced by its emitted stable prefix; every other
+			// entry renders whole, so the append-only verification pass (a second
+			// full render of the block's stable prefix) is skipped for them. This
+			// keeps a complete-ledger replay at one render per block.
+			const rendered =
+				index === start ? this.#renderEntry(entry, width) : trimBlankEdges(entry.component.render(width));
 			const emittedRows = index === start ? this.#renderStablePrefix(entry, entry.emitted, width).length : 0;
 			const block = rendered.slice(emittedRows);
 			if (block.length === 0) continue;

@@ -274,14 +274,15 @@ export class AssistantMessageComponent extends Container {
 		super();
 		this.#transcriptBlockFinalized = message !== undefined;
 
-		// Slim cache-invalidation divider, populated above the content when this
-		// turn's request lost the prompt cache (see setCacheInvalidation).
-		this.#markerSlot = new Container();
-		this.addChild(this.#markerSlot);
-
-		// Container for text/thinking content
+		// Container for text/thinking content.
 		this.#contentContainer = new Container();
 		this.addChild(this.#contentContainer);
+
+		// Cache-miss usage arrives only at message end. Keep its divider after
+		// streamed content so rows already emitted to native history remain a
+		// prefix of this append-only block.
+		this.#markerSlot = new Container();
+		this.addChild(this.#markerSlot);
 
 		if (message) {
 			this.updateContent(message);
@@ -289,10 +290,9 @@ export class AssistantMessageComponent extends Container {
 	}
 
 	/**
-	 * Show or clear the slim cache-invalidation divider above this turn. Set at
-	 * `message_end` (live) or during rebuild, once the turn's usage is known and
-	 * compared against the previous turn's cache footprint. Bumps the transcript
-	 * block version so the change repaints even after content finalized.
+	 * Show or clear the trailing cache-invalidation divider. Set at `message_end`
+	 * (live) or during rebuild, once the turn's usage is known and compared
+	 * against the previous turn's cache footprint.
 	 */
 	setCacheInvalidation(info: CacheInvalidation | undefined): void {
 		this.#markerSlot.clear();

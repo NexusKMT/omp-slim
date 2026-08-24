@@ -4,6 +4,7 @@ import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { AssistantThinkingRenderer } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-coding-agent/modes/components/assistant-message";
+import { TranscriptContainer } from "@oh-my-pi/pi-coding-agent/modes/components/transcript-container";
 import { clearMermaidCache } from "@oh-my-pi/pi-coding-agent/modes/theme/mermaid-cache";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { ImageProtocol, setTerminalImageProtocol, TERMINAL, Text } from "@oh-my-pi/pi-tui";
@@ -77,7 +78,28 @@ describe("AssistantMessageComponent append-only transcript rows", () => {
 		expect(component.getTranscriptStableRows().map(row => row.key)).toEqual(semanticRows.map(row => row.key));
 		const wide = component.renderTranscriptStableRows(semanticRows.length, 120);
 		expect(wide.length).toBeLessThan(narrow.length);
-		expect(wideRender.slice(0, wide.length)).toEqual(wide);
+		expect(wideRender.slice(0, wide.length)).toEqual([...wide]);
+	});
+
+	it("appends a late cache-miss marker after emitted stable rows", () => {
+		const component = new AssistantMessageComponent();
+		component.updateContent(
+			createAssistantMessage(
+				"First completed paragraph is deliberately long enough to wrap.\n\nCurrent partial paragraph",
+			),
+			{ transient: true },
+		);
+		const transcript = new TranscriptContainer();
+		transcript.addChild(component);
+		transcript.renderViewport(80, 20, { now: 0, tick: 0 });
+
+		component.setCacheInvalidation({ reprocessedTokens: 50_000 });
+		component.markTranscriptBlockFinalized();
+
+		const batch = transcript.peekFlushBatch(80);
+		const rendered = Bun.stripANSI(batch?.rows.join("\n") ?? "");
+		expect(rendered).toContain("Current partial paragraph");
+		expect(rendered.indexOf("cache miss")).toBeGreaterThan(rendered.indexOf("Current partial paragraph"));
 	});
 
 	it("publishes completed visible thinking blocks through the same stable-row contract", () => {

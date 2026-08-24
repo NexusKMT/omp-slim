@@ -268,7 +268,7 @@ export class Composer implements TerminalFrameProvider {
 		const width = Math.max(1, viewport.columns);
 		const rows = Math.max(0, viewport.rows);
 		const tail = this.#runtimeMounted
-			? this.#renderRoots([...this.#runtimeChildren, this.#statusHost], width)
+			? this.#renderResizeTail(width, rows)
 			: this.#renderRoots([this.#bootstrapInputGap, this.editor, this.#statusHost], width);
 		let header: readonly string[];
 		if (this.#headerRetired) {
@@ -296,6 +296,15 @@ export class Composer implements TerminalFrameProvider {
 	/** Forces every currently eligible finalized prefix to retire before stop. */
 	beginHistoryFlush(): void {
 		this.#historyFlush = true;
+		// A pending replay would re-render and re-stream the entire committed
+		// ledger during shutdown; the terminal already holds that history, so
+		// flush emits only genuinely un-retired rows. An already offered batch
+		// stays valid and is accepted by the flush loop.
+		this.#historyReplayRequested = false;
+		this.#headerReplayPending = false;
+		for (const child of this.#runtimeChildren) {
+			if (child instanceof TranscriptContainer) child.cancelReplay();
+		}
 	}
 
 	#startHistoryReplay(): void {
@@ -383,6 +392,23 @@ export class Composer implements TerminalFrameProvider {
 		const rows: string[] = [];
 		for (const root of roots) rows.push(...root.render(width));
 		return rows;
+	}
+	/**
+	 * Mounted-runtime rows for the transient resize buffer. Only the trailing
+	 * viewport can survive the caller's bottom slice, so the transcript renders
+	 * a bounded tail instead of the full committed ledger, and the chrome above
+	 * it renders only when that tail underfills the screen.
+	 */
+	#renderResizeTail(width: number, rows: number): string[] {
+		const roots = [...this.#runtimeChildren, this.#statusHost];
+		const transcriptIndex = roots.findIndex(root => root instanceof TranscriptContainer);
+		if (transcriptIndex < 0) return this.#renderRoots(roots, width);
+		const transcript = roots[transcriptIndex] as TranscriptContainer;
+		const after = this.#renderRoots(roots.slice(transcriptIndex + 1), width);
+		const transcriptRows = transcript.renderTail(width, Math.max(0, rows - after.length));
+		const pre =
+			transcriptRows.length + after.length >= rows ? [] : this.#renderRoots(roots.slice(0, transcriptIndex), width);
+		return [...pre, ...transcriptRows, ...after];
 	}
 
 	/** Reflow accepted hard rows exactly as the restored terminal buffer will. */
