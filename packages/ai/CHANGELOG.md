@@ -18,6 +18,10 @@
 
 - Fixed Codex WebSocket `slow_down` and rate-limit rejections discarding a valid `previous_response_id` continuation and forcing retries to replay the full context, including when throttling interrupts streamed output.
 
+### Fixed
+
+- Fixed Codex WebSocket continuations replaying full context whenever a turn toggled Fast mode, while preserving strict resets for model, instructions, tools, reasoning, verbosity, and response format changes.
+
 ## [18.0.4] - 2026-08-24
 
 ### Fixed

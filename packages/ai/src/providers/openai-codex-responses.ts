@@ -3470,10 +3470,14 @@ function recordCodexTurnUsageDiagnostics(
 	CODEX_DEBUG && logger.debug("[codex] codex turn diagnostics", { diagnostics: state.stats.lastTurn });
 }
 
+const CODEX_CHAIN_TOP_LEVEL_EXCLUDE_MAP = {
+	service_tier: true,
+};
+
 /**
- * Shape the next websocket turn's request body: when the session's append
- * baseline is intact (same options, strict history prefix), chain via
- * `previous_response_id` + delta-only `input`; otherwise break the chain and
+ * Shape the next websocket turn's request body: when the session's strict
+ * history prefix is intact and request options other than the per-turn
+ * service_tier match, chain via previous_response_id + delta-only input;
  * replay the full transcript. SSE requests never chain — the HTTP endpoint's
  * request schema has no `previous_response_id` (codex-rs carries it only on
  * websocket `response.create` frames) and strict gateway validators 400 it
@@ -3485,7 +3489,12 @@ function buildCodexChainedRequestBody(
 ): RequestBody {
 	const chainable = state?.canAppend === true;
 	const appendInput = chainable
-		? buildResponsesDeltaInput(state.lastRequest, state.lastResponseItems, requestBody)
+		? buildResponsesDeltaInput(
+				state.lastRequest,
+				state.lastResponseItems,
+				requestBody,
+				CODEX_CHAIN_TOP_LEVEL_EXCLUDE_MAP,
+			)
 		: null;
 	if (appendInput && appendInput.length > 0 && state?.lastResponseId) {
 		return { ...requestBody, previous_response_id: state.lastResponseId, input: appendInput };
