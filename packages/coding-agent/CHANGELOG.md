@@ -17,6 +17,7 @@
 
 - Standardized completed edit results on hashline-style path and numbered-preview output across edit modes.
 - Made `omp git` stream file contents into an off-thread native differ, paint complete lines immediately, progressively apply syntax highlighting, and defer large commit file statistics until after the first interactive frame.
+- Documented that `retry.maxDelayMs: 0` disables the fail-fast wait ceiling in `docs/settings.md` and the settings UI, so a provider-stated quota reset can sleep through to auto-resume instead of failing the turn.
 - Added `r` shortcut to refresh the git state
 - Added `s`/`u` shortcuts to stage/unstage files directly from the sidebar
 - Made `space` (and `s`/`u`) in the git TUI sidebar stage/unstage whole directories; `enter`/`←`/`→` keep folding the tree
