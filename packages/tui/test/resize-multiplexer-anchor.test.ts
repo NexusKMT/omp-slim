@@ -196,11 +196,13 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 	});
 
 	it("preserves modified F3 input while a probe tag is outstanding", () => {
-		// Shift+F3 encodes as CSI 1;2R — byte-identical to a CPR for row 1,
-		// column 2. Tag columns start at 17, so an F3-shaped sequence with no
-		// live tag must pass through to input untouched instead of being
-		// stripped as a terminal report, and must not resolve the probe. The
-		// probe's real reply afterwards still resolves normally.
+		// Modified F3 encodes as CSI 1;<mod>R with modifier params spanning
+		// 2-256 once lock-state bits (caps 64, num 128) are included — e.g.
+		// Shift+F3 is CSI 1;2R and F3 with Caps Lock is CSI 1;65R. Row-1
+		// sequences that match no live tag must pass through to input
+		// untouched instead of being stripped as terminal reports, and must
+		// not resolve the probe. The probe's real reply afterwards still
+		// resolves normally.
 		const { terminal, tui, renderScheduler, writes } = startRig();
 		const received: string[] = [];
 		tui.addInputListener(data => {
@@ -210,9 +212,13 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		terminal.resize(40, 6);
 		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
 		writes.length = 0;
-		terminal.sendInput("\x1b[1;2R"); // Shift+F3, not a reply to any live tag
+		terminal.sendInput("\x1b[1;2R"); // Shift+F3
+		terminal.sendInput("\x1b[1;65R"); // F3 with Caps Lock
+		terminal.sendInput("\x1b[1;129R"); // F3 with Num Lock
 		expect(writes.join("")).not.toMatch(/\x1b\[\d+;1H/);
 		expect(received.join("")).toContain("\x1b[1;2R");
+		expect(received.join("")).toContain("\x1b[1;65R");
+		expect(received.join("")).toContain("\x1b[1;129R");
 		terminal.sendInput("\x1b[4;17R"); // the probe's real reply
 		const repaint = writes.join("");
 		const cup = repaint.match(/\x1b\[(\d+);1H/);

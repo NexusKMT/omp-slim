@@ -1754,9 +1754,15 @@ export class TUI extends Container {
 			if (!match || match.index === undefined) break;
 			const row = Number(match[1]);
 			const column = Number(match[2]);
-			if (!this.#cprColumnTags.has(column) && row === 1 && column >= 2 && column <= 16) {
-				// CSI 1;2R..1;16R with no live tag is modified F3 (tag columns
-				// start at 17): leave the keystroke for the focused component.
+			if (!this.#cprColumnTags.has(column) && row === 1 && column >= 2) {
+				// CSI 1;<mod>R with no live tag is modified F3: the modifier
+				// parameter spans 2-256 once the lock-state bits (caps 64,
+				// num 128) and hyper/meta are included, so no practical tag
+				// range escapes it entirely. Anything row-1 we did not tag is
+				// treated as a keystroke and left for the focused component;
+				// a tagged column hit by a hyper/meta-modified F3 (params
+				// 17-64, practically unused) is still gated by the epoch check
+				// below.
 				searchFrom += match.index + match[0].length;
 				continue;
 			}
