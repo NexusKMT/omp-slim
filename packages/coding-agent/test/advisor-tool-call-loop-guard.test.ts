@@ -58,16 +58,19 @@ describe("advisor tool-call loop guard", () => {
 	 * Live advisor agent built through the real `SessionAdvisors` path, driven by
 	 * a stream that repeats one identical failing tool call forever.
 	 */
-	function createAdvisor(guardSettings: Record<string, unknown>): { advisor: Agent; contexts: Context[] } {
+	function createAdvisor(
+		guardSettings: Record<string, unknown>,
+		maxRepeatedTurns = 8,
+	): { advisor: Agent; contexts: Context[] } {
 		const primaryMock = createMockModel({ provider: "anthropic", responses: [{ content: ["primary complete"] }] });
 		const advisorMock = createMockModel({ provider: "anthropic" });
 		const contexts: Context[] = [];
 		let turn = 0;
 		const advisorStreamFn: typeof advisorMock.stream = (_model, context) => {
 			contexts.push(context);
-			// Stop once the corrective lands so a broken guard fails on the
-			// assertion rather than looping until the test times out.
-			const repeating = turn < 8 && !JSON.stringify(context.messages).includes("tool_call_loop_detected");
+			// Deliberately ignore the corrective. The enabled guard must hard-stop
+			// this stream; the finite ceiling keeps the disabled control bounded.
+			const repeating = turn < maxRepeatedTurns;
 			turn++;
 			const message: AssistantMessage = repeating
 				? {
@@ -120,25 +123,28 @@ describe("advisor tool-call loop guard", () => {
 	}
 
 	it("redirects the advisor's own repeated tool call and reaches its next request", async () => {
-		const { advisor, contexts } = createAdvisor({
-			"model.toolCallLoopGuard.enabled": true,
-			"model.toolCallLoopGuard.threshold": 3,
-		});
+		const { advisor, contexts } = createAdvisor(
+			{
+				"model.toolCallLoopGuard.enabled": true,
+				"model.toolCallLoopGuard.threshold": 3,
+			},
+			20,
+		);
 
 		await advisor.prompt("review the current update");
 
-		// Threshold 3 => two clean turns, the third trips the bound.
-		const redirects = contexts.filter(context =>
-			JSON.stringify(context.messages).includes("tool_call_loop_detected"),
-		);
-		expect(redirects).toHaveLength(1);
-		const delivered = JSON.stringify(redirects[0]!.messages);
+		// First threshold injects one corrective; ignoring it re-arms the
+		// detector, and the second threshold aborts. The agent loop observes the
+		// abort after one already-scheduled request, bounding twenty repeats at 7.
+		expect(contexts).toHaveLength(7);
+		const delivered = JSON.stringify(contexts[3]!.messages);
 		expect(delivered).toContain("You called `read` 3 consecutive times");
 		expect(delivered).toContain("ENOENT: no such file or directory");
-		// The advisor's context uses the default LLM converter, so the corrective
-		// only survives as an LLM-native role.
+		const redirects = advisor.state.messages.filter(
+			message => message.role === "user" && JSON.stringify(message.content).includes("tool_call_loop_detected"),
+		);
+		expect(redirects).toHaveLength(1);
 		expect(advisor.state.messages.filter(message => message.role === "custom")).toHaveLength(0);
-		expect(advisor.state.messages.at(-1)?.role).toBe("assistant");
 	});
 
 	it("leaves the advisor unbounded when the shared loop guard is disabled", async () => {

@@ -883,6 +883,7 @@ export class SessionAdvisors {
 				name: advisorName,
 				liveMessages: () => advisorAgent.state.messages,
 				appendMessage: message => advisorAgent.appendMessage(message),
+				abort: reason => advisorAgent.abort(reason),
 			});
 			advisorAgent.setOnTurnEnd((messages, signal, context) => {
 				if (signal?.aborted) return;
@@ -892,6 +893,7 @@ export class SessionAdvisors {
 			const advisorAgentFacade: AdvisorAgent = {
 				prompt: async input => {
 					let quarantined: string | undefined;
+					advisorLoopGuard.reset();
 					try {
 						quarantinedAdvisorOutput = undefined;
 						// Multi-message input (candidate 4) must serialize deterministically
@@ -914,6 +916,7 @@ export class SessionAdvisors {
 				},
 				abort: reason => advisorAgent.abort(reason),
 				reset: () => {
+					advisorLoopGuard.reset();
 					advisorAgent.reset();
 					appendOnlyContext.log.clear();
 				},

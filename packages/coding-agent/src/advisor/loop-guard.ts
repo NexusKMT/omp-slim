@@ -14,6 +14,8 @@ export interface AdvisorLoopGuardHost {
 	liveMessages(): AgentMessage[];
 	/** Appends to the advisor agent's live context. */
 	appendMessage(message: AgentMessage): void;
+	/** Stops the current advisor update after it ignores one corrective. */
+	abort(reason: Error): void;
 }
 
 /**
@@ -30,11 +32,18 @@ export class AdvisorLoopGuard {
 	readonly #host: AdvisorLoopGuardHost;
 	#guard: ToolCallLoopGuard | undefined;
 	#guardSettingsKey: string | undefined;
+	#redirectIssued = false;
 
 	constructor(host: AdvisorLoopGuardHost) {
 		this.#host = host;
 	}
 
+	/** Clear detector and escalation state at an advisor update/context boundary. */
+	reset(): void {
+		this.#guard = undefined;
+		this.#guardSettingsKey = undefined;
+		this.#redirectIssued = false;
+	}
 	/** Records one completed advisor turn and injects a redirect when calls repeat. */
 	recordTurn(messages: AgentMessage[], context: AgentTurnEndContext | undefined): void {
 		if (context?.message.role !== "assistant") return;
@@ -43,11 +52,26 @@ export class AdvisorLoopGuard {
 			toolResults: context.toolResults,
 		});
 		if (!detection) return;
+		if (this.#redirectIssued) {
+			logger.warn("advisor ignored tool-call loop redirect; aborting update", {
+				advisor: this.#host.name,
+				toolName: detection.toolName,
+				count: detection.count,
+			});
+			this.#host.abort(new Error(`Advisor repeated ${detection.toolName} after a loop redirect`));
+			this.reset();
+			return;
+		}
 		logger.warn("advisor tool-call loop detected", {
 			advisor: this.#host.name,
 			toolName: detection.toolName,
 			count: detection.count,
 		});
+		this.#redirectIssued = true;
+		// Re-arm after the first corrective. If it is ignored, the same bound
+		// trips again and hard-stops this update instead of running forever.
+		this.#guard = undefined;
+		this.#guardSettingsKey = undefined;
 		// A `user` message, not the primary's custom one: the advisor agent runs
 		// the default LLM converter, which keeps only LLM-native roles — a custom
 		// message would be dropped before the request and correct nothing.
@@ -66,8 +90,7 @@ export class AdvisorLoopGuard {
 
 	#activeGuard(): ToolCallLoopGuard | undefined {
 		if (this.#host.settings.get("model.toolCallLoopGuard.enabled") !== true) {
-			this.#guard = undefined;
-			this.#guardSettingsKey = undefined;
+			this.reset();
 			return undefined;
 		}
 		const threshold = this.#host.settings.get("model.toolCallLoopGuard.threshold");
