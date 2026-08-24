@@ -51,3 +51,25 @@ test("legacy extension analysis persists and reads its SQLite parse cache", asyn
 	// the deliberately altered persisted row instead of parsing the source again.
 	expect(await runProbe(cacheRoot)).toBe('import value from "./dependency.js";\n');
 });
+
+test("legacy extension parse cache opens in WAL mode (#9549)", async () => {
+	const tempDir = TempDir.createSync("@legacy-pi-extension-cache-wal-");
+	tempDirs.push(tempDir);
+	const cacheRoot = tempDir.path();
+	await fs.mkdir(path.join(cacheRoot, "omp"), { recursive: true });
+
+	await runProbe(cacheRoot);
+
+	// WAL is persisted in the db header, so a fresh connection reports it. The
+	// default delete-journal mode serialized cache writes behind per-entry
+	// journal create/delete + fsync and blocked startup for ~20s under
+	// concurrent omp processes.
+	const cachePath = path.join(cacheRoot, "omp", "cache", "legacy-pi-extension-cache.db");
+	const db = new Database(cachePath);
+	try {
+		const mode = db.query<{ journal_mode: string }, []>("PRAGMA journal_mode").get()?.journal_mode;
+		expect(mode).toBe("wal");
+	} finally {
+		db.close();
+	}
+});

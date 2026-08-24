@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed startup blocking the event loop for ~20s on Linux with concurrent sessions: the legacy Pi extension parse cache now uses SQLite WAL journaling instead of per-entry journal create/delete + fsync churn ([#9549](https://github.com/can1357/oh-my-pi/issues/9549)).
+
 ## [18.0.3] - 2026-08-23
 
 ### Added

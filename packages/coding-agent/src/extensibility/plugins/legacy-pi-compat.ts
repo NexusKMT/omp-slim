@@ -8,6 +8,7 @@ import * as url from "node:url";
 import type { ParseResult, ParserPlugin } from "@babel/parser";
 import { parse as parseBabel } from "@babel/parser";
 import {
+	getDbBusyTimeoutMs,
 	getLegacyPiExtensionCacheDbPath,
 	isCompiledBinary,
 	logger,
@@ -581,7 +582,14 @@ function getExtensionParseCacheDb(): Database | null {
 		}
 		fs.mkdirSync(path.dirname(cachePath), { recursive: true });
 		const db = new Database(cachePath, { create: true });
-		db.run("PRAGMA busy_timeout = 50");
+		// Install the busy handler BEFORE any lock-taking statement (incl.
+		// `PRAGMA journal_mode=WAL`, which takes an exclusive lock during WAL
+		// recovery). See #2421. WAL + synchronous=NORMAL avoids the per-entry
+		// journal create/delete + fsync churn that serialized this cache behind
+		// concurrent omp startups and blocked the event loop for ~20s (#9549).
+		db.run(`PRAGMA busy_timeout = ${getDbBusyTimeoutMs()}`);
+		db.run("PRAGMA journal_mode=WAL");
+		db.run("PRAGMA synchronous=NORMAL");
 		db.run(
 			"CREATE TABLE IF NOT EXISTS extension_parse_cache (cache_key TEXT PRIMARY KEY, source_type TEXT NOT NULL, [references] TEXT NOT NULL, commonjs_named_exports TEXT NOT NULL, commonjs_reexport_specifiers TEXT NOT NULL)",
 		);
