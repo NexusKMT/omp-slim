@@ -27,8 +27,9 @@ import type { ChangedFile, GitModel } from "./state";
 
 /** Actions the sidebar raises to the root component. */
 export type SidebarAction =
-	| { type: "stage"; file?: ChangedFile }
-	| { type: "unstage"; file?: ChangedFile }
+	/** `selection` omitted → whole tree; `label` names the target for the status line. */
+	| { type: "stage"; selection?: { files: ChangedFile[]; label: string } }
+	| { type: "unstage"; selection?: { files: ChangedFile[]; label: string } }
 	| { type: "commit"; message: string; amend: boolean; stageAll: boolean };
 
 type FileTarget = { kind: "file"; file: ChangedFile } | { kind: "dir"; key: string };
@@ -223,7 +224,15 @@ export class Sidebar {
 
 	/** Re-sync selection after a model refresh; returns the file to show. */
 	reconcile(): ChangedFile | null {
+		const previousTargets = this.#targets;
+		const previousKey = this.#selectedKey;
 		this.#rebuildTargets();
+		// Staging/unstaging removes the selected row from its section; land on
+		// the nearest surviving file/dir row instead of falling back to the top.
+		if (previousKey !== undefined && !this.#targetByKey.has(previousKey)) {
+			const survivor = this.#nearestSurvivor(previousTargets, previousKey);
+			if (survivor) this.#selectedKey = targetKey(survivor);
+		}
 		const target = this.selected;
 		if (target) this.#selectedKey = targetKey(target);
 		if (target?.kind === "file") return target.file;
@@ -232,6 +241,25 @@ export class Sidebar {
 			return firstFile.file;
 		}
 		return firstFile?.kind === "file" ? firstFile.file : null;
+	}
+	/** Closest file/dir row (in previous display order) that still exists after a rebuild. */
+	#nearestSurvivor(previousTargets: readonly Target[], previousKey: string): Target | undefined {
+		const index = previousTargets.findIndex(target => targetKey(target) === previousKey);
+		if (index < 0) return undefined;
+		const survivorAt = (i: number): Target | undefined => {
+			const candidate = previousTargets[i];
+			if (candidate.kind !== "file" && candidate.kind !== "dir") return undefined;
+			return this.#targetByKey.get(targetKey(candidate));
+		};
+		for (let i = index + 1; i < previousTargets.length; i++) {
+			const survivor = survivorAt(i);
+			if (survivor) return survivor;
+		}
+		for (let i = index - 1; i >= 0; i--) {
+			const survivor = survivorAt(i);
+			if (survivor) return survivor;
+		}
+		return undefined;
 	}
 
 	/** Section entries in display order: tree dirs + files, or flat files. */
@@ -372,8 +400,8 @@ export class Sidebar {
 	#activate(target: Target): void {
 		switch (target.kind) {
 			case "file": {
-				if (target.file.area === "unstaged") this.#onAction({ type: "stage", file: target.file });
-				else if (target.file.area === "staged") this.#onAction({ type: "unstage", file: target.file });
+				const action = this.#stageActionFor(target);
+				if (action) this.#onAction(action);
 				break;
 			}
 			case "dir": {
@@ -404,6 +432,27 @@ export class Sidebar {
 				this.#submitCommit();
 				break;
 		}
+	}
+
+	/** Stage/unstage action for a file or dir row; dirs batch every file underneath. */
+	#stageActionFor(target: FileTarget): SidebarAction | null {
+		if (target.kind === "file") {
+			const selection = { files: [target.file], label: target.file.path };
+			if (target.file.area === "unstaged") return { type: "stage", selection };
+			if (target.file.area === "staged") return { type: "unstage", selection };
+			return null;
+		}
+		// Dir keys are `<section>:<path from repo root>` (see #fileEntries).
+		const sep = target.key.indexOf(":");
+		const section = target.key.slice(0, sep);
+		if (section !== "unstaged" && section !== "staged") return null;
+		const dirPath = target.key.slice(sep + 1);
+		const files = (section === "unstaged" ? this.#model.unstaged : this.#model.staged).filter(file =>
+			file.path.startsWith(`${dirPath}/`),
+		);
+		if (files.length === 0) return null;
+		const selection = { files, label: `${dirPath}/` };
+		return section === "unstaged" ? { type: "stage", selection } : { type: "unstage", selection };
 	}
 
 	#toggleAmend(): void {
@@ -559,13 +608,15 @@ export class Sidebar {
 			// Enter opens a file (focus the diff); space/s/u do the staging.
 			if (target.kind === "file") this.#onFocusDiff();
 			else this.#activate(target);
-		} else if (data === " " && target?.kind !== undefined && (target.kind === "file" || target.kind === "dir"))
-			this.#activate(target);
-		else if (data === "s" && target?.kind === "file" && target.file.area === "unstaged")
-			this.#onAction({ type: "stage", file: target.file });
-		else if (data === "u" && target?.kind === "file" && target.file.area === "staged")
-			this.#onAction({ type: "unstage", file: target.file });
-		else if (data === "t") {
+		} else if (data === " " && (target?.kind === "file" || target?.kind === "dir")) {
+			// Space stages/unstages the row — folders act on every file underneath.
+			// Enter/click toggle dir collapse; ←/→ fold explicitly.
+			const action = this.#stageActionFor(target);
+			if (action) this.#onAction(action);
+		} else if ((data === "s" || data === "u") && (target?.kind === "file" || target?.kind === "dir")) {
+			const action = this.#stageActionFor(target);
+			if (action?.type === (data === "s" ? "stage" : "unstage")) this.#onAction(action);
+		} else if (data === "t") {
 			this.viewStyle = this.viewStyle === "path" ? "tree" : "path";
 			this.#treeVersion++;
 			this.#requestRender();
