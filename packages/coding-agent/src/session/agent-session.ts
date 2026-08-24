@@ -2544,6 +2544,9 @@ export class AgentSession {
 			this.#prunedTerminalRefusal = undefined;
 			this.#emitRunState("running");
 		}
+		// This must happen before event fan-out awaits: streamed tool-call deltas
+		// can otherwise queue validation that a delayed turn-start reset erases.
+		if (event.type === "turn_start") this.#streamingEditGuard.reset();
 		// Step the mid-run todo counter synchronously, BEFORE any await in this
 		// handler. The agent loop's next-turn `getAsideMessages` poll can run
 		// before queued microtasks drain, so `#takeMidRunTodoNudge` MUST see the
@@ -2684,10 +2687,7 @@ export class AgentSession {
 			}
 		}
 
-		if (event.type === "turn_start") {
-			this.#streamingEditGuard.reset();
-			this.#ttsr.onTurnStart();
-		}
+		if (event.type === "turn_start") this.#ttsr.onTurnStart();
 
 		if (event.type === "turn_end") this.#ttsr.onTurnEnd();
 		// Finalize the tool-choice queue's in-flight yield after tools have executed.
