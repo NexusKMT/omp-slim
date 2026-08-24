@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.4] - 2026-08-24
+
 ### Changed
 
 - Improved performance in append-only context mode by memoizing message serialization, keeping per-call sync overhead flat as conversations grow.

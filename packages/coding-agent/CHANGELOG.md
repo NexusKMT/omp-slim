@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.4] - 2026-08-24
+
 ### Added
 
 - Added the `omp git` command (and `/git` slash command): an interactive, fullscreen repository TUI featuring a split/inline/hunk diff viewer with minimap scrollbar, syntax highlighting, a staging sidebar with line-level staging, commit composer with amend support, and author avatars. Supports keyboard navigation, full mouse interaction, and pinning views to specific commits via `omp git <revision>`.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.4] - 2026-08-24
+
 ### Changed
 
 - Significantly improved streaming Markdown rendering performance by caching unchanged rows, resuming boundary walks, and inspecting only text deltas for guard scans and OSC 8 normalization.
