@@ -26,21 +26,38 @@ function sanitizeToolType(toolType: string): string {
 }
 
 /**
- * Persist an artifact only when the filesystem confirms the complete payload is readable.
+ * Persist an artifact only when the filesystem confirms the complete payload is
+ * readable, then swap it into place atomically.
+ *
+ * Content is staged to a temporary sibling and verified (byte count, on-disk
+ * size, readability) before an atomic `rename` publishes it. `agent://<id>`
+ * discovers `${id}.md` by scanning the artifacts directory rather than reading
+ * `result.outputPath`, so a direct in-place write that fell short would leave a
+ * truncated file resolvable as incomplete output and a failed follow-up write
+ * would destroy the prior valid artifact. Staging keeps both hazards out: on
+ * any failure the temp file is removed and the existing artifact at `path` is
+ * untouched.
  *
  * Returns the verified UTF-8 byte count.
  */
 export async function writeArtifact(path: string, content: string): Promise<number> {
 	const expectedBytes = Buffer.byteLength(content);
-	const writtenBytes = await Bun.write(path, content);
-	if (writtenBytes !== expectedBytes) {
-		throw new Error(`Artifact write incomplete: wrote ${writtenBytes} of ${expectedBytes} bytes`);
+	const tempPath = `${path}.tmp-${crypto.randomUUID()}`;
+	try {
+		const writtenBytes = await Bun.write(tempPath, content);
+		if (writtenBytes !== expectedBytes) {
+			throw new Error(`Artifact write incomplete: wrote ${writtenBytes} of ${expectedBytes} bytes`);
+		}
+		const file = Bun.file(tempPath);
+		if (file.size !== expectedBytes) {
+			throw new Error(`Artifact size mismatch: found ${file.size} of ${expectedBytes} bytes`);
+		}
+		await file.slice(0, Math.min(expectedBytes, 1)).arrayBuffer();
+		await fs.rename(tempPath, path);
+	} catch (error) {
+		await fs.rm(tempPath, { force: true });
+		throw error;
 	}
-	const file = Bun.file(path);
-	if (file.size !== expectedBytes) {
-		throw new Error(`Artifact size mismatch: found ${file.size} of ${expectedBytes} bytes`);
-	}
-	await file.slice(0, Math.min(expectedBytes, 1)).arrayBuffer();
 	return expectedBytes;
 }
 
