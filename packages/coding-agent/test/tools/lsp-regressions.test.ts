@@ -3595,6 +3595,36 @@ describe("lsp regressions", () => {
 		}
 	});
 
+	it("rename_file treats a dangling destination symlink as an existing path", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-rename-dangling-dest-");
+		try {
+			const sourceFile = path.join(tempDir.path(), "old.ts");
+			const destFile = path.join(tempDir.path(), "dangling.ts");
+			await Bun.write(sourceFile, "export const a = 1;\n");
+			const sourceStat = await fs.promises.stat(sourceFile);
+			const realLstat = fs.promises.lstat;
+			const lstatSpy = vi.spyOn(fs.promises, "lstat").mockImplementation((async (target: fs.PathLike) => {
+				if (target === destFile) return sourceStat;
+				return await realLstat(target);
+			}) as typeof fs.promises.lstat);
+
+			const result = await new LspTool(makeLspSession(tempDir.path())).execute("rename-dangling-dest", {
+				action: "rename_file",
+				file: sourceFile,
+				new_name: destFile,
+				timeout: 5,
+			});
+
+			expect(textResult(result)).toContain("destination already exists: dangling.ts");
+			expect(lstatSpy).toHaveBeenCalledWith(destFile);
+			expect(fs.existsSync(sourceFile)).toBe(true);
+			expect(fs.existsSync(destFile)).toBe(false);
+		} finally {
+			vi.restoreAllMocks();
+			tempDir.removeSync();
+		}
+	});
+
 	it("shortens an outside-cwd Windows home path before separator normalization", async () => {
 		if (!lspHomeOverride) throw new Error("Expected isolated home");
 		const cwd = path.join(lspHomeOverride, "project");

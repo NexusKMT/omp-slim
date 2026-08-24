@@ -502,7 +502,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 			}
 
 			try {
-				await fs.promises.stat(dest);
+				await fs.promises.lstat(dest);
 				return {
 					content: [
 						{
