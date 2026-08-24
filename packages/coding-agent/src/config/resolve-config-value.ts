@@ -4,11 +4,7 @@
  * Note: command execution is async to avoid blocking the TUI.
  */
 
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
-import { $envExact } from "@oh-my-pi/pi-utils";
-
-const execAsync = promisify(exec);
+import { $envExact, $which, ptree } from "@oh-my-pi/pi-utils";
 
 /** Cache for successful shell command results (persists for process lifetime). */
 const commandResultCache = new Map<string, string>();
@@ -56,17 +52,26 @@ async function executeCommand(commandConfig: string): Promise<string | undefined
 	return await promise;
 }
 
-async function runShellCommand(command: string, timeoutMs: number): Promise<string | undefined> {
+/**
+ * Run one `!command` config-value resolution and capture stdout.
+ *
+ * Exported for testing (timeout and tree-kill semantics).
+ *
+ * ptree spawns through Bun with piped-only stdio, so descriptors this process
+ * holds open — e.g. a credential a launcher passed us on a private fd — cannot
+ * cross into the command, matching the models.yml apiKey resolver's isolation
+ * (model-config-values.ts). Its native terminate() still kills the whole
+ * descendant tree when the timeout fires, so a credential helper that forked
+ * background work cannot outlive its budget, and stderr is drained to a
+ * truncated tail rather than mixed into the captured value.
+ */
+export async function runShellCommand(command: string, timeoutMs: number): Promise<string | undefined> {
 	try {
-		// child_process#exec spawns the command with stdio pipes only, so the
-		// child cannot read descriptors this process holds open — e.g. a
-		// credential a launcher passed us on a private fd. The previous
-		// executeShell() path ran the command through the natives brush shell,
-		// whose children inherit every inheritable descriptor. exec also
-		// matches the models.yml `!command` resolver (model-config-values.ts),
-		// which already uses child_process, and captures stdout only like it.
-		const { stdout } = await execAsync(command, { timeout: timeoutMs, encoding: "utf8", windowsHide: true });
-		const trimmed = stdout.trim();
+		const cmd =
+			process.platform === "win32" ? ["cmd.exe", "/d", "/s", "/c", command] : [$which("sh") ?? "sh", "-c", command];
+		const result = await ptree.exec(cmd, { timeout: timeoutMs, allowNonZero: true, allowAbort: true });
+		if (!result.ok) return undefined;
+		const trimmed = result.stdout.trim();
 		return trimmed.length > 0 ? trimmed : undefined;
 	} catch {
 		return undefined;

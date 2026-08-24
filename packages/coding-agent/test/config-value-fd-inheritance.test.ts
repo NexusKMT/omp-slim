@@ -1,29 +1,31 @@
 /**
  * `!command` config values must not leak inherited file descriptors into the
- * credential-resolving child.
+ * credential-resolving child, and a timed-out command must not leave
+ * descendants running.
  *
  * A launcher can legitimately hand omp an open descriptor (for example a
  * credential bundle) that is meant to stay single-consumer. The child spawned
  * for `auth.broker.url` / header `!command` resolution used to run through the
  * natives brush shell (executeShell), whose children inherit every inheritable
  * descriptor; the models.yml apiKey resolver (execSync) already spawned with
- * stdio pipes only. The fix converges the config-value path on the same
- * child_process primitive.
+ * stdio pipes only. The fix converges the config-value path on ptree, which
+ * keeps piped-only stdio while preserving executeShell's process-tree
+ * termination on timeout.
  *
- * Discriminating oracle: an external helper script whose body is `cat <&3`
- * — it succeeds only when fd 3 survived into the resolution child. Red
- * before the fix (the canary content resolves as the value), green after (the
- * helper's dup fails, the command exits non-zero, resolveConfigValue returns
- * undefined). No /proc dependency, so the oracle discriminates on every
- * non-Windows platform. (brush itself rejects `<&3` in the command string
- * while still passing inherited fds through to external children, so the
- * oracle must be a script, not an inline redirection.)
+ * Oracle notes: the fd oracle must be an external helper script whose body is
+ * `cat <&3` — brush rejects inline `<&3` in the command string while still
+ * passing inherited fds to external children. A positive control runs first so
+ * the fd assertion cannot pass vacuously (e.g. if the resolver stopped
+ * executing commands at all). The tree-kill oracle mirrors the contract pinned
+ * by packages/natives/test/native.test.ts for executeShell. No /proc
+ * dependency, so both oracles discriminate on every non-Windows platform.
  */
 import { afterEach, expect, test } from "bun:test";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import { runShellCommand } from "../src/config/resolve-config-value";
 
 const resolverUrl = pathToFileURL(path.join(import.meta.dir, "../src/config/resolve-config-value.ts")).href;
 
@@ -49,10 +51,17 @@ test.skipIf(process.platform === "win32")(
 		try {
 			// The resolver must load in a child process: fd inheritance only exists
 			// across a real exec boundary, so the probe runs via --eval in a spawned
-			// bun (same pattern as cli-provider-api-keys.test.ts).
+			// bun (same pattern as cli-provider-api-keys.test.ts). The positive
+			// control asserts command execution works through the same resolver
+			// before the fd case requires `undefined`.
 			const script = `import { resolveConfigValue } from ${JSON.stringify(resolverUrl)};
+const control = await resolveConfigValue("!echo positive-control-ok");
+console.log(control === "positive-control-ok" ? "CONTROL-OK" : "CONTROL-BAD:" + control);
 const value = await resolveConfigValue("!${spyPath}");
-console.log(value === undefined ? "RESOLVED-UNDEFINED" : "LEAKED:" + value);`;
+console.log(value === undefined ? "RESOLVED-UNDEFINED" : "LEAKED:" + value);
+// ptree's timeout race leaves a pending Bun.sleep timer after resolution;
+// leave the probe deterministically instead of waiting out the timer.
+process.exit(0);`;
 			const proc = Bun.spawn({
 				cmd: [process.execPath, "--eval", script],
 				cwd: process.cwd(),
@@ -61,9 +70,33 @@ console.log(value === undefined ? "RESOLVED-UNDEFINED" : "LEAKED:" + value);`;
 			});
 			const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
 			expect(exitCode, stdout).toBe(0);
-			expect(stdout.trim()).toBe("RESOLVED-UNDEFINED");
+			const lines = stdout.trim().split("\n");
+			expect(lines[0], "positive control: commands must still resolve").toBe("CONTROL-OK");
+			expect(lines[1], "fd oracle: the canary must not resolve").toBe("RESOLVED-UNDEFINED");
 		} finally {
 			fs.closeSync(canaryFd);
 		}
+	},
+);
+
+test.skipIf(process.platform === "win32")(
+	"a timed-out !command leaves no descendant writing after the kill",
+	async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-config-treekill-"));
+		roots.push(root);
+		const marker = path.join(root, "marker");
+
+		// The backgrounded sleep must never get to write: the timeout kills the
+		// whole tree, not just the shell (parity with the executeShell contract).
+		const result = await runShellCommand(`{ sleep 0.4; echo done > "${marker}"; } & sleep 10`, 150);
+		expect(result).toBeUndefined();
+		// Real subprocess timing: fake timers cannot advance a child's clock, and
+		// the oracle is "the marker never appears" — poll so a leak fails fast
+		// instead of paying the full window on green.
+		const deadline = Date.now() + 700;
+		while (Date.now() < deadline && !fs.existsSync(marker)) {
+			await Bun.sleep(50);
+		}
+		expect(fs.existsSync(marker), "orphaned descendant wrote the marker after the timeout").toBe(false);
 	},
 );

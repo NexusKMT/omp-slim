@@ -23,7 +23,7 @@
 - Fixed resize and display replays, ensuring stable rendering and full transcript flushing on agent shutdown
 - Fixed fast tool completions leaving a permanent running summary that blocked transcript retirement and squeezed later tool output.
 - Fixed `omp git` hunk navigation (`alt+↓`/`alt+↑`) appearing to do nothing while the file sidebar had focus: the diff cursor band now stays visible (dimmed) when the pane is unfocused.
-- Fixed `!command` config values (`auth.broker.url`, `auth.broker.token`, custom headers) passing inherited file descriptors — including credentials a launcher handed omp on a private handle — through to the resolution command; commands now run under the platform shell, matching models.yml `apiKey` commands ([#9640](https://github.com/can1357/oh-my-pi/pull/9640) by [@ghosty-11](https://github.com/ghosty-11))
+- Fixed `!command` config values (`auth.broker.url`, `auth.broker.token`, custom headers) passing inherited file descriptors to the resolution command; `!command` values now run under the platform shell like models.yml `apiKey` commands ([#9640](https://github.com/can1357/oh-my-pi/pull/9640) by [@ghosty-11](https://github.com/ghosty-11))
 
 ## [18.0.4] - 2026-08-24
 
