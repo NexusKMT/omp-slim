@@ -76,10 +76,6 @@ describe("Yolo-Auto provider discovery", () => {
 	});
 
 	test("inherits reasoning and context for models other providers already bundle", async () => {
-		// If Yolo-Auto starts serving a model that has no yolo-auto bundled
-		// reference (e.g. deepseek-v4-flash), the global reference index must
-		// supply the metadata — otherwise the model surfaces with reasoning
-		// off, text-only input, and null context.
 		const fetch: FetchImpl = async () =>
 			new Response(
 				JSON.stringify({
@@ -100,6 +96,31 @@ describe("Yolo-Auto provider discovery", () => {
 			contextWindow: 1048576,
 		});
 		expect(flash?.thinking?.efforts).toEqual([Effort.Low, Effort.High, Effort.Max]);
+	});
+
+	test("overlays flat-rate cost and no-store surface on foreign references", async () => {
+		// gpt-4o has no yolo-auto bundled reference, so the global index
+		// supplies OpenAI's token pricing and store-capable surface. The
+		// provider-wide constraints must win: Yolo is flat-rate and its
+		// documented surface rejects the `store` param.
+		const fetch: FetchImpl = async () =>
+			new Response(
+				JSON.stringify({
+					data: [
+						{ id: "qwen3.8-27b", object: "model" },
+						{ id: "gpt-4o", object: "model" },
+					],
+				}),
+				{ status: 200 },
+			);
+		const models = await yoloAutoModelManagerOptions({ apiKey: "yolo-test-key", fetch }).fetchDynamicModels?.();
+		const gpt4o = models?.find(model => model.id === "gpt-4o");
+
+		expect(gpt4o).toMatchObject({
+			provider: "yolo-auto",
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			compat: { supportsStore: false, supportsDeveloperRole: false },
+		});
 	});
 
 	test("returns null when /v1/models rejects the key", async () => {

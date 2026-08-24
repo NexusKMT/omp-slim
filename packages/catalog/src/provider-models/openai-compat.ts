@@ -4807,6 +4807,33 @@ export interface YoloAutoModelManagerConfig {
 }
 
 /**
+ * Map a discovered entry onto its reference, then re-apply Yolo-Auto's
+ * provider-wide wire constraints. A model that only exists in another
+ * provider's bundle (e.g. `gpt-4o` served via the global reference index)
+ * would otherwise inherit that provider's token pricing and `store`-capable
+ * surface, which the flat-rate Yolo endpoint neither charges nor accepts.
+ */
+function mapYoloAutoModel(
+	entry: OpenAICompatibleModelRecord,
+	defaults: ModelSpec<"openai-completions">,
+	reference: ModelSpec<"openai-completions"> | undefined,
+): ModelSpec<"openai-completions"> {
+	const model = mapWithBundledReference(entry, defaults, reference);
+	if (!reference) {
+		// Bare defaults are already zero-cost with no compat overrides.
+		return model;
+	}
+	return {
+		...model,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		compat: {
+			...model.compat,
+			supportsStore: false,
+			supportsDeveloperRole: false,
+		},
+	};
+}
+/**
  * Yolo-Auto model manager: OpenAI-compatible chat completions at the
  * flat-rate `qwen3.8-27b` endpoint. Live `/v1/models` discovery replaces the
  * bundled seed once a key is stored or present in `YOLO_AUTO_API_KEY`. Models
@@ -4827,7 +4854,7 @@ export function yoloAutoModelManagerOptions(
 			config,
 			requireApiKey: true,
 			mapModel: (entry, defaults, reference) =>
-				mapWithBundledReference(entry, defaults, reference ?? resolveReference(defaults.id)),
+				mapYoloAutoModel(entry, defaults, reference ?? resolveReference(defaults.id)),
 			dynamicModelsAuthoritative: true,
 		}),
 	};
