@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- New `omp git` command: a fullscreen repository TUI with a split/inline/hunk/file diff viewer (minimap scrollbar, word wrap, whitespace-insensitive mode, syntax highlighting, intraline emphasis), a staging sidebar (path or collapsible tree file lists, per-file and per-hunk stage/unstage/discard, shift-selected line staging) and a commit composer with amend support; commit view shows author avatars (Gravatar/GitHub) with an identicon fallback. Full mouse support (click, wheel, minimap seek) plus keyboard navigation. Also available as the `/git` slash command inside interactive sessions (esc exits back to the transcript), and `omp git <revision>`//`/git <revision>` pins the view to one commit.
+
 ### Changed
 
 - Cap streaming markdown renders at the reveal cadence when reveal is caught up; provider deltas accumulate and flush per tick instead of rendering per token.
@@ -10,6 +14,7 @@
 
 ### Fixed
 
+- `!` shell commands on zsh/fish now run in a real PTY: interactive shell startup no longer spews `can't change option: zle`/`monitor` errors or fails gitstatus initialization, and command output keeps its terminal colors in the transcript (same virtual-terminal replay `launch` logs use).
 - Fixed the transcript permanently losing block spacing and compacting every tool call to one line after a stream died mid-message (e.g. a transport drop during a large tool call): the orphaned streaming block no longer jams history retirement, so the live viewport recovers instead of staying in pressure layout until restart.
 - Fixed clean-cutover instructions conflicting with deletion safety by explicitly allowing removal of code made obsolete by the requested cutover.
 - Eval runtime-availability probes (Python/Ruby/Julia) no longer inherit the host stdin handle and are now bounded by the eval call's timeout and abort signal, so a probe that hangs during backend resolution — e.g. the native-Windows inherited-stdin wedge — returns a clear error instead of wedging the whole turn indefinitely ([#9466](https://github.com/can1357/oh-my-pi/issues/9466)).

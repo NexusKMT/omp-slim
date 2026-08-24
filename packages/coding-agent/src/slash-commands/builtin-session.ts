@@ -462,6 +462,17 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		},
 	},
 	{
+		name: "git",
+		icon: "branch",
+		description: "Open the git UI (split diff viewer, staging, commit composer)",
+		inlineHint: "[revision]",
+		allowArgs: true,
+		handleTui: (command, runtime) => {
+			runtime.ctx.showGitUi(command.args.trim() || undefined);
+			runtime.ctx.editor.setText("");
+		},
+	},
+	{
 		name: "branch",
 		icon: "branch",
 		description: "Create a new branch from a previous message",
