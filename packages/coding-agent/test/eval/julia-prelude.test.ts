@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 import { $which, TempDir } from "@oh-my-pi/pi-utils";
 import { disposeJuliaKernelSessionsByOwner, executeJulia } from "../../src/eval/jl/executor";
+import { runBoundedProbe } from "../../src/eval/probe";
 
 const JULIA_PATH = $which("julia");
 const HAS_JULIA = Boolean(JULIA_PATH);
@@ -18,34 +19,23 @@ const OWNER_ID = "julia-prelude-tests";
 const PREWARM_TIMEOUT_MS = 120_000;
 
 async function prewarmJulia(juliaPath: string): Promise<void> {
-	const proc = Bun.spawn([juliaPath, "-e", "exit(0)"], {
-		stdin: "ignore",
-		stdout: "ignore",
-		stderr: "pipe",
-		windowsHide: true,
+	// runBoundedProbe supplies the stdio detachment and process-tree kill this
+	// lifecycle needs — juliaPath can be a shim (juliaup) whose real
+	// interpreter must not outlive the hook; the ceiling override is what
+	// admits the longer test-infrastructure budget.
+	const probe = await runBoundedProbe([juliaPath, "-e", "exit(0)"], {
+		cwd: process.cwd(),
+		env: process.env,
+		timeoutMs: PREWARM_TIMEOUT_MS,
+		timeoutCeilingMs: PREWARM_TIMEOUT_MS,
 	});
-	let timedOut = false;
-	const timer = setTimeout(() => {
-		timedOut = true;
-		try {
-			proc.kill("SIGKILL");
-		} catch {
-			// Already exited; nothing to reap.
-		}
-	}, PREWARM_TIMEOUT_MS);
-	try {
-		const exitCode = await proc.exited;
-		if (timedOut) {
-			throw new Error(
-				`Julia prewarm (${juliaPath} -e 'exit(0)') timed out after ${PREWARM_TIMEOUT_MS}ms; the runner cannot start Julia at all`,
-			);
-		}
-		if (exitCode !== 0) {
-			const stderr = (await new Response(proc.stderr).text()).trim();
-			throw new Error(`Julia prewarm (${juliaPath} -e 'exit(0)') exited ${exitCode}${stderr ? `: ${stderr}` : ""}`);
-		}
-	} finally {
-		clearTimeout(timer);
+	if (probe.timedOut) {
+		throw new Error(
+			`Julia prewarm (${juliaPath} -e 'exit(0)') timed out after ${PREWARM_TIMEOUT_MS}ms; the runner cannot start Julia at all`,
+		);
+	}
+	if (probe.exitCode !== 0) {
+		throw new Error(`Julia prewarm (${juliaPath} -e 'exit(0)') exited ${probe.exitCode}`);
 	}
 }
 
