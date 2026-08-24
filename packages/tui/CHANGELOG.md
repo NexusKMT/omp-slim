@@ -6,6 +6,10 @@
 
 - Renamed TerminalFrameProvider.resetHistory to beginHistoryReplay
 
+### Changed
+
+- History replay batches now bottom-split into leading viewport space and serialize the complete replay remainder plus final viewport in one synchronous terminal write.
+
 ### Fixed
 
 - Fixed graceful terminal shutdown leaving eligible finalized output in the mutable viewport instead of retiring it before shell handoff.
