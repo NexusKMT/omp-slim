@@ -2631,8 +2631,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.subagentContainer.addChild(new Text(lines.join("\n"), 1, 0));
 	}
 
-	async #loadTodoList(): Promise<void> {
-		this.todoPhases = this.session.getTodoPhases();
+	async #loadTodoList(source: AgentSession = this.session): Promise<void> {
+		this.todoPhases = source.getTodoPhases();
 		this.#syncTodoAutoClearTimer();
 		this.#renderTodoList();
 	}
@@ -5624,8 +5624,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.requestRender();
 	}
 
-	async reloadTodos(): Promise<void> {
-		await this.#loadTodoList();
+	async reloadTodos(source: AgentSession = this.session): Promise<void> {
+		await this.#loadTodoList(source);
 		this.ui.requestRender();
 	}
 
