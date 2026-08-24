@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- OMP no longer exits during Codex WebSocket cleanup if Bun throws `ERR_SOCKET_CLOSED` for a socket with an open state.
+
 ## [18.0.4] - 2026-08-24
 
 ### Fixed
