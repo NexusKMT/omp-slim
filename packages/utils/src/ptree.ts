@@ -18,6 +18,70 @@ type PipedSubprocess<In extends InMask = InMask> = Subprocess<In, "pipe", "pipe"
 /** Grace after the root process exits for buffered pipe output to drain. */
 const EXIT_DRAIN_GRACE_MS = 100;
 
+const LINUX_SUBREAPER_COMMAND_ENV = "OMP_PTREE_SUBREAPER_COMMAND";
+
+/**
+ * Linux-only supervisor for commands that must retain daemonized descendants.
+ *
+ * The supervisor becomes a child subreaper before spawning the real command.
+ * Orphans therefore reparent here instead of to init, even after setsid(2),
+ * and remain in the supervisor's PID tree until the outer deadline kills it.
+ */
+const LINUX_SUBREAPER_SCRIPT = String.raw`
+import { dlopen, FFIType } from "bun:ffi";
+import * as fs from "node:fs/promises";
+
+const libc = dlopen("libc.so.6", {
+	prctl: {
+		args: [FFIType.i32, FFIType.u64, FFIType.u64, FFIType.u64, FFIType.u64],
+		returns: FFIType.i32,
+	},
+	waitpid: {
+		args: [FFIType.i32, FFIType.ptr, FFIType.i32],
+		returns: FFIType.i32,
+	},
+});
+
+if (libc.symbols.prctl(36, 1, 0, 0, 0) !== 0) {
+	throw new Error("failed to become a Linux child subreaper");
+}
+
+const commandJson = Bun.env.${LINUX_SUBREAPER_COMMAND_ENV};
+if (!commandJson) throw new Error("missing supervised command");
+delete Bun.env.${LINUX_SUBREAPER_COMMAND_ENV};
+const command = JSON.parse(commandJson);
+const child = Bun.spawn(command, {
+	stdin: "inherit",
+	stdout: "pipe",
+	stderr: "pipe",
+	windowsHide: true,
+});
+
+async function relay(stream, destination) {
+	const writer = destination.writer();
+	for await (const chunk of stream) writer.write(chunk);
+	await writer.flush();
+}
+
+async function hasLiveChildren() {
+	while (libc.symbols.waitpid(-1, null, 1) > 0) {}
+	const taskRoot = "/proc/" + process.pid + "/task";
+	for (const tid of await fs.readdir(taskRoot)) {
+		const children = await fs.readFile(taskRoot + "/" + tid + "/children", "utf8").catch(() => "");
+		if (children.trim().length > 0) return true;
+	}
+	return false;
+}
+
+const [exitCode] = await Promise.all([
+	child.exited,
+	relay(child.stdout, Bun.stdout),
+	relay(child.stderr, Bun.stderr),
+]);
+while (await hasLiveChildren()) await Bun.sleep(10);
+process.exit(exitCode ?? 1);
+`;
+
 // ── Exceptions ───────────────────────────────────────────────────────────────
 
 /**
@@ -117,6 +181,7 @@ export class ChildProcess<In extends InMask = InMask> {
 	// Termination in flight after kill(); aborted exits await it before reporting.
 	#terminating?: Promise<boolean | void>;
 	#terminateGroup: boolean;
+	#hardKillTree: boolean;
 	// Windows has no process groups. Retaining the root's native handle pins
 	// its PID after exit so killTree() can still enumerate its original children.
 	#windowsRootProcess?: Process;
@@ -125,8 +190,10 @@ export class ChildProcess<In extends InMask = InMask> {
 		readonly exposeStderr: boolean,
 		retainFullStderr = exposeStderr,
 		terminateGroup = false,
+		hardKillTree = false,
 	) {
 		this.#terminateGroup = terminateGroup;
+		this.#hardKillTree = hardKillTree;
 		this.#windowsRootProcess = process.platform === "win32" ? (Process.fromPid(proc.pid) ?? undefined) : undefined;
 		if (retainFullStderr) this.#stderrChunks = [];
 		// Eagerly drain stderr into a truncated tail, retaining raw chunks only for explicit full capture.
@@ -272,6 +339,17 @@ export class ChildProcess<In extends InMask = InMask> {
 			// The normalized exit promise may already have resolved from a dead
 			// group leader; wait() still needs to report the later deadline.
 			if (this.proc.exitCode !== null) this.#exitReason = reason;
+		}
+		if (gracefulMs !== undefined && gracefulMs < 0 && this.#hardKillTree && this.proc.exitCode === null) {
+			// terminate() sends its polite wave to the root before rebuilding the
+			// hard-kill tree. A subreaper root can die in that gap and release its
+			// adopted descendants, so snapshot and hard-kill the live tree first.
+			const root = Process.fromPid(this.proc.pid);
+			if (root) {
+				root.killTree(9);
+				this.#terminating = Promise.resolve();
+				return;
+			}
 		}
 		if (
 			this.proc.exitCode !== null &&
@@ -469,6 +547,11 @@ type ChildSpawnOptions<In extends InMask = InMask> = Omit<
 > & {
 	signal?: AbortSignal;
 	detached?: boolean;
+	/**
+	 * On Linux, supervise the command from a child subreaper so descendants
+	 * remain reachable even after changing session and reparenting.
+	 */
+	subreaper?: boolean;
 	/** Expose and retain complete stderr for a later `wait({ stderr: "full" })`. */
 	stderr?: "full" | null;
 };
@@ -478,16 +561,24 @@ function spawnInternal<In extends InMask = InMask>(
 	opts: ChildSpawnOptions<In> | undefined,
 	retainFullStderr: boolean,
 ): ChildProcess<In> {
-	const { timeout = -1, signal, stderr, detached, ...rest } = opts ?? {};
-	const child = Bun.spawn(cmd, {
+	const { timeout = -1, signal, stderr, detached, subreaper = false, ...rest } = opts ?? {};
+	const useSubreaper = subreaper && process.platform === "linux";
+	const child = Bun.spawn(useSubreaper ? [process.execPath, "-e", LINUX_SUBREAPER_SCRIPT] : cmd, {
 		stdin: "ignore",
 		stdout: "pipe",
 		stderr: "pipe",
 		windowsHide: true,
 		detached,
 		...rest,
+		env: useSubreaper
+			? {
+					...(rest.env ?? Bun.env),
+					BUN_BE_BUN: "1",
+					[LINUX_SUBREAPER_COMMAND_ENV]: JSON.stringify(cmd),
+				}
+			: rest.env,
 	});
-	const cp = new ChildProcess(child, stderr === "full", retainFullStderr, detached === true);
+	const cp = new ChildProcess(child, stderr === "full", retainFullStderr, detached === true, useSubreaper);
 	if (signal) cp.attachSignal(signal);
 	if (timeout > 0) cp.attachTimeout(timeout);
 	return cp;

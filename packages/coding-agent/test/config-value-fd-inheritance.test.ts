@@ -131,6 +131,35 @@ test.skipIf(process.platform === "win32")(
 	},
 );
 
+test.skipIf(process.platform !== "linux")(
+	"a timed-out !command kills descendants that leave the isolated session",
+	async () => {
+		const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omp-config-session-escape-"));
+		roots.push(root);
+		const pidFile = path.join(root, "escaped.pid");
+		const worker = path.join(root, "escaped-worker.sh");
+		await fs.promises.writeFile(worker, `#!/bin/sh\necho $$ > "${pidFile}"\nexec sleep 30\n`, { mode: 0o755 });
+
+		let escaped: Process | null = null;
+		try {
+			// `setsid` moves the intermediate into a new session, then that
+			// intermediate backgrounds the worker and exits. The worker is no
+			// longer in the resolver shell's PID tree or original process group.
+			const command = `setsid sh -c '"${worker}" &' </dev/null >/dev/null 2>&1 & while [ ! -s "${pidFile}" ]; do :; done; sleep 10`;
+			const result = await runShellCommand(command, 150);
+			expect(result).toBeUndefined();
+
+			const pid = Number.parseInt((await Bun.file(pidFile).text()).trim(), 10);
+			escaped = Process.fromPid(pid);
+			expect(escaped?.status(), `session-escaping descendant ${pid} survived the timeout`).not.toBe(
+				ProcessStatus.Running,
+			);
+		} finally {
+			escaped?.killTree(9);
+		}
+	},
+);
+
 test.skipIf(process.platform === "win32")(
 	"a timed-out !command hard-kills descendants that ignore SIGTERM",
 	async () => {
