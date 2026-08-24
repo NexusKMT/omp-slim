@@ -1505,7 +1505,7 @@ function selectNativeCompactionError(previousError: unknown, nextError: unknown)
  * retained replacement history — so the wording describes processed input, not
  * retained context, to avoid implying the number is the post-compaction size.
  */
-export function formatRemoteCompactionSummary(inputTokens: number): string {
+function formatRemoteCompactionSummary(inputTokens: number): string {
 	return (
 		"Remote compaction preserved provider-native history for this session." +
 		(inputTokens > 0 ? ` Compaction processed ${inputTokens} input tokens.` : "")

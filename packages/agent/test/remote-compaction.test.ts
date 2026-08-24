@@ -5,7 +5,6 @@ import {
 	compact,
 	createFileOps,
 	DEFAULT_COMPACTION_SETTINGS,
-	formatRemoteCompactionSummary,
 	NativeCompactionError,
 	prepareCompaction,
 	type SessionEntry,
@@ -1928,7 +1927,9 @@ describe("compact() remote compaction failure handling", () => {
 		const remote = getCompactionV2PreserveData(result.preserveData);
 		expect(remote?.usedTokens).toBe(55);
 		expect(remote?.replacementHistory.at(-1)).toEqual(compactionItem);
-		expect(result.summary).toContain("Remote compaction preserved provider-native history");
+		expect(result.summary).toBe(
+			"Remote compaction preserved provider-native history for this session. Compaction processed 55 input tokens.",
+		);
 		expect(completeSpy).not.toHaveBeenCalled();
 	});
 
@@ -2339,24 +2340,5 @@ describe("compact() remote compaction failure handling", () => {
 			}),
 		).rejects.toThrow("Remote compaction failed");
 		expect(completeSpy).not.toHaveBeenCalled();
-	});
-});
-
-describe("formatRemoteCompactionSummary", () => {
-	test("describes the value as processed input tokens, not retained replay size", () => {
-		// `usedTokens` is the compaction request's input usage, not the retained
-		// replacement-history size — the wording must not imply the latter (#9585).
-		const summary = formatRemoteCompactionSummary(195633);
-		expect(summary).toBe(
-			"Remote compaction preserved provider-native history for this session. Compaction processed 195633 input tokens.",
-		);
-		expect(summary).not.toContain("Retained");
-		expect(summary).not.toContain("replay payload");
-	});
-
-	test("omits the token clause when input usage is unknown", () => {
-		expect(formatRemoteCompactionSummary(0)).toBe(
-			"Remote compaction preserved provider-native history for this session.",
-		);
 	});
 });
