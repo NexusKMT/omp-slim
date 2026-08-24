@@ -23,6 +23,7 @@
 - Fixed resize and display replays, ensuring stable rendering and full transcript flushing on agent shutdown
 - Fixed fast tool completions leaving a permanent running summary that blocked transcript retirement and squeezed later tool output.
 - Fixed `omp git` hunk navigation (`alt+↓`/`alt+↑`) appearing to do nothing while the file sidebar had focus: the diff cursor band now stays visible (dimmed) when the pane is unfocused.
+- Fixed the auto-retry countdown freezing on its initial seconds value: the delay was rendered once when the loader was created, so a long provider-stated wait (rate-limit resets, quota windows) looked stuck while the background timer ran. The remaining time now ticks down on every spinner frame.
 
 ## [18.0.4] - 2026-08-24
 

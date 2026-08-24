@@ -2,7 +2,7 @@ import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { getStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { type Component, Loader, TERMINAL } from "@oh-my-pi/pi-tui";
-import { logger, prompt, sanitizeText } from "@oh-my-pi/pi-utils";
+import { formatDuration, logger, prompt, sanitizeText } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { extractTextContent } from "../../commit/utils";
 import { settings } from "../../config/settings";
@@ -1994,12 +1994,16 @@ export class EventController {
 			this.#restorePinnedErrorInline = true;
 			this.ctx.clearPinnedError();
 		}
-		const delaySeconds = Math.round(event.delayMs / 1000);
+		const retryStartMs = Date.now();
+		const retryLabel = `Retrying (${event.attempt}/${event.maxAttempts})`;
 		this.ctx.retryLoader = new Loader(
 			this.ctx.ui,
 			spinner => theme.fg("warning", spinner),
 			text => theme.fg("muted", text),
-			`Retrying (${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s…${this.#maintenanceEscHint()}`,
+			() => {
+				const remaining = Math.max(0, event.delayMs - (Date.now() - retryStartMs));
+				return `${retryLabel} in ${formatDuration(remaining)}…${this.#maintenanceEscHint()}`;
+			},
 			getSymbolTheme().spinnerFrames,
 		);
 		this.ctx.statusContainer.addChild(this.ctx.retryLoader);
