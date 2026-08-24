@@ -66,12 +66,7 @@ function tab(overrides: Partial<TabSnapshot> & { tabId: number }): TabSnapshot {
 	};
 }
 
-function connect(
-	bridge: RelayBridge,
-	socket: FakeExtSocket,
-	tabs: TabSnapshot[],
-	attachedTabIds: number[] = [],
-): void {
+function connect(bridge: RelayBridge, socket: FakeExtSocket, tabs: TabSnapshot[], attachedTabIds: number[] = []): void {
 	bridge.extConnected(socket);
 	bridge.extMessage(
 		socket,

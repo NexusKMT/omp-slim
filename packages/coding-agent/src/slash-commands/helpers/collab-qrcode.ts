@@ -35,11 +35,7 @@ export class CollabQrCodeComponent implements Component, TranscriptPresentationT
 			return [this.#hiddenHint(`terminal width ${width}; need ${this.#minWidth}`)];
 		}
 		if (this.#allocatedRows < this.#lines.length) {
-			return [
-				this.#hiddenHint(
-					`viewport height ${this.#allocatedRows}; need ${this.#lines.length}`,
-				),
-			];
+			return [this.#hiddenHint(`viewport height ${this.#allocatedRows}; need ${this.#lines.length}`)];
 		}
 		return this.#lines;
 	}

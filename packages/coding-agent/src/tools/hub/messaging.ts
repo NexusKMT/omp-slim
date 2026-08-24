@@ -35,9 +35,10 @@ import {
 	type HubListStatus,
 	type HubRenderArgs,
 	type HubRosterCounts,
-	MAX_HUB_LIST_LIMIT,
 	hubErrorResult,
+	MAX_HUB_LIST_LIMIT,
 } from "./types";
+
 export { DEFAULT_HUB_LIST_LIMIT, MAX_HUB_LIST_LIMIT } from "./types";
 
 export const DEFAULT_IRC_TIMEOUT_MS = 120_000;

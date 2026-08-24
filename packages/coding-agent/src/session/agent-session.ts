@@ -2991,9 +2991,7 @@ export class AgentSession {
 					msg.model === model.id &&
 					(msg.stopReason === "length" ||
 						(msg.stopReason === "error" && AIError.isContextOverflow(msg, model.contextWindow ?? 0)));
-				const speculationCompletion = requiresSpeculativeRecovery
-					? skippedSpeculationCompletion
-					: undefined;
+				const speculationCompletion = requiresSpeculativeRecovery ? skippedSpeculationCompletion : undefined;
 				if (!speculationCompletion) {
 					maintenanceRoute("skip-post-turn-maintenance");
 					await emitAgentEndNotification();

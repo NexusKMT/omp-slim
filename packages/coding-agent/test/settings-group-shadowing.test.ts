@@ -10,10 +10,7 @@ describe("dropSettingsGroupShadows", () => {
 	});
 
 	it("keeps well-formed nested objects for a settings group", () => {
-		const result = dropSettingsGroupShadows(
-			{ tui: { resizeScrollback: "preserve" } },
-			"/proj/.claude/settings.json",
-		);
+		const result = dropSettingsGroupShadows({ tui: { resizeScrollback: "preserve" } }, "/proj/.claude/settings.json");
 		expect(result).toEqual({ tui: { resizeScrollback: "preserve" } });
 	});
 

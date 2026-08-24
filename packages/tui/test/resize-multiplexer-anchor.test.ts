@@ -29,7 +29,10 @@ class FullFrameProvider implements TerminalFrameProvider {
 			this.rowPad > 0 ? `live-${i}`.padEnd(this.rowPad, "x") : `live-${i}`,
 		);
 		if (this.markerRow !== undefined) rows[this.markerRow] = `${rows[this.markerRow]}${CURSOR_MARKER}`;
-		const plan: TerminalFramePlan = { history: this.history, viewport: rows.slice(-Math.min(this.liveRows, viewport.rows)) };
+		const plan: TerminalFramePlan = {
+			history: this.history,
+			viewport: rows.slice(-Math.min(this.liveRows, viewport.rows)),
+		};
 		return plan;
 	}
 	renderResizeFrame(viewport: ViewportSize): readonly string[] {
@@ -122,7 +125,6 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		if (previousTmux === undefined) delete Bun.env.TMUX;
 		else Bun.env.TMUX = previousTmux;
 	});
-
 
 	it("skips the SIGWINCH-side erase so a racing re-layout cannot blank popped scrollback", () => {
 		const { terminal, tui, renderScheduler, writes } = startRig();

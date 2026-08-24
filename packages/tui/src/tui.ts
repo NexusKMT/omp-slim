@@ -1302,8 +1302,7 @@ export class TUI extends Container {
 				// rows into scrollback; across an observed burst the totals
 				// telescope from pre-burst state. SIGWINCH coalescing can hide a
 				// grow from this model, which is why a reply always wins above.
-				const parkedRow =
-					this.#providerViewportTop + this.#reflowedRowCount(probe.window, 0, probe.offset, width);
+				const parkedRow = this.#providerViewportTop + this.#reflowedRowCount(probe.window, 0, probe.offset, width);
 				const shrink = this.#previousHeight - height;
 				const discardedBelow = Math.min(shrink, Math.max(0, this.#previousHeight - 1 - parkedRow));
 				const pushed = Math.max(0, shrink - discardedBelow);
@@ -1821,8 +1820,7 @@ export class TUI extends Container {
 			// Other unknown-column replies while expecting tagged ones are our
 			// requests answered with a clamped or mangled column: strip and
 			// discard; the probe timeout covers recovery.
-			data =
-				data.slice(0, searchFrom + match.index) + data.slice(searchFrom + match.index + match[0].length);
+			data = data.slice(0, searchFrom + match.index) + data.slice(searchFrom + match.index + match[0].length);
 		}
 		if (data.length === 0) return;
 		// Ctrl+C/Esc use app-level double-press windows. Give those gestures one

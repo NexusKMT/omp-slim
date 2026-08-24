@@ -1078,9 +1078,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 			}
 			const outputs: string[] = [];
 			if (stopped.length > 0) {
-				outputs.push(
-					"Stopped " + stopped.length + " server(s) with superseded configuration: " + stopped.join(", "),
-				);
+				outputs.push(`Stopped ${stopped.length} server(s) with superseded configuration: ${stopped.join(", ")}`);
 			}
 			for (const [workspaceServerName, workspaceServerConfig] of servers) {
 				throwIfAborted(signal);

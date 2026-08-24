@@ -382,7 +382,11 @@ export async function ensurePersistedRoster(registry: AgentRegistry, sessionFile
 	if (!root) return;
 
 	const taggedRegistry = registry as RegistryWithPersistedRosterLatches;
-	const latches = (taggedRegistry[kPersistedRosterLatches] ??= new Map());
+	let latches = taggedRegistry[kPersistedRosterLatches];
+	if (!latches) {
+		latches = new Map();
+		taggedRegistry[kPersistedRosterLatches] = latches;
+	}
 	const existing = latches.get(root);
 	if (existing) return existing;
 	const pending = registerPersistedSubagents(registry, root).catch(error => {

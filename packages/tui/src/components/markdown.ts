@@ -1022,8 +1022,7 @@ const FAST_CMARK_WORD_AT_START_RE = /^[^\s\p{P}\p{S}]/u;
 // (`| col_a | col_b |\n| --` + `--- | -`). The cold render then re-wraps and
 // restyles the header, so the splice must disarm. The gate runs on the GROWN
 // last line (`recipe.rowRaw`'s last line + deltaTabs) in render().
-const FAST_TABLE_DELIM_ROW_RE =
-	/^\s*(?:\|[\s:]*-+\s*(?:\|[\s:]*-+\s*)*|[\s:]*-+\s*(?:\|[\s:]*-+\s*)+)\|?\s*$/;
+const FAST_TABLE_DELIM_ROW_RE = /^\s*(?:\|[\s:]*-+\s*(?:\|[\s:]*-+\s*)*|[\s:]*-+\s*(?:\|[\s:]*-+\s*)+)\|?\s*$/;
 
 // A paragraph's LAST line can complete into a different block kind under an
 // inert delta (ATX heading, blockquote, bullet marker, HR, ref-def) — disarm
