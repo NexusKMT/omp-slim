@@ -641,7 +641,15 @@ export class TUI extends Container {
 	// In-flight post-resize anchor probe: the stale viewport snapshot and park
 	// offset captured when CSI 6n was written, plus the no-reply fallback timer.
 	#resizeProbe:
-		| { window: readonly string[]; offset: number; timer: RenderTimer; swallowedRow?: number; retried: boolean }
+		| {
+				window: readonly string[];
+				offset: number;
+				timer: RenderTimer;
+				epoch: number;
+				swallowedRow?: number;
+				swallowedEpoch?: number;
+				retried: boolean;
+		  }
 		| undefined;
 	// Pre-erase viewport snapshot for the settled resize-anchor probe: the erase
 	// in #beginResizeAltPaint empties #providerWindow, so the probe must bound
@@ -662,8 +670,15 @@ export class TUI extends Container {
 	// shrink-then-regrow that never exceeds the pre-burst height (see the
 	// CPR-timeout fallback in #resolveResizeAnchor).
 	#resizeBurstPull = 0;
-	// Unanswered CSI 6n probes; CPR replies are consumed from input while > 0.
-	#pendingCprReplies = 0;
+	// Geometry epoch: bumped on every resize transaction entry, so each CSI 6n
+	// request can be tagged with the geometry it was parked under. Terminals
+	// answer DSR in request order, so a consumed tag at the current epoch
+	// proves the reply (and every later one) is post-restart; an older tag is
+	// ambiguous under drops.
+	#geometryEpoch = 0;
+	// FIFO of geometry epochs for unanswered CSI 6n requests; replies are
+	// consumed from input while nonempty.
+	#cprRequestEpochs: number[] = [];
 	// Outstanding CPR replies that answer canceled probes; swallowed by
 	// #handleInput instead of resolving the active probe.
 	#staleCprReplies = 0;
@@ -1072,6 +1087,7 @@ export class TUI extends Container {
 		if (this.terminal.rows > burstLastHeight) this.#resizeBurstGrew = true;
 		this.#resizeBurstLastHeight = this.terminal.rows;
 		this.#resizeBurstPull += Math.max(0, this.terminal.rows - burstLastHeight);
+		this.#geometryEpoch++;
 		if (!this.#resizeAltActive) {
 			this.#resizeAltActive = true;
 			setAltScreenActive(true);
@@ -1174,27 +1190,35 @@ export class TUI extends Container {
 				// pre-restart probe's answer (its own reply dropped), and
 				// trusting that stale row overwrites pulled-back history. A
 				// dropped DSR reply is a transient race, so discard the
-				// ambiguous row and ask once more before falling back; a reply
-				// swallowed during the retry window is post-restart and safe
-				// for the timeout path below.
+				// ambiguous row and ask once more before falling back.
 				this.#beginResizeAnchorProbe(true);
 				return;
 			}
 			// A canceled probe's reply may have been dropped entirely, in which
 			// case the reply swallowed as stale was actually this probe's own
-			// answer; it is exact then, and no worse than the pre-resize
-			// viewport guess when the swallowed reply really was stale.
-			this.#resolveResizeAnchor(probe?.swallowedRow);
+			// answer. Trust it when its consumed queue tag carries the current
+			// geometry epoch (order-preserved replies make that proof of
+			// post-restart geometry) or when the direct-terminal staleRows
+			// clamp bounds the damage; a multiplexer grow with an older tag
+			// falls back to the conservative pull bound instead.
+			const swallowedTrusted =
+				probe?.swallowedRow !== undefined &&
+				(probe.swallowedEpoch === probe.epoch || !(isInsideTerminalMultiplexer() && this.#resizeBurstGrew));
+			this.#resolveResizeAnchor(swallowedTrusted ? probe?.swallowedRow : undefined);
 		}, TUI.#RESIZE_PROBE_TIMEOUT_MS);
-		this.#resizeProbe = { window: this.#resizeProbeWindow, offset: this.#resizeProbeOffset, timer, retried: retry };
 		// Replies still outstanding at arm time answer canceled probes against
 		// pre-restart geometry; they must be swallowed, not matched to this
 		// probe, or a delayed first reply anchors the settled repaint with the
-		// cursor row from before the latest resize. (On a retry this also
-		// covers the retried request's own late reply: swallowed, it still
-		// resolves the probe through the timeout's swallowedRow path.)
-		this.#staleCprReplies = this.#pendingCprReplies;
-		this.#pendingCprReplies++;
+		// cursor row from before the latest resize.
+		this.#staleCprReplies = this.#cprRequestEpochs.length;
+		this.#resizeProbe = {
+			window: this.#resizeProbeWindow,
+			offset: this.#resizeProbeOffset,
+			timer,
+			epoch: this.#geometryEpoch,
+			retried: retry,
+		};
+		this.#cprRequestEpochs.push(this.#geometryEpoch);
 		this.terminal.write("\x1b[6n");
 	}
 
@@ -1704,16 +1728,20 @@ export class TUI extends Container {
 		// Consume CPR replies (CSI row;col R) while an anchor probe is unanswered;
 		// they are terminal reports, never keystrokes, and must not reach the
 		// focused component.
-		while (this.#pendingCprReplies > 0) {
+		while (this.#cprRequestEpochs.length > 0) {
 			const match = data.match(/\x1b\[(\d+);(\d+)R/);
 			if (!match || match.index === undefined) break;
-			this.#pendingCprReplies--;
+			const tagEpoch = this.#cprRequestEpochs.shift();
 			if (this.#staleCprReplies > 0) {
 				// Answer to a canceled probe (see #beginResizeAnchorProbe). Keep
-				// the row: if this probe's own reply never arrives, the timeout
-				// fallback prefers it over the pre-resize viewport top.
+				// the row and its queue tag: if this probe's own reply never
+				// arrives, the timeout fallback may still use it when the tag
+				// proves post-restart geometry (or the context bounds the risk).
 				this.#staleCprReplies--;
-				if (this.#resizeProbe) this.#resizeProbe.swallowedRow = Number(match[1]) - 1;
+				if (this.#resizeProbe) {
+					this.#resizeProbe.swallowedRow = Number(match[1]) - 1;
+					this.#resizeProbe.swallowedEpoch = tagEpoch;
+				}
 			} else {
 				this.#resolveResizeAnchor(Number(match[1]) - 1);
 			}

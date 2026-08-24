@@ -277,6 +277,29 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		tui.stop();
 	});
 
+	it("rejects a pre-restart reply arriving during the retry window", () => {
+		// Probe A (12 -> 14) stays outstanding through the restart (14 -> 20)
+		// and both post-restart probes' replies are dropped; A's reply lands
+		// only during the retry window. Its queue tag carries the pre-restart
+		// epoch, so the retry timeout must not trust it (row 3 would repaint
+		// over rows pulled by the second grow) and must use the accumulated
+		// pull bound 3 + 8 = 11 (CUP row 12) instead.
+		const { terminal, tui, renderScheduler, writes } = startRig();
+		terminal.resize(40, 14);
+		renderScheduler.settle(); // exit the resize alt borrow, start probe A
+		terminal.resize(40, 20); // mid-probe restart: cancels A, starts a new borrow
+		renderScheduler.settle(); // exit the second borrow, start probe B
+		renderScheduler.settle(); // B's timeout: no reply -> one bounded retry
+		terminal.sendInput("\x1b[4;1R"); // A's very late reply: pre-restart tag
+		writes.length = 0;
+		renderScheduler.settle(); // retry timeout: reject the stale row, use the bound
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(12);
+		tui.stop();
+	});
+
 	it("recovers the retried probe's swallowed reply when the original was dropped", () => {
 		// The original reply never arrives, so the retry's own reply is
 		// swallowed as presumed-stale; the retry timeout must anchor from it
