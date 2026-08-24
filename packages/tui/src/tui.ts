@@ -657,6 +657,9 @@ export class TUI extends Container {
 	#resizeBurstLastHeight: number | undefined;
 	// Unanswered CSI 6n probes; CPR replies are consumed from input while > 0.
 	#pendingCprReplies = 0;
+	// Outstanding CPR replies that answer canceled probes; swallowed by
+	// #handleInput instead of resolving the active probe.
+	#staleCprReplies = 0;
 	// Prepared rows painted by the previous provider frame, for row diffing.
 	#providerWindow: string[] = [];
 	#previousFrameLength = 0;
@@ -1157,6 +1160,11 @@ export class TUI extends Container {
 			this.#resolveResizeAnchor(undefined);
 		}, TUI.#RESIZE_PROBE_TIMEOUT_MS);
 		this.#resizeProbe = { window: this.#resizeProbeWindow, offset: this.#resizeProbeOffset, timer };
+		// Replies still outstanding at arm time answer canceled probes against
+		// pre-restart geometry; they must be swallowed, not matched to this
+		// probe, or a delayed first reply anchors the settled repaint with the
+		// cursor row from before the latest resize.
+		this.#staleCprReplies = this.#pendingCprReplies;
 		this.#pendingCprReplies++;
 		this.terminal.write("\x1b[6n");
 	}
@@ -1659,7 +1667,12 @@ export class TUI extends Container {
 			const match = data.match(/\x1b\[(\d+);(\d+)R/);
 			if (!match || match.index === undefined) break;
 			this.#pendingCprReplies--;
-			this.#resolveResizeAnchor(Number(match[1]) - 1);
+			if (this.#staleCprReplies > 0) {
+				// Answer to a canceled probe (see #beginResizeAnchorProbe).
+				this.#staleCprReplies--;
+			} else {
+				this.#resolveResizeAnchor(Number(match[1]) - 1);
+			}
 			data = data.slice(0, match.index) + data.slice(match.index + match[0].length);
 		}
 		if (data.length === 0) return;

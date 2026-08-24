@@ -236,11 +236,38 @@ describe("resize anchor probe stash on a direct terminal", () => {
 		terminal.resize(40, 6); // mid-probe restart: cancels the probe, window already []
 		renderScheduler.settle(); // exit the second borrow, start the second probe
 		writes.length = 0;
-		terminal.sendInput("\x1b[4;1R"); // parked cursor still on screen row 3
+		terminal.sendInput("\x1b[4;1R"); // canceled first probe's delayed reply: swallowed
+		terminal.sendInput("\x1b[4;1R"); // second probe's reply: parked cursor still on row 3
 		const repaint = writes.join("");
 		const cup = repaint.match(/\x1b\[(\d+);1H/);
 		expect(cup).not.toBeNull();
 		expect(Number(cup![1])).toBe(1);
+		tui.stop();
+	});
+
+	it("swallows the canceled probe's delayed reply after a mid-probe restart", () => {
+		// The restart cancels the first probe, but its CSI 6n reply is still in
+		// flight and reports the cursor row from before the second resize.
+		// Matching it to the second probe would anchor the settled repaint at
+		// the pre-restart row 3 (CUP row 4) and drop the real reply; the
+		// serialized probe must swallow it and anchor at the second reply's
+		// row 1 (CUP row 2). A 2-row window keeps the height-staleRows bound
+		// (6 - 2 = 4) from masking the difference.
+		const { terminal, tui, provider, renderScheduler, writes } = startRig();
+		provider.liveRows = 2;
+		tui.requestRender(true);
+		terminal.resize(40, 11);
+		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
+		terminal.resize(40, 6); // mid-probe restart: first reply still outstanding
+		renderScheduler.settle(); // exit the second borrow, start the second probe
+		writes.length = 0;
+		terminal.sendInput("\x1b[4;1R"); // stale: cursor row before the second resize
+		expect(writes.join("")).not.toMatch(/\x1b\[\d+;1H/);
+		terminal.sendInput("\x1b[2;1R"); // real: parked cursor after the second resize
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(2);
 		tui.stop();
 	});
 
