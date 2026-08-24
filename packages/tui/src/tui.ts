@@ -1166,18 +1166,17 @@ export class TUI extends Container {
 		this.#cancelResizeProbe();
 		const timer = this.#renderScheduler.scheduleRender(() => {
 			const probe = this.#resizeProbe;
-			if (
-				probe !== undefined &&
-				probe.swallowedRow === undefined &&
-				!probe.retried &&
-				isInsideTerminalMultiplexer() &&
-				this.#resizeBurstGrew
-			) {
+			if (probe !== undefined && !probe.retried && isInsideTerminalMultiplexer() && this.#resizeBurstGrew) {
 				// A CPR-less multiplexer grow cannot be anchored safely: every
 				// choice inside the unknown pull span risks either overwriting
 				// pulled-back committed rows or leaving stale live rows behind.
-				// A dropped DSR reply is a transient race, so ask once more
-				// before falling back to the conservative bound.
+				// A swallowed reply is no better here — it may be the canceled
+				// pre-restart probe's answer (its own reply dropped), and
+				// trusting that stale row overwrites pulled-back history. A
+				// dropped DSR reply is a transient race, so discard the
+				// ambiguous row and ask once more before falling back; a reply
+				// swallowed during the retry window is post-restart and safe
+				// for the timeout path below.
 				this.#beginResizeAnchorProbe(true);
 				return;
 			}

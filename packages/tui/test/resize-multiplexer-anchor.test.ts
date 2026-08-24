@@ -230,6 +230,53 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		tui.stop();
 	});
 
+	it("discards a pre-restart swallowed reply instead of trusting it", () => {
+		// Mirror ordering of the dropped-reply case: probe A's late reply
+		// arrives (swallowed, pre-restart row 3) while probe B's own reply is
+		// dropped. Trusting the swallowed row would anchor at 3 (CUP row 4)
+		// and overwrite pulled-back history; the timeout must discard it and
+		// retry, and with the retry also unanswered fall back to the
+		// accumulated pull bound 3 + 8 = 11 (CUP row 12).
+		const { terminal, tui, renderScheduler, writes } = startRig();
+		terminal.resize(40, 20);
+		renderScheduler.settle(); // exit the resize alt borrow, start probe A
+		terminal.resize(40, 18); // mid-probe restart: cancels A, starts a new borrow
+		renderScheduler.settle(); // exit the second borrow, start probe B
+		terminal.sendInput("\x1b[4;1R"); // A's late reply: swallowed, pre-restart row
+		writes.length = 0;
+		renderScheduler.settle(); // B's timeout: ambiguous swallow -> one bounded retry
+		expect(writes.join("")).toContain("\x1b[6n");
+		expect(writes.join("")).not.toMatch(/\x1b\[\d+;1H/);
+		renderScheduler.settle(); // retry timeout: conservative fallback
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(12);
+		tui.stop();
+	});
+
+	it("resolves from a reply swallowed during the retry window", () => {
+		// Same mirror ordering, but a post-restart reply lands during the
+		// retry window: swallowed (attributed to the dropped probe B), it is
+		// still post-restart geometry, so the retry timeout must anchor from
+		// it rather than the conservative bound.
+		const { terminal, tui, renderScheduler, writes } = startRig();
+		terminal.resize(40, 20);
+		renderScheduler.settle(); // exit the resize alt borrow, start probe A
+		terminal.resize(40, 18); // mid-probe restart: cancels A, starts a new borrow
+		renderScheduler.settle(); // exit the second borrow, start probe B
+		terminal.sendInput("\x1b[4;1R"); // A's late reply: swallowed, discarded at retry
+		renderScheduler.settle(); // B's timeout: ambiguous swallow -> one bounded retry
+		terminal.sendInput("\x1b[10;1R"); // post-restart reply: swallowed but trustworthy
+		writes.length = 0;
+		renderScheduler.settle(); // retry timeout -> resolve from the swallowed row
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(10);
+		tui.stop();
+	});
+
 	it("recovers the retried probe's swallowed reply when the original was dropped", () => {
 		// The original reply never arrives, so the retry's own reply is
 		// swallowed as presumed-stale; the retry timeout must anchor from it
