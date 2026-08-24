@@ -3388,6 +3388,107 @@ describe("openai-codex streaming", () => {
 		expect(result.usage.premiumRequests).toBeUndefined();
 	});
 
+	it("continues websocket chains across Standard → Fast → Standard service tiers", async () => {
+		const tempDir = TempDir.createSync("@pi-codex-stream-");
+		setAgentDir(tempDir.path());
+		const sentRequests: Array<Record<string, unknown>> = [];
+		const fetchMock = vi.fn(async () => {
+			throw new Error("SSE fallback should not be called");
+		});
+
+		class CrossTierWebSocket extends MockWebSocket {
+			constructor(url: string, options?: { headers?: WsHeaders }) {
+				super(url, options);
+				this.scheduleOpen();
+			}
+
+			override send(data: string): void {
+				sentRequests.push(JSON.parse(data) as Record<string, unknown>);
+				const responseIndex = sentRequests.length;
+				this.emitCodexResponse({
+					messageId: `msg_${responseIndex}`,
+					responseId: `resp_${responseIndex}`,
+					text: `Answer ${responseIndex}`,
+					terminalType: "response.completed",
+					includeCreated: true,
+				});
+			}
+		}
+
+		global.WebSocket = CrossTierWebSocket as unknown as typeof WebSocket;
+		const model: Model<"openai-codex-responses"> = buildModel({
+			id: "gpt-5.3-codex-spark",
+			name: "GPT-5.3 Codex Spark",
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			baseUrl: "https://chatgpt.com/backend-api",
+			reasoning: true,
+			preferWebsockets: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128000,
+			maxTokens: 128000,
+		});
+		const providerSessionState = new Map<string, ProviderSessionState>();
+		const baseOptions = {
+			fetch: fetchMock as FetchImpl,
+			apiKey: createCodexTestToken(),
+			sessionId: "ws-cross-tier-session",
+			providerSessionState,
+		};
+		const startedAt = Date.now();
+		const firstContext: Context = {
+			systemPrompt: ["You are a helpful assistant."],
+			messages: [{ role: "user", content: "First question", timestamp: startedAt }],
+		};
+		const firstResponse = await streamOpenAICodexResponses(model, firstContext, baseOptions).result();
+		const secondContext: Context = {
+			systemPrompt: firstContext.systemPrompt,
+			messages: [
+				...firstContext.messages,
+				firstResponse,
+				{ role: "user", content: "Second question", timestamp: startedAt + 1 },
+			],
+		};
+		const secondResponse = await streamOpenAICodexResponses(model, secondContext, {
+			...baseOptions,
+			serviceTier: "priority",
+		}).result();
+		const thirdContext: Context = {
+			systemPrompt: firstContext.systemPrompt,
+			messages: [
+				...secondContext.messages,
+				secondResponse,
+				{ role: "user", content: "Third question", timestamp: startedAt + 2 },
+			],
+		};
+		await streamOpenAICodexResponses(model, thirdContext, baseOptions).result();
+
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(sentRequests).toHaveLength(3);
+		expect(sentRequests[0]?.service_tier).toBeUndefined();
+		expect(sentRequests[0]?.previous_response_id).toBeUndefined();
+		expect(JSON.stringify(sentRequests[0]?.input)).toContain("First question");
+		expect(sentRequests[1]?.service_tier).toBe("priority");
+		expect(sentRequests[1]?.previous_response_id).toBe("resp_1");
+		expect(JSON.stringify(sentRequests[1]?.input)).toContain("Second question");
+		expect(JSON.stringify(sentRequests[1]?.input)).not.toContain("First question");
+		expect(sentRequests[2]?.service_tier).toBeUndefined();
+		expect(sentRequests[2]?.previous_response_id).toBe("resp_2");
+		expect(JSON.stringify(sentRequests[2]?.input)).toContain("Third question");
+		expect(JSON.stringify(sentRequests[2]?.input)).not.toContain("Second question");
+
+		const stats = getOpenAICodexWebSocketDebugStats(model, {
+			sessionId: "ws-cross-tier-session",
+			providerSessionState,
+		});
+		expect(stats?.fullContextRequests).toBe(1);
+		expect(stats?.deltaRequests).toBe(2);
+		expect(stats?.lastInputItems).toBe(1);
+		expect(stats?.lastDeltaInputItems).toBe(1);
+		expect(stats?.lastPreviousResponseId).toBe("resp_2");
+	});
+
 	it("records websocket delta request and usage diagnostics", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
 		setAgentDir(tempDir.path());
