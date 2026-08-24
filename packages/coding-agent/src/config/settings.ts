@@ -142,6 +142,52 @@ function setByPath(obj: RawSettings, segments: string[], value: unknown): void {
 	current[segments[segments.length - 1]] = value;
 }
 
+/**
+ * Dotted-path prefixes that name settings groups (e.g. "tui" for "tui.*").
+ * A prefix may simultaneously be a schema leaf ("model", "providers", …);
+ * those accept scalar values and are excluded from shadow detection.
+ */
+const SETTINGS_GROUP_ONLY_PREFIXES: Readonly<Record<string, true>> = (() => {
+	const prefixes: Record<string, true> = {};
+	for (const key of Object.keys(SETTINGS_SCHEMA)) {
+		for (let dot = key.indexOf("."); dot !== -1; dot = key.indexOf(".", dot + 1)) {
+			prefixes[key.slice(0, dot)] = true;
+		}
+	}
+	for (const key of Object.keys(SETTINGS_SCHEMA)) delete prefixes[key];
+	return prefixes;
+})();
+
+/**
+ * Drop entries from capability-provided project settings whose non-object
+ * value would shadow an entire settings group. `.claude/settings.json` is
+ * shared with other tools, and a foreign leaf like `"tui": "fullscreen"`
+ * deep-merges over omp's `tui` group, silently replacing every `tui.*`
+ * setting for sessions rooted in that project. Values at schema leaves,
+ * unknown keys, and well-formed nested objects pass through unchanged.
+ */
+export function dropSettingsGroupShadows(data: RawSettings, sourcePath: string, basePrefix = ""): RawSettings {
+	const result: RawSettings = {};
+	for (const key of Object.keys(data)) {
+		const value = data[key];
+		const path = basePrefix === "" ? key : `${basePrefix}.${key}`;
+		if (!Object.hasOwn(SETTINGS_GROUP_ONLY_PREFIXES, path)) {
+			result[key] = value;
+			continue;
+		}
+		if (typeof value !== "object" || value === null || Array.isArray(value)) {
+			logger.warn("Settings: ignoring project setting that would shadow a settings group", {
+				setting: path,
+				value,
+				source: sourcePath,
+			});
+			continue;
+		}
+		result[key] = dropSettingsGroupShadows(value as RawSettings, sourcePath, path);
+	}
+	return result;
+}
+
 export function normalizeProviderMaxInFlightRequests(value: unknown): Record<string, number> {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return {};
 	const normalized: Record<string, number> = {};
@@ -1366,7 +1412,7 @@ export class Settings {
 			const result = await loadCapability(settingsCapability.id, { cwd: this.#cwd });
 			for (const item of result.items as SettingsCapabilityItem[]) {
 				if (item.level === "project") {
-					merged = this.#deepMerge(merged, item.data as RawSettings);
+					merged = this.#deepMerge(merged, dropSettingsGroupShadows(item.data as RawSettings, item.path));
 					if (Object.hasOwn(item.data, "shellPath")) shellPathSource = item.path;
 				}
 			}
