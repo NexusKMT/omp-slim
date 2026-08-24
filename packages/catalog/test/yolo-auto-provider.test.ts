@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createModelManager } from "@oh-my-pi/pi-catalog/model-manager";
 import { yoloAutoModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
 
@@ -74,5 +75,24 @@ describe("Yolo-Auto provider discovery", () => {
 
 	test("serves no dynamic models without an API key", () => {
 		expect(yoloAutoModelManagerOptions().fetchDynamicModels).toBeUndefined();
+	});
+
+	test("marks live discovery authoritative so retired bundled ids cannot linger", () => {
+		// The runtime merge path reads this flag from the manager options, not
+		// the catalog descriptor — without it a successful /v1/models response
+		// merges over the bundled seed instead of replacing it.
+		expect(yoloAutoModelManagerOptions({ apiKey: "yolo-test-key" }).dynamicModelsAuthoritative).toBe(true);
+	});
+
+	test("prunes the bundled id when a live catalog omits it", async () => {
+		// Regression: a provider-side retirement of qwen3.8-27b must not leave
+		// the bundled seed selectable. With the authoritative option the
+		// production manager replaces the static rows with the wire catalog.
+		const fetch: FetchImpl = async () =>
+			new Response(JSON.stringify({ data: [{ id: "live-only", object: "model" }] }), { status: 200 });
+		const manager = createModelManager(yoloAutoModelManagerOptions({ apiKey: "yolo-test-key", fetch }));
+		const { models } = await manager.refresh("online");
+
+		expect(models.map(model => model.id)).toEqual(["live-only"]);
 	});
 });

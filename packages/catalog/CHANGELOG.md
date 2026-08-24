@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+
+- Added Yolo-Auto as a provider with the flat-rate `qwen3.8-27b` model and live `/v1/models` discovery.
+
 ## [18.0.4] - 2026-08-24
 
 ### Fixed

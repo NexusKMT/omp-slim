@@ -4809,7 +4809,13 @@ export interface YoloAutoModelManagerConfig {
 export function yoloAutoModelManagerOptions(
 	config?: YoloAutoModelManagerConfig,
 ): ModelManagerOptions<"openai-completions"> {
-	return createSimpleOpenAICompletionsOptions("yolo-auto", YOLO_AUTO_BASE_URL, config);
+	return {
+		...createSimpleOpenAICompletionsOptions("yolo-auto", YOLO_AUTO_BASE_URL, config),
+		// The runtime reads this from the manager options (not the descriptor
+		// entry): a successful live `/v1/models` response must replace the
+		// bundled seed, not merge it (retired models stay selectable otherwise).
+		dynamicModelsAuthoritative: true,
+	};
 }
 
 // ---------------------------------------------------------------------------

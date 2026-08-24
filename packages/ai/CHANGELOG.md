@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+
+- Added a `/login` API-key flow for Yolo-Auto, validated against the provider's `/v1/models` endpoint.
+
 ## [18.0.4] - 2026-08-24
 
 ### Fixed
