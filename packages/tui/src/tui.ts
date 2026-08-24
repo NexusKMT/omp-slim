@@ -1390,6 +1390,11 @@ export class TUI extends Container {
 			this.#altPreviousLines = [];
 			this.#pendingAltExit = "";
 		}
+		// A latched destructive reset (settled rebuild-mode resize, /clear) pairs
+		// ED3 with a complete-ledger replay. Running that pair during stop would
+		// erase native history and re-stream the whole transcript at quit; drop
+		// the latch so the flush below writes only un-retired rows.
+		this.#clearScrollbackOnNextRender = false;
 		this.#flushHistoryBeforeStop();
 		// Deliberately leave transmitted images in the terminal's graphics store:
 		// placeholder cells committed to native scrollback render only while their
