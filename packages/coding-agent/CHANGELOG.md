@@ -20,7 +20,7 @@
 
 ### Fixed
 
-- Fixed resize and display replays rewinding logical transcript retirement state; committed rows now replay through an independent cursor and survive overlays without duplicating the live viewport.
+- Fixed resize and display replays, ensuring stable rendering and full transcript flushing on agent shutdown
 - Fixed fast tool completions leaving a permanent running summary that blocked transcript retirement and squeezed later tool output.
 - Fixed `omp git` hunk navigation (`alt+↓`/`alt+↑`) appearing to do nothing while the file sidebar had focus: the diff cursor band now stays visible (dimmed) when the pane is unfocused.
 
