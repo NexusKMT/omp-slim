@@ -435,4 +435,35 @@ describe("RelayBridge attachment release", () => {
 		);
 		expect(detached).toBeDefined();
 	});
+
+	it("clears an in-flight detach immediately when the extension socket is replaced", async () => {
+		const bridge = new RelayBridge({ group: { title: "omp", color: "cyan" } });
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		const sessionId = await attachPage(bridge, ext, cdp, connId, 1);
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: ++msgSeq, method: "Target.detachFromTarget", params: { sessionId } }),
+		);
+		await flush();
+		expect(ext.pending("detach")).toHaveLength(1);
+
+		const replacement = new FakeExtSocket();
+		connect(bridge, replacement, [tab({ tabId: 1 })]);
+		const reattachId = ++msgSeq;
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: reattachId, method: "Target.attachToTarget", params: { targetId: "PAGE1" } }),
+		);
+		await flush();
+
+		// Reattachment reaches the replacement immediately; it does not wait
+		// for the old socket's unreachable detach result or its 20s timeout.
+		expect(replacement.pending("attach")).toHaveLength(1);
+		ack(bridge, replacement, "attach");
+		await flush();
+		expect(cdp.sessionFor(reattachId)).toBeDefined();
+	});
 });

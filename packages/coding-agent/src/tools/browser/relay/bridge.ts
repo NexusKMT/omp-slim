@@ -211,10 +211,19 @@ export class RelayBridge {
 
 	// ---- extension lifecycle -------------------------------------------------
 
+	#rejectPendingExtensionRpcs(message: string): void {
+		for (const pending of this.#pendingRpc.values()) {
+			clearTimeout(pending.timer);
+			pending.reject(new Error(message));
+		}
+		this.#pendingRpc.clear();
+	}
+
 	/** A new extension socket connected; replaces any previous one. */
 	extConnected(socket: RelaySocket): void {
 		if (this.#ext && this.#ext !== socket) {
 			this.#log("replacing extension socket");
+			this.#rejectPendingExtensionRpcs("relay extension replaced");
 			this.#ext.close();
 		}
 		this.#ext = socket;
@@ -224,11 +233,7 @@ export class RelayBridge {
 		if (this.#ext !== socket) return;
 		this.#ext = null;
 		this.#extInfo = null;
-		for (const pending of this.#pendingRpc.values()) {
-			clearTimeout(pending.timer);
-			pending.reject(new Error("relay extension disconnected"));
-		}
-		this.#pendingRpc.clear();
+		this.#rejectPendingExtensionRpcs("relay extension disconnected");
 		for (const tab of this.#tabs.values()) {
 			tab.attached = false;
 			tab.attaching = null;
