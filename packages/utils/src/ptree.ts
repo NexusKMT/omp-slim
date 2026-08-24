@@ -21,26 +21,33 @@ const EXIT_DRAIN_GRACE_MS = 100;
 const LINUX_SUBREAPER_COMMAND_ENV = "OMP_PTREE_SUBREAPER_COMMAND";
 
 /**
- * Linux-only supervisor for commands that must retain daemonized descendants.
+ * Build the Linux child-subreaper entrypoint.
  *
- * The supervisor becomes a child subreaper before spawning the real command.
- * Orphans therefore reparent here instead of to init, even after setsid(2),
- * and remain in the supervisor's PID tree until the outer deadline kills it.
+ * @internal Exported so tests can force a missing first libc soname and verify
+ * the loader continues to the next candidate.
  */
-const LINUX_SUBREAPER_SCRIPT = String.raw`
+export function createLinuxSubreaperScript(libcCandidates: readonly string[] = ["libc.so.6", "libc.so"]): string {
+	return `
 import { dlopen, FFIType } from "bun:ffi";
 import * as fs from "node:fs/promises";
 
-const libc = dlopen("libc.so.6", {
-	prctl: {
-		args: [FFIType.i32, FFIType.u64, FFIType.u64, FFIType.u64, FFIType.u64],
-		returns: FFIType.i32,
-	},
-	waitpid: {
-		args: [FFIType.i32, FFIType.ptr, FFIType.i32],
-		returns: FFIType.i32,
-	},
-});
+let libc;
+for (const soname of ${JSON.stringify(libcCandidates)}) {
+	try {
+		libc = dlopen(soname, {
+			prctl: {
+				args: [FFIType.i32, FFIType.u64, FFIType.u64, FFIType.u64, FFIType.u64],
+				returns: FFIType.i32,
+			},
+			waitpid: {
+				args: [FFIType.i32, FFIType.ptr, FFIType.i32],
+				returns: FFIType.i32,
+			},
+		});
+		break;
+	} catch {}
+}
+if (!libc) throw new Error("failed to load libc for Linux child supervision");
 
 if (libc.symbols.prctl(36, 1, 0, 0, 0) !== 0) {
 	throw new Error("failed to become a Linux child subreaper");
@@ -81,6 +88,9 @@ const [exitCode] = await Promise.all([
 while (await hasLiveChildren()) await Bun.sleep(10);
 process.exit(exitCode ?? 1);
 `;
+}
+
+const LINUX_SUBREAPER_SCRIPT = createLinuxSubreaperScript();
 
 // ── Exceptions ───────────────────────────────────────────────────────────────
 
@@ -549,7 +559,9 @@ type ChildSpawnOptions<In extends InMask = InMask> = Omit<
 	detached?: boolean;
 	/**
 	 * On Linux, supervise the command from a child subreaper so descendants
-	 * remain reachable even after changing session and reparenting.
+	 * remain reachable after changing session and reparenting. Other platforms
+	 * ignore this option. macOS process groups cannot retain a daemonized
+	 * descendant that creates a new session and reparents to launchd.
 	 */
 	subreaper?: boolean;
 	/** Expose and retain complete stderr for a later `wait({ stderr: "full" })`. */

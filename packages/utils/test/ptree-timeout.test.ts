@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Process, ProcessStatus } from "@oh-my-pi/pi-natives";
-import { exec, NonZeroExitError, spawn, TimeoutError } from "@oh-my-pi/pi-utils/ptree";
+import { createLinuxSubreaperScript, exec, NonZeroExitError, spawn, TimeoutError } from "@oh-my-pi/pi-utils/ptree";
 
 describe("ptree timeout", () => {
 	it("contains the lifecycle rejection when the caller does not observe exited", async () => {
@@ -26,6 +26,32 @@ describe("ptree timeout", () => {
 		} finally {
 			process.off("unhandledRejection", onUnhandled);
 		}
+	});
+
+	it.skipIf(process.platform !== "linux")("falls back after the first libc soname is unavailable", async () => {
+		const script = createLinuxSubreaperScript(["libc.so.omp-missing", "libc.so.6"]);
+		const child = Bun.spawn([process.execPath, "-e", script], {
+			env: {
+				...Bun.env,
+				BUN_BE_BUN: "1",
+				OMP_PTREE_SUBREAPER_COMMAND: JSON.stringify([
+					process.execPath,
+					"-e",
+					'process.stdout.write("libc-fallback-ok")',
+				]),
+			},
+			stdin: "ignore",
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [exitCode, stdout, stderr] = await Promise.all([
+			child.exited,
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+		]);
+
+		expect(exitCode, stderr).toBe(0);
+		expect(stdout).toBe("libc-fallback-ok");
 	});
 
 	it("clears the timeout timer once the child exits so a fast command does not hold the event loop", async () => {
