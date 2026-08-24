@@ -4,16 +4,10 @@
 
 ### Fixed
 
-- Fixed Cursor tool calls through the OpenAI-compatible auth gateway losing their arguments when Cursor announced the complete argument map without streaming argument deltas ([#9479](https://github.com/can1357/oh-my-pi/issues/9479)).
-- Fixed Cursor plan-entitlement refusals repeatedly reselecting an account that cannot serve the requested model; denied credentials are now blocked only for that model and rotation converges on an eligible sibling ([#9488](https://github.com/can1357/oh-my-pi/issues/9488)).
-- HTTP 413s caused by request byte size or provider media budgets no longer classify as token-context overflows, so token compaction is no longer attempted against them ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Transient-wrapped payload rejections (`Provider returned error: 413 …`) are no longer retried against the same model; recovery goes through the fallback chain and honest 413 handling instead ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Bare HTTP 413 statuses with opaque or empty bodies (e.g. the `Content Too Large` reason phrase) now classify as payload rejections instead of falling through unclassified, and media-budget numeric limits (`image count exceeds the limit of 20`) keep their payload classification rather than being vetoed into token-compaction routing ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Provider-reported token usage above the model's context window is now exposed as authoritative overflow evidence (`isUsageBackedContextOverflow`), so payload-worded 413 bodies backed by a real token excess stay on the compaction path instead of being routed into model switches ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Token-context evidence anywhere in an error's cause chain now outranks the status-only 413 payload inference, so generic wrappers around provider token-overflow errors (`Provider returned error` wrapping a nested 413 `maximum context length …`) stay on the compaction path instead of being misrouted as byte/media rejections ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Two-phase error finalization no longer leaves a stale status-inferred payload flag behind: when a provider throws a bare `HTTP 413 from …` and only appends the captured response body during formatting, final text carrying explicit token-overflow wording clears the earlier inference so token compaction owns the recovery ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- New `isTextAmbiguousContextOverflow` helper exposes the dual-classified (payload + overflow, no reported token excess) arbitration shared by fallback and model-switching callers, so TurnRecovery and advisor recovery cannot drift ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Fixed Cursor conversation rotation after an abort or mid-turn restart rebuilding a poisoned resume request, so retries replay the last user message on a fresh conversation and can rotate again after a later successful turn.
+- Fixed Cursor tool calls through OpenAI-compatible authentication gateways losing arguments when complete argument maps are sent without streaming deltas ([#9479](https://github.com/can1357/oh-my-pi/issues/9479)).
+- Fixed Cursor plan entitlement refusals repeatedly selecting ineligible accounts by scoping credential blocks to the requested model during rotation ([#9488](https://github.com/can1357/oh-my-pi/issues/9488)).
+- Improved HTTP 413 error classification to accurately distinguish between payload/media size limits and token context window overflows, preventing inappropriate token compaction attempts and routing to correct recovery/fallback strategies ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
+- Fixed Cursor conversation rotation after aborts or mid-turn restarts to properly replay the last user message on a fresh conversation.
 
 ## [18.0.3] - 2026-08-23
 

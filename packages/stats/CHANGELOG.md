@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed SuperGrok usage appearing free by applying matching public xAI API prices, including 200K-token rates, backfilling existing rows, labeling dollar values as API-equivalent estimates, and showing subscription-only models as N/A ([#9512](https://github.com/can1357/oh-my-pi/issues/9512)).
+- Fixed SuperGrok usage appearing as free by applying matching public xAI API pricing (including 200K-token rates), labeling costs as API-equivalent estimates, backfilling existing usage records, and displaying subscription-only models as N/A ([#9512](https://github.com/can1357/oh-my-pi/issues/9512)).
 
 ## [18.0.1] - 2026-08-23
 

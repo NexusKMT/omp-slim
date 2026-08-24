@@ -4,11 +4,11 @@
 
 ### Changed
 
-- Append-only context mode no longer re-serializes the entire already-synced history on every LLM call; per-message digests are memoized by message identity, keeping per-call sync cost flat as conversations grow.
+- Improved performance in append-only context mode by memoizing message serialization, keeping per-call sync overhead flat as conversations grow.
 
 ### Fixed
 
-- `onTurnEnd` now runs for a turn stopped by a terminal-tool-result abort (e.g. a subagent's final `yield`) instead of being skipped as an external abort, so per-turn bookkeeping observes the yield turn.
+- Fixed an issue where `onTurnEnd` was skipped for turns ended by a terminal tool result (such as a subagent's final `yield`).
 
 ## [18.0.0] - 2026-08-22
 

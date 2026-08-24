@@ -4,15 +4,12 @@
 
 ### Changed
 
-- Streaming markdown renders now cache rendered+wrapped rows for unchanged tokens in the unfrozen tail and splice byte-identical rows, re-rendering only the changed suffix each frame — O(delta) tail render instead of O(tail) per tick, −26.6% median frame cost on tight 128KB streaming docs ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
+- Significantly improved streaming Markdown rendering performance by caching unchanged rows, resuming boundary walks, and inspecting only text deltas for guard scans and OSC 8 normalization.
 
 ### Fixed
 
-- Fixed Markdown render aborting the TUI when `createHighlightStream` throws; open fences now fall back to the unhighlighted path.
-- Fixed Korean IME cursor drift in Orca by matching its two-cell Hangul Compatibility Jamo rendering ([#9397](https://github.com/can1357/oh-my-pi/issues/9397)).
-- Markdown streaming renderer now resumes the stable-block-boundary walk at the first tail token instead of re-walking the frozen prefix every frame (boundary walk 241µs → 0.9µs/frame at 128KB, −99.6%) ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
-- Markdown streaming renderer now memoizes the ref-def/CR guard scan: while text grows append-only, only the delta is inspected for the characters a reference definition or CR needs, and a clean delta reuses the previous verdict. Guard cost drops from ~265µs to ~0.1µs per frame on a 128KB tight document ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
-- The Markdown streaming renderer now normalizes OSC 8 hyperlink terminators only in the pending append region instead of re-scanning the whole document on every frame, cutting per-frame OSC8 scan cost from ~25µs to sub-µs at 128KB documents ([#9048](https://github.com/can1357/oh-my-pi/issues/9048)).
+- Fixed TUI aborting when syntax highlighting fails during Markdown rendering by falling back to unhighlighted text.
+- Fixed Korean IME cursor drift in Orca by properly matching two-cell Hangul Compatibility Jamo rendering.
 
 ## [18.0.3] - 2026-08-23
 

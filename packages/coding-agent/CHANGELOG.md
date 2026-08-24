@@ -4,67 +4,32 @@
 
 ### Added
 
-- New `omp git` command: a fullscreen repository TUI with a split/inline/hunk/file diff viewer (minimap scrollbar, word wrap, whitespace-insensitive mode, syntax highlighting, intraline emphasis), a staging sidebar (path or collapsible tree file lists, per-file and per-hunk stage/unstage/discard, shift-selected line staging) and a commit composer with amend support; commit view shows author avatars (Gravatar/GitHub) with an identicon fallback. Full mouse support (click, wheel, minimap seek) plus keyboard navigation. Also available as the `/git` slash command inside interactive sessions (esc exits back to the transcript), and `omp git <revision>`//`/git <revision>` pins the view to one commit.
+- Added the `omp git` command (and `/git` slash command): an interactive, fullscreen repository TUI featuring a split/inline/hunk diff viewer with minimap scrollbar, syntax highlighting, a staging sidebar with line-level staging, commit composer with amend support, and author avatars. Supports keyboard navigation, full mouse interaction, and pinning views to specific commits via `omp git <revision>`.
+- Overhauled the `/extensions` Extension Control Center into a fullscreen alternate-screen dashboard with mouse support, tab navigation, unified inspector views across extension types, live MCP connection management, and expandable details (`Ctrl+O`).
+- Added support for live syntax highlighting in streaming markdown code blocks.
+- Added an immediately editable startup composer for interactive launches, preserving drafts typed while session initialization is in progress.
 
 ### Changed
 
-- Cap streaming markdown renders at the reveal cadence when reveal is caught up; provider deltas accumulate and flush per tick instead of rendering per token.
-- Streaming thinking display stays smooth on long sessions: appending to large thinking blocks no longer re-processes the whole text on every tick.
-- Streamed-edit guard no longer blocks the event loop while streaming: edit-target reads are async and removed-line verification is memoized per file, cutting precheck stalls on large files from tens of milliseconds (seconds cumulative) to low single-digit milliseconds.
+- Improved streaming markdown and thinking block rendering performance on long sessions by batching token updates and eliminating redundant re-processing.
+- Optimized streaming edit verification and session restoration for large files and history-heavy sessions.
 
 ### Fixed
 
-- `!` shell commands on zsh/fish now run in a real PTY: interactive shell startup no longer spews `can't change option: zle`/`monitor` errors or fails gitstatus initialization, and command output keeps its terminal colors in the transcript (same virtual-terminal replay `launch` logs use).
-- Fixed the transcript permanently losing block spacing and compacting every tool call to one line after a stream died mid-message (e.g. a transport drop during a large tool call): the orphaned streaming block no longer jams history retirement, so the live viewport recovers instead of staying in pressure layout until restart.
-- Fixed clean-cutover instructions conflicting with deletion safety by explicitly allowing removal of code made obsolete by the requested cutover.
-- Eval runtime-availability probes (Python/Ruby/Julia) no longer inherit the host stdin handle and are now bounded by the eval call's timeout and abort signal, so a probe that hangs during backend resolution — e.g. the native-Windows inherited-stdin wedge — returns a clear error instead of wedging the whole turn indefinitely ([#9466](https://github.com/can1357/oh-my-pi/issues/9466)).
-- Subagent advisors now review the final `yield`: the yield turn is delivered to the advisor and its review is drained before the subagent session is disposed, instead of being abandoned at teardown ([#9505](https://github.com/can1357/oh-my-pi/issues/9505)).
-- ACP `hub wait` (and other structured tool progress) no longer renders a raw JSON envelope as the tool row: an empty-text result envelope whose data already rides the frame as `rawOutput` no longer falls back to serializing the whole value into a `content` text block ([#9511](https://github.com/can1357/oh-my-pi/issues/9511)).
-- Fixed the sticky Todo HUD being permanently collapsed; `/todo expand` now shows every phase and task, and `/todo collapse` restores the bounded preview ([#9493](https://github.com/can1357/oh-my-pi/issues/9493)).
-- Fixed finalized transcript blocks rendering as runs of blank lines under viewport pressure: empty live blocks (hidden tool activity, content-less streaming blocks) no longer reserve viewport rows or emit blank rows ([#9483](https://github.com/can1357/oh-my-pi/issues/9483)).
-- Fixed retired welcome-screen rows disappearing from terminal history after a resize.
-- `omp --resume`/`--continue` now restores discovery-backed session models (models.yml `discovery:` providers such as `openai-models-list`/`litellm`) instead of silently falling back to the default role ([#9502](https://github.com/can1357/oh-my-pi/issues/9502)).
-- Dual-flag bare-413 goal dead ends (status-only with no body, low occupancy) now persist their terminal error turn so reopened sessions know why the goal stopped, matching the behaviour already in place for pure payload rejections.
-- Persisted terminal empty error turns are now excluded from provider context on session reload; they appear only in the display transcript.
-- Fixed byte-size and media-budget HTTP 413 rejections (e.g. provider vision budgets rejecting archived image frames) dead-ending token compaction with a misleading "freed too little context" warning: with real token headroom the rejection now surfaces honestly and automatic retries of the failing payload are blocked ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Status-only HTTP 413 rejections (opaque reason phrase or empty body) and media-budget numeric-limit rejections (`image count exceeds the limit of N`) now surface the honest payload-rejection warning and block automatic resends instead of dead-ending in token compaction ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Ambiguous HTTP 413 rejections (bare status with no body, media-budget numeric limits) now consult a configured model-fallback chain before any maintenance outcome stands: a different provider's larger byte or media budget can accept the request the primary rejected ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Payload-worded HTTP 413 rejections whose provider-reported token usage exceeds the model's context window are no longer eligible for configured fallback-chain switches: maintenance's authoritative-usage arbitration owns them like pure context overflows ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Goal mode now preserves the intrinsic Fireworks Fast→base degradation precedence over configured hard-error fallback chains: the pre-compaction chain consult is scoped to payload rejections ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- Advisor turn recovery now applies the same payload/usage arbitration as the main loop's fallback eligibility: a dual-classified media-budget 413 with no reported token excess switches the advisor to its configured fallback chain instead of marking it unavailable, while usage-backed overflows keep the veto ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- When a payload-worded 413 dead ends with provider-reported input tokens above the model's window, the warning now diagnoses a token-context problem (enable compaction, reduce usage, or switch models) instead of contradicting the accounting with "NOT a token-context problem" ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- A payload-rejection 413 that dead ends an active goal is now persisted to the session JSONL before the automatic-continuation block returns, so a reopened session keeps the provider's terminal error instead of ending at the last tool result ([#9235](https://github.com/can1357/oh-my-pi/issues/9235)).
-- A streamed-edit removed-lines verification still pending across a turn boundary or completed edit no longer starts later and aborts the agent based on stale content.
-- Fixed the TUI crashing with `undefined is not a constructor` while streaming a highlighted code fence against a stale local `pi-natives` addon that does not export `HighlightStream`.
-- Fixed Hindsight session retains stamping items with retain time instead of the conversation's source timestamps.
-- Fixed streamed `xd://` device writes (including MCP tools) looking like a hung in-flight call while the model is still thinking; they now show as queued until the tool actually starts.
-- Applied registered extension shell environments to interactive `!` commands.
-- Fixed clearing the transcript or switching sessions while a tool was still running leaving spinner animation work active for the rest of the process ([#8733](https://github.com/can1357/oh-my-pi/pull/8733) follow-up).
-- Code blocks now syntax-highlight live while the response streams instead of staying plain until the block settles
-- Fixed `/shake thinking` reporting "Nothing to shake" after removing reasoning; it now reports the dropped count and leaves thinking-only turns empty.
-- Fixed session teardown occasionally losing pending input drafts during shutdown
-- Fixed streaming edit failures caused by trailing partial lines
-- Interrupting a Claude model mid-thinking no longer replays the partial reasoning as quoted conversation text on the next turn, which Anthropic's `reasoning_extraction` classifier refused.
-- Sloppy edit `＋` inserts before an anchor line no longer double their typed indentation or flatten the anchor.
-- Session restore no longer re-runs the edit-matching engine for every historical edit in the transcript; large sessions with many edits resume several times faster.
-- Fixed image requests to Kimi Code / Moonshot failing with 400 `unsupported image url`: their catalog api is openai-completions so the image URL mirror gate wrongly admitted them; Moonshot-native hosts now always receive inline base64 images.
-- Fixed Read failing with `unable to open database file` for cleanly closed WAL-mode SQLite databases without `-wal`/`-shm` sidecars.
-- Fixed collapsed edit results with long wrapped diff lines growing beyond their rendered-row budget and corrupting native Windows terminal transcript layout ([#9302](https://github.com/can1357/oh-my-pi/issues/9302)).
-- Fixed edit tool section header paths not trimming surrounding whitespace, so a header with padded brackets failed with file-not-found.
-- Fixed transcript content disappearing from terminal scrollback below a live hub-wait/todo/jobs card: the card's viewport pin froze scrollback commits at its own rows, so everything the turn streamed below it scrolled off-screen without ever entering terminal history (and was lost for good when the session exited first). A displaceable card with content below it no longer holds the commit ceiling; its rows commit as they scroll off and the card seals in place, so the next poll stacks a fresh card instead of retracting history.
-- Fixed the composer attachment chip thumbnail showing an empty box for pasted images: the paste pipeline re-encodes images as JPEG/WebP, and transmitting those bytes as Kitty PNG data made the terminal reject them (blank placeholder cells). Non-PNG attachments now convert to PNG before the thumbnail transmit, like transcript images.
-- Added an immediately editable startup composer for plain interactive launches; drafts typed while session initialization runs transfer intact into the full UI.
-- Fixed the browser tool's first `open` timing out after 30 s on a slow or cold host: tab startup now runs under its own budget inside the caller's timeout, falls back to the inline worker in time, and no longer leaves an orphan page behind ([#9271](https://github.com/can1357/oh-my-pi/pull/9271) by [@CaptainArni](https://github.com/CaptainArni))
-- Fixed eval kernel shutdown leaking detached runner descendants when direct-process termination could not confirm exit.
-### Fixed
-
-- Fixed startup blocking the event loop for ~20s on Linux with concurrent sessions: the legacy Pi extension parse cache now uses SQLite WAL journaling instead of per-entry journal create/delete + fsync churn ([#9549](https://github.com/can1357/oh-my-pi/issues/9549)).
-### Fixed
-
-- Settings → Plugins tab no longer renders empty on first open of a fresh session; the async plugin list now schedules a repaint when it mounts ([#9526](https://github.com/can1357/oh-my-pi/issues/9526)).
-### Fixed
-
-- Reviving a finished subagent with a `hub` message no longer overwrites its completed `agent://<id>` output with a "exited without calling yield" warning; revival/wake turns only rewrite the artifact when they produce a new `yield` result ([#9518](https://github.com/can1357/oh-my-pi/issues/9518)).
+- Fixed `!` shell commands on zsh/fish by running them inside a real PTY, resolving terminal option errors and preserving ANSI color formatting.
+- Fixed transcript layout corruption and viewport compression caused by interrupted streams, empty blocks, or collapsed wrapped diff lines.
+- Fixed transcript scrollback loss where output below sticky cards (such as hub-wait or todo) failed to commit to terminal history.
+- Improved HTTP 413 error handling: accurately distinguish between true token-context overflows and provider byte/media budget limits, persist terminal errors across sessions, and enable proper fallback-chain model switching.
+- Fixed discovery-backed session models failing to restore when resuming sessions with `omp --resume` or `--continue`.
+- Fixed browser tool initial launch timeouts on slow or cold host environments.
+- Fixed eval runtime probes hanging on Windows due to inherited stdin handles.
+- Fixed Claude models replaying partial thinking blocks as conversation text when interrupted mid-turn.
+- Fixed image request failures with Kimi Code and Moonshot models by ensuring inline base64 image delivery.
+- Fixed SQLite WAL-mode databases without sidecars failing to open in the Read tool.
+- Fixed pasted image thumbnail rendering in the composer attachment preview.
+- Fixed Linux startup event loop delays caused by legacy extension cache fsync churn.
+- Fixed subagent advisors abandoning reviews on the final yield turn during session teardown.
+- Fixed `/todo` expand/collapse commands and corrected `/shake thinking` reporting.
 
 ## [18.0.3] - 2026-08-23
 
@@ -78,42 +43,6 @@
 - Squeezed transcript tool rows no longer render as a bare unstyled `╭─ Hub` frame: a squeezed block keeps its real render whenever it fits the allocated rows, and blocks that genuinely overflow fold to a themed frame that names the tool's activity (e.g. `Hub · send → Main`).
 - Python/Ruby/Julia eval cells that hit their wall-clock timeout during a `parallel()`/`agent()`/`tool.*` fan-out no longer get their kernel force-killed (losing all session state): the timeout now aborts in-flight bridge calls so the runner unwinds as a clean KeyboardInterrupt and the kernel survives.
 - Multi-select ask options whose labels end in `(Recommended)` now show their checked state and avoid duplicate recommendation suffixes ([#9452](https://github.com/can1357/oh-my-pi/issues/9452)).
-### Added
-
-- `/extensions` now joins live `MCPManager` state into MCP rows and the inspector: connection health, `serverInfo` title/description, tool/resource/prompt catalogs, and server instructions, with transport/command last. MCP protocol typings now include 2025-11-25 implementation and tool display metadata (`title`, `description`, `websiteUrl`, `icons`, tool `annotations`).
-- `/extensions` uses one inspector grammar across kinds (identity → enablement/runtime → description → origin → kind surface → contents → config). Tools join live session schemas, rules show apply-when plus body, skills show discovery semantics plus instruction preview, and slash commands parse frontmatter description/`$ARGUMENTS` instead of dumping the raw markdown file.
-- Truncated `/extensions` inspector sections (`… N more`) expand in place with Ctrl+O (the existing `app.tools.expand` binding). Long inspector lines wrap instead of ellipsizing, the inspector leaves a scrollbar gutter, and truncated previews fill leftover viewport height while reserving the hint row. Custom-tool factories that export several tools from one file stay grouped (e.g. `systemd.ts` → `systemd_inspect`/`systemd_control`/`systemd_author`); args stay collapsed until Ctrl+O, and the file's leading JSDoc is the bundle description. List hints show `hidden` for hidden tools/skills, omit default arg counts / `discoverable` / `listed`, and label project-level items with the directory that contains `.omp` when present. Skill discovery sits under Active only when the skill is hidden. Shadowed MCP configs do not join the winner's live connection.
-
-### Changed
-
-- `/extensions` MCP enable/disable now disconnects or reconnects the live `MCPManager` and refreshes session MCP tools, matching `/mcp enable` / `/mcp disable`.
-- `/extensions` MCP status no longer means "enabled in config": a selected server shows Connected / Connecting / Not connected / Inactive from the live manager, matching `/mcp list`. The command/url is no longer used as the MCP description.
-- `/extensions` no longer leads with `Type:` / `Status:` plumbing. Enablement is the first fact after the name for every kind; MCP keeps live connection health in that slot.
-- `/extensions` MCP tools now show `inputSchema` arguments the same way custom tools do: three or fewer args inline, more than three collapsed until Ctrl+O. Server `initialize.instructions` sit under the description instead of as a footer; the duplicate Connection heading is gone (command/url/env remain as labeled rows). Descriptions and guidance longer than three wrapped lines collapse until Ctrl+O.
-- `/extensions` origin path is dim again, matching the pre-overhaul inspector.
-
-### Fixed
-
-- Incremental `/mcp enable` and `/extensions` MCP enable keep already-connected servers' tools in `MCPManager.getTools()`; `connectServers()` merges per-server ownership instead of replacing the whole registry.
-- `/extensions` provider master-disable disconnects that provider's live MCP servers and rebinds session tools without rewriting `mcp.json`; re-enable does not auto-connect.
-- `/extensions` custom-tool factory names and labels on a single inspector row go through `sanitizeDisplayLine`, so embedded newlines cannot inject extra TUI rows.
-- `/extensions` list hints collapse newlines (`sanitizeDisplayLine`) so a rule glob or hook trigger cannot inject extra TUI rows and desync scrolling.
-- `/extensions` MCP enable loads configs with the same discovery filters as startup (`mcp.enableProjectConfig`, Exa, builtin-browser), so toggling a filtered-out row does not start a server session init skipped.
-- Shadowed `/extensions` rows are informational only, including same-name MCP configs that share the winner's `mcp:<name>` id even when disablement wins display state (`enabled: false` + `_shadowed`).
-- `/extensions` sanitizes untrusted MCP/tool display strings (`sanitizeText` then `replaceTabs`) before applying theme SGR, so OSC/BEL/ANSI from a server cannot leak into the TUI. List hints, origin paths, and schema `type`/`default` go through the same boundary.
-- `/extensions` joins custom tools by originating file first: a same-name builtin/MCP/SDK tool is not treated as the custom file, and a factory that also exports the file stem still lists every sibling. Project list hints accept Windows `.omp` paths.
-- `/extensions` custom-tool inspector rows now join live tools by the originating file path carried through `getAllToolInfos()`, so `git.ts` and `git_commit.ts` stay separate while a multi-export factory like `systemd.ts` still groups siblings.
-- `/extensions` Ctrl+O expand follows the selected row (`id` + path). Changing selection collapses again; a live refresh of the same row keeps the expand state.
-- `/extensions` schema `type` and `default` values that land on one inspector parameter row go through `sanitizeDisplayLine`, so a newline in either field cannot inject an extra TUI row.
-- `/extensions` keeps Codex/OpenCode slash-command frontmatter (`description`, `argumentHint` / `argument-hint`) on the capability record after discovery strips it from `content`, so the inspector and search still see those fields. Providers that leave raw frontmatter in `content` still fall back to `commandPreview`.
-- `/extensions` command preview keeps an empty parsed body when a slash-command file is only frontmatter, so YAML is not shown as the template and `$ARGUMENTS` in frontmatter does not report as a body token.
-- `/extensions` builds the live tool list from one `getAllToolInfos()` snapshot instead of rebuilding that collection once per tool.
-- `/extensions` treats Windows UNC custom-tool paths as filesystem provenance so factory siblings on a share still join the same inspector row.
-- `/extensions` repaints live MCP health when `MCPManager` reconnects or trips its crash breaker, not only on EventBus connect-status events.
-- `/extensions` repaints when MCP resource/prompt catalogs finish loading after `connected`, instead of keeping empty counts until unrelated input.
-- `/extensions` joins live custom tools from one ToolInfo snapshot per dashboard render; list rows and the inspector reuse that snapshot instead of rebuilding it per row.
-- `/extensions` PageUp/PageDown scroll an overflowed inspector pane; Up/Down still move the list.
-- `/extensions` (the Extension Control Center) now opens as a fullscreen window on the terminal's alternate screen, matching `/settings`: it borrows the alt buffer for its lifetime (the transcript is untouched underneath) and uses the same modern chrome — a titled rounded frame, the shared `TabBar` for provider switching, and a divider/footer layout. The dashboard is now mouse-aware: the wheel scrolls the list (and the detail inspector, which gained its own scroll viewport), hovering highlights tabs and rows, and clicking selects a row or — when it is already selected — toggles it; clicking a provider tab switches to it. Empty enabled providers are unselectable while disabled providers stay selectable so their master switch can re-enable them.
 
 ## [18.0.2] - 2026-08-23
 

@@ -4,7 +4,7 @@
 
 ### Added
 
-- Exported getAvatarCacheDir to resolve the avatar cache directory path
+- Exported `getAvatarCacheDir` to resolve the avatar cache directory path.
 
 ## [18.0.1] - 2026-08-23
 

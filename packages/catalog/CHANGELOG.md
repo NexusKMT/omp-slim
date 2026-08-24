@@ -4,9 +4,9 @@
 
 ### Fixed
 
-- Fixed effort-less `cursor/cursor-grok-4.5` and `cursor/cursor-grok-4.6` requests being clamped to the `-low` tier, which Cursor's Start plan refuses (`ERROR_RATE_LIMITED_CHANGEABLE`), making the models unusable without an explicit `medium` — including through `omp auth-gateway`, where OpenAI-compatible clients send no effort. The collapsed row now defaults to and clamps to the `-medium` tier the plan serves ([#9478](https://github.com/can1357/oh-my-pi/issues/9478)).
-- Fixed aliased OpenCode Zen Ox Alpha ids (e.g. `opencode-zen/x-preview-f-free`) exposing the generic `minimal`/`low`/`medium`/`high`/`xhigh` ladder instead of the gateway's wire-exact `low`/`high`/`max` tiers, leaving the real `max` tier unreachable; alias detection now also matches the SKU's stencil display name ([#9349](https://github.com/can1357/oh-my-pi/issues/9349)).
-- Fixed public xAI and matching SuperGrok models missing xAI's higher rate card for prompts reaching 200K tokens ([#9512](https://github.com/can1357/oh-my-pi/issues/9512)).
+- Fixed default reasoning effort for `cursor/cursor-grok-4.5` and `cursor/cursor-grok-4.6` so requests without an explicit effort setting default to `-medium` instead of `-low`, preventing rate limit rejections on Cursor's Start plan ([#9478](https://github.com/can1357/oh-my-pi/issues/9478)).
+- Fixed aliased OpenCode Zen Ox Alpha models exposing incorrect effort levels, ensuring the gateway's native `low`, `high`, and `max` tiers are correctly mapped and reachable ([#9349](https://github.com/can1357/oh-my-pi/issues/9349)).
+- Fixed missing rate card tier for public xAI and SuperGrok models with prompt lengths exceeding 200K tokens ([#9512](https://github.com/can1357/oh-my-pi/issues/9512)).
 
 ## [18.0.2] - 2026-08-23
 
