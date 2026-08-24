@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { createModelManager } from "@oh-my-pi/pi-catalog/model-manager";
 import { yoloAutoModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
@@ -57,14 +58,48 @@ describe("Yolo-Auto provider discovery", () => {
 			supportsStore: false,
 			supportsReasoningEffort: true,
 			thinkingFormat: "qwen-chat-template",
+			qwenTemplateReasoningEffort: true,
 		});
-		expect(qwen?.thinking?.mode).toBe("effort");
+		// The template dialect exposes the wire-exact low/medium/xhigh ladder
+		// with mandatory thinking — selecting an effort must reach the request.
+		expect(qwen?.thinking).toMatchObject({
+			mode: "effort",
+			efforts: ["low", "medium", "xhigh"],
+			requiresEffort: true,
+		});
 	});
 
 	test("surfaces wire ids that have no bundled reference", async () => {
 		const { fetch } = yoloAutoModelsFetch();
 		const models = await yoloAutoModelManagerOptions({ apiKey: "yolo-test-key", fetch }).fetchDynamicModels?.();
 		expect(models?.some(model => model.id === "qwen3.8-27b:beta")).toBe(true);
+	});
+
+	test("inherits reasoning and context for models other providers already bundle", async () => {
+		// If Yolo-Auto starts serving a model that has no yolo-auto bundled
+		// reference (e.g. deepseek-v4-flash), the global reference index must
+		// supply the metadata — otherwise the model surfaces with reasoning
+		// off, text-only input, and null context.
+		const fetch: FetchImpl = async () =>
+			new Response(
+				JSON.stringify({
+					data: [
+						{ id: "qwen3.8-27b", object: "model" },
+						{ id: "deepseek-v4-flash", object: "model" },
+					],
+				}),
+				{ status: 200 },
+			);
+		const models = await yoloAutoModelManagerOptions({ apiKey: "yolo-test-key", fetch }).fetchDynamicModels?.();
+		const flash = models?.find(model => model.id === "deepseek-v4-flash");
+
+		expect(flash).toMatchObject({
+			provider: "yolo-auto",
+			baseUrl: "https://yolo-auto.com/v1",
+			reasoning: true,
+			contextWindow: 1048576,
+		});
+		expect(flash?.thinking?.efforts).toEqual([Effort.Low, Effort.High, Effort.Max]);
 	});
 
 	test("returns null when /v1/models rejects the key", async () => {

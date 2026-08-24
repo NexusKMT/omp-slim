@@ -4791,6 +4791,11 @@ export const YOLO_AUTO_STATIC_MODELS: readonly ModelSpec<"openai-completions">[]
 			supportsStore: false,
 			supportsReasoningEffort: true,
 			thinkingFormat: "qwen-chat-template",
+			// Yolo-Auto renders the Qwen 3.8+ chat template server-side, so the
+			// template-kwarg reasoning dialect applies even though the host is
+			// not a local backend: without this the selected effort is silently
+			// dropped and every request sends only `enable_thinking: true`.
+			qwenTemplateReasoningEffort: true,
 		},
 	},
 ];
@@ -4804,17 +4809,27 @@ export interface YoloAutoModelManagerConfig {
 /**
  * Yolo-Auto model manager: OpenAI-compatible chat completions at the
  * flat-rate `qwen3.8-27b` endpoint. Live `/v1/models` discovery replaces the
- * bundled seed once a key is stored or present in `YOLO_AUTO_API_KEY`.
+ * bundled seed once a key is stored or present in `YOLO_AUTO_API_KEY`. Models
+ * the provider adds later inherit metadata (reasoning, thinking, context)
+ * from the global bundled reference index, so new ids work without a per-id
+ * code change.
  */
 export function yoloAutoModelManagerOptions(
 	config?: YoloAutoModelManagerConfig,
 ): ModelManagerOptions<"openai-completions"> {
+	const references = createBundledReferenceMap<"openai-completions">("yolo-auto");
+	const resolveReference = createReferenceResolver(() => references);
 	return {
-		...createSimpleOpenAICompletionsOptions("yolo-auto", YOLO_AUTO_BASE_URL, config),
-		// The runtime reads this from the manager options (not the descriptor
-		// entry): a successful live `/v1/models` response must replace the
-		// bundled seed, not merge it (retired models stay selectable otherwise).
-		dynamicModelsAuthoritative: true,
+		...createOpenAICompatibleModelManagerOptions({
+			api: "openai-completions",
+			providerId: "yolo-auto",
+			defaultBaseUrl: YOLO_AUTO_BASE_URL,
+			config,
+			requireApiKey: true,
+			mapModel: (entry, defaults, reference) =>
+				mapWithBundledReference(entry, defaults, reference ?? resolveReference(defaults.id)),
+			dynamicModelsAuthoritative: true,
+		}),
 	};
 }
 
