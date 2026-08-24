@@ -136,7 +136,10 @@ export class ChildProcess<In extends InMask = InMask> {
 		// Give buffered pipe output a short drain grace after the root exits, then
 		// stop collecting: a backgrounded orphan can hold the pipes far past the
 		// caller's budget. The timer is unref'd so a clean fast exit never waits.
-		this.#exitedGrace = this.#exited
+		// Keyed on the RAW process exit: the normalized #exited awaits the
+		// stderr drain for nonzero exits, so racing the drain against a grace
+		// derived from it would deadlock while an orphan holds stderr.
+		this.#exitedGrace = proc.exited
 			.catch(() => {})
 			.then(
 				() =>

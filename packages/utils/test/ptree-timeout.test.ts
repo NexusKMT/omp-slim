@@ -99,4 +99,27 @@ describe("ptree timeout", () => {
 			if (orphanPid) Process.fromPid(orphanPid)?.killTree(9);
 		}
 	});
+
+	it("completes when a nonzero exit races an orphan holding stderr", async () => {
+		// `sleep 30 >&2 & exit 1`: the nonzero-exit normalization awaits the
+		// stderr drain, so a grace keyed on the normalized exit promise would
+		// deadlock until the orphan closes stderr. The grace must key on the
+		// raw process exit.
+		let orphanPid: number | undefined;
+		try {
+			const start = performance.now();
+			const result = await exec(["sh", "-c", "sleep 30 >&2 & echo $! >&2; exit 1"], {
+				timeout: 1_000,
+				allowNonZero: true,
+				allowAbort: true,
+			});
+			const elapsedMs = performance.now() - start;
+			const match = /(\d+)\s*$/.exec(result.stderr.trim());
+			orphanPid = match ? Number.parseInt(match[1], 10) : undefined;
+			expect(result.exitCode).toBe(1);
+			expect(elapsedMs).toBeLessThan(5_000);
+		} finally {
+			if (orphanPid) Process.fromPid(orphanPid)?.killTree(9);
+		}
+	});
 });
