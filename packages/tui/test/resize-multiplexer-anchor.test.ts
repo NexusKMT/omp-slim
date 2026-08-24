@@ -76,6 +76,38 @@ class ResizeScheduler {
 	}
 }
 
+// Every signal isInsideTerminalMultiplexer() recognizes; the suite itself may
+// run under tmux, screen, Zellij, CMUX, or Herdr, so direct-terminal describes
+// must clear them all (TERM prefixed tmux-/screen- also flags a multiplexer).
+const MUX_SIGNALS = [
+	"TMUX",
+	"STY",
+	"ZELLIJ",
+	"HERDR_ENV",
+	"CMUX_WORKSPACE_ID",
+	"CMUX_SURFACE_ID",
+	"CMUX_REMOTE_TRANSPORT",
+	"TERM",
+] as const;
+
+function useDirectTerminalEnv() {
+	let saved: Partial<Record<(typeof MUX_SIGNALS)[number], string | undefined>>;
+	beforeEach(() => {
+		saved = {};
+		for (const key of MUX_SIGNALS) {
+			saved[key] = Bun.env[key];
+			delete Bun.env[key];
+		}
+		Bun.env.TERM = "xterm-256color";
+	});
+	afterEach(() => {
+		for (const key of MUX_SIGNALS) {
+			if (saved[key] === undefined) delete Bun.env[key];
+			else Bun.env[key] = saved[key];
+		}
+	});
+}
+
 describe("resize anchoring inside a terminal multiplexer", () => {
 	let previousTmux: string | undefined;
 
@@ -368,35 +400,7 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 // bound and the CPR-relative offset math, so a stale offset or a wiped stash
 // silently disables the exact protections the stash exists to provide.
 describe("resize anchor probe stash on a direct terminal", () => {
-	// Every signal isInsideTerminalMultiplexer() recognizes; the suite itself
-	// may run under tmux, screen, Zellij, CMUX, or Herdr.
-	const MUX_SIGNALS = [
-		"TMUX",
-		"STY",
-		"ZELLIJ",
-		"HERDR_ENV",
-		"CMUX_WORKSPACE_ID",
-		"CMUX_SURFACE_ID",
-		"CMUX_REMOTE_TRANSPORT",
-		"TERM",
-	] as const;
-	let saved: Partial<Record<(typeof MUX_SIGNALS)[number], string | undefined>>;
-
-	beforeEach(() => {
-		saved = {};
-		for (const key of MUX_SIGNALS) {
-			saved[key] = Bun.env[key];
-			delete Bun.env[key];
-		}
-		// TERM prefixed tmux-/screen- also flags a multiplexer.
-		Bun.env.TERM = "xterm-256color";
-	});
-	afterEach(() => {
-		for (const key of MUX_SIGNALS) {
-			if (saved[key] === undefined) delete Bun.env[key];
-			else Bun.env[key] = saved[key];
-		}
-	});
+	useDirectTerminalEnv();
 
 	it("zeroes the probe offset after the erase parks the cursor on the viewport top", () => {
 		// A cursor marker in live row 4 parks the hardware cursor at offset 4
@@ -522,21 +526,7 @@ describe("resize anchor probe stash on a direct terminal", () => {
 // history pulled down by a grow; grows must retry, discard ambiguous swallows,
 // and fall back to the accumulated pull bound under the clamp.
 describe("resize anchor probe on a direct-terminal grow", () => {
-	let previousTmux: string | undefined;
-	let previousTerm: string | undefined;
-
-	beforeEach(() => {
-		previousTmux = Bun.env.TMUX;
-		previousTerm = Bun.env.TERM;
-		delete Bun.env.TMUX;
-		Bun.env.TERM = "xterm-256color";
-	});
-	afterEach(() => {
-		if (previousTmux === undefined) delete Bun.env.TMUX;
-		else Bun.env.TMUX = previousTmux;
-		if (previousTerm === undefined) delete Bun.env.TERM;
-		else Bun.env.TERM = previousTerm;
-	});
+	useDirectTerminalEnv();
 
 	it("discards an ambiguous swallow and retries on a grow", () => {
 		// Probe A's late reply (pre-restart row 3) is swallowed while probe
