@@ -91,6 +91,9 @@
 ### Fixed
 
 - Failed `browser.open` calls now terminate OMP-spawned app process trees when no tab can be acquired.
+### Fixed
+
+- Browser handles from `tab.id()`/`tab.ref()`/`tab.waitFor()` now fail fast with a named per-op error (e.g. `handle.click() timed out after 8000ms`) instead of letting a stalled `(await tab.id(n)).click()` consume the whole browser cell ([#9535](https://github.com/can1357/oh-my-pi/issues/9535)).
 
 ## [18.0.3] - 2026-08-23
 
