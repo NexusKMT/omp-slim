@@ -1237,11 +1237,12 @@ export class EventController {
 			const displayMessage: AssistantMessage =
 				silentlyAborted || ttsrSilenced
 					? {
-							// Silence the streaming render by downgrading stopReason to "stop" for
-							// display only — does NOT mutate the persisted message's stopReason
-							// (the marker on errorMessage drives replay-side suppression).
+							// Silence the streaming render without mutating the persisted message.
+							// TTSR reasons describe internal control flow and must not reach the
+							// error presentation after the display-only stopReason downgrade.
 							...this.ctx.streamingMessage,
 							stopReason: "stop",
+							errorMessage: ttsrSilenced ? undefined : this.ctx.streamingMessage.errorMessage,
 						}
 					: this.ctx.streamingMessage;
 			const displayTimeline = splitAssistantMessageToolTimeline(displayMessage);

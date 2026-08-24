@@ -12,9 +12,9 @@
  *         aborted"; `updateContent` receives the original message ref.
  *   C2b errorMessage = USER_INTERRUPT_LABEL (threaded via AbortController) + aborted
  *       → the threaded reason is preserved verbatim, NOT replaced by the generic.
- *   C3  isTtsrAbortPending = true + aborted
- *       → `updateContent` receives a message with `stopReason: "stop"`;
- *         `errorMessage` is NOT set (TTSR existing behavior unchanged).
+ *   C3  isTtsrAbortPending = true + aborted + threaded TTSR reason
+ *       → `updateContent` receives a message with `stopReason: "stop"` and no
+ *         `errorMessage`; the persisted message retains its reason.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
@@ -175,8 +175,11 @@ describe("EventController #handleMessageEnd abort labeling", () => {
 		expect(arg.stopReason).toBe("aborted");
 	});
 
-	it("C3: isTtsrAbortPending=true + aborted -> updateContent stopReason='stop', errorMessage NOT set", async () => {
-		const message = makeAssistantMessage({ stopReason: "aborted", errorMessage: undefined });
+	it("C3: TTSR abort reason is omitted from the interactive display message", async () => {
+		const message = makeAssistantMessage({
+			stopReason: "aborted",
+			errorMessage: "TTSR matched rule: no-unwrap",
+		});
 		const { controller, streamingComponent } = createFixture({
 			streamingMessage: message,
 			isTtsrAbortPending: true,
@@ -184,9 +187,7 @@ describe("EventController #handleMessageEnd abort labeling", () => {
 
 		await controller.handleEvent({ type: "message_end", message });
 
-		// TTSR keeps its existing flag-only render path — `errorMessage` stays undefined,
-		// and the display copy gets `stopReason: "stop"`.
-		expect(message.errorMessage).toBeUndefined();
+		expect(message.errorMessage).toBe("TTSR matched rule: no-unwrap");
 		expect(streamingComponent.updateContent).toHaveBeenCalledTimes(1);
 		const arg = streamingComponent.updateContent.mock.calls[0]![0] as AssistantMessage;
 		expect(arg.stopReason).toBe("stop");
