@@ -318,7 +318,10 @@ describe("RelayBridge attachment release", () => {
 
 		// Mirror Chrome: onDetach reaches the bridge before detach's RPC result.
 		// This echo is expected and must not ban/retract the live target.
-		bridge.extMessage(ext, JSON.stringify({ t: "detached", tabId: 1, reason: "target_closed" }));
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "detached", tabId: 1, reason: "target_closed", relayInitiated: true }),
+		);
 		ack(bridge, ext, "detach");
 		await flush();
 
@@ -355,7 +358,10 @@ describe("RelayBridge attachment release", () => {
 		// Only the initial attach has reached the extension while detach is pending.
 		expect(ext.rpcs("attach")).toHaveLength(1);
 
-		bridge.extMessage(ext, JSON.stringify({ t: "detached", tabId: 1, reason: "target_closed" }));
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "detached", tabId: 1, reason: "target_closed", relayInitiated: true }),
+		);
 		ack(bridge, ext, "detach");
 		await flush();
 		expect(ext.rpcs("attach")).toHaveLength(2);
@@ -470,7 +476,10 @@ describe("RelayBridge attachment release", () => {
 		// The old chrome.debugger.detach finishes after replacement attach and
 		// sends its callback through the new global extension socket. Correlation
 		// must survive the rejected RPC so this cannot retract the new session.
-		bridge.extMessage(replacement, JSON.stringify({ t: "detached", tabId: 1, reason: "target_closed" }));
+		bridge.extMessage(
+			replacement,
+			JSON.stringify({ t: "detached", tabId: 1, reason: "target_closed", relayInitiated: true }),
+		);
 		await flush();
 		const replacementDetach = cdp.messages.find(
 			message =>
@@ -481,5 +490,19 @@ describe("RelayBridge attachment release", () => {
 				message.params.sessionId === replacementSession,
 		);
 		expect(replacementDetach).toBeUndefined();
+
+		// A later genuine user cancellation has no relay attribution and must
+		// still retract the replacement session.
+		bridge.extMessage(replacement, JSON.stringify({ t: "detached", tabId: 1, reason: "canceled_by_user" }));
+		await flush();
+		const userDetach = cdp.messages.find(
+			message =>
+				message.method === "Target.detachedFromTarget" &&
+				message.params !== null &&
+				typeof message.params === "object" &&
+				"sessionId" in message.params &&
+				message.params.sessionId === replacementSession,
+		);
+		expect(userDetach).toBeDefined();
 	});
 });

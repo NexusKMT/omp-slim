@@ -89,9 +89,6 @@ class TabState {
 	attaching: Promise<boolean> | null = null;
 	/** Relay-initiated detach in flight; reattach serializes behind it. */
 	detaching: Promise<void> | null = null;
-	/** Expected chrome.debugger.onDetach echo, independent of the RPC wait. */
-	expectingDetachEcho = false;
-	detachEchoTimer: NodeJS.Timeout | null = null;
 	/** True after the relay put this tab in the omp group; `ompGroupId` holds that group. */
 	grouped = false;
 	/** Group RPC in flight — suppresses duplicate requests from load-time tabUpdated bursts. */
@@ -277,7 +274,7 @@ export class RelayBridge {
 				this.#onCdpEvent(msg.tabId, msg.sessionId, msg.method, msg.params);
 				return;
 			case "detached":
-				this.#onTabDetached(msg.tabId, msg.reason);
+				this.#onTabDetached(msg.tabId, msg.reason, msg.relayInitiated === true);
 				return;
 			case "tabCreated":
 				this.#onTabUpsert(msg.tab);
@@ -313,7 +310,7 @@ export class RelayBridge {
 			// connections still hold sessions: restore them best-effort.
 			if (wasAttached && !tab.attached && this.#sessionHolders(tab.tabId).length > 0) {
 				void this.#ensureAttached(tab).then(ok => {
-					if (!ok) this.#onTabDetached(tab.tabId, "reattach_failed");
+					if (!ok) this.#onTabDetached(tab.tabId, "reattach_failed", false);
 				});
 			}
 		}
@@ -656,18 +653,13 @@ export class RelayBridge {
 		}
 	}
 
-	#onTabDetached(tabId: number, reason: string): void {
+	#onTabDetached(tabId: number, reason: string, relayInitiated: boolean): void {
 		const tab = this.#tabs.get(tabId);
 		if (!tab) return;
-		// Relay-initiated detach can outlive its RPC/socket. Keep callback
-		// correlation separate from the promise used to serialize reattach.
-		if (tab.expectingDetachEcho) {
-			tab.expectingDetachEcho = false;
-			if (tab.detachEchoTimer) clearTimeout(tab.detachEchoTimer);
-			tab.detachEchoTimer = null;
-			tab.attaching = null;
-			return;
-		}
+		// Explicit source attribution comes from the extension that executed
+		// chrome.debugger.detach, so socket replacement cannot confuse this
+		// with a user cancellation or mutate an unrelated attach promise.
+		if (relayInitiated) return;
 		this.#log("tab detached", { tabId, reason });
 		tab.attached = false;
 		tab.attaching = null;
@@ -684,7 +676,6 @@ export class RelayBridge {
 		this.#retractTab(tab);
 		this.#tabs.delete(tabId);
 		for (const conn of this.#conns.values()) conn.claims.delete(tabId);
-		if (tab.detachEchoTimer) clearTimeout(tab.detachEchoTimer);
 	}
 
 	#onTabUpsert(snap: TabSnapshot, opts: { silent?: boolean } = {}): void {
@@ -869,13 +860,6 @@ export class RelayBridge {
 		const tab = this.#tabs.get(tabId);
 		if (!tab?.attached) return;
 		tab.attached = false;
-		tab.expectingDetachEcho = true;
-		if (tab.detachEchoTimer) clearTimeout(tab.detachEchoTimer);
-		tab.detachEchoTimer = setTimeout(() => {
-			tab.expectingDetachEcho = false;
-			tab.detachEchoTimer = null;
-		}, RPC_TIMEOUT_MS);
-		tab.detachEchoTimer.unref();
 		const done = this.#rpc({ op: "detach", tabId })
 			.then(() => {})
 			.catch(() => {})
