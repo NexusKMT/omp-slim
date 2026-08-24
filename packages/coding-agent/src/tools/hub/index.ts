@@ -54,11 +54,13 @@ import {
 	launchRenderResult,
 } from "./launch";
 import {
+	DEFAULT_HUB_LIST_LIMIT,
 	drainPendingInbox,
 	executeInbox,
 	executeList,
 	executeMessageWait,
 	executeSend,
+	MAX_HUB_LIST_LIMIT,
 	messageResult,
 	messagingRenderCall,
 	messagingRenderResult,
@@ -83,6 +85,10 @@ const hubSchema = type({
 	"ids?": type("string[]").describe("wait: job ids to watch (omit = all running jobs); cancel: job ids to kill"),
 	"timeoutMs?": type("number").describe("wait (messages/jobs): timeout in milliseconds (0 waits indefinitely)"),
 	"peek?": type("boolean").describe("inbox: list messages without consuming them"),
+	"status?": type("'running' | 'idle' | 'parked'").describe("list: filter by status; omit for running+idle"),
+	"limit?": type("number > 0").describe(
+		`list: max peer rows; default ${DEFAULT_HUB_LIST_LIMIT}, max ${MAX_HUB_LIST_LIMIT}`,
+	),
 	"name?": type("string <= 48").describe("process ops: stable project-scoped launch name"),
 	"application?": type("string > 0").describe("start: executable or application path"),
 	"args?": type("string[]").describe("start: argv passed directly to the application"),
@@ -172,6 +178,10 @@ export class HubTool implements AgentTool<typeof hubSchema, HubDetails> {
 			call: { op: "list" },
 		},
 		{
+			caption: "Inspect parked peer history",
+			call: { op: "list", status: "parked" },
+		},
+		{
 			caption: "Fire-and-forget DM — same send wakes idle/parked peers",
 			call: {
 				op: "send",
@@ -255,7 +265,10 @@ export class HubTool implements AgentTool<typeof hubSchema, HubDetails> {
 			case "list": {
 				const messaging = this.#messaging();
 				if (!messaging) return hubErrorResult("Peer messaging is unavailable in this session.", { op: "list" });
-				return executeList(messaging.registry, messaging.senderId);
+				return executeList(messaging.registry, messaging.senderId, {
+					status: params.status,
+					limit: params.limit,
+				});
 			}
 			case "send": {
 				const toPeer = params.to?.trim();

@@ -40,7 +40,8 @@ import subagentAsyncPendingTemplate from "../prompts/system/subagent-async-pendi
 import subagentSystemPromptTemplate from "../prompts/system/subagent-system-prompt.md" with { type: "text" };
 import submitReminderTemplate from "../prompts/system/subagent-yield-reminder.md" with { type: "text" };
 import { AgentLifecycleManager, type AgentReviver } from "../registry/agent-lifecycle";
-import { AgentRegistry } from "../registry/agent-registry";
+import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
+import { ensurePersistedRoster } from "../registry/persisted-agents";
 import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage } from "../sdk";
 import type { AgentSession, AgentSessionEvent, Prewalk } from "../session/agent-session";
 import { type ArtifactManager, writeArtifact } from "../session/artifacts";
@@ -278,19 +279,39 @@ function installSubagentRetryFallbackChain(args: {
 	return role;
 }
 
-function renderIrcPeerRoster(selfId: string): string {
-	const peers = AgentRegistry.global()
-		.list()
-		.filter(ref => ref.id !== selfId && ref.status !== "aborted" && ref.kind !== "advisor");
-	if (peers.length === 0) return "- (no other agents)";
-	const lines = peers.map(
-		peer =>
-			`- \`${peer.id}\` — ${peer.displayName} (${peer.kind}, ${peer.status})${peer.activity ? `: ${peer.activity}` : ""}`,
-	);
-	if (peers.some(peer => peer.status === "idle" || peer.status === "parked")) {
-		lines.push("Idle/parked peers are not gone: messaging them wakes (or revives) them.");
+function formatIrcPeerRoster(registry: AgentRegistry, selfId: string): string {
+	const live = registry.listVisibleTo(selfId);
+	let parkedCount = 0;
+	for (const ref of registry.list()) {
+		if (ref.id !== selfId && ref.kind !== "advisor" && ref.status === "parked") parkedCount++;
+	}
+	const lines: string[] = [];
+	if (live.length === 0) {
+		lines.push(parkedCount > 0 ? "- (no live agents)" : "- (no other agents)");
+	} else {
+		for (const peer of live) {
+			lines.push(
+				`- \`${peer.id}\` — ${peer.displayName} (${peer.kind}, ${peer.status})${peer.activity ? `: ${peer.activity}` : ""}`,
+			);
+		}
+	}
+	if (live.some(peer => peer.status === "idle")) {
+		lines.push("Idle peers are not gone: messaging them wakes them.");
+	}
+	if (parkedCount > 0) {
+		lines.push(
+			`${parkedCount} parked peer(s) omitted. Query with \`hub\` op:"list" status:"parked"; send to a known id, \`history://<id>\`, or \`agent://<id>\` still works.`,
+		);
 	}
 	return lines.join("\n");
+}
+
+export async function renderIrcPeerRoster(
+	selfId: string,
+	registry: AgentRegistry = AgentRegistry.global(),
+): Promise<string> {
+	await ensurePersistedRoster(registry, registry.get(selfId)?.sessionFile ?? registry.get(MAIN_AGENT_ID)?.sessionFile);
+	return formatIrcPeerRoster(registry, selfId);
 }
 
 function withAbortTimeout<T>(
@@ -3138,7 +3159,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						worktree: worktree ?? "",
 						outputSchema: normalizedOutputSchema,
 						outputSchemaOverridesAgent: options.outputSchemaOverridesAgent === true,
-						ircPeers: ircEnabled ? renderIrcPeerRoster(id) : "",
+						ircPeers: ircEnabled ? formatIrcPeerRoster(AgentRegistry.global(), id) : "",
 						ircSelfId: ircEnabled ? id : "",
 					});
 					return defaultPrompt.length === 0
@@ -3176,6 +3197,14 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				sessionManager.adoptArtifactManager(options.parentArtifactManager);
 			}
 			sessionOpenedAt = performance.now();
+			if (ircEnabled) {
+				await ensurePersistedRoster(
+					AgentRegistry.global(),
+					AgentRegistry.global().get(MAIN_AGENT_ID)?.sessionFile ??
+						AgentRegistry.global().get(id)?.sessionFile ??
+						sessionFile,
+				);
+			}
 
 			const sessionPromise = createAgentSession(buildSubagentSessionOptions(sessionManager, null));
 			let session: AgentSession;
@@ -3205,6 +3234,14 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					});
 					if (options.parentArtifactManager) {
 						reopened.adoptArtifactManager(options.parentArtifactManager);
+					}
+					if (ircEnabled) {
+						await ensurePersistedRoster(
+							AgentRegistry.global(),
+							AgentRegistry.global().get(MAIN_AGENT_ID)?.sessionFile ??
+								AgentRegistry.global().get(id)?.sessionFile ??
+								sessionFile,
+						);
 					}
 					const { session: revived } = await createAgentSession(
 						buildSubagentSessionOptions(reopened, expectedAgentRef),
