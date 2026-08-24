@@ -202,6 +202,26 @@ describe("browser handle enrichment — guarded actions", () => {
 		expect(labels).toEqual(["handle.select()"]);
 	});
 
+	it("guards drag and touch input methods, not just click/type", async () => {
+		const makeStalled = (method: string): ElementHandle =>
+			({
+				[method]: () => new Promise<void>(() => {}), // stalled CDP input
+				type: async () => {},
+				evaluate: async () => {},
+				dispose: async () => {},
+			}) as unknown as ElementHandle;
+		const { guard, labels } = makeGuard(50);
+
+		const drag = toActionableHandle(makeStalled("drag"), guard) as unknown as Record<string, () => Promise<void>>;
+		await expect(drag.drag!()).rejects.toThrow("handle.drag() timed out after 50ms");
+		const touch = toActionableHandle(makeStalled("touchStart"), guard) as unknown as Record<
+			string,
+			() => Promise<void>
+		>;
+		await expect(touch.touchStart!()).rejects.toThrow("handle.touchStart() timed out after 50ms");
+		expect(labels).toEqual(["handle.drag()", "handle.touchStart()"]);
+	});
+
 	it("runs the guarded fill as a single op without re-entering the wrapped type()", async () => {
 		const node = { value: "old", focused: false };
 		const stub = {

@@ -331,10 +331,12 @@ export type ActionableHandle = ElementHandle & { fill(value: string): Promise<vo
 export type HandleOpGuard = <T>(label: string, fn: (signal: AbortSignal) => Promise<T>) => Promise<T>;
 
 /**
- * Interactive `ElementHandle` methods that dispatch input or navigation and can
- * stall on a busy page. When {@link toActionableHandle} is given a guard, each is
- * routed through the per-op fail-fast wrapper; without it the inherited puppeteer
- * method runs outside the op map and a stall consumes the whole cell (issue #9535).
+ * Every `ElementHandle` method that dispatches input, pointer/touch, drag, or navigation
+ * work and can therefore stall on a busy page. When {@link toActionableHandle} is given a
+ * guard, each is routed through the per-op fail-fast wrapper; without it the inherited
+ * puppeteer method runs outside the op map and a stall consumes the whole cell (issue #9535).
+ * Pure reads (`boundingBox`, `screenshot`, `evaluate`, queries) are omitted — they are not
+ * user-driven actions and keep their native puppeteer behavior.
  */
 const GUARDED_HANDLE_METHODS = [
 	"click",
@@ -346,6 +348,15 @@ const GUARDED_HANDLE_METHODS = [
 	"select",
 	"uploadFile",
 	"scrollIntoView",
+	"drag",
+	"dragEnter",
+	"dragOver",
+	"drop",
+	"dragAndDrop",
+	"touchStart",
+	"touchMove",
+	"touchEnd",
+	"autofill",
 ] as const satisfies readonly (keyof ElementHandle)[];
 
 type GuardedHandleMethod = (typeof GUARDED_HANDLE_METHODS)[number];
