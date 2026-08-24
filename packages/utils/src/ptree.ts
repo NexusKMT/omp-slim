@@ -104,7 +104,8 @@ export class ChildProcess<In extends InMask = InMask> {
 	#stderrDone: Promise<void>;
 	#exited: Promise<number>;
 	#stderrStream?: ReadableStream<Uint8Array>;
-
+	// Termination in flight after kill(); aborted exits await it before reporting.
+	#terminating?: Promise<boolean | void>;
 	constructor(
 		readonly proc: PipedSubprocess<In>,
 		readonly exposeStderr: boolean,
@@ -220,7 +221,7 @@ export class ChildProcess<In extends InMask = InMask> {
 	kill(reason?: Exception, gracefulMs?: number) {
 		if (reason && !this.#exitReasonPending) this.#exitReasonPending = reason;
 		if (!this.proc.killed)
-			void Process.fromPid(this.proc.pid)
+			this.#terminating = Process.fromPid(this.proc.pid)
 				?.terminate(gracefulMs === undefined ? undefined : { gracefulMs })
 				?.catch(e => void e);
 	}
@@ -283,10 +284,10 @@ export class ChildProcess<In extends InMask = InMask> {
 			else throw err;
 		}
 
-		if (!exitError) exitError = this.exitReason;
-		if (!exitError && this.exitCode !== null && this.exitCode !== 0) {
-			exitError = new NonZeroExitError(this.exitCode, this.#stderrTail);
-		}
+		// On abort/timeout, hold the result until the tree is actually gone: the
+		// native terminate() is graceful-first, and reporting before it finishes
+		// would leave timed-out descendants alive past the caller's budget.
+		if (exitError?.aborted && this.#terminating) await this.#terminating;
 
 		const exitCode = this.exitCode ?? (exitError && !exitError.aborted ? exitError.exitCode : null);
 		const ok = exitCode === 0;
@@ -313,7 +314,10 @@ export class ChildProcess<In extends InMask = InMask> {
 		// Use a clearable timer instead of Bun.sleep(): an uncleared sleep keeps the
 		// event loop referenced for the full timeout even after a fast child exits.
 		const timer = setTimeout(() => {
-			if (this.proc.exitCode === null) this.kill(new TimeoutError(ms, this.#stderrTail));
+			// Hard-kill the tree immediately: the caller's budget is already
+			// breached, and a graceful phase loses TERM-ignoring descendants once
+			// the root dies and they reparent away from the walk.
+			if (this.proc.exitCode === null) this.kill(new TimeoutError(ms, this.#stderrTail), -1);
 		}, ms);
 		this.proc.exited.catch(() => {}).then(() => clearTimeout(timer));
 	}

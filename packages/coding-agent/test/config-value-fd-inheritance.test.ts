@@ -86,15 +86,40 @@ test.skipIf(process.platform === "win32")(
 
 		// The backgrounded sleep must never get to write: the timeout kills the
 		// whole tree, not just the shell (parity with the executeShell contract).
-		const result = await runShellCommand(`{ sleep 0.4; echo done > "${marker}"; } & sleep 10`, 150);
+		// The resolver returns only after termination completes, so the marker
+		// delay and poll window only need comfortable margins against scheduler
+		// noise — the poll keeps discriminating power if that await is ever lost
+		// (an orphan would write at the delay, inside the window).
+		const result = await runShellCommand(`{ sleep 1.5; echo done > "${marker}"; } & sleep 10`, 150);
 		expect(result).toBeUndefined();
 		// Real subprocess timing: fake timers cannot advance a child's clock, and
 		// the oracle is "the marker never appears" — poll so a leak fails fast
 		// instead of paying the full window on green.
-		const deadline = Date.now() + 700;
+		const deadline = Date.now() + 2000;
 		while (Date.now() < deadline && !fs.existsSync(marker)) {
 			await Bun.sleep(50);
 		}
 		expect(fs.existsSync(marker), "orphaned descendant wrote the marker after the timeout").toBe(false);
+	},
+);
+
+test.skipIf(process.platform === "win32")(
+	"a timed-out !command hard-kills descendants that ignore SIGTERM",
+	async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-config-treekill-term-"));
+		roots.push(root);
+		const marker = path.join(root, "marker");
+
+		// Parity with the executeShell contract (natives native.test.ts "should
+		// SIGKILL workloads that ignore SIGTERM on timeout"): the timeout must
+		// hard-kill the whole tree, and the resolver must not report the timeout
+		// until that kill has completed.
+		const result = await runShellCommand(`{ trap '' TERM; sleep 1.5; echo done > "${marker}"; } & sleep 10`, 150);
+		expect(result).toBeUndefined();
+		const deadline = Date.now() + 2000;
+		while (Date.now() < deadline && !fs.existsSync(marker)) {
+			await Bun.sleep(50);
+		}
+		expect(fs.existsSync(marker), "SIGTERM-ignoring descendant wrote the marker after the timeout").toBe(false);
 	},
 );
