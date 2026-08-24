@@ -42,6 +42,7 @@ import {
 	type AdvisorAgent,
 	type AdvisorConfig,
 	AdvisorEmissionGuard,
+	AdvisorLoopGuard,
 	type AdvisorMessageDetails,
 	type AdvisorNote,
 	AdvisorOutputQuarantinedError,
@@ -874,6 +875,19 @@ export class SessionAdvisors {
 				serviceTierResolver: advisorServiceTierResolver,
 			});
 			advisorAgent.setDisableReasoning(shouldDisableReasoning(advisorThinkingLevel));
+			// The advisor's own loop needs the same repeated-tool-call bound the
+			// primary gets from `LoopGuards`; nothing else stops it reissuing one
+			// failing call until the update is abandoned.
+			const advisorLoopGuard = new AdvisorLoopGuard({
+				settings: this.#host.settings,
+				name: advisorName,
+				liveMessages: () => advisorAgent.state.messages,
+				appendMessage: message => advisorAgent.appendMessage(message),
+			});
+			advisorAgent.setOnTurnEnd((messages, signal, context) => {
+				if (signal?.aborted) return;
+				advisorLoopGuard.recordTurn(messages, context);
+			});
 
 			const advisorAgentFacade: AdvisorAgent = {
 				prompt: async input => {
