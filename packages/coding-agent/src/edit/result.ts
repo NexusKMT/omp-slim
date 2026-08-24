@@ -1,3 +1,10 @@
+/**
+ * Shared model-visible and structured results for every edit backend.
+ *
+ * A completed edit always needs the same hashline-compatible preview,
+ * diagnostics metadata, snapshot cap, and aggregate shape. Keeping those
+ * mechanics here makes each backend responsible only for applying its edit.
+ */
 import { buildCompactDiffPreview } from "@oh-my-pi/hashline";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { FileDiagnosticsResult } from "../lsp";
@@ -119,8 +126,8 @@ export function createAggregateEditDetails(options: AggregateEditDetailsOptions)
 			perFileResults?.find(entry => entry.firstChangedLine !== undefined)?.firstChangedLine,
 		...(perFileResults ? { perFileResults } : {}),
 		...(options.path ? { path: options.path } : {}),
-		...(options.oldText !== undefined ? { oldText: options.oldText } : {}),
-		...(options.newText !== undefined ? { newText: options.newText } : {}),
+		...("oldText" in options ? { oldText: options.oldText } : {}),
+		...("newText" in options ? { newText: options.newText } : {}),
 		...(options.snapshotsPruned ? { snapshotsPruned: true } : {}),
 	};
 	return pruneOversizedEditSnapshots(details);
@@ -147,8 +154,10 @@ export function createAggregateEditToolResult(
 	};
 }
 
-/** Builds one hashline-style result and its aggregate-ready per-file details. */
-export function createEditResult(options: EditResultOptions): EditResult {
+function formatEditResultText(options: EditResultOptions): string {
+	if (options.text !== undefined) return options.text;
+	if (options.op === "delete") return `Deleted ${options.displayPath}`;
+
 	const previewDiff = options.previewSource
 		? generateDiffString(options.previewSource.before, options.previewSource.after, undefined, {
 				path: options.previewSource.path,
@@ -165,11 +174,12 @@ export function createEditResult(options: EditResultOptions): EditResult {
 		.filter(Boolean)
 		.join("\n");
 	const warnings = options.warnings?.filter(Boolean) ?? [];
-	const text =
-		options.text ??
-		(options.op === "delete"
-			? `Deleted ${options.displayPath}`
-			: `${body}${warnings.length > 0 ? `\n\nWarnings:\n${warnings.join("\n")}` : ""}`);
+	return `${body}${warnings.length > 0 ? `\n\nWarnings:\n${warnings.join("\n")}` : ""}`;
+}
+
+/** Builds one hashline-style result and its aggregate-ready per-file details. */
+export function createEditResult(options: EditResultOptions): EditResult {
+	const text = formatEditResultText(options);
 	const meta = outputMeta()
 		.diagnostics(options.diagnostics?.summary ?? "", options.diagnostics?.messages ?? [])
 		.get();
@@ -183,8 +193,8 @@ export function createEditResult(options: EditResultOptions): EditResult {
 		move: options.move,
 		sourcePath: options.sourcePath,
 		meta,
-		oldText: options.oldText,
-		newText: options.newText,
+		...("oldText" in options ? { oldText: options.oldText } : {}),
+		...("newText" in options ? { newText: options.newText } : {}),
 	};
 	const details: EditToolDetails = {
 		diff: options.diff,
@@ -194,8 +204,8 @@ export function createEditResult(options: EditResultOptions): EditResult {
 		move: options.move,
 		sourcePath: options.sourcePath,
 		meta,
-		oldText: options.oldText,
-		newText: options.newText,
+		...("oldText" in options ? { oldText: options.oldText } : {}),
+		...("newText" in options ? { newText: options.newText } : {}),
 		...(options.resultPath ? { path: options.resultPath } : {}),
 	};
 	return {
