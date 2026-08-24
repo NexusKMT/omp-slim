@@ -9,6 +9,7 @@
 ### Fixed
 
 - Fixed graceful terminal shutdown leaving eligible finalized output in the mutable viewport instead of retiring it before shell handoff.
+- Fixed streaming Markdown fast-tail byte-identity divergences across seams: (1) a `_…_` emphasis row ending in a Unicode letter/number now stays literal per CommonMark intraword rules (fixed seam word-char checks: `[\w\p{L}\p{N}]` for underscore, `[^\s\p{P}\p{S}]` for `*`/`~`); (2) a `*`/`~` row followed by a Unicode format/combining char (`*a.*` + U+200C) now drops emphasis as cold render does; (3) an inert delta completing a GFM table delimiter row now re-renders the tail as a table instead of splicing paragraph rows.
 
 ## [18.0.4] - 2026-08-24
 

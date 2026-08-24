@@ -1007,6 +1007,22 @@ const FAST_LITERAL_MARKER_RE = /[*~`[\]<>()$&#]/;
 // open an emphasis that a future delta closes. Only flanked `_` is a
 // delimiter; intraword `_` (a_b) is literal.
 const FAST_ROW_UNDERSCORE_RE = /(?:^|[^\w])_/;
+// Two distinct CommonMark word-char notions drive the seam re-flank checks.
+// For the `_`-underscore seam, "word char" = ASCII `\w` (which includes `_`)
+// plus Unicode letters/numbers — `[\w\p{L}\p{N}]`. `\w` alone missed a row
+// ending in a Unicode letter (`é`); CM's char class `[^\s\p{P}\p{S}]` would
+// wrongly treat `_` (\p{Pc}) as a word char and break the `_..._` intraword
+// gate. For `*`/`~` closing emphasis, marked's flanking test uses the full
+// class `[^\s\p{P}\p{S}]` (which covers format/combining marks like U+200C and
+// U+0301), so branch 2 must use that wider class.
+const FAST_UNDERSCORE_WORD_AT_END_RE = /[\w\p{L}\p{N}]$/u;
+const FAST_CMARK_WORD_AT_START_RE = /^[^\s\p{P}\p{S}]/u;
+// A GFM table delimiter row lets a preceding pipe-header line flip into a
+// table when a future inert delta completes it — even a marker-free delta
+// (`| col_a | col_b |\n| --` + `--- | -`). The cold render then re-wraps and
+// restyles the header, so the splice must disarm. The gate runs on the GROWN
+// last line (`recipe.rowRaw`'s last line + deltaTabs) in render().
+const FAST_TABLE_DELIM_ROW_RE = /^\s*\|?[\s:]*-+\s*(\|[\s:]*-+\s*)+\|?\s*$/;
 
 // A paragraph's LAST line can complete into a different block kind under an
 // inert delta (ATX heading, blockquote, bullet marker, HR, ref-def) — disarm
@@ -2059,9 +2075,12 @@ export class Markdown implements Component {
 				// splice keeps it. A row ending `$` (closed inline math) followed
 				// by a digit is invalidated by the anti-currency rule ($x$123 is
 				// literal, not math) — disarm.
+				const grownLastLine = recipe.rowRaw.slice(recipe.rowRaw.lastIndexOf("\n") + 1) + deltaTabs;
 				const trailingDelimiterSeamHazard =
-					(markerDelta && (deltaTabs.startsWith("_") || deltaTabs.endsWith("_")) && /\w$/.test(recipe.rowRaw)) ||
-					(!markerDelta && /[*~_]$/.test(recipe.rowRaw) && /^\w/.test(deltaTabs)) ||
+					(markerDelta &&
+						(deltaTabs.startsWith("_") || deltaTabs.endsWith("_")) &&
+						FAST_UNDERSCORE_WORD_AT_END_RE.test(recipe.rowRaw)) ||
+					(!markerDelta && /[*~_]$/.test(recipe.rowRaw) && FAST_CMARK_WORD_AT_START_RE.test(deltaTabs)) ||
 					(!markerDelta && recipe.rowRaw.endsWith("$") && /^[0-9]/.test(deltaTabs));
 				// A delta opening a pairing char when the captured row ENDS with the
 				// same char can re-pair across the seam: cold lex of the joined run
@@ -2079,6 +2098,9 @@ export class Markdown implements Component {
 					!lineStartHazard &&
 					!hardDelta &&
 					!trailingDelimiterSeamHazard &&
+					// A grown GFM delimiter last line flips a preceding pipe-header
+					// into a table on a marker-free delta (`| --` + `--- | -`).
+					!FAST_TABLE_DELIM_ROW_RE.test(grownLastLine) &&
 					(!markerDelta || (!this.#lastTailCapture?.open && !pairSeamHazard && !inlineHasOpen(deltaTokens!))) &&
 					!FAST_URL_ANYWHERE_RE.test(seamWindow)
 				) {

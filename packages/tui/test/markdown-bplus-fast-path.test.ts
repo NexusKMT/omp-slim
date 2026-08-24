@@ -303,6 +303,35 @@ describe("B+ fast-tail paragraph re-wrap", () => {
 	it("row-ending math delimiter followed by digit disarms (anti-currency)", () => {
 		assertSpliceParts(["the value is $x$", "the value is $x$123"], "the value is $x$123");
 	});
+
+	it("row-ending underscore after a Unicode word char disarms (intraword re-flank)", () => {
+		// CommonMark flanking treats `é` as a word char (Unicode punctuation), so
+		// `é_foo_` is intraword-literal: the closing `_` cannot open emphasis. An
+		// ASCII-only `\w` predicate would miss that and splice the styled row.
+		assertSpliceParts(["é", "é_foo_"], "é_foo_");
+	});
+
+	it("row-ending closing star followed by a Unicode format char disarms (CommonMark word class)", () => {
+		// marked's flanking word-char class is `[^\s\p{P}\p{S}]` (includes Cf/Mn):
+		// `*a.*` + ZWJ U+200C is literal (the `*` is non-right-flanking), but the
+		// ASCII-word splice would keep the styled row.
+		assertSpliceParts(["*a.*", "*a.*​"], "*a.*​");
+		// Combining acute (Mn) and soft hyphen (Cf) hit the same seam.
+		assertSpliceParts(["*a.*", "*a.*́"], "*a.*́");
+		assertSpliceParts(["*a.*", "*a.*­"], "*a.*­");
+	});
+
+	it("inert delta completing a GFM delimiter row flips the tail to a table — disarms", () => {
+		// Streamed `| col_a | col_b |\n| --`, then a marker-free `--- | -`: the
+		// grown last line becomes a valid delimiter, so cold render wraps and
+		// restyles the header as a table. A splice would keep the paragraph rows
+		// byte-for-byte and diverge from cold.
+		const frozen = "Intro paragraph before the table streams in, with a `code span` and **bold** for flavor. ";
+		assertSpliceParts(
+			[`${frozen}\n\n| col_a | col_b |\n| --`, `${frozen}\n\n| col_a | col_b |\n| ----- | --`],
+			`${frozen}\n\n| col_a | col_b |\n| ----- | --`,
+		);
+	});
 });
 
 it("line-start hazard does not fire on prose (char-class range regression)", () => {
