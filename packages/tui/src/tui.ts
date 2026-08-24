@@ -640,7 +640,9 @@ export class TUI extends Container {
 	#parkedViewportOffset = 0;
 	// In-flight post-resize anchor probe: the stale viewport snapshot and park
 	// offset captured when CSI 6n was written, plus the no-reply fallback timer.
-	#resizeProbe: { window: readonly string[]; offset: number; timer: RenderTimer; swallowedRow?: number } | undefined;
+	#resizeProbe:
+		| { window: readonly string[]; offset: number; timer: RenderTimer; swallowedRow?: number; retried: boolean }
+		| undefined;
 	// Pre-erase viewport snapshot for the settled resize-anchor probe: the erase
 	// in #beginResizeAltPaint empties #providerWindow, so the probe must bound
 	// the anchor with the window that was actually on screen when the resize
@@ -1159,20 +1161,38 @@ export class TUI extends Container {
 	 * trip against the parked cursor reports where the viewport's logical line
 	 * landed. The settled repaint waits for the reply (or a short timeout).
 	 */
-	#beginResizeAnchorProbe(): void {
+	#beginResizeAnchorProbe(retry = false): void {
 		this.#cancelResizeProbe();
 		const timer = this.#renderScheduler.scheduleRender(() => {
+			const probe = this.#resizeProbe;
+			if (
+				probe !== undefined &&
+				probe.swallowedRow === undefined &&
+				!probe.retried &&
+				isInsideTerminalMultiplexer() &&
+				this.#resizeBurstGrew
+			) {
+				// A CPR-less multiplexer grow cannot be anchored safely: every
+				// choice inside the unknown pull span risks either overwriting
+				// pulled-back committed rows or leaving stale live rows behind.
+				// A dropped DSR reply is a transient race, so ask once more
+				// before falling back to the conservative bound.
+				this.#beginResizeAnchorProbe(true);
+				return;
+			}
 			// A canceled probe's reply may have been dropped entirely, in which
 			// case the reply swallowed as stale was actually this probe's own
 			// answer; it is exact then, and no worse than the pre-resize
 			// viewport guess when the swallowed reply really was stale.
-			this.#resolveResizeAnchor(this.#resizeProbe?.swallowedRow);
+			this.#resolveResizeAnchor(probe?.swallowedRow);
 		}, TUI.#RESIZE_PROBE_TIMEOUT_MS);
-		this.#resizeProbe = { window: this.#resizeProbeWindow, offset: this.#resizeProbeOffset, timer };
+		this.#resizeProbe = { window: this.#resizeProbeWindow, offset: this.#resizeProbeOffset, timer, retried: retry };
 		// Replies still outstanding at arm time answer canceled probes against
 		// pre-restart geometry; they must be swallowed, not matched to this
 		// probe, or a delayed first reply anchors the settled repaint with the
-		// cursor row from before the latest resize.
+		// cursor row from before the latest resize. (On a retry this also
+		// covers the retried request's own late reply: swallowed, it still
+		// resolves the probe through the timeout's swallowedRow path.)
 		this.#staleCprReplies = this.#pendingCprReplies;
 		this.#pendingCprReplies++;
 		this.terminal.write("\x1b[6n");

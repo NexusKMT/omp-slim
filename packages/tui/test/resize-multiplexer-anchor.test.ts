@@ -167,22 +167,63 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		tui.stop();
 	});
 
-	it("anchors a CPR-less grow at the conservative pull bound", () => {
-		// Grow 12 -> 20 with the probe reply dropped: tmux may have pulled up
-		// to 8 scrollback rows down, moving the real viewport top from 3 to as
-		// far as 11. The pre-resize top would repaint at row 3 over pulled-back
-		// committed rows; the timeout must anchor at the upper bound 3 + 8 = 11
-		// (CUP row 12) — exact when scrollback covers the pull, and merely
-		// below the real viewport when it does not.
+	it("anchors a doubly CPR-less grow at the conservative pull bound", () => {
+		// Grow 12 -> 20 with both the original probe's reply and the retry's
+		// reply dropped: tmux may have pulled up to 8 scrollback rows down,
+		// moving the real viewport top from 3 to as far as 11. The pre-resize
+		// top would repaint at row 3 over pulled-back committed rows; the
+		// final timeout must anchor at the upper bound 3 + 8 = 11 (CUP row
+		// 12) — exact when scrollback covers the pull, and merely below the
+		// real viewport when it does not.
 		const { terminal, tui, renderScheduler, writes } = startRig();
 		terminal.resize(40, 20);
 		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
 		writes.length = 0;
-		renderScheduler.settle(); // probe timeout with no reply at all
+		renderScheduler.settle(); // first timeout: no reply -> one bounded retry
+		expect(writes.join("")).toContain("\x1b[6n");
+		expect(writes.join("")).not.toMatch(/\x1b\[\d+;1H/);
+		renderScheduler.settle(); // retry timeout: conservative fallback
 		const repaint = writes.join("");
 		const cup = repaint.match(/\x1b\[(\d+);1H/);
 		expect(cup).not.toBeNull();
 		expect(Number(cup![1])).toBe(12);
+		tui.stop();
+	});
+
+	it("resolves a CPR-less grow from the retried probe's reply", () => {
+		// The original probe's reply is merely late: it lands after the retry
+		// is armed (swallowed as stale, pre-grow row), and the retry's own
+		// reply then resolves the anchor eagerly at the true post-pull row.
+		const { terminal, tui, renderScheduler, writes } = startRig();
+		terminal.resize(40, 20);
+		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
+		renderScheduler.settle(); // first timeout: no reply -> one bounded retry
+		writes.length = 0;
+		terminal.sendInput("\x1b[4;1R"); // late original reply: swallowed
+		expect(writes.join("")).not.toMatch(/\x1b\[\d+;1H/);
+		terminal.sendInput("\x1b[8;1R"); // retry's reply: parked cursor at row 7
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(8);
+		tui.stop();
+	});
+
+	it("recovers the retried probe's swallowed reply when the original was dropped", () => {
+		// The original reply never arrives, so the retry's own reply is
+		// swallowed as presumed-stale; the retry timeout must anchor from it
+		// rather than the conservative bound.
+		const { terminal, tui, renderScheduler, writes } = startRig();
+		terminal.resize(40, 20);
+		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
+		renderScheduler.settle(); // first timeout: no reply -> one bounded retry
+		terminal.sendInput("\x1b[8;1R"); // retry's reply: swallowed as presumed-stale
+		writes.length = 0;
+		renderScheduler.settle(); // retry timeout -> resolve from the swallowed row
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(8);
 		tui.stop();
 	});
 });
