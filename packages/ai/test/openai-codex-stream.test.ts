@@ -4217,6 +4217,125 @@ describe("openai-codex streaming", () => {
 			lastPreviousResponseId: undefined,
 		});
 	});
+	it.each([
+		["a pre-response rate_limit_exceeded rejection", "rate_limit_exceeded", false],
+		["slow_down interrupts response progress", "slow_down", true],
+	] as const)("preserves websocket continuation when %s", async (_case, code, emitPartialResponse) => {
+		const tempDir = TempDir.createSync("@pi-codex-stream-");
+		setAgentDir(tempDir.path());
+		const sentRequests: Array<Record<string, unknown>> = [];
+		const fetchMock = vi.fn(async () => {
+			throw new Error("SSE fallback should not be called");
+		});
+
+		class RateLimitedContinuationWebSocket extends MockWebSocket {
+			constructor(url: string, options?: { headers?: WsHeaders }) {
+				super(url, options);
+				this.scheduleOpen();
+			}
+
+			override send(data: string): void {
+				const request = JSON.parse(data) as Record<string, unknown>;
+				sentRequests.push(request);
+				const requestIndex = sentRequests.length;
+
+				if (requestIndex === 1) {
+					this.emitCodexResponse({
+						messageId: "msg_1",
+						responseId: "resp_1",
+						text: "First answer",
+						terminalType: "response.completed",
+						includeCreated: true,
+					});
+					return;
+				}
+
+				if (requestIndex === 2) {
+					expect(request.previous_response_id).toBe("resp_1");
+					if (emitPartialResponse) {
+						this.sendJson({ type: "response.created", response: { id: "resp_rejected" } });
+						this.sendJson({
+							type: "response.output_item.added",
+							item: {
+								type: "message",
+								id: "msg_rejected",
+								role: "assistant",
+								status: "in_progress",
+								content: [],
+							},
+						});
+						this.sendJson({ type: "response.content_part.added", part: { type: "output_text", text: "" } });
+						this.sendJson({ type: "response.output_text.delta", delta: "Partial answer" });
+					}
+					this.sendJson({
+						type: "error",
+						code,
+						message:
+							"Your request rate increased too quickly. Please reduce the request rate and gradually increase it again.",
+					});
+					return;
+				}
+
+				if (requestIndex === 3) {
+					this.emitCodexResponse({
+						messageId: "msg_3",
+						responseId: "resp_3",
+						text: "Second answer",
+						terminalType: "response.completed",
+						includeCreated: true,
+					});
+					return;
+				}
+
+				throw new Error(`Unexpected websocket request index: ${requestIndex}`);
+			}
+		}
+
+		global.WebSocket = RateLimitedContinuationWebSocket as unknown as typeof WebSocket;
+		const model = createCodexTestModel("https://chatgpt.com/backend-api");
+		const providerSessionState = new Map<string, ProviderSessionState>();
+		const firstContext: Context = {
+			systemPrompt: ["You are a helpful assistant."],
+			messages: [{ role: "user", content: "First question", timestamp: Date.now() }],
+		};
+		const options = {
+			fetch: fetchMock as FetchImpl,
+			apiKey: createCodexTestToken(),
+			sessionId: `ws-${code}-continuation-session`,
+			providerSessionState,
+		};
+		const firstResponse = await streamOpenAICodexResponses(model, firstContext, options).result();
+		const secondContext: Context = {
+			systemPrompt: ["You are a helpful assistant."],
+			messages: [
+				...firstContext.messages,
+				firstResponse,
+				{ role: "user", content: "Second question", timestamp: Date.now() + 1 },
+			],
+		};
+
+		const rejectedResponse = await streamOpenAICodexResponses(model, secondContext, options).result();
+		expect(rejectedResponse.stopReason).toBe("error");
+		expect(rejectedResponse.errorMessage).toContain(code);
+		if (emitPartialResponse) {
+			expect(JSON.stringify(rejectedResponse.content)).toContain("Partial answer");
+		} else {
+			expect(rejectedResponse.content).toHaveLength(0);
+		}
+
+		const retriedResponse = await streamOpenAICodexResponses(model, secondContext, options).result();
+		expect(retriedResponse.stopReason).toBe("stop");
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(sentRequests).toHaveLength(3);
+		expect(sentRequests[2]?.previous_response_id).toBe("resp_1");
+		const retryInput = sentRequests[2]?.input;
+		expect(Array.isArray(retryInput)).toBe(true);
+		expect(retryInput).toHaveLength(1);
+		expect(JSON.stringify(retryInput)).toContain("Second question");
+		expect(JSON.stringify(retryInput)).not.toContain("First answer");
+		expect(JSON.stringify(retryInput)).not.toContain("Partial answer");
+	});
+
 	it("retries websocket continuations when a proxy reports a stale previous response anchor", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
 		setAgentDir(tempDir.path());

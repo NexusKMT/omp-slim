@@ -458,6 +458,7 @@ export interface OpenAICodexWebSocketDebugStats {
 type CodexWebSocketSessionState = {
 	disableWebsocket: boolean;
 	lastRequest?: RequestBody;
+	/** Last completed response; an in-progress response cannot replace the retry baseline. */
 	lastResponseId?: string;
 	lastResponseItems?: InputItem[];
 	canAppend: boolean;
@@ -1019,14 +1020,6 @@ class CodexStreamRuntime {
 		const input = (rawEvent as { input?: string }).input;
 		if (typeof input === "string") finalizeCustomToolCallInputDone(entry.block, input);
 	}
-
-	handleResponseCreated(rawEvent: Record<string, unknown>): void {
-		const response = (rawEvent as { response?: { id?: string } }).response;
-		const state = this.websocketState;
-		if (state && this.transport === "websocket" && typeof response?.id === "string" && response.id.length > 0) {
-			state.lastResponseId = response.id;
-		}
-	}
 }
 
 interface CodexWhitespaceToolCallArgumentsDeltaState {
@@ -1047,6 +1040,7 @@ interface CodexStreamFailureContext {
 	output: AssistantMessage;
 	options: OpenAICodexResponsesOptions | undefined;
 	requestContext: CodexRequestContext;
+	runtime?: CodexStreamRuntime;
 	startTime: number;
 	firstTokenTime?: number;
 }
@@ -2000,6 +1994,11 @@ const CODEX_STALE_PREVIOUS_RESPONSE_CODES: Record<string, true> = {
 	codex_previous_response_stale: true,
 };
 
+const CODEX_APPEND_PRESERVING_REJECTION_CODES: Record<string, true> = {
+	rate_limit_exceeded: true,
+	slow_down: true,
+};
+
 function isCodexStalePreviousResponseError(error: unknown): boolean {
 	if (!(error instanceof Error)) return false;
 	if (
@@ -2021,9 +2020,22 @@ function isCodexStalePreviousResponseError(error: unknown): boolean {
 	);
 }
 
+function shouldPreserveCodexWebSocketAppendState(context: CodexStreamFailureContext, error: unknown): boolean {
+	if (!(error instanceof CodexProviderStreamError) || !error.code) return false;
+	const state = context.requestContext.websocketState;
+	return (
+		Object.hasOwn(CODEX_APPEND_PRESERVING_REJECTION_CODES, error.code.toLowerCase()) &&
+		context.runtime?.transport === "websocket" &&
+		state?.canAppend === true &&
+		state.lastRequest !== undefined &&
+		state.lastResponseId !== undefined &&
+		state.lastResponseItems !== undefined
+	);
+}
+
 async function handleCodexStreamFailure(context: CodexStreamFailureContext, error: unknown): Promise<AssistantMessage> {
 	const { output } = context;
-	if (context.requestContext.websocketState) {
+	if (context.requestContext.websocketState && !shouldPreserveCodexWebSocketAppendState(context, error)) {
 		resetCodexWebSocketAppendState(context.requestContext.websocketState);
 		context.requestContext.websocketState.modelsEtag = undefined;
 	}
@@ -2293,11 +2305,6 @@ class CodexStreamProcessor {
 		if (eventType === "response.output_item.done") {
 			this.runtime.whitespaceToolCallArgumentsDelta = undefined;
 			this.#handleOutputItemDone(rawEvent);
-			return firstTokenTime;
-		}
-
-		if (eventType === "response.created") {
-			this.runtime.handleResponseCreated(rawEvent);
 			return firstTokenTime;
 		}
 
