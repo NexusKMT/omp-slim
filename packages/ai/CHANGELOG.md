@@ -10,6 +10,10 @@
 
 - Fixed OpenAI-compatible completions misclassifying uppercase `finish_reason` values (`STOP`, `MAX_TOKENS`) emitted by some Gemini-backend gateways as provider errors; `mapStopReason` now folds case before matching and maps `MAX_TOKENS` to `length` ([#9566](https://github.com/can1357/oh-my-pi/pull/9566)).
 
+### Fixed
+
+- Fixed provider message-count limit errors being misclassified as payload rejections instead of recoverable context overflows ([#9629](https://github.com/can1357/oh-my-pi/issues/9629)).
+
 ## [18.0.4] - 2026-08-24
 
 ### Fixed
