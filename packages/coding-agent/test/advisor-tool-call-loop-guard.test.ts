@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
-import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, Context } from "@oh-my-pi/pi-ai";
+import { Agent, type AgentMessage, type AgentTool, type AgentTurnEndContext } from "@oh-my-pi/pi-agent-core";
+import type { AssistantMessage, Context, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -10,6 +10,7 @@ import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { AdvisorLoopGuard } from "../src/advisor/loop-guard";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
 const zeroUsage = {
@@ -145,6 +146,52 @@ describe("advisor tool-call loop guard", () => {
 		);
 		expect(redirects).toHaveLength(1);
 		expect(advisor.state.messages.filter(message => message.role === "custom")).toHaveLength(0);
+	});
+
+	it("starts repetition counting fresh after an advisor context reset", () => {
+		const settings = Settings.isolated({
+			"model.toolCallLoopGuard.enabled": true,
+			"model.toolCallLoopGuard.threshold": 3,
+		});
+		const messages: AgentMessage[] = [];
+		const guard = new AdvisorLoopGuard({
+			settings,
+			name: "test",
+			liveMessages: () => messages,
+			appendMessage: message => messages.push(message),
+			abort: () => {},
+		});
+		const turn = (id: string): AgentTurnEndContext => {
+			const message: AssistantMessage = {
+				role: "assistant",
+				content: [{ type: "toolCall", id, name: "read", arguments: { path: "missing.ts" } }],
+				api: "anthropic-messages",
+				provider: "anthropic",
+				model: "test",
+				usage: zeroUsage,
+				stopReason: "toolUse",
+				timestamp: Date.now(),
+			};
+			const result: ToolResultMessage = {
+				role: "toolResult",
+				toolCallId: id,
+				toolName: "read",
+				content: [{ type: "text", text: "ENOENT" }],
+				isError: true,
+				timestamp: Date.now(),
+			};
+			return { message, toolResults: [result], willContinue: true };
+		};
+
+		guard.recordTurn(messages, turn("before-1"));
+		guard.recordTurn(messages, turn("before-2"));
+		guard.reset();
+		guard.recordTurn(messages, turn("after-1"));
+		guard.recordTurn(messages, turn("after-2"));
+		expect(messages).toHaveLength(0);
+		guard.recordTurn(messages, turn("after-3"));
+		expect(messages).toHaveLength(1);
+		expect(messages[0]?.role).toBe("user");
 	});
 
 	it("leaves the advisor unbounded when the shared loop guard is disabled", async () => {
