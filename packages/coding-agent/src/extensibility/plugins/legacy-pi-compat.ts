@@ -575,7 +575,16 @@ function getExtensionParseCacheDb(): Database | null {
 		const cachePath = getLegacyPiExtensionCacheDbPath();
 		try {
 			if (fs.statSync(cachePath).size > EXTENSION_PARSE_CACHE_MAX_BYTES) {
-				fs.rmSync(cachePath, { force: true });
+				// Remove the full WAL set, not just the main db. A leftover
+				// `-wal`/`-shm` pair still owned by a concurrent omp process is
+				// adopted by this fresh connection; when that `-wal` has
+				// uncheckpointed frames (the normal case while another omp is
+				// writing its own cache entries), `journal_mode=WAL` fails with
+				// SQLITE_IOERR — disabling the parse cache for the whole process
+				// and forcing a reparse of every extension on startup. See #9549.
+				for (const suffix of ["", "-wal", "-shm"]) {
+					fs.rmSync(`${cachePath}${suffix}`, { force: true });
+				}
 			}
 		} catch {
 			// A missing or unreadable cache is a cold cache.
@@ -602,6 +611,15 @@ function getExtensionParseCacheDb(): Database | null {
 		extensionParseCacheDb = null;
 		return null;
 	}
+}
+
+/**
+ * Test seam: whether the extension parse cache opened successfully. Exercises
+ * the real eviction + open path, including full WAL-set cleanup on oversized
+ * caches (#9549).
+ */
+export function __isExtensionParseCacheAvailableForTests(): boolean {
+	return getExtensionParseCacheDb() !== null;
 }
 
 function parseCachedAnalysis(row: ExtensionParseCacheRow): ExtensionSourceAnalysis | null {
