@@ -21,11 +21,12 @@ import { VirtualTerminal } from "./virtual-terminal";
 class FullFrameProvider implements TerminalFrameProvider {
 	history: { id: number; rows: string[] } | undefined;
 	markerRow: number | undefined;
+	liveRows = 8;
 
 	renderFrame(viewport: ViewportSize): TerminalFramePlan {
-		const rows = Array.from({ length: 8 }, (_, i) => `live-${i}`);
+		const rows = Array.from({ length: this.liveRows }, (_, i) => `live-${i}`);
 		if (this.markerRow !== undefined) rows[this.markerRow] = `${rows[this.markerRow]}${CURSOR_MARKER}`;
-		const plan: TerminalFramePlan = { history: this.history, viewport: rows.slice(-Math.min(8, viewport.rows)) };
+		const plan: TerminalFramePlan = { history: this.history, viewport: rows.slice(-Math.min(this.liveRows, viewport.rows)) };
 		return plan;
 	}
 	renderResizeFrame(viewport: ViewportSize): readonly string[] {
@@ -51,13 +52,15 @@ function startRig(markerRow?: number) {
 	};
 	tui.setFrameProvider(provider);
 	tui.start();
-	return { terminal, tui, renderScheduler, writes };
+	return { terminal, tui, provider, renderScheduler, writes };
 }
 
 class ResizeScheduler {
 	#pending = new Set<() => void>();
+	/** Mutable clock: advance past the 100 ms post-settle resize suppression. */
+	t = 0;
 	now(): number {
-		return 0;
+		return this.t;
 	}
 	scheduleImmediate(callback: () => void): void {
 		callback();
@@ -137,6 +140,26 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		expect(Number(cup![1])).toBe(2);
 		tui.stop();
 	});
+
+	it("falls back to the settled CPR when a coalesced burst reverses direction", () => {
+		// Burst 12 -> 20 -> 6: the grow pulls scrollback into the pane and moves
+		// the parked logical row, so the clip model's telescoping (which would
+		// compute pushed=0 from pre-burst state and anchor at 3) no longer
+		// describes the pane. A reversed burst must take the CPR/timeout path,
+		// whose `height - staleRows` bound (6 - 8 -> 0) anchors the repaint at
+		// the top instead of overwriting rows above the real viewport.
+		const { terminal, tui, renderScheduler, writes } = startRig();
+		terminal.resize(40, 20);
+		terminal.resize(40, 6);
+		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
+		writes.length = 0;
+		renderScheduler.settle(); // probe timeout path -> settled repaint
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(1);
+		tui.stop();
+	});
 });
 
 // Regression coverage for the CPR probe's pre-erase stash on direct terminals:
@@ -212,6 +235,32 @@ describe("resize anchor probe stash on a direct terminal", () => {
 		const cup = repaint.match(/\x1b\[(\d+);1H/);
 		expect(cup).not.toBeNull();
 		expect(Number(cup![1])).toBe(1);
+		tui.stop();
+	});
+
+	it("snapshots a legitimately empty viewport on a fresh transaction", () => {
+		// A completed resize populates the stash; a later normal frame may
+		// legitimately render an empty viewport. The next fresh transaction must
+		// snapshot that empty window: keeping the old 8-row stash would clamp
+		// the anchor with `height - staleRows` rows that are no longer on
+		// screen (6 - 8 -> 0) and erase committed rows above the real (empty)
+		// viewport. With the refreshed stash the anchor stays at the viewport
+		// top (row 3, CUP row 4).
+		const { terminal, tui, provider, renderScheduler, writes } = startRig();
+		terminal.resize(40, 11);
+		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
+		renderScheduler.settle(); // probe timeout path -> settled repaint populates the stash
+		renderScheduler.t = 1000; // step past the post-settle resize suppression
+		provider.liveRows = 0;
+		tui.requestRender(true); // normal frame with an empty viewport
+		terminal.resize(40, 6); // fresh transaction: no probe in flight
+		renderScheduler.settle();
+		writes.length = 0;
+		renderScheduler.settle();
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(4);
 		tui.stop();
 	});
 });

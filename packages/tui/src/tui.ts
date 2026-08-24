@@ -647,6 +647,14 @@ export class TUI extends Container {
 	// began (see #resolveResizeAnchor's `height - staleRows` clamp).
 	#resizeProbeWindow: readonly string[] = [];
 	#resizeProbeOffset = 0;
+	// Direction tracking for the current coalesced resize burst (reset when a
+	// plan frame commits, alongside #previousHeight). A burst containing any
+	// height grow invalidates the multiplexer clip model in
+	// #resolveResizeAnchor: the grow pulls scrollback into the pane and moves
+	// the parked logical row, so the net shrink no longer telescopes from
+	// pre-burst state.
+	#resizeBurstGrew = false;
+	#resizeBurstLastHeight: number | undefined;
 	// Unanswered CSI 6n probes; CPR replies are consumed from input while > 0.
 	#pendingCprReplies = 0;
 	// Prepared rows painted by the previous provider frame, for row diffing.
@@ -1010,7 +1018,7 @@ export class TUI extends Container {
 				if (this.#resizeProbe) {
 					// The anchor being probed is already stale; restart the transaction.
 					this.#cancelResizeProbe();
-					this.#beginResizeAltPaint();
+					this.#beginResizeAltPaint(true);
 					return;
 				}
 				if (this.#renderScheduler.now() < this.#suppressResizeUntil) {
@@ -1038,12 +1046,21 @@ export class TUI extends Container {
 		}
 		this.requestRender(true, { clearScrollback: options?.clearScrollback === true });
 	}
-	/** Borrow the alternate buffer for stable, history-free resize repainting. */
-	#beginResizeAltPaint(): void {
+	/**
+	 * Borrow the alternate buffer for stable, history-free resize repainting.
+	 * `restartingProbe` marks a transaction restarted by a SIGWINCH that
+	 * arrived while the settled anchor probe was in flight: the live window
+	 * was already stashed and emptied, so the snapshot below must be skipped
+	 * to keep the good stash.
+	 */
+	#beginResizeAltPaint(restartingProbe = false): void {
 		if (this.#altActive) {
 			this.requestRender(true);
 			return;
 		}
+		const burstLastHeight = this.#resizeBurstLastHeight ?? this.#previousHeight;
+		if (this.terminal.rows > burstLastHeight) this.#resizeBurstGrew = true;
+		this.#resizeBurstLastHeight = this.terminal.rows;
 		if (!this.#resizeAltActive) {
 			this.#resizeAltActive = true;
 			setAltScreenActive(true);
@@ -1070,12 +1087,7 @@ export class TUI extends Container {
 			// over pulled-back history rows or scroll-push the frame into
 			// scrollback again.
 			let erase = "";
-			if (this.#providerWindow.length > 0) {
-				// Guard against a transaction restart: a SIGWINCH landing after the
-				// settle but before the CPR reply re-enters here with the live window
-				// already stashed and emptied, and an unconditional snapshot would
-				// wipe the good stash with the empty window (resurrecting the dead
-				// staleRows bound this stash exists to prevent).
+			if (!restartingProbe) {
 				this.#resizeProbeWindow = this.#providerWindow;
 				this.#resizeProbeOffset = this.#parkedViewportOffset;
 			}
@@ -1178,7 +1190,7 @@ export class TUI extends Container {
 				? this.#providerViewportTop
 				: reportedRow - this.#reflowedRowCount(probe.window, 0, probe.offset, width);
 		let top = Math.max(0, Math.min(reportedTop, height - staleRows));
-		if (isInsideTerminalMultiplexer() && height < this.#previousHeight) {
+		if (isInsideTerminalMultiplexer() && height < this.#previousHeight && !this.#resizeBurstGrew) {
 			// Multiplexers clip on height shrink around the cursor, not around
 			// content: rows strictly below the cursor are discarded first (even
 			// non-blank ones — measured against real tmux), and only the remainder
@@ -1189,7 +1201,10 @@ export class TUI extends Container {
 			// visible. Derive the push deterministically from the saved parked
 			// cursor instead. Across a coalesced multi-SIGWINCH burst the totals
 			// telescope, so pre-burst state with the cumulative shrink stays
-			// exact.
+			// exact — but only while the burst is monotonic: any grow step pulls
+			// scrollback back into the pane and moves the parked logical row, so
+			// reversed bursts (#resizeBurstGrew) fall back to the settled CPR
+			// path above.
 			const parkedRow =
 				this.#providerViewportTop + this.#reflowedRowCount(probe.window, 0, probe.offset, width);
 			const shrink = this.#previousHeight - height;
@@ -2190,6 +2205,8 @@ export class TUI extends Container {
 		this.#providerViewportTop = newTop;
 		this.#previousWidth = width;
 		this.#previousHeight = height;
+		this.#resizeBurstGrew = false;
+		this.#resizeBurstLastHeight = undefined;
 		this.#previousFrameLength = rows;
 		this.#clearScrollbackOnNextRender = false;
 		this.#forceViewportRepaintOnNextRender = false;
