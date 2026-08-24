@@ -7,7 +7,7 @@ import type {
 	AgentToolUpdateCallback,
 	ToolApprovalDecision,
 } from "@oh-my-pi/pi-agent-core";
-import { logger, prompt, untilAborted } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger, prompt, untilAborted } from "@oh-my-pi/pi-utils";
 import { type Theme, theme } from "../modes/theme/theme";
 import lspDescription from "../prompts/tools/lsp.md" with { type: "text" };
 import type { ToolSession } from "../tools";
@@ -467,26 +467,26 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 			let sourceStat: fs.Stats;
 			try {
 				sourceStat = await fs.promises.stat(source);
-			} catch {
+			} catch (err) {
+				// Only ENOENT means "missing". Reporting EACCES/ELOOP/EIO as a
+				// missing path sends the caller hunting the wrong problem — and
+				// silently invites them to recreate a file that is already there.
+				const relSource = formatPathRelativeToCwd(source, this.session.cwd);
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Error: source path does not exist: ${formatPathRelativeToCwd(source, this.session.cwd)}`,
+							text: isEnoent(err)
+								? `Error: source path does not exist: ${relSource}`
+								: `Error: cannot read source path ${relSource}: ${err instanceof Error ? err.message : String(err)}`,
 						},
 					],
 					details: { action, success: false, request: params },
 				};
 			}
 
-			let destExists = false;
 			try {
 				await fs.promises.stat(dest);
-				destExists = true;
-			} catch {
-				// expected: destination must not exist
-			}
-			if (destExists) {
 				return {
 					content: [
 						{
@@ -496,6 +496,21 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 					],
 					details: { action, success: false, request: params },
 				};
+			} catch (err) {
+				// ENOENT is the success case: the destination is free. Any other
+				// failure means we never established that, so renaming onto it
+				// could clobber a file we simply could not see.
+				if (!isEnoent(err)) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Error: cannot read destination path ${formatPathRelativeToCwd(dest, this.session.cwd)}: ${err instanceof Error ? err.message : String(err)}`,
+							},
+						],
+						details: { action, success: false, request: params },
+					};
+				}
 			}
 
 			const enumerated = await enumerateRenamePairs(source, dest);

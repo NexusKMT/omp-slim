@@ -23,6 +23,7 @@
 - Fixed resize and display replays, ensuring stable rendering and full transcript flushing on agent shutdown
 - Fixed fast tool completions leaving a permanent running summary that blocked transcript retirement and squeezed later tool output.
 - Fixed `omp git` hunk navigation (`alt+↓`/`alt+↑`) appearing to do nothing while the file sidebar had focus: the diff cursor band now stays visible (dimmed) when the pane is unfocused.
+- Fixed `lsp rename_file` reporting an unreadable source path as "does not exist", and renaming onto a destination whose existence check failed for any reason other than the path being free ([#8381](https://github.com/can1357/oh-my-pi/issues/8381))
 
 ## [18.0.4] - 2026-08-24
 
