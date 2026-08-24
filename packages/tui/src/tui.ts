@@ -2263,7 +2263,14 @@ export class TUI extends Container {
 		} else {
 			this.#imageBudget.takePurgeIds();
 		}
-		if (destructiveReset) buffer += "\x1b[H\x1b[3J\x1b[2J";
+		// ED2 MUST precede ED3: tmux implements ED2 by scrolling the live screen
+		// into pane history (so cleared content stays reachable), so erasing
+		// history first would let ED2 refill it with a copy of the old screen —
+		// which the replay then repaints, duplicating one full frame per reset.
+		// ED2-then-ED3 clears the screen, then wipes history including that
+		// push. On xterm-family terminals the two erases are independent and
+		// the order is irrelevant.
+		if (destructiveReset) buffer += "\x1b[H\x1b[2J\x1b[3J";
 		const diffable =
 			geometryStable &&
 			historyRows.length === 0 &&

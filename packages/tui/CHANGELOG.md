@@ -5,6 +5,8 @@
 ### Fixed
 
 - Fixed tmux pane zoom/resize corrupting terminal scrollback (duplicated frames and silent history loss).
+- Fixed destructive resets (session replace, `/tree`, resize-settle scrollback rebuilds) permanently depositing one duplicate frame in tmux pane history per reset. The reset emitted `CSI 3 J` before `CSI 2 J`, and tmux implements ED2 by scrolling the live screen into pane history — refilling the just-wiped history with a copy of the old screen that the replay then painted again. The erase order is now ED2-then-ED3, which clears the screen first and then wipes history including tmux's push; on xterm-family terminals the two erases are independent and the order is irrelevant.
+
 ## [18.0.4] - 2026-08-24
 
 ### Changed
