@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { Process } from "@oh-my-pi/pi-natives";
+import { Process, ProcessStatus } from "@oh-my-pi/pi-natives";
 import { exec, NonZeroExitError, spawn, TimeoutError } from "@oh-my-pi/pi-utils/ptree";
 
 describe("ptree timeout", () => {
@@ -43,6 +43,55 @@ describe("ptree timeout", () => {
 		expect(text).toContain("probe-done");
 		expect(elapsedMs).toBeLessThan(5_000);
 	});
+
+	it.skipIf(process.platform === "win32")(
+		"keeps reading inherited stdout until the configured command deadline",
+		async () => {
+			// Real subprocess timing: fake timers cannot advance the child clock.
+			// The root exits immediately, but its child writes after the legacy
+			// 100 ms drain grace and before the 1 s command deadline.
+			const result = await exec(["/bin/sh", "-c", "(sleep .2; printf token) &"], {
+				timeout: 1_000,
+				allowNonZero: true,
+				allowAbort: true,
+			});
+
+			expect(result.ok).toBe(true);
+			expect(result.stdout).toBe("token");
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"terminates a detached group that holds stdout past the command deadline",
+		async () => {
+			// The root exits after printing its child's pid. The child keeps the
+			// group and stdout alive past the deadline, so timeout must terminate
+			// the group even though its original leader is already gone.
+			let orphanPid: number | undefined;
+			try {
+				const result = await exec(["/bin/sh", "-c", "sleep 30 & echo $!"], {
+					detached: true,
+					timeout: 250,
+					allowNonZero: true,
+					allowAbort: true,
+				});
+				orphanPid = Number.parseInt(result.stdout.trim(), 10);
+
+				expect(result.exitError).toBeInstanceOf(TimeoutError);
+				// Real process state: SIGKILL delivery is synchronous, but pidfd
+				// exit observation may settle on the next scheduler turn.
+				const deadline = Date.now() + 500;
+				let status = Process.fromPid(orphanPid)?.status();
+				while (status === ProcessStatus.Running && Date.now() < deadline) {
+					await Bun.sleep(10);
+					status = Process.fromPid(orphanPid)?.status();
+				}
+				expect(status).not.toBe(ProcessStatus.Running);
+			} finally {
+				if (orphanPid) Process.fromPid(orphanPid)?.killTree(9);
+			}
+		},
+	);
 
 	it.skipIf(process.platform === "win32")(
 		"throws NonZeroExitError by default when the child exits nonzero",

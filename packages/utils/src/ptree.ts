@@ -106,9 +106,13 @@ export class ChildProcess<In extends InMask = InMask> {
 	#exitReasonPending?: Exception;
 	#stderrDone: Promise<void>;
 	#exited: Promise<number>;
-	// Resolves shortly after the root exits regardless of pipe state; pipe reads
-	// race it so an orphan holding a pipe cannot stall collection.
-	#exitedGrace: Promise<void>;
+	#openPipeReaders = 1;
+	// Pipe reads race this cutoff. Timed commands resolve it at their configured
+	// deadline; untimed commands retain a short post-root drain grace.
+	#drainCutoff: Promise<void>;
+	#resolveDrainCutoff: () => void;
+	#timeoutConfigured = false;
+	#timeoutTimer?: NodeJS.Timeout;
 	#stderrStream?: ReadableStream<Uint8Array>;
 	// Termination in flight after kill(); aborted exits await it before reporting.
 	#terminating?: Promise<boolean | void>;
@@ -136,31 +140,31 @@ export class ChildProcess<In extends InMask = InMask> {
 		// Normalize Bun's exited promise into our exitReason / exitedCleanly model.
 		const { promise, resolve, reject } = Promise.withResolvers<number>();
 		this.#exited = promise;
-		// Give buffered pipe output a short drain grace after the root exits, then
-		// stop collecting: a backgrounded orphan can hold the pipes far past the
-		// caller's budget. The timer is unref'd so a clean fast exit never waits.
-		// Keyed on the RAW process exit: the normalized #exited awaits the
-		// stderr drain for nonzero exits, so racing the drain against a grace
-		// derived from it would deadlock while an orphan holds stderr.
-		this.#exitedGrace = proc.exited
+		const drainCutoff = Promise.withResolvers<void>();
+		this.#drainCutoff = drainCutoff.promise;
+		this.#resolveDrainCutoff = drainCutoff.resolve;
+		// Without an explicit command deadline, preserve the short grace that
+		// prevents an orphaned pipe from hanging an unbounded spawn caller.
+		// attachTimeout() runs synchronously after construction and takes ownership
+		// of this cutoff for timed commands.
+		proc.exited
 			.catch(() => {})
 			.then(() => {
-				const { promise, resolve } = Promise.withResolvers<void>();
-				const timer = setTimeout(resolve, EXIT_DRAIN_GRACE_MS);
+				if (this.#timeoutConfigured) return;
+				const timer = setTimeout(this.#resolveDrainCutoff, EXIT_DRAIN_GRACE_MS);
 				timer.unref?.();
-				return promise;
 			});
 
-		const exitedGrace = this.#exitedGrace;
+		const pipeCutoff = this.#drainCutoff;
 		this.#stderrDone = (async () => {
 			const reader = stderrStream.getReader();
 			try {
 				for (;;) {
 					const chunk = await Promise.race([
-						reader.read().then(r => ({ grace: false as const, r })),
-						exitedGrace.then(() => ({ grace: true as const })),
+						reader.read().then(r => ({ cutoff: false as const, r })),
+						pipeCutoff.then(() => ({ cutoff: true as const })),
 					]);
-					if (chunk.grace) {
+					if (chunk.cutoff) {
 						await reader.cancel().catch(() => {});
 						break;
 					}
@@ -170,6 +174,7 @@ export class ChildProcess<In extends InMask = InMask> {
 					trim();
 				}
 			} catch {}
+			this.#openPipeReaders--;
 			this.#stderrTail += dec.decode();
 			trim();
 		})();
@@ -253,7 +258,27 @@ export class ChildProcess<In extends InMask = InMask> {
 	}
 
 	kill(reason?: Exception, gracefulMs?: number) {
-		if (reason && !this.#exitReasonPending) this.#exitReasonPending = reason;
+		if (reason && !this.#exitReasonPending) {
+			this.#exitReasonPending = reason;
+			// The normalized exit promise may already have resolved from a dead
+			// group leader; wait() still needs to report the later deadline.
+			if (this.proc.exitCode !== null) this.#exitReason = reason;
+		}
+		if (
+			this.proc.exitCode !== null &&
+			this.#terminateGroup &&
+			this.#openPipeReaders > 0 &&
+			process.platform !== "win32"
+		) {
+			// Bun detached children are POSIX session/process-group leaders. If
+			// the leader has exited, the native Process handle cannot rediscover
+			// its PGID, but a pipe-holding descendant keeps that exact group alive.
+			try {
+				process.kill(-this.proc.pid, "SIGKILL");
+			} catch {}
+			this.#terminating = Promise.resolve();
+			return;
+		}
 		if (!this.proc.killed) {
 			const options =
 				gracefulMs === undefined
@@ -277,21 +302,22 @@ export class ChildProcess<In extends InMask = InMask> {
 	}
 
 	/**
-	 * Read a pipe fully, but stop once the root has exited and the drain grace
-	 * elapsed: a backgrounded orphan can inherit the pipe and hold it far past
-	 * the caller's budget, so EOF alone must not bound the read.
+	 * Read a pipe fully, but stop at the command deadline (or, without one,
+	 * shortly after the root exits). A backgrounded child may legitimately
+	 * produce output after its root exits, but cannot hold the pipe forever.
 	 */
 	async #readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
+		this.#openPipeReaders++;
 		const reader = stream.getReader();
 		const dec = new TextDecoder();
 		let out = "";
 		try {
 			for (;;) {
 				const chunk = await Promise.race([
-					reader.read().then(r => ({ grace: false as const, r })),
-					this.#exitedGrace.then(() => ({ grace: true as const })),
+					reader.read().then(r => ({ cutoff: false as const, r })),
+					this.#drainCutoff.then(() => ({ cutoff: true as const })),
 				]);
-				if (chunk.grace) {
+				if (chunk.cutoff) {
 					await reader.cancel().catch(() => {});
 					break;
 				}
@@ -301,6 +327,7 @@ export class ChildProcess<In extends InMask = InMask> {
 		} catch {
 			// A cancelled or failed read keeps whatever was already collected.
 		}
+		this.#openPipeReaders--;
 		return out + dec.decode();
 	}
 
@@ -352,6 +379,7 @@ export class ChildProcess<In extends InMask = InMask> {
 			if (err instanceof Exception) exitError = err;
 			else throw err;
 		}
+		this.#clearTimeout();
 		if (!exitError) exitError = this.exitReason;
 		if (!exitError && this.exitCode !== null && this.exitCode !== 0) {
 			exitError = new NonZeroExitError(this.exitCode, this.#stderrTail);
@@ -381,18 +409,30 @@ export class ChildProcess<In extends InMask = InMask> {
 		this.#exited.catch(() => {}).finally(() => signal.removeEventListener("abort", onAbort));
 	}
 
+	#clearTimeout(): void {
+		if (!this.#timeoutTimer) return;
+		clearTimeout(this.#timeoutTimer);
+		this.#timeoutTimer = undefined;
+	}
+
 	attachTimeout(ms: number): void {
 		if (ms <= 0 || this.proc.killed) return;
+		this.#timeoutConfigured = true;
 		this.#exited.catch(() => {});
-		// Use a clearable timer instead of Bun.sleep(): an uncleared sleep keeps the
-		// event loop referenced for the full timeout even after a fast child exits.
+		// One unref'd deadline controls both termination and pipe collection.
+		// A clean command clears it in wait(), so fast invocations do not hold
+		// the event loop for the unused remainder.
 		const timer = setTimeout(() => {
-			// Hard-kill the tree immediately: the caller's budget is already
-			// breached, and a graceful phase loses TERM-ignoring descendants once
-			// the root dies and they reparent away from the walk.
-			if (this.proc.exitCode === null) this.kill(new TimeoutError(ms, this.#stderrTail), -1);
+			// A detached group can remain alive after its leader exits. Only use
+			// the dead-leader fallback while an inherited pipe proves that exact
+			// group still has a live member; this avoids stale-PGID reuse.
+			if (this.proc.exitCode === null || (this.#terminateGroup && this.#openPipeReaders > 0)) {
+				this.kill(new TimeoutError(ms, this.#stderrTail), -1);
+			}
+			this.#resolveDrainCutoff();
 		}, ms);
-		this.proc.exited.catch(() => {}).then(() => clearTimeout(timer));
+		timer.unref?.();
+		this.#timeoutTimer = timer;
 	}
 
 	[Symbol.dispose](): void {
