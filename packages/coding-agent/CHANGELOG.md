@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed fast tool completions leaving a permanent running summary that blocked transcript retirement and squeezed later tool output.
+
 ## [18.0.4] - 2026-08-24
 
 ### Added
