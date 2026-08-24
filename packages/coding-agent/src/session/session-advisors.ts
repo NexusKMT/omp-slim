@@ -218,8 +218,6 @@ export interface SessionAdvisorsOptions {
 	configs?: AdvisorConfig[];
 	streamFn?: StreamFn;
 	transformProviderContext?: (context: Context, model: Model) => Context | Promise<Context>;
-	/** Advisor spend already persisted for this session, restored on resume. */
-	initialCosts?: ReadonlyMap<string, number>;
 }
 
 /** Options accepted when an advisor injects a primary-session message. */
@@ -330,7 +328,6 @@ export class SessionAdvisors {
 		this.#advisorConfigs = options.configs;
 		this.#advisorStreamFn = options.streamFn;
 		this.#transformProviderContext = options.transformProviderContext;
-		if (options.initialCosts) this.#advisorCosts = new Map(options.initialCosts);
 		if (this.#advisorEnabled) this.#buildAdvisorRuntime();
 	}
 
@@ -446,6 +443,26 @@ export class SessionAdvisors {
 	/** Replace the ledger with the spend recorded for the session becoming active. */
 	restoreCost(costs: ReadonlyMap<string, number>): void {
 		this.#advisorCosts = new Map(costs);
+	}
+
+	/** Capture the per-advisor ledger at a transcript byte-snapshot boundary. */
+	costSnapshot(): ReadonlyMap<string, number> {
+		return new Map(this.#advisorCosts);
+	}
+
+	/**
+	 * Restore spend persisted at `costsAtSnapshot`, then add only the process-local
+	 * delta billed after that fixed transcript snapshot. This preserves turns
+	 * completed while the background scan runs without double-counting entries
+	 * the scan already includes.
+	 */
+	restoreInitialCost(costs: ReadonlyMap<string, number>, costsAtSnapshot: ReadonlyMap<string, number>): void {
+		const restored = new Map(costs);
+		for (const [slug, current] of this.#advisorCosts) {
+			const accrued = current - (costsAtSnapshot.get(slug) ?? 0);
+			if (accrued > 0) restored.set(slug, (restored.get(slug) ?? 0) + accrued);
+		}
+		this.#advisorCosts = restored;
 	}
 
 	/**
@@ -963,12 +980,16 @@ export class SessionAdvisors {
 				obfuscator: this.#host.obfuscator,
 				getModelIdentity: () => formatModelString(advisorRef.agent.state.model),
 				beginAdvisorUpdate: inProgress => {
+					advisorRef.recorder.beginTurn();
 					advisorRef.adviseTool.beginUpdate(inProgress);
 					advisorRef.emissionGuard.beginUpdate();
 				},
 				onTurnError: (error, failedMessages, signal) =>
 					this.#recoverAdvisorTurn(advisorRef, error, failedMessages, signal),
 				onTurnSuccess: async () => {
+					// Commit the delivered batch so retries of a failed turn stay deduped
+					// while this successful turn's context is persisted once (issue #9553).
+					advisorRef.recorder.commitTurn();
 					const fallback = advisorRef.retryFallback;
 					if (!advisorRef.retryFallbackPendingSuccess || !fallback) return;
 					advisorRef.retryFallbackPendingSuccess = false;

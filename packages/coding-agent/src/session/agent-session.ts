@@ -519,6 +519,8 @@ export class AgentSession {
 	#goalModeState: GoalModeState | undefined;
 	#goalRuntime: GoalRuntime;
 	readonly #advisors: SessionAdvisors;
+	/** Resolves once the resume-time advisor spend backfill settles (issue #9553). */
+	#advisorCostRestore: Promise<void> = Promise.resolve();
 	#goalTurnCounter = 0;
 	#planReferenceSent = false;
 	#planReferencePath = "local://PLAN.md";
@@ -1546,7 +1548,6 @@ export class AgentSession {
 			configs: config.advisorConfigs,
 			streamFn: config.advisorStreamFn,
 			transformProviderContext: config.transformProviderContext,
-			initialCosts: config.initialAdvisorCosts,
 		});
 
 		const maintenanceHost: SessionMaintenanceHost = {
@@ -9681,6 +9682,47 @@ export class AgentSession {
 	/** Return cumulative cost recorded for the current session's advisor activity. */
 	getAdvisorCost(): number {
 		return this.#advisors.getAdvisorCost();
+	}
+
+	/**
+	 * Begin backfilling advisor spend recorded before this resume, off the
+	 * critical path (issue #9553). A large advisor transcript would otherwise
+	 * block session startup for tens of seconds while the whole file is streamed
+	 * and parsed; instead the status-line total hydrates once the scan settles.
+	 * The resulting promise is exposed via {@link advisorCostRestore} for tests
+	 * and headless callers that must observe the hydrated total.
+	 */
+	beginInitialAdvisorCostRestore(): void {
+		const sessionId = this.sessionId;
+		let costsAtSnapshot: ReadonlyMap<string, number> = new Map();
+		this.#advisorCostRestore = loadAdvisorTranscriptCosts(this.sessionFile, {
+			onSnapshot: () => {
+				costsAtSnapshot = this.#advisors.costSnapshot();
+			},
+		})
+			.then(costs => {
+				if (this.sessionId !== sessionId) return;
+				this.restoreInitialAdvisorCosts(costs, costsAtSnapshot);
+			})
+			.catch(err => logger.debug("advisor cost restore failed", { err: String(err) }));
+	}
+
+	/** Resolves once {@link beginInitialAdvisorCostRestore}'s scan has settled. */
+	get advisorCostRestore(): Promise<void> {
+		return this.#advisorCostRestore;
+	}
+
+	/**
+	 * Restore persisted advisor spend plus the process-local delta billed after
+	 * `costsAtSnapshot`. The loader fixes every transcript's byte length before
+	 * capturing that baseline, so a turn completed while the scan runs is added
+	 * exactly once.
+	 */
+	restoreInitialAdvisorCosts(
+		costs: ReadonlyMap<string, number>,
+		costsAtSnapshot: ReadonlyMap<string, number> = new Map(),
+	): void {
+		this.#advisors.restoreInitialCost(costs, costsAtSnapshot);
 	}
 	/** Return whether any active or configured advisor is running on an OAuth/subscription model. */
 	isAdvisorUsingSubscription(): boolean {
