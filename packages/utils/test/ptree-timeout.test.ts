@@ -87,6 +87,16 @@ describe("ptree timeout", () => {
 		},
 	);
 
+	it.skipIf(process.platform === "win32")("keeps reading inherited stdout until EOF without a timeout", async () => {
+		const result = await exec(["/bin/sh", "-c", "(sleep .2; printf token) &"], {
+			allowNonZero: true,
+			allowAbort: true,
+		});
+
+		expect(result.ok).toBe(true);
+		expect(result.stdout).toBe("token");
+	});
+
 	it.skipIf(process.platform === "win32")(
 		"terminates a detached group that holds stdout past the command deadline",
 		async () => {

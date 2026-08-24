@@ -15,9 +15,6 @@ type InMask = "pipe" | "ignore" | Buffer | Uint8Array | null;
 /** A Bun subprocess with stdout/stderr always piped (stdin may vary). */
 type PipedSubprocess<In extends InMask = InMask> = Subprocess<In, "pipe", "pipe">;
 
-/** Grace after the root process exits for buffered pipe output to drain. */
-const EXIT_DRAIN_GRACE_MS = 100;
-
 const LINUX_SUBREAPER_COMMAND_ENV = "OMP_PTREE_SUBREAPER_COMMAND";
 
 /**
@@ -181,11 +178,10 @@ export class ChildProcess<In extends InMask = InMask> {
 	#stderrDone: Promise<void>;
 	#exited: Promise<number>;
 	#openPipeReaders = 1;
-	// Pipe reads race this cutoff. Timed commands resolve it at their configured
-	// deadline; untimed commands retain a short post-root drain grace.
+	// Pipe reads race this cutoff only when attachTimeout() configures a
+	// command deadline. Untimed commands preserve complete EOF-based capture.
 	#drainCutoff: Promise<void>;
 	#resolveDrainCutoff: () => void;
-	#timeoutConfigured = false;
 	#timeoutTimer?: NodeJS.Timeout;
 	#stderrStream?: ReadableStream<Uint8Array>;
 	// Termination in flight after kill(); aborted exits await it before reporting.
@@ -224,17 +220,8 @@ export class ChildProcess<In extends InMask = InMask> {
 		const drainCutoff = Promise.withResolvers<void>();
 		this.#drainCutoff = drainCutoff.promise;
 		this.#resolveDrainCutoff = drainCutoff.resolve;
-		// Without an explicit command deadline, preserve the short grace that
-		// prevents an orphaned pipe from hanging an unbounded spawn caller.
-		// attachTimeout() runs synchronously after construction and takes ownership
-		// of this cutoff for timed commands.
-		proc.exited
-			.catch(() => {})
-			.then(() => {
-				if (this.#timeoutConfigured) return;
-				const timer = setTimeout(this.#resolveDrainCutoff, EXIT_DRAIN_GRACE_MS);
-				timer.unref?.();
-			});
+		// The cutoff remains pending for untimed commands, preserving complete
+		// EOF-based capture. attachTimeout() resolves it at the command deadline.
 
 		const pipeCutoff = this.#drainCutoff;
 		this.#stderrDone = (async () => {
@@ -406,9 +393,7 @@ export class ChildProcess<In extends InMask = InMask> {
 	}
 
 	/**
-	 * Read a pipe fully, but stop at the command deadline (or, without one,
-	 * shortly after the root exits). A backgrounded child may legitimately
-	 * produce output after its root exits, but cannot hold the pipe forever.
+	 * Read a pipe fully, stopping early only at an explicit command deadline.
 	 */
 	async #readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
 		this.#openPipeReaders++;
@@ -521,7 +506,6 @@ export class ChildProcess<In extends InMask = InMask> {
 
 	attachTimeout(ms: number): void {
 		if (ms <= 0 || this.proc.killed) return;
-		this.#timeoutConfigured = true;
 		this.#exited.catch(() => {});
 		// One unref'd deadline controls both termination and pipe collection.
 		// A clean command clears it in wait(), so fast invocations do not hold
