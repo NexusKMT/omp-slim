@@ -1251,9 +1251,10 @@ export class TUI extends Container {
 	 * clamps the cursor instead of scrolling it) — bottom-preserving resize
 	 * guarantees the stale viewport ends on the last screen row whenever a
 	 * push happened; validated against kitty's real core in
-	 * resize-anchor-recovery.test.ts. Multiplexers clip instead of rewrapping,
-	 * so that bound never applies: monotonic shrinks use the deterministic
-	 * clip model below, everything else trusts the CPR directly.
+	 * resize-anchor-recovery.test.ts. Multiplexers clip on height changes
+	 * (though they reflow on width changes), so that bound never applies:
+	 * monotonic shrinks use the deterministic clip model below, everything
+	 * else trusts the CPR directly.
 	 */
 	#resolveResizeAnchor(reportedRow: number | undefined): void {
 		const probe = this.#resizeProbe;
@@ -1332,14 +1333,17 @@ export class TUI extends Container {
 	}
 
 	/**
-	 * Rows `[start, end)` of a previously painted window re-measured at `width`.
-	 * Direct terminals rewrap on resize (a row spans ceil(cells/width) rows);
-	 * multiplexers clip in place, so every row still spans exactly one row.
+	 * Rows `[start, end)` of a previously painted window re-measured at
+	 * `width`. Every terminal rewraps content on a width change — including
+	 * multiplexers: tmux clips in place on height changes only, and reflows
+	 * the pane (scrollback included) when the width moves, so a row painted
+	 * wider than the current width spans ceil(cells/width) physical rows
+	 * everywhere. For height-only resizes the painted rows already fit the
+	 * width and the count is unchanged.
 	 */
 	#reflowedRowCount(window: readonly string[], start: number, end: number, width: number): number {
 		const stop = Math.min(end, window.length);
 		const from = Math.max(0, start);
-		if (isInsideTerminalMultiplexer()) return Math.max(0, stop - from);
 		let rows = 0;
 		for (let index = from; index < stop; index++) {
 			rows += Math.max(1, Math.ceil(visibleWidth(window[index]!) / Math.max(1, width)));

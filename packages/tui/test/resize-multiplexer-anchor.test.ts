@@ -22,9 +22,12 @@ class FullFrameProvider implements TerminalFrameProvider {
 	history: { id: number; rows: string[] } | undefined;
 	markerRow: number | undefined;
 	liveRows = 8;
+	rowPad = 0;
 
 	renderFrame(viewport: ViewportSize): TerminalFramePlan {
-		const rows = Array.from({ length: this.liveRows }, (_, i) => `live-${i}`);
+		const rows = Array.from({ length: this.liveRows }, (_, i) =>
+			this.rowPad > 0 ? `live-${i}`.padEnd(this.rowPad, "x") : `live-${i}`,
+		);
 		if (this.markerRow !== undefined) rows[this.markerRow] = `${rows[this.markerRow]}${CURSOR_MARKER}`;
 		const plan: TerminalFramePlan = { history: this.history, viewport: rows.slice(-Math.min(this.liveRows, viewport.rows)) };
 		return plan;
@@ -192,6 +195,29 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		const cup = repaint.match(/\x1b\[(\d+);1H/);
 		expect(cup).not.toBeNull();
 		expect(Number(cup![1])).toBe(6);
+		tui.stop();
+	});
+
+	it("accounts for tmux width reflow in the CPR offset math", () => {
+		// tmux clips on height changes but REFLOWS the pane on width changes:
+		// a 36-cell row wraps to two physical rows at width 20, and the parked
+		// cursor rides its logical line down. With the marker parked 4 logical
+		// rows below the viewport top, the cursor sits 8 physical rows below
+		// it after the shrink (row 11, reply row 12), so the anchor must be
+		// 11 - 8 = 3 (CUP row 4). Counting logical rows (clip semantics) would
+		// compute 11 - 4 = 7 and repaint below the real viewport, leaving the
+		// old wide rows wrapped above it — one leftover frame per zoom toggle.
+		const { terminal, tui, provider, renderScheduler, writes } = startRig(4);
+		provider.rowPad = 36;
+		tui.requestRender(true); // repaint the window with 36-cell rows
+		terminal.resize(20, 12); // width-only shrink: tmux reflow, not clip
+		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
+		writes.length = 0;
+		terminal.sendInput("\x1b[12;17R"); // parked cursor after reflow: physical row 11
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(4);
 		tui.stop();
 	});
 
