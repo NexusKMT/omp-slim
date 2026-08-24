@@ -4842,14 +4842,26 @@ function mapYoloAutoModel(
 export function yoloAutoModelManagerOptions(
 	config?: YoloAutoModelManagerConfig,
 ): ModelManagerOptions<"openai-completions"> {
-	// Seed the reference map from the curated static models, not the
-	// previously generated bundle: a credentialed `gen:models` run must never
-	// resolve qwen3.8-27b through the global index (e.g. NanoGPT's
-	// 262144-context row) and bake a bundle that loses the curated
-	// template-effort surface.
+	// Curated static models take precedence over the previously generated
+	// bundle so later corrections to the curated metadata are honored; bundle
+	// rows keep ids that earlier credentialed runs discovered, and the global
+	// index covers everything else.
 	const references = new Map<string, ModelSpec<"openai-completions">>();
-	for (const model of YOLO_AUTO_STATIC_MODELS) {
+	const bundled = createBundledReferenceMap<"openai-completions">("yolo-auto");
+	for (const model of bundled.values()) {
 		references.set(model.id, model);
+	}
+	for (const model of YOLO_AUTO_STATIC_MODELS) {
+		const previous = references.get(model.id);
+		references.set(model.id, {
+			...previous,
+			...model,
+			// Generation-filled fields the curated seed leaves null: keep the
+			// canonical values baked by the previous regen (max-output cap,
+			// derived thinking) instead of dropping them.
+			maxTokens: model.maxTokens ?? previous?.maxTokens ?? null,
+			thinking: model.thinking ?? previous?.thinking,
+		});
 	}
 	const resolveReference = createReferenceResolver(() => references);
 	return {
@@ -4860,7 +4872,7 @@ export function yoloAutoModelManagerOptions(
 			config,
 			requireApiKey: true,
 			mapModel: (entry, defaults, reference) =>
-				mapYoloAutoModel(entry, defaults, reference ?? resolveReference(defaults.id)),
+				mapYoloAutoModel(entry, defaults, resolveReference(defaults.id) ?? reference),
 			dynamicModelsAuthoritative: true,
 		}),
 	};

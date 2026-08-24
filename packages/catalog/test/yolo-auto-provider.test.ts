@@ -1,6 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, vi } from "bun:test";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { createModelManager } from "@oh-my-pi/pi-catalog/model-manager";
+import * as modelsModule from "@oh-my-pi/pi-catalog/models";
 import { yoloAutoModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
 
@@ -157,5 +159,45 @@ describe("Yolo-Auto provider discovery", () => {
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			compat: { supportsStore: false, supportsDeveloperRole: false },
 		});
+	});
+
+	test("prefers curated metadata over a stale previous bundle", async () => {
+		// A credentialed `gen:models` run bakes live discovery into
+		// models.json; that previous bundle row must not shadow later
+		// corrections to YOLO_AUTO_STATIC_MODELS. Simulate a stale bundle row
+		// (262K context, no template dialect) and require the curated surface.
+		const originalGetBundledModels = modelsModule.getBundledModels;
+		vi.spyOn(modelsModule, "getBundledModels").mockImplementation((provider => {
+			if (provider === "yolo-auto") {
+				return [
+					buildModel({
+						id: "qwen3.8-27b",
+						name: "Qwen3.8 27B (stale bundle)",
+						api: "openai-completions",
+						provider: "yolo-auto",
+						baseUrl: "https://yolo-auto.com/v1",
+						reasoning: true,
+						input: ["text", "image"],
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+						contextWindow: 262_144,
+						maxTokens: null,
+					}),
+				];
+			}
+			return originalGetBundledModels(provider);
+		}) as typeof modelsModule.getBundledModels);
+		try {
+			const fetch: FetchImpl = async () =>
+				new Response(JSON.stringify({ data: [{ id: "qwen3.8-27b", object: "model" }] }), { status: 200 });
+			const models = await yoloAutoModelManagerOptions({ apiKey: "yolo-test-key", fetch }).fetchDynamicModels?.();
+			const qwen = models?.find(model => model.id === "qwen3.8-27b");
+
+			expect(qwen).toMatchObject({
+				contextWindow: 131072,
+				compat: { qwenTemplateReasoningEffort: true },
+			});
+		} finally {
+			vi.restoreAllMocks();
+		}
 	});
 });
