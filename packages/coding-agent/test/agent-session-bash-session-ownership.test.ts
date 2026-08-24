@@ -5,7 +5,7 @@ import { Agent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import * as bashExecutor from "@oh-my-pi/pi-coding-agent/exec/bash-executor";
 import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import { createBashTool } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-pi-coding-agent-shim";
@@ -32,8 +32,10 @@ describe("AgentSession bash session ownership", () => {
 	let session: AgentSession;
 	let additionalManagers: SessionManager[];
 
-	beforeEach(() => {
+	beforeEach(async () => {
+		resetSettingsForTest();
 		tempDir = TempDir.createSync("@pi-bash-session-owner-");
+		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		authStorage = createInMemoryAuthStorage();
 		authStorage.setRuntimeApiKey("anthropic", "test-key");
 		additionalManagers = [];
@@ -45,6 +47,7 @@ describe("AgentSession bash session ownership", () => {
 		await Promise.all(additionalManagers.map(manager => manager.close()));
 		authStorage.close();
 		tempDir.removeSync();
+		resetSettingsForTest();
 	});
 
 	function createSession(
@@ -115,6 +118,16 @@ describe("AgentSession bash session ownership", () => {
 	});
 
 	it("applies the registered bash shell environment to user-shell commands", async () => {
+		// BashRunner delegates execution to the global Settings-backed executor, so
+		// keep this extension-env contract independent of the developer's shell rc.
+		const shell = process.platform === "win32" ? (Bun.env.ComSpec ?? "cmd.exe") : "/bin/sh";
+		Settings.instance.set("shellPath", shell);
+		vi.spyOn(Settings.prototype, "getShellConfig").mockReturnValue({
+			shell,
+			args: process.platform === "win32" ? ["/c"] : ["-c"],
+			env: { PATH: Bun.env.PATH ?? "", HOME: tempDir.path(), SHELL: shell },
+			prefix: undefined,
+		});
 		const spawnHook = vi.fn(spawn => ({
 			...spawn,
 			env: { ...spawn.env, OMP_USER_SHELL_ENV: "extension-value" },
