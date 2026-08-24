@@ -43,6 +43,7 @@
 ### Fixed
 
 - Fixed kernel sessions failing to recover when a dead kernel reports cancellation instead of throwing.
+- Fixed advisors repeating one failing tool call without any bound: the `model.toolCallLoopGuard.*` settings now govern the advisor's own loop too, redirecting it at the configured threshold ([#9491](https://github.com/can1357/oh-my-pi/issues/9491))
 
 ## [18.0.4] - 2026-08-24
 
