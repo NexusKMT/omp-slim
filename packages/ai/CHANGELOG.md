@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed provider message-count limit errors being misclassified as payload rejections instead of recoverable context overflows ([#9629](https://github.com/can1357/oh-my-pi/issues/9629)).
+
 ## [18.0.4] - 2026-08-24
 
 ### Fixed
