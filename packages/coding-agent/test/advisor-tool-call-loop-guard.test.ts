@@ -102,7 +102,12 @@ describe("advisor tool-call loop guard", () => {
 			return stream;
 		};
 		const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
-		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false, ...guardSettings });
+		const settings = Settings.isolated({
+			"advisor.syncBacklog": "1",
+			"compaction.enabled": false,
+			"todo.enabled": false,
+			...guardSettings,
+		});
 		session = new AgentSession({
 			agent: new Agent({
 				getApiKey: () => "test-key",
@@ -132,7 +137,9 @@ describe("advisor tool-call loop guard", () => {
 			20,
 		);
 
-		await advisor.prompt("review the current update");
+		if (!session) throw new Error("Expected live session");
+		await session.prompt("review the current update");
+		expect(await session.waitForAdvisorCatchup(2_000)).toBe(true);
 
 		// First threshold injects one corrective; ignoring it re-arms the
 		// detector, and the second threshold aborts. The agent loop observes the
@@ -146,6 +153,7 @@ describe("advisor tool-call loop guard", () => {
 		);
 		expect(redirects).toHaveLength(1);
 		expect(advisor.state.messages.filter(message => message.role === "custom")).toHaveLength(0);
+		expect(advisor.state.error).toBeUndefined();
 	});
 
 	it("starts repetition counting fresh after an advisor context reset", () => {
