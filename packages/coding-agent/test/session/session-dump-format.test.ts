@@ -207,6 +207,27 @@ printf 'done\\n'
 		expect(out).not.toContain("## async-progress");
 	});
 
+	it("leaves ordinary custom XML messages unchanged", () => {
+		const content = "<system-noticeable>ordinary custom content</system-noticeable>";
+		const out = formatSessionDumpText({
+			messages: [
+				{
+					role: "custom",
+					customType: "plugin-message",
+					content,
+					display: true,
+					attribution: "agent",
+					timestamp: 1,
+				},
+			],
+		});
+
+		expect(out).toContain("## plugin-message");
+		expect(out).toContain(content);
+		expect(out).not.toContain("## System Notice:");
+		expect(out).not.toContain("```xml");
+	});
+
 	it("does not nest a thinking block that already carries a literal <thinking> envelope (#2700)", () => {
 		const out = formatSessionDumpText({
 			messages: [

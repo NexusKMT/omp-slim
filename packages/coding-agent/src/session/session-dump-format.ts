@@ -116,7 +116,7 @@ function customMessageText(message: CustomMessage | HookMessage): string {
 
 function appendCustomMessage(lines: string[], message: CustomMessage | HookMessage): void {
 	const content = customMessageText(message);
-	if (!content.trimStart().startsWith("<system-notice")) {
+	if (!/^<system-notice(?:\s|>)/.test(content.trimStart())) {
 		lines.push(`## ${message.customType}\n`);
 		lines.push(content);
 		lines.push("\n");
