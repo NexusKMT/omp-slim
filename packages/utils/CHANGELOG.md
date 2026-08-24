@@ -6,14 +6,15 @@
 
 - Added `stableStringifyJson` for deterministic serialization of nested JSON-shaped data.
 
+### Fixed
+
+- Managed Chrome-for-Testing installs no longer fail extracting the ~269 MB `chrome` binary against the default 64 MiB archive-member cap; the trusted browser download now extracts with a ceiling sized for it. ([#9534](https://github.com/can1357/oh-my-pi/issues/9534))
+
 ## [18.0.4] - 2026-08-24
 
 ### Added
 
 - Exported `getAvatarCacheDir` to resolve the avatar cache directory path.
-### Fixed
-
-- Managed Chrome-for-Testing installs no longer fail extracting the ~269 MB `chrome` binary against the default 64 MiB archive-member cap; the trusted browser download now extracts with a ceiling sized for it. ([#9534](https://github.com/can1357/oh-my-pi/issues/9534))
 
 ## [18.0.1] - 2026-08-23
 

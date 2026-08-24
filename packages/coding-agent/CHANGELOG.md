@@ -47,20 +47,24 @@
 - Fixed the git TUI sidebar jumping back to the top of the file list after staging or unstaging a file; selection now stays on the nearest remaining row
 - Fixed long sessions becoming unrecoverable when a provider rejects histories over its message-count limit ([#9629](https://github.com/can1357/oh-my-pi/issues/9629)).
 - Session `/dump` output now labels system notices with readable titles and fences their raw payloads as XML.
-
-### Fixed
-
 - Fixed kernel sessions failing to recover when a dead kernel reports cancellation instead of throwing.
 - Fixed advisors repeating one failing tool call without any bound: the `model.toolCallLoopGuard.*` settings now govern the advisor's own loop too, redirecting it at the configured threshold ([#9491](https://github.com/can1357/oh-my-pi/issues/9491))
 - Fixed `lsp rename_file` reporting an unreadable source path as "does not exist", and renaming onto a destination whose existence check failed for any reason other than the path being free ([#8381](https://github.com/can1357/oh-my-pi/issues/8381))
 - Fixed LSP clients with different process arguments, initialization options, or settings sharing the first configuration's process, and made `lsp reload *` replace and stop clients created from superseded configurations ([#8382](https://github.com/can1357/oh-my-pi/issues/8382), [#8384](https://github.com/can1357/oh-my-pi/issues/8384))
 - Fixed the browser relay leaving Chrome's debugging infobar up after a client released a tab's last session with `Target.detachFromTarget`: the attachment is now dropped, so dismissing a stale infobar no longer blocks the relay from driving that tab ([#9613](https://github.com/can1357/oh-my-pi/issues/9613))
 - Fixed the auto-retry countdown freezing on its initial seconds value: the delay was rendered once when the loader was created, so a long provider-stated wait (rate-limit resets, quota windows) looked stuck while the background timer ran. The remaining time now ticks down on every spinner frame.
-### Fixed
-
 - Fixed the sticky Todo HUD freezing at an earlier snapshot after viewing a subagent and returning to the main session ([#9571](https://github.com/can1357/oh-my-pi/issues/9571)).
 - Fixed child task completions linking unreadable artifacts and `hub jobs` replaying result bodies that were already delivered ([#9646](https://github.com/can1357/oh-my-pi/issues/9646)).
 - Fixed `omp update` showing the POSIX `curl … | sh` reinstall command on Windows when a package-rename migration failed verification; it now uses the platform-aware PowerShell hint ([#9619](https://github.com/can1357/oh-my-pi/issues/9619))
+- Custom model `thinking.requiresEffort: false` is now preserved from `models.yml`, allowing verified local Qwen chat templates to keep `:off` as strict `enable_thinking=false` instead of clamping it to the lowest effort.
+- Project settings from shared capability files (e.g. `.claude/settings.json`) no longer shadow an entire settings group when a foreign non-object leaf collides with a group prefix — Claude Code's `"tui": "fullscreen"` used to silently replace every `tui.*` setting for sessions rooted in that project. Such values are now dropped with a warning naming the setting and source file.
+- Jina Reader requests now use configured credentials for higher authenticated rate limits while remaining available anonymously ([#9431](https://github.com/can1357/oh-my-pi/issues/9431)).
+- Advisor transcripts no longer re-persist replayed "Session update" batches on every re-prime/retry, so `__advisor.jsonl` grows with new content instead of ballooning to multiple GB; resumed sessions load the advisor cost total off the critical path (no more minute-long `createAgentSession` hang), and the Agent Hub caps pathological advisor-transcript scans so one huge file can't stall `hub list` ([#9553](https://github.com/can1357/oh-my-pi/issues/9553)).
+- Failed `browser.open` calls now terminate OMP-spawned app process trees when no tab can be acquired.
+- Browser handles from `tab.id()`/`tab.ref()`/`tab.waitFor()` now fail fast with a named per-op error (e.g. `handle.click() timed out after 8000ms`) instead of letting a stalled `(await tab.id(n)).click()` consume the whole browser cell ([#9535](https://github.com/can1357/oh-my-pi/issues/9535)).
+- Thinking-only length stops that overlap speculative handoff now resume compaction recovery instead of leaving the autonomous run idle.
+- Completed assistant replies remain represented in the live transcript when an older active block prevents scrollback retirement under viewport pressure ([#9508](https://github.com/can1357/oh-my-pi/issues/9508)).
+- Accelerated SHA-2 and SHA-3 checksum builtins on ARM64 CPUs that support the corresponding hardware instructions ([#9554](https://github.com/can1357/oh-my-pi/issues/9554)).
 
 ## [18.0.4] - 2026-08-24
 
@@ -93,25 +97,6 @@
 - Fixed Linux startup event loop delays caused by legacy extension cache fsync churn.
 - Fixed subagent advisors abandoning reviews on the final yield turn during session teardown.
 - Fixed `/todo` expand/collapse commands and corrected `/shake thinking` reporting.
-- Custom model `thinking.requiresEffort: false` is now preserved from `models.yml`, allowing verified local Qwen chat templates to keep `:off` as strict `enable_thinking=false` instead of clamping it to the lowest effort.
-### Fixed
-
-- Project settings from shared capability files (e.g. `.claude/settings.json`) no longer shadow an entire settings group when a foreign non-object leaf collides with a group prefix — Claude Code's `"tui": "fullscreen"` used to silently replace every `tui.*` setting for sessions rooted in that project. Such values are now dropped with a warning naming the setting and source file.
-### Fixed
-
-- Jina Reader requests now use configured credentials for higher authenticated rate limits while remaining available anonymously ([#9431](https://github.com/can1357/oh-my-pi/issues/9431)).
-### Fixed
-
-- Advisor transcripts no longer re-persist replayed "Session update" batches on every re-prime/retry, so `__advisor.jsonl` grows with new content instead of ballooning to multiple GB; resumed sessions load the advisor cost total off the critical path (no more minute-long `createAgentSession` hang), and the Agent Hub caps pathological advisor-transcript scans so one huge file can't stall `hub list` ([#9553](https://github.com/can1357/oh-my-pi/issues/9553)).
-### Fixed
-
-- Failed `browser.open` calls now terminate OMP-spawned app process trees when no tab can be acquired.
-### Fixed
-
-- Browser handles from `tab.id()`/`tab.ref()`/`tab.waitFor()` now fail fast with a named per-op error (e.g. `handle.click() timed out after 8000ms`) instead of letting a stalled `(await tab.id(n)).click()` consume the whole browser cell ([#9535](https://github.com/can1357/oh-my-pi/issues/9535)).
-### Fixed
-
-- Thinking-only length stops that overlap speculative handoff now resume compaction recovery instead of leaving the autonomous run idle.
 
 ## [18.0.3] - 2026-08-23
 
@@ -123,9 +108,7 @@
 
 - Resolved cursor drift and text duplication caused by overlapping or out-of-bounds spelling ranges
 - Squeezed transcript tool rows no longer render as a bare unstyled `╭─ Hub` frame: a squeezed block keeps its real render whenever it fits the allocated rows, and blocks that genuinely overflow fold to a themed frame that names the tool's activity (e.g. `Hub · send → Main`).
-- Completed assistant replies remain represented in the live transcript when an older active block prevents scrollback retirement under viewport pressure ([#9508](https://github.com/can1357/oh-my-pi/issues/9508)).
 - Python/Ruby/Julia eval cells that hit their wall-clock timeout during a `parallel()`/`agent()`/`tool.*` fan-out no longer get their kernel force-killed (losing all session state): the timeout now aborts in-flight bridge calls so the runner unwinds as a clean KeyboardInterrupt and the kernel survives.
-- Accelerated SHA-2 and SHA-3 checksum builtins on ARM64 CPUs that support the corresponding hardware instructions ([#9554](https://github.com/can1357/oh-my-pi/issues/9554)).
 - Multi-select ask options whose labels end in `(Recommended)` now show their checked state and avoid duplicate recommendation suffixes ([#9452](https://github.com/can1357/oh-my-pi/issues/9452)).
 
 ## [18.0.2] - 2026-08-23
