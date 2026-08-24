@@ -207,7 +207,13 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 			},
 		});
 		opts.onSubprocessResult?.(result);
-		if (deferredCleanup) return result;
+		// Deferred cleanup no longer implies an aborted run: a successful `yield`
+		// whose teardown drains past the grace window returns exitCode 0 with a
+		// pending `deferredCleanup` (issue #9670). Capture branch/patch here
+		// regardless — the isolation worktree is still on disk (its teardown is
+		// deferred to the `finally` below, which waits for `deferredCleanup`
+		// before removing it), so skipping capture would let the `finally`
+		// delete the agent's edits and report a false, changeless completion.
 		if (opts.mergeMode === "branch" && result.exitCode === 0) {
 			try {
 				const commitResult = await commitToBranch(
