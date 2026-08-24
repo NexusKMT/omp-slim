@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Kept the main session alive when Bun surfaces an optional-worker IPC send `EPIPE` through `uncaughtException` instead of `unhandledRejection`.
+
 ## [18.0.4] - 2026-08-24
 
 ### Added
