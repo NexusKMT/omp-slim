@@ -33,6 +33,9 @@
 - Fixed Linux startup event loop delays caused by legacy extension cache fsync churn.
 - Fixed subagent advisors abandoning reviews on the final yield turn during session teardown.
 - Fixed `/todo` expand/collapse commands and corrected `/shake thinking` reporting.
+### Fixed
+
+- Custom model `thinking.requiresEffort: false` is now preserved from `models.yml`, allowing verified local Qwen chat templates to keep `:off` as strict `enable_thinking=false` instead of clamping it to the lowest effort.
 
 ## [18.0.3] - 2026-08-23
 
