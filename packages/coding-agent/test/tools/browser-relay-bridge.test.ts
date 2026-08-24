@@ -294,22 +294,66 @@ describe("RelayBridge tab grouping", () => {
 });
 
 describe("RelayBridge attachment release", () => {
-	it("detaches the debugger when an explicit Target.detachFromTarget releases the last session", async () => {
+	it("detaches cleanly on explicit last-session release and permits reattachment", async () => {
 		const bridge = new RelayBridge({ group: { title: "omp", color: "cyan" } });
 		const ext = new FakeExtSocket();
 		connect(bridge, ext, [tab({ tabId: 1 })]);
 		const cdp = new FakeCdpSocket();
 		const connId = bridge.cdpConnected(cdp);
 		const sessionId = await attachPage(bridge, ext, cdp, connId, 1);
-		// Releasing the last session explicitly must drop the attachment the
-		// same way closing the socket while holding it does; otherwise the
-		// chrome.debugger attachment and its infobar outlive every session.
 		bridge.cdpMessage(
 			connId,
 			JSON.stringify({ id: ++msgSeq, method: "Target.detachFromTarget", params: { sessionId } }),
 		);
 		await flush();
 		expect(ext.rpcs("detach").map(rpc => rpc.tabId)).toEqual([1]);
+
+		// Mirror Chrome: onDetach reaches the bridge before detach's RPC result.
+		// This echo is expected and must not ban/retract the live target.
+		bridge.extMessage(ext, JSON.stringify({ t: "detached", tabId: 1, reason: "target_closed" }));
+		ack(bridge, ext, "detach");
+		await flush();
+
+		const reattachId = ++msgSeq;
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: reattachId, method: "Target.attachToTarget", params: { targetId: "PAGE1" } }),
+		);
+		ack(bridge, ext, "attach");
+		await flush();
+		expect(cdp.sessionFor(reattachId)).toBeDefined();
+		expect(cdp.messages.some(message => message.method === "Target.targetDestroyed")).toBe(false);
+	});
+
+	it("serializes immediate reattachment behind the detach RPC and its echo", async () => {
+		const bridge = new RelayBridge({ group: { title: "omp", color: "cyan" } });
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		const sessionId = await attachPage(bridge, ext, cdp, connId, 1);
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: ++msgSeq, method: "Target.detachFromTarget", params: { sessionId } }),
+		);
+		await flush();
+
+		const reattachId = ++msgSeq;
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: reattachId, method: "Target.attachToTarget", params: { targetId: "PAGE1" } }),
+		);
+		await flush();
+		// Only the initial attach has reached the extension while detach is pending.
+		expect(ext.rpcs("attach")).toHaveLength(1);
+
+		bridge.extMessage(ext, JSON.stringify({ t: "detached", tabId: 1, reason: "target_closed" }));
+		ack(bridge, ext, "detach");
+		await flush();
+		expect(ext.rpcs("attach")).toHaveLength(2);
+		ack(bridge, ext, "attach");
+		await flush();
+		expect(cdp.sessionFor(reattachId)).toBeDefined();
 	});
 
 	it("keeps the attachment while another connection still holds a session on the tab", async () => {

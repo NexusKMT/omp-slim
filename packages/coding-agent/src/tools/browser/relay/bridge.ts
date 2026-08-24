@@ -87,6 +87,8 @@ class TabState {
 	/** Whether targets for this tab were announced to discovering connections. */
 	announced = false;
 	attaching: Promise<boolean> | null = null;
+	/** Relay-initiated detach in flight; reattach serializes behind it. */
+	detaching: Promise<void> | null = null;
 	/** True after the relay put this tab in the omp group; `ompGroupId` holds that group. */
 	grouped = false;
 	/** Group RPC in flight — suppresses duplicate requests from load-time tabUpdated bursts. */
@@ -649,6 +651,13 @@ export class RelayBridge {
 	#onTabDetached(tabId: number, reason: string): void {
 		const tab = this.#tabs.get(tabId);
 		if (!tab) return;
+		// chrome.debugger.detach emits onDetach before its RPC result. A release
+		// we initiated clears attached first, so its echo is expected — banning
+		// here would retract a live target and block its next attachment.
+		if (!tab.attached) {
+			tab.attaching = null;
+			return;
+		}
 		this.#log("tab detached", { tabId, reason });
 		tab.attached = false;
 		tab.attaching = null;
@@ -841,7 +850,7 @@ export class RelayBridge {
 	}
 
 	/**
-	 * Release the tab's `chrome.debugger` attachment once no downstream session
+	 * Release the tab's chrome.debugger attachment once no downstream session
 	 * holds it. Inert while the long-lived registry connection still holds one.
 	 */
 	#detachIfUnheld(tabId: number): void {
@@ -849,7 +858,13 @@ export class RelayBridge {
 		const tab = this.#tabs.get(tabId);
 		if (!tab?.attached) return;
 		tab.attached = false;
-		void this.#rpc({ op: "detach", tabId }).catch(() => {});
+		const done = this.#rpc({ op: "detach", tabId })
+			.then(() => {})
+			.catch(() => {})
+			.finally(() => {
+				if (tab.detaching === done) tab.detaching = null;
+			});
+		tab.detaching = done;
 	}
 
 	/** Connections currently holding any session on a tab. */
@@ -872,6 +887,9 @@ export class RelayBridge {
 	}
 
 	async #ensureAttached(tab: TabState): Promise<boolean> {
+		// The extension emits the detach echo before resolving the RPC. Awaiting
+		// prevents a replacement attach racing either operation.
+		while (tab.detaching) await tab.detaching;
 		if (tab.attached) return true;
 		if (tab.banned || !this.#ext) return false;
 		if (tab.attaching) return await tab.attaching;
