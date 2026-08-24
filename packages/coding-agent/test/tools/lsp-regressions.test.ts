@@ -3524,7 +3524,13 @@ describe("lsp regressions", () => {
 			// EACCES is not ENOENT: the file is there, we just can't read it.
 			const realStat = fs.promises.stat;
 			vi.spyOn(fs.promises, "stat").mockImplementation((async (target: fs.PathLike) => {
-				if (target === sourceFile) throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+				if (target === sourceFile) {
+					throw Object.assign(new Error(`permission denied: ${sourceFile}\tsecret`), {
+						code: "EACCES",
+						path: sourceFile,
+						syscall: "stat",
+					});
+				}
 				return await realStat(target);
 			}) as typeof fs.promises.stat);
 
@@ -3537,8 +3543,9 @@ describe("lsp regressions", () => {
 			});
 
 			const output = textResult(result);
-			expect(output).toContain("cannot read source path");
-			expect(output).toContain("permission denied");
+			expect(output).toContain("cannot read source path locked.ts: EACCES during stat");
+			expect(output).not.toContain(tempDir.path());
+			expect(output).not.toContain("\t");
 			expect(output).not.toContain("does not exist");
 			expect(result.details).toMatchObject({ action: "rename_file", success: false });
 		} finally {
@@ -3558,7 +3565,13 @@ describe("lsp regressions", () => {
 			// so treating it as absent would rename onto a file we cannot see.
 			const realStat = fs.promises.stat;
 			vi.spyOn(fs.promises, "stat").mockImplementation((async (target: fs.PathLike) => {
-				if (target === destFile) throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+				if (target === destFile) {
+					throw Object.assign(new Error(`permission denied: ${destFile}\tsecret`), {
+						code: "EACCES",
+						path: destFile,
+						syscall: "stat",
+					});
+				}
 				return await realStat(target);
 			}) as typeof fs.promises.stat);
 
@@ -3570,7 +3583,10 @@ describe("lsp regressions", () => {
 				timeout: 5,
 			});
 
-			expect(textResult(result)).toContain("cannot read destination path");
+			const output = textResult(result);
+			expect(output).toContain("cannot read destination path new.ts: EACCES during stat");
+			expect(output).not.toContain(tempDir.path());
+			expect(output).not.toContain("\t");
 			expect(result.details).toMatchObject({ action: "rename_file", success: false });
 			expect(fs.existsSync(sourceFile)).toBe(true);
 		} finally {

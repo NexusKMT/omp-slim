@@ -7,12 +7,13 @@ import type {
 	AgentToolUpdateCallback,
 	ToolApprovalDecision,
 } from "@oh-my-pi/pi-agent-core";
-import { isEnoent, logger, prompt, untilAborted } from "@oh-my-pi/pi-utils";
+import { isEnoent, isFsError, logger, prompt, untilAborted } from "@oh-my-pi/pi-utils";
 import { type Theme, theme } from "../modes/theme/theme";
 import lspDescription from "../prompts/tools/lsp.md" with { type: "text" };
 import type { ToolSession } from "../tools";
 import { truncateForPrompt } from "../tools/approval";
 import { formatPathRelativeToCwd, resolveToCwd } from "../tools/path-utils";
+import { replaceTabs, shortenPath } from "../tools/render-utils";
 import { ToolAbortError, ToolError, throwIfAborted } from "../tools/tool-errors";
 import { clampTimeout } from "../tools/tool-timeouts";
 import {
@@ -144,6 +145,17 @@ async function enumerateRenamePairs(
 		});
 	}
 	return { pairs, directory: true, exceeded: false };
+}
+
+function formatRenameStatPath(filePath: string, cwd: string): string {
+	return replaceTabs(shortenPath(formatPathRelativeToCwd(filePath, cwd)));
+}
+
+/** Filesystem error detail safe for model/TUI output: never echo raw paths. */
+function formatRenameStatError(error: unknown): string {
+	if (!isFsError(error)) return "unknown filesystem error";
+	const syscall = error.syscall ? ` during ${replaceTabs(error.syscall)}` : "";
+	return `${replaceTabs(error.code)}${syscall}`;
 }
 
 /**
@@ -471,14 +483,14 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 				// Only ENOENT means "missing". Reporting EACCES/ELOOP/EIO as a
 				// missing path sends the caller hunting the wrong problem — and
 				// silently invites them to recreate a file that is already there.
-				const relSource = formatPathRelativeToCwd(source, this.session.cwd);
+				const relSource = formatRenameStatPath(source, this.session.cwd);
 				return {
 					content: [
 						{
 							type: "text",
 							text: isEnoent(err)
 								? `Error: source path does not exist: ${relSource}`
-								: `Error: cannot read source path ${relSource}: ${err instanceof Error ? err.message : String(err)}`,
+								: `Error: cannot read source path ${relSource}: ${formatRenameStatError(err)}`,
 						},
 					],
 					details: { action, success: false, request: params },
@@ -491,7 +503,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 					content: [
 						{
 							type: "text",
-							text: `Error: destination already exists: ${formatPathRelativeToCwd(dest, this.session.cwd)}`,
+							text: `Error: destination already exists: ${formatRenameStatPath(dest, this.session.cwd)}`,
 						},
 					],
 					details: { action, success: false, request: params },
@@ -505,7 +517,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 						content: [
 							{
 								type: "text",
-								text: `Error: cannot read destination path ${formatPathRelativeToCwd(dest, this.session.cwd)}: ${err instanceof Error ? err.message : String(err)}`,
+								text: `Error: cannot read destination path ${formatRenameStatPath(dest, this.session.cwd)}: ${formatRenameStatError(err)}`,
 							},
 						],
 						details: { action, success: false, request: params },
