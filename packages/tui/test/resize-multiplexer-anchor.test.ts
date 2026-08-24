@@ -142,22 +142,28 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 	});
 
 	it("falls back to the settled CPR when a coalesced burst reverses direction", () => {
-		// Burst 12 -> 20 -> 6: the grow pulls scrollback into the pane and moves
-		// the parked logical row, so the clip model's telescoping (which would
-		// compute pushed=0 from pre-burst state and anchor at 3) no longer
-		// describes the pane. A reversed burst must take the CPR/timeout path,
-		// whose `height - staleRows` bound (6 - 8 -> 0) anchors the repaint at
-		// the top instead of overwriting rows above the real viewport.
+		// Burst 12 -> 20 -> 6: the grow pulls the 3 committed scrollback rows
+		// into the pane (parked cursor rides down 3 -> 6), then the 14-row
+		// shrink discards the 13 rows below the cursor and pushes 1, leaving
+		// the real viewport top at 5 — which the settled CPR reports, because
+		// tmux keeps the parked cursor attached through both moves. The clip
+		// model would telescope the net 12 -> 6 shrink from pre-burst state
+		// (pushed=0, anchor 3) and repaint above the real viewport; the
+		// `height - staleRows` bound would be worse still, dragging the anchor
+		// to 0 over five retained history rows (tmux discarded stale rows
+		// below the cursor rather than pushing them, so the bottom-preserving
+		// bound does not hold). The reversed burst must anchor exactly where
+		// the CPR reports.
 		const { terminal, tui, renderScheduler, writes } = startRig();
 		terminal.resize(40, 20);
 		terminal.resize(40, 6);
 		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
 		writes.length = 0;
-		renderScheduler.settle(); // probe timeout path -> settled repaint
+		terminal.sendInput("\x1b[6;1R"); // parked cursor: real viewport top, row 5
 		const repaint = writes.join("");
 		const cup = repaint.match(/\x1b\[(\d+);1H/);
 		expect(cup).not.toBeNull();
-		expect(Number(cup![1])).toBe(1);
+		expect(Number(cup![1])).toBe(6);
 		tui.stop();
 	});
 });

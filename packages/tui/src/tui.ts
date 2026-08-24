@@ -1169,13 +1169,16 @@ export class TUI extends Container {
 
 	/**
 	 * Anchor the settled post-resize repaint. `reportedRow` is the 0-based CPR
-	 * row of the parked cursor (undefined = probe timed out). The viewport top
-	 * is `min(reported - parkOffset, height - staleRows)`: terminals track the
+	 * row of the parked cursor (undefined = probe timed out). Direct terminals
+	 * use `min(reported - parkOffset, height - staleRows)`: they track the
 	 * cursor exactly through width rewrap, and the second bound reconstructs
-	 * height-shrink scrollback pushes that leave the cursor behind (kitty clamps
-	 * the cursor instead of scrolling it) — bottom-preserving resize guarantees
-	 * the stale viewport ends on the last screen row whenever a push happened.
-	 * Validated against kitty's real core in resize-anchor-recovery.test.ts.
+	 * height-shrink scrollback pushes that leave the cursor behind (kitty
+	 * clamps the cursor instead of scrolling it) — bottom-preserving resize
+	 * guarantees the stale viewport ends on the last screen row whenever a
+	 * push happened; validated against kitty's real core in
+	 * resize-anchor-recovery.test.ts. Multiplexers clip instead of rewrapping,
+	 * so that bound never applies: monotonic shrinks use the deterministic
+	 * clip model below, everything else trusts the CPR directly.
 	 */
 	#resolveResizeAnchor(reportedRow: number | undefined): void {
 		const probe = this.#resizeProbe;
@@ -1189,28 +1192,42 @@ export class TUI extends Container {
 			reportedRow === undefined
 				? this.#providerViewportTop
 				: reportedRow - this.#reflowedRowCount(probe.window, 0, probe.offset, width);
-		let top = Math.max(0, Math.min(reportedTop, height - staleRows));
-		if (isInsideTerminalMultiplexer() && height < this.#previousHeight && !this.#resizeBurstGrew) {
-			// Multiplexers clip on height shrink around the cursor, not around
-			// content: rows strictly below the cursor are discarded first (even
-			// non-blank ones — measured against real tmux), and only the remainder
-			// of the shrink pushes top rows into scrollback. tmux also does not
-			// keep the parked cursor attached to its logical line across the
-			// shrink, so CPR-relative math lands above the real viewport and the
-			// settled repaint would overwrite committed rows that are still
-			// visible. Derive the push deterministically from the saved parked
-			// cursor instead. Across a coalesced multi-SIGWINCH burst the totals
-			// telescope, so pre-burst state with the cumulative shrink stays
-			// exact — but only while the burst is monotonic: any grow step pulls
-			// scrollback back into the pane and moves the parked logical row, so
-			// reversed bursts (#resizeBurstGrew) fall back to the settled CPR
-			// path above.
-			const parkedRow =
-				this.#providerViewportTop + this.#reflowedRowCount(probe.window, 0, probe.offset, width);
-			const shrink = this.#previousHeight - height;
-			const discardedBelow = Math.min(shrink, Math.max(0, this.#previousHeight - 1 - parkedRow));
-			const pushed = Math.max(0, shrink - discardedBelow);
-			top = Math.max(0, this.#providerViewportTop - pushed);
+		let top: number;
+		if (isInsideTerminalMultiplexer()) {
+			if (height < this.#previousHeight && !this.#resizeBurstGrew) {
+				// Multiplexers clip on height shrink around the cursor, not around
+				// content: rows strictly below the cursor are discarded first (even
+				// non-blank ones — measured against real tmux), and only the
+				// remainder of the shrink pushes top rows into scrollback. Derive
+				// the push deterministically from the saved parked cursor. Across a
+				// coalesced multi-SIGWINCH burst the totals telescope, so pre-burst
+				// state with the cumulative shrink stays exact — but only while the
+				// burst is monotonic: any grow step pulls scrollback back into the
+				// pane and moves the parked logical row.
+				const parkedRow =
+					this.#providerViewportTop + this.#reflowedRowCount(probe.window, 0, probe.offset, width);
+				const shrink = this.#previousHeight - height;
+				const discardedBelow = Math.min(shrink, Math.max(0, this.#previousHeight - 1 - parkedRow));
+				const pushed = Math.max(0, shrink - discardedBelow);
+				top = Math.max(0, this.#providerViewportTop - pushed);
+			} else {
+				// Reversed bursts and grows trust the settled CPR: the multiplexer
+				// keeps the parked cursor attached through grow pull-down and
+				// shrink push. The `height - staleRows` bound must NOT apply here —
+				// it encodes bottom-preserving rewrap, but a multiplexer shrink may
+				// have discarded stale rows below the cursor instead of pushing the
+				// top ones, so the bound would drag the anchor over retained
+				// history rows above the real viewport. Frame-size clamping
+				// happens when the settled plan frame is emitted.
+				top = Math.max(0, reportedTop);
+			}
+		} else {
+			// Direct terminals rewrap bottom-preserving: with `staleRows` stale
+			// rows on screen the viewport top cannot exceed `height - staleRows`
+			// whenever a push happened, so the bound reconstructs height-shrink
+			// pushes that leave the cursor behind (kitty clamps the cursor
+			// instead of scrolling it).
+			top = Math.max(0, Math.min(reportedTop, height - staleRows));
 		}
 		if ($flag("PI_DEBUG_REDRAW")) {
 			const msg = `[${new Date().toISOString()}] resize anchor: size=${width}x${height} cpr=${reportedRow ?? "timeout"} park=${probe.offset} stale=${staleRows} old=${this.#providerViewportTop} top=${top}\n`;
