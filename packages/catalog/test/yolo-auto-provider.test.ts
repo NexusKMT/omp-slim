@@ -150,5 +150,12 @@ describe("Yolo-Auto provider discovery", () => {
 		const { models } = await manager.refresh("online");
 
 		expect(models.map(model => model.id)).toEqual(["live-only"]);
+		// Even a reference-less wire id keeps the provider-wide flat-rate cost
+		// and no-store surface — the generic compat defaults would otherwise
+		// resolve `supportsStore: true` and the endpoint rejects the field.
+		expect(models[0]).toMatchObject({
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			compat: { supportsStore: false, supportsDeveloperRole: false },
+		});
 	});
 });

@@ -4819,12 +4819,10 @@ function mapYoloAutoModel(
 	reference: ModelSpec<"openai-completions"> | undefined,
 ): ModelSpec<"openai-completions"> {
 	const model = mapWithBundledReference(entry, defaults, reference);
-	if (!reference) {
-		// Bare defaults are already zero-cost with no compat overrides.
-		return model;
-	}
 	return {
 		...model,
+		// Flat-rate and no-store are provider-wide: they must win whether the
+		// reference came from the yolo bundle, the global index, or nowhere.
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		compat: {
 			...model.compat,
@@ -4844,7 +4842,15 @@ function mapYoloAutoModel(
 export function yoloAutoModelManagerOptions(
 	config?: YoloAutoModelManagerConfig,
 ): ModelManagerOptions<"openai-completions"> {
-	const references = createBundledReferenceMap<"openai-completions">("yolo-auto");
+	// Seed the reference map from the curated static models, not the
+	// previously generated bundle: a credentialed `gen:models` run must never
+	// resolve qwen3.8-27b through the global index (e.g. NanoGPT's
+	// 262144-context row) and bake a bundle that loses the curated
+	// template-effort surface.
+	const references = new Map<string, ModelSpec<"openai-completions">>();
+	for (const model of YOLO_AUTO_STATIC_MODELS) {
+		references.set(model.id, model);
+	}
 	const resolveReference = createReferenceResolver(() => references);
 	return {
 		...createOpenAICompatibleModelManagerOptions({
