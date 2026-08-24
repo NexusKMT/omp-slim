@@ -60,9 +60,9 @@ async function executeCommand(commandConfig: string): Promise<string | undefined
  * ptree spawns through Bun with piped-only stdio, so descriptors this process
  * holds open — e.g. a credential a launcher passed us on a private fd — cannot
  * cross into the command, matching the models.yml apiKey resolver's isolation
- * (model-config-values.ts). Its native terminate() still kills the whole
- * descendant tree when the timeout fires, so a credential helper that forked
- * background work cannot outlive its budget, and stderr is drained to a
+ * (model-config-values.ts). On timeout it hard-kills the whole descendant tree
+ * and only reports once that kill has completed, so a credential helper that
+ * forked background work cannot outlive its budget; stderr is drained to a
  * truncated tail rather than mixed into the captured value.
  */
 export async function runShellCommand(command: string, timeoutMs: number): Promise<string | undefined> {
@@ -70,7 +70,10 @@ export async function runShellCommand(command: string, timeoutMs: number): Promi
 		const cmd =
 			process.platform === "win32" ? ["cmd.exe", "/d", "/s", "/c", command] : [$which("sh") ?? "sh", "-c", command];
 		const result = await ptree.exec(cmd, { timeout: timeoutMs, allowNonZero: true, allowAbort: true });
-		if (!result.ok) return undefined;
+		// An aborted result can still carry a real exit code (the command may
+		// exit zero in the window between the timeout firing and the kill landing)
+		// — timed-out output is never a resolved credential.
+		if (!result.ok || result.exitError?.aborted) return undefined;
 		const trimmed = result.stdout.trim();
 		return trimmed.length > 0 ? trimmed : undefined;
 	} catch {

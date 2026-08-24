@@ -283,6 +283,10 @@ export class ChildProcess<In extends InMask = InMask> {
 			if (err instanceof Exception) exitError = err;
 			else throw err;
 		}
+		if (!exitError) exitError = this.exitReason;
+		if (!exitError && this.exitCode !== null && this.exitCode !== 0) {
+			exitError = new NonZeroExitError(this.exitCode, this.#stderrTail);
+		}
 
 		// On abort/timeout, hold the result until the tree is actually gone: the
 		// native terminate() is graceful-first, and reporting before it finishes
