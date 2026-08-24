@@ -310,15 +310,12 @@ export class ChildProcess<In extends InMask = InMask> {
 	attachTimeout(ms: number): void {
 		if (ms <= 0 || this.proc.killed) return;
 		this.#exited.catch(() => {});
-		Promise.race([
-			Bun.sleep(ms).then(() => true),
-			this.proc.exited.then(
-				() => false,
-				() => false,
-			),
-		]).then(timedOut => {
-			if (timedOut) this.kill(new TimeoutError(ms, this.#stderrTail));
-		});
+		// Use a clearable timer instead of Bun.sleep(): an uncleared sleep keeps the
+		// event loop referenced for the full timeout even after a fast child exits.
+		const timer = setTimeout(() => {
+			if (this.proc.exitCode === null) this.kill(new TimeoutError(ms, this.#stderrTail));
+		}, ms);
+		this.proc.exited.catch(() => {}).then(() => clearTimeout(timer));
 	}
 
 	[Symbol.dispose](): void {

@@ -59,9 +59,7 @@ const control = await resolveConfigValue("!echo positive-control-ok");
 console.log(control === "positive-control-ok" ? "CONTROL-OK" : "CONTROL-BAD:" + control);
 const value = await resolveConfigValue("!${spyPath}");
 console.log(value === undefined ? "RESOLVED-UNDEFINED" : "LEAKED:" + value);
-// ptree's timeout race leaves a pending Bun.sleep timer after resolution;
-// leave the probe deterministically instead of waiting out the timer.
-process.exit(0);`;
+`;
 			const proc = Bun.spawn({
 				cmd: [process.execPath, "--eval", script],
 				cwd: process.cwd(),
