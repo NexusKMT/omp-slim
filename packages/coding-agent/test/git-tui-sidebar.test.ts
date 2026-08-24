@@ -31,6 +31,24 @@ async function withDirtyRepo(run: (harness: SidebarHarness) => Promise<void>): P
 	}
 }
 
+/** Repo where a/ holds both a modified tracked file and an untracked one: a/tracked.txt (M), a/new.txt (?). */
+async function withMixedRepo(run: (harness: SidebarHarness) => Promise<void>): Promise<void> {
+	const repo = await fs.mkdtemp(path.join(os.tmpdir(), "omp-git-tui-sidebar-mixed-"));
+	try {
+		await $`git init --initial-branch=main`.cwd(repo).quiet();
+		await $`git config user.name "Test User"`.cwd(repo).quiet();
+		await $`git config user.email "test@example.com"`.cwd(repo).quiet();
+		await Bun.write(path.join(repo, "a/tracked.txt"), "before\n");
+		await $`git add a/tracked.txt`.cwd(repo).quiet();
+		await $`git commit -m base`.cwd(repo).quiet();
+		await Bun.write(path.join(repo, "a/tracked.txt"), "after\n");
+		await Bun.write(path.join(repo, "a/new.txt"), "new\n");
+		await run(await SidebarHarness.create(repo));
+	} finally {
+		await fs.rm(repo, { recursive: true, force: true });
+	}
+}
+
 /** Drives a real Sidebar against a real GitModel, applying raised actions like the root component. */
 class SidebarHarness {
 	readonly actions: SidebarAction[] = [];
@@ -147,6 +165,31 @@ describe("git tui sidebar staging", () => {
 			await harness.applyLastAction();
 			expect(model.staged).toEqual([]);
 			expect(model.unstaged.map(file => file.path).sort()).toEqual(["a/one.txt", "a/two.txt", "b/three.txt"]);
+		});
+	});
+	test("pure additions form their own list; staging their dir skips modified siblings", async () => {
+		await withMixedRepo(async harness => {
+			const { sidebar, model, actions } = harness;
+			// Targets: [Stage All] → dir a/ (changes) → a/tracked.txt → dir a/ (additions) → a/new.txt.
+			sidebar.handleInput("j");
+			expect(sidebar.selected?.kind).toBe("dir");
+			sidebar.handleInput("j");
+			expect(sidebar.selectedFile?.path).toBe("a/tracked.txt");
+			sidebar.handleInput("j");
+			expect(sidebar.selected?.kind).toBe("dir");
+			sidebar.handleInput("j");
+			expect(sidebar.selectedFile?.path).toBe("a/new.txt");
+
+			// Space on the additions-list a/ dir stages only the new file, not the modified sibling.
+			sidebar.handleInput("k");
+			sidebar.handleInput(" ");
+			expect(actions.at(-1)).toEqual({
+				type: "stage",
+				selection: { files: [expect.objectContaining({ path: "a/new.txt" })], label: "a/" },
+			});
+			await harness.applyLastAction();
+			expect(model.staged.map(file => file.path)).toEqual(["a/new.txt"]);
+			expect(model.unstaged.map(file => file.path)).toEqual(["a/tracked.txt"]);
 		});
 	});
 });
