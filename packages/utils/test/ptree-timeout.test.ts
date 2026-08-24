@@ -44,19 +44,22 @@ describe("ptree timeout", () => {
 		expect(elapsedMs).toBeLessThan(5_000);
 	});
 
-	it("throws NonZeroExitError by default when the child exits nonzero", async () => {
-		// wait()'s default contract: without allowNonZero, a nonzero exit rejects
-		// instead of returning an unsuccessful result.
-		let threw: unknown;
-		try {
-			await exec(["sh", "-c", "exit 3"]);
-		} catch (err) {
-			threw = err;
-		}
-		expect(threw).toBeInstanceOf(NonZeroExitError);
-	});
+	it.skipIf(process.platform === "win32")(
+		"throws NonZeroExitError by default when the child exits nonzero",
+		async () => {
+			// wait()'s default contract: without allowNonZero, a nonzero exit rejects
+			// instead of returning an unsuccessful result.
+			let threw: unknown;
+			try {
+				await exec(["sh", "-c", "exit 3"]);
+			} catch (err) {
+				threw = err;
+			}
+			expect(threw).toBeInstanceOf(NonZeroExitError);
+		},
+	);
 
-	it("completes when an orphan holds stdout past the root's exit", async () => {
+	it.skipIf(process.platform === "win32")("completes when an orphan holds stdout past the root's exit", async () => {
 		// `sleep 30 & echo token $!`: the root exits at once but the background
 		// sleep inherits the pipe, so an EOF-based read would stall for the
 		// orphan's lifetime, far past the timeout budget. The orphan's pid is
@@ -80,7 +83,7 @@ describe("ptree timeout", () => {
 		}
 	});
 
-	it("completes when an orphan holds stderr past the root's exit", async () => {
+	it.skipIf(process.platform === "win32")("completes when an orphan holds stderr past the root's exit", async () => {
 		let orphanPid: number | undefined;
 		try {
 			const start = performance.now();
@@ -100,7 +103,7 @@ describe("ptree timeout", () => {
 		}
 	});
 
-	it("completes when a nonzero exit races an orphan holding stderr", async () => {
+	it.skipIf(process.platform === "win32")("completes when a nonzero exit races an orphan holding stderr", async () => {
 		// `sleep 30 >&2 & exit 1`: the nonzero-exit normalization awaits the
 		// stderr drain, so a grace keyed on the normalized exit promise would
 		// deadlock until the orphan closes stderr. The grace must key on the
