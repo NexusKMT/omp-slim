@@ -59,6 +59,9 @@
 ### Fixed
 
 - Fixed startup blocking the event loop for ~20s on Linux with concurrent sessions: the legacy Pi extension parse cache now uses SQLite WAL journaling instead of per-entry journal create/delete + fsync churn ([#9549](https://github.com/can1357/oh-my-pi/issues/9549)).
+### Fixed
+
+- Settings → Plugins tab no longer renders empty on first open of a fresh session; the async plugin list now schedules a repaint when it mounts ([#9526](https://github.com/can1357/oh-my-pi/issues/9526)).
 
 ## [18.0.3] - 2026-08-23
 
