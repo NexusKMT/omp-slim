@@ -641,6 +641,12 @@ export class TUI extends Container {
 	// In-flight post-resize anchor probe: the stale viewport snapshot and park
 	// offset captured when CSI 6n was written, plus the no-reply fallback timer.
 	#resizeProbe: { window: readonly string[]; offset: number; timer: RenderTimer } | undefined;
+	// Pre-erase viewport snapshot for the settled resize-anchor probe: the erase
+	// in #beginResizeAltPaint empties #providerWindow, so the probe must bound
+	// the anchor with the window that was actually on screen when the resize
+	// began (see #resolveResizeAnchor's `height - staleRows` clamp).
+	#resizeProbeWindow: readonly string[] = [];
+	#resizeProbeOffset = 0;
 	// Unanswered CSI 6n probes; CPR replies are consumed from input while > 0.
 	#pendingCprReplies = 0;
 	// Prepared rows painted by the previous provider frame, for row diffing.
@@ -1056,10 +1062,17 @@ export class TUI extends Container {
 			// cursor-relative movement lands on the viewport's top row. On height
 			// shrink kitty clamps the cursor instead of moving it with pushed rows,
 			// so cursor-relative addressing would start rows late; fall back to the
-			// same bottom-preserving bound as resize-anchor recovery. The blank top
-			// row then anchors the settled CPR probe (empty window means staleRows 0).
+			// same bottom-preserving bound as resize-anchor recovery. The pre-erase
+			// window is stashed for the settled CPR probe: its reflowed row count
+			// bounds the anchor to `height - staleRows`, so a mis-parked cursor (a
+			// single-step tmux zoom re-lays the pane before SIGWINCH delivery,
+			// moving the park target under us) cannot anchor the settled repaint
+			// over pulled-back history rows or scroll-push the frame into
+			// scrollback again.
 			let erase = "";
-			if (this.#hasEverRendered && this.#providerWindow.length > 0) {
+			this.#resizeProbeWindow = this.#providerWindow;
+			this.#resizeProbeOffset = this.#parkedViewportOffset;
+			if (this.#hasEverRendered && this.#providerWindow.length > 0 && !isInsideTerminalMultiplexer()) {
 				if (this.terminal.rows < this.#previousHeight) {
 					const staleRows = this.#reflowedRowCount(
 						this.#providerWindow,
@@ -1078,6 +1091,17 @@ export class TUI extends Container {
 					);
 					erase = `\x1b[?25l${up > 0 ? `\x1b[${up}A` : ""}\r\x1b[J`;
 				}
+				this.#providerWindow = [];
+				this.#parkedViewportOffset = 0;
+			}
+			if (this.#hasEverRendered && this.#providerWindow.length > 0 && isInsideTerminalMultiplexer()) {
+				// Multiplexers apply the pane re-layout on their own schedule relative
+				// to SIGWINCH delivery, so an immediate erase races it: with the pane
+				// already re-laid the stale coordinates blank pulled-back committed
+				// rows (destroying popped scrollback), and with the pane not yet
+				// re-laid the erase lands on rows about to move. Skip it — the
+				// settled repaint overwrites the live region at the clip-model anchor
+				// and erases below it, race-free after the quiet window.
 				this.#providerWindow = [];
 				this.#parkedViewportOffset = 0;
 			}
@@ -1108,7 +1132,7 @@ export class TUI extends Container {
 		const timer = this.#renderScheduler.scheduleRender(() => {
 			this.#resolveResizeAnchor(undefined);
 		}, TUI.#RESIZE_PROBE_TIMEOUT_MS);
-		this.#resizeProbe = { window: this.#providerWindow, offset: this.#parkedViewportOffset, timer };
+		this.#resizeProbe = { window: this.#resizeProbeWindow, offset: this.#resizeProbeOffset, timer };
 		this.#pendingCprReplies++;
 		this.terminal.write("\x1b[6n");
 	}
@@ -1141,7 +1165,26 @@ export class TUI extends Container {
 			reportedRow === undefined
 				? this.#providerViewportTop
 				: reportedRow - this.#reflowedRowCount(probe.window, 0, probe.offset, width);
-		const top = Math.max(0, Math.min(reportedTop, height - staleRows));
+		let top = Math.max(0, Math.min(reportedTop, height - staleRows));
+		if (isInsideTerminalMultiplexer() && height < this.#previousHeight) {
+			// Multiplexers clip on height shrink around the cursor, not around
+			// content: rows strictly below the cursor are discarded first (even
+			// non-blank ones — measured against real tmux), and only the remainder
+			// of the shrink pushes top rows into scrollback. tmux also does not
+			// keep the parked cursor attached to its logical line across the
+			// shrink, so CPR-relative math lands above the real viewport and the
+			// settled repaint would overwrite committed rows that are still
+			// visible. Derive the push deterministically from the saved parked
+			// cursor instead. Across a coalesced multi-SIGWINCH burst the totals
+			// telescope, so pre-burst state with the cumulative shrink stays
+			// exact.
+			const parkedRow =
+				this.#providerViewportTop + this.#reflowedRowCount(probe.window, 0, probe.offset, width);
+			const shrink = this.#previousHeight - height;
+			const discardedBelow = Math.min(shrink, Math.max(0, this.#previousHeight - 1 - parkedRow));
+			const pushed = Math.max(0, shrink - discardedBelow);
+			top = Math.max(0, this.#providerViewportTop - pushed);
+		}
 		if ($flag("PI_DEBUG_REDRAW")) {
 			const msg = `[${new Date().toISOString()}] resize anchor: size=${width}x${height} cpr=${reportedRow ?? "timeout"} park=${probe.offset} stale=${staleRows} old=${this.#providerViewportTop} top=${top}\n`;
 			fs.appendFileSync(getDebugLogPath(), msg);

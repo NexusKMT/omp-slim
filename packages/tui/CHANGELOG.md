@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed tmux pane zoom/resize corrupting terminal scrollback (duplicated frames and silent history loss).
 ## [18.0.4] - 2026-08-24
 
 ### Changed
