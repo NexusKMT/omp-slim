@@ -73,7 +73,14 @@ export async function runShellCommand(command: string, timeoutMs: number): Promi
 			process.platform === "win32"
 				? [Bun.env.ComSpec || Bun.env.COMSPEC || "cmd.exe", "/d", "/s", "/c", command]
 				: ["/bin/sh", "-c", command];
-		const result = await ptree.exec(cmd, { timeout: timeoutMs, allowNonZero: true, allowAbort: true });
+		const result = await ptree.exec(cmd, {
+			timeout: timeoutMs,
+			allowNonZero: true,
+			allowAbort: true,
+			// POSIX process-group isolation keeps double-forked/reparented
+			// descendants reachable after they leave the shell's PID tree.
+			detached: process.platform !== "win32",
+		});
 		// An aborted result can still carry a real exit code (the command may
 		// exit zero in the window between the timeout firing and the kill landing)
 		// — timed-out output is never a resolved credential.

@@ -25,6 +25,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import { Process, ProcessStatus } from "@oh-my-pi/pi-natives";
 import { runShellCommand } from "../src/config/resolve-config-value";
 
 const resolverUrl = pathToFileURL(path.join(import.meta.dir, "../src/config/resolve-config-value.ts")).href;
@@ -100,6 +101,33 @@ test.skipIf(process.platform === "win32")(
 			await Bun.sleep(50);
 		}
 		expect(await Bun.file(marker).exists(), "orphaned descendant wrote the marker after the timeout").toBe(false);
+	},
+);
+
+test.skipIf(process.platform === "win32")(
+	"a timed-out !command kills descendants reparented before the timeout",
+	async () => {
+		const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omp-config-reparented-"));
+		roots.push(root);
+		const pidFile = path.join(root, "escaped.pid");
+		const worker = path.join(root, "escaped-worker.sh");
+		await fs.promises.writeFile(worker, `#!/bin/sh\necho $$ > "${pidFile}"\nsleep 30\n`, { mode: 0o755 });
+
+		let escaped: Process | null = null;
+		try {
+			// The intermediate shell exits immediately after backgrounding the
+			// worker. Waiting for its pid file proves the worker started before
+			// the resolver timeout, but PID-tree traversal can no longer find it.
+			const command = `sh -c '"${worker}" &' & while [ ! -s "${pidFile}" ]; do :; done; sleep 10`;
+			const result = await runShellCommand(command, 150);
+			expect(result).toBeUndefined();
+
+			const pid = Number.parseInt((await Bun.file(pidFile).text()).trim(), 10);
+			escaped = Process.fromPid(pid);
+			expect(escaped?.status(), `reparented descendant ${pid} survived the timeout`).not.toBe(ProcessStatus.Running);
+		} finally {
+			escaped?.killTree(9);
+		}
 	},
 );
 

@@ -112,11 +112,14 @@ export class ChildProcess<In extends InMask = InMask> {
 	#stderrStream?: ReadableStream<Uint8Array>;
 	// Termination in flight after kill(); aborted exits await it before reporting.
 	#terminating?: Promise<boolean | void>;
+	#terminateGroup: boolean;
 	constructor(
 		readonly proc: PipedSubprocess<In>,
 		readonly exposeStderr: boolean,
 		retainFullStderr = exposeStderr,
+		terminateGroup = false,
 	) {
+		this.#terminateGroup = terminateGroup;
 		if (retainFullStderr) this.#stderrChunks = [];
 		// Eagerly drain stderr into a truncated tail, retaining raw chunks only for explicit full capture.
 		const dec = new TextDecoder();
@@ -251,10 +254,17 @@ export class ChildProcess<In extends InMask = InMask> {
 
 	kill(reason?: Exception, gracefulMs?: number) {
 		if (reason && !this.#exitReasonPending) this.#exitReasonPending = reason;
-		if (!this.proc.killed)
+		if (!this.proc.killed) {
+			const options =
+				gracefulMs === undefined
+					? this.#terminateGroup
+						? { group: true }
+						: undefined
+					: { gracefulMs, group: this.#terminateGroup };
 			this.#terminating = Process.fromPid(this.proc.pid)
-				?.terminate(gracefulMs === undefined ? undefined : { gracefulMs })
+				?.terminate(options)
 				?.catch(e => void e);
+		}
 	}
 
 	// ── Output helpers ───────────────────────────────────────────────────
@@ -409,15 +419,16 @@ function spawnInternal<In extends InMask = InMask>(
 	opts: ChildSpawnOptions<In> | undefined,
 	retainFullStderr: boolean,
 ): ChildProcess<In> {
-	const { timeout = -1, signal, stderr, ...rest } = opts ?? {};
+	const { timeout = -1, signal, stderr, detached, ...rest } = opts ?? {};
 	const child = Bun.spawn(cmd, {
 		stdin: "ignore",
 		stdout: "pipe",
 		stderr: "pipe",
 		windowsHide: true,
+		detached,
 		...rest,
 	});
-	const cp = new ChildProcess(child, stderr === "full", retainFullStderr);
+	const cp = new ChildProcess(child, stderr === "full", retainFullStderr, detached === true);
 	if (signal) cp.attachSignal(signal);
 	if (timeout > 0) cp.attachTimeout(timeout);
 	return cp;
