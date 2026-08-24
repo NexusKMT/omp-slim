@@ -160,7 +160,7 @@ function createStreamingEdit(
 	chunks: string[],
 	abortSignalRef: { current?: AbortSignal },
 	createArguments: (path: string, streamedText: string) => Record<string, unknown>,
-	streamStateRef?: { deltaCount: number; waitBeforeFirstDelta?: Promise<void> },
+	streamStateRef?: { deltaCount: number; waitBeforeFirstDelta?: Promise<void>; waitBeforeFinish?: Promise<void> },
 ): Agent["streamFn"] {
 	let callIndex = 0;
 	return (_model, _context, options) => {
@@ -221,6 +221,12 @@ function createStreamingEdit(
 				await Bun.sleep(0);
 			}
 
+			// Optional gate before the final events: lets a test hold the turn open
+			// until the guard's async verification verdict has landed, instead of
+			// racing `done` against I/O-backed verification.
+			if (streamStateRef?.waitBeforeFinish) {
+				await streamStateRef.waitBeforeFinish;
+			}
 			if (aborted) return;
 
 			const finalCall = createToolCall(toolCallId, createArguments(path, streamedText));
@@ -238,7 +244,7 @@ function createStreamForDiff(
 	path: string,
 	chunks: string[],
 	abortSignalRef: { current?: AbortSignal },
-	streamStateRef?: { deltaCount: number; waitBeforeFirstDelta?: Promise<void> },
+	streamStateRef?: { deltaCount: number; waitBeforeFirstDelta?: Promise<void>; waitBeforeFinish?: Promise<void> },
 ): Agent["streamFn"] {
 	return createStreamingEdit(
 		path,
@@ -301,52 +307,70 @@ it(
 );
 
 it(
-	"aborts for failing patches across fragmented streamed deltas",
+	"aborts for failing patches across random streams",
 	async () => {
-		// The session-driven form of this test raced the fake provider against
-		// the guard's async verification: Bun.sleep(0) between deltas does not
-		// guarantee the Bun.file().text() load plus the verification chain settle
-		// before the provider emits `done`, and the turn reset then correctly
-		// discards the late verdict (CI flake: expected "aborted", received
-		// "stop"). Drive the guard directly and gate its file load explicitly so
-		// the verdict lands deterministically, while seed 7 still fragments the
-		// decision-critical `-omega` line across deltas exactly as the streamed
-		// session did.
-		const abortCalls = { count: 0 };
+		// This test raced the fake provider against the guard's async
+		// verification: Bun.sleep(0) between deltas does not guarantee the
+		// Bun.file().text() load plus the verification chain settle before the
+		// provider emits `done`, and the turn reset then correctly discards the
+		// late verdict (CI flake: expected "aborted", received "stop"). Keep the
+		// full session contract — event forwarding into the guard, agent.abort()
+		// translated into an aborted turn and AbortSignal — but gate both async
+		// legs explicitly: hold the target's file load open until every seed-7
+		// fragmented delta (which splits the decision-critical `-omega` line)
+		// has streamed, and hold the provider's final `done` until the released
+		// verification has had its macrotasks to land the verdict.
 		const target = path.join(tempDir, "sample.txt");
 		await Bun.write(target, "alpha\nbeta\ngamma\n");
-		const { guard, makeEvent } = buildSmallTargetGuard(target, "call_edit_1", abortCalls);
 		const diff = "@@\n-omega\n+beta2\n";
 		const chunks = chunkStringRandomly(diff, 7);
+		const abortSignalRef: { current?: AbortSignal } = {};
+		const finishGate = Promise.withResolvers<void>();
+		const streamState = { deltaCount: 0, waitBeforeFinish: finishGate.promise };
+		const streamFn = createStreamForDiff("sample.txt", chunks, abortSignalRef, streamState);
+		const { session, authStorage } = await createSession(tempDir, streamFn, editTool);
 
 		const { promise: heldLoad, resolve: releaseLoad } = Promise.withResolvers<string>();
 		const realFile = Bun.file.bind(Bun);
-		const fileSpy = vi.spyOn(Bun, "file").mockImplementation(((pathLike: string) => ({
-			text: () => (pathLike === target ? heldLoad : realFile(pathLike).text()),
-		})) as typeof Bun.file);
+		const fileSpy = vi.spyOn(Bun, "file").mockImplementation(((pathLike: string) => {
+			const real = realFile(pathLike);
+			if (pathLike !== target) return real;
+			// Only .text() is held; the session may touch other BunFile members.
+			return new Proxy(real, {
+				get(obj, prop) {
+					if (prop === "text") return () => heldLoad;
+					const value = Reflect.get(obj, prop);
+					return typeof value === "function" ? value.bind(obj) : value;
+				},
+			});
+		}) as typeof Bun.file);
+
 		try {
-			guard.preCache(makeEvent("toolcall_start", ""));
-			let streamed = "";
-			for (const chunk of chunks) {
-				streamed += chunk;
-				const event = makeEvent("toolcall_delta", streamed);
-				guard.preCache(event);
-				guard.maybeAbort(event);
+			const promptPromise = session.prompt("apply patch");
+			while (streamState.deltaCount < chunks.length) {
 				await drainMacrotasks(1);
 			}
 
 			// Every queued verification is still pending behind the held load, so
 			// the abort decision cannot have raced the stream.
-			expect(guard.abortTriggered).toBe(false);
+			expect(abortSignalRef.current?.aborted ?? false).toBe(false);
 
 			releaseLoad("alpha\nbeta\ngamma\n");
 			await heldLoad;
 			await drainMacrotasks(10);
+			finishGate.resolve();
+			await promptPromise;
 
-			expect(guard.abortTriggered).toBe(true);
-			expect(abortCalls.count).toBe(1);
+			const lastAssistant = lastAssistantMessage(session.state.messages);
+			expect(lastAssistant?.stopReason).toBe("aborted");
+			expect(abortSignalRef.current?.aborted ?? false).toBe(true);
 		} finally {
 			fileSpy.mockRestore();
+			try {
+				await session.dispose();
+			} finally {
+				authStorage.close();
+			}
 		}
 	},
 	STREAMING_EDIT_RANDOM_STREAM_TIMEOUT_MS,
@@ -651,37 +675,54 @@ async function streamDiff(
 it(
 	"streams large-target edit prechecks without blocking the event loop",
 	async () => {
-		const abortCalls = { count: 0 };
-		const { removedLines, guard, makeEvent } = await createLargeTargetSetup(abortCalls);
-		const diff = `@@\n${removedLines.map(l => `-${l}`).join("\n")}\n+replacement\n`;
+		// Drift is wall clock and cannot distinguish a blocked event loop from
+		// scheduler preemption; the ambient control only absorbs spikes that land
+		// inside its own sampling window, so a single sample stays load-sensitive
+		// (observed >30ms drift under parallel-suite contention with correctly
+		// sliced guard work). A real regression blocks every fresh run, so the
+		// bounds must fail on independent fresh setups before the test does.
+		let lastFailure: unknown;
+		for (let attempt = 0; attempt < 3; attempt++) {
+			const abortCalls = { count: 0 };
+			const { removedLines, guard, makeEvent } = await createLargeTargetSetup(abortCalls);
+			const diff = `@@\n${removedLines.map(l => `-${l}`).join("\n")}\n+replacement\n`;
 
-		// Ambient control: identical pacing with no guard work. Under heavy machine
-		// load the drift monitor reports OS scheduling jitter for any process; the
-		// guard run may only exceed it by a small margin plus the absolute budget.
-		const ambientDriftMs = await measureMaxDrift(async () => {
-			await streamDiff(undefined, undefined, diff);
-		});
+			// Ambient control: identical pacing with no guard work. Under heavy machine
+			// load the drift monitor reports OS scheduling jitter for any process; the
+			// guard run may only exceed it by a small margin plus the absolute budget.
+			const ambientDriftMs = await measureMaxDrift(async () => {
+				await streamDiff(undefined, undefined, diff);
+			});
 
-		let maxSyncSpanMs = 0;
-		const maxDriftMs = await measureMaxDrift(async () => {
-			maxSyncSpanMs = await streamDiff(guard, makeEvent, diff);
-		});
+			let maxSyncSpanMs = 0;
+			const maxDriftMs = await measureMaxDrift(async () => {
+				maxSyncSpanMs = await streamDiff(guard, makeEvent, diff);
+			});
 
-		// performance.now() spans include runner-preemption time the ambient drift
-		// control also absorbs, so calibrate the guard-work ceiling against the
-		// measured jitter instead of trusting a fixed wall-clock bound alone.
-		expect(maxSyncSpanMs).toBeLessThan(Math.max(5, ambientDriftMs * 3));
-		// The guard run legitimately spends one tick decoding + LF-normalizing the
-		// 2MB target and then pays GC for that churn — single-digit ms locally,
-		// 12ms observed on a 2-core CI runner. The ambient control cannot absorb
-		// those (they only occur under guard work), so the absolute floor covers
-		// them. Regression drift is an order of magnitude above it: an unsliced
-		// removed-lines pass scans 200 lines x 2MB in one continuation (>=40ms
-		// even on fast hardware), and inline-sync blocking is caught by the
-		// tighter maxSyncSpanMs bound above.
-		expect(maxDriftMs).toBeLessThan(Math.max(30, ambientDriftMs + 5));
-		expect(guard.abortTriggered).toBe(false);
-		expect(abortCalls.count).toBe(0);
+			// Not load-sensitive: these must hold on every attempt.
+			expect(guard.abortTriggered).toBe(false);
+			expect(abortCalls.count).toBe(0);
+
+			try {
+				// performance.now() spans include runner-preemption time the ambient drift
+				// control also absorbs, so calibrate the guard-work ceiling against the
+				// measured jitter instead of trusting a fixed wall-clock bound alone.
+				expect(maxSyncSpanMs).toBeLessThan(Math.max(5, ambientDriftMs * 3));
+				// The guard run legitimately spends one tick decoding + LF-normalizing the
+				// 2MB target and then pays GC for that churn — single-digit ms locally,
+				// 12ms observed on a 2-core CI runner. The ambient control cannot absorb
+				// those (they only occur under guard work), so the absolute floor covers
+				// them. Regression drift is an order of magnitude above it: an unsliced
+				// removed-lines pass scans 200 lines x 2MB in one continuation (>=40ms
+				// even on fast hardware), and inline-sync blocking is caught by the
+				// tighter maxSyncSpanMs bound above.
+				expect(maxDriftMs).toBeLessThan(Math.max(30, ambientDriftMs + 5));
+				return;
+			} catch (error) {
+				lastFailure = error;
+			}
+		}
+		throw lastFailure;
 	},
 	STREAMING_EDIT_RANDOM_STREAM_TIMEOUT_MS,
 );
