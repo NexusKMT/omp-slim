@@ -280,3 +280,108 @@ describe("RelayBridge tab grouping", () => {
 		expect(groups[0]!.tabIds).toEqual([1]);
 	});
 });
+
+describe("RelayBridge Runtime sessions", () => {
+	it("virtualizes Runtime enable state for each pseudo-session", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+
+		const first = new FakeCdpSocket();
+		const firstConn = bridge.cdpConnected(first);
+		const firstSession = await attachPage(bridge, ext, first, firstConn, 1);
+		bridge.cdpMessage(firstConn, JSON.stringify({ id: ++msgSeq, sessionId: firstSession, method: "Runtime.enable" }));
+		await flush();
+		expect(ext.pending("send").map(rpc => rpc.method)).toEqual(["Runtime.disable"]);
+		ack(bridge, ext, "send");
+		await flush();
+		expect(ext.pending("send").map(rpc => rpc.method)).toEqual(["Runtime.enable"]);
+
+		const context = {
+			context: {
+				id: 17,
+				origin: "https://example.com",
+				name: "",
+				uniqueId: "context-17",
+				auxData: { isDefault: true, type: "default", frameId: "frame-1" },
+			},
+		};
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "cdpEvent", tabId: 1, method: "Runtime.executionContextCreated", params: context }),
+		);
+		ack(bridge, ext, "send");
+		await flush();
+
+		const second = new FakeCdpSocket();
+		const secondConn = bridge.cdpConnected(second);
+		const secondSession = await attachPage(bridge, ext, second, secondConn, 1);
+		const runtimeSendCount = ext.rpcs("send").length;
+		bridge.cdpMessage(
+			secondConn,
+			JSON.stringify({ id: ++msgSeq, sessionId: secondSession, method: "Runtime.enable" }),
+		);
+		await flush();
+		expect(ext.rpcs("send")).toHaveLength(runtimeSendCount);
+
+		const contexts = second.messages.filter(
+			message => message.sessionId === secondSession && message.method === "Runtime.executionContextCreated",
+		);
+		expect(contexts.map(message => message.params)).toEqual([context]);
+
+		bridge.cdpMessage(
+			secondConn,
+			JSON.stringify({ id: ++msgSeq, sessionId: secondSession, method: "Runtime.disable" }),
+		);
+		await flush();
+		expect(ext.rpcs("send")).toHaveLength(runtimeSendCount);
+
+		const nextContext = {
+			context: { ...context.context, id: 18, uniqueId: "context-18" },
+		};
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "cdpEvent", tabId: 1, method: "Runtime.executionContextCreated", params: nextContext }),
+		);
+		const firstContexts = first.messages.filter(
+			message => message.sessionId === firstSession && message.method === "Runtime.executionContextCreated",
+		);
+		expect(firstContexts.map(message => message.params)).toEqual([context, nextContext]);
+		expect(
+			second.messages.filter(
+				message => message.sessionId === secondSession && message.method === "Runtime.executionContextCreated",
+			),
+		).toEqual(contexts);
+	});
+
+	it("keeps a pipelined Runtime.disable authoritative while root enable completes", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		const sessionId = await attachPage(bridge, ext, cdp, connId, 1);
+		bridge.cdpMessage(connId, JSON.stringify({ id: ++msgSeq, sessionId, method: "Runtime.enable" }));
+		await flush();
+
+		bridge.cdpMessage(connId, JSON.stringify({ id: ++msgSeq, sessionId, method: "Runtime.disable" }));
+		ack(bridge, ext, "send");
+		await flush();
+		expect(ext.pending("send").map(rpc => rpc.method)).toEqual(["Runtime.enable"]);
+
+		const context = { context: { id: 19 } };
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "cdpEvent", tabId: 1, method: "Runtime.executionContextCreated", params: context }),
+		);
+		ack(bridge, ext, "send");
+		await flush();
+
+		expect(
+			cdp.messages.filter(
+				message => message.sessionId === sessionId && message.method === "Runtime.executionContextCreated",
+			),
+		).toEqual([]);
+	});
+});

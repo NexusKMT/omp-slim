@@ -39,6 +39,9 @@ interface CdpCommand {
 interface SessionRef {
 	kind: "tab" | "page";
 	tabId: number;
+	runtimeEnabled: boolean;
+	/** Context ids already announced to this pseudo-session. */
+	readonly runtimeContexts: Set<number>;
 }
 
 interface TargetInfo {
@@ -96,6 +99,13 @@ class TabState {
 	groupOptOut = false;
 	/** Real Chrome session ids (OOPIF/worker children) living under this tab's root session. */
 	readonly realSessions = new Set<string>();
+	/** Live execution contexts from the shared root debugger session. */
+	readonly runtimeContexts = new Map<number, Record<string, unknown>>();
+	/** Whether the shared root Runtime domain has been enabled by the bridge. */
+	rootRuntimeEnabled = false;
+	rootRuntimeEnabling: Promise<void> | null = null;
+	/** Invalidates an in-flight Runtime enable when the debugger detaches. */
+	runtimeGeneration = 0;
 
 	constructor(
 		readonly tabId: number,
@@ -342,6 +352,7 @@ export class RelayBridge {
 			const tab = this.#tabs.get(tabId);
 			if (tab?.attached) {
 				tab.attached = false;
+				this.#resetRuntime(tab);
 				void this.#rpc({ op: "detach", tabId }).catch(() => {});
 			}
 		}
@@ -377,7 +388,7 @@ export class RelayBridge {
 			return;
 		}
 		if (ref?.kind === "page") {
-			await this.#forwardToTab(conn, msg, ref.tabId, undefined);
+			await this.#handlePageSessionCommand(conn, msg, sessionId, ref);
 			return;
 		}
 		const realTab = this.#realSessionTabs.get(sessionId);
@@ -386,6 +397,75 @@ export class RelayBridge {
 			return;
 		}
 		this.#replyError(conn, msg, `Unknown session id ${sessionId}`);
+	}
+
+	async #handlePageSessionCommand(
+		conn: CdpConnection,
+		msg: CdpCommand,
+		sessionId: string,
+		ref: SessionRef,
+	): Promise<void> {
+		if (msg.method === "Runtime.disable") {
+			ref.runtimeEnabled = false;
+			ref.runtimeContexts.clear();
+			this.#reply(conn, msg, {});
+			return;
+		}
+		if (msg.method !== "Runtime.enable") {
+			await this.#forwardToTab(conn, msg, ref.tabId, undefined);
+			return;
+		}
+		if (ref.runtimeEnabled) {
+			this.#reply(conn, msg, {});
+			return;
+		}
+
+		ref.runtimeEnabled = true;
+		const tab = this.#tabs.get(ref.tabId);
+		if (!tab) {
+			ref.runtimeEnabled = false;
+			this.#replyError(conn, msg, `No tab with id ${ref.tabId}`);
+			return;
+		}
+		try {
+			await this.#ensureRuntimeEnabled(tab);
+			if (conn.sessions.get(sessionId) === ref && ref.runtimeEnabled) {
+				this.#replayRuntimeContexts(conn, sessionId, ref, tab);
+			}
+			this.#reply(conn, msg, {});
+		} catch (err) {
+			ref.runtimeEnabled = false;
+			ref.runtimeContexts.clear();
+			this.#replyError(conn, msg, err instanceof Error ? err.message : String(err));
+		}
+	}
+
+	async #ensureRuntimeEnabled(tab: TabState): Promise<void> {
+		if (tab.rootRuntimeEnabled) return;
+		if (tab.rootRuntimeEnabling) return await tab.rootRuntimeEnabling;
+
+		const enabling = this.#cycleRuntime(tab);
+		tab.rootRuntimeEnabling = enabling;
+		const generation = tab.runtimeGeneration;
+		try {
+			await enabling;
+			if (tab.runtimeGeneration === generation) tab.rootRuntimeEnabled = true;
+		} finally {
+			if (tab.rootRuntimeEnabling === enabling) tab.rootRuntimeEnabling = null;
+		}
+	}
+
+	async #cycleRuntime(tab: TabState): Promise<void> {
+		await this.#rpc({ op: "send", tabId: tab.tabId, method: "Runtime.disable" });
+		await this.#rpc({ op: "send", tabId: tab.tabId, method: "Runtime.enable" });
+	}
+
+	#replayRuntimeContexts(conn: CdpConnection, sessionId: string, ref: SessionRef, tab: TabState): void {
+		for (const [contextId, params] of tab.runtimeContexts) {
+			if (ref.runtimeContexts.has(contextId)) continue;
+			ref.runtimeContexts.add(contextId);
+			conn.socket.send(JSON.stringify({ sessionId, method: "Runtime.executionContextCreated", params }));
+		}
 	}
 
 	async #forwardToTab(
@@ -645,7 +725,39 @@ export class RelayBridge {
 			}
 			return;
 		}
-		// Root-session event: fan out once per minted page session.
+		if (method.startsWith("Runtime.")) {
+			const createdContext = method === "Runtime.executionContextCreated" ? params?.context : undefined;
+			const createdContextId =
+				createdContext &&
+				typeof createdContext === "object" &&
+				"id" in createdContext &&
+				typeof createdContext.id === "number"
+					? createdContext.id
+					: undefined;
+			const destroyedContextId =
+				method === "Runtime.executionContextDestroyed" && typeof params?.executionContextId === "number"
+					? params.executionContextId
+					: undefined;
+			if (createdContextId !== undefined && params) tab.runtimeContexts.set(createdContextId, params);
+			if (destroyedContextId !== undefined) tab.runtimeContexts.delete(destroyedContextId);
+			if (method === "Runtime.executionContextsCleared") tab.runtimeContexts.clear();
+
+			for (const conn of this.#conns.values()) {
+				for (const [pageSession, ref] of conn.sessions) {
+					if (ref.kind !== "page" || ref.tabId !== tabId) continue;
+					if (destroyedContextId !== undefined) ref.runtimeContexts.delete(destroyedContextId);
+					if (method === "Runtime.executionContextsCleared") ref.runtimeContexts.clear();
+					if (!ref.runtimeEnabled) continue;
+					if (createdContextId !== undefined) {
+						if (ref.runtimeContexts.has(createdContextId)) continue;
+						ref.runtimeContexts.add(createdContextId);
+					}
+					conn.socket.send(JSON.stringify({ sessionId: pageSession, method, params }));
+				}
+			}
+			return;
+		}
+		// Other root-session events fan out once per minted page session.
 		for (const conn of this.#conns.values()) {
 			for (const pageSession of conn.sessionsForTab(tabId, "page")) {
 				conn.socket.send(JSON.stringify({ sessionId: pageSession, method, params }));
@@ -659,6 +771,7 @@ export class RelayBridge {
 		this.#log("tab detached", { tabId, reason });
 		tab.attached = false;
 		tab.attaching = null;
+		this.#resetRuntime(tab);
 		tab.banned = true;
 		// The user dismissed the debugger infobar (or the attach was torn
 		// down): release the tab's omp-group membership too.
@@ -831,7 +944,7 @@ export class RelayBridge {
 
 	#mintSession(conn: CdpConnection, kind: "tab" | "page", tabId: number): string {
 		const sessionId = `S${kind === "tab" ? "T" : "P"}${tabId}.${conn.id}.${++this.#sessionSeq}`;
-		conn.sessions.set(sessionId, { kind, tabId });
+		conn.sessions.set(sessionId, { kind, tabId, runtimeEnabled: false, runtimeContexts: new Set() });
 		return sessionId;
 	}
 
@@ -841,6 +954,13 @@ export class RelayBridge {
 		conn.sessions.delete(sessionId);
 		const targetId = ref.kind === "tab" ? tabTargetId(ref.tabId) : pageTargetId(ref.tabId);
 		this.#emit(conn, "Target.detachedFromTarget", { sessionId, targetId }, parentSessionId);
+	}
+
+	#resetRuntime(tab: TabState): void {
+		tab.runtimeContexts.clear();
+		tab.rootRuntimeEnabled = false;
+		tab.rootRuntimeEnabling = null;
+		tab.runtimeGeneration++;
 	}
 
 	/** Connections currently holding any session on a tab. */
