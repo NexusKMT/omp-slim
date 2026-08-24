@@ -148,7 +148,11 @@ async function enumerateRenamePairs(
 }
 
 function formatRenameStatPath(filePath: string, cwd: string): string {
-	return replaceTabs(shortenPath(formatPathRelativeToCwd(filePath, cwd)));
+	const relative = formatPathRelativeToCwd(filePath, cwd);
+	// formatPathRelativeToCwd normalizes Windows separators. Shorten the
+	// original native path first when it stayed absolute so home matching uses
+	// the same separator form as os.homedir().
+	return replaceTabs(path.isAbsolute(relative) ? shortenPath(filePath) : relative);
 }
 
 /** Filesystem error detail safe for model/TUI output: never echo raw paths. */
