@@ -144,8 +144,8 @@ function setByPath(obj: RawSettings, segments: string[], value: unknown): void {
 
 /**
  * Dotted-path prefixes that name settings groups (e.g. "tui" for "tui.*").
- * A prefix may simultaneously be a schema leaf ("model", "providers", …);
- * those accept scalar values and are excluded from shadow detection.
+ * A prefix may simultaneously be a schema leaf; those accept their declared
+ * value shape and are excluded from shadow detection.
  */
 const SETTINGS_GROUP_ONLY_PREFIXES: Readonly<Record<string, true>> = (() => {
 	const prefixes: Record<string, true> = {};
