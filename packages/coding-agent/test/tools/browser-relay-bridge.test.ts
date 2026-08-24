@@ -40,6 +40,18 @@ class FakeCdpSocket implements RelaySocket {
 		const result = msg && "result" in msg && msg.result && typeof msg.result === "object" ? msg.result : undefined;
 		return result && "sessionId" in result && typeof result.sessionId === "string" ? result.sessionId : undefined;
 	}
+	/** Session ids the bridge announced through `Target.attachedToTarget`. */
+	attachedSessions(): string[] {
+		const out: string[] = [];
+		for (const msg of this.messages) {
+			if (msg.method !== "Target.attachedToTarget") continue;
+			const params = msg.params;
+			if (params && typeof params === "object" && "sessionId" in params && typeof params.sessionId === "string") {
+				out.push(params.sessionId);
+			}
+		}
+		return out;
+	}
 }
 
 function tab(overrides: Partial<TabSnapshot> & { tabId: number }): TabSnapshot {
@@ -278,5 +290,72 @@ describe("RelayBridge tab grouping", () => {
 		const groups = ext2.rpcs("group");
 		expect(groups).toHaveLength(1);
 		expect(groups[0]!.tabIds).toEqual([1]);
+	});
+});
+
+describe("RelayBridge attachment release", () => {
+	it("detaches the debugger when an explicit Target.detachFromTarget releases the last session", async () => {
+		const bridge = new RelayBridge({ group: { title: "omp", color: "cyan" } });
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		const sessionId = await attachPage(bridge, ext, cdp, connId, 1);
+		// Releasing the last session explicitly must drop the attachment the
+		// same way closing the socket while holding it does; otherwise the
+		// chrome.debugger attachment and its infobar outlive every session.
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: ++msgSeq, method: "Target.detachFromTarget", params: { sessionId } }),
+		);
+		await flush();
+		expect(ext.rpcs("detach").map(rpc => rpc.tabId)).toEqual([1]);
+	});
+
+	it("keeps the attachment while another connection still holds a session on the tab", async () => {
+		const bridge = new RelayBridge({ group: { title: "omp", color: "cyan" } });
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		// Long-lived registry connection: holds a session on the tab throughout.
+		const registry = new FakeCdpSocket();
+		const registryConn = bridge.cdpConnected(registry);
+		await attachPage(bridge, ext, registry, registryConn, 1);
+		const worker = new FakeCdpSocket();
+		const workerConn = bridge.cdpConnected(worker);
+		const sessionId = await attachPage(bridge, ext, worker, workerConn, 1);
+		bridge.cdpMessage(
+			workerConn,
+			JSON.stringify({ id: ++msgSeq, method: "Target.detachFromTarget", params: { sessionId } }),
+		);
+		await flush();
+		expect(ext.rpcs("detach")).toHaveLength(0);
+	});
+
+	it("detaches once the tab session released alongside the page session leaves no holder", async () => {
+		const bridge = new RelayBridge({ group: { title: "omp", color: "cyan" } });
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		// setAutoAttach mints a tab session; attachToTarget adds a page session.
+		bridge.cdpMessage(connId, JSON.stringify({ id: ++msgSeq, method: "Target.setAutoAttach" }));
+		ack(bridge, ext, "attach");
+		await flush();
+		const pageSession = await attachPage(bridge, ext, cdp, connId, 1);
+		const tabSession = cdp.attachedSessions().find(id => id !== pageSession);
+		if (!tabSession) throw new Error("setAutoAttach did not mint a tab session");
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: ++msgSeq, method: "Target.detachFromTarget", params: { sessionId: pageSession } }),
+		);
+		await flush();
+		// The tab session still holds the attachment.
+		expect(ext.rpcs("detach")).toHaveLength(0);
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: ++msgSeq, method: "Target.detachFromTarget", params: { sessionId: tabSession } }),
+		);
+		await flush();
+		expect(ext.rpcs("detach").map(rpc => rpc.tabId)).toEqual([1]);
 	});
 });

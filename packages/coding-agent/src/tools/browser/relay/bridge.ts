@@ -337,14 +337,7 @@ export class RelayBridge {
 		}
 		conn.claims.clear();
 		// Drop the debugger (and its infobar) from tabs nobody drives anymore.
-		for (const tabId of touched) {
-			if (this.#sessionHolders(tabId).length > 0) continue;
-			const tab = this.#tabs.get(tabId);
-			if (tab?.attached) {
-				tab.attached = false;
-				void this.#rpc({ op: "detach", tabId }).catch(() => {});
-			}
-		}
+		for (const tabId of touched) this.#detachIfUnheld(tabId);
 		this.#log("cdp client closed", { conn: connId });
 	}
 
@@ -841,6 +834,22 @@ export class RelayBridge {
 		conn.sessions.delete(sessionId);
 		const targetId = ref.kind === "tab" ? tabTargetId(ref.tabId) : pageTargetId(ref.tabId);
 		this.#emit(conn, "Target.detachedFromTarget", { sessionId, targetId }, parentSessionId);
+		// An explicit release of the last session must drop the attachment too,
+		// or it outlives every downstream session: the infobar stays up, and
+		// dismissing it bans the tab for the rest of the epoch.
+		this.#detachIfUnheld(ref.tabId);
+	}
+
+	/**
+	 * Release the tab's `chrome.debugger` attachment once no downstream session
+	 * holds it. Inert while the long-lived registry connection still holds one.
+	 */
+	#detachIfUnheld(tabId: number): void {
+		if (this.#sessionHolders(tabId).length > 0) return;
+		const tab = this.#tabs.get(tabId);
+		if (!tab?.attached) return;
+		tab.attached = false;
+		void this.#rpc({ op: "detach", tabId }).catch(() => {});
 	}
 
 	/** Connections currently holding any session on a tab. */
