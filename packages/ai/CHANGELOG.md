@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Codex WebSocket `slow_down` and rate-limit rejections discarding a valid `previous_response_id` continuation and forcing retries to replay the full context, including when throttling interrupts streamed output.
+
 ## [18.0.4] - 2026-08-24
 
 ### Fixed
