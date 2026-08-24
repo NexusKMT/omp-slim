@@ -335,6 +335,27 @@ describe("terminal frame plans", () => {
 		tui.stop();
 	});
 
+	it("does not duplicate current-width history on a height-only grow", async () => {
+		const terminal = new VirtualTerminal(20, 2);
+		const provider = new WidthReplayProvider();
+		const renderScheduler = new VirtualRenderScheduler();
+		const tui = new TUI(terminal, undefined, { renderScheduler });
+		tui.setResizeScrollback("append");
+		tui.setFrameProvider(provider);
+		tui.start();
+		await renderScheduler.settle(terminal);
+
+		expect(plainBuffer(terminal)).toContain("history-one@20");
+
+		terminal.resize(20, 6); // height-only grow: width unchanged, nothing rewraps
+		await renderScheduler.advance(terminal, 160);
+
+		const resized = plainBuffer(terminal);
+		expect(provider.resetCount).toBe(0);
+		expect(resized.filter(row => row === "history-one@20")).toEqual(["history-one@20"]);
+		tui.stop();
+	});
+
 	it("rebuilds current-width history without retaining stale rows", async () => {
 		const terminal = new VirtualTerminal(20, 2);
 		const provider = new WidthReplayProvider();
