@@ -393,10 +393,22 @@ describe("lsp regressions", () => {
 				tempDir.path(),
 				1_000,
 			);
+			const languageServer = installHandshakeLsp();
+			const differentLanguage = await lspClient.getOrCreateClient(
+				{ ...base, languageId: "typescriptreact" },
+				tempDir.path(),
+				1_000,
+			);
+			const filePath = path.join(tempDir.path(), "component.ts");
+			await Bun.write(filePath, "export const component = true;\n");
+			await lspClient.ensureFileOpen(differentLanguage, filePath);
+			const didOpen = await languageServer.waitFor(message => message.method === "textDocument/didOpen");
+			expect(didOpen.params).toMatchObject({ textDocument: { languageId: "typescriptreact" } });
 
 			expect(differentArgs).not.toBe(baseClient);
 			expect(differentInit).not.toBe(baseClient);
 			expect(differentSettings).not.toBe(baseClient);
+			expect(differentLanguage).not.toBe(baseClient);
 		} finally {
 			await lspClient.shutdownAll();
 			tempDir.removeSync();

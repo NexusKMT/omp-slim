@@ -841,7 +841,12 @@ const EXIT_TIMEOUT_MS = 1_000;
  */
 function clientKey(config: ServerConfig, cwd: string): string {
 	const spawnCommand = config.resolvedCommand ?? config.command;
-	const identity = stableStringifyJson([config.args ?? [], config.initOptions ?? null, config.settings ?? null]);
+	const identity = stableStringifyJson([
+		config.args ?? [],
+		config.initOptions ?? null,
+		config.settings ?? null,
+		config.languageId ?? null,
+	]);
 	return `${spawnCommand}:${cwd}:${identity}`;
 }
 
