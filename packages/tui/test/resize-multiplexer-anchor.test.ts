@@ -166,6 +166,25 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		expect(Number(cup![1])).toBe(6);
 		tui.stop();
 	});
+
+	it("anchors a CPR-less grow at the conservative pull bound", () => {
+		// Grow 12 -> 20 with the probe reply dropped: tmux may have pulled up
+		// to 8 scrollback rows down, moving the real viewport top from 3 to as
+		// far as 11. The pre-resize top would repaint at row 3 over pulled-back
+		// committed rows; the timeout must anchor at the upper bound 3 + 8 = 11
+		// (CUP row 12) — exact when scrollback covers the pull, and merely
+		// below the real viewport when it does not.
+		const { terminal, tui, renderScheduler, writes } = startRig();
+		terminal.resize(40, 20);
+		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
+		writes.length = 0;
+		renderScheduler.settle(); // probe timeout with no reply at all
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(12);
+		tui.stop();
+	});
 });
 
 // Regression coverage for the CPR probe's pre-erase stash on direct terminals:

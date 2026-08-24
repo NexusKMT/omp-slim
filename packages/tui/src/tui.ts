@@ -655,6 +655,10 @@ export class TUI extends Container {
 	// pre-burst state.
 	#resizeBurstGrew = false;
 	#resizeBurstLastHeight: number | undefined;
+	// Tallest height seen during the burst: bounds how much scrollback a
+	// multiplexer grow can have pulled down (see the CPR-timeout fallback in
+	// #resolveResizeAnchor).
+	#resizeBurstMaxHeight: number | undefined;
 	// Unanswered CSI 6n probes; CPR replies are consumed from input while > 0.
 	#pendingCprReplies = 0;
 	// Outstanding CPR replies that answer canceled probes; swallowed by
@@ -1064,6 +1068,7 @@ export class TUI extends Container {
 		const burstLastHeight = this.#resizeBurstLastHeight ?? this.#previousHeight;
 		if (this.terminal.rows > burstLastHeight) this.#resizeBurstGrew = true;
 		this.#resizeBurstLastHeight = this.terminal.rows;
+		this.#resizeBurstMaxHeight = Math.max(this.#resizeBurstMaxHeight ?? this.#previousHeight, this.terminal.rows);
 		if (!this.#resizeAltActive) {
 			this.#resizeAltActive = true;
 			setAltScreenActive(true);
@@ -1231,7 +1236,19 @@ export class TUI extends Container {
 				// top ones, so the bound would drag the anchor over retained
 				// history rows above the real viewport. Frame-size clamping
 				// happens when the settled plan frame is emitted.
-				top = Math.max(0, reportedTop);
+				if (reportedRow === undefined) {
+					// No CPR at all. The pre-resize top is stale-low here: the grow
+					// already pulled scrollback down and moved the real viewport.
+					// Anchor at the conservative upper bound instead — pull never
+					// exceeds the burst's tallest grow, and pushes/discards only
+					// lower the top. Exact when scrollback covers the pull; when it
+					// does not, the repaint lands below the real viewport and leaves
+					// stale rows above rather than overwriting committed ones.
+					const maxPull = Math.max(0, (this.#resizeBurstMaxHeight ?? this.#previousHeight) - this.#previousHeight);
+					top = Math.max(0, this.#providerViewportTop + maxPull);
+				} else {
+					top = Math.max(0, reportedTop);
+				}
 			}
 		} else {
 			// Direct terminals rewrap bottom-preserving: with `staleRows` stale
@@ -2244,6 +2261,7 @@ export class TUI extends Container {
 		this.#previousHeight = height;
 		this.#resizeBurstGrew = false;
 		this.#resizeBurstLastHeight = undefined;
+		this.#resizeBurstMaxHeight = undefined;
 		this.#previousFrameLength = rows;
 		this.#clearScrollbackOnNextRender = false;
 		this.#forceViewportRepaintOnNextRender = false;
