@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { isEnoent, logger, postmortem, ptree, untilAborted } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger, postmortem, ptree, stableStringifyJson, untilAborted } from "@oh-my-pi/pi-utils";
 import { MessageFramer } from "../jsonrpc/message-framing";
 import { ToolAbortError, throwIfAborted } from "../tools/tool-errors";
 import { applyWorkspaceEdit, type ExecutedWorkspaceChange } from "./edits";
@@ -823,8 +823,46 @@ const PROJECT_LOAD_TIMEOUT_MS = 15_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 const EXIT_TIMEOUT_MS = 1_000;
 
+/**
+ * Identity of a server process *and* its initialization: everything that makes
+ * two configs unsafe to share one client. `command` + `cwd` alone handed a
+ * config with different args/settings the client another config had spawned
+ * (#8382), and left a changed config resolving to the stale client after
+ * `reload *` (#8384). The command component mirrors the spawn site
+ * (`resolvedCommand ?? command`), so two configs naming the same binary
+ * differently still share, while the same name resolving to different binaries
+ * does not. JSON-encoded so no value can forge the separator.
+ */
 function clientKey(config: ServerConfig, cwd: string): string {
-	return `${config.command}:${cwd}`;
+	const spawnCommand = config.resolvedCommand ?? config.command;
+	const identity = stableStringifyJson([config.args ?? [], config.initOptions ?? null, config.settings ?? null]);
+	return `${spawnCommand}:${cwd}:${identity}`;
+}
+
+/**
+ * Shut down clients for `cwd` whose identity is absent from `configs`, and
+ * return the server commands torn down.
+ *
+ * `reload *` re-reads config from disk. Identity-aware keys make a changed
+ * server resolve to a fresh client, but the process spawned from the old
+ * config would stay registered and running — the idle checker that would
+ * eventually reap it is opt-in and off by default.
+ */
+export async function shutdownStaleClients(cwd: string, configs: readonly ServerConfig[]): Promise<string[]> {
+	const fresh = new Set(configs.map(config => clientKey(config, cwd)));
+	const resolvedCwd = path.resolve(cwd);
+	const stale = Array.from(clients.values()).filter(
+		client => path.resolve(client.cwd) === resolvedCwd && !fresh.has(client.name),
+	);
+	const results = await Promise.all(stale.map(client => shutdownClientInstance(client)));
+	const failed = stale.filter((_client, index) => results[index] !== true);
+	if (failed.length > 0) {
+		throw new Error(
+			"Failed to stop LSP server(s) with superseded configuration: " +
+				failed.map(client => client.config.command).join(", "),
+		);
+	}
+	return stale.map(client => client.config.command);
 }
 
 /** Allow an explicit user reload to retry a matching initialization failure immediately. */

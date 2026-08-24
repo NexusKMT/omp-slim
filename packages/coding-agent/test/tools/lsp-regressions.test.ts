@@ -230,6 +230,19 @@ function installFakeLsp(handler: FakeLspHandler, options?: FakeLspOptions): Fake
 	return server;
 }
 
+/** LSP fake that completes initialize and graceful shutdown handshakes. */
+function installHandshakeLsp(): FakeLspServer {
+	return installFakeLsp((message, server) => {
+		if (message.method === "initialize") {
+			server.send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
+		} else if (message.method === "shutdown") {
+			server.send({ jsonrpc: "2.0", id: message.id, result: null });
+		} else if (message.method === "exit") {
+			server.exit(0);
+		}
+	});
+}
+
 type BunSpawnOptions = Bun.SpawnOptions.SpawnOptions<
 	Bun.SpawnOptions.Writable,
 	Bun.SpawnOptions.Readable,
@@ -333,6 +346,61 @@ describe("lsp regressions", () => {
 				},
 			},
 		});
+	});
+
+	it("keeps equivalent LSP configs shared but isolates distinct process and initialization semantics", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-client-identity-");
+		try {
+			installHandshakeLsp();
+			const base: ServerConfig = {
+				command: "fake-lsp",
+				args: ["--mode", "base"],
+				fileTypes: [".ts"],
+				rootMarkers: [],
+				initOptions: { nested: { beta: 2, alpha: 1 } },
+				settings: { diagnostics: { enabled: true, severity: "warning" } },
+			};
+			const baseClient = await lspClient.getOrCreateClient(base, tempDir.path(), 1_000);
+
+			// Object insertion order is not semantic: a canonical-equivalent config
+			// must still share the same process.
+			const equivalent = await lspClient.getOrCreateClient(
+				{
+					...base,
+					initOptions: { nested: { alpha: 1, beta: 2 } },
+					settings: { diagnostics: { severity: "warning", enabled: true } },
+				},
+				tempDir.path(),
+				1_000,
+			);
+			expect(equivalent).toBe(baseClient);
+
+			installHandshakeLsp();
+			const differentArgs = await lspClient.getOrCreateClient(
+				{ ...base, args: ["--mode", "other"] },
+				tempDir.path(),
+				1_000,
+			);
+			installHandshakeLsp();
+			const differentInit = await lspClient.getOrCreateClient(
+				{ ...base, initOptions: { nested: { alpha: 99, beta: 2 } } },
+				tempDir.path(),
+				1_000,
+			);
+			installHandshakeLsp();
+			const differentSettings = await lspClient.getOrCreateClient(
+				{ ...base, settings: { diagnostics: { enabled: false, severity: "warning" } } },
+				tempDir.path(),
+				1_000,
+			);
+
+			expect(differentArgs).not.toBe(baseClient);
+			expect(differentInit).not.toBe(baseClient);
+			expect(differentSettings).not.toBe(baseClient);
+		} finally {
+			await lspClient.shutdownAll();
+			tempDir.removeSync();
+		}
 	});
 
 	it("uses a custom server languageId for disk and in-memory document opens", async () => {
@@ -3510,6 +3578,56 @@ describe("lsp regressions", () => {
 			expect(output).toContain("Renamed");
 		} finally {
 			vi.restoreAllMocks();
+			tempDir.removeSync();
+		}
+	});
+
+	it("workspace reload replaces a client whose process or initialization config changed", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-reload-identity-");
+		try {
+			const oldServer = installHandshakeLsp();
+			const oldConfig: ServerConfig = {
+				command: "fake-lsp",
+				args: ["--mode", "old"],
+				fileTypes: [".ts"],
+				rootMarkers: [],
+				initOptions: { generation: 1 },
+				settings: { diagnostics: false },
+			};
+			const oldClient = await lspClient.getOrCreateClient(oldConfig, tempDir.path(), 1_000);
+
+			const newServer = installHandshakeLsp();
+			const newConfig: ServerConfig = {
+				...oldConfig,
+				args: ["--mode", "new"],
+				initOptions: { generation: 2 },
+				settings: { diagnostics: true },
+			};
+			vi.spyOn(lspConfig, "loadConfig").mockReturnValue({
+				servers: { "fake-lsp": newConfig },
+				idleTimeoutMs: undefined,
+			});
+
+			const tool = new LspTool(makeLspSession(tempDir.path()));
+			const result = await tool.execute("reload-client-identity", { action: "reload", file: "*" });
+			const newClient = await lspClient.getActiveOrPendingClient(newConfig, tempDir.path());
+
+			expect(newClient).toBeDefined();
+			expect(newClient).not.toBe(oldClient);
+			expect(oldServer.received.map(message => message.method)).toContain("shutdown");
+			expect(oldServer.received.map(message => message.method)).toContain("exit");
+			expect(newServer.received.map(message => message.method)).toContain("initialize");
+			expect(newServer.received).toContainEqual(
+				expect.objectContaining({
+					method: "workspace/didChangeConfiguration",
+					params: { settings: { diagnostics: true } },
+				}),
+			);
+			const output = textResult(result);
+			expect(output).toContain("Stopped 1 server(s) with superseded configuration: fake-lsp");
+			expect(output).toContain("Reloaded fake-lsp");
+		} finally {
+			await lspClient.shutdownAll();
 			tempDir.removeSync();
 		}
 	});
