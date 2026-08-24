@@ -4,7 +4,7 @@
  * Note: command execution is async to avoid blocking the TUI.
  */
 
-import { $envExact, $which, ptree } from "@oh-my-pi/pi-utils";
+import { $envExact, ptree } from "@oh-my-pi/pi-utils";
 
 /** Cache for successful shell command results (persists for process lifetime). */
 const commandResultCache = new Map<string, string>();
@@ -67,8 +67,12 @@ async function executeCommand(commandConfig: string): Promise<string | undefined
  */
 export async function runShellCommand(command: string, timeoutMs: number): Promise<string | undefined> {
 	try {
+		// Absolute OS shell, not a PATH-resolved name: a launcher may hand omp a
+		// minimal tool-only PATH (same shape as execSync's default shell).
 		const cmd =
-			process.platform === "win32" ? ["cmd.exe", "/d", "/s", "/c", command] : [$which("sh") ?? "sh", "-c", command];
+			process.platform === "win32"
+				? [Bun.env.ComSpec || Bun.env.COMSPEC || "cmd.exe", "/d", "/s", "/c", command]
+				: ["/bin/sh", "-c", command];
 		const result = await ptree.exec(cmd, { timeout: timeoutMs, allowNonZero: true, allowAbort: true });
 		// An aborted result can still carry a real exit code (the command may
 		// exit zero in the window between the timeout firing and the kill landing)

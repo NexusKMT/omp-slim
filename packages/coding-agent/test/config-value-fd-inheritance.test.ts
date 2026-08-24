@@ -123,3 +123,24 @@ test.skipIf(process.platform === "win32")(
 		expect(fs.existsSync(marker), "SIGTERM-ignoring descendant wrote the marker after the timeout").toBe(false);
 	},
 );
+
+test.skipIf(process.platform === "win32")("resolves !commands when PATH omits the shell entirely", async () => {
+	// A launcher may supply a minimal tool-only PATH; the resolver must still
+	// find the OS shell. Probing in a subprocess so the stripped PATH cannot
+	// affect this test process's own spawns.
+	const script = `import { runShellCommand } from ${JSON.stringify(resolverUrl)};
+const value = await runShellCommand("echo pathless-ok", 5_000);
+console.log(value === "pathless-ok" ? "PATHLESS-OK" : "PATHLESS-BAD:" + value);`;
+	const emptyPathDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-no-sh-in-path-"));
+	roots.push(emptyPathDir);
+	const proc = Bun.spawn({
+		cmd: [process.execPath, "--eval", script],
+		cwd: process.cwd(),
+		env: { ...Bun.env, PATH: emptyPathDir },
+		stdio: ["ignore", "pipe", "pipe"],
+		timeout: 15_000,
+	});
+	const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+	expect(exitCode, stdout).toBe(0);
+	expect(stdout.trim()).toBe("PATHLESS-OK");
+});
