@@ -39,6 +39,8 @@ export interface AppendOnlyTranscriptBlock {
 
 interface FinalizableBlock {
 	isTranscriptBlockFinalized?(): boolean;
+	/** Whether emergency pressure should reserve one viewport row for this settled block. */
+	isTranscriptBlockEmergencyVisible?(): boolean;
 }
 
 /**
@@ -537,7 +539,17 @@ export class TranscriptContainer extends Container {
 		}
 		if (hiddenActive > 0) output.push(`${hiddenActive} more transcript blocks active`);
 		const visibleRows = rows - output.length;
-		const visible = visibleRows > 0 ? shown.slice(-visibleRows) : [];
+		let visible = visibleRows > 0 ? shown.slice(-visibleRows) : [];
+		if (visibleRows > 0) {
+			const visibleStart = shown.length - visibleRows;
+			for (let index = visibleStart - 1; index >= 0; index--) {
+				const candidate = shown[index]!;
+				const block = candidate.entry.component as Component & FinalizableBlock;
+				if (candidate.entry.state !== "settled" || block.isTranscriptBlockEmergencyVisible?.() !== true) continue;
+				visible = [candidate, ...visible.slice(1)];
+				break;
+			}
+		}
 		for (const candidate of visible) {
 			this.#setAllocation(candidate.entry.component, 1, frame);
 			const rendered = this.#renderEntry(candidate.entry, width).slice(
