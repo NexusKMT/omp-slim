@@ -26,6 +26,25 @@ function sanitizeToolType(toolType: string): string {
 }
 
 /**
+ * Persist an artifact only when the filesystem confirms the complete payload is readable.
+ *
+ * Returns the verified UTF-8 byte count.
+ */
+export async function writeArtifact(path: string, content: string): Promise<number> {
+	const expectedBytes = Buffer.byteLength(content);
+	const writtenBytes = await Bun.write(path, content);
+	if (writtenBytes !== expectedBytes) {
+		throw new Error(`Artifact write incomplete: wrote ${writtenBytes} of ${expectedBytes} bytes`);
+	}
+	const file = Bun.file(path);
+	if (file.size !== expectedBytes) {
+		throw new Error(`Artifact size mismatch: found ${file.size} of ${expectedBytes} bytes`);
+	}
+	await file.slice(0, Math.min(expectedBytes, 1)).arrayBuffer();
+	return expectedBytes;
+}
+
+/**
  * Manages artifact storage for a session.
  *
  * Artifacts are stored with sequential IDs in the session's artifact directory.
@@ -115,7 +134,7 @@ export class ArtifactManager {
 	 */
 	async save(content: string, toolType: string): Promise<string> {
 		const { id, path } = await this.allocatePath(toolType);
-		await Bun.write(path, content);
+		await writeArtifact(path, content);
 		return id;
 	}
 

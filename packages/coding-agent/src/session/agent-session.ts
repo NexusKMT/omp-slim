@@ -245,6 +245,7 @@ import type {
 	SessionStats,
 	UsageFallbackConfirmer,
 } from "./agent-session-types";
+import { writeArtifact } from "./artifacts";
 import {
 	ASYNC_INLINE_RESULT_MAX_CHARS,
 	ASYNC_PREVIEW_MAX_CHARS,
@@ -1972,7 +1973,7 @@ export class AgentSession {
 		try {
 			const { path: artifactPath, id: artifactId } = await this.sessionManager.allocateArtifactPath("async");
 			if (artifactPath && artifactId) {
-				await Bun.write(artifactPath, result);
+				await writeArtifact(artifactPath, result);
 				return `${preview}\nFull output: artifact://${artifactId}`;
 			}
 		} catch (error) {
