@@ -684,10 +684,6 @@ export class TUI extends Container {
 	// reply to a dead tag is stripped and discarded by column.
 	#cprColumnTags = new Map<number, number>();
 	#cprProbeSeq = 0;
-	// Requests armed without a tag (degenerate spans or full occupancy): their
-	// replies are un-attributable, so they are stripped and discarded and the
-	// probe timeout anchors conservatively.
-	#untaggedCprReplies = 0;
 	// Prepared rows painted by the previous provider frame, for row diffing.
 	#providerWindow: string[] = [];
 	#previousFrameLength = 0;
@@ -1210,30 +1206,31 @@ export class TUI extends Container {
 		// freeing a column while its reply may still arrive would let that
 		// reply match a newer tag on the reused column. Dead tags only
 		// accumulate from genuinely dropped replies; a terminal that drops
-		// enough of them to exhaust the span earns the untagged fallback.
+		// enough of them to exhaust the span earns the timeout-only fallback.
 		// Park a distinct column for this request so its reply is
-		// self-identifying. Column 1 is never used: it cannot be told apart
-		// from a spurious or clamped reply. A column may not be reused while
-		// its tag is live — the old request's delayed reply would be attributed
-		// to the new epoch — so scan for a free slot. The direct-terminal span
-		// stays small: a stale parked column wraps the cursor onto a later
-		// visual row if the width later shrinks below it mid-probe, so small
-		// columns confine that corner to sub-9-column windows.
-		const span = Math.min(isInsideTerminalMultiplexer() ? 30 : 8, this.terminal.columns - 1);
+		// self-identifying, then return the cursor to column 1 immediately:
+		// the reply snapshots the column when the terminal processes the CSI
+		// 6n, but a cursor RESTING on a nonzero column would reflow onto a
+		// later visual row if a direct terminal's width later shrank below it,
+		// corrupting the next probe's cursor-relative math. Column 1 is never
+		// used as a tag: it cannot be told apart from a spurious or clamped
+		// reply. A column may not be reused while its tag is live — the old
+		// request's delayed reply would be attributed to the new epoch — so
+		// scan for a free slot.
+		const span = Math.min(30, this.terminal.columns - 1);
 		if (span >= 4) {
 			for (let index = 0; index < span; index++) {
 				const candidate = 2 + ((this.#cprProbeSeq + index) % span);
 				if (this.#cprColumnTags.has(candidate)) continue;
 				this.#cprProbeSeq += index + 1;
 				this.#cprColumnTags.set(candidate, this.#geometryEpoch);
-				this.terminal.write(`\x1b[${candidate}G\x1b[6n`);
+				this.terminal.write(`\x1b[${candidate}G\x1b[6n\x1b[1G`);
 				return;
 			}
 		}
-		// Degenerate span or full occupancy: the reply cannot be attributed, so
-		// it is only counted for stripping; the timeout anchors conservatively.
-		this.#untaggedCprReplies++;
-		this.terminal.write("\x1b[6n");
+		// Degenerate span or full occupancy: an untagged reply could never be
+		// attributed, so no DSR is sent at all; the timeout anchors
+		// conservatively on its own.
 	}
 
 	#cancelResizeProbe(): void {
@@ -1260,10 +1257,8 @@ export class TUI extends Container {
 		if (!probe) return;
 		probe.timer.cancel();
 		this.#resizeProbe = undefined;
-		// Untagged (degenerate-mode) requests still outstanding are dead; their
-		// replies were never attributable anyway. Column tags stay live: their
-		// replies are self-identifying and discarded by tag whenever they come.
-		this.#untaggedCprReplies = 0;
+		// Column tags stay live across resolves: their replies are
+		// self-identifying and discarded by tag whenever they arrive.
 		const width = this.terminal.columns;
 		const height = this.terminal.rows;
 		const staleRows = this.#reflowedRowCount(probe.window, 0, probe.window.length, width);
@@ -1752,7 +1747,7 @@ export class TUI extends Container {
 		// Consume CPR replies (CSI row;col R) while an anchor probe is unanswered;
 		// they are terminal reports, never keystrokes, and must not reach the
 		// focused component.
-		while (this.#cprColumnTags.size > 0 || this.#untaggedCprReplies > 0) {
+		while (this.#cprColumnTags.size > 0) {
 			const match = data.match(/\x1b\[(\d+);(\d+)R/);
 			if (!match || match.index === undefined) break;
 			const column = Number(match[2]);
@@ -1766,9 +1761,6 @@ export class TUI extends Container {
 				if (probe !== undefined && tagEpoch === probe.epoch) {
 					this.#resolveResizeAnchor(Number(match[1]) - 1);
 				}
-			} else if (this.#untaggedCprReplies > 0) {
-				// A degenerate-mode reply: un-attributable, discard it.
-				this.#untaggedCprReplies--;
 			}
 			// Unknown-column replies while expecting only tagged ones are our
 			// requests answered with a clamped or mangled column: strip and

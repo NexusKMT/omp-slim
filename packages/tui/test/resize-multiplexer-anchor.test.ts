@@ -212,7 +212,7 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
 		writes.length = 0;
 		renderScheduler.settle(); // first timeout: no reply -> one bounded retry
-		expect(writes.join("")).toContain("\x1b[6n");
+		expect(writes.join("")).toContain("\x1b[3G\x1b[6n\x1b[1G"); // retry: tagged, cursor restored
 		expect(writes.join("")).not.toMatch(/\x1b\[\d+;1H/);
 		renderScheduler.settle(); // retry timeout: conservative fallback
 		const repaint = writes.join("");
@@ -374,21 +374,20 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		// Probe A tags column 2 and its retry column 3; a mid-probe narrow to
 		// 3 columns collapses the span so a tagged probe would have to reuse
 		// column 2 while A's tag is live — promoting A's delayed pre-restart
-		// reply to the current epoch. The narrow probe must go untagged
-		// instead: A's late reply is discarded by its old tag, the untagged
-		// probe's own reply is un-attributable and discarded too, and the
-		// timeout anchors at the accumulated pull bound 3 + 8 = 11 (CUP row
-		// 12).
+		// reply to the current epoch. The narrow probe must send no DSR at
+		// all: an untagged reply could never be attributed, and its late
+		// arrival would leak into keyboard input. A's late reply is discarded
+		// by its old tag, and the timeout anchors at the accumulated pull
+		// bound 3 + 8 = 11 (CUP row 12).
 		const { terminal, tui, renderScheduler, writes } = startRig();
 		terminal.resize(40, 20);
 		renderScheduler.settle(); // exit the resize alt borrow, start probe A (col 2)
 		renderScheduler.settle(); // A's timeout: no reply -> retry (col 3)
 		terminal.resize(3, 18); // mid-probe narrow: span collapses below tagging
-		renderScheduler.settle(); // exit the borrow, start the untagged probe
 		writes.length = 0;
+		renderScheduler.settle(); // exit the borrow: degenerate probe, no DSR sent
+		expect(writes.join("")).not.toContain("\x1b[6n");
 		terminal.sendInput("\x1b[4;2R"); // A's very late reply: old tag, discarded
-		expect(writes.join("")).not.toMatch(/\x1b\[\d+;1H/);
-		terminal.sendInput("\x1b[6;1R"); // untagged probe's reply: un-attributable, discarded
 		expect(writes.join("")).not.toMatch(/\x1b\[\d+;1H/);
 		renderScheduler.settle(); // untagged probe's timeout: grow -> one bounded retry
 		renderScheduler.settle(); // retry timeout: accumulated pull bound
