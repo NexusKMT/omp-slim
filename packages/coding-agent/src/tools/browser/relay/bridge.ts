@@ -651,10 +651,10 @@ export class RelayBridge {
 	#onTabDetached(tabId: number, reason: string): void {
 		const tab = this.#tabs.get(tabId);
 		if (!tab) return;
-		// chrome.debugger.detach emits onDetach before its RPC result. A release
-		// we initiated clears attached first, so its echo is expected — banning
-		// here would retract a live target and block its next attachment.
-		if (!tab.attached) {
+		// chrome.debugger.detach emits onDetach before its RPC result. Only a
+		// detach we explicitly track is an expected echo; attached=false alone
+		// also describes a failed restart reattachment, which must retract.
+		if (tab.detaching) {
 			tab.attaching = null;
 			return;
 		}

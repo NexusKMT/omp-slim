@@ -88,6 +88,14 @@ function ack(bridge: RelayBridge, socket: FakeExtSocket, op: RelayRpcRequest["op
 	}
 }
 
+/** Reject every unanswered extension RPC of op. */
+function reject(bridge: RelayBridge, socket: FakeExtSocket, op: RelayRpcRequest["op"], error: string): void {
+	for (const rpc of socket.pending(op)) {
+		socket.markAcked(rpc.id);
+		bridge.extMessage(socket, JSON.stringify({ t: "rpcResult", id: rpc.id, ok: false, error }));
+	}
+}
+
 /** Flush the rpc .then() microtask chains (no timers involved). */
 async function flush(): Promise<void> {
 	for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -401,5 +409,30 @@ describe("RelayBridge attachment release", () => {
 		);
 		await flush();
 		expect(ext.rpcs("detach").map(rpc => rpc.tabId)).toEqual([1]);
+	});
+
+	it("retracts held sessions when reconnect reattachment fails", async () => {
+		const bridge = new RelayBridge({ group: { title: "omp", color: "cyan" } });
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		const sessionId = await attachPage(bridge, ext, cdp, connId, 1);
+
+		const replacement = new FakeExtSocket();
+		connect(bridge, replacement, [tab({ tabId: 1 })]);
+		expect(replacement.pending("attach")).toHaveLength(1);
+		reject(bridge, replacement, "attach", "debugger unavailable");
+		await flush();
+
+		const detached = cdp.messages.find(
+			message =>
+				message.method === "Target.detachedFromTarget" &&
+				message.params !== null &&
+				typeof message.params === "object" &&
+				"sessionId" in message.params &&
+				message.params.sessionId === sessionId,
+		);
+		expect(detached).toBeDefined();
 	});
 });
