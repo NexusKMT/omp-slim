@@ -1070,8 +1070,15 @@ export class TUI extends Container {
 			// over pulled-back history rows or scroll-push the frame into
 			// scrollback again.
 			let erase = "";
-			this.#resizeProbeWindow = this.#providerWindow;
-			this.#resizeProbeOffset = this.#parkedViewportOffset;
+			if (this.#providerWindow.length > 0) {
+				// Guard against a transaction restart: a SIGWINCH landing after the
+				// settle but before the CPR reply re-enters here with the live window
+				// already stashed and emptied, and an unconditional snapshot would
+				// wipe the good stash with the empty window (resurrecting the dead
+				// staleRows bound this stash exists to prevent).
+				this.#resizeProbeWindow = this.#providerWindow;
+				this.#resizeProbeOffset = this.#parkedViewportOffset;
+			}
 			if (this.#hasEverRendered && this.#providerWindow.length > 0 && !isInsideTerminalMultiplexer()) {
 				if (this.terminal.rows < this.#previousHeight) {
 					const staleRows = this.#reflowedRowCount(
@@ -1091,6 +1098,11 @@ export class TUI extends Container {
 					);
 					erase = `\x1b[?25l${up > 0 ? `\x1b[${up}A` : ""}\r\x1b[J`;
 				}
+				// Both erase paths leave the cursor on the viewport's top row, so the
+				// parked offset no longer applies; carrying a stale nonzero offset
+				// into the probe would anchor the settled repaint above the real
+				// viewport top and overwrite visible committed rows.
+				this.#resizeProbeOffset = 0;
 				this.#providerWindow = [];
 				this.#parkedViewportOffset = 0;
 			}

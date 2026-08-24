@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { type TerminalFramePlan, type TerminalFrameProvider, TUI, type ViewportSize } from "@oh-my-pi/pi-tui";
+import {
+	CURSOR_MARKER,
+	type TerminalFramePlan,
+	type TerminalFrameProvider,
+	TUI,
+	type ViewportSize,
+} from "@oh-my-pi/pi-tui";
 import { VirtualTerminal } from "./virtual-terminal";
 
 // Regression coverage for tmux pane zoom corrupting scrollback (duplication and
@@ -14,9 +20,11 @@ import { VirtualTerminal } from "./virtual-terminal";
 
 class FullFrameProvider implements TerminalFrameProvider {
 	history: { id: number; rows: string[] } | undefined;
+	markerRow: number | undefined;
 
 	renderFrame(viewport: ViewportSize): TerminalFramePlan {
 		const rows = Array.from({ length: 8 }, (_, i) => `live-${i}`);
+		if (this.markerRow !== undefined) rows[this.markerRow] = `${rows[this.markerRow]}${CURSOR_MARKER}`;
 		const plan: TerminalFramePlan = { history: this.history, viewport: rows.slice(-Math.min(8, viewport.rows)) };
 		return plan;
 	}
@@ -26,6 +34,24 @@ class FullFrameProvider implements TerminalFrameProvider {
 	acknowledgeHistory(): void {
 		this.history = undefined;
 	}
+}
+
+function startRig(markerRow?: number) {
+	const terminal = new VirtualTerminal(40, 12);
+	const provider = new FullFrameProvider();
+	provider.markerRow = markerRow;
+	provider.history = { id: 1, rows: Array.from({ length: 3 }, (_, i) => `committed-${i}`) };
+	const renderScheduler = new ResizeScheduler();
+	const tui = new TUI(terminal, undefined, { renderScheduler });
+	const writes: string[] = [];
+	const originalWrite = terminal.write.bind(terminal);
+	terminal.write = (data: string) => {
+		writes.push(data);
+		originalWrite(data);
+	};
+	tui.setFrameProvider(provider);
+	tui.start();
+	return { terminal, tui, renderScheduler, writes };
 }
 
 class ResizeScheduler {
@@ -59,22 +85,6 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		else Bun.env.TMUX = previousTmux;
 	});
 
-	function startRig() {
-		const terminal = new VirtualTerminal(40, 12);
-		const provider = new FullFrameProvider();
-		provider.history = { id: 1, rows: Array.from({ length: 3 }, (_, i) => `committed-${i}`) };
-		const renderScheduler = new ResizeScheduler();
-		const tui = new TUI(terminal, undefined, { renderScheduler });
-		const writes: string[] = [];
-		const originalWrite = terminal.write.bind(terminal);
-		terminal.write = (data: string) => {
-			writes.push(data);
-			originalWrite(data);
-		};
-		tui.setFrameProvider(provider);
-		tui.start();
-		return { terminal, tui, renderScheduler, writes };
-	}
 
 	it("skips the SIGWINCH-side erase so a racing re-layout cannot blank popped scrollback", () => {
 		const { terminal, tui, renderScheduler, writes } = startRig();
@@ -125,6 +135,70 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		const cup = repaint.match(/\x1b\[(\d+);1H/);
 		expect(cup).not.toBeNull();
 		expect(Number(cup![1])).toBe(2);
+		tui.stop();
+	});
+});
+
+// Regression coverage for the CPR probe's pre-erase stash on direct terminals:
+// the stash (window + park offset) feeds both the `height - staleRows` anchor
+// bound and the CPR-relative offset math, so a stale offset or a wiped stash
+// silently disables the exact protections the stash exists to provide.
+describe("resize anchor probe stash on a direct terminal", () => {
+	let previousTmux: string | undefined;
+	let previousTerm: string | undefined;
+
+	beforeEach(() => {
+		previousTmux = Bun.env.TMUX;
+		previousTerm = Bun.env.TERM;
+		delete Bun.env.TMUX;
+		// TERM prefixed tmux-/screen- also flags a multiplexer.
+		Bun.env.TERM = "xterm-256color";
+	});
+	afterEach(() => {
+		if (previousTmux === undefined) delete Bun.env.TMUX;
+		else Bun.env.TMUX = previousTmux;
+		if (previousTerm === undefined) delete Bun.env.TERM;
+		else Bun.env.TERM = previousTerm;
+	});
+
+	it("zeroes the probe offset after the erase parks the cursor on the viewport top", () => {
+		// A cursor marker in live row 4 parks the hardware cursor at offset 4
+		// from the viewport top. The SIGWINCH-side erase re-parks the cursor on
+		// the viewport's top row, so the settled CPR (row 4 -> viewport top 3)
+		// must anchor at 3 (CUP row 4). Carrying the stale offset into the probe
+		// would compute 3 - 4 and anchor the repaint at 0, overwriting the three
+		// still-visible committed rows.
+		const { terminal, tui, renderScheduler, writes } = startRig(4);
+		terminal.resize(40, 11);
+		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
+		writes.length = 0;
+		terminal.sendInput("\x1b[4;1R"); // parked cursor: viewport top, screen row 3
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(4);
+		tui.stop();
+	});
+
+	it("keeps the stash when a mid-probe SIGWINCH restarts the transaction", () => {
+		// A resize landing after the settle but before the CPR reply restarts
+		// the transaction with the live window already stashed and emptied. The
+		// restart must not overwrite the stash with the empty window: the second
+		// probe still needs the 8-row snapshot so its `height - staleRows` bound
+		// (6 - 8 -> 0) overrides the reported row. A wiped stash would bound
+		// nothing (staleRows 0) and anchor at the reported row 3, scroll-pushing
+		// the repaint into scrollback — the original duplication bug.
+		const { terminal, tui, renderScheduler, writes } = startRig();
+		terminal.resize(40, 11);
+		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
+		terminal.resize(40, 6); // mid-probe restart: cancels the probe, window already []
+		renderScheduler.settle(); // exit the second borrow, start the second probe
+		writes.length = 0;
+		terminal.sendInput("\x1b[4;1R"); // parked cursor still on screen row 3
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(1);
 		tui.stop();
 	});
 });
