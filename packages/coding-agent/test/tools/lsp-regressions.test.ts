@@ -3661,6 +3661,10 @@ describe("lsp regressions", () => {
 				rootMarkers: [],
 			};
 			const oldClientPromise = lspClient.getOrCreateClient(oldConfig, tempDir.path(), 1_000);
+			const oldOutcome = oldClientPromise.then(
+				() => "resolved",
+				error => String(error),
+			);
 			const initialize = await oldServer.waitFor(message => message.method === "initialize");
 
 			const newServer = installHandshakeLsp();
@@ -3671,16 +3675,55 @@ describe("lsp regressions", () => {
 			});
 			const tool = new LspTool(makeLspSession(tempDir.path()));
 			const reload = tool.execute("reload-pending-client", { action: "reload", file: "*" });
+			const concurrentOldOutcome = lspClient.getOrCreateClient(oldConfig, tempDir.path(), 1_000).then(
+				() => "resolved",
+				error => String(error),
+			);
 			await Bun.sleep(0);
 			expect(newServer.received.some(message => message.method === "initialize")).toBe(false);
-
 			oldServer.send({ jsonrpc: "2.0", id: initialize.id, result: { capabilities: {} } });
-			await oldClientPromise;
+			expect(await oldOutcome).toContain("superseded during initialization");
+			expect(await concurrentOldOutcome).toContain("superseded during initialization");
 			const result = await reload;
 
-			expect(oldServer.received.map(message => message.method)).toContain("shutdown");
+			expect(oldServer.killed).toBe(true);
+			expect(oldServer.received.filter(message => message.method === "initialize")).toHaveLength(1);
 			expect(newServer.received.map(message => message.method)).toContain("initialize");
 			expect(textResult(result)).toContain("Reloaded fake-lsp");
+		} finally {
+			await lspClient.shutdownAll();
+			tempDir.removeSync();
+		}
+	});
+
+	it("workspace reload deadline interrupts a stale pending initializer and prevents late publication", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-reload-pending-abort-");
+		try {
+			const oldServer = installFakeLsp(() => {});
+			const oldConfig: ServerConfig = {
+				command: "fake-lsp",
+				args: ["--mode", "old"],
+				fileTypes: [".ts"],
+				rootMarkers: [],
+			};
+			const oldClientPromise = lspClient.getOrCreateClient(oldConfig, tempDir.path());
+			const oldOutcome = oldClientPromise.then(
+				() => "resolved",
+				error => String(error),
+			);
+			const initialize = await oldServer.waitFor(message => message.method === "initialize");
+			const newConfig: ServerConfig = { ...oldConfig, args: ["--mode", "new"] };
+			const controller = new AbortController();
+			const reason = new Error("reload cancelled");
+			const cleanup = lspClient.shutdownStaleClients(tempDir.path(), [newConfig], controller.signal);
+			await Bun.sleep(0);
+			controller.abort(reason);
+			await expect(cleanup).rejects.toBeInstanceOf(ToolAbortError);
+
+			// The original caller did not carry the reload signal. Even after its
+			// initialize response arrives, the tombstone prevents stale publish.
+			oldServer.send({ jsonrpc: "2.0", id: initialize.id, result: { capabilities: {} } });
+			expect(await oldOutcome).toContain("superseded during initialization");
 		} finally {
 			await lspClient.shutdownAll();
 			tempDir.removeSync();

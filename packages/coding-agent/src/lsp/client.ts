@@ -31,6 +31,7 @@ interface PendingClient {
 	token: symbol;
 }
 const clientLocks = new Map<string, PendingClient>();
+const invalidatedClientKeys = new Set<string>();
 const fileOperationLocks = new Map<string, Promise<void>>();
 
 /** Negative cache of recent init failures so a broken server fails fast instead of re-spawning per call. */
@@ -859,19 +860,35 @@ function clientKey(config: ServerConfig, cwd: string): string {
  * config would stay registered and running — the idle checker that would
  * eventually reap it is opt-in and off by default.
  */
-export async function shutdownStaleClients(cwd: string, configs: readonly ServerConfig[]): Promise<string[]> {
+export async function shutdownStaleClients(
+	cwd: string,
+	configs: readonly ServerConfig[],
+	signal?: AbortSignal,
+): Promise<string[]> {
 	const fresh = new Set(configs.map(config => clientKey(config, cwd)));
+	for (const key of fresh) invalidatedClientKeys.delete(key);
 	const resolvedCwd = path.resolve(cwd);
-	// A pre-init client exists only in clientLocks. Wait for stale initializers
-	// before scanning clients so they cannot publish behind this cleanup and run
-	// concurrently with the replacement started by reload *.
+	// Tombstone stale identities before awaiting initialization. Existing
+	// callers keep sharing their in-flight promise; later callers cannot spawn
+	// another stale process while reload is blocked on teardown.
 	const stalePending = Array.from(clientLocks.entries()).filter(
 		([key, pending]) => path.resolve(pending.cwd) === resolvedCwd && !fresh.has(key),
 	);
-	for (const [key, pending] of stalePending) {
-		if (clientLocks.get(key) === pending) clientLocks.delete(key);
+	for (const [key] of stalePending) invalidatedClientKeys.add(key);
+	for (const client of clients.values()) {
+		if (path.resolve(client.cwd) === resolvedCwd && !fresh.has(client.name)) {
+			invalidatedClientKeys.add(client.name);
+		}
 	}
-	await Promise.allSettled(stalePending.map(([, pending]) => pending.promise));
+	await Promise.all(
+		stalePending.map(async ([, pending]) => {
+			try {
+				await untilAborted(signal, pending.promise);
+			} catch {
+				throwIfAborted(signal);
+			}
+		}),
+	);
 
 	const stale = Array.from(clients.values()).filter(
 		client => path.resolve(client.cwd) === resolvedCwd && !fresh.has(client.name),
@@ -909,10 +926,9 @@ export async function getOrCreateClient(
 	signal?: AbortSignal,
 ): Promise<LspClient> {
 	const key = clientKey(config, cwd);
-
 	// Check if client already exists
 	const existingClient = clients.get(key);
-	if (existingClient) {
+	if (existingClient && !invalidatedClientKeys.has(key)) {
 		existingClient.lastActivity = Date.now();
 		return existingClient;
 	}
@@ -921,6 +937,9 @@ export async function getOrCreateClient(
 	const existingLock = clientLocks.get(key);
 	if (existingLock) {
 		return existingLock.promise;
+	}
+	if (invalidatedClientKeys.has(key)) {
+		throw new Error(`LSP configuration was superseded during reload: ${config.command}`);
 	}
 
 	// Fail fast on a recent deterministic init failure instead of re-spawning
@@ -1056,6 +1075,9 @@ export async function getOrCreateClient(
 			// Publish only after init succeeds: pre-init clients are reachable
 			// solely through clientLocks, so concurrent callers (warmup vs first
 			// tool call) wait for init instead of using an unacknowledged client.
+			if (invalidatedClientKeys.has(key)) {
+				throw new Error(`LSP configuration was superseded during initialization: ${config.command}`);
+			}
 			clients.set(key, client);
 			initFailures.delete(key);
 			return client;
@@ -1602,6 +1624,7 @@ export async function sendNotification(
  */
 export async function shutdownAll(): Promise<void> {
 	stopIdleChecker();
+	invalidatedClientKeys.clear();
 	const clientsToShutdown = Array.from(clients.values());
 	clients.clear();
 	// Mid-initialize clients live only in clientLocks (publication is deferred

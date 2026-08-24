@@ -1037,6 +1037,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 			const stopped = await shutdownStaleClients(
 				this.session.cwd,
 				servers.map(([, serverConfig]) => serverConfig),
+				signal,
 			);
 			if (servers.length === 0) {
 				return {
