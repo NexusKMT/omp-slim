@@ -11,9 +11,9 @@ import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal";
 import { assistantMsg, createTestSession, userMsg } from "./utilities";
 
-// The single sequence the TUI emits for a destructive reset (erase scrollback +
-// viewport, repaint from row zero) — see `tui.ts` `#renderFrame`.
-const DESTRUCTIVE_RESET = "\x1b[H\x1b[3J\x1b[2J";
+// Every destructive reset emits one erase-scrollback (ED3). Count that
+// operation without coupling this regression to the ED2/ED3 ordering.
+const ERASE_SCROLLBACK = "\x1b[3J";
 
 /** VirtualTerminal that also records every raw byte the TUI writes. */
 class CapturingTerminal extends VirtualTerminal {
@@ -25,7 +25,7 @@ class CapturingTerminal extends VirtualTerminal {
 	countResets(): number {
 		const all = this.raw.join("");
 		let n = 0;
-		for (let i = all.indexOf(DESTRUCTIVE_RESET); i !== -1; i = all.indexOf(DESTRUCTIVE_RESET, i + 1)) n++;
+		for (let i = all.indexOf(ERASE_SCROLLBACK); i !== -1; i = all.indexOf(ERASE_SCROLLBACK, i + 1)) n++;
 		return n;
 	}
 }
