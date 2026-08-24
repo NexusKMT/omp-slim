@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { Process } from "@oh-my-pi/pi-natives";
 import { exec, NonZeroExitError, spawn, TimeoutError } from "@oh-my-pi/pi-utils/ptree";
 
 describe("ptree timeout", () => {
@@ -53,5 +54,49 @@ describe("ptree timeout", () => {
 			threw = err;
 		}
 		expect(threw).toBeInstanceOf(NonZeroExitError);
+	});
+
+	it("completes when an orphan holds stdout past the root's exit", async () => {
+		// `sleep 30 & echo token $!`: the root exits at once but the background
+		// sleep inherits the pipe, so an EOF-based read would stall for the
+		// orphan's lifetime, far past the timeout budget. The orphan's pid is
+		// printed so the fixture can clean it up instead of leaking it.
+		let orphanPid: number | undefined;
+		try {
+			const start = performance.now();
+			const result = await exec(["sh", "-c", "sleep 30 & echo token $!"], {
+				timeout: 1_000,
+				allowNonZero: true,
+				allowAbort: true,
+			});
+			const elapsedMs = performance.now() - start;
+			const match = /^token (\d+)$/.exec(result.stdout.trim());
+			orphanPid = match ? Number.parseInt(match[1], 10) : undefined;
+			expect(result.ok).toBe(true);
+			expect(match, `stdout was: ${result.stdout}`).not.toBeUndefined();
+			expect(elapsedMs).toBeLessThan(5_000);
+		} finally {
+			if (orphanPid) Process.fromPid(orphanPid)?.killTree(9);
+		}
+	});
+
+	it("completes when an orphan holds stderr past the root's exit", async () => {
+		let orphanPid: number | undefined;
+		try {
+			const start = performance.now();
+			const result = await exec(["sh", "-c", "sleep 30 >&2 & echo token2 $!"], {
+				timeout: 1_000,
+				allowNonZero: true,
+				allowAbort: true,
+			});
+			const elapsedMs = performance.now() - start;
+			const match = /^token2 (\d+)$/.exec(result.stdout.trim());
+			orphanPid = match ? Number.parseInt(match[1], 10) : undefined;
+			expect(result.ok).toBe(true);
+			expect(match, `stdout was: ${result.stdout}`).not.toBeUndefined();
+			expect(elapsedMs).toBeLessThan(5_000);
+		} finally {
+			if (orphanPid) Process.fromPid(orphanPid)?.killTree(9);
+		}
 	});
 });

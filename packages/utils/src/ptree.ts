@@ -15,6 +15,9 @@ type InMask = "pipe" | "ignore" | Buffer | Uint8Array | null;
 /** A Bun subprocess with stdout/stderr always piped (stdin may vary). */
 type PipedSubprocess<In extends InMask = InMask> = Subprocess<In, "pipe", "pipe">;
 
+/** Grace after the root process exits for buffered pipe output to drain. */
+const EXIT_DRAIN_GRACE_MS = 100;
+
 // ── Exceptions ───────────────────────────────────────────────────────────────
 
 /**
@@ -103,6 +106,9 @@ export class ChildProcess<In extends InMask = InMask> {
 	#exitReasonPending?: Exception;
 	#stderrDone: Promise<void>;
 	#exited: Promise<number>;
+	// Resolves shortly after the root exits regardless of pipe state; pipe reads
+	// race it so an orphan holding a pipe cannot stall collection.
+	#exitedGrace: Promise<void>;
 	#stderrStream?: ReadableStream<Uint8Array>;
 	// Termination in flight after kill(); aborted exits await it before reporting.
 	#terminating?: Promise<boolean | void>;
@@ -124,21 +130,44 @@ export class ChildProcess<In extends InMask = InMask> {
 			this.#stderrStream = teeStream;
 			stderrStream = drainStream;
 		}
+		// Normalize Bun's exited promise into our exitReason / exitedCleanly model.
+		const { promise, resolve, reject } = Promise.withResolvers<number>();
+		this.#exited = promise;
+		// Give buffered pipe output a short drain grace after the root exits, then
+		// stop collecting: a backgrounded orphan can hold the pipes far past the
+		// caller's budget. The timer is unref'd so a clean fast exit never waits.
+		this.#exitedGrace = this.#exited
+			.catch(() => {})
+			.then(
+				() =>
+					new Promise<void>(graceResolve => {
+						const timer = setTimeout(graceResolve, EXIT_DRAIN_GRACE_MS);
+						timer.unref?.();
+					}),
+			);
+
+		const exitedGrace = this.#exitedGrace;
 		this.#stderrDone = (async () => {
+			const reader = stderrStream.getReader();
 			try {
-				for await (const chunk of stderrStream) {
-					this.#stderrChunks?.push(chunk);
-					this.#stderrTail += dec.decode(chunk, { stream: true });
+				for (;;) {
+					const chunk = await Promise.race([
+						reader.read().then(r => ({ grace: false as const, r })),
+						exitedGrace.then(() => ({ grace: true as const })),
+					]);
+					if (chunk.grace) {
+						await reader.cancel().catch(() => {});
+						break;
+					}
+					if (chunk.r.done) break;
+					this.#stderrChunks?.push(chunk.r.value);
+					this.#stderrTail += dec.decode(chunk.r.value, { stream: true });
 					trim();
 				}
 			} catch {}
 			this.#stderrTail += dec.decode();
 			trim();
 		})();
-
-		// Normalize Bun's exited promise into our exitReason / exitedCleanly model.
-		const { promise, resolve, reject } = Promise.withResolvers<number>();
-		this.#exited = promise;
 
 		proc.exited
 			.catch(() => null)
@@ -229,10 +258,38 @@ export class ChildProcess<In extends InMask = InMask> {
 	// ── Output helpers ───────────────────────────────────────────────────
 
 	async text(): Promise<string> {
-		const p = new Response(this.stdout).text();
+		const p = this.#readStream(this.proc.stdout);
 		if (this.#nothrow) return p;
 		const [text] = await Promise.all([p, this.exitedCleanly]);
 		return text;
+	}
+
+	/**
+	 * Read a pipe fully, but stop once the root has exited and the drain grace
+	 * elapsed: a backgrounded orphan can inherit the pipe and hold it far past
+	 * the caller's budget, so EOF alone must not bound the read.
+	 */
+	async #readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
+		const reader = stream.getReader();
+		const dec = new TextDecoder();
+		let out = "";
+		try {
+			for (;;) {
+				const chunk = await Promise.race([
+					reader.read().then(r => ({ grace: false as const, r })),
+					this.#exitedGrace.then(() => ({ grace: true as const })),
+				]);
+				if (chunk.grace) {
+					await reader.cancel().catch(() => {});
+					break;
+				}
+				if (chunk.r.done) break;
+				out += dec.decode(chunk.r.value, { stream: true });
+			}
+		} catch {
+			// A cancelled or failed read keeps whatever was already collected.
+		}
+		return out + dec.decode();
 	}
 
 	async blob(): Promise<Blob> {
@@ -268,7 +325,7 @@ export class ChildProcess<In extends InMask = InMask> {
 			throw new Error('Full stderr capture must be requested when spawning the process (pass stderr: "full")');
 		}
 
-		const stdoutP = new Response(this.stdout).text();
+		const stdoutP = this.#readStream(this.proc.stdout);
 		const stderrP =
 			stderrMode === "full" && stderrChunks
 				? this.#stderrDone.then(() => new TextDecoder().decode(Buffer.concat(stderrChunks)))
