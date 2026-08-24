@@ -300,6 +300,31 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		tui.stop();
 	});
 
+	it("recovers eager CPR resolution after a fully dropped transaction", () => {
+		// Transaction one (12 -> 20) drops both its replies and resolves at
+		// the conservative bound. Its dead request tags must not linger: a
+		// later grow (20 -> 26) whose probe answers promptly would otherwise
+		// shift the phantom tags, swallow its own valid reply as pre-restart,
+		// and fall back below the real viewport — one dropped pair poisoning
+		// every subsequent grow. The reply here must resolve eagerly at its
+		// reported row 9 (CUP row 10).
+		const { terminal, tui, renderScheduler, writes } = startRig();
+		terminal.resize(40, 20);
+		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
+		renderScheduler.settle(); // first timeout: no reply -> one bounded retry
+		renderScheduler.settle(); // retry timeout: conservative fallback, tags retired
+		renderScheduler.t = 1000; // step past the post-settle resize suppression
+		terminal.resize(40, 26); // a later responsive grow
+		renderScheduler.settle(); // exit the borrow, start a fresh probe
+		writes.length = 0;
+		terminal.sendInput("\x1b[10;1R"); // prompt reply: must resolve eagerly
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(10);
+		tui.stop();
+	});
+
 	it("recovers the retried probe's swallowed reply when the original was dropped", () => {
 		// The original reply never arrives, so the retry's own reply is
 		// swallowed as presumed-stale; the retry timeout must anchor from it

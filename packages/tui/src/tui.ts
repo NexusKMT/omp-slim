@@ -1246,6 +1246,14 @@ export class TUI extends Container {
 		if (!probe) return;
 		probe.timer.cancel();
 		this.#resizeProbe = undefined;
+		// This probing episode is over: any still-outstanding requests are dead
+		// to us, and leaving their tags queued would shift the next
+		// transaction's replies against phantom epochs — one genuinely dropped
+		// pair would poison every later grow into the conservative fallback. A
+		// dead reply arriving after this point is spurious input, exactly like
+		// any unsolicited CPR.
+		this.#cprRequestEpochs.length = 0;
+		this.#staleCprReplies = 0;
 		const width = this.terminal.columns;
 		const height = this.terminal.rows;
 		const staleRows = this.#reflowedRowCount(probe.window, 0, probe.window.length, width);
