@@ -75,6 +75,9 @@ class CdpConnection {
 	}
 }
 
+/** Transport replacement is retryable and must not permanently ban a tab. */
+class ExtensionReplacedError extends Error {}
+
 class TabState {
 	url: string;
 	title: string;
@@ -92,6 +95,8 @@ class TabState {
 	attaching: Promise<boolean> | null = null;
 	/** Relay-initiated detach in flight; reattach serializes behind it. */
 	detaching: Promise<void> | null = null;
+	/** A successful attach completed after the most recently requested relay detach. */
+	reattachedAfterDetach = false;
 	/** True after the relay put this tab in the omp group; `ompGroupId` holds that group. */
 	grouped = false;
 	/** Group RPC in flight — suppresses duplicate requests from load-time tabUpdated bursts. */
@@ -221,10 +226,10 @@ export class RelayBridge {
 
 	// ---- extension lifecycle -------------------------------------------------
 
-	#rejectPendingExtensionRpcs(message: string): void {
+	#rejectPendingExtensionRpcs(error: Error): void {
 		for (const pending of this.#pendingRpc.values()) {
 			clearTimeout(pending.timer);
-			pending.reject(new Error(message));
+			pending.reject(error);
 		}
 		this.#pendingRpc.clear();
 	}
@@ -234,7 +239,7 @@ export class RelayBridge {
 		if (this.#ext && this.#ext !== socket) {
 			this.#log("replacing extension socket");
 			for (const tab of this.#tabs.values()) this.#resetRuntime(tab);
-			this.#rejectPendingExtensionRpcs("relay extension replaced");
+			this.#rejectPendingExtensionRpcs(new ExtensionReplacedError());
 			this.#ext.close();
 		}
 		this.#ext = socket;
@@ -244,7 +249,7 @@ export class RelayBridge {
 		if (this.#ext !== socket) return;
 		this.#ext = null;
 		this.#extInfo = null;
-		this.#rejectPendingExtensionRpcs("relay extension disconnected");
+		this.#rejectPendingExtensionRpcs(new Error("relay extension disconnected"));
 		for (const tab of this.#tabs.values()) {
 			tab.attached = false;
 			tab.attaching = null;
@@ -772,7 +777,13 @@ export class RelayBridge {
 		// Explicit source attribution comes from the extension that executed
 		// chrome.debugger.detach, so socket replacement cannot confuse this
 		// with a user cancellation or mutate an unrelated attach promise.
-		if (relayInitiated) return;
+		if (relayInitiated) {
+			// A replacement hello can observe the old attachment before the
+			// pending detach completes. Reconcile that stale snapshot unless a
+			// later attach has already superseded this detach.
+			if (!tab.reattachedAfterDetach) tab.attached = false;
+			return;
+		}
 		this.#log("tab detached", { tabId, reason });
 		tab.attached = false;
 		tab.attaching = null;
@@ -975,6 +986,7 @@ export class RelayBridge {
 		if (!tab?.attached) return;
 		tab.attached = false;
 		this.#resetRuntime(tab);
+		tab.reattachedAfterDetach = false;
 		const done = this.#rpc({ op: "detach", tabId })
 			.then(() => {})
 			.catch(() => {})
@@ -1020,6 +1032,7 @@ export class RelayBridge {
 		const attempt = this.#rpc({ op: "attach", tabId: tab.tabId })
 			.then(() => {
 				tab.attached = true;
+				tab.reattachedAfterDetach = true;
 				return true;
 			})
 			.catch(err => {
@@ -1028,7 +1041,7 @@ export class RelayBridge {
 					url: tab.url,
 					error: err instanceof Error ? err.message : String(err),
 				});
-				tab.banned = true;
+				if (!(err instanceof ExtensionReplacedError)) tab.banned = true;
 				return false;
 			})
 			.finally(() => {

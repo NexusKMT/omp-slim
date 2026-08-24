@@ -66,7 +66,12 @@ function tab(overrides: Partial<TabSnapshot> & { tabId: number }): TabSnapshot {
 	};
 }
 
-function connect(bridge: RelayBridge, socket: FakeExtSocket, tabs: TabSnapshot[]): void {
+function connect(
+	bridge: RelayBridge,
+	socket: FakeExtSocket,
+	tabs: TabSnapshot[],
+	attachedTabIds: number[] = [],
+): void {
 	bridge.extConnected(socket);
 	bridge.extMessage(
 		socket,
@@ -75,7 +80,7 @@ function connect(bridge: RelayBridge, socket: FakeExtSocket, tabs: TabSnapshot[]
 			userAgent: "test",
 			browserVersion: "Chrome/151.0.0.0",
 			tabs,
-			attachedTabIds: [],
+			attachedTabIds,
 		}),
 	);
 }
@@ -615,6 +620,67 @@ describe("RelayBridge attachment release", () => {
 				message.params.sessionId === sessionId,
 		);
 		expect(detached).toBeDefined();
+	});
+
+	it("reconciles a delayed detach after replacement hello still reports the old attachment", async () => {
+		const bridge = new RelayBridge({ group: { title: "omp", color: "cyan" } });
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		const sessionId = await attachPage(bridge, ext, cdp, connId, 1);
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: ++msgSeq, method: "Target.detachFromTarget", params: { sessionId } }),
+		);
+		await flush();
+
+		const replacement = new FakeExtSocket();
+		connect(bridge, replacement, [tab({ tabId: 1 })], [1]);
+		bridge.extMessage(
+			replacement,
+			JSON.stringify({ t: "detached", tabId: 1, reason: "target_closed", relayInitiated: true }),
+		);
+		await flush();
+
+		const reattachId = ++msgSeq;
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: reattachId, method: "Target.attachToTarget", params: { targetId: "PAGE1" } }),
+		);
+		await flush();
+		expect(replacement.pending("attach")).toHaveLength(1);
+		ack(bridge, replacement, "attach");
+		await flush();
+		expect(cdp.sessionFor(reattachId)).toBeDefined();
+	});
+
+	it("does not ban a tab when its in-flight attach is interrupted by extension replacement", async () => {
+		const bridge = new RelayBridge({ group: { title: "omp", color: "cyan" } });
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: ++msgSeq, method: "Target.attachToTarget", params: { targetId: "PAGE1" } }),
+		);
+		expect(ext.pending("attach")).toHaveLength(1);
+
+		const replacement = new FakeExtSocket();
+		connect(bridge, replacement, [tab({ tabId: 1 })]);
+		await flush();
+
+		const retryId = ++msgSeq;
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: retryId, method: "Target.attachToTarget", params: { targetId: "PAGE1" } }),
+		);
+		await flush();
+		expect(replacement.pending("attach")).toHaveLength(1);
+		ack(bridge, replacement, "attach");
+		await flush();
+		expect(cdp.sessionFor(retryId)).toBeDefined();
 	});
 
 	it("clears an in-flight detach immediately when the extension socket is replaced", async () => {
