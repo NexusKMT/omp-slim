@@ -301,30 +301,52 @@ it(
 );
 
 it(
-	"aborts for failing patches across random streams",
+	"aborts for failing patches across fragmented streamed deltas",
 	async () => {
-		await Bun.write(path.join(tempDir, "sample.txt"), "alpha\nbeta\ngamma\n");
+		// The session-driven form of this test raced the fake provider against
+		// the guard's async verification: Bun.sleep(0) between deltas does not
+		// guarantee the Bun.file().text() load plus the verification chain settle
+		// before the provider emits `done`, and the turn reset then correctly
+		// discards the late verdict (CI flake: expected "aborted", received
+		// "stop"). Drive the guard directly and gate its file load explicitly so
+		// the verdict lands deterministically, while seed 7 still fragments the
+		// decision-critical `-omega` line across deltas exactly as the streamed
+		// session did.
+		const abortCalls = { count: 0 };
+		const target = path.join(tempDir, "sample.txt");
+		await Bun.write(target, "alpha\nbeta\ngamma\n");
+		const { guard, makeEvent } = buildSmallTargetGuard(target, "call_edit_1", abortCalls);
 		const diff = "@@\n-omega\n+beta2\n";
+		const chunks = chunkStringRandomly(diff, 7);
 
-		for (const seed of seeds) {
-			const chunks = chunkStringRandomly(diff, seed);
-			const abortSignalRef: { current?: AbortSignal } = {};
-			const streamFn = createStreamForDiff("sample.txt", chunks, abortSignalRef);
-			const { session, authStorage } = await createSession(tempDir, streamFn, editTool);
-
-			try {
-				await session.prompt("apply patch");
-
-				const lastAssistant = lastAssistantMessage(session.state.messages);
-				expect(lastAssistant?.stopReason).toBe("aborted");
-				expect(abortSignalRef.current?.aborted ?? false).toBe(true);
-			} finally {
-				try {
-					await session.dispose();
-				} finally {
-					authStorage.close();
-				}
+		const { promise: heldLoad, resolve: releaseLoad } = Promise.withResolvers<string>();
+		const realFile = Bun.file.bind(Bun);
+		const fileSpy = vi.spyOn(Bun, "file").mockImplementation(((pathLike: string) => ({
+			text: () => (pathLike === target ? heldLoad : realFile(pathLike).text()),
+		})) as typeof Bun.file);
+		try {
+			guard.preCache(makeEvent("toolcall_start", ""));
+			let streamed = "";
+			for (const chunk of chunks) {
+				streamed += chunk;
+				const event = makeEvent("toolcall_delta", streamed);
+				guard.preCache(event);
+				guard.maybeAbort(event);
+				await drainMacrotasks(1);
 			}
+
+			// Every queued verification is still pending behind the held load, so
+			// the abort decision cannot have raced the stream.
+			expect(guard.abortTriggered).toBe(false);
+
+			releaseLoad("alpha\nbeta\ngamma\n");
+			await heldLoad;
+			await drainMacrotasks(10);
+
+			expect(guard.abortTriggered).toBe(true);
+			expect(abortCalls.count).toBe(1);
+		} finally {
+			fileSpy.mockRestore();
 		}
 	},
 	STREAMING_EDIT_RANDOM_STREAM_TIMEOUT_MS,
