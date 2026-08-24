@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- Fixed invalid streamed edit patches occasionally reaching the edit tool instead of being stopped early.
 - Fixed `!` shell commands on zsh/fish by running them inside a real PTY, resolving terminal option errors and preserving ANSI color formatting.
 - Fixed transcript layout corruption and viewport compression caused by interrupted streams, empty blocks, or collapsed wrapped diff lines.
 - Fixed transcript scrollback loss where output below sticky cards (such as hub-wait or todo) failed to commit to terminal history.
