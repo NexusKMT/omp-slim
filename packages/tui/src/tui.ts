@@ -1213,15 +1213,17 @@ export class TUI extends Container {
 		// the reply snapshots the column when the terminal processes the CSI
 		// 6n, but a cursor RESTING on a nonzero column would reflow onto a
 		// later visual row if a direct terminal's width later shrank below it,
-		// corrupting the next probe's cursor-relative math. Column 1 is never
-		// used as a tag: it cannot be told apart from a spurious or clamped
-		// reply. A column may not be reused while its tag is live — the old
-		// request's delayed reply would be attributed to the new epoch — so
-		// scan for a free slot.
-		const span = Math.min(30, this.terminal.columns - 1);
+		// corrupting the next probe's cursor-relative math. Columns 1-16 are
+		// never used as tags: column 1 cannot be told apart from a spurious or
+		// clamped reply, and modified F3 keys encode as CSI 1;<mod>R with
+		// modifier codes 2-16, which is byte-identical to a CPR for row 1 on
+		// those columns. A column may not be reused while its tag is live —
+		// the old request's delayed reply would be attributed to the new
+		// epoch — so scan for a free slot.
+		const span = Math.min(30, this.terminal.columns - 16);
 		if (span >= 4) {
 			for (let index = 0; index < span; index++) {
-				const candidate = 2 + ((this.#cprProbeSeq + index) % span);
+				const candidate = 17 + ((this.#cprProbeSeq + index) % span);
 				if (this.#cprColumnTags.has(candidate)) continue;
 				this.#cprProbeSeq += index + 1;
 				this.#cprColumnTags.set(candidate, this.#geometryEpoch);
@@ -1746,10 +1748,18 @@ export class TUI extends Container {
 		// Consume CPR replies (CSI row;col R) while an anchor probe is unanswered;
 		// they are terminal reports, never keystrokes, and must not reach the
 		// focused component.
+		let searchFrom = 0;
 		while (this.#cprColumnTags.size > 0) {
-			const match = data.match(/\x1b\[(\d+);(\d+)R/);
+			const match = data.slice(searchFrom).match(/\x1b\[(\d+);(\d+)R/);
 			if (!match || match.index === undefined) break;
+			const row = Number(match[1]);
 			const column = Number(match[2]);
+			if (!this.#cprColumnTags.has(column) && row === 1 && column >= 2 && column <= 16) {
+				// CSI 1;2R..1;16R with no live tag is modified F3 (tag columns
+				// start at 17): leave the keystroke for the focused component.
+				searchFrom += match.index + match[0].length;
+				continue;
+			}
 			if (this.#cprColumnTags.has(column)) {
 				// Column-tagged reply: exact attribution. Resolve only when its
 				// request was parked under the active probe's geometry; a reply
@@ -1761,10 +1771,11 @@ export class TUI extends Container {
 					this.#resolveResizeAnchor(Number(match[1]) - 1);
 				}
 			}
-			// Unknown-column replies while expecting only tagged ones are our
+			// Other unknown-column replies while expecting tagged ones are our
 			// requests answered with a clamped or mangled column: strip and
 			// discard; the probe timeout covers recovery.
-			data = data.slice(0, match.index) + data.slice(match.index + match[0].length);
+			data =
+				data.slice(0, searchFrom + match.index) + data.slice(searchFrom + match.index + match[0].length);
 		}
 		if (data.length === 0) return;
 		// Ctrl+C/Esc use app-level double-press windows. Give those gestures one
