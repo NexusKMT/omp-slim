@@ -46,6 +46,8 @@
 - Fixed `omp git` hunk navigation (`alt+↓`/`alt+↑`) appearing to do nothing while the file sidebar had focus: the diff cursor band now stays visible (dimmed) when the pane is unfocused.
 - Fixed the git TUI sidebar jumping back to the top of the file list after staging or unstaging a file; selection now stays on the nearest remaining row
 - Fixed long sessions becoming unrecoverable when a provider rejects histories over its message-count limit ([#9629](https://github.com/can1357/oh-my-pi/issues/9629)).
+- Session `/dump` output now labels system notices with readable titles and fences their raw payloads as XML.
+
 ### Fixed
 
 - Fixed kernel sessions failing to recover when a dead kernel reports cancellation instead of throwing.
