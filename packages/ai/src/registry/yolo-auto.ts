@@ -12,7 +12,7 @@ import type { ProviderDefinition } from "./types";
  */
 export const loginYoloAuto = createApiKeyLogin({
 	providerLabel: "Yolo-Auto",
-	authUrl: "https://yolo-auto.com/docs",
+	authUrl: "https://yolo-auto.com/app",
 	instructions: "Create or copy your Yolo-Auto API key (yolo_...)",
 	promptMessage: "Paste your Yolo-Auto API key",
 	placeholder: "yolo-...",
