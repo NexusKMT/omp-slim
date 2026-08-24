@@ -22,13 +22,11 @@ import {
 	getAgentDir,
 	getLastChangelogVersionPath,
 	getProjectDir,
-	hasFsCode,
 	isEnoent,
 	logger,
 	MAIN_CONFIG_FILENAMES,
 	procmgr,
 	setWorktreesDir,
-	toError,
 } from "@oh-my-pi/pi-utils";
 import { withFileLock } from "@oh-my-pi/pi-utils/file-lock";
 import { JSONC, YAML } from "bun";
@@ -40,6 +38,7 @@ import { isLightTheme, setAutoThemeMapping, setColorBlindMode, setSymbolPreset }
 import { AgentStorage } from "../session/agent-storage";
 import { type CompactionMethod, DEFAULT_COMPACTION_METHOD_ORDER } from "../session/compaction-methods";
 import { AUTO_IMAGE_PROVIDER_ORDER, isImageProviderId } from "../tools/image-providers";
+import { replaceFileAtomically } from "../utils/atomic-file";
 import { type EditMode, normalizeEditMode } from "../utils/edit-mode";
 import { INSPECT_IMAGE_MODES } from "../utils/inspect-image-mode";
 import { isSearchProviderId, SEARCH_PROVIDER_ORDER } from "../web/search/types";
@@ -2246,56 +2245,11 @@ export class Settings {
 			} finally {
 				await handle.close();
 			}
-			try {
-				await fs.promises.rename(tempPath, filePath);
-			} catch (error) {
-				if (!hasFsCode(error, "EPERM")) throw error;
-				await this.#replaceYamlAfterEperm(tempPath, filePath, error);
-			}
+			await replaceFileAtomically(tempPath, filePath);
 			removeTemp = false;
 		} finally {
 			if (removeTemp) {
 				await fs.promises.rm(tempPath, { force: true }).catch(() => {});
-			}
-		}
-	}
-	async #replaceYamlAfterEperm(tempPath: string, filePath: string, renameError: unknown): Promise<void> {
-		const backupPath = `${filePath}.${process.pid}.${randomUUID()}.bak`;
-		try {
-			await fs.promises.rename(filePath, backupPath);
-		} catch (error) {
-			if (isEnoent(error)) {
-				await fs.promises.rename(tempPath, filePath);
-				return;
-			}
-			throw renameError;
-		}
-
-		try {
-			await fs.promises.rename(tempPath, filePath);
-		} catch (replaceError) {
-			try {
-				await fs.promises.rename(backupPath, filePath);
-			} catch (rollbackError) {
-				throw new Error(
-					`Failed to replace settings file after EPERM (original: ${toError(renameError).message}; retry: ${
-						toError(replaceError).message
-					}; rollback: ${toError(rollbackError).message})`,
-					{ cause: toError(renameError) },
-				);
-			}
-			throw replaceError;
-		}
-
-		try {
-			await fs.promises.rm(backupPath);
-		} catch (error) {
-			if (!isEnoent(error)) {
-				logger.warn("Settings: failed to remove atomic-write backup", {
-					path: filePath,
-					backupPath,
-					error: toError(error).message,
-				});
 			}
 		}
 	}
