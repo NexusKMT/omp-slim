@@ -109,8 +109,9 @@ describe("browser handle enrichment — guarded actions", () => {
 	};
 
 	it("fails a stalled handle.click() fast with a named error instead of hanging", async () => {
+		const stalled = Promise.withResolvers<void>();
 		const stub = {
-			click: () => new Promise<void>(() => {}), // never settles — a busy popup/navigation stall
+			click: () => stalled.promise, // never settles — a busy popup/navigation stall
 			type: async () => {},
 			evaluate: async () => {},
 			dispose: async () => {},
@@ -125,10 +126,11 @@ describe("browser handle enrichment — guarded actions", () => {
 		let clicks = 0;
 		let disposed = false;
 		let cacheCleared = false;
+		const stalled = Promise.withResolvers<void>();
 		const stub = {
 			click: () => {
 				clicks++;
-				return new Promise<void>(() => {});
+				return stalled.promise;
 			},
 			type: async () => {},
 			evaluate: async () => {},
@@ -205,7 +207,7 @@ describe("browser handle enrichment — guarded actions", () => {
 	it("guards drag and touch input methods, not just click/type", async () => {
 		const makeStalled = (method: string): ElementHandle =>
 			({
-				[method]: () => new Promise<void>(() => {}), // stalled CDP input
+				[method]: () => Promise.withResolvers<void>().promise, // stalled CDP input
 				type: async () => {},
 				evaluate: async () => {},
 				dispose: async () => {},
@@ -285,6 +287,21 @@ describe("browser handle enrichment — guarded actions", () => {
 		expect(clicks).toBe(1);
 		expect(firstLabels).toEqual([]);
 		expect(secondLabels).toEqual(["handle.click()"]);
+	});
+
+	it("does not dispatch through a handle retained after its browser run ended", async () => {
+		let clicks = 0;
+		const stub = {
+			click: async () => {
+				clicks++;
+			},
+			type: async () => {},
+			evaluate: async () => {},
+		} as unknown as ElementHandle;
+		const guard: HandleOpGuard = (_label, fn) => fn(AbortSignal.abort(new Error("run ended")));
+
+		await expect(toActionableHandle(stub, guard).click()).rejects.toThrow("Operation aborted");
+		expect(clicks).toBe(0);
 	});
 });
 

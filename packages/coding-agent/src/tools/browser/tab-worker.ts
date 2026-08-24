@@ -387,6 +387,7 @@ async function runGuardedHandleAction<T>(
 				"run tab.observe() or tab.ariaSnapshot() to resolve a fresh handle",
 		);
 	}
+	throwIfAborted(signal);
 	const pending = action();
 	try {
 		return await untilAborted(signal, () => pending);
