@@ -160,7 +160,7 @@ function createStreamingEdit(
 	chunks: string[],
 	abortSignalRef: { current?: AbortSignal },
 	createArguments: (path: string, streamedText: string) => Record<string, unknown>,
-	streamStateRef?: { deltaCount: number; waitBeforeFirstDelta?: Promise<void> },
+	streamStateRef?: { deltaCount: number; waitBeforeFirstDelta?: Promise<void>; waitBeforeFinish?: Promise<void> },
 ): Agent["streamFn"] {
 	let callIndex = 0;
 	return (_model, _context, options) => {
@@ -221,6 +221,12 @@ function createStreamingEdit(
 				await Bun.sleep(0);
 			}
 
+			// Optional gate before the final events: lets a test hold the turn open
+			// until the guard's async verification verdict has landed, instead of
+			// racing `done` against I/O-backed verification.
+			if (streamStateRef?.waitBeforeFinish) {
+				await streamStateRef.waitBeforeFinish;
+			}
 			if (aborted) return;
 
 			const finalCall = createToolCall(toolCallId, createArguments(path, streamedText));
@@ -238,7 +244,7 @@ function createStreamForDiff(
 	path: string,
 	chunks: string[],
 	abortSignalRef: { current?: AbortSignal },
-	streamStateRef?: { deltaCount: number; waitBeforeFirstDelta?: Promise<void> },
+	streamStateRef?: { deltaCount: number; waitBeforeFirstDelta?: Promise<void>; waitBeforeFinish?: Promise<void> },
 ): Agent["streamFn"] {
 	return createStreamingEdit(
 		path,
@@ -303,27 +309,67 @@ it(
 it(
 	"aborts for failing patches across random streams",
 	async () => {
-		await Bun.write(path.join(tempDir, "sample.txt"), "alpha\nbeta\ngamma\n");
+		// This test raced the fake provider against the guard's async
+		// verification: Bun.sleep(0) between deltas does not guarantee the
+		// Bun.file().text() load plus the verification chain settle before the
+		// provider emits `done`, and the turn reset then correctly discards the
+		// late verdict (CI flake: expected "aborted", received "stop"). Keep the
+		// full session contract — event forwarding into the guard, agent.abort()
+		// translated into an aborted turn and AbortSignal — but gate both async
+		// legs explicitly: hold the target's file load open until every seed-7
+		// fragmented delta (which splits the decision-critical `-omega` line)
+		// has streamed, and hold the provider's final `done` until the released
+		// verification has had its macrotasks to land the verdict.
+		const target = path.join(tempDir, "sample.txt");
+		await Bun.write(target, "alpha\nbeta\ngamma\n");
 		const diff = "@@\n-omega\n+beta2\n";
+		const chunks = chunkStringRandomly(diff, 7);
+		const abortSignalRef: { current?: AbortSignal } = {};
+		const finishGate = Promise.withResolvers<void>();
+		const streamState = { deltaCount: 0, waitBeforeFinish: finishGate.promise };
+		const streamFn = createStreamForDiff("sample.txt", chunks, abortSignalRef, streamState);
+		const { session, authStorage } = await createSession(tempDir, streamFn, editTool);
 
-		for (const seed of seeds) {
-			const chunks = chunkStringRandomly(diff, seed);
-			const abortSignalRef: { current?: AbortSignal } = {};
-			const streamFn = createStreamForDiff("sample.txt", chunks, abortSignalRef);
-			const { session, authStorage } = await createSession(tempDir, streamFn, editTool);
+		const { promise: heldLoad, resolve: releaseLoad } = Promise.withResolvers<string>();
+		const realFile = Bun.file.bind(Bun);
+		const fileSpy = vi.spyOn(Bun, "file").mockImplementation(((pathLike: string) => {
+			const real = realFile(pathLike);
+			if (pathLike !== target) return real;
+			// Only .text() is held; the session may touch other BunFile members.
+			return new Proxy(real, {
+				get(obj, prop) {
+					if (prop === "text") return () => heldLoad;
+					const value = Reflect.get(obj, prop);
+					return typeof value === "function" ? value.bind(obj) : value;
+				},
+			});
+		}) as typeof Bun.file);
 
+		try {
+			const promptPromise = session.prompt("apply patch");
+			while (streamState.deltaCount < chunks.length) {
+				await drainMacrotasks(1);
+			}
+
+			// Every queued verification is still pending behind the held load, so
+			// the abort decision cannot have raced the stream.
+			expect(abortSignalRef.current?.aborted ?? false).toBe(false);
+
+			releaseLoad("alpha\nbeta\ngamma\n");
+			await heldLoad;
+			await drainMacrotasks(10);
+			finishGate.resolve();
+			await promptPromise;
+
+			const lastAssistant = lastAssistantMessage(session.state.messages);
+			expect(lastAssistant?.stopReason).toBe("aborted");
+			expect(abortSignalRef.current?.aborted ?? false).toBe(true);
+		} finally {
+			fileSpy.mockRestore();
 			try {
-				await session.prompt("apply patch");
-
-				const lastAssistant = lastAssistantMessage(session.state.messages);
-				expect(lastAssistant?.stopReason).toBe("aborted");
-				expect(abortSignalRef.current?.aborted ?? false).toBe(true);
+				await session.dispose();
 			} finally {
-				try {
-					await session.dispose();
-				} finally {
-					authStorage.close();
-				}
+				authStorage.close();
 			}
 		}
 	},
