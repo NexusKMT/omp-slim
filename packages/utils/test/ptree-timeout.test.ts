@@ -93,6 +93,36 @@ describe("ptree timeout", () => {
 		},
 	);
 
+	it.skipIf(process.platform !== "win32")(
+		"terminates a pipe-holding descendant after the Windows root exits",
+		async () => {
+			// Windows has no process groups. The probe exits after starting a
+			// child that inherits stdout, so the retained root handle must anchor
+			// the Toolhelp tree walk when the command deadline expires.
+			const probe = `${import.meta.dir}/fixtures/ptree-dead-root-probe.ts`;
+			let descendantPid: number | undefined;
+			try {
+				const result = await exec([process.execPath, probe], {
+					timeout: 250,
+					allowNonZero: true,
+					allowAbort: true,
+				});
+				descendantPid = Number.parseInt(result.stdout.trim(), 10);
+
+				expect(result.exitError).toBeInstanceOf(TimeoutError);
+				const deadline = Date.now() + 500;
+				let status = Process.fromPid(descendantPid)?.status();
+				while (status === ProcessStatus.Running && Date.now() < deadline) {
+					await Bun.sleep(10);
+					status = Process.fromPid(descendantPid)?.status();
+				}
+				expect(status).not.toBe(ProcessStatus.Running);
+			} finally {
+				if (descendantPid) Process.fromPid(descendantPid)?.killTree(9);
+			}
+		},
+	);
+
 	it.skipIf(process.platform === "win32")(
 		"throws NonZeroExitError by default when the child exits nonzero",
 		async () => {
@@ -174,4 +204,25 @@ describe("ptree timeout", () => {
 			if (orphanPid) Process.fromPid(orphanPid)?.killTree(9);
 		}
 	});
+
+	it.skipIf(process.platform === "win32")(
+		"preserves the timeout reason when nonzero normalization waits for stderr",
+		async () => {
+			// The root exits nonzero while its child holds stderr open. The
+			// deadline kills the detached group while exit normalization awaits
+			// the drain, and that timeout must outrank the earlier exit code.
+			let threw: unknown;
+			try {
+				await exec(["/bin/sh", "-c", "sleep 30 >&2 & exit 7"], {
+					detached: true,
+					timeout: 250,
+					allowNonZero: true,
+				});
+			} catch (err) {
+				threw = err;
+			}
+
+			expect(threw).toBeInstanceOf(TimeoutError);
+		},
+	);
 });

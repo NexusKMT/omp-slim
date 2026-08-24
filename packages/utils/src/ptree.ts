@@ -117,6 +117,9 @@ export class ChildProcess<In extends InMask = InMask> {
 	// Termination in flight after kill(); aborted exits await it before reporting.
 	#terminating?: Promise<boolean | void>;
 	#terminateGroup: boolean;
+	// Windows has no process groups. Retaining the root's native handle pins
+	// its PID after exit so killTree() can still enumerate its original children.
+	#windowsRootProcess?: Process;
 	constructor(
 		readonly proc: PipedSubprocess<In>,
 		readonly exposeStderr: boolean,
@@ -124,6 +127,7 @@ export class ChildProcess<In extends InMask = InMask> {
 		terminateGroup = false,
 	) {
 		this.#terminateGroup = terminateGroup;
+		this.#windowsRootProcess = process.platform === "win32" ? (Process.fromPid(proc.pid) ?? undefined) : undefined;
 		if (retainFullStderr) this.#stderrChunks = [];
 		// Eagerly drain stderr into a truncated tail, retaining raw chunks only for explicit full capture.
 		const dec = new TextDecoder();
@@ -193,6 +197,11 @@ export class ChildProcess<In extends InMask = InMask> {
 				}
 
 				await this.#stderrDone;
+				if (this.#exitReasonPending) {
+					this.#exitReason = this.#exitReasonPending;
+					reject(this.#exitReasonPending);
+					return;
+				}
 
 				if (exitCode !== null) {
 					this.#exitReason = new NonZeroExitError(exitCode, this.#stderrTail);
@@ -279,6 +288,13 @@ export class ChildProcess<In extends InMask = InMask> {
 			this.#terminating = Promise.resolve();
 			return;
 		}
+		if (this.proc.exitCode !== null && this.#windowsRootProcess && this.#openPipeReaders > 0) {
+			// The retained handle keeps the dead root PID reserved, making the
+			// Windows Toolhelp descendant walk identity-safe after root exit.
+			this.#windowsRootProcess.killTree();
+			this.#terminating = Promise.resolve();
+			return;
+		}
 		if (!this.proc.killed) {
 			const options =
 				gracefulMs === undefined
@@ -286,7 +302,7 @@ export class ChildProcess<In extends InMask = InMask> {
 						? { group: true }
 						: undefined
 					: { gracefulMs, group: this.#terminateGroup };
-			this.#terminating = Process.fromPid(this.proc.pid)
+			this.#terminating = (this.#windowsRootProcess ?? Process.fromPid(this.proc.pid))
 				?.terminate(options)
 				?.catch(e => void e);
 		}
@@ -426,7 +442,10 @@ export class ChildProcess<In extends InMask = InMask> {
 			// A detached group can remain alive after its leader exits. Only use
 			// the dead-leader fallback while an inherited pipe proves that exact
 			// group still has a live member; this avoids stale-PGID reuse.
-			if (this.proc.exitCode === null || (this.#terminateGroup && this.#openPipeReaders > 0)) {
+			if (
+				this.proc.exitCode === null ||
+				(this.#openPipeReaders > 0 && (this.#terminateGroup || this.#windowsRootProcess))
+			) {
 				this.kill(new TimeoutError(ms, this.#stderrTail), -1);
 			}
 			this.#resolveDrainCutoff();
