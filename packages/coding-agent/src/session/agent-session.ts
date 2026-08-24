@@ -9693,18 +9693,26 @@ export class AgentSession {
 	 * and headless callers that must observe the hydrated total.
 	 */
 	beginInitialAdvisorCostRestore(): void {
-		const sessionId = this.sessionId;
-		let costsAtSnapshot: ReadonlyMap<string, number> = new Map();
+		let stale = false;
+		const unregisterSessionChange = this.registerSessionChangeCallback(() => {
+			stale = true;
+		});
+		const snapshot = this.#advisors.beginCostRestoreSnapshot();
 		this.#advisorCostRestore = loadAdvisorTranscriptCosts(this.sessionFile, {
-			onSnapshot: () => {
-				costsAtSnapshot = this.#advisors.costSnapshot();
-			},
+			beforeSnapshot: snapshot.ready,
+			onSnapshot: snapshot.release,
+			shouldContinue: () => !stale && !this.isDisposed,
 		})
 			.then(costs => {
-				if (this.sessionId !== sessionId) return;
-				this.restoreInitialAdvisorCosts(costs, costsAtSnapshot);
+				if (stale || this.isDisposed) return;
+				this.restoreInitialAdvisorCosts(costs, snapshot.costsAtSnapshot);
+				this.#emit({ type: "advisor_cost_changed" });
 			})
-			.catch(err => logger.debug("advisor cost restore failed", { err: String(err) }));
+			.catch(err => logger.debug("advisor cost restore failed", { err: String(err) }))
+			.finally(() => {
+				snapshot.release();
+				unregisterSessionChange();
+			});
 	}
 
 	/** Resolves once {@link beginInitialAdvisorCostRestore}'s scan has settled. */
@@ -9714,8 +9722,8 @@ export class AgentSession {
 
 	/**
 	 * Restore persisted advisor spend plus the process-local delta billed after
-	 * `costsAtSnapshot`. The loader fixes every transcript's byte length before
-	 * capturing that baseline, so a turn completed while the scan runs is added
+	 * `costsAtSnapshot`. The recorder barrier fixes every transcript's byte length
+	 * after capturing that baseline, so a turn completed while the scan runs is added
 	 * exactly once.
 	 */
 	restoreInitialAdvisorCosts(

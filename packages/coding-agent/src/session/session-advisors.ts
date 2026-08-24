@@ -306,6 +306,8 @@ export class SessionAdvisors {
 	#advisorProviderSessionIds = new Map<string, string>();
 	#advisorCosts = new Map<string, number>();
 	#advisorRecorderClosed: Promise<void> = Promise.resolve();
+	/** Holds recorder writes behind the active resume-cost byte snapshot. */
+	#advisorCostSnapshotBarrier: Promise<void> | undefined;
 	#advisorAutoResumeSuppressed = false;
 	#preserveAdvisorAdvice = false;
 	#preserveTerminalYieldAdvice = false;
@@ -445,9 +447,34 @@ export class SessionAdvisors {
 		this.#advisorCosts = new Map(costs);
 	}
 
-	/** Capture the per-advisor ledger at a transcript byte-snapshot boundary. */
+	/** Capture the current per-advisor spend ledger. */
 	costSnapshot(): ReadonlyMap<string, number> {
 		return new Map(this.#advisorCosts);
+	}
+	/**
+	 * Freeze active recorder writes after everything billed so far. The returned
+	 * baseline and byte snapshot therefore describe the same turn boundary.
+	 */
+	beginCostRestoreSnapshot(): {
+		costsAtSnapshot: ReadonlyMap<string, number>;
+		ready: Promise<unknown>;
+		release: () => void;
+	} {
+		const costsAtSnapshot = this.costSnapshot();
+		const gate = Promise.withResolvers<void>();
+		this.#advisorCostSnapshotBarrier = gate.promise;
+		const ready = Promise.all(this.#advisors.map(advisor => advisor.recorder.blockWritesUntil(gate.promise)));
+		let released = false;
+		return {
+			costsAtSnapshot,
+			ready,
+			release: () => {
+				if (released) return;
+				released = true;
+				if (this.#advisorCostSnapshotBarrier === gate.promise) this.#advisorCostSnapshotBarrier = undefined;
+				gate.resolve();
+			},
+		};
 	}
 
 	/**
@@ -971,7 +998,9 @@ export class SessionAdvisors {
 				advisorTranscriptFilename(slug),
 				// On the advisor on→off→on toggle, wait for the prior recorders' closes
 				// so two SessionManagers never hold the same file at once.
-				this.#advisorRecorderClosed,
+				this.#advisorCostSnapshotBarrier
+					? Promise.all([this.#advisorRecorderClosed, this.#advisorCostSnapshotBarrier])
+					: this.#advisorRecorderClosed,
 			);
 			const runtime = new AdvisorRuntime(advisorAgentFacade, {
 				snapshotMessages: () => this.#host.agent.state.messages,
@@ -999,6 +1028,7 @@ export class SessionAdvisors {
 						role: fallback.role,
 					});
 				},
+				onTurnAbandoned: () => advisorRef.recorder.abandonTurn(),
 				notifyFailure: error => {
 					this.#advisorStatuses.set(slug, { name: advisorName, status: "error" });
 					const message = error instanceof Error ? error.message : String(error);

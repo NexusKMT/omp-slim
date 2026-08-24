@@ -559,18 +559,44 @@ describe("AgentSession advisor toggle", () => {
 	});
 	it("adds a turn billed while the resume scan is running to persisted spend", async () => {
 		const restore = Promise.withResolvers<Map<string, number>>();
-		const load = vi.spyOn(advisorModule, "loadAdvisorTranscriptCosts").mockImplementation((_file, options) => {
+		const events: string[] = [];
+		const unsubscribe = session.subscribe(event => events.push(event.type));
+		const load = vi.spyOn(advisorModule, "loadAdvisorTranscriptCosts").mockImplementation(async (_file, options) => {
+			await options?.beforeSnapshot;
 			options?.onSnapshot?.();
 			return restore.promise;
 		});
 		try {
-			session.beginInitialAdvisorCostRestore();
 			const advisor = enableAdvisor();
+			session.beginInitialAdvisorCostRestore();
 			appendAdvisorCost(advisor, 0.25, 1);
 			restore.resolve(new Map([["", 0.5]]));
 			await session.advisorCostRestore;
 
 			expect(session.getAdvisorCost()).toBeCloseTo(0.75, 8);
+			expect(events).toContain("advisor_cost_changed");
+		} finally {
+			unsubscribe();
+			load.mockRestore();
+		}
+	});
+	it("cancels an initial cost restore when the session is disposed", async () => {
+		const restore = Promise.withResolvers<Map<string, number>>();
+		let shouldContinue: (() => boolean) | undefined;
+		const load = vi.spyOn(advisorModule, "loadAdvisorTranscriptCosts").mockImplementation((_file, options) => {
+			shouldContinue = options?.shouldContinue;
+			options?.onSnapshot?.();
+			return restore.promise;
+		});
+		try {
+			session.beginInitialAdvisorCostRestore();
+			expect(shouldContinue?.()).toBe(true);
+			session.beginDispose();
+			expect(shouldContinue?.()).toBe(false);
+			restore.resolve(new Map([["", 0.5]]));
+			await session.advisorCostRestore;
+
+			expect(session.getAdvisorCost()).toBe(0);
 		} finally {
 			load.mockRestore();
 		}

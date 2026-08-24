@@ -210,6 +210,50 @@ describe("AdvisorTranscriptRecorder", () => {
 		});
 	});
 
+	it("keeps a repeated delta after the prior batch is abandoned", async () => {
+		await withTempDir(async dir => {
+			const sessionFile = path.join(dir, "sess.jsonl");
+			const recorder = new AdvisorTranscriptRecorder(
+				() => sessionFile,
+				() => dir,
+			);
+			recorder.beginTurn();
+			recorder.record(userMessage("### Session update"));
+			recorder.abandonTurn();
+			recorder.beginTurn();
+			recorder.record(userMessage("### Session update"));
+			recorder.commitTurn();
+			await recorder.close();
+
+			const messages = await readMessageEntries(path.join(dir, "sess", ADVISOR_TRANSCRIPT_FILENAME));
+			expect(messages.filter(m => m.message?.role === "user")).toHaveLength(2);
+		});
+	});
+
+	it("holds post-snapshot records behind a byte boundary", async () => {
+		await withTempDir(async dir => {
+			const sessionFile = path.join(dir, "sess.jsonl");
+			const recorder = new AdvisorTranscriptRecorder(
+				() => sessionFile,
+				() => dir,
+			);
+			recorder.record(assistantMessage("before", 1, 0.25));
+			const gate = Promise.withResolvers<void>();
+			const ready = recorder.blockWritesUntil(gate.promise);
+			recorder.record(assistantMessage("after", 1, 0.5));
+			await ready;
+
+			const transcript = path.join(dir, "sess", ADVISOR_TRANSCRIPT_FILENAME);
+			const beforeRelease = await readMessageEntries(transcript);
+			expect(beforeRelease.filter(m => m.message?.role === "assistant")).toHaveLength(1);
+
+			gate.resolve();
+			await recorder.close();
+			const afterRelease = await readMessageEntries(transcript);
+			expect(afterRelease.filter(m => m.message?.role === "assistant")).toHaveLength(2);
+		});
+	});
+
 	it("keeps identical deltas delivered within one turn", async () => {
 		await withTempDir(async dir => {
 			const sessionFile = path.join(dir, "sess.jsonl");
@@ -252,6 +296,28 @@ describe("AdvisorTranscriptRecorder", () => {
 				"": 0.25,
 				security: 0.75,
 			});
+		});
+	});
+
+	it("yields before snapshotting transcript metadata", async () => {
+		await withTempDir(async dir => {
+			const sessionFile = path.join(dir, "sess.jsonl");
+			const recorder = new AdvisorTranscriptRecorder(
+				() => sessionFile,
+				() => dir,
+			);
+			recorder.record(assistantMessage("persisted", 1, 0.25));
+			await recorder.close();
+
+			let snapshotTaken = false;
+			const costs = loadAdvisorTranscriptCosts(sessionFile, {
+				onSnapshot: () => {
+					snapshotTaken = true;
+				},
+			});
+			expect(snapshotTaken).toBe(false);
+			expect((await costs).get("")).toBeCloseTo(0.25, 8);
+			expect(snapshotTaken).toBe(true);
 		});
 	});
 

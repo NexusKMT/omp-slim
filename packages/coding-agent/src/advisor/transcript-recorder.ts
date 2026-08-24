@@ -1,4 +1,4 @@
-import * as fs from "node:fs";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { Message, UserMessage } from "@oh-my-pi/pi-ai";
@@ -36,12 +36,16 @@ export function isAdvisorTranscriptName(name: string): boolean {
 
 /** Controls resume-time advisor transcript cost restoration. */
 export interface LoadAdvisorTranscriptCostsOptions {
+	/** Resolves once active recorder writes are paused at the snapshot boundary. */
+	beforeSnapshot?: Promise<unknown>;
 	/**
 	 * Runs synchronously after every transcript's byte length has been captured
-	 * and before parsing begins. Callers use this boundary to snapshot in-memory
-	 * costs; later appends are excluded from the disk totals.
+	 * and before parsing begins. Callers release recorder write barriers at this
+	 * boundary; later appends remain excluded from the captured disk totals.
 	 */
 	onSnapshot?: () => void;
+	/** Stop metadata discovery and transcript parsing when the owning session is gone. */
+	shouldContinue?: () => boolean;
 }
 
 interface AdvisorTranscriptCostFileSnapshot {
@@ -67,14 +71,13 @@ export async function loadAdvisorTranscriptCosts(
 	sessionFile: string | undefined,
 	options: LoadAdvisorTranscriptCostsOptions = {},
 ): Promise<Map<string, number>> {
+	await options.beforeSnapshot;
 	const snapshots: AdvisorTranscriptCostFileSnapshot[] = [];
 	if (sessionFile?.endsWith(JSONL_SUFFIX)) {
 		const directory = sessionFile.slice(0, -JSONL_SUFFIX.length);
-		let dirents: fs.Dirent[] = [];
-		try {
-			dirents = fs.readdirSync(directory, { withFileTypes: true });
-		} catch {}
+		const dirents = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
 		for (const dirent of dirents) {
+			if (options.shouldContinue?.() === false) break;
 			if (!dirent.isFile() || !isAdvisorTranscriptName(dirent.name)) continue;
 			const file = path.join(directory, dirent.name);
 			try {
@@ -84,7 +87,7 @@ export async function loadAdvisorTranscriptCosts(
 						dirent.name === ADVISOR_TRANSCRIPT_FILENAME
 							? ""
 							: dirent.name.slice(`${ADVISOR_TRANSCRIPT_STEM}.`.length, -JSONL_SUFFIX.length),
-					maxBytes: fs.statSync(file).size,
+					maxBytes: (await fs.stat(file)).size,
 				});
 			} catch {}
 		}
@@ -115,7 +118,7 @@ export async function loadAdvisorTranscriptCosts(
 					const total_ = message.usage?.cost?.total;
 					if (typeof total_ === "number" && Number.isFinite(total_)) total += total_;
 				},
-				{ maxBytes: snapshot.maxBytes },
+				{ maxBytes: snapshot.maxBytes, shouldContinue: options.shouldContinue },
 			);
 		} catch (err) {
 			logger.debug("advisor transcript cost read failed", { file: path.basename(snapshot.file), err: String(err) });
@@ -275,6 +278,29 @@ export class AdvisorTranscriptRecorder {
 	 * committed one — only re-deliveries of an *uncommitted* turn are replays.
 	 */
 	commitTurn(): void {
+		this.#clearReplayWindow();
+	}
+
+	/** Discard replay identity for a failed batch that will not be retried. */
+	abandonTurn(): void {
+		this.#clearReplayWindow();
+	}
+
+	/**
+	 * Queue a write barrier after all records accepted so far. Once `ready`
+	 * resolves, callers may safely snapshot the file length; records accepted
+	 * after this call remain queued until `release` settles.
+	 */
+	blockWritesUntil(release: Promise<unknown>): Promise<void> {
+		const ready = Promise.withResolvers<void>();
+		this.#enqueue(async () => {
+			ready.resolve();
+			await release;
+		});
+		return ready.promise;
+	}
+
+	#clearReplayWindow(): void {
 		this.#replayWindow = [];
 		this.#replayCursor = 0;
 	}
