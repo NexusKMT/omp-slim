@@ -464,6 +464,22 @@ describe("RelayBridge attachment release", () => {
 		expect(replacement.pending("attach")).toHaveLength(1);
 		ack(bridge, replacement, "attach");
 		await flush();
-		expect(cdp.sessionFor(reattachId)).toBeDefined();
+		const replacementSession = cdp.sessionFor(reattachId);
+		expect(replacementSession).toBeDefined();
+
+		// The old chrome.debugger.detach finishes after replacement attach and
+		// sends its callback through the new global extension socket. Correlation
+		// must survive the rejected RPC so this cannot retract the new session.
+		bridge.extMessage(replacement, JSON.stringify({ t: "detached", tabId: 1, reason: "target_closed" }));
+		await flush();
+		const replacementDetach = cdp.messages.find(
+			message =>
+				message.method === "Target.detachedFromTarget" &&
+				message.params !== null &&
+				typeof message.params === "object" &&
+				"sessionId" in message.params &&
+				message.params.sessionId === replacementSession,
+		);
+		expect(replacementDetach).toBeUndefined();
 	});
 });

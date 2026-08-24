@@ -89,6 +89,9 @@ class TabState {
 	attaching: Promise<boolean> | null = null;
 	/** Relay-initiated detach in flight; reattach serializes behind it. */
 	detaching: Promise<void> | null = null;
+	/** Expected chrome.debugger.onDetach echo, independent of the RPC wait. */
+	expectingDetachEcho = false;
+	detachEchoTimer: NodeJS.Timeout | null = null;
 	/** True after the relay put this tab in the omp group; `ompGroupId` holds that group. */
 	grouped = false;
 	/** Group RPC in flight — suppresses duplicate requests from load-time tabUpdated bursts. */
@@ -656,10 +659,12 @@ export class RelayBridge {
 	#onTabDetached(tabId: number, reason: string): void {
 		const tab = this.#tabs.get(tabId);
 		if (!tab) return;
-		// chrome.debugger.detach emits onDetach before its RPC result. Only a
-		// detach we explicitly track is an expected echo; attached=false alone
-		// also describes a failed restart reattachment, which must retract.
-		if (tab.detaching) {
+		// Relay-initiated detach can outlive its RPC/socket. Keep callback
+		// correlation separate from the promise used to serialize reattach.
+		if (tab.expectingDetachEcho) {
+			tab.expectingDetachEcho = false;
+			if (tab.detachEchoTimer) clearTimeout(tab.detachEchoTimer);
+			tab.detachEchoTimer = null;
 			tab.attaching = null;
 			return;
 		}
@@ -679,6 +684,7 @@ export class RelayBridge {
 		this.#retractTab(tab);
 		this.#tabs.delete(tabId);
 		for (const conn of this.#conns.values()) conn.claims.delete(tabId);
+		if (tab.detachEchoTimer) clearTimeout(tab.detachEchoTimer);
 	}
 
 	#onTabUpsert(snap: TabSnapshot, opts: { silent?: boolean } = {}): void {
@@ -863,6 +869,13 @@ export class RelayBridge {
 		const tab = this.#tabs.get(tabId);
 		if (!tab?.attached) return;
 		tab.attached = false;
+		tab.expectingDetachEcho = true;
+		if (tab.detachEchoTimer) clearTimeout(tab.detachEchoTimer);
+		tab.detachEchoTimer = setTimeout(() => {
+			tab.expectingDetachEcho = false;
+			tab.detachEchoTimer = null;
+		}, RPC_TIMEOUT_MS);
+		tab.detachEchoTimer.unref();
 		const done = this.#rpc({ op: "detach", tabId })
 			.then(() => {})
 			.catch(() => {})
