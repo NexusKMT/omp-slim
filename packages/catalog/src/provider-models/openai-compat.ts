@@ -4761,6 +4761,60 @@ export function aiandModelManagerOptions(config?: AiandModelManagerConfig): Mode
 }
 
 // ---------------------------------------------------------------------------
+// 16.7 Yolo-Auto (yolo-auto.com)
+// ---------------------------------------------------------------------------
+
+const YOLO_AUTO_BASE_URL = "https://yolo-auto.com/v1";
+
+/**
+ * Documented Yolo-Auto catalog (yolo-auto.com/docs, 2026-08) bundled so the
+ * provider is usable when generation and first boot have no live key. The
+ * flat-rate `/v1/models` response is authoritative once discovery runs.
+ * The compat block mirrors the provider's documented wire surface: the API
+ * speaks the Qwen chat template with `reasoning_effort` support and rejects
+ * the `developer` role and `store` param.
+ */
+export const YOLO_AUTO_STATIC_MODELS: readonly ModelSpec<"openai-completions">[] = [
+	{
+		id: "qwen3.8-27b",
+		name: "Qwen3.8 27B",
+		api: "openai-completions",
+		provider: "yolo-auto",
+		baseUrl: YOLO_AUTO_BASE_URL,
+		reasoning: true,
+		input: ["text", "image"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 131_072,
+		maxTokens: null,
+		compat: {
+			supportsDeveloperRole: false,
+			supportsStore: false,
+			supportsReasoningEffort: true,
+			thinkingFormat: "qwen-chat-template",
+		},
+	},
+];
+
+export interface YoloAutoModelManagerConfig {
+	apiKey?: string;
+	baseUrl?: string;
+	fetch?: FetchImpl;
+}
+
+/**
+ * Yolo-Auto model manager: OpenAI-compatible chat completions at the
+ * flat-rate `qwen3.8-27b` endpoint. Live `/v1/models` discovery replaces the
+ * bundled seed once a key is stored or present in `YOLO_AUTO_API_KEY`.
+ */
+export function yoloAutoModelManagerOptions(
+	config?: YoloAutoModelManagerConfig,
+): ModelManagerOptions<"openai-completions"> {
+	return createSimpleOpenAICompletionsOptions("yolo-auto", YOLO_AUTO_BASE_URL, config);
+}
+
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // 17. Qwen Portal
 // ---------------------------------------------------------------------------
 
