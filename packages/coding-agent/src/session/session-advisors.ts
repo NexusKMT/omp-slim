@@ -217,8 +217,6 @@ export interface SessionAdvisorsOptions {
 	configs?: AdvisorConfig[];
 	streamFn?: StreamFn;
 	transformProviderContext?: (context: Context, model: Model) => Context | Promise<Context>;
-	/** Advisor spend already persisted for this session, restored on resume. */
-	initialCosts?: ReadonlyMap<string, number>;
 }
 
 /** Options accepted when an advisor injects a primary-session message. */
@@ -328,7 +326,6 @@ export class SessionAdvisors {
 		this.#advisorConfigs = options.configs;
 		this.#advisorStreamFn = options.streamFn;
 		this.#transformProviderContext = options.transformProviderContext;
-		if (options.initialCosts) this.#advisorCosts = new Map(options.initialCosts);
 		if (this.#advisorEnabled) this.#buildAdvisorRuntime();
 	}
 
@@ -444,6 +441,19 @@ export class SessionAdvisors {
 	/** Replace the ledger with the spend recorded for the session becoming active. */
 	restoreCost(costs: ReadonlyMap<string, number>): void {
 		this.#advisorCosts = new Map(costs);
+	}
+
+	/**
+	 * Seed the persisted spend recorded before this session was resumed. Applied
+	 * off the critical path (see {@link AgentSession.restoreInitialAdvisorCosts}),
+	 * so a slug already billed this process — a turn that finished before the
+	 * transcript scan did — keeps its accumulated value instead of being
+	 * clobbered or double-counted.
+	 */
+	restoreInitialCost(costs: ReadonlyMap<string, number>): void {
+		for (const [slug, total] of costs) {
+			if (!this.#advisorCosts.has(slug)) this.#advisorCosts.set(slug, total);
+		}
 	}
 
 	/**
