@@ -345,11 +345,20 @@ it(
 			});
 		}) as typeof Bun.file);
 
+		const promptPromise = session.prompt("apply patch");
+		let stopWaitingForDeltas = false;
 		try {
-			const promptPromise = session.prompt("apply patch");
-			while (streamState.deltaCount < chunks.length) {
-				await drainMacrotasks(1);
-			}
+			const first = await Promise.race([
+				(async () => {
+					while (!stopWaitingForDeltas && streamState.deltaCount < chunks.length) {
+						await drainMacrotasks(1);
+					}
+					return "deltas" as const;
+				})(),
+				promptPromise.then(() => "prompt" as const),
+			]);
+			if (first === "prompt") throw new Error("Prompt completed before every streamed delta was emitted");
+			stopWaitingForDeltas = true;
 
 			// Every queued verification is still pending behind the held load, so
 			// the abort decision cannot have raced the stream.
@@ -365,6 +374,10 @@ it(
 			expect(lastAssistant?.stopReason).toBe("aborted");
 			expect(abortSignalRef.current?.aborted ?? false).toBe(true);
 		} finally {
+			stopWaitingForDeltas = true;
+			releaseLoad("alpha\nbeta\ngamma\n");
+			finishGate.resolve();
+			await promptPromise.catch(() => undefined);
 			fileSpy.mockRestore();
 			try {
 				await session.dispose();
