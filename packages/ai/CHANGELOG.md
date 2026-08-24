@@ -6,6 +6,10 @@
 - Fixed DeepSeek vision SKUs (`deepseek-v4-flash-vision-exp`, any `-vision-` id) losing image input after the text-only DeepSeek guard: genuinely multimodal ids now keep `image_url` parts while text-only DeepSeek endpoints still strip them.
 
 
+### Fixed
+
+- Fixed OpenAI-compatible completions misclassifying uppercase `finish_reason` values (`STOP`, `MAX_TOKENS`) emitted by some Gemini-backend gateways as provider errors; `mapStopReason` now folds case before matching and maps `MAX_TOKENS` to `length` ([#9566](https://github.com/can1357/oh-my-pi/pull/9566)).
+
 ## [18.0.4] - 2026-08-24
 
 ### Fixed
