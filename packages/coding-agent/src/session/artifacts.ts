@@ -6,6 +6,7 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { replaceFileAtomically } from "../utils/atomic-file";
 
 /**
  * Sanitize a tool name for safe use as the middle segment of the artifact
@@ -53,7 +54,7 @@ export async function writeArtifact(path: string, content: string): Promise<numb
 			throw new Error(`Artifact size mismatch: found ${file.size} of ${expectedBytes} bytes`);
 		}
 		await file.slice(0, Math.min(expectedBytes, 1)).arrayBuffer();
-		await fs.rename(tempPath, path);
+		await replaceFileAtomically(tempPath, path);
 	} catch (error) {
 		await fs.rm(tempPath, { force: true });
 		throw error;

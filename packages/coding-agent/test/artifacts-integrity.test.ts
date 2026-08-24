@@ -64,4 +64,27 @@ describe("ArtifactManager write integrity", () => {
 		expect(await Bun.file(destination).text()).toBe("original valid report");
 		expect(await fs.readdir(dir)).toEqual(["Worker.md"]);
 	});
+
+	it("replaces an existing artifact when Windows rejects rename-over-target", async () => {
+		const dir = freshDir();
+		await fs.mkdir(dir, { recursive: true });
+		const destination = path.join(dir, "Worker.md");
+		await writeArtifact(destination, "original report");
+
+		const rename = fs.rename.bind(fs);
+		let injected = false;
+		vi.spyOn(fs, "rename").mockImplementation(async (source, target) => {
+			if (!injected && String(source).includes(".tmp-") && String(target) === destination) {
+				injected = true;
+				throw Object.assign(new Error("injected Windows replacement failure"), { code: "EEXIST" });
+			}
+			await rename(source, target);
+		});
+
+		await writeArtifact(destination, "replacement report");
+
+		expect(injected).toBe(true);
+		expect(await Bun.file(destination).text()).toBe("replacement report");
+		expect(await fs.readdir(dir)).toEqual(["Worker.md"]);
+	});
 });
