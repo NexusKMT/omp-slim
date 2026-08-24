@@ -141,13 +141,12 @@ export class ChildProcess<In extends InMask = InMask> {
 		// derived from it would deadlock while an orphan holds stderr.
 		this.#exitedGrace = proc.exited
 			.catch(() => {})
-			.then(
-				() =>
-					new Promise<void>(graceResolve => {
-						const timer = setTimeout(graceResolve, EXIT_DRAIN_GRACE_MS);
-						timer.unref?.();
-					}),
-			);
+			.then(() => {
+				const { promise, resolve } = Promise.withResolvers<void>();
+				const timer = setTimeout(resolve, EXIT_DRAIN_GRACE_MS);
+				timer.unref?.();
+				return promise;
+			});
 
 		const exitedGrace = this.#exitedGrace;
 		this.#stderrDone = (async () => {

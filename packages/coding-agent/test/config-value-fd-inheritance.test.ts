@@ -31,23 +31,23 @@ const resolverUrl = pathToFileURL(path.join(import.meta.dir, "../src/config/reso
 
 const roots: string[] = [];
 
-afterEach(() => {
-	for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+afterEach(async () => {
+	for (const root of roots.splice(0)) await fs.promises.rm(root, { recursive: true, force: true });
 });
 
 test.skipIf(process.platform === "win32")(
 	"config !command children cannot read descriptors the launcher passed omp",
 	async () => {
-		const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-config-fd-"));
+		const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omp-config-fd-"));
 		roots.push(root);
 		const canaryPath = path.join(root, "canary.txt");
-		fs.writeFileSync(canaryPath, "CANARY-THAT-MUST-NOT-RESOLVE");
+		await fs.promises.writeFile(canaryPath, "CANARY-THAT-MUST-NOT-RESOLVE");
 		const spyPath = path.join(root, "fd3-spy.sh");
-		fs.writeFileSync(spyPath, "#!/usr/bin/env bash\ncat <&3\n", { mode: 0o755 });
+		await fs.promises.writeFile(spyPath, "#!/usr/bin/env bash\ncat <&3\n", { mode: 0o755 });
 
 		// The child receives fd 3 the way a launcher would pass one: an extra
 		// stdio entry, dup2'd in regardless of close-on-exec state.
-		const canaryFd = fs.openSync(canaryPath, "r");
+		const canary = await fs.promises.open(canaryPath, "r");
 		try {
 			// The resolver must load in a child process: fd inheritance only exists
 			// across a real exec boundary, so the probe runs via --eval in a spawned
@@ -63,7 +63,7 @@ console.log(value === undefined ? "RESOLVED-UNDEFINED" : "LEAKED:" + value);
 			const proc = Bun.spawn({
 				cmd: [process.execPath, "--eval", script],
 				cwd: process.cwd(),
-				stdio: ["ignore", "pipe", "pipe", canaryFd],
+				stdio: ["ignore", "pipe", "pipe", canary.fd],
 				timeout: 15_000,
 			});
 			const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
@@ -72,7 +72,7 @@ console.log(value === undefined ? "RESOLVED-UNDEFINED" : "LEAKED:" + value);
 			expect(lines[0], "positive control: commands must still resolve").toBe("CONTROL-OK");
 			expect(lines[1], "fd oracle: the canary must not resolve").toBe("RESOLVED-UNDEFINED");
 		} finally {
-			fs.closeSync(canaryFd);
+			await canary.close();
 		}
 	},
 );
@@ -80,7 +80,7 @@ console.log(value === undefined ? "RESOLVED-UNDEFINED" : "LEAKED:" + value);
 test.skipIf(process.platform === "win32")(
 	"a timed-out !command leaves no descendant writing after the kill",
 	async () => {
-		const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-config-treekill-"));
+		const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omp-config-treekill-"));
 		roots.push(root);
 		const marker = path.join(root, "marker");
 
@@ -96,17 +96,17 @@ test.skipIf(process.platform === "win32")(
 		// the oracle is "the marker never appears" — poll so a leak fails fast
 		// instead of paying the full window on green.
 		const deadline = Date.now() + 2000;
-		while (Date.now() < deadline && !fs.existsSync(marker)) {
+		while (Date.now() < deadline && !(await Bun.file(marker).exists())) {
 			await Bun.sleep(50);
 		}
-		expect(fs.existsSync(marker), "orphaned descendant wrote the marker after the timeout").toBe(false);
+		expect(await Bun.file(marker).exists(), "orphaned descendant wrote the marker after the timeout").toBe(false);
 	},
 );
 
 test.skipIf(process.platform === "win32")(
 	"a timed-out !command hard-kills descendants that ignore SIGTERM",
 	async () => {
-		const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-config-treekill-term-"));
+		const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omp-config-treekill-term-"));
 		roots.push(root);
 		const marker = path.join(root, "marker");
 
@@ -117,10 +117,12 @@ test.skipIf(process.platform === "win32")(
 		const result = await runShellCommand(`{ trap '' TERM; sleep 1.5; echo done > "${marker}"; } & sleep 10`, 150);
 		expect(result).toBeUndefined();
 		const deadline = Date.now() + 2000;
-		while (Date.now() < deadline && !fs.existsSync(marker)) {
+		while (Date.now() < deadline && !(await Bun.file(marker).exists())) {
 			await Bun.sleep(50);
 		}
-		expect(fs.existsSync(marker), "SIGTERM-ignoring descendant wrote the marker after the timeout").toBe(false);
+		expect(await Bun.file(marker).exists(), "SIGTERM-ignoring descendant wrote the marker after the timeout").toBe(
+			false,
+		);
 	},
 );
 
@@ -131,7 +133,7 @@ test.skipIf(process.platform === "win32")("resolves !commands when PATH omits th
 	const script = `import { runShellCommand } from ${JSON.stringify(resolverUrl)};
 const value = await runShellCommand("echo pathless-ok", 5_000);
 console.log(value === "pathless-ok" ? "PATHLESS-OK" : "PATHLESS-BAD:" + value);`;
-	const emptyPathDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-no-sh-in-path-"));
+	const emptyPathDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omp-no-sh-in-path-"));
 	roots.push(emptyPathDir);
 	const proc = Bun.spawn({
 		cmd: [process.execPath, "--eval", script],
