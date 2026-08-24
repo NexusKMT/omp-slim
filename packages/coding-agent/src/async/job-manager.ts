@@ -815,7 +815,7 @@ export class AsyncJobManager {
 			}
 
 			this.#deliveries.shift();
-			await this.#deliverDelivery(delivery);
+			void this.#deliverDelivery(delivery);
 		}
 	}
 
