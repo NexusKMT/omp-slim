@@ -1704,10 +1704,6 @@ export class Markdown implements Component {
 		this.#cachedWidth = undefined;
 		this.#cachedLines = undefined;
 	}
-	/** Width-independent source prefix ending at a frozen Markdown block boundary. */
-	getLastRenderStableText(): string {
-		return this.#transientRenderCache ? (this.#streamPrefixText ?? "") : "";
-	}
 
 	get transientRenderCache(): boolean {
 		return this.#transientRenderCache;

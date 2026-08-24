@@ -56,32 +56,33 @@ afterEach(() => {
 	clearMermaidCache();
 });
 
-describe("AssistantMessageComponent append-only transcript rows", () => {
-	it("publishes width-independent completed Markdown while keeping the current suffix mutable", () => {
+describe("AssistantMessageComponent transcript lifecycle", () => {
+	it("keeps a revised streaming message mutable until finalization", () => {
 		const component = new AssistantMessageComponent();
+		const transcript = new TranscriptContainer();
+		transcript.addChild(component);
 		component.updateContent(
 			createAssistantMessage(
 				"First completed paragraph is deliberately long enough to wrap.\n\nCurrent partial paragraph",
 			),
 			{ transient: true },
 		);
-		component.render(24);
+		transcript.renderViewport(80, 20, { now: 0, tick: 0 });
 
-		expect(component.transcriptBlockMode).toBe("appendOnly");
-		const semanticRows = component.getTranscriptStableRows();
-		const narrow = component.renderTranscriptStableRows(semanticRows.length, 24);
-		const stable = Bun.stripANSI(narrow.join("\n"));
-		expect(stable).toContain("First completed");
-		expect(stable).not.toContain("Current partial paragraph");
+		component.updateContent(
+			createAssistantMessage("Revised opening paragraph replaces the prior draft.\n\nCurrent partial paragraph"),
+			{ transient: true },
+		);
+		const live = Bun.stripANSI(transcript.renderViewport(80, 20, { now: 1, tick: 1 }).join("\n"));
+		expect(live).toContain("Revised opening paragraph");
+		expect(transcript.peekFinalizedBatch(80, 0)).toBeUndefined();
 
-		const wideRender = component.render(120);
-		expect(component.getTranscriptStableRows().map(row => row.key)).toEqual(semanticRows.map(row => row.key));
-		const wide = component.renderTranscriptStableRows(semanticRows.length, 120);
-		expect(wide.length).toBeLessThan(narrow.length);
-		expect(wideRender.slice(0, wide.length)).toEqual([...wide]);
+		component.markTranscriptBlockFinalized();
+		const batch = transcript.peekFlushBatch(80);
+		expect(Bun.stripANSI(batch?.rows.join("\n") ?? "")).toContain("Revised opening paragraph");
 	});
 
-	it("appends a late cache-miss marker after emitted stable rows", () => {
+	it("appends a late cache-miss marker after assistant output", () => {
 		const component = new AssistantMessageComponent();
 		component.updateContent(
 			createAssistantMessage(
@@ -100,33 +101,6 @@ describe("AssistantMessageComponent append-only transcript rows", () => {
 		const rendered = Bun.stripANSI(batch?.rows.join("\n") ?? "");
 		expect(rendered).toContain("Current partial paragraph");
 		expect(rendered.indexOf("cache miss")).toBeGreaterThan(rendered.indexOf("Current partial paragraph"));
-	});
-
-	it("publishes completed visible thinking blocks through the same stable-row contract", () => {
-		const component = new AssistantMessageComponent();
-		component.updateContent(
-			{
-				...createAssistantMessage(""),
-				content: [{ type: "thinking", thinking: "Settled reasoning.\n\nCurrent reasoning suffix" }],
-			},
-			{ transient: true },
-		);
-		component.render(120);
-
-		const stableRows = component.getTranscriptStableRows();
-		const stable = Bun.stripANSI(component.renderTranscriptStableRows(stableRows.length, 120).join("\n"));
-		expect(stable).toContain("Settled reasoning.");
-		expect(stable).not.toContain("Current reasoning suffix");
-	});
-
-	it("withholds Mermaid rows whose asynchronous layout can still change", () => {
-		const component = new AssistantMessageComponent();
-		component.updateContent(createAssistantMessage("```mermaid\nflowchart TD\nA-->B\n```\n\nMore"), {
-			transient: true,
-		});
-		component.render(120);
-
-		expect(component.getTranscriptStableRows()).toEqual([]);
 	});
 });
 
