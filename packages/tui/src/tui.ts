@@ -689,6 +689,11 @@ export class TUI extends Container {
 	// Outstanding CPR replies that answer canceled probes; swallowed by
 	// #handleInput instead of resolving the active probe.
 	#staleCprReplies = 0;
+	// Direct-terminal replies retired by a resolve while still outstanding:
+	// stripped and discarded if they arrive between transactions, and folded
+	// back into the stale counter when the next probe arms, so a late reply
+	// can never eagerly resolve a newer probe or leak into keyboard input.
+	#retiredCprReplies = 0;
 	// Prepared rows painted by the previous provider frame, for row diffing.
 	#providerWindow: string[] = [];
 	#previousFrameLength = 0;
@@ -1215,12 +1220,11 @@ export class TUI extends Container {
 			retried: retry,
 		};
 		if (isInsideTerminalMultiplexer()) {
-			// Tags older than a few transactions are dead: their replies, if
-			// ever coming, would be discarded by epoch anyway, and leaving them
-			// would eventually exhaust the column span.
-			for (const [column, epoch] of this.#cprColumnTags) {
-				if (epoch < this.#geometryEpoch - 4) this.#cprColumnTags.delete(column);
-			}
+			// Tags are never expired by age: a reply has no lifetime guarantee,
+			// and freeing a column while its reply may still arrive would let
+			// that reply match a newer tag on the reused column. Dead tags only
+			// accumulate from genuinely dropped replies; a terminal that drops
+			// enough of them to exhaust the span earns the FIFO fallback below.
 			// Park a distinct column for this request so its reply is
 			// self-identifying. Column 1 is never used: it cannot be told apart
 			// from a spurious or clamped reply. A column may not be reused while
@@ -1240,10 +1244,13 @@ export class TUI extends Container {
 				}
 			}
 		}
-		// Replies still outstanding at arm time answer canceled probes against
-		// pre-restart geometry; they must be swallowed, not matched to this
-		// probe, or a delayed first reply anchors the settled repaint with the
-		// cursor row from before the latest resize.
+		// Replies still outstanding at arm time — including ones retired by an
+		// earlier resolve — answer canceled probes against pre-restart
+		// geometry; they must be swallowed, not matched to this probe, or a
+		// delayed first reply anchors the settled repaint with the cursor row
+		// from before the latest resize.
+		this.#pendingCprReplies += this.#retiredCprReplies;
+		this.#retiredCprReplies = 0;
 		this.#staleCprReplies = this.#pendingCprReplies;
 		this.#pendingCprReplies++;
 		this.terminal.write("\x1b[6n");
@@ -1273,13 +1280,13 @@ export class TUI extends Container {
 		if (!probe) return;
 		probe.timer.cancel();
 		this.#resizeProbe = undefined;
-		// This direct-terminal probing episode is over: requests still counted
-		// are dead to us, and leaving them counted would swallow the next
-		// transaction's replies against phantoms — one genuinely dropped pair
-		// would poison every later resize. A dead reply arriving after this
-		// point is spurious input, exactly like any unsolicited CPR.
-		// Multiplexer column tags stay: their replies are self-identifying, so
-		// late arrivals are stripped and discarded by column instead.
+		// This direct-terminal probing episode is over, but requests still
+		// counted may yet answer. Retire them: a retired reply arriving between
+		// transactions is stripped and discarded, and the next probe arm folds
+		// the count into its stale counter so the reply can only be swallowed,
+		// never matched eagerly. Multiplexer column tags stay live instead:
+		// their replies are self-identifying and discarded by tag.
+		this.#retiredCprReplies += this.#pendingCprReplies;
 		this.#pendingCprReplies = 0;
 		this.#staleCprReplies = 0;
 		const width = this.terminal.columns;
@@ -1770,7 +1777,7 @@ export class TUI extends Container {
 		// Consume CPR replies (CSI row;col R) while an anchor probe is unanswered;
 		// they are terminal reports, never keystrokes, and must not reach the
 		// focused component.
-		while (this.#pendingCprReplies > 0 || this.#cprColumnTags.size > 0) {
+		while (this.#pendingCprReplies > 0 || this.#retiredCprReplies > 0 || this.#cprColumnTags.size > 0) {
 			const match = data.match(/\x1b\[(\d+);(\d+)R/);
 			if (!match || match.index === undefined) break;
 			const column = Number(match[2]);
@@ -1784,6 +1791,9 @@ export class TUI extends Container {
 				if (probe !== undefined && tagEpoch === probe.epoch) {
 					this.#resolveResizeAnchor(Number(match[1]) - 1);
 				}
+			} else if (this.#retiredCprReplies > 0) {
+				// A retired reply landing between transactions: discard it.
+				this.#retiredCprReplies--;
 			} else if (this.#pendingCprReplies > 0) {
 				this.#pendingCprReplies--;
 				if (this.#staleCprReplies > 0) {

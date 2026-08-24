@@ -568,4 +568,33 @@ describe("resize anchor probe on a direct-terminal grow", () => {
 		expect(Number(cup![1])).toBe(12);
 		tui.stop();
 	});
+
+	it("swallows a retired transaction's late replies instead of resolving from them", () => {
+		// Transaction one (12 -> 16) drops both its replies and resolves at
+		// the pull bound; its retired replies then arrive during the next
+		// grow's probe window. They must fold into the stale counter and be
+		// swallowed — eagerly resolving from one would anchor the new grow at
+		// the old row over pulled-back history. The new probe's own reply
+		// (third in FIFO order) resolves at its reported row 12 under the
+		// clamp min(12, 20 - 8) = 12 (CUP row 13).
+		const { terminal, tui, renderScheduler, writes } = startRig();
+		terminal.resize(40, 16);
+		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
+		renderScheduler.settle(); // first timeout: no reply -> one bounded retry
+		renderScheduler.settle(); // retry timeout: pull bound, both requests retired
+		renderScheduler.t = 1000; // step past the post-settle resize suppression
+		terminal.resize(40, 20); // next grow: folds retired replies into stale
+		renderScheduler.settle(); // exit the borrow, start the fresh probe
+		writes.length = 0;
+		terminal.sendInput("\x1b[4;1R"); // retired reply one: swallowed
+		expect(writes.join("")).not.toMatch(/\x1b\[\d+;1H/);
+		terminal.sendInput("\x1b[4;1R"); // retired reply two: swallowed
+		expect(writes.join("")).not.toMatch(/\x1b\[\d+;1H/);
+		terminal.sendInput("\x1b[13;1R"); // the fresh probe's own reply
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(13);
+		tui.stop();
+	});
 });
