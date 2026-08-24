@@ -24,7 +24,13 @@ import { detectLanguageId, EquivalentUriMap, fileToUri, uriToFile } from "./util
 // =============================================================================
 
 const clients = new Map<string, LspClient>();
-const clientLocks = new Map<string, Promise<LspClient>>();
+interface PendingClient {
+	promise: Promise<LspClient>;
+	cwd: string;
+	config: ServerConfig;
+	token: symbol;
+}
+const clientLocks = new Map<string, PendingClient>();
 const fileOperationLocks = new Map<string, Promise<void>>();
 
 /** Negative cache of recent init failures so a broken server fails fast instead of re-spawning per call. */
@@ -851,6 +857,17 @@ function clientKey(config: ServerConfig, cwd: string): string {
 export async function shutdownStaleClients(cwd: string, configs: readonly ServerConfig[]): Promise<string[]> {
 	const fresh = new Set(configs.map(config => clientKey(config, cwd)));
 	const resolvedCwd = path.resolve(cwd);
+	// A pre-init client exists only in clientLocks. Wait for stale initializers
+	// before scanning clients so they cannot publish behind this cleanup and run
+	// concurrently with the replacement started by reload *.
+	const stalePending = Array.from(clientLocks.entries()).filter(
+		([key, pending]) => path.resolve(pending.cwd) === resolvedCwd && !fresh.has(key),
+	);
+	for (const [key, pending] of stalePending) {
+		if (clientLocks.get(key) === pending) clientLocks.delete(key);
+	}
+	await Promise.allSettled(stalePending.map(([, pending]) => pending.promise));
+
 	const stale = Array.from(clients.values()).filter(
 		client => path.resolve(client.cwd) === resolvedCwd && !fresh.has(client.name),
 	);
@@ -898,7 +915,7 @@ export async function getOrCreateClient(
 	// Check if another coroutine is already creating this client
 	const existingLock = clientLocks.get(key);
 	if (existingLock) {
-		return existingLock;
+		return existingLock.promise;
 	}
 
 	// Fail fast on a recent deterministic init failure instead of re-spawning
@@ -912,6 +929,7 @@ export async function getOrCreateClient(
 	}
 
 	// Create new client with lock
+	const lockToken = Symbol();
 	const clientPromise = (async () => {
 		const baseCommand = config.resolvedCommand ?? config.command;
 		const baseArgs = config.args ?? [];
@@ -970,7 +988,7 @@ export async function getOrCreateClient(
 		// Register crash recovery - remove client on process exit
 		proc.exited.then(() => {
 			if (clients.get(key) === client) clients.delete(key);
-			if (clientLocks.get(key) === clientPromise) clientLocks.delete(key);
+			if (clientLocks.get(key)?.token === lockToken) clientLocks.delete(key);
 			client.resolveProjectLoaded();
 
 			// Reject any pending requests — the server is gone, they will never complete.
@@ -1051,11 +1069,11 @@ export async function getOrCreateClient(
 			}
 			throw err;
 		} finally {
-			clientLocks.delete(key);
+			if (clientLocks.get(key)?.token === lockToken) clientLocks.delete(key);
 		}
 	})();
 
-	clientLocks.set(key, clientPromise);
+	clientLocks.set(key, { promise: clientPromise, cwd, config, token: lockToken });
 	return clientPromise;
 }
 
@@ -1075,7 +1093,7 @@ export async function getActiveOrPendingClient(
 	const pending = clientLocks.get(clientKey(config, cwd));
 	if (!pending) return undefined;
 	try {
-		return await untilAborted(signal, pending);
+		return await untilAborted(signal, pending.promise);
 	} catch {
 		throwIfAborted(signal);
 		return undefined;
@@ -1584,7 +1602,7 @@ export async function shutdownAll(): Promise<void> {
 	// Mid-initialize clients live only in clientLocks (publication is deferred
 	// until init succeeds) — without this, their server processes outlive
 	// shutdown. Failed init promises already cleaned up after themselves.
-	const pendingClients = Array.from(clientLocks.values());
+	const pendingClients = Array.from(clientLocks.values(), pending => pending.promise);
 	clientLocks.clear();
 	const seen = new Set<LspClient>(clientsToShutdown);
 	await Promise.allSettled([

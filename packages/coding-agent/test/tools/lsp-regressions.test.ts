@@ -3632,6 +3632,49 @@ describe("lsp regressions", () => {
 		}
 	});
 
+	it("workspace reload waits for a stale pending client before starting its replacement", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-reload-pending-");
+		try {
+			const oldServer = installFakeLsp((message, server) => {
+				if (message.method === "shutdown") {
+					server.send({ jsonrpc: "2.0", id: message.id, result: null });
+				} else if (message.method === "exit") {
+					server.exit(0);
+				}
+			});
+			const oldConfig: ServerConfig = {
+				command: "fake-lsp",
+				args: ["--mode", "old"],
+				fileTypes: [".ts"],
+				rootMarkers: [],
+			};
+			const oldClientPromise = lspClient.getOrCreateClient(oldConfig, tempDir.path(), 1_000);
+			const initialize = await oldServer.waitFor(message => message.method === "initialize");
+
+			const newServer = installHandshakeLsp();
+			const newConfig: ServerConfig = { ...oldConfig, args: ["--mode", "new"] };
+			vi.spyOn(lspConfig, "loadConfig").mockReturnValue({
+				servers: { "fake-lsp": newConfig },
+				idleTimeoutMs: undefined,
+			});
+			const tool = new LspTool(makeLspSession(tempDir.path()));
+			const reload = tool.execute("reload-pending-client", { action: "reload", file: "*" });
+			await Bun.sleep(0);
+			expect(newServer.received.some(message => message.method === "initialize")).toBe(false);
+
+			oldServer.send({ jsonrpc: "2.0", id: initialize.id, result: { capabilities: {} } });
+			await oldClientPromise;
+			const result = await reload;
+
+			expect(oldServer.received.map(message => message.method)).toContain("shutdown");
+			expect(newServer.received.map(message => message.method)).toContain("initialize");
+			expect(textResult(result)).toContain("Reloaded fake-lsp");
+		} finally {
+			await lspClient.shutdownAll();
+			tempDir.removeSync();
+		}
+	});
+
 	it("workspace reload rediscovers LSP servers after an empty config was cached", async () => {
 		const tempDir = TempDir.createSync("@omp-lsp-reload-redetect-");
 		try {
