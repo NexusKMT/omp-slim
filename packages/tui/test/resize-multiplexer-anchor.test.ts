@@ -337,6 +337,30 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		expect(Number(cup![1])).toBe(8);
 		tui.stop();
 	});
+
+	it("does not reuse a live column tag when the pane narrows", () => {
+		// Probe A tags column 2 and its retry column 3; a mid-probe narrow to
+		// 3 columns collapses the span so a tagged probe would have to reuse
+		// column 2 while A's tag is live — promoting A's delayed pre-restart
+		// reply to the current epoch. The narrow probe must fall back to the
+		// FIFO scheme instead: A's late reply is discarded by its old tag, and
+		// the fresh probe's column-1 reply resolves the anchor.
+		const { terminal, tui, renderScheduler, writes } = startRig();
+		terminal.resize(40, 20);
+		renderScheduler.settle(); // exit the resize alt borrow, start probe A (col 2)
+		renderScheduler.settle(); // A's timeout: no reply -> retry (col 3)
+		terminal.resize(3, 18); // mid-probe narrow: span collapses below tagging
+		renderScheduler.settle(); // exit the borrow, start the FIFO probe
+		writes.length = 0;
+		terminal.sendInput("\x1b[4;2R"); // A's very late reply: old tag, discarded
+		expect(writes.join("")).not.toMatch(/\x1b\[\d+;1H/);
+		terminal.sendInput("\x1b[6;1R"); // the FIFO probe's own reply
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(6);
+		tui.stop();
+	});
 });
 
 // Regression coverage for the CPR probe's pre-erase stash on direct terminals:
@@ -489,6 +513,69 @@ describe("resize anchor probe stash on a direct terminal", () => {
 		const cup = repaint.match(/\x1b\[(\d+);1H/);
 		expect(cup).not.toBeNull();
 		expect(Number(cup![1])).toBe(4);
+		tui.stop();
+	});
+});
+
+// Direct-terminal grow coverage: the height-staleRows clamp is only an upper
+// bound, so a stale pre-restart row (or the pre-resize top) can anchor over
+// history pulled down by a grow; grows must retry, discard ambiguous swallows,
+// and fall back to the accumulated pull bound under the clamp.
+describe("resize anchor probe on a direct-terminal grow", () => {
+	let previousTmux: string | undefined;
+	let previousTerm: string | undefined;
+
+	beforeEach(() => {
+		previousTmux = Bun.env.TMUX;
+		previousTerm = Bun.env.TERM;
+		delete Bun.env.TMUX;
+		Bun.env.TERM = "xterm-256color";
+	});
+	afterEach(() => {
+		if (previousTmux === undefined) delete Bun.env.TMUX;
+		else Bun.env.TMUX = previousTmux;
+		if (previousTerm === undefined) delete Bun.env.TERM;
+		else Bun.env.TERM = previousTerm;
+	});
+
+	it("discards an ambiguous swallow and retries on a grow", () => {
+		// Probe A's late reply (pre-restart row 3) is swallowed while probe
+		// B's own reply is dropped. On a grow the clamp cannot save a stale
+		// row that is too small, so the timeout must retry instead of trusting
+		// it, and with the retry also unanswered anchor at the accumulated
+		// pull bound min(3 + 8, 20 - 8) = 11 (CUP row 12), not row 3.
+		const { terminal, tui, renderScheduler, writes } = startRig();
+		terminal.resize(40, 16);
+		renderScheduler.settle(); // exit the resize alt borrow, start probe A
+		terminal.resize(40, 20); // mid-probe restart: cancels A
+		renderScheduler.settle(); // exit the second borrow, start probe B
+		terminal.sendInput("\x1b[4;1R"); // A's late reply: swallowed
+		writes.length = 0;
+		renderScheduler.settle(); // B's timeout: ambiguous swallow on a grow -> retry
+		expect(writes.join("")).toContain("\x1b[6n");
+		expect(writes.join("")).not.toMatch(/\x1b\[\d+;1H/);
+		renderScheduler.settle(); // retry timeout: pull bound under the clamp
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(12);
+		tui.stop();
+	});
+
+	it("anchors a CPR-less grow at the pull bound under the clamp", () => {
+		// Grow 12 -> 20 with every reply dropped: the pre-resize top 3 is
+		// stale-low once the grow pulled history down. The final timeout must
+		// anchor at min(3 + 8, 20 - 8) = 11 (CUP row 12).
+		const { terminal, tui, renderScheduler, writes } = startRig();
+		terminal.resize(40, 20);
+		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
+		renderScheduler.settle(); // first timeout: no reply -> one bounded retry
+		writes.length = 0;
+		renderScheduler.settle(); // retry timeout: pull bound under the clamp
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(12);
 		tui.stop();
 	});
 });

@@ -1189,21 +1189,23 @@ export class TUI extends Container {
 		this.#cancelResizeProbe();
 		const timer = this.#renderScheduler.scheduleRender(() => {
 			const probe = this.#resizeProbe;
-			if (probe !== undefined && !probe.retried && isInsideTerminalMultiplexer() && this.#resizeBurstGrew) {
-				// A CPR-less multiplexer grow cannot be anchored safely: every
-				// choice inside the unknown pull span risks either overwriting
-				// pulled-back committed rows or leaving stale live rows behind.
-				// A dropped DSR reply is a transient race, so ask once more
-				// before falling back to the conservative bound.
+			if (probe !== undefined && !probe.retried && this.#resizeBurstGrew) {
+				// A CPR-less grow cannot be anchored safely on any terminal:
+				// every choice inside the unknown pull span risks either
+				// overwriting pulled-back committed rows or leaving stale live
+				// rows behind. A dropped DSR reply is a transient race, so ask
+				// once more before falling back to the conservative bound.
 				this.#beginResizeAnchorProbe(true);
 				return;
 			}
 			// Direct terminals only: a canceled probe's reply may have been
 			// dropped, in which case the reply swallowed as stale was actually
 			// this probe's own answer; the staleRows clamp bounds the damage
-			// when it really was stale. Multiplexer replies are column-tagged
-			// and never swallowed, so this is always undefined there.
-			this.#resolveResizeAnchor(probe?.swallowedRow);
+			// when it really was stale — except on a grow, where the clamp is
+			// only an upper bound and a stale pre-restart row would anchor over
+			// pulled-back history. Multiplexer replies are column-tagged and
+			// never swallowed, so this is always undefined there.
+			this.#resolveResizeAnchor(this.#resizeBurstGrew ? undefined : probe?.swallowedRow);
 		}, TUI.#RESIZE_PROBE_TIMEOUT_MS);
 		this.#resizeProbe = {
 			window: this.#resizeProbeWindow,
@@ -1213,14 +1215,30 @@ export class TUI extends Container {
 			retried: retry,
 		};
 		if (isInsideTerminalMultiplexer()) {
+			// Tags older than a few transactions are dead: their replies, if
+			// ever coming, would be discarded by epoch anyway, and leaving them
+			// would eventually exhaust the column span.
+			for (const [column, epoch] of this.#cprColumnTags) {
+				if (epoch < this.#geometryEpoch - 4) this.#cprColumnTags.delete(column);
+			}
 			// Park a distinct column for this request so its reply is
 			// self-identifying. Column 1 is never used: it cannot be told apart
-			// from a spurious or clamped reply.
-			const span = Math.max(1, Math.min(30, this.terminal.columns - 1));
-			const column = 2 + (this.#cprProbeSeq++ % span);
-			this.#cprColumnTags.set(column, this.#geometryEpoch);
-			this.terminal.write(`\x1b[${column}G\x1b[6n`);
-			return;
+			// from a spurious or clamped reply. A column may not be reused while
+			// its tag is live — the old request's delayed reply would be
+			// attributed to the new epoch — so scan for a free slot; degenerate
+			// spans (very narrow panes) and full occupancy fall back to the
+			// FIFO scheme below, whose staleRows clamp bounds the damage.
+			const span = Math.min(30, this.terminal.columns - 1);
+			if (span >= 4) {
+				for (let index = 0; index < span; index++) {
+					const candidate = 2 + ((this.#cprProbeSeq + index) % span);
+					if (this.#cprColumnTags.has(candidate)) continue;
+					this.#cprProbeSeq += index + 1;
+					this.#cprColumnTags.set(candidate, this.#geometryEpoch);
+					this.terminal.write(`\x1b[${candidate}G\x1b[6n`);
+					return;
+				}
+			}
 		}
 		// Replies still outstanding at arm time answer canceled probes against
 		// pre-restart geometry; they must be swallowed, not matched to this
@@ -1317,8 +1335,14 @@ export class TUI extends Container {
 			// rows on screen the viewport top cannot exceed `height - staleRows`
 			// whenever a push happened, so the bound reconstructs height-shrink
 			// pushes that leave the cursor behind (kitty clamps the cursor
-			// instead of scrolling it).
-			top = Math.max(0, Math.min(reportedTop, height - staleRows));
+			// instead of scrolling it). A CPR-less grow is stale-low like the
+			// multiplexer case — grow pull-down moved the real viewport — so it
+			// anchors at the accumulated pull bound, still under the clamp.
+			const fallbackTop =
+				reportedRow === undefined && this.#resizeBurstGrew
+					? this.#providerViewportTop + this.#resizeBurstPull
+					: reportedTop;
+			top = Math.max(0, Math.min(fallbackTop, height - staleRows));
 		}
 		if ($flag("PI_DEBUG_REDRAW")) {
 			const msg = `[${new Date().toISOString()}] resize anchor: size=${width}x${height} cpr=${reportedRow ?? "timeout"} park=${probe.offset} stale=${staleRows} old=${this.#providerViewportTop} top=${top}\n`;
