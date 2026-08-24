@@ -32,6 +32,7 @@ interface PendingClient {
 }
 const clientLocks = new Map<string, PendingClient>();
 const invalidatedClientKeys = new Set<string>();
+const clientReloadBarriers = new Map<string, Promise<unknown>>();
 const fileOperationLocks = new Map<string, Promise<void>>();
 
 /** Negative cache of recent init failures so a broken server fails fast instead of re-spawning per call. */
@@ -860,48 +861,68 @@ function clientKey(config: ServerConfig, cwd: string): string {
  * config would stay registered and running — the idle checker that would
  * eventually reap it is opt-in and off by default.
  */
-export async function shutdownStaleClients(
+export function shutdownStaleClients(
 	cwd: string,
 	configs: readonly ServerConfig[],
 	signal?: AbortSignal,
 ): Promise<string[]> {
 	const fresh = new Set(configs.map(config => clientKey(config, cwd)));
-	for (const key of fresh) invalidatedClientKeys.delete(key);
 	const resolvedCwd = path.resolve(cwd);
-	// Tombstone stale identities before awaiting initialization. Existing
-	// callers keep sharing their in-flight promise; later callers cannot spawn
-	// another stale process while reload is blocked on teardown.
-	const stalePending = Array.from(clientLocks.entries()).filter(
-		([key, pending]) => path.resolve(pending.cwd) === resolvedCwd && !fresh.has(key),
-	);
-	for (const [key] of stalePending) invalidatedClientKeys.add(key);
-	for (const client of clients.values()) {
-		if (path.resolve(client.cwd) === resolvedCwd && !fresh.has(client.name)) {
-			invalidatedClientKeys.add(client.name);
-		}
-	}
-	await Promise.all(
-		stalePending.map(async ([, pending]) => {
+	const previousBarrier = clientReloadBarriers.get(resolvedCwd);
+	const cleanup = (async (): Promise<string[]> => {
+		if (previousBarrier) {
 			try {
-				await untilAborted(signal, pending.promise);
+				await untilAborted(signal, previousBarrier);
 			} catch {
 				throwIfAborted(signal);
+				// A later explicit reload retries teardown after an earlier one
+				// failed; ordinary client creation remains blocked in between.
 			}
-		}),
-	);
-
-	const stale = Array.from(clients.values()).filter(
-		client => path.resolve(client.cwd) === resolvedCwd && !fresh.has(client.name),
-	);
-	const results = await Promise.all(stale.map(client => shutdownClientInstance(client)));
-	const failed = stale.filter((_client, index) => results[index] !== true);
-	if (failed.length > 0) {
-		throw new Error(
-			"Failed to stop LSP server(s) with superseded configuration: " +
-				failed.map(client => client.config.command).join(", "),
+		}
+		for (const key of fresh) invalidatedClientKeys.delete(key);
+		// Tombstone stale identities before awaiting initialization. Existing
+		// callers keep sharing their in-flight promise; later callers cannot spawn
+		// another stale process while reload is blocked on teardown.
+		const stalePending = Array.from(clientLocks.entries()).filter(
+			([key, pending]) => path.resolve(pending.cwd) === resolvedCwd && !fresh.has(key),
 		);
-	}
-	return stale.map(client => client.config.command);
+		for (const [key] of stalePending) invalidatedClientKeys.add(key);
+		for (const client of clients.values()) {
+			if (path.resolve(client.cwd) === resolvedCwd && !fresh.has(client.name)) {
+				invalidatedClientKeys.add(client.name);
+			}
+		}
+		await Promise.all(
+			stalePending.map(async ([, pending]) => {
+				try {
+					await untilAborted(signal, pending.promise);
+				} catch {
+					throwIfAborted(signal);
+				}
+			}),
+		);
+
+		const stale = Array.from(clients.values()).filter(
+			client => path.resolve(client.cwd) === resolvedCwd && !fresh.has(client.name),
+		);
+		const results = await Promise.all(stale.map(client => shutdownClientInstance(client)));
+		const failed = stale.filter((_client, index) => results[index] !== true);
+		if (failed.length > 0) {
+			throw new Error(
+				"Failed to stop LSP server(s) with superseded configuration: " +
+					failed.map(client => client.config.command).join(", "),
+			);
+		}
+		return stale.map(client => client.config.command);
+	})();
+	clientReloadBarriers.set(resolvedCwd, cleanup);
+	void cleanup.then(
+		() => {
+			if (clientReloadBarriers.get(resolvedCwd) === cleanup) clientReloadBarriers.delete(resolvedCwd);
+		},
+		() => {},
+	);
+	return cleanup;
 }
 
 /** Allow an explicit user reload to retry a matching initialization failure immediately. */
@@ -940,6 +961,27 @@ export async function getOrCreateClient(
 	}
 	if (invalidatedClientKeys.has(key)) {
 		throw new Error(`LSP configuration was superseded during reload: ${config.command}`);
+	}
+
+	// Do not start a fresh identity until superseded processes are confirmed stopped.
+	const reloadBarrier = clientReloadBarriers.get(path.resolve(cwd));
+	if (reloadBarrier) {
+		try {
+			await untilAborted(signal, reloadBarrier);
+		} catch (error) {
+			throwIfAborted(signal);
+			throw error;
+		}
+		const clientAfterReload = clients.get(key);
+		if (clientAfterReload && !invalidatedClientKeys.has(key)) {
+			clientAfterReload.lastActivity = Date.now();
+			return clientAfterReload;
+		}
+		const lockAfterReload = clientLocks.get(key);
+		if (lockAfterReload) return lockAfterReload.promise;
+		if (invalidatedClientKeys.has(key)) {
+			throw new Error(`LSP configuration was superseded during reload: ${config.command}`);
+		}
 	}
 
 	// Fail fast on a recent deterministic init failure instead of re-spawning
@@ -1627,6 +1669,7 @@ export async function sendNotification(
 export async function shutdownAll(): Promise<void> {
 	stopIdleChecker();
 	invalidatedClientKeys.clear();
+	clientReloadBarriers.clear();
 	const clientsToShutdown = Array.from(clients.values());
 	clients.clear();
 	// Mid-initialize clients live only in clientLocks (publication is deferred
