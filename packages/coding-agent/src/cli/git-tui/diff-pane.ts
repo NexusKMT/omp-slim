@@ -13,10 +13,12 @@
  * the visible viewport brightened; clicking it seeks. Long lines either pan
  * horizontally (`←`/`→`) or soft-wrap when word wrap is enabled.
  */
+import type { DiffStreamResult, HighlightStream } from "@oh-my-pi/pi-natives";
 import { diffWords, structuredPatchHunks } from "@oh-my-pi/pi-natives";
 import { replaceTabs, sliceWithWidth, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
-import { getLanguageFromPath, highlightCode, theme } from "../../modes/theme/theme";
+import { createHighlightStream, getLanguageFromPath, theme } from "../../modes/theme/theme";
 import { bgAnsi, canvasHex, fgAnsi, mixHex, pill, selectionBgAnsi, textHex, withBg } from "./colors";
+import { DIFF_CONTEXT_LINES, type FileStreamUpdate } from "./state";
 
 /** Column ranges (inclusive start, exclusive end) carrying intraline emphasis. */
 type MarkRanges = readonly (readonly [number, number])[];
@@ -27,7 +29,7 @@ interface DiffRow {
 	readonly kind: RowKind;
 	readonly oldNum?: number;
 	readonly newNum?: number;
-	/** Syntax-highlighted, tab-expanded line for each side ("" when absent). */
+	/** Tab-expanded line for each side ("" when absent). */
 	readonly oldText: string;
 	readonly newText: string;
 	readonly oldWidth: number;
@@ -53,8 +55,12 @@ export interface DiffDocument {
 	readonly filePath: string;
 	readonly rows: readonly DiffRow[];
 	readonly hunks: readonly HunkBlock[];
-	/** New-side lines for the `file` view (highlighted + display width). */
+	/** Tab-expanded new-side lines for the `file` view. */
 	readonly fileLines: readonly { text: string; width: number }[];
+	/** Tab-expanded source lines, retained for progressive syntax highlighting. */
+	readonly oldDisplayLines: readonly string[];
+	/** Tab-expanded source lines, retained for progressive syntax highlighting. */
+	readonly newDisplayLines: readonly string[];
 	readonly additions: number;
 	readonly deletions: number;
 	readonly gutterWidth: number;
@@ -76,12 +82,10 @@ export type ViewMode = "split" | "inline" | "hunk" | "file";
 /** Hunk-button actions raised to the root component. */
 export type HunkAction = "stage" | "unstage" | "discard";
 
-/** Skip syntax highlighting above this size to keep the pane responsive. */
-const HIGHLIGHT_LIMIT_BYTES = 512 * 1024;
+/** Maximum source lines highlighted before yielding control back to the TUI. */
+const HIGHLIGHT_BATCH_LINES = 32;
 /** Cap on intraline word-diff pairs per document. */
 const INTRALINE_PAIR_LIMIT = 1_500;
-/** Context lines around each hunk in the hunk view. */
-const HUNK_CONTEXT = 3;
 
 function intralineMarks(oldLine: string, newLine: string): { old: MarkRanges; new: MarkRanges } {
 	const oldRanges: [number, number][] = [];
@@ -115,6 +119,8 @@ function pushRange(ranges: [number, number][], start: number, end: number): void
 export interface DiffBuildOptions {
 	/** Align ignoring leading/trailing whitespace (disables hunk patches). */
 	ignoreWhitespace?: boolean;
+	/** Exact runs/hunks already computed by the native streaming differ. */
+	streamResult?: DiffStreamResult;
 }
 
 /** Build the aligned document for one file from its raw old/new texts. */
@@ -129,10 +135,6 @@ export function buildDiffDocument(
 	const newLines = newRaw.length === 0 ? [] : newRaw.replace(/\n$/, "").split("\n");
 	const oldPlain = oldLines.map(replaceTabs);
 	const newPlain = newLines.map(replaceTabs);
-	const lang = getLanguageFromPath(filePath);
-	const highlightable = oldRaw.length + newRaw.length <= HIGHLIGHT_LIMIT_BYTES;
-	const oldHl = highlightable && lang ? highlightCode(oldPlain.join("\n"), lang) : oldPlain;
-	const newHl = highlightable && lang ? highlightCode(newPlain.join("\n"), lang) : newPlain;
 
 	// Alignment basis: raw lines, or trimmed lines when ignoring whitespace.
 	// Line numbers stay 1:1 with the raw text either way.
@@ -163,8 +165,8 @@ export function buildDiffDocument(
 			kind,
 			oldNum: oldIdx === undefined ? undefined : oldIdx + 1,
 			newNum: newIdx === undefined ? undefined : newIdx + 1,
-			oldText: oldIdx === undefined ? "" : (oldHl[oldIdx] ?? ""),
-			newText: newIdx === undefined ? "" : (newHl[newIdx] ?? ""),
+			oldText: oldIdx === undefined ? "" : (oldPlain[oldIdx] ?? ""),
+			newText: newIdx === undefined ? "" : (newPlain[newIdx] ?? ""),
 			oldWidth: oldIdx === undefined ? 0 : visibleWidth(oldPlain[oldIdx] ?? ""),
 			newWidth: newIdx === undefined ? 0 : visibleWidth(newPlain[newIdx] ?? ""),
 			oldMarks: marks?.old,
@@ -215,22 +217,63 @@ export function buildDiffDocument(
 		return rows;
 	};
 
-	// Pass 1: one mega-context hunk aligns the entire file.
-	const megaHunks = structuredPatchHunks(oldBasis, newBasis, oldLines.length + newLines.length + 1);
+	const streamed = ignoreWs ? undefined : options.streamResult;
 	const rows: DiffRow[] = [];
-	for (const hunk of megaHunks) rows.push(...walkHunk(hunk, true));
-	if (megaHunks.length === 0) {
-		// Identical files: show pure context.
-		for (let i = 0; i < oldLines.length; i++) {
-			touch(oldPlain[i]);
-			rows.push(makeRow("context", i, i));
+	if (streamed) {
+		let oldIndex = 0;
+		let newIndex = 0;
+		let pendingDel: number[] = [];
+		let pendingAdd: number[] = [];
+		const flush = (): void => {
+			const paired = Math.min(pendingDel.length, pendingAdd.length);
+			for (let index = 0; index < paired; index++)
+				rows.push(makeRow("change", pendingDel[index], pendingAdd[index]));
+			for (let index = paired; index < pendingDel.length; index++)
+				rows.push(makeRow("del", pendingDel[index], undefined));
+			for (let index = paired; index < pendingAdd.length; index++)
+				rows.push(makeRow("add", undefined, pendingAdd[index]));
+			pendingDel = [];
+			pendingAdd = [];
+		};
+		for (const run of streamed.runs) {
+			if (run.removed) {
+				for (let index = 0; index < run.count; index++) {
+					touch(oldPlain[oldIndex]);
+					pendingDel.push(oldIndex++);
+					deletions++;
+				}
+			} else if (run.added) {
+				for (let index = 0; index < run.count; index++) {
+					touch(newPlain[newIndex]);
+					pendingAdd.push(newIndex++);
+					additions++;
+				}
+			} else {
+				flush();
+				for (let index = 0; index < run.count; index++) {
+					touch(oldPlain[oldIndex]);
+					touch(newPlain[newIndex]);
+					rows.push(makeRow("context", oldIndex++, newIndex++));
+				}
+			}
+		}
+		flush();
+	} else {
+		// The synchronous path remains for direct callers and whitespace-ignore.
+		const megaHunks = structuredPatchHunks(oldBasis, newBasis, oldLines.length + newLines.length + 1);
+		for (const hunk of megaHunks) rows.push(...walkHunk(hunk, true));
+		if (megaHunks.length === 0) {
+			for (let index = 0; index < oldLines.length; index++) {
+				touch(oldPlain[index]);
+				rows.push(makeRow("context", index, index));
+			}
 		}
 	}
 
-	// Pass 2: tight hunks for the hunk view + per-hunk patches. Patch bodies
-	// must be raw lines, so whitespace-ignore alignment cannot produce patches.
+	// Tight hunks drive the hunk view and patch actions. Whitespace-ignore
+	// cannot use the raw streamed result because its equality basis differs.
 	const canPatch = !ignoreWs;
-	const tightHunks = structuredPatchHunks(oldBasis, newBasis, HUNK_CONTEXT);
+	const tightHunks = streamed?.hunks ?? structuredPatchHunks(oldBasis, newBasis, DIFF_CONTEXT_LINES);
 	const hunks: HunkBlock[] = tightHunks.map(hunk => ({
 		header: `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`,
 		patch: canPatch
@@ -239,7 +282,7 @@ export function buildDiffDocument(
 		rows: walkHunk(hunk, false),
 	}));
 
-	const fileLines = newPlain.map((line, i) => ({ text: newHl[i] ?? "", width: visibleWidth(line) }));
+	const fileLines = newPlain.map(line => ({ text: line, width: visibleWidth(line) }));
 	const gutterWidth = Math.max(3, String(Math.max(oldLines.length, newLines.length)).length);
 	const rowIndexByNewLine: number[] = new Array(newLines.length + 1).fill(-1);
 	rows.forEach((row, index) => {
@@ -250,6 +293,8 @@ export function buildDiffDocument(
 		rows,
 		hunks,
 		fileLines,
+		oldDisplayLines: oldPlain,
+		newDisplayLines: newPlain,
 		additions,
 		deletions,
 		gutterWidth,
@@ -312,7 +357,7 @@ export function buildLineSelectionPatch(
 	const lastSelected = lastRow !== undefined && to >= doc.rows.length - 1 && lastRow.kind !== "context";
 	const endsNL = lastSelected ? otherEndsNL : baseEndsNL;
 	const targetText = target.join("\n") + (endsNL && target.length > 0 ? "\n" : "");
-	const hunks = structuredPatchHunks(base, targetText, HUNK_CONTEXT);
+	const hunks = structuredPatchHunks(base, targetText, DIFF_CONTEXT_LINES);
 	if (hunks.length === 0) return null;
 	const body = hunks
 		.map(
@@ -374,7 +419,7 @@ function palette(): DiffPalette {
 // ── pane ─────────────────────────────────────────────────────────────────────
 
 /** Placeholder states shown instead of a document. */
-export type DiffPaneState = "empty" | "loading" | "binary" | "tooLarge" | "ready";
+export type DiffPaneState = "empty" | "loading" | "streaming" | "binary" | "tooLarge" | "ready";
 
 /** One rendered line of the current view. */
 type Visual =
@@ -383,6 +428,21 @@ type Visual =
 	| { t: "file"; index: number; seg: number; rowIndex: number }
 	| { t: "header"; hunk: number }
 	| { t: "blank" };
+
+/** Incremental syntax-coloring state layered over an immutable document. */
+interface SyntaxHighlights {
+	readonly old: (string | undefined)[];
+	readonly new: (string | undefined)[];
+}
+
+/** Provisional complete lines exposed while native ingestion is active. */
+interface StreamingDocument {
+	readonly filePath: string;
+	readonly oldLines: string[];
+	readonly newLines: string[];
+	stableCommonLines: number;
+	maxLineWidth: number;
+}
 
 /** Result of a left click inside the pane. */
 export type PaneClick = { type: "hunk-action"; hunk: HunkBlock; action: HunkAction } | { type: "handled" } | null;
@@ -394,6 +454,8 @@ export type PaneClick = { type: "hunk-action"; hunk: HunkBlock; action: HunkActi
 export class DiffPane {
 	#doc: DiffDocument | null = null;
 	#docVersion = 0;
+	#highlights: SyntaxHighlights | null = null;
+	#streaming: StreamingDocument | null = null;
 	state: DiffPaneState = "empty";
 	/** Message shown in the empty state. */
 	emptyMessage = "No changes";
@@ -404,7 +466,7 @@ export class DiffPane {
 	selectedHunk = 0;
 	scrollTop = 0;
 	scrollLeft = 0;
-	/** Pane holds keyboard focus: cursor/selection highlights render. */
+	/** Pane holds keyboard focus: the cursor band renders at full strength (dimmed otherwise). */
 	focused = false;
 	/** Cursor as a visual-row index; navigation keys move it. */
 	cursor = 0;
@@ -423,6 +485,8 @@ export class DiffPane {
 	setDocument(doc: DiffDocument | null, state: DiffPaneState): void {
 		this.#doc = doc;
 		this.#docVersion++;
+		this.#highlights = null;
+		this.#streaming = null;
 		this.state = state;
 		this.scrollTop = 0;
 		this.scrollLeft = 0;
@@ -437,6 +501,89 @@ export class DiffPane {
 				this.scrollTop = Math.max(0, first - Math.floor(this.#lastHeight / 3));
 			}
 		}
+	}
+
+	/** Start a provisional file view while the native stream ingests both sides. */
+	startStream(filePath: string): void {
+		this.setDocument(null, "streaming");
+		this.#streaming = { filePath, oldLines: [], newLines: [], stableCommonLines: 0, maxLineWidth: 0 };
+	}
+
+	/** Merge newly completed native-stream lines into the provisional viewport. */
+	updateStream(update: FileStreamUpdate): void {
+		const streaming = this.#streaming;
+		if (!streaming) return;
+		streaming.oldLines.splice(
+			update.oldLineOffset,
+			streaming.oldLines.length - update.oldLineOffset,
+			...update.oldLines,
+		);
+		streaming.newLines.splice(
+			update.newLineOffset,
+			streaming.newLines.length - update.newLineOffset,
+			...update.newLines,
+		);
+		for (const line of update.oldLines) streaming.maxLineWidth = Math.max(streaming.maxLineWidth, line.length);
+		for (const line of update.newLines) streaming.maxLineWidth = Math.max(streaming.maxLineWidth, line.length);
+		streaming.stableCommonLines = update.progress.stableCommonLines;
+		this.#clampScroll();
+	}
+
+	/** Incrementally syntax-highlight the active document without blocking input. */
+	async highlightAsync(signal: AbortSignal, requestRender: () => void): Promise<void> {
+		const doc = this.#doc;
+		if (!doc || signal.aborted) return;
+		const language = getLanguageFromPath(doc.filePath);
+		const oldStream = createHighlightStream(language);
+		const newStream = createHighlightStream(language);
+		if (!oldStream && !newStream) return;
+
+		const highlights: SyntaxHighlights = {
+			old: new Array(doc.oldDisplayLines.length),
+			new: new Array(doc.newDisplayLines.length),
+		};
+		this.#highlights = highlights;
+		let oldOffset = oldStream ? 0 : doc.oldDisplayLines.length;
+		let newOffset = newStream ? 0 : doc.newDisplayLines.length;
+		while (oldOffset < doc.oldDisplayLines.length || newOffset < doc.newDisplayLines.length) {
+			if (signal.aborted || this.#doc !== doc) return;
+			if (oldStream && oldOffset < doc.oldDisplayLines.length) {
+				oldOffset = this.#highlightChunk(
+					oldStream,
+					doc.oldDisplayLines,
+					doc.oldEndsNewline,
+					highlights.old,
+					oldOffset,
+				);
+			}
+			if (newStream && newOffset < doc.newDisplayLines.length) {
+				newOffset = this.#highlightChunk(
+					newStream,
+					doc.newDisplayLines,
+					doc.newEndsNewline,
+					highlights.new,
+					newOffset,
+				);
+			}
+			requestRender();
+			if (oldOffset < doc.oldDisplayLines.length || newOffset < doc.newDisplayLines.length) await Bun.sleep(0);
+		}
+	}
+
+	#highlightChunk(
+		stream: HighlightStream,
+		lines: readonly string[],
+		endsNewline: boolean,
+		highlights: (string | undefined)[],
+		offset: number,
+	): number {
+		const end = Math.min(lines.length, offset + HIGHLIGHT_BATCH_LINES);
+		const final = end === lines.length;
+		const chunk = `${lines.slice(offset, end).join("\n")}${!final || endsNewline ? "\n" : ""}`;
+		const rendered = stream.push(chunk).split("\n");
+		if (chunk.endsWith("\n")) rendered.pop();
+		for (let index = offset; index < end; index++) highlights[index] = rendered[index - offset] ?? lines[index];
+		return end;
 	}
 
 	setMode(mode: ViewMode): void {
@@ -462,12 +609,14 @@ export class DiffPane {
 	// ── scrolling ──────────────────────────────────────────────────────────
 
 	#total(): number {
-		return this.#doc ? this.#layout(this.#lastWidth || 80).length : 0;
+		if (this.#doc) return this.#layout(this.#lastWidth || 80).length;
+		return this.#streaming ? Math.max(this.#streaming.oldLines.length, this.#streaming.newLines.length) : 0;
 	}
 
 	#clampScroll(): void {
 		this.scrollTop = Math.max(0, Math.min(this.scrollTop, Math.max(0, this.#total() - this.#lastHeight)));
-		const maxLeft = this.wrap ? 0 : Math.max(0, (this.#doc?.maxLineWidth ?? 0) - 8);
+		const maxLineWidth = this.#doc?.maxLineWidth ?? this.#streaming?.maxLineWidth ?? 0;
+		const maxLeft = this.wrap ? 0 : Math.max(0, maxLineWidth - 8);
 		this.scrollLeft = Math.max(0, Math.min(this.scrollLeft, maxLeft));
 	}
 
@@ -753,6 +902,7 @@ export class DiffPane {
 		this.#lastHeight = height;
 		this.#hits = new Array(height);
 		const doc = this.#doc;
+		if (this.state === "streaming" && this.#streaming) return this.#renderStreaming(width, height);
 		if (!doc || this.state !== "ready") {
 			const message =
 				this.state === "loading"
@@ -777,7 +927,7 @@ export class DiffPane {
 		const minimap = this.#renderMinimap(visuals, height, colors);
 		const selectFrom = this.anchor === null ? this.cursor : Math.min(this.anchor, this.cursor);
 		const selectTo = this.anchor === null ? this.cursor : Math.max(this.anchor, this.cursor);
-		const selectionBg = selectionBgAnsi();
+		const selectionBg = selectionBgAnsi(!this.focused);
 		const lines: string[] = [];
 		for (let i = 0; i < height; i++) {
 			const visual = visuals[this.scrollTop + i];
@@ -789,12 +939,66 @@ export class DiffPane {
 			const body = this.#renderVisual(visual, doc, width, colors, i);
 			let padded = `${body}${" ".repeat(Math.max(0, width - 2 - visibleWidth(body)))}`;
 			const visualIndex = this.scrollTop + i;
-			if (this.focused && visualIndex >= selectFrom && visualIndex <= selectTo) {
+			if (visualIndex >= selectFrom && visualIndex <= selectTo) {
 				padded = `${withBg(padded, selectionBg)}\x1b[0m`;
 			}
 			lines.push(`${padded} ${minimap[i]}`);
 		}
 		return lines;
+	}
+
+	#renderStreaming(width: number, height: number): string[] {
+		const streaming = this.#streaming;
+		if (!streaming) return [];
+		const total = this.#total();
+		if (total === 0) {
+			return Array.from({ length: height }, (_, index) =>
+				index === Math.floor(height / 2) ? centerText(theme.fg("dim", "Streaming file…"), width) : "",
+			);
+		}
+		this.#clampScroll();
+		const gutter = Math.max(3, String(total).length);
+		const selectionBg = selectionBgAnsi(!this.focused);
+		const lines: string[] = [];
+		for (let screenRow = 0; screenRow < height; screenRow++) {
+			const index = this.scrollTop + screenRow;
+			if (index >= total) {
+				lines.push("");
+				continue;
+			}
+			let line: string;
+			if (this.mode === "file") {
+				const textWidth = Math.max(8, width - gutter - 1);
+				const text = streaming.newLines[index];
+				if (text === undefined) {
+					line = "";
+				} else {
+					const slice = sliceWithWidth(text, this.scrollLeft, textWidth);
+					line = `${theme.fg("dim", String(index + 1).padStart(gutter))} ${slice.text}${" ".repeat(Math.max(0, textWidth - slice.width))}`;
+				}
+			} else {
+				const textWidth = Math.max(8, Math.floor((width - 2 * (gutter + 1) - 1) / 2));
+				const renderSide = (text: string | undefined): string => {
+					if (text === undefined) return " ".repeat(gutter + 1 + textWidth);
+					const slice = sliceWithWidth(text, this.scrollLeft, textWidth);
+					return `${theme.fg("dim", String(index + 1).padStart(gutter))} ${slice.text}${" ".repeat(Math.max(0, textWidth - slice.width))}`;
+				};
+				line = `${renderSide(streaming.oldLines[index])}${theme.fg("borderMuted", "│")}${renderSide(streaming.newLines[index])}`;
+			}
+			line = truncateToWidth(line, width);
+			if (index === this.cursor) {
+				line = `${withBg(`${line}${" ".repeat(Math.max(0, width - visibleWidth(line)))}`, selectionBg)}\x1b[0m`;
+			}
+			lines.push(line);
+		}
+		return lines;
+	}
+
+	#displayText(row: DiffRow, side: "old" | "new" | "both"): string {
+		const actualSide = side === "old" ? "old" : "new";
+		const number = actualSide === "old" ? row.oldNum : row.newNum;
+		const plain = actualSide === "old" ? row.oldText : row.newText;
+		return number === undefined ? plain : (this.#highlights?.[actualSide][number - 1] ?? plain);
 	}
 
 	#renderVisual(visual: Visual, doc: DiffDocument, width: number, colors: DiffPalette, screenRow: number): string {
@@ -832,8 +1036,8 @@ export class DiffPane {
 				const gutter = doc.gutterWidth;
 				const textWidth = Math.max(8, width - gutter - 1 - 2 - 2);
 				const startCol = this.wrap ? visual.seg * textWidth : this.scrollLeft;
-				const line = doc.fileLines[visual.index];
-				const slice = sliceWithWidth(line.text, startCol, textWidth);
+				const text = this.#highlights?.new[visual.index] ?? doc.fileLines[visual.index]?.text ?? "";
+				const slice = sliceWithWidth(text, startCol, textWidth);
 				const gutterText =
 					visual.seg === 0 ? theme.fg("dim", String(visual.index + 1).padStart(gutter)) : " ".repeat(gutter);
 				return `${gutterText} ${slice.text}${" ".repeat(Math.max(0, textWidth - slice.width))}`;
@@ -893,7 +1097,7 @@ export class DiffPane {
 			: isAdd
 				? `${" ".repeat(gutter)}${fgAnsi(colors.gutterAdd)}${newLabel}\x1b[0m `
 				: theme.fg("dim", `${oldLabel}${newLabel} `);
-		const text = side === "old" ? row.oldText : row.newText;
+		const text = this.#displayText(row, side);
 		const marks = side === "old" ? row.oldMarks : row.newMarks;
 		let body: string;
 		if (!isDel && !isAdd) {
@@ -922,7 +1126,7 @@ export class DiffPane {
 		first: boolean,
 	): string {
 		const num = side === "old" ? row.oldNum : row.newNum;
-		const text = side === "old" ? row.oldText : row.newText;
+		const text = this.#displayText(row, side);
 		const marks = side === "old" ? row.oldMarks : row.newMarks;
 		const present = num !== undefined;
 		const changed = row.kind === "change" || (side === "old" ? row.kind === "del" : row.kind === "add");

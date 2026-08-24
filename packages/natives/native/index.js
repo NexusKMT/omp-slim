@@ -20,6 +20,7 @@ const nativeBindings = loadNative();
 export const AudioCapture = nativeBindings.AudioCapture;
 export const AudioPlayback = nativeBindings.AudioPlayback;
 export const DesktopSession = adaptDesktopSession(nativeBindings.DesktopSession);
+export const DiffStream = nativeBindings.DiffStream;
 export const FileLock = nativeBindings.FileLock;
 export const HighlightStream = nativeBindings.HighlightStream;
 export const LiveWebRtcPeer = nativeBindings.LiveWebRtcPeer;
@@ -91,6 +92,7 @@ export const supportsLanguage = nativeBindings.supportsLanguage;
 export const truncateToWidth = nativeBindings.truncateToWidth;
 export const vectorIndexTopK = nativeBindings.vectorIndexTopK;
 export const visibleWidth = nativeBindings.visibleWidth;
+export const warmHighlighter = nativeBindings.warmHighlighter;
 export const wrapTextWithAnsi = nativeBindings.wrapTextWithAnsi;
 
 // string/numeric enums (napi-rs string_enum produces TS-only const enum)
@@ -101,6 +103,10 @@ export const AstMatchStrictness = {
 	Relaxed: "relaxed",
 	Signature: "signature",
 	Template: "template",
+};
+export const DiffSide = {
+	Old: "Old",
+	New: "New",
 };
 export const Ellipsis = {
 	Unicode: 0,

@@ -2,8 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `q` shortcut to exit the git TUI
+- Compressed single-child directory chains in the sidebar tree view
+
 ### Changed
 
+- Made `omp git` stream file contents into an off-thread native differ, paint complete lines immediately, progressively apply syntax highlighting, and defer large commit file statistics until after the first interactive frame.
 - Added `r` shortcut to refresh the git state
 - Added `s`/`u` shortcuts to stage/unstage files directly from the sidebar
 - Added `space` shortcut as page down in the diff pane
@@ -12,6 +18,7 @@
 ### Fixed
 
 - Fixed fast tool completions leaving a permanent running summary that blocked transcript retirement and squeezed later tool output.
+- Fixed `omp git` hunk navigation (`alt+↓`/`alt+↑`) appearing to do nothing while the file sidebar had focus: the diff cursor band now stays visible (dimmed) when the pane is unfocused.
 
 ## [18.0.4] - 2026-08-24
 

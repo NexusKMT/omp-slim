@@ -26,7 +26,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
-import { theme } from "../../modes/theme/theme";
+import { theme, warmHighlighter } from "../../modes/theme/theme";
 import * as git from "../../utils/git";
 import { AvatarLoader } from "./avatar";
 import { pill, softPill, tintChip } from "./colors";
@@ -102,12 +102,15 @@ class GitTuiComponent implements Component {
 	readonly #model: GitModel;
 	readonly #pane = new DiffPane();
 	readonly #sidebar: Sidebar;
+	readonly #highlightReady = warmHighlighter();
 	readonly #done = Promise.withResolvers<void>();
 	#focus: Focus = "sidebar";
 	#currentFile: ChangedFile | null = null;
 	#contents: FileContents | null = null;
 	#ignoreWhitespace = false;
 	#loadSeq = 0;
+	#loadAbort: AbortController | null = null;
+	#highlightAbort: AbortController | null = null;
 	#refreshTimer: NodeJS.Timeout | undefined;
 	#busy = false;
 	#status = "";
@@ -145,6 +148,8 @@ class GitTuiComponent implements Component {
 
 	dispose(): void {
 		this.#disposed = true;
+		this.#loadAbort?.abort();
+		this.#highlightAbort?.abort();
 		clearInterval(this.#refreshTimer);
 	}
 
@@ -155,19 +160,39 @@ class GitTuiComponent implements Component {
 		try {
 			const changed = await this.#model.refresh();
 			if (!changed && !force) return;
-			const file = this.#sidebar.reconcile();
-			// Keep showing the same file when it still exists; otherwise fall back
-			// to the sidebar's suggestion.
-			const stillExists =
-				this.#currentFile &&
-				[...this.#model.unstaged, ...this.#model.staged, ...(this.#model.headCommit?.files ?? [])].some(
-					candidate => candidate.path === this.#currentFile?.path && candidate.area === this.#currentFile?.area,
-				);
-			this.#showFile(stillExists ? this.#currentFile : file);
-			this.#ui.requestRender();
+			this.#syncSidebar(true);
+			this.#loadDeferredDetails();
 		} catch (error) {
 			this.#setStatus(theme.fg("error", error instanceof Error ? error.message : String(error)));
 		}
+	}
+
+	/** Reconcile model changes without reloading an unchanged diff for decoration-only updates. */
+	#syncSidebar(reloadCurrent: boolean): void {
+		const suggested = this.#sidebar.reconcile();
+		const current = this.#currentFile;
+		const stillExists =
+			current &&
+			[...this.#model.unstaged, ...this.#model.staged, ...(this.#model.headCommit?.files ?? [])].some(
+				candidate => candidate.path === current.path && candidate.area === current.area,
+			);
+		const file = stillExists ? current : suggested;
+		const sameFile = file !== null && current !== null && file.path === current.path && file.area === current.area;
+		if (reloadCurrent || !sameFile) this.#showFile(file);
+		this.#ui.requestRender();
+	}
+
+	/** Load count/list details after the initial file list and diff are usable. */
+	#loadDeferredDetails(): void {
+		const apply = (changed: boolean): void => {
+			if (changed && !this.#disposed) this.#syncSidebar(false);
+		};
+		const fail = (error: unknown): void => {
+			if (!this.#disposed)
+				this.#setStatus(theme.fg("error", error instanceof Error ? error.message : String(error)));
+		};
+		void this.#model.loadChangeStats().then(apply).catch(fail);
+		if (this.#model.clean) void this.#model.loadHeadFiles().then(apply).catch(fail);
 	}
 
 	#patchTargetFor(file: ChangedFile | null): "stage" | "unstage" | null {
@@ -178,6 +203,10 @@ class GitTuiComponent implements Component {
 	}
 
 	#showFile(file: ChangedFile | null): void {
+		this.#loadAbort?.abort();
+		this.#loadAbort = null;
+		this.#highlightAbort?.abort();
+		this.#highlightAbort = null;
 		this.#currentFile = file;
 		this.#contents = null;
 		this.#pane.patchTarget = this.#patchTargetFor(file);
@@ -188,17 +217,28 @@ class GitTuiComponent implements Component {
 			this.#ui.requestRender();
 			return;
 		}
-		this.#pane.setDocument(null, "loading");
+		const abort = new AbortController();
+		this.#loadAbort = abort;
+		this.#pane.startStream(file.path);
 		this.#ui.requestRender();
 		void this.#model
-			.contents(file)
+			.streamContents(
+				file,
+				update => {
+					if (seq !== this.#loadSeq || this.#disposed) return;
+					this.#pane.updateStream(update);
+					this.#ui.requestRender();
+				},
+				abort.signal,
+			)
 			.then(contents => {
 				if (seq !== this.#loadSeq || this.#disposed) return;
+				if (this.#loadAbort === abort) this.#loadAbort = null;
 				this.#contents = contents;
 				this.#rebuildDocument();
 			})
 			.catch(error => {
-				if (seq !== this.#loadSeq) return;
+				if (seq !== this.#loadSeq || abort.signal.aborted) return;
 				this.#pane.setDocument(null, "empty");
 				this.#setStatus(theme.fg("error", error instanceof Error ? error.message : String(error)));
 			});
@@ -209,6 +249,8 @@ class GitTuiComponent implements Component {
 		const file = this.#currentFile;
 		const contents = this.#contents;
 		if (!file || !contents) return;
+		this.#highlightAbort?.abort();
+		this.#highlightAbort = null;
 		const edge = this.#pendingHunkEdge;
 		this.#pendingHunkEdge = null;
 		if (contents.tooLarge) this.#pane.setDocument(null, "tooLarge");
@@ -217,10 +259,20 @@ class GitTuiComponent implements Component {
 			this.#pane.setDocument(
 				buildDiffDocument(contents.oldText, contents.newText, file.path, {
 					ignoreWhitespace: this.#ignoreWhitespace,
+					streamResult: contents.streamResult ?? undefined,
 				}),
 				"ready",
 			);
 			if (edge) this.#pane.seekHunk(edge);
+			const abort = new AbortController();
+			this.#highlightAbort = abort;
+			void this.#highlightReady
+				.then(() =>
+					abort.signal.aborted
+						? undefined
+						: this.#pane.highlightAsync(abort.signal, () => this.#ui.requestRender()),
+				)
+				.catch(() => undefined);
 		}
 		this.#ui.requestRender();
 	}
@@ -356,7 +408,7 @@ class GitTuiComponent implements Component {
 		this.#ignoreWhitespace = !this.#ignoreWhitespace;
 		this.#rebuildDocument();
 	}
-	/** `n`/`p`: next/prev hunk, rolling into the adjacent file at the edges. */
+	/** Alt+Down/Up: next/prev hunk, rolling into the adjacent file at the edges. */
 	#jumpHunkOrFile(direction: 1 | -1): void {
 		if (this.#pane.jumpHunk(direction)) {
 			this.#ui.requestRender();
@@ -393,6 +445,10 @@ class GitTuiComponent implements Component {
 		}
 		// Global shortcuts — active unless a commit-form input is capturing text.
 		if (!(this.#focus === "sidebar" && this.#sidebar.editing)) {
+			if (matchesKey(data, "q")) {
+				this.#done.resolve();
+				return;
+			}
 			// Ghostty on macOS reports Option as super+alt (kitty mod 11).
 			if (matchesKey(data, "alt+down") || matchesKey(data, "super+alt+down")) return this.#jumpHunkOrFile(1);
 			if (matchesKey(data, "alt+up") || matchesKey(data, "super+alt+up")) return this.#jumpHunkOrFile(-1);
