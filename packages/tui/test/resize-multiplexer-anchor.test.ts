@@ -147,7 +147,8 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		terminal.resize(40, 6);
 		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
 		writes.length = 0;
-		renderScheduler.settle(); // probe timeout path -> settled repaint
+		renderScheduler.settle(); // first timeout: no reply -> one bounded retry
+		renderScheduler.settle(); // retry timeout -> clip-model repaint
 		const repaint = writes.join("");
 		const cup = repaint.match(/\x1b\[(\d+);1H/);
 		expect(cup).not.toBeNull();
@@ -165,11 +166,32 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		terminal.resize(40, 2);
 		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
 		writes.length = 0;
-		renderScheduler.settle(); // probe timeout path -> settled repaint
+		renderScheduler.settle(); // first timeout: no reply -> one bounded retry
+		renderScheduler.settle(); // retry timeout -> clip-model repaint
 		const repaint = writes.join("");
 		const cup = repaint.match(/\x1b\[(\d+);1H/);
 		expect(cup).not.toBeNull();
 		expect(Number(cup![1])).toBe(2);
+		tui.stop();
+	});
+
+	it("lets the settled CPR outrank the clip model on a shrink", () => {
+		// SIGWINCH coalescing can hide an intermediate grow entirely, so an
+		// observed-monotonic shrink is not proof of monotonicity. The parked
+		// cursor's reply IS exact — discards leave it in place, pushes only
+		// occur after everything below it is discarded, and hidden grows ride
+		// it down — so a reply reporting row 5 must anchor there (CUP row 6)
+		// even though the clip model would keep the anchor at the pre-burst
+		// top 3 and overwrite the two pulled-back rows.
+		const { terminal, tui, renderScheduler, writes } = startRig();
+		terminal.resize(40, 6);
+		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
+		writes.length = 0;
+		terminal.sendInput("\x1b[6;2R"); // parked cursor: rode a hidden pull down to row 5
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(6);
 		tui.stop();
 	});
 

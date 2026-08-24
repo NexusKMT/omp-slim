@@ -1184,12 +1184,13 @@ export class TUI extends Container {
 		this.#cancelResizeProbe();
 		const timer = this.#renderScheduler.scheduleRender(() => {
 			const probe = this.#resizeProbe;
-			if (probe !== undefined && !probe.retried && this.#resizeBurstGrew) {
-				// A CPR-less grow cannot be anchored safely on any terminal:
-				// every choice inside the unknown pull span risks either
-				// overwriting pulled-back committed rows or leaving stale live
-				// rows behind. A dropped DSR reply is a transient race, so ask
-				// once more before falling back to the conservative bound.
+			if (probe !== undefined && !probe.retried && (isInsideTerminalMultiplexer() || this.#resizeBurstGrew)) {
+				// A CPR-less resolve is heuristic: a grow's pull span is unknown
+				// on any terminal, and SIGWINCH coalescing can hide intermediate
+				// grows entirely, so even an observed-monotonic multiplexer
+				// shrink cannot be modeled with certainty. A dropped DSR reply
+				// is a transient race — multiplexers in particular answer DSR
+				// themselves — so ask once more before falling back.
 				this.#beginResizeAnchorProbe(true);
 				return;
 			}
@@ -1268,16 +1269,27 @@ export class TUI extends Container {
 				: reportedRow - this.#reflowedRowCount(probe.window, 0, probe.offset, width);
 		let top: number;
 		if (isInsideTerminalMultiplexer()) {
-			if (height < this.#previousHeight && !this.#resizeBurstGrew) {
-				// Multiplexers clip on height shrink around the cursor, not around
-				// content: rows strictly below the cursor are discarded first (even
-				// non-blank ones — measured against real tmux), and only the
-				// remainder of the shrink pushes top rows into scrollback. Derive
-				// the push deterministically from the saved parked cursor. Across a
-				// coalesced multi-SIGWINCH burst the totals telescope, so pre-burst
-				// state with the cumulative shrink stays exact — but only while the
-				// burst is monotonic: any grow step pulls scrollback back into the
-				// pane and moves the parked logical row.
+			if (reportedRow !== undefined) {
+				// The parked cursor's reply is exact under multiplexer clipping:
+				// discards leave the cursor in place, pushes only occur after
+				// everything below it is discarded (the bottom row IS the
+				// attached position), and grow pull-down rides it down. It
+				// therefore also reflects intermediate geometries that SIGWINCH
+				// coalescing hid from the burst tracker, and always outranks the
+				// clip model. The `height - staleRows` bound must NOT apply here:
+				// it encodes bottom-preserving rewrap, but a multiplexer shrink
+				// may have discarded stale rows below the cursor instead of
+				// pushing the top ones. Frame-size clamping happens when the
+				// settled plan frame is emitted.
+				top = Math.max(0, reportedTop);
+			} else if (height < this.#previousHeight && !this.#resizeBurstGrew) {
+				// Last resort after the retry: model the clip deterministically
+				// from the saved parked cursor. Rows strictly below the cursor
+				// are discarded first (even non-blank ones — measured against
+				// real tmux), and only the remainder of the shrink pushes top
+				// rows into scrollback; across an observed burst the totals
+				// telescope from pre-burst state. SIGWINCH coalescing can hide a
+				// grow from this model, which is why a reply always wins above.
 				const parkedRow =
 					this.#providerViewportTop + this.#reflowedRowCount(probe.window, 0, probe.offset, width);
 				const shrink = this.#previousHeight - height;
@@ -1285,27 +1297,14 @@ export class TUI extends Container {
 				const pushed = Math.max(0, shrink - discardedBelow);
 				top = Math.max(0, this.#providerViewportTop - pushed);
 			} else {
-				// Reversed bursts and grows trust the settled CPR: the multiplexer
-				// keeps the parked cursor attached through grow pull-down and
-				// shrink push. The `height - staleRows` bound must NOT apply here —
-				// it encodes bottom-preserving rewrap, but a multiplexer shrink may
-				// have discarded stale rows below the cursor instead of pushing the
-				// top ones, so the bound would drag the anchor over retained
-				// history rows above the real viewport. Frame-size clamping
-				// happens when the settled plan frame is emitted.
-				if (reportedRow === undefined) {
-					// No CPR at all. The pre-resize top is stale-low here: every
-					// grow step already pulled scrollback down and moved the real
-					// viewport. Anchor at the conservative upper bound instead —
-					// pull never exceeds the burst's accumulated growth, and
-					// pushes/discards only lower the top. Exact when scrollback
-					// covers the pull; when it does not, the repaint lands below
-					// the real viewport and leaves stale rows above rather than
-					// overwriting committed ones.
-					top = Math.max(0, this.#providerViewportTop + this.#resizeBurstPull);
-				} else {
-					top = Math.max(0, reportedTop);
-				}
+				// CPR-less grow or reversed burst: the pre-resize top is
+				// stale-low, every grow step already pulled scrollback down.
+				// Anchor at the conservative upper bound — pull never exceeds
+				// the burst's accumulated growth, and pushes/discards only lower
+				// the top. Exact when scrollback covers the pull; when it does
+				// not, the repaint lands below the real viewport and leaves
+				// stale rows above rather than overwriting committed ones.
+				top = Math.max(0, this.#providerViewportTop + this.#resizeBurstPull);
 			}
 		} else {
 			// Direct terminals rewrap bottom-preserving: with `staleRows` stale
