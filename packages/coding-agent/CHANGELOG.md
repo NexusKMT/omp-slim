@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Fixed the transcript permanently losing block spacing and compacting every tool call to one line after a stream died mid-message (e.g. a transport drop during a large tool call): the orphaned streaming block no longer jams history retirement, so the live viewport recovers instead of staying in pressure layout until restart.
 - Fixed clean-cutover instructions conflicting with deletion safety by explicitly allowing removal of code made obsolete by the requested cutover.
 - Eval runtime-availability probes (Python/Ruby/Julia) no longer inherit the host stdin handle and are now bounded by the eval call's timeout and abort signal, so a probe that hangs during backend resolution — e.g. the native-Windows inherited-stdin wedge — returns a clear error instead of wedging the whole turn indefinitely ([#9466](https://github.com/can1357/oh-my-pi/issues/9466)).
 - Subagent advisors now review the final `yield`: the yield turn is delivered to the advisor and its review is drained before the subagent session is disposed, instead of being abandoned at teardown ([#9505](https://github.com/can1357/oh-my-pi/issues/9505)).
