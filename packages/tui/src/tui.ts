@@ -640,7 +640,7 @@ export class TUI extends Container {
 	#parkedViewportOffset = 0;
 	// In-flight post-resize anchor probe: the stale viewport snapshot and park
 	// offset captured when CSI 6n was written, plus the no-reply fallback timer.
-	#resizeProbe: { window: readonly string[]; offset: number; timer: RenderTimer } | undefined;
+	#resizeProbe: { window: readonly string[]; offset: number; timer: RenderTimer; swallowedRow?: number } | undefined;
 	// Pre-erase viewport snapshot for the settled resize-anchor probe: the erase
 	// in #beginResizeAltPaint empties #providerWindow, so the probe must bound
 	// the anchor with the window that was actually on screen when the resize
@@ -1157,7 +1157,11 @@ export class TUI extends Container {
 	#beginResizeAnchorProbe(): void {
 		this.#cancelResizeProbe();
 		const timer = this.#renderScheduler.scheduleRender(() => {
-			this.#resolveResizeAnchor(undefined);
+			// A canceled probe's reply may have been dropped entirely, in which
+			// case the reply swallowed as stale was actually this probe's own
+			// answer; it is exact then, and no worse than the pre-resize
+			// viewport guess when the swallowed reply really was stale.
+			this.#resolveResizeAnchor(this.#resizeProbe?.swallowedRow);
 		}, TUI.#RESIZE_PROBE_TIMEOUT_MS);
 		this.#resizeProbe = { window: this.#resizeProbeWindow, offset: this.#resizeProbeOffset, timer };
 		// Replies still outstanding at arm time answer canceled probes against
@@ -1668,8 +1672,11 @@ export class TUI extends Container {
 			if (!match || match.index === undefined) break;
 			this.#pendingCprReplies--;
 			if (this.#staleCprReplies > 0) {
-				// Answer to a canceled probe (see #beginResizeAnchorProbe).
+				// Answer to a canceled probe (see #beginResizeAnchorProbe). Keep
+				// the row: if this probe's own reply never arrives, the timeout
+				// fallback prefers it over the pre-resize viewport top.
 				this.#staleCprReplies--;
+				if (this.#resizeProbe) this.#resizeProbe.swallowedRow = Number(match[1]) - 1;
 			} else {
 				this.#resolveResizeAnchor(Number(match[1]) - 1);
 			}

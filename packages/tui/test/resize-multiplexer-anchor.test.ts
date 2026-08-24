@@ -271,6 +271,30 @@ describe("resize anchor probe stash on a direct terminal", () => {
 		tui.stop();
 	});
 
+	it("recovers the swallowed reply when the canceled probe's reply was dropped", () => {
+		// If the canceled probe's reply never arrives, the only reply the
+		// second probe sees is its own — swallowed as presumed-stale. The
+		// timeout must then anchor from that swallowed row (exact in this
+		// drop case) instead of the pre-resize viewport top: reply row 1
+		// anchors at 1 (CUP row 2), while the pre-resize fallback would
+		// anchor at the stale top 3 (CUP row 4).
+		const { terminal, tui, provider, renderScheduler, writes } = startRig();
+		provider.liveRows = 2;
+		tui.requestRender(true);
+		terminal.resize(40, 11);
+		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
+		terminal.resize(40, 6); // mid-probe restart: canceled reply never arrives
+		renderScheduler.settle(); // exit the second borrow, start the second probe
+		terminal.sendInput("\x1b[2;1R"); // the second probe's own reply: swallowed
+		writes.length = 0;
+		renderScheduler.settle(); // probe timeout -> settled repaint
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(2);
+		tui.stop();
+	});
+
 	it("snapshots a legitimately empty viewport on a fresh transaction", () => {
 		// A completed resize populates the stash; a later normal frame may
 		// legitimately render an empty viewport. The next fresh transaction must
