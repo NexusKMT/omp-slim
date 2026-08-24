@@ -353,4 +353,35 @@ describe("RelayBridge Runtime sessions", () => {
 			),
 		).toEqual(contexts);
 	});
+
+	it("keeps a pipelined Runtime.disable authoritative while root enable completes", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		const sessionId = await attachPage(bridge, ext, cdp, connId, 1);
+		bridge.cdpMessage(connId, JSON.stringify({ id: ++msgSeq, sessionId, method: "Runtime.enable" }));
+		await flush();
+
+		bridge.cdpMessage(connId, JSON.stringify({ id: ++msgSeq, sessionId, method: "Runtime.disable" }));
+		ack(bridge, ext, "send");
+		await flush();
+		expect(ext.pending("send").map(rpc => rpc.method)).toEqual(["Runtime.enable"]);
+
+		const context = { context: { id: 19 } };
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "cdpEvent", tabId: 1, method: "Runtime.executionContextCreated", params: context }),
+		);
+		ack(bridge, ext, "send");
+		await flush();
+
+		expect(
+			cdp.messages.filter(
+				message => message.sessionId === sessionId && message.method === "Runtime.executionContextCreated",
+			),
+		).toEqual([]);
+	});
 });

@@ -429,7 +429,9 @@ export class RelayBridge {
 		}
 		try {
 			await this.#ensureRuntimeEnabled(tab);
-			this.#replayRuntimeContexts(conn, sessionId, ref, tab);
+			if (conn.sessions.get(sessionId) === ref && ref.runtimeEnabled) {
+				this.#replayRuntimeContexts(conn, sessionId, ref, tab);
+			}
 			this.#reply(conn, msg, {});
 		} catch (err) {
 			ref.runtimeEnabled = false;
