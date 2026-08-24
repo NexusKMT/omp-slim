@@ -9,6 +9,9 @@
 ### Changed
 
 - History replay batches now bottom-split into leading viewport space and serialize the complete replay remainder plus final viewport in one synchronous terminal write.
+### Added
+
+- `Loader` now accepts a `() => string` message; the function is re-evaluated on each spinner tick so dynamic labels (live countdowns) advance in sync with the glyph instead of freezing on the initial value. Static strings remain the zero-cost path (`setText` short-circuits on unchanged content).
 
 ### Fixed
 
