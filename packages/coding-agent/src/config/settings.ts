@@ -178,7 +178,6 @@ export function dropSettingsGroupShadows(data: RawSettings, sourcePath: string, 
 		if (typeof value !== "object" || value === null || Array.isArray(value)) {
 			logger.warn("Settings: ignoring project setting that would shadow a settings group", {
 				setting: path,
-				value,
 				source: sourcePath,
 			});
 			continue;
