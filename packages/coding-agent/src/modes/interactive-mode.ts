@@ -2310,7 +2310,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			}),
 		}));
 		if (!mutated) return;
-		this.session.setTodoPhases(next);
+		this.viewSession.setTodoPhases(next);
 		this.setTodos(next);
 	}
 
