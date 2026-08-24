@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import { logger } from "@oh-my-pi/pi-utils";
 import { ADVISOR_TRANSCRIPT_FILENAME, isAdvisorTranscriptName } from "../advisor/transcript-recorder";
 import { resolveExplicitModelRole } from "../config/model-resolver";
 import { assistantTurnProducedOutput } from "../session/messages";
@@ -341,15 +342,19 @@ async function readPersistedVibeChildIds(sessionFile: string, shouldContinue: ()
 	}
 }
 
-const persistedRosterLatches = new WeakMap<AgentRegistry, Promise<void>>();
+const kPersistedRosterLatches = Symbol("persistedRosterLatches");
+
+interface RegistryWithPersistedRosterLatches extends AgentRegistry {
+	[kPersistedRosterLatches]?: Map<string, Promise<void>>;
+}
 
 async function resolveRootSessionFile(registry: AgentRegistry, hint?: string | null): Promise<string | undefined> {
 	const mainFile = registry.get(MAIN_AGENT_ID)?.sessionFile;
 	const candidate =
-		typeof mainFile === "string" && mainFile.endsWith(".jsonl")
-			? mainFile
-			: typeof hint === "string" && hint.endsWith(".jsonl")
-				? hint
+		typeof hint === "string" && hint.endsWith(".jsonl")
+			? hint
+			: typeof mainFile === "string" && mainFile.endsWith(".jsonl")
+				? mainFile
 				: undefined;
 	if (candidate === undefined) return undefined;
 	let current: string = path.resolve(candidate);
@@ -363,27 +368,29 @@ async function resolveRootSessionFile(registry: AgentRegistry, hint?: string | n
 
 /**
  * Restore parked sibling transcripts from the interactive root session once
- * per registry. Live in-memory peers do not skip the scan; an empty tree is
+ * per root. Live in-memory peers do not skip the scan; an empty tree is
  * not scanned again.
  */
-export function ensurePersistedRoster(registry: AgentRegistry, sessionFileHint?: string | null): Promise<void> {
-	const existing = persistedRosterLatches.get(registry);
+export async function ensurePersistedRoster(registry: AgentRegistry, sessionFileHint?: string | null): Promise<void> {
+	let root: string | undefined;
+	try {
+		root = await resolveRootSessionFile(registry, sessionFileHint);
+	} catch (error) {
+		logger.warn("Failed to resolve persisted agent roster", { error: String(error) });
+		return;
+	}
+	if (!root) return;
+
+	const taggedRegistry = registry as RegistryWithPersistedRosterLatches;
+	const latches = (taggedRegistry[kPersistedRosterLatches] ??= new Map());
+	const existing = latches.get(root);
 	if (existing) return existing;
-	const pending = (async () => {
-		try {
-			const root = await resolveRootSessionFile(registry, sessionFileHint);
-			if (!root) {
-				persistedRosterLatches.delete(registry);
-				return;
-			}
-			await registerPersistedSubagents(registry, root);
-		} catch (error) {
-			persistedRosterLatches.delete(registry);
-			throw error;
-		}
-	})();
-	persistedRosterLatches.set(registry, pending);
-	return pending;
+	const pending = registerPersistedSubagents(registry, root).catch(error => {
+		latches.delete(root);
+		logger.warn("Failed to restore persisted agent roster", { root, error: String(error) });
+	});
+	latches.set(root, pending);
+	await pending;
 }
 
 /** Register persisted subagent and advisor transcripts as parked registry refs. */

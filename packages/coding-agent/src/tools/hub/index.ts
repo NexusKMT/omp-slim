@@ -54,19 +54,23 @@ import {
 	launchRenderResult,
 } from "./launch";
 import {
-	DEFAULT_HUB_LIST_LIMIT,
 	drainPendingInbox,
 	executeInbox,
 	executeList,
 	executeMessageWait,
 	executeSend,
-	MAX_HUB_LIST_LIMIT,
 	messageResult,
 	messagingRenderCall,
 	messagingRenderResult,
 	normalizeIrcTimeoutMs,
 } from "./messaging";
-import { type HubDetails, type HubRenderArgs, hubErrorResult } from "./types";
+import {
+	DEFAULT_HUB_LIST_LIMIT,
+	type HubDetails,
+	type HubRenderArgs,
+	hubErrorResult,
+	MAX_HUB_LIST_LIMIT,
+} from "./types";
 
 export { isWaitingPollDetails } from "./jobs";
 export type { LaunchParams, LaunchToolDetails } from "./launch";
@@ -265,10 +269,15 @@ export class HubTool implements AgentTool<typeof hubSchema, HubDetails> {
 			case "list": {
 				const messaging = this.#messaging();
 				if (!messaging) return hubErrorResult("Peer messaging is unavailable in this session.", { op: "list" });
-				return executeList(messaging.registry, messaging.senderId, {
-					status: params.status,
-					limit: params.limit,
-				});
+				return executeList(
+					messaging.registry,
+					messaging.senderId,
+					{
+						status: params.status,
+						limit: params.limit,
+					},
+					this.session.getSessionFile(),
+				);
 			}
 			case "send": {
 				const toPeer = params.to?.trim();

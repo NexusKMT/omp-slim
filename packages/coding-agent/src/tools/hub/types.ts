@@ -42,6 +42,9 @@ export interface HubPeerInfo {
 
 /** Status values `op:"list"` can filter on. Advisor is a kind, not a status. */
 export type HubListStatus = "running" | "idle" | "parked";
+/** Model-facing roster bounds shared by the hub schema and executor. */
+export const DEFAULT_HUB_LIST_LIMIT = 32;
+export const MAX_HUB_LIST_LIMIT = 100;
 
 /** Addressable roster tallies always returned by `op:"list"`. */
 export interface HubRosterCounts {

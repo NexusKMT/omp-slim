@@ -378,6 +378,29 @@ describe("hub list", () => {
 		expect(fromChild.details.counts?.parked).toBe(1);
 		expect(fromChild.details.peers?.map(peer => peer.id)).not.toContain("ParkedScout");
 	});
+	it("restores a newly selected root when the registry outlives a session", async () => {
+		using tempDir = TempDir.createSync("@omp-hub-list-session-switch-");
+		const firstRoot = path.join(tempDir.path(), "first.jsonl");
+		const secondRoot = path.join(tempDir.path(), "second.jsonl");
+		await Bun.write(firstRoot, `${sessionHeader("first")}\n`);
+		await Bun.write(secondRoot, `${sessionHeader("second")}\n`);
+		await writeParkedTranscript(path.join(tempDir.path(), "first", "OldWorker.jsonl"), "old", "old task");
+		await writeParkedTranscript(path.join(tempDir.path(), "second", "NewWorker.jsonl"), "new", "new task");
+
+		const registry = new AgentRegistry();
+		registry.register({
+			id: MAIN_AGENT_ID,
+			displayName: MAIN_AGENT_ID,
+			kind: "main",
+			session: null,
+			sessionFile: firstRoot,
+			status: "running",
+		});
+
+		await executeList(registry, MAIN_AGENT_ID, { status: "parked" }, firstRoot);
+		const switched = await executeList(registry, MAIN_AGENT_ID, { status: "parked" }, secondRoot);
+		expect(switched.details?.peers?.map(peer => peer.id)).toContain("NewWorker");
+	});
 
 	it("clamps a positive fractional limit to at least one row", async () => {
 		const registry = new AgentRegistry();

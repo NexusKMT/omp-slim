@@ -31,18 +31,16 @@ import {
 } from "../render-utils";
 import {
 	type CoordinationDetails,
+	DEFAULT_HUB_LIST_LIMIT,
 	type HubListStatus,
 	type HubRenderArgs,
 	type HubRosterCounts,
+	MAX_HUB_LIST_LIMIT,
 	hubErrorResult,
 } from "./types";
+export { DEFAULT_HUB_LIST_LIMIT, MAX_HUB_LIST_LIMIT } from "./types";
 
 export const DEFAULT_IRC_TIMEOUT_MS = 120_000;
-
-/** Default model-facing roster page. Large enough for live siblings, far below parked leakage. */
-export const DEFAULT_HUB_LIST_LIMIT = 32;
-/** Hard cap so even explicit parked archaeology cannot dump hundreds of names. */
-export const MAX_HUB_LIST_LIMIT = 100;
 
 const LIST_STATUS_ORDER: Record<string, number> = { running: 0, idle: 1, parked: 2 };
 
@@ -146,8 +144,9 @@ export async function executeList(
 	registry: AgentRegistry,
 	senderId: string,
 	params: HubListParams = {},
+	sessionFileHint?: string | null,
 ): Promise<AgentToolResult<CoordinationDetails>> {
-	await ensurePersistedRoster(registry, registry.get(senderId)?.sessionFile);
+	await ensurePersistedRoster(registry, sessionFileHint ?? registry.get(senderId)?.sessionFile);
 	const refs = registry.list();
 
 	const selected = selectListRefs(registry, senderId, params.status);

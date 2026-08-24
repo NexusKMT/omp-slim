@@ -3200,9 +3200,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			if (ircEnabled) {
 				await ensurePersistedRoster(
 					AgentRegistry.global(),
-					AgentRegistry.global().get(MAIN_AGENT_ID)?.sessionFile ??
+					sessionFile ??
 						AgentRegistry.global().get(id)?.sessionFile ??
-						sessionFile,
+						AgentRegistry.global().get(MAIN_AGENT_ID)?.sessionFile,
 				);
 			}
 
@@ -3238,9 +3238,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					if (ircEnabled) {
 						await ensurePersistedRoster(
 							AgentRegistry.global(),
-							AgentRegistry.global().get(MAIN_AGENT_ID)?.sessionFile ??
+							sessionFile ??
 								AgentRegistry.global().get(id)?.sessionFile ??
-								sessionFile,
+								AgentRegistry.global().get(MAIN_AGENT_ID)?.sessionFile,
 						);
 					}
 					const { session: revived } = await createAgentSession(
