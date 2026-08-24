@@ -4093,7 +4093,7 @@ describe("lsp regressions", () => {
 		it("shutdownClientInstance reports a failed teardown when the process outlives the kill", async () => {
 			const tempDir = TempDir.createSync("@omp-lsp-teardown-delayed-");
 			try {
-				installFakeLsp(
+				const server = installFakeLsp(
 					(message, srv) => {
 						if (message.method === "initialize") {
 							srv.send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
@@ -4109,6 +4109,10 @@ describe("lsp regressions", () => {
 
 				const exited = await lspClient.shutdownClientInstance(client);
 				expect(exited).toBe(false);
+				expect(lspClient.getActiveClients().some(s => s.name === config.command)).toBe(true);
+
+				server.exit(0);
+				await Bun.sleep(0);
 				expect(lspClient.getActiveClients().some(s => s.name === config.command)).toBe(false);
 			} finally {
 				vi.restoreAllMocks();

@@ -1468,7 +1468,9 @@ export async function shutdownClientInstance(client: LspClient): Promise<boolean
 	}
 
 	client.proc.kill();
-	return await waitForExit(client, EXIT_TIMEOUT_MS);
+	const exited = await waitForExit(client, EXIT_TIMEOUT_MS);
+	if (!exited && !clients.has(client.name)) clients.set(client.name, client);
+	return exited;
 }
 
 /**
