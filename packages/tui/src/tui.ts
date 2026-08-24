@@ -647,7 +647,6 @@ export class TUI extends Container {
 				timer: RenderTimer;
 				epoch: number;
 				swallowedRow?: number;
-				swallowedEpoch?: number;
 				retried: boolean;
 		  }
 		| undefined;
@@ -671,14 +670,22 @@ export class TUI extends Container {
 	// CPR-timeout fallback in #resolveResizeAnchor).
 	#resizeBurstPull = 0;
 	// Geometry epoch: bumped on every resize transaction entry, so each CSI 6n
-	// request can be tagged with the geometry it was parked under. Terminals
-	// answer DSR in request order, so a consumed tag at the current epoch
-	// proves the reply (and every later one) is post-restart; an older tag is
-	// ambiguous under drops.
+	// request records the geometry it was parked under.
 	#geometryEpoch = 0;
-	// FIFO of geometry epochs for unanswered CSI 6n requests; replies are
-	// consumed from input while nonempty.
-	#cprRequestEpochs: number[] = [];
+	// Multiplexer CPR attribution: panes clip without rewrapping, so the
+	// parked cursor's column survives resizes. Each request parks a distinct
+	// column (CHA) before its CSI 6n; the terminal processes requests
+	// serially, so every reply carries its own request's column. That makes
+	// attribution exact even when replies are dropped — the failure FIFO
+	// counting cannot survive. Entries linger until answered or their column
+	// is reused; a late reply to a dead entry is stripped and discarded.
+	#cprColumnTags = new Map<number, number>();
+	#cprProbeSeq = 0;
+	// Direct terminals rewrap on width change, which can move a cursor parked
+	// on a nonzero column onto a different visual row, so their requests stay
+	// on column 1 and are counted FIFO; the staleRows clamp bounds the damage
+	// of any misattribution.
+	#pendingCprReplies = 0;
 	// Outstanding CPR replies that answer canceled probes; swallowed by
 	// #handleInput instead of resolving the active probe.
 	#staleCprReplies = 0;
@@ -1186,31 +1193,18 @@ export class TUI extends Container {
 				// A CPR-less multiplexer grow cannot be anchored safely: every
 				// choice inside the unknown pull span risks either overwriting
 				// pulled-back committed rows or leaving stale live rows behind.
-				// A swallowed reply is no better here — it may be the canceled
-				// pre-restart probe's answer (its own reply dropped), and
-				// trusting that stale row overwrites pulled-back history. A
-				// dropped DSR reply is a transient race, so discard the
-				// ambiguous row and ask once more before falling back.
+				// A dropped DSR reply is a transient race, so ask once more
+				// before falling back to the conservative bound.
 				this.#beginResizeAnchorProbe(true);
 				return;
 			}
-			// A canceled probe's reply may have been dropped entirely, in which
-			// case the reply swallowed as stale was actually this probe's own
-			// answer. Trust it when its consumed queue tag carries the current
-			// geometry epoch (order-preserved replies make that proof of
-			// post-restart geometry) or when the direct-terminal staleRows
-			// clamp bounds the damage; a multiplexer grow with an older tag
-			// falls back to the conservative pull bound instead.
-			const swallowedTrusted =
-				probe?.swallowedRow !== undefined &&
-				(probe.swallowedEpoch === probe.epoch || !(isInsideTerminalMultiplexer() && this.#resizeBurstGrew));
-			this.#resolveResizeAnchor(swallowedTrusted ? probe?.swallowedRow : undefined);
+			// Direct terminals only: a canceled probe's reply may have been
+			// dropped, in which case the reply swallowed as stale was actually
+			// this probe's own answer; the staleRows clamp bounds the damage
+			// when it really was stale. Multiplexer replies are column-tagged
+			// and never swallowed, so this is always undefined there.
+			this.#resolveResizeAnchor(probe?.swallowedRow);
 		}, TUI.#RESIZE_PROBE_TIMEOUT_MS);
-		// Replies still outstanding at arm time answer canceled probes against
-		// pre-restart geometry; they must be swallowed, not matched to this
-		// probe, or a delayed first reply anchors the settled repaint with the
-		// cursor row from before the latest resize.
-		this.#staleCprReplies = this.#cprRequestEpochs.length;
 		this.#resizeProbe = {
 			window: this.#resizeProbeWindow,
 			offset: this.#resizeProbeOffset,
@@ -1218,7 +1212,22 @@ export class TUI extends Container {
 			epoch: this.#geometryEpoch,
 			retried: retry,
 		};
-		this.#cprRequestEpochs.push(this.#geometryEpoch);
+		if (isInsideTerminalMultiplexer()) {
+			// Park a distinct column for this request so its reply is
+			// self-identifying. Column 1 is never used: it cannot be told apart
+			// from a spurious or clamped reply.
+			const span = Math.max(1, Math.min(30, this.terminal.columns - 1));
+			const column = 2 + (this.#cprProbeSeq++ % span);
+			this.#cprColumnTags.set(column, this.#geometryEpoch);
+			this.terminal.write(`\x1b[${column}G\x1b[6n`);
+			return;
+		}
+		// Replies still outstanding at arm time answer canceled probes against
+		// pre-restart geometry; they must be swallowed, not matched to this
+		// probe, or a delayed first reply anchors the settled repaint with the
+		// cursor row from before the latest resize.
+		this.#staleCprReplies = this.#pendingCprReplies;
+		this.#pendingCprReplies++;
 		this.terminal.write("\x1b[6n");
 	}
 
@@ -1246,13 +1255,14 @@ export class TUI extends Container {
 		if (!probe) return;
 		probe.timer.cancel();
 		this.#resizeProbe = undefined;
-		// This probing episode is over: any still-outstanding requests are dead
-		// to us, and leaving their tags queued would shift the next
-		// transaction's replies against phantom epochs — one genuinely dropped
-		// pair would poison every later grow into the conservative fallback. A
-		// dead reply arriving after this point is spurious input, exactly like
-		// any unsolicited CPR.
-		this.#cprRequestEpochs.length = 0;
+		// This direct-terminal probing episode is over: requests still counted
+		// are dead to us, and leaving them counted would swallow the next
+		// transaction's replies against phantoms — one genuinely dropped pair
+		// would poison every later resize. A dead reply arriving after this
+		// point is spurious input, exactly like any unsolicited CPR.
+		// Multiplexer column tags stay: their replies are self-identifying, so
+		// late arrivals are stripped and discarded by column instead.
+		this.#pendingCprReplies = 0;
 		this.#staleCprReplies = 0;
 		const width = this.terminal.columns;
 		const height = this.terminal.rows;
@@ -1736,23 +1746,36 @@ export class TUI extends Container {
 		// Consume CPR replies (CSI row;col R) while an anchor probe is unanswered;
 		// they are terminal reports, never keystrokes, and must not reach the
 		// focused component.
-		while (this.#cprRequestEpochs.length > 0) {
+		while (this.#pendingCprReplies > 0 || this.#cprColumnTags.size > 0) {
 			const match = data.match(/\x1b\[(\d+);(\d+)R/);
 			if (!match || match.index === undefined) break;
-			const tagEpoch = this.#cprRequestEpochs.shift();
-			if (this.#staleCprReplies > 0) {
-				// Answer to a canceled probe (see #beginResizeAnchorProbe). Keep
-				// the row and its queue tag: if this probe's own reply never
-				// arrives, the timeout fallback may still use it when the tag
-				// proves post-restart geometry (or the context bounds the risk).
-				this.#staleCprReplies--;
-				if (this.#resizeProbe) {
-					this.#resizeProbe.swallowedRow = Number(match[1]) - 1;
-					this.#resizeProbe.swallowedEpoch = tagEpoch;
+			const column = Number(match[2]);
+			if (this.#cprColumnTags.has(column)) {
+				// Column-tagged multiplexer reply: exact attribution. Resolve
+				// only when its request was parked under the active probe's
+				// geometry; a reply from an older epoch is stale and discarded.
+				const tagEpoch = this.#cprColumnTags.get(column);
+				this.#cprColumnTags.delete(column);
+				const probe = this.#resizeProbe;
+				if (probe !== undefined && tagEpoch === probe.epoch) {
+					this.#resolveResizeAnchor(Number(match[1]) - 1);
 				}
-			} else {
-				this.#resolveResizeAnchor(Number(match[1]) - 1);
+			} else if (this.#pendingCprReplies > 0) {
+				this.#pendingCprReplies--;
+				if (this.#staleCprReplies > 0) {
+					// Answer to a canceled probe (see #beginResizeAnchorProbe).
+					// Keep the row: if this probe's own reply never arrives, the
+					// timeout fallback prefers it over the pre-resize viewport
+					// top, and the staleRows clamp bounds the damage.
+					this.#staleCprReplies--;
+					if (this.#resizeProbe) this.#resizeProbe.swallowedRow = Number(match[1]) - 1;
+				} else {
+					this.#resolveResizeAnchor(Number(match[1]) - 1);
+				}
 			}
+			// Unknown-column replies while expecting only tagged ones are our
+			// requests answered with a clamped or mangled column: strip and
+			// discard; the probe timeout covers recovery.
 			data = data.slice(0, match.index) + data.slice(match.index + match[0].length);
 		}
 		if (data.length === 0) return;

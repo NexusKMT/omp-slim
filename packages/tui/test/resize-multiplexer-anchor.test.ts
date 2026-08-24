@@ -159,7 +159,7 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		terminal.resize(40, 6);
 		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
 		writes.length = 0;
-		terminal.sendInput("\x1b[6;1R"); // parked cursor: real viewport top, row 5
+		terminal.sendInput("\x1b[6;2R"); // parked cursor: real viewport top, row 5
 		const repaint = writes.join("");
 		const cup = repaint.match(/\x1b\[(\d+);1H/);
 		expect(cup).not.toBeNull();
@@ -211,18 +211,17 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		tui.stop();
 	});
 
-	it("resolves a CPR-less grow from the retried probe's reply", () => {
-		// The original probe's reply is merely late: it lands after the retry
-		// is armed (swallowed as stale, pre-grow row), and the retry's own
-		// reply then resolves the anchor eagerly at the true post-pull row.
+	it("resolves a CPR-less grow from the original probe's late reply", () => {
+		// The original probe's reply is merely late: it lands only after the
+		// retry is armed. Its column tag still carries the current geometry
+		// epoch (no restart happened), so it resolves the anchor eagerly —
+		// same geometry, valid answer.
 		const { terminal, tui, renderScheduler, writes } = startRig();
 		terminal.resize(40, 20);
 		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
 		renderScheduler.settle(); // first timeout: no reply -> one bounded retry
 		writes.length = 0;
-		terminal.sendInput("\x1b[4;1R"); // late original reply: swallowed
-		expect(writes.join("")).not.toMatch(/\x1b\[\d+;1H/);
-		terminal.sendInput("\x1b[8;1R"); // retry's reply: parked cursor at row 7
+		terminal.sendInput("\x1b[8;2R"); // original probe's late reply: same epoch
 		const repaint = writes.join("");
 		const cup = repaint.match(/\x1b\[(\d+);1H/);
 		expect(cup).not.toBeNull();
@@ -230,11 +229,11 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		tui.stop();
 	});
 
-	it("discards a pre-restart swallowed reply instead of trusting it", () => {
+	it("discards a pre-restart reply instead of trusting it", () => {
 		// Mirror ordering of the dropped-reply case: probe A's late reply
-		// arrives (swallowed, pre-restart row 3) while probe B's own reply is
-		// dropped. Trusting the swallowed row would anchor at 3 (CUP row 4)
-		// and overwrite pulled-back history; the timeout must discard it and
+		// arrives (pre-restart column tag, row 3) while probe B's own reply
+		// is dropped. Trusting the stale row would anchor at 3 (CUP row 4)
+		// and overwrite pulled-back history; attribution must discard it,
 		// retry, and with the retry also unanswered fall back to the
 		// accumulated pull bound 3 + 8 = 11 (CUP row 12).
 		const { terminal, tui, renderScheduler, writes } = startRig();
@@ -242,9 +241,9 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		renderScheduler.settle(); // exit the resize alt borrow, start probe A
 		terminal.resize(40, 18); // mid-probe restart: cancels A, starts a new borrow
 		renderScheduler.settle(); // exit the second borrow, start probe B
-		terminal.sendInput("\x1b[4;1R"); // A's late reply: swallowed, pre-restart row
+		terminal.sendInput("\x1b[4;2R"); // A's late reply: pre-restart tag, discarded
 		writes.length = 0;
-		renderScheduler.settle(); // B's timeout: ambiguous swallow -> one bounded retry
+		renderScheduler.settle(); // B's timeout: no valid reply -> one bounded retry
 		expect(writes.join("")).toContain("\x1b[6n");
 		expect(writes.join("")).not.toMatch(/\x1b\[\d+;1H/);
 		renderScheduler.settle(); // retry timeout: conservative fallback
@@ -255,21 +254,19 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		tui.stop();
 	});
 
-	it("resolves from a reply swallowed during the retry window", () => {
-		// Same mirror ordering, but a post-restart reply lands during the
-		// retry window: swallowed (attributed to the dropped probe B), it is
-		// still post-restart geometry, so the retry timeout must anchor from
-		// it rather than the conservative bound.
+	it("resolves from probe B's reply arriving during the retry window", () => {
+		// Same mirror ordering, but the dropped-thought probe B answers during
+		// the retry window: its column tag carries the post-restart epoch, so
+		// it resolves the anchor eagerly instead of waiting for the timeout.
 		const { terminal, tui, renderScheduler, writes } = startRig();
 		terminal.resize(40, 20);
 		renderScheduler.settle(); // exit the resize alt borrow, start probe A
 		terminal.resize(40, 18); // mid-probe restart: cancels A, starts a new borrow
 		renderScheduler.settle(); // exit the second borrow, start probe B
-		terminal.sendInput("\x1b[4;1R"); // A's late reply: swallowed, discarded at retry
-		renderScheduler.settle(); // B's timeout: ambiguous swallow -> one bounded retry
-		terminal.sendInput("\x1b[10;1R"); // post-restart reply: swallowed but trustworthy
+		terminal.sendInput("\x1b[4;2R"); // A's late reply: pre-restart tag, discarded
+		renderScheduler.settle(); // B's timeout: no valid reply -> one bounded retry
 		writes.length = 0;
-		renderScheduler.settle(); // retry timeout -> resolve from the swallowed row
+		terminal.sendInput("\x1b[10;3R"); // B's own late reply: post-restart epoch
 		const repaint = writes.join("");
 		const cup = repaint.match(/\x1b\[(\d+);1H/);
 		expect(cup).not.toBeNull();
@@ -290,7 +287,7 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		terminal.resize(40, 20); // mid-probe restart: cancels A, starts a new borrow
 		renderScheduler.settle(); // exit the second borrow, start probe B
 		renderScheduler.settle(); // B's timeout: no reply -> one bounded retry
-		terminal.sendInput("\x1b[4;1R"); // A's very late reply: pre-restart tag
+		terminal.sendInput("\x1b[4;2R"); // A's very late reply: pre-restart tag
 		writes.length = 0;
 		renderScheduler.settle(); // retry timeout: reject the stale row, use the bound
 		const repaint = writes.join("");
@@ -317,7 +314,7 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		terminal.resize(40, 26); // a later responsive grow
 		renderScheduler.settle(); // exit the borrow, start a fresh probe
 		writes.length = 0;
-		terminal.sendInput("\x1b[10;1R"); // prompt reply: must resolve eagerly
+		terminal.sendInput("\x1b[10;4R"); // prompt reply: must resolve eagerly
 		const repaint = writes.join("");
 		const cup = repaint.match(/\x1b\[(\d+);1H/);
 		expect(cup).not.toBeNull();
@@ -325,17 +322,15 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		tui.stop();
 	});
 
-	it("recovers the retried probe's swallowed reply when the original was dropped", () => {
-		// The original reply never arrives, so the retry's own reply is
-		// swallowed as presumed-stale; the retry timeout must anchor from it
-		// rather than the conservative bound.
+	it("resolves eagerly from the retry's reply when the original was dropped", () => {
+		// The original reply never arrives; the retry's own reply is exactly
+		// attributable by its column tag and resolves the anchor immediately.
 		const { terminal, tui, renderScheduler, writes } = startRig();
 		terminal.resize(40, 20);
 		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
 		renderScheduler.settle(); // first timeout: no reply -> one bounded retry
-		terminal.sendInput("\x1b[8;1R"); // retry's reply: swallowed as presumed-stale
 		writes.length = 0;
-		renderScheduler.settle(); // retry timeout -> resolve from the swallowed row
+		terminal.sendInput("\x1b[8;3R"); // retry's reply: exact attribution
 		const repaint = writes.join("");
 		const cup = repaint.match(/\x1b\[(\d+);1H/);
 		expect(cup).not.toBeNull();
