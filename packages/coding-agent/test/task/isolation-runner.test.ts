@@ -319,7 +319,7 @@ describe("runIsolatedSubprocess", () => {
 		});
 		const cleanupSpy = vi.spyOn(worktreeModule, "cleanupIsolation").mockResolvedValue();
 
-		const outcome = await runIsolatedSubprocess({
+		const run = runIsolatedSubprocess({
 			baseOptions: {
 				cwd: "/repo",
 				agent: { name: "task", description: "Task agent", systemPrompt: "test", source: "bundled" },
@@ -335,16 +335,18 @@ describe("runIsolatedSubprocess", () => {
 			buildFailureResult: err => result({ exitCode: 1, error: String(err) }),
 		});
 
+		// Capture waits until every deferred writer has settled.
+		await Promise.resolve();
+		expect(captureSpy).not.toHaveBeenCalled();
+		expect(cleanupSpy).not.toHaveBeenCalled();
+		cleanupGate.resolve();
+		const outcome = await run;
+
 		const patchPath = path.join(artifactsDir, "DeferredSuccess.patch");
-		// The successful result is preserved and its work captured, not discarded.
 		expect(outcome.exitCode).toBe(0);
 		expect(outcome.patchPath).toBe(patchPath);
 		expect(await Bun.file(patchPath).text()).toBe(rootPatch);
 		expect(captureSpy).toHaveBeenCalledWith("/repo/isolated", baseline);
-		// Worktree teardown stays deferred until the late cleanup settles.
-		expect(cleanupSpy).not.toHaveBeenCalled();
-		cleanupGate.resolve();
-		await cleanupGate.promise;
 		await Promise.resolve();
 		await Promise.resolve();
 		expect(cleanupSpy).toHaveBeenCalledTimes(1);
