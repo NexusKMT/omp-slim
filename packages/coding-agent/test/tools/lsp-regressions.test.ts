@@ -3563,17 +3563,17 @@ describe("lsp regressions", () => {
 
 			// A failed destination probe never established that the path is free,
 			// so treating it as absent would rename onto a file we cannot see.
-			const realStat = fs.promises.stat;
-			vi.spyOn(fs.promises, "stat").mockImplementation((async (target: fs.PathLike) => {
+			const realLstat = fs.promises.lstat;
+			vi.spyOn(fs.promises, "lstat").mockImplementation((async (target: fs.PathLike) => {
 				if (target === destFile) {
 					throw Object.assign(new Error(`permission denied: ${destFile}\tsecret`), {
 						code: "EACCES",
 						path: destFile,
-						syscall: "stat",
+						syscall: "lstat",
 					});
 				}
-				return await realStat(target);
-			}) as typeof fs.promises.stat);
+				return await realLstat(target);
+			}) as typeof fs.promises.lstat);
 
 			const tool = new LspTool(makeLspSession(tempDir.path()));
 			const result = await tool.execute("rename-dest-eacces", {
@@ -3584,7 +3584,7 @@ describe("lsp regressions", () => {
 			});
 
 			const output = textResult(result);
-			expect(output).toContain("cannot read destination path new.ts: EACCES during stat");
+			expect(output).toContain("cannot read destination path new.ts: EACCES during lstat");
 			expect(output).not.toContain(tempDir.path());
 			expect(output).not.toContain("\t");
 			expect(result.details).toMatchObject({ action: "rename_file", success: false });
