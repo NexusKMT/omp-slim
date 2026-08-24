@@ -585,27 +585,24 @@ async function streamDiff(
 }
 
 it(
-	"dispatches and time-slices large-target edit prechecks",
+	"keeps the event loop responsive while prechecking a large-target edit",
 	async () => {
 		const abortCalls = { count: 0 };
 		const { target, removedLines, guard, makeEvent } = await createLargeTargetSetup(abortCalls);
 		const content = await Bun.file(target).text();
 		const { promise: heldLoad, resolve: releaseLoad } = Promise.withResolvers<string>();
-		const { promise: resumeScan, resolve: releaseScan } = Promise.withResolvers<void>();
 		const realFile = Bun.file.bind(Bun);
 		const fileSpy = vi.spyOn(Bun, "file").mockImplementation(((pathLike: string) => ({
 			text: () => (pathLike === target ? heldLoad : realFile(pathLike).text()),
 		})) as typeof Bun.file);
+		// Advance the guard's slice clock deterministically so the scan crosses its
+		// time-slice boundary after each line regardless of real scan duration; the
+		// responsiveness contract below is proven by an external task, not by the
+		// clock or the guard's internal yield count.
 		let nowMs = 0;
 		const clockSpy = vi.spyOn(performance, "now").mockImplementation(() => {
 			nowMs += 3;
 			return nowMs;
-		});
-		let yieldCount = 0;
-		const sleepSpy = vi.spyOn(Bun, "sleep").mockImplementation(async duration => {
-			if (duration !== 0) return;
-			yieldCount += 1;
-			if (yieldCount === 1) await resumeScan;
 		});
 
 		try {
@@ -614,29 +611,31 @@ it(
 			guard.preCache(event);
 			guard.maybeAbort(event);
 
-			// The streaming callback returns while the async target load is pending.
+			// The streaming callback returns while the async target load is pending:
+			// no synchronous scan blocks the caller.
 			expect(guard.abortTriggered).toBe(false);
 			expect(abortCalls.count).toBe(0);
 
+			// Release the load, then race an independently scheduled macrotask against
+			// the removed-lines scan. The absent line sits at the tail: a scan that
+			// blocked the loop would reach it and abort before any other task could
+			// run, so the beacon would observe an already-aborted guard. A responsive
+			// scan yields first, letting the beacon run mid-flight.
 			releaseLoad(content);
-			await drainMacrotasks(1);
+			const beacon = Promise.withResolvers<boolean>();
+			setImmediate(() => beacon.resolve(guard.abortTriggered));
+			const abortedWhenBeaconRan = await beacon.promise;
+			expect(abortedWhenBeaconRan).toBe(false);
 
-			// The forced 2ms slice boundary yields before reaching the absent tail
-			// line, rather than scanning the whole target in one continuation.
-			expect(yieldCount).toBe(1);
-			expect(guard.abortTriggered).toBe(false);
-
-			releaseScan();
-			await drainMacrotasks(1);
-
-			expect(yieldCount).toBeGreaterThan(1);
+			// Draining the remaining slices completes the scan and surfaces the abort
+			// the absent tail line must trigger.
+			for (let i = 0; i < 400 && !guard.abortTriggered; i += 1) {
+				await drainMacrotasks(1);
+			}
 			expect(guard.abortTriggered).toBe(true);
 			expect(abortCalls.count).toBe(1);
 		} finally {
 			releaseLoad(content);
-			releaseScan();
-			await drainMacrotasks(1);
-			sleepSpy.mockRestore();
 			clockSpy.mockRestore();
 			fileSpy.mockRestore();
 		}
