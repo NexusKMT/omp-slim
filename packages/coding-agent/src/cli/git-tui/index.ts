@@ -12,8 +12,9 @@
  * clicks/wheel. All toolbar buttons are clickable and mirrored by keys:
  * `v` cycles the view (`1`–`4` pick one), `alt+↓`/`alt+↑` jump hunks and roll
  * into the adjacent file at the edges, `]`/`[` switch files, `s`/`u`
- * stage/unstage (hunk-aware), `x` discards a hunk, `w` wraps, `b` toggles
- * whitespace-insensitive alignment, `c` jumps to the commit form, `r`
+ * stage/unstage (hunk-aware), `x` discards a hunk, `w` wraps, `b` cycles
+ * whitespace handling (exact → ignore whitespace → ignore
+ * formatting/import-only changes), `c` jumps to the commit form, `r`
  * refreshes. In the sidebar tree `←`/`→` collapse/expand directories and
  * `enter` opens the selected file in the diff pane.
  */
@@ -37,6 +38,7 @@ import {
 	type HunkAction,
 	type HunkBlock,
 	type ViewMode,
+	type WhitespaceMode,
 } from "./diff-pane";
 import { Sidebar, type SidebarAction } from "./sidebar";
 import type { FileContents } from "./state";
@@ -107,7 +109,7 @@ class GitTuiComponent implements Component {
 	#focus: Focus = "sidebar";
 	#currentFile: ChangedFile | null = null;
 	#contents: FileContents | null = null;
-	#ignoreWhitespace = false;
+	#whitespace: WhitespaceMode = "off";
 	#loadSeq = 0;
 	#loadAbort: AbortController | null = null;
 	#highlightAbort: AbortController | null = null;
@@ -258,7 +260,7 @@ class GitTuiComponent implements Component {
 		else {
 			this.#pane.setDocument(
 				buildDiffDocument(contents.oldText, contents.newText, file.path, {
-					ignoreWhitespace: this.#ignoreWhitespace,
+					whitespace: this.#whitespace,
 					streamResult: contents.streamResult ?? undefined,
 				}),
 				"ready",
@@ -404,8 +406,20 @@ class GitTuiComponent implements Component {
 		this.#ui.requestRender();
 	}
 
-	#toggleWhitespace(): void {
-		this.#ignoreWhitespace = !this.#ignoreWhitespace;
+	/** `b`/toolbar chip: exact → ignore whitespace → ignore formatting/imports. */
+	#cycleWhitespace(): void {
+		this.#whitespace =
+			this.#whitespace === "off" ? "whitespace" : this.#whitespace === "whitespace" ? "formatting" : "off";
+		this.#setStatus(
+			theme.fg(
+				"dim",
+				this.#whitespace === "off"
+					? "Showing all changes"
+					: this.#whitespace === "whitespace"
+						? "Ignoring whitespace-only line changes"
+						: "Ignoring formatting and import-only changes",
+			),
+		);
 		this.#rebuildDocument();
 	}
 	/** Alt+Down/Up: next/prev hunk, rolling into the adjacent file at the edges. */
@@ -468,7 +482,7 @@ class GitTuiComponent implements Component {
 				this.#ui.requestRender();
 				return;
 			}
-			if (data === "b") return this.#toggleWhitespace();
+			if (data === "b") return this.#cycleWhitespace();
 			if (data === "r") return void this.#refresh(true);
 			if (data === "c") {
 				if (this.#sidebar.focusCommitForm()) this.#setFocus("sidebar");
@@ -661,7 +675,10 @@ class GitTuiComponent implements Component {
 		}
 
 		const right = new HitRow();
-		right.button(chip(glyphs.ws, this.#ignoreWhitespace), () => this.#toggleWhitespace());
+		right.button(
+			chip(this.#whitespace === "formatting" ? `${glyphs.ws}+` : glyphs.ws, this.#whitespace !== "off"),
+			() => this.#cycleWhitespace(),
+		);
 		right.add(" ");
 		right.button(chip(glyphs.wrap, this.#pane.wrap), () => {
 			this.#pane.toggleWrap();

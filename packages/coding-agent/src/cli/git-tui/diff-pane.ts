@@ -115,10 +115,66 @@ function pushRange(ranges: [number, number][], start: number, end: number): void
 	else ranges.push([start, end]);
 }
 
+/**
+ * Whitespace handling for {@link buildDiffDocument}:
+ *
+ * - `off`: exact, byte-level alignment.
+ * - `whitespace`: align ignoring leading/trailing whitespace (disables hunk
+ *   patches — the alignment no longer matches git's view of the file).
+ * - `formatting`: exact alignment, but changed blocks that only move
+ *   whitespace around (indentation, line splits/joins, blank lines) or only
+ *   touch import statements (ts/js, rust, go) are demoted to context.
+ */
+export type WhitespaceMode = "off" | "whitespace" | "formatting";
+
+/** Languages with import-statement demotion under formatting-ignore. */
+type ImportLang = "ts" | "rust" | "go";
+
+const IMPORT_LANG_BY_EXT: Record<string, ImportLang> = {
+	ts: "ts",
+	tsx: "ts",
+	mts: "ts",
+	cts: "ts",
+	js: "ts",
+	jsx: "ts",
+	mjs: "ts",
+	cjs: "ts",
+	rs: "rust",
+	go: "go",
+};
+
+/**
+ * Per-language import recognition. `starter` marks a line that begins an
+ * import statement; `continuation` admits inner/closing lines of multi-line
+ * import blocks. A changed block is import-only when every changed line
+ * matches either pattern and at least one matches `starter`.
+ * `removable` matches self-contained import statement lines that may be
+ * dropped before re-comparing a mixed block as a pure reflow.
+ */
+const IMPORT_LINES: Record<ImportLang, { starter: RegExp; continuation: RegExp; removable: RegExp }> = {
+	ts: {
+		starter: /^import\b|^export\s+(?:type\s+)?(?:\*(?:\s+as\s+[\w$]+)?|\{[^}]*\})\s*from\s*["']/,
+		continuation:
+			/^(?:type\s+)?[\w$]+(?:\s+as\s+[\w$]+)?\s*,?$|^\}\s*from\s*["'][^"']*["'](?:\s*with\s*\{[^}]*\})?\s*;?$/,
+		removable:
+			/^import\b[^"']*["'][^"']*["'][^"']*$|^export\s+(?:type\s+)?(?:\*(?:\s+as\s+[\w$]+)?|\{[^}]*\})\s*from\s*["'][^"']*["']\s*;?$|^\}\s*from\s*["'][^"']*["'](?:\s*with\s*\{[^}]*\})?\s*;?$/,
+	},
+	rust: {
+		starter: /^(?:pub(?:\([^)]*\))?\s+)?use\b|^extern\s+crate\b/,
+		continuation: /^[\w:*{},\s]+;?$/,
+		removable: /^(?:pub(?:\([^)]*\))?\s+)?use\b[^;]*;$|^extern\s+crate\s+[^;]+;$/,
+	},
+	go: {
+		starter: /^import\b/,
+		continuation: /^(?:[\w.]+\s+)?"[^"]+"\s*,?$|^[()]$/,
+		removable: /^import\b.*$|^(?:[\w.]+\s+)?"[^"]+"$|^\)$/,
+	},
+};
+
 /** Options for {@link buildDiffDocument}. */
 export interface DiffBuildOptions {
-	/** Align ignoring leading/trailing whitespace (disables hunk patches). */
-	ignoreWhitespace?: boolean;
+	/** Whitespace handling; defaults to `off`. */
+	whitespace?: WhitespaceMode;
 	/** Exact runs/hunks already computed by the native streaming differ. */
 	streamResult?: DiffStreamResult;
 }
@@ -130,7 +186,12 @@ export function buildDiffDocument(
 	filePath: string,
 	options: DiffBuildOptions = {},
 ): DiffDocument {
-	const ignoreWs = options.ignoreWhitespace === true;
+	const mode = options.whitespace ?? "off";
+	const ignoreWs = mode === "whitespace";
+	const ignoreFormatting = mode === "formatting";
+	const dot = filePath.lastIndexOf(".");
+	const importLang =
+		ignoreFormatting && dot >= 0 ? (IMPORT_LANG_BY_EXT[filePath.slice(dot + 1).toLowerCase()] ?? null) : null;
 	const oldLines = oldRaw.length === 0 ? [] : oldRaw.replace(/\n$/, "").split("\n");
 	const newLines = newRaw.length === 0 ? [] : newRaw.replace(/\n$/, "").split("\n");
 	const oldPlain = oldLines.map(replaceTabs);
@@ -175,6 +236,55 @@ export function buildDiffDocument(
 			newRaw: newIdx === undefined ? undefined : newLines[newIdx],
 		};
 	};
+	/** True when a changed block should demote to context under formatting-ignore. */
+	const demoteBlock = (dels: number[], adds: number[]): boolean => {
+		if (!ignoreFormatting) return false;
+		const stripBlock = (lines: string[], indices: number[], removable: RegExp | null): string => {
+			let out = "";
+			for (const idx of indices) {
+				const raw = lines[idx] ?? "";
+				if (removable?.test(raw.trim())) continue;
+				out += raw.replace(/\s+/g, "");
+			}
+			return out;
+		};
+		if (stripBlock(oldLines, dels, null) === stripBlock(newLines, adds, null)) return true;
+		if (!importLang) return false;
+		const { starter, continuation, removable } = IMPORT_LINES[importLang];
+		let sawImport = false;
+		const importish = (lines: string[], indices: number[]): boolean => {
+			for (const idx of indices) {
+				const line = (lines[idx] ?? "").trim();
+				if (line.length === 0) continue;
+				if (starter.test(line)) sawImport = true;
+				else if (!continuation.test(line)) return false;
+			}
+			return true;
+		};
+		if (importish(oldLines, dels) && importish(newLines, adds) && sawImport) return true;
+		// Mixed block: whole-line import statements dropped, the remainder must
+		// be a pure whitespace reflow for the block to stay hidden.
+		return stripBlock(oldLines, dels, removable) === stripBlock(newLines, adds, removable);
+	};
+
+	/** Pair a pending del/add block into rows; ignored blocks become context. */
+	const flushBlock = (rows: DiffRow[], dels: number[], adds: number[], count: boolean): void => {
+		if (dels.length === 0 && adds.length === 0) return;
+		const paired = Math.min(dels.length, adds.length);
+		if (demoteBlock(dels, adds)) {
+			for (let i = 0; i < paired; i++) rows.push(makeRow("context", dels[i], adds[i]));
+			for (let i = paired; i < dels.length; i++) rows.push(makeRow("context", dels[i], undefined));
+			for (let i = paired; i < adds.length; i++) rows.push(makeRow("context", undefined, adds[i]));
+			return;
+		}
+		if (count) {
+			deletions += dels.length;
+			additions += adds.length;
+		}
+		for (let i = 0; i < paired; i++) rows.push(makeRow("change", dels[i], adds[i]));
+		for (let i = paired; i < dels.length; i++) rows.push(makeRow("del", dels[i], undefined));
+		for (let i = paired; i < adds.length; i++) rows.push(makeRow("add", undefined, adds[i]));
+	};
 
 	/** Walk one structured hunk into aligned rows (shared by both passes). */
 	const walkHunk = (hunk: { oldStart: number; newStart: number; lines: string[] }, count: boolean): DiffRow[] => {
@@ -184,10 +294,7 @@ export function buildDiffDocument(
 		let pendingDel: number[] = [];
 		let pendingAdd: number[] = [];
 		const flush = (): void => {
-			const paired = Math.min(pendingDel.length, pendingAdd.length);
-			for (let i = 0; i < paired; i++) rows.push(makeRow("change", pendingDel[i], pendingAdd[i]));
-			for (let i = paired; i < pendingDel.length; i++) rows.push(makeRow("del", pendingDel[i], undefined));
-			for (let i = paired; i < pendingAdd.length; i++) rows.push(makeRow("add", undefined, pendingAdd[i]));
+			flushBlock(rows, pendingDel, pendingAdd, count);
 			pendingDel = [];
 			pendingAdd = [];
 		};
@@ -195,12 +302,10 @@ export function buildDiffDocument(
 			const tag = line[0];
 			if (tag === "\\") continue;
 			if (tag === "-") {
-				if (count) deletions++;
 				touch(oldPlain[oldNum - 1]);
 				pendingDel.push(oldNum - 1);
 				oldNum++;
 			} else if (tag === "+") {
-				if (count) additions++;
 				touch(newPlain[newNum - 1]);
 				pendingAdd.push(newNum - 1);
 				newNum++;
@@ -225,13 +330,7 @@ export function buildDiffDocument(
 		let pendingDel: number[] = [];
 		let pendingAdd: number[] = [];
 		const flush = (): void => {
-			const paired = Math.min(pendingDel.length, pendingAdd.length);
-			for (let index = 0; index < paired; index++)
-				rows.push(makeRow("change", pendingDel[index], pendingAdd[index]));
-			for (let index = paired; index < pendingDel.length; index++)
-				rows.push(makeRow("del", pendingDel[index], undefined));
-			for (let index = paired; index < pendingAdd.length; index++)
-				rows.push(makeRow("add", undefined, pendingAdd[index]));
+			flushBlock(rows, pendingDel, pendingAdd, true);
 			pendingDel = [];
 			pendingAdd = [];
 		};
@@ -240,13 +339,11 @@ export function buildDiffDocument(
 				for (let index = 0; index < run.count; index++) {
 					touch(oldPlain[oldIndex]);
 					pendingDel.push(oldIndex++);
-					deletions++;
 				}
 			} else if (run.added) {
 				for (let index = 0; index < run.count; index++) {
 					touch(newPlain[newIndex]);
 					pendingAdd.push(newIndex++);
-					additions++;
 				}
 			} else {
 				flush();
@@ -274,13 +371,17 @@ export function buildDiffDocument(
 	// cannot use the raw streamed result because its equality basis differs.
 	const canPatch = !ignoreWs;
 	const tightHunks = streamed?.hunks ?? structuredPatchHunks(oldBasis, newBasis, DIFF_CONTEXT_LINES);
-	const hunks: HunkBlock[] = tightHunks.map(hunk => ({
+	const allHunks: HunkBlock[] = tightHunks.map(hunk => ({
 		header: `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`,
 		patch: canPatch
 			? `--- a/${filePath}\n+++ b/${filePath}\n@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@\n${hunk.lines.join("\n")}\n`
 			: "",
 		rows: walkHunk(hunk, false),
 	}));
+	// Formatting-ignore: hunks whose every changed block was demoted vanish
+	// from the hunk view; mixed hunks stay (their patches include the
+	// formatting noise — staging follows git's real content).
+	const hunks = ignoreFormatting ? allHunks.filter(hunk => hunk.rows.some(row => row.kind !== "context")) : allHunks;
 
 	const fileLines = newPlain.map(line => ({ text: line, width: visibleWidth(line) }));
 	const gutterWidth = Math.max(3, String(Math.max(oldLines.length, newLines.length)).length);
@@ -335,9 +436,13 @@ export function buildLineSelectionPatch(
 		if (selected && row.kind !== "context") touched = true;
 		const useNew = intent === "apply" ? selected : !selected;
 		switch (row.kind) {
-			case "context":
-				target.push(row.oldRaw ?? "");
+			case "context": {
+				// Formatting-demoted rows can be one-sided or differ across
+				// sides; the target must mirror the patch base outside changes.
+				const line = intent === "apply" ? row.oldRaw : row.newRaw;
+				if (line !== undefined) target.push(line);
 				break;
+			}
 			case "change":
 				target.push((useNew ? row.newRaw : row.oldRaw) ?? "");
 				break;
@@ -995,7 +1100,9 @@ export class DiffPane {
 	}
 
 	#displayText(row: DiffRow, side: "old" | "new" | "both"): string {
-		const actualSide = side === "old" ? "old" : "new";
+		// "both" prefers the new side; formatting-demoted one-sided context
+		// rows may only carry an old side.
+		const actualSide = side === "old" || (side === "both" && row.newNum === undefined) ? "old" : "new";
 		const number = actualSide === "old" ? row.oldNum : row.newNum;
 		const plain = actualSide === "old" ? row.oldText : row.newText;
 		return number === undefined ? plain : (this.#highlights?.[actualSide][number - 1] ?? plain);
