@@ -534,40 +534,93 @@ export class DiffPane {
 		this.#clampScroll();
 	}
 
-	/** Jump to the next/previous hunk; selects it in hunk view. */
-	jumpHunk(direction: 1 | -1): void {
+	/** Jump to the next/previous hunk. False when already at the boundary. */
+	jumpHunk(direction: 1 | -1): boolean {
+		const doc = this.#doc;
+		if (!doc || doc.hunks.length === 0) return false;
+		const visuals = this.#layout(this.#lastWidth || 80);
+		if (this.mode === "hunk") {
+			const next = this.selectedHunk + direction;
+			if (next < 0 || next >= doc.hunks.length) return false;
+			this.#focusHunkHeader(next, visuals);
+			return true;
+		}
+		// Other modes: jump between change blocks.
+		const starts = this.#changeStarts(visuals);
+		const reference = this.cursor;
+		const next =
+			direction > 0
+				? starts.find(start => start > reference)
+				: [...starts].reverse().find(start => start < reference);
+		if (next === undefined) return false;
+		this.#focusChange(next);
+		return true;
+	}
+
+	/** Snap to the first/last hunk — the landing spot when hunk nav crosses files. */
+	seekHunk(edge: "first" | "last"): void {
 		const doc = this.#doc;
 		if (!doc || doc.hunks.length === 0) return;
 		const visuals = this.#layout(this.#lastWidth || 80);
 		if (this.mode === "hunk") {
-			this.selectedHunk = Math.max(0, Math.min(doc.hunks.length - 1, this.selectedHunk + direction));
-			const header = visuals.findIndex(visual => visual.t === "header" && visual.hunk === this.selectedHunk);
-			if (header >= 0) {
-				this.cursor = header;
-				this.anchor = null;
-				this.scrollTop = Math.max(0, header - 1);
-				this.#clampScroll();
-			}
+			this.#focusHunkHeader(edge === "first" ? 0 : doc.hunks.length - 1, visuals);
 			return;
 		}
-		// Other modes: jump between change blocks.
+		const starts = this.#changeStarts(visuals);
+		if (starts.length === 0) return;
+		this.#focusChange(edge === "first" ? starts[0] : starts[starts.length - 1]);
+	}
+
+	/** Move the cursor to the first/last visual row (home/end, `g`/`G`). */
+	cursorToEdge(edge: "start" | "end"): void {
+		const total = this.#total();
+		if (total === 0) return;
+		this.anchor = null;
+		this.cursor = edge === "start" ? 0 : total - 1;
+		if (this.cursor < this.scrollTop) this.scrollTop = this.cursor;
+		if (this.cursor >= this.scrollTop + this.#lastHeight) this.scrollTop = this.cursor - this.#lastHeight + 1;
+		this.#clampScroll();
+	}
+
+	/** Select a hunk in hunk view and scroll its header into view. */
+	#focusHunkHeader(index: number, visuals: Visual[]): void {
+		this.selectedHunk = index;
+		const header = visuals.findIndex(visual => visual.t === "header" && visual.hunk === index);
+		if (header >= 0) {
+			this.cursor = header;
+			this.anchor = null;
+			this.scrollTop = Math.max(0, header - 1);
+			this.#clampScroll();
+		}
+	}
+
+	/** First visual row of every change block, in document order. */
+	#changeStarts(visuals: Visual[]): number[] {
 		const starts: number[] = [];
 		let inChange = false;
 		for (let i = 0; i < visuals.length; i++) {
-			const kind = visualKind(visuals[i]);
+			const kind = this.#changeKind(visuals[i]);
 			const changed = kind !== "context" && kind !== null;
 			if (changed && !inChange) starts.push(i);
 			inChange = changed;
 		}
-		if (starts.length === 0) return;
-		const reference = this.cursor;
-		const next =
-			direction > 0
-				? (starts.find(start => start > reference) ?? starts[starts.length - 1])
-				: ([...starts].reverse().find(start => start < reference) ?? starts[0]);
-		this.cursor = next;
+		return starts;
+	}
+
+	/** Like {@link visualKind}, but resolves file-view rows through the document. */
+	#changeKind(visual: Visual): RowKind | "hunk" | null {
+		if (visual.t === "file") {
+			const row = visual.rowIndex >= 0 ? this.#doc?.rows[visual.rowIndex] : undefined;
+			return row?.kind ?? "context";
+		}
+		return visualKind(visual);
+	}
+
+	/** Put the cursor on a change block and scroll it into the upper third. */
+	#focusChange(row: number): void {
+		this.cursor = row;
 		this.anchor = null;
-		this.scrollTop = Math.max(0, next - Math.floor(this.#lastHeight / 3));
+		this.scrollTop = Math.max(0, row - Math.floor(this.#lastHeight / 3));
 		this.#clampScroll();
 	}
 

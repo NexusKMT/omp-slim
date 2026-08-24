@@ -144,6 +144,7 @@ export class Sidebar {
 	readonly #avatars: AvatarLoader;
 	readonly #onSelectFile: (file: ChangedFile | null) => void;
 	readonly #onAction: (action: SidebarAction) => void;
+	readonly #onFocusDiff: () => void;
 	readonly #requestRender: () => void;
 	readonly summary = new Input();
 	readonly description = new Editor(getEditorTheme());
@@ -154,6 +155,8 @@ export class Sidebar {
 	viewStyle: "path" | "tree" = "tree";
 	readonly #collapsed = new Set<string>();
 	#targets: Target[] = [];
+	/** Tree depth per target key (file/dir rows only); parent-jump for `←`. */
+	readonly #entryDepth = new Map<string, number>();
 	#selectedKey: string | undefined;
 	#scrollTop = 0;
 	#visibleRows: (Row | undefined)[] = [];
@@ -167,6 +170,7 @@ export class Sidebar {
 		imageBudget?: ImageBudget;
 		onSelectFile: (file: ChangedFile | null) => void;
 		onAction: (action: SidebarAction) => void;
+		onFocusDiff: () => void;
 		requestRender: () => void;
 	}) {
 		this.#model = options.model;
@@ -174,6 +178,7 @@ export class Sidebar {
 		this.#imageBudget = options.imageBudget;
 		this.#onSelectFile = options.onSelectFile;
 		this.#onAction = options.onAction;
+		this.#onFocusDiff = options.onFocusDiff;
 		this.#requestRender = options.requestRender;
 		this.summary.prompt = "";
 		this.description.setBorderVisible(false);
@@ -255,14 +260,18 @@ export class Sidebar {
 
 	#rebuildTargets(): void {
 		const targets: Target[] = [];
+		this.#entryDepth.clear();
+		const push = (entry: FileEntry): void => {
+			this.#entryDepth.set(targetKey(entry.target), entry.depth ?? 0);
+			targets.push(entry.target);
+		};
 		if (this.#model.clean) {
-			for (const entry of this.#fileEntries(this.#model.headCommit?.files ?? [], "commit"))
-				targets.push(entry.target);
+			for (const entry of this.#fileEntries(this.#model.headCommit?.files ?? [], "commit")) push(entry);
 		} else {
 			targets.push({ kind: "stage-all" });
-			for (const entry of this.#fileEntries(this.#model.unstaged, "unstaged")) targets.push(entry.target);
+			for (const entry of this.#fileEntries(this.#model.unstaged, "unstaged")) push(entry);
 			targets.push({ kind: "unstage-all" });
-			for (const entry of this.#fileEntries(this.#model.staged, "staged")) targets.push(entry.target);
+			for (const entry of this.#fileEntries(this.#model.staged, "staged")) push(entry);
 			targets.push({ kind: "amend" }, { kind: "summary" }, { kind: "description" }, { kind: "commit-button" });
 		}
 		this.#targets = targets;
@@ -362,6 +371,84 @@ export class Sidebar {
 		}
 		return false;
 	}
+	/** True while a commit-form text input is capturing letter keys. */
+	get editing(): boolean {
+		const target = this.selected;
+		return this.focused && (target?.kind === "summary" || target?.kind === "description");
+	}
+
+	/**
+	 * Move selection to the next/previous visible file row. False at the
+	 * boundary. `from` anchors the walk at the file currently shown in the
+	 * diff pane, so hunk rollover works even when the sidebar selection sits
+	 * on a dir row or a commit-form control.
+	 */
+	selectAdjacentFile(direction: 1 | -1, from?: ChangedFile | null): boolean {
+		this.#rebuildTargets();
+		let start = from
+			? this.#targets.findIndex(
+					target => target.kind === "file" && target.file.path === from.path && target.file.area === from.area,
+				)
+			: -1;
+		if (start < 0) {
+			const current = this.selected;
+			start = current ? this.#targets.findIndex(target => targetKey(target) === targetKey(current)) : -1;
+		}
+		for (let i = start + direction; i >= 0 && i < this.#targets.length; i += direction) {
+			const target = this.#targets[i];
+			if (target.kind === "file") {
+				this.#select(target);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Select the commit summary input (the `c` shortcut). False on a clean tree. */
+	focusCommitForm(): boolean {
+		this.#rebuildTargets();
+		const summary = this.#targets.find(target => target.kind === "summary");
+		if (!summary) return false;
+		this.#select(summary);
+		return true;
+	}
+
+	/** `←`: collapse an expanded dir, otherwise jump to the parent dir row. */
+	#collapseOrParent(): void {
+		const target = this.selected;
+		if (!target || (target.kind !== "file" && target.kind !== "dir")) return;
+		if (target.kind === "dir" && !this.#collapsed.has(target.key)) {
+			this.#collapsed.add(target.key);
+			this.#requestRender();
+			return;
+		}
+		const index = this.#targets.findIndex(candidate => targetKey(candidate) === targetKey(target));
+		const depth = this.#entryDepth.get(targetKey(target)) ?? 0;
+		for (let i = index - 1; i >= 0; i--) {
+			const candidate = this.#targets[i];
+			// Section headers/buttons bound the tree walk.
+			if (candidate.kind !== "file" && candidate.kind !== "dir") return;
+			if (candidate.kind === "dir" && (this.#entryDepth.get(targetKey(candidate)) ?? 0) < depth) {
+				this.#select(candidate);
+				return;
+			}
+		}
+	}
+
+	/** `→`: expand a collapsed dir, step into an expanded one, open a file. */
+	#expandOrOpen(): void {
+		const target = this.selected;
+		if (target?.kind === "dir") {
+			if (this.#collapsed.has(target.key)) {
+				this.#collapsed.delete(target.key);
+				this.#requestRender();
+			} else {
+				this.#moveSelection(1);
+			}
+			return;
+		}
+		if (target?.kind === "file") this.#onFocusDiff();
+	}
 
 	handleInput(data: string): void {
 		this.#rebuildTargets();
@@ -388,13 +475,24 @@ export class Sidebar {
 			}
 		}
 
-		if (matchesKey(data, "up")) this.#moveSelection(-1);
-		else if (matchesKey(data, "down")) this.#moveSelection(1);
+		if (matchesKey(data, "up") || data === "k") this.#moveSelection(-1);
+		else if (matchesKey(data, "down") || data === "j") this.#moveSelection(1);
+		else if (matchesKey(data, "left") || data === "h") this.#collapseOrParent();
+		else if (matchesKey(data, "right") || data === "l") this.#expandOrOpen();
+		else if (matchesKey(data, "home") || data === "g") this.#moveSelection(-this.#targets.length);
+		else if (matchesKey(data, "end") || data === "G") this.#moveSelection(this.#targets.length);
 		else if (matchesKey(data, "pageUp")) this.#moveSelection(-Math.max(1, this.#lastHeight - 4));
 		else if (matchesKey(data, "pageDown")) this.#moveSelection(Math.max(1, this.#lastHeight - 4));
-		else if (matchesKey(data, "enter") && target) this.#activate(target);
-		else if (data === " " && target?.kind !== undefined && (target.kind === "file" || target.kind === "dir"))
+		else if (matchesKey(data, "enter") && target) {
+			// Enter opens a file (focus the diff); space/s/u do the staging.
+			if (target.kind === "file") this.#onFocusDiff();
+			else this.#activate(target);
+		} else if (data === " " && target?.kind !== undefined && (target.kind === "file" || target.kind === "dir"))
 			this.#activate(target);
+		else if (data === "s" && target?.kind === "file" && target.file.area === "unstaged")
+			this.#onAction({ type: "stage", file: target.file });
+		else if (data === "u" && target?.kind === "file" && target.file.area === "staged")
+			this.#onAction({ type: "unstage", file: target.file });
 		else if (data === "t") {
 			this.viewStyle = this.viewStyle === "path" ? "tree" : "path";
 			this.#requestRender();

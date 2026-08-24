@@ -8,10 +8,14 @@
  * commit details with author avatar when clean), and a footer with key hints.
  *
  * `tab` moves focus between the diff and the sidebar; both panes take
- * arrows/PgUp/PgDn and mouse clicks/wheel. All toolbar buttons are clickable
- * and mirrored by keys: `v` cycles the view, `n`/`p` jump hunks, `s`/`u`
+ * arrows/PgUp/PgDn, vim motions (`j`/`k`/`h`/`l`/`g`/`G`), and mouse
+ * clicks/wheel. All toolbar buttons are clickable and mirrored by keys:
+ * `v` cycles the view (`1`–`4` pick one), `alt+↓`/`alt+↑` jump hunks and roll
+ * into the adjacent file at the edges, `]`/`[` switch files, `s`/`u`
  * stage/unstage (hunk-aware), `x` discards a hunk, `w` wraps, `b` toggles
- * whitespace-insensitive alignment.
+ * whitespace-insensitive alignment, `c` jumps to the commit form, `r`
+ * refreshes. In the sidebar tree `←`/`→` collapse/expand directories and
+ * `enter` opens the selected file in the diff pane.
  */
 import {
 	type Component,
@@ -113,6 +117,8 @@ class GitTuiComponent implements Component {
 	#headerHits: UiHit[] = [];
 	#toolbarHits: UiHit[] = [];
 	#pendingDiscard: string | null = null;
+	/** After hopping files backwards, land on the last hunk once the diff loads. */
+	#pendingHunkEdge: "last" | null = null;
 	#disposed = false;
 
 	constructor(ui: TUI, cwd: string, pinnedSha?: string) {
@@ -125,6 +131,7 @@ class GitTuiComponent implements Component {
 			imageBudget: ui.imageBudget,
 			onSelectFile: file => this.#showFile(file),
 			onAction: action => void this.#runAction(action),
+			onFocusDiff: () => this.#setFocus("diff"),
 			requestRender: () => this.#ui.requestRender(),
 		});
 		this.#sidebar.setFocused(true);
@@ -202,6 +209,8 @@ class GitTuiComponent implements Component {
 		const file = this.#currentFile;
 		const contents = this.#contents;
 		if (!file || !contents) return;
+		const edge = this.#pendingHunkEdge;
+		this.#pendingHunkEdge = null;
 		if (contents.tooLarge) this.#pane.setDocument(null, "tooLarge");
 		else if (contents.binary) this.#pane.setDocument(null, "binary");
 		else {
@@ -211,6 +220,7 @@ class GitTuiComponent implements Component {
 				}),
 				"ready",
 			);
+			if (edge) this.#pane.seekHunk(edge);
 		}
 		this.#ui.requestRender();
 	}
@@ -346,6 +356,21 @@ class GitTuiComponent implements Component {
 		this.#ignoreWhitespace = !this.#ignoreWhitespace;
 		this.#rebuildDocument();
 	}
+	/** `n`/`p`: next/prev hunk, rolling into the adjacent file at the edges. */
+	#jumpHunkOrFile(direction: 1 | -1): void {
+		if (this.#pane.jumpHunk(direction)) {
+			this.#ui.requestRender();
+			return;
+		}
+		this.#selectFile(direction, direction < 0 ? "last" : "first");
+	}
+
+	/** `]`/`[`: show the next/previous file; `edge` picks the landing hunk. */
+	#selectFile(direction: 1 | -1, edge: "first" | "last" = "first"): void {
+		this.#pendingHunkEdge = edge === "last" ? "last" : null;
+		if (!this.#sidebar.selectAdjacentFile(direction, this.#currentFile)) this.#pendingHunkEdge = null;
+		this.#ui.requestRender();
+	}
 
 	handleInput(data: string): void {
 		if (matchesKey(data, "ctrl+c")) {
@@ -366,26 +391,47 @@ class GitTuiComponent implements Component {
 			this.#done.resolve();
 			return;
 		}
-		if (this.#focus === "diff") {
-			if (data === "q") {
-				this.#done.resolve();
+		// Global shortcuts — active unless a commit-form input is capturing text.
+		if (!(this.#focus === "sidebar" && this.#sidebar.editing)) {
+			// Ghostty on macOS reports Option as super+alt (kitty mod 11).
+			if (matchesKey(data, "alt+down") || matchesKey(data, "super+alt+down")) return this.#jumpHunkOrFile(1);
+			if (matchesKey(data, "alt+up") || matchesKey(data, "super+alt+up")) return this.#jumpHunkOrFile(-1);
+			if (data === "]") return this.#selectFile(1);
+			if (data === "[") return this.#selectFile(-1);
+			if (data === "v") {
+				this.#pane.cycleMode();
+				this.#ui.requestRender();
 				return;
 			}
+			if (data === "1" || data === "2" || data === "3" || data === "4") {
+				const modes: ViewMode[] = ["file", "split", "inline", "hunk"];
+				return this.#setMode(modes[Number(data) - 1]);
+			}
+			if (data === "w") {
+				this.#pane.toggleWrap();
+				this.#ui.requestRender();
+				return;
+			}
+			if (data === "b") return this.#toggleWhitespace();
+			if (data === "r") return void this.#refresh(true);
+			if (data === "c") {
+				if (this.#sidebar.focusCommitForm()) this.#setFocus("sidebar");
+				return;
+			}
+		}
+		if (this.#focus === "diff") {
 			if (matchesKey(data, "shift+up")) this.#pane.moveCursor(-1, true);
 			else if (matchesKey(data, "shift+down")) this.#pane.moveCursor(1, true);
-			else if (matchesKey(data, "up")) this.#pane.moveCursor(-1, false);
-			else if (matchesKey(data, "down")) this.#pane.moveCursor(1, false);
+			else if (matchesKey(data, "up") || data === "k") this.#pane.moveCursor(-1, false);
+			else if (matchesKey(data, "down") || data === "j") this.#pane.moveCursor(1, false);
 			else if (matchesKey(data, "pageUp")) this.#pane.moveCursor(-Math.max(1, this.#contentHeight - 2), false);
-			else if (matchesKey(data, "pageDown")) this.#pane.moveCursor(Math.max(1, this.#contentHeight - 2), false);
-			else if (matchesKey(data, "left")) this.#pane.scrollLeftBy(-8);
-			else if (matchesKey(data, "right")) this.#pane.scrollLeftBy(8);
-			else if (matchesKey(data, "home")) this.#pane.seekTo(0);
-			else if (matchesKey(data, "end")) this.#pane.seekTo(Number.MAX_SAFE_INTEGER);
-			else if (data === "v") this.#pane.cycleMode();
-			else if (data === "n") this.#pane.jumpHunk(1);
-			else if (data === "p") this.#pane.jumpHunk(-1);
-			else if (data === "w") this.#pane.toggleWrap();
-			else if (data === "b") return this.#toggleWhitespace();
+			else if (matchesKey(data, "pageDown") || data === " ")
+				this.#pane.moveCursor(Math.max(1, this.#contentHeight - 2), false);
+			else if (matchesKey(data, "left") || data === "h") this.#pane.scrollLeftBy(-8);
+			else if (matchesKey(data, "right") || data === "l") this.#pane.scrollLeftBy(8);
+			else if (matchesKey(data, "home") || data === "g") this.#pane.cursorToEdge("start");
+			else if (matchesKey(data, "end") || data === "G") this.#pane.cursorToEdge("end");
+			else if (matchesKey(data, "enter")) return this.#jumpHunkOrFile(1);
 			else if (data === "s" || data === "u") {
 				if (this.#pane.selection?.explicit && this.#pane.patchTarget) {
 					void this.#lineAction(this.#pane.patchTarget);
@@ -499,8 +545,8 @@ class GitTuiComponent implements Component {
 			theme.fg(
 				"dim",
 				this.#focus === "diff"
-					? "tab focus · shift+↑/↓ select · s/u stage · x discard · v view · n/p hunk · w wrap · b ws · q quit"
-					: "tab focus · ↑/↓ move · enter stage/unstage · space toggle · t tree · esc quit",
+					? "alt+↓/↑ hunk · ]/[ file · shift+↑/↓ select · s/u stage · x discard · v view · c commit · q quit"
+					: "↑/↓ move · ←/→ fold · space stage · enter open · alt+↓/↑ hunk · c commit · t tree · q quit",
 			);
 		const free = width - row.width - right.width - 1;
 		const middleText = free > visibleWidth(middle) + 4 ? middle : truncateToWidth(middle, Math.max(0, free - 4));
@@ -548,12 +594,10 @@ class GitTuiComponent implements Component {
 		const groupStart = Math.max(row.width + 2, Math.floor((this.#centerWidth - groupWidth) / 2));
 		row.add(" ".repeat(Math.max(0, groupStart - row.width)));
 		row.button(navUp, () => {
-			this.#pane.jumpHunk(-1);
-			this.#ui.requestRender();
+			this.#jumpHunkOrFile(-1);
 		});
 		row.button(navDown, () => {
-			this.#pane.jumpHunk(1);
-			this.#ui.requestRender();
+			this.#jumpHunkOrFile(1);
 		});
 		row.add("  ");
 		for (const segment of segments) {
