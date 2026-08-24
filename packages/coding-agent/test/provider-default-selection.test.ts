@@ -10,13 +10,22 @@ describe("provider default selection", () => {
 	 * provider's declared default and falls through to `availableModels[0]`
 	 * when nothing matches. Synthetic's default pointed at `hf:zai-org/GLM-5.1`
 	 * after the provider moved to GLM-5.2, so an account with only
-	 * `SYNTHETIC_API_KEY` opened on `hf:moonshotai/Kimi-K3` — first in catalog
-	 * order — instead of the declared default.
+	 * `SYNTHETIC_API_KEY` opened on whichever model sorted first instead of the
+	 * declared default.
+	 *
+	 * The default is moved to the back of the availability list rather than
+	 * relying on catalog order, so the assertion keeps proving that the picker
+	 * overrides position — not that `gen:models` happens to sort some other
+	 * model first.
 	 */
-	test("picks Synthetic's declared default over catalog order", () => {
-		const available = getBundledModels("synthetic") as Model<Api>[];
-		expect(available.length).toBeGreaterThan(0);
-		expect(available[0]?.id).not.toBe(DEFAULT_MODEL_PER_PROVIDER.synthetic);
+	test("picks Synthetic's declared default over availability order", () => {
+		const bundled = getBundledModels("synthetic") as Model<Api>[];
+		const declaredDefault = bundled.find(model => model.id === DEFAULT_MODEL_PER_PROVIDER.synthetic);
+		expect(declaredDefault).toBeDefined();
+		if (!declaredDefault) return;
+
+		const available = [...bundled.filter(model => model !== declaredDefault), declaredDefault];
+		expect(available.length).toBeGreaterThan(1);
 
 		const picked = pickDefaultAvailableModel(available);
 
