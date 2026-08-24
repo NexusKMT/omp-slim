@@ -100,7 +100,10 @@ class ReflowingAppendBlock implements Component {
 }
 const finalAnswer: AssistantMessage = {
 	role: "assistant",
-	content: [{ type: "text", text: "## Implemented" }],
+	content: [
+		{ type: "thinking", thinking: "Reasoning first" },
+		{ type: "text", text: "## Implemented" },
+	],
 	api: "openai-codex-responses",
 	provider: "openai-codex",
 	model: "gpt-5.6-sol",
@@ -342,7 +345,7 @@ describe("TranscriptContainer", () => {
 
 		expect(transcript.peekFinalizedBatch(80, 3)).toBeUndefined();
 		const rows = transcript.renderViewport(80, 3, frame);
-		expect(rows[0]).toBe("1 more transcript blocks active");
+		expect(rows[0]).toBe("2 more transcript blocks active");
 		expect(Bun.stripANSI(rows[1] ?? "").trim()).toBe("Implemented");
 		expect(rows[2]).toBe("task running");
 	});

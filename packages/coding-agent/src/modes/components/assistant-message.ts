@@ -148,6 +148,7 @@ export class AssistantMessageComponent extends Container {
 	#contentContainer: Container;
 	#markerSlot: Container;
 	#lastMessage?: AssistantMessage;
+	#emergencyText?: Markdown;
 	#toolImagesByCallId = new Map<string, ImageContent[]>();
 	#convertedKittyImages = new Map<string, ImageContent>();
 	#showImages = true;
@@ -402,12 +403,11 @@ export class AssistantMessageComponent extends Container {
 	isTranscriptBlockFinalized(): boolean {
 		return this.#transcriptBlockFinalized;
 	}
-	/** Keep completed assistant prose represented when active-block overflow forces emergency rendering. */
-	isTranscriptBlockEmergencyVisible(): boolean {
-		if (!this.#transcriptBlockFinalized || !this.#lastMessage) return false;
-		return this.#lastMessage.content.some(
-			content => content.type === "text" && canonicalizeMessage(content.text).length > 0,
-		);
+
+	/** Render completed prose rather than an earlier thinking row under emergency viewport pressure. */
+	renderTranscriptBlockEmergencyRow(width: number): string | undefined {
+		if (!this.#transcriptBlockFinalized) return undefined;
+		return this.#emergencyText?.render(width)[0];
 	}
 
 	getTranscriptBlockVersion(): number {
@@ -749,6 +749,7 @@ export class AssistantMessageComponent extends Container {
 
 		// Clear content container
 		this.#contentContainer.clear();
+		this.#emergencyText = undefined;
 		this.#thinkingDots = undefined;
 		this.#hasTruncatableError = false;
 
@@ -778,6 +779,7 @@ export class AssistantMessageComponent extends Container {
 				const mdOptions = this.#textColorTransform ? { color: this.#textColorTransform } : undefined;
 				const md = new Markdown(trimmed, 1, 0, getMarkdownTheme(), mdOptions, 0);
 				this.#contentContainer.addChild(md);
+				this.#emergencyText = md;
 				captureItems?.push({ md, contentIndex: i, blockType: "text", lastText: trimmed });
 				hasRenderedContent = true;
 			} else if (content.type === "thinking" && resolveThinkingDisplay(content, this.proseOnlyThinking).visible) {
