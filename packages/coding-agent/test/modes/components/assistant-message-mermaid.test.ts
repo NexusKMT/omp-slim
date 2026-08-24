@@ -55,6 +55,59 @@ afterEach(() => {
 	clearMermaidCache();
 });
 
+describe("AssistantMessageComponent append-only transcript rows", () => {
+	it("publishes width-independent completed Markdown while keeping the current suffix mutable", () => {
+		const component = new AssistantMessageComponent();
+		component.updateContent(
+			createAssistantMessage(
+				"First completed paragraph is deliberately long enough to wrap.\n\nCurrent partial paragraph",
+			),
+			{ transient: true },
+		);
+		component.render(24);
+
+		expect(component.transcriptBlockMode).toBe("appendOnly");
+		const semanticRows = component.getTranscriptStableRows();
+		const narrow = component.renderTranscriptStableRows(semanticRows.length, 24);
+		const stable = Bun.stripANSI(narrow.join("\n"));
+		expect(stable).toContain("First completed");
+		expect(stable).not.toContain("Current partial paragraph");
+
+		const wideRender = component.render(120);
+		expect(component.getTranscriptStableRows().map(row => row.key)).toEqual(semanticRows.map(row => row.key));
+		const wide = component.renderTranscriptStableRows(semanticRows.length, 120);
+		expect(wide.length).toBeLessThan(narrow.length);
+		expect(wideRender.slice(0, wide.length)).toEqual(wide);
+	});
+
+	it("publishes completed visible thinking blocks through the same stable-row contract", () => {
+		const component = new AssistantMessageComponent();
+		component.updateContent(
+			{
+				...createAssistantMessage(""),
+				content: [{ type: "thinking", thinking: "Settled reasoning.\n\nCurrent reasoning suffix" }],
+			},
+			{ transient: true },
+		);
+		component.render(120);
+
+		const stableRows = component.getTranscriptStableRows();
+		const stable = Bun.stripANSI(component.renderTranscriptStableRows(stableRows.length, 120).join("\n"));
+		expect(stable).toContain("Settled reasoning.");
+		expect(stable).not.toContain("Current reasoning suffix");
+	});
+
+	it("withholds Mermaid rows whose asynchronous layout can still change", () => {
+		const component = new AssistantMessageComponent();
+		component.updateContent(createAssistantMessage("```mermaid\nflowchart TD\nA-->B\n```\n\nMore"), {
+			transient: true,
+		});
+		component.render(120);
+
+		expect(component.getTranscriptStableRows()).toEqual([]);
+	});
+});
+
 describe("AssistantMessageComponent mermaid markdown", () => {
 	it("renders fenced Mermaid ASCII without terminal image protocol", () => {
 		const rendered = renderAssistantMessage("```mermaid\nflowchart TD\n  Start-->Stop\n```");

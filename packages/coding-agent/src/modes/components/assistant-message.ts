@@ -19,6 +19,7 @@ import { convertImageToPng } from "../../utils/image-loading";
 import { canonicalizeMessage, formatThinkingForDisplay, hasDisplayableThinking } from "../../utils/thinking-display";
 import { resolveAssistantErrorPresentation } from "../utils/transcript-render-helpers";
 import { type CacheInvalidation, CacheInvalidationMarkerComponent } from "./cache-invalidation-marker";
+import type { TranscriptStableRow } from "./transcript-container";
 
 /**
  * Max lines of a turn-ending provider error rendered inline in the transcript.
@@ -28,9 +29,18 @@ import { type CacheInvalidation, CacheInvalidationMarkerComponent } from "./cach
  * the persisted session.
  */
 const MAX_TRANSCRIPT_ERROR_LINES = 8;
+const EMPTY_STABLE_RENDER: readonly string[] = [];
+
+/** Opening or closing fence of a code block: at least three backticks/tildes plus info string. */
+const CODE_FENCE_LINE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 type ThinkingContentBlock = Extract<AssistantMessage["content"][number], { type: "thinking" }>;
 type DisplayThinkingContentBlock = ThinkingContentBlock & { rawThinking?: string };
+type StableMarkdownPart = { kind: "text" | "thinking"; text: string } | { kind: "spacer" };
+interface AssistantStableSnapshot {
+	readonly key: string;
+	readonly parts: readonly StableMarkdownPart[];
+}
 
 function resolveThinkingDisplay(block: ThinkingContentBlock, proseOnly: boolean): { text: string; visible: boolean } {
 	const rawThinking = (block as DisplayThinkingContentBlock).rawThinking;
@@ -47,13 +57,34 @@ function resolveThinkingDisplay(block: ThinkingContentBlock, proseOnly: boolean)
 }
 
 /**
- * Whether `text` contains a ` ```mermaid ` fence (open or closed) outside
- * ordinary code fences. Mermaid defers native-scrollback settling wholesale
- * (see {@link AssistantMessageComponent.getTranscriptBlockSettledRows}): its
- * ASCII rendering resolves asynchronously, so even a completed fence can
- * re-layout rows that already looked settled. Fence-aware so a mermaid
- * example inside a regular code block never triggers the deferral.
+ * Whether `text` contains a Mermaid fence (open or closed) outside ordinary
+ * code fences. Its asynchronous ASCII renderer can re-layout earlier rows, so
+ * append-only publication waits for normal retirement.
  */
+function containsMermaidFence(text: string): boolean {
+	let fence: string | undefined;
+	for (const line of text.split("\n")) {
+		const match = CODE_FENCE_LINE.exec(line);
+		if (fence !== undefined) {
+			if (match && match[2]!.trim() === "" && match[1]![0] === fence[0] && match[1]!.length >= fence.length) {
+				fence = undefined;
+			}
+			continue;
+		}
+		if (!match) continue;
+		if (/^mermaid\b/.test(match[2]!.trim())) return true;
+		fence = match[1]!;
+	}
+	return false;
+}
+
+function isRenderedPrefix(prefix: readonly string[], rows: readonly string[]): boolean {
+	if (prefix.length > rows.length) return false;
+	for (let index = 0; index < prefix.length; index++) {
+		if (prefix[index] !== rows[index]) return false;
+	}
+	return true;
+}
 
 /**
  * Frames for the streaming "thinking" pulse rendered in place of a hidden
@@ -153,6 +184,7 @@ function lerpHex(from: string, to: string, t: number): string {
  * Component that renders a complete assistant message
  */
 export class AssistantMessageComponent extends Container {
+	readonly transcriptBlockMode = "appendOnly" as const;
 	#contentContainer: Container;
 	#markerSlot: Container;
 	#lastMessage?: AssistantMessage;
@@ -162,6 +194,9 @@ export class AssistantMessageComponent extends Container {
 	#showToolResultImages = true;
 	#kittyConversionsInFlight = new Set<string>();
 	#transcriptBlockFinalized: boolean;
+	#containsMermaidSource = false;
+	#transcriptStableRows: TranscriptStableRow[] = [];
+	#stableSnapshots: AssistantStableSnapshot[] = [];
 	/**
 	 * When true, the turn-ending `Error: …` line for `stopReason === "error"` is
 	 * suppressed because the same error is currently shown in the pinned banner
@@ -278,6 +313,12 @@ export class AssistantMessageComponent extends Container {
 		if (this.#lastMessage) {
 			this.updateContent(this.#lastMessage, { transient: this.#lastUpdateTransient });
 		}
+	}
+
+	override render(width: number): readonly string[] {
+		const rows = super.render(width);
+		this.#publishStableSnapshot(rows, width);
+		return rows;
 	}
 
 	setHideThinkingBlock(hide: boolean): void {
@@ -409,6 +450,96 @@ export class AssistantMessageComponent extends Container {
 
 	isTranscriptBlockFinalized(): boolean {
 		return this.#transcriptBlockFinalized;
+	}
+
+	/** Width-independent stable semantic chunks from completed Markdown boundaries. */
+	getTranscriptStableRows(): readonly TranscriptStableRow[] {
+		return this.#transcriptStableRows;
+	}
+
+	renderTranscriptStableRows(count: number, width: number): readonly string[] {
+		if (count <= 0) return EMPTY_STABLE_RENDER;
+		const snapshot = this.#stableSnapshots[Math.min(Math.trunc(count), this.#stableSnapshots.length) - 1];
+		return snapshot ? this.#renderStableSnapshot(snapshot, width) : EMPTY_STABLE_RENDER;
+	}
+
+	#publishStableSnapshot(rendered: readonly string[], width: number): void {
+		const snapshot = this.#currentStableSnapshot();
+		if (!snapshot) return;
+		const previous = this.#stableSnapshots.at(-1);
+		if (previous?.key === snapshot.key) return;
+		if (previous && !this.#isSnapshotExtension(previous, snapshot)) return;
+		const currentRows = this.#renderStableSnapshot(snapshot, width);
+		if (!isRenderedPrefix(currentRows, rendered)) return;
+		const previousRows = previous ? this.#renderStableSnapshot(previous, width) : EMPTY_STABLE_RENDER;
+		if (!isRenderedPrefix(previousRows, currentRows)) return;
+		if (currentRows.length === previousRows.length) return;
+
+		this.#stableSnapshots.push(snapshot);
+		this.#transcriptStableRows.push({ key: snapshot.key });
+	}
+
+	#isSnapshotExtension(previous: AssistantStableSnapshot, current: AssistantStableSnapshot): boolean {
+		if (previous.parts.length > current.parts.length) return false;
+		for (let index = 0; index < previous.parts.length; index++) {
+			const before = previous.parts[index]!;
+			const after = current.parts[index]!;
+			if (before.kind !== after.kind) return false;
+			if (before.kind === "spacer" || after.kind === "spacer") continue;
+			const isLast = index === previous.parts.length - 1;
+			if (isLast ? !after.text.startsWith(before.text) : after.text !== before.text) return false;
+		}
+		return true;
+	}
+
+	#currentStableSnapshot(): AssistantStableSnapshot | undefined {
+		if (this.#transcriptBlockFinalized || !this.#lastUpdateTransient) return undefined;
+		if (this.#containsMermaidSource || this.#markerSlot.children.length > 0) return undefined;
+		const items = this.#fastPathItems;
+		if (!items || items.length === 0) return undefined;
+
+		const parts: StableMarkdownPart[] = [];
+		let itemIndex = 0;
+		for (const child of this.#contentContainer.children) {
+			const item = items[itemIndex];
+			if (item?.md === child) {
+				const streaming = itemIndex === items.length - 1;
+				const text = streaming ? item.md.getLastRenderStableText() : item.lastText;
+				if (text.length > 0) parts.push({ kind: item.blockType, text });
+				itemIndex++;
+				if (streaming) break;
+				continue;
+			}
+			if (child instanceof Spacer) {
+				parts.push({ kind: "spacer" });
+				continue;
+			}
+			break;
+		}
+		if (parts.length === 0) return undefined;
+		return { key: JSON.stringify(parts), parts };
+	}
+
+	#renderStableSnapshot(snapshot: AssistantStableSnapshot, width: number): readonly string[] {
+		const rows: string[] = [];
+		for (const part of snapshot.parts) {
+			if (part.kind === "spacer") {
+				rows.push("");
+				continue;
+			}
+			const options =
+				part.kind === "thinking"
+					? {
+							color: (text: string) => theme.fg("thinkingText", text),
+							italic: true,
+						}
+					: this.#textColorTransform
+						? { color: this.#textColorTransform }
+						: undefined;
+			const markdown = new Markdown(part.text, 1, 0, getMarkdownTheme(), options, 0);
+			rows.push(...markdown.render(width));
+		}
+		return rows;
 	}
 
 	getTranscriptBlockVersion(): number {
@@ -744,6 +875,13 @@ export class AssistantMessageComponent extends Container {
 			this.#thinkingTokens = 0;
 			this.#thinkingRateLive = false;
 		}
+
+		this.#containsMermaidSource = message.content.some(content => {
+			if (content.type === "text") return containsMermaidFence(content.text);
+			if (content.type !== "thinking" || this.hideThinkingBlock) return false;
+			const display = resolveThinkingDisplay(content, this.proseOnlyThinking);
+			return display.visible && containsMermaidFence(display.text);
+		});
 
 		// Fast path: reuse Markdown children when shape is stable during streaming
 		if (this.#tryFastPathUpdate(message, opts)) return;

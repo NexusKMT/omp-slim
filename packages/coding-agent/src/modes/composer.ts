@@ -127,7 +127,14 @@ export class Composer implements TerminalFrameProvider {
 		| {
 				id: number;
 				rows: readonly string[];
-				source: "header" | "headerReplay" | { transcript: TranscriptContainer; transcriptId: number };
+				kind: "append" | "replay";
+				source:
+					| "header"
+					| {
+							transcript: TranscriptContainer;
+							transcriptId?: number;
+							header: "none" | "replay";
+					  };
 		  }
 		| undefined;
 	#historyReplayRequested = false;
@@ -228,10 +235,7 @@ export class Composer implements TerminalFrameProvider {
 		const frame: AnimationFrame = { now, tick: Math.floor(now / 80) };
 		const active = transcript.renderViewport(width, Math.max(0, rows - before.length - after.length), frame);
 		const composed = [...before, ...active, ...after];
-		if (
-			history !== undefined &&
-			(this.#offeredHistory?.source === "header" || this.#offeredHistory?.source === "headerReplay")
-		) {
+		if (history !== undefined && this.#offeredHistory?.source === "header") {
 			const visibleHeaderRows = Math.max(0, rows - composed.length);
 			this.#retiredHeaderStart = Math.max(0, history.rows.length - visibleHeaderRows);
 		}
@@ -248,11 +252,11 @@ export class Composer implements TerminalFrameProvider {
 		if (offered.source === "header") {
 			this.#headerRetired = true;
 			this.#retiredHeaderRows = offered.rows;
-		} else if (offered.source === "headerReplay") {
-			this.#headerReplayPending = false;
-			this.#retiredHeaderRows = offered.rows;
 		} else {
-			offered.source.transcript.acknowledgeFinalizedBatch(offered.source.transcriptId);
+			if (offered.source.transcriptId !== undefined) {
+				offered.source.transcript.acknowledgeFinalizedBatch(offered.source.transcriptId);
+			}
+			if (offered.source.header === "replay") this.#headerReplayPending = false;
 		}
 		this.#offeredHistory = undefined;
 		if (this.#historyReplayRequested) this.#startHistoryReplay();
@@ -302,23 +306,37 @@ export class Composer implements TerminalFrameProvider {
 		}
 	}
 
-	/** Header retires first, then finalized transcript prefixes, one batch at a time. */
+	/** Header retires first; replay coalesces it with the complete transcript ledger. */
 	#offerHistory(
 		transcript: TranscriptContainer,
 		width: number,
 		rows: number,
 		chromeRows: number,
-	): { id: number; rows: readonly string[] } | undefined {
+	): { id: number; rows: readonly string[]; kind: "append" | "replay" } | undefined {
 		if (this.#offeredHistory !== undefined) {
-			return { id: this.#offeredHistory.id, rows: this.#offeredHistory.rows };
+			return {
+				id: this.#offeredHistory.id,
+				rows: this.#offeredHistory.rows,
+				kind: this.#offeredHistory.kind,
+			};
 		}
 		if (this.#headerReplayPending) {
+			const transcriptReplay = transcript.peekReplayBatch(width);
 			this.#offeredHistory = {
 				id: this.#nextHistoryId++,
-				rows: this.#reflowRetiredHeader(width, 0),
-				source: "headerReplay",
+				rows: [...this.#reflowRetiredHeader(width, 0), ...(transcriptReplay?.rows ?? [])],
+				kind: "replay",
+				source: {
+					transcript,
+					transcriptId: transcriptReplay?.id,
+					header: "replay",
+				},
 			};
-			return { id: this.#offeredHistory.id, rows: this.#offeredHistory.rows };
+			return {
+				id: this.#offeredHistory.id,
+				rows: this.#offeredHistory.rows,
+				kind: this.#offeredHistory.kind,
+			};
 		}
 		if (!this.#headerRetired) {
 			const welcome = this.#welcome;
@@ -332,9 +350,14 @@ export class Composer implements TerminalFrameProvider {
 				this.#offeredHistory = {
 					id: this.#nextHistoryId++,
 					rows: [...renderedHeader, ""],
+					kind: "append",
 					source: "header",
 				};
-				return { id: this.#offeredHistory.id, rows: this.#offeredHistory.rows };
+				return {
+					id: this.#offeredHistory.id,
+					rows: this.#offeredHistory.rows,
+					kind: this.#offeredHistory.kind,
+				};
 			}
 			this.#headerRetired = true;
 			this.#retiredHeaderRows = [];
@@ -346,9 +369,14 @@ export class Composer implements TerminalFrameProvider {
 		this.#offeredHistory = {
 			id: this.#nextHistoryId++,
 			rows: batch.rows,
-			source: { transcript, transcriptId: batch.id },
+			kind: batch.kind ?? "append",
+			source: { transcript, transcriptId: batch.id, header: "none" },
 		};
-		return { id: this.#offeredHistory.id, rows: this.#offeredHistory.rows };
+		return {
+			id: this.#offeredHistory.id,
+			rows: this.#offeredHistory.rows,
+			kind: this.#offeredHistory.kind,
+		};
 	}
 
 	#renderRoots(roots: readonly Component[], width: number): string[] {
