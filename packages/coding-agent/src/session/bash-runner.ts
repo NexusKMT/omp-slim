@@ -2,7 +2,7 @@ import * as path from "node:path";
 import type { Agent } from "@oh-my-pi/pi-agent-core";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { Settings } from "../config/settings";
-import { type BashResult, executeBash as executeBashCommand } from "../exec/bash-executor";
+import { type BashPtyOptions, type BashResult, executeBash as executeBashCommand } from "../exec/bash-executor";
 import type { ExtensionRunner } from "../extensibility/extensions";
 import { outputMeta } from "../tools/output-meta";
 import { clampTimeout } from "../tools/tool-timeouts";
@@ -69,7 +69,7 @@ export class BashRunner {
 	async executeBash(
 		command: string,
 		onChunk?: (chunk: string) => void,
-		options?: { excludeFromContext?: boolean; useUserShell?: boolean },
+		options?: { excludeFromContext?: boolean; useUserShell?: boolean; pty?: BashPtyOptions },
 	): Promise<BashResult> {
 		const target = this.#captureSessionTarget();
 		let targetTransferred = false;
@@ -109,6 +109,7 @@ export class BashRunner {
 					onMinimizedSave: originalText => this.#saveOriginalArtifact(target, originalText),
 					env: shellEnv,
 					useUserShell: options?.useUserShell,
+					pty: options?.pty,
 				});
 			} finally {
 				this.#abortControllers.delete(abortController);
