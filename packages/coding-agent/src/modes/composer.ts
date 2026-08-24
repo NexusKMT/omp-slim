@@ -134,6 +134,8 @@ export class Composer implements TerminalFrameProvider {
 							transcript: TranscriptContainer;
 							transcriptId?: number;
 							header: "none" | "replay";
+							/** Recomposed header rows to accept as the new retired-header bytes. */
+							headerRows?: readonly string[];
 					  };
 		  }
 		| undefined;
@@ -143,9 +145,10 @@ export class Composer implements TerminalFrameProvider {
 	// The welcome header retires to terminal history exactly once, after the
 	// intro settles; until then it renders as mutable viewport chrome.
 	#headerRetired = false;
-	// Exact hard rows accepted into native history. Resize-alt paints reflow
-	// these rows rather than recomposing the header, because a wider terminal
-	// never joins hard tip wraps that were committed at the original width.
+	// Exact hard rows accepted into native history. Transient resize-alt
+	// paints reflow these rows to match the terminal's own rewrap of history
+	// it still holds; a settled replay owns every byte it emits, so it
+	// recomposes the header at the replay width and refreshes these rows.
 	#retiredHeaderRows: readonly string[] | undefined;
 	// Hard-row prefix currently above the native viewport. The first resize
 	// frame may pull part of it down before the normal buffer is borrowed.
@@ -256,7 +259,10 @@ export class Composer implements TerminalFrameProvider {
 			if (offered.source.transcriptId !== undefined) {
 				offered.source.transcript.acknowledgeFinalizedBatch(offered.source.transcriptId);
 			}
-			if (offered.source.header === "replay") this.#headerReplayPending = false;
+			if (offered.source.header === "replay") {
+				this.#headerReplayPending = false;
+				if (offered.source.headerRows !== undefined) this.#retiredHeaderRows = offered.source.headerRows;
+			}
 		}
 		this.#offeredHistory = undefined;
 		if (this.#historyReplayRequested) this.#startHistoryReplay();
@@ -331,14 +337,21 @@ export class Composer implements TerminalFrameProvider {
 		}
 		if (this.#headerReplayPending) {
 			const transcriptReplay = transcript.peekReplayBatch(width);
+			// A replay follows a scrollback clear, so the header recomposes at
+			// the new width exactly like transcript entries do. An empty
+			// recompose (welcome unmounted after retirement) falls back to the
+			// committed rows, hard-wrapped the way the terminal would.
+			const recomposed = this.#header.render(width);
+			const headerRows = recomposed.length > 0 ? [...recomposed, ""] : this.#reflowRetiredHeader(width, 0);
 			this.#offeredHistory = {
 				id: this.#nextHistoryId++,
-				rows: [...this.#reflowRetiredHeader(width, 0), ...(transcriptReplay?.rows ?? [])],
+				rows: [...headerRows, ...(transcriptReplay?.rows ?? [])],
 				kind: "replay",
 				source: {
 					transcript,
 					transcriptId: transcriptReplay?.id,
 					header: "replay",
+					headerRows,
 				},
 			};
 			return {
