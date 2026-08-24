@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added side-by-side image and SVG previews to `omp git`, including local Git LFS object resolution and explicit placeholders for unavailable or unsupported binary content.
 - Added the `omp if-bench` command: a zero-tool instruction-following and working-memory benchmark that drives one cached conversation per model, adding one more glyph array action every turn while a `nya{1,N}` directive moves through the prompt, with a live turn-ladder board and a ranked scoreboard
 - Added `q` shortcut to exit the git TUI
 - Added a third state to the git TUI whitespace toggle (`b`): beyond ignoring whitespace-only line changes, it hides formatting-only changes (indentation, line splits/joins, blank lines) and import-only changes in TypeScript/JavaScript, Rust, and Go
@@ -19,6 +20,7 @@
 
 ### Fixed
 
+- Fixed resize and display replays rewinding logical transcript retirement state; committed rows now replay through an independent cursor and survive overlays without duplicating the live viewport.
 - Fixed fast tool completions leaving a permanent running summary that blocked transcript retirement and squeezed later tool output.
 - Fixed `omp git` hunk navigation (`alt+↓`/`alt+↑`) appearing to do nothing while the file sidebar had focus: the diff cursor band now stays visible (dimmed) when the pane is unfocused.
 

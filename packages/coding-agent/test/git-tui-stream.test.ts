@@ -1,11 +1,50 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { DiffSide, DiffStream } from "@oh-my-pi/pi-natives";
+import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { $ } from "bun";
-import { buildDiffDocument, buildLineSelectionPatch, type DiffBuildOptions } from "../src/cli/git-tui/diff-pane";
+import {
+	buildDiffDocument,
+	buildLineSelectionPatch,
+	type DiffBuildOptions,
+	DiffPane,
+} from "../src/cli/git-tui/diff-pane";
 import { GitModel } from "../src/cli/git-tui/state";
+import { initTheme } from "../src/modes/theme/theme";
+
+const RED_PNG = Buffer.from(
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+	"base64",
+);
+const LFS_POINTER_VERSION = "version https://git-lfs.github.com/spec/v1";
+beforeAll(async () => {
+	await initTheme(false);
+});
+
+async function withReviewRepo(run: (repo: string) => Promise<void>): Promise<void> {
+	const repo = await fs.mkdtemp(path.join(os.tmpdir(), "omp-git-tui-stream-"));
+	try {
+		await $`git init --initial-branch=main`.cwd(repo).quiet();
+		await $`git config user.name "Test User"`.cwd(repo).quiet();
+		await $`git config user.email "test@example.com"`.cwd(repo).quiet();
+		await Bun.write(path.join(repo, "seed.txt"), "seed\n");
+		await $`git add seed.txt`.cwd(repo).quiet();
+		await $`git commit -m base`.cwd(repo).quiet();
+		await run(repo);
+	} finally {
+		await fs.rm(repo, { recursive: true, force: true });
+	}
+}
+
+async function loadStagedContents(repo: string, filePath: string) {
+	const model = new GitModel(repo);
+	await model.refresh();
+	const file = model.staged.find(candidate => candidate.path === filePath);
+	if (!file) throw new Error(`staged file was not discovered: ${filePath}`);
+	return { contents: await model.streamContents(file, () => {}), file };
+}
 
 async function streamedDocument(oldText: string, newText: string, options: DiffBuildOptions = {}) {
 	const stream = new DiffStream();
@@ -24,14 +63,7 @@ async function streamedDocument(oldText: string, newText: string, options: DiffB
 
 describe("git TUI streamed document", () => {
 	test("uses an empty base side for a staged added file", async () => {
-		const repo = await fs.mkdtemp(path.join(os.tmpdir(), "omp-git-tui-stream-"));
-		try {
-			await $`git init --initial-branch=main`.cwd(repo).quiet();
-			await $`git config user.name "Test User"`.cwd(repo).quiet();
-			await $`git config user.email "test@example.com"`.cwd(repo).quiet();
-			await Bun.write(path.join(repo, "seed.txt"), "seed\n");
-			await $`git add seed.txt`.cwd(repo).quiet();
-			await $`git commit -m base`.cwd(repo).quiet();
+		await withReviewRepo(async repo => {
 			await Bun.write(path.join(repo, "added.ts"), "export const added = true;\n");
 			await $`git add added.ts`.cwd(repo).quiet();
 
@@ -43,13 +75,12 @@ describe("git TUI streamed document", () => {
 			const contents = await model.streamContents(file, () => {
 				updates++;
 			});
+			if (contents.kind !== "text") throw new Error("staged text file was not diffable");
 			expect(contents.oldText).toBe("");
 			expect(contents.newText).toBe("export const added = true;\n");
-			expect(contents.streamResult).not.toBeNull();
+			expect(contents.streamResult.runs.length).toBeGreaterThan(0);
 			expect(updates).toBeGreaterThan(0);
-		} finally {
-			await fs.rm(repo, { recursive: true, force: true });
-		}
+		});
 	});
 
 	test.each([
@@ -62,6 +93,112 @@ describe("git TUI streamed document", () => {
 		expect(streamed).toEqual(synchronous);
 	});
 });
+describe("git TUI asset previews", () => {
+	test("renders raster Git objects as media instead of binary placeholders", async () => {
+		await withReviewRepo(async repo => {
+			await Bun.write(path.join(repo, "image.png"), RED_PNG);
+			await $`git add image.png`.cwd(repo).quiet();
+
+			const { contents, file } = await loadStagedContents(repo, "image.png");
+			if (contents.kind !== "asset" || contents.new.kind !== "image") {
+				throw new Error("PNG was not loaded as a media asset");
+			}
+			expect(contents.old.kind).toBe("empty");
+			expect(contents.new.image.sourceMimeType).toBe("image/png");
+			expect([contents.new.image.widthPx, contents.new.image.heightPx]).toEqual([1, 1]);
+
+			const pane = new DiffPane();
+			pane.setAsset(file.path, contents.old, contents.new);
+			const rendered = sanitizeText(pane.render(80, 12).join("\n"));
+			expect(rendered).toContain("After · PNG");
+			expect(rendered).not.toContain("Binary object");
+		});
+	});
+
+	test("rasterizes SVG Git objects for terminal preview", async () => {
+		await withReviewRepo(async repo => {
+			const svg =
+				'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="red"/></svg>';
+			await Bun.write(path.join(repo, "diagram.svg"), svg);
+			await $`git add diagram.svg`.cwd(repo).quiet();
+
+			const { contents, file } = await loadStagedContents(repo, "diagram.svg");
+			if (contents.kind !== "asset" || contents.new.kind !== "image") {
+				throw new Error("SVG was not rasterized as a media asset");
+			}
+			expect(contents.new.image.sourceMimeType).toBe("image/svg+xml");
+			expect([contents.new.image.widthPx, contents.new.image.heightPx]).toEqual([20, 10]);
+
+			const pane = new DiffPane();
+			pane.setAsset(file.path, contents.old, contents.new);
+			expect(sanitizeText(pane.render(80, 12).join("\n"))).toContain("After · SVG");
+		});
+	});
+
+	test("resolves staged Git LFS pointers from local object storage", async () => {
+		await withReviewRepo(async repo => {
+			const oid = new Bun.CryptoHasher("sha256").update(RED_PNG).digest("hex");
+			const objectPath = path.join(repo, ".git", "lfs", "objects", oid.slice(0, 2), oid.slice(2, 4), oid);
+			await fs.mkdir(path.dirname(objectPath), { recursive: true });
+			await Bun.write(objectPath, RED_PNG);
+			await Bun.write(
+				path.join(repo, "lfs-image.png"),
+				`${LFS_POINTER_VERSION}\noid sha256:${oid}\nsize ${RED_PNG.byteLength}\n`,
+			);
+			await $`git add lfs-image.png`.cwd(repo).quiet();
+
+			const { contents, file } = await loadStagedContents(repo, "lfs-image.png");
+			if (contents.kind !== "asset" || contents.new.kind !== "image") {
+				throw new Error("local Git LFS object was not loaded as media");
+			}
+			expect(contents.new.image.lfsOid).toBe(oid);
+			expect(contents.new.image.byteLength).toBe(RED_PNG.byteLength);
+
+			const pane = new DiffPane();
+			pane.setAsset(file.path, contents.old, contents.new);
+			expect(sanitizeText(pane.render(90, 12).join("\n"))).toContain("After · PNG · Git LFS");
+		});
+	});
+
+	test("shows unavailable Git LFS objects explicitly", async () => {
+		await withReviewRepo(async repo => {
+			const oid = "0".repeat(64);
+			await Bun.write(
+				path.join(repo, "missing.png"),
+				`${LFS_POINTER_VERSION}\noid sha256:${oid}\nsize ${RED_PNG.byteLength}\n`,
+			);
+			await $`git add missing.png`.cwd(repo).quiet();
+
+			const { contents, file } = await loadStagedContents(repo, "missing.png");
+			if (contents.kind !== "asset" || contents.new.kind !== "lfsMissing") {
+				throw new Error("missing Git LFS object did not surface its placeholder");
+			}
+			const pane = new DiffPane();
+			pane.setAsset(file.path, contents.old, contents.new);
+			const rendered = sanitizeText(pane.render(90, 12).join("\n"));
+			expect(rendered).toContain("Git LFS object unavailable");
+			expect(rendered).toContain("sha256:000000000000…");
+		});
+	});
+
+	test("keeps invalid UTF-8 Git objects out of the text renderer", async () => {
+		await withReviewRepo(async repo => {
+			await Bun.write(path.join(repo, "object.bin"), new Uint8Array([0xff, 0xfe, 0xfd, 0xfc]));
+			await $`git add object.bin`.cwd(repo).quiet();
+
+			const { contents, file } = await loadStagedContents(repo, "object.bin");
+			if (contents.kind !== "asset" || contents.new.kind !== "binary") {
+				throw new Error("binary Git object was not classified safely");
+			}
+			const pane = new DiffPane();
+			pane.setAsset(file.path, contents.old, contents.new);
+			const rendered = sanitizeText(pane.render(80, 12).join("\n"));
+			expect(rendered).toContain("Binary object");
+			expect(rendered).not.toContain("�");
+		});
+	});
+});
+
 describe("formatting-ignore whitespace mode", () => {
 	const FMT: DiffBuildOptions = { whitespace: "formatting" };
 	const SPLIT_OLD = "const x = foo(a, b);\nkeep\n";

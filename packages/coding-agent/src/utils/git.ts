@@ -1859,6 +1859,24 @@ export const show = Object.assign(
 	},
 );
 
+/** Resolve Git LFS's local object directory without downloading content. */
+export const lfs = {
+	/**
+	 * Return the repository's Git LFS media directory. Uses `git lfs env` when
+	 * available so custom storage is honored, then falls back to `.git/lfs/objects`.
+	 */
+	async mediaDir(cwd: string, signal?: AbortSignal): Promise<string | null> {
+		const environment = await tryText(cwd, ["lfs", "env"], { readOnly: true, signal });
+		const configured = environment
+			?.split("\n")
+			.find(line => line.startsWith("LocalMediaDir="))
+			?.slice("LocalMediaDir=".length)
+			.trim();
+		if (configured) return path.resolve(cwd, configured);
+		const repository = await resolveRepository(cwd);
+		return repository ? path.join(repository.commonDir, "lfs", "objects") : null;
+	},
+};
 /** Read commit message and author metadata for replay/rewrite flows. */
 export async function commitDetails(cwd: string, revision: string, signal?: AbortSignal): Promise<CommitDetails> {
 	const raw = await runText(cwd, ["show", "-s", "--format=%H%x00%P%x00%an%x00%ae%x00%aI%x00%B", revision], {

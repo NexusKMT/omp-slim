@@ -102,7 +102,7 @@ function chip(label: string, active: boolean): string {
 class GitTuiComponent implements Component {
 	readonly #ui: TUI;
 	readonly #model: GitModel;
-	readonly #pane = new DiffPane();
+	readonly #pane: DiffPane;
 	readonly #sidebar: Sidebar;
 	readonly #highlightReady = warmHighlighter();
 	readonly #done = Promise.withResolvers<void>();
@@ -129,6 +129,7 @@ class GitTuiComponent implements Component {
 	constructor(ui: TUI, cwd: string, pinnedSha?: string) {
 		this.#ui = ui;
 		this.#model = new GitModel(cwd, { pinnedSha });
+		this.#pane = new DiffPane(ui.imageBudget);
 		const avatars = new AvatarLoader(() => this.#ui.requestRender());
 		this.#sidebar = new Sidebar({
 			model: this.#model,
@@ -255,13 +256,13 @@ class GitTuiComponent implements Component {
 		this.#highlightAbort = null;
 		const edge = this.#pendingHunkEdge;
 		this.#pendingHunkEdge = null;
-		if (contents.tooLarge) this.#pane.setDocument(null, "tooLarge");
-		else if (contents.binary) this.#pane.setDocument(null, "binary");
-		else {
+		if (contents.kind === "asset") {
+			this.#pane.setAsset(file.path, contents.old, contents.new);
+		} else {
 			this.#pane.setDocument(
 				buildDiffDocument(contents.oldText, contents.newText, file.path, {
 					whitespace: this.#whitespace,
-					streamResult: contents.streamResult ?? undefined,
+					streamResult: contents.streamResult,
 				}),
 				"ready",
 			);
@@ -601,7 +602,10 @@ class GitTuiComponent implements Component {
 		}
 
 		const right = new HitRow();
-		right.add(theme.fg("dim", "UTF-8")).add("  ");
+		const asset = this.#contents?.kind === "asset" ? this.#contents : null;
+		const contentKind =
+			asset && (asset.old.kind === "image" || asset.new.kind === "image") ? "Media" : asset ? "Binary" : "UTF-8";
+		right.add(theme.fg("dim", contentKind)).add("  ");
 		if (file?.area === "unstaged")
 			right.button(pill(" Stage File ", theme.getColorHex("toolDiffAdded")), () => this.#stageCurrentFile());
 		else if (file?.area === "staged")

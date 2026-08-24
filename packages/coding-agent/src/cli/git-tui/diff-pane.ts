@@ -15,10 +15,11 @@
  */
 import type { DiffStreamResult, HighlightStream } from "@oh-my-pi/pi-natives";
 import { diffWords, structuredPatchHunks } from "@oh-my-pi/pi-natives";
-import { replaceTabs, sliceWithWidth, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
+import { Image, type ImageBudget, replaceTabs, sliceWithWidth, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
+import { formatBytes } from "@oh-my-pi/pi-utils";
 import { createHighlightStream, getLanguageFromPath, theme } from "../../modes/theme/theme";
 import { bgAnsi, canvasHex, fgAnsi, mixHex, pill, selectionBgAnsi, textHex, withBg } from "./colors";
-import { DIFF_CONTEXT_LINES, type FileStreamUpdate } from "./state";
+import { DIFF_CONTEXT_LINES, type FileAssetSide, type FileStreamUpdate } from "./state";
 
 /** Column ranges (inclusive start, exclusive end) carrying intraline emphasis. */
 type MarkRanges = readonly (readonly [number, number])[];
@@ -524,7 +525,7 @@ function palette(): DiffPalette {
 // ── pane ─────────────────────────────────────────────────────────────────────
 
 /** Placeholder states shown instead of a document. */
-export type DiffPaneState = "empty" | "loading" | "streaming" | "binary" | "tooLarge" | "ready";
+export type DiffPaneState = "empty" | "loading" | "streaming" | "asset" | "ready";
 
 /** One rendered line of the current view. */
 type Visual =
@@ -548,6 +549,11 @@ interface StreamingDocument {
 	stableCommonLines: number;
 	maxLineWidth: number;
 }
+interface AssetDocument {
+	readonly filePath: string;
+	readonly old: FileAssetSide;
+	readonly new: FileAssetSide;
+}
 
 /** Result of a left click inside the pane. */
 export type PaneClick = { type: "hunk-action"; hunk: HunkBlock; action: HunkAction } | { type: "handled" } | null;
@@ -557,10 +563,12 @@ export type PaneClick = { type: "hunk-action"; hunk: HunkBlock; action: HunkActi
  * composes its rendered lines into the frame.
  */
 export class DiffPane {
+	readonly #imageBudget: ImageBudget | undefined;
 	#doc: DiffDocument | null = null;
 	#docVersion = 0;
 	#highlights: SyntaxHighlights | null = null;
 	#streaming: StreamingDocument | null = null;
+	#asset: AssetDocument | null = null;
 	state: DiffPaneState = "empty";
 	/** Message shown in the empty state. */
 	emptyMessage = "No changes";
@@ -582,6 +590,9 @@ export class DiffPane {
 	#layoutCache: { key: string; visuals: Visual[] } | undefined;
 	/** Per visible row: clickable hunk-button ranges recorded during render. */
 	#hits: ({ hunk: number; primary?: [number, number]; discard?: [number, number] } | undefined)[] = [];
+	constructor(imageBudget?: ImageBudget) {
+		this.#imageBudget = imageBudget;
+	}
 
 	get doc(): DiffDocument | null {
 		return this.#doc;
@@ -592,6 +603,7 @@ export class DiffPane {
 		this.#docVersion++;
 		this.#highlights = null;
 		this.#streaming = null;
+		this.#asset = null;
 		this.state = state;
 		this.scrollTop = 0;
 		this.scrollLeft = 0;
@@ -606,6 +618,11 @@ export class DiffPane {
 				this.scrollTop = Math.max(0, first - Math.floor(this.#lastHeight / 3));
 			}
 		}
+	}
+	/** Show media previews and safe placeholders for non-text Git objects. */
+	setAsset(filePath: string, old: FileAssetSide, next: FileAssetSide): void {
+		this.setDocument(null, "asset");
+		this.#asset = { filePath, old, new: next };
 	}
 
 	/** Start a provisional file view while the native stream ingests both sides. */
@@ -1008,15 +1025,9 @@ export class DiffPane {
 		this.#hits = new Array(height);
 		const doc = this.#doc;
 		if (this.state === "streaming" && this.#streaming) return this.#renderStreaming(width, height);
+		if (this.state === "asset" && this.#asset) return this.#renderAsset(width, height);
 		if (!doc || this.state !== "ready") {
-			const message =
-				this.state === "loading"
-					? "Loading diff…"
-					: this.state === "binary"
-						? "Binary file"
-						: this.state === "tooLarge"
-							? "File too large to diff"
-							: this.emptyMessage;
+			const message = this.state === "loading" ? "Loading diff…" : this.emptyMessage;
 			const lines: string[] = [];
 			for (let i = 0; i < height; i++) {
 				lines.push(
@@ -1050,6 +1061,118 @@ export class DiffPane {
 			lines.push(`${padded} ${minimap[i]}`);
 		}
 		return lines;
+	}
+	#renderAsset(width: number, height: number): string[] {
+		const asset = this.#asset;
+		if (!asset || height <= 0) return [];
+		const leftWidth = Math.max(1, Math.floor((width - 1) / 2));
+		const rightWidth = Math.max(1, width - leftWidth - 1);
+		const bodyHeight = Math.max(0, height - 1);
+		const oldLines = this.#renderAssetSide(asset.old, leftWidth, bodyHeight, `old:${asset.filePath}`);
+		const newLines = this.#renderAssetSide(asset.new, rightWidth, bodyHeight, `new:${asset.filePath}`);
+		const border = theme.fg("borderMuted", "│");
+		const lines: string[] = [];
+		for (let index = 0; index < height; index++) {
+			const leftSource =
+				index === 0
+					? centerText(theme.bold(this.#assetTitle("Before", asset.old)), leftWidth)
+					: (oldLines[index - 1] ?? "");
+			const rightSource =
+				index === 0
+					? centerText(theme.bold(this.#assetTitle("After", asset.new)), rightWidth)
+					: (newLines[index - 1] ?? "");
+			const left = truncateToWidth(leftSource, leftWidth);
+			const right = truncateToWidth(rightSource, rightWidth);
+			lines.push(
+				`${left}${" ".repeat(Math.max(0, leftWidth - visibleWidth(left)))}${border}${right}${" ".repeat(Math.max(0, rightWidth - visibleWidth(right)))}`,
+			);
+		}
+		return lines;
+	}
+
+	#renderAssetSide(side: FileAssetSide, width: number, height: number, placementKey: string): readonly string[] {
+		if (height <= 0) return [];
+		let content: readonly string[];
+		if (side.kind === "image") {
+			const image = side.image;
+			content = new Image(
+				image.data,
+				image.mimeType,
+				{ fallbackColor: text => theme.fg("dim", text) },
+				{
+					maxWidthCells: Math.max(1, width - 2),
+					maxHeightCells: height,
+					filename: this.#asset?.filePath,
+					budget: this.#imageBudget,
+					imageKey: `git-review:${placementKey}:${image.key}`,
+				},
+				{ widthPx: image.widthPx, heightPx: image.heightPx },
+			).render(width);
+		} else {
+			let details: string[];
+			switch (side.kind) {
+				case "empty":
+					details = ["No file"];
+					break;
+				case "text":
+					details = ["Text object", formatBytes(side.byteLength)];
+					break;
+				case "binary":
+					details = [
+						"Binary object",
+						side.byteLength === undefined ? "Size unavailable" : formatBytes(side.byteLength),
+					];
+					break;
+				case "tooLarge":
+					details = [
+						"Object too large to preview",
+						side.byteLength === undefined ? "Exceeds preview limit" : formatBytes(side.byteLength),
+					];
+					break;
+				case "lfsMissing":
+					details = [
+						"Git LFS object unavailable",
+						`sha256:${side.oid.slice(0, 12)}… · ${formatBytes(side.byteLength)}`,
+					];
+					break;
+			}
+			content = details.map(detail => centerText(theme.fg("dim", detail), width));
+		}
+		const top = Math.max(0, Math.floor((height - content.length) / 2));
+		return Array.from({ length: height }, (_, index) => content[index - top] ?? "");
+	}
+
+	#assetTitle(label: string, side: FileAssetSide): string {
+		let kind: string;
+		let lfs = false;
+		switch (side.kind) {
+			case "empty":
+				return label;
+			case "image":
+				kind =
+					side.image.sourceMimeType === "image/svg+xml"
+						? "SVG"
+						: side.image.sourceMimeType.replace(/^image\//, "").toUpperCase();
+				lfs = side.image.lfsOid !== undefined;
+				break;
+			case "text":
+				kind = "Text";
+				lfs = side.lfsOid !== undefined;
+				break;
+			case "binary":
+				kind = "Binary";
+				lfs = side.lfsOid !== undefined;
+				break;
+			case "tooLarge":
+				kind = "Too large";
+				lfs = side.lfsOid !== undefined;
+				break;
+			case "lfsMissing":
+				kind = "LFS missing";
+				lfs = true;
+				break;
+		}
+		return `${label} · ${kind}${lfs ? " · Git LFS" : ""}`;
 	}
 
 	#renderStreaming(width: number, height: number): string[] {
