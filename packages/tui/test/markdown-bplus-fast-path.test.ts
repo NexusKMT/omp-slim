@@ -331,6 +331,7 @@ describe("B+ fast-tail paragraph re-wrap", () => {
 			[`${frozen}\n\n| col_a | col_b |\n| --`, `${frozen}\n\n| col_a | col_b |\n| ----- | --`],
 			`${frozen}\n\n| col_a | col_b |\n| ----- | --`,
 		);
+		assertSpliceParts(["paragraph\n\n| one |\n|", "paragraph\n\n| one |\n|-"], "paragraph\n\n| one |\n|-");
 	});
 });
 
