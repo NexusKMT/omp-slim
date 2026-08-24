@@ -190,6 +190,27 @@ describe("resize anchoring inside a terminal multiplexer", () => {
 		tui.stop();
 	});
 
+	it("accounts for partial regrowth in the CPR-less pull bound", () => {
+		// Burst 12 -> 6 -> 10 never exceeds the pre-burst height, but the
+		// 6 -> 10 regrow can still pull four scrollback rows down. A bound
+		// derived from the tallest height (12) would compute zero pull and
+		// repaint from the pre-burst top 3 over those pulled-back committed
+		// rows; the accumulated grow steps bound the anchor at 3 + 4 = 7
+		// (CUP row 8).
+		const { terminal, tui, renderScheduler, writes } = startRig();
+		terminal.resize(40, 6);
+		terminal.resize(40, 10);
+		renderScheduler.settle(); // exit the resize alt borrow, start the CPR probe
+		renderScheduler.settle(); // first timeout: no reply -> one bounded retry
+		writes.length = 0;
+		renderScheduler.settle(); // retry timeout: conservative fallback
+		const repaint = writes.join("");
+		const cup = repaint.match(/\x1b\[(\d+);1H/);
+		expect(cup).not.toBeNull();
+		expect(Number(cup![1])).toBe(8);
+		tui.stop();
+	});
+
 	it("resolves a CPR-less grow from the retried probe's reply", () => {
 		// The original probe's reply is merely late: it lands after the retry
 		// is armed (swallowed as stale, pre-grow row), and the retry's own

@@ -657,10 +657,11 @@ export class TUI extends Container {
 	// pre-burst state.
 	#resizeBurstGrew = false;
 	#resizeBurstLastHeight: number | undefined;
-	// Tallest height seen during the burst: bounds how much scrollback a
-	// multiplexer grow can have pulled down (see the CPR-timeout fallback in
-	// #resolveResizeAnchor).
-	#resizeBurstMaxHeight: number | undefined;
+	// Sum of every grow step in the burst: bounds how much scrollback a
+	// multiplexer can have pulled down across the whole burst, including a
+	// shrink-then-regrow that never exceeds the pre-burst height (see the
+	// CPR-timeout fallback in #resolveResizeAnchor).
+	#resizeBurstPull = 0;
 	// Unanswered CSI 6n probes; CPR replies are consumed from input while > 0.
 	#pendingCprReplies = 0;
 	// Outstanding CPR replies that answer canceled probes; swallowed by
@@ -1070,7 +1071,7 @@ export class TUI extends Container {
 		const burstLastHeight = this.#resizeBurstLastHeight ?? this.#previousHeight;
 		if (this.terminal.rows > burstLastHeight) this.#resizeBurstGrew = true;
 		this.#resizeBurstLastHeight = this.terminal.rows;
-		this.#resizeBurstMaxHeight = Math.max(this.#resizeBurstMaxHeight ?? this.#previousHeight, this.terminal.rows);
+		this.#resizeBurstPull += Math.max(0, this.terminal.rows - burstLastHeight);
 		if (!this.#resizeAltActive) {
 			this.#resizeAltActive = true;
 			setAltScreenActive(true);
@@ -1257,15 +1258,15 @@ export class TUI extends Container {
 				// history rows above the real viewport. Frame-size clamping
 				// happens when the settled plan frame is emitted.
 				if (reportedRow === undefined) {
-					// No CPR at all. The pre-resize top is stale-low here: the grow
-					// already pulled scrollback down and moved the real viewport.
-					// Anchor at the conservative upper bound instead — pull never
-					// exceeds the burst's tallest grow, and pushes/discards only
-					// lower the top. Exact when scrollback covers the pull; when it
-					// does not, the repaint lands below the real viewport and leaves
-					// stale rows above rather than overwriting committed ones.
-					const maxPull = Math.max(0, (this.#resizeBurstMaxHeight ?? this.#previousHeight) - this.#previousHeight);
-					top = Math.max(0, this.#providerViewportTop + maxPull);
+					// No CPR at all. The pre-resize top is stale-low here: every
+					// grow step already pulled scrollback down and moved the real
+					// viewport. Anchor at the conservative upper bound instead —
+					// pull never exceeds the burst's accumulated growth, and
+					// pushes/discards only lower the top. Exact when scrollback
+					// covers the pull; when it does not, the repaint lands below
+					// the real viewport and leaves stale rows above rather than
+					// overwriting committed ones.
+					top = Math.max(0, this.#providerViewportTop + this.#resizeBurstPull);
 				} else {
 					top = Math.max(0, reportedTop);
 				}
@@ -2281,7 +2282,7 @@ export class TUI extends Container {
 		this.#previousHeight = height;
 		this.#resizeBurstGrew = false;
 		this.#resizeBurstLastHeight = undefined;
-		this.#resizeBurstMaxHeight = undefined;
+		this.#resizeBurstPull = 0;
 		this.#previousFrameLength = rows;
 		this.#clearScrollbackOnNextRender = false;
 		this.#forceViewportRepaintOnNextRender = false;
