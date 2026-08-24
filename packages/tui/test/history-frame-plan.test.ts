@@ -271,6 +271,7 @@ describe("terminal frame plans", () => {
 		).toEqual(["welcome", "editor"]);
 
 		renderScheduler.settle();
+		terminal.sendInput("\x1b[2;17R");
 		renderScheduler.settle();
 		expect(
 			terminal
