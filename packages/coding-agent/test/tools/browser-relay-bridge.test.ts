@@ -384,4 +384,74 @@ describe("RelayBridge Runtime sessions", () => {
 			),
 		).toEqual([]);
 	});
+	it("refreshes Runtime contexts after the extension reconnects", async () => {
+		const bridge = new RelayBridge({});
+		const firstExt = new FakeExtSocket();
+		connect(bridge, firstExt, [tab({ tabId: 1 })]);
+
+		const first = new FakeCdpSocket();
+		const firstConn = bridge.cdpConnected(first);
+		const firstSession = await attachPage(bridge, firstExt, first, firstConn, 1);
+		bridge.cdpMessage(firstConn, JSON.stringify({ id: ++msgSeq, sessionId: firstSession, method: "Runtime.enable" }));
+		await flush();
+		ack(bridge, firstExt, "send");
+		await flush();
+		const staleContext = { context: { id: 17 } };
+		bridge.extMessage(
+			firstExt,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: 1,
+				method: "Runtime.executionContextCreated",
+				params: staleContext,
+			}),
+		);
+		ack(bridge, firstExt, "send");
+		await flush();
+
+		bridge.extClosed(firstExt);
+		const nextExt = new FakeExtSocket();
+		bridge.extConnected(nextExt);
+		bridge.extMessage(
+			nextExt,
+			JSON.stringify({
+				t: "hello",
+				userAgent: "test",
+				browserVersion: "Chrome/151.0.0.0",
+				tabs: [tab({ tabId: 1 })],
+				attachedTabIds: [1],
+			}),
+		);
+
+		const second = new FakeCdpSocket();
+		const secondConn = bridge.cdpConnected(second);
+		const secondSession = await attachPage(bridge, nextExt, second, secondConn, 1);
+		bridge.cdpMessage(
+			secondConn,
+			JSON.stringify({ id: ++msgSeq, sessionId: secondSession, method: "Runtime.enable" }),
+		);
+		await flush();
+		expect(nextExt.pending("send").map(rpc => rpc.method)).toEqual(["Runtime.disable"]);
+		ack(bridge, nextExt, "send");
+		await flush();
+		expect(nextExt.pending("send").map(rpc => rpc.method)).toEqual(["Runtime.enable"]);
+
+		const currentContext = { context: { id: 18 } };
+		bridge.extMessage(
+			nextExt,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: 1,
+				method: "Runtime.executionContextCreated",
+				params: currentContext,
+			}),
+		);
+		ack(bridge, nextExt, "send");
+		await flush();
+
+		const contexts = second.messages.filter(
+			message => message.sessionId === secondSession && message.method === "Runtime.executionContextCreated",
+		);
+		expect(contexts.map(message => message.params)).toEqual([currentContext]);
+	});
 });

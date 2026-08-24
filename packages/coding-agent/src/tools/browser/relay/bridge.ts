@@ -223,6 +223,7 @@ export class RelayBridge {
 	extConnected(socket: RelaySocket): void {
 		if (this.#ext && this.#ext !== socket) {
 			this.#log("replacing extension socket");
+			for (const tab of this.#tabs.values()) this.#resetRuntime(tab);
 			this.#ext.close();
 		}
 		this.#ext = socket;
@@ -240,6 +241,7 @@ export class RelayBridge {
 		for (const tab of this.#tabs.values()) {
 			tab.attached = false;
 			tab.attaching = null;
+			this.#resetRuntime(tab);
 			// The extension dissolves omp groups on disconnect (or died along
 			// with them); grouping state is unknowable until the next hello.
 			// Without this reset, the next hello's groupId=-1 snapshots would
