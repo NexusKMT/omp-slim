@@ -33,9 +33,6 @@ async function runProbeScenario(options: {
 			'#!/usr/bin/env sh\nprintf x >> "$OMP_GPU_PROBE_COUNT"\nif [ -n "$OMP_GPU_PROBE_VALID_OUTPUT" ]; then printf "%s\\n" "$OMP_GPU_PROBE_VALID_OUTPUT"; fi\nif [ "$OMP_GPU_PROBE_DESCENDANT_HOLDS_STDOUT" = "true" ]; then sleep "$OMP_GPU_PROBE_SLEEP" & exit 0; fi\nif [ "$OMP_GPU_PROBE_HOLD_STDOUT_OPEN" = "true" ]; then sleep "$OMP_GPU_PROBE_SLEEP" & wait "$!"; fi\nif [ -n "$OMP_GPU_PROBE_SLEEP" ]; then exec sleep "$OMP_GPU_PROBE_SLEEP"; fi\nexit 0\n',
 		);
 		await fs.chmod(probePath, 0o755);
-		if (options.legacyCache !== undefined) {
-			await Bun.write(path.join(cacheRoot, "omp", "gpu_cache.json"), options.legacyCache);
-		}
 
 		const scenarioPath = path.join(tempRoot, "scenario.ts");
 		await Bun.write(
@@ -45,6 +42,8 @@ import { buildSystemPrompt } from ${JSON.stringify(path.join(import.meta.dir, ".
 
 Object.defineProperty(process, "platform", { value: ${JSON.stringify(options.platform ?? "linux")} });
 refreshDirsFromEnv();
+const legacyCache = process.env.OMP_GPU_PROBE_LEGACY_CACHE;
+if (legacyCache !== undefined) await Bun.write(getGpuCachePath(), legacyCache);
 const buildOptions = {
 	contextFiles: [],
 	skills: [],
@@ -102,6 +101,11 @@ console.log(JSON.stringify({ elapsedMs: Math.round(performance.now() - startedAt
 			env.OMP_GPU_PROBE_VALID_OUTPUT = options.validOutput;
 		} else {
 			delete env.OMP_GPU_PROBE_VALID_OUTPUT;
+		}
+		if (options.legacyCache !== undefined) {
+			env.OMP_GPU_PROBE_LEGACY_CACHE = options.legacyCache;
+		} else {
+			delete env.OMP_GPU_PROBE_LEGACY_CACHE;
 		}
 
 		const childStartedAt = performance.now();
