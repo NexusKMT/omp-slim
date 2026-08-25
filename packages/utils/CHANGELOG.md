@@ -8,7 +8,7 @@
 
 ### Fixed
 
-- Managed Chrome-for-Testing installs no longer fail extracting the ~269 MB `chrome` binary against the default 64 MiB archive-member cap; the trusted browser download now extracts with a ceiling sized for it. ([#9534](https://github.com/can1357/oh-my-pi/issues/9534))
+- Fixed managed Chrome-for-Testing installation failures when extracting the trusted browser download.
 
 ## [18.0.4] - 2026-08-24
 
