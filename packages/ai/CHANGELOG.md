@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed auth-gateway OpenAI Responses requests rejecting multimodal function-call outputs containing input text, images, or files; inline data images are now preserved as tool-result content.
+
 ## [18.0.5] - 2026-08-25
 
 ### Breaking Changes
@@ -22,9 +26,6 @@
 - Fixed Codex WebSocket cleanup failures caused by already-closed sockets.
 - Added safe retries for transient mid-stream socket closures across OpenAI Responses, Chat Completions, Azure OpenAI Responses, and Codex SSE when no replay-unsafe output has been emitted.
 - Fixed usage and cost reporting for OpenAI-compatible gateways backed by Vertex AI or Gemini by recognizing cached prompt tokens reported through `cachedContentTokenCount`.
-### Fixed
-
-- Fixed auth-gateway OpenAI Responses requests rejecting multimodal function-call outputs containing input text, images, or files; inline data images are now preserved as tool-result content.
 
 ## [18.0.4] - 2026-08-24
 
