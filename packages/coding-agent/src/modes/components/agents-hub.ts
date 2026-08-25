@@ -288,7 +288,7 @@ export class AgentsHubComponent implements Component {
 		this.#loadError = null;
 		try {
 			const selectedName = this.#selectedAgent()?.name;
-			const { agents } = await discoverAgents(this.#cwd);
+			const { agents } = await discoverAgents(this.#cwd, undefined, this.#settings.get("extensions"));
 			const disabled = new Set(this.#settings.get("task.disabledAgents") ?? []);
 			const overrides = this.#settings.get("task.agentModelOverrides") ?? {};
 			const prewalkOverrides = this.#settings.get("task.agentPrewalk") ?? {};

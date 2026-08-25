@@ -61,13 +61,18 @@ async function loadAgentsFromDir(dir: string, source: AgentSource): Promise<Agen
 /**
  * Discover agents from filesystem and merge with bundled agents.
  * Precedence (highest wins): project `.omp/agents`, user `.omp/agents`,
- * OMP extension-package agents in `listOmpExtensionRoots` source order
- * (CLI roots > project `extensions:` settings > user `extensions:` settings >
- * installed npm/link plugins), Claude marketplace plugin agents (project
- * scope before user), then bundled.
+ * OMP extension-package agents from the effective `extensions` setting,
+ * installed npm/link plugins, Claude marketplace plugin agents (project scope
+ * before user), then bundled.
  * @param cwd - Current working directory for project agent discovery
+ * @param home - Home directory for user and marketplace discovery
+ * @param configuredExtensionPaths - Effective `extensions` setting, including runtime overrides
  */
-export async function discoverAgents(cwd: string, home: string = os.homedir()): Promise<DiscoveryResult> {
+export async function discoverAgents(
+	cwd: string,
+	home: string = os.homedir(),
+	configuredExtensionPaths?: readonly string[],
+): Promise<DiscoveryResult> {
 	const resolvedCwd = path.resolve(cwd);
 
 	const userDirs = getConfigDirs("agents", { project: false })
@@ -90,15 +95,16 @@ export async function discoverAgents(cwd: string, home: string = os.homedir()): 
 	const user = userDirs[0];
 	if (user) orderedDirs.push({ dir: user.path, source: "user" });
 
-	// OMP extension-package agents/ dirs. `listOmpExtensionRoots` returns roots in
-	// source-precedence order (CLI > project `extensions:` settings > user
-	// `extensions:` settings > installed npm/link plugins, with marketplace
-	// installs already excluded by realpath) — consume that order verbatim so the
-	// `task` agent surface dedups identically to the sibling skills/hooks/tools
-	// surface in `discovery/omp-plugins.ts`. Gate on `omp-plugins` so
-	// disabledProviders suppresses the whole extension-package surface.
+	// Extension-package agents use the same effective root set as sibling
+	// skills/hooks/tools. Callers with a live Settings instance pass its merged
+	// value so overlays and runtime overrides replace persisted arrays.
 	const extensionRoots = isProviderEnabled("omp-plugins")
-		? await listOmpExtensionRoots({ cwd: resolvedCwd, home, repoRoot: null })
+		? await listOmpExtensionRoots({
+				cwd: resolvedCwd,
+				home,
+				repoRoot: null,
+				configuredExtensionPaths,
+			})
 		: [];
 	for (const root of extensionRoots) {
 		orderedDirs.push({ dir: path.join(root.path, "agents"), source: root.level });

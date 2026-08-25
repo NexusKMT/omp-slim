@@ -16,6 +16,12 @@ export interface LoadContext {
 	home: string;
 	/** Git repository root (directory containing .git), or null if not in a repo */
 	repoRoot: string | null;
+	/**
+	 * Effective `extensions` setting for this capability load. When present,
+	 * extension sub-discovery MUST use it instead of reconstructing settings
+	 * layers from disk.
+	 */
+	configuredExtensionPaths?: readonly string[];
 }
 
 /**

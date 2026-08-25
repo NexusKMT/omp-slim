@@ -119,17 +119,15 @@ function ctx(): LoadContext {
 	return { cwd: project, home, repoRoot: project };
 }
 
-test("project settings.json#extensions surfaces every sub-directory", async () => {
-	writeFile(path.join(project, ".omp", "settings.json"), JSON.stringify({ extensions: [ext] }));
-
+async function expectExtensionSubDirectoriesLoaded(context: LoadContext): Promise<void> {
 	const [skills, commands, rules, prompts, hooks, tools, mcps] = await Promise.all([
-		loadFromPlugin<{ name: string }>(skillCapability.id, ctx()),
-		loadFromPlugin<{ name: string }>(slashCommandCapability.id, ctx()),
-		loadFromPlugin<{ name: string }>(ruleCapability.id, ctx()),
-		loadFromPlugin<{ name: string }>(promptCapability.id, ctx()),
-		loadFromPlugin<{ name: string; type: "pre" | "post" }>(hookCapability.id, ctx()),
-		loadFromPlugin<{ name: string }>(toolCapability.id, ctx()),
-		loadFromPlugin<{ name: string; command?: string }>(mcpCapability.id, ctx()),
+		loadFromPlugin<{ name: string }>(skillCapability.id, context),
+		loadFromPlugin<{ name: string }>(slashCommandCapability.id, context),
+		loadFromPlugin<{ name: string }>(ruleCapability.id, context),
+		loadFromPlugin<{ name: string }>(promptCapability.id, context),
+		loadFromPlugin<{ name: string; type: "pre" | "post" }>(hookCapability.id, context),
+		loadFromPlugin<{ name: string }>(toolCapability.id, context),
+		loadFromPlugin<{ name: string; command?: string }>(mcpCapability.id, context),
 	]);
 
 	expect(skills.map(s => s.name)).toContain("my-skill");
@@ -140,6 +138,11 @@ test("project settings.json#extensions surfaces every sub-directory", async () =
 	expect(hooks.some(h => h.name === "edit.sh" && h.type === "post")).toBe(true);
 	expect(tools.map(t => t.name)).toEqual(expect.arrayContaining(["wcount", "deep-tool"]));
 	expect(mcps.find(m => m.name === "lsp")?.command).toBe("lsp-server");
+}
+
+test("project settings.json#extensions surfaces every sub-directory", async () => {
+	writeFile(path.join(project, ".omp", "settings.json"), JSON.stringify({ extensions: [ext] }));
+	await expectExtensionSubDirectoriesLoaded(ctx());
 });
 
 test("user settings.json#extensions also feeds sub-discovery", async () => {
@@ -150,29 +153,8 @@ test("user settings.json#extensions also feeds sub-discovery", async () => {
 });
 
 test("project config.yml#extensions surfaces every sub-directory (#9768)", async () => {
-	// config.yml is the canonical settings store; settings.json is a legacy
-	// migration source. Before the fix, listOmpExtensionRoots read only
-	// settings.json, so a config.yml-declared extension loaded its module but
-	// never sub-discovered its skills/hooks/etc.
 	writeFile(path.join(project, ".omp", "config.yml"), `extensions:\n  - "${ext}"\n`);
-
-	const [skills, commands, rules, prompts, hooks, tools, mcps] = await Promise.all([
-		loadFromPlugin<{ name: string }>(skillCapability.id, ctx()),
-		loadFromPlugin<{ name: string }>(slashCommandCapability.id, ctx()),
-		loadFromPlugin<{ name: string }>(ruleCapability.id, ctx()),
-		loadFromPlugin<{ name: string }>(promptCapability.id, ctx()),
-		loadFromPlugin<{ name: string; type: "pre" | "post" }>(hookCapability.id, ctx()),
-		loadFromPlugin<{ name: string }>(toolCapability.id, ctx()),
-		loadFromPlugin<{ name: string; command?: string }>(mcpCapability.id, ctx()),
-	]);
-
-	expect(skills.map(s => s.name)).toContain("my-skill");
-	expect(commands.map(c => c.name)).toContain("greet");
-	expect(rules.map(r => r.name)).toContain("style");
-	expect(prompts.map(p => p.name)).toContain("review");
-	expect(hooks.some(h => h.name === "bash.sh" && h.type === "pre")).toBe(true);
-	expect(tools.map(t => t.name)).toEqual(expect.arrayContaining(["wcount", "deep-tool"]));
-	expect(mcps.find(m => m.name === "lsp")?.command).toBe("lsp-server");
+	await expectExtensionSubDirectoriesLoaded(ctx());
 });
 
 test("user config.yaml#extensions feeds sub-discovery", async () => {
@@ -183,14 +165,60 @@ test("user config.yaml#extensions feeds sub-discovery", async () => {
 	expect(skills.map(s => s.name)).toContain("my-skill");
 });
 
-test("config.yml and settings.json naming the same package dedup to one root", async () => {
-	// Both surfaces feed the module loader; keeping two spellings would
-	// otherwise double-count the package. First-seen-wins dedup collapses them.
-	writeFile(path.join(project, ".omp", "config.yml"), `extensions:\n  - "${ext}"\n`);
-	writeFile(path.join(project, ".omp", "settings.json"), JSON.stringify({ extensions: [ext] }));
+test("project config.yml#extensions replaces lower-precedence configured roots", async () => {
+	const userExt = path.join(tempDir, "user-extension");
+	const projectSettingsExt = path.join(tempDir, "project-settings-extension");
+	const projectConfigExt = path.join(tempDir, "project-config-extension");
+	buildExtensionPackage(userExt, "user-skill");
+	buildExtensionPackage(projectSettingsExt, "project-settings-skill");
+	buildExtensionPackage(projectConfigExt, "project-config-skill");
+	writeFile(path.join(home, ".omp", "agent", "config.yml"), `extensions:\n  - "${userExt}"\n`);
+	writeFile(path.join(project, ".omp", "settings.json"), JSON.stringify({ extensions: [projectSettingsExt] }));
+	writeFile(path.join(project, ".omp", "config.yml"), `extensions:\n  - "${projectConfigExt}"\n`);
 
-	const roots = await listOmpExtensionRoots(ctx());
-	expect(roots.map(r => r.path)).toEqual([ext]);
+	const skills = await loadFromPlugin<{ name: string }>(skillCapability.id, ctx());
+	const names = skills.map(skill => skill.name);
+	expect(names).toContain("project-config-skill");
+	expect(names).not.toContain("project-settings-skill");
+	expect(names).not.toContain("user-skill");
+});
+
+test("effective extensions replace persisted roots for overlays and runtime overrides", async () => {
+	const persistedExt = path.join(tempDir, "persisted-extension");
+	const overrideExt = path.join(tempDir, "override-extension");
+	buildExtensionPackage(persistedExt, "persisted-skill");
+	buildExtensionPackage(overrideExt, "override-skill");
+	writeFile(path.join(project, ".omp", "config.yml"), `extensions:\n  - "${persistedExt}"\n`);
+
+	const context: LoadContext = { ...ctx(), configuredExtensionPaths: [overrideExt] };
+	const skills = await loadFromPlugin<{ name: string }>(skillCapability.id, context);
+	const names = skills.map(skill => skill.name);
+	expect(names).toContain("override-skill");
+	expect(names).not.toContain("persisted-skill");
+
+	const emptyOverride: LoadContext = { ...ctx(), configuredExtensionPaths: [] };
+	const emptySkills = await loadFromPlugin<{ name: string }>(skillCapability.id, emptyOverride);
+	expect(emptySkills.map(skill => skill.name)).not.toContain("persisted-skill");
+});
+
+test("empty project config.yml#extensions suppresses user roots", async () => {
+	const userExt = path.join(tempDir, "user-extension");
+	buildExtensionPackage(userExt, "user-skill");
+	writeFile(path.join(home, ".omp", "agent", "config.yml"), `extensions:\n  - "${userExt}"\n`);
+	writeFile(path.join(project, ".omp", "config.yml"), "extensions: []\n");
+
+	const skills = await loadFromPlugin<{ name: string }>(skillCapability.id, ctx());
+	expect(skills.map(skill => skill.name)).not.toContain("user-skill");
+});
+
+test("user YAML config suppresses its legacy settings.json migration source", async () => {
+	const legacyExt = path.join(tempDir, "legacy-extension");
+	buildExtensionPackage(legacyExt, "legacy-skill");
+	writeFile(path.join(home, ".omp", "agent", "settings.json"), JSON.stringify({ extensions: [legacyExt] }));
+	writeFile(path.join(home, ".omp", "agent", "config.yml"), "theme:\n  dark: default\n");
+
+	const skills = await loadFromPlugin<{ name: string }>(skillCapability.id, ctx());
+	expect(skills.map(skill => skill.name)).not.toContain("legacy-skill");
 });
 
 test("`--extension` CLI injection is wired through the same provider", async () => {

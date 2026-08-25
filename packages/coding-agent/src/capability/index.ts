@@ -265,7 +265,10 @@ export async function loadCapability<T>(
 	const cwd = options.cwd ?? getProjectDir();
 	const home = os.homedir();
 	const repoRoot = await findRepoRoot(cwd);
-	const ctx: LoadContext = { cwd, home, repoRoot };
+	const configuredExtensionPaths = settings?.get("extensions");
+	const ctx: LoadContext = configuredExtensionPaths
+		? { cwd, home, repoRoot, configuredExtensionPaths }
+		: { cwd, home, repoRoot };
 	const providers = filterProviders(capability, options);
 
 	return await loadImpl(capability, providers, ctx, options);

@@ -8,10 +8,9 @@
  * `prompts/`, `.mcp.json`) are wired into discovery by `omp-plugins.ts`.
  *
  * CLI-provided paths are injected via {@link injectOmpExtensionCliRoots}
- * before discovery runs; settings paths are read lazily in
- * {@link listOmpExtensionRoots} from each scope's canonical `config.yml`
- * (`config.yaml` at user scope) *and* legacy `settings.json`, mirroring the
- * merged `extensions:` that `loadExtensionModules` loads via `settings.get`.
+ * before discovery runs. Capability loads supply the effective `extensions`
+ * setting; direct callers reconstruct its array-replacement precedence from
+ * canonical YAML config and legacy `settings.json`.
  *
  * @see ./omp-plugins.ts
  * @see ./builtin.ts `loadExtensionModules`
@@ -139,24 +138,31 @@ function scopeDirs(ctx: LoadContext): ScopeDirs {
 	};
 }
 
-async function readSettingsExtensions(settingsPath: string): Promise<string[]> {
-	const content = await readFile(settingsPath);
-	if (!content) return [];
-	const parsed = tryParseJson<{ extensions?: unknown }>(content);
-	const raw = parsed?.extensions;
-	if (!Array.isArray(raw)) return [];
+function readExtensionsArray(raw: unknown): string[] | null {
+	if (!Array.isArray(raw)) return null;
 	return raw.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+}
+
+async function readSettingsExtensions(settingsPath: string): Promise<string[] | null> {
+	const content = await readFile(settingsPath);
+	if (!content) return null;
+	const parsed = tryParseJson<{ extensions?: unknown }>(content);
+	return readExtensionsArray(parsed?.extensions);
 }
 
 /** Project native config filename; matches the single `.omp/config.yml` the settings loader reads. */
 const PROJECT_CONFIG_FILENAMES = ["config.yml"] as const;
 
+interface YamlExtensions {
+	exists: boolean;
+	entries: string[] | null;
+}
+
 /**
- * Read the `extensions:` array from a scope's canonical YAML config. The first
- * present filename wins (mirroring the settings loader), and a present-but-
- * malformed file yields no entries rather than throwing.
+ * Read the first present YAML config filename, matching the settings loader's
+ * `config.yml` before `config.yaml` selection.
  */
-async function readYamlExtensions(scopeDir: string, filenames: readonly string[]): Promise<string[]> {
+async function readYamlExtensions(scopeDir: string, filenames: readonly string[]): Promise<YamlExtensions> {
 	for (const filename of filenames) {
 		const content = await readFile(path.join(scopeDir, filename));
 		if (content === null) continue;
@@ -164,30 +170,42 @@ async function readYamlExtensions(scopeDir: string, filenames: readonly string[]
 		try {
 			parsed = YAML.parse(content);
 		} catch {
-			return [];
+			return { exists: true, entries: null };
 		}
-		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return [];
-		if (!("extensions" in parsed)) return [];
-		const raw = parsed.extensions;
-		if (!Array.isArray(raw)) return [];
-		return raw.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+			return { exists: true, entries: null };
+		}
+		const raw = "extensions" in parsed ? parsed.extensions : undefined;
+		return { exists: true, entries: readExtensionsArray(raw) };
 	}
-	return [];
+	return { exists: false, entries: null };
+}
+
+interface ConfiguredExtensions {
+	entries: string[];
+	level: "user" | "project";
 }
 
 /**
- * Merge a scope's configured extension paths from both surfaces that feed
- * `settings.get("extensions")`: the canonical `config.yml`/`config.yaml` and
- * the legacy `settings.json`. Reading only the latter left `config.yml`-only
- * extensions loading their module while their `skills/`, `hooks/`, etc. never
- * reached discovery (#9768). Duplicate paths are dropped downstream.
+ * Select the persisted `extensions` array with the same array-replacement
+ * precedence as `Settings`: project YAML, project legacy settings, user YAML,
+ * then user legacy settings. A present user YAML config suppresses its legacy
+ * migration source even when it omits `extensions`.
  */
-async function readScopeExtensions(scopeDir: string, configFilenames: readonly string[]): Promise<string[]> {
-	const [fromConfig, fromSettings] = await Promise.all([
-		readYamlExtensions(scopeDir, configFilenames),
-		readSettingsExtensions(path.join(scopeDir, "settings.json")),
+async function readConfiguredExtensions(ctx: LoadContext): Promise<ConfiguredExtensions | null> {
+	const { project, user } = scopeDirs(ctx);
+	const [projectYaml, projectSettings, userYaml, userSettings] = await Promise.all([
+		readYamlExtensions(project, PROJECT_CONFIG_FILENAMES),
+		readSettingsExtensions(path.join(project, "settings.json")),
+		readYamlExtensions(user, MAIN_CONFIG_FILENAMES),
+		readSettingsExtensions(path.join(user, "settings.json")),
 	]);
-	return [...fromConfig, ...fromSettings];
+	if (projectYaml.entries !== null) return { entries: projectYaml.entries, level: "project" };
+	if (projectSettings !== null) return { entries: projectSettings, level: "project" };
+	if (userYaml.entries !== null) return { entries: userYaml.entries, level: "user" };
+	if (userYaml.exists) return null;
+	if (userSettings !== null) return { entries: userSettings, level: "user" };
+	return null;
 }
 
 function resolveAgainst(raw: string, ctx: LoadContext): string {
@@ -212,14 +230,14 @@ async function isDirectory(p: string): Promise<boolean> {
 /**
  * Resolve every configured extension package directory for the given context.
  *
- * Sources, in order of precedence (later entries with the same absolute path
- * are dropped):
+ * Sources, in order of precedence:
  *
  * 1. Invocation-scoped SDK roots, when present; otherwise CLI roots injected
  *    via {@link injectOmpExtensionCliRoots}
- * 2. Project `<cwd>/.omp/config.yml#extensions`, then `.omp/settings.json#extensions`
- * 3. User `~/.omp/agent/config.{yml,yaml}#extensions`, then `settings.json#extensions`
- * 4. Enabled npm/link plugins installed under `<plugins>/node_modules/` (for
+ * 2. The effective configured `extensions` array. Capability loads pass the
+ *    active `Settings` value (including overlays and runtime overrides);
+ *    direct callers fall back to persisted array-replacement precedence.
+ * 3. Enabled npm/link plugins installed under `<plugins>/node_modules/` (for
  *    `omp install <pkg>` / `omp plugin install` / `omp plugin link`). Marketplace
  *    installs are loaded by the `claude-plugins` provider and are excluded here.
  * Only entries that resolve to a directory on disk are returned; file
@@ -237,21 +255,30 @@ export async function listOmpExtensionRoots(ctx: LoadContext): Promise<OmpExtens
 				root.relativePath ? { ...root, path: path.resolve(ctx.cwd, root.relativePath) } : root,
 			);
 	if (rootMode === "merge") {
-		const { project, user } = scopeDirs(ctx);
-		const [projectExtensions, userExtensions, installedPlugins] = await Promise.all([
-			readScopeExtensions(project, PROJECT_CONFIG_FILENAMES),
-			readScopeExtensions(user, MAIN_CONFIG_FILENAMES),
+		const [persisted, installedPlugins] = await Promise.all([
+			readConfiguredExtensions(ctx),
 			listInstalledPluginRoots(ctx),
 		]);
+		const configured =
+			ctx.configuredExtensionPaths !== undefined
+				? {
+						entries: [...ctx.configuredExtensionPaths],
+						level:
+							persisted && Bun.deepEquals(ctx.configuredExtensionPaths, persisted.entries)
+								? persisted.level
+								: ("user" as const),
+					}
+				: persisted;
 		candidates = [
 			...candidates,
-			...projectExtensions.map((raw): InjectedRoot => ({ path: resolveAgainst(raw, ctx), level: "project" })),
-			...userExtensions.map((raw): InjectedRoot => ({ path: resolveAgainst(raw, ctx), level: "user" })),
+			...(configured?.entries.map(
+				(raw): InjectedRoot => ({ path: resolveAgainst(raw, ctx), level: configured.level }),
+			) ?? []),
 			...installedPlugins,
 		];
 	}
 
-	// First-seen-wins dedup preserves invocation/CLI > project-settings > user-settings > installed precedence.
+	// First-seen-wins dedup preserves invocation/CLI > configured settings > installed precedence.
 	const seen = new Set<string>();
 	const unique: InjectedRoot[] = [];
 	for (const candidate of candidates) {
