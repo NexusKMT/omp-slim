@@ -26,7 +26,6 @@ const LINUX_SUBREAPER_COMMAND_ENV = "OMP_PTREE_SUBREAPER_COMMAND";
 export function createLinuxSubreaperScript(libcCandidates: readonly string[] = ["libc.so.6", "libc.so"]): string {
 	return `
 import { dlopen, FFIType } from "bun:ffi";
-import * as fs from "node:fs/promises";
 
 let libc;
 for (const soname of ${JSON.stringify(libcCandidates)}) {
@@ -53,12 +52,14 @@ if (libc.symbols.prctl(36, 1, 0, 0, 0) !== 0) {
 const commandJson = Bun.env.${LINUX_SUBREAPER_COMMAND_ENV};
 if (!commandJson) throw new Error("missing supervised command");
 delete Bun.env.${LINUX_SUBREAPER_COMMAND_ENV};
+delete Bun.env.BUN_BE_BUN;
 const command = JSON.parse(commandJson);
 const child = Bun.spawn(command, {
 	stdin: "inherit",
 	stdout: "pipe",
 	stderr: "pipe",
 	windowsHide: true,
+	env: Bun.env,
 });
 
 async function relay(stream, destination) {
@@ -67,14 +68,12 @@ async function relay(stream, destination) {
 	await writer.flush();
 }
 
-async function hasLiveChildren() {
-	while (libc.symbols.waitpid(-1, null, 1) > 0) {}
-	const taskRoot = "/proc/" + process.pid + "/task";
-	for (const tid of await fs.readdir(taskRoot)) {
-		const children = await fs.readFile(taskRoot + "/" + tid + "/children", "utf8").catch(() => "");
-		if (children.trim().length > 0) return true;
-	}
-	return false;
+function hasLiveChildren() {
+	let childPid;
+	do {
+		childPid = libc.symbols.waitpid(-1, null, 1);
+	} while (childPid > 0);
+	return childPid === 0;
 }
 
 const [exitCode] = await Promise.all([
@@ -82,7 +81,7 @@ const [exitCode] = await Promise.all([
 	relay(child.stdout, Bun.stdout),
 	relay(child.stderr, Bun.stderr),
 ]);
-while (await hasLiveChildren()) await Bun.sleep(10);
+while (hasLiveChildren()) await Bun.sleep(10);
 process.exit(exitCode ?? 1);
 `;
 }

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the Linux `subreaper` spawn option to retain reparented descendants for process-tree cleanup.
+
+### Fixed
+
+- Fixed `ptree` timeout cleanup and output capture so timed commands retain their deadline through descendant-held pipes and untimed commands read output to EOF.
+
 ## [18.0.4] - 2026-08-24
 
 ### Added

@@ -54,6 +54,57 @@ describe("ptree timeout", () => {
 		expect(stdout).toBe("libc-fallback-ok");
 	});
 
+	it.skipIf(process.platform !== "linux")("does not leak supervisor-only environment into the command", async () => {
+		const result = await exec(["/bin/sh", "-c", `printf %s "\${BUN_BE_BUN-unset}"`], {
+			subreaper: true,
+		});
+
+		expect(result.stdout).toBe("unset");
+	});
+
+	it.skipIf(process.platform !== "linux")("supervises commands without a mounted procfs", async () => {
+		const script = `
+const mountExit = await Bun.spawn(["mount", "-t", "tmpfs", "tmpfs", "/proc"], {
+	stdout: "ignore",
+	stderr: "inherit",
+}).exited;
+if (mountExit !== 0) throw new Error("failed to hide procfs");
+${createLinuxSubreaperScript()}
+`;
+		const child = Bun.spawn(
+			[
+				"unshare",
+				"--user",
+				"--map-root-user",
+				"--mount",
+				"--propagation",
+				"private",
+				process.execPath,
+				"-e",
+				script,
+			],
+			{
+				cwd: "/tmp",
+				env: {
+					...Bun.env,
+					BUN_BE_BUN: "1",
+					OMP_PTREE_SUBREAPER_COMMAND: JSON.stringify(["/bin/sh", "-c", "printf procfs-free-ok"]),
+				},
+				stdin: "ignore",
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		const [exitCode, stdout, stderr] = await Promise.all([
+			child.exited,
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+		]);
+
+		expect(exitCode, stderr).toBe(0);
+		expect(stdout).toBe("procfs-free-ok");
+	});
+
 	it("clears the timeout timer once the child exits so a fast command does not hold the event loop", async () => {
 		// Real subprocess timing: the probe (a static-import fixture) resolves a
 		// quick command under a 10 s ptree timeout and then must exit on its own;
