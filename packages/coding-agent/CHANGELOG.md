@@ -30,6 +30,7 @@
 
 - Fixed marketplace-installed plugins silently omitting their `rules/` directories from discovery ([#9702](https://github.com/can1357/oh-my-pi/issues/9702)).
 - Fixed advisor notes in the `/tree` session view exposing their model-facing XML wrapper; rows now read `advisor (name, severity): note` in plain text.
+- Fixed `agent()` (and other subagent spawns) discarding a valid terminal `yield` as `cleanup exceeded N ms` when teardown (e.g. a slow advisor review) drained past the cleanup deadline; a successful run now keeps its result and the late cleanup is handed off asynchronously ([#9670](https://github.com/can1357/oh-my-pi/issues/9670)).
 - Fixed the welcome screen staying at its original width after a terminal resize; a settled rebuild now recomposes it at the new width like the rest of the transcript.
 - Fixed `omp if-bench` ending an Anthropic model's run on a transient `Refusal (cyber)` classification; the cyber classifier is stochastic near the threshold, so a refused turn is now retried with a fresh session (up to 3 attempts) before it is scored as a run-ending provider failure.
 - Fixed streamed assistant responses crashing when a later provider delta revised earlier Markdown; assistant output now stays mutable until finalization.
