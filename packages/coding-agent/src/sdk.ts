@@ -183,6 +183,7 @@ import { collectMountedMCPToolRoutes, projectMountedMCPXdevGuidance } from "./se
 import { createSettingsAwareStreamFn } from "./session/settings-stream-fn";
 import { SnapcompactInlineTransformer } from "./session/snapcompact-inline";
 import { createSnapcompactSavingsRecorder } from "./session/snapcompact-savings-journal";
+import { CodingAgentSpeculativeExecutionHost } from "./speculation/host";
 import { closeAllConnections } from "./ssh/connection-manager";
 import { unmountAll } from "./ssh/sshfs-mount";
 import {
@@ -3524,6 +3525,14 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		};
 		const kimiApiFormatSetting = settings.get("providers.kimiApiFormat");
 		const kimiApiFormat = kimiApiFormatSetting === "auto" ? undefined : kimiApiFormatSetting;
+		const speculativeToolExecution = settings.get("tools.speculativeExecution.enabled")
+			? {
+					enabled: true,
+					maxInFlight: settings.get("tools.speculativeExecution.maxInFlight"),
+					host: new CodingAgentSpeculativeExecutionHost(settings, toolSession, extensionRunner),
+				}
+			: undefined;
+
 		agent = new Agent({
 			initialState: {
 				systemPrompt,
@@ -3608,6 +3617,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			pruneToolDescriptions: inlineToolDescriptors,
 			dialect: resolveDialect(settings.get("tools.format"), model),
 			abortOnFabricatedToolResult: settings.get("tools.abortOnFabricatedResult"),
+			speculativeToolExecution,
 			getToolChoice: () => session?.nextToolChoiceDirective(),
 			onToolChoiceUnavailable: () => session?.toolChoiceQueue.reject("unavailable"),
 			telemetry: options.telemetry,

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added default-off speculative execution for validated local reads, including reads projected from nested JavaScript and Python eval cells.
+
 ## [18.1.17] - 2026-09-10
 
 ### Added

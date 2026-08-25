@@ -1,0 +1,319 @@
+import type {
+	AgentToolCall,
+	AgentToolResult,
+	SpeculativeChildHandle,
+	SpeculativeOperationSink,
+	ToolSpeculationStreamSession,
+} from "@oh-my-pi/pi-agent-core";
+import type { ToolSession } from "../../tools";
+import { namespaceSessionId as namespaceJavaScriptSessionId } from "../js";
+import { shadowPlanIfPresent } from "../js/context-manager";
+import type { RuntimeCallIdentity } from "../js/shared/runtime";
+import type { JsStatusEvent } from "../js/shared/types";
+import { bridgeValueFromToolResult } from "../js/tool-bridge";
+import { namespaceSessionId as namespacePythonSessionId } from "../py";
+import { shadowPlanPythonIfPresent } from "../py/executor";
+import { type ShadowClaimKey, ShadowClaimStore } from "./claim-store";
+import { EvalArgsStreamDecoder } from "./eval-args-stream";
+import { evaluateShadowExpression } from "./evaluator";
+import type { ShadowOperation, ShadowPlan, ShadowValue } from "./types";
+
+interface ClaimedChild {
+	handle: SpeculativeChildHandle;
+	args: Readonly<Record<string, unknown>>;
+	name: string;
+}
+
+export interface EvalShadowCellOptions {
+	coordinator: SpeculativeOperationSink;
+	parentToolCallId: string;
+	session: ToolSession;
+	cwd: string;
+	sessionId: string;
+	kernelOwnerId?: string;
+	emitStatus?: (event: JsStatusEvent) => void;
+	onDiscard?: () => void;
+}
+
+function canonicalize(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(canonicalize);
+	if (value === null || typeof value !== "object") return value;
+	return Object.fromEntries(
+		Object.entries(value as Record<string, unknown>)
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([key, item]) => [key, canonicalize(item)]),
+	);
+}
+
+function fingerprint(args: unknown): string {
+	const canonicalArgs =
+		args && typeof args === "object" && !Array.isArray(args)
+			? Object.fromEntries(Object.entries(args as Record<string, unknown>).filter(([key]) => key !== "i"))
+			: args;
+	return JSON.stringify(canonicalize(canonicalArgs));
+}
+
+function asArgs(value: unknown): Readonly<Record<string, unknown>> | undefined {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+	return value as Readonly<Record<string, unknown>>;
+}
+
+export class EvalShadowCellSession implements ToolSpeculationStreamSession {
+	readonly #options: EvalShadowCellOptions;
+	readonly #decoder = new EvalArgsStreamDecoder();
+	readonly #claims = new ShadowClaimStore<ClaimedChild>();
+	readonly contextIndependent = true;
+	readonly #admitted = new Map<string, Promise<void>>();
+	readonly #results = new Map<string, ShadowValue>();
+	readonly #runtimeOccurrences = new Map<string, number>();
+	#occurrenceAssignment = Promise.resolve();
+	#snapshot: Readonly<Record<string, ShadowValue | unknown>> | undefined;
+	#closed = false;
+	#updates = Promise.resolve();
+	#pendingPlan: { codePrefix: string; language: string } | undefined;
+	#planning = false;
+
+	constructor(options: EvalShadowCellOptions) {
+		this.#options = options;
+	}
+
+	async update(_toolCall: AgentToolCall, partialJson?: string): Promise<void> {
+		if (this.#closed || partialJson === undefined) return;
+		const decoded = this.#decoder.update(partialJson);
+		if (decoded.kind === "snapshot" ? decoded.snapshot.restart : decoded.restart) {
+			await this.discard("streamed eval argument buffer restarted");
+			return;
+		}
+		if (decoded.kind === "disabled") {
+			await this.discard(`streamed eval argument decoding disabled: ${decoded.reason}`);
+			return;
+		}
+		if (decoded.kind !== "snapshot") return;
+		if (decoded.snapshot.reset === true) {
+			await this.discard("reset eval cells cannot use retained shadow state");
+			return;
+		}
+		if (decoded.snapshot.language === undefined && !decoded.snapshot.complete) return;
+		const language = decoded.snapshot.language ?? "js";
+		this.#pendingPlan = { codePrefix: decoded.snapshot.codePrefix, language };
+		if (!this.#planning) {
+			this.#planning = true;
+			this.#updates = this.#drainPlanUpdates();
+		}
+	}
+
+	async #drainPlanUpdates(): Promise<void> {
+		try {
+			while (!this.#closed) {
+				const pending = this.#pendingPlan;
+				if (!pending) return;
+				this.#pendingPlan = undefined;
+				await this.#plan(pending.codePrefix, pending.language).catch(() => undefined);
+			}
+		} finally {
+			this.#planning = false;
+		}
+	}
+
+	async finalize(context: { args: Readonly<Record<string, unknown>> }): Promise<void> {
+		if (this.#closed) return;
+		if (!this.#decoder.matchesFinal(context.args)) {
+			await this.discard("final eval arguments do not match streamed shadow plan");
+			return;
+		}
+		await this.#updates;
+	}
+
+	commit(): void {}
+
+	async discard(reason: string): Promise<void> {
+		if (this.#closed) return;
+		this.#closed = true;
+		this.#pendingPlan = undefined;
+		this.#claims.discard();
+		try {
+			if (this.#options.coordinator.discardChildren) {
+				await this.#options.coordinator.discardChildren(this.#options.parentToolCallId, reason);
+			} else {
+				await this.#options.coordinator.close(reason);
+			}
+			await Promise.allSettled(this.#admitted.values());
+		} finally {
+			this.#options.onDiscard?.();
+		}
+	}
+
+	async claim(
+		name: string,
+		args: unknown,
+		identity: RuntimeCallIdentity,
+		remainingTimeoutMs: number,
+		signal?: AbortSignal,
+	): Promise<AgentToolResult<unknown> | undefined> {
+		const normalized = asArgs(args);
+		if (!normalized || signal?.aborted) return undefined;
+		const outcome = await this.#claims.claimRuntimeAsync(
+			{
+				siteId: identity.siteId,
+				name,
+				fingerprint: fingerprint(normalized),
+				occurrence: identity.occurrence,
+			},
+			remainingTimeoutMs,
+			signal,
+		);
+		if (!outcome || signal?.aborted) return undefined;
+		return await outcome.value.handle.commit(outcome.value.args);
+	}
+
+	async claimValue(
+		name: string,
+		args: unknown,
+		identity: RuntimeCallIdentity,
+		remainingTimeoutMs: number,
+	): Promise<unknown | undefined> {
+		const result = await this.claim(name, args, identity, remainingTimeoutMs);
+		if (!result) return undefined;
+		return bridgeValueFromToolResult(name, args, result, this.#options.emitStatus);
+	}
+	async #plan(code: string, language: string): Promise<void> {
+		if (this.#closed || !code) return;
+		let plan: ShadowPlan | null = null;
+		if (language === "js") {
+			const projected = await shadowPlanIfPresent({
+				sessionKey: namespaceJavaScriptSessionId(this.#options.sessionId),
+				cwd: this.#options.cwd,
+				sessionId: namespaceJavaScriptSessionId(this.#options.sessionId),
+				code,
+			});
+			if (projected) {
+				this.#snapshot ??= projected.snapshot.values;
+				plan = projected.plan;
+			}
+		} else if (language === "py") {
+			const projected = await shadowPlanPythonIfPresent({
+				cwd: this.#options.cwd,
+				sessionId: namespacePythonSessionId(this.#options.sessionId),
+				kernelOwnerId: this.#options.kernelOwnerId,
+				code,
+			});
+			if (projected) {
+				this.#snapshot ??= projected.snapshot.values;
+				plan = projected;
+			}
+		}
+		if (!plan || !this.#snapshot) {
+			if (this.#admitted.size > 0) await this.discard("streamed eval prefix cannot retain speculative operations");
+			return;
+		}
+		const plannedOperationIds = new Set(plan.operations.map(operation => operation.call.id));
+		if ([...this.#admitted.keys()].some(id => !plannedOperationIds.has(id))) {
+			await this.discard("streamed eval prefix removed a speculative operation");
+			return;
+		}
+
+		let unresolvedControlStart = Number.POSITIVE_INFINITY;
+		for (const control of plan.controls ?? []) {
+			if (control.kind === "conditional") {
+				unresolvedControlStart = Math.min(unresolvedControlStart, control.span.start);
+			}
+		}
+		for (const operation of plan.operations) {
+			if (operation.call.controlDependencies.length > 0 || operation.call.span.start >= unresolvedControlStart) {
+				continue;
+			}
+			if (this.#admitted.has(operation.call.id)) continue;
+			const previousOccurrenceAssignment = this.#occurrenceAssignment;
+			const occurrenceAssigned = Promise.withResolvers<void>();
+			this.#occurrenceAssignment = occurrenceAssigned.promise;
+			const admission = this.#admitWhenReady(operation, previousOccurrenceAssignment, occurrenceAssigned.resolve);
+			this.#admitted.set(operation.call.id, admission);
+		}
+	}
+
+	async #admitWhenReady(
+		operation: ShadowOperation,
+		previousOccurrenceAssignment: Promise<void>,
+		releaseOccurrenceAssignment: () => void,
+	): Promise<void> {
+		let occurrenceAssigned = false;
+		const release = () => {
+			if (occurrenceAssigned) return;
+			occurrenceAssigned = true;
+			releaseOccurrenceAssignment();
+		};
+		try {
+			if (operation.call.controlDependencies.length > 0) return;
+			await Promise.all(operation.call.dependencies.map(id => this.#admitted.get(id)));
+			if (this.#closed || !this.#snapshot) return;
+			let evaluated: ShadowValue;
+			try {
+				evaluated = evaluateShadowExpression(operation.call.args, {
+					snapshot: this.#snapshot,
+					results: this.#results,
+				});
+			} catch {
+				return;
+			}
+			if (operation.call.name !== "read") return;
+			const runtimeArgs = evaluated.value;
+			const executionArgs = asArgs(runtimeArgs);
+			if (!executionArgs) return;
+			const tool = this.#options.session.getToolForEvalBridge?.("read");
+			if (!tool) return;
+			await previousOccurrenceAssignment;
+			const runtimeOccurrenceKey = `${operation.call.siteId}\0${operation.call.name}`;
+			const runtimeOccurrence = this.#runtimeOccurrences.get(runtimeOccurrenceKey) ?? 0;
+			this.#runtimeOccurrences.set(runtimeOccurrenceKey, runtimeOccurrence + 1);
+			release();
+			const key: ShadowClaimKey = {
+				siteId: operation.call.siteId,
+				dynamicPath: operation.call.dynamicPath.join("/"),
+				name: operation.call.name,
+				fingerprint: fingerprint(runtimeArgs),
+				occurrence: operation.call.occurrence,
+			};
+			const candidateId = `${this.#options.parentToolCallId}:${operation.call.id}`;
+			const handle = await this.#options.coordinator.admit({
+				candidateId,
+				parentToolCallId: this.#options.parentToolCallId,
+				dependencies: operation.call.dependencies.map(id => `${this.#options.parentToolCallId}:${id}`),
+				toolCall: { type: "toolCall", id: candidateId, name: operation.call.name, arguments: executionArgs },
+				tool,
+				source: "eval_shadow",
+			});
+			if (!handle) return;
+			this.#claims.register(key, runtimeOccurrence);
+			const startedAt = performance.now();
+			try {
+				const outcome = await handle.outcome;
+				if (outcome.kind !== "result") {
+					this.#claims.miss(key);
+					await handle.discard("speculative child did not produce a reusable result").catch(() => undefined);
+					return;
+				}
+				const virtualDurationMs = performance.now() - startedAt;
+				if (outcome.isError) {
+					this.#claims.miss(key);
+					await handle.discard("speculative child returned an error").catch(() => undefined);
+					return;
+				}
+				const value = bridgeValueFromToolResult(operation.call.name, runtimeArgs, outcome.result);
+				this.#results.set(operation.call.id, {
+					value,
+					origins: [{ kind: "local_read", resource: String(executionArgs.path ?? "") }],
+				});
+				this.#claims.add(key, {
+					kind: "result",
+					value: { handle, args: executionArgs, name: operation.call.name },
+					virtualDurationMs,
+				});
+			} catch {
+				this.#claims.miss(key);
+				await handle.discard("speculative child execution failed").catch(() => undefined);
+			}
+		} finally {
+			release();
+		}
+	}
+}

@@ -7,6 +7,9 @@ interface RunnerFrame {
 	id?: string;
 	data?: string;
 	status?: string;
+	revision?: number;
+	digest?: string;
+	admissionRejected?: boolean;
 }
 
 const pythonPath = Bun.env.PYTHON ?? ($which("python3") ? "python3" : "python");
@@ -125,6 +128,97 @@ describe("Python runner request dispatch", () => {
 			runner.send({ id: "b", code: "print('two')" });
 			const dones = await collectDoneOrder(runner, new Set(["a", "b"]));
 			expect(dones.map(frame => frame.status).sort()).toEqual(["ok", "ok"]);
+		} finally {
+			await runner.dispose();
+		}
+	});
+
+	it("preserves cell locals and resets call-site occurrences", async () => {
+		const runner = spawnRunner();
+		const cell = ['path = "cell.txt"', 'tool.read({"path": locals()["path"]})'].join("\n");
+		try {
+			runner.send({
+				id: "setup",
+				code: [
+					"identities = []",
+					"occurrences = {}",
+					"def __omp_reset_call_occurrences__():",
+					"    occurrences.clear()",
+					"def __omp_with_call_site__(site_id, action, args):",
+					"    occurrence = occurrences.get(site_id, 0)",
+					"    occurrences[site_id] = occurrence + 1",
+					"    identities.append((site_id, occurrence, args))",
+					"    return action(args)",
+					"class Tool:",
+					"    def read(self, args):",
+					"        return args['path']",
+					"tool = Tool()",
+				].join("\n"),
+			});
+			await collectDoneOrder(runner, new Set(["setup"]));
+
+			runner.send({ id: "first", code: cell });
+			const [first] = await collectDoneOrder(runner, new Set(["first"]));
+			expect(first.status).toBe("ok");
+			runner.send({ id: "second", code: cell });
+			const [second] = await collectDoneOrder(runner, new Set(["second"]));
+			expect(second.status).toBe("ok");
+
+			runner.send({
+				id: "assert",
+				code: 'assert [identity[1:] for identity in identities] == [(0, {"path": "cell.txt"}), (0, {"path": "cell.txt"})]',
+			});
+			const [assertion] = await collectDoneOrder(runner, new Set(["assert"]));
+			expect(assertion.status).toBe("ok");
+		} finally {
+			await runner.dispose();
+		}
+	});
+
+	it.skipIf(process.platform !== "win32")("handles shadow controls and stale shadow admission", async () => {
+		const runner = spawnRunner();
+		try {
+			runner.send({ id: "seed", code: "window_admission_guard = 1" });
+			await collectDoneOrder(runner, new Set(["seed"]));
+
+			runner.send({ id: "snapshot", type: "shadow_snapshot" });
+			const snapshot = await runner.nextFrame();
+			expect(snapshot).toMatchObject({
+				type: "shadow_snapshot",
+				id: "snapshot",
+				eligible: true,
+			});
+			if (snapshot.revision === undefined || snapshot.digest === undefined) {
+				throw new Error("expected shadow snapshot revision and digest");
+			}
+
+			runner.send({ id: "mutate", code: "window_admission_guard = 2" });
+			await collectDoneOrder(runner, new Set(["mutate"]));
+			runner.send({
+				id: "stale",
+				code: "window_admission_guard = 3",
+				expectedShadowRevision: snapshot.revision,
+				expectedShadowDigest: snapshot.digest,
+			});
+			expect(await runner.nextFrame()).toMatchObject({
+				type: "done",
+				id: "stale",
+				admissionRejected: true,
+			});
+
+			runner.send({ id: "plan", type: "shadow_plan", code: "shadow_control_leak = True" });
+			expect(await runner.nextFrame()).toMatchObject({
+				type: "shadow_plan",
+				id: "plan",
+				eligible: true,
+			});
+
+			runner.send({
+				id: "run",
+				code: "assert window_admission_guard == 2 and 'shadow_control_leak' not in globals()",
+			});
+			const [done] = await collectDoneOrder(runner, new Set(["run"]));
+			expect(done.status).toBe("ok");
 		} finally {
 			await runner.dispose();
 		}

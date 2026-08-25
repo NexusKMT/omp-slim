@@ -6,6 +6,7 @@ import {
 	ensurePyToolBridge,
 	registerPyToolBridge,
 } from "@oh-my-pi/pi-coding-agent/eval/py/tool-bridge";
+import type { EvalShadowCellSession } from "@oh-my-pi/pi-coding-agent/eval/speculation/cell-session";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { $which, isRecord } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
@@ -248,6 +249,56 @@ asyncio.run(check_intent())
 			expect(res.status).toBe(200);
 			expect(statusEvents).toHaveLength(1);
 			expect(statusEvents[0]!.op).toBe("read");
+		} finally {
+			unregister();
+		}
+	});
+
+	it("settles an interrupted speculative wait without starting ordinary tool execution", async () => {
+		const calls: FakeCall[] = [];
+		const started = Promise.withResolvers<void>();
+		const controller = new AbortController();
+		const lateClaim = Promise.withResolvers<undefined>();
+		let claimSignal: AbortSignal | undefined;
+		const shadowCell = {
+			async claim(
+				_name: string,
+				_args: unknown,
+				_identity: { siteId: string; occurrence: number },
+				_remainingTimeoutMs: number,
+				signal?: AbortSignal,
+			) {
+				claimSignal = signal;
+				started.resolve();
+				return await lateClaim.promise;
+			},
+		} as unknown as EvalShadowCellSession;
+		const info = await ensurePyToolBridge();
+		const sessionId = `claim-abort-${crypto.randomUUID()}`;
+		const unregister = registerPyToolBridge(sessionId, "run", {
+			toolSession: makeSession(new Map([["read", makeFakeTool("read", calls, { content: [] })]])),
+			signal: controller.signal,
+			shadowCell,
+		});
+		try {
+			const response = call(info, {
+				session: sessionId,
+				run: "run",
+				name: "read",
+				args: { path: "waiting.txt" },
+				identity: { siteId: "site-1", occurrence: 0 },
+			});
+			await started.promise;
+			controller.abort();
+
+			expect(await (await response).json()).toEqual({
+				ok: false,
+				error: 'bridge call "read" aborted: eval cell was interrupted',
+			});
+			expect(claimSignal).toBe(controller.signal);
+			expect(calls).toEqual([]);
+			lateClaim.reject(new Error("late speculative failure"));
+			await Promise.resolve();
 		} finally {
 			unregister();
 		}
