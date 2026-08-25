@@ -5,7 +5,6 @@
 ### Fixed
 
 - Fixed the `synthetic` provider's default model still pointing at the retired `hf:zai-org/GLM-5.1`; an account with only `SYNTHETIC_API_KEY` opened on whichever model sorted first (`hf:moonshotai/Kimi-K3`) instead of the provider default, which is now the bundled `hf:zai-org/GLM-5.2`.
-
 - Added Yolo-Auto as a provider with the flat-rate `deepseek-flash-v4` model and live `/v1/models` discovery.
 
 ## [18.0.4] - 2026-08-24

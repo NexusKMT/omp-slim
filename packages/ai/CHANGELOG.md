@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Renamed the internal stream-retry helper `withEmptyCompletionRetry` to `withReplaySafeStreamRetry` (module `@oh-my-pi/pi-ai/utils/empty-completion-retry`), now taking a policy argument (`retryEmptyCompletion` / `retryProviderErrors`). Callers of the old export must migrate ([#7979](https://github.com/can1357/oh-my-pi/issues/7979)).
+
 ### Fixed
 
 - Fixed DeepSeek vision SKUs (`deepseek-v4-flash-vision-exp`, any `-vision-` id) losing image input after the text-only DeepSeek guard: genuinely multimodal ids now keep `image_url` parts while text-only DeepSeek endpoints still strip them.
@@ -11,8 +15,8 @@
 - Fixed Codex WebSocket continuations replaying full context whenever a turn toggled Fast mode, while preserving strict resets for model, instructions, tools, reasoning, verbosity, and response format changes.
 - OMP no longer exits during Codex WebSocket cleanup if Bun throws `ERR_SOCKET_CLOSED` for a socket with an open state.
 - Fixed OpenAI-compatible streaming usage parsing to read Vertex/Gemini cache hits reported in `cachedContentTokenCount`, so `cacheRead` and derived cost reflect prompt caching through gateways fronting Vertex AI ([#9713](https://github.com/can1357/oh-my-pi/issues/9713)).
-
 - Added a `/login` API-key flow for Yolo-Auto, validated against the provider's `/v1/models` endpoint.
+- Retried transient mid-stream socket closures for OpenAI Responses, Chat Completions, Azure OpenAI Responses, and Codex SSE when no replay-unsafe output was emitted ([#7979](https://github.com/can1357/oh-my-pi/issues/7979)).
 
 ## [18.0.4] - 2026-08-24
 
@@ -260,13 +264,6 @@
 ### Fixed
 
 - Fixed account-scoped Codex cyber-policy denials bypassing sibling credential rotation; replay-safe requests now try every configured account before surfacing the error.
-### Breaking Changes
-
-- Renamed the internal stream-retry helper `withEmptyCompletionRetry` to `withReplaySafeStreamRetry` (module `@oh-my-pi/pi-ai/utils/empty-completion-retry`), now taking a policy argument (`retryEmptyCompletion` / `retryProviderErrors`). Callers of the old export must migrate ([#7979](https://github.com/can1357/oh-my-pi/issues/7979)).
-
-### Fixed
-
-- Retried transient mid-stream socket closures for OpenAI Responses, Chat Completions, Azure OpenAI Responses, and Codex SSE when no replay-unsafe output was emitted ([#7979](https://github.com/can1357/oh-my-pi/issues/7979)).
 
 ## [17.2.11] - 2026-08-07
 

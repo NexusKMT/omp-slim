@@ -12,7 +12,6 @@
 - Added a third state to the git TUI whitespace toggle (`b`): beyond ignoring whitespace-only line changes, it hides formatting-only changes (indentation, line splits/joins, blank lines) and import-only changes in TypeScript/JavaScript, Rust, and Go
 - Compressed single-child directory chains in the sidebar tree view
 - Split pure additions (new/untracked files) into their own list below tracked changes in each git TUI file section, separated by a rule; addition rows drop the redundant status letter and deleted files render struck through
-
 - Added Yolo-Auto to the `/login` provider list and the `YOLO_AUTO_API_KEY` env help.
 
 ### Changed
@@ -29,7 +28,6 @@
 ### Fixed
 
 - Fixed Obsidian theme task instructions and usage-limit text blending into dark backgrounds.
-
 - Fixed marketplace-installed plugins silently omitting their `rules/` directories from discovery ([#9702](https://github.com/can1357/oh-my-pi/issues/9702)).
 - Fixed advisor notes in the `/tree` session view exposing their model-facing XML wrapper; rows now read `advisor (name, severity): note` in plain text.
 - Fixed `agent()` (and other subagent spawns) discarding a valid terminal `yield` as `cleanup exceeded N ms` when teardown (e.g. a slow advisor review) drained past the cleanup deadline; a successful run now keeps its result and the late cleanup is handed off asynchronously ([#9670](https://github.com/can1357/oh-my-pi/issues/9670)).
