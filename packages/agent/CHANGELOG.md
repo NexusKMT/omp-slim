@@ -7,6 +7,9 @@
 ### Fixed
 
 - Corrected remote compaction summaries so they accurately report the number of input tokens processed.
+### Fixed
+
+- Fixed Codex remote compaction replaying image-read tool results as synthetic user messages instead of preserving the images inside their function outputs.
 
 ## [18.0.4] - 2026-08-24
 
