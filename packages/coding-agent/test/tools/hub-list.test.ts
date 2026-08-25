@@ -10,7 +10,7 @@ import { AgentRegistry, getAgentTombstonePath, MAIN_AGENT_ID } from "@oh-my-pi/p
 import { ensurePersistedRoster, registerPersistedSubagents } from "@oh-my-pi/pi-coding-agent/registry/persisted-agents";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/session-entries";
-import { renderIrcPeerRoster } from "@oh-my-pi/pi-coding-agent/task/executor";
+import { collectIrcPeerRoster } from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { HubTool } from "@oh-my-pi/pi-coding-agent/tools/hub";
 import {
@@ -19,7 +19,7 @@ import {
 	executeSend,
 	MAX_HUB_LIST_LIMIT,
 } from "@oh-my-pi/pi-coding-agent/tools/hub/messaging";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { prompt, TempDir } from "@oh-my-pi/pi-utils";
 
 function sessionHeader(id: string): string {
 	return JSON.stringify({
@@ -67,6 +67,39 @@ function makeToolSession(registry: AgentRegistry, agentId: string, sessionFile: 
 		agentRegistry: registry,
 		getAgentId: () => agentId,
 	};
+}
+
+const subagentSystemPromptTemplatePath = path.resolve(
+	import.meta.dir,
+	"../../src/prompts/system/subagent-system-prompt.md",
+);
+
+/**
+ * Render the production subagent system prompt (roster section and all) with
+ * the live peer data — the same template and render engine the executor uses
+ * when spawning a child session — so these tests pin the real prompt output.
+ */
+async function renderIrcPeerRoster(
+	selfId: string,
+	registry: AgentRegistry = AgentRegistry.global(),
+	sessionFileHint?: string | null,
+): Promise<string> {
+	const hint = sessionFileHint ?? registry.get(selfId)?.sessionFile ?? registry.get(MAIN_AGENT_ID)?.sessionFile;
+	const root = await ensurePersistedRoster(registry, hint);
+	const roster = collectIrcPeerRoster(registry, selfId, root);
+	return prompt.render(await fs.promises.readFile(subagentSystemPromptTemplatePath, "utf-8"), {
+		agent: "",
+		context: "",
+		planReference: "",
+		planReferencePath: "",
+		worktree: "",
+		outputSchema: undefined,
+		outputSchemaOverridesAgent: false,
+		ircPeers: roster.peers,
+		ircParkedCount: roster.parkedCount,
+		ircOmittedCount: roster.omittedCount,
+		ircSelfId: selfId,
+	});
 }
 
 describe("hub list", () => {

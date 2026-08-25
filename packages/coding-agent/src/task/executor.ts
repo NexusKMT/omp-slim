@@ -335,34 +335,6 @@ export function collectIrcPeerRoster(
 	return { peers, parkedCount, omittedCount };
 }
 
-/**
- * Render the production subagent system prompt (roster section and all) with
- * the live peer data, so tests exercise the same Markdown template path as a
- * real child session.
- */
-export async function renderIrcPeerRoster(
-	selfId: string,
-	registry: AgentRegistry = AgentRegistry.global(),
-	sessionFileHint?: string | null,
-): Promise<string> {
-	const hint = sessionFileHint ?? registry.get(selfId)?.sessionFile ?? registry.get(MAIN_AGENT_ID)?.sessionFile;
-	const root = await ensurePersistedRoster(registry, hint);
-	const roster = collectIrcPeerRoster(registry, selfId, root);
-	return prompt.render(subagentSystemPromptTemplate, {
-		agent: "",
-		context: "",
-		planReference: "",
-		planReferencePath: "",
-		worktree: "",
-		outputSchema: undefined,
-		outputSchemaOverridesAgent: false,
-		ircPeers: roster.peers,
-		ircParkedCount: roster.parkedCount,
-		ircOmittedCount: roster.omittedCount,
-		ircSelfId: selfId,
-	});
-}
-
 function withAbortTimeout<T>(
 	promise: Promise<T>,
 	timeoutMs: number,
