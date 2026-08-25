@@ -149,6 +149,9 @@ type OpenAICompletionsUsageLike = {
 	prompt_cache_miss_tokens?: unknown;
 	prompt_tokens_details?: unknown;
 	completion_tokens_details?: unknown;
+	// Vertex/Gemini reports cache hits here (camelCase) when fronted by an
+	// OpenAI-compatible gateway; the OpenAI-shaped cached fields stay absent.
+	cachedContentTokenCount?: unknown;
 };
 
 type OpenAICompletionsPromptTokenDetails = {
@@ -171,6 +174,7 @@ function hasPositiveCacheReadTokenField(rawUsage: object): boolean {
 	const usageLike = rawUsage as OpenAICompletionsUsageLike;
 	if (typeof usageLike.cached_tokens === "number" && usageLike.cached_tokens > 0) return true;
 	if (typeof usageLike.prompt_cache_hit_tokens === "number" && usageLike.prompt_cache_hit_tokens > 0) return true;
+	if (typeof usageLike.cachedContentTokenCount === "number" && usageLike.cachedContentTokenCount > 0) return true;
 
 	const rawPromptTokenDetails = usageLike.prompt_tokens_details;
 	if (typeof rawPromptTokenDetails !== "object" || rawPromptTokenDetails === null) return false;
@@ -1774,13 +1778,19 @@ export function parseChunkUsage(
 	const promptCacheHitTokens = usageLike.prompt_cache_hit_tokens;
 	const promptCacheMissTokens = usageLike.prompt_cache_miss_tokens;
 	const promptTokenCachedTokens = promptTokenDetails?.cached_tokens;
+	const cachedContentTokenCount = usageLike.cachedContentTokenCount;
 	const completionReasoningTokens = completionTokenDetails?.reasoning_tokens;
 	const cacheWriteTokens = promptTokenDetails?.cache_write_tokens;
 	const outputTokens = typeof completionTokens === "number" ? completionTokens : 0;
 	const accounting = calculateOpenAIUsageAccounting({
 		promptTokens: typeof promptTokens === "number" ? promptTokens : 0,
 		outputTokens,
-		cachedTokens: firstPositiveNumber(cachedTokens, promptCacheHitTokens, promptTokenCachedTokens),
+		cachedTokens: firstPositiveNumber(
+			cachedTokens,
+			promptCacheHitTokens,
+			promptTokenCachedTokens,
+			cachedContentTokenCount,
+		),
 		reasoningTokens: typeof completionReasoningTokens === "number" ? completionReasoningTokens : 0,
 		cacheWriteOpenRouter: typeof cacheWriteTokens === "number" ? cacheWriteTokens : undefined,
 		cacheWriteDeepSeek: typeof promptCacheMissTokens === "number" ? promptCacheMissTokens : undefined,

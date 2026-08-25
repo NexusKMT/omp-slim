@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed OpenAI-compatible streaming usage parsing to read Vertex/Gemini cache hits reported in `cachedContentTokenCount`, so `cacheRead` and derived cost reflect prompt caching through gateways fronting Vertex AI ([#9713](https://github.com/can1357/oh-my-pi/issues/9713)).
+
 ## [18.0.4] - 2026-08-24
 
 ### Fixed
