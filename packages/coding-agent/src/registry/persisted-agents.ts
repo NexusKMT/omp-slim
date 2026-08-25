@@ -276,14 +276,17 @@ async function readPersistedAgentHistory(
  * multi-megabyte historical transcript just to populate one roster row.
  */
 async function readPersistedAgentMetadata(sessionFile: string): Promise<PersistedAgentMetadata> {
-	const stat = fs.promises.stat(sessionFile).catch(error => {
-		// A transcript listed by readdir can vanish before its metadata is read
-		// (session switch or compaction): ENOENT is the tolerated optional-file
-		// race. Any other stat failure (EACCES/EMFILE/EIO) is a filesystem fault
-		// that must surface so the roster latch drops and the next call retries.
-		if (isFilesystemError(error)) throw error;
-		return undefined;
-	});
+	// Settle immediately instead of leaving a rejecting promise pending while
+	// the transcript stream runs: a stat fault (EACCES/EMFILE/EIO) must not
+	// surface as an unhandled rejection if the stream errors first or takes
+	// long. ENOENT stays the tolerated optional-file race (a transcript listed
+	// by readdir can vanish before its metadata is read); the fault is captured
+	// and rethrown only after the stream has settled, so the roster latch drops
+	// and the next call retries.
+	const stat: Promise<{ file?: fs.Stats; error?: unknown }> = fs.promises.stat(sessionFile).then(
+		file => ({ file }),
+		error => (isFilesystemError(error) ? { error } : { file: undefined }),
+	);
 	const artifactBase = sessionFile.slice(0, -".jsonl".length);
 	const outputPath = `${artifactBase}.md`;
 	const patchPath = `${artifactBase}.patch`;
@@ -344,7 +347,11 @@ async function readPersistedAgentMetadata(sessionFile: string): Promise<Persiste
 		// prefix still yields what it can.
 		if (isFilesystemError(error)) throw error;
 	}
-	const [file, [hasOutput, hasPatch]] = await Promise.all([stat, artifactFiles]);
+	const [statResult, [hasOutput, hasPatch]] = await Promise.all([stat, artifactFiles]);
+	// A transient stat fault surfaces now that both reads have settled; ENOENT
+	// already degraded to an undefined file above.
+	if (statResult.error !== undefined) throw statResult.error;
+	const file = statResult.file;
 	return {
 		activity,
 		createdAt: createdAt ?? file?.birthtimeMs,
@@ -375,10 +382,25 @@ async function readPersistedVibeChildIds(sessionFile: string, shouldContinue: ()
 	}
 }
 
+/**
+ * Upper bound on remembered roster latches. Once the bound is reached, only
+ * settled entries are forgotten (oldest first), so an in-flight scan is never
+ * evicted and a root whose latch was pruned is simply re-scanned on its next
+ * ensure call.
+ */
+const MAX_PERSISTED_ROSTER_LATCHES = 32;
+
 const kPersistedRosterLatches = Symbol("persistedRosterLatches");
 
+interface PersistedRosterLatch {
+	/** Settles when the root's roster scan finishes (success or logged failure). */
+	pending: Promise<void>;
+	/** True once `pending` has settled; only settled latches are evictable. */
+	settled: boolean;
+}
+
 interface RegistryWithPersistedRosterLatches extends AgentRegistry {
-	[kPersistedRosterLatches]?: Map<string, Promise<void>>;
+	[kPersistedRosterLatches]?: Map<string, PersistedRosterLatch>;
 }
 
 async function resolveRootSessionFile(registry: AgentRegistry, hint?: string | null): Promise<string | undefined> {
@@ -423,10 +445,12 @@ export function isCurrentSessionRosterRef(
 }
 
 /**
- * Restore parked sibling transcripts once per current root session. A session
- * switch on the same process-global registry gets a new scan (the previous
- * root's latch is dropped, so switching back re-scans that tree). IO failure
- * degrades roster counts, never task startup, and remains retryable.
+ * Restore parked sibling transcripts once per current root session. Scans are
+ * latched per root: concurrent calls for the same root share one in-flight
+ * scan, while distinct roots stay latched independently. The latch cache is
+ * bounded by forgetting settled roots oldest-first, so a switch back to an old
+ * root re-scans only once its latch was pruned. IO failure degrades roster
+ * counts, never task startup, and remains retryable.
  */
 export async function ensurePersistedRoster(
 	registry: AgentRegistry,
@@ -451,25 +475,40 @@ export async function ensurePersistedRoster(
 	}
 	const existing = latches.get(root);
 	if (existing) {
-		await existing;
+		await existing.pending;
 		return root;
 	}
-	// Serialize with any in-flight scan, then keep only the current root
-	// latched: a session switch drops the previous root's entry so a switch
-	// back re-scans that tree.
-	const previous = latches.size > 0 ? [...latches.values()].pop()! : Promise.resolve();
-	latches.clear();
+	// Forget settled latches oldest-first once the bound is reached, so a
+	// process that visits many roots doesn't accumulate one entry per root.
+	// In-flight scans are never evicted: their latch is the single-flight guard.
+	if (latches.size >= MAX_PERSISTED_ROSTER_LATCHES) {
+		for (const [latchedRoot, latch] of latches) {
+			if (latches.size < MAX_PERSISTED_ROSTER_LATCHES) break;
+			if (latch.settled) latches.delete(latchedRoot);
+		}
+	}
 	let pending: Promise<void>;
-	pending = previous
-		.then(() => registerPersistedSubagents(registry, root, { hydrateHistory: false }))
-		.catch(error => {
-			if (latches.get(root) === pending) latches.delete(root);
+	pending = registerPersistedSubagents(registry, root, { hydrateHistory: false }).then(
+		() => {
+			const latch = latches.get(root);
+			if (latch) latch.settled = true;
+		},
+		error => {
+			// A failed scan drops its latch so the next call retries; the failure
+			// itself degrades to in-memory peers, never task startup.
+			const latch = latches.get(root);
+			if (latch && latch.pending === pending) {
+				latches.delete(root);
+			} else if (latch) {
+				latch.settled = true;
+			}
 			logger.warn("Persisted agent roster scan failed; using in-memory peers", {
 				rootSessionFile: root,
 				error: rosterScanError(error),
 			});
-		});
-	latches.set(root, pending);
+		},
+	);
+	latches.set(root, { pending, settled: false });
 	await pending;
 	return root;
 }
