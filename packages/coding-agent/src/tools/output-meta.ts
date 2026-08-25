@@ -794,16 +794,22 @@ async function spillLargeResultToArtifact(
 	const newMeta: OutputMeta = { ...(existingMeta ?? {}), truncation: truncationMeta };
 	const newDetails = { ...(result.details ?? {}), meta: newMeta };
 
-	// MCP details keep a second copy of the payload the spill just bounded. Prune
-	// every part already represented elsewhere so `details.rawContent` cannot
-	// re-inflate the on-disk size: text blocks and `resource.text` are captured
-	// verbatim by the artifact, and image data survives on the result content
-	// (and eval's `images`). Resource URI/MIME/blob metadata has no other home,
-	// so it is retained.
-	const rawContent = newDetails.rawContent;
-	if (Array.isArray(rawContent)) {
+	// Prune the raw payload only MCP results duplicate into `details.rawContent`.
+	// Identify them by the required `serverName` + `mcpToolName` markers (the same
+	// signature the MCP renderer uses) so a property-name collision on an
+	// SDK/extension tool's intentionally unconstrained details can never trigger
+	// this transformation. Everything already stored elsewhere is dropped so
+	// `rawContent` cannot re-inflate the on-disk size: text blocks and
+	// `resource.text` are captured verbatim by the artifact, and image data
+	// survives on the result content (and eval's `images`). Resource URI/MIME/blob
+	// metadata has no other home, so it is retained.
+	if (
+		typeof newDetails.serverName === "string" &&
+		typeof newDetails.mcpToolName === "string" &&
+		Array.isArray(newDetails.rawContent)
+	) {
 		const structuredContent: unknown[] = [];
-		for (const block of rawContent) {
+		for (const block of newDetails.rawContent) {
 			if (!isRecord(block)) {
 				structuredContent.push(block);
 				continue;

@@ -1047,6 +1047,55 @@ describe("Coding Agent Tools", () => {
 			}
 		});
 
+		it("should not prune details.rawContent for non-MCP tool results (#9689)", async () => {
+			// SDK/extension tools share this spill wrapper and their `details` payload
+			// is unconstrained. A tool that happens to name a field `rawContent` must
+			// keep it verbatim: only the MCP bridge (serverName + mcpToolName) mirrors
+			// its content there, so a bare property-name collision must not lose data.
+			const spillSettings = Settings.isolated({
+				"tools.artifactSpillThreshold": 20,
+				"tools.artifactTailBytes": 64,
+				"tools.artifactTailLines": 10,
+				"tools.artifactHeadBytes": 64,
+			});
+			const spillManager = SessionManager.create(testDir, path.join(testDir, "sdk-spill-sessions"));
+			await spillManager.ensureOnDisk();
+			const context = {
+				...createTestToolContext(["custom_sdk_tool"]),
+				settings: spillSettings,
+				sessionManager: spillManager,
+			};
+
+			const payload = "SDK OUTPUT LINE\n".repeat(4000);
+			// No serverName/mcpToolName markers → not an MCP result.
+			const rawContent = [
+				{ type: "text", text: "extension-owned text that must survive" },
+				{ type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+			];
+			const sdkTool = {
+				name: "custom_sdk_tool",
+				description: "fake sdk tool that uses details.rawContent for its own data",
+				async execute() {
+					return {
+						content: [{ type: "text" as const, text: payload }],
+						details: { rawContent },
+					};
+				},
+			};
+
+			try {
+				const wrapped = wrapToolWithMetaNotice(sdkTool as unknown as AgentTool);
+				const result = await wrapped.execute("sdk-call", {}, undefined, undefined, context);
+
+				// Spill still fired on the oversized content.
+				expect(result.details?.meta?.truncation?.artifactId).toBeDefined();
+				// The tool's own rawContent is left untouched.
+				expect(result.details?.rawContent).toEqual(rawContent);
+			} finally {
+				await spillManager.close();
+			}
+		});
+
 		it("should render directories as a two-level tree without capping root entries", async () => {
 			const childDir = path.join(testDir, "child");
 			const base = Date.now() - 60_000;
