@@ -164,13 +164,18 @@ function renderActiveRepoContextPrompt(activeRepoContext: ActiveRepoContext | nu
 		.trim();
 }
 
-function parseWmicTable(output: string, header: string): string | null {
-	const lines = output
+function parseWindowsGpuModel(output: string): string | null {
+	const adapters = output
 		.split("\n")
 		.map(line => line.trim())
-		.filter(Boolean);
-	const filtered = lines.filter(line => line.toLowerCase() !== header.toLowerCase());
-	return filtered[0] ?? null;
+		.filter(line => Boolean(line) && line.toLowerCase() !== "name");
+	const physicalAdapters = adapters.filter(adapter => !/\b(?:virtual|mirror|remote|citrix)\b/i.test(adapter));
+	return (
+		physicalAdapters.find(adapter => /\b(?:nvidia|amd|radeon|intel)\b/i.test(adapter)) ??
+		physicalAdapters[0] ??
+		adapters[0] ??
+		null
+	);
 }
 
 const SYSTEM_PROMPT_PREP_TIMEOUT_MS = 5000;
@@ -224,7 +229,7 @@ async function getGpuModel(): Promise<string | null> {
 	switch (process.platform) {
 		case "win32": {
 			const output = await runGpuProbe(["wmic", "path", "win32_VideoController", "get", "name"]);
-			return output ? parseWmicTable(output, "Name") : null;
+			return output ? parseWindowsGpuModel(output) : null;
 		}
 		case "linux": {
 			const output = await runGpuProbe(["lspci"]);

@@ -13,6 +13,7 @@ interface ProbeRunResult {
 
 async function runProbeScenario(options: {
 	runs: number;
+	platform?: "linux" | "win32";
 	sleepSeconds?: number;
 	holdStdoutOpen?: boolean;
 	descendantHoldsStdout?: boolean;
@@ -25,12 +26,12 @@ async function runProbeScenario(options: {
 		const probeCountPath = path.join(tempRoot, "probe-count");
 		await fs.mkdir(binDir, { recursive: true });
 		await fs.mkdir(path.join(cacheRoot, "omp"), { recursive: true });
-		const lspciPath = path.join(binDir, "lspci");
+		const probePath = path.join(binDir, options.platform === "win32" ? "wmic" : "lspci");
 		await Bun.write(
-			lspciPath,
+			probePath,
 			'#!/usr/bin/env sh\nprintf x >> "$OMP_GPU_PROBE_COUNT"\nif [ -n "$OMP_GPU_PROBE_VALID_OUTPUT" ]; then printf "%s\\n" "$OMP_GPU_PROBE_VALID_OUTPUT"; fi\nif [ "$OMP_GPU_PROBE_DESCENDANT_HOLDS_STDOUT" = "true" ]; then sleep "$OMP_GPU_PROBE_SLEEP" & exit 0; fi\nif [ "$OMP_GPU_PROBE_HOLD_STDOUT_OPEN" = "true" ]; then sleep "$OMP_GPU_PROBE_SLEEP" & wait "$!"; fi\nif [ -n "$OMP_GPU_PROBE_SLEEP" ]; then exec sleep "$OMP_GPU_PROBE_SLEEP"; fi\nexit 0\n',
 		);
-		await fs.chmod(lspciPath, 0o755);
+		await fs.chmod(probePath, 0o755);
 
 		const scenarioPath = path.join(tempRoot, "scenario.ts");
 		await Bun.write(
@@ -38,6 +39,7 @@ async function runProbeScenario(options: {
 			`import { getGpuCachePath, refreshDirsFromEnv } from ${JSON.stringify(path.resolve(import.meta.dir, "../../utils/src/index.ts"))};
 import { buildSystemPrompt } from ${JSON.stringify(path.join(import.meta.dir, "../src/system-prompt.ts"))};
 
+Object.defineProperty(process, "platform", { value: ${JSON.stringify(options.platform ?? "linux")} });
 refreshDirsFromEnv();
 const buildOptions = {
 	contextFiles: [],
@@ -66,13 +68,14 @@ console.log(JSON.stringify({ elapsedMs: Math.round(performance.now() - startedAt
 
 		const env: Record<string, string | undefined> = {
 			...process.env,
+			HOME: tempRoot,
 			PATH: `${binDir}:${process.env.PATH ?? ""}`,
 			XDG_CACHE_HOME: cacheRoot,
 			OMP_GPU_PROBE_COUNT: probeCountPath,
 			OMP_GPU_PROBE_RUNS: String(options.runs),
 		};
-		// Strip inherited dirs-resolver overrides so XDG_CACHE_HOME above wins and
-		// the test cannot touch the developer/CI profile's real gpu_cache.json.
+		// Strip inherited dirs-resolver overrides so the temporary HOME/XDG roots
+		// win and the test cannot touch the developer/CI profile's real gpu_cache.json.
 		for (const key of ["PI_CODING_AGENT_DIR", "OMP_PROFILE", "PI_PROFILE", "PI_CONFIG_DIR"]) {
 			delete env[key];
 		}
@@ -165,6 +168,28 @@ describe.skipIf(process.platform !== "linux")("system prompt GPU probe", () => {
 		// take at least the 8s sleep.
 		expect(result.childElapsedMs).toBeLessThan(5000);
 	}, 20_000);
+
+	it("prefers a physical Windows GPU over first-listed virtual adapters", async () => {
+		const result = await runProbeScenario({
+			runs: 1,
+			platform: "win32",
+			validOutput: "Name\nGameViewer Virtual Display Adapter\nNVIDIA GeForce RTX 2080 Ti",
+		});
+
+		expect(result.cached).toEqual({ gpu: "NVIDIA GeForce RTX 2080 Ti" });
+		expect(result.count).toBe(1);
+	});
+
+	it("keeps the first Windows adapter when every adapter is virtual", async () => {
+		const result = await runProbeScenario({
+			runs: 1,
+			platform: "win32",
+			validOutput: "Name\nRemote Display Adapter\nCitrix Virtual Adapter",
+		});
+
+		expect(result.cached).toEqual({ gpu: "Remote Display Adapter" });
+		expect(result.count).toBe(1);
+	});
 });
 
 describe.skipIf(process.platform !== "linux")("system prompt CPU model", () => {
