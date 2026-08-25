@@ -311,6 +311,33 @@ describe("OpenAI-family mid-stream socket-close retry", () => {
 		expect(result.content.find(block => block.type === "text")?.text).toBe("partial");
 	});
 
+	it("does not retry Codex SSE after a whitespace-only text delta commits", async () => {
+		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+		let requests = 0;
+		const fetchMock: FetchImpl = vi.fn(async () => {
+			requests++;
+			// A whitespace-only delta still reached the consumer as text_delta;
+			// replaying would duplicate it, so the socket close must surface.
+			return createSocketCloseResponse([
+				{
+					type: "response.output_item.added",
+					item: { type: "message", id: "msg_ws", role: "assistant", status: "in_progress", content: [] },
+				},
+				{ type: "response.content_part.added", part: { type: "output_text", text: "" } },
+				{ type: "response.output_text.delta", delta: "  \n" },
+			]);
+		});
+
+		const result = await streamOpenAICodexResponses(codexModel, context, {
+			apiKey: "test-key",
+			fetch: fetchMock,
+		}).result();
+
+		expect(requests).toBe(1);
+		expect(result.stopReason).toBe("error");
+		expect(result.content.find(block => block.type === "text")?.text).toBe("  \n");
+	});
+
 	it("does not retry Codex SSE after thinking output commits", async () => {
 		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
 		let requests = 0;
