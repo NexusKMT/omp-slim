@@ -10,7 +10,7 @@ import {
 	TruncatedText,
 	truncateToWidth,
 } from "@oh-my-pi/pi-tui";
-import { isRecord } from "@oh-my-pi/pi-utils";
+import { isRecord, sanitizeText } from "@oh-my-pi/pi-utils";
 import type { TreeFilterMode } from "../../config/settings-schema";
 import { theme } from "../../modes/theme/theme";
 import {
@@ -70,6 +70,18 @@ interface AdvisorTreeDisplay {
 }
 
 /**
+ * Collapse a raw advisor field (a `WATCHDOG.yml`-supplied name or severity) to
+ * a single safe line: strip ANSI/control characters via the shared sanitizer,
+ * then fold the tab/newline it intentionally preserves into spaces so the value
+ * cannot split or misalign a session-tree row.
+ */
+function sanitizeAdvisorField(value: string): string {
+	return sanitizeText(value)
+		.replace(/[\n\t]/g, " ")
+		.trim();
+}
+
+/**
  * Extract display metadata from an advisor custom-message's `details.notes`,
  * ignoring the model-facing `<advisory>` wrapper stored in `content`. Collects
  * distinct non-default advisor names and severities so the tree row can tag the
@@ -83,16 +95,13 @@ function advisorTreeDisplay(details: unknown): AdvisorTreeDisplay {
 	for (const note of details.notes) {
 		if (!isRecord(note)) continue;
 		if (typeof note.note === "string") notes.push(note.note);
-		if (
-			typeof note.advisor === "string" &&
-			note.advisor &&
-			note.advisor !== "default" &&
-			!advisors.includes(note.advisor)
-		) {
-			advisors.push(note.advisor);
+		if (typeof note.advisor === "string") {
+			const name = sanitizeAdvisorField(note.advisor);
+			if (name && name !== "default" && !advisors.includes(name)) advisors.push(name);
 		}
-		if (typeof note.severity === "string" && note.severity && !severities.includes(note.severity)) {
-			severities.push(note.severity);
+		if (typeof note.severity === "string") {
+			const severity = sanitizeAdvisorField(note.severity);
+			if (severity && !severities.includes(severity)) severities.push(severity);
 		}
 	}
 	return { qualifier: [...advisors, ...severities].join(", "), text: notes.join(" ") };

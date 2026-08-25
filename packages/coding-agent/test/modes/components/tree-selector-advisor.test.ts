@@ -65,4 +65,12 @@ describe("TreeSelectorComponent advisor message rendering", () => {
 		expect(rendered).toContain("advisor: Continue.");
 		expect(rendered).not.toContain("advisor (");
 	});
+
+	it("folds tabs/newlines in a WATCHDOG-supplied advisor name into a single-line qualifier", () => {
+		const rendered = render(advisorTree({ note: "Careful.", severity: "blocker", advisor: "sec\tteam\nlead" }));
+
+		expect(rendered).toContain("advisor (sec team lead, blocker): Careful.");
+		expect(rendered).not.toContain("\t");
+		expect(rendered.split("\n").filter(line => line.includes("advisor ("))).toHaveLength(1);
+	});
 });
