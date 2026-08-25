@@ -28,6 +28,7 @@
 
 ### Fixed
 
+- Fixed race condition where tunnel startup was incorrectly reported as failure on quick process exit
 - Fixed Obsidian theme task instructions and usage-limit text blending into dark backgrounds.
 - Fixed marketplace-installed plugins silently omitting their `rules/` directories from discovery ([#9702](https://github.com/can1357/oh-my-pi/issues/9702)).
 - Fixed advisor notes in the `/tree` session view exposing their model-facing XML wrapper; rows now read `advisor (name, severity): note` in plain text.
