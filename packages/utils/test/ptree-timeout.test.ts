@@ -62,6 +62,15 @@ describe("ptree timeout", () => {
 		expect(result.stdout).toBe("unset");
 	});
 
+	it.skipIf(process.platform !== "linux")("preserves caller-supplied BUN_BE_BUN for the command", async () => {
+		const result = await exec(["/bin/sh", "-c", `printf %s "\${BUN_BE_BUN-unset}"`], {
+			subreaper: true,
+			env: { ...Bun.env, BUN_BE_BUN: "1" },
+		});
+
+		expect(result.stdout).toBe("1");
+	});
+
 	it.skipIf(process.platform !== "linux")("supervises commands without a mounted procfs", async () => {
 		const script = `
 const mountExit = await Bun.spawn(["mount", "-t", "tmpfs", "tmpfs", "/proc"], {
@@ -137,6 +146,21 @@ ${createLinuxSubreaperScript()}
 			expect(result.stdout).toBe("token");
 		},
 	);
+
+	it.skipIf(process.platform === "win32")("rejects text when the deadline fires after the root exits", async () => {
+		using child = spawn(["/bin/sh", "-c", "sleep 30 & echo token"], {
+			detached: true,
+			timeout: 250,
+		});
+		let threw: unknown;
+		try {
+			await child.text();
+		} catch (error) {
+			threw = error;
+		}
+
+		expect(threw).toBeInstanceOf(TimeoutError);
+	});
 
 	it.skipIf(process.platform === "win32")("keeps reading inherited stdout until EOF without a timeout", async () => {
 		const result = await exec(["/bin/sh", "-c", "(sleep .2; printf token) &"], {

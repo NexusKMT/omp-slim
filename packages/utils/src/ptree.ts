@@ -16,6 +16,7 @@ type InMask = "pipe" | "ignore" | Buffer | Uint8Array | null;
 type PipedSubprocess<In extends InMask = InMask> = Subprocess<In, "pipe", "pipe">;
 
 const LINUX_SUBREAPER_COMMAND_ENV = "OMP_PTREE_SUBREAPER_COMMAND";
+const LINUX_SUBREAPER_BUN_BE_BUN_ENV = "OMP_PTREE_SUBREAPER_BUN_BE_BUN";
 
 /**
  * Build the Linux child-subreaper entrypoint.
@@ -51,8 +52,11 @@ if (libc.symbols.prctl(36, 1, 0, 0, 0) !== 0) {
 
 const commandJson = Bun.env.${LINUX_SUBREAPER_COMMAND_ENV};
 if (!commandJson) throw new Error("missing supervised command");
+const callerBunBeBun = Bun.env.${LINUX_SUBREAPER_BUN_BE_BUN_ENV};
 delete Bun.env.${LINUX_SUBREAPER_COMMAND_ENV};
-delete Bun.env.BUN_BE_BUN;
+delete Bun.env.${LINUX_SUBREAPER_BUN_BE_BUN_ENV};
+if (callerBunBeBun === undefined) delete Bun.env.BUN_BE_BUN;
+else Bun.env.BUN_BE_BUN = callerBunBeBun;
 const command = JSON.parse(commandJson);
 const child = Bun.spawn(command, {
 	stdin: "inherit",
@@ -388,6 +392,11 @@ export class ChildProcess<In extends InMask = InMask> {
 		const p = this.#readStream(this.proc.stdout);
 		if (this.#nothrow) return p;
 		const [text] = await Promise.all([p, this.exitedCleanly]);
+		const exitReason = this.exitReason;
+		if (exitReason?.aborted) {
+			if (this.#terminating) await this.#terminating;
+			throw exitReason;
+		}
 		return text;
 	}
 
@@ -558,6 +567,7 @@ function spawnInternal<In extends InMask = InMask>(
 ): ChildProcess<In> {
 	const { timeout = -1, signal, stderr, detached, subreaper = false, ...rest } = opts ?? {};
 	const useSubreaper = subreaper && process.platform === "linux";
+	const commandEnv = rest.env ?? Bun.env;
 	const child = Bun.spawn(useSubreaper ? [process.execPath, "-e", LINUX_SUBREAPER_SCRIPT] : cmd, {
 		stdin: "ignore",
 		stdout: "pipe",
@@ -567,9 +577,10 @@ function spawnInternal<In extends InMask = InMask>(
 		...rest,
 		env: useSubreaper
 			? {
-					...(rest.env ?? Bun.env),
+					...commandEnv,
 					BUN_BE_BUN: "1",
 					[LINUX_SUBREAPER_COMMAND_ENV]: JSON.stringify(cmd),
+					[LINUX_SUBREAPER_BUN_BE_BUN_ENV]: commandEnv.BUN_BE_BUN,
 				}
 			: rest.env,
 	});
