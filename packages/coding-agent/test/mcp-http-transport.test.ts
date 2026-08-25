@@ -235,6 +235,62 @@ describe("MCP Streamable HTTP transport timeouts", () => {
 			tools: [{ name: "fast", inputSchema: { type: "object" } }],
 		});
 	});
+
+	it("close aborts and drains an in-flight SSE POST request", async () => {
+		const requestReceived = Promise.withResolvers<void>();
+		server = Bun.serve({
+			port: 0,
+			fetch() {
+				requestReceived.resolve();
+				return stalledBodyResponse("", {
+					headers: { "Content-Type": "text/event-stream" },
+				});
+			},
+		});
+		if (!server) throw new Error("Test server was not started");
+		const transport = new HttpTransport({
+			type: "http",
+			url: `http://127.0.0.1:${server.port}/mcp`,
+			timeout: GUARD_TIMEOUT_MS,
+		});
+		await transport.connect();
+
+		const request = transport.request("tools/list");
+		await requestReceived.promise;
+		const closing = transport.close();
+
+		await expect(withPendingGuard(request, "aborted request")).rejects.toMatchObject({ name: "AbortError" });
+		await withPendingGuard(closing, "transport close");
+	});
+
+	it("keeps an abandoned SSE request rejection observed after caller cancellation", async () => {
+		const requestReceived = Promise.withResolvers<void>();
+		const caller = new AbortController();
+		server = Bun.serve({
+			port: 0,
+			fetch() {
+				requestReceived.resolve();
+				return stalledBodyResponse("", {
+					headers: { "Content-Type": "text/event-stream" },
+				});
+			},
+		});
+		const transport = await connectedTransport();
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => unhandled.push(reason);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			void transport.request("tools/list", undefined, { signal: caller.signal });
+			await requestReceived.promise;
+			caller.abort();
+			await new Promise<void>(resolve => setImmediate(resolve));
+
+			expect(unhandled).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+			await transport.close();
+		}
+	});
 });
 
 describe("MCP Streamable HTTP protocol version header", () => {

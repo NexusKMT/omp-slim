@@ -236,23 +236,38 @@ const EXPECTED_CLEANUP = Symbol.for("omp.expectedCleanupError");
  * consumer. Returns the same error for inline use at the `abort()` callsite.
  */
 export function markExpectedCleanupError<T extends object>(reason: T): T {
-	(reason as Record<PropertyKey, unknown>)[EXPECTED_CLEANUP] = true;
+	Reflect.set(reason, EXPECTED_CLEANUP, true);
 	return reason;
 }
 
+function hasExpectedCleanupMarker(reason: unknown): boolean {
+	let current: unknown = reason;
+	for (let depth = 0; depth < 8 && current !== null && typeof current === "object"; depth++) {
+		if (Reflect.get(current, EXPECTED_CLEANUP) === true) return true;
+		current = Reflect.get(current, "cause");
+	}
+	return false;
+}
+
 /**
- * Whether `reason` (or any error in its `cause` chain) was marked via
- * {@link markExpectedCleanupError}. Walks the chain because the unhandled
- * reason is often a wrapper (`AbortError`) with the marked abort reason as
- * its `cause`.
+ * Whether an unhandled rejection is routine cancellation or closed-socket
+ * fallout, either explicitly marked or recognizable by a runtime-stable error
+ * identity. Exact names/codes deliberately avoid swallowing generic network
+ * failures or application errors whose message happens to mention a socket.
  */
 export function isExpectedCleanupError(reason: unknown): boolean {
 	let current: unknown = reason;
-	for (let depth = 0; depth < 8 && current !== null && typeof current === "object"; depth++) {
-		if ((current as Record<PropertyKey, unknown>)[EXPECTED_CLEANUP] === true) return true;
-		current = (current as { cause?: unknown }).cause;
+	for (let depth = 0; depth < 8 && current instanceof Error; depth++) {
+		if (
+			Reflect.get(current, EXPECTED_CLEANUP) === true ||
+			current.name === "AbortError" ||
+			("code" in current && current.code === "ERR_SOCKET_CLOSED")
+		) {
+			return true;
+		}
+		current = current.cause;
 	}
-	return false;
+	return hasExpectedCleanupMarker(reason);
 }
 
 /** Interceptors consulted by the global `unhandledRejection` handler before the fatal path. */
@@ -339,7 +354,10 @@ if (isMainThread) {
 			process.stderr.write(`Inspector opened: ${url}\n`);
 		})
 		.on("uncaughtException", async err => {
-			if (isExpectedCleanupError(err)) {
+			// Only explicitly marked exceptions are safe here. Structural
+			// AbortError/socket classification is limited to promise rejections:
+			// a synchronously thrown error may indicate an application bug.
+			if (hasExpectedCleanupMarker(err)) {
 				logger.warn("Ignoring expected cleanup exception", { err });
 				return;
 			}
