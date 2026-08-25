@@ -16,6 +16,7 @@
 ### Changed
 
 - Standardized completed edit results on hashline-style path and numbered-preview output across edit modes.
+- Documented relay semantics in the browser tool's model-facing prompt: relay can engage via the `browser.relay` setting without `app.relay`, every relay open result says `on relay`, and the session is then inside the user's real logged-in browser with the conduct that follows.
 - Made `omp git` stream file contents into an off-thread native differ, paint complete lines immediately, progressively apply syntax highlighting, and defer large commit file statistics until after the first interactive frame.
 - Added `r` shortcut to refresh the git state
 - Added `s`/`u` shortcuts to stage/unstage files directly from the sidebar
