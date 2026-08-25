@@ -6,6 +6,7 @@ import {
 	ImageProtocol,
 	isPaseoEmbedder,
 	NotifyProtocol,
+	resolveImageProtocol,
 	resolveWarpImageProtocol,
 	shouldEnableHyperlinksByDefault,
 	shouldEnableSynchronizedOutputByDefault,
@@ -217,6 +218,14 @@ describe("Paseo embedder carve-out", () => {
 	it("detects Paseo via PASEO_TERMINAL_ID", () => {
 		expect(isPaseoEmbedder({})).toBe(false);
 		expect(isPaseoEmbedder({ PASEO_TERMINAL_ID: "term-1" })).toBe(true);
+	});
+
+	it("drops the multiplexer-restored Kitty fallback inside Paseo", () => {
+		// Regression (getpaseo/paseo#3850): tmux inside a Paseo pane resolves to
+		// base (null static protocol) and TERM=tmux-* would restore Kitty via
+		// the fallback — the embedder carve-out must win over the fallback.
+		expect(resolveImageProtocol("base", { TERM: "tmux-256color", PASEO_TERMINAL_ID: "term-1" }, true)).toBeNull();
+		expect(resolveImageProtocol("base", { TERM: "tmux-256color" }, true)).toBe(ImageProtocol.Kitty);
 	});
 
 	it("drops Kitty graphics when Paseo hosts the terminal", async () => {

@@ -446,10 +446,14 @@ export function shouldEnableHyperlinksByDefault(
 	return true;
 }
 
-function getFallbackImageProtocol(terminalId: TerminalId): ImageProtocol | null {
-	if (!process.stdout.isTTY) return null;
+function getFallbackImageProtocol(
+	terminalId: TerminalId,
+	env: NodeJS.ProcessEnv = Bun.env,
+	isTTY: boolean = process.stdout.isTTY === true,
+): ImageProtocol | null {
+	if (!isTTY) return null;
 	if (terminalId === "vscode" || terminalId === "alacritty") return null;
-	const term = Bun.env.TERM?.toLowerCase() ?? "";
+	const term = env.TERM?.toLowerCase() ?? "";
 	if (term.includes("screen") || term.includes("tmux") || term.includes("ghostty")) {
 		return ImageProtocol.Kitty;
 	}
@@ -480,6 +484,39 @@ export function resolveWarpImageProtocol(
  */
 export function isPaseoEmbedder(env: NodeJS.ProcessEnv = Bun.env): boolean {
 	return Boolean(env.PASEO_TERMINAL_ID);
+}
+
+/**
+ * Resolve the image protocol for a non-forced runtime: static per-terminal
+ * support (with Warp's platform carve-out), then the multiplexer fallback,
+ * then the Paseo embedder carve-out. `isTTY` is injectable because the
+ * fallback only fires on a real TTY — a piped subprocess cannot exercise
+ * that path, so regression tests call this directly.
+ */
+export function resolveImageProtocol(
+	terminalId: TerminalId,
+	env: NodeJS.ProcessEnv = Bun.env,
+	isTTY: boolean = process.stdout.isTTY === true,
+): ImageProtocol | null {
+	let imageProtocol: ImageProtocol | null;
+	if (terminalId === "warp") {
+		// Warp advertises Kitty graphics on macOS/Linux only; drop it on win32.
+		imageProtocol = resolveWarpImageProtocol(process.platform, env);
+	} else {
+		imageProtocol = getTerminalInfo(terminalId).imageProtocol;
+		if (!imageProtocol) {
+			const fallbackImageProtocol = getFallbackImageProtocol(terminalId, env, isTTY);
+			if (fallbackImageProtocol) imageProtocol = fallbackImageProtocol;
+		}
+	}
+	// Paseo's xterm.js renderer draws neither Kitty APC nor placeholders —
+	// applied after the multiplexer fallback so tmux/screen inside a Paseo
+	// pane cannot restore Kitty via getFallbackImageProtocol
+	// (getpaseo/paseo#3850).
+	if (imageProtocol !== null && isPaseoEmbedder(env)) {
+		return null;
+	}
+	return imageProtocol;
 }
 
 function getWarpTerminalInfo(platform: NodeJS.Platform, env: NodeJS.ProcessEnv = Bun.env): TerminalInfo {
@@ -584,15 +621,8 @@ export const TERMINAL: RuntimeTerminal = (() => {
 	const forcedImageProtocol = getForcedImageProtocol();
 	if (forcedImageProtocol !== undefined) {
 		resolved.imageProtocol = forcedImageProtocol;
-	} else if (resolved.id === "warp") {
-		// Warp advertises Kitty graphics on macOS/Linux only; drop it on win32.
-		resolved.imageProtocol = resolveWarpImageProtocol();
-	} else if (resolved.imageProtocol !== null && isPaseoEmbedder(Bun.env)) {
-		// Paseo's xterm.js renderer draws neither Kitty APC nor placeholders.
-		resolved.imageProtocol = null;
-	} else if (!resolved.imageProtocol) {
-		const fallbackImageProtocol = getFallbackImageProtocol(resolved.id);
-		if (fallbackImageProtocol) resolved.imageProtocol = fallbackImageProtocol;
+	} else {
+		resolved.imageProtocol = resolveImageProtocol(resolved.id, Bun.env, process.stdout.isTTY === true);
 	}
 	// Hyperlink (OSC 8) capability. The static per-terminal flag lives on
 	// KNOWN_TERMINALS; shouldEnableHyperlinksByDefault folds in runtime context —
