@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `--model <id>:<effort>` dropping the effort from the `default` role, so cycling back to `default` with ctrl+p ran at the previous role's reasoning effort. An explicit `--thinking` still wins over the flag's suffix.
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
