@@ -154,14 +154,16 @@ routing, model ids, or usage accounting.
 
 ### ClinePass
 
-- Requests carry the official Cline CLI's client-identity header set (`X-CLIENT-TYPE`, `X-CLIENT-VERSION`, `X-PLATFORM`, `X-CORE-VERSION`, `HTTP-Referer`, `X-Title`, `User-Agent: Cline/<v>`), mirrored from `sdk/packages/llms/src/providers/request-headers.ts` with Cline's blessing. The gateway gates parts of the roster (some free-tier models) to Cline product surfaces with a 403; the mirror is the supported identification contract. Version values are not minimum-checked (probed 2026-08-13).
-- Catalog IDs omit the gateway's `cline-pass/` namespace; Chat Completions adds it on the wire. Free-tier models are the exception: they keep their full OpenRouter-style IDs (e.g. `deepseek/deepseek-v4-flash`), which the gateway already namespaces, so they go on the wire unprefixed via a per-model raw wire tag set at discovery time (bucket-derived, not ID-shape-derived).
-- The OpenAI-compatible `/models` route is absent. Discover the authoritative roster from Cline's public `recommended-models` endpoint: the `clinePass` bucket is the subscription roster (required; a malformed bucket is rejected so the bundled fallback survives), and the optional `free` bucket overlays $0 usage-billing models that work on any Cline account, subscription or not. Metadata resolves in three tiers mirroring the official client's enrichment: bundled upstream reference, then OpenRouter's public `/models` catalog live (fetched in parallel, tolerated away offline — keyed by full id for free entries, slug for pass entries), then conservative defaults. The generated catalog is the offline fallback.
-- Billing is subscription quota, but subscription models carry the upstream list price (resolved from the bundled reference at discovery time) so cost display reads as API-equivalent spend — the codex/github-copilot policy. Only the free tier is genuinely $0; ids with no upstream reference stay zero until models.dev prices them.
-- Output limits use `max_completion_tokens`. Reasoning uses `reasoning_effort` (`none` through `max`) and streams through `delta.reasoning`; continuations replay it only for model families whose compatibility policy requires reasoning history.
-- Login validates the key against `/users/me` rather than a probe completion, so roster churn cannot lock out sign-in and validation never consumes subscription quota.
-- Subscription-window exhaustion (`clinepass limit`) and free-tier caps (`free limit reached on model …`) classify as usage limits (fail fast, rotate sibling credentials). A not-subscribed response on a subscription model is rewritten to point at the free tier; a `model not found` response after roster rotation is rewritten to suggest reselection.
-- The dashboard's `/users/me/plan/usage-limits` route accepts the inference API key and returns five-hour, weekly, and monthly utilization with reset times; `/users/me` supplies the account email label. Usage reporting does not require account OAuth.
+- Requests carry the official Cline CLI client identity (`X-CLIENT-TYPE`, `X-CLIENT-VERSION`, `X-PLATFORM`, `X-CORE-VERSION`, `User-Agent`, and related headers). Inference also carries OMP's stable session key as `X-Task-ID`; account and discovery calls omit it. This is the supported identification contract for Cline-gated roster entries.
+- Public catalog ids omit the gateway's `cline-pass/` namespace; Chat Completions adds it on the wire. Free-tier ids retain their full OpenRouter-style namespace because the gateway already receives them in wire form.
+- The public `recommended-models` endpoint is authoritative for membership. The required `clinePass` bucket and optional `free` bucket currently resolve to a sixteen-model roster; malformed subscription data is rejected so the generated fallback survives.
+- Known ids use a Cline-authored metadata snapshot for exact limits, subscription pricing, input modalities, and per-model reasoning controls. Unknown ids remain usable with conservative limits and no invented reasoning controls until live OpenRouter enrichment or regeneration supplies metadata.
+- Subscription models display Cline's API-equivalent list price, but streamed `usage.cost` is the authoritative billed/discounted charge. Free-tier models remain genuinely $0.
+- Reasoning is model-specific: effort models send only their advertised wire tiers, Qwen3.7 Plus maps OMP efforts to Cline's nested `reasoning.max_tokens` budget, and thinking-off sends `reasoning: { enabled: false }` where Cline advertises a toggle.
+- Cline-hosted Qwen routes receive Anthropic-style ephemeral cache breakpoints. Reasoning continuations replay through `delta.reasoning` only for families that require it.
+- Login validates the key against `/users/me`; inference validation then proves model access without consuming quota.
+- Subscription-window exhaustion (`clinepass limit`) and free-tier caps (`free limit reached on model ...`) classify as usage limits. Roster rotation and account-policy errors receive provider-specific recovery guidance.
+- The dashboard's `/users/me/plan/usage-limits` route accepts the inference API key and reports five-hour, weekly, and monthly utilization; `/users/me` supplies the account label. Usage reporting does not require account OAuth.
 
 ### Fireworks and Firepass
 
@@ -246,13 +248,16 @@ Reasoning fields are not interchangeable.
 - Compat needs both policies: disable reasoning for any tool choice, and disable
   reasoning only for forced tool choice.
 
-### xAI Grok through Responses/SuperGrok
+### xAI Grok through Responses (`xai` and `xai-oauth`)
 
-Keep these independent:
+Both the paid API-key provider (`xai` / `XAI_API_KEY`) and SuperGrok OAuth
+(`xai-oauth`) chat over `https://api.x.ai/v1/responses`. Keep these independent:
 
-- omit `reasoning.effort`
-- include or drop encrypted reasoning replay
-- filter reasoning-history wrappers
+- omit `reasoning.effort` unless the model is on the Grok effort-capable allowlist
+- omit `reasoning.summary` (the host rejects it; do not fall back to `"auto"`)
+- omit presence/frequency penalties (`/v1/responses` rejects them for every Grok model)
+- include `reasoning.encrypted_content` on the request
+- replay encrypted reasoning items on later turns
 
 Some models reject only one of those fields; do not collapse them into one
 "Grok mode" branch.

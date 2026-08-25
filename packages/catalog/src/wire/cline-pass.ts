@@ -15,20 +15,21 @@ export const CLINEPASS_API_BASE_URL = "https://api.cline.bot/api/v1";
  * The gate accepted an arbitrary version string when probed (0.0.1 passed on
  * 2026-08-13), so the pinned versions are mirror fidelity, not a minimum — but
  * the full set is sent deliberately: partial mirrors are one gateway change
- * away from a 403. `X-Task-ID` (the CLI's per-session id) is omitted: the gate
- * does not require it and a per-request random value would be a worse signal
- * than none.
+ * away from a 403. `X-Task-ID` carries OMP's stable prompt-cache/session key
+ * when available; account and discovery calls omit it rather than inventing a
+ * per-request identity.
  */
-export function clinePassClientHeaders(): Record<string, string> {
+export function clinePassClientHeaders(taskId?: string): Record<string, string> {
 	return {
 		"HTTP-Referer": "https://cline.bot",
 		"X-Title": "Cline",
 		"X-IS-MULTIROOT": "false",
-		"X-CLIENT-TYPE": "cline-cli",
-		"User-Agent": "Cline/3.0.54",
-		"X-CLIENT-VERSION": "3.0.54",
+		"X-CLIENT-TYPE": "cline-sdk",
+		"User-Agent": "Cline/3.0.58",
+		"X-CLIENT-VERSION": "3.0.58",
 		"X-PLATFORM": process.platform,
 		"X-PLATFORM-VERSION": "3.0.54",
-		"X-CORE-VERSION": "0.0.74",
+		"X-CORE-VERSION": "0.0.79",
+		...(taskId ? { "X-Task-ID": taskId } : {}),
 	};
 }

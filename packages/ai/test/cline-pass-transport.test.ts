@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
-import type { Context, FetchImpl, Model, Tool } from "@oh-my-pi/pi-ai/types";
+import type { Context, FetchImpl, Model, Tool, Usage } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -46,7 +46,7 @@ const context: Context = {
 	tools: [markerTool],
 };
 
-function completionResponse(model: string): Response {
+function completionResponse(model: string, usage?: Record<string, unknown>): Response {
 	const events = [
 		{
 			id: "cline-pass-test",
@@ -61,6 +61,7 @@ function completionResponse(model: string): Response {
 			created: 0,
 			model,
 			choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+			...(usage ? { usage } : {}),
 		},
 		"[DONE]",
 	];
@@ -116,7 +117,9 @@ async function capturePayload(options: {
 	reasoning?: Effort;
 	disableReasoning?: boolean;
 	toolChoice?: { type: "tool"; name: string };
-}): Promise<{ payload: Record<string, unknown>; headers: Record<string, string> }> {
+	sessionId?: string;
+	rawUsage?: Record<string, unknown>;
+}): Promise<{ payload: Record<string, unknown>; headers: Record<string, string>; usage: Usage }> {
 	const model =
 		options.model ??
 		(getBundledModel<"openai-completions">(
@@ -129,20 +132,21 @@ async function capturePayload(options: {
 		async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
 			payload = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<string, unknown>;
 			headers = Object.fromEntries(new Headers(init?.headers).entries());
-			return completionResponse(model.id);
+			return completionResponse(model.id, options.rawUsage);
 		},
 		{ preconnect: fetch.preconnect },
 	);
-	await streamOpenAICompletions(model, options.context ?? context, {
+	const result = await streamOpenAICompletions(model, options.context ?? context, {
 		apiKey: "test-key",
 		fetch: fetchMock,
 		maxTokens: 64,
 		reasoning: options.reasoning,
 		disableReasoning: options.disableReasoning,
 		toolChoice: options.toolChoice,
+		sessionId: options.sessionId,
 	}).result();
 	if (!payload) throw new Error("Expected ClinePass request payload");
-	return { payload, headers };
+	return { payload, headers, usage: result.usage };
 }
 
 describe("ClinePass OpenAI transport", () => {
@@ -160,10 +164,11 @@ describe("ClinePass OpenAI transport", () => {
 		expect(payload.tool_choice).toEqual({ type: "function", function: { name: "get_marker" } });
 	});
 
-	it("disables ClinePass reasoning with the gateway's none effort", async () => {
+	it("disables ClinePass reasoning with the gateway's nested switch", async () => {
 		const { payload } = await capturePayload({ disableReasoning: true });
 
-		expect(payload.reasoning_effort).toBe("none");
+		expect(payload.reasoning).toEqual({ enabled: false });
+		expect(payload.reasoning_effort).toBeUndefined();
 		expect(payload.model).toBe("cline-pass/kimi-k3");
 	});
 
@@ -172,18 +177,19 @@ describe("ClinePass OpenAI transport", () => {
 		// product surfaces; this header set is the contract that identifies a Cline
 		// client (sdk/packages/llms/src/providers/request-headers.ts). Sent on
 		// every ClinePass request, mirrored with Cline's blessing.
-		const { headers } = await capturePayload({ model: freeTierDeepseek });
+		const { headers } = await capturePayload({ model: freeTierDeepseek, sessionId: "session-123" });
 
 		expect(headers).toMatchObject({
 			"http-referer": "https://cline.bot",
 			"x-title": "Cline",
 			"x-is-multiroot": "false",
-			"x-client-type": "cline-cli",
-			"x-client-version": expect.stringMatching(/^\d+\.\d+\.\d+$/),
+			"x-client-type": "cline-sdk",
+			"x-client-version": "3.0.58",
 			"x-platform": process.platform,
-			"x-platform-version": expect.stringMatching(/^\d+\.\d+\.\d+$/),
-			"x-core-version": expect.stringMatching(/^\d+\.\d+\.\d+$/),
-			"user-agent": expect.stringMatching(/^Cline\/\d+\.\d+\.\d+$/),
+			"x-platform-version": "3.0.54",
+			"x-core-version": "0.0.79",
+			"x-task-id": "session-123",
+			"user-agent": "Cline/3.0.58",
 		});
 		expect(headers.authorization).toBe("Bearer test-key");
 	});
@@ -242,13 +248,48 @@ describe("ClinePass OpenAI transport", () => {
 	it("downgrades a forced ClinePass Qwen tool choice to auto while preserving reasoning", async () => {
 		const { payload } = await capturePayload({
 			modelId: "qwen3.7-max",
-			reasoning: Effort.Low,
+			reasoning: Effort.High,
 			toolChoice: { type: "tool", name: "get_marker" },
 		});
 
 		expect(payload.model).toBe("cline-pass/qwen3.7-max");
-		expect(payload.reasoning_effort).toBe("low");
+		expect(payload.reasoning_effort).toBe("high");
 		expect(payload.tool_choice).toBe("auto");
+	});
+
+	it("maps Qwen budget reasoning to Cline's nested max_tokens field", async () => {
+		const { payload } = await capturePayload({
+			modelId: "qwen3.7-plus",
+			reasoning: Effort.High,
+		});
+
+		expect(payload.reasoning).toEqual({ max_tokens: 104_857 });
+		expect(payload.reasoning_effort).toBeUndefined();
+	});
+
+	it("marks Cline Qwen prompt content for gateway caching", async () => {
+		const { payload } = await capturePayload({
+			modelId: "qwen3.8-max",
+			reasoning: Effort.High,
+		});
+		const messages = payload.messages as Array<{ role: string; content: unknown }>;
+		const user = messages.find(message => message.role === "user");
+
+		expect(user?.content).toEqual([{ type: "text", text: "Get marker 42", cache_control: { type: "ephemeral" } }]);
+	});
+
+	it("uses Cline's billed gateway cost instead of catalog pricing", async () => {
+		const { usage } = await capturePayload({
+			rawUsage: {
+				prompt_tokens: 1_000,
+				completion_tokens: 100,
+				cost: 0.001,
+				market_cost: 0.02,
+			},
+		});
+
+		expect(usage.cost.total).toBe(0.001);
+		expect(usage.cost.input + usage.cost.output + usage.cost.cacheRead + usage.cost.cacheWrite).toBeCloseTo(0.001);
 	});
 
 	it("serializes a Qwen tool continuation without requiring reasoning replay", async () => {
@@ -260,7 +301,7 @@ describe("ClinePass OpenAI transport", () => {
 			apiKey: "test-key",
 			fetch: firstFetch,
 			maxTokens: 64,
-			reasoning: Effort.Low,
+			reasoning: Effort.High,
 		}).result();
 		const { payload } = await capturePayload({
 			modelId: "qwen3.7-max",
@@ -279,7 +320,7 @@ describe("ClinePass OpenAI transport", () => {
 					},
 				],
 			},
-			reasoning: Effort.Low,
+			reasoning: Effort.High,
 		});
 		const messages = payload.messages as Array<Record<string, unknown>>;
 		const wireAssistant = messages.find(message => message.role === "assistant");

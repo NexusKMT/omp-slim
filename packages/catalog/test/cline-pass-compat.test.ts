@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { toClinePassPublicModelId, toClinePassWireModelId } from "@oh-my-pi/pi-catalog/cline-pass-model-id";
 import { buildOpenAICompat } from "@oh-my-pi/pi-catalog/compat/openai";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import {
 	DEFAULT_MODEL_PER_PROVIDER,
 	MODELS_DEV_PROVIDER_DESCRIPTORS,
@@ -72,29 +73,44 @@ describe("ClinePass catalog", () => {
 			baseUrl: "https://api.cline.bot/api/v1",
 			reasoning: true,
 			input: ["text", "image"],
-			// Upstream list prices pass through: billing is subscription quota, but
-			// cost display reads as API-equivalent spend (codex/github-copilot policy).
-			cost: { input: 9, output: 12, cacheRead: 0, cacheWrite: 0 },
+			// ClinePass pricing is subscription-specific API-equivalent spend, not
+			// the generic models.dev list price supplied by this fixture.
+			cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
 			contextWindow: 1_048_576,
-			maxTokens: 131_072,
+			maxTokens: 1_048_576,
 		});
 	});
 
-	it("maps Cline's full reasoning ladder from source metadata", () => {
+	it("maps Cline's per-model reasoning controls from the curated snapshot", () => {
 		const model = sourceModel("kimi-k3");
 
 		expect(model.thinking).toEqual({
 			mode: "effort",
-			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
-			effortMap: {
-				minimal: "none",
-				low: "low",
-				medium: "medium",
-				high: "high",
-				xhigh: "xhigh",
-				max: "max",
-			},
+			efforts: [Effort.Low, Effort.High, Effort.Max],
+			defaultLevel: Effort.High,
+			requiresEffort: false,
 		});
+	});
+
+	it("bundles the full current roster for offline startup", () => {
+		expect(getBundledModels("cline-pass").map(model => model.id)).toEqual([
+			"deepseek-v4-flash",
+			"deepseek-v4-pro",
+			"deepseek/deepseek-v4-flash",
+			"glm-5.2",
+			"glm-5.3",
+			"kimi-k2.6",
+			"kimi-k2.7-code",
+			"kimi-k3",
+			"mimo-v2.5",
+			"mimo-v2.5-pro",
+			"minimax-m3",
+			"poolside/laguna-s-2.1:free",
+			"qwen3.7-max",
+			"qwen3.7-plus",
+			"qwen3.8-max",
+			"stealth/ox-alpha",
+		]);
 	});
 
 	it("uses the Cline wire namespace without exposing it in model selection", () => {
@@ -111,13 +127,11 @@ describe("ClinePass catalog", () => {
 		expect(compat.wireModelIdMode).toBe("cline-pass");
 		expect(compat.maxTokensField).toBe("max_completion_tokens");
 		expect(compat.thinkingFormat).toBe("openai");
-		expect(compat.reasoningDisableMode).toBe("none-effort");
+		expect(compat.reasoningDisableMode).toBe("cline-enabled-false");
 		expect(compat.reasoningEffortMap).toEqual({
-			minimal: "none",
-			low: "low",
-			medium: "medium",
-			high: "high",
-			xhigh: "xhigh",
+			minimal: "low",
+			medium: "high",
+			xhigh: "max",
 			max: "max",
 		});
 		expect(compat.reasoningContentField).toBe("reasoning");
@@ -165,7 +179,7 @@ describe("ClinePass catalog", () => {
 			"https://openrouter.ai/api/v1/models",
 		]);
 		expect(models?.map(model => model.id)).toEqual(["kimi-k3", "future-model"]);
-		expect(models?.[0]?.maxTokens).toBe(131_072);
+		expect(models?.[0]?.maxTokens).toBe(1_048_576);
 		// A reference-backed subscription id surfaces the upstream list price so the
 		// picker does not render it as "free" (issue #5598 policy); exact numbers
 		// track upstream catalog data, so assert the contract, not the digits.
@@ -179,7 +193,7 @@ describe("ClinePass catalog", () => {
 			contextWindow: 128_000,
 			maxTokens: 8_192,
 			reasoning: true,
-			thinking: { mode: "effort" },
+			compat: { supportsReasoningEffort: false },
 		});
 	});
 
@@ -396,7 +410,7 @@ describe("ClinePass catalog", () => {
 		const models = await options.fetchDynamicModels?.();
 		expect(models?.map(model => model.id)).toEqual(["kimi-k3", "nvidia/nemotron-3.5-lightning"]);
 		// The pass entry keeps its enriched bundled metadata and cline-pass wire mode.
-		expect(models?.[0]?.maxTokens).toBe(131_072);
+		expect(models?.[0]?.maxTokens).toBe(1_048_576);
 		expect(buildOpenAICompat(models?.[0] as ModelSpec<"openai-completions">).wireModelIdMode).toBe("cline-pass");
 	});
 });

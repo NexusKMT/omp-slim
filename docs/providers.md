@@ -51,7 +51,7 @@ For headless or remote setups backed by a shared auth broker, the CLI exposes `o
 
 When a model has no credentials, `omp` tells you to run `/login` or set the provider's environment variable.
 
-For ClinePass, set `CLINE_API_KEY` or run `/login cline-pass` to open the Cline dashboard and validate a newly created API key. OMP refreshes its model roster from Cline's public recommended-models endpoint, retains generated metadata as an offline fallback, and reports the subscription's five-hour, weekly, and monthly quota windows through `omp usage`. The roster also includes Cline's free-tier models (marked `(free)`): they ride the same key at $0 outside the subscription quota, so they work on any Cline account even without a ClinePass subscription. Subscription models show their upstream list price in the model picker and session cost as an API-equivalent reference (matching Codex and GitHub Copilot); only the `(free)` tier is actually $0. The integration mirrors the official Cline CLI's client behavior throughout — client-identity headers, roster interpretation, and OpenRouter-based metadata enrichment for models the bundled catalog has not priced yet — with Cline's blessing for a native integration.
+For ClinePass, set `CLINE_API_KEY` or run `/login cline-pass` to open the Cline dashboard and validate a newly created API key. OMP refreshes membership from Cline's public recommended-models endpoint and bundles the current sixteen-model roster with Cline-authored limits, subscription pricing, modalities, and per-model reasoning controls for offline startup. New live ids remain selectable before regeneration, using conservative metadata rather than guessed controls. `omp usage` reports five-hour, weekly, and monthly quota windows. Free-tier models are marked `(free)` and work with the same key on any Cline account; subscription models show API-equivalent reference pricing, while streamed gateway cost remains authoritative for actual billed or discounted usage. Requests mirror Cline CLI client headers and a stable per-session task id, Qwen routes use Cline's prompt-cache shape, and Qwen3.7 Plus maps thinking levels to the gateway's token-budget field.
 
 ### Pinning a key in `models.yml`
 
@@ -105,6 +105,7 @@ Each provider has one or more environment variables that supply a key when no st
 | `alibaba-token-plan`             | `ALIBABA_TOKEN_PLAN_API_KEY`, then `BAILIAN_TOKEN_PLAN_API_KEY`               |
 | `baseten`                        | `BASETEN_API_KEY`                                                             |
 | `bedrock-mantle`                 | `AWS_BEARER_TOKEN_BEDROCK`                                                    |
+| `deepinfra`                      | `DEEPINFRA_API_KEY`                                                           |
 | `deepseek`                       | `DEEPSEEK_API_KEY`                                                            |
 | `siliconflow`                    | `SILICONFLOW_API_KEY`                                                         |
 | `siliconflow-cn`                 | `SILICONFLOW_CN_API_KEY`                                                      |
@@ -151,6 +152,7 @@ Each provider has one or more environment variables that supply a key when no st
 | `lm-studio`                      | `LM_STUDIO_API_KEY` (optional; keyless by default)                            |
 | `llama.cpp`                      | `LLAMA_CPP_API_KEY` (only when the server requires auth)                      |
 | `vllm`                           | `VLLM_API_KEY` (optional for an unauthenticated local server)                 |
+| `yolo-auto`                      | `YOLO_AUTO_API_KEY`                                                            |
 
 OAuth-backed providers such as `anthropic`, `github-copilot`, `cursor`, `ollama-cloud`, `qwen-portal`, `kimi-code`, `xai-oauth`, `wafer-serverless`, `google-gemini-cli`, and `google-antigravity` are normally reached through `/login` rather than an environment variable. See [Environment variables](./environment-variables.md) for search-tool and configuration variables not listed here.
 
