@@ -12,7 +12,7 @@ import type {
 	AgentToolUpdateCallback,
 } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import { isRecord, logger } from "@oh-my-pi/pi-utils";
 import { getDefault, type Settings } from "../config/settings";
 import { formatGroupedDiagnosticMessages } from "../lsp/utils";
 import type { Theme } from "../modes/theme/theme";
@@ -794,15 +794,19 @@ async function spillLargeResultToArtifact(
 	const newMeta: OutputMeta = { ...(existingMeta ?? {}), truncation: truncationMeta };
 	const newDetails = { ...(result.details ?? {}), meta: newMeta };
 
-	// The full payload now lives in the spilled artifact. Some tools duplicate
-	// that same text verbatim inside `details` — MCP results carry a second copy
-	// under `details.rawContent` (mcp/tool-bridge.ts). Left in place, every
-	// consumer that serializes `details` re-persists the whole payload: the eval
-	// bridge forwards it into `jsonOutputs`, which lands byte-for-byte in both the
-	// main session JSONL and the `.eval.log` sidecar alongside the dedicated MCP
-	// sidecar. Drop it so the artifact stays the single durable copy. See #9687.
-	if (newDetails.rawContent !== undefined) {
-		delete newDetails.rawContent;
+	// MCP details repeat text blocks already captured by the artifact. Remove
+	// only those duplicated strings: resource and image blocks retain structure
+	// (URI, MIME metadata, blobs) that the formatted artifact cannot represent.
+	const rawContent = newDetails.rawContent;
+	if (Array.isArray(rawContent)) {
+		const structuredContent = rawContent.filter(
+			(block: unknown) => !(isRecord(block) && block.type === "text" && typeof block.text === "string"),
+		);
+		if (structuredContent.length > 0) {
+			newDetails.rawContent = structuredContent;
+		} else {
+			delete newDetails.rawContent;
+		}
 	}
 
 	return { ...result, content: newContent, details: newDetails };

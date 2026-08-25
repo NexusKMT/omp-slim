@@ -970,12 +970,11 @@ describe("Coding Agent Tools", () => {
 			}
 		});
 
-		it("should drop a spilled result's duplicated details.rawContent (#9687)", async () => {
+		it("should drop duplicated raw text while preserving structured MCP content (#9687)", async () => {
 			// MCP results carry a verbatim second copy of their content text under
-			// `details.rawContent`. When the spill truncates the content and writes
-			// the dedicated MCP sidecar, that raw copy must not survive on `details`
-			// — otherwise every consumer that serializes it (eval's jsonOutputs →
-			// main JSONL + `.eval.log`) re-persists the whole payload byte-for-byte.
+			// `details.rawContent`. The spill artifact replaces that text copy, but
+			// resource and image entries retain structure unavailable in the
+			// formatted artifact and must remain visible to eval callers.
 			const spillSettings = Settings.isolated({
 				"tools.artifactSpillThreshold": 20,
 				"tools.artifactTailBytes": 64,
@@ -991,16 +990,28 @@ describe("Coding Agent Tools", () => {
 			};
 
 			const payload = "SEARCH RESULT LINE\n".repeat(4000);
+			const resource = {
+				type: "resource" as const,
+				resource: {
+					uri: "file:///workspace/result.bin",
+					mimeType: "application/octet-stream",
+					blob: "AAECAw==",
+				},
+			};
+			const image = { type: "image" as const, data: "iVBORw0KGgo=", mimeType: "image/png" };
 			const mcpTool = {
 				name: "mcp__server__tool",
 				description: "fake mcp tool returning a large structured payload",
 				async execute() {
 					return {
-						content: [{ type: "text" as const, text: payload }],
+						content: [
+							{ type: "text" as const, text: payload },
+							{ type: "image" as const, data: image.data, mimeType: image.mimeType },
+						],
 						details: {
 							serverName: "server",
 							mcpToolName: "tool",
-							rawContent: [{ type: "text", text: payload }],
+							rawContent: [{ type: "text", text: payload }, resource, image],
 						},
 					};
 				},
@@ -1014,8 +1025,8 @@ describe("Coding Agent Tools", () => {
 				expect(truncation?.artifactId).toBeDefined();
 				expect(Buffer.byteLength(getTextOutput(result), "utf-8")).toBeLessThan(Buffer.byteLength(payload, "utf-8"));
 
-				// The full payload lives once, in the artifact — not re-embedded in details.
-				expect(result.details?.rawContent).toBeUndefined();
+				// Only the raw text has a complete representation in the artifact.
+				expect(result.details?.rawContent).toEqual([resource, image]);
 
 				const artifactPath = path.join(
 					spillManager.getArtifactsDir()!,
