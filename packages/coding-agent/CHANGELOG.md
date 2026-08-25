@@ -13,6 +13,7 @@
 - Compressed single-child directory chains in the sidebar tree view
 - Split pure additions (new/untracked files) into their own list below tracked changes in each git TUI file section, separated by a rule; addition rows drop the redundant status letter and deleted files render struck through
 - Added Yolo-Auto to the `/login` provider list and the `YOLO_AUTO_API_KEY` env help.
+- The `/login` OpenRouter entry now signs in via the browser (Sign in with OpenRouter) and provisions an API key automatically; pasting an existing `sk-or-…` key still works in the same flow.
 
 ### Changed
 
