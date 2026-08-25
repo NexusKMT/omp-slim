@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `issue://`, `pr://`, and the `github` tool querying github.com for repositories hosted on GitHub Enterprise; the resolved host is now kept, and repository-qualified URLs accept a `pr://<host>/<owner>/<repo>/<N>` prefix.
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
