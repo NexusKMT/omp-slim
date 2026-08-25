@@ -111,6 +111,10 @@
 
 - Fixed `omp bench` and `omp if-bench` failing to resolve credential-scoped dynamic models already listed by `omp models`.
 
+### Fixed
+
+- Kept `checkpoint` and `rewind` on the direct tool surface under Codex Code Mode; routed through the eval bridge they were invisible to the session's checkpoint state machine, leaving sessions unable to rewind or yield.
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
