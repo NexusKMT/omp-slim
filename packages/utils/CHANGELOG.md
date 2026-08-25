@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- OMP no longer exits when Bun 1.4 throws an asynchronous `ERR_SOCKET_CLOSED` from `node:net` internals during socket cleanup.
+
 ## [18.0.5] - 2026-08-25
 
 ### Added

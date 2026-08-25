@@ -123,4 +123,32 @@ describe("postmortem broken-pipe handling", () => {
 				.catch(() => {});
 		}
 	});
+
+	function makeSocketClosedErr(stack: string): Error {
+		const err = new Error("Socket is closed");
+		Object.assign(err, { code: "ERR_SOCKET_CLOSED" });
+		err.stack = stack;
+		return err;
+	}
+
+	it("classifies Bun's frameless node:net ERR_SOCKET_CLOSED as internal", () => {
+		// Verbatim stack from the Bun 1.4 async close-callback crash.
+		expect(
+			postmortem.isInternalSocketClosedError(
+				makeSocketClosedErr("Error: Socket is closed\n    at unknown\n    at close (node:net:686:67)"),
+			),
+		).toBe(true);
+	});
+
+	it("keeps ERR_SOCKET_CLOSED fatal when application frames are on the stack", () => {
+		expect(
+			postmortem.isInternalSocketClosedError(
+				makeSocketClosedErr(
+					"Error: Socket is closed\n    at send (/app/src/broker.ts:12:3)\n    at close (node:net:686:67)",
+				),
+			),
+		).toBe(false);
+		const other = Object.assign(new Error("Socket is closed"), { code: "EPIPE" });
+		expect(postmortem.isInternalSocketClosedError(other)).toBe(false);
+	});
 });
