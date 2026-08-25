@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.5] - 2026-08-25
+
 ### Breaking Changes
 
 - Renamed the public `TerminalFrameProvider.resetHistory` method to `beginHistoryReplay`.

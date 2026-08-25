@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.5] - 2026-08-25
+
 ### Added
 
 - Added asynchronous, size-bounded SVG-to-PNG rasterization for terminal media previews.

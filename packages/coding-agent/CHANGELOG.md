@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.5] - 2026-08-25
+
 ### Added
 
 - Added append-only transcript declarations and stable-row APIs for components with immutable history prefixes.
