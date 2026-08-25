@@ -154,15 +154,21 @@ describe("withReplaySafeStreamRetry", () => {
 	it("does not retry an empty pause_turn completion", async () => {
 		let attempts = 0;
 		const waits: number[] = [];
-		const stream = withEmptyCompletionRetry({}, CTX, { providerRetryWait: async ms => void waits.push(ms) }, () => {
-			attempts++;
-			const message = assistant();
-			message.stopDetails = { type: "pause_turn" };
-			return streamFromEvents([
-				{ type: "start", partial: message },
-				{ type: "done", reason: "stop", message },
-			] as unknown as AssistantMessageEvent[]);
-		});
+		const stream = withReplaySafeStreamRetry(
+			{},
+			CTX,
+			{ providerRetryWait: async ms => void waits.push(ms) },
+			() => {
+				attempts++;
+				const message = assistant();
+				message.stopDetails = { type: "pause_turn" };
+				return streamFromEvents([
+					{ type: "start", partial: message },
+					{ type: "done", reason: "stop", message },
+				] as unknown as AssistantMessageEvent[]);
+			},
+			{ retryEmptyCompletion: true },
+		);
 
 		const events = await drain(stream);
 		const result = await stream.result();
