@@ -112,9 +112,6 @@ async function fetchClinePassUsage(params: UsageFetchParams, ctx: UsageFetchCont
 	const baseUrl = (params.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
 	const usageUrl = `${baseUrl}${USAGE_LIMITS_PATH}`;
 	const headers = {
-		// The CLI's client identity rides every api.cline.bot call, not just
-		// inference: a uniform mirror keeps account routes working if the
-		// gateway ever extends its client-surface gating beyond model traffic.
 		...clinePassClientHeaders(),
 		Accept: "application/json",
 		Authorization: `Bearer ${credential.apiKey}`,

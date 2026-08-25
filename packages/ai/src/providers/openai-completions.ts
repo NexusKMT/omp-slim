@@ -1439,9 +1439,7 @@ function createRequestSetup(
 		// Provider auth/header overlay: Kimi-code hosts require shared client
 		// attribution headers prepended before caller headers. Kept here (not in
 		// the shared helper) because it is provider-specific request setup.
-		// ClinePass mirrors the official Cline CLI's client-identity headers: the
-		// gateway gates parts of the roster (some free-tier models) to Cline
-		// product surfaces, and this is the contract that identifies one.
+		// ClinePass sends the mirrored Cline CLI identity; documented in wire/cline-pass.ts.
 		prependHeaders:
 			model.provider === "kimi-code"
 				? getKimiCommonHeaders

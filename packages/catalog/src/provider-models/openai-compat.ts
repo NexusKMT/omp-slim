@@ -2565,10 +2565,10 @@ function buildClinePassFallbackModel(id: string): ModelSpec<"openai-completions"
 /**
  * Live reference catalog mirroring Cline's own client enrichment: the official
  * CLI fills roster metadata from OpenRouter's public `/models` catalog (their
- * gateway routes through it), keyed by full id and by slug. We consult it only
- * for models the bundled reference has no real upstream entry for — the bundle
- * stays authoritative for known ids, and unknown ids ride fresh live data
- * instead of the conservative constants until the next regen.
+ * gateway routes through it), keyed by full id and by slug. Consulted only for
+ * ids the bundled reference has no real upstream entry for: the bundle stays
+ * authoritative for known ids, and unknown ids ride fresh live data instead of
+ * the conservative constants until the next regen.
  */
 interface ClinePassLiveCatalogEntry {
 	name?: string;
@@ -2682,8 +2682,8 @@ function buildClinePassSubscriptionModel(
 	if (curated) return curated;
 	const base = references.get(id) ?? buildClinePassFallbackModel(id);
 	const reference = resolveModelReference(id, getBundledModelReferenceIndex());
-	// A reference pointing back at our own bundle means the last regen knew
-	// nothing about the id and encoded fallback constants — treat as no reference.
+	// A reference pointing back at the ClinePass bundle means the last regen
+	// knew nothing about the id and encoded fallback constants — treat as none.
 	const upstream = reference && reference.provider !== "cline-pass" ? reference : undefined;
 	// Same degeneracy on the bundle side: a bundled entry whose limits are the
 	// fallback pair was written by a regen that had no upstream data for the id.

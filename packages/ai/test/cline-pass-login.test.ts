@@ -25,8 +25,6 @@ describe("ClinePass login", () => {
 
 		expect(result).toBe("sk_test");
 		expect(authUrls).toEqual(["https://app.cline.bot/dashboard/account"]);
-		// Account identity route, not a probe completion: login stays decoupled
-		// from roster churn and never burns subscription quota on validation.
 		expect(requestUrl).toBe("https://api.cline.bot/api/v1/users/me");
 		expect(requestMethod).toBe("GET");
 		expect(authorization).toBe("Bearer sk_test");
