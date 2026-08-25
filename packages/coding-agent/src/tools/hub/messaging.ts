@@ -17,7 +17,7 @@ import type { RenderResultOptions } from "../../extensibility/custom-tools/types
 import { IrcBus, type IrcDeliveryReceipt, type IrcMessage } from "../../irc/bus";
 import type { Theme } from "../../modes/theme/theme";
 import { type AgentRegistry, MAIN_AGENT_ID } from "../../registry/agent-registry";
-import { ensurePersistedRoster } from "../../registry/persisted-agents";
+import { ensurePersistedRoster, isCurrentSessionRosterRef } from "../../registry/persisted-agents";
 import { canSpawnAtDepth } from "../../task/types";
 import { Ellipsis, renderStatusLine, renderTreeList, truncateToWidth } from "../../tui";
 import {
@@ -43,7 +43,8 @@ export { DEFAULT_HUB_LIST_LIMIT, MAX_HUB_LIST_LIMIT } from "./types";
 
 export const DEFAULT_IRC_TIMEOUT_MS = 120_000;
 
-const LIST_STATUS_ORDER: Record<string, number> = { running: 0, idle: 1, parked: 2 };
+/** Hub roster ordering (running before idle before parked) shared with the child prompt's live-row cap. */
+export const LIST_STATUS_ORDER: Record<string, number> = { running: 0, idle: 1, parked: 2 };
 
 export interface HubListParams {
 	status?: HubListStatus;
@@ -59,9 +60,21 @@ function resolveHubListLimit(limit: number | undefined): number {
 	return Math.min(Math.max(1, Math.floor(limit)), MAX_HUB_LIST_LIMIT);
 }
 
-function selectListRefs(registry: AgentRegistry, senderId: string, status: HubListStatus | undefined) {
+function selectListRefs(
+	registry: AgentRegistry,
+	senderId: string,
+	status: HubListStatus | undefined,
+	rootSessionFile: string | undefined,
+) {
 	if (status === "parked") {
-		return registry.list().filter(ref => isAddressablePeer(ref, senderId) && ref.status === "parked");
+		return registry
+			.list()
+			.filter(
+				ref =>
+					isAddressablePeer(ref, senderId) &&
+					ref.status === "parked" &&
+					isCurrentSessionRosterRef(ref, rootSessionFile),
+			);
 	}
 	const live = registry.listVisibleTo(senderId);
 	return status ? live.filter(ref => ref.status === status) : live;
@@ -147,10 +160,15 @@ export async function executeList(
 	params: HubListParams = {},
 	sessionFileHint?: string | null,
 ): Promise<AgentToolResult<CoordinationDetails>> {
-	await ensurePersistedRoster(registry, sessionFileHint ?? registry.get(senderId)?.sessionFile);
-	const refs = registry.list();
+	const rootSessionFile = await ensurePersistedRoster(
+		registry,
+		sessionFileHint ?? registry.get(senderId)?.sessionFile,
+	);
+	const refs = registry
+		.list()
+		.filter(ref => isAddressablePeer(ref, senderId) && isCurrentSessionRosterRef(ref, rootSessionFile));
 
-	const selected = selectListRefs(registry, senderId, params.status);
+	const selected = selectListRefs(registry, senderId, params.status, rootSessionFile);
 	selected.sort(
 		(a, b) =>
 			(LIST_STATUS_ORDER[a.status] ?? 9) - (LIST_STATUS_ORDER[b.status] ?? 9) || b.lastActivity - a.lastActivity,
@@ -715,7 +733,7 @@ function renderListResult(details: Partial<CoordinationDetails>, expanded: boole
 	const rosterCounts = details.counts;
 	if (peers.length === 0) {
 		const meta =
-			rosterCounts && rosterCounts.parked > 0
+			rosterCounts && rosterCounts.running + rosterCounts.idle + rosterCounts.parked > 0
 				? [
 						`${rosterCounts.running} running`,
 						`${rosterCounts.idle} idle`,

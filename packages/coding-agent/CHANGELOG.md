@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Fixed `hub list` and child peer rosters counting parked agents from stale root sessions; the persisted roster now scopes to the current root, retries transient filesystem faults, and renders live rows through the production subagent prompt template with a truthful omitted count.
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
