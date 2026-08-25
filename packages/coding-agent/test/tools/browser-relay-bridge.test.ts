@@ -76,6 +76,14 @@ function ack(bridge: RelayBridge, socket: FakeExtSocket, op: RelayRpcRequest["op
 	}
 }
 
+/** Fail every unanswered extension RPC of `op` with `ok: false`. */
+function nack(bridge: RelayBridge, socket: FakeExtSocket, op: RelayRpcRequest["op"], error = "rpc failed"): void {
+	for (const rpc of socket.pending(op)) {
+		socket.markAcked(rpc.id);
+		bridge.extMessage(socket, JSON.stringify({ t: "rpcResult", id: rpc.id, ok: false, error }));
+	}
+}
+
 /** Flush the rpc .then() microtask chains (no timers involved). */
 async function flush(): Promise<void> {
 	for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -419,5 +427,64 @@ describe("RelayBridge Runtime sessions", () => {
 				message => message.sessionId === sessionId && message.method === "Runtime.executionContextCreated",
 			),
 		).toEqual(received);
+	});
+
+	it("holds a pipelined duplicate Runtime.enable until the in-flight enable settles", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		const sessionId = await attachPage(bridge, ext, cdp, connId, 1);
+
+		const enable1 = ++msgSeq;
+		bridge.cdpMessage(connId, JSON.stringify({ id: enable1, sessionId, method: "Runtime.enable" }));
+		await flush();
+		const enable2 = ++msgSeq;
+		bridge.cdpMessage(connId, JSON.stringify({ id: enable2, sessionId, method: "Runtime.enable" }));
+		await flush();
+
+		// Root disable/enable cycle still pending: neither caller may be acked.
+		expect(cdp.messages.filter(message => message.id === enable1 || message.id === enable2)).toEqual([]);
+
+		ack(bridge, ext, "send"); // Runtime.disable leg
+		await flush();
+		ack(bridge, ext, "send"); // Runtime.enable leg
+		await flush();
+
+		const results = cdp.messages
+			.filter(message => (message.id === enable1 || message.id === enable2) && "result" in message)
+			.map(message => message.id)
+			.sort((a, b) => (a as number) - (b as number));
+		expect(results).toEqual([enable1, enable2]);
+	});
+
+	it("fails a pipelined duplicate Runtime.enable when the root enable fails", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		const sessionId = await attachPage(bridge, ext, cdp, connId, 1);
+
+		const enable1 = ++msgSeq;
+		bridge.cdpMessage(connId, JSON.stringify({ id: enable1, sessionId, method: "Runtime.enable" }));
+		await flush();
+		const enable2 = ++msgSeq;
+		bridge.cdpMessage(connId, JSON.stringify({ id: enable2, sessionId, method: "Runtime.enable" }));
+		await flush();
+
+		// The first leg of the root cycle fails: both callers must observe it.
+		nack(bridge, ext, "send");
+		await flush();
+
+		const errored = cdp.messages
+			.filter(message => (message.id === enable1 || message.id === enable2) && "error" in message)
+			.map(message => message.id)
+			.sort((a, b) => (a as number) - (b as number));
+		expect(errored).toEqual([enable1, enable2]);
+		expect(
+			cdp.messages.filter(message => (message.id === enable1 || message.id === enable2) && "result" in message),
+		).toEqual([]);
 	});
 });
