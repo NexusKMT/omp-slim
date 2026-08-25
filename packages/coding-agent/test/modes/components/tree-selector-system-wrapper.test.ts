@@ -74,4 +74,16 @@ describe("TreeSelectorComponent system-wrapper message rendering", () => {
 		expect(rendered).not.toContain("<system-notice");
 		expect(rendered).not.toContain("reason=");
 	});
+
+	it("preserves system tags contained in an async-result payload", () => {
+		const rendered = render(
+			customMessageTree(
+				"async-result",
+				"<system-notice>\nResult: <system-reminder>literal payload</system-reminder>\n</system-notice>",
+			),
+		);
+
+		expect(rendered).toContain("[async-result]: Result: <system-reminder>literal payload</system-reminder>");
+		expect(rendered).not.toContain("<system-notice>");
+	});
 });

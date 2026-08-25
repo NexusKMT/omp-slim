@@ -108,13 +108,12 @@ function advisorTreeDisplay(details: unknown): AdvisorTreeDisplay {
 }
 
 /**
- * Strip the model-facing `<system-notice>` / `<system-reminder>` (and any other
- * `<system-*>`) wrapper tags framing injects around custom-message content, so
- * the session tree shows the human-readable body rather than the XML envelope
- * (issue #9755, following the advisor fix in #9708).
+ * Strip one model-facing `<system-*>` envelope from custom-message content.
+ * Nested system tags belong to the recorded payload and remain visible.
  */
 function stripSystemWrapperTags(content: string): string {
-	return content.replace(/<\/?system-[\w-]+(?:\s[^>]*)?>/gi, "");
+	const match = content.match(/^\s*<(system-[\w-]+)(?:\s[^>]*)?>\s*([\s\S]*?)\s*<\/\1>\s*$/i);
+	return match?.[2] ?? content;
 }
 
 class TreeList implements Component {
