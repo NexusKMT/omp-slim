@@ -315,4 +315,178 @@ describe("persisted roster latch semantics", () => {
 		await ensurePersistedRoster(registry, rootFor(0));
 		expect(countReaddirs(readdirs, scanDir(rootFor(0)))).toBe(2);
 	}, 10_000);
+	it("re-scans a root whose parked ref another root superseded (A→B→A)", async () => {
+		using tempDir = TempDir.createSync("@omp-roster-supersede-");
+		const dir = tempDir.path();
+		const rootA = path.join(dir, "a", "main.jsonl");
+		const rootB = path.join(dir, "b", "main.jsonl");
+		const childA = path.join(dir, "a", "main", "Worker.jsonl");
+		const childB = path.join(dir, "b", "main", "Worker.jsonl");
+		await Bun.write(rootA, `${sessionHeader("a")}\n`);
+		await Bun.write(rootB, `${sessionHeader("b")}\n`);
+		await Bun.write(childA, `${sessionHeader("worker")}\n${sessionInitRecord()}\n`);
+		await Bun.write(childB, `${sessionHeader("worker")}\n${sessionInitRecord()}\n`);
+		const readdirs: string[] = [];
+		spyOnReaddirs(readdirs);
+		const registry = new AgentRegistry();
+		await ensurePersistedRoster(registry, rootA);
+		expect(registry.get("Worker")?.sessionFile).toBe(childA);
+		expect(countReaddirs(readdirs, scanDir(rootA))).toBe(1);
+		// Root B's scan replaces the shared id globally: the parked ref now
+		// targets B's transcript.
+		await ensurePersistedRoster(registry, rootB);
+		expect(registry.get("Worker")?.sessionFile).toBe(childB);
+		// Returning to root A must not early-return off A's settled latch: the
+		// ref its scan restored no longer matches registry identity/session, so
+		// A is re-scanned and its own transcript wins again — the session,
+		// history, and messaging refs all target A's file.
+		await ensurePersistedRoster(registry, rootA);
+		expect(registry.get("Worker")?.sessionFile).toBe(childA);
+		expect(registry.get("Worker")?.status).toBe("parked");
+		expect(countReaddirs(readdirs, scanDir(rootA))).toBe(2);
+		// A's restored latch is valid again: a repeated call does not re-scan.
+		await ensurePersistedRoster(registry, rootA);
+		expect(countReaddirs(readdirs, scanDir(rootA))).toBe(2);
+		// B's latch was superseded by A's re-scan; revisiting B refreshes it.
+		await ensurePersistedRoster(registry, rootB);
+		expect(registry.get("Worker")?.sessionFile).toBe(childB);
+		expect(countReaddirs(readdirs, scanDir(rootB))).toBe(2);
+	}, 10_000);
+
+	it("refreshes only the superseded refs of a root (partial supersession)", async () => {
+		using tempDir = TempDir.createSync("@omp-roster-partial-");
+		const dir = tempDir.path();
+		const rootA = path.join(dir, "a", "main.jsonl");
+		const rootB = path.join(dir, "b", "main.jsonl");
+		const childA1 = path.join(dir, "a", "main", "Worker1.jsonl");
+		const childA2 = path.join(dir, "a", "main", "Worker2.jsonl");
+		const childB1 = path.join(dir, "b", "main", "Worker1.jsonl");
+		await Bun.write(rootA, `${sessionHeader("a")}\n`);
+		await Bun.write(rootB, `${sessionHeader("b")}\n`);
+		await Bun.write(childA1, `${sessionHeader("worker1")}\n${sessionInitRecord()}\n`);
+		await Bun.write(childA2, `${sessionHeader("worker2")}\n${sessionInitRecord()}\n`);
+		await Bun.write(childB1, `${sessionHeader("worker1")}\n${sessionInitRecord()}\n`);
+		const readdirs: string[] = [];
+		spyOnReaddirs(readdirs);
+		const registry = new AgentRegistry();
+		await ensurePersistedRoster(registry, rootA);
+		expect(registry.get("Worker1")?.sessionFile).toBe(childA1);
+		expect(registry.get("Worker2")?.sessionFile).toBe(childA2);
+		// B owns only Worker1: it replaces just that one; Worker2 stays A's.
+		await ensurePersistedRoster(registry, rootB);
+		expect(registry.get("Worker1")?.sessionFile).toBe(childB1);
+		expect(registry.get("Worker2")?.sessionFile).toBe(childA2);
+		// A's latch detects Worker1 moved; re-scanning restores Worker1 without
+		// touching Worker2's still-valid ref.
+		await ensurePersistedRoster(registry, rootA);
+		expect(registry.get("Worker1")?.sessionFile).toBe(childA1);
+		expect(registry.get("Worker2")?.sessionFile).toBe(childA2);
+		expect(countReaddirs(readdirs, scanDir(rootA))).toBe(2);
+		expect(countReaddirs(readdirs, scanDir(rootB))).toBe(1);
+		// B's latch is stale again (Worker1 moved back to A); revisiting B
+		// refreshes it, still leaving Worker2 on A.
+		await ensurePersistedRoster(registry, rootB);
+		expect(registry.get("Worker1")?.sessionFile).toBe(childB1);
+		expect(registry.get("Worker2")?.sessionFile).toBe(childA2);
+		expect(countReaddirs(readdirs, scanDir(rootB))).toBe(2);
+	}, 10_000);
+
+	it("re-scans a root whose restored ref was released", async () => {
+		using tempDir = TempDir.createSync("@omp-roster-released-");
+		const dir = tempDir.path();
+		const rootFile = path.join(dir, "main.jsonl");
+		const childFile = path.join(dir, "main", "Worker.jsonl");
+		await Bun.write(rootFile, `${sessionHeader("main")}\n`);
+		await Bun.write(childFile, `${sessionHeader("worker")}\n${sessionInitRecord()}\n`);
+		const readdirs: string[] = [];
+		spyOnReaddirs(readdirs);
+		const registry = new AgentRegistry();
+		await ensurePersistedRoster(registry, rootFile);
+		expect(registry.get("Worker")?.sessionFile).toBe(childFile);
+		expect(countReaddirs(readdirs, scanDir(rootFile))).toBe(1);
+		// A release removes the ref the latch restored; the next ensure sees the
+		// missing ref and re-scans to restore it.
+		expect(registry.unregister("Worker")).toBe(true);
+		await ensurePersistedRoster(registry, rootFile);
+		expect(registry.get("Worker")?.sessionFile).toBe(childFile);
+		expect(countReaddirs(readdirs, scanDir(rootFile))).toBe(2);
+	}, 10_000);
+
+	it("keeps a settled latch valid for a tombstoned transcript", async () => {
+		using tempDir = TempDir.createSync("@omp-roster-tombstone-");
+		const dir = tempDir.path();
+		const rootFile = path.join(dir, "main.jsonl");
+		const childFile = path.join(dir, "main", "Worker.jsonl");
+		await Bun.write(rootFile, `${sessionHeader("main")}\n`);
+		await Bun.write(childFile, `${sessionHeader("worker")}\n${sessionInitRecord()}\n`);
+		await Bun.write(`${childFile}.tombstone`, "");
+		const readdirs: string[] = [];
+		spyOnReaddirs(readdirs);
+		const registry = new AgentRegistry();
+		await ensurePersistedRoster(registry, rootFile);
+		expect(registry.get("Worker")?.status).toBe("aborted");
+		expect(registry.get("Worker")?.sessionFile).toBe(childFile);
+		// The restored aborted ref still matches the latch token: no re-scan.
+		await ensurePersistedRoster(registry, rootFile);
+		expect(countReaddirs(readdirs, scanDir(rootFile))).toBe(1);
+	}, 10_000);
+
+	it("does not re-scan when a transcript file vanishes after its latch settled", async () => {
+		using tempDir = TempDir.createSync("@omp-roster-vanished-");
+		const dir = tempDir.path();
+		const rootFile = path.join(dir, "main.jsonl");
+		const childFile = path.join(dir, "main", "Worker.jsonl");
+		await Bun.write(rootFile, `${sessionHeader("main")}\n`);
+		await Bun.write(childFile, `${sessionHeader("worker")}\n${sessionInitRecord()}\n`);
+		const readdirs: string[] = [];
+		spyOnReaddirs(readdirs);
+		const registry = new AgentRegistry();
+		await ensurePersistedRoster(registry, rootFile);
+		expect(registry.get("Worker")?.sessionFile).toBe(childFile);
+		expect(countReaddirs(readdirs, scanDir(rootFile))).toBe(1);
+		await fs.promises.rm(childFile);
+		// The ref's id+file identity is intact even though the transcript is
+		// gone; the settled latch stays valid and no re-scan runs.
+		await ensurePersistedRoster(registry, rootFile);
+		expect(registry.get("Worker")?.sessionFile).toBe(childFile);
+		expect(countReaddirs(readdirs, scanDir(rootFile))).toBe(1);
+	}, 10_000);
+
+	it("retries a supersession refresh whose scan failed", async () => {
+		using tempDir = TempDir.createSync("@omp-roster-refresh-failure-");
+		const dir = tempDir.path();
+		const rootA = path.join(dir, "a", "main.jsonl");
+		const rootB = path.join(dir, "b", "main.jsonl");
+		const childA = path.join(dir, "a", "main", "Worker.jsonl");
+		const childB = path.join(dir, "b", "main", "Worker.jsonl");
+		await Bun.write(rootA, `${sessionHeader("a")}\n`);
+		await Bun.write(rootB, `${sessionHeader("b")}\n`);
+		await Bun.write(childA, `${sessionHeader("worker")}\n${sessionInitRecord()}\n`);
+		await Bun.write(childB, `${sessionHeader("worker")}\n${sessionInitRecord()}\n`);
+		let failChildA = false;
+		const realStat = fsp.stat;
+		vi.spyOn(fs.promises, "stat").mockImplementation((async (target: fs.PathLike) => {
+			if (target === childA && failChildA) {
+				throw Object.assign(new Error(`EACCES: ${childA}`), { code: "EACCES" });
+			}
+			return realStat(target);
+		}) as typeof fs.promises.stat);
+		const readdirs: string[] = [];
+		spyOnReaddirs(readdirs);
+		const registry = new AgentRegistry();
+		await ensurePersistedRoster(registry, rootA);
+		expect(registry.get("Worker")?.sessionFile).toBe(childA);
+		await ensurePersistedRoster(registry, rootB);
+		expect(registry.get("Worker")?.sessionFile).toBe(childB);
+		// A's refresh scan faults on its child: the scan fails and drops the
+		// latch, so B's ref stays current and the failure stays retryable.
+		failChildA = true;
+		await ensurePersistedRoster(registry, rootA);
+		expect(registry.get("Worker")?.sessionFile).toBe(childB);
+		expect(countReaddirs(readdirs, scanDir(rootA))).toBe(2);
+		failChildA = false;
+		await ensurePersistedRoster(registry, rootA);
+		expect(registry.get("Worker")?.sessionFile).toBe(childA);
+		expect(countReaddirs(readdirs, scanDir(rootA))).toBe(3);
+	}, 10_000);
 });
