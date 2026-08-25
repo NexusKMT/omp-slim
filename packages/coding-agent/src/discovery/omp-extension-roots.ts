@@ -8,9 +8,10 @@
  * `prompts/`, `.mcp.json`) are wired into discovery by `omp-plugins.ts`.
  *
  * CLI-provided paths are injected via {@link injectOmpExtensionCliRoots}
- * before discovery runs; settings paths are read lazily from
- * `<scope>/settings.json` in {@link listOmpExtensionRoots} to mirror what
- * `loadExtensionModules` already does.
+ * before discovery runs; settings paths are read lazily in
+ * {@link listOmpExtensionRoots} from each scope's canonical `config.yml`
+ * (`config.yaml` at user scope) *and* legacy `settings.json`, mirroring the
+ * merged `extensions:` that `loadExtensionModules` loads via `settings.get`.
  *
  * @see ./omp-plugins.ts
  * @see ./builtin.ts `loadExtensionModules`
@@ -18,7 +19,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getAgentDir, isEnoent, logger, tryParseJson } from "@oh-my-pi/pi-utils";
+import { getAgentDir, isEnoent, logger, MAIN_CONFIG_FILENAMES, tryParseJson } from "@oh-my-pi/pi-utils";
+import { YAML } from "bun";
 import { readDirEntries, readFile } from "../capability/fs";
 import type { LoadContext } from "../capability/types";
 import { getEnabledPlugins } from "../extensibility/plugins/loader";
@@ -146,6 +148,48 @@ async function readSettingsExtensions(settingsPath: string): Promise<string[]> {
 	return raw.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
 }
 
+/** Project native config filename; matches the single `.omp/config.yml` the settings loader reads. */
+const PROJECT_CONFIG_FILENAMES = ["config.yml"] as const;
+
+/**
+ * Read the `extensions:` array from a scope's canonical YAML config. The first
+ * present filename wins (mirroring the settings loader), and a present-but-
+ * malformed file yields no entries rather than throwing.
+ */
+async function readYamlExtensions(scopeDir: string, filenames: readonly string[]): Promise<string[]> {
+	for (const filename of filenames) {
+		const content = await readFile(path.join(scopeDir, filename));
+		if (content === null) continue;
+		let parsed: unknown;
+		try {
+			parsed = YAML.parse(content);
+		} catch {
+			return [];
+		}
+		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return [];
+		if (!("extensions" in parsed)) return [];
+		const raw = parsed.extensions;
+		if (!Array.isArray(raw)) return [];
+		return raw.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+	}
+	return [];
+}
+
+/**
+ * Merge a scope's configured extension paths from both surfaces that feed
+ * `settings.get("extensions")`: the canonical `config.yml`/`config.yaml` and
+ * the legacy `settings.json`. Reading only the latter left `config.yml`-only
+ * extensions loading their module while their `skills/`, `hooks/`, etc. never
+ * reached discovery (#9768). Duplicate paths are dropped downstream.
+ */
+async function readScopeExtensions(scopeDir: string, configFilenames: readonly string[]): Promise<string[]> {
+	const [fromConfig, fromSettings] = await Promise.all([
+		readYamlExtensions(scopeDir, configFilenames),
+		readSettingsExtensions(path.join(scopeDir, "settings.json")),
+	]);
+	return [...fromConfig, ...fromSettings];
+}
+
 function resolveAgainst(raw: string, ctx: LoadContext): string {
 	const tilde = expandTilde(raw, ctx.home);
 	return path.isAbsolute(tilde) ? tilde : path.resolve(ctx.cwd, tilde);
@@ -173,8 +217,8 @@ async function isDirectory(p: string): Promise<boolean> {
  *
  * 1. Invocation-scoped SDK roots, when present; otherwise CLI roots injected
  *    via {@link injectOmpExtensionCliRoots}
- * 2. Project `<cwd>/.omp/settings.json#extensions`
- * 3. User `~/.omp/agent/settings.json#extensions`
+ * 2. Project `<cwd>/.omp/config.yml#extensions`, then `.omp/settings.json#extensions`
+ * 3. User `~/.omp/agent/config.{yml,yaml}#extensions`, then `settings.json#extensions`
  * 4. Enabled npm/link plugins installed under `<plugins>/node_modules/` (for
  *    `omp install <pkg>` / `omp plugin install` / `omp plugin link`). Marketplace
  *    installs are loaded by the `claude-plugins` provider and are excluded here.
@@ -195,8 +239,8 @@ export async function listOmpExtensionRoots(ctx: LoadContext): Promise<OmpExtens
 	if (rootMode === "merge") {
 		const { project, user } = scopeDirs(ctx);
 		const [projectExtensions, userExtensions, installedPlugins] = await Promise.all([
-			readSettingsExtensions(path.join(project, "settings.json")),
-			readSettingsExtensions(path.join(user, "settings.json")),
+			readScopeExtensions(project, PROJECT_CONFIG_FILENAMES),
+			readScopeExtensions(user, MAIN_CONFIG_FILENAMES),
 			listInstalledPluginRoots(ctx),
 		]);
 		candidates = [

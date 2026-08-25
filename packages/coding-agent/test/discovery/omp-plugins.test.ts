@@ -149,6 +149,50 @@ test("user settings.json#extensions also feeds sub-discovery", async () => {
 	expect(skills.map(s => s.name)).toContain("my-skill");
 });
 
+test("project config.yml#extensions surfaces every sub-directory (#9768)", async () => {
+	// config.yml is the canonical settings store; settings.json is a legacy
+	// migration source. Before the fix, listOmpExtensionRoots read only
+	// settings.json, so a config.yml-declared extension loaded its module but
+	// never sub-discovered its skills/hooks/etc.
+	writeFile(path.join(project, ".omp", "config.yml"), `extensions:\n  - "${ext}"\n`);
+
+	const [skills, commands, rules, prompts, hooks, tools, mcps] = await Promise.all([
+		loadFromPlugin<{ name: string }>(skillCapability.id, ctx()),
+		loadFromPlugin<{ name: string }>(slashCommandCapability.id, ctx()),
+		loadFromPlugin<{ name: string }>(ruleCapability.id, ctx()),
+		loadFromPlugin<{ name: string }>(promptCapability.id, ctx()),
+		loadFromPlugin<{ name: string; type: "pre" | "post" }>(hookCapability.id, ctx()),
+		loadFromPlugin<{ name: string }>(toolCapability.id, ctx()),
+		loadFromPlugin<{ name: string; command?: string }>(mcpCapability.id, ctx()),
+	]);
+
+	expect(skills.map(s => s.name)).toContain("my-skill");
+	expect(commands.map(c => c.name)).toContain("greet");
+	expect(rules.map(r => r.name)).toContain("style");
+	expect(prompts.map(p => p.name)).toContain("review");
+	expect(hooks.some(h => h.name === "bash.sh" && h.type === "pre")).toBe(true);
+	expect(tools.map(t => t.name)).toEqual(expect.arrayContaining(["wcount", "deep-tool"]));
+	expect(mcps.find(m => m.name === "lsp")?.command).toBe("lsp-server");
+});
+
+test("user config.yaml#extensions feeds sub-discovery", async () => {
+	// User scope also honors the legacy-compatible `config.yaml` filename.
+	writeFile(path.join(home, ".omp", "agent", "config.yaml"), `extensions:\n  - "${ext}"\n`);
+
+	const skills = await loadFromPlugin<{ name: string }>(skillCapability.id, ctx());
+	expect(skills.map(s => s.name)).toContain("my-skill");
+});
+
+test("config.yml and settings.json naming the same package dedup to one root", async () => {
+	// Both surfaces feed the module loader; keeping two spellings would
+	// otherwise double-count the package. First-seen-wins dedup collapses them.
+	writeFile(path.join(project, ".omp", "config.yml"), `extensions:\n  - "${ext}"\n`);
+	writeFile(path.join(project, ".omp", "settings.json"), JSON.stringify({ extensions: [ext] }));
+
+	const roots = await listOmpExtensionRoots(ctx());
+	expect(roots.map(r => r.path)).toEqual([ext]);
+});
+
 test("`--extension` CLI injection is wired through the same provider", async () => {
 	// Empty settings on disk; rely purely on CLI injection.
 	injectOmpExtensionCliRoots([ext], home, project);
