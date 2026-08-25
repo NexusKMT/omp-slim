@@ -480,6 +480,16 @@ export class AgentSession {
 	/** Per-session `CUT`/`PASTE` clipboard register shared across edit calls. */
 	editClipboard?: Clipboard;
 
+	/**
+	 * Effective `extensions` setting for this session, read live from its own
+	 * {@link settings} so post-startup capability reloads honor overlays and
+	 * runtime overrides (and survive settings reloads). Session-local — never
+	 * the process-global singleton — so concurrent sessions stay isolated.
+	 */
+	get configuredExtensionPaths(): readonly string[] {
+		return this.settings.get("extensions") ?? [];
+	}
+
 	#powerAssertion: MacOSPowerAssertion | undefined;
 
 	readonly configWarnings: string[] = [];

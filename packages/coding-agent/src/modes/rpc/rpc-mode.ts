@@ -986,7 +986,9 @@ export async function runRpcMode(
 		clearPluginRootsAndCaches(projectPath ? [projectPath] : undefined);
 		resetCapabilities();
 		await session.refreshSkills();
-		session.setSlashCommands(await loadSlashCommands({ cwd }));
+		session.setSlashCommands(
+			await loadSlashCommands({ cwd, configuredExtensionPaths: session.configuredExtensionPaths }),
+		);
 		await emitAvailableCommandsUpdate();
 	};
 	const emitAvailableCommandsUpdate = async () => {

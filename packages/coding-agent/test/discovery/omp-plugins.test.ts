@@ -16,7 +16,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getCapability } from "@oh-my-pi/pi-coding-agent/capability";
+import { getCapability, loadCapability } from "@oh-my-pi/pi-coding-agent/capability";
 import { clearCache } from "@oh-my-pi/pi-coding-agent/capability/fs";
 import { hookCapability } from "@oh-my-pi/pi-coding-agent/capability/hook";
 import { mcpCapability } from "@oh-my-pi/pi-coding-agent/capability/mcp";
@@ -354,6 +354,24 @@ test("concurrent scopes snapshot their own effective extensions (no cross-sessio
 
 	expect(firstRoots.map(root => root.path)).toEqual([firstExt]);
 	expect(secondRoots.map(root => root.path)).toEqual([secondExt]);
+});
+
+test("loadCapability configuredExtensionPaths surfaces override extensions outside any scope (#9769)", async () => {
+	// refreshSkills / slash-command reloads run outside the construction-time
+	// invocation scope. The effective extensions must arrive via the explicit
+	// option so overlay/override extensions survive; omitting it falls back to
+	// the (empty) persisted config on disk.
+	const overrideExt = path.join(tempDir, "runtime-override-extension");
+	buildExtensionPackage(overrideExt, "runtime-override-skill");
+
+	const withOption = await loadCapability<{ name: string }>(skillCapability.id, {
+		cwd: project,
+		configuredExtensionPaths: [overrideExt],
+	});
+	expect(withOption.items.map(skill => skill.name)).toContain("runtime-override-skill");
+
+	const withoutOption = await loadCapability<{ name: string }>(skillCapability.id, { cwd: project });
+	expect(withoutOption.items.map(skill => skill.name)).not.toContain("runtime-override-skill");
 });
 
 test("file-extension entrypoints contribute zero sub-surface (the file has no siblings to scan)", async () => {

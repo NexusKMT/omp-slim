@@ -82,6 +82,13 @@ export interface LoadOptions<T = unknown> {
 	/** Explicit disabled extension IDs to apply instead of settings. */
 	disabledExtensions?: string[];
 	/**
+	 * Effective `extensions` setting for this load, forwarded to
+	 * {@link LoadContext.configuredExtensionPaths}. Post-startup reloads (e.g.
+	 * `refreshSkills`) MUST pass their live session value so overlay/override
+	 * extensions survive outside the construction-time invocation scope.
+	 */
+	configuredExtensionPaths?: readonly string[];
+	/**
 	 * Drop items before deduplication as if they never existed (e.g. scope
 	 * exclusions). A dropped item neither survives nor claims its dedupe key,
 	 * so it cannot shadow anything. Receives the item with its attached

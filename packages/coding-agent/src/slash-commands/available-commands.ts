@@ -24,13 +24,15 @@ export interface AvailableCommandsSession {
 	readonly mcpPromptCommands?: ReadonlyArray<LoadedCustomCommand>;
 	readonly skills: ReadonlyArray<Skill>;
 	readonly skillsSettings?: SkillsSettings;
+	readonly configuredExtensionPaths?: readonly string[];
 	setSlashCommands(slashCommands: FileSlashCommand[]): void;
 	sessionManager: { getCwd(): string };
 }
 
 export async function buildAvailableSlashCommands(
 	session: AvailableCommandsSession,
-	loadFileCommands: (cwd: string) => Promise<FileSlashCommand[]> = cwd => loadSlashCommands({ cwd }),
+	loadFileCommands: (cwd: string) => Promise<FileSlashCommand[]> = cwd =>
+		loadSlashCommands({ cwd, configuredExtensionPaths: session.configuredExtensionPaths }),
 ): Promise<InternalAvailableSlashCommand[]> {
 	const commands: InternalAvailableSlashCommand[] = [];
 	const seenNames = new Set<string>();

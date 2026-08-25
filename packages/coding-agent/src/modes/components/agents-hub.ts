@@ -805,7 +805,7 @@ export class AgentsHubComponent implements Component {
 		const frontmatter = YAML.stringify({ name: spec.identifier, description: spec.whenToUse }, null, 2).trimEnd();
 		const content = `---\n${frontmatter}\n---\n\n${spec.systemPrompt.trim()}\n`;
 		await Bun.write(filePath, content);
-		await refreshAgentDiscovery(this.#cwd);
+		await refreshAgentDiscovery(this.#cwd, this.#settings.get("extensions"));
 		this.#clearCreateFlow();
 		this.#notice = `Created agent ${spec.identifier} at ${shortenPath(filePath)}`;
 		await this.#reload();

@@ -1183,6 +1183,7 @@ export class SessionTools {
 				...skillsSettings,
 				cwd: this.#host.sessionManager.getCwd(),
 				disabledExtensions: this.#host.settings.get("disabledExtensions") ?? [],
+				configuredExtensionPaths: this.#host.settings.get("extensions") ?? [],
 			});
 			this.#skills = discovered.skills;
 			this.#skillWarnings = discovered.warnings;

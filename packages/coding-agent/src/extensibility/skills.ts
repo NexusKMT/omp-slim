@@ -120,6 +120,12 @@ export async function loadSkillsFromDir(options: LoadSkillsFromDirOptions): Prom
 export interface LoadSkillsOptions extends SkillsSettings {
 	/** Working directory for project-local skills. Default: getProjectDir() */
 	cwd?: string;
+	/**
+	 * Effective `extensions` setting. Post-startup reloads pass their live
+	 * session value so overlay/override extension skills survive outside the
+	 * construction-time invocation scope.
+	 */
+	configuredExtensionPaths?: readonly string[];
 }
 
 /**
@@ -141,6 +147,7 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 		ignoredSkills = [],
 		includeSkills = [],
 		disabledExtensions = [],
+		configuredExtensionPaths,
 	} = options;
 
 	// Early return if skills are disabled
@@ -175,7 +182,11 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 	}
 
 	// Use capability API to load all skills
-	const result = await loadCapability<CapabilitySkill>(skillCapability.id, { cwd, disabledExtensions });
+	const result = await loadCapability<CapabilitySkill>(skillCapability.id, {
+		cwd,
+		disabledExtensions,
+		configuredExtensionPaths,
+	});
 
 	const skillMap = new Map<string, Skill>();
 	const realPathSet = new Set<string>();

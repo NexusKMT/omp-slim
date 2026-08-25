@@ -456,7 +456,7 @@ const discoveryMemo = new Map<string, Promise<DiscoveryResult>>();
 const discoverySnapshots = new Map<string, AgentDefinition[]>();
 let discoveryMemoFn: typeof discoverAgents | undefined;
 
-function discoverAgentsForCreate(cwd: string): Promise<DiscoveryResult> {
+function discoverAgentsForCreate(cwd: string, configuredExtensionPaths?: readonly string[]): Promise<DiscoveryResult> {
 	const fn = discoverAgents;
 	if (discoveryMemoFn !== fn) {
 		discoveryMemoFn = fn;
@@ -466,7 +466,7 @@ function discoverAgentsForCreate(cwd: string): Promise<DiscoveryResult> {
 	const key = path.resolve(cwd);
 	let pending = discoveryMemo.get(key);
 	if (!pending) {
-		pending = fn(cwd);
+		pending = fn(cwd, undefined, configuredExtensionPaths);
 		discoveryMemo.set(key, pending);
 		pending.catch(() => {
 			if (discoveryMemo.get(key) === pending) discoveryMemo.delete(key);
@@ -476,10 +476,10 @@ function discoverAgentsForCreate(cwd: string): Promise<DiscoveryResult> {
 }
 
 /** Rescan one cwd and publish its definitions to existing and future task tools. */
-export async function refreshAgentDiscovery(cwd: string): Promise<void> {
+export async function refreshAgentDiscovery(cwd: string, configuredExtensionPaths?: readonly string[]): Promise<void> {
 	const key = path.resolve(cwd);
 	discoveryMemo.delete(key);
-	const pending = discoverAgentsForCreate(cwd);
+	const pending = discoverAgentsForCreate(cwd, configuredExtensionPaths);
 	const { agents } = await pending;
 	if (discoveryMemo.get(key) === pending) {
 		discoverySnapshots.set(key, agents);
@@ -667,7 +667,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	 * Create a TaskTool instance with async agent discovery.
 	 */
 	static async create(session: ToolSession): Promise<TaskTool> {
-		const { agents } = await discoverAgentsForCreate(session.cwd);
+		const { agents } = await discoverAgentsForCreate(session.cwd, session.settings.get("extensions") ?? []);
 		return new TaskTool(session, agents);
 	}
 

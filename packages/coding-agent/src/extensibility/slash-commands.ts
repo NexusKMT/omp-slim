@@ -57,6 +57,12 @@ function parseCommandTemplate(
 export interface LoadSlashCommandsOptions {
 	/** Working directory for project-local commands. Default: getProjectDir() */
 	cwd?: string;
+	/**
+	 * Effective `extensions` setting. Post-startup reloads pass their live
+	 * session value so overlay/override extension commands survive outside the
+	 * construction-time invocation scope.
+	 */
+	configuredExtensionPaths?: readonly string[];
 }
 
 /**
@@ -64,7 +70,10 @@ export interface LoadSlashCommandsOptions {
  * Loads from all registered providers (builtin, user, project).
  */
 export async function loadSlashCommands(options: LoadSlashCommandsOptions = {}): Promise<FileSlashCommand[]> {
-	const result = await loadCapability<SlashCommand>(slashCommandCapability.id, { cwd: options.cwd });
+	const result = await loadCapability<SlashCommand>(slashCommandCapability.id, {
+		cwd: options.cwd,
+		configuredExtensionPaths: options.configuredExtensionPaths,
+	});
 
 	const fileCommands: FileSlashCommand[] = result.items.map(cmd => {
 		const { description, body } = parseCommandTemplate(cmd.content, {
