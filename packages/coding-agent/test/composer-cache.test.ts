@@ -10,14 +10,14 @@ import {
 	writeComposerUiCache,
 	writeComposerWelcomeCache,
 } from "@oh-my-pi/pi-coding-agent/modes/composer-cache";
-import { getAgentDir } from "@oh-my-pi/pi-utils/dirs";
+import { getComposerCacheDir } from "@oh-my-pi/pi-utils/dirs";
 
 describe("composer startup cache", () => {
 	it("round-trips per-project UI, recent-session JSONL, and LSP speculation", async () => {
 		const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-composer-cache-"));
 		const otherCwd = `${cwd}-other`;
 		const key = Bun.hash.wyhash(path.resolve(cwd)).toString(16).padStart(16, "0");
-		const cacheDir = path.join(getAgentDir(), "cache", "composer", key);
+		const cacheDir = path.join(getComposerCacheDir(), key);
 		try {
 			const preferences = { ...COMPOSER_DEFAULTS, composerShape: "rail", autocompleteMaxVisible: 7 };
 			const recentSessions = [{ name: "cached work", timeAgo: "3m ago" }];

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Exported `getComposerCacheDir` to resolve the per-project composer speculative cache directory under the XDG cache category, so the coding-agent composer startup cache honors `XDG_CACHE_HOME` like the other agent caches.
+
 ## [18.0.5] - 2026-08-25
 
 ### Added

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Fixed the composer speculative startup cache ignoring `XDG_CACHE_HOME`
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
