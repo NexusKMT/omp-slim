@@ -388,15 +388,18 @@ export class ChildProcess<In extends InMask = InMask> {
 
 	// ── Output helpers ───────────────────────────────────────────────────
 
+	async #throwIfAborted(): Promise<void> {
+		const exitReason = this.exitReason;
+		if (!exitReason?.aborted) return;
+		if (this.#terminating) await this.#terminating;
+		throw exitReason;
+	}
+
 	async text(): Promise<string> {
 		const p = this.#readStream(this.proc.stdout);
 		if (this.#nothrow) return p;
 		const [text] = await Promise.all([p, this.exitedCleanly]);
-		const exitReason = this.exitReason;
-		if (exitReason?.aborted) {
-			if (this.#terminating) await this.#terminating;
-			throw exitReason;
-		}
+		await this.#throwIfAborted();
 		return text;
 	}
 
@@ -432,6 +435,7 @@ export class ChildProcess<In extends InMask = InMask> {
 		const p = new Response(this.stdout).blob();
 		if (this.#nothrow) return p;
 		const [blob] = await Promise.all([p, this.exitedCleanly]);
+		await this.#throwIfAborted();
 		return blob;
 	}
 
