@@ -4771,18 +4771,30 @@ const YOLO_AUTO_BASE_URL = "https://yolo-auto.com/v1";
  * provider is usable when generation and first boot have no live key. The
  * flat-rate `/v1/models` response is authoritative once discovery runs.
  * The compat block mirrors the provider's documented wire surface: the API
- * speaks the Qwen chat template with `reasoning_effort` support and rejects
+ * speaks the generic chat template with `reasoning_effort` support and rejects
  * the `developer` role and `store` param.
  */
 export const YOLO_AUTO_STATIC_MODELS: readonly ModelSpec<"openai-completions">[] = [
 	{
-		id: "qwen3.8-27b",
-		name: "Qwen3.8 27B",
+		id: "deepseek-flash-v4",
+		name: "DeepSeek Flash V4",
 		api: "openai-completions",
 		provider: "yolo-auto",
 		baseUrl: YOLO_AUTO_BASE_URL,
 		reasoning: true,
 		input: ["text", "image"],
+		thinking: {
+			mode: "effort",
+			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
+			effortMap: {
+				[Effort.Minimal]: "low",
+				[Effort.Low]: "low",
+				[Effort.Medium]: "high",
+				[Effort.High]: "high",
+				[Effort.XHigh]: "max",
+				[Effort.Max]: "max",
+			},
+		},
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 131_072,
 		maxTokens: null,
@@ -4790,12 +4802,7 @@ export const YOLO_AUTO_STATIC_MODELS: readonly ModelSpec<"openai-completions">[]
 			supportsDeveloperRole: false,
 			supportsStore: false,
 			supportsReasoningEffort: true,
-			thinkingFormat: "qwen-chat-template",
-			// Yolo-Auto renders the Qwen 3.8+ chat template server-side, so the
-			// template-kwarg reasoning dialect applies even though the host is
-			// not a local backend: without this the selected effort is silently
-			// dropped and every request sends only `enable_thinking: true`.
-			qwenTemplateReasoningEffort: true,
+			thinkingFormat: "chat-template",
 		},
 	},
 ];
@@ -4833,7 +4840,7 @@ function mapYoloAutoModel(
 }
 /**
  * Yolo-Auto model manager: OpenAI-compatible chat completions at the
- * flat-rate `qwen3.8-27b` endpoint. Live `/v1/models` discovery replaces the
+ * flat-rate `deepseek-flash-v4` endpoint. Live `/v1/models` discovery replaces the
  * bundled seed once a key is stored or present in `YOLO_AUTO_API_KEY`. Models
  * the provider adds later inherit metadata (reasoning, thinking, context)
  * from the global bundled reference index, so new ids work without a per-id

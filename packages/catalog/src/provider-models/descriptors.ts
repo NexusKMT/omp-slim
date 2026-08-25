@@ -533,7 +533,7 @@ export const CATALOG_PROVIDERS = [
 	},
 	{
 		id: "yolo-auto",
-		defaultModel: "qwen3.8-27b",
+		defaultModel: "deepseek-flash-v4",
 		envVars: ["YOLO_AUTO_API_KEY"],
 		createModelManagerOptions: (config: ModelManagerConfig) => yoloAutoModelManagerOptions(config),
 		dynamicModelsAuthoritative: true,

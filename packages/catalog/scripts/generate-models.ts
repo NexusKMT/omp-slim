@@ -672,6 +672,9 @@ async function generateModels() {
 			if (
 				!fetchedKeys.has(`${model.provider}/${model.id}`) &&
 				!DISCOVERY_ONLY_PROVIDERS.has(model.provider) &&
+				// Yolo-Auto's documented static seed is the complete fallback
+				// catalog; never resurrect retired ids from the previous snapshot.
+				model.provider !== "yolo-auto" &&
 				!RETIRED_PROVIDERS.has(model.provider) &&
 				!authoritativeCatalogProviders.has(model.provider) &&
 				!authoritativeSpecialDiscoveryProviders.has(model.provider) &&
