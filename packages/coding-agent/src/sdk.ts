@@ -79,7 +79,7 @@ import "./discovery";
 import { createImageUrlServiceFromSettings } from "./blob-broker/service";
 import { wrapStreamFnWithBlobUrlFallback } from "./blob-broker/stream-fallback";
 import { initializeWithSettings } from "./discovery";
-import { withOmpExtensionRootScope } from "./discovery/omp-extension-roots";
+import { setInvocationConfiguredExtensions, withOmpExtensionRootScope } from "./discovery/omp-extension-roots";
 import { disposeAllJuliaKernelSessions, disposeJuliaKernelSessionsByOwner } from "./eval/jl/executor";
 import { disposeVmContextsByOwner } from "./eval/js/context-manager";
 import { disposeAllKernelSessions, disposeKernelSessionsByOwner } from "./eval/py/executor";
@@ -1268,6 +1268,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		options.settingsManager ??
 		logger.time("settings", Settings.init, { cwd, agentDir }));
 	logger.time("initializeWithSettings", initializeWithSettings, settings);
+	// Snapshot this session's effective `extensions` onto its invocation scope so
+	// extension sub-discovery stays isolated from other concurrent sessions'
+	// Settings instances (never the process-global singleton).
+	setInvocationConfiguredExtensions(settings.get("extensions") ?? []);
 
 	// Pin authStorage to modelRegistry.authStorage: ModelRegistry.getApiKey() routes refresh
 	// failures through that instance, so any divergent storage handed to the bridge / mcpManager

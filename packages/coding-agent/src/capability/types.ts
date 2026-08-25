@@ -17,9 +17,12 @@ export interface LoadContext {
 	/** Git repository root (directory containing .git), or null if not in a repo */
 	repoRoot: string | null;
 	/**
-	 * Effective `extensions` setting for this capability load. When present,
-	 * extension sub-discovery MUST use it instead of reconstructing settings
-	 * layers from disk.
+	 * Effective `extensions` setting supplied explicitly by a direct caller
+	 * (e.g. {@link ../task/discovery.discoverAgents}) that already holds its own
+	 * session's `Settings`. When set, extension sub-discovery uses it instead of
+	 * the invocation-scoped snapshot or the persisted config on disk. Left unset
+	 * by {@link loadCapability}; SDK sessions route their effective value through
+	 * the invocation scope so concurrent sessions stay isolated.
 	 */
 	configuredExtensionPaths?: readonly string[];
 }

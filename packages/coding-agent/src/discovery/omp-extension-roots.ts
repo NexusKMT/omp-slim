@@ -49,6 +49,14 @@ interface InvocationRootScope {
 	/** Raw SDK spellings, resolved against the LoadContext that performs discovery. */
 	paths: readonly string[];
 	mode: OmpExtensionRootMode;
+	/**
+	 * Effective `extensions` setting for the owning session, captured once its
+	 * `Settings` instance is loaded. Session-local so concurrent SDK sessions
+	 * never observe each other's configured roots. `undefined` until
+	 * {@link setInvocationConfiguredExtensions} runs; discovery then falls back
+	 * to reading the persisted config from disk.
+	 */
+	configuredExtensions?: readonly string[];
 }
 
 const invocationRootScope = new AsyncLocalStorage<InvocationRootScope>();
@@ -79,6 +87,18 @@ export function withOmpExtensionRootScope<T>(
 	callback: () => T,
 ): T {
 	return invocationRootScope.run({ paths: [...paths], mode }, callback);
+}
+
+/**
+ * Record the owning session's effective `extensions` setting on the active
+ * invocation scope so sub-discovery honors overlays and runtime overrides
+ * without reading the process-global settings singleton (which the most
+ * recently initialized session would otherwise clobber). No-op outside a
+ * {@link withOmpExtensionRootScope} callback.
+ */
+export function setInvocationConfiguredExtensions(paths: readonly string[]): void {
+	const scope = invocationRootScope.getStore();
+	if (scope) scope.configuredExtensions = [...paths];
 }
 
 /**
@@ -234,9 +254,11 @@ async function isDirectory(p: string): Promise<boolean> {
  *
  * 1. Invocation-scoped SDK roots, when present; otherwise CLI roots injected
  *    via {@link injectOmpExtensionCliRoots}
- * 2. The effective configured `extensions` array. Capability loads pass the
- *    active `Settings` value (including overlays and runtime overrides);
- *    direct callers fall back to persisted array-replacement precedence.
+ * 2. The effective configured `extensions` array. SDK sessions record their
+ *    live `Settings` value on the invocation scope via
+ *    {@link setInvocationConfiguredExtensions} (honoring overlays and runtime
+ *    overrides); scopeless callers fall back to persisted array-replacement
+ *    precedence read from disk.
  * 3. Enabled npm/link plugins installed under `<plugins>/node_modules/` (for
  *    `omp install <pkg>` / `omp plugin install` / `omp plugin link`). Marketplace
  *    installs are loaded by the `claude-plugins` provider and are excluded here.
@@ -259,14 +281,16 @@ export async function listOmpExtensionRoots(ctx: LoadContext): Promise<OmpExtens
 			readConfiguredExtensions(ctx),
 			listInstalledPluginRoots(ctx),
 		]);
+		// Prefer the session's effective `extensions` (explicit ctx value, else
+		// the invocation-scoped snapshot) so overlays and runtime overrides win;
+		// scopeless callers fall back to the persisted config read from disk.
+		const effective = ctx.configuredExtensionPaths ?? scopedRoots?.configuredExtensions;
 		const configured =
-			ctx.configuredExtensionPaths !== undefined
+			effective !== undefined
 				? {
-						entries: [...ctx.configuredExtensionPaths],
+						entries: [...effective],
 						level:
-							persisted && Bun.deepEquals(ctx.configuredExtensionPaths, persisted.entries)
-								? persisted.level
-								: ("user" as const),
+							persisted && Bun.deepEquals(effective, persisted.entries) ? persisted.level : ("user" as const),
 					}
 				: persisted;
 		candidates = [

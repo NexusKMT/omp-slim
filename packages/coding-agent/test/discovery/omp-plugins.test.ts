@@ -32,6 +32,7 @@ import {
 	clearOmpExtensionCliRoots,
 	injectOmpExtensionCliRoots,
 	listOmpExtensionRoots,
+	setInvocationConfiguredExtensions,
 	withOmpExtensionRootScope,
 } from "@oh-my-pi/pi-coding-agent/discovery/omp-extension-roots";
 import { discoverExtensionPaths } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
@@ -323,6 +324,36 @@ test("invocation scopes isolate concurrent SDK roots and merge ambient roots onl
 	const mergedRoots = await withOmpExtensionRootScope([ext], "merge", () => listOmpExtensionRoots(ctx()));
 	expect(mergedRoots.map(root => root.path)).toEqual(expect.arrayContaining([ext, projectExt, installed]));
 	expect(mergedRoots.map(root => root.path)).not.toContain(staleCli);
+});
+
+test("concurrent scopes snapshot their own effective extensions (no cross-session leak)", async () => {
+	// Reproduces the P1 concurrency hazard: two SDK sessions with different
+	// effective `extensions` must each discover only their own roots, even when
+	// their capability loads interleave during startup.
+	const firstExt = path.join(tempDir, "first-session-extension");
+	const secondExt = path.join(tempDir, "second-session-extension");
+	buildExtensionPackage(firstExt, "first-session-skill");
+	buildExtensionPackage(secondExt, "second-session-skill");
+
+	const firstEntered = Promise.withResolvers<void>();
+	const secondEntered = Promise.withResolvers<void>();
+	const [firstRoots, secondRoots] = await Promise.all([
+		withOmpExtensionRootScope([], "merge", async () => {
+			setInvocationConfiguredExtensions([firstExt]);
+			firstEntered.resolve();
+			await secondEntered.promise;
+			return listOmpExtensionRoots(ctx());
+		}),
+		withOmpExtensionRootScope([], "merge", async () => {
+			setInvocationConfiguredExtensions([secondExt]);
+			secondEntered.resolve();
+			await firstEntered.promise;
+			return listOmpExtensionRoots(ctx());
+		}),
+	]);
+
+	expect(firstRoots.map(root => root.path)).toEqual([firstExt]);
+	expect(secondRoots.map(root => root.path)).toEqual([secondExt]);
 });
 
 test("file-extension entrypoints contribute zero sub-surface (the file has no siblings to scan)", async () => {
