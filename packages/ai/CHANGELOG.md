@@ -10,6 +10,7 @@
 - Fixed Codex WebSocket `slow_down` and rate-limit rejections discarding a valid `previous_response_id` continuation and forcing retries to replay the full context, including when throttling interrupts streamed output.
 - Fixed Codex WebSocket continuations replaying full context whenever a turn toggled Fast mode, while preserving strict resets for model, instructions, tools, reasoning, verbosity, and response format changes.
 - OMP no longer exits during Codex WebSocket cleanup if Bun throws `ERR_SOCKET_CLOSED` for a socket with an open state.
+- Fixed OpenAI-compatible streaming usage parsing to read Vertex/Gemini cache hits reported in `cachedContentTokenCount`, so `cacheRead` and derived cost reflect prompt caching through gateways fronting Vertex AI ([#9713](https://github.com/can1357/oh-my-pi/issues/9713)).
 
 ## [18.0.4] - 2026-08-24
 
