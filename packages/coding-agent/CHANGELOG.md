@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed imported and legacy sessions with missing assistant usage metadata dropping RPC lifecycle events ([#9743](https://github.com/can1357/oh-my-pi/issues/9743)).
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
