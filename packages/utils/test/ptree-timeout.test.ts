@@ -58,7 +58,7 @@ describe("ptree timeout", () => {
 	});
 
 	it.skipIf(process.platform !== "linux")("falls back after the first libc soname is unavailable", async () => {
-		const script = createLinuxSubreaperScript(["libc.so.omp-missing", "libc.so.6"]);
+		const script = createLinuxSubreaperScript(["libc.so.omp-missing", "libc.so.6", "libc.so"]);
 		const child = Bun.spawn([process.execPath, "-e", script], {
 			env: {
 				...Bun.env,
