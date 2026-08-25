@@ -36,6 +36,7 @@
 - Fixed fast tool completions leaving a permanent running summary that blocked transcript retirement and squeezed later tool output.
 - Fixed `omp git` hunk navigation (`alt+↓`/`alt+↑`) appearing to do nothing while the file sidebar had focus: the diff cursor band now stays visible (dimmed) when the pane is unfocused.
 - Fixed the git TUI sidebar jumping back to the top of the file list after staging or unstaging a file; selection now stays on the nearest remaining row
+- Fixed large tool payloads being persisted twice on disk when an `eval` cell called an MCP tool: the spilled result no longer re-embeds the full `details.rawContent`, so the dedicated MCP artifact sidecar is the single durable copy ([#9687](https://github.com/can1357/oh-my-pi/issues/9687)).
 
 ## [18.0.4] - 2026-08-24
 

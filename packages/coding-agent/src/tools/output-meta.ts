@@ -794,6 +794,17 @@ async function spillLargeResultToArtifact(
 	const newMeta: OutputMeta = { ...(existingMeta ?? {}), truncation: truncationMeta };
 	const newDetails = { ...(result.details ?? {}), meta: newMeta };
 
+	// The full payload now lives in the spilled artifact. Some tools duplicate
+	// that same text verbatim inside `details` — MCP results carry a second copy
+	// under `details.rawContent` (mcp/tool-bridge.ts). Left in place, every
+	// consumer that serializes `details` re-persists the whole payload: the eval
+	// bridge forwards it into `jsonOutputs`, which lands byte-for-byte in both the
+	// main session JSONL and the `.eval.log` sidecar alongside the dedicated MCP
+	// sidecar. Drop it so the artifact stays the single durable copy. See #9687.
+	if (newDetails.rawContent !== undefined) {
+		delete newDetails.rawContent;
+	}
+
 	return { ...result, content: newContent, details: newDetails };
 }
 

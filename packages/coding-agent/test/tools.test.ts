@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as url from "node:url";
 import * as zlib from "node:zlib";
-import type { AgentToolContext } from "@oh-my-pi/pi-agent-core";
+import type { AgentTool, AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
 import { DEFAULT_BASH_INTERCEPTOR_RULES, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { EditTool } from "@oh-my-pi/pi-coding-agent/edit";
@@ -965,6 +965,63 @@ describe("Coding Agent Tools", () => {
 				);
 				expect(getTextOutput(artifactResult)).toContain(line);
 				expect(saveArtifact).not.toHaveBeenCalled();
+			} finally {
+				await spillManager.close();
+			}
+		});
+
+		it("should drop a spilled result's duplicated details.rawContent (#9687)", async () => {
+			// MCP results carry a verbatim second copy of their content text under
+			// `details.rawContent`. When the spill truncates the content and writes
+			// the dedicated MCP sidecar, that raw copy must not survive on `details`
+			// — otherwise every consumer that serializes it (eval's jsonOutputs →
+			// main JSONL + `.eval.log`) re-persists the whole payload byte-for-byte.
+			const spillSettings = Settings.isolated({
+				"tools.artifactSpillThreshold": 20,
+				"tools.artifactTailBytes": 64,
+				"tools.artifactTailLines": 10,
+				"tools.artifactHeadBytes": 64,
+			});
+			const spillManager = SessionManager.create(testDir, path.join(testDir, "mcp-spill-sessions"));
+			await spillManager.ensureOnDisk();
+			const context = {
+				...createTestToolContext(["mcp__server__tool"]),
+				settings: spillSettings,
+				sessionManager: spillManager,
+			};
+
+			const payload = "SEARCH RESULT LINE\n".repeat(4000);
+			const mcpTool = {
+				name: "mcp__server__tool",
+				description: "fake mcp tool returning a large structured payload",
+				async execute() {
+					return {
+						content: [{ type: "text" as const, text: payload }],
+						details: {
+							serverName: "server",
+							mcpToolName: "tool",
+							rawContent: [{ type: "text", text: payload }],
+						},
+					};
+				},
+			};
+
+			try {
+				const wrapped = wrapToolWithMetaNotice(mcpTool as unknown as AgentTool);
+				const result = await wrapped.execute("mcp-call", {}, undefined, undefined, context);
+
+				const truncation = result.details?.meta?.truncation;
+				expect(truncation?.artifactId).toBeDefined();
+				expect(Buffer.byteLength(getTextOutput(result), "utf-8")).toBeLessThan(Buffer.byteLength(payload, "utf-8"));
+
+				// The full payload lives once, in the artifact — not re-embedded in details.
+				expect(result.details?.rawContent).toBeUndefined();
+
+				const artifactPath = path.join(
+					spillManager.getArtifactsDir()!,
+					`${truncation.artifactId}.mcp__server__tool.log`,
+				);
+				expect(await Bun.file(artifactPath).text()).toBe(payload);
 			} finally {
 				await spillManager.close();
 			}
