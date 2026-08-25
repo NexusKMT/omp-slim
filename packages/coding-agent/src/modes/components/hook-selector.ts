@@ -633,6 +633,22 @@ export class HookSelectorComponent extends OverlayPanel {
 		return true;
 	}
 
+	/** Jump to (and, for single-select menus, immediately confirm) the option at
+	 *  1-based digit `1`–`9`. Skipped while type-to-search is active so digits
+	 *  stay searchable, and for out-of-range or disabled targets. Checkbox menus
+	 *  only move the cursor — confirmation stays on `enter`. Returns whether the
+	 *  keypress was consumed. */
+	#handleQuickSelect(keyData: string): boolean {
+		if (this.#isSearchEnabled()) return false;
+		if (keyData.length !== 1 || keyData < "1" || keyData > "9") return false;
+		const target = this.#filteredOptions[Number(keyData) - 1];
+		if (!target || this.#isDisabled(target.index)) return true;
+		this.#selectedIndex = Number(keyData) - 1;
+		this.#updateList();
+		if (this.#selectionMarker !== "checkbox") this.#onSelectCallback(target.option.label);
+		return true;
+	}
+
 	handleInput(keyData: string): void {
 		if (this.#countdown) {
 			this.#countdown.reset();
@@ -645,6 +661,10 @@ export class HookSelectorComponent extends OverlayPanel {
 		}
 
 		if (this.#handleSearchInput(keyData)) {
+			return;
+		}
+
+		if (this.#handleQuickSelect(keyData)) {
 			return;
 		}
 
