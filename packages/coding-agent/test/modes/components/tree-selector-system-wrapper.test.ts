@@ -75,6 +75,19 @@ describe("TreeSelectorComponent system-wrapper message rendering", () => {
 		expect(rendered).not.toContain("reason=");
 	});
 
+	it("strips a system wrapper whose quoted attributes contain greater-than signs", () => {
+		const rendered = render(
+			customMessageTree(
+				"ttsr-interrupt",
+				'<system-interrupt reason="rule_violation" rule="coverage > 80%" path="rules/watch>dog.md">\nOutput interrupted.\n</system-interrupt>',
+			),
+		);
+
+		expect(rendered).toContain("[ttsr-interrupt]: Output interrupted.");
+		expect(rendered).not.toContain("coverage > 80%");
+		expect(rendered).not.toContain("watch>dog.md");
+	});
+
 	it("preserves system tags contained in an async-result payload", () => {
 		const rendered = render(
 			customMessageTree(

@@ -112,7 +112,7 @@ function advisorTreeDisplay(details: unknown): AdvisorTreeDisplay {
  * Nested system tags belong to the recorded payload and remain visible.
  */
 function stripSystemWrapperTags(content: string): string {
-	const match = content.match(/^\s*<(system-[\w-]+)(?:\s[^>]*)?>\s*([\s\S]*?)\s*<\/\1>\s*$/i);
+	const match = content.match(/^\s*<(system-[\w-]+)(?:\s+(?:[^"'<>]|"[^"]*"|'[^']*')*)?>\s*([\s\S]*?)\s*<\/\1>\s*$/i);
 	return match?.[2] ?? content;
 }
 
