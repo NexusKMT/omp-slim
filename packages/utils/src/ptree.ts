@@ -431,29 +431,63 @@ export class ChildProcess<In extends InMask = InMask> {
 		return out + dec.decode();
 	}
 
-	async blob(): Promise<Blob> {
-		const p = new Response(this.stdout).blob();
+	async #readBytes(): Promise<Uint8Array> {
+		const reader = this.proc.stdout.getReader();
+		this.#openPipeReaders++;
+		const chunks: Uint8Array[] = [];
+		let length = 0;
+		try {
+			for (;;) {
+				const chunk = await Promise.race([
+					reader.read().then(r => ({ cutoff: false as const, r })),
+					this.#drainCutoff.then(() => ({ cutoff: true as const })),
+				]);
+				if (chunk.cutoff) {
+					await reader.cancel().catch(() => {});
+					break;
+				}
+				if (chunk.r.done) break;
+				chunks.push(chunk.r.value);
+				length += chunk.r.value.byteLength;
+			}
+		} catch {
+			// A cancelled or failed read keeps whatever was already collected.
+		} finally {
+			this.#openPipeReaders--;
+			reader.releaseLock();
+		}
+
+		const bytes = new Uint8Array(length);
+		let offset = 0;
+		for (const chunk of chunks) {
+			bytes.set(chunk, offset);
+			offset += chunk.byteLength;
+		}
+		return bytes;
+	}
+
+	async #readOutputBytes(waitForCleanExit = false): Promise<Uint8Array> {
+		const p = this.#readBytes();
 		if (this.#nothrow) return p;
-		const [blob] = await Promise.all([p, this.exitedCleanly]);
+		const bytes = waitForCleanExit ? (await Promise.all([p, this.exitedCleanly]))[0] : await p;
 		await this.#throwIfAborted();
-		return blob;
+		return bytes;
+	}
+
+	async blob(): Promise<Blob> {
+		return new Blob([await this.#readOutputBytes(true)]);
 	}
 
 	async json(): Promise<unknown> {
-		return new Response(this.stdout).json();
+		return JSON.parse(new TextDecoder().decode(await this.#readOutputBytes()));
 	}
 
 	async arrayBuffer(): Promise<ArrayBuffer> {
-		return new Response(this.stdout).arrayBuffer();
+		return (await this.#readOutputBytes()).buffer as ArrayBuffer;
 	}
 
 	async bytes(): Promise<Uint8Array> {
-		// Bun's `Response(stream).bytes()` returns the raw `ArrayBuffer` once the
-		// stream emits more than one chunk (subprocess stdout chunks past ~128 KB).
-		// Normalize at the contract boundary so every caller — SSH read,
-		// `decodeUtf8Text`, callers slicing with `.subarray` — sees a `Uint8Array`.
-		const body = (await new Response(this.stdout).bytes()) as Uint8Array | ArrayBuffer;
-		return body instanceof Uint8Array ? body : new Uint8Array(body);
+		return this.#readOutputBytes();
 	}
 
 	// ── Wait ─────────────────────────────────────────────────────────────

@@ -191,20 +191,25 @@ ${createLinuxSubreaperScript()}
 		expect(threw).toBeInstanceOf(TimeoutError);
 	});
 
-	it.skipIf(process.platform === "win32")("rejects blob when the deadline fires after the root exits", async () => {
-		using child = spawn(["/bin/sh", "-c", "sleep 30 & printf token"], {
-			detached: true,
-			timeout: 250,
-		});
-		let threw: unknown;
-		try {
-			await child.blob();
-		} catch (error) {
-			threw = error;
-		}
+	for (const outputMethod of ["blob", "json", "arrayBuffer", "bytes"] as const) {
+		it.skipIf(process.platform === "win32")(
+			`rejects ${outputMethod} when the deadline fires after the root exits`,
+			async () => {
+				using child = spawn(["/bin/sh", "-c", `sleep 30 2>/dev/null & printf '"token"'`], {
+					detached: true,
+					timeout: 250,
+				});
+				let threw: unknown;
+				try {
+					await child[outputMethod]();
+				} catch (error) {
+					threw = error;
+				}
 
-		expect(threw).toBeInstanceOf(TimeoutError);
-	});
+				expect(threw).toBeInstanceOf(TimeoutError);
+			},
+		);
+	}
 
 	it.skipIf(process.platform === "win32")("keeps reading inherited stdout until EOF without a timeout", async () => {
 		const result = await exec(["/bin/sh", "-c", "(sleep .2; printf token) &"], {
