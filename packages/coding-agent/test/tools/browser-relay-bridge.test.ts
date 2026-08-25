@@ -384,4 +384,40 @@ describe("RelayBridge Runtime sessions", () => {
 			),
 		).toEqual([]);
 	});
+
+	it("still fans root Runtime events out to a session that never enabled the domain", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		// omp's own patched-puppeteer client pull-acquires contexts and never
+		// sends Runtime.enable, yet still waits on executionContextCreated.
+		const sessionId = await attachPage(bridge, ext, cdp, connId, 1);
+
+		const context = { context: { id: 42, uniqueId: "context-42" } };
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "cdpEvent", tabId: 1, method: "Runtime.executionContextCreated", params: context }),
+		);
+
+		const received = cdp.messages.filter(
+			message => message.sessionId === sessionId && message.method === "Runtime.executionContextCreated",
+		);
+		expect(received.map(message => message.params)).toEqual([context]);
+
+		// An explicit disable silences the same session — a later re-emit is dropped.
+		bridge.cdpMessage(connId, JSON.stringify({ id: ++msgSeq, sessionId, method: "Runtime.disable" }));
+		await flush();
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "cdpEvent", tabId: 1, method: "Runtime.executionContextCreated", params: context }),
+		);
+		expect(
+			cdp.messages.filter(
+				message => message.sessionId === sessionId && message.method === "Runtime.executionContextCreated",
+			),
+		).toEqual(received);
+	});
 });

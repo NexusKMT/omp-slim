@@ -36,10 +36,21 @@ interface CdpCommand {
 	sessionId?: string;
 }
 
+/**
+ * Per-pseudo-session Runtime domain state.
+ * - `default`: never toggled Runtime — still receives the relay's legacy
+ *   root-event fan-out, so omp's own patched-puppeteer client (which
+ *   pull-acquires contexts and never sends `Runtime.enable`) keeps getting
+ *   `Runtime.executionContextCreated`.
+ * - `enabled`: ran `Runtime.enable`; gets the existing-context replay.
+ * - `disabled`: explicitly ran `Runtime.disable`; silenced until it re-enables.
+ */
+type RuntimeState = "default" | "enabled" | "disabled";
+
 interface SessionRef {
 	kind: "tab" | "page";
 	tabId: number;
-	runtimeEnabled: boolean;
+	runtimeState: RuntimeState;
 	/** Context ids already announced to this pseudo-session. */
 	readonly runtimeContexts: Set<number>;
 }
@@ -406,7 +417,7 @@ export class RelayBridge {
 		ref: SessionRef,
 	): Promise<void> {
 		if (msg.method === "Runtime.disable") {
-			ref.runtimeEnabled = false;
+			ref.runtimeState = "disabled";
 			ref.runtimeContexts.clear();
 			this.#reply(conn, msg, {});
 			return;
@@ -415,26 +426,29 @@ export class RelayBridge {
 			await this.#forwardToTab(conn, msg, ref.tabId, undefined);
 			return;
 		}
-		if (ref.runtimeEnabled) {
+		if (ref.runtimeState === "enabled") {
 			this.#reply(conn, msg, {});
 			return;
 		}
 
-		ref.runtimeEnabled = true;
+		const prev = ref.runtimeState;
+		ref.runtimeState = "enabled";
 		const tab = this.#tabs.get(ref.tabId);
 		if (!tab) {
-			ref.runtimeEnabled = false;
+			ref.runtimeState = prev;
 			this.#replyError(conn, msg, `No tab with id ${ref.tabId}`);
 			return;
 		}
 		try {
 			await this.#ensureRuntimeEnabled(tab);
-			if (conn.sessions.get(sessionId) === ref && ref.runtimeEnabled) {
+			// A disable pipelined behind this enable may have resolved while the
+			// root RPC was in flight; only replay if we still own an enabled ref.
+			if (conn.sessions.get(sessionId) === ref && ref.runtimeState === "enabled") {
 				this.#replayRuntimeContexts(conn, sessionId, ref, tab);
 			}
 			this.#reply(conn, msg, {});
 		} catch (err) {
-			ref.runtimeEnabled = false;
+			if (ref.runtimeState === "enabled") ref.runtimeState = prev;
 			ref.runtimeContexts.clear();
 			this.#replyError(conn, msg, err instanceof Error ? err.message : String(err));
 		}
@@ -747,7 +761,9 @@ export class RelayBridge {
 					if (ref.kind !== "page" || ref.tabId !== tabId) continue;
 					if (destroyedContextId !== undefined) ref.runtimeContexts.delete(destroyedContextId);
 					if (method === "Runtime.executionContextsCleared") ref.runtimeContexts.clear();
-					if (!ref.runtimeEnabled) continue;
+					// `default` sessions never enabled Runtime but still get the
+					// legacy fan-out; only an explicit `Runtime.disable` silences one.
+					if (ref.runtimeState === "disabled") continue;
 					if (createdContextId !== undefined) {
 						if (ref.runtimeContexts.has(createdContextId)) continue;
 						ref.runtimeContexts.add(createdContextId);
@@ -944,7 +960,7 @@ export class RelayBridge {
 
 	#mintSession(conn: CdpConnection, kind: "tab" | "page", tabId: number): string {
 		const sessionId = `S${kind === "tab" ? "T" : "P"}${tabId}.${conn.id}.${++this.#sessionSeq}`;
-		conn.sessions.set(sessionId, { kind, tabId, runtimeEnabled: false, runtimeContexts: new Set() });
+		conn.sessions.set(sessionId, { kind, tabId, runtimeState: "default", runtimeContexts: new Set() });
 		return sessionId;
 	}
 
