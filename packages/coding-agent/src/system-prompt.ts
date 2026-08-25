@@ -282,6 +282,14 @@ function getTerminalName(): string | undefined {
 	return term ?? undefined;
 }
 
+/**
+ * On-disk cache schema version. Bumped when detection logic changes so stored
+ * selections from an older parser are rejected and re-probed instead of served
+ * indefinitely — e.g. the Windows virtual-adapter filtering added for #9675,
+ * which would otherwise keep returning a cached virtual GPU after upgrade.
+ */
+const GPU_CACHE_VERSION = 1;
+
 /** Cached GPU probe result. */
 interface GpuCache {
 	gpu: string | null;
@@ -291,7 +299,7 @@ async function loadGpuCache(): Promise<GpuCache | null> {
 	try {
 		const cachePath = getGpuCachePath();
 		const content = await Bun.file(cachePath).json();
-		if (content && typeof content === "object" && "gpu" in content) {
+		if (content && typeof content === "object" && content.version === GPU_CACHE_VERSION && "gpu" in content) {
 			const gpu = content.gpu;
 			return { gpu: typeof gpu === "string" ? gpu : null };
 		}
@@ -304,7 +312,7 @@ async function loadGpuCache(): Promise<GpuCache | null> {
 async function saveGpuCache(info: GpuCache): Promise<void> {
 	try {
 		const cachePath = getGpuCachePath();
-		await Bun.write(cachePath, JSON.stringify(info, null, "\t"));
+		await Bun.write(cachePath, JSON.stringify({ version: GPU_CACHE_VERSION, gpu: info.gpu }, null, "\t"));
 	} catch {
 		// Silently ignore cache write failures
 	}

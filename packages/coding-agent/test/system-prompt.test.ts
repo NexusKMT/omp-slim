@@ -18,6 +18,7 @@ async function runProbeScenario(options: {
 	holdStdoutOpen?: boolean;
 	descendantHoldsStdout?: boolean;
 	validOutput?: string;
+	legacyCache?: string;
 }): Promise<ProbeRunResult> {
 	const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gpu-probe-"));
 	try {
@@ -32,6 +33,9 @@ async function runProbeScenario(options: {
 			'#!/usr/bin/env sh\nprintf x >> "$OMP_GPU_PROBE_COUNT"\nif [ -n "$OMP_GPU_PROBE_VALID_OUTPUT" ]; then printf "%s\\n" "$OMP_GPU_PROBE_VALID_OUTPUT"; fi\nif [ "$OMP_GPU_PROBE_DESCENDANT_HOLDS_STDOUT" = "true" ]; then sleep "$OMP_GPU_PROBE_SLEEP" & exit 0; fi\nif [ "$OMP_GPU_PROBE_HOLD_STDOUT_OPEN" = "true" ]; then sleep "$OMP_GPU_PROBE_SLEEP" & wait "$!"; fi\nif [ -n "$OMP_GPU_PROBE_SLEEP" ]; then exec sleep "$OMP_GPU_PROBE_SLEEP"; fi\nexit 0\n',
 		);
 		await fs.chmod(probePath, 0o755);
+		if (options.legacyCache !== undefined) {
+			await Bun.write(path.join(cacheRoot, "omp", "gpu_cache.json"), options.legacyCache);
+		}
 
 		const scenarioPath = path.join(tempRoot, "scenario.ts");
 		await Bun.write(
@@ -121,14 +125,14 @@ describe.skipIf(process.platform !== "linux")("system prompt GPU probe", () => {
 	it("caches empty GPU probe results", async () => {
 		const result = await runProbeScenario({ runs: 2 });
 
-		expect(result.cached).toEqual({ gpu: null });
+		expect(result.cached).toEqual({ version: 1, gpu: null });
 		expect(result.count).toBe(1);
 	}, 15_000);
 
 	it("kills the GPU probe at the prep deadline", async () => {
 		const result = await runProbeScenario({ runs: 1, sleepSeconds: 12, holdStdoutOpen: true });
 
-		expect(result.cached).toEqual({ gpu: null });
+		expect(result.cached).toEqual({ version: 1, gpu: null });
 		// Probe is SIGKILLed at ~4.5s and the drain wait is bounded, so in-child
 		// time sits near the deadline; waiting on the descendant would push it
 		// past the 12s sleep.
@@ -143,7 +147,7 @@ describe.skipIf(process.platform !== "linux")("system prompt GPU probe", () => {
 	it("does not wait on stdout held by a descendant after a successful probe", async () => {
 		const result = await runProbeScenario({ runs: 1, sleepSeconds: 8, descendantHoldsStdout: true });
 
-		expect(result.cached).toEqual({ gpu: null });
+		expect(result.cached).toEqual({ version: 1, gpu: null });
 		// Probe exits 0 immediately but leaves a backgrounded sleep holding the stdout
 		// pipe. The success path MUST bound the drain wait, not block until sleep exits.
 		expect(result.elapsedMs).toBeLessThan(2000);
@@ -162,7 +166,7 @@ describe.skipIf(process.platform !== "linux")("system prompt GPU probe", () => {
 
 		// Probe exited 0 with valid output before bg sleep held stdout open.
 		// Captured stdout MUST be cached, not discarded as if the probe failed.
-		expect(result.cached).toEqual({ gpu: "02.0 VGA compatible controller: NVIDIA TestGPU" });
+		expect(result.cached).toEqual({ version: 1, gpu: "02.0 VGA compatible controller: NVIDIA TestGPU" });
 		expect(result.elapsedMs).toBeLessThan(2000);
 		// Budgets bun spawn/startup overhead; blocking on the descendant would
 		// take at least the 8s sleep.
@@ -176,7 +180,7 @@ describe.skipIf(process.platform !== "linux")("system prompt GPU probe", () => {
 			validOutput: "Name\nGameViewer Virtual Display Adapter\nNVIDIA GeForce RTX 2080 Ti",
 		});
 
-		expect(result.cached).toEqual({ gpu: "NVIDIA GeForce RTX 2080 Ti" });
+		expect(result.cached).toEqual({ version: 1, gpu: "NVIDIA GeForce RTX 2080 Ti" });
 		expect(result.count).toBe(1);
 	});
 
@@ -187,7 +191,21 @@ describe.skipIf(process.platform !== "linux")("system prompt GPU probe", () => {
 			validOutput: "Name\nRemote Display Adapter\nCitrix Virtual Adapter",
 		});
 
-		expect(result.cached).toEqual({ gpu: "Remote Display Adapter" });
+		expect(result.cached).toEqual({ version: 1, gpu: "Remote Display Adapter" });
+		expect(result.count).toBe(1);
+	});
+
+	it("rejects a pre-versioning cache and re-probes the Windows GPU", async () => {
+		const result = await runProbeScenario({
+			runs: 1,
+			platform: "win32",
+			validOutput: "Name\nGameViewer Virtual Display Adapter\nNVIDIA GeForce RTX 2080 Ti",
+			legacyCache: JSON.stringify({ gpu: "GameViewer Virtual Display Adapter" }),
+		});
+
+		// The old unversioned cache holds the virtual adapter the previous parser
+		// picked; it MUST be discarded and re-probed, not served indefinitely.
+		expect(result.cached).toEqual({ version: 1, gpu: "NVIDIA GeForce RTX 2080 Ti" });
 		expect(result.count).toBe(1);
 	});
 });
