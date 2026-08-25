@@ -49,6 +49,22 @@ function slowTranscript(): string {
 	})}\n`;
 }
 
+/**
+ * A slow transcript that still registers: an oversized session record in the
+ * prefix (so the capped metadata read streams many chunks) followed by a
+ * `session_init`, which makes the file a complete, parkable transcript.
+ */
+function slowTranscriptWithInit(): string {
+	return `${sessionHeader("slow")}\n${JSON.stringify({
+		type: "session",
+		version: CURRENT_SESSION_VERSION,
+		id: "pad",
+		timestamp: "2026-08-25T10:00:00.000Z",
+		cwd: "/tmp",
+		pad: "x".repeat(8 * 1024 * 1024),
+	})}\n${sessionInitRecord()}\n`;
+}
+
 /** Directory a scan reads to list a root's transcripts (`<sessionFile>` minus `.jsonl`). */
 function scanDir(sessionFile: string): string {
 	return sessionFile.slice(0, -".jsonl".length);
@@ -72,11 +88,10 @@ function countReaddirs(readdirs: string[], dir: string): number {
 }
 
 /** Spy on `fs.promises.readdir`, recording each scanned directory. */
-function spyOnReaddirs(readdirs: string[], gate?: () => void): void {
+function spyOnReaddirs(readdirs: string[]): void {
 	const realReaddir = fsp.readdir;
 	vi.spyOn(fs.promises, "readdir").mockImplementation((async (target: fs.PathLike) => {
 		readdirs.push(String(target));
-		gate?.();
 		return realReaddir(target, { withFileTypes: true });
 	}) as unknown as typeof fsp.readdir);
 }
@@ -199,32 +214,95 @@ describe("persisted roster latch semantics", () => {
 		expect(countReaddirs(readdirs, scanDir(rootB))).toBe(1);
 	});
 
+	it("serializes scan bodies so a shared child basename is never latched-missed", async () => {
+		using tempDir = TempDir.createSync("@omp-roster-shared-child-");
+		const dir = tempDir.path();
+		const rootA = path.join(dir, "a", "main.jsonl");
+		const rootB = path.join(dir, "b", "main.jsonl");
+		const childA = path.join(dir, "a", "main", "Worker.jsonl");
+		const childB = path.join(dir, "b", "main", "Worker.jsonl");
+		// Root A's child streams slowly: with interleaved scans, root B captures
+		// the shared id as unregistered and stalls on its own metadata read until
+		// A registers, then CAS-skips — a settled latch that never saw its own
+		// transcript. The serialization tail queues B behind A instead, so B
+		// observes A's registration and replaces it.
+		await Bun.write(rootA, `${sessionHeader("a")}\n`);
+		await Bun.write(rootB, `${sessionHeader("b")}\n`);
+		await Bun.write(childA, slowTranscriptWithInit());
+		await Bun.write(childB, `${sessionHeader("worker")}\n${sessionInitRecord()}\n`);
+		const realStat = fsp.stat;
+		let releaseChildB: () => void = () => {};
+		const childBGate = new Promise<void>(resolve => {
+			releaseChildB = resolve;
+		});
+		vi.spyOn(fs.promises, "stat").mockImplementation((async (target: fs.PathLike) => {
+			if (target === childB) await childBGate;
+			return realStat(target);
+		}) as typeof fs.promises.stat);
+		const readdirs: string[] = [];
+		spyOnReaddirs(readdirs);
+		const registry = new AgentRegistry();
+		const pA = ensurePersistedRoster(registry, rootA);
+		const pB = ensurePersistedRoster(registry, rootB);
+		// Root A's scan (the first in the queue) registers the shared child; only
+		// then does B's metadata read proceed, so B must observe A's ref.
+		await pA;
+		releaseChildB();
+		await pB;
+		// The later scan's registration is the current one: B's transcript, not A's.
+		expect(registry.get("Worker")?.sessionFile).toBe(childB);
+		expect(registry.get("Worker")?.status).toBe("parked");
+		// B's latch settled with that result: a repeated call does not re-scan.
+		await ensurePersistedRoster(registry, rootB);
+		expect(countReaddirs(readdirs, scanDir(rootB))).toBe(1);
+	}, 10_000);
+
+	it("keeps the scan queue moving after a failed root scan", async () => {
+		using tempDir = TempDir.createSync("@omp-roster-queue-failure-");
+		const dir = tempDir.path();
+		const rootA = path.join(dir, "a", "main.jsonl");
+		const rootB = path.join(dir, "b", "main.jsonl");
+		const childA = path.join(dir, "a", "main", "Worker.jsonl");
+		const childB = path.join(dir, "b", "main", "Worker.jsonl");
+		await Bun.write(rootA, `${sessionHeader("a")}\n`);
+		await Bun.write(rootB, `${sessionHeader("b")}\n`);
+		await Bun.write(childA, `${sessionHeader("worker")}\n${sessionInitRecord()}\n`);
+		await Bun.write(childB, `${sessionHeader("worker")}\n${sessionInitRecord()}\n`);
+		spyOnStatFault(childA, "EACCES");
+		const readdirs: string[] = [];
+		spyOnReaddirs(readdirs);
+		const registry = new AgentRegistry();
+		const [ra, rb] = await Promise.all([
+			ensurePersistedRoster(registry, rootA),
+			ensurePersistedRoster(registry, rootB),
+		]);
+		expect(ra).toBe(rootA);
+		expect(rb).toBe(rootB);
+		// A's failed scan did not poison the queue: B's scan still ran and
+		// registered its child.
+		expect(registry.get("Worker")?.sessionFile).toBe(childB);
+		// A's failed scan dropped its latch: a retry re-scans A.
+		await ensurePersistedRoster(registry, rootA);
+		expect(countReaddirs(readdirs, scanDir(rootA))).toBe(2);
+	});
+
 	it("bounds remembered latches by evicting only settled ones", async () => {
 		using tempDir = TempDir.createSync("@omp-roster-latch-bound-");
 		const dir = tempDir.path();
 		const rootFor = (index: number) => path.join(dir, `root-${index}`, "main.jsonl");
 		const rootCount = MAX_PERSISTED_ROSTER_LATCHES + 1;
 		const readdirs: string[] = [];
-		const realReaddir = fsp.readdir;
-		let releaseScans = () => {};
-		const scansHeld = new Promise<void>(resolve => {
-			releaseScans = resolve;
-		});
-		vi.spyOn(fs.promises, "readdir").mockImplementation((async (target: fs.PathLike) => {
-			readdirs.push(String(target));
-			// Hold every scan at its first directory read until all roots are
-			// latched, so the bound overflow happens while scans are in flight.
-			if (readdirs.length === rootCount) releaseScans();
-			await scansHeld;
-			return realReaddir(target, { withFileTypes: true });
-		}) as unknown as typeof fsp.readdir);
+		spyOnReaddirs(readdirs);
 		const registry = new AgentRegistry();
 		const roots = Array.from({ length: rootCount }, (_, index) => rootFor(index));
-		await Promise.all(roots.map(root => Bun.write(root, "")));
+		// The first root's scan streams slowly, so every latch is inserted
+		// (unsettled) before the first scan settles: the bound overflow at the
+		// 33rd insertion can only prune settled entries — there are none yet.
+		await Promise.all(roots.map(root => Bun.write(root, root === roots[0] ? slowTranscript() : "")));
 		const scans = await Promise.all(roots.map(root => ensurePersistedRoster(registry, root)));
 		for (const root of scans) expect(root).toBeDefined();
-		// All 33 scans were in flight when the 33rd latch was inserted; none was
-		// evicted, so root 0's settled latch still dedupes a repeated call.
+		// All 33 scans were queued or in flight when the 33rd latch was inserted;
+		// none was evicted, so root 0's settled latch still dedupes a repeat.
 		await ensurePersistedRoster(registry, rootFor(0));
 		expect(countReaddirs(readdirs, scanDir(rootFor(0)))).toBe(1);
 		// A new root pushes the cache over its bound; only settled entries are

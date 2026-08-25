@@ -392,6 +392,17 @@ const MAX_PERSISTED_ROSTER_LATCHES = 32;
 
 const kPersistedRosterLatches = Symbol("persistedRosterLatches");
 
+/**
+ * Failure-tolerant serialization tail for scan bodies. Distinct roots share one
+ * process-global registry, so their scans must not interleave: a child
+ * basename present in two roots' trees would otherwise be captured as
+ * unregistered by both, and whichever registers last would CAS-skip the other,
+ * leaving that root with a settled latch that never saw its own transcript.
+ * The tail always stores a settled wrapper, so a failed scan can never poison
+ * the queue for the next root.
+ */
+const kPersistedRosterScanTail = Symbol("persistedRosterScanTail");
+
 interface PersistedRosterLatch {
 	/** Settles when the root's roster scan finishes (success or logged failure). */
 	pending: Promise<void>;
@@ -401,6 +412,7 @@ interface PersistedRosterLatch {
 
 interface RegistryWithPersistedRosterLatches extends AgentRegistry {
 	[kPersistedRosterLatches]?: Map<string, PersistedRosterLatch>;
+	[kPersistedRosterScanTail]?: Promise<void>;
 }
 
 async function resolveRootSessionFile(registry: AgentRegistry, hint?: string | null): Promise<string | undefined> {
@@ -447,10 +459,12 @@ export function isCurrentSessionRosterRef(
 /**
  * Restore parked sibling transcripts once per current root session. Scans are
  * latched per root: concurrent calls for the same root share one in-flight
- * scan, while distinct roots stay latched independently. The latch cache is
- * bounded by forgetting settled roots oldest-first, so a switch back to an old
- * root re-scans only once its latch was pruned. IO failure degrades roster
- * counts, never task startup, and remains retryable.
+ * scan, while distinct roots stay latched independently but serialize their
+ * scan bodies behind a failure-tolerant tail (a child basename shared across
+ * roots must be observed as already-registered, never raced unseen). The latch
+ * cache is bounded by forgetting settled roots oldest-first, so a switch back
+ * to an old root re-scans only once its latch was pruned. IO failure degrades
+ * roster counts, never task startup, and remains retryable.
  */
 export async function ensurePersistedRoster(
 	registry: AgentRegistry,
@@ -487,8 +501,18 @@ export async function ensurePersistedRoster(
 			if (latch.settled) latches.delete(latchedRoot);
 		}
 	}
+	// Chain the scan body behind any other root's in-flight scan (same-root
+	// calls never reach here: they joined the latch above). The tail always
+	// stores a settled wrapper, so a failed scan settles it and the next root
+	// still proceeds.
+	const tail = taggedRegistry[kPersistedRosterScanTail] ?? Promise.resolve();
+	const scan = tail.then(() => registerPersistedSubagents(registry, root, { hydrateHistory: false }));
+	taggedRegistry[kPersistedRosterScanTail] = scan.then(
+		() => {},
+		() => {},
+	);
 	let pending: Promise<void>;
-	pending = registerPersistedSubagents(registry, root, { hydrateHistory: false }).then(
+	pending = scan.then(
 		() => {
 			const latch = latches.get(root);
 			if (latch) latch.settled = true;
