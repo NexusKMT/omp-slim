@@ -1,19 +1,29 @@
 import { type Component, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { AnimationFrame, TranscriptPresentationTarget } from "../../modes/components/transcript-container";
 import { fgOrPlain } from "../../modes/theme/theme";
+import { urlHyperlinkAlways } from "../../tui";
 import { QrCode, renderQrHalfBlocks } from "../../utils/qrcode";
+
+/** Scheme-less display form of a collab browser deep link, OSC-8 linked. */
+export function collabBrowserLink(webLink: string): string {
+	const display = fgOrPlain("accent", `\x1b[4m${webLink.replace(/^https?:\/\//, "")}\x1b[24m`);
+	return urlHyperlinkAlways(webLink, display);
+}
 
 /**
  * One-shot transcript block that prints a collab browser-join URL as a
  * scannable QR code. The symbol is encoded once at construction (byte mode,
  * EC level M) and rendered as ANSI half-blocks; on terminals too narrow for
- * the symbol it degrades to a one-line hint pointing at the printed URL.
+ * the symbol it degrades to a one-line hint that includes the URL.
  *
  * The transcript viewport can also clip a live block to a single row under
  * pressure (many short settled blocks — typical when thinking is a one-line
  * summary rather than a tall trace). The QR's first/last rows are a white
  * quiet zone, so a 1-row clip looks like an empty white line. When the
  * allocated height cannot fit the full symbol, degrade to the same hint.
+ * The sibling `/collab` status heading can also collapse to its first row
+ * under that pressure, so the hint must carry the URL itself — "use the
+ * URL above" is not reachable.
  */
 export class CollabQrCodeComponent implements Component, TranscriptPresentationTarget {
 	readonly #lines: readonly string[];
@@ -40,7 +50,16 @@ export class CollabQrCodeComponent implements Component, TranscriptPresentationT
 		return this.#lines;
 	}
 
+	/** Survives emergency 1-row transcript pressure when this block is otherwise hidden. */
+	renderTranscriptBlockEmergencyRow(_width: number): string {
+		return this.#hiddenHint(
+			Number.isFinite(this.#allocatedRows)
+				? `viewport height ${this.#allocatedRows}; need ${this.#lines.length}`
+				: "transcript pressure",
+		);
+	}
+
 	#hiddenHint(reason: string): string {
-		return ` ${fgOrPlain("warning", `QR code hidden: ${reason}. Use the browser URL above.`)}`;
+		return ` ${fgOrPlain("warning", `QR code hidden: ${reason}.`)} ${collabBrowserLink(this.url)}`;
 	}
 }

@@ -149,7 +149,24 @@ describe("/collab slash command QR code rendering", () => {
 		expect(presented[1]).toBeInstanceOf(CollabQrCodeComponent);
 		const component = presented[1] as CollabQrCodeComponent;
 		expect(component.url).toBe(webViewLink);
-		expect(component.render(10).join("\n")).toContain("QR code hidden");
+		const clipped = component.render(10).join("\n");
+		expect(clipped).toContain("QR code hidden");
+		expect(clipped).toContain("my.omp.sh/#read-only");
+		expect(clipped).not.toContain("URL above");
+	});
+
+	it("keeps the browser URL on the first status row so transcript clipping cannot hide it", async () => {
+		const startSpy = mockStartedHostLinks();
+		const harness = createRuntimeHarness();
+
+		const handled = await executeBuiltinSlashCommand("/collab", harness.runtime);
+
+		expect(handled).toBe(true);
+		expect(startSpy).toHaveBeenCalled();
+		const statusText = harness.showStatus.mock.calls[0]?.[0] as string;
+		const firstRow = statusText.split("\n")[0] ?? "";
+		expect(firstRow).toContain("Collab session started!");
+		expect(firstRow).toContain("my.omp.sh/#started-full");
 	});
 });
 
@@ -175,6 +192,16 @@ describe("CollabQrCodeComponent transcript height clipping", () => {
 		expect(clipped).toHaveLength(1);
 		expect(clipped[0]).toContain("QR code hidden");
 		expect(clipped[0]).toContain("viewport height 1");
+		expect(clipped[0]).toContain("my.omp.sh/#clip-test");
+		expect(clipped[0]).not.toContain("URL above");
 		expect(clipped[0]).not.toMatch(/\x1b\[(?:47|40)m/);
+	});
+
+	it("keeps the browser URL as the emergency one-row transcript representation", () => {
+		const component = new CollabQrCodeComponent("https://my.omp.sh/#clip-test");
+		component.setTranscriptAllocation(1);
+		const row = component.renderTranscriptBlockEmergencyRow(120);
+		expect(row).toContain("my.omp.sh/#clip-test");
+		expect(row).not.toContain("URL above");
 	});
 });
