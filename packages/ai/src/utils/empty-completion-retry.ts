@@ -135,9 +135,11 @@ export function withReplaySafeStreamRetry<M, O extends StreamRetryOptions>(
 			const completedMessage = terminal?.type === "done" ? terminal.message : undefined;
 			const retryEmpty =
 				policy.retryEmptyCompletion === true &&
+				options?.acceptEmptyResponse !== true &&
 				!committed &&
 				completedMessage !== undefined &&
 				completedMessage.stopReason === "stop" &&
+				completedMessage.stopDetails?.type !== "pause_turn" &&
 				!completedMessage.errorMessage &&
 				(completedMessage.usage?.output ?? 0) <= 1 &&
 				!hasVisibleAssistantContent(completedMessage) &&
