@@ -470,6 +470,18 @@ export function resolveWarpImageProtocol(
 	return windowsHost ? null : ImageProtocol.Kitty;
 }
 
+/**
+ * Paseo (getpaseo/paseo) hardcodes `TERM_PROGRAM=kitty` into every PTY
+ * (`buildTerminalEnvironment`) while its xterm.js renderer implements neither
+ * Kitty graphics nor Unicode placeholders — trusting the advertisement turns
+ * image previews into literal PUA garbage (getpaseo/paseo#3850). Paseo
+ * injects `PASEO_TERMINAL_ID` into every terminal it hosts, which makes a
+ * reliable embedder signal.
+ */
+export function isPaseoEmbedder(env: NodeJS.ProcessEnv = Bun.env): boolean {
+	return Boolean(env.PASEO_TERMINAL_ID);
+}
+
 function getWarpTerminalInfo(platform: NodeJS.Platform, env: NodeJS.ProcessEnv = Bun.env): TerminalInfo {
 	return new TerminalInfo(
 		"warp",
@@ -575,6 +587,9 @@ export const TERMINAL: RuntimeTerminal = (() => {
 	} else if (resolved.id === "warp") {
 		// Warp advertises Kitty graphics on macOS/Linux only; drop it on win32.
 		resolved.imageProtocol = resolveWarpImageProtocol();
+	} else if (resolved.imageProtocol !== null && isPaseoEmbedder(Bun.env)) {
+		// Paseo's xterm.js renderer draws neither Kitty APC nor placeholders.
+		resolved.imageProtocol = null;
 	} else if (!resolved.imageProtocol) {
 		const fallbackImageProtocol = getFallbackImageProtocol(resolved.id);
 		if (fallbackImageProtocol) resolved.imageProtocol = fallbackImageProtocol;
