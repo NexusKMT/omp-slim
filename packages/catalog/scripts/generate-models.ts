@@ -52,6 +52,7 @@ import {
 	projectOpenAIProReasoningAliases,
 	SAKANA_FUGU_STATIC_MODELS,
 	stripFireworksDeepSeekThinkingToggle,
+	YOLO_AUTO_STATIC_MODELS,
 } from "../src/provider-models/openai-compat";
 import { type OpenAICodexAccount, openaiCodexModelManagerOptions } from "../src/provider-models/special";
 import type { Api, Model, ModelSpec } from "../src/types";
@@ -593,6 +594,12 @@ async function generateModels() {
 	// authoritative and replaces the seed.
 	if (!authoritativeCatalogProviders.has("aiand")) {
 		allModels.push(...AIAND_STATIC_MODELS);
+	}
+	// Seed Yolo-Auto's documented catalog so the provider is usable when
+	// generation has no YOLO_AUTO_API_KEY. A live `/v1/models` snapshot is
+	// authoritative and replaces the seed.
+	if (!authoritativeCatalogProviders.has("yolo-auto")) {
+		allModels.push(...YOLO_AUTO_STATIC_MODELS);
 	}
 	// Seed the GMI Cloud default model so a fresh install (and a regen without a
 	// `GMI_API_KEY`) still resolves the descriptor's `defaultModel` synchronously

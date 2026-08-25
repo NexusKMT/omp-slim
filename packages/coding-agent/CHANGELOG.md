@@ -13,6 +13,8 @@
 - Compressed single-child directory chains in the sidebar tree view
 - Split pure additions (new/untracked files) into their own list below tracked changes in each git TUI file section, separated by a rule; addition rows drop the redundant status letter and deleted files render struck through
 
+- Added Yolo-Auto to the `/login` provider list and the `YOLO_AUTO_API_KEY` env help.
+
 ### Changed
 
 - Standardized completed edit results on hashline-style path and numbered-preview output across edit modes.
