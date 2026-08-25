@@ -61,13 +61,41 @@ interface ToolCallInfo {
 	arguments: Record<string, unknown>;
 }
 
-function advisorNoteText(details: unknown): string {
-	if (!isRecord(details) || !Array.isArray(details.notes)) return "";
+/** Advisor note metadata surfaced on a single session-tree row. */
+interface AdvisorTreeDisplay {
+	/** Non-default advisor names then severities, comma-joined (e.g. `sec, blocker`). */
+	qualifier: string;
+	/** Note bodies joined into one line. */
+	text: string;
+}
+
+/**
+ * Extract display metadata from an advisor custom-message's `details.notes`,
+ * ignoring the model-facing `<advisory>` wrapper stored in `content`. Collects
+ * distinct non-default advisor names and severities so the tree row can tag the
+ * note the way its transcript card does.
+ */
+function advisorTreeDisplay(details: unknown): AdvisorTreeDisplay {
+	if (!isRecord(details) || !Array.isArray(details.notes)) return { qualifier: "", text: "" };
 	const notes: string[] = [];
+	const advisors: string[] = [];
+	const severities: string[] = [];
 	for (const note of details.notes) {
-		if (isRecord(note) && typeof note.note === "string") notes.push(note.note);
+		if (!isRecord(note)) continue;
+		if (typeof note.note === "string") notes.push(note.note);
+		if (
+			typeof note.advisor === "string" &&
+			note.advisor &&
+			note.advisor !== "default" &&
+			!advisors.includes(note.advisor)
+		) {
+			advisors.push(note.advisor);
+		}
+		if (typeof note.severity === "string" && note.severity && !severities.includes(note.severity)) {
+			severities.push(note.severity);
+		}
 	}
-	return notes.join(" ");
+	return { qualifier: [...advisors, ...severities].join(", "), text: notes.join(" ") };
 }
 
 class TreeList implements Component {
@@ -382,13 +410,14 @@ class TreeList implements Component {
 			}
 			case "custom_message": {
 				parts.push(entry.customType);
-				const content =
-					entry.customType === "advisor"
-						? advisorNoteText(entry.details)
-						: typeof entry.content === "string"
-							? entry.content
-							: this.#extractContent(entry.content);
-				if (content) parts.push(content);
+				if (entry.customType === "advisor") {
+					const { qualifier, text } = advisorTreeDisplay(entry.details);
+					if (qualifier) parts.push(qualifier);
+					if (text) parts.push(text);
+				} else {
+					const content = typeof entry.content === "string" ? entry.content : this.#extractContent(entry.content);
+					if (content) parts.push(content);
+				}
 				break;
 			}
 			case "compaction":
@@ -675,15 +704,19 @@ class TreeList implements Component {
 				break;
 			}
 			case "custom_message": {
+				if (entry.customType === "advisor") {
+					const { qualifier, text } = advisorTreeDisplay(entry.details);
+					const label = qualifier ? `advisor (${qualifier}): ` : "advisor: ";
+					result = theme.fg("customMessageLabel", label) + normalize(text);
+					break;
+				}
 				const content =
-					entry.customType === "advisor"
-						? advisorNoteText(entry.details)
-						: typeof entry.content === "string"
-							? entry.content
-							: entry.content
-									.filter((c): c is { type: "text"; text: string } => c.type === "text")
-									.map(c => c.text)
-									.join("");
+					typeof entry.content === "string"
+						? entry.content
+						: entry.content
+								.filter((c): c is { type: "text"; text: string } => c.type === "text")
+								.map(c => c.text)
+								.join("");
 				result = theme.fg("customMessageLabel", `[${entry.customType}]: `) + normalize(content);
 				break;
 			}
