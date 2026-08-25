@@ -250,23 +250,12 @@ function hasExpectedCleanupMarker(reason: unknown): boolean {
 }
 
 /**
- * Whether an unhandled rejection is routine cancellation or closed-socket
- * fallout, either explicitly marked or recognizable by a runtime-stable error
- * identity. Exact names/codes deliberately avoid swallowing generic network
- * failures or application errors whose message happens to mention a socket.
+ * Whether `reason` (or any object in its bounded `cause` chain) was explicitly
+ * marked via {@link markExpectedCleanupError}. Runtime error names and codes
+ * are intentionally insufficient: unmarked `AbortError` and socket failures
+ * can originate from application code and must remain fatal when unhandled.
  */
 export function isExpectedCleanupError(reason: unknown): boolean {
-	let current: unknown = reason;
-	for (let depth = 0; depth < 8 && current instanceof Error; depth++) {
-		if (
-			Reflect.get(current, EXPECTED_CLEANUP) === true ||
-			current.name === "AbortError" ||
-			("code" in current && current.code === "ERR_SOCKET_CLOSED")
-		) {
-			return true;
-		}
-		current = current.cause;
-	}
 	return hasExpectedCleanupMarker(reason);
 }
 

@@ -65,6 +65,7 @@ describe("mapWithConcurrencyLimit", () => {
 		const siblingStarted = Promise.withResolvers<void>();
 		const siblingCleaningUp = Promise.withResolvers<void>();
 		const releaseCleanup = Promise.withResolvers<void>();
+		const siblingAborted = Promise.withResolvers<void>();
 
 		const pending = mapWithConcurrencyLimit([0, 1], 2, async (item, _index, signal) => {
 			if (item === 0) {
@@ -73,7 +74,8 @@ describe("mapWithConcurrencyLimit", () => {
 			}
 
 			siblingStarted.resolve();
-			await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+			signal.addEventListener("abort", () => siblingAborted.resolve(), { once: true });
+			await siblingAborted.promise;
 			siblingCleaningUp.resolve();
 			await releaseCleanup.promise;
 			return item;

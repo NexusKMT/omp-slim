@@ -7,7 +7,7 @@
  * `ToolSession` registered for the current execution and forwards to the same
  * `callSessionTool` implementation the JS bridge uses.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger, postmortem } from "@oh-my-pi/pi-utils";
 import type { ToolSession } from "../../tools";
 import { callSessionTool, type JsStatusEvent } from "../js/tool-bridge";
 
@@ -43,11 +43,13 @@ interface BridgeServer {
 const registrations = new Map<string, PyToolBridgeEntry>();
 let serverPromise: Promise<BridgeServer> | null = null;
 
-function isExpectedBridgeShutdownError(error: unknown): boolean {
+function markExpectedBridgeShutdownError(error: unknown): error is Error {
 	if (!(error instanceof Error)) return false;
-	if (error.name === "AbortError") return true;
-	if (!("code" in error)) return false;
-	return error.code === "ERR_SOCKET_CLOSED" || error.code === "ECONNRESET" || error.code === "EPIPE";
+	const expected =
+		error.name === "AbortError" ||
+		("code" in error && (error.code === "ERR_SOCKET_CLOSED" || error.code === "ECONNRESET" || error.code === "EPIPE"));
+	if (expected) postmortem.markExpectedCleanupError(error);
+	return expected;
 }
 
 /**
@@ -144,7 +146,7 @@ async function startServer(): Promise<BridgeServer> {
 			}
 		},
 		error(err) {
-			if (isExpectedBridgeShutdownError(err)) {
+			if (markExpectedBridgeShutdownError(err)) {
 				logger.debug("Python tool bridge connection closed during shutdown", { error: err.message });
 			} else {
 				logger.error("Python tool bridge request failed", { error: err });
@@ -166,7 +168,7 @@ async function startServer(): Promise<BridgeServer> {
 		info,
 		stop: () => {
 			stopPromise ??= Promise.try(() => server.stop(true)).catch(error => {
-				if (!isExpectedBridgeShutdownError(error)) throw error;
+				if (!markExpectedBridgeShutdownError(error)) throw error;
 				logger.debug("Python tool bridge stopped after its socket closed", {
 					error: error.message,
 				});

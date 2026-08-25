@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { connectToServer } from "@oh-my-pi/pi-coding-agent/mcp/client";
 import { HttpTransport } from "@oh-my-pi/pi-coding-agent/mcp/transports/http";
+import { postmortem } from "@oh-my-pi/pi-utils";
 
 const encoder = new TextEncoder();
 const REQUEST_TIMEOUT_MS = 50;
@@ -259,7 +260,12 @@ describe("MCP Streamable HTTP transport timeouts", () => {
 		await requestReceived.promise;
 		const closing = transport.close();
 
-		await expect(withPendingGuard(request, "aborted request")).rejects.toMatchObject({ name: "AbortError" });
+		const requestError = await withPendingGuard(request, "aborted request").then(
+			() => undefined,
+			error => error,
+		);
+		expect(requestError).toMatchObject({ name: "AbortError" });
+		expect(postmortem.isExpectedCleanupError(requestError)).toBe(true);
 		await withPendingGuard(closing, "transport close");
 	});
 
@@ -283,7 +289,9 @@ describe("MCP Streamable HTTP transport timeouts", () => {
 			void transport.request("tools/list", undefined, { signal: caller.signal });
 			await requestReceived.promise;
 			caller.abort();
-			await new Promise<void>(resolve => setImmediate(resolve));
+			const nextTurn = Promise.withResolvers<void>();
+			setImmediate(nextTurn.resolve);
+			await nextTurn.promise;
 
 			expect(unhandled).toEqual([]);
 		} finally {

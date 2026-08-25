@@ -6,7 +6,7 @@
  * header on every request (see `MCP_PROTOCOL_VERSION`).
  */
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { logger, readSseEvents, readSseJson } from "@oh-my-pi/pi-utils";
+import { logger, postmortem, readSseEvents, readSseJson } from "@oh-my-pi/pi-utils";
 import type {
 	JsonRpcError,
 	JsonRpcMessage,
@@ -724,7 +724,9 @@ export class HttpTransport implements MCPTransport {
 
 	async #closeTransport(): Promise<void> {
 		this.#connected = false;
-		const closeReason = new DOMException("MCP HTTP transport closed", "AbortError");
+		const closeReason = postmortem.markExpectedCleanupError(
+			new DOMException("MCP HTTP transport closed", "AbortError"),
+		);
 		this.#lifecycleController.abort(closeReason);
 
 		if (this.#sseConnection) {

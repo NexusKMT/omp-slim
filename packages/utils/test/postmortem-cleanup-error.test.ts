@@ -66,15 +66,18 @@ describe("postmortem expected cleanup errors", () => {
 		expect(postmortem.isExpectedCleanupError(beyondLimit)).toBe(false);
 	});
 
-	it("recognizes aborts and closed sockets through cause chains without matching unrelated errors", () => {
+	it("requires an explicit cleanup marker for aborts and closed sockets", () => {
 		const abort = new DOMException("operation aborted", "AbortError");
 		const closedSocket = Object.assign(new Error("Socket is closed"), { code: "ERR_SOCKET_CLOSED" });
 
-		expect(postmortem.isExpectedCleanupError(abort)).toBe(true);
-		expect(postmortem.isExpectedCleanupError(new Error("request failed", { cause: closedSocket }))).toBe(true);
-		expect(postmortem.isExpectedCleanupError(Object.assign(new Error("connection reset"), { code: "ECONNRESET" }))).toBe(
-			false,
-		);
+		expect(postmortem.isExpectedCleanupError(abort)).toBe(false);
+		expect(postmortem.isExpectedCleanupError(new Error("request failed", { cause: closedSocket }))).toBe(false);
+		expect(postmortem.isExpectedCleanupError(postmortem.markExpectedCleanupError(abort))).toBe(true);
+		expect(
+			postmortem.isExpectedCleanupError(
+				new Error("request failed", { cause: postmortem.markExpectedCleanupError(closedSocket) }),
+			),
+		).toBe(true);
 		expect(postmortem.isExpectedCleanupError(new Error("Socket is closed"))).toBe(false);
 	});
 
@@ -93,32 +96,28 @@ describe("postmortem expected cleanup errors", () => {
 		expect(result.stderr).not.toContain("[Unhandled Rejection]");
 	});
 
-	it("lets the process survive an unhandled AbortError from cancellation", async () => {
+	it("keeps an unmarked unhandled AbortError fatal", async () => {
 		const result = await runPostmortemProbe(`
 			import "${postmortemModuleUrl}";
 
-			Promise.reject(new DOMException("operation aborted", "AbortError"));
+			Promise.reject(new DOMException("unexpected abort rejection", "AbortError"));
 			await Promise.resolve();
-			console.log("survived abort rejection");
 		`);
 
-		expect(result.exitCode).toBe(0);
-		expect(result.stdout).toContain("survived abort rejection");
-		expect(result.stderr).not.toContain("[Unhandled Rejection]");
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toContain("[Unhandled Rejection] AbortError: unexpected abort rejection");
 	});
 
-	it("lets the process survive an unhandled ERR_SOCKET_CLOSED rejection", async () => {
+	it("keeps an unmarked ERR_SOCKET_CLOSED rejection fatal", async () => {
 		const result = await runPostmortemProbe(`
 			import "${postmortemModuleUrl}";
 
-			Promise.reject(Object.assign(new Error("Socket is closed"), { code: "ERR_SOCKET_CLOSED" }));
+			Promise.reject(Object.assign(new Error("unexpected socket rejection"), { code: "ERR_SOCKET_CLOSED" }));
 			await Promise.resolve();
-			console.log("survived closed socket rejection");
 		`);
 
-		expect(result.exitCode).toBe(0);
-		expect(result.stdout).toContain("survived closed socket rejection");
-		expect(result.stderr).not.toContain("[Unhandled Rejection]");
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toContain("[Unhandled Rejection] Error: unexpected socket rejection");
 	});
 
 	it("lets the process survive an uncaught exception that is marked as expected cleanup", async () => {

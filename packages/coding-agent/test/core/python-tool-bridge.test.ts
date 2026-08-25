@@ -191,7 +191,9 @@ describe("Python tool bridge HTTP server", () => {
 			release.resolve();
 			await stopping;
 			await response;
-			await new Promise<void>(resolve => setImmediate(resolve));
+			const nextTurn = Promise.withResolvers<void>();
+			setImmediate(nextTurn.resolve);
+			await nextTurn.promise;
 
 			expect(unhandled).toEqual([]);
 		} finally {
