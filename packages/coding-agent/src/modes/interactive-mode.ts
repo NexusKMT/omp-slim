@@ -110,6 +110,7 @@ import {
 import type { CompactMode } from "../session/compact-modes";
 import type { ForeignSessionSource } from "../session/foreign-session-store";
 import { HistoryStorage } from "../session/history-storage";
+import { USER_INTERRUPT_LABEL } from "../session/messages";
 import type { SessionContext } from "../session/session-context";
 import { getRecentSessions } from "../session/session-listing";
 import type { SessionManager } from "../session/session-manager";
@@ -3148,7 +3149,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// (issue #8326).
 		if (options?.interruptActiveTurn && this.session.isStreaming) {
 			await this.session.runModeExitTeardown(async () => {
-				await this.session.abort();
+				await this.session.abort({ reason: USER_INTERRUPT_LABEL });
 				await this.#tearDownPlanMode(options);
 			});
 			return;

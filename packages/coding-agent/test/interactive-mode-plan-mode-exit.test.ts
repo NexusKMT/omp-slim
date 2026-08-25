@@ -18,6 +18,7 @@ import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mod
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import { USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -76,13 +77,17 @@ describe("InteractiveMode plan mode exit", () => {
 
 	it("aborts the in-flight turn when exited mid-stream", async () => {
 		const started = Promise.withResolvers<void>();
+		let abortReason: unknown;
 		streamFn = (_model, _context, options) => {
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
 				stream.push({ type: "start", partial: createAssistantMessage("") });
 				options?.signal?.addEventListener(
 					"abort",
-					() => stream.push({ type: "error", reason: "aborted", error: createAssistantMessage("Aborted") }),
+					() => {
+						abortReason = options.signal?.reason;
+						stream.push({ type: "error", reason: "aborted", error: createAssistantMessage("Aborted") });
+					},
 					{ once: true },
 				);
 				started.resolve();
@@ -104,5 +109,6 @@ describe("InteractiveMode plan mode exit", () => {
 		expect(mode.planModeEnabled).toBe(false);
 		expect(session.isStreaming).toBe(false);
 		expect(session.getPlanModeState()).toBeUndefined();
+		expect(abortReason).toBe(USER_INTERRUPT_LABEL);
 	});
 });
