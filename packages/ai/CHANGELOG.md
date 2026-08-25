@@ -258,6 +258,13 @@
 ### Fixed
 
 - Fixed account-scoped Codex cyber-policy denials bypassing sibling credential rotation; replay-safe requests now try every configured account before surfacing the error.
+### Breaking Changes
+
+- Renamed the internal stream-retry helper `withEmptyCompletionRetry` to `withReplaySafeStreamRetry` (module `@oh-my-pi/pi-ai/utils/empty-completion-retry`), now taking a policy argument (`retryEmptyCompletion` / `retryProviderErrors`). Callers of the old export must migrate ([#7979](https://github.com/can1357/oh-my-pi/issues/7979)).
+
+### Fixed
+
+- Retried transient mid-stream socket closures for OpenAI Responses, Chat Completions, Azure OpenAI Responses, and Codex SSE when no replay-unsafe output was emitted ([#7979](https://github.com/can1357/oh-my-pi/issues/7979)).
 
 ## [17.2.11] - 2026-08-07
 
