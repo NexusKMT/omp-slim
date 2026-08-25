@@ -633,17 +633,18 @@ export class HookSelectorComponent extends OverlayPanel {
 		return true;
 	}
 
-	/** Jump to (and, for single-select menus, immediately confirm) the option at
-	 *  1-based digit `1`–`9`. Skipped while type-to-search is active so digits
-	 *  stay searchable, and for out-of-range or disabled targets. Checkbox menus
-	 *  only move the cursor — confirmation stays on `enter`. Returns whether the
-	 *  keypress was consumed. */
+	/** Jump to (and, for single-select menus, immediately confirm) the option
+	 *  whose label starts with the pressed digit and a period. Numbered options
+	 *  can follow unnumbered rows, as in `/review` after a detected PR. Once
+	 *  type-to-search is active, digits stay searchable. Checkbox menus only
+	 *  move the cursor — confirmation stays on `enter`. */
 	#handleQuickSelect(keyData: string): boolean {
-		if (this.#isSearchEnabled()) return false;
-		if (keyData.length !== 1 || keyData < "1" || keyData > "9") return false;
-		const target = this.#filteredOptions[Number(keyData) - 1];
+		if (this.#searchQuery.length > 0 || keyData.length !== 1 || keyData < "1" || keyData > "9") return false;
+		const targetIndex = this.#filteredOptions.findIndex(({ option }) => option.label.startsWith(`${keyData}. `));
+		if (targetIndex < 0) return false;
+		const target = this.#filteredOptions[targetIndex];
 		if (!target || this.#isDisabled(target.index)) return true;
-		this.#selectedIndex = Number(keyData) - 1;
+		this.#selectedIndex = targetIndex;
 		this.#updateList();
 		if (this.#selectionMarker !== "checkbox") this.#onSelectCallback(target.option.label);
 		return true;
@@ -660,11 +661,11 @@ export class HookSelectorComponent extends OverlayPanel {
 			return;
 		}
 
-		if (this.#handleSearchInput(keyData)) {
+		if (this.#handleQuickSelect(keyData)) {
 			return;
 		}
 
-		if (this.#handleQuickSelect(keyData)) {
+		if (this.#handleSearchInput(keyData)) {
 			return;
 		}
 

@@ -239,11 +239,11 @@ describe("HookSelectorComponent", () => {
 		expect(selected).toBeUndefined();
 	});
 
-	it("selects and confirms the option at the pressed digit", () => {
+	it("selects the matching numbered option after an unnumbered row", () => {
 		let selected: string | undefined;
 		const component = new HookSelectorComponent(
 			"Pick one",
-			["First", "Second", "Third"],
+			["Detected item", "1. First", "2. Second", "3. Third"],
 			option => {
 				selected = option;
 			},
@@ -252,14 +252,14 @@ describe("HookSelectorComponent", () => {
 
 		component.handleInput("3");
 
-		expect(selected).toBe("Third");
+		expect(selected).toBe("3. Third");
 	});
 
 	it("ignores a digit that targets a disabled option", () => {
 		let selected: string | undefined;
 		const component = new HookSelectorComponent(
 			"Pick one",
-			["First", "Disabled", "Third"],
+			["1. First", "2. Disabled", "3. Third"],
 			option => {
 				selected = option;
 			},
@@ -272,11 +272,11 @@ describe("HookSelectorComponent", () => {
 		expect(selected).toBeUndefined();
 	});
 
-	it("ignores a digit past the end of the list", () => {
+	it("ignores a digit without a matching numbered option", () => {
 		let selected: string | undefined;
 		const component = new HookSelectorComponent(
 			"Pick one",
-			["First", "Second"],
+			["1. First", "2. Second"],
 			option => {
 				selected = option;
 			},
@@ -288,11 +288,27 @@ describe("HookSelectorComponent", () => {
 		expect(selected).toBeUndefined();
 	});
 
+	it("does not turn an unnumbered menu into implicit numeric shortcuts", () => {
+		let selected: string | undefined;
+		const component = new HookSelectorComponent(
+			"Pick one",
+			["First", "Second", "Third"],
+			option => {
+				selected = option;
+			},
+			() => {},
+		);
+
+		component.handleInput("3");
+
+		expect(selected).toBeUndefined();
+	});
+
 	it("moves the cursor without confirming on checkbox menus", () => {
 		let selected: string | undefined;
 		const component = new HookSelectorComponent(
 			"Pick many",
-			["First", "Second", "Third"],
+			["1. First", "2. Second", "3. Third"],
 			option => {
 				selected = option;
 			},
@@ -304,7 +320,7 @@ describe("HookSelectorComponent", () => {
 		expect(selected).toBeUndefined();
 
 		component.handleInput("\n");
-		expect(selected).toBe("Second");
+		expect(selected).toBe("2. Second");
 	});
 
 	it("treats digits as search text once the list overflows", () => {
