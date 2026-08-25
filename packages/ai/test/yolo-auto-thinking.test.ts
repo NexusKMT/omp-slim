@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { streamOpenAICompletions } from "../src/providers/openai-completions";
 import type { Context, FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "../../catalog/src/build";
 import { Effort } from "../../catalog/src/effort";
 import { YOLO_AUTO_STATIC_MODELS } from "../../catalog/src/provider-models/openai-compat";
+import { streamOpenAICompletions } from "../src/providers/openai-completions";
 
 const model = buildModel(YOLO_AUTO_STATIC_MODELS[0]) as Model<"openai-completions">;
 
@@ -33,7 +33,10 @@ function captureRequest(): { bodies: Record<string, unknown>[]; fetch: FetchImpl
 	return { bodies, fetch };
 }
 
-async function outgoingBody(options: { reasoning?: Effort; disableReasoning?: boolean }): Promise<Record<string, unknown>> {
+async function outgoingBody(options: {
+	reasoning?: Effort;
+	disableReasoning?: boolean;
+}): Promise<Record<string, unknown>> {
 	const { bodies, fetch } = captureRequest();
 	await streamOpenAICompletions(model, context, { apiKey: "yolo-test-key", fetch, ...options }).result();
 	const body = bodies[0];
