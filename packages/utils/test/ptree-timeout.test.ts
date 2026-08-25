@@ -2,6 +2,35 @@ import { describe, expect, it } from "bun:test";
 import { Process, ProcessStatus } from "@oh-my-pi/pi-natives";
 import { createLinuxSubreaperScript, exec, NonZeroExitError, spawn, TimeoutError } from "@oh-my-pi/pi-utils/ptree";
 
+async function supportsLinuxMountNamespaces(): Promise<boolean> {
+	if (process.platform !== "linux") return false;
+	try {
+		const probe = Bun.spawn(
+			[
+				"unshare",
+				"--user",
+				"--map-root-user",
+				"--mount",
+				"--propagation",
+				"private",
+				"/bin/sh",
+				"-c",
+				"mount -t tmpfs tmpfs /proc",
+			],
+			{
+				stdin: "ignore",
+				stdout: "ignore",
+				stderr: "ignore",
+			},
+		);
+		return (await probe.exited) === 0;
+	} catch {
+		return false;
+	}
+}
+
+const linuxMountNamespacesAvailable = await supportsLinuxMountNamespaces();
+
 describe("ptree timeout", () => {
 	it("contains the lifecycle rejection when the caller does not observe exited", async () => {
 		const unhandled = new Set<unknown>();
@@ -71,7 +100,7 @@ describe("ptree timeout", () => {
 		expect(result.stdout).toBe("1");
 	});
 
-	it.skipIf(process.platform !== "linux")("supervises commands without a mounted procfs", async () => {
+	it.skipIf(!linuxMountNamespacesAvailable)("supervises commands without a mounted procfs", async () => {
 		const script = `
 const mountExit = await Bun.spawn(["mount", "-t", "tmpfs", "tmpfs", "/proc"], {
 	stdout: "ignore",
