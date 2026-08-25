@@ -10,6 +10,7 @@ import {
 	TruncatedText,
 	truncateToWidth,
 } from "@oh-my-pi/pi-tui";
+import { isRecord } from "@oh-my-pi/pi-utils";
 import type { TreeFilterMode } from "../../config/settings-schema";
 import { theme } from "../../modes/theme/theme";
 import {
@@ -58,6 +59,15 @@ type FilterMode = TreeFilterMode;
 interface ToolCallInfo {
 	name: string;
 	arguments: Record<string, unknown>;
+}
+
+function advisorNoteText(details: unknown): string {
+	if (!isRecord(details) || !Array.isArray(details.notes)) return "";
+	const notes: string[] = [];
+	for (const note of details.notes) {
+		if (isRecord(note) && typeof note.note === "string") notes.push(note.note);
+	}
+	return notes.join(" ");
 }
 
 class TreeList implements Component {
@@ -372,11 +382,13 @@ class TreeList implements Component {
 			}
 			case "custom_message": {
 				parts.push(entry.customType);
-				if (typeof entry.content === "string") {
-					parts.push(entry.content);
-				} else {
-					parts.push(this.#extractContent(entry.content));
-				}
+				const content =
+					entry.customType === "advisor"
+						? advisorNoteText(entry.details)
+						: typeof entry.content === "string"
+							? entry.content
+							: this.#extractContent(entry.content);
+				if (content) parts.push(content);
 				break;
 			}
 			case "compaction":
@@ -664,12 +676,14 @@ class TreeList implements Component {
 			}
 			case "custom_message": {
 				const content =
-					typeof entry.content === "string"
-						? entry.content
-						: entry.content
-								.filter((c): c is { type: "text"; text: string } => c.type === "text")
-								.map(c => c.text)
-								.join("");
+					entry.customType === "advisor"
+						? advisorNoteText(entry.details)
+						: typeof entry.content === "string"
+							? entry.content
+							: entry.content
+									.filter((c): c is { type: "text"; text: string } => c.type === "text")
+									.map(c => c.text)
+									.join("");
 				result = theme.fg("customMessageLabel", `[${entry.customType}]: `) + normalize(content);
 				break;
 			}
