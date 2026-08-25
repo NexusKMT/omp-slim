@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Cursor `composer-2.5` selections silently serving the Fast variant by pinning the Standard tier with an explicit `{ id: "fast", value: "false" }` request parameter ([#9012](https://github.com/can1357/oh-my-pi/issues/9012)).
+
 ## [18.0.4] - 2026-08-24
 
 ### Fixed
