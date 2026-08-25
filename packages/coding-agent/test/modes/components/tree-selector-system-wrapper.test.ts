@@ -20,6 +20,35 @@ function customMessageTree(customType: string, content: string): SessionTreeNode
 	];
 }
 
+function arrayCustomMessageTree(customType: string, blocks: string[]): SessionTreeNode[] {
+	return [
+		{
+			entry: {
+				type: "custom_message",
+				id: "wrapper-entry",
+				parentId: null,
+				timestamp: "2026-08-25T00:00:00.000Z",
+				customType,
+				content: blocks.map(text => ({ type: "text" as const, text })),
+				display: true,
+			},
+			children: [],
+		},
+	];
+}
+
+function searchResult(tree: SessionTreeNode[], query: string): string {
+	const selector = new TreeSelectorComponent(
+		tree,
+		tree[0]?.entry.id ?? null,
+		60,
+		() => {},
+		() => {},
+	);
+	for (const ch of query) selector.handleInput(ch);
+	return Bun.stripANSI(selector.render(120).join("\n"));
+}
+
 function render(tree: SessionTreeNode[]): string {
 	const selector = new TreeSelectorComponent(
 		tree,
@@ -98,5 +127,13 @@ describe("TreeSelectorComponent system-wrapper message rendering", () => {
 
 		expect(rendered).toContain("[async-result]: Result: <system-reminder>literal payload</system-reminder>");
 		expect(rendered).not.toContain("<system-notice>");
+	});
+
+	it("keeps the outer wrapper out of the search index for a long array-valued message", () => {
+		const body = `Background job bg_1 completed. ${"detail ".repeat(60)}`.trim();
+		const tree = arrayCustomMessageTree("async-result", [`<system-notice>\n${body}\n</system-notice>`]);
+
+		expect(searchResult(tree, "system-notice")).toContain("No entries match");
+		expect(searchResult(tree, "Background")).not.toContain("No entries match");
 	});
 });
