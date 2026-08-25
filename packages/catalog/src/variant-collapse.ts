@@ -211,11 +211,13 @@ function devinTierFamily(
 	defaultEffort?: Effort,
 ): EffortVariantFamily {
 	const family = tierFamily(id, name, routes, efforts);
-	if (defaultEffort === undefined) return family;
+	if (defaultEffort === undefined || family.thinking === undefined) return family;
 	const defaultMember = family.routing[defaultEffort];
 	return {
 		...family,
-		...(defaultMember !== undefined ? { defaultMember } : undefined),
+		...(defaultMember !== undefined
+			? { members: [defaultMember, ...family.members.filter(member => member !== defaultMember)], defaultMember }
+			: undefined),
 		thinking: { ...family.thinking, defaultLevel: defaultEffort },
 	};
 }

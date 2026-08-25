@@ -1,6 +1,8 @@
 import { gunzipSync, gzipSync } from "node:zlib";
 
 import {
+	AssignModelRequestSchema,
+	AssignModelResponseSchema,
 	CacheControlType,
 	type ChatMessagePrompt,
 	ChatMessagePromptSchema,
@@ -12,16 +14,14 @@ import {
 	ChatToolDefinitionSchema,
 	CompletionConfigurationSchema,
 	ConversationalPlannerMode,
-	AssignModelRequestSchema,
-	AssignModelResponseSchema,
 	GetChatMessageRequestSchema,
 	GetChatMessageResponseSchema,
 	GetUserJwtRequestSchema,
 	GetUserJwtResponseSchema,
 	type ImageData,
-	type ModelAssignment,
 	ImageDataSchema,
 	MetadataSchema,
+	type ModelAssignment,
 	PromptCacheOptionsSchema,
 	StopReason,
 } from "@oh-my-pi/pi-catalog/discovery/devin-proto";

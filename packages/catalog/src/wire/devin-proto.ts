@@ -6,7 +6,7 @@
  */
 
 import { gunzipSync } from "node:zlib";
-import { type DescMessage, fromBinary, type MessageShape } from "@bufbuild/protobuf";
+import { fromBinary, type MessageCodec, type ProtoMessage } from "../discovery/protobuf";
 
 /**
  * Decode a unary Devin Connect response. Edges variously return bare protobuf
@@ -14,10 +14,10 @@ import { type DescMessage, fromBinary, type MessageShape } from "@bufbuild/proto
  * direct decode is attempted before the gzip fallback. Returns `null` when
  * neither representation decodes against `schema`.
  */
-export function decodeDevinUnaryMessage<Desc extends DescMessage>(
-	schema: Desc,
+export function decodeDevinUnaryMessage<TMessage extends ProtoMessage>(
+	schema: MessageCodec<TMessage>,
 	payload: Uint8Array,
-): MessageShape<Desc> | null {
+): TMessage | null {
 	try {
 		return fromBinary(schema, payload);
 	} catch {

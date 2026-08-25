@@ -1,18 +1,15 @@
 import { beforeAll, describe, expect, it } from "bun:test";
-import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import type { FetchImpl } from "@oh-my-pi/pi-utils";
 // Import from source, not the package specifier: the workspace `node_modules`
 // copy resolves to the primary checkout, not this worktree.
 import { buildModel } from "../src/build";
 import { fetchDevinModels } from "../src/discovery/devin";
 import {
-	GetCliModelConfigsRequestSchema,
-	GetCliModelConfigsResponseSchema,
-} from "../src/discovery/devin-gen/exa/api_server_pb/api_server_pb";
-import {
 	type ClientModelConfig,
 	ClientModelConfigSchema,
 	DisplayOption,
+	GetCliModelConfigsRequestSchema,
+	GetCliModelConfigsResponseSchema,
 	type Metadata,
 	ModelDimensionKind,
 	ModelDimensionSchema,
@@ -22,7 +19,8 @@ import {
 	ModelFamilyMetadataValueSchema,
 	ModelFeaturesSchema,
 	ModelInfoSchema,
-} from "../src/discovery/devin-gen/exa/codeium_common_pb/codeium_common_pb";
+} from "../src/discovery/devin-proto";
+import { create, fromBinary, toBinary } from "../src/discovery/protobuf";
 import { Effort } from "../src/effort";
 import { CATALOG_PROVIDERS } from "../src/provider-models/descriptors";
 import { DEVIN_STATIC_MODELS, devinModelManagerOptions } from "../src/provider-models/special";
@@ -57,6 +55,10 @@ interface ConfigInit {
 	effortOrder?: number;
 	/** `Fast Mode` entry: `true` -> order 1 (fast lane), `false` -> order 0. */
 	fast?: boolean;
+	/** `Thinking` entry: `true` -> order 1, `false` -> order 0. */
+	thinking?: boolean;
+	/** `1M Context` entry: `true` -> order 1, `false` -> order 0. */
+	oneMillionContext?: boolean;
 	isDefault?: boolean;
 	/** Emit no `modelInfo` at all — the pre-`modelFeatures` config shape. */
 	omitModelInfo?: boolean;
@@ -84,6 +86,28 @@ function config(init: ConfigInit): ClientModelConfig {
 				value: create(ModelFamilyMetadataValueSchema, {
 					name: init.fast ? "Fast" : "Standard",
 					order: init.fast ? 1 : 0,
+				}),
+			}),
+		);
+	}
+	if (init.thinking !== undefined) {
+		entries.push(
+			create(ModelFamilyMetadataEntrySchema, {
+				key: "Thinking",
+				value: create(ModelFamilyMetadataValueSchema, {
+					name: init.thinking ? "Thinking" : "No Thinking",
+					order: init.thinking ? 1 : 0,
+				}),
+			}),
+		);
+	}
+	if (init.oneMillionContext !== undefined) {
+		entries.push(
+			create(ModelFamilyMetadataEntrySchema, {
+				key: "1M Context",
+				value: create(ModelFamilyMetadataValueSchema, {
+					name: init.oneMillionContext ? "1M Context" : "Standard Context",
+					order: init.oneMillionContext ? 1 : 0,
 				}),
 			}),
 		);
@@ -192,6 +216,50 @@ const FIXTURE_CONFIGS: readonly ClientModelConfig[] = [
 		],
 		{ fast: true },
 	),
+	// Thinking and context are independent native axes. They become an off/high
+	// effort pair on standard and 1M logical model lanes.
+	config({
+		uid: "claude-sonnet-4-6",
+		label: "Claude Sonnet 4.6",
+		family: "Claude Sonnet 4.6",
+		effort: "High",
+		effortOrder: 3,
+		thinking: false,
+		oneMillionContext: false,
+		contextWindow: 200_000,
+	}),
+	config({
+		uid: "claude-sonnet-4-6-thinking",
+		label: "Claude Sonnet 4.6 Thinking",
+		family: "Claude Sonnet 4.6",
+		effort: "High",
+		effortOrder: 3,
+		thinking: true,
+		oneMillionContext: false,
+		contextWindow: 200_000,
+		isDefault: true,
+	}),
+	config({
+		uid: "claude-sonnet-4-6-1m",
+		label: "Claude Sonnet 4.6 1M",
+		family: "Claude Sonnet 4.6",
+		effort: "High",
+		effortOrder: 3,
+		thinking: false,
+		oneMillionContext: true,
+		contextWindow: 1_000_000,
+	}),
+	config({
+		uid: "claude-sonnet-4-6-thinking-1m",
+		label: "Claude Sonnet 4.6 Thinking 1M",
+		family: "Claude Sonnet 4.6",
+		effort: "High",
+		effortOrder: 3,
+		thinking: true,
+		oneMillionContext: true,
+		contextWindow: 1_000_000,
+		isDefault: true,
+	}),
 	// A family the static fallback table has never heard of: collapsing it can
 	// only come from the server's own `modelFamilyMetadata`.
 	...tiers("Mercury 9.1 Ion", "mercury-9-1-ion", [
@@ -477,6 +545,26 @@ describe("devin server-declared family collapsing", () => {
 		// Server truth wins over the static fallback table's five-tier ladder.
 		expect(thinking("claude-opus-5-fast").efforts).toEqual([Effort.Medium, Effort.High]);
 		expect(model("claude-opus-5-fast").requestModelId).toBe("claude-opus-5-high-fast");
+	});
+
+	it("splits context lanes and maps the Thinking axis onto off and high routes", () => {
+		const standard = model("claude-sonnet-4-6");
+		expect(standard.name).toBe("Claude Sonnet 4.6");
+		expect(standard.contextWindow).toBe(200_000);
+		expect(standard.requestModelId).toBe("claude-sonnet-4-6-thinking");
+		expect(thinking("claude-sonnet-4-6").effortRouting).toEqual({
+			off: "claude-sonnet-4-6",
+			high: "claude-sonnet-4-6-thinking",
+		});
+
+		const longContext = model("claude-sonnet-4-6-1m");
+		expect(longContext.name).toBe("Claude Sonnet 4.6 1M");
+		expect(longContext.contextWindow).toBe(1_000_000);
+		expect(longContext.requestModelId).toBe("claude-sonnet-4-6-thinking-1m");
+		expect(thinking("claude-sonnet-4-6-1m").effortRouting).toEqual({
+			off: "claude-sonnet-4-6-1m",
+			high: "claude-sonnet-4-6-thinking-1m",
+		});
 	});
 
 	it("keeps configs whose family declares no effort axis on their wire uid", () => {

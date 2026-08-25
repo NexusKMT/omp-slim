@@ -7,9 +7,9 @@ import { DEVIN_DEFAULT_BASE_URL, devinDiscoveryMetadata } from "../wire/devin";
 import { decodeDevinUnaryMessage } from "../wire/devin-proto";
 import {
 	type ClientModelConfig,
+	DisplayOption,
 	GetCliModelConfigsRequestSchema,
 	GetCliModelConfigsResponseSchema,
-	DisplayOption,
 	MetadataSchema,
 	ModelDimensionKind,
 } from "./devin-proto";
@@ -135,10 +135,17 @@ const DEVIN_FAMILY_EFFORT_KEYS: Readonly<Partial<Record<string, true>>> = { effo
 /** `modelFamilyMetadata` entry key for the service-tier axis; order 1 is the fast lane. */
 const DEVIN_FAMILY_FAST_KEY = "fast mode";
 const DEVIN_FAMILY_FAST_ORDER = 1;
+/** Boolean reasoning axis used by Claude families whose effort name alone is ambiguous. */
+const DEVIN_FAMILY_THINKING_KEY = "thinking";
+const DEVIN_FAMILY_THINKING_ORDER = 1;
+/** Context-window axis; order 1 selects the separate 1M-context lane. */
+const DEVIN_FAMILY_CONTEXT_1M_KEY = "1m context";
+const DEVIN_FAMILY_CONTEXT_1M_ORDER = 1;
 
 /** Effort-entry display names, normalized to a space-free token, mapped onto pi efforts. */
 const DEVIN_FAMILY_EFFORT_BY_NAME: Readonly<Partial<Record<string, Effort | "off">>> = {
 	none: "off",
+	nothinking: "off",
 	minimal: Effort.Minimal,
 	low: Effort.Low,
 	medium: Effort.Medium,
@@ -148,11 +155,11 @@ const DEVIN_FAMILY_EFFORT_BY_NAME: Readonly<Partial<Record<string, Effort | "off
 };
 
 /**
- * One server-declared family lane. A family's Fast Mode sibling is a separate
- * lane (and a separate logical model), never a second routing dimension.
+ * One server-declared family lane. Fast service and 1M context are separate
+ * logical models; reasoning effort remains the lane's only selectable axis.
  */
 interface DevinFamilyLane {
-	/** Logical id: the normalized family label, `-fast` for the fast lane. */
+	/** Logical id: normalized family label plus optional `-1m` / `-fast` suffixes. */
 	id: string;
 	name: string;
 	/** Member wire uids in server order. */
@@ -175,7 +182,9 @@ function collectDevinFamilyLane(lanes: Map<string, DevinFamilyLane>, config: Cli
 	if (!label) return;
 
 	let effort: Effort | "off" | undefined;
+	let thinking: boolean | undefined;
 	let fast = false;
+	let oneMillionContext = false;
 	for (const entry of metadata.entries) {
 		const value = entry.value;
 		if (value === undefined) continue;
@@ -189,10 +198,21 @@ function collectDevinFamilyLane(lanes: Map<string, DevinFamilyLane>, config: Cli
 			fast = value.order === DEVIN_FAMILY_FAST_ORDER;
 			continue;
 		}
+		if (key === DEVIN_FAMILY_THINKING_KEY) {
+			thinking = value.order === DEVIN_FAMILY_THINKING_ORDER;
+			continue;
+		}
+		if (key === DEVIN_FAMILY_CONTEXT_1M_KEY) {
+			oneMillionContext = value.order === DEVIN_FAMILY_CONTEXT_1M_ORDER;
+			continue;
+		}
 		if (DEVIN_FAMILY_EFFORT_KEYS[key]) {
 			effort = DEVIN_FAMILY_EFFORT_BY_NAME[value.name.toLowerCase().replace(/[^a-z0-9]+/g, "")];
 		}
 	}
+	// Claude's paired non-thinking and thinking configs share the same "High"
+	// effort label; its explicit Thinking axis decides whether the route is off.
+	if (thinking === false) effort = "off";
 
 	// Family label as an OMP id: "GPT-5.6 Sol" -> "gpt-5-6-sol".
 	const baseId = label
@@ -200,10 +220,11 @@ function collectDevinFamilyLane(lanes: Map<string, DevinFamilyLane>, config: Cli
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "");
 	if (!baseId) return;
-	const laneId = fast ? `${baseId}-fast` : baseId;
+	const laneId = `${baseId}${oneMillionContext ? "-1m" : ""}${fast ? "-fast" : ""}`;
 	let lane = lanes.get(laneId);
 	if (lane === undefined) {
-		lane = { id: laneId, name: fast ? `${label} Fast` : label, members: [], routing: {} };
+		const name = `${label}${oneMillionContext ? " 1M" : ""}${fast ? " Fast" : ""}`;
+		lane = { id: laneId, name, members: [], routing: {} };
 		lanes.set(laneId, lane);
 	}
 	lane.members.push(uid);
@@ -243,6 +264,7 @@ function devinDynamicFamilies(lanes: Iterable<DevinFamilyLane>): EffortVariantFa
 			name: lane.name,
 			members,
 			routing: lane.routing,
+			...(defaultMember !== undefined ? { defaultMember } : {}),
 			thinking: {
 				mode: "effort",
 				efforts,

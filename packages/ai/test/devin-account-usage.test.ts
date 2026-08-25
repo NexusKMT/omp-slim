@@ -1,29 +1,34 @@
 import { describe, expect, test } from "bun:test";
 import { gzipSync } from "node:zlib";
-import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
-import { timestampFromMs } from "@bufbuild/protobuf/wkt";
 import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
 import type { UsageFetchParams, UsageLimit, UsageReport } from "@oh-my-pi/pi-ai/usage";
 import { devinUsageProvider } from "@oh-my-pi/pi-ai/usage/devin";
 import {
 	BillingStrategy,
 	DevinPlanInfoSchema,
+	GetUserStatusRequestSchema,
+	GetUserStatusResponseSchema,
 	type Metadata,
 	PlanInfoSchema,
 	PlanStatusSchema,
 	TeamsTier,
+	TimestampSchema,
 	UserStatusSchema,
-} from "@oh-my-pi/pi-catalog/discovery/devin-gen/exa/codeium_common_pb/codeium_common_pb";
-import {
-	GetUserStatusRequestSchema,
-	GetUserStatusResponseSchema,
-} from "@oh-my-pi/pi-catalog/discovery/devin-gen/exa/seat_management_pb/seat_management_pb";
+} from "@oh-my-pi/pi-catalog/discovery/devin-proto";
+import { create, fromBinary, toBinary } from "@oh-my-pi/pi-catalog/discovery/protobuf";
 
 const USER_STATUS_URL = "https://server.codeium.com/exa.seat_management_pb.SeatManagementService/GetUserStatus";
 const PLAN_START_MS = 1_767_225_600_000;
 const PLAN_END_MS = 1_769_904_000_000;
 const DAILY_RESET_SECONDS = 1_767_312_000n;
 const WEEKLY_RESET_SECONDS = 1_767_830_400n;
+
+function timestampFromMs(timestamp: number) {
+	return create(TimestampSchema, {
+		seconds: BigInt(Math.floor(timestamp / 1_000)),
+		nanos: (timestamp % 1_000) * 1_000_000,
+	});
+}
 /** Mirrors the provider's `Metadata.os` mapping so the assertion holds on every host. */
 const EXPECTED_OS = process.platform === "darwin" ? "darwin" : process.platform === "win32" ? "windows" : "linux";
 
@@ -183,8 +188,8 @@ describe("Devin account usage", () => {
 		expect(capture.metadata?.ideName).toBe("devin-cli");
 		expect(capture.metadata?.ideType).toBe("chisel");
 		expect(capture.metadata?.extensionName).toBe("chisel");
-		expect(capture.metadata?.ideVersion).toBe("3000.4.16");
-		expect(capture.metadata?.extensionVersion).toBe("3000.4.16");
+		expect(capture.metadata?.ideVersion).toBe("3000.6.2");
+		expect(capture.metadata?.extensionVersion).toBe("3000.6.2");
 		expect(capture.metadata?.locale).toBe("en");
 		expect(capture.metadata?.os).toBe(EXPECTED_OS);
 

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test";
 import { gunzipSync } from "node:zlib";
-import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { streamDevin } from "@oh-my-pi/pi-ai/providers/devin";
 import type { Context, Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
@@ -8,16 +7,15 @@ import {
 	type AssignModelRequest,
 	AssignModelRequestSchema,
 	AssignModelResponseSchema,
+	ChatMessageSource,
 	type GetChatMessageRequest,
 	GetChatMessageRequestSchema,
 	GetChatMessageResponseSchema,
+	GetUserJwtResponseSchema,
 	ModelAssignmentSchema,
-} from "@oh-my-pi/pi-catalog/discovery/devin-gen/exa/api_server_pb/api_server_pb";
-import { GetUserJwtResponseSchema } from "@oh-my-pi/pi-catalog/discovery/devin-gen/exa/auth_pb/auth_pb";
-import {
-	ChatMessageSource,
 	StopReason,
-} from "@oh-my-pi/pi-catalog/discovery/devin-gen/exa/codeium_common_pb/codeium_common_pb";
+} from "@oh-my-pi/pi-catalog/discovery/devin-proto";
+import { create, fromBinary, toBinary } from "@oh-my-pi/pi-catalog/discovery/protobuf";
 import type { DevinCompat } from "@oh-my-pi/pi-catalog/types";
 
 const AUTH_PAYLOAD = toBinary(GetUserJwtResponseSchema, create(GetUserJwtResponseSchema, { userJwt: "user-jwt" }));
@@ -157,7 +155,7 @@ describe("streamDevin router assignment", () => {
 			ideName: "devin-cli",
 			ideType: "chisel",
 			extensionName: "chisel",
-			extensionVersion: "3000.4.16",
+			extensionVersion: "3000.6.2",
 			apiKey: "devin-session-token$token",
 			userJwt: "",
 		});

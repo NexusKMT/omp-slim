@@ -9,20 +9,18 @@
  * surface on that identity tuple.
  */
 
-import { create, toBinary } from "@bufbuild/protobuf";
-import { timestampMs } from "@bufbuild/protobuf/wkt";
 import {
 	BillingStrategy,
+	GetUserStatusRequestSchema,
+	type GetUserStatusResponse,
+	GetUserStatusResponseSchema,
 	MetadataSchema,
 	type PlanInfo,
 	type PlanStatus,
 	TeamsTier,
-} from "@oh-my-pi/pi-catalog/discovery/devin-gen/exa/codeium_common_pb/codeium_common_pb";
-import {
-	GetUserStatusRequestSchema,
-	type GetUserStatusResponse,
-	GetUserStatusResponseSchema,
-} from "@oh-my-pi/pi-catalog/discovery/devin-gen/exa/seat_management_pb/seat_management_pb";
+	type Timestamp,
+} from "@oh-my-pi/pi-catalog/discovery/devin-proto";
+import { create, toBinary } from "@oh-my-pi/pi-catalog/discovery/protobuf";
 import { DEVIN_DEFAULT_BASE_URL, devinCliMetadata, normalizeDevinSessionToken } from "@oh-my-pi/pi-catalog/wire/devin";
 import { decodeDevinUnaryMessage } from "@oh-my-pi/pi-catalog/wire/devin-proto";
 import type {
@@ -45,6 +43,10 @@ const PROVIDER = "devin";
 const GET_USER_STATUS_PATH = "/exa.seat_management_pb.SeatManagementService/GetUserStatus";
 
 const MICROS_PER_USD = 1_000_000;
+
+function timestampMs(timestamp: Timestamp): number {
+	return Number(timestamp.seconds) * 1_000 + timestamp.nanos / 1_000_000;
+}
 
 /** Session token as the CLI sends it: the wire format carries the scheme prefix. */
 function devinSessionToken(credential: UsageCredential): string | undefined {
