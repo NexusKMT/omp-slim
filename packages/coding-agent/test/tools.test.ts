@@ -970,11 +970,12 @@ describe("Coding Agent Tools", () => {
 			}
 		});
 
-		it("should drop duplicated raw text while preserving structured MCP content (#9687)", async () => {
-			// MCP results carry a verbatim second copy of their content text under
-			// `details.rawContent`. The spill artifact replaces that text copy, but
-			// resource and image entries retain structure unavailable in the
-			// formatted artifact and must remain visible to eval callers.
+		it("should strip payloads duplicated by structured MCP blocks (#9687)", async () => {
+			// MCP results carry a second copy of the payload under `details.rawContent`.
+			// Everything already stored elsewhere must be pruned so it cannot re-inflate
+			// on-disk size: text and `resource.text` land in the spill artifact, image
+			// data survives on the result content. Only resource URI/MIME/blob metadata,
+			// which has no other home, is retained.
 			const spillSettings = Settings.isolated({
 				"tools.artifactSpillThreshold": 20,
 				"tools.artifactTailBytes": 64,
@@ -990,13 +991,14 @@ describe("Coding Agent Tools", () => {
 			};
 
 			const payload = "SEARCH RESULT LINE\n".repeat(4000);
+			const resourceMeta = {
+				uri: "file:///workspace/result.bin",
+				mimeType: "application/octet-stream",
+				blob: "AAECAw==",
+			};
 			const resource = {
 				type: "resource" as const,
-				resource: {
-					uri: "file:///workspace/result.bin",
-					mimeType: "application/octet-stream",
-					blob: "AAECAw==",
-				},
+				resource: { ...resourceMeta, text: "duplicated resource body\n".repeat(200) },
 			};
 			const image = { type: "image" as const, data: "iVBORw0KGgo=", mimeType: "image/png" };
 			const mcpTool = {
@@ -1025,8 +1027,15 @@ describe("Coding Agent Tools", () => {
 				expect(truncation?.artifactId).toBeDefined();
 				expect(Buffer.byteLength(getTextOutput(result), "utf-8")).toBeLessThan(Buffer.byteLength(payload, "utf-8"));
 
-				// Only the raw text has a complete representation in the artifact.
-				expect(result.details?.rawContent).toEqual([resource, image]);
+				// Text and image are represented elsewhere; only resource metadata
+				// (without the artifact-stored text) survives on details.rawContent.
+				expect(result.details?.rawContent).toEqual([{ type: "resource", resource: resourceMeta }]);
+				// The image block is preserved on the result content.
+				expect(result.content).toContainEqual({
+					type: "image",
+					data: image.data,
+					mimeType: image.mimeType,
+				});
 
 				const artifactPath = path.join(
 					spillManager.getArtifactsDir()!,

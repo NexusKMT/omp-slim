@@ -794,14 +794,31 @@ async function spillLargeResultToArtifact(
 	const newMeta: OutputMeta = { ...(existingMeta ?? {}), truncation: truncationMeta };
 	const newDetails = { ...(result.details ?? {}), meta: newMeta };
 
-	// MCP details repeat text blocks already captured by the artifact. Remove
-	// only those duplicated strings: resource and image blocks retain structure
-	// (URI, MIME metadata, blobs) that the formatted artifact cannot represent.
+	// MCP details keep a second copy of the payload the spill just bounded. Prune
+	// every part already represented elsewhere so `details.rawContent` cannot
+	// re-inflate the on-disk size: text blocks and `resource.text` are captured
+	// verbatim by the artifact, and image data survives on the result content
+	// (and eval's `images`). Resource URI/MIME/blob metadata has no other home,
+	// so it is retained.
 	const rawContent = newDetails.rawContent;
 	if (Array.isArray(rawContent)) {
-		const structuredContent = rawContent.filter(
-			(block: unknown) => !(isRecord(block) && block.type === "text" && typeof block.text === "string"),
-		);
+		const structuredContent: unknown[] = [];
+		for (const block of rawContent) {
+			if (!isRecord(block)) {
+				structuredContent.push(block);
+				continue;
+			}
+			// Text and image payloads live in the artifact / result content.
+			if (block.type === "text" || block.type === "image") continue;
+			// Resource text is folded into the artifact; keep the rest of the resource.
+			if (block.type === "resource" && isRecord(block.resource) && "text" in block.resource) {
+				const resource = { ...block.resource };
+				delete resource.text;
+				structuredContent.push({ ...block, resource });
+				continue;
+			}
+			structuredContent.push(block);
+		}
 		if (structuredContent.length > 0) {
 			newDetails.rawContent = structuredContent;
 		} else {
