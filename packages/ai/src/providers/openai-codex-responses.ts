@@ -2722,6 +2722,34 @@ class CodexStreamProcessor {
 		return true;
 	}
 
+	/**
+	 * Emit balancing `*_end` events for every block that opened (pushed a
+	 * `*_start`) but never committed visible content, so a retry that resets
+	 * `output` and replays cannot leave the consumer with an orphaned
+	 * `text_start`/`thinking_start` from the abandoned attempt. Only reachable
+	 * blocks are empty text/reasoning ones — a committed tool/text block blocks
+	 * the retry upstream.
+	 */
+	#closeOpenBlocksForReplay(): void {
+		const { runtime, output, stream } = this;
+		const open = new Set<CodexOpenItem>(runtime.openItems.values());
+		for (const entry of runtime.openItemsByOutputIndex.values()) open.add(entry);
+		if (runtime.currentEntry) open.add(runtime.currentEntry);
+		for (const entry of open) {
+			const block = entry.block;
+			if (block?.type === "thinking") {
+				stream.push({
+					type: "thinking_end",
+					contentIndex: entry.contentIndex,
+					content: block.thinking,
+					partial: output,
+				});
+			} else if (block?.type === "text") {
+				stream.push({ type: "text_end", contentIndex: entry.contentIndex, content: block.text, partial: output });
+			}
+		}
+	}
+
 	async #tryRetryProviderError(error: unknown): Promise<boolean> {
 		const retryable =
 			error instanceof CodexProviderStreamError
@@ -2746,6 +2774,10 @@ class CodexStreamProcessor {
 			return false;
 		}
 
+		// A leading `output_item.added` already pushed a `*_start` for the (empty)
+		// open block; balance it with the matching end before the reset+replay so
+		// consumers never see an orphaned start from the abandoned attempt.
+		this.#closeOpenBlocksForReplay();
 		this.runtime.providerRetryAttempt += 1;
 		const websocketState = this.requestContext.websocketState;
 		if (websocketState) {

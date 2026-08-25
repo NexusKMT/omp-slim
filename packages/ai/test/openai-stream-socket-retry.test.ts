@@ -268,14 +268,22 @@ describe("OpenAI-family mid-stream socket-close retry", () => {
 				: completedCodexSse("codex recovered after empty block");
 		});
 
-		const result = await streamOpenAICodexResponses(codexModel, context, {
+		const events: string[] = [];
+		const stream = streamOpenAICodexResponses(codexModel, context, {
 			apiKey: "test-key",
 			fetch: fetchMock,
-		}).result();
+		});
+		for await (const event of stream) events.push(event.type);
+		const result = await stream.result();
 
 		expect(requests).toBe(2);
 		expect(result.stopReason).toBe("stop");
 		expect(result.content.find(block => block.type === "text")?.text).toBe("codex recovered after empty block");
+		// The abandoned attempt's text_start is balanced by a text_end before the
+		// replay: no orphaned block-start reaches the consumer.
+		expect(events.filter(type => type === "text_start")).toHaveLength(
+			events.filter(type => type === "text_end").length,
+		);
 	});
 
 	it("does not retry Codex SSE after text output commits", async () => {
