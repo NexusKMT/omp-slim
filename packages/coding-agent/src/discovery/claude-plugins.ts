@@ -250,7 +250,8 @@ async function loadSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
 // =============================================================================
 
 async function loadRules(ctx: LoadContext): Promise<LoadResult<Rule>> {
-	const { roots, warnings } = await allowedRoots(ctx, "other");
+	const { roots, warnings: rootWarnings } = await allowedRoots(ctx, "other");
+	const warnings = [...rootWarnings];
 	const results = await Promise.all(
 		roots.map(root =>
 			loadFilesFromDir<Rule>(ctx, path.join(root.path, "rules"), PROVIDER_ID, root.scope, {
