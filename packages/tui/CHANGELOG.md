@@ -11,7 +11,8 @@
 - History replay batches now bottom-split into leading viewport space and serialize the complete replay remainder plus final viewport in one synchronous terminal write.
 
 ### Fixed
-- Fixed image previews rendering as PUA garbage inside Paseo terminals by dropping the Kitty image protocol when `PASEO_TERMINAL_ID` is present ([#9724](https://github.com/can1357/oh-my-pi/pull/9724) by [@aproto9787](https://github.com/aproto9787)).
+
+- Fixed image previews rendering as PUA garbage inside Paseo terminals by dropping the Kitty image protocol when `PASEO_TERMINAL_ID` is present.
 
 - Fixed graceful terminal shutdown leaving eligible finalized output in the mutable viewport instead of retiring it before shell handoff.
 - Fixed a latched destructive scrollback rebuild (settled rebuild-mode resize, display reset) erasing and re-streaming the whole transcript during stop; the latch is dropped and shutdown writes only the un-retired tail.
