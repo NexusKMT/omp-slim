@@ -452,11 +452,8 @@ describe("RelayBridge Runtime sessions", () => {
 		ack(bridge, ext, "send"); // Runtime.enable leg
 		await flush();
 
-		const results = cdp.messages
-			.filter(message => (message.id === enable1 || message.id === enable2) && "result" in message)
-			.map(message => message.id)
-			.sort((a, b) => (a as number) - (b as number));
-		expect(results).toEqual([enable1, enable2]);
+		expect(cdp.messages.filter(message => message.id === enable1 && "result" in message)).toHaveLength(1);
+		expect(cdp.messages.filter(message => message.id === enable2 && "result" in message)).toHaveLength(1);
 	});
 
 	it("fails a pipelined duplicate Runtime.enable when the root enable fails", async () => {
@@ -478,13 +475,41 @@ describe("RelayBridge Runtime sessions", () => {
 		nack(bridge, ext, "send");
 		await flush();
 
-		const errored = cdp.messages
-			.filter(message => (message.id === enable1 || message.id === enable2) && "error" in message)
-			.map(message => message.id)
-			.sort((a, b) => (a as number) - (b as number));
-		expect(errored).toEqual([enable1, enable2]);
+		expect(cdp.messages.filter(message => message.id === enable1 && "error" in message)).toHaveLength(1);
+		expect(cdp.messages.filter(message => message.id === enable2 && "error" in message)).toHaveLength(1);
 		expect(
 			cdp.messages.filter(message => (message.id === enable1 || message.id === enable2) && "result" in message),
+		).toEqual([]);
+	});
+
+	it("preserves the latest disable when an older and newer enable both fail", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		const sessionId = await attachPage(bridge, ext, cdp, connId, 1);
+
+		bridge.cdpMessage(connId, JSON.stringify({ id: ++msgSeq, sessionId, method: "Runtime.enable" }));
+		await flush();
+		bridge.cdpMessage(connId, JSON.stringify({ id: ++msgSeq, sessionId, method: "Runtime.disable" }));
+		const latestEnable = ++msgSeq;
+		bridge.cdpMessage(connId, JSON.stringify({ id: latestEnable, sessionId, method: "Runtime.enable" }));
+		await flush();
+
+		nack(bridge, ext, "send");
+		await flush();
+		expect(cdp.messages.filter(message => message.id === latestEnable && "error" in message)).toHaveLength(1);
+
+		const context = { context: { id: 91, uniqueId: "context-91" } };
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "cdpEvent", tabId: 1, method: "Runtime.executionContextCreated", params: context }),
+		);
+		expect(
+			cdp.messages.filter(
+				message => message.sessionId === sessionId && message.method === "Runtime.executionContextCreated",
+			),
 		).toEqual([]);
 	});
 });

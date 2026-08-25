@@ -55,6 +55,8 @@ interface SessionRef {
 	readonly runtimeContexts: Set<number>;
 	/** In-flight `Runtime.enable` for this session; duplicates await it. */
 	runtimeEnabling: Promise<void> | null;
+	/** Monotonic ownership token for enable rollback and replay. */
+	runtimeEpoch: number;
 }
 
 interface TargetInfo {
@@ -420,6 +422,7 @@ export class RelayBridge {
 	): Promise<void> {
 		if (msg.method === "Runtime.disable") {
 			ref.runtimeState = "disabled";
+			ref.runtimeEpoch++;
 			ref.runtimeContexts.clear();
 			// Abandon any in-flight enable's ownership: a later enable starts fresh
 			// rather than joining a cycle that predates this disable.
@@ -467,6 +470,7 @@ export class RelayBridge {
 	 */
 	async #enableSessionRuntime(conn: CdpConnection, sessionId: string, ref: SessionRef): Promise<void> {
 		const prev = ref.runtimeState;
+		const epoch = ++ref.runtimeEpoch;
 		ref.runtimeState = "enabled";
 		const tab = this.#tabs.get(ref.tabId);
 		if (!tab) {
@@ -475,14 +479,16 @@ export class RelayBridge {
 		}
 		try {
 			await this.#ensureRuntimeEnabled(tab);
-			// A disable pipelined behind this enable may have resolved while the
-			// root RPC was in flight; only replay if we still own an enabled ref.
-			if (conn.sessions.get(sessionId) === ref && ref.runtimeState === "enabled") {
+			// A disable or newer enable may have taken ownership while the root
+			// RPC was in flight; only the latest enable may replay or roll back.
+			if (conn.sessions.get(sessionId) === ref && ref.runtimeEpoch === epoch && ref.runtimeState === "enabled") {
 				this.#replayRuntimeContexts(conn, sessionId, ref, tab);
 			}
 		} catch (err) {
-			if (ref.runtimeState === "enabled") ref.runtimeState = prev;
-			ref.runtimeContexts.clear();
+			if (ref.runtimeEpoch === epoch) {
+				ref.runtimeState = prev;
+				ref.runtimeContexts.clear();
+			}
 			throw err;
 		}
 	}
@@ -999,6 +1005,7 @@ export class RelayBridge {
 			runtimeState: "default",
 			runtimeContexts: new Set(),
 			runtimeEnabling: null,
+			runtimeEpoch: 0,
 		});
 		return sessionId;
 	}
