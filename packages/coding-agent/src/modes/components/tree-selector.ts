@@ -107,6 +107,16 @@ function advisorTreeDisplay(details: unknown): AdvisorTreeDisplay {
 	return { qualifier: [...advisors, ...severities].join(", "), text: notes.join(" ") };
 }
 
+/**
+ * Strip the model-facing `<system-notice>` / `<system-reminder>` (and any other
+ * `<system-*>`) wrapper tags framing injects around custom-message content, so
+ * the session tree shows the human-readable body rather than the XML envelope
+ * (issue #9755, following the advisor fix in #9708).
+ */
+function stripSystemWrapperTags(content: string): string {
+	return content.replace(/<\/?system-[\w-]+(?:\s[^>]*)?>/gi, "");
+}
+
 class TreeList implements Component {
 	#flatNodes: FlatNode[] = [];
 	#filteredNodes: FlatNode[] = [];
@@ -424,7 +434,9 @@ class TreeList implements Component {
 					if (qualifier) parts.push(qualifier);
 					if (text) parts.push(text);
 				} else {
-					const content = typeof entry.content === "string" ? entry.content : this.#extractContent(entry.content);
+					const content = stripSystemWrapperTags(
+						typeof entry.content === "string" ? entry.content : this.#extractContent(entry.content),
+					);
 					if (content) parts.push(content);
 				}
 				break;
@@ -719,13 +731,14 @@ class TreeList implements Component {
 					result = theme.fg("customMessageLabel", label) + normalize(text);
 					break;
 				}
-				const content =
+				const content = stripSystemWrapperTags(
 					typeof entry.content === "string"
 						? entry.content
 						: entry.content
 								.filter((c): c is { type: "text"; text: string } => c.type === "text")
 								.map(c => c.text)
-								.join("");
+								.join(""),
+				);
 				result = theme.fg("customMessageLabel", `[${entry.customType}]: `) + normalize(content);
 				break;
 			}
