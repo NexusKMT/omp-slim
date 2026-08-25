@@ -214,6 +214,29 @@ console.log(JSON.stringify({ id: TERMINAL_ID, imageProtocol: TERMINAL.imageProto
 	});
 });
 
+/**
+ * Build a child-process env for the TERMINAL resolution subprocesses: inherits
+ * the runner's environment, strips every terminal-identification marker and
+ * image-protocol pin, then applies the caller's overrides. Keeps the suite
+ * independent of which terminal it runs inside (full-suite safe).
+ */
+function subprocessEnv(overrides: Record<string, string | undefined>): Record<string, string | undefined> {
+	const env: Record<string, string | undefined> = { ...Bun.env };
+	for (const key of [
+		"PI_FORCE_IMAGE_PROTOCOL",
+		"PASEO_TERMINAL_ID",
+		"KITTY_WINDOW_ID",
+		"GHOSTTY_RESOURCES_DIR",
+		"WEZTERM_PANE",
+		"ITERM_SESSION_ID",
+		"VSCODE_PID",
+		"ALACRITTY_WINDOW_ID",
+	]) {
+		delete env[key];
+	}
+	return { ...env, ...overrides };
+}
+
 describe("Paseo embedder carve-out", () => {
 	it("detects Paseo via PASEO_TERMINAL_ID", () => {
 		expect(isPaseoEmbedder({})).toBe(false);
@@ -229,22 +252,7 @@ describe("Paseo embedder carve-out", () => {
 	});
 
 	it("drops Kitty graphics when Paseo hosts the terminal", async () => {
-		const env: Record<string, string | undefined> = {
-			...Bun.env,
-			TERM_PROGRAM: "kitty",
-			PASEO_TERMINAL_ID: "term-1",
-		};
-		for (const key of [
-			"PI_FORCE_IMAGE_PROTOCOL",
-			"KITTY_WINDOW_ID",
-			"GHOSTTY_RESOURCES_DIR",
-			"WEZTERM_PANE",
-			"ITERM_SESSION_ID",
-			"VSCODE_PID",
-			"ALACRITTY_WINDOW_ID",
-		]) {
-			delete env[key];
-		}
+		const env = subprocessEnv({ TERM_PROGRAM: "kitty", PASEO_TERMINAL_ID: "term-1" });
 
 		const proc = Bun.spawn({
 			cmd: [
@@ -273,8 +281,7 @@ console.log(JSON.stringify({ id: TERMINAL_ID, imageProtocol: TERMINAL.imageProto
 	});
 
 	it("keeps Kitty graphics for a real kitty without PASEO_TERMINAL_ID", async () => {
-		const env: Record<string, string | undefined> = { ...Bun.env, TERM_PROGRAM: "kitty" };
-		for (const key of ["PI_FORCE_IMAGE_PROTOCOL", "PASEO_TERMINAL_ID"]) delete env[key];
+		const env = subprocessEnv({ TERM_PROGRAM: "kitty" });
 
 		const proc = Bun.spawn({
 			cmd: [
