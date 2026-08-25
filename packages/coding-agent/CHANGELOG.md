@@ -26,6 +26,7 @@
 ### Fixed
 
 - Fixed the welcome screen staying at its original width after a terminal resize; a settled rebuild now recomposes it at the new width like the rest of the transcript.
+- Fixed a growing task/tool card clipping already-visible assistant text when both share a height-constrained live viewport; surplus rows now fill ordinary transcript blocks before dynamic tool activity, which collapses to its compact form under pressure ([#9718](https://github.com/can1357/oh-my-pi/issues/9718)).
 - Fixed `omp if-bench` ending an Anthropic model's run on a transient `Refusal (cyber)` classification; the cyber classifier is stochastic near the threshold, so a refused turn is now retried with a fresh session (up to 3 attempts) before it is scored as a run-ending provider failure.
 - Fixed streamed assistant responses crashing when a later provider delta revised earlier Markdown; assistant output now stays mutable until finalization.
 - Fixed an orphaned foreground tool card surviving a later agent turn and pinning the entire transcript outside native scrollback; new turns now seal abandoned cards while preserving background-task updates.
