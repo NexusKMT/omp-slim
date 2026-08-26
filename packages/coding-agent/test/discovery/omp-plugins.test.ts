@@ -359,13 +359,16 @@ test("concurrent scopes snapshot their own effective extensions (no cross-sessio
 	expect(secondRoots.map(root => root.path)).toEqual([secondExt]);
 });
 
-test("explicit-only ctx mode excludes ambient/installed roots on scopeless reload (#9769)", async () => {
-	// A disableExtensionDiscovery session reloads outside the invocation scope.
-	// Its LoadContext must carry explicit-only so the refresh honors only the
-	// explicit roots — never installed plugins the caller opted out of.
+test("explicit-only mode drops the configured lane and installed roots (#9769)", async () => {
+	// A disableExtensionDiscovery / `--no-extensions` session must honor only its
+	// explicit roots on reload — never the ambient `extensions:` (configured
+	// lane) or installed plugins the caller opted out of, even when the struct
+	// still carries a nonempty configured array (round-8 leak).
 	const explicitExt = path.join(tempDir, "explicit-extension");
+	const configuredExt = path.join(tempDir, "configured-extension");
 	const installed = path.join(home, ".omp", "plugins", "node_modules", "installed-extension");
 	buildExtensionPackage(explicitExt, "explicit-skill");
+	buildExtensionPackage(configuredExt, "configured-skill");
 	buildExtensionPackage(installed, "installed-skill");
 	writeFile(
 		path.join(home, ".omp", "plugins", "package.json"),
@@ -374,15 +377,15 @@ test("explicit-only ctx mode excludes ambient/installed roots on scopeless reloa
 
 	const mergeRoots = await listOmpExtensionRoots({
 		...ctx(),
-		extensionRoots: { explicit: [explicitExt], mode: "merge", configured: [] },
+		extensionRoots: { explicit: [explicitExt], mode: "merge", configured: [configuredExt] },
 	});
 	expect(mergeRoots.map(root => path.basename(root.path))).toEqual(
-		expect.arrayContaining(["explicit-extension", "installed-extension"]),
+		expect.arrayContaining(["explicit-extension", "configured-extension", "installed-extension"]),
 	);
 
 	const explicitOnlyRoots = await listOmpExtensionRoots({
 		...ctx(),
-		extensionRoots: { explicit: [explicitExt], mode: "explicit-only", configured: [] },
+		extensionRoots: { explicit: [explicitExt], mode: "explicit-only", configured: [configuredExt] },
 	});
 	expect(explicitOnlyRoots.map(root => root.path)).toEqual([explicitExt]);
 });
