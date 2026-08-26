@@ -1,5 +1,5 @@
-import * as os from "node:os";
 import * as path from "node:path";
+import { getSafeProjectCwd } from "@oh-my-pi/pi-utils";
 import { writeRemoteFile } from "../ssh/file-transfer";
 import type { BlobDestinationId } from "./destinations";
 import type { BlobUploader, BlobUploadRequest, RemoteDeleteAction } from "./publication";
@@ -247,7 +247,7 @@ function createFtpUploader(config: DestinationRuntimeConfig): BlobUploader {
 					stdin: request.bytes,
 					stdout: "ignore",
 					stderr: "pipe",
-					cwd: os.homedir(),
+					cwd: getSafeProjectCwd(),
 				});
 				const stderr = await new Response(process.stderr as ReadableStream<Uint8Array>).text();
 				const exitCode = await process.exited;
