@@ -115,18 +115,17 @@ where
 	let mut seen_paths = HashSet::new();
 
 	for install_path in [registry_path, where_path].into_iter().flatten() {
-		let root = PathBuf::from(&install_path);
-		let normalized_root = normalize_path(&root);
-		if normalized_root.is_empty() || !seen_roots.insert(normalized_root) {
-			continue;
-		}
-		install_roots.push(root);
-
 		for path in git_paths_for_install_root(&install_path) {
 			let normalized_path = normalize_path(Path::new(&path));
 			if !normalized_path.is_empty() && seen_paths.insert(normalized_path) {
 				paths.push(path);
 			}
+		}
+
+		let root = PathBuf::from(&install_path);
+		let normalized_root = normalize_path(&root);
+		if !normalized_root.is_empty() && seen_roots.insert(normalized_root) {
+			install_roots.push(root);
 		}
 	}
 
@@ -373,6 +372,26 @@ mod tests {
 		let discovery = discover_git_with(|| Some(registry_path), || Some(where_path));
 
 		assert_eq!(discovery.install_roots, vec![root.path().to_path_buf()]);
+		assert_eq!(discovery.paths, vec![
+			root.path().join("cmd").to_string_lossy().into_owned(),
+			root.path().join("bin").to_string_lossy().into_owned(),
+			root
+				.path()
+				.join("usr")
+				.join("bin")
+				.to_string_lossy()
+				.into_owned(),
+		]);
+	}
+
+	#[test]
+	fn git_discovery_keeps_valid_candidates_when_duplicate_root_spellings_differ() {
+		let root = git_install_fixture();
+		let clean_path = root.path().to_string_lossy().into_owned();
+		let decorated_path = format!("  \"{clean_path}\"  ");
+
+		let discovery = discover_git_with(|| Some(decorated_path), || Some(clean_path));
+
 		assert_eq!(discovery.paths, vec![
 			root.path().join("cmd").to_string_lossy().into_owned(),
 			root.path().join("bin").to_string_lossy().into_owned(),
