@@ -361,6 +361,7 @@ class SessionEntryIndex {
 export type ReadonlySessionManager = Pick<
 	SessionManager,
 	| "getCwd"
+	| "getRecordedCwd"
 	| "getSessionDir"
 	| "getSessionId"
 	| "getSessionFile"
@@ -461,6 +462,7 @@ export class SessionManager {
 	#cwd: string;
 	/** Additional workspace directories beyond cwd (multi-root). Normalized absolute, deduped, excludes cwd. */
 	#additionalDirectories: string[] = [];
+	#fallbackRuntimeOnly = false;
 	#sessionDir: string;
 	readonly #persist: boolean;
 	readonly #storage: SessionStorage;
@@ -1891,6 +1893,7 @@ export class SessionManager {
 			return;
 		}
 		this.#cwd = resolvedCwd;
+		this.#fallbackRuntimeOnly = true;
 		if (this.#sessionFile) {
 			this.#rememberBreadcrumb(resolvedCwd, this.#sessionFile);
 		}
@@ -1954,6 +1957,11 @@ export class SessionManager {
 	async setAdditionalDirectories(directories: string[]): Promise<void> {
 		const workspace = normalizeSessionWorkspace({ cwd: this.#cwd, directories });
 		const next = additionalWorkspaceDirectories(workspace);
+		if (this.#fallbackRuntimeOnly) {
+			this.#additionalDirectories = next;
+			this.#fallbackRuntimeOnly = false;
+			return;
+		}
 		if (
 			next.length === this.#additionalDirectories.length &&
 			next.every((d, i) => d === this.#additionalDirectories[i])
