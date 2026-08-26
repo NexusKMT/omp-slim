@@ -836,6 +836,30 @@ describe("Settings", () => {
 			expect(savedSettings.defaultThinkingLevel).toBe(Effort.High);
 			expect(savedSettings.enabledModels).toEqual(["openai/gpt-5.2-codex"]);
 		});
+		it("reapplies runtime hooks when a later external edit wins", async () => {
+			await writeSettings({
+				provider: { appendOnlyContext: "auto" },
+			});
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			const received: string[] = [];
+			const unsubscribe = onAppendOnlyModeChanged(value => {
+				received.push(value);
+			});
+
+			try {
+				settings.set("provider.appendOnlyContext", "on");
+				await writeSettings({
+					provider: { appendOnlyContext: "off" },
+				});
+				await settings.flush();
+
+				expect(settings.get("provider.appendOnlyContext")).toBe("off");
+				expect(received).toEqual(["on", "off"]);
+			} finally {
+				unsubscribe();
+			}
+		});
 	});
 
 	describe("model role overrides", () => {

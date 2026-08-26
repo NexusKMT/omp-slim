@@ -2384,6 +2384,15 @@ export class Settings {
 		const modifiedPathMutations = new Map(this.#modifiedPathMutations);
 		const modifiedModelRoleMutations = new Map(this.#modifiedGlobalModelRoleMutations);
 		const globalRolesAtStart = this.#modelRolesFromLayer(this.#global);
+		const previousSignaledValues = {
+			modelRoles: this.get("modelRoles"),
+			sessionAccent: this.get("statusLine.sessionAccent"),
+		};
+		const previousCodeModeValues = this.#codeModeSignalSnapshot();
+		const previousHookValues = new Map<SettingPath, unknown>();
+		for (const key of Object.keys(SETTING_HOOKS) as SettingPath[]) {
+			previousHookValues.set(key, this.get(key));
+		}
 		this.#modified.clear();
 		this.#modifiedGlobalModelRoles.clear();
 		this.#modifiedPathMutations.clear();
@@ -2527,6 +2536,25 @@ export class Settings {
 		}
 
 		this.#rebuildMerged();
+		const nextModelRoles = this.get("modelRoles");
+		if (!Bun.deepEquals(nextModelRoles, previousSignaledValues.modelRoles)) {
+			this.#fireEffectiveSettingChanged("modelRoles", nextModelRoles, previousSignaledValues.modelRoles);
+		}
+		const nextSessionAccent = this.get("statusLine.sessionAccent");
+		if (!Bun.deepEquals(nextSessionAccent, previousSignaledValues.sessionAccent)) {
+			this.#fireEffectiveSettingChanged(
+				"statusLine.sessionAccent",
+				nextSessionAccent,
+				previousSignaledValues.sessionAccent,
+			);
+		}
+		this.#fireCodeModeChangeIfNeeded(previousCodeModeValues);
+		for (const [key, previous] of previousHookValues) {
+			const next = this.get(key);
+			if (!Bun.deepEquals(next, previous)) {
+				SETTING_HOOKS[key]?.(next, previous);
+			}
+		}
 	}
 	#queueProjectSave(): void {
 		if (!this.#persist) return;
