@@ -8,6 +8,11 @@
 ### Changed
 
 - A drifting append-only transcript publication (e.g. a mid-stream theme change) now freezes further mid-stream emission for that block instead of failing the render.
+- The git TUI sidebar now separates new files from tracked changes only in the unstaged section; staged and commit file lists show one list with status letters.
+
+### Fixed
+
+- Clicking a git TUI section header label no longer stages or unstages every file; only the Stage All / Unstage All button does.
 
 ## [18.0.5] - 2026-08-25
 

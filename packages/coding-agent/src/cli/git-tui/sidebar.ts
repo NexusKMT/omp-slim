@@ -72,13 +72,13 @@ const KIND_COLOR: Record<ChangedFile["kind"], "warning" | "success" | "error" | 
 };
 
 const SUMMARY_LIMIT = 72;
-/** Pure additions (new files) render as their own list below the tracked changes. */
+/** Pure additions (new files) render as their own list below the tracked changes, unstaged section only. */
 function isAddition(file: ChangedFile): boolean {
 	return file.kind === "added" || file.kind === "untracked";
 }
 interface SplitFiles {
-	changes: ChangedFile[];
-	additions: ChangedFile[];
+	changes: readonly ChangedFile[];
+	additions: readonly ChangedFile[];
 }
 
 function targetKey(target: Target): string {
@@ -106,9 +106,10 @@ interface TreeDir {
 
 /** File row: status letter, dimmed directory, bright basename, +/− counts. */
 function fileRowText(file: ChangedFile, width: number, selected: boolean, focused: boolean, depth?: number): string {
-	// The additions list is homogeneous, so its rows carry no status letter.
-	const prefix = isAddition(file) ? "" : `${theme.fg(KIND_COLOR[file.kind], KIND_LETTER[file.kind])} `;
-	const prefixWidth = isAddition(file) ? 0 : 2;
+	// The unstaged additions list is homogeneous, so its rows carry no status letter.
+	const bare = file.area === "unstaged" && isAddition(file);
+	const prefix = bare ? "" : `${theme.fg(KIND_COLOR[file.kind], KIND_LETTER[file.kind])} `;
+	const prefixWidth = bare ? 0 : 2;
 	const slash = file.path.lastIndexOf("/");
 	const dir = depth === undefined && slash >= 0 ? file.path.slice(0, slash + 1) : "";
 	const base = slash >= 0 ? file.path.slice(slash + 1) : file.path;
@@ -148,12 +149,25 @@ function dirRowText(entry: FileEntry, width: number, selected: boolean, focused:
 	return selected && focused ? `${withBg(line, selectionBgAnsi())}\x1b[0m` : line;
 }
 
-function sectionHeader(label: string, action: string, width: number, selected: boolean, focused: boolean): string {
+/** Section header row: clicking the action pill stages/unstages; the label only selects. */
+function sectionHeaderRow(
+	label: string,
+	action: string,
+	target: Target,
+	width: number,
+	selected: boolean,
+	focused: boolean,
+): Row {
 	const left = theme.bold(label);
 	const right = softPill(` ${action} `, { active: true });
 	const pad = Math.max(1, width - 2 - visibleWidth(left) - visibleWidth(right));
 	const line = ` ${left}${" ".repeat(pad)}${right} `;
-	return selected && focused ? `${withBg(line, selectionBgAnsi())}\x1b[0m` : line;
+	const from = 1 + visibleWidth(left) + pad;
+	return {
+		text: selected && focused ? `${withBg(line, selectionBgAnsi())}\x1b[0m` : line,
+		target,
+		hits: [{ from, to: from + visibleWidth(right), target }],
+	};
 }
 
 /** Sidebar state machine + renderer. */
@@ -278,11 +292,14 @@ export class Sidebar {
 		return undefined;
 	}
 
-	/** Tracked changes vs pure additions; memoized so entry caches stay identity-stable. */
+	/** Tracked changes vs pure additions (unstaged only; other sections stay one list); memoized so entry caches stay identity-stable. */
 	#splitFiles(section: string, files: readonly ChangedFile[]): SplitFiles {
 		const cached = this.#splitCache.get(section);
 		if (cached?.source === files) return cached.split;
-		const split = { changes: files.filter(file => !isAddition(file)), additions: files.filter(isAddition) };
+		const split =
+			section === "unstaged"
+				? { changes: files.filter(file => !isAddition(file)), additions: files.filter(isAddition) }
+				: { changes: files, additions: [] };
 		this.#splitCache.set(section, { source: files, split });
 		return split;
 	}
@@ -672,6 +689,8 @@ export class Sidebar {
 		if (!target) return;
 		const wasSelected = this.selected && targetKey(this.selected) === targetKey(target);
 		this.#select(target);
+		// Rows with column-scoped buttons only fire when the button itself is hit.
+		if (visible.hits && !hit) return;
 		if (target.kind !== "file" && target.kind !== "summary" && target.kind !== "description") {
 			this.#activate(target);
 		} else if (target.kind === "file" && wasSelected) {
@@ -786,30 +805,30 @@ export class Sidebar {
 	#fileListRows(width: number, isSelected: (target: Target) => boolean): Row[] {
 		const rows: Row[] = [];
 		const stageAll: Target = { kind: "stage-all" };
-		rows.push({
-			text: sectionHeader(
+		rows.push(
+			sectionHeaderRow(
 				`▾ Unstaged Files (${this.#model.unstaged.length})`,
 				"Stage All",
+				stageAll,
 				width,
 				isSelected(stageAll),
 				this.focused,
 			),
-			target: stageAll,
-		});
+		);
 		rows.push(...this.#sectionRows(this.#model.unstaged, "unstaged", width));
 		if (this.#model.unstaged.length === 0) rows.push({ text: theme.fg("dim", "   no unstaged files") });
 		rows.push({ text: "" });
 		const unstageAll: Target = { kind: "unstage-all" };
-		rows.push({
-			text: sectionHeader(
+		rows.push(
+			sectionHeaderRow(
 				`▾ Staged Files (${this.#model.staged.length})`,
 				"Unstage All",
+				unstageAll,
 				width,
 				isSelected(unstageAll),
 				this.focused,
 			),
-			target: unstageAll,
-		});
+		);
 		rows.push(...this.#sectionRows(this.#model.staged, "staged", width));
 		if (this.#model.staged.length === 0) rows.push({ text: theme.fg("dim", "   no staged files") });
 		return rows;
