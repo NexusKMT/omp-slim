@@ -431,6 +431,28 @@ async function handleFormatEndpoint(
 	}
 	if (controller.signal.aborted) return clientClosedResponse(route);
 
+	const supportsOpenAIImageFileReferences =
+		model.api === "openai-responses" ||
+		model.api === "azure-openai-responses" ||
+		model.api === "openai-codex-responses";
+	if (
+		route.label === "openai-responses" &&
+		!supportsOpenAIImageFileReferences &&
+		parsed.context.messages.some(
+			message =>
+				message.role === "toolResult" &&
+				message.content.some(
+					block => block.type === "image" && block.providerFile?.provider === "openai" && block.providerFile.id,
+				),
+		)
+	) {
+		return route.module.formatError(
+			400,
+			"invalid_request_error",
+			"OpenAI image file IDs in tool outputs require a Responses-compatible upstream model",
+		);
+	}
+
 	// Sticky credential id: honour the client's `prompt_cache_key` when
 	// supplied (so external session ids align), otherwise derive from
 	// modelId + system + tools + first message. Mirrored into
