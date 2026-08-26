@@ -226,11 +226,11 @@ export interface HubSendParams {
 }
 
 export async function executeSend(
-	deps: { registry: AgentRegistry; senderId: string; settings: Settings },
+	deps: { registry: AgentRegistry; senderId: string; settings: Settings; sessionFileHint?: string | null },
 	params: HubSendParams,
 	signal?: AbortSignal,
 ): Promise<AgentToolResult<CoordinationDetails>> {
-	const { registry, senderId, settings } = deps;
+	const { registry, senderId, settings, sessionFileHint } = deps;
 	const to = params.to?.trim();
 	const message = params.message?.trim();
 	if (!to) {
@@ -249,6 +249,17 @@ export async function executeSend(
 			from: senderId,
 			to,
 		});
+	}
+	// A direct send may address a parked id that another root's scan (or a
+	// prior list) restored into this process-global registry. Refresh this
+	// caller's persisted roster once before the bus resolves the target, so a
+	// same-named parked ref (and the revival that follows it) targets this
+	// root's transcript — never requiring a prior `list`. Broadcasts address
+	// no id and fan out to live peers only, so they skip the refresh. A
+	// missing caller session hint keeps the existing in-memory behavior: no
+	// root is guessed from the registry or cwd.
+	if (!isBroadcast && sessionFileHint) {
+		await ensurePersistedRoster(registry, sessionFileHint);
 	}
 
 	const bus = IrcBus.global();

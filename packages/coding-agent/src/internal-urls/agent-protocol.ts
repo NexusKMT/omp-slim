@@ -18,9 +18,11 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { isEnoent } from "@oh-my-pi/pi-utils";
+import { AgentRegistry } from "../registry/agent-registry";
+import { ensurePersistedRoster } from "../registry/persisted-agents";
 import { applyQuery, pathToQuery } from "./json-query";
 import { artifactsDirsFromRegistry } from "./registry-helpers";
-import type { InternalResource, InternalUrl, ProtocolHandler, UrlCompletion } from "./types";
+import type { InternalResource, InternalUrl, ProtocolHandler, ResolveContext, UrlCompletion } from "./types";
 
 /**
  * Handler for agent:// URLs.
@@ -32,10 +34,19 @@ export class AgentProtocolHandler implements ProtocolHandler {
 	readonly scheme = "agent";
 	readonly immutable = true;
 
-	async resolve(url: InternalUrl): Promise<InternalResource> {
+	async resolve(url: InternalUrl, context?: ResolveContext): Promise<InternalResource> {
 		const outputId = url.rawHost || url.hostname;
 		if (!outputId) {
 			throw new Error("agent:// URL requires an output ID: agent://<id>");
+		}
+
+		// A caller resolving a possibly-parked id refreshes its own root's
+		// persisted roster first: a stale parked ref restored by another root's
+		// scan would add that root's artifacts dir to the scan (and win the
+		// first-hit id map) for a shared id. The refresh replaces the ref with
+		// this root's transcript, keeping this caller's output in front.
+		if (context?.sessionFile) {
+			await ensurePersistedRoster(AgentRegistry.global(), context.sessionFile);
 		}
 
 		const urlPath = url.pathname;

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { AgentProtocolHandler } from "@oh-my-pi/pi-coding-agent/internal-urls/agent-protocol";
 import { HistoryProtocolHandler } from "@oh-my-pi/pi-coding-agent/internal-urls/history-protocol";
 import { parseInternalUrl } from "@oh-my-pi/pi-coding-agent/internal-urls/parse";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
@@ -1470,5 +1471,325 @@ describe("child system prompt roster", () => {
 		expect(text).toContain("- `Runner` —");
 		expect(text).toContain(`${extra + 1} more live peer(s) omitted`);
 		expect(text).not.toContain("parked peer(s) omitted");
+	});
+});
+describe("hub direct addressing refreshes the caller root without a prior list", () => {
+	beforeEach(() => {
+		AgentRegistry.resetGlobalForTests();
+		AgentLifecycleManager.resetGlobalForTests();
+		IrcBus.resetGlobalForTests();
+	});
+	afterEach(() => {
+		AgentRegistry.resetGlobalForTests();
+		AgentLifecycleManager.resetGlobalForTests();
+		IrcBus.resetGlobalForTests();
+	});
+
+	/** Transcript with a distinguishable user line: header + session_init + message. */
+	async function writeTranscriptWithLine(sessionFile: string, id: string, secret: string): Promise<void> {
+		await Bun.write(
+			sessionFile,
+			`${[
+				sessionHeader(id),
+				JSON.stringify({
+					type: "session_init",
+					id: `si-${id}`,
+					parentId: null,
+					timestamp: "2026-08-13T17:14:49.000Z",
+					systemPrompt: "review",
+					task: `task-${secret}`,
+					tools: ["read"],
+				}),
+				JSON.stringify({
+					type: "message",
+					id: `m-${id}`,
+					parentId: null,
+					timestamp: "2026-08-13T17:14:50.000Z",
+					message: { role: "user", content: `secret-${secret}-line`, timestamp: 1 },
+				}),
+			].join("\n")}\n`,
+		);
+	}
+
+	/** Directory a roster scan reads for a root (`<sessionFile>` minus `.jsonl`). */
+	function scanDir(sessionFile: string): string {
+		return sessionFile.slice(0, -".jsonl".length);
+	}
+
+	function countReaddirs(readdirs: string[], dir: string): number {
+		return readdirs.filter(target => target === dir).length;
+	}
+
+	/** Spy on `fs.promises.readdir`, recording each scanned directory. */
+	function spyOnReaddirs(readdirs: string[]): void {
+		const realReaddir = fs.promises.readdir;
+		spyOn(fs.promises, "readdir").mockImplementation((async (target: fs.PathLike) => {
+			readdirs.push(String(target));
+			return realReaddir(target, { withFileTypes: true });
+		}) as unknown as typeof fs.promises.readdir);
+	}
+
+	function fakeRevivedSession(delivered: string[]): AgentSession {
+		return {
+			isStreaming: false,
+			messages: [],
+			deliverIrcMessage: async (msg: { body: string }) => {
+				delivered.push(msg.body);
+				return "woken";
+			},
+		} as unknown as AgentSession;
+	}
+
+	it("direct send, history://, and agent:// target the caller root's parked Worker without a prior list (A→B→A)", async () => {
+		using tempDir = TempDir.createSync("@omp-hub-direct-root-");
+		const dir = tempDir.path();
+		const rootA = path.join(dir, "a", "main.jsonl");
+		const rootB = path.join(dir, "b", "main.jsonl");
+		const childA = path.join(dir, "a", "main", "Worker.jsonl");
+		const childB = path.join(dir, "b", "main", "Worker.jsonl");
+		const artifactA = path.join(dir, "a", "main", "Worker.md");
+		const artifactB = path.join(dir, "b", "main", "Worker.md");
+		await Bun.write(rootA, `${sessionHeader("a")}\n`);
+		await Bun.write(rootB, `${sessionHeader("b")}\n`);
+		await writeTranscriptWithLine(childA, "worker", "A");
+		await writeTranscriptWithLine(childB, "worker", "B");
+		await Bun.write(artifactA, "A OUTPUT");
+		await Bun.write(artifactB, "B OUTPUT");
+
+		const registry = AgentRegistry.global();
+		const readdirs: string[] = [];
+		spyOnReaddirs(readdirs);
+		try {
+			// B's scan runs first and restores the shared id: the process-global
+			// Worker ref points at B's transcript (and B's artifacts dir wins the
+			// agent:// scan before A's session is even registered).
+			await ensurePersistedRoster(registry, rootB);
+			expect(registry.get("Worker")?.sessionFile).toBe(childB);
+			expect(countReaddirs(readdirs, scanDir(rootB))).toBe(1);
+			registry.register({
+				id: MAIN_AGENT_ID,
+				displayName: MAIN_AGENT_ID,
+				kind: "main",
+				session: null,
+				sessionFile: rootA,
+				status: "running",
+			});
+
+			// history://Worker without a list refreshes A's root and reads A's
+			// transcript — the stale B ref is replaced before the lookup.
+			const history = await new HistoryProtocolHandler().resolve(parseInternalUrl("history://Worker"), {
+				sessionFile: rootA,
+			});
+			expect(history.sourcePath).toBe(childA);
+			expect(history.content).toContain("secret-A-line");
+			expect(history.content).not.toContain("secret-B-line");
+			expect(registry.get("Worker")?.sessionFile).toBe(childA);
+			expect(countReaddirs(readdirs, scanDir(rootA))).toBe(1);
+
+			// agent://Worker resolves A's output artifact through the same refresh.
+			// Its own readdir goes through the `node:fs/promises` binding, which
+			// the roster-scan spy does not intercept: the roster count stays put,
+			// proving the refresh did not re-scan A's tree.
+			const artifact = await new AgentProtocolHandler().resolve(parseInternalUrl("agent://Worker"), {
+				sessionFile: rootA,
+			});
+			expect(artifact.content).toBe("A OUTPUT");
+			expect(artifact.sourcePath).toBe(artifactA);
+			expect(countReaddirs(readdirs, scanDir(rootA))).toBe(1);
+
+			// A direct send without a prior list revives A's parked Worker: the
+			// refreshed ref is what the cold revive (persisted-subagent factory)
+			// and the bus delivery are bound to.
+			let delivered: string[] = [];
+			AgentLifecycleManager.global().setPersistedSubagentReviverFactory(
+				async () => async () => fakeRevivedSession(delivered),
+				0,
+			);
+			const sent = await executeSend(
+				{ registry, senderId: MAIN_AGENT_ID, settings: Settings.isolated(), sessionFileHint: rootA },
+				{ to: "Worker", message: "wake A" },
+			);
+			expect(sent.isError).toBeFalsy();
+			expect(sent.details?.receipts).toEqual([{ to: "Worker", outcome: "revived" }]);
+			expect(delivered).toEqual(["wake A"]);
+			expect(registry.get("Worker")?.sessionFile).toBe(childA);
+			expect(countReaddirs(readdirs, scanDir(rootA))).toBe(1);
+
+			// A repeated direct send stays on the settled latch — no re-scan.
+			const again = await executeSend(
+				{ registry, senderId: MAIN_AGENT_ID, settings: Settings.isolated(), sessionFileHint: rootA },
+				{ to: "Worker", message: "wake A again" },
+			);
+			expect(again.isError).toBeFalsy();
+			expect(again.details?.receipts?.[0]?.to).toBe("Worker");
+			expect(delivered).toEqual(["wake A", "wake A again"]);
+			expect(registry.get("Worker")?.sessionFile).toBe(childA);
+			expect(countReaddirs(readdirs, scanDir(rootA))).toBe(1);
+
+			// A's revived Worker parks again (session detached, ref retained) —
+			// the state a real idle-TTL park leaves behind.
+			registry.unregister("Worker");
+			registry.register({
+				id: "Worker",
+				displayName: "task",
+				kind: "sub",
+				session: null,
+				sessionFile: childA,
+				status: "parked",
+			});
+
+			// history://Worker from B refreshes B's superseded root and reads B's
+			// transcript while the ref is still parked.
+			const historyB = await new HistoryProtocolHandler().resolve(parseInternalUrl("history://Worker"), {
+				sessionFile: rootB,
+			});
+			expect(historyB.sourcePath).toBe(childB);
+			expect(historyB.content).toContain("secret-B-line");
+			expect(historyB.content).not.toContain("secret-A-line");
+			// B's latch was superseded by A's re-scan; the history refresh re-scans
+			// B exactly once.
+			expect(countReaddirs(readdirs, scanDir(rootB))).toBe(2);
+			expect(countReaddirs(readdirs, scanDir(rootA))).toBe(1);
+
+			// Reversed: B's direct send (settled latch — no re-scan) revives B's
+			// Worker.
+			const deliveredB: string[] = [];
+			delivered = deliveredB;
+			const sentB = await executeSend(
+				{ registry, senderId: MAIN_AGENT_ID, settings: Settings.isolated(), sessionFileHint: rootB },
+				{ to: "Worker", message: "wake B" },
+			);
+			expect(sentB.isError).toBeFalsy();
+			expect(sentB.details?.receipts).toEqual([{ to: "Worker", outcome: "revived" }]);
+			expect(deliveredB).toEqual(["wake B"]);
+			expect(registry.get("Worker")?.sessionFile).toBe(childB);
+			expect(countReaddirs(readdirs, scanDir(rootB))).toBe(2);
+			expect(countReaddirs(readdirs, scanDir(rootA))).toBe(1);
+		} finally {
+			spyOn(fs.promises, "readdir").mockRestore();
+		}
+	}, 15_000);
+
+	it("keeps a live same-id Worker in place when the caller root refreshes", async () => {
+		using tempDir = TempDir.createSync("@omp-hub-direct-live-");
+		const dir = tempDir.path();
+		const rootA = path.join(dir, "a", "main.jsonl");
+		const childA = path.join(dir, "a", "main", "Worker.jsonl");
+		await Bun.write(rootA, `${sessionHeader("a")}\n`);
+		await writeTranscriptWithLine(childA, "worker", "A");
+
+		const registry = AgentRegistry.global();
+		const delivered: string[] = [];
+		const liveSession = {
+			isStreaming: false,
+			messages: [{ role: "user", content: "live-worker-line", timestamp: 1 }],
+			deliverIrcMessage: async (msg: { body: string }) => {
+				delivered.push(msg.body);
+				return "woken";
+			},
+		} as unknown as AgentSession;
+		registry.register({
+			id: MAIN_AGENT_ID,
+			displayName: MAIN_AGENT_ID,
+			kind: "main",
+			session: null,
+			sessionFile: rootA,
+			status: "running",
+		});
+		registry.register({
+			id: "Worker",
+			displayName: "task",
+			kind: "sub",
+			session: liveSession,
+			sessionFile: childA,
+			status: "running",
+		});
+
+		// The refresh scans A's tree and finds the same-id transcript, but the
+		// live session must never be displaced by the disk-derived parked ref.
+		const sent = await executeSend(
+			{ registry, senderId: MAIN_AGENT_ID, settings: Settings.isolated(), sessionFileHint: rootA },
+			{ to: "Worker", message: "live ping" },
+		);
+		expect(sent.isError).toBeFalsy();
+		expect(sent.details?.receipts).toEqual([{ to: "Worker", outcome: "woken" }]);
+		expect(delivered).toEqual(["live ping"]);
+		expect(registry.get("Worker")?.status).toBe("running");
+		expect(registry.get("Worker")?.session).toBe(liveSession);
+		expect(registry.get("Worker")?.sessionFile).toBe(childA);
+
+		const history = await new HistoryProtocolHandler().resolve(parseInternalUrl("history://Worker"), {
+			sessionFile: rootA,
+		});
+		expect(history.notes?.join("\n")).toContain("live session");
+		expect(history.content).toContain("live-worker-line");
+		expect(registry.get("Worker")?.status).toBe("running");
+		expect(registry.get("Worker")?.session).toBe(liveSession);
+	});
+
+	it("stays graceful when the caller root or target id is unavailable", async () => {
+		using tempDir = TempDir.createSync("@omp-hub-direct-missing-");
+		const dir = tempDir.path();
+		const rootB = path.join(dir, "b", "main.jsonl");
+		const childB = path.join(dir, "b", "main", "Worker.jsonl");
+		await Bun.write(rootB, `${sessionHeader("b")}\n`);
+		await writeTranscriptWithLine(childB, "worker", "B");
+		const registry = AgentRegistry.global();
+		registry.register({
+			id: MAIN_AGENT_ID,
+			displayName: MAIN_AGENT_ID,
+			kind: "main",
+			session: null,
+			sessionFile: rootB,
+			status: "running",
+		});
+		registry.register({
+			id: "Worker",
+			displayName: "task",
+			kind: "sub",
+			session: null,
+			sessionFile: childB,
+			status: "parked",
+		});
+		// The caller session file points at a root that does not exist on disk.
+		const missingRoot = path.join(dir, "missing", "main.jsonl");
+
+		// history:// with an unavailable caller root keeps the in-memory ref.
+		const history = await new HistoryProtocolHandler().resolve(parseInternalUrl("history://Worker"), {
+			sessionFile: missingRoot,
+		});
+		expect(history.sourcePath).toBe(childB);
+		expect(history.content).toContain("secret-B-line");
+
+		// A send with an unresolvable caller root still delivers (in-memory refs).
+		const delivered: string[] = [];
+		AgentLifecycleManager.global().setPersistedSubagentReviverFactory(
+			async () => async () => fakeRevivedSession(delivered),
+			0,
+		);
+		const sent = await executeSend(
+			{ registry, senderId: MAIN_AGENT_ID, settings: Settings.isolated(), sessionFileHint: missingRoot },
+			{ to: "Worker", message: "wake in-memory" },
+		);
+		expect(sent.isError).toBeFalsy();
+		expect(sent.details?.receipts).toEqual([{ to: "Worker", outcome: "revived" }]);
+		expect(delivered).toEqual(["wake in-memory"]);
+
+		// Unknown ids still fail with the same guided error, and sends to them
+		// still produce a failed receipt — never a throw.
+		const error = await new HistoryProtocolHandler()
+			.resolve(parseInternalUrl("history://Nope"), { sessionFile: missingRoot })
+			.then(
+				() => null,
+				err => err as Error,
+			);
+		expect(error).toBeInstanceOf(Error);
+		expect(error?.message).toContain("Unknown agent: Nope");
+		const unknown = await executeSend(
+			{ registry, senderId: MAIN_AGENT_ID, settings: Settings.isolated(), sessionFileHint: missingRoot },
+			{ to: "Nope", message: "hello?" },
+		);
+		expect(unknown.isError).toBeTruthy();
+		expect(unknown.details?.receipts?.[0]?.outcome).toBe("failed");
 	});
 });
