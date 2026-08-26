@@ -1134,6 +1134,8 @@ export class CommandController {
 						this.ctx.showError(
 							`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at target). Restart required.`,
 						);
+						if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
+						this.ctx.showError("Editor disabled — restart to continue.");
 						return;
 					} else {
 						this.ctx.showError(
@@ -1159,6 +1161,8 @@ export class CommandController {
 					this.ctx.showError(
 						`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at source). Restart required.`,
 					);
+					if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
+					this.ctx.showError("Editor disabled — restart to continue.");
 				} else {
 					this.ctx.showError(
 						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (workspace remains at ${actual})`,
@@ -1187,6 +1191,8 @@ export class CommandController {
 					this.ctx.showError(
 						`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at source). Restart required.`,
 					);
+					if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
+					this.ctx.showError("Editor disabled — restart to continue.");
 				} else {
 					this.ctx.showError(
 						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (workspace remains at ${actual})`,
@@ -1311,6 +1317,8 @@ export class CommandController {
 						this.ctx.showError(
 							`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at target). Restart required.`,
 						);
+						if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
+						this.ctx.showError("Editor disabled — restart to continue.");
 						return;
 					} else {
 						this.ctx.showError(
@@ -1336,6 +1344,8 @@ export class CommandController {
 					this.ctx.showError(
 						`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at source). Restart required.`,
 					);
+					if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
+					this.ctx.showError("Editor disabled — restart to continue.");
 				} else {
 					this.ctx.showError(
 						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (workspace remains at ${actual})`,
@@ -1368,6 +1378,8 @@ export class CommandController {
 				this.ctx.showError(
 					`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at source). Restart required.`,
 				);
+				if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
+				this.ctx.showError("Editor disabled — restart to continue.");
 			} else {
 				this.ctx.showError(
 					`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (workspace remains at ${actual})`,
