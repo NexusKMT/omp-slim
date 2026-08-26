@@ -1117,6 +1117,9 @@ export class CommandController {
 			this.ctx.showError(`Failed to switch workspace: ${e instanceof Error ? e.message : String(e)}`);
 			try {
 				await this.ctx.sessionManager.rollbackMove(previousState);
+				try {
+					await this.ctx.applyCwdChange(previousState.cwd);
+				} catch {}
 			} catch (err) {
 				// rollbackMove keeps the manager at the moved target while
 				// applyCwdChange left the process at the source — re-scope the
@@ -1263,6 +1266,9 @@ export class CommandController {
 			this.ctx.showError(`Failed to switch workspace: ${e instanceof Error ? e.message : String(e)}`);
 			try {
 				await this.ctx.sessionManager.rollbackMove(previousState);
+				try {
+					await this.ctx.applyCwdChange(previousState.cwd);
+				} catch {}
 			} catch (err) {
 				// rollbackMove keeps the manager at the moved target while
 				// applyCwdChange left the process at the source — re-scope the
