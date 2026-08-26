@@ -337,6 +337,57 @@ describe("ModelRegistry command-resolved models.yml values", () => {
 		]);
 	});
 
+	test("401 refreshes a command-backed custom model header and retries with the fresh value", async () => {
+		const bearerFile = path.join(tempDir, "bearer.txt");
+		const tenantFile = path.join(tempDir, "tenant.txt");
+		fs.writeFileSync(bearerFile, "stale-bearer");
+		fs.writeFileSync(tenantFile, "stale-tenant");
+		fs.writeFileSync(
+			modelsPath,
+			JSON.stringify({
+				providers: {
+					"custom-proxy": {
+						baseUrl: "https://custom-proxy.example.com/v1",
+						api: "openai-completions",
+						apiKey: `!${stdoutFileCommand(bearerFile)}`,
+						models: [
+							{
+								id: "custom-model",
+								name: "Custom Model",
+								headers: { "x-tenant-token": `!${stdoutFileCommand(tenantFile)}` },
+							},
+						],
+					},
+				},
+			}),
+		);
+
+		const registry = new ModelRegistry(authStorage, modelsPath);
+		const model = registry.find("custom-proxy", "custom-model");
+		if (!model) throw new Error("Expected custom model");
+		expect(model.headers?.["x-tenant-token"]).toBe("stale-tenant");
+		fs.writeFileSync(bearerFile, "fresh-bearer");
+		fs.writeFileSync(tenantFile, "fresh-tenant");
+
+		const seen: Array<{ auth?: string; tenant?: string }> = [];
+		const context: Context = { systemPrompt: ["s"], messages: [{ role: "user", content: "hi", timestamp: 0 }] };
+		const streamHandle = streamSimple(model, context, {
+			apiKey: registry.resolver(model),
+			fetch: refreshGateFetch(seen),
+			maxTokens: 16,
+		});
+		for await (const _event of streamHandle) {
+			// drain
+		}
+		const result = await streamHandle.result();
+
+		expect(result.stopReason).not.toBe("error");
+		expect(seen).toEqual([
+			{ auth: "Bearer stale-bearer", tenant: "stale-tenant" },
+			{ auth: "Bearer fresh-bearer", tenant: "fresh-tenant" },
+		]);
+	});
+
 	test("401 refreshes a command-backed modelOverrides header and retries with the fresh value", async () => {
 		const bearerFile = path.join(tempDir, "bearer.txt");
 		const tenantFile = path.join(tempDir, "tenant.txt");

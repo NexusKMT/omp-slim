@@ -1199,6 +1199,9 @@ export class ModelRegistry {
 			const resolvedProviderHeaders = resolveConfigHeaders(providerConfig.headers);
 			const commandConfigs = new Set<string>();
 			this.#collectCommandConfigValues(commandConfigs, providerConfig.apiKey, providerConfig.headers);
+			for (const modelDef of providerConfig.models ?? []) {
+				this.#collectCommandConfigValues(commandConfigs, undefined, modelDef.headers);
+			}
 			// Always set overrides when baseUrl/headers/apiKey/authHeader/compat/disableStrictTools/guardrail*/transport are present
 			if (
 				providerConfig.baseUrl ||
