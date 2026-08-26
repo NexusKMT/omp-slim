@@ -4,6 +4,7 @@
  * Note: command execution is async to avoid blocking the TUI.
  */
 
+import { executeShell } from "@oh-my-pi/pi-natives";
 import { $envExact, ptree } from "@oh-my-pi/pi-utils";
 
 /** Cache for successful shell command results (persists for process lifetime). */
@@ -57,29 +58,50 @@ async function executeCommand(commandConfig: string): Promise<string | undefined
  *
  * Exported for testing (timeout and tree-kill semantics).
  *
- * ptree spawns through Bun with piped-only stdio, so descriptors this process
- * holds open — e.g. a credential a launcher passed us on a private fd — cannot
- * cross into the command, matching the models.yml apiKey resolver's isolation
- * (model-config-values.ts). On timeout it hard-kills the whole descendant tree
- * and only reports once that kill has completed, so a credential helper that
- * forked background work cannot outlive its budget; stderr is drained to a
- * truncated tail rather than mixed into the captured value.
+ * On POSIX, ptree spawns through Bun with piped-only stdio, so descriptors
+ * this process holds open — e.g. a credential a launcher passed us on a
+ * private fd — cannot cross into the command, matching the models.yml apiKey
+ * resolver's isolation (model-config-values.ts). On timeout it hard-kills the
+ * whole descendant tree and only reports once that kill has completed, so a
+ * credential helper that forked background work cannot outlive its budget;
+ * stderr is drained to a truncated tail rather than mixed into the captured
+ * value.
+ *
+ * Windows keeps the original natives Brush shell: existing `!command` values
+ * depend on its POSIX-style grammar, and piped-only stdio changes nothing
+ * there — child handle inheritance is governed by the CreateProcess
+ * inheritable-handle set, not by which stdio streams are wired, so the
+ * measured POSIX fd-inheritance leak has no Windows equivalent this switch
+ * would close.
  */
 export async function runShellCommand(command: string, timeoutMs: number): Promise<string | undefined> {
+	if (process.platform === "win32") {
+		try {
+			let output = "";
+			const result = await executeShell({ command, timeoutMs }, (err, chunk) => {
+				if (!err) {
+					output += chunk;
+				}
+			});
+			if (result.timedOut || result.exitCode !== 0) {
+				return undefined;
+			}
+			const trimmed = output.trim();
+			return trimmed.length > 0 ? trimmed : undefined;
+		} catch {
+			return undefined;
+		}
+	}
 	try {
 		// Absolute OS shell, not a PATH-resolved name: a launcher may hand omp a
 		// minimal tool-only PATH (same shape as execSync's default shell).
-		const cmd =
-			process.platform === "win32"
-				? [Bun.env.ComSpec || Bun.env.COMSPEC || "cmd.exe", "/d", "/s", "/c", command]
-				: ["/bin/sh", "-c", command];
-		const result = await ptree.exec(cmd, {
+		const result = await ptree.exec(["/bin/sh", "-c", command], {
 			timeout: timeoutMs,
 			allowNonZero: true,
 			allowAbort: true,
 			// POSIX process-group isolation keeps double-forked/reparented
 			// descendants reachable after they leave the shell's PID tree.
-			detached: process.platform !== "win32",
+			detached: true,
 			// Linux child-subreaper supervision retains workers that create a new
 			// session and outlive the intermediate process that launched them.
 			subreaper: process.platform === "linux",

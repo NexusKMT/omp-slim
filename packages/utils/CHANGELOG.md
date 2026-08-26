@@ -9,6 +9,7 @@
 ### Fixed
 
 - Fixed `ptree` timeout cleanup and output capture so timed commands retain their deadline through descendant-held pipes and untimed commands read output to EOF.
+
 ## [18.0.6] - 2026-08-26
 
 ### Added
