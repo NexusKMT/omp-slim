@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added `Markdown.getLastRenderStableText()`, exposing the frozen streaming-prefix source text for append-only transcript publication.
 
 ## [18.0.5] - 2026-08-25
 

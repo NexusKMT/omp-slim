@@ -1,6 +1,13 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Long streaming thinking blocks now retire their completed paragraphs into terminal scrollback mid-turn instead of staying clipped to the viewport until the turn ends.
+
+### Changed
+
+- A drifting append-only transcript publication (e.g. a mid-stream theme change) now freezes further mid-stream emission for that block instead of failing the render.
 
 ## [18.0.5] - 2026-08-25
 
