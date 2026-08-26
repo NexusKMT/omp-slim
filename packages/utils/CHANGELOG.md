@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep project-directory state unchanged when changing directories fails.
+
 ## [18.0.7] - 2026-08-26
 
 ### Added
@@ -12,9 +16,6 @@
 ### Fixed
 
 - Fixed OMP sessions unexpectedly exiting during socket cleanup or optional-worker communication on Bun.
-### Fixed
-
-- Keep project-directory state unchanged when changing directories fails.
 
 ## [18.0.6] - 2026-08-26
 

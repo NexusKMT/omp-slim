@@ -8195,11 +8195,21 @@ export class AgentSession {
 			this.#bash.markSessionTransition(bashTransition);
 			if (options?.onCwdChange) {
 				const newCwd = this.sessionManager.getCwd();
+				const recordedCwd = this.sessionManager.getRecordedCwd() ?? previousSessionState.cwd;
 				if (path.resolve(newCwd) !== path.resolve(previousSessionState.cwd)) {
 					cwdChangeTarget = newCwd;
 					if (!(await options.onCwdChange(newCwd, previousSessionState.cwd))) {
 						throw SESSION_CWD_CHANGE_REJECTED;
 					}
+				} else if (path.resolve(recordedCwd) !== path.resolve(previousSessionState.cwd)) {
+					// setSessionFile retained previous cwd because recorded cwd failed
+					// directoryIsEnterable (TCC-denied). Previous check saw no change
+					// and returned success, leaving tools on wrong transcript.
+					cwdChangeTarget = recordedCwd;
+					if (!(await options.onCwdChange(recordedCwd, previousSessionState.cwd))) {
+						throw SESSION_CWD_CHANGE_REJECTED;
+					}
+					throw SESSION_CWD_CHANGE_REJECTED;
 				}
 			}
 			if (switchingToDifferentSession) {
