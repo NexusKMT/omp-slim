@@ -800,6 +800,42 @@ describe("Settings", () => {
 			const savedSettings = await readSettings();
 			expect(savedSettings.defaultThinkingLevel).toBe(Effort.High);
 		});
+
+		it("preserves a same-key external edit made after a local save was queued", async () => {
+			await writeSettings({
+				defaultThinkingLevel: Effort.Low,
+			});
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			settings.set("defaultThinkingLevel", Effort.High);
+
+			await writeSettings({
+				defaultThinkingLevel: Effort.Medium,
+			});
+			await settings.flush();
+
+			expect((await readSettings()).defaultThinkingLevel).toBe(Effort.Medium);
+			expect(settings.get("defaultThinkingLevel")).toBe(Effort.Medium);
+		});
+
+		it("merges a pending local change with a later disjoint external edit", async () => {
+			await writeSettings({
+				defaultThinkingLevel: Effort.Low,
+			});
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			settings.set("defaultThinkingLevel", Effort.High);
+
+			await writeSettings({
+				defaultThinkingLevel: Effort.Low,
+				enabledModels: ["openai/gpt-5.2-codex"],
+			});
+			await settings.flush();
+
+			const savedSettings = await readSettings();
+			expect(savedSettings.defaultThinkingLevel).toBe(Effort.High);
+			expect(savedSettings.enabledModels).toEqual(["openai/gpt-5.2-codex"]);
+		});
 	});
 
 	describe("model role overrides", () => {
@@ -823,6 +859,23 @@ describe("Settings", () => {
 			});
 			expect(settings.getModelRole("default")).toBe("openai/gpt-5.2-codex");
 			expect(settings.getModelRole("smol")).toBe("anthropic/claude-haiku-4-5");
+		});
+
+		it("preserves a same-role external edit made after a local save was queued", async () => {
+			await writeSettings({
+				modelRoles: { default: "anthropic/claude-sonnet-4-5" },
+			});
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			settings.setModelRole("default", "openai/gpt-5.2-codex");
+
+			await writeSettings({
+				modelRoles: { default: "moonshot/kimi-k3:max" },
+			});
+			await settings.flush();
+
+			expect((await readSettings()).modelRoles).toEqual({ default: "moonshot/kimi-k3:max" });
+			expect(settings.getModelRole("default")).toBe("moonshot/kimi-k3:max");
 		});
 
 		it("preserves concurrent external per-role edits when saving one global role", async () => {
