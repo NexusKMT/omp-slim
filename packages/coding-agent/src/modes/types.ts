@@ -487,6 +487,7 @@ export interface InteractiveModeContext {
 	setLoopPrompt(prompt: string): void;
 	disableLoopMode(message?: string): void;
 	cancelGoalContinuation(): void;
+	disableGoalMode(message?: string): void;
 	pauseLoop(): void;
 	handlePlanApproval(details: PlanApprovalDetails): Promise<void>;
 	openPlanReview(): Promise<void>;

@@ -1136,7 +1136,7 @@ export class CommandController {
 						);
 						if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
 						this.ctx.disableLoopMode("Session disabled due to workspace mismatch");
-						this.ctx.cancelGoalContinuation();
+						this.ctx.disableGoalMode("Goal mode disabled due to workspace mismatch");
 						this.ctx.showError("Editor disabled — restart to continue.");
 						return;
 					} else {
@@ -1165,7 +1165,7 @@ export class CommandController {
 					);
 					if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
 					this.ctx.disableLoopMode("Session disabled due to workspace mismatch");
-					this.ctx.cancelGoalContinuation();
+					this.ctx.disableGoalMode("Goal mode disabled due to workspace mismatch");
 					this.ctx.showError("Editor disabled — restart to continue.");
 				} else {
 					this.ctx.showError(
@@ -1197,7 +1197,7 @@ export class CommandController {
 					);
 					if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
 					this.ctx.disableLoopMode("Session disabled due to workspace mismatch");
-					this.ctx.cancelGoalContinuation();
+					this.ctx.disableGoalMode("Goal mode disabled due to workspace mismatch");
 					this.ctx.showError("Editor disabled — restart to continue.");
 				} else {
 					this.ctx.showError(
@@ -1325,7 +1325,7 @@ export class CommandController {
 						);
 						if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
 						this.ctx.disableLoopMode("Session disabled due to workspace mismatch");
-						this.ctx.cancelGoalContinuation();
+						this.ctx.disableGoalMode("Goal mode disabled due to workspace mismatch");
 						this.ctx.showError("Editor disabled — restart to continue.");
 						return;
 					} else {
@@ -1354,7 +1354,7 @@ export class CommandController {
 					);
 					if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
 					this.ctx.disableLoopMode("Session disabled due to workspace mismatch");
-					this.ctx.cancelGoalContinuation();
+					this.ctx.disableGoalMode("Goal mode disabled due to workspace mismatch");
 					this.ctx.showError("Editor disabled — restart to continue.");
 				} else {
 					this.ctx.showError(
@@ -1390,7 +1390,7 @@ export class CommandController {
 				);
 				if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
 				this.ctx.disableLoopMode("Session disabled due to workspace mismatch");
-				this.ctx.cancelGoalContinuation();
+				this.ctx.disableGoalMode("Goal mode disabled due to workspace mismatch");
 				this.ctx.showError("Editor disabled — restart to continue.");
 			} else {
 				this.ctx.showError(
