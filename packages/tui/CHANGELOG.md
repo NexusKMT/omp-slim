@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed leading bare-name skill prefixes such as `/batch` returning no autocomplete suggestions.
+
 ## [18.0.6] - 2026-08-26
 
 ### Added
