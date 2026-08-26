@@ -117,7 +117,7 @@ describe("MCP scope filtering precedes connection-equivalence deduplication", ()
 
 			const withEffectiveRoots = await loadAllMCPConfigs(projectDir, {
 				filterExa: false,
-				configuredExtensionPaths: [extensionDir],
+				extensionRoots: { explicit: [extensionDir], mode: "merge", configured: [] },
 			});
 			expect(withEffectiveRoots.configs.extensionserver).toMatchObject({ command: "extension-mcp" });
 

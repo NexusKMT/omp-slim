@@ -288,7 +288,11 @@ export class AgentsHubComponent implements Component {
 		this.#loadError = null;
 		try {
 			const selectedName = this.#selectedAgent()?.name;
-			const { agents } = await discoverAgents(this.#cwd, undefined, this.#settings.get("extensions"));
+			const { agents } = await discoverAgents(this.#cwd, undefined, {
+				explicit: [],
+				mode: "merge",
+				configured: this.#settings.get("extensions") ?? [],
+			});
 			const disabled = new Set(this.#settings.get("task.disabledAgents") ?? []);
 			const overrides = this.#settings.get("task.agentModelOverrides") ?? {};
 			const prewalkOverrides = this.#settings.get("task.agentPrewalk") ?? {};
@@ -805,7 +809,11 @@ export class AgentsHubComponent implements Component {
 		const frontmatter = YAML.stringify({ name: spec.identifier, description: spec.whenToUse }, null, 2).trimEnd();
 		const content = `---\n${frontmatter}\n---\n\n${spec.systemPrompt.trim()}\n`;
 		await Bun.write(filePath, content);
-		await refreshAgentDiscovery(this.#cwd, this.#settings.get("extensions"));
+		await refreshAgentDiscovery(this.#cwd, {
+			explicit: [],
+			mode: "merge",
+			configured: this.#settings.get("extensions") ?? [],
+		});
 		this.#clearCreateFlow();
 		this.#notice = `Created agent ${spec.identifier} at ${shortenPath(filePath)}`;
 		await this.#reload();

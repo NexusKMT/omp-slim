@@ -22,6 +22,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { isProviderEnabled } from "../capability";
+import type { EffectiveExtensionRoots } from "../capability/types";
 import { findAllNearestProjectConfigDirs, getConfigDirs } from "../config";
 import { listClaudePluginRoots } from "../discovery/helpers";
 import { listOmpExtensionRoots } from "../discovery/omp-extension-roots";
@@ -66,14 +67,12 @@ async function loadAgentsFromDir(dir: string, source: AgentSource): Promise<Agen
  * before user), then bundled.
  * @param cwd - Current working directory for project agent discovery
  * @param home - Home directory for user and marketplace discovery
- * @param configuredExtensionPaths - Effective `extensions` setting, including runtime overrides
- * @param extensionRootMode - Discovery mode paired with `configuredExtensionPaths`
+ * @param extensionRoots - Session-local extension roots (explicit + mode + configured)
  */
 export async function discoverAgents(
 	cwd: string,
 	home: string = os.homedir(),
-	configuredExtensionPaths?: readonly string[],
-	extensionRootMode?: "merge" | "explicit-only",
+	extensionRoots?: EffectiveExtensionRoots,
 ): Promise<DiscoveryResult> {
 	const resolvedCwd = path.resolve(cwd);
 
@@ -98,18 +97,11 @@ export async function discoverAgents(
 	if (user) orderedDirs.push({ dir: user.path, source: "user" });
 
 	// Extension-package agents use the same effective root set as sibling
-	// skills/hooks/tools. Callers with a live Settings instance pass its merged
-	// value so overlays and runtime overrides replace persisted arrays.
-	const extensionRoots = isProviderEnabled("omp-plugins")
-		? await listOmpExtensionRoots({
-				cwd: resolvedCwd,
-				home,
-				repoRoot: null,
-				configuredExtensionPaths,
-				extensionRootMode,
-			})
+	// skills/hooks/tools, threaded whole so explicit roots and mode survive.
+	const packageRoots = isProviderEnabled("omp-plugins")
+		? await listOmpExtensionRoots({ cwd: resolvedCwd, home, repoRoot: null, extensionRoots })
 		: [];
-	for (const root of extensionRoots) {
+	for (const root of packageRoots) {
 		orderedDirs.push({ dir: path.join(root.path, "agents"), source: root.level });
 	}
 

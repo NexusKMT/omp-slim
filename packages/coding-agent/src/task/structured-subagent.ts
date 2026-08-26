@@ -252,12 +252,7 @@ export async function resolveEffectiveSubagentPolicy(
 	assertPlanControlsAllowed(request, planMode);
 	assertDepthAndSpawnAllowed(request, agentName);
 
-	const discovery = await discoverAgents(
-		request.session.cwd,
-		undefined,
-		request.session.settings.get("extensions"),
-		request.session.extensionRootMode,
-	);
+	const discovery = await discoverAgents(request.session.cwd, undefined, request.session.effectiveExtensionRoots);
 	const agent = getAgent(discovery.agents, agentName);
 	if (!agent) {
 		const available = discovery.agents.map(candidate => candidate.name).join(", ") || "none";
@@ -444,6 +439,13 @@ function buildExecutorOptions(
 		workspaceTree: session.workspaceTree,
 		promptTemplates: session.promptTemplates,
 		rules: session.rules,
+		// Subagents inherit the parent's already-resolved extension module paths.
+		// The parent's raw SDK `additionalExtensionPaths` are intentionally not
+		// re-threaded: child sessions carry no `additionalExtensionPaths`, so
+		// their `effectiveExtensionRoots.explicit` is empty and extension-package
+		// agents/skills reach them only through inherited paths — not a fresh
+		// scoped sub-discovery. Revisit if subagents ever need explicit-root
+		// agents the parent did not itself preload.
 		preloadedExtensionPaths: restrictToolNames ? [] : session.extensionPaths,
 		preloadedCustomToolPaths: restrictToolNames ? [] : session.customToolPaths,
 		localProtocolOptions,

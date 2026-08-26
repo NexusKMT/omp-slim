@@ -101,6 +101,7 @@ import {
 import { type AdvisorConfig, type AdvisorRuntimeStatus, loadAdvisorTranscriptCosts } from "../advisor";
 import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, type AsyncJob, AsyncJobManager } from "../async";
 import { reset as resetCapabilities } from "../capability";
+import type { EffectiveExtensionRoots } from "../capability/types";
 import { shouldEnableAppendOnlyContext } from "../config/append-only-context-mode";
 import type { ModelRegistry } from "../config/model-registry";
 import type { ResolvedModelRoleValue } from "../config/model-resolver";
@@ -486,29 +487,20 @@ export class AgentSession {
 	readonly #disableExtensionDiscovery: boolean;
 
 	/**
-	 * Effective extension roots for this session: the SDK's explicit
-	 * `additionalExtensionPaths` plus (unless discovery is disabled) the live
-	 * `extensions` setting, read from its own {@link settings} so post-startup
-	 * reloads honor overlays/runtime overrides and survive settings reloads.
-	 * Session-local — never the process-global singleton — so concurrent
-	 * sessions stay isolated, and explicit roots outlive the construction-time
-	 * invocation scope.
+	 * Session-local extension roots for this session, read live from its own
+	 * {@link settings}. Threaded whole (explicit lane + mode + configured lane)
+	 * so post-startup reloads — `refreshSkills`, slash-command/agent/MCP
+	 * rediscovery — stay byte-identical to the construction-time scoped load and
+	 * never lose the explicit `additionalExtensionPaths`, the `explicit-only`
+	 * mode, or project provenance. Session-local, never the process-global
+	 * singleton, so concurrent sessions stay isolated.
 	 */
-	get configuredExtensionPaths(): readonly string[] {
-		const explicit = this.#additionalExtensionPaths;
-		if (this.#disableExtensionDiscovery) return explicit;
-		const configured = this.settings.get("extensions") ?? [];
-		return explicit.length > 0 ? [...explicit, ...configured] : configured;
-	}
-
-	/**
-	 * Discovery mode paired with {@link configuredExtensionPaths}. A
-	 * `disableExtensionDiscovery` session stays `explicit-only` across
-	 * post-startup reloads so refreshes never re-merge ambient or installed
-	 * roots the caller opted out of.
-	 */
-	get extensionRootMode(): "merge" | "explicit-only" {
-		return this.#disableExtensionDiscovery ? "explicit-only" : "merge";
+	get effectiveExtensionRoots(): EffectiveExtensionRoots {
+		return {
+			explicit: this.#additionalExtensionPaths,
+			mode: this.#disableExtensionDiscovery ? "explicit-only" : "merge",
+			configured: this.settings.get("extensions") ?? [],
+		};
 	}
 
 	#powerAssertion: MacOSPowerAssertion | undefined;
@@ -1348,8 +1340,7 @@ export class AgentSession {
 			agent: this.agent,
 			sessionManager: this.sessionManager,
 			settings: this.settings,
-			configuredExtensionPaths: () => this.configuredExtensionPaths,
-			extensionRootMode: () => this.extensionRootMode,
+			effectiveExtensionRoots: () => this.effectiveExtensionRoots,
 			modelRegistry: this.#modelRegistry,
 			extensionRunner: () => this.#extensionRunner,
 			clientBridge: () => this.#clientBridge,

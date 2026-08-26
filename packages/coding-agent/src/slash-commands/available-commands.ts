@@ -1,4 +1,5 @@
 import type { AvailableCommand } from "@oh-my-pi/pi-utils/acp";
+import type { EffectiveExtensionRoots } from "../capability/types";
 import type { SkillsSettings } from "../config/settings";
 import type { LoadedCustomCommand } from "../extensibility/custom-commands";
 import type { ExtensionRunner } from "../extensibility/extensions";
@@ -24,8 +25,7 @@ export interface AvailableCommandsSession {
 	readonly mcpPromptCommands?: ReadonlyArray<LoadedCustomCommand>;
 	readonly skills: ReadonlyArray<Skill>;
 	readonly skillsSettings?: SkillsSettings;
-	readonly configuredExtensionPaths?: readonly string[];
-	readonly extensionRootMode?: "merge" | "explicit-only";
+	readonly effectiveExtensionRoots?: EffectiveExtensionRoots;
 	setSlashCommands(slashCommands: FileSlashCommand[]): void;
 	sessionManager: { getCwd(): string };
 }
@@ -33,11 +33,7 @@ export interface AvailableCommandsSession {
 export async function buildAvailableSlashCommands(
 	session: AvailableCommandsSession,
 	loadFileCommands: (cwd: string) => Promise<FileSlashCommand[]> = cwd =>
-		loadSlashCommands({
-			cwd,
-			configuredExtensionPaths: session.configuredExtensionPaths,
-			extensionRootMode: session.extensionRootMode,
-		}),
+		loadSlashCommands({ cwd, extensionRoots: session.effectiveExtensionRoots }),
 ): Promise<InternalAvailableSlashCommand[]> {
 	const commands: InternalAvailableSlashCommand[] = [];
 	const seenNames = new Set<string>();

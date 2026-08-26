@@ -3,6 +3,7 @@ import type { Agent, AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { isRecord, logger, prompt, stringProperty, untilAborted } from "@oh-my-pi/pi-utils";
 import { reset as resetCapabilities } from "../capability";
+import type { EffectiveExtensionRoots } from "../capability/types";
 import type { ModelRegistry } from "../config/model-registry";
 import { formatModelString } from "../config/model-resolver";
 import type { Settings, SkillsSettings } from "../config/settings";
@@ -44,10 +45,8 @@ export interface SessionToolsHost {
 	agent: Agent;
 	sessionManager: SessionManager;
 	settings: Settings;
-	/** Effective extension roots (explicit SDK paths + live `extensions:`) for post-startup reloads. */
-	configuredExtensionPaths(): readonly string[];
-	/** Discovery mode paired with {@link configuredExtensionPaths}. */
-	extensionRootMode(): "merge" | "explicit-only";
+	/** Session-local extension roots (explicit + mode + configured) for post-startup reloads. */
+	effectiveExtensionRoots(): EffectiveExtensionRoots;
 	modelRegistry: ModelRegistry;
 	extensionRunner(): ExtensionRunner | undefined;
 	clientBridge(): ClientBridge | undefined;
@@ -1187,8 +1186,7 @@ export class SessionTools {
 				...skillsSettings,
 				cwd: this.#host.sessionManager.getCwd(),
 				disabledExtensions: this.#host.settings.get("disabledExtensions") ?? [],
-				configuredExtensionPaths: this.#host.configuredExtensionPaths(),
-				extensionRootMode: this.#host.extensionRootMode(),
+				extensionRoots: this.#host.effectiveExtensionRoots(),
 			});
 			this.#skills = discovered.skills;
 			this.#skillWarnings = discovered.warnings;

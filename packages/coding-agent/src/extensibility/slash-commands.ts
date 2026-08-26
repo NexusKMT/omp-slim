@@ -1,5 +1,6 @@
 import { parseFrontmatter, prompt } from "@oh-my-pi/pi-utils";
 import { slashCommandCapability } from "../capability/slash-command";
+import type { EffectiveExtensionRoots } from "../capability/types";
 import { appendInlineArgsFallback, templateUsesInlineArgPlaceholders } from "../config/prompt-templates";
 import type { SlashCommand } from "../discovery";
 import { loadCapability } from "../discovery";
@@ -57,14 +58,8 @@ function parseCommandTemplate(
 export interface LoadSlashCommandsOptions {
 	/** Working directory for project-local commands. Default: getProjectDir() */
 	cwd?: string;
-	/**
-	 * Effective `extensions` setting. Post-startup reloads pass their live
-	 * session value so overlay/override extension commands survive outside the
-	 * construction-time invocation scope.
-	 */
-	configuredExtensionPaths?: readonly string[];
-	/** Discovery mode paired with {@link configuredExtensionPaths}. */
-	extensionRootMode?: "merge" | "explicit-only";
+	/** Session-local extension roots for post-startup reloads (explicit + mode + configured). */
+	extensionRoots?: EffectiveExtensionRoots;
 }
 
 /**
@@ -74,8 +69,7 @@ export interface LoadSlashCommandsOptions {
 export async function loadSlashCommands(options: LoadSlashCommandsOptions = {}): Promise<FileSlashCommand[]> {
 	const result = await loadCapability<SlashCommand>(slashCommandCapability.id, {
 		cwd: options.cwd,
-		configuredExtensionPaths: options.configuredExtensionPaths,
-		extensionRootMode: options.extensionRootMode,
+		extensionRoots: options.extensionRoots,
 	});
 
 	const fileCommands: FileSlashCommand[] = result.items.map(cmd => {

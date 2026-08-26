@@ -9,7 +9,7 @@ import * as url from "node:url";
 import { isDefinitiveOAuthFailure, type TSchema } from "@oh-my-pi/pi-ai";
 import type { OAuthCredentials } from "@oh-my-pi/pi-ai/oauth/types";
 import { logger } from "@oh-my-pi/pi-utils";
-import type { SourceMeta } from "../capability/types";
+import type { EffectiveExtensionRoots, SourceMeta } from "../capability/types";
 import { resolveConfigValue } from "../config/resolve-config-value";
 import type { CustomTool } from "../extensibility/custom-tools/types";
 import { type AuthStorage, REMOTE_REFRESH_SENTINEL } from "../session/auth-storage";
@@ -177,10 +177,8 @@ export interface MCPDiscoverOptions {
 	filterExa?: boolean;
 	/** Whether to filter out browser MCP servers when builtin browser tool is enabled (default: false) */
 	filterBrowser?: boolean;
-	/** Effective extension roots for session-scoped post-startup rediscovery. */
-	configuredExtensionPaths?: readonly string[];
-	/** Discovery mode paired with {@link configuredExtensionPaths}. */
-	extensionRootMode?: "merge" | "explicit-only";
+	/** Session-local extension roots for post-startup rediscovery (explicit + mode + configured). */
+	extensionRoots?: EffectiveExtensionRoots;
 	/** Called when MCP server connection state changes. */
 	onStatus?: (event: McpConnectionStatusEvent) => void;
 }
@@ -465,8 +463,7 @@ export class MCPManager {
 				enableProjectConfig: options?.enableProjectConfig,
 				filterExa: options?.filterExa,
 				filterBrowser: options?.filterBrowser,
-				configuredExtensionPaths: options?.configuredExtensionPaths,
-				extensionRootMode: options?.extensionRootMode,
+				extensionRoots: options?.extensionRoots,
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);

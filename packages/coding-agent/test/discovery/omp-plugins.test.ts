@@ -191,13 +191,16 @@ test("effective extensions replace persisted roots for overlays and runtime over
 	buildExtensionPackage(overrideExt, "override-skill");
 	writeFile(path.join(project, ".omp", "config.yml"), `extensions:\n  - "${persistedExt}"\n`);
 
-	const context: LoadContext = { ...ctx(), configuredExtensionPaths: [overrideExt] };
+	const context: LoadContext = {
+		...ctx(),
+		extensionRoots: { explicit: [], mode: "merge", configured: [overrideExt] },
+	};
 	const skills = await loadFromPlugin<{ name: string }>(skillCapability.id, context);
 	const names = skills.map(skill => skill.name);
 	expect(names).toContain("override-skill");
 	expect(names).not.toContain("persisted-skill");
 
-	const emptyOverride: LoadContext = { ...ctx(), configuredExtensionPaths: [] };
+	const emptyOverride: LoadContext = { ...ctx(), extensionRoots: { explicit: [], mode: "merge", configured: [] } };
 	const emptySkills = await loadFromPlugin<{ name: string }>(skillCapability.id, emptyOverride);
 	expect(emptySkills.map(skill => skill.name)).not.toContain("persisted-skill");
 });
@@ -371,8 +374,7 @@ test("explicit-only ctx mode excludes ambient/installed roots on scopeless reloa
 
 	const mergeRoots = await listOmpExtensionRoots({
 		...ctx(),
-		configuredExtensionPaths: [explicitExt],
-		extensionRootMode: "merge",
+		extensionRoots: { explicit: [explicitExt], mode: "merge", configured: [] },
 	});
 	expect(mergeRoots.map(root => path.basename(root.path))).toEqual(
 		expect.arrayContaining(["explicit-extension", "installed-extension"]),
@@ -380,23 +382,53 @@ test("explicit-only ctx mode excludes ambient/installed roots on scopeless reloa
 
 	const explicitOnlyRoots = await listOmpExtensionRoots({
 		...ctx(),
-		configuredExtensionPaths: [explicitExt],
-		extensionRootMode: "explicit-only",
+		extensionRoots: { explicit: [explicitExt], mode: "explicit-only", configured: [] },
 	});
 	expect(explicitOnlyRoots.map(root => root.path)).toEqual([explicitExt]);
 });
 
-test("loadCapability configuredExtensionPaths surfaces override extensions outside any scope (#9769)", async () => {
+test("scopeless reload with session roots equals the construction-time scoped load (#9769 invariant)", async () => {
+	// The single invariant that retires the per-surface regressions: for any
+	// session, listOmpExtensionRoots outside the construction scope with
+	// session.effectiveExtensionRoots returns byte-identical roots (paths,
+	// levels, order) to the construction-time scoped call — across the whole
+	// 2×2 grid of explicit-only × has-configured.
+	const explicitExt = path.join(tempDir, "invariant-explicit");
+	const configuredExt = path.join(tempDir, "invariant-configured");
+	const installed = path.join(home, ".omp", "plugins", "node_modules", "invariant-installed");
+	buildExtensionPackage(explicitExt, "invariant-explicit-skill");
+	buildExtensionPackage(configuredExt, "invariant-configured-skill");
+	buildExtensionPackage(installed, "invariant-installed-skill");
+	// Persist the configured lane at project scope so its provenance resolves to `project`.
+	writeFile(path.join(project, ".omp", "config.yml"), `extensions:\n  - "${configuredExt}"\n`);
+	writeFile(
+		path.join(home, ".omp", "plugins", "package.json"),
+		JSON.stringify({ name: "omp-plugins", dependencies: { "invariant-installed": "1.0.0" } }),
+	);
+
+	for (const mode of ["merge", "explicit-only"] as const) {
+		for (const configured of [[configuredExt], []]) {
+			const roots = { explicit: [explicitExt], mode, configured };
+			const scoped = await withOmpExtensionRootScope(roots.explicit, roots.mode, () => {
+				setInvocationConfiguredExtensions(roots.configured);
+				return listOmpExtensionRoots(ctx());
+			});
+			const reloaded = await listOmpExtensionRoots({ ...ctx(), extensionRoots: roots });
+			expect(reloaded).toEqual(scoped);
+		}
+	}
+});
+
+test("loadCapability extensionRoots surfaces override extensions outside any scope (#9769)", async () => {
 	// refreshSkills / slash-command reloads run outside the construction-time
-	// invocation scope. The effective extensions must arrive via the explicit
-	// option so overlay/override extensions survive; omitting it falls back to
-	// the (empty) persisted config on disk.
+	// invocation scope. The effective roots must arrive via the explicit option
+	// so overlay/override extensions survive; omitting it falls back to disk.
 	const overrideExt = path.join(tempDir, "runtime-override-extension");
 	buildExtensionPackage(overrideExt, "runtime-override-skill");
 
 	const withOption = await loadCapability<{ name: string }>(skillCapability.id, {
 		cwd: project,
-		configuredExtensionPaths: [overrideExt],
+		extensionRoots: { explicit: [], mode: "merge", configured: [overrideExt] },
 	});
 	expect(withOption.items.map(skill => skill.name)).toContain("runtime-override-skill");
 

@@ -7,7 +7,7 @@ import {
 	sanitizeManagedDescription,
 } from "../autolearn/managed-skills";
 import { skillCapability } from "../capability/skill";
-import type { SourceMeta } from "../capability/types";
+import type { EffectiveExtensionRoots, SourceMeta } from "../capability/types";
 import type { SkillsSettings } from "../config/settings";
 import { type Skill as CapabilitySkill, loadCapability } from "../discovery";
 import { compareSkillOrder, scanSkillsFromDir } from "../discovery/helpers";
@@ -121,13 +121,11 @@ export interface LoadSkillsOptions extends SkillsSettings {
 	/** Working directory for project-local skills. Default: getProjectDir() */
 	cwd?: string;
 	/**
-	 * Effective `extensions` setting. Post-startup reloads pass their live
-	 * session value so overlay/override extension skills survive outside the
-	 * construction-time invocation scope.
+	 * Session-local extension roots. Post-startup reloads pass their live
+	 * session value so explicit roots, discovery mode, and configured
+	 * extensions all survive outside the construction-time invocation scope.
 	 */
-	configuredExtensionPaths?: readonly string[];
-	/** Discovery mode paired with {@link configuredExtensionPaths}. */
-	extensionRootMode?: "merge" | "explicit-only";
+	extensionRoots?: EffectiveExtensionRoots;
 }
 
 /**
@@ -149,8 +147,7 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 		ignoredSkills = [],
 		includeSkills = [],
 		disabledExtensions = [],
-		configuredExtensionPaths,
-		extensionRootMode,
+		extensionRoots,
 	} = options;
 
 	// Early return if skills are disabled
@@ -188,8 +185,7 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 	const result = await loadCapability<CapabilitySkill>(skillCapability.id, {
 		cwd,
 		disabledExtensions,
-		configuredExtensionPaths,
-		extensionRootMode,
+		extensionRoots,
 	});
 
 	const skillMap = new Map<string, Skill>();

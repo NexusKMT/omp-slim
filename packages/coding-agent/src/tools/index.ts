@@ -4,6 +4,7 @@ import type { FetchImpl, ImageContent, Model, ServiceTierByFamily, ToolChoice } 
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AsyncJobManager } from "../async/job-manager";
 import type { Rule } from "../capability/rule";
+import type { EffectiveExtensionRoots } from "../capability/types";
 import type { PromptTemplate } from "../config/prompt-templates";
 import type { Settings } from "../config/settings";
 import { EditTool } from "../edit";
@@ -198,11 +199,12 @@ export interface ToolSession {
 	 */
 	extensionPaths?: string[];
 	/**
-	 * Extension discovery mode for post-startup sub-discovery. `explicit-only`
-	 * (an SDK `disableExtensionDiscovery` session) restricts reloads to the
-	 * session's explicit roots. Defaults to `merge` when unset.
+	 * Session-local extension roots for post-startup sub-discovery: explicit SDK
+	 * roots, discovery mode, and configured `extensions:`. Threaded whole so the
+	 * task surface (`TaskTool.create`, preflight, refresh) stays byte-identical
+	 * to the construction-time scoped load.
 	 */
-	extensionRootMode?: "merge" | "explicit-only";
+	effectiveExtensionRoots?: EffectiveExtensionRoots;
 	/**
 	 * Pre-discovered custom-tool source paths from `.omp/tools/`, `.claude/tools/`,
 	 * plugins, etc. Forwarded to subagents so they skip the FS scan but still

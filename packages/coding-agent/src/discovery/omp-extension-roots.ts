@@ -21,7 +21,7 @@ import * as path from "node:path";
 import { getAgentDir, isEnoent, logger, MAIN_CONFIG_FILENAMES, tryParseJson } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { readDirEntries, readFile } from "../capability/fs";
-import type { LoadContext } from "../capability/types";
+import type { ExtensionRootMode, LoadContext } from "../capability/types";
 import { getEnabledPlugins } from "../extensibility/plugins/loader";
 import { expandTilde } from "../tools/path-utils";
 import { listClaudePluginRoots } from "./helpers";
@@ -43,7 +43,8 @@ interface InjectedRoot {
 	level: "user" | "project";
 }
 
-export type OmpExtensionRootMode = "merge" | "explicit-only";
+/** Extension sub-discovery mode; re-exported alias of {@link ExtensionRootMode}. */
+export type OmpExtensionRootMode = ExtensionRootMode;
 
 interface InvocationRootScope {
 	/** Raw SDK spellings, resolved against the LoadContext that performs discovery. */
@@ -250,50 +251,58 @@ async function isDirectory(p: string): Promise<boolean> {
 /**
  * Resolve every configured extension package directory for the given context.
  *
- * Sources, in order of precedence:
+ * Sources are threaded as one `EffectiveExtensionRoots` value — from
+ * `ctx.extensionRoots` (a post-startup reload), else the invocation scope
+ * (a construction-time load), else the process defaults (CLI injection + disk).
+ * The three lanes stay separate so no dimension is lost:
  *
- * 1. Invocation-scoped SDK roots, when present; otherwise CLI roots injected
- *    via {@link injectOmpExtensionCliRoots}
- * 2. The effective configured `extensions` array. SDK sessions record their
- *    live `Settings` value on the invocation scope via
- *    {@link setInvocationConfiguredExtensions} (honoring overlays and runtime
- *    overrides); scopeless callers fall back to persisted array-replacement
- *    precedence read from disk.
- * 3. Enabled npm/link plugins installed under `<plugins>/node_modules/` (for
- *    `omp install <pkg>` / `omp plugin install` / `omp plugin link`). Marketplace
- *    installs are loaded by the `claude-plugins` provider and are excluded here.
+ * 1. Explicit lane — `explicit` roots (SDK `additionalExtensionPaths` / CLI
+ *    `--extension`). Always active, always user-level.
+ * 2. Configured lane — the effective `extensions:` setting, added only in
+ *    `merge` mode. Its provenance is resolved against the persisted config, so
+ *    a project-configured package is labeled `project` (kept separate from the
+ *    explicit lane precisely so this comparison is not polluted).
+ * 3. Installed npm/link plugins under `<plugins>/node_modules/`, added only in
+ *    `merge` mode. Marketplace installs load via the `claude-plugins` provider.
+ *
+ * `explicit-only` mode (an SDK `disableExtensionDiscovery` session) contributes
+ * the explicit lane alone — no ambient `extensions:`, installed plugins, or
+ * disk config — identically inside and outside the construction scope.
+ *
  * Only entries that resolve to a directory on disk are returned; file
  * entrypoints contribute zero sub-discovery surface and are filtered out.
- * Installed-plugin enumeration failures (missing lockfile, unreadable
- * `package.json`, etc.) are logged at `debug` and degrade gracefully — the
- * other sources still surface.
+ * Installed-plugin enumeration failures degrade gracefully at `debug`.
  */
 export async function listOmpExtensionRoots(ctx: LoadContext): Promise<OmpExtensionRoot[]> {
 	const scopedRoots = invocationRootScope.getStore();
-	// Post-startup reloads run outside `withOmpExtensionRootScope`; the caller
-	// carries the session's discovery mode on the LoadContext so an
-	// `explicit-only` session never re-merges ambient/installed roots on refresh.
-	const rootMode = ctx.extensionRootMode ?? scopedRoots?.mode ?? injectedCliRootMode;
-	let candidates: InjectedRoot[] = scopedRoots
-		? scopedRoots.paths.map(raw => ({ path: resolveAgainst(raw, ctx), level: "user" }))
-		: injectedCliRoots.map(root =>
-				root.relativePath ? { ...root, path: path.resolve(ctx.cwd, root.relativePath) } : root,
-			);
+	// Explicit lane, in precedence order: caller-provided reload value, then the
+	// construction-time invocation scope, then process-level CLI injection.
+	const explicitSeed: InjectedRoot[] = ctx.extensionRoots
+		? ctx.extensionRoots.explicit.map(raw => ({ path: resolveAgainst(raw, ctx), level: "user" }))
+		: scopedRoots
+			? scopedRoots.paths.map(raw => ({ path: resolveAgainst(raw, ctx), level: "user" }))
+			: injectedCliRoots.map(root =>
+					root.relativePath ? { ...root, path: path.resolve(ctx.cwd, root.relativePath) } : root,
+				);
+	const rootMode: OmpExtensionRootMode = ctx.extensionRoots?.mode ?? scopedRoots?.mode ?? injectedCliRootMode;
+	let candidates: InjectedRoot[] = explicitSeed;
 	if (rootMode === "merge") {
 		const [persisted, installedPlugins] = await Promise.all([
 			readConfiguredExtensions(ctx),
 			listInstalledPluginRoots(ctx),
 		]);
-		// Prefer the session's effective `extensions` (explicit ctx value, else
-		// the invocation-scoped snapshot) so overlays and runtime overrides win;
-		// scopeless callers fall back to the persisted config read from disk.
-		const effective = ctx.configuredExtensionPaths ?? scopedRoots?.configuredExtensions;
+		// Configured lane: caller value, else the invocation-scoped snapshot,
+		// else the persisted config on disk. Compared unpolluted against the
+		// persisted array so project provenance survives.
+		const configuredEntries = ctx.extensionRoots?.configured ?? scopedRoots?.configuredExtensions;
 		const configured =
-			effective !== undefined
+			configuredEntries !== undefined
 				? {
-						entries: [...effective],
+						entries: [...configuredEntries],
 						level:
-							persisted && Bun.deepEquals(effective, persisted.entries) ? persisted.level : ("user" as const),
+							persisted && Bun.deepEquals(configuredEntries, persisted.entries)
+								? persisted.level
+								: ("user" as const),
 					}
 				: persisted;
 		candidates = [
@@ -302,15 +311,6 @@ export async function listOmpExtensionRoots(ctx: LoadContext): Promise<OmpExtens
 				(raw): InjectedRoot => ({ path: resolveAgainst(raw, ctx), level: configured.level }),
 			) ?? []),
 			...installedPlugins,
-		];
-	} else if (ctx.configuredExtensionPaths !== undefined) {
-		// `explicit-only` reload outside the scope: honor exactly the caller's
-		// roots — no ambient `extensions:`, installed plugins, or disk config.
-		candidates = [
-			...candidates,
-			...ctx.configuredExtensionPaths.map(
-				(raw): InjectedRoot => ({ path: resolveAgainst(raw, ctx), level: "user" }),
-			),
 		];
 	}
 

@@ -27,6 +27,7 @@ function createSession(cwd: string, extensions: readonly string[] = []): ToolSes
 		cwd,
 		hasUI: false,
 		settings: Settings.isolated({ extensions: [...extensions] }),
+		effectiveExtensionRoots: { explicit: [], mode: "merge", configured: [...extensions] },
 		getSessionFile: () => null,
 		getSessionSpawns: () => "*",
 	} as unknown as ToolSession;
@@ -96,7 +97,7 @@ describe("TaskTool.create discovery memo", () => {
 		const existing = await TaskTool.create(session);
 
 		expect(existing.description).toContain("General-purpose task agent");
-		await refreshAgentDiscovery(session.cwd, session.settings.get("extensions"));
+		await refreshAgentDiscovery(session.cwd, session.effectiveExtensionRoots);
 
 		expect(existing.description).toContain("Refreshed task agent");
 		expect(existing.description).not.toContain("General-purpose task agent");

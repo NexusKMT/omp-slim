@@ -6,7 +6,7 @@
 
 import { getMCPConfigPath } from "@oh-my-pi/pi-utils";
 import { mcpCapability } from "../capability/mcp";
-import type { SourceMeta } from "../capability/types";
+import type { EffectiveExtensionRoots, SourceMeta } from "../capability/types";
 import type { MCPServer } from "../discovery";
 import { loadCapability } from "../discovery";
 import { readDisabledServers, readEnabledServers } from "./config-writer";
@@ -20,10 +20,8 @@ export interface LoadMCPConfigsOptions {
 	filterExa?: boolean;
 	/** Whether to filter out browser MCP servers when builtin browser tool is enabled (default: false) */
 	filterBrowser?: boolean;
-	/** Effective extension roots for session-scoped post-startup rediscovery. */
-	configuredExtensionPaths?: readonly string[];
-	/** Discovery mode paired with {@link configuredExtensionPaths}. */
-	extensionRootMode?: "merge" | "explicit-only";
+	/** Session-local extension roots for post-startup rediscovery (explicit + mode + configured). */
+	extensionRoots?: EffectiveExtensionRoots;
 }
 
 /** Result of loading MCP configs */
@@ -131,8 +129,7 @@ export async function loadAllMCPConfigs(cwd: string, options?: LoadMCPConfigsOpt
 
 	const result = await loadCapability<MCPServer>(mcpCapability.id, {
 		cwd,
-		configuredExtensionPaths: options?.configuredExtensionPaths,
-		extensionRootMode: options?.extensionRootMode,
+		extensionRoots: options?.extensionRoots,
 		filter: includeServer,
 		suppress: suppressServer,
 	});

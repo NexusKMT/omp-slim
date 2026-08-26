@@ -1,10 +1,9 @@
 /**
- * Regression (#9769 review): `AgentSession.configuredExtensionPaths` must retain
- * the SDK's explicit `additionalExtensionPaths` for post-startup reloads. Those
- * roots live only in the construction-time invocation scope, so a getter that
- * returned just `settings.extensions` dropped them from `refreshSkills`,
- * `/reload-plugins`, and MCP rediscovery, silently removing the explicitly
- * supplied packages' skills, commands, agents, and servers.
+ * Regression (#9769 review): `AgentSession.effectiveExtensionRoots` must thread
+ * the SDK's explicit `additionalExtensionPaths`, the discovery mode, and the
+ * live configured `extensions` as three separate lanes for post-startup
+ * reloads. Flattening them dropped explicit roots and the `explicit-only` mode
+ * from `refreshSkills`, `/reload-plugins`, and MCP rediscovery.
  */
 import { afterEach, describe, expect, it } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
@@ -22,7 +21,7 @@ interface SessionInputs {
 	extensions?: string[];
 }
 
-describe("AgentSession.configuredExtensionPaths", () => {
+describe("AgentSession.effectiveExtensionRoots", () => {
 	const sessions: AgentSession[] = [];
 	const authStorages: AuthStorage[] = [];
 
@@ -52,26 +51,29 @@ describe("AgentSession.configuredExtensionPaths", () => {
 		return session;
 	}
 
-	it("keeps explicit SDK roots when the extensions setting is empty", async () => {
+	it("keeps explicit SDK roots and merge mode when the extensions setting is empty", async () => {
 		const session = await makeSession({ additionalExtensionPaths: ["/ext/explicit"] });
-		expect(session.configuredExtensionPaths).toEqual(["/ext/explicit"]);
-		expect(session.extensionRootMode).toBe("merge");
+		expect(session.effectiveExtensionRoots).toEqual({ explicit: ["/ext/explicit"], mode: "merge", configured: [] });
 	});
-	it("merges explicit roots ahead of the configured extensions setting", async () => {
+
+	it("keeps explicit and configured in separate lanes under merge mode", async () => {
 		const session = await makeSession({
 			additionalExtensionPaths: ["/ext/explicit"],
 			extensions: ["/ext/configured"],
 		});
-		expect(session.configuredExtensionPaths).toEqual(["/ext/explicit", "/ext/configured"]);
+		expect(session.effectiveExtensionRoots).toEqual({
+			explicit: ["/ext/explicit"],
+			mode: "merge",
+			configured: ["/ext/configured"],
+		});
 	});
 
-	it("exposes only explicit roots in explicit-only mode when discovery is disabled", async () => {
+	it("reports explicit-only mode when discovery is disabled", async () => {
 		const session = await makeSession({
 			additionalExtensionPaths: ["/ext/explicit"],
 			extensions: ["/ext/configured"],
 			disableExtensionDiscovery: true,
 		});
-		expect(session.configuredExtensionPaths).toEqual(["/ext/explicit"]);
-		expect(session.extensionRootMode).toBe("explicit-only");
+		expect(session.effectiveExtensionRoots).toMatchObject({ explicit: ["/ext/explicit"], mode: "explicit-only" });
 	});
 });

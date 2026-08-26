@@ -989,8 +989,7 @@ export async function runRpcMode(
 		session.setSlashCommands(
 			await loadSlashCommands({
 				cwd,
-				configuredExtensionPaths: session.configuredExtensionPaths,
-				extensionRootMode: session.extensionRootMode,
+				extensionRoots: session.effectiveExtensionRoots,
 			}),
 		);
 		await emitAvailableCommandsUpdate();

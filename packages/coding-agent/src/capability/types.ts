@@ -6,6 +6,23 @@
  * a unified array of MCP servers.
  */
 
+/** Extension sub-discovery mode; `explicit-only` suppresses ambient sources. */
+export type ExtensionRootMode = "merge" | "explicit-only";
+
+/**
+ * Session-local extension-root inputs for sub-discovery, threaded as one value
+ * so no dimension is lost between the construction-time invocation scope and
+ * post-startup reloads. `explicit` are the SDK `additionalExtensionPaths` / CLI
+ * `--extension` roots (always active, user-level); `configured` is the live
+ * `extensions:` setting (ambient, only in `merge` mode, provenance resolved
+ * against the persisted config); `mode` gates the ambient/installed sources.
+ */
+export interface EffectiveExtensionRoots {
+	explicit: readonly string[];
+	mode: ExtensionRootMode;
+	configured: readonly string[];
+}
+
 /**
  * Context passed to every provider loader.
  */
@@ -17,21 +34,13 @@ export interface LoadContext {
 	/** Git repository root (directory containing .git), or null if not in a repo */
 	repoRoot: string | null;
 	/**
-	 * Effective `extensions` setting supplied explicitly by a direct caller
-	 * (e.g. {@link ../task/discovery.discoverAgents}) that already holds its own
-	 * session's `Settings`. When set, extension sub-discovery uses it instead of
-	 * the invocation-scoped snapshot or the persisted config on disk. Left unset
-	 * by {@link loadCapability}; SDK sessions route their effective value through
-	 * the invocation scope so concurrent sessions stay isolated.
+	 * Session-local extension roots for sub-discovery. When set, extension
+	 * discovery uses these lanes instead of the invocation-scoped snapshot or
+	 * the process defaults, so post-startup reloads stay byte-identical to the
+	 * construction-time scoped load. Left unset by {@link loadCapability}; SDK
+	 * sessions carry their value explicitly (or via the invocation scope).
 	 */
-	configuredExtensionPaths?: readonly string[];
-	/**
-	 * Extension discovery mode for this load. `explicit-only` (from an SDK
-	 * `disableExtensionDiscovery` session) restricts sub-discovery to
-	 * {@link configuredExtensionPaths} — no ambient `extensions:`, installed
-	 * plugins, or disk config. Defaults to `merge` when unset.
-	 */
-	extensionRootMode?: "merge" | "explicit-only";
+	extensionRoots?: EffectiveExtensionRoots;
 }
 
 /**
@@ -89,14 +98,12 @@ export interface LoadOptions<T = unknown> {
 	/** Explicit disabled extension IDs to apply instead of settings. */
 	disabledExtensions?: string[];
 	/**
-	 * Effective `extensions` setting for this load, forwarded to
-	 * {@link LoadContext.configuredExtensionPaths}. Post-startup reloads (e.g.
-	 * `refreshSkills`) MUST pass their live session value so overlay/override
-	 * extensions survive outside the construction-time invocation scope.
+	 * Session-local extension roots for this load, forwarded to
+	 * {@link LoadContext.extensionRoots}. Post-startup reloads MUST pass their
+	 * live session value so explicit roots, discovery mode, and configured
+	 * extensions all survive outside the construction-time invocation scope.
 	 */
-	configuredExtensionPaths?: readonly string[];
-	/** Extension discovery mode, forwarded to {@link LoadContext.extensionRootMode}. */
-	extensionRootMode?: "merge" | "explicit-only";
+	extensionRoots?: EffectiveExtensionRoots;
 	/**
 	 * Drop items before deduplication as if they never existed (e.g. scope
 	 * exclusions). A dropped item neither survives nor claims its dedupe key,

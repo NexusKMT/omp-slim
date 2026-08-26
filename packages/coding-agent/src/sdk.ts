@@ -53,6 +53,7 @@ import { createAutoresearchExtension } from "./autoresearch";
 import { loadCapability } from "./capability";
 import { type Rule, ruleCapability, setActiveRules } from "./capability/rule";
 import { bucketRules } from "./capability/rule-buckets";
+import type { EffectiveExtensionRoots } from "./capability/types";
 import { shouldEnableAppendOnlyContext } from "./config/append-only-context-mode";
 import { shouldInlineToolDescriptors } from "./config/inline-tool-descriptors-mode";
 import { isAuthenticated, kNoAuth, ModelRegistry } from "./config/model-registry";
@@ -1905,6 +1906,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			if (event.type === "connecting" && event.serverNames.length === 0) return;
 			eventBus.emit(MCP_CONNECTION_STATUS_EVENT_CHANNEL, event);
 		};
+		const sessionExtensionRoots: EffectiveExtensionRoots = {
+			explicit: options.additionalExtensionPaths ?? [],
+			mode: options.disableExtensionDiscovery ? "explicit-only" : "merge",
+			configured: settings.get("extensions") ?? [],
+		};
 		const mcpDiscoverOptions = {
 			onStatus: onMCPStatus,
 			enableProjectConfig: settings.get("mcp.enableProjectConfig") ?? true,
@@ -1912,10 +1918,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			filterExa: true,
 			// Filter browser MCP servers when builtin browser tool is active
 			filterBrowser: settings.get("browser.enabled") ?? false,
-			configuredExtensionPaths: settings.get("extensions") ?? [],
-			extensionRootMode: (options.disableExtensionDiscovery ? "explicit-only" : "merge") as
-				| "merge"
-				| "explicit-only",
+			extensionRoots: sessionExtensionRoots,
 		};
 		if (enableMCP && !mcpManager) {
 			if (deferMCPDiscoveryForUI) {
@@ -2095,7 +2098,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// Forward the source-path list (NOT the loaded instances) so subagents
 		// rebuild their own session-scoped extensions.
 		toolSession.extensionPaths = extensionPaths;
-		toolSession.extensionRootMode = options.disableExtensionDiscovery ? "explicit-only" : "merge";
+		toolSession.effectiveExtensionRoots = sessionExtensionRoots;
 
 		// Load inline extensions from factories
 		if (inlineExtensions.length > 0) {
