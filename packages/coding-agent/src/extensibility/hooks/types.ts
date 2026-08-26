@@ -86,7 +86,7 @@ export interface HookUIContext {
 	/**
 	 * Set status text in the footer/status bar.
 	 * Pass undefined as text to clear the status for this key.
-	 * ANSI/VT escape sequences are stripped, and control characters are replaced with spaces.
+	 * ANSI/VT escape sequences and most control characters are stripped; tabs and newlines become spaces.
 	 * Repeated spaces are collapsed and surrounding whitespace is trimmed.
 	 * The combined status line is truncated to terminal width.
 	 * @param key - Unique key to identify this status (e.g., hook name)
