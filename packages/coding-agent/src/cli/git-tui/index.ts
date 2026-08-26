@@ -5,7 +5,9 @@
  * (scope chip, file/diff toggle, hunk navigation, hunk/inline/split view
  * buttons, whitespace + word-wrap toggles), center diff pane with a minimap
  * scrollbar, right sidebar (file management + commit form while dirty, HEAD
- * commit details with author avatar when clean), and a footer with key hints.
+ * commit details with author avatar when clean). Submitting an empty commit
+ * form generates an llm-git-compatible message; submitting populated fields
+ * commits them. A footer shows key hints.
  *
  * `tab` moves focus between the diff and the sidebar; both panes take
  * arrows/PgUp/PgDn, vim motions (`j`/`k`/`h`/`l`/`g`/`G`), and mouse
@@ -28,6 +30,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
+import { generateGitCommit } from "../../commit/conventional/service";
 import { theme, warmHighlighter } from "../../modes/theme/theme";
 import * as git from "../../utils/git";
 import { AvatarLoader } from "./avatar";
@@ -114,6 +117,7 @@ class GitTuiComponent implements Component {
 	#loadSeq = 0;
 	#loadAbort: AbortController | null = null;
 	#highlightAbort: AbortController | null = null;
+	#generationAbort: AbortController | null = null;
 	#refreshTimer: NodeJS.Timeout | undefined;
 	#busy = false;
 	#status = "";
@@ -154,6 +158,7 @@ class GitTuiComponent implements Component {
 		this.#disposed = true;
 		this.#loadAbort?.abort();
 		this.#highlightAbort?.abort();
+		this.#generationAbort?.abort();
 		clearInterval(this.#refreshTimer);
 	}
 
@@ -298,6 +303,37 @@ class GitTuiComponent implements Component {
 						theme.fg("success", action.selection ? `Unstaged ${action.selection.label}` : "Unstaged all changes"),
 					);
 					break;
+				case "generate": {
+					const abort = new AbortController();
+					this.#generationAbort = abort;
+					this.#sidebar.setGenerating(true);
+					this.#setStatus(theme.fg("accent", "Generating commit message…"));
+					try {
+						const generated = await generateGitCommit({
+							cwd: this.#model.cwd,
+							stageIfEmpty: true,
+							signal: abort.signal,
+							onProgress: message => {
+								if (!this.#disposed) this.#setStatus(theme.fg("dim", message));
+							},
+						});
+						this.#sidebar.setGeneratedCommit(generated.commit);
+						this.#setStatus(
+							generated.validationError
+								? theme.fg("warning", `Generated message needs review: ${generated.validationError}`)
+								: theme.fg(
+										"success",
+										generated.stagedAll
+											? "Staged all changes and generated commit message"
+											: "Generated commit message",
+									),
+						);
+					} finally {
+						if (this.#generationAbort === abort) this.#generationAbort = null;
+						this.#sidebar.setGenerating(false);
+					}
+					break;
+				}
 				case "commit": {
 					if (action.stageAll) await this.#model.stage();
 					await this.#model.commit(action.message, { amend: action.amend });

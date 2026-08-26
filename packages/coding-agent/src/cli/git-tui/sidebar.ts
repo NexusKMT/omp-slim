@@ -20,6 +20,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
+import type { ConventionalCommit } from "../../commit/types";
 import { getEditorTheme, theme } from "../../modes/theme/theme";
 import { type AvatarLoader, identiconLines } from "./avatar";
 import { pill, selectionBgAnsi, softPill, tintChip, withBg } from "./colors";
@@ -30,6 +31,7 @@ export type SidebarAction =
 	/** `selection` omitted → whole tree; `label` names the target for the status line. */
 	| { type: "stage"; selection?: { files: ChangedFile[]; label: string } }
 	| { type: "unstage"; selection?: { files: ChangedFile[]; label: string } }
+	| { type: "generate" }
 	| { type: "commit"; message: string; amend: boolean; stageAll: boolean };
 
 type FileTarget = { kind: "file"; file: ChangedFile } | { kind: "dir"; key: string };
@@ -183,6 +185,7 @@ export class Sidebar {
 	readonly #imageBudget: ImageBudget | undefined;
 	focused = false;
 	amend = false;
+	generating = false;
 	/** File-list presentation: flat paths or a collapsible directory tree. */
 	viewStyle: "path" | "tree" = "tree";
 	readonly #collapsed = new Set<string>();
@@ -518,11 +521,14 @@ export class Sidebar {
 
 	#submitCommit(): void {
 		const summary = this.summary.getValue().trim();
-		if (!summary) return;
 		const body = this.description.getText().trim();
-		const message = body ? `${summary}\n\n${body}` : summary;
 		const stageAll = this.#model.staged.length === 0;
 		if (stageAll && this.#model.unstaged.length === 0 && !this.amend) return;
+		if (!summary) {
+			if (!body) this.#onAction({ type: "generate" });
+			return;
+		}
+		const message = body ? `${summary}\n\n${body}` : summary;
 		this.#onAction({ type: "commit", message, amend: this.amend, stageAll });
 	}
 
@@ -531,6 +537,18 @@ export class Sidebar {
 		this.summary.setValue("");
 		this.description.setText("");
 		this.amend = false;
+	}
+	/** Replace the form with one generated conventional commit. */
+	setGeneratedCommit(commit: ConventionalCommit): void {
+		const scope = commit.scope ? `(${commit.scope})` : "";
+		this.summary.setValue(`${commit.type}${scope}: ${commit.summary}`);
+		this.description.setText(commit.body.map(detail => `- ${detail}`).join("\n"));
+		this.#requestRender();
+	}
+	/** Reflect whether an inference request currently owns the commit form. */
+	setGenerating(generating: boolean): void {
+		this.generating = generating;
+		this.#requestRender();
 	}
 	/** Escape while the sidebar has focus: blur a text input first. True when consumed. */
 	handleEscape(): boolean {
@@ -870,15 +888,20 @@ export class Sidebar {
 		rows.push({ text: "" });
 
 		const commitTarget: Target = { kind: "commit-button" };
-		const canCommit =
-			this.summary.getValue().trim().length > 0 &&
-			(this.#model.staged.length > 0 || this.#model.unstaged.length > 0 || this.amend);
-		const label = this.#model.staged.length > 0 ? "-○- Commit staged changes" : "-○- Stage all & commit";
+		const hasChanges = this.#model.staged.length > 0 || this.#model.unstaged.length > 0 || this.amend;
+		const summary = this.summary.getValue().trim();
+		const description = this.description.getText().trim();
+		const canActivate = hasChanges && !this.generating && (summary.length > 0 || description.length === 0);
+		const label = this.generating
+			? "-○- Generating commit message"
+			: this.#model.staged.length > 0
+				? "-○- Commit staged changes"
+				: "-○- Stage all & commit";
 		const pad = Math.max(0, Math.floor((width - 4 - visibleWidth(label)) / 2));
 		const inner = `${" ".repeat(pad)}${label}${" ".repeat(pad)}`;
 		const button = pill(inner, theme.getColorHex("accent"), {
-			dim: !canCommit,
-			selected: canCommit && isSelected(commitTarget) && this.focused,
+			dim: !canActivate,
+			selected: canActivate && isSelected(commitTarget) && this.focused,
 		});
 		rows.push({ text: ` ${button}`, target: commitTarget });
 		return rows;
