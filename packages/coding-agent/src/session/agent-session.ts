@@ -500,6 +500,7 @@ export class AgentSession {
 			explicit: this.#additionalExtensionPaths,
 			mode: this.#disableExtensionDiscovery ? "explicit-only" : "merge",
 			configured: this.settings.get("extensions") ?? [],
+			configuredLevel: this.settings.extensionsSourceLevel(),
 		};
 	}
 

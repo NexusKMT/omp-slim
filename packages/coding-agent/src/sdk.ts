@@ -1272,7 +1272,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	// Snapshot this session's effective `extensions` onto its invocation scope so
 	// extension sub-discovery stays isolated from other concurrent sessions'
 	// Settings instances (never the process-global singleton).
-	setInvocationConfiguredExtensions(settings.get("extensions") ?? []);
+	setInvocationConfiguredExtensions(settings.get("extensions") ?? [], settings.extensionsSourceLevel());
 
 	// Pin authStorage to modelRegistry.authStorage: ModelRegistry.getApiKey() routes refresh
 	// failures through that instance, so any divergent storage handed to the bridge / mcpManager
@@ -1913,6 +1913,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			explicit: options.additionalExtensionPaths ?? [],
 			mode: options.disableExtensionDiscovery ? "explicit-only" : "merge",
 			configured: settings.get("extensions") ?? [],
+			configuredLevel: settings.extensionsSourceLevel(),
 		});
 		const mcpDiscoverOptions = {
 			onStatus: onMCPStatus,

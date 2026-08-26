@@ -295,6 +295,7 @@ export class AgentsHubComponent implements Component {
 				explicit: [],
 				mode: "merge",
 				configured: this.#settings.get("extensions") ?? [],
+				configuredLevel: this.#settings.extensionsSourceLevel(),
 			}
 		);
 	}

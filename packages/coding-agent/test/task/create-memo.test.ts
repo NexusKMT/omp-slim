@@ -27,7 +27,12 @@ function createSession(cwd: string, extensions: readonly string[] = []): ToolSes
 		cwd,
 		hasUI: false,
 		settings: Settings.isolated({ extensions: [...extensions] }),
-		effectiveExtensionRoots: () => ({ explicit: [], mode: "merge", configured: [...extensions] }),
+		effectiveExtensionRoots: () => ({
+			explicit: [],
+			mode: "merge",
+			configured: [...extensions],
+			configuredLevel: "user",
+		}),
 		getSessionFile: () => null,
 		getSessionSpawns: () => "*",
 	} as unknown as ToolSession;
@@ -103,6 +108,7 @@ describe("TaskTool.create discovery memo", () => {
 				explicit: [],
 				mode: "merge" as const,
 				configured: settings.get("extensions") ?? [],
+				configuredLevel: "user" as const,
 			}),
 			getSessionFile: () => null,
 			getSessionSpawns: () => "*",

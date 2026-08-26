@@ -53,7 +53,12 @@ describe("AgentSession.effectiveExtensionRoots", () => {
 
 	it("keeps explicit SDK roots and merge mode when the extensions setting is empty", async () => {
 		const session = await makeSession({ additionalExtensionPaths: ["/ext/explicit"] });
-		expect(session.effectiveExtensionRoots).toEqual({ explicit: ["/ext/explicit"], mode: "merge", configured: [] });
+		expect(session.effectiveExtensionRoots).toEqual({
+			explicit: ["/ext/explicit"],
+			mode: "merge",
+			configured: [],
+			configuredLevel: "user",
+		});
 	});
 
 	it("keeps explicit and configured in separate lanes under merge mode", async () => {
@@ -65,6 +70,7 @@ describe("AgentSession.effectiveExtensionRoots", () => {
 			explicit: ["/ext/explicit"],
 			mode: "merge",
 			configured: ["/ext/configured"],
+			configuredLevel: "user",
 		});
 	});
 

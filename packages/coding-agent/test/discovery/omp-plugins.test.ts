@@ -193,14 +193,17 @@ test("effective extensions replace persisted roots for overlays and runtime over
 
 	const context: LoadContext = {
 		...ctx(),
-		extensionRoots: { explicit: [], mode: "merge", configured: [overrideExt] },
+		extensionRoots: { explicit: [], mode: "merge", configured: [overrideExt], configuredLevel: "user" },
 	};
 	const skills = await loadFromPlugin<{ name: string }>(skillCapability.id, context);
 	const names = skills.map(skill => skill.name);
 	expect(names).toContain("override-skill");
 	expect(names).not.toContain("persisted-skill");
 
-	const emptyOverride: LoadContext = { ...ctx(), extensionRoots: { explicit: [], mode: "merge", configured: [] } };
+	const emptyOverride: LoadContext = {
+		...ctx(),
+		extensionRoots: { explicit: [], mode: "merge", configured: [], configuredLevel: "user" },
+	};
 	const emptySkills = await loadFromPlugin<{ name: string }>(skillCapability.id, emptyOverride);
 	expect(emptySkills.map(skill => skill.name)).not.toContain("persisted-skill");
 });
@@ -377,7 +380,12 @@ test("explicit-only mode drops the configured lane and installed roots (#9769)",
 
 	const mergeRoots = await listOmpExtensionRoots({
 		...ctx(),
-		extensionRoots: { explicit: [explicitExt], mode: "merge", configured: [configuredExt] },
+		extensionRoots: {
+			explicit: [explicitExt],
+			mode: "merge",
+			configured: [configuredExt],
+			configuredLevel: "project",
+		},
 	});
 	expect(mergeRoots.map(root => path.basename(root.path))).toEqual(
 		expect.arrayContaining(["explicit-extension", "configured-extension", "installed-extension"]),
@@ -385,9 +393,35 @@ test("explicit-only mode drops the configured lane and installed roots (#9769)",
 
 	const explicitOnlyRoots = await listOmpExtensionRoots({
 		...ctx(),
-		extensionRoots: { explicit: [explicitExt], mode: "explicit-only", configured: [configuredExt] },
+		extensionRoots: {
+			explicit: [explicitExt],
+			mode: "explicit-only",
+			configured: [configuredExt],
+			configuredLevel: "project",
+		},
 	});
 	expect(explicitOnlyRoots.map(root => root.path)).toEqual([explicitExt]);
+});
+
+test("configured lane takes its level from the authority's configuredLevel, not the disk scan (#9769)", async () => {
+	// A project provider Settings can't see on the `.omp` disk scan (e.g.
+	// `.claude/settings.json`) still yields a project-level root because the
+	// session carries the Settings-resolved provenance in the struct.
+	const configuredExt = path.join(tempDir, "provenance-extension");
+	buildExtensionPackage(configuredExt, "provenance-skill");
+	// Nothing on `.omp` disk configures it — the old deepEquals scan would label it `user`.
+
+	const asProject = await listOmpExtensionRoots({
+		...ctx(),
+		extensionRoots: { explicit: [], mode: "merge", configured: [configuredExt], configuredLevel: "project" },
+	});
+	expect(asProject.find(root => root.path === configuredExt)?.level).toBe("project");
+
+	const asUser = await listOmpExtensionRoots({
+		...ctx(),
+		extensionRoots: { explicit: [], mode: "merge", configured: [configuredExt], configuredLevel: "user" },
+	});
+	expect(asUser.find(root => root.path === configuredExt)?.level).toBe("user");
 });
 
 test("scopeless reload with session roots equals the construction-time scoped load (#9769 invariant)", async () => {
@@ -411,13 +445,15 @@ test("scopeless reload with session roots equals the construction-time scoped lo
 
 	for (const mode of ["merge", "explicit-only"] as const) {
 		for (const configured of [[configuredExt], []]) {
-			const roots = { explicit: [explicitExt], mode, configured };
-			const scoped = await withOmpExtensionRootScope(roots.explicit, roots.mode, () => {
-				setInvocationConfiguredExtensions(roots.configured);
-				return listOmpExtensionRoots(ctx());
-			});
-			const reloaded = await listOmpExtensionRoots({ ...ctx(), extensionRoots: roots });
-			expect(reloaded).toEqual(scoped);
+			for (const configuredLevel of ["user", "project"] as const) {
+				const roots = { explicit: [explicitExt], mode, configured, configuredLevel };
+				const scoped = await withOmpExtensionRootScope(roots.explicit, roots.mode, () => {
+					setInvocationConfiguredExtensions(roots.configured, roots.configuredLevel);
+					return listOmpExtensionRoots(ctx());
+				});
+				const reloaded = await listOmpExtensionRoots({ ...ctx(), extensionRoots: roots });
+				expect(reloaded).toEqual(scoped);
+			}
 		}
 	}
 });
@@ -431,7 +467,7 @@ test("loadCapability extensionRoots surfaces override extensions outside any sco
 
 	const withOption = await loadCapability<{ name: string }>(skillCapability.id, {
 		cwd: project,
-		extensionRoots: { explicit: [], mode: "merge", configured: [overrideExt] },
+		extensionRoots: { explicit: [], mode: "merge", configured: [overrideExt], configuredLevel: "user" },
 	});
 	expect(withOption.items.map(skill => skill.name)).toContain("runtime-override-skill");
 

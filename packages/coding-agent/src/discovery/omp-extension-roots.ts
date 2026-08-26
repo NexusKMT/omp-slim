@@ -58,6 +58,8 @@ interface InvocationRootScope {
 	 * to reading the persisted config from disk.
 	 */
 	configuredExtensions?: readonly string[];
+	/** Provenance of {@link configuredExtensions}, from `Settings`. Defaults to `user` when unset. */
+	configuredLevel?: "user" | "project";
 }
 
 const invocationRootScope = new AsyncLocalStorage<InvocationRootScope>();
@@ -91,15 +93,18 @@ export function withOmpExtensionRootScope<T>(
 }
 
 /**
- * Record the owning session's effective `extensions` setting on the active
- * invocation scope so sub-discovery honors overlays and runtime overrides
- * without reading the process-global settings singleton (which the most
- * recently initialized session would otherwise clobber). No-op outside a
- * {@link withOmpExtensionRootScope} callback.
+ * Record the owning session's effective `extensions` setting (and its
+ * `Settings`-resolved provenance) on the active invocation scope so
+ * sub-discovery honors overlays/runtime overrides and foreign project
+ * providers without reading the process-global settings singleton. No-op
+ * outside a {@link withOmpExtensionRootScope} callback.
  */
-export function setInvocationConfiguredExtensions(paths: readonly string[]): void {
+export function setInvocationConfiguredExtensions(paths: readonly string[], level: "user" | "project" = "user"): void {
 	const scope = invocationRootScope.getStore();
-	if (scope) scope.configuredExtensions = [...paths];
+	if (scope) {
+		scope.configuredExtensions = [...paths];
+		scope.configuredLevel = level;
+	}
 }
 
 /**
@@ -259,9 +264,11 @@ async function isDirectory(p: string): Promise<boolean> {
  * 1. Explicit lane — `explicit` roots (SDK `additionalExtensionPaths` / CLI
  *    `--extension`). Always active, always user-level.
  * 2. Configured lane — the effective `extensions:` setting, added only in
- *    `merge` mode. Its provenance is resolved against the persisted config, so
- *    a project-configured package is labeled `project` (kept separate from the
- *    explicit lane precisely so this comparison is not polluted).
+ *    `merge` mode. Its provenance (`configuredLevel`) is carried from
+ *    `Settings` (the authority that merges every project provider, incl.
+ *    `.claude/settings.json`, and honors overlays/overrides), never re-derived
+ *    from a partial `.omp` disk scan; scopeless callers read the persisted
+ *    `.omp` config, which supplies its own level.
  * 3. Installed npm/link plugins under `<plugins>/node_modules/`, added only in
  *    `merge` mode. Marketplace installs load via the `claude-plugins` provider.
  *
@@ -287,24 +294,22 @@ export async function listOmpExtensionRoots(ctx: LoadContext): Promise<OmpExtens
 	const rootMode: OmpExtensionRootMode = ctx.extensionRoots?.mode ?? scopedRoots?.mode ?? injectedCliRootMode;
 	let candidates: InjectedRoot[] = explicitSeed;
 	if (rootMode === "merge") {
-		const [persisted, installedPlugins] = await Promise.all([
-			readConfiguredExtensions(ctx),
-			listInstalledPluginRoots(ctx),
-		]);
-		// Configured lane: caller value, else the invocation-scoped snapshot,
-		// else the persisted config on disk. Compared unpolluted against the
-		// persisted array so project provenance survives.
+		const installedPlugins = await listInstalledPluginRoots(ctx);
+		// Configured lane. When a session supplies the effective value (reload
+		// struct or invocation-scoped snapshot), its provenance came from
+		// `Settings` — the authority that merges every project provider (incl.
+		// `.claude/settings.json`) and honors overlays/overrides — so trust the
+		// carried `configuredLevel` verbatim. When no session value is present,
+		// read the persisted `.omp` config on disk, which is the authoritative
+		// source (and its own provenance) in that scopeless path.
 		const configuredEntries = ctx.extensionRoots?.configured ?? scopedRoots?.configuredExtensions;
 		const configured =
 			configuredEntries !== undefined
 				? {
 						entries: [...configuredEntries],
-						level:
-							persisted && Bun.deepEquals(configuredEntries, persisted.entries)
-								? persisted.level
-								: ("user" as const),
+						level: ctx.extensionRoots?.configuredLevel ?? scopedRoots?.configuredLevel ?? ("user" as const),
 					}
-				: persisted;
+				: await readConfiguredExtensions(ctx);
 		candidates = [
 			...candidates,
 			...(configured?.entries.map(

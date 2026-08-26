@@ -14,13 +14,16 @@ export type ExtensionRootMode = "merge" | "explicit-only";
  * so no dimension is lost between the construction-time invocation scope and
  * post-startup reloads. `explicit` are the SDK `additionalExtensionPaths` / CLI
  * `--extension` roots (always active, user-level); `configured` is the live
- * `extensions:` setting (ambient, only in `merge` mode, provenance resolved
- * against the persisted config); `mode` gates the ambient/installed sources.
+ * `extensions:` setting (ambient, only in `merge` mode); `configuredLevel` is
+ * its provenance as resolved by `Settings` (the authority — includes foreign
+ * project providers like `.claude/settings.json`, never re-derived from `.omp`
+ * on disk); `mode` gates the ambient/installed sources.
  */
 export interface EffectiveExtensionRoots {
 	explicit: readonly string[];
 	mode: ExtensionRootMode;
 	configured: readonly string[];
+	configuredLevel: "user" | "project";
 }
 
 /**
