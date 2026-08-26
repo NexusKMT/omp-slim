@@ -439,13 +439,10 @@ function buildExecutorOptions(
 		workspaceTree: session.workspaceTree,
 		promptTemplates: session.promptTemplates,
 		rules: session.rules,
-		// Subagents inherit the parent's already-resolved extension module paths.
-		// The parent's raw SDK `additionalExtensionPaths` are intentionally not
-		// re-threaded: child sessions carry no `additionalExtensionPaths`, so
-		// their `effectiveExtensionRoots.explicit` is empty and extension-package
-		// agents/skills reach them only through inherited paths — not a fresh
-		// scoped sub-discovery. Revisit if subagents ever need explicit-root
-		// agents the parent did not itself preload.
+		// Root policy and module paths have separate jobs: the live policy drives
+		// recursive sub-discovery; preloaded paths only avoid re-scanning/reusing
+		// parent-bound extension instances while constructing the child.
+		extensionRoots: session.effectiveExtensionRoots?.bind(session),
 		preloadedExtensionPaths: restrictToolNames ? [] : session.extensionPaths,
 		preloadedCustomToolPaths: restrictToolNames ? [] : session.customToolPaths,
 		localProtocolOptions,

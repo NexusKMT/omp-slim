@@ -21,6 +21,7 @@ import type {
 import type { postmortem } from "@oh-my-pi/pi-utils";
 import type { AdvisorConfig } from "../advisor";
 import type { AsyncJob, AsyncJobDeliveryState, AsyncJobManager } from "../async";
+import type { EffectiveExtensionRoots } from "../capability/types";
 import type { ModelRegistry } from "../config/model-registry";
 import type { PromptTemplate } from "../config/prompt-templates";
 import type { Settings, SkillsSettings } from "../config/settings";
@@ -126,12 +127,14 @@ export interface AgentSessionConfig {
 	sessionManager: SessionManager;
 	settings: Settings;
 	/**
-	 * Raw SDK `additionalExtensionPaths`. Retained so post-startup capability
-	 * reloads rediscover explicitly-supplied packages, which live only in the
-	 * construction-time invocation scope otherwise.
+	 * Live extension-root policy inherited from the owning session. Subagents use
+	 * this provider so explicit roots, discovery mode, configured roots, and
+	 * provenance survive recursive task discovery.
 	 */
+	extensionRoots?: () => EffectiveExtensionRoots;
+	/** Raw SDK `additionalExtensionPaths`; used when no inherited root provider exists. */
 	additionalExtensionPaths?: readonly string[];
-	/** Mirror of `disableExtensionDiscovery`: reloads then use only explicit roots. */
+	/** Mirror of `disableExtensionDiscovery`; used when no inherited root provider exists. */
 	disableExtensionDiscovery?: boolean;
 	/** Whether the session spawn policy permits the read-only `scout` subagent. Defaults to true. */
 	scoutAllowedBySpawnPolicy?: boolean;

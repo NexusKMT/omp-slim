@@ -481,27 +481,16 @@ export class AgentSession {
 	/** Per-session `CUT`/`PASTE` clipboard register shared across edit calls. */
 	editClipboard?: Clipboard;
 
-	/** Raw SDK `additionalExtensionPaths`, resolved lazily by `listOmpExtensionRoots`. */
-	readonly #additionalExtensionPaths: readonly string[];
-	/** When true, reloads expose only the explicit roots (no ambient `extensions:`). */
-	readonly #disableExtensionDiscovery: boolean;
+	/** Materializes this session's live extension-root policy per discovery call. */
+	readonly #extensionRoots: () => EffectiveExtensionRoots;
 
 	/**
-	 * Session-local extension roots for this session, read live from its own
-	 * {@link settings}. Threaded whole (explicit lane + mode + configured lane)
-	 * so post-startup reloads — `refreshSkills`, slash-command/agent/MCP
-	 * rediscovery — stay byte-identical to the construction-time scoped load and
-	 * never lose the explicit `additionalExtensionPaths`, the `explicit-only`
-	 * mode, or project provenance. Session-local, never the process-global
-	 * singleton, so concurrent sessions stay isolated.
+	 * Session-local extension roots for post-startup rediscovery. Subagents may
+	 * inherit the owning session's provider so recursive task discovery preserves
+	 * explicit roots, mode, configured roots, and provenance.
 	 */
 	get effectiveExtensionRoots(): EffectiveExtensionRoots {
-		return {
-			explicit: this.#additionalExtensionPaths,
-			mode: this.#disableExtensionDiscovery ? "explicit-only" : "merge",
-			configured: this.settings.get("extensions") ?? [],
-			configuredLevel: this.settings.extensionsSourceLevel(),
-		};
+		return this.#extensionRoots();
 	}
 
 	#powerAssertion: MacOSPowerAssertion | undefined;
@@ -1022,8 +1011,14 @@ export class AgentSession {
 		this.sessionManager = config.sessionManager;
 		this.settings = config.settings;
 		this.#modelRegistry = config.modelRegistry;
-		this.#additionalExtensionPaths = config.additionalExtensionPaths ?? [];
-		this.#disableExtensionDiscovery = config.disableExtensionDiscovery ?? false;
+		this.#extensionRoots =
+			config.extensionRoots ??
+			(() => ({
+				explicit: config.additionalExtensionPaths ?? [],
+				mode: config.disableExtensionDiscovery ? "explicit-only" : "merge",
+				configured: this.settings.get("extensions") ?? [],
+				configuredLevel: this.settings.extensionsSourceLevel(),
+			}));
 		this.#codexResetCoordinator = config.codexResetCoordinator ?? defaultCodexAutoRedeemCoordinator;
 		const bashHost: BashRunnerHost = {
 			agent: this.agent,
