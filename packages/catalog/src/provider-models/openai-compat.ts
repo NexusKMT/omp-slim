@@ -5179,10 +5179,10 @@ function getLiteLLMParams(entry: LiteLLMRichModelEntry): LiteLLMRichModelEntry |
 function getLiteLLMMetadataValue(entry: LiteLLMRichModelEntry, key: string): unknown {
 	return entry[key] ?? getLiteLLMModelInfo(entry)?.[key];
 }
-/** Per-million USD cost from a `*_per_token` LiteLLM field, or `undefined` when absent/negative. */
+/** Per-million USD cost from a positive `*_per_token` LiteLLM field. */
 function getLiteLLMPerMillionCost(entry: LiteLLMRichModelEntry, key: string): number | undefined {
 	const perToken = toNumber(getLiteLLMMetadataValue(entry, key));
-	return perToken !== undefined && perToken >= 0 ? perToken * 1_000_000 : undefined;
+	return perToken !== undefined && perToken > 0 ? perToken * 1_000_000 : undefined;
 }
 
 /** Map positive LiteLLM per-token prices onto their per-million cost fields. */
@@ -5409,6 +5409,7 @@ function mergeLiteLLMRichEndpointModels<TApi extends Api>(
 		input: next.supportsVision === true || next.supportsVision === false ? next.model.input : existing.model.input,
 		reasoning: typeof next.supportsReasoning === "boolean" ? next.model.reasoning : existing.model.reasoning,
 		cost: { ...existing.model.cost, ...existing.reportedCost, ...next.reportedCost },
+		compat: next.hasSupportedOpenAIParams ? next.model.compat : existing.model.compat,
 	};
 	if (next.hasToolMetadata) {
 		model.supportsTools = next.model.supportsTools;
@@ -5548,8 +5549,11 @@ async function fetchLiteLLMRichModelsInternal<TApi extends Api>(
 				if (
 					(entry.supportsVision !== true && entry.supportsVision !== false) ||
 					(options.resolveApi !== undefined && entry.apiRoute === "unknown") ||
-					(entry.hasCost &&
-						(entry.reportedCost.cacheRead === undefined || entry.reportedCost.cacheWrite === undefined))
+					(Object.keys(entry.reportedCost).length > 0 &&
+						(entry.reportedCost.input === undefined ||
+							entry.reportedCost.output === undefined ||
+							entry.reportedCost.cacheRead === undefined ||
+							entry.reportedCost.cacheWrite === undefined))
 				) {
 					needsMoreMetadata = true;
 					break;
