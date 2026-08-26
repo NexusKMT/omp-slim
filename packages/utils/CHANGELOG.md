@@ -7,6 +7,9 @@
 ### Added
 
 - Added conventional commit generation with support for dependency, security, configuration, UX, and infrastructure commit types, plus configurable caching and large-diff analysis behavior.
+### Added
+
+- Exported `getComposerCacheDir` to resolve the per-project composer speculative cache directory under the XDG cache category, so the coding-agent composer startup cache honors `XDG_CACHE_HOME` like the other agent caches.
 
 ## [18.0.5] - 2026-08-25
 

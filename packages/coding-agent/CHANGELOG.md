@@ -61,6 +61,8 @@
 
 - Fixed command-backed (`!command`) provider and model-override header credentials staying pinned to their stale value after an HTTP 401; the auth retry now re-runs those commands and sends the refreshed headers. ([#9760](https://github.com/can1357/oh-my-pi/issues/9760))
 
+- Fixed the composer speculative startup cache ignoring `XDG_CACHE_HOME`
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
