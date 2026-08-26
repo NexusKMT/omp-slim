@@ -444,6 +444,7 @@ function buildExecutorOptions(
 		// parent-bound extension instances while constructing the child.
 		extensionRoots: session.effectiveExtensionRoots?.bind(session),
 		preloadedExtensionPaths: restrictToolNames ? [] : session.extensionPaths,
+		preloadedPreparedExtensions: restrictToolNames ? [] : session.preparedExtensions,
 		preloadedCustomToolPaths: restrictToolNames ? [] : session.customToolPaths,
 		localProtocolOptions,
 		parentArtifactManager: session.getArtifactManager?.() ?? undefined,

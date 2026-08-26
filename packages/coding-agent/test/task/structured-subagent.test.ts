@@ -462,6 +462,14 @@ describe("structured subagent primitive", () => {
 		mockDiscovery();
 		const mcpManager = {} as NonNullable<ToolSession["mcpManager"]>;
 		const extensionPaths = ["/plugins/example.ts"];
+		const preparedExtensions = [
+			{
+				path: extensionPaths[0]!,
+				resolvedPath: extensionPaths[0]!,
+				factory: () => {},
+				error: null,
+			},
+		] as NonNullable<ToolSession["preparedExtensions"]>;
 		const customToolPaths = [{ path: "/tools/example.ts", source: "project" }] as unknown as NonNullable<
 			ToolSession["customToolPaths"]
 		>;
@@ -479,6 +487,7 @@ describe("structured subagent primitive", () => {
 			mcpManager,
 			extensionPaths,
 			customToolPaths,
+			preparedExtensions,
 			effectiveExtensionRoots: extensionRoots,
 		});
 		const mcpDisabledSession = session();
@@ -516,6 +525,7 @@ describe("structured subagent primitive", () => {
 			enableMCP: true,
 			mcpManager,
 			preloadedExtensionPaths: extensionPaths,
+			preloadedPreparedExtensions: preparedExtensions,
 			preloadedCustomToolPaths: customToolPaths,
 		});
 		expect(options[1]?.restrictToolNames).toBe(false);

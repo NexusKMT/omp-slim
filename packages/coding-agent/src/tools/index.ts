@@ -12,6 +12,7 @@ import { checkJuliaKernelAvailability } from "../eval/jl/kernel";
 import { checkPythonKernelAvailability } from "../eval/py/kernel";
 import { checkRubyKernelAvailability } from "../eval/rb/kernel";
 import type { ToolPathWithSource } from "../extensibility/custom-tools";
+import type { PreparedExtension } from "../extensibility/extensions/types";
 import type { Skill } from "../extensibility/skills";
 import type { GoalModeState, GoalRuntime } from "../goals";
 import { GoalTool } from "../goals/tools/goal-tool";
@@ -198,6 +199,8 @@ export interface ToolSession {
 	 * (`<inline-N>`) are NOT included — those are session-local.
 	 */
 	extensionPaths?: string[];
+	/** Imported extension factories safe to rebind in child sessions. */
+	preparedExtensions?: PreparedExtension[];
 	/**
 	 * Session-local extension roots for post-startup sub-discovery: explicit SDK
 	 * roots, discovery mode, and configured `extensions:`. A provider (not a
