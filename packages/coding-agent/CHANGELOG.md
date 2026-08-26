@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- ACP clients prompting while the agent is mid-turn now receive a typed JSON-RPC error (code -32003, `data.reason: "session_busy"`) instead of an opaque -32603 "Internal error", so prompts no longer appear to vanish when the session is busy.
+
 ## [18.0.6] - 2026-08-26
 
 ### Added
