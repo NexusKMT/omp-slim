@@ -1117,9 +1117,26 @@ export class CommandController {
 			this.ctx.showError(`Failed to switch workspace: ${e instanceof Error ? e.message : String(e)}`);
 			try {
 				await this.ctx.sessionManager.rollbackMove(previousState);
+				let sourceOk = false;
 				try {
-					await this.ctx.applyCwdChange(previousState.cwd);
+					sourceOk = await this.ctx.applyCwdChange(previousState.cwd);
 				} catch {}
+				if (!sourceOk) {
+					const actual = this.ctx.sessionManager.getCwd();
+					let realigned = false;
+					try {
+						realigned = await this.ctx.applyCwdChange(actual);
+					} catch {}
+					if (!realigned) {
+						this.ctx.showError(
+							`Failed to restore source workspace after rollback: process remains at target while session is at ${actual}`,
+						);
+					} else {
+						this.ctx.showError(
+							`Failed to restore source workspace after rollback: workspace remains at ${actual}`,
+						);
+					}
+				}
 			} catch (err) {
 				// rollbackMove keeps the manager at the moved target while
 				// applyCwdChange left the process at the source — re-scope the
@@ -1266,9 +1283,26 @@ export class CommandController {
 			this.ctx.showError(`Failed to switch workspace: ${e instanceof Error ? e.message : String(e)}`);
 			try {
 				await this.ctx.sessionManager.rollbackMove(previousState);
+				let sourceOk = false;
 				try {
-					await this.ctx.applyCwdChange(previousState.cwd);
+					sourceOk = await this.ctx.applyCwdChange(previousState.cwd);
 				} catch {}
+				if (!sourceOk) {
+					const actual = this.ctx.sessionManager.getCwd();
+					let realigned = false;
+					try {
+						realigned = await this.ctx.applyCwdChange(actual);
+					} catch {}
+					if (!realigned) {
+						this.ctx.showError(
+							`Failed to restore source workspace after rollback: process remains at target while session is at ${actual}`,
+						);
+					} else {
+						this.ctx.showError(
+							`Failed to restore source workspace after rollback: workspace remains at ${actual}`,
+						);
+					}
+				}
 			} catch (err) {
 				// rollbackMove keeps the manager at the moved target while
 				// applyCwdChange left the process at the source — re-scope the
