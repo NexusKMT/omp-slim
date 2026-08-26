@@ -5,6 +5,7 @@
 ### Added
 
 - Automatically generate commit summaries for whitespace-only changes without LLM latency
+- The git TUI sidebar's Unstaged/Staged section headers now fold on click, Enter, or ←/→, hiding the section's file rows; space or `s`/`u` on a header stages/unstages the whole section.
 - Automatically correct grammar and tense in generated commit summaries
 - Exclude redundant project-wide names from generated commit scopes
 - The git TUI can now generate cached conventional commit messages using llm-git's fast and map-reduce workflow.
@@ -18,7 +19,8 @@
 
 ### Fixed
 
-- Clicking a git TUI section header label no longer stages or unstages every file; only the Stage All / Unstage All button does.
+- Failed commit-message generation in the git TUI now keeps a single-line error in the status bar instead of silently reverting to idle after a few seconds.
+- Generating a commit message no longer keeps `omp git` alive after quitting; broker-backed auth storage is now closed when generation finishes.
 
 ## [18.0.5] - 2026-08-25
 

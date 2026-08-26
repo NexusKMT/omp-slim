@@ -193,6 +193,49 @@ describe("git tui sidebar staging", () => {
 			expect(model.unstaged.map(file => file.path)).toEqual(["a/tracked.txt"]);
 		});
 	});
+	test("clicking the section header label folds it instead of staging everything", async () => {
+		await withDirtyRepo(async ({ sidebar, actions }) => {
+			const lines = sidebar.render(40, 30);
+			const strip = (line: string): string => line.replace(/\x1b\[[0-9;]*m/g, "");
+			const headerRow = lines.findIndex(line => strip(line).includes("Unstaged Files"));
+			expect(headerRow).toBeGreaterThanOrEqual(0);
+
+			// Regression (#e0a92099dd follow-up): a label click used to fall through
+			// to the row-level stage-all target and stage the whole changeset.
+			sidebar.handleClick(headerRow, 2);
+			expect(actions).toEqual([]);
+			expect(sidebar.selected).toEqual({ kind: "section", area: "unstaged" });
+
+			// Folded: chevron flips and the section's rows leave render + keyboard nav.
+			const folded = sidebar.render(40, 30);
+			expect(strip(folded[headerRow] ?? "")).toContain("▸ Unstaged Files");
+			expect(folded.some(line => strip(line).includes("one.txt"))).toBe(false);
+			sidebar.handleInput("j");
+			expect(sidebar.selected).toEqual({ kind: "section", area: "staged" });
+
+			// Second label click unfolds.
+			sidebar.handleInput("k");
+			sidebar.handleClick(headerRow, 2);
+			const unfolded = sidebar.render(40, 30);
+			expect(strip(unfolded[headerRow] ?? "")).toContain("▾ Unstaged Files");
+			expect(unfolded.some(line => strip(line).includes("one.txt"))).toBe(true);
+		});
+	});
+
+	test("only the header pill stages everything; selection stays on the header", async () => {
+		await withDirtyRepo(async ({ sidebar, actions }) => {
+			const lines = sidebar.render(40, 30);
+			const strip = (line: string): string => line.replace(/\x1b\[[0-9;]*m/g, "");
+			const headerRow = lines.findIndex(line => strip(line).includes("Unstaged Files"));
+			const pillCol = strip(lines[headerRow] ?? "").indexOf("Stage All");
+			expect(pillCol).toBeGreaterThan(0);
+
+			sidebar.handleClick(headerRow, pillCol + 1);
+			expect(actions).toEqual([{ type: "stage" }]);
+			expect(sidebar.selected).toEqual({ kind: "section", area: "unstaged" });
+		});
+	});
+
 	test("empty commit action generates before a populated action commits", async () => {
 		await withDirtyRepo(async ({ sidebar, actions }) => {
 			sidebar.handleInput("G");

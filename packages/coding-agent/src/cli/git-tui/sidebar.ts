@@ -35,10 +35,13 @@ export type SidebarAction =
 	| { type: "commit"; message: string; amend: boolean; stageAll: boolean };
 
 type FileTarget = { kind: "file"; file: ChangedFile } | { kind: "dir"; key: string };
+/** A foldable file-list section header (unstaged/staged). */
+type SectionTarget = { kind: "section"; area: "unstaged" | "staged" };
 
 type Target =
 	| FileTarget
 	| { kind: "view-style"; style: "path" | "tree" }
+	| SectionTarget
 	| { kind: "stage-all" }
 	| { kind: "unstage-all" }
 	| { kind: "amend" }
@@ -86,6 +89,7 @@ interface SplitFiles {
 function targetKey(target: Target): string {
 	if (target.kind === "file") return `file:${target.file.area}:${target.file.path}`;
 	if (target.kind === "dir") return `dir:${target.key}`;
+	if (target.kind === "section") return `section:${target.area}`;
 	if (target.kind === "view-style") return `view:${target.style}`;
 	return target.kind;
 }
@@ -151,11 +155,12 @@ function dirRowText(entry: FileEntry, width: number, selected: boolean, focused:
 	return selected && focused ? `${withBg(line, selectionBgAnsi())}\x1b[0m` : line;
 }
 
-/** Section header row: clicking the action pill stages/unstages; the label only selects. */
+/** Section header row: clicking the label toggles the fold; the action pill stages/unstages. */
 function sectionHeaderRow(
 	label: string,
 	action: string,
 	target: Target,
+	pillTarget: Target,
 	width: number,
 	selected: boolean,
 	focused: boolean,
@@ -168,7 +173,7 @@ function sectionHeaderRow(
 	return {
 		text: selected && focused ? `${withBg(line, selectionBgAnsi())}\x1b[0m` : line,
 		target,
-		hits: [{ from, to: from + visibleWidth(right), target }],
+		hits: [{ from, to: from + visibleWidth(right), target: pillTarget }],
 	};
 }
 
@@ -189,6 +194,7 @@ export class Sidebar {
 	/** File-list presentation: flat paths or a collapsible directory tree. */
 	viewStyle: "path" | "tree" = "tree";
 	readonly #collapsed = new Set<string>();
+	readonly #collapsedSections = new Set<SectionTarget["area"]>();
 	#targets: Target[] = [];
 	#treeVersion = 0;
 	readonly #targetByKey = new Map<string, Target>();
@@ -270,7 +276,7 @@ export class Sidebar {
 		if (target) this.#selectedKey = targetKey(target);
 		if (target?.kind === "file") return target.file;
 		const firstFile = this.#targets.find(candidate => candidate.kind === "file");
-		if (firstFile?.kind === "file" && (!target || target.kind === "stage-all" || target.kind === "unstage-all")) {
+		if (firstFile?.kind === "file" && (!target || target.kind === "section")) {
 			return firstFile.file;
 		}
 		return firstFile?.kind === "file" ? firstFile.file : null;
@@ -403,10 +409,10 @@ export class Sidebar {
 		if (this.#model.clean) {
 			pushSection(headFiles ?? [], "commit");
 		} else {
-			pushTarget({ kind: "stage-all" });
-			pushSection(this.#model.unstaged, "unstaged");
-			pushTarget({ kind: "unstage-all" });
-			pushSection(this.#model.staged, "staged");
+			pushTarget({ kind: "section", area: "unstaged" });
+			if (!this.#collapsedSections.has("unstaged")) pushSection(this.#model.unstaged, "unstaged");
+			pushTarget({ kind: "section", area: "staged" });
+			if (!this.#collapsedSections.has("staged")) pushSection(this.#model.staged, "staged");
 			pushTarget({ kind: "amend" });
 			pushTarget({ kind: "summary" });
 			pushTarget({ kind: "description" });
@@ -466,6 +472,9 @@ export class Sidebar {
 				this.#treeVersion++;
 				this.#requestRender();
 				break;
+			case "section":
+				this.#toggleSection(target.area);
+				break;
 			case "stage-all":
 				this.#onAction({ type: "stage" });
 				break;
@@ -484,8 +493,9 @@ export class Sidebar {
 		}
 	}
 
-	/** Stage/unstage action for a file or dir row; dirs batch every file underneath. */
-	#stageActionFor(target: FileTarget): SidebarAction | null {
+	/** Stage/unstage action for a file, dir, or section-header row; dirs and sections batch every file underneath. */
+	#stageActionFor(target: FileTarget | SectionTarget): SidebarAction | null {
+		if (target.kind === "section") return target.area === "unstaged" ? { type: "stage" } : { type: "unstage" };
 		if (target.kind === "file") {
 			const selection = { files: [target.file], label: target.file.path };
 			if (target.file.area === "unstaged") return { type: "stage", selection };
@@ -604,6 +614,10 @@ export class Sidebar {
 	/** `←`: collapse an expanded dir, otherwise jump to the parent dir row. */
 	#collapseOrParent(): void {
 		const target = this.selected;
+		if (target?.kind === "section" && !this.#collapsedSections.has(target.area)) {
+			this.#toggleSection(target.area);
+			return;
+		}
 		if (!target || (target.kind !== "file" && target.kind !== "dir")) return;
 		if (target.kind === "dir" && !this.#collapsed.has(target.key)) {
 			this.#collapsed.add(target.key);
@@ -627,6 +641,11 @@ export class Sidebar {
 	/** `→`: expand a collapsed dir, step into an expanded one, open a file. */
 	#expandOrOpen(): void {
 		const target = this.selected;
+		if (target?.kind === "section") {
+			if (this.#collapsedSections.has(target.area)) this.#toggleSection(target.area);
+			else this.#moveSelection(1);
+			return;
+		}
 		if (target?.kind === "dir") {
 			if (this.#collapsed.has(target.key)) {
 				this.#collapsed.delete(target.key);
@@ -638,6 +657,12 @@ export class Sidebar {
 			return;
 		}
 		if (target?.kind === "file") this.#onFocusDiff();
+	}
+	/** Fold/unfold a whole section; hidden rows drop out of keyboard navigation. */
+	#toggleSection(area: SectionTarget["area"]): void {
+		if (!this.#collapsedSections.delete(area)) this.#collapsedSections.add(area);
+		this.#treeVersion++;
+		this.#requestRender();
 	}
 
 	handleInput(data: string): void {
@@ -677,12 +702,15 @@ export class Sidebar {
 			// Enter opens a file (focus the diff); space/s/u do the staging.
 			if (target.kind === "file") this.#onFocusDiff();
 			else this.#activate(target);
-		} else if (data === " " && (target?.kind === "file" || target?.kind === "dir")) {
-			// Space stages/unstages the row — folders act on every file underneath.
-			// Enter/click toggle dir collapse; ←/→ fold explicitly.
+		} else if (data === " " && (target?.kind === "file" || target?.kind === "dir" || target?.kind === "section")) {
+			// Space stages/unstages the row — folders and section headers act on every file underneath.
+			// Enter/click toggle dir/section collapse; ←/→ fold explicitly.
 			const action = this.#stageActionFor(target);
 			if (action) this.#onAction(action);
-		} else if ((data === "s" || data === "u") && (target?.kind === "file" || target?.kind === "dir")) {
+		} else if (
+			(data === "s" || data === "u") &&
+			(target?.kind === "file" || target?.kind === "dir" || target?.kind === "section")
+		) {
 			const action = this.#stageActionFor(target);
 			if (action?.type === (data === "s" ? "stage" : "unstage")) this.#onAction(action);
 		} else if (data === "t") {
@@ -705,10 +733,11 @@ export class Sidebar {
 		const hit = visible.hits?.find(candidate => col >= candidate.from && col < candidate.to);
 		const target = hit?.target ?? visible.target;
 		if (!target) return;
-		const wasSelected = this.selected && targetKey(this.selected) === targetKey(target);
-		this.#select(target);
-		// Rows with column-scoped buttons only fire when the button itself is hit.
-		if (visible.hits && !hit) return;
+		// Selection follows the row; column-scoped buttons (header pills) fire
+		// their own action without stealing it.
+		const selectTarget = visible.target ?? target;
+		const wasSelected = this.selected && targetKey(this.selected) === targetKey(selectTarget);
+		this.#select(selectTarget);
 		if (target.kind !== "file" && target.kind !== "summary" && target.kind !== "description") {
 			this.#activate(target);
 		} else if (target.kind === "file" && wasSelected) {
@@ -822,33 +851,41 @@ export class Sidebar {
 
 	#fileListRows(width: number, isSelected: (target: Target) => boolean): Row[] {
 		const rows: Row[] = [];
-		const stageAll: Target = { kind: "stage-all" };
+		const unstaged: SectionTarget = { kind: "section", area: "unstaged" };
+		const unstagedFolded = this.#collapsedSections.has("unstaged");
 		rows.push(
 			sectionHeaderRow(
-				`▾ Unstaged Files (${this.#model.unstaged.length})`,
+				`${unstagedFolded ? "▸" : "▾"} Unstaged Files (${this.#model.unstaged.length})`,
 				"Stage All",
-				stageAll,
+				unstaged,
+				{ kind: "stage-all" },
 				width,
-				isSelected(stageAll),
+				isSelected(unstaged),
 				this.focused,
 			),
 		);
-		rows.push(...this.#sectionRows(this.#model.unstaged, "unstaged", width));
-		if (this.#model.unstaged.length === 0) rows.push({ text: theme.fg("dim", "   no unstaged files") });
+		if (!unstagedFolded) {
+			rows.push(...this.#sectionRows(this.#model.unstaged, "unstaged", width));
+			if (this.#model.unstaged.length === 0) rows.push({ text: theme.fg("dim", "   no unstaged files") });
+		}
 		rows.push({ text: "" });
-		const unstageAll: Target = { kind: "unstage-all" };
+		const staged: SectionTarget = { kind: "section", area: "staged" };
+		const stagedFolded = this.#collapsedSections.has("staged");
 		rows.push(
 			sectionHeaderRow(
-				`▾ Staged Files (${this.#model.staged.length})`,
+				`${stagedFolded ? "▸" : "▾"} Staged Files (${this.#model.staged.length})`,
 				"Unstage All",
-				unstageAll,
+				staged,
+				{ kind: "unstage-all" },
 				width,
-				isSelected(unstageAll),
+				isSelected(staged),
 				this.focused,
 			),
 		);
-		rows.push(...this.#sectionRows(this.#model.staged, "staged", width));
-		if (this.#model.staged.length === 0) rows.push({ text: theme.fg("dim", "   no staged files") });
+		if (!stagedFolded) {
+			rows.push(...this.#sectionRows(this.#model.staged, "staged", width));
+			if (this.#model.staged.length === 0) rows.push({ text: theme.fg("dim", "   no staged files") });
+		}
 		return rows;
 	}
 

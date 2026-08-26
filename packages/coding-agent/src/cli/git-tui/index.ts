@@ -122,6 +122,7 @@ class GitTuiComponent implements Component {
 	#busy = false;
 	#status = "";
 	#statusAt = 0;
+	#statusSticky = false;
 	#centerWidth = 0;
 	#contentHeight = 20;
 	#headerHits: UiHit[] = [];
@@ -172,7 +173,7 @@ class GitTuiComponent implements Component {
 			this.#syncSidebar(true);
 			this.#loadDeferredDetails();
 		} catch (error) {
-			this.#setStatus(theme.fg("error", error instanceof Error ? error.message : String(error)));
+			this.#setError(error);
 		}
 	}
 
@@ -197,8 +198,7 @@ class GitTuiComponent implements Component {
 			if (changed && !this.#disposed) this.#syncSidebar(false);
 		};
 		const fail = (error: unknown): void => {
-			if (!this.#disposed)
-				this.#setStatus(theme.fg("error", error instanceof Error ? error.message : String(error)));
+			if (!this.#disposed) this.#setError(error);
 		};
 		void this.#model.loadChangeStats().then(apply).catch(fail);
 		if (this.#model.clean) void this.#model.loadHeadFiles().then(apply).catch(fail);
@@ -249,7 +249,7 @@ class GitTuiComponent implements Component {
 			.catch(error => {
 				if (seq !== this.#loadSeq || abort.signal.aborted) return;
 				this.#pane.setDocument(null, "empty");
-				this.#setStatus(theme.fg("error", error instanceof Error ? error.message : String(error)));
+				this.#setError(error);
 			});
 	}
 
@@ -344,7 +344,7 @@ class GitTuiComponent implements Component {
 			}
 			await this.#refresh(true);
 		} catch (error) {
-			this.#setStatus(theme.fg("error", error instanceof Error ? error.message : String(error)));
+			this.#setError(error);
 		} finally {
 			this.#busy = false;
 		}
@@ -372,7 +372,7 @@ class GitTuiComponent implements Component {
 			);
 			await this.#refresh(true);
 		} catch (error) {
-			this.#setStatus(theme.fg("error", error instanceof Error ? error.message : String(error)));
+			this.#setError(error);
 		} finally {
 			this.#busy = false;
 		}
@@ -413,7 +413,7 @@ class GitTuiComponent implements Component {
 			);
 			await this.#refresh(true);
 		} catch (error) {
-			this.#setStatus(theme.fg("error", error instanceof Error ? error.message : String(error)));
+			this.#setError(error);
 		} finally {
 			this.#busy = false;
 		}
@@ -422,7 +422,14 @@ class GitTuiComponent implements Component {
 	#setStatus(text: string): void {
 		this.#status = text;
 		this.#statusAt = Date.now();
+		this.#statusSticky = false;
 		this.#ui.requestRender();
+	}
+	/** Persistent single-line error status; provider/git messages may span lines. */
+	#setError(error: unknown): void {
+		const message = error instanceof Error ? error.message : String(error);
+		this.#setStatus(theme.fg("error", message.replace(/\s+/g, " ").trim()));
+		this.#statusSticky = true;
 	}
 
 	// ── input ──────────────────────────────────────────────────────────────
@@ -653,7 +660,7 @@ class GitTuiComponent implements Component {
 		right.add(" ").button(softPill(` ${glyphs.close} `), () => this.#done.resolve());
 
 		// The empty middle carries the key hints (or a fresh status message).
-		const status = Date.now() - this.#statusAt < STATUS_TTL_MS ? this.#status : "";
+		const status = this.#statusSticky || Date.now() - this.#statusAt < STATUS_TTL_MS ? this.#status : "";
 		const middle =
 			status ||
 			theme.fg(
