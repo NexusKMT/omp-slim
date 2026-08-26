@@ -491,4 +491,26 @@ describe("SessionManager.moveTo", () => {
 			),
 		).toBe(true);
 	});
+
+	it("keeps the manager pointed at the moved file when the inverse relocation fails", async () => {
+		const session = SessionManager.create(cwdA);
+		session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
+		session.appendMessage(makeAssistantMessage());
+		await session.flush();
+		const snapshot = session.captureState();
+		await session.moveTo(cwdB);
+		const movedFile = session.getSessionFile()!;
+
+		// Make the inverse rename fail on the rollback call.
+		const moveTo = spyOn(session, "moveTo").mockRejectedValueOnce(new Error("rename denied"));
+		try {
+			await expect(session.rollbackMove(snapshot)).rejects.toThrow("the session file remains at");
+		} finally {
+			moveTo.mockRestore();
+		}
+
+		// The manager must keep pointing at the actual on-disk file so later
+		// appends continue there instead of splitting the transcript.
+		expect(session.getSessionFile()).toBe(movedFile);
+	});
 });

@@ -1356,16 +1356,16 @@ export class SessionManager {
 	 * header is persisted after relocation so a fresh open of the source
 	 * session sees the pre-move metadata, including workspace roots the move
 	 * filtered out. Rollbacks must not re-enter forward-move hooks, so this
-	 * bypasses AgentSession entirely. If the rename-back itself fails,
-	 * in-memory state is still restored and the error names where the session
-	 * file actually lives.
+	 * bypasses AgentSession entirely. If the rename-back itself fails, the
+	 * manager stays pointed at the actual moved file (restoring the snapshot
+	 * would split the transcript across a recreated source and the stranded
+	 * target) and the error names where the session file actually lives.
 	 */
 	async rollbackMove(snapshot: SessionManagerStateSnapshot): Promise<void> {
 		try {
 			await this.moveTo(snapshot.cwd, snapshot.sessionDir);
 		} catch (error) {
 			const movedFile = this.getSessionFile();
-			this.restoreState(snapshot);
 			throw new Error(
 				`could not relocate the session back to ${snapshot.sessionDir} (${error instanceof Error ? error.message : String(error)}); the session file remains at ${movedFile}`,
 			);
