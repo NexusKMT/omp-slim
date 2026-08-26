@@ -746,7 +746,7 @@ async function switchToResumedProject(
 	} catch (error) {
 		logger.warn("Could not switch to resumed project directory", { cwd: resumedCwd, error: String(error) });
 		try {
-			await sessionManager.moveTo(launchCwd);
+			sessionManager.setCwdWithoutRelocation(launchCwd);
 		} catch (rollbackError) {
 			throw new SessionResolutionError(
 				`Could not switch to resumed project ${resumedCwd}; failed to restore launch directory ${launchCwd}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
@@ -769,7 +769,8 @@ async function switchToResumedProject(
 		// the session with target-scoped cwd and launch-scoped settings.
 		logger.warn("Could not rescope to resumed project directory", { cwd, error: String(error) });
 		try {
-			setProjectDir(launchCwd); // do NOT move session file — just restore runtime scope (plugin roots/caches/settings already handled);
+			setProjectDir(launchCwd);
+			sessionManager.setCwdWithoutRelocation(launchCwd);
 			clearPluginRootsAndCaches();
 			await preloadPluginRoots(os.homedir(), launchCwd);
 			// Settings.#cwd was already assigned the destination; re-scope it

@@ -1880,6 +1880,23 @@ export class SessionManager {
 		return this.#cwd;
 	}
 
+	setCwdWithoutRelocation(newCwd: string): void {
+		const resolvedCwd = path.resolve(newCwd);
+		if (resolvedCwd === path.resolve(this.#cwd)) {
+			return;
+		}
+		this.#cwd = resolvedCwd;
+		this.#header.cwd = resolvedCwd;
+		if (this.#additionalDirectories.length > 0) {
+			this.#additionalDirectories = this.#additionalDirectories.filter(d => d !== resolvedCwd);
+			this.#header.additionalDirectories =
+				this.#additionalDirectories.length > 0 ? this.#additionalDirectories : undefined;
+		}
+		if (this.#sessionFile) {
+			this.#rememberBreadcrumb(resolvedCwd, this.#sessionFile);
+		}
+	}
+
 	/** Additional workspace directories beyond cwd (multi-root), absolute and normalized. */
 	getAdditionalDirectories(): string[] {
 		return [...this.#additionalDirectories];
