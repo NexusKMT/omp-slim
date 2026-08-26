@@ -171,25 +171,6 @@ export function getOpenAiRemoteCompactionPayload(
 	};
 }
 
-/**
- * Collect tool-call ids carried inside an OpenAI Responses replay payload
- * (remote compaction's `replacementHistory`). These calls are replayed to the
- * provider through the compaction summary's `providerPayload`, not as local
- * assistant messages, so a local `toolResult` under `providerReplayThroughEntryId`
- * can be validly paired with a call that never appears in the message list.
- */
-function collectReplayToolCallIds(payload: ProviderPayload | undefined, into: Set<string>): void {
-	if (payload?.type !== "openaiResponsesHistory" || !Array.isArray(payload.items)) return;
-	for (const item of payload.items) {
-		if (!item || typeof item !== "object") continue;
-		const record = item as Record<string, unknown>;
-		if (typeof record.call_id === "string") into.add(record.call_id);
-		else if (typeof record.type === "string" && record.type.includes("call") && typeof record.id === "string") {
-			into.add(record.id);
-		}
-	}
-}
-
 export function buildSessionContext(
 	entries: SessionEntry[],
 	leafId?: string | null,
@@ -504,33 +485,6 @@ export function buildSessionContext(
 		for (const entry of path) {
 			appendMessage(entry);
 		}
-	}
-
-	// Provider histories require each tool result to follow a distinct assistant
-	// tool call. Corrupt/imported journals can contain an orphan result when a
-	// started tool outlives an aborted assistant stream; replaying that shape makes
-	// providers reject every later turn. Keep transcript mode forensic, but repair
-	// the LLM context before it reaches any provider. A remote-compaction summary
-	// replays its kept tool calls through `providerPayload` rather than as local
-	// assistant messages, so seed those call ids too or a validly-paired result
-	// under `providerReplayThroughEntryId` would be dropped as an orphan.
-	if (!options?.transcript) {
-		const unmatchedToolCallIds = new Set<string>();
-		let nextMessageIndex = 0;
-		for (const message of messages) {
-			let keep = true;
-			if (message.role === "assistant") {
-				for (const block of message.content) {
-					if (block.type === "toolCall") unmatchedToolCallIds.add(block.id);
-				}
-			} else if (message.role === "compactionSummary") {
-				collectReplayToolCallIds(message.providerPayload, unmatchedToolCallIds);
-			} else if (message.role === "toolResult") {
-				keep = unmatchedToolCallIds.delete(message.toolCallId);
-			}
-			if (keep) messages[nextMessageIndex++] = message;
-		}
-		messages.length = nextMessageIndex;
 	}
 
 	// Strip dangling tool_use blocks — a tool_use with no matching tool_result on the
