@@ -418,6 +418,34 @@ describe("ModelRegistry runtime provider registration", () => {
 		});
 	});
 
+	test("registerProvider preserves a standalone Codex WebSocket opt-out across refresh", async () => {
+		const config: ProviderConfigInput = {
+			baseUrl: "https://chatgpt.com/backend-api/codex",
+			apiKey: "RUNTIME_KEY",
+			api: "openai-codex-responses",
+			models: [{ ...baseModel, id: "gpt-5.6-sol", preferWebsockets: false }],
+		};
+
+		registry.registerProvider("runtime-codex", config, "ext://runtime");
+		expect(registry.find("runtime-codex", "gpt-5.6-sol")?.preferWebsockets).toBe(false);
+
+		await registry.refresh("offline");
+		expect(registry.find("runtime-codex", "gpt-5.6-sol")?.preferWebsockets).toBe(false);
+	});
+
+	test("registerProvider lets an extension disable WebSockets on a bundled Codex model", () => {
+		const config: ProviderConfigInput = {
+			baseUrl: "https://chatgpt.com/backend-api/codex",
+			apiKey: "RUNTIME_KEY",
+			api: "openai-codex-responses",
+			models: [{ ...baseModel, id: "gpt-5.4", preferWebsockets: false }],
+		};
+
+		registry.registerProvider("openai-codex", config, "ext://runtime");
+
+		expect(registry.find("openai-codex", "gpt-5.4")?.preferWebsockets).toBe(false);
+	});
+
 	test("extension-registered models survive refresh('offline') cycle", async () => {
 		const config: ProviderConfigInput = {
 			baseUrl: "https://runtime.example.com/v1",

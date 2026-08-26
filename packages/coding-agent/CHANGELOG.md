@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Extension-registered Codex models now preserve `preferWebsockets: false` and skip the WebSocket transport attempt.
+
 ## [18.0.6] - 2026-08-26
 
 ### Added
