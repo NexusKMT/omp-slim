@@ -301,6 +301,30 @@ describe("ModelRegistry runtime provider registration", () => {
 			model: "model-compact",
 		});
 	});
+	test("combines static fallback models with dynamic provider discovery", async () => {
+		const providerName = "combined-runtime-provider";
+		let dynamicFetches = 0;
+		registry.registerProvider(
+			providerName,
+			{
+				baseUrl: "https://runtime.example.com/v1",
+				apiKey: "RUNTIME_KEY",
+				api: "openai-completions",
+				models: [{ ...baseModel, id: "fallback-model" }],
+				fetchDynamicModels: async () => {
+					dynamicFetches++;
+					return [{ ...baseModel, id: "dynamic-model" }];
+				},
+			},
+			"ext://runtime",
+		);
+
+		await registry.refreshRuntimeProviders("online");
+
+		expect(dynamicFetches).toBe(1);
+		expect(registry.find(providerName, "dynamic-model")).toBeDefined();
+		expect(registry.find(providerName, "fallback-model")).toBeDefined();
+	});
 
 	test("configured discovery suppresses extension fetchDynamicModels for the same provider", async () => {
 		const providerName = "runtime-configured-provider";

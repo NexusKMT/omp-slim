@@ -1569,7 +1569,8 @@ export interface ProviderConfig {
 	 * Async factory that fetches the live model list from the provider endpoint.
 	 * Runs through the same SQLite model-cache as built-in providers (keyed by
 	 * provider name, default 24 h TTL). Receives the resolved API key (undefined
-	 * when unauthenticated). Mutually exclusive with `models`.
+	 * when unauthenticated). When combined with `models`, the static models remain as fallbacks
+	 * alongside the live catalog.
 	 */
 	fetchDynamicModels?: (apiKey: string | undefined) => Promise<readonly ProviderModelConfig[]>;
 }
