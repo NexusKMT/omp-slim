@@ -1698,8 +1698,9 @@ export async function runRootCommand(
 
 		if ((typeof parsedArgs.resume === "string" || foreignSource) && sessionManager) {
 			const previousCwd = cwd;
+			const recordedCwd = sessionManager.getRecordedCwd() ?? sessionManager.getCwd();
 			const resumedProject = await switchToResumedProject(
-				sessionManager.getCwd(),
+				recordedCwd,
 				settingsInstance,
 				pluginPreloadPromise,
 				sessionManager,
@@ -1766,8 +1767,9 @@ export async function runRootCommand(
 			}
 			sessionManager = await SessionManager.open(selected.path);
 			const previousCwd = cwd;
+			const recordedCwd = selected.cwd || sessionManager.getRecordedCwd() || sessionManager.getCwd();
 			const resumedProject = await switchToResumedProject(
-				sessionManager.getCwd(),
+				recordedCwd,
 				settingsInstance,
 				pluginPreloadPromise,
 				sessionManager,

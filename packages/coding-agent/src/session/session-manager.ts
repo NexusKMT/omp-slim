@@ -1880,15 +1880,17 @@ export class SessionManager {
 		return this.#cwd;
 	}
 
+	/** Recorded cwd from the session header (original project), may differ from runtime {@link getCwd} when fallback retained launch cwd. */
+	getRecordedCwd(): string | undefined {
+		return this.#header?.cwd;
+	}
+
 	setCwdWithoutRelocation(newCwd: string): void {
 		const resolvedCwd = path.resolve(newCwd);
 		if (resolvedCwd === path.resolve(this.#cwd)) {
 			return;
 		}
 		this.#cwd = resolvedCwd;
-		if (this.#additionalDirectories.length > 0) {
-			this.#additionalDirectories = this.#additionalDirectories.filter(d => d !== resolvedCwd);
-		}
 		if (this.#sessionFile) {
 			this.#rememberBreadcrumb(resolvedCwd, this.#sessionFile);
 		}
