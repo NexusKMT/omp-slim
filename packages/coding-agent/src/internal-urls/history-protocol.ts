@@ -63,9 +63,14 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 		// persisted roster first: a same-named parked ref restored by another
 		// root's scan must not be served (or listed as known) in its place.
 		// The refresh is latched per root, so a settled roster never re-scans.
+		let rootSessionFile: string | undefined;
 		if (agentId && context?.sessionFile) {
-			await ensurePersistedRoster(registry, context.sessionFile);
+			rootSessionFile = await ensurePersistedRoster(registry, context.sessionFile);
 		}
+		// On-disk fallbacks below scan the caller root's artifact directory
+		// first, so a same-named transcript restored by another root's scan
+		// never shadows this caller's own on-disk transcript.
+		const preferredArtifactDir = rootSessionFile?.slice(0, -".jsonl".length);
 		// Advisor transcripts are observability-only — surfaced in the Agent Hub, never
 		// in the agent-facing roster. Hide them from the index, lookup, and completions.
 		const visible = registry.list().filter(ref => ref.kind !== "advisor");
@@ -91,7 +96,7 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 		if (!ref) {
 			// Registry miss — the agent may have been unregistered or lost on resume.
 			// Serve its transcript straight from disk if the session file persists.
-			const disk = await this.#resolveFromDisk(agentId);
+			const disk = await this.#resolveFromDisk(agentId, preferredArtifactDir);
 			if (disk) return { ...disk, url: url.href };
 
 			const known = visible.map(candidate => candidate.id);
@@ -110,7 +115,7 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 		} else {
 			// No live session and no retained sessionFile — try the disk scan before
 			// giving up, in case the transcript lingers under an artifacts dir.
-			const disk = await this.#resolveFromDisk(ref.id);
+			const disk = await this.#resolveFromDisk(ref.id, preferredArtifactDir);
 			if (disk) return { ...disk, url: url.href };
 			throw new Error(`Agent ${ref.id} has no transcript: session is gone and no session file was retained`);
 		}
@@ -129,9 +134,12 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 	/**
 	 * Load a transcript for `agentId` from an on-disk `.jsonl` session file,
 	 * matched case-insensitively. Returns `undefined` when no file is found.
+	 * `preferredArtifactDir` — the caller root's artifact directory, when
+	 * known — is scanned before every registry-derived dir, so a same-id
+	 * transcript from another root cannot shadow the caller's own.
 	 */
-	async #resolveFromDisk(agentId: string): Promise<InternalResource | undefined> {
-		const files = await sessionFilesFromDisk();
+	async #resolveFromDisk(agentId: string, preferredArtifactDir?: string): Promise<InternalResource | undefined> {
+		const files = await sessionFilesFromDisk(preferredArtifactDir);
 		const lower = agentId.toLowerCase();
 		let matchedId: string | undefined;
 		let sessionFile: string | undefined;

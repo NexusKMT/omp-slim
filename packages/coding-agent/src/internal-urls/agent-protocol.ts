@@ -40,15 +40,6 @@ export class AgentProtocolHandler implements ProtocolHandler {
 			throw new Error("agent:// URL requires an output ID: agent://<id>");
 		}
 
-		// A caller resolving a possibly-parked id refreshes its own root's
-		// persisted roster first: a stale parked ref restored by another root's
-		// scan would add that root's artifacts dir to the scan (and win the
-		// first-hit id map) for a shared id. The refresh replaces the ref with
-		// this root's transcript, keeping this caller's output in front.
-		if (context?.sessionFile) {
-			await ensurePersistedRoster(AgentRegistry.global(), context.sessionFile);
-		}
-
 		const urlPath = url.pathname;
 		const queryParam = url.searchParams.get("q");
 		const hasPathExtraction = urlPath && urlPath !== "/" && urlPath !== "";
@@ -58,7 +49,21 @@ export class AgentProtocolHandler implements ProtocolHandler {
 			throw new Error("agent:// URL cannot combine path extraction with ?q=");
 		}
 
-		const dirs = artifactsDirsFromRegistry();
+		const registry = AgentRegistry.global();
+		const rootSessionFile = context?.sessionFile
+			? await ensurePersistedRoster(registry, context.sessionFile)
+			: undefined;
+		// The caller root's canonical artifact directory (its session file minus
+		// the `.jsonl` suffix) is scanned FIRST, ahead of every process-global
+		// registry dir. The roster ref this refresh installs for the caller's
+		// parked id contributes only its nested child dir, not the root dir that
+		// actually holds `<id>.md` — and with two coexisting roots the global
+		// `Main` ref can belong to the other root, whose dir would otherwise win
+		// the first-hit id map for a shared id. No caller session file: keep the
+		// pre-existing global scan untouched.
+		const dirs = artifactsDirsFromRegistry(
+			rootSessionFile ? { preferredDir: rootSessionFile.slice(0, -6) } : undefined,
+		);
 		if (dirs.length === 0) {
 			throw new Error("No session - agent outputs unavailable");
 		}
