@@ -1716,6 +1716,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
+	cancelGoalContinuation(): void {
+		this.#cancelGoalContinuation();
+	}
+
 	#isAutoSubmitBlocked(): boolean {
 		return this.session.isStreaming || this.session.isCompacting || this.session.hasPostPromptWork;
 	}
