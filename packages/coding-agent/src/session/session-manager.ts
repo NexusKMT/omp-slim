@@ -1890,6 +1890,7 @@ export class SessionManager {
 	setCwdWithoutRelocation(newCwd: string): void {
 		const resolvedCwd = path.resolve(newCwd);
 		if (resolvedCwd === path.resolve(this.#cwd)) {
+			this.#fallbackRuntimeOnly = true;
 			return;
 		}
 		this.#cwd = resolvedCwd;
