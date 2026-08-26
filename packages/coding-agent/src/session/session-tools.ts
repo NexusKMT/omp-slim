@@ -44,6 +44,8 @@ export interface SessionToolsHost {
 	agent: Agent;
 	sessionManager: SessionManager;
 	settings: Settings;
+	/** Effective extension roots (explicit SDK paths + live `extensions:`) for post-startup reloads. */
+	configuredExtensionPaths(): readonly string[];
 	modelRegistry: ModelRegistry;
 	extensionRunner(): ExtensionRunner | undefined;
 	clientBridge(): ClientBridge | undefined;
@@ -1183,7 +1185,7 @@ export class SessionTools {
 				...skillsSettings,
 				cwd: this.#host.sessionManager.getCwd(),
 				disabledExtensions: this.#host.settings.get("disabledExtensions") ?? [],
-				configuredExtensionPaths: this.#host.settings.get("extensions") ?? [],
+				configuredExtensionPaths: this.#host.configuredExtensionPaths(),
 			});
 			this.#skills = discovered.skills;
 			this.#skillWarnings = discovered.warnings;

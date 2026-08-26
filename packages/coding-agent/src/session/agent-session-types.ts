@@ -125,6 +125,14 @@ export interface AgentSessionConfig {
 	codeModeState?: { namespacesInfo?: unknown };
 	sessionManager: SessionManager;
 	settings: Settings;
+	/**
+	 * Raw SDK `additionalExtensionPaths`. Retained so post-startup capability
+	 * reloads rediscover explicitly-supplied packages, which live only in the
+	 * construction-time invocation scope otherwise.
+	 */
+	additionalExtensionPaths?: readonly string[];
+	/** Mirror of `disableExtensionDiscovery`: reloads then use only explicit roots. */
+	disableExtensionDiscovery?: boolean;
 	/** Whether the session spawn policy permits the read-only `scout` subagent. Defaults to true. */
 	scoutAllowedBySpawnPolicy?: boolean;
 	/** Whether the caller explicitly requested yolo/auto-approve behavior for this session. */

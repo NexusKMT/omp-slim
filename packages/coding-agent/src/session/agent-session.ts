@@ -480,14 +480,25 @@ export class AgentSession {
 	/** Per-session `CUT`/`PASTE` clipboard register shared across edit calls. */
 	editClipboard?: Clipboard;
 
+	/** Raw SDK `additionalExtensionPaths`, resolved lazily by `listOmpExtensionRoots`. */
+	readonly #additionalExtensionPaths: readonly string[];
+	/** When true, reloads expose only the explicit roots (no ambient `extensions:`). */
+	readonly #disableExtensionDiscovery: boolean;
+
 	/**
-	 * Effective `extensions` setting for this session, read live from its own
-	 * {@link settings} so post-startup capability reloads honor overlays and
-	 * runtime overrides (and survive settings reloads). Session-local — never
-	 * the process-global singleton — so concurrent sessions stay isolated.
+	 * Effective extension roots for this session: the SDK's explicit
+	 * `additionalExtensionPaths` plus (unless discovery is disabled) the live
+	 * `extensions` setting, read from its own {@link settings} so post-startup
+	 * reloads honor overlays/runtime overrides and survive settings reloads.
+	 * Session-local — never the process-global singleton — so concurrent
+	 * sessions stay isolated, and explicit roots outlive the construction-time
+	 * invocation scope.
 	 */
 	get configuredExtensionPaths(): readonly string[] {
-		return this.settings.get("extensions") ?? [];
+		const explicit = this.#additionalExtensionPaths;
+		if (this.#disableExtensionDiscovery) return explicit;
+		const configured = this.settings.get("extensions") ?? [];
+		return explicit.length > 0 ? [...explicit, ...configured] : configured;
 	}
 
 	#powerAssertion: MacOSPowerAssertion | undefined;
@@ -1008,6 +1019,8 @@ export class AgentSession {
 		this.sessionManager = config.sessionManager;
 		this.settings = config.settings;
 		this.#modelRegistry = config.modelRegistry;
+		this.#additionalExtensionPaths = config.additionalExtensionPaths ?? [];
+		this.#disableExtensionDiscovery = config.disableExtensionDiscovery ?? false;
 		this.#codexResetCoordinator = config.codexResetCoordinator ?? defaultCodexAutoRedeemCoordinator;
 		const bashHost: BashRunnerHost = {
 			agent: this.agent,
@@ -1325,6 +1338,7 @@ export class AgentSession {
 			agent: this.agent,
 			sessionManager: this.sessionManager,
 			settings: this.settings,
+			configuredExtensionPaths: () => this.configuredExtensionPaths,
 			modelRegistry: this.#modelRegistry,
 			extensionRunner: () => this.#extensionRunner,
 			clientBridge: () => this.#clientBridge,
