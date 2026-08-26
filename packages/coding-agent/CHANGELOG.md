@@ -53,6 +53,10 @@
 
 - Fixed clicks on the active Settings section sidebar toggling its first option ([#9795](https://github.com/can1357/oh-my-pi/issues/9795)).
 
+### Fixed
+
+- Fixed pending settings saves overwriting later external edits to `config.yml` ([#9789](https://github.com/can1357/oh-my-pi/issues/9789)).
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
