@@ -1,19 +1,27 @@
 /**
- * Regression (#9769 review): `AgentSession.effectiveExtensionRoots` must thread
- * the SDK's explicit `additionalExtensionPaths`, the discovery mode, and the
- * live configured `extensions` as three separate lanes for post-startup
- * reloads. Flattening them dropped explicit roots and the `explicit-only` mode
- * from `refreshSkills`, `/reload-plugins`, and MCP rediscovery.
+ * Regression (#9769 review): a session's extension roots must survive
+ * post-startup discovery. Exercised through the real `AgentSession.refreshSkills`
+ * path against on-disk extension packages, so it defends the user-visible
+ * contract — explicit `additionalExtensionPaths` skills still resolve after a
+ * reload, and an `explicit-only` (`disableExtensionDiscovery`) session drops the
+ * ambient `extensions:` configured lane — not merely that the getter echoes its
+ * constructor inputs.
  */
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import "@oh-my-pi/pi-coding-agent/discovery";
+import { setActiveSkills } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 
 interface SessionInputs {
 	additionalExtensionPaths?: readonly string[];
@@ -21,13 +29,29 @@ interface SessionInputs {
 	extensions?: string[];
 }
 
-describe("AgentSession.effectiveExtensionRoots", () => {
+/** Write a minimal extension package exposing a single named skill. */
+function buildSkillPackage(dir: string, skillName: string): void {
+	fs.mkdirSync(path.join(dir, "skills", skillName), { recursive: true });
+	fs.writeFileSync(
+		path.join(dir, "skills", skillName, "SKILL.md"),
+		`---\nname: ${skillName}\ndescription: ${skillName} fixture\n---\nbody\n`,
+	);
+}
+
+describe("AgentSession extension-root discovery (post-startup)", () => {
 	const sessions: AgentSession[] = [];
 	const authStorages: AuthStorage[] = [];
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-session-ext-"));
+	});
 
 	afterEach(async () => {
 		for (const session of sessions.splice(0)) await session.dispose();
 		for (const authStorage of authStorages.splice(0)) authStorage.close();
+		setActiveSkills([]);
+		removeSyncWithRetries(tempDir);
 	});
 
 	async function makeSession(inputs: SessionInputs): Promise<AgentSession> {
@@ -46,40 +70,56 @@ describe("AgentSession.effectiveExtensionRoots", () => {
 			modelRegistry: new ModelRegistry(authStorage),
 			additionalExtensionPaths: inputs.additionalExtensionPaths,
 			disableExtensionDiscovery: inputs.disableExtensionDiscovery,
+			skillsReloadable: true,
 		});
 		sessions.push(session);
 		return session;
 	}
 
-	it("keeps explicit SDK roots and merge mode when the extensions setting is empty", async () => {
-		const session = await makeSession({ additionalExtensionPaths: ["/ext/explicit"] });
-		expect(session.effectiveExtensionRoots).toEqual({
-			explicit: ["/ext/explicit"],
-			mode: "merge",
-			configured: [],
-			configuredLevel: "user",
-		});
+	it("surfaces an additionalExtensionPaths package's skills through refreshSkills", async () => {
+		const ext = path.join(tempDir, "explicit-pkg");
+		buildSkillPackage(ext, "explicit-skill");
+		// Empty settings.extensions: the only source is the explicit SDK root,
+		// which lives solely in the construction-time scope. A stale/flattened
+		// getter would drop it on this post-startup reload.
+		const session = await makeSession({ additionalExtensionPaths: [ext] });
+
+		await session.refreshSkills();
+
+		expect(session.skills.map(skill => skill.name)).toContain("explicit-skill");
 	});
 
-	it("keeps explicit and configured in separate lanes under merge mode", async () => {
+	it("drops the ambient configured lane for an explicit-only session on refresh", async () => {
+		const explicitExt = path.join(tempDir, "explicit-pkg");
+		const configuredExt = path.join(tempDir, "configured-pkg");
+		buildSkillPackage(explicitExt, "explicit-skill");
+		buildSkillPackage(configuredExt, "configured-skill");
+		// disableExtensionDiscovery ⇒ explicit-only: the explicit root is honored,
+		// the ambient `extensions:` (configured) root is suppressed on reload.
 		const session = await makeSession({
-			additionalExtensionPaths: ["/ext/explicit"],
-			extensions: ["/ext/configured"],
-		});
-		expect(session.effectiveExtensionRoots).toEqual({
-			explicit: ["/ext/explicit"],
-			mode: "merge",
-			configured: ["/ext/configured"],
-			configuredLevel: "user",
-		});
-	});
-
-	it("reports explicit-only mode when discovery is disabled", async () => {
-		const session = await makeSession({
-			additionalExtensionPaths: ["/ext/explicit"],
-			extensions: ["/ext/configured"],
+			additionalExtensionPaths: [explicitExt],
+			extensions: [configuredExt],
 			disableExtensionDiscovery: true,
 		});
-		expect(session.effectiveExtensionRoots).toMatchObject({ explicit: ["/ext/explicit"], mode: "explicit-only" });
+
+		await session.refreshSkills();
+
+		const names = session.skills.map(skill => skill.name);
+		expect(names).toContain("explicit-skill");
+		expect(names).not.toContain("configured-skill");
+	});
+
+	it("reflects a runtime extensions override on the next refresh", async () => {
+		const configuredExt = path.join(tempDir, "configured-pkg");
+		buildSkillPackage(configuredExt, "configured-skill");
+		const session = await makeSession({});
+
+		await session.refreshSkills();
+		expect(session.skills.map(skill => skill.name)).not.toContain("configured-skill");
+
+		// The live getter reads settings per call, so the override lands on refresh.
+		session.settings.override("extensions", [configuredExt]);
+		await session.refreshSkills();
+		expect(session.skills.map(skill => skill.name)).toContain("configured-skill");
 	});
 });
