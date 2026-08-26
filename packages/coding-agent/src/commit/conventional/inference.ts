@@ -1,5 +1,5 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Api, ApiKey, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
+import type { Api, ApiKey, AssistantMessage, AuthStorage, Model } from "@oh-my-pi/pi-ai";
 import { completeSimple } from "@oh-my-pi/pi-ai";
 import { toReasoningEffort } from "../../thinking";
 import type { ResolvedCommitModel } from "../model-selection";
@@ -47,6 +47,7 @@ export class OmpCommitInference implements CommitInference {
 	readonly #targets: Record<CommitInferenceRole, InferenceTarget>;
 	readonly #config: ConventionalGenerationConfig;
 	readonly #cache: CommitInferenceCache | null;
+	readonly #authStorage: AuthStorage | null;
 	readonly #onProgress?: CommitProgress;
 	readonly #signal?: AbortSignal;
 
@@ -56,6 +57,8 @@ export class OmpCommitInference implements CommitInference {
 		forcePrimaryForEveryRole?: boolean;
 		config: ConventionalGenerationConfig;
 		cache: CommitInferenceCache | null;
+		/** Closed on dispose; broker-backed storage runs a background sync loop that pins the event loop. */
+		authStorage?: AuthStorage;
 		onProgress?: CommitProgress;
 		signal?: AbortSignal;
 	}) {
@@ -68,6 +71,7 @@ export class OmpCommitInference implements CommitInference {
 		};
 		this.#config = options.config;
 		this.#cache = options.cache;
+		this.#authStorage = options.authStorage ?? null;
 		this.#onProgress = options.onProgress;
 		this.#signal = options.signal;
 	}
@@ -163,9 +167,10 @@ export class OmpCommitInference implements CommitInference {
 		throw lastError ?? new Error(`Max retries exceeded for ${request.operation}`);
 	}
 
-	/** Release the cache handle after generation completes. */
+	/** Release the cache and auth-storage handles after generation completes. */
 	dispose(): void {
 		this.#cache?.close();
+		this.#authStorage?.close();
 	}
 }
 

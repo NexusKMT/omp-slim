@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added backgroundIdleMs option to customize the auto-park duration
+
+### Fixed
+
+- Auth-broker background snapshot sync no longer keeps the process alive: it parks after 20s without store use and resumes on the next use, so an unclosed broker-backed auth storage can no longer hang CLI exits.
+
 ## [18.0.5] - 2026-08-25
 
 ### Breaking Changes
