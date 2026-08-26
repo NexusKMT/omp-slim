@@ -22,11 +22,11 @@ const REFRESHED_AGENTS = [
 	},
 ];
 
-function createSession(cwd: string): ToolSession {
+function createSession(cwd: string, extensions: readonly string[] = []): ToolSession {
 	return {
 		cwd,
 		hasUI: false,
-		settings: Settings.isolated({}),
+		settings: Settings.isolated({ extensions: [...extensions] }),
 		getSessionFile: () => null,
 		getSessionSpawns: () => "*",
 	} as unknown as ToolSession;
@@ -60,6 +60,20 @@ describe("TaskTool.create discovery memo", () => {
 		expect(spy).toHaveBeenCalledTimes(2);
 	});
 
+	it("isolates sessions sharing a cwd when effective extensions differ", async () => {
+		const spy = vi
+			.spyOn(discoveryModule, "discoverAgents")
+			.mockResolvedValueOnce({ agents: TEST_AGENTS, projectAgentsDir: null })
+			.mockResolvedValueOnce({ agents: REFRESHED_AGENTS, projectAgentsDir: null });
+
+		const first = await TaskTool.create(createSession("/tmp/omp-memo-shared", ["/extensions/first"]));
+		const second = await TaskTool.create(createSession("/tmp/omp-memo-shared", ["/extensions/second"]));
+
+		expect(spy).toHaveBeenCalledTimes(2);
+		expect(first.description).toContain("General-purpose task agent");
+		expect(second.description).toContain("Refreshed task agent");
+	});
+
 	it("does not cache a rejected discovery", async () => {
 		const spy = vi
 			.spyOn(discoveryModule, "discoverAgents")
@@ -82,7 +96,7 @@ describe("TaskTool.create discovery memo", () => {
 		const existing = await TaskTool.create(session);
 
 		expect(existing.description).toContain("General-purpose task agent");
-		await refreshAgentDiscovery(session.cwd);
+		await refreshAgentDiscovery(session.cwd, session.settings.get("extensions"));
 
 		expect(existing.description).toContain("Refreshed task agent");
 		expect(existing.description).not.toContain("General-purpose task agent");

@@ -177,6 +177,8 @@ export interface MCPDiscoverOptions {
 	filterExa?: boolean;
 	/** Whether to filter out browser MCP servers when builtin browser tool is enabled (default: false) */
 	filterBrowser?: boolean;
+	/** Effective extension roots for session-scoped post-startup rediscovery. */
+	configuredExtensionPaths?: readonly string[];
 	/** Called when MCP server connection state changes. */
 	onStatus?: (event: McpConnectionStatusEvent) => void;
 }
@@ -461,6 +463,7 @@ export class MCPManager {
 				enableProjectConfig: options?.enableProjectConfig,
 				filterExa: options?.filterExa,
 				filterBrowser: options?.filterBrowser,
+				configuredExtensionPaths: options?.configuredExtensionPaths,
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);

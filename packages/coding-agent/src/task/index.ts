@@ -442,19 +442,24 @@ class TaskJobError extends Error {}
 
 /**
  * Process-level create-time discovery memo and published reload snapshots,
- * keyed by resolved cwd.
+ * keyed by resolved cwd plus the exact effective `extensions` array.
  *
- * `TaskTool.create` runs for every (sub)agent session in this process and the
- * walk-up + plugin-registry scan in `discoverAgents` is identical for a given
- * cwd, so repeat creations reuse the first scan. Explicit plugin reloads
- * replace the matching snapshot so already-created tools advertise the latest
- * definitions. Execution-time discovery (`#runSpawn`) intentionally stays
- * fresh. The memo also tracks the live `discoverAgents` binding: test spies
- * swap that binding, which invalidates both caches automatically.
+ * `TaskTool.create` runs for every (sub)agent session in this process. Sessions
+ * may share a cwd while carrying different overlay/runtime extension settings,
+ * so cwd alone is not an isolation boundary. Explicit plugin reloads replace
+ * only the matching cwd+extensions snapshot. Execution-time discovery
+ * (`#runSpawn`) intentionally stays fresh. The memo also tracks the live
+ * `discoverAgents` binding: test spies swap that binding, which invalidates
+ * both caches automatically.
  */
 const discoveryMemo = new Map<string, Promise<DiscoveryResult>>();
 const discoverySnapshots = new Map<string, AgentDefinition[]>();
 let discoveryMemoFn: typeof discoverAgents | undefined;
+
+/** Stable cache identity for the filesystem root and ordered effective extension paths. */
+function discoveryCacheKey(cwd: string, configuredExtensionPaths?: readonly string[]): string {
+	return `${path.resolve(cwd)}\0${JSON.stringify(configuredExtensionPaths ?? null)}`;
+}
 
 function discoverAgentsForCreate(cwd: string, configuredExtensionPaths?: readonly string[]): Promise<DiscoveryResult> {
 	const fn = discoverAgents;
@@ -463,7 +468,7 @@ function discoverAgentsForCreate(cwd: string, configuredExtensionPaths?: readonl
 		discoveryMemo.clear();
 		discoverySnapshots.clear();
 	}
-	const key = path.resolve(cwd);
+	const key = discoveryCacheKey(cwd, configuredExtensionPaths);
 	let pending = discoveryMemo.get(key);
 	if (!pending) {
 		pending = fn(cwd, undefined, configuredExtensionPaths);
@@ -477,7 +482,7 @@ function discoverAgentsForCreate(cwd: string, configuredExtensionPaths?: readonl
 
 /** Rescan one cwd and publish its definitions to existing and future task tools. */
 export async function refreshAgentDiscovery(cwd: string, configuredExtensionPaths?: readonly string[]): Promise<void> {
-	const key = path.resolve(cwd);
+	const key = discoveryCacheKey(cwd, configuredExtensionPaths);
 	discoveryMemo.delete(key);
 	const pending = discoverAgentsForCreate(cwd, configuredExtensionPaths);
 	const { agents } = await pending;
@@ -602,7 +607,10 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		const planMode = this.session.getPlanModeState?.()?.enabled === true;
 		const isolationMode = this.session.settings.get("task.isolation.mode");
 		return renderDescription({
-			agents: discoverySnapshots.get(path.resolve(this.session.cwd)) ?? this.#discoveredAgents,
+			agents:
+				discoverySnapshots.get(
+					discoveryCacheKey(this.session.cwd, this.session.settings.get("extensions") ?? []),
+				) ?? this.#discoveredAgents,
 			isolationEnabled: !planMode && isolationMode !== "none",
 			applyIsolatedChanges: this.session.settings.get("task.isolation.apply"),
 			disabledAgents,
