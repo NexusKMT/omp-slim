@@ -37,6 +37,10 @@
 
 - Fixed `async-result` and `mid-run-todo-nudge` rows in `/tree` displaying internal `<system-notice>`/`<system-reminder>` XML wrappers instead of readable text ([#9755](https://github.com/can1357/oh-my-pi/issues/9755)).
 
+### Fixed
+
+- Fixed `/collab` hiding the join URL when the QR code is clipped: the one-line fallback now includes the browser link, and the status heading keeps that URL on its first row so transcript pressure cannot drop it.
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
