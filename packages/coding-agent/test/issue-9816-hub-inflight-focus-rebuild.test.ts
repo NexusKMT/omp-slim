@@ -11,7 +11,7 @@
  * focus blackout is authoritative in the rebuilt transcript; a later event is
  * delivered through the newly installed subscription.
  */
-import { beforeAll, describe, expect, it, vi } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, vi } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { ToolResultMessage } from "@oh-my-pi/pi-ai";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -193,6 +193,10 @@ describe("#9816 focus blackout across an in-flight hub wait", () => {
 		resetSettingsForTest();
 		await Settings.init({ inMemory: true });
 		await initTheme();
+	});
+
+	afterAll(() => {
+		resetSettingsForTest();
 	});
 
 	it("drains a lost completion into the transcript before rebuilding the main session", async () => {
