@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added `omp usage clients` — per-client token burn recorded by the auth broker (which machine and app spent how many tokens per provider), with `--days` and `--json`.
 
 ## [18.0.6] - 2026-08-26
 
