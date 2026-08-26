@@ -43,7 +43,7 @@ import subagentSystemPromptTemplate from "../prompts/system/subagent-system-prom
 import submitReminderTemplate from "../prompts/system/subagent-yield-reminder.md" with { type: "text" };
 import { AgentLifecycleManager, type AgentReviver } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
-import { ensurePersistedRoster } from "../registry/persisted-agents";
+import { ensurePersistedRoster, isCurrentSessionRosterRef } from "../registry/persisted-agents";
 import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage } from "../sdk";
 import type { AgentSession, AgentSessionEvent, Prewalk } from "../session/agent-session";
 import { type ArtifactManager, writeArtifact } from "../session/artifacts";
@@ -56,6 +56,8 @@ import { type ConfiguredThinkingLevel, prewalkWouldBeNoop, resolveTaskEffortLeve
 import type { ContextFileEntry, ToolSession } from "../tools";
 import { resolveEvalBackends } from "../tools/eval-backends";
 import { isIrcEnabled } from "../tools/hub";
+import { LIST_STATUS_ORDER } from "../tools/hub/messaging";
+import { DEFAULT_HUB_LIST_LIMIT } from "../tools/hub/types";
 import { normalizeSchema } from "../tools/jtd-to-json-schema";
 import { buildOutputValidator, summarizeValidationFailure } from "../tools/output-schema-validator";
 import { ToolAbortError } from "../tools/tool-errors";
@@ -281,39 +283,58 @@ function installSubagentRetryFallbackChain(args: {
 	return role;
 }
 
-function formatIrcPeerRoster(registry: AgentRegistry, selfId: string): string {
-	const live = registry.listVisibleTo(selfId);
-	let parkedCount = 0;
-	for (const ref of registry.list()) {
-		if (ref.id !== selfId && ref.kind !== "advisor" && ref.status === "parked") parkedCount++;
-	}
-	const lines: string[] = [];
-	if (live.length === 0) {
-		lines.push(parkedCount > 0 ? "- (no live agents)" : "- (no other agents)");
-	} else {
-		for (const peer of live) {
-			lines.push(
-				`- \`${peer.id}\` — ${peer.displayName} (${peer.kind}, ${peer.status})${peer.activity ? `: ${peer.activity}` : ""}`,
-			);
-		}
-	}
-	if (live.some(peer => peer.status === "idle")) {
-		lines.push("Idle peers are not gone: messaging them wakes them.");
-	}
-	if (parkedCount > 0) {
-		lines.push(
-			`${parkedCount} parked peer(s) omitted. Query with \`hub\` op:"list" status:"parked"; send to a known id, \`history://<id>\`, or \`agent://<id>\` still works.`,
-		);
-	}
-	return lines.join("\n");
+export interface IrcPeerRosterRow {
+	id: string;
+	displayName: string;
+	kind: string;
+	status: string;
+	activity?: string;
 }
 
-export async function renderIrcPeerRoster(
+export interface IrcPeerRosterData {
+	/** Live (running+idle) peer rows, bounded at DEFAULT_HUB_LIST_LIMIT. */
+	peers: IrcPeerRosterRow[];
+	/** Current-root parked refs, counted but never named. */
+	parkedCount: number;
+	/** Live rows dropped by the bound; the prompt reports them truthfully. */
+	omittedCount: number;
+}
+
+export function collectIrcPeerRoster(
+	registry: AgentRegistry,
 	selfId: string,
-	registry: AgentRegistry = AgentRegistry.global(),
-): Promise<string> {
-	await ensurePersistedRoster(registry, registry.get(selfId)?.sessionFile ?? registry.get(MAIN_AGENT_ID)?.sessionFile);
-	return formatIrcPeerRoster(registry, selfId);
+	rootSessionFile?: string,
+): IrcPeerRosterData {
+	// Same ordering as `hub list`: running before idle, then newest activity
+	// first — so the cap keeps the newest relevant siblings, not an
+	// insertion-order prefix.
+	const live = registry
+		.listVisibleTo(selfId)
+		.sort(
+			(a, b) =>
+				(LIST_STATUS_ORDER[a.status] ?? 9) - (LIST_STATUS_ORDER[b.status] ?? 9) || b.lastActivity - a.lastActivity,
+		);
+	const limit = DEFAULT_HUB_LIST_LIMIT;
+	const omittedCount = Math.max(0, live.length - limit);
+	const peers = (omittedCount > 0 ? live.slice(0, limit) : live).map(peer => ({
+		id: peer.id,
+		displayName: peer.displayName,
+		kind: peer.kind,
+		status: peer.status,
+		activity: peer.activity,
+	}));
+	let parkedCount = 0;
+	for (const ref of registry.list()) {
+		if (
+			ref.id !== selfId &&
+			ref.kind !== "advisor" &&
+			ref.status === "parked" &&
+			isCurrentSessionRosterRef(ref, rootSessionFile)
+		) {
+			parkedCount++;
+		}
+	}
+	return { peers, parkedCount, omittedCount };
 }
 
 function withAbortTimeout<T>(
@@ -3122,6 +3143,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			}
 
 			const { normalized: normalizedOutputSchema } = normalizeSchema(outputSchema);
+			// Root resolved by the latest roster ensure; the prompt callback renders
+			// live peer rows scoped to it, so a session switch hides stale parked trees.
+			let ircRootSessionFile: string | undefined;
 
 			// Captured by the lifecycle reviver: rebuilding an equivalent session from
 			// the same JSONL file re-invokes createAgentSession with the exact options
@@ -3162,6 +3186,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				preloadedPreparedExtensions: restrictToolNames ? [] : options.preloadedPreparedExtensions,
 				preloadedCustomToolPaths: restrictToolNames ? [] : options.preloadedCustomToolPaths,
 				systemPrompt: defaultPrompt => {
+					const ircRoster = ircEnabled
+						? collectIrcPeerRoster(AgentRegistry.global(), id, ircRootSessionFile)
+						: undefined;
 					const subagentPrompt = prompt.render(subagentSystemPromptTemplate, {
 						agent: agent.systemPrompt,
 						context: options.context?.trim() ?? "",
@@ -3170,7 +3197,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						worktree: worktree ?? "",
 						outputSchema: normalizedOutputSchema,
 						outputSchemaOverridesAgent: options.outputSchemaOverridesAgent === true,
-						ircPeers: ircEnabled ? formatIrcPeerRoster(AgentRegistry.global(), id) : "",
+						ircPeers: ircRoster?.peers ?? [],
+						ircParkedCount: ircRoster?.parkedCount ?? 0,
+						ircOmittedCount: ircRoster?.omittedCount ?? 0,
 						ircSelfId: ircEnabled ? id : "",
 					});
 					return defaultPrompt.length === 0
@@ -3209,9 +3238,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			}
 			sessionOpenedAt = performance.now();
 			if (ircEnabled) {
-				await ensurePersistedRoster(
+				ircRootSessionFile = await ensurePersistedRoster(
 					AgentRegistry.global(),
-					sessionFile ??
+					sessionManager.getSessionFile() ??
+						sessionFile ??
 						AgentRegistry.global().get(id)?.sessionFile ??
 						AgentRegistry.global().get(MAIN_AGENT_ID)?.sessionFile,
 				);
@@ -3247,9 +3277,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						reopened.adoptArtifactManager(options.parentArtifactManager);
 					}
 					if (ircEnabled) {
-						await ensurePersistedRoster(
+						ircRootSessionFile = await ensurePersistedRoster(
 							AgentRegistry.global(),
-							sessionFile ??
+							reopened.getSessionFile() ??
+								sessionFile ??
 								AgentRegistry.global().get(id)?.sessionFile ??
 								AgentRegistry.global().get(MAIN_AGENT_ID)?.sessionFile,
 						);
