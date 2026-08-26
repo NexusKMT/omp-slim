@@ -81,7 +81,10 @@ describe("daemon wait generation binding", () => {
 			const restartDeadline = Date.now() + 5_000;
 			while (Date.now() < restartDeadline) {
 				const listed = await client.request({ op: "list" });
-				if (listed.op === "list" && listed.daemons.some(daemon => daemon.name === "restarting" && daemon.restartCount > 0)) {
+				if (
+					listed.op === "list" &&
+					listed.daemons.some(daemon => daemon.name === "restarting" && daemon.restartCount > 0)
+				) {
 					restartObserved = true;
 					break;
 				}

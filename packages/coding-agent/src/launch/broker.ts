@@ -1094,8 +1094,7 @@ class DaemonBroker {
 		};
 		const woke = condition() || (await this.#waitUntil(record, condition, operation.timeoutMs));
 		if (generationEnded()) {
-			const exit =
-				record.snapshot.exitCode === undefined ? "" : ` with exit code ${record.snapshot.exitCode}`;
+			const exit = record.snapshot.exitCode === undefined ? "" : ` with exit code ${record.snapshot.exitCode}`;
 			throw new Error(
 				`Daemon ${operation.name} generation ${boundGeneration} exited${exit}; ` +
 					"the wait was rejected instead of continuing against a replacement generation",
