@@ -581,12 +581,20 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 					await runtime.sessionManager.rollbackMove(previousState);
 				} catch (rollbackError) {
 					const actual = runtime.sessionManager.getCwd();
+					let realigned = false;
 					try {
 						setProjectDir(actual);
 						await runtime.settings.reloadForCwd(actual);
 						applyProviderGlobalsFromSettings(runtime.settings);
 						await runtime.reloadPlugins();
+						realigned = true;
 					} catch {}
+					if (!realigned) {
+						return usage(
+							`Move failed and rollback failed: ${errorMessage(rollbackError)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
+							runtime,
+						);
+					}
 					return usage(
 						`Move failed and rollback failed: ${errorMessage(rollbackError)} (workspace remains at ${actual})`,
 						runtime,
@@ -611,12 +619,20 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 					await runtime.sessionManager.rollbackMove(previousState);
 				} catch (rollbackError) {
 					const actual = runtime.sessionManager.getCwd();
+					let realigned = false;
 					try {
 						setProjectDir(actual);
 						await runtime.settings.reloadForCwd(actual);
 						applyProviderGlobalsFromSettings(runtime.settings);
 						await runtime.reloadPlugins();
+						realigned = true;
 					} catch {}
+					if (!realigned) {
+						return usage(
+							`Move failed and rollback failed: ${errorMessage(rollbackError)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
+							runtime,
+						);
+					}
 					return usage(
 						`Move failed and rollback failed: ${errorMessage(rollbackError)} (workspace remains at ${actual})`,
 						runtime,
