@@ -21,6 +21,10 @@
 
 - Extension-registered Codex models now preserve `preferWebsockets: false` and skip the WebSocket transport attempt.
 
+### Fixed
+
+- Fixed `--model <id>:<effort>` dropping the effort from the `default` role, so cycling back to `default` with ctrl+p ran at the previous role's reasoning effort. An explicit `--thinking` still wins over the flag's suffix.
+
 ## [18.0.6] - 2026-08-26
 
 ### Added
