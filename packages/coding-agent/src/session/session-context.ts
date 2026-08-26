@@ -487,6 +487,28 @@ export function buildSessionContext(
 		}
 	}
 
+	// Provider histories require each tool result to follow a distinct assistant
+	// tool call. Corrupt/imported journals can contain an orphan result when a
+	// started tool outlives an aborted assistant stream; replaying that shape makes
+	// providers reject every later turn. Keep transcript mode forensic, but repair
+	// the LLM context before it reaches any provider.
+	if (!options?.transcript) {
+		const unmatchedToolCallIds = new Set<string>();
+		let nextMessageIndex = 0;
+		for (const message of messages) {
+			let keep = true;
+			if (message.role === "assistant") {
+				for (const block of message.content) {
+					if (block.type === "toolCall") unmatchedToolCallIds.add(block.id);
+				}
+			} else if (message.role === "toolResult") {
+				keep = unmatchedToolCallIds.delete(message.toolCallId);
+			}
+			if (keep) messages[nextMessageIndex++] = message;
+		}
+		messages.length = nextMessageIndex;
+	}
+
 	// Strip dangling tool_use blocks — a tool_use with no matching tool_result on the
 	// resolved leaf→root path — from ANY assistant turn, not just the trailing one.
 	// This happens whenever the leaf (or a branch point) lands such that an assistant

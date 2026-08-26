@@ -255,6 +255,24 @@ function syntheticToolResultEntry(
 	};
 }
 
+describe("buildSessionContext orphaned toolResults", () => {
+	it("drops only results without a preceding assistant toolCall from provider context", () => {
+		const context = buildSessionContext([
+			userEntry("user", null, "run both jobs", 1),
+			toolCallAssistantEntry("assistant", "user", "toolUse", "call-1", 2),
+			syntheticToolResultEntry("paired-result", "assistant", "call-1", 3),
+			syntheticToolResultEntry("orphan-result", "paired-result", "call-2", 4),
+		]);
+		const toolResultIds: string[] = [];
+		for (const message of context.messages) {
+			if (message.role === "toolResult") toolResultIds.push(message.toolCallId);
+		}
+
+		expect(context.messages.map(message => message.role)).toEqual(["user", "assistant", "toolResult"]);
+		expect(toolResultIds).toEqual(["call-1"]);
+	});
+});
+
 function hiddenContinuityEntry(id: string, parentId: string | null): SessionEntry {
 	return {
 		type: "custom_message",
