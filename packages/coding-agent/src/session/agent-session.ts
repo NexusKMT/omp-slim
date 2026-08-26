@@ -2183,20 +2183,17 @@ export class AgentSession {
 	#prunedTerminalRefusal: AssistantMessage | undefined = undefined;
 
 	/**
-	 * In-flight {@link #dispatchAgentEvent} promises. agent-core invokes the
-	 * event subscriber fire-and-forget, so a `message_end`/`agent_end` handler
-	 * can still be awaiting extension/subscriber/maintenance work — and thus its
-	 * `sessionManager`/`agent.state` append — after `agent.waitForIdle()`
-	 * resolves. Dispose drains this set so the late append lands *before* the
-	 * memory release, never after it.
+	 * Event handlers currently applying agent-core events to subscribers and
+	 * session persistence. agent-core invokes the subscriber fire-and-forget, so
+	 * a `message_end` handler can still be persisting its tool result after the
+	 * preceding `tool_execution_end` was emitted externally.
 	 */
 	#inFlightEventHandlers = new Set<Promise<void>>();
 
 	/**
 	 * Subscriber entry point. Delegates to {@link #dispatchAgentEvent} and
-	 * records the dispatch in {@link #inFlightEventHandlers} until it settles so
-	 * {@link #drainInFlightEventHandlers} can await the session's async
-	 * event/persistence pipeline during teardown.
+	 * records the dispatch until it settles so transcript rebuilds and teardown
+	 * can await the async subscriber/persistence pipeline.
 	 */
 	#handleAgentEvent = (event: AgentEvent): Promise<void> => {
 		const processing = this.#dispatchAgentEvent(event);
@@ -2206,10 +2203,25 @@ export class AgentSession {
 	};
 
 	/**
-	 * Await every in-flight event handler (and any it chains into) so a late
-	 * message/entry append cannot land after the caller clears session memory.
-	 * The agent must already be idle — otherwise new events keep arriving and
-	 * this never drains.
+	 * Await only the event handlers (and their persistence) already in flight at
+	 * call time, without chasing handlers registered afterward.
+	 *
+	 * Focus attach uses this after subscribing to the target: a tool completion
+	 * emitted during the focus blackout must finish persisting before the
+	 * rebuild, but a continuously streaming target must NOT postpone the swap for
+	 * the rest of the turn. Events dispatched after this snapshot already reach
+	 * the freshly installed listener, so — unlike {@link #drainInFlightEventHandlers}
+	 * — this settles one snapshot and never loops.
+	 */
+	async settleInFlightEventHandlers(): Promise<void> {
+		await Promise.allSettled([...this.#inFlightEventHandlers]);
+	}
+
+	/**
+	 * Exhaustively drain the agent-event pipeline, including handlers chained by
+	 * handlers that were already draining. Dispose uses this after the agent is
+	 * idle so a late message/entry append cannot land after session memory is
+	 * released; it never terminates while new events still arrive.
 	 */
 	async #drainInFlightEventHandlers(): Promise<void> {
 		while (this.#inFlightEventHandlers.size > 0) {

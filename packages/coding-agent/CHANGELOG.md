@@ -13,6 +13,10 @@
 
 - `/branch` now always opens the branch-from-message selector regardless of `doubleEscapeAction` setting ([#9818](https://github.com/can1357/oh-my-pi/pull/9818)).
 
+### Fixed
+
+- Fixed an in-flight tool card freezing after viewing a subagent and returning to the main session ([#9816](https://github.com/can1357/oh-my-pi/issues/9816)).
+
 ## [18.0.6] - 2026-08-26
 
 ### Added
