@@ -8,6 +8,7 @@
 - Fixed graceful terminal shutdown leaving eligible finalized output in the mutable viewport instead of retiring it before shell handoff.
 - Fixed a latched destructive scrollback rebuild (settled rebuild-mode resize, display reset) erasing and re-streaming the whole transcript during stop; the latch is dropped and shutdown writes only the un-retired tail.
 - Fixed `append` resize-scrollback mode duplicating committed history (including the editor/status rows) in native scrollback after a height-only terminal resize; the width-refresh replay now runs only when the width actually changed ([#9671](https://github.com/can1357/oh-my-pi/issues/9671)).
+- Fixed leading bare-name skill prefixes such as `/batch` returning no autocomplete suggestions.
 
 ## [18.0.6] - 2026-08-26
 

@@ -178,17 +178,19 @@ describe("CombinedAutocompleteProvider", () => {
 			expect(result?.items.map(item => item.value)).toEqual(["skill:"]);
 		});
 
-		it("does not surface skills for a leading prefix unrelated to the namespace", async () => {
+		it("surfaces skills for a leading bare-name prefix", async () => {
 			const provider = new CombinedAutocompleteProvider(
-				[{ name: "skill:humanizer", description: "Remove signs of AI writing" }],
+				[
+					{ name: "skill:batch", description: "Run batch workflows" },
+					{ name: "skill:reviewer", description: "Code review" },
+				],
 				"/tmp",
 			);
 
-			// Bare-name and description fuzzy matches are reserved for the
-			// mid-prompt skill popup; at prompt start only `/skill:…` lists skills.
-			const result = await provider.getSuggestions(["/hum"], 0, "/hum".length);
+			const result = await provider.getSuggestions(["/batch"], 0, "/batch".length);
 
-			expect(result).toBeNull();
+			expect(result?.prefix).toBe("/batch");
+			expect(result?.items.map(item => item.value)).toEqual(["skill:batch"]);
 		});
 
 		it("expands individual skills once the leading prefix enters the namespace", async () => {

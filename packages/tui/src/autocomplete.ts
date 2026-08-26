@@ -393,21 +393,26 @@ export const SKILL_NAMESPACE = "skill:";
 
 /**
  * Collapse `skill:*` commands into a single `/skill:` namespace row while the
- * typed prefix has not committed to the namespace. Until the prefix starts
- * with `skill:`, individual skills never list — a lone group entry (shown only
- * while the prefix is still a prefix of `skill:`) keeps the `/` popup
- * readable. Accepting the group inserts `/skill:` without a trailing space so
- * the reopened popup expands to the individual skills.
+ * typed prefix is empty or still approaches the namespace. Bare skill-name
+ * prefixes retain matching skills (`/hum` → `skill:humanizer`), while the
+ * group entry keeps the `/` popup readable. Accepting the group inserts
+ * `/skill:` without a trailing space so the reopened popup expands to the
+ * individual skills.
  */
 function collapseSkillNamespace(commands: CommandEntry[], lowerPrefix: string): CommandEntry[] {
 	if (lowerPrefix.startsWith(SKILL_NAMESPACE)) return commands;
 	let skillCount = 0;
 	let skillIcon: string | undefined;
 	const rest = commands.filter(cmd => {
-		if (!getCommandName(cmd)?.startsWith(SKILL_NAMESPACE)) return true;
+		const name = getCommandName(cmd);
+		if (!name?.startsWith(SKILL_NAMESPACE)) return true;
 		skillCount += 1;
 		skillIcon ??= cmd.icon;
-		return false;
+		return (
+			lowerPrefix.length > 0 &&
+			!SKILL_NAMESPACE.startsWith(lowerPrefix) &&
+			name.slice(SKILL_NAMESPACE.length).toLowerCase().startsWith(lowerPrefix)
+		);
 	});
 	if (skillCount === 0) return commands;
 	if (!SKILL_NAMESPACE.startsWith(lowerPrefix)) return rest;
