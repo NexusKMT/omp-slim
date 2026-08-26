@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Codex remote compaction replaying image-read tool results as synthetic user messages instead of preserving the images inside their function outputs.
+
 ## [18.0.5] - 2026-08-25
 
 ### Fixed

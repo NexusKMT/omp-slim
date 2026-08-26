@@ -23,6 +23,10 @@
 
 - Fixed auth-broker background activity keeping processes alive unnecessarily, so unused broker-backed auth storage now parks automatically and no longer prevents CLI exit.
 
+### Fixed
+
+- Fixed auth-gateway OpenAI Responses requests rejecting multimodal function-call outputs containing input text and images; inline, remote, and OpenAI file-backed images are now preserved as tool-result content.
+
 ## [18.0.5] - 2026-08-25
 
 ### Breaking Changes
