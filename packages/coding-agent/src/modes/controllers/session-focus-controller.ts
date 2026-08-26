@@ -107,6 +107,15 @@ export class SessionFocusController {
 			}
 			await this.ctx.eventController.handleEvent(event);
 		});
+		// Events emitted while another session was focused had no TUI listener,
+		// but their AgentSession handlers still persist authoritative transcript
+		// state asynchronously. Subscribe first, then drain that pipeline before
+		// replay: already-emitted tool completions become persisted toolResults;
+		// later updates reach the new listener. Without this handoff, replay can
+		// resurrect a result-less toolCall after its only completion was lost
+		// during the focus blackout (#9816).
+		await target.drainEventHandlers();
+		if (generation !== this.#attachGeneration) return false;
 		this.ctx.statusLine.setSession(target, this.#focusedAgentId);
 		await this.ctx.renderInitialMessages({ clearTerminalHistory: true });
 		if (generation !== this.#attachGeneration) return false;

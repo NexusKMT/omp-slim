@@ -2183,20 +2183,17 @@ export class AgentSession {
 	#prunedTerminalRefusal: AssistantMessage | undefined = undefined;
 
 	/**
-	 * In-flight {@link #dispatchAgentEvent} promises. agent-core invokes the
-	 * event subscriber fire-and-forget, so a `message_end`/`agent_end` handler
-	 * can still be awaiting extension/subscriber/maintenance work — and thus its
-	 * `sessionManager`/`agent.state` append — after `agent.waitForIdle()`
-	 * resolves. Dispose drains this set so the late append lands *before* the
-	 * memory release, never after it.
+	 * Event handlers currently applying agent-core events to subscribers and
+	 * session persistence. agent-core invokes the subscriber fire-and-forget, so
+	 * a `message_end` handler can still be persisting its tool result after the
+	 * preceding `tool_execution_end` was emitted externally.
 	 */
 	#inFlightEventHandlers = new Set<Promise<void>>();
 
 	/**
 	 * Subscriber entry point. Delegates to {@link #dispatchAgentEvent} and
-	 * records the dispatch in {@link #inFlightEventHandlers} until it settles so
-	 * {@link #drainInFlightEventHandlers} can await the session's async
-	 * event/persistence pipeline during teardown.
+	 * records the dispatch until it settles so transcript rebuilds and teardown
+	 * can await the async subscriber/persistence pipeline.
 	 */
 	#handleAgentEvent = (event: AgentEvent): Promise<void> => {
 		const processing = this.#dispatchAgentEvent(event);
@@ -2206,12 +2203,14 @@ export class AgentSession {
 	};
 
 	/**
-	 * Await every in-flight event handler (and any it chains into) so a late
-	 * message/entry append cannot land after the caller clears session memory.
-	 * The agent must already be idle — otherwise new events keep arriving and
-	 * this never drains.
+	 * Wait until the current agent-event pipeline reaches a quiescent point.
+	 *
+	 * Focus attach calls this after subscribing but before rebuilding the
+	 * transcript: terminal tool events emitted while another session was focused
+	 * are then persisted into the rebuild, while events that arrive later reach
+	 * the newly installed listener.
 	 */
-	async #drainInFlightEventHandlers(): Promise<void> {
+	async drainEventHandlers(): Promise<void> {
 		while (this.#inFlightEventHandlers.size > 0) {
 			await Promise.allSettled([...this.#inFlightEventHandlers]);
 		}
@@ -4225,7 +4224,7 @@ export class AgentSession {
 			await withTimeout(
 				(async () => {
 					await this.agent.waitForIdle();
-					await this.#drainInFlightEventHandlers();
+					await this.drainEventHandlers();
 				})(),
 				options.drainTimeoutMs ?? POST_PROMPT_DRAIN_TIMEOUT_MS,
 				"Timed out waiting for the active agent run to settle during dispose",
@@ -4267,7 +4266,7 @@ export class AgentSession {
 		if (!drained) {
 			void (async () => {
 				await this.agent.waitForIdle();
-				await this.#drainInFlightEventHandlers();
+				await this.drainEventHandlers();
 				this.#releaseRetainedSessionMemory();
 			})().catch(error => logger.warn("Deferred dispose finalization failed", { error: String(error) }));
 		}

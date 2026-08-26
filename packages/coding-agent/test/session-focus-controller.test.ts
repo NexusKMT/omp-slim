@@ -24,6 +24,7 @@ function makeSessionStub(opts: { isStreaming?: boolean } = {}): SessionStub {
 				unsubscribeCalls++;
 			};
 		},
+		async drainEventHandlers() {},
 	};
 	return {
 		session: stub as unknown as AgentSession,
