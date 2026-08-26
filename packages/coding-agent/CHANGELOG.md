@@ -75,6 +75,11 @@
 
 - Fixed compiled-binary extensions failing to import `@oh-my-pi/pi-coding-agent/registry/*` modules.
 
+### Fixed
+
+- Fixed `!` user-shell commands losing extension-provided environment variables (e.g. the secretsd session token) when the extension also mirrors them into the omp process environment: the shell-env hook now diffs against the child shell's actual base environment instead of `process.env`.
+- Fixed the user-shell environment hook sharing the cached shell config object with extension hooks: a hook that mutates its environment context in place could permanently poison later commands' environment diffing.
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
