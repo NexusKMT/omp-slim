@@ -501,7 +501,7 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 	const enableLsp = session.enableLsp ?? true;
 	const requestedTools = restrictToolNames
 		? normalizeToolNames(toolNames ?? [])
-		: toolNames && toolNames.length > 0
+		: toolNames
 			? normalizeToolNames(toolNames)
 			: undefined;
 	// createTools may be called more than once for the same ToolSession. A later

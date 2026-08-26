@@ -21,6 +21,7 @@
 ### Fixed
 
 - Bound hub process waits to the generation observed at issuance so automatic restarts cannot prolong the wait or satisfy it with replacement-process output ([#9777](https://github.com/can1357/oh-my-pi/pull/9777)).
+- Agent definitions with an explicit `tools: []` now spawn without the default work tools.
 - Corrected the documented `tools.approval` key format for MCP tools so per-tool deny policies use the registered tool name ([#9830](https://github.com/can1357/oh-my-pi/issues/9830)).
 - `/branch` now always opens the branch-from-message selector regardless of `doubleEscapeAction` setting ([#9818](https://github.com/can1357/oh-my-pi/pull/9818)).
 - Fixed an in-flight tool card freezing after viewing a subagent and returning to the main session ([#9816](https://github.com/can1357/oh-my-pi/issues/9816)).

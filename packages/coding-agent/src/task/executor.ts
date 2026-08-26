@@ -2835,7 +2835,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 
 	// Add tools if specified
 	let toolNames: string[] | undefined;
-	if (agent.tools && agent.tools.length > 0) {
+	if (agent.tools) {
 		toolNames = agent.tools;
 		// Auto-include task tool if spawns defined but task not in tools
 		if (agent.spawns !== undefined && !toolNames.includes("task") && !atMaxDepth) {
