@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Documented the scope of the two relay opt-in paths: per-call `app.relay: true`, and the `browser.relay` setting as the profile-wide default across projects.
+
 ## [17.2.5] - 2026-08-03
 
 ### Added
