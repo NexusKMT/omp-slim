@@ -1046,11 +1046,12 @@ describe("github tool", () => {
 		});
 
 		it("checks out a pull request into a worktree and configures contributor push metadata", async () => {
-			vi.spyOn(git.github, "json")
+			const githubSpy = vi
+				.spyOn(git.github, "json")
 				.mockResolvedValueOnce({
 					number: 123,
 					title: "Contributor fix",
-					url: "https://github.com/base/repo/pull/123",
+					url: "https://ghe.example.com/base/repo/pull/123",
 					baseRefName: "main",
 					headRefName: fixture.headRefName,
 					headRefOid: fixture.headRefOid,
@@ -1067,6 +1068,7 @@ describe("github tool", () => {
 
 			const tool = new GithubTool(createSession(fixture.repoRoot));
 			const result = await tool.execute("pr-checkout", { op: "pr_checkout", pr: "123" });
+			expect(githubSpy.mock.calls[1]?.[1]).toContain("ghe.example.com/contrib/repo");
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 			const primaryRoot = (await git.repo.primaryRoot(fixture.repoRoot)) ?? fixture.repoRoot;
 			const worktreePath = await expectedWorktreePath(tempHome.home, primaryRoot, "pr-123");
