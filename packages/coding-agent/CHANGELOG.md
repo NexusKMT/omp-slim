@@ -50,6 +50,14 @@
 - Improved `omp git` responsiveness with immediate file rendering, progressive syntax highlighting, and deferred large-commit statistics.
 - Documented that `retry.maxDelayMs: 0` permits provider-requested quota waits to continue until automatic retry, rather than enforcing a wait ceiling.
 - Expanded git TUI navigation and file-management shortcuts, including refresh, stage/unstage, directory operations, hunk and file navigation, pane movement, diff-view selection, commit-form access, and paging.
+- Standardized completed edit results on hashline-style path and numbered-preview output across edit modes.
+- Made `omp git` stream file contents into an off-thread native differ, paint complete lines immediately, progressively apply syntax highlighting, and defer large commit file statistics until after the first interactive frame.
+- Added `r` shortcut to refresh the git state
+- Added `s`/`u` shortcuts to stage/unstage files directly from the sidebar
+- Made `space` (and `s`/`u`) in the git TUI sidebar stage/unstage whole directories; `enter`/`←`/`→` keep folding the tree
+- Added `space` shortcut as page down in the diff pane
+- Expanded `omp git` keyboard navigation: `alt+↓`/`alt+↑` jump hunks and roll into the adjacent file at the edges, `]`/`[` switch files, `←`/`→` collapse/expand sidebar directories, `enter` opens the selected file, vim motions (`j`/`k`/`h`/`l`/`g`/`G`) work in both panes, `1`–`4` pick a diff view directly, and `c` jumps to the commit form.
+- Clarified the computer tool prompt: `desktop.window()` returns a promise that must be awaited, and `win.ax()` snapshots are textual trees rather than structured node lists.
 
 ### Fixed
 
