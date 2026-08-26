@@ -4,16 +4,15 @@
 
 ### Added
 
-- Added application-level usage attribution: observed-usage reports now carry an `app` label (`OMP_APP_NAME`, default `omp`), the broker persists and aggregates per-`(install, app, provider)`, and the auth-gateway attributes each request to the originating client via new `x-omp-install-id`/`x-omp-hostname`/`x-omp-app` headers (sent automatically by the pi-native transport; unlabeled foreign-SDK traffic falls back to the gateway host under the `gateway` app). Update the broker before clients — pre-`app` brokers reject the new report field and clients latch reporting off until restart.
+- Added application-level usage attribution for billing and usage reporting, with per-application aggregation and automatic client identification. Applications can set their label with `OMP_APP_NAME` (default: `omp`); update the broker before clients to support the new usage reports.
 
 ### Fixed
 
-- Fixed Anthropic Claude subscription OAuth requests being rejected by the upstream service ([#9801](https://github.com/can1357/oh-my-pi/pull/9801) by [@fanbaoyu1024](https://github.com/fanbaoyu1024)).
-- Fixed Anthropic Claude subscription OAuth requests being rejected by the upstream service ([#9801](https://github.com/can1357/oh-my-pi/pull/9801) by [@fanbaoyu1024](https://github.com/fanbaoyu1024)).
-- Fixed OpenAI-compatible streaming error events being treated as successful empty completions, so queue admission failures now trigger retry and model fallback.
-- Fixed auth-gateway OpenAI Responses requests rejecting multimodal function-call outputs containing input text and images; inline, remote, and OpenAI file-backed images are now preserved as tool-result content.
-- Fixed Cursor rejecting resumed/forked sessions whose history came from a Responses-family provider (e.g. Codex) with an opaque `resource_exhausted` by sanitizing composite `callId|itemId` tool-call ids before replay ([#9754](https://github.com/can1357/oh-my-pi/issues/9754)).
-- Fixed Cursor `composer-2.5` selections silently serving the Fast variant by pinning the Standard tier with an explicit `{ id: "fast", value: "false" }` request parameter ([#9012](https://github.com/can1357/oh-my-pi/issues/9012)).
+- Fixed Anthropic Claude subscription OAuth requests being rejected by the upstream service ([#9801](https://github.com/can1357/oh-my-pi/pull/9801)).
+- Fixed OpenAI-compatible streaming errors being reported as empty successful completions, enabling retries and model fallback when queue admission fails.
+- Fixed multimodal tool results in OpenAI Responses requests so inline, remote, and OpenAI file-backed images are preserved correctly.
+- Fixed resumed and forked Cursor sessions failing when their history came from a Responses-based provider such as Codex ([#9754](https://github.com/can1357/oh-my-pi/issues/9754)).
+- Fixed Cursor `composer-2.5` selections using the Fast variant instead of the Standard tier ([#9012](https://github.com/can1357/oh-my-pi/issues/9012)).
 
 ## [18.0.6] - 2026-08-26
 

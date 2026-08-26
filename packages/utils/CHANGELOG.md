@@ -4,13 +4,12 @@
 
 ### Added
 
-- Added `RequestError.sessionBusy(message, data)` for the ACP session-busy application error (`-32003`) on the shared JSON-RPC transport.
-- Exported `getComposerCacheDir` to resolve the per-project composer speculative cache directory under the XDG cache category, so the coding-agent composer startup cache honors `XDG_CACHE_HOME` like the other agent caches.
+- Added `RequestError.sessionBusy(message, data)` to represent ACP session-busy errors (`-32003`) through the shared JSON-RPC transport.
+- Exported `getComposerCacheDir` for resolving the per-project Composer cache directory, including support for `XDG_CACHE_HOME`.
 
 ### Fixed
 
-- OMP no longer exits when Bun 1.4 throws an asynchronous `ERR_SOCKET_CLOSED` from `node:net` internals during socket cleanup.
-- Kept the main session alive when Bun surfaces an optional-worker IPC send `EPIPE` through `uncaughtException` instead of `unhandledRejection`.
+- Fixed OMP sessions unexpectedly exiting during socket cleanup or optional-worker communication on Bun.
 
 ## [18.0.6] - 2026-08-26
 

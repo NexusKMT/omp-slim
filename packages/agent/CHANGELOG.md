@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed Codex remote compaction replaying image-read tool results as synthetic user messages instead of preserving the images inside their function outputs.
+- Fixed Codex remote compaction to preserve images returned by image-reading tools, preventing them from being replayed as incorrect synthetic user messages.
 
 ## [18.0.5] - 2026-08-25
 

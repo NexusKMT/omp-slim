@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed LiteLLM discovery storing zero cache prices when `/model_group/info` omitted them but a later metadata endpoint provided them.
+- Fixed LiteLLM model discovery so model pricing is correctly populated when pricing information is provided by a later metadata endpoint.
 
 ## [18.0.5] - 2026-08-25
 

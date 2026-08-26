@@ -4,11 +4,10 @@
 
 ### Fixed
 
-- Fixed image previews rendering as PUA garbage inside Paseo terminals by dropping the Kitty image protocol when `PASEO_TERMINAL_ID` is present.
-- Fixed graceful terminal shutdown leaving eligible finalized output in the mutable viewport instead of retiring it before shell handoff.
-- Fixed a latched destructive scrollback rebuild (settled rebuild-mode resize, display reset) erasing and re-streaming the whole transcript during stop; the latch is dropped and shutdown writes only the un-retired tail.
-- Fixed `append` resize-scrollback mode duplicating committed history (including the editor/status rows) in native scrollback after a height-only terminal resize; the width-refresh replay now runs only when the width actually changed ([#9671](https://github.com/can1357/oh-my-pi/issues/9671)).
-- Fixed leading bare-name skill prefixes such as `/batch` returning no autocomplete suggestions when no command matches the prefix as strongly; equal-strength command matches keep the popup command-only.
+- Fixed image previews displaying as garbled characters in Paseo terminals.
+- Fixed graceful shutdown so finalized output is correctly retired before handing control back to the shell.
+- Fixed terminal resizing from duplicating committed history in native scrollback.
+- Fixed autocomplete suggestions for bare-name skills such as `/batch` when no command matches the prefix more strongly.
 
 ## [18.0.6] - 2026-08-26
 
