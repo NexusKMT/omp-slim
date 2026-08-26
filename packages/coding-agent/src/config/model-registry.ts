@@ -2433,7 +2433,7 @@ export class ModelRegistry {
 				} else {
 					this.#invalidateProviderModelCache(providerName);
 				}
-				return;
+				if (!config.fetchDynamicModels) return;
 			}
 
 			// Update the unprojected snapshot, then rerun every whole-catalog
@@ -2454,7 +2454,7 @@ export class ModelRegistry {
 
 			this.#models = this.#applyRuntimeModelModifiers(this.#unprojectedModels);
 			this.#invalidateProviderModelCache(providerName);
-			return;
+			if (!config.fetchDynamicModels) return;
 		}
 
 		if (config.fetchDynamicModels) {
