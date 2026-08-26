@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `!` user-shell commands losing extension-provided environment variables (e.g. the secretsd session token) when the extension also mirrors them into the omp process environment: the shell-env hook now diffs against the child shell's actual base environment instead of `process.env`.
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
@@ -67,7 +71,6 @@
 - Fixed completed assistant replies disappearing from the live transcript under viewport pressure.
 - Accelerated SHA-2 and SHA-3 checksums on supported ARM64 hardware.
 - Fixed large MCP tool payloads being stored redundantly on disk.
-
 ## [18.0.4] - 2026-08-24
 
 ### Added

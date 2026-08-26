@@ -154,6 +154,49 @@ describe("AgentSession bash session ownership", () => {
 		);
 	});
 
+	it("forwards a hook-injected variable even when process.env already mirrors its value", async () => {
+		// Regression: an extension may both mirror a variable into process.env (so
+		// MCP servers and workers inherit it) and inject it via its spawnHook. The
+		// hook adapter forwards only entries differing from the baseline it is
+		// handed; diffing against process.env made the mirrored value look
+		// unchanged and dropped it, while the child shell's real base env (the
+		// filtered spawn env) never contained it — so user shells lost the
+		// variable entirely (the secretsd session-token incident).
+		const shell = process.platform === "win32" ? (Bun.env.ComSpec ?? "cmd.exe") : "/bin/sh";
+		Settings.instance.set("shellPath", shell);
+		vi.spyOn(Settings.prototype, "getShellConfig").mockReturnValue({
+			shell,
+			args: process.platform === "win32" ? ["/c"] : ["-c"],
+			env: { PATH: Bun.env.PATH ?? "", HOME: tempDir.path(), SHELL: shell },
+			prefix: undefined,
+		});
+		const previousMirror = process.env.OMP_USER_SHELL_MIRROR;
+		process.env.OMP_USER_SHELL_MIRROR = "mirrored-value";
+		try {
+			const spawnHook = vi.fn(spawn => ({
+				...spawn,
+				env: { ...spawn.env, OMP_USER_SHELL_MIRROR: "mirrored-value" },
+			}));
+			const definition = createBashTool(tempDir.path(), { spawnHook });
+			const extensionRunner = {
+				hasHandlers: vi.fn(() => false),
+				getRegisteredTool: vi.fn((name: string) => (name === "bash" ? { definition } : undefined)),
+				emit: vi.fn().mockResolvedValue(undefined),
+				emitBeforeAgentStart: vi.fn().mockResolvedValue(undefined),
+			} as unknown as ExtensionRunner;
+			createSession(undefined, extensionRunner);
+
+			const result = await session.executeBash('printf "%s" "$OMP_USER_SHELL_MIRROR"', undefined, {
+				useUserShell: true,
+			});
+
+			expect(result.output).toBe("mirrored-value");
+		} finally {
+			if (previousMirror === undefined) delete process.env.OMP_USER_SHELL_MIRROR;
+			else process.env.OMP_USER_SHELL_MIRROR = previousMirror;
+		}
+	});
+
 	it("does not run the shell environment hook when a user_bash handler replaces the result", async () => {
 		const spawnHook = vi.fn(() => {
 			throw new Error("shell env hook must not run when user_bash supplies a replacement result");
