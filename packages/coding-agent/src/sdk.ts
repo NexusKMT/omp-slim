@@ -93,6 +93,7 @@ import {
 import { discoverCustomToolPaths, loadCustomTools, type ToolPathWithSource } from "./extensibility/custom-tools";
 import type { CustomTool, CustomToolContext, CustomToolSessionEvent } from "./extensibility/custom-tools/types";
 import {
+	bindPreparedExtensions,
 	discoverAndLoadExtensions,
 	discoverExtensionPaths,
 	EXTENSION_HANDLER_TIMEOUT_MS,
@@ -104,6 +105,7 @@ import {
 	type LoadExtensionsResult,
 	loadExtensionFromFactory,
 	loadExtensions,
+	type PreparedExtension,
 	type RegisteredTool,
 	type ToolDefinition,
 	wrapRegisteredTools,
@@ -449,7 +451,7 @@ export interface CreateAgentSessionOptions {
 	 * `Extension` instances close over a parent-bound `ExtensionAPI` (cwd,
 	 * eventBus, runtime), and reusing them would route tools/handlers/commands
 	 * back through the parent. For subagents, forward
-	 * {@link preloadedExtensionPaths} instead.
+	 * {@link preloadedPreparedExtensions} instead.
 	 *
 	 * @internal
 	 */
@@ -460,9 +462,15 @@ export interface CreateAgentSessionOptions {
 	 * `loadExtensions()` itself so each `Extension` is bound to THIS session's
 	 * `ExtensionAPI` (cwd, eventBus, runtime).
 	 *
-	 * This is the safe pass-through for parent → subagent forwarding.
+	 * Compatibility pass-through for callers that do not have prepared factories.
 	 */
 	preloadedExtensionPaths?: string[];
+	/**
+	 * Session-independent imported extension factories. Child sessions rebind
+	 * these to their own ExtensionAPI without re-evaluating the module graph.
+	 * @internal
+	 */
+	preloadedPreparedExtensions?: readonly PreparedExtension[];
 	/**
 	 * Pre-discovered custom-tool source paths from `.omp/tools/`, `.claude/tools/`,
 	 * plugins, etc. When provided, the filesystem-scan inside
@@ -2045,11 +2053,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		//      Extension instances. Shallow-clone `extensions` so the inline
 		//      push below cannot mutate the caller's array. `runtime` is shared
 		//      so flag values set pre-creation flow into the live session.
-		//   2. `preloadedExtensionPaths` (subagent): caller resolved paths;
-		//      skip the FS scan but always re-call `loadExtensions` here so
-		//      each `Extension` binds to THIS session's `ExtensionAPI`
-		//      (cwd, eventBus, runtime).
-		//   3. No preload: run the full session discovery.
+		//   2. `preloadedPreparedExtensions` (subagent): caller imported modules;
+		//      re-bind their factories to THIS session's ExtensionAPI without
+		//      evaluating the same module graph again.
+		//   3. `preloadedExtensionPaths`: compatibility fallback for callers that
+		//      only have paths; imports and binds them for this session.
+		//   4. No preload: run the full session discovery.
 		// `disableExtensionDiscovery` is honored implicitly: a caller that set
 		// the flag and pre-resolved the result already reflects that choice.
 		let extensionPaths: string[];
@@ -2069,6 +2078,18 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			extensionPaths = extensionsResult.extensions
 				.map(ext => ext.resolvedPath)
 				.filter(p => !p.startsWith("<inline"));
+		} else if (options.preloadedPreparedExtensions) {
+			extensionPaths = options.preloadedPreparedExtensions.map(prepared => prepared.path);
+			extensionsResult = await logger.time(
+				"bindPreparedExtensions",
+				bindPreparedExtensions,
+				options.preloadedPreparedExtensions,
+				cwd,
+				eventBus,
+			);
+			for (const { path, error } of extensionsResult.errors) {
+				logger.error("Failed to bind extension", { path, error });
+			}
 		} else if (options.preloadedExtensionPaths) {
 			extensionPaths = options.preloadedExtensionPaths;
 			extensionsResult = await logger.time("loadExtensions", loadExtensions, extensionPaths, cwd, eventBus);
@@ -2087,6 +2108,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// Forward the source-path list (NOT the loaded instances) so subagents
 		// rebuild their own session-scoped extensions.
 		toolSession.extensionPaths = extensionPaths;
+		toolSession.preparedExtensions = extensionsResult.preparedExtensions;
 
 		// Load inline extensions from factories
 		if (inlineExtensions.length > 0) {

@@ -440,6 +440,7 @@ function buildExecutorOptions(
 		promptTemplates: session.promptTemplates,
 		rules: session.rules,
 		preloadedExtensionPaths: restrictToolNames ? [] : session.extensionPaths,
+		preloadedPreparedExtensions: restrictToolNames ? [] : session.preparedExtensions,
 		preloadedCustomToolPaths: restrictToolNames ? [] : session.customToolPaths,
 		localProtocolOptions,
 		parentArtifactManager: session.getArtifactManager?.() ?? undefined,
