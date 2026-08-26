@@ -1690,4 +1690,25 @@ describe("Settings", () => {
 			});
 		});
 	});
+
+	describe("extensionsSourceLevel", () => {
+		it("reports project when a foreign project provider (.claude/settings.json) supplies extensions", async () => {
+			const claudeSettings = path.join(projectDir, ".claude", "settings.json");
+			fs.mkdirSync(path.dirname(claudeSettings), { recursive: true });
+			fs.writeFileSync(claudeSettings, JSON.stringify({ extensions: ["../claude-ext"] }));
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			expect(settings.get("extensions")).toContain("../claude-ext");
+			expect(settings.extensionsSourceLevel()).toBe("project");
+		});
+
+		it("reports user for a user-only setting and for runtime overrides", async () => {
+			await writeSettings({ extensions: ["../user-ext"] });
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			expect(settings.extensionsSourceLevel()).toBe("user");
+
+			settings.override("extensions", ["../override-ext"]);
+			expect(settings.extensionsSourceLevel()).toBe("user");
+		});
+	});
 });

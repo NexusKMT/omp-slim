@@ -468,7 +468,19 @@ describe("structured subagent primitive", () => {
 		const planSession = session({ planMode: true });
 		Object.assign(planSession, { mcpManager, extensionPaths, customToolPaths });
 		const nonPlanSession = session();
-		Object.assign(nonPlanSession, { mcpManager, extensionPaths, customToolPaths });
+		let explicitRoot = "/plugins/explicit";
+		const extensionRoots = () => ({
+			explicit: [explicitRoot],
+			mode: "explicit-only" as const,
+			configured: ["/plugins/configured"],
+			configuredLevel: "project" as const,
+		});
+		Object.assign(nonPlanSession, {
+			mcpManager,
+			extensionPaths,
+			customToolPaths,
+			effectiveExtensionRoots: extensionRoots,
+		});
 		const mcpDisabledSession = session();
 		mcpDisabledSession.enableMCP = false;
 		const restrictedSession = session();
@@ -507,6 +519,9 @@ describe("structured subagent primitive", () => {
 			preloadedCustomToolPaths: customToolPaths,
 		});
 		expect(options[1]?.restrictToolNames).toBe(false);
+		expect(options[1]?.extensionRoots?.()).toEqual(extensionRoots());
+		explicitRoot = "/plugins/explicit-after-spawn";
+		expect(options[1]?.extensionRoots?.().explicit).toEqual([explicitRoot]);
 		expect(options[2]).toMatchObject({ enableMCP: false });
 		expect(options[2]?.mcpManager).toBeUndefined();
 		expect(options[3]).toMatchObject({

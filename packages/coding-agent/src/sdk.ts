@@ -53,6 +53,7 @@ import { createAutoresearchExtension } from "./autoresearch";
 import { loadCapability } from "./capability";
 import { type Rule, ruleCapability, setActiveRules } from "./capability/rule";
 import { bucketRules } from "./capability/rule-buckets";
+import type { EffectiveExtensionRoots } from "./capability/types";
 import { shouldEnableAppendOnlyContext } from "./config/append-only-context-mode";
 import { shouldInlineToolDescriptors } from "./config/inline-tool-descriptors-mode";
 import { isAuthenticated, kNoAuth, ModelRegistry } from "./config/model-registry";
@@ -79,7 +80,7 @@ import "./discovery";
 import { createImageUrlServiceFromSettings } from "./blob-broker/service";
 import { wrapStreamFnWithBlobUrlFallback } from "./blob-broker/stream-fallback";
 import { initializeWithSettings } from "./discovery";
-import { withOmpExtensionRootScope } from "./discovery/omp-extension-roots";
+import { setInvocationConfiguredExtensions, withOmpExtensionRootScope } from "./discovery/omp-extension-roots";
 import { disposeAllJuliaKernelSessions, disposeJuliaKernelSessionsByOwner } from "./eval/jl/executor";
 import { disposeVmContextsByOwner } from "./eval/js/context-manager";
 import { disposeAllKernelSessions, disposeKernelSessionsByOwner } from "./eval/py/executor";
@@ -439,6 +440,14 @@ export interface CreateAgentSessionOptions {
 	additionalExtensionPaths?: string[];
 	/** Disable extension discovery (explicit paths still load). */
 	disableExtensionDiscovery?: boolean;
+	/**
+	 * Live extension-root policy inherited by a child session. Keeps recursive
+	 * sub-discovery aligned with the parent while `preloadedExtensionPaths` only
+	 * optimizes extension-module loading.
+	 *
+	 * @internal
+	 */
+	extensionRoots?: () => EffectiveExtensionRoots;
 	/**
 	 * Pre-loaded extensions (skips file discovery and the per-session factory
 	 * call). Used by the CLI when extensions are loaded early to parse custom
@@ -1250,10 +1259,10 @@ export function createAutoLearnCaptureRunner(
  * ```
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
-	const rootMode = options.disableExtensionDiscovery ? "explicit-only" : "merge";
-	return await withOmpExtensionRootScope(options.additionalExtensionPaths ?? [], rootMode, () =>
-		createAgentSessionScoped(options),
-	);
+	const extensionRoots = options.extensionRoots?.();
+	const explicit = extensionRoots?.explicit ?? options.additionalExtensionPaths ?? [];
+	const mode = extensionRoots?.mode ?? (options.disableExtensionDiscovery ? "explicit-only" : "merge");
+	return await withOmpExtensionRootScope(explicit, mode, () => createAgentSessionScoped(options));
 }
 
 async function createAgentSessionScoped(options: CreateAgentSessionOptions): Promise<CreateAgentSessionResult> {
@@ -1268,6 +1277,14 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		options.settingsManager ??
 		logger.time("settings", Settings.init, { cwd, agentDir }));
 	logger.time("initializeWithSettings", initializeWithSettings, settings);
+	// Snapshot this session's effective configured lane onto its invocation scope
+	// so startup sub-discovery sees the same complete policy that post-startup
+	// reloads and recursively spawned children consume.
+	const extensionRoots = options.extensionRoots?.();
+	setInvocationConfiguredExtensions(
+		extensionRoots?.configured ?? settings.get("extensions") ?? [],
+		extensionRoots?.configuredLevel ?? settings.extensionsSourceLevel(),
+	);
 
 	// Pin authStorage to modelRegistry.authStorage: ModelRegistry.getApiKey() routes refresh
 	// failures through that instance, so any divergent storage handed to the bridge / mcpManager
@@ -1901,6 +1918,17 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			if (event.type === "connecting" && event.serverNames.length === 0) return;
 			eventBus.emit(MCP_CONNECTION_STATUS_EVENT_CHANNEL, event);
 		};
+		// Provider, never a stored value: inherited child policy remains linked to
+		// the owning session, while top-level sessions materialize their own live
+		// settings on every discovery call.
+		const buildSessionExtensionRoots =
+			options.extensionRoots ??
+			((): EffectiveExtensionRoots => ({
+				explicit: options.additionalExtensionPaths ?? [],
+				mode: options.disableExtensionDiscovery ? "explicit-only" : "merge",
+				configured: settings.get("extensions") ?? [],
+				configuredLevel: settings.extensionsSourceLevel(),
+			}));
 		const mcpDiscoverOptions = {
 			onStatus: onMCPStatus,
 			enableProjectConfig: settings.get("mcp.enableProjectConfig") ?? true,
@@ -1908,6 +1936,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			filterExa: true,
 			// Filter browser MCP servers when builtin browser tool is active
 			filterBrowser: settings.get("browser.enabled") ?? false,
+			extensionRoots: buildSessionExtensionRoots(),
 		};
 		if (enableMCP && !mcpManager) {
 			if (deferMCPDiscoveryForUI) {
@@ -2087,6 +2116,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// Forward the source-path list (NOT the loaded instances) so subagents
 		// rebuild their own session-scoped extensions.
 		toolSession.extensionPaths = extensionPaths;
+		toolSession.effectiveExtensionRoots = buildSessionExtensionRoots;
 
 		// Load inline extensions from factories
 		if (inlineExtensions.length > 0) {
@@ -3545,6 +3575,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			serviceTierByFamily: initialServiceTierByFamily,
 			sessionManager,
 			settings,
+			additionalExtensionPaths: options.additionalExtensionPaths,
+			extensionRoots: buildSessionExtensionRoots,
+			disableExtensionDiscovery: options.disableExtensionDiscovery,
 			autoApprove: options.autoApprove,
 			scoutAllowedBySpawnPolicy: isScoutSpawnable(undefined, options.spawns ?? "*"),
 			evalKernelOwnerId,

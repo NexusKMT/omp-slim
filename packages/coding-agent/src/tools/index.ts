@@ -4,6 +4,7 @@ import type { FetchImpl, ImageContent, Model, ServiceTierByFamily, ToolChoice } 
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AsyncJobManager } from "../async/job-manager";
 import type { Rule } from "../capability/rule";
+import type { EffectiveExtensionRoots } from "../capability/types";
 import type { PromptTemplate } from "../config/prompt-templates";
 import type { Settings } from "../config/settings";
 import { EditTool } from "../edit";
@@ -197,6 +198,14 @@ export interface ToolSession {
 	 * (`<inline-N>`) are NOT included — those are session-local.
 	 */
 	extensionPaths?: string[];
+	/**
+	 * Session-local extension roots for post-startup sub-discovery: explicit SDK
+	 * roots, discovery mode, and configured `extensions:`. A provider (not a
+	 * stored value) so it is materialized live per discovery call — a runtime
+	 * override or settings reload is reflected, never a construction-time
+	 * snapshot. Keeps the task surface byte-identical to the scoped load.
+	 */
+	effectiveExtensionRoots?(): EffectiveExtensionRoots;
 	/**
 	 * Pre-discovered custom-tool source paths from `.omp/tools/`, `.claude/tools/`,
 	 * plugins, etc. Forwarded to subagents so they skip the FS scan but still

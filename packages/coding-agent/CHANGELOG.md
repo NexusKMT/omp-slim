@@ -63,6 +63,10 @@
 
 - Fixed the composer speculative startup cache ignoring `XDG_CACHE_HOME`
 
+### Fixed
+
+- Fixed extension packages configured via `extensions:` in `.omp/config.yml` not wiring their bundled `skills/`, `hooks/`, `tools/`, `commands/`, `rules/`, `prompts/`, and `.mcp.json` into discovery ([#9768](https://github.com/can1357/oh-my-pi/issues/9768)).
+
 ## [18.0.5] - 2026-08-25
 
 ### Added

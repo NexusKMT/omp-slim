@@ -11,6 +11,7 @@ import type { Api, Model, ServiceTierByFamily, Usage } from "@oh-my-pi/pi-ai";
 import { logger, popLoopPhase, prompt, pushLoopPhase, untilAborted } from "@oh-my-pi/pi-utils";
 import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, AsyncJobManager } from "../async";
 import type { Rule } from "../capability/rule";
+import type { EffectiveExtensionRoots } from "../capability/types";
 import { ModelRegistry } from "../config/model-registry";
 import {
 	formatModelSelectorValue,
@@ -456,6 +457,11 @@ export interface ExecutorOptions {
 	workspaceTree?: WorkspaceTree;
 	/** Parent-discovered rules, forwarded to skip rule discovery in the subagent. */
 	rules?: Rule[];
+	/**
+	 * Parent session's live extension-root policy. Forwarded separately from
+	 * `preloadedExtensionPaths`, which only controls extension module loading.
+	 */
+	extensionRoots?: () => EffectiveExtensionRoots;
 	/**
 	 * Parent's discovered extension source paths. Forwarded to skip the
 	 * extension FS scan in the subagent; the subagent then re-binds each
@@ -3148,6 +3154,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				promptTemplates: options.promptTemplates,
 				workspaceTree: options.workspaceTree,
 				rules: options.rules,
+				extensionRoots: options.extensionRoots,
 				preloadedExtensionPaths: restrictToolNames ? [] : options.preloadedExtensionPaths,
 				preloadedCustomToolPaths: restrictToolNames ? [] : options.preloadedCustomToolPaths,
 				systemPrompt: defaultPrompt => {

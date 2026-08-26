@@ -113,7 +113,7 @@ describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("forwards rules, preloadedExtensionPaths, and preloadedCustomToolPaths to createAgentSession", async () => {
+	it("forwards rules, extension-root policy, and preloaded source paths to createAgentSession", async () => {
 		const session = yieldEmittingSession();
 		const spy = vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));
 
@@ -122,10 +122,17 @@ describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 		const preloadedCustomToolPaths: ToolPathWithSource[] = [
 			{ path: "tools/x.ts", source: { provider: "config", providerName: "Config", level: "project" } },
 		];
+		const extensionRoots = () => ({
+			explicit: ["/abs/parent/explicit-extension"],
+			mode: "explicit-only" as const,
+			configured: ["/abs/parent/configured-extension"],
+			configuredLevel: "project" as const,
+		});
 
 		const result = await runSubprocess({
 			...baseOptions,
 			rules,
+			extensionRoots,
 			preloadedExtensionPaths,
 			preloadedCustomToolPaths,
 		});
@@ -135,6 +142,7 @@ describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 		const forwarded = spy.mock.calls[0]?.[0];
 		// Identity, not equality: passing a clone would defeat the perf fix.
 		expect(forwarded?.rules).toBe(rules);
+		expect(forwarded?.extensionRoots).toBe(extensionRoots);
 		expect(forwarded?.preloadedExtensionPaths).toBe(preloadedExtensionPaths);
 		expect(forwarded?.preloadedCustomToolPaths).toBe(preloadedCustomToolPaths);
 	});
