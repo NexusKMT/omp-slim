@@ -1408,7 +1408,6 @@ describe("auth-gateway OpenAI Responses multimodal tool outputs", () => {
 	});
 });
 describe("auth-gateway OpenAI Responses computer option bridge", () => {
-
 	it("preserves the native tool, forced choice, and include in stream options", async () => {
 		registerMockApi();
 		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "gw-computer-options-"));

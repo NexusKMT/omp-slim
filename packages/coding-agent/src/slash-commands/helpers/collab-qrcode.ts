@@ -1,4 +1,4 @@
-import { Ellipsis, type Component, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
+import { type Component, Ellipsis, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { AnimationFrame, TranscriptPresentationTarget } from "../../modes/components/transcript-container";
 import { fgOrPlain } from "../../modes/theme/theme";
 import { urlHyperlinkAlways } from "../../tui";
@@ -10,9 +10,7 @@ export function collabBrowserLink(webLink: string, label?: string): string {
 	const display = fgOrPlain("accent", `\x1b[4m${label ?? schemeLess}\x1b[24m`);
 	const linked = urlHyperlinkAlways(webLink, display);
 	// Without OSC-8 support, keep the literal URL at the visible prefix.
-	return label !== undefined && linked === display
-		? fgOrPlain("accent", `\x1b[4m${schemeLess}\x1b[24m`)
-		: linked;
+	return label !== undefined && linked === display ? fgOrPlain("accent", `\x1b[4m${schemeLess}\x1b[24m`) : linked;
 }
 
 /**
