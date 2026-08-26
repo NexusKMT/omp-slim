@@ -96,12 +96,15 @@ export class BashRunner {
 			// spawn env — NOT from live process.env. Diffing against process.env
 			// cancels out any variable an extension both mirrors into process.env
 			// and injects via its hook (e.g. the secretsd session token file), so
-			// hand the hook the env the child will actually receive.
+			// hand the hook the env the child will actually receive. Pass a copy:
+			// this.#host.settings.getShellConfig().env is a cached, shared object,
+			// and a legacy hook that mutates its context.env in place (a supported
+			// pattern) would otherwise poison that cache for every later command.
 			const shellEnv =
 				options?.useUserShell === true
 					? extensionRunner
 							?.getRegisteredTool("bash")
-							?.definition.shellEnv?.({ command, cwd, env: this.#host.settings.getShellConfig().env })
+							?.definition.shellEnv?.({ command, cwd, env: { ...this.#host.settings.getShellConfig().env } })
 					: undefined;
 
 			const abortController = new AbortController();

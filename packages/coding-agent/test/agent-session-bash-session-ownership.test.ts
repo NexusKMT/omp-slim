@@ -197,6 +197,48 @@ describe("AgentSession bash session ownership", () => {
 		}
 	});
 
+	it("does not poison the cached shell env when a hook mutates its context in place", async () => {
+		// Regression: `Settings#getShellConfig().env` is a cached, shared object
+		// (procmgr's module-level cache). A legacy hook that mutates its
+		// `context.env` in place — a supported pattern, see "forwards changes
+		// when the hook mutates its environment in place" below — must not be
+		// handed that shared object directly: doing so writes the injected
+		// variable straight into the cache, poisoning the diff baseline for
+		// every later command. On the next call the hook injects the same
+		// value again, it now looks unchanged against the poisoned baseline,
+		// and the adapter silently drops it from the forwarded env.
+		const shell = process.platform === "win32" ? (Bun.env.ComSpec ?? "cmd.exe") : "/bin/sh";
+		Settings.instance.set("shellPath", shell);
+		const cachedShellConfig = {
+			shell,
+			args: process.platform === "win32" ? ["/c"] : ["-c"],
+			env: { PATH: Bun.env.PATH ?? "", HOME: tempDir.path(), SHELL: shell },
+			prefix: undefined,
+		};
+		vi.spyOn(Settings.prototype, "getShellConfig").mockReturnValue(cachedShellConfig);
+		const spawnHook = vi.fn(context => {
+			context.env.OMP_INJECTED_TOKEN = "injected-value";
+			return context;
+		});
+		const definition = createBashTool(tempDir.path(), { spawnHook });
+		const extensionRunner = {
+			hasHandlers: vi.fn(() => false),
+			getRegisteredTool: vi.fn((name: string) => (name === "bash" ? { definition } : undefined)),
+			emit: vi.fn().mockResolvedValue(undefined),
+			emitBeforeAgentStart: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ExtensionRunner;
+		createSession(undefined, extensionRunner);
+		const executeBashSpy = vi.spyOn(bashExecutor, "executeBash").mockResolvedValue(bashResult);
+
+		await session.executeBash("true", undefined, { useUserShell: true });
+		await session.executeBash("true", undefined, { useUserShell: true });
+
+		expect(executeBashSpy).toHaveBeenCalledTimes(2);
+		expect(executeBashSpy.mock.calls[0]?.[1]?.env).toEqual({ OMP_INJECTED_TOKEN: "injected-value" });
+		expect(executeBashSpy.mock.calls[1]?.[1]?.env).toEqual({ OMP_INJECTED_TOKEN: "injected-value" });
+		expect(cachedShellConfig.env).not.toHaveProperty("OMP_INJECTED_TOKEN");
+	});
+
 	it("does not run the shell environment hook when a user_bash handler replaces the result", async () => {
 		const spawnHook = vi.fn(() => {
 			throw new Error("shell env hook must not run when user_bash supplies a replacement result");
