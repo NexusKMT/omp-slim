@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fixed unfinished live viewport rows entering tmux pane history and duplicating streamed output ([#9780](https://github.com/can1357/oh-my-pi/issues/9780)).
 - Fixed image previews displaying as garbled characters in Paseo terminals.
 - Fixed graceful shutdown so finalized output is correctly retired before handing control back to the shell.
 - Fixed terminal resizing from duplicating committed history in native scrollback.
