@@ -234,6 +234,7 @@ if (!process.argv.includes(socketClosedChildFlag)) {
 		).toBe(false);
 		const other = Object.assign(new Error("Socket is closed"), { code: "EPIPE" });
 		expect(postmortem.isInternalSocketClosedError(other)).toBe(false);
+		expect(postmortem.isInternalSocketClosedError("not an error")).toBe(false);
 	});
 	});
 }

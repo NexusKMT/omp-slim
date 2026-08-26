@@ -158,8 +158,8 @@ export function isIpcSendEpipe(err: Error): boolean {
  * Only frameless internal stacks qualify: an `ERR_SOCKET_CLOSED` raised
  * through application code keeps the fatal path.
  */
-export function isInternalSocketClosedError(err: Error): boolean {
-	if (!("code" in err) || err.code !== "ERR_SOCKET_CLOSED") return false;
+export function isInternalSocketClosedError(err: unknown): boolean {
+	if (!(err instanceof Error) || !("code" in err) || err.code !== "ERR_SOCKET_CLOSED") return false;
 	const frames = (err.stack ?? "").split("\n").slice(1);
 	if (frames.length === 0) return false;
 	let hasNetFrame = false;
