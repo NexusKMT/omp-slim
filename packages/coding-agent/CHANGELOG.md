@@ -68,6 +68,9 @@
 - Kept completed assistant replies visible when viewport pressure prevents older active content from being retired.
 - Accelerated SHA-2 and SHA-3 checksum builtins on supported ARM64 hardware.
 - Fixed joined collaboration guests becoming inconsistent with the host after host-side compaction.
+### Fixed
+
+- Handle denied working-directory changes without crashing resume, move, or startup flows.
 
 ## [18.0.6] - 2026-08-26
 

@@ -773,6 +773,10 @@ async function switchToResumedProject(
 			await sessionManager.moveTo(launchCwd);
 			clearPluginRootsAndCaches();
 			await preloadPluginRoots(os.homedir(), launchCwd);
+			// Settings.#cwd was already assigned the destination; re-scope it
+			// back so path-derived values and project saves target the launch
+			// project, not the failed resume target.
+			await activeSettings.reloadForCwd(launchCwd);
 		} catch (rollbackError) {
 			throw new SessionResolutionError(
 				`Could not switch to resumed project ${resumedCwd} (${error instanceof Error ? error.message : String(error)}); failed to restore launch directory ${launchCwd}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,

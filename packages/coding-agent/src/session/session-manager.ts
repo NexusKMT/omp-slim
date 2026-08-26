@@ -1352,10 +1352,13 @@ export class SessionManager {
 	/**
 	 * Undo a {@link moveTo} using a {@link captureState} snapshot: rename the
 	 * session and artifacts back into the captured bucket, then restore the
-	 * captured metadata (cwd, header, additionalDirectories). Rollbacks must
-	 * not re-enter forward-move hooks, so this bypasses AgentSession entirely.
-	 * If the rename-back itself fails, in-memory state is still restored and
-	 * the error names where the session file actually lives.
+	 * captured metadata (cwd, header, additionalDirectories). The captured
+	 * header is persisted after relocation so a fresh open of the source
+	 * session sees the pre-move metadata, including workspace roots the move
+	 * filtered out. Rollbacks must not re-enter forward-move hooks, so this
+	 * bypasses AgentSession entirely. If the rename-back itself fails,
+	 * in-memory state is still restored and the error names where the session
+	 * file actually lives.
 	 */
 	async rollbackMove(snapshot: SessionManagerStateSnapshot): Promise<void> {
 		try {
@@ -1368,8 +1371,15 @@ export class SessionManager {
 			);
 		}
 		this.restoreState(snapshot);
+		// The inverse moveTo already rewrote the source file with the
+		// target-filtered header. Persist the captured one so disk and memory
+		// agree after a fresh open.
+		if (this.#persist && this.#sessionFile) {
+			this.#forceFileCreation = true;
+			this.#rewriteRequired = true;
+			await this.#rewriteAtomically();
+		}
 	}
-
 	/** Switch to a different session file (resume / branch). */
 	async setSessionFile(sessionFile: string): Promise<void> {
 		await this.#setSessionFile(sessionFile);

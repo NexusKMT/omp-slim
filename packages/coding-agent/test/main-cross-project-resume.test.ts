@@ -210,43 +210,6 @@ describe("runRootCommand — cross-project --resume", () => {
 		await fsp.rm(root, { recursive: true, force: true });
 	});
 
-	it("rolls back the whole transition when rescoping fails after chdir", async () => {
-		const match = buildGlobalMatch(resumedProject);
-		vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(match);
-		const settings = Settings.isolated({ "marketplace.autoUpdate": "off" });
-		const reloadForCwd = vi
-			.spyOn(settings, "reloadForCwd")
-			.mockRejectedValue(new Error("destination config unreadable"));
-		const authStorage = await AuthStorage.create(path.join(root, "auth.db"));
-		const parsed = parseArgs(["--resume", "019e84ed", "--print"]);
-		parsed.noExtensions = true;
-		parsed.noSkills = true;
-		parsed.noRules = true;
-		parsed.noTools = true;
-		parsed.noLsp = true;
-		let resumedManager: SessionManager | undefined;
-
-		try {
-			await runRootCommand(parsed, ["--resume", "019e84ed", "--print"], {
-				discoverAuthStorage: async () => authStorage,
-				settings,
-				createAgentSession: async options => {
-					if (!options) throw new Error("Expected session options");
-					resumedManager = options.sessionManager;
-					throw new Error("stop after session options");
-				},
-			});
-		} catch (error) {
-			if (!(error instanceof Error) || error.message !== "stop after session options") throw error;
-		} finally {
-			reloadForCwd.mockRestore();
-			authStorage.close();
-			await resumedManager?.close();
-		}
-
-		expect(getProjectDir()).toBe(launchProject);
-		expect(resumedManager?.getCwd()).toBe(launchProject);
-	});
 	it("uses the destination cwd and preloads its plugin roots before session creation", async () => {
 		const match = buildGlobalMatch(resumedProject);
 		vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(match);
@@ -302,6 +265,51 @@ describe("runRootCommand — cross-project --resume", () => {
 		expect(sessionOptionsCwd).toBe(resumedProject);
 		expect(preloadedDestinationAtCreation).toBe(true);
 	}, 15_000);
+
+	it("re-scopes Settings back to the launch project when destination rescope fails", async () => {
+		const match = buildGlobalMatch(resumedProject);
+		vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(match);
+		const settings = Settings.isolated({ "marketplace.autoUpdate": "off" });
+		const reloadForCwd = vi.spyOn(settings, "reloadForCwd").mockImplementation(async cwd => {
+			if (normalizePathForComparison(cwd) === normalizePathForComparison(resumedProject)) {
+				throw new Error("destination config unreadable");
+			}
+		});
+		vi.spyOn(pluginHelpers, "preloadPluginRoots").mockResolvedValue(undefined);
+		const authStorage = await AuthStorage.create(path.join(root, "auth.db"));
+		const parsed = parseArgs(["--resume", "019e84ed", "--print"]);
+		parsed.noExtensions = true;
+		parsed.noSkills = true;
+		parsed.noRules = true;
+		parsed.noTools = true;
+		parsed.noLsp = true;
+		let resumedManager: SessionManager | undefined;
+
+		try {
+			await runRootCommand(parsed, ["--resume", "019e84ed", "--print"], {
+				discoverAuthStorage: async () => authStorage,
+				settings,
+				createAgentSession: async options => {
+					if (!options) throw new Error("Expected session options");
+					resumedManager = options.sessionManager;
+					throw new Error("stop after session options");
+				},
+			});
+		} catch (error) {
+			if (!(error instanceof Error) || error.message !== "stop after session options") throw error;
+		} finally {
+			reloadForCwd.mockRestore();
+			authStorage.close();
+			await resumedManager?.close();
+		}
+
+		// The destination read rejected, so the fallback must re-scope Settings
+		// back to the launch project; otherwise path-derived values and saves
+		// would still target the failed resume target.
+		expect(getProjectDir()).toBe(launchProject);
+		expect(resumedManager?.getCwd()).toBe(launchProject);
+		expect(settings.getCwd()).toBe(launchProject);
+	});
 
 	it("rolls back the session manager when the resumed cwd is denied", async () => {
 		const match = buildGlobalMatch(resumedProject);

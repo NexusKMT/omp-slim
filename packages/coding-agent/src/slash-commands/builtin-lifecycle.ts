@@ -575,16 +575,6 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 				return usage(`Move failed: ${errorMessage(err)}`, runtime);
 			}
 			try {
-				setProjectDir(resolvedPath);
-			} catch (err) {
-				try {
-					await runtime.sessionManager.rollbackMove(previousState);
-				} catch (rollbackError) {
-					return usage(`Move failed and rollback failed: ${errorMessage(rollbackError)}`, runtime);
-				}
-				return usage(`Move failed: ${errorMessage(err)}`, runtime);
-			}
-			try {
 				await runtime.settings.reloadForCwd(resolvedPath);
 				applyProviderGlobalsFromSettings(runtime.settings);
 				// Reload plugin/capability caches so the next prompt sees commands and
@@ -592,6 +582,12 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 				await runtime.reloadPlugins();
 			} catch (err) {
 				try {
+					// Undo the whole transition: the process cwd and Settings scope
+					// return to the source project alongside the session relocation.
+					setProjectDir(runtime.cwd);
+					await runtime.settings.reloadForCwd(runtime.cwd);
+					applyProviderGlobalsFromSettings(runtime.settings);
+					await runtime.reloadPlugins();
 					await runtime.sessionManager.rollbackMove(previousState);
 				} catch (rollbackError) {
 					return usage(`Move failed and rollback failed: ${errorMessage(rollbackError)}`, runtime);
