@@ -4,23 +4,20 @@
 
 ### Added
 
-- Automatically generate commit summaries for whitespace-only changes without LLM latency
-- The git TUI sidebar's Unstaged/Staged section headers now fold on click, Enter, or ←/→, hiding the section's file rows; space or `s`/`u` on a header stages/unstages the whole section.
-- Automatically correct grammar and tense in generated commit summaries
-- Exclude redundant project-wide names from generated commit scopes
-- The git TUI can now generate cached conventional commit messages using llm-git's fast and map-reduce workflow.
-- Long streaming thinking blocks now retire their completed paragraphs into terminal scrollback mid-turn instead of staying clipped to the viewport until the turn ends.
+- Added fast, cached conventional commit message generation to the git TUI and `omp commit --legacy`, including automatic handling of whitespace-only changes, clearer commit scopes, and improved grammar and tense in generated summaries.
+- The git TUI sidebar now supports collapsing and expanding the Unstaged and Staged sections, with keyboard shortcuts to stage or unstage an entire section.
+- Long streaming thinking and reasoning output now continues into terminal scrollback during a turn instead of remaining clipped to the viewport.
 
 ### Changed
 
-- `omp commit --legacy` now uses the same conventional commit generator as the git TUI.
-- A drifting append-only transcript publication (e.g. a mid-stream theme change) now freezes further mid-stream emission for that block instead of failing the render.
-- The git TUI sidebar now separates new files from tracked changes only in the unstaged section; staged and commit file lists show one list with status letters.
+- `omp commit --legacy` now uses the same conventional commit message generation as the git TUI.
+- The git TUI sidebar now groups new files separately from tracked changes in the Unstaged section, while Staged and commit file lists use a unified status-based view.
+- Improved resilience when streaming output changes during rendering, preventing incomplete blocks from causing further display updates to fail.
 
 ### Fixed
 
-- Failed commit-message generation in the git TUI now keeps a single-line error in the status bar instead of silently reverting to idle after a few seconds.
-- Generating a commit message no longer keeps `omp git` alive after quitting; broker-backed auth storage is now closed when generation finishes.
+- Commit-message generation errors in the git TUI now remain visible in the status bar instead of disappearing and returning to an idle state.
+- Quitting `omp git` during commit-message generation now exits cleanly without leaving the process running.
 
 ## [18.0.5] - 2026-08-25
 

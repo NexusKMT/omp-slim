@@ -1,9 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Fixed
 
-- TypeScript/TSX now highlight with dedicated grammars instead of the JavaScript grammar, which mis-parsed type annotations and could paint everything after a template literal as a string.
+- Improved TypeScript and TSX syntax highlighting, including correct handling of type annotations and template literals.
 
 ## [18.0.5] - 2026-08-25
 

@@ -4,11 +4,7 @@
 
 ### Added
 
-- Added conventional commit generation pipeline
-- Added local caching for commit inference results
-- Added map-reduce processing to improve analysis of large diffs
-- Added support for new commit types including deps, security, config, ux, and infra
-- Added configuration settings for commit caching and map-reduce behavior
+- Added conventional commit generation with support for dependency, security, configuration, UX, and infrastructure commit types, plus configurable caching and large-diff analysis behavior.
 
 ## [18.0.5] - 2026-08-25
 
