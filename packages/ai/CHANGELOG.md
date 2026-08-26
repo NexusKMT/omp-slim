@@ -44,6 +44,10 @@
 - Added safe retries for transient mid-stream socket closures across OpenAI Responses, Chat Completions, Azure OpenAI Responses, and Codex SSE when no replay-unsafe output has been emitted.
 - Fixed usage and cost reporting for OpenAI-compatible gateways backed by Vertex AI or Gemini by recognizing cached prompt tokens reported through `cachedContentTokenCount`.
 
+### Fixed
+
+- Fixed Cursor `composer-2.5` selections silently serving the Fast variant by pinning the Standard tier with an explicit `{ id: "fast", value: "false" }` request parameter ([#9012](https://github.com/can1357/oh-my-pi/issues/9012)).
+
 ## [18.0.4] - 2026-08-24
 
 ### Fixed
