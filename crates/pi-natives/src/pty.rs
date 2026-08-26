@@ -777,6 +777,7 @@ fn await_pty_output_drain(
 	loop {
 		if reader_thread.is_finished() {
 			drop(queued);
+			// Unbounded by design (#7421, same as shell.rs `drain_handle.await`).
 			let _ = pump_done_rx.recv();
 			let _ = reader_thread.join();
 			return;
@@ -1025,6 +1026,22 @@ mod reader_queue_tests {
 		);
 		assert!(start.elapsed() >= POST_CANCEL_DRAIN_TIMEOUT);
 		assert!(stopped.load(Ordering::Acquire), "cancel must stop the pump");
+	}
+
+	#[test]
+	fn drain_cancel_returns_once_pump_observes_stop() {
+		let (pump_tx, pump_rx) = flume::bounded::<()>(1);
+		let reader = std::thread::spawn(|| std::thread::park());
+		let (queued, _) = flume::bounded::<ReaderEvent>(READER_QUEUE_CHUNKS);
+		let in_js = AtomicBool::new(true);
+		let start = Instant::now();
+		await_pty_output_drain(pump_rx, reader, queued, &in_js, true, move || {
+			drop(pump_tx);
+		});
+		assert!(
+			start.elapsed() < POST_CANCEL_DRAIN_TIMEOUT,
+			"after stop disconnects the pump, cancel must not sit out the full drain timeout",
+		);
 	}
 }
 
