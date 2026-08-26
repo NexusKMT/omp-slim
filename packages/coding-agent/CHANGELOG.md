@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.7] - 2026-08-26
+
 ### Added
 
 - Added `omp usage clients` to report per-client token usage recorded by the auth broker, including the machine and application responsible for usage by provider. Supports `--days` and `--json` output.
@@ -68,6 +70,7 @@
 - Kept completed assistant replies visible when viewport pressure prevents older active content from being retired.
 - Accelerated SHA-2 and SHA-3 checksum builtins on supported ARM64 hardware.
 - Fixed joined collaboration guests becoming inconsistent with the host after host-side compaction.
+- Fixed `hub list` and child peer rosters counting parked agents from stale root sessions; the persisted roster now scopes to the current root, retries transient filesystem faults, and renders live rows through the production subagent prompt template with a truthful omitted count.
 
 ## [18.0.6] - 2026-08-26
 
@@ -88,7 +91,6 @@
 - Commit-message generation errors in the git TUI now remain visible in the status bar instead of disappearing and returning to an idle state.
 - Fixed `omp update` leaving standalone Windows binaries on the old version when stale Bun launcher metadata was present, and preserved launchers installed by a newer concurrent update during binary repair ([#9806](https://github.com/can1357/oh-my-pi/issues/9806)).
 - Quitting `omp git` during commit-message generation now exits cleanly without leaving the process running.
-- Fixed `hub list` and child peer rosters counting parked agents from stale root sessions; the persisted roster now scopes to the current root, retries transient filesystem faults, and renders live rows through the production subagent prompt template with a truthful omitted count.
 
 ## [18.0.5] - 2026-08-25
 
