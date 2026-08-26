@@ -606,24 +606,26 @@ function parseOpenAICompletionsErrorStatus(value: unknown): number | undefined {
 function createOpenAICompletionsStreamError(chunk: unknown, provider: string): Error | undefined {
 	if (!chunk || typeof chunk !== "object") return undefined;
 	const error = Reflect.get(chunk, "error");
-	if (!error || typeof error !== "object") return undefined;
+	const flatMessage = Reflect.get(chunk, "message");
+	const structuredError = error !== null && typeof error === "object";
+	if (!structuredError && typeof error !== "string" && typeof flatMessage !== "string") return undefined;
 
-	const messageValue = Reflect.get(error, "message");
+	const parsed = AIError.OpenAIHttpError.parseEnvelope(chunk, undefined);
+	const detail = parsed.detail ?? "Provider returned an in-band OpenAI completions stream error";
+	if (!structuredError) {
+		return new AIError.ProviderResponseError(detail, { provider, kind: "runtime" });
+	}
+
 	const typeValue = Reflect.get(error, "type");
 	const codeValue = Reflect.get(error, "code");
 	const type = typeof typeValue === "string" ? typeValue.trim() : undefined;
 	const status =
 		parseOpenAICompletionsErrorStatus(codeValue) ??
 		(type ? OPENAI_COMPLETIONS_ERROR_STATUS_BY_TYPE[type.toUpperCase()] : undefined);
-	const detail =
-		typeof messageValue === "string" && messageValue.length > 0
-			? messageValue
-			: "Provider returned an in-band OpenAI completions stream error";
 	if (status === undefined) {
 		return new AIError.ProviderResponseError(detail, { provider, kind: "runtime" });
 	}
-	const code = type || (typeof codeValue === "string" ? codeValue : undefined);
-	return new AIError.ProviderHttpError(`${status} ${detail}`, status, { code });
+	return new AIError.ProviderHttpError(`${status} ${detail}`, status, { code: parsed.code });
 }
 
 const streamOpenAICompletionsOnce = (

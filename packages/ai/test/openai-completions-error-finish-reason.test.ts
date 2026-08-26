@@ -133,6 +133,30 @@ describe("in-band SSE error envelope", () => {
 		expect(result.errorMessage).toContain("The request queue is full.");
 	}, 10_000);
 
+	it("surfaces a flat error string carried inside a successful HTTP stream", async () => {
+		const fetchMock = createSseFetch([{ error: "rate limit exceeded" }, "[DONE]"]);
+
+		const result = await streamOpenAICompletions(completionsModel, baseContext(), {
+			apiKey: "test-key",
+			fetch: fetchMock,
+		}).result();
+
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toContain("rate limit exceeded");
+	}, 10_000);
+
+	it("surfaces a flat message-only error carried inside a successful HTTP stream", async () => {
+		const fetchMock = createSseFetch([{ message: "provider temporarily unavailable" }, "[DONE]"]);
+
+		const result = await streamOpenAICompletions(completionsModel, baseContext(), {
+			apiKey: "test-key",
+			fetch: fetchMock,
+		}).result();
+
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toContain("provider temporarily unavailable");
+	}, 10_000);
+
 	it("does not replay after content precedes an in-band error", async () => {
 		let attempts = 0;
 		const baseFetch = createSseFetch([
