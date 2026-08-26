@@ -343,6 +343,13 @@ if (isMainThread) {
 				logger.warn("Ignoring expected cleanup exception", { err });
 				return;
 			}
+			// Bun can surface a worker IPC send race through uncaughtException
+			// instead of unhandledRejection. Apply the same optional-worker
+			// containment in either global error channel.
+			if (isIpcSendEpipe(err)) {
+				logger.warn("Ignoring EPIPE from worker IPC send; optional subsystem will self-recover", { err });
+				return;
+			}
 			// A malformed advanced-serialization frame from a worker subprocess
 			// surfaces here as a process-level uncaughtException (oven-sh/bun#37287)
 			// rather than in the channel's ipc() callback, and Bun gives no way to

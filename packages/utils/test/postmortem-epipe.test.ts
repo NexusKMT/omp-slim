@@ -4,8 +4,27 @@ import { postmortem } from "@oh-my-pi/pi-utils";
 
 const childFlag = "--stdio-epipe-child";
 const raceChildFlag = "--stdio-epipe-race-child";
+const uncaughtIpcChildFlag = "--uncaught-ipc-epipe-child";
+const unrelatedUncaughtChildFlag = "--unrelated-uncaught-child";
+const unrelatedUncaughtChildFlagIndex = process.argv.indexOf(unrelatedUncaughtChildFlag);
+const uncaughtIpcChildFlagIndex = process.argv.indexOf(uncaughtIpcChildFlag);
 const childFlagIndex = process.argv.indexOf(childFlag);
-if (childFlagIndex >= 0) {
+if (unrelatedUncaughtChildFlagIndex >= 0) {
+	setImmediate(() => {
+		throw new Error("unrelated fatal exception");
+	});
+	await Bun.sleep(200);
+	process.exit(0);
+} else if (uncaughtIpcChildFlagIndex >= 0) {
+	const marker = process.argv[uncaughtIpcChildFlagIndex + 1];
+	if (!marker) throw new Error("Missing survival marker path");
+	setImmediate(() => {
+		throw Object.assign(new Error("broken pipe"), { code: "EPIPE", syscall: "send" });
+	});
+	await Bun.sleep(100);
+	await Bun.write(marker, "survived uncaught worker IPC EPIPE");
+	process.exit(0);
+} else if (childFlagIndex >= 0) {
 	const marker = process.argv[childFlagIndex + 1];
 	if (!marker) throw new Error("Missing cleanup marker path");
 	postmortem.registerStdioDisconnectHandling();
@@ -56,6 +75,43 @@ describe("postmortem broken-pipe handling", () => {
 		expect(postmortem.classifyBrokenPipe(makeErr({ code: "ENOENT", syscall: "send" }))).toBeUndefined();
 		expect(postmortem.classifyBrokenPipe(new Error("boom"))).toBeUndefined();
 		expect(postmortem.classifyBrokenPipe(makeErr({ code: undefined, syscall: undefined }))).toBeUndefined();
+	});
+
+	it("keeps the process alive when Bun surfaces worker IPC EPIPE as an uncaught exception", async () => {
+		const marker = `/tmp/omp-postmortem-uncaught-ipc-${process.pid}-${Date.now()}`;
+		const child = Bun.spawn([process.execPath, "run", import.meta.path, uncaughtIpcChildFlag, marker], {
+			stdin: "ignore",
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		try {
+			const [exitCode, stdout, stderr] = await Promise.all([
+				child.exited,
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+			]);
+			expect(exitCode, stderr).toBe(0);
+			expect(stdout).toBe("");
+			expect(stderr).toBe("");
+			expect(await Bun.file(marker).text()).toBe("survived uncaught worker IPC EPIPE");
+		} finally {
+			child.kill();
+			await child.exited;
+			await Bun.file(marker)
+				.delete()
+				.catch(() => {});
+		}
+	});
+
+	it("keeps unrelated uncaught exceptions fatal", async () => {
+		const child = Bun.spawn([process.execPath, "run", import.meta.path, unrelatedUncaughtChildFlag], {
+			stdin: "ignore",
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+		expect(exitCode).toBe(1);
+		expect(stderr).toContain("[Uncaught Exception] Error: unrelated fatal exception");
 	});
 
 	it("awaits cleanup and exits successfully when a registered stdio peer disconnects", async () => {
