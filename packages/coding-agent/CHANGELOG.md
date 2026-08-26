@@ -3,10 +3,12 @@
 ## [Unreleased]
 ### Added
 
+- The git TUI can now generate cached conventional commit messages using llm-git's fast and map-reduce workflow.
 - Long streaming thinking blocks now retire their completed paragraphs into terminal scrollback mid-turn instead of staying clipped to the viewport until the turn ends.
 
 ### Changed
 
+- `omp commit --legacy` now uses the same conventional commit generator as the git TUI.
 - A drifting append-only transcript publication (e.g. a mid-stream theme change) now freezes further mid-stream emission for that block instead of failing the render.
 - The git TUI sidebar now separates new files from tracked changes only in the unstaged section; staged and commit file lists show one list with status letters.
 
