@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `RequestError.sessionBusy(message, data)` for the ACP session-busy application error (`-32003`) on the shared JSON-RPC transport.
+
 ## [18.0.6] - 2026-08-26
 
 ### Added
