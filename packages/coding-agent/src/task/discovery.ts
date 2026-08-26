@@ -67,11 +67,13 @@ async function loadAgentsFromDir(dir: string, source: AgentSource): Promise<Agen
  * @param cwd - Current working directory for project agent discovery
  * @param home - Home directory for user and marketplace discovery
  * @param configuredExtensionPaths - Effective `extensions` setting, including runtime overrides
+ * @param extensionRootMode - Discovery mode paired with `configuredExtensionPaths`
  */
 export async function discoverAgents(
 	cwd: string,
 	home: string = os.homedir(),
 	configuredExtensionPaths?: readonly string[],
+	extensionRootMode?: "merge" | "explicit-only",
 ): Promise<DiscoveryResult> {
 	const resolvedCwd = path.resolve(cwd);
 
@@ -104,6 +106,7 @@ export async function discoverAgents(
 				home,
 				repoRoot: null,
 				configuredExtensionPaths,
+				extensionRootMode,
 			})
 		: [];
 	for (const root of extensionRoots) {

@@ -46,6 +46,8 @@ export interface SessionToolsHost {
 	settings: Settings;
 	/** Effective extension roots (explicit SDK paths + live `extensions:`) for post-startup reloads. */
 	configuredExtensionPaths(): readonly string[];
+	/** Discovery mode paired with {@link configuredExtensionPaths}. */
+	extensionRootMode(): "merge" | "explicit-only";
 	modelRegistry: ModelRegistry;
 	extensionRunner(): ExtensionRunner | undefined;
 	clientBridge(): ClientBridge | undefined;
@@ -1186,6 +1188,7 @@ export class SessionTools {
 				cwd: this.#host.sessionManager.getCwd(),
 				disabledExtensions: this.#host.settings.get("disabledExtensions") ?? [],
 				configuredExtensionPaths: this.#host.configuredExtensionPaths(),
+				extensionRootMode: this.#host.extensionRootMode(),
 			});
 			this.#skills = discovered.skills;
 			this.#skillWarnings = discovered.warnings;

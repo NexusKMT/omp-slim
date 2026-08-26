@@ -126,6 +126,8 @@ export interface LoadSkillsOptions extends SkillsSettings {
 	 * construction-time invocation scope.
 	 */
 	configuredExtensionPaths?: readonly string[];
+	/** Discovery mode paired with {@link configuredExtensionPaths}. */
+	extensionRootMode?: "merge" | "explicit-only";
 }
 
 /**
@@ -148,6 +150,7 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 		includeSkills = [],
 		disabledExtensions = [],
 		configuredExtensionPaths,
+		extensionRootMode,
 	} = options;
 
 	// Early return if skills are disabled
@@ -186,6 +189,7 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 		cwd,
 		disabledExtensions,
 		configuredExtensionPaths,
+		extensionRootMode,
 	});
 
 	const skillMap = new Map<string, Skill>();

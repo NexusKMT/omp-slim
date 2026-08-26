@@ -501,6 +501,16 @@ export class AgentSession {
 		return explicit.length > 0 ? [...explicit, ...configured] : configured;
 	}
 
+	/**
+	 * Discovery mode paired with {@link configuredExtensionPaths}. A
+	 * `disableExtensionDiscovery` session stays `explicit-only` across
+	 * post-startup reloads so refreshes never re-merge ambient or installed
+	 * roots the caller opted out of.
+	 */
+	get extensionRootMode(): "merge" | "explicit-only" {
+		return this.#disableExtensionDiscovery ? "explicit-only" : "merge";
+	}
+
 	#powerAssertion: MacOSPowerAssertion | undefined;
 
 	readonly configWarnings: string[] = [];
@@ -1339,6 +1349,7 @@ export class AgentSession {
 			sessionManager: this.sessionManager,
 			settings: this.settings,
 			configuredExtensionPaths: () => this.configuredExtensionPaths,
+			extensionRootMode: () => this.extensionRootMode,
 			modelRegistry: this.#modelRegistry,
 			extensionRunner: () => this.#extensionRunner,
 			clientBridge: () => this.#clientBridge,

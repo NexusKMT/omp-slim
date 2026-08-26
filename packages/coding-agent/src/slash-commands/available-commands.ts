@@ -25,6 +25,7 @@ export interface AvailableCommandsSession {
 	readonly skills: ReadonlyArray<Skill>;
 	readonly skillsSettings?: SkillsSettings;
 	readonly configuredExtensionPaths?: readonly string[];
+	readonly extensionRootMode?: "merge" | "explicit-only";
 	setSlashCommands(slashCommands: FileSlashCommand[]): void;
 	sessionManager: { getCwd(): string };
 }
@@ -32,7 +33,11 @@ export interface AvailableCommandsSession {
 export async function buildAvailableSlashCommands(
 	session: AvailableCommandsSession,
 	loadFileCommands: (cwd: string) => Promise<FileSlashCommand[]> = cwd =>
-		loadSlashCommands({ cwd, configuredExtensionPaths: session.configuredExtensionPaths }),
+		loadSlashCommands({
+			cwd,
+			configuredExtensionPaths: session.configuredExtensionPaths,
+			extensionRootMode: session.extensionRootMode,
+		}),
 ): Promise<InternalAvailableSlashCommand[]> {
 	const commands: InternalAvailableSlashCommand[] = [];
 	const seenNames = new Set<string>();

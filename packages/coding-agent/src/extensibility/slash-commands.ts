@@ -63,6 +63,8 @@ export interface LoadSlashCommandsOptions {
 	 * construction-time invocation scope.
 	 */
 	configuredExtensionPaths?: readonly string[];
+	/** Discovery mode paired with {@link configuredExtensionPaths}. */
+	extensionRootMode?: "merge" | "explicit-only";
 }
 
 /**
@@ -73,6 +75,7 @@ export async function loadSlashCommands(options: LoadSlashCommandsOptions = {}):
 	const result = await loadCapability<SlashCommand>(slashCommandCapability.id, {
 		cwd: options.cwd,
 		configuredExtensionPaths: options.configuredExtensionPaths,
+		extensionRootMode: options.extensionRootMode,
 	});
 
 	const fileCommands: FileSlashCommand[] = result.items.map(cmd => {

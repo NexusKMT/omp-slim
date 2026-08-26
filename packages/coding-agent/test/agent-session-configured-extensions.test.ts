@@ -55,8 +55,8 @@ describe("AgentSession.configuredExtensionPaths", () => {
 	it("keeps explicit SDK roots when the extensions setting is empty", async () => {
 		const session = await makeSession({ additionalExtensionPaths: ["/ext/explicit"] });
 		expect(session.configuredExtensionPaths).toEqual(["/ext/explicit"]);
+		expect(session.extensionRootMode).toBe("merge");
 	});
-
 	it("merges explicit roots ahead of the configured extensions setting", async () => {
 		const session = await makeSession({
 			additionalExtensionPaths: ["/ext/explicit"],
@@ -65,12 +65,13 @@ describe("AgentSession.configuredExtensionPaths", () => {
 		expect(session.configuredExtensionPaths).toEqual(["/ext/explicit", "/ext/configured"]);
 	});
 
-	it("exposes only explicit roots when discovery is disabled", async () => {
+	it("exposes only explicit roots in explicit-only mode when discovery is disabled", async () => {
 		const session = await makeSession({
 			additionalExtensionPaths: ["/ext/explicit"],
 			extensions: ["/ext/configured"],
 			disableExtensionDiscovery: true,
 		});
 		expect(session.configuredExtensionPaths).toEqual(["/ext/explicit"]);
+		expect(session.extensionRootMode).toBe("explicit-only");
 	});
 });

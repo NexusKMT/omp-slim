@@ -270,7 +270,10 @@ async function isDirectory(p: string): Promise<boolean> {
  */
 export async function listOmpExtensionRoots(ctx: LoadContext): Promise<OmpExtensionRoot[]> {
 	const scopedRoots = invocationRootScope.getStore();
-	const rootMode = scopedRoots?.mode ?? injectedCliRootMode;
+	// Post-startup reloads run outside `withOmpExtensionRootScope`; the caller
+	// carries the session's discovery mode on the LoadContext so an
+	// `explicit-only` session never re-merges ambient/installed roots on refresh.
+	const rootMode = ctx.extensionRootMode ?? scopedRoots?.mode ?? injectedCliRootMode;
 	let candidates: InjectedRoot[] = scopedRoots
 		? scopedRoots.paths.map(raw => ({ path: resolveAgainst(raw, ctx), level: "user" }))
 		: injectedCliRoots.map(root =>
@@ -299,6 +302,15 @@ export async function listOmpExtensionRoots(ctx: LoadContext): Promise<OmpExtens
 				(raw): InjectedRoot => ({ path: resolveAgainst(raw, ctx), level: configured.level }),
 			) ?? []),
 			...installedPlugins,
+		];
+	} else if (ctx.configuredExtensionPaths !== undefined) {
+		// `explicit-only` reload outside the scope: honor exactly the caller's
+		// roots — no ambient `extensions:`, installed plugins, or disk config.
+		candidates = [
+			...candidates,
+			...ctx.configuredExtensionPaths.map(
+				(raw): InjectedRoot => ({ path: resolveAgainst(raw, ctx), level: "user" }),
+			),
 		];
 	}
 

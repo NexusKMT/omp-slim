@@ -356,6 +356,36 @@ test("concurrent scopes snapshot their own effective extensions (no cross-sessio
 	expect(secondRoots.map(root => root.path)).toEqual([secondExt]);
 });
 
+test("explicit-only ctx mode excludes ambient/installed roots on scopeless reload (#9769)", async () => {
+	// A disableExtensionDiscovery session reloads outside the invocation scope.
+	// Its LoadContext must carry explicit-only so the refresh honors only the
+	// explicit roots — never installed plugins the caller opted out of.
+	const explicitExt = path.join(tempDir, "explicit-extension");
+	const installed = path.join(home, ".omp", "plugins", "node_modules", "installed-extension");
+	buildExtensionPackage(explicitExt, "explicit-skill");
+	buildExtensionPackage(installed, "installed-skill");
+	writeFile(
+		path.join(home, ".omp", "plugins", "package.json"),
+		JSON.stringify({ name: "omp-plugins", dependencies: { "installed-extension": "1.0.0" } }),
+	);
+
+	const mergeRoots = await listOmpExtensionRoots({
+		...ctx(),
+		configuredExtensionPaths: [explicitExt],
+		extensionRootMode: "merge",
+	});
+	expect(mergeRoots.map(root => path.basename(root.path))).toEqual(
+		expect.arrayContaining(["explicit-extension", "installed-extension"]),
+	);
+
+	const explicitOnlyRoots = await listOmpExtensionRoots({
+		...ctx(),
+		configuredExtensionPaths: [explicitExt],
+		extensionRootMode: "explicit-only",
+	});
+	expect(explicitOnlyRoots.map(root => root.path)).toEqual([explicitExt]);
+});
+
 test("loadCapability configuredExtensionPaths surfaces override extensions outside any scope (#9769)", async () => {
 	// refreshSkills / slash-command reloads run outside the construction-time
 	// invocation scope. The effective extensions must arrive via the explicit

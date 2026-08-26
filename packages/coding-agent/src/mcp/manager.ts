@@ -179,6 +179,8 @@ export interface MCPDiscoverOptions {
 	filterBrowser?: boolean;
 	/** Effective extension roots for session-scoped post-startup rediscovery. */
 	configuredExtensionPaths?: readonly string[];
+	/** Discovery mode paired with {@link configuredExtensionPaths}. */
+	extensionRootMode?: "merge" | "explicit-only";
 	/** Called when MCP server connection state changes. */
 	onStatus?: (event: McpConnectionStatusEvent) => void;
 }
@@ -464,6 +466,7 @@ export class MCPManager {
 				filterExa: options?.filterExa,
 				filterBrowser: options?.filterBrowser,
 				configuredExtensionPaths: options?.configuredExtensionPaths,
+				extensionRootMode: options?.extensionRootMode,
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);

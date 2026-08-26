@@ -25,6 +25,13 @@ export interface LoadContext {
 	 * the invocation scope so concurrent sessions stay isolated.
 	 */
 	configuredExtensionPaths?: readonly string[];
+	/**
+	 * Extension discovery mode for this load. `explicit-only` (from an SDK
+	 * `disableExtensionDiscovery` session) restricts sub-discovery to
+	 * {@link configuredExtensionPaths} — no ambient `extensions:`, installed
+	 * plugins, or disk config. Defaults to `merge` when unset.
+	 */
+	extensionRootMode?: "merge" | "explicit-only";
 }
 
 /**
@@ -88,6 +95,8 @@ export interface LoadOptions<T = unknown> {
 	 * extensions survive outside the construction-time invocation scope.
 	 */
 	configuredExtensionPaths?: readonly string[];
+	/** Extension discovery mode, forwarded to {@link LoadContext.extensionRootMode}. */
+	extensionRootMode?: "merge" | "explicit-only";
 	/**
 	 * Drop items before deduplication as if they never existed (e.g. scope
 	 * exclusions). A dropped item neither survives nor claims its dedupe key,

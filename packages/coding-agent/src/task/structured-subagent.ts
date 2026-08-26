@@ -252,7 +252,12 @@ export async function resolveEffectiveSubagentPolicy(
 	assertPlanControlsAllowed(request, planMode);
 	assertDepthAndSpawnAllowed(request, agentName);
 
-	const discovery = await discoverAgents(request.session.cwd, undefined, request.session.settings.get("extensions"));
+	const discovery = await discoverAgents(
+		request.session.cwd,
+		undefined,
+		request.session.settings.get("extensions"),
+		request.session.extensionRootMode,
+	);
 	const agent = getAgent(discovery.agents, agentName);
 	if (!agent) {
 		const available = discovery.agents.map(candidate => candidate.name).join(", ") || "none";

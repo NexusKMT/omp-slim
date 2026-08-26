@@ -22,6 +22,8 @@ export interface LoadMCPConfigsOptions {
 	filterBrowser?: boolean;
 	/** Effective extension roots for session-scoped post-startup rediscovery. */
 	configuredExtensionPaths?: readonly string[];
+	/** Discovery mode paired with {@link configuredExtensionPaths}. */
+	extensionRootMode?: "merge" | "explicit-only";
 }
 
 /** Result of loading MCP configs */
@@ -130,6 +132,7 @@ export async function loadAllMCPConfigs(cwd: string, options?: LoadMCPConfigsOpt
 	const result = await loadCapability<MCPServer>(mcpCapability.id, {
 		cwd,
 		configuredExtensionPaths: options?.configuredExtensionPaths,
+		extensionRootMode: options?.extensionRootMode,
 		filter: includeServer,
 		suppress: suppressServer,
 	});

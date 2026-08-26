@@ -30,7 +30,11 @@ import type { SlashCommandSpec } from "./types";
 export async function reloadTuiPluginState(ctx: InteractiveModeContext): Promise<void> {
 	const projectPath = await resolveActiveProjectRegistryPath(ctx.sessionManager.getCwd());
 	clearPluginRootsAndCaches(projectPath ? [projectPath] : undefined);
-	await refreshAgentDiscovery(ctx.sessionManager.getCwd(), ctx.settings.get("extensions") ?? []);
+	await refreshAgentDiscovery(
+		ctx.sessionManager.getCwd(),
+		ctx.settings.get("extensions") ?? [],
+		ctx.session.extensionRootMode,
+	);
 	await ctx.refreshSkillState();
 	await ctx.refreshSlashCommandState();
 	resetCapabilities();

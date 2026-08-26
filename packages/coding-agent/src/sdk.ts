@@ -1913,6 +1913,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// Filter browser MCP servers when builtin browser tool is active
 			filterBrowser: settings.get("browser.enabled") ?? false,
 			configuredExtensionPaths: settings.get("extensions") ?? [],
+			extensionRootMode: (options.disableExtensionDiscovery ? "explicit-only" : "merge") as
+				| "merge"
+				| "explicit-only",
 		};
 		if (enableMCP && !mcpManager) {
 			if (deferMCPDiscoveryForUI) {
@@ -2092,6 +2095,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// Forward the source-path list (NOT the loaded instances) so subagents
 		// rebuild their own session-scoped extensions.
 		toolSession.extensionPaths = extensionPaths;
+		toolSession.extensionRootMode = options.disableExtensionDiscovery ? "explicit-only" : "merge";
 
 		// Load inline extensions from factories
 		if (inlineExtensions.length > 0) {

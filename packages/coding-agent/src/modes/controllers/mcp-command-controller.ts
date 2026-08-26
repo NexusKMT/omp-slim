@@ -2124,6 +2124,7 @@ export class MCPCommandController {
 
 		const { configs, sources } = await loadAllMCPConfigs(getProjectDir(), {
 			configuredExtensionPaths: this.ctx.session.configuredExtensionPaths,
+			extensionRootMode: this.ctx.session.extensionRootMode,
 		});
 		const config = configs[name];
 		if (!config) {
@@ -2183,6 +2184,7 @@ export class MCPCommandController {
 			filterExa: true,
 			filterBrowser: this.ctx.settings.get("browser.enabled") ?? false,
 			configuredExtensionPaths: this.ctx.session.configuredExtensionPaths,
+			extensionRootMode: this.ctx.session.extensionRootMode,
 		});
 		await this.ctx.session.refreshMCPTools(this.ctx.mcpManager.getTools());
 

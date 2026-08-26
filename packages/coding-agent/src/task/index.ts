@@ -456,22 +456,30 @@ const discoveryMemo = new Map<string, Promise<DiscoveryResult>>();
 const discoverySnapshots = new Map<string, AgentDefinition[]>();
 let discoveryMemoFn: typeof discoverAgents | undefined;
 
-/** Stable cache identity for the filesystem root and ordered effective extension paths. */
-function discoveryCacheKey(cwd: string, configuredExtensionPaths?: readonly string[]): string {
-	return `${path.resolve(cwd)}\0${JSON.stringify(configuredExtensionPaths ?? null)}`;
+/** Stable cache identity for the filesystem root, ordered effective extension paths, and discovery mode. */
+function discoveryCacheKey(
+	cwd: string,
+	configuredExtensionPaths?: readonly string[],
+	extensionRootMode?: "merge" | "explicit-only",
+): string {
+	return `${path.resolve(cwd)}\0${JSON.stringify(configuredExtensionPaths ?? null)}\0${extensionRootMode ?? "merge"}`;
 }
 
-function discoverAgentsForCreate(cwd: string, configuredExtensionPaths?: readonly string[]): Promise<DiscoveryResult> {
+function discoverAgentsForCreate(
+	cwd: string,
+	configuredExtensionPaths?: readonly string[],
+	extensionRootMode?: "merge" | "explicit-only",
+): Promise<DiscoveryResult> {
 	const fn = discoverAgents;
 	if (discoveryMemoFn !== fn) {
 		discoveryMemoFn = fn;
 		discoveryMemo.clear();
 		discoverySnapshots.clear();
 	}
-	const key = discoveryCacheKey(cwd, configuredExtensionPaths);
+	const key = discoveryCacheKey(cwd, configuredExtensionPaths, extensionRootMode);
 	let pending = discoveryMemo.get(key);
 	if (!pending) {
-		pending = fn(cwd, undefined, configuredExtensionPaths);
+		pending = fn(cwd, undefined, configuredExtensionPaths, extensionRootMode);
 		discoveryMemo.set(key, pending);
 		pending.catch(() => {
 			if (discoveryMemo.get(key) === pending) discoveryMemo.delete(key);
@@ -481,10 +489,14 @@ function discoverAgentsForCreate(cwd: string, configuredExtensionPaths?: readonl
 }
 
 /** Rescan one cwd and publish its definitions to existing and future task tools. */
-export async function refreshAgentDiscovery(cwd: string, configuredExtensionPaths?: readonly string[]): Promise<void> {
-	const key = discoveryCacheKey(cwd, configuredExtensionPaths);
+export async function refreshAgentDiscovery(
+	cwd: string,
+	configuredExtensionPaths?: readonly string[],
+	extensionRootMode?: "merge" | "explicit-only",
+): Promise<void> {
+	const key = discoveryCacheKey(cwd, configuredExtensionPaths, extensionRootMode);
 	discoveryMemo.delete(key);
-	const pending = discoverAgentsForCreate(cwd, configuredExtensionPaths);
+	const pending = discoverAgentsForCreate(cwd, configuredExtensionPaths, extensionRootMode);
 	const { agents } = await pending;
 	if (discoveryMemo.get(key) === pending) {
 		discoverySnapshots.set(key, agents);
@@ -609,7 +621,11 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		return renderDescription({
 			agents:
 				discoverySnapshots.get(
-					discoveryCacheKey(this.session.cwd, this.session.settings.get("extensions") ?? []),
+					discoveryCacheKey(
+						this.session.cwd,
+						this.session.settings.get("extensions") ?? [],
+						this.session.extensionRootMode,
+					),
 				) ?? this.#discoveredAgents,
 			isolationEnabled: !planMode && isolationMode !== "none",
 			applyIsolatedChanges: this.session.settings.get("task.isolation.apply"),
@@ -675,7 +691,11 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	 * Create a TaskTool instance with async agent discovery.
 	 */
 	static async create(session: ToolSession): Promise<TaskTool> {
-		const { agents } = await discoverAgentsForCreate(session.cwd, session.settings.get("extensions") ?? []);
+		const { agents } = await discoverAgentsForCreate(
+			session.cwd,
+			session.settings.get("extensions") ?? [],
+			session.extensionRootMode,
+		);
 		return new TaskTool(session, agents);
 	}
 

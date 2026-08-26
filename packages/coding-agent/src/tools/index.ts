@@ -198,6 +198,12 @@ export interface ToolSession {
 	 */
 	extensionPaths?: string[];
 	/**
+	 * Extension discovery mode for post-startup sub-discovery. `explicit-only`
+	 * (an SDK `disableExtensionDiscovery` session) restricts reloads to the
+	 * session's explicit roots. Defaults to `merge` when unset.
+	 */
+	extensionRootMode?: "merge" | "explicit-only";
+	/**
 	 * Pre-discovered custom-tool source paths from `.omp/tools/`, `.claude/tools/`,
 	 * plugins, etc. Forwarded to subagents so they skip the FS scan but still
 	 * re-bind tools to their own session-scoped `CustomToolAPI`.

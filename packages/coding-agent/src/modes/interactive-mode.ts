@@ -1460,6 +1460,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			: await loadSlashCommands({
 					cwd: basePath,
 					configuredExtensionPaths: this.session.configuredExtensionPaths,
+					extensionRootMode: this.session.extensionRootMode,
 				});
 		this.fileSlashCommands = new Set(fileCommands.map(cmd => cmd.name));
 		const promptIcon = getSlashCommandTypeIcon("prompt");
