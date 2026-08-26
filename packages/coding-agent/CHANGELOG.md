@@ -41,6 +41,10 @@
 
 - Fixed `/collab` hiding the join URL when the QR code is clipped: the one-line fallback now includes the browser link, and the status heading keeps that URL on its first row so transcript pressure cannot drop it.
 
+### Fixed
+
+- Fixed clicks on the active Settings section sidebar toggling its first option ([#9795](https://github.com/can1357/oh-my-pi/issues/9795)).
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
