@@ -90,7 +90,7 @@ function makeSession(initialMessages: AgentMessage[], initialStreaming: boolean)
 				if (listener === next) listener = undefined;
 			};
 		},
-		async drainEventHandlers() {
+		async settleInFlightEventHandlers() {
 			await persistence;
 		},
 		buildTranscriptSessionContext() {

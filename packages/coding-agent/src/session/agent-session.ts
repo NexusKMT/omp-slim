@@ -2203,14 +2203,27 @@ export class AgentSession {
 	};
 
 	/**
-	 * Wait until the current agent-event pipeline reaches a quiescent point.
+	 * Await only the event handlers (and their persistence) already in flight at
+	 * call time, without chasing handlers registered afterward.
 	 *
-	 * Focus attach calls this after subscribing but before rebuilding the
-	 * transcript: terminal tool events emitted while another session was focused
-	 * are then persisted into the rebuild, while events that arrive later reach
-	 * the newly installed listener.
+	 * Focus attach uses this after subscribing to the target: a tool completion
+	 * emitted during the focus blackout must finish persisting before the
+	 * rebuild, but a continuously streaming target must NOT postpone the swap for
+	 * the rest of the turn. Events dispatched after this snapshot already reach
+	 * the freshly installed listener, so — unlike {@link #drainInFlightEventHandlers}
+	 * — this settles one snapshot and never loops.
 	 */
-	async drainEventHandlers(): Promise<void> {
+	async settleInFlightEventHandlers(): Promise<void> {
+		await Promise.allSettled([...this.#inFlightEventHandlers]);
+	}
+
+	/**
+	 * Exhaustively drain the agent-event pipeline, including handlers chained by
+	 * handlers that were already draining. Dispose uses this after the agent is
+	 * idle so a late message/entry append cannot land after session memory is
+	 * released; it never terminates while new events still arrive.
+	 */
+	async #drainInFlightEventHandlers(): Promise<void> {
 		while (this.#inFlightEventHandlers.size > 0) {
 			await Promise.allSettled([...this.#inFlightEventHandlers]);
 		}
@@ -4224,7 +4237,7 @@ export class AgentSession {
 			await withTimeout(
 				(async () => {
 					await this.agent.waitForIdle();
-					await this.drainEventHandlers();
+					await this.#drainInFlightEventHandlers();
 				})(),
 				options.drainTimeoutMs ?? POST_PROMPT_DRAIN_TIMEOUT_MS,
 				"Timed out waiting for the active agent run to settle during dispose",
@@ -4266,7 +4279,7 @@ export class AgentSession {
 		if (!drained) {
 			void (async () => {
 				await this.agent.waitForIdle();
-				await this.drainEventHandlers();
+				await this.#drainInFlightEventHandlers();
 				this.#releaseRetainedSessionMemory();
 			})().catch(error => logger.warn("Deferred dispose finalization failed", { error: String(error) }));
 		}
