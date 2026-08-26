@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed compiled-binary extensions failing to import `@oh-my-pi/pi-coding-agent/registry/*` modules.
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
