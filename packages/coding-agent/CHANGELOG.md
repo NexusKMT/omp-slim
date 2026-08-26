@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `/branch` now always opens the branch-from-message selector regardless of `doubleEscapeAction` setting ([#9818](https://github.com/can1357/oh-my-pi/pull/9818)).
+
 ## [18.0.6] - 2026-08-26
 
 ### Added
