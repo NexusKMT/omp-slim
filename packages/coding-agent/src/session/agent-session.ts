@@ -8192,6 +8192,15 @@ export class AgentSession {
 			}
 			await this.sessionManager.setSessionFile(sessionPath);
 			this.#bash.markSessionTransition(bashTransition);
+			if (options?.onCwdChange) {
+				const newCwd = this.sessionManager.getCwd();
+				if (path.resolve(newCwd) !== path.resolve(previousSessionState.cwd)) {
+					cwdChangeTarget = newCwd;
+					if (!(await options.onCwdChange(newCwd, previousSessionState.cwd))) {
+						throw SESSION_CWD_CHANGE_REJECTED;
+					}
+				}
+			}
 			if (switchingToDifferentSession) {
 				this.#freshProviderSessionId = undefined;
 				this.#clearInheritedProviderPromptCacheKey();
@@ -8324,15 +8333,6 @@ export class AgentSession {
 					targetSessionFile: sessionPath,
 					error: String(refreshErr),
 				});
-			}
-			if (options?.onCwdChange) {
-				const newCwd = this.sessionManager.getCwd();
-				if (path.resolve(newCwd) !== path.resolve(previousSessionState.cwd)) {
-					cwdChangeTarget = newCwd;
-					if (!(await options.onCwdChange(newCwd, previousSessionState.cwd))) {
-						throw SESSION_CWD_CHANGE_REJECTED;
-					}
-				}
 			}
 			// Hand the ledger over to the session that just took over, and only once the
 			// switch has committed: an earlier swap would be lost work if any step above
