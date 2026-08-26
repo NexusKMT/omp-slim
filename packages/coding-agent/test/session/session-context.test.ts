@@ -271,6 +271,37 @@ describe("buildSessionContext orphaned toolResults", () => {
 		expect(context.messages.map(message => message.role)).toEqual(["user", "assistant", "toolResult"]);
 		expect(toolResultIds).toEqual(["call-1"]);
 	});
+
+	it("keeps a result paired with a tool call carried only in the remote-compaction replay payload", () => {
+		const context = buildSessionContext([
+			userEntry("u1", null, "start the remote job", 1),
+			syntheticToolResultEntry("r1", "u1", "call-remote", 2),
+			{
+				type: "compaction",
+				id: "c1",
+				parentId: "r1",
+				timestamp,
+				summary: "remote compaction",
+				firstKeptEntryId: "u1",
+				tokensBefore: 100,
+				providerReplayThroughEntryId: "u1",
+				preserveData: {
+					openaiRemoteCompaction: {
+						provider: "openai-codex",
+						replacementHistory: [
+							{ type: "function_call", call_id: "call-remote", name: "bash", arguments: "{}" },
+						],
+					},
+				},
+			},
+		] satisfies SessionEntry[]);
+		const toolResultIds: string[] = [];
+		for (const message of context.messages) {
+			if (message.role === "toolResult") toolResultIds.push(message.toolCallId);
+		}
+
+		expect(toolResultIds).toEqual(["call-remote"]);
+	});
 });
 
 function hiddenContinuityEntry(id: string, parentId: string | null): SessionEntry {
