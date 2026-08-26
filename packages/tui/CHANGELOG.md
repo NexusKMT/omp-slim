@@ -27,6 +27,10 @@
 - Fixed graceful shutdown so finalized output is correctly retired before handing control back to the shell.
 - Fixed terminal scrollback corruption during shutdown, tmux pane zoom and resize, and destructive screen resets, preventing duplicated frames, lost history, and stale transcript re-streaming.
 - Fixed streaming Markdown rendering at chunk boundaries to preserve CommonMark emphasis behavior for Unicode text and correctly recognize GFM tables as they are completed.
+- Fixed image previews rendering as PUA garbage inside Paseo terminals by dropping the Kitty image protocol when `PASEO_TERMINAL_ID` is present.
+
+- Fixed graceful terminal shutdown leaving eligible finalized output in the mutable viewport instead of retiring it before shell handoff.
+- Fixed a latched destructive scrollback rebuild (settled rebuild-mode resize, display reset) erasing and re-streaming the whole transcript during stop; the latch is dropped and shutdown writes only the un-retired tail.
 
 ## [18.0.4] - 2026-08-24
 
