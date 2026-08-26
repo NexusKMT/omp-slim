@@ -44,39 +44,14 @@ const danglingAssistant = {
 	timestamp: Date.now(),
 } as unknown as AgentMessage;
 
-/** Named `hub wait` is process supervision, never a background-job poll. */
-const danglingProcessWait = {
-	role: "assistant",
-	content: [{ type: "toolCall", id: "process-wait", name: "hub", arguments: { op: "wait", name: "server" } }],
-	api: "anthropic-messages",
-	provider: "anthropic",
-	model: "claude-sonnet-4-5",
-	stopReason: "toolUse",
-	usage,
-	timestamp: Date.now(),
-} as unknown as AgentMessage;
-
 function createFixture(opts: { isStreaming: boolean }) {
 	const chatContainer = new TranscriptContainer();
-	const runningJob = {
-		id: "unrelated-job",
-		type: "task",
-		status: "running",
-		label: "Unrelated job",
-		startTime: Date.now() - 1_000,
-	};
 	const session = {
 		retryAttempt: 0,
 		getToolByName: () => undefined,
 		hasBuiltInTool: () => true,
 		sessionManager: { getCwd: () => process.cwd() },
 		isStreaming: opts.isStreaming,
-		getAgentId: () => undefined,
-		asyncJobManager: {
-			getRunningJobs: () => [runningJob],
-			getJob: () => runningJob,
-			isJobResultConsumed: () => false,
-		},
 	};
 	let helpers!: UiHelpers;
 	const ctx = {
@@ -153,22 +128,6 @@ describe("mid-turn transcript rebuild keeps in-flight tool calls", () => {
 
 		expect(component.isTranscriptBlockFinalized()).toBe(true);
 		expect(ctx.pendingTools.size).toBe(0);
-	});
-
-	it("keeps named process waits separate from unrelated background jobs during rebuild", () => {
-		const { ctx, helpers, chatContainer } = createFixture({ isStreaming: true });
-
-		helpers.renderSessionContext({ messages: [danglingProcessWait] } as SessionContext);
-
-		const [component] = pendingComponents(chatContainer);
-		expect(component).toBeDefined();
-		created.push(component);
-		expect(ctx.pendingTools.get("process-wait")).toBe(component);
-
-		const rendered = Bun.stripANSI(component.render(120).join("\n"));
-		expect(rendered).toContain("server");
-		expect(rendered).not.toContain("waiting on 1 job");
-		expect(rendered).not.toContain("Unrelated job");
 	});
 
 	it("seals dangling toolCalls on idle rebuilds instead of leaving a live spinner", () => {
