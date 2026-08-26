@@ -78,7 +78,8 @@ class SidebarHarness {
 	/** Apply the last raised stage/unstage action the way GitTuiComponent#runAction does. */
 	async applyLastAction(): Promise<void> {
 		const action = this.actions.at(-1);
-		if (!action || action.type === "commit") throw new Error("no stage/unstage action was raised");
+		if (!action || action.type === "commit" || action.type === "generate")
+			throw new Error("no stage/unstage action was raised");
 		if (action.type === "stage") await this.model.stage(action.selection?.files);
 		else await this.model.unstage(action.selection?.files);
 		await this.model.refresh();
@@ -190,6 +191,33 @@ describe("git tui sidebar staging", () => {
 			await harness.applyLastAction();
 			expect(model.staged.map(file => file.path)).toEqual(["a/new.txt"]);
 			expect(model.unstaged.map(file => file.path)).toEqual(["a/tracked.txt"]);
+		});
+	});
+	test("empty commit action generates before a populated action commits", async () => {
+		await withDirtyRepo(async ({ sidebar, actions }) => {
+			sidebar.handleInput("G");
+			expect(sidebar.selected?.kind).toBe("commit-button");
+
+			sidebar.handleInput("\r");
+			expect(actions.at(-1)).toEqual({ type: "generate" });
+
+			sidebar.setGeneratedCommit({
+				type: "fix",
+				scope: "git-tui",
+				summary: "corrected generated commit flow",
+				body: ["Preserved staged-tree analysis."],
+				footers: [],
+			});
+			expect(sidebar.summary.getValue()).toBe("fix(git-tui): corrected generated commit flow");
+			expect(sidebar.description.getText()).toBe("- Preserved staged-tree analysis.");
+
+			sidebar.handleInput("\r");
+			expect(actions.at(-1)).toEqual({
+				type: "commit",
+				message: "fix(git-tui): corrected generated commit flow\n\n- Preserved staged-tree analysis.",
+				amend: false,
+				stageAll: true,
+			});
 		});
 	});
 });

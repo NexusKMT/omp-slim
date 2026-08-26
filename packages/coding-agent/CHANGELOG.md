@@ -1,8 +1,12 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
+- Automatically generate commit summaries for whitespace-only changes without LLM latency
+- Automatically correct grammar and tense in generated commit summaries
+- Exclude redundant project-wide names from generated commit scopes
 - The git TUI can now generate cached conventional commit messages using llm-git's fast and map-reduce workflow.
 - Long streaming thinking blocks now retire their completed paragraphs into terminal scrollback mid-turn instead of staying clipped to the viewport until the turn ends.
 
