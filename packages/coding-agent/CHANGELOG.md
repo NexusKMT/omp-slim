@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a joined collab guest diverging from the host after the host compacted: the guest now collapses its replicated context behind the compaction summary instead of keeping the stale pre-compaction transcript ([#9781](https://github.com/can1357/oh-my-pi/issues/9781)).
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
