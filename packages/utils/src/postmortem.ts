@@ -338,11 +338,12 @@ if (isMainThread) {
 			const url = inspector.url();
 			process.stderr.write(`Inspector opened: ${url}\n`);
 		})
-		.on("uncaughtException", async err => {
-			if (isExpectedCleanupError(err)) {
-				logger.warn("Ignoring expected cleanup exception", { err });
+		.on("uncaughtException", async thrown => {
+			if (isExpectedCleanupError(thrown)) {
+				logger.warn("Ignoring expected cleanup exception", { err: thrown });
 				return;
 			}
+			const err = thrown instanceof Error ? thrown : new Error(String(thrown));
 			// Bun can surface a worker IPC send race through uncaughtException
 			// instead of unhandledRejection. Apply the same optional-worker
 			// containment in either global error channel.

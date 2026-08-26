@@ -11,7 +11,7 @@ const uncaughtIpcChildFlagIndex = process.argv.indexOf(uncaughtIpcChildFlag);
 const childFlagIndex = process.argv.indexOf(childFlag);
 if (unrelatedUncaughtChildFlagIndex >= 0) {
 	setImmediate(() => {
-		throw new Error("unrelated fatal exception");
+		throw "unrelated fatal exception";
 	});
 	await Bun.sleep(200);
 	process.exit(0);
