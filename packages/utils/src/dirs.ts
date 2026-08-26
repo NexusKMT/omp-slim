@@ -250,6 +250,28 @@ export async function directoryIsEnterable(dir: string): Promise<boolean> {
 	}
 }
 
+/** Whether `dir` is enterable, synchronous variant. See {@link directoryIsEnterable}. */
+export function directoryIsEnterableSync(dir: string): boolean {
+	try {
+		fs.accessSync(dir, fs.constants.X_OK);
+		return fs.statSync(dir).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Project directory when it is enterable, otherwise a safe fallback.
+ * Used by spawns that must preserve project-relative behavior when healthy.
+ */
+export function getSafeProjectCwd(): string {
+	try {
+		const dir = getProjectDir();
+		if (directoryIsEnterableSync(dir)) return dir;
+	} catch {}
+	return os.homedir();
+}
+
 /** Get the config directory name relative to home (e.g. ".omp" or PI_CONFIG_DIR override). */
 export function getConfigDirName(): string {
 	return process.env.PI_CONFIG_DIR || CONFIG_DIR_NAME;

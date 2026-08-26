@@ -1114,7 +1114,17 @@ export class CommandController {
 			try {
 				await this.ctx.sessionManager.rollbackMove(previousState);
 			} catch (err) {
-				this.ctx.showError(`Failed to roll back move: ${err instanceof Error ? err.message : String(err)}`);
+				// rollbackMove keeps the manager at the moved target while
+				// applyCwdChange left the process at the source — re-scope the
+				// process to the actual manager location so the workspace is
+				// consistent, even though the original move could not be undone.
+				const actual = this.ctx.sessionManager.getCwd();
+				try {
+					await this.ctx.applyCwdChange(actual);
+				} catch {}
+				this.ctx.showError(
+					`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (workspace remains at ${actual})`,
+				);
 			}
 			return;
 		}

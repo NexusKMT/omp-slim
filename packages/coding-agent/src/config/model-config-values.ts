@@ -1,6 +1,5 @@
 import { execSync } from "node:child_process";
-import * as os from "node:os";
-import { $envExact, logger } from "@oh-my-pi/pi-utils";
+import { $envExact, getSafeProjectCwd, logger } from "@oh-my-pi/pi-utils";
 
 const commandValueCache = new Map<string, string>();
 // Failed `!command` resolutions (non-zero exit, empty stdout) are negative-cached
@@ -45,7 +44,7 @@ function resolveCommandConfig(command: string, options?: ResolveConfigValueOptio
 	if (retryAt !== undefined && Date.now() < retryAt) return undefined;
 	try {
 		const stdout = execSync(command, {
-			cwd: os.homedir(),
+			cwd: getSafeProjectCwd(),
 			encoding: "utf8",
 			timeout: 10_000,
 			windowsHide: true,
