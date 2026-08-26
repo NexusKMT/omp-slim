@@ -1131,11 +1131,16 @@ export class CommandController {
 						this.ctx.showError(
 							`Failed to restore source workspace after rollback: process remains at target while session is at ${actual}`,
 						);
+						this.ctx.showError(
+							`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at target). Restart required.`,
+						);
+						return;
 					} else {
 						this.ctx.showError(
 							`Failed to restore source workspace after rollback: workspace remains at ${actual}`,
 						);
 					}
+					return;
 				}
 			} catch (err) {
 				// rollbackMove keeps the manager at the moved target while
@@ -1150,6 +1155,9 @@ export class CommandController {
 				if (!realigned) {
 					this.ctx.showError(
 						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
+					);
+					this.ctx.showError(
+						`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at source). Restart required.`,
 					);
 				} else {
 					this.ctx.showError(
@@ -1175,6 +1183,9 @@ export class CommandController {
 				if (!realigned) {
 					this.ctx.showError(
 						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
+					);
+					this.ctx.showError(
+						`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at source). Restart required.`,
 					);
 				} else {
 					this.ctx.showError(
@@ -1297,11 +1308,16 @@ export class CommandController {
 						this.ctx.showError(
 							`Failed to restore source workspace after rollback: process remains at target while session is at ${actual}`,
 						);
+						this.ctx.showError(
+							`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at target). Restart required.`,
+						);
+						return;
 					} else {
 						this.ctx.showError(
 							`Failed to restore source workspace after rollback: workspace remains at ${actual}`,
 						);
 					}
+					return;
 				}
 			} catch (err) {
 				// rollbackMove keeps the manager at the moved target while
@@ -1316,6 +1332,9 @@ export class CommandController {
 				if (!realigned) {
 					this.ctx.showError(
 						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
+					);
+					this.ctx.showError(
+						`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at source). Restart required.`,
 					);
 				} else {
 					this.ctx.showError(
@@ -1345,6 +1364,9 @@ export class CommandController {
 			if (!realigned) {
 				this.ctx.showError(
 					`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
+				);
+				this.ctx.showError(
+					`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at source). Restart required.`,
 				);
 			} else {
 				this.ctx.showError(
