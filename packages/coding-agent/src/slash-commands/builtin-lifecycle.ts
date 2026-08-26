@@ -600,7 +600,17 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 					await runtime.reloadPlugins();
 					await runtime.sessionManager.rollbackMove(previousState);
 				} catch (rollbackError) {
-					return usage(`Move failed and rollback failed: ${errorMessage(rollbackError)}`, runtime);
+					const actual = runtime.sessionManager.getCwd();
+					try {
+						setProjectDir(actual);
+						await runtime.settings.reloadForCwd(actual);
+						applyProviderGlobalsFromSettings(runtime.settings);
+						await runtime.reloadPlugins();
+					} catch {}
+					return usage(
+						`Move failed and rollback failed: ${errorMessage(rollbackError)} (workspace remains at ${actual})`,
+						runtime,
+					);
 				}
 				return usage(`Move failed: ${errorMessage(err)}`, runtime);
 			}
