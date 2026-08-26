@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Added
 
 - Added application-level usage attribution: observed-usage reports now carry an `app` label (`OMP_APP_NAME`, default `omp`), the broker persists and aggregates per-`(install, app, provider)`, and the auth-gateway attributes each request to the originating client via new `x-omp-install-id`/`x-omp-hostname`/`x-omp-app` headers (sent automatically by the pi-native transport; unlabeled foreign-SDK traffic falls back to the gateway host under the `gateway` app). Update the broker before clients — pre-`app` brokers reject the new report field and clients latch reporting off until restart.
@@ -8,14 +9,11 @@
 ### Fixed
 
 - Fixed Anthropic Claude subscription OAuth requests being rejected by the upstream service ([#9801](https://github.com/can1357/oh-my-pi/pull/9801) by [@fanbaoyu1024](https://github.com/fanbaoyu1024)).
-
-### Fixed
-
 - Fixed Anthropic Claude subscription OAuth requests being rejected by the upstream service ([#9801](https://github.com/can1357/oh-my-pi/pull/9801) by [@fanbaoyu1024](https://github.com/fanbaoyu1024)).
-
-### Fixed
-
 - Fixed OpenAI-compatible streaming error events being treated as successful empty completions, so queue admission failures now trigger retry and model fallback.
+- Fixed auth-gateway OpenAI Responses requests rejecting multimodal function-call outputs containing input text and images; inline, remote, and OpenAI file-backed images are now preserved as tool-result content.
+- Fixed Cursor rejecting resumed/forked sessions whose history came from a Responses-family provider (e.g. Codex) with an opaque `resource_exhausted` by sanitizing composite `callId|itemId` tool-call ids before replay ([#9754](https://github.com/can1357/oh-my-pi/issues/9754)).
+- Fixed Cursor `composer-2.5` selections silently serving the Fast variant by pinning the Standard tier with an explicit `{ id: "fast", value: "false" }` request parameter ([#9012](https://github.com/can1357/oh-my-pi/issues/9012)).
 
 ## [18.0.6] - 2026-08-26
 
@@ -26,14 +24,6 @@
 ### Fixed
 
 - Fixed auth-broker background activity keeping processes alive unnecessarily, so unused broker-backed auth storage now parks automatically and no longer prevents CLI exit.
-
-### Fixed
-
-- Fixed auth-gateway OpenAI Responses requests rejecting multimodal function-call outputs containing input text and images; inline, remote, and OpenAI file-backed images are now preserved as tool-result content.
-
-### Fixed
-
-- Fixed Cursor rejecting resumed/forked sessions whose history came from a Responses-family provider (e.g. Codex) with an opaque `resource_exhausted` by sanitizing composite `callId|itemId` tool-call ids before replay ([#9754](https://github.com/can1357/oh-my-pi/issues/9754)).
 
 ## [18.0.5] - 2026-08-25
 
@@ -55,10 +45,6 @@
 - Fixed Codex WebSocket cleanup failures caused by already-closed sockets.
 - Added safe retries for transient mid-stream socket closures across OpenAI Responses, Chat Completions, Azure OpenAI Responses, and Codex SSE when no replay-unsafe output has been emitted.
 - Fixed usage and cost reporting for OpenAI-compatible gateways backed by Vertex AI or Gemini by recognizing cached prompt tokens reported through `cachedContentTokenCount`.
-
-### Fixed
-
-- Fixed Cursor `composer-2.5` selections silently serving the Fast variant by pinning the Standard tier with an explicit `{ id: "fast", value: "false" }` request parameter ([#9012](https://github.com/can1357/oh-my-pi/issues/9012)).
 
 ## [18.0.4] - 2026-08-24
 

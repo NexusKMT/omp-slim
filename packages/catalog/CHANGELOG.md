@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed LiteLLM discovery storing zero cache prices when `/model_group/info` omitted them but a later metadata endpoint provided them.
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
