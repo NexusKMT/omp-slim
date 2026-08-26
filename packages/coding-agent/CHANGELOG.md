@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Corrected the documented `tools.approval` key format for MCP tools so per-tool deny policies use the registered tool name ([#9830](https://github.com/can1357/oh-my-pi/issues/9830)).
+
 ## [18.0.6] - 2026-08-26
 
 ### Added
