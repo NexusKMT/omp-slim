@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed OpenAI-compatible streaming error events being treated as successful empty completions, so queue admission failures now trigger retry and model fallback.
+
 ## [18.0.6] - 2026-08-26
 
 ### Added
