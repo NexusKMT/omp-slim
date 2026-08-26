@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Corrected the hook status API documentation and example to reflect that ANSI styling is stripped before display ([#9790](https://github.com/can1357/oh-my-pi/issues/9790)).
+
 ## [18.0.5] - 2026-08-25
 
 ### Added
