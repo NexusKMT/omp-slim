@@ -95,6 +95,7 @@ import {
 	postmortem,
 	prompt,
 	Snowflake,
+	setProjectDir,
 	stringProperty,
 	withTimeout,
 } from "@oh-my-pi/pi-utils";
@@ -8413,13 +8414,23 @@ export class AgentSession {
 					rollbackFailure = `cwd rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`;
 				}
 				if (rollbackFailure) {
-					this.#bash.finishSessionTransition(bashTransition, false);
-					logger.warn("Failed to restore cwd after session switch", { cwd: previousSessionState.cwd });
-					// The session is restored to the source, but the process cwd
-					// may still sit at the target. Surface both halves instead of
-					// failing open with only the original error.
-					const original = error instanceof Error ? error.message : String(error);
-					throw new Error(`${original} (${rollbackFailure}; the process may remain in ${cwdChangeTarget})`);
+					// Attempt to realign process cwd to source before surfacing terminal mismatch.
+					try {
+						process.chdir(previousSessionState.cwd);
+						try {
+							setProjectDir(previousSessionState.cwd);
+						} catch {}
+						rollbackFailure = undefined;
+					} catch {}
+					if (rollbackFailure) {
+						this.#bash.finishSessionTransition(bashTransition, false);
+						logger.warn("Failed to restore cwd after session switch", { cwd: previousSessionState.cwd });
+						// The session is restored to the source, but the process cwd
+						// may still sit at the target. Surface both halves instead of
+						// failing open with only the original error.
+						const original = error instanceof Error ? error.message : String(error);
+						throw new Error(`${original} (${rollbackFailure}; the process may remain in ${cwdChangeTarget})`);
+					}
 				}
 			}
 			this.#bash.finishSessionTransition(bashTransition, false);

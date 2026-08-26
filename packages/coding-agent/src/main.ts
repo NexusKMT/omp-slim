@@ -769,8 +769,7 @@ async function switchToResumedProject(
 		// the session with target-scoped cwd and launch-scoped settings.
 		logger.warn("Could not rescope to resumed project directory", { cwd, error: String(error) });
 		try {
-			setProjectDir(launchCwd);
-			await sessionManager.moveTo(launchCwd);
+			setProjectDir(launchCwd); // do NOT move session file — just restore runtime scope (plugin roots/caches/settings already handled);
 			clearPluginRootsAndCaches();
 			await preloadPluginRoots(os.homedir(), launchCwd);
 			// Settings.#cwd was already assigned the destination; re-scope it
