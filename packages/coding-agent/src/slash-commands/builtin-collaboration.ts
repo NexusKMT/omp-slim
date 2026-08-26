@@ -23,7 +23,7 @@ function collabLinkHint(host: CollabHost, heading: string, view = false): string
 	return [
 		// Keep the URL on the first row: under transcript pressure the status
 		// block is clipped to rendered[0], which used to drop the join link.
-		`${theme.fg("success", heading)}  ${collabBrowserLink(webLink)}`,
+		`${collabBrowserLink(webLink, "Join in browser")}  ${theme.fg("success", heading)}`,
 		` ${bullet} ${theme.fg("muted", view ? "Watch from another terminal:" : "Join from another terminal:")} ${APP_NAME} join "${link}"`,
 		` ${bullet} ${theme.fg("muted", "or any web browser:")} ${collabBrowserLink(webLink)}`,
 		theme.fg(

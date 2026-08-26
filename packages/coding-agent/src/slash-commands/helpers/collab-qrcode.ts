@@ -1,13 +1,18 @@
-import { type Component, visibleWidth } from "@oh-my-pi/pi-tui";
+import { Ellipsis, type Component, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { AnimationFrame, TranscriptPresentationTarget } from "../../modes/components/transcript-container";
 import { fgOrPlain } from "../../modes/theme/theme";
 import { urlHyperlinkAlways } from "../../tui";
 import { QrCode, renderQrHalfBlocks } from "../../utils/qrcode";
 
 /** Scheme-less display form of a collab browser deep link, OSC-8 linked. */
-export function collabBrowserLink(webLink: string): string {
-	const display = fgOrPlain("accent", `\x1b[4m${webLink.replace(/^https?:\/\//, "")}\x1b[24m`);
-	return urlHyperlinkAlways(webLink, display);
+export function collabBrowserLink(webLink: string, label?: string): string {
+	const schemeLess = webLink.replace(/^https?:\/\//, "");
+	const display = fgOrPlain("accent", `\x1b[4m${label ?? schemeLess}\x1b[24m`);
+	const linked = urlHyperlinkAlways(webLink, display);
+	// Without OSC-8 support, keep the literal URL at the visible prefix.
+	return label !== undefined && linked === display
+		? fgOrPlain("accent", `\x1b[4m${schemeLess}\x1b[24m`)
+		: linked;
 }
 
 /**
@@ -42,24 +47,29 @@ export class CollabQrCodeComponent implements Component, TranscriptPresentationT
 
 	render(width: number): readonly string[] {
 		if (width < this.#minWidth) {
-			return [this.#hiddenHint(`terminal width ${width}; need ${this.#minWidth}`)];
+			return [this.#hiddenHint(`terminal width ${width}; need ${this.#minWidth}`, width)];
 		}
 		if (this.#allocatedRows < this.#lines.length) {
-			return [this.#hiddenHint(`viewport height ${this.#allocatedRows}; need ${this.#lines.length}`)];
+			return [this.#hiddenHint(`viewport height ${this.#allocatedRows}; need ${this.#lines.length}`, width)];
 		}
 		return this.#lines;
 	}
 
 	/** Survives emergency 1-row transcript pressure when this block is otherwise hidden. */
-	renderTranscriptBlockEmergencyRow(_width: number): string {
+	renderTranscriptBlockEmergencyRow(width: number): string {
 		return this.#hiddenHint(
 			Number.isFinite(this.#allocatedRows)
 				? `viewport height ${this.#allocatedRows}; need ${this.#lines.length}`
 				: "transcript pressure",
+			width,
 		);
 	}
 
-	#hiddenHint(reason: string): string {
-		return ` ${fgOrPlain("warning", `QR code hidden: ${reason}.`)} ${collabBrowserLink(this.url)}`;
+	#hiddenHint(reason: string, width: number): string {
+		return truncateToWidth(
+			`${collabBrowserLink(this.url, "Join")} ${fgOrPlain("warning", `QR code hidden: ${reason}.`)}`,
+			width,
+			Ellipsis.Omit,
+		);
 	}
 }
