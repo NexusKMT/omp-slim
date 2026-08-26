@@ -174,6 +174,8 @@ describe("Anthropic request fingerprint alignment", () => {
 		});
 
 		expect(headers.Accept).toBe("application/json");
+		// Pinned literally (not via the imported constant) so a wrong version bump is caught
+		// on an observable wire header: this is the exact User-Agent the upstream expects.
 		expect(headers["User-Agent"]).toBe("claude-cli/2.1.246 (external, claude-desktop)");
 		expect(headers["X-Claude-Code-Session-Id"]).toBe(sessionId);
 		expect(headers["X-Stainless-Arch"]).toBe(mapStainlessArch(process.arch));
@@ -234,6 +236,10 @@ describe("Anthropic request fingerprint alignment", () => {
 			thinkingDisplay: "omitted",
 		});
 		expect(hiddenUtility.defaultHeaders["anthropic-beta"]).not.toContain("redact-thinking-2026-02-12");
+		// Drift guard: the no-tools/no-thinking utility branch is a distinct code path
+		// (buildCoworkBetas utility defaults) from the agent branch asserted above. Its
+		// OAuth beta must be present verbatim — dropping `oauth-2025-04-20` there silently
+		// reintroduces the upstream 403 with no other test failing.
 		expect(hiddenUtility.defaultHeaders["anthropic-beta"]).toContain("oauth-2025-04-20");
 	});
 
