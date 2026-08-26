@@ -112,8 +112,37 @@ function advisorTreeDisplay(details: unknown): AdvisorTreeDisplay {
  * Nested system tags belong to the recorded payload and remain visible.
  */
 function stripSystemWrapperTags(content: string): string {
-	const match = content.match(/^\s*<(system-[\w-]+)(?:\s+(?:[^"'<>]|"[^"]*"|'[^']*')*)?>\s*([\s\S]*?)\s*<\/\1>\s*$/i);
-	return match?.[2] ?? content;
+	const trimmed = content.trim();
+	const opening = /^<(system-[\w-]+)/i.exec(trimmed);
+	if (!opening) return content;
+
+	const attributeStart = opening[0].length;
+	const firstAttributeCharacter = trimmed[attributeStart];
+	if (firstAttributeCharacter !== ">" && !/\s/.test(firstAttributeCharacter ?? "")) return content;
+
+	let quote: '"' | "'" | undefined;
+	let openingEnd = -1;
+	for (let index = attributeStart; index < trimmed.length; index++) {
+		const character = trimmed[index];
+		if (quote) {
+			if (character === quote) quote = undefined;
+		} else if (character === '"' || character === "'") {
+			quote = character;
+		} else if (character === "<") {
+			return content;
+		} else if (character === ">") {
+			openingEnd = index;
+			break;
+		}
+	}
+	if (openingEnd === -1 || quote) return content;
+
+	const closingTag = `</${opening[1]}>`;
+	const closingStart = trimmed.length - closingTag.length;
+	if (closingStart <= openingEnd || trimmed.slice(closingStart).toLowerCase() !== closingTag.toLowerCase()) {
+		return content;
+	}
+	return trimmed.slice(openingEnd + 1, closingStart).trim();
 }
 
 /** Per-message cap on text folded into the tree search index. */

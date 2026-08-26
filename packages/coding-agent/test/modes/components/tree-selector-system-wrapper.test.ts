@@ -129,6 +129,12 @@ describe("TreeSelectorComponent system-wrapper message rendering", () => {
 		expect(rendered).not.toContain("<system-notice>");
 	});
 
+	it("leaves a long unterminated system-looking message unchanged without stalling", () => {
+		const rendered = render(customMessageTree("async-result", `<system-notice>${" ".repeat(5_000)}`));
+
+		expect(rendered).toContain("[async-result]: <system-notice>");
+	});
+
 	it("keeps the outer wrapper out of the search index for a long array-valued message", () => {
 		const body = `Background job bg_1 completed. ${"detail ".repeat(60)}`.trim();
 		const tree = arrayCustomMessageTree("async-result", [`<system-notice>\n${body}\n</system-notice>`]);
