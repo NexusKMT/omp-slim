@@ -1886,11 +1886,8 @@ export class SessionManager {
 			return;
 		}
 		this.#cwd = resolvedCwd;
-		this.#header.cwd = resolvedCwd;
 		if (this.#additionalDirectories.length > 0) {
 			this.#additionalDirectories = this.#additionalDirectories.filter(d => d !== resolvedCwd);
-			this.#header.additionalDirectories =
-				this.#additionalDirectories.length > 0 ? this.#additionalDirectories : undefined;
 		}
 		if (this.#sessionFile) {
 			this.#rememberBreadcrumb(resolvedCwd, this.#sessionFile);

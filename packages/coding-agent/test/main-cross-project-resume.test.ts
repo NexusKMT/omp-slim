@@ -365,7 +365,9 @@ describe("runRootCommand — cross-project --resume", () => {
 			}
 			originalChdir(dir);
 		});
-		const moveTo = vi.spyOn(SessionManager.prototype, "moveTo").mockRejectedValue(new Error("rollback unavailable"));
+		const moveTo = vi.spyOn(SessionManager.prototype, "setCwdWithoutRelocation").mockImplementation(() => {
+			throw new Error("rollback unavailable");
+		});
 		const parsed = parseArgs(["--resume", "019e84ed", "--print"]);
 		parsed.noExtensions = true;
 		parsed.noSkills = true;
