@@ -127,11 +127,14 @@ function makeGuestHarness(model: Model, modelRegistry: ModelRegistry): GuestHarn
 // Frames traverse the real CollabSocket, whose AES-GCM seal/open run on
 // WebCrypto — genuine async that resolves on the event loop, not on a clock
 // this test controls, so fake timers cannot drive it. Poll event-loop ticks
-// (zero-delay yields, not a wall-clock guess) until the awaited state lands.
-async function settleFrames(predicate: () => boolean, maxTicks = 500): Promise<void> {
-	for (let i = 0; i < maxTicks; i++) {
+// until the awaited state lands, bounded by wall time rather than a tick
+// count: under a loaded parallel test run 500 zero-delay yields can elapse
+// before the WebCrypto work is ever scheduled.
+async function settleFrames(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
 		if (predicate()) return;
-		await Bun.sleep(0);
+		await Bun.sleep(1);
 	}
 	if (!predicate()) throw new Error("condition not met while settling collab frames");
 }
