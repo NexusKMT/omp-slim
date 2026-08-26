@@ -162,11 +162,15 @@ export function isInternalSocketClosedError(err: Error): boolean {
 	if (!("code" in err) || err.code !== "ERR_SOCKET_CLOSED") return false;
 	const frames = (err.stack ?? "").split("\n").slice(1);
 	if (frames.length === 0) return false;
-	return frames.every(frame => {
+	let hasNetFrame = false;
+	const internal = frames.every(frame => {
 		const trimmed = frame.trim();
 		if (trimmed === "" || trimmed === "at unknown" || trimmed === "at native") return true;
-		return /\(node:[^)]*\)$/.test(trimmed) || /^at node:/.test(trimmed);
+		if (!/\(node:[^)]*\)$/.test(trimmed) && !/^at node:/.test(trimmed)) return false;
+		hasNetFrame ||= trimmed.includes("node:net:");
+		return true;
 	});
+	return internal && hasNetFrame;
 }
 
 /**

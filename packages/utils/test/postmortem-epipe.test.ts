@@ -4,6 +4,7 @@ import { postmortem } from "@oh-my-pi/pi-utils";
 
 const childFlag = "--stdio-epipe-child";
 const raceChildFlag = "--stdio-epipe-race-child";
+const socketClosedChildFlag = "--socket-closed-child";
 const childFlagIndex = process.argv.indexOf(childFlag);
 if (childFlagIndex >= 0) {
 	const marker = process.argv[childFlagIndex + 1];
@@ -35,10 +36,16 @@ if (childFlagIndex >= 0) {
 	});
 	void Promise.reject(Object.assign(new Error("broken pipe"), { code: "EPIPE", syscall: "write" }));
 	await new Promise<void>(() => {});
+} else if (process.argv.includes(socketClosedChildFlag)) {
+	const err = Object.assign(new Error("Socket is closed"), { code: "ERR_SOCKET_CLOSED" });
+	err.stack = "Error: Socket is closed\n    at unknown\n    at close (node:net:686:67)";
+	process.emit("uncaughtException", err);
+	process.stdout.write("survived\n");
 }
 
-describe("postmortem broken-pipe handling", () => {
-	function makeErr(props: { code?: string; syscall?: string; message?: string }): Error {
+if (!process.argv.includes(socketClosedChildFlag)) {
+	describe("postmortem broken-pipe handling", () => {
+		function makeErr(props: { code?: string; syscall?: string; message?: string }): Error {
 		const err = new Error(props.message ?? "broken pipe");
 		Object.assign(err, { code: props.code, syscall: props.syscall });
 		return err;
@@ -140,6 +147,19 @@ describe("postmortem broken-pipe handling", () => {
 		).toBe(true);
 	});
 
+	it("keeps the process alive for Bun's async node:net close error", async () => {
+		const child = Bun.spawn([process.execPath, "run", import.meta.path, socketClosedChildFlag], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [exitCode, stdout] = await Promise.all([
+			child.exited,
+			new Response(child.stdout).text(),
+		]);
+		expect(exitCode).toBe(0);
+		expect(stdout).toBe("survived\n");
+	});
+
 	it("keeps ERR_SOCKET_CLOSED fatal when application frames are on the stack", () => {
 		expect(
 			postmortem.isInternalSocketClosedError(
@@ -148,7 +168,16 @@ describe("postmortem broken-pipe handling", () => {
 				),
 			),
 		).toBe(false);
+		expect(postmortem.isInternalSocketClosedError(makeSocketClosedErr("Error: Socket is closed\n    at unknown"))).toBe(
+			false,
+		);
+		expect(
+			postmortem.isInternalSocketClosedError(
+				makeSocketClosedErr("Error: Socket is closed\n    at tick (node:timers:1:1)"),
+			),
+		).toBe(false);
 		const other = Object.assign(new Error("Socket is closed"), { code: "EPIPE" });
 		expect(postmortem.isInternalSocketClosedError(other)).toBe(false);
 	});
-});
+	});
+}
