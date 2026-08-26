@@ -131,7 +131,7 @@ function makeGuestHarness(model: Model, modelRegistry: ModelRegistry): GuestHarn
 async function settleFrames(predicate: () => boolean, maxTicks = 500): Promise<void> {
 	for (let i = 0; i < maxTicks; i++) {
 		if (predicate()) return;
-		await new Promise<void>(resolve => setTimeout(resolve, 0));
+		await Bun.sleep(0);
 	}
 	if (!predicate()) throw new Error("condition not met while settling collab frames");
 }
