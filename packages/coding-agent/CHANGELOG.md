@@ -33,6 +33,10 @@
 
 - Corrected the hook status API documentation and example to reflect that ANSI styling is stripped before display ([#9790](https://github.com/can1357/oh-my-pi/issues/9790)).
 
+### Fixed
+
+- Fixed `async-result` and `mid-run-todo-nudge` rows in `/tree` displaying internal `<system-notice>`/`<system-reminder>` XML wrappers instead of readable text ([#9755](https://github.com/can1357/oh-my-pi/issues/9755)).
+
 ## [18.0.5] - 2026-08-25
 
 ### Added

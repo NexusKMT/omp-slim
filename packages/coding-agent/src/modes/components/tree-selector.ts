@@ -107,6 +107,18 @@ function advisorTreeDisplay(details: unknown): AdvisorTreeDisplay {
 	return { qualifier: [...advisors, ...severities].join(", "), text: notes.join(" ") };
 }
 
+/**
+ * Strip one model-facing `<system-*>` envelope from custom-message content.
+ * Nested system tags belong to the recorded payload and remain visible.
+ */
+function stripSystemWrapperTags(content: string): string {
+	const match = content.match(/^\s*<(system-[\w-]+)(?:\s+(?:[^"'<>]|"[^"]*"|'[^']*')*)?>\s*([\s\S]*?)\s*<\/\1>\s*$/i);
+	return match?.[2] ?? content;
+}
+
+/** Per-message cap on text folded into the tree search index. */
+const SEARCH_TEXT_LIMIT = 200;
+
 class TreeList implements Component {
 	#flatNodes: FlatNode[] = [];
 	#filteredNodes: FlatNode[] = [];
@@ -424,7 +436,7 @@ class TreeList implements Component {
 					if (qualifier) parts.push(qualifier);
 					if (text) parts.push(text);
 				} else {
-					const content = typeof entry.content === "string" ? entry.content : this.#extractContent(entry.content);
+					const content = stripSystemWrapperTags(this.#joinTextContent(entry.content)).slice(0, SEARCH_TEXT_LIMIT);
 					if (content) parts.push(content);
 				}
 				break;
@@ -719,13 +731,7 @@ class TreeList implements Component {
 					result = theme.fg("customMessageLabel", label) + normalize(text);
 					break;
 				}
-				const content =
-					typeof entry.content === "string"
-						? entry.content
-						: entry.content
-								.filter((c): c is { type: "text"; text: string } => c.type === "text")
-								.map(c => c.text)
-								.join("");
+				const content = stripSystemWrapperTags(this.#joinTextContent(entry.content));
 				result = theme.fg("customMessageLabel", `[${entry.customType}]: `) + normalize(content);
 				break;
 			}
@@ -780,14 +786,24 @@ class TreeList implements Component {
 	}
 
 	#extractContent(content: unknown): string {
-		const maxLen = 200;
-		if (typeof content === "string") return content.slice(0, maxLen);
+		return this.#joinTextContent(content).slice(0, SEARCH_TEXT_LIMIT);
+	}
+
+	/** Concatenate every text block (or return a string as-is) with no length cap. */
+	#joinTextContent(content: unknown): string {
+		if (typeof content === "string") return content;
 		if (Array.isArray(content)) {
 			let result = "";
 			for (const c of content) {
-				if (typeof c === "object" && c !== null && "type" in c && c.type === "text") {
-					result += (c as { text: string }).text;
-					if (result.length >= maxLen) return result.slice(0, maxLen);
+				if (
+					typeof c === "object" &&
+					c !== null &&
+					"type" in c &&
+					c.type === "text" &&
+					"text" in c &&
+					typeof c.text === "string"
+				) {
+					result += c.text;
 				}
 			}
 			return result;
