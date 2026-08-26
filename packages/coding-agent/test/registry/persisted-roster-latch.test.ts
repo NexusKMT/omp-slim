@@ -231,12 +231,10 @@ describe("persisted roster latch semantics", () => {
 		await Bun.write(childA, slowTranscriptWithInit());
 		await Bun.write(childB, `${sessionHeader("worker")}\n${sessionInitRecord()}\n`);
 		const realStat = fsp.stat;
-		let releaseChildB: () => void = () => {};
-		const childBGate = new Promise<void>(resolve => {
-			releaseChildB = resolve;
-		});
+		const childBGate = Promise.withResolvers<void>();
+		const releaseChildB = () => childBGate.resolve();
 		vi.spyOn(fs.promises, "stat").mockImplementation((async (target: fs.PathLike) => {
-			if (target === childB) await childBGate;
+			if (target === childB) await childBGate.promise;
 			return realStat(target);
 		}) as typeof fs.promises.stat);
 		const readdirs: string[] = [];
