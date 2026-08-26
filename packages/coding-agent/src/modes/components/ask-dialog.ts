@@ -459,11 +459,11 @@ export class AskDialogComponent implements Component {
 	 * to expand so the global Ctrl+O listener can still expand transcript tools.
 	 */
 	toggleQuestionExpansion(): boolean {
-		if (this.#closed) return false;
+		if (this.#closed || this.#isSubmitTab()) return false;
 		const question = this.#questions[this.#currentQuestionIndex()];
 		if (!question) return false;
 		const overflows = wrapQuestionTitle(question, this.#contentWidth).length > MAX_HEADER_ROWS;
-		if (!overflows && !this.#expanded) return false;
+		if (!overflows) return false;
 		this.#expanded = !this.#expanded;
 		this.invalidate();
 		this.#requestRender();
@@ -512,10 +512,12 @@ export class AskDialogComponent implements Component {
 		// Fixed panel height: measured from the tallest tab at spawn and
 		// re-measured only when the viewport changes. Tab switches, cursor
 		// moves, and later answers never resize the box; content that
-		// outgrows it scrolls. Expanding a truncated question is an explicit
-		// user gesture and may grow the box within the existing height cap.
+		// outgrows it scrolls. Expanding a truncated question uses the space
+		// available within the existing height cap.
 		const totalRows = this.#dialogHeight(innerWidth, process.stdout.rows || 40);
-		const headerLines = this.#renderHeader(innerWidth);
+		const tabBarRows = this.#hasSubmitTab() ? 1 : 0;
+		const maxTitleRows = Math.max(1, totalRows - 5 - MIN_BODY_ROWS - tabBarRows);
+		const headerLines = this.#renderHeader(innerWidth, maxTitleRows);
 		// topBorder(1) + header(N) + divider(1) + divider(1) + footer(1) +
 		// bottomBorder(1) = N + 5 fixed rows outside the body. Without the
 		// bottomBorder term the dialog overflowed the viewport by one row
@@ -609,7 +611,7 @@ export class AskDialogComponent implements Component {
 		this.options.tui?.requestRender();
 	}
 
-	#renderHeader(width: number): string[] {
+	#renderHeader(width: number, maxTitleRows: number): string[] {
 		const lines: string[] = [];
 		if (this.#hasSubmitTab()) {
 			const tabs: Tab[] = [
@@ -636,7 +638,7 @@ export class AskDialogComponent implements Component {
 		}
 		const wrapped = wrapQuestionTitle(question, width);
 		this.#headerExpandable = wrapped.length > MAX_HEADER_ROWS;
-		const maxRows = this.#expanded ? wrapped.length : MAX_HEADER_ROWS;
+		const maxRows = this.#expanded ? maxTitleRows : MAX_HEADER_ROWS;
 		lines.push(...renderQuestionTitle(question, width, maxRows));
 		return lines;
 	}
