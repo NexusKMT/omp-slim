@@ -1110,7 +1110,36 @@ export class CommandController {
 			this.ctx.showError(`Move failed: ${err instanceof Error ? err.message : String(err)}`);
 			return;
 		}
-		if (!(await this.ctx.applyCwdChange(resolvedPath))) {
+		let applied = false;
+		try {
+			applied = await this.ctx.applyCwdChange(resolvedPath);
+		} catch (e) {
+			this.ctx.showError(`Failed to switch workspace: ${e instanceof Error ? e.message : String(e)}`);
+			try {
+				await this.ctx.sessionManager.rollbackMove(previousState);
+			} catch (err) {
+				// rollbackMove keeps the manager at the moved target while
+				// applyCwdChange left the process at the source — re-scope the
+				// process to the actual manager location so the workspace is
+				// consistent, even though the original move could not be undone.
+				const actual = this.ctx.sessionManager.getCwd();
+				let realigned = false;
+				try {
+					realigned = await this.ctx.applyCwdChange(actual);
+				} catch {}
+				if (!realigned) {
+					this.ctx.showError(
+						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
+					);
+				} else {
+					this.ctx.showError(
+						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (workspace remains at ${actual})`,
+					);
+				}
+			}
+			return;
+		}
+		if (!applied) {
 			try {
 				await this.ctx.sessionManager.rollbackMove(previousState);
 			} catch (err) {
@@ -1227,7 +1256,36 @@ export class CommandController {
 	async #moveInteractiveCwd(resolvedPath: string): Promise<void> {
 		const previousState = this.ctx.sessionManager.captureState();
 		await this.ctx.sessionManager.moveTo(resolvedPath);
-		if (await this.ctx.applyCwdChange(resolvedPath)) {
+		let ok = false;
+		try {
+			ok = await this.ctx.applyCwdChange(resolvedPath);
+		} catch (e) {
+			this.ctx.showError(`Failed to switch workspace: ${e instanceof Error ? e.message : String(e)}`);
+			try {
+				await this.ctx.sessionManager.rollbackMove(previousState);
+			} catch (err) {
+				// rollbackMove keeps the manager at the moved target while
+				// applyCwdChange left the process at the source — re-scope the
+				// process to the actual manager location so the workspace is
+				// consistent, even though the original move could not be undone.
+				const actual = this.ctx.sessionManager.getCwd();
+				let realigned = false;
+				try {
+					realigned = await this.ctx.applyCwdChange(actual);
+				} catch {}
+				if (!realigned) {
+					this.ctx.showError(
+						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
+					);
+				} else {
+					this.ctx.showError(
+						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (workspace remains at ${actual})`,
+					);
+				}
+			}
+			return;
+		}
+		if (ok) {
 			this.ctx.updateEditorBorderColor();
 			await this.ctx.reloadTodos();
 			return;

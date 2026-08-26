@@ -1589,10 +1589,25 @@ export class InteractiveMode implements InteractiveModeContext {
 				await this.refreshSkillState();
 				await this.refreshSlashCommandState(previousCwd);
 			} catch (restoreError) {
+				const actual = this.sessionManager.getCwd();
+				try {
+					setProjectDir(actual);
+					if (isSettingsInitialized()) {
+						await settings.reloadForCwd(actual);
+						applyProviderGlobalsFromSettings(settings);
+					}
+					clearClaudePluginRootsCache();
+					await this.refreshTitleSystemPrompt(actual);
+					resetCapabilities();
+					await this.refreshSkillState();
+					await this.refreshSlashCommandState(actual);
+				} catch {}
 				this.showError(
 					`Failed to switch to ${newCwd} (${error instanceof Error ? error.message : String(error)}), and restoring the previous workspace failed: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
 				);
-				return false;
+				throw new Error(
+					`Failed to restore workspace after failed switch to ${newCwd}: ${restoreError instanceof Error ? restoreError.message : String(restoreError)} (workspace may be inconsistent at ${actual})`,
+				);
 			}
 			this.showError(
 				`Cannot change working directory to ${newCwd}: ${error instanceof Error ? error.message : String(error)}`,
