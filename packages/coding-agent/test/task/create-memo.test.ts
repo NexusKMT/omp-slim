@@ -27,7 +27,7 @@ function createSession(cwd: string, extensions: readonly string[] = []): ToolSes
 		cwd,
 		hasUI: false,
 		settings: Settings.isolated({ extensions: [...extensions] }),
-		effectiveExtensionRoots: { explicit: [], mode: "merge", configured: [...extensions] },
+		effectiveExtensionRoots: () => ({ explicit: [], mode: "merge", configured: [...extensions] }),
 		getSessionFile: () => null,
 		getSessionSpawns: () => "*",
 	} as unknown as ToolSession;
@@ -88,6 +88,35 @@ describe("TaskTool.create discovery memo", () => {
 		expect(spy).toHaveBeenCalledTimes(2);
 	});
 
+	it("reflects a runtime settings override through the live provider (no stale snapshot)", async () => {
+		const spy = vi
+			.spyOn(discoveryModule, "discoverAgents")
+			.mockResolvedValueOnce({ agents: TEST_AGENTS, projectAgentsDir: null })
+			.mockResolvedValueOnce({ agents: REFRESHED_AGENTS, projectAgentsDir: null });
+		const settings = Settings.isolated({ extensions: [] });
+		const session = {
+			cwd: "/tmp/omp-memo-live",
+			hasUI: false,
+			settings,
+			// Provider reads settings live — a stored snapshot would freeze the key.
+			effectiveExtensionRoots: () => ({
+				explicit: [],
+				mode: "merge" as const,
+				configured: settings.get("extensions") ?? [],
+			}),
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+		} as unknown as ToolSession;
+
+		const before = await TaskTool.create(session);
+		expect(before.description).toContain("General-purpose task agent");
+
+		settings.override("extensions", ["/extensions/live"]);
+		const after = await TaskTool.create(session);
+		expect(after.description).toContain("Refreshed task agent");
+		expect(spy).toHaveBeenCalledTimes(2);
+	});
+
 	it("publishes refreshed definitions to existing and future tools", async () => {
 		const spy = vi
 			.spyOn(discoveryModule, "discoverAgents")
@@ -97,7 +126,7 @@ describe("TaskTool.create discovery memo", () => {
 		const existing = await TaskTool.create(session);
 
 		expect(existing.description).toContain("General-purpose task agent");
-		await refreshAgentDiscovery(session.cwd, session.effectiveExtensionRoots);
+		await refreshAgentDiscovery(session.cwd, session.effectiveExtensionRoots?.());
 
 		expect(existing.description).toContain("Refreshed task agent");
 		expect(existing.description).not.toContain("General-purpose task agent");

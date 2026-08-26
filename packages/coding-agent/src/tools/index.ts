@@ -200,11 +200,12 @@ export interface ToolSession {
 	extensionPaths?: string[];
 	/**
 	 * Session-local extension roots for post-startup sub-discovery: explicit SDK
-	 * roots, discovery mode, and configured `extensions:`. Threaded whole so the
-	 * task surface (`TaskTool.create`, preflight, refresh) stays byte-identical
-	 * to the construction-time scoped load.
+	 * roots, discovery mode, and configured `extensions:`. A provider (not a
+	 * stored value) so it is materialized live per discovery call — a runtime
+	 * override or settings reload is reflected, never a construction-time
+	 * snapshot. Keeps the task surface byte-identical to the scoped load.
 	 */
-	effectiveExtensionRoots?: EffectiveExtensionRoots;
+	effectiveExtensionRoots?(): EffectiveExtensionRoots;
 	/**
 	 * Pre-discovered custom-tool source paths from `.omp/tools/`, `.claude/tools/`,
 	 * plugins, etc. Forwarded to subagents so they skip the FS scan but still

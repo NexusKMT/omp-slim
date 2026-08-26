@@ -1906,11 +1906,14 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			if (event.type === "connecting" && event.serverNames.length === 0) return;
 			eventBus.emit(MCP_CONNECTION_STATUS_EVENT_CHANNEL, event);
 		};
-		const sessionExtensionRoots: EffectiveExtensionRoots = {
+		// Provider, never a stored value: materialized per discovery call so a
+		// runtime override or settings reload is reflected. `explicit`/`mode` are
+		// construction-time constants; only `configured` is read live.
+		const buildSessionExtensionRoots = (): EffectiveExtensionRoots => ({
 			explicit: options.additionalExtensionPaths ?? [],
 			mode: options.disableExtensionDiscovery ? "explicit-only" : "merge",
 			configured: settings.get("extensions") ?? [],
-		};
+		});
 		const mcpDiscoverOptions = {
 			onStatus: onMCPStatus,
 			enableProjectConfig: settings.get("mcp.enableProjectConfig") ?? true,
@@ -1918,7 +1921,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			filterExa: true,
 			// Filter browser MCP servers when builtin browser tool is active
 			filterBrowser: settings.get("browser.enabled") ?? false,
-			extensionRoots: sessionExtensionRoots,
+			extensionRoots: buildSessionExtensionRoots(),
 		};
 		if (enableMCP && !mcpManager) {
 			if (deferMCPDiscoveryForUI) {
@@ -2098,7 +2101,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// Forward the source-path list (NOT the loaded instances) so subagents
 		// rebuild their own session-scoped extensions.
 		toolSession.extensionPaths = extensionPaths;
-		toolSession.effectiveExtensionRoots = sessionExtensionRoots;
+		toolSession.effectiveExtensionRoots = buildSessionExtensionRoots;
 
 		// Load inline extensions from factories
 		if (inlineExtensions.length > 0) {
