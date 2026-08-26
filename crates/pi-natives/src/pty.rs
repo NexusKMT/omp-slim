@@ -495,18 +495,20 @@ fn run_pty_sync(
 		let js_gone = Arc::clone(&js_gone);
 		let in_js = Arc::clone(&in_js);
 		napi::tokio::spawn(async move {
-			pump_pty_chunks(reader_rx, async move |payload| {
-				let Some(callback) = on_chunk.as_ref() else {
-					return true;
-				};
-				in_js.store(true, Ordering::Release);
-				let ok = callback.call_async(Ok(payload)).await.is_ok();
-				in_js.store(false, Ordering::Release);
-				if !ok {
-					js_gone.store(true, Ordering::Release);
-				}
-				ok
-			})
+			pump_pty_chunks(
+				reader_rx,
+				async move |payload| {
+					let Some(callback) = on_chunk.as_ref() else {
+						return true;
+					};
+					let ok = callback.call_async(Ok(payload)).await.is_ok();
+					if !ok {
+						js_gone.store(true, Ordering::Release);
+					}
+					ok
+				},
+				Some(in_js.as_ref()),
+			)
 			.await;
 			let _ = pump_done_tx.send(());
 		})
@@ -690,13 +692,24 @@ fn run_pty_sync(
 async fn pump_pty_chunks(
 	rx: flume::Receiver<ReaderEvent>,
 	mut forward: impl AsyncFnMut(String) -> bool,
+	busy: Option<&AtomicBool>,
 ) {
 	const MAX_BATCH_BYTES: usize = 64 * 1024;
 	const INITIAL_BATCH_CAP: usize = 8 * 1024;
 	let mut batch = String::with_capacity(INITIAL_BATCH_CAP);
+	let set_busy = |value: bool| {
+		if let Some(busy) = busy {
+			busy.store(value, Ordering::Release);
+		}
+	};
 	loop {
 		let first = match rx.recv_async().await {
-			Ok(ReaderEvent::Chunk(text)) => text,
+			Ok(ReaderEvent::Chunk(text)) => {
+				// Hold the idle-check flag before coalesce/forward so a drained
+				// queue is not mistaken for a stuck-open slave.
+				set_busy(true);
+				text
+			},
 			Ok(ReaderEvent::Done) | Err(_) => break,
 		};
 		batch.push_str(&first);
@@ -712,7 +725,9 @@ async fn pump_pty_chunks(
 			}
 		}
 		let payload = std::mem::replace(&mut batch, String::with_capacity(INITIAL_BATCH_CAP));
-		if !payload.is_empty() && !forward(payload).await {
+		let keep_going = payload.is_empty() || forward(payload).await;
+		set_busy(false);
+		if !keep_going {
 			return;
 		}
 		if done {
@@ -733,7 +748,10 @@ async fn pump_pty_chunks(
 /// reader parked on a full bridge is backpressure, not a hang. Only a
 /// permanently open slave (EOF never arrives, queue empty, no in-flight
 /// callback) may skip the unbounded wait. `stop_pump` is invoked on every
-/// abandonment path so `on_chunk` cannot fire after `start()` resolves.
+/// abandonment path, then this waits up to `POST_CANCEL_DRAIN_TIMEOUT` for
+/// the pump task to observe abort so `start()` does not resolve while
+/// `call_async` is still in Rust. An already-queued napi callback can still
+/// run once; TSFN work lives on the JS thread.
 fn await_pty_output_drain(
 	pump_done_rx: flume::Receiver<()>,
 	reader_thread: std::thread::JoinHandle<()>,
@@ -745,11 +763,11 @@ fn await_pty_output_drain(
 	let mut stop_pump = Some(stop_pump);
 
 	if abandon_slow_js {
-		let _ = pump_done_rx.recv_timeout(POST_CANCEL_DRAIN_TIMEOUT);
 		if let Some(stop_pump) = stop_pump.take() {
 			stop_pump();
 		}
 		drop(queued);
+		let _ = pump_done_rx.recv_timeout(POST_CANCEL_DRAIN_TIMEOUT);
 		if reader_thread.is_finished() {
 			let _ = reader_thread.join();
 		}
@@ -779,6 +797,8 @@ fn await_pty_output_drain(
 					if let Some(stop_pump) = stop_pump.take() {
 						stop_pump();
 					}
+					drop(queued);
+					let _ = pump_done_rx.recv_timeout(POST_CANCEL_DRAIN_TIMEOUT);
 					return;
 				}
 			},
@@ -832,11 +852,15 @@ mod reader_queue_tests {
 		let mut received = String::with_capacity(CHUNKS * CHUNK_BYTES);
 		time::timeout(
 			Duration::from_secs(30),
-			pump_pty_chunks(rx, async |payload: String| {
-				received.push_str(&payload);
-				time::sleep(Duration::from_micros(500)).await;
-				true
-			}),
+			pump_pty_chunks(
+				rx,
+				async |payload: String| {
+					received.push_str(&payload);
+					time::sleep(Duration::from_micros(500)).await;
+					true
+				},
+				None,
+			),
 		)
 		.await
 		.expect("pump should finish once the producer hangs up");
@@ -856,7 +880,7 @@ mod reader_queue_tests {
 	#[tokio::test(flavor = "multi_thread")]
 	async fn pty_pump_death_disconnects_channel_without_blocking_senders() {
 		let (tx, rx) = flume::bounded::<ReaderEvent>(4);
-		let pump = tokio::spawn(pump_pty_chunks(rx, async |_payload: String| false));
+		let pump = tokio::spawn(pump_pty_chunks(rx, async |_payload: String| false, None));
 		let producer = tokio::spawn(async move {
 			let mut disconnected = 0usize;
 			for _ in 0..64 {
