@@ -5,6 +5,10 @@
 
 - Added application-level usage attribution: observed-usage reports now carry an `app` label (`OMP_APP_NAME`, default `omp`), the broker persists and aggregates per-`(install, app, provider)`, and the auth-gateway attributes each request to the originating client via new `x-omp-install-id`/`x-omp-hostname`/`x-omp-app` headers (sent automatically by the pi-native transport; unlabeled foreign-SDK traffic falls back to the gateway host under the `gateway` app). Update the broker before clients — pre-`app` brokers reject the new report field and clients latch reporting off until restart.
 
+### Fixed
+
+- Fixed Anthropic Claude subscription OAuth requests being rejected by the upstream service ([#9801](https://github.com/can1357/oh-my-pi/pull/9801) by [@fanbaoyu1024](https://github.com/fanbaoyu1024)).
+
 ## [18.0.6] - 2026-08-26
 
 ### Added
