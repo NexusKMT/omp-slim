@@ -1119,12 +1119,19 @@ export class CommandController {
 				// process to the actual manager location so the workspace is
 				// consistent, even though the original move could not be undone.
 				const actual = this.ctx.sessionManager.getCwd();
+				let realigned = false;
 				try {
-					await this.ctx.applyCwdChange(actual);
+					realigned = await this.ctx.applyCwdChange(actual);
 				} catch {}
-				this.ctx.showError(
-					`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (workspace remains at ${actual})`,
-				);
+				if (!realigned) {
+					this.ctx.showError(
+						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
+					);
+				} else {
+					this.ctx.showError(
+						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (workspace remains at ${actual})`,
+					);
+				}
 			}
 			return;
 		}
