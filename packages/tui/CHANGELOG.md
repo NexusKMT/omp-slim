@@ -10,6 +10,7 @@
 
 - Fixed pending-work animations repeatedly composing expensive frames without applying their full render cost to CPU backpressure.
 - Fixed unfinished live viewport rows entering tmux pane history and duplicating streamed output ([#9780](https://github.com/can1357/oh-my-pi/issues/9780)).
+- Fixed the resize pre-erase archiving the unfinished frame into scrollback on terminals that preserve a full-screen clear, including when a cursor-relative erase clamps onto the first row ([#9780](https://github.com/can1357/oh-my-pi/issues/9780)).
 
 ## [18.0.7] - 2026-08-26
 

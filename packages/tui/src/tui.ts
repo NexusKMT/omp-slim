@@ -55,6 +55,17 @@ const SEGMENT_RESET = "\x1b[0m";
 const LINE_TERMINATOR = "\x1b[0m\x1b]8;;\x07";
 const ERASE_LINE = "\x1b[2K";
 const ERASE_TO_END_OF_LINE = "\x1b[K";
+// Erase the cursor's row and everything below it, cursor-relative, without ever
+// issuing a full-screen clear: tmux (`grid_view_clear_history()`) and Windows
+// conhost (#9597) archive a screen-wide erase into scrollback instead of
+// discarding it, so an erase that starts on the first cell preserves the very
+// live rows it exists to remove (#9780). EL2 clears the cursor's row, then ED0
+// from the next column clears the remainder, which leaves the cursor off the
+// first cell for the erase that spans the rest of the screen. The trailing CR
+// restores the column, so callers see the same cursor position as a plain
+// `\r\x1b[J`. Used where the resize path must stay cursor-relative because the
+// terminal reflowed the normal buffer and absolute rows are stale.
+const ERASE_BELOW_CURSOR_ROW = "\r\x1b[2K\x1b[C\x1b[J\r";
 // Keep the common short-row path out of native width/truncation. Longer rows
 // are fit by visible cells, not source code units, so zero-width-heavy prefixes
 // cannot hide visible suffix text that still belongs in the viewport.
@@ -1148,7 +1159,7 @@ export class TUI extends Container {
 						this.terminal.columns,
 					);
 					const top = Math.max(0, Math.min(this.#providerViewportTop, this.terminal.rows - staleRows));
-					erase = `\x1b[?25l\x1b[${top + 1};1H\x1b[J`;
+					erase = `\x1b[?25l${this.#eraseBelowRow(top, this.terminal.rows)}`;
 				} else {
 					const up = this.#reflowedRowCount(
 						this.#providerWindow,
@@ -1156,7 +1167,7 @@ export class TUI extends Container {
 						this.#parkedViewportOffset,
 						this.terminal.columns,
 					);
-					erase = `\x1b[?25l${up > 0 ? `\x1b[${up}A` : ""}\r\x1b[J`;
+					erase = `\x1b[?25l${up > 0 ? `\x1b[${up}A` : ""}${ERASE_BELOW_CURSOR_ROW}`;
 				}
 				// Both erase paths leave the cursor on the viewport's top row, so the
 				// parked offset no longer applies; carrying a stale nonzero offset
@@ -2264,6 +2275,23 @@ export class TUI extends Container {
 	}
 
 	/**
+	 * Erase `row` and everything below it, absolute-addressed, without ever
+	 * issuing a full-screen clear. tmux and Windows conhost (#9597) archive a
+	 * screen-wide erase into pane history instead of discarding it, so an erase
+	 * anchored on the first row would preserve the unfinished frame it exists to
+	 * remove (#9780). Below existing history a plain ED0 cannot span the screen;
+	 * on the first row, EL2 that row and ED0 from the second down touch the same
+	 * cells with no full-screen clear. `row` is clamped because a caller's
+	 * viewport top can predate a height shrink.
+	 */
+	#eraseBelowRow(row: number, height: number): string {
+		const top = Math.max(0, Math.min(row, Math.max(0, height - 1)));
+		if (top > 0) return `\x1b[${top + 1};1H\x1b[J`;
+		if (height <= 1) return `\x1b[1;1H${ERASE_LINE}`;
+		return `\x1b[1;1H${ERASE_LINE}\x1b[2;1H\x1b[J`;
+	}
+
+	/**
 	 * Physical write transaction: append an ordinary batch, or bottom-split one
 	 * complete replay into a history remainder and final viewport, then serialize
 	 * the whole result in one terminal write before acknowledgement.
@@ -2371,16 +2399,7 @@ export class TUI extends Container {
 			// committed rows and blanks, never an unfinished frame.
 			const pushed = Math.max(0, startTop + preparedHistory.length + rows - height);
 			if (pushed > this.#providerViewportTop && this.#providerWindow.length > 0) {
-				const eraseTop = this.#providerViewportTop;
-				if (eraseTop > 0) {
-					// Below existing history: ED0 here never spans the whole screen.
-					buffer += `\x1b[${eraseTop + 1};1H\x1b[J`;
-				} else {
-					// Full-screen erase makes tmux preserve the live rows (#9780);
-					// EL2 the first row + ED0 the rest clears the same cells, no full clear.
-					buffer += "\x1b[1;1H\x1b[2K";
-					if (height > 1) buffer += "\x1b[2;1H\x1b[J";
-				}
+				buffer += this.#eraseBelowRow(this.#providerViewportTop, height);
 			}
 			buffer += `\x1b[${startTop + 1};1H`;
 			let screenRow = startTop;
