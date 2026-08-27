@@ -658,6 +658,34 @@ describe("usage status-line segment", () => {
 		expect(content).toContain("8%");
 	});
 
+	it("renders Google Antigravity daily usage", async () => {
+		const now = Date.now();
+		const component = makeComponent(
+			[
+				{
+					provider: "google-antigravity",
+					limits: [
+						{
+							label: "Usage (Google)",
+							scope: { provider: "google-antigravity", windowId: "daily" },
+							window: { id: "daily", label: "Daily", durationMs: 86_400_000, resetsAt: now + 11 * 60_000 },
+							amount: { usedFraction: 0.054 },
+						},
+					],
+				},
+			],
+			{ provider: "google-antigravity" },
+		);
+
+		component.refreshUsageInBackground();
+		await flushUsageRefresh();
+		const content = stripVTControlCharacters(component.getTopBorder(200).content);
+
+		expect(content).toContain("1d");
+		expect(content).toContain("5%");
+		expect(content).toContain("11m");
+	});
+
 	it("ignores non-canonical windows without a reported span", async () => {
 		const component = makeComponent([
 			{
