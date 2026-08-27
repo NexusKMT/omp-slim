@@ -274,7 +274,9 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 	const dynamicFetchSucceeded = fetchedDynamicModels !== null;
 	const anyRemoteFetchSucceeded = modelsDevFetchSucceeded || dynamicFetchSucceeded;
 	const allConfiguredRemoteFetchesSucceeded =
-		(!hasModelsDevFetcher || modelsDevFetchSucceeded) && (!hasDynamicFetcher || dynamicFetchSucceeded);
+		hasRemoteFetcher &&
+		(!hasModelsDevFetcher || modelsDevFetchSucceeded) &&
+		(!hasDynamicFetcher || dynamicFetchSucceeded);
 	const authoritativeDynamicFetchSucceeded = dynamicModelsAuthoritative && dynamicFetchSucceeded;
 	const remoteResolutionComplete = authoritativeDynamicFetchSucceeded || allConfiguredRemoteFetchesSucceeded;
 	const preparedCacheModels = remoteResolutionComplete
@@ -301,7 +303,7 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 			dynamicModels.length > 0 &&
 			(dynamicModelsAuthoritative || !hasModelsDevFetcher || modelsDevFetchSucceeded)
 		: modelsDevFetchSucceeded;
-	const mergedWithCache = mergeModelSources(staticModels, cacheModels);
+	const mergedWithCache = mergeDynamicModels(staticModels, cacheModels);
 	const mergedWithModelsDev = mergeDynamicModels(mergedWithCache, modelsDevModels);
 	const mergedModels = mergeDynamicModels(mergedWithModelsDev, dynamicModels);
 	const models = collapseBuiltModelVariants(
@@ -346,7 +348,7 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 				? preparedLatestCacheModels.filter(model => !additiveStaticModelIds.has(model.id))
 				: preparedLatestCacheModels;
 			const fallbackSnapshotModels = collapseBuiltModelVariants(
-				mergeDynamicModels(mergeModelSources(staticModels, latestCacheModels), modelsDevModels),
+				mergeDynamicModels(mergeDynamicModels(staticModels, latestCacheModels), modelsDevModels),
 			);
 			writeModelCache(
 				cacheProviderId,
@@ -451,23 +453,6 @@ function prepareCacheModelsForStaticMismatch<TApi extends Api>(
 		sanitizedModels.push(staticIds?.has(model.id) ? { ...model, contextWindow: null, maxTokens: null } : model);
 	}
 	return sanitizedModels;
-}
-
-function mergeModelSources<TApi extends Api>(...sources: readonly (readonly Model<TApi>[])[]): Model<TApi>[] {
-	// Strip out empty/missing sources up front. The hot path is `(static, [])`
-	// (modelsDev disabled / failed) — a single non-empty source means we can
-	// skip the Map churn entirely and just hand back the array.
-	const nonEmpty = sources.filter(source => source.length > 0);
-	if (nonEmpty.length === 0) return [];
-	if (nonEmpty.length === 1) return [...nonEmpty[0]];
-	const merged = new Map<string, Model<TApi>>();
-	for (const source of nonEmpty) {
-		for (const model of source) {
-			if (!model?.id) continue;
-			merged.set(model.id, model);
-		}
-	}
-	return Array.from(merged.values());
 }
 
 function mergeDynamicModels<TApi extends Api>(
