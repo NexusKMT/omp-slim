@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed prompts hanging when a successful automatic retry ended through an early terminal path such as `yield`.
+
 ## [18.0.7] - 2026-08-26
 
 ### Added
