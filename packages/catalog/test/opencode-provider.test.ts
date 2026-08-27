@@ -130,6 +130,65 @@ describe("Shared models.dev catalog fallback", () => {
 		}
 	});
 
+	test("filters generation-rejected rows before runtime resolution and caching", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-runtime-policy-"));
+		const rawModel = (id: string, npm: string) => ({
+			id,
+			name: id,
+			tool_call: true,
+			reasoning: true,
+			limit: { context: 128_000, output: 32_000 },
+			modalities: { input: ["text"], output: ["text"] },
+			provider: { npm },
+		});
+		const cases = [
+			{
+				providerId: "zai",
+				invalidId: "glm-5.2[1m]",
+				validId: "glm-5.3-flash",
+				npm: "@ai-sdk/anthropic",
+			},
+			{
+				providerId: "amazon-bedrock",
+				invalidId: "openai.gpt-5.4",
+				validId: "openai.gpt-oss-120b",
+				npm: "@ai-sdk/openai-compatible",
+			},
+		] as const;
+		try {
+			for (const { providerId, invalidId, validId, npm } of cases) {
+				const fallback = modelsDevCatalogFallback(providerId);
+				if (!fallback) throw new Error(`${providerId} did not configure a models.dev fallback`);
+				const options = {
+					providerId,
+					cacheDbPath: path.join(tempDir, `${providerId}.db`),
+					staticModels: [],
+					modelsDev: {
+						...fallback,
+						fetch: async () => ({
+							[providerId]: {
+								models: {
+									[invalidId]: rawModel(invalidId, npm),
+									[validId]: rawModel(validId, npm),
+								},
+							},
+						}),
+					},
+				};
+
+				const online = await resolveProviderModels(options, "online");
+				expect(online.models.some(model => model.id === invalidId)).toBe(false);
+				expect(online.models.some(model => model.id === validId)).toBe(true);
+
+				const cached = await resolveProviderModels(options, "offline");
+				expect(cached.models.some(model => model.id === invalidId)).toBe(false);
+				expect(cached.models.some(model => model.id === validId)).toBe(true);
+			}
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	test("keeps upgraded bundled metadata authoritative over an older same-id cache row", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-additive-cache-upgrade-"));
 		try {

@@ -47,6 +47,7 @@ import {
 import { createBundledReferenceMap, createReferenceResolver, toModelSpec } from "./bundled-references";
 import { getDefaultModelDiscoveryBaseUrl, resolveModelCacheProviderId } from "./cache-provider-id";
 import type { ModelManagerConfig } from "./descriptor-types";
+import { filterModelsDevCatalogRows } from "./models-dev-policies";
 
 const MODELS_DEV_URL = "https://catalog.stencil.so/models.json.zstd";
 
@@ -6843,6 +6844,6 @@ export function modelsDevCatalogFallback(
 	return {
 		additiveOnly: true,
 		fetch: () => withCatalogDiscoveryTimeout(timeoutMs, signal => fetchWellKnownModels(fetchImpl, signal)),
-		map: payload => (isRecord(payload) ? mapModelsDevToModels(payload, descriptors) : []),
+		map: payload => (isRecord(payload) ? filterModelsDevCatalogRows(mapModelsDevToModels(payload, descriptors)) : []),
 	};
 }
