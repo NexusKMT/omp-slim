@@ -5,9 +5,11 @@
 ### Added
 
 - Added Z.AI GLM Coding Plan usage tracking: credit-based `CREDIT_LIMIT` windows (5h + weekly) now surface in `omp usage` and the status line with the plan tier (`plan: lite/pro/max`).
+
 ### Fixed
 
 - Fixed Amazon Bedrock requests to OpenAI-schema models (the `gpt-5.x` SKUs) failing with HTTP 400 `unknown_parameter: 'thinking'` when reasoning was enabled, by sending `reasoning.effort` instead of Anthropic's `thinking` budget block for models the catalog marks as effort-controlled.
+- Fixed Cursor replay rejecting sessions with orphaned tool results while preserving their output as assistant context.
 
 ## [18.0.7] - 2026-08-26
 
@@ -22,9 +24,6 @@
 - Fixed multimodal tool results in OpenAI Responses requests so inline, remote, and OpenAI file-backed images are preserved correctly.
 - Fixed resumed and forked Cursor sessions failing when their history came from a Responses-based provider such as Codex ([#9754](https://github.com/can1357/oh-my-pi/issues/9754)).
 - Fixed Cursor `composer-2.5` selections using the Fast variant instead of the Standard tier ([#9012](https://github.com/can1357/oh-my-pi/issues/9012)).
-### Fixed
-
-- Fixed Cursor replay rejecting sessions with orphaned tool results while preserving their output as assistant context.
 
 ## [18.0.6] - 2026-08-26
 

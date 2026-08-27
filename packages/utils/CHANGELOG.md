@@ -2,9 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the Linux `subreaper` spawn option to retain reparented descendants for process-tree cleanup.
+
 ### Fixed
 
 - Keep project-directory state unchanged when changing directories fails.
+- Fixed `ptree` timeout cleanup and output capture so timed commands retain their deadline through descendant-held pipes and untimed commands read output to EOF.
 
 ## [18.0.7] - 2026-08-26
 
@@ -17,13 +22,6 @@
 ### Fixed
 
 - Fixed OMP sessions unexpectedly exiting during socket cleanup or optional-worker communication on Bun.
-### Added
-
-- Added the Linux `subreaper` spawn option to retain reparented descendants for process-tree cleanup.
-
-### Fixed
-
-- Fixed `ptree` timeout cleanup and output capture so timed commands retain their deadline through descendant-held pipes and untimed commands read output to EOF.
 
 ## [18.0.6] - 2026-08-26
 
