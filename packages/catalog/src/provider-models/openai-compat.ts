@@ -139,6 +139,17 @@ function getCatalogSession(fetchImpl: FetchImpl | undefined): CatalogSession {
 	return created;
 }
 
+function waitForCatalogRequest<T>(request: Promise<T>, signal?: AbortSignal): Promise<T> {
+	if (!signal) return request;
+	if (signal.aborted) return Promise.reject(signal.reason);
+	const aborted = Promise.withResolvers<never>();
+	const rejectAborted = () => aborted.reject(signal.reason);
+	signal.addEventListener("abort", rejectAborted, { once: true });
+	return Promise.race([request, aborted.promise]).finally(() => {
+		signal.removeEventListener("abort", rejectAborted);
+	});
+}
+
 const CATALOG_USER_AGENT = USER_AGENT;
 
 /**
@@ -148,9 +159,11 @@ const CATALOG_USER_AGENT = USER_AGENT;
  * responses (test stubs, fallback mirrors) parse identically.
  *
  * Fetched fully once per fetch context: concurrent callers sharing a fetch
- * implementation reuse the in-flight request, while repeat callers send a
- * conditional GET that the server answers with `304`. Transient failures reuse
- * the last in-memory payload for callers that only need best-effort metadata.
+ * implementation reuse one transport request, while repeat callers send a
+ * conditional GET that the server answers with `304`. Each subscriber may stop
+ * waiting independently; the shared transport retains its own hard deadline.
+ * Transient failures reuse the last in-memory payload for callers that only
+ * need best-effort metadata.
  */
 export function fetchWellKnownModels(fetchImpl?: FetchImpl, signal?: AbortSignal): Promise<unknown> {
 	const session = getCatalogSession(fetchImpl);
@@ -163,11 +176,13 @@ export function fetchWellKnownModels(fetchImpl?: FetchImpl, signal?: AbortSignal
 function fetchRevalidatedWellKnownModels(fetchImpl?: FetchImpl, signal?: AbortSignal): Promise<unknown> {
 	const session = getCatalogSession(fetchImpl);
 	if (!session.inflight) {
-		session.inflight = fetchCatalogPayload(fetchImpl ?? discoveryFetch(), session, signal).finally(() => {
+		session.inflight = withCatalogDiscoveryTimeout(DEFAULT_OPENAI_COMPATIBLE_DISCOVERY_TIMEOUT_MS, transportSignal =>
+			fetchCatalogPayload(fetchImpl ?? discoveryFetch(), session, transportSignal),
+		).finally(() => {
 			session.inflight = null;
 		});
 	}
-	return session.inflight;
+	return waitForCatalogRequest(session.inflight, signal);
 }
 
 function fetchRevalidatedWellKnownModelsWithTimeout(

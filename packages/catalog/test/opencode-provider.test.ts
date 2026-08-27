@@ -443,31 +443,39 @@ describe("Shared models.dev catalog fallback", () => {
 		}
 	});
 
-	test("aborts a stalled shared catalog request at the configured deadline", async () => {
+	test("applies subscriber deadlines without aborting a joined catalog request", async () => {
 		let aborted = false;
+		let fetches = 0;
+		const transport = Promise.withResolvers<Response>();
 		const stalledFetch: FetchImpl = (_input, init) => {
-			const { promise, reject } = Promise.withResolvers<Response>();
+			fetches++;
 			const signal = init?.signal;
-			if (!signal) {
-				reject(new Error("catalog fetch did not receive an abort signal"));
-				return promise;
-			}
+			if (!signal) throw new Error("catalog fetch did not receive an abort signal");
 			const rejectAborted = () => {
 				aborted = true;
-				reject(signal.reason);
+				transport.reject(signal.reason);
 			};
 			if (signal.aborted) {
 				rejectAborted();
 			} else {
 				signal.addEventListener("abort", rejectAborted, { once: true });
 			}
-			return promise;
+			return transport.promise;
 		};
-		const fallback = modelsDevCatalogFallback("zai", stalledFetch, 5);
-		if (!fallback) throw new Error("ZAI did not configure a models.dev fallback");
+		const shortFallback = modelsDevCatalogFallback("zai", stalledFetch, 5);
+		const longFallback = modelsDevCatalogFallback("zai", stalledFetch, 5_000);
+		if (!shortFallback || !longFallback) throw new Error("ZAI did not configure a models.dev fallback");
 
-		await expect(fallback.fetch()).rejects.toThrow(/timed out/i);
-		expect(aborted).toBe(true);
+		const shortRequest = shortFallback.fetch();
+		const longRequest = longFallback.fetch();
+		await expect(shortRequest).rejects.toThrow(/timed out/i);
+		expect(aborted).toBe(false);
+		expect(fetches).toBe(1);
+
+		const payload = { source: "shared-transport" };
+		transport.resolve(Response.json(payload));
+		expect(await longRequest).toEqual(payload);
+		expect(aborted).toBe(false);
 	});
 });
 
