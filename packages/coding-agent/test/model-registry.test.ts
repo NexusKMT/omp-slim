@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { Effort, type FetchImpl, type Model, type OpenAICompat, type ThinkingConfig } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
+import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
@@ -1971,6 +1972,7 @@ describe("ModelRegistry", () => {
 		let vertexNonAuthoritative: ModelRegistry;
 		let vertexStale: ModelRegistry;
 		let litellmStaleNamespaceCache: ModelRegistry;
+		let sharedCatalogCache: ModelRegistry;
 		let litellmCurrentNamespaceCache: ModelRegistry;
 		let openaiModelsListStaleNamespaceCache: ModelRegistry;
 		const vertexProjectModel = () =>
@@ -1987,6 +1989,35 @@ describe("ModelRegistry", () => {
 				maxTokens: 8_888,
 			});
 		beforeAll(() => {
+			sharedCatalogCache = readonlyRegistry(
+				{ providers: {} },
+				{
+					seedCache: dbPath => {
+						writeModelCache(
+							"zai",
+							Date.now(),
+							[
+								...getBundledModels("zai"),
+								buildModel({
+									id: "glm-5.3-flash",
+									name: "GLM-5.3-Flash",
+									api: "anthropic-messages",
+									provider: "zai",
+									baseUrl: "https://api.z.ai/api/anthropic",
+									reasoning: true,
+									input: ["text", "image"],
+									cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+									contextWindow: 1_000_000,
+									maxTokens: 131_072,
+								}),
+							],
+							true,
+							"",
+							dbPath,
+						);
+					},
+				},
+			);
 			legacySentinels = readonlyRegistry(
 				{
 					providers: {
@@ -2415,6 +2446,20 @@ describe("ModelRegistry", () => {
 			const vertexModels = getModelsForProvider(vertexStale, "google-vertex");
 			expect(vertexModels.some(model => model.id === "zai-org/glm-4.7-maas")).toBe(true);
 			expect(vertexModels.some(model => model.id.startsWith("gemini-"))).toBe(true);
+		});
+
+		test("hydrates cached shared-catalog additions without provider credentials", () => {
+			expect(sharedCatalogCache.find("zai", "glm-5.3-flash")).toMatchObject({
+				contextWindow: 1_000_000,
+				maxTokens: 131_072,
+			});
+			expect(sharedCatalogCache.getProviderDiscoveryState("zai")).toMatchObject({
+				provider: "zai",
+				status: "cached",
+				optional: false,
+				stale: false,
+				source: "cache",
+			});
 		});
 	});
 

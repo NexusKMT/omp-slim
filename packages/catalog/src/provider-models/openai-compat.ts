@@ -21,7 +21,7 @@ import {
 	isReasoningGlmModelId,
 } from "../identity/family";
 import { resolveModelReference } from "../identity/reference";
-import type { ModelManagerOptions } from "../model-manager";
+import type { ModelManagerOptions, ModelsDevFallback } from "../model-manager";
 import { type GeneratedProvider, getBundledModels } from "../models";
 import { OPENAI_GPT_56_CYBER_STANDARD_COST, OPENAI_GPT_56_SOL_STANDARD_COST } from "../openai-pricing";
 import type {
@@ -6790,3 +6790,38 @@ export const MODELS_DEV_PROVIDER_DESCRIPTORS: readonly ModelsDevProviderDescript
 	...MODELS_DEV_PROVIDER_DESCRIPTORS_CODING_PLANS,
 	...MODELS_DEV_PROVIDER_DESCRIPTORS_SPECIALIZED,
 ];
+
+const MODELS_DEV_DESCRIPTORS_BY_PROVIDER: Record<string, ModelsDevProviderDescriptor[]> = Object.create(null);
+for (const descriptor of MODELS_DEV_PROVIDER_DESCRIPTORS) {
+	const providerDescriptors = MODELS_DEV_DESCRIPTORS_BY_PROVIDER[descriptor.providerId];
+	if (providerDescriptors) {
+		providerDescriptors.push(descriptor);
+	} else {
+		MODELS_DEV_DESCRIPTORS_BY_PROVIDER[descriptor.providerId] = [descriptor];
+	}
+}
+
+/** Providers whose bundled catalog can receive additive models.dev updates at runtime. */
+export const MODELS_DEV_CATALOG_PROVIDER_IDS: readonly string[] = Object.freeze(
+	Object.keys(MODELS_DEV_DESCRIPTORS_BY_PROVIDER),
+);
+
+/**
+ * Build the shared models.dev fallback for one known provider.
+ *
+ * Every provider-specific manager shares the process-wide conditional fetch in
+ * `fetchWellKnownModels`; the model manager persists each mapped provider slice
+ * independently so startup can restore it without parsing the full catalog.
+ */
+export function modelsDevCatalogFallback(
+	providerId: string,
+	fetchImpl?: FetchImpl,
+): ModelsDevFallback<Api> | undefined {
+	const descriptors = MODELS_DEV_DESCRIPTORS_BY_PROVIDER[providerId];
+	if (!descriptors) return undefined;
+	return {
+		additiveOnly: true,
+		fetch: () => fetchWellKnownModels(fetchImpl),
+		map: payload => (isRecord(payload) ? mapModelsDevToModels(payload, descriptors) : []),
+	};
+}

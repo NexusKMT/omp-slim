@@ -1,17 +1,28 @@
 import type { Api, Model } from "@oh-my-pi/pi-ai/types";
-import { type OpenAICodexAccount, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models";
+import type { ModelResolutionSource } from "@oh-my-pi/pi-catalog/model-manager";
+import {
+	MODELS_DEV_CATALOG_PROVIDER_IDS,
+	type OpenAICodexAccount,
+	PROVIDER_DESCRIPTORS,
+} from "@oh-my-pi/pi-catalog/provider-models";
 import type { AuthStorage, OAuthCredential } from "../session/auth-storage";
 
-const SPECIAL_MODEL_MANAGER_PROVIDER_IDS: readonly string[] = [
+export const SPECIAL_MODEL_MANAGER_PROVIDER_IDS: readonly string[] = [
 	"google-antigravity",
 	"google-gemini-cli",
 	"openai-codex",
 ];
 
-export const STARTUP_MODEL_CACHE_PROVIDER_IDS: readonly string[] = [
+const STARTUP_MODEL_CACHE_PROVIDER_IDS_RECORD: Record<string, true> = Object.create(null);
+for (const providerId of [
 	...PROVIDER_DESCRIPTORS.map(descriptor => descriptor.providerId),
 	...SPECIAL_MODEL_MANAGER_PROVIDER_IDS,
-];
+	...MODELS_DEV_CATALOG_PROVIDER_IDS,
+]) {
+	STARTUP_MODEL_CACHE_PROVIDER_IDS_RECORD[providerId] = true;
+}
+
+export const STARTUP_MODEL_CACHE_PROVIDER_IDS: readonly string[] = Object.keys(STARTUP_MODEL_CACHE_PROVIDER_IDS_RECORD);
 
 // Sentinels for local-only OAuth tokens — declared inline to avoid loading
 // provider modules at startup. Must match packages/ai/src/registry/llama-cpp.ts,
@@ -71,6 +82,7 @@ export interface ProviderDiscoveryState {
 	optional: boolean;
 	stale: boolean;
 	fetchedAt?: number;
+	source?: ModelResolutionSource;
 	models: string[];
 	error?: string;
 }

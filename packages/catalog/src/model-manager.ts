@@ -21,6 +21,8 @@ export interface ModelsDevFallback<TApi extends Api = Api, TPayload = unknown> {
 	fetch(): Promise<TPayload>;
 	/** Maps payload into provider models. */
 	map(payload: TPayload, providerId: Provider): readonly ModelSpec<TApi>[];
+	/** When true, mapped rows can add model ids but cannot replace static metadata. */
+	additiveOnly?: boolean;
 }
 
 /**
@@ -58,17 +60,25 @@ export interface ModelManagerOptions<TApi extends Api = Api, TModelsDevPayload =
 }
 
 /**
+ * Catalog source that most recently refreshed the resolved provider snapshot.
+ */
+export type ModelResolutionSource = "bundled" | "cache" | "models.dev" | "provider";
+
+/**
  * Resolution result.
  *
  * `stale` is false when the resolved catalog is authoritative for the selected provider:
- * - a dynamic endpoint fetch succeeded in this call (an empty catalog is still
+ * - a provider endpoint fetch succeeded in this call (an empty catalog is still
  *   authoritative for the cycle, so downstream pruning of removed models runs),
+ * - a models.dev fetch succeeded for a provider without endpoint discovery,
  * - a still-fresh authoritative cache was reused in `online-if-uncached` mode, or
- * - the provider has no dynamic fetcher configured.
+ * - the provider has no remote fetcher configured.
  */
 export interface ModelResolutionResult<TApi extends Api = Api> {
 	models: Model<TApi>[];
 	stale: boolean;
+	source: ModelResolutionSource;
+	updatedAt?: number;
 }
 
 /**
@@ -219,14 +229,12 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 		(!dynamicModelsAuthoritative || cacheFingerprintMatches);
 	const dynamicFetcher = options.fetchDynamicModels;
 	const hasDynamicFetcher = typeof dynamicFetcher === "function";
-	const hasAuthoritativeCache = ((cache?.authoritative ?? false) && hasUsableFreshCache) || !hasDynamicFetcher;
+	const hasModelsDevFetcher = options.modelsDev !== undefined;
+	const hasRemoteFetcher = hasDynamicFetcher || hasModelsDevFetcher;
+	const hasAuthoritativeCache = ((cache?.authoritative ?? false) && hasUsableFreshCache) || !hasRemoteFetcher;
 	const cacheAgeMs = cache ? now() - cache.updatedAt : Number.POSITIVE_INFINITY;
-	const shouldFetchFromNetwork = shouldFetchRemoteSources(
-		strategy,
-		hasUsableFreshCache,
-		hasAuthoritativeCache,
-		cacheAgeMs,
-	);
+	const shouldFetchFromNetwork =
+		hasRemoteFetcher && shouldFetchRemoteSources(strategy, hasUsableFreshCache, hasAuthoritativeCache, cacheAgeMs);
 
 	// Cold-start fast path: when a fresh, authoritative cache exists, the network
 	// fetch is skipped, AND the static catalog slice is byte-identical to what
@@ -240,17 +248,31 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 		cacheFingerprintMatches &&
 		!cacheHasUnresolvedHeaders
 	) {
-		return { models: collapseBuiltModelVariants(restoredCache.models), stale: false };
+		return {
+			models: collapseBuiltModelVariants(restoredCache.models),
+			stale: false,
+			source: "cache",
+			updatedAt: cache.updatedAt,
+		};
 	}
 
 	const [fetchedModelsDevModels, fetchedDynamicModels] = shouldFetchFromNetwork
 		? await Promise.all([fetchModelsDev(options), dynamicFetcher ? fetchDynamicModels(dynamicFetcher) : null])
 		: [null, null];
-	const modelsDevModels = normalizeModelList<TApi>(fetchedModelsDevModels ?? []);
+	const modelsDevFetchSucceeded = fetchedModelsDevModels !== null;
+	const normalizedModelsDevModels = normalizeModelList<TApi>(fetchedModelsDevModels ?? []);
+	let modelsDevModels = normalizedModelsDevModels;
+	if (options.modelsDev?.additiveOnly && normalizedModelsDevModels.length > 0 && staticModels.length > 0) {
+		const staticModelIds = new Set(staticModels.map(model => model.id));
+		modelsDevModels = normalizedModelsDevModels.filter(model => !staticModelIds.has(model.id));
+	}
 	const shouldUseFreshCacheAsAuthoritative =
 		strategy === "online-if-uncached" && hasUsableFreshCache && hasAuthoritativeCache;
 	const dynamicFetchSucceeded = fetchedDynamicModels !== null;
-	const cacheModels = dynamicFetchSucceeded
+	// Endpoint discovery, when configured, decides whether this cycle is
+	// authoritative. Otherwise a successful shared-catalog fetch does.
+	const resolutionFetchSucceeded = hasDynamicFetcher ? dynamicFetchSucceeded : modelsDevFetchSucceeded;
+	const cacheModels = resolutionFetchSucceeded
 		? []
 		: prepareCacheModelsForStaticMismatch(
 				usableCachedModels,
@@ -259,36 +281,39 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 				options.dropCachedModelIdsOnStaticMismatch,
 			);
 	const dynamicModels = fetchedDynamicModels ?? [];
-	// A successful empty result stays authoritative for THIS cycle (so an
+	// A successful empty endpoint result stays authoritative for THIS cycle (so an
 	// intentional catalog emptying still prunes removed models downstream), but
 	// is NOT pinned into the cache as authoritative — that would suppress the
-	// short retry that recovers a transient empty response (#6620). The two
-	// concerns are deliberately separate: result authority vs. cache retry.
-	const dynamicCacheAuthoritative = dynamicFetchSucceeded && dynamicModels.length > 0;
+	// short retry that recovers a transient empty response (#6620). Shared
+	// models.dev snapshots may be empty for one provider and remain authoritative.
+	const cacheAuthoritative = hasDynamicFetcher
+		? dynamicFetchSucceeded && dynamicModels.length > 0
+		: modelsDevFetchSucceeded;
 	const mergedWithCache = mergeDynamicModels(mergeModelSources(staticModels, modelsDevModels), cacheModels);
 	const mergedModels = mergeDynamicModels(mergedWithCache, dynamicModels);
 	const models = collapseBuiltModelVariants(
 		dynamicModelsAuthoritative && dynamicFetchSucceeded ? retainModelIds(mergedModels, dynamicModels) : mergedModels,
 	);
-	const dynamicAuthoritative = !hasDynamicFetcher || dynamicFetchSucceeded || shouldUseFreshCacheAsAuthoritative;
+	const resolutionAuthoritative = !hasRemoteFetcher || resolutionFetchSucceeded || shouldUseFreshCacheAsAuthoritative;
+	const remoteUpdatedAt = dynamicFetchSucceeded || modelsDevFetchSucceeded ? now() : undefined;
 	if (shouldFetchFromNetwork) {
-		if (dynamicFetchSucceeded) {
+		if (resolutionFetchSucceeded) {
 			const mergedSnapshot = mergeDynamicModels(mergeModelSources(staticModels, modelsDevModels), dynamicModels);
 			const snapshotModels = dynamicModelsAuthoritative
 				? retainModelIds(mergedSnapshot, dynamicModels)
 				: mergedSnapshot;
 			writeModelCache(
 				cacheProviderId,
-				now(),
+				remoteUpdatedAt!,
 				collapseBuiltModelVariants(snapshotModels),
-				dynamicCacheAuthoritative,
+				cacheAuthoritative,
 				staticFingerprint,
 				dbPath,
 				staticModels,
 				restorableHeaderFallback,
 			);
 		} else {
-			// Dynamic fetch failed — update cache with a non-authoritative snapshot so
+			// Remote fetch failed — update cache with a non-authoritative snapshot so
 			// stale state remains visible while retry backoff still applies.
 			const latestCache = readModelCache<TApi>(cacheProviderId, ttlMs, now, dbPath);
 			const latestRestoredCache = restoreCachedModelHeaders(
@@ -325,9 +350,18 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 			);
 		}
 	}
+	const source: ModelResolutionSource = dynamicFetchSucceeded
+		? "provider"
+		: modelsDevFetchSucceeded
+			? "models.dev"
+			: cache
+				? "cache"
+				: "bundled";
 	return {
 		models,
-		stale: !dynamicAuthoritative,
+		stale: !resolutionAuthoritative,
+		source,
+		...(remoteUpdatedAt !== undefined ? { updatedAt: remoteUpdatedAt } : cache ? { updatedAt: cache.updatedAt } : {}),
 	};
 }
 
