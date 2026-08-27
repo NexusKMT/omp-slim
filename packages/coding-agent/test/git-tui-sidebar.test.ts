@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { $ } from "bun";
+import { parseVerdict } from "../src/cli/git-tui/ai-stage";
 import { AvatarLoader } from "../src/cli/git-tui/avatar";
 import { Sidebar, type SidebarAction } from "../src/cli/git-tui/sidebar";
 import { GitModel } from "../src/cli/git-tui/state";
@@ -78,7 +79,7 @@ class SidebarHarness {
 	/** Apply the last raised stage/unstage action the way GitTuiComponent#runAction does. */
 	async applyLastAction(): Promise<void> {
 		const action = this.actions.at(-1);
-		if (!action || action.type === "commit" || action.type === "generate")
+		if (!action || (action.type !== "stage" && action.type !== "unstage"))
 			throw new Error("no stage/unstage action was raised");
 		if (action.type === "stage") await this.model.stage(action.selection?.files);
 		else await this.model.unstage(action.selection?.files);
@@ -262,5 +263,63 @@ describe("git tui sidebar staging", () => {
 				stageAll: true,
 			});
 		});
+	});
+	test("wand pill opens the AI textbox; enter raises stage-ai with the typed prompt", async () => {
+		await withDirtyRepo(async ({ sidebar, actions }) => {
+			sidebar.setFocused(true);
+			const strip = (line: string): string => line.replace(/\x1b\[[0-9;]*m/g, "");
+			const lines = sidebar.render(44, 30);
+			const headerRow = lines.findIndex(line => strip(line).includes("Unstaged Files"));
+			const header = strip(lines[headerRow] ?? "");
+			// Non-nerd preset renders the wand pill as ✦ next to Stage All.
+			const wandCol = header.indexOf("✦");
+			expect(wandCol).toBeGreaterThan(header.indexOf("Stage All"));
+
+			// Clicking the wand opens the textbox row under the header without staging anything.
+			sidebar.handleClick(headerRow, wandCol);
+			expect(actions).toEqual([]);
+			expect(sidebar.editing).toBe(true);
+
+			for (const ch of "all comment changes") sidebar.handleInput(ch);
+			sidebar.handleInput("\r");
+			expect(actions).toEqual([{ type: "stage-ai", prompt: "all comment changes" }]);
+			// Submission closes the box and clears the typed prompt.
+			expect(sidebar.aiInput.getValue()).toBe("");
+			expect(sidebar.render(44, 30).some(line => strip(line).includes("What should we stage?"))).toBe(false);
+		});
+	});
+
+	test("escape closes the AI textbox without raising an action and clears the draft", async () => {
+		await withDirtyRepo(async ({ sidebar, actions }) => {
+			sidebar.setFocused(true);
+			const strip = (line: string): string => line.replace(/\x1b\[[0-9;]*m/g, "");
+			const lines = sidebar.render(44, 30);
+			const headerRow = lines.findIndex(line => strip(line).includes("Unstaged Files"));
+			sidebar.handleClick(headerRow, strip(lines[headerRow] ?? "").indexOf("✦"));
+			for (const ch of "abc") sidebar.handleInput(ch);
+
+			expect(sidebar.handleEscape()).toBe(true);
+			expect(actions).toEqual([]);
+			expect(sidebar.aiInput.getValue()).toBe("");
+			// Empty prompt + enter must not raise an action either.
+			sidebar.handleClick(headerRow, strip(lines[headerRow] ?? "").indexOf("✦"));
+			sidebar.handleInput("\r");
+			expect(actions).toEqual([]);
+		});
+	});
+});
+
+describe("git tui ai-stage verdict parsing", () => {
+	test("earliest bare yes accepts; no, mixed order, and noise reject", () => {
+		expect(parseVerdict("yes")).toBe(true);
+		expect(parseVerdict("Yes.")).toBe(true);
+		expect(parseVerdict("I would say yes")).toBe(true);
+		expect(parseVerdict("no")).toBe(false);
+		expect(parseVerdict("no, though parts could be yes")).toBe(false);
+		expect(parseVerdict("yes — but actually no")).toBe(true);
+		expect(parseVerdict("")).toBe(false);
+		expect(parseVerdict("maybe")).toBe(false);
+		// Substrings must not match: "eyes"/"nose" carry no verdict.
+		expect(parseVerdict("eyes nose")).toBe(false);
 	});
 });

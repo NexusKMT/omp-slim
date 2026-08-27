@@ -32,6 +32,8 @@ export type SidebarAction =
 	| { type: "stage"; selection?: { files: ChangedFile[]; label: string } }
 	| { type: "unstage"; selection?: { files: ChangedFile[]; label: string } }
 	| { type: "generate" }
+	/** Wand pill: AI-filter the unstaged tree against a natural-language prompt. */
+	| { type: "stage-ai"; prompt: string }
 	| { type: "commit"; message: string; amend: boolean; stageAll: boolean };
 
 type FileTarget = { kind: "file"; file: ChangedFile } | { kind: "dir"; key: string };
@@ -44,6 +46,8 @@ type Target =
 	| SectionTarget
 	| { kind: "stage-all" }
 	| { kind: "unstage-all" }
+	| { kind: "stage-ai" }
+	| { kind: "stage-ai-input" }
 	| { kind: "amend" }
 	| { kind: "summary" }
 	| { kind: "description" }
@@ -158,22 +162,33 @@ function dirRowText(entry: FileEntry, width: number, selected: boolean, focused:
 /** Section header row: clicking the label toggles the fold; the action pill stages/unstages. */
 function sectionHeaderRow(
 	label: string,
-	action: string,
+	pills: readonly { action: string; target: Target }[],
 	target: Target,
-	pillTarget: Target,
 	width: number,
 	selected: boolean,
 	focused: boolean,
 ): Row {
 	const left = theme.bold(label);
-	const right = softPill(` ${action} `, { active: true });
-	const pad = Math.max(1, width - 2 - visibleWidth(left) - visibleWidth(right));
-	const line = ` ${left}${" ".repeat(pad)}${right} `;
-	const from = 1 + visibleWidth(left) + pad;
+	const rendered = pills.map(pill => softPill(` ${pill.action} `, { active: true }));
+	const rightWidth = rendered.reduce((sum, text) => sum + visibleWidth(text), 0) + Math.max(0, rendered.length - 1);
+	const pad = Math.max(1, width - 2 - visibleWidth(left) - rightWidth);
+	let line = ` ${left}${" ".repeat(pad)}`;
+	let col = 1 + visibleWidth(left) + pad;
+	const hits: Row["hits"] = [];
+	rendered.forEach((text, index) => {
+		if (index > 0) {
+			line += " ";
+			col += 1;
+		}
+		hits.push({ from: col, to: col + visibleWidth(text), target: pills[index].target });
+		line += text;
+		col += visibleWidth(text);
+	});
+	line += " ";
 	return {
 		text: selected && focused ? `${withBg(line, selectionBgAnsi())}\x1b[0m` : line,
 		target,
-		hits: [{ from, to: from + visibleWidth(right), target: pillTarget }],
+		hits,
 	};
 }
 
@@ -187,10 +202,13 @@ export class Sidebar {
 	readonly #requestRender: () => void;
 	readonly summary = new Input();
 	readonly description = new Editor(getEditorTheme());
+	/** "What should we stage?" textbox opened by the unstaged-header wand pill. */
+	readonly aiInput = new Input();
 	readonly #imageBudget: ImageBudget | undefined;
 	focused = false;
 	amend = false;
 	generating = false;
+	#aiPromptOpen = false;
 	/** File-list presentation: flat paths or a collapsible directory tree. */
 	viewStyle: "path" | "tree" = "tree";
 	readonly #collapsed = new Set<string>();
@@ -246,6 +264,7 @@ export class Sidebar {
 		this.#onFocusDiff = options.onFocusDiff;
 		this.#requestRender = options.requestRender;
 		this.summary.prompt = "";
+		this.aiInput.prompt = "";
 		this.description.setBorderVisible(false);
 		this.description.setMaxHeight(5);
 	}
@@ -410,6 +429,7 @@ export class Sidebar {
 			pushSection(headFiles ?? [], "commit");
 		} else {
 			pushTarget({ kind: "section", area: "unstaged" });
+			if (this.#aiPromptOpen) pushTarget({ kind: "stage-ai-input" });
 			if (!this.#collapsedSections.has("unstaged")) pushSection(this.#model.unstaged, "unstaged");
 			pushTarget({ kind: "section", area: "staged" });
 			if (!this.#collapsedSections.has("staged")) pushSection(this.#model.staged, "staged");
@@ -433,6 +453,7 @@ export class Sidebar {
 		this.#selectedKey = targetKey(target);
 		this.summary.focused = this.focused && target.kind === "summary";
 		this.description.focused = this.focused && target.kind === "description";
+		this.aiInput.focused = this.focused && target.kind === "stage-ai-input";
 		if (target.kind === "file") this.#onSelectFile(target.file);
 		this.#requestRender();
 	}
@@ -443,6 +464,7 @@ export class Sidebar {
 		const target = this.selected;
 		this.summary.focused = focused && target?.kind === "summary";
 		this.description.focused = focused && target?.kind === "description";
+		this.aiInput.focused = focused && target?.kind === "stage-ai-input";
 	}
 
 	#moveSelection(delta: number): void {
@@ -481,6 +503,11 @@ export class Sidebar {
 			case "unstage-all":
 				this.#onAction({ type: "unstage" });
 				break;
+			case "stage-ai":
+				this.#openAiPrompt();
+				break;
+			case "stage-ai-input":
+				break;
 			case "amend":
 				this.#toggleAmend();
 				break;
@@ -517,6 +544,21 @@ export class Sidebar {
 		if (files.length === 0) return null;
 		const selection = { files, label: `${dirPath}/` };
 		return area === "unstaged" ? { type: "stage", selection } : { type: "unstage", selection };
+	}
+
+	/** Open the AI staging textbox under the unstaged header and focus it. */
+	#openAiPrompt(): void {
+		this.#aiPromptOpen = true;
+		this.#treeVersion++;
+		this.#rebuildTargets();
+		this.#select({ kind: "stage-ai-input" });
+	}
+
+	#closeAiPrompt(): void {
+		this.#aiPromptOpen = false;
+		this.aiInput.setValue("");
+		this.#treeVersion++;
+		this.#requestRender();
 	}
 
 	#toggleAmend(): void {
@@ -563,6 +605,11 @@ export class Sidebar {
 	/** Escape while the sidebar has focus: blur a text input first. True when consumed. */
 	handleEscape(): boolean {
 		const target = this.selected;
+		if (target?.kind === "stage-ai-input") {
+			this.#closeAiPrompt();
+			this.#select({ kind: "section", area: "unstaged" });
+			return true;
+		}
 		if (target?.kind === "summary" || target?.kind === "description") {
 			this.#select({ kind: "commit-button" });
 			return true;
@@ -572,7 +619,10 @@ export class Sidebar {
 	/** True while a commit-form text input is capturing letter keys. */
 	get editing(): boolean {
 		const target = this.selected;
-		return this.focused && (target?.kind === "summary" || target?.kind === "description");
+		return (
+			this.focused &&
+			(target?.kind === "summary" || target?.kind === "description" || target?.kind === "stage-ai-input")
+		);
 	}
 
 	/**
@@ -668,6 +718,25 @@ export class Sidebar {
 	handleInput(data: string): void {
 		this.#rebuildTargets();
 		const target = this.selected;
+
+		if (target?.kind === "stage-ai-input" && this.focused) {
+			if (matchesKey(data, "enter")) {
+				const promptText = this.aiInput.getValue().trim();
+				if (promptText.length > 0) {
+					this.#closeAiPrompt();
+					this.#select({ kind: "section", area: "unstaged" });
+					this.#onAction({ type: "stage-ai", prompt: promptText });
+				}
+				return;
+			}
+			if (matchesKey(data, "up")) return this.#moveSelection(-1);
+			if (matchesKey(data, "down")) return this.#moveSelection(1);
+			if (!matchesKey(data, "pageUp") && !matchesKey(data, "pageDown")) {
+				this.aiInput.handleInput(data);
+				this.#requestRender();
+				return;
+			}
+		}
 
 		if (target?.kind === "summary" && this.focused) {
 			if (matchesKey(data, "up")) return this.#moveSelection(-1);
@@ -853,17 +922,21 @@ export class Sidebar {
 		const rows: Row[] = [];
 		const unstaged: SectionTarget = { kind: "section", area: "unstaged" };
 		const unstagedFolded = this.#collapsedSections.has("unstaged");
+		const wand = theme.getSymbolPreset() === "nerd" ? "" : "✦";
 		rows.push(
 			sectionHeaderRow(
 				`${unstagedFolded ? "▸" : "▾"} Unstaged Files (${this.#model.unstaged.length})`,
-				"Stage All",
+				[
+					{ action: "Stage All", target: { kind: "stage-all" } },
+					{ action: wand, target: { kind: "stage-ai" } },
+				],
 				unstaged,
-				{ kind: "stage-all" },
 				width,
 				isSelected(unstaged),
 				this.focused,
 			),
 		);
+		if (this.#aiPromptOpen) rows.push(this.#aiPromptRow(width, isSelected));
 		if (!unstagedFolded) {
 			rows.push(...this.#sectionRows(this.#model.unstaged, "unstaged", width));
 			if (this.#model.unstaged.length === 0) rows.push({ text: theme.fg("dim", "   no unstaged files") });
@@ -874,9 +947,8 @@ export class Sidebar {
 		rows.push(
 			sectionHeaderRow(
 				`${stagedFolded ? "▸" : "▾"} Staged Files (${this.#model.staged.length})`,
-				"Unstage All",
+				[{ action: "Unstage All", target: { kind: "unstage-all" } }],
 				staged,
-				{ kind: "unstage-all" },
 				width,
 				isSelected(staged),
 				this.focused,
@@ -887,6 +959,16 @@ export class Sidebar {
 			if (this.#model.staged.length === 0) rows.push({ text: theme.fg("dim", "   no staged files") });
 		}
 		return rows;
+	}
+	/** Inline "What should we stage?" textbox under the unstaged header. */
+	#aiPromptRow(width: number, isSelected: (target: Target) => boolean): Row {
+		const target: Target = { kind: "stage-ai-input" };
+		const bar = isSelected(target) ? theme.fg("accent", "▎") : theme.fg("borderMuted", "▏");
+		const line =
+			this.aiInput.getValue().length === 0 && !this.aiInput.focused
+				? theme.fg("dim", "What should we stage?")
+				: (this.aiInput.render(width - 4)[0] ?? "");
+		return { text: ` ${bar}${line}`, target };
 	}
 
 	#commitFormRows(width: number, isSelected: (target: Target) => boolean): Row[] {

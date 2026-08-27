@@ -5,10 +5,13 @@
 ### Added
 
 - Include token usage statistics in inspect_image tool output
+- Pressing the session model shortcut (alt+p) again inside the picker toggles a red Task mode that switches the Task subagent's model for this session instead.
+- Git TUI: an AI staging wand next to "Stage All" asks "What should we stage?" and stages only the matching changes — the tiny/smol model filters files, then hunks, fully in parallel (e.g. "all comment changes").
 
 ### Fixed
 
 - Fixed `inspect_image` selecting a text-only vision/default role when an image-capable model was available on the active provider.
+- Improved unexpected-stop recovery for reasoning-only stalls by requiring the next concrete tool action instead of repeated analysis.
 
 ## [18.0.8] - 2026-08-27
 
