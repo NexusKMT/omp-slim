@@ -1,6 +1,6 @@
 import type { Usage } from "@oh-my-pi/pi-ai";
 import { Container, Spacer, Text } from "@oh-my-pi/pi-tui";
-import { formatNumber } from "@oh-my-pi/pi-utils";
+import { formatDuration, formatNumber } from "@oh-my-pi/pi-utils";
 import { theme } from "../../modes/theme/theme";
 
 /** Below this the rate is nonsense (cached/instant responses yield absurd tok/s). */
@@ -15,13 +15,40 @@ function formatUsageTimestamp(ms: number): string {
 	return `${date} ${time}`;
 }
 
+/**
+ * Prompt→yield wall time for a turn: from the user prompt's timestamp to the
+ * final assistant message's creation, plus that response's provider-reported
+ * request duration (the only wall-clock the provider gives us) — so hooks, tool
+ * calls, and the final generation all count. Undefined when the turn start is
+ * unknown (mid-attach) or the math is non-positive.
+ */
+export function turnElapsedMs(
+	turnStartedAt: number | undefined,
+	message: { timestamp: number; duration?: number },
+): number | undefined {
+	if (turnStartedAt === undefined) return undefined;
+	const elapsed = message.timestamp - turnStartedAt + (message.duration ?? 0);
+	return elapsed > 0 ? elapsed : undefined;
+}
+
 /** Format the metrics shared by standalone usage blocks and compact tool groups. */
-export function formatUsageRow(usage: Usage, durationMs?: number, ttftMs?: number, timestamp?: number): string {
+export function formatUsageRow(
+	usage: Usage,
+	durationMs?: number,
+	ttftMs?: number,
+	timestamp?: number,
+	turnElapsedMs?: number,
+): string {
 	const totalInput = usage.input + usage.cacheWrite;
 	const parts: string[] = [];
 	// Lead with the turn's local wall-clock time (down to the second), log-line style.
 	if (timestamp !== undefined && Number.isFinite(timestamp) && timestamp > 0) {
 		parts.push(formatUsageTimestamp(timestamp));
+	}
+	// The delta the operator actually waited, clock-suffixed so it reads apart
+	// from the TTFT figure below (which reuses the same clock icon).
+	if (turnElapsedMs !== undefined && turnElapsedMs > 0) {
+		parts.push(`${theme.icon.time}Δ${formatDuration(turnElapsedMs)}`);
 	}
 	parts.push(`${theme.icon.input} ${formatNumber(totalInput)}`);
 	parts.push(`${theme.icon.output} ${formatNumber(usage.output)}`);
@@ -41,12 +68,18 @@ export function formatUsageRow(usage: Usage, durationMs?: number, ttftMs?: numbe
 	return parts.join("  ");
 }
 
-// `timestamp` is optional and trails the throughput args to preserve the existing
-// (usage, durationMs, ttftMs) call contract — this function is part of the package's
-// public export surface (./modes/components/*).
-export function createUsageRowBlock(usage: Usage, durationMs?: number, ttftMs?: number, timestamp?: number): Container {
+// `timestamp` and `turnElapsedMs` are optional and trail the throughput args to
+// preserve the existing (usage, durationMs, ttftMs) call contract — this
+// function is part of the package's public export surface (./modes/components/*).
+export function createUsageRowBlock(
+	usage: Usage,
+	durationMs?: number,
+	ttftMs?: number,
+	timestamp?: number,
+	turnElapsedMs?: number,
+): Container {
 	const block = new Container();
 	block.addChild(new Spacer(1));
-	block.addChild(new Text(theme.fg("dim", formatUsageRow(usage, durationMs, ttftMs, timestamp)), 1, 0));
+	block.addChild(new Text(theme.fg("dim", formatUsageRow(usage, durationMs, ttftMs, timestamp, turnElapsedMs)), 1, 0));
 	return block;
 }

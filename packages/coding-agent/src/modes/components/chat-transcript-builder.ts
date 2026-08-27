@@ -57,7 +57,7 @@ import { groupedReadUsageCallIds, ReadToolGroupComponent, readArgsCollapseIntoGr
 import { SkillMessageComponent } from "./skill-message";
 import { ToolExecutionComponent } from "./tool-execution";
 import { TranscriptContainer } from "./transcript-container";
-import { createUsageRowBlock } from "./usage-row";
+import { createUsageRowBlock, turnElapsedMs } from "./usage-row";
 import { CollapsedSyntheticMessageComponent, UserMessageComponent } from "./user-message";
 
 export interface ChatTranscriptBuilderDeps {
@@ -91,6 +91,8 @@ export class ChatTranscriptBuilder {
 	#pendingUsageTtft: number | undefined;
 	#pendingUsageTimestamp: number | undefined;
 	#pendingReadUsageCallIds: string[] | undefined;
+	#pendingUsageElapsedMs: number | undefined;
+	#turnStartedAt: number | undefined;
 	#lastAssistantUsage: Usage | undefined;
 	#waitingPoll: ToolExecutionComponent | null = null;
 	#todoSnapshot: ToolExecutionComponent | null = null;
@@ -143,6 +145,8 @@ export class ChatTranscriptBuilder {
 		this.#pendingUsageTtft = undefined;
 		this.#pendingUsageTimestamp = undefined;
 		this.#pendingReadUsageCallIds = undefined;
+		this.#pendingUsageElapsedMs = undefined;
+		this.#turnStartedAt = undefined;
 		this.#lastAssistantUsage = undefined;
 		this.#waitingPoll = null;
 		this.#todoSnapshot = null;
@@ -215,6 +219,7 @@ export class ChatTranscriptBuilder {
 				this.#pendingUsageDuration,
 				this.#pendingUsageTtft,
 				this.#pendingUsageTimestamp,
+				this.#pendingUsageElapsedMs,
 			) ??
 				false);
 		if (!usageAttached) {
@@ -226,6 +231,7 @@ export class ChatTranscriptBuilder {
 					this.#pendingUsageDuration,
 					this.#pendingUsageTtft,
 					this.#pendingUsageTimestamp,
+					this.#pendingUsageElapsedMs,
 				),
 			);
 		}
@@ -234,6 +240,7 @@ export class ChatTranscriptBuilder {
 		this.#pendingUsageTtft = undefined;
 		this.#pendingUsageTimestamp = undefined;
 		this.#pendingReadUsageCallIds = undefined;
+		this.#pendingUsageElapsedMs = undefined;
 	}
 
 	#appendChatMessage(message: AgentMessage): void {
@@ -251,6 +258,7 @@ export class ChatTranscriptBuilder {
 				break;
 			case "user":
 			case "developer": {
+				if (message.role === "user") this.#turnStartedAt = message.timestamp;
 				// A user prompt closes the poll-displacement window, same as the live path.
 				if (message.role === "user") this.#resolveWaitingPoll();
 				if (message.role === "user") this.#resolveTodoSnapshot();
@@ -312,6 +320,11 @@ export class ChatTranscriptBuilder {
 			default:
 				message satisfies never;
 		}
+	}
+
+	/** Prompt→yield wall time for the current turn, or undefined when unknown. */
+	#turnElapsedMs(message: Extract<AgentMessage, { role: "assistant" }>): number | undefined {
+		return turnElapsedMs(this.#turnStartedAt, message);
 	}
 
 	#appendAssistantMessage(message: Extract<AgentMessage, { role: "assistant" }>): void {
@@ -430,6 +443,8 @@ export class ChatTranscriptBuilder {
 		this.#pendingUsageTtft = message.ttft;
 		this.#pendingUsageTimestamp = message.timestamp;
 		this.#pendingReadUsageCallIds = this.#pendingUsage ? groupedReadUsageCallIds(message) : undefined;
+		this.#pendingUsageElapsedMs =
+			this.#pendingUsage && settings.get("display.showTurnTime") ? this.#turnElapsedMs(message) : undefined;
 	}
 
 	#appendToolResult(message: Extract<AgentMessage, { role: "toolResult" }>): void {

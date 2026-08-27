@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Transcript usage rows now show the total prompt-to-yield time (Δ + clock, including tool calls) after the turn timestamp, gated by `display.showTurnTime`.
+
 ## [18.0.7] - 2026-08-26
 
 ### Added

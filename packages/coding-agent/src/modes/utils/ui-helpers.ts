@@ -36,7 +36,7 @@ import { StrippedToolCallsPlaceholder } from "../../modes/components/stripped-to
 import { ToolActivityContainer } from "../../modes/components/tool-activity";
 import { ToolExecutionComponent, type ToolExecutionHandle } from "../../modes/components/tool-execution";
 import { TranscriptBlock, TranscriptContainer } from "../../modes/components/transcript-container";
-import { createUsageRowBlock } from "../../modes/components/usage-row";
+import { createUsageRowBlock, turnElapsedMs } from "../../modes/components/usage-row";
 import { UserMessageComponent } from "../../modes/components/user-message";
 import { decodeStreamedToolArgs, streamingStringKeysForTool } from "../../modes/controllers/tool-args-reveal";
 import { materializeImageReferenceLinksSync } from "../../modes/image-references";
@@ -378,6 +378,8 @@ export class UiHelpers {
 		let pendingUsageTtft: number | undefined;
 		let pendingUsageTimestamp: number | undefined;
 		let pendingReadUsageCallIds: string[] | undefined;
+		let pendingUsageTurnElapsed: number | undefined;
+		let turnStartedAt: number | undefined;
 		const flushPendingUsage = () => {
 			if (!pendingUsage) return;
 			const usageAttached =
@@ -388,13 +390,20 @@ export class UiHelpers {
 					pendingUsageDuration,
 					pendingUsageTtft,
 					pendingUsageTimestamp,
+					pendingUsageTurnElapsed,
 				) ??
 					false);
 			if (!usageAttached) {
 				readGroup?.seal();
 				readGroup = null;
 				this.ctx.chatContainer.addChild(
-					createUsageRowBlock(pendingUsage, pendingUsageDuration, pendingUsageTtft, pendingUsageTimestamp),
+					createUsageRowBlock(
+						pendingUsage,
+						pendingUsageDuration,
+						pendingUsageTtft,
+						pendingUsageTimestamp,
+						pendingUsageTurnElapsed,
+					),
 				);
 			}
 			pendingUsage = undefined;
@@ -402,6 +411,7 @@ export class UiHelpers {
 			pendingUsageTtft = undefined;
 			pendingUsageTimestamp = undefined;
 			pendingReadUsageCallIds = undefined;
+			pendingUsageTurnElapsed = undefined;
 		};
 		// Rebuild-time mirror of the event controller's displaceable-poll
 		// bookkeeping: a `hub` wait that found every watched job still running is
@@ -606,6 +616,9 @@ export class UiHelpers {
 				pendingUsageTtft = message.ttft;
 				pendingUsageTimestamp = message.timestamp;
 				pendingReadUsageCallIds = pendingUsage ? groupedReadUsageCallIds(message) : undefined;
+				pendingUsageTurnElapsed = this.ctx.settings.get("display.showTurnTime")
+					? turnElapsedMs(turnStartedAt, message)
+					: undefined;
 			} else if (message.role === "toolResult") {
 				if (options.preservedLiveToolCallIds?.has(message.toolCallId)) continue;
 				const pendingReadComponent = this.ctx.pendingTools.get(message.toolCallId);
@@ -678,6 +691,7 @@ export class UiHelpers {
 				// A user prompt closes the displacement window, same as the live path.
 				if (message.role === "user") resolveWaitingPoll();
 				if (message.role === "user") resolveTodoSnapshot();
+				if (message.role === "user") turnStartedAt = message.timestamp;
 				// All other messages use standard rendering
 				this.ctx.addMessageToChat(message, { reuseSettledComponent: options.reuseSettledComponents });
 			}
