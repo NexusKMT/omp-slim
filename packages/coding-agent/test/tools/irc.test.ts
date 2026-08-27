@@ -1,15 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
+import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { SettingPath } from "@oh-my-pi/pi-coding-agent/config/settings-schema";
 import { IrcBus, type IrcMessage } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { type CoordinationDetails, HubTool, isIrcEnabled } from "@oh-my-pi/pi-coding-agent/tools/hub";
+import { TempDir } from "@oh-my-pi/pi-utils";
 
 interface FakeSession {
 	session: AgentSession;
@@ -23,20 +28,22 @@ interface FakeSession {
 	setError: (error: Error) => void;
 	/** Side effect run on delivery (e.g. reply via the bus). */
 	onDeliver: (fn: (msg: IrcMessage) => void) => void;
-	/** Flip the recipient's streaming (engagement) state. */
-	setStreaming: (value: boolean) => void;
+	/** Emit a terminal `agent_end` to the session's subscribers. */
+	endTurn: (options?: { isTerminal?: boolean }) => void;
 }
 
 function makeFakeSession(): FakeSession {
 	let outcome: "injected" | "woken" = "injected";
-	let streaming = true;
 	let nextError: Error | null = null;
 	let deliverHook: ((msg: IrcMessage) => void) | undefined;
+	const listeners = new Set<(event: AgentSessionEvent) => void>();
 	const delivered: IrcMessage[] = [];
 	const relayed: CustomMessage[] = [];
 	const session = {
-		get isStreaming() {
-			return streaming;
+		isStreaming: true,
+		subscribe: (listener: (event: AgentSessionEvent) => void) => {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
 		},
 		deliverIrcMessage: async (msg: IrcMessage) => {
 			if (nextError) {
@@ -65,8 +72,13 @@ function makeFakeSession(): FakeSession {
 		onDeliver: fn => {
 			deliverHook = fn;
 		},
-		setStreaming: value => {
-			streaming = value;
+		endTurn: options => {
+			const event = {
+				type: "agent_end",
+				messages: [],
+				isTerminal: options?.isTerminal ?? true,
+			} as unknown as AgentSessionEvent;
+			for (const listener of [...listeners]) listener(event);
 		},
 	};
 }
@@ -103,11 +115,43 @@ function createRealSession(overrides: Partial<Record<SettingPath, unknown>> = {}
 	return { session, sessionManager };
 }
 
+/** A real `AgentSession` driven by a mock model, so a prompt runs a genuine
+ *  turn and emits the real terminal `agent_end` after prompt unwind. */
+function createStreamingSession(modelRegistry: ModelRegistry, responses: MockResponse[]): { session: AgentSession } {
+	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	if (!model) throw new Error("Expected bundled anthropic model to exist");
+	const mock = createMockModel({ responses });
+	const session = new AgentSession({
+		agent: new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["system prompt"], tools: [], messages: [] },
+			streamFn: mock.stream,
+		}),
+		sessionManager: SessionManager.inMemory("/tmp"),
+		settings: Settings.isolated({ "compaction.enabled": false, "retry.enabled": false }),
+		modelRegistry,
+	});
+	return { session };
+}
+
 describe("IRC", () => {
 	let registry: AgentRegistry;
 	let bus: IrcBus;
 
 	const sessions: AgentSession[] = [];
+	let authDir: TempDir;
+	let authStorage: AuthStorage;
+	let modelRegistry: ModelRegistry;
+	beforeAll(async () => {
+		authDir = TempDir.createSync("@pi-irc-auth-");
+		authStorage = await AuthStorage.create(authDir.join("auth.db"));
+		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		modelRegistry = new ModelRegistry(authStorage, authDir.join("models.yml"));
+	});
+	afterAll(() => {
+		authStorage.close();
+		authDir.removeSync();
+	});
 	beforeEach(() => {
 		AgentRegistry.resetGlobalForTests();
 		AgentLifecycleManager.resetGlobalForTests();
@@ -828,12 +872,14 @@ describe("IRC", () => {
 			const main = makeFakeSession();
 			registry.register({ id: "0-Main", displayName: "main", kind: "main", session: main.session });
 			const sub = makeFakeSession();
-			// Recipient is mid-turn (streaming) when the awaited aside lands.
 			registry.register({ id: "0-Sub", displayName: "task", kind: "sub", session: sub.session, status: "running" });
 			sub.onDeliver(() => {
-				// It consumes the aside and ends its turn WITHOUT ever replying.
-				sub.setStreaming(false);
-				registry.setStatus("0-Sub", "idle", sub.session);
+				// The recipient consumes the aside and ends its turn WITHOUT replying.
+				// It stays `isStreaming === true` throughout: the terminal `agent_end`
+				// (emitted post-unwind, while the registry still reads the peer as
+				// running) is the only stop signal — a fix that watched `isStreaming`
+				// flipping false would miss it and block the full timeout.
+				sub.endTurn();
 			});
 
 			const tool = new HubTool(makeToolSession(registry, "0-Main"));
@@ -852,6 +898,57 @@ describe("IRC", () => {
 			expect(details?.waited ?? null).toBeNull();
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 			expect(text).toContain("0-Sub stopped without replying");
+		});
+
+		it("op=send await=true ignores a non-terminal (continuation) agent_end", async () => {
+			const main = makeFakeSession();
+			registry.register({ id: "0-Main", displayName: "main", kind: "main", session: main.session });
+			const sub = makeFakeSession();
+			registry.register({ id: "0-Sub", displayName: "task", kind: "sub", session: sub.session, status: "running" });
+			sub.onDeliver(() => {
+				// A mid-run continuation (auto-compaction / retry) emits a
+				// non-terminal agent_end; it must NOT settle the await early.
+				sub.endTurn({ isTerminal: false });
+				// The recipient then replies on the resumed turn.
+				void bus.send({ from: "0-Sub", to: "0-Main", body: "resumed reply" });
+			});
+
+			const tool = new HubTool(makeToolSession(registry, "0-Main"));
+			const result = await tool.execute("call-1", {
+				op: "send",
+				to: "0-Sub",
+				message: "ping",
+				await: true,
+				timeoutMs: 120_000,
+			});
+
+			const details = result.details as CoordinationDetails | undefined;
+			expect(details?.waited?.body).toBe("resumed reply");
+		});
+
+		it("await monitor aborts on a real AgentSession's terminal agent_end", async () => {
+			// End-to-end against a real session: it runs a genuine turn and emits its
+			// terminal `agent_end` only after the prompt unwinds. This pins the exact
+			// ordering the monitor relies on — the registry still reports the peer as
+			// running at the (deferred) idle transition, so keying on `isStreaming`
+			// flipping would strand the sender for the full timeout.
+			const { session: subSession } = createStreamingSession(modelRegistry, [{ content: ["done, not replying"] }]);
+			sessions.push(subSession);
+			registry.register({ id: "0-Main", displayName: "main", kind: "main", session: makeFakeSession().session });
+			registry.register({ id: "0-Sub", displayName: "task", kind: "sub", session: subSession, status: "running" });
+			const unsync = registry.syncSessionStatus("0-Sub", subSession);
+			try {
+				const waitP = bus.wait("0-Main", { from: "0-Sub" }, 120_000, undefined, {
+					drainPending: false,
+					awaitTarget: { registry, target: "0-Sub" },
+				});
+				await subSession.prompt("work");
+				await subSession.waitForIdle();
+				expect(subSession.isStreaming).toBe(false);
+				await expect(waitP).rejects.toThrow(/stopped without replying/);
+			} finally {
+				unsync();
+			}
 		});
 
 		it("op=send rejects await with to=all and self-sends", async () => {

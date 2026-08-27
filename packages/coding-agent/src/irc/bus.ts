@@ -18,6 +18,8 @@
 import { logger, Snowflake } from "@oh-my-pi/pi-utils";
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
+import type { AgentSession } from "../session/agent-session";
+import type { AgentSessionEvent } from "../session/agent-session-events";
 import type { CustomMessage } from "../session/messages";
 
 export interface IrcMessage {
@@ -319,25 +321,42 @@ export class IrcBus {
 		const awaitTarget = options?.awaitTarget;
 		if (awaitTarget) {
 			const { registry, target } = awaitTarget;
-			// Session `isStreaming` (not `registry.isRunning`) is the engagement
-			// signal: it stays true across mid-run continuations (auto-compaction /
-			// retry) that briefly flip the registry status to idle, so those flaps
-			// never masquerade as a terminal stop.
-			let engaged = registry.get(target)?.session?.isStreaming === true;
-			unsubscribeAwaitTarget = registry.onChange(() => {
+			let subscribedSession: AgentSession | null = null;
+			let unsubscribeSession: (() => void) | undefined;
+			// The peer's terminal `agent_end` is the authoritative "stopped" signal.
+			// It is emitted only after the peer's prompt fully unwinds (see
+			// AgentSession#flushPendingAgentEnd) and supersedes mid-run
+			// continuations (auto-compaction / retry), so — unlike the registry
+			// `idle` transition, which fires while `isStreaming` is still true — it
+			// fires exactly once, when the peer truly stops. A real reply resolves
+			// the waiter mid-turn before this ever fires, so cleanup tears it down.
+			const onSessionEvent = (event: AgentSessionEvent): void => {
+				if (event.type === "agent_end" && event.isTerminal !== false) {
+					settle({ kind: "abort", error: new IrcAwaitTargetStopped(target) });
+				}
+			};
+			const sync = (): void => {
 				const ref = registry.get(target);
+				// Gone or hard-aborted: no reply will ever come.
 				if (!ref || ref.status === "aborted") {
 					settle({ kind: "abort", error: new IrcAwaitTargetStopped(target) });
 					return;
 				}
-				if (ref.session?.isStreaming === true) {
-					engaged = true;
-					return;
+				// Follow the live session across a park→revive rebuild; tolerate a
+				// parked peer with no session yet (the send is about to revive it).
+				const session = ref.session;
+				if (session && session !== subscribedSession) {
+					unsubscribeSession?.();
+					subscribedSession = session;
+					unsubscribeSession = session.subscribe(onSessionEvent);
 				}
-				if (engaged) {
-					settle({ kind: "abort", error: new IrcAwaitTargetStopped(target) });
-				}
-			});
+			};
+			const unsubscribeChange = registry.onChange(sync);
+			unsubscribeAwaitTarget = () => {
+				unsubscribeChange();
+				unsubscribeSession?.();
+			};
+			sync();
 		}
 
 		return promise;
