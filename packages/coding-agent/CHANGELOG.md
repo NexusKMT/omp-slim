@@ -2,9 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added nonblocking shared model-catalog refresh with cached startup hydration and source freshness diagnostics, allowing newly published models for known providers to appear without a binary release.
+
 ## [18.0.7] - 2026-08-26
 
 ### Added
+
 
 - Added `omp usage clients` to report per-client token usage recorded by the auth broker, including the machine and application responsible for usage by provider. Supports `--days` and `--json` output.
 
