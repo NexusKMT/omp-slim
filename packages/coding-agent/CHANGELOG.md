@@ -34,6 +34,8 @@
 
 - Fixed the `aarch64-linux` `nix build` output segfaulting in the dynamic loader before startup by repointing the stale `DT_VERDEF` that `patchelf` leaves behind when it grows `.dynamic`, and surfaced smoke-test signal deaths in the build log instead of masking them ([#9881](https://github.com/can1357/oh-my-pi/issues/9881)).
 
+- Fixed `CTRL-O` now shows a status message ("Tool output expansion: enabled/disabled") after toggling, consistent with CTRL-T and CTRL-SHIFT-O.
+
 ## [18.0.7] - 2026-08-26
 
 ### Added
