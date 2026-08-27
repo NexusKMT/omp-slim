@@ -302,7 +302,8 @@ export class Theme {
 
 	/**
 	 * Apply a foreground over a controlled background, choosing a contrast-safe
-	 * fallback only when the theme token requests the terminal default.
+	 * fallback only when the theme token requests the terminal default and
+	 * reapplying it after nested full/foreground resets.
 	 */
 	fgOnBg(color: ThemeColor, background: ThemeBg, text: string): string {
 		const ansi = this.getFgOnBgAnsi(color, background);

@@ -74,6 +74,21 @@ describe("empty foreground contrast", () => {
 			setThemeInstance(dark);
 		}
 	});
+
+	it("reapplies the editor surface foreground after nested decorator resets", () => {
+		const { light, dark } = createBaseThemes();
+		try {
+			setThemeInstance(light);
+			const surfaceColor = getEditorTheme().surfaceColor;
+			if (!surfaceColor) throw new Error("Editor surface color is unavailable");
+
+			const styled = surfaceColor("before\x1b[39mafter-default\x1b[0mafter-full");
+			expect(styled).toContain("\x1b[39m\x1b[38;2;0;0;0mafter-default");
+			expect(styled).toContain("\x1b[0m\x1b[48;2;232;232;232m\x1b[38;2;0;0;0mafter-full");
+		} finally {
+			setThemeInstance(dark);
+		}
+	});
 });
 
 describe("isLightTheme (standalone)", () => {
