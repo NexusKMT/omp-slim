@@ -3416,7 +3416,6 @@ export class AgentSession {
 		request: ScheduledAgentContinueRequest,
 		coalescedSources: Set<string>,
 	): Promise<AgentContinueOutcome> {
-		this.#beginInFlight();
 		try {
 			const reverted = await this.#recovery.maybeRestoreRetryFallbackPrimary();
 			if (signal.aborted || this.#isDisposed) {
@@ -3449,9 +3448,6 @@ export class AgentSession {
 				stack: error instanceof Error ? error.stack : undefined,
 			});
 			return { status: "failed", error };
-		} finally {
-			this.#usagePreflightReadyForNextModelCall = false;
-			this.#endInFlight();
 		}
 	}
 
@@ -3493,6 +3489,7 @@ export class AgentSession {
 					return;
 				}
 
+				this.#beginInFlight();
 				const coalescedSources = new Set([options.source]);
 				const promise = this.#runAgentContinue(signal, request, coalescedSources);
 				const attempt: ActiveAgentContinue = {
@@ -3505,9 +3502,15 @@ export class AgentSession {
 				try {
 					this.#handleAgentContinueOutcome(await promise, request);
 				} finally {
+					// Clear the active attempt BEFORE #endInFlight(): the settle drain it
+					// triggers (#drainStrandedQueuedMessages -> queued-message-drain) runs
+					// synchronously and must start a fresh continue for messages queued
+					// after this attempt's final poll, not coalesce onto the finished one.
 					if (this.#activeAgentContinue === attempt) {
 						this.#activeAgentContinue = undefined;
 					}
+					this.#usagePreflightReadyForNextModelCall = false;
+					this.#endInFlight();
 				}
 			},
 			{

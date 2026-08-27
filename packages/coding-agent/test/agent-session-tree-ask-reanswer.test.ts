@@ -589,6 +589,41 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 		}
 	});
 
+	it("starts a fresh continue for work queued while a scheduled continuation settles", async () => {
+		// A continuation scheduled during the previous attempt's settle drain
+		// (#endInFlight -> #drainStrandedQueuedMessages -> queued-message-drain)
+		// must run its own agent.continue(), not coalesce onto the finished attempt
+		// and strand the queued message until the next prompt.
+		const ctx = await createTestSession({ inMemory: true });
+		const { session } = ctx;
+		let calls = 0;
+		const continueSpy = vi.spyOn(session.agent, "continue").mockImplementation(async () => {
+			calls++;
+			if (calls === 1) {
+				// The turn ended with a steer stranded past its final queue poll.
+				session.agent.steer({
+					role: "user",
+					content: "stranded",
+					steering: true,
+					attribution: "user",
+					timestamp: Date.now(),
+				});
+			} else {
+				session.agent.replaceQueues([], []);
+			}
+		});
+		try {
+			session.resumeAfterAskReanswer();
+			await session.waitForIdle();
+
+			expect(calls).toBe(2);
+			expect(session.agent.hasQueuedMessages()).toBe(false);
+		} finally {
+			continueSpy.mockRestore();
+			await ctx.cleanup();
+		}
+	});
+
 	it("(l) does not report a committed re-answer for a plain non-ask leaf move", async () => {
 		const ctx = await createTestSession({ inMemory: true });
 		try {
