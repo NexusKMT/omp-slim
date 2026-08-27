@@ -83,6 +83,8 @@ export class EventController {
 	#lastReadGroup: ReadToolGroupComponent | undefined = undefined;
 	/** Timestamp of the current turn's user prompt; drives the usage row's prompt→yield delta. */
 	#turnStartedAt: number | undefined = undefined;
+	/** When the last completed run ended; stale `#turnStartedAt` anchors are cleared against it. */
+	#lastAgentEndAt: number | undefined = undefined;
 	// Count of visible assistant content blocks (rendered non-empty text/thinking)
 	// already seen in the current streaming message. A newly appearing one breaks
 	// the read run: the rendered reasoning/answer is a visual separator, so reads
@@ -682,6 +684,7 @@ export class EventController {
 		this.#readToolCallAssistantComponents.clear();
 		this.#lastAssistantComponent = undefined;
 		this.#turnStartedAt = undefined;
+		this.#lastAgentEndAt = undefined;
 		this.#pinnedErrorComponent = undefined;
 		this.#pinnedErrorMessage = undefined;
 		this.#restorePinnedErrorInline = true;
@@ -765,6 +768,18 @@ export class EventController {
 	}
 
 	async #handleAgentStart(_event: Extract<AgentSessionEvent, { type: "agent_start" }>): Promise<void> {
+		// A run with no user prompt in it (synthetic-only: `/goal` kickoff,
+		// approved-plan execution) must not measure prompt→yield from an unrelated
+		// earlier prompt. Normal user turns reseed via message_start before
+		// agent_start; retries of the same turn keep the anchor because it still
+		// postdates the last completed run.
+		if (
+			this.#turnStartedAt !== undefined &&
+			this.#lastAgentEndAt !== undefined &&
+			this.#turnStartedAt < this.#lastAgentEndAt
+		) {
+			this.#turnStartedAt = undefined;
+		}
 		this.#clearApprovalPreviewGates();
 		// A new turn cannot inherit a foreground tool execution. A dropped
 		// agent_end (for example after a renderer exception) otherwise leaves a
@@ -1802,6 +1817,7 @@ export class EventController {
 	async #finishAgentEnd(event: Extract<AgentSessionEvent, { type: "agent_end" }>): Promise<void> {
 		this.#setTerminalProgress(false);
 		this.ctx.statusLine.markActivityEnd();
+		this.#lastAgentEndAt = Date.now();
 		this.#streamingReveal.stop();
 		this.#toolArgsReveal.flushAll();
 		if (this.ctx.loadingAnimation) {

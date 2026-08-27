@@ -205,7 +205,7 @@ describe("focus-attach mid-turn keeps the prompt→yield delta", () => {
 		resetSettingsForTest();
 	});
 
-	it("hands the replayed user timestamp to the controller so the live message_end row shows the delta", async () => {
+	function createFixture() {
 		const chatContainer = new TranscriptContainer();
 		chatContainer.setToolActivityVisible(true);
 		let helpers!: UiHelpers;
@@ -220,8 +220,8 @@ describe("focus-attach mid-turn keeps the prompt→yield delta", () => {
 			extensionRunner: undefined,
 			isTtsrAbortPending: false,
 			retryAttempt: 0,
-			isStreaming: true,
-			sessionManager: { getCwd: () => process.cwd(), putBlobSync: () => undefined },
+			isStreaming: false,
+			sessionManager: { getCwd: () => process.cwd(), putBlobSync: () => undefined, getSessionName: () => undefined },
 		};
 		const ctx = {
 			isInitialized: true,
@@ -235,15 +235,22 @@ describe("focus-attach mid-turn keeps the prompt→yield delta", () => {
 			hideToolActivity: false,
 			effectiveHideThinkingBlock: false,
 			proseOnlyThinking: true,
-			statusLine: { invalidate: vi.fn() },
+			statusLine: { invalidate: vi.fn(), markActivityEnd: vi.fn(), markActivityStart: vi.fn() },
 			updateEditorTopBorder: vi.fn(),
+			editor: { getText: () => "busy", setText: vi.fn() },
 			noteDisplayableThinkingContent: vi.fn(() => false),
+			locallySubmittedUserSignatures: new Set<string>(),
+			optimisticUserMessageSignature: undefined,
+			updatePendingMessagesDisplay: vi.fn(),
 			ensureLoadingAnimation: vi.fn(),
+			flushPendingModelSwitch: vi.fn(async () => {}),
+			flushPendingCommandOutput: vi.fn(),
 			session: viewSession,
 			viewSession,
 			sessionManager: viewSession.sessionManager,
 			showWarning: vi.fn(),
 			showPinnedError: vi.fn(),
+			clearPinnedError: vi.fn(),
 			clearTransientSessionUi: vi.fn(),
 			lastAssistantUsage: undefined,
 			eventController: undefined as unknown as EventController,
@@ -255,6 +262,23 @@ describe("focus-attach mid-turn keeps the prompt→yield delta", () => {
 		const controller = new EventController(ctx);
 		ctx.eventController = controller;
 		helpers = new UiHelpers(ctx);
+		return { controller, helpers, chatContainer, viewSession };
+	}
+
+	async function driveAssistantTurn(controller: EventController, message: AssistantFixture): Promise<void> {
+		await controller.handleEvent({ type: "message_start", message } as Extract<
+			AgentSessionEvent,
+			{ type: "message_start" }
+		>);
+		await controller.handleEvent({ type: "message_end", message } as Extract<
+			AgentSessionEvent,
+			{ type: "message_end" }
+		>);
+	}
+
+	it("hands the replayed user timestamp to the controller so the live message_end row shows the delta", async () => {
+		const { controller, helpers, chatContainer, viewSession } = createFixture();
+		viewSession.isStreaming = true;
 
 		// Focus attach: reset clears the controller's turn start, then the rebuild
 		// replays the user prompt; because the target is streaming, the generator
@@ -264,18 +288,37 @@ describe("focus-attach mid-turn keeps the prompt→yield delta", () => {
 
 		// The in-flight assistant message ends on the live controller — no user
 		// message_start follows, so only the handoff keeps the delta available.
-		const final = assistantMessage();
-		await controller.handleEvent({ type: "message_start", message: final } as Extract<
-			AgentSessionEvent,
-			{ type: "message_start" }
-		>);
-		await controller.handleEvent({ type: "message_end", message: final } as Extract<
-			AgentSessionEvent,
-			{ type: "message_end" }
-		>);
+		await driveAssistantTurn(controller, assistantMessage());
 
 		const rendered = renderedText(chatContainer);
 		expect(rendered).toContain(TURN_ELAPSED_LABEL);
 		expect(rendered).toContain(USAGE_LABEL);
+	});
+
+	it("clears a stale prompt anchor for a synthetic-only run", async () => {
+		const { controller, chatContainer } = createFixture();
+
+		// Turn 1: a real user prompt anchors the delta in the controller.
+		controller.resetTranscriptAnchors();
+		await controller.handleEvent({ type: "message_start", message: userMessage() } as Extract<
+			AgentSessionEvent,
+			{ type: "message_start" }
+		>);
+		await driveAssistantTurn(controller, assistantMessage());
+		expect(renderedText(chatContainer)).toContain(TURN_ELAPSED_LABEL);
+		await controller.handleEvent({ type: "agent_end", isTerminal: true, messages: [] } as Extract<
+			AgentSessionEvent,
+			{ type: "agent_end" }
+		>);
+
+		// Synthetic-only run (`/goal` kickoff, approved-plan execution): agent_start
+		// with no user message must not measure prompt→yield from the completed
+		// turn's prompt (which would fold the idle gap into the delta).
+		await controller.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
+		await driveAssistantTurn(controller, assistantMessage());
+
+		// Turn 1 keeps its row's delta; the synthetic run must not add another.
+		const occurrences = renderedText(chatContainer).match(/Δ1m/g)?.length ?? 0;
+		expect(occurrences).toBe(1);
 	});
 });

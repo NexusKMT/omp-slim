@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { streamGoogle } from "@oh-my-pi/pi-ai/providers/google";
 import { streamGoogleGeminiCli } from "@oh-my-pi/pi-ai/providers/google-gemini-cli";
@@ -61,6 +61,17 @@ function textOf(message: { content: Array<{ type: string; text?: string }> }): s
 
 const context: Context = { messages: [{ role: "user", content: "hi", timestamp: 1 }] };
 
+// Fixed request-start time for the retry-timestamp regression: the provider
+// stamps `output` with Date.now() when the request starts. Flipping the clock
+// inside the FIRST fetch (the empty attempt) makes a buggy retry reset re-stamp
+// with a later time, so "timestamp preserved" is distinguishable from
+// "timestamp re-stamped" without racing the provider's internal mutation.
+const REQUEST_START = 1_700_000_000_000;
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
 const genaiModel: Model<"google-generative-ai"> = buildModel({
 	id: "gemini-3-flash",
 	name: "Gemini 3 Flash",
@@ -121,9 +132,11 @@ function endpointFromInput(input: Parameters<FetchImpl>[0]): string {
 
 describe("Google empty-response retry (public + Vertex path)", () => {
 	it("retries a STOP-with-empty-text response and delivers the real follow-up content", async () => {
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(REQUEST_START);
 		let calls = 0;
 		const fetchMock: FetchImpl = async () => {
 			calls += 1;
+			if (calls === 1) nowSpy.mockReturnValue(REQUEST_START + 10_000);
 			return calls === 1 ? sse(genaiChunk("")) : sse(genaiChunk("Hello!"));
 		};
 
@@ -136,9 +149,9 @@ describe("Google empty-response retry (public + Vertex path)", () => {
 		expect(result.stopReason).toBe("stop");
 		expect(textOf(result)).toBe("Hello!");
 		// The retry must not re-stamp the message: `duration` is measured from the
-		// original request start, so the timestamp stays on that same timeline.
-		const [startEvent] = events.filter(event => event.type === "start");
-		expect(startEvent?.type === "start" ? startEvent.partial.timestamp : undefined).toBe(result.timestamp);
+		// original request start, so the timestamp stays on that same timeline —
+		// a reset inside the retry would read the flipped clock (REQUEST_START + 10s).
+		expect(result.timestamp).toBe(REQUEST_START);
 		void events;
 	});
 
@@ -273,9 +286,11 @@ describe("Google empty-response retry (public + Vertex path)", () => {
 
 describe("Google empty-response retry (Cloud Code Assist path)", () => {
 	it("retries a STOP-with-empty-text response (the reported gemini-3-flash hang)", async () => {
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(REQUEST_START);
 		let calls = 0;
 		const fetchMock: FetchImpl = async () => {
 			calls += 1;
+			if (calls === 1) nowSpy.mockReturnValue(REQUEST_START + 10_000);
 			// Cloud Code Assist re-fetches `response.url` on retry; synthetic Responses default it to "".
 			const response = calls === 1 ? sse(ccaChunk("")) : sse(ccaChunk("Done."));
 			Object.defineProperty(response, "url", { value: "https://example.com/v1internal:streamGenerateContent" });
@@ -296,8 +311,7 @@ describe("Google empty-response retry (Cloud Code Assist path)", () => {
 		// Same timeline guarantee as the public/Vertex path: the retried message
 		// keeps the request-start timestamp so `timestamp`+`duration` never
 		// double-counts the setup/prior-attempt window.
-		const [cliStartEvent] = events.filter(event => event.type === "start");
-		expect(cliStartEvent?.type === "start" ? cliStartEvent.partial.timestamp : undefined).toBe(result.timestamp);
+		expect(result.timestamp).toBe(REQUEST_START);
 		void events;
 	});
 
