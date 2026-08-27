@@ -253,17 +253,18 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 		cacheFingerprintMatches &&
 		!cacheHasUnresolvedHeaders
 	) {
-		const cachedModels = additiveStaticModelIds
-			? mergeDynamicModels(
-					staticModels,
-					restoredCache.models.filter(model => !additiveStaticModelIds.has(model.id)),
-				)
+		const cacheContribution = additiveStaticModelIds
+			? restoredCache.models.filter(model => !additiveStaticModelIds.has(model.id))
 			: restoredCache.models;
+		const cachedModels = additiveStaticModelIds
+			? mergeDynamicModels(staticModels, cacheContribution)
+			: restoredCache.models;
+		const source: ModelResolutionSource = cacheContribution.length > 0 ? "cache" : "bundled";
 		return {
 			models: collapseBuiltModelVariants(cachedModels),
 			stale: false,
-			source: "cache",
-			updatedAt: cache.updatedAt,
+			source,
+			...(source === "cache" ? { updatedAt: cache.updatedAt } : {}),
 		};
 	}
 
@@ -368,18 +369,23 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 			);
 		}
 	}
+	const cacheContributed = cacheModels.length > 0;
 	const source: ModelResolutionSource = dynamicFetchSucceeded
 		? "provider"
 		: modelsDevFetchSucceeded
 			? "models.dev"
-			: cache
+			: cacheContributed
 				? "cache"
 				: "bundled";
 	return {
 		models,
 		stale: !resolutionAuthoritative,
 		source,
-		...(remoteUpdatedAt !== undefined ? { updatedAt: remoteUpdatedAt } : cache ? { updatedAt: cache.updatedAt } : {}),
+		...(remoteUpdatedAt !== undefined
+			? { updatedAt: remoteUpdatedAt }
+			: cacheContributed && cache
+				? { updatedAt: cache.updatedAt }
+				: {}),
 	};
 }
 

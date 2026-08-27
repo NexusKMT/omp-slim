@@ -247,6 +247,8 @@ describe("Shared models.dev catalog fallback", () => {
 				contextWindow: staticV2.contextWindow,
 				maxTokens: staticV2.maxTokens,
 			});
+			expect(upgraded.source).toBe("bundled");
+			expect(upgraded.updatedAt).toBeUndefined();
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
@@ -302,6 +304,8 @@ describe("Shared models.dev catalog fallback", () => {
 				contextWindow: bundledModel.contextWindow,
 				maxTokens: bundledModel.maxTokens,
 			});
+			expect(resolved.source).toBe("bundled");
+			expect(resolved.updatedAt).toBeUndefined();
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
