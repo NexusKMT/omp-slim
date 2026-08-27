@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.7] - 2026-08-26
+
 ### Breaking Changes
 
 - Removed the `inlineMathSpanEnd` and `mathStartIndex` exports; the math delimiter grammar now lives in `@oh-my-pi/pi-utils/math-delimiters`.
@@ -9,10 +11,6 @@
 ### Fixed
 
 - Math spans now end at the first unescaped delimiter, so a TeX row break no longer closes a span early: `\(a \\) b\)` renders as one equation, and an escaped `\$` no longer ends `$$…$$`.
-## [18.0.7] - 2026-08-26
-
-### Fixed
-
 - Fixed image previews displaying as garbled characters in Paseo terminals.
 - Fixed terminal resizing from duplicating committed history in native scrollback.
 - Fixed autocomplete suggestions for bare-name skills such as `/batch` when no command matches the prefix more strongly.
