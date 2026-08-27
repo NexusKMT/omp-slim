@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed inline Snapcompact skipping all text compaction for tool results that also contain source images; mixed results now compact their text while preserving every original image block.
+
 ## [18.0.8] - 2026-08-27
 
 ### Added
