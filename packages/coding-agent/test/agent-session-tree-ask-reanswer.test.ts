@@ -14,7 +14,7 @@
  * silently reporting a successful no-op navigation (review on #5895).
  */
 import { describe, expect, it, vi } from "bun:test";
-import { Agent, type AgentToolResult } from "@oh-my-pi/pi-agent-core";
+import { Agent, AgentBusyError, type AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionRunner, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
@@ -22,6 +22,7 @@ import { SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets/obfuscator";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type { AskToolDetails } from "@oh-my-pi/pi-coding-agent/tools/ask";
+import { logger } from "@oh-my-pi/pi-utils";
 
 const TEST_MODEL = getBundledModel("anthropic", "claude-sonnet-4-5")!;
 
@@ -557,6 +558,45 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 			await session.waitForIdle();
 			expect(continueSpy).toHaveBeenCalledTimes(1);
 		} finally {
+			await ctx.cleanup();
+		}
+	});
+
+	it("coalesces concurrent continuation sources instead of calling a busy agent", async () => {
+		const ctx = await createTestSession({ inMemory: true });
+		const { session } = ctx;
+		const releaseContinue = Promise.withResolvers<void>();
+		const continueStarted = Promise.withResolvers<void>();
+		let continueInFlight = false;
+		const continueSpy = vi.spyOn(session.agent, "continue").mockImplementation(async () => {
+			if (continueInFlight) throw new AgentBusyError();
+			continueInFlight = true;
+			continueStarted.resolve();
+			await releaseContinue.promise;
+			continueInFlight = false;
+		});
+		const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+		const debug = vi.spyOn(logger, "debug").mockImplementation(() => {});
+		try {
+			session.resumeAfterAskReanswer();
+			session.resumeAfterAskReanswer();
+			await continueStarted.promise;
+			releaseContinue.resolve();
+			await session.waitForIdle();
+
+			expect(continueSpy).toHaveBeenCalledTimes(1);
+			expect(warn).not.toHaveBeenCalledWith("agent.continue failed after scheduling", expect.anything());
+			expect(debug).toHaveBeenCalledWith("agent.continue coalesced after scheduling", {
+				source: "ask-reanswer",
+				schedulerToken: expect.any(Number),
+				activeSource: "ask-reanswer",
+				activeSchedulerToken: expect.any(Number),
+			});
+		} finally {
+			releaseContinue.resolve();
+			continueSpy.mockRestore();
+			warn.mockRestore();
+			debug.mockRestore();
 			await ctx.cleanup();
 		}
 	});

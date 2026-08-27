@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Coalesced simultaneous autonomous continuation requests so goal and recovery schedulers no longer call a busy agent repeatedly; continuation diagnostics now identify each source and scheduler token ([#9988](https://github.com/can1357/oh-my-pi/issues/9988)).
+
 ## [18.0.8] - 2026-08-27
 
 ### Added

@@ -273,7 +273,8 @@ export interface SessionMaintenanceHost {
 		task: (signal: AbortSignal) => Promise<void>,
 		options?: { delayMs?: number; generation?: number; onSkip?: (reason: "aborted" | "stale-generation") => void },
 	): void;
-	scheduleAgentContinue(options?: {
+	scheduleAgentContinue(options: {
+		source: string;
 		delayMs?: number;
 		generation?: number;
 		shouldContinue?: () => boolean;
@@ -1810,7 +1811,11 @@ export class SessionMaintenance {
 			if (promoted) {
 				await this.#host.dropPersistedAssistantTurn(assistantMessage);
 				// Retry on the promoted (larger) model without compacting
-				this.#host.scheduleAgentContinue({ delayMs: 100, generation });
+				this.#host.scheduleAgentContinue({
+					source: "context-promotion-overflow",
+					delayMs: 100,
+					generation,
+				});
 				return COMPACTION_CHECK_CONTINUATION;
 			}
 
@@ -1879,7 +1884,11 @@ export class SessionMaintenance {
 					failed: `${assistantMessage.provider}/${assistantMessage.model}`,
 					current: `${this.#model.provider}/${this.#model.id}`,
 				});
-				this.#host.scheduleAgentContinue({ delayMs: 100, generation });
+				this.#host.scheduleAgentContinue({
+					source: "promoted-model-overflow",
+					delayMs: 100,
+					generation,
+				});
 				return COMPACTION_CHECK_CONTINUATION;
 			}
 		}
@@ -1902,7 +1911,11 @@ export class SessionMaintenance {
 				logger.debug("Context promotion triggered by response.incomplete (length stop)", {
 					from: `${assistantMessage.provider}/${assistantMessage.model}`,
 				});
-				this.#host.scheduleAgentContinue({ delayMs: 100, generation });
+				this.#host.scheduleAgentContinue({
+					source: "context-promotion-incomplete",
+					delayMs: 100,
+					generation,
+				});
 				return COMPACTION_CHECK_CONTINUATION;
 			}
 
@@ -3144,6 +3157,7 @@ export class SessionMaintenance {
 						});
 					} else if (!suppressContinuation && this.#host.agent.hasQueuedMessages()) {
 						this.#host.scheduleAgentContinue({
+							source: "frame-rescue-queued-message",
 							delayMs: 100,
 							generation,
 							shouldContinue: () => this.#host.agent.hasQueuedMessages(),
@@ -3813,7 +3827,11 @@ export class SessionMaintenance {
 		);
 
 		if (retryFits) {
-			this.#host.scheduleAgentContinue({ delayMs: 100, generation: args.generation });
+			this.#host.scheduleAgentContinue({
+				source: "compaction-retry",
+				delayMs: 100,
+				generation: args.generation,
+			});
 			continuationScheduled = true;
 		} else {
 			continuationScheduled = this.#host.scheduleCompactionContinuation({
@@ -3951,7 +3969,11 @@ export class SessionMaintenance {
 						(reason === "incomplete" && lastAssistant.stopReason === "length");
 					if (shouldDrop) this.#host.agent.replaceMessages(messages.slice(0, -1));
 				}
-				this.#host.scheduleAgentContinue({ delayMs: 100, generation });
+				this.#host.scheduleAgentContinue({
+					source: "shake-retry",
+					delayMs: 100,
+					generation,
+				});
 				continuationScheduled = true;
 			} else {
 				continuationScheduled = this.#host.scheduleCompactionContinuation({
