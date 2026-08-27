@@ -383,6 +383,7 @@ export class StatusLineComponent implements Component {
 	#speculationBlinkOn = true;
 	#hookStatuses: Map<string, string> = new Map();
 	#subagentCount: number = 0;
+	#runningSubagentIds = new Set<string>();
 	/**
 	 * Active-processing accounting for the `time_spent` segment, keyed per
 	 * {@link AgentSession} so the focus-controller mid-turn attach path
@@ -559,8 +560,9 @@ export class StatusLineComponent implements Component {
 		this.#autoCompactEnabled = enabled;
 	}
 
-	setSubagentCount(count: number): void {
-		this.#subagentCount = count;
+	setRunningSubagents(agentIds: readonly string[]): void {
+		this.#subagentCount = agentIds.length;
+		this.#runningSubagentIds = new Set(agentIds);
 	}
 
 	/**
@@ -1906,13 +1908,15 @@ export class StatusLineComponent implements Component {
 		}
 
 		if (layout !== "plain-left") {
-			// Count only bash jobs. Every task-tool spawn registers both an AgentRegistry ref
-			// (kind="sub") and an AsyncJobManager job of type "task" with the same agent id, so
-			// counting all running jobs made this badge mirror the subagent badge beside it and
-			// neither number meant anything on its own. Filtered here rather than in
-			// getAsyncJobSnapshot() so other consumers keep the unfiltered semantics.
+			// Count task jobs only until their AgentRegistry ref appears. Once it is
+			// running, the subagent badge represents that same agent; bash and eval
+			// jobs always remain independent background work.
 			const runningBackgroundJobs =
-				this.session.getAsyncJobSnapshot()?.running.filter(job => job.type === "bash").length ?? 0;
+				this.session
+					.getAsyncJobSnapshot()
+					?.running.filter(
+						job => job.type !== "task" || job.agentId === undefined || !this.#runningSubagentIds.has(job.agentId),
+					).length ?? 0;
 			if (runningBackgroundJobs > 0) {
 				rightParts.unshift(theme.fg("statusLineSubagents", `${theme.icon.job} ${runningBackgroundJobs}`));
 			}

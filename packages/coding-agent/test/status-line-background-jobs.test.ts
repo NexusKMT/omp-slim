@@ -1,17 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
+import type { AsyncJobType } from "@oh-my-pi/pi-coding-agent/async";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { StatusLineComponent } from "@oh-my-pi/pi-coding-agent/modes/components/status-line";
 import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import type { AsyncJobSnapshotItem } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "./helpers/settings-test-state";
-
-interface RunningJob {
-	id: string;
-	type: "bash" | "task";
-	status: "running";
-	label: string;
-	startTime: number;
-}
 
 let settingsState: SettingsTestState | undefined;
 
@@ -26,17 +20,19 @@ afterEach(() => {
 	settingsState = undefined;
 });
 
-function runningJob(type: RunningJob["type"], index: number): RunningJob {
+function runningJob(type: AsyncJobType, index: number): AsyncJobSnapshotItem {
+	const id = `${type}-${index}`;
 	return {
-		id: `${type}-${index}`,
+		id,
 		type,
 		status: "running",
 		label: `${type} ${index}`,
 		startTime: index,
+		agentId: type === "task" ? id : undefined,
 	};
 }
 
-function makeComponent(running: RunningJob[]): StatusLineComponent {
+function makeComponent(running: AsyncJobSnapshotItem[]): StatusLineComponent {
 	const messages: unknown[] = [];
 	const model = { id: "test-model", name: "Test Model", contextWindow: 100_000 };
 	const session = {
@@ -85,19 +81,20 @@ function makeComponent(running: RunningJob[]): StatusLineComponent {
 }
 
 describe("status-line background-job badge", () => {
-	it("excludes task subagents and shows only running bash jobs", () => {
-		const subagentCount = 3;
-		const running = Array.from({ length: subagentCount }, (_, index) => runningJob("task", index));
+	it("counts non-task jobs without duplicating running task subagents", () => {
+		const running = [runningJob("task", 0), runningJob("bash", 1), runningJob("eval", 2)];
 		const component = makeComponent(running);
-		component.setSubagentCount(subagentCount);
+		component.setRunningSubagents(["task-0"]);
 
-		const taskOnly = stripVTControlCharacters(component.getTopBorder(120).content);
-		expect(taskOnly).toContain(`${theme.icon.agents} ${subagentCount} agents`);
-		expect(taskOnly).not.toContain(theme.icon.job);
+		const content = stripVTControlCharacters(component.getTopBorder(120).content);
+		expect(content).toContain(`${theme.icon.agents} 1 agent`);
+		expect(content).toContain(`${theme.icon.job} 2`);
+	});
 
-		running.push(runningJob("bash", subagentCount));
-		const withBash = stripVTControlCharacters(component.getTopBorder(120).content);
-		expect(withBash).toContain(`${theme.icon.agents} ${subagentCount} agents`);
-		expect(withBash).toContain(`${theme.icon.job} 1`);
+	it("counts queued task jobs before their subagent is registered", () => {
+		const component = makeComponent([runningJob("task", 0)]);
+		component.setRunningSubagents([]);
+		const content = stripVTControlCharacters(component.getTopBorder(120).content);
+		expect(content).toContain(`${theme.icon.job} 1`);
 	});
 });
