@@ -107,8 +107,8 @@ const MUX_SIGNALS = [
 	"TERM",
 ] as const;
 
-function startRig(markerRow?: number) {
-	const terminal = new PreservedClearTerminal(40, 12);
+function startRig(markerRow?: number, columns = 40, rows = 12) {
+	const terminal = new PreservedClearTerminal(columns, rows);
 	const provider = new FullFrameProvider();
 	provider.markerRow = markerRow;
 	const renderScheduler = new ResizeScheduler();
@@ -160,6 +160,19 @@ describe("resize pre-erase on a preserved-clear terminal", () => {
 		expect(terminal.getViewport()[0]?.trimEnd()).toBe("live-0");
 
 		terminal.resize(40, 6);
+		renderScheduler.settle();
+
+		expect(terminal.archivedClears).toBe(0);
+		tui.stop();
+	});
+
+	it("keeps the erase off the first cell at a one-column viewport, where CUF cannot move", () => {
+		// One column is a supported geometry, and there CUF clamps at the right
+		// margin: stepping one column right leaves the cursor on the first cell,
+		// so the erase has to step a row instead.
+		const { terminal, tui, renderScheduler } = startRig(2, 1, 4);
+
+		terminal.resize(1, 8);
 		renderScheduler.settle();
 
 		expect(terminal.archivedClears).toBe(0);
