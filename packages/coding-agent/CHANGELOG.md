@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- `omp usage` now shows Z.AI GLM Coding Plan credit quotas (5h + weekly) with the subscribed plan tier.
+- The usage status line now labels untiered quota windows with the report's plan tier, surfacing Z.AI Coding Plan (`pro`) and Codex plan names next to the 5h/7d percentages.
+
 ## [18.0.7] - 2026-08-26
 
 ### Added
