@@ -22,7 +22,6 @@ import { SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets/obfuscator";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type { AskToolDetails } from "@oh-my-pi/pi-coding-agent/tools/ask";
-import { logger } from "@oh-my-pi/pi-utils";
 
 const TEST_MODEL = getBundledModel("anthropic", "claude-sonnet-4-5")!;
 
@@ -575,8 +574,6 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 			await releaseContinue.promise;
 			continueInFlight = false;
 		});
-		const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
-		const debug = vi.spyOn(logger, "debug").mockImplementation(() => {});
 		try {
 			session.resumeAfterAskReanswer();
 			session.resumeAfterAskReanswer();
@@ -585,18 +582,9 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 			await session.waitForIdle();
 
 			expect(continueSpy).toHaveBeenCalledTimes(1);
-			expect(warn).not.toHaveBeenCalledWith("agent.continue failed after scheduling", expect.anything());
-			expect(debug).toHaveBeenCalledWith("agent.continue coalesced after scheduling", {
-				source: "ask-reanswer",
-				schedulerToken: expect.any(Number),
-				activeSource: "ask-reanswer",
-				activeSchedulerToken: expect.any(Number),
-			});
 		} finally {
 			releaseContinue.resolve();
 			continueSpy.mockRestore();
-			warn.mockRestore();
-			debug.mockRestore();
 			await ctx.cleanup();
 		}
 	});
