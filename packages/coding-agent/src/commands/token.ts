@@ -7,8 +7,40 @@ import chalk from "@oh-my-pi/pi-utils/chalk";
 import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import { tokenHelp as commandHelp } from "../cli/command-help";
 import { isAuthenticated, ModelRegistry } from "../config/model-registry";
+import { refreshStoredManagedMcpOAuthCredential } from "../mcp/oauth-credentials";
+import { isManagedMCPOAuthCredentialId } from "../mcp/oauth-flow";
 import { discoverAuthStorage } from "../sdk";
+import type { AuthStorage } from "../session/auth-storage";
 import { getAvailableAuthMethods } from "../web/search/providers/perplexity-auth";
+
+async function resolveManagedMcpOAuthToken(
+	authStorage: AuthStorage,
+	provider: string,
+	options: { credentialId?: number; forceRefresh?: boolean } = {},
+): Promise<string | undefined> {
+	const row = authStorage
+		.listStoredCredentials(provider)
+		.find(
+			entry =>
+				entry.credential.type === "oauth" &&
+				(options.credentialId === undefined || entry.id === options.credentialId),
+		);
+	if (row?.credential.type !== "oauth") return undefined;
+	const before = row.credential;
+	const result = await refreshStoredManagedMcpOAuthCredential(authStorage, provider, options);
+	const credential = result.credential;
+	if (!credential || Date.now() >= credential.expires) return undefined;
+	if (
+		options.forceRefresh &&
+		!result.refreshed &&
+		credential.access === before.access &&
+		credential.refresh === before.refresh &&
+		credential.expires === before.expires
+	) {
+		return undefined;
+	}
+	return credential.access;
+}
 
 export default class Token extends Command {
 	static description = commandHelp.description;
@@ -50,7 +82,8 @@ export default class Token extends Command {
 	async run(): Promise<void> {
 		const { args, flags } = await this.parse(Token);
 		const providerName = args.provider ?? "";
-		const provider = providerName.toLowerCase();
+		const managedMcpOAuth = isManagedMCPOAuthCredentialId(args.provider);
+		const provider = managedMcpOAuth ? providerName : providerName.toLowerCase();
 
 		const authStorage = await discoverAuthStorage();
 		try {
@@ -84,9 +117,18 @@ export default class Token extends Command {
 					process.exitCode = 1;
 					return;
 				}
-				const resolution = await authStorage.getOAuthAccessAt(provider, n - 1, {
-					forceRefresh: flags["force-refresh"],
-				});
+				const resolution = managedMcpOAuth
+					? await resolveManagedMcpOAuthToken(authStorage, provider, {
+							credentialId: accounts[n - 1]?.credentialId,
+							forceRefresh: flags["force-refresh"],
+						})
+					: await authStorage.getOAuthAccessAt(provider, n - 1, {
+							forceRefresh: flags["force-refresh"],
+						});
+				if (typeof resolution === "string") {
+					process.stdout.write(`${resolution}\n`);
+					return;
+				}
 				if (!resolution?.ok) {
 					const reason = resolution && !resolution.ok ? resolution.error : "no OAuth credential available";
 					process.stderr.write(
@@ -114,7 +156,11 @@ export default class Token extends Command {
 				}
 			}
 
-			if (!apiKey) {
+			if (!apiKey && managedMcpOAuth) {
+				apiKey = await resolveManagedMcpOAuthToken(authStorage, provider, {
+					forceRefresh: flags["force-refresh"],
+				});
+			} else if (!apiKey) {
 				apiKey = await modelRegistry.getApiKeyForProvider(provider, undefined, {
 					forceRefresh: flags["force-refresh"],
 				});
