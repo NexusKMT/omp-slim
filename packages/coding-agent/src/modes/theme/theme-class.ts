@@ -130,6 +130,7 @@ const LANG_BRAND_COLORS: Partial<Record<SymbolKey, string>> = {
 };
 
 const BACKGROUND_RESET_PATTERN = /\x1b\[(?:0|49)m/g;
+const FOREGROUND_RESET_PATTERN = /\x1b\[(?:0|39)m/g;
 
 export class Theme {
 	#fgColors: Record<ThemeColor, string>;
@@ -168,7 +169,7 @@ export class Theme {
 			if (!isValidThemeColor(key)) continue;
 			const value = fgColors[key];
 			const hex = resolveToHex(value, slIsLight);
-			this.#fgColors[key] = fgAnsi(value === "" ? hex : value, mode);
+			this.#fgColors[key] = fgAnsi(value, mode);
 			this.#hexFgColors[key] = hex;
 		}
 		this.#bgColors = {} as Record<ThemeBg, string>;
@@ -299,6 +300,15 @@ export class Theme {
 		return `${ansi}${text.replace(BACKGROUND_RESET_PATTERN, `$&${ansi}`)}\x1b[49m`;
 	}
 
+	/**
+	 * Apply a foreground over a controlled background, choosing a contrast-safe
+	 * fallback only when the theme token requests the terminal default.
+	 */
+	fgOnBg(color: ThemeColor, background: ThemeBg, text: string): string {
+		const ansi = this.getFgOnBgAnsi(color, background);
+		return `${ansi}${text.replace(FOREGROUND_RESET_PATTERN, `$&${ansi}`)}\x1b[39m`;
+	}
+
 	bold(text: string): string {
 		return chalk.bold(text);
 	}
@@ -329,6 +339,18 @@ export class Theme {
 		const ansi = this.#bgColors[color];
 		if (!ansi) throw new Error(`Unknown theme background color: ${color}`);
 		return ansi;
+	}
+
+	/**
+	 * Foreground ANSI for text rendered over a controlled theme background.
+	 * Explicit theme colors win; terminal-default tokens become black or near-white.
+	 */
+	getFgOnBgAnsi(color: ThemeColor, background: ThemeBg): string {
+		const ansi = this.#fgColors[color];
+		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
+		if (ansi !== "\x1b[39m") return ansi;
+		const backgroundLuma = colorLuma(this.getBgHex(background));
+		return colorToAnsi(backgroundLuma !== undefined && backgroundLuma > 0.5 ? "#000000" : "#e5e5e7", this.mode);
 	}
 
 	/**

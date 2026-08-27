@@ -46,12 +46,20 @@ describe("Theme.isLight", () => {
 });
 
 describe("empty foreground contrast", () => {
-	it("emits explicit contrasting ANSI foregrounds for empty theme tokens", () => {
+	it("preserves terminal-default foregrounds for unpainted empty tokens", () => {
 		const { light, dark } = createBaseThemes();
 
-		expect(light.getFgAnsi("text")).toBe("\x1b[38;2;0;0;0m");
-		expect(light.getFgAnsi("userMessageText")).toBe("\x1b[38;2;0;0;0m");
-		expect(dark.getFgAnsi("text")).toBe("\x1b[38;2;229;229;231m");
+		expect(light.getFgAnsi("text")).toBe("\x1b[39m");
+		expect(light.getFgAnsi("userMessageText")).toBe("\x1b[39m");
+		expect(dark.getFgAnsi("text")).toBe("\x1b[39m");
+	});
+
+	it("chooses empty-token contrast from the controlled background", () => {
+		const { light } = createBaseThemes();
+		const porcelain = createTheme(defaultThemes.porcelain, { mode: "truecolor" });
+
+		expect(light.getFgOnBgAnsi("userMessageText", "userMessageBg")).toBe("\x1b[38;2;0;0;0m");
+		expect(porcelain.getFgOnBgAnsi("userMessageText", "userMessageBg")).toBe("\x1b[38;2;229;229;231m");
 	});
 
 	it("pairs the editor surface with its user-message foreground", () => {
