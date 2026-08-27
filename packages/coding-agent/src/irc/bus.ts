@@ -44,6 +44,20 @@ interface IrcWaiter {
 	cancel: () => void;
 }
 
+/**
+ * Rejection reason for a `send await:true` whose awaited peer reached a
+ * terminal stop (ended its turn, parked, was aborted, or unregistered)
+ * without ever replying. Distinct from a plain timeout so the sender can
+ * surface "they stopped" instead of stranding the caller on the full
+ * `irc.timeoutMs` window.
+ */
+export class IrcAwaitTargetStopped extends Error {
+	constructor(target: string) {
+		super(`Awaited peer "${target}" stopped without replying.`);
+		this.name = "IrcAwaitTargetStopped";
+	}
+}
+
 /** Mailbox cap per agent; oldest messages are dropped beyond it. */
 const MAILBOX_CAP = 100;
 
@@ -205,7 +219,11 @@ export class IrcBus {
 		filter: { from?: string },
 		timeoutMs: number,
 		signal?: AbortSignal,
-		options?: { drainPending?: boolean; liveness?: { registry: AgentRegistry; senderId: string } },
+		options?: {
+			drainPending?: boolean;
+			liveness?: { registry: AgentRegistry; senderId: string };
+			awaitTarget?: { registry: AgentRegistry; target: string };
+		},
 	): Promise<IrcMessage | null> {
 		if (signal?.aborted) {
 			throw signal.reason instanceof Error ? signal.reason : new Error("IRC wait aborted");
@@ -221,6 +239,7 @@ export class IrcBus {
 		let timer: NodeJS.Timeout | undefined;
 		let onAbort: (() => void) | undefined;
 		let unsubscribeLiveness: (() => void) | undefined;
+		let unsubscribeAwaitTarget: (() => void) | undefined;
 
 		const liveness = options?.liveness;
 		const livenessReason = filter.from
@@ -245,6 +264,7 @@ export class IrcBus {
 			clearTimeout(timer);
 			if (signal && onAbort) signal.removeEventListener("abort", onAbort);
 			unsubscribeLiveness?.();
+			unsubscribeAwaitTarget?.();
 		};
 
 		const waiter: IrcWaiter = {
@@ -286,6 +306,38 @@ export class IrcBus {
 			if (!check()) {
 				settle({ kind: "abort", error: new Error(livenessReason) });
 			}
+		}
+
+		// `send await:true`: settle the sender promptly once the awaited peer
+		// reaches a terminal stop without replying, instead of stranding it on
+		// the full timeout. Unlike `liveness`, this tolerates a peer that is
+		// idle/parked when the send lands (the send is about to wake or revive
+		// it): it only aborts once the peer has actually been observed running
+		// and then stopped, or is unambiguously gone (unregistered / aborted).
+		// A real reply resolves the waiter first (the recipient sends it mid-turn,
+		// before the turn-end idle transition), so cleanup tears this down.
+		const awaitTarget = options?.awaitTarget;
+		if (awaitTarget) {
+			const { registry, target } = awaitTarget;
+			// Session `isStreaming` (not `registry.isRunning`) is the engagement
+			// signal: it stays true across mid-run continuations (auto-compaction /
+			// retry) that briefly flip the registry status to idle, so those flaps
+			// never masquerade as a terminal stop.
+			let engaged = registry.get(target)?.session?.isStreaming === true;
+			unsubscribeAwaitTarget = registry.onChange(() => {
+				const ref = registry.get(target);
+				if (!ref || ref.status === "aborted") {
+					settle({ kind: "abort", error: new IrcAwaitTargetStopped(target) });
+					return;
+				}
+				if (ref.session?.isStreaming === true) {
+					engaged = true;
+					return;
+				}
+				if (engaged) {
+					settle({ kind: "abort", error: new IrcAwaitTargetStopped(target) });
+				}
+			});
 		}
 
 		return promise;

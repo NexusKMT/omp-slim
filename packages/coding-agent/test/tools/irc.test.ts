@@ -23,16 +23,21 @@ interface FakeSession {
 	setError: (error: Error) => void;
 	/** Side effect run on delivery (e.g. reply via the bus). */
 	onDeliver: (fn: (msg: IrcMessage) => void) => void;
+	/** Flip the recipient's streaming (engagement) state. */
+	setStreaming: (value: boolean) => void;
 }
 
 function makeFakeSession(): FakeSession {
 	let outcome: "injected" | "woken" = "injected";
+	let streaming = true;
 	let nextError: Error | null = null;
 	let deliverHook: ((msg: IrcMessage) => void) | undefined;
 	const delivered: IrcMessage[] = [];
 	const relayed: CustomMessage[] = [];
 	const session = {
-		isStreaming: true,
+		get isStreaming() {
+			return streaming;
+		},
 		deliverIrcMessage: async (msg: IrcMessage) => {
 			if (nextError) {
 				const err = nextError;
@@ -59,6 +64,9 @@ function makeFakeSession(): FakeSession {
 		},
 		onDeliver: fn => {
 			deliverHook = fn;
+		},
+		setStreaming: value => {
+			streaming = value;
 		},
 	};
 }
@@ -814,6 +822,36 @@ describe("IRC", () => {
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 			expect(text).toContain("Send delivered");
 			expect(text).toContain("interrupted");
+		});
+
+		it("op=send await=true settles when the recipient stops without replying", async () => {
+			const main = makeFakeSession();
+			registry.register({ id: "0-Main", displayName: "main", kind: "main", session: main.session });
+			const sub = makeFakeSession();
+			// Recipient is mid-turn (streaming) when the awaited aside lands.
+			registry.register({ id: "0-Sub", displayName: "task", kind: "sub", session: sub.session, status: "running" });
+			sub.onDeliver(() => {
+				// It consumes the aside and ends its turn WITHOUT ever replying.
+				sub.setStreaming(false);
+				registry.setStatus("0-Sub", "idle", sub.session);
+			});
+
+			const tool = new HubTool(makeToolSession(registry, "0-Main"));
+			// A 120s timeout would strand the sender if the stop were not observed;
+			// the exit monitor must settle it long before the default bun timeout.
+			const result = await tool.execute("call-1", {
+				op: "send",
+				to: "0-Sub",
+				message: "ping",
+				await: true,
+				timeoutMs: 120_000,
+			});
+
+			expect(result.isError).toBeFalsy();
+			const details = result.details as CoordinationDetails | undefined;
+			expect(details?.waited ?? null).toBeNull();
+			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+			expect(text).toContain("0-Sub stopped without replying");
 		});
 
 		it("op=send rejects await with to=all and self-sends", async () => {
