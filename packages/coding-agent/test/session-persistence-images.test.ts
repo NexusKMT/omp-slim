@@ -226,4 +226,35 @@ describe("snapcompact frame persistence", () => {
 		expect(imageBlocks).toHaveLength(1);
 		expect(imageBlocks.every(block => isStrictBase64(block.data))).toBe(true);
 	});
+
+	it("recovers frames corrupted by older persistence versions as retained source text", async () => {
+		using tempDir = TempDir.createSync("@snapcompact-frame-recovery-");
+		const blobStore = new BlobStore(tempDir.path());
+		const sourceText = "complete normalized archived source";
+		const corruptedData = `${Buffer.alloc(400_000, 7).toString("base64").slice(0, 499_953)}\n\n[Session persistence truncated large content]`;
+		const entry: CompactionEntry = {
+			type: "compaction",
+			id: "compaction-1",
+			parentId: null,
+			timestamp: new Date(0).toISOString(),
+			summary: "summary",
+			firstKeptEntryId: "entry-1",
+			tokensBefore: 5000,
+			preserveData: {
+				[snapcompact.PRESERVE_KEY]: {
+					frames: [{ data: corruptedData, mimeType: "image/png", cols: 100, rows: 100, chars: 5000 }],
+					totalChars: 5000,
+					truncatedChars: 0,
+					text: sourceText,
+				} satisfies Archive,
+			},
+		};
+
+		await resolveBlobRefsInEntries([entry], blobStore);
+		const recovered = snapcompact.getPreservedArchive(entry.preserveData)!;
+		const blocks = snapcompact.historyBlocks(recovered, {
+			maxFrameDataBytes: snapcompact.FRAME_DATA_BYTES_BUDGET,
+		});
+		expect(blocks).toEqual([{ type: "text", text: sourceText }]);
+	});
 });

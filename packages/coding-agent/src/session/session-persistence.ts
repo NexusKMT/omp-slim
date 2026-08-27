@@ -32,6 +32,11 @@ function truncateString(value: string, maxLength: number): string {
 	return truncated;
 }
 
+/** Detect strings damaged by an older persistence pass so loaders can migrate them safely. */
+export function isPersistenceTruncatedString(value: unknown): value is string {
+	return typeof value === "string" && value.endsWith(TRUNCATION_NOTICE);
+}
+
 export function isImageBlock(value: unknown): value is { type: "image"; data: string; mimeType?: string } {
 	return (
 		typeof value === "object" &&
@@ -62,7 +67,7 @@ export function isImageDataPayload(value: unknown): value is { data: string; mim
  * externalized to the blob store instead of truncated as a generic string: a
  * `content` image block, an `images[]` entry, or a snapcompact frame under
  * `frames[]`. Shared by the persist path ({@link shouldExternalizeImagePayload})
- * and the load path (`shouldResolveImagePayload`) so the two never drift and
+ * and the load path (`resolvePersistedBlobRefs`) so the two never drift and
  * strand a payload externalized on write but not resolved on read.
  */
 export function isExternalizableImagePosition(

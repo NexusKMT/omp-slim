@@ -1,10 +1,11 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import * as snapcompact from "@oh-my-pi/snapcompact";
 import { getBlobsDir, isEnoent, parseJsonlLenient } from "@oh-my-pi/pi-utils";
 import { BlobStore, isBlobRef, resolveImageData, resolveImageDataUrl } from "./blob-store";
 import { buildSessionContext } from "./session-context";
 import type { FileEntry, RawFileEntry, SessionEntry, SessionHeader } from "./session-entries";
 import { migrateToCurrentVersion } from "./session-migrations";
-import { isExternalizableImagePosition } from "./session-persistence";
+import { isExternalizableImagePosition, isPersistenceTruncatedString } from "./session-persistence";
 import { FileSessionStorage, type SessionStorage } from "./session-storage";
 import {
 	parseTitleSlotFromContent,
@@ -382,6 +383,27 @@ function containsBlobRef(value: unknown): boolean {
 	return false;
 }
 
+/**
+ * Older persistence versions truncated oversized frame base64 in place. Recover
+ * those archives from their retained source text so an already-wedged session
+ * resumes as text instead of sending malformed image data to the provider.
+ */
+function repairTruncatedSnapcompactFrames(entry: FileEntry): void {
+	if (entry.type !== "compaction") return;
+	const archive = snapcompact.getPreservedArchive(entry.preserveData);
+	if (!archive || !archive.frames.some(frame => isPersistenceTruncatedString(frame.data))) return;
+	const slot = entry.preserveData?.[snapcompact.PRESERVE_KEY];
+	if (typeof slot !== "object" || slot === null) return;
+
+	if (archive.text) {
+		Object.assign(slot, { frames: [], textHead: archive.text, textTail: "" });
+		return;
+	}
+	Object.assign(slot, {
+		frames: archive.frames.filter(frame => !isPersistenceTruncatedString(frame.data)),
+	});
+}
+
 export async function resolveBlobRefsInEntries(entries: FileEntry[], blobStore: BlobStore): Promise<void> {
 	const pending: Promise<void>[] = [];
 	// Interleave precheck + initiation per entry so a positive entry begins resolution at the same
@@ -389,6 +411,7 @@ export async function resolveBlobRefsInEntries(entries: FileEntry[], blobStore: 
 	// later entry before an earlier resolution mutates it).
 	for (const entry of entries) {
 		if (entry.type === "session") continue;
+		repairTruncatedSnapcompactFrames(entry);
 		if (!containsBlobRef(entry)) continue;
 		pending.push(resolvePersistedBlobRefs(entry, blobStore));
 	}
