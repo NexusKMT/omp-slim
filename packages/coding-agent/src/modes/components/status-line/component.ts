@@ -322,6 +322,11 @@ function removeContextSegments(parts: string[], segments: StatusLineSegmentId[])
 function formatEmbeddedContextPercent(percent: number): string {
 	return `${percent > 0 && percent < 1 ? percent.toFixed(1) : Math.round(percent)}%`;
 }
+
+function embeddedContextGaugeMinWidth(percent: number, contextWindow: number): number {
+	return formatEmbeddedContextPercent(percent).length + formatNumber(contextWindow).length + 4;
+}
+
 function hasGitSegment(segments: readonly StatusLineSegmentId[]): boolean {
 	return segments.includes("git");
 }
@@ -1934,7 +1939,15 @@ export class StatusLineComponent implements Component {
 
 		let leftWidth = groupWidth(left, leftCapWidth, leftSepWidth);
 		let rightWidth = groupWidth(right, rightCapWidth, rightSepWidth);
-		const totalWidth = () => leftWidth + rightWidth + (left.length > 0 && right.length > 0 ? 1 : 0);
+		// Embedded mode removes the standalone context segment before overflow
+		// handling, so the gauge must reserve enough room for both labels. Without
+		// this budget a long path/session title can leave a one-cell gap: the
+		// context segment is gone, and the gauge silently omits its labels too.
+		const embeddedContextWidth = embedContext
+			? embeddedContextGaugeMinWidth(ctx.contextPercent ?? 0, ctx.contextWindow)
+			: 0;
+		const minimumGapWidth = () => embeddedContextWidth || (left.length > 0 && right.length > 0 ? 1 : 0);
+		const totalWidth = () => leftWidth + rightWidth + minimumGapWidth();
 
 		if (topFillWidth > 0) {
 			// Truncate the session-name segment before dropping right segments —
@@ -2093,7 +2106,7 @@ export class StatusLineComponent implements Component {
 		if (embedContext) {
 			const candidatePercent = formatEmbeddedContextPercent(percentOverflow ? pct : clampedPct);
 			const candidateWindow = formatNumber(ctx.contextWindow);
-			if (gapWidth >= candidatePercent.length + candidateWindow.length + 4) {
+			if (gapWidth >= embeddedContextGaugeMinWidth(percentOverflow ? pct : clampedPct, ctx.contextWindow)) {
 				percentLabel = candidatePercent;
 				windowLabel = candidateWindow;
 				if (percentOverflow) {

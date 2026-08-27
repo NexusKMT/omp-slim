@@ -396,6 +396,30 @@ describe("StatusLineComponent context breakdown", () => {
 			settings.clearOverride("statusLine.preset");
 		}
 	});
+
+	it("reserves embedded context labels when a long session title consumes the status line", () => {
+		const { session } = makeSession({
+			messages: [userMessage("hi"), assistantMessage("done")],
+			usage: { tokens: 50_000, contextWindow: 200_000, percent: 25 },
+			sessionName: "28大学生AI赋能司法行政创新挑战 law agent",
+		});
+		const comp = new StatusLineComponent(session);
+		comp.updateSettings({
+			preset: "custom",
+			leftSegments: ["pi", "model", "path", "context_pct"],
+			rightSegments: ["session_name"],
+			separator: "powerline-thin",
+			sessionAccent: false,
+			contextLine: "embedded",
+		});
+
+		const border = comp.getTopBorder(48);
+		const plain = border.content.replaceAll(/\x1b\[[0-9;]*m/g, "");
+		expect(border.width).toBe(48);
+		expect(plain).toContain("25%");
+		expect(plain).toContain("200K");
+	});
+
 	it("embedded overflow (>100%) breaks the raw percent past the window label in error color", () => {
 		const { session } = makeSession({
 			messages: [userMessage("hi"), assistantMessage("done")],
