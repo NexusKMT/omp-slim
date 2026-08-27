@@ -50,14 +50,27 @@ export interface UnknownModel {
 
 export type ParsedModel = GeminiModel | AnthropicModel | OpenAIModel | UnknownModel;
 
-/** Strip a provider namespace prefix (`openai/gpt-5.4` → `gpt-5.4`). */
+/**
+ * Strip a provider namespace prefix (`openai/gpt-5.4` → `gpt-5.4`) and any
+ * trailing OpenRouter route suffix (`glm-5.3-flash:nitro` → `glm-5.3-flash`),
+ * so identity parsers see the canonical id behind an aggregator variant.
+ */
 // Cache keyed by model id (a bounded set of bundled/aggregator ids), so no eviction is needed.
 const bareModelIdCache = new Map<string, string>();
 export function bareModelId(modelId: string): string {
 	const cached = bareModelIdCache.get(modelId);
 	if (cached !== undefined) return cached;
-	const p = modelId.lastIndexOf("/");
-	const result = p !== -1 ? modelId.slice(p + 1) : modelId;
+	const slash = modelId.lastIndexOf("/");
+	let result = slash !== -1 ? modelId.slice(slash + 1) : modelId;
+	// OpenRouter route suffixes (`:nitro`, `:floor`, `:exacto`, …) are request-time
+	// routing shortcuts, never part of a real family id. Thinking-level suffixes
+	// (`:high`, `:max`) share the shape; parsers called on bare ids treat them as
+	// unknown words either way, so stripping uniformly is safe and keeps e.g.
+	// `isGlm53ReasoningEffortModelId` working for `...:nitro` selectors.
+	const colon = result.lastIndexOf(":");
+	if (colon !== -1) {
+		result = result.slice(0, colon);
+	}
 	bareModelIdCache.set(modelId, result);
 	return result;
 }

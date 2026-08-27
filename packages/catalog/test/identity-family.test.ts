@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+	bareModelId,
 	hasOpus47ApiRestrictions,
 	isClaudeModelId,
 	isGeminiModelId,
+	isGlm53ReasoningEffortModelId,
 	isGlmVisionModelId,
 	isGrokModelId,
 	isGrokMultiAgentModelId,
@@ -313,6 +315,15 @@ describe("isReasoningGlmModelId", () => {
 	});
 });
 
+describe("family matchers on OpenRouter route-suffixed ids", () => {
+	test("isGlm53ReasoningEffortModelId sees through :nitro route suffixes", () => {
+		expect(isGlm53ReasoningEffortModelId("z-ai/glm-5.3:nitro")).toBe(true);
+		expect(isGlm53ReasoningEffortModelId("z-ai/glm-5.3-air:nitro")).toBe(true);
+		// Flash/preview variants stay excluded with or without a route suffix.
+		expect(isGlm53ReasoningEffortModelId("z-ai/glm-5.3-flash")).toBe(false);
+		expect(isGlm53ReasoningEffortModelId("z-ai/glm-5.3-flash:nitro")).toBe(false);
+	});
+});
 describe("isGlmVisionModelId", () => {
 	test("matches the `v` vision shape across versions and variants", () => {
 		expect(isGlmVisionModelId("glm-4v")).toBe(true);
@@ -437,5 +448,19 @@ describe("isGrokXHighEffortCapable", () => {
 		expect(isGrokXHighEffortCapable("grok-3-mini")).toBe(false);
 		expect(isGrokXHighEffortCapable("grok-build")).toBe(false);
 		expect(isGrokXHighEffortCapable("")).toBe(false);
+	});
+});
+
+describe("bareModelId", () => {
+	test("strips OpenRouter route suffixes alongside the provider namespace", () => {
+		expect(bareModelId("z-ai/glm-5.3-flash:nitro")).toBe("glm-5.3-flash");
+		expect(bareModelId("deepseek/deepseek-v4-pro-0813:nitro")).toBe("deepseek-v4-pro-0813");
+		expect(bareModelId("openai/gpt-4o:extended")).toBe("gpt-4o");
+	});
+
+	test("keeps ids without a colon suffix untouched", () => {
+		expect(bareModelId("anthropic/claude-opus-5")).toBe("claude-opus-5");
+		expect(bareModelId("gpt-5.6-luna")).toBe("gpt-5.6-luna");
+		expect(bareModelId("")).toBe("");
 	});
 });

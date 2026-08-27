@@ -649,6 +649,27 @@ describe("parseModelPattern", () => {
 			expect(result.warning).toBeUndefined();
 		});
 
+		test("supports route suffixes on undated ids when only the base is registered", () => {
+			// `openrouter/z-ai/glm-4.7:nitro` has no dated snapshot to strip; the fallback
+			// chain must still reach base `z-ai/glm-4.7` (also covers `:floor`, `:online`,
+			// `:exacto`, `:extended` — none appear in any catalog listing).
+			const result = parseModelPattern("openrouter/z-ai/glm-4.7:nitro", allModels);
+			expect(result.model?.provider).toBe("openrouter");
+			expect(result.model?.id).toBe("z-ai/glm-4.7:nitro");
+			expect(result.thinkingLevel).toBeUndefined();
+			expect(result.explicitThinkingLevel).toBe(false);
+			expect(result.warning).toBeUndefined();
+		});
+
+		test("supports route suffixes on undated ids with an appended thinking level", () => {
+			const result = parseModelPattern("openrouter/z-ai/glm-4.7:nitro:max", allModels);
+			expect(result.model?.provider).toBe("openrouter");
+			expect(result.model?.id).toBe("z-ai/glm-4.7:nitro");
+			expect(result.thinkingLevel).toBe(Effort.Max);
+			expect(result.explicitThinkingLevel).toBe(true);
+			expect(result.warning).toBeUndefined();
+		});
+
 		test("openrouter/<id>:max applies max through the exact-selector path, not an OpenRouter route", () => {
 			// `max` is a thinking-level suffix, never an OpenRouter route suffix: the request
 			// must resolve the base model and carry max, not clone a literal `z-ai/glm-4.7:max`.
