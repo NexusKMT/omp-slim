@@ -435,7 +435,11 @@ const PULSE_BACKLOG_PERIODS: u32 = 3;
 /// playback target and the capture backlog instead, trading fixed delay for
 /// jitter tolerance. Fields the server ignores for a direction stay at the
 /// "server default" sentinel.
-fn pulse_attr(config: DeviceConfig, direction: c_int, latency_ms: u32) -> Result<PaBufferAttr, String> {
+fn pulse_attr(
+	config: DeviceConfig,
+	direction: c_int,
+	latency_ms: u32,
+) -> Result<PaBufferAttr, String> {
 	let period_bytes = pulse_bytes(config, config.period_ms)?;
 	let latency_bytes = pulse_bytes(config, latency_ms.max(config.period_ms))?;
 	let backlog_bytes = latency_bytes

@@ -1,8 +1,8 @@
-import { $ } from "bun";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { $ } from "bun";
 
 const DT_VERDEF = 0x6ffffffcn;
 const VERDEF_ADDRESS = 0x12345678n;

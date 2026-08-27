@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { streamSimple } from "../src/stream";
 import type { Context, Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { streamSimple } from "../src/stream";
 
 // Bedrock hosts the GPT-5.x SKUs behind OpenAI's own request schema. It rejects
 // the Anthropic budget block with HTTP 400 `unknown_parameter: 'thinking'` and

@@ -100,7 +100,7 @@ pub fn playback_drain_periods(config: DeviceConfig) -> u32 {
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn playback_drain_periods(_config: DeviceConfig) -> u32 {
+pub const fn playback_drain_periods(_config: DeviceConfig) -> u32 {
 	3
 }
 

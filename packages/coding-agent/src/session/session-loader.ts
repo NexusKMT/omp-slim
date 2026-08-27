@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import * as snapcompact from "@oh-my-pi/snapcompact";
 import { getBlobsDir, isEnoent, parseJsonlLenient } from "@oh-my-pi/pi-utils";
+import * as snapcompact from "@oh-my-pi/snapcompact";
 import { BlobStore, isBlobRef, resolveImageData, resolveImageDataUrl } from "./blob-store";
 import { buildSessionContext } from "./session-context";
 import type { FileEntry, RawFileEntry, SessionEntry, SessionHeader } from "./session-entries";
@@ -391,7 +391,7 @@ function containsBlobRef(value: unknown): boolean {
 function repairTruncatedSnapcompactFrames(entry: FileEntry): void {
 	if (entry.type !== "compaction") return;
 	const archive = snapcompact.getPreservedArchive(entry.preserveData);
-	if (!archive || !archive.frames.some(frame => isPersistenceTruncatedString(frame.data))) return;
+	if (!archive?.frames.some(frame => isPersistenceTruncatedString(frame.data))) return;
 	const slot = entry.preserveData?.[snapcompact.PRESERVE_KEY];
 	if (typeof slot !== "object" || slot === null) return;
 

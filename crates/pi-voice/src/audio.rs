@@ -147,7 +147,8 @@ impl PlaybackStream {
 		let mut cursor = 0;
 		let mut empty_callbacks = 0;
 		let config = DeviceConfig { sample_rate, period_ms: PLAYBACK_PERIOD_MS };
-		let drain_callbacks = (playback_drain_periods(config) as usize) + PLAYBACK_DRAIN_MARGIN_CALLBACKS;
+		let drain_callbacks =
+			(playback_drain_periods(config) as usize) + PLAYBACK_DRAIN_MARGIN_CALLBACKS;
 		// The guard travels inside the fill closure: if the backend drops the
 		// callback for any reason (worker exit on device loss, stop), waiters
 		// blocked in `wait_for_drain` wake instead of hanging forever.
