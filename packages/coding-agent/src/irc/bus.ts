@@ -323,17 +323,25 @@ export class IrcBus {
 			const { registry, target } = awaitTarget;
 			let subscribedSession: AgentSession | null = null;
 			let unsubscribeSession: (() => void) | undefined;
+			let active = true;
 			// The peer's terminal `agent_end` is the authoritative "stopped" signal.
 			// It is emitted only after the peer's prompt fully unwinds (see
-			// AgentSession#flushPendingAgentEnd) and supersedes mid-run
-			// continuations (auto-compaction / retry), so — unlike the registry
-			// `idle` transition, which fires while `isStreaming` is still true — it
-			// fires exactly once, when the peer truly stops. A real reply resolves
-			// the waiter mid-turn before this ever fires, so cleanup tears it down.
+			// AgentSession#flushPendingAgentEnd) and supersedes scheduled
+			// continuations. A side-channel auto-reply may outlive that main turn,
+			// though, so wait for it before declaring the peer stopped: its bus send
+			// resolves this waiter first; an empty/failed reply then falls through to
+			// the clean stopped result.
 			const onSessionEvent = (event: AgentSessionEvent): void => {
-				if (event.type === "agent_end" && event.isTerminal !== false) {
+				if (event.type !== "agent_end" || event.isTerminal === false) return;
+				const session = subscribedSession;
+				if (!session) {
 					settle({ kind: "abort", error: new IrcAwaitTargetStopped(target) });
+					return;
 				}
+				void session.waitForIrcAutoReplies().then(() => {
+					if (!active || registry.get(target)?.session !== session) return;
+					settle({ kind: "abort", error: new IrcAwaitTargetStopped(target) });
+				});
 			};
 			const sync = (): void => {
 				const ref = registry.get(target);
@@ -353,6 +361,7 @@ export class IrcBus {
 			};
 			const unsubscribeChange = registry.onChange(sync);
 			unsubscribeAwaitTarget = () => {
+				active = false;
 				unsubscribeChange();
 				unsubscribeSession?.();
 			};

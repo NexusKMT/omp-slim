@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
-import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
+import { createMockModel, type MockHandler } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -45,6 +45,7 @@ function makeFakeSession(): FakeSession {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		},
+		waitForIrcAutoReplies: async () => {},
 		deliverIrcMessage: async (msg: IrcMessage) => {
 			if (nextError) {
 				const err = nextError;
@@ -119,8 +120,8 @@ function createRealSession(overrides: Partial<Record<SettingPath, unknown>> = {}
  *  turn and emits the real terminal `agent_end` after prompt unwind. */
 function createStreamingSession(
 	modelRegistry: ModelRegistry,
-	responses: MockResponse[],
-	options?: { tools?: HubTool[] },
+	responses: MockHandler[],
+	options?: { tools?: HubTool[]; settings?: Partial<Record<SettingPath, unknown>> },
 ): { session: AgentSession } {
 	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 	if (!model) throw new Error("Expected bundled anthropic model to exist");
@@ -132,7 +133,11 @@ function createStreamingSession(
 			streamFn: mock.stream,
 		}),
 		sessionManager: SessionManager.inMemory("/tmp"),
-		settings: Settings.isolated({ "compaction.enabled": false, "retry.enabled": false }),
+		settings: Settings.isolated({
+			"compaction.enabled": false,
+			"retry.enabled": false,
+			...options?.settings,
+		}),
 		modelRegistry,
 	});
 	return { session };
@@ -951,6 +956,64 @@ describe("IRC", () => {
 				expect(subSession.isStreaming).toBe(false);
 				await expect(waitP).rejects.toThrow(/stopped without replying/);
 			} finally {
+				unsync();
+			}
+		});
+
+		it("op=send await=true waits for an in-flight side-channel auto-reply", async () => {
+			const streamStarted = Promise.withResolvers<void>();
+			const autoReplyStarted = Promise.withResolvers<void>();
+			const releaseAutoReply = Promise.withResolvers<void>();
+			const { session: subSession } = createStreamingSession(
+				modelRegistry,
+				[
+					() => {
+						streamStarted.resolve();
+						return { content: ["working"], delayMs: 1_000 };
+					},
+				],
+				{ settings: { "async.enabled": false } },
+			);
+			sessions.push(subSession);
+			registry.register({ id: "0-Main", displayName: "main", kind: "main", session: makeFakeSession().session });
+			registry.register({ id: "0-Sub", displayName: "task", kind: "sub", session: subSession, status: "running" });
+			const unsync = registry.syncSessionStatus("0-Sub", subSession);
+			vi.spyOn(subSession, "runEphemeralTurn").mockImplementation(async () => {
+				autoReplyStarted.resolve();
+				await releaseAutoReply.promise;
+				return { replyText: "delayed auto answer", assistantMessage: {} as never };
+			});
+			try {
+				const running = subSession.prompt("work");
+				await streamStarted.promise;
+				const mainHub = new HubTool(makeToolSession(registry, "0-Main"));
+				const resultP = mainHub.execute("call-1", {
+					op: "send",
+					to: "0-Sub",
+					message: "answer on the side channel",
+					await: true,
+					timeoutMs: 5_000,
+				});
+				let settled = false;
+				void resultP.then(() => {
+					settled = true;
+				});
+				await autoReplyStarted.promise;
+				// Model the main turn consuming the incoming aside before it ends:
+				// no bridge queue or wake turn remains to keep agent_end
+				// non-terminal; only the separate side request is still alive.
+				expect(subSession.drainPendingIrcInboxMessages("0-Sub")).toHaveLength(1);
+				await running;
+				await subSession.waitForIdle();
+				await Promise.resolve();
+				expect(settled).toBe(false);
+
+				releaseAutoReply.resolve();
+				const result = await resultP;
+				const details = result.details as CoordinationDetails | undefined;
+				expect(details?.waited?.body).toBe("delayed auto answer");
+			} finally {
+				releaseAutoReply.resolve();
 				unsync();
 			}
 		});

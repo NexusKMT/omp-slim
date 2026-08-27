@@ -7935,6 +7935,11 @@ export class AgentSession {
 		return this.#irc.deliver(msg, opts);
 	}
 
+	/** Waits for side-channel IRC auto-replies currently owned by this session. */
+	waitForIrcAutoReplies(): Promise<void> {
+		return this.#irc.waitForAutoReplies();
+	}
+
 	/** Installs task-executor monitoring around autonomous IRC wake turns. */
 	setIrcWakeTurnObserver(
 		observer: ((records: CustomMessage[]) => ((error?: unknown) => void | Promise<void>) | undefined) | undefined,
