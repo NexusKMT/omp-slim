@@ -5,6 +5,7 @@ import { Text } from "./text";
 const RENDER_INTERVAL_MS = 1000 / 30;
 const SPINNER_ADVANCE_MS = 80;
 const RENDER_BACKPRESSURE_MULTIPLIER = 9;
+const MAX_BACKPRESSURE_FRAME_COST_MS = 200;
 
 type ColorFn = (str: string) => string;
 
@@ -145,7 +146,11 @@ export class Loader extends Text {
 			const cadenceDelayMs = Math.max(0, intervalMs - requestCostMs);
 			// Idle for nine times the full frame cost to keep animation at or
 			// below 10% CPU even though requestComponentRender() only enqueues.
-			const backpressureDelayMs = Math.max(completedFrameCostMs, requestCostMs) * RENDER_BACKPRESSURE_MULTIPLIER;
+			const boundedFrameCostMs = Math.min(
+				MAX_BACKPRESSURE_FRAME_COST_MS,
+				Math.max(completedFrameCostMs, requestCostMs),
+			);
+			const backpressureDelayMs = boundedFrameCostMs * RENDER_BACKPRESSURE_MULTIPLIER;
 			this.#scheduleTick(intervalMs, Math.max(cadenceDelayMs, backpressureDelayMs));
 		}, delayMs);
 		this.#intervalId = timer;
