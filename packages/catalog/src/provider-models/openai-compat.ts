@@ -114,17 +114,29 @@ function toInputCapabilities(value: unknown): ("text" | "image")[] {
 }
 
 /**
- * Process-wide catalog session: the first call downloads the payload (the one
- * request the server logs); later calls revalidate with `If-None-Match` and
- * reuse the decoded payload on `304`. Failure after a successful load falls
- * back to the session copy.
+ * Catalog sessions are scoped to the fetch implementation that owns their
+ * network and authentication context. Callers sharing one fetch reuse the same
+ * conditional request state; isolated registries cannot observe each other's
+ * payloads, ETags, or in-flight requests.
  */
-const catalogSession: {
+interface CatalogSession {
 	inflight: Promise<unknown> | null;
 	payload: unknown;
 	etag: string | null;
 	hasPayload: boolean;
-} = { inflight: null, payload: undefined, etag: null, hasPayload: false };
+}
+
+const defaultCatalogSession: CatalogSession = { inflight: null, payload: undefined, etag: null, hasPayload: false };
+const catalogSessionsByFetch = new WeakMap<FetchImpl, CatalogSession>();
+
+function getCatalogSession(fetchImpl: FetchImpl | undefined): CatalogSession {
+	if (!fetchImpl) return defaultCatalogSession;
+	const existing = catalogSessionsByFetch.get(fetchImpl);
+	if (existing) return existing;
+	const created: CatalogSession = { inflight: null, payload: undefined, etag: null, hasPayload: false };
+	catalogSessionsByFetch.set(fetchImpl, created);
+	return created;
+}
 
 const CATALOG_USER_AGENT = USER_AGENT;
 
@@ -134,42 +146,47 @@ const CATALOG_USER_AGENT = USER_AGENT;
  * The frame magic is sniffed rather than trusting content-type so plain-JSON
  * responses (test stubs, fallback mirrors) parse identically.
  *
- * Fetched fully once per process: concurrent callers share the in-flight
- * request, repeat callers send a conditional GET that the server answers
- * (and deliberately does not log) with `304`.
+ * Fetched fully once per fetch context: concurrent callers sharing a fetch
+ * implementation reuse the in-flight request, while repeat callers send a
+ * conditional GET that the server answers with `304`.
  */
 export function fetchWellKnownModels(fetchImpl?: FetchImpl, signal?: AbortSignal): Promise<unknown> {
-	if (!catalogSession.inflight) {
-		catalogSession.inflight = fetchCatalogPayload(fetchImpl ?? discoveryFetch(), signal).finally(() => {
-			catalogSession.inflight = null;
+	const session = getCatalogSession(fetchImpl);
+	if (!session.inflight) {
+		session.inflight = fetchCatalogPayload(fetchImpl ?? discoveryFetch(), session, signal).finally(() => {
+			session.inflight = null;
 		});
 	}
-	return catalogSession.inflight;
+	return session.inflight;
 }
 
-async function fetchCatalogPayload(fetchImpl: FetchImpl, signal?: AbortSignal): Promise<unknown> {
+async function fetchCatalogPayload(
+	fetchImpl: FetchImpl,
+	session: CatalogSession,
+	signal?: AbortSignal,
+): Promise<unknown> {
 	const headers: Record<string, string> = {
 		Accept: "application/zstd, application/json",
 		"User-Agent": CATALOG_USER_AGENT,
 	};
-	if (catalogSession.hasPayload && catalogSession.etag) {
-		headers["If-None-Match"] = catalogSession.etag;
+	if (session.hasPayload && session.etag) {
+		headers["If-None-Match"] = session.etag;
 	}
 	let response: Response;
 	try {
 		response = await fetchImpl(MODELS_DEV_URL, { method: "GET", headers, signal });
 	} catch (error) {
-		if (catalogSession.hasPayload) {
-			return catalogSession.payload;
+		if (session.hasPayload) {
+			return session.payload;
 		}
 		throw error;
 	}
-	if (response.status === 304 && catalogSession.hasPayload) {
-		return catalogSession.payload;
+	if (response.status === 304 && session.hasPayload) {
+		return session.payload;
 	}
 	if (!response.ok) {
-		if (catalogSession.hasPayload) {
-			return catalogSession.payload;
+		if (session.hasPayload) {
+			return session.payload;
 		}
 		throw new Error(`models catalog fetch failed: ${response.status}`);
 	}
@@ -177,9 +194,9 @@ async function fetchCatalogPayload(fetchImpl: FetchImpl, signal?: AbortSignal): 
 	const isZstd = bytes.length >= 4 && new DataView(bytes.buffer, bytes.byteOffset).getUint32(0, true) === ZSTD_MAGIC;
 	const text = new TextDecoder().decode(isZstd ? await Bun.zstdDecompress(bytes) : bytes);
 	const payload: unknown = JSON.parse(text);
-	catalogSession.payload = payload;
-	catalogSession.etag = response.headers.get("etag");
-	catalogSession.hasPayload = true;
+	session.payload = payload;
+	session.etag = response.headers.get("etag");
+	session.hasPayload = true;
 	return payload;
 }
 
@@ -6809,19 +6826,23 @@ export const MODELS_DEV_CATALOG_PROVIDER_IDS: readonly string[] = Object.freeze(
 /**
  * Build the shared models.dev fallback for one known provider.
  *
- * Every provider-specific manager shares the process-wide conditional fetch in
- * `fetchWellKnownModels`; the model manager persists each mapped provider slice
- * independently so startup can restore it without parsing the full catalog.
+ * Provider managers sharing one fetch implementation reuse its conditional
+ * catalog session. Each mapped provider slice is persisted independently so
+ * startup can restore it without parsing the full catalog.
+ *
+ * `timeoutMs` bounds the catalog request. It is configurable for callers with a
+ * stricter startup budget and for deterministic timeout tests.
  */
 export function modelsDevCatalogFallback(
 	providerId: string,
 	fetchImpl?: FetchImpl,
+	timeoutMs = DEFAULT_OPENAI_COMPATIBLE_DISCOVERY_TIMEOUT_MS,
 ): ModelsDevFallback<Api> | undefined {
 	const descriptors = MODELS_DEV_DESCRIPTORS_BY_PROVIDER[providerId];
 	if (!descriptors) return undefined;
 	return {
 		additiveOnly: true,
-		fetch: () => fetchWellKnownModels(fetchImpl),
+		fetch: () => withCatalogDiscoveryTimeout(timeoutMs, signal => fetchWellKnownModels(fetchImpl, signal)),
 		map: payload => (isRecord(payload) ? mapModelsDevToModels(payload, descriptors) : []),
 	};
 }

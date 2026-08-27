@@ -8,11 +8,13 @@ import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import {
+	fetchWellKnownModels,
 	MODELS_DEV_PROVIDER_DESCRIPTORS,
 	modelsDevCatalogFallback,
 	opencodeGoModelManagerOptions,
 	opencodeZenModelManagerOptions,
 } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
+import type { FetchImpl } from "@oh-my-pi/pi-utils";
 
 const LIVE_FREE_MODEL_IDS = [
 	"deepseek-v4-flash-free",
@@ -126,6 +128,173 @@ describe("Shared models.dev catalog fallback", () => {
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
+	});
+
+	test("keeps upgraded bundled metadata authoritative over an older same-id cache row", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-additive-cache-upgrade-"));
+		try {
+			const bundledModel = getBundledModels("zai")[0];
+			if (!bundledModel) throw new Error("ZAI bundled catalog is empty");
+			const staticV1 = { ...bundledModel, name: "Bundled before upgrade" };
+			const cachedOverride = {
+				...staticV1,
+				name: "Untrusted cached override",
+				contextWindow: 1,
+				maxTokens: 1,
+			};
+			const cacheDbPath = path.join(tempDir, "models.db");
+			const legacyModelsDev = {
+				fetch: async () => [cachedOverride],
+				map: (payload: Array<typeof cachedOverride>) => payload,
+			};
+			const seeded = await resolveProviderModels(
+				{
+					providerId: "zai" as const,
+					cacheDbPath,
+					staticModels: [staticV1],
+					modelsDev: legacyModelsDev,
+				},
+				"online",
+			);
+			expect(seeded.models.find(model => model.id === bundledModel.id)).toMatchObject({
+				name: "Untrusted cached override",
+				contextWindow: 1,
+				maxTokens: 1,
+			});
+
+			const staticV2 = {
+				...bundledModel,
+				name: "Bundled after upgrade",
+				contextWindow: 1_000_001,
+				maxTokens: 131_073,
+			};
+			const upgraded = await resolveProviderModels(
+				{
+					providerId: "zai" as const,
+					cacheDbPath,
+					staticModels: [staticV2],
+					modelsDev: {
+						...legacyModelsDev,
+						additiveOnly: true,
+						fetch: async () => {
+							throw new Error("offline");
+						},
+					},
+				},
+				"offline",
+			);
+			expect(upgraded.models.find(model => model.id === bundledModel.id)).toMatchObject({
+				name: "Bundled after upgrade",
+				contextWindow: staticV2.contextWindow,
+				maxTokens: staticV2.maxTokens,
+			});
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("retains one source's cached slice when the other source refreshes", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-partial-source-refresh-"));
+		try {
+			const existingModel = getBundledModels("zai")[0];
+			if (!existingModel) throw new Error("ZAI bundled catalog is empty");
+			const sharedModel = {
+				...existingModel,
+				id: "shared-only",
+				name: "Shared only",
+				requestModelId: undefined,
+			};
+			let endpointModel = {
+				...existingModel,
+				id: "endpoint-only",
+				name: "Endpoint v1",
+				requestModelId: undefined,
+			};
+			let sharedCatalogAvailable = true;
+			const modelsDev = {
+				additiveOnly: true,
+				fetch: async () => {
+					if (!sharedCatalogAvailable) throw new Error("models.dev unavailable");
+					return [sharedModel];
+				},
+				map: (payload: Array<typeof sharedModel>) => payload,
+			};
+			const options = {
+				providerId: "zai" as const,
+				cacheDbPath: path.join(tempDir, "models.db"),
+				staticModels: [existingModel],
+				modelsDev,
+				fetchDynamicModels: async () => [endpointModel],
+			};
+
+			const initial = await resolveProviderModels(options, "online");
+			expect(initial.models.map(model => model.id).sort()).toEqual(
+				[existingModel.id, "shared-only", "endpoint-only"].sort(),
+			);
+
+			sharedCatalogAvailable = false;
+			endpointModel = { ...endpointModel, name: "Endpoint v2" };
+			const partial = await resolveProviderModels(options, "online");
+			expect(partial.models.map(model => model.id).sort()).toEqual(
+				[existingModel.id, "shared-only", "endpoint-only"].sort(),
+			);
+			expect(partial.models.find(model => model.id === "endpoint-only")?.name).toBe("Endpoint v2");
+			expect(partial.source).toBe("provider");
+			expect(partial.stale).toBe(true);
+
+			const cached = await resolveProviderModels(options, "offline");
+			expect(cached.models.map(model => model.id).sort()).toEqual(
+				[existingModel.id, "shared-only", "endpoint-only"].sort(),
+			);
+			expect(cached.stale).toBe(true);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("isolates conditional catalog sessions by fetch context", async () => {
+		let firstFetches = 0;
+		let secondFetches = 0;
+		const firstFetch: FetchImpl = async () => {
+			firstFetches++;
+			return Response.json({ source: "first" }, { headers: { etag: '"first"' } });
+		};
+		const secondFetch: FetchImpl = async () => {
+			secondFetches++;
+			return Response.json({ source: "second" }, { headers: { etag: '"second"' } });
+		};
+
+		const [first, second] = await Promise.all([fetchWellKnownModels(firstFetch), fetchWellKnownModels(secondFetch)]);
+		expect(first).toEqual({ source: "first" });
+		expect(second).toEqual({ source: "second" });
+		expect(firstFetches).toBe(1);
+		expect(secondFetches).toBe(1);
+	});
+
+	test("aborts a stalled shared catalog request at the configured deadline", async () => {
+		let aborted = false;
+		const stalledFetch: FetchImpl = (_input, init) =>
+			new Promise<Response>((_resolve, reject) => {
+				const signal = init?.signal;
+				if (!signal) {
+					reject(new Error("catalog fetch did not receive an abort signal"));
+					return;
+				}
+				const rejectAborted = () => {
+					aborted = true;
+					reject(signal.reason);
+				};
+				if (signal.aborted) {
+					rejectAborted();
+				} else {
+					signal.addEventListener("abort", rejectAborted, { once: true });
+				}
+			});
+		const fallback = modelsDevCatalogFallback("zai", stalledFetch, 5);
+		if (!fallback) throw new Error("ZAI did not configure a models.dev fallback");
+
+		await expect(fallback.fetch()).rejects.toThrow(/timed out/i);
+		expect(aborted).toBe(true);
 	});
 });
 

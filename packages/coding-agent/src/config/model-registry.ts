@@ -1766,7 +1766,9 @@ export class ModelRegistry {
 					getProviderDefinition(descriptor.providerId)?.prepareModelDiscovery?.(discoveryConfig) ??
 					discoveryConfig;
 				const managerOptions = descriptor.createModelManagerOptions(preparedConfig);
-				const modelsDev = managerOptions.modelsDev ?? modelsDevCatalogFallback(descriptor.providerId, this.#fetch);
+				const modelsDev = managerOptions.modelsDev
+					? { ...managerOptions.modelsDev, additiveOnly: true }
+					: modelsDevCatalogFallback(descriptor.providerId, this.#fetch);
 				options.push(modelsDev ? { ...managerOptions, modelsDev } : managerOptions);
 			}
 		}

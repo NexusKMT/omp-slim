@@ -7,6 +7,10 @@ import {
 } from "@oh-my-pi/pi-catalog/provider-models";
 import type { AuthStorage, OAuthCredential } from "../session/auth-storage";
 
+/**
+ * Built-in providers whose discovery requires provider-specific credentials
+ * or account expansion and therefore cannot use the standard descriptor path.
+ */
 export const SPECIAL_MODEL_MANAGER_PROVIDER_IDS: readonly string[] = [
 	"google-antigravity",
 	"google-gemini-cli",
