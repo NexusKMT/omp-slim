@@ -5693,6 +5693,10 @@ export class AgentSession {
 			!options?.synthetic && !hasPendingUserDirective ? this.#todo.createEagerTodoPrelude(expandedText) : undefined;
 		const eagerTaskPrelude =
 			!options?.synthetic && !hasPendingUserDirective ? this.#todo.createEagerTaskPrelude(expandedText) : undefined;
+		// Stamp the turn's start before any preprocessing (image normalization,
+		// vision-model description for text-only models) so the prompt→yield
+		// timing includes the time the operator actually waits for.
+		const submittedAt = Date.now();
 		const normalizedImages = await this.#normalizeImagesForModel(options?.images);
 
 		const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
@@ -5717,10 +5721,11 @@ export class AgentSession {
 					role: "developer" as const,
 					content: userContent,
 					attribution: promptAttribution,
-					timestamp: Date.now(),
+					timestamp: submittedAt,
 					synthetic: true,
+					userInitiated: options?.userInitiated === true ? true : undefined,
 				}
-			: { role: "user" as const, content: userContent, attribution: promptAttribution, timestamp: Date.now() };
+			: { role: "user" as const, content: userContent, attribution: promptAttribution, timestamp: submittedAt };
 
 		const preludeMessages: AgentMessage[] = [];
 		if (eagerTodoPrelude) {

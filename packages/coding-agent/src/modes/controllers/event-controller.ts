@@ -917,7 +917,12 @@ export class EventController {
 			// queued follow-up drained inside the current run — plan approval, /goal)
 			// starts fresh work without a new agent_start: clear the preceding user
 			// prompt's anchor so its rows don't inherit the old turn's span.
-			if (event.message.synthetic) this.#turnStartedAt = undefined;
+			if (event.message.synthetic) {
+				// A deliberate operator action (`.`, `c` continue shortcut) is the
+				// turn's own prompt: anchor the delta to it instead of clearing.
+				if (event.message.userInitiated) this.#turnStartedAt = event.message.timestamp;
+				else this.#turnStartedAt = undefined;
+			}
 		} else if (event.message.role === "fileMention") {
 			this.#resetReadGroup();
 			this.ctx.addMessageToChat(event.message);

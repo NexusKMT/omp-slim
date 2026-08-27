@@ -700,7 +700,12 @@ export class UiHelpers {
 				// prompt's timestamp, mirroring the live agent_start clear. Same-turn
 				// continuation reminders (todo, plan) are persisted developer messages
 				// WITHOUT the synthetic marker, so their anchor survives the rebuild.
-				if (message.role === "developer" && message.synthetic) turnStartedAt = undefined;
+				if (message.role === "developer" && message.synthetic) {
+					// A deliberate operator action (`.`, `c` continue shortcut) is the
+					// turn's own prompt: anchor the delta to it instead of clearing.
+					if (message.userInitiated) turnStartedAt = message.timestamp;
+					else turnStartedAt = undefined;
+				}
 				if (message.role === "custom" && isUserTurnInitiator(message as CustomMessage)) {
 					turnStartedAt = message.timestamp;
 				}

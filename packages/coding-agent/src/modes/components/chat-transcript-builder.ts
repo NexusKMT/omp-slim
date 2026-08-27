@@ -270,7 +270,10 @@ export class ChatTranscriptBuilder {
 					// agent_start clear. Same-turn continuation reminders (todo, plan)
 					// are persisted developer messages WITHOUT the synthetic marker,
 					// so their anchor survives the rebuild.
-					this.#turnStartedAt = undefined;
+					// A deliberate operator action (`.`, `c` continue shortcut) is the turn's
+					// own prompt: anchor the delta to it instead of clearing.
+					if (message.userInitiated) this.#turnStartedAt = message.timestamp;
+					else this.#turnStartedAt = undefined;
 				}
 				// A user prompt closes the poll-displacement window, same as the live path.
 				if (message.role === "user") this.#resolveWaitingPoll();

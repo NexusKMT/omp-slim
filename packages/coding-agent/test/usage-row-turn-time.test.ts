@@ -198,6 +198,22 @@ describe("ChatTranscriptBuilder turn elapsed", () => {
 		const occurrences = renderedText(transcript.container).match(/Δ1m/g)?.length ?? 0;
 		expect(occurrences).toBe(2);
 	});
+	it("anchors a user-initiated continue shortcut to its own submission time", () => {
+		settings.set("display.showTurnTime", true);
+		const transcript = builder();
+		// `.`/`c` continue: a synthetic developer prompt the OPERATOR issued — the
+		// message's timestamp is the prompt time, not a continuation to clear.
+		const continuePrompt = {
+			role: "developer",
+			content: "continue",
+			attribution: "agent",
+			synthetic: true,
+			userInitiated: true,
+			timestamp: PROMPT_AT,
+		} as unknown as AgentMessage;
+		transcript.rebuild(toEntries([continuePrompt, assistantMessage()]));
+		expect(renderedText(transcript.container)).toContain("Δ1m");
+	});
 
 	it("seeds the prompt→yield delta from a user-invoked skill custom message", () => {
 		settings.set("display.showTurnTime", true);
