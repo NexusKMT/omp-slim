@@ -906,6 +906,12 @@ export class EventController {
 				this.ctx.updatePendingMessagesDisplay();
 			}
 			this.ctx.ui.requestRender(true);
+		} else if (event.message.role === "developer") {
+			// A run-initiating synthetic developer prompt (auto-continue, or a
+			// queued follow-up drained inside the current run — plan approval, /goal)
+			// starts fresh work without a new agent_start: clear the preceding user
+			// prompt's anchor so its rows don't inherit the old turn's span.
+			if (event.message.synthetic) this.#turnStartedAt = undefined;
 		} else if (event.message.role === "fileMention") {
 			this.#resetReadGroup();
 			this.ctx.addMessageToChat(event.message);

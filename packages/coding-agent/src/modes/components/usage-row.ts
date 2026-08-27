@@ -17,17 +17,20 @@ function formatUsageTimestamp(ms: number): string {
 
 /**
  * Prompt→yield wall time for a turn: from the user prompt's timestamp to the
- * final assistant message's creation, plus that response's provider-reported
- * request duration (the only wall-clock the provider gives us) — so hooks, tool
- * calls, and the final generation all count. Undefined when the turn start is
- * unknown (mid-attach) or the math is non-positive.
+ * response's local completion time. The session stamps `completedAt` at
+ * `message_end`, so the span is exact and provider-independent — some providers
+ * never report `duration` (gitlab-duo) or stamp `timestamp` at request start.
+ * Older persisted messages fall back to request start + provider duration.
+ * Undefined when the turn start is unknown (mid-attach) or the math is
+ * non-positive.
  */
 export function turnElapsedMs(
 	turnStartedAt: number | undefined,
-	message: { timestamp: number; duration?: number },
+	message: { timestamp: number; duration?: number; completedAt?: number },
 ): number | undefined {
 	if (turnStartedAt === undefined) return undefined;
-	const elapsed = message.timestamp - turnStartedAt + (message.duration ?? 0);
+	const end = message.completedAt ?? message.timestamp + (message.duration ?? 0);
+	const elapsed = end - turnStartedAt;
 	return elapsed > 0 ? Math.round(elapsed) : undefined;
 }
 

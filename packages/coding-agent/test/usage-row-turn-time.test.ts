@@ -152,6 +152,23 @@ describe("ChatTranscriptBuilder turn elapsed", () => {
 		transcript.rebuild(toEntries([assistantMessage()]));
 		expect(renderedText(transcript.container)).not.toContain(TURN_ELAPSED_LABEL);
 	});
+	it("measures the span from the local completion time when the provider omits duration", () => {
+		settings.set("display.showTurnTime", true);
+		const transcript = builder();
+		// gitlab-duo-style: `timestamp` stamped at request start, no provider
+		// `duration` — the session's `completedAt` stamp still yields the full span.
+		transcript.rebuild(
+			toEntries([userMessage(), assistantMessage({ duration: undefined, completedAt: PROMPT_AT + 60_000 })]),
+		);
+		expect(renderedText(transcript.container)).toContain("Δ1m");
+	});
+
+	it("falls back to request start plus provider duration for legacy unstamped messages", () => {
+		settings.set("display.showTurnTime", true);
+		const transcript = builder();
+		transcript.rebuild(toEntries([userMessage(), assistantMessage({ duration: undefined })]));
+		expect(renderedText(transcript.container)).toContain("Δ30.0s");
+	});
 	it("clears the prompt anchor at a developer-initiated synthetic run during replay", () => {
 		settings.set("display.showTurnTime", true);
 		const transcript = builder();
@@ -414,6 +431,35 @@ describe("focus-attach mid-turn keeps the prompt→yield delta", () => {
 		>);
 		await driveAssistantTurn(controller, assistantMessage());
 		expect(renderedText(chatContainer)).toContain(TURN_ELAPSED_LABEL);
+	});
+	it("clears the live anchor when a synthetic developer prompt drains inside the run", async () => {
+		const { controller, chatContainer } = createFixture();
+		controller.resetTranscriptAnchors();
+		await controller.handleEvent({ type: "message_start", message: userMessage() } as Extract<
+			AgentSessionEvent,
+			{ type: "message_start" }
+		>);
+		await driveAssistantTurn(controller, assistantMessage());
+		expect(renderedText(chatContainer)).toContain(TURN_ELAPSED_LABEL);
+
+		// Queued synthetic follow-up (plan approval, /goal) drained inside the same
+		// run — no new agent_start, so the developer message_start must clear the
+		// preceding user prompt's anchor itself.
+		const developer = {
+			role: "developer",
+			content: "approved plan",
+			attribution: "agent",
+			synthetic: true,
+			timestamp: RESPONSE_CREATED_AT + 5_000,
+		} as unknown as AgentMessage;
+		await controller.handleEvent({ type: "message_start", message: developer } as Extract<
+			AgentSessionEvent,
+			{ type: "message_start" }
+		>);
+		await driveAssistantTurn(controller, assistantMessage());
+
+		const occurrences = renderedText(chatContainer).match(/Δ1m/g)?.length ?? 0;
+		expect(occurrences).toBe(1); // the synthetic run's row adds no delta
 	});
 });
 describe("AgentSession synthetic follow-up marking", () => {

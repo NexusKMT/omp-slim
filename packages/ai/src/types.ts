@@ -978,6 +978,8 @@ export interface AssistantMessage {
 	timestamp: number; // Unix timestamp in milliseconds
 	duration?: number; // Request duration in milliseconds
 	ttft?: number; // Time to first token in milliseconds
+	/** Local wall-clock time the response finished streaming (ms since epoch); stamped by the session at message_end so prompt→yield timing never depends on provider-reported duration. */
+	completedAt?: number;
 }
 
 export interface ToolResultMessage<TDetails = unknown> {
