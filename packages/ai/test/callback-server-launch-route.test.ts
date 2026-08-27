@@ -129,8 +129,9 @@ describe("OAuthCallbackFlow /launch route", () => {
 		const html = await callbackResponse.text();
 
 		expect(html).toContain("Authentication Successful");
-		expect(html).toContain("You have successfully logged in.<br>You can now close this tab.");
+		expect(html).toContain("You have successfully logged in.<br>Please close this tab manually.");
 		expect(html).toContain("Close Window");
+		expect(html).toContain("closeButton.remove();");
 		expect(html).not.toContain("This window will close automatically.");
 		await login;
 	});
