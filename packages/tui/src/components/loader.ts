@@ -139,12 +139,13 @@ export class Loader extends Text {
 				this.#requestPaint();
 			}
 
-			const frameCostMs = performance.now() - startedAt;
+			const completedFrameCostMs = this.#ui?.lastFrameCostMs ?? 0;
+			const requestCostMs = performance.now() - startedAt;
 			if (this.#intervalId !== timer) return;
-			const cadenceDelayMs = Math.max(0, intervalMs - frameCostMs);
-			// Idle for nine times the paint cost to keep animation at or below
-			// 10% CPU, even when a slow ConPTY write exceeds the normal cadence.
-			const backpressureDelayMs = frameCostMs * RENDER_BACKPRESSURE_MULTIPLIER;
+			const cadenceDelayMs = Math.max(0, intervalMs - requestCostMs);
+			// Idle for nine times the full frame cost to keep animation at or
+			// below 10% CPU even though requestComponentRender() only enqueues.
+			const backpressureDelayMs = Math.max(completedFrameCostMs, requestCostMs) * RENDER_BACKPRESSURE_MULTIPLIER;
 			this.#scheduleTick(intervalMs, Math.max(cadenceDelayMs, backpressureDelayMs));
 		}, delayMs);
 		this.#intervalId = timer;

@@ -901,6 +901,16 @@ export class TUI extends Container {
 		return this.#synchronizedOutputEnabled;
 	}
 
+	/**
+	 * Cost in milliseconds of the most recently completed frame.
+	 *
+	 * Animation components use this to apply proportional backpressure after
+	 * their render request is asynchronously composed and written.
+	 */
+	get lastFrameCostMs(): number {
+		return this.#lastFrameCostMs;
+	}
+
 	setFocus(component: Component | null): void {
 		const topVisibleOverlay = this.#getTopmostVisibleOverlay();
 		if (topVisibleOverlay && !isOverlayFocusTarget(topVisibleOverlay.component, component)) {
