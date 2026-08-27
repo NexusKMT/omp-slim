@@ -31,6 +31,7 @@
 - Fixed fast tool completions leaving a permanent running summary that blocked transcript retirement and squeezed later tool output.
 - Fixed `omp git` hunk navigation (`alt+↓`/`alt+↑`) appearing to do nothing while the file sidebar had focus: the diff cursor band now stays visible (dimmed) when the pane is unfocused.
 - Fixed the git TUI sidebar jumping back to the top of the file list after staging or unstaging a file; selection now stays on the nearest remaining row
+- Fixed the startup default model resolving to an `amazon-bedrock/*` model — and failing every turn with a Bedrock 403 — when an ambient AWS credential source (a stray `~/.aws` profile, an EC2 instance role) made Bedrock look available; auto-selection now prefers a provider you actually signed into over one that only self-resolves AWS credentials ([#9967](https://github.com/can1357/oh-my-pi/issues/9967)).
 ### Fixed
 
 - Fixed the `aarch64-linux` `nix build` output segfaulting in the dynamic loader before startup by repointing the stale `DT_VERDEF` that `patchelf` leaves behind when it grows `.dynamic`, and surfaced smoke-test signal deaths in the build log instead of masking them ([#9881](https://github.com/can1357/oh-my-pi/issues/9881)).

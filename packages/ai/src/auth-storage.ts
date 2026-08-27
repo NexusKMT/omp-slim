@@ -28,6 +28,7 @@ import type {
 	OAuthProvider,
 	OAuthProviderId,
 } from "./registry/oauth/types";
+import { AUTHENTICATED_SENTINEL } from "./registry/types";
 import { getEnvApiKey, getEnvApiKeyName } from "./stream";
 import type { Provider } from "./types";
 import type {
@@ -2746,6 +2747,26 @@ export class AuthStorage {
 		if (this.#hasDedicatedEnvAuth(provider)) return true;
 		if (this.#fallbackResolver?.(provider)) return true;
 		return false;
+	}
+
+	/**
+	 * Like {@link hasAuth} but excludes providers whose only credential is the
+	 * self-resolving {@link AUTHENTICATED_SENTINEL} — the marker AWS/Vertex
+	 * transports return when a credential *source* merely exists (a stray
+	 * `~/.aws` profile, an EC2 instance role, Application Default Credentials)
+	 * without a usable key resolved yet. Default-model auto-selection uses this
+	 * so an ambiently-available provider (e.g. `amazon-bedrock` via an unrelated
+	 * AWS profile) does not win the startup default over a provider the user
+	 * actually signed into and then 403 on the first turn. Explicit selection
+	 * and picker visibility still go through {@link hasAuth}. See issue #9967.
+	 */
+	hasConcreteAuth(provider: string): boolean {
+		if (this.#runtimeOverrides.has(provider)) return true;
+		if (this.#configOverrides.has(provider)) return true;
+		if (this.#getCredentialsForProvider(provider).length > 0) return true;
+		if (this.#hasDedicatedEnvAuth(provider) && getEnvApiKey(provider) !== AUTHENTICATED_SENTINEL) return true;
+		const fallback = this.#fallbackResolver?.(provider);
+		return fallback !== undefined && fallback !== AUTHENTICATED_SENTINEL;
 	}
 
 	/**
