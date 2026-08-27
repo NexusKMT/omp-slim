@@ -11,9 +11,9 @@
 //! # Contract
 //! - [`PlaybackDevice::start`] opens the default speaker and invokes `fill`
 //!   with a mono `f32` buffer roughly every [`DeviceConfig::period_ms`]. The
-//!   callback runs on a backend-owned audio thread and must not block. Backends
-//!   keep at most three periods queued OS-side; the engine's drain accounting
-//!   (`PLAYBACK_DRAIN_CALLBACKS`) depends on that bound.
+//!   callback runs on a backend-owned audio thread and must not block. Queue
+//!   depth varies by backend and stream config; [`playback_drain_periods`]
+//!   reports the bound used by the engine's drain accounting.
 //! - [`CaptureDevice::start`] opens the default microphone and invokes `sink`
 //!   with non-empty mono `f32` chunks at the requested sample rate, also from a
 //!   backend-owned thread.

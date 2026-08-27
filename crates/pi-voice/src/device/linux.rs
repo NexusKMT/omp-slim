@@ -385,16 +385,26 @@ const REMOTE_PULSE_LATENCY_MS: u32 = 200;
 /// `PULSE_SERVER` gets the network-safe default and local servers keep the
 /// low-latency callback period.
 fn pulse_latency_ms(period_ms: u32) -> u32 {
-	if let Some(ms) = std::env::var("PULSE_LATENCY_MSEC")
+	let latency_override = std::env::var("PULSE_LATENCY_MSEC")
 		.ok()
-		.and_then(|raw| parse_latency_msec(&raw))
-	{
-		return ms.max(period_ms);
-	}
-	if std::env::var_os("PULSE_SERVER").is_some_and(|server| !server.is_empty()) {
-		return REMOTE_PULSE_LATENCY_MS.max(period_ms);
-	}
-	period_ms
+		.and_then(|raw| parse_latency_msec(&raw));
+	let pulse_server_configured = latency_override.is_none()
+		&& std::env::var_os("PULSE_SERVER").is_some_and(|server| !server.is_empty());
+	select_pulse_latency_ms(period_ms, latency_override, pulse_server_configured)
+}
+
+fn select_pulse_latency_ms(
+	period_ms: u32,
+	latency_override: Option<u32>,
+	pulse_server_configured: bool,
+) -> u32 {
+	latency_override
+		.unwrap_or(if pulse_server_configured {
+			REMOTE_PULSE_LATENCY_MS
+		} else {
+			period_ms
+		})
+		.max(period_ms)
 }
 
 fn parse_latency_msec(raw: &str) -> Option<u32> {
@@ -1037,6 +1047,16 @@ mod tests {
 		assert_eq!(parse_latency_msec(" 150 "), Some(150));
 		assert_eq!(parse_latency_msec("0"), None);
 		assert_eq!(parse_latency_msec("abc"), None);
+	}
+	/// The environment-derived latency policy keeps local streams at the
+	/// callback period, widens explicit servers, and gives a valid override
+	/// precedence without allowing it below the callback period.
+	#[test]
+	fn latency_selection_obeys_local_remote_and_override_precedence() {
+		assert_eq!(select_pulse_latency_ms(50, None, false), 50);
+		assert_eq!(select_pulse_latency_ms(50, None, true), 200);
+		assert_eq!(select_pulse_latency_ms(50, Some(150), true), 150);
+		assert_eq!(select_pulse_latency_ms(50, Some(10), true), 50);
 	}
 
 	/// Regression guard: drain accounting must scale with the same
