@@ -3444,6 +3444,10 @@ export class AgentSession {
 					content: [{ type: "text", text: autoContinuePrompt }],
 					attribution: "agent",
 					timestamp: Date.now(),
+					// Distinguishes this run-initiating prompt from same-turn
+					// continuation reminders (todo/plan) that are also persisted as
+					// developer messages; replay uses it for the prompt→yield anchor.
+					synthetic: true,
 				},
 				autoContinuePrompt,
 				{
@@ -5683,7 +5687,13 @@ export class AgentSession {
 			});
 		}
 		const message = options?.synthetic
-			? { role: "developer" as const, content: userContent, attribution: promptAttribution, timestamp: Date.now() }
+			? {
+					role: "developer" as const,
+					content: userContent,
+					attribution: promptAttribution,
+					timestamp: Date.now(),
+					synthetic: true,
+				}
 			: { role: "user" as const, content: userContent, attribution: promptAttribution, timestamp: Date.now() };
 
 		const preludeMessages: AgentMessage[] = [];

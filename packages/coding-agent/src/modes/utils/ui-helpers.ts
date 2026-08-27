@@ -695,10 +695,12 @@ export class UiHelpers {
 				// Only genuinely user-attributed prompts anchor the delta; a mid-run
 				// agent-attributed `user` message (advisor tool-loop redirect) must not.
 				if (message.role === "user" && message.attribution !== "agent") turnStartedAt = message.timestamp;
-				// Recovery reminders (empty/unexpected-stop retries) never reach replay
-				// — they are appendMessage'd into the LLM context without events — so
-				// every developer message here is genuinely run-initiating.
-				if (message.role === "developer") turnStartedAt = undefined;
+				// A synthetic developer message initiates a fresh run (auto-continue,
+				// /goal, approved plan): replay must not inherit the preceding user
+				// prompt's timestamp, mirroring the live agent_start clear. Same-turn
+				// continuation reminders (todo, plan) are persisted developer messages
+				// WITHOUT the synthetic marker, so their anchor survives the rebuild.
+				if (message.role === "developer" && message.synthetic) turnStartedAt = undefined;
 				if (message.role === "custom" && isUserInvokedSkillPrompt(message as CustomMessage)) {
 					turnStartedAt = message.timestamp;
 				}

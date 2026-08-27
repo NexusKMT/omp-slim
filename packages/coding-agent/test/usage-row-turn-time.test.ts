@@ -145,6 +145,7 @@ describe("ChatTranscriptBuilder turn elapsed", () => {
 		const developer = {
 			role: "developer",
 			content: "auto-continue",
+			synthetic: true,
 			timestamp: RESPONSE_CREATED_AT + 5_000,
 		} as unknown as AgentMessage;
 		transcript.rebuild(toEntries([userMessage(), assistantMessage(), developer, assistantMessage()]));
@@ -152,6 +153,21 @@ describe("ChatTranscriptBuilder turn elapsed", () => {
 		// (developer message, no user prompt) must not inherit the user anchor.
 		const occurrences = renderedText(transcript.container).match(/Δ1m/g)?.length ?? 0;
 		expect(occurrences).toBe(1);
+	});
+	it("keeps the prompt anchor across a persisted same-turn continuation reminder", () => {
+		settings.set("display.showTurnTime", true);
+		const transcript = builder();
+		// The todo/plan continuation reminders are persisted developer messages
+		// WITHOUT the synthetic marker (auto-continue carries it): the continued
+		// assistant row must keep measuring from the initiating user prompt.
+		const reminder = {
+			role: "developer",
+			content: "todo reminder",
+			timestamp: RESPONSE_CREATED_AT + 5_000,
+		} as unknown as AgentMessage;
+		transcript.rebuild(toEntries([userMessage(), assistantMessage(), reminder, assistantMessage()]));
+		const occurrences = renderedText(transcript.container).match(/Δ1m/g)?.length ?? 0;
+		expect(occurrences).toBe(2);
 	});
 
 	it("seeds the prompt→yield delta from a user-invoked skill custom message", () => {
