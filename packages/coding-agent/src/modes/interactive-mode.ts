@@ -1575,6 +1575,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			// cwd-derived caches (provider globals, plugin roots, capabilities,
 			// skills, slash commands) must all return to the source project so a
 			// `false` result reliably means nothing was committed.
+			this.sessionManager.setCwdWithoutRelocation(previousCwd);
 			try {
 				setProjectDir(previousCwd);
 				if (isSettingsInitialized()) {

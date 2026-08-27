@@ -132,6 +132,46 @@ describe("SessionManager.moveTo", () => {
 		expect(header?.additionalDirectories ?? []).toContain(path.resolve(cwdB));
 		expect(session.getCwd()).toBe(path.resolve(cwdA));
 	});
+	it("relocates a fallback session whose bucket matches the runtime cwd", async () => {
+		const deniedDir = path.join(testAgentDir, "denied-project");
+		const deniedFile = path.join(deniedDir, "session.jsonl");
+		await fsp.mkdir(deniedDir);
+		await Bun.write(
+			deniedFile,
+			`${JSON.stringify({
+				type: "session",
+				id: "019e84ed-b4cc-7000-9c87-5afe6df992c1",
+				cwd: deniedDir,
+				timestamp: new Date(0).toISOString(),
+			})}\n`,
+		);
+		const realAccess = fs.promises.access.bind(fs.promises);
+		const access = spyOn(fs.promises, "access").mockImplementation(async (target, mode) => {
+			if (path.resolve(String(target)) === path.resolve(deniedDir)) {
+				throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+			}
+			return realAccess(target, mode);
+		});
+		try {
+			const session = await SessionManager.open(deniedFile, undefined, undefined, { initialCwd: cwdA });
+			try {
+				const snapshot = session.captureState();
+				await session.moveTo(cwdA);
+				const movedFile = session.getSessionFile()!;
+				expect(movedFile).not.toBe(deniedFile);
+
+				await session.rollbackMove(snapshot);
+
+				expect(fs.existsSync(deniedFile)).toBe(true);
+				expect(fs.existsSync(movedFile)).toBe(false);
+				expect(session.getSessionFile()).toBe(deniedFile);
+			} finally {
+				await session.close();
+			}
+		} finally {
+			access.mockRestore();
+		}
+	});
 
 	it("succeeds on fresh session without ENOENT, then deferred persistence works", async () => {
 		const session = SessionManager.create(cwdA);

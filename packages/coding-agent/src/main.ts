@@ -744,13 +744,7 @@ async function switchToResumedProject(
 		setProjectDir(resumedCwd);
 	} catch (error) {
 		logger.warn("Could not switch to resumed project directory", { cwd: resumedCwd, error: String(error) });
-		try {
-			sessionManager.setCwdWithoutRelocation(launchCwd);
-		} catch (rollbackError) {
-			throw new SessionResolutionError(
-				`Could not switch to resumed project ${resumedCwd}; failed to restore launch directory ${launchCwd}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-			);
-		}
+		sessionManager.setCwdWithoutRelocation(launchCwd);
 		return { cwd: launchCwd, chdirFailed: resumedCwd };
 	}
 	clearPluginRootsAndCaches();
@@ -762,6 +756,9 @@ async function switchToResumedProject(
 	try {
 		await preloadPluginRoots(os.homedir(), cwd);
 		await activeSettings.reloadForCwd(cwd);
+		if (normalizePathForComparison(sessionManager.getCwd()) !== normalizePathForComparison(cwd)) {
+			sessionManager.adoptRecordedCwd();
+		}
 	} catch (error) {
 		// The process cwd is already committed to the target. If rescoping the
 		// cwd-derived state fails, undo the whole transition instead of building

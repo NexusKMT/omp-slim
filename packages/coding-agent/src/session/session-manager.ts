@@ -1369,7 +1369,8 @@ export class SessionManager {
 	 */
 	async rollbackMove(snapshot: SessionManagerStateSnapshot): Promise<void> {
 		try {
-			await this.moveTo(snapshot.cwd, snapshot.sessionDir);
+			const targetSessionDir = snapshot.sessionFile ? path.dirname(snapshot.sessionFile) : snapshot.sessionDir;
+			await this.moveTo(snapshot.cwd, targetSessionDir);
 		} catch (error) {
 			const movedFile = this.getSessionFile();
 			throw new Error(
@@ -1429,12 +1430,15 @@ export class SessionManager {
 		if (headerCwd && headerCwd !== path.resolve(this.#cwd) && (await directoryIsEnterable(headerCwd))) {
 			this.#cwd = headerCwd;
 			this.#sessionDir = path.dirname(resolvedSessionFile);
+			this.#fallbackRuntimeOnly = false;
 			this.#rememberBreadcrumb(this.#cwd, resolvedSessionFile);
 		} else if (headerCwd && headerCwd !== path.resolve(this.#cwd)) {
 			// Header cwd not enterable: keep runtime cwd but mark fallback
 			// so workspace changes stay runtime-only until the transcript
 			// is relocated.
 			this.#fallbackRuntimeOnly = true;
+		} else {
+			this.#fallbackRuntimeOnly = false;
 		}
 
 		this.#applyEntries(header, fileEntries.slice(1) as SessionEntry[]);
@@ -1514,23 +1518,23 @@ export class SessionManager {
 	async moveTo(newCwd: string, targetSessionDir?: string): Promise<void> {
 		const resolvedCwd = path.resolve(newCwd);
 		const resolvedTargetDir = targetSessionDir ? path.resolve(targetSessionDir) : undefined;
-		// In fallback mode #cwd already equals the runtime cwd while #sessionDir
-		// still points at the denied project. Don't early-return on same-cwd
-		// or the file would stay in the wrong bucket; force relocation.
-		if (
-			resolvedCwd === path.resolve(this.#cwd) &&
-			!this.#fallbackRuntimeOnly &&
-			(!resolvedTargetDir || resolvedTargetDir === path.resolve(this.#sessionDir))
-		) {
-			return;
-		}
-
 		const managedRoot = resolveManagedSessionRoot(this.#sessionDir, this.#cwd);
 		const nextSessionDir =
 			resolvedTargetDir ??
 			(managedRoot
 				? computeDefaultSessionDir(resolvedCwd, this.#storage, managedRoot)
 				: computeDefaultSessionDir(resolvedCwd, this.#storage));
+		const expectedSessionFile = this.#sessionFile
+			? path.join(nextSessionDir, path.basename(this.#sessionFile))
+			: undefined;
+		if (
+			resolvedCwd === path.resolve(this.#cwd) &&
+			!this.#fallbackRuntimeOnly &&
+			(!resolvedTargetDir || resolvedTargetDir === path.resolve(this.#sessionDir)) &&
+			(!expectedSessionFile || path.resolve(this.#sessionFile!) === path.resolve(expectedSessionFile))
+		) {
+			return;
+		}
 
 		let sessionFileExisted = false;
 		// Track source+dest for concurrent completed appends during relocation
@@ -1914,6 +1918,15 @@ export class SessionManager {
 			this.#rememberBreadcrumb(resolvedCwd, this.#sessionFile);
 		}
 	}
+	adoptRecordedCwd(): void {
+		const recordedCwd = this.#header.cwd;
+		if (!recordedCwd) return;
+		this.#cwd = path.resolve(recordedCwd);
+		if (this.#sessionFile) this.#sessionDir = path.dirname(this.#sessionFile);
+		this.#fallbackRuntimeOnly = false;
+		if (this.#sessionFile) this.#rememberBreadcrumb(this.#cwd, this.#sessionFile);
+	}
+
 	/**
 	 * Re-anchor the session bucket to the runtime cwd after a fallback.
 	 * The fallback flag keeps the transcript at its recorded path (stale

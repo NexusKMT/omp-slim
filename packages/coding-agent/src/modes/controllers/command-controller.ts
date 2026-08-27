@@ -72,6 +72,55 @@ function showMarkdownPanel(ctx: InteractiveModeContext, title: string, markdown:
 export class CommandController {
 	constructor(private readonly ctx: InteractiveModeContext) {}
 
+	async #restoreAfterMoveFailure(
+		previousState: Parameters<InteractiveModeContext["sessionManager"]["rollbackMove"]>[0],
+		initialError?: unknown,
+	): Promise<void> {
+		if (initialError !== undefined) {
+			this.ctx.showError(
+				`Failed to switch workspace: ${initialError instanceof Error ? initialError.message : String(initialError)}`,
+			);
+		}
+
+		try {
+			await this.ctx.sessionManager.rollbackMove(previousState);
+		} catch (rollbackError) {
+			const actual = this.ctx.sessionManager.getCwd();
+			let realigned = false;
+			try {
+				realigned = await this.ctx.applyCwdChange(actual);
+			} catch {}
+			if (!realigned) {
+				this.ctx.showError(
+					`Failed to roll back move: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)} (failed to re-align workspace to ${actual})`,
+				);
+				await this.ctx.shutdown();
+				return;
+			}
+			this.ctx.showError(
+				`Failed to roll back move: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)} (workspace remains at ${actual})`,
+			);
+		}
+
+		let sourceRestored = false;
+		try {
+			sourceRestored = await this.ctx.applyCwdChange(previousState.cwd);
+		} catch {}
+		if (sourceRestored) return;
+
+		const actual = this.ctx.sessionManager.getCwd();
+		let realigned = false;
+		try {
+			realigned = await this.ctx.applyCwdChange(actual);
+		} catch {}
+		if (!realigned) {
+			this.ctx.showError(`Failed to restore source workspace after rollback: workspace remains at ${actual}`);
+			await this.ctx.shutdown();
+			return;
+		}
+		this.ctx.showError(`Failed to restore source workspace after rollback: workspace remains at ${actual}`);
+	}
+
 	openInBrowser(urlOrPath: string): void {
 		openPath(urlOrPath);
 	}
@@ -1113,98 +1162,12 @@ export class CommandController {
 		let applied = false;
 		try {
 			applied = await this.ctx.applyCwdChange(resolvedPath);
-		} catch (e) {
-			this.ctx.showError(`Failed to switch workspace: ${e instanceof Error ? e.message : String(e)}`);
-			try {
-				await this.ctx.sessionManager.rollbackMove(previousState);
-				let sourceOk = false;
-				try {
-					sourceOk = await this.ctx.applyCwdChange(previousState.cwd);
-				} catch {}
-				if (!sourceOk) {
-					const actual = this.ctx.sessionManager.getCwd();
-					let realigned = false;
-					try {
-						realigned = await this.ctx.applyCwdChange(actual);
-					} catch {}
-					if (!realigned) {
-						this.ctx.showError(
-							`Failed to restore source workspace after rollback: process remains at target while session is at ${actual}`,
-						);
-						this.ctx.showError(
-							`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at target). Restart required.`,
-						);
-						if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
-						this.ctx.disableLoopMode("Session disabled due to workspace mismatch");
-						this.ctx.disableGoalMode("Goal mode disabled due to workspace mismatch");
-						this.ctx.showError("Editor disabled — restart to continue.");
-						return;
-					} else {
-						this.ctx.showError(
-							`Failed to restore source workspace after rollback: workspace remains at ${actual}`,
-						);
-					}
-					return;
-				}
-			} catch (err) {
-				// rollbackMove keeps the manager at the moved target while
-				// applyCwdChange left the process at the source — re-scope the
-				// process to the actual manager location so the workspace is
-				// consistent, even though the original move could not be undone.
-				const actual = this.ctx.sessionManager.getCwd();
-				let realigned = false;
-				try {
-					realigned = await this.ctx.applyCwdChange(actual);
-				} catch {}
-				if (!realigned) {
-					this.ctx.showError(
-						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
-					);
-					this.ctx.showError(
-						`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at source). Restart required.`,
-					);
-					if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
-					this.ctx.disableLoopMode("Session disabled due to workspace mismatch");
-					this.ctx.disableGoalMode("Goal mode disabled due to workspace mismatch");
-					this.ctx.showError("Editor disabled — restart to continue.");
-				} else {
-					this.ctx.showError(
-						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (workspace remains at ${actual})`,
-					);
-				}
-			}
+		} catch (error) {
+			await this.#restoreAfterMoveFailure(previousState, error);
 			return;
 		}
 		if (!applied) {
-			try {
-				await this.ctx.sessionManager.rollbackMove(previousState);
-			} catch (err) {
-				// rollbackMove keeps the manager at the moved target while
-				// applyCwdChange left the process at the source — re-scope the
-				// process to the actual manager location so the workspace is
-				// consistent, even though the original move could not be undone.
-				const actual = this.ctx.sessionManager.getCwd();
-				let realigned = false;
-				try {
-					realigned = await this.ctx.applyCwdChange(actual);
-				} catch {}
-				if (!realigned) {
-					this.ctx.showError(
-						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
-					);
-					this.ctx.showError(
-						`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at source). Restart required.`,
-					);
-					if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
-					this.ctx.disableLoopMode("Session disabled due to workspace mismatch");
-					this.ctx.disableGoalMode("Goal mode disabled due to workspace mismatch");
-					this.ctx.showError("Editor disabled — restart to continue.");
-				} else {
-					this.ctx.showError(
-						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (workspace remains at ${actual})`,
-					);
-				}
-			}
+			await this.#restoreAfterMoveFailure(previousState);
 			return;
 		}
 
@@ -1299,105 +1262,20 @@ export class CommandController {
 	async #moveInteractiveCwd(resolvedPath: string): Promise<void> {
 		const previousState = this.ctx.sessionManager.captureState();
 		await this.ctx.sessionManager.moveTo(resolvedPath);
-		let ok = false;
+		let applied = false;
 		try {
-			ok = await this.ctx.applyCwdChange(resolvedPath);
-		} catch (e) {
-			this.ctx.showError(`Failed to switch workspace: ${e instanceof Error ? e.message : String(e)}`);
-			try {
-				await this.ctx.sessionManager.rollbackMove(previousState);
-				let sourceOk = false;
-				try {
-					sourceOk = await this.ctx.applyCwdChange(previousState.cwd);
-				} catch {}
-				if (!sourceOk) {
-					const actual = this.ctx.sessionManager.getCwd();
-					let realigned = false;
-					try {
-						realigned = await this.ctx.applyCwdChange(actual);
-					} catch {}
-					if (!realigned) {
-						this.ctx.showError(
-							`Failed to restore source workspace after rollback: process remains at target while session is at ${actual}`,
-						);
-						this.ctx.showError(
-							`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at target). Restart required.`,
-						);
-						if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
-						this.ctx.disableLoopMode("Session disabled due to workspace mismatch");
-						this.ctx.disableGoalMode("Goal mode disabled due to workspace mismatch");
-						this.ctx.showError("Editor disabled — restart to continue.");
-						return;
-					} else {
-						this.ctx.showError(
-							`Failed to restore source workspace after rollback: workspace remains at ${actual}`,
-						);
-					}
-					return;
-				}
-			} catch (err) {
-				// rollbackMove keeps the manager at the moved target while
-				// applyCwdChange left the process at the source — re-scope the
-				// process to the actual manager location so the workspace is
-				// consistent, even though the original move could not be undone.
-				const actual = this.ctx.sessionManager.getCwd();
-				let realigned = false;
-				try {
-					realigned = await this.ctx.applyCwdChange(actual);
-				} catch {}
-				if (!realigned) {
-					this.ctx.showError(
-						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
-					);
-					this.ctx.showError(
-						`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at source). Restart required.`,
-					);
-					if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
-					this.ctx.disableLoopMode("Session disabled due to workspace mismatch");
-					this.ctx.disableGoalMode("Goal mode disabled due to workspace mismatch");
-					this.ctx.showError("Editor disabled — restart to continue.");
-				} else {
-					this.ctx.showError(
-						`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (workspace remains at ${actual})`,
-					);
-				}
-			}
+			applied = await this.ctx.applyCwdChange(resolvedPath);
+		} catch (error) {
+			await this.#restoreAfterMoveFailure(previousState, error);
 			return;
 		}
-		if (ok) {
-			this.ctx.updateEditorBorderColor();
-			await this.ctx.reloadTodos();
+		if (!applied) {
+			await this.#restoreAfterMoveFailure(previousState);
 			return;
 		}
-		try {
-			await this.ctx.sessionManager.rollbackMove(previousState);
-		} catch (err) {
-			// rollbackMove keeps the manager at the moved target while
-			// applyCwdChange left the process at the source — re-scope the
-			// process to the actual manager location so the workspace is
-			// consistent, even though the original move could not be undone.
-			const actual = this.ctx.sessionManager.getCwd();
-			let realigned = false;
-			try {
-				realigned = await this.ctx.applyCwdChange(actual);
-			} catch {}
-			if (!realigned) {
-				this.ctx.showError(
-					`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
-				);
-				this.ctx.showError(
-					`Session disabled due to unrecoverable workspace mismatch (manager at ${actual}, process at source). Restart required.`,
-				);
-				if (this.ctx.editor) this.ctx.editor.disableSubmit = true;
-				this.ctx.disableLoopMode("Session disabled due to workspace mismatch");
-				this.ctx.disableGoalMode("Goal mode disabled due to workspace mismatch");
-				this.ctx.showError("Editor disabled — restart to continue.");
-			} else {
-				this.ctx.showError(
-					`Failed to roll back move: ${err instanceof Error ? err.message : String(err)} (workspace remains at ${actual})`,
-				);
-			}
-		}
+
+		this.ctx.updateEditorBorderColor();
+		await this.ctx.reloadTodos();
 	}
 
 	async #applyBashResultCwd(result: BashResult): Promise<void> {

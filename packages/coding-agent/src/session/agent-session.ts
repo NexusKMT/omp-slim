@@ -8193,28 +8193,18 @@ export class AgentSession {
 			}
 			await this.sessionManager.setSessionFile(sessionPath);
 			this.#bash.markSessionTransition(bashTransition);
+			const newCwd = this.sessionManager.getCwd();
+			const recordedCwd = this.sessionManager.getRecordedCwd() ?? previousSessionState.cwd;
+			if (!options?.onCwdChange && path.resolve(recordedCwd) !== path.resolve(previousSessionState.cwd)) {
+				throw SESSION_CWD_CHANGE_REJECTED;
+			}
 			if (options?.onCwdChange) {
-				const newCwd = this.sessionManager.getCwd();
-				const recordedCwd = this.sessionManager.getRecordedCwd() ?? previousSessionState.cwd;
 				if (path.resolve(newCwd) !== path.resolve(previousSessionState.cwd)) {
 					cwdChangeTarget = newCwd;
 					if (!(await options.onCwdChange(newCwd, previousSessionState.cwd))) {
 						throw SESSION_CWD_CHANGE_REJECTED;
 					}
 				} else if (path.resolve(recordedCwd) !== path.resolve(previousSessionState.cwd)) {
-					// setSessionFile retained previous cwd because recorded cwd failed
-					// directoryIsEnterable (TCC-denied). Previous check saw no change
-					// and returned success, leaving tools on wrong transcript.
-					cwdChangeTarget = recordedCwd;
-					if (!(await options.onCwdChange(recordedCwd, previousSessionState.cwd))) {
-						throw SESSION_CWD_CHANGE_REJECTED;
-					}
-					// Access was restored between probe and callback, so
-					// onCwdChange moved to recordedCwd. Undo before rejecting
-					// or the manager and process would diverge.
-					if (!(await options.onCwdChange(previousSessionState.cwd, recordedCwd))) {
-						throw new Error(`cwd reverse rollback was rejected: ${recordedCwd} -> ${previousSessionState.cwd}`);
-					}
 					throw SESSION_CWD_CHANGE_REJECTED;
 				}
 			}

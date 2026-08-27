@@ -55,6 +55,11 @@ function formatWorkspaceDirectories(runtime: SlashCommandRuntime, note?: string)
 	const lines = ["Workspace directories:", `  ${cwd} (working directory)`, ...additional.map(d => `  ${d}`)];
 	return note ? `${note}\n${lines.join("\n")}` : lines.join("\n");
 }
+async function fatalMoveFailure(text: string, runtime: SlashCommandRuntime): Promise<SlashCommandResult> {
+	await runtime.output(text);
+	await runtime.session.dispose();
+	return commandConsumed();
+}
 
 export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 	{
@@ -591,7 +596,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 						realigned = true;
 					} catch {}
 					if (!realigned) {
-						return usage(
+						return fatalMoveFailure(
 							`Move failed and rollback failed: ${errorMessage(rollbackError)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
 							runtime,
 						);
@@ -617,7 +622,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 						realigned = true;
 					} catch {}
 					if (!realigned) {
-						return usage(
+						return fatalMoveFailure(
 							`Move failed and rollback failed: ${errorMessage(rollbackError)} (failed to re-align workspace to ${actual}; process remains at source while session is at ${actual})`,
 							runtime,
 						);

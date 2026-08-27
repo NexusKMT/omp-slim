@@ -43,7 +43,12 @@ interface FakeAcpBuiltinSession {
 	markMovedFromEmptySessionFile(sessionFile: string): void;
 	fork(): Promise<boolean>;
 	handoff(instr?: string): Promise<{ document: string; savedPath?: string } | undefined>;
+	dispose(): Promise<void>;
 	exportToHtml(outputPath?: string): Promise<string>;
+	effectiveExtensionRoots: unknown;
+	setTitleSystemPrompt(prompt: string | undefined): void;
+	setSlashCommands(commands: unknown[]): void;
+	refreshSkills(): Promise<void>;
 	getTodoPhases(): Array<{ name: string; tasks: Array<{ content: string; status: string }> }>;
 	setTodoPhases(phases: Array<{ name: string; tasks: Array<{ content: string; status: string }> }>): void;
 	refreshBaseSystemPrompt(): Promise<void>;
@@ -95,6 +100,11 @@ function createRuntime() {
 		_todoPhases: [],
 		_switchedTo: undefined,
 		_movedFromEmptySessionFile: undefined,
+		dispose: async () => {},
+		effectiveExtensionRoots: undefined,
+		setTitleSystemPrompt: (_prompt: string | undefined) => {},
+		setSlashCommands: (_commands: unknown[]) => {},
+		refreshSkills: async () => {},
 		toggleFastMode() {
 			this.fastMode = !this.fastMode;
 			return this.fastMode;
@@ -1236,6 +1246,27 @@ describe("wave 5 — adapters and polish", () => {
 });
 
 describe("/move preflight flush", () => {
+	it("disposes the session when headless workspace rollback cannot recover", async () => {
+		const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-acp-move-fatal-"));
+		const originalProjectDir = getProjectDir();
+		const { output, runtime, session } = createRuntime();
+		const dispose = spyOn(session, "dispose");
+		const reloadForCwd = spyOn(runtime.settings, "reloadForCwd").mockRejectedValue(
+			new Error("workspace reload failed"),
+		);
+		try {
+			const result = await executeAcpBuiltinSlashCommand(`/move ${targetDir}`, runtime);
+
+			expect(result).toEqual({ consumed: true });
+			expect(dispose).toHaveBeenCalledTimes(1);
+			expect(output.some(text => text.includes("failed to re-align workspace"))).toBe(true);
+		} finally {
+			reloadForCwd.mockRestore();
+			dispose.mockRestore();
+			setProjectDir(originalProjectDir);
+			await fs.rm(targetDir, { recursive: true, force: true });
+		}
+	});
 	it("aborts text-mode /move when pending settings flush fails", async () => {
 		const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-acp-move-"));
 		try {

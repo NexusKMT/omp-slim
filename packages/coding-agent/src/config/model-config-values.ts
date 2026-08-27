@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { $envExact, getSafeProjectCwd, logger } from "@oh-my-pi/pi-utils";
+import { $envExact, directoryIsEnterableSync, getProjectDir, logger } from "@oh-my-pi/pi-utils";
 
 const commandValueCache = new Map<string, string>();
 // Failed `!command` resolutions (non-zero exit, empty stdout) are negative-cached
@@ -43,8 +43,13 @@ function resolveCommandConfig(command: string, options?: ResolveConfigValueOptio
 	const retryAt = commandFailureRetryAt.get(command);
 	if (retryAt !== undefined && Date.now() < retryAt) return undefined;
 	try {
+		const cwd = getProjectDir();
+		if (!directoryIsEnterableSync(cwd)) {
+			commandFailureRetryAt.set(command, Date.now() + COMMAND_FAILURE_RETRY_MS);
+			return undefined;
+		}
 		const stdout = execSync(command, {
-			cwd: getSafeProjectCwd(),
+			cwd,
 			encoding: "utf8",
 			timeout: 10_000,
 			windowsHide: true,

@@ -179,6 +179,29 @@ describe("AgentSession.switchSession previous-context build", () => {
 		expect(sessionManager.getSessionFile()).toBe(previousSessionFile);
 		expect(sessionManager.getCwd()).toBe(sourceDir.path());
 	});
+	it("rejects callback-free switches across project directories", async () => {
+		const sourceDir = TempDir.createSync("@pi-switch-no-callback-source-");
+		const targetDir = TempDir.createSync("@pi-switch-no-callback-target-");
+		tempDirs.push(sourceDir, targetDir);
+
+		const { session, sessionManager } = buildSession(sourceDir);
+		sessionManager.appendMessage({ role: "user", content: "source", timestamp: 1 });
+		await sessionManager.flush();
+		const previousSessionFile = sessionManager.getSessionFile();
+
+		const targetManager = SessionManager.create(targetDir.path(), targetDir.path());
+		targetManager.appendMessage({ role: "user", content: "target", timestamp: 2 });
+		await targetManager.ensureOnDisk();
+		await targetManager.flush();
+		const targetSessionFile = targetManager.getSessionFile();
+		await targetManager.close();
+
+		const switched = await session.switchSession(targetSessionFile!);
+
+		expect(switched).toBe(false);
+		expect(sessionManager.getSessionFile()).toBe(previousSessionFile);
+		expect(sessionManager.getCwd()).toBe(sourceDir.path());
+	});
 
 	it("restores cwd when cwd adoption throws after changing it", async () => {
 		const sourceDir = TempDir.createSync("@pi-switch-cwd-error-source-");

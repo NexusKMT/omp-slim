@@ -27,6 +27,7 @@ function createMoveContext(sourceDir: string, settingsFlush?: () => Promise<void
 		state.movedTo = snapshot.cwd;
 		restoreState(snapshot);
 	});
+	const shutdown = vi.fn(async () => {});
 	const ctx = {
 		session: { isStreaming: false, moveSession },
 		sessionManager: {
@@ -48,8 +49,9 @@ function createMoveContext(sourceDir: string, settingsFlush?: () => Promise<void
 		reloadTodos: vi.fn(async () => {}),
 		ui: { requestRender: vi.fn() },
 		present,
+		shutdown,
 	} as unknown as InteractiveModeContext;
-	return { ctx, state, present, captureState, restoreState, rollbackMove, sessionDir };
+	return { ctx, state, present, captureState, restoreState, rollbackMove, shutdown, sessionDir };
 }
 
 describe("CommandController /move", () => {
@@ -86,8 +88,12 @@ describe("CommandController /move", () => {
 		const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-source-"));
 		const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-target-"));
 		try {
-			const { ctx, state, captureState, restoreState, rollbackMove } = createMoveContext(sourceDir);
-			ctx.applyCwdChange = vi.fn(async () => false);
+			const { ctx, state, captureState, restoreState, rollbackMove, shutdown } = createMoveContext(sourceDir);
+			let applyCount = 0;
+			ctx.applyCwdChange = vi.fn(async () => {
+				applyCount += 1;
+				return applyCount > 1;
+			});
 			const controller = new CommandController(ctx);
 
 			await controller.handleMoveCommand(targetDir);
@@ -96,9 +102,33 @@ describe("CommandController /move", () => {
 			expect(rollbackMove).toHaveBeenCalledWith(captureState.mock.results[0]?.value);
 			expect(state.cwd).toBe(sourceDir);
 			expect(restoreState).toHaveBeenCalledWith(captureState.mock.results[0]?.value);
+			expect(shutdown).not.toHaveBeenCalled();
 			expect(ctx.updateEditorBorderColor).not.toHaveBeenCalled();
 			expect(ctx.reloadTodos).not.toHaveBeenCalled();
 			expect(ctx.ui.requestRender).not.toHaveBeenCalled();
+		} finally {
+			await fs.rm(sourceDir, { recursive: true, force: true });
+			await fs.rm(targetDir, { recursive: true, force: true });
+		}
+	});
+	it("shuts down when rollback and workspace realignment both fail", async () => {
+		const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-source-"));
+		const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-target-"));
+		try {
+			const { ctx, shutdown, rollbackMove } = createMoveContext(sourceDir);
+			let applyCount = 0;
+			ctx.applyCwdChange = vi.fn(async () => {
+				applyCount += 1;
+				if (applyCount === 1) throw new Error("target setup failed");
+				return false;
+			});
+			rollbackMove.mockRejectedValueOnce(new Error("rollback denied"));
+			const controller = new CommandController(ctx);
+
+			await controller.handleMoveCommand(targetDir);
+
+			expect(shutdown).toHaveBeenCalledTimes(1);
+			expect(ctx.present).not.toHaveBeenCalled();
 		} finally {
 			await fs.rm(sourceDir, { recursive: true, force: true });
 			await fs.rm(targetDir, { recursive: true, force: true });
