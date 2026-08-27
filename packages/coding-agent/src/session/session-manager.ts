@@ -1093,10 +1093,7 @@ export class SessionManager {
 	#resetToNewSession(options?: NewSessionOptions, forcedSessionFile?: string): string | undefined {
 		this.#diskTail = Promise.resolve();
 		this.#clearDiskError();
-		if (this.#fallbackRuntimeOnly) {
-			this.#sessionDir = computeDefaultSessionDir(this.#cwd, this.#storage);
-			this.#fallbackRuntimeOnly = false;
-		}
+		this.#reconcileSessionDirForFallback();
 		this.#sessionId = mintSessionId();
 		this.#sessionName = undefined;
 		this.#titleSource = undefined;
@@ -1475,10 +1472,7 @@ export class SessionManager {
 		const parentSessionId = this.#sessionId;
 		await this.#drainAndCloseWriter();
 		this.#clearDiskError();
-		if (this.#fallbackRuntimeOnly) {
-			this.#sessionDir = computeDefaultSessionDir(this.#cwd, this.#storage);
-			this.#fallbackRuntimeOnly = false;
-		}
+		this.#reconcileSessionDirForFallback();
 
 		const timestamp = nowIso();
 		this.#sessionId = mintSessionId();
@@ -1514,10 +1508,27 @@ export class SessionManager {
 	/**
 	 * Move the session to a new working directory: relocate the session file and
 	 * artifacts on disk, update internal references, and rewrite the header cwd.
+	 *
+	 * Fallback note (P2 3867822545, P2 3867876183): when a resumed cwd is denied
+	 * after the probe (macOS TCC / EACCES), startup fallback via
+	 * `setCwdWithoutRelocation` keeps the transcript at its recorded path while
+	 * the runtime cwd falls back to launch, setting `fallbackRuntimeOnly=true`.
+	 * In that state `#cwd` diverges from `#header.cwd`/`#sessionDir`. The guard
+	 * below checks `!fallbackRuntimeOnly` so a same-cwd moveTo still relocates
+	 * to the runtime bucket, and the flag is cleared only after the durable
+	 * move succeeds (see clearing comment below).
 	 */
 	async moveTo(newCwd: string, targetSessionDir?: string): Promise<void> {
 		const resolvedCwd = path.resolve(newCwd);
 		const resolvedTargetDir = targetSessionDir ? path.resolve(targetSessionDir) : undefined;
+		// Same-cwd+same-dir is a no-op only when the session is not in fallback
+		// mode. When fallbackRuntimeOnly is set, #cwd already equals the runtime
+		// (launch) cwd but #sessionDir/#header.cwd still point at the denied
+		// resumed project (setCwdWithoutRelocation kept the file in place —
+		// P2 3867822545). Without `!fallbackRuntimeOnly` a fallback session
+		// calling moveTo(its own cwd) would early-return and never relocate
+		// its file to computeDefaultSessionDir(runtimeCwd), stranding it in
+		// the wrong bucket forever; the flag forces re-anchor (P2 3867876183).
 		if (
 			resolvedCwd === path.resolve(this.#cwd) &&
 			!this.#fallbackRuntimeOnly &&
@@ -1622,6 +1633,14 @@ export class SessionManager {
 			this.#cwd = resolvedCwd;
 			this.#sessionDir = nextSessionDir;
 			this.#header.cwd = resolvedCwd;
+			// Clear only after durable relocation: #sessionDir/#header.cwd are
+			// now repointed and the rename (if any) has landed. If the move
+			// threw, #sessionDir is still the denied project's bucket — keeping
+			// the flag preserves the retry signal so the next moveTo / new /
+			// fork / branch correctly re-anchors via computeDefaultSessionDir.
+			// Eager clear before the move would permanently strand the file
+			// (stranded-file bug P2 3867822545; re-anchor authorized by
+			// P2 3867876183).
 			this.#fallbackRuntimeOnly = false;
 			// Re-filter additional roots: the new cwd may have been an additional root,
 			// or it may now contain/subsume one. Re-normalize to keep the invariant
@@ -1912,6 +1931,20 @@ export class SessionManager {
 			this.#rememberBreadcrumb(resolvedCwd, this.#sessionFile);
 		}
 	}
+	/**
+	 * Re-anchor the session bucket to the runtime cwd after a fallback.
+	 * The fallback flag keeps the transcript at its recorded path (stale
+	 * bucket) while runtime cwd is the launch dir; only a true relocation
+	 * (moveTo / new / fork / branch) should recompute sessionDir and clear
+	 * the marker. Workspace-dir mutations must NOT clear it early — see
+	 * add/remove/set below (P2 3867876183).
+	 */
+	#reconcileSessionDirForFallback(): void {
+		if (this.#fallbackRuntimeOnly) {
+			this.#sessionDir = computeDefaultSessionDir(this.#cwd, this.#storage);
+			this.#fallbackRuntimeOnly = false;
+		}
+	}
 
 	/** Additional workspace directories beyond cwd (multi-root), absolute and normalized. */
 	getAdditionalDirectories(): string[] {
@@ -1943,6 +1976,15 @@ export class SessionManager {
 		}
 		if (this.#additionalDirectories.includes(resolved)) return null;
 		this.#additionalDirectories = [...this.#additionalDirectories, resolved];
+		// P2 3867876183: fallback session keeps transcript at stale path while
+		// runtime cwd is launch cwd. Workspace edits are runtime-only until
+		// relocation — persisting launch-derived roots into the stale file
+		// would contaminate the recorded session (wrong bucket, wrong header
+		// cwd, breaks cwd-never-in-additional invariant) and make a future
+		// resume load roots meaningless for the old project. Keep marker.
+		if (this.#fallbackRuntimeOnly) {
+			return resolved;
+		}
 		this.#header.additionalDirectories = this.#additionalDirectories;
 		await this.#persistWorkspaceDirectoriesChange();
 		return resolved;
@@ -1958,6 +2000,11 @@ export class SessionManager {
 		const idx = this.#additionalDirectories.findIndex(p => path.resolve(p) === resolved);
 		if (idx === -1) return null;
 		this.#additionalDirectories = this.#additionalDirectories.filter((_, i) => i !== idx);
+		// P2 3867876183: same fallback invariant as add — runtime-only, keep
+		// marker until transcript relocates; do not rewrite stale header/file.
+		if (this.#fallbackRuntimeOnly) {
+			return resolved;
+		}
 		if (this.#additionalDirectories.length === 0) {
 			this.#header.additionalDirectories = undefined;
 		} else {
@@ -1971,10 +2018,15 @@ export class SessionManager {
 	async setAdditionalDirectories(directories: string[]): Promise<void> {
 		const workspace = normalizeSessionWorkspace({ cwd: this.#cwd, directories });
 		const next = additionalWorkspaceDirectories(workspace);
+		// P2 3867876183: fallback session is runtime-only. Seeding launch
+		// roots into the stale file would persist launch-bucket paths into a
+		// transcript still anchored at the recorded (un-enterable) cwd,
+		// violating the invariant that header.additionalDirectories is scoped
+		// to header.cwd and polluting the old bucket. Keep marker until
+		// #reconcileSessionDirForFallback / moveTo relocates the transcript;
+		// next new/fork/branch will then seed against the correct runtime cwd.
 		if (this.#fallbackRuntimeOnly) {
 			this.#additionalDirectories = next;
-			this.#sessionDir = computeDefaultSessionDir(this.#cwd, this.#storage);
-			this.#fallbackRuntimeOnly = false;
 			return;
 		}
 		if (
@@ -2640,10 +2692,7 @@ export class SessionManager {
 
 		const timestamp = nowIso();
 		const newSessionId = mintSessionId();
-		if (this.#fallbackRuntimeOnly) {
-			this.#sessionDir = computeDefaultSessionDir(this.#cwd, this.#storage);
-			this.#fallbackRuntimeOnly = false;
-		}
+		this.#reconcileSessionDirForFallback();
 		const newSessionFile = path.join(this.#sessionDir, `${fileSafeTimestamp(timestamp)}_${newSessionId}.jsonl`);
 		const header: SessionHeader = {
 			type: "session",

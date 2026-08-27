@@ -8214,8 +8214,10 @@ export class AgentSession {
 					// recordedCwd. Undo that side-effect before rejecting — the catch
 					// block skips reverse for SESSION_CWD_CHANGE_REJECTED, so without
 					// this the manager would be restored to the source while
-					// process/settings remain at the target.
-					await options.onCwdChange(previousSessionState.cwd, recordedCwd);
+					// process/settings remain at the target. (P2 3867876190)
+					if (!(await options.onCwdChange(previousSessionState.cwd, recordedCwd))) {
+						throw new Error(`cwd reverse rollback was rejected: ${recordedCwd} -> ${previousSessionState.cwd}`);
+					}
 					throw SESSION_CWD_CHANGE_REJECTED;
 				}
 			}
