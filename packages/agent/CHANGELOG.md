@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/shake elide` deleting images from mixed tool results and over-reporting token savings; it now offloads only the text while preserving every image block for normal replay.
+
 ## [18.0.7] - 2026-08-26
 
 ### Fixed
