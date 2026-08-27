@@ -536,4 +536,62 @@ describe("AgentSession synthetic follow-up marking", () => {
 			await session.dispose();
 		}
 	});
+	it("persists a user-attributed custom prompt with its original submission timestamp", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const mock = createMockModel({
+			// Real provider delay: the session's internal settle timers use the
+			// platform clock, so fake timers would freeze both the submission and
+			// the (buggy) emission stamp identically — a genuine delay is the only
+			// way to separate the two and prove the entry carries the submission.
+			handler: async () => {
+				await Bun.sleep(150);
+				return { content: ["Done"] };
+			},
+		});
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [] },
+			streamFn: mock.stream,
+			convertToLlm,
+		});
+		const sessionManager = SessionManager.inMemory();
+		const session = new AgentSession({
+			agent,
+			sessionManager,
+			settings: Settings.isolated(),
+			modelRegistry,
+			extensionRunner: {
+				emit: vi.fn(async () => undefined),
+				emitBeforeAgentStart: vi.fn(async () => undefined),
+				hasHandlers: vi.fn(() => false),
+				emitSessionStop: vi.fn(async () => undefined),
+			} as unknown as ExtensionRunner,
+		});
+		const submittedAt = Date.now();
+		try {
+			await session.promptCustomMessage({
+				customType: "collab-prompt",
+				content: "hello from the peer",
+				display: true,
+				attribution: "user",
+			});
+			await session.waitForIdle();
+			const entry = sessionManager.getEntries().find(entry => entry.type === "custom_message");
+			expect(entry).toBeDefined();
+			const entryMs = new Date((entry as { timestamp: string }).timestamp).getTime();
+			// The entry carries the submission instant, not the post-run emission.
+			expect(entryMs - submittedAt).toBeLessThan(50);
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	it("stores a caller-supplied timestamp on the custom message entry", () => {
+		const sessionManager = SessionManager.inMemory();
+		sessionManager.appendCustomMessageEntry("collab-prompt", "hi", true, undefined, "user", 1_700_000_000_123);
+		const entry = sessionManager.getEntries().find(entry => entry.type === "custom_message") as {
+			timestamp: string;
+		};
+		expect(entry.timestamp).toBe(new Date(1_700_000_000_123).toISOString());
+	});
 });
