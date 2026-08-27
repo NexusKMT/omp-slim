@@ -775,9 +775,7 @@ describe("pi-natives", () => {
 			expect((await run).cancelled).toBeTrue();
 		});
 
-		// PR CI fetches the published natives leaf, not this branch
-		// (ci.yml native_addons). Run locally after `bun run build:bindings`
-		// and on main, which bazel-builds the addon.
+		// Needs this PR's rust; PR CI loads the published natives leaf.
 		it.skipIf(process.env.GITHUB_EVENT_NAME === "pull_request")(
 			"keeps a fast PTY child blocked while onChunk is stalled and still delivers every byte",
 			async () => {
