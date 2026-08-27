@@ -404,6 +404,11 @@ describe("ModelRegistry runtime provider registration", () => {
 
 	test("refreshProvider aborts and retries inherited shared-catalog fetches", async () => {
 		vi.useFakeTimers();
+		// Pin the keyless premise: a host ANTHROPIC_API_KEY (dev machines, agent
+		// harnesses) gives the anthropic manager a fetchDynamicModels hook whose
+		// endpoint fetch starts only after the catalog abort — its deadline timer
+		// arms after the last advanceTimersByTime and the refresh hangs forever.
+		const peekSpy = vi.spyOn(authStorage, "peekApiKey").mockResolvedValue(undefined);
 		let catalogFetches = 0;
 		let abortedFetches = 0;
 		const stalledFetch: FetchImpl = (_input, init) => {
@@ -442,6 +447,7 @@ describe("ModelRegistry runtime provider registration", () => {
 		await secondRefresh;
 		expect(abortedFetches).toBe(2);
 		expect(catalogFetches).toBe(2);
+		peekSpy.mockRestore();
 	});
 
 	test("refreshRuntimeProviders times out extension fetchDynamicModels that never resolves", async () => {
