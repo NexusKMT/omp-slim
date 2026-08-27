@@ -686,6 +686,47 @@ describe("usage status-line segment", () => {
 		expect(content).toContain("11m");
 	});
 
+	it("scopes Antigravity usage to the active model's backend counter", async () => {
+		const now = Date.now();
+		const reports = [
+			{
+				provider: "google-antigravity",
+				limits: [
+					{
+						id: "google-antigravity:google:default:daily",
+						label: "Usage (Google)",
+						scope: { provider: "google-antigravity", windowId: "daily" },
+						window: { id: "daily", label: "Daily", durationMs: 86_400_000, resetsAt: now + 11 * 60_000 },
+						amount: { usedFraction: 0.91 },
+					},
+					{
+						id: "google-antigravity:anthropic:default:daily",
+						label: "Usage (Anthropic)",
+						scope: { provider: "google-antigravity", windowId: "daily" },
+						window: { id: "daily", label: "Daily", durationMs: 86_400_000, resetsAt: now + 40 * 60_000 },
+						amount: { usedFraction: 0.24 },
+					},
+				],
+			},
+		];
+
+		const claude = makeComponent(reports, { provider: "google-antigravity", modelId: "claude-opus-4-6" });
+		claude.refreshUsageInBackground();
+		await flushUsageRefresh();
+		const claudeContent = stripVTControlCharacters(claude.getTopBorder(200).content);
+		expect(claudeContent).toContain("1d");
+		expect(claudeContent).toContain("24%");
+		expect(claudeContent).not.toContain("91%");
+
+		const gemini = makeComponent(reports, { provider: "google-antigravity", modelId: "gemini-3-pro" });
+		gemini.refreshUsageInBackground();
+		await flushUsageRefresh();
+		const geminiContent = stripVTControlCharacters(gemini.getTopBorder(200).content);
+		expect(geminiContent).toContain("1d");
+		expect(geminiContent).toContain("91%");
+		expect(geminiContent).not.toContain("24%");
+	});
+
 	it("ignores non-canonical windows without a reported span", async () => {
 		const component = makeComponent([
 			{

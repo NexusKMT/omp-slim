@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
+import { parseKnownModel } from "@oh-my-pi/pi-catalog/identity";
 import {
 	type Component,
 	type ComposerStyle,
@@ -59,6 +60,38 @@ interface UsageScopeGroup {
 
 function normalizeUsageScopeValue(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : undefined;
+}
+
+/** Antigravity backend counters the status line can scope to a model family. */
+const ANTIGRAVITY_KNOWN_COUNTERS: Record<string, true> = { google: true, anthropic: true, openai: true };
+
+/**
+ * Antigravity account reports keep Google, Anthropic, and OpenAI backend
+ * counters separate and sort limits by remaining fraction, so a Claude session
+ * could otherwise display the more-exhausted Gemini quota (or vice versa). Map
+ * the active model id to the counter key encoded in the Antigravity limit id
+ * (`google-antigravity:<counter>:<tier>:<window>`). Returns undefined when the
+ * family is unknown (e.g. `gpt-oss-*`), so filtering falls back to first-match.
+ */
+function antigravityCounterForModel(modelId: string | undefined): string | undefined {
+	if (!modelId) return undefined;
+	switch (parseKnownModel(modelId).family) {
+		case "gemini":
+			return "google";
+		case "anthropic":
+			return "anthropic";
+		case "openai":
+			return "openai";
+		default:
+			return undefined;
+	}
+}
+
+/** Backend counter segment of an Antigravity limit id, or undefined. */
+function antigravityCounterFromLimitId(id: string | undefined): string | undefined {
+	if (!id) return undefined;
+	const parts = id.split(":");
+	return parts.length >= 2 ? parts[1] : undefined;
 }
 
 /**
@@ -1463,6 +1496,8 @@ export class StatusLineComponent implements Component {
 		if (!Array.isArray(reports)) return null;
 		const now = Date.now();
 		const activeModelId = normalizeUsageScopeValue(context.modelId);
+		const activeAntigravityCounter =
+			context.provider === "google-antigravity" ? antigravityCounterForModel(context.modelId) : undefined;
 		const scopeGroups = new Map<string, UsageScopeGroup>();
 		for (const report of reports) {
 			if (!report || typeof report !== "object") continue;
@@ -1535,6 +1570,15 @@ export class StatusLineComponent implements Component {
 				// specificity, untiered limits preserve the historical preference.
 				const priority = modelId ? (normalizedTier ? 1 : 0) : normalizedTier ? 3 : 2;
 				const id = "id" in limit && typeof limit.id === "string" ? limit.id : undefined;
+				// Antigravity keeps per-family counters in one untiered group; keep
+				// only the counter matching the active model's family. Unknown
+				// families and unclassified counters fall through to first-match.
+				if (activeAntigravityCounter) {
+					const counter = antigravityCounterFromLimitId(id);
+					if (counter && counter !== activeAntigravityCounter && ANTIGRAVITY_KNOWN_COUNTERS[counter]) {
+						continue;
+					}
+				}
 				const resetValue = window && "resetsAt" in window ? window.resetsAt : undefined;
 				const displayCandidate: UsageWindowCandidate = {
 					id,
