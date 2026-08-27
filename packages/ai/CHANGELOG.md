@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the OAuth success page's close-window action to fall back to manual-close guidance when the browser refuses to close the tab.
+
 ## [18.0.8] - 2026-08-27
 
 ### Added
