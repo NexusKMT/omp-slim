@@ -771,6 +771,11 @@ export class SelectorController {
 		const current = this.ctx.session.model;
 		const quickRoleOrder = this.ctx.settings.get("cycleOrder");
 		const quickRoleCycle = this.ctx.session.getRoleModelCycle(quickRoleOrder);
+		const currentSelector = current ? `${current.provider}/${current.id}` : undefined;
+		// Preselect the effective Task model in task mode: the configured override,
+		// else the session model (the bundled task agent inherits it by default).
+		const taskOverride = this.ctx.settings.get("task.agentModelOverrides").task;
+		const taskSelector = (Array.isArray(taskOverride) ? taskOverride[0] : taskOverride) ?? currentSelector;
 		let overlayHandle: OverlayHandle | undefined;
 		let closed = false;
 		const done = () => {
@@ -839,11 +844,24 @@ export class SelectorController {
 						this.ctx.showError(error instanceof Error ? error.message : String(error));
 					}
 				},
+				onPickTask: (_model, selector) => {
+					// Session-only: layer the Task override onto the runtime settings
+					// layer so it is never persisted, mirroring the session-model pick.
+					this.ctx.settings.override("task.agentModelOverrides", {
+						...this.ctx.settings.get("task.agentModelOverrides"),
+						task: selector,
+					});
+					this.ctx.showStatus(`Task subagent model (session-only): ${selector}. Use /agents to persist.`);
+					done();
+				},
 				onCancel: done,
 			},
 			{
 				currentContextTokens,
-				currentSelector: current ? `${current.provider}/${current.id}` : undefined,
+				currentSelector,
+				taskModeKeys: this.ctx.keybindings.getKeys("app.model.selectTemporary"),
+				taskModeKeyLabel: this.ctx.keybindings.getDisplayString("app.model.selectTemporary") || "alt+p",
+				taskSelector,
 				quickRoles: quickRoleCycle?.models,
 				quickRoleOrder,
 				currentQuickRole: quickRoleCycle?.models[quickRoleCycle.currentIndex]?.role,
