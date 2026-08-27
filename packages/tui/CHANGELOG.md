@@ -11,6 +11,7 @@
 ### Fixed
 
 - Math spans now end at the first unescaped delimiter, so a TeX row break no longer closes a span early: `\(a \\) b\)` renders as one equation, and an escaped `\$` no longer ends `$$…$$`.
+- Fixed unfinished live viewport rows entering tmux pane history and duplicating streamed output ([#9780](https://github.com/can1357/oh-my-pi/issues/9780)).
 - Fixed image previews displaying as garbled characters in Paseo terminals.
 - Fixed terminal resizing from duplicating committed history in native scrollback.
 - Fixed autocomplete suggestions for bare-name skills such as `/batch` when no command matches the prefix more strongly.
