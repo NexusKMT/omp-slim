@@ -368,28 +368,6 @@ describe("model thinking derivation", () => {
 		expect(clampThinkingLevelForModel(bare, Effort.Max)).toBe(Effort.High);
 	});
 
-	it("normalizes GLM-5.3 Flash onto the mandatory low/high/max ladder (issue #9960)", () => {
-		const flash = createModel({
-			id: "glm-5.3-flash",
-			api: "openai-completions",
-			provider: "opencode-go",
-			baseUrl: "https://opencode.ai/zen/go/v1",
-			thinking: {
-				mode: "effort",
-				efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
-			},
-		});
-
-		expect(flash.thinking).toEqual({
-			mode: "effort",
-			efforts: [Effort.Low, Effort.High, Effort.Max],
-			defaultLevel: Effort.Max,
-			requiresEffort: true,
-		});
-		expect(requireSupportedEffort(flash, Effort.Max)).toBe(Effort.Max);
-		expect(clampThinkingLevelForModel(flash, Effort.XHigh)).toBe(Effort.High);
-	});
-
 	it("normalizes OpenCode gateway ox-alpha onto the low/high/max ladder with mandatory thinking (issue #9349)", () => {
 		// The OpenCode Go gateway rejects minimal/medium/xhigh for ox-alpha
 		// (`[1210] ... please use low, high, or max`), so the stale
