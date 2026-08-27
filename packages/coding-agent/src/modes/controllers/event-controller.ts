@@ -24,7 +24,13 @@ import { getSymbolTheme, theme } from "../../modes/theme/theme";
 import type { InteractiveModeContext, TodoPhase } from "../../modes/types";
 import idleRecapPrompt from "../../prompts/system/recap-user.md" with { type: "text" };
 import type { AgentSessionEvent } from "../../session/agent-session";
-import { isSilentAbort, isUserInvokedSkillPrompt, readQueueChipText, resolveAbortLabel } from "../../session/messages";
+import {
+	isSilentAbort,
+	isUserInvokedSkillPrompt,
+	isUserTurnInitiator,
+	readQueueChipText,
+	resolveAbortLabel,
+} from "../../session/messages";
 import { type ApprovalMode, resolveApproval } from "../../tools/approval";
 import { previewLine, TRUNCATE_LENGTHS } from "../../tools/render-utils";
 import { PROPOSE_DEVICE_NAME, writeDeviceDispatch } from "../../tools/resolve";
@@ -830,10 +836,10 @@ export class EventController {
 			}
 			this.#renderedCustomMessages.add(signature);
 			this.#resetReadGroup();
-			// A directly-invoked `/skill:` custom prompt is the run's initiating
-			// message (user attribution): seed the prompt→yield delta from it, the
-			// same as a user message.
-			if (event.message.role === "custom" && isUserInvokedSkillPrompt(event.message)) {
+			// A directly-invoked `/skill:` or writable-collab custom prompt is the
+			// run's initiating message (user attribution): seed the prompt→yield
+			// delta from it, the same as a user message.
+			if (event.message.role === "custom" && isUserTurnInitiator(event.message)) {
 				this.#turnStartedAt = event.message.timestamp;
 			}
 			if (

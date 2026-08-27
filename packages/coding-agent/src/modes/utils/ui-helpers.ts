@@ -46,7 +46,7 @@ import { LAUNCH_COMPLETION_MESSAGE_TYPE } from "../../session/launch-completion"
 import {
 	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
 	type CustomMessage,
-	isUserInvokedSkillPrompt,
+	isUserTurnInitiator,
 	LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE,
 	SKILL_PROMPT_MESSAGE_TYPE,
 	type SkillPromptDetails,
@@ -701,7 +701,7 @@ export class UiHelpers {
 				// continuation reminders (todo, plan) are persisted developer messages
 				// WITHOUT the synthetic marker, so their anchor survives the rebuild.
 				if (message.role === "developer" && message.synthetic) turnStartedAt = undefined;
-				if (message.role === "custom" && isUserInvokedSkillPrompt(message as CustomMessage)) {
+				if (message.role === "custom" && isUserTurnInitiator(message as CustomMessage)) {
 					turnStartedAt = message.timestamp;
 				}
 				// All other messages use standard rendering

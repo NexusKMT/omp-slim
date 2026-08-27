@@ -22,7 +22,7 @@ import { LAUNCH_COMPLETION_MESSAGE_TYPE } from "../../session/launch-completion"
 import {
 	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
 	type CustomMessage,
-	isUserInvokedSkillPrompt,
+	isUserTurnInitiator,
 	LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE,
 	SKILL_PROMPT_MESSAGE_TYPE,
 	type SkillPromptDetails,
@@ -312,7 +312,7 @@ export class ChatTranscriptBuilder {
 				// A directly-invoked `/skill:` custom prompt is the run's initiator
 				// (user attribution), so it seeds the prompt→yield delta like a user
 				// message does.
-				if (message.role === "custom" && isUserInvokedSkillPrompt(message as CustomMessage)) {
+				if (message.role === "custom" && isUserTurnInitiator(message as CustomMessage)) {
 					this.#turnStartedAt = message.timestamp;
 				}
 				this.#appendCustomMessage(message);
