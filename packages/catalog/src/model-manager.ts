@@ -502,7 +502,7 @@ function retainModelIds<TApi extends Api>(
 
 const MODEL_CACHE_FINGERPRINT_VERSION = "merge-v3";
 const kStaticFingerprint = Symbol("model-manager.staticFingerprint");
-type ModelArrayWithFingerprint = readonly Model<Api>[] & { [kStaticFingerprint]?: string };
+type ModelArrayWithFingerprint = readonly (ModelSpec<Api> | Model<Api>)[] & { [kStaticFingerprint]?: string };
 
 /**
  * Return the versioned, low-collision model-cache identity for a static provider
@@ -510,7 +510,7 @@ type ModelArrayWithFingerprint = readonly Model<Api>[] & { [kStaticFingerprint]?
  * the JSON serialization and hash.
  */
 export function fingerprintStaticModels<TApi extends Api>(
-	models: readonly Model<TApi>[],
+	models: readonly (ModelSpec<TApi> | Model<TApi>)[],
 	dynamicModelsAuthoritative = false,
 ): string {
 	if (models.length === 0) return `${MODEL_CACHE_FINGERPRINT_VERSION}:empty`;

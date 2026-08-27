@@ -1974,6 +1974,7 @@ describe("ModelRegistry", () => {
 		let vertexStale: ModelRegistry;
 		let litellmStaleNamespaceCache: ModelRegistry;
 		let sharedCatalogCache: ModelRegistry;
+		let staticOnlySharedCatalogCache: ModelRegistry;
 		let litellmCurrentNamespaceCache: ModelRegistry;
 		let openaiModelsListStaleNamespaceCache: ModelRegistry;
 		const vertexProjectModel = () =>
@@ -2025,6 +2026,27 @@ describe("ModelRegistry", () => {
 							"merge-v3:stale-bundle",
 							dbPath,
 						);
+					},
+				},
+			);
+			staticOnlySharedCatalogCache = readonlyRegistry(
+				{ providers: {} },
+				{
+					seedCache: dbPath => {
+						for (const [providerId, dynamicModelsAuthoritative] of [
+							["zai", false],
+							["anthropic", true],
+						] as const) {
+							const bundledModels = getBundledModels(providerId);
+							writeModelCache(
+								providerId,
+								Date.now(),
+								bundledModels,
+								false,
+								fingerprintStaticModels(bundledModels, dynamicModelsAuthoritative),
+								dbPath,
+							);
+						}
 					},
 				},
 			);
@@ -2477,6 +2499,23 @@ describe("ModelRegistry", () => {
 				stale: false,
 				source: "cache",
 			});
+		});
+
+		test("reports static-only shared-catalog startup caches as bundled", () => {
+			for (const providerId of ["zai", "anthropic"] as const) {
+				const bundledModel = getBundledModels(providerId)[0];
+				if (!bundledModel) throw new Error(`${providerId} bundled catalog is empty`);
+				expect(staticOnlySharedCatalogCache.find(providerId, bundledModel.id)).toBeDefined();
+				const discovery = staticOnlySharedCatalogCache.getProviderDiscoveryState(providerId);
+				expect(discovery).toMatchObject({
+					provider: providerId,
+					status: "unavailable",
+					optional: false,
+					stale: true,
+					source: "bundled",
+				});
+				expect(discovery?.fetchedAt).toBeUndefined();
+			}
 		});
 	});
 

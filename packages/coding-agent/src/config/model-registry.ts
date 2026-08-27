@@ -924,10 +924,12 @@ export class ModelRegistry {
 			const omittedHeaderIds = new Set(cache.headerOmittedModelIds);
 			const unrestorableHeaderIds = new Set(cache.unrestorableHeaderModelIds);
 			const bundledModels =
-				omittedHeaderIds.size > 0 || additiveSharedCatalogProvider
+				omittedHeaderIds.size > 0 || sharedCatalogProvider
 					? (getBundledModels(providerId as Parameters<typeof getBundledModels>[0]) as Model<Api>[])
 					: undefined;
-			const bundledFingerprint = bundledModels ? fingerprintStaticModels(bundledModels) : undefined;
+			const bundledFingerprint = bundledModels
+				? fingerprintStaticModels(bundledModels, sharedCatalogProvider && !additiveSharedCatalogProvider)
+				: undefined;
 			// A matching cache may contain provider-endpoint overrides. Strip
 			// same-id rows only across a bundled-catalog upgrade, where the
 			// additive shared catalog must not replace the new bundled metadata.
@@ -978,13 +980,24 @@ export class ModelRegistry {
 			const cachedModels = this.#applyHardcodedModelPolicies(resolved);
 			modelsByProvider.set(providerId, cachedModels);
 			if (sharedCatalogProvider) {
+				const cacheMatchesBundledFingerprint =
+					bundledFingerprint !== undefined &&
+					(cache.staticFingerprint === bundledFingerprint ||
+						cache.staticFingerprint.startsWith(`${bundledFingerprint}:drop:`));
+				const cachedSnapshotMatchesBundled =
+					bundledFingerprint !== undefined &&
+					fingerprintStaticModels(cache.models, !additiveSharedCatalogProvider) === bundledFingerprint;
+				const cacheContributed = additiveSharedCatalogProvider
+					? cachedModels.some(model => bundledById?.has(model.id) !== true)
+					: !(cacheMatchesBundledFingerprint && cachedSnapshotMatchesBundled);
+				const stale = !cache.fresh || !cache.authoritative;
 				this.#providerDiscoveryStates.set(providerId, {
 					provider: providerId,
-					status: "cached",
+					status: cacheContributed ? "cached" : stale ? "unavailable" : "idle",
 					optional: false,
-					stale: !cache.fresh || !cache.authoritative,
-					fetchedAt: cache.updatedAt,
-					source: "cache",
+					stale,
+					...(cacheContributed ? { fetchedAt: cache.updatedAt } : {}),
+					source: cacheContributed ? "cache" : "bundled",
 					models: cachedModels.map(model => model.id),
 				});
 			}
