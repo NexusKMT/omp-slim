@@ -100,6 +100,7 @@ export class CommandController {
 			this.ctx.showError(
 				`Failed to roll back move: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)} (workspace remains at ${actual})`,
 			);
+			return;
 		}
 
 		let sourceRestored = false;

@@ -134,6 +134,30 @@ describe("CommandController /move", () => {
 			await fs.rm(targetDir, { recursive: true, force: true });
 		}
 	});
+	it("stops recovery after aligning with the moved session", async () => {
+		const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-source-"));
+		const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-target-"));
+		try {
+			const { ctx, shutdown, rollbackMove } = createMoveContext(sourceDir);
+			ctx.applyCwdChange = vi
+				.fn()
+				.mockRejectedValueOnce(new Error("target setup failed"))
+				.mockResolvedValueOnce(true)
+				.mockResolvedValueOnce(true);
+			rollbackMove.mockRejectedValueOnce(new Error("rollback denied"));
+			const controller = new CommandController(ctx);
+
+			await controller.handleMoveCommand(targetDir);
+
+			expect(ctx.applyCwdChange).toHaveBeenCalledTimes(2);
+			expect(ctx.applyCwdChange).toHaveBeenNthCalledWith(1, targetDir);
+			expect(ctx.applyCwdChange).toHaveBeenNthCalledWith(2, targetDir);
+			expect(shutdown).not.toHaveBeenCalled();
+		} finally {
+			await fs.rm(sourceDir, { recursive: true, force: true });
+			await fs.rm(targetDir, { recursive: true, force: true });
+		}
+	});
 
 	it("aborts /move when pending settings flush fails, leaving cwd untouched", async () => {
 		const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-source-"));
