@@ -38,7 +38,7 @@ use crate::js;
 struct Inner {
 	/// Bytes accepted from JS but not yet claimed by the pump thread. The
 	/// pump swaps this out wholesale, so enqueue cost is an in-place append
-	/// and chunks coalesce into one `write(2)` per drain cycle.
+	/// and chunks coalesce into one contiguous drain buffer per drain cycle.
 	back:    Mutex<Vec<u8>>,
 	/// Bytes accepted but not yet written to the fd.
 	pending: AtomicUsize,
