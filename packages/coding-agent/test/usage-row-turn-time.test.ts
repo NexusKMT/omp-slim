@@ -3,10 +3,18 @@
  * rows, gated by `display.showTurnTime` — the delta sits right after the turn's
  * timestamp and counts hooks, tool calls, and the final generation.
  */
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Usage } from "@oh-my-pi/pi-ai";
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import { ChatTranscriptBuilder } from "@oh-my-pi/pi-coding-agent/modes/components/chat-transcript-builder";
 import { TranscriptContainer } from "@oh-my-pi/pi-coding-agent/modes/components/transcript-container";
 import { formatUsageRow } from "@oh-my-pi/pi-coding-agent/modes/components/usage-row";
@@ -15,8 +23,13 @@ import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import type { SessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { Container, type TUI } from "@oh-my-pi/pi-tui";
+import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 
 // 60s of elapsed: 30s between the prompt and the final response's creation,
 // plus a 30s provider request — formatDuration renders this as "1m".
@@ -401,5 +414,51 @@ describe("focus-attach mid-turn keeps the prompt→yield delta", () => {
 		>);
 		await driveAssistantTurn(controller, assistantMessage());
 		expect(renderedText(chatContainer)).toContain(TURN_ELAPSED_LABEL);
+	});
+});
+describe("AgentSession synthetic follow-up marking", () => {
+	let sharedDir: string;
+	let authStorage: AuthStorage;
+	let modelRegistry: ModelRegistry;
+
+	beforeAll(async () => {
+		sharedDir = path.join(os.tmpdir(), `pi-turn-time-shared-${Snowflake.next()}`);
+		fs.mkdirSync(sharedDir, { recursive: true });
+		authStorage = await AuthStorage.create(path.join(sharedDir, "auth.db"));
+		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		modelRegistry = new ModelRegistry(authStorage, path.join(sharedDir, "models.yml"));
+	});
+	afterAll(() => {
+		authStorage.close();
+		removeSyncWithRetries(sharedDir);
+	});
+
+	it("marks a queued synthetic follow-up as a run-initiating developer message", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [] },
+			streamFn: mock.stream,
+			convertToLlm,
+		});
+		const session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated(),
+			modelRegistry,
+			extensionRunner: {} as unknown as ExtensionRunner,
+		});
+		try {
+			// The approved-plan execution path queues the hidden directive this way
+			// (plan approval racing a busy turn); the queued developer message must
+			// carry the run-initiating synthetic marker so replay clears the
+			// preceding user prompt's anchor.
+			await session.followUp("approved plan", undefined, { synthetic: true });
+			const developer = agent.peekFollowUpQueue().find(message => message.role === "developer");
+			expect(developer?.synthetic).toBe(true);
+		} finally {
+			await session.dispose();
+		}
 	});
 });
