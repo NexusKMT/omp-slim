@@ -11,6 +11,7 @@
 - Fixed prompts hanging when a successful automatic retry ended through an early terminal path such as `yield`.
 - Fixed `hub` `send await:true` blocking for the full IRC timeout when the awaited agent finished without replying; the send now settles as soon as the peer stops ([#9913](https://github.com/can1357/oh-my-pi/issues/9913)).
 - Fixed workspace symbol searches reporting success when every configured language server failed; partial failures now remain visible alongside successful results ([#8387](https://github.com/can1357/oh-my-pi/issues/8387)).
+- Handle denied working-directory changes without crashing resume, move, or startup flows.
 
 ## [18.0.7] - 2026-08-26
 
