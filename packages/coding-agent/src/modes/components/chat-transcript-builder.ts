@@ -22,6 +22,7 @@ import { LAUNCH_COMPLETION_MESSAGE_TYPE } from "../../session/launch-completion"
 import {
 	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
 	type CustomMessage,
+	isUserInvokedSkillPrompt,
 	LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE,
 	SKILL_PROMPT_MESSAGE_TYPE,
 	type SkillPromptDetails,
@@ -259,6 +260,10 @@ export class ChatTranscriptBuilder {
 			case "user":
 			case "developer": {
 				if (message.role === "user") this.#turnStartedAt = message.timestamp;
+				// A developer message initiates a synthetic run (auto-continuation,
+				// advisor): replay must not inherit the preceding user prompt's
+				// timestamp, mirroring the live agent_start clear.
+				else this.#turnStartedAt = undefined;
 				// A user prompt closes the poll-displacement window, same as the live path.
 				if (message.role === "user") this.#resolveWaitingPoll();
 				if (message.role === "user") this.#resolveTodoSnapshot();
@@ -296,6 +301,12 @@ export class ChatTranscriptBuilder {
 			}
 			case "hookMessage":
 			case "custom":
+				// A directly-invoked `/skill:` custom prompt is the run's initiator
+				// (user attribution), so it seeds the prompt→yield delta like a user
+				// message does.
+				if (message.role === "custom" && isUserInvokedSkillPrompt(message as CustomMessage)) {
+					this.#turnStartedAt = message.timestamp;
+				}
 				this.#appendCustomMessage(message);
 				break;
 			case "compactionSummary": {

@@ -830,6 +830,12 @@ export class EventController {
 			}
 			this.#renderedCustomMessages.add(signature);
 			this.#resetReadGroup();
+			// A directly-invoked `/skill:` custom prompt is the run's initiating
+			// message (user attribution): seed the prompt→yield delta from it, the
+			// same as a user message.
+			if (event.message.role === "custom" && isUserInvokedSkillPrompt(event.message)) {
+				this.#turnStartedAt = event.message.timestamp;
+			}
 			if (
 				event.message.role === "custom" &&
 				this.ctx.optimisticSkillMessagePending &&

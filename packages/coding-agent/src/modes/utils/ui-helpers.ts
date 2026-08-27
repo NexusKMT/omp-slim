@@ -46,6 +46,7 @@ import { LAUNCH_COMPLETION_MESSAGE_TYPE } from "../../session/launch-completion"
 import {
 	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
 	type CustomMessage,
+	isUserInvokedSkillPrompt,
 	LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE,
 	SKILL_PROMPT_MESSAGE_TYPE,
 	type SkillPromptDetails,
@@ -692,6 +693,15 @@ export class UiHelpers {
 				if (message.role === "user") resolveWaitingPoll();
 				if (message.role === "user") resolveTodoSnapshot();
 				if (message.role === "user") turnStartedAt = message.timestamp;
+				// Replay-side run boundaries, mirroring the live agent_start/agent_end
+				// bookkeeping: a developer message initiates a synthetic run (auto-
+				// continuation, advisor), so it must not inherit the preceding user
+				// prompt's timestamp; a directly-invoked `/skill:` custom prompt is the
+				// run's initiator and seeds it instead.
+				if (message.role === "developer") turnStartedAt = undefined;
+				if (message.role === "custom" && isUserInvokedSkillPrompt(message as CustomMessage)) {
+					turnStartedAt = message.timestamp;
+				}
 				// All other messages use standard rendering
 				this.ctx.addMessageToChat(message, { reuseSettledComponent: options.reuseSettledComponents });
 			}

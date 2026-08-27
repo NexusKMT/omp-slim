@@ -139,6 +139,35 @@ describe("ChatTranscriptBuilder turn elapsed", () => {
 		transcript.rebuild(toEntries([assistantMessage()]));
 		expect(renderedText(transcript.container)).not.toContain(TURN_ELAPSED_LABEL);
 	});
+	it("clears the prompt anchor at a developer-initiated synthetic run during replay", () => {
+		settings.set("display.showTurnTime", true);
+		const transcript = builder();
+		const developer = {
+			role: "developer",
+			content: "auto-continue",
+			timestamp: RESPONSE_CREATED_AT + 5_000,
+		} as unknown as AgentMessage;
+		transcript.rebuild(toEntries([userMessage(), assistantMessage(), developer, assistantMessage()]));
+		// Only the user turn's row carries the delta; the auto-continuation run
+		// (developer message, no user prompt) must not inherit the user anchor.
+		const occurrences = renderedText(transcript.container).match(/Δ1m/g)?.length ?? 0;
+		expect(occurrences).toBe(1);
+	});
+
+	it("seeds the prompt→yield delta from a user-invoked skill custom message", () => {
+		settings.set("display.showTurnTime", true);
+		const transcript = builder();
+		const skill = {
+			role: "custom",
+			customType: "skill-prompt",
+			attribution: "user",
+			content: "/skill:build",
+			display: false,
+			timestamp: PROMPT_AT,
+		} as unknown as AgentMessage;
+		transcript.rebuild(toEntries([skill, assistantMessage()]));
+		expect(renderedText(transcript.container)).toContain(TURN_ELAPSED_LABEL);
+	});
 });
 
 describe("UiHelpers.renderSessionContext turn elapsed", () => {
@@ -320,5 +349,23 @@ describe("focus-attach mid-turn keeps the prompt→yield delta", () => {
 		// Turn 1 keeps its row's delta; the synthetic run must not add another.
 		const occurrences = renderedText(chatContainer).match(/Δ1m/g)?.length ?? 0;
 		expect(occurrences).toBe(1);
+	});
+	it("seeds the delta from a user-invoked skill prompt in the live path", async () => {
+		const { controller, chatContainer } = createFixture();
+		controller.resetTranscriptAnchors();
+		const skill = {
+			role: "custom",
+			customType: "skill-prompt",
+			attribution: "user",
+			content: "/skill:build",
+			display: false,
+			timestamp: PROMPT_AT,
+		} as unknown as AgentMessage;
+		await controller.handleEvent({ type: "message_start", message: skill } as Extract<
+			AgentSessionEvent,
+			{ type: "message_start" }
+		>);
+		await driveAssistantTurn(controller, assistantMessage());
+		expect(renderedText(chatContainer)).toContain(TURN_ELAPSED_LABEL);
 	});
 });
