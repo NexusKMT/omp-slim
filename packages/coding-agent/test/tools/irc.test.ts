@@ -117,14 +117,18 @@ function createRealSession(overrides: Partial<Record<SettingPath, unknown>> = {}
 
 /** A real `AgentSession` driven by a mock model, so a prompt runs a genuine
  *  turn and emits the real terminal `agent_end` after prompt unwind. */
-function createStreamingSession(modelRegistry: ModelRegistry, responses: MockResponse[]): { session: AgentSession } {
+function createStreamingSession(
+	modelRegistry: ModelRegistry,
+	responses: MockResponse[],
+	options?: { tools?: HubTool[] },
+): { session: AgentSession } {
 	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 	if (!model) throw new Error("Expected bundled anthropic model to exist");
 	const mock = createMockModel({ responses });
 	const session = new AgentSession({
 		agent: new Agent({
 			getApiKey: () => "test-key",
-			initialState: { model, systemPrompt: ["system prompt"], tools: [], messages: [] },
+			initialState: { model, systemPrompt: ["system prompt"], tools: options?.tools ?? [], messages: [] },
 			streamFn: mock.stream,
 		}),
 		sessionManager: SessionManager.inMemory("/tmp"),
@@ -947,6 +951,59 @@ describe("IRC", () => {
 				expect(subSession.isStreaming).toBe(false);
 				await expect(waitP).rejects.toThrow(/stopped without replying/);
 			} finally {
+				unsync();
+			}
+		});
+
+		it("await target waits through an IRC wake scheduled after terminal settle", async () => {
+			const subHub = new HubTool(makeToolSession(registry, "0-Sub"));
+			const { session: subSession } = createStreamingSession(
+				modelRegistry,
+				[
+					{ content: ["working"] },
+					{
+						content: [
+							{
+								type: "toolCall",
+								id: "tail-reply",
+								name: "hub",
+								arguments: { op: "send", to: "0-Main", message: "reply from the IRC wake" },
+							},
+						],
+					},
+					{ content: ["wake complete"] },
+				],
+				{ tools: [subHub] },
+			);
+			sessions.push(subSession);
+			registry.register({ id: "0-Main", displayName: "main", kind: "main", session: makeFakeSession().session });
+			registry.register({ id: "0-Sub", displayName: "task", kind: "sub", session: subSession, status: "running" });
+			const unsync = registry.syncSessionStatus("0-Sub", subSession);
+			let sentAtTail = false;
+			const unsubscribe = subSession.subscribe(event => {
+				if (sentAtTail || event.type !== "message_end" || event.message.role !== "assistant") return;
+				sentAtTail = true;
+				// Session listeners receive the final assistant message after the
+				// loop's last aside poll but before the deferred terminal
+				// `agent_end`. Delivering here strands the record until the settle
+				// drain schedules its IRC wake turn.
+				void bus.send(
+					{ from: "0-Main", to: "0-Sub", body: "reply after your current turn" },
+					{ expectsReply: true },
+				);
+			});
+			try {
+				const waitP = bus.wait("0-Main", { from: "0-Sub" }, 5_000, undefined, {
+					drainPending: false,
+					awaitTarget: { registry, target: "0-Sub" },
+				});
+				await subSession.prompt("work");
+				const reply = await waitP;
+
+				expect(sentAtTail).toBe(true);
+				expect(reply?.body).toBe("reply from the IRC wake");
+			} finally {
+				unsubscribe();
 				unsync();
 			}
 		});
