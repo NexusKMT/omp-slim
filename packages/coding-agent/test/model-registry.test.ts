@@ -2308,11 +2308,12 @@ describe("ModelRegistry", () => {
 					maxTokens: 16_384,
 				});
 			litellmStaleNamespaceCache = readonlyRegistry(litellmProxyConfig(), {
-				// Rows cached before per-model Responses routing must be orphaned
-				// instead of keeping OpenAI-backed groups on Chat Completions.
+				// Rows cached under the retired namespace whose `compatConfig`
+				// retained a colliding bundled model's provider-specific transport
+				// (issue #9938) must be orphaned instead of served.
 				seedCache: dbPath =>
 					writeModelCache(
-						"litellm-proxy:litellm-rich-v2",
+						"litellm-proxy:litellm-rich-v3",
 						Date.now(),
 						[litellmCachedModel("MiniMax-M3 (3x usage)")],
 						true,
@@ -2323,7 +2324,7 @@ describe("ModelRegistry", () => {
 			litellmCurrentNamespaceCache = readonlyRegistry(litellmProxyConfig(), {
 				seedCache: dbPath =>
 					writeModelCache(
-						"litellm-proxy:litellm-rich-v3",
+						"litellm-proxy:litellm-rich-v4",
 						Date.now(),
 						[litellmCachedModel("MiniMax-M3")],
 						true,
@@ -2409,13 +2410,13 @@ describe("ModelRegistry", () => {
 			});
 		});
 
-		test("ignores litellm discovery rows cached under the retired rich-v2 namespace", () => {
-			// Warm rich-v2 rows carry the pre-change provider-wide API and must not load.
+		test("ignores litellm discovery rows cached under the retired rich-v3 namespace", () => {
+			// Warm rich-v3 rows carry the leaked provider-specific compat and must not load.
 			expect(litellmStaleNamespaceCache.find("litellm-proxy", "minimax/minimax-m3")).toBeUndefined();
 			expect(getModelsForProvider(litellmStaleNamespaceCache, "litellm-proxy")).toHaveLength(0);
 		});
 
-		test("loads litellm discovery rows cached under the rich-v3 namespace", () => {
+		test("loads litellm discovery rows cached under the rich-v4 namespace", () => {
 			const model = litellmCurrentNamespaceCache.find("litellm-proxy", "minimax/minimax-m3");
 			expect(model?.name).toBe("MiniMax-M3");
 			expect(model?.provider).toBe("litellm-proxy");

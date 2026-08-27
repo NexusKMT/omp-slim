@@ -5645,12 +5645,14 @@ export function litellmModelManagerOptions(config?: LiteLLMModelManagerConfig): 
 	const baseUrl = config?.baseUrl ?? getDefaultModelDiscoveryBaseUrl("litellm")!;
 	return {
 		providerId: "litellm",
-		// rich-v7 invalidates rows cached before discovery continued past endpoints
-		// that omitted cache pricing. Earlier versions added bundled reference fallback,
-		// moved OpenAI models to Responses, continued past incomplete vision and API
-		// metadata, stripped reseller usage suffixes, filtered placeholder rows, and
-		// mapped rich pricing. Bump the version whenever these mappers change, or warm
-		// authoritative caches keep serving pre-change rows for the full TTL.
+		// rich-v8 invalidates rows whose `compatConfig` retained a colliding
+		// bundled model's provider-specific transport (e.g. Fireworks
+		// `wireModelIdMode`) before that leak was fixed. Earlier versions added
+		// bundled reference fallback, moved OpenAI models to Responses, continued
+		// past incomplete vision/API metadata and endpoints omitting cache
+		// pricing, stripped reseller usage suffixes, filtered placeholder rows,
+		// and mapped rich pricing. Bump the version whenever these mappers change,
+		// or warm authoritative caches keep serving pre-change rows for the full TTL.
 		cacheProviderId: resolveModelCacheProviderId("litellm", { baseUrl }),
 		// litellm is a local-only proxy and is never bundled in models.json (that
 		// would leak the machine's localhost catalog). Prefer the proxy's richer
