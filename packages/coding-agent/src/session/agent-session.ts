@@ -5610,6 +5610,10 @@ export class AgentSession {
 	 * the ACP agent) use this to know whether to expect an `agent_end` event.
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<boolean> {
+		// Stamp the operator's submission instant before ANY async preprocessing —
+		// command execution, image normalization, vision-model description — so the
+		// prompt→yield delta includes the whole wait, whatever path the prompt takes.
+		const submittedAt = Date.now();
 		// A manual `/compact` runs with the agent subscription disconnected until its
 		// cleanup finally re-drains the preserved queues. Starting a turn before then
 		// would neither persist nor forward its events and could race the in-flight
@@ -5664,10 +5668,6 @@ export class AgentSession {
 			this.#toolChoiceQueue.removeByLabel("plan-mode-decision");
 		}
 
-		// Stamp the turn's start before any preprocessing or the streaming branch:
-		// queued image prompts (steer/follow-up) and the direct path both measure
-		// from the operator's submission instant.
-		const submittedAt = Date.now();
 		// If streaming, queue via steer() or followUp() based on option
 		if (this.isStreaming) {
 			const streamingBehavior = options?.streamingBehavior;
