@@ -27,7 +27,10 @@ async function resolveManagedMcpOAuthToken(
 		);
 	if (row?.credential.type !== "oauth") return undefined;
 	const before = row.credential;
-	const result = await refreshStoredManagedMcpOAuthCredential(authStorage, provider, options);
+	const result = await refreshStoredManagedMcpOAuthCredential(authStorage, provider, {
+		...options,
+		recoverServerUrlFromCredentialId: true,
+	});
 	const credential = result.credential;
 	if (!credential || Date.now() >= credential.expires) return undefined;
 	if (

@@ -2,8 +2,60 @@ import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import * as path from "node:path";
 import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
+import { refreshStoredManagedMcpOAuthCredential } from "@oh-my-pi/pi-coding-agent/mcp/oauth-credentials";
 import type { MCPStoredOAuthCredential } from "@oh-my-pi/pi-coding-agent/mcp/oauth-flow";
 import { TempDir } from "@oh-my-pi/pi-utils";
+
+/** Capture the `resource` form field of the single refresh_token grant a helper call makes. */
+async function captureRefreshResource(
+	recoverServerUrlFromCredentialId: boolean,
+): Promise<{ resources: (string | null)[]; access: string | undefined }> {
+	// Credential id embeds a DIFFERENT origin than the token endpoint, so a
+	// recovered fallback resource survives same-origin filtering and is observable.
+	const provider = "mcp_oauth:profile:default:https://remote.example.test/mcp";
+	const resources: (string | null)[] = [];
+	const tokenServer = Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		async fetch(request) {
+			const body = new URLSearchParams(await request.text());
+			resources.push(body.get("resource"));
+			return Response.json({ access_token: "access-1", refresh_token: "refresh-1", expires_in: 3600 });
+		},
+	});
+	try {
+		const storage = new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")));
+		await storage.reload();
+		const credential: MCPStoredOAuthCredential = {
+			type: "oauth",
+			access: "access-0",
+			refresh: "refresh-0",
+			expires: Date.now() - 60_000,
+			tokenUrl: `http://127.0.0.1:${tokenServer.port}/token`,
+		};
+		await storage.set(provider, credential);
+		const result = await refreshStoredManagedMcpOAuthCredential(storage, provider, {
+			forceRefresh: true,
+			recoverServerUrlFromCredentialId,
+		});
+		storage.close();
+		return { resources, access: result.credential?.access };
+	} finally {
+		tokenServer.stop(true);
+	}
+}
+
+test("standalone refresh recovers the fallback resource from the credential id", async () => {
+	const { resources, access } = await captureRefreshResource(true);
+	expect(access).toBe("access-1");
+	expect(resources).toEqual(["https://remote.example.test/mcp"]);
+});
+
+test("refresh without server-url recovery advertises no resource", async () => {
+	const { resources, access } = await captureRefreshResource(false);
+	expect(access).toBe("access-1");
+	expect(resources).toEqual([null]);
+});
 
 const cliEntry = path.join(import.meta.dir, "..", "src", "cli.ts");
 

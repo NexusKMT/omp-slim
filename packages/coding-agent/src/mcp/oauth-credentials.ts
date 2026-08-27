@@ -148,6 +148,12 @@ async function refreshBrokeredMcpOAuthCredential(
  * Local rows use their embedded OAuth metadata; broker-redacted rows delegate the
  * grant to the broker. The MCP manager and standalone credential consumers share
  * this path so rotating refresh tokens are persisted before callers receive them.
+ *
+ * `serverUrl` supplies the RFC 8707 fallback resource indicator; the manager passes
+ * the configured server URL for http/sse servers and `undefined` for stdio servers,
+ * whose refresh must NOT advertise a resource. Standalone consumers that hold only
+ * the credential id (`omp token`) set `recoverServerUrlFromCredentialId` to derive
+ * the same fallback resource the http/sse client would use.
  */
 export async function refreshStoredManagedMcpOAuthCredential(
 	authStorage: AuthStorage,
@@ -155,6 +161,7 @@ export async function refreshStoredManagedMcpOAuthCredential(
 	opts: {
 		credentialId?: number;
 		serverUrl?: string;
+		recoverServerUrlFromCredentialId?: boolean;
 		auth?: MCPAuthConfig;
 		forceRefresh?: boolean;
 		keepCredentialOnRefreshFailure?: boolean;
@@ -171,7 +178,9 @@ export async function refreshStoredManagedMcpOAuthCredential(
 		return { credential: undefined, refreshed: false, removed: false };
 	}
 	const observedCredential: MCPStoredOAuthCredential = row.credential;
-	const serverUrl = opts.serverUrl ?? mcpOAuthServerUrlFromCredentialId(provider);
+	const serverUrl =
+		opts.serverUrl ??
+		(opts.recoverServerUrlFromCredentialId ? mcpOAuthServerUrlFromCredentialId(provider) : undefined);
 	return authStorage.refreshStoredOAuthCredential<MCPStoredOAuthCredential>(provider, {
 		credentialId: row.id,
 		observedCredential,
