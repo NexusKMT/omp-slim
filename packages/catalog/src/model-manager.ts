@@ -215,7 +215,7 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 	const cacheHasUnresolvedHeaders = restoredCache.unresolvedModelIds.size > 0;
 	const dynamicModelsAuthoritative = options.dynamicModelsAuthoritative ?? false;
 	const cacheDropIds = options.dropCachedModelIdsOnStaticMismatch;
-	const staticCatalogFingerprint = fingerprintStatic(staticModels, dynamicModelsAuthoritative);
+	const staticCatalogFingerprint = fingerprintStaticModels(staticModels, dynamicModelsAuthoritative);
 	// Endpoint-migration policy is cache identity: adding an id must invalidate
 	// matching-static-catalog caches written by the prior resolver.
 	const staticFingerprint =
@@ -494,22 +494,22 @@ function retainModelIds<TApi extends Api>(
 	return models.filter(model => retainedIds.has(model.id));
 }
 
-/**
- * Stable, low-collision fingerprint of a static catalog slice. Cached by
- * reference so repeat calls in the same process (e.g. multiple cold-start
- * arms calling `resolveProviderModels` with the same `staticModels` array)
- * skip the JSON+hash work after the first call.
- */
 const MODEL_CACHE_FINGERPRINT_VERSION = "merge-v3";
 const kStaticFingerprint = Symbol("model-manager.staticFingerprint");
 type ModelArrayWithFingerprint = readonly Model<Api>[] & { [kStaticFingerprint]?: string };
-function fingerprintStatic<TApi extends Api>(
+
+/**
+ * Return the versioned, low-collision model-cache identity for a static provider
+ * slice. Results are cached by array reference so repeat cold-start paths skip
+ * the JSON serialization and hash.
+ */
+export function fingerprintStaticModels<TApi extends Api>(
 	models: readonly Model<TApi>[],
 	dynamicModelsAuthoritative = false,
 ): string {
 	if (models.length === 0) return `${MODEL_CACHE_FINGERPRINT_VERSION}:empty`;
 	if (dynamicModelsAuthoritative)
-		return `${MODEL_CACHE_FINGERPRINT_VERSION}:authoritative:${fingerprintStatic(models)}`;
+		return `${MODEL_CACHE_FINGERPRINT_VERSION}:authoritative:${fingerprintStaticModels(models)}`;
 	const tagged = models as ModelArrayWithFingerprint;
 	const cached = tagged[kStaticFingerprint];
 	if (cached !== undefined) return cached;

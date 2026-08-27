@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { Effort, type FetchImpl, type Model, type OpenAICompat, type ThinkingConfig } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
+import { fingerprintStaticModels } from "@oh-my-pi/pi-catalog/model-manager";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -1993,11 +1994,20 @@ describe("ModelRegistry", () => {
 				{ providers: {} },
 				{
 					seedCache: dbPath => {
+						const bundledModels = getBundledModels("zai");
+						const bundledModel = bundledModels[0];
+						if (!bundledModel) throw new Error("ZAI bundled catalog is empty");
 						writeModelCache(
 							"zai",
 							Date.now(),
 							[
-								...getBundledModels("zai"),
+								{
+									...bundledModel,
+									name: "Stale cached name",
+									contextWindow: bundledModel.contextWindow === 1 ? 2 : 1,
+									maxTokens: bundledModel.maxTokens === 1 ? 2 : 1,
+								},
+								...bundledModels.slice(1),
 								buildModel({
 									id: "glm-5.3-flash",
 									name: "GLM-5.3-Flash",
@@ -2012,7 +2022,7 @@ describe("ModelRegistry", () => {
 								}),
 							],
 							true,
-							"",
+							"merge-v3:stale-bundle",
 							dbPath,
 						);
 					},
@@ -2098,7 +2108,7 @@ describe("ModelRegistry", () => {
 								}),
 							],
 							true,
-							"",
+							fingerprintStaticModels(getBundledModels("ollama-cloud")),
 							dbPath,
 						);
 					},
@@ -2448,7 +2458,14 @@ describe("ModelRegistry", () => {
 			expect(vertexModels.some(model => model.id.startsWith("gemini-"))).toBe(true);
 		});
 
-		test("hydrates cached shared-catalog additions without provider credentials", () => {
+		test("hydrates only shared-catalog additions from cache", () => {
+			const bundledModel = getBundledModels("zai")[0];
+			if (!bundledModel) throw new Error("ZAI bundled catalog is empty");
+			expect(sharedCatalogCache.find("zai", bundledModel.id)).toMatchObject({
+				name: bundledModel.name,
+				contextWindow: bundledModel.contextWindow,
+				maxTokens: bundledModel.maxTokens,
+			});
 			expect(sharedCatalogCache.find("zai", "glm-5.3-flash")).toMatchObject({
 				contextWindow: 1_000_000,
 				maxTokens: 131_072,
