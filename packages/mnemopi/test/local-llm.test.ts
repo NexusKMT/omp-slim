@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { FetchImpl } from "@oh-my-pi/pi-ai";
 import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
 import {
@@ -22,6 +25,17 @@ import { withMnemopiRuntimeOptions } from "@oh-my-pi/pi-mnemopi/core/runtime-opt
 
 const OLD_ENV = { ...process.env };
 
+const tempRoots: string[] = [];
+
+// Per-test SQLite path so `new Mnemopi(...)` never touches the shared default
+// bank file. Full-workspace parallel runs otherwise contend on that single path
+// and throw SQLITE_BUSY at initBeam once busy_timeout is exceeded (#9886).
+function tempDbPath(): string {
+	const root = mkdtempSync(join(tmpdir(), "mnemopi-local-llm-"));
+	tempRoots.push(root);
+	return join(root, "mnemopi.db");
+}
+
 function restoreEnv(): void {
 	for (const key in process.env) {
 		if (!(key in OLD_ENV)) delete process.env[key];
@@ -36,6 +50,9 @@ function restoreEnv(): void {
 afterEach(() => {
 	restoreEnv();
 	resetHostLlmBackendForTests();
+	while (tempRoots.length > 0) {
+		rmSync(tempRoots.pop() as string, { recursive: true, force: true });
+	}
 });
 
 registerMockApi();
@@ -143,6 +160,7 @@ describe("local LLM TypeScript port", () => {
 			throw new Error("remote should not be called");
 		};
 		const memory = new Mnemopi({
+			dbPath: tempDbPath(),
 			llm: async (prompt, opts) => `fn:${prompt}:${opts?.maxTokens ?? 0}`,
 		});
 		try {
@@ -160,7 +178,7 @@ describe("local LLM TypeScript port", () => {
 		const model = createMockModel({
 			handler: () => ({ content: ["model summary"] }),
 		});
-		const memory = new Mnemopi({ llm: model });
+		const memory = new Mnemopi({ dbPath: tempDbPath(), llm: model });
 		try {
 			const text = await withMnemopiRuntimeOptions(memory.runtimeOptions, () => complete("hello"));
 			expect(text).toBe("model summary");
@@ -177,7 +195,7 @@ describe("local LLM TypeScript port", () => {
 			fetchCalls += 1;
 			throw new Error("remote should not be called");
 		};
-		const memory = new Mnemopi({ llm: false });
+		const memory = new Mnemopi({ dbPath: tempDbPath(), llm: false });
 		try {
 			const text = await withMnemopiRuntimeOptions(memory.runtimeOptions, () =>
 				complete("hello", 0.3, { fetch: fetchMock }),
