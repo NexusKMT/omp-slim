@@ -198,6 +198,10 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 	const staticModels = options.staticModels
 		? passModelList<TApi>(options.staticModels)
 		: (getBundledModels(options.providerId as GeneratedProvider) as Model<TApi>[]);
+	const additiveStaticModelIds =
+		options.modelsDev?.additiveOnly && staticModels.length > 0
+			? new Set(staticModels.map(model => model.id))
+			: undefined;
 	const cache = readModelCache<TApi>(cacheProviderId, ttlMs, now, dbPath);
 	const restoredCache = restoreCachedModelHeaders(
 		cache?.models ?? [],
@@ -240,8 +244,8 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 	// Cold-start fast path: when a fresh, authoritative cache exists, the network
 	// fetch is skipped, AND the static catalog slice is byte-identical to what
 	// was merged in last time, the cache row IS the authoritative merge result.
-	// Re-running `mergeDynamicModels(static, cache)` would just rebuild the same
-	// objects (~800ms in the steady-state cold-start profile for `omp -p hi`).
+	// Additive caches still need same-id rows stripped because an older binary
+	// may have written the snapshot before additive semantics were enabled.
 	if (
 		!shouldFetchFromNetwork &&
 		cache?.fresh &&
@@ -249,8 +253,14 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 		cacheFingerprintMatches &&
 		!cacheHasUnresolvedHeaders
 	) {
+		const cachedModels = additiveStaticModelIds
+			? mergeDynamicModels(
+					staticModels,
+					restoredCache.models.filter(model => !additiveStaticModelIds.has(model.id)),
+				)
+			: restoredCache.models;
 		return {
-			models: collapseBuiltModelVariants(restoredCache.models),
+			models: collapseBuiltModelVariants(cachedModels),
 			stale: false,
 			source: "cache",
 			updatedAt: cache.updatedAt,
@@ -262,10 +272,6 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 		: [null, null];
 	const modelsDevFetchSucceeded = fetchedModelsDevModels !== null;
 	const normalizedModelsDevModels = normalizeModelList<TApi>(fetchedModelsDevModels ?? []);
-	const additiveStaticModelIds =
-		options.modelsDev?.additiveOnly && staticModels.length > 0
-			? new Set(staticModels.map(model => model.id))
-			: undefined;
 	const modelsDevModels = additiveStaticModelIds
 		? normalizedModelsDevModels.filter(model => !additiveStaticModelIds.has(model.id))
 		: normalizedModelsDevModels;

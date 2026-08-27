@@ -372,6 +372,36 @@ describe("ModelRegistry runtime provider registration", () => {
 		expect(configuredRegistry.find(providerName, "shared-runtime-model")?.contextWindow).toBe(32_768);
 	});
 
+	test("runtime provider manager supersedes the built-in shared catalog manager", async () => {
+		let catalogFetches = 0;
+		const catalogFetch: FetchImpl = async input => {
+			catalogFetches++;
+			throw new Error(`Unexpected built-in catalog fetch: ${String(input)}`);
+		};
+		const overrideRegistry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: catalogFetch });
+		let runtimeFetches = 0;
+		overrideRegistry.registerProvider(
+			"anthropic",
+			{
+				baseUrl: "https://runtime.example.com/v1",
+				api: "anthropic-messages",
+				fetchDynamicModels: async () => {
+					runtimeFetches++;
+					return [{ ...baseModel, id: "runtime-anthropic-model" }];
+				},
+			},
+			"ext://runtime",
+		);
+
+		await overrideRegistry.refreshProvider("anthropic", "online");
+
+		expect(runtimeFetches).toBe(1);
+		expect(catalogFetches).toBe(0);
+		expect(getProviderModels(overrideRegistry, "anthropic").map(model => model.id)).toEqual([
+			"runtime-anthropic-model",
+		]);
+	});
+
 	test("refreshRuntimeProviders times out extension fetchDynamicModels that never resolves", async () => {
 		vi.useFakeTimers();
 		const hangingFetch = Promise.withResolvers<readonly NonNullable<ProviderConfigInput["models"]>[number][]>();

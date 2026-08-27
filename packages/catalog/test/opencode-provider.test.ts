@@ -252,6 +252,61 @@ describe("Shared models.dev catalog fallback", () => {
 		}
 	});
 
+	test("sanitizes a fresh matching cache when additive mode is enabled", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-additive-fresh-cache-"));
+		try {
+			const bundledModel = getBundledModels("zai")[0];
+			if (!bundledModel) throw new Error("ZAI bundled catalog is empty");
+			const cachedOverride = {
+				...bundledModel,
+				name: "Untrusted cached override",
+				contextWindow: 1,
+				maxTokens: 1,
+			};
+			const cacheDbPath = path.join(tempDir, "models.db");
+			const legacyModelsDev = {
+				fetch: async () => [cachedOverride],
+				map: (payload: Array<typeof cachedOverride>) => payload,
+			};
+			await resolveProviderModels(
+				{
+					providerId: "zai" as const,
+					cacheDbPath,
+					staticModels: [bundledModel],
+					modelsDev: legacyModelsDev,
+				},
+				"online",
+			);
+
+			let additiveFetches = 0;
+			const resolved = await resolveProviderModels(
+				{
+					providerId: "zai" as const,
+					cacheDbPath,
+					staticModels: [bundledModel],
+					modelsDev: {
+						...legacyModelsDev,
+						additiveOnly: true,
+						fetch: async () => {
+							additiveFetches++;
+							return [];
+						},
+					},
+				},
+				"online-if-uncached",
+			);
+
+			expect(additiveFetches).toBe(0);
+			expect(resolved.models.find(model => model.id === bundledModel.id)).toMatchObject({
+				name: bundledModel.name,
+				contextWindow: bundledModel.contextWindow,
+				maxTokens: bundledModel.maxTokens,
+			});
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	test("retains one source's cached slice when the other source refreshes", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-partial-source-refresh-"));
 		try {
@@ -332,23 +387,24 @@ describe("Shared models.dev catalog fallback", () => {
 
 	test("aborts a stalled shared catalog request at the configured deadline", async () => {
 		let aborted = false;
-		const stalledFetch: FetchImpl = (_input, init) =>
-			new Promise<Response>((_resolve, reject) => {
-				const signal = init?.signal;
-				if (!signal) {
-					reject(new Error("catalog fetch did not receive an abort signal"));
-					return;
-				}
-				const rejectAborted = () => {
-					aborted = true;
-					reject(signal.reason);
-				};
-				if (signal.aborted) {
-					rejectAborted();
-				} else {
-					signal.addEventListener("abort", rejectAborted, { once: true });
-				}
-			});
+		const stalledFetch: FetchImpl = (_input, init) => {
+			const { promise, reject } = Promise.withResolvers<Response>();
+			const signal = init?.signal;
+			if (!signal) {
+				reject(new Error("catalog fetch did not receive an abort signal"));
+				return promise;
+			}
+			const rejectAborted = () => {
+				aborted = true;
+				reject(signal.reason);
+			};
+			if (signal.aborted) {
+				rejectAborted();
+			} else {
+				signal.addEventListener("abort", rejectAborted, { once: true });
+			}
+			return promise;
+		};
 		const fallback = modelsDevCatalogFallback("zai", stalledFetch, 5);
 		if (!fallback) throw new Error("ZAI did not configure a models.dev fallback");
 
