@@ -1,15 +1,13 @@
 /**
  * AI-assisted selective staging for the git TUI ("what should we stage?").
  *
- * Runs two fanned-out tiny-model passes over the unstaged tree: a permissive
- * per-file pass rejects files that cannot match the user's instruction, then a
- * per-hunk pass over the surviving files picks the exact hunks. Matching hunks
- * are staged via `git apply --cached`; accepted untracked and binary files are
- * staged whole. Every judgement is an independent yes/no completion, so both
- * passes run fully in parallel (the provider in-flight limiter bounds the
- * blast).
+ * Runs two tiny-model passes over the unstaged tree. The file pass shows the
+ * model the whole changed-file list in one completion (batched for huge trees)
+ * so files are picked as a coherent set; the hunk pass then judges every hunk
+ * of the picked files with independent parallel yes/no completions. Matching
+ * hunks are staged via `git apply --cached`; picked untracked and binary files
+ * are staged whole.
  */
-import * as path from "node:path";
 import {
 	type Api,
 	type ApiKey,
@@ -24,14 +22,14 @@ import type { FileDiff } from "../../commit/types";
 import { ModelRegistry } from "../../config/model-registry";
 import { resolveRoleSelection } from "../../config/model-resolver";
 import { Settings } from "../../config/settings";
-import filePromptTemplate from "../../prompts/system/git-ai-stage-file.md" with { type: "text" };
+import filesPromptTemplate from "../../prompts/system/git-ai-stage-files.md" with { type: "text" };
 import hunkPromptTemplate from "../../prompts/system/git-ai-stage-hunk.md" with { type: "text" };
 import { discoverAuthStorage, loadCliExtensionProviders } from "../../sdk";
 import * as git from "../../utils/git";
 import type { ChangedFile } from "./state";
 
-/** Head-truncation bound for per-file diff excerpts in the file pass. */
-const FILE_EXCERPT_CHARS = 1600;
+/** Files per file-pass completion; larger trees fan out one call per batch. */
+const FILE_BATCH = 80;
 /** Head-truncation bound for hunk text in the hunk pass. */
 const HUNK_CHARS = 2400;
 /**
@@ -87,7 +85,7 @@ export async function aiStage(options: AiStageOptions): Promise<AiStageOutcome> 
 		const model = resolveRoleSelection(["tiny", "smol"], settings, registry.getAvailable())?.model;
 		if (!model) throw new Error("No tiny/smol model available for AI staging");
 		if (!(await registry.getApiKey(model))) throw new Error(`No API key for ${model.provider}/${model.id}`);
-		const judge = createJudge(model, registry.resolver(model), signal);
+		const complete = createCompleter(model, registry.resolver(model), signal);
 
 		const rawDiff = tracked.length > 0 ? await git.diff(cwd, { files: tracked.map(file => file.path), signal }) : "";
 		const fileDiffs = new Map(git.diff.parseFiles(rawDiff).map(entry => [entry.filename, entry]));
@@ -96,35 +94,42 @@ export async function aiStage(options: AiStageOptions): Promise<AiStageOutcome> 
 			file: Pick<ChangedFile, "path" | "kind">;
 			/** Parsed worktree diff; absent for untracked files. */
 			diff?: FileDiff;
-			excerpt: string;
 		}
 		const candidates: Candidate[] = tracked.flatMap(file => {
 			const diff = fileDiffs.get(file.path);
-			return diff ? [{ file, diff, excerpt: bound(diff.content, FILE_EXCERPT_CHARS) }] : [];
+			return diff ? [{ file, diff }] : [];
 		});
-		candidates.push(
-			...(await Promise.all(
-				untracked.map(async file => ({ file, excerpt: await untrackedExcerpt(cwd, file.path) })),
-			)),
-		);
+		candidates.push(...untracked.map(file => ({ file })));
 
-		// File pass: reject files that cannot match; everything else advances.
-		let filesJudged = 0;
-		const fileVerdicts = await judgeAll(candidates, async candidate => {
-			const accepted = await judge(
-				prompt.render(filePromptTemplate, {
-					instruction,
-					path: candidate.file.path,
-					kind: candidate.file.kind,
-					excerpt: candidate.excerpt,
-					// No hunk pass follows for untracked/binary files: this verdict stages the whole file.
-					final: !candidate.diff || candidate.diff.isBinary,
+		// File pass: one completion sees the whole (batched) list, so files are
+		// picked as a coherent set instead of N independent coin flips.
+		onProgress?.(`Choosing files… (${candidates.length} changed)`);
+		const batches: Candidate[][] = [];
+		for (let start = 0; start < candidates.length; start += FILE_BATCH) {
+			batches.push(candidates.slice(start, start + FILE_BATCH));
+		}
+		const picked = (
+			await Promise.all(
+				batches.map(async batch => {
+					const fileList = batch
+						.map(candidate => `- ${candidate.file.path} (${describeCandidate(candidate)})`)
+						.join("\n");
+					const reply = await complete(prompt.render(filesPromptTemplate, { instruction, fileList }));
+					const picks = parseFileSelection(
+						reply,
+						batch.map(candidate => candidate.file.path),
+					);
+					return picks.map(pick => batch[pick - 1]);
 				}),
-			);
-			onProgress?.(`Choosing files… ${++filesJudged}/${candidates.length}`);
-			return accepted;
-		});
-		const matched = candidates.filter((_, index) => fileVerdicts[index]);
+			)
+		).flat();
+		onProgress?.(`Picked ${picked.length}/${candidates.length} files`);
+		// Zero picks usually means the request is about change content ("comment
+		// edits"), which paths alone cannot answer — advance everything and let
+		// the hunk pass decide. A non-authoritative file scope must never stage
+		// whole files: no untracked/binary whole-stages, no whole-file fallback.
+		const fileScopeAuthoritative = picked.length > 0;
+		const matched = fileScopeAuthoritative ? picked : candidates;
 
 		// Hunk pass: every hunk of every matched text file is judged independently.
 		const binaryWhole: string[] = [];
@@ -132,7 +137,7 @@ export async function aiStage(options: AiStageOptions): Promise<AiStageOutcome> 
 		for (const candidate of matched) {
 			if (!candidate.diff) continue;
 			if (candidate.diff.isBinary) {
-				binaryWhole.push(candidate.file.path);
+				if (fileScopeAuthoritative) binaryWhole.push(candidate.file.path);
 				continue;
 			}
 			for (const hunk of parseFileHunks(candidate.diff).hunks) {
@@ -149,7 +154,7 @@ export async function aiStage(options: AiStageOptions): Promise<AiStageOutcome> 
 		}
 		let hunksJudged = 0;
 		const hunkVerdicts = await judgeAll(jobs, async job => {
-			const accepted = await judge(
+			const reply = await complete(
 				prompt.render(hunkPromptTemplate, {
 					instruction,
 					path: job.path,
@@ -157,9 +162,18 @@ export async function aiStage(options: AiStageOptions): Promise<AiStageOutcome> 
 				}),
 			);
 			onProgress?.(`Choosing hunks… ${++hunksJudged}/${jobs.length}`);
-			return accepted;
+			return parseVerdict(reply);
 		});
 
+		const stagedHunks = hunkVerdicts.filter(Boolean).length;
+		// The hunk judge asks whether the changed lines themselves are what the
+		// user described. Topical instructions ("git stuff", "the login feature")
+		// are answered by the file pick, not by line content, so the judge
+		// rejects every hunk unanimously — take that as "the instruction does not
+		// discriminate within files" and stage the picked files whole. Kind
+		// instructions ("comment changes") accept at least one hunk somewhere,
+		// which keeps the per-hunk selection authoritative.
+		const wholeFileScope = fileScopeAuthoritative && jobs.length > 0 && stagedHunks === 0;
 		const indicesByPath = new Map<string, number[]>();
 		jobs.forEach((job, index) => {
 			if (!hunkVerdicts[index]) return;
@@ -167,16 +181,21 @@ export async function aiStage(options: AiStageOptions): Promise<AiStageOutcome> 
 			if (indices) indices.push(job.index);
 			else indicesByPath.set(job.path, [job.index]);
 		});
+		const trackedWhole = wholeFileScope
+			? matched.filter(candidate => candidate.diff && !candidate.diff.isBinary).map(candidate => candidate.file.path)
+			: [];
 
 		const selections: git.HunkSelection[] = [
 			...binaryWhole.map(filePath => ({ path: filePath, hunks: { type: "all" } as const })),
+			...trackedWhole.map(filePath => ({ path: filePath, hunks: { type: "all" } as const })),
 			...[...indicesByPath].map(([filePath, indices]) => ({
 				path: filePath,
 				hunks: { type: "indices", indices } as const,
 			})),
 		];
-		const untrackedAccepted = matched.filter(candidate => !candidate.diff).map(candidate => candidate.file.path);
-		const stagedHunks = hunkVerdicts.filter(Boolean).length;
+		const untrackedAccepted = fileScopeAuthoritative
+			? matched.filter(candidate => !candidate.diff).map(candidate => candidate.file.path)
+			: [];
 		if (selections.length > 0 || untrackedAccepted.length > 0) onProgress?.("Staging…");
 		if (selections.length > 0) await git.stage.hunks(cwd, selections, { rawDiff, signal });
 		if (untrackedAccepted.length > 0) await git.stage.files(cwd, untrackedAccepted, signal);
@@ -186,19 +205,19 @@ export async function aiStage(options: AiStageOptions): Promise<AiStageOutcome> 
 			totalFiles: candidates.length,
 			stagedHunks,
 			totalHunks: jobs.length,
-			wholeFiles: untrackedAccepted.length + binaryWhole.length,
+			wholeFiles: untrackedAccepted.length + binaryWhole.length + trackedWhole.length,
 		};
 	} finally {
 		authStorage.close();
 	}
 }
 
-/** One yes/no completion against the resolved model. */
-function createJudge(
+/** One text completion against the resolved model. */
+function createCompleter(
 	model: Model<Api>,
 	apiKey: ApiKey,
 	signal?: AbortSignal,
-): (userPrompt: string) => Promise<boolean> {
+): (userPrompt: string) => Promise<string> {
 	return async userPrompt => {
 		const response = await retryTransientCompletion(
 			() =>
@@ -212,7 +231,7 @@ function createJudge(
 		if (response.stopReason === "error") {
 			throw new Error(`AI staging request failed: ${response.errorMessage ?? "unknown error"}`);
 		}
-		return parseVerdict(extractText(response.content));
+		return extractText(response.content);
 	};
 }
 
@@ -244,6 +263,38 @@ async function judgeAll<T>(items: readonly T[], run: (item: T) => Promise<boolea
 	return verdicts;
 }
 
+/** File-list line detail: change kind plus +/− counts when the diff is parsed. */
+function describeCandidate(candidate: { file: Pick<ChangedFile, "kind">; diff?: FileDiff }): string {
+	if (!candidate.diff) return candidate.file.kind;
+	return `${candidate.file.kind}, +${candidate.diff.additions} −${candidate.diff.deletions}`;
+}
+
+/**
+ * Parse the file-pass reply into 1-based picks over `paths`.
+ *
+ * The model echoes matching paths verbatim (tiny models copy strings reliably
+ * but miscount list indices, measured on lfm2-2.6b). A line-level echo match
+ * runs first; a boundary-guarded substring match catches prose replies without
+ * picking `a/b.ts` off a mention of `other/a/b.ts`. "none" or noise yields no
+ * picks.
+ */
+export function parseFileSelection(text: string, paths: readonly string[]): number[] {
+	const picked = new Set<number>();
+	const lines = text.split("\n").map(line => line.replace(/^[\s\-*•]+/, "").trim());
+	paths.forEach((filePath, index) => {
+		if (lines.some(line => line === filePath || line.startsWith(`${filePath} `))) {
+			picked.add(index + 1);
+			return;
+		}
+		const at = text.indexOf(filePath);
+		if (at < 0) return;
+		const before = at > 0 ? text[at - 1] : "";
+		const after = at + filePath.length < text.length ? text[at + filePath.length] : "";
+		if (!/[\w./-]/.test(before) && !/[\w./-]/.test(after)) picked.add(index + 1);
+	});
+	return [...picked].sort((left, right) => left - right);
+}
+
 /** Earliest bare `yes` before any `no` accepts; anything else rejects. */
 export function parseVerdict(text: string): boolean {
 	const lower = text.toLowerCase();
@@ -255,16 +306,6 @@ export function parseVerdict(text: string): boolean {
 
 function bound(text: string, limit: number): string {
 	return text.length <= limit ? text : `${text.slice(0, limit)}\n…`;
-}
-
-/** Bounded head of an untracked worktree file; empty for unreadable or binary content. */
-async function untrackedExcerpt(cwd: string, filePath: string): Promise<string> {
-	try {
-		const text = await Bun.file(path.join(cwd, filePath)).slice(0, FILE_EXCERPT_CHARS).text();
-		return text.includes("\u0000") ? "" : text;
-	} catch {
-		return "";
-	}
 }
 
 function extractText(content: AssistantMessage["content"]): string {
