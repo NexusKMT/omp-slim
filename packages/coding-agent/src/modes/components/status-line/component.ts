@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
-import { parseKnownModel } from "@oh-my-pi/pi-catalog/identity";
+import { getAntigravityCounterKeyForModel } from "@oh-my-pi/pi-ai/usage/google-antigravity";
 import {
 	type Component,
 	type ComposerStyle,
@@ -64,28 +64,6 @@ function normalizeUsageScopeValue(value: unknown): string | undefined {
 
 /** Antigravity backend counters the status line can scope to a model family. */
 const ANTIGRAVITY_KNOWN_COUNTERS: Record<string, true> = { google: true, anthropic: true, openai: true };
-
-/**
- * Antigravity account reports keep Google, Anthropic, and OpenAI backend
- * counters separate and sort limits by remaining fraction, so a Claude session
- * could otherwise display the more-exhausted Gemini quota (or vice versa). Map
- * the active model id to the counter key encoded in the Antigravity limit id
- * (`google-antigravity:<counter>:<tier>:<window>`). Returns undefined when the
- * family is unknown (e.g. `gpt-oss-*`), so filtering falls back to first-match.
- */
-function antigravityCounterForModel(modelId: string | undefined): string | undefined {
-	if (!modelId) return undefined;
-	switch (parseKnownModel(modelId).family) {
-		case "gemini":
-			return "google";
-		case "anthropic":
-			return "anthropic";
-		case "openai":
-			return "openai";
-		default:
-			return undefined;
-	}
-}
 
 /** Backend counter segment of an Antigravity limit id, or undefined. */
 function antigravityCounterFromLimitId(id: string | undefined): string | undefined {
@@ -1497,7 +1475,7 @@ export class StatusLineComponent implements Component {
 		const now = Date.now();
 		const activeModelId = normalizeUsageScopeValue(context.modelId);
 		const activeAntigravityCounter =
-			context.provider === "google-antigravity" ? antigravityCounterForModel(context.modelId) : undefined;
+			context.provider === "google-antigravity" ? getAntigravityCounterKeyForModel(context.modelId) : undefined;
 		const scopeGroups = new Map<string, UsageScopeGroup>();
 		for (const report of reports) {
 			if (!report || typeof report !== "object") continue;

@@ -706,6 +706,13 @@ describe("usage status-line segment", () => {
 						window: { id: "daily", label: "Daily", durationMs: 86_400_000, resetsAt: now + 40 * 60_000 },
 						amount: { usedFraction: 0.24 },
 					},
+					{
+						id: "google-antigravity:openai:default:daily",
+						label: "Usage (OpenAI)",
+						scope: { provider: "google-antigravity", windowId: "daily" },
+						window: { id: "daily", label: "Daily", durationMs: 86_400_000, resetsAt: now + 25 * 60_000 },
+						amount: { usedFraction: 0.63 },
+					},
 				],
 			},
 		];
@@ -725,6 +732,14 @@ describe("usage status-line segment", () => {
 		expect(geminiContent).toContain("1d");
 		expect(geminiContent).toContain("91%");
 		expect(geminiContent).not.toContain("24%");
+
+		const gptOss = makeComponent(reports, { provider: "google-antigravity", modelId: "gpt-oss-120b" });
+		gptOss.refreshUsageInBackground();
+		await flushUsageRefresh();
+		const gptOssContent = stripVTControlCharacters(gptOss.getTopBorder(200).content);
+		expect(gptOssContent).toContain("1d");
+		expect(gptOssContent).toContain("63%");
+		expect(gptOssContent).not.toContain("91%");
 	});
 
 	it("ignores non-canonical windows without a reported span", async () => {
