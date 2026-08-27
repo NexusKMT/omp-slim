@@ -75,10 +75,13 @@ describe("parseArgs — --cwd flag", () => {
 			throw new Error("operation not permitted");
 		});
 
-		await expect(applyStartupCwd(parsed)).rejects.toThrow(
-			`Cannot change working directory to ${targetDir}: operation not permitted`,
-		);
-		chdir.mockRestore();
+		try {
+			await expect(applyStartupCwd(parsed)).rejects.toThrow(
+				`Cannot change working directory to ${targetDir}: operation not permitted`,
+			);
+		} finally {
+			chdir.mockRestore();
+		}
 		expect(getProjectDir()).toBe(launchDir);
 	});
 

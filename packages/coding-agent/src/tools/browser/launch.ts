@@ -76,60 +76,90 @@ const USER_AGENT_TARGET_TYPES = new Set(["page", "webview", "background_page"]);
 const PUPPETEER_SOURCE_URL_SUFFIX = "//# sourceURL=__puppeteer_evaluation_script__";
 
 /**
- * Lazy-import puppeteer from a safe CWD so cosmiconfig doesn't choke
- * on malformed package.json files in the user's project tree.
- *
- * Dynamic import is required because puppeteer-core probes the cwd at module
- * load time; we must `process.chdir` to a safe scratch dir before loading and
- * restore cwd afterwards. A static import would run at module-init time before
- * cwd is safe.
+ * Lazy-import puppeteer while hiding the user's cwd from cosmiconfig. The
+ * import must not change the filesystem cwd: it is awaited and callers
+ * continue running on the main thread while it is pending.
  */
-let puppeteerModule: typeof Puppeteer | undefined;
-export async function loadPuppeteer(): Promise<typeof Puppeteer> {
-	if (puppeteerModule) return puppeteerModule;
-	const prev = process.cwd();
-	const safeDir = getPuppeteerDir();
-	await Bun.write(path.join(safeDir, "package.json"), "{}");
-	let importSucceeded = false;
-	let failed = false;
-	let failure: unknown;
-	let loaded: typeof Puppeteer | undefined;
+let puppeteerCwdFailed = false;
+let puppeteerCwdFailure: unknown;
+async function importPuppeteerWithSafeCwd(safeDir: string): Promise<typeof Puppeteer> {
+	const cwdDescriptor = Object.getOwnPropertyDescriptor(process, "cwd");
+	if (!cwdDescriptor || typeof cwdDescriptor.value !== "function") {
+		throw new Error("Unable to safely override process.cwd for Puppeteer import");
+	}
+
 	try {
-		process.chdir(safeDir);
-		loaded = (await import("puppeteer-core")).default;
-		puppeteerModule = loaded;
-		importSucceeded = true;
-	} catch (error) {
-		failed = true;
-		failure = error;
+		Object.defineProperty(process, "cwd", { ...cwdDescriptor, value: () => safeDir });
+	} catch (overrideFailure) {
+		puppeteerCwdFailed = true;
+		puppeteerCwdFailure = overrideFailure;
+		throw overrideFailure;
+	}
+	let loaded: typeof Puppeteer | undefined;
+	let importFailure: unknown;
+	let importFailed = false;
+	let restorationFailure: unknown;
+	let restorationFailed = false;
+	try {
+		try {
+			// Dynamic import is intentional: Puppeteer probes cwd during module initialization.
+			loaded = (await import("puppeteer-core")).default;
+		} catch (error) {
+			importFailed = true;
+			importFailure = error;
+		}
 	} finally {
 		try {
-			process.chdir(prev);
-		} catch (restoreError) {
-			if (importSucceeded) {
-				puppeteerModule = undefined;
-				failed = true;
-				failure = restoreError;
-			} else {
-				logger.warn("Could not restore cwd after failed Puppeteer import", { error: String(restoreError) });
-			}
+			Object.defineProperty(process, "cwd", cwdDescriptor);
+		} catch (error) {
+			restorationFailed = true;
+			restorationFailure = error;
 		}
 	}
-	if (failed) throw failure;
+	if (restorationFailed) {
+		const failure = importFailed
+			? new AggregateError([importFailure, restorationFailure], "Puppeteer import and cwd restoration failed")
+			: restorationFailure;
+		puppeteerCwdFailed = true;
+		puppeteerCwdFailure = failure;
+		throw failure;
+	}
+	if (importFailed) throw importFailure;
 	return loaded!;
+}
+
+let puppeteerModule: typeof Puppeteer | undefined;
+let puppeteerLoadPromise: Promise<typeof Puppeteer> | undefined;
+async function loadPuppeteerImport(safeDir: string, prepareSafeDir: boolean): Promise<typeof Puppeteer> {
+	if (puppeteerCwdFailed) throw puppeteerCwdFailure;
+	let loading = puppeteerLoadPromise;
+	if (!loading) {
+		loading = (async () => {
+			if (prepareSafeDir) await Bun.write(path.join(safeDir, "package.json"), "{}");
+			return importPuppeteerWithSafeCwd(safeDir);
+		})();
+		puppeteerLoadPromise = loading;
+	}
+	try {
+		return await loading;
+	} finally {
+		if (puppeteerLoadPromise === loading) puppeteerLoadPromise = undefined;
+	}
+}
+
+export async function loadPuppeteer(): Promise<typeof Puppeteer> {
+	if (puppeteerModule) return puppeteerModule;
+	const loaded = await loadPuppeteerImport(getPuppeteerDir(), true);
+	puppeteerModule = loaded;
+	return loaded;
 }
 
 let puppeteerModuleWorker: typeof Puppeteer | undefined;
 export async function loadPuppeteerInWorker(safeDir: string): Promise<typeof Puppeteer> {
 	if (puppeteerModuleWorker) return puppeteerModuleWorker;
-	const orig = process.cwd;
-	Object.defineProperty(process, "cwd", { value: () => safeDir, configurable: true });
-	try {
-		puppeteerModuleWorker = (await import("puppeteer-core")).default;
-		return puppeteerModuleWorker;
-	} finally {
-		Object.defineProperty(process, "cwd", { value: orig, configurable: true });
-	}
+	const loaded = await loadPuppeteerImport(safeDir, false);
+	puppeteerModuleWorker = loaded;
+	return loaded;
 }
 
 let browsersModule: typeof BrowsersNs | undefined;

@@ -95,7 +95,6 @@ import {
 	postmortem,
 	prompt,
 	Snowflake,
-	setProjectDir,
 	stringProperty,
 	withTimeout,
 } from "@oh-my-pi/pi-utils";
@@ -8098,7 +8097,8 @@ export class AgentSession {
 	async reload(): Promise<void> {
 		const sessionFile = this.sessionFile;
 		if (!sessionFile) return;
-		await this.switchSession(sessionFile);
+		const switched = await this.switchSession(sessionFile);
+		if (!switched) throw new Error("Session reload cancelled");
 	}
 	/**
 	 * Switch to a different session file.
@@ -8108,7 +8108,11 @@ export class AgentSession {
 	 */
 	async switchSession(
 		sessionPath: string,
-		options?: { onCwdChange?: (newCwd: string, previousCwd: string) => Promise<boolean> },
+		options?: {
+			onCwdChange?: (newCwd: string, previousCwd: string) => Promise<boolean>;
+			/** Collab snapshot adoption keeps the guest's process cwd and marks the replica runtime-only. */
+			preserveLocalCwd?: boolean;
+		},
 	): Promise<boolean> {
 		const previousSessionFile = this.sessionManager.getSessionFile();
 		const switchingToDifferentSession = previousSessionFile
@@ -8195,17 +8199,21 @@ export class AgentSession {
 			this.#bash.markSessionTransition(bashTransition);
 			const newCwd = this.sessionManager.getCwd();
 			const recordedCwd = this.sessionManager.getRecordedCwd() ?? previousSessionState.cwd;
-			if (!options?.onCwdChange && path.resolve(recordedCwd) !== path.resolve(previousSessionState.cwd)) {
-				throw SESSION_CWD_CHANGE_REJECTED;
-			}
-			if (options?.onCwdChange) {
-				if (path.resolve(newCwd) !== path.resolve(previousSessionState.cwd)) {
-					cwdChangeTarget = newCwd;
-					if (!(await options.onCwdChange(newCwd, previousSessionState.cwd))) {
+			if (options?.preserveLocalCwd) {
+				this.sessionManager.setCwdWithoutRelocation(previousSessionState.cwd);
+			} else {
+				if (!options?.onCwdChange && path.resolve(recordedCwd) !== path.resolve(previousSessionState.cwd)) {
+					throw SESSION_CWD_CHANGE_REJECTED;
+				}
+				if (options?.onCwdChange) {
+					if (path.resolve(newCwd) !== path.resolve(previousSessionState.cwd)) {
+						cwdChangeTarget = newCwd;
+						if (!(await options.onCwdChange(newCwd, previousSessionState.cwd))) {
+							throw SESSION_CWD_CHANGE_REJECTED;
+						}
+					} else if (path.resolve(recordedCwd) !== path.resolve(previousSessionState.cwd)) {
 						throw SESSION_CWD_CHANGE_REJECTED;
 					}
-				} else if (path.resolve(recordedCwd) !== path.resolve(previousSessionState.cwd)) {
-					throw SESSION_CWD_CHANGE_REJECTED;
 				}
 			}
 			if (switchingToDifferentSession) {
@@ -8420,18 +8428,9 @@ export class AgentSession {
 					rollbackFailure = `cwd rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`;
 				}
 				if (rollbackFailure) {
-					// Attempt to realign process cwd for diagnostics, but do not clear rollbackFailure — full workspace restore via onCwdChange already failed.
-					try {
-						process.chdir(previousSessionState.cwd);
-						try {
-							setProjectDir(previousSessionState.cwd);
-						} catch {}
-					} catch {}
+					this.beginDispose();
 					this.#bash.finishSessionTransition(bashTransition, false);
 					logger.warn("Failed to restore cwd after session switch", { cwd: previousSessionState.cwd });
-					// The session is restored to the source, but the process cwd
-					// may still sit at the target. Surface both halves instead of
-					// failing open with only the original error.
 					const original = error instanceof Error ? error.message : String(error);
 					throw new Error(`${original} (${rollbackFailure}; the process may remain in ${cwdChangeTarget})`);
 				}
