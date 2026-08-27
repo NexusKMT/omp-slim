@@ -692,12 +692,12 @@ export class UiHelpers {
 				// A user prompt closes the displacement window, same as the live path.
 				if (message.role === "user") resolveWaitingPoll();
 				if (message.role === "user") resolveTodoSnapshot();
-				if (message.role === "user") turnStartedAt = message.timestamp;
-				// Replay-side run boundaries, mirroring the live agent_start/agent_end
-				// bookkeeping: a developer message initiates a synthetic run (auto-
-				// continuation, advisor), so it must not inherit the preceding user
-				// prompt's timestamp; a directly-invoked `/skill:` custom prompt is the
-				// run's initiator and seeds it instead.
+				// Only genuinely user-attributed prompts anchor the delta; a mid-run
+				// agent-attributed `user` message (advisor tool-loop redirect) must not.
+				if (message.role === "user" && message.attribution !== "agent") turnStartedAt = message.timestamp;
+				// Recovery reminders (empty/unexpected-stop retries) never reach replay
+				// — they are appendMessage'd into the LLM context without events — so
+				// every developer message here is genuinely run-initiating.
 				if (message.role === "developer") turnStartedAt = undefined;
 				if (message.role === "custom" && isUserInvokedSkillPrompt(message as CustomMessage)) {
 					turnStartedAt = message.timestamp;

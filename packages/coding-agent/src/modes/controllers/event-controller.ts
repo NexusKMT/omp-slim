@@ -856,7 +856,9 @@ export class EventController {
 			this.ctx.ui.requestRender();
 		} else if (event.message.role === "user") {
 			vocalizer.clear();
-			this.#turnStartedAt = event.message.timestamp;
+			// Only genuinely user-attributed prompts anchor the delta; a mid-run
+			// agent-attributed `user` message (advisor tool-loop redirect) must not.
+			if (event.message.attribution !== "agent") this.#turnStartedAt = event.message.timestamp;
 			const textContent = this.ctx.getUserMessageText(event.message);
 			const imageBlocks =
 				typeof event.message.content === "string"

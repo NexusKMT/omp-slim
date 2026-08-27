@@ -168,6 +168,24 @@ describe("ChatTranscriptBuilder turn elapsed", () => {
 		transcript.rebuild(toEntries([skill, assistantMessage()]));
 		expect(renderedText(transcript.container)).toContain(TURN_ELAPSED_LABEL);
 	});
+	it("ignores an agent-attributed user message as a turn start", () => {
+		settings.set("display.showTurnTime", true);
+		const transcript = builder();
+		// The advisor's tool-loop guard injects a mid-run `user` corrective with
+		// `attribution: "agent"`; it must not reset the anchor to the redirect.
+		const redirect = {
+			role: "user",
+			content: [{ type: "text", text: "stop looping" }],
+			synthetic: true,
+			attribution: "agent",
+			timestamp: RESPONSE_CREATED_AT + 5_000,
+		} as unknown as AgentMessage;
+		transcript.rebuild(toEntries([userMessage(), assistantMessage(), redirect, assistantMessage()]));
+		// The real user prompt anchors both turns; the redirect adds no reset, so
+		// the second assistant row still measures from the initiating prompt.
+		const occurrences = renderedText(transcript.container).match(/Δ1m/g)?.length ?? 0;
+		expect(occurrences).toBe(2);
+	});
 });
 
 describe("UiHelpers.renderSessionContext turn elapsed", () => {

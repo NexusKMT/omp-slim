@@ -259,11 +259,19 @@ export class ChatTranscriptBuilder {
 				break;
 			case "user":
 			case "developer": {
-				if (message.role === "user") this.#turnStartedAt = message.timestamp;
-				// A developer message initiates a synthetic run (auto-continuation,
-				// advisor): replay must not inherit the preceding user prompt's
-				// timestamp, mirroring the live agent_start clear.
-				else this.#turnStartedAt = undefined;
+				// Only genuinely user-attributed prompts anchor the delta; a mid-run
+				// agent-attributed `user` message (advisor tool-loop redirect) must not.
+				if (message.role === "user" && message.attribution !== "agent") {
+					this.#turnStartedAt = message.timestamp;
+				} else if (message.role === "developer") {
+					// A developer message initiates a synthetic run (auto-continuation,
+					// advisor): replay must not inherit the preceding user prompt's
+					// timestamp, mirroring the live agent_start clear. Recovery reminders
+					// (empty/unexpected-stop retries) are appendMessage'd into the LLM
+					// context without events and never become persisted entries, so every
+					// developer message here is genuinely run-initiating.
+					this.#turnStartedAt = undefined;
+				}
 				// A user prompt closes the poll-displacement window, same as the live path.
 				if (message.role === "user") this.#resolveWaitingPoll();
 				if (message.role === "user") this.#resolveTodoSnapshot();
