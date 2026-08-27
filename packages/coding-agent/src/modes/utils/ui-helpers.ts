@@ -715,6 +715,13 @@ export class UiHelpers {
 		} else {
 			resolveTodoSnapshot();
 		}
+		// Same mid-turn handoff for the prompt→yield delta: focus attach and
+		// mid-turn rebuilds reset the controller's turn start before replaying,
+		// so the in-flight assistant `message_end` would otherwise render the
+		// usage row without the elapsed figure. Mirrors inheritDisplaceableTodo.
+		if (this.ctx.viewSession.isStreaming) {
+			this.ctx.eventController?.inheritTurnStart(turnStartedAt);
+		}
 
 		// Entries still in `pendingTools` are toolCalls whose result never landed
 		// during the replay — with `keepDanglingToolCalls` these are exactly the

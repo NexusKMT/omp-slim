@@ -1024,6 +1024,17 @@ export class EventController {
 	inheritDisplaceableTodo(component: ToolExecutionComponent | null | undefined): void {
 		this.#displaceableTodoComponent = component?.canBeDisplacedBy("todo") ? component : undefined;
 	}
+	/**
+	 * Adopt the rebuild's replayed user-prompt timestamp so a still-running turn
+	 * keeps its prompt→yield delta. Focus attach and mid-turn rebuilds reset the
+	 * controller's turn start before replaying entries; without the handoff the
+	 * in-flight assistant `message_end` would render the usage row without the
+	 * elapsed figure. Mirrors {@link inheritDisplaceableTodo}. Drops the
+	 * candidate when the rebuild saw no user message.
+	 */
+	inheritTurnStart(turnStartedAt: number | undefined): void {
+		if (turnStartedAt !== undefined) this.#turnStartedAt = turnStartedAt;
+	}
 
 	async #handleNotice(event: Extract<AgentSessionEvent, { type: "notice" }>): Promise<void> {
 		const message = event.source ? `${event.source}: ${event.message}` : event.message;

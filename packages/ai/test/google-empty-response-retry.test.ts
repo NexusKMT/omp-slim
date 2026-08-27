@@ -135,6 +135,10 @@ describe("Google empty-response retry (public + Vertex path)", () => {
 		expect(starts).toBe(1); // exactly one start across the retry — no duplicate partials
 		expect(result.stopReason).toBe("stop");
 		expect(textOf(result)).toBe("Hello!");
+		// The retry must not re-stamp the message: `duration` is measured from the
+		// original request start, so the timestamp stays on that same timeline.
+		const [startEvent] = events.filter(event => event.type === "start");
+		expect(startEvent?.type === "start" ? startEvent.partial.timestamp : undefined).toBe(result.timestamp);
 		void events;
 	});
 
@@ -289,6 +293,11 @@ describe("Google empty-response retry (Cloud Code Assist path)", () => {
 		expect(starts).toBe(1); // the empty attempt must not leave a dangling duplicate start
 		expect(result.stopReason).toBe("stop");
 		expect(textOf(result)).toBe("Done.");
+		// Same timeline guarantee as the public/Vertex path: the retried message
+		// keeps the request-start timestamp so `timestamp`+`duration` never
+		// double-counts the setup/prior-attempt window.
+		const [cliStartEvent] = events.filter(event => event.type === "start");
+		expect(cliStartEvent?.type === "start" ? cliStartEvent.partial.timestamp : undefined).toBe(result.timestamp);
 		void events;
 	});
 

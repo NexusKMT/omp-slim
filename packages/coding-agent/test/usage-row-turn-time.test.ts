@@ -8,10 +8,13 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { Usage } from "@oh-my-pi/pi-ai";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ChatTranscriptBuilder } from "@oh-my-pi/pi-coding-agent/modes/components/chat-transcript-builder";
+import { TranscriptContainer } from "@oh-my-pi/pi-coding-agent/modes/components/transcript-container";
 import { formatUsageRow } from "@oh-my-pi/pi-coding-agent/modes/components/usage-row";
+import { EventController } from "@oh-my-pi/pi-coding-agent/modes/controllers/event-controller";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
+import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { SessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
 import { Container, type TUI } from "@oh-my-pi/pi-tui";
 
@@ -80,6 +83,20 @@ describe("formatUsageRow turn elapsed", () => {
 
 	it("omits the delta when no elapsed is supplied", () => {
 		expect(formatUsageRow(assistantMessage().usage as Usage)).not.toContain("Δ");
+	});
+
+	it("rounds fractional elapsed so the label never prints a raw float", () => {
+		// `message.duration` comes from performance.now(); the combined value must
+		// not leak the fraction into the label (roboomp: unstable oversized text).
+		const row = formatUsageRow(
+			assistantMessage().usage as Usage,
+			undefined,
+			undefined,
+			undefined,
+			347.28381699998863,
+		);
+		expect(row).toContain("Δ347ms");
+		expect(row).not.toContain("347.28381699998863");
 	});
 });
 
@@ -173,5 +190,92 @@ describe("UiHelpers.renderSessionContext turn elapsed", () => {
 		const { ctx, helpers } = makeHarness(false);
 		helpers.renderSessionContext({ messages: [userMessage(), assistantMessage()] } as SessionContext);
 		expect(renderedText(ctx.chatContainer)).not.toContain(TURN_ELAPSED_LABEL);
+	});
+});
+
+describe("focus-attach mid-turn keeps the prompt→yield delta", () => {
+	beforeEach(async () => {
+		resetSettingsForTest();
+		await Settings.init({ inMemory: true, cwd: process.cwd() });
+		settings.set("display.showTokenUsage", true);
+		settings.set("display.showTurnTime", true);
+	});
+	afterEach(() => {
+		vi.restoreAllMocks();
+		resetSettingsForTest();
+	});
+
+	it("hands the replayed user timestamp to the controller so the live message_end row shows the delta", async () => {
+		const chatContainer = new TranscriptContainer();
+		chatContainer.setToolActivityVisible(true);
+		let helpers!: UiHelpers;
+		const ui = {
+			requestRender: vi.fn(),
+			requestComponentRender: vi.fn(),
+			imageBudget: undefined,
+		} as unknown as TUI;
+		const viewSession = {
+			getToolByName: () => undefined,
+			hasBuiltInTool: () => true,
+			extensionRunner: undefined,
+			isTtsrAbortPending: false,
+			retryAttempt: 0,
+			isStreaming: true,
+			sessionManager: { getCwd: () => process.cwd(), putBlobSync: () => undefined },
+		};
+		const ctx = {
+			isInitialized: true,
+			init: vi.fn(async () => {}),
+			ui,
+			settings,
+			chatContainer,
+			transcriptMessageComponents: new WeakMap(),
+			pendingTools: new Map(),
+			toolOutputExpanded: false,
+			hideToolActivity: false,
+			effectiveHideThinkingBlock: false,
+			proseOnlyThinking: true,
+			statusLine: { invalidate: vi.fn() },
+			updateEditorTopBorder: vi.fn(),
+			noteDisplayableThinkingContent: vi.fn(() => false),
+			ensureLoadingAnimation: vi.fn(),
+			session: viewSession,
+			viewSession,
+			sessionManager: viewSession.sessionManager,
+			showWarning: vi.fn(),
+			showPinnedError: vi.fn(),
+			clearTransientSessionUi: vi.fn(),
+			lastAssistantUsage: undefined,
+			eventController: undefined as unknown as EventController,
+			getUserMessageText: (message: { content?: unknown }) =>
+				typeof message.content === "string" ? message.content : "",
+			addMessageToChat: (message: AgentMessage) => helpers.addMessageToChat(message),
+			updateEditorBorderColor: vi.fn(),
+		} as unknown as InteractiveModeContext;
+		const controller = new EventController(ctx);
+		ctx.eventController = controller;
+		helpers = new UiHelpers(ctx);
+
+		// Focus attach: reset clears the controller's turn start, then the rebuild
+		// replays the user prompt; because the target is streaming, the generator
+		// hands the timestamp back instead of discarding it.
+		controller.resetTranscriptAnchors();
+		helpers.renderSessionContext({ messages: [userMessage(), assistantMessage()] } as SessionContext);
+
+		// The in-flight assistant message ends on the live controller — no user
+		// message_start follows, so only the handoff keeps the delta available.
+		const final = assistantMessage();
+		await controller.handleEvent({ type: "message_start", message: final } as Extract<
+			AgentSessionEvent,
+			{ type: "message_start" }
+		>);
+		await controller.handleEvent({ type: "message_end", message: final } as Extract<
+			AgentSessionEvent,
+			{ type: "message_end" }
+		>);
+
+		const rendered = renderedText(chatContainer);
+		expect(rendered).toContain(TURN_ELAPSED_LABEL);
+		expect(rendered).toContain(USAGE_LABEL);
 	});
 });

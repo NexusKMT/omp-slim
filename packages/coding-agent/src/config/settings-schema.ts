@@ -1299,7 +1299,7 @@ export const SETTINGS_SCHEMA = {
 
 	"display.showTurnTime": {
 		type: "boolean",
-		default: true,
+		default: false,
 		ui: {
 			tab: "appearance",
 			group: "Display",
