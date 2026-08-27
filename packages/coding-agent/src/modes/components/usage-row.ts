@@ -16,21 +16,18 @@ function formatUsageTimestamp(ms: number): string {
 }
 
 /**
- * Prompt→yield wall time for a turn: from the user prompt's timestamp to the
- * response's local completion time. The session stamps `completedAt` at
- * `message_end`, so the span is exact and provider-independent — some providers
- * never report `duration` (gitlab-duo) or stamp `timestamp` at request start.
- * Older persisted messages fall back to request start + provider duration.
- * Undefined when the turn start is unknown (mid-attach) or the math is
- * non-positive.
+ * Prompt→yield wall time for a turn, from pure local timestamps: the user
+ * prompt's timestamp to the response's completion time (`completedAt`, stamped
+ * by the session at `message_end`). No provider-reported duration is involved —
+ * messages persisted before the stamp existed simply have no span.
+ * Undefined when either end is unknown (mid-attach or unstamped message).
  */
 export function turnElapsedMs(
 	turnStartedAt: number | undefined,
-	message: { timestamp: number; duration?: number; completedAt?: number },
+	message: { completedAt?: number },
 ): number | undefined {
-	if (turnStartedAt === undefined) return undefined;
-	const end = message.completedAt ?? message.timestamp + (message.duration ?? 0);
-	const elapsed = end - turnStartedAt;
+	if (turnStartedAt === undefined || message.completedAt === undefined) return undefined;
+	const elapsed = message.completedAt - turnStartedAt;
 	return elapsed > 0 ? Math.round(elapsed) : undefined;
 }
 

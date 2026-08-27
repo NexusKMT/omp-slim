@@ -59,6 +59,7 @@ function assistantMessage(overrides: Partial<AssistantFixture> = {}): AssistantF
 		},
 		timestamp: RESPONSE_CREATED_AT,
 		duration: REQUEST_DURATION_MS,
+		completedAt: PROMPT_AT + 60_000,
 		...overrides,
 	} as unknown as AssistantFixture;
 }
@@ -157,17 +158,15 @@ describe("ChatTranscriptBuilder turn elapsed", () => {
 		const transcript = builder();
 		// gitlab-duo-style: `timestamp` stamped at request start, no provider
 		// `duration` — the session's `completedAt` stamp still yields the full span.
-		transcript.rebuild(
-			toEntries([userMessage(), assistantMessage({ duration: undefined, completedAt: PROMPT_AT + 60_000 })]),
-		);
+		transcript.rebuild(toEntries([userMessage(), assistantMessage({ duration: undefined })]));
 		expect(renderedText(transcript.container)).toContain("Δ1m");
 	});
 
-	it("falls back to request start plus provider duration for legacy unstamped messages", () => {
+	it("shows no delta for a legacy message without the local completion stamp", () => {
 		settings.set("display.showTurnTime", true);
 		const transcript = builder();
-		transcript.rebuild(toEntries([userMessage(), assistantMessage({ duration: undefined })]));
-		expect(renderedText(transcript.container)).toContain("Δ30.0s");
+		transcript.rebuild(toEntries([userMessage(), assistantMessage({ completedAt: undefined })]));
+		expect(renderedText(transcript.container)).not.toContain("Δ");
 	});
 	it("clears the prompt anchor at a developer-initiated synthetic run during replay", () => {
 		settings.set("display.showTurnTime", true);

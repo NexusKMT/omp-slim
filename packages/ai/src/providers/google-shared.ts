@@ -492,10 +492,7 @@ function resetGoogleStreamOutputForRetry(output: AssistantMessage): void {
 	};
 	output.stopReason = "stop";
 	output.errorMessage = undefined;
-	// Deliberately NOT reset: `duration` is measured from the original
-	// `startTime`, so keeping the request-start timestamp puts both on one
-	// timeline — a reset here would double-count the setup/prior-attempt window
-	// in downstream `timestamp`+`duration` math (usage-row prompt→yield time).
+	output.timestamp = Date.now();
 }
 
 /**

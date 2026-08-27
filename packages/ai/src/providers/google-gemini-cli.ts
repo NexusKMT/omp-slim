@@ -646,10 +646,7 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 				};
 				output.stopReason = "stop";
 				output.errorMessage = undefined;
-				// Deliberately NOT reset: `duration` is measured from the original
-				// `startTime`, so the request-start timestamp stays on the same
-				// timeline — resetting would double-count the setup/prior-attempt
-				// window in downstream `timestamp`+`duration` math.
+				output.timestamp = Date.now();
 				sawFinishReason = false;
 			};
 
