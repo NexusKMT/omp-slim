@@ -506,7 +506,10 @@ describe("OpenCode provider discovery", () => {
 				mode: "effort",
 				efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
 			},
-			input: ["text"],
+			// GLM-5.3 Flash is multimodal; image input coexists with the
+			// reasoning-effort ladder (the `glm.vision` SKU flag matches only the
+			// `…v` shape, never image capability).
+			input: ["text", "image"],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			contextWindow: 1_000_000,
 			maxTokens: 131_072,
@@ -561,6 +564,7 @@ describe("OpenCode provider discovery", () => {
 			);
 			const flash = upgraded.models.find(model => model.id === discoveredFlash.id);
 			expect(fetches).toBe(1);
+			expect(flash?.input).toEqual(["text", "image"]);
 			expect(flash?.thinking).toEqual({
 				mode: "effort",
 				efforts: [Effort.Low, Effort.High, Effort.Max],
