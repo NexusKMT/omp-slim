@@ -1906,7 +1906,13 @@ export class StatusLineComponent implements Component {
 		}
 
 		if (layout !== "plain-left") {
-			const runningBackgroundJobs = this.session.getAsyncJobSnapshot()?.running.length ?? 0;
+			// Count only bash jobs. Every task-tool spawn registers both an AgentRegistry ref
+			// (kind="sub") and an AsyncJobManager job of type "task" with the same agent id, so
+			// counting all running jobs made this badge mirror the subagent badge beside it and
+			// neither number meant anything on its own. Filtered here rather than in
+			// getAsyncJobSnapshot() so other consumers keep the unfiltered semantics.
+			const runningBackgroundJobs =
+				this.session.getAsyncJobSnapshot()?.running.filter(job => job.type === "bash").length ?? 0;
 			if (runningBackgroundJobs > 0) {
 				rightParts.unshift(theme.fg("statusLineSubagents", `${theme.icon.job} ${runningBackgroundJobs}`));
 			}
