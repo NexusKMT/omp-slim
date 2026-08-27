@@ -52,6 +52,7 @@ struct Inner {
 /// incrementally. In particular, Terminal.app can stop draining a PTY when a
 /// large normal-screen history replay arrives as one multi-hundred-KiB write,
 /// leaving the writer blocked and every later frame queued behind it.
+#[cfg(unix)]
 const MAX_TTY_WRITE_CHUNK_BYTES: usize = 16 * 1024;
 
 #[cfg(unix)]
