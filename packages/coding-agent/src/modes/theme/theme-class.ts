@@ -3,7 +3,7 @@ import type { Effort } from "@oh-my-pi/pi-ai";
 import { colorLuma, logger, relativeLuminance } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { bgAnsi, colorToAnsi, fgAnsi, resolveToHex } from "./color";
-import type { ColorMode, ThemeBg, ThemeColor } from "./schema";
+import { type ColorMode, isValidThemeColor, type ThemeBg, type ThemeColor } from "./schema";
 import {
 	type SlashCommandIconName,
 	SPINNER_FRAMES,
@@ -164,9 +164,12 @@ export class Theme {
 
 		this.#fgColors = {} as Record<ThemeColor, string>;
 		this.#hexFgColors = {} as Record<ThemeColor, string>;
-		for (const [key, value] of Object.entries(fgColors) as [ThemeColor, string | number][]) {
-			this.#fgColors[key] = fgAnsi(value, mode);
-			this.#hexFgColors[key] = resolveToHex(value, slIsLight);
+		for (const key in fgColors) {
+			if (!isValidThemeColor(key)) continue;
+			const value = fgColors[key];
+			const hex = resolveToHex(value, slIsLight);
+			this.#fgColors[key] = fgAnsi(value === "" ? hex : value, mode);
+			this.#hexFgColors[key] = hex;
 		}
 		this.#bgColors = {} as Record<ThemeBg, string>;
 		this.#hexBgColors = {} as Record<ThemeBg, string>;

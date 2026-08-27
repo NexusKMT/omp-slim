@@ -4,8 +4,26 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { generateThemeVars } from "@oh-my-pi/pi-coding-agent/export/html";
 import { defaultThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/defaults";
-import { getResolvedThemeColors, getThemeByName, isLightTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/loader";
+import {
+	getEditorTheme,
+	getResolvedThemeColors,
+	getThemeByName,
+	isLightTheme,
+	setThemeInstance,
+} from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { getAgentDir, getCustomThemesDir, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
+
+function createBaseThemes() {
+	const builtins = getBuiltinThemes();
+	const lightJson = builtins.light;
+	const darkJson = builtins.dark;
+	if (!lightJson || !darkJson) throw new Error("Base light/dark themes are unavailable");
+	return {
+		light: createTheme(lightJson, { mode: "truecolor" }),
+		dark: createTheme(darkJson, { mode: "truecolor" }),
+	};
+}
 
 describe("Theme.isLight", () => {
 	it("classifies built-in themes by their status-line surface", async () => {
@@ -24,6 +42,29 @@ describe("Theme.isLight", () => {
 		expect(light?.accentSurfaceLuminance).toBeGreaterThan(0.5);
 		// ...dark themes pass undefined so accents stay vivid.
 		expect(dark?.accentSurfaceLuminance).toBeUndefined();
+	});
+});
+
+describe("empty foreground contrast", () => {
+	it("emits explicit contrasting ANSI foregrounds for empty theme tokens", () => {
+		const { light, dark } = createBaseThemes();
+
+		expect(light.getFgAnsi("text")).toBe("\x1b[38;2;0;0;0m");
+		expect(light.getFgAnsi("userMessageText")).toBe("\x1b[38;2;0;0;0m");
+		expect(dark.getFgAnsi("text")).toBe("\x1b[38;2;229;229;231m");
+	});
+
+	it("pairs the editor surface with its user-message foreground", () => {
+		const { light, dark } = createBaseThemes();
+		try {
+			setThemeInstance(light);
+			const surfaceColor = getEditorTheme().surfaceColor;
+			if (!surfaceColor) throw new Error("Editor surface color is unavailable");
+
+			expect(surfaceColor("typed")).toContain("\x1b[48;2;232;232;232m\x1b[38;2;0;0;0mtyped");
+		} finally {
+			setThemeInstance(dark);
+		}
 	});
 });
 

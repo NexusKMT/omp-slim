@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Kept text readable on light terminal backgrounds by pairing TUI surfaces with explicit contrasting foreground colors.
+
 ## [18.0.7] - 2026-08-26
 
 ### Added
