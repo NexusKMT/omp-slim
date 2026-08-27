@@ -396,6 +396,7 @@ interface SessionManagerStateSnapshot {
 	onDisk: boolean;
 	needsRewrite: boolean;
 	draftOnlySessionCleanupArmed: boolean;
+	fallbackRuntimeOnly: boolean;
 	header: SessionHeader;
 	entries: SessionEntry[];
 }
@@ -1092,6 +1093,10 @@ export class SessionManager {
 	#resetToNewSession(options?: NewSessionOptions, forcedSessionFile?: string): string | undefined {
 		this.#diskTail = Promise.resolve();
 		this.#clearDiskError();
+		if (this.#fallbackRuntimeOnly) {
+			this.#sessionDir = computeDefaultSessionDir(this.#cwd, this.#storage);
+			this.#fallbackRuntimeOnly = false;
+		}
 		this.#sessionId = mintSessionId();
 		this.#sessionName = undefined;
 		this.#titleSource = undefined;
@@ -1296,6 +1301,7 @@ export class SessionManager {
 			onDisk: this.#fileIsCurrent,
 			needsRewrite: this.#rewriteRequired,
 			draftOnlySessionCleanupArmed: this.#draftOnlySessionCleanupArmed,
+			fallbackRuntimeOnly: this.#fallbackRuntimeOnly,
 			// Entries are snapshotted by reference (switch/reload replaces the
 			// array wholesale). The header is cloned: moveTo mutates it in place
 			// (cwd, additionalDirectories), so a by-reference capture would let
@@ -1337,6 +1343,7 @@ export class SessionManager {
 		this.#rewriteRequired = snapshot.needsRewrite;
 		this.#forceFileCreation = snapshot.onDisk;
 		this.#draftOnlySessionCleanupArmed = snapshot.draftOnlySessionCleanupArmed;
+		this.#fallbackRuntimeOnly = snapshot.fallbackRuntimeOnly;
 		this.#applyEntries(snapshot.header, [...snapshot.entries]);
 		this.#additionalDirectories = snapshot.header.additionalDirectories ?? [];
 		this.#sessionName = snapshot.sessionName;
@@ -1468,6 +1475,10 @@ export class SessionManager {
 		const parentSessionId = this.#sessionId;
 		await this.#drainAndCloseWriter();
 		this.#clearDiskError();
+		if (this.#fallbackRuntimeOnly) {
+			this.#sessionDir = computeDefaultSessionDir(this.#cwd, this.#storage);
+			this.#fallbackRuntimeOnly = false;
+		}
 
 		const timestamp = nowIso();
 		this.#sessionId = mintSessionId();
@@ -1509,6 +1520,7 @@ export class SessionManager {
 		const resolvedTargetDir = targetSessionDir ? path.resolve(targetSessionDir) : undefined;
 		if (
 			resolvedCwd === path.resolve(this.#cwd) &&
+			!this.#fallbackRuntimeOnly &&
 			(!resolvedTargetDir || resolvedTargetDir === path.resolve(this.#sessionDir))
 		) {
 			return;
@@ -1610,6 +1622,7 @@ export class SessionManager {
 			this.#cwd = resolvedCwd;
 			this.#sessionDir = nextSessionDir;
 			this.#header.cwd = resolvedCwd;
+			this.#fallbackRuntimeOnly = false;
 			// Re-filter additional roots: the new cwd may have been an additional root,
 			// or it may now contain/subsume one. Re-normalize to keep the invariant
 			// that cwd is never also listed as an additional directory.
@@ -1960,6 +1973,7 @@ export class SessionManager {
 		const next = additionalWorkspaceDirectories(workspace);
 		if (this.#fallbackRuntimeOnly) {
 			this.#additionalDirectories = next;
+			this.#sessionDir = computeDefaultSessionDir(this.#cwd, this.#storage);
 			this.#fallbackRuntimeOnly = false;
 			return;
 		}
@@ -2626,6 +2640,10 @@ export class SessionManager {
 
 		const timestamp = nowIso();
 		const newSessionId = mintSessionId();
+		if (this.#fallbackRuntimeOnly) {
+			this.#sessionDir = computeDefaultSessionDir(this.#cwd, this.#storage);
+			this.#fallbackRuntimeOnly = false;
+		}
 		const newSessionFile = path.join(this.#sessionDir, `${fileSafeTimestamp(timestamp)}_${newSessionId}.jsonl`);
 		const header: SessionHeader = {
 			type: "session",
