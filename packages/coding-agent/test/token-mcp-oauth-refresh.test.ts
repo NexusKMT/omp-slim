@@ -133,3 +133,44 @@ test("token refreshes and persists a rotating local MCP OAuth grant", async () =
 		tokenServer.stop(true);
 	}
 }, 30_000);
+
+test("token refuses a managed MCP id scoped to another profile", async () => {
+	using tempDir = TempDir.createSync("@omp-token-mcp-oauth-xprofile-");
+	// A non-expired row that the fall-through resolver WOULD hand back verbatim.
+	const foreignProvider = "mcp_oauth:profile:work:https://mcp.example.test/mcp";
+	const dbPath = tempDir.join("agent.db");
+	const store = await SqliteAuthCredentialStore.open(dbPath);
+	const authStorage = new AuthStorage(store);
+	await authStorage.reload();
+	await authStorage.set(foreignProvider, {
+		type: "oauth",
+		access: "work-access",
+		refresh: "work-refresh",
+		expires: Date.now() + 3_600_000,
+	});
+	authStorage.close();
+
+	const proc = Bun.spawn([process.execPath, cliEntry, "token", foreignProvider], {
+		cwd: path.resolve(import.meta.dir, "../../.."),
+		env: {
+			...process.env,
+			NO_COLOR: "1",
+			OMP_AUTH_BROKER_TOKEN: undefined,
+			OMP_AUTH_BROKER_URL: undefined,
+			OMP_PROFILE: undefined,
+			PI_PROFILE: undefined,
+			PI_CODING_AGENT_DIR: tempDir.path(),
+		},
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [exitCode, stdout, stderr] = await Promise.all([
+		proc.exited,
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+	]);
+
+	expect(exitCode).toBe(1);
+	expect(stdout).not.toContain("work-access");
+	expect(stderr).toContain('profile "work"');
+}, 30_000);

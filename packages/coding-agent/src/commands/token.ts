@@ -5,10 +5,11 @@
 import { PROVIDER_REGISTRY } from "@oh-my-pi/pi-ai";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { getActiveProfile } from "@oh-my-pi/pi-utils/dirs";
 import { tokenHelp as commandHelp } from "../cli/command-help";
 import { isAuthenticated, ModelRegistry } from "../config/model-registry";
 import { refreshStoredManagedMcpOAuthCredential } from "../mcp/oauth-credentials";
-import { isManagedMCPOAuthCredentialId } from "../mcp/oauth-flow";
+import { isManagedMCPOAuthCredentialId, mcpOAuthCredentialProfile } from "../mcp/oauth-flow";
 import { discoverAuthStorage } from "../sdk";
 import type { AuthStorage } from "../session/auth-storage";
 import { getAvailableAuthMethods } from "../web/search/providers/perplexity-auth";
@@ -87,6 +88,20 @@ export default class Token extends Command {
 		const providerName = args.provider ?? "";
 		const managedMcpOAuth = isManagedMCPOAuthCredentialId(args.provider);
 		const provider = managedMcpOAuth ? providerName : providerName.toLowerCase();
+		// Profile-scoped managed ids stay isolated per profile: a shared broker
+		// snapshot carries `mcp_oauth:profile:*` rows for every profile, so refuse
+		// to read/refresh another profile's row from this one (mirrors
+		// removeManagedMcpOAuthCredential). Legacy unscoped ids have no profile.
+		if (managedMcpOAuth) {
+			const scopedProfile = mcpOAuthCredentialProfile(provider);
+			if (scopedProfile !== undefined && scopedProfile !== (getActiveProfile() ?? "default")) {
+				process.stderr.write(
+					`${chalk.red(`Managed MCP credential "${providerName}" belongs to profile "${scopedProfile}", not the active profile.`)}\n`,
+				);
+				process.exitCode = 1;
+				return;
+			}
+		}
 
 		const authStorage = await discoverAuthStorage();
 		try {
