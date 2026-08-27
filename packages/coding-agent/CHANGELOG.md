@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Include token usage statistics in inspect_image tool output
+
+### Fixed
+
+- Fixed `inspect_image` selecting a text-only vision/default role when an image-capable model was available on the active provider.
+
 ## [18.0.8] - 2026-08-27
 
 ### Added
