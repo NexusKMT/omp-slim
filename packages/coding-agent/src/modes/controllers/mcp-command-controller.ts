@@ -1988,7 +1988,7 @@ export class MCPCommandController {
 				oauth.tokenUrl,
 				flowClientId,
 				flowClientSecret,
-				oauth.scopes ?? "",
+				oauth.scopes || runtimeBaseConfig.oauth?.scope || "",
 				{
 					callbackPort: found.config.oauth?.callbackPort,
 					callbackPath: found.config.oauth?.callbackPath,
