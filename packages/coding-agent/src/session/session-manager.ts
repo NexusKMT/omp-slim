@@ -1430,6 +1430,13 @@ export class SessionManager {
 			this.#cwd = headerCwd;
 			this.#sessionDir = path.dirname(resolvedSessionFile);
 			this.#rememberBreadcrumb(this.#cwd, resolvedSessionFile);
+		} else if (headerCwd && headerCwd !== path.resolve(this.#cwd)) {
+			// Denied or otherwise non-enterable header cwd with no
+			// onCwdChange callback (extension/RPC caller): keep runtime cwd
+			// but mark fallback so workspace mutations stay runtime-only and
+			// an explicit moveTo(source) still relocates the transcript
+			// (P2 1432: same-cwd no-op would otherwise strand file).
+			this.#fallbackRuntimeOnly = true;
 		}
 
 		this.#applyEntries(header, fileEntries.slice(1) as SessionEntry[]);

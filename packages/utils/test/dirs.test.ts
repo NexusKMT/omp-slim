@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, spyOn, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { directoryIsMissing, getProjectDir, setProjectDir } from "@oh-my-pi/pi-utils/dirs";
+import {
+	__resetProjectDirCacheForTests,
+	directoryIsMissing,
+	getProjectDir,
+	setProjectDir,
+} from "@oh-my-pi/pi-utils/dirs";
 
 const originalProjectDir = fs.realpathSync(process.cwd()).replace(/^\/private(?=\/)/, "");
 
@@ -10,9 +15,9 @@ afterEach(() => {
 	vi.restoreAllMocks();
 	setProjectDir(originalProjectDir);
 });
-
 describe("project directory state", () => {
 	it("enters an accessible fallback when process.cwd fails", () => {
+		__resetProjectDirCacheForTests();
 		const originalPwd = process.env.PWD;
 		const cwd = spyOn(process, "cwd").mockImplementation(() => {
 			throw new Error("cwd unavailable");

@@ -211,6 +211,11 @@ export function setProjectDir(dir: string): void {
 	projectDir = resolved;
 }
 
+/** Reset the cached project directory (test seam). */
+export function __resetProjectDirCacheForTests(): void {
+	projectDir = undefined;
+}
+
 /** Whether a path is absent or not a directory. Other stat failures return false. */
 export async function directoryIsMissing(dir: string): Promise<boolean> {
 	try {
