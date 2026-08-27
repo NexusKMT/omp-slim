@@ -402,6 +402,41 @@ describe("ModelRegistry runtime provider registration", () => {
 		]);
 	});
 
+	test("refreshProvider times out inherited shared-catalog fetches", async () => {
+		vi.useFakeTimers();
+		let catalogFetches = 0;
+		const stalledFetch: FetchImpl = () => {
+			catalogFetches++;
+			return Promise.withResolvers<Response>().promise;
+		};
+		const stalledRegistry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: stalledFetch });
+
+		const baselineTimers = vi.getTimerCount();
+		let outcome: "resolved" | "rejected" | undefined;
+		const refresh = stalledRegistry.refreshProvider("anthropic", "online").then(
+			() => {
+				outcome = "resolved";
+			},
+			error => {
+				outcome = "rejected";
+				throw error;
+			},
+		);
+
+		await drainMicrotasksUntil(
+			() => vi.getTimerCount() > baselineTimers,
+			"shared-catalog timeout timer was not armed",
+		);
+		expect(outcome).toBeUndefined();
+		vi.advanceTimersByTime(14_999);
+		await Promise.resolve();
+		expect(outcome).toBeUndefined();
+		vi.advanceTimersByTime(1);
+		await refresh;
+		expect(outcome).toBe("resolved");
+		expect(catalogFetches).toBe(1);
+	});
+
 	test("refreshRuntimeProviders times out extension fetchDynamicModels that never resolves", async () => {
 		vi.useFakeTimers();
 		const hangingFetch = Promise.withResolvers<readonly NonNullable<ProviderConfigInput["models"]>[number][]>();

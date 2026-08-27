@@ -103,7 +103,7 @@ import {
 	resolveCodexDiscoveryAccounts,
 	SPECIAL_MODEL_MANAGER_PROVIDER_IDS,
 	STARTUP_MODEL_CACHE_PROVIDER_IDS,
-	withRuntimeDynamicModelsTimeout,
+	withModelDiscoveryTimeout,
 } from "./model-provider-discovery";
 
 export { mergeDiscoveredModel } from "./model-patch";
@@ -1843,7 +1843,9 @@ export class ModelRegistry {
 	): Promise<BuiltInDiscoveryResult> {
 		try {
 			const manager = createModelManager({ ...options, cacheDbPath: this.#cacheDbPath });
-			const result = await manager.refresh(strategy);
+			const result = await withModelDiscoveryTimeout(RUNTIME_DYNAMIC_MODEL_FETCH_TIMEOUT_MS, () =>
+				manager.refresh(strategy),
+			);
 			const models = result.models.map(model =>
 				model.provider === options.providerId ? model : { ...model, provider: options.providerId },
 			);
@@ -2587,7 +2589,7 @@ export class ModelRegistry {
 				fetchDynamicModels: async () => {
 					const apiKey = await this.#peekApiKeyForProvider(providerName);
 					const resolvedKey = isAuthenticated(apiKey) ? apiKey : undefined;
-					const modelDefs = await withRuntimeDynamicModelsTimeout(RUNTIME_DYNAMIC_MODEL_FETCH_TIMEOUT_MS, () =>
+					const modelDefs = await withModelDiscoveryTimeout(RUNTIME_DYNAMIC_MODEL_FETCH_TIMEOUT_MS, () =>
 						fetcher(resolvedKey),
 					);
 					const results: Model<Api>[] = [];

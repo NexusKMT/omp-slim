@@ -56,15 +56,15 @@ export function isDiscoveryBearerApiKey(apiKey: string | undefined | null): apiK
 }
 
 /**
- * Wraps an extension-provided fetchDynamicModels call with a hard timeout.
- * Uses a cancellable manual timer (not AbortSignal.timeout) so that a fast
- * successful path does not leave an armed timeout signal for concurrent GC.
- * The inner fetcher does not receive a signal (extension contract has none).
+ * Wraps a model-discovery operation with a hard timeout. Uses a cancellable
+ * manual timer (not AbortSignal.timeout) so that a fast successful path does
+ * not leave an armed timeout signal for concurrent GC. The inner operation
+ * does not receive a signal because not every discovery contract accepts one.
  */
-export async function withRuntimeDynamicModelsTimeout<T>(timeoutMs: number, run: () => Promise<T>): Promise<T> {
+export async function withModelDiscoveryTimeout<T>(timeoutMs: number, run: () => Promise<T>): Promise<T> {
 	const { promise: timeoutPromise, reject: timeoutReject } = Promise.withResolvers<never>();
 	const timer = setTimeout(() => {
-		timeoutReject(new Error(`fetchDynamicModels timed out after ${timeoutMs}ms`));
+		timeoutReject(new Error(`model discovery timed out after ${timeoutMs}ms`));
 	}, timeoutMs);
 	try {
 		return await Promise.race([run(), timeoutPromise]);
