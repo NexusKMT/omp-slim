@@ -587,22 +587,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 					const actual = runtime.sessionManager.getCwd();
 					let realigned = false;
 					try {
-						setProjectDir(actual);
-						await runtime.settings.reloadForCwd(actual);
-						applyProviderGlobalsFromSettings(runtime.settings);
-						clearClaudePluginRootsCache();
-						const src = discoverTitleSystemPromptFile(actual);
-						const p = await resolvePromptInput(src, "title system prompt");
-						runtime.session.setTitleSystemPrompt(p);
-						resetCapabilities();
-						await runtime.session.refreshSkills(); // refreshSkillState
-						const cmds = await loadSlashCommands({
-							cwd: actual,
-							extensionRoots: runtime.session.effectiveExtensionRoots,
-						});
-						runtime.session.setSlashCommands(cmds);
-						await runtime.refreshCommands?.(); // refreshSlashCommandState
-						await runtime.reloadPlugins();
+						await rescopeHeadlessToCwd(runtime, actual);
 						realigned = true;
 					} catch {}
 					if (!realigned) {
@@ -619,66 +604,16 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 				return usage(`Move failed: ${errorMessage(err)}`, runtime);
 			}
 			try {
-				await runtime.settings.reloadForCwd(resolvedPath);
-				applyProviderGlobalsFromSettings(runtime.settings);
-				clearClaudePluginRootsCache();
-				const titleSource = discoverTitleSystemPromptFile(resolvedPath);
-				const titlePrompt = await resolvePromptInput(titleSource, "title system prompt");
-				runtime.session.setTitleSystemPrompt(titlePrompt);
-				resetCapabilities();
-				// refreshSkillState — headless equivalent via session.refreshSkills
-				await runtime.session.refreshSkills();
-				// refreshSlashCommandState — headless equivalent via loadSlashCommands + refreshCommands
-				const fileCommands = await loadSlashCommands({
-					cwd: resolvedPath,
-					extensionRoots: runtime.session.effectiveExtensionRoots,
-				});
-				runtime.session.setSlashCommands(fileCommands);
-				await runtime.refreshCommands?.();
-				// Reload plugin/capability caches so the next prompt sees commands and
-				// capabilities scoped to the new cwd (also covers agent discovery / MCP).
-				await runtime.reloadPlugins();
+				await rescopeHeadlessToCwd(runtime, resolvedPath);
 			} catch (err) {
 				try {
-					// Undo the whole transition: the process cwd and Settings scope
-					// return to the source project alongside the session relocation.
-					setProjectDir(runtime.cwd);
-					await runtime.settings.reloadForCwd(runtime.cwd);
-					applyProviderGlobalsFromSettings(runtime.settings);
-					clearClaudePluginRootsCache();
-					const src = discoverTitleSystemPromptFile(runtime.cwd);
-					const p = await resolvePromptInput(src, "title system prompt");
-					runtime.session.setTitleSystemPrompt(p);
-					resetCapabilities();
-					await runtime.session.refreshSkills(); // refreshSkillState
-					const cmds = await loadSlashCommands({
-						cwd: runtime.cwd,
-						extensionRoots: runtime.session.effectiveExtensionRoots,
-					});
-					runtime.session.setSlashCommands(cmds);
-					await runtime.refreshCommands?.(); // refreshSlashCommandState
-					await runtime.reloadPlugins();
 					await runtime.sessionManager.rollbackMove(previousState);
+					await rescopeHeadlessToCwd(runtime, previousState.cwd);
 				} catch (rollbackError) {
 					const actual = runtime.sessionManager.getCwd();
 					let realigned = false;
 					try {
-						setProjectDir(actual);
-						await runtime.settings.reloadForCwd(actual);
-						applyProviderGlobalsFromSettings(runtime.settings);
-						clearClaudePluginRootsCache();
-						const src2 = discoverTitleSystemPromptFile(actual);
-						const p2 = await resolvePromptInput(src2, "title system prompt");
-						runtime.session.setTitleSystemPrompt(p2);
-						resetCapabilities();
-						await runtime.session.refreshSkills(); // refreshSkillState
-						const cmds2 = await loadSlashCommands({
-							cwd: actual,
-							extensionRoots: runtime.session.effectiveExtensionRoots,
-						});
-						runtime.session.setSlashCommands(cmds2);
-						await runtime.refreshCommands?.(); // refreshSlashCommandState
-						await runtime.reloadPlugins();
+						await rescopeHeadlessToCwd(runtime, actual);
 						realigned = true;
 					} catch {}
 					if (!realigned) {
@@ -781,3 +716,21 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 		handleTui: shutdownHandlerTui,
 	},
 ];
+async function rescopeHeadlessToCwd(runtime: SlashCommandRuntime, cwd: string): Promise<void> {
+	setProjectDir(cwd);
+	await runtime.settings.reloadForCwd(cwd);
+	applyProviderGlobalsFromSettings(runtime.settings);
+	clearClaudePluginRootsCache();
+	const src = discoverTitleSystemPromptFile(cwd);
+	const p = await resolvePromptInput(src, "title system prompt");
+	runtime.session.setTitleSystemPrompt(p);
+	resetCapabilities();
+	await runtime.session.refreshSkills();
+	const cmds = await loadSlashCommands({
+		cwd,
+		extensionRoots: runtime.session.effectiveExtensionRoots,
+	});
+	runtime.session.setSlashCommands(cmds);
+	await runtime.refreshCommands?.();
+	await runtime.reloadPlugins();
+}

@@ -8209,6 +8209,13 @@ export class AgentSession {
 					if (!(await options.onCwdChange(recordedCwd, previousSessionState.cwd))) {
 						throw SESSION_CWD_CHANGE_REJECTED;
 					}
+					// Access was restored between the directory probe and the callback,
+					// so onCwdChange succeeded and moved process/workspace to
+					// recordedCwd. Undo that side-effect before rejecting — the catch
+					// block skips reverse for SESSION_CWD_CHANGE_REJECTED, so without
+					// this the manager would be restored to the source while
+					// process/settings remain at the target.
+					await options.onCwdChange(previousSessionState.cwd, recordedCwd);
 					throw SESSION_CWD_CHANGE_REJECTED;
 				}
 			}
