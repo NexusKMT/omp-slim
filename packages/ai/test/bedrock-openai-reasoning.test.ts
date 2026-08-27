@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { streamBedrock } from "@oh-my-pi/pi-ai/providers/amazon-bedrock";
+import { streamSimple } from "../src/stream";
 import type { Context, Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
@@ -32,8 +32,8 @@ function payloadFor(model: Model<"bedrock-converse-stream">, reasoning: Effort):
 	const controller = new AbortController();
 	controller.abort();
 	const { promise, resolve } = Promise.withResolvers<unknown>();
-	void streamBedrock(model, context, {
-		bearerToken: "test-token",
+	void streamSimple(model, context, {
+		providerOptions: { bearerToken: "test-token" },
 		signal: controller.signal,
 		reasoning,
 		maxTokens: 16,
@@ -47,10 +47,12 @@ describe("Bedrock OpenAI-schema reasoning", () => {
 		const model = bedrockModel("global.openai.gpt-5.6-luna", { mode: "effort", efforts: OPENAI_LADDER });
 		const payload = (await payloadFor(model, Effort.Max)) as {
 			additionalModelRequestFields?: Record<string, unknown>;
+			inferenceConfig?: { maxTokens?: number };
 		};
 
 		expect(payload.additionalModelRequestFields).toEqual({ reasoning: { effort: "max" } });
 		expect(payload.additionalModelRequestFields).not.toHaveProperty("thinking");
+		expect(payload.inferenceConfig?.maxTokens).toBe(16);
 	});
 
 	test("keeps the budget block for Anthropic models on the same API", async () => {

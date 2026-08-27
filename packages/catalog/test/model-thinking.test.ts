@@ -710,7 +710,7 @@ describe("model thinking derivation", () => {
 	it("classifies OpenAI-schema Bedrock models as effort, leaving gpt-oss on budget", () => {
 		// Bedrock serves the GPT-5.x SKUs through OpenAI's own request schema,
 		// which rejects Anthropic's budget block: `unknown_parameter: 'thinking'`.
-		for (const id of ["global.openai.gpt-5.6-luna", "global.openai.gpt-5.6-sol", "openai.gpt-5.6-terra"]) {
+		for (const id of ["global.openai.gpt-5.6-luna", "global.openai.gpt-5.6-sol", "global.openai.gpt-5.6-terra"]) {
 			expect(createModel({ id, api: "bedrock-converse-stream", provider: "amazon-bedrock" }).thinking?.mode).toBe(
 				"effort",
 			);
