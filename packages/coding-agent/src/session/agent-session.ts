@@ -535,7 +535,7 @@ export class AgentSession {
 	#goalModeState: GoalModeState | undefined;
 	#goalRuntime: GoalRuntime;
 	readonly #advisors: SessionAdvisors;
-	/** Resolves once the resume-time advisor spend backfill settles (issue #9553). */
+	/** Resolves once the resume-time advisor spend backfill settles. */
 	#advisorCostRestore: Promise<void> = Promise.resolve();
 	#goalTurnCounter = 0;
 	#planReferenceSent = false;
@@ -8209,12 +8209,9 @@ export class AgentSession {
 					if (!(await options.onCwdChange(recordedCwd, previousSessionState.cwd))) {
 						throw SESSION_CWD_CHANGE_REJECTED;
 					}
-					// Access was restored between the directory probe and the callback,
-					// so onCwdChange succeeded and moved process/workspace to
-					// recordedCwd. Undo that side-effect before rejecting — the catch
-					// block skips reverse for SESSION_CWD_CHANGE_REJECTED, so without
-					// this the manager would be restored to the source while
-					// process/settings remain at the target. (P2 3867876190)
+					// Access was restored between probe and callback, so
+					// onCwdChange moved to recordedCwd. Undo before rejecting
+					// or the manager and process would diverge.
 					if (!(await options.onCwdChange(previousSessionState.cwd, recordedCwd))) {
 						throw new Error(`cwd reverse rollback was rejected: ${recordedCwd} -> ${previousSessionState.cwd}`);
 					}
@@ -9834,11 +9831,9 @@ export class AgentSession {
 
 	/**
 	 * Begin backfilling advisor spend recorded before this resume, off the
-	 * critical path (issue #9553). A large advisor transcript would otherwise
-	 * block session startup for tens of seconds while the whole file is streamed
-	 * and parsed; instead the status-line total hydrates once the scan settles.
-	 * The resulting promise is exposed via {@link advisorCostRestore} for tests
-	 * and headless callers that must observe the hydrated total.
+	 * critical path. A large transcript would otherwise block startup while
+	 * the file is streamed; the status-line total hydrates once the scan
+	 * settles.
 	 */
 	beginInitialAdvisorCostRestore(): void {
 		let stale = false;

@@ -565,10 +565,9 @@ async function runInteractiveMode(
 	const checkedVersionPromise = versionCheckPromise.catch(() => undefined);
 
 	// `init` already cleared native history before painting the startup frame.
-	// The normal replay offers resumed transcript rows to the frame provider and
-	// repaints the viewport, so another destructive clear would only archive the
-	// startup frame on conhost (issue #9597). In-process session replacements
-	// still request `clearTerminalHistory` at their own callsites.
+	// Replaying resumed transcript rows and repainting the viewport is enough;
+	// another clear would only archive the startup frame. In-process session
+	// replacements still request `clearTerminalHistory` at their own callsites.
 	await logger.time("InteractiveMode.renderInitialMessages", () =>
 		mode.renderInitialMessages({ preserveExistingChat: true }),
 	);

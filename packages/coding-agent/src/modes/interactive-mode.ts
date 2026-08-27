@@ -623,11 +623,9 @@ export class InteractiveMode implements InteractiveModeContext {
 	todoPhases: TodoPhase[] = [];
 	/**
 	 * Session that owns the plan currently in {@link todoPhases}. Subagent
-	 * reconciliation persists back to this session — never blindly to
-	 * `viewSession`. During a focus attach `viewSession` flips to the destination
-	 * before `reloadTodos` refreshes the snapshot, so an observer flush in that
-	 * window would otherwise write the previous session's plan into the
-	 * destination's canonical todos (#9575 review).
+	 * reconciliation persists to this session, not blindly to `viewSession`,
+	 * which flips to the destination before `reloadTodos` refreshes during
+	 * focus attach.
 	 */
 	#todoPhasesOwner?: AgentSession;
 	hideThinkingBlock = false;
@@ -3231,14 +3229,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (!this.planModeEnabled) {
 			return;
 		}
-		// A mid-turn user exit must land on the CURRENTLY streaming turn, not only
-		// the next one. The turn-start `plan-mode-active.md` block orders the model
-		// to keep planning until it writes a plan to `xd://propose`, so without
-		// interrupting the live turn the agent keeps acting in plan mode until it
-		// emits a plan (issue #9699). Mirror `#exitVibeMode`: abort inside
-		// `runModeExitTeardown` so a queued steer/follow-up cannot restart on the
-		// still-live plan toolset before teardown restores the previous tools
-		// (issue #8326).
+		// A mid-turn exit must interrupt the currently streaming turn.
+		// The plan-mode prompt instructs the model to keep planning until it
+		// writes to `xd://propose`, so the live turn must be aborted inside
+		// `runModeExitTeardown` to avoid restarting on the stale toolset.
 		if (options?.interruptActiveTurn && this.session.isStreaming) {
 			await this.session.runModeExitTeardown(async () => {
 				await this.session.abort({ reason: USER_INTERRUPT_LABEL });
