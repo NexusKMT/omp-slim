@@ -402,39 +402,46 @@ describe("ModelRegistry runtime provider registration", () => {
 		]);
 	});
 
-	test("refreshProvider times out inherited shared-catalog fetches", async () => {
+	test("refreshProvider aborts and retries inherited shared-catalog fetches", async () => {
 		vi.useFakeTimers();
 		let catalogFetches = 0;
-		const stalledFetch: FetchImpl = () => {
+		let abortedFetches = 0;
+		const stalledFetch: FetchImpl = (_input, init) => {
 			catalogFetches++;
-			return Promise.withResolvers<Response>().promise;
+			const { promise, reject } = Promise.withResolvers<Response>();
+			const signal = init?.signal;
+			if (!signal) {
+				reject(new Error("catalog fetch did not receive an abort signal"));
+				return promise;
+			}
+			const rejectAborted = () => {
+				abortedFetches++;
+				reject(signal.reason);
+			};
+			if (signal.aborted) {
+				rejectAborted();
+			} else {
+				signal.addEventListener("abort", rejectAborted, { once: true });
+			}
+			return promise;
 		};
 		const stalledRegistry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: stalledFetch });
 
-		const baselineTimers = vi.getTimerCount();
-		let outcome: "resolved" | "rejected" | undefined;
-		const refresh = stalledRegistry.refreshProvider("anthropic", "online").then(
-			() => {
-				outcome = "resolved";
-			},
-			error => {
-				outcome = "rejected";
-				throw error;
-			},
-		);
-
-		await drainMicrotasksUntil(
-			() => vi.getTimerCount() > baselineTimers,
-			"shared-catalog timeout timer was not armed",
-		);
-		expect(outcome).toBeUndefined();
-		vi.advanceTimersByTime(14_999);
+		const firstRefresh = stalledRegistry.refreshProvider("anthropic", "online");
+		await drainMicrotasksUntil(() => catalogFetches === 1, "first shared-catalog fetch did not start");
+		vi.advanceTimersByTime(9_999);
 		await Promise.resolve();
-		expect(outcome).toBeUndefined();
+		expect(abortedFetches).toBe(0);
 		vi.advanceTimersByTime(1);
-		await refresh;
-		expect(outcome).toBe("resolved");
-		expect(catalogFetches).toBe(1);
+		await firstRefresh;
+		expect(abortedFetches).toBe(1);
+
+		const secondRefresh = stalledRegistry.refreshProvider("anthropic", "online");
+		await drainMicrotasksUntil(() => catalogFetches === 2, "second shared-catalog fetch did not start");
+		vi.advanceTimersByTime(10_000);
+		await secondRefresh;
+		expect(abortedFetches).toBe(2);
+		expect(catalogFetches).toBe(2);
 	});
 
 	test("refreshRuntimeProviders times out extension fetchDynamicModels that never resolves", async () => {

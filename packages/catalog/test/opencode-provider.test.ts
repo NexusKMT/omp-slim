@@ -385,6 +385,60 @@ describe("Shared models.dev catalog fallback", () => {
 		expect(secondFetches).toBe(1);
 	});
 
+	test("reports a stale cache when conditional catalog revalidation fails", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-revalidation-fallback-"));
+		try {
+			const bundledModels = getBundledModels("zai");
+			let catalogAvailable = true;
+			let fetches = 0;
+			const fetchImpl: FetchImpl = async () => {
+				fetches++;
+				if (!catalogAvailable) throw new Error("models.dev unavailable");
+				return Response.json(
+					{
+						zai: {
+							models: {
+								"shared-only": {
+									id: "shared-only",
+									name: "Shared Only",
+									tool_call: true,
+									reasoning: false,
+									limit: { context: 128_000, output: 8_192 },
+									modalities: { input: ["text"], output: ["text"] },
+									provider: { npm: "@ai-sdk/anthropic" },
+								},
+							},
+						},
+					},
+					{ headers: { etag: '"catalog-v1"' } },
+				);
+			};
+			const fallback = modelsDevCatalogFallback("zai", fetchImpl);
+			if (!fallback) throw new Error("ZAI did not configure a models.dev fallback");
+			const options = {
+				providerId: "zai" as const,
+				cacheDbPath: path.join(tempDir, "models.db"),
+				staticModels: bundledModels,
+				modelsDev: fallback,
+			};
+
+			const initial = await resolveProviderModels(options, "online");
+			expect(initial.source).toBe("models.dev");
+			expect(initial.stale).toBe(false);
+			expect(initial.models.some(model => model.id === "shared-only")).toBe(true);
+
+			catalogAvailable = false;
+			const failedRevalidation = await resolveProviderModels(options, "online");
+			expect(failedRevalidation.source).toBe("cache");
+			expect(failedRevalidation.stale).toBe(true);
+			expect(failedRevalidation.updatedAt).toBe(initial.updatedAt);
+			expect(failedRevalidation.models.some(model => model.id === "shared-only")).toBe(true);
+			expect(fetches).toBe(2);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	test("aborts a stalled shared catalog request at the configured deadline", async () => {
 		let aborted = false;
 		const stalledFetch: FetchImpl = (_input, init) => {

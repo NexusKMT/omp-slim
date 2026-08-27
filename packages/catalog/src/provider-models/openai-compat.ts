@@ -149,9 +149,18 @@ const CATALOG_USER_AGENT = USER_AGENT;
  *
  * Fetched fully once per fetch context: concurrent callers sharing a fetch
  * implementation reuse the in-flight request, while repeat callers send a
- * conditional GET that the server answers with `304`.
+ * conditional GET that the server answers with `304`. Transient failures reuse
+ * the last in-memory payload for callers that only need best-effort metadata.
  */
 export function fetchWellKnownModels(fetchImpl?: FetchImpl, signal?: AbortSignal): Promise<unknown> {
+	const session = getCatalogSession(fetchImpl);
+	return fetchRevalidatedWellKnownModels(fetchImpl, signal).catch(error => {
+		if (session.hasPayload) return session.payload;
+		throw error;
+	});
+}
+
+function fetchRevalidatedWellKnownModels(fetchImpl?: FetchImpl, signal?: AbortSignal): Promise<unknown> {
 	const session = getCatalogSession(fetchImpl);
 	if (!session.inflight) {
 		session.inflight = fetchCatalogPayload(fetchImpl ?? discoveryFetch(), session, signal).finally(() => {
@@ -159,6 +168,13 @@ export function fetchWellKnownModels(fetchImpl?: FetchImpl, signal?: AbortSignal
 		});
 	}
 	return session.inflight;
+}
+
+function fetchRevalidatedWellKnownModelsWithTimeout(
+	fetchImpl?: FetchImpl,
+	timeoutMs = DEFAULT_OPENAI_COMPATIBLE_DISCOVERY_TIMEOUT_MS,
+): Promise<unknown> {
+	return withCatalogDiscoveryTimeout(timeoutMs, signal => fetchRevalidatedWellKnownModels(fetchImpl, signal));
 }
 
 async function fetchCatalogPayload(
@@ -173,22 +189,11 @@ async function fetchCatalogPayload(
 	if (session.hasPayload && session.etag) {
 		headers["If-None-Match"] = session.etag;
 	}
-	let response: Response;
-	try {
-		response = await fetchImpl(MODELS_DEV_URL, { method: "GET", headers, signal });
-	} catch (error) {
-		if (session.hasPayload) {
-			return session.payload;
-		}
-		throw error;
-	}
+	const response = await fetchImpl(MODELS_DEV_URL, { method: "GET", headers, signal });
 	if (response.status === 304 && session.hasPayload) {
 		return session.payload;
 	}
 	if (!response.ok) {
-		if (session.hasPayload) {
-			return session.payload;
-		}
 		throw new Error(`models catalog fetch failed: ${response.status}`);
 	}
 	const bytes = new Uint8Array(await response.arrayBuffer());
@@ -2870,7 +2875,7 @@ function openCodeModelManagerOptions(
 		// by the 2h cache TTL instead.
 		dropCachedModelIdsOnStaticMismatch: Object.keys(apiOverrides),
 		modelsDev: {
-			fetch: () => fetchWellKnownModels(config?.fetch),
+			fetch: () => fetchRevalidatedWellKnownModelsWithTimeout(config?.fetch),
 			map: payload => {
 				if (!isRecord(payload)) return [];
 				return mapModelsDevToModels(payload, OPENCODE_MODELS_DEV_DESCRIPTORS)
@@ -6136,7 +6141,7 @@ export function anthropicModelManagerOptions(
 	return {
 		providerId: "anthropic",
 		modelsDev: {
-			fetch: () => fetchWellKnownModels(config?.fetch),
+			fetch: () => fetchRevalidatedWellKnownModelsWithTimeout(config?.fetch),
 			map: payload => mapAnthropicModelsDev(payload, baseUrl),
 		},
 		...(apiKey && {
@@ -6843,7 +6848,7 @@ export function modelsDevCatalogFallback(
 	if (!descriptors) return undefined;
 	return {
 		additiveOnly: true,
-		fetch: () => withCatalogDiscoveryTimeout(timeoutMs, signal => fetchWellKnownModels(fetchImpl, signal)),
+		fetch: () => fetchRevalidatedWellKnownModelsWithTimeout(fetchImpl, timeoutMs),
 		map: payload => (isRecord(payload) ? filterModelsDevCatalogRows(mapModelsDevToModels(payload, descriptors)) : []),
 	};
 }
