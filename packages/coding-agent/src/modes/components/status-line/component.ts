@@ -1946,7 +1946,16 @@ export class StatusLineComponent implements Component {
 		const embeddedContextWidth = embedContext
 			? embeddedContextGaugeMinWidth(ctx.contextPercent ?? 0, ctx.contextWindow)
 			: 0;
-		const minimumGapWidth = () => embeddedContextWidth || (left.length > 0 && right.length > 0 ? 1 : 0);
+		const minimumGapWidth = (): number => {
+			if (!embeddedContextWidth) return left.length > 0 && right.length > 0 ? 1 : 0;
+			// If the labels cannot coexist with the last surviving segment, fall
+			// back to the original one-cell gauge instead of dropping the entire
+			// status line. At this width the labels cannot render either way.
+			if (left.length + right.length === 1 && leftWidth + rightWidth + embeddedContextWidth > topFillWidth) {
+				return 1;
+			}
+			return embeddedContextWidth;
+		};
 		const totalWidth = () => leftWidth + rightWidth + minimumGapWidth();
 
 		if (topFillWidth > 0) {

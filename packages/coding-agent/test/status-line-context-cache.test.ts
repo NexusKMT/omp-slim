@@ -420,6 +420,25 @@ describe("StatusLineComponent context breakdown", () => {
 		expect(plain).toContain("200K");
 	});
 
+	it("preserves a status segment when embedded context labels cannot fit", () => {
+		const { session } = makeSession({
+			messages: [userMessage("hi"), assistantMessage("done")],
+			usage: { tokens: 50_000, contextWindow: 200_000, percent: 25 },
+		});
+		const comp = new StatusLineComponent(session);
+		comp.updateSettings({
+			preset: "custom",
+			leftSegments: ["pi", "context_pct"],
+			rightSegments: [],
+			separator: "powerline-thin",
+			contextLine: "embedded",
+		});
+
+		const border = comp.getTopBorder(8);
+		expect(border.content).not.toBe("");
+		expect(border.width).toBe(8);
+	});
+
 	it("embedded overflow (>100%) breaks the raw percent past the window label in error color", () => {
 		const { session } = makeSession({
 			messages: [userMessage("hi"), assistantMessage("done")],
