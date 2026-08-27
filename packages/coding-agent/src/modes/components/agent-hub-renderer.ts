@@ -1,5 +1,5 @@
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { Ellipsis, visibleWidth } from "@oh-my-pi/pi-tui";
+import { Ellipsis, padding, visibleWidth } from "@oh-my-pi/pi-tui";
 import { formatDuration, formatNumber, sanitizeText } from "@oh-my-pi/pi-utils";
 import { getRoleInfo } from "../../config/model-roles";
 import type { Settings } from "../../config/settings";
@@ -172,13 +172,15 @@ export function formatChildIds(children: readonly AgentRef[], width: number): st
 	return text;
 }
 
-/** Bash `tree`-style ancestry prefix, clipped from the left on pathological depth. */
+/** Bash `tree`-style ancestry connector. With a gutter it right-aligns inside the
+ * reserved gutter so agent ids share one column; without, it clips from the left. */
 export function treeBranch(
 	ref: AgentRef,
 	maxWidth: number,
 	depthById: ReadonlyMap<string, number>,
 	parentById: ReadonlyMap<string, string>,
 	lastSiblingById: ReadonlyMap<string, boolean>,
+	gutterWidth = 0,
 ): string {
 	if ((depthById.get(ref.id) ?? 0) === 0) return "";
 	const segments: string[] = [lastSiblingById.get(ref.id) ? "└── " : "├── "];
@@ -189,8 +191,50 @@ export function treeBranch(
 		segments.push(lastSiblingById.get(parent) ? "    " : "│   ");
 		parent = parentById.get(parent);
 	}
-	const maxSegments = Math.max(1, Math.floor(Math.max(4, maxWidth - 2) / 4));
+	const maxSegments =
+		gutterWidth > 0 ? Math.floor(gutterWidth / 4) : Math.max(1, Math.floor(Math.max(4, maxWidth - 2) / 4));
 	const omitted = Math.max(0, segments.length - maxSegments);
 	const prefix = segments.slice(0, maxSegments).reverse().join("");
-	return theme.fg("dim", `${omitted > 0 ? "… " : ""}${prefix}`);
+	const text = `${omitted > 0 ? "… " : ""}${prefix}`;
+	return theme.fg("dim", gutterWidth > 0 ? `${padding(gutterWidth - text.length)}${text}` : text);
+}
+
+/** Higher is better: exact > prefix > substring > scattered subsequence. */
+export function fuzzyAgentScore(query: string, target: string): number {
+	if (query.length === 0) return 1;
+	if (target === query) return 100;
+	if (target.startsWith(query)) return 80;
+	if (target.includes(query)) return 60;
+	let q = 0;
+	let gaps = 0;
+	let last = -1;
+	for (let t = 0; t < target.length && q < query.length; t += 1) {
+		if (query[q] === target[t]) {
+			if (last >= 0 && t - last > 1) gaps += 1;
+			last = t;
+			q += 1;
+		}
+	}
+	if (q !== query.length) return 0;
+	return Math.max(1, 40 - gaps * 5);
+}
+
+/** Case-insensitive scattered-subsequence match used by the agent filter. */
+export function fuzzyAgentMatch(query: string, target: string): boolean {
+	const q = query.toLowerCase();
+	const t = target.toLowerCase();
+	if (q.length === 0) return true;
+	if (q.length > t.length) return false;
+	let i = 0;
+	for (let j = 0; j < t.length && i < q.length; j += 1) {
+		if (q[i] === t[j]) i += 1;
+	}
+	return i === q.length;
+}
+
+/** Right-align `text` inside a fixed-width cell, truncating overflow. */
+export function alignRightCell(text: string, width: number): string {
+	const visible = visibleWidth(text);
+	if (visible > width) return truncateToWidth(text, width);
+	return `${" ".repeat(width - visible)}${text}`;
 }

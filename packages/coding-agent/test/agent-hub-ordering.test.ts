@@ -157,7 +157,7 @@ describe("Agent hub row ordering", () => {
 		}
 	});
 
-	it("freezes the initial lastActivity order while the hub is open", () => {
+	it("re-sorts rows by most-recent activity while the hub is open", () => {
 		vi.useFakeTimers();
 		let hub: AgentHubOverlayComponent | undefined;
 		try {
@@ -177,22 +177,44 @@ describe("Agent hub row ordering", () => {
 
 			hub = makeHub(agents);
 			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A"]);
-			// Bump A's lastActivity far ahead of the others; captured order wins.
+			// Bump A's lastActivity far ahead of the others; recency wins live.
 			setSystemTime(4000);
 			agents.setActivity("A", "still running");
 
-			// Status changes must not reorder the captured roster either.
-			agents.setStatus("B", "idle");
-
-			// Registering a new agent schedules a coalesced row refresh; even a
-			// different status is appended after all rows captured on open.
+			// A parked agent sorts below live ones by status order.
 			setSystemTime(5000);
 			const sessionD = {} as AgentSession;
 			agents.register({ id: "D", displayName: "Delta", kind: "sub", session: sessionD, status: "parked" });
-
+			// Renders coalesce: the immediate frame still shows the captured order.
 			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A"]);
 			vi.advanceTimersByTime(100);
-			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A", "D"]);
+			expect(renderedAgentIds(hub)).toEqual(["A", "C", "B", "D"]);
+		} finally {
+			hub?.dispose();
+			vi.useRealTimers();
+			setSystemTime();
+		}
+	});
+
+	it("filters agents with a fuzzy query and clears on Escape", () => {
+		vi.useFakeTimers();
+		let hub: AgentHubOverlayComponent | undefined;
+		try {
+			geometry = stubStdoutGeometry(120);
+			const agents = new AgentRegistry();
+			const sessionA = {} as AgentSession;
+			agents.register({ id: "alpha-one", displayName: "Alpha", kind: "sub", session: sessionA });
+			const sessionB = {} as AgentSession;
+			agents.register({ id: "beta-two", displayName: "Beta", kind: "sub", session: sessionB });
+
+			hub = makeHub(agents);
+			expect(renderedAgentIds(hub)).toEqual(["alpha-one", "beta-two"]);
+			hub.handleInput("/");
+			hub.handleInput("a");
+			hub.handleInput("p");
+			expect(renderedAgentIds(hub)).toEqual(["alpha-one"]);
+			hub.handleInput("\u001b");
+			expect(renderedAgentIds(hub)).toEqual(["alpha-one", "beta-two"]);
 		} finally {
 			hub?.dispose();
 			vi.useRealTimers();
