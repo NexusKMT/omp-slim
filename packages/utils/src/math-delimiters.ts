@@ -31,9 +31,10 @@ export interface MathBlock {
 // paragraph/list parsing — so a multi-line equation (e.g. a matrix with `\\`
 // row breaks) survives as one unit and blank lines inside the block don't split
 // it. The own-line requirement leaves inline `$$…$$` inside prose to the span
-// grammar below.
-const MATH_BLOCK_DOLLAR = /^ {0,3}\$\$[ \t]*\n([\s\S]+?)\n {0,3}\$\$[ \t]*(?:\n|$)/;
-const MATH_BLOCK_BRACKET = /^ {0,3}\\\[[ \t]*\n([\s\S]+?)\n {0,3}\\\][ \t]*(?:\n|$)/;
+// grammar below. `\r?\n` at each line boundary keeps the grammar CRLF-safe for
+// direct callers; marked-fed renderers already normalize line endings first.
+const MATH_BLOCK_DOLLAR = /^ {0,3}\$\$[ \t]*\r?\n([\s\S]+?)\r?\n {0,3}\$\$[ \t]*(?:\r?\n|$)/;
+const MATH_BLOCK_BRACKET = /^ {0,3}\\\[[ \t]*\r?\n([\s\S]+?)\r?\n {0,3}\\\][ \t]*(?:\r?\n|$)/;
 
 /**
  * Leftmost offset at or after `from` where an opener could begin. A scan hint,

@@ -94,6 +94,13 @@ describe("math block grammar", () => {
 		expect(mathBlockAt("$$\na\n\nb\n$$\n")?.body).toBe("a\n\nb");
 	});
 
+	test("matches an own-line block delimited by CRLF line endings", () => {
+		// Direct callers may pass Windows-authored text; marked normalizes first,
+		// but the shared grammar must not trip on `\r\n` at the delimiter lines.
+		expect(mathBlockAt("$$\r\nx\r\n$$\r\n")).toEqual({ raw: "$$\r\nx\r\n$$\r\n", body: "x" });
+		expect(mathBlockAt("\\[\r\nx\r\n\\]\r\n")).toEqual({ raw: "\\[\r\nx\r\n\\]\r\n", body: "x" });
+	});
+
 	test("declines a block that is unclosed, empty, or not on its own line", () => {
 		expect(mathBlockAt("$$\nunclosed\n")).toBeUndefined();
 		expect(mathBlockAt("$$\n \n$$\n")).toBeUndefined();
