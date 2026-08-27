@@ -1,7 +1,4 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { FetchImpl } from "@oh-my-pi/pi-ai";
 import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
 import {
@@ -22,18 +19,19 @@ import {
 } from "@oh-my-pi/pi-mnemopi/core/local-llm";
 import { Mnemopi } from "@oh-my-pi/pi-mnemopi/core/memory";
 import { withMnemopiRuntimeOptions } from "@oh-my-pi/pi-mnemopi/core/runtime-options";
+import { TempDir } from "@oh-my-pi/pi-utils";
 
 const OLD_ENV = { ...process.env };
 
-const tempRoots: string[] = [];
+const tempDirs: TempDir[] = [];
 
 // Per-test SQLite path so `new Mnemopi(...)` never touches the shared default
 // bank file. Full-workspace parallel runs otherwise contend on that single path
 // and throw SQLITE_BUSY at initBeam once busy_timeout is exceeded (#9886).
 function tempDbPath(): string {
-	const root = mkdtempSync(join(tmpdir(), "mnemopi-local-llm-"));
-	tempRoots.push(root);
-	return join(root, "mnemopi.db");
+	const tempDir = TempDir.createSync("@mnemopi-local-llm-");
+	tempDirs.push(tempDir);
+	return tempDir.join("mnemopi.db");
 }
 
 function restoreEnv(): void {
@@ -50,8 +48,8 @@ function restoreEnv(): void {
 afterEach(() => {
 	restoreEnv();
 	resetHostLlmBackendForTests();
-	while (tempRoots.length > 0) {
-		rmSync(tempRoots.pop() as string, { recursive: true, force: true });
+	for (const tempDir of tempDirs.splice(0)) {
+		tempDir.removeSync();
 	}
 });
 
