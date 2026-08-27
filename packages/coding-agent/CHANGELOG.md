@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `snapcompact` compaction frames larger than the persistence limit being truncated into invalid image base64 on session resume, which made the provider reject every subsequent request with HTTP 400 ([#9901](https://github.com/can1357/oh-my-pi/issues/9901)).
+
 ## [18.0.7] - 2026-08-26
 
 ### Added
