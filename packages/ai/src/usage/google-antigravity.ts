@@ -441,10 +441,15 @@ function getAntigravityCounterLimits(report: UsageReport, counterKey: string): U
 	return report.limits.filter(limit => limit.id.toLowerCase().startsWith(prefix));
 }
 
-// Exhaustion checks are only safe with a concrete backend counter. A no-model
-// Antigravity credential lookup (for example image-provider discovery) must
-// not turn one exhausted family into a provider-wide block.
-function scopeAntigravityLimitsForModel(
+/**
+ * Scope an Antigravity report to the active model's backend counter, falling
+ * back to legacy default counters only when that backend has no limits.
+ *
+ * Exhaustion checks are only safe with a concrete backend counter. A no-model
+ * credential lookup (for example image-provider discovery) must not turn one
+ * exhausted family into a provider-wide block.
+ */
+export function scopeAntigravityLimitsForModel(
 	report: UsageReport,
 	context: CredentialRankingContext | undefined,
 ): UsageLimit[] {

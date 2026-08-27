@@ -693,6 +693,13 @@ describe("usage status-line segment", () => {
 				provider: "google-antigravity",
 				limits: [
 					{
+						id: "google-antigravity:default:default:daily",
+						label: "Usage",
+						scope: { provider: "google-antigravity", windowId: "daily" },
+						window: { id: "daily", label: "Daily", durationMs: 86_400_000, resetsAt: now + 5 * 60_000 },
+						amount: { usedFraction: 0.99 },
+					},
+					{
 						id: "google-antigravity:google:default:daily",
 						label: "Usage (Google)",
 						scope: { provider: "google-antigravity", windowId: "daily" },
@@ -724,6 +731,7 @@ describe("usage status-line segment", () => {
 		expect(claudeContent).toContain("1d");
 		expect(claudeContent).toContain("24%");
 		expect(claudeContent).not.toContain("91%");
+		expect(claudeContent).not.toContain("99%");
 
 		const gemini = makeComponent(reports, { provider: "google-antigravity", modelId: "gemini-3-pro" });
 		gemini.refreshUsageInBackground();
@@ -732,6 +740,7 @@ describe("usage status-line segment", () => {
 		expect(geminiContent).toContain("1d");
 		expect(geminiContent).toContain("91%");
 		expect(geminiContent).not.toContain("24%");
+		expect(geminiContent).not.toContain("99%");
 
 		const gptOss = makeComponent(reports, { provider: "google-antigravity", modelId: "gpt-oss-120b" });
 		gptOss.refreshUsageInBackground();
@@ -740,6 +749,33 @@ describe("usage status-line segment", () => {
 		expect(gptOssContent).toContain("1d");
 		expect(gptOssContent).toContain("63%");
 		expect(gptOssContent).not.toContain("91%");
+		expect(gptOssContent).not.toContain("99%");
+	});
+
+	it("falls back to legacy default Antigravity usage when the model counter is absent", async () => {
+		const component = makeComponent(
+			[
+				{
+					provider: "google-antigravity",
+					limits: [
+						{
+							id: "google-antigravity:default:default:daily",
+							label: "Usage",
+							scope: { provider: "google-antigravity", windowId: "daily" },
+							window: { id: "daily", label: "Daily", durationMs: 86_400_000 },
+							amount: { usedFraction: 0.42 },
+						},
+					],
+				},
+			],
+			{ provider: "google-antigravity", modelId: "claude-opus-4-6" },
+		);
+
+		component.refreshUsageInBackground();
+		await flushUsageRefresh();
+		const content = stripVTControlCharacters(component.getTopBorder(200).content);
+		expect(content).toContain("1d");
+		expect(content).toContain("42%");
 	});
 
 	it("ignores non-canonical windows without a reported span", async () => {

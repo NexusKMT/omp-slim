@@ -1,7 +1,10 @@
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
-import { getAntigravityCounterKeyForModel } from "@oh-my-pi/pi-ai/usage/google-antigravity";
+import {
+	getAntigravityCounterKeyForModel,
+	scopeAntigravityLimitsForModel,
+} from "@oh-my-pi/pi-ai/usage/google-antigravity";
 import {
 	type Component,
 	type ComposerStyle,
@@ -60,16 +63,6 @@ interface UsageScopeGroup {
 
 function normalizeUsageScopeValue(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : undefined;
-}
-
-/** Antigravity backend counters the status line can scope to a model family. */
-const ANTIGRAVITY_KNOWN_COUNTERS: Record<string, true> = { google: true, anthropic: true, openai: true };
-
-/** Backend counter segment of an Antigravity limit id, or undefined. */
-function antigravityCounterFromLimitId(id: string | undefined): string | undefined {
-	if (!id) return undefined;
-	const parts = id.split(":");
-	return parts.length >= 2 ? parts[1] : undefined;
 }
 
 /**
@@ -1481,11 +1474,15 @@ export class StatusLineComponent implements Component {
 			if (!report || typeof report !== "object") continue;
 			const provider = "provider" in report ? report.provider : undefined;
 			if (context.provider && provider !== context.provider) continue;
-			const limits = "limits" in report ? report.limits : undefined;
-			if (!Array.isArray(limits)) continue;
+			const reportLimits = "limits" in report ? report.limits : undefined;
+			if (!Array.isArray(reportLimits)) continue;
 			// fetchUsageReports supplies normalized rows; the guards above protect
 			// the unknown session boundary before the account matcher reads metadata.
 			const usageReport = report as UsageReport;
+			const limits =
+				provider === "google-antigravity" && activeAntigravityCounter
+					? scopeAntigravityLimitsForModel(usageReport, context)
+					: reportLimits;
 			for (const limit of limits) {
 				if (
 					!limit ||
@@ -1548,15 +1545,6 @@ export class StatusLineComponent implements Component {
 				// specificity, untiered limits preserve the historical preference.
 				const priority = modelId ? (normalizedTier ? 1 : 0) : normalizedTier ? 3 : 2;
 				const id = "id" in limit && typeof limit.id === "string" ? limit.id : undefined;
-				// Antigravity keeps per-family counters in one untiered group; keep
-				// only the counter matching the active model's family. Unknown
-				// families and unclassified counters fall through to first-match.
-				if (activeAntigravityCounter) {
-					const counter = antigravityCounterFromLimitId(id);
-					if (counter && counter !== activeAntigravityCounter && ANTIGRAVITY_KNOWN_COUNTERS[counter]) {
-						continue;
-					}
-				}
 				const resetValue = window && "resetsAt" in window ? window.resetsAt : undefined;
 				const displayCandidate: UsageWindowCandidate = {
 					id,
