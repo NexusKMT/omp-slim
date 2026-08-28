@@ -562,8 +562,10 @@ describe("ReviewCommand", () => {
 	it("keeps base branch review mode working", async () => {
 		const dir = await createTempDir();
 		const diffSpy = vi.fn(async () => SAMPLE_PR_DIFF);
+		const mergeBaseSpy = vi.fn(async () => "basesha");
 		const repository = {
 			currentBranch: async () => "feature",
+			mergeBase: mergeBaseSpy,
 			diffText: diffSpy,
 			listBranches: async () => ["main"],
 		} as unknown as VcsGitRepo;
@@ -579,7 +581,8 @@ describe("ReviewCommand", () => {
 		expect(result).toBeDefined();
 		expect(result!).toContain("Reviewing changes between `main` and `feature`");
 		expect(result!).toContain("src/pr.ts");
-		expect(diffSpy).toHaveBeenCalledWith({ base: "main", head: "feature" });
+		expect(mergeBaseSpy).toHaveBeenCalledWith("main", "feature");
+		expect(diffSpy).toHaveBeenCalledWith({ base: "basesha", head: "feature" });
 	});
 
 	it("resolves base-branch review against a real repo without a range revspec", async () => {
@@ -606,10 +609,19 @@ describe("ReviewCommand", () => {
 			expect(sameResult).toBeUndefined();
 			expect(notices).toEqual([{ message: "No changes between main and main", type: "warning" }]);
 
-			// Divergent branch: produces the PR-style diff for the changed file.
+			// Feature branch changes a.txt; main independently advances with a
+			// base-only file. PR-style (merge-base) review must show only the
+			// feature change, never main's base-only file. A two-tree
+			// (`base head`) diff would surface base-only.txt as a reverse
+			// deletion — the regression this asserts against.
 			await $`git checkout -q -b feature`.cwd(dir).quiet();
 			await fs.writeFile(path.join(dir, "a.txt"), "two\n");
-			await $`git commit -q -am change`.cwd(dir).quiet();
+			await $`git commit -q -am feature-change`.cwd(dir).quiet();
+			await $`git checkout -q main`.cwd(dir).quiet();
+			await fs.writeFile(path.join(dir, "base-only.txt"), "base\n");
+			await $`git add base-only.txt`.cwd(dir).quiet();
+			await $`git commit -q -m base-advance`.cwd(dir).quiet();
+			await $`git checkout -q feature`.cwd(dir).quiet();
 			const feature = new ReviewCommand({ cwd: dir } as unknown as CustomCommandAPI);
 			const featureResult = await feature.execute(
 				[],
@@ -619,6 +631,7 @@ describe("ReviewCommand", () => {
 			);
 			expect(featureResult).toContain("Reviewing changes between `main` and `feature`");
 			expect(featureResult).toContain("a.txt");
+			expect(featureResult).not.toContain("base-only.txt");
 		} finally {
 			await removeWithRetries(dir);
 		}

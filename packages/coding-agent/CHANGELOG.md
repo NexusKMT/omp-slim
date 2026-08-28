@@ -5,7 +5,7 @@
 ### Fixed
 
 - Fixed `import numpy` (and other native-extension imports) hanging indefinitely in the Python eval tool on Windows, where the runner's always-on background stdin reader deadlocked native DLL loading; Windows now reads the control channel serially between requests while POSIX keeps concurrent request dispatch ([#7985](https://github.com/can1357/oh-my-pi/issues/7985)).
-- Fixed `/review`'s "Review against a base branch (PR Style)" mode failing with a `revspec "…" did not resolve to a single object` error; the base and current branch are now passed as separate revisions, and selecting the current branch reports no changes instead of erroring ([#10067](https://github.com/can1357/oh-my-pi/issues/10067)).
+- Fixed `/review`'s "Review against a base branch (PR Style)" mode failing with a `revspec "…" did not resolve to a single object` error; it now compares the merge base against the current branch (true PR-style semantics, excluding base-only commits), and selecting the current branch reports no changes instead of erroring ([#10067](https://github.com/can1357/oh-my-pi/issues/10067)).
 
 ## [18.0.9] - 2026-08-28
 

@@ -560,6 +560,29 @@ impl GitRepo {
 		Ok(out)
 	}
 
+	/// Return the best common ancestor of `a` and `b` (`git merge-base a b`),
+	/// or `None` when their histories are unrelated. Used for PR-style diffs,
+	/// which compare the merge base against the head rather than the two tips.
+	pub fn merge_base(&self, a: &str, b: &str) -> Result<Option<String>> {
+		if self.is_reftable() {
+			return cli_try(self.root(), &["merge-base", a, b]);
+		}
+		let repo = self.gix()?;
+		let a_id = repo
+			.rev_parse_single(a)
+			.map_err(|err| Error::backend("git merge-base", err))?
+			.detach();
+		let b_id = repo
+			.rev_parse_single(b)
+			.map_err(|err| Error::backend("git merge-base", err))?
+			.detach();
+		match repo.merge_base(a_id, b_id) {
+			Ok(id) => Ok(Some(id.detach().to_string())),
+			Err(gix::repository::merge_base::Error::NotFound { .. }) => Ok(None),
+			Err(err) => Err(Error::backend("git merge-base", err)),
+		}
+	}
+
 	/// List commits touching `file`, newest first.
 	pub fn rev_list_touching(&self, rev: &str, file: &str, limit: usize) -> Result<Vec<String>> {
 		if self.is_reftable() {

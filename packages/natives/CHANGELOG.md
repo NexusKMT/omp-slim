@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `VcsGitRepo.mergeBase(a, b)` to resolve the best common ancestor of two revisions (`git merge-base`), returning `null` for unrelated histories.
+
 ## [18.0.9] - 2026-08-28
 
 ### Breaking Changes
