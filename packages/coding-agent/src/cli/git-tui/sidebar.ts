@@ -81,14 +81,6 @@ const KIND_COLOR: Record<ChangedFile["kind"], "warning" | "success" | "error" | 
 };
 
 const SUMMARY_LIMIT = 72;
-/** Pure additions (new files) render as their own list below the tracked changes, unstaged section only. */
-function isAddition(file: ChangedFile): boolean {
-	return file.kind === "added" || file.kind === "untracked";
-}
-interface SplitFiles {
-	changes: readonly ChangedFile[];
-	additions: readonly ChangedFile[];
-}
 
 function targetKey(target: Target): string {
 	if (target.kind === "file") return `file:${target.file.area}:${target.file.path}`;
@@ -116,10 +108,8 @@ interface TreeDir {
 
 /** File row: status letter, dimmed directory, bright basename, +/− counts. */
 function fileRowText(file: ChangedFile, width: number, selected: boolean, focused: boolean, depth?: number): string {
-	// The unstaged additions list is homogeneous, so its rows carry no status letter.
-	const bare = file.area === "unstaged" && isAddition(file);
-	const prefix = bare ? "" : `${theme.fg(KIND_COLOR[file.kind], KIND_LETTER[file.kind])} `;
-	const prefixWidth = bare ? 0 : 2;
+	const prefix = `${theme.fg(KIND_COLOR[file.kind], KIND_LETTER[file.kind])} `;
+	const prefixWidth = 2;
 	const slash = file.path.lastIndexOf("/");
 	const dir = depth === undefined && slash >= 0 ? file.path.slice(0, slash + 1) : "";
 	const base = slash >= 0 ? file.path.slice(slash + 1) : file.path;
@@ -238,8 +228,6 @@ export class Sidebar {
 		| undefined;
 	/** Tree depth per target key (file/dir rows only); parent-jump for `←`. */
 	readonly #entryDepth = new Map<string, number>();
-	/** Change/addition split per section, keyed on source array identity. */
-	readonly #splitCache = new Map<string, { source: readonly ChangedFile[]; split: SplitFiles }>();
 	#selectedKey: string | undefined;
 	#scrollTop = 0;
 	/** One-shot: the next render scrolls the selected row into view. Set on
@@ -322,18 +310,6 @@ export class Sidebar {
 			if (survivor) return survivor;
 		}
 		return undefined;
-	}
-
-	/** Tracked changes vs pure additions (unstaged only; other sections stay one list); memoized so entry caches stay identity-stable. */
-	#splitFiles(section: string, files: readonly ChangedFile[]): SplitFiles {
-		const cached = this.#splitCache.get(section);
-		if (cached?.source === files) return cached.split;
-		const split =
-			section === "unstaged"
-				? { changes: files.filter(file => !isAddition(file)), additions: files.filter(isAddition) }
-				: { changes: files, additions: [] };
-		this.#splitCache.set(section, { source: files, split });
-		return split;
 	}
 
 	/** Section entries in display order: tree dirs + files, or flat files. */
@@ -425,9 +401,7 @@ export class Sidebar {
 			pushTarget(entry.target);
 		};
 		const pushSection = (files: readonly ChangedFile[], section: string): void => {
-			const { changes, additions } = this.#splitFiles(section, files);
-			for (const entry of this.#fileEntries(changes, section)) pushEntry(entry);
-			for (const entry of this.#fileEntries(additions, `${section}-added`)) pushEntry(entry);
+			for (const entry of this.#fileEntries(files, section)) pushEntry(entry);
 		};
 		if (this.#model.clean) {
 			pushSection(headFiles ?? [], "commit");
@@ -536,16 +510,12 @@ export class Sidebar {
 		}
 		// Dir keys are `<section>:<path from repo root>` (see #fileEntries).
 		const sep = target.key.indexOf(":");
-		const section = target.key.slice(0, sep);
-		const inAdditions = section.endsWith("-added");
-		const area = inAdditions ? section.slice(0, -"-added".length) : section;
+		const area = target.key.slice(0, sep);
 		if (area !== "unstaged" && area !== "staged") return null;
 		const dirPath = target.key.slice(sep + 1);
-		const { changes, additions } = this.#splitFiles(
-			area,
-			area === "unstaged" ? this.#model.unstaged : this.#model.staged,
+		const files = (area === "unstaged" ? this.#model.unstaged : this.#model.staged).filter(file =>
+			file.path.startsWith(`${dirPath}/`),
 		);
-		const files = (inAdditions ? additions : changes).filter(file => file.path.startsWith(`${dirPath}/`));
 		if (files.length === 0) return null;
 		const selection = { files, label: `${dirPath}/` };
 		return area === "unstaged" ? { type: "stage", selection } : { type: "unstage", selection };
@@ -889,20 +859,6 @@ export class Sidebar {
 		const cached = this.#fileEntryCache.get(section);
 		return cached?.entries === entries ? cached.rows : entries.map(entry => ({ entry, target: entry.target }));
 	}
-	/** Section rows: tracked changes first, then pure additions as their own list below a rule. */
-	#sectionRows(files: readonly ChangedFile[], section: string, width: number): Row[] {
-		const { changes, additions } = this.#splitFiles(section, files);
-		const changeRows = this.#entryRows(changes, section);
-		if (additions.length === 0) return changeRows;
-		const additionRows = this.#entryRows(additions, `${section}-added`);
-		if (changeRows.length === 0) return additionRows;
-		return [
-			...changeRows,
-			{ text: theme.fg("borderMuted", ` ${"─".repeat(Math.max(0, width - 2))}`) },
-			...additionRows,
-		];
-	}
-
 	#rowText(row: Row, width: number, selectedKey: string | undefined): string {
 		const entry = row.entry;
 		if (!entry) return row.text ?? "";
@@ -948,7 +904,7 @@ export class Sidebar {
 		);
 		if (this.#aiPromptOpen) rows.push(this.#aiPromptRow(width, isSelected));
 		if (!unstagedFolded) {
-			rows.push(...this.#sectionRows(this.#model.unstaged, "unstaged", width));
+			rows.push(...this.#entryRows(this.#model.unstaged, "unstaged"));
 			if (this.#model.unstaged.length === 0) rows.push({ text: theme.fg("dim", "   no unstaged files") });
 		}
 		rows.push({ text: "" });
@@ -965,7 +921,7 @@ export class Sidebar {
 			),
 		);
 		if (!stagedFolded) {
-			rows.push(...this.#sectionRows(this.#model.staged, "staged", width));
+			rows.push(...this.#entryRows(this.#model.staged, "staged"));
 			if (this.#model.staged.length === 0) rows.push({ text: theme.fg("dim", "   no staged files") });
 		}
 		return rows;
@@ -1078,7 +1034,7 @@ export class Sidebar {
 			text: ` ${theme.bold(`${head.files.length} modified`)}  ${theme.fg("success", `+${additions}`)} ${theme.fg("error", `−${deletions}`)} ${theme.fg("dim", `· ${head.shortSha}`)}`,
 		});
 		rows.push(this.#viewToggleRow(width));
-		rows.push(...this.#sectionRows(head.files, "commit", width));
+		rows.push(...this.#entryRows(head.files, "commit"));
 		return rows;
 	}
 

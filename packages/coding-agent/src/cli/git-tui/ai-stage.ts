@@ -16,8 +16,10 @@ import {
 	type Model,
 	retryTransientCompletion,
 } from "@oh-my-pi/pi-ai";
+import type { VcsHunkSelection } from "@oh-my-pi/pi-natives";
+import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
-import { parseFileHunks } from "../../commit/git/diff";
+import { parseFileDiffs, parseFileHunks } from "../../commit/git/diff";
 import type { FileDiff } from "../../commit/types";
 import { ModelRegistry } from "../../config/model-registry";
 import { resolveRoleSelection } from "../../config/model-resolver";
@@ -25,7 +27,6 @@ import { Settings } from "../../config/settings";
 import filesPromptTemplate from "../../prompts/system/git-ai-stage-files.md" with { type: "text" };
 import hunkPromptTemplate from "../../prompts/system/git-ai-stage-hunk.md" with { type: "text" };
 import { discoverAuthStorage, loadCliExtensionProviders } from "../../sdk";
-import * as git from "../../utils/git";
 import type { ChangedFile } from "./state";
 
 /** Files per file-pass completion; larger trees fan out one call per batch. */
@@ -71,6 +72,7 @@ export interface AiStageOptions {
  */
 export async function aiStage(options: AiStageOptions): Promise<AiStageOutcome> {
 	const { cwd, instruction, signal, onProgress } = options;
+	const repo = vcs.requireGit(cwd);
 	const untracked = options.files.filter(file => file.kind === "untracked");
 	const tracked = options.files.filter(file => file.kind !== "untracked" && file.kind !== "conflicted");
 	if (tracked.length === 0 && untracked.length === 0) throw new Error("No unstaged changes to filter");
@@ -87,8 +89,8 @@ export async function aiStage(options: AiStageOptions): Promise<AiStageOutcome> 
 		if (!(await registry.getApiKey(model))) throw new Error(`No API key for ${model.provider}/${model.id}`);
 		const complete = createCompleter(model, registry.resolver(model), signal);
 
-		const rawDiff = tracked.length > 0 ? await git.diff(cwd, { files: tracked.map(file => file.path), signal }) : "";
-		const fileDiffs = new Map(git.diff.parseFiles(rawDiff).map(entry => [entry.filename, entry]));
+		const rawDiff = tracked.length > 0 ? await repo.diffText({ files: tracked.map(file => file.path) }, signal) : "";
+		const fileDiffs = new Map(parseFileDiffs(rawDiff).map(entry => [entry.filename, entry]));
 
 		interface Candidate {
 			file: Pick<ChangedFile, "path" | "kind">;
@@ -185,20 +187,21 @@ export async function aiStage(options: AiStageOptions): Promise<AiStageOutcome> 
 			? matched.filter(candidate => candidate.diff && !candidate.diff.isBinary).map(candidate => candidate.file.path)
 			: [];
 
-		const selections: git.HunkSelection[] = [
-			...binaryWhole.map(filePath => ({ path: filePath, hunks: { type: "all" } as const })),
-			...trackedWhole.map(filePath => ({ path: filePath, hunks: { type: "all" } as const })),
+		const selections: VcsHunkSelection[] = [
+			...binaryWhole.map(filePath => ({ path: filePath, kind: "all" as const })),
+			...trackedWhole.map(filePath => ({ path: filePath, kind: "all" as const })),
 			...[...indicesByPath].map(([filePath, indices]) => ({
 				path: filePath,
-				hunks: { type: "indices", indices } as const,
+				kind: "indices" as const,
+				indices,
 			})),
 		];
 		const untrackedAccepted = fileScopeAuthoritative
 			? matched.filter(candidate => !candidate.diff).map(candidate => candidate.file.path)
 			: [];
 		if (selections.length > 0 || untrackedAccepted.length > 0) onProgress?.("Staging…");
-		if (selections.length > 0) await git.stage.hunks(cwd, selections, { rawDiff, signal });
-		if (untrackedAccepted.length > 0) await git.stage.files(cwd, untrackedAccepted, signal);
+		if (selections.length > 0) await repo.stageHunks(selections, rawDiff || null, signal);
+		if (untrackedAccepted.length > 0) await repo.stageFiles(untrackedAccepted, signal);
 
 		return {
 			matchedFiles: matched.length,
