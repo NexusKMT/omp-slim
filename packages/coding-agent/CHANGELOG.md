@@ -26,6 +26,7 @@
 - Fixed `xd://` MCP failures reporting actionable transport stages, failure classes, server/tool context, retryability, safe trace IDs, and redacted JSON-RPC details instead of unusable fetch-library advice ([#10093](https://github.com/can1357/oh-my-pi/issues/10093)).
 - Fixed ACP `read` tool-call locations leaking the OMP read selector (e.g. `file.md:1-20`) into `ToolCallLocation.path`, which made Zed Follow open an empty buffer; the location now names the resolved filesystem path, real files literally named like a selector stay literal, and `write`/`edit` colon paths are untouched ([#10088](https://github.com/can1357/oh-my-pi/issues/10088)).
 - Fixed `/review`'s "Review against a base branch (PR Style)" mode failing with a `revspec "…" did not resolve to a single object` error; it now compares the merge base against the current branch (true PR-style semantics, excluding base-only commits), and selecting the current branch reports no changes instead of erroring ([#10067](https://github.com/can1357/oh-my-pi/issues/10067)).
+- Made prompt history write through synchronously so a submitted prompt is durable immediately, and checkpointed the prompt and agent database WALs on exit so they no longer grow unbounded across sessions ([#10079](https://github.com/can1357/oh-my-pi/issues/10079)).
 
 ## [18.0.9] - 2026-08-28
 
