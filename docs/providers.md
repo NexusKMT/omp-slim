@@ -322,6 +322,25 @@ providers:
         maxTokens: 8192
 ```
 
+### Zhipu BigModel account-balance keys
+
+`/login zai` targets the global Z.AI Coding Plan endpoint, and `/login zhipu-coding-plan` targets the domestic Zhipu Coding Plan endpoint. Neither flow configures the general pay-as-you-go BigModel endpoint at `https://open.bigmodel.cn/api/paas/v4`.
+
+Use a custom provider for an API key issued from a standard BigModel account balance:
+
+```yaml
+providers:
+  bigmodel:
+    baseUrl: https://open.bigmodel.cn/api/paas/v4
+    api: openai-completions
+    apiKey: BIGMODEL_API_KEY
+    models:
+      - id: glm-4.6
+        name: GLM-4.6 (BigModel)
+```
+
+Set `BIGMODEL_API_KEY` to the `<id>.<secret>` key before starting `omp`, then select `bigmodel/glm-4.6`. The key does not use an `sk-` prefix.
+
 Keyless local provider (no credentials required):
 
 ```yaml
