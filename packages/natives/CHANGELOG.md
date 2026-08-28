@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `execReplace` for POSIX `execvp(3)` process-image replacement (used by the CLI's `/restart`).
+
 ## [18.0.9] - 2026-08-28
 
 ### Breaking Changes

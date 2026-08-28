@@ -523,6 +523,18 @@ export interface QuitOptions {
 	drainStdout?: boolean;
 }
 
+/**
+ * Waits (bounded) for buffered stdout to reach the terminal. Used before
+ * process exit and before an exec-replace, where unflushed output would be
+ * lost with the process image.
+ */
+export async function drainStdout(): Promise<void> {
+	if (process.stdout.writableLength === 0) return;
+	const { promise, resolve } = Promise.withResolvers<void>();
+	process.stdout.once("drain", resolve);
+	await Promise.race([promise, Bun.sleep(5000)]);
+}
+
 async function runQuit(code: number, exitMode: "guarded" | "native", options: QuitOptions = {}): Promise<void> {
 	await runCleanup(Reason.MANUAL);
 
@@ -530,10 +542,8 @@ async function runQuit(code: number, exitMode: "guarded" | "native", options: Qu
 		return; // Workers: cleanup done, let worker exit naturally
 	}
 
-	if (options.drainStdout !== false && process.stdout.writableLength > 0) {
-		const { promise, resolve } = Promise.withResolvers<void>();
-		process.stdout.once("drain", resolve);
-		await Promise.race([promise, Bun.sleep(5000)]);
+	if (options.drainStdout !== false) {
+		await drainStdout();
 	}
 
 	switch (exitMode) {

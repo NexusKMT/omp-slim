@@ -720,6 +720,15 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 		description: "Exit the application",
 		handleTui: shutdownHandlerTui,
 	},
+	{
+		name: "restart",
+		icon: "restart",
+		description: "Restart omp with the same launch flags, resuming this session",
+		handleTui: async (_command, runtime) => {
+			runtime.ctx.editor.setText("");
+			await runtime.ctx.restart();
+		},
+	},
 ];
 async function rescopeHeadlessToCwd(runtime: SlashCommandRuntime, cwd: string): Promise<void> {
 	setProjectDir(cwd);

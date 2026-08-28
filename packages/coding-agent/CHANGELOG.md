@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `/restart` to relaunch omp with the original launch flags and resume the current session in place.
+
 ## [18.0.9] - 2026-08-28
 
 ### Breaking Changes

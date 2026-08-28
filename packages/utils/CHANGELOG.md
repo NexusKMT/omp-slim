@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `postmortem.drainStdout` to flush buffered stdout before process exit or exec-replace.
+
 ## [18.0.9] - 2026-08-28
 
 ### Fixed

@@ -241,6 +241,8 @@ export interface InteractiveModeContext {
 	init(options?: InteractiveModeInitOptions): Promise<void>;
 	playWelcomeIntro(): void;
 	shutdown(): Promise<void>;
+	/** Tear down like {@link shutdown}, then relaunch the CLI with the original launch flags, resuming this session. */
+	restart(): Promise<void>;
 	checkShutdownRequested(): Promise<void>;
 
 	// Extension UI integration
