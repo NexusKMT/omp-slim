@@ -289,10 +289,9 @@ export async function waitForDiagnostics(
 				break;
 			}
 			if (pullResult.failed !== undefined) {
-				// A pull-capable server that errors/times out won't answer via pull; stop
-				// waiting. The final publish re-check still lets a late publish win.
+				// A pull failure leaves the report unknown, but a dual-mode server
+				// may still publish fresh diagnostics within the remaining budget.
 				pullFailure = pullResult.failed;
-				break;
 			}
 		}
 	}
@@ -300,7 +299,12 @@ export async function waitForDiagnostics(
 	const versionOk = minVersion === undefined || client.diagnosticsVersion > minVersion;
 	const published = client.diagnostics.get(uri);
 	if (published && versionOk) {
-		return published.diagnostics;
+		if (expectedDocumentVersion !== undefined && published.version === expectedDocumentVersion) {
+			return published.diagnostics;
+		}
+		if (published === settledRef && Date.now() - settledAt >= settleMs) {
+			return published.diagnostics;
+		}
 	}
 	if (pullResultPromise) {
 		const outcome = await pullResultPromise;
