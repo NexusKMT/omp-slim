@@ -28,6 +28,8 @@ import { theme } from "../theme/theme";
 export interface ComposerPreviewStatusSource {
 	/** Powerline bar with the context gauge (box top border content). */
 	getTopBorder(width: number, previewTitle?: string): { content: string; width: number };
+	/** Flush soft-capped powerline band (band composer top row). */
+	getBandTopBorder(width: number, previewTitle?: string): { content: string; width: number };
 	/** Plain right-group chip (claude top rule content). */
 	getStandaloneTopBorder(width: number, previewTitle?: string): { content: string; width: number };
 	/** Plain standalone bottom bar carrying the given segment groups. */
@@ -56,6 +58,8 @@ export function renderComposerShapePreview(
 	if (status) {
 		if (style.statusAttachment === "top-border") {
 			topBorder = status.getTopBorder(Math.max(1, previewWidth - chromeWidth * 2), PREVIEW_TITLE);
+		} else if (style.statusAttachment === "top-band") {
+			topBorder = status.getBandTopBorder(previewWidth, PREVIEW_TITLE);
 		} else if (style.statusAttachment === "top-rule-chip") {
 			topBorder = status.getStandaloneTopBorder(previewWidth, PREVIEW_TITLE);
 		}
@@ -115,7 +119,7 @@ export class ComposerShapePreview implements Component {
 	#shape: ComposerShape;
 	#options: ComposerShapePreviewOptions;
 
-	constructor(initialValue: ComposerShape = "box", options: ComposerShapePreviewOptions = {}) {
+	constructor(initialValue: ComposerShape = "band", options: ComposerShapePreviewOptions = {}) {
 		this.#shape = initialValue;
 		this.#options = options;
 	}
