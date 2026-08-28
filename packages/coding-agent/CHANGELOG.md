@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed MCP OAuth discovery for authorization-server issuer URLs with nested paths, including Keycloak realms ([#10042](https://github.com/can1357/oh-my-pi/issues/10042)).
+- Fixed MCP OAuth endpoint and dynamic client registration discovery for authorization-server URLs with nested paths, including Keycloak realms ([#10042](https://github.com/can1357/oh-my-pi/issues/10042)).
 
 ## [18.0.9] - 2026-08-28
 

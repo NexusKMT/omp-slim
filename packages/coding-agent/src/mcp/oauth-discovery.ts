@@ -544,7 +544,8 @@ export async function discoverOAuthEndpoints(
 	return null;
 }
 
-function buildWellKnownUrls(wellKnownPath: string, baseUrl: string): URL[] {
+/** Build ordered metadata URL candidates for OAuth and OIDC discovery. */
+export function buildWellKnownUrls(wellKnownPath: string, baseUrl: string): URL[] {
 	let parsed: URL;
 	try {
 		parsed = new URL(baseUrl);
