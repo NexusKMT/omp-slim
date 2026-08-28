@@ -295,6 +295,8 @@ export interface InteractiveModeContext {
 	setWorkingMessage(message?: string): void;
 	applyPendingWorkingMessage(): void;
 	ensureLoadingAnimation(): void;
+	/** Reconcile the idle "F5 to Retry" status row with the transcript tail. */
+	syncRetryHintRow(): void;
 	startPendingSubmission(input: {
 		text: string;
 		images?: ImageContent[];

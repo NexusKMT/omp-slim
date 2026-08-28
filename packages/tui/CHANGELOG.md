@@ -4,10 +4,9 @@
 
 ### Added
 
-- Right arrow at end of line now accepts the selected autocomplete suggestion, the inline ghost word completion, and spelling replacements, like Tab
-- Added smooth brand-color fade between idle and working states in the status line
-- Added turn timer to the status line brand segment when the agent is active
-- Added 'band' composer style for flush, full-width status lines
+- Press the Right Arrow at the end of a line to accept autocomplete suggestions, inline ghost-text completions, and spelling corrections, just like Tab.
+- Added a smooth brand-color transition and an elapsed turn timer to the status line while the agent is working.
+- Added a full-width “band” composer style for flush status lines.
 
 ## [18.0.9] - 2026-08-28
 

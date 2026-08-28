@@ -119,7 +119,7 @@ export function buildSharpshooterEnvelope(
 	}
 
 	const currentMessage = current ?? messages[currentUserIndex];
-	if (!currentMessage || currentMessage.role !== "user") return undefined;
+	if (currentMessage?.role !== "user") return undefined;
 	const currentPrompt = visibleMessageText(currentMessage).trim();
 	if (!currentPrompt) return undefined;
 

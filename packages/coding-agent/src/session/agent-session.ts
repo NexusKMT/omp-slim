@@ -7958,6 +7958,11 @@ export class AgentSession {
 		this.#recovery.setAutoRetryEnabled(enabled);
 	}
 
+	/** Whether the last turn ended aborted/failed on a tool call, so {@link retry} would re-attempt it. */
+	get hasAbortedToolCallTail(): boolean {
+		return this.#recovery.hasAbortedToolCallTail;
+	}
+
 	/** Retry the last failed assistant turn when the session is idle. */
 	retry(): Promise<boolean> {
 		return this.#recovery.retry();

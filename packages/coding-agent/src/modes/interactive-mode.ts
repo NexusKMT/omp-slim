@@ -57,7 +57,7 @@ import { reset as resetCapabilities } from "../capability";
 import { restartArgv } from "../cli/flag-tables";
 import type { CollabGuestLink } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
-import { KeybindingsManager } from "../config/keybindings";
+import { formatKeyHint, KeybindingsManager } from "../config/keybindings";
 import { formatModelString, type ResolvedModelRoleValue } from "../config/model-resolver";
 import { applyProviderGlobalsFromSettings } from "../config/provider-globals";
 import {
@@ -657,6 +657,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	autoCompactionLoader: Loader | undefined = undefined;
 	retryLoader: Loader | undefined = undefined;
 	#pendingWorkingMessage: string | undefined;
+	#retryHintRow: Text | undefined;
 	#workingMessageAccentCacheKey?: WorkingMessageAccentCacheKey;
 	#workingMessageAccentCacheValue?: WorkingMessageAccent;
 	#workingMessageAccentCacheHasValue = false;
@@ -5136,7 +5137,9 @@ export class InteractiveMode implements InteractiveModeContext {
 				DEFAULT_WORKING_MESSAGE,
 				// The brand spinner lives in the status line while working; this row
 				// leads with the interrupt affordance instead of a second spinner.
-				[theme.icon.esc],
+				// The leading space nudges the row one column right of the flush-left
+				// status rows so the interrupt glyph reads as indented.
+				[` ${theme.icon.esc}`],
 			);
 			this.loadingAnimation.setTrailer(() => this.#workingTitleTrailer());
 			this.statusContainer.addChild(this.loadingAnimation);
@@ -5247,6 +5250,34 @@ export class InteractiveMode implements InteractiveModeContext {
 		clearTerminalHistory?: boolean;
 	}): Promise<void> {
 		await this.#uiHelpers.renderInitialMessages(options);
+		this.syncRetryHintRow();
+	}
+	/**
+	 * Reconcile the idle "F5 to Retry" status row with the transcript tail:
+	 * mount it when the last turn died on a tool call (Esc mid-execution,
+	 * stream failure) and the status row is free, remove it when stale. Runs at
+	 * turn end and after every transcript replay (startup resume, `/tree`,
+	 * session switch). The advertised key is the live `app.retry` binding,
+	 * dispatched by the editor to `InputController.handleRetry`.
+	 */
+	syncRetryHintRow(): void {
+		const show = !this.collabGuest && !this.viewSession.isStreaming && this.viewSession.hasAbortedToolCallTail;
+		if (this.#retryHintRow) {
+			const mounted = this.statusContainer.children.includes(this.#retryHintRow);
+			if (mounted && show) return;
+			if (mounted) this.statusContainer.removeChild(this.#retryHintRow);
+			this.#retryHintRow = undefined;
+		}
+		// Never contend with a live loader (working/auto-retry/compaction).
+		if (!show || this.statusContainer.children.length > 0) return;
+		const retryKey = this.keybindings.getKeys("app.retry")[0] ?? "f5";
+		this.#retryHintRow = new Text(
+			`${theme.fg("muted", theme.icon.loop)} ${theme.fg("dim", `${formatKeyHint(retryKey)} to Retry`)}`,
+			1,
+			0,
+		);
+		this.statusContainer.addChild(this.#retryHintRow);
+		this.ui.requestRender();
 	}
 
 	truncateTranscriptFromMessage(message: AgentMessage): boolean {

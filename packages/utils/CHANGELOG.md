@@ -4,15 +4,15 @@
 
 ### Added
 
-- Added `postmortem.drainStdout` to flush buffered stdout before process exit or exec-replace.
-- Added `hexToOklch`/`oklchToHex` color conversions with chroma-reducing sRGB gamut mapping.
+- Added `postmortem.drainStdout` to flush buffered standard output before process exit or exec-replacement.
+- Added an `exitOnly` option to `postmortem.register` for resources that should remain available during keep-alive cleanup and be released only on actual process exit.
+- Added `hexToOklch` and `oklchToHex` color conversion utilities with sRGB gamut mapping that reduces chroma when necessary.
 - Added `checkpointWal` to checkpoint committed SQLite WAL frames without blocking concurrent readers.
-- Added an `exitOnly` option to `postmortem.register` for resources that must survive a keep-alive `cleanup()` and release only on a real exit.
 
 ### Fixed
 
-- Made `postmortem` registrations repeatable across manual keep-alive cleanup passes, so persistent resource owners and callbacks registered mid-pass remain armed for the eventual real exit.
-- Made cleanup passes await async callbacks registered mid-pass, so `postmortem.cleanup()` no longer settles early and signal-driven exits no longer terminate late cleanup work mid-flight.
+- Fixed repeatable `postmortem` cleanup behavior so persistent resources and callbacks registered during cleanup remain active until the eventual process exit.
+- Fixed asynchronous `postmortem` cleanup so callbacks registered during a cleanup pass are awaited before cleanup completes, including during signal-driven exits.
 
 ## [18.0.9] - 2026-08-28
 
