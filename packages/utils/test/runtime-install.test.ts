@@ -287,27 +287,36 @@ describe("ensureRuntimeInstalled install lock", () => {
 		await expect(fs.stat(`${runtimeDir}.lock`)).rejects.toThrow();
 	}, 15_000);
 
-	test("a fresh legacy .lock directory is waited on before it is reclaimed", async () => {
+	test("a live legacy .lock owner is waited out, never reclaimed on retry exhaustion", async () => {
 		const { spec, probe } = await makeFileDependency();
 		const runtimeDir = await makeRuntimeDir();
-		// A recently created directory could still belong to a live pre-18.x
-		// installer, so the migration must poll the wait envelope before
-		// force-reclaiming rather than delete a possibly-active lock immediately.
+		// A recently created directory may still belong to a live pre-18.x
+		// installer. Retry exhaustion must NOT reclaim it — that would race two
+		// installs against the same tree — only its owner releasing the lock may
+		// let the new install proceed.
 		await fs.mkdir(`${runtimeDir}.lock`, { recursive: true });
 
-		const attempts = 5;
-		const sleepMs = 80;
-		const start = Date.now();
-		await ensureRuntimeInstalled({
+		const sleepMs = 40;
+		const install = ensureRuntimeInstalled({
 			runtimeDir,
 			install: { dependencies: { [probe]: spec } },
 			probePackage: probe,
-			lockAttempts: attempts,
+			lockAttempts: 3,
 			lockSleepMs: sleepMs,
 		});
-		const waited = Date.now() - start;
 
-		expect(waited).toBeGreaterThanOrEqual((attempts - 1) * sleepMs);
+		// Integration timing: the reclaim decision runs on the module's own
+		// `Bun.sleep` poll loop and a real `bun install` subprocess, so fake
+		// timers cannot drive it. Wait past the retry window (lockAttempts x
+		// lockSleepMs) — under the old bug the install would have reclaimed the
+		// fresh lock and populated node_modules by now; it must not have.
+		await Bun.sleep(sleepMs * 8);
+		expect((await fs.stat(`${runtimeDir}.lock`)).isDirectory()).toBe(true);
+		expect(await Bun.file(path.join(runtimeDir, "node_modules", probe, "package.json")).exists()).toBe(false);
+
+		// The legacy owner finishes and releases; only now does the install proceed.
+		await fs.rm(`${runtimeDir}.lock`, { recursive: true, force: true });
+		await install;
 		expect(await Bun.file(path.join(runtimeDir, "node_modules", probe, "package.json")).exists()).toBe(true);
 		await expect(fs.stat(`${runtimeDir}.lock`)).rejects.toThrow();
 	}, 15_000);

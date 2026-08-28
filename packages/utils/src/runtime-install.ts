@@ -315,50 +315,47 @@ const STALE_LEGACY_LOCK_MS = 10 * 60_000;
  * that only its creator removed; an installer killed outside that window
  * (SIGKILL/OOM/Ctrl-C) left it unreleasable, wedging every later install for
  * the full wait envelope (issue #10120). During an in-flight upgrade a legacy
- * process may still legitimately own this directory, so wait for it to finish
- * before force-reclaiming. After the directory is released or reclaimed,
- * atomically create and retain it through `fn`: an older process cannot acquire
- * the legacy namespace between the handoff check and the new install.
+ * process may still legitimately own this directory, so poll until it is
+ * released and only force-reclaim once the directory is older than any
+ * plausible install ({@link STALE_LEGACY_LOCK_MS}) — never merely because a
+ * retry budget elapsed, which would delete a still-active legacy lock and let
+ * two installers race the same tree. Once the namespace is free, atomically
+ * create and retain the directory through `fn`: an older process cannot acquire
+ * it between the handoff check and the new install.
  */
-async function withLegacyInstallLock<T>(
-	runtimeDir: string,
-	attempts: number,
-	sleepMs: number,
-	fn: () => Promise<T>,
-): Promise<T> {
+async function withLegacyInstallLock<T>(runtimeDir: string, sleepMs: number, fn: () => Promise<T>): Promise<T> {
 	const legacy = `${runtimeDir}.lock`;
 	for (;;) {
-		let reserved = false;
-		for (let attempt = 0; attempt < attempts; attempt++) {
-			try {
-				await fsp.mkdir(legacy);
-				reserved = true;
-				break;
-			} catch (error) {
-				if (!isEexist(error)) throw error;
-			}
-
+		try {
+			await fsp.mkdir(legacy);
+		} catch (error) {
+			if (!isEexist(error)) throw error;
+			// Someone already holds the legacy namespace.
 			let stat: fs.Stats;
 			try {
 				stat = await fsp.stat(legacy);
-			} catch (error) {
-				if (isEnoent(error)) continue;
-				throw error;
+			} catch (statError) {
+				if (isEnoent(statError)) continue; // released between mkdir and stat; retry
+				throw statError;
 			}
-			// A non-directory already reserves the namespace against old mkdir lockers.
+			// A non-directory is a newer lock file, which already excludes old mkdir lockers.
 			if (!stat.isDirectory()) return fn();
-			if (Date.now() - stat.mtimeMs > STALE_LEGACY_LOCK_MS) break;
-			if (attempt + 1 < attempts) await Bun.sleep(sleepMs);
-		}
-
-		if (reserved) {
-			try {
-				return await fn();
-			} finally {
+			// A fresh directory may still belong to a live pre-18.x installer, so
+			// wait for it to finish; only a crash orphan (older than any plausible
+			// install) is force-reclaimed.
+			if (Date.now() - stat.mtimeMs > STALE_LEGACY_LOCK_MS) {
 				await fsp.rm(legacy, { recursive: true, force: true });
+			} else {
+				await Bun.sleep(sleepMs);
 			}
+			continue;
 		}
-		await fsp.rm(legacy, { recursive: true, force: true });
+		// Reserved the legacy namespace; retain it across the install.
+		try {
+			return await fn();
+		} finally {
+			await fsp.rm(legacy, { recursive: true, force: true });
+		}
 	}
 }
 
@@ -430,7 +427,7 @@ export async function ensureRuntimeInstalled(options: EnsureRuntimeInstalledOpti
 	return withFileLock(
 		`${runtimeDir}.install`,
 		() =>
-			withLegacyInstallLock(runtimeDir, lockAttempts, lockSleepMs, async () => {
+			withLegacyInstallLock(runtimeDir, lockSleepMs, async () => {
 				if (await probeManifest.exists()) return runtimeDir;
 				await writeRuntimeManifest(runtimeDir, install);
 				onPhase?.("download");
