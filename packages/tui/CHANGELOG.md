@@ -4,6 +4,7 @@
 
 ### Added
 
+- Right arrow at end of line now accepts the selected autocomplete suggestion, the inline ghost word completion, and spelling replacements, like Tab
 - Added smooth brand-color fade between idle and working states in the status line
 - Added turn timer to the status line brand segment when the agent is active
 - Added 'band' composer style for flush, full-width status lines
