@@ -579,6 +579,44 @@ describe("MCP Streamable HTTP POST response resumption", () => {
 		expect(observed.auth).toEqual(["Bearer stale", "Bearer fresh"]);
 		expect(observed.lastEventId).toBe("stream-1");
 	});
+
+	it("never replays the POST when a resume GET stays unauthorized", async () => {
+		const observed = { posts: 0, gets: 0, refreshes: 0 };
+		server = Bun.serve({
+			port: 0,
+			fetch(req) {
+				if (req.method === "POST") {
+					observed.posts++;
+					return new Response("id: stream-1\nretry: 10\ndata:\n\n", {
+						headers: { "Content-Type": "text/event-stream" },
+					});
+				}
+				observed.gets++;
+				return new Response("expired", { status: 401 });
+			},
+		});
+		if (!server) throw new Error("Test server was not started");
+		const transport = new HttpTransport({
+			type: "http",
+			url: `http://127.0.0.1:${server.port}/mcp`,
+			timeout: GUARD_TIMEOUT_MS,
+			headers: { Authorization: "Bearer stale" },
+		});
+		// A live refresh would tempt #requestWithAuthRetry to re-POST if the
+		// SSEResumeError identity were lost during normalization.
+		transport.onAuthError = async () => {
+			observed.refreshes++;
+			return { Authorization: "Bearer fresh" };
+		};
+		await transport.connect();
+
+		await expect(withPendingGuard(transport.request("tools/call"), "request")).rejects.toBeDefined();
+		// The server accepted the POST once; auth refresh happens inside the resume
+		// GET only, and the originating POST is never replayed.
+		expect(observed.posts).toBe(1);
+		expect(observed.gets).toBe(2);
+		expect(observed.refreshes).toBe(1);
+	});
 	it("marks a clean accepted SSE EOF without an event ID as non-replayable", async () => {
 		let posts = 0;
 		server = Bun.serve({

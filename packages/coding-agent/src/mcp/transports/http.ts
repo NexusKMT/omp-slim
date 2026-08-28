@@ -626,7 +626,16 @@ export class HttpTransport implements MCPTransport {
 				}
 			} catch (error) {
 				if (captured) return;
-				if (operation.isTimeoutAbort(error)) {
+				// The server accepted this POST (it returned a 2xx SSE stream) before
+				// the drain or a resume GET failed, so the originating request must
+				// never be replayed — it may already have executed a state-changing
+				// tool. Preserve SSEResumeError so #requestWithAuthRetry's no-replay
+				// guard still fires instead of refreshing auth and re-POSTing, and
+				// force every other post-acceptance failure non-retryable so the
+				// reconnect path in isRetriableConnectionError cannot replay it.
+				if (error instanceof SSEResumeError || (error instanceof Error && error.name === "AbortError")) {
+					reject(error);
+				} else if (operation.isTimeoutAbort(error)) {
 					reject(
 						new MCPTransportError({
 							transport: "http",
@@ -638,15 +647,26 @@ export class HttpTransport implements MCPTransport {
 							cause: error,
 						}),
 					);
-				} else if (error instanceof Error && error.name === "AbortError") {
-					reject(error);
 				} else {
+					const normalized = normalizeMCPTransportError(error, {
+						transport: "http",
+						stage: error instanceof SyntaxError ? "decode" : "receive",
+						traceId,
+					});
 					reject(
-						normalizeMCPTransportError(error, {
-							transport: "http",
-							stage: error instanceof SyntaxError ? "decode" : "receive",
-							traceId,
-						}),
+						normalized.retryable
+							? new MCPTransportError({
+									transport: normalized.transport,
+									stage: normalized.stage,
+									failure: normalized.failure,
+									message: normalized.message,
+									retryable: false,
+									code: normalized.code,
+									data: normalized.data,
+									traceId: normalized.traceId,
+									cause: normalized,
+								})
+							: normalized,
 					);
 				}
 			} finally {
