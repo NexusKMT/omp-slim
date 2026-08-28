@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.10] - 2026-08-28
+
 ### Added
 
 - Added native process replacement support for the CLI’s `/restart` command.

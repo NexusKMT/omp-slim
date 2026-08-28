@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.10] - 2026-08-28
+
 ### Added
 
 - Added the Sharpshooter memory backend for tracking friction-earned project decisions, with `/memory queue` and `/memory sync` controls.

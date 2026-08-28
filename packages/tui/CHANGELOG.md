@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.10] - 2026-08-28
+
 ### Added
 
 - Press the Right Arrow at the end of a line to accept autocomplete suggestions, inline ghost-text completions, and spelling corrections, just like Tab.
