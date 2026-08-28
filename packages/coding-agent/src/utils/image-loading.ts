@@ -214,6 +214,44 @@ export class ImageInputTooLargeError extends Error {
 	}
 }
 
+/**
+ * Raised when image bytes cannot be decoded — a truncated stream, a payload
+ * with a hole in the middle, or bytes that are not the container they claim.
+ * Failing at ingress keeps them out of the transcript, where they would
+ * otherwise be persisted and rejected by the provider on every later request,
+ * with no way to resume the session.
+ */
+export class InvalidImageDataError extends Error {
+	readonly reason: string;
+
+	constructor(label: string, mimeType: string, reason: string) {
+		super(`${label} is not a decodable ${mimeType} image: ${reason}`);
+		this.name = "InvalidImageDataError";
+		this.reason = reason;
+	}
+}
+
+/**
+ * Why an image cannot be decoded, or `null` when it decodes.
+ *
+ * A full decode is the only check that matches what vision backends accept: a
+ * middle-elided PNG keeps its signature, its header, and even a well-formed
+ * `IEND` trailer, so header sniffing and chunk-framing walks both pass it —
+ * while real-world images that decoders render happily do have odd framing, so
+ * a structural walk rejects payloads providers accept. Decoding is the ground
+ * truth on both sides. Callers on hot paths must cache the verdict.
+ */
+export async function imageDecodeFailureReason(image: ImageContent): Promise<string | null> {
+	const bytes = Buffer.from(image.data, "base64");
+	if (bytes.length === 0) return "empty image data";
+	try {
+		await new Bun.Image(bytes).png().toBase64();
+		return null;
+	} catch (error) {
+		return error instanceof Error ? error.message : String(error);
+	}
+}
+
 interface LoadInMemoryImageInputOptions {
 	image: ImageContent;
 	resolvedPath: string;
@@ -227,6 +265,14 @@ async function loadInMemoryImageInput(options: LoadInMemoryImageInputOptions): P
 	const inputBytes = Buffer.byteLength(options.image.data, "base64");
 	if (inputBytes > options.maxBytes) {
 		throw new ImageInputTooLargeError(inputBytes, options.maxBytes);
+	}
+
+	// Decode before anything else: a payload that cannot be decoded is rejected
+	// by the provider for the whole request, so it must fail here — where the
+	// caller still has a path to act on — instead of entering the transcript.
+	const decodeFailure = await imageDecodeFailureReason(options.image);
+	if (decodeFailure !== null) {
+		throw new InvalidImageDataError(options.resolvedPath, options.image.mimeType, decodeFailure);
 	}
 
 	let outputData = options.image.data;

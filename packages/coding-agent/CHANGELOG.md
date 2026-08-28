@@ -26,6 +26,9 @@
 - Fixed a macOS composer display issue where undercurl could remain attached to stale text after rapid typing.
 - Improved `xd://` MCP failure messages with actionable transport stages, failure categories, server and tool context, retryability, trace IDs, and redacted JSON-RPC details.
 - Fixed ACP `read` tool-call locations so clients such as Zed Follow receive the resolved filesystem path rather than the OMP line-range selector.
+### Fixed
+
+- Fixed an undecodable image (a truncated or partially written screenshot) permanently wedging a session: the provider rejected every later request, including on resume, with no way out. Reading one now fails with an actionable error, and any that reach the transcript are replaced by a note before the request instead of breaking it.
 
 ## [18.0.9] - 2026-08-28
 
