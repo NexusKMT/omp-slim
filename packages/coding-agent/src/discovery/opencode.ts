@@ -200,6 +200,7 @@ interface OpenCodeMCPConfig {
 		clientId?: string;
 		clientSecret?: string;
 		scope?: string;
+		callbackPort?: number;
 		redirectUri?: string;
 	};
 }
@@ -230,6 +231,7 @@ function normalizeOAuth(value: unknown): MCPServer["oauth"] | undefined {
 		clientId: typeof value.clientId === "string" ? value.clientId : undefined,
 		clientSecret: typeof value.clientSecret === "string" ? value.clientSecret : undefined,
 		scope: typeof value.scope === "string" ? value.scope : undefined,
+		callbackPort: typeof value.callbackPort === "number" ? value.callbackPort : undefined,
 		redirectUri: typeof value.redirectUri === "string" ? value.redirectUri : undefined,
 	};
 	return Object.values(oauth).some(item => item !== undefined) ? oauth : undefined;

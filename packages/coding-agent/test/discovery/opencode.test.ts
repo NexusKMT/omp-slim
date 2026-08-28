@@ -169,6 +169,7 @@ describe("OpenCode MCP discovery", () => {
 							clientId: "configured-client",
 							clientSecret: "configured-secret",
 							scope: "mcp:read mcp:write",
+							callbackPort: 53192,
 							redirectUri: "http://127.0.0.1:53192/callback",
 						},
 					},
@@ -184,6 +185,7 @@ describe("OpenCode MCP discovery", () => {
 				clientId: "configured-client",
 				clientSecret: "configured-secret",
 				scope: "mcp:read mcp:write",
+				callbackPort: 53192,
 				redirectUri: "http://127.0.0.1:53192/callback",
 			},
 		});
