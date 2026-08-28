@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Perplexity email login for accounts protected by authenticator two-factor authentication.
+
 ## [18.0.9] - 2026-08-28
 
 ### Fixed
