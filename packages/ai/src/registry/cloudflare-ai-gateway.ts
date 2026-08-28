@@ -53,11 +53,13 @@ export const cloudflareAiGatewayProvider = {
 	id: "cloudflare-ai-gateway",
 	name: "Cloudflare AI Gateway",
 	prepareModel: model => {
+		const hasGatewayPlaceholders = model.baseUrl.includes("<account>") || model.baseUrl.includes("<gateway>");
 		if (model.id.startsWith("anthropic/")) {
 			const requestModelId = model.id.slice("anthropic/".length).replaceAll(".", "-");
+			const baseUrl = hasGatewayPlaceholders ? CLOUDFLARE_AI_GATEWAY_ANTHROPIC_BASE_URL : model.baseUrl;
 			if (
 				model.api === "anthropic-messages" &&
-				model.baseUrl === CLOUDFLARE_AI_GATEWAY_ANTHROPIC_BASE_URL &&
+				model.baseUrl === baseUrl &&
 				model.requestModelId === requestModelId
 			) {
 				return model;
@@ -65,35 +67,33 @@ export const cloudflareAiGatewayProvider = {
 			return {
 				...model,
 				api: "anthropic-messages",
-				baseUrl: CLOUDFLARE_AI_GATEWAY_ANTHROPIC_BASE_URL,
+				baseUrl,
 				requestModelId,
 			};
 		}
 		if (model.id.startsWith("openai/")) {
 			const requestModelId = model.id.slice("openai/".length);
-			if (
-				model.api === "openai-responses" &&
-				model.baseUrl === CLOUDFLARE_AI_GATEWAY_OPENAI_BASE_URL &&
-				model.requestModelId === requestModelId
-			) {
+			const baseUrl = hasGatewayPlaceholders ? CLOUDFLARE_AI_GATEWAY_OPENAI_BASE_URL : model.baseUrl;
+			if (model.api === "openai-responses" && model.baseUrl === baseUrl && model.requestModelId === requestModelId) {
 				return model;
 			}
 			return buildModel({
 				...model,
 				api: "openai-responses",
-				baseUrl: CLOUDFLARE_AI_GATEWAY_OPENAI_BASE_URL,
+				baseUrl,
 				compat: model.compatConfig,
 				requestModelId,
 			});
 		}
 		if (model.id.startsWith("workers-ai/")) {
-			if (model.api === "openai-completions" && model.baseUrl === CLOUDFLARE_AI_GATEWAY_COMPAT_BASE_URL) {
+			const baseUrl = hasGatewayPlaceholders ? CLOUDFLARE_AI_GATEWAY_COMPAT_BASE_URL : model.baseUrl;
+			if (model.api === "openai-completions" && model.baseUrl === baseUrl) {
 				return model;
 			}
 			return buildModel({
 				...model,
 				api: "openai-completions",
-				baseUrl: CLOUDFLARE_AI_GATEWAY_COMPAT_BASE_URL,
+				baseUrl,
 				compat: model.compatConfig,
 			});
 		}

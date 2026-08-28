@@ -118,16 +118,20 @@ describe("Cloudflare AI Gateway", () => {
 		expect(prepared?.options.apiKey).toBe("N/A");
 	});
 
-	test("routes Workers AI models through the compatibility endpoint", () => {
+	test("keeps the Workers AI provider namespace for streamed compatibility requests", async () => {
+		const captured: CapturedRequest = {};
 		const credential = serializeCloudflareAiGatewayCredential("gateway-token", "account-id", "my-gateway");
-		const prepared = prepareGatewayRequest(WORKERS_MODEL, credential);
+		await stream(WORKERS_MODEL, CONTEXT, {
+			apiKey: credential,
+			fetch: captureRequest(captured),
+			maxTokens: 16,
+		}).result();
 
-		expect(prepared?.model.api).toBe("openai-completions");
-		expect(prepared?.model.baseUrl).toBe("https://gateway.ai.cloudflare.com/v1/account-id/my-gateway/compat");
-		expect(prepared?.model.id).toBe("workers-ai/@cf/meta/llama-4-scout-17b-16e-instruct");
-		expect(prepared?.model.headers?.["cf-aig-authorization"]).toBe("Bearer gateway-token");
-		expect(prepared?.options.apiKey).toBe("N/A");
+		expect(captured.url).toBe("https://gateway.ai.cloudflare.com/v1/account-id/my-gateway/compat/chat/completions");
+		expect(captured.headers?.get("cf-aig-authorization")).toBe("Bearer gateway-token");
+		expect(JSON.parse(captured.body ?? "{}").model).toBe("workers-ai/@cf/meta/llama-4-scout-17b-16e-instruct");
 	});
+
 	test("sends OpenAI-format models through the gateway without upstream bearer auth", async () => {
 		const captured: CapturedRequest = {};
 		const credential = serializeCloudflareAiGatewayCredential("gateway-token", "account-id", "my-gateway");
@@ -214,12 +218,12 @@ describe("Cloudflare AI Gateway", () => {
 	test("keeps legacy plain tokens working with an explicit base URL", () => {
 		const model = {
 			...ANTHROPIC_MODEL,
-			id: "claude-sonnet-4-5",
 			baseUrl: "https://gateway.ai.cloudflare.com/v1/legacy-account/legacy-gateway/anthropic",
 		};
 		const prepared = prepareGatewayRequest(model, "legacy-token");
 
 		expect(prepared?.model.baseUrl).toBe(model.baseUrl);
+		expect(prepared?.model.requestModelId).toBe("claude-sonnet-4-5");
 		expect(prepared?.options.apiKey).toBe("legacy-token");
 	});
 });
