@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { readModelCache } from "@oh-my-pi/pi-catalog/model-cache";
+import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
 import { basetenModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
-import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
+import type { FetchImpl, ModelSpec } from "@oh-my-pi/pi-catalog/types";
 
 describe("Baseten provider discovery", () => {
 	test("discovers Baseten models with custom metadata", async () => {
@@ -176,5 +182,89 @@ describe("Baseten provider discovery", () => {
 			efforts: ["low", "high", "max"],
 			defaultLevel: "max",
 		});
+	});
+
+	test("invalidates cached GLM-5.3-Flash reasoning metadata on upgrade", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-baseten-glm53-flash-cache-"));
+		const cacheDbPath = path.join(tempDir, "models.db");
+		const discoveredFlash: ModelSpec<"openai-completions"> = {
+			id: "zai-org/GLM-5.3-Flash",
+			name: "GLM 5.3 Flash",
+			api: "openai-completions",
+			provider: "baseten",
+			baseUrl: "https://inference.baseten.co/v1",
+			reasoning: true,
+			input: ["text", "image"],
+			cost: { input: 0.15, output: 0.5, cacheRead: 0.03, cacheWrite: 0 },
+			contextWindow: 1_048_576,
+			maxTokens: 131_072,
+		};
+		const discoveryPayload = {
+			data: [
+				{
+					id: "zai-org/GLM-5.3-Flash",
+					object: "model",
+					name: "GLM 5.3 Flash",
+					context_length: 1048576,
+					max_completion_tokens: 131072,
+					supported_features: ["tools", "json_mode", "structured_outputs", "reasoning"],
+					input_modalities: ["text", "image"],
+					pricing: {
+						prompt: "0.00000015",
+						completion: "0.0000005",
+						input_cache_read: "0.00000003",
+					},
+				},
+			],
+		};
+		const fetchMock: FetchImpl = async () =>
+			new Response(JSON.stringify(discoveryPayload), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+
+		try {
+			// Pass 1: write a fresh authoritative cache under the PRE-fix identity
+			// (no migration list) whose row carries the stale pre-fix computed
+			// value: reasoning false, no thinking.
+			await resolveProviderModels(
+				{
+					...basetenModelManagerOptions({ apiKey: "k", fetch: fetchMock }),
+					cacheDbPath,
+					dropCachedModelIdsOnStaticMismatch: undefined,
+					fetchDynamicModels: async () => [{ ...discoveredFlash, reasoning: false, input: ["text", "image"] }],
+				},
+				"online",
+			);
+			const priorCache = readModelCache("baseten", Number.POSITIVE_INFINITY, Date.now, cacheDbPath);
+			if (!priorCache) throw new Error("Baseten cache was not written");
+
+			// Pass 2: the fixed options object (migration list active) reading that
+			// cache with the default strategy — the stale row must NOT be served;
+			// discovery re-runs and re-derives the corrected metadata.
+			let fetches = 0;
+			const upgraded = await resolveProviderModels(
+				{
+					...basetenModelManagerOptions({ apiKey: "k", fetch: fetchMock }),
+					cacheDbPath,
+					fetchDynamicModels: async () => {
+						fetches++;
+						return [discoveredFlash];
+					},
+				},
+				"online-if-uncached",
+			);
+			const flash = upgraded.models.find(model => model.id === "zai-org/GLM-5.3-Flash");
+			expect(fetches).toBe(1);
+			expect(flash?.reasoning).toBe(true);
+			expect(flash?.thinking).toEqual({
+				mode: "effort",
+				efforts: [Effort.Low, Effort.High, Effort.Max],
+				defaultLevel: Effort.Max,
+				requiresEffort: true,
+			});
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
 	});
 });
