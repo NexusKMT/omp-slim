@@ -2,12 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed working-memory recall returning too few or no results when many matching rows had been retired with `memory_edit invalidate` (which sets `valid_until` and leaves `superseded_by` unset).
+
 ## [18.0.9] - 2026-08-28
 
 ### Fixed
 
 - Fixed working-memory search returning too few or no results when the most relevant matches had been superseded, ensuring valid older entries are still returned.
-- Fixed retired working-memory rows occupying FTS candidate slots: because the fixed-size candidate window was filled before visibility was applied, a query whose top lexical matches were retired could return fewer rows than requested, or none, while valid rows existed. The candidate queries now apply the same visibility predicate as the rest of recall — excluding both superseded rows and rows past their `valid_until`, which is the shape an invalidation without a replacement id produces — and probe by key rather than materializing the live-row set.
 
 ## [18.0.0] - 2026-08-22
 

@@ -559,7 +559,7 @@ function ftsRows(
 				   AND EXISTS (SELECT 1 FROM working_memory w WHERE w.id = f.id AND w.superseded_by IS NULL
 				       AND (w.valid_until IS NULL OR w.valid_until > ?))
 				 ORDER BY f.rank, f.id LIMIT ?`,
-				[ftsQuery(query, useSynonyms), new Date().toISOString(), limit],
+				[ftsQuery(query, useSynonyms), nowIso(), limit],
 			);
 		}
 		return queryAll(
@@ -569,7 +569,7 @@ function ftsRows(
 			   AND EXISTS (SELECT 1 FROM episodic_memory e WHERE e.rowid = f.rowid AND e.superseded_by IS NULL
 			       AND (e.valid_until IS NULL OR e.valid_until > ?))
 			 ORDER BY f.rank, f.rowid LIMIT ?`,
-			[ftsQuery(query, useSynonyms), new Date().toISOString(), limit],
+			[ftsQuery(query, useSynonyms), nowIso(), limit],
 		);
 	} catch {
 		return [];
