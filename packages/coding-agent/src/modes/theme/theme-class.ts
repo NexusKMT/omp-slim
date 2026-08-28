@@ -350,6 +350,9 @@ export class Theme {
 		const ansi = this.#fgColors[color];
 		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
 		if (ansi !== "\x1b[39m") return ansi;
+		const backgroundAnsi = this.#bgColors[background];
+		if (!backgroundAnsi) throw new Error(`Unknown theme background color: ${background}`);
+		if (backgroundAnsi === "\x1b[49m") return ansi;
 		const backgroundLuma = colorLuma(this.getBgHex(background));
 		return colorToAnsi(backgroundLuma !== undefined && backgroundLuma > 0.5 ? "#000000" : "#e5e5e7", this.mode);
 	}

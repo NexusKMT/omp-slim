@@ -62,6 +62,28 @@ describe("empty foreground contrast", () => {
 		expect(porcelain.getFgOnBgAnsi("userMessageText", "userMessageBg")).toBe("\x1b[38;2;229;229;231m");
 	});
 
+	it("preserves terminal defaults when the message background is also default", () => {
+		const { dark } = createBaseThemes();
+		const darkJson = getBuiltinThemes().dark;
+		if (!darkJson) throw new Error("Base dark theme is unavailable");
+		const terminalDefault = createTheme(
+			{
+				...darkJson,
+				colors: { ...darkJson.colors, userMessageBg: "", userMessageText: "" },
+			},
+			{ mode: "truecolor" },
+		);
+		try {
+			setThemeInstance(terminalDefault);
+			const surfaceColor = getEditorTheme().surfaceColor;
+			if (!surfaceColor) throw new Error("Editor surface color is unavailable");
+
+			expect(surfaceColor("typed")).toBe("\x1b[49m\x1b[39mtyped\x1b[39m\x1b[49m");
+		} finally {
+			setThemeInstance(dark);
+		}
+	});
+
 	it("pairs the editor surface with its user-message foreground", () => {
 		const { light, dark } = createBaseThemes();
 		try {
