@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/login` for Qianfan rejecting valid API keys that lack access to the validation model, treating an authenticated `invalid_model` response as a successful credential check.
+
 ## [18.0.9] - 2026-08-28
 
 ### Fixed

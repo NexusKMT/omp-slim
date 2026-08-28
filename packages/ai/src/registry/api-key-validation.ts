@@ -1,4 +1,4 @@
-import { ProviderHttpError } from "../error/classes";
+import { OpenAIHttpError, ProviderHttpError } from "../error/classes";
 import type { FetchImpl } from "../types";
 
 type OpenAICompatibleValidationOptions = {
@@ -8,6 +8,7 @@ type OpenAICompatibleValidationOptions = {
 	model: string;
 	signal?: AbortSignal;
 	fetch?: FetchImpl;
+	tolerateModelDenied?: boolean;
 };
 type AnthropicCompatibleValidationOptions = {
 	provider: string;
@@ -40,7 +41,7 @@ function resolveValidationHeaders(
 	return typeof headers === "function" ? headers() : headers;
 }
 
-async function createApiKeyValidationError(provider: string, response: Response): Promise<ProviderHttpError> {
+async function readErrorEnvelope(response: Response): Promise<{ details: string; code: string | undefined }> {
 	let details = "";
 	try {
 		details = (await response.text()).trim();
@@ -48,10 +49,34 @@ async function createApiKeyValidationError(provider: string, response: Response)
 		// Ignore body read errors; the HTTP status still preserves the failure category.
 	}
 
+	let bodyJson: unknown;
+	try {
+		bodyJson = details ? JSON.parse(details) : undefined;
+	} catch {
+		bodyJson = undefined;
+	}
+	const { code } = OpenAIHttpError.parseEnvelope(bodyJson, details);
+	return { details, code };
+}
+
+async function createApiKeyValidationError(provider: string, response: Response): Promise<ProviderHttpError> {
+	const { details, code } = await readErrorEnvelope(response);
+
 	const message = details
 		? `${provider} API key validation failed (${response.status}): ${details}`
 		: `${provider} API key validation failed (${response.status})`;
-	return new ProviderHttpError(message, response.status, { headers: response.headers });
+	return new ProviderHttpError(message, response.status, { headers: response.headers, code });
+}
+
+/**
+ * Whether an OpenAI-compatible error body reports that the request was
+ * authenticated but the model was denied. Providers such as Qianfan return
+ * `401 invalid_model` when the key has no access to the validation model —
+ * the key itself is valid, so it must not block login.
+ */
+async function isAuthenticatedModelDenied(response: Response): Promise<boolean> {
+	if (response.status !== 401) return false;
+	return (await readErrorEnvelope(response)).code === "invalid_model";
 }
 
 /**
@@ -80,6 +105,10 @@ export async function validateOpenAICompatibleApiKey(options: OpenAICompatibleVa
 	});
 
 	if (response.ok) {
+		return;
+	}
+
+	if (options.tolerateModelDenied && (await isAuthenticatedModelDenied(response))) {
 		return;
 	}
 
