@@ -210,7 +210,18 @@ describe("SnapcompactInlineTransformer", () => {
 
 	it("compacts text in mixed tool results while preserving every source image and the input context", async () => {
 		const options = withTestShape({ renderSystemPrompt: "all", renderToolResults: true });
-		const transformer = new SnapcompactInlineTransformer(options);
+		const renderedTexts: string[] = [];
+		const transformer = new SnapcompactInlineTransformer(options, undefined, {
+			async framesFor(text, shape, maxFrames) {
+				renderedTexts.push(text);
+				const count = Math.min(snapcompact.frames(text, { shape }), maxFrames ?? Number.POSITIVE_INFINITY);
+				return Array.from({ length: count }, () => ({
+					type: "image" as const,
+					data: "ZnJhbWU=",
+					mimeType: "image/png",
+				}));
+			},
+		});
 		const toolImage: ImageContent = {
 			type: "image",
 			data: "dG9vbC1pbWFnZS1ieXRlcw==",
@@ -218,6 +229,11 @@ describe("SnapcompactInlineTransformer", () => {
 			detail: "original",
 			providerFile: { provider: "anthropic", id: "file_tool_source" },
 			url: "https://images.example.invalid/tool-source.webp",
+		};
+		const secondToolImage: ImageContent = {
+			type: "image",
+			data: "c2Vjb25kLXRvb2wtaW1hZ2UtYnl0ZXM=",
+			mimeType: "image/png",
 		};
 		const userImage: ImageContent = {
 			type: "image",
@@ -230,6 +246,7 @@ describe("SnapcompactInlineTransformer", () => {
 			{ type: "text", text: LARGE },
 			toolImage,
 			{ type: "text", text: "mixed result text tail" },
+			secondToolImage,
 		];
 		const mixedResult: ToolResultMessage = {
 			...toolResult("call_mixed", LARGE),
@@ -241,6 +258,7 @@ describe("SnapcompactInlineTransformer", () => {
 		};
 		const pristine = structuredClone(context);
 		const toolImageSnapshot = structuredClone(toolImage);
+		const secondToolImageSnapshot = structuredClone(secondToolImage);
 		const userImageSnapshot = structuredClone(userImage);
 		const originalMessages = context.messages;
 		const originalSystemPrompt = context.systemPrompt;
@@ -258,12 +276,35 @@ describe("SnapcompactInlineTransformer", () => {
 		expect(estimate.systemPrompt?.applied).toBe(true);
 		const swapped = result.messages[1] as ToolResultMessage;
 		const toolImageIndex = swapped.content.indexOf(toolImage);
-		expect(swapped.content[0].type).toBe("text");
-		expect(toolImageIndex).toBe(swapped.content.length - 1);
-		expect(swapped.content.slice(1, toolImageIndex).every(block => block.type === "image")).toBe(true);
-		expect(swapped.content.slice(1, toolImageIndex)).toHaveLength(estimate.toolResults!.frames);
+		const secondToolImageIndex = swapped.content.indexOf(secondToolImage);
+		expect(swapped.content[0]).toEqual({
+			type: "text",
+			text: expect.stringContaining("source-image position markers"),
+		});
+		expect(toolImageIndex).toBe(estimate.toolResults!.frames + 2);
+		expect(secondToolImageIndex).toBe(swapped.content.length - 1);
+		expect(swapped.content.slice(1, toolImageIndex - 1).every(block => block.type === "image")).toBe(true);
+		expect(swapped.content.slice(1, toolImageIndex - 1)).toHaveLength(estimate.toolResults!.frames);
+		expect(swapped.content[toolImageIndex - 1]).toEqual({
+			type: "text",
+			text: "[Original source image 1; corresponds to its marker in the compacted text.]",
+		});
+		const mixedRenderedText = renderedTexts.find(text => text.includes("mixed result text tail"));
+		expect(mixedRenderedText).toContain("[Source image 1 was attached here in the original tool result.]");
+		expect(mixedRenderedText!.indexOf("[Source image 1")).toBeLessThan(
+			mixedRenderedText!.indexOf("mixed result text tail"),
+		);
 		expect(swapped.content[toolImageIndex]).toBe(toolImage);
 		expect(swapped.content[toolImageIndex]).toEqual(toolImageSnapshot);
+		expect(mixedRenderedText!.indexOf("mixed result text tail")).toBeLessThan(
+			mixedRenderedText!.indexOf("[Source image 2"),
+		);
+		expect(swapped.content[secondToolImageIndex - 1]).toEqual({
+			type: "text",
+			text: "[Original source image 2; corresponds to its marker in the compacted text.]",
+		});
+		expect(swapped.content[secondToolImageIndex]).toBe(secondToolImage);
+		expect(swapped.content[secondToolImageIndex]).toEqual(secondToolImageSnapshot);
 		expect(result.messages[2]).toBe(context.messages[2]);
 
 		const carrier = result.messages[0] as { content: (TextContent | ImageContent)[] };
@@ -425,16 +466,22 @@ describe("SnapcompactInlineTransformer", () => {
 			systemPrompt: context.systemPrompt!,
 			messages: context.messages,
 		});
-		const result = await new SnapcompactInlineTransformer(options).transform(context, model);
+		const frameCountSpy = spyOn(snapcompact, "frames");
+		try {
+			const result = await new SnapcompactInlineTransformer(options).transform(context, model);
 
-		expect(estimate.toolResults?.total).toBe(2);
-		expect(estimate.toolResults?.swapped).toBe(0);
-		expect(estimate.toolResults?.savedTokens).toBe(0);
-		expect(estimate.systemPrompt?.applied).toBe(false);
-		expect(estimate.systemPrompt?.reason).toBe("budget");
-		expect(estimate.savedTokens).toBe(0);
-		expect(result).toBe(context);
-		expect(result.messages[1]).toBe(mixedResult);
+			expect(frameCountSpy).not.toHaveBeenCalled();
+			expect(estimate.toolResults?.total).toBe(2);
+			expect(estimate.toolResults?.swapped).toBe(0);
+			expect(estimate.toolResults?.savedTokens).toBe(0);
+			expect(estimate.systemPrompt?.applied).toBe(false);
+			expect(estimate.systemPrompt?.reason).toBe("budget");
+			expect(estimate.savedTokens).toBe(0);
+			expect(result).toBe(context);
+			expect(result.messages[1]).toBe(mixedResult);
+		} finally {
+			frameCountSpy.mockRestore();
+		}
 	});
 
 	it("caches renders across turns: identical input does not re-rasterize", async () => {

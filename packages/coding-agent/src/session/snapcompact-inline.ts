@@ -242,8 +242,14 @@ function buildInlineToolResultCandidate(
 ): BuiltInlineToolResultCandidate {
 	const blocks: BlockViews = Array.isArray(content) ? (content as BlockViews) : [];
 	const textBlocks: string[] = [];
+	let sourceImageIndex = 0;
 	for (const block of blocks) {
-		if (block.type === "text" && typeof block.text === "string") textBlocks.push(block.text);
+		if (block.type === "text" && typeof block.text === "string") {
+			textBlocks.push(block.text);
+		} else if (block.type === "image") {
+			sourceImageIndex++;
+			textBlocks.push(`[Source image ${sourceImageIndex} was attached here in the original tool result.]`);
+		}
 	}
 	const text = textBlocks.join("\n");
 	const textTokens = text.length > 0 ? tokenizer.countTokens(text) : 0;
@@ -438,6 +444,7 @@ export class SnapcompactInlineTransformer {
 		const shape = snapcompact.resolveShape(model, this.options.shape);
 		const tokenizer = new Tokenizer(model);
 		const budget = snapcompact.providerImageBudget(model.provider) - countMessageImages(context.messages);
+		if (budget <= 0) return context;
 
 		const messages = [...context.messages];
 
@@ -492,10 +499,15 @@ export class SnapcompactInlineTransformer {
 			if (!target) continue;
 			const frames = await this.#framesFor(this.#toolCache, swap.id, target.text, shape);
 			const content: (TextContent | ImageContent)[] = [{ type: "text", text: toolResultNote }, ...frames];
-			// Keep the note adjacent to its generated frames, then retain
-			// source images in their original relative order and identity.
+			let sourceImageIndex = 0;
 			for (const block of target.message.content) {
-				if (block.type === "image") content.push(block);
+				if (block.type !== "image") continue;
+				sourceImageIndex++;
+				content.push({
+					type: "text",
+					text: `[Original source image ${sourceImageIndex}; corresponds to its marker in the compacted text.]`,
+				});
+				content.push(block);
 			}
 			messages[target.index] = { ...target.message, content };
 			changed = true;
