@@ -34,6 +34,9 @@
 - Fixed image previews displaying as garbled characters in Paseo terminals.
 - Fixed terminal resizing from duplicating committed history in native scrollback.
 - Fixed autocomplete suggestions for bare-name skills such as `/batch` when no command matches the prefix more strongly.
+### Fixed
+
+- LaTeX `\textbf`, `\textit`, `\textsl`, and `\emph` now render terminal bold and italic attributes; unsupported text-font fallbacks such as `\texttt` and `\textsf` remain plain text.
 
 ## [18.0.6] - 2026-08-26
 
