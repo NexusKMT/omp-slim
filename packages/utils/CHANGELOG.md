@@ -6,6 +6,10 @@
 
 - Added `checkpointWal` to checkpoint committed SQLite WAL frames without blocking concurrent readers.
 
+### Fixed
+
+- Re-armed `postmortem` after a manual `cleanup()` that keeps the process alive, so resources opened afterwards are still cleaned at the eventual real exit instead of being silently orphaned.
+
 ## [18.0.9] - 2026-08-28
 
 ### Fixed

@@ -249,4 +249,22 @@ describe("postmortem expected cleanup errors", () => {
 		expect(result.stdout).toContain("cleanup deadline released");
 		expect(result.stderr).not.toContain("cleanup stayed pending after the deadline");
 	});
+
+	it("re-arms registrations after a manual cleanup keeps the process alive", async () => {
+		const result = await runPostmortemProbe(`
+			import { postmortem } from "${postmortemModuleUrl}";
+
+			const order = [];
+			await postmortem.cleanup();
+			// Registered after a completed manual cleanup: must arm for the next pass,
+			// not run immediately as a one-shot late callback.
+			postmortem.register("late", () => { order.push("cleanup"); });
+			order.push("registered");
+			await postmortem.cleanup();
+			console.log(JSON.stringify(order));
+		`);
+
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout).toContain('["registered","cleanup"]');
+	});
 });

@@ -5,7 +5,7 @@
 ### Fixed
 
 - Fixed `import numpy` (and other native-extension imports) hanging indefinitely in the Python eval tool on Windows, where the runner's always-on background stdin reader deadlocked native DLL loading; Windows now reads the control channel serially between requests while POSIX keeps concurrent request dispatch ([#7985](https://github.com/can1357/oh-my-pi/issues/7985)).
-- Preserved prompts submitted immediately before exit and checkpointed prompt and agent database WALs during shutdown ([#10079](https://github.com/can1357/oh-my-pi/issues/10079)).
+- Made prompt history write through synchronously so a submitted prompt is durable immediately, and checkpointed the prompt and agent database WALs on exit so they no longer grow unbounded across sessions ([#10079](https://github.com/can1357/oh-my-pi/issues/10079)).
 
 ## [18.0.9] - 2026-08-28
 

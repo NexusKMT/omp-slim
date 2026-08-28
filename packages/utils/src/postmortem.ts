@@ -80,11 +80,18 @@ const fatalRecoveryHintProviders = new Set<FatalRecoveryHintProvider>();
 
 /**
  * Internal: runs all registered cleanup callbacks for the given reason.
- * Ensures each callback is invoked at most once. Handles errors and prevents reentrancy.
+ * Ensures each armed callback is invoked at most once per pass. Handles errors
+ * and prevents reentrancy.
+ *
+ * `keepAlive` marks a manual cleanup that keeps the process running (see
+ * {@link cleanup}). Such a pass re-arms the system afterwards — the stage
+ * returns to `idle` so resources opened later are still cleaned at the real
+ * exit, and callbacks that already ran stay latched (`done`) so they never run
+ * twice. An exit-driven pass instead settles to `complete` and stays there.
  *
  * Returns a Promise that settles after all cleanups complete or error out.
  */
-function runCleanup(reason: Reason): Promise<void> {
+function runCleanup(reason: Reason, keepAlive = false): Promise<void> {
 	switch (cleanupStage) {
 		case "idle":
 			cleanupStage = "running";
@@ -94,6 +101,10 @@ function runCleanup(reason: Reason): Promise<void> {
 		case "complete":
 			return Promise.resolve();
 	}
+
+	const settle = (): void => {
+		cleanupStage = keepAlive ? "idle" : "complete";
+	};
 
 	// Call .cleanup() for each callback that is still "armed".
 	// Use Promise.try to handle sync/async, but only those armed.
@@ -108,16 +119,19 @@ function runCleanup(reason: Reason): Promise<void> {
 				logger.error("Cleanup callback failed", { err, stack: err.stack });
 			}
 		}
-		cleanupStage = "complete";
+		settle();
 	});
 	const deadline = Promise.withResolvers<void>();
 	const deadlineTimer = setTimeout(() => {
 		logger.error("Cleanup deadline exceeded; proceeding with exit", { reason });
-		cleanupStage = "complete";
+		settle();
 		deadline.resolve();
 	}, CLEANUP_DEADLINE_MS);
 	cleanupPromise = Promise.race([cleanupSettled, deadline.promise]).finally(() => {
 		clearTimeout(deadlineTimer);
+		// A re-armed pass must drop its settled promise so the next real exit
+		// starts a fresh cleanup instead of returning this resolved one.
+		if (keepAlive) cleanupPromise = undefined;
 	});
 	return cleanupPromise;
 }
@@ -510,11 +524,12 @@ export function register(id: string, callback: (reason: Reason) => void | Promis
 }
 
 /**
- * Runs all cleanup callbacks without exiting.
+ * Runs all cleanup callbacks without exiting, then re-arms the system so
+ * resources opened afterwards are still cleaned at the eventual real exit.
  * Use this in workers or when you need to clean up but continue execution.
  */
 export function cleanup(): Promise<void> {
-	return runCleanup(Reason.MANUAL);
+	return runCleanup(Reason.MANUAL, true);
 }
 
 /** Controls how manual process shutdown handles terminal output. */

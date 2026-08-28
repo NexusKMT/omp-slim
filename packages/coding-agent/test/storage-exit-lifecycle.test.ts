@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -11,27 +11,19 @@ const REPO_ROOT = path.resolve(import.meta.dir, "../../..");
 const HISTORY_STORAGE_MODULE = path.resolve(import.meta.dir, "../src/session/history-storage.ts");
 const AGENT_STORAGE_MODULE = path.resolve(import.meta.dir, "../src/session/agent-storage.ts");
 
-async function freshStorage(prefix = "omp-history-drain-"): Promise<HistoryStorage> {
+async function freshStorage(prefix = "omp-history-write-through-"): Promise<HistoryStorage> {
 	tempDir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
 	const dbPath = path.join(tempDir, "history.db");
 	HistoryStorage.close();
 	return HistoryStorage.open(dbPath);
 }
 
-/** Drain the 100ms insert batch window, then await the pending writes. */
-async function flush(...writes: Promise<void>[]): Promise<void> {
-	vi.advanceTimersByTime(100);
-	await Promise.all(writes);
-}
-
 beforeEach(() => {
 	HistoryStorage.close();
-	vi.useFakeTimers();
 });
 
 afterEach(async () => {
 	HistoryStorage.close();
-	vi.useRealTimers();
 	if (tempDir) {
 		await removeWithRetries(tempDir).catch(() => {});
 		tempDir = "";
@@ -39,44 +31,33 @@ afterEach(async () => {
 });
 
 /**
- * Contract for the history-storage async drain: multiple rapid `add()` calls
- * within the drain window are batched into a single flushed write, and the
- * returned promise resolves once the batch is persisted. This guards the
- * `Promise.withResolvers()` refactor of `AsyncDrain` — the drain must still
- * coalesce pushes and resolve its per-batch promise.
+ * Prompt submission is human-paced, so history writes through synchronously:
+ * every accepted prompt is durable the moment `add()` resolves, with no batch
+ * window a fast exit could race.
  */
-describe("HistoryStorage AsyncDrain batching", () => {
-	it("coalesces pushes within the drain window into one flushed write", async () => {
+describe("HistoryStorage write-through", () => {
+	it("persists each submitted prompt without waiting on a timer", async () => {
 		const storage = await freshStorage();
-		// Three rapid adds before the 100ms drain window fires.
-		const p1 = storage.add("first prompt");
-		const p2 = storage.add("second prompt");
-		const p3 = storage.add("third prompt");
-		await flush(p1, p2, p3);
+		await storage.add("first prompt");
+		await storage.add("second prompt");
+		await storage.add("third prompt");
 
 		expect(storage.getRecent(10).map(r => r.prompt)).toEqual(["third prompt", "second prompt", "first prompt"]);
 	});
 
-	it("resolves the returned promise for each coalesced push", async () => {
+	it("replaces provenance when the same prompt is resubmitted", async () => {
 		const storage = await freshStorage();
-		const p1 = storage.add("a");
-		const p2 = storage.add("b");
-		await flush(p1, p2);
-		// Both promises must have resolved (not hang) — flush awaited them.
-		expect(storage.getRecent(10)).toHaveLength(2);
-	});
+		await storage.add("repeat", "/first", "session-a");
+		await storage.add("repeat", "/second", "session-b");
 
-	it("starts a fresh batch after the prior one flushes", async () => {
-		const storage = await freshStorage();
-		await flush(storage.add("batch-one"));
-		// After the first batch flushes, a new add starts a new batch.
-		await flush(storage.add("batch-two"));
-		expect(storage.getRecent(10).map(r => r.prompt)).toEqual(["batch-two", "batch-one"]);
+		const entries = storage.getRecent(10);
+		expect(entries).toHaveLength(1);
+		expect(entries[0]).toMatchObject({ prompt: "repeat", cwd: "/second", sessionId: "session-b" });
 	});
 });
 
 describe("storage process-exit cleanup", () => {
-	it("flushes queued writes and checkpoints both databases before a hard exit", async () => {
+	it("persists a synchronous prompt and flushes the deferred perf sample before a hard exit", async () => {
 		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-storage-exit-"));
 		const historyDbPath = path.join(tempDir, "history.db");
 		const agentDbPath = path.join(tempDir, "agent.db");
@@ -87,7 +68,7 @@ describe("storage process-exit cleanup", () => {
 			`import { AgentStorage } from ${JSON.stringify(agentModule)};`,
 			`const history = HistoryStorage.open(${JSON.stringify(historyDbPath)});`,
 			`const agent = await AgentStorage.open(${JSON.stringify(agentDbPath)});`,
-			'void history.add("queued immediately before exit", "/tmp", "exit-session");',
+			'void history.add("written immediately before exit", "/tmp", "exit-session");',
 			'void agent.recordModelPerf("openai/repro", { outputTokens: 10, durationMs: 1000 });',
 			"process.exit(0);",
 		].join("\n");
@@ -106,13 +87,14 @@ describe("storage process-exit cleanup", () => {
 			Bun.write(agentCheckpoint, Bun.file(agentDbPath)),
 		]);
 
-		// Read copies of the main database files without their WALs. The queued
-		// rows are visible only if process-exit cleanup checkpointed them.
+		// Read copies of the main database files without their WALs. Both rows are
+		// visible only if process-exit cleanup flushed the deferred perf batch and
+		// checkpointed committed frames into the main file.
 		const historyDb = new Database(historyCheckpoint, { readonly: true });
 		const agentDb = new Database(agentCheckpoint, { readonly: true });
 		try {
 			expect(historyDb.query<{ prompt: string }, []>("SELECT prompt FROM history").get()).toEqual({
-				prompt: "queued immediately before exit",
+				prompt: "written immediately before exit",
 			});
 			expect(
 				agentDb
@@ -163,5 +145,42 @@ describe("storage process-exit cleanup", () => {
 		expect(stdout.trim()).toBe(
 			JSON.stringify({ prompts: ["opened after cleanup"], commands: { "after-cleanup": 1 } }),
 		);
+	});
+
+	it("re-arms exit cleanup for a store opened after a manual postmortem cleanup", async () => {
+		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-storage-rearm-"));
+		const agentDbPath = path.join(tempDir, "agent.db");
+		// A manual cleanup keeps the process alive; the store is opened afterward,
+		// then only a real exit flushes its deferred perf batch. If postmortem did
+		// not re-arm, the exit callback would never fire and the sample would be lost.
+		const script = [
+			'import { postmortem } from "@oh-my-pi/pi-utils";',
+			`import { AgentStorage } from ${JSON.stringify(AGENT_STORAGE_MODULE)};`,
+			"await postmortem.cleanup();",
+			`const agent = await AgentStorage.open(${JSON.stringify(agentDbPath)});`,
+			'void agent.recordModelPerf("openai/rearm", { outputTokens: 20, durationMs: 2000 });',
+			"process.exit(0);",
+		].join("\n");
+		const child = Bun.spawn([process.execPath, "--eval", script], {
+			cwd: REPO_ROOT,
+			stdin: "ignore",
+			stdout: "ignore",
+			stderr: "pipe",
+		});
+		const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+		expect(exitCode, stderr).toBe(0);
+
+		const agentDb = new Database(agentDbPath, { readonly: true });
+		try {
+			expect(
+				agentDb
+					.query<{ samples: number; output_tokens: number; gen_ms: number }, []>(
+						"SELECT samples, output_tokens, gen_ms FROM model_perf WHERE model_key = 'openai/rearm'",
+					)
+					.get(),
+			).toEqual({ samples: 1, output_tokens: 20, gen_ms: 2000 });
+		} finally {
+			agentDb.close();
+		}
 	});
 });

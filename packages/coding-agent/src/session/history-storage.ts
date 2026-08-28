@@ -1,14 +1,7 @@
 import { Database, type Statement } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import {
-	AsyncDrain,
-	checkpointWal,
-	getDbBusyTimeoutMs,
-	getHistoryDbPath,
-	logger,
-	postmortem,
-} from "@oh-my-pi/pi-utils";
+import { checkpointWal, getDbBusyTimeoutMs, getHistoryDbPath, logger, postmortem } from "@oh-my-pi/pi-utils";
 
 /** A unique prompt with provenance from its most recent submission. */
 export interface HistoryEntry {
@@ -73,7 +66,6 @@ let cancelExitCleanup: (() => void) | undefined;
 export class HistoryStorage {
 	#db: Database;
 	static #instance?: HistoryStorage;
-	#drain = new AsyncDrain<Pick<HistoryEntry, "prompt" | "cwd" | "sessionId">>(100);
 	#sessionResolver?: () => string | undefined;
 
 	// Prepared statements
@@ -146,7 +138,7 @@ ON CONFLICT(prompt) DO UPDATE SET
 		return instance;
 	}
 
-	/** Flushes queued prompts, closes the process-wide database, and permits reopening it. */
+	/** Checkpoints and closes the process-wide database, and permits reopening it. */
 	static close(): void {
 		const instance = HistoryStorage.#instance;
 		HistoryStorage.#instance = undefined;
@@ -156,9 +148,6 @@ ON CONFLICT(prompt) DO UPDATE SET
 	}
 
 	#close(): void {
-		// History batches are synchronous once invoked, so this persists them
-		// before finalizing the statements they use, including in process.on("exit").
-		void this.#drain.flush();
 		checkpointWal(this.#db);
 		for (const stmt of this.#substringStmts.values()) stmt.finalize();
 		this.#substringStmts.clear();
@@ -179,20 +168,28 @@ ON CONFLICT(prompt) DO UPDATE SET
 	/**
 	 * Register a resolver that supplies the current session ID for prompts added
 	 * without an explicit `sessionId`. Evaluated synchronously at `add()` time so
-	 * batched writes capture the session active when the prompt was submitted.
+	 * each write captures the session active when the prompt was submitted.
 	 */
 	setSessionResolver(resolver: () => string | undefined): void {
 		this.#sessionResolver = resolver;
 	}
 
-	/** Stores a prompt and replaces its provenance with the latest submission. */
+	/**
+	 * Stores a prompt and replaces its provenance with the latest submission.
+	 * The write is synchronous: prompt submission is human-paced, not a hot
+	 * path, so the row is durable the moment `add()` returns and can never be
+	 * lost to an exit racing a deferred flush. Failures are logged, not thrown.
+	 */
 	add(prompt: string, cwd?: string, sessionId?: string): Promise<void> {
 		const trimmed = normalizePrompt(prompt);
 		if (!trimmed) return Promise.resolve();
 		const session = sessionId ?? this.#sessionResolver?.();
-		return this.#drain.push({ prompt: trimmed, cwd: cwd ?? undefined, sessionId: session || undefined }, rows => {
-			this.#insertBatch(rows);
-		});
+		try {
+			this.#insertBatch([{ prompt: trimmed, cwd: cwd ?? undefined, sessionId: session || undefined }]);
+		} catch (error) {
+			logger.error("HistoryStorage add failed", { error: String(error) });
+		}
+		return Promise.resolve();
 	}
 
 	/** Returns unique prompts ordered by their most recent submission. */
