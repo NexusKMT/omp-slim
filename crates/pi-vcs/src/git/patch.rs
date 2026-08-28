@@ -20,8 +20,7 @@ use gix::{
 	refs::transaction::PreviousValue,
 };
 
-use super::GitRepo;
-use super::mutate::update_reference;
+use super::{GitRepo, mutate::update_reference};
 use crate::{
 	error::{Error, Result},
 	types::{ApplyOptions, DiffOptions, HunkSelection, HunkSelectionError, HunkSpec},
@@ -1161,7 +1160,15 @@ fn update_stash_ref(
 	message: String,
 	force_create_reflog: bool,
 ) -> Result<()> {
-	update_reference(repo, "git stash ref", "refs/stash", id, expected, &message, force_create_reflog)
+	update_reference(
+		repo,
+		"git stash ref",
+		"refs/stash",
+		id,
+		expected,
+		&message,
+		force_create_reflog,
+	)
 }
 
 fn previous_stash_from_log(log: &[u8]) -> Option<(gix::ObjectId, &[u8])> {

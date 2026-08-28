@@ -48,8 +48,10 @@ pub(crate) fn update_reference(
 		deref: false,
 	};
 	let now;
-	let committer = if let Some(signature) =
-		repo.committer().transpose().map_err(|err| Error::backend(op, err))?
+	let committer = if let Some(signature) = repo
+		.committer()
+		.transpose()
+		.map_err(|err| Error::backend(op, err))?
 	{
 		signature
 	} else {
@@ -59,7 +61,11 @@ pub(crate) fn update_reference(
 				.duration_since(std::time::UNIX_EPOCH)
 				.map_or(0, |elapsed| elapsed.as_secs())
 		);
-		gix::actor::SignatureRef { name: "oh-my-pi".into(), email: "omp@localhost".into(), time: &now }
+		gix::actor::SignatureRef {
+			name:  "oh-my-pi".into(),
+			email: "omp@localhost".into(),
+			time:  &now,
+		}
 	};
 	repo
 		.edit_references_as(Some(edit), Some(committer))
@@ -265,7 +271,15 @@ impl GitRepo {
 		} else {
 			gix::refs::transaction::PreviousValue::MustNotExist
 		};
-		update_reference(&repo, "git branch", &full, id, constraint, &format!("branch: Created from {start}"), false)?;
+		update_reference(
+			&repo,
+			"git branch",
+			&full,
+			id,
+			constraint,
+			&format!("branch: Created from {start}"),
+			false,
+		)?;
 		Ok(())
 	}
 
