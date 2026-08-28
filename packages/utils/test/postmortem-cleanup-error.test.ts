@@ -268,6 +268,24 @@ describe("postmortem expected cleanup errors", () => {
 		expect(result.stdout).toContain('["registered","cleanup"]');
 	});
 
+	it("runs a persistent owner again at real exit after a keep-alive cleanup", async () => {
+		const result = await runPostmortemProbe(`
+			import { postmortem } from "${postmortemModuleUrl}";
+
+			const order = [];
+			postmortem.register("persistent", () => { order.push("cleanup"); });
+			await postmortem.cleanup();
+			// The owner remains registered while its subsystem creates resources
+			// again; the real exit must run the same registration a second time.
+			order.push("reused");
+			process.on("exit", () => { console.log(JSON.stringify(order)); });
+			process.exit(0);
+		`);
+
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout).toContain('["cleanup","reused","cleanup"]');
+	});
+
 	it("skips exit-only callbacks on keep-alive cleanup but runs them on the real exit", async () => {
 		const result = await runPostmortemProbe(`
 			import { postmortem } from "${postmortemModuleUrl}";
@@ -275,7 +293,7 @@ describe("postmortem expected cleanup errors", () => {
 			const order = [];
 			// Exit-only: a keep-alive cleanup must skip it without latching, so the
 			// registration survives for the eventual real exit.
-			postmortem.register("exit-only", () => { order.push("cleanup"); }, true);
+			postmortem.register("exit-only", () => { order.push("cleanup"); }, { exitOnly: true });
 			await postmortem.cleanup();
 			order.push("after-keepalive");
 			process.on("exit", () => { console.log(JSON.stringify(order)); });

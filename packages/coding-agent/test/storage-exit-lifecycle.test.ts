@@ -147,6 +147,50 @@ describe("storage process-exit cleanup", () => {
 		);
 	});
 
+	it("arms storage opened while a keep-alive cleanup is still running", async () => {
+		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-storage-running-cleanup-"));
+		const agentDbPath = path.join(tempDir, "agent.db");
+		const checkpointed = path.join(tempDir, "agent-checkpoint.db");
+		const script = [
+			'import { postmortem } from "@oh-my-pi/pi-utils";',
+			`import { AgentStorage } from ${JSON.stringify(AGENT_STORAGE_MODULE)};`,
+			"const gate = Promise.withResolvers();",
+			'postmortem.register("blocker", () => gate.promise);',
+			"const cleanup = postmortem.cleanup();",
+			// Open while the blocker keeps cleanupStage="running". The exit-only
+			// registration must stay armed rather than firing before publication.
+			`const agent = await AgentStorage.open(${JSON.stringify(agentDbPath)});`,
+			'void agent.recordModelPerf("openai/running", { outputTokens: 30, durationMs: 3000 });',
+			"gate.resolve();",
+			"await cleanup;",
+			"process.exit(0);",
+		].join("\n");
+		const child = Bun.spawn([process.execPath, "--eval", script], {
+			cwd: REPO_ROOT,
+			stdin: "ignore",
+			stdout: "ignore",
+			stderr: "pipe",
+		});
+		const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+		expect(exitCode, stderr).toBe(0);
+
+		// Read the main file without its WAL: only the real-exit callback flushes
+		// the deferred sample and checkpoints it into this copy.
+		await Bun.write(checkpointed, Bun.file(agentDbPath));
+		const agentDb = new Database(checkpointed, { readonly: true });
+		try {
+			expect(
+				agentDb
+					.query<{ samples: number; output_tokens: number; gen_ms: number }, []>(
+						"SELECT samples, output_tokens, gen_ms FROM model_perf WHERE model_key = 'openai/running'",
+					)
+					.get(),
+			).toEqual({ samples: 1, output_tokens: 30, gen_ms: 3000 });
+		} finally {
+			agentDb.close();
+		}
+	});
+
 	it("re-arms exit cleanup for a store opened after a manual postmortem cleanup", async () => {
 		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-storage-rearm-"));
 		const agentDbPath = path.join(tempDir, "agent.db");

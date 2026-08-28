@@ -399,7 +399,7 @@ FROM model_usage_legacy
 				// continuing process (Settings, MCP cache, callers hold it); the real
 				// exit closes. Register before publishing so a real-exit-in-progress
 				// late registration sees an empty map.
-				cancelExitCleanup ??= postmortem.register("agent-storage", () => AgentStorage.close(), true);
+				cancelExitCleanup ??= postmortem.register("agent-storage", () => AgentStorage.close(), { exitOnly: true });
 				instances.set(dbPath, storage);
 				return storage;
 			} catch (err) {

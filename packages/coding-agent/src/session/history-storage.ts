@@ -134,7 +134,7 @@ ON CONFLICT(prompt) DO UPDATE SET
 		// Exit-only: a keep-alive cleanup leaves the handle valid so the editor can
 		// keep submitting prompts; the real exit closes. Register before publishing
 		// so a real-exit-in-progress late registration cannot close this instance.
-		cancelExitCleanup = postmortem.register("history-storage", () => HistoryStorage.close(), true);
+		cancelExitCleanup = postmortem.register("history-storage", () => HistoryStorage.close(), { exitOnly: true });
 		HistoryStorage.#instance = instance;
 		return instance;
 	}

@@ -9,7 +9,7 @@
 
 ### Fixed
 
-- Re-armed `postmortem` after a manual `cleanup()` that keeps the process alive, so resources opened afterwards are still cleaned at the eventual real exit instead of being silently orphaned.
+- Made `postmortem` registrations repeatable across manual keep-alive cleanup passes, so persistent resource owners and callbacks registered mid-pass remain armed for the eventual real exit.
 
 ## [18.0.9] - 2026-08-28
 
