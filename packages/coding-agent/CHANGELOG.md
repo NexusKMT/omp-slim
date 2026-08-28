@@ -33,6 +33,9 @@
 ### Fixed
 
 - Fixed snapcompact committing a projected context that was no smaller than the original; it now falls back or reports the skipped compaction ([#10023](https://github.com/can1357/oh-my-pi/issues/10023)).
+### Fixed
+
+- Fixed inline Snapcompact skipping all text compaction for tool results that also contain source images; mixed results now compact their text while preserving every original image block.
 
 ## [18.0.8] - 2026-08-27
 
