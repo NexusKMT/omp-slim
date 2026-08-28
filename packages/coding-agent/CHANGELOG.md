@@ -6,6 +6,9 @@
 
 - Added `/restart` to relaunch omp with the original launch flags and resume the current session in place.
 - Added the `band` composer shape: a flush soft-capped powerline status band above a curved `╰─` prompt, with the session title docked right on the working row instead of the band; the band sits flush under the working row while it renders, and keeps a blank line above itself when idle.
+### Fixed
+
+- The edit tool now reads `－`-prefixed MATCH lines as whole-line deletions (a `＋` run directly below replaces them), instead of failing to match the marker verbatim.
 ### Changed
 
 - The status line's brand icon now becomes a braille spinner with a turn timer while the agent works, fading between dim gray and the accent color across turn edges; the working row leads with an esc glyph and the streamed intent instead of its own spinner and trailing `[esc]` hint.
