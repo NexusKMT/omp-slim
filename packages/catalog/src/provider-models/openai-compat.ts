@@ -4170,10 +4170,9 @@ export function basetenModelManagerOptions(
 			// vocabulary, which OMP must not guess.
 			const isSupportedBasetenReasoningModel =
 				isKimiK3ModelId(defaults.id) ||
+				isReasoningGlmModelId(defaults.id) ||
 				defaults.id === "openai/gpt-oss-120b" ||
-				defaults.id === "deepseek-ai/DeepSeek-V4-Pro" ||
-				defaults.id === "zai-org/GLM-5.2" ||
-				defaults.id === "zai-org/GLM-5.2-Fast";
+				defaults.id === "deepseek-ai/DeepSeek-V4-Pro";
 			const reasoning =
 				isSupportedBasetenReasoningModel &&
 				(features.includes("reasoning") || features.includes("reasoning_effort"));

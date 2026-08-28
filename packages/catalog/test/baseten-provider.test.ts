@@ -71,6 +71,20 @@ describe("Baseten provider discovery", () => {
 								input_cache_read: "0.00000021",
 							},
 						},
+						{
+							id: "zai-org/GLM-5.3-Flash",
+							object: "model",
+							name: "GLM 5.3 Flash",
+							context_length: 1048576,
+							max_completion_tokens: 131072,
+							supported_features: ["tools", "json_mode", "structured_outputs", "reasoning"],
+							input_modalities: ["text", "image"],
+							pricing: {
+								prompt: "0.00000015",
+								completion: "0.0000005",
+								input_cache_read: "0.00000003",
+							},
+						},
 					],
 				}),
 				{ status: 200, headers: { "content-type": "application/json" } },
@@ -138,6 +152,29 @@ describe("Baseten provider discovery", () => {
 		expect(buildModel(glmFast).thinking).toMatchObject({
 			mode: "effort",
 			efforts: ["high", "max"],
+		});
+
+		const glmFlash = models?.find(model => model.id === "zai-org/GLM-5.3-Flash");
+		if (!glmFlash) throw new Error("Baseten GLM-5.3-Flash was not discovered");
+		expect(glmFlash).toMatchObject({
+			provider: "baseten",
+			api: "openai-completions",
+			name: "GLM 5.3 Flash",
+			reasoning: true,
+			input: ["text", "image"],
+			contextWindow: 1048576,
+			maxTokens: 131072,
+			cost: {
+				input: 0.15,
+				output: 0.5,
+				cacheRead: 0.03,
+				cacheWrite: 0,
+			},
+		});
+		expect(buildModel(glmFlash).thinking).toMatchObject({
+			mode: "effort",
+			efforts: ["low", "high", "max"],
+			defaultLevel: "max",
 		});
 	});
 });
