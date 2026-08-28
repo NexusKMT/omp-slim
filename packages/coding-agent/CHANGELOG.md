@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed `import numpy` (and other native-extension imports) hanging indefinitely in the Python eval tool on Windows, where the runner's always-on background stdin reader deadlocked native DLL loading; Windows now reads the control channel serially between requests while POSIX keeps concurrent request dispatch ([#7985](https://github.com/can1357/oh-my-pi/issues/7985)).
+- Fixed subagent extension contexts so `ctx.getContextUsage()` reports the child session's usage and `ctx.compact()` compacts that session ([#10097](https://github.com/can1357/oh-my-pi/issues/10097)).
 
 ## [18.0.9] - 2026-08-28
 
