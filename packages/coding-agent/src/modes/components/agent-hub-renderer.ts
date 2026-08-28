@@ -145,17 +145,19 @@ export function formatMetrics(metrics: AgentMetrics): string {
 	].join(theme.sep.dot);
 }
 
-/** Row-grid variant of {@link formatMetrics}: fixed-width right-aligned cells so every
- * agent's metadata line shares one column layout instead of flowing after wrapped text. */
+/** Row-grid variant of {@link formatMetrics}: fixed-width cells so every agent's metadata
+ * line shares one column layout instead of flowing after wrapped text. Cost is left-aligned
+ * so the line starts flush; the numeric cells are right-aligned so units line up. */
 export function formatMetricColumns(metrics: AgentMetrics, age: string): string {
+	const cost = formatCost(metrics.cost);
 	return [
-		alignRightCell(formatCost(metrics.cost), 8),
-		alignRightCell(formatMetricDuration(metrics) ?? "—", 11),
+		cost + padding(8 - visibleWidth(cost)),
+		alignRightCell(formatMetricDuration(metrics) ?? "—", 13),
 		alignRightCell(`${formatNumber(metrics.requests)} req`, 8),
 		alignRightCell(`${formatNumber(metrics.tools)} tools`, 9),
 		alignRightCell(`${formatNumber(metrics.tokens)} tok`, 8),
-		alignRightCell(age, 7),
-	].join("  ");
+		alignRightCell(age, 8),
+	].join(" ");
 }
 
 export function contextGauge(tokens: number, window: number): string {
