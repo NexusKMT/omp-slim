@@ -238,6 +238,10 @@ export class ModelRegistry {
 	#cacheDbPath?: string;
 	#suppressedSelectors: Map<string, number> = new Map();
 	#backgroundRefresh?: Promise<void>;
+	/** Whether the first background discovery has settled; latches once so a late-armed waiter still resolves. */
+	#initialRefreshSettled = false;
+	/** Waiter armed before the initial background refresh starts (CLI kicks it off after the session is built, #10048). */
+	#initialRefreshWaiters?: PromiseWithResolvers<void>;
 	#credentialScopedCacheHydration?: Promise<void>;
 	#configuredDiscoveryInFlight: Map<DiscoveryProviderConfig, Map<ModelRefreshStrategy, Promise<Model<Api>[]>>> =
 		new Map();
@@ -437,6 +441,7 @@ export class ModelRegistry {
 				if (this.#backgroundRefresh === refreshPromise) {
 					this.#backgroundRefresh = undefined;
 				}
+				this.#markInitialRefreshSettled();
 			});
 		this.#backgroundRefresh = refreshPromise;
 	}
@@ -464,12 +469,27 @@ export class ModelRegistry {
 	}
 
 	/**
-	 * Whether an initial background discovery is still running. Read before
-	 * awaiting {@link awaitBackgroundRefresh} so a consumer can tell a genuine
-	 * pending discovery from a registry that will never refresh (#10048).
+	 * Resolve once the initial background discovery has settled, arming a waiter
+	 * even when the refresh has not started yet. In the CLI path
+	 * {@link refreshInBackground} runs right after the session is constructed
+	 * (`main.ts`), so a consumer created in the constructor cannot rely on an
+	 * in-flight snapshot — it must observe the settle whenever it happens.
+	 * Resolves immediately once any background refresh has completed; never
+	 * rejects (discovery errors are swallowed by `refreshInBackground`). Stays
+	 * pending when no background refresh is ever started (e.g. an embedder that
+	 * manages discovery itself), which leaves startup suppression in place.
 	 */
-	hasBackgroundRefreshInFlight(): boolean {
-		return this.#backgroundRefresh !== undefined;
+	awaitInitialBackgroundRefresh(): Promise<void> {
+		if (this.#initialRefreshSettled) return Promise.resolve();
+		this.#initialRefreshWaiters ??= Promise.withResolvers<void>();
+		return this.#initialRefreshWaiters.promise;
+	}
+
+	#markInitialRefreshSettled(): void {
+		if (this.#initialRefreshSettled) return;
+		this.#initialRefreshSettled = true;
+		this.#initialRefreshWaiters?.resolve();
+		this.#initialRefreshWaiters = undefined;
 	}
 
 	async refreshProvider(providerId: string, strategy: ModelRefreshStrategy = "online"): Promise<void> {

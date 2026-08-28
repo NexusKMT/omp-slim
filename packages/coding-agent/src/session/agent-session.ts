@@ -1724,12 +1724,13 @@ export class AgentSession {
 
 		// Config-declared resolution done against the catalog as it stands at
 		// construction can be premature: background discovery is started
-		// fire-and-forget before the session is built, so discovery-backed
-		// providers (e.g. GitHub Copilot, or a models.yml LiteLLM provider with a
-		// cold cache) may not be populated yet. Reconcile once the initial refresh
-		// settles — reactivate a `no_model` advisor (#9010) and retract stale
-		// retry.fallbackChains warnings (#10048).
-		void this.#reconcileSessionAfterModelDiscovery();
+		// fire-and-forget (before the session in the SDK path, right after it in
+		// the CLI path), so discovery-backed providers (e.g. GitHub Copilot, or a
+		// models.yml LiteLLM provider with a cold cache) may not be populated yet.
+		// Reactivate a `no_model` advisor (#9010) and retract stale
+		// retry.fallbackChains warnings (#10048) once discovery settles.
+		void this.#retryInactiveAdvisorAfterModelDiscovery();
+		void this.#revalidateFallbackChainsAfterModelDiscovery();
 	}
 	/** Model registry for API key resolution and model discovery */
 	get modelRegistry(): ModelRegistry {
@@ -9874,33 +9875,32 @@ export class AgentSession {
 	}
 
 	/**
-	 * After the initial background model discovery settles, reconcile session
-	 * state resolved against a possibly-incomplete catalog at construction:
-	 * reactivate an advisor that fell back to `no_model` (#9010) and re-run
-	 * retry.fallbackChains validation so config-declared discovery providers
-	 * whose models arrived a beat late stop reporting valid selectors as
-	 * unknown (#10048).
-	 *
-	 * The fallback re-check only runs when a background refresh was actually in
-	 * flight: without one, discovery will not populate the registry, so the
-	 * startup suppression stands rather than surfacing an unverifiable warning.
+	 * Reactivate an advisor that resolved to `no_model` at construction because a
+	 * discovery-backed provider had not populated the model registry yet. Awaits
+	 * the initial background refresh, then rebuilds the advisor and emits
+	 * `model_changed` so the status line reflects the now-active advisor. See #9010.
 	 */
-	async #reconcileSessionAfterModelDiscovery(): Promise<void> {
-		if (this.#isDisposed) return;
-		const hasInactiveAdvisor = this.#advisors.hasInactiveNoModelAdvisor();
-		const hasDeferredValidation = this.#recovery.hasPendingDiscoveryDeferredFallbackValidation();
-		if (!hasInactiveAdvisor && !hasDeferredValidation) return;
-		const discoveryWasInFlight = this.#modelRegistry.hasBackgroundRefreshInFlight();
+	async #retryInactiveAdvisorAfterModelDiscovery(): Promise<void> {
+		if (this.#isDisposed || !this.#advisors.hasInactiveNoModelAdvisor()) return;
 		await this.#modelRegistry.awaitBackgroundRefresh();
 		if (this.#isDisposed) return;
-		if (hasInactiveAdvisor && this.#advisors.retryAfterModelDiscovery()) {
-			this.#emit({ type: "model_changed" });
-		}
-		if (
-			hasDeferredValidation &&
-			discoveryWasInFlight &&
-			this.#recovery.revalidateRetryFallbackChainsAfterDiscovery()
-		) {
+		if (this.#advisors.retryAfterModelDiscovery()) this.#emit({ type: "model_changed" });
+	}
+
+	/**
+	 * Re-run retry.fallbackChains validation once the initial background discovery
+	 * settles. Startup validation suppresses "unknown model" warnings for
+	 * config-declared discovery providers whose cold cache left the registry empty
+	 * (#10048); this retracts the ones discovery resolved and surfaces any that
+	 * stayed unknown. Uses {@link ModelRegistry.awaitInitialBackgroundRefresh}
+	 * because the CLI starts that refresh right after the session is built, so an
+	 * in-flight snapshot taken in the constructor would always miss it.
+	 */
+	async #revalidateFallbackChainsAfterModelDiscovery(): Promise<void> {
+		if (this.#isDisposed || !this.#recovery.hasPendingDiscoveryDeferredFallbackValidation()) return;
+		await this.#modelRegistry.awaitInitialBackgroundRefresh();
+		if (this.#isDisposed) return;
+		if (this.#recovery.revalidateRetryFallbackChainsAfterDiscovery()) {
 			this.#emit({ type: "config_warnings_changed" });
 		}
 	}
