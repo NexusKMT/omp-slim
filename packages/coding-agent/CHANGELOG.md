@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the project-shared headless browser retaining orphaned pages, iframes, and workers from omp sessions that ended abnormally; a live session now reaps targets whose owning process is gone when it attaches to the shared browser ([#10022](https://github.com/can1357/oh-my-pi/issues/10022)).
+
 ## [18.0.8] - 2026-08-27
 
 ### Added
