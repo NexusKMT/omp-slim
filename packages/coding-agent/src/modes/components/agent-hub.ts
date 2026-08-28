@@ -232,8 +232,6 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	#treeDepthById = new Map<string, number>();
 	#treeParentById = new Map<string, string>();
 	#treeLastSiblingById = new Map<string, boolean>();
-	/** Reserved connector column width in tree mode so agent ids align vertically. */
-	#treeGutterWidth = 0;
 	/** Fuzzy agent filter (`/`), applied to id and display name. */
 	#agentFilter = "";
 	#agentFilterEditing = false;
@@ -517,22 +515,6 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 				b.lastActivity - a.lastActivity ||
 				a.id.localeCompare(b.id),
 		);
-
-		if (this.#viewMode === "tree") {
-			const tree = projectAgentTree(rosterRows);
-			this.#rows = tree.rows;
-			this.#treeDepthById = tree.depthById;
-			this.#treeParentById = tree.parentById;
-			this.#treeLastSiblingById = tree.lastSiblingById;
-			const maxDepth = Math.max(0, ...tree.depthById.values());
-			this.#treeGutterWidth = Math.min(28, (maxDepth + 1) * 4);
-		} else {
-			this.#rows = rosterRows;
-			this.#treeDepthById.clear();
-			this.#treeParentById.clear();
-			this.#treeLastSiblingById.clear();
-			this.#treeGutterWidth = 0;
-		}
 
 		if (this.#viewMode === "tree") {
 			const tree = projectAgentTree(rosterRows);
@@ -1130,25 +1112,15 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		const max = Math.max(1, width);
 		const cursor = selected ? theme.fg("accent", theme.nav.cursor) : " ";
 		const depth = this.#viewMode === "tree" ? (this.#treeDepthById.get(ref.id) ?? 0) : 0;
-		// Tree connectors render inside a reserved gutter so ids align vertically
-		// across depths instead of shifting the whole row right.
+		// Tree rails descend from the status dot: the connector sits between the
+		// cursor and the glyph, so child rows hang under their parent's dot.
 		const branch =
 			this.#viewMode === "tree"
-				? treeBranch(
-						ref,
-						max,
-						this.#treeDepthById,
-						this.#treeParentById,
-						this.#treeLastSiblingById,
-						this.#treeGutterWidth,
-					)
+				? treeBranch(ref, max, this.#treeDepthById, this.#treeParentById, this.#treeLastSiblingById)
 				: "";
 		const id = sanitizeDisplayText(ref.id);
 		const styledId = selected ? theme.bold(theme.fg("accent", id)) : theme.bold(id);
-		const fields: string[] = [`${cursor} ${statusGlyph(ref.status)} ${branch}${styledId}`];
-		if (ref.displayName && ref.displayName !== ref.id) {
-			fields.push(theme.fg("dim", sanitizeDisplayText(ref.displayName)));
-		}
+		const fields: string[] = [`${cursor} ${branch}${statusGlyph(ref.status)} ${styledId}`];
 		if (this.#viewMode === "roster" && ref.parentId && ref.parentId !== MAIN_AGENT_ID) {
 			fields.push(theme.fg("dim", `↳ ${sanitizeDisplayText(ref.parentId)}`));
 		}
@@ -1175,7 +1147,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		const right = meta.join(theme.sep.dot);
 
 		const entry: string[] = [];
-		const detailIndent = Math.min(max - 1, 4 + (this.#viewMode === "tree" ? this.#treeGutterWidth : depth * 2));
+		const detailIndent = Math.min(max - 1, 4 + (this.#viewMode === "tree" ? visibleWidth(branch) : depth * 2));
 		const leftWidth = visibleWidth(left);
 		const rightWidth = visibleWidth(right);
 		if (rightWidth > 0 && leftWidth + 2 + rightWidth <= max) {

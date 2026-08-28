@@ -187,32 +187,33 @@ export function formatChildIds(children: readonly AgentRef[], width: number): st
 	return text;
 }
 
-/** Bash `tree`-style ancestry connector. With a gutter it right-aligns inside the
- * reserved gutter so agent ids share one column; without, it clips from the left. */
+/** Bash `tree`-style ancestry connector. The prefix sits at the status-glyph column so
+ * rails descend from the parent's dot: top-level rows (Main's direct children) render
+ * bare, and each deeper level shifts one 4-char connector right. */
 export function treeBranch(
 	ref: AgentRef,
 	maxWidth: number,
 	depthById: ReadonlyMap<string, number>,
 	parentById: ReadonlyMap<string, string>,
 	lastSiblingById: ReadonlyMap<string, boolean>,
-	gutterWidth = 0,
 ): string {
-	// Depth-0 rows are Main's direct children — the top level of the tree — so they draw
-	// a connector too (like `tree` printing a root's children), never a blank gutter.
+	if ((depthById.get(ref.id) ?? 0) === 0) return "";
 	const segments: string[] = [lastSiblingById.get(ref.id) ? "└── " : "├── "];
 	const ancestry = new Set<string>();
 	let parent = parentById.get(ref.id);
 	while (parent && parent !== MAIN_AGENT_ID && !ancestry.has(parent)) {
+		const grandparent = parentById.get(parent);
+		// A bare top-level parent (drawn without a connector, just its dot) has no
+		// rail column — its children's connectors sit directly under that dot.
+		if (!grandparent || grandparent === MAIN_AGENT_ID) break;
 		ancestry.add(parent);
 		segments.push(lastSiblingById.get(parent) ? "    " : "│   ");
-		parent = parentById.get(parent);
+		parent = grandparent;
 	}
-	const maxSegments =
-		gutterWidth > 0 ? Math.floor(gutterWidth / 4) : Math.max(1, Math.floor(Math.max(4, maxWidth - 2) / 4));
+	const maxSegments = Math.max(1, Math.floor(Math.max(4, maxWidth - 2) / 4));
 	const omitted = Math.max(0, segments.length - maxSegments);
 	const prefix = segments.slice(0, maxSegments).reverse().join("");
-	const text = `${omitted > 0 ? "… " : ""}${prefix}`;
-	return theme.fg("dim", gutterWidth > 0 ? `${padding(gutterWidth - text.length)}${text}` : text);
+	return theme.fg("dim", `${omitted > 0 ? "… " : ""}${prefix}`);
 }
 
 /** Higher is better: exact > prefix > substring > scattered subsequence. */
