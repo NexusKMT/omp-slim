@@ -269,8 +269,10 @@ describe("ensureRuntimeInstalled install lock", () => {
 	test("a stale legacy .lock directory does not block install and is cleared", async () => {
 		const { spec, probe } = await makeFileDependency();
 		const runtimeDir = await makeRuntimeDir();
-		// The pre-18.x crash orphan: a bare lock directory with no live owner.
+		// A pre-18.x crash orphan, older than any live install: reclaimed at once.
 		await fs.mkdir(`${runtimeDir}.lock`, { recursive: true });
+		const stale = new Date(Date.now() - 60 * 60_000);
+		await fs.utimes(`${runtimeDir}.lock`, stale, stale);
 
 		await ensureRuntimeInstalled({
 			runtimeDir,
@@ -280,6 +282,31 @@ describe("ensureRuntimeInstalled install lock", () => {
 			lockSleepMs: 50,
 		});
 
+		expect(await Bun.file(path.join(runtimeDir, "node_modules", probe, "package.json")).exists()).toBe(true);
+		await expect(fs.stat(`${runtimeDir}.lock`)).rejects.toThrow();
+	}, 15_000);
+
+	test("a fresh legacy .lock directory is waited on before it is reclaimed", async () => {
+		const { spec, probe } = await makeFileDependency();
+		const runtimeDir = await makeRuntimeDir();
+		// A recently created directory could still belong to a live pre-18.x
+		// installer, so the migration must poll the wait envelope before
+		// force-reclaiming rather than delete a possibly-active lock immediately.
+		await fs.mkdir(`${runtimeDir}.lock`, { recursive: true });
+
+		const attempts = 5;
+		const sleepMs = 80;
+		const start = Date.now();
+		await ensureRuntimeInstalled({
+			runtimeDir,
+			install: { dependencies: { [probe]: spec } },
+			probePackage: probe,
+			lockAttempts: attempts,
+			lockSleepMs: sleepMs,
+		});
+		const waited = Date.now() - start;
+
+		expect(waited).toBeGreaterThanOrEqual((attempts - 1) * sleepMs);
 		expect(await Bun.file(path.join(runtimeDir, "node_modules", probe, "package.json")).exists()).toBe(true);
 		await expect(fs.stat(`${runtimeDir}.lock`)).rejects.toThrow();
 	}, 15_000);
