@@ -132,16 +132,24 @@ export interface CollectOrphanOptions {
 	graceMs?: number;
 }
 
-/** Orphan-scan result: target ids to close, plus the ownership files to delete. */
-export interface OrphanScan {
+/** Targets belonging to one dead process, kept grouped so partial failures remain retryable. */
+export interface OrphanOwner {
+	file: string;
+	pid: number;
+	updatedAt: number;
 	targetIds: string[];
-	staleFiles: string[];
+}
+
+/** Orphan-scan result grouped by durable ownership file. */
+export interface OrphanScan {
+	owners: OrphanOwner[];
 }
 
 /**
- * Scan a registry dir for targets whose owning process is gone. Returns the
- * dead-owner target ids to close and the ownership files to remove. This
- * process's own file and every live-owner file are left untouched.
+ * Scan a registry dir for targets whose owning process is gone. Returns one
+ * entry per dead owner so a reaper can retain only targets whose CDP closure
+ * was not confirmed. This process's own file and every live-owner file are
+ * left untouched.
  */
 export async function collectOrphanTargets(
 	scope: SharedTargetScope,
@@ -155,11 +163,10 @@ export async function collectOrphanTargets(
 	try {
 		entries = await fs.readdir(dir);
 	} catch (err) {
-		if (isEnoent(err)) return { targetIds: [], staleFiles: [] };
+		if (isEnoent(err)) return { owners: [] };
 		throw err;
 	}
-	const targetIds: string[] = [];
-	const staleFiles: string[] = [];
+	const owners: OrphanOwner[] = [];
 	const nowMs = now();
 	for (const entry of entries) {
 		if (!entry.endsWith(".json")) continue;
@@ -174,40 +181,69 @@ export async function collectOrphanTargets(
 		if (record.pid === process.pid) continue; // our own file
 		if (isAlive(record.pid)) continue; // owner still running
 		if (nowMs - (record.updatedAt ?? 0) < graceMs) continue; // conservative grace
-		for (const id of record.targets) if (typeof id === "string") targetIds.push(id);
-		staleFiles.push(file);
+		owners.push({
+			file,
+			pid: record.pid,
+			updatedAt: record.updatedAt,
+			targetIds: record.targets.filter(id => typeof id === "string"),
+		});
 	}
-	return { targetIds, staleFiles };
-}
-
-/** Remove ownership files whose owners were reaped. */
-export async function pruneOwnershipFiles(files: readonly string[]): Promise<void> {
-	await Promise.all(files.map(file => fs.rm(file, { force: true }).catch(() => undefined)));
+	return { owners };
 }
 
 /**
- * Close a page target by id through a fresh CDP session. Best-effort: mirrors
- * `tab-supervisor`'s close path so a wedged page can't hang teardown, and so a
- * target that vanished on its own resolves as a no-op.
+ * Close a page target by id through a fresh CDP session. Returns true only
+ * when CDP confirms the close or confirms the target no longer exists; a
+ * dropped connection or transient protocol failure returns false so durable
+ * ownership remains available for a later retry.
  */
-export async function closeCdpTarget(browser: Browser, targetId: string): Promise<void> {
+export async function closeCdpTarget(browser: Browser, targetId: string): Promise<boolean> {
 	const session = await browser
 		.target()
 		.createCDPSession()
 		.catch(() => null);
-	if (!session) return;
+	if (!session) return false;
 	try {
-		await session.send("Target.closeTarget", { targetId }).catch(() => undefined);
+		try {
+			const result = await session.send("Target.closeTarget", { targetId });
+			if (result.success) return true;
+		} catch {
+			// A concurrent reaper or the page itself may already have closed the
+			// target. Confirm absence before treating the cleanup as complete.
+		}
+		try {
+			const { targetInfos } = await session.send("Target.getTargets");
+			return !targetInfos.some(info => info.targetId === targetId);
+		} catch {
+			return false;
+		}
 	} finally {
 		await session.detach().catch(() => undefined);
 	}
 }
 
+/** Atomically retain unresolved targets, or remove an ownership file once all are resolved. */
+async function updateOwnershipFile(owner: OrphanOwner, targetIds: string[]): Promise<void> {
+	if (targetIds.length === 0) {
+		await fs.rm(owner.file, { force: true });
+		return;
+	}
+	const tmp = `${owner.file}.${process.pid}.tmp`;
+	try {
+		const record: OwnershipFile = { pid: owner.pid, updatedAt: owner.updatedAt, targets: targetIds };
+		await Bun.write(tmp, JSON.stringify(record));
+		await fs.rename(tmp, owner.file);
+	} catch (error) {
+		await fs.rm(tmp, { force: true }).catch(() => undefined);
+		throw error;
+	}
+}
+
 /**
- * Reap shared-browser targets whose owning omp process is gone, then remove
- * their ownership files. Best-effort and bounded by the caller's browser
- * connection; failures are logged, never thrown, so a browser open is never
- * blocked by cleanup of unrelated dead sessions.
+ * Reap shared-browser targets whose owning omp process is gone. Each owner
+ * file is removed only after every target is confirmed closed/absent; partial
+ * failures atomically retain the unresolved ids for the next attach to retry.
+ * Failures are logged, never thrown, so cleanup cannot block browser open.
  */
 export async function reapOrphanSharedTargets(browser: Browser, scope: SharedTargetScope): Promise<number> {
 	let scan: OrphanScan;
@@ -219,23 +255,27 @@ export async function reapOrphanSharedTargets(browser: Browser, scope: SharedTar
 		});
 		return 0;
 	}
-	if (scan.targetIds.length === 0) {
-		await pruneOwnershipFiles(scan.staleFiles);
-		return 0;
-	}
 	let closed = 0;
-	for (const targetId of scan.targetIds) {
+	for (const owner of scan.owners) {
+		const retained: string[] = [];
+		for (const targetId of owner.targetIds) {
+			if (await closeCdpTarget(browser, targetId)) {
+				closed++;
+			} else {
+				retained.push(targetId);
+				logger.debug("Retaining orphaned shared-browser target for retry", { targetId, ownerPid: owner.pid });
+			}
+		}
+		if (retained.length === owner.targetIds.length) continue;
 		try {
-			await closeCdpTarget(browser, targetId);
-			closed++;
+			await updateOwnershipFile(owner, retained);
 		} catch (err) {
-			logger.debug("Failed to close orphaned shared-browser target", {
-				targetId,
+			logger.debug("Failed to update shared-browser ownership after reap", {
+				ownerPid: owner.pid,
 				error: err instanceof Error ? err.message : String(err),
 			});
 		}
 	}
-	await pruneOwnershipFiles(scan.staleFiles);
 	if (closed > 0) logger.debug("Reaped orphaned shared-browser targets", { count: closed, daemon: scope.daemonName });
 	return closed;
 }

@@ -9,8 +9,8 @@
  *  - a dead owner's targets are collected for reaping, a live owner's are not;
  *  - this process's own targets are never reaped (a live session keeps its tabs);
  *  - a conservative grace window keeps a just-crashed owner's fresh records;
- *  - `reapOrphanSharedTargets` closes the dead targets via CDP and deletes the
- *    ownership file.
+ *  - confirmed closures are removed, while transient failures remain durable
+ *    and are retried on the next reap.
  */
 import { afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
@@ -54,11 +54,17 @@ async function deadPid(): Promise<number> {
 	return proc.pid;
 }
 
-/** Minimal puppeteer Browser stub recording which target ids get closed via CDP. */
-function makeBrowser(closed: string[]): Browser {
+/** Minimal puppeteer Browser stub recording closes and optionally failing selected targets. */
+function makeBrowser(closed: string[], failTargets: ReadonlySet<string> = new Set()): Browser {
 	const session = {
-		send: async (_method: string, params: { targetId: string }) => {
+		send: async (method: string, params?: { targetId: string }) => {
+			if (method === "Target.getTargets") {
+				return { targetInfos: [...failTargets].map(targetId => ({ targetId })) };
+			}
+			if (!params) throw new Error(`Missing params for ${method}`);
+			if (failTargets.has(params.targetId)) throw new Error("transient CDP failure");
 			closed.push(params.targetId);
+			return { success: true };
 		},
 		detach: async () => undefined,
 	};
@@ -94,9 +100,14 @@ describe("orphan-registry — ownership scan", () => {
 			isAlive: pid => pid === live,
 		});
 
-		expect(scan.targetIds.sort()).toEqual(["dead-a", "dead-b"]);
-		expect(scan.targetIds).not.toContain("live-a");
-		expect(scan.staleFiles).toEqual([path.join(registryDir(scope), `${dead}.json`)]);
+		expect(scan.owners).toEqual([
+			{
+				file: path.join(registryDir(scope), `${dead}.json`),
+				pid: dead,
+				updatedAt: 0,
+				targetIds: ["dead-a", "dead-b"],
+			},
+		]);
 	});
 
 	it("never reaps this process's own recorded targets", async () => {
@@ -112,8 +123,7 @@ describe("orphan-registry — ownership scan", () => {
 
 		// ...but a scan (even with everything else forced dead) skips it.
 		const scan = await collectOrphanTargets(scope, { now: () => 10_000_000, isAlive: () => false });
-		expect(scan.targetIds).toEqual([]);
-		expect(scan.staleFiles).toEqual([]);
+		expect(scan.owners).toEqual([]);
 	});
 
 	it("forgetSharedTarget drops one id and removes the file once empty", async () => {
@@ -140,14 +150,21 @@ describe("orphan-registry — ownership scan", () => {
 			isAlive: () => false,
 			graceMs: 15_000,
 		});
-		expect(withinGrace.targetIds).toEqual([]);
+		expect(withinGrace.owners).toEqual([]);
 
 		const pastGrace = await collectOrphanTargets(scope, {
 			now: () => 130_000,
 			isAlive: () => false,
 			graceMs: 15_000,
 		});
-		expect(pastGrace.targetIds).toEqual(["fresh"]);
+		expect(pastGrace.owners).toEqual([
+			{
+				file: path.join(registryDir(scope), `${dead}.json`),
+				pid: dead,
+				updatedAt: 100_000,
+				targetIds: ["fresh"],
+			},
+		]);
 	});
 });
 
@@ -166,6 +183,36 @@ describe("orphan-registry — reap", () => {
 
 		expect(count).toBe(2);
 		expect(closed.sort()).toEqual(["orphan-1", "orphan-2"]);
+		expect(await Bun.file(path.join(registryDir(scope), `${dead}.json`)).exists()).toBe(false);
+	});
+
+	it("retains transient CDP failures and retries them on the next reap", async () => {
+		const scope = trackedScope();
+		const dead = await deadPid();
+		const updatedAt = Date.now() - 60_000;
+		await writeOwnershipFile(scope, {
+			pid: dead,
+			updatedAt,
+			targets: ["closed-now", "retry-later"],
+		});
+		const firstClosed: string[] = [];
+
+		const firstCount = await reapOrphanSharedTargets(makeBrowser(firstClosed, new Set(["retry-later"])), scope);
+
+		expect(firstCount).toBe(1);
+		expect(firstClosed).toEqual(["closed-now"]);
+		const retained = (await Bun.file(path.join(registryDir(scope), `${dead}.json`)).json()) as {
+			pid: number;
+			updatedAt: number;
+			targets: string[];
+		};
+		expect(retained).toEqual({ pid: dead, updatedAt, targets: ["retry-later"] });
+
+		const retryClosed: string[] = [];
+		const retryCount = await reapOrphanSharedTargets(makeBrowser(retryClosed), scope);
+
+		expect(retryCount).toBe(1);
+		expect(retryClosed).toEqual(["retry-later"]);
 		expect(await Bun.file(path.join(registryDir(scope), `${dead}.json`)).exists()).toBe(false);
 	});
 });
