@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed relative API addresses ending in image extensions being swallowed as missing local image files instead of pasted as text ([#10103](https://github.com/can1357/oh-my-pi/issues/10103)).
+
 ## [18.0.10] - 2026-08-28
 
 ### Added
