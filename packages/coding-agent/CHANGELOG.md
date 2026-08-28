@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `lsp diagnostics` reporting `OK` for project-aware pull-diagnostic servers (e.g. Roslyn) whose `textDocument/diagnostic` response overran the 3s single-file budget; such servers now get a longer single-file wait and a timed-out or errored pull surfaces as a server failure instead of a clean result ([#10035](https://github.com/can1357/oh-my-pi/issues/10035)).
+
 ## [18.0.9] - 2026-08-28
 
 ### Breaking Changes

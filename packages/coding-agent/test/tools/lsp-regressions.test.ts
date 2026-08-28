@@ -1660,6 +1660,88 @@ describe("lsp regressions", () => {
 		}, 15_000);
 	}
 
+	it("surfaces a failed document pull as a server failure instead of OK (#10035)", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-failed-pull-");
+		try {
+			// initTheme() populates the module theme the tool's error renderer reads;
+			// production initializes it before any tool runs.
+			await initTheme();
+			const targetFile = path.join(tempDir.path(), "Program.cs");
+			await Bun.write(targetFile, "private readonly object _gate = new();\n");
+
+			// Roslyn-shaped server: no static diagnosticProvider, dynamically registers
+			// textDocument/diagnostic on `initialized`, then fails the pull (mirrors a
+			// cold analysis pull that overruns the wait budget and gets cancelled).
+			const fakeServer = installFakeLsp((message, server) => {
+				if (message.method === "initialize") {
+					server.send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
+					server.send({
+						jsonrpc: "2.0",
+						method: "$/progress",
+						params: { token: "roslyn", value: { kind: "begin" } },
+					});
+					server.send({
+						jsonrpc: "2.0",
+						method: "$/progress",
+						params: { token: "roslyn", value: { kind: "end" } },
+					});
+				} else if (message.method === "initialized") {
+					server.send({
+						jsonrpc: "2.0",
+						id: "register-diagnostics",
+						method: "client/registerCapability",
+						params: {
+							registrations: [
+								{
+									id: "pull-diagnostics",
+									method: "textDocument/diagnostic",
+									registerOptions: { identifier: "DocumentCompilerSemantic" },
+								},
+							],
+						},
+					});
+				} else if (message.method === "textDocument/diagnostic") {
+					server.send({
+						jsonrpc: "2.0",
+						id: message.id,
+						error: { code: -32800, message: "request failed" },
+					});
+				} else if (message.method === "shutdown") {
+					server.send({ jsonrpc: "2.0", id: message.id, result: null });
+				} else if (message.method === "exit") {
+					server.exit(0);
+				}
+			});
+
+			const serverConfig: ServerConfig = {
+				command: "Microsoft.CodeAnalysis.LanguageServer",
+				fileTypes: ["cs"],
+				rootMarkers: [],
+			};
+			vi.spyOn(lspConfig, "loadConfig").mockReturnValue({
+				servers: { roslyn: serverConfig },
+				idleTimeoutMs: undefined,
+			});
+			vi.spyOn(lspConfig, "getServersForFile").mockReturnValue([["roslyn", serverConfig]]);
+
+			const tool = new LspTool(makeLspSession(tempDir.path()));
+			const result = await tool.execute("failed-pull", {
+				action: "diagnostics",
+				file: targetFile,
+				timeout: 20,
+			});
+
+			expect(fakeServer.received.map(m => m.method)).toContain("textDocument/diagnostic");
+			const text = textResult(result);
+			expect(text).not.toBe("OK");
+			expect(text).toContain("all language servers failed");
+			expect(result.details?.success).toBe(false);
+		} finally {
+			await lspClient.shutdownAll();
+			tempDir.removeSync();
+		}
+	}, 15_000);
+
 	it("does not reuse stale file diagnostics after another URI publishes", async () => {
 		const tempDir = TempDir.createSync("@omp-lsp-stale-diags-");
 		try {
