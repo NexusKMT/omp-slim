@@ -40,6 +40,9 @@ let cleanupStage: "idle" | "running" | "complete" = "idle";
 let cleanupPass = 0;
 let activeCleanupReason: Reason | undefined;
 let activeCleanupKeepAlive = false;
+// Promises of callbacks invoked late (registered while a pass runs), joined by
+// the active pass before it settles so `cleanup()`/signal exits await them.
+let activeLatePromises: Promise<void>[] | undefined;
 const CLEANUP_DEADLINE_MS = 10_000;
 /**
  * Symbol stamped by the extension-load guard onto the throwing replacement it
@@ -129,7 +132,10 @@ function runCleanup(reason: Reason, keepAlive = false): Promise<void> {
 	const pass = ++cleanupPass;
 	activeCleanupReason = reason;
 	activeCleanupKeepAlive = keepAlive;
+	const late: Promise<void>[] = [];
+	activeLatePromises = late;
 	const settle = (): void => {
+		if (activeLatePromises === late) activeLatePromises = undefined;
 		if (cleanupPass !== pass) return;
 		cleanupStage = keepAlive ? "idle" : "complete";
 		if (keepAlive) {
@@ -144,13 +150,16 @@ function runCleanup(reason: Reason, keepAlive = false): Promise<void> {
 		return Promise.try(() => invokeCleanup(registration, reason, keepAlive, pass));
 	});
 
-	const cleanupSettled = Promise.allSettled(promises).then(results => {
+	const cleanupSettled = Promise.allSettled(promises).then(async results => {
 		for (const result of results) {
 			if (result.status === "rejected") {
 				const err = result.reason instanceof Error ? result.reason : new Error(String(result.reason));
 				logger.error("Cleanup callback failed", { err, stack: err.stack });
 			}
 		}
+		// Join callbacks registered while this pass ran (already error-caught);
+		// each batch may register more. The deadline race still bounds the pass.
+		while (late.length > 0) await Promise.allSettled(late.splice(0));
 		settle();
 	});
 	const deadline = Promise.withResolvers<void>();
@@ -555,10 +564,14 @@ export function register(
 	const invokeLate = (reason: Reason, keepAlive: boolean): void => {
 		try {
 			const pending = invokeCleanup(registration, reason, keepAlive, cleanupPass);
-			void pending?.catch(error => {
+			if (!pending) return;
+			const tracked = pending.catch(error => {
 				const err = error instanceof Error ? error : new Error(String(error));
 				logger.error("Cleanup callback failed", { err, id, stack: err.stack });
 			});
+			// Join the active pass so cleanup()/signal exits await it; after a
+			// completed exit pass there is nothing left to join.
+			activeLatePromises?.push(tracked);
 		} catch (error) {
 			const err = error instanceof Error ? error : new Error(String(error));
 			logger.error("Cleanup callback failed", { err, id, stack: err.stack });

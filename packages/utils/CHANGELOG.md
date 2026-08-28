@@ -12,6 +12,7 @@
 ### Fixed
 
 - Made `postmortem` registrations repeatable across manual keep-alive cleanup passes, so persistent resource owners and callbacks registered mid-pass remain armed for the eventual real exit.
+- Made cleanup passes await async callbacks registered mid-pass, so `postmortem.cleanup()` no longer settles early and signal-driven exits no longer terminate late cleanup work mid-flight.
 
 ## [18.0.9] - 2026-08-28
 

@@ -90,8 +90,10 @@ describe("storage process-exit cleanup", () => {
 		// Read copies of the main database files without their WALs. Both rows are
 		// visible only if process-exit cleanup flushed the deferred perf batch and
 		// checkpointed committed frames into the main file.
-		const historyDb = new Database(historyCheckpoint, { readonly: true });
-		const agentDb = new Database(agentCheckpoint, { readonly: true });
+		// Writable open: SQLite rejects read-only access to a WAL-mode file with no
+		// -shm/-wal beside it; the copies still expose only main-file content.
+		const historyDb = new Database(historyCheckpoint);
+		const agentDb = new Database(agentCheckpoint);
 		try {
 			expect(historyDb.query<{ prompt: string }, []>("SELECT prompt FROM history").get()).toEqual({
 				prompt: "written immediately before exit",
@@ -176,8 +178,10 @@ describe("storage process-exit cleanup", () => {
 
 		// Read the main file without its WAL: only the real-exit callback flushes
 		// the deferred sample and checkpoints it into this copy.
+		// Writable open: SQLite rejects read-only access to a WAL-mode file with no
+		// -shm/-wal beside it; the copy still exposes only main-file content.
 		await Bun.write(checkpointed, Bun.file(agentDbPath));
-		const agentDb = new Database(checkpointed, { readonly: true });
+		const agentDb = new Database(checkpointed);
 		try {
 			expect(
 				agentDb

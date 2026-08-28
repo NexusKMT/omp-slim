@@ -303,4 +303,54 @@ describe("postmortem expected cleanup errors", () => {
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout).toContain('["after-keepalive","cleanup"]');
 	});
+
+	it("awaits an async callback registered mid-pass before cleanup() settles", async () => {
+		const result = await runPostmortemProbe(`
+			import { postmortem } from "${postmortemModuleUrl}";
+
+			const order = [];
+			postmortem.register("outer", () => {
+				// Registered while the keep-alive pass is running: cleanup() must
+				// join its async completion, not settle after the snapshot alone.
+				postmortem.register("late", async () => {
+					// One full event-loop turn: settles strictly after the snapshot pass.
+					const { promise, resolve } = Promise.withResolvers();
+					setImmediate(resolve);
+					await promise;
+					order.push("late");
+				});
+				order.push("outer");
+			});
+			await postmortem.cleanup();
+			order.push("settled");
+			console.log(JSON.stringify(order));
+		`);
+
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout).toContain('["outer","late","settled"]');
+	});
+
+	it("finishes an async late registration before a SIGTERM exit", async () => {
+		const result = await runPostmortemProbe(`
+			import { postmortem } from "${postmortemModuleUrl}";
+
+			postmortem.register("outer", () => {
+				// Registered during the signal-driven exit pass: the process must not
+				// terminate until this async work completes.
+				postmortem.register("late", async () => {
+					// One full event-loop turn: settles strictly after the snapshot pass.
+					const { promise, resolve } = Promise.withResolvers();
+					setImmediate(resolve);
+					await promise;
+					console.log("late-done");
+				});
+			});
+			process.kill(process.pid, "SIGTERM");
+			// Stay alive until the signal path exits; the harness watchdog bounds a regression.
+			await Promise.withResolvers().promise;
+		`);
+
+		expect(result.exitCode).toBe(143);
+		expect(result.stdout).toContain("late-done");
+	});
 });
