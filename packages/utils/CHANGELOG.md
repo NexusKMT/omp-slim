@@ -2,9 +2,9 @@
 
 ## [Unreleased]
 
-### Fixed
+### Added
 
-- Ran synchronous postmortem callbacks during process exit so resource cleanup completes before Bun terminates.
+- Added `checkpointWal` to checkpoint committed SQLite WAL frames without blocking concurrent readers.
 
 ## [18.0.9] - 2026-08-28
 
