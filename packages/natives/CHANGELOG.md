@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Breaking Changes
 
 - Replaced the Git-only `watchHead`/`headWatchTarget` API with backend-neutral `watch`/`VcsRepo.watchTarget`.

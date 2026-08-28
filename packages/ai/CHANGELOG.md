@@ -5,6 +5,8 @@
 ### Fixed
 
 - Fixed the OAuth success page's close-window action to fall back to manual-close guidance when the browser refuses to close the tab.
+- Fixed Cloudflare AI Gateway onboarding and routing: `/login` now stores the account and gateway IDs with the token, materializes provider endpoints, and keeps gateway credentials out of upstream OpenAI authorization headers.
+- Fixed Codex OAuth selection to keep chat and Spark quotas independent, preserve legacy shared blocks from older brokers, and avoid treating incomplete usage reports as uncapped.
 
 ## [18.0.8] - 2026-08-27
 
@@ -14,7 +16,6 @@
 
 ### Fixed
 
-- Fixed Cloudflare AI Gateway onboarding and routing: `/login` now stores the account and gateway IDs with the token, materializes provider endpoints, and keeps gateway credentials out of upstream OpenAI authorization headers.
 - Fixed Amazon Bedrock requests to OpenAI-schema models (the `gpt-5.x` SKUs) failing with HTTP 400 `unknown_parameter: 'thinking'` when reasoning was enabled, by sending `reasoning.effort` instead of Anthropic's `thinking` budget block for models the catalog marks as effort-controlled.
 - Fixed Cursor replay rejecting sessions with orphaned tool results while preserving their output as assistant context.
 
@@ -31,9 +32,6 @@
 - Fixed multimodal tool results in OpenAI Responses requests so inline, remote, and OpenAI file-backed images are preserved correctly.
 - Fixed resumed and forked Cursor sessions failing when their history came from a Responses-based provider such as Codex ([#9754](https://github.com/can1357/oh-my-pi/issues/9754)).
 - Fixed Cursor `composer-2.5` selections using the Fast variant instead of the Standard tier ([#9012](https://github.com/can1357/oh-my-pi/issues/9012)).
-### Fixed
-
-- Fixed Codex OAuth selection to keep chat and Spark quotas independent, preserve legacy shared blocks from older brokers, and avoid treating incomplete usage reports as uncapped.
 
 ## [18.0.6] - 2026-08-26
 

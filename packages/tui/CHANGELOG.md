@@ -9,6 +9,8 @@
 ### Fixed
 
 - Fixed background styling issues when inline color swatches are used inside highlighted lines
+- Fixed resizing a terminal copying the current screen into scrollback in tmux panes and Windows consoles, leaving a duplicate of the in-progress turn above the live one ([#9962](https://github.com/can1357/oh-my-pi/pull/9962) by [@nategriffin26](https://github.com/nategriffin26)).
+- LaTeX `\textbf`, `\textit`, `\textsl`, and `\emph` now render terminal bold and italic attributes; unsupported text-font fallbacks such as `\texttt` and `\textsf` remain plain text.
 
 ## [18.0.8] - 2026-08-27
 
@@ -20,7 +22,6 @@
 
 - Fixed pending-work animations repeatedly composing expensive frames without applying their full render cost to CPU backpressure.
 - Fixed unfinished live viewport rows entering tmux pane history and duplicating streamed output ([#9780](https://github.com/can1357/oh-my-pi/issues/9780)).
-- Fixed resizing a terminal copying the current screen into scrollback in tmux panes and Windows consoles, leaving a duplicate of the in-progress turn above the live one ([#9962](https://github.com/can1357/oh-my-pi/pull/9962) by [@nategriffin26](https://github.com/nategriffin26)).
 
 ## [18.0.7] - 2026-08-26
 
@@ -34,9 +35,6 @@
 - Fixed image previews displaying as garbled characters in Paseo terminals.
 - Fixed terminal resizing from duplicating committed history in native scrollback.
 - Fixed autocomplete suggestions for bare-name skills such as `/batch` when no command matches the prefix more strongly.
-### Fixed
-
-- LaTeX `\textbf`, `\textit`, `\textsl`, and `\emph` now render terminal bold and italic attributes; unsupported text-font fallbacks such as `\texttt` and `\textsf` remain plain text.
 
 ## [18.0.6] - 2026-08-26
 
