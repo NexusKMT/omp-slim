@@ -303,7 +303,7 @@ describe("Agent hub Enter activation", () => {
 		});
 		const workerEntry = renderedRosterEntry(hub, "Worker", 120);
 		expect(workerEntry).toContain("Inspect dependency boundaries and report unsafe coupling.");
-		expect(workerEntry.replace(/\s+/g, " ")).toContain("usage —");
+		expect(workerEntry.replace(/\s+/g, " ")).toContain("usage ·");
 		expect(workerEntry).not.toContain("$0.000");
 		hub.dispose();
 	});

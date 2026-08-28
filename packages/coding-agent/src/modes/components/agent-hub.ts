@@ -60,6 +60,7 @@ import {
 	contextGauge,
 	formatChildIds,
 	formatCost,
+	formatMetricColumns,
 	formatMetricDuration,
 	formatMetrics,
 	formatRoleBadge,
@@ -524,7 +525,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			this.#treeParentById = tree.parentById;
 			this.#treeLastSiblingById = tree.lastSiblingById;
 			const maxDepth = Math.max(0, ...tree.depthById.values());
-			this.#treeGutterWidth = Math.min(24, maxDepth * 4);
+			this.#treeGutterWidth = Math.min(28, (maxDepth + 1) * 4);
 		} else {
 			this.#rows = rosterRows;
 			this.#treeDepthById.clear();
@@ -1160,9 +1161,9 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		}
 		const left = fields.join("  ");
 
-		// Fixed-width numeric columns pinned to the right edge: spend, turns,
-		// age. Badges (variable width) sit before the columns so every row's
-		// numeric cells share the same grid.
+		// Line 1 right side carries variable-width badges only. Cost/turns/time
+		// get their own always-present metadata line below so wrapping task text
+		// can never mix with them.
 		const metrics = this.#metricsFor(ref, observed);
 		const meta: string[] = [];
 		const modelRole = observed?.progress?.modelRole ?? ref.history?.modelRole;
@@ -1171,32 +1172,27 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		}
 		const badge = modelBadge(ref, observed);
 		if (badge) meta.push(badge);
-		const spend = theme.fg("dim", metrics ? formatCost(metrics.cost) : "—");
-		const turns = theme.fg("dim", metrics ? `${formatNumber(metrics.requests)} req` : "—");
-		const age = theme.fg("dim", formatAge(Math.max(1, Math.round((Date.now() - ref.lastActivity) / 1000))));
-		const columns = [alignRightCell(spend, 9), alignRightCell(turns, 8), alignRightCell(age, 7)].join("  ");
-		const right = meta.length > 0 ? `${meta.join(theme.sep.dot)}  ${columns}` : columns;
+		const right = meta.join(theme.sep.dot);
 
-		const leftWidth = visibleWidth(left);
-		const rightWidth = visibleWidth(right);
 		const entry: string[] = [];
 		const detailIndent = Math.min(max - 1, 4 + (this.#viewMode === "tree" ? this.#treeGutterWidth : depth * 2));
-		if (leftWidth + 2 + rightWidth <= max) {
+		const leftWidth = visibleWidth(left);
+		const rightWidth = visibleWidth(right);
+		if (rightWidth > 0 && leftWidth + 2 + rightWidth <= max) {
 			entry.push(left + padding(max - leftWidth - rightWidth) + right);
 		} else {
 			entry.push(truncateToWidth(left.replace(/[\r\n]+/g, " "), max));
-			entry.push(`${padding(Math.max(0, detailIndent))}${truncateToWidth(right, Math.max(1, max - detailIndent))}`);
 		}
 
-		const usage = metrics ? theme.fg("dim", formatMetrics(metrics)) : theme.fg("dim", "usage —");
-		const task = observed?.description ?? observed?.progress?.task ?? ref.activity;
+		const indent = padding(Math.max(0, detailIndent));
 		const detailWidth = Math.max(1, max - detailIndent);
-		const details = task
-			? `${theme.fg("muted", sanitizeLine(task, detailWidth))}${theme.fg("dim", theme.sep.dot)}${usage}`
-			: usage;
-		for (const wrapped of wrapTextWithAnsi(details, detailWidth)) {
-			entry.push(`${padding(Math.max(0, detailIndent))}${wrapped}`);
+		const task = observed?.description ?? observed?.progress?.task ?? ref.activity;
+		if (task) {
+			entry.push(`${indent}${theme.fg("muted", truncateToWidth(sanitizeLine(task, detailWidth), detailWidth))}`);
 		}
+		const age = formatAge(Math.max(1, Math.round((Date.now() - ref.lastActivity) / 1000)));
+		const metadata = metrics ? formatMetricColumns(metrics, age) : `usage ${theme.sep.dot} ${age}`;
+		entry.push(`${indent}${theme.fg("dim", metadata)}`);
 		if (!hovered) return entry;
 		return entry.map(lineRow => {
 			const rowWidth = visibleWidth(lineRow);

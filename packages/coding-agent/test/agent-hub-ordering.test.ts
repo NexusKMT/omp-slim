@@ -770,7 +770,7 @@ describe("Agent hub row ordering", () => {
 
 			const historical = renderedRosterEntry(hub, "Historical", 160);
 			expect(historical).toContain("Restored task");
-			expect(historical).toContain("usage —");
+			expect(historical).toMatch(/usage\s+·/);
 			expect(historical).not.toContain("$0.000");
 		} finally {
 			hub.dispose();
@@ -833,8 +833,8 @@ describe("Agent hub row ordering", () => {
 		try {
 			const rendered = Bun.stripANSI(hub.render(160).join("\n"));
 			expect(rendered).toContain("0/2 measured");
-			expect(renderedRosterEntry(hub, "Incomplete", 160)).toContain("usage —");
-			expect(renderedRosterEntry(hub, "NonFinite", 160)).toContain("usage —");
+			expect(renderedRosterEntry(hub, "Incomplete", 160)).toMatch(/usage\s+·/);
+			expect(renderedRosterEntry(hub, "NonFinite", 160)).toMatch(/usage\s+·/);
 			expect(getSessionStats).not.toHaveBeenCalled();
 		} finally {
 			hub.dispose();
