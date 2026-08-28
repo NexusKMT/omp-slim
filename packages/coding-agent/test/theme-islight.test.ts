@@ -98,16 +98,19 @@ describe("empty foreground contrast", () => {
 		}
 	});
 
-	it("uses the normal text token for transparent composer text", async () => {
+	it("uses the normal text token for transparent composer text", () => {
 		const { dark } = createBaseThemes();
-		const poimandres = await getThemeByName("light-poimandres");
-		if (!poimandres) throw new Error("Light Poimandres theme is unavailable");
+		const poimandresJson = getBuiltinThemes()["light-poimandres"];
+		if (!poimandresJson) throw new Error("Light Poimandres theme is unavailable");
 		try {
-			setThemeInstance(poimandres);
+			// poimandres `text` is #506477 → rgb(80,100,119); a transparent composer
+			// must paint typed text with it, never the `userMessageText` (#ffffff)
+			// reserved for the painted message background.
+			setThemeInstance(createTheme(poimandresJson, { mode: "truecolor" }));
 			const editor = new Editor(getEditorTheme());
 			editor.setText("typed");
 
-			expect(editor.render(40).join("\n")).toContain(`${poimandres.getFgAnsi("text")}typed`);
+			expect(editor.render(40).join("\n")).toContain("\x1b[38;2;80;100;119mtyped");
 		} finally {
 			setThemeInstance(dark);
 		}
