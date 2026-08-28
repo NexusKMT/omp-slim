@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed `import numpy` (and other native-extension imports) hanging indefinitely in the Python eval tool on Windows, where the runner's always-on background stdin reader deadlocked native DLL loading; Windows now reads the control channel serially between requests while POSIX keeps concurrent request dispatch ([#7985](https://github.com/can1357/oh-my-pi/issues/7985)).
+- Fixed `xd://` MCP failures reporting actionable transport stages, failure classes, server/tool context, retryability, safe trace IDs, and redacted JSON-RPC details instead of unusable fetch-library advice ([#10093](https://github.com/can1357/oh-my-pi/issues/10093)).
 
 ## [18.0.9] - 2026-08-28
 

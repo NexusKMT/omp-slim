@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "bun:test";
+import { createMCPJsonRpcError, MCPTransportError } from "@oh-my-pi/pi-coding-agent/mcp/errors";
 import type { MCPReconnect } from "@oh-my-pi/pi-coding-agent/mcp/tool-bridge";
 import {
 	createMCPToolName,
@@ -143,6 +144,31 @@ describe("isRetriableConnectionError", () => {
 		});
 	}
 
+	it("uses typed transport metadata without retrying ambiguous timeouts", () => {
+		expect(
+			isRetriableConnectionError(
+				new MCPTransportError({
+					transport: "http",
+					stage: "send",
+					failure: "reset",
+					message: "Connection reset",
+					retryable: true,
+				}),
+			),
+		).toBe(true);
+		expect(
+			isRetriableConnectionError(
+				new MCPTransportError({
+					transport: "http",
+					stage: "receive",
+					failure: "timeout",
+					message: "Request timeout",
+					retryable: false,
+				}),
+			),
+		).toBe(false);
+	});
+
 	it("returns false for non-Error values", () => {
 		expect(isRetriableConnectionError("ECONNREFUSED")).toBe(false);
 		expect(isRetriableConnectionError(null)).toBe(false);
@@ -267,7 +293,10 @@ describe("MCPTool.execute retry on connection error", () => {
 		const result = await tool.execute("call-1", {}, noop, noCtx);
 
 		expect(result.details?.isError).toBe(true);
-		expect(result.content[0]).toEqual({ type: "text", text: "MCP error: ECONNRESET" });
+		expect(result.content[0]).toMatchObject({
+			type: "text",
+			text: expect.stringContaining("failure: reset"),
+		});
 	});
 
 	it("does not retry on non-retriable error", async () => {
@@ -287,6 +316,33 @@ describe("MCPTool.execute retry on connection error", () => {
 		expect(result.details?.isError).toBe(true);
 	});
 
+	it("renders server, tool, protocol data, trace ID, retryability, and one next step", async () => {
+		const failTransport = mockTransport(async () => {
+			throw createMCPJsonRpcError("stdio", {
+				code: -32042,
+				message: "upstream rejected the call",
+				data: { detail: "invalid input", token: "server-secret", traceId: "trace-abc123" },
+			});
+		});
+		const tool = new MCPTool(makeConnection(failTransport), TOOL_DEF);
+
+		const result = await tool.execute("call-1", {}, noop, noCtx);
+		const content = result.content[0];
+		if (content?.type !== "text") throw new Error("Expected an MCP text diagnostic");
+
+		expect(content.text).toContain("server: test-server");
+		expect(content.text).toContain("tool: do_stuff");
+		expect(content.text).toContain("transport: stdio");
+		expect(content.text).toContain("stage: protocol");
+		expect(content.text).toContain("failure: json_rpc");
+		expect(content.text).toContain("retryable: no");
+		expect(content.text).toContain("code: -32042");
+		expect(content.text).toContain("trace_id: trace-abc123");
+		expect(content.text).toContain('"token":"[redacted]"');
+		expect(content.text).not.toContain("server-secret");
+		expect(content.text.match(/^next: /gm)).toHaveLength(1);
+	});
+
 	it("does not retry when no reconnect callback", async () => {
 		const failTransport = mockTransport(async () => {
 			throw new Error("ECONNREFUSED");
@@ -296,7 +352,10 @@ describe("MCPTool.execute retry on connection error", () => {
 		const result = await tool.execute("call-1", {}, noop, noCtx);
 
 		expect(result.details?.isError).toBe(true);
-		expect(result.content[0]).toEqual({ type: "text", text: "MCP error: ECONNREFUSED" });
+		expect(result.content[0]).toMatchObject({
+			type: "text",
+			text: expect.stringContaining("failure: connect"),
+		});
 	});
 
 	it("returns error from retry when retry also fails", async () => {
@@ -312,7 +371,10 @@ describe("MCPTool.execute retry on connection error", () => {
 		const result = await tool.execute("call-1", {}, noop, noCtx);
 
 		expect(result.details?.isError).toBe(true);
-		expect(result.content[0]).toEqual({ type: "text", text: "MCP error: HTTP 503: Service Unavailable" });
+		expect(result.content[0]).toMatchObject({
+			type: "text",
+			text: expect.stringContaining("failure: http_status"),
+		});
 	});
 
 	it("preserves provider info from new connection on successful retry", async () => {
