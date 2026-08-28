@@ -98,14 +98,16 @@ describe("empty foreground contrast", () => {
 		}
 	});
 
-	it("gives transparent box composer text an explicit light-theme foreground", () => {
-		const { light, dark } = createBaseThemes();
+	it("uses the normal text token for transparent composer text", async () => {
+		const { dark } = createBaseThemes();
+		const poimandres = await getThemeByName("light-poimandres");
+		if (!poimandres) throw new Error("Light Poimandres theme is unavailable");
 		try {
-			setThemeInstance(light);
+			setThemeInstance(poimandres);
 			const editor = new Editor(getEditorTheme());
 			editor.setText("typed");
 
-			expect(editor.render(40).join("\n")).toContain("\x1b[38;2;0;0;0mtyped");
+			expect(editor.render(40).join("\n")).toContain(`${poimandres.getFgAnsi("text")}typed`);
 		} finally {
 			setThemeInstance(dark);
 		}
