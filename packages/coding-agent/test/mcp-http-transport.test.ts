@@ -579,6 +579,25 @@ describe("MCP Streamable HTTP POST response resumption", () => {
 		expect(observed.auth).toEqual(["Bearer stale", "Bearer fresh"]);
 		expect(observed.lastEventId).toBe("stream-1");
 	});
+	it("marks a clean accepted SSE EOF without an event ID as non-replayable", async () => {
+		let posts = 0;
+		server = Bun.serve({
+			port: 0,
+			fetch() {
+				posts++;
+				return new Response("", { headers: { "Content-Type": "text/event-stream" } });
+			},
+		});
+		const transport = await connectedTransport();
+
+		await expect(withPendingGuard(transport.request("tools/call"), "request")).rejects.toMatchObject({
+			transport: "http",
+			stage: "receive",
+			failure: "eof",
+			retryable: false,
+		});
+		expect(posts).toBe(1);
+	});
 });
 
 describe("MCP Streamable HTTP GET listener resumption", () => {

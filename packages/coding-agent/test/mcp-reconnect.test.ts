@@ -316,6 +316,36 @@ describe("MCPTool.execute retry on connection error", () => {
 		expect(result.details?.isError).toBe(true);
 	});
 
+	it("does not reconnect and replay a non-retryable accepted SSE EOF", async () => {
+		let calls = 0;
+		let reconnects = 0;
+		const failTransport = mockTransport(async () => {
+			calls++;
+			throw new MCPTransportError({
+				transport: "http",
+				stage: "receive",
+				failure: "eof",
+				message: "No response received after the server accepted the POST",
+				retryable: false,
+			});
+		});
+		const reconnect: MCPReconnect = async () => {
+			reconnects++;
+			return makeConnection(mockTransport(async () => toolCallResult("duplicated")));
+		};
+		const tool = new MCPTool(makeConnection(failTransport), TOOL_DEF, reconnect);
+
+		const result = await tool.execute("call-1", {}, noop, noCtx);
+
+		expect(calls).toBe(1);
+		expect(reconnects).toBe(0);
+		expect(result.details?.isError).toBe(true);
+		expect(result.content[0]).toMatchObject({
+			type: "text",
+			text: expect.stringContaining("retryable: no"),
+		});
+	});
+
 	it("renders server, tool, protocol data, trace ID, retryability, and one next step", async () => {
 		const failTransport = mockTransport(async () => {
 			throw createMCPJsonRpcError("stdio", {

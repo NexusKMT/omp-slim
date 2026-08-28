@@ -618,7 +618,7 @@ export class HttpTransport implements MCPTransport {
 							stage: "receive",
 							failure: "eof",
 							message: `No response received for request ID ${expectedId}`,
-							retryable: true,
+							retryable: false,
 							traceId,
 						});
 					}

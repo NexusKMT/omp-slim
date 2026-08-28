@@ -60,7 +60,7 @@ export function isRetriableConnectionError(error: unknown): boolean {
 			error.failure === "eof" ||
 			error.failure === "closed"
 		) {
-			return true;
+			return error.retryable;
 		}
 		return error.failure === "http_status" && (error.code === 404 || error.code === 502 || error.code === 503);
 	}
