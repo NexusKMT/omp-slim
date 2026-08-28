@@ -40,6 +40,9 @@
 ### Fixed
 
 - Fixed managed Chrome-for-Testing installation failures when extracting the trusted browser download.
+### Fixed
+
+- Restricted postmortem cleanup-error suppression to explicitly marked teardown failures, so unrelated unhandled `AbortError` and closed-socket rejections remain fatal.
 
 ## [18.0.4] - 2026-08-24
 
