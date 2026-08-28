@@ -576,6 +576,13 @@ function buildWellKnownUrls(wellKnownPath: string, baseUrl: string): URL[] {
 	};
 	push(relUrl);
 
+	// OIDC Discovery §4 issuer-path form: <issuer>/.well-known/openid-configuration.
+	// Some path-routed OAuth servers expose their other metadata the same way.
+	if (wellKnownPath.startsWith("/.well-known/")) {
+		const pathAppendedUrl = new URL(`${normalizedPath}${wellKnownPath}`, parsed.origin);
+		push(pathAppendedUrl);
+	}
+
 	// RFC 8414 §3.1 path-ful issuer form: /.well-known/<suffix>/<issuer-path>.
 	// Only meaningful for well-known metadata documents.
 	if (wellKnownPath.startsWith("/.well-known/")) {

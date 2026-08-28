@@ -129,6 +129,40 @@ describe("path-prefixed auth servers", () => {
 		expect(calls).toContain("https://gateway.example.com/my-service/.well-known/oauth-authorization-server");
 	});
 
+	it("discovers OIDC metadata appended to a multi-segment issuer path", async () => {
+		const calls: string[] = [];
+		const fetchImpl = mockFetch((input: FetchInput) => {
+			const url = String(input);
+			calls.push(url);
+
+			if (url === "https://auth.example.com/auth/realms/myrealm/.well-known/openid-configuration") {
+				return new Response(
+					JSON.stringify({
+						issuer: "https://auth.example.com/auth/realms/myrealm",
+						authorization_endpoint: "https://auth.example.com/auth/realms/myrealm/protocol/openid-connect/auth",
+						token_endpoint: "https://auth.example.com/auth/realms/myrealm/protocol/openid-connect/token",
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				);
+			}
+
+			return new Response("not found", { status: 404 });
+		});
+
+		const oauth = await discoverOAuthEndpoints(
+			"https://mcp.example.com/mcp",
+			"https://auth.example.com/auth/realms/myrealm",
+			undefined,
+			{ fetch: fetchImpl },
+		);
+
+		expect(oauth).toEqual({
+			authorizationUrl: "https://auth.example.com/auth/realms/myrealm/protocol/openid-connect/auth",
+			tokenUrl: "https://auth.example.com/auth/realms/myrealm/protocol/openid-connect/token",
+		});
+		expect(calls).toContain("https://auth.example.com/auth/realms/myrealm/.well-known/openid-configuration");
+	});
+
 	it("falls back to RFC 8414 path-ful issuer form (/.well-known/oauth-authorization-server/<path>)", async () => {
 		const calls: string[] = [];
 		const fetchImpl = mockFetch((input: FetchInput) => {
