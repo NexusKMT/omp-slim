@@ -1459,6 +1459,8 @@ async def _serve_windows(loop: asyncio.AbstractEventLoop, stdin) -> None:
             break
         try:
             await _handle_request_async(req)
+        except asyncio.CancelledError:
+            raise  # task cancellation must propagate; never swallow it and spin
         except BaseException as exc:  # noqa: BLE001 - one bad request must not wedge the loop
             _emit_error(str(req.get("id", "")), exc)
 
