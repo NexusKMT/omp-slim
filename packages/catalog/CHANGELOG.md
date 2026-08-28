@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Cloudflare AI Gateway shared-catalog refresh to include active Workers AI chat models, including newly released models not present in the bundled snapshot.
+
 ## [18.0.9] - 2026-08-28
 
 ### Added
