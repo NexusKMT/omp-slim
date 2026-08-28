@@ -44,6 +44,12 @@ describe("Shared models.dev catalog fallback", () => {
 			const bundledModel = bundledModels[0];
 			if (!bundledModel) throw new Error("ZAI bundled catalog is empty");
 			const bundledModelId = bundledModel.id;
+			// Must stay un-bundled: the fallback contract below is about models.dev
+			// publishing a model the bundled catalog does not carry yet.
+			const newlyPublishedId = "glm-experimental-probe";
+			if (bundledModels.some(model => model.id === newlyPublishedId)) {
+				throw new Error(`${newlyPublishedId} is bundled; pick a new un-bundled fixture id`);
+			}
 			let fetches = 0;
 			const fallback = modelsDevCatalogFallback("zai");
 			if (!fallback) throw new Error("ZAI did not configure a models.dev fallback");
@@ -54,9 +60,9 @@ describe("Shared models.dev catalog fallback", () => {
 					return {
 						zai: {
 							models: {
-								"glm-5.3-flash": {
-									id: "glm-5.3-flash",
-									name: "GLM-5.3-Flash",
+								[newlyPublishedId]: {
+									id: newlyPublishedId,
+									name: "GLM Experimental Probe",
 									tool_call: true,
 									reasoning: true,
 									limit: { context: 1_000_000, output: 131_072 },
@@ -95,7 +101,7 @@ describe("Shared models.dev catalog fallback", () => {
 				reasoning: bundledModel.reasoning,
 				input: bundledModel.input,
 			});
-			expect(online.models.find(model => model.id === "glm-5.3-flash")).toMatchObject({
+			expect(online.models.find(model => model.id === newlyPublishedId)).toMatchObject({
 				api: "anthropic-messages",
 				baseUrl: "https://api.z.ai/api/anthropic",
 				contextWindow: 1_000_000,
@@ -108,7 +114,7 @@ describe("Shared models.dev catalog fallback", () => {
 			expect(cached.stale).toBe(false);
 			expect(cached.source).toBe("cache");
 			expect(cached.updatedAt).toBe(online.updatedAt);
-			expect(cached.models.some(model => model.id === "glm-5.3-flash")).toBe(true);
+			expect(cached.models.some(model => model.id === newlyPublishedId)).toBe(true);
 
 			const staleFallback = await resolveProviderModels(
 				{
@@ -126,7 +132,7 @@ describe("Shared models.dev catalog fallback", () => {
 			expect(staleFallback.stale).toBe(true);
 			expect(staleFallback.source).toBe("cache");
 			expect(staleFallback.updatedAt).toBe(online.updatedAt);
-			expect(staleFallback.models.some(model => model.id === "glm-5.3-flash")).toBe(true);
+			expect(staleFallback.models.some(model => model.id === newlyPublishedId)).toBe(true);
 			expect(fetches).toBe(1);
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
