@@ -945,11 +945,12 @@ export class SessionMaintenance {
 							? ctxWindow - effectiveReserveTokens(ctxWindow, effectiveSettings)
 							: Number.POSITIVE_INFINITY;
 					const projected = this.#projectSnapcompactContextTokens(preparation, snapcompactResult);
-					if (projected >= snapcompactResult.tokensBefore) {
+					const reductionBaseline = this.#projectPreSnapcompactContextTokens(preparation);
+					if (projected >= reductionBaseline) {
 						logger.warn("Snapcompact projection would not reduce context", {
 							model: this.#model?.id,
 							projected,
-							tokensBefore: snapcompactResult.tokensBefore,
+							reductionBaseline,
 						});
 						this.#host.emitNotice("warning", "snapcompact would not reduce context.", "compaction");
 						throw new Error("snapcompact would not reduce context locally.");
@@ -1548,6 +1549,28 @@ export class SessionMaintenance {
 		// hook deflates the provider-anchored breakdown, which must not suppress
 		// pre-prompt compaction (see #estimateStoredContextTokens).
 		return compactionContextTokens(breakdown?.usedTokens ?? 0, localEstimate);
+	}
+
+	/**
+	 * Local pre-compaction context for a snapcompact preparation, measured on the
+	 * exact same non-message overhead and tokenizer as
+	 * {@link #projectSnapcompactContextTokens}: fixed overhead + the region that
+	 * would be archived (`messagesToSummarize` + `turnPrefixMessages`) + the kept
+	 * tail (`recentMessages`). Comparing the projection against this
+	 * self-consistent baseline isolates the single thing snapcompact changes —
+	 * the archived region becomes an imaged summary — so a result whose frames
+	 * cost more tokens than the text they replace is rejected, while genuine
+	 * reductions are not. Recomputed from the live messages rather than
+	 * `preparation.tokensBefore`, which carries only provider usage (zero for
+	 * imported sessions with no usage metadata, or a deflated figure behind a
+	 * payload-shrinking hook) and would falsely reject reducing archives (#10023).
+	 */
+	#projectPreSnapcompactContextTokens(preparation: CompactionPreparation): number {
+		let tokens = computeNonMessageTokens(this.#host.nonMessageTokenSource(), this.#tokenizer);
+		tokens += this.#tokenizer.countMessages(preparation.messagesToSummarize);
+		tokens += this.#tokenizer.countMessages(preparation.turnPrefixMessages);
+		tokens += this.#tokenizer.countMessages(preparation.recentMessages);
+		return tokens;
 	}
 
 	async runPrePromptCompactionIfNeeded(messages: AgentMessage[]): Promise<void> {
@@ -3332,11 +3355,13 @@ export class SessionMaintenance {
 									? ctxWindow - effectiveReserveTokens(ctxWindow, effectiveSettings)
 									: Number.POSITIVE_INFINITY;
 							const projected = this.#projectSnapcompactContextTokens(preparation, snapcompactResult);
-							if (projected >= snapcompactResult.tokensBefore) {
+							const reductionBaseline =
+								options.triggerContextTokens ?? this.#projectPreSnapcompactContextTokens(preparation);
+							if (projected >= reductionBaseline) {
 								logger.warn("Snapcompact projection would not reduce context", {
 									model: this.#model?.id,
 									projected,
-									tokensBefore: snapcompactResult.tokensBefore,
+									reductionBaseline,
 								});
 								snapcompactBlocker =
 									"snapcompact would not reduce context; trying the next preferred compaction method.";
