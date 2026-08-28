@@ -27,6 +27,9 @@
 - Fixed `inspect_image` selecting a text-only vision/default role when an image-capable model was available on the active provider.
 - Improved unexpected-stop recovery for reasoning-only stalls by requiring the next concrete tool action instead of repeated analysis.
 - The edit tool now repairs a stray closing marker typed in place of the divider in a selection (`old⟫new` inside one selection instead of `old│new`) and applies the intended replacement with a note, instead of failing with an unmatched-marker error.
+### Fixed
+
+- Coalesced simultaneous autonomous continuation requests so goal and recovery schedulers no longer call a busy agent repeatedly; continuation diagnostics now identify each source and scheduler token ([#9988](https://github.com/can1357/oh-my-pi/issues/9988)).
 
 ## [18.0.8] - 2026-08-27
 
