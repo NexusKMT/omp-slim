@@ -5,6 +5,7 @@
 ### Added
 
 - Added `postmortem.drainStdout` to flush buffered stdout before process exit or exec-replace.
+- Added `hexToOklch`/`oklchToHex` color conversions with chroma-reducing sRGB gamut mapping.
 
 ## [18.0.9] - 2026-08-28
 
