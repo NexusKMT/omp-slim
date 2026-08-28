@@ -30,6 +30,9 @@
 ### Fixed
 
 - Coalesced simultaneous autonomous continuation requests so goal and recovery schedulers no longer call a busy agent repeatedly; continuation diagnostics now identify each source and scheduler token ([#9988](https://github.com/can1357/oh-my-pi/issues/9988)).
+### Fixed
+
+- Fixed snapcompact committing a projected context that was no smaller than the original; it now falls back or reports the skipped compaction ([#10023](https://github.com/can1357/oh-my-pi/issues/10023)).
 
 ## [18.0.8] - 2026-08-27
 
