@@ -75,7 +75,14 @@ export function pickDefaultAvailableModel(
 		hasConcreteCredential === undefined
 			? availableModels
 			: (() => {
-					const concrete = availableModels.filter(model => hasConcreteCredential(model.provider));
+					const concreteAuthByProvider = new Map<string, boolean>();
+					const concrete = availableModels.filter(model => {
+						const cached = concreteAuthByProvider.get(model.provider);
+						if (cached !== undefined) return cached;
+						const hasConcreteAuth = hasConcreteCredential(model.provider);
+						concreteAuthByProvider.set(model.provider, hasConcreteAuth);
+						return hasConcreteAuth;
+					});
 					return concrete.length > 0 ? concrete : availableModels;
 				})();
 	const firstDefault = models.find(

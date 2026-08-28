@@ -477,6 +477,21 @@ describe("pickDefaultAvailableModel", () => {
 		expect(picked?.provider).toBe("amazon-bedrock");
 		expect(picked?.id).toBe(DEFAULT_MODEL_PER_PROVIDER["amazon-bedrock"]);
 	});
+
+	test("checks concrete auth once per provider", () => {
+		const bedrockDefault = createBedrockDefaultModel();
+		const secondBedrockModel = createBedrockDefaultModel({ id: "us.anthropic.claude-sonnet-4-6" });
+		const anthropicDefault = createOpusModel("anthropic", DEFAULT_MODEL_PER_PROVIDER.anthropic, "Claude Opus");
+		const checkedProviders: string[] = [];
+
+		const picked = pickDefaultAvailableModel([bedrockDefault, secondBedrockModel, anthropicDefault], provider => {
+			checkedProviders.push(provider);
+			return provider === "anthropic";
+		});
+
+		expect(picked?.provider).toBe("anthropic");
+		expect(checkedProviders).toEqual(["amazon-bedrock", "anthropic"]);
+	});
 });
 
 describe("parseModelPattern", () => {

@@ -2768,7 +2768,18 @@ export class AuthStorage {
 		if (this.#runtimeOverrides.has(provider)) return true;
 		if (this.#configOverrides.has(provider)) return true;
 		if (this.#getCredentialsForProvider(provider).length > 0) return true;
-		if (this.#hasDedicatedEnvAuth(provider) && getEnvApiKey(provider) !== AUTHENTICATED_SENTINEL) return true;
+		if (
+			(provider === "amazon-bedrock" || provider === "bedrock-mantle") &&
+			$env.AWS_BEARER_TOKEN_BEDROCK?.trim()
+		) {
+			return true;
+		}
+		if (provider === "xai-oauth") {
+			if ($env.XAI_OAUTH_TOKEN?.trim()) return true;
+		} else {
+			const envApiKey = getEnvApiKey(provider);
+			if (envApiKey !== undefined && envApiKey !== AUTHENTICATED_SENTINEL) return true;
+		}
 		const fallback = this.#fallbackResolver?.(provider);
 		return fallback !== undefined && fallback !== AUTHENTICATED_SENTINEL;
 	}

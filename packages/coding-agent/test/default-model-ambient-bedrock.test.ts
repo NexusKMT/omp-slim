@@ -27,12 +27,15 @@ describe("issue #9967 default model with ambient Bedrock credentials", () => {
 	let registry: ModelRegistry;
 	let savedAccessKey: string | undefined;
 	let savedSecret: string | undefined;
+	let savedBearerToken: string | undefined;
 
 	beforeEach(async () => {
 		savedAccessKey = process.env.AWS_ACCESS_KEY_ID;
 		savedSecret = process.env.AWS_SECRET_ACCESS_KEY;
+		savedBearerToken = process.env.AWS_BEARER_TOKEN_BEDROCK;
 		delete process.env.AWS_ACCESS_KEY_ID;
 		delete process.env.AWS_SECRET_ACCESS_KEY;
+		delete process.env.AWS_BEARER_TOKEN_BEDROCK;
 		tempDir = path.join(os.tmpdir(), `pi-9967-${Snowflake.next()}`);
 		fs.mkdirSync(tempDir, { recursive: true });
 		authStorage = createInMemoryAuthStorage();
@@ -47,6 +50,8 @@ describe("issue #9967 default model with ambient Bedrock credentials", () => {
 		else process.env.AWS_ACCESS_KEY_ID = savedAccessKey;
 		if (savedSecret === undefined) delete process.env.AWS_SECRET_ACCESS_KEY;
 		else process.env.AWS_SECRET_ACCESS_KEY = savedSecret;
+		if (savedBearerToken === undefined) delete process.env.AWS_BEARER_TOKEN_BEDROCK;
+		else process.env.AWS_BEARER_TOKEN_BEDROCK = savedBearerToken;
 		fs.rmSync(tempDir, { recursive: true, force: true });
 	});
 
@@ -81,5 +86,17 @@ describe("issue #9967 default model with ambient Bedrock credentials", () => {
 		const picked = pickDefaultAvailableModel(available, provider => registry.hasConcreteAuth(provider));
 		expect(picked?.provider).toBe("anthropic");
 		expect(picked?.id).toBe(DEFAULT_MODEL_PER_PROVIDER.anthropic);
+	});
+
+	test("treats a dedicated Bedrock bearer token as concrete auth", () => {
+		process.env.AWS_BEARER_TOKEN_BEDROCK = "bedrock-test-token";
+
+		expect(authStorage.hasAuth("amazon-bedrock")).toBe(true);
+		expect(registry.hasConcreteAuth("amazon-bedrock")).toBe(true);
+
+		const picked = pickDefaultAvailableModel(registry.getAvailable(), provider =>
+			registry.hasConcreteAuth(provider),
+		);
+		expect(picked?.provider).toBe("amazon-bedrock");
 	});
 });
