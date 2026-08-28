@@ -944,7 +944,17 @@ export class SessionMaintenance {
 						ctxWindow > 0
 							? ctxWindow - effectiveReserveTokens(ctxWindow, effectiveSettings)
 							: Number.POSITIVE_INFINITY;
-					if (this.#projectSnapcompactContextTokens(preparation, snapcompactResult) > budget) {
+					const projected = this.#projectSnapcompactContextTokens(preparation, snapcompactResult);
+					if (projected >= snapcompactResult.tokensBefore) {
+						logger.warn("Snapcompact projection would not reduce context", {
+							model: this.#model?.id,
+							projected,
+							tokensBefore: snapcompactResult.tokensBefore,
+						});
+						this.#host.emitNotice("warning", "snapcompact would not reduce context.", "compaction");
+						throw new Error("snapcompact would not reduce context locally.");
+					}
+					if (projected > budget) {
 						logger.warn("Snapcompact still overflows the window after frame-budget sizing", {
 							model: this.#model?.id,
 						});
@@ -3322,7 +3332,16 @@ export class SessionMaintenance {
 									? ctxWindow - effectiveReserveTokens(ctxWindow, effectiveSettings)
 									: Number.POSITIVE_INFINITY;
 							const projected = this.#projectSnapcompactContextTokens(preparation, snapcompactResult);
-							if (projected > budget) {
+							if (projected >= snapcompactResult.tokensBefore) {
+								logger.warn("Snapcompact projection would not reduce context", {
+									model: this.#model?.id,
+									projected,
+									tokensBefore: snapcompactResult.tokensBefore,
+								});
+								snapcompactBlocker =
+									"snapcompact would not reduce context; trying the next preferred compaction method.";
+								snapcompactResult = undefined;
+							} else if (projected > budget) {
 								logger.warn("Snapcompact still overflows the window after frame-budget sizing", {
 									model: this.#model?.id,
 									projected,

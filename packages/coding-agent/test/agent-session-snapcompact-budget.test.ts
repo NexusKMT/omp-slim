@@ -145,7 +145,7 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 			summary: "stubbed snapcompact",
 			shortSummary: "stub",
 			firstKeptEntryId: firstKeptEntry.id,
-			tokensBefore: 100_000,
+			tokensBefore: 180_000,
 			details: { readFiles: [], modifiedFiles: [] },
 			preserveData: {
 				snapcompact: { frames: [], totalChars: 0, truncatedChars: 0 },
@@ -180,6 +180,39 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 		const worstCaseEdgeTokens = Math.ceil((2 * edgeCap) / 4) + 2000;
 		const fullProjection = baseTokens + (maxFrames ?? 0) * snapcompact.FRAME_TOKEN_ESTIMATE + worstCaseEdgeTokens;
 		expect(fullProjection).toBeLessThanOrEqual(budget);
+	});
+
+	it("rejects manual snapcompact when its projected context is larger than the input", async () => {
+		const branchEntries = sessionManager.getBranch();
+		const lastEntry = branchEntries[branchEntries.length - 1];
+		if (!lastEntry?.id) throw new Error("Expected branch entry with id");
+		vi.spyOn(snapcompact, "compact").mockResolvedValue({
+			summary: "inflating snapcompact",
+			shortSummary: "inflating",
+			firstKeptEntryId: lastEntry.id,
+			tokensBefore: 4_000,
+			details: { readFiles: [], modifiedFiles: [] },
+			preserveData: {
+				snapcompact: {
+					frames: [
+						{
+							data: "ZmFrZQ==",
+							mimeType: "image/png",
+							cols: 64,
+							rows: 40,
+							chars: 4,
+						},
+					],
+					totalChars: 4,
+					truncatedChars: 0,
+				},
+			},
+		});
+
+		await expect(session.compact(undefined, { mode: "snapcompact" })).rejects.toThrow(
+			"snapcompact would not reduce context locally.",
+		);
+		expect(sessionManager.getEntries().some(entry => entry.type === "compaction")).toBe(false);
 	});
 
 	it("still invokes snapcompact with maxFrames=1 when residual headroom is below the summary-text reserve", async () => {
@@ -219,7 +252,7 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 			summary: "stubbed snapcompact",
 			shortSummary: "stub",
 			firstKeptEntryId: lastEntry.id,
-			tokensBefore: 100_000,
+			tokensBefore: 180_000,
 			// Text-only archive: zero frames, modest text edges. The projection
 			// charges 0 for frames, so the post-compaction context fits.
 			details: { readFiles: [], modifiedFiles: [] },

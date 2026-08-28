@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed snapcompact committing a projected context that was no smaller than the original; it now falls back or reports the skipped compaction ([#10023](https://github.com/can1357/oh-my-pi/issues/10023)).
+
 ## [18.0.8] - 2026-08-27
 
 ### Added
