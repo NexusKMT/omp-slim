@@ -724,6 +724,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	#signalTeardown?: SessionTeardown;
 	readonly #version: string;
 	readonly #startupChangelog: StartupChangelogSelection | undefined;
+	/** Header components below the config warnings + welcome, retained so a live config-warning change can rebuild the header (#10048). */
+	#headerAfter: readonly Component[] = [];
 	#planModePreviousTools: string[] | undefined;
 	#goalModePreviousTools: string[] | undefined;
 	#vibeModePreviousTools: string[] | undefined;
@@ -1164,10 +1166,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			lspServers: this.#getWelcomeLspServers(),
 		});
 		this.#persistComposerWelcome(modelName, providerName);
-		const headerBefore: Component[] = [];
-		for (const warning of this.session.configWarnings) {
-			headerBefore.push(new Text(theme.fg("warning", `Warning: ${warning}`), 1, 0), new Spacer(1));
-		}
+		const headerBefore = this.#buildConfigWarningComponents();
 		const headerAfter: Component[] = [];
 		if (!startupQuiet && this.#startupChangelog && settings.get("startup.changelogMode") !== "hidden") {
 			headerAfter.push(
@@ -1186,6 +1185,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			}
 			headerAfter.push(new Spacer(1), new DynamicBorder());
 		}
+		this.#headerAfter = headerAfter;
 		this.composer.setHeaderExtras(headerBefore, headerAfter);
 		this.statusLine.watchBranch(() => {
 			this.ui.requestRender();
@@ -1339,6 +1339,9 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.session.subscribe(event => {
 				if (event.type === "model_changed") {
 					this.#updateWelcomeModel();
+				}
+				if (event.type === "config_warnings_changed") {
+					this.composer.setHeaderExtras(this.#buildConfigWarningComponents(), this.#headerAfter);
 				}
 				void this.#handleGoalSessionEvent(event);
 			}),
@@ -5005,6 +5008,15 @@ export class InteractiveMode implements InteractiveModeContext {
 		const providerName = this.session.model?.provider ?? "Unknown";
 		this.composer.updateWelcome({ modelName, providerName });
 		this.#persistComposerWelcome(modelName, providerName);
+	}
+
+	/** Header rows for the current config warnings, rebuilt when they change (#10048). */
+	#buildConfigWarningComponents(): Component[] {
+		const components: Component[] = [];
+		for (const warning of this.session.configWarnings) {
+			components.push(new Text(theme.fg("warning", `Warning: ${warning}`), 1, 0), new Spacer(1));
+		}
+		return components;
 	}
 
 	#persistComposerWelcome(modelName: string, providerName: string): void {

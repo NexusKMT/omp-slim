@@ -1722,13 +1722,14 @@ export class AgentSession {
 			});
 		});
 
-		// An advisor enabled in config resolves its role against the model catalog
-		// as it stands at construction. Discovery-backed providers (e.g. GitHub
-		// Copilot) may not be populated yet — background discovery is started
-		// fire-and-forget before the session is built — so a valid configured model
-		// can land as `no_model`. Retry once the initial refresh settles so the
-		// advisor activates without a manual /advisor toggle. See #9010.
-		void this.#retryInactiveAdvisorAfterModelDiscovery();
+		// Config-declared resolution done against the catalog as it stands at
+		// construction can be premature: background discovery is started
+		// fire-and-forget before the session is built, so discovery-backed
+		// providers (e.g. GitHub Copilot, or a models.yml LiteLLM provider with a
+		// cold cache) may not be populated yet. Reconcile once the initial refresh
+		// settles — reactivate a `no_model` advisor (#9010) and retract stale
+		// retry.fallbackChains warnings (#10048).
+		void this.#reconcileSessionAfterModelDiscovery();
 	}
 	/** Model registry for API key resolution and model discovery */
 	get modelRegistry(): ModelRegistry {
@@ -9873,16 +9874,35 @@ export class AgentSession {
 	}
 
 	/**
-	 * Reactivate an advisor that resolved to `no_model` at construction because a
-	 * discovery-backed provider had not populated the model registry yet. Awaits
-	 * the initial background refresh, then rebuilds the advisor and emits
-	 * `model_changed` so the status line reflects the now-active advisor. See #9010.
+	 * After the initial background model discovery settles, reconcile session
+	 * state resolved against a possibly-incomplete catalog at construction:
+	 * reactivate an advisor that fell back to `no_model` (#9010) and re-run
+	 * retry.fallbackChains validation so config-declared discovery providers
+	 * whose models arrived a beat late stop reporting valid selectors as
+	 * unknown (#10048).
+	 *
+	 * The fallback re-check only runs when a background refresh was actually in
+	 * flight: without one, discovery will not populate the registry, so the
+	 * startup suppression stands rather than surfacing an unverifiable warning.
 	 */
-	async #retryInactiveAdvisorAfterModelDiscovery(): Promise<void> {
-		if (this.#isDisposed || !this.#advisors.hasInactiveNoModelAdvisor()) return;
+	async #reconcileSessionAfterModelDiscovery(): Promise<void> {
+		if (this.#isDisposed) return;
+		const hasInactiveAdvisor = this.#advisors.hasInactiveNoModelAdvisor();
+		const hasDeferredValidation = this.#recovery.hasPendingDiscoveryDeferredFallbackValidation();
+		if (!hasInactiveAdvisor && !hasDeferredValidation) return;
+		const discoveryWasInFlight = this.#modelRegistry.hasBackgroundRefreshInFlight();
 		await this.#modelRegistry.awaitBackgroundRefresh();
 		if (this.#isDisposed) return;
-		if (this.#advisors.retryAfterModelDiscovery()) this.#emit({ type: "model_changed" });
+		if (hasInactiveAdvisor && this.#advisors.retryAfterModelDiscovery()) {
+			this.#emit({ type: "model_changed" });
+		}
+		if (
+			hasDeferredValidation &&
+			discoveryWasInFlight &&
+			this.#recovery.revalidateRetryFallbackChainsAfterDiscovery()
+		) {
+			this.#emit({ type: "config_warnings_changed" });
+		}
 	}
 
 	/**

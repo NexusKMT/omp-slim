@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `retry.fallbackChains` reporting valid selectors as `references unknown model` at startup when a config-declared discovery provider (e.g. LiteLLM in `models.yml`) had a cold discovery cache — such as the first launch after an update bumps the cache namespace. Warnings for pending-discovery providers are now deferred and re-evaluated once discovery lands, and cleared from the header if resolved ([#10048](https://github.com/can1357/oh-my-pi/issues/10048)).
+
 ## [18.0.9] - 2026-08-28
 
 ### Breaking Changes

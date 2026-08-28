@@ -463,6 +463,15 @@ export class ModelRegistry {
 		}
 	}
 
+	/**
+	 * Whether an initial background discovery is still running. Read before
+	 * awaiting {@link awaitBackgroundRefresh} so a consumer can tell a genuine
+	 * pending discovery from a registry that will never refresh (#10048).
+	 */
+	hasBackgroundRefreshInFlight(): boolean {
+		return this.#backgroundRefresh !== undefined;
+	}
+
 	async refreshProvider(providerId: string, strategy: ModelRefreshStrategy = "online"): Promise<void> {
 		this.#reloadStaticModels();
 		for (const selector of this.#suppressedSelectors.keys()) {
@@ -2266,6 +2275,17 @@ export class ModelRegistry {
 
 	getProviderDiscoveryState(provider: string): ProviderDiscoveryState | undefined {
 		return this.#providerDiscoveryStates.get(provider);
+	}
+
+	/**
+	 * Whether a config-declared discovery provider has not yet produced a
+	 * catalog in this process. A cold discovery cache (e.g. after `omp update`
+	 * bumps the cache namespace) leaves the provider in its initial `idle`
+	 * state with no models, so a selector the provider will supply looks
+	 * unknown until background discovery lands (#10048).
+	 */
+	isProviderDiscoveryPending(provider: string): boolean {
+		return this.#providerDiscoveryStates.get(provider)?.status === "idle";
 	}
 
 	/**
