@@ -39,6 +39,9 @@
 ### Fixed
 
 - Google Antigravity daily quota usage now appears in the status-line usage segment ([#9999](https://github.com/can1357/oh-my-pi/issues/9999)).
+### Fixed
+
+- Fixed status-line background-work counts to keep queued tasks and eval jobs visible without double-counting running subagents.
 
 ## [18.0.8] - 2026-08-27
 

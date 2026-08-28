@@ -393,6 +393,7 @@ export class StatusLineComponent implements Component {
 	#speculationBlinkOn = true;
 	#hookStatuses: Map<string, string> = new Map();
 	#subagentCount: number = 0;
+	#runningSubagentIds = new Set<string>();
 	/**
 	 * Active-processing accounting for the `time_spent` segment, keyed per
 	 * {@link AgentSession} so the focus-controller mid-turn attach path
@@ -568,8 +569,9 @@ export class StatusLineComponent implements Component {
 		this.#autoCompactEnabled = enabled;
 	}
 
-	setSubagentCount(count: number): void {
-		this.#subagentCount = count;
+	setRunningSubagents(agentIds: readonly string[]): void {
+		this.#subagentCount = agentIds.length;
+		this.#runningSubagentIds = new Set(agentIds);
 	}
 
 	/**
@@ -1888,7 +1890,15 @@ export class StatusLineComponent implements Component {
 		}
 
 		if (layout !== "plain-left") {
-			const runningBackgroundJobs = this.session.getAsyncJobSnapshot()?.running.length ?? 0;
+			// Count task jobs only until their AgentRegistry ref appears. Once it is
+			// running, the subagent badge represents that same agent; bash and eval
+			// jobs always remain independent background work.
+			const runningBackgroundJobs =
+				this.session
+					.getAsyncJobSnapshot()
+					?.running.filter(
+						job => job.type !== "task" || job.agentId === undefined || !this.#runningSubagentIds.has(job.agentId),
+					).length ?? 0;
 			if (runningBackgroundJobs > 0) {
 				rightParts.unshift(theme.fg("statusLineSubagents", `${theme.icon.job} ${runningBackgroundJobs}`));
 			}
