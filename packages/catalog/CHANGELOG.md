@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Cursor Kimi K3, Grok 4, and Composer 2.5 models being treated as text-only despite accepting image attachments.
+
 ## [18.0.9] - 2026-08-28
 
 ### Added
