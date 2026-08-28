@@ -95,10 +95,14 @@ function runCleanup(reason: Reason): Promise<void> {
 			return Promise.resolve();
 	}
 
-	// Call .cleanup() for each callback that is still "armed".
-	// Use Promise.try to handle sync/async, but only those armed.
+	// Invoke callbacks before wrapping their results: Bun defers Promise.try's
+	// callback, but the process "exit" event only permits synchronous cleanup.
 	const promises = callbackList.toReversed().map(callback => {
-		return Promise.try(() => callback(reason));
+		try {
+			return Promise.resolve(callback(reason));
+		} catch (error) {
+			return Promise.reject(error);
+		}
 	});
 
 	const cleanupSettled = Promise.allSettled(promises).then(results => {

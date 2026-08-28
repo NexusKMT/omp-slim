@@ -1,7 +1,14 @@
 import { Database, type Statement } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { AsyncDrain, getDbBusyTimeoutMs, getHistoryDbPath, logger } from "@oh-my-pi/pi-utils";
+import {
+	AsyncDrain,
+	checkpointWal,
+	getDbBusyTimeoutMs,
+	getHistoryDbPath,
+	logger,
+	postmortem,
+} from "@oh-my-pi/pi-utils";
 
 /** A unique prompt with provenance from its most recent submission. */
 export interface HistoryEntry {
@@ -59,6 +66,8 @@ CREATE TABLE IF NOT EXISTS history (
 );
 CREATE INDEX IF NOT EXISTS idx_history_created_at ON history(created_at DESC);
 `;
+
+let cancelExitCleanup: (() => void) | undefined;
 
 /** Stores searchable prompts with only their latest project and session metadata. */
 export class HistoryStorage {
@@ -128,18 +137,25 @@ ON CONFLICT(prompt) DO UPDATE SET
 	static open(dbPath: string = getHistoryDbPath()): HistoryStorage {
 		if (!HistoryStorage.#instance) {
 			HistoryStorage.#instance = new HistoryStorage(dbPath);
+			cancelExitCleanup = postmortem.register("history-storage", () => HistoryStorage.close());
 		}
 		return HistoryStorage.#instance;
 	}
 
-	/** @internal Reset the singleton and close its database — test-only. */
-	static resetInstance(): void {
+	/** Flushes queued prompts, closes the process-wide database, and permits reopening it. */
+	static close(): void {
 		const instance = HistoryStorage.#instance;
 		HistoryStorage.#instance = undefined;
+		cancelExitCleanup?.();
+		cancelExitCleanup = undefined;
 		if (instance) instance.#close();
 	}
 
 	#close(): void {
+		// History batches are synchronous once invoked, so this persists them
+		// before finalizing the statements they use, including in process.on("exit").
+		void this.#drain.flush();
+		checkpointWal(this.#db);
 		for (const stmt of this.#substringStmts.values()) stmt.finalize();
 		this.#substringStmts.clear();
 		this.#upsertRowStmt.finalize();

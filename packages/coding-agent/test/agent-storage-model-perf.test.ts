@@ -21,7 +21,7 @@ describe("AgentStorage model perf aggregates", () => {
 
 	afterEach(async () => {
 		vi.useRealTimers();
-		AgentStorage.resetInstance();
+		AgentStorage.close();
 		if (tempDir) {
 			try {
 				await tempDir.remove();

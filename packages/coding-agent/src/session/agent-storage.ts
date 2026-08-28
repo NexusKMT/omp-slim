@@ -8,7 +8,16 @@ import {
 	SqliteAuthCredentialStore,
 	type StoredAuthCredential,
 } from "@oh-my-pi/pi-ai";
-import { AsyncDrain, getAgentDbPath, getDbBusyTimeoutMs, getStatsDbPath, isRecord, logger } from "@oh-my-pi/pi-utils";
+import {
+	AsyncDrain,
+	checkpointWal,
+	getAgentDbPath,
+	getDbBusyTimeoutMs,
+	getStatsDbPath,
+	isRecord,
+	logger,
+	postmortem,
+} from "@oh-my-pi/pi-utils";
 import type { RawSettings as Settings } from "../config/settings";
 
 /** Row shape for settings table queries */
@@ -121,6 +130,7 @@ const SQLITE_NOW_EPOCH = "CAST(strftime('%s','now') AS INTEGER)";
 
 /** Singleton instances per database path */
 const instances = new Map<string, AgentStorage>();
+let cancelExitCleanup: (() => void) | undefined;
 
 /**
  * Unified SQLite storage for agent settings, model usage, and auth credentials.
@@ -385,6 +395,7 @@ FROM model_usage_legacy
 			try {
 				const storage = new AgentStorage(dbPath);
 				instances.set(dbPath, storage);
+				cancelExitCleanup ??= postmortem.register("agent-storage", () => AgentStorage.close());
 				return storage;
 			} catch (err) {
 				if (!isSqliteBusyError(err)) {
@@ -402,13 +413,20 @@ FROM model_usage_legacy
 			{ cause: lastError },
 		);
 	}
-	/** @internal Reset all singletons and close their databases — test-only. */
-	static resetInstance(): void {
+
+	/** Flushes deferred writes, closes every process-wide database, and permits reopening them. */
+	static close(): void {
 		for (const storage of instances.values()) storage.#close();
 		instances.clear();
+		cancelExitCleanup?.();
+		cancelExitCleanup = undefined;
 	}
 
 	#close(): void {
+		// Model-performance batches are synchronous once invoked, so this
+		// persists them before finalizing their statements during process exit.
+		void this.#perfDrain.flush();
+		checkpointWal(this.#db);
 		this.#listSettingsStmt.finalize();
 		this.#upsertModelUsageStmt.finalize();
 		this.#listModelUsageStmt.finalize();

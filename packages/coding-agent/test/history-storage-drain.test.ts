@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -10,7 +11,7 @@ let tempDir = "";
 async function freshStorage(prefix = "omp-history-drain-"): Promise<HistoryStorage> {
 	tempDir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
 	const dbPath = path.join(tempDir, "history.db");
-	HistoryStorage.resetInstance();
+	HistoryStorage.close();
 	return HistoryStorage.open(dbPath);
 }
 
@@ -21,12 +22,12 @@ async function flush(...writes: Promise<void>[]): Promise<void> {
 }
 
 beforeEach(() => {
-	HistoryStorage.resetInstance();
+	HistoryStorage.close();
 	vi.useFakeTimers();
 });
 
 afterEach(async () => {
-	HistoryStorage.resetInstance();
+	HistoryStorage.close();
 	vi.useRealTimers();
 	if (tempDir) {
 		await removeWithRetries(tempDir).catch(() => {});
@@ -68,5 +69,58 @@ describe("HistoryStorage AsyncDrain batching", () => {
 		// After the first batch flushes, a new add starts a new batch.
 		await flush(storage.add("batch-two"));
 		expect(storage.getRecent(10).map(r => r.prompt)).toEqual(["batch-two", "batch-one"]);
+	});
+});
+
+describe("storage process-exit cleanup", () => {
+	it("flushes queued writes and checkpoints both databases before a hard exit", async () => {
+		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-storage-exit-"));
+		const historyDbPath = path.join(tempDir, "history.db");
+		const agentDbPath = path.join(tempDir, "agent.db");
+		const historyModule = path.resolve(import.meta.dir, "../src/session/history-storage.ts");
+		const agentModule = path.resolve(import.meta.dir, "../src/session/agent-storage.ts");
+		const script = [
+			`import { HistoryStorage } from ${JSON.stringify(historyModule)};`,
+			`import { AgentStorage } from ${JSON.stringify(agentModule)};`,
+			`const history = HistoryStorage.open(${JSON.stringify(historyDbPath)});`,
+			`const agent = await AgentStorage.open(${JSON.stringify(agentDbPath)});`,
+			'void history.add("queued immediately before exit", "/tmp", "exit-session");',
+			'void agent.recordModelPerf("openai/repro", { outputTokens: 10, durationMs: 1000 });',
+			"process.exit(0);",
+		].join("\n");
+		const child = Bun.spawn([process.execPath, "--eval", script], {
+			cwd: path.resolve(import.meta.dir, "../../.."),
+			stdin: "ignore",
+			stdout: "ignore",
+			stderr: "pipe",
+		});
+		const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+		expect(exitCode, stderr).toBe(0);
+		const historyCheckpoint = path.join(tempDir, "history-checkpoint.db");
+		const agentCheckpoint = path.join(tempDir, "agent-checkpoint.db");
+		await Promise.all([
+			Bun.write(historyCheckpoint, Bun.file(historyDbPath)),
+			Bun.write(agentCheckpoint, Bun.file(agentDbPath)),
+		]);
+
+		// Read copies of the main database files without their WALs. The queued
+		// rows are visible only if process-exit cleanup checkpointed them.
+		const historyDb = new Database(historyCheckpoint, { readonly: true });
+		const agentDb = new Database(agentCheckpoint, { readonly: true });
+		try {
+			expect(historyDb.query<{ prompt: string }, []>("SELECT prompt FROM history").get()).toEqual({
+				prompt: "queued immediately before exit",
+			});
+			expect(
+				agentDb
+					.query<{ samples: number; output_tokens: number; gen_ms: number }, []>(
+						"SELECT samples, output_tokens, gen_ms FROM model_perf WHERE model_key = 'openai/repro'",
+					)
+					.get(),
+			).toEqual({ samples: 1, output_tokens: 10, gen_ms: 1000 });
+		} finally {
+			historyDb.close();
+			agentDb.close();
+		}
 	});
 });
