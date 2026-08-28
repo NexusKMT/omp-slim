@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed session-level auto-retry never firing for empty (`contentBlocks: 0`) Anthropic stream truncations reported as `stream ended before message_stop`, matching the existing retry behavior already applied to `stream ended before message_start`.
+
 ## [18.0.9] - 2026-08-28
 
 ### Fixed
