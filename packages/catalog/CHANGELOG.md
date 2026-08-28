@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `google-antigravity/gemini-3.7-flash-tiered` sending `thinkingLevel: MINIMAL` at `:off`/`:minimal`, which Cloud Code Assist rejects with HTTP 400; the discovery alias now collapses into `gemini-3.7-flash` and routes those tiers to the `-low` SKU like the 3.6 family ([#10016](https://github.com/can1357/oh-my-pi/issues/10016)).
+
 ## [18.0.8] - 2026-08-27
 
 ### Fixed
