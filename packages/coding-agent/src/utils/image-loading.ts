@@ -232,6 +232,14 @@ export class InvalidImageDataError extends Error {
 }
 
 /**
+ * Smallest raster the decode probe terminates into. The decode is the oracle,
+ * so the output size cannot change the verdict — a 1x1 sink keeps the check
+ * from allocating a full-size pixel buffer, a full-size PNG, and a base64
+ * string for a payload that may be up to {@link MAX_IMAGE_INPUT_BYTES}.
+ */
+const DECODE_PROBE_EDGE_PX = 1;
+
+/**
  * Why an image cannot be decoded, or `null` when it decodes.
  *
  * A full decode is the only check that matches what vision backends accept: a
@@ -245,7 +253,10 @@ export async function imageDecodeFailureReason(image: ImageContent): Promise<str
 	const bytes = Buffer.from(image.data, "base64");
 	if (bytes.length === 0) return "empty image data";
 	try {
-		await new Bun.Image(bytes).png().toBase64();
+		// Decode in full (that is what catches a hole in the compressed stream),
+		// then terminate into a 1x1 raster's bytes instead of re-encoding at the
+		// source dimensions and base64-ing a result nobody reads.
+		await new Bun.Image(bytes).resize(DECODE_PROBE_EDGE_PX, DECODE_PROBE_EDGE_PX).png().bytes();
 		return null;
 	} catch (error) {
 		return error instanceof Error ? error.message : String(error);
