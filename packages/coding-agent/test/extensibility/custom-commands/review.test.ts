@@ -637,6 +637,40 @@ describe("ReviewCommand", () => {
 		}
 	});
 
+	it("rejects base-branch review when histories share no merge base", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-review-orphan-"));
+		try {
+			await $`git init -q -b main`.cwd(dir).quiet();
+			await $`git config user.email test@example.com`.cwd(dir).quiet();
+			await $`git config user.name Test`.cwd(dir).quiet();
+			await fs.writeFile(path.join(dir, "a.txt"), "one\n");
+			await $`git add a.txt`.cwd(dir).quiet();
+			await $`git commit -q -m init`.cwd(dir).quiet();
+
+			// Orphan branch: no common ancestor with main, so PR-style review
+			// must abort instead of comparing the two unrelated trees.
+			await $`git checkout -q --orphan orphan`.cwd(dir).quiet();
+			await $`git rm -q -rf .`.cwd(dir).quiet();
+			await fs.writeFile(path.join(dir, "b.txt"), "other\n");
+			await $`git add b.txt`.cwd(dir).quiet();
+			await $`git commit -q -m orphan`.cwd(dir).quiet();
+
+			const command = new ReviewCommand({ cwd: dir } as unknown as CustomCommandAPI);
+			const notices: NotifyCall[] = [];
+			const result = await command.execute(
+				[],
+				createContext({
+					selectResults: ["1. Review against a base branch (PR Style)", "main"],
+					onNotify: call => notices.push(call),
+				}),
+			);
+			expect(result).toBeUndefined();
+			expect(notices).toEqual([{ message: "No common history between main and orphan", type: "error" }]);
+		} finally {
+			await removeWithRetries(dir);
+		}
+	});
+
 	it("keeps specific commit review mode working", async () => {
 		const dir = await createTempDir();
 		const showSpy = vi.fn(async () => ({ data: Buffer.from(SAMPLE_PR_DIFF), truncated: false }));
