@@ -4,24 +4,22 @@
 
 ### Breaking Changes
 
-- The `git`/`jj` wrapper modules are gone from the SDK surface: VCS operations are exposed by `@oh-my-pi/pi-natives/vcs` (native handles, typed `VcsError`); the package now re-exports only the `github` (gh CLI) helpers.
+- Removed the `git` and `jj` wrapper modules from the SDK surface. VCS operations are now available through `@oh-my-pi/pi-natives/vcs`, including native handles and typed `VcsError` support; the package continues to re-export the `github` (gh CLI) helpers.
 
 ### Fixed
 
-- Kept text readable on light terminal backgrounds by pairing TUI surfaces with explicit contrasting foreground colors.
-- Coalesced simultaneous autonomous continuation requests so goal and recovery schedulers no longer call a busy agent repeatedly; continuation diagnostics now identify each source and scheduler token ([#9988](https://github.com/can1357/oh-my-pi/issues/9988)).
-- Fixed snapcompact committing a projected context that was no smaller than the original; it now falls back or reports the skipped compaction ([#10023](https://github.com/can1357/oh-my-pi/issues/10023)).
-- Fixed inline Snapcompact skipping all text compaction for tool results that also contain source images; mixed results now compact their text while preserving every original image block.
-- Google Antigravity daily quota usage now appears in the status-line usage segment ([#9999](https://github.com/can1357/oh-my-pi/issues/9999)).
-- Fixed status-line background-work counts to keep queued tasks and eval jobs visible without double-counting running subagents.
-- Fixed RPC subagent subscriptions and the subagent HUD missing agents spawned by another subagent (depth >= 2): lifecycle, progress, and event frames are now published on a per-session observability bus inherited by every spawned agent in the session tree while per-session extension buses stay isolated, so nested agents appear in `get_subagents`, the `subagent_*` event stream, and `get_subagent_messages` ([#9952](https://github.com/can1357/oh-my-pi/pull/9952)).
-- Fixed `omp token` refreshing local MCP OAuth credentials through the MCP grant path without temporarily blocking or losing rotating refresh tokens ([#9953](https://github.com/can1357/oh-my-pi/issues/9953)).
-- Preserved OpenCode MCP OAuth configuration during discovery.
-- Fixed unhandled `ERR_SOCKET_CLOSED` and floating promise rejections crashing the process during concurrent subagent teardowns, timeouts, and MCP HTTP transport disconnects ([#9750](https://github.com/can1357/oh-my-pi/issues/9750)).
-- Fixed the startup default model resolving to an `amazon-bedrock/*` model — and failing every turn with a Bedrock 403 — when an ambient AWS credential source (a stray `~/.aws` profile, an EC2 instance role) made Bedrock look available; auto-selection now prefers a provider you actually signed into over one that only self-resolves AWS credentials ([#9967](https://github.com/can1357/oh-my-pi/issues/9967)).
-- Kept embedded context usage visible when long session names or paths fill the status line ([#9946](https://github.com/can1357/oh-my-pi/pull/9946) by [@641-git641](https://github.com/641-git641)).
-- Fixed `CTRL-O` now shows a status message ("Tool output expansion: enabled/disabled") after toggling, consistent with CTRL-T and CTRL-SHIFT-O.
-- Fixed `omp usage` capacity stats to report Codex chat and Spark meters separately when they share a window duration.
+- Improved terminal readability on light backgrounds by ensuring TUI surfaces use contrasting foreground colors.
+- Coalesced simultaneous autonomous continuation requests to prevent repeated calls while the agent is busy, with clearer continuation diagnostics.
+- Fixed Snapcompact so it skips or falls back when compaction would not reduce context size, and now compacts text in mixed tool results while preserving all source images.
+- Added Google Antigravity daily quota usage to the status line.
+- Fixed status-line background-work counts so queued tasks and evaluation jobs remain visible without double-counting running subagents.
+- Fixed nested subagent visibility in RPC subscriptions, the subagent HUD, `get_subagents`, `subagent_*` events, and `get_subagent_messages`.
+- Fixed `omp token` refreshing local MCP OAuth credentials without blocking or losing rotating refresh tokens, and preserved OpenCode MCP OAuth configuration during discovery.
+- Prevented process crashes caused by socket-closed errors and unhandled promise rejections during concurrent subagent shutdowns, timeouts, and MCP transport disconnects.
+- Fixed automatic startup model selection so ambient AWS credentials do not incorrectly select an unavailable Amazon Bedrock model over a provider the user has authenticated with.
+- Kept embedded context usage visible in the status line when long session names or paths consume available space.
+- Added a status message when `CTRL-O` toggles tool-output expansion.
+- Fixed `omp usage` to report Codex Chat and Spark capacity meters separately when they share a usage window.
 
 ## [18.0.8] - 2026-08-27
 

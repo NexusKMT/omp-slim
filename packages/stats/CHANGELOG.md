@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed model colors so they now remain consistent between the Model Preference chart and Model Statistics table.
+- Fixed inconsistent model colors between the Model Preference chart and Model Statistics table.
 
 ## [18.0.4] - 2026-08-24
 

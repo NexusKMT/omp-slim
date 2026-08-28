@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed superseded working-memory rows occupying FTS candidate slots: because the fixed-size candidate window was filled before visibility was applied, a query whose top lexical matches were superseded could return fewer rows than requested, or none, while valid older rows existed. Superseded rows are now excluded in the candidate queries themselves.
+- Fixed working-memory search returning too few or no results when the most relevant matches had been superseded, ensuring valid older entries are still returned.
 
 ## [18.0.0] - 2026-08-22
 

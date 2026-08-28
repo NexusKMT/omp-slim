@@ -4,9 +4,9 @@
 
 ### Fixed
 
-- Fixed the OAuth success page's close-window action to fall back to manual-close guidance when the browser refuses to close the tab.
-- Fixed Cloudflare AI Gateway onboarding and routing: `/login` now stores the account and gateway IDs with the token, materializes provider endpoints, and keeps gateway credentials out of upstream OpenAI authorization headers.
-- Fixed Codex OAuth selection to keep chat and Spark quotas independent, preserve legacy shared blocks from older brokers, and avoid treating incomplete usage reports as uncapped.
+- Improved OAuth sign-in flows, including a fallback message when the browser cannot automatically close the OAuth success tab.
+- Fixed Cloudflare AI Gateway onboarding and routing so gateway account and endpoint configuration is preserved correctly while gateway credentials are not sent as upstream OpenAI authorization headers.
+- Fixed Codex OAuth quota handling so chat and Spark usage remain independent, legacy shared quota limits continue to work, and incomplete usage reports are not incorrectly treated as unlimited.
 
 ## [18.0.8] - 2026-08-27
 

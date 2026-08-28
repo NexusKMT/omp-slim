@@ -4,20 +4,13 @@
 
 ### Added
 
-- Added Z.AI `glm-5.3-flash` to the bundled GLM Coding Plan catalog with its 1M
-  context window, 131,072-token output budget, native image input, and the
-  GLM-5.3 `low`/`high`/`max` mandatory-thinking ladder. The `zai` provider has
-  no live model discovery, so the SKU was unreachable in `/model` and
-  `omp models` even though the coding-plan endpoints already serve it. GLM-5.3-Flash
-  is also the first `-flash` SKU that reasons and the first GLM coding model
-  that accepts images without a `v` marker in its id, so the GLM family
-  classifiers now admit `-flash` from 5.3 on.
+- Added Z.AI GLM-5.3-Flash to the bundled GLM Coding Plan catalog, with a 1M-token context window, 131,072-token output limit, native image input, and low/high/max thinking levels. It is now available through model discovery and the model picker.
 
 ### Fixed
 
-- Fixed `google-antigravity/gemini-3.7-flash-tiered` sending `thinkingLevel: MINIMAL` at `:off`/`:minimal`, which Cloud Code Assist rejects with HTTP 400; the discovery alias now collapses into `gemini-3.7-flash` and routes those tiers to the `-low` SKU like the 3.6 family ([#10016](https://github.com/can1357/oh-my-pi/issues/10016)).
-- Fixed OpenCode Go and Zen GLM-5.3 Flash models sending the rejected `reasoning_effort: "xhigh"` top tier; they now expose the mandatory wire-exact `low`/`high`/`max` ladder ([#9960](https://github.com/can1357/oh-my-pi/issues/9960)).
-- Fixed Cloudflare AI Gateway credential handling by adding a shared parser for stored token and routing metadata.
+- Fixed Google Antigravity Gemini 3.7 Flash tiered models failing with HTTP 400 errors at minimal or disabled thinking levels; those tiers now use the compatible Gemini 3.7 Flash model routing.
+- Fixed OpenCode Go and Zen GLM-5.3 Flash models exposing an unsupported extra-high reasoning level; they now use the supported low/high/max reasoning levels.
+- Fixed Cloudflare AI Gateway credential handling so stored credentials and routing metadata are parsed and used correctly.
 
 ## [18.0.8] - 2026-08-27
 

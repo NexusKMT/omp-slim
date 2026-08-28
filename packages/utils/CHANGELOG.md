@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Restricted postmortem cleanup-error suppression to explicitly marked teardown failures, so unrelated unhandled `AbortError` and closed-socket rejections remain fatal.
+- Fixed error handling so unrelated aborted requests and closed-connection failures are no longer silently suppressed.
 
 ## [18.0.8] - 2026-08-27
 
