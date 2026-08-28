@@ -97,6 +97,18 @@ describe("latexToUnicode ANSI colors", () => {
 		expect(latexToUnicode(String.raw`\sqrt{\textbf{x}}`)).toBe("√\x1b[1mx\x1b[22m");
 	});
 
+	it("keeps synthetic wrapper glyphs at the caller style", () => {
+		setTrueColor(true);
+
+		expect(latexToUnicode(String.raw`\boxed{\textcolor{red}{x}}`)).toBe(`[${fg("#ff0000")}x${FG_RESET}]`);
+		expect(latexToUnicode(String.raw`\pmod{\textbf{x}}`)).toBe("(mod \x1b[1mx\x1b[22m)");
+	});
+
+	it("keeps fallback script glyphs at the script-site style", () => {
+		expect(latexToUnicode(String.raw`x_{\textit{word}}`)).toBe("x_(\x1b[3mword\x1b[23m)");
+		expect(latexToUnicode(String.raw`x^{\textbf{foo!}}`)).toBe("x^(\x1b[1mfoo!\x1b[22m)");
+	});
+
 	it("cancels an enclosing terminal style for nested text overrides", () => {
 		const bold = latexToUnicode(String.raw`\textbf{A\textmd{B}C}`);
 		const italic = latexToUnicode(String.raw`\textit{A\textup{B}C}`);
