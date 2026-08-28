@@ -161,20 +161,22 @@ describe("path-prefixed auth servers", () => {
 			tokenUrl: "https://auth.example.com/auth/realms/myrealm/protocol/openid-connect/token",
 		});
 		expect(calls).toContain("https://auth.example.com/auth/realms/myrealm/.well-known/openid-configuration");
+		expect(calls).not.toContain("https://auth.example.com/.well-known/openid-configuration/auth/realms/myrealm");
 	});
 
-	it("falls back to RFC 8414 path-ful issuer form (/.well-known/oauth-authorization-server/<path>)", async () => {
+	it("tries RFC 8414 path-ful metadata before the path-appended compatibility form", async () => {
 		const calls: string[] = [];
 		const fetchImpl = mockFetch((input: FetchInput) => {
 			const url = String(input);
 			calls.push(url);
 
-			if (url === "https://gateway.example.com/.well-known/oauth-authorization-server/my-service") {
+			if (url === "https://auth.example.com/.well-known/oauth-authorization-server/tenants/acme") {
 				return new Response(
 					JSON.stringify({
-						authorization_endpoint: "https://gateway.example.com/my-service/oauth",
-						token_endpoint: "https://gateway.example.com/my-service/token",
-						registration_endpoint: "https://gateway.example.com/my-service/register",
+						issuer: "https://auth.example.com/tenants/acme",
+						authorization_endpoint: "https://auth.example.com/tenants/acme/oauth",
+						token_endpoint: "https://auth.example.com/tenants/acme/token",
+						registration_endpoint: "https://auth.example.com/tenants/acme/register",
 					}),
 					{ status: 200, headers: { "Content-Type": "application/json" } },
 				);
@@ -183,16 +185,20 @@ describe("path-prefixed auth servers", () => {
 			return new Response("not found", { status: 404 });
 		});
 
-		const oauth = await discoverOAuthEndpoints("https://gateway.example.com/my-service", undefined, undefined, {
-			fetch: fetchImpl,
-		});
+		const oauth = await discoverOAuthEndpoints(
+			"https://mcp.example.com/mcp",
+			"https://auth.example.com/tenants/acme",
+			undefined,
+			{ fetch: fetchImpl },
+		);
 
 		expect(oauth).toEqual({
-			authorizationUrl: "https://gateway.example.com/my-service/oauth",
-			tokenUrl: "https://gateway.example.com/my-service/token",
-			registrationUrl: "https://gateway.example.com/my-service/register",
+			authorizationUrl: "https://auth.example.com/tenants/acme/oauth",
+			tokenUrl: "https://auth.example.com/tenants/acme/token",
+			registrationUrl: "https://auth.example.com/tenants/acme/register",
 		});
-		expect(calls).toContain("https://gateway.example.com/.well-known/oauth-authorization-server/my-service");
+		expect(calls).toContain("https://auth.example.com/.well-known/oauth-authorization-server/tenants/acme");
+		expect(calls).not.toContain("https://auth.example.com/tenants/acme/.well-known/oauth-authorization-server");
 	});
 
 	it("prefers absolute well-known when it succeeds (origin-root servers still work)", async () => {
