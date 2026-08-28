@@ -1341,7 +1341,7 @@ export class InteractiveMode implements InteractiveModeContext {
 					this.#updateWelcomeModel();
 				}
 				if (event.type === "config_warnings_changed") {
-					this.composer.setHeaderExtras(this.#buildConfigWarningComponents(), this.#headerAfter);
+					this.#syncConfigWarningHeader();
 				}
 				void this.#handleGoalSessionEvent(event);
 			}),
@@ -1355,6 +1355,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		// can change the model before this subscription exists, so the
 		// model_changed events they emit are never observed by the handler above.
 		this.#updateWelcomeModel();
+		// Config warnings can change during the same pre-subscription window; the
+		// event is not replayed, so rebuild from the live array once here too.
+		this.#syncConfigWarningHeader();
 		this.#eventBusUnsubscribers.push(
 			onModelRolesChanged(() => {
 				void this.#reapplyPlanModeModelOnRoleChange();
@@ -5008,6 +5011,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		const providerName = this.session.model?.provider ?? "Unknown";
 		this.composer.updateWelcome({ modelName, providerName });
 		this.#persistComposerWelcome(modelName, providerName);
+	}
+
+	#syncConfigWarningHeader(): void {
+		this.composer.setHeaderExtras(this.#buildConfigWarningComponents(), this.#headerAfter);
 	}
 
 	/** Header rows for the current config warnings, rebuilt when they change (#10048). */
