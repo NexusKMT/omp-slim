@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as Module from "node:module";
 import * as path from "node:path";
+import { withFileLock } from "./file-lock";
 
 /**
  * On-demand runtime dependency support for native-heavy optional packages
@@ -303,25 +304,24 @@ export interface EnsureRuntimeInstalledOptions {
 	lockSleepMs?: number;
 }
 
-function isErrnoCode(error: unknown, code: string): boolean {
-	return typeof error === "object" && error !== null && "code" in error && error.code === code;
-}
-
-async function acquireInstallLock(runtimeDir: string, attempts: number, sleepMs: number): Promise<() => Promise<void>> {
-	const lockDir = `${runtimeDir}.lock`;
-	await fsp.mkdir(path.dirname(lockDir), { recursive: true });
-	for (let attempt = 0; attempt < attempts; attempt++) {
-		try {
-			await fsp.mkdir(lockDir);
-			return async () => {
-				await fsp.rm(lockDir, { recursive: true, force: true });
-			};
-		} catch (error) {
-			if (!isErrnoCode(error, "EEXIST")) throw error;
-			await Bun.sleep(sleepMs);
-		}
+/**
+ * Best-effort removal of the pre-crash-safe `${runtimeDir}.lock` mkdir lock.
+ *
+ * Versions through 18.0.10 serialized installs with a bare lock *directory*
+ * that only its creator removed; an installer killed outside that window
+ * (SIGKILL/OOM/Ctrl-C) left it unreleasable, wedging every later install for
+ * the full wait envelope (issue #10120). The OS-backed lock now lives at a
+ * distinct path, so any leftover directory here is inert; clear it so it does
+ * not linger. Ownership is never inferred from this directory.
+ */
+async function removeLegacyLockDir(runtimeDir: string): Promise<void> {
+	try {
+		const legacy = `${runtimeDir}.lock`;
+		const stat = await fsp.stat(legacy).catch(() => null);
+		if (stat?.isDirectory()) await fsp.rm(legacy, { recursive: true, force: true });
+	} catch {
+		// A lingering legacy directory is inert with the new lock path; ignore.
 	}
-	throw new Error(`Timed out waiting for runtime install lock: ${lockDir}`);
 }
 
 export async function writeRuntimeManifest(runtimeDir: string, install: RuntimeInstallSpec): Promise<void> {
@@ -363,7 +363,13 @@ async function runRuntimeInstall(runtimeDir: string): Promise<void> {
 
 /**
  * Materialize a pinned dependency set into `runtimeDir` (idempotent,
- * cross-process safe via a lock directory). Returns `runtimeDir`.
+ * cross-process safe). Returns `runtimeDir`.
+ *
+ * Serialization uses the OS-backed {@link withFileLock} at
+ * `${runtimeDir}.install.lock`, which the kernel releases on process death, so
+ * a crashed installer cannot wedge later attempts (issue #10120). The path is
+ * deliberately distinct from the legacy `${runtimeDir}.lock` mkdir directory
+ * so stale directories from older versions are inert.
  */
 export async function ensureRuntimeInstalled(options: EnsureRuntimeInstalledOptions): Promise<string> {
 	const { runtimeDir, install, onPhase, lockAttempts = 240, lockSleepMs = 250 } = options;
@@ -379,15 +385,20 @@ export async function ensureRuntimeInstalled(options: EnsureRuntimeInstalledOpti
 	if (await probeManifest.exists()) return runtimeDir;
 
 	onPhase?.("initiate");
-	const releaseLock = await acquireInstallLock(runtimeDir, lockAttempts, lockSleepMs);
-	try {
-		if (await probeManifest.exists()) return runtimeDir;
-		await writeRuntimeManifest(runtimeDir, install);
-		onPhase?.("download");
-		await runRuntimeInstall(runtimeDir);
-		onPhase?.("done");
-		return runtimeDir;
-	} finally {
-		await releaseLock();
-	}
+	// withFileLock does not create parent directories; the runtime cache dir may
+	// not exist yet on the very first install.
+	await fsp.mkdir(path.dirname(runtimeDir), { recursive: true });
+	await removeLegacyLockDir(runtimeDir);
+	return withFileLock(
+		`${runtimeDir}.install`,
+		async () => {
+			if (await probeManifest.exists()) return runtimeDir;
+			await writeRuntimeManifest(runtimeDir, install);
+			onPhase?.("download");
+			await runRuntimeInstall(runtimeDir);
+			onPhase?.("done");
+			return runtimeDir;
+		},
+		{ retries: lockAttempts, retryDelayMs: lockSleepMs },
+	);
 }

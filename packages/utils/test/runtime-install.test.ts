@@ -3,7 +3,9 @@ import * as fs from "node:fs/promises";
 import * as Module from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
+import { isEnoent } from "../src/fs-error";
 import {
+	ensureRuntimeInstalled,
 	installRuntimeModuleResolver,
 	resolveRuntimeModule,
 	splitBareSpecifier,
@@ -238,4 +240,105 @@ describe("writeRuntimeManifest", () => {
 		const empty = await readManifest({ dependencies: { "kokoro-js": "1.2.1" }, overrides: {} });
 		expect("overrides" in empty).toBe(false);
 	});
+});
+
+// Contract under test: ensureRuntimeInstalled serializes installs with the
+// crash-safe OS-backed lock (issue #10120). A lock left behind by a process
+// that died mid-install must not wedge later attempts, and the pre-18.x
+// `${runtimeDir}.lock` mkdir *directory* must not permanently break the new
+// file-backed lock path.
+describe("ensureRuntimeInstalled install lock", () => {
+	// A local `file:` dependency keeps the real `bun install` offline and
+	// deterministic — no registry, no network.
+	async function makeFileDependency(): Promise<{ spec: string; probe: string }> {
+		const src = await fs.mkdtemp(path.join(os.tmpdir(), "omp-runtime-dep-"));
+		tempDirs.push(src);
+		await fs.writeFile(
+			path.join(src, "package.json"),
+			JSON.stringify({ name: "omp-runtime-fixture", version: "1.0.0" }),
+		);
+		return { spec: `file:${src}`, probe: "omp-runtime-fixture" };
+	}
+
+	async function makeRuntimeDir(): Promise<string> {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-runtime-cache-"));
+		tempDirs.push(root);
+		return path.join(root, "cache", "fixture-runtime");
+	}
+
+	test("a stale legacy .lock directory does not block install and is cleared", async () => {
+		const { spec, probe } = await makeFileDependency();
+		const runtimeDir = await makeRuntimeDir();
+		// The pre-18.x crash orphan: a bare lock directory with no live owner.
+		await fs.mkdir(`${runtimeDir}.lock`, { recursive: true });
+
+		await ensureRuntimeInstalled({
+			runtimeDir,
+			install: { dependencies: { [probe]: spec } },
+			probePackage: probe,
+			lockAttempts: 8,
+			lockSleepMs: 50,
+		});
+
+		expect(await Bun.file(path.join(runtimeDir, "node_modules", probe, "package.json")).exists()).toBe(true);
+		await expect(fs.stat(`${runtimeDir}.lock`)).rejects.toThrow();
+	}, 15_000);
+
+	test("a crashed lock owner does not wedge a later install", async () => {
+		const { spec, probe } = await makeFileDependency();
+		const runtimeDir = await makeRuntimeDir();
+		await fs.mkdir(path.dirname(runtimeDir), { recursive: true });
+		const readyPath = `${runtimeDir}.holder-ready`;
+		// Hold the exact lock ensureRuntimeInstalled contends for, then die.
+		const holder = Bun.spawn(
+			[
+				process.execPath,
+				path.join(import.meta.dir, "fixtures/file-lock-holder.ts"),
+				`${runtimeDir}.install`,
+				readyPath,
+			],
+			{
+				cwd: path.resolve(import.meta.dir, "../../.."),
+				env: { HOME: process.env.HOME ?? "", PATH: process.env.PATH ?? "" },
+				stdin: "ignore",
+				stdout: "ignore",
+				stderr: "pipe",
+			},
+		);
+
+		try {
+			for (;;) {
+				try {
+					await fs.access(readyPath);
+					break;
+				} catch (error) {
+					if (!isEnoent(error)) throw error;
+					if (holder.exitCode !== null) {
+						throw new Error(
+							`lock holder exited before readiness (${holder.exitCode}): ${await new Response(holder.stderr).text()}`,
+						);
+					}
+				}
+			}
+
+			holder.kill("SIGKILL");
+			await holder.exited;
+
+			// Kernel released the abandoned lock on death; the install must
+			// proceed rather than burn the wait envelope and throw.
+			await ensureRuntimeInstalled({
+				runtimeDir,
+				install: { dependencies: { [probe]: spec } },
+				probePackage: probe,
+				lockAttempts: 20,
+				lockSleepMs: 50,
+			});
+			expect(await Bun.file(path.join(runtimeDir, "node_modules", probe, "package.json")).exists()).toBe(true);
+		} finally {
+			if (holder.exitCode === null) {
+				holder.kill("SIGKILL");
+				await holder.exited;
+			}
+		}
+	}, 20_000);
 });
