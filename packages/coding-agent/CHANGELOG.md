@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added the Sharpshooter memory backend for friction-earned project decisions, with `/memory queue` and `/memory sync` controls.
 - Added `/restart` to relaunch omp with the original launch flags and resume the current session in place.
 - Added the `band` composer shape: a flush soft-capped powerline status band above a curved `╰─` prompt, with the session title docked right on the working row instead of the band; the band sits flush under the working row while it renders, and keeps a blank line above itself when idle.
 
