@@ -183,4 +183,36 @@ describe("storage process-exit cleanup", () => {
 			agentDb.close();
 		}
 	});
+
+	it("keeps a handle held across a manual cleanup usable", async () => {
+		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-storage-keepalive-"));
+		const agentDbPath = path.join(tempDir, "agent.db");
+		// A cached handle (Settings, MCP cache, the editor) survives a keep-alive
+		// cleanup that keeps the process running: its statements must not be
+		// finalized, so writes through the same handle keep working afterward.
+		const script = [
+			'import { postmortem } from "@oh-my-pi/pi-utils";',
+			`import { AgentStorage } from ${JSON.stringify(AGENT_STORAGE_MODULE)};`,
+			`const agent = await AgentStorage.open(${JSON.stringify(agentDbPath)});`,
+			'agent.recordCommandUsage("before-cleanup");',
+			"await postmortem.cleanup();",
+			// Same handle after cleanup: writing here throws if statements were finalized.
+			'agent.recordCommandUsage("after-cleanup");',
+			"console.log(JSON.stringify(agent.listCommandUsage()));",
+			"process.exit(0);",
+		].join("\n");
+		const child = Bun.spawn([process.execPath, "--eval", script], {
+			cwd: REPO_ROOT,
+			stdin: "ignore",
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [exitCode, stdout, stderr] = await Promise.all([
+			child.exited,
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+		]);
+		expect(exitCode, stderr).toBe(0);
+		expect(JSON.parse(stdout.trim())).toEqual({ "before-cleanup": 1, "after-cleanup": 1 });
+	});
 });

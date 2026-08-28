@@ -395,9 +395,11 @@ FROM model_usage_legacy
 		for (let attempt = 0; attempt < maxRetries; attempt++) {
 			try {
 				const storage = new AgentStorage(dbPath);
-				// Register before publishing the first instance: late
-				// registrations run immediately and must see an empty map.
-				cancelExitCleanup ??= postmortem.register("agent-storage", () => AgentStorage.close());
+				// Exit-only: a keep-alive cleanup leaves the open handle valid for the
+				// continuing process (Settings, MCP cache, callers hold it); the real
+				// exit closes. Register before publishing so a real-exit-in-progress
+				// late registration sees an empty map.
+				cancelExitCleanup ??= postmortem.register("agent-storage", () => AgentStorage.close(), true);
 				instances.set(dbPath, storage);
 				return storage;
 			} catch (err) {

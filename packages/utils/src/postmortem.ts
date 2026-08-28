@@ -25,7 +25,7 @@ export enum Reason {
 }
 
 // Internal list of active cleanup callbacks (in registration order)
-const callbackList: ((reason: Reason) => Promise<void> | void)[] = [];
+const callbackList: ((reason: Reason, keepAlive: boolean) => Promise<void> | void)[] = [];
 // Tracks cleanup run state (to prevent recursion/reentry issues)
 let cleanupStage: "idle" | "running" | "complete" = "idle";
 const CLEANUP_DEADLINE_MS = 10_000;
@@ -109,7 +109,7 @@ function runCleanup(reason: Reason, keepAlive = false): Promise<void> {
 	// Call .cleanup() for each callback that is still "armed".
 	// Use Promise.try to handle sync/async, but only those armed.
 	const promises = callbackList.toReversed().map(callback => {
-		return Promise.try(() => callback(reason));
+		return Promise.try(() => callback(reason, keepAlive));
 	});
 
 	const cleanupSettled = Promise.allSettled(promises).then(results => {
@@ -481,13 +481,23 @@ if (isMainThread) {
 /**
  * Register a process cleanup callback, to be run on shutdown, signal, or fatal error.
  *
- * Returns a Callback instance that can be used to cancel (unregister) or manually clean up.
- * If register is called after cleanup already began, invokes callback on a microtask.
+ * `exitOnly` marks a callback that must run only on a real exit, never on a
+ * manual keep-alive {@link cleanup}: such a pass skips it without latching, so
+ * it stays armed for the eventual exit. Use it for resources the continuation
+ * still holds after a keep-alive cleanup (open databases, cached handles) —
+ * tearing them down mid-process would orphan their references.
+ *
+ * Returns a function that cancels (unregisters) the callback.
+ * If register is called after cleanup already began, a normal callback runs
+ * once immediately; an `exitOnly` one only arms for the real exit.
  */
-export function register(id: string, callback: (reason: Reason) => void | Promise<void>): () => void {
+export function register(id: string, callback: (reason: Reason) => void | Promise<void>, exitOnly = false): () => void {
 	let done = false;
-	const exec = (reason: Reason) => {
+	const exec = (reason: Reason, keepAlive: boolean) => {
 		if (done) return;
+		// Exit-only callbacks skip keep-alive passes without latching, so the
+		// real exit still runs them.
+		if (exitOnly && keepAlive) return;
 		done = true;
 		try {
 			return callback(reason);
@@ -506,8 +516,13 @@ export function register(id: string, callback: (reason: Reason) => void | Promis
 	};
 
 	if (cleanupStage !== "idle") {
-		// Cleanup is already in progress or complete; run late registrations once
-		// without re-entering the global cleanup pass.
+		// Cleanup is already in progress or complete. Exit-only callbacks must not
+		// fire on a keep-alive pass, so arm them for the real exit instead of
+		// running now; normal callbacks run once without re-entering the pass.
+		if (exitOnly) {
+			callbackList.push(exec);
+			return cancel;
+		}
 		logger.debug("Cleanup already started; running late callback once", { id });
 		try {
 			callback(Reason.MANUAL);

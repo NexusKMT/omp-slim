@@ -131,9 +131,10 @@ ON CONFLICT(prompt) DO UPDATE SET
 		if (existing) return existing;
 
 		const instance = new HistoryStorage(dbPath);
-		// Register before publishing the singleton: late registrations run
-		// immediately, and must not close the instance this call returns.
-		cancelExitCleanup = postmortem.register("history-storage", () => HistoryStorage.close());
+		// Exit-only: a keep-alive cleanup leaves the handle valid so the editor can
+		// keep submitting prompts; the real exit closes. Register before publishing
+		// so a real-exit-in-progress late registration cannot close this instance.
+		cancelExitCleanup = postmortem.register("history-storage", () => HistoryStorage.close(), true);
 		HistoryStorage.#instance = instance;
 		return instance;
 	}

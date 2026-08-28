@@ -5,6 +5,7 @@
 ### Added
 
 - Added `checkpointWal` to checkpoint committed SQLite WAL frames without blocking concurrent readers.
+- Added an `exitOnly` option to `postmortem.register` for resources that must survive a keep-alive `cleanup()` and release only on a real exit.
 
 ### Fixed
 
