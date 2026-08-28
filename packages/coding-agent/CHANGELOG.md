@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.9] - 2026-08-28
+
 ### Breaking Changes
 
 - Removed the `git` and `jj` wrapper modules from the SDK surface. VCS operations are now available through `@oh-my-pi/pi-natives/vcs`, including native handles and typed `VcsError` support; the package continues to re-export the `github` (gh CLI) helpers.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.9] - 2026-08-28
+
 ### Fixed
 
 - Improved OAuth sign-in flows, including a fallback message when the browser cannot automatically close the OAuth success tab.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.9] - 2026-08-28
+
 ### Breaking Changes
 
 - Replaced the Git-specific `watchHead` and `headWatchTarget` API with the backend-neutral `watch` and `VcsRepo.watchTarget` APIs.

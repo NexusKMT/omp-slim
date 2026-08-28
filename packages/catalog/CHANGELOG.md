@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.9] - 2026-08-28
+
 ### Added
 
 - Added Z.AI GLM-5.3-Flash to the bundled GLM Coding Plan catalog, with a 1M-token context window, 131,072-token output limit, native image input, and low/high/max thinking levels. It is now available through model discovery and the model picker.
