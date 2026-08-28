@@ -5,6 +5,11 @@
 ### Breaking Changes
 
 - The `git`/`jj` wrapper modules are gone from the SDK surface: VCS operations are exposed by `@oh-my-pi/pi-natives/vcs` (native handles, typed `VcsError`); the package now re-exports only the `github` (gh CLI) helpers.
+### Fixed
+
+- Kept text readable on light terminal backgrounds by pairing TUI surfaces with explicit contrasting foreground colors.
+
+## [18.0.7] - 2026-08-26
 
 ### Added
 

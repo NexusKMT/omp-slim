@@ -2291,7 +2291,7 @@ export class StatusLineComponent implements Component {
 				paddingX: 0,
 				borderColor: str => theme.fg("border", str),
 				accentColor: str => theme.fg("accent", str),
-				surfaceColor: str => theme.bgFill("userMessageBg", str),
+				surfaceColor: str => theme.bgFill("userMessageBg", theme.fgOnBg("userMessageText", "userMessageBg", str)),
 				box: theme.boxRound,
 				topBorder: this.getStandaloneTopBorder(width),
 			});
