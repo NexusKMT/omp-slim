@@ -12,6 +12,7 @@ import {
 	type ComposerChromeContext,
 	type EditorTopBorder,
 	getComposerStyle,
+	isFilledComposerStyle,
 	padding,
 	truncateToWidth,
 	visibleWidth,
@@ -78,7 +79,7 @@ export function renderComposerShapePreview(
 	// foreground, while transparent shapes resolve `text` to a contrast-safe
 	// color so an empty token never falls back to the terminal default.
 	const promptRow = `${promptText}${theme.inverse(" ")}`;
-	const text = style.filledSurface ? promptRow : theme.fgResolved("text", promptRow);
+	const text = isFilledComposerStyle(style) ? promptRow : theme.fgResolved("text", promptRow);
 	const pad = padding(Math.max(0, contentWidth - visibleWidth(promptText) - 1));
 	const styledGutter = gutter ? theme.fg("accent", gutter) : "";
 

@@ -32,6 +32,7 @@ import {
 	type EditorBorderStyle,
 	type EditorTopBorder,
 	getComposerStyle,
+	isFilledComposerStyle,
 } from "./composer";
 
 export type { EditorBorderStyle, EditorTopBorder };
@@ -1273,7 +1274,7 @@ export class Editor implements Component, Focusable {
 					displayWidth = visibleWidth(displayText);
 				}
 			}
-			const renderedText = style.filledSurface
+			const renderedText = isFilledComposerStyle(style)
 				? displayText
 				: (this.#theme.textColor ?? PASSTHROUGH_COLOR)(displayText);
 
