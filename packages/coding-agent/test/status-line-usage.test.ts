@@ -750,6 +750,16 @@ describe("usage status-line segment", () => {
 		expect(gptOssContent).toContain("63%");
 		expect(gptOssContent).not.toContain("91%");
 		expect(gptOssContent).not.toContain("99%");
+		for (const modelId of ["tab_flash_lite_preview", "tab_jump_flash_lite_preview"]) {
+			const tabModel = makeComponent(reports, { provider: "google-antigravity", modelId });
+			tabModel.refreshUsageInBackground();
+			await flushUsageRefresh();
+			const tabContent = stripVTControlCharacters(tabModel.getTopBorder(200).content);
+			expect(tabContent).toContain("1d");
+			expect(tabContent).toContain("91%");
+			expect(tabContent).not.toContain("24%");
+			expect(tabContent).not.toContain("99%");
+		}
 	});
 
 	it("falls back to legacy default Antigravity usage when the model counter is absent", async () => {

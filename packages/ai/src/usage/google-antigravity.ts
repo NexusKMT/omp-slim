@@ -431,7 +431,13 @@ export function getAntigravityCounterKeyForModel(modelId: string | undefined): s
 	const normalizedModelId = modelId?.toLowerCase();
 	if (!normalizedModelId) return undefined;
 	if (normalizedModelId.startsWith("claude-")) return "anthropic";
-	if (normalizedModelId.startsWith("gemini-") || normalizedModelId.startsWith("gemma-")) return "google";
+	if (
+		normalizedModelId.startsWith("gemini-") ||
+		normalizedModelId.startsWith("gemma-") ||
+		normalizedModelId.startsWith("tab_")
+	) {
+		return "google";
+	}
 	if (normalizedModelId.startsWith("gpt-") || normalizedModelId.startsWith("openai/")) return "openai";
 	return undefined;
 }
