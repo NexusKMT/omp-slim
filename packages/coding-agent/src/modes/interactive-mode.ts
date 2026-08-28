@@ -855,7 +855,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.settings = session.settings;
 		const preferences = {
 			quiet: settings.get("startup.quiet"),
-			composerShape: settings.get("composer.shape") ?? "box",
+			composerShape: settings.get("composer.shape") ?? "band",
 			showHardwareCursor: settings.get("showHardwareCursor"),
 			maxInlineImages: settings.get("tui.maxInlineImages"),
 			resizeScrollback: settings.get("tui.resizeScrollback"),
@@ -2121,7 +2121,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		});
 	}
 	syncComposerShape(): void {
-		const shape = settings.get("composer.shape") ?? "box";
+		const shape = settings.get("composer.shape") ?? "band";
 		const style = getComposerStyle(shape);
 		this.composer.setPreferences({ composerShape: shape });
 		this.statusLine.setAutocompleteActiveProbe(() => this.editor.isAutocompleteActive());

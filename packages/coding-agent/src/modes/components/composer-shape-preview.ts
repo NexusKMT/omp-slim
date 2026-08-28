@@ -114,7 +114,7 @@ export class ComposerShapePreview implements Component {
 	#shape: ComposerShape;
 	#options: ComposerShapePreviewOptions;
 
-	constructor(initialValue: ComposerShape = "box", options: ComposerShapePreviewOptions = {}) {
+	constructor(initialValue: ComposerShape = "band", options: ComposerShapePreviewOptions = {}) {
 		this.#shape = initialValue;
 		this.#options = options;
 	}

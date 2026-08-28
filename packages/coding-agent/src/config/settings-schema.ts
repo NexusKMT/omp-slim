@@ -105,14 +105,14 @@ export type ComposerShape = string;
 /** Built-in composer choices and their shared settings/setup copy. */
 export const BUILTIN_COMPOSER_SHAPES = [
 	{
-		value: "box",
-		label: "Rounded Box (Default)",
-		description: "Status line embedded in top border, compact 2-line prompt",
+		value: "band",
+		label: "Status Band (Default)",
+		description: "Flush soft-capped status band above a curved prompt, no frame",
 	},
 	{
-		value: "band",
-		label: "Status Band",
-		description: "Flush soft-capped status band above a curved prompt, no frame",
+		value: "box",
+		label: "Rounded Box",
+		description: "Status line embedded in top border, compact 2-line prompt",
 	},
 	{
 		value: "claude",
@@ -732,7 +732,7 @@ export const SETTINGS_SCHEMA = {
 	// Composer
 	"composer.shape": {
 		type: "string",
-		default: "box",
+		default: "band",
 		ui: {
 			tab: "appearance",
 			group: "Composer",

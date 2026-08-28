@@ -11,6 +11,7 @@
 - The edit tool now reads `－`-prefixed MATCH lines as whole-line deletions (a `＋` run directly below replaces them), instead of failing to match the marker verbatim.
 ### Changed
 
+- The `band` composer shape is now the default; existing `composer.shape` settings are unchanged.
 - The status line's brand icon now becomes a braille spinner with a turn timer while the agent works, fading between dim gray and the accent color across turn edges; the working row leads with an esc glyph and the streamed intent instead of its own spinner and trailing `[esc]` hint.
 - The session accent color now also tints the status line's accent-role parts — `pi` icon, `hostname`, model name and thinking level, PR link, mode badges (Plan/Prewalk/Vibe/Goal), collab, and usage tier — matching the session title and context gauge; status colors (warnings, git) are untouched.
 - Session accent colors now inherit the active theme accent's perceived lightness and colorfulness (OKLCH) instead of a fixed neon saturation, so per-session hues blend with muted and vivid themes alike; dark themes draw hues only from the arc whose vividness peak fits the dark lightness cap, excluding the yellow/olive range that renders as mustard.
