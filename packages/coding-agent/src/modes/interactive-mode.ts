@@ -4957,7 +4957,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#sessionInfoOverlayHandle = undefined;
 		if (!handle) return;
 		handle.hide();
-		this.ui.setFocus(this.editor);
+		// Focus the visible editor-slot owner, not this.editor: an extension ask
+		// or hook may have swapped into editorContainer while the panel was open,
+		// and keys must reach the visible prompt (same stale-focus class as #3349).
+		this.#selectorController.focusActiveEditorArea();
 		this.ui.requestRender();
 	}
 
