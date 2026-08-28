@@ -1076,6 +1076,7 @@ describe("Cursor generic tier routing (issue #9237)", () => {
 describe("variant aliases", () => {
 	it("resolves members and recycled ids per provider", () => {
 		expect(resolveVariantAlias("google-antigravity", "gemini-3.5-flash-low")).toBe("gemini-3.5-flash");
+		expect(resolveVariantAlias("google-antigravity", "gemini-3.7-flash-tiered")).toBe("gemini-3.7-flash");
 		expect(resolveVariantAlias("google-gemini-cli", "gemini-pro-agent")).toBe("gemini-3.1-pro");
 		expect(resolveVariantAlias("google-antigravity", "gemini-3-flash")).toBe("gemini-3.5-flash");
 		expect(resolveVariantAlias("google-antigravity", "gemini-2.5-flash-thinking")).toBe("gemini-2.5-flash");
