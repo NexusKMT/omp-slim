@@ -575,21 +575,22 @@ export function buildWellKnownUrls(wellKnownPath: string, baseUrl: string): URL[
 			seen.add(u.href);
 		}
 	};
-	push(relUrl);
 
-	if (wellKnownPath.startsWith("/.well-known/")) {
-		const pathAppendedUrl = new URL(`${normalizedPath}${wellKnownPath}`, parsed.origin);
-		const pathfulUrl = new URL(`${wellKnownPath}${normalizedPath}`, parsed.origin);
-
-		if (wellKnownPath === "/.well-known/openid-configuration") {
-			// OIDC Discovery §4 uses <issuer>/.well-known/openid-configuration.
-			push(pathAppendedUrl);
-			push(pathfulUrl);
-		} else {
-			// RFC 8414 §3.1 uses /.well-known/<suffix>/<issuer-path>.
-			push(pathfulUrl);
-			push(pathAppendedUrl);
-		}
+	if (wellKnownPath === "/.well-known/openid-configuration") {
+		// OIDC Discovery §4 standard form is <issuer>/.well-known/openid-configuration;
+		// try it before the parent-relative and RFC 8414 compatibility fallbacks.
+		push(new URL(`${normalizedPath}${wellKnownPath}`, parsed.origin));
+		push(relUrl);
+		push(new URL(`${wellKnownPath}${normalizedPath}`, parsed.origin));
+	} else if (wellKnownPath.startsWith("/.well-known/")) {
+		// RFC 8414 §3.1 standard form is /.well-known/<suffix>/<issuer-path>;
+		// try it before the parent-relative and path-appended compatibility fallbacks.
+		push(new URL(`${wellKnownPath}${normalizedPath}`, parsed.origin));
+		push(relUrl);
+		push(new URL(`${normalizedPath}${wellKnownPath}`, parsed.origin));
+	} else {
+		// Non-metadata paths only have the parent-relative gateway fallback.
+		push(relUrl);
 	}
 
 	return candidates;

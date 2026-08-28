@@ -162,6 +162,9 @@ describe("path-prefixed auth servers", () => {
 		});
 		expect(calls).toContain("https://auth.example.com/auth/realms/myrealm/.well-known/openid-configuration");
 		expect(calls).not.toContain("https://auth.example.com/.well-known/openid-configuration/auth/realms/myrealm");
+		// The standard issuer form is tried before the parent-relative fallback, so the
+		// slow/absent parent-relative URL is never probed once the issuer form succeeds.
+		expect(calls).not.toContain("https://auth.example.com/auth/realms/.well-known/openid-configuration");
 	});
 
 	it("tries RFC 8414 path-ful metadata before the path-appended compatibility form", async () => {
