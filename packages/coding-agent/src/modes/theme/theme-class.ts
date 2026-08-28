@@ -2,6 +2,7 @@ import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Effort } from "@oh-my-pi/pi-ai";
 import { colorLuma, logger, relativeLuminance } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
+import type { SessionAccentTheme } from "../../utils/session-color";
 import { bgAnsi, colorToAnsi, fgAnsi, resolveToHex } from "./color";
 import { type ColorMode, isValidThemeColor, type ThemeBg, type ThemeColor } from "./schema";
 import {
@@ -274,6 +275,19 @@ export class Theme {
 	 */
 	getAccentColorHex(): string {
 		return this.getColorHex("accent");
+	}
+	/**
+	 * Theme-derived inputs for `getSessionAccentHex`: the accent hex whose
+	 * OKLCH weight session accents adopt, the major colors they must not
+	 * hue-collide with, and the light-theme surface luminance to contrast
+	 * against.
+	 */
+	get sessionAccentInputs(): SessionAccentTheme {
+		return {
+			accentHex: this.getAccentColorHex(),
+			colorHexes: this.getMajorThemeColorHexes(),
+			surfaceLuminance: this.accentSurfaceLuminance,
+		};
 	}
 
 	fg(color: ThemeColor, text: string): string {
@@ -559,6 +573,7 @@ export class Theme {
 			advisor: this.#symbols["icon.advisor"],
 			time: this.#symbols["icon.time"],
 			omp: this.#symbols["icon.omp"],
+			esc: this.#symbols["icon.esc"],
 			ghost: this.#symbols["icon.ghost"],
 			agents: this.#symbols["icon.agents"],
 			job: this.#symbols["icon.job"],

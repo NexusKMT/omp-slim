@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added smooth brand-color fade between idle and working states in the status line
+- Added turn timer to the status line brand segment when the agent is active
 - Added 'band' composer style for flush, full-width status lines
 
 ## [18.0.9] - 2026-08-28
