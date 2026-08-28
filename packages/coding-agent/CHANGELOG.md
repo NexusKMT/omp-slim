@@ -81,6 +81,8 @@
 
 - Kept embedded context usage visible when long session names or paths fill the status line ([#9946](https://github.com/can1357/oh-my-pi/pull/9946) by [@641-git641](https://github.com/641-git641)).
 
+- Fixed `CTRL-O` now shows a status message ("Tool output expansion: enabled/disabled") after toggling, consistent with CTRL-T and CTRL-SHIFT-O.
+
 ## [18.0.7] - 2026-08-26
 
 ### Added
