@@ -20,6 +20,7 @@
 
 - Fixed pending-work animations repeatedly composing expensive frames without applying their full render cost to CPU backpressure.
 - Fixed unfinished live viewport rows entering tmux pane history and duplicating streamed output ([#9780](https://github.com/can1357/oh-my-pi/issues/9780)).
+- Fixed resizing a terminal copying the current screen into scrollback in tmux panes and Windows consoles, leaving a duplicate of the in-progress turn above the live one ([#9962](https://github.com/can1357/oh-my-pi/pull/9962) by [@nategriffin26](https://github.com/nategriffin26)).
 
 ## [18.0.7] - 2026-08-26
 
