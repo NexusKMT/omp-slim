@@ -7,6 +7,9 @@ import { HistoryStorage } from "@oh-my-pi/pi-coding-agent/session/history-storag
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 let tempDir = "";
+const REPO_ROOT = path.resolve(import.meta.dir, "../../..");
+const HISTORY_STORAGE_MODULE = path.resolve(import.meta.dir, "../src/session/history-storage.ts");
+const AGENT_STORAGE_MODULE = path.resolve(import.meta.dir, "../src/session/agent-storage.ts");
 
 async function freshStorage(prefix = "omp-history-drain-"): Promise<HistoryStorage> {
 	tempDir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -77,8 +80,8 @@ describe("storage process-exit cleanup", () => {
 		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-storage-exit-"));
 		const historyDbPath = path.join(tempDir, "history.db");
 		const agentDbPath = path.join(tempDir, "agent.db");
-		const historyModule = path.resolve(import.meta.dir, "../src/session/history-storage.ts");
-		const agentModule = path.resolve(import.meta.dir, "../src/session/agent-storage.ts");
+		const historyModule = HISTORY_STORAGE_MODULE;
+		const agentModule = AGENT_STORAGE_MODULE;
 		const script = [
 			`import { HistoryStorage } from ${JSON.stringify(historyModule)};`,
 			`import { AgentStorage } from ${JSON.stringify(agentModule)};`,
@@ -89,7 +92,7 @@ describe("storage process-exit cleanup", () => {
 			"process.exit(0);",
 		].join("\n");
 		const child = Bun.spawn([process.execPath, "--eval", script], {
-			cwd: path.resolve(import.meta.dir, "../../.."),
+			cwd: REPO_ROOT,
 			stdin: "ignore",
 			stdout: "ignore",
 			stderr: "pipe",
@@ -122,5 +125,43 @@ describe("storage process-exit cleanup", () => {
 			historyDb.close();
 			agentDb.close();
 		}
+	});
+
+	it("keeps stores opened after manual postmortem cleanup usable", async () => {
+		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-storage-late-open-"));
+		const historyDbPath = path.join(tempDir, "history.db");
+		const agentDbPath = path.join(tempDir, "agent.db");
+		const script = [
+			'import { postmortem } from "@oh-my-pi/pi-utils";',
+			`import { HistoryStorage } from ${JSON.stringify(HISTORY_STORAGE_MODULE)};`,
+			`import { AgentStorage } from ${JSON.stringify(AGENT_STORAGE_MODULE)};`,
+			"await postmortem.cleanup();",
+			`const history = HistoryStorage.open(${JSON.stringify(historyDbPath)});`,
+			'void history.add("opened after cleanup", "/tmp", "late-session");',
+			"HistoryStorage.close();",
+			`const reopenedHistory = HistoryStorage.open(${JSON.stringify(historyDbPath)});`,
+			"const prompts = reopenedHistory.getRecent(10).map(row => row.prompt);",
+			"HistoryStorage.close();",
+			`const agent = await AgentStorage.open(${JSON.stringify(agentDbPath)});`,
+			'agent.recordCommandUsage("after-cleanup");',
+			"const commands = agent.listCommandUsage();",
+			"AgentStorage.close();",
+			"console.log(JSON.stringify({ prompts, commands }));",
+		].join("\n");
+		const child = Bun.spawn([process.execPath, "--eval", script], {
+			cwd: REPO_ROOT,
+			stdin: "ignore",
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [exitCode, stdout, stderr] = await Promise.all([
+			child.exited,
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+		]);
+		expect(exitCode, stderr).toBe(0);
+		expect(stdout.trim()).toBe(
+			JSON.stringify({ prompts: ["opened after cleanup"], commands: { "after-cleanup": 1 } }),
+		);
 	});
 });

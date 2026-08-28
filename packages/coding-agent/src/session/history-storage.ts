@@ -135,11 +135,15 @@ ON CONFLICT(prompt) DO UPDATE SET
 
 	/** Opens the process-wide prompt history database. */
 	static open(dbPath: string = getHistoryDbPath()): HistoryStorage {
-		if (!HistoryStorage.#instance) {
-			HistoryStorage.#instance = new HistoryStorage(dbPath);
-			cancelExitCleanup = postmortem.register("history-storage", () => HistoryStorage.close());
-		}
-		return HistoryStorage.#instance;
+		const existing = HistoryStorage.#instance;
+		if (existing) return existing;
+
+		const instance = new HistoryStorage(dbPath);
+		// Register before publishing the singleton: late registrations run
+		// immediately, and must not close the instance this call returns.
+		cancelExitCleanup = postmortem.register("history-storage", () => HistoryStorage.close());
+		HistoryStorage.#instance = instance;
+		return instance;
 	}
 
 	/** Flushes queued prompts, closes the process-wide database, and permits reopening it. */

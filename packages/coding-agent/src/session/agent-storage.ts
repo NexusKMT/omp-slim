@@ -394,8 +394,10 @@ FROM model_usage_legacy
 		for (let attempt = 0; attempt < maxRetries; attempt++) {
 			try {
 				const storage = new AgentStorage(dbPath);
-				instances.set(dbPath, storage);
+				// Register before publishing the first instance: late
+				// registrations run immediately and must see an empty map.
 				cancelExitCleanup ??= postmortem.register("agent-storage", () => AgentStorage.close());
+				instances.set(dbPath, storage);
 				return storage;
 			} catch (err) {
 				if (!isSqliteBusyError(err)) {
