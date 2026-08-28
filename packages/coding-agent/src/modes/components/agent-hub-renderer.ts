@@ -186,6 +186,8 @@ export function formatChildIds(children: readonly AgentRef[], width: number): st
 	}
 	return text;
 }
+const TREE_SEGMENT_WIDTH = 4;
+const TREE_DETAIL_BASE_INDENT = 4;
 
 /** Build one bash `tree`-style ancestry prefix. Continuation rows replace the
  * node's own branch with a rail only when a later sibling still needs it. */
@@ -211,7 +213,7 @@ function treePrefix(
 		segments.push(lastSiblingById.get(parent) ? "    " : "│   ");
 		parent = grandparent;
 	}
-	const maxSegments = Math.max(1, Math.floor(Math.max(4, maxWidth - 2) / 4));
+	const maxSegments = Math.max(1, Math.floor(Math.max(TREE_SEGMENT_WIDTH, maxWidth - 2) / TREE_SEGMENT_WIDTH));
 	const omitted = Math.max(0, segments.length - maxSegments);
 	const prefix = segments.slice(0, maxSegments).reverse().join("");
 	const omittedPrefix = omitted > 0 ? (continuation ? "  " : "… ") : "";
@@ -238,6 +240,10 @@ export function treeContinuation(
 	lastSiblingById: ReadonlyMap<string, boolean>,
 ): string {
 	return treePrefix(ref, maxWidth, depthById, parentById, lastSiblingById, true);
+}
+/** One roster-wide origin for metric columns, independent of tree depth. */
+export function treeMetadataIndent(maxWidth: number, maxDepth: number): number {
+	return Math.min(Math.max(0, maxWidth - 1), TREE_DETAIL_BASE_INDENT + Math.max(0, maxDepth) * TREE_SEGMENT_WIDTH);
 }
 
 /** Higher is better: exact > prefix > substring > scattered subsequence. */

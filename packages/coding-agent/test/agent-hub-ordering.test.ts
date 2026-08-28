@@ -63,6 +63,11 @@ interface RenderedAgentRow {
 }
 
 const ROSTER_ENTRY_PATTERN = /^(❯| ) (?:(?:(?:│ {3}| {4})*)(?:├── |└── ))?(\S+) (\S+)/u;
+function rosterEntryMatch(cell: string | undefined): RegExpExecArray | null {
+	if (!cell) return null;
+	const match = ROSTER_ENTRY_PATTERN.exec(cell);
+	return match?.[2] === "│" ? null : match;
+}
 
 function rosterCell(raw: string): string | undefined {
 	const line = Bun.stripANSI(raw);
@@ -73,13 +78,11 @@ function rosterCell(raw: string): string | undefined {
 }
 
 function renderedAgentRows(hub: AgentHubOverlayComponent, width = 120): RenderedAgentRow[] {
-	// Roster entry first cells are
-	// `<cursor> <status-glyph> [tree-prefix] <id> …`; task cells are
-	// indented deeper and never match the cursor/status slots.
+	// `<cursor> <status-glyph> [tree-prefix] <id> …`; continuation rows may
+	// carry `│` in the status column and are rejected by rosterEntryMatch.
 	const rows: RenderedAgentRow[] = [];
 	for (const raw of hub.render(width)) {
-		const cell = rosterCell(raw);
-		const match = cell ? ROSTER_ENTRY_PATTERN.exec(cell) : null;
+		const match = rosterEntryMatch(rosterCell(raw));
 		if (match) rows.push({ id: match[3]!, selected: match[1] === "❯" });
 	}
 	return rows;
@@ -95,26 +98,19 @@ function selectedAgentId(hub: AgentHubOverlayComponent): string | undefined {
 
 function renderedRosterEntry(hub: AgentHubOverlayComponent, id: string, width: number): string {
 	const cells = hub.render(width).map(rosterCell);
-	const start = cells.findIndex(cell => {
-		const match = cell ? ROSTER_ENTRY_PATTERN.exec(cell) : null;
-		return match?.[3] === id;
-	});
+	const start = cells.findIndex(cell => rosterEntryMatch(cell)?.[3] === id);
 	expect(start).toBeGreaterThanOrEqual(0);
 	const entry: string[] = [];
 	for (let i = start; i < cells.length; i++) {
 		const cell = cells[i];
 		if (cell === undefined || cell.trim().length === 0) break;
-		if (i > start && ROSTER_ENTRY_PATTERN.test(cell)) break;
+		if (i > start && rosterEntryMatch(cell)) break;
 		entry.push(cell.trimEnd());
 	}
 	return entry.join("\n");
 }
 function renderedRosterHeaderLineRaw(hub: AgentHubOverlayComponent, id: string, width: number): string {
-	const line = hub.render(width).find(raw => {
-		const cell = rosterCell(raw);
-		const match = cell ? ROSTER_ENTRY_PATTERN.exec(cell) : null;
-		return match?.[3] === id;
-	});
+	const line = hub.render(width).find(raw => rosterEntryMatch(rosterCell(raw))?.[3] === id);
 	if (!line) throw new Error(`No rendered roster header for ${id}`);
 	return line;
 }
@@ -982,6 +978,7 @@ describe("Agent hub row ordering", () => {
 		geometry.setRows(32);
 		const agents = new AgentRegistry();
 		agents.register({ id: "Parent", displayName: "Parent", kind: "sub", parentId: "Main", session: null });
+		agents.setActivity("Parent", "Parent task");
 		agents.register({ id: "First", displayName: "First", kind: "sub", parentId: "Parent", session: null });
 		agents.setActivity("First", "First task");
 		agents.register({ id: "Grandchild", displayName: "Grandchild", kind: "sub", parentId: "First", session: null });
@@ -992,12 +989,23 @@ describe("Agent hub row ordering", () => {
 
 		try {
 			hub.handleInput("t");
+			const parentDetails = renderedRosterEntry(hub, "Parent", 120).split("\n").slice(1);
 			const firstDetails = renderedRosterEntry(hub, "First", 120).split("\n").slice(1);
 			const grandchildDetails = renderedRosterEntry(hub, "Grandchild", 120).split("\n").slice(1);
 			const lastDetails = renderedRosterEntry(hub, "Last", 120).split("\n").slice(1);
-			expect(firstDetails.every(line => line.startsWith("  │     "))).toBe(true);
+			expect(parentDetails).toHaveLength(2);
+			expect(firstDetails).toHaveLength(2);
+			expect(grandchildDetails).toHaveLength(2);
+			expect(lastDetails).toHaveLength(2);
+			expect(parentDetails.every(line => line.startsWith("  │ "))).toBe(true);
+			expect(firstDetails.every(line => line.startsWith("  │   │ "))).toBe(true);
 			expect(grandchildDetails.every(line => line.startsWith("  │         "))).toBe(true);
 			expect(lastDetails.every(line => line.startsWith("        ") && !line.includes("│"))).toBe(true);
+			const metadataOrigins = [parentDetails, firstDetails, grandchildDetails, lastDetails].map(lines =>
+				lines[1]!.indexOf("usage"),
+			);
+			expect(new Set(metadataOrigins)).toEqual(new Set([metadataOrigins[0]]));
+			expect(metadataOrigins[0]).toBeGreaterThan(0);
 		} finally {
 			hub.dispose();
 		}

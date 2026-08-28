@@ -72,6 +72,7 @@ import {
 	statusText,
 	treeBranch,
 	treeContinuation,
+	treeMetadataIndent,
 } from "./agent-hub-renderer";
 import { AgentTranscriptViewer } from "./agent-transcript-viewer";
 import {
@@ -232,6 +233,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	#treeDepthById = new Map<string, number>();
 	#treeParentById = new Map<string, string>();
 	#treeLastSiblingById = new Map<string, boolean>();
+	#treeMaxDepth = 0;
 	/** Fuzzy agent filter (`/`), applied to id and display name. */
 	#agentFilter = "";
 	#agentFilterEditing = false;
@@ -522,11 +524,14 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			this.#treeDepthById = tree.depthById;
 			this.#treeParentById = tree.parentById;
 			this.#treeLastSiblingById = tree.lastSiblingById;
+			this.#treeMaxDepth = 0;
+			for (const depth of tree.depthById.values()) this.#treeMaxDepth = Math.max(this.#treeMaxDepth, depth);
 		} else {
 			this.#rows = rosterRows;
 			this.#treeDepthById.clear();
 			this.#treeParentById.clear();
 			this.#treeLastSiblingById.clear();
+			this.#treeMaxDepth = 0;
 		}
 		const keptIndex = selectedId ? this.#rows.findIndex(ref => ref.id === selectedId) : -1;
 		this.#selectedRow = keptIndex >= 0 ? keptIndex : Math.min(this.#selectedRow, Math.max(0, this.#rows.length - 1));
@@ -1155,10 +1160,16 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			entry.push(truncateToWidth(left.replace(/[\r\n]+/g, " "), max));
 		}
 
+		const ownChildRail = this.#childrenByParent.has(ref.id) ? theme.fg("dim", "│ ") : "  ";
 		const continuation = treeMode
-			? `  ${treeContinuation(ref, max, this.#treeDepthById, this.#treeParentById, this.#treeLastSiblingById)}  `
+			? `  ${treeContinuation(ref, max, this.#treeDepthById, this.#treeParentById, this.#treeLastSiblingById)}${ownChildRail}`
 			: "";
 		const indent = treeMode && visibleWidth(continuation) === detailIndent ? continuation : padding(detailIndent);
+		const metadataIndent = treeMode ? treeMetadataIndent(max, this.#treeMaxDepth) : detailIndent;
+		const metadataPrefix =
+			treeMode && visibleWidth(continuation) === detailIndent
+				? continuation + padding(metadataIndent - detailIndent)
+				: padding(metadataIndent);
 		const detailWidth = Math.max(1, max - detailIndent);
 		const task = observed?.description ?? observed?.progress?.task ?? ref.activity;
 		if (task) {
@@ -1166,7 +1177,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		}
 		const age = formatAge(Math.max(1, Math.round((Date.now() - ref.lastActivity) / 1000)));
 		const metadata = metrics ? formatMetricColumns(metrics, age) : `usage ${theme.sep.dot} ${age}`;
-		entry.push(`${indent}${theme.fg("dim", metadata)}`);
+		entry.push(`${metadataPrefix}${theme.fg("dim", metadata)}`);
 		if (!hovered) return entry;
 		return entry.map(lineRow => {
 			const rowWidth = visibleWidth(lineRow);
