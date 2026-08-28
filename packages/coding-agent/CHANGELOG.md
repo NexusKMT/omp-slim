@@ -6,6 +6,10 @@
 
 - Removed the `git` and `jj` wrapper modules from the SDK surface. VCS operations are now available through `@oh-my-pi/pi-natives/vcs`, including native handles and typed `VcsError` support; the package continues to re-export the `github` (gh CLI) helpers.
 
+### Changed
+
+- `extendedContext` now defaults to off: models with premium long-context pricing tiers (e.g. GPT-5.6 1M) stay capped at their standard-pricing window unless the setting or `/extended-context on` enables the extended window.
+
 ### Fixed
 
 - Improved terminal readability on light backgrounds by ensuring TUI surfaces use contrasting foreground colors.
