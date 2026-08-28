@@ -354,6 +354,7 @@ function hasGitBackedSegment(segments: readonly StatusLineSegmentId[]): boolean 
 
 export class StatusLineComponent implements Component {
 	#standalone: false | "full" | "left-only" = false;
+	#topAttachment: ComposerStyle["statusAttachment"] = "top-border";
 	#standaloneGap = false;
 	#autocompleteActiveProbe: (() => boolean) | undefined;
 	#renderRevision = 0;
@@ -1796,9 +1797,11 @@ export class StatusLineComponent implements Component {
 	}
 
 	/**
-	 * Build the status bar for one of four layouts:
+	 * Build the status bar for one of five layouts:
 	 * - `box`: powerline groups joined by the context-reactive gauge line
 	 *   (embedded in the editor's top border).
+	 * - `band`: the box layout opened by a soft flush-left cap, for the band
+	 *   composer's frameless full-width top row.
 	 * - `plain-full`: no background, no powerline caps, dot separators, gap is
 	 *   plain spaces — the standalone bottom bar for pi/borderless composers.
 	 * - `plain-left`: left segments only (claude composer; the right group
@@ -1810,11 +1813,11 @@ export class StatusLineComponent implements Component {
 	 */
 	#buildStatusLine(
 		width: number,
-		layout: "box" | "plain-full" | "plain-left" | "plain-right" = "box",
+		layout: "box" | "band" | "plain-full" | "plain-left" | "plain-right" = "box",
 		previewTitle?: string,
 	): string {
 		const effectiveSettings = this.#resolveSettings();
-		const plain = layout !== "box";
+		const plain = layout !== "box" && layout !== "band";
 		const includePath =
 			hasPathSegment(effectiveSettings.leftSegments) || hasPathSegment(effectiveSettings.rightSegments);
 		const gitEnabled = this.#gitEnabled();
@@ -1857,6 +1860,8 @@ export class StatusLineComponent implements Component {
 		const leftSegmentIds = layout === "plain-right" ? [] : effectiveSettings.leftSegments;
 		for (const segId of leftSegmentIds) {
 			if (subagentBadge && segId === "subagents") continue;
+			// The band composer relocates the title to the working row's trailer.
+			if (layout === "band" && segId === "session_name") continue;
 			const rendered = renderSegment(segId, ctx);
 			if (rendered.visible && rendered.content) {
 				leftParts.push(rendered.content);
@@ -1869,6 +1874,7 @@ export class StatusLineComponent implements Component {
 		const rightSegmentIds = layout === "plain-left" ? [] : effectiveSettings.rightSegments;
 		for (const segId of rightSegmentIds) {
 			if (subagentBadge && segId === "subagents") continue;
+			if (layout === "band" && segId === "session_name") continue;
 			const rendered = renderSegment(segId, ctx);
 			if (rendered.visible && rendered.content) {
 				rightParts.push(rendered.content);
@@ -1916,6 +1922,11 @@ export class StatusLineComponent implements Component {
 		// so the width budget excludes them too.
 		const leftCapWidth = separatorDef.endCaps && !transparentBg ? visibleWidth(separatorDef.endCaps.right) : 0;
 		const rightCapWidth = separatorDef.endCaps && !transparentBg ? visibleWidth(separatorDef.endCaps.left) : 0;
+		// The band layout opens flush against the terminal edge with a soft cap
+		// (rust omp's status band). Like the other caps it needs an opaque
+		// background to bridge, and only powerline separator styles carry caps.
+		const bandCap = layout === "band" && separatorDef.endCaps && !transparentBg ? theme.sep.powerlineCapLeft : "";
+		const bandCapWidth = visibleWidth(bandCap);
 
 		const groupWidth = (parts: string[], capWidth: number, sepWidth: number): number => {
 			if (parts.length === 0) return 0;
@@ -1924,7 +1935,7 @@ export class StatusLineComponent implements Component {
 			return partsWidth + sepTotal + 2 + capWidth;
 		};
 
-		let leftWidth = groupWidth(left, leftCapWidth, leftSepWidth);
+		let leftWidth = groupWidth(left, leftCapWidth + bandCapWidth, leftSepWidth);
 		let rightWidth = groupWidth(right, rightCapWidth, rightSepWidth);
 		// Embedded mode removes the standalone context segment before overflow
 		// handling, so the gauge must reserve enough room for both labels. Without
@@ -1995,7 +2006,7 @@ export class StatusLineComponent implements Component {
 							reRendered = adjusted;
 						}
 						left[pathIdx] = reRendered.content;
-						leftWidth = groupWidth(left, leftCapWidth, leftSepWidth);
+						leftWidth = groupWidth(left, leftCapWidth + bandCapWidth, leftSepWidth);
 					}
 				}
 			}
@@ -2014,7 +2025,7 @@ export class StatusLineComponent implements Component {
 				const dropIdx = leftOverflowDropIndex();
 				left.splice(dropIdx, 1);
 				leftSegIds.splice(dropIdx, 1);
-				leftWidth = groupWidth(left, leftCapWidth, leftSepWidth);
+				leftWidth = groupWidth(left, leftCapWidth + bandCapWidth, leftSepWidth);
 			}
 		}
 
@@ -2029,15 +2040,17 @@ export class StatusLineComponent implements Component {
 					: "";
 			const capPrefix = separatorDef.endCaps?.useBgAsFg ? bgAnsi.replace("\x1b[48;", "\x1b[38;") : bgAnsi + sepAnsi;
 			const capText = cap ? `${capPrefix}${this.#focusedAgentId ? "\x1b[22m" : ""}${cap}\x1b[0m` : "";
+			const openText =
+				direction === "left" && bandCap
+					? `${capPrefix}${this.#focusedAgentId ? "\x1b[22m" : ""}${bandCap}\x1b[0m`
+					: "";
 
 			let content = bgAnsi + fgAnsi;
 			content += ` ${parts.join(` ${sepAnsi}${sep}${fgAnsi} `)} `;
 			content += "\x1b[0m";
 
-			if (capText) {
-				return direction === "right" ? capText + content : content + capText;
-			}
-			return content;
+			if (direction === "right") return capText + content;
+			return openText + content + capText;
 		};
 
 		const leftGroup = renderGroup(left, "left");
@@ -2210,17 +2223,29 @@ export class StatusLineComponent implements Component {
 	}
 
 	getTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {
-		let content = this.#buildStatusLine(width, "box", previewTitle);
-		if (this.#focusedAgentId && content) {
-			// Dim the whole bar while focus-proxied. Group/cap terminators emit full
-			// `\x1b[0m` resets that would cancel faint mid-bar, so re-open it after each.
-			content = `\x1b[2m${content.replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")}\x1b[22m`;
-		}
+		const content = this.#dimWhileFocusProxied(this.#buildStatusLine(width, "box", previewTitle));
 		return {
 			content,
 			width: visibleWidth(content),
 			revision: this.#renderRevision,
 		};
+	}
+
+	/** Flush-left soft-capped powerline band (the band composer's top row). */
+	getBandTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {
+		const content = this.#dimWhileFocusProxied(this.#buildStatusLine(width, "band", previewTitle));
+		return {
+			content,
+			width: visibleWidth(content),
+			revision: this.#renderRevision,
+		};
+	}
+
+	/** Dim the whole bar while focus-proxied. Group/cap terminators emit full
+	 * `\x1b[0m` resets that would cancel faint mid-bar, so re-open it after each. */
+	#dimWhileFocusProxied(content: string): string {
+		if (!this.#focusedAgentId || !content) return content;
+		return `\x1b[2m${content.replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")}\x1b[22m`;
 	}
 	/**
 	 * Standalone bar placement derived from the composer style. `bottomBar`
@@ -2231,8 +2256,9 @@ export class StatusLineComponent implements Component {
 	 * `bottomBarGap` inserts a blank spacer row above the bar for styles whose
 	 * editor has no bottom chrome.
 	 */
-	setComposerStyle(style: Pick<ComposerStyle, "bottomBar" | "bottomBarGap">): void {
+	setComposerStyle(style: Pick<ComposerStyle, "statusAttachment" | "bottomBar" | "bottomBarGap">): void {
 		this.#standalone = style.bottomBar === "none" ? false : style.bottomBar === "left" ? "left-only" : "full";
+		this.#topAttachment = style.statusAttachment;
 		this.#standaloneGap = style.bottomBarGap;
 	}
 
@@ -2243,10 +2269,7 @@ export class StatusLineComponent implements Component {
 
 	/** Plain right-group content for the claude composer's top rule. */
 	getStandaloneTopBorder(width: number, previewTitle?: string): { content: string; width: number; revision: number } {
-		let content = this.#buildStatusLine(width, "plain-right", previewTitle);
-		if (this.#focusedAgentId && content) {
-			content = `\x1b[2m${content.replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")}\x1b[22m`;
-		}
+		const content = this.#dimWhileFocusProxied(this.#buildStatusLine(width, "plain-right", previewTitle));
 		return {
 			content,
 			width: visibleWidth(content),
@@ -2261,11 +2284,9 @@ export class StatusLineComponent implements Component {
 	 * the active one).
 	 */
 	renderBottomBar(width: number, groups: "left" | "full", previewTitle?: string): string {
-		let content = this.#buildStatusLine(width, groups === "left" ? "plain-left" : "plain-full", previewTitle);
-		if (this.#focusedAgentId && content) {
-			content = `\x1b[2m${content.replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")}\x1b[22m`;
-		}
-		return content;
+		return this.#dimWhileFocusProxied(
+			this.#buildStatusLine(width, groups === "left" ? "plain-left" : "plain-full", previewTitle),
+		);
 	}
 	/**
 	 * Status bar lines for a composer layout, rendered through the real
@@ -2275,15 +2296,16 @@ export class StatusLineComponent implements Component {
 	 * render.
 	 */
 	getPreviewLines(width: number, style?: Pick<ComposerStyle, "statusAttachment" | "bottomBar">): string[] {
-		const attachment =
-			style?.statusAttachment ??
-			(this.#standalone === false ? "top-border" : this.#standalone === "left-only" ? "top-rule-chip" : "none");
+		const attachment = style?.statusAttachment ?? this.#topAttachment;
 		const bottomBar =
 			style?.bottomBar ?? (this.#standalone === false ? "none" : this.#standalone === "left-only" ? "left" : "full");
 		const lines: string[] = [];
 		if (attachment === "top-border") {
 			const border = this.getTopBorder(width);
 			if (border.content) lines.push(border.content);
+		} else if (attachment === "top-band") {
+			const band = this.getBandTopBorder(width);
+			if (band.content) lines.push(band.content);
 		} else if (attachment === "top-rule-chip") {
 			// Render the chip on its rule exactly as the claude composer does.
 			const rule = claudeComposerStyle.renderTop({

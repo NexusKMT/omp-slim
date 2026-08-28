@@ -110,6 +110,11 @@ export const BUILTIN_COMPOSER_SHAPES = [
 		description: "Status line embedded in top border, compact 2-line prompt",
 	},
 	{
+		value: "band",
+		label: "Status Band",
+		description: "Flush soft-capped status band above a curved prompt, no frame",
+	},
+	{
 		value: "claude",
 		label: "Claude Code",
 		description: "Full-width horizontal rules above and below, status line at bottom",

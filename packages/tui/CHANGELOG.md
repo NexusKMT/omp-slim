@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added 'band' composer style for flush, full-width status lines
+
 ## [18.0.9] - 2026-08-28
 
 ### Added

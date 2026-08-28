@@ -5,6 +5,10 @@
 ### Added
 
 - Added `/restart` to relaunch omp with the original launch flags and resume the current session in place.
+- Added the `band` composer shape: a flush soft-capped powerline status band above a curved `╰─` prompt, with the session title docked right on the working row instead of the band.
+### Changed
+
+- The session accent color now also tints the status line's accent-role parts — `pi` icon, `hostname`, model name and thinking level, PR link, mode badges (Plan/Prewalk/Vibe/Goal), collab, and usage tier — matching the session title and context gauge; status colors (warnings, git) are untouched.
 
 ## [18.0.9] - 2026-08-28
 
