@@ -3,6 +3,10 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import {
+	getAntigravityCounterKeyForModel,
+	scopeAntigravityLimitsForModel,
+} from "@oh-my-pi/pi-ai/usage/google-antigravity";
+import {
 	type Component,
 	type ComposerStyle,
 	claudeComposerStyle,
@@ -47,7 +51,7 @@ const WATCHER_FAILURE_POLL_TTL_MS = 5000;
 /** A displayable limit after provider, account, model, and window filtering. */
 interface UsageWindowCandidate {
 	id?: string;
-	windowClass: "5h" | "7d" | "monthly";
+	windowClass: "5h" | "daily" | "7d" | "monthly";
 	fraction: number;
 	resetsAt?: number;
 }
@@ -451,6 +455,7 @@ export class StatusLineComponent implements Component {
 	#cachedUsage: {
 		tier?: string;
 		fiveHour?: { percent: number; resetMinutes?: number };
+		daily?: { percent: number; resetMinutes?: number };
 		sevenDay?: { percent: number; resetHours?: number };
 		monthly?: { percent: number; resetHours?: number };
 	} | null = null;
@@ -1421,22 +1426,29 @@ export class StatusLineComponent implements Component {
 	): {
 		tier?: string;
 		fiveHour?: { percent: number; resetMinutes?: number };
+		daily?: { percent: number; resetMinutes?: number };
 		sevenDay?: { percent: number; resetHours?: number };
 		monthly?: { percent: number; resetHours?: number };
 	} | null {
 		if (!Array.isArray(reports)) return null;
 		const now = Date.now();
 		const activeModelId = normalizeUsageScopeValue(context.modelId);
+		const activeAntigravityCounter =
+			context.provider === "google-antigravity" ? getAntigravityCounterKeyForModel(context.modelId) : undefined;
 		const scopeGroups = new Map<string, UsageScopeGroup>();
 		for (const report of reports) {
 			if (!report || typeof report !== "object") continue;
 			const provider = "provider" in report ? report.provider : undefined;
 			if (context.provider && provider !== context.provider) continue;
-			const limits = "limits" in report ? report.limits : undefined;
-			if (!Array.isArray(limits)) continue;
+			const reportLimits = "limits" in report ? report.limits : undefined;
+			if (!Array.isArray(reportLimits)) continue;
 			// fetchUsageReports supplies normalized rows; the guards above protect
 			// the unknown session boundary before the account matcher reads metadata.
 			const usageReport = report as UsageReport;
+			const limits =
+				provider === "google-antigravity" && activeAntigravityCounter
+					? scopeAntigravityLimitsForModel(usageReport, context)
+					: reportLimits;
 			for (const limit of limits) {
 				if (
 					!limit ||
@@ -1467,11 +1479,15 @@ export class StatusLineComponent implements Component {
 				const subscriptionWindow =
 					windowId === "5h" || windowId === "7d"
 						? windowId
-						: durationMs !== undefined && Math.abs(durationMs - 5 * 3_600_000) <= 60_000
-							? "5h"
-							: durationMs !== undefined && Math.abs(durationMs - 7 * 86_400_000) <= 60_000
-								? "7d"
-								: undefined;
+						: windowId === "daily" || windowId === "24h" || windowId === "1d"
+							? "daily"
+							: durationMs !== undefined && Math.abs(durationMs - 5 * 3_600_000) <= 60_000
+								? "5h"
+								: durationMs !== undefined && Math.abs(durationMs - 86_400_000) <= 60_000
+									? "daily"
+									: durationMs !== undefined && Math.abs(durationMs - 7 * 86_400_000) <= 60_000
+										? "7d"
+										: undefined;
 				const windowClass =
 					subscriptionWindow ??
 					((context.provider === "cursor" || context.provider === "opencode-go") &&
@@ -1518,6 +1534,7 @@ export class StatusLineComponent implements Component {
 		if (!selectedGroup) return null;
 
 		let fiveHour: { percent: number; resetMinutes?: number } | undefined;
+		let daily: { percent: number; resetMinutes?: number } | undefined;
 		let sevenDay: { percent: number; resetHours?: number } | undefined;
 		let monthly: { percent: number; resetHours?: number } | undefined;
 		let monthlyPriority = Number.POSITIVE_INFINITY;
@@ -1532,6 +1549,15 @@ export class StatusLineComponent implements Component {
 		for (const candidate of selectedGroup.candidates) {
 			if (candidate.windowClass === "5h" && !fiveHour) {
 				fiveHour = {
+					percent: candidate.fraction * 100,
+					resetMinutes:
+						typeof candidate.resetsAt === "number"
+							? Math.max(0, Math.round((candidate.resetsAt - now) / 60_000))
+							: undefined,
+				};
+			}
+			if (candidate.windowClass === "daily" && !daily) {
+				daily = {
 					percent: candidate.fraction * 100,
 					resetMinutes:
 						typeof candidate.resetsAt === "number"
@@ -1562,8 +1588,8 @@ export class StatusLineComponent implements Component {
 				}
 			}
 		}
-		if (!fiveHour && !sevenDay && !monthly) return null;
-		return { tier: selectedGroup.tier, fiveHour, sevenDay, monthly };
+		if (!fiveHour && !daily && !sevenDay && !monthly) return null;
+		return { tier: selectedGroup.tier, fiveHour, daily, sevenDay, monthly };
 	}
 
 	/**

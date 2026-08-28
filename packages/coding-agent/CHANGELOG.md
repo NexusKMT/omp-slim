@@ -36,6 +36,9 @@
 ### Fixed
 
 - Fixed inline Snapcompact skipping all text compaction for tool results that also contain source images; mixed results now compact their text while preserving every original image block.
+### Fixed
+
+- Google Antigravity daily quota usage now appears in the status-line usage segment ([#9999](https://github.com/can1357/oh-my-pi/issues/9999)).
 
 ## [18.0.8] - 2026-08-27
 
