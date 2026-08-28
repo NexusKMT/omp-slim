@@ -977,6 +977,31 @@ describe("Agent hub row ordering", () => {
 			hub.dispose();
 		}
 	});
+	it("keeps tree rails continuous across task and metrics rows", () => {
+		geometry = stubStdoutGeometry(120);
+		geometry.setRows(32);
+		const agents = new AgentRegistry();
+		agents.register({ id: "Parent", displayName: "Parent", kind: "sub", parentId: "Main", session: null });
+		agents.register({ id: "First", displayName: "First", kind: "sub", parentId: "Parent", session: null });
+		agents.setActivity("First", "First task");
+		agents.register({ id: "Grandchild", displayName: "Grandchild", kind: "sub", parentId: "First", session: null });
+		agents.setActivity("Grandchild", "Grandchild task");
+		agents.register({ id: "Last", displayName: "Last", kind: "sub", parentId: "Parent", session: null });
+		agents.setActivity("Last", "Last task");
+		const hub = makeHub(agents);
+
+		try {
+			hub.handleInput("t");
+			const firstDetails = renderedRosterEntry(hub, "First", 120).split("\n").slice(1);
+			const grandchildDetails = renderedRosterEntry(hub, "Grandchild", 120).split("\n").slice(1);
+			const lastDetails = renderedRosterEntry(hub, "Last", 120).split("\n").slice(1);
+			expect(firstDetails.every(line => line.startsWith("  │     "))).toBe(true);
+			expect(grandchildDetails.every(line => line.startsWith("  │         "))).toBe(true);
+			expect(lastDetails.every(line => line.startsWith("        ") && !line.includes("│"))).toBe(true);
+		} finally {
+			hub.dispose();
+		}
+	});
 
 	it("keeps cyclic parent links renderable in tree mode", () => {
 		const agents = new AgentRegistry();

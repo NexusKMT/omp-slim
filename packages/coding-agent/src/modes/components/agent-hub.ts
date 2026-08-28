@@ -55,7 +55,6 @@ import {
 	STATUS_ORDER,
 } from "./agent-hub-projection";
 import {
-	alignRightCell,
 	clampHubLine,
 	contextGauge,
 	formatChildIds,
@@ -72,6 +71,7 @@ import {
 	statusGlyph,
 	statusText,
 	treeBranch,
+	treeContinuation,
 } from "./agent-hub-renderer";
 import { AgentTranscriptViewer } from "./agent-transcript-viewer";
 import {
@@ -1111,13 +1111,12 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	): string[] {
 		const max = Math.max(1, width);
 		const cursor = selected ? theme.fg("accent", theme.nav.cursor) : " ";
-		const depth = this.#viewMode === "tree" ? (this.#treeDepthById.get(ref.id) ?? 0) : 0;
+		const treeMode = this.#viewMode === "tree";
 		// Tree rails descend from the status dot: the connector sits between the
 		// cursor and the glyph, so child rows hang under their parent's dot.
-		const branch =
-			this.#viewMode === "tree"
-				? treeBranch(ref, max, this.#treeDepthById, this.#treeParentById, this.#treeLastSiblingById)
-				: "";
+		const branch = treeMode
+			? treeBranch(ref, max, this.#treeDepthById, this.#treeParentById, this.#treeLastSiblingById)
+			: "";
 		const id = sanitizeDisplayText(ref.id);
 		const styledId = selected ? theme.bold(theme.fg("accent", id)) : theme.bold(id);
 		const fields: string[] = [`${cursor} ${branch}${statusGlyph(ref.status)} ${styledId}`];
@@ -1147,7 +1146,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		const right = meta.join(theme.sep.dot);
 
 		const entry: string[] = [];
-		const detailIndent = Math.min(max - 1, 4 + (this.#viewMode === "tree" ? visibleWidth(branch) : depth * 2));
+		const detailIndent = Math.min(max - 1, 4 + visibleWidth(branch));
 		const leftWidth = visibleWidth(left);
 		const rightWidth = visibleWidth(right);
 		if (rightWidth > 0 && leftWidth + 2 + rightWidth <= max) {
@@ -1156,7 +1155,10 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			entry.push(truncateToWidth(left.replace(/[\r\n]+/g, " "), max));
 		}
 
-		const indent = padding(Math.max(0, detailIndent));
+		const continuation = treeMode
+			? `  ${treeContinuation(ref, max, this.#treeDepthById, this.#treeParentById, this.#treeLastSiblingById)}  `
+			: "";
+		const indent = treeMode && visibleWidth(continuation) === detailIndent ? continuation : padding(detailIndent);
 		const detailWidth = Math.max(1, max - detailIndent);
 		const task = observed?.description ?? observed?.progress?.task ?? ref.activity;
 		if (task) {

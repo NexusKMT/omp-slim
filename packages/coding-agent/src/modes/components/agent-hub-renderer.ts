@@ -187,18 +187,19 @@ export function formatChildIds(children: readonly AgentRef[], width: number): st
 	return text;
 }
 
-/** Bash `tree`-style ancestry connector. The prefix sits at the status-glyph column so
- * rails descend from the parent's dot: top-level rows (Main's direct children) render
- * bare, and each deeper level shifts one 4-char connector right. */
-export function treeBranch(
+/** Build one bash `tree`-style ancestry prefix. Continuation rows replace the
+ * node's own branch with a rail only when a later sibling still needs it. */
+function treePrefix(
 	ref: AgentRef,
 	maxWidth: number,
 	depthById: ReadonlyMap<string, number>,
 	parentById: ReadonlyMap<string, string>,
 	lastSiblingById: ReadonlyMap<string, boolean>,
+	continuation: boolean,
 ): string {
 	if ((depthById.get(ref.id) ?? 0) === 0) return "";
-	const segments: string[] = [lastSiblingById.get(ref.id) ? "└── " : "├── "];
+	const lastSibling = lastSiblingById.get(ref.id);
+	const segments: string[] = [continuation ? (lastSibling ? "    " : "│   ") : lastSibling ? "└── " : "├── "];
 	const ancestry = new Set<string>();
 	let parent = parentById.get(ref.id);
 	while (parent && parent !== MAIN_AGENT_ID && !ancestry.has(parent)) {
@@ -213,7 +214,30 @@ export function treeBranch(
 	const maxSegments = Math.max(1, Math.floor(Math.max(4, maxWidth - 2) / 4));
 	const omitted = Math.max(0, segments.length - maxSegments);
 	const prefix = segments.slice(0, maxSegments).reverse().join("");
-	return theme.fg("dim", `${omitted > 0 ? "… " : ""}${prefix}`);
+	const omittedPrefix = omitted > 0 ? (continuation ? "  " : "… ") : "";
+	return theme.fg("dim", `${omittedPrefix}${prefix}`);
+}
+
+/** Bash `tree`-style branch for an agent's identity row. */
+export function treeBranch(
+	ref: AgentRef,
+	maxWidth: number,
+	depthById: ReadonlyMap<string, number>,
+	parentById: ReadonlyMap<string, string>,
+	lastSiblingById: ReadonlyMap<string, boolean>,
+): string {
+	return treePrefix(ref, maxWidth, depthById, parentById, lastSiblingById, false);
+}
+
+/** Ancestry rails for the task and metrics rows beneath an agent identity. */
+export function treeContinuation(
+	ref: AgentRef,
+	maxWidth: number,
+	depthById: ReadonlyMap<string, number>,
+	parentById: ReadonlyMap<string, string>,
+	lastSiblingById: ReadonlyMap<string, boolean>,
+): string {
+	return treePrefix(ref, maxWidth, depthById, parentById, lastSiblingById, true);
 }
 
 /** Higher is better: exact > prefix > substring > scattered subsequence. */
