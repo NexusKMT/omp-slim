@@ -18,6 +18,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Message } from "@oh-my-pi/pi-ai";
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -85,7 +86,10 @@ describe("AgentSession snapcompact no-reduction guard", () => {
 			},
 			{ role: "user", content: [{ type: "text", text: "third question" }], timestamp: Date.now() },
 		];
-		const agent = new Agent({ initialState: { model, systemPrompt: ["Test"], tools: [], messages: seed } });
+		const agent = new Agent({
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: seed },
+			streamFn: createMockModel({ responses: [{ content: ["Done"] }] }).stream,
+		});
 		for (const message of seed) sessionManager.appendMessage(message);
 
 		session = new AgentSession({
@@ -94,6 +98,7 @@ describe("AgentSession snapcompact no-reduction guard", () => {
 			settings: Settings.isolated({
 				"compaction.methodOrder": ["snapcompact"],
 				"compaction.autoContinue": false,
+				"compaction.asyncEnabled": false,
 				// Force nearly everything into the summarized region so the archive
 				// is what dominates the projection.
 				"compaction.keepRecentTokens": 1,
@@ -134,5 +139,38 @@ describe("AgentSession snapcompact no-reduction guard", () => {
 		);
 		expect(compactSpy).toHaveBeenCalledTimes(1);
 		expect(sessionManager.getEntries().some(entry => entry.type === "compaction")).toBe(false);
+	});
+
+	it("rejects an inflating automatic result triggered by a large pending prompt", async () => {
+		const branchEntries = sessionManager.getBranch();
+		const firstKeptEntry = branchEntries[branchEntries.length - 1];
+		if (!firstKeptEntry?.id) throw new Error("Expected branch entry with id");
+
+		const frame = { data: "ZmFrZQ==", mimeType: "image/png", cols: 64, rows: 40, chars: 4 } as const;
+		const compactSpy = vi.spyOn(snapcompact, "compact").mockResolvedValue({
+			summary: "archived onto frames",
+			shortSummary: "archived",
+			firstKeptEntryId: firstKeptEntry.id,
+			tokensBefore: 100_000,
+			details: { readFiles: [], modifiedFiles: [] },
+			preserveData: {
+				snapcompact: { frames: [frame, frame, frame], totalChars: 12, truncatedChars: 0 },
+			},
+		});
+
+		let rejectedInflatingSnapcompact = false;
+		session.subscribe(event => {
+			if (
+				event.type === "auto_compaction_end" &&
+				event.action === "snapcompact" &&
+				event.errorMessage?.includes("would not reduce context")
+			) {
+				rejectedInflatingSnapcompact = true;
+			}
+		});
+		await session.prompt("pending ".repeat(190_000));
+
+		expect(rejectedInflatingSnapcompact).toBe(true);
+		expect(compactSpy).toHaveBeenCalled();
 	});
 });
