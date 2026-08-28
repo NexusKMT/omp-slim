@@ -15,6 +15,7 @@ import {
 	mapEffortToGoogleThinkingLevel,
 	resolveWireModelId,
 } from "@oh-my-pi/pi-catalog/model-thinking";
+import { getBundledModel, getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { googleGeminiCliModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/google";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import {
@@ -225,6 +226,15 @@ describe("collapseEffortVariants", () => {
 		const out = collapseEffortVariants([collapsedFlash, staleTiered], ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
 		expect(out.map(m => m.id)).toEqual(["gemini-3.7-flash"]);
 		expect(out[0]?.thinking?.effortRouting?.minimal).toBe("gemini-3.7-flash-low");
+	});
+
+	it("bundles only the routed gemini-3.7-flash model after generation (#10016)", () => {
+		const models = getBundledModels("google-antigravity");
+		expect(models.some(model => model.id === "gemini-3.7-flash-tiered")).toBe(false);
+
+		const flash = getBundledModel("google-antigravity", "gemini-3.7-flash");
+		expect(flash?.thinking?.effortRouting?.minimal).toBe("gemini-3.7-flash-low");
+		expect(flash ? mapEffortToGoogleThinkingLevel(Effort.Minimal, flash) : undefined).toBe("LOW");
 	});
 
 	it("drops routes whose target member is absent", () => {
