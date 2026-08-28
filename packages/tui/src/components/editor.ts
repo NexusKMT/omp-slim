@@ -401,6 +401,8 @@ export interface EditorTheme {
 	accentColor?: (str: string) => string;
 	/** Background fill used by filled composer styles. */
 	surfaceColor?: (str: string) => string;
+	/** Foreground used when the composer shape leaves its text surface transparent. */
+	textColor?: (str: string) => string;
 	selectList: SelectListTheme;
 	symbols: SymbolTheme;
 	editorPaddingX?: number;
@@ -1271,13 +1273,16 @@ export class Editor implements Component, Focusable {
 					displayWidth = visibleWidth(displayText);
 				}
 			}
+			const renderedText = style.filledSurface
+				? displayText
+				: (this.#theme.textColor ?? PASSTHROUGH_COLOR)(displayText);
 
 			const linePad = padding(Math.max(0, lineContentWidth - displayWidth));
 
 			result.push(
 				...style.renderRow({
 					...chromeCtx,
-					text: displayText,
+					text: renderedText,
 					pad: linePad,
 					gutter: gutterText,
 					isLastRow: visibleIndex === visibleLayoutLines.length - 1,

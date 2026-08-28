@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed typed composer text becoming unreadable on light terminal backgrounds in transparent composer styles ([#10038](https://github.com/can1357/oh-my-pi/issues/10038)).
+
 ## [18.0.9] - 2026-08-28
 
 ### Breaking Changes
