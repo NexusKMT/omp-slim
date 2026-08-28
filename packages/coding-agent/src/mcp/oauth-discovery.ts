@@ -14,6 +14,8 @@ const DISCOVERY_FETCH_TIMEOUT_MS = 10_000;
 export interface OAuthEndpoints {
 	authorizationUrl: string;
 	tokenUrl: string;
+	/** Authorization-server issuer URL used for metadata discovery. */
+	issuerUrl?: string;
 	clientId?: string;
 	/** Dynamic client registration endpoint advertised by the authorization server. */
 	registrationUrl?: string;
@@ -29,6 +31,11 @@ function readRegistrationUrl(metadata: Record<string, unknown>): string | undefi
 		metadata.registrationUrl ??
 		metadata.registration_uri ??
 		metadata.registrationUri;
+	return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+function readIssuerUrl(metadata: Record<string, unknown>): string | undefined {
+	const value = metadata.issuer ?? metadata.issuer_url ?? metadata.issuerUrl;
 	return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
@@ -119,7 +126,15 @@ export function extractOAuthEndpoints(error: Error): OAuthEndpoints | null {
 			(obj.resource_uri as string | undefined) ||
 			(obj.resourceUri as string | undefined);
 
-		return { authorizationUrl, tokenUrl, registrationUrl: readRegistrationUrl(obj), clientId, scopes, resource };
+		return {
+			authorizationUrl,
+			tokenUrl,
+			issuerUrl: readIssuerUrl(obj),
+			registrationUrl: readRegistrationUrl(obj),
+			clientId,
+			scopes,
+			resource,
+		};
 	};
 
 	const clientIdFromAuthUrl = (authorizationUrl: string): string | undefined => {
@@ -192,6 +207,7 @@ export function extractOAuthEndpoints(error: Error): OAuthEndpoints | null {
 			return {
 				authorizationUrl,
 				tokenUrl,
+				issuerUrl: challengeValues.get("issuer") || challengeValues.get("issuer_url"),
 				registrationUrl:
 					challengeValues.get("registration_endpoint") ||
 					challengeValues.get("registration_url") ||
@@ -438,6 +454,7 @@ export async function discoverOAuthEndpoints(
 			return {
 				authorizationUrl: String(metadata.authorization_endpoint),
 				tokenUrl: String(metadata.token_endpoint),
+				issuerUrl: readIssuerUrl(metadata),
 				registrationUrl: readRegistrationUrl(metadata),
 				clientId:
 					typeof metadata.client_id === "string"
@@ -462,6 +479,7 @@ export async function discoverOAuthEndpoints(
 				return {
 					authorizationUrl: oauthData.authorization_url || String(oauthData.authorizationUrl),
 					tokenUrl: oauthData.token_url || String(oauthData.tokenUrl),
+					issuerUrl: readIssuerUrl(oauthData) ?? readIssuerUrl(metadata),
 					registrationUrl: readRegistrationUrl(oauthData),
 					clientId:
 						typeof oauthData.client_id === "string"

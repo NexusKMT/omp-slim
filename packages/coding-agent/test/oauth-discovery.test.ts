@@ -158,6 +158,7 @@ describe("path-prefixed auth servers", () => {
 
 		expect(oauth).toEqual({
 			authorizationUrl: "https://auth.example.com/auth/realms/myrealm/protocol/openid-connect/auth",
+			issuerUrl: "https://auth.example.com/auth/realms/myrealm",
 			tokenUrl: "https://auth.example.com/auth/realms/myrealm/protocol/openid-connect/token",
 		});
 		expect(calls).toContain("https://auth.example.com/auth/realms/myrealm/.well-known/openid-configuration");
@@ -197,6 +198,7 @@ describe("path-prefixed auth servers", () => {
 
 		expect(oauth).toEqual({
 			authorizationUrl: "https://auth.example.com/tenants/acme/oauth",
+			issuerUrl: "https://auth.example.com/tenants/acme",
 			tokenUrl: "https://auth.example.com/tenants/acme/token",
 			registrationUrl: "https://auth.example.com/tenants/acme/register",
 		});
@@ -363,6 +365,7 @@ describe("resource_metadata chain", () => {
 
 		expect(oauth).toEqual({
 			authorizationUrl: "https://sso.example.com/oauth/auth",
+			issuerUrl: "https://sso.example.com",
 			tokenUrl: "https://sso.example.com/oauth/token",
 			scopes: "k8s.logging-mcp-server k8s.annotations",
 			resource: "https://gateway.example.com",
@@ -409,6 +412,7 @@ describe("resource_metadata chain", () => {
 
 		expect(oauth).toEqual({
 			authorizationUrl: "https://ws.cloud.databricks.com/oidc/v1/authorize",
+			issuerUrl: "https://ws.cloud.databricks.com/oidc",
 			tokenUrl: "https://ws.cloud.databricks.com/oidc/v1/token",
 			scopes: "genie offline_access",
 			resource: "https://ws.cloud.databricks.com/api/2.0/mcp/genie",
@@ -600,6 +604,7 @@ describe("RFC 8414 §3.3 issuer validation", () => {
 
 		expect(oauth).toEqual({
 			authorizationUrl: "https://mcp.atlassian.com/v1/authorize",
+			issuerUrl: "https://cf.mcp.atlassian.com",
 			tokenUrl: "https://cf.mcp.atlassian.com/v1/token",
 			registrationUrl: "https://cf.mcp.atlassian.com/v1/register",
 		});
@@ -667,6 +672,7 @@ describe("RFC 8414 §3.3 issuer validation", () => {
 
 		expect(oauth).toEqual({
 			authorizationUrl: "https://mcp.plane.so/http/authorize",
+			issuerUrl: "https://mcp.plane.so/http",
 			tokenUrl: "https://mcp.plane.so/http/token",
 			registrationUrl: "https://mcp.plane.so/http/register",
 			resource: "https://mcp.plane.so/http/mcp",
@@ -700,6 +706,7 @@ describe("RFC 8414 §3.3 issuer validation", () => {
 
 		expect(oauth).toEqual({
 			authorizationUrl: "https://auth.example.com/oauth/authorize",
+			issuerUrl: "https://auth.example.com/",
 			tokenUrl: "https://auth.example.com/oauth/token",
 		});
 	});

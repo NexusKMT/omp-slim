@@ -84,7 +84,7 @@ describe("mcp oauth flow", () => {
 		expect(authUrl.searchParams.get("state")).toBe("test-state");
 	});
 
-	it("discovers DCR metadata appended to a multi-segment authorization path", async () => {
+	it("uses the issuer rather than the authorization endpoint to discover DCR metadata", async () => {
 		const calls: string[] = [];
 		const fetchImpl: FetchImpl = async input => {
 			const url = String(input);
@@ -110,8 +110,9 @@ describe("mcp oauth flow", () => {
 
 		const flow = new MCPOAuthFlow(
 			{
-				authorizationUrl: "https://auth.example.com/auth/realms/myrealm",
-				tokenUrl: "https://auth.example.com/auth/realms/myrealm/token",
+				authorizationUrl: "https://auth.example.com/auth/realms/myrealm/protocol/openid-connect/auth",
+				tokenUrl: "https://auth.example.com/auth/realms/myrealm/protocol/openid-connect/token",
+				issuerUrl: "https://auth.example.com/auth/realms/myrealm",
 				fetch: fetchImpl,
 			},
 			{},

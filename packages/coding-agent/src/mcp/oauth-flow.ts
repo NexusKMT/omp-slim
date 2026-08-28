@@ -299,6 +299,8 @@ export interface MCPOAuthConfig {
 	authorizationUrl: string;
 	/** Token endpoint URL */
 	tokenUrl: string;
+	/** Authorization-server issuer URL used for metadata discovery. */
+	issuerUrl?: string;
 	/** Dynamic client registration endpoint advertised by the authorization server. */
 	registrationUrl?: string;
 	/** Client ID (optional when already embedded in authorization URL) */
@@ -665,7 +667,10 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
 	}
 
 	async #resolveRegistrationEndpoint(): Promise<string | null> {
-		const candidates = buildWellKnownUrls("/.well-known/oauth-authorization-server", this.config.authorizationUrl);
+		const candidates = buildWellKnownUrls(
+			"/.well-known/oauth-authorization-server",
+			this.config.issuerUrl ?? this.config.authorizationUrl,
+		);
 		for (const url of candidates) {
 			const endpoint = await this.#tryWellKnownForRegistration(url.toString());
 			if (endpoint) return endpoint;
