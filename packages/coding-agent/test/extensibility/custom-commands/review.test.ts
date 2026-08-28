@@ -11,6 +11,7 @@ import * as gh from "@oh-my-pi/pi-coding-agent/tools/gh";
 import type { VcsGitRepo, VcsRepo } from "@oh-my-pi/pi-natives";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { $ } from "bun";
 
 const SAMPLE_JJ_DIFF = `diff --git a/src/workspace.ts b/src/workspace.ts
 --- a/src/workspace.ts
@@ -578,7 +579,49 @@ describe("ReviewCommand", () => {
 		expect(result).toBeDefined();
 		expect(result!).toContain("Reviewing changes between `main` and `feature`");
 		expect(result!).toContain("src/pr.ts");
-		expect(diffSpy).toHaveBeenCalledWith({ base: "main...feature" });
+		expect(diffSpy).toHaveBeenCalledWith({ base: "main", head: "feature" });
+	});
+
+	it("resolves base-branch review against a real repo without a range revspec", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-review-real-"));
+		try {
+			await $`git init -q -b main`.cwd(dir).quiet();
+			await $`git config user.email test@example.com`.cwd(dir).quiet();
+			await $`git config user.name Test`.cwd(dir).quiet();
+			await fs.writeFile(path.join(dir, "a.txt"), "one\n");
+			await $`git add a.txt`.cwd(dir).quiet();
+			await $`git commit -q -m init`.cwd(dir).quiet();
+
+			// Same branch selected as base: must report no changes, not crash on
+			// a `main...main` revspec that rev_parse_single cannot resolve.
+			const sameBranch = new ReviewCommand({ cwd: dir } as unknown as CustomCommandAPI);
+			const notices: NotifyCall[] = [];
+			const sameResult = await sameBranch.execute(
+				[],
+				createContext({
+					selectResults: ["1. Review against a base branch (PR Style)", "main"],
+					onNotify: call => notices.push(call),
+				}),
+			);
+			expect(sameResult).toBeUndefined();
+			expect(notices).toEqual([{ message: "No changes between main and main", type: "warning" }]);
+
+			// Divergent branch: produces the PR-style diff for the changed file.
+			await $`git checkout -q -b feature`.cwd(dir).quiet();
+			await fs.writeFile(path.join(dir, "a.txt"), "two\n");
+			await $`git commit -q -am change`.cwd(dir).quiet();
+			const feature = new ReviewCommand({ cwd: dir } as unknown as CustomCommandAPI);
+			const featureResult = await feature.execute(
+				[],
+				createContext({
+					selectResults: ["1. Review against a base branch (PR Style)", "main"],
+				}),
+			);
+			expect(featureResult).toContain("Reviewing changes between `main` and `feature`");
+			expect(featureResult).toContain("a.txt");
+		} finally {
+			await removeWithRetries(dir);
+		}
 	});
 
 	it("keeps specific commit review mode working", async () => {

@@ -541,7 +541,7 @@ export class ReviewCommand implements CustomCommand {
 				const currentBranch = await getCurrentBranch(this.api);
 				let diffText: string;
 				try {
-					diffText = await vcs.requireGit(this.api.cwd).diffText({ base: `${baseBranch}...${currentBranch}` });
+					diffText = await vcs.requireGit(this.api.cwd).diffText({ base: baseBranch, head: currentBranch });
 				} catch (err) {
 					ctx.ui.notify(`Failed to get diff: ${err instanceof Error ? err.message : String(err)}`, "error");
 					return undefined;
