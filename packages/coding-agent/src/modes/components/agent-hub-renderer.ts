@@ -200,7 +200,7 @@ export function treeBranch(
 	const segments: string[] = [lastSiblingById.get(ref.id) ? "└── " : "├── "];
 	const ancestry = new Set<string>();
 	let parent = parentById.get(ref.id);
-	while (parent && parentById.get(parent) !== MAIN_AGENT_ID && !ancestry.has(parent)) {
+	while (parent && parent !== MAIN_AGENT_ID && !ancestry.has(parent)) {
 		ancestry.add(parent);
 		segments.push(lastSiblingById.get(parent) ? "    " : "│   ");
 		parent = parentById.get(parent);
