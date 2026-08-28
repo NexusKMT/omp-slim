@@ -155,6 +155,7 @@ export class AgentStorage {
 	#perfBackfillChecked = false;
 	/** Coalesces per-turn perf samples into one deferred transaction off the turn's hot path. */
 	#perfDrain = new AsyncDrain<ModelPerfInsert>(MODEL_PERF_FLUSH_DELAY_MS);
+	#closing = false;
 
 	private constructor(dbPath: string) {
 		this.#autoPerfBackfill = dbPath === getAgentDbPath();
@@ -425,6 +426,7 @@ FROM model_usage_legacy
 	}
 
 	#close(): void {
+		this.#closing = true;
 		// Model-performance batches are synchronous once invoked, so this
 		// persists them before finalizing their statements during process exit.
 		void this.#perfDrain.flush();
@@ -544,10 +546,9 @@ FROM model_usage_legacy
 	}
 
 	#flushModelPerf(rows: ModelPerfInsert[]): void {
-		// Kick the one-time history import too, so aggregates populate even if
-		// the user never opens /models. Additive merge makes ordering with live
-		// samples irrelevant.
-		this.#kickModelPerfBackfill();
+		// A close-triggered flush must persist only the queued live batch. Starting
+		// the async stats import here could commit aggregates without its marker.
+		if (!this.#closing) this.#kickModelPerfBackfill();
 		try {
 			this.#db.transaction((batch: ModelPerfInsert[]) => {
 				for (const row of batch) this.#foldModelPerf(row);
