@@ -174,9 +174,11 @@ describe("AgentSession shake", () => {
 			const latestUser = sessionManager
 				.getBranch()
 				.findLast(entry => entry.type === "message" && entry.message.role === "user");
-			expect(latestUser?.type === "message" ? latestUser.message.content : undefined).toEqual([
-				{ type: "text", text: tailBefore },
-			]);
+			expect(
+				latestUser?.type === "message" && latestUser.message.role === "user"
+					? latestUser.message.content
+					: undefined,
+			).toEqual([{ type: "text", text: tailBefore }]);
 
 			const sessionFile = sessionManager.getSessionFile();
 			if (!sessionFile) throw new Error("Expected persisted shake session");

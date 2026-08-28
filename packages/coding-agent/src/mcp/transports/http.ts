@@ -126,9 +126,7 @@ export class HttpTransport implements MCPTransport {
 
 	/** Combine caller cancellation with transport shutdown for every HTTP operation. */
 	#operationSignal(signal?: AbortSignal): AbortSignal {
-		return signal
-			? AbortSignal.any([signal, this.#lifecycleController.signal])
-			: this.#lifecycleController.signal;
+		return signal ? AbortSignal.any([signal, this.#lifecycleController.signal]) : this.#lifecycleController.signal;
 	}
 
 	/**
@@ -383,11 +381,7 @@ export class HttpTransport implements MCPTransport {
 		}
 	}
 
-	request<T = unknown>(
-		method: string,
-		params?: Record<string, unknown>,
-		options?: MCPRequestOptions,
-	): Promise<T> {
+	request<T = unknown>(method: string, params?: Record<string, unknown>, options?: MCPRequestOptions): Promise<T> {
 		return this.#trackRequest(this.#requestWithAuthRetry<T>(method, params, options));
 	}
 
@@ -737,16 +731,8 @@ export class HttpTransport implements MCPTransport {
 		// Aborting is only the cancellation request. Wait until fetches and body
 		// readers have actually observed it before session/process teardown can
 		// close their sockets underneath still-running promise continuations.
-		while (
-			this.#activeFetches.size > 0 ||
-			this.#activeRequests.size > 0 ||
-			this.#backgroundDrains.size > 0
-		) {
-			await Promise.allSettled([
-				...this.#activeFetches,
-				...this.#activeRequests,
-				...this.#backgroundDrains,
-			]);
+		while (this.#activeFetches.size > 0 || this.#activeRequests.size > 0 || this.#backgroundDrains.size > 0) {
+			await Promise.allSettled([...this.#activeFetches, ...this.#activeRequests, ...this.#backgroundDrains]);
 		}
 
 		if (this.#sessionId) {

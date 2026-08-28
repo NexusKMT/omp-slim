@@ -94,9 +94,7 @@ describe("issue #9967 default model with ambient Bedrock credentials", () => {
 		expect(authStorage.hasAuth("amazon-bedrock")).toBe(true);
 		expect(registry.hasConcreteAuth("amazon-bedrock")).toBe(true);
 
-		const picked = pickDefaultAvailableModel(registry.getAvailable(), provider =>
-			registry.hasConcreteAuth(provider),
-		);
+		const picked = pickDefaultAvailableModel(registry.getAvailable(), provider => registry.hasConcreteAuth(provider));
 		expect(picked?.provider).toBe("amazon-bedrock");
 	});
 });

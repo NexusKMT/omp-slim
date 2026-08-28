@@ -2768,10 +2768,7 @@ export class AuthStorage {
 		if (this.#runtimeOverrides.has(provider)) return true;
 		if (this.#configOverrides.has(provider)) return true;
 		if (this.#getCredentialsForProvider(provider).length > 0) return true;
-		if (
-			(provider === "amazon-bedrock" || provider === "bedrock-mantle") &&
-			$env.AWS_BEARER_TOKEN_BEDROCK?.trim()
-		) {
+		if ((provider === "amazon-bedrock" || provider === "bedrock-mantle") && $env.AWS_BEARER_TOKEN_BEDROCK?.trim()) {
 			return true;
 		}
 		if (provider === "xai-oauth") {

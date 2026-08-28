@@ -47,7 +47,8 @@ function markExpectedBridgeShutdownError(error: unknown): error is Error {
 	if (!(error instanceof Error)) return false;
 	const expected =
 		error.name === "AbortError" ||
-		("code" in error && (error.code === "ERR_SOCKET_CLOSED" || error.code === "ECONNRESET" || error.code === "EPIPE"));
+		("code" in error &&
+			(error.code === "ERR_SOCKET_CLOSED" || error.code === "ECONNRESET" || error.code === "EPIPE"));
 	if (expected) postmortem.markExpectedCleanupError(error);
 	return expected;
 }
