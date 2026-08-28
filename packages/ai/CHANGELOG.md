@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed session auto-retry for empty Anthropic streams truncated before `message_stop` ([#10113](https://github.com/can1357/oh-my-pi/issues/10113)).
+
 ## [18.0.9] - 2026-08-28
 
 ### Fixed
