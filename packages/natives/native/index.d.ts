@@ -392,6 +392,8 @@ export declare class VcsGitRepo {
   logOnelines(count: number, signal?: unknown | undefined | null): Promise<Array<string>>
   /** Commits in a range. */
   revListRange(base: string, head: string, signal?: unknown | undefined | null): Promise<Array<string>>
+  /** Best common ancestor of two revisions. */
+  mergeBase(a: string, b: string, signal?: unknown | undefined | null): Promise<string | undefined | null>
   /** Commits touching a file. */
   revListTouching(rev: string, file: string, limit: number, signal?: unknown | undefined | null): Promise<Array<string>>
   /** Commit details. */
