@@ -39,7 +39,6 @@ import { SpeechEnhancer } from "../../tts/speech-enhancer";
 import { vocalizer } from "../../tts/vocalizer";
 import { canonicalizeMessage } from "../../utils/thinking-display";
 import { setTerminalTitleState } from "../../utils/title-generator";
-import { interruptHint } from "../shared";
 import { createAssistantMessageComponent } from "../utils/interactive-context-helpers";
 import {
 	assistantHasVisibleContent,
@@ -522,7 +521,7 @@ export class EventController {
 		const trimmed = intent.trim();
 		if (!trimmed || trimmed === this.#lastIntent) return;
 		this.#lastIntent = trimmed;
-		this.ctx.setWorkingMessage(`${trimmed}${interruptHint()}`);
+		this.ctx.setWorkingMessage(trimmed);
 	}
 
 	subscribeToAgent(): void {

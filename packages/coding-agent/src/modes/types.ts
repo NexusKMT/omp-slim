@@ -110,6 +110,8 @@ export interface InteractiveModeContext {
 	chatContainer: TranscriptContainer;
 	pendingMessagesContainer: Container;
 	statusContainer: Container;
+	/** Whether the status/working row rendered lines in the latest frame; the band composer's editor top gap collapses only then. */
+	readonly statusRowOccupied: boolean;
 	todoContainer: Container;
 	subagentContainer: Container;
 	btwContainer: Container;

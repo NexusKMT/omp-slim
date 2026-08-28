@@ -167,6 +167,7 @@ import { ChatBlock, type ChatBlockHost } from "./components/chat-block";
 import { CodexResetFireworksController } from "./components/codex-reset-fireworks";
 import { CustomEditor } from "./components/custom-editor";
 import { DynamicBorder } from "./components/dynamic-border";
+import { EditorTopGap } from "./components/editor-top-gap";
 import { ErrorBannerComponent } from "./components/error-banner";
 import type { EvalExecutionComponent } from "./components/eval-execution";
 import type { HookEditorComponent } from "./components/hook-editor";
@@ -213,15 +214,14 @@ import {
 } from "./session-observer-registry";
 import { createSessionTeardown, type SessionTeardown } from "./session-teardown";
 import { runProviderSetupWizard } from "./setup-wizard/lazy";
-import { interruptHint, sanitizeStatusText } from "./shared";
+import { sanitizeStatusText } from "./shared";
 import { invokeSkillCommandFromText, isKnownSkillCommand } from "./skill-command";
 import { clearMermaidCache } from "./theme/mermaid-cache";
-import { type ShimmerPalette, shimmerEnabled, shimmerSegments, shimmerText } from "./theme/shimmer";
+import { type ShimmerPalette, shimmerEnabled, shimmerText } from "./theme/shimmer";
 import type { Theme } from "./theme/theme";
 import {
 	getEditorTheme,
 	getMarkdownTheme,
-	getSymbolTheme,
 	onTerminalAppearanceChange,
 	onThemeChange,
 	setMarkdownMermaidRendering,
@@ -242,16 +242,19 @@ import type {
 import { UiHelpers } from "./utils/ui-helpers";
 
 const STILL_CLOSING_DELAY_MS = 3_000;
-
-const HINT_SHIMMER_PALETTE: ShimmerPalette = {
-	low: "dim",
-	mid: "muted",
-	high: "borderAccent",
-};
+const DEFAULT_WORKING_MESSAGE = "Working…";
 
 interface WorkingMessageAccent {
 	main: string;
 	dim: string;
+	/**
+	 * Interned shimmer palette for this accent so `compile()` inside
+	 * `shimmerText` sees a stable palette object between animation ticks.
+	 * A fresh palette literal every frame guaranteed a cache miss on the
+	 * Symbol-keyed compiled-ANSI slot and forced `resolveTierAnsi` to walk
+	 * every tier open/close for the ~30fps loader redraw (issue #4377).
+	 */
+	palette?: ShimmerPalette;
 }
 
 interface WorkingMessageAccentCacheKey {
@@ -260,40 +263,10 @@ interface WorkingMessageAccentCacheKey {
 	sessionAccentEnabled: boolean;
 }
 
-/**
- * Intern the shimmer palettes for each `WorkingMessageAccent` so `compile()`
- * inside `shimmerSegments` sees a stable palette object between animation
- * ticks. Allocating fresh palette literals every frame guaranteed a cache miss
- * on the Symbol-keyed compiled-ANSI slot and forced `resolveTierAnsi` to walk
- * every tier open/close for the ~30fps loader redraw (issue #4377).
- */
-const workingMessagePaletteCache = new WeakMap<WorkingMessageAccent, { main: ShimmerPalette; hint: ShimmerPalette }>();
-
-function workingMessagePalettes(accent: WorkingMessageAccent): { main: ShimmerPalette; hint: ShimmerPalette } {
-	let entry = workingMessagePaletteCache.get(accent);
-	if (!entry) {
-		entry = {
-			main: { low: "dim", mid: { ansi: accent.main }, high: { ansi: accent.main }, bold: true },
-			hint: { low: "dim", mid: { ansi: accent.dim }, high: { ansi: accent.dim } },
-		};
-		workingMessagePaletteCache.set(accent, entry);
-	}
-	return entry;
-}
-
 function renderWorkingMessage(message: string, accent?: WorkingMessageAccent): string {
-	const palettes = accent ? workingMessagePalettes(accent) : undefined;
-	const palette = palettes?.main;
-	const hint = interruptHint();
-	if (!message.endsWith(hint)) return shimmerText(message, theme, palette);
-	const header = message.slice(0, -hint.length);
-	return shimmerSegments(
-		[
-			{ text: header, palette },
-			{ text: hint, palette: palettes?.hint ?? HINT_SHIMMER_PALETTE },
-		],
-		theme,
-	);
+	if (!accent) return shimmerText(message, theme);
+	accent.palette ??= { low: "dim", mid: { ansi: accent.main }, high: { ansi: accent.main }, bold: true };
+	return shimmerText(message, theme, accent.palette);
 }
 
 const EDITOR_MAX_HEIGHT_MIN = 6;
@@ -458,6 +431,12 @@ class StatusHudContainer extends AnchoredLiveContainer {
 	}
 
 	override render(width: number): readonly string[] {
+		const lines = this.#renderLines(width);
+		this.mode.statusRowOccupied = lines.length > 0;
+		return lines;
+	}
+
+	#renderLines(width: number): readonly string[] {
 		const childLines = super.render(width);
 		if (!this.mode.isCompactTodoMode()) {
 			if (childLines.length === 0) {
@@ -590,6 +569,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	chatContainer: TranscriptContainer;
 	pendingMessagesContainer: Container;
 	statusContainer: Container;
+	/** Whether {@link statusContainer} rendered lines in the latest frame; the band composer's editor top gap collapses only then. */
+	statusRowOccupied = false;
 	todoContainer: Container;
 	subagentContainer: Container;
 	btwContainer: Container;
@@ -679,9 +660,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	#workingMessageAccentCacheKey?: WorkingMessageAccentCacheKey;
 	#workingMessageAccentCacheValue?: WorkingMessageAccent;
 	#workingMessageAccentCacheHasValue = false;
-	get #defaultWorkingMessage(): string {
-		return `Working…${interruptHint()}`;
-	}
 	/** Band composer: the status band hides `session_name`, so the title docks
 	 * onto the working row instead — right-aligned, dim, italic. */
 	#workingTitleTrailer(): string | undefined {
@@ -988,7 +966,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			logger.warn("History storage unavailable", { error: String(error) });
 		}
 		this.hookWidgetContainerAbove = new Container();
-		this.hookWidgetContainerAbove.addChild(new Spacer(1));
+		this.hookWidgetContainerAbove.addChild(new EditorTopGap(() => this.statusRowOccupied));
 		this.hookWidgetContainerBelow = new Container();
 		this.attachmentChipsContainer = new Container();
 		this.attachmentChipsContainer.addChild(
@@ -1227,7 +1205,8 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.deferredCommandContainer,
 			// Working loader / transient status sits below the sticky todo + subagent
 			// HUDs, just above the editor's hook-widget top margin — so it reads next to
-			// the prompt while keeping the one-line gap above the editor.
+			// the prompt while keeping the one-line gap above the editor (the band
+			// composer collapses that gap so its status band sits flush).
 			this.statusContainer,
 			this.attachmentChipsContainer,
 			this.hookWidgetContainerAbove,
@@ -2180,9 +2159,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		} else {
 			const accentEnabled = !isSettingsInitialized() || settings.get("statusLine.sessionAccent") !== false;
 			const sessionName = accentEnabled ? this.sessionManager.getSessionName() : undefined;
-			const hex = sessionName
-				? getSessionAccentHex(sessionName, theme.getMajorThemeColorHexes(), theme.accentSurfaceLuminance)
-				: undefined;
+			const hex = sessionName ? getSessionAccentHex(sessionName, theme.sessionAccentInputs) : undefined;
 			const ansi = getSessionAccentAnsi(hex);
 			if (ansi) {
 				this.editor.borderColor = (str: string) => `${ansi}${str}\x1b[39m`;
@@ -5131,7 +5108,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (!key.sessionAccentEnabled || !key.sessionName) {
 			return this.#cacheWorkingMessageAccent(key, undefined);
 		}
-		const hex = getSessionAccentHex(key.sessionName, theme.getMajorThemeColorHexes(), key.accentSurfaceLuminance);
+		const hex = getSessionAccentHex(key.sessionName, theme.sessionAccentInputs);
 		const main = getSessionAccentAnsi(hex);
 		const dim = getSessionAccentAnsi(adjustHsv(hex, { s: 0.55, v: 0.65 }));
 		return this.#cacheWorkingMessageAccent(key, main && dim ? { main, dim } : undefined);
@@ -5153,11 +5130,13 @@ export class InteractiveMode implements InteractiveModeContext {
 				this.ui,
 				spinner => {
 					const accent = this.#getWorkingMessageAccent();
-					return accent ? `${accent.main}${spinner}\x1b[39m` : theme.fg("accent", spinner);
+					return accent ? `${accent.dim}${spinner}\x1b[39m` : theme.fg("muted", spinner);
 				},
 				messageColorFn,
-				this.#defaultWorkingMessage,
-				getSymbolTheme().spinnerFrames,
+				DEFAULT_WORKING_MESSAGE,
+				// The brand spinner lives in the status line while working; this row
+				// leads with the interrupt affordance instead of a second spinner.
+				[theme.icon.esc],
 			);
 			this.loadingAnimation.setTrailer(() => this.#workingTitleTrailer());
 			this.statusContainer.addChild(this.loadingAnimation);
@@ -5183,7 +5162,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (message === undefined) {
 			this.#pendingWorkingMessage = undefined;
 			if (this.loadingAnimation) {
-				this.loadingAnimation.setMessage(this.#defaultWorkingMessage);
+				this.loadingAnimation.setMessage(DEFAULT_WORKING_MESSAGE);
 			}
 			return;
 		}

@@ -95,6 +95,7 @@ export type SymbolKey =
 	| "icon.advisor"
 	| "icon.time"
 	| "icon.omp"
+	| "icon.esc"
 	| "icon.ghost"
 	| "icon.agents"
 	| "icon.job"
@@ -441,7 +442,8 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"icon.subscription": "(sub)",
 	"icon.advisor": "👁",
 	"icon.time": "⏱",
-	"icon.omp": "\u{f0d57}",
+	"icon.omp": "π",
+	"icon.esc": "⎋",
 	"icon.ghost": "👻",
 	"icon.agents": "👥",
 	"icon.job": "⚙",
@@ -783,6 +785,8 @@ const NERD_SYMBOLS: SymbolMap = {
 	"icon.time": "\uf017",
 	// pick: 󰵗 (nf-md-pi) | alt:  π ∏ ∑
 	"icon.omp": "\u{f0d57}",
+	// pick: 󱊷 (nf-md-keyboard_esc) | alt: ⎋
+	"icon.esc": "\u{f12b7}",
 	// pick: 󰊠 (nf-md-ghost) | alt: 👻
 	"icon.ghost": "\u{f02a0}",
 	// pick:  | alt: 
@@ -1129,7 +1133,8 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"icon.subscription": "(sub)",
 	"icon.advisor": "(adv)",
 	"icon.time": "t:",
-	"icon.omp": "\u{f0d57}",
+	"icon.omp": "pi",
+	"icon.esc": "esc",
 	"icon.ghost": "@",
 	"icon.agents": "AG",
 	"icon.job": "bg",
