@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { toNumber } from "@oh-my-pi/pi-catalog/utils";
+import { USER_AGENT } from "@oh-my-pi/pi-utils";
 import type {
 	CredentialRankingContext,
 	CredentialRankingStrategy,
@@ -417,7 +418,7 @@ export const openaiCodexUsageProvider: UsageProvider = {
 
 		const headers: Record<string, string> = {
 			Authorization: `Bearer ${accessToken}`,
-			"User-Agent": "OpenCode-Status-Plugin/1.0",
+			"User-Agent": USER_AGENT,
 		};
 		if (accountId) {
 			headers["ChatGPT-Account-Id"] = accountId;
@@ -610,8 +611,11 @@ export const codexRankingStrategy: CredentialRankingStrategy = {
 		return { primary: findLimit("primary"), secondary: findLimit("secondary") };
 	},
 	windowDefaults: { primaryMs: 60 * 60 * 1000, secondaryMs: 7 * 24 * 60 * 60 * 1000 },
-	hasPriorityBoost(primary) {
-		if (!primary) return false;
+	hasPriorityBoost(primary, primaryUncapped = false, context) {
+		// Chat plans can omit an uncapped primary window while retaining their
+		// weekly window. Spark always has a capped primary meter, so a missing
+		// Spark primary is incomplete rather than uncapped.
+		if (!primary) return primaryUncapped && !isCodexSparkRequest(context);
 		const windowId = primary.scope.windowId?.toLowerCase();
 		const durationMs = primary.window?.durationMs;
 		const isFiveHourWindow =
