@@ -11,6 +11,7 @@
 ### Fixed
 
 - Fixed OpenCode Go and Zen GLM-5.3 Flash models sending the rejected `reasoning_effort: "xhigh"` top tier; they now expose the mandatory wire-exact `low`/`high`/`max` ladder ([#9960](https://github.com/can1357/oh-my-pi/issues/9960)).
+- Fixed Cloudflare AI Gateway credential handling by adding a shared parser for stored token and routing metadata.
 - Fixed the thinking control mode for OpenAI models served over Bedrock Converse (`global.openai.gpt-5.6-luna`, `-sol`, `-terra`), which are now classified as `effort` rather than `budget` so requests use OpenAI's reasoning schema.
 - Fixed LiteLLM discovery leaking a colliding bundled model's provider-specific transport onto custom endpoints: a discovered alias (e.g. `kimi-k3`) matching a bundled Fireworks model no longer inherits that model's wire-id transform, which had caused requests to POST a model id the endpoint never advertised and return HTTP 400 ([#9938](https://github.com/can1357/oh-my-pi/issues/9938)).
 

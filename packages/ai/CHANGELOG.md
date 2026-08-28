@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Fixed Cloudflare AI Gateway onboarding and routing: `/login` now stores the account and gateway IDs with the token, materializes provider endpoints, and keeps gateway credentials out of upstream OpenAI authorization headers.
 - Fixed Amazon Bedrock requests to OpenAI-schema models (the `gpt-5.x` SKUs) failing with HTTP 400 `unknown_parameter: 'thinking'` when reasoning was enabled, by sending `reasoning.effort` instead of Anthropic's `thinking` budget block for models the catalog marks as effort-controlled.
 - Fixed Cursor replay rejecting sessions with orphaned tool results while preserving their output as assistant context.
 
