@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as Module from "node:module";
 import * as os from "node:os";
@@ -307,6 +308,31 @@ describe("ensureRuntimeInstalled install lock", () => {
 		const waited = Date.now() - start;
 
 		expect(waited).toBeGreaterThanOrEqual((attempts - 1) * sleepMs);
+		expect(await Bun.file(path.join(runtimeDir, "node_modules", probe, "package.json")).exists()).toBe(true);
+		await expect(fs.stat(`${runtimeDir}.lock`)).rejects.toThrow();
+	}, 15_000);
+
+	test("reserves the legacy namespace before the new install starts", async () => {
+		const { spec, probe } = await makeFileDependency();
+		const runtimeDir = await makeRuntimeDir();
+		let observedDownload = false;
+
+		await ensureRuntimeInstalled({
+			runtimeDir,
+			install: { dependencies: { [probe]: spec } },
+			probePackage: probe,
+			lockAttempts: 8,
+			lockSleepMs: 50,
+			onPhase: phase => {
+				if (phase !== "download") return;
+				observedDownload = true;
+				// A legacy process racing in after the handoff must lose its
+				// atomic mkdir before the new process mutates node_modules.
+				expect(() => fsSync.mkdirSync(`${runtimeDir}.lock`)).toThrow();
+			},
+		});
+
+		expect(observedDownload).toBe(true);
 		expect(await Bun.file(path.join(runtimeDir, "node_modules", probe, "package.json")).exists()).toBe(true);
 		await expect(fs.stat(`${runtimeDir}.lock`)).rejects.toThrow();
 	}, 15_000);

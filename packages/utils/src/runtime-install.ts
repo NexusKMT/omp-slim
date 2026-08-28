@@ -3,6 +3,7 @@ import * as fsp from "node:fs/promises";
 import * as Module from "node:module";
 import * as path from "node:path";
 import { withFileLock } from "./file-lock";
+import { isEexist, isEnoent } from "./fs-error";
 
 /**
  * On-demand runtime dependency support for native-heavy optional packages
@@ -304,35 +305,61 @@ export interface EnsureRuntimeInstalledOptions {
 	lockSleepMs?: number;
 }
 
-/** No runtime install plausibly runs this long, so an older legacy lock directory is a crash orphan. */
+/** No runtime install plausibly runs this long, so older legacy lock directories are crash orphans. */
 const STALE_LEGACY_LOCK_MS = 10 * 60_000;
 
 /**
- * Reclaim the pre-crash-safe `${runtimeDir}.lock` mkdir lock during migration.
+ * Run `fn` while reserving the pre-crash-safe `${runtimeDir}.lock` namespace.
  *
  * Versions through 18.0.10 serialized installs with a bare lock *directory*
  * that only its creator removed; an installer killed outside that window
  * (SIGKILL/OOM/Ctrl-C) left it unreleasable, wedging every later install for
- * the full wait envelope (issue #10120). The OS-backed lock now lives at a
- * distinct path, but during an in-flight upgrade a legacy process may still
- * legitimately own this directory. Wait for such an owner to finish — it
- * removes the directory on completion — before force-reclaiming, so old and new
- * installers do not `bun install` concurrently into the same tree. A directory
- * older than any plausible install ({@link STALE_LEGACY_LOCK_MS}) is a certain
- * crash orphan and is reclaimed at once. Ownership is otherwise never inferred
- * from this directory.
+ * the full wait envelope (issue #10120). During an in-flight upgrade a legacy
+ * process may still legitimately own this directory, so wait for it to finish
+ * before force-reclaiming. After the directory is released or reclaimed,
+ * atomically create and retain it through `fn`: an older process cannot acquire
+ * the legacy namespace between the handoff check and the new install.
  */
-async function reclaimLegacyLockDir(runtimeDir: string, attempts: number, sleepMs: number): Promise<void> {
+async function withLegacyInstallLock<T>(
+	runtimeDir: string,
+	attempts: number,
+	sleepMs: number,
+	fn: () => Promise<T>,
+): Promise<T> {
 	const legacy = `${runtimeDir}.lock`;
-	for (let attempt = 0; attempt < attempts; attempt++) {
-		const stat = await fsp.stat(legacy).catch(() => null);
-		// Gone (released by a live owner) or never the legacy directory shape.
-		if (!stat?.isDirectory()) return;
-		// Too old for any live install; treat as a crash orphan and reclaim now.
-		if (Date.now() - stat.mtimeMs > STALE_LEGACY_LOCK_MS) break;
-		await Bun.sleep(sleepMs);
+	for (;;) {
+		let reserved = false;
+		for (let attempt = 0; attempt < attempts; attempt++) {
+			try {
+				await fsp.mkdir(legacy);
+				reserved = true;
+				break;
+			} catch (error) {
+				if (!isEexist(error)) throw error;
+			}
+
+			let stat: fs.Stats;
+			try {
+				stat = await fsp.stat(legacy);
+			} catch (error) {
+				if (isEnoent(error)) continue;
+				throw error;
+			}
+			// A non-directory already reserves the namespace against old mkdir lockers.
+			if (!stat.isDirectory()) return fn();
+			if (Date.now() - stat.mtimeMs > STALE_LEGACY_LOCK_MS) break;
+			if (attempt + 1 < attempts) await Bun.sleep(sleepMs);
+		}
+
+		if (reserved) {
+			try {
+				return await fn();
+			} finally {
+				await fsp.rm(legacy, { recursive: true, force: true });
+			}
+		}
+		await fsp.rm(legacy, { recursive: true, force: true });
 	}
-	await fsp.rm(legacy, { recursive: true, force: true }).catch(() => {});
 }
 
 export async function writeRuntimeManifest(runtimeDir: string, install: RuntimeInstallSpec): Promise<void> {
@@ -380,8 +407,8 @@ async function runRuntimeInstall(runtimeDir: string): Promise<void> {
  * `${runtimeDir}.install.lock`, which the kernel releases on process death, so
  * a crashed installer cannot wedge later attempts (issue #10120). The path is
  * deliberately distinct from the legacy `${runtimeDir}.lock` mkdir directory;
- * see {@link reclaimLegacyLockDir} for how an in-flight legacy owner is handed
- * off during an upgrade rather than deleted out from under it.
+ * {@link withLegacyInstallLock} atomically reserves that namespace during the
+ * new install so older processes cannot cross the migration boundary.
  */
 export async function ensureRuntimeInstalled(options: EnsureRuntimeInstalledOptions): Promise<string> {
 	const { runtimeDir, install, onPhase, lockAttempts = 240, lockSleepMs = 250 } = options;
@@ -400,17 +427,17 @@ export async function ensureRuntimeInstalled(options: EnsureRuntimeInstalledOpti
 	// withFileLock does not create parent directories; the runtime cache dir may
 	// not exist yet on the very first install.
 	await fsp.mkdir(path.dirname(runtimeDir), { recursive: true });
-	await reclaimLegacyLockDir(runtimeDir, lockAttempts, lockSleepMs);
 	return withFileLock(
 		`${runtimeDir}.install`,
-		async () => {
-			if (await probeManifest.exists()) return runtimeDir;
-			await writeRuntimeManifest(runtimeDir, install);
-			onPhase?.("download");
-			await runRuntimeInstall(runtimeDir);
-			onPhase?.("done");
-			return runtimeDir;
-		},
+		() =>
+			withLegacyInstallLock(runtimeDir, lockAttempts, lockSleepMs, async () => {
+				if (await probeManifest.exists()) return runtimeDir;
+				await writeRuntimeManifest(runtimeDir, install);
+				onPhase?.("download");
+				await runRuntimeInstall(runtimeDir);
+				onPhase?.("done");
+				return runtimeDir;
+			}),
 		{ retries: lockAttempts, retryDelayMs: lockSleepMs },
 	);
 }
