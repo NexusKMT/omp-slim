@@ -419,5 +419,9 @@ export interface CredentialRankingStrategy {
 	 * ticker start). `primaryUncapped` is true only when the fetched report has
 	 * an applicable secondary window but no applicable primary window.
 	 */
-	hasPriorityBoost?(primary: UsageLimit | undefined, primaryUncapped?: boolean): boolean;
+	hasPriorityBoost?(
+		primary: UsageLimit | undefined,
+		primaryUncapped?: boolean,
+		context?: CredentialRankingContext,
+	): boolean;
 }

@@ -2178,7 +2178,7 @@ export class AuthStorage {
 				blocked,
 				blockedUntil,
 				usageMeasured,
-				hasPriorityBoost: strategy.hasPriorityBoost?.(primary, primaryUncapped) ?? false,
+				hasPriorityBoost: strategy.hasPriorityBoost?.(primary, primaryUncapped, args.rankingContext) ?? false,
 				planPriority: 0,
 				secondaryUsed: this.#normalizeUsageFraction(secondary),
 				secondaryRequiredDrain: this.#computeWindowRequiredDrain(
@@ -4782,7 +4782,7 @@ export class AuthStorage {
 				blocked,
 				blockedUntil,
 				usageMeasured,
-				hasPriorityBoost: strategy.hasPriorityBoost?.(primary, primaryUncapped) ?? false,
+				hasPriorityBoost: strategy.hasPriorityBoost?.(primary, primaryUncapped, args.rankingContext) ?? false,
 				planPriority: getOpenAICodexPlanPriority(usage, args.planRequirement),
 				secondaryUsed: this.#normalizeUsageFraction(secondary),
 				secondaryRequiredDrain: this.#computeWindowRequiredDrain(
