@@ -74,6 +74,9 @@
 - Fixed the git TUI sidebar jumping back to the top of the file list after staging or unstaging a file; selection now stays on the nearest remaining row
 - Fixed the `aarch64-linux` `nix build` output segfaulting in the dynamic loader before startup by repointing the stale `DT_VERDEF` that `patchelf` leaves behind when it grows `.dynamic`, and surfaced smoke-test signal deaths in the build log instead of masking them ([#9881](https://github.com/can1357/oh-my-pi/issues/9881)).
 - Added custom RPC launcher builders so embedded clients can transport omp RPC through SSH and remote process managers.
+### Fixed
+
+- Kept embedded context usage visible when long session names or paths fill the status line ([#9946](https://github.com/can1357/oh-my-pi/pull/9946) by [@641-git641](https://github.com/641-git641)).
 
 ## [18.0.7] - 2026-08-26
 
