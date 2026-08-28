@@ -1,15 +1,15 @@
 import { hexToOklch, oklchCusp, oklchToHex, relativeLuminance } from "@oh-my-pi/pi-utils";
 
 /**
- * Derive a stable hue (0-359) from a string using djb2 hash.
+ * Derive a stable 32-bit hash from a string using djb2.
  */
-function nameToHue(name: string): number {
+function nameToHash(name: string): number {
 	let hash = 5381;
 	for (let i = 0; i < name.length; i++) {
 		hash = ((hash << 5) + hash) ^ name.charCodeAt(i);
 		hash = hash >>> 0; // keep 32-bit unsigned
 	}
-	return hash % 360;
+	return hash;
 }
 
 /**
@@ -111,22 +111,20 @@ function arcToHue(intervals: readonly HueInterval[], pos: number): number {
 }
 
 /**
- * Dark themes draw hues from the warm→green arc, restricted to hues whose
+ * Dark themes draw hues from the full wheel, restricted to hues whose
  * sRGB gamut cusp is reachable under {@link DARK_MAX_LIGHTNESS}. A hue whose
  * vividness peak needs more lightness than the cap can only render as a
  * darkened version of itself, and yellow (cusp L ≈ 0.97) is the one hue
  * that shifts category when darkened — to olive/mustard — so the derivation
- * excludes the yellow/chartreuse core (≈94–138°) for every theme. The arc
- * starts at red (25°) and stops before cyan (180°), which is common
- * theme-semantic territory and the light-theme band.
+ * excludes the yellow/chartreuse core (≈94–138°) and the over-light cyan
+ * peak (≈158–200°) for every theme. Collisions with theme-semantic hues are
+ * handled per-theme by {@link findSafeHue}, not by narrowing the arc.
  */
-const DARK_ARC_START = 25;
-const DARK_ARC_END = 180;
 const DARK_HUE_INTERVALS: readonly HueInterval[] = (() => {
 	const intervals: Array<[number, number]> = [];
 	let start = -1;
-	for (let h = DARK_ARC_START; h <= DARK_ARC_END; h++) {
-		if (h < DARK_ARC_END && oklchCusp(h).l <= DARK_MAX_LIGHTNESS) {
+	for (let h = 0; h <= 360; h++) {
+		if (h < 360 && oklchCusp(h).l <= DARK_MAX_LIGHTNESS) {
 			if (start < 0) start = h;
 		} else if (start >= 0) {
 			intervals.push([start, h - 1]);
@@ -157,9 +155,9 @@ export interface SessionAccentTheme {
  * Derive a stable CSS hex accent color from a session name and the active theme.
  *
  * The session name hash picks only the **hue**, from a dark/light-specific
- * hue arc so the accent feels natural for the theme type: warm→green on
- * dark, restricted to hues whose vividness peak is reachable under the
- * dark lightness cap (see {@link DARK_HUE_INTERVALS}); cool on light. **Lightness and chroma are carried over from the theme's own accent
+ * hue arc so the accent feels natural for the theme type: the full wheel on
+ * dark minus hues whose vividness peak is unreachable under the dark
+ * lightness cap (see {@link DARK_HUE_INTERVALS}); cool on light. **Lightness and chroma are carried over from the theme's own accent
  * color**, normalized to the sRGB gamut cusp of each hue: the lightness at
  * which a hue peaks in chroma varies wildly (yellow ≈ 0.97, blue ≈ 0.45), so
  * absolute OKLCH lightness cannot transfer between hues — a pink accent's
@@ -186,7 +184,7 @@ export function getSessionAccentHex(name: string, theme: SessionAccentTheme): st
 	const intervals = isDark ? DARK_HUE_INTERVALS : LIGHT_HUE_INTERVALS;
 
 	// 2. Session name picks a position along the admissible arc
-	const pos = nameToHue(name) % arcLength(intervals);
+	const pos = nameToHash(name) % arcLength(intervals);
 
 	// 3. Shift away if too close to any theme color — stays within the arc
 	const themeHues = theme.colorHexes.map(hexToHue).filter((h): h is number => h !== undefined);

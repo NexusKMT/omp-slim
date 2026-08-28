@@ -47,15 +47,24 @@ describe("getSessionAccentHex", () => {
 		expect(getSessionAccentHex("x", onLight(0.7))).toBe(getSessionAccentHex("x", onLight(0.7)));
 	});
 
-	it("uses warm→green hues with a reachable vividness peak on dark themes", () => {
+	it("uses full-wheel hues with a reachable vividness peak on dark themes", () => {
 		// A hue whose gamut cusp needs more lightness than the dark cap (0.88)
 		// can only render as a darkened version of itself; the arc must skip those.
 		for (const name of names) {
 			const h = hexToOklch(getSessionAccentHex(name, onDark())).h;
-			expect(h).toBeGreaterThanOrEqual(25 - HUE_TOLERANCE);
-			expect(h).toBeLessThanOrEqual(157 + HUE_TOLERANCE);
 			expect(oklchCusp(h).l).toBeLessThanOrEqual(0.88 + 0.01);
 		}
+	});
+
+	it("does not collapse into the warm band on dark themes", () => {
+		// Regression: a warm-dominated arc (25-93 plus a green sliver) made
+		// ~80% of session accents render as orange. Cool hues must carry a
+		// substantial share of names.
+		const warm = names.filter(name => {
+			const h = hexToOklch(getSessionAccentHex(name, onDark())).h;
+			return h < 94 || h > 350;
+		}).length;
+		expect(warm / names.length).toBeLessThan(0.5);
 	});
 
 	it("uses cool OKLCH hues (195-330) on light themes", () => {
@@ -147,7 +156,7 @@ describe("getSessionAccentHex with real Theme", () => {
 		}
 	});
 
-	it("stays in the warm band and avoids theme hues on dark-catppuccin", async () => {
+	it("stays in the admissible arc and avoids theme hues on dark-catppuccin", async () => {
 		const theme = await getThemeByName("dark-catppuccin");
 		if (!theme) return;
 		const inputs = theme.sessionAccentInputs;
@@ -155,8 +164,7 @@ describe("getSessionAccentHex with real Theme", () => {
 
 		for (const name of ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"]) {
 			const h = hexToOklch(getSessionAccentHex(name, inputs)).h;
-			expect(h).toBeGreaterThanOrEqual(25 - HUE_TOLERANCE);
-			expect(h).toBeLessThanOrEqual(157 + HUE_TOLERANCE);
+			expect(oklchCusp(h).l).toBeLessThanOrEqual(0.88 + 0.01);
 			for (const th of themeHues) {
 				const dist = Math.min(Math.abs(h - th), 360 - Math.abs(h - th));
 				expect(dist).toBeGreaterThanOrEqual(10 - HUE_TOLERANCE);
