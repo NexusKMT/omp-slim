@@ -39,8 +39,11 @@ const MAX_DATA_DEPTH = 5;
 const MAX_DATA_ENTRIES = 30;
 const FETCH_VERBOSE_ADVICE =
 	/\s*For more information, pass `verbose: true` in the second argument to fetch\(\)\.?\s*$/i;
+// Substring match, not exact: compound names (`client_secret`, `clientSecret`,
+// `private_key`, `signingSecret`, `access_token`) must classify as secrets so
+// their values never reach the exposed `data:` diagnostic.
 const SECRET_KEY =
-	/^(?:authorization|cookie|set-cookie|api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password)$/i;
+	/(?:authorization|bearer|cookie|secret|passw(?:or)?d|pwd|token|credential|api[-_]?key|private[-_]?key|access[-_]?key|signature)/i;
 const TRACE_KEYS = /^(?:trace[-_]?id|request[-_]?id|correlation[-_]?id|traceparent)$/i;
 
 export class MCPTransportError extends Error {
@@ -86,7 +89,10 @@ function sanitizeDiagnosticText(value: string, maxChars: number): string {
 		.replace(FETCH_VERBOSE_ADVICE, "")
 		.replace(/\b(Bearer|Basic)\s+[^\s,;]+/gi, "$1 [redacted]")
 		.replace(/([?&](?:access[-_]?token|api[-_]?key|key|token|secret|password)=)[^&#\s]+/gi, "$1[redacted]")
-		.replace(/((?:authorization|api[-_]?key|token|secret|password)\s*[:=]\s*)[^\s,;}]+/gi, "$1[redacted]")
+		.replace(
+			/((?:authorization|api[-_]?key|private[-_]?key|access[-_]?key|token|secret|passw(?:or)?d|pwd|credential)\s*[:=]\s*)[^\s,;}]+/gi,
+			"$1[redacted]",
+		)
 		.slice(0, maxChars)
 		.trim();
 }

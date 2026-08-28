@@ -373,6 +373,29 @@ describe("MCPTool.execute retry on connection error", () => {
 		expect(content.text.match(/^next: /gm)).toHaveLength(1);
 	});
 
+	it("redacts compound credential keys in JSON-RPC error data", () => {
+		const error = createMCPJsonRpcError("http", {
+			code: -32001,
+			message: "server echoed its OAuth config",
+			data: {
+				client_secret: "cs-leak",
+				clientSecret: "cs-camel-leak",
+				private_key: "pk-leak",
+				signingSecret: "sign-leak",
+				access_token: "at-leak",
+				apiKey: "ak-leak",
+				note: "safe-detail",
+			},
+		});
+		if (error.data === undefined) throw new Error("Expected serialized error data");
+
+		for (const leaked of ["cs-leak", "cs-camel-leak", "pk-leak", "sign-leak", "at-leak", "ak-leak"]) {
+			expect(error.data).not.toContain(leaked);
+		}
+		expect(error.data).toContain('"note":"safe-detail"');
+		expect(error.data).toContain("[redacted]");
+	});
+
 	it("does not retry when no reconnect callback", async () => {
 		const failTransport = mockTransport(async () => {
 			throw new Error("ECONNREFUSED");
