@@ -2273,12 +2273,13 @@ export class TUI extends Container {
 	 * on the first row, EL2 that row and ED0 from the second down touch the same
 	 * cells with no full-screen clear. `row` is clamped because a caller's
 	 * viewport top can predate a height shrink.
+	 * Every form leaves the cursor on the clamped row at column zero.
 	 */
 	#eraseBelowRow(row: number, height: number): string {
 		const top = Math.max(0, Math.min(row, Math.max(0, height - 1)));
 		if (top > 0) return `\x1b[${top + 1};1H\x1b[J`;
 		if (height <= 1) return `\x1b[1;1H${ERASE_LINE}`;
-		return `\x1b[1;1H${ERASE_LINE}\x1b[2;1H\x1b[J`;
+		return `\x1b[1;1H${ERASE_LINE}\x1b[2;1H\x1b[J\x1b[1;1H`;
 	}
 
 	/**
