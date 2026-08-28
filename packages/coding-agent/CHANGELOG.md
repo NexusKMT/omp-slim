@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Fixed git TUI sidebar wheel scrolling snapping back to the selected row after staging or collapsing entries; the list now follows the selection only when it actually changes.
 - Fixed `inspect_image` selecting a text-only vision/default role when an image-capable model was available on the active provider.
 - Improved unexpected-stop recovery for reasoning-only stalls by requiring the next concrete tool action instead of repeated analysis.
 

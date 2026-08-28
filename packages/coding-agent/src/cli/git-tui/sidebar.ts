@@ -242,6 +242,9 @@ export class Sidebar {
 	readonly #splitCache = new Map<string, { source: readonly ChangedFile[]; split: SplitFiles }>();
 	#selectedKey: string | undefined;
 	#scrollTop = 0;
+	/** One-shot: the next render scrolls the selected row into view. Set on
+	 * explicit selection changes so wheel scrolling can roam freely. */
+	#followSelection = false;
 	#visibleRows: (Row | undefined)[] = [];
 	#lastWidth = 40;
 	#lastHeight = 24;
@@ -293,6 +296,7 @@ export class Sidebar {
 		}
 		const target = this.selected;
 		if (target) this.#selectedKey = targetKey(target);
+		if (this.#selectedKey !== previousKey) this.#followSelection = true;
 		if (target?.kind === "file") return target.file;
 		const firstFile = this.#targets.find(candidate => candidate.kind === "file");
 		if (firstFile?.kind === "file" && (!target || target.kind === "section")) {
@@ -451,6 +455,7 @@ export class Sidebar {
 
 	#select(target: Target): void {
 		this.#selectedKey = targetKey(target);
+		this.#followSelection = true;
 		this.summary.focused = this.focused && target.kind === "summary";
 		this.description.focused = this.focused && target.kind === "description";
 		this.aiInput.focused = this.focused && target.kind === "stage-ai-input";
@@ -833,11 +838,16 @@ export class Sidebar {
 		}
 
 		const listHeight = Math.max(1, height - pinned.length);
-		// Keep the selected row inside the scrollable window.
-		const selectedRow = rows.findIndex(row => row.target && selectedKey === targetKey(row.target));
-		if (selectedRow >= 0) {
-			if (selectedRow < this.#scrollTop) this.#scrollTop = selectedRow;
-			if (selectedRow >= this.#scrollTop + listHeight) this.#scrollTop = selectedRow - listHeight + 1;
+		// Scroll the selected row into view only after an explicit selection
+		// change; unconditional following would snap wheel scrolling back to
+		// the selection on every render.
+		if (this.#followSelection) {
+			this.#followSelection = false;
+			const selectedRow = rows.findIndex(row => row.target && selectedKey === targetKey(row.target));
+			if (selectedRow >= 0) {
+				if (selectedRow < this.#scrollTop) this.#scrollTop = selectedRow;
+				if (selectedRow >= this.#scrollTop + listHeight) this.#scrollTop = selectedRow - listHeight + 1;
+			}
 		}
 		this.#scrollTop = Math.max(0, Math.min(this.#scrollTop, Math.max(0, rows.length - listHeight)));
 

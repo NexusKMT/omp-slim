@@ -237,6 +237,29 @@ describe("git tui sidebar staging", () => {
 		});
 	});
 
+	test("wheel scroll away from the selection survives idle re-renders", async () => {
+		await withDirtyRepo(async ({ sidebar }) => {
+			const strip = (line: string): string => line.replace(/\x1b\[[0-9;]*m/g, "");
+			// Select the last file so the follow-selection clamp scrolls the list down.
+			for (let i = 0; i < 5; i++) sidebar.handleInput("j");
+			expect(sidebar.selectedFile?.path).toBe("b/three.txt");
+			const scrolled = sidebar.render(40, 12);
+			expect(strip(scrolled[0] ?? "")).not.toContain("file change");
+
+			// Wheel back to the top; an idle re-render (2s refresh tick) must not
+			// snap the viewport back down to keep the selection visible.
+			sidebar.handleWheel(-4);
+			sidebar.render(40, 12);
+			const idle = sidebar.render(40, 12);
+			expect(strip(idle[0] ?? "")).toContain("file change");
+
+			// An explicit selection change still pulls the row into view.
+			sidebar.handleInput("j");
+			const followed = sidebar.render(40, 12);
+			expect(followed.some(line => strip(line).includes("Staged Files"))).toBe(true);
+		});
+	});
+
 	test("empty commit action generates before a populated action commits", async () => {
 		await withDirtyRepo(async ({ sidebar, actions }) => {
 			sidebar.handleInput("G");
