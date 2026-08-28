@@ -537,10 +537,9 @@ async function generateModels() {
 	// natively multimodal GLM coding SKU — its id carries no `v` marker, and
 	// base64 image blocks are accepted on `https://api.z.ai/api/anthropic` —
 	// so the seed declares image input directly instead of inheriting the
-	// text-only default. Cost is the currently billed launch price from
-	// https://docs.z.ai/guides/overview/pricing (50% off list 0.15/0.50/0.03
-	// through 2026-09-09); once upstream metadata carries the SKU its row wins
-	// dedup and supplies pricing.
+	// text-only default. Use the documented list price from
+	// https://docs.z.ai/guides/overview/pricing rather than the 50%-off launch
+	// promotion, which expires on 2026-09-09.
 	allModels.push({
 		id: "glm-5.3-flash",
 		name: "GLM-5.3-Flash",
@@ -549,7 +548,7 @@ async function generateModels() {
 		baseUrl: "https://api.z.ai/api/anthropic",
 		reasoning: true,
 		input: ["text", "image"],
-		cost: { input: 0.075, output: 0.25, cacheRead: 0.015, cacheWrite: 0 },
+		cost: { input: 0.15, output: 0.5, cacheRead: 0.03, cacheWrite: 0 },
 		contextWindow: 1_000_000,
 		maxTokens: 131_072,
 	} as ModelSpec<"anthropic-messages">);

@@ -7,6 +7,7 @@ interface BundledModel {
 	baseUrl: string;
 	contextWindow: number | null;
 	maxTokens: number | null;
+	cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
 	input?: readonly string[];
 	reasoning?: boolean;
 	thinking?: { efforts?: readonly string[]; defaultLevel?: string; requiresEffort?: boolean };
@@ -35,6 +36,9 @@ describe("zai bundled catalog", () => {
 		expect(model.baseUrl).toBe("https://api.z.ai/api/anthropic");
 		expect(model.contextWindow).toBe(1_000_000);
 		expect(model.maxTokens).toBe(131_072);
+		// Keep the permanent catalog on list price; the 50%-off launch
+		// promotion expires on 2026-09-09.
+		expect(model.cost).toEqual({ input: 0.15, output: 0.5, cacheRead: 0.03, cacheWrite: 0 });
 		// Natively multimodal: the id carries no `v` marker, but the Anthropic
 		// endpoint accepts image blocks.
 		expect(model.input).toEqual(["text", "image"]);
