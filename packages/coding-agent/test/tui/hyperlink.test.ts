@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import * as os from "node:os";
 import * as path from "node:path";
 import * as url from "node:url";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -361,5 +362,30 @@ describe("chat markdown links honor tui.hyperlinks", () => {
 		const output = renderChatLink();
 		expect(output).toContain("the docs");
 		expect(output.includes(`${OSC}8;`)).toBe(false);
+	});
+});
+
+describe("applyHyperlinkSetting on project-scoped reload", () => {
+	// A cross-project reload (`/move`, resume, rollback) fires SETTING_HOOKS via
+	// Settings.reloadForCwd → the tui.hyperlinks hook reapplies the policy, so
+	// renderers gating on TERMINAL.hyperlinks never keep the previous project's
+	// value while path links already track the new one (#10196 review).
+	it("reapplies the effective policy so the runtime flag tracks the reloaded setting", async () => {
+		const origHyperlinks = terminalCaps.TERMINAL.hyperlinks;
+		const dirA = path.join(os.tmpdir(), "omp-hyperlink-reload-a");
+		const dirB = path.join(os.tmpdir(), "omp-hyperlink-reload-b");
+		try {
+			terminalCaps.setTerminalHyperlinks(false);
+			settings.override("tui.hyperlinks", "always");
+			await settings.reloadForCwd(dirA);
+			expect(terminalCaps.TERMINAL.hyperlinks).toBe(true);
+
+			settings.override("tui.hyperlinks", "off");
+			await settings.reloadForCwd(dirB);
+			expect(terminalCaps.TERMINAL.hyperlinks).toBe(false);
+		} finally {
+			settings.clearOverride("tui.hyperlinks");
+			terminalCaps.setTerminalHyperlinks(origHyperlinks);
+		}
 	});
 });
