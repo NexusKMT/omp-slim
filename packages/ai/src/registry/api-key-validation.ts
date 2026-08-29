@@ -69,17 +69,6 @@ async function createApiKeyValidationError(provider: string, response: Response)
 }
 
 /**
- * Whether an OpenAI-compatible error body reports that the request was
- * authenticated but the model was denied. Providers such as Qianfan return
- * `401 invalid_model` when the key has no access to the validation model —
- * the key itself is valid, so it must not block login.
- */
-async function isAuthenticatedModelDenied(response: Response): Promise<boolean> {
-	if (response.status !== 401) return false;
-	return (await readErrorEnvelope(response)).code === "invalid_model";
-}
-
-/**
  * Validate an API key against an OpenAI-compatible chat completions endpoint.
  *
  * Performs a minimal request to verify credentials and endpoint access.
@@ -108,11 +97,15 @@ export async function validateOpenAICompatibleApiKey(options: OpenAICompatibleVa
 		return;
 	}
 
-	if (options.tolerateModelDenied && (await isAuthenticatedModelDenied(response))) {
+	const { details, code } = await readErrorEnvelope(response);
+	if (options.tolerateModelDenied && response.status === 401 && code === "invalid_model") {
 		return;
 	}
 
-	throw await createApiKeyValidationError(options.provider, response);
+	const message = details
+		? `${options.provider} API key validation failed (${response.status}): ${details}`
+		: `${options.provider} API key validation failed (${response.status})`;
+	throw new ProviderHttpError(message, response.status, { headers: response.headers, code });
 }
 
 /**
