@@ -4079,10 +4079,19 @@ export function syntheticModelManagerOptions(
 							name: toModelName(entry.name, reference?.name ?? defaults.name),
 							reasoning,
 							...(thinking ? { thinking } : {}),
+							// Advertised `input_modalities` are authoritative, mirroring the
+							// effort vocabulary above: a wire that names its modalities (even
+							// text-only) must not regrow `image` from the bundled reference.
+							// Only when the wire omits them do `supports_vision` and the
+							// reference get a vote.
 							input:
-								modalities.includes("image") || entry.supports_vision === true || referenceSupportsImage
-									? ["text", "image"]
-									: ["text"],
+								modalities.length > 0
+									? modalities.includes("image")
+										? ["text", "image"]
+										: ["text"]
+									: entry.supports_vision === true || referenceSupportsImage
+										? ["text", "image"]
+										: ["text"],
 							// A present `supported_features` list (even empty) is the route's
 							// whole advertised surface: no `tools` entry means no tool
 							// support. The reference still wins when it already vouched for
