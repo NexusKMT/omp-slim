@@ -350,7 +350,6 @@ export function rfc9728ProtectedResourceMetadataUrl(serverUrl: string | undefine
 	try {
 		const parsed = new URL(serverUrl);
 		const path = parsed.pathname.replace(/\/+$/, "");
-		if (!path) return undefined;
 		return `${parsed.origin}/.well-known/oauth-protected-resource${path}`;
 	} catch {
 		return undefined;

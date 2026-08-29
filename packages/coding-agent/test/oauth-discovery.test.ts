@@ -533,12 +533,13 @@ describe("RFC 9728 path-inserted protected resource", () => {
 	const mcpUrl = "https://mcp.gateway.example/platform/v1/d/tenant.example/prod/service";
 	const pathfulPr =
 		"https://mcp.gateway.example/.well-known/oauth-protected-resource/platform/v1/d/tenant.example/prod/service";
+	const originRootPr = "https://mcp.gateway.example/.well-known/oauth-protected-resource";
 	const originAs = "https://mcp.gateway.example/.well-known/oauth-authorization-server";
 	const tenantOidc = "https://tenant.example/.well-known/openid-configuration";
 
 	it("builds the path-inserted protected-resource URL between origin and MCP path", () => {
 		expect(rfc9728ProtectedResourceMetadataUrl(mcpUrl)).toBe(pathfulPr);
-		expect(rfc9728ProtectedResourceMetadataUrl("https://mcp.gateway.example")).toBeUndefined();
+		expect(rfc9728ProtectedResourceMetadataUrl("https://mcp.gateway.example")).toBe(originRootPr);
 		expect(rfc9728ProtectedResourceMetadataUrl(undefined)).toBeUndefined();
 	});
 
@@ -548,6 +549,7 @@ describe("RFC 9728 path-inserted protected resource", () => {
 		expect(auth.requiresAuth).toBe(true);
 		expect(auth.authType).toBe("oauth");
 		expect(auth.resourceMetadataUrl).toBe(pathfulPr);
+		expect(analyzeAuthError(error, "https://mcp.gateway.example").resourceMetadataUrl).toBe(originRootPr);
 	});
 
 	it("does not classify a JWT bearer 401 as an API key", () => {
