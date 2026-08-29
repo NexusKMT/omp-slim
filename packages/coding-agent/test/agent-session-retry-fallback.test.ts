@@ -26,7 +26,10 @@ import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensi
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import type { ServingModel } from "@oh-my-pi/pi-coding-agent/session/retry-fallback-chains";
+import {
+	type ServingModel,
+	validateRetryFallbackChains,
+} from "@oh-my-pi/pi-coding-agent/session/retry-fallback-chains";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -5257,6 +5260,117 @@ describe("AgentSession retry fallback", () => {
 		expect(session.configWarnings).not.toContain(
 			"Fallback chain for role 'default' references unknown model: ollama-cloud/deepseek-v4-pro",
 		);
+	});
+
+	it("suppresses unknown-model warnings for a config-declared discovery provider with a cold cache", async () => {
+		const primaryModel = getBundledModel("openai", "gpt-4o-mini");
+		if (!primaryModel) {
+			throw new Error("Expected bundled OpenAI test model to exist");
+		}
+		const modelsConfigPath = path.join(tempDir.path(), "cold-discovery-models.json");
+		await Bun.write(
+			modelsConfigPath,
+			JSON.stringify({
+				providers: {
+					litellm: {
+						baseUrl: "https://litellm.example.net/v1",
+						api: "openai-completions",
+						discovery: { type: "litellm" },
+					},
+				},
+			}),
+		);
+		// Cold cache: no discovery row exists, so the provider contributes no
+		// models and its discovery state is `idle` (pending) at construction —
+		// the exact state that made valid selectors look unknown (#10048).
+		const coldRegistry = new ModelRegistry(authStorage, modelsConfigPath);
+		expect(coldRegistry.isProviderDiscoveryPending("litellm")).toBe(true);
+		expect(coldRegistry.find("litellm", "Qwen3.8-27B")).toBeUndefined();
+
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.fallbackChains": {
+				"litellm/Qwen3.8-27B": ["litellm/Qwen3.8-27B-hetzner"],
+			},
+		});
+		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
+		const agent = new Agent({
+			getApiKey: model => `${model.provider}-test-key`,
+			initialState: { model: primaryModel, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: () => {
+				throw new Error("Not exercised");
+			},
+		});
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry: coldRegistry,
+		});
+		await session.waitForIdle();
+
+		expect(session.configWarnings).not.toContain(
+			"retry.fallbackChains key references unknown model: litellm/Qwen3.8-27B",
+		);
+		expect(session.configWarnings).not.toContain(
+			"Fallback chain for model 'litellm/Qwen3.8-27B' references unknown model: litellm/Qwen3.8-27B-hetzner",
+		);
+	});
+
+	it("defers fallback warnings while a selector's provider discovery is pending, then surfaces them once settled", () => {
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.fallbackChains": {
+				"litellm/Qwen3.8-27B": ["litellm/Qwen3.8-27B-hetzner"],
+			},
+		});
+
+		const pendingWarnings: string[] = [];
+		validateRetryFallbackChains(settings, sharedRegistry, message => pendingWarnings.push(message), {
+			isDiscoveryPending: provider => provider === "litellm",
+		});
+		expect(pendingWarnings).toEqual([]);
+
+		const settledWarnings: string[] = [];
+		validateRetryFallbackChains(settings, sharedRegistry, message => settledWarnings.push(message));
+		expect(settledWarnings).toEqual([
+			"retry.fallbackChains key references unknown model: litellm/Qwen3.8-27B",
+			"Fallback chain for model 'litellm/Qwen3.8-27B' references unknown model: litellm/Qwen3.8-27B-hetzner",
+		]);
+	});
+
+	it("resolves awaitInitialBackgroundRefresh for a refresh started after the waiter is armed", async () => {
+		const modelsConfigPath = path.join(tempDir.path(), "late-refresh-models.json");
+		await Bun.write(
+			modelsConfigPath,
+			JSON.stringify({
+				providers: {
+					litellm: {
+						baseUrl: "https://litellm.example.net/v1",
+						api: "openai-completions",
+						discovery: { type: "litellm" },
+					},
+				},
+			}),
+		);
+		const registry = new ModelRegistry(authStorage, modelsConfigPath);
+		// The CLI starts background discovery only after the session — and thus
+		// this awaiter — is constructed, so a waiter armed before any refresh must
+		// still resolve when the later refresh settles (#10048).
+		let settled = false;
+		const waiter = registry.awaitInitialBackgroundRefresh().then(() => {
+			settled = true;
+		});
+		await scheduler.wait(10);
+		expect(settled).toBe(false);
+
+		registry.refreshInBackground("offline");
+		await waiter;
+		expect(settled).toBe(true);
+
+		// Once settled, a fresh waiter resolves immediately.
+		await registry.awaitInitialBackgroundRefresh();
 	});
 
 	it("warns on unknown or malformed model-selector chain keys at startup", () => {

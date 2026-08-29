@@ -289,6 +289,14 @@ export class TurnRecovery {
 	#bootstrapCache:
 		| { model: Model; level: ThinkingLevel | undefined; routed: boolean; value: ServingModel }
 		| undefined;
+	/**
+	 * Fallback-chain warnings pushed to `configWarnings` by startup validation,
+	 * tracked so a post-discovery re-check can retract the ones discovery
+	 * resolved (#10048).
+	 */
+	#fallbackChainWarnings = new Set<string>();
+	/** Whether startup validation deferred any warning pending in-flight discovery (#10048). */
+	#pendingDiscoveryDeferredValidation = false;
 
 	constructor(host: TurnRecoveryHost, options: TurnRecoveryOptions = {}) {
 		this.#host = host;
@@ -1360,9 +1368,63 @@ export class TurnRecovery {
 	}
 
 	#validateRetryFallbackChains(): void {
-		validateRetryFallbackChains(this.#host.settings, this.#host.modelRegistry, message =>
-			this.#host.configWarnings.push(message),
+		let deferred = false;
+		validateRetryFallbackChains(
+			this.#host.settings,
+			this.#host.modelRegistry,
+			message => {
+				logger.warn(message);
+				this.#fallbackChainWarnings.add(message);
+				this.#host.configWarnings.push(message);
+			},
+			{
+				isDiscoveryPending: provider => {
+					const pending = this.#host.modelRegistry.isProviderDiscoveryPending(provider);
+					if (pending) deferred = true;
+					return pending;
+				},
+			},
 		);
+		this.#pendingDiscoveryDeferredValidation = deferred;
+	}
+
+	/** Whether startup fallback-chain validation deferred any warning pending in-flight discovery (#10048). */
+	hasPendingDiscoveryDeferredFallbackValidation(): boolean {
+		return this.#pendingDiscoveryDeferredValidation;
+	}
+
+	/**
+	 * Re-run fallback-chain validation once background discovery has settled and
+	 * reconcile `configWarnings`. Startup validation suppresses "unknown model"
+	 * warnings for selectors whose config-declared discovery provider had not yet
+	 * populated the registry (a cold cache after `omp update` bumps the discovery
+	 * namespace, #10048). With discovery done, drop any startup warning discovery
+	 * resolved and surface warnings for selectors that stayed unknown.
+	 *
+	 * @returns true when `configWarnings` changed and the header must rebuild.
+	 */
+	revalidateRetryFallbackChainsAfterDiscovery(): boolean {
+		const definitive = new Set<string>();
+		validateRetryFallbackChains(this.#host.settings, this.#host.modelRegistry, message => definitive.add(message));
+		this.#pendingDiscoveryDeferredValidation = false;
+		let changed = false;
+		for (const message of [...this.#fallbackChainWarnings]) {
+			if (definitive.has(message)) continue;
+			const index = this.#host.configWarnings.indexOf(message);
+			if (index !== -1) {
+				this.#host.configWarnings.splice(index, 1);
+				changed = true;
+			}
+			this.#fallbackChainWarnings.delete(message);
+		}
+		for (const message of definitive) {
+			if (this.#fallbackChainWarnings.has(message)) continue;
+			logger.warn(message);
+			this.#fallbackChainWarnings.add(message);
+			this.#host.configWarnings.push(message);
+			changed = true;
+		}
+		return changed;
 	}
 
 	#getRetryFallbackRevertPolicy(): RetryFallbackRevertPolicy {
