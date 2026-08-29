@@ -119,7 +119,7 @@ describe("plugin config", () => {
 		expect(await manager.getPluginSettings(pluginName)).toEqual({ mainBranchProtection: false });
 	});
 
-	test("updates marketplace runtime features while list stays duplicate-free", async () => {
+	test("updates user marketplace runtime features despite a project shadow while list stays duplicate-free", async () => {
 		const pluginName = "omp-featureful";
 		const installPath = path.join(pluginsDir, "cache", pluginName);
 		const pluginPath = path.join(pluginsDir, "node_modules", pluginName);
@@ -157,19 +157,39 @@ describe("plugin config", () => {
 				settings: {},
 			}),
 		);
+		const projectPluginsDir = path.join(tmpRoot, ".omp", "plugins");
+		const projectInstallPath = path.join(tmpRoot, "project-cache", pluginName);
+		const projectPluginPath = path.join(projectPluginsDir, "node_modules", pluginName);
+		await Bun.write(
+			path.join(projectInstallPath, "package.json"),
+			JSON.stringify({
+				name: pluginName,
+				version: "2.0.0",
+				omp: { version: "2.0.0", features: { projectOnly: { description: "Project-only feature" } } },
+			}),
+		);
+		await fs.mkdir(path.dirname(projectPluginPath), { recursive: true });
+		await fs.symlink(projectInstallPath, projectPluginPath, "dir");
+		await Bun.write(
+			path.join(projectPluginsDir, "omp-plugins.lock.json"),
+			JSON.stringify({
+				plugins: { [pluginName]: { version: "2.0.0", enabledFeatures: null, enabled: true } },
+				settings: {},
+			}),
+		);
 
 		const manager = new PluginManager(tmpRoot);
 		expect(await manager.list()).toEqual([]);
-		expect((await manager.getPlugin(pluginName))?.manifest.features).toHaveProperty("review");
+		expect((await manager.getPlugin(pluginName))?.manifest.features).toHaveProperty("projectOnly");
 
 		spyOn(console, "log").mockImplementation(() => {});
 		await runPluginCommand({ action: "features", args: [pluginName], flags: { enable: "review", json: true } });
 		let lock = await Bun.file(lockfile).json();
 		expect(lock.plugins[pluginName].enabledFeatures).toEqual(["review"]);
 
-		await expect(manager.setEnabledFeatures(pluginName, ["missing"])).rejects.toThrow(
-			/Unknown feature "missing" in omp-featureful/,
-		);
+		await expect(
+			runPluginCommand({ action: "features", args: [pluginName], flags: { enable: "projectOnly", json: true } }),
+		).rejects.toThrow(/Unknown feature "projectOnly" in omp-featureful/);
 		lock = await Bun.file(lockfile).json();
 		expect(lock.plugins[pluginName].enabledFeatures).toEqual(["review"]);
 	});
