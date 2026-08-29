@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed `VcsGitRepo` staging and commits reading a stale in-memory index snapshot on a reused repo handle, which could make `commitCreate` fail with "nothing to commit, working tree clean" right after `stageFiles` on coarse-mtime filesystems ([#10130](https://github.com/can1357/oh-my-pi/issues/10130)).
+- Fixed staging and committing files through a reused Git repository handle, ensuring newly staged changes are correctly included in commits even on filesystems with coarse timestamp resolution.
 
 ## [18.0.10] - 2026-08-28
 

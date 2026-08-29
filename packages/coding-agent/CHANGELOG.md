@@ -4,36 +4,34 @@
 
 ### Added
 
-- Added ability to preview composer and status-line components in the gallery
-- Added CLI flags to filter gallery output by surface, composer, or segment
+- Added gallery previews for composer and status-line components, with CLI filters for browsing by surface, composer, or segment.
 
 ### Changed
 
-- The status line now shows the thinking level as a compact icon on the model name by default (`statusLine.compactThinkingLevel` defaults to `true`).
+- The status line now displays the thinking level as a compact icon alongside the model name by default; set `statusLine.compactThinkingLevel` to `false` to restore the previous display.
 
 ### Fixed
 
-- Fixed MCP OAuth discovery preferring RFC 9728 path-inserted protected-resource metadata over origin-root authorization-server documents on shared API gateways, so the grant targets the resource's issuer rather than a generic login hub.
-- Fixed credential rotation on HTTP 402 payment-required errors so sibling credentials rotate before model fallback without misclassifying informative non-quota responses ([#10181](https://github.com/can1357/oh-my-pi/pull/10181)).
-- Retriable transport errors (e.g. `socket connection was closed unexpectedly`, timeouts) after the model already streamed a complete tool call now auto-retry through the configured retry budget and fallback chains instead of ending the turn terminally. The retry is gated on positive proof that every emitted call never executed (each paired with a synthetic `executed: false` result) and no committed text or image output, so a side effect can never be replayed; turns with any executed call, real result, or committed visible output keep the existing replay-unsafe veto.
-- Fixed an undecodable image (a truncated or partially written screenshot) permanently wedging a session: the provider rejected every later request, including on resume, with no way out. Reading one now fails with an actionable error, and any that reach the transcript are replaced by a note before the request instead of breaking it.
-- Sharpshooter consolidation no longer wipes memory files when the model returns an all-empty replacement; the error is recorded and queued deltas are preserved.
-- Fixed `omp plugin features` failing to find marketplace-installed plugins.
-- Fixed Escape aborting an active turn when dismissing the `/session` information panel; the panel now owns focus until closed.
-- Fixed Ctrl+T "Thinking blocks: hidden" leaving long reasoning visible when it had already streamed into native scrollback as append-only stable rows; the toggle now forgets that emission ledger so the display reset re-renders those blocks hidden ([#10177](https://github.com/can1357/oh-my-pi/issues/10177)).
-- Fixed high idle CPU while the agent works ([#10129](https://github.com/can1357/oh-my-pi/issues/10129)).
-- Fixed the status line showing resumed advisor subscription spend as a dollar amount instead of a subscription ([#10129](https://github.com/can1357/oh-my-pi/issues/10129)).
-- Fixed relative API addresses ending in image extensions being swallowed as missing local image files instead of pasted as text ([#10103](https://github.com/can1357/oh-my-pi/issues/10103)).
-- Fixed chat markdown links and bare URLs not becoming OSC 8 hyperlinks under `tui.hyperlinks=always`, so they are now clickable consistently with file/path links ([#10195](https://github.com/can1357/oh-my-pi/issues/10195)).
-- Fixed typed composer text becoming unreadable on light terminal backgrounds in transparent composer styles ([#10038](https://github.com/can1357/oh-my-pi/issues/10038)).
-- Fixed MCP OAuth endpoint and dynamic client registration discovery for authorization-server URLs with nested paths, including Keycloak realms ([#10042](https://github.com/can1357/oh-my-pi/issues/10042)).
-- Fixed `retry.fallbackChains` reporting valid selectors as `references unknown model` at startup when a config-declared discovery provider (e.g. LiteLLM in `models.yml`) had a cold discovery cache — such as the first launch after an update bumps the cache namespace. Warnings for pending-discovery providers are now deferred and re-evaluated once discovery lands, and cleared from the header if resolved ([#10048](https://github.com/can1357/oh-my-pi/issues/10048)).
-- Fixed visible OMP-launched browser windows retaining a pinned layout viewport instead of resizing their page content with the OS window.
-- Fixed `import numpy` (and other native-extension imports) hanging indefinitely in the Python eval tool on Windows, where the runner's always-on background stdin reader deadlocked native DLL loading; Windows now reads the control channel serially between requests while POSIX keeps concurrent request dispatch ([#7985](https://github.com/can1357/oh-my-pi/issues/7985)).
-- Fixed subagent extension contexts so `ctx.getContextUsage()` reports the child session's usage and `ctx.compact()` compacts that session ([#10097](https://github.com/can1357/oh-my-pi/issues/10097)).
-- Fixed `lsp diagnostics` reporting `OK` for project-aware pull-diagnostic servers (e.g. Roslyn) whose `textDocument/diagnostic` response overran the 3s single-file budget; such servers now get a longer single-file wait and a timed-out or errored pull surfaces as a server failure instead of a clean result ([#10035](https://github.com/can1357/oh-my-pi/issues/10035)).
-- Fixed incorrect labels under `Settings > Context > Compaction Token Limit`.
-- Fixed the project-shared headless browser retaining orphaned pages, iframes, and workers from omp sessions that ended abnormally; a live session now reaps targets whose owning process is gone when it attaches to the shared browser ([#10022](https://github.com/can1357/oh-my-pi/issues/10022)).
+- Fixed MCP OAuth discovery for shared API gateways and authorization servers with nested paths, including Keycloak realms, so authentication targets the correct resource issuer and supports endpoint and dynamic client-registration discovery.
+- Fixed credential rotation for HTTP 402 payment-required responses so sibling credentials are tried before model fallback without misclassifying informative non-quota errors.
+- Transport errors after a complete, non-executed tool call can now retry through configured retry budgets and fallback chains when it is safe to do so, instead of ending the turn prematurely.
+- Improved handling of truncated or otherwise undecodable images so they produce an actionable error and no longer permanently block subsequent requests or resumed sessions.
+- Fixed Sharpshooter consolidation preserving memory files and queued changes when an empty replacement is returned.
+- Fixed `omp plugin features` so it discovers marketplace-installed plugins.
+- Fixed Escape handling when closing the `/session` information panel; the panel now retains focus until dismissed.
+- Fixed the thinking-block visibility toggle so streamed reasoning is correctly hidden when thinking blocks are set to hidden.
+- Reduced high idle CPU usage while the agent is working.
+- Fixed resumed advisor subscription usage being displayed as a dollar amount instead of as a subscription.
+- Fixed relative API addresses whose names end in image extensions being pasted as text instead of incorrectly treated as missing local image files.
+- Fixed chat Markdown links and bare URLs so they become clickable OSC 8 hyperlinks when `tui.hyperlinks=always` is enabled.
+- Fixed unreadable composer text on light terminal backgrounds when using transparent composer styles.
+- Fixed `retry.fallbackChains` warnings for valid selectors from providers whose model discovery is still pending; validation now updates after discovery completes.
+- Fixed visible browser windows launched by OMP so page content resizes with the operating-system window.
+- Fixed Python evaluation hanging on Windows when importing native-extension modules such as NumPy.
+- Fixed subagent extension context helpers so `ctx.getContextUsage()` and `ctx.compact()` operate on the child session.
+- Fixed `lsp diagnostics` incorrectly reporting success for project-aware pull-diagnostic servers when diagnostics time out or fail.
+- Corrected labels under `Settings > Context > Compaction Token Limit`.
+- Fixed orphaned pages, iframes, and workers accumulating in the shared headless browser after abnormal OMP session termination.
 
 ## [18.0.10] - 2026-08-28
 

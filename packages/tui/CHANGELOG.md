@@ -4,11 +4,11 @@
 
 ### Added
 
-- Added `setTerminalHyperlinks()` so hosts can route their OSC 8 hyperlink policy into the Markdown renderer's link wrapping.
+- Added `setTerminalHyperlinks()` to let hosts control OSC 8 hyperlink behavior in rendered Markdown links.
 
 ### Fixed
 
-- Words starting with hex digits (e.g. `#each`) no longer render an inline color swatch for their hex-looking prefix (`#eac`); swatches now require the whole word to be a color.
+- Fixed inline color swatches appearing for words with hex-like prefixes, such as `#each`; swatches now appear only when the entire word is a valid color.
 
 ## [18.0.10] - 2026-08-28
 

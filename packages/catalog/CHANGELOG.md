@@ -4,11 +4,10 @@
 
 ### Fixed
 
-- Fixed issue where GLM models being served from Baseten were not being resolved as reasoning models. This immediately fixes Baseten `zai-org/GLM-5.3-Flash` and should fix future GLM models added.
-- Fixed Cloudflare AI Gateway shared-catalog refresh to include active Workers AI chat models, including newly released models not present in the bundled snapshot.
-- Fixed Cursor Kimi K3, Grok 4, and Composer 2.5 models being treated as text-only despite accepting image attachments.
-- Fixed family identity for OpenRouter route-suffixed ids (`z-ai/glm-5.3:nitro`, `deepseek/deepseek-v4-pro-0813:nitro`): `bareModelId` now strips the request-time routing suffix (`:nitro`, `:floor`, `:online`, `:exacto`, `:extended`) alongside the provider namespace, so GLM-5.3 keeps its wire-exact `low`/`high`/`max` effort ladder and dated DeepSeek SKUs no longer collapse to the `high`-only ladder when selected through a routing variant.
-- Fixed OpenRouter's route-suffixed dated DeepSeek V4 Pro SKU (`deepseek/deepseek-v4-pro-0813:nitro`) collapsing to the `high`-only effort ladder instead of preserving `low`/`high`/`max`.
+- Fixed Baseten GLM models, including GLM-5.3-Flash, being incorrectly classified as non-reasoning models.
+- Fixed Cloudflare AI Gateway catalog refreshes so active Workers AI chat models, including newly released models, are discovered correctly.
+- Fixed Cursor Kimi K3, Grok 4, and Composer 2.5 models being incorrectly treated as text-only when they support image attachments.
+- Fixed OpenRouter routed model variants, including GLM-5.3 and dated DeepSeek V4 Pro, so their reasoning effort options are preserved correctly.
 
 ## [18.0.9] - 2026-08-28
 

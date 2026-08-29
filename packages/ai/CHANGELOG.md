@@ -4,12 +4,12 @@
 
 ### Fixed
 
-- Fixed session auto-retry for empty Anthropic streams truncated before `message_stop` ([#10113](https://github.com/can1357/oh-my-pi/issues/10113)).
-- Fixed Gemini 3.x tool-call continuations through OpenAI-compatible endpoints failing with missing thought signature errors. ([#10172](https://github.com/can1357/oh-my-pi/issues/10172))
-- Fixed HTTP 402 payment-required and deactivated workspace responses being misclassified so credential rotation correctly falls back to sibling credentials without treating non-quota responses as usage limits ([#10181](https://github.com/can1357/oh-my-pi/pull/10181)).
-- Fixed Perplexity email login for accounts protected by authenticator two-factor authentication.
-- Fixed `/login` for Qianfan rejecting valid API keys that lack access to the validation model, treating an authenticated `invalid_model` response as a successful credential check.
-- Fixed Z.AI browser sign-in using an unregistered random callback port when port 54548 is occupied; it now reports the conflict before opening the browser ([#10157](https://github.com/can1357/oh-my-pi/issues/10157)).
+- Fixed automatic session retries for Anthropic-compatible streams that end prematurely without a completion signal.
+- Fixed Gemini 3.x tool-call continuations through OpenAI-compatible endpoints.
+- Fixed credential fallback for HTTP 402 payment-required and deactivated-workspace responses, preventing them from being misclassified as quota exhaustion.
+- Fixed Perplexity email sign-in for accounts protected by authenticator-based two-factor authentication.
+- Fixed Qianfan API-key login validation for keys that cannot access the validation model.
+- Fixed Z.AI browser sign-in to report an occupied callback port before opening the browser.
 
 ## [18.0.9] - 2026-08-28
 

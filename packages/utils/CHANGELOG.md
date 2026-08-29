@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed `ensureRuntimeInstalled` so a crashed or killed runtime installer no longer wedges every later install for 60s: it now serializes with the OS-backed crash-safe lock (`withFileLock`) instead of a hand-rolled lock directory ([#10120](https://github.com/can1357/oh-my-pi/issues/10120)).
+- Fixed runtime installation getting stuck for up to 60 seconds after an installer crash or forced termination, allowing subsequent installation attempts to proceed normally.
 
 ## [18.0.10] - 2026-08-28
 
