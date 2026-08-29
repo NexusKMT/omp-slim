@@ -38,6 +38,9 @@
 
 - Fixed high idle CPU while the agent works ([#10129](https://github.com/can1357/oh-my-pi/issues/10129)).
 - Fixed the status line showing resumed advisor subscription spend as a dollar amount instead of a subscription ([#10129](https://github.com/can1357/oh-my-pi/issues/10129)).
+### Fixed
+
+- Fixed relative API addresses ending in image extensions being swallowed as missing local image files instead of pasted as text ([#10103](https://github.com/can1357/oh-my-pi/issues/10103)).
 
 ## [18.0.10] - 2026-08-28
 
