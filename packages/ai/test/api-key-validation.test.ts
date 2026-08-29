@@ -7,6 +7,7 @@ import {
 	validateApiKeyAgainstModelsEndpoint,
 	validateOpenAICompatibleApiKey,
 } from "../src/registry/api-key-validation";
+import { loginQianfan } from "../src/registry/qianfan";
 import type { FetchImpl } from "../src/types";
 
 type Validator = (fetch: FetchImpl) => Promise<void>;
@@ -134,6 +135,21 @@ describe("model-denied 401 triage", () => {
 			});
 
 		await expect(qianfanValidator(fetchMock, true)).resolves.toBeUndefined();
+	});
+
+	it("allows Qianfan login with a valid key that lacks access to its validation model", async () => {
+		const fetchMock: FetchImpl = async () =>
+			new Response(modelDeniedBody, {
+				status: 401,
+				headers: { "Content-Type": "application/json" },
+			});
+
+		await expect(
+			loginQianfan({
+				onPrompt: async () => "bce-v3/ALTAK-valid-model-scoped-key",
+				fetch: fetchMock,
+			}),
+		).resolves.toBe("bce-v3/ALTAK-valid-model-scoped-key");
 	});
 
 	it("still rejects the same 401 when model denial is not tolerated", async () => {
