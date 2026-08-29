@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed working-memory recall returning too few or no results when many matching rows had been retired with `memory_edit invalidate` (which sets `valid_until` and leaves `superseded_by` unset).
+
 ## [18.0.9] - 2026-08-28
 
 ### Fixed
