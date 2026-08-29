@@ -27,6 +27,7 @@ const BEL = "\x07";
  * detection when the user switches back to `auto`.
  */
 const DETECTED_TERMINAL_HYPERLINKS = TERMINAL.hyperlinks;
+type HyperlinkMode = "off" | "auto" | "always";
 
 /** Stable 8-char hex ID derived from a URI — hints terminals to coalesce identical adjacent links. */
 function buildLinkId(uri: string): string {
@@ -57,7 +58,10 @@ function buildFileUri(filePath: string, opts?: { line?: number; col?: number }):
  */
 export function isHyperlinkEnabled(): boolean {
 	if (!isSettingsInitialized()) return false;
-	const mode = settings.get("tui.hyperlinks");
+	return resolveHyperlinkMode(settings.get("tui.hyperlinks"));
+}
+
+function resolveHyperlinkMode(mode: HyperlinkMode): boolean {
 	if (mode === "off") return false;
 	if (mode === "always") return true;
 	// auto: respect the detected capability (immutable snapshot, not the mutable
@@ -77,8 +81,8 @@ export function isHyperlinkEnabled(): boolean {
  * via {@link isHyperlinkEnabled}. Called at TUI startup and whenever the setting
  * changes at runtime.
  */
-export function applyHyperlinkSetting(): void {
-	setTerminalHyperlinks(isHyperlinkEnabled());
+export function applyHyperlinkSetting(mode?: HyperlinkMode): void {
+	setTerminalHyperlinks(mode === undefined ? isHyperlinkEnabled() : resolveHyperlinkMode(mode));
 }
 
 function safeHyperlinkUri(uri: string): string | undefined {

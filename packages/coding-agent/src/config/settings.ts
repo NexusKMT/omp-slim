@@ -2763,8 +2763,8 @@ const SETTING_HOOKS: Partial<Record<SettingPath, SettingHook<any>>> = {
 	// A project-scoped reload (`/move`, cross-project resume, rollback) can change
 	// the effective value; reapply so pi-tui renderers gating on the shared flag
 	// track it the same instant path/resource links do. Runtime `/settings` edits
-	// go through the selector controller instead (`set()` does not fire hooks).
-	"tui.hyperlinks": () => applyHyperlinkSetting(),
+	// also go through the selector controller to invalidate and repaint live views.
+	"tui.hyperlinks": value => applyHyperlinkSetting(value),
 	"provider.appendOnlyContext": value => {
 		if (typeof value === "string") {
 			appendOnlyModeSignal.fire(value);

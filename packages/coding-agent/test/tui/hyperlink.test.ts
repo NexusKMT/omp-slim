@@ -347,6 +347,27 @@ describe("chat markdown links honor tui.hyperlinks", () => {
 		return md.render(80).join("\n");
 	}
 
+	it("applies the configured policy while Settings.init publishes the singleton", async () => {
+		resetSettingsForTest();
+		terminalCaps.setTerminalHyperlinks(false);
+		try {
+			await Settings.init({ inMemory: true, overrides: { "tui.hyperlinks": "always" } });
+			const output = new terminalCaps.Markdown(
+				"See [the docs](https://example.com/path) for details.",
+				0,
+				0,
+				getMarkdownTheme(),
+			)
+				.render(80)
+				.join("\n");
+			expect(terminalCaps.TERMINAL.hyperlinks).toBe(true);
+			expect(extractAnyTerminatorLinkUri(output)).toBe("https://example.com/path");
+		} finally {
+			resetSettingsForTest();
+			await Settings.init({ inMemory: true });
+		}
+	});
+
 	it('wraps the link in OSC 8 under "always" even when the terminal did not advertise support', () => {
 		terminalCaps.TERMINAL.hyperlinks = false;
 		setHyperlinkMode("always");
