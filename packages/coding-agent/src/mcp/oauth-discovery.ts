@@ -231,7 +231,10 @@ export function analyzeAuthError(error: Error, serverUrl?: string): AuthDetectio
 	const authServerUrl = extractMcpAuthServerUrl(error, serverUrl);
 	// Extract resource_metadata URL from challenge entries in error message
 	const resourceMetaMatch = error.message.match(/resource_metadata\s*=\s*"([^"]+)"/i);
-	const resourceMetadataUrl = resourceMetaMatch?.[1];
+	// RFC 9728 / MCP: when WWW-Authenticate omits resource_metadata, still probe
+	// the path-inserted protected-resource URL. Origin-root authorization-server
+	// documents on shared gateways often name a different issuer.
+	const resourceMetadataUrl = resourceMetaMatch?.[1] ?? rfc9728ProtectedResourceMetadataUrl(serverUrl);
 
 	// Try to extract OAuth endpoints
 	const oauth = extractOAuthEndpoints(error);
@@ -257,6 +260,19 @@ export function analyzeAuthError(error: Error, serverUrl?: string): AuthDetectio
 
 	// Check if it might be API key based
 	const errorMsg = error.message.toLowerCase();
+	// A JSON 401 that mentions JWT is a bearer/OAuth challenge, not a static
+	// API key. The generic "token"/"bearer" heuristic below would otherwise
+	// classify it as apikey and skip protected-resource discovery.
+	if (/\bjwt\b/.test(errorMsg) && errorMsg.includes("token")) {
+		return {
+			requiresAuth: true,
+			authType: "oauth",
+			authServerUrl,
+			resourceMetadataUrl,
+			scopes: challengeScopes,
+			message: "Server requires OAuth authentication. Launching authorization flow...",
+		};
+	}
 	if (
 		errorMsg.includes("api key") ||
 		errorMsg.includes("api_key") ||
@@ -324,6 +340,24 @@ function issuerMatchesBase(metadataIssuer: unknown, baseUrl: string): boolean {
 }
 
 /**
+ * RFC 9728: insert `/.well-known/oauth-protected-resource` between the origin
+ * and the resource path. Origin-root protected-resource metadata on API
+ * gateways often names a shared login hub, not the issuer that minted the
+ * client's `client_id`.
+ */
+export function rfc9728ProtectedResourceMetadataUrl(serverUrl: string | undefined): string | undefined {
+	if (!serverUrl) return undefined;
+	try {
+		const parsed = new URL(serverUrl);
+		const path = parsed.pathname.replace(/\/+$/, "");
+		if (!path) return undefined;
+		return `${parsed.origin}/.well-known/oauth-protected-resource${path}`;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
  * Read space-separated OAuth scopes off a metadata document. Accepts either
  * an array (RFC 8414 `scopes_supported`) or a space-separated string
  * (`scopes` / `scope`), matching what MCP gateways emit under
@@ -379,13 +413,25 @@ export async function discoverOAuthEndpoints(
 	opts?: { fetch?: FetchImpl; protectedResource?: string; protectedScopes?: string; signal?: AbortSignal },
 ): Promise<OAuthEndpoints | null> {
 	const fetchImpl: FetchImpl = opts?.fetch ?? fetch;
-	const wellKnownPaths = [
+	const issuerWellKnownPaths = [
 		"/.well-known/oauth-authorization-server",
 		"/.well-known/openid-configuration",
 		"/.well-known/oauth-protected-resource",
 		"/oauth/metadata",
 		"/.mcp/auth",
-		"/authorize", // Some MCP servers expose OAuth config here
+		"/authorize",
+	];
+	// Resource-server fallback: probe protected-resource metadata before
+	// origin-root authorization-server / OpenID documents. Gateways that front
+	// many tenants commonly publish a generic AS at the origin that is not the
+	// authorization server for this MCP URL.
+	const resourceWellKnownPaths = [
+		"/.well-known/oauth-protected-resource",
+		"/.well-known/oauth-authorization-server",
+		"/.well-known/openid-configuration",
+		"/oauth/metadata",
+		"/.mcp/auth",
+		"/authorize",
 	];
 	const urlsToQuery: Array<{ url: string; issuerCandidate: boolean }> = [];
 	const visitedAuthServers = new Set<string>();
@@ -483,6 +529,7 @@ export async function discoverOAuthEndpoints(
 	};
 
 	for (const base of urlsToQuery) {
+		const wellKnownPaths = base.issuerCandidate ? issuerWellKnownPaths : resourceWellKnownPaths;
 		for (const path of wellKnownPaths) {
 			// Try each well-known path at both the absolute origin and relative
 			const urlsToTry = buildWellKnownUrls(path, base.url);
@@ -566,22 +613,23 @@ function buildWellKnownUrls(wellKnownPath: string, baseUrl: string): URL[] {
 	const prefixPath = lastSlash === 0 ? normalizedPath : normalizedPath.slice(0, lastSlash);
 	const relUrl = new URL(wellKnownPath.slice(1), `${parsed.origin}${prefixPath}/`);
 
-	const candidates: URL[] = [absUrl];
-	const seen = new Set<string>([absUrl.href]);
+	const candidates: URL[] = [];
+	const seen = new Set<string>();
 	const push = (u: URL): void => {
 		if (!seen.has(u.href)) {
 			candidates.push(u);
 			seen.add(u.href);
 		}
 	};
-	push(relUrl);
 
-	// RFC 8414 §3.1 path-ful issuer form: /.well-known/<suffix>/<issuer-path>.
-	// Only meaningful for well-known metadata documents.
+	// RFC 8414 §3.1 / RFC 9728: insert the well-known suffix between origin and
+	// path first. Origin-root documents on MCP gateways often describe a
+	// different issuer than the path-scoped resource.
 	if (wellKnownPath.startsWith("/.well-known/")) {
-		const pathfulUrl = new URL(`${wellKnownPath}${normalizedPath}`, parsed.origin);
-		push(pathfulUrl);
+		push(new URL(`${wellKnownPath}${normalizedPath}`, parsed.origin));
 	}
+	push(relUrl);
+	push(absUrl);
 
 	return candidates;
 }

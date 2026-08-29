@@ -10,6 +10,9 @@
 ### Changed
 
 - The status line now shows the thinking level as a compact icon on the model name by default (`statusLine.compactThinkingLevel` defaults to `true`).
+### Fixed
+
+- Fixed MCP OAuth discovery preferring RFC 9728 path-inserted protected-resource metadata over origin-root authorization-server documents on shared API gateways, so the grant targets the resource's issuer rather than a generic login hub.
 
 ## [18.0.10] - 2026-08-28
 
