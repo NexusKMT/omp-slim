@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed native `git add` (`stageFiles([])`) so it no longer stages macOS NFD duplicates of already-tracked NFC paths, or files ignored only by a nested `.gitignore`.
+
 ## [18.1.3] - 2026-09-02
 
 ### Fixed

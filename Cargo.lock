@@ -6309,6 +6309,7 @@ name = "pi-vcs"
 version = "18.1.3"
 dependencies = [
  "gix",
+ "gix-utils",
  "jj-lib",
  "libc",
  "tempfile",

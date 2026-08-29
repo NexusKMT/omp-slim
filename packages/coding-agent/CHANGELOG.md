@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `omp commit` auto-staging so it no longer picks up macOS Unicode-normalization duplicate paths or files ignored only by a nested `.gitignore`.
+
 ## [18.1.3] - 2026-09-02
 
 ### Changed
