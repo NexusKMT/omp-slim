@@ -30,6 +30,7 @@ import {
 	Loader,
 	Markdown,
 	Spacer,
+	setTerminalHyperlinks,
 	setTerminalTextSizing,
 	setTuiTight,
 	TERMINAL,
@@ -139,6 +140,7 @@ import {
 	todoMatchesAnyDescription,
 } from "../tools/todo";
 import { vocalizer } from "../tts/vocalizer";
+import { isHyperlinkEnabled } from "../tui/hyperlink";
 import { renderTreeList } from "../tui/tree-list";
 import { formatStartupChangelogSummary, type StartupChangelogSelection } from "../utils/changelog";
 import { copyToClipboard } from "../utils/clipboard";
@@ -929,6 +931,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		// capability (`TERMINAL.supportsTextSizing` defaults on for Kitty) so it stays off
 		// unless the user opts in, and never emits raw escapes on other terminals.
 		setTerminalTextSizing(settings.get("tui.textSizing") && TERMINAL.supportsTextSizing);
+		// Route the resolved `tui.hyperlinks` policy into TERMINAL.hyperlinks so
+		// renderers that gate on the raw capability flag (the Markdown component's
+		// `[text](url)`/bare-URL links, status-line PR links) honor `off`/`always`
+		// the same way the path/resource links do via isHyperlinkEnabled().
+		setTerminalHyperlinks(isHyperlinkEnabled());
 		this.chatContainer = new TranscriptContainer();
 		this.pendingMessagesContainer = new AnchoredLiveContainer();
 		this.statusContainer = new StatusHudContainer(this);

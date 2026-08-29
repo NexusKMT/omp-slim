@@ -3,6 +3,7 @@ import * as path from "node:path";
 import * as url from "node:url";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { LocalProtocolHandler } from "@oh-my-pi/pi-coding-agent/internal-urls/local-protocol";
+import { getMarkdownTheme, initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import {
 	fileHyperlink,
@@ -310,5 +311,49 @@ describe("tryResolveInternalUrlSync", () => {
 	it("swallows errors from malformed URLs", () => {
 		// Malformed input should not throw, just return undefined.
 		expect(tryResolveInternalUrlSync("local://%ZZ")).toBeUndefined();
+	});
+});
+
+describe("chat markdown links honor tui.hyperlinks", () => {
+	// The Markdown renderer gates OSC 8 on the raw TERMINAL.hyperlinks capability
+	// flag, so the coding-agent routes the resolved `tui.hyperlinks` policy into it
+	// via setTerminalHyperlinks(isHyperlinkEnabled()) at TUI startup. These tests
+	// exercise that exact wiring so a `[text](url)` chat link tracks the setting the
+	// same way path/resource links already do (issue #10195).
+	const originalHyperlinks = terminalCaps.TERMINAL.hyperlinks;
+
+	beforeAll(async () => {
+		await initTheme();
+	});
+	afterEach(() => {
+		terminalCaps.TERMINAL.hyperlinks = originalHyperlinks;
+	});
+
+	function renderChatLink(): string {
+		terminalCaps.setTerminalHyperlinks(isHyperlinkEnabled());
+		const md = new terminalCaps.Markdown(
+			"See [the docs](https://example.com/path) for details.",
+			0,
+			0,
+			getMarkdownTheme(),
+		);
+		return md.render(80).join("\n");
+	}
+
+	it('wraps the link in OSC 8 under "always" even when the terminal did not advertise support', () => {
+		terminalCaps.TERMINAL.hyperlinks = false;
+		setHyperlinkMode("always");
+		const output = renderChatLink();
+		// The Markdown renderer terminates OSC 8 with BEL, so match either terminator.
+		expect(output.includes(`${OSC}8;`)).toBe(true);
+		expect(extractAnyTerminatorLinkUri(output)).toBe("https://example.com/path");
+	});
+
+	it('suppresses the OSC 8 wrap under "off" even when the terminal advertised support', () => {
+		terminalCaps.TERMINAL.hyperlinks = true;
+		setHyperlinkMode("off");
+		const output = renderChatLink();
+		expect(output).toContain("the docs");
+		expect(output.includes(`${OSC}8;`)).toBe(false);
 	});
 });

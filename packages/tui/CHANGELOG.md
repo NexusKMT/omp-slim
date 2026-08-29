@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `setTerminalHyperlinks()` so hosts can route their OSC 8 hyperlink policy into the Markdown renderer's link wrapping.
+
 ## [18.0.10] - 2026-08-28
 
 ### Added

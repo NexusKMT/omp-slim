@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed chat markdown links and bare URLs not becoming OSC 8 hyperlinks under `tui.hyperlinks=always`, so they are now clickable consistently with file/path links ([#10195](https://github.com/can1357/oh-my-pi/issues/10195)).
+
 ## [18.0.10] - 2026-08-28
 
 ### Added
