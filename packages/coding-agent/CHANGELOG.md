@@ -38,6 +38,9 @@
 - Fixed a macOS composer display issue where undercurl could remain attached to stale text after rapid typing.
 - Improved `xd://` MCP failure messages with actionable transport stages, failure categories, server and tool context, retryability, trace IDs, and redacted JSON-RPC details.
 - Fixed ACP `read` tool-call locations so clients such as Zed Follow receive the resolved filesystem path rather than the OMP line-range selector.
+### Fixed
+
+- Fixed MCP OAuth endpoint and dynamic client registration discovery for authorization-server URLs with nested paths, including Keycloak realms ([#10042](https://github.com/can1357/oh-my-pi/issues/10042)).
 
 ## [18.0.9] - 2026-08-28
 

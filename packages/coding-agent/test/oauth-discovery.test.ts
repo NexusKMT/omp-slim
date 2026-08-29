@@ -129,18 +129,18 @@ describe("path-prefixed auth servers", () => {
 		expect(calls).toContain("https://gateway.example.com/my-service/.well-known/oauth-authorization-server");
 	});
 
-	it("falls back to RFC 8414 path-ful issuer form (/.well-known/oauth-authorization-server/<path>)", async () => {
+	it("discovers OIDC metadata appended to a multi-segment issuer path", async () => {
 		const calls: string[] = [];
 		const fetchImpl = mockFetch((input: FetchInput) => {
 			const url = String(input);
 			calls.push(url);
 
-			if (url === "https://gateway.example.com/.well-known/oauth-authorization-server/my-service") {
+			if (url === "https://auth.example.com/auth/realms/myrealm/.well-known/openid-configuration") {
 				return new Response(
 					JSON.stringify({
-						authorization_endpoint: "https://gateway.example.com/my-service/oauth",
-						token_endpoint: "https://gateway.example.com/my-service/token",
-						registration_endpoint: "https://gateway.example.com/my-service/register",
+						issuer: "https://auth.example.com/auth/realms/myrealm",
+						authorization_endpoint: "https://auth.example.com/auth/realms/myrealm/protocol/openid-connect/auth",
+						token_endpoint: "https://auth.example.com/auth/realms/myrealm/protocol/openid-connect/token",
 					}),
 					{ status: 200, headers: { "Content-Type": "application/json" } },
 				);
@@ -149,16 +149,61 @@ describe("path-prefixed auth servers", () => {
 			return new Response("not found", { status: 404 });
 		});
 
-		const oauth = await discoverOAuthEndpoints("https://gateway.example.com/my-service", undefined, undefined, {
-			fetch: fetchImpl,
-		});
+		const oauth = await discoverOAuthEndpoints(
+			"https://mcp.example.com/mcp",
+			"https://auth.example.com/auth/realms/myrealm",
+			undefined,
+			{ fetch: fetchImpl },
+		);
 
 		expect(oauth).toEqual({
-			authorizationUrl: "https://gateway.example.com/my-service/oauth",
-			tokenUrl: "https://gateway.example.com/my-service/token",
-			registrationUrl: "https://gateway.example.com/my-service/register",
+			authorizationUrl: "https://auth.example.com/auth/realms/myrealm/protocol/openid-connect/auth",
+			issuerUrl: "https://auth.example.com/auth/realms/myrealm",
+			tokenUrl: "https://auth.example.com/auth/realms/myrealm/protocol/openid-connect/token",
 		});
-		expect(calls).toContain("https://gateway.example.com/.well-known/oauth-authorization-server/my-service");
+		expect(calls).toContain("https://auth.example.com/auth/realms/myrealm/.well-known/openid-configuration");
+		expect(calls).not.toContain("https://auth.example.com/.well-known/openid-configuration/auth/realms/myrealm");
+		// The standard issuer form is tried before the parent-relative fallback, so the
+		// slow/absent parent-relative URL is never probed once the issuer form succeeds.
+		expect(calls).not.toContain("https://auth.example.com/auth/realms/.well-known/openid-configuration");
+	});
+
+	it("tries RFC 8414 path-ful metadata before the path-appended compatibility form", async () => {
+		const calls: string[] = [];
+		const fetchImpl = mockFetch((input: FetchInput) => {
+			const url = String(input);
+			calls.push(url);
+
+			if (url === "https://auth.example.com/.well-known/oauth-authorization-server/tenants/acme") {
+				return new Response(
+					JSON.stringify({
+						issuer: "https://auth.example.com/tenants/acme",
+						authorization_endpoint: "https://auth.example.com/tenants/acme/oauth",
+						token_endpoint: "https://auth.example.com/tenants/acme/token",
+						registration_endpoint: "https://auth.example.com/tenants/acme/register",
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				);
+			}
+
+			return new Response("not found", { status: 404 });
+		});
+
+		const oauth = await discoverOAuthEndpoints(
+			"https://mcp.example.com/mcp",
+			"https://auth.example.com/tenants/acme",
+			undefined,
+			{ fetch: fetchImpl },
+		);
+
+		expect(oauth).toEqual({
+			authorizationUrl: "https://auth.example.com/tenants/acme/oauth",
+			issuerUrl: "https://auth.example.com/tenants/acme",
+			tokenUrl: "https://auth.example.com/tenants/acme/token",
+			registrationUrl: "https://auth.example.com/tenants/acme/register",
+		});
+		expect(calls).toContain("https://auth.example.com/.well-known/oauth-authorization-server/tenants/acme");
+		expect(calls).not.toContain("https://auth.example.com/tenants/acme/.well-known/oauth-authorization-server");
 	});
 
 	it("prefers absolute well-known when it succeeds (origin-root servers still work)", async () => {
@@ -320,6 +365,7 @@ describe("resource_metadata chain", () => {
 
 		expect(oauth).toEqual({
 			authorizationUrl: "https://sso.example.com/oauth/auth",
+			issuerUrl: "https://sso.example.com",
 			tokenUrl: "https://sso.example.com/oauth/token",
 			scopes: "k8s.logging-mcp-server k8s.annotations",
 			resource: "https://gateway.example.com",
@@ -366,6 +412,7 @@ describe("resource_metadata chain", () => {
 
 		expect(oauth).toEqual({
 			authorizationUrl: "https://ws.cloud.databricks.com/oidc/v1/authorize",
+			issuerUrl: "https://ws.cloud.databricks.com/oidc",
 			tokenUrl: "https://ws.cloud.databricks.com/oidc/v1/token",
 			scopes: "genie offline_access",
 			resource: "https://ws.cloud.databricks.com/api/2.0/mcp/genie",
@@ -641,6 +688,7 @@ describe("RFC 8414 §3.3 issuer validation", () => {
 
 		expect(oauth).toEqual({
 			authorizationUrl: "https://mcp.atlassian.com/v1/authorize",
+			issuerUrl: "https://cf.mcp.atlassian.com",
 			tokenUrl: "https://cf.mcp.atlassian.com/v1/token",
 			registrationUrl: "https://cf.mcp.atlassian.com/v1/register",
 		});
@@ -707,6 +755,7 @@ describe("RFC 8414 §3.3 issuer validation", () => {
 
 		expect(oauth).toEqual({
 			authorizationUrl: "https://mcp.plane.so/http/authorize",
+			issuerUrl: "https://mcp.plane.so/http",
 			tokenUrl: "https://mcp.plane.so/http/token",
 			registrationUrl: "https://mcp.plane.so/http/register",
 			resource: "https://mcp.plane.so/http/mcp",
@@ -740,6 +789,7 @@ describe("RFC 8414 §3.3 issuer validation", () => {
 
 		expect(oauth).toEqual({
 			authorizationUrl: "https://auth.example.com/oauth/authorize",
+			issuerUrl: "https://auth.example.com/",
 			tokenUrl: "https://auth.example.com/oauth/token",
 		});
 	});
