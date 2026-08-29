@@ -46,6 +46,13 @@ export interface LoadAdvisorTranscriptCostsOptions {
 	onSnapshot?: () => void;
 	/** Stop metadata discovery and transcript parsing when the owning session is gone. */
 	shouldContinue?: () => boolean;
+	/**
+	 * When provided, receives the distinct providers that billed each advisor
+	 * slug (populated only for slugs with nonzero cost), so callers can
+	 * re-derive subscription attribution from persisted spend without a second
+	 * scan (#10129).
+	 */
+	providersBySlug?: Map<string, Set<string>>;
 }
 
 interface AdvisorTranscriptCostFileSnapshot {
@@ -97,6 +104,7 @@ export async function loadAdvisorTranscriptCosts(
 	const costs = new Map<string, number>();
 	for (const snapshot of snapshots) {
 		let total = 0;
+		const providers = new Set<string>();
 		let validHeader: boolean | undefined;
 		try {
 			await visitEntriesFromFileStream(
@@ -117,6 +125,7 @@ export async function loadAdvisorTranscriptCosts(
 					// whole transcript's total.
 					const total_ = message.usage?.cost?.total;
 					if (typeof total_ === "number" && Number.isFinite(total_)) total += total_;
+					if (typeof message.provider === "string" && message.provider) providers.add(message.provider);
 				},
 				{ maxBytes: snapshot.maxBytes, shouldContinue: options.shouldContinue },
 			);
@@ -124,7 +133,10 @@ export async function loadAdvisorTranscriptCosts(
 			logger.debug("advisor transcript cost read failed", { file: path.basename(snapshot.file), err: String(err) });
 			continue;
 		}
-		if (total > 0) costs.set(snapshot.slug, total);
+		if (total > 0) {
+			costs.set(snapshot.slug, total);
+			if (options.providersBySlug && providers.size > 0) options.providersBySlug.set(snapshot.slug, providers);
+		}
 	}
 	return costs;
 }

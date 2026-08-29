@@ -577,6 +577,33 @@ describe("AgentSession advisor toggle", () => {
 		session.restoreInitialAdvisorCosts(new Map([["", 0.5]]));
 		expect(session.getAdvisorCost()).toBeCloseTo(0.5, 8);
 	});
+	it("attributes restored advisor spend to a subscription without a catalog scan", () => {
+		// #10131 follow-up: with no live runtime, subscription attribution comes
+		// from the providers that billed the restored spend, re-derived via the
+		// current OAuth credentials — never a per-render getAvailable() scan.
+		const oauthSpy = vi.spyOn(authStorage, "hasOAuth").mockImplementation(provider => provider === "anthropic");
+		const scanSpy = vi.spyOn(modelRegistry, "getAvailable");
+		try {
+			session.restoreInitialAdvisorCosts(new Map([["", 0.5]]), new Map(), new Map([["", new Set(["anthropic"])]]));
+			expect(session.isAdvisorActive()).toBe(false);
+			expect(session.getAdvisorCost()).toBeCloseTo(0.5, 8);
+			expect(session.isAdvisorUsingSubscription()).toBe(true);
+			expect(scanSpy).not.toHaveBeenCalled();
+		} finally {
+			scanSpy.mockRestore();
+			oauthSpy.mockRestore();
+		}
+	});
+	it("does not attribute restored advisor spend to a subscription without OAuth on its provider", () => {
+		const oauthSpy = vi.spyOn(authStorage, "hasOAuth").mockReturnValue(false);
+		try {
+			session.restoreInitialAdvisorCosts(new Map([["", 0.5]]), new Map(), new Map([["", new Set(["anthropic"])]]));
+			expect(session.getAdvisorCost()).toBeCloseTo(0.5, 8);
+			expect(session.isAdvisorUsingSubscription()).toBe(false);
+		} finally {
+			oauthSpy.mockRestore();
+		}
+	});
 	it("adds a turn billed while the resume scan is running to persisted spend", async () => {
 		const restore = Promise.withResolvers<Map<string, number>>();
 		const events: string[] = [];

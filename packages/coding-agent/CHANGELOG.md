@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed high idle CPU while the agent works ([#10129](https://github.com/can1357/oh-my-pi/issues/10129)).
+- Fixed the status line showing resumed advisor subscription spend as a dollar amount instead of a subscription ([#10129](https://github.com/can1357/oh-my-pi/issues/10129)).
 
 ## [18.0.10] - 2026-08-28
 

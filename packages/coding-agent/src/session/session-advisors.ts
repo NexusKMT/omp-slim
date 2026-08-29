@@ -450,12 +450,38 @@ export class SessionAdvisors {
 		this.#advisorSubscriptionSlugs.clear();
 	}
 
-	/** Replace the ledger with the spend recorded for the session becoming active. */
-	restoreCost(costs: ReadonlyMap<string, number>): void {
+	/**
+	 * Replace the ledger with the spend recorded for the session becoming active.
+	 * `providersBySlug` (from {@link loadAdvisorTranscriptCosts}) re-derives the
+	 * subscription attribution the torn-down runtime can no longer report.
+	 */
+	restoreCost(costs: ReadonlyMap<string, number>, providersBySlug?: ReadonlyMap<string, ReadonlySet<string>>): void {
 		this.#advisorCosts = new Map(costs);
-		// Restored totals come from a transcript with no live runtime to attribute
-		// them, so drop stale subscription flags rather than rescanning per render.
-		this.#advisorSubscriptionSlugs.clear();
+		this.#advisorSubscriptionSlugs = this.#deriveSubscriptionSlugs(costs, providersBySlug);
+	}
+
+	/**
+	 * Slugs whose restored spend ran on a provider that currently authenticates
+	 * via OAuth — the persisted-spend equivalent of the live {@link isUsingSubscription}
+	 * check, so resumed sessions attribute subscription usage without a catalog scan.
+	 */
+	#deriveSubscriptionSlugs(
+		costs: ReadonlyMap<string, number>,
+		providersBySlug: ReadonlyMap<string, ReadonlySet<string>> | undefined,
+	): Set<string> {
+		const slugs = new Set<string>();
+		if (!providersBySlug) return slugs;
+		const auth = this.#host.modelRegistry.authStorage;
+		for (const [slug, providers] of providersBySlug) {
+			if ((costs.get(slug) ?? 0) <= 0) continue;
+			for (const provider of providers) {
+				if (auth.hasOAuth(provider)) {
+					slugs.add(slug);
+					break;
+				}
+			}
+		}
+		return slugs;
 	}
 
 	/** Capture the current per-advisor spend ledger. */
@@ -494,13 +520,22 @@ export class SessionAdvisors {
 	 * completed while the background scan runs without double-counting entries
 	 * the scan already includes.
 	 */
-	restoreInitialCost(costs: ReadonlyMap<string, number>, costsAtSnapshot: ReadonlyMap<string, number>): void {
+	restoreInitialCost(
+		costs: ReadonlyMap<string, number>,
+		costsAtSnapshot: ReadonlyMap<string, number>,
+		providersBySlug?: ReadonlyMap<string, ReadonlySet<string>>,
+	): void {
 		const restored = new Map(costs);
+		const subscription = this.#deriveSubscriptionSlugs(costs, providersBySlug);
 		for (const [slug, current] of this.#advisorCosts) {
 			const accrued = current - (costsAtSnapshot.get(slug) ?? 0);
-			if (accrued > 0) restored.set(slug, (restored.get(slug) ?? 0) + accrued);
+			if (accrued <= 0) continue;
+			restored.set(slug, (restored.get(slug) ?? 0) + accrued);
+			// The delta billed after the snapshot carries its own live attribution.
+			if (this.#advisorSubscriptionSlugs.has(slug)) subscription.add(slug);
 		}
 		this.#advisorCosts = restored;
+		this.#advisorSubscriptionSlugs = subscription;
 	}
 
 	/**
