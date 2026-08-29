@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Ctrl+T "Thinking blocks: hidden" leaving long reasoning visible when it had already streamed into native scrollback as append-only stable rows; the toggle now forgets that emission ledger so the display reset re-renders those blocks hidden ([#10177](https://github.com/can1357/oh-my-pi/issues/10177)).
+
 ## [18.0.10] - 2026-08-28
 
 ### Added
