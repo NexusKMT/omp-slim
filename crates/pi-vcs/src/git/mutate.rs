@@ -1425,26 +1425,15 @@ mod tests {
 		// did not advance past the snapshot's (sub-second writes / coarse mtime
 		// filesystems), failing with "nothing to commit, working tree clean".
 		let (temp, repo) = fixture();
-		let index_path = repo.info().git_dir.join("index");
 		// Pin the mtime so the snapshot captured while staging and the index the
 		// write leaves behind collide on the exact same tick.
-		let pinned =
-			std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-		let pin = |path: &Path| {
-			fs::File::options()
-				.write(true)
-				.open(path)
-				.unwrap()
-				.set_modified(pinned)
-				.unwrap();
-		};
-		pin(&index_path);
+		crate::git::pin_index_mtime(&repo);
 
 		fs::write(temp.path().join("a"), "changed\n").unwrap();
 		repo.stage_files(&["a".into()]).unwrap();
-		// Staging bumped the mtime; forcing it back to `pinned` reproduces the
-		// same-tick collision that made gix serve the pre-stage index.
-		pin(&index_path);
+		// Staging bumped the mtime; forcing it back reproduces the same-tick
+		// collision that made gix serve the pre-stage index.
+		crate::git::pin_index_mtime(&repo);
 
 		let sha = repo
 			.commit_create("change", &CommitOptions::default())

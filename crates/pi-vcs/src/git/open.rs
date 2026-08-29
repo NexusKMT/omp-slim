@@ -114,6 +114,22 @@ pub(crate) fn load_index_or_empty(
 	}
 }
 
+/// Start a status query with an index loaded directly from disk.
+///
+/// Supplying the index is required even after other read paths bypass the
+/// shared snapshot: [`gix::Repository::status`] otherwise reacquires that same
+/// mtime-gated snapshot internally.
+pub(crate) fn status_with_fresh_index<'repo>(
+	repo: &'repo gix::Repository,
+	op: &'static str,
+) -> Result<gix::status::Platform<'repo, gix::progress::Discard>> {
+	let index = load_index_or_empty(repo, op)?;
+	Ok(repo
+		.status(gix::progress::Discard)
+		.map_err(|err| Error::backend(op, err))?
+		.index(index.into()))
+}
+
 /// Open options for repositories the agent operates on.
 ///
 /// - Environment: deny `GIT_*` location/object overrides — operations bind to

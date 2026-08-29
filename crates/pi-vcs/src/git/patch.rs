@@ -1670,34 +1670,23 @@ mod tests {
 
 		// Freeze the index mtime so every read collides with the preceding write
 		// on the same tick — the exact race the fix removes.
-		let pinned =
-			std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-		let index_path = repo.info().git_dir.join("index");
-		let pin = || {
-			fs::File::options()
-				.write(true)
-				.open(&index_path)
-				.expect("open index")
-				.set_modified(pinned)
-				.expect("pin index mtime");
-		};
-		pin();
+		crate::git::pin_index_mtime(&repo);
 
 		repo.stage_hunks(
 			&[HunkSelection { path: "new-file.txt".into(), hunks: HunkSpec::All }],
 			Some(&raw),
 		)
 		.expect("stage new file");
-		pin();
+		crate::git::pin_index_mtime(&repo);
 		repo.commit_create("feat: add new file", &crate::types::CommitOptions::default())
 			.expect("commit new file");
-		pin();
+		crate::git::pin_index_mtime(&repo);
 		repo.stage_hunks(
 			&[HunkSelection { path: "tracked.txt".into(), hunks: HunkSpec::All }],
 			Some(&raw),
 		)
 		.expect("stage tracked file");
-		pin();
+		crate::git::pin_index_mtime(&repo);
 		repo.commit_create("fix: update tracked file", &crate::types::CommitOptions::default())
 			.expect("commit tracked file");
 

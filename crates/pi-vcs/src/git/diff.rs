@@ -4,7 +4,10 @@ use std::{fmt::Write as _, io::Write as _, path::Path};
 
 use gix::bstr::{BStr, BString, ByteSlice};
 
-use super::{GitRepo, open::load_index_or_empty};
+use super::{
+	GitRepo,
+	open::{load_index_or_empty, status_with_fresh_index},
+};
 use crate::{
 	error::{Error, Result},
 	types::{DiffOptions, NumstatEntry, ShowResult},
@@ -430,9 +433,7 @@ fn index_change(repo: &gix::Repository, change: gix::diff::index::Change) -> Res
 
 fn worktree_changes(repo: &gix::Repository, files: &[String]) -> Result<Vec<FileChange>> {
 	let patterns = bstring_patterns(files);
-	let mut iter = repo
-		.status(gix::progress::Discard)
-		.map_err(|err| Error::backend("git diff", err))?
+	let mut iter = status_with_fresh_index(repo, "git diff")?
 		.untracked_files(gix::status::UntrackedFiles::None)
 		.index_worktree_options_mut(|options| options.dirwalk_options = None)
 		.into_index_worktree_iter(patterns)
@@ -1336,6 +1337,50 @@ mod tests {
 				.diff_text(&DiffOptions::default())
 				.expect("intent-to-add diff"),
 			git(dir.path(), &["diff"])
+		);
+	}
+
+	#[test]
+	fn status_reads_observe_same_tick_stage_on_reused_handle() {
+		let dir = fixture();
+		fs::write(dir.path().join("file.txt"), "changed\n").expect("edit tracked");
+		fs::write(dir.path().join("new.txt"), "new\n").expect("write untracked");
+		let repo = GitRepo::discover(dir.path())
+			.expect("discover")
+			.expect("repository");
+
+		// Populate gix's shared index snapshot through status-backed diff before
+		// staging, then force the write back onto the same mtime tick.
+		crate::git::pin_index_mtime(&repo);
+		assert!(!repo.diff_text(&DiffOptions::default()).expect("initial diff").is_empty());
+		repo.stage_files(&["file.txt".into(), "new.txt".into()])
+			.expect("stage files");
+		crate::git::pin_index_mtime(&repo);
+
+		assert_eq!(
+			repo.diff_text(&DiffOptions::default()).expect("worktree diff"),
+			git(dir.path(), &["diff"])
+		);
+		assert_eq!(
+			repo
+				.status_porcelain(&crate::types::StatusOptions::default())
+				.expect("status"),
+			git(dir.path(), &["status", "--porcelain"])
+		);
+		assert_eq!(
+			repo.status_summary().expect("summary"),
+			crate::types::StatusSummary { staged: 2, unstaged: 0, untracked: 0 }
+		);
+		assert_eq!(repo.ls_files(true, true).expect("untracked files"), Vec::<String>::new());
+
+		repo.commit_create("stage all", &crate::types::CommitOptions::default())
+			.expect("commit staged files");
+		assert!(!repo.is_dirty().expect("clean after commit"));
+		assert_eq!(
+			repo
+				.status_porcelain(&crate::types::StatusOptions::default())
+				.expect("clean status"),
+			""
 		);
 	}
 
