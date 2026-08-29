@@ -3371,7 +3371,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// After the model-specific normalizers: they carry better wording for the
 			// cases they own (STB WebP), so this stays the backstop for everything
 			// else, and it runs before the blob broker uploads any of these bytes.
-			transformed = await dropUnreadableContextImages(transformed);
+			transformed = await dropUnreadableContextImages(transformed, transformModel);
 			if (blobBroker) transformed = await blobBroker.decorateContext(transformed, transformModel);
 			// Keep per-request volatility out of the system prompt: the date/cwd
 			// reminder rides on the first user turn so open-weight providers keep
@@ -4046,7 +4046,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						let transformed = obfuscator ? obfuscateProviderContext(obfuscator, context) : context;
 						transformed = clampProviderContextImages(transformed, transformModel);
 						transformed = await normalizeProviderContextImagesForModel(transformed, transformModel);
-						transformed = await dropUnreadableContextImages(transformed);
+						transformed = await dropUnreadableContextImages(transformed, transformModel);
 						if (blobBroker) transformed = await blobBroker.decorateContext(transformed, transformModel);
 						return withDateCwdReminder(
 							transformed,

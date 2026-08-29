@@ -11,11 +11,13 @@ import type {
 	Context,
 	ImageContent,
 	Message,
+	Model,
 	ProviderPayload,
 	TextContent,
 	ToolResultMessage,
 	UserMessage,
 } from "@oh-my-pi/pi-ai";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { dropUnreadableContextImages } from "@oh-my-pi/pi-coding-agent/session/provider-image-budget";
 
 /**
@@ -37,6 +39,23 @@ const MIDDLE_ELIDED_PNG = (() => {
 
 const INTACT_IMAGE: ImageContent = { type: "image", data: ODD_FRAMED_PNG, mimeType: "image/png" };
 const BROKEN_IMAGE: ImageContent = { type: "image", data: MIDDLE_ELIDED_PNG, mimeType: "image/png" };
+const OPENAI_RESPONSES_MODEL = buildModel({
+	id: "gpt-4.1",
+	name: "GPT 4.1",
+	api: "openai-responses",
+	provider: "openai",
+	baseUrl: "https://api.openai.com/v1",
+	reasoning: false,
+	input: ["text", "image"],
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	contextWindow: 128_000,
+	maxTokens: 4096,
+});
+const BEDROCK_MODEL: Model = {
+	...OPENAI_RESPONSES_MODEL,
+	api: "bedrock-converse-stream",
+	provider: "amazon-bedrock",
+};
 
 function userMessage(content: (TextContent | ImageContent)[], providerPayload?: ProviderPayload): UserMessage {
 	return {
@@ -113,7 +132,7 @@ describe("dropUnreadableContextImages", () => {
 			],
 		};
 
-		const guarded = await dropUnreadableContextImages(context);
+		const guarded = await dropUnreadableContextImages(context, OPENAI_RESPONSES_MODEL);
 
 		const guardedResult = guarded.messages[1];
 		if (guardedResult?.role !== "toolResult") throw new Error("expected a tool result");
@@ -127,7 +146,47 @@ describe("dropUnreadableContextImages", () => {
 	test("returns the original context when every image decodes", async () => {
 		const context: Context = { messages: [userMessage([{ type: "text", text: "look" }, INTACT_IMAGE])] };
 
-		expect(await dropUnreadableContextImages(context)).toBe(context);
+		expect(await dropUnreadableContextImages(context, OPENAI_RESPONSES_MODEL)).toBe(context);
+	});
+
+	test("degrades empty inline data and provider references unusable by the active API", async () => {
+		const emptyInline: ImageContent = { type: "image", data: "", mimeType: "image/png" };
+		const foreignReference: ImageContent = {
+			...BROKEN_IMAGE,
+			providerFile: { provider: "anthropic", id: "file-anthropic" },
+		};
+		const context: Context = { messages: [userMessage([emptyInline, foreignReference])] };
+
+		const guarded = await dropUnreadableContextImages(context, OPENAI_RESPONSES_MODEL);
+		const message = guarded.messages[0];
+		if (message?.role !== "user" || !Array.isArray(message.content)) throw new Error("expected user content");
+		expect(textOf(message.content[0])).toContain("empty image data");
+		expect(textOf(message.content[1])).toContain("image omitted");
+
+		const urlContext: Context = {
+			messages: [userMessage([{ ...BROKEN_IMAGE, url: "https://blobs.example/corrupt.png" }])],
+		};
+		const guardedUrl = await dropUnreadableContextImages(urlContext, BEDROCK_MODEL);
+		const urlMessage = guardedUrl.messages[0];
+		if (urlMessage?.role !== "user" || !Array.isArray(urlMessage.content)) {
+			throw new Error("expected user content");
+		}
+		expect(textOf(urlMessage.content[0])).toContain("image omitted");
+	});
+
+	test("degrades malformed base64 and bytes that do not match the declared container", async () => {
+		const malformedBase64: ImageContent = {
+			...INTACT_IMAGE,
+			data: `${ODD_FRAMED_PNG.slice(0, 20)}!${ODD_FRAMED_PNG.slice(20)}`,
+		};
+		const mislabeled: ImageContent = { ...INTACT_IMAGE, mimeType: "image/jpeg" };
+		const context: Context = { messages: [userMessage([malformedBase64, mislabeled])] };
+
+		const guarded = await dropUnreadableContextImages(context, OPENAI_RESPONSES_MODEL);
+		const message = guarded.messages[0];
+		if (message?.role !== "user" || !Array.isArray(message.content)) throw new Error("expected user content");
+		expect(textOf(message.content[0])).toContain("invalid base64");
+		expect(textOf(message.content[1])).toContain("contains image/png");
 	});
 
 	/**
@@ -154,7 +213,7 @@ describe("dropUnreadableContextImages", () => {
 			messages: [userMessage([urlBacked, fileBacked]), toolResult([urlBacked, fileBacked])],
 		};
 
-		const guarded = await dropUnreadableContextImages(context);
+		const guarded = await dropUnreadableContextImages(context, OPENAI_RESPONSES_MODEL);
 
 		expect(guarded).toBe(context);
 		expect(guarded.messages[0]).toBe(context.messages[0]);
@@ -174,7 +233,7 @@ describe("dropUnreadableContextImages", () => {
 		);
 		const context: Context = { messages: [original] };
 
-		const guarded = await dropUnreadableContextImages(context);
+		const guarded = await dropUnreadableContextImages(context, OPENAI_RESPONSES_MODEL);
 
 		expect(guarded).not.toBe(context);
 		const parts = nativeContentParts(guarded.messages[0]!);
@@ -198,7 +257,18 @@ describe("dropUnreadableContextImages", () => {
 			],
 		};
 
-		expect(await dropUnreadableContextImages(context)).toBe(context);
+		expect(await dropUnreadableContextImages(context, OPENAI_RESPONSES_MODEL)).toBe(context);
+	});
+
+	test("degrades empty or malformed native data URIs instead of throwing", async () => {
+		for (const imageUrl of ["data:image/png,", "data:image/png,%ZZ"]) {
+			const context: Context = {
+				messages: [userMessage([{ type: "text", text: "look" }], nativeImagePayload(imageUrl))],
+			};
+
+			const guarded = await dropUnreadableContextImages(context, OPENAI_RESPONSES_MODEL);
+			expect(nativeTextOf(nativeContentParts(guarded.messages[0]!)[1])).toContain("image omitted");
+		}
 	});
 
 	/**
@@ -210,7 +280,7 @@ describe("dropUnreadableContextImages", () => {
 			messages: [userMessage([{ type: "text", text: "look" }], nativeImagePayload("https://cdn.example/shot.png"))],
 		};
 
-		expect(await dropUnreadableContextImages(context)).toBe(context);
+		expect(await dropUnreadableContextImages(context, OPENAI_RESPONSES_MODEL)).toBe(context);
 	});
 
 	/**
@@ -232,7 +302,7 @@ describe("dropUnreadableContextImages", () => {
 		};
 		const context: Context = { messages: [result] };
 
-		const guarded = await dropUnreadableContextImages(context);
+		const guarded = await dropUnreadableContextImages(context, OPENAI_RESPONSES_MODEL);
 
 		const guardedResult = guarded.messages[0];
 		if (guardedResult?.role !== "toolResult") throw new Error("expected a tool result");
@@ -253,6 +323,6 @@ describe("dropUnreadableContextImages", () => {
 		};
 		const context: Context = { messages: [result] };
 
-		expect(await dropUnreadableContextImages(context)).toBe(context);
+		expect(await dropUnreadableContextImages(context, OPENAI_RESPONSES_MODEL)).toBe(context);
 	});
 });

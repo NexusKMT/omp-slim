@@ -9,7 +9,14 @@ import type {
 	TextContent,
 } from "@oh-my-pi/pi-ai";
 import { rasterizeSvg } from "@oh-my-pi/pi-natives";
-import { formatBytes, isRecord, logger, readImageMetadata, SUPPORTED_IMAGE_MIME_TYPES } from "@oh-my-pi/pi-utils";
+import {
+	formatBytes,
+	isRecord,
+	logger,
+	parseImageMetadata,
+	readImageMetadata,
+	SUPPORTED_IMAGE_MIME_TYPES,
+} from "@oh-my-pi/pi-utils";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import { resolveReadPath } from "../tools/path-utils";
 import { formatDimensionNote, type ImageResizeOptions, resizeImage } from "./image-resize";
@@ -250,8 +257,15 @@ const DECODE_PROBE_EDGE_PX = 1;
  * truth on both sides. Callers on hot paths must cache the verdict.
  */
 export async function imageDecodeFailureReason(image: ImageContent): Promise<string | null> {
+	if (!/^[A-Za-z0-9+/]*={0,2}$/.test(image.data)) return "invalid base64 image data";
+	const normalizedData = image.data.replace(/=+$/, "");
 	const bytes = Buffer.from(image.data, "base64");
 	if (bytes.length === 0) return "empty image data";
+	if (bytes.toString("base64").replace(/=+$/, "") !== normalizedData) return "invalid base64 image data";
+	const detected = parseImageMetadata(bytes);
+	if (detected && detected.mimeType !== image.mimeType.toLowerCase()) {
+		return `declared ${image.mimeType} but contains ${detected.mimeType}`;
+	}
 	try {
 		// Decode in full (that is what catches a hole in the compressed stream),
 		// then terminate into a 1x1 raster's bytes instead of re-encoding at the

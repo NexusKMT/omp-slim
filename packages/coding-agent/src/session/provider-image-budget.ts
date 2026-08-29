@@ -14,6 +14,7 @@ import { decodeDataUri } from "@oh-my-pi/pi-ai/providers/openai-data-uri";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import { providerImageBudget } from "@oh-my-pi/snapcompact";
+import { supportsRemoteImageUrls } from "../blob-broker/context-images";
 import { imageDecodeFailureReason } from "../utils/image-loading";
 
 const TOOL_RESULT_IMAGE_OMISSION: TextContent = {
@@ -114,7 +115,9 @@ async function unreadableImageReason(image: ImageContent): Promise<string | null
  *
  * An `ImageContent` may legitimately carry EMPTY `data` beside an external
  * reference, and it is the reference — never those bytes — that the provider
- * receives. Two producers make exactly that shape:
+ * receives. Provider-file references displace inline bytes only on an API that
+ * understands that provider's reference shape; another API falls back to data.
+ * Two producers make the empty reference-backed shape:
  *   - `openai-responses-server.ts` `functionOutputContent()` represents a
  *     native `input_image` URL / file id as `{ data: "", url }` or
  *     `{ data: "", providerFile }`;
@@ -127,10 +130,37 @@ async function unreadableImageReason(image: ImageContent): Promise<string | null
  * reference-backed block would therefore destroy a perfectly good image over
  * bytes the provider is never sent.
  */
-function sendsInlineImageBytes(image: ImageContent): boolean {
-	if (image.providerFile?.id || image.providerFile?.uri) return false;
-	if (image.url) return false;
-	return image.data.length > 0;
+function sendsInlineImageBytes(image: ImageContent, model: Model): boolean {
+	const reference = image.providerFile;
+	if (reference) {
+		switch (reference.provider) {
+			case "openai":
+				if (
+					reference.id &&
+					(model.api === "openai-responses" ||
+						model.api === "openai-codex-responses" ||
+						model.api === "azure-openai-responses")
+				) {
+					return false;
+				}
+				break;
+			case "anthropic":
+				if (reference.id && model.api === "anthropic-messages") return false;
+				break;
+			case "google":
+				if (
+					reference.uri &&
+					(model.api === "google-generative-ai" ||
+						model.api === "google-gemini-cli" ||
+						model.api === "google-vertex")
+				) {
+					return false;
+				}
+				break;
+		}
+	}
+	if (image.url && supportsRemoteImageUrls(model)) return false;
+	return true;
 }
 
 /**
@@ -140,19 +170,27 @@ function sendsInlineImageBytes(image: ImageContent): boolean {
  */
 function inlineImageFromDataUri(imageUrl: unknown): ImageContent | undefined {
 	if (typeof imageUrl !== "string") return undefined;
-	const decoded = decodeDataUri(imageUrl);
-	if (!decoded || decoded.data.length === 0) return undefined;
-	return { type: "image", data: decoded.data, mimeType: decoded.mimeType };
+	try {
+		const decoded = decodeDataUri(imageUrl);
+		return decoded ? { type: "image", data: decoded.data, mimeType: decoded.mimeType } : undefined;
+	} catch {
+		// A malformed percent escape is itself unreadable inline data. Return an
+		// empty probe so the caller degrades it instead of wedging on URI decoding.
+		return imageUrl.slice(0, 5).toLowerCase() === "data:"
+			? { type: "image", data: "", mimeType: "application/octet-stream" }
+			: undefined;
+	}
 }
 
 /** `undefined` when every image decodes, so callers can keep the original array. */
 async function replaceUnreadableContent(
 	content: readonly (TextContent | ImageContent)[],
+	model: Model,
 ): Promise<(TextContent | ImageContent)[] | undefined> {
 	let replaced: (TextContent | ImageContent)[] | undefined;
 	for (let index = 0; index < content.length; index++) {
 		const part = content[index];
-		if (part.type !== "image" || !sendsInlineImageBytes(part)) continue;
+		if (part.type !== "image" || !sendsInlineImageBytes(part, model)) continue;
 		const reason = await unreadableImageReason(part);
 		if (reason === null) continue;
 		replaced ??= [...content];
@@ -245,19 +283,21 @@ async function unreadableComputerScreenshotReason(
 }
 
 /** `undefined` when the message needs no rewrite. */
-async function dropUnreadableFromMessage(message: Message): Promise<Message | undefined> {
+async function dropUnreadableFromMessage(message: Message, model: Model): Promise<Message | undefined> {
 	switch (message.role) {
 		case "user":
 		case "developer": {
 			// Both views matter, and they can disagree: a native input image is
 			// stripped out of generic content and survives only on the payload.
-			const content = Array.isArray(message.content) ? await replaceUnreadableContent(message.content) : undefined;
+			const content = Array.isArray(message.content)
+				? await replaceUnreadableContent(message.content, model)
+				: undefined;
 			const providerPayload = await replaceUnreadableNativePayload(message.providerPayload);
 			if (!content && !providerPayload) return undefined;
 			return { ...message, ...(content ? { content } : {}), ...(providerPayload ? { providerPayload } : {}) };
 		}
 		case "toolResult": {
-			const content = await replaceUnreadableContent(message.content);
+			const content = await replaceUnreadableContent(message.content, model);
 			const screenshotReason = await unreadableComputerScreenshotReason(message.providerMetadata);
 			if (!content && screenshotReason === null) return undefined;
 			// Dropping the computer metadata is safe here specifically because the
@@ -290,10 +330,10 @@ async function dropUnreadableFromMessage(message: Message): Promise<Message | un
  * a computer result's `providerMetadata.screenshot`. Only bytes that actually
  * travel are checked — see {@link sendsInlineImageBytes}.
  */
-export async function dropUnreadableContextImages(context: Context): Promise<Context> {
+export async function dropUnreadableContextImages(context: Context, model: Model): Promise<Context> {
 	let messages: Message[] | undefined;
 	for (let index = 0; index < context.messages.length; index++) {
-		const rewritten = await dropUnreadableFromMessage(context.messages[index]);
+		const rewritten = await dropUnreadableFromMessage(context.messages[index], model);
 		if (!rewritten) continue;
 		messages ??= [...context.messages];
 		messages[index] = rewritten;
