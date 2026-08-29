@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.11] - 2026-08-29
+
 ### Fixed
 
 - Fixed Baseten GLM models, including GLM-5.3-Flash, being incorrectly classified as non-reasoning models.

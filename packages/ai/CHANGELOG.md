@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.11] - 2026-08-29
+
 ### Fixed
 
 - Fixed automatic session retries for Anthropic-compatible streams that end prematurely without a completion signal.

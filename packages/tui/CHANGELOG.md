@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.11] - 2026-08-29
+
 ### Added
 
 - Added `setTerminalHyperlinks()` to let hosts control OSC 8 hyperlink behavior in rendered Markdown links.

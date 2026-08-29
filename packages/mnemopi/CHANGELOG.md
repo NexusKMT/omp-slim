@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.11] - 2026-08-29
+
 ### Fixed
 
 - Fixed working-memory recall returning too few or no results after matching memories were invalidated.

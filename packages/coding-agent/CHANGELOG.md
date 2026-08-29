@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.11] - 2026-08-29
+
 ### Added
 
 - Added gallery previews for composer and status-line components, with CLI filters for browsing by surface, composer, or segment.

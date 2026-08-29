@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.0.11] - 2026-08-29
+
 ### Fixed
 
 - Fixed agent startup and context compaction failures for models with unrecognized tokenizer encodings.
