@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added ability to preview composer and status-line components in the gallery
+- Added CLI flags to filter gallery output by surface, composer, or segment
+
+### Changed
+
+- The status line now shows the thinking level as a compact icon on the model name by default (`statusLine.compactThinkingLevel` defaults to `true`).
+
 ## [18.0.10] - 2026-08-28
 
 ### Added

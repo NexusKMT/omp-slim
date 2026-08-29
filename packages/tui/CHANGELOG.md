@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Words starting with hex digits (e.g. `#each`) no longer render an inline color swatch for their hex-looking prefix (`#eac`); swatches now require the whole word to be a color.
+
 ## [18.0.10] - 2026-08-28
 
 ### Added

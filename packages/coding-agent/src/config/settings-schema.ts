@@ -839,7 +839,7 @@ export const SETTINGS_SCHEMA = {
 	},
 	"statusLine.compactThinkingLevel": {
 		type: "boolean",
-		default: false,
+		default: true,
 		ui: {
 			tab: "appearance",
 			group: "Status Line",

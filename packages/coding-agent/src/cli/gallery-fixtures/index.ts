@@ -26,6 +26,8 @@ import { statusLineFixtures } from "./status-line";
 import { webFixtures } from "./web";
 
 export * from "./types";
+export * from "./composer";
+export * from "./segments";
 
 export const galleryFixtures = {
 	...interactionFixtures,
