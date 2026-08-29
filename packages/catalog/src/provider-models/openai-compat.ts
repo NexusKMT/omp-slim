@@ -12,6 +12,7 @@ import { FIREWORKS_FAST_SUFFIX, toFireworksPublicModelId } from "../fireworks-mo
 import { getBundledModelReferenceIndex } from "../identity/bundled";
 import {
 	anthropicModelSupportsThinking,
+	isGlm52ReasoningEffortModelId,
 	isGlmVisionModelId,
 	isGrokReasoningEffortCapable,
 	isKimiK3ModelId,
@@ -4152,7 +4153,7 @@ export interface BasetenModelManagerConfig {
 // A previous version of OMP shipped this model without reasoning levels. We've
 // since fixed that. This const lets us bust the cache so that users on that
 // version of OMP pick up the reasoning levels immediately.
-const BASETEN_CACHE_MIGRATION_MODEL_IDS = ["zai-org/GLM-5.3-Flash"] as const;
+const BASETEN_CACHE_MIGRATION_MODEL_IDS = ["zai-org/GLM-5.3", "zai-org/GLM-5.3-Flash"] as const;
 
 export function basetenModelManagerOptions(
 	config?: BasetenModelManagerConfig,
@@ -4180,7 +4181,7 @@ export function basetenModelManagerOptions(
 			// vocabulary, which OMP must not guess.
 			const isSupportedBasetenReasoningModel =
 				isKimiK3ModelId(defaults.id) ||
-				isReasoningGlmModelId(defaults.id) ||
+				isGlm52ReasoningEffortModelId(defaults.id) ||
 				defaults.id === "openai/gpt-oss-120b" ||
 				defaults.id === "deepseek-ai/DeepSeek-V4-Pro";
 			const reasoning =

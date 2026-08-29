@@ -64,6 +64,13 @@ describe("Baseten provider discovery", () => {
 							},
 						},
 						{
+							id: "zai-org/GLM-4.7",
+							object: "model",
+							name: "GLM 4.7",
+							supported_features: ["tools", "reasoning"],
+							input_modalities: ["text"],
+						},
+						{
 							id: "zai-org/GLM-5.2-Fast",
 							object: "model",
 							name: "GLM 5.2 Fast",
@@ -76,6 +83,13 @@ describe("Baseten provider discovery", () => {
 								completion: "0.0000066",
 								input_cache_read: "0.00000021",
 							},
+						},
+						{
+							id: "zai-org/GLM-5.3",
+							object: "model",
+							name: "GLM 5.3",
+							supported_features: ["tools", "reasoning"],
+							input_modalities: ["text"],
 						},
 						{
 							id: "zai-org/GLM-5.3-Flash",
@@ -153,6 +167,18 @@ describe("Baseten provider discovery", () => {
 		});
 
 		const glmFast = models?.find(model => model.id === "zai-org/GLM-5.2-Fast");
+		const glm47 = models?.find(model => model.id === "zai-org/GLM-4.7");
+		expect(glm47?.reasoning).toBe(false);
+
+		const glm53 = models?.find(model => model.id === "zai-org/GLM-5.3");
+		if (!glm53) throw new Error("Baseten GLM-5.3 was not discovered");
+		expect(glm53.reasoning).toBe(true);
+		expect(buildModel(glm53).thinking).toMatchObject({
+			mode: "effort",
+			efforts: ["low", "high", "max"],
+			defaultLevel: "max",
+		});
+
 		expect(glmFast).toBeDefined();
 		if (!glmFast) throw new Error("Baseten GLM-5.2 Fast was not discovered");
 		expect(buildModel(glmFast).thinking).toMatchObject({
@@ -184,85 +210,76 @@ describe("Baseten provider discovery", () => {
 		});
 	});
 
-	test("invalidates cached GLM-5.3-Flash reasoning metadata on upgrade", async () => {
-		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-baseten-glm53-flash-cache-"));
+	test("invalidates cached GLM-5.3 reasoning metadata on upgrade", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-baseten-glm53-cache-"));
 		const cacheDbPath = path.join(tempDir, "models.db");
-		const discoveredFlash: ModelSpec<"openai-completions"> = {
-			id: "zai-org/GLM-5.3-Flash",
-			name: "GLM 5.3 Flash",
-			api: "openai-completions",
-			provider: "baseten",
-			baseUrl: "https://inference.baseten.co/v1",
-			reasoning: true,
-			input: ["text", "image"],
-			cost: { input: 0.15, output: 0.5, cacheRead: 0.03, cacheWrite: 0 },
-			contextWindow: 1_048_576,
-			maxTokens: 131_072,
-		};
-		const discoveryPayload = {
-			data: [
-				{
-					id: "zai-org/GLM-5.3-Flash",
-					object: "model",
-					name: "GLM 5.3 Flash",
-					context_length: 1048576,
-					max_completion_tokens: 131072,
-					supported_features: ["tools", "json_mode", "structured_outputs", "reasoning"],
-					input_modalities: ["text", "image"],
-					pricing: {
-						prompt: "0.00000015",
-						completion: "0.0000005",
-						input_cache_read: "0.00000003",
-					},
-				},
-			],
-		};
-		const fetchMock: FetchImpl = async () =>
-			new Response(JSON.stringify(discoveryPayload), {
-				status: 200,
-				headers: { "content-type": "application/json" },
-			});
+		const discoveredModels: ModelSpec<"openai-completions">[] = [
+			{
+				id: "zai-org/GLM-5.3",
+				name: "GLM 5.3",
+				api: "openai-completions",
+				provider: "baseten",
+				baseUrl: "https://inference.baseten.co/v1",
+				reasoning: true,
+				input: ["text"],
+				cost: { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0 },
+				contextWindow: 1_048_576,
+				maxTokens: 131_072,
+			},
+			{
+				id: "zai-org/GLM-5.3-Flash",
+				name: "GLM 5.3 Flash",
+				api: "openai-completions",
+				provider: "baseten",
+				baseUrl: "https://inference.baseten.co/v1",
+				reasoning: true,
+				input: ["text", "image"],
+				cost: { input: 0.15, output: 0.5, cacheRead: 0.03, cacheWrite: 0 },
+				contextWindow: 1_048_576,
+				maxTokens: 131_072,
+			},
+		];
 
 		try {
-			// Pass 1: write a fresh authoritative cache under the PRE-fix identity
-			// (no migration list) whose row carries the stale pre-fix computed
-			// value: reasoning false, no thinking.
+			// Pass 1: write a fresh authoritative cache under the pre-fix identity
+			// whose GLM-5.3 rows carry the stale computed value.
 			await resolveProviderModels(
 				{
-					...basetenModelManagerOptions({ apiKey: "k", fetch: fetchMock }),
+					...basetenModelManagerOptions({ apiKey: "k" }),
 					cacheDbPath,
 					dropCachedModelIdsOnStaticMismatch: undefined,
-					fetchDynamicModels: async () => [{ ...discoveredFlash, reasoning: false, input: ["text", "image"] }],
+					fetchDynamicModels: async () => discoveredModels.map(model => ({ ...model, reasoning: false })),
 				},
 				"online",
 			);
 			const priorCache = readModelCache("baseten", Number.POSITIVE_INFINITY, Date.now, cacheDbPath);
 			if (!priorCache) throw new Error("Baseten cache was not written");
 
-			// Pass 2: the fixed options object (migration list active) reading that
-			// cache with the default strategy — the stale row must NOT be served;
-			// discovery re-runs and re-derives the corrected metadata.
+			// Pass 2: the migration policy must force discovery and replace both
+			// corrected rows rather than serving either stale cache entry.
 			let fetches = 0;
 			const upgraded = await resolveProviderModels(
 				{
-					...basetenModelManagerOptions({ apiKey: "k", fetch: fetchMock }),
+					...basetenModelManagerOptions({ apiKey: "k" }),
 					cacheDbPath,
 					fetchDynamicModels: async () => {
 						fetches++;
-						return [discoveredFlash];
+						return discoveredModels;
 					},
 				},
 				"online-if-uncached",
 			);
-			const flash = upgraded.models.find(model => model.id === "zai-org/GLM-5.3-Flash");
 			expect(fetches).toBe(1);
-			expect(flash?.reasoning).toBe(true);
-			expect(flash?.thinking).toEqual({
-				mode: "effort",
-				efforts: [Effort.Low, Effort.High, Effort.Max],
-				defaultLevel: Effort.Max,
-				requiresEffort: true,
-			});
+			for (const id of ["zai-org/GLM-5.3", "zai-org/GLM-5.3-Flash"]) {
+				const model = upgraded.models.find(candidate => candidate.id === id);
+				expect(model?.reasoning).toBe(true);
+				expect(model?.thinking).toEqual({
+					mode: "effort",
+					efforts: [Effort.Low, Effort.High, Effort.Max],
+					defaultLevel: Effort.Max,
+					requiresEffort: true,
+				});
+			}
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
