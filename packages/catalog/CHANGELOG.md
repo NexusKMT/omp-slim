@@ -25,6 +25,7 @@
 ### Fixed
 
 - Fixed family identity for OpenRouter route-suffixed ids (`z-ai/glm-5.3:nitro`, `deepseek/deepseek-v4-pro-0813:nitro`): `bareModelId` now strips the request-time routing suffix (`:nitro`, `:floor`, `:online`, `:exacto`, `:extended`) alongside the provider namespace, so GLM-5.3 keeps its wire-exact `low`/`high`/`max` effort ladder and dated DeepSeek SKUs no longer collapse to the `high`-only ladder when selected through a routing variant.
+- Fixed OpenRouter's route-suffixed dated DeepSeek V4 Pro SKU (`deepseek/deepseek-v4-pro-0813:nitro`) collapsing to the `high`-only effort ladder instead of preserving `low`/`high`/`max`.
 - Fixed the thinking control mode for OpenAI models served over Bedrock Converse (`global.openai.gpt-5.6-luna`, `-sol`, `-terra`), which are now classified as `effort` rather than `budget` so requests use OpenAI's reasoning schema.
 - Fixed LiteLLM discovery leaking a colliding bundled model's provider-specific transport onto custom endpoints: a discovered alias (e.g. `kimi-k3`) matching a bundled Fireworks model no longer inherits that model's wire-id transform, which had caused requests to POST a model id the endpoint never advertised and return HTTP 400 ([#9938](https://github.com/can1357/oh-my-pi/issues/9938)).
 

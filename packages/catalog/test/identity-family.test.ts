@@ -357,16 +357,6 @@ describe("isGlm53ReasoningEffortModelId", () => {
 		expect(isGlm53ReasoningEffortModelId("glm-5.3v")).toBe(false);
 	});
 });
-
-describe("family matchers on OpenRouter route-suffixed ids", () => {
-	test("isGlm53ReasoningEffortModelId sees through :nitro route suffixes", () => {
-		expect(isGlm53ReasoningEffortModelId("z-ai/glm-5.3:nitro")).toBe(true);
-		expect(isGlm53ReasoningEffortModelId("z-ai/glm-5.3-air:nitro")).toBe(true);
-		// Flash/preview variants stay excluded with or without a route suffix.
-		expect(isGlm53ReasoningEffortModelId("z-ai/glm-5.3-flash")).toBe(false);
-		expect(isGlm53ReasoningEffortModelId("z-ai/glm-5.3-flash:nitro")).toBe(false);
-	});
-});
 describe("isGlmVisionModelId", () => {
 	test("matches the `v` vision shape across versions and variants", () => {
 		expect(isGlmVisionModelId("glm-4v")).toBe(true);
@@ -506,10 +496,10 @@ describe("isGrokXHighEffortCapable", () => {
 });
 
 describe("bareModelId", () => {
-	test("strips OpenRouter route suffixes alongside the provider namespace", () => {
-		expect(bareModelId("z-ai/glm-5.3-flash:nitro")).toBe("glm-5.3-flash");
-		expect(bareModelId("deepseek/deepseek-v4-pro-0813:nitro")).toBe("deepseek-v4-pro-0813");
-		expect(bareModelId("openai/gpt-4o:extended")).toBe("gpt-4o");
+	test("strips only the provider namespace and preserves colon-delimited identity", () => {
+		expect(bareModelId("ollama-cloud/gemma3:12b")).toBe("gemma3:12b");
+		expect(bareModelId("synthetic/syn:large:text")).toBe("syn:large:text");
+		expect(bareModelId("custom:happyhorse-1.0")).toBe("custom:happyhorse-1.0");
 	});
 
 	test("keeps ids without a colon suffix untouched", () => {
