@@ -3706,6 +3706,64 @@ describe("AgentSession retry fallback", () => {
 		expect(lastAssistant.content).toContainEqual({ type: "text", text: "Recovered after Anthropic envelope retry" });
 	});
 
+	it("auto-retries Anthropic stream-envelope failures before message_stop", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model) {
+			throw new Error("Expected bundled Anthropic test model to exist");
+		}
+
+		const envelopeError = "Anthropic stream envelope error: stream ended before message_stop";
+		const requestedModels: string[] = [];
+
+		const mock = createMockModel({
+			responses: [{ throw: envelopeError }, { content: ["Recovered after Anthropic envelope retry"] }],
+		});
+		const agent = new Agent({
+			getApiKey: model => `${model.provider}-test-key`,
+			initialState: {
+				model,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+			},
+			streamFn: (requestedModel, context, options) => {
+				requestedModels.push(`${requestedModel.provider}/${requestedModel.id}`);
+				return mock.stream(requestedModel, context, options);
+			},
+		});
+
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 5,
+			"retry.maxRetries": 1,
+		});
+		settings.setModelRole("default", `${model.provider}/${model.id}`);
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+		const { retryStartEvents, retryEndEvents } = trackRetryEvents(session);
+
+		await session.prompt("Retry Anthropic envelope failure before message_stop");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual([`${model.provider}/${model.id}`, `${model.provider}/${model.id}`]);
+		expect(retryStartEvents).toHaveLength(1);
+		expect(retryStartEvents[0]).toMatchObject({
+			attempt: 1,
+			maxAttempts: 1,
+			errorMessage: envelopeError,
+		});
+		expect(retryEndEvents).toHaveLength(1);
+		expect(retryEndEvents[0]).toMatchObject({ success: true, attempt: 1 });
+		const lastAssistant = getLastAssistantMessage(session);
+		expect(lastAssistant.stopReason).toBe("stop");
+		expect(lastAssistant.content).toContainEqual({ type: "text", text: "Recovered after Anthropic envelope retry" });
+	});
+
 	it("falls back on mid-stream Anthropic envelope failures without same-model retries", async () => {
 		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
 		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
