@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed session-level auto-retry never firing for empty (`contentBlocks: 0`) Anthropic stream truncations reported as `stream ended before message_stop`, matching the existing retry behavior already applied to `stream ended before message_start`.
+- Fixed session auto-retry for empty Anthropic streams truncated before `message_stop` ([#10113](https://github.com/can1357/oh-my-pi/issues/10113)).
 
 ## [18.0.9] - 2026-08-28
 
