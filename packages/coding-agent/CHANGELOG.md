@@ -28,6 +28,9 @@
 ### Fixed
 
 - Fixed `omp plugin features` failing to find marketplace-installed plugins.
+### Fixed
+
+- Fixed Escape aborting an active turn when dismissing the `/session` information panel; the panel now owns focus until closed.
 
 ## [18.0.10] - 2026-08-28
 
