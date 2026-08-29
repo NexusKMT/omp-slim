@@ -28,6 +28,11 @@ type ModelListValidationOptions = {
 	fetch?: FetchImpl;
 };
 
+type ErrorEnvelope = {
+	details: string;
+	code: string | undefined;
+};
+
 const VALIDATION_TIMEOUT_MS = 15_000;
 
 function normalizeAnthropicCompatibleBaseUrl(baseUrl: string): string {
@@ -41,7 +46,7 @@ function resolveValidationHeaders(
 	return typeof headers === "function" ? headers() : headers;
 }
 
-async function readErrorEnvelope(response: Response): Promise<{ details: string; code: string | undefined }> {
+async function readErrorEnvelope(response: Response): Promise<ErrorEnvelope> {
 	let details = "";
 	try {
 		details = (await response.text()).trim();
@@ -59,8 +64,12 @@ async function readErrorEnvelope(response: Response): Promise<{ details: string;
 	return { details, code };
 }
 
-async function createApiKeyValidationError(provider: string, response: Response): Promise<ProviderHttpError> {
-	const { details, code } = await readErrorEnvelope(response);
+async function createApiKeyValidationError(
+	provider: string,
+	response: Response,
+	envelope?: ErrorEnvelope,
+): Promise<ProviderHttpError> {
+	const { details, code } = envelope ?? (await readErrorEnvelope(response));
 
 	const message = details
 		? `${provider} API key validation failed (${response.status}): ${details}`
@@ -97,15 +106,12 @@ export async function validateOpenAICompatibleApiKey(options: OpenAICompatibleVa
 		return;
 	}
 
-	const { details, code } = await readErrorEnvelope(response);
-	if (options.tolerateModelDenied && response.status === 401 && code === "invalid_model") {
+	const envelope = await readErrorEnvelope(response);
+	if (options.tolerateModelDenied && response.status === 401 && envelope.code === "invalid_model") {
 		return;
 	}
 
-	const message = details
-		? `${options.provider} API key validation failed (${response.status}): ${details}`
-		: `${options.provider} API key validation failed (${response.status})`;
-	throw new ProviderHttpError(message, response.status, { headers: response.headers, code });
+	throw await createApiKeyValidationError(options.provider, response, envelope);
 }
 
 /**

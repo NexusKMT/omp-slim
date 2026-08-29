@@ -168,6 +168,7 @@ describe("model-denied 401 triage", () => {
 		expect((error as ProviderHttpError).status).toBe(401);
 		expect((error as ProviderHttpError).code).toBe("invalid_iam_token");
 		expect(error.message).toContain("qianfan API key validation failed (401)");
+		expect(error.message).toContain("invalid IAM token");
 	});
 
 	it("exposes the provider error code on the thrown error for diagnostics", async () => {
