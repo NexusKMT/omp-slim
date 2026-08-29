@@ -474,6 +474,11 @@ export function resolveProviderModelReference(
 		return undefined;
 	}
 
+	// OpenRouter route suffixes (`:nitro`, `:floor`, `:online`, `:exacto`, `:extended`)
+	// are request-time routing shortcuts that never appear in any catalog or discovery
+	// listing, so the exact lookup above cannot see them. Fall back through the
+	// suffix/date-stripped candidate chain to the base catalog model and clone it with
+	// the requested id, preserving route semantics on the wire.
 	for (const fallbackId of getOpenRouterFallbackModelIds(modelId).slice(1)) {
 		const fallback = index.get(`${normalizedProvider}\u0000${fallbackId.toLowerCase()}`);
 		if (fallback === null) {
