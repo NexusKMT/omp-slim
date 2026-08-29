@@ -6,6 +6,7 @@
 
 - Fixed issue where GLM models being served from Baseten were not being resolved as reasoning models. This immediately fixes Baseten `zai-org/GLM-5.3-Flash` and should fix future GLM models added.
 - Fixed Cloudflare AI Gateway shared-catalog refresh to include active Workers AI chat models, including newly released models not present in the bundled snapshot.
+- Fixed Cursor Kimi K3, Grok 4, and Composer 2.5 models being treated as text-only despite accepting image attachments.
 
 ## [18.0.9] - 2026-08-28
 
