@@ -549,7 +549,7 @@ export async function discoverOAuthEndpoints(
 		const wellKnownPaths = base.issuerCandidate ? issuerWellKnownPaths : resourceWellKnownPaths;
 		for (const path of wellKnownPaths) {
 			// Try each well-known path at both the absolute origin and relative
-			const urlsToTry = buildWellKnownUrls(path, base.url);
+			const urlsToTry = buildWellKnownUrls(path, base.url, base.issuerCandidate);
 			for (const url of urlsToTry) {
 				try {
 					const response = await fetchImpl(url.toString(), {
@@ -609,7 +609,7 @@ export async function discoverOAuthEndpoints(
 }
 
 /** Build ordered metadata URL candidates for OAuth and OIDC discovery. */
-export function buildWellKnownUrls(wellKnownPath: string, baseUrl: string): URL[] {
+export function buildWellKnownUrls(wellKnownPath: string, baseUrl: string, issuerCandidate: boolean): URL[] {
 	let parsed: URL;
 	try {
 		parsed = new URL(baseUrl);
@@ -640,7 +640,14 @@ export function buildWellKnownUrls(wellKnownPath: string, baseUrl: string): URL[
 		}
 	};
 
-	if (wellKnownPath === "/.well-known/openid-configuration") {
+	if (!issuerCandidate) {
+		// Resource URLs retain the gateway-compatible ordering: the parent-relative
+		// fallback must not wait behind issuer-only probes that may time out.
+		push(relUrl);
+		if (wellKnownPath.startsWith("/.well-known/")) {
+			push(new URL(`${wellKnownPath}${normalizedPath}`, parsed.origin));
+		}
+	} else if (wellKnownPath === "/.well-known/openid-configuration") {
 		// OIDC Discovery §4 standard form is <issuer>/.well-known/openid-configuration;
 		// try it before the parent-relative and RFC 8414 compatibility fallbacks.
 		push(new URL(`${normalizedPath}${wellKnownPath}`, parsed.origin));

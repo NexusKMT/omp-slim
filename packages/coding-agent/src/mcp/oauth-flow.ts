@@ -670,6 +670,7 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
 		const candidates = buildWellKnownUrls(
 			"/.well-known/oauth-authorization-server",
 			this.config.issuerUrl ?? this.config.authorizationUrl,
+			this.config.issuerUrl !== undefined,
 		);
 		for (const url of candidates) {
 			const endpoint = await this.#tryWellKnownForRegistration(url.toString());
