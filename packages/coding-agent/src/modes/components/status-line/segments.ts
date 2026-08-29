@@ -504,7 +504,6 @@ const costSegment: StatusLineSegment = {
 		const normalizedPremiumRequests = normalizePremiumRequests(premiumRequests);
 		const state = ctx.session.state;
 		const usingSubscription = state.model ? (ctx.session.modelRegistry?.isUsingOAuth(state.model) ?? false) : false;
-		const advisorUsingSubscription = ctx.session.isAdvisorUsingSubscription?.() ?? false;
 
 		if (!cost && !advisorCost && !usingSubscription && !normalizedPremiumRequests) {
 			return { content: "", visible: false };
@@ -521,6 +520,11 @@ const costSegment: StatusLineSegment = {
 		if (normalizedPremiumRequests) billingParts.push(`★ ${formatNumber(normalizedPremiumRequests)}`);
 		if (advisorCost) {
 			const prefix = billingParts.length ? "+ " : "";
+			// Resolve the advisor subscription flag lazily: with no active advisor
+			// it walks the whole model catalog (getAvailable → hasAuth per provider
+			// → credential-file reads), and the status line re-renders at the
+			// working-spinner cadence, so an eager per-frame probe pinned CPU (#10129).
+			const advisorUsingSubscription = ctx.session.isAdvisorUsingSubscription?.() ?? false;
 			billingParts.push(`${prefix}${formatAdvisorSpend(advisorCost, advisorUsingSubscription, theme)}`);
 		}
 		if (billingParts.length === 0) return { content: "", visible: false };
