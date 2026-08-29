@@ -2307,6 +2307,8 @@ describe("AgentSession retry fallback", () => {
 			});
 			expect(session.model?.provider).toBe(primaryModel.provider);
 			expect(session.model?.id).toBe(primaryModel.id);
+			await session.dispose();
+			session = undefined;
 		}
 	});
 
