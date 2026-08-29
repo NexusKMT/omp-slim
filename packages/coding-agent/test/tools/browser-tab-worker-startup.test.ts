@@ -1,4 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+
+// Browser global read inside page.evaluate callbacks; absent from bun-types.
+declare const devicePixelRatio: number;
+
 import {
 	acquireBrowser,
 	type BrowserHandle,

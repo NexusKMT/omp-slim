@@ -134,8 +134,7 @@ impl GitRepo {
 /// Pin the worktree index mtime to reproduce same-tick snapshot races in tests.
 #[cfg(test)]
 pub(crate) fn pin_index_mtime(repo: &GitRepo) {
-	let pinned =
-		std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+	let pinned = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
 	std::fs::File::options()
 		.write(true)
 		.open(repo.info().git_dir.join("index"))

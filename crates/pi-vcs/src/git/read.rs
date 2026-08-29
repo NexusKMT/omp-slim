@@ -247,8 +247,7 @@ impl GitRepo {
 			UntrackedMode::Normal => gix::status::UntrackedFiles::Collapsed,
 			UntrackedMode::All => gix::status::UntrackedFiles::Files,
 		};
-		let platform = status_with_fresh_index(&repo, "git status")?
-			.untracked_files(untracked);
+		let platform = status_with_fresh_index(&repo, "git status")?.untracked_files(untracked);
 		let iter = platform
 			.into_iter(options.pathspecs.iter().map(|path| path.as_bytes().into()))
 			.map_err(|err| Error::backend("git status", err))?;

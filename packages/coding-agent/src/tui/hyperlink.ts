@@ -80,9 +80,12 @@ function resolveHyperlinkMode(mode: HyperlinkMode): boolean {
  * ever writes the effective decision; `auto` transitions restore real detection
  * via {@link isHyperlinkEnabled}. Called at TUI startup and whenever the setting
  * changes at runtime.
+ * Accepts the raw (unvalidated) setting value; anything but a known mode falls
+ * back to the setting-resolved default.
  */
-export function applyHyperlinkSetting(mode?: HyperlinkMode): void {
-	setTerminalHyperlinks(mode === undefined ? isHyperlinkEnabled() : resolveHyperlinkMode(mode));
+export function applyHyperlinkSetting(mode?: unknown): void {
+	const valid = mode === "off" || mode === "auto" || mode === "always" ? mode : undefined;
+	setTerminalHyperlinks(valid === undefined ? isHyperlinkEnabled() : resolveHyperlinkMode(valid));
 }
 
 function safeHyperlinkUri(uri: string): string | undefined {

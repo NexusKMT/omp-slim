@@ -69,10 +69,10 @@ impl GitRepo {
 /// `recent_snapshot` notes it "relies on sub-section precision or else is a
 /// race … up to the caller"). The in-process mutators here write a fresh index
 /// within the same mtime tick as the read that populated the snapshot, so a
-/// later read through that snapshot would return the pre-mutation index — e.g. a
-/// commit right after staging sees an unchanged tree and fails with "nothing to
-/// commit, working tree clean". Reading the index from disk makes mutate→read
-/// deterministic regardless of filesystem timestamp granularity.
+/// later read through that snapshot would return the pre-mutation index — e.g.
+/// a commit right after staging sees an unchanged tree and fails with "nothing
+/// to commit, working tree clean". Reading the index from disk makes
+/// mutate→read deterministic regardless of filesystem timestamp granularity.
 pub(crate) fn load_index_or_head(
 	repo: &gix::Repository,
 	op: &'static str,

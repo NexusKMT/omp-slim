@@ -350,8 +350,10 @@ export async function runGalleryCommand(args: GalleryCommandArgs): Promise<void>
 		);
 		return;
 	}
-	if (surfaces.includes("segment") && args.segment && !getSegmentGalleryInventory().includes(args.segment)) {
-		process.stdout.write(`Unknown segment '${args.segment}'. Known segments: ${getSegmentGalleryInventory().join(", ")}\n`);
+	if (surfaces.includes("segment") && args.segment && !getSegmentGalleryInventory().some(id => id === args.segment)) {
+		process.stdout.write(
+			`Unknown segment '${args.segment}'. Known segments: ${getSegmentGalleryInventory().join(", ")}\n`,
+		);
 		return;
 	}
 

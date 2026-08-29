@@ -1352,13 +1352,21 @@ mod tests {
 		// Populate gix's shared index snapshot through status-backed diff before
 		// staging, then force the write back onto the same mtime tick.
 		crate::git::pin_index_mtime(&repo);
-		assert!(!repo.diff_text(&DiffOptions::default()).expect("initial diff").is_empty());
-		repo.stage_files(&["file.txt".into(), "new.txt".into()])
+		assert!(
+			!repo
+				.diff_text(&DiffOptions::default())
+				.expect("initial diff")
+				.is_empty()
+		);
+		repo
+			.stage_files(&["file.txt".into(), "new.txt".into()])
 			.expect("stage files");
 		crate::git::pin_index_mtime(&repo);
 
 		assert_eq!(
-			repo.diff_text(&DiffOptions::default()).expect("worktree diff"),
+			repo
+				.diff_text(&DiffOptions::default())
+				.expect("worktree diff"),
 			git(dir.path(), &["diff"])
 		);
 		assert_eq!(
@@ -1367,13 +1375,15 @@ mod tests {
 				.expect("status"),
 			git(dir.path(), &["status", "--porcelain"])
 		);
-		assert_eq!(
-			repo.status_summary().expect("summary"),
-			crate::types::StatusSummary { staged: 2, unstaged: 0, untracked: 0 }
-		);
+		assert_eq!(repo.status_summary().expect("summary"), crate::types::StatusSummary {
+			staged:    2,
+			unstaged:  0,
+			untracked: 0,
+		});
 		assert_eq!(repo.ls_files(true, true).expect("untracked files"), Vec::<String>::new());
 
-		repo.commit_create("stage all", &crate::types::CommitOptions::default())
+		repo
+			.commit_create("stage all", &crate::types::CommitOptions::default())
 			.expect("commit staged files");
 		assert!(!repo.is_dirty().expect("clean after commit"));
 		assert_eq!(

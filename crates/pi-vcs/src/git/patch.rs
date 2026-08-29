@@ -1672,22 +1672,26 @@ mod tests {
 		// on the same tick — the exact race the fix removes.
 		crate::git::pin_index_mtime(&repo);
 
-		repo.stage_hunks(
-			&[HunkSelection { path: "new-file.txt".into(), hunks: HunkSpec::All }],
-			Some(&raw),
-		)
-		.expect("stage new file");
+		repo
+			.stage_hunks(
+				&[HunkSelection { path: "new-file.txt".into(), hunks: HunkSpec::All }],
+				Some(&raw),
+			)
+			.expect("stage new file");
 		crate::git::pin_index_mtime(&repo);
-		repo.commit_create("feat: add new file", &crate::types::CommitOptions::default())
+		repo
+			.commit_create("feat: add new file", &crate::types::CommitOptions::default())
 			.expect("commit new file");
 		crate::git::pin_index_mtime(&repo);
-		repo.stage_hunks(
-			&[HunkSelection { path: "tracked.txt".into(), hunks: HunkSpec::All }],
-			Some(&raw),
-		)
-		.expect("stage tracked file");
+		repo
+			.stage_hunks(
+				&[HunkSelection { path: "tracked.txt".into(), hunks: HunkSpec::All }],
+				Some(&raw),
+			)
+			.expect("stage tracked file");
 		crate::git::pin_index_mtime(&repo);
-		repo.commit_create("fix: update tracked file", &crate::types::CommitOptions::default())
+		repo
+			.commit_create("fix: update tracked file", &crate::types::CommitOptions::default())
 			.expect("commit tracked file");
 
 		assert_eq!(
