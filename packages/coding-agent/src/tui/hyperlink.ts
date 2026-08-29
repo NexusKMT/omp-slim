@@ -20,6 +20,12 @@ const OSC = "\x1b]";
 const ST = "\x1b\\";
 const BEL = "\x07";
 
+/**
+ * The terminal's detected OSC 8 capability, captured once at import before any
+ * policy application mutates {@link TERMINAL}.hyperlinks. `auto` resolves against
+ * this immutable value so a prior `always`/`off` selection can never poison
+ * detection when the user switches back to `auto`.
+ */
 const DETECTED_TERMINAL_HYPERLINKS = TERMINAL.hyperlinks;
 
 /** Stable 8-char hex ID derived from a URI — hints terminals to coalesce identical adjacent links. */
@@ -54,23 +60,24 @@ export function isHyperlinkEnabled(): boolean {
 	const mode = settings.get("tui.hyperlinks");
 	if (mode === "off") return false;
 	if (mode === "always") return true;
-	// auto: respect terminal capabilities and NO_COLOR
+	// auto: respect the detected capability (immutable snapshot, not the mutable
+	// runtime flag that applyHyperlinkSetting overwrites) and NO_COLOR.
 	if (Bun.env.NO_COLOR) return false;
 	if (!process.stdout.isTTY) return false;
-	return TERMINAL.hyperlinks;
+	return DETECTED_TERMINAL_HYPERLINKS;
 }
 
 /**
- * Apply the current `tui.hyperlinks` policy to renderers that read
- * {@link TERMINAL}.hyperlinks directly.
+ * Push the resolved `tui.hyperlinks` policy into {@link TERMINAL}.hyperlinks, the
+ * effective flag that pi-tui renderers gating on it directly — the Markdown
+ * component's `[text](url)`/bare-URL links and the status-line PR link — consult.
  *
- * Auto mode first restores the process-start capability because prior
- * `always`/`off` applications overwrite the mutable runtime flag.
+ * Detection stays immutable in {@link DETECTED_TERMINAL_HYPERLINKS}, so this only
+ * ever writes the effective decision; `auto` transitions restore real detection
+ * via {@link isHyperlinkEnabled}. Called at TUI startup and whenever the setting
+ * changes at runtime.
  */
 export function applyHyperlinkSetting(): void {
-	if (isSettingsInitialized() && settings.get("tui.hyperlinks") === "auto") {
-		setTerminalHyperlinks(DETECTED_TERMINAL_HYPERLINKS);
-	}
 	setTerminalHyperlinks(isHyperlinkEnabled());
 }
 
