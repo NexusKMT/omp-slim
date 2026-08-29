@@ -5,9 +5,7 @@ const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAM
 
 describe("decodeDataUri", () => {
 	test("decodes percent-encoded binary bytes without requiring valid UTF-8", () => {
-		const encoded = Array.from(Buffer.from(PNG, "base64"), byte =>
-			`%${byte.toString(16).padStart(2, "0")}`,
-		).join("");
+		const encoded = Array.from(Buffer.from(PNG, "base64"), byte => `%${byte.toString(16).padStart(2, "0")}`).join("");
 
 		expect(decodeDataUri(`data:image/png,${encoded}`)).toEqual({ mimeType: "image/png", data: PNG });
 	});

@@ -1,8 +1,8 @@
 import { renderComposerShapePreview } from "../../modes/components/composer-shape-preview";
 import { getComposerShapeOptions } from "../../modes/components/composer-shape-registry";
 import { StatusLineComponent } from "../../modes/components/status-line";
-import type { GalleryPreviewEntry } from "./types";
 import { createGallerySession } from "./preview-session";
+import type { GalleryPreviewEntry } from "./types";
 
 /** Production composer registry in selector order. */
 export function getComposerGalleryInventory(): readonly string[] {

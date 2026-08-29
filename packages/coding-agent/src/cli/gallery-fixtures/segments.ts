@@ -158,7 +158,10 @@ function variantsFor(id: StatusLineSegmentId): readonly SegmentVariantSpec[] {
 			];
 		case "git":
 			return [
-				{ label: "clean", context: { git: { branch: "main", status: { staged: 0, unstaged: 0, untracked: 0 }, pr: null } } },
+				{
+					label: "clean",
+					context: { git: { branch: "main", status: { staged: 0, unstaged: 0, untracked: 0 }, pr: null } },
+				},
 				{ label: "dirty" },
 			];
 		case "cost":
@@ -180,7 +183,12 @@ function variantsFor(id: StatusLineSegmentId): readonly SegmentVariantSpec[] {
 				{ label: "error", context: { contextPercent: 96, contextTokens: 192_000 } },
 				{
 					label: "active compaction",
-					context: { contextPercent: 72, contextTokens: 144_000, compactionSpeculation: "running", speculationBlinkOn: true },
+					context: {
+						contextPercent: 72,
+						contextTokens: 144_000,
+						compactionSpeculation: "running",
+						speculationBlinkOn: true,
+					},
 				},
 				{
 					label: "armed compaction",
@@ -229,11 +237,7 @@ function variantsFor(id: StatusLineSegmentId): readonly SegmentVariantSpec[] {
 	}
 }
 
-function renderIsolatedSegment(
-	id: StatusLineSegmentId,
-	spec: SegmentVariantSpec,
-	width: number,
-): readonly string[] {
+function renderIsolatedSegment(id: StatusLineSegmentId, spec: SegmentVariantSpec, width: number): readonly string[] {
 	const base = baseContext(spec.session);
 	const override = spec.context;
 	const context: SegmentContext = {

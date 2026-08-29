@@ -9918,7 +9918,9 @@ export class AgentSession {
 	 */
 	async #revalidateFallbackChainsAfterModelDiscovery(): Promise<void> {
 		if (this.#isDisposed || !this.#recovery.hasPendingDiscoveryDeferredFallbackValidation()) return;
-		await this.#modelRegistry.awaitInitialBackgroundRefresh(this.#fallbackDiscoveryRevalidationAbortController.signal);
+		await this.#modelRegistry.awaitInitialBackgroundRefresh(
+			this.#fallbackDiscoveryRevalidationAbortController.signal,
+		);
 		if (this.#isDisposed) return;
 		if (this.#recovery.revalidateRetryFallbackChainsAfterDiscovery()) {
 			this.#emit({ type: "config_warnings_changed" });

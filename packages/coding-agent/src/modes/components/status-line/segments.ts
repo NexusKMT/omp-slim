@@ -277,7 +277,10 @@ function renderGoalMode(ctx: SegmentContext, mode: { enabled: boolean; paused: b
 	};
 }
 
-function formatLoopLimit(limit: NonNullable<SegmentContext["loopMode"]>["limit"], nowMs = Date.now()): string | undefined {
+function formatLoopLimit(
+	limit: NonNullable<SegmentContext["loopMode"]>["limit"],
+	nowMs = Date.now(),
+): string | undefined {
 	if (!limit) return undefined;
 	if (limit.kind === "iterations") return `${limit.remaining}/${limit.initial}`;
 

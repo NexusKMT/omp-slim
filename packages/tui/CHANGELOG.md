@@ -2,12 +2,13 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Words starting with hex digits (e.g. `#each`) no longer render an inline color swatch for their hex-looking prefix (`#eac`); swatches now require the whole word to be a color.
 ### Added
 
 - Added `setTerminalHyperlinks()` so hosts can route their OSC 8 hyperlink policy into the Markdown renderer's link wrapping.
+
+### Fixed
+
+- Words starting with hex digits (e.g. `#each`) no longer render an inline color swatch for their hex-looking prefix (`#eac`); swatches now require the whole word to be a color.
 
 ## [18.0.10] - 2026-08-28
 

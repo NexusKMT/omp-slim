@@ -4962,10 +4962,7 @@ describe("AgentSession retry fallback", () => {
 			"retry.baseDelayMs": 1,
 			"retry.maxRetries": 1,
 			"retry.fallbackChains": {
-				default: [
-					`${smallFallback.provider}/${smallFallback.id}`,
-					`${largeFallback.provider}/${largeFallback.id}`,
-				],
+				default: [`${smallFallback.provider}/${smallFallback.id}`, `${largeFallback.provider}/${largeFallback.id}`],
 			},
 		});
 		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
