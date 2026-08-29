@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Retriable transport errors (e.g. `socket connection was closed unexpectedly`, timeouts) after the model already streamed a complete tool call now auto-retry through the configured retry budget and fallback chains instead of ending the turn terminally. The retry is gated on positive proof that every emitted call never executed (each paired with a synthetic `executed: false` result) and no committed text or image output, so a side effect can never be replayed; turns with any executed call, real result, or committed visible output keep the existing replay-unsafe veto.
+
 ## [18.0.10] - 2026-08-28
 
 ### Added
