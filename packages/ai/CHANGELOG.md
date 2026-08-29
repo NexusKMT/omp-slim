@@ -8,6 +8,7 @@
 - Fixed session auto-retry for empty Anthropic streams truncated before `message_stop` ([#10113](https://github.com/can1357/oh-my-pi/issues/10113)).
 - Fixed Gemini 3.x tool-call continuations through OpenAI-compatible endpoints failing with missing thought signature errors. ([#10172](https://github.com/can1357/oh-my-pi/issues/10172))
 - Fixed HTTP 402 payment-required and deactivated workspace responses being misclassified so credential rotation correctly falls back to sibling credentials without treating non-quota responses as usage limits ([#10181](https://github.com/can1357/oh-my-pi/pull/10181)).
+- Fixed Perplexity email login for accounts protected by authenticator two-factor authentication.
 
 ## [18.0.9] - 2026-08-28
 
