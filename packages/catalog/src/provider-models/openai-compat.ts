@@ -656,6 +656,7 @@ type OpenAICompatibleModelManagerBuilderOptions<TApi extends Api> = {
 	headers?: SimpleProviderDiscoveryHeaders;
 	dynamicModelsAuthoritative?: true;
 	requireApiKey?: true;
+	dropCachedModelIdsOnStaticMismatch?: readonly string[];
 	filterModel?: (
 		entry: OpenAICompatibleModelRecord,
 		model: ModelSpec<TApi>,
@@ -678,6 +679,9 @@ function createOpenAICompatibleModelManagerOptions<TApi extends Api>(
 	return {
 		providerId: options.providerId,
 		...(options.dynamicModelsAuthoritative && { dynamicModelsAuthoritative: true }),
+		...(options.dropCachedModelIdsOnStaticMismatch && {
+			dropCachedModelIdsOnStaticMismatch: options.dropCachedModelIdsOnStaticMismatch,
+		}),
 		...((!options.requireApiKey || apiKey) && {
 			fetchDynamicModels: () =>
 				fetchOpenAICompatibleModels({
@@ -4145,6 +4149,11 @@ export interface BasetenModelManagerConfig {
 	fetch?: FetchImpl;
 }
 
+// A previous version of OMP shipped this model without reasoning levels. We've
+// since fixed that. This const lets us bust the cache so that users on that
+// version of OMP pick up the reasoning levels immediately.
+const BASETEN_CACHE_MIGRATION_MODEL_IDS = ["zai-org/GLM-5.3-Flash"] as const;
+
 export function basetenModelManagerOptions(
 	config?: BasetenModelManagerConfig,
 ): ModelManagerOptions<"openai-completions"> {
@@ -4155,6 +4164,7 @@ export function basetenModelManagerOptions(
 		config,
 		dynamicModelsAuthoritative: true,
 		requireApiKey: true,
+		dropCachedModelIdsOnStaticMismatch: BASETEN_CACHE_MIGRATION_MODEL_IDS,
 		mapModel: (entry, defaults, reference) => {
 			const raw = entry as Record<string, unknown> & {
 				supported_features?: unknown;
@@ -4170,10 +4180,9 @@ export function basetenModelManagerOptions(
 			// vocabulary, which OMP must not guess.
 			const isSupportedBasetenReasoningModel =
 				isKimiK3ModelId(defaults.id) ||
+				isReasoningGlmModelId(defaults.id) ||
 				defaults.id === "openai/gpt-oss-120b" ||
-				defaults.id === "deepseek-ai/DeepSeek-V4-Pro" ||
-				defaults.id === "zai-org/GLM-5.2" ||
-				defaults.id === "zai-org/GLM-5.2-Fast";
+				defaults.id === "deepseek-ai/DeepSeek-V4-Pro";
 			const reasoning =
 				isSupportedBasetenReasoningModel &&
 				(features.includes("reasoning") || features.includes("reasoning_effort"));

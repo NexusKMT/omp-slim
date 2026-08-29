@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed issue where GLM models being served from Baseten were not being resolved as reasoning models. This immediately fixes Baseten `zai-org/GLM-5.3-Flash` and should fix future GLM models added.
+
 ## [18.0.9] - 2026-08-28
 
 ### Added
