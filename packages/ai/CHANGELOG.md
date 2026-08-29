@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Z.AI browser sign-in using an unregistered random callback port when port 54548 is occupied; it now reports the conflict before opening the browser ([#10157](https://github.com/can1357/oh-my-pi/issues/10157)).
+
 ## [18.0.9] - 2026-08-28
 
 ### Fixed
