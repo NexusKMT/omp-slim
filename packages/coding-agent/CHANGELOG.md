@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed high idle CPU while the agent works by no longer scanning the full model catalog (and reading credential files) on every status-line render to resolve an advisor-subscription flag that is only shown when advisor spend exists ([#10129](https://github.com/can1357/oh-my-pi/issues/10129)).
+- Fixed high idle CPU while the agent works ([#10129](https://github.com/can1357/oh-my-pi/issues/10129)).
 
 ## [18.0.10] - 2026-08-28
 
