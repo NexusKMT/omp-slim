@@ -3,13 +3,13 @@ import { toClinePassPublicModelId, toClinePassWireModelId } from "@oh-my-pi/pi-c
 import { buildOpenAICompat } from "@oh-my-pi/pi-catalog/compat/openai";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
-import { createReferenceResolver } from "@oh-my-pi/pi-catalog/provider-models/bundled-references";
 import {
 	DEFAULT_MODEL_PER_PROVIDER,
 	MODELS_DEV_PROVIDER_DESCRIPTORS,
 	mapModelsDevToModels,
 	PROVIDER_DESCRIPTORS,
 } from "@oh-my-pi/pi-catalog/provider-models";
+import { createReferenceResolver } from "@oh-my-pi/pi-catalog/provider-models/bundled-references";
 import { clinePassModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 
