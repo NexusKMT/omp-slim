@@ -10,6 +10,7 @@ import {
 	type Model,
 	type ModelUsageHealth,
 	type ProviderSessionState,
+	type ToolCall,
 } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
@@ -143,6 +144,61 @@ function recoveredTextStream(model: Model<Api>, text: string): AssistantMessageE
 		stream.push({ type: "text_delta", contentIndex: 0, delta: text, partial });
 		stream.push({ type: "text_end", contentIndex: 0, content: text, partial });
 		stream.push({ type: "done", reason: "stop", message: partial });
+	});
+	return stream;
+}
+function transportErrorAfterToolCallStream(
+	model: Model<Api>,
+	toolCall: ToolCall,
+	thinkingSignature?: string,
+): AssistantMessageEventStream {
+	const stream = new AssistantMessageEventStream();
+	queueMicrotask(() => {
+		const partial: AssistantMessage = {
+			role: "assistant",
+			content: [],
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: emptyUsage(),
+			stopReason: "stop",
+			timestamp: Date.now(),
+		};
+		const thinking =
+			thinkingSignature === undefined
+				? undefined
+				: {
+						type: "thinking" as const,
+						thinking: "Signed reasoning before the tool call.",
+						thinkingSignature,
+					};
+		if (thinking) partial.content.push(thinking);
+		const toolCallIndex = partial.content.length;
+		partial.content.push(toolCall);
+		stream.push({ type: "start", partial });
+		if (thinking) {
+			stream.push({ type: "thinking_start", contentIndex: 0, partial });
+			stream.push({ type: "thinking_delta", contentIndex: 0, delta: thinking.thinking, partial });
+			stream.push({ type: "thinking_end", contentIndex: 0, content: thinking.thinking, partial });
+		}
+		stream.push({ type: "toolcall_start", contentIndex: toolCallIndex, partial });
+		stream.push({
+			type: "toolcall_delta",
+			contentIndex: toolCallIndex,
+			delta: JSON.stringify(toolCall.arguments),
+			partial,
+		});
+		stream.push({ type: "toolcall_end", contentIndex: toolCallIndex, toolCall, partial });
+		stream.push({
+			type: "error",
+			reason: "error",
+			error: {
+				...partial,
+				stopReason: "error",
+				errorMessage: "The socket connection was closed unexpectedly.",
+				duration: 1000,
+			},
+		});
 	});
 	return stream;
 }
@@ -2655,6 +2711,73 @@ describe("AgentSession retry fallback", () => {
 		expect(getLastAssistantMessage(session).stopReason).toBe("stop");
 	});
 
+	it("keeps signed thinking in a preserved transport-error turn on its source Anthropic model", async () => {
+		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("anthropic", "claude-opus-4-1");
+		if (!primaryModel || !fallbackModel) {
+			throw new Error("Expected bundled Anthropic test models to exist");
+		}
+
+		const requestedModels: string[] = [];
+		const fallbackAppliedEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "signed-transport-call",
+			name: "bash",
+			arguments: { command: "ssh host" },
+		};
+		let requestCount = 0;
+		const agent = new Agent({
+			getApiKey: model => `${model.provider}-test-key`,
+			initialState: {
+				model: primaryModel,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+			},
+			streamFn: (model, context, options) => {
+				requestCount++;
+				requestedModels.push(`${model.provider}/${model.id}`);
+				if (requestCount === 1) {
+					return transportErrorAfterToolCallStream(model, toolCall, "sonnet-signature");
+				}
+				const mock = createMockModel({ id: model.id, provider: model.provider });
+				mock.push({ content: ["Recovered on Sonnet"] });
+				return mock.stream(mock, context, options);
+			},
+		});
+
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 1,
+			"retry.maxRetries": 1,
+			"retry.fallbackChains": {
+				"anthropic/*": [`${fallbackModel.provider}/${fallbackModel.id}`],
+			},
+		});
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+		session.subscribe(event => {
+			if (event.type === "retry_fallback_applied") fallbackAppliedEvents.push(event);
+		});
+
+		await session.prompt("Run a signed tool turn");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual([
+			`${primaryModel.provider}/${primaryModel.id}`,
+			`${primaryModel.provider}/${primaryModel.id}`,
+		]);
+		expect(fallbackAppliedEvents).toEqual([]);
+		expect(session.model?.id).toBe(primaryModel.id);
+		expect(getLastAssistantMessage(session).stopReason).toBe("stop");
+	});
+
 	it("surfaces a non-retryable error without same-model retries when no fallback candidate has a credential", async () => {
 		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
 		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
@@ -4774,6 +4897,92 @@ describe("AgentSession retry fallback", () => {
 			`${fallbackModel.provider}/${fallbackModel.id}`,
 		]);
 		expect(session.model?.id).toBe(fallbackModel.id);
+	});
+
+	it("includes a preserved transport-error turn when fitting retry fallback windows", async () => {
+		const modelsConfigPath = path.join(tempDir.path(), "preserved-failed-turn-models.json");
+		await Bun.write(
+			modelsConfigPath,
+			JSON.stringify({
+				providers: {
+					anthropic: {
+						modelOverrides: {
+							"claude-sonnet-4-5": { contextWindow: 1_000_000 },
+						},
+					},
+					openai: {
+						modelOverrides: {
+							"gpt-4o-mini": { contextWindow: 4000 },
+							"gpt-4o": { contextWindow: 1_000_000 },
+						},
+					},
+				},
+			}),
+		);
+		modelRegistry = new ModelRegistry(authStorage, modelsConfigPath);
+
+		const primaryModel = modelRegistry.find("anthropic", "claude-sonnet-4-5");
+		const smallFallback = modelRegistry.find("openai", "gpt-4o-mini");
+		const largeFallback = modelRegistry.find("openai", "gpt-4o");
+		if (!primaryModel || !smallFallback || !largeFallback) {
+			throw new Error("Expected override models to resolve");
+		}
+
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "large-transport-call",
+			name: "write",
+			arguments: { path: "report.txt", content: "lorem ipsum ".repeat(5000) },
+		};
+		const requestedModels: string[] = [];
+		let requestCount = 0;
+		const agent = new Agent({
+			getApiKey: model => `${model.provider}-test-key`,
+			initialState: {
+				model: primaryModel,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+			},
+			streamFn: (model, context, options) => {
+				requestCount++;
+				requestedModels.push(`${model.provider}/${model.id}`);
+				if (requestCount === 1) return transportErrorAfterToolCallStream(model, toolCall);
+				const mock = createMockModel({ id: model.id, provider: model.provider });
+				mock.push({ content: ["Recovered on a fitting fallback"] });
+				return mock.stream(mock, context, options);
+			},
+		});
+
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 1,
+			"retry.maxRetries": 1,
+			"retry.fallbackChains": {
+				default: [
+					`${smallFallback.provider}/${smallFallback.id}`,
+					`${largeFallback.provider}/${largeFallback.id}`,
+				],
+			},
+		});
+		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+
+		await session.prompt("Write a large report");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual([
+			`${primaryModel.provider}/${primaryModel.id}`,
+			`${largeFallback.provider}/${largeFallback.id}`,
+		]);
+		expect(requestedModels).not.toContain(`${smallFallback.provider}/${smallFallback.id}`);
+		expect(session.model?.id).toBe(largeFallback.id);
 	});
 
 	it("restores routed fallback primaries after cooldown expiry", async () => {

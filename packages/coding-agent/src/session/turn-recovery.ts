@@ -1713,12 +1713,14 @@ export class TurnRecovery {
 	async #tryRetryModelFallback(
 		currentSelector: string,
 		failedMessage: AssistantMessage,
-		options?: { pinFallback?: boolean },
+		options?: { pinFallback?: boolean; preserveFailedTurn?: boolean },
 	): Promise<boolean> {
 		const ceiling = this.#host.thinkingLevelCeiling();
-		const latestAssistant = this.#host.agent.state.messages.findLast(
-			(message): message is AssistantMessage => message.role === "assistant" && message !== failedMessage,
-		);
+		const latestAssistant = options?.preserveFailedTurn
+			? failedMessage
+			: this.#host.agent.state.messages.findLast(
+					(message): message is AssistantMessage => message.role === "assistant" && message !== failedMessage,
+				);
 		for (const role of this.retryFallbackChainKeys(currentSelector)) {
 			for (const selector of this.findRetryFallbackCandidates(role, currentSelector)) {
 				if (this.isRetryFallbackSelectorSuppressed(selector)) continue;
@@ -1747,9 +1749,13 @@ export class TurnRecovery {
 				// clamped UP past the cap by its model floor — skip it entirely.
 				if (ceiling !== undefined && !modelSupportsEffortCeiling(candidate, ceiling)) continue;
 				// Skip a candidate whose window cannot hold the retry context. The
-				// failed assistant is removed before continue(), so exclude it here to
-				// judge the request that will actually be sent (issue #8065).
-				if (!this.#host.contextFitsModel(candidate, failedMessage)) continue;
+				// failed assistant is excluded only when retry removes it; preserved
+				// unexecuted-tool turns remain part of the request (issue #8065).
+				if (
+					!this.#host.contextFitsModel(candidate, options?.preserveFailedTurn ? undefined : failedMessage)
+				) {
+					continue;
+				}
 				const apiKey = await this.#host.modelRegistry.getApiKey(candidate, this.#host.sessionId());
 				if (!apiKey) continue;
 				return this.applyRetryFallbackCandidate(role, selector, currentSelector, options);
@@ -2131,6 +2137,7 @@ export class TurnRecovery {
 				}
 				switchedModel = await this.#tryRetryModelFallback(currentSelector, message, {
 					pinFallback: classifierRefusal,
+					preserveFailedTurn,
 				});
 			}
 			// Auto fallback from a Fireworks Fast variant to its base model. Independent
