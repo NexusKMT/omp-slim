@@ -653,6 +653,9 @@ describe("RFC 9728 path-inserted protected resource", () => {
 			tokenUrl: "https://tenant.example/oauth/token",
 			scopes: "mcp_api offline_access",
 			resource: mcpUrl,
+			issuerUrl: "https://tenant.example",
+			clientId: undefined,
+			registrationUrl: undefined,
 		});
 		expect(calls[0]).toBe(pathfulPr);
 		expect(calls).toContain(tenantOidc);

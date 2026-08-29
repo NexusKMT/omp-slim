@@ -641,12 +641,13 @@ export function buildWellKnownUrls(wellKnownPath: string, baseUrl: string, issue
 	};
 
 	if (!issuerCandidate) {
-		// Resource URLs retain the gateway-compatible ordering: the parent-relative
-		// fallback must not wait behind issuer-only probes that may time out.
-		push(relUrl);
+		// RFC 9728: probe path-inserted metadata first — origin-root documents on
+		// shared gateways often describe a different issuer than the path-scoped
+		// resource — then the parent-relative gateway fallback.
 		if (wellKnownPath.startsWith("/.well-known/")) {
 			push(new URL(`${wellKnownPath}${normalizedPath}`, parsed.origin));
 		}
+		push(relUrl);
 	} else if (wellKnownPath === "/.well-known/openid-configuration") {
 		// OIDC Discovery §4 standard form is <issuer>/.well-known/openid-configuration;
 		// try it before the parent-relative and RFC 8414 compatibility fallbacks.
