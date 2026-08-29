@@ -305,6 +305,13 @@ export class SessionAdvisors {
 	#advisorStatuses = new Map<string, { name: string; status: AdvisorRuntimeStatus }>();
 	#advisorProviderSessionIds = new Map<string, string>();
 	#advisorCosts = new Map<string, number>();
+	/**
+	 * Slugs whose recorded spend ran on an OAuth/subscription model. Kept in
+	 * lockstep with {@link #advisorCosts} so {@link isUsingSubscription} can
+	 * attribute historical advisor spend without rescanning the model catalog
+	 * once the advisor runtime is gone (#10131).
+	 */
+	#advisorSubscriptionSlugs = new Set<string>();
 	#advisorRecorderClosed: Promise<void> = Promise.resolve();
 	/** Holds recorder writes behind the active resume-cost byte snapshot. */
 	#advisorCostSnapshotBarrier: Promise<void> | undefined;
@@ -440,11 +447,15 @@ export class SessionAdvisors {
 	/** Drop the recorded spend once a conversation boundary has committed. */
 	clearCost(): void {
 		this.#advisorCosts.clear();
+		this.#advisorSubscriptionSlugs.clear();
 	}
 
 	/** Replace the ledger with the spend recorded for the session becoming active. */
 	restoreCost(costs: ReadonlyMap<string, number>): void {
 		this.#advisorCosts = new Map(costs);
+		// Restored totals come from a transcript with no live runtime to attribute
+		// them, so drop stale subscription flags rather than rescanning per render.
+		this.#advisorSubscriptionSlugs.clear();
 	}
 
 	/** Capture the current per-advisor spend ledger. */
@@ -614,7 +625,10 @@ export class SessionAdvisors {
 	 * so none of them inject into the new conversation.
 	 */
 	#resetAdvisorSessionState(preserveCost: boolean): void {
-		if (!preserveCost) this.#advisorCosts.clear();
+		if (!preserveCost) {
+			this.#advisorCosts.clear();
+			this.#advisorSubscriptionSlugs.clear();
+		}
 		// Mute the recorder across the re-prime: AdvisorRuntime.reset() aborts the advisor
 		// loop, and that abort can emit an `aborted` message_end we must not attribute to
 		// either session's transcript. Detach, reset, then re-attach the live agent's feed.
@@ -1219,6 +1233,9 @@ export class SessionAdvisors {
 
 	#recordAdvisorCost(advisor: ActiveAdvisor, message: AssistantMessage): void {
 		this.#advisorCosts.set(advisor.slug, (this.#advisorCosts.get(advisor.slug) ?? 0) + message.usage.cost.total);
+		// Cheap in-memory OAuth-credential check; captured now so subscription
+		// attribution survives the advisor runtime being torn down (#10131).
+		if (this.#host.modelRegistry.isUsingOAuth(advisor.model)) this.#advisorSubscriptionSlugs.add(advisor.slug);
 	}
 
 	/** Subscribe the advisor agent's finalized messages into the transcript recorder.
@@ -1824,13 +1841,17 @@ export class SessionAdvisors {
 		for (const advisorCost of this.#advisorCosts.values()) cost += advisorCost;
 		return cost;
 	}
-	/** Return whether any active or configured advisor is running on an OAuth/subscription model. */
+	/**
+	 * Whether advisor spend should be attributed to an OAuth/subscription plan.
+	 * With live advisors it reflects their current models; once the runtime is
+	 * gone it consults the attribution recorded as spend accrued, so the status
+	 * line never rescans the model catalog per render (#10131).
+	 */
 	isUsingSubscription(): boolean {
 		if (this.#advisors.length > 0) {
 			return this.#advisors.some(a => this.#host.modelRegistry.isUsingOAuth(a.model));
 		}
-		const sel = resolveAdvisorRoleSelection(this.#host.settings, this.#host.modelRegistry.getAvailable());
-		return sel ? this.#host.modelRegistry.isUsingOAuth(sel.model) : false;
+		return this.#advisorSubscriptionSlugs.size > 0;
 	}
 	/**
 	 * Return structured advisor stats for the status command and TUI panel.

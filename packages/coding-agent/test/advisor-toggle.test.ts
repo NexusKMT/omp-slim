@@ -430,6 +430,26 @@ describe("AgentSession advisor toggle", () => {
 		session.setAdvisorEnabled(false);
 		expect(session.getAdvisorCost()).toBeCloseTo(0.5, 8);
 	});
+	it("attributes advisor subscription spend after teardown without rescanning the catalog", () => {
+		// #10131: with the runtime gone, isUsingSubscription() must read the
+		// attribution captured as spend accrued, not fall back to a per-render
+		// getAvailable() catalog scan (which reads credential files per provider).
+		const oauthSpy = vi.spyOn(modelRegistry, "isUsingOAuth").mockReturnValue(true);
+		try {
+			const advisor = enableAdvisor();
+			appendAdvisorCost(advisor, 0.5, 1);
+			session.setAdvisorEnabled(false);
+			expect(session.isAdvisorActive()).toBe(false);
+			expect(session.getAdvisorCost()).toBeCloseTo(0.5, 8);
+
+			const scanSpy = vi.spyOn(modelRegistry, "getAvailable");
+			expect(session.isAdvisorUsingSubscription()).toBe(true);
+			expect(scanSpy).not.toHaveBeenCalled();
+			scanSpy.mockRestore();
+		} finally {
+			oauthSpy.mockRestore();
+		}
+	});
 	it("retains total advisor cost after the live roster changes", () => {
 		const advisor = enableAdvisor();
 		appendAdvisorCost(advisor, 0.5, 1);
