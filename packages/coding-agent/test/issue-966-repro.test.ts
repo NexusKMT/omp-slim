@@ -20,7 +20,7 @@ try {
 	await fs.writeFile(path.join(dir, "tracked.txt"), "base\\n");
 	await $\`git add tracked.txt\`.cwd(dir).quiet();
 	await $\`git commit -m baseline\`.cwd(dir).quiet();
-	const repo = vcs.requireGit(dir);
+	let repo = vcs.requireGit(dir);
 	// #10130: pi-vcs memoizes a gix index snapshot and only refreshes it when the
 	// index mtime is strictly newer than the snapshot's own timestamp. Both of the
 	// stage -> commit pairs below can land inside a single mtime tick on a fresh
@@ -39,6 +39,11 @@ try {
 		indexTick += 1;
 		const when = new Date(Date.now() + indexTick * 1000);
 		await fs.utimes(indexPath, when, when);
+		// Re-acquire the handle too: the mtime bump only invalidates the snapshot
+		// the next time a handle consults it, and a handle whose OnceLock already
+		// resolved keeps the stale one for its whole lifetime. requireGit() builds
+		// a brand new GitRepo (new OnceLock) on every call, so this is cheap.
+		repo = vcs.requireGit(dir);
 	};
 	await fs.writeFile(path.join(dir, "tracked.txt"), "base\\ntracked change\\n");
 	await fs.writeFile(path.join(dir, "new-file.txt"), "sample data\\n");
