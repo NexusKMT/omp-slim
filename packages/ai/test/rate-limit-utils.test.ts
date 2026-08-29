@@ -391,11 +391,13 @@ describe("isUsageLimit", () => {
 		expect(isUsageLimit(new ProviderHttpError("Payment Required", 402))).toBe(true);
 		expect(isUsageLimit(new ProviderHttpError("A subscription is required for this endpoint", 402))).toBe(false);
 	});
-	it("detects 402 Payment Required as credential-rotatable usage limit", () => {
+	it("detects 402 Payment Required and Payment is required as credential-rotatable usage limit", () => {
 		expect(isUsageLimit(Object.assign(new Error("Payment Required"), { status: 402 }))).toBe(true);
+		expect(isUsageLimit(Object.assign(new Error("Payment is required"), { status: 402 }))).toBe(true);
 		expect(
 			isUsageLimit(Object.assign(new Error('{"detail":{"code":"deactivated_workspace"}}'), { status: 402 })),
 		).toBe(true);
+		expect(isUsageLimit({ status: 402 })).toBe(true);
 	});
 });
 
@@ -551,6 +553,7 @@ describe("isUsageLimitOutcome", () => {
 		expect(isUsageLimitOutcome(402, "HTTP 402")).toBe(true);
 		expect(isUsageLimitOutcome(402, "402 status code (no body)")).toBe(true);
 		expect(isUsageLimitOutcome(402, "Payment Required")).toBe(true);
+		expect(isUsageLimitOutcome(402, "Payment is required")).toBe(true);
 		expect(isUsageLimitOutcome(402, '{"detail":{"code":"deactivated_workspace"}}')).toBe(true);
 		expect(isUsageLimitOutcome(402, "A subscription is required for this endpoint")).toBe(false);
 		expect(isUsageLimitOutcome(500, "Payment Required")).toBe(false);
@@ -570,6 +573,8 @@ describe("isUsageLimitOutcome", () => {
 		expect(isUsageLimit(new ProviderHttpError("402 status code (no body)", 402))).toBe(true);
 		expect(isUsageLimit(new ProviderHttpError("", 402))).toBe(true);
 		expect(isUsageLimit(new ProviderHttpError("Payment Required", 402))).toBe(true);
+		expect(isUsageLimit(new ProviderHttpError("Payment is required", 402))).toBe(true);
+		expect(isUsageLimit({ status: 402 })).toBe(true);
 		expect(isUsageLimitOutcome(402, "A subscription is required for this endpoint")).toBe(false);
 		expect(isUsageLimit(new ProviderHttpError("A subscription is required for this endpoint", 402))).toBe(false);
 	});

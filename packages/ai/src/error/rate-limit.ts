@@ -288,7 +288,8 @@ const USAGE_LIMIT_PATTERN =
 export function isUsageLimitStatus(status: number | undefined): boolean {
 	return status === 429 || status === 402;
 }
-const STATUS_402_QUOTA_PATTERN = /\b(?:payment.?required|deactivated_workspace|insufficient.?balance)\b/i;
+const STATUS_402_QUOTA_PATTERN =
+	/\b(?:payment(?:\s+is)?[-_.\s]*required|deactivated_workspace|insufficient.?balance)\b/i;
 
 export function is402BillingCapBody(message: string | undefined): boolean {
 	if (message === undefined || isOpaqueStatusBody(message)) return true;

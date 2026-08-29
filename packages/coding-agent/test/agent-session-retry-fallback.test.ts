@@ -2227,6 +2227,78 @@ describe("AgentSession retry fallback", () => {
 		expect(session.model?.provider).toBe(primaryModel.provider);
 		expect(session.model?.id).toBe(primaryModel.id);
 	});
+	it("rotates sibling credentials on 402 Payment is required and status-only 402 without invoking model fallback", async () => {
+		const primaryModel = getBundledModel("openai", "gpt-4o") ?? getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("google", "gemini-1.5-pro") ?? getBundledModel("openai", "gpt-4o-mini");
+		if (!primaryModel || !fallbackModel) {
+			throw new Error("Expected bundled test models to exist");
+		}
+
+		for (const errorToThrow of [Object.assign(new Error("Payment is required"), { status: 402 }), { status: 402 }]) {
+			const requestedCalls: Array<{ model: string; apiKey: string | undefined }> = [];
+			let currentKey = "key-A";
+			const mock = createMockModel();
+			const agent = new Agent({
+				getApiKey: () => currentKey,
+				initialState: {
+					model: primaryModel,
+					systemPrompt: ["Test"],
+					tools: [],
+					messages: [],
+				},
+				streamFn: (model, context, options) => {
+					const apiKey = typeof options?.apiKey === "string" ? options.apiKey : undefined;
+					requestedCalls.push({ model: `${model.provider}/${model.id}`, apiKey });
+					if (requestedCalls.length === 1) {
+						mock.push({ throw: errorToThrow });
+					} else {
+						mock.push({ content: ["ok:sibling-credential-success"] });
+					}
+					return mock.stream(model, context, options);
+				},
+			});
+
+			const markUsageLimitSpy = vi
+				.spyOn(modelRegistry.authStorage, "markUsageLimitReached")
+				.mockImplementation(async () => {
+					currentKey = "key-B";
+					return { switched: true };
+				});
+
+			const settings = Settings.isolated({
+				"compaction.enabled": false,
+				"retry.baseDelayMs": 1,
+				"retry.maxRetries": 2,
+				"retry.modelFallback": true,
+				"retry.fallbackChains": {
+					[`${primaryModel.provider}/${primaryModel.id}`]: [`${fallbackModel.provider}/${fallbackModel.id}`],
+				},
+			});
+
+			session = new AgentSession({
+				agent,
+				sessionManager: SessionManager.inMemory(),
+				settings,
+				modelRegistry,
+			});
+
+			await session.prompt("Prompt requiring credential rotation");
+			await session.waitForIdle();
+
+			expect(markUsageLimitSpy).toHaveBeenCalledTimes(1);
+			expect(requestedCalls).toHaveLength(2);
+			expect(requestedCalls[0]).toEqual({
+				model: `${primaryModel.provider}/${primaryModel.id}`,
+				apiKey: "key-A",
+			});
+			expect(requestedCalls[1]).toEqual({
+				model: `${primaryModel.provider}/${primaryModel.id}`,
+				apiKey: "key-B",
+			});
+			expect(session.model?.provider).toBe(primaryModel.provider);
+			expect(session.model?.id).toBe(primaryModel.id);
+		}
+	});
 
 	it("allows model fallback on 402 Payment Required when all sibling credentials are exhausted", async () => {
 		const primaryModel = getBundledModel("openai", "gpt-4o") ?? getBundledModel("anthropic", "claude-sonnet-4-5");

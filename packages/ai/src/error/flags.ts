@@ -518,6 +518,9 @@ function classifyText(
 	) {
 		kinds |= Flag.PayloadRejected;
 	}
+	if (statusEvidence === 402 && (errorMessage === undefined || isOpaqueStatusBody(errorMessage))) {
+		kinds |= Flag.UsageLimit;
+	}
 	if (kinds !== 0) return create(kinds);
 	const fallbackStatus = errorStatus ?? (errorMessage ? status({ message: errorMessage }) : undefined);
 	if (fallbackStatus === 401 || fallbackStatus === 403) return create(Flag.AuthFailed);
