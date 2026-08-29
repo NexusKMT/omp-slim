@@ -346,17 +346,19 @@ describe("ensureRuntimeInstalled install lock", () => {
 		await expect(fs.stat(`${runtimeDir}.lock`)).rejects.toThrow();
 	}, 15_000);
 
-	test("a crashed lock owner does not wedge a later install", async () => {
+	test("a crashed installer does not wedge a later install", async () => {
 		const { spec, probe } = await makeFileDependency();
 		const runtimeDir = await makeRuntimeDir();
 		await fs.mkdir(path.dirname(runtimeDir), { recursive: true });
 		const readyPath = `${runtimeDir}.holder-ready`;
-		// Hold the exact lock ensureRuntimeInstalled contends for, then die.
+		// Enter the real ensureRuntimeInstalled critical section, including its
+		// legacy namespace reservation, then die before bun install starts.
 		const holder = Bun.spawn(
 			[
 				process.execPath,
-				path.join(import.meta.dir, "fixtures/file-lock-holder.ts"),
-				`${runtimeDir}.install`,
+				path.join(import.meta.dir, "fixtures/runtime-install-holder.ts"),
+				runtimeDir,
+				spec,
 				readyPath,
 			],
 			{
@@ -377,17 +379,18 @@ describe("ensureRuntimeInstalled install lock", () => {
 					if (!isEnoent(error)) throw error;
 					if (holder.exitCode !== null) {
 						throw new Error(
-							`lock holder exited before readiness (${holder.exitCode}): ${await new Response(holder.stderr).text()}`,
+							`runtime installer exited before readiness (${holder.exitCode}): ${await new Response(holder.stderr).text()}`,
 						);
 					}
 				}
 			}
+			expect((await fs.stat(`${runtimeDir}.lock`)).isFile()).toBe(true);
 
 			holder.kill("SIGKILL");
 			await holder.exited;
 
-			// Kernel released the abandoned lock on death; the install must
-			// proceed rather than burn the wait envelope and throw.
+			// The kernel released the OS lock; the identifiable compatibility
+			// reservation must not turn this real crash into another long wait.
 			await ensureRuntimeInstalled({
 				runtimeDir,
 				install: { dependencies: { [probe]: spec } },
@@ -396,6 +399,7 @@ describe("ensureRuntimeInstalled install lock", () => {
 				lockSleepMs: 50,
 			});
 			expect(await Bun.file(path.join(runtimeDir, "node_modules", probe, "package.json")).exists()).toBe(true);
+			await expect(fs.stat(`${runtimeDir}.lock`)).rejects.toThrow();
 		} finally {
 			if (holder.exitCode === null) {
 				holder.kill("SIGKILL");

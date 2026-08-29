@@ -320,26 +320,29 @@ const STALE_LEGACY_LOCK_MS = 10 * 60_000;
  * plausible install ({@link STALE_LEGACY_LOCK_MS}) — never merely because a
  * retry budget elapsed, which would delete a still-active legacy lock and let
  * two installers race the same tree. Once the namespace is free, atomically
- * create and retain the directory through `fn`: an older process cannot acquire
- * it between the handoff check and the new install.
+ * create and retain a regular file through `fn`: an older process cannot
+ * acquire it between the handoff check and the new install. A file left by a
+ * crashed new installer can be reused immediately because the outer OS lock
+ * proves its owner is gone, unlike a legacy directory whose owner is unknown.
  */
 async function withLegacyInstallLock<T>(runtimeDir: string, sleepMs: number, fn: () => Promise<T>): Promise<T> {
 	const legacy = `${runtimeDir}.lock`;
 	for (;;) {
 		try {
-			await fsp.mkdir(legacy);
+			const reservation = await fsp.open(legacy, "wx");
+			await reservation.close();
 		} catch (error) {
 			if (!isEexist(error)) throw error;
-			// Someone already holds the legacy namespace.
 			let stat: fs.Stats;
 			try {
 				stat = await fsp.stat(legacy);
 			} catch (statError) {
-				if (isEnoent(statError)) continue; // released between mkdir and stat; retry
+				if (isEnoent(statError)) continue; // released between open and stat; retry
 				throw statError;
 			}
-			// A non-directory is a newer lock file, which already excludes old mkdir lockers.
-			if (!stat.isDirectory()) return fn();
+			// A non-directory is a reservation left by a newer installer. The
+			// outer OS lock proves that installer is gone, so reuse it at once.
+			if (!stat.isDirectory()) break;
 			// A fresh directory may still belong to a live pre-18.x installer, so
 			// wait for it to finish; only a crash orphan (older than any plausible
 			// install) is force-reclaimed.
@@ -350,12 +353,13 @@ async function withLegacyInstallLock<T>(runtimeDir: string, sleepMs: number, fn:
 			}
 			continue;
 		}
-		// Reserved the legacy namespace; retain it across the install.
-		try {
-			return await fn();
-		} finally {
-			await fsp.rm(legacy, { recursive: true, force: true });
-		}
+		break;
+	}
+	// Retain the regular-file reservation across the install.
+	try {
+		return await fn();
+	} finally {
+		await fsp.rm(legacy, { force: true });
 	}
 }
 
