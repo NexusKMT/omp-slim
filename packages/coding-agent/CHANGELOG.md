@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed credential rotation on HTTP 402 payment-required errors so sibling credentials rotate before model fallback without misclassifying informative non-quota responses ([#10181](https://github.com/can1357/oh-my-pi/pull/10181)).
+
 ## [18.0.10] - 2026-08-28
 
 ### Added

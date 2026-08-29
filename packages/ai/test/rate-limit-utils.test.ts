@@ -3,6 +3,7 @@ import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
 import { classify, Flag, is, isUsageLimit, retriable } from "@oh-my-pi/pi-ai/error/flags";
 import {
 	calculateRateLimitBackoffMs,
+	is402BillingCapBody,
 	isConcurrencyCapExclusion,
 	isOpaqueStatusBody,
 	isUsageLimitOutcome,
@@ -388,10 +389,13 @@ describe("isUsageLimit", () => {
 			false,
 		);
 		expect(isUsageLimit(new ProviderHttpError("Payment Required", 402))).toBe(true);
+		expect(isUsageLimit(new ProviderHttpError("A subscription is required for this endpoint", 402))).toBe(false);
 	});
 	it("detects 402 Payment Required as credential-rotatable usage limit", () => {
 		expect(isUsageLimit(Object.assign(new Error("Payment Required"), { status: 402 }))).toBe(true);
-		expect(isUsageLimit(Object.assign(new Error('{"detail":{"code":"deactivated_workspace"}}'), { status: 402 }))).toBe(true);
+		expect(
+			isUsageLimit(Object.assign(new Error('{"detail":{"code":"deactivated_workspace"}}'), { status: 402 })),
+		).toBe(true);
 	});
 });
 
@@ -402,6 +406,7 @@ describe("isUsageLimitOutcome", () => {
 		expect(isUsageLimitOutcome(429, "429")).toBe(true);
 		expect(isUsageLimitOutcome(429, "HTTP 429")).toBe(true);
 		expect(isUsageLimitOutcome(429, "Error 429")).toBe(true);
+		expect(isUsageLimitOutcome(429, "429 status code (no body)")).toBe(true);
 		expect(isUsageLimitOutcome(429, "{}")).toBe(true);
 	});
 
@@ -540,14 +545,33 @@ describe("isUsageLimitOutcome", () => {
 		expect(isUsageLimit(message)).toBe(true);
 	});
 
-	it("treats 402 as a categorical billing cap (rotates on any 402 body)", () => {
+	it("treats 402 quota and opaque bodies as credential-rotatable billing caps while preserving non-quota contract", () => {
 		expect(isUsageLimitStatus(402)).toBe(true);
 		expect(isUsageLimitOutcome(402, undefined)).toBe(true);
 		expect(isUsageLimitOutcome(402, "HTTP 402")).toBe(true);
+		expect(isUsageLimitOutcome(402, "402 status code (no body)")).toBe(true);
 		expect(isUsageLimitOutcome(402, "Payment Required")).toBe(true);
 		expect(isUsageLimitOutcome(402, '{"detail":{"code":"deactivated_workspace"}}')).toBe(true);
-		expect(isUsageLimitOutcome(402, "A subscription is required for this endpoint")).toBe(true);
+		expect(isUsageLimitOutcome(402, "A subscription is required for this endpoint")).toBe(false);
+		expect(isUsageLimitOutcome(500, "Payment Required")).toBe(false);
+		expect(isUsageLimitOutcome(403, "Payment Required")).toBe(false);
+		expect(isUsageLimitOutcome(400, "Payment Required")).toBe(false);
+		for (const body of [
+			"usage_limit_reached",
+			"resource_exhausted",
+			"usage_not_included",
+			"limit_reached",
+			"personal-team-blocked",
+		]) {
+			expect(isUsageLimitOutcome(402, body)).toBe(true);
+			expect(isUsageLimit(new ProviderHttpError(body, 402))).toBe(true);
+		}
 		expect(isUsageLimit(new ProviderHttpError("HTTP 402", 402))).toBe(true);
+		expect(isUsageLimit(new ProviderHttpError("402 status code (no body)", 402))).toBe(true);
+		expect(isUsageLimit(new ProviderHttpError("", 402))).toBe(true);
+		expect(isUsageLimit(new ProviderHttpError("Payment Required", 402))).toBe(true);
+		expect(isUsageLimitOutcome(402, "A subscription is required for this endpoint")).toBe(false);
+		expect(isUsageLimit(new ProviderHttpError("A subscription is required for this endpoint", 402))).toBe(false);
 	});
 
 	it("does not rotate on auth/invalid-request statuses with unrelated bodies", () => {
@@ -590,7 +614,7 @@ describe("isUsageLimitOutcome", () => {
 		expect(retriable(id)).toBe(true);
 	});
 
-	// HTTP 402 is categorically an account-billing cap, so a 402 whose body is
+	// HTTP 402 represents an account-billing cap, so a 402 whose body is
 	// worded as a concurrency cap still rotates — the billing-cap status wins
 	// over the concurrency exclusion. The identical concurrency wording on a
 	// quota-worded 429 stays non-rotatable (5s backoff). This pins the
@@ -620,5 +644,31 @@ describe("calculateRateLimitBackoffMs", () => {
 
 	it("returns a short backoff for CONCURRENT_LIMIT", () => {
 		expect(calculateRateLimitBackoffMs("CONCURRENT_LIMIT")).toBe(5_000);
+	});
+});
+
+describe("is402BillingCapBody", () => {
+	it("returns true for undefined or opaque bodies", () => {
+		expect(is402BillingCapBody(undefined)).toBe(true);
+		expect(is402BillingCapBody("")).toBe(true);
+		expect(is402BillingCapBody("HTTP 402")).toBe(true);
+		expect(is402BillingCapBody("402 status code (no body)")).toBe(true);
+	});
+
+	it("returns true for payment, deactivation, and balance wording", () => {
+		expect(is402BillingCapBody("Payment Required")).toBe(true);
+		expect(is402BillingCapBody('{"detail":{"code":"deactivated_workspace"}}')).toBe(true);
+		expect(is402BillingCapBody("Insufficient balance in account")).toBe(true);
+	});
+
+	it("returns true for quota exhaustion and concurrent limit reasons", () => {
+		expect(is402BillingCapBody("quota exceeded")).toBe(true);
+		expect(is402BillingCapBody("insufficient_quota")).toBe(true);
+		expect(is402BillingCapBody("concurrent requests limit reached")).toBe(true);
+	});
+
+	it("returns false for non-quota informative bodies", () => {
+		expect(is402BillingCapBody("A subscription is required for this endpoint")).toBe(false);
+		expect(is402BillingCapBody("Rate limit exceeded, too many requests")).toBe(false);
 	});
 });

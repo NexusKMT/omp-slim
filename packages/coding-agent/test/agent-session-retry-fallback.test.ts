@@ -2164,11 +2164,11 @@ describe("AgentSession retry fallback", () => {
 			throw new Error("Expected bundled test models to exist");
 		}
 
-		const requestedCalls: Array<{ model: string; key: string }> = [];
-		let callCount = 0;
+		const requestedCalls: Array<{ model: string; apiKey: string | undefined }> = [];
+		let currentKey = "key-A";
 		const mock = createMockModel();
 		const agent = new Agent({
-			getApiKey: model => `key-attempt-${callCount}`,
+			getApiKey: () => currentKey,
 			initialState: {
 				model: primaryModel,
 				systemPrompt: ["Test"],
@@ -2176,9 +2176,9 @@ describe("AgentSession retry fallback", () => {
 				messages: [],
 			},
 			streamFn: (model, context, options) => {
-				callCount++;
-				requestedCalls.push({ model: `${model.provider}/${model.id}`, key: `key-attempt-${callCount}` });
-				if (callCount === 1) {
+				const apiKey = typeof options?.apiKey === "string" ? options.apiKey : undefined;
+				requestedCalls.push({ model: `${model.provider}/${model.id}`, apiKey });
+				if (requestedCalls.length === 1) {
 					mock.push({ throw: Object.assign(new Error("Payment Required"), { status: 402 }) });
 				} else {
 					mock.push({ content: ["ok:sibling-credential-success"] });
@@ -2187,7 +2187,12 @@ describe("AgentSession retry fallback", () => {
 			},
 		});
 
-		const markUsageLimitSpy = vi.spyOn(modelRegistry.authStorage, "markUsageLimitReached").mockResolvedValue({ switched: true });
+		const markUsageLimitSpy = vi
+			.spyOn(modelRegistry.authStorage, "markUsageLimitReached")
+			.mockImplementation(async () => {
+				currentKey = "key-B";
+				return { switched: true };
+			});
 
 		const settings = Settings.isolated({
 			"compaction.enabled": false,
@@ -2211,8 +2216,14 @@ describe("AgentSession retry fallback", () => {
 
 		expect(markUsageLimitSpy).toHaveBeenCalledTimes(1);
 		expect(requestedCalls).toHaveLength(2);
-		expect(requestedCalls[0].model).toBe(`${primaryModel.provider}/${primaryModel.id}`);
-		expect(requestedCalls[1].model).toBe(`${primaryModel.provider}/${primaryModel.id}`);
+		expect(requestedCalls[0]).toEqual({
+			model: `${primaryModel.provider}/${primaryModel.id}`,
+			apiKey: "key-A",
+		});
+		expect(requestedCalls[1]).toEqual({
+			model: `${primaryModel.provider}/${primaryModel.id}`,
+			apiKey: "key-B",
+		});
 		expect(session.model?.provider).toBe(primaryModel.provider);
 		expect(session.model?.id).toBe(primaryModel.id);
 	});
