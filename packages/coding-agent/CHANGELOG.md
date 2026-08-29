@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `omp plugin features` failing to find marketplace-installed plugins.
+
 ## [18.0.10] - 2026-08-28
 
 ### Added
