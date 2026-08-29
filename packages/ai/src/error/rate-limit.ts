@@ -326,14 +326,12 @@ export function isUsageLimitOutcome(status: number | undefined, message: string 
 	// accept an undefined status too — but only when the body names a cap that
 	// resets, never on a bare 403, which stays an auth failure.
 	if ((status === 403 || status === undefined) && message && isAccountScopedCapText(message)) return true;
+	if (isBillingCapStatus) return true;
 	if (!isUsageLimitStatus(status)) return false;
 	if (!message || isOpaqueStatusBody(message)) return true;
 	const reason = parseRateLimitReason(message);
-	// For the categorical 402 billing cap a concurrency-worded body is still an
-	// exhausted cap (rotate); for 429 / other only QUOTA_EXHAUSTED rotates.
-	return isQuotaExhaustedReason(reason) || (isBillingCapStatus && reason === "CONCURRENT_LIMIT");
+	return isQuotaExhaustedReason(reason);
 }
-
 /**
  * A usage-limit status body is opaque when it carries no signal beyond the
  * status itself — empty, whitespace-only, the status digits with HTTP/JSON

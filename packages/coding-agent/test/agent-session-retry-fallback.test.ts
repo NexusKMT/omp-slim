@@ -2157,6 +2157,123 @@ describe("AgentSession retry fallback", () => {
 		expect(retryEndEvents).toHaveLength(1);
 		expect(retryEndEvents[0]).toMatchObject({ success: true });
 	});
+	it("rotates sibling credentials on 402 Payment Required without invoking model fallback", async () => {
+		const primaryModel = getBundledModel("openai", "gpt-4o") ?? getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("google", "gemini-1.5-pro") ?? getBundledModel("openai", "gpt-4o-mini");
+		if (!primaryModel || !fallbackModel) {
+			throw new Error("Expected bundled test models to exist");
+		}
+
+		const requestedCalls: Array<{ model: string; key: string }> = [];
+		let callCount = 0;
+		const mock = createMockModel();
+		const agent = new Agent({
+			getApiKey: model => `key-attempt-${callCount}`,
+			initialState: {
+				model: primaryModel,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+			},
+			streamFn: (model, context, options) => {
+				callCount++;
+				requestedCalls.push({ model: `${model.provider}/${model.id}`, key: `key-attempt-${callCount}` });
+				if (callCount === 1) {
+					mock.push({ throw: Object.assign(new Error("Payment Required"), { status: 402 }) });
+				} else {
+					mock.push({ content: ["ok:sibling-credential-success"] });
+				}
+				return mock.stream(model, context, options);
+			},
+		});
+
+		const markUsageLimitSpy = vi.spyOn(modelRegistry.authStorage, "markUsageLimitReached").mockResolvedValue({ switched: true });
+
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 1,
+			"retry.maxRetries": 2,
+			"retry.modelFallback": true,
+			"retry.fallbackChains": {
+				[`${primaryModel.provider}/${primaryModel.id}`]: [`${fallbackModel.provider}/${fallbackModel.id}`],
+			},
+		});
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+
+		await session.prompt("Prompt requiring credential rotation");
+		await session.waitForIdle();
+
+		expect(markUsageLimitSpy).toHaveBeenCalledTimes(1);
+		expect(requestedCalls).toHaveLength(2);
+		expect(requestedCalls[0].model).toBe(`${primaryModel.provider}/${primaryModel.id}`);
+		expect(requestedCalls[1].model).toBe(`${primaryModel.provider}/${primaryModel.id}`);
+		expect(session.model?.provider).toBe(primaryModel.provider);
+		expect(session.model?.id).toBe(primaryModel.id);
+	});
+
+	it("allows model fallback on 402 Payment Required when all sibling credentials are exhausted", async () => {
+		const primaryModel = getBundledModel("openai", "gpt-4o") ?? getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("google", "gemini-1.5-pro") ?? getBundledModel("openai", "gpt-4o-mini");
+		if (!primaryModel || !fallbackModel) {
+			throw new Error("Expected bundled test models to exist");
+		}
+
+		const requestedModels: string[] = [];
+		const mock = createMockModel();
+		const agent = new Agent({
+			getApiKey: model => `${model.provider}-test-key`,
+			initialState: {
+				model: primaryModel,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+			},
+			streamFn: (model, context, options) => {
+				requestedModels.push(`${model.provider}/${model.id}`);
+				if (model.provider === primaryModel.provider && model.id === primaryModel.id) {
+					mock.push({ throw: Object.assign(new Error("Payment Required"), { status: 402 }) });
+				} else {
+					mock.push({ content: [`ok:${model.provider}/${model.id}`] });
+				}
+				return mock.stream(model, context, options);
+			},
+		});
+
+		vi.spyOn(modelRegistry.authStorage, "markUsageLimitReached").mockResolvedValue({ switched: false });
+
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 1,
+			"retry.maxRetries": 1,
+			"retry.modelFallback": true,
+			"retry.fallbackChains": {
+				[`${primaryModel.provider}/${primaryModel.id}`]: [`${fallbackModel.provider}/${fallbackModel.id}`],
+			},
+		});
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+
+		await session.prompt("Prompt triggering fallback on exhausted siblings");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual([
+			`${primaryModel.provider}/${primaryModel.id}`,
+			`${fallbackModel.provider}/${fallbackModel.id}`,
+		]);
+		expect(session.model?.provider).toBe(fallbackModel.provider);
+		expect(session.model?.id).toBe(fallbackModel.id);
+	});
 
 	it("applies a provider-wildcard chain to any model of that provider", async () => {
 		const primaryModel = getBundledModel("anthropic", "claude-opus-4-1");

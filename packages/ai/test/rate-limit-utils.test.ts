@@ -387,6 +387,11 @@ describe("isUsageLimit", () => {
 		expect(isUsageLimit(new ProviderHttpError("Generic provider failure", 429, { code: "rate_limit_error" }))).toBe(
 			false,
 		);
+		expect(isUsageLimit(new ProviderHttpError("Payment Required", 402))).toBe(true);
+	});
+	it("detects 402 Payment Required as credential-rotatable usage limit", () => {
+		expect(isUsageLimit(Object.assign(new Error("Payment Required"), { status: 402 }))).toBe(true);
+		expect(isUsageLimit(Object.assign(new Error('{"detail":{"code":"deactivated_workspace"}}'), { status: 402 }))).toBe(true);
 	});
 });
 
@@ -535,11 +540,13 @@ describe("isUsageLimitOutcome", () => {
 		expect(isUsageLimit(message)).toBe(true);
 	});
 
-	it("treats 402 as a usage-limit status (opaque body rotates, informative non-quota body does not)", () => {
+	it("treats 402 as a categorical billing cap (rotates on any 402 body)", () => {
 		expect(isUsageLimitStatus(402)).toBe(true);
 		expect(isUsageLimitOutcome(402, undefined)).toBe(true);
 		expect(isUsageLimitOutcome(402, "HTTP 402")).toBe(true);
-		expect(isUsageLimitOutcome(402, "A subscription is required for this endpoint")).toBe(false);
+		expect(isUsageLimitOutcome(402, "Payment Required")).toBe(true);
+		expect(isUsageLimitOutcome(402, '{"detail":{"code":"deactivated_workspace"}}')).toBe(true);
+		expect(isUsageLimitOutcome(402, "A subscription is required for this endpoint")).toBe(true);
 		expect(isUsageLimit(new ProviderHttpError("HTTP 402", 402))).toBe(true);
 	});
 

@@ -485,8 +485,8 @@ function classifyText(
 			!concurrencyExcluded &&
 			(matchesUsageLimitText(cleanMessage) ||
 				((statusClean === 403 || statusClean === undefined) && isAccountScopedCapText(cleanMessage)) ||
-				(isLimitStatus &&
-					(isOpaque || reason === "QUOTA_EXHAUSTED" || (isBillingCapStatus && reason === "CONCURRENT_LIMIT"))))
+				isBillingCapStatus ||
+				(isLimitStatus && (isOpaque || reason === "QUOTA_EXHAUSTED")))
 		) {
 			kinds |= Flag.UsageLimit;
 		}
@@ -566,6 +566,7 @@ export function classify(error: unknown, api?: Api): number {
 			let linkKinds = 0;
 			const { status: codeStatus, code } = link;
 			if (
+				codeStatus === 402 ||
 				code === "usage_limit_reached" ||
 				(code === "insufficient_quota" && !isDashScopeTokenLimitText(link.message))
 			) {
