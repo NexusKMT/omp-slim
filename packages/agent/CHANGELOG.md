@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Unknown native tokenizer encodings now fall back to the byte estimate instead of crashing spawn and compaction.
+
 ## [18.0.10] - 2026-08-28
 
 ### Added
