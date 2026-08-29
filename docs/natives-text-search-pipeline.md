@@ -69,7 +69,7 @@ Terminology follows `docs/natives-architecture.md`:
 - **Directory branch**
   - Rust builds a `pi_walker::WalkRequest` with `.cache(false)` hard-coded (`build_grep_walk_request`): directory searches stream while the tree is walked and never read or populate the shared scan cache.
   - The walk yields file candidates directly to searchers (`glob`/type filters run walker-side; the type filter is applied per candidate).
-  - Files larger than the size cap are deferred to a trailing prefix pass that memory-maps only the leading window.
+  - Files larger than the size cap are deferred to a trailing prefix pass that reads only the leading window into an owned buffer.
 
 ### Search/collection semantics
 

@@ -158,12 +158,14 @@ Unless requested, remove upstream compatibility shims.
 
 ## 10) Validate the port
 
-Run the standard checks after changes:
+Run the checks that cover the port after changes:
 
 - `bun check`
+- Run the focused Bun test or smoke scenario that exercises the changed behavior.
+- If dependencies changed, run `bun install --frozen-lockfile` after updating `bun.lock`.
 
 If the repo already has failing checks unrelated to your changes, call that out.
-Tests use Bun's runner (not Vitest), but only run `bun test` when explicitly requested.
+Tests use Bun's runner (not Vitest), but do not substitute an indiscriminate project-wide `bun test` for targeted behavioral verification.
 
 ## 11) Protect improved features (regression trap list)
 
