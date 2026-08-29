@@ -6,7 +6,7 @@
  * permits it. Falls back to plain text when disabled.
  */
 import * as url from "node:url";
-import { TERMINAL } from "@oh-my-pi/pi-tui";
+import { setTerminalHyperlinks, TERMINAL } from "@oh-my-pi/pi-tui";
 import { isSettingsInitialized, settings } from "../config/settings";
 import {
 	LocalProtocolHandler,
@@ -19,6 +19,8 @@ import {
 const OSC = "\x1b]";
 const ST = "\x1b\\";
 const BEL = "\x07";
+
+const DETECTED_TERMINAL_HYPERLINKS = TERMINAL.hyperlinks;
 
 /** Stable 8-char hex ID derived from a URI — hints terminals to coalesce identical adjacent links. */
 function buildLinkId(uri: string): string {
@@ -56,6 +58,20 @@ export function isHyperlinkEnabled(): boolean {
 	if (Bun.env.NO_COLOR) return false;
 	if (!process.stdout.isTTY) return false;
 	return TERMINAL.hyperlinks;
+}
+
+/**
+ * Apply the current `tui.hyperlinks` policy to renderers that read
+ * {@link TERMINAL}.hyperlinks directly.
+ *
+ * Auto mode first restores the process-start capability because prior
+ * `always`/`off` applications overwrite the mutable runtime flag.
+ */
+export function applyHyperlinkSetting(): void {
+	if (isSettingsInitialized() && settings.get("tui.hyperlinks") === "auto") {
+		setTerminalHyperlinks(DETECTED_TERMINAL_HYPERLINKS);
+	}
+	setTerminalHyperlinks(isHyperlinkEnabled());
 }
 
 function safeHyperlinkUri(uri: string): string | undefined {

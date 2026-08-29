@@ -6,6 +6,7 @@ import { LocalProtocolHandler } from "@oh-my-pi/pi-coding-agent/internal-urls/lo
 import { getMarkdownTheme, initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import {
+	applyHyperlinkSetting,
 	fileHyperlink,
 	isHyperlinkEnabled,
 	tryResolveInternalUrlSync,
@@ -315,11 +316,9 @@ describe("tryResolveInternalUrlSync", () => {
 });
 
 describe("chat markdown links honor tui.hyperlinks", () => {
-	// The Markdown renderer gates OSC 8 on the raw TERMINAL.hyperlinks capability
-	// flag, so the coding-agent routes the resolved `tui.hyperlinks` policy into it
-	// via setTerminalHyperlinks(isHyperlinkEnabled()) at TUI startup. These tests
-	// exercise that exact wiring so a `[text](url)` chat link tracks the setting the
-	// same way path/resource links already do (issue #10195).
+	// The Markdown renderer gates OSC 8 on TERMINAL.hyperlinks. The coding-agent
+	// applies its setting to that shared flag so chat links track path/resource
+	// links (issue #10195).
 	const originalHyperlinks = terminalCaps.TERMINAL.hyperlinks;
 
 	beforeAll(async () => {
@@ -330,7 +329,7 @@ describe("chat markdown links honor tui.hyperlinks", () => {
 	});
 
 	function renderChatLink(): string {
-		terminalCaps.setTerminalHyperlinks(isHyperlinkEnabled());
+		applyHyperlinkSetting();
 		const md = new terminalCaps.Markdown(
 			"See [the docs](https://example.com/path) for details.",
 			0,
