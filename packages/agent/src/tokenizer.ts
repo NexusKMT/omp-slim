@@ -26,8 +26,9 @@ export function tokenizerEncodingForModel(model: Pick<Model, "tokenizer"> | null
 }
 
 /**
- * `strict` always pays for an exact native count (the catalog-resolved
- * tokenizer when known, o200k_base otherwise). `approximate` and
+ * `strict` always tries an exact native count (the catalog-resolved tokenizer
+ * when known, o200k_base otherwise), falling back to the byte upper bound when
+ * the loaded addon does not recognize that encoding. `approximate` and
  * `upperbound` prefer the same exact count for known tokenizer families or
  * when `PI_TOKENIZER_ACCURATE=1` is set; otherwise they use a cheap heuristic:
  * `approximate` a bytes/4 guess, `upperbound` the raw byte length (never
@@ -61,9 +62,18 @@ function sumFragments(text: string | string[], perFragment: (t: string) => numbe
 	return Array.isArray(text) ? text.reduce((sum, t) => sum + perFragment(t), 0) : perFragment(text);
 }
 
-function countTokensNat(text: string | string[], encoding: natives.Encoding | null | undefined, mode: TokenCountMode): number {
+interface NativeTokenCount {
+	tokens: number;
+	exact: boolean;
+}
+
+function countTokensNat(
+	text: string | string[],
+	encoding: natives.Encoding | null | undefined,
+	mode: TokenCountMode,
+): NativeTokenCount {
 	try {
-		return natives.countTokens(text, encoding);
+		return { tokens: natives.countTokens(text, encoding), exact: true };
 	} catch (error) {
 		if (
 			!(error instanceof Error) ||
@@ -72,7 +82,8 @@ function countTokensNat(text: string | string[], encoding: natives.Encoding | nu
 		) {
 			throw error;
 		}
-		return sumFragments(text, mode === "upperbound" ? byteLength : byteEstimate);
+		const tokens = sumFragments(text, mode === "approximate" ? byteEstimate : byteLength);
+		return { tokens, exact: false };
 	}
 }
 
@@ -82,11 +93,10 @@ export interface TokenBudgetCheck {
 	fits: boolean;
 	/**
 	 * Token count behind the verdict: the exact native count when `exact` is
-	 * set, otherwise the cheap byte upper bound (which already fit, so it is
-	 * only an over-estimate of a count known to be under budget).
+	 * set, otherwise the conservative byte upper bound.
 	 */
 	tokens: number;
-	/** Whether the exact tokenizer had to run because the cheap bound busted. */
+	/** Whether `tokens` came from the exact native tokenizer. */
 	exact: boolean;
 }
 
@@ -140,9 +150,9 @@ export class Tokenizer {
 	}
 
 	countTokens(text: string | string[], mode: TokenCountMode = "approximate"): number {
-		if (mode === "strict") return countTokensNat(text, this.#encoding, mode);
-		if (!testEnv && this.#encoding !== null) return countTokensNat(text, this.#encoding, mode);
-		if (accurate) return countTokensNat(text, undefined, mode);
+		if (mode === "strict") return countTokensNat(text, this.#encoding, mode).tokens;
+		if (!testEnv && this.#encoding !== null) return countTokensNat(text, this.#encoding, mode).tokens;
+		if (accurate) return countTokensNat(text, undefined, mode).tokens;
 		return sumFragments(text, mode === "upperbound" ? byteLength : byteEstimate);
 	}
 
@@ -160,8 +170,8 @@ export class Tokenizer {
 	checkTokenBudget(text: string | string[], budget: number): TokenBudgetCheck {
 		const bound = sumFragments(text, byteLength);
 		if (bound <= budget) return { fits: true, tokens: bound, exact: false };
-		const tokens = this.countTokens(text, "strict");
-		return { fits: tokens <= budget, tokens, exact: true };
+		const result = countTokensNat(text, this.#encoding, "strict");
+		return { fits: result.tokens <= budget, tokens: result.tokens, exact: result.exact };
 	}
 
 	/**

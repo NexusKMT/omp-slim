@@ -85,13 +85,18 @@ describe("countTokens with modes", () => {
 		expect(claude.countTokens("hello world", "strict")).not.toBe(generic.countTokens("hello world", "strict"));
 	});
 
-	test("falls back to the byte estimate when native encoding is unknown", () => {
+	test("falls back conservatively when native encoding is unknown", () => {
 		vi.spyOn(natives, "countTokens").mockImplementation(() => {
 			throw new Error('value "DeepSeekV3" does not match any variant of enum Encoding');
 		});
 		const tokenizer = new Tokenizer({ tokenizer: "deepseek-v3" });
-		expect(tokenizer.countTokens("hello world", "strict")).toBe(3);
+		expect(tokenizer.countTokens("hello world", "strict")).toBe(11);
 		expect(tokenizer.countTokens("hello world", "upperbound")).toBe(11);
+		expect(tokenizer.checkTokenBudget("x".repeat(40), 20)).toEqual({
+			fits: false,
+			tokens: 40,
+			exact: false,
+		});
 	});
 
 	test("does not swallow unrelated native tokenizer errors", () => {
