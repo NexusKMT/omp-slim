@@ -2179,7 +2179,9 @@ describe("AgentSession retry fallback", () => {
 				const apiKey = typeof options?.apiKey === "string" ? options.apiKey : undefined;
 				requestedCalls.push({ model: `${model.provider}/${model.id}`, apiKey });
 				if (requestedCalls.length === 1) {
-					mock.push({ throw: Object.assign(new Error("Payment Required"), { status: 402 }) });
+					// The mock model keeps only the thrown error's message text, so the
+					// 402 must travel inside the message for classification to rotate.
+					mock.push({ throw: new Error("HTTP 402 Payment Required") });
 				} else {
 					mock.push({ content: ["ok:sibling-credential-success"] });
 				}
@@ -2234,7 +2236,11 @@ describe("AgentSession retry fallback", () => {
 			throw new Error("Expected bundled test models to exist");
 		}
 
-		for (const errorToThrow of [Object.assign(new Error("Payment is required"), { status: 402 }), { status: 402 }]) {
+		// The mock model reduces a thrown error to its message text (a `status`
+		// property never reaches the AssistantMessage), so carry the 402 inside
+		// the message: the first iteration exercises the quota-worded body, the
+		// second an opaque status-only body.
+		for (const errorToThrow of [new Error("HTTP 402 Payment is required"), new Error("HTTP 402")]) {
 			const requestedCalls: Array<{ model: string; apiKey: string | undefined }> = [];
 			let currentKey = "key-A";
 			const mock = createMockModel();
@@ -2258,8 +2264,12 @@ describe("AgentSession retry fallback", () => {
 				},
 			});
 
+			// `vi.spyOn` on an already-spied method returns the existing spy with
+			// its accumulated call history, so clear it between the parameterized
+			// iterations — each must observe exactly one credential rotation.
 			const markUsageLimitSpy = vi
 				.spyOn(modelRegistry.authStorage, "markUsageLimitReached")
+				.mockClear()
 				.mockImplementation(async () => {
 					currentKey = "key-B";
 					return { switched: true };
