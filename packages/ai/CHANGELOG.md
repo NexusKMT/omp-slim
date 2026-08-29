@@ -10,6 +10,7 @@
 - Fixed HTTP 402 payment-required and deactivated workspace responses being misclassified so credential rotation correctly falls back to sibling credentials without treating non-quota responses as usage limits ([#10181](https://github.com/can1357/oh-my-pi/pull/10181)).
 - Fixed Perplexity email login for accounts protected by authenticator two-factor authentication.
 - Fixed `/login` for Qianfan rejecting valid API keys that lack access to the validation model, treating an authenticated `invalid_model` response as a successful credential check.
+- Fixed Z.AI browser sign-in using an unregistered random callback port when port 54548 is occupied; it now reports the conflict before opening the browser ([#10157](https://github.com/can1357/oh-my-pi/issues/10157)).
 
 ## [18.0.9] - 2026-08-28
 
