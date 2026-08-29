@@ -1656,6 +1656,60 @@ mod tests {
 	}
 
 	#[test]
+	fn stage_hunks_commit_split_survives_unadvanced_index_mtime() {
+		// Regression for #10130 (the issue-966 split-commit repro): two
+		// back-to-back stage_hunks -> commit_create pairs on one reused handle
+		// read a stale in-memory index snapshot when every mutation landed in a
+		// single mtime tick, so the first commit errored "nothing to commit".
+		let temp = init(&[("tracked.txt", b"original\n")]);
+		fs::write(temp.path().join("tracked.txt"), b"updated\n").expect("edit tracked");
+		fs::write(temp.path().join("new-file.txt"), b"new\n").expect("write new");
+		git(temp.path(), &["add", "-N", "new-file.txt"]);
+		let repo = repo(temp.path());
+		let raw = repo.diff_text(&DiffOptions::default()).expect("diff");
+
+		// Freeze the index mtime so every read collides with the preceding write
+		// on the same tick — the exact race the fix removes.
+		let pinned =
+			std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+		let index_path = repo.info().git_dir.join("index");
+		let pin = || {
+			fs::File::options()
+				.write(true)
+				.open(&index_path)
+				.expect("open index")
+				.set_modified(pinned)
+				.expect("pin index mtime");
+		};
+		pin();
+
+		repo.stage_hunks(
+			&[HunkSelection { path: "new-file.txt".into(), hunks: HunkSpec::All }],
+			Some(&raw),
+		)
+		.expect("stage new file");
+		pin();
+		repo.commit_create("feat: add new file", &crate::types::CommitOptions::default())
+			.expect("commit new file");
+		pin();
+		repo.stage_hunks(
+			&[HunkSelection { path: "tracked.txt".into(), hunks: HunkSpec::All }],
+			Some(&raw),
+		)
+		.expect("stage tracked file");
+		pin();
+		repo.commit_create("fix: update tracked file", &crate::types::CommitOptions::default())
+			.expect("commit tracked file");
+
+		assert_eq!(
+			git(temp.path(), &["log", "--format=%s", "-2"]).trim(),
+			"fix: update tracked file\nfeat: add new file"
+		);
+		assert_eq!(git(temp.path(), &["show", "HEAD:tracked.txt"]), "updated\n");
+		assert_eq!(git(temp.path(), &["show", "HEAD~1:new-file.txt"]), "new\n");
+	}
+
+	#[test]
 	fn patch_join_and_validation_preserve_binary_terminators() {
 		assert_eq!(join_patches(&["one\n\n".into(), "two".into(), String::new()]), "one\n\ntwo\n\n");
 		let binary = "diff --git a/a.bin b/a.bin\nindex 1111111..2222222 100644\nGIT binary \
