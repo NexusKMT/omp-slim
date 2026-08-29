@@ -7,7 +7,7 @@ use std::{
 
 use gix::bstr::ByteSlice;
 
-use super::GitRepo;
+use super::{GitRepo, open::load_index_or_empty};
 use crate::{
 	error::{Error, Result},
 	types::{
@@ -700,9 +700,7 @@ impl GitRepo {
 		}
 		if !others {
 			let repo = self.gix()?;
-			let index = repo
-				.index_or_empty()
-				.map_err(|err| Error::backend("git ls-files", err))?;
+			let index = load_index_or_empty(&repo, "git ls-files")?;
 			let mut out: Vec<_> = index
 				.entries()
 				.iter()

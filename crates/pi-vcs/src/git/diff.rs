@@ -4,7 +4,7 @@ use std::{fmt::Write as _, io::Write as _, path::Path};
 
 use gix::bstr::{BStr, BString, ByteSlice};
 
-use super::GitRepo;
+use super::{GitRepo, open::load_index_or_empty};
 use crate::{
 	error::{Error, Result},
 	types::{DiffOptions, NumstatEntry, ShowResult},
@@ -310,9 +310,7 @@ fn index_changes(
 	tree_id: gix::ObjectId,
 	files: &[String],
 ) -> Result<Vec<FileChange>> {
-	let index = repo
-		.index_or_empty()
-		.map_err(|err| Error::backend("git diff --cached", err))?;
+	let index = load_index_or_empty(repo, "git diff --cached")?;
 	let mut pathspec = make_pathspec(repo, files, false)?;
 	let mut out = Vec::new();
 	repo
@@ -1149,9 +1147,7 @@ fn make_pathspec<'repo>(
 	if files.is_empty() {
 		return Ok(None);
 	}
-	let index = repo
-		.index_or_empty()
-		.map_err(|err| Error::backend("git diff pathspec", err))?;
+	let index = load_index_or_empty(repo, "git diff pathspec")?;
 	repo
 		.pathspec(
 			false,

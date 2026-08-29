@@ -20,7 +20,7 @@ use gix::{
 	refs::transaction::PreviousValue,
 };
 
-use super::{GitRepo, mutate::update_reference};
+use super::{GitRepo, mutate::update_reference, open::load_index_or_head};
 use crate::{
 	error::{Error, Result},
 	types::{ApplyOptions, DiffOptions, HunkSelection, HunkSelectionError, HunkSpec},
@@ -1190,9 +1190,7 @@ fn blob_bytes(repo: &gix::Repository, id: gix::ObjectId) -> Result<Vec<u8>> {
 }
 
 fn index_map(repo: &gix::Repository) -> Result<BTreeMap<String, FileEntry>> {
-	let index = repo
-		.index_or_load_from_head_or_empty()
-		.map_err(|err| Error::backend("git read index", err))?;
+	let index = load_index_or_head(repo, "git read index")?;
 	Ok(index_state_map(&index))
 }
 
@@ -1306,10 +1304,7 @@ fn untracked_worktree_map(
 	gix_repo: &gix::Repository,
 	index: &BTreeMap<String, FileEntry>,
 ) -> Result<BTreeMap<String, FileEntry>> {
-	let mut walk_index = gix_repo
-		.index_or_load_from_head_or_empty()
-		.map_err(|err| Error::backend("git read index for untracked files", err))?
-		.into_owned();
+	let mut walk_index = load_index_or_head(gix_repo, "git read index for untracked files")?;
 	for entry in walk_index.entries_mut() {
 		entry.flags.insert(Flags::UPTODATE);
 	}
