@@ -200,6 +200,34 @@ describe("runSharpshooterConsolidation", () => {
 		const state = await readSharpshooterState(harness.agentDir, harness.cwd);
 		expect(state.lastError?.message).toContain("120-line limit");
 	});
+
+	it("rejects an all-empty replacement without consuming deltas or wiping memory files", async () => {
+		using temp = TempDir.createSync("@pi-sharpshooter-empty-wipe-");
+		const harness = createHarness(temp.path());
+		await appendSharpshooterDelta(harness.agentDir, harness.cwd, delta("session-a", 1, "Keep one boundary."));
+		const bankDir = sharpshooterBankDir(harness.agentDir, harness.cwd);
+		await Bun.write(path.join(bankDir, "architecture.md"), "old architecture");
+		await Bun.write(path.join(bankDir, "product.md"), "old product");
+		await Bun.write(path.join(bankDir, "style.md"), "old style");
+		vi.spyOn(ai, "completeSimple").mockResolvedValue(
+			completion([
+				{ name: "architecture.md", content: "" },
+				{ name: "product.md", content: "   \n\t " },
+				{ name: "style.md", content: "" },
+			]),
+		);
+
+		const result = await runSharpshooterConsolidation({ ...harness, force: true });
+
+		expect(result.ran).toBe(false);
+		expect(result.reason).toBe("error");
+		expect(result.error).toContain("all-empty");
+		expect(await Bun.file(path.join(bankDir, "architecture.md")).text()).toBe("old architecture");
+		expect(await Bun.file(path.join(bankDir, "product.md")).text()).toBe("old product");
+		expect(await Bun.file(path.join(bankDir, "style.md")).text()).toBe("old style");
+		const state = await readSharpshooterState(harness.agentDir, harness.cwd);
+		expect(state.lastError?.message).toContain("all-empty");
+	});
 });
 
 describe("renderSharpshooterSessions", () => {

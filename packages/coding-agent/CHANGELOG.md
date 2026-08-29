@@ -22,6 +22,9 @@
 ### Fixed
 
 - Fixed an undecodable image (a truncated or partially written screenshot) permanently wedging a session: the provider rejected every later request, including on resume, with no way out. Reading one now fails with an actionable error, and any that reach the transcript are replaced by a note before the request instead of breaking it.
+### Fixed
+
+- Sharpshooter consolidation no longer wipes memory files when the model returns an all-empty replacement; the error is recorded and queued deltas are preserved.
 
 ## [18.0.10] - 2026-08-28
 
@@ -558,6 +561,8 @@
 - Added repeat read warning hints when identical file content is read multiple times.
 - Explicit DAP adapters can now attach without a PID or port when `attachDefaults` provide the target arguments.
 - Added `isProjectTrusted()` compatibility shim to `ExtensionContext` for extensions targeting upstream per-directory trust gates.
+- Added `/reload-settings` slash command (`/reload-config`): re-reads the global, project, and overlay config layers from disk and applies them to the live session without a restart, reporting which effective settings changed.
+- `/reload-settings` also reloads `models.yml` (custom providers/models) and refreshes the model catalog live, so models added mid-session appear in `/models` and `/switch` without a restart.
 
 ### Changed
 
