@@ -2157,6 +2157,216 @@ describe("AgentSession retry fallback", () => {
 		expect(retryEndEvents).toHaveLength(1);
 		expect(retryEndEvents[0]).toMatchObject({ success: true });
 	});
+	it("rotates sibling credentials on 402 Payment Required without invoking model fallback", async () => {
+		const primaryModel = getBundledModel("openai", "gpt-4o") ?? getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("google", "gemini-1.5-pro") ?? getBundledModel("openai", "gpt-4o-mini");
+		if (!primaryModel || !fallbackModel) {
+			throw new Error("Expected bundled test models to exist");
+		}
+
+		const requestedCalls: Array<{ model: string; apiKey: string | undefined }> = [];
+		let currentKey = "key-A";
+		const mock = createMockModel();
+		const agent = new Agent({
+			getApiKey: () => currentKey,
+			initialState: {
+				model: primaryModel,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+			},
+			streamFn: (model, context, options) => {
+				const apiKey = typeof options?.apiKey === "string" ? options.apiKey : undefined;
+				requestedCalls.push({ model: `${model.provider}/${model.id}`, apiKey });
+				if (requestedCalls.length === 1) {
+					// The mock model keeps only the thrown error's message text, so the
+					// 402 must travel inside the message for classification to rotate.
+					mock.push({ throw: new Error("HTTP 402 Payment Required") });
+				} else {
+					mock.push({ content: ["ok:sibling-credential-success"] });
+				}
+				return mock.stream(model, context, options);
+			},
+		});
+
+		const markUsageLimitSpy = vi
+			.spyOn(modelRegistry.authStorage, "markUsageLimitReached")
+			.mockImplementation(async () => {
+				currentKey = "key-B";
+				return { switched: true };
+			});
+
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 1,
+			"retry.maxRetries": 2,
+			"retry.modelFallback": true,
+			"retry.fallbackChains": {
+				[`${primaryModel.provider}/${primaryModel.id}`]: [`${fallbackModel.provider}/${fallbackModel.id}`],
+			},
+		});
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+
+		await session.prompt("Prompt requiring credential rotation");
+		await session.waitForIdle();
+
+		expect(markUsageLimitSpy).toHaveBeenCalledTimes(1);
+		expect(requestedCalls).toHaveLength(2);
+		expect(requestedCalls[0]).toEqual({
+			model: `${primaryModel.provider}/${primaryModel.id}`,
+			apiKey: "key-A",
+		});
+		expect(requestedCalls[1]).toEqual({
+			model: `${primaryModel.provider}/${primaryModel.id}`,
+			apiKey: "key-B",
+		});
+		expect(session.model?.provider).toBe(primaryModel.provider);
+		expect(session.model?.id).toBe(primaryModel.id);
+	});
+	it("rotates sibling credentials on 402 Payment is required and status-only 402 without invoking model fallback", async () => {
+		const primaryModel = getBundledModel("openai", "gpt-4o") ?? getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("google", "gemini-1.5-pro") ?? getBundledModel("openai", "gpt-4o-mini");
+		if (!primaryModel || !fallbackModel) {
+			throw new Error("Expected bundled test models to exist");
+		}
+
+		// The mock model reduces a thrown error to its message text (a `status`
+		// property never reaches the AssistantMessage), so carry the 402 inside
+		// the message: the first iteration exercises the quota-worded body, the
+		// second an opaque status-only body.
+		for (const errorToThrow of [new Error("HTTP 402 Payment is required"), new Error("HTTP 402")]) {
+			const requestedCalls: Array<{ model: string; apiKey: string | undefined }> = [];
+			let currentKey = "key-A";
+			const mock = createMockModel();
+			const agent = new Agent({
+				getApiKey: () => currentKey,
+				initialState: {
+					model: primaryModel,
+					systemPrompt: ["Test"],
+					tools: [],
+					messages: [],
+				},
+				streamFn: (model, context, options) => {
+					const apiKey = typeof options?.apiKey === "string" ? options.apiKey : undefined;
+					requestedCalls.push({ model: `${model.provider}/${model.id}`, apiKey });
+					if (requestedCalls.length === 1) {
+						mock.push({ throw: errorToThrow });
+					} else {
+						mock.push({ content: ["ok:sibling-credential-success"] });
+					}
+					return mock.stream(model, context, options);
+				},
+			});
+
+			// `vi.spyOn` on an already-spied method returns the existing spy with
+			// its accumulated call history, so clear it between the parameterized
+			// iterations — each must observe exactly one credential rotation.
+			const markUsageLimitSpy = vi
+				.spyOn(modelRegistry.authStorage, "markUsageLimitReached")
+				.mockClear()
+				.mockImplementation(async () => {
+					currentKey = "key-B";
+					return { switched: true };
+				});
+
+			const settings = Settings.isolated({
+				"compaction.enabled": false,
+				"retry.baseDelayMs": 1,
+				"retry.maxRetries": 2,
+				"retry.modelFallback": true,
+				"retry.fallbackChains": {
+					[`${primaryModel.provider}/${primaryModel.id}`]: [`${fallbackModel.provider}/${fallbackModel.id}`],
+				},
+			});
+
+			session = new AgentSession({
+				agent,
+				sessionManager: SessionManager.inMemory(),
+				settings,
+				modelRegistry,
+			});
+
+			await session.prompt("Prompt requiring credential rotation");
+			await session.waitForIdle();
+
+			expect(markUsageLimitSpy).toHaveBeenCalledTimes(1);
+			expect(requestedCalls).toHaveLength(2);
+			expect(requestedCalls[0]).toEqual({
+				model: `${primaryModel.provider}/${primaryModel.id}`,
+				apiKey: "key-A",
+			});
+			expect(requestedCalls[1]).toEqual({
+				model: `${primaryModel.provider}/${primaryModel.id}`,
+				apiKey: "key-B",
+			});
+			expect(session.model?.provider).toBe(primaryModel.provider);
+			expect(session.model?.id).toBe(primaryModel.id);
+		}
+	});
+
+	it("allows model fallback on 402 Payment Required when all sibling credentials are exhausted", async () => {
+		const primaryModel = getBundledModel("openai", "gpt-4o") ?? getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("google", "gemini-1.5-pro") ?? getBundledModel("openai", "gpt-4o-mini");
+		if (!primaryModel || !fallbackModel) {
+			throw new Error("Expected bundled test models to exist");
+		}
+
+		const requestedModels: string[] = [];
+		const mock = createMockModel();
+		const agent = new Agent({
+			getApiKey: model => `${model.provider}-test-key`,
+			initialState: {
+				model: primaryModel,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+			},
+			streamFn: (model, context, options) => {
+				requestedModels.push(`${model.provider}/${model.id}`);
+				if (model.provider === primaryModel.provider && model.id === primaryModel.id) {
+					mock.push({ throw: Object.assign(new Error("Payment Required"), { status: 402 }) });
+				} else {
+					mock.push({ content: [`ok:${model.provider}/${model.id}`] });
+				}
+				return mock.stream(model, context, options);
+			},
+		});
+
+		vi.spyOn(modelRegistry.authStorage, "markUsageLimitReached").mockResolvedValue({ switched: false });
+
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 1,
+			"retry.maxRetries": 1,
+			"retry.modelFallback": true,
+			"retry.fallbackChains": {
+				[`${primaryModel.provider}/${primaryModel.id}`]: [`${fallbackModel.provider}/${fallbackModel.id}`],
+			},
+		});
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+
+		await session.prompt("Prompt triggering fallback on exhausted siblings");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual([
+			`${primaryModel.provider}/${primaryModel.id}`,
+			`${fallbackModel.provider}/${fallbackModel.id}`,
+		]);
+		expect(session.model?.provider).toBe(fallbackModel.provider);
+		expect(session.model?.id).toBe(fallbackModel.id);
+	});
 
 	it("applies a provider-wildcard chain to any model of that provider", async () => {
 		const primaryModel = getBundledModel("anthropic", "claude-opus-4-1");

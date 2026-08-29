@@ -13,6 +13,9 @@
 ### Fixed
 
 - Fixed MCP OAuth discovery preferring RFC 9728 path-inserted protected-resource metadata over origin-root authorization-server documents on shared API gateways, so the grant targets the resource's issuer rather than a generic login hub.
+### Fixed
+
+- Fixed credential rotation on HTTP 402 payment-required errors so sibling credentials rotate before model fallback without misclassifying informative non-quota responses ([#10181](https://github.com/can1357/oh-my-pi/pull/10181)).
 
 ## [18.0.10] - 2026-08-28
 
