@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Gemini 3.x tool-call continuations through OpenAI-compatible endpoints failing with missing thought signature errors. ([#10172](https://github.com/can1357/oh-my-pi/issues/10172))
+
 ## [18.0.9] - 2026-08-28
 
 ### Fixed
