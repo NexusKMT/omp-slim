@@ -3,6 +3,7 @@ import { toClinePassPublicModelId, toClinePassWireModelId } from "@oh-my-pi/pi-c
 import { buildOpenAICompat } from "@oh-my-pi/pi-catalog/compat/openai";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
+import { createReferenceResolver } from "@oh-my-pi/pi-catalog/provider-models/bundled-references";
 import {
 	DEFAULT_MODEL_PER_PROVIDER,
 	MODELS_DEV_PROVIDER_DESCRIPTORS,
@@ -118,6 +119,13 @@ describe("ClinePass catalog", () => {
 		expect(toClinePassPublicModelId("kimi-k3")).toBe("kimi-k3");
 		expect(toClinePassWireModelId("kimi-k3")).toBe("cline-pass/kimi-k3");
 		expect(toClinePassWireModelId("cline-pass/kimi-k3")).toBe("cline-pass/kimi-k3");
+	});
+
+	it("excludes ClinePass metadata from generic bare-id references", () => {
+		const reference = createReferenceResolver<"openai-completions">(new Map())("kimi-k3");
+
+		expect(reference?.provider).toBe("fireworks");
+		expect(reference?.maxTokens).toBe(131_072);
 	});
 
 	it("applies the verified Cline gateway request and reasoning compatibility", () => {
