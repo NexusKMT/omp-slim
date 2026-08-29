@@ -770,18 +770,14 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
 	const safeDir = getPuppeteerDir();
 	const browserWSEndpoint = browser.browser.wsEndpoint();
 	if (!browserWSEndpoint) throw new ToolError("Browser websocket endpoint is unavailable");
-	// Only a truly hidden launch runs the headless tab worker, which pins the
-	// page to a fixed viewport (CDP Emulation.setDeviceMetricsOverride) for
-	// deterministic screenshots. A "visible" headless kind (browser.headless:
-	// false) is a real window the user resizes; the headless path would lock
-	// its content at a fixed size and leave a gray letterbox when the OS window
-	// grows. Attach to the visible page instead — that path never overrides the
-	// viewport, so the window resizes naturally.
-	if (browser.kind.kind === "headless" && browser.kind.headless) {
+	if (browser.kind.kind === "headless") {
 		return {
 			mode: "headless",
 			browserWSEndpoint,
 			safeDir,
+			// Visible launches still need an OMP-owned page, stealth setup, and
+			// independent lifecycle; only their fixed device emulation is disabled.
+			emulateViewport: browser.kind.headless,
 			viewport: opts.viewport,
 			dialogs: opts.dialogs,
 			url: opts.url,
