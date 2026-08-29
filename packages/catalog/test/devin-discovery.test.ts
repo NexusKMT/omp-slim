@@ -398,6 +398,18 @@ describe("devin native discovery request", () => {
 			new Response(emptyPayload, { status: 200, headers: { "content-type": "application/proto" } });
 		expect(await fetchDevinModels({ apiKey: "fixture-token", fetch: fetchImpl })).toBeNull();
 	});
+
+	it("treats a catalog with no usable configs as failed discovery so the seed survives", async () => {
+		const filteredPayload = toBinary(
+			GetCliModelConfigsResponseSchema,
+			create(GetCliModelConfigsResponseSchema, {
+				clientModelConfigs: [config({ uid: "disabled", disabled: true })],
+			}),
+		);
+		const fetchImpl: FetchImpl = async () =>
+			new Response(filteredPayload, { status: 200, headers: { "content-type": "application/proto" } });
+		expect(await fetchDevinModels({ apiKey: "fixture-token", fetch: fetchImpl })).toBeNull();
+	});
 });
 
 describe("devin native display filtering", () => {
