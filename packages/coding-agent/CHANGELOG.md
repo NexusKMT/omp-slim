@@ -61,6 +61,9 @@
 - Fixed `retry.fallbackChains` reporting valid selectors as `references unknown model` at startup when a config-declared discovery provider (e.g. LiteLLM in `models.yml`) had a cold discovery cache — such as the first launch after an update bumps the cache namespace. Warnings for pending-discovery providers are now deferred and re-evaluated once discovery lands, and cleared from the header if resolved ([#10048](https://github.com/can1357/oh-my-pi/issues/10048)).
 - Fixed `import numpy` (and other native-extension imports) hanging indefinitely in the Python eval tool on Windows, where the runner's always-on background stdin reader deadlocked native DLL loading; Windows now reads the control channel serially between requests while POSIX keeps concurrent request dispatch ([#7985](https://github.com/can1357/oh-my-pi/issues/7985)).
 - Fixed subagent extension contexts so `ctx.getContextUsage()` reports the child session's usage and `ctx.compact()` compacts that session ([#10097](https://github.com/can1357/oh-my-pi/issues/10097)).
+### Fixed
+
+- Fixed `lsp diagnostics` reporting `OK` for project-aware pull-diagnostic servers (e.g. Roslyn) whose `textDocument/diagnostic` response overran the 3s single-file budget; such servers now get a longer single-file wait and a timed-out or errored pull surfaces as a server failure instead of a clean result ([#10035](https://github.com/can1357/oh-my-pi/issues/10035)).
 
 ## [18.0.9] - 2026-08-28
 
