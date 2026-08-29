@@ -25,6 +25,9 @@
 ### Fixed
 
 - Sharpshooter consolidation no longer wipes memory files when the model returns an all-empty replacement; the error is recorded and queued deltas are preserved.
+### Fixed
+
+- Fixed `omp plugin features` failing to find marketplace-installed plugins.
 
 ## [18.0.10] - 2026-08-28
 
