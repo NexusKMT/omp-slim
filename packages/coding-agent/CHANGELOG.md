@@ -19,6 +19,9 @@
 ### Fixed
 
 - Retriable transport errors (e.g. `socket connection was closed unexpectedly`, timeouts) after the model already streamed a complete tool call now auto-retry through the configured retry budget and fallback chains instead of ending the turn terminally. The retry is gated on positive proof that every emitted call never executed (each paired with a synthetic `executed: false` result) and no committed text or image output, so a side effect can never be replayed; turns with any executed call, real result, or committed visible output keep the existing replay-unsafe veto.
+### Fixed
+
+- Fixed an undecodable image (a truncated or partially written screenshot) permanently wedging a session: the provider rejected every later request, including on resume, with no way out. Reading one now fails with an actionable error, and any that reach the transcript are replaced by a note before the request instead of breaking it.
 
 ## [18.0.10] - 2026-08-28
 
