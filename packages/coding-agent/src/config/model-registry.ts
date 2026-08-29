@@ -241,7 +241,7 @@ export class ModelRegistry {
 	/** Whether the first background discovery has settled; latches once so a late-armed waiter still resolves. */
 	#initialRefreshSettled = false;
 	/** Waiter armed before the initial background refresh starts (CLI kicks it off after the session is built, #10048). */
-	#initialRefreshWaiters?: PromiseWithResolvers<void>;
+	#initialRefreshWaiters = new Set<() => void>();
 	#credentialScopedCacheHydration?: Promise<void>;
 	#configuredDiscoveryInFlight: Map<DiscoveryProviderConfig, Map<ModelRefreshStrategy, Promise<Model<Api>[]>>> =
 		new Map();
@@ -478,18 +478,30 @@ export class ModelRegistry {
 	 * rejects (discovery errors are swallowed by `refreshInBackground`). Stays
 	 * pending when no background refresh is ever started (e.g. an embedder that
 	 * manages discovery itself), which leaves startup suppression in place.
+	 * An optional abort signal releases a waiter when its owning session is
+	 * disposed before an embedder starts discovery.
 	 */
-	awaitInitialBackgroundRefresh(): Promise<void> {
+	awaitInitialBackgroundRefresh(signal?: AbortSignal): Promise<void> {
 		if (this.#initialRefreshSettled) return Promise.resolve();
-		this.#initialRefreshWaiters ??= Promise.withResolvers<void>();
-		return this.#initialRefreshWaiters.promise;
+		if (signal?.aborted) return Promise.resolve();
+		const { promise, resolve } = Promise.withResolvers<void>();
+		const settle = () => {
+			signal?.removeEventListener("abort", settle);
+			this.#initialRefreshWaiters.delete(settle);
+			resolve();
+		};
+		this.#initialRefreshWaiters.add(settle);
+		signal?.addEventListener("abort", settle, { once: true });
+		// Close the race with a refresh or abort settling between the guards
+		// above and listener registration.
+		if (this.#initialRefreshSettled || signal?.aborted) settle();
+		return promise;
 	}
 
 	#markInitialRefreshSettled(): void {
 		if (this.#initialRefreshSettled) return;
 		this.#initialRefreshSettled = true;
-		this.#initialRefreshWaiters?.resolve();
-		this.#initialRefreshWaiters = undefined;
+		for (const settle of this.#initialRefreshWaiters) settle();
 	}
 
 	async refreshProvider(providerId: string, strategy: ModelRefreshStrategy = "online"): Promise<void> {

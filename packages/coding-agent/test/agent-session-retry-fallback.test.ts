@@ -5355,6 +5355,11 @@ describe("AgentSession retry fallback", () => {
 			}),
 		);
 		const registry = new ModelRegistry(authStorage, modelsConfigPath);
+		const cancelled = new AbortController();
+		const cancelledWaiter = registry.awaitInitialBackgroundRefresh(cancelled.signal);
+		cancelled.abort();
+		await cancelledWaiter;
+
 		// The CLI starts background discovery only after the session — and thus
 		// this awaiter — is constructed, so a waiter armed before any refresh must
 		// still resolve when the later refresh settles (#10048).
