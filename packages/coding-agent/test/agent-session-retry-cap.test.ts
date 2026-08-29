@@ -986,13 +986,20 @@ describe("AgentSession retry delay cap", () => {
 		expect(last.stopReason).toBe("stop");
 	});
 
-	it("does not auto-retry a timeout after streaming a complete write tool call", async () => {
+	it("auto-retries a timeout after streaming a complete unexecuted write tool call", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) {
 			throw new Error("Expected bundled Anthropic test model to exist");
 		}
 
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "tc-write",
+			name: "write",
+			arguments: { path: "doc/report.md", content: "large report chunk" },
+		};
 		let streamCalls = 0;
+		let resumedWithSyntheticResult = false;
 		const agent = new Agent({
 			getApiKey: model => `${model.provider}-test-key`,
 			initialState: {
@@ -1001,8 +1008,26 @@ describe("AgentSession retry delay cap", () => {
 				tools: [],
 				messages: [],
 			},
-			streamFn: requestedModel => {
+			streamFn: (requestedModel, context, options) => {
 				streamCalls += 1;
+				if (streamCalls > 1) {
+					const matchingResult = context.messages.find(
+						message => message.role === "toolResult" && message.toolCallId === toolCall.id,
+					);
+					resumedWithSyntheticResult =
+						matchingResult?.role === "toolResult" &&
+						typeof matchingResult.details === "object" &&
+						matchingResult.details !== null &&
+						"executed" in matchingResult.details &&
+						matchingResult.details.executed === false;
+					const recoveryModel = createMockModel({
+						id: requestedModel.id,
+						provider: requestedModel.provider,
+					});
+					recoveryModel.push({ content: ["Recovered after timeout"] });
+					return recoveryModel.stream(recoveryModel, context, options);
+				}
+
 				const stream = new AssistantMessageEventStream();
 				queueMicrotask(() => {
 					const partial: AssistantMessage = {
@@ -1021,12 +1046,6 @@ describe("AgentSession retry delay cap", () => {
 						},
 						stopReason: "stop",
 						timestamp: Date.now(),
-					};
-					const toolCall: ToolCall = {
-						type: "toolCall",
-						id: "tc-write",
-						name: "write",
-						arguments: { path: "doc/report.md", content: "large report chunk" },
 					};
 					partial.content.push(toolCall);
 					stream.push({ type: "start", partial });
@@ -1069,27 +1088,22 @@ describe("AgentSession retry delay cap", () => {
 
 		const retryStartEvents: AutoRetryStartEvent[] = [];
 		const retryEndEvents: AutoRetryEndEvent[] = [];
-		const agentEndEvents: Array<Extract<AgentSessionEvent, { type: "agent_end" }>> = [];
 		session.subscribe(event => {
 			if (event.type === "auto_retry_start") retryStartEvents.push(event);
 			if (event.type === "auto_retry_end") retryEndEvents.push(event);
-			if (event.type === "agent_end") agentEndEvents.push(event);
 		});
 
 		await session.prompt("Write a large report");
 		await session.waitForIdle();
 
-		expect(streamCalls).toBe(1);
-		expect(retryStartEvents).toHaveLength(0);
-		expect(retryEndEvents).toHaveLength(0);
-		expect(session.agent.state.messages.at(-1)?.role).toBe("toolResult");
-		expect(agentEndEvents).toHaveLength(1);
-		expect(agentEndEvents[0].isTerminal).toBe(true);
-		const terminalError = [...agentEndEvents[0].messages]
-			.reverse()
-			.find((message): message is AssistantMessage => message.role === "assistant");
-		expect(terminalError?.stopReason).toBe("error");
-		expect(terminalError?.errorMessage).toBe("The operation timed out.");
+		expect(streamCalls).toBe(2);
+		expect(resumedWithSyntheticResult).toBe(true);
+		expect(retryStartEvents).toHaveLength(1);
+		expect(retryEndEvents).toContainEqual(expect.objectContaining({ success: true, attempt: 1 }));
+		expect(lastAssistant(session).content).toContainEqual({
+			type: "text",
+			text: "Recovered after timeout",
+		});
 	});
 
 	it.each([
