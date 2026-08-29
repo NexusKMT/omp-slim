@@ -124,8 +124,12 @@ export async function loadAdvisorTranscriptCosts(
 					// One malformed usage block must cost that entry only, not the
 					// whole transcript's total.
 					const total_ = message.usage?.cost?.total;
-					if (typeof total_ === "number" && Number.isFinite(total_)) total += total_;
-					if (typeof message.provider === "string" && message.provider) providers.add(message.provider);
+					if (typeof total_ === "number" && Number.isFinite(total_)) {
+						total += total_;
+						if (total_ > 0 && typeof message.provider === "string" && message.provider) {
+							providers.add(message.provider);
+						}
+					}
 				},
 				{ maxBytes: snapshot.maxBytes, shouldContinue: options.shouldContinue },
 			);

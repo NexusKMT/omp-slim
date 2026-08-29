@@ -450,6 +450,22 @@ describe("AgentSession advisor toggle", () => {
 			oauthSpy.mockRestore();
 		}
 	});
+	it("does not attribute paid spend to a subscription after a zero-cost OAuth turn", () => {
+		let usingOAuth = false;
+		const oauthSpy = vi.spyOn(modelRegistry, "isUsingOAuth").mockImplementation(() => usingOAuth);
+		try {
+			const advisor = enableAdvisor();
+			appendAdvisorCost(advisor, 0.5, 1);
+			usingOAuth = true;
+			appendAdvisorCost(advisor, 0, 2);
+			session.setAdvisorEnabled(false);
+
+			expect(session.getAdvisorCost()).toBeCloseTo(0.5, 8);
+			expect(session.isAdvisorUsingSubscription()).toBe(false);
+		} finally {
+			oauthSpy.mockRestore();
+		}
+	});
 	it("retains total advisor cost after the live roster changes", () => {
 		const advisor = enableAdvisor();
 		appendAdvisorCost(advisor, 0.5, 1);

@@ -1267,10 +1267,13 @@ export class SessionAdvisors {
 	}
 
 	#recordAdvisorCost(advisor: ActiveAdvisor, message: AssistantMessage): void {
-		this.#advisorCosts.set(advisor.slug, (this.#advisorCosts.get(advisor.slug) ?? 0) + message.usage.cost.total);
+		const cost = message.usage.cost.total;
+		this.#advisorCosts.set(advisor.slug, (this.#advisorCosts.get(advisor.slug) ?? 0) + cost);
 		// Cheap in-memory OAuth-credential check; captured now so subscription
 		// attribution survives the advisor runtime being torn down (#10131).
-		if (this.#host.modelRegistry.isUsingOAuth(advisor.model)) this.#advisorSubscriptionSlugs.add(advisor.slug);
+		if (cost > 0 && Number.isFinite(cost) && this.#host.modelRegistry.isUsingOAuth(advisor.model)) {
+			this.#advisorSubscriptionSlugs.add(advisor.slug);
+		}
 	}
 
 	/** Subscribe the advisor agent's finalized messages into the transcript recorder.
