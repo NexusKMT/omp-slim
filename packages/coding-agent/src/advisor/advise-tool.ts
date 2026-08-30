@@ -267,7 +267,16 @@ export class AdviseTool implements AgentTool<typeof adviseSchema, AdviseDetails>
 				useless: true,
 			};
 		}
-		const delivered = this.#deliver(args.note, args.severity);
+		// Live path (completed update, or a blocker that must interrupt now). If the
+		// note already holds a deferred reservation, it cleared the emission guard
+		// when reserved — pull it from the backlog and deliver without re-accepting,
+		// so a blocker escalation of a still-queued nit/concern interrupts at its
+		// blocker severity instead of being rejected as already-seen and arriving
+		// late at the lower deferred severity.
+		const key = advisorNoteDedupeKey(args.note);
+		const reservedIndex = this.#deferredNotes.findIndex(item => item.key === key);
+		if (reservedIndex !== -1) this.#deferredNotes.splice(reservedIndex, 1);
+		const delivered = this.#deliver(args.note, args.severity, reservedIndex !== -1);
 		return {
 			content: [{ type: "text", text: delivered ? "Recorded." : "Duplicate advice ignored." }],
 			details: { note: args.note, severity: args.severity },
