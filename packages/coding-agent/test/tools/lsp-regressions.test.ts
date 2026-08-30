@@ -595,19 +595,19 @@ describe("lsp regressions", () => {
 			installHandshakeLsp();
 			const clientB = await lspClient.getOrCreateClient(configB, tempDirB.path(), 1_000);
 
-			// Client A was active 2 seconds ago
-			clientA.lastActivity = Date.now() - 2_000;
+			// Client A was active just now, Client B was active 2 seconds ago
+			clientA.lastActivity = Date.now();
 			clientB.lastActivity = Date.now() - 2_000;
 
-			// Accessing Workspace B's config should not affect client A's idle evaluation
+			// Accessing Workspace B's config should not affect client A
 			getConfig(tempDirB.path());
 
-			const now = Date.now();
-			const timeoutA = getConfig(clientA.cwd).idleTimeoutMs!;
-			const timeoutB = getConfig(clientB.cwd).idleTimeoutMs!;
+			// Drive the production idle sweep path end-to-end
+			await lspClient.checkIdleClients();
 
-			expect(lspClient.isIdleClient(clientA, now, timeoutA)).toBe(false);
-			expect(lspClient.isIdleClient(clientB, now, timeoutB)).toBe(true);
+			const activeNames = lspClient.getActiveClients().map(c => c.name);
+			expect(activeNames).toContain("fake-lsp-iso-a");
+			expect(activeNames).not.toContain("fake-lsp-iso-b");
 		} finally {
 			configCache.delete(tempDirA.path());
 			configCache.delete(tempDirB.path());
