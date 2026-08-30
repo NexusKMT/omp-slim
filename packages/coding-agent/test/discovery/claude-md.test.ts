@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { type ContextFile, contextFileCapability } from "@oh-my-pi/pi-coding-agent/capability/context-file";
 import type { LoadContext } from "@oh-my-pi/pi-coding-agent/capability/types";
+import { loadCapability } from "@oh-my-pi/pi-coding-agent/discovery";
 import { loadClaudeMd } from "@oh-my-pi/pi-coding-agent/discovery/claude-md";
 import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 
@@ -114,5 +116,64 @@ describe("standalone CLAUDE.md discovery", () => {
 		const result = await loadClaudeMd(context);
 
 		expect(result.items.map(file => file.path)).toEqual([repoClaude]);
+	});
+});
+
+describe("claude-md final registration and precedence", () => {
+	let tempDir!: string;
+
+	beforeEach(() => {
+		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-claude-md-reg-"));
+	});
+
+	afterEach(() => {
+		removeSyncWithRetries(tempDir);
+	});
+
+	test("registers and loads standalone root CLAUDE.md through the capability", async () => {
+		const repoRoot = path.join(tempDir, "repo");
+		const cwd = path.join(repoRoot, "src");
+		fs.mkdirSync(path.join(repoRoot, ".git"), { recursive: true });
+		fs.mkdirSync(cwd, { recursive: true });
+		writeClaude(path.join(repoRoot, "CLAUDE.md"), "root context");
+		writeClaude(path.join(cwd, "CLAUDE.md"), "cwd context");
+
+		const result = await loadCapability<ContextFile>(contextFileCapability.id, { cwd });
+
+		const claudeFiles = result.items.filter(file => file._source.providerName === "CLAUDE.md");
+		expect(claudeFiles.map(file => file.path)).toEqual([
+			path.join(cwd, "CLAUDE.md"),
+			path.join(repoRoot, "CLAUDE.md"),
+		]);
+	});
+
+	test(".claude/CLAUDE.md shadows standalone CLAUDE.md at the same depth", async () => {
+		const repoRoot = path.join(tempDir, "repo");
+		const cwd = path.join(repoRoot, "src");
+		fs.mkdirSync(path.join(repoRoot, ".git"), { recursive: true });
+		fs.mkdirSync(path.join(cwd, ".claude"), { recursive: true });
+		writeClaude(path.join(cwd, ".claude", "CLAUDE.md"), "config-dir context");
+		writeClaude(path.join(cwd, "CLAUDE.md"), "standalone context");
+
+		const result = await loadCapability<ContextFile>(contextFileCapability.id, { cwd });
+
+		expect(result.items.filter(file => file.level === "project" && file.depth === 0).map(file => file.path)).toEqual([
+			path.join(cwd, ".claude", "CLAUDE.md"),
+		]);
+	});
+
+	test("standalone AGENTS.md wins the depth tie against standalone CLAUDE.md", async () => {
+		const repoRoot = path.join(tempDir, "repo");
+		const cwd = path.join(repoRoot, "src");
+		fs.mkdirSync(path.join(repoRoot, ".git"), { recursive: true });
+		fs.mkdirSync(cwd, { recursive: true });
+		writeClaude(path.join(repoRoot, "CLAUDE.md"), "claude context");
+		writeClaude(path.join(repoRoot, "AGENTS.md"), "agents context");
+
+		const result = await loadCapability<ContextFile>(contextFileCapability.id, { cwd });
+
+		expect(result.items.filter(file => file.level === "project" && file.depth === 1).map(file => file.path)).toEqual([
+			path.join(repoRoot, "AGENTS.md"),
+		]);
 	});
 });
