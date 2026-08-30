@@ -87,6 +87,8 @@ export class ImageBudget {
 	#idToKey = new Map<number, string>();
 	/** Display-order image ids observed during the in-flight pass. */
 	#passIds: number[] = [];
+	/** Per-id suppression decision from the first observation in this pass. */
+	#passSuppression = new Map<number, boolean>();
 	/**
 	 * Suppress threshold reflected in the frame currently on the terminal: images
 	 * at display indices `[0, #onTerminal)` are shown as text there.
@@ -185,6 +187,7 @@ export class ImageBudget {
 	 */
 	beginPass(stable = false): void {
 		this.#passIds.length = 0;
+		this.#passSuppression.clear();
 		this.#stablePass = stable;
 		this.#applyingReset = !stable && this.#cap > 0 && this.#planned > this.#onTerminal;
 	}
@@ -199,14 +202,18 @@ export class ImageBudget {
 	 * (`#suppressedIds`) keyed by id — order- and partiality-independent.
 	 */
 	observe(imageId: number): boolean {
+		const existing = this.#passSuppression.get(imageId);
+		if (existing !== undefined) return existing;
 		if (this.#stablePass) {
 			const suppressed = this.#cap > 0 && this.#suppressedIds.has(imageId);
+			this.#passSuppression.set(imageId, suppressed);
 			if (suppressed) this.#forgetKeyForId(imageId);
 			return suppressed;
 		}
 		const index = this.#passIds.length;
 		this.#passIds.push(imageId);
 		const suppressed = this.#cap > 0 && index < this.#planned;
+		this.#passSuppression.set(imageId, suppressed);
 		if (suppressed) this.#forgetKeyForId(imageId);
 		return suppressed;
 	}
