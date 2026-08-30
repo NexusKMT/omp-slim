@@ -38,7 +38,28 @@ const resolverUrl = pathToFileURL(path.join(import.meta.dir, "../src/config/reso
  * for the worker *inside* the timed command. 150 ms did not, and the tests
  * flaked whenever the worker lost the race (#10259).
  */
-const ESCAPE_TIMEOUT_MS = 2000;
+const ESCAPE_TIMEOUT_MS = 3000;
+
+/** How long a killed descendant may take to actually leave `Running`. */
+const DEATH_GRACE_MS = 2000;
+
+/**
+ * Assert an escaped descendant does not survive the timeout.
+ *
+ * Sampling `status()` once on the tick `runShellCommand` resolves is racy in
+ * the *failing* direction: signal delivery and reaping are asynchronous, so a
+ * descendant that is being killed can still read `Running` for a few
+ * milliseconds. Poll instead of sampling. This keeps full discriminating
+ * power — the worker `sleep 30`s, far beyond this window, so a descendant the
+ * product genuinely fails to kill is still `Running` when the grace expires.
+ */
+async function expectDescendantDead(escaped: Process | null, pid: number, label: string): Promise<void> {
+	const deadline = Date.now() + DEATH_GRACE_MS;
+	while (Date.now() < deadline && escaped?.status() === ProcessStatus.Running) {
+		await Bun.sleep(25);
+	}
+	expect(escaped?.status(), `${label} descendant ${pid} survived the timeout`).not.toBe(ProcessStatus.Running);
+}
 
 const roots: string[] = [];
 
@@ -137,7 +158,7 @@ test.skipIf(process.platform === "win32")(
 
 			const pid = Number.parseInt((await Bun.file(pidFile).text()).trim(), 10);
 			escaped = Process.fromPid(pid);
-			expect(escaped?.status(), `reparented descendant ${pid} survived the timeout`).not.toBe(ProcessStatus.Running);
+			await expectDescendantDead(escaped, pid, "reparented");
 		} finally {
 			escaped?.killTree(9);
 		}
@@ -165,9 +186,7 @@ test.skipIf(process.platform !== "linux")(
 
 			const pid = Number.parseInt((await Bun.file(pidFile).text()).trim(), 10);
 			escaped = Process.fromPid(pid);
-			expect(escaped?.status(), `session-escaping descendant ${pid} survived the timeout`).not.toBe(
-				ProcessStatus.Running,
-			);
+			await expectDescendantDead(escaped, pid, "session-escaping");
 		} finally {
 			escaped?.killTree(9);
 		}
