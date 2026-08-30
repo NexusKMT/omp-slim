@@ -314,6 +314,26 @@ describe("Settings", () => {
 			expect(YAML.parse(await Bun.file(managedConfigPath).text())).toEqual({ setupVersion: 2 });
 		});
 
+		it("writes through a dangling symlink chain to the final target, preserving every link", async () => {
+			// config.yml -> mid.yml -> final.yml where final.yml does not exist yet
+			// (first-run into a dotfiles/managed checkout). realpath throws ENOENT at
+			// the missing tail, so the write path must walk the chain hop by hop and
+			// land on final.yml — recreating it while leaving both links intact.
+			const finalPath = tempDir.join("final-config.yml");
+			const midPath = tempDir.join("mid-config.yml");
+			await fs.promises.symlink(finalPath, midPath, "file");
+			await fs.promises.symlink(midPath, getConfigPath(), "file");
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			settings.set("setupVersion", 3);
+			await settings.flush();
+
+			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
+			expect(fs.lstatSync(midPath).isSymbolicLink()).toBe(true);
+			expect(fs.lstatSync(finalPath).isSymbolicLink()).toBe(false);
+			expect(YAML.parse(await Bun.file(finalPath).text())).toEqual({ setupVersion: 3 });
+		});
+
 		it("falls back to move-aside replacement when Windows reports EPERM", async () => {
 			await writeSettings({ setupVersion: 1 });
 			const settings = await Settings.init({ cwd: projectDir, agentDir });

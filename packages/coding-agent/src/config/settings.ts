@@ -1404,14 +1404,29 @@ export class Settings {
 			if (!isEnoent(error)) throw error;
 		}
 
-		// realpath fails for a dangling symlink. Resolve its immediate target so
-		// recreating a quarantined config repairs the target without replacing
-		// the user-managed link.
+		// realpath fails for a dangling symlink. Resolve its target so recreating
+		// a quarantined config repairs the target without replacing the
+		// user-managed link. Walk the symlink chain hop by hop: realpath already
+		// handled the case where every referent exists, so we only reach here when
+		// the final referent is missing. Follow each existing intermediate link
+		// until the referent is a non-symlink or does not exist, so the write
+		// lands on the final target and preserves every intermediate link instead
+		// of clobbering one into a regular file.
 		try {
-			const stat = await fs.promises.lstat(filePath);
-			if (stat.isSymbolicLink()) {
-				const target = await fs.promises.readlink(filePath);
-				return path.resolve(path.dirname(filePath), target);
+			if ((await fs.promises.lstat(filePath)).isSymbolicLink()) {
+				let current = filePath;
+				for (;;) {
+					const target = await fs.promises.readlink(current);
+					const resolved = path.resolve(path.dirname(current), target);
+					let nextIsSymlink = false;
+					try {
+						nextIsSymlink = (await fs.promises.lstat(resolved)).isSymbolicLink();
+					} catch (error) {
+						if (!isEnoent(error)) throw error;
+					}
+					if (!nextIsSymlink) return resolved;
+					current = resolved;
+				}
 			}
 		} catch (error) {
 			if (!isEnoent(error)) throw error;
