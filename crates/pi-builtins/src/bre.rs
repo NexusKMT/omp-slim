@@ -164,7 +164,7 @@ pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> Result<String, Br
 					// through it turned `[\(]` into a group opener and broke
 					// compilation, so the whole expression is scanned as
 					// bracket syntax and copied across.
-					match take_bracket_expression(&mut chars) {
+					match take_bracket_expression(&mut chars, true) {
 						Some(body) => {
 							result.push('[');
 							result.push_str(&body);
@@ -257,11 +257,22 @@ fn ends_branch(chars: &std::iter::Peekable<std::str::Chars<'_>>) -> bool {
 /// Consume a bracket expression's body, returning it without the outer `[]`.
 ///
 /// The opening `[` is already consumed. Returns `None` - advancing nothing -
-/// when the expression is unterminated. Inside a bracket expression POSIX
-/// gives `\` no special meaning, so it is doubled on the way out to keep it a
-/// literal for the engine: measured, `grep -c '[\(]'` selects lines holding a
-/// backslash OR a parenthesis.
-fn take_bracket_expression(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String> {
+/// when the expression is unterminated.
+///
+/// With `normalize`, the body is rewritten so the engine reads it the way
+/// POSIX does: `\` has no special meaning inside a bracket expression, so it
+/// is doubled to stay a literal, and a leading `]` is escaped rather than
+/// closing the expression. Measured, `grep -c '[\(]'` selects lines holding a
+/// backslash OR a parenthesis, and `grep -c '[]x]'` selects lines holding a
+/// bracket or an `x`.
+///
+/// Without it the body is copied verbatim, which is what an already-extended
+/// pattern needs: the caller is only locating the expression so it can skip
+/// over it, and must not change how it matches.
+fn take_bracket_expression(
+	chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+	normalize: bool,
+) -> Option<String> {
 	let mut probe = chars.clone();
 	let mut body = String::new();
 
@@ -271,7 +282,7 @@ fn take_bracket_expression(chars: &mut std::iter::Peekable<std::str::Chars<'_>>)
 		body.push(probe.next()?);
 	}
 	if probe.peek() == Some(&']') {
-		body.push_str(r"\]");
+		body.push_str(if normalize { r"\]" } else { "]" });
 		probe.next();
 	}
 
@@ -282,7 +293,7 @@ fn take_bracket_expression(chars: &mut std::iter::Peekable<std::str::Chars<'_>>)
 				return Some(body + "]");
 			},
 			// `\` is an ordinary character here; keep it one.
-			'\\' => body.push_str(r"\\"),
+			'\\' => body.push_str(if normalize { r"\\" } else { "\\" }),
 			// `[:alpha:]`, `[.x.]` and `[=x=]` carry their own terminators, so
 			// the `]` that closes them does not close the bracket expression.
 			'[' if matches!(probe.peek(), Some(':' | '.' | '=')) => {
@@ -303,6 +314,62 @@ fn take_bracket_expression(chars: &mut std::iter::Peekable<std::str::Chars<'_>>)
 		}
 	}
 	None
+}
+
+/// Make an ERE's non-interval `{` the literal both real tools treat it as.
+///
+/// POSIX leaves a `{` that opens no interval undefined, and both GNU and BSD
+/// grep take it literally, while the `regex` crate rejects the pattern
+/// outright. Measured against /usr/bin/grep:
+///
+/// ```text
+/// grep -Ec '{a}'    1, literal          regex: "repetition operator missing expression"
+/// grep -Ec 'a{'     2, literal          regex: "repetition quantifier expects a valid decimal"
+/// grep -Ec '{foo'   1, literal          regex: "repetition operator missing expression"
+/// grep -Ec 'a{1,2'  "braces not balanced"   regex: "unclosed counted repetition"
+/// ```
+///
+/// The last line is why this cannot simply escape every brace that fails to
+/// open an interval: an unterminated interval is an ERROR in both tools, and
+/// escaping it would turn a diagnosed mistake into a silent literal match.
+/// A digit after `{` is what separates the two - it marks an attempted
+/// interval, which is left for the engine to accept or reject.
+#[cfg(feature = "util.grep")]
+pub(crate) fn ere_literalize_braces(pattern: &str) -> std::borrow::Cow<'_, str> {
+	if !pattern.contains('{') {
+		return std::borrow::Cow::Borrowed(pattern);
+	}
+
+	let mut result = String::with_capacity(pattern.len());
+	let mut chars = pattern.chars().peekable();
+	let mut rewrote = false;
+
+	while let Some(c) = chars.next() {
+		match c {
+			// An escape already spells out its own meaning; copy the pair.
+			'\\' => {
+				result.push('\\');
+				if let Some(escaped) = chars.next() {
+					result.push(escaped);
+				}
+			},
+			// A brace inside a bracket expression is already a literal.
+			'[' => match take_bracket_expression(&mut chars, false) {
+				Some(body) => {
+					result.push('[');
+					result.push_str(&body);
+				},
+				None => result.push('['),
+			},
+			'{' if !chars.peek().is_some_and(char::is_ascii_digit) => {
+				result.push_str(r"\{");
+				rewrote = true;
+			},
+			_ => result.push(c),
+		}
+	}
+
+	if rewrote { std::borrow::Cow::Owned(result) } else { std::borrow::Cow::Borrowed(pattern) }
 }
 
 /// True when an ERE contains a repetition operator with nothing to repeat.

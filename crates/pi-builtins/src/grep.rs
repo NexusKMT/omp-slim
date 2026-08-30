@@ -701,6 +701,13 @@ fn build_matcher(
 		return build_default_matcher(&builder, &translated, patterns).map(CompiledMatcher::Rust);
 	}
 
+	// A `{` that opens no interval is a literal to GNU and BSD grep, but the
+	// `regex` crate refuses the whole pattern, so `grep -E '{a}'` failed on
+	// patterns real grep matches. An attempted-but-unterminated interval
+	// stays an error in both.
+	let patterns: Vec<std::borrow::Cow<'_, str>> =
+		patterns.iter().map(|p| bre::ere_literalize_braces(p)).collect();
+
 	// `regex` accepts `^+` and compiles it as `(?:^)+`, which matches at every
 	// line start. GNU and BSD grep both reject the pattern, so returning every
 	// line with exit 0 would be a wrong answer reported as success.
@@ -712,7 +719,7 @@ fn build_matcher(
 	}
 
 	builder
-		.build_many(patterns)
+		.build_many(&patterns)
 		.map(CompiledMatcher::Rust)
 		.map_err(|error| error.to_string())
 }
@@ -1927,6 +1934,38 @@ mod tests {
 		let (code, out, err) = run(&["-c", "a[d"], "a[d\nplain\n");
 		assert_eq!(code, 0, "{err}");
 		assert_eq!(out, "1\n", "falls back to the literal text the user typed");
+	}
+
+	#[test]
+	fn a_brace_that_opens_no_interval_is_literal_in_an_ere() {
+		// Every expectation below is a measurement from /usr/bin/grep against
+		// this same input, not a reading of the spec.
+		let input = "{a}\na{\n{foo\na{1}b\nplain\n}\n[{]\n";
+		for (pattern, want) in [
+			("{a}", "1\n"),
+			("a{", "2\n"),
+			("{foo", "1\n"),
+			("}", "3\n"),
+			("[{]", "5\n"),
+			(r"\{a\}", "1\n"),
+			// Still a real interval, and still applied.
+			("a{1}", "4\n"),
+			("a{1,2}", "4\n"),
+		] {
+			let (code, out, err) = run(&["-Ec", pattern], input);
+			assert_eq!(code, 0, "-E {pattern}: {err}");
+			assert_eq!(out, want, "-E {pattern}");
+		}
+
+		// The two brace patterns real grep REFUSES must stay refused. A `{`
+		// followed by a digit is an attempted interval: unterminated, it is
+		// "braces not balanced", and with no operand it is "repetition-operator
+		// operand invalid". Escaping those would convert a diagnosed mistake
+		// into a silent literal match.
+		for pattern in ["a{1,2", "{1}"] {
+			let (code, out, _) = run(&["-Ec", pattern], input);
+			assert_eq!(code, 2, "-E {pattern} must stay an error, got {out:?}");
+		}
 	}
 }
 
