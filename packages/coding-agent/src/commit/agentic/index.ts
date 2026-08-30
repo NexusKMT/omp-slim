@@ -91,6 +91,8 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<{ usedF
 		}
 	}
 
+	process.stdout.write("● Discovering context files...\n");
+
 	const contextMdFiles = contextFiles.filter(
 		file => file.path.endsWith("AGENTS.md") || file.path.endsWith("CLAUDE.md"),
 	);
