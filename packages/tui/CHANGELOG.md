@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed image-heavy session resumes exceeding the terminal output limit before the inline-image budget was applied ([#10305](https://github.com/can1357/oh-my-pi/issues/10305)).
+
 ## [18.0.11] - 2026-08-29
 
 ### Added

@@ -1422,11 +1422,13 @@ export class TUI extends Container {
 	/** Paint the full semantic tail on the borrowed resize buffer. */
 	#renderResizeAltFrame(width: number, height: number): void {
 		const provider = this.#frameProvider;
-		this.#imageBudget.beginPass();
-		const rendered =
-			provider?.renderResizeFrame?.({ columns: width, rows: height }) ??
-			(provider ? provider.renderFrame({ columns: width, rows: height }).viewport : this.render(width));
-		this.#imageBudget.endPass();
+		let rendered: readonly string[];
+		do {
+			this.#imageBudget.beginPass();
+			rendered =
+				provider?.renderResizeFrame?.({ columns: width, rows: height }) ??
+				(provider ? provider.renderFrame({ columns: width, rows: height }).viewport : this.render(width));
+		} while (this.#imageBudget.endPass());
 		const viewport = rendered.length > height ? rendered.slice(rendered.length - height) : Array.from(rendered);
 		this.#extractCursorMarkers(viewport);
 		this.#emitAltFrame(this.#prepareLinesArray(viewport, width), width, height);
@@ -1600,9 +1602,11 @@ export class TUI extends Container {
 		if (width <= 0 || height <= 0) return;
 		provider.beginHistoryFlush();
 		while (true) {
-			this.#imageBudget.beginPass();
-			const plan = provider.renderFrame({ columns: width, rows: height });
-			this.#imageBudget.endPass();
+			let plan: TerminalFramePlan;
+			do {
+				this.#imageBudget.beginPass();
+				plan = provider.renderFrame({ columns: width, rows: height });
+			} while (this.#imageBudget.endPass());
 			if (plan.history === undefined) return;
 			let viewport = Array.from(plan.viewport);
 			if (viewport.length > height) viewport = viewport.slice(0, height);
@@ -2262,9 +2266,11 @@ export class TUI extends Container {
 		const provider = this.#frameProvider;
 		if (!provider || width <= 0 || height <= 0) return;
 		this.#debugNextWindowTop = 0;
-		this.#imageBudget.beginPass();
-		const plan = provider.renderFrame({ columns: width, rows: height });
-		this.#imageBudget.endPass();
+		let plan: TerminalFramePlan;
+		do {
+			this.#imageBudget.beginPass();
+			plan = provider.renderFrame({ columns: width, rows: height });
+		} while (this.#imageBudget.endPass());
 		let viewport = Array.from(plan.viewport);
 		if (viewport.length > height) {
 			const message = `Frame provider returned ${viewport.length} rows for a ${height}-row viewport`;
@@ -2624,9 +2630,11 @@ export class TUI extends Container {
 	 * mutable viewport. Nothing is ever appended to terminal history.
 	 */
 	#renderChildrenFrame(width: number, height: number): void {
-		this.#imageBudget.beginPass();
-		const composed = this.render(width);
-		this.#imageBudget.endPass();
+		let composed: readonly string[];
+		do {
+			this.#imageBudget.beginPass();
+			composed = this.render(width);
+		} while (this.#imageBudget.endPass());
 		if (this.#maybeDeferGhosttyInitialImagePaint()) return;
 		this.#debugNextWindowTop = Math.max(0, composed.length - height);
 		const viewport = composed.length > height ? composed.slice(composed.length - height) : Array.from(composed);
