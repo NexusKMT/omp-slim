@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- Fixed custom extension `web_search` tools being shadowed by built-in search when enabled ([#10315](https://github.com/can1357/oh-my-pi/issues/10315)).
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
