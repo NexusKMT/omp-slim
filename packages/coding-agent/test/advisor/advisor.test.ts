@@ -8,6 +8,7 @@ import type { TUI } from "@oh-my-pi/pi-tui";
 import {
 	AdviseTool,
 	type AdvisorAgent,
+	AdvisorEmissionGuard,
 	type AdvisorNote,
 	AdvisorOutputQuarantinedError,
 	AdvisorRuntime,
@@ -495,6 +496,62 @@ describe("advisor", () => {
 			tool.beginUpdate(false);
 			expect(onAdvice).toHaveBeenCalledTimes(1);
 			expect(onAdvice).toHaveBeenCalledWith("Same point raised repeatedly.", "concern");
+		});
+
+		it("flushes every distinct deferred concern past the per-update emission cap on a late catch-up update", async () => {
+			// Regression for #10271 ("The Advisor is Late"): in yolo mode the primary
+			// is continuously mid-turn from the advisor's view, so every concern is
+			// deferred and the whole backlog is replayed in one catch-up update. That
+			// flush routes through AdvisorEmissionGuard exactly like the live path, so
+			// the one-note-per-update budget used to collapse N distinct concerns to 1.
+			const delivered: string[] = [];
+			const guard = new AdvisorEmissionGuard();
+			// Mirror AgentSession#routeAdvice: every note runs through the emission guard.
+			const tool = new AdviseTool(note => {
+				if (guard.accept(note)) delivered.push(note);
+			});
+			// Mirror beginAdvisorUpdate: the deferred flush runs inside the guard's
+			// flush window, then the per-update budget resets for the live turn.
+			const beginUpdate = (inProgress: boolean) => {
+				guard.withDeferredFlush(() => tool.beginUpdate(inProgress));
+				guard.beginUpdate();
+			};
+			const concerns = [
+				"Bare `location` cannot work outside the page; inspect with `await page.url()`.",
+				"Scope navigation to the visualizer's own `.viz-container`.",
+				'BFS uses `progressType="bar"`, so it has no `.viz-pill` controls.',
+				"Tab switching delegates from a trusted click; a dispatched KeyboardEvent is untrusted.",
+			];
+
+			beginUpdate(true);
+			for (const [i, note] of concerns.entries()) await tool.execute(`c-${i}`, { note, severity: "concern" });
+			// All withheld mid-turn — nothing reaches the primary yet.
+			expect(delivered).toEqual([]);
+
+			// Turn completes: the deferred backlog flushes and every distinct concern
+			// survives the emission guard, oldest first.
+			beginUpdate(false);
+			expect(delivered).toEqual(concerns);
+		});
+
+		it("still caps a single model turn spraying many distinct notes to one accepted note", async () => {
+			// The flush exemption must not disarm the flood control the cap exists for
+			// (#3520): notes emitted live in one advisor turn stay capped at one.
+			const delivered: string[] = [];
+			const guard = new AdvisorEmissionGuard();
+			const tool = new AdviseTool(note => {
+				if (guard.accept(note)) delivered.push(note);
+			});
+			const beginUpdate = (inProgress: boolean) => {
+				guard.withDeferredFlush(() => tool.beginUpdate(inProgress));
+				guard.beginUpdate();
+			};
+
+			beginUpdate(false);
+			await tool.execute("s-0", { note: "First distinct live concern.", severity: "concern" });
+			await tool.execute("s-1", { note: "Second distinct live concern.", severity: "concern" });
+			await tool.execute("s-2", { note: "Third distinct live concern.", severity: "concern" });
+			expect(delivered).toEqual(["First distinct live concern."]);
 		});
 
 		it("validates parameters using ArkType", () => {

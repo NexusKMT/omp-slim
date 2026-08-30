@@ -118,6 +118,7 @@ export class AdvisorEmissionGuard {
 	/** Insertion-order log to drive FIFO eviction without an extra Map. */
 	#seenOrder: string[] = [];
 	#consumedThisUpdate = false;
+	#flushingDeferred = false;
 	readonly #capacity: number;
 
 	constructor(opts: { capacity?: number } = {}) {
@@ -134,6 +135,7 @@ export class AdvisorEmissionGuard {
 		this.#seen.clear();
 		this.#seenOrder.length = 0;
 		this.#consumedThisUpdate = false;
+		this.#flushingDeferred = false;
 	}
 
 	/**
@@ -146,10 +148,30 @@ export class AdvisorEmissionGuard {
 	}
 
 	/**
+	 * Run `flush` with the per-update rate limit lifted, for {@link AdviseTool}'s
+	 * deferred-note replay at turn completion. Each deferred note was emitted in
+	 * its own separate advisor update and never consumed a budget slot there, so
+	 * replaying the accumulated backlog must not be capped to one note — the cap
+	 * targets a single model turn spraying many notes (#3520), not a late
+	 * advisor reviewing the whole run in one catch-up update (#10271, e.g. yolo
+	 * mode), which used to have every deferred concern but the first silently
+	 * dropped. Dedupe and noise filtering still apply inside the window. The
+	 * window is synchronous and self-closing so it never leaks into the live turn.
+	 */
+	withDeferredFlush<T>(flush: () => T): T {
+		this.#flushingDeferred = true;
+		try {
+			return flush();
+		} finally {
+			this.#flushingDeferred = false;
+		}
+	}
+
+	/**
 	 * Whether the proposed note should reach the primary. On `true` the gate
-	 * has already recorded the note (consumed the per-update budget and added
-	 * it to the dedupe history) — caller delivers the note. On `false` the
-	 * caller drops it.
+	 * has already recorded the note (consumed the per-update budget, unless a
+	 * {@link withDeferredFlush} window is open, and added it to the dedupe
+	 * history) — caller delivers the note. On `false` the caller drops it.
 	 *
 	 * Empty / whitespace-only notes are suppressed; the model's
 	 * tool-args contract still requires a non-empty string but defense-in-depth.
@@ -159,8 +181,10 @@ export class AdvisorEmissionGuard {
 		if (!key) return false;
 		if (SUPPRESSED_NORMALIZED_PHRASES[key]) return false;
 		if (this.#seen.has(key)) return false;
-		if (this.#consumedThisUpdate) return false;
-		this.#consumedThisUpdate = true;
+		if (!this.#flushingDeferred) {
+			if (this.#consumedThisUpdate) return false;
+			this.#consumedThisUpdate = true;
+		}
 		this.#seen.add(key);
 		this.#seenOrder.push(key);
 		if (this.#seenOrder.length > this.#capacity) {

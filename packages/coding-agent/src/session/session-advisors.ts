@@ -1059,7 +1059,10 @@ export class SessionAdvisors {
 				getModelIdentity: () => formatModelString(advisorRef.agent.state.model),
 				beginAdvisorUpdate: inProgress => {
 					advisorRef.recorder.beginTurn();
-					advisorRef.adviseTool.beginUpdate(inProgress);
+					// The deferred-note flush inside beginUpdate replays a backlog of
+					// distinct concerns accumulated across earlier mid-turn updates; lift
+					// the per-update cap for it so it isn't collapsed to one note (#10271).
+					advisorRef.emissionGuard.withDeferredFlush(() => advisorRef.adviseTool.beginUpdate(inProgress));
 					advisorRef.emissionGuard.beginUpdate();
 				},
 				onTurnError: (error, failedMessages, signal) =>

@@ -18,6 +18,7 @@
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
+- Fixed the advisor dropping all but one concern when it caught up on several turns in a single update (e.g. yolo mode); the deferred-note backlog is now delivered in full ([#10271](https://github.com/can1357/oh-my-pi/issues/10271))
 
 ## [18.0.11] - 2026-08-29
 
