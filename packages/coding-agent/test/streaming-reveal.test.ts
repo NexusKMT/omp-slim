@@ -510,6 +510,28 @@ describe("frame-skip coalescing", () => {
 		expect(textAt(latestMessage(component), 0)).toBe("after  tool");
 	});
 
+	it("detects an in-place block rewrite of the snapped tool-boundary content", () => {
+		// OpenAI Responses reuses the cumulative output object and can replace
+		// streamed text with authoritative terminal content in place. Aliasing the
+		// snapped array would compare it to itself and keep the stale text; an
+		// immutable snapshot must still repaint even when the rewrite has the same
+		// grapheme count.
+		vi.useFakeTimers();
+		const { component, controller } = makeController();
+
+		const message = makeMessage([{ type: "text", text: "streamed abc" }]);
+		const block = message.content[0]! as Extract<AssistantMessage["content"][number], { type: "text" }>;
+		controller.begin(component, makeMessage([{ type: "text", text: "" }]), false);
+		controller.setTarget(message, true);
+		const snapped = component.messages.length;
+
+		// Same array, same length, block rewritten in place.
+		block.text = "streamed xyz";
+		controller.setTarget(message, true);
+		expect(component.messages).toHaveLength(snapped + 1);
+		expect(textAt(latestMessage(component), 0)).toBe("streamed xyz");
+	});
+
 	it("keeps synchronous per-setTarget renders when smooth streaming is off", () => {
 		vi.useFakeTimers();
 		const { component, controller } = makeController({ smooth: false });

@@ -223,6 +223,11 @@ export class StreamingRevealController {
 	#timer: NodeJS.Timeout | undefined;
 	#revealed = 0;
 	#targetDirty = false;
+	// Immutable deep clone of the leading content snapped at the tool-call
+	// boundary. Kept independent of the live message so an in-place provider
+	// rewrite of a previously emitted block (e.g. OpenAI Responses replacing
+	// streamed text with authoritative terminal content) is still detected —
+	// aliasing the live array would make the equality check compare it to itself.
 	#snappedToolBoundaryContent: AssistantMessage["content"] | undefined;
 	#hideThinkingBlock = false;
 	#proseOnlyThinking = true;
@@ -270,7 +275,7 @@ export class StreamingRevealController {
 			component.updateContent(this.#build(message, this.#revealed), {
 				transient: true,
 			});
-			this.#snappedToolBoundaryContent = message.content;
+			this.#snappedToolBoundaryContent = structuredClone(message.content);
 			return;
 		}
 		this.#renderCurrent();
@@ -306,7 +311,7 @@ export class StreamingRevealController {
 			this.#component.updateContent(this.#build(message, this.#revealed), {
 				transient: true,
 			});
-			this.#snappedToolBoundaryContent = message.content;
+			this.#snappedToolBoundaryContent = structuredClone(message.content);
 			return;
 		}
 		this.#snappedToolBoundaryContent = undefined;
