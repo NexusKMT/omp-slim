@@ -19,6 +19,7 @@
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
+- Fixed trailing assistant text being truncated when a tool call started mid-stream: the smooth-streaming reveal now force-completes at the tool-call boundary instead of leaving un-revealed text to be committed to scrollback ([#10318](https://github.com/can1357/oh-my-pi/issues/10318)).
 
 ## [18.0.11] - 2026-08-29
 

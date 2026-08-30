@@ -248,7 +248,7 @@ export class StreamingRevealController {
 		);
 	}
 
-	begin(component: StreamingRevealComponent, message: AssistantMessage): void {
+	begin(component: StreamingRevealComponent, message: AssistantMessage, hasToolCalls: boolean): void {
 		this.stop();
 		this.#component = component;
 		this.#target = message;
@@ -262,7 +262,7 @@ export class StreamingRevealController {
 			return;
 		}
 		const total = this.#visibleUnits(message);
-		if (message.content.some(block => block.type === "toolCall")) {
+		if (hasToolCalls) {
 			// A tool call is a transcript-order boundary: finish any leading
 			// assistant text before EventController renders the separate tool card.
 			this.#revealed = total;
@@ -275,7 +275,7 @@ export class StreamingRevealController {
 		this.#syncTimer(total);
 	}
 
-	setTarget(message: AssistantMessage): void {
+	setTarget(message: AssistantMessage, hasToolCalls: boolean): void {
 		this.#target = message;
 		this.#hideThinkingBlock = this.#getHideThinkingBlock();
 		this.#proseOnlyThinking = this.#getProseOnlyThinking();
@@ -290,7 +290,7 @@ export class StreamingRevealController {
 			return;
 		}
 		const total = this.#visibleUnits(message);
-		if (message.content.some(block => block.type === "toolCall")) {
+		if (hasToolCalls) {
 			// A tool call is a transcript-order boundary: finish any leading
 			// assistant text before EventController renders the separate tool card.
 			this.#revealed = total;
