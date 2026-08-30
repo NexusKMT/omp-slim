@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a crash when rendering a reference-style Markdown link whose label matches a JavaScript built-in name (e.g. `[x][constructor]`, `[x][__proto__]`); such links now render as plain text instead of terminating the TUI, including during session resume ([#10283](https://github.com/can1357/oh-my-pi/issues/10283)).
+
 ## [18.0.11] - 2026-08-29
 
 ### Added
