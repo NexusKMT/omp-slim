@@ -231,7 +231,7 @@ impl Shell {
 				.await
 				.map(Into::into)
 				.map_err(|err| Error::from_reason(err.to_string()));
-			await_drain(drain_handle).await;
+			await_drain(drain_handle, &result).await;
 			result
 		})
 	}
@@ -283,7 +283,7 @@ pub fn execute_shell<'env>(
 			.await
 			.map(Into::into)
 			.map_err(|err| Error::from_reason(err.to_string()));
-		await_drain(drain_handle).await;
+		await_drain(drain_handle, &result).await;
 		result
 	})
 }
@@ -348,27 +348,35 @@ async fn pump_chunks(rx: flume::Receiver<String>, mut forward: impl AsyncFnMut(S
 	}
 }
 
-/// Upper bound on how long to wait for the chunk-forwarding pump to finish
-/// after the run future has resolved. The pump normally drains in microseconds
-/// once the command's pipe writers close, but a grandchild that inherited the
-/// stdout pipe can keep a pipe-reader task — and thus one of the bridge-queue
-/// senders — alive indefinitely, so the channel never disconnects and the pump
-/// never returns. Awaiting it unbounded wedged the whole run promise past the
-/// requested timeout, leaving the JS `+5s` watchdog as the only path that ever
-/// returned (#10308).
-const DRAIN_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+/// Upper bound on how long to wait for the chunk-forwarding pump after an
+/// interrupted run resolves. Native cancellation may detach a pipe reader whose
+/// sender never closes when a grandchild inherited stdout; waiting for channel
+/// disconnect would then wedge the run promise past its requested timeout
+/// (#10308). Successful and failed runs remain unbounded so every chunk already
+/// accepted by the bridge reaches JavaScript before the result resolves.
+const INTERRUPTED_DRAIN_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Await the chunk-forwarding pump, bounded by [`DRAIN_SHUTDOWN_TIMEOUT`].
+/// Finish forwarding accepted output after a native shell run resolves.
 ///
-/// If the pump does not finish in time — an orphaned reader is still holding a
-/// sender — abort it. Dropping the pump drops its `flume::Receiver`, which
-/// disconnects the channel so the orphaned sender's next `send_async` fails
-/// fast and the detached reader unwinds instead of pinning the run promise.
-async fn await_drain(handle: Option<napi::tokio::task::JoinHandle<()>>) {
+/// Normal completion and errors drain without a deadline to preserve every
+/// accepted chunk. Cancellation and timeout are bounded because an orphaned
+/// pipe reader can otherwise keep a sender alive forever; aborting the pump
+/// drops its `flume::Receiver`, disconnecting that reader.
+async fn await_drain(
+	handle: Option<napi::tokio::task::JoinHandle<()>>,
+	result: &Result<ShellRunResult>,
+) {
 	let Some(mut handle) = handle else {
 		return;
 	};
-	if napi::tokio::time::timeout(DRAIN_SHUTDOWN_TIMEOUT, &mut handle).await.is_err() {
+	if !matches!(result, Ok(result) if result.cancelled || result.timed_out) {
+		let _ = handle.await;
+		return;
+	}
+	if napi::tokio::time::timeout(INTERRUPTED_DRAIN_SHUTDOWN_TIMEOUT, &mut handle)
+		.await
+		.is_err()
+	{
 		handle.abort();
 		let _ = handle.await;
 	}
@@ -376,7 +384,13 @@ async fn await_drain(handle: Option<napi::tokio::task::JoinHandle<()>>) {
 
 #[cfg(test)]
 mod tests {
-	use std::time::Duration;
+	use std::{
+		sync::{
+			Arc,
+			atomic::{AtomicBool, Ordering},
+		},
+		time::Duration,
+	};
 
 	use flume;
 	use pi_shell::{
@@ -385,7 +399,10 @@ mod tests {
 	};
 	use tokio::time;
 
-	use super::{BRIDGE_QUEUE_CHUNKS, CoreShell, DRAIN_SHUTDOWN_TIMEOUT, await_drain, pump_chunks};
+	use super::{
+		BRIDGE_QUEUE_CHUNKS, CoreShell, INTERRUPTED_DRAIN_SHUTDOWN_TIMEOUT, ShellRunResult,
+		await_drain, pump_chunks,
+	};
 
 	/// Regression for #4078: the reader→JS bridge queue must stay bounded when
 	/// the JS side (here: a deliberately slow `forward`) cannot keep up with a
@@ -463,25 +480,65 @@ mod tests {
 			.expect("pump task");
 	}
 
-	/// Regression for #10308: a grandchild that inherits the stdout pipe keeps a
-	/// pipe-reader task alive after the run future resolves, so one bridge-queue
-	/// sender is never dropped and `pump_chunks` never sees channel disconnect.
-	/// `await_drain` must still return (bounded by `DRAIN_SHUTDOWN_TIMEOUT` and
-	/// then aborting the pump) instead of wedging the run promise forever. On
-	/// the pre-fix `let _ = handle.await` this never returned and only the JS
-	/// `+5s` watchdog could recover, producing the reporter's `N+5.00s` signature.
+	/// A successful run must wait for every accepted bridge chunk even when a
+	/// slow JavaScript consumer takes longer than the interrupted-run bound.
+	/// Bounding this path reports success while silently dropping queued output.
 	#[tokio::test(flavor = "multi_thread")]
-	async fn await_drain_returns_when_a_reader_orphans_a_sender() {
+	async fn await_drain_preserves_slow_output_after_success() {
+		let (tx, rx) = flume::bounded::<String>(BRIDGE_QUEUE_CHUNKS);
+		let forwarded = Arc::new(AtomicBool::new(false));
+		let observed = Arc::clone(&forwarded);
+		let handle = napi::tokio::spawn(pump_chunks(rx, async move |_payload: String| {
+			time::sleep(INTERRUPTED_DRAIN_SHUTDOWN_TIMEOUT + Duration::from_millis(100)).await;
+			observed.store(true, Ordering::Release);
+			true
+		}));
+		tx.send("accepted".to_string()).expect("pump should be connected");
+		drop(tx);
+		let result = Ok(ShellRunResult {
+			exit_code:   Some(0),
+			cancelled:   false,
+			timed_out:   false,
+			minimized:   None,
+			working_dir: None,
+		});
+
+		time::timeout(
+			INTERRUPTED_DRAIN_SHUTDOWN_TIMEOUT + Duration::from_secs(2),
+			await_drain(Some(handle), &result),
+		)
+		.await
+		.expect("successful completion must drain slow accepted output");
+		assert!(forwarded.load(Ordering::Acquire), "accepted output was dropped before success returned");
+	}
+
+	/// Regression for #10308: a grandchild that inherits the stdout pipe keeps a
+	/// pipe-reader task alive after an interrupted run resolves, so one
+	/// bridge-queue sender is never dropped and `pump_chunks` never sees channel
+	/// disconnect. `await_drain` must return after the interrupted-run bound and
+	/// abort the pump instead of wedging the native promise forever.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn await_drain_returns_when_a_reader_orphans_a_sender_after_timeout() {
 		let (tx, rx) = flume::bounded::<String>(BRIDGE_QUEUE_CHUNKS);
 		let orphan = tx.clone();
-		let handle = napi::tokio::spawn(pump_chunks(rx, async |_p: String| true));
+		let handle = napi::tokio::spawn(pump_chunks(rx, async |_payload: String| true));
 		drop(tx);
+		let result = Ok(ShellRunResult {
+			exit_code:   None,
+			cancelled:   false,
+			timed_out:   true,
+			minimized:   None,
+			working_dir: None,
+		});
 		let started = time::Instant::now();
-		time::timeout(DRAIN_SHUTDOWN_TIMEOUT + Duration::from_secs(2), await_drain(Some(handle)))
-			.await
-			.expect("await_drain must return even when a sender is orphaned");
+		time::timeout(
+			INTERRUPTED_DRAIN_SHUTDOWN_TIMEOUT + Duration::from_secs(2),
+			await_drain(Some(handle), &result),
+		)
+		.await
+		.expect("await_drain must return when an interrupted reader orphans a sender");
 		assert!(
-			started.elapsed() >= DRAIN_SHUTDOWN_TIMEOUT,
+			started.elapsed() >= INTERRUPTED_DRAIN_SHUTDOWN_TIMEOUT,
 			"await_drain returned before its bound; the drain was not actually blocked",
 		);
 		// The pump was aborted, so its receiver is dropped: the orphaned sender
