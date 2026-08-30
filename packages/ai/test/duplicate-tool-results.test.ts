@@ -17,6 +17,7 @@ import type {
 	ToolResultMessage,
 	UserMessage,
 } from "@oh-my-pi/pi-ai/types";
+import { normalizeToolCallId } from "@oh-my-pi/pi-ai/utils";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 /**
@@ -976,6 +977,128 @@ describe("Composite Tool-Call Id Pairing", () => {
 		const results = resultsFor(transformed, "call_A");
 		expect(results).toHaveLength(1);
 		expect(results[0]!.content).toEqual([{ type: "text", text: "205 tools found" }]);
+	});
+
+	it("survives cross-provider normalization to an Anthropic target (#10284)", () => {
+		// Codex's cross-provider angle: a session model/provider switch replays a
+		// Responses-origin composite call to an Anthropic target. The `|` is
+		// invalid for Anthropic, so the assistant call `call_A|fc_ASSISTANT`
+		// normalizes to `call_A_fc_ASSISTANT` while its real result arrives with a
+		// DIFFERENT item half (`call_A|fc_RESULT`). Pre-fix the result missed the
+		// exact-key lookup and stayed composite, so the pairing pass replaced the
+		// real result with the synthetic stub. Canonical pairing must carry the
+		// call_ component's normalized id onto the result across normalization.
+		const anthropicTarget: Model<"anthropic-messages"> = buildModel({
+			api: "anthropic-messages",
+			provider: "anthropic",
+			id: "claude-sonnet-4-5",
+			name: "Claude Sonnet 4.5",
+			baseUrl: "https://api.anthropic.com",
+			input: ["text"],
+			cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+			maxTokens: 8192,
+			contextWindow: 200000,
+			reasoning: true,
+		});
+		const messages: Message[] = [
+			{ role: "user", content: "search", timestamp: 1 },
+			makeToolCallAssistant(["call_A|fc_ASSISTANT"], 2),
+			makeToolResult("call_A|fc_RESULT", "205 tools found", 3),
+		];
+
+		const transformed = transformMessages(messages, anthropicTarget, normalizeToolCallId);
+
+		expect(hasSynthetic(transformed)).toBe(false);
+		const callIds = transformed
+			.filter((m): m is AssistantMessage => m.role === "assistant")
+			.flatMap(m => m.content)
+			.filter((b): b is ToolCall => b.type === "toolCall")
+			.map(b => b.id);
+		expect(callIds).toEqual(["call_A_fc_ASSISTANT"]);
+		const results = transformed.filter((m): m is ToolResultMessage => m.role === "toolResult");
+		expect(results).toHaveLength(1);
+		expect(results[0]!.toolCallId).toBe("call_A_fc_ASSISTANT");
+		expect(results[0]!.content).toEqual([{ type: "text", text: "205 tools found" }]);
+	});
+});
+
+/**
+ * Regression for #10284: same-model Chat Completions tool-call ids are OPAQUE
+ * provider correlation tokens that may themselves contain `|`
+ * (`openai-completions.ts` preserves them verbatim on same-model replay). The
+ * composite-`call_` pairing must NOT canonicalize them: splitting `opaque|first`
+ * and `opaque|second` onto one `opaque` bucket collapsed two distinct calls, so
+ * the assistant halves were `_dup`-suffixed (`opaque_dup1|second_dup1`) and the
+ * lone result (`opaque|second`) paired with neither surviving wire id — the
+ * provider then rejected the replay.
+ */
+describe("Opaque Chat Completions ids are not canonicalized (#10284)", () => {
+	const model: Model<"openai-completions"> = buildModel({
+		api: "openai-completions",
+		provider: "openai",
+		id: "gpt-4o",
+		name: "GPT-4o",
+		baseUrl: "https://api.openai.com/v1",
+		input: ["text"],
+		cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+		maxTokens: 8192,
+		contextWindow: 128000,
+		reasoning: false,
+	});
+
+	const assistantWithCalls = (ids: string[], timestamp: number): AssistantMessage => ({
+		role: "assistant",
+		content: ids.map(id => ({ type: "toolCall", id, name: "read", arguments: {} })),
+		api: "openai-completions",
+		provider: "openai",
+		model: "gpt-4o",
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "toolUse",
+		timestamp,
+	});
+
+	const toolResult = (id: string, text: string, timestamp: number): ToolResultMessage => ({
+		role: "toolResult",
+		toolCallId: id,
+		toolName: "read",
+		content: [{ type: "text", text }],
+		isError: false,
+		timestamp,
+	});
+
+	it("leaves pipe-bearing opaque ids intact and pairs the lone result to its call", () => {
+		const messages: Message[] = [
+			{ role: "user", content: "read twice", timestamp: 1 },
+			assistantWithCalls(["opaque|first", "opaque|second"], 2),
+			toolResult("opaque|second", "second output", 3),
+		];
+
+		const context: Context = { messages };
+		const wireMessages = convertMessages(model, context, model.compat);
+
+		const assistantIds = wireMessages
+			.filter((m): m is ChatCompletionAssistantMessageParam => m.role === "assistant" && Array.isArray(m.tool_calls))
+			.flatMap(m => m.tool_calls?.map(tc => tc.id) ?? []);
+		// Both opaque ids survive verbatim — neither collapsed onto `opaque` nor
+		// `_dup`-suffixed.
+		expect(assistantIds).toEqual(["opaque|first", "opaque|second"]);
+
+		const toolWireIds = wireMessages
+			.filter((m): m is ChatCompletionToolMessageParam => m.role === "tool")
+			.map(m => m.tool_call_id);
+		// The real result pairs with its own call; every emitted result id matches
+		// a surviving assistant call.
+		expect(toolWireIds).toContain("opaque|second");
+		for (const id of toolWireIds) {
+			expect(assistantIds).toContain(id);
+		}
 	});
 });
 
