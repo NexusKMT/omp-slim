@@ -601,7 +601,9 @@ function isWithin(parent: string, child: string): boolean {
  *
  * When a repository is nested below the user's home directory, continue past
  * the Git root to discover workspace-level files, but stop before loading the
- * home directory's own copy as project context.
+ * home directory's own copy as project context. A repository rooted at the
+ * home directory itself is not "nested below" it, so the home-level file
+ * remains project context.
  */
 export async function loadStandaloneContextFiles(
 	ctx: LoadContext,
@@ -615,10 +617,11 @@ export async function loadStandaloneContextFiles(
 	const repoRoot = ctx.repoRoot ? path.resolve(ctx.repoRoot) : null;
 	const filesystemRoot = path.parse(cwd).root;
 	const cwdIsUnderHome = isWithin(home, cwd);
-	const repoIsUnderHome = repoRoot !== null && isWithin(home, repoRoot);
+	const repoIsHome = repoRoot !== null && samePath(home, repoRoot);
+	const repoIsUnderHome = repoRoot !== null && isWithin(home, repoRoot) && !repoIsHome;
 	const scanToHome = repoRoot !== null && cwdIsUnderHome && repoIsUnderHome;
 	const boundary = scanToHome ? home : (repoRoot ?? (cwdIsUnderHome ? home : filesystemRoot));
-	const includeBoundary = repoRoot === null ? cwdIsUnderHome : !samePath(boundary, home);
+	const includeBoundary = repoRoot === null ? cwdIsUnderHome : !samePath(boundary, home) || repoIsHome;
 	const excludeHome = scanToHome;
 
 	let current = cwd;

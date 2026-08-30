@@ -117,6 +117,21 @@ describe("standalone CLAUDE.md discovery", () => {
 
 		expect(result.items.map(file => file.path)).toEqual([repoClaude]);
 	});
+
+	test("loads the repository-root CLAUDE.md when the repository root is home", async () => {
+		const home = path.join(tempDir, "home");
+		const repoRoot = home;
+		const cwd = path.join(home, "project");
+		fs.mkdirSync(cwd, { recursive: true });
+
+		const homeClaude = path.join(home, "CLAUDE.md");
+		writeClaude(homeClaude, "repo root context");
+
+		const context: LoadContext = { cwd, home, repoRoot };
+		const result = await loadClaudeMd(context);
+
+		expect(result.items.map(file => file.path)).toEqual([homeClaude]);
+	});
 });
 
 describe("claude-md final registration and precedence", () => {
