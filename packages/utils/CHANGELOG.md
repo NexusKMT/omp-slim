@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `postmortem.fatal` for terminal-safe top-level failure reporting.
+
+### Fixed
+
+- Fatal reports now begin registered display cleanup before writing to stderr ([#10275](https://github.com/can1357/oh-my-pi/issues/10275)).
+
 ## [18.0.11] - 2026-08-29
 
 ### Fixed

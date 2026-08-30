@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed fatal cleanup leaving the cursor inside a focused input before stderr output ([#10275](https://github.com/can1357/oh-my-pi/issues/10275)).
+
 ## [18.0.11] - 2026-08-29
 
 ### Added
