@@ -9498,6 +9498,43 @@ mod tests {
 	}
 
 	#[test]
+	fn builtin_substitutes_only_plus_prefixed_lines() {
+		// THE OBSERVABLE DEFECT this change exists for, covered end to end:
+		// argument parsing, BRE compilation and substitution together.
+		// `s/^\+/PLUS/` used to rewrite the start of EVERY line, because
+		// `\+` became `+` unconditionally and `^+` compiles as `(?:^)+`.
+		let input = "alpha\n+added\n-removed\n context\n+another\n";
+		let (code, capture) =
+			crate::host::run_util::<Sed>(&[r"s/^\+/PLUS/"], input, "/");
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "alpha\nPLUSadded\n-removed\n context\nPLUSanother\n");
+		assert_eq!(capture.err(), "");
+	}
+
+	#[test]
+	fn builtin_rejects_a_brace_quantifier_with_no_operand() {
+		// Real sed refuses this. Emitting the operator gave `^{1,3}`, which
+		// fancy-regex accepts and matches at every line start.
+		let (code, capture) =
+			crate::host::run_util::<Sed>(&[r"s/^\{1,3\}/X/"], "alpha\n+added\n", "/");
+		assert_ne!(code, 0, "must not substitute: {:?}", capture.out());
+		assert!(
+			capture.err().contains("repetition-operator operand invalid"),
+			"{}",
+			capture.err()
+		);
+	}
+
+	#[test]
+	fn builtin_treats_only_the_first_caret_of_a_branch_as_an_anchor() {
+		// Measured: `sed 's/^^/X/'` rewrites only lines that begin with a
+		// literal caret, consuming one of them.
+		let (code, capture) = crate::host::run_util::<Sed>(&["s/^^/X/"], "^a\naaa\n^^b\n", "/");
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "Xa\naaa\nX^b\n");
+	}
+
+	#[test]
 	fn builtin_propagates_q_status() {
 		let (code, capture) = crate::host::run_util::<Sed>(&["2q42"], "one\ntwo\nthree\n", "/");
 		assert_eq!(code, 42);

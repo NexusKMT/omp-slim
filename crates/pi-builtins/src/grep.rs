@@ -603,22 +603,35 @@ fn escape_literal(pat: &str) -> String {
 	out
 }
 
-fn build_default_matcher<P: AsRef<str>>(
+/// Build a matcher, falling back to a literal match for any pattern the engine
+/// refuses.
+///
+/// `fallbacks` supplies the text to escape when the corresponding entry of
+/// `patterns` will not compile. The two differ for a BRE, where `patterns`
+/// holds the translated form: a back-reference cannot be compiled by
+/// `grep-regex` at all, and escaping the TRANSLATION would make `\(a\)\1`
+/// match the text `(a)\1` rather than the bytes the user typed. The literal
+/// fallback must reproduce the user's pattern, which is what it did before the
+/// translation step existed.
+fn build_default_matcher<P: AsRef<str>, F: AsRef<str>>(
 	builder: &RegexMatcherBuilder,
 	patterns: &[P],
+	fallbacks: &[F],
 ) -> Result<RegexMatcher, String> {
+	debug_assert_eq!(patterns.len(), fallbacks.len());
 	let error = match builder.build_many(patterns) {
 		Ok(matcher) => return Ok(matcher),
 		Err(error) => error,
 	};
 	let sanitized: Vec<String> = patterns
 		.iter()
-		.map(|pattern| {
+		.zip(fallbacks.iter())
+		.map(|(pattern, fallback)| {
 			let pattern = pattern.as_ref();
 			if builder.build(pattern).is_ok() {
 				pattern.to_owned()
 			} else {
-				escape_literal(pattern)
+				escape_literal(fallback.as_ref())
 			}
 		})
 		.collect();
@@ -674,15 +687,18 @@ fn build_matcher(
 		// the operator and a bare `+` is a literal. Translating through the
 		// shared BRE module is what makes `grep 'fo+'` mean "fo+" and
 		// `grep '^+'` mean a leading plus, as GNU and BSD grep both do.
-		// Back-references are left untouched: `grep-regex` cannot compile
-		// them, so `build_default_matcher` falls back to a literal match
-		// exactly as it did before.
+		//
+		// The ORIGINAL patterns are handed to the fallback. `grep-regex`
+		// cannot compile a back-reference, so `\(a\)\1` falls back to a
+		// literal match, and it has to be the user's own text - escaping the
+		// translated `(a)\1` would silently match different bytes than before
+		// this translation step existed.
 		let translated: Vec<String> = patterns
 			.iter()
 			.map(|pattern| bre::bre_to_ere(pattern, bre::Backrefs::Unsupported))
 			.collect::<Result<_, _>>()
 			.map_err(|e: bre::BreError| e.message().to_owned())?;
-		return build_default_matcher(&builder, &translated).map(CompiledMatcher::Rust);
+		return build_default_matcher(&builder, &translated, patterns).map(CompiledMatcher::Rust);
 	}
 
 	// `regex` accepts `^+` and compiles it as `(?:^)+`, which matches at every
@@ -1789,6 +1805,75 @@ mod tests {
 		let (code, _, err) = run(&["-Ec", "^+"], input);
 		assert_eq!(code, 2, "-E '^+' must be rejected");
 		assert!(err.contains("grep:"), "{err}");
+	}
+
+	#[test]
+	fn no_operand_brace_interval_is_rejected_through_grep() {
+		// Covered here rather than only in the translator, because the failure
+		// mode was invisible at that level: `^\{2\}` translated to `^{2}`,
+		// which `grep-regex` ACCEPTS as `(?:^){2}` and matches at every line
+		// start, so the whole file came back with exit 0.
+		let input = "alpha\n+added\n-removed\n context\n+another\n";
+		for pattern in [r"^\{2\}", r"^\{1,4\}", r"\{1,4\}", r"\(\{2\}\)", r"a\|\{2\}"] {
+			let (code, out, err) = run(&["-c", pattern], input);
+			assert_eq!(code, 2, "{pattern} must be rejected, got {out:?}");
+			assert!(err.contains("repetition-operator operand invalid"), "{pattern}: {err}");
+		}
+		// With an operand it is an ordinary quantifier and still works.
+		let (code, out, err) = run(&["-c", r"a\{1,2\}"], input);
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "3\n");
+	}
+
+	#[test]
+	fn literal_brace_is_not_rejected_by_the_operand_check() {
+		// `grep -E '^{"'` is a real pattern - the common JSON-line filter -
+		// and GNU grep accepts it, because a `{` that opens no interval is a
+		// literal. An earlier revision of this guard exited 2 on it.
+		let input = "{\"a\":1}\n{foo\nplain\n";
+		for args in
+			[vec!["-c", "^{"], vec!["-Ec", "^\\{"], vec!["-Ec", "^\\{\""], vec!["-c", "{foo"]]
+		{
+			let (code, _, err) = run(&args, input);
+			assert!(code == 0 || code == 1, "{args:?} must not error: {err}");
+			assert!(!err.contains("operand invalid"), "{args:?}: {err}");
+		}
+		let (code, out, err) = run(&["-c", "^{"], input);
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "2\n");
+
+		// NOT asserted here, and a known divergence: `-E '{a}'` and `-E 'a{'`
+		// are literals to GNU grep but `regex` rejects them in its own parser,
+		// which it did before this operand check existed. Making those literal
+		// means rewriting ERE patterns rather than validating them.
+	}
+
+	#[test]
+	fn unsupported_backreference_falls_back_to_the_users_own_text() {
+		// `grep-regex` cannot compile a back-reference, so the pattern is
+		// matched literally. That literal must be what the user typed: after
+		// translation the pattern reads `(a)\1`, and escaping THAT made
+		// `\(a\)\1` match the text `(a)\1` instead of `\(a\)\1`.
+		let (code, out, err) = run(&["-c", r"\(a\)\1"], "x\\(a\\)\\1y\nnope\n");
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "1\n", "fallback must match the original pattern text");
+		let (code, out, _) = run(&["-c", r"\(a\)\1"], "x(a)\\1y\nnope\n");
+		assert_eq!(code, 1, "translated text must not be what is matched");
+		assert_eq!(out, "0\n");
+	}
+
+	#[test]
+	fn only_the_first_caret_of_a_branch_anchors() {
+		// Measured: `grep -c '^^'` counts lines beginning with a literal
+		// caret, and `sed 's/^^/X/'` rewrites only those. Treating the second
+		// caret as another anchor matched every line.
+		let input = "^a\naaa\n^^b\n";
+		let (code, out, err) = run(&["-c", "^^"], input);
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "2\n");
+		let (code, out, err) = run(&["-c", r"^\^"], input);
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "2\n", "the escaped form must agree with the bare one");
 	}
 }
 

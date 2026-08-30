@@ -58,6 +58,12 @@ pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> Result<String, Br
 	// the positions where a repetition character is not an operator and where
 	// `^` IS an anchor. One piece of state answers both questions.
 	let mut has_atom = false;
+	// Whether a branch-start `^` has already been consumed as an anchor. Only
+	// the FIRST caret of a branch anchors: measured, `grep -c '^^'` counts
+	// lines beginning with a literal caret and `sed 's/^^/X/'` rewrites only
+	// those, so a second caret is an ordinary character. Keyed off `has_atom`
+	// alone, both carets became zero-width anchors and every line matched.
+	let mut anchored = false;
 	while let Some(c) = chars.next() {
 		if c == '\\' {
 			match chars.peek() {
@@ -65,6 +71,7 @@ pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> Result<String, Br
 					chars.next();
 					result.push('('); // Group start
 					has_atom = false;
+					anchored = false;
 				},
 				Some(')') => {
 					chars.next();
@@ -93,6 +100,7 @@ pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> Result<String, Br
 					chars.next();
 					result.push('|'); // Alternation operator
 					has_atom = false;
+					anchored = false;
 				},
 				Some('{') => {
 					chars.next();
@@ -165,14 +173,17 @@ pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> Result<String, Br
 						has_atom = true;
 					}
 				},
-				'^' if has_atom && previous != Some('[') => {
-					// In a BRE `^` is an ANCHOR at the start of the pattern and
-					// directly after `\(` or `\|`, and a literal anywhere else.
-					// Those are exactly the positions where no atom precedes,
-					// so `has_atom` already distinguishes them - measured,
-					// `grep '\(^alpha\)'` matches on GNU and BSD grep, and
-					// keying this off `at_beginning` instead escaped the
-					// anchor and matched nothing.
+				'^' if (has_atom || anchored) && previous != Some('[') => {
+					// In a BRE `^` is an ANCHOR only at the start of a branch -
+					// the start of the pattern, or directly after `\(` or `\|` -
+					// and only ONCE there. Anywhere else, including a second
+					// caret at the same branch start, it is a literal.
+					//
+					// Measured: `grep '\(^alpha\)'` matches on GNU and BSD grep,
+					// so start-of-pattern is the wrong test; and `grep -c '^^'`
+					// counts lines beginning with a caret while
+					// `sed 's/^^/X/'` rewrites only those, so the second caret
+					// is not a second anchor.
 					//
 					// Escaping the literal uses is valid in an ERE:
 					// "the ERE "a^b" is valid, but can never match because
@@ -181,6 +192,7 @@ pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> Result<String, Br
 					// POSIX 9.4.9 ERE Expression Anchoring
 					result.push('\\');
 					result.push(c);
+					has_atom = true;
 				},
 				'$' if chars.peek().is_some() => {
 					// Similarly for $ appearing not at the end.
@@ -188,10 +200,13 @@ pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> Result<String, Br
 					result.push(c);
 					has_atom = true;
 				},
-				// An anchor is not an atom: `^` leaves `has_atom` as it found
-				// it, so `^*` sees no operand while `[^x]*` still quantifies
-				// the bracket expression.
-				'^' | '$' => result.push(c),
+				// A branch-start anchor. It is not an atom, so `^*` still sees
+				// no operand, but it is consumed: the next caret is a literal.
+				'^' => {
+					result.push(c);
+					anchored = true;
+				},
+				'$' => result.push(c),
 				_ => {
 					result.push(c);
 					has_atom = true;
