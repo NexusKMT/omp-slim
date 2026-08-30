@@ -5870,13 +5870,20 @@ export class AgentSession {
 		return true;
 	}
 
+	/**
+	 * @returns true when the message is (or will be) picked up by an agent turn
+	 * — queued into a running turn, or a new turn started synchronously. false
+	 * when dispatch bailed before invoking the agent (e.g. a concurrent abort
+	 * won the generation race), so hosts waiting on a terminal `agent_end` can
+	 * stop instead of hanging.
+	 */
 	async promptCustomMessage<T = unknown>(
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
 		options?: Pick<PromptOptions, "streamingBehavior" | "toolChoice"> & {
 			queueChipText?: string;
 			queueOnly?: boolean;
 		},
-	): Promise<void> {
+	): Promise<boolean> {
 		const textContent =
 			typeof message.content === "string"
 				? message.content
@@ -5912,7 +5919,7 @@ export class AgentSession {
 				await this.#queueCustomMessage(notice, streamingBehavior);
 			}
 			await this.#queueCustomMessage(message, streamingBehavior, options.queueChipText);
-			return;
+			return true;
 		}
 		if (this.isStreaming) {
 			const streamingBehavior = options?.streamingBehavior;
@@ -5922,7 +5929,7 @@ export class AgentSession {
 				await this.#queueCustomMessage(notice, streamingBehavior);
 			}
 			await this.#queueCustomMessage(message, streamingBehavior, options?.queueChipText);
-			return;
+			return true;
 		}
 
 		const customMessage: CustomMessage<T> = {
@@ -5935,7 +5942,7 @@ export class AgentSession {
 			timestamp: Date.now(),
 		};
 
-		await this.#promptWithMessage(customMessage, textContent, {
+		return this.#promptWithMessage(customMessage, textContent, {
 			...options,
 			prependMessages: keywordNotices.length > 0 ? keywordNotices : undefined,
 		});
