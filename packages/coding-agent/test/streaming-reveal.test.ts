@@ -491,6 +491,25 @@ describe("frame-skip coalescing", () => {
 		expect(component.messages.length).toBe(pending + 1);
 	});
 
+	it("does not rebuild an unchanged target after the tool-call boundary", () => {
+		vi.useFakeTimers();
+		const { component, controller } = makeController();
+
+		controller.begin(component, makeMessage([{ type: "text", text: "" }]), false);
+		controller.setTarget(makeMessage([{ type: "text", text: "before tool" }]), true);
+		const snapped = component.messages.length;
+
+		// Cumulative tool argument deltas repeat the unchanged beforeTools segment.
+		controller.setTarget(makeMessage([{ type: "text", text: "before tool" }]), true);
+		expect(component.messages).toHaveLength(snapped);
+
+		// A provider rewrite of the leading segment must still repaint, even when
+		// the replacement has the same reveal-unit count.
+		controller.setTarget(makeMessage([{ type: "text", text: "after  tool" }]), true);
+		expect(component.messages).toHaveLength(snapped + 1);
+		expect(textAt(latestMessage(component), 0)).toBe("after  tool");
+	});
+
 	it("keeps synchronous per-setTarget renders when smooth streaming is off", () => {
 		vi.useFakeTimers();
 		const { component, controller } = makeController({ smooth: false });

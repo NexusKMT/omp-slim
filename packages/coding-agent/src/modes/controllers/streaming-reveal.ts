@@ -223,6 +223,7 @@ export class StreamingRevealController {
 	#timer: NodeJS.Timeout | undefined;
 	#revealed = 0;
 	#targetDirty = false;
+	#snappedToolBoundaryContent: AssistantMessage["content"] | undefined;
 	#hideThinkingBlock = false;
 	#proseOnlyThinking = true;
 	#smoothStreaming = true;
@@ -269,6 +270,7 @@ export class StreamingRevealController {
 			component.updateContent(this.#build(message, this.#revealed), {
 				transient: true,
 			});
+			this.#snappedToolBoundaryContent = message.content;
 			return;
 		}
 		this.#renderCurrent();
@@ -291,15 +293,23 @@ export class StreamingRevealController {
 		}
 		const total = this.#visibleUnits(message);
 		if (hasToolCalls) {
+			const alreadySnapped =
+				this.#revealed === total &&
+				this.#snappedToolBoundaryContent !== undefined &&
+				Bun.deepEquals(this.#snappedToolBoundaryContent, message.content);
 			// A tool call is a transcript-order boundary: finish any leading
 			// assistant text before EventController renders the separate tool card.
 			this.#revealed = total;
+			this.#targetDirty = false;
 			this.#stopTimer();
+			if (alreadySnapped) return;
 			this.#component.updateContent(this.#build(message, this.#revealed), {
 				transient: true,
 			});
+			this.#snappedToolBoundaryContent = message.content;
 			return;
 		}
+		this.#snappedToolBoundaryContent = undefined;
 		if (this.#revealed > total) {
 			this.#revealed = total;
 		}
@@ -324,6 +334,7 @@ export class StreamingRevealController {
 		this.#component = undefined;
 		this.#revealed = 0;
 		this.#targetDirty = false;
+		this.#snappedToolBoundaryContent = undefined;
 		this.#unitCounter.reset();
 	}
 
