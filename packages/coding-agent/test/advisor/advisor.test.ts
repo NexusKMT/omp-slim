@@ -441,21 +441,24 @@ describe("advisor", () => {
 			expect(onAdvice).toHaveBeenNthCalledWith(3, note, "blocker");
 		});
 
-		it("defers non-blockers during in-progress updates and flushes them on the next completed update", async () => {
+		it("defers non-blockers per update and flushes the backlog on the next completed update", async () => {
 			const onAdvice = vi.fn();
 			const tool = new AdviseTool(onAdvice);
 			const note = "The result still needs a focused regression test.";
 
 			tool.beginUpdate(true);
 			const deferred = await tool.execute("tc-1", { note, severity: "concern" });
-			await tool.execute("tc-2", { note: "Minor naming cleanup.", severity: "nit" });
-			await tool.execute("tc-3", { note: "A destructive command is running.", severity: "blocker" });
+			await tool.execute("tc-2", { note: "A destructive command is running.", severity: "blocker" });
 
 			// Deferred notes are NOT delivered mid-turn; blocker still goes through.
 			expect(onAdvice).toHaveBeenCalledTimes(1);
 			expect(onAdvice).toHaveBeenCalledWith("A destructive command is running.", "blocker");
 			// The tool tells the advisor the note is deferred, not silently "Recorded.".
 			expect(JSON.stringify(deferred.content)).toContain("Deferred");
+
+			// A second distinct concern in a later in-progress update queues its own slot.
+			tool.beginUpdate(true);
+			await tool.execute("tc-3", { note: "Minor naming cleanup.", severity: "nit" });
 
 			// Completing the turn deterministically flushes both withheld notes,
 			// oldest first — no reliance on the advisor model re-raising them.
@@ -498,12 +501,13 @@ describe("advisor", () => {
 			expect(onAdvice).toHaveBeenCalledWith("Same point raised repeatedly.", "concern");
 		});
 
-		it("flushes every distinct deferred concern past the per-update emission cap on a late catch-up update", async () => {
+		it("flushes one deferred concern per update past the per-update emission cap on a late catch-up", async () => {
 			// Regression for #10271 ("The Advisor is Late"): in yolo mode the primary
-			// is continuously mid-turn from the advisor's view, so every concern is
-			// deferred and the whole backlog is replayed in one catch-up update. That
-			// flush routes through AdvisorEmissionGuard exactly like the live path, so
-			// the one-note-per-update budget used to collapse N distinct concerns to 1.
+			// is continuously mid-turn, so the advisor runs many in-progress updates
+			// (one concern each) and the whole backlog is replayed in a single catch-up
+			// flush. That flush routes through AdvisorEmissionGuard exactly like the
+			// live path, whose one-note-per-update budget used to collapse the backlog
+			// to a single note.
 			const delivered: string[] = [];
 			const guard = new AdvisorEmissionGuard();
 			// Mirror AgentSession#routeAdvice: every note runs through the emission guard.
@@ -523,8 +527,11 @@ describe("advisor", () => {
 				"Tab switching delegates from a trusted click; a dispatched KeyboardEvent is untrusted.",
 			];
 
-			beginUpdate(true);
-			for (const [i, note] of concerns.entries()) await tool.execute(`c-${i}`, { note, severity: "concern" });
+			// Each concern arrives in its own in-progress advisor update.
+			for (const [i, note] of concerns.entries()) {
+				beginUpdate(true);
+				await tool.execute(`c-${i}`, { note, severity: "concern" });
+			}
 			// All withheld mid-turn — nothing reaches the primary yet.
 			expect(delivered).toEqual([]);
 
@@ -532,6 +539,29 @@ describe("advisor", () => {
 			// survives the emission guard, oldest first.
 			beginUpdate(false);
 			expect(delivered).toEqual(concerns);
+		});
+
+		it("caps a single in-progress prompt spraying distinct notes to one deferred note", async () => {
+			// P1 review guard: without a deferral-time cap, a single in-progress
+			// advisor prompt could queue many distinct notes and the exempt flush
+			// would deliver the whole spray the per-update cap exists to suppress
+			// (#3520). Only the first distinct note of an update may be deferred.
+			const delivered: string[] = [];
+			const guard = new AdvisorEmissionGuard();
+			const tool = new AdviseTool(note => {
+				if (guard.accept(note)) delivered.push(note);
+			});
+			const beginUpdate = (inProgress: boolean) => {
+				guard.withDeferredFlush(() => tool.beginUpdate(inProgress));
+				guard.beginUpdate();
+			};
+
+			beginUpdate(true);
+			await tool.execute("x-0", { note: "First mid-turn concern.", severity: "concern" });
+			await tool.execute("x-1", { note: "Second mid-turn concern.", severity: "concern" });
+			await tool.execute("x-2", { note: "Third mid-turn concern.", severity: "concern" });
+			beginUpdate(false);
+			expect(delivered).toEqual(["First mid-turn concern."]);
 		});
 
 		it("still caps a single model turn spraying many distinct notes to one accepted note", async () => {

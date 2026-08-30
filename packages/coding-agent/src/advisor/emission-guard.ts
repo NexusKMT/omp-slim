@@ -149,14 +149,15 @@ export class AdvisorEmissionGuard {
 
 	/**
 	 * Run `flush` with the per-update rate limit lifted, for {@link AdviseTool}'s
-	 * deferred-note replay at turn completion. Each deferred note was emitted in
-	 * its own separate advisor update and never consumed a budget slot there, so
-	 * replaying the accumulated backlog must not be capped to one note — the cap
-	 * targets a single model turn spraying many notes (#3520), not a late
-	 * advisor reviewing the whole run in one catch-up update (#10271, e.g. yolo
-	 * mode), which used to have every deferred concern but the first silently
-	 * dropped. Dedupe and noise filtering still apply inside the window. The
-	 * window is synchronous and self-closing so it never leaks into the live turn.
+	 * deferred-note replay at turn completion. This is safe because `AdviseTool`
+	 * already enforces the one-note-per-update cap at the deferral boundary, so
+	 * the backlog it replays holds at most one note per originating advisor
+	 * update. Lifting the cap here lets a late advisor that reviewed the whole
+	 * run across many in-progress updates surface one concern per update (#10271,
+	 * e.g. yolo mode) instead of collapsing the flush to a single note, while a
+	 * single model turn spraying many notes stays capped at the source (#3520).
+	 * Dedupe and noise filtering still apply inside the window. The window is
+	 * synchronous and self-closing so it never leaks into the live turn.
 	 */
 	withDeferredFlush<T>(flush: () => T): T {
 		this.#flushingDeferred = true;

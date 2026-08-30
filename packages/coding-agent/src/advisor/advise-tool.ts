@@ -189,6 +189,15 @@ export class AdviseTool implements AgentTool<typeof adviseSchema, AdviseDetails>
 	 *  tool previously returned "Recorded." for a note that was never routed).
 	 *  Cleared on `resetDeliveredNotes` alongside the delivered-rank map. */
 	#deferredNotes: { key: string; note: string; severity?: AdviseDetails["severity"] }[] = [];
+	/** Whether a distinct note has already been queued for deferred delivery in
+	 *  the current advisor update. Enforces the one-advise-per-update cap at the
+	 *  deferral boundary (mirroring {@link AdvisorEmissionGuard}'s live-path
+	 *  budget): a single in-progress prompt that sprays several distinct notes
+	 *  queues only the first, so the flush cannot deliver an unbounded batch
+	 *  (#3520). Distinct notes accumulated across separate updates still each
+	 *  queue one (#10271). Escalating an already-pending note never consumes a
+	 *  fresh slot. Reset per update in {@link beginUpdate}. */
+	#deferredThisUpdate = false;
 
 	constructor(private readonly onAdvice: (note: string, severity?: AdviseDetails["severity"]) => void) {}
 
@@ -200,6 +209,8 @@ export class AdviseTool implements AgentTool<typeof adviseSchema, AdviseDetails>
 	beginUpdate(inProgress: boolean): void {
 		const wasInProgress = this.#inProgressUpdate;
 		this.#inProgressUpdate = inProgress;
+		// A new advisor prompt cycle: refresh the one-note-per-update deferral budget.
+		this.#deferredThisUpdate = false;
 		// Turn just completed: flush everything withheld mid-turn, oldest first.
 		// Each flush re-enters the normal dedupe path (escalation rank > delivered
 		// rank), so a note the advisor already got through at a higher severity
@@ -216,6 +227,7 @@ export class AdviseTool implements AgentTool<typeof adviseSchema, AdviseDetails>
 		this.#deliveredNoteSeverities.clear();
 		this.#inProgressUpdate = false;
 		this.#deferredNotes = [];
+		this.#deferredThisUpdate = false;
 	}
 
 	async execute(
@@ -233,11 +245,17 @@ export class AdviseTool implements AgentTool<typeof adviseSchema, AdviseDetails>
 			// reached the primary, so it never re-raised and the advice was lost.
 			const key = advisorNoteDedupeKey(args.note);
 			const pending = this.#deferredNotes.find(item => item.key === key);
-			if (!pending) {
+			if (pending) {
+				// Escalating an already-queued note reuses its slot; never a new one.
+				if (advisorSeverityRank(args.severity) > advisorSeverityRank(pending.severity))
+					pending.severity = args.severity;
+			} else if (!this.#deferredThisUpdate) {
 				this.#deferredNotes.push({ key, note: args.note, severity: args.severity });
-			} else if (advisorSeverityRank(args.severity) > advisorSeverityRank(pending.severity)) {
-				pending.severity = args.severity;
+				this.#deferredThisUpdate = true;
 			}
+			// Otherwise the per-update deferral budget is spent: drop silently, as the
+			// live path does for over-budget notes, so the advisor isn't tempted to
+			// rephrase past the cap. The tool still reports the note as deferred.
 			return {
 				content: [
 					{
