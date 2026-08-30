@@ -31,7 +31,7 @@ import {
 	waitForProjectLoaded,
 } from "./client";
 import { getLinterClient } from "./clients";
-import { getServersForFile } from "./config";
+import { configCache, getConfig, getServersForFile } from "./config";
 import {
 	BATCH_DIAGNOSTICS_WAIT_TIMEOUT_MS,
 	formatLocationWithContext,
@@ -57,8 +57,6 @@ import {
 } from "./edits";
 import { detectLspmux } from "./lspmux";
 import {
-	configCache,
-	getConfig,
 	getLspServerForFile,
 	getLspServers,
 	getLspServersForFile,

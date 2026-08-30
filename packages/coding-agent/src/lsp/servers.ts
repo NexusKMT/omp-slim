@@ -17,8 +17,6 @@ import { getServersForFile, type LspConfig, loadConfig } from "./config";
 import { MUX_RESTART_METHOD } from "./mux/protocol";
 import type { LspClient, ServerConfig } from "./types";
 
-export { configCache, getConfig } from "./config";
-
 /**
  * LSP actions that do not mutate the workspace or language-server state.
  * Anything not in this set (rename, code_actions with apply, rename_file,
