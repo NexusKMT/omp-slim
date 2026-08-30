@@ -51,20 +51,42 @@ function responsesCallComponent(id: string): string {
 }
 
 /**
- * The set of `call_` components that provably originate from a Responses-family
- * assistant turn (keyed off the source message `api`). Only these may be
- * canonicalized by {@link toolCallPairingKey}: an opaque Chat Completions id
- * that merely contains `|` must pair by raw equality, never by its prefix.
+ * Origin classification for tool-call ids, tracked per CONCRETE id rather than
+ * by a global prefix set. Two facts drive whether an id may be canonicalized to
+ * its `call_` component for pairing:
+ *
+ *  - `responsesComponents`: the `call_` components of ids provably minted by a
+ *    Responses-family assistant turn (keyed off the source message `api`).
+ *  - `opaqueCompositeCallIds`: the FULL ids of pipe-bearing tool calls from a
+ *    NON-Responses (opaque Chat Completions) assistant turn. openai-completions
+ *    preserves these verbatim as provider correlation tokens; the `|` is
+ *    literal, so they must pair by raw equality even when their `call_` prefix
+ *    happens to collide with a Responses component seen elsewhere in history.
+ *
+ * Scoping by concrete id (not merely a shared prefix) is load-bearing (#10284):
+ * an earlier Responses `call_A` must not license canonicalizing later same-model
+ * Chat Completions ids `call_A|first` / `call_A|second` onto one `call_A`
+ * bucket, which would collapse two distinct opaque calls and steer a lone
+ * `call_A|second` result onto the wrong call.
  */
-function collectResponsesCompositePrefixes(messages: readonly Message[]): Set<string> {
-	const prefixes = new Set<string>();
+interface ToolCallOriginScope {
+	responsesComponents: ReadonlySet<string>;
+	opaqueCompositeCallIds: ReadonlySet<string>;
+}
+
+function collectToolCallOriginScope(messages: readonly Message[]): ToolCallOriginScope {
+	const responsesComponents = new Set<string>();
+	const opaqueCompositeCallIds = new Set<string>();
 	for (const msg of messages) {
-		if (msg.role !== "assistant" || !isResponsesFamilyApi(msg.api)) continue;
+		if (msg.role !== "assistant") continue;
+		const responsesOrigin = isResponsesFamilyApi(msg.api);
 		for (const block of msg.content) {
-			if (block.type === "toolCall") prefixes.add(responsesCallComponent(block.id));
+			if (block.type !== "toolCall") continue;
+			if (responsesOrigin) responsesComponents.add(responsesCallComponent(block.id));
+			else if (block.id.includes("|")) opaqueCompositeCallIds.add(block.id);
 		}
 	}
-	return prefixes;
+	return { responsesComponents, opaqueCompositeCallIds };
 }
 
 /**
@@ -77,15 +99,16 @@ function collectResponsesCompositePrefixes(messages: readonly Message[]): Set<st
  * while NOT collapsing two distinct parallel calls whose results happen to
  * share a `response_item` (`fc_`) half.
  *
- * SCOPING (load-bearing, #10284): only ids whose `call_` component is in
- * `responsesCompositePrefixes` — i.e. provably minted by a Responses-family
- * assistant turn — are canonicalized. A same-model Chat Completions id is an
- * OPAQUE provider correlation token that may itself contain `|`
- * (openai-completions.ts preserves it verbatim); splitting it would collapse
- * two distinct opaque calls onto one bucket, so the real result never pairs and
- * the call is back-filled with a synthetic stub. Opaque ids fall through to
- * full-id keying, where the provider's own echoed `tool_call_id` already pairs
- * result to call by raw equality.
+ * SCOPING (load-bearing, #10284): a pipe-bearing id is canonicalized to its
+ * `call_` component ONLY when it is not itself a concrete opaque-origin call id
+ * ({@link ToolCallOriginScope.opaqueCompositeCallIds}) and its component was
+ * minted by a Responses-family turn ({@link ToolCallOriginScope.responsesComponents}).
+ * A same-model Chat Completions id is an OPAQUE provider correlation token that
+ * may itself contain `|` (openai-completions.ts preserves it verbatim);
+ * splitting it would collapse two distinct opaque calls onto one bucket, so the
+ * real result never pairs and the call is back-filled with a synthetic stub.
+ * Opaque ids fall through to full-id keying, where the provider's own echoed
+ * `tool_call_id` already pairs result to call by raw equality.
  *
  * Pairing keys are used only for lookup; the messages' own ids are left intact
  * so the provider encoder still receives the exact wire ids it expects.
@@ -96,11 +119,12 @@ function collectResponsesCompositePrefixes(messages: readonly Message[]): Set<st
  * and genuine cross-turn id reuse is `_dup`-suffixed on the call_ segment by
  * `deduplicateToolCallIds` (which this key preserves).
  */
-function toolCallPairingKey(id: string, responsesCompositePrefixes: ReadonlySet<string>): string {
+function toolCallPairingKey(id: string, originScope: ToolCallOriginScope): string {
 	const pipe = id.indexOf("|");
 	if (pipe <= 0) return id;
+	if (originScope.opaqueCompositeCallIds.has(id)) return id;
 	const prefix = id.slice(0, pipe);
-	return responsesCompositePrefixes.has(prefix) ? prefix : id;
+	return originScope.responsesComponents.has(prefix) ? prefix : id;
 }
 
 function appendDuplicateSuffix(originalId: string, suffix: string, maxLength: number): string {
@@ -128,7 +152,7 @@ type PendingToolResultRewrite = { replacementId: string } | undefined;
 
 function deduplicateToolCallIds(
 	messages: Message[],
-	responsesCompositePrefixes: ReadonlySet<string>,
+	originScope: ToolCallOriginScope,
 	maxToolCallIdLength = MAX_TOOL_CALL_ID_LENGTH,
 	duplicateSuffixPrefix = "_dup",
 ): Message[] {
@@ -142,7 +166,7 @@ function deduplicateToolCallIds(
 			// call's canonical id. Raw-string keying here misses the composite,
 			// so the `_dup` remap silently no-ops and a reused call_id's later
 			// result is dropped downstream.
-			const key = toolCallPairingKey(msg.toolCallId, responsesCompositePrefixes);
+			const key = toolCallPairingKey(msg.toolCallId, originScope);
 			const rewrites = pendingToolResultRewrites.get(key);
 			if (!rewrites || rewrites.length === 0) return msg;
 
@@ -176,7 +200,7 @@ function deduplicateToolCallIds(
 			// share one counter + rewrite queue. The `_dup` SUFFIX still lands on
 			// the full wire id via `appendDuplicateSuffix` (below) — only the
 			// KEYING is canonical, so emitted ids are unchanged.
-			const blockKey = toolCallPairingKey(block.id, responsesCompositePrefixes);
+			const blockKey = toolCallPairingKey(block.id, originScope);
 
 			// Drop any pending rewrites carried over from a prior assistant turn
 			// for this id on its first appearance this turn. When a later turn
@@ -203,7 +227,7 @@ function deduplicateToolCallIds(
 				`${duplicateSuffixPrefix}${duplicateIndex}`,
 				maxToolCallIdLength,
 			);
-			while (seenToolCallIds.has(toolCallPairingKey(replacementId, responsesCompositePrefixes))) {
+			while (seenToolCallIds.has(toolCallPairingKey(replacementId, originScope))) {
 				duplicateIndex += 1;
 				replacementId = appendDuplicateSuffix(
 					block.id,
@@ -212,7 +236,7 @@ function deduplicateToolCallIds(
 				);
 			}
 			seenToolCallIds.set(blockKey, duplicateIndex + 1);
-			seenToolCallIds.set(toolCallPairingKey(replacementId, responsesCompositePrefixes), 1);
+			seenToolCallIds.set(toolCallPairingKey(replacementId, originScope), 1);
 			enqueueToolResultRewrite(blockKey, { replacementId });
 			contentChanged = true;
 			return { ...block, id: replacementId };
@@ -896,28 +920,33 @@ export function transformMessages<TApi extends Api>(
 						normalizedToolCall = { ...toolCall, thoughtSignature: undefined };
 					}
 
+					let normalizedId: string | undefined;
 					if (isAnthropicTarget) {
-						const normalizedId = normalizeAnthropicTargetToolCallId(
+						normalizedId = normalizeAnthropicTargetToolCallId(
 							toolCall.id,
 							model,
 							assistantMsg,
 							normalizeToolCallId,
 						);
+					} else if (!isSameModel && normalizeToolCallId) {
+						normalizedId = normalizeToolCallId(toolCall.id, model, assistantMsg);
+					}
+
+					if (normalizedId !== undefined) {
 						if (normalizedId !== toolCall.id) {
 							toolCallIdMap.set(toolCall.id, normalizedId);
-							if (isResponsesFamilyApi(assistantMsg.api) && toolCall.id.includes("|")) {
-								responsesCompositeIdMap.set(responsesCallComponent(toolCall.id), normalizedId);
-							}
 							normalizedToolCall = { ...normalizedToolCall, id: normalizedId };
 						}
-					} else if (!isSameModel && normalizeToolCallId) {
-						const normalizedId = normalizeToolCallId(toolCall.id, model, assistantMsg);
-						if (normalizedId !== toolCall.id) {
-							toolCallIdMap.set(toolCall.id, normalizedId);
-							if (isResponsesFamilyApi(assistantMsg.api) && toolCall.id.includes("|")) {
-								responsesCompositeIdMap.set(responsesCallComponent(toolCall.id), normalizedId);
-							}
-							normalizedToolCall = { ...normalizedToolCall, id: normalizedId };
+						// Record the Responses call-component → emitted-id mapping
+						// EVEN WHEN the assistant id is plain and normalization is
+						// identity. A composite RESULT (`call_A|fc_R`) for a plain
+						// Responses call `call_A` still needs this mapping to resolve
+						// onto the emitted id; without it the result stays composite
+						// and the target sees a call `call_A` beside a result
+						// `call_A|fc_R`, breaking call/result correspondence (and, on
+						// Anthropic, the id char rules).
+						if (isResponsesFamilyApi(assistantMsg.api)) {
+							responsesCompositeIdMap.set(responsesCallComponent(toolCall.id), normalizedId);
 						}
 					}
 
@@ -946,12 +975,13 @@ export function transformMessages<TApi extends Api>(
 		}
 		return msg;
 	});
-	// Prefixes provably minted by a Responses-family assistant turn — the only
-	// ids `toolCallPairingKey` may canonicalize to their `call_` component.
-	const responsesCompositePrefixes = collectResponsesCompositePrefixes(normalizedMessages);
+	// Per-concrete-id origin classification — the only scope `toolCallPairingKey`
+	// consults to decide whether a pipe-bearing id is a canonicalizable Responses
+	// composite or an opaque Chat Completions token that pairs by raw equality.
+	const originScope = collectToolCallOriginScope(normalizedMessages);
 	const transformed = deduplicateToolCallIds(
 		normalizedMessages,
-		responsesCompositePrefixes,
+		originScope,
 		maxNormalizedToolCallIdLength,
 		duplicateToolCallIdSuffixPrefix,
 	);
@@ -967,14 +997,14 @@ export function transformMessages<TApi extends Api>(
 		const msg = transformed[index];
 		if (msg.role === "toolResult") {
 			const entry: IndexedToolResult = { index, msg, consumed: false };
-			const key = toolCallPairingKey(msg.toolCallId, responsesCompositePrefixes);
+			const key = toolCallPairingKey(msg.toolCallId, originScope);
 			const entries = realToolResultsById.get(key);
 			if (entries) entries.push(entry);
 			else realToolResultsById.set(key, [entry]);
 		}
 	}
 	const takeRealToolResult = (id: string, afterIndex: number): ToolResultMessage | undefined => {
-		const entries = realToolResultsById.get(toolCallPairingKey(id, responsesCompositePrefixes));
+		const entries = realToolResultsById.get(toolCallPairingKey(id, originScope));
 		if (!entries) return undefined;
 		for (const entry of entries) {
 			if (entry.consumed || entry.index <= afterIndex) continue;
@@ -993,7 +1023,7 @@ export function transformMessages<TApi extends Api>(
 	for (const msg of transformed) {
 		if (msg.role !== "assistant") continue;
 		for (const block of msg.content) {
-			if (block.type === "toolCall") validToolUseIds.add(toolCallPairingKey(block.id, responsesCompositePrefixes));
+			if (block.type === "toolCall") validToolUseIds.add(toolCallPairingKey(block.id, originScope));
 		}
 	}
 
@@ -1014,7 +1044,7 @@ export function transformMessages<TApi extends Api>(
 	const flushPendingToolCalls = (timestamp: number): void => {
 		if (pendingToolCalls.length === 0) return;
 		for (const tc of pendingToolCalls) {
-			const statusKey = toolCallPairingKey(tc.id, responsesCompositePrefixes);
+			const statusKey = toolCallPairingKey(tc.id, originScope);
 			if (toolCallStatus.has(statusKey)) continue;
 			const realToolResult = takeRealToolResult(tc.id, pendingToolCallsStartIndex);
 			if (realToolResult) {
@@ -1038,7 +1068,7 @@ export function transformMessages<TApi extends Api>(
 	const flushPendingAbortedToolCalls = (): void => {
 		if (pendingAbortedTimestamp === undefined) return;
 		for (const tc of pendingAbortedToolCalls.values()) {
-			const statusKey = toolCallPairingKey(tc.id, responsesCompositePrefixes);
+			const statusKey = toolCallPairingKey(tc.id, originScope);
 			if (toolCallStatus.has(statusKey)) continue;
 			const realToolResult = takeRealToolResult(tc.id, pendingAbortedStartIndex);
 			if (realToolResult) {
@@ -1095,9 +1125,7 @@ export function transformMessages<TApi extends Api>(
 				// before the next turn boundary.
 				result.push(msg);
 				pendingAbortedToolCalls = new Map(
-					toolCalls.map(
-						toolCall => [toolCallPairingKey(toolCall.id, responsesCompositePrefixes), toolCall] as const,
-					),
+					toolCalls.map(toolCall => [toolCallPairingKey(toolCall.id, originScope), toolCall] as const),
 				);
 				pendingAbortedTimestamp = assistantMsg.timestamp;
 				pendingAbortedStartIndex = i;
@@ -1111,7 +1139,7 @@ export function transformMessages<TApi extends Api>(
 
 			result.push(msg);
 		} else if (msg.role === "toolResult") {
-			const resultKey = toolCallPairingKey(msg.toolCallId, responsesCompositePrefixes);
+			const resultKey = toolCallPairingKey(msg.toolCallId, originScope);
 			if (toolCallStatus.has(resultKey)) continue;
 
 			if (pendingAbortedToolCalls.has(resultKey)) {
@@ -1121,7 +1149,7 @@ export function transformMessages<TApi extends Api>(
 				continue;
 			}
 
-			if (pendingToolCalls.some(tc => toolCallPairingKey(tc.id, responsesCompositePrefixes) === resultKey)) {
+			if (pendingToolCalls.some(tc => toolCallPairingKey(tc.id, originScope) === resultKey)) {
 				toolCallStatus.set(resultKey, ToolCallStatus.Resolved);
 				result.push(msg);
 				continue;
@@ -1147,9 +1175,7 @@ export function transformMessages<TApi extends Api>(
 				// Drop the orphan silently in that case; the pending calls will be
 				// resolved in their own contiguous result window or at the next boundary.
 				if (
-					pendingToolCalls.some(
-						tc => !toolCallStatus.has(toolCallPairingKey(tc.id, responsesCompositePrefixes)),
-					) ||
+					pendingToolCalls.some(tc => !toolCallStatus.has(toolCallPairingKey(tc.id, originScope))) ||
 					pendingAbortedToolCalls.size > 0
 				) {
 					continue;
