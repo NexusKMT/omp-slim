@@ -19,6 +19,7 @@
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
+- Fixed bash tool timeouts hanging an extra 5 seconds and reporting empty output identical to a silent success when a grandchild process held the command's output pipe open; the native shell now bounds its output-drain so the timeout fires on time, timeouts that the safety net had to enforce say the shell backend did not respond, and a wedged run no longer leaks its session ([#10308](https://github.com/can1357/oh-my-pi/issues/10308)).
 
 ## [18.0.11] - 2026-08-29
 

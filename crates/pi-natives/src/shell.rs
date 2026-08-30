@@ -1,6 +1,6 @@
 //! Brush-based shell execution exported via N-API.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use napi::{
 	Env, Result,
@@ -231,9 +231,7 @@ impl Shell {
 				.await
 				.map(Into::into)
 				.map_err(|err| Error::from_reason(err.to_string()));
-			if let Some(handle) = drain_handle {
-				let _ = handle.await;
-			}
+			await_drain(drain_handle).await;
 			result
 		})
 	}
@@ -285,9 +283,7 @@ pub fn execute_shell<'env>(
 			.await
 			.map(Into::into)
 			.map_err(|err| Error::from_reason(err.to_string()));
-		if let Some(handle) = drain_handle {
-			let _ = handle.await;
-		}
+		await_drain(drain_handle).await;
 		result
 	})
 }
@@ -352,6 +348,32 @@ async fn pump_chunks(rx: flume::Receiver<String>, mut forward: impl AsyncFnMut(S
 	}
 }
 
+/// Upper bound on how long to wait for the chunk-forwarding pump to finish
+/// after the run future has resolved. The pump normally drains in microseconds
+/// once the command's pipe writers close, but a grandchild that inherited the
+/// stdout pipe can keep a pipe-reader task — and thus one of the bridge-queue
+/// senders — alive indefinitely, so the channel never disconnects and the pump
+/// never returns. Awaiting it unbounded wedged the whole run promise past the
+/// requested timeout, leaving the JS `+5s` watchdog as the only path that ever
+/// returned (#10308).
+const DRAIN_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Await the chunk-forwarding pump, bounded by [`DRAIN_SHUTDOWN_TIMEOUT`].
+///
+/// If the pump does not finish in time — an orphaned reader is still holding a
+/// sender — abort it. Dropping the pump drops its `flume::Receiver`, which
+/// disconnects the channel so the orphaned sender's next `send_async` fails
+/// fast and the detached reader unwinds instead of pinning the run promise.
+async fn await_drain(handle: Option<napi::tokio::task::JoinHandle<()>>) {
+	let Some(mut handle) = handle else {
+		return;
+	};
+	if napi::tokio::time::timeout(DRAIN_SHUTDOWN_TIMEOUT, &mut handle).await.is_err() {
+		handle.abort();
+		let _ = handle.await;
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use std::time::Duration;
@@ -363,7 +385,7 @@ mod tests {
 	};
 	use tokio::time;
 
-	use super::{BRIDGE_QUEUE_CHUNKS, CoreShell, pump_chunks};
+	use super::{BRIDGE_QUEUE_CHUNKS, CoreShell, DRAIN_SHUTDOWN_TIMEOUT, await_drain, pump_chunks};
 
 	/// Regression for #4078: the reader→JS bridge queue must stay bounded when
 	/// the JS side (here: a deliberately slow `forward`) cannot keep up with a
@@ -439,6 +461,32 @@ mod tests {
 			.await
 			.expect("pump should exit after forward fails")
 			.expect("pump task");
+	}
+
+	/// Regression for #10308: a grandchild that inherits the stdout pipe keeps a
+	/// pipe-reader task alive after the run future resolves, so one bridge-queue
+	/// sender is never dropped and `pump_chunks` never sees channel disconnect.
+	/// `await_drain` must still return (bounded by `DRAIN_SHUTDOWN_TIMEOUT` and
+	/// then aborting the pump) instead of wedging the run promise forever. On
+	/// the pre-fix `let _ = handle.await` this never returned and only the JS
+	/// `+5s` watchdog could recover, producing the reporter's `N+5.00s` signature.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn await_drain_returns_when_a_reader_orphans_a_sender() {
+		let (tx, rx) = flume::bounded::<String>(BRIDGE_QUEUE_CHUNKS);
+		let orphan = tx.clone();
+		let handle = napi::tokio::spawn(pump_chunks(rx, async |_p: String| true));
+		drop(tx);
+		let started = time::Instant::now();
+		time::timeout(DRAIN_SHUTDOWN_TIMEOUT + Duration::from_secs(2), await_drain(Some(handle)))
+			.await
+			.expect("await_drain must return even when a sender is orphaned");
+		assert!(
+			started.elapsed() >= DRAIN_SHUTDOWN_TIMEOUT,
+			"await_drain returned before its bound; the drain was not actually blocked",
+		);
+		// The pump was aborted, so its receiver is dropped: the orphaned sender
+		// now observes a disconnected channel instead of parking forever.
+		assert!(orphan.send("late".to_string()).is_err(), "aborting the pump must disconnect the channel");
 	}
 
 	mod child_session_action_tests {
