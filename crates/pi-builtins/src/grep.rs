@@ -4,7 +4,6 @@
 
 
 use std::{
-	borrow::Cow,
 	ffi::{OsStr, OsString},
 	fs::File,
 	io::{self, Read, Write},
@@ -20,6 +19,7 @@ use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::{
 	BinaryDetection, Searcher, SearcherBuilder, Sink, SinkContext, SinkFinish, SinkMatch,
 };
+use crate::bre;
 use crate::host::{Host, Utility, util};
 
 /// PCRE2 JIT toggle: `OMP_PCRE2_JIT=1` forces JIT on, `0`/`false` forces it
@@ -603,52 +603,6 @@ fn escape_literal(pat: &str) -> String {
 	out
 }
 
-/// Translate GNU BRE `\|` alternation into the syntax accepted by
-/// `grep-regex`, without rewriting escaped pipes inside character classes.
-fn normalize_basic_alternation(pattern: &str) -> Cow<'_, str> {
-	let bytes = pattern.as_bytes();
-	let mut output = None;
-	let mut copied = 0;
-	let mut index = 0;
-	let mut in_class = false;
-
-	while index < bytes.len() {
-		if bytes[index] == b'\\' {
-			let run_start = index;
-			while index < bytes.len() && bytes[index] == b'\\' {
-				index += 1;
-			}
-			let slash_count = index - run_start;
-			if !in_class && slash_count % 2 == 1 && index < bytes.len() && bytes[index] == b'|' {
-				let normalized = output.get_or_insert_with(|| String::with_capacity(pattern.len()));
-				normalized.push_str(&pattern[copied..index - 1]);
-				normalized.push('|');
-				copied = index + 1;
-				index += 1;
-				continue;
-			}
-			if slash_count % 2 == 1 && index < bytes.len() {
-				index += 1;
-			}
-			continue;
-		}
-
-		match bytes[index] {
-			b'[' if !in_class => in_class = true,
-			b']' if in_class => in_class = false,
-			_ => {},
-		}
-		index += 1;
-	}
-
-	if let Some(mut normalized) = output {
-		normalized.push_str(&pattern[copied..]);
-		Cow::Owned(normalized)
-	} else {
-		Cow::Borrowed(pattern)
-	}
-}
-
 fn build_default_matcher<P: AsRef<str>>(
 	builder: &RegexMatcherBuilder,
 	patterns: &[P],
@@ -716,11 +670,28 @@ fn build_matcher(
 	}
 
 	if mode == MatchMode::Default {
-		let normalized: Vec<_> = patterns
+		// BRE is a distinct dialect, not ERE with different escaping: `\+` is
+		// the operator and a bare `+` is a literal. Translating through the
+		// shared BRE module is what makes `grep 'fo+'` mean "fo+" and
+		// `grep '^+'` mean a leading plus, as GNU and BSD grep both do.
+		// Back-references are left untouched: `grep-regex` cannot compile
+		// them, so `build_default_matcher` falls back to a literal match
+		// exactly as it did before.
+		let translated: Vec<String> = patterns
 			.iter()
-			.map(|pattern| normalize_basic_alternation(pattern))
+			.map(|pattern| bre::bre_to_ere(pattern, bre::Backrefs::Unsupported))
 			.collect();
-		return build_default_matcher(&builder, &normalized).map(CompiledMatcher::Rust);
+		return build_default_matcher(&builder, &translated).map(CompiledMatcher::Rust);
+	}
+
+	// `regex` accepts `^+` and compiles it as `(?:^)+`, which matches at every
+	// line start. GNU and BSD grep both reject the pattern, so returning every
+	// line with exit 0 would be a wrong answer reported as success.
+	if let Some(bad) = patterns
+		.iter()
+		.find(|pattern| bre::ere_repetition_operand_missing(pattern))
+	{
+		return Err(format!("repetition-operator operand invalid: {bad}"));
 	}
 
 	builder
@@ -1748,17 +1719,25 @@ mod tests {
 	}
 
 	#[test]
-	fn basic_mode_falls_back_per_pattern_but_extended_mode_is_strict() {
+	fn basic_mode_is_posix_bre_and_extended_mode_is_strict() {
 		let (code, out, err) = run(&["-A", "1", "fail)"], "ok\n(1 fail)\nnext\n");
 		assert_eq!(code, 0, "{err}");
 		assert_eq!(out, "(1 fail)\nnext\n");
 		let (code, _, err) = run(&["-E", "fail)"], "fail)\n");
 		assert_eq!(code, 2);
 		assert!(err.contains("grep:"));
+		// In a BRE a bare `+` is a LITERAL, so `fo+` does not match `foooo`.
+		// This assertion previously expected `foooo`, which is ERE
+		// behaviour; `/usr/bin/grep -e 'fo+' -e 'bar)' -h` on this input
+		// prints `bar)` alone on both GNU and BSD grep. Use `fo\+` for the
+		// quantifier.
 		let (code, out, err) =
 			run(&["-e", "fo+", "-e", "bar)", "-h"], "foooo\nbar)\nbaz\n");
 		assert_eq!(code, 0, "{err}");
-		assert_eq!(out, "foooo\nbar)\n");
+		assert_eq!(out, "bar)\n");
+		let (code, out, err) = run(&["-e", r"fo\+", "-h"], "foooo\nbar)\nbaz\n");
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "foooo\n");
 	}
 
 	#[test]
@@ -1780,6 +1759,35 @@ mod tests {
 		assert_eq!(code, 0);
 		assert!(err.is_empty());
 		assert!(out.contains("grep") && out.contains("pi-uu-grep"));
+	}
+
+	#[test]
+	fn repetition_with_no_operand_is_literal_in_bre_and_invalid_in_ere() {
+		// Measured against GNU/BSD grep 2.6.0 on the same fixture. Before
+		// this, every BRE row below returned 5 - the whole file - because
+		// `^+` reached the engine as an operator and compiled to `(?:^)+`,
+		// matching the empty string at every line start.
+		let input = "alpha\n+added\n-removed\n context\n+another\n";
+		for (pattern, want) in
+			[("^+", "2\n"), ("^*", "0\n"), ("^?", "0\n"), ("*x", "0\n"), ("^\\+", "2\n")]
+		{
+			let (code, out, err) = run(&["-c", pattern], input);
+			assert!(code == 0 || code == 1, "{pattern}: {err}");
+			assert_eq!(out, want, "pattern {pattern}");
+		}
+
+		// The forms that already agreed must not regress.
+		for (pattern, want) in [("+added", "1\n"), ("[+]", "2\n"), ("a\\+", "3\n")] {
+			let (code, out, err) = run(&["-c", pattern], input);
+			assert_eq!(code, 0, "{pattern}: {err}");
+			assert_eq!(out, want, "pattern {pattern}");
+		}
+
+		// ERE rejects it outright, as the real grep does, rather than
+		// silently returning every line.
+		let (code, _, err) = run(&["-Ec", "^+"], input);
+		assert_eq!(code, 2, "-E '^+' must be rejected");
+		assert!(err.contains("grep:"), "{err}");
 	}
 }
 

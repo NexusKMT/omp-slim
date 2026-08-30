@@ -1115,102 +1115,7 @@ fn parse_command_ending(
 	Ok(())
 }
 
-/// Convert a primitive BRE pattern to a safe ERE-compatible pattern string.
-/// - Replaces `\(`, `\)`, `\?`, `\+`, `\|`, `\{` and `\}` with `(`, `)`, `?`,
-///   `+`, `|`, `{` and `}`.
-/// - Puts single-digit back-references in non-capturing groups..
-/// - Escapes ERE-only metacharacters: `+ ? { } | ( )`.
-/// - Leaves all other characters as-is.
-fn bre_to_ere(pattern: &str) -> String {
-	let mut result = String::with_capacity(pattern.len());
-	let mut chars = pattern.chars().peekable();
-
-	let mut at_beginning = true;
-	let mut previous: Option<char> = None;
-	while let Some(c) = chars.next() {
-		if c == '\\' {
-			match chars.peek() {
-				Some('(') => {
-					chars.next();
-					result.push('('); // Group start
-				},
-				Some(')') => {
-					chars.next();
-					result.push(')'); // Group end
-				},
-				Some('?') => {
-					chars.next();
-					result.push('?'); // Quantifier 0 or 1
-				},
-				Some('+') => {
-					chars.next();
-					result.push('+'); // Quantifier 1 or more
-				},
-				Some('|') => {
-					chars.next();
-					result.push('|'); // Alternation operator
-				},
-				Some('{') => {
-					chars.next();
-					result.push('{'); // Brace quantifier start
-				},
-				Some('}') => {
-					chars.next();
-					result.push('}'); // Brace quantifier end
-				},
-				Some(v) if v.is_ascii_digit() => {
-					// Back-reference.  In sed BREs these are single-digit
-					// (\1-\9) whereas fancy_regex supports multi-digit
-					// back-references. Put them in a non-capturing group
-					// to avoid having the number extend beyond the single
-					// digit. Example: In sed \11 matches group 1 followed
-					// by '1', not group 11.
-					result.push_str(&format!(r"(?:\{v})"));
-					chars.next();
-				},
-				Some(&next) => {
-					// Preserve other escaped characters.
-					chars.next();
-					result.push('\\');
-					result.push(next);
-				},
-				None => {
-					// Trailing backslash; keep it.
-					result.push('\\');
-				},
-			}
-		} else {
-			match c {
-				'+' | '?' | '{' | '}' | '|' | '(' | ')' => {
-					// Escape unsupported ERE metacharacters.
-					result.push('\\');
-					result.push(c);
-				},
-				'^' if !at_beginning && previous != Some('[') => {
-					// In BREs ^ has special meaning at the beginning
-					// and as bracket negation.  This heuristic escapes
-					// all other uses, which per POSIX are valid in EREs.
-					// "the ERE "a^b" is valid, but can never match because
-					// the 'a' prevents the expression "^b" from matching
-					// starting at the first character."
-					// POSIX 9.4.9 ERE Expression Anchoring
-					result.push('\\');
-					result.push(c);
-				},
-				'$' if chars.peek().is_some() => {
-					// Similarly for $ appearing not at the end.
-					result.push('\\');
-					result.push(c);
-				},
-				_ => result.push(c),
-			}
-		}
-		at_beginning = false;
-		previous = Some(c);
-	}
-
-	result
-}
+// The BRE→ERE translation lives in `crate::bre`, shared with `grep`.
 
 /// Compile the provided regular expression string into a corresponding engine.
 /// An empty pattern results in None, which means that the last RE employed
@@ -1231,7 +1136,7 @@ fn compile_regex(
 	let pattern = if context.regex_extended {
 		pattern
 	} else {
-		&bre_to_ere(pattern)
+		&crate::bre::bre_to_ere(pattern, crate::bre::Backrefs::Supported)
 	};
 
 	let mut modifiers = String::new();
@@ -2949,59 +2854,7 @@ mod tests {
 		assert!(err.to_string().contains("invalid reference \\2"));
 	}
 
-	// bre_to_ere
-	#[test]
-	fn test_bre_group_translation() {
-		assert_eq!(bre_to_ere(r"\(a\?b\+c\|\)"), "(a?b+c|)");
-		assert_eq!(bre_to_ere(r"a\(b\)c"), "a(b)c");
-	}
-
-	#[test]
-	fn test_bre_brace_quantifier_translation() {
-		assert_eq!(bre_to_ere(r"\{1,4\}"), "{1,4}");
-	}
-
-	#[test]
-	fn test_ere_metacharacters_escaped() {
-		assert_eq!(bre_to_ere(r"a+b?c{1}|(d)"), r"a\+b\?c\{1\}\|\(d\)");
-	}
-
-	#[test]
-	fn test_literal_backslashes_preserved() {
-		assert_eq!(bre_to_ere(r"foo\\bar"), r"foo\\bar");
-		assert_eq!(bre_to_ere(r"\."), r"\.");
-	}
-
-	#[test]
-	fn test_character_classes_unchanged() {
-		assert_eq!(bre_to_ere(r"[a-z]"), "[a-z]");
-		assert_eq!(bre_to_ere(r"[^0-9]"), "[^0-9]");
-	}
-
-	#[test]
-	fn test_anchors_and_dot_and_star() {
-		assert_eq!(bre_to_ere(r"^a.*b$"), "^a.*b$");
-	}
-
-	#[test]
-	fn test_trailing_backslash_is_preserved() {
-		assert_eq!(bre_to_ere(r"abc\"), r"abc\");
-	}
-
-	#[test]
-	fn test_caret_escaped_in_middle() {
-		assert_eq!(bre_to_ere(r"^a^[^x]c"), r"^a\^[^x]c");
-	}
-
-	#[test]
-	fn test_dollar_escaped_in_middle() {
-		assert_eq!(bre_to_ere(r"a$c$"), r"a\$c$");
-	}
-
-	#[test]
-	fn test_bre_back_reference() {
-		assert_eq!(bre_to_ere(r"\(.\)\1\(.\)\2"), r"(.)(?:\1)(.)(?:\2)");
-	}
+	// The BRE→ERE translation and its tests live in `crate::bre`.
 
 	// patch_block_endings
 
