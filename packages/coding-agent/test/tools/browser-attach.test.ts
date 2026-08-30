@@ -56,6 +56,36 @@ function fakeTarget(type: string, page: Page | null): Target {
 	} as unknown as Target;
 }
 
+interface DisposableExecutable {
+	path: string;
+	pid: number;
+	close(): Promise<void>;
+}
+
+async function spawnDisposableExecutable(): Promise<DisposableExecutable> {
+	const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-browser-app-path-"));
+	const executable = path.join(tempDir, path.basename(process.execPath));
+	await Bun.write(executable, Bun.file(process.execPath));
+	if (process.platform !== "win32") await fs.chmod(executable, 0o755);
+	const child = Bun.spawn([executable, "--eval", 'process.stdout.write("ready\\n"); await Bun.stdin.text()'], {
+		stdin: "pipe",
+		stdout: "pipe",
+		stderr: "ignore",
+	});
+	const readiness = child.stdout.getReader();
+	await readiness.read();
+	readiness.releaseLock();
+	return {
+		path: executable,
+		pid: child.pid,
+		async close() {
+			child.kill();
+			await child.exited;
+			await fs.rm(tempDir, { recursive: true, force: true });
+		},
+	};
+}
+
 describe("pickElectronTarget", () => {
 	beforeAll(async () => {
 		if (!CHROMIUM_AVAILABLE) return;
@@ -139,31 +169,60 @@ describe("pickElectronTarget", () => {
 	});
 
 	test("refuses to replace a running same-executable process", async () => {
-		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-browser-app-path-"));
-		const executable = path.join(tempDir, path.basename(process.execPath));
-		await Bun.write(executable, Bun.file(process.execPath));
-		if (process.platform !== "win32") await fs.chmod(executable, 0o755);
-		const existing = Bun.spawn([executable, "--eval", 'process.stdout.write("ready\\n"); await Bun.stdin.text()'], {
-			stdin: "pipe",
-			stdout: "pipe",
-			stderr: "ignore",
-		});
-		const readiness = existing.stdout.getReader();
-		await readiness.read();
-		readiness.releaseLock();
-
+		const existing = await spawnDisposableExecutable();
 		try {
 			await expect(
 				acquireBrowser(
-					{ kind: "spawned", path: executable },
+					{ kind: "spawned", path: existing.path },
 					{ cwd: process.cwd(), signal: AbortSignal.timeout(2_000) },
 				),
 			).rejects.toThrow("already running without a reusable CDP endpoint");
 			expect(Process.fromPid(existing.pid)?.status()).toBe(ProcessStatus.Running);
 		} finally {
-			existing.kill();
-			await existing.exited;
-			await fs.rm(tempDir, { recursive: true, force: true });
+			await existing.close();
+		}
+	}, 10_000);
+
+	test("launches an isolated user-data-dir beside a running executable", async () => {
+		const existing = await spawnDisposableExecutable();
+		const { promise: launched, resolve: markLaunched } = Promise.withResolvers<void>();
+		const marker = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch() {
+				markLaunched();
+				return new Response("ok");
+			},
+		});
+		const controller = new AbortController();
+		const childScript = `await fetch(${JSON.stringify(marker.url.href)}); Bun.serve({ port: 0, fetch: () => new Response("ok") });`;
+		const openError = acquireBrowser(
+			{ kind: "spawned", path: existing.path },
+			{
+				cwd: process.cwd(),
+				appArgs: ["--eval", childScript, `--user-data-dir=${path.join(path.dirname(existing.path), "profile")}`],
+				signal: controller.signal,
+			},
+		).then(
+			() => new Error("Expected isolated app acquisition to remain pending"),
+			error => (error instanceof Error ? error : new Error(String(error))),
+		);
+
+		try {
+			await Promise.race([
+				launched,
+				openError.then(error => {
+					throw error;
+				}),
+			]);
+			expect(Process.fromPid(existing.pid)?.status()).toBe(ProcessStatus.Running);
+			controller.abort();
+			expect((await openError).name).toBe("ToolAbortError");
+		} finally {
+			controller.abort();
+			await openError;
+			await marker.stop(true);
+			await existing.close();
 		}
 	}, 10_000);
 

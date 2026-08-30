@@ -150,11 +150,12 @@ async function probeCdpAt(port: number, signal?: AbortSignal): Promise<boolean> 
 
 /**
  * Return a reusable CDP endpoint for `exe`, or null when no instance is
- * running. Refuse to replace an occupied instance that does not expose CDP.
+ * running. Refuse to replace an occupied instance unless the caller can
+ * launch an isolated profile.
  */
 export async function findReusableCdp(
 	exe: string,
-	signal?: AbortSignal,
+	options: { signal?: AbortSignal; allowOccupied?: boolean } = {},
 ): Promise<{ cdpUrl: string; pid: number } | null> {
 	const candidates = Process.fromPath(exe).filter(process => process.status() === ProcessStatus.Running);
 	for (const process of candidates) {
@@ -166,11 +167,11 @@ export async function findReusableCdp(
 		}
 		const port = findCdpPortInArgs(args);
 		if (port === null) continue;
-		if (await probeCdpAt(port, signal)) {
+		if (await probeCdpAt(port, options.signal)) {
 			return { cdpUrl: `http://127.0.0.1:${port}`, pid: process.pid };
 		}
 	}
-	if (candidates.length > 0) {
+	if (!options.allowOccupied && candidates.length > 0) {
 		const name = path.basename(exe);
 		throw new ToolError(
 			`Cannot launch ${name} because it is already running without a reusable CDP endpoint. Close ${name}, relaunch it with --remote-debugging-port, or pass app.cdp_url for an existing endpoint.`,
