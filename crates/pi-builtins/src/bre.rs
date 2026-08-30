@@ -18,6 +18,23 @@ pub(crate) enum Backrefs {
 	Unsupported,
 }
 
+/// A pattern the BRE dialect cannot express.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum BreError {
+	/// A repetition operator with nothing to repeat, where the tools error
+	/// rather than treating the character as a literal.
+	RepetitionOperandMissing,
+}
+
+impl BreError {
+	/// The message GNU and BSD grep both use for this condition.
+	pub(crate) fn message(self) -> &'static str {
+		match self {
+			Self::RepetitionOperandMissing => "repetition-operator operand invalid",
+		}
+	}
+}
+
 /// Convert a primitive BRE pattern to a safe ERE-compatible pattern string.
 /// - Replaces `\(`, `\)`, `\?`, `\+`, `\|`, `\{` and `\}` with `(`, `)`, `?`,
 ///   `+`, `|`, `{` and `}`.
@@ -31,14 +48,15 @@ pub(crate) enum Backrefs {
 /// This matters because the target engines accept `^+` and compile it as
 /// `(?:^)+`, which matches the empty string at every line start - so a pattern
 /// meant to find a few lines silently matches all of them.
-pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> String {
+pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> Result<String, BreError> {
 	let mut result = String::with_capacity(pattern.len());
 	let mut chars = pattern.chars().peekable();
 
-	let mut at_beginning = true;
 	let mut previous: Option<char> = None;
 	// Whether something repeatable precedes the current position. False at the
-	// start of the pattern and directly after `^`, `\(` or `\|`.
+	// start of the pattern and directly after `\(` or `\|`, which are exactly
+	// the positions where a repetition character is not an operator and where
+	// `^` IS an anchor. One piece of state answers both questions.
 	let mut has_atom = false;
 	while let Some(c) = chars.next() {
 		if c == '\\' {
@@ -78,12 +96,21 @@ pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> String {
 				},
 				Some('{') => {
 					chars.next();
-					// Emitted as an operator even with no operand, so the
-					// engine REJECTS the pattern. That is what `grep` and
-					// `sed` both do: measured, `\{1,4\}` with nothing to
-					// repeat is "repetition-operator operand invalid", not
-					// a literal brace. Degrading it to a literal here would
-					// replace a correct error with a silent wrong match.
+					// A brace quantifier with nothing to repeat is an ERROR in
+					// both tools, not a literal brace: measured,
+					// `grep '\{1,4\}'` and `sed 's/\{1,3\}/X/'` each report
+					// "repetition-operator operand invalid".
+					//
+					// It cannot simply be emitted as an operator and left to
+					// the engine. `^\{1,4\}` becomes `^{1,4}`, which BOTH
+					// engines accept as `(?:^){1,4}` - matching the empty
+					// string at every line start, so the pattern silently
+					// selects every line with a success exit status. That is
+					// the same fail-open this module exists to close, and it
+					// has to be refused here because no later layer sees it.
+					if !has_atom {
+						return Err(BreError::RepetitionOperandMissing);
+					}
 					result.push('{'); // Brace quantifier start
 				},
 				Some('}') => {
@@ -138,17 +165,22 @@ pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> String {
 						has_atom = true;
 					}
 				},
-				'^' if !at_beginning && previous != Some('[') => {
-					// In BREs ^ has special meaning at the beginning
-					// and as bracket negation.  This heuristic escapes
-					// all other uses, which per POSIX are valid in EREs.
+				'^' if has_atom && previous != Some('[') => {
+					// In a BRE `^` is an ANCHOR at the start of the pattern and
+					// directly after `\(` or `\|`, and a literal anywhere else.
+					// Those are exactly the positions where no atom precedes,
+					// so `has_atom` already distinguishes them - measured,
+					// `grep '\(^alpha\)'` matches on GNU and BSD grep, and
+					// keying this off `at_beginning` instead escaped the
+					// anchor and matched nothing.
+					//
+					// Escaping the literal uses is valid in an ERE:
 					// "the ERE "a^b" is valid, but can never match because
 					// the 'a' prevents the expression "^b" from matching
 					// starting at the first character."
 					// POSIX 9.4.9 ERE Expression Anchoring
 					result.push('\\');
 					result.push(c);
-					has_atom = true;
 				},
 				'$' if chars.peek().is_some() => {
 					// Similarly for $ appearing not at the end.
@@ -166,11 +198,10 @@ pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> String {
 				},
 			}
 		}
-		at_beginning = false;
 		previous = Some(c);
 	}
 
-	result
+	Ok(result)
 }
 
 /// True when an ERE contains a repetition operator with nothing to repeat.
@@ -215,11 +246,49 @@ pub(crate) fn ere_repetition_operand_missing(pattern: &str) -> bool {
 			// `^*` has nothing to repeat while `[^x]*` still quantifies the
 			// bracket expression.
 			'^' | '$' => {},
-			'*' | '+' | '?' | '{' if !has_atom => return true,
+			'*' | '+' | '?' if !has_atom => return true,
+			// A `{` is only a repetition operator when it actually opens an
+			// interval. Measured: `grep -E '^{'` matches nothing and reports
+			// no error, because a `{` that cannot be parsed as `{n}`, `{n,}`
+			// or `{n,m}` is an ordinary literal - while `grep -E '{1}'` IS
+			// "repetition-operator operand invalid". Flagging every `{` here
+			// rejected patterns the real tool accepts.
+			'{' => {
+				let rest: String = chars.clone().collect();
+				if opens_interval(&rest) {
+					if !has_atom {
+						return true;
+					}
+				} else {
+					has_atom = true;
+				}
+			},
 			_ => has_atom = true,
 		}
 	}
 	false
+}
+
+/// Whether `rest`, the text just past a `{`, completes a valid interval:
+/// `n}`, `n,}` or `n,m}`. Anything else leaves the `{` a literal.
+#[cfg(feature = "util.grep")]
+fn opens_interval(rest: &str) -> bool {
+	let mut chars = rest.chars().peekable();
+	let mut digits = 0usize;
+	while chars.peek().is_some_and(char::is_ascii_digit) {
+		chars.next();
+		digits += 1;
+	}
+	if digits == 0 {
+		return false;
+	}
+	if chars.peek() == Some(&',') {
+		chars.next();
+		while chars.peek().is_some_and(char::is_ascii_digit) {
+			chars.next();
+		}
+	}
+	chars.next() == Some('}')
 }
 
 #[cfg(test)]
@@ -227,7 +296,11 @@ mod tests {
 	use super::*;
 
 	fn ere(pattern: &str) -> String {
-		bre_to_ere(pattern, Backrefs::Supported)
+		bre_to_ere(pattern, Backrefs::Supported).expect("translatable")
+	}
+
+	fn ere_err(pattern: &str) -> Option<BreError> {
+		bre_to_ere(pattern, Backrefs::Supported).err()
 	}
 
 	// Relocated from `sed`, which owned this translation before `grep` shared it.
@@ -240,7 +313,8 @@ mod tests {
 
 	#[test]
 	fn test_bre_brace_quantifier_translation() {
-		assert_eq!(ere(r"\{1,4\}"), "{1,4}");
+		assert_eq!(ere(r"a\{1,4\}"), "a{1,4}");
+		assert_eq!(ere(r"\(a\)\{1,4\}"), "(a){1,4}");
 	}
 
 	#[test]
@@ -287,7 +361,22 @@ mod tests {
 
 	#[test]
 	fn back_references_pass_through_when_the_engine_does_not() {
-		assert_eq!(bre_to_ere(r"\(a\)\1", Backrefs::Unsupported), r"(a)\1");
+		// THE FALLBACK CONTRACT, stated because `grep` depends on it.
+		//
+		// `grep-regex` cannot compile a back-reference at all. Rather than
+		// inventing a translation, the sequence is emitted unchanged, so the
+		// pattern fails to compile and `grep`'s `build_default_matcher`
+		// escapes it and matches it LITERALLY - which is exactly what
+		// happened before this module existed. The behaviour is unchanged by
+		// the refactor; it is not an endorsement of matching `\1` literally.
+		assert_eq!(
+			bre_to_ere(r"\(a\)\1", Backrefs::Unsupported).expect("translatable"),
+			r"(a)\1"
+		);
+		// The grouping exists only for engines that support them, where a
+		// bare `\11` would otherwise read as group 11 instead of group 1
+		// followed by a literal '1'.
+		assert_eq!(ere(r"\(a\)\11"), r"(a)(?:\1)1");
 	}
 
 	// ── Repetition operators with no preceding atom ──────────────────────────
@@ -312,12 +401,30 @@ mod tests {
 	}
 
 	#[test]
-	fn escaped_brace_quantifier_with_no_operand_stays_an_operator() {
-		// Deliberately NOT a literal. `grep` and `sed` both reject
-		// `\{1,4\}` with nothing to repeat rather than matching a brace, so
-		// the operator is emitted and the engine refuses the pattern.
-		assert_eq!(ere(r"^\{2\}"), r"^{2}");
-		assert_eq!(ere(r"\{1,4\}"), r"{1,4}");
+	fn escaped_brace_quantifier_with_no_operand_is_rejected() {
+		// Neither a literal nor an operator: an ERROR, which is what both
+		// tools do. Emitting the operator and leaving it to the engine was
+		// measurably wrong - `^{2}` and `^{1,4}` COMPILE as `(?:^){2}`, which
+		// matches at every line start, so the pattern silently selected the
+		// whole file with exit 0.
+		assert_eq!(ere_err(r"^\{2\}"), Some(BreError::RepetitionOperandMissing));
+		assert_eq!(ere_err(r"\{1,4\}"), Some(BreError::RepetitionOperandMissing));
+		assert_eq!(ere_err(r"\(\{2\}\)"), Some(BreError::RepetitionOperandMissing));
+		assert_eq!(ere_err(r"a\|\{2\}"), Some(BreError::RepetitionOperandMissing));
+		// With an operand it is an ordinary quantifier.
+		assert_eq!(ere_err(r"a\{2\}"), None);
+	}
+
+	#[test]
+	fn caret_is_an_anchor_after_group_open_and_alternation() {
+		// Measured: `grep '\(^alpha\)'` matches on GNU and BSD grep. Keying
+		// this off "start of pattern" escaped the anchor and matched nothing.
+		assert_eq!(ere(r"\(^a\)"), r"(^a)");
+		assert_eq!(ere(r"a\|^b"), r"a|^b");
+		assert_eq!(ere(r"\(^a\|^b\)"), r"(^a|^b)");
+		// Still a literal where an atom precedes it.
+		assert_eq!(ere(r"a^b"), r"a\^b");
+		assert_eq!(ere(r"^a^"), r"^a\^");
 	}
 
 	#[test]
@@ -383,8 +490,26 @@ mod tests {
 			"$",
 			r"\\",
 			r"a\",      // trailing backslash: not our error to report
+			// A `{` that opens no interval is a LITERAL, not an operator.
+			// Measured: `grep -E '^{'` and `grep -E '{a}'` match nothing and
+			// report no error, while `grep -E '{1}'` IS invalid. Rejecting
+			// every `{` refused patterns the real tool accepts.
+			"^{",
+			"{",
+			"{a}",
+			"{,5}",
+			"^{}",
+			"{1a}",
 		] {
 			assert!(!ere_repetition_operand_missing(pattern), "should accept {pattern}");
+		}
+	}
+
+	#[cfg(feature = "util.grep")]
+	#[test]
+	fn ere_rejects_only_intervals_that_really_open() {
+		for pattern in ["{1}", "^{2}", "{3,}", "{4,5}", "(|{6})"] {
+			assert!(ere_repetition_operand_missing(pattern), "should reject {pattern}");
 		}
 	}
 }

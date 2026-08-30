@@ -1132,12 +1132,20 @@ fn compile_regex(
 		return Ok(None);
 	}
 
-	// Convert basic to extended regular expression if needed.
-	let pattern = if context.regex_extended {
-		pattern
+	// Convert basic to extended regular expression if needed. A BRE the
+	// dialect cannot express is a compilation error, matching real sed:
+	// `sed 's/\{1,3\}/X/'` reports an invalid RE rather than substituting.
+	let translated = if context.regex_extended {
+		None
 	} else {
-		&crate::bre::bre_to_ere(pattern, crate::bre::Backrefs::Supported)
+		Some(
+			crate::bre::bre_to_ere(pattern, crate::bre::Backrefs::Supported).map_err(|e| {
+				compilation_error::<Regex>(lines, line, format!("invalid regex '{pattern}': {}", e.message()))
+					.unwrap_err()
+			})?,
+		)
 	};
+	let pattern = translated.as_deref().unwrap_or(pattern);
 
 	let mut modifiers = String::new();
 	if icase {
@@ -2090,6 +2098,47 @@ mod tests {
 				.is_match(&mut IOChunk::new_from_str("acaa\nccc"))
 				.unwrap()
 		);
+	}
+
+	#[test]
+	fn test_compile_re_basic_leading_plus_is_a_literal() {
+		// REGRESSION: `s/^\+/X/` used to substitute at the start of EVERY
+		// line, because `\+` became `+` unconditionally and `^+` compiles as
+		// `(?:^)+`. Real sed changes only lines that begin with a plus.
+		let (lines, chars) = dummy_providers();
+		let regex = compile_regex(&lines, &chars, r"^\+", &ctx(), false, false)
+			.unwrap()
+			.expect("regex should be present");
+		assert!(regex.is_match(&mut IOChunk::new_from_str("+added")).unwrap());
+		assert!(!regex.is_match(&mut IOChunk::new_from_str("alpha")).unwrap());
+		assert!(!regex.is_match(&mut IOChunk::new_from_str(" context")).unwrap());
+	}
+
+	#[test]
+	fn test_compile_re_basic_no_operand_brace_is_rejected() {
+		// Real sed refuses this rather than substituting: emitting the
+		// operator would give `{1,3}` or, after an anchor, `^{1,3}` - which
+		// fancy-regex accepts and matches at every line start.
+		let (lines, chars) = dummy_providers();
+		for pattern in [r"\{1,3\}", r"^\{1,3\}"] {
+			let err = compile_regex(&lines, &chars, pattern, &ctx(), false, false)
+				.expect_err("a brace quantifier with no operand must not compile");
+			assert!(
+				err.to_string().contains("repetition-operator operand invalid"),
+				"{pattern}: {err}"
+			);
+		}
+	}
+
+	#[test]
+	fn test_compile_re_basic_caret_is_an_anchor_inside_a_group() {
+		// `\(^a\)` anchors in a BRE; escaping the caret matched nothing.
+		let (lines, chars) = dummy_providers();
+		let regex = compile_regex(&lines, &chars, r"\(^alpha\)", &ctx(), false, false)
+			.unwrap()
+			.expect("regex should be present");
+		assert!(regex.is_match(&mut IOChunk::new_from_str("alpha")).unwrap());
+		assert!(!regex.is_match(&mut IOChunk::new_from_str("xalpha")).unwrap());
 	}
 
 	#[test]

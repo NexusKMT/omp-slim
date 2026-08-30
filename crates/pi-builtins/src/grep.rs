@@ -680,7 +680,8 @@ fn build_matcher(
 		let translated: Vec<String> = patterns
 			.iter()
 			.map(|pattern| bre::bre_to_ere(pattern, bre::Backrefs::Unsupported))
-			.collect();
+			.collect::<Result<_, _>>()
+			.map_err(|e: bre::BreError| e.message().to_owned())?;
 		return build_default_matcher(&builder, &translated).map(CompiledMatcher::Rust);
 	}
 
