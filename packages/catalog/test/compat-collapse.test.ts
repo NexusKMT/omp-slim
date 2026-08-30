@@ -4,11 +4,22 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import {
+	collapseBuiltVariants,
+	collapseVariants,
+	deriveThinkingPairFamilies,
+	getVariantAliasSources,
+	isCollapsedVariantSpec,
+	resolveBareVariantSelector,
+	resolveVariantSelector,
+	reviewedCollapseTable,
+	type VariantCollapseTable,
+} from "@oh-my-pi/pi-catalog/compat/collapse";
+import { stripThinkingVariantSuffix } from "@oh-my-pi/pi-catalog/compat/taxonomy";
+import {
 	ANTIGRAVITY_PRIMARY_ENDPOINT,
 	fetchAntigravityDiscoveryModels,
 } from "@oh-my-pi/pi-catalog/discovery/antigravity";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
-import { stripThinkingVariantToken } from "@oh-my-pi/pi-catalog/identity/family";
 import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
 import {
 	defaultSupportedEffort,
@@ -18,20 +29,17 @@ import {
 import { getBundledModel, getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { googleGeminiCliModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/google";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
-import {
-	ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
-	CURSOR_VARIANT_COLLAPSE_TABLE,
-	collapseBuiltModelVariants,
-	collapseEffortVariants,
-	collapseEffortVariantsAcrossProviders,
-	DEVIN_VARIANT_COLLAPSE_TABLE,
-	deriveThinkingPairFamilies,
-	GEMINI_CLI_VARIANT_COLLAPSE_TABLE,
-	getVariantAliasSources,
-	isVariantCollapsedSpec,
-	resolveBareVariantAlias,
-	resolveVariantAlias,
-} from "@oh-my-pi/pi-catalog/variant-collapse";
+
+function requireReviewedTable(provider: string): VariantCollapseTable {
+	const table = reviewedCollapseTable(provider);
+	if (table === undefined) throw new Error(`missing reviewed collapse table for ${provider}`);
+	return table;
+}
+
+const antigravityTable = requireReviewedTable("google-antigravity");
+const cursorTable = requireReviewedTable("cursor");
+const devinTable = requireReviewedTable("devin");
+const geminiCliTable = requireReviewedTable("google-gemini-cli");
 
 function memberSpec(
 	id: string,
@@ -114,12 +122,11 @@ const FLASH_TRIPLET = () => [
 	memberSpec("gemini-3-flash-agent", { input: ["text"] }),
 ];
 
-describe("collapseEffortVariants", () => {
+describe("collapseVariants with a reviewed table", () => {
 	it("collapses the 3.5-flash triplet into one routed logical spec", () => {
-		const out = collapseEffortVariants(
-			[...FLASH_TRIPLET(), memberSpec("gemini-2.5-flash-lite")],
-			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
-		);
+		const out = collapseVariants([...FLASH_TRIPLET(), memberSpec("gemini-2.5-flash-lite")], {
+			table: antigravityTable,
+		});
 
 		expect(out.map(m => m.id).sort()).toEqual(["gemini-2.5-flash-lite", "gemini-3.5-flash"]);
 		// Non-family specs pass through by reference.
@@ -149,14 +156,14 @@ describe("collapseEffortVariants", () => {
 	});
 
 	it("collapses Gemini 3.6 Flash tiers into one routed logical spec", () => {
-		const out = collapseEffortVariants(
+		const out = collapseVariants(
 			[
 				memberSpec("gemini-3.6-flash-high"),
 				memberSpec("gemini-3.6-flash-low"),
 				memberSpec("gemini-3.6-flash-medium"),
 				memberSpec("gemini-3.6-flash-tiered"),
 			],
-			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
+			{ table: antigravityTable },
 		);
 
 		expect(out).toHaveLength(1);
@@ -184,14 +191,14 @@ describe("collapseEffortVariants", () => {
 	});
 
 	it("folds the gemini-3.7-flash-tiered alias into gemini-3.7-flash so :minimal sends LOW not MINIMAL (#10016)", () => {
-		const out = collapseEffortVariants(
+		const out = collapseVariants(
 			[
 				memberSpec("gemini-3.7-flash-high"),
 				memberSpec("gemini-3.7-flash-low"),
 				memberSpec("gemini-3.7-flash-medium"),
 				memberSpec("gemini-3.7-flash-tiered"),
 			],
-			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
+			{ table: antigravityTable },
 		);
 
 		expect(out).toHaveLength(1);
@@ -239,7 +246,7 @@ describe("collapseEffortVariants", () => {
 			},
 		});
 
-		const out = collapseEffortVariants([collapsedFlash, staleTiered], ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
+		const out = collapseVariants([collapsedFlash, staleTiered], { table: antigravityTable });
 		expect(out.map(m => m.id)).toEqual(["gemini-3.7-flash"]);
 		expect(out[0]?.thinking?.effortRouting?.minimal).toBe("gemini-3.7-flash-low");
 	});
@@ -254,10 +261,7 @@ describe("collapseEffortVariants", () => {
 	});
 
 	it("drops routes whose target member is absent", () => {
-		const out = collapseEffortVariants(
-			[memberSpec("gemini-3.5-flash-extra-low")],
-			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
-		);
+		const out = collapseVariants([memberSpec("gemini-3.5-flash-extra-low")], { table: antigravityTable });
 
 		expect(out).toHaveLength(1);
 		expect(out[0]?.id).toBe("gemini-3.5-flash");
@@ -272,12 +276,12 @@ describe("collapseEffortVariants", () => {
 	});
 
 	it("routes both bare and -thinking sonnet 4.6 ids to the bare wire id (backend has no -thinking twin)", () => {
-		const out = collapseEffortVariants(
+		const out = collapseVariants(
 			[
 				memberSpec("claude-sonnet-4-6", { maxTokens: 64_000 }),
 				memberSpec("claude-sonnet-4-6-thinking", { maxTokens: 64_000 }),
 			],
-			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
+			{ table: antigravityTable },
 		);
 
 		expect(out).toHaveLength(1);
@@ -296,10 +300,9 @@ describe("collapseEffortVariants", () => {
 	});
 
 	it("collapses a bare-only sonnet 4.6 discovery to the bare wire id", () => {
-		const out = collapseEffortVariants(
-			[memberSpec("claude-sonnet-4-6", { maxTokens: 64_000 })],
-			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
-		);
+		const out = collapseVariants([memberSpec("claude-sonnet-4-6", { maxTokens: 64_000 })], {
+			table: antigravityTable,
+		});
 
 		expect(out).toHaveLength(1);
 		const spec = out[0];
@@ -315,7 +318,7 @@ describe("collapseEffortVariants", () => {
 	});
 
 	it("routes every opus 4.6 request to the -thinking wire id (the only one the backend exposes)", () => {
-		const out = collapseEffortVariants([memberSpec("claude-opus-4-6-thinking")], ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
+		const out = collapseVariants([memberSpec("claude-opus-4-6-thinking")], { table: antigravityTable });
 
 		expect(out).toHaveLength(1);
 		const spec = out[0];
@@ -351,7 +354,7 @@ describe("collapseEffortVariants", () => {
 				},
 			},
 		};
-		const out = collapseEffortVariants([stale], ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
+		const out = collapseVariants([stale], { table: antigravityTable });
 
 		expect(out).toHaveLength(1);
 		const spec = out[0];
@@ -387,7 +390,7 @@ describe("collapseEffortVariants", () => {
 				},
 			},
 		};
-		const out = collapseEffortVariants([stale], ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
+		const out = collapseVariants([stale], { table: antigravityTable });
 
 		expect(out).toHaveLength(1);
 		const spec = out[0];
@@ -407,10 +410,9 @@ describe("collapseEffortVariants", () => {
 	});
 
 	it("renames single-member families through requestModelId with no routing", () => {
-		const out = collapseEffortVariants(
-			[memberSpec("gpt-oss-120b-medium", { input: ["text"] })],
-			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
-		);
+		const out = collapseVariants([memberSpec("gpt-oss-120b-medium", { input: ["text"] })], {
+			table: antigravityTable,
+		});
 
 		expect(out[0]?.id).toBe("gpt-oss-120b");
 		expect(out[0]?.requestModelId).toBe("gpt-oss-120b-medium");
@@ -419,18 +421,18 @@ describe("collapseEffortVariants", () => {
 	});
 
 	it("is idempotent and dedupes mixed raw+collapsed input", () => {
-		const once = collapseEffortVariants(FLASH_TRIPLET(), ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
-		expect(collapseEffortVariants(once, ANTIGRAVITY_VARIANT_COLLAPSE_TABLE)).toEqual(once);
+		const once = collapseVariants(FLASH_TRIPLET(), { table: antigravityTable });
+		expect(collapseVariants(once, { table: antigravityTable })).toEqual(once);
 
 		// Stale raw members beside the live collapsed entry dedupe away; the
 		// collapsed entry wins verbatim.
 		const mixed = [...once, memberSpec("gemini-3.5-flash-low"), memberSpec("gemini-3-flash-agent")];
-		const deduped = collapseEffortVariants(mixed, ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
+		const deduped = collapseVariants(mixed, { table: antigravityTable });
 		expect(deduped).toEqual(once);
 	});
 
 	it("keeps gemini-cli flash on the level transport with the original routing", () => {
-		const out = collapseEffortVariants(FLASH_TRIPLET(), GEMINI_CLI_VARIANT_COLLAPSE_TABLE);
+		const out = collapseVariants(FLASH_TRIPLET(), { table: geminiCliTable });
 		const flash = out.find(m => m.id === "gemini-3.5-flash");
 		expect(flash?.thinking?.mode).toBe("google-level");
 		expect(flash?.thinking?.effortBudgets).toBeUndefined();
@@ -444,10 +446,9 @@ describe("collapseEffortVariants", () => {
 	});
 
 	it("collapses the 3.1-pro family on the budget transport with the +1 budgets", () => {
-		const out = collapseEffortVariants(
-			[memberSpec("gemini-3.1-pro-low"), memberSpec("gemini-pro-agent")],
-			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
-		);
+		const out = collapseVariants([memberSpec("gemini-3.1-pro-low"), memberSpec("gemini-pro-agent")], {
+			table: antigravityTable,
+		});
 		const pro = out.find(m => m.id === "gemini-3.1-pro");
 		expect(pro?.thinking?.mode).toBe("budget");
 		expect(pro?.thinking?.effortBudgets).toEqual({ low: 1001, high: 10001 });
@@ -467,7 +468,7 @@ describe("collapseEffortVariants", () => {
 			reasoning: true,
 			thinking: { mode: "google-level", efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High] },
 		};
-		const out = collapseEffortVariants([stale], ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
+		const out = collapseVariants([stale], { table: antigravityTable });
 		const flash = out.find(m => m.id === "gemini-3-flash");
 		expect(flash).toBeDefined();
 		expect(flash?.thinking?.mode).toBe("budget");
@@ -485,14 +486,11 @@ describe("collapseEffortVariants", () => {
 			reasoning: true,
 			thinking: { mode: "google-level", efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High] },
 		};
-		const canonical = collapseEffortVariants(FLASH_TRIPLET(), ANTIGRAVITY_VARIANT_COLLAPSE_TABLE).find(
+		const canonical = collapseVariants(FLASH_TRIPLET(), { table: antigravityTable }).find(
 			m => m.id === "gemini-3.5-flash",
 		);
 		expect(canonical).toBeDefined();
-		const out = collapseEffortVariants(
-			[stale, canonical as ModelSpec<"google-gemini-cli">],
-			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
-		);
+		const out = collapseVariants([stale, canonical as ModelSpec<"google-gemini-cli">], { table: antigravityTable });
 		expect(out.map(m => m.id).sort()).toEqual(["gemini-3-flash", "gemini-3.5-flash"]);
 		expect(out.find(m => m.id === "gemini-3-flash")?.thinking?.mode).toBe("budget");
 		expect(out.find(m => m.id === "gemini-3.5-flash")?.thinking?.mode).toBe("budget");
@@ -512,31 +510,34 @@ describe("collapseEffortVariants", () => {
 				suppressWhenOff: true,
 			},
 		};
-		const out = collapseEffortVariants([stale], ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
+		const out = collapseVariants([stale], { table: antigravityTable });
 		const pro = out.find(m => m.id === "gemini-3.1-pro");
 		expect(pro?.thinking?.mode).toBe("budget");
 		expect(pro?.thinking?.effortBudgets).toEqual({ low: 1001, high: 10001 });
 	});
 });
 
-describe("stripThinkingVariantToken", () => {
+describe("stripThinkingVariantSuffix", () => {
 	it("strips trailing and infix tokens case-insensitively", () => {
-		expect(stripThinkingVariantToken("kimi-k2-thinking")).toBe("kimi-k2");
-		expect(stripThinkingVariantToken("hf:moonshotai/Kimi-K2-Thinking")).toBe("hf:moonshotai/Kimi-K2");
-		expect(stripThinkingVariantToken("xiaomi/mimo-v2-flash-thinking-original")).toBe("xiaomi/mimo-v2-flash-original");
-		expect(stripThinkingVariantToken("[Kiro] claude-opus-4-8-thinking [X]")).toBe("[Kiro] claude-opus-4-8 [X]");
-		// Reasoning-token spellings pair the same way.
-		expect(stripThinkingVariantToken("x-ai/grok-4.1-fast-reasoning")).toBe("x-ai/grok-4.1-fast");
-		expect(stripThinkingVariantToken("claude-3-7-sonnet-reasoner")).toBe("claude-3-7-sonnet");
+		expect(stripThinkingVariantSuffix("kimi-k2-thinking")).toBe("kimi-k2");
+		expect(stripThinkingVariantSuffix("hf:moonshotai/Kimi-K2-Thinking")).toBe("hf:moonshotai/Kimi-K2");
+		expect(stripThinkingVariantSuffix("xiaomi/mimo-v2-flash-thinking-original")).toBe(
+			"xiaomi/mimo-v2-flash-original",
+		);
+		expect(stripThinkingVariantSuffix("[Kiro] claude-opus-4-8-thinking [X]")).toBe("[Kiro] claude-opus-4-8 [X]");
+		// Infix `reasoning` pairs live siblings (perplexity/sonar-reasoning-pro
+		// beside sonar-pro) and dated `-thinking-2507` forms keep pairing.
+		expect(stripThinkingVariantSuffix("perplexity/sonar-reasoning-pro")).toBe("perplexity/sonar-pro");
+		expect(stripThinkingVariantSuffix("qwen3-235b-a22b-thinking-2507")).toBe("qwen3-235b-a22b-2507");
 	});
 
 	it("ignores ids without a token and negated tokens", () => {
-		expect(stripThinkingVariantToken("kimi-k2")).toBeUndefined();
+		expect(stripThinkingVariantSuffix("kimi-k2")).toBeUndefined();
 		// OpenRouter route variants use `:thinking` — a different mechanism.
-		expect(stripThinkingVariantToken("anthropic/claude-3.7-sonnet:thinking")).toBeUndefined();
-		expect(stripThinkingVariantToken("thinkingcap-1")).toBeUndefined();
+		expect(stripThinkingVariantSuffix("anthropic/claude-3.7-sonnet:thinking")).toBeUndefined();
+		expect(stripThinkingVariantSuffix("thinkingcap-1")).toBeUndefined();
 		// `non-thinking` names the NON-thinking SKU.
-		expect(stripThinkingVariantToken("deepseek-non-thinking-v3.2-exp")).toBeUndefined();
+		expect(stripThinkingVariantSuffix("deepseek-non-thinking-v3.2-exp")).toBeUndefined();
 	});
 });
 
@@ -556,7 +557,7 @@ describe("deriveThinkingPairFamilies", () => {
 			high: "kimi-k2-thinking",
 		});
 
-		const out = collapseEffortVariants(specs, { families });
+		const out = collapseVariants(specs, { table: { families } });
 		expect(out).toHaveLength(1);
 		expect(out[0]?.id).toBe("kimi-k2");
 		expect(out[0]?.requestModelId).toBeUndefined();
@@ -590,7 +591,7 @@ describe("deriveThinkingPairFamilies", () => {
 		expect(families).toHaveLength(1);
 		expect(families[0]?.thinking?.mode).toBe("effort");
 
-		const out = collapseEffortVariants([base, twin], { families });
+		const out = collapseVariants([base, twin], { table: { families } });
 		expect(out).toHaveLength(1);
 		expect(out[0]?.reasoning).toBe(true);
 		expect(out[0]?.cost.input).toBe(0.09);
@@ -606,7 +607,7 @@ describe("deriveThinkingPairFamilies", () => {
 		expect(families).toHaveLength(1);
 		expect(families[0]?.thinking?.efforts.length).toBeGreaterThan(0);
 
-		const out = collapseEffortVariants([base, twin], { families });
+		const out = collapseVariants([base, twin], { table: { families } });
 		expect(out.map(m => m.id)).toEqual(["TEE/kimi-k2.5"]);
 		// Effort routing to a live thinking id forces reasoning even though
 		// upstream marked neither member.
@@ -649,13 +650,13 @@ describe("deriveThinkingPairFamilies", () => {
 			memberSpec("claude-sonnet-4-6"),
 			memberSpec("claude-sonnet-4-6-thinking", { thinking: PAIR_THINKING }),
 		];
-		expect(deriveThinkingPairFamilies(specs, ANTIGRAVITY_VARIANT_COLLAPSE_TABLE)).toEqual([]);
+		expect(deriveThinkingPairFamilies(specs, antigravityTable)).toEqual([]);
 	});
 });
 
-describe("collapseEffortVariantsAcrossProviders", () => {
+describe("collapseVariants across providers", () => {
 	it("applies hand tables and derived pairs per provider", () => {
-		const out = collapseEffortVariantsAcrossProviders([
+		const out = collapseVariants([
 			memberSpec("gemini-3.5-flash-extra-low"),
 			pairSpec("kimi-k2"),
 			pairSpec("kimi-k2-thinking", { reasoning: true, thinking: PAIR_THINKING }),
@@ -673,7 +674,7 @@ describe("collapseEffortVariantsAcrossProviders", () => {
 
 describe("Devin tier routing", () => {
 	const family = (id: string) => {
-		const found = DEVIN_VARIANT_COLLAPSE_TABLE.families.find(f => f.id === id);
+		const found = devinTable.families.find(f => f.id === id);
 		if (!found) throw new Error(`Devin family ${id} missing`);
 		return found;
 	};
@@ -753,7 +754,7 @@ describe("Devin tier routing", () => {
 			}),
 		);
 
-		const collapsed = collapseEffortVariants(specs, DEVIN_VARIANT_COLLAPSE_TABLE);
+		const collapsed = collapseVariants(specs, { table: devinTable });
 		expect(collapsed.map(model => model.id).sort()).toEqual(["claude-fable-5", "swe-1-7"]);
 
 		const fable = collapsed.find(model => model.id === "claude-fable-5");
@@ -808,7 +809,7 @@ describe("Devin tier routing", () => {
 		expect(haiku.members).toEqual(["MODEL_PRIVATE_11"]);
 		expect(haiku.thinking).toBeUndefined();
 
-		const collapsed = collapseEffortVariants([devinMemberSpec("MODEL_PRIVATE_11")], DEVIN_VARIANT_COLLAPSE_TABLE);
+		const collapsed = collapseVariants([devinMemberSpec("MODEL_PRIVATE_11")], { table: devinTable });
 		const spec = collapsed[0];
 		if (!spec) throw new Error("Haiku did not collapse");
 		expect(spec.id).toBe("claude-haiku-4-5");
@@ -821,7 +822,7 @@ describe("Devin tier routing", () => {
 	});
 
 	it("collapses the added families and defaults the wire UID to the native tier", () => {
-		const collapsed = collapseEffortVariants(
+		const collapsed = collapseVariants(
 			[
 				"gemini-3-7-flash-minimal",
 				"gemini-3-7-flash-low",
@@ -830,7 +831,7 @@ describe("Devin tier routing", () => {
 				"swe-1-7-lightning-medium",
 				"swe-1-7-lightning",
 			].map(id => devinMemberSpec(id)),
-			DEVIN_VARIANT_COLLAPSE_TABLE,
+			{ table: devinTable },
 		);
 		expect(collapsed.map(spec => spec.id).sort()).toEqual(["gemini-3-7-flash", "swe-1-7-lightning"]);
 
@@ -866,9 +867,9 @@ describe("Cursor Grok tier routing (issue #8803)", () => {
 	];
 
 	it("collapses the 14 effort siblings into four logical models, split by the -fast lane", () => {
-		const collapsed = collapseEffortVariants(
+		const collapsed = collapseVariants(
 			RAW_SIBLINGS.map(id => cursorMemberSpec(id)),
-			CURSOR_VARIANT_COLLAPSE_TABLE,
+			{ table: cursorTable },
 		);
 		expect(collapsed.map(model => model.id).sort()).toEqual([
 			"cursor-grok-4.5",
@@ -888,9 +889,9 @@ describe("Cursor Grok tier routing (issue #8803)", () => {
 	});
 
 	it("routes each user effort onto the live sibling wire id per service-tier lane", () => {
-		const collapsed = collapseEffortVariants(
+		const collapsed = collapseVariants(
 			RAW_SIBLINGS.map(id => cursorMemberSpec(id)),
-			CURSOR_VARIANT_COLLAPSE_TABLE,
+			{ table: cursorTable },
 		);
 		const model = (id: string) => {
 			const found = collapsed.find(m => m.id === id);
@@ -907,9 +908,9 @@ describe("Cursor Grok tier routing (issue #8803)", () => {
 	});
 
 	it("defaults the collapsed row to -medium and clamps effort-less to -medium (issue #9478)", () => {
-		const collapsed = collapseEffortVariants(
+		const collapsed = collapseVariants(
 			RAW_SIBLINGS.map(id => cursorMemberSpec(id)),
-			CURSOR_VARIANT_COLLAPSE_TABLE,
+			{ table: cursorTable },
 		);
 		const defaults = [
 			["cursor-grok-4.5", "cursor-grok-4.5-medium"],
@@ -948,10 +949,10 @@ describe("Cursor Grok tier routing (issue #8803)", () => {
 			},
 		};
 		// Bundled/cache row (no live siblings) — the offline pass-through path.
-		const offline = collapseBuiltModelVariants([buildModel(stale)]);
+		const offline = collapseBuiltVariants([buildModel(stale)]);
 		expect(offline.find(m => m.id === "cursor-grok-4.6")?.requestModelId).toBe("cursor-grok-4.6-medium");
 		// Bundled row merged with live siblings — the online discovery path.
-		const online = collapseBuiltModelVariants([
+		const online = collapseBuiltVariants([
 			buildModel(stale),
 			...RAW_SIBLINGS.filter(id => id.startsWith("cursor-grok-4.6-") && !id.endsWith("-fast")).map(id =>
 				buildModel(cursorMemberSpec(id)),
@@ -961,7 +962,7 @@ describe("Cursor Grok tier routing (issue #8803)", () => {
 
 		// Account-specific discovery can omit the preferred tier. Do not route
 		// effort-less requests to a sibling the account did not advertise.
-		const withoutMedium = collapseBuiltModelVariants([
+		const withoutMedium = collapseBuiltVariants([
 			buildModel({ ...stale, requestModelId: "cursor-grok-4.6-medium" }),
 			buildModel(cursorMemberSpec("cursor-grok-4.6-low")),
 			buildModel(cursorMemberSpec("cursor-grok-4.6-high")),
@@ -978,9 +979,9 @@ describe("Cursor GPT-5.6 tier routing (issue #9025)", () => {
 
 	it("collapses the 36 effort siblings into six logical models, split by the -fast lane", () => {
 		expect(RAW_SIBLINGS).toHaveLength(36);
-		const collapsed = collapseEffortVariants(
+		const collapsed = collapseVariants(
 			RAW_SIBLINGS.map(id => cursorMemberSpec(id)),
-			CURSOR_VARIANT_COLLAPSE_TABLE,
+			{ table: cursorTable },
 		);
 		expect(collapsed.map(model => model.id).sort()).toEqual([
 			"gpt-5.6-luna",
@@ -1001,9 +1002,9 @@ describe("Cursor GPT-5.6 tier routing (issue #9025)", () => {
 	});
 
 	it("routes each user effort onto the live sibling wire id per service-tier lane", () => {
-		const collapsed = collapseEffortVariants(
+		const collapsed = collapseVariants(
 			RAW_SIBLINGS.map(id => cursorMemberSpec(id)),
-			CURSOR_VARIANT_COLLAPSE_TABLE,
+			{ table: cursorTable },
 		);
 		const model = (id: string) => {
 			const found = collapsed.find(m => m.id === id);
@@ -1029,7 +1030,7 @@ describe("Cursor generic tier routing (issue #9237)", () => {
 			cursorMemberSpec(`gpt-5.5-${tier}`, { name: `GPT-5.5 ${tier}` }),
 			cursorMemberSpec(`gpt-5.5-${tier}-fast`, { name: `GPT-5.5 ${tier} Fast` }),
 		]);
-		const collapsed = collapseEffortVariantsAcrossProviders(raw);
+		const collapsed = collapseVariants(raw);
 		expect(collapsed.map(model => model.id).sort()).toEqual(["gpt-5.5", "gpt-5.5-fast"]);
 
 		const standard = collapsed.find(model => model.id === "gpt-5.5");
@@ -1054,7 +1055,7 @@ describe("Cursor generic tier routing (issue #9237)", () => {
 		const raw = ["none", "low", "extra-high"].map(tier =>
 			cursorMemberSpec(`gpt-5.5-${tier}`, { name: `GPT-5.5 ${tier}` }),
 		);
-		const collapsed = collapseEffortVariantsAcrossProviders(raw);
+		const collapsed = collapseVariants(raw);
 
 		expect(collapsed.map(model => model.id)).toEqual(["gpt-5.5"]);
 		const model = collapsed[0];
@@ -1077,7 +1078,7 @@ describe("Cursor generic tier routing (issue #9237)", () => {
 				thinking: { mode: "effort", efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh] },
 			}),
 		];
-		const collapsed = collapseEffortVariantsAcrossProviders(raw);
+		const collapsed = collapseVariants(raw);
 
 		expect(collapsed.map(model => model.id)).toEqual(raw.map(model => model.id));
 		expect(collapsed[0]?.thinking?.efforts).toEqual([Effort.Low, Effort.Medium, Effort.High, Effort.XHigh]);
@@ -1090,7 +1091,7 @@ describe("Cursor generic tier routing (issue #9237)", () => {
 			cursorMemberSpec("gemini-3.6-flash-high", { contextWindow: 1_000_000 }),
 		];
 
-		expect(collapseEffortVariantsAcrossProviders(raw).map(model => model.id)).toEqual(raw.map(model => model.id));
+		expect(collapseVariants(raw).map(model => model.id)).toEqual(raw.map(model => model.id));
 	});
 
 	it("keeps Cursor max-mode SKUs out of effort-only families", () => {
@@ -1099,7 +1100,7 @@ describe("Cursor generic tier routing (issue #9237)", () => {
 			cursorMemberSpec("gemini-3.7-flash-max", { cursorMaxMode: true }),
 		];
 
-		expect(collapseEffortVariantsAcrossProviders(raw).map(model => model.id)).toEqual(raw.map(model => model.id));
+		expect(collapseVariants(raw).map(model => model.id)).toEqual(raw.map(model => model.id));
 	});
 
 	it("does not treat product -max or split -thinking names as effort-only families", () => {
@@ -1115,9 +1116,7 @@ describe("Cursor generic tier routing (issue #9237)", () => {
 			"claude-opus-5-thinking-max",
 		];
 
-		expect(collapseEffortVariantsAcrossProviders(ids.map(id => cursorMemberSpec(id))).map(model => model.id)).toEqual(
-			ids,
-		);
+		expect(collapseVariants(ids.map(id => cursorMemberSpec(id))).map(model => model.id)).toEqual(ids);
 	});
 
 	it("dedupes live tiers beside matching collapsed static rows", () => {
@@ -1125,8 +1124,8 @@ describe("Cursor generic tier routing (issue #9237)", () => {
 			buildModel(cursorMemberSpec(`review-merged-9237-${tier}`)),
 			buildModel(cursorMemberSpec(`review-merged-9237-${tier}-fast`)),
 		]);
-		const staticModels = collapseBuiltModelVariants(raw);
-		const merged = collapseBuiltModelVariants([...staticModels, ...raw]);
+		const staticModels = collapseBuiltVariants(raw);
+		const merged = collapseBuiltVariants([...staticModels, ...raw]);
 
 		expect(merged.map(model => model.id).sort()).toEqual(["review-merged-9237", "review-merged-9237-fast"]);
 		const standard = merged.find(model => model.id === "review-merged-9237");
@@ -1139,7 +1138,7 @@ describe("Cursor generic tier routing (issue #9237)", () => {
 			contextPromotionTarget: "cursor/review-promotion-target-low",
 			compactionModel: "review-promotion-target-high",
 		};
-		const collapsed = collapseEffortVariantsAcrossProviders([
+		const collapsed = collapseVariants([
 			cursorMemberSpec("review-promotion-target-low"),
 			cursorMemberSpec("review-promotion-target-high"),
 			cursorMemberSpec("review-promotion-source-none", sourceOverrides),
@@ -1152,11 +1151,11 @@ describe("Cursor generic tier routing (issue #9237)", () => {
 	});
 
 	it("preserves references to live tiers after an earlier family becomes unsafe", () => {
-		collapseEffortVariantsAcrossProviders([
+		collapseVariants([
 			cursorMemberSpec("review-changing-target-low"),
 			cursorMemberSpec("review-changing-target-high"),
 		]);
-		const collapsed = collapseEffortVariantsAcrossProviders([
+		const collapsed = collapseVariants([
 			cursorMemberSpec("review-changing-target-low", { contextWindow: 200_000 }),
 			cursorMemberSpec("review-changing-target-high", { contextWindow: 1_000_000 }),
 			cursorMemberSpec("review-changing-source", {
@@ -1173,21 +1172,21 @@ describe("Cursor generic tier routing (issue #9237)", () => {
 
 describe("variant aliases", () => {
 	it("resolves members and recycled ids per provider", () => {
-		expect(resolveVariantAlias("google-antigravity", "gemini-3.5-flash-low")).toBe("gemini-3.5-flash");
-		expect(resolveVariantAlias("google-antigravity", "gemini-3.7-flash-tiered")).toBe("gemini-3.7-flash");
-		expect(resolveVariantAlias("google-gemini-cli", "gemini-pro-agent")).toBe("gemini-3.1-pro");
-		expect(resolveVariantAlias("google-antigravity", "gemini-3-flash")).toBe("gemini-3.5-flash");
-		expect(resolveVariantAlias("google-antigravity", "gemini-2.5-flash-thinking")).toBe("gemini-2.5-flash");
-		expect(resolveVariantAlias("google-antigravity", "gemini-2.5-flash-lite")).toBeUndefined();
-		expect(resolveVariantAlias("anthropic", "claude-sonnet-4-6-thinking")).toBeUndefined();
+		expect(resolveVariantSelector("google-antigravity", "gemini-3.5-flash-low")).toBe("gemini-3.5-flash");
+		expect(resolveVariantSelector("google-antigravity", "gemini-3.7-flash-tiered")).toBe("gemini-3.7-flash");
+		expect(resolveVariantSelector("google-gemini-cli", "gemini-pro-agent")).toBe("gemini-3.1-pro");
+		expect(resolveVariantSelector("google-antigravity", "gemini-3-flash")).toBe("gemini-3.5-flash");
+		expect(resolveVariantSelector("google-antigravity", "gemini-2.5-flash-thinking")).toBe("gemini-2.5-flash");
+		expect(resolveVariantSelector("google-antigravity", "gemini-2.5-flash-lite")).toBeUndefined();
+		expect(resolveVariantSelector("anthropic", "claude-sonnet-4-6-thinking")).toBeUndefined();
 	});
 
 	it("names the declaring providers in bare-id lookups", () => {
-		const hit = resolveBareVariantAlias("GEMINI-3.5-FLASH-LOW");
+		const hit = resolveBareVariantSelector("GEMINI-3.5-FLASH-LOW");
 		expect(hit?.id).toBe("gemini-3.5-flash");
 		expect(hit?.providers).toContain("google-antigravity");
 		expect(hit?.providers).toContain("google-gemini-cli");
-		expect(resolveBareVariantAlias("gpt-4o")).toBeUndefined();
+		expect(resolveBareVariantSelector("gpt-4o")).toBeUndefined();
 	});
 
 	it("reverse sources cover members and recycled ids", () => {
@@ -1205,12 +1204,12 @@ describe("variant aliases", () => {
 			"review-model-9237-low-fast",
 			"review-model-9237-high-fast",
 		];
-		const collapsed = collapseEffortVariantsAcrossProviders(ids.map(id => cursorMemberSpec(id)));
+		const collapsed = collapseVariants(ids.map(id => cursorMemberSpec(id)));
 		expect(collapsed.map(model => model.id).sort()).toEqual(["review-model-9237", "review-model-9237-fast"]);
 
-		expect(resolveVariantAlias("cursor", "review-model-9237-high")).toBe("review-model-9237");
-		expect(resolveVariantAlias("CURSOR", "review-model-9237-low-fast")).toBe("review-model-9237-fast");
-		expect(resolveBareVariantAlias("review-model-9237-high")).toEqual({
+		expect(resolveVariantSelector("cursor", "review-model-9237-high")).toBe("review-model-9237");
+		expect(resolveVariantSelector("CURSOR", "review-model-9237-low-fast")).toBe("review-model-9237-fast");
+		expect(resolveBareVariantSelector("review-model-9237-high")).toEqual({
 			id: "review-model-9237",
 			providers: ["cursor"],
 		});
@@ -1225,49 +1224,46 @@ describe("variant aliases", () => {
 	});
 
 	it("keeps provider-scoped aliases out of bare-id and reverse lookups", () => {
-		expect(resolveVariantAlias("devin", "opus")).toBe("claude-opus-5");
-		expect(resolveVariantAlias("devin", "claude")).toBe("claude-sonnet-5");
-		expect(resolveVariantAlias("devin", "sonnet")).toBe("claude-sonnet-5");
-		expect(resolveVariantAlias("devin", "haiku")).toBe("claude-haiku-4-5");
-		expect(resolveVariantAlias("devin", "gemini")).toBe("gemini-3-7-flash");
-		expect(resolveVariantAlias("devin", "gpt")).toBe("gpt-5-6-terra");
-		expect(resolveVariantAlias("devin", "codex")).toBe("gpt-5-3-codex");
-		expect(resolveVariantAlias("devin", "SWE")).toBe("swe-1-7-lightning");
+		expect(resolveVariantSelector("devin", "opus")).toBe("claude-opus-5");
+		expect(resolveVariantSelector("devin", "claude")).toBe("claude-sonnet-5");
+		expect(resolveVariantSelector("devin", "sonnet")).toBe("claude-sonnet-5");
+		expect(resolveVariantSelector("devin", "haiku")).toBe("claude-haiku-4-5");
+		expect(resolveVariantSelector("devin", "gemini")).toBe("gemini-3-7-flash");
+		expect(resolveVariantSelector("devin", "gpt")).toBe("gpt-5-6-terra");
+		expect(resolveVariantSelector("devin", "codex")).toBe("gpt-5-3-codex");
+		expect(resolveVariantSelector("devin", "SWE")).toBe("swe-1-7-lightning");
 
 		// Generic labels must stay meaningless without a provider.
 		for (const alias of ["opus", "claude", "sonnet", "haiku", "gemini", "gpt", "codex", "swe"]) {
-			expect(resolveBareVariantAlias(alias)).toBeUndefined();
-			expect(resolveVariantAlias("google-antigravity", alias)).toBeUndefined();
+			expect(resolveBareVariantSelector(alias)).toBeUndefined();
+			expect(resolveVariantSelector("google-antigravity", alias)).toBeUndefined();
 		}
 		// ...and must never re-key config off the collapsed model.
 		expect(getVariantAliasSources("devin", "claude-opus-5")).not.toContain("opus");
 	});
 
 	it("resolves the dotted native Devin spellings to hyphenated logical ids", () => {
-		expect(resolveVariantAlias("devin", "gpt-5.6-terra")).toBe("gpt-5-6-terra");
-		expect(resolveVariantAlias("devin", "gpt-5.6-sol")).toBe("gpt-5-6-sol");
-		expect(resolveVariantAlias("devin", "gpt-5.6-luna")).toBe("gpt-5-6-luna");
-		expect(resolveVariantAlias("devin", "gemini-3.7-flash")).toBe("gemini-3-7-flash");
-		expect(resolveVariantAlias("devin", "swe-1.7")).toBe("swe-1-7");
-		expect(resolveVariantAlias("devin", "swe-1.7-lightning")).toBe("swe-1-7-lightning");
-		expect(resolveVariantAlias("devin", "grok-4.6")).toBe("grok-4-6");
-		expect(resolveVariantAlias("devin", "glm-5.2")).toBe("glm-5-2");
-		expect(resolveVariantAlias("devin", "claude-haiku-4.5")).toBe("claude-haiku-4-5");
+		expect(resolveVariantSelector("devin", "gpt-5.6-terra")).toBe("gpt-5-6-terra");
+		expect(resolveVariantSelector("devin", "gpt-5.6-sol")).toBe("gpt-5-6-sol");
+		expect(resolveVariantSelector("devin", "gpt-5.6-luna")).toBe("gpt-5-6-luna");
+		expect(resolveVariantSelector("devin", "gemini-3.7-flash")).toBe("gemini-3-7-flash");
+		expect(resolveVariantSelector("devin", "swe-1.7")).toBe("swe-1-7");
+		expect(resolveVariantSelector("devin", "swe-1.7-lightning")).toBe("swe-1-7-lightning");
+		expect(resolveVariantSelector("devin", "grok-4.6")).toBe("grok-4-6");
+		expect(resolveVariantSelector("devin", "glm-5.2")).toBe("glm-5-2");
+		expect(resolveVariantSelector("devin", "claude-haiku-4.5")).toBe("claude-haiku-4-5");
 		// Members still win over provider aliases and stay bare-resolvable.
-		expect(resolveVariantAlias("devin", "claude-opus-5-max")).toBe("claude-opus-5");
-		expect(resolveBareVariantAlias("claude-opus-5-max")?.id).toBe("claude-opus-5");
+		expect(resolveVariantSelector("devin", "claude-opus-5-max")).toBe("claude-opus-5");
+		expect(resolveBareVariantSelector("claude-opus-5-max")?.id).toBe("claude-opus-5");
 	});
 	it("scopes collapsed-spec detection to routing and hand-table families", () => {
-		const collapsed = collapseEffortVariants(
-			[memberSpec("gemini-3.5-flash-low")],
-			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
-		)[0];
-		expect(collapsed && isVariantCollapsedSpec(collapsed)).toBe(true);
-		expect(isVariantCollapsedSpec(memberSpec("gemini-3.5-flash-low"))).toBe(false);
+		const collapsed = collapseVariants([memberSpec("gemini-3.5-flash-low")], { table: antigravityTable })[0];
+		expect(collapsed && isCollapsedVariantSpec(collapsed)).toBe(true);
+		expect(isCollapsedVariantSpec(memberSpec("gemini-3.5-flash-low"))).toBe(false);
 		// Copilot long-context variants carry requestModelId but are NOT
 		// collapsed specs — the generator rebake must not skip them.
 		expect(
-			isVariantCollapsedSpec(
+			isCollapsedVariantSpec(
 				memberSpec("claude-opus-4.7-1m", { provider: "github-copilot", requestModelId: "claude-opus-4.7" }),
 			),
 		).toBe(false);
@@ -1276,7 +1272,7 @@ describe("variant aliases", () => {
 
 describe("resolveWireModelId", () => {
 	it("survives buildModel and routes per effort with requestModelId fallback", () => {
-		const collapsed = collapseEffortVariants(FLASH_TRIPLET(), ANTIGRAVITY_VARIANT_COLLAPSE_TABLE)[0];
+		const collapsed = collapseVariants(FLASH_TRIPLET(), { table: antigravityTable })[0];
 		const model = buildModel(collapsed as ModelSpec<"google-gemini-cli">);
 
 		expect(model.thinking?.effortRouting).toEqual(collapsed?.thinking?.effortRouting);
@@ -1287,10 +1283,7 @@ describe("resolveWireModelId", () => {
 		expect(resolveWireModelId(model, undefined)).toBe("gemini-3.5-flash-extra-low");
 
 		// Dropped route (partial family) falls back to requestModelId.
-		const partial = collapseEffortVariants(
-			[memberSpec("gemini-3.5-flash-extra-low")],
-			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
-		)[0];
+		const partial = collapseVariants([memberSpec("gemini-3.5-flash-extra-low")], { table: antigravityTable })[0];
 		const partialModel = buildModel(partial as ModelSpec<"google-gemini-cli">);
 		expect(resolveWireModelId(partialModel, Effort.High)).toBe("gemini-3.5-flash-extra-low");
 
@@ -1314,10 +1307,9 @@ describe("merge-point collapsing (resolveProviderModels)", () => {
 			memberSpec("gemini-3.1-pro-high"),
 			memberSpec("gemini-2.5-flash-lite"),
 		];
-		const liveCollapsed = collapseEffortVariants(
-			[memberSpec("gemini-3.1-pro-low"), memberSpec("gemini-3.1-pro-high")],
-			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
-		);
+		const liveCollapsed = collapseVariants([memberSpec("gemini-3.1-pro-low"), memberSpec("gemini-3.1-pro-high")], {
+			table: antigravityTable,
+		});
 
 		const result = await resolveProviderModels(
 			{
@@ -1518,13 +1510,13 @@ describe("antigravity discovery collapsing", () => {
 
 describe("Devin GLM-5.2 collapse", () => {
 	it("collapses the three 200K GLM-5.2 variants into one logical entry routing all efforts to the free glm-5-2 wire UID", () => {
-		const out = collapseEffortVariants(
+		const out = collapseVariants(
 			[
 				devinMemberSpec("glm-5-2"),
 				devinMemberSpec("glm-5-2-max"),
 				devinMemberSpec("glm-5-2-none", { reasoning: false }),
 			],
-			DEVIN_VARIANT_COLLAPSE_TABLE,
+			{ table: devinTable },
 		);
 
 		expect(out).toHaveLength(1);
@@ -1537,10 +1529,7 @@ describe("Devin GLM-5.2 collapse", () => {
 	});
 
 	it("routes every effort to glm-5-2 (never to the quota-gated glm-5-2-max or glm-5-2-none)", () => {
-		const out = collapseEffortVariants(
-			[devinMemberSpec("glm-5-2"), devinMemberSpec("glm-5-2-max")],
-			DEVIN_VARIANT_COLLAPSE_TABLE,
-		);
+		const out = collapseVariants([devinMemberSpec("glm-5-2"), devinMemberSpec("glm-5-2-max")], { table: devinTable });
 
 		const spec = out[0];
 		const routing = spec?.thinking?.effortRouting ?? {};
@@ -1550,13 +1539,13 @@ describe("Devin GLM-5.2 collapse", () => {
 	});
 
 	it("collapses the three 1M GLM-5.2 variants into one paid entry with proper effort routing", () => {
-		const out = collapseEffortVariants(
+		const out = collapseVariants(
 			[
 				devinMemberSpec("glm-5-2-1m", { contextWindow: 1_000_000 }),
 				devinMemberSpec("glm-5-2-max-1m", { contextWindow: 1_000_000 }),
 				devinMemberSpec("glm-5-2-none-1m", { contextWindow: 1_000_000, reasoning: false }),
 			],
-			DEVIN_VARIANT_COLLAPSE_TABLE,
+			{ table: devinTable },
 		);
 
 		expect(out).toHaveLength(1);
