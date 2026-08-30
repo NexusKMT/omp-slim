@@ -12,6 +12,15 @@
 ### Fixed
 
 - Fixed HTML session exports reordering interleaved assistant text, thinking, images, and tool calls in the transcript, and split matching text/tool sidebar rows with block-accurate navigation. ([#10253](https://github.com/can1357/oh-my-pi/pull/10253) by [@realcoderandom](https://github.com/realcoderandom))
+### Changed
+
+- Disabled `hashline` edit mode for Kimi, Mimo, DeepSeek Flash, and Stepfun models for stability
+
+### Fixed
+
+- Fixed an issue where custom model overrides were lost during configuration updates
+- Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
+- Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
 
 ## [18.0.11] - 2026-08-29
 
