@@ -338,6 +338,25 @@ describe("HTML export assistant content ordering", () => {
 		expect(rendered.lastScrolledId()).toBe("entry-assistant-1-block-1");
 	});
 
+	test("hides projected tool calls when the No-tools filter is active", () => {
+		const rendered = renderAssistant(
+			[
+				{ type: "text", text: "before-tool" },
+				{ type: "toolCall", id: "tool-1", name: "read", arguments: { path: "hidden.ts" } },
+				{ type: "text", text: "after-tool" },
+			],
+			"stop",
+			true,
+		);
+
+		const noToolsButton = rendered.document.querySelector('.filter-btn[data-filter="no-tools"]');
+		if (!noToolsButton) throw new Error("Export template is missing the No-tools filter");
+		noToolsButton.click();
+
+		expect(renderedSidebarOrder(rendered)).toEqual(["assistant: before-tool", "assistant: after-tool"]);
+		expect(rendered.document.getElementById("tree-status")?.textContent).toBe("2 / 3 rows");
+	});
+
 	test("uses projected timeline order when tool result ancestry is reversed", () => {
 		const rendered = renderAssistant(
 			[

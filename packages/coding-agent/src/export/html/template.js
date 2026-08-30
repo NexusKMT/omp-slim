@@ -574,7 +574,7 @@
        * Pi stores those continuations as separate entries; OMP keeps one
        * content array. Do not mutate session entries or parentIds.
        */
-      function buildInterleavedAssistantRows(flatNode, toolResultNodes) {
+      function buildInterleavedAssistantRows(flatNode, toolResultNodes, includeTools) {
         const entry = flatNode.node.entry;
         if (entry.type !== 'message' || entry.message.role !== 'assistant') return null;
 
@@ -621,6 +621,10 @@
             text += block.text;
           } else if (block.type === 'toolCall') {
             flushText();
+            if (!includeTools) {
+              navigationId = entry.id;
+              continue;
+            }
             const anchorId = assistantBlockDomId(entry.id, blockIndex, mainSctx);
             const resultNode = toolResultNodes.get(block.id);
             if (resultNode) {
@@ -648,19 +652,21 @@
         return rows;
       }
 
-      function projectSidebarRows(filteredNodes) {
+      function projectSidebarRows(filteredNodes, includeTools = true) {
         const toolResultNodes = new Map();
-        for (const flatNode of filteredNodes) {
-          const entry = flatNode.node.entry;
-          if (entry.type === 'message' && entry.message.role === 'toolResult' && entry.message.toolCallId) {
-            toolResultNodes.set(entry.message.toolCallId, flatNode);
+        if (includeTools) {
+          for (const flatNode of filteredNodes) {
+            const entry = flatNode.node.entry;
+            if (entry.type === 'message' && entry.message.role === 'toolResult' && entry.message.toolCallId) {
+              toolResultNodes.set(entry.message.toolCallId, flatNode);
+            }
           }
         }
 
         const projectedByAssistantId = new Map();
         const claimedToolResultIds = new Set();
         for (const flatNode of filteredNodes) {
-          const rows = buildInterleavedAssistantRows(flatNode, toolResultNodes);
+          const rows = buildInterleavedAssistantRows(flatNode, toolResultNodes, includeTools);
           if (!rows) continue;
           projectedByAssistantId.set(flatNode.node.entry.id, rows);
           for (const row of rows) {
@@ -674,6 +680,7 @@
         const rows = [];
         for (const flatNode of filteredNodes) {
           const entry = flatNode.node.entry;
+          if (!includeTools && entry.type === 'message' && entry.message.role === 'toolResult') continue;
           const projected = projectedByAssistantId.get(entry.id);
           if (projected) {
             rows.push(...projected);
@@ -704,7 +711,7 @@
         const flatNodes = flattenTree(tree, activePathIds);
         const filtered = filterNodes(flatNodes, currentLeafId);
         const allSidebarRows = projectSidebarRows(flatNodes);
-        const sidebarRows = projectSidebarRows(filtered);
+        const sidebarRows = projectSidebarRows(filtered, filterMode !== 'no-tools');
         const container = document.getElementById('tree-container');
         const activeRowIndex = currentTargetAnchorId
           ? sidebarRows.findIndex(row => row.anchorId === currentTargetAnchorId)
