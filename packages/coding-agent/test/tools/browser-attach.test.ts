@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import { BrowserTool } from "@oh-my-pi/pi-coding-agent/tools/browser";
@@ -15,6 +18,7 @@ import {
 	releaseBrowser,
 } from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
 import { acquireTab } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
+import { Process, ProcessStatus } from "@oh-my-pi/pi-natives";
 import type { Browser, HTTPRequest, Page, Target } from "puppeteer-core";
 import { chromiumAvailable } from "./chromium-probe";
 
@@ -133,6 +137,35 @@ describe("pickElectronTarget", () => {
 		);
 		expect(normalizeConnectedCdpUrl("http://127.0.0.1:9222/")).toBe("http://127.0.0.1:9222");
 	});
+
+	test("refuses to replace a running same-executable process", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-browser-app-path-"));
+		const executable = path.join(tempDir, path.basename(process.execPath));
+		await Bun.write(executable, Bun.file(process.execPath));
+		if (process.platform !== "win32") await fs.chmod(executable, 0o755);
+		const existing = Bun.spawn([executable, "--eval", 'process.stdout.write("ready\\n"); await Bun.stdin.text()'], {
+			stdin: "pipe",
+			stdout: "pipe",
+			stderr: "ignore",
+		});
+		const readiness = existing.stdout.getReader();
+		await readiness.read();
+		readiness.releaseLock();
+
+		try {
+			await expect(
+				acquireBrowser(
+					{ kind: "spawned", path: executable },
+					{ cwd: process.cwd(), signal: AbortSignal.timeout(2_000) },
+				),
+			).rejects.toThrow("already running without a reusable CDP endpoint");
+			expect(Process.fromPid(existing.pid)?.status()).toBe(ProcessStatus.Running);
+		} finally {
+			existing.kill();
+			await existing.exited;
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	}, 10_000);
 
 	// Launches real headless Chromium; skipped where Chrome's system libraries are absent.
 	test.skipIf(!CHROMIUM_AVAILABLE)(

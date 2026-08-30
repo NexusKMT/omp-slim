@@ -1,4 +1,5 @@
 import * as net from "node:net";
+import * as path from "node:path";
 import { Process, ProcessStatus } from "@oh-my-pi/pi-natives";
 import type { Socket } from "bun";
 import type { Browser, Page } from "puppeteer-core";
@@ -148,27 +149,32 @@ async function probeCdpAt(port: number, signal?: AbortSignal): Promise<boolean> 
 }
 
 /**
- * If any running instance of `exe` was launched with `--remote-debugging-port`
- * and that endpoint actually answers, return it so attach can reuse it instead
- * of killing and respawning. Idempotent re-attaches are the common case.
+ * Return a reusable CDP endpoint for `exe`, or null when no instance is
+ * running. Refuse to replace an occupied instance that does not expose CDP.
  */
 export async function findReusableCdp(
 	exe: string,
 	signal?: AbortSignal,
 ): Promise<{ cdpUrl: string; pid: number } | null> {
-	const candidates = Process.fromPath(exe).filter(p => p.status() === ProcessStatus.Running);
-	for (const proc of candidates) {
+	const candidates = Process.fromPath(exe).filter(process => process.status() === ProcessStatus.Running);
+	for (const process of candidates) {
 		let args: string[];
 		try {
-			args = proc.args();
+			args = process.args();
 		} catch {
 			continue;
 		}
 		const port = findCdpPortInArgs(args);
 		if (port === null) continue;
 		if (await probeCdpAt(port, signal)) {
-			return { cdpUrl: `http://127.0.0.1:${port}`, pid: proc.pid };
+			return { cdpUrl: `http://127.0.0.1:${port}`, pid: process.pid };
 		}
+	}
+	if (candidates.length > 0) {
+		const name = path.basename(exe);
+		throw new ToolError(
+			`Cannot launch ${name} because it is already running without a reusable CDP endpoint. Close ${name}, relaunch it with --remote-debugging-port, or pass app.cdp_url for an existing endpoint.`,
+		);
 	}
 	return null;
 }
@@ -255,20 +261,4 @@ export async function gracefulKillTreeOnce(pid: number, gracePeriodMs = 2000): P
 	const process = Process.fromPid(pid);
 	if (!process) return;
 	await process.terminate({ gracefulMs: gracePeriodMs, timeoutMs: 500 });
-}
-
-/**
- * Multi-process variant for attach: find every PID running `executablePath`
- * (single-instance apps may keep an orphan around) and tear them all down.
- */
-export async function killExistingByPath(executablePath: string, signal?: AbortSignal): Promise<number> {
-	const processes = Process.fromPath(executablePath);
-	if (!processes.length) return 0;
-	const results = await Promise.all(
-		processes.map(async process => {
-			throwIfAborted(signal);
-			return await process.terminate({ gracefulMs: 3000, timeoutMs: 1000 });
-		}),
-	);
-	return results.length;
 }
