@@ -1875,5 +1875,58 @@ mod tests {
 		assert_eq!(code, 0, "{err}");
 		assert_eq!(out, "2\n", "the escaped form must agree with the bare one");
 	}
+
+	#[test]
+	fn a_dollar_before_a_branch_boundary_still_anchors() {
+		// `$` anchors at the end of a BRE BRANCH, not only at the end of the
+		// whole pattern. Escaping it made the first branch unmatchable, so
+		// lines ending in `a` were silently dropped from the result.
+		let input = "a\nb\nca\nxb\nz\nax\n";
+		let (code, out, err) = run(&["-c", r"a$\|b"], input);
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "4\n", "a, b, ca and xb all match");
+
+		// The same alternation written the other way round must agree.
+		let (_, out, err) = run(&["-c", r"b\|a$"], input);
+		assert_eq!(out, "4\n", "{err}");
+
+		// And inside a group, where `\)` ends the branch instead of `\|`.
+		let (_, out, err) = run(&["-c", r"\(a$\)"], input);
+		assert_eq!(out, "2\n", "{err}");
+
+		// A `$` that ends neither is still a literal dollar sign.
+		let (_, out, err) = run(&["-c", "a$b"], "a$b\nab\n");
+		assert_eq!(out, "1\n", "{err}");
+	}
+
+	#[test]
+	fn bracket_expressions_are_not_translated_as_bre() {
+		// Inside `[...]` the BRE operators are ordinary characters. The
+		// translator used to read `\(` as a group opener, producing a pattern
+		// the engine refused, which then fell back to a literal match.
+		let input = "has ( paren\nhas \\ slash\nplain\n";
+		let (code, out, err) = run(&["-c", r"[\(]"], input);
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "2\n", "a backslash OR a parenthesis, as measured");
+
+		// `]` first is a literal, `^` still negates, and a character class
+		for (pattern, want) in
+			[(r"[]x]", "1\n"), (r"[^abc]", "3\n"), (r"[[:digit:]]", "1\n"), (r"[*+]", "1\n")]
+		{
+			let (code, out, err) = run(&["-c", pattern], "]\nq7\n*\nabc\n");
+			assert_eq!(code, 0, "{pattern}: {err}");
+			assert_eq!(out, want, "{pattern}");
+		}
+
+		// An unterminated bracket expression is not silently swallowed as an
+		// empty class: the engine refuses it. In `grep` it then reaches the
+		// pre-existing literal fallback - the same path back-references take -
+		// so it matches the typed text rather than erroring the way real grep
+		// does. That divergence predates this change and is unchanged by it;
+		// `sed`, which has no such fallback, reports the error.
+		let (code, out, err) = run(&["-c", "a[d"], "a[d\nplain\n");
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "1\n", "falls back to the literal text the user typed");
+	}
 }
 

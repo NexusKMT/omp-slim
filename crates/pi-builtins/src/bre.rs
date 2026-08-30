@@ -52,7 +52,6 @@ pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> Result<String, Br
 	let mut result = String::with_capacity(pattern.len());
 	let mut chars = pattern.chars().peekable();
 
-	let mut previous: Option<char> = None;
 	// Whether something repeatable precedes the current position. False at the
 	// start of the pattern and directly after `\(` or `\|`, which are exactly
 	// the positions where a repetition character is not an operator and where
@@ -159,6 +158,24 @@ pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> Result<String, Br
 			}
 		} else {
 			match c {
+				'[' => {
+					// A bracket expression is NOT BRE syntax: inside it, `\`,
+					// `(`, `|` and `*` are ordinary characters. Translating
+					// through it turned `[\(]` into a group opener and broke
+					// compilation, so the whole expression is scanned as
+					// bracket syntax and copied across.
+					match take_bracket_expression(&mut chars) {
+						Some(body) => {
+							result.push('[');
+							result.push_str(&body);
+						},
+						// Unterminated. Measured, both tools reject it -
+						// "brackets ([ ]) not balanced" - so the half-open
+						// `[` is passed through for the engine to refuse.
+						None => result.push('['),
+					}
+					has_atom = true;
+				},
 				'+' | '?' | '{' | '}' | '|' | '(' | ')' => {
 					// Escape unsupported ERE metacharacters.
 					result.push('\\');
@@ -173,7 +190,7 @@ pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> Result<String, Br
 						has_atom = true;
 					}
 				},
-				'^' if (has_atom || anchored) && previous != Some('[') => {
+				'^' if has_atom || anchored => {
 					// In a BRE `^` is an ANCHOR only at the start of a branch -
 					// the start of the pattern, or directly after `\(` or `\|` -
 					// and only ONCE there. Anywhere else, including a second
@@ -194,8 +211,8 @@ pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> Result<String, Br
 					result.push(c);
 					has_atom = true;
 				},
-				'$' if chars.peek().is_some() => {
-					// Similarly for $ appearing not at the end.
+				'$' if !ends_branch(&chars) => {
+					// Similarly for `$` appearing not at the end of a branch.
 					result.push('\\');
 					result.push(c);
 					has_atom = true;
@@ -213,10 +230,79 @@ pub(crate) fn bre_to_ere(pattern: &str, backrefs: Backrefs) -> Result<String, Br
 				},
 			}
 		}
-		previous = Some(c);
 	}
 
 	Ok(result)
+}
+
+/// Whether the rest of the pattern ends the current branch.
+///
+/// `$` is an anchor at the end of a branch, not only at the end of the whole
+/// pattern: `grep 'a$\|b'` selects lines ending in `a` as well as lines
+/// containing `b`, and the alternation normalization this module replaced
+/// preserved that by leaving `$` untouched. Escaping it here made the first
+/// branch unmatchable and silently dropped those lines.
+///
+/// BSD grep differs - it anchors only at the very end of the pattern - but
+/// `\|` is itself a GNU extension, so GNU decides its semantics.
+fn ends_branch(chars: &std::iter::Peekable<std::str::Chars<'_>>) -> bool {
+	let mut rest = chars.clone();
+	match rest.next() {
+		None => true,
+		Some('\\') => matches!(rest.next(), Some('|' | ')')),
+		Some(_) => false,
+	}
+}
+
+/// Consume a bracket expression's body, returning it without the outer `[]`.
+///
+/// The opening `[` is already consumed. Returns `None` - advancing nothing -
+/// when the expression is unterminated. Inside a bracket expression POSIX
+/// gives `\` no special meaning, so it is doubled on the way out to keep it a
+/// literal for the engine: measured, `grep -c '[\(]'` selects lines holding a
+/// backslash OR a parenthesis.
+fn take_bracket_expression(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String> {
+	let mut probe = chars.clone();
+	let mut body = String::new();
+
+	// A leading `^` negates, and a `]` immediately after that is the literal
+	// `]` rather than the terminator.
+	if probe.peek() == Some(&'^') {
+		body.push(probe.next()?);
+	}
+	if probe.peek() == Some(&']') {
+		body.push_str(r"\]");
+		probe.next();
+	}
+
+	while let Some(c) = probe.next() {
+		match c {
+			']' => {
+				*chars = probe;
+				return Some(body + "]");
+			},
+			// `\` is an ordinary character here; keep it one.
+			'\\' => body.push_str(r"\\"),
+			// `[:alpha:]`, `[.x.]` and `[=x=]` carry their own terminators, so
+			// the `]` that closes them does not close the bracket expression.
+			'[' if matches!(probe.peek(), Some(':' | '.' | '=')) => {
+				let kind = probe.next()?;
+				body.push('[');
+				body.push(kind);
+				let mut previous = None;
+				loop {
+					let next = probe.next()?;
+					body.push(next);
+					if previous == Some(kind) && next == ']' {
+						break;
+					}
+					previous = Some(next);
+				}
+			},
+			_ => body.push(c),
+		}
+	}
+	None
 }
 
 /// True when an ERE contains a repetition operator with nothing to repeat.
