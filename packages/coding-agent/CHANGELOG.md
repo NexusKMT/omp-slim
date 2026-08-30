@@ -18,6 +18,7 @@
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
+- Fixed Nix flake builds failing after dependency updates by regenerating offline Bun sources and making CI execute the lockfile consistency check ([#10280](https://github.com/can1357/oh-my-pi/issues/10280)).
 
 ## [18.0.11] - 2026-08-29
 
