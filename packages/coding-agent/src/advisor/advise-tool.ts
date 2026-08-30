@@ -189,17 +189,20 @@ export class AdviseTool implements AgentTool<typeof adviseSchema, AdviseDetails>
 	 *  tool previously returned "Recorded." for a note that was never routed).
 	 *  Cleared on `resetDeliveredNotes` alongside the delivered-rank map. */
 	#deferredNotes: { key: string; note: string; severity?: AdviseDetails["severity"] }[] = [];
-	/** Whether a distinct note has already been queued for deferred delivery in
-	 *  the current advisor update. Enforces the one-advise-per-update cap at the
-	 *  deferral boundary (mirroring {@link AdvisorEmissionGuard}'s live-path
-	 *  budget): a single in-progress prompt that sprays several distinct notes
-	 *  queues only the first, so the flush cannot deliver an unbounded batch
-	 *  (#3520). Distinct notes accumulated across separate updates still each
-	 *  queue one (#10271). Escalating an already-pending note never consumes a
-	 *  fresh slot. Reset per update in {@link beginUpdate}. */
-	#deferredThisUpdate = false;
 
-	constructor(private readonly onAdvice: (note: string, severity?: AdviseDetails["severity"]) => void) {}
+	/**
+	 * @param onAdvice Route an accepted note to the primary (channel selection +
+	 *   delivery). Never re-filters — the note already cleared `accept`.
+	 * @param accept The emission guard's noise/empty/dedupe filter plus the
+	 *   one-advise-per-update budget, consumed the moment a note is emitted
+	 *   (live or deferred). A suppressed note returns `false` without spending
+	 *   the budget, so it cannot burn an update's slot ahead of a real concern.
+	 *   Defaults to always-accept for standalone use/tests without a guard.
+	 */
+	constructor(
+		private readonly onAdvice: (note: string, severity?: AdviseDetails["severity"]) => void,
+		private readonly accept: (note: string) => boolean = () => true,
+	) {}
 
 	/**
 	 * Mark whether the next advisor prompt reviews an in-progress primary turn.
@@ -209,16 +212,14 @@ export class AdviseTool implements AgentTool<typeof adviseSchema, AdviseDetails>
 	beginUpdate(inProgress: boolean): void {
 		const wasInProgress = this.#inProgressUpdate;
 		this.#inProgressUpdate = inProgress;
-		// A new advisor prompt cycle: refresh the one-note-per-update deferral budget.
-		this.#deferredThisUpdate = false;
 		// Turn just completed: flush everything withheld mid-turn, oldest first.
-		// Each flush re-enters the normal dedupe path (escalation rank > delivered
-		// rank), so a note the advisor already got through at a higher severity
-		// stays suppressed while a genuinely-new deferred note is delivered once.
+		// Each note already cleared the emission guard (filter + per-update budget)
+		// when it was reserved, so the flush routes it without re-accepting — a
+		// backlog of one note per originating update reaches the primary intact.
 		if (wasInProgress && !inProgress && this.#deferredNotes.length > 0) {
 			const pending = this.#deferredNotes;
 			this.#deferredNotes = [];
-			for (const { note, severity } of pending) this.#deliver(note, severity);
+			for (const { note, severity } of pending) this.#deliver(note, severity, true);
 		}
 	}
 
@@ -227,7 +228,6 @@ export class AdviseTool implements AgentTool<typeof adviseSchema, AdviseDetails>
 		this.#deliveredNoteSeverities.clear();
 		this.#inProgressUpdate = false;
 		this.#deferredNotes = [];
-		this.#deferredThisUpdate = false;
 	}
 
 	async execute(
@@ -249,13 +249,13 @@ export class AdviseTool implements AgentTool<typeof adviseSchema, AdviseDetails>
 				// Escalating an already-queued note reuses its slot; never a new one.
 				if (advisorSeverityRank(args.severity) > advisorSeverityRank(pending.severity))
 					pending.severity = args.severity;
-			} else if (!this.#deferredThisUpdate) {
+			} else if (this.accept(args.note)) {
+				// Reserve the update's one slot now (the emission guard filters noise
+				// and enforces the per-update budget at the moment the note is emitted,
+				// exactly like the live path); hold it for the flush. A suppressed or
+				// over-budget note fails `accept` here and is dropped without a slot.
 				this.#deferredNotes.push({ key, note: args.note, severity: args.severity });
-				this.#deferredThisUpdate = true;
 			}
-			// Otherwise the per-update deferral budget is spent: drop silently, as the
-			// live path does for over-budget notes, so the advisor isn't tempted to
-			// rephrase past the cap. The tool still reports the note as deferred.
 			return {
 				content: [
 					{
@@ -278,11 +278,15 @@ export class AdviseTool implements AgentTool<typeof adviseSchema, AdviseDetails>
 	/** Run one note through the escalation-rank dedupe and, if it passes, route it
 	 *  to the primary. Returns true when the note was actually delivered. Shared by
 	 *  the live path (`execute`) and the deferred flush (`beginUpdate(false)`). */
-	#deliver(note: string, severity?: AdviseDetails["severity"]): boolean {
+	#deliver(note: string, severity?: AdviseDetails["severity"], alreadyAccepted = false): boolean {
 		const key = advisorNoteDedupeKey(note);
 		const rank = advisorSeverityRank(severity);
 		const previousRank = this.#deliveredNoteSeverities.get(key) ?? 0;
 		if (rank <= previousRank) return false;
+		// Live notes clear the emission guard here; deferred notes already cleared
+		// it when reserved, so the flush passes `alreadyAccepted` to avoid a second
+		// (budget-consuming, dedupe-rejecting) pass.
+		if (!alreadyAccepted && !this.accept(note)) return false;
 		this.#deliveredNoteSeverities.set(key, rank);
 		this.onAdvice(note, severity);
 		return true;

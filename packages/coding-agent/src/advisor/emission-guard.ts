@@ -118,7 +118,6 @@ export class AdvisorEmissionGuard {
 	/** Insertion-order log to drive FIFO eviction without an extra Map. */
 	#seenOrder: string[] = [];
 	#consumedThisUpdate = false;
-	#flushingDeferred = false;
 	readonly #capacity: number;
 
 	constructor(opts: { capacity?: number } = {}) {
@@ -135,7 +134,6 @@ export class AdvisorEmissionGuard {
 		this.#seen.clear();
 		this.#seenOrder.length = 0;
 		this.#consumedThisUpdate = false;
-		this.#flushingDeferred = false;
 	}
 
 	/**
@@ -148,44 +146,26 @@ export class AdvisorEmissionGuard {
 	}
 
 	/**
-	 * Run `flush` with the per-update rate limit lifted, for {@link AdviseTool}'s
-	 * deferred-note replay at turn completion. This is safe because `AdviseTool`
-	 * already enforces the one-note-per-update cap at the deferral boundary, so
-	 * the backlog it replays holds at most one note per originating advisor
-	 * update. Lifting the cap here lets a late advisor that reviewed the whole
-	 * run across many in-progress updates surface one concern per update (#10271,
-	 * e.g. yolo mode) instead of collapsing the flush to a single note, while a
-	 * single model turn spraying many notes stays capped at the source (#3520).
-	 * Dedupe and noise filtering still apply inside the window. The window is
-	 * synchronous and self-closing so it never leaks into the live turn.
-	 */
-	withDeferredFlush<T>(flush: () => T): T {
-		this.#flushingDeferred = true;
-		try {
-			return flush();
-		} finally {
-			this.#flushingDeferred = false;
-		}
-	}
-
-	/**
 	 * Whether the proposed note should reach the primary. On `true` the gate
-	 * has already recorded the note (consumed the per-update budget, unless a
-	 * {@link withDeferredFlush} window is open, and added it to the dedupe
-	 * history) — caller delivers the note. On `false` the caller drops it.
+	 * has already recorded the note (consumed the per-update budget and added
+	 * it to the dedupe history) — caller delivers the note. On `false` the
+	 * caller drops it.
 	 *
-	 * Empty / whitespace-only notes are suppressed; the model's
-	 * tool-args contract still requires a non-empty string but defense-in-depth.
+	 * The single authority for the one-advise-per-update budget: called at the
+	 * moment a note is emitted, whether it is delivered live or held for a
+	 * deferred flush. A note that fails the noise/empty/dedupe filter never
+	 * consumes the budget, so a suppressed phrase cannot burn the update's slot
+	 * ahead of a substantive concern. Empty / whitespace-only notes are
+	 * suppressed defensively even though the tool-args contract requires a
+	 * non-empty string.
 	 */
 	accept(note: string): boolean {
 		const key = normalizeAdvisorNote(note);
 		if (!key) return false;
 		if (SUPPRESSED_NORMALIZED_PHRASES[key]) return false;
 		if (this.#seen.has(key)) return false;
-		if (!this.#flushingDeferred) {
-			if (this.#consumedThisUpdate) return false;
-			this.#consumedThisUpdate = true;
-		}
+		if (this.#consumedThisUpdate) return false;
+		this.#consumedThisUpdate = true;
 		this.#seen.add(key);
 		this.#seenOrder.push(key);
 		if (this.#seenOrder.length > this.#capacity) {
