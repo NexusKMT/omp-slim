@@ -176,4 +176,19 @@ describe("claude-md final registration and precedence", () => {
 			path.join(repoRoot, "AGENTS.md"),
 		]);
 	});
+
+	test("empty standalone files do not claim a depth scope", async () => {
+		const repoRoot = path.join(tempDir, "repo");
+		const cwd = path.join(repoRoot, "src");
+		fs.mkdirSync(path.join(repoRoot, ".git"), { recursive: true });
+		fs.mkdirSync(cwd, { recursive: true });
+		writeClaude(path.join(repoRoot, "AGENTS.md"), "");
+		writeClaude(path.join(repoRoot, "CLAUDE.md"), "claude context");
+
+		const result = await loadCapability<ContextFile>(contextFileCapability.id, { cwd });
+
+		expect(result.items.filter(file => file.level === "project" && file.depth === 1).map(file => file.path)).toEqual([
+			path.join(repoRoot, "CLAUDE.md"),
+		]);
+	});
 });

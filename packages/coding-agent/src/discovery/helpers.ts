@@ -629,7 +629,10 @@ export async function loadStandaloneContextFiles(
 			const candidate = path.join(current, fileName);
 			const content = await readFile(candidate);
 
-			if (content !== null) {
+			// Empty files contribute nothing and must not claim the depth scope:
+			// at a priority tie, an empty first-registered file would shadow a
+			// non-empty sibling (e.g. an empty AGENTS.md shadowing CLAUDE.md).
+			if (content !== null && content !== "") {
 				const parent = path.dirname(candidate);
 				const baseName = parent.split(path.sep).pop() ?? "";
 
