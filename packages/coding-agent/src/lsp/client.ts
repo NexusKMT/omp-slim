@@ -2,6 +2,7 @@ import * as path from "node:path";
 import { isEnoent, logger, postmortem, ptree, stableStringifyJson, untilAborted } from "@oh-my-pi/pi-utils";
 import { MessageFramer } from "../jsonrpc/message-framing";
 import { ToolAbortError, throwIfAborted } from "../tools/tool-errors";
+import { getConfig } from "./config";
 import { applyWorkspaceEdit, type ExecutedWorkspaceChange } from "./edits";
 import { getLspmuxCommand, isLspmuxSupported } from "./lspmux";
 import { connectSharedLspTransport } from "./mux/daemon";
@@ -57,15 +58,16 @@ export function setSharedLspEnabled(enabled: boolean): void {
 }
 
 /**
- * Configure the idle timeout for LSP clients.
- * @param ms - Timeout in milliseconds, or null/undefined to disable
+ * Configure the global fallback idle timeout for LSP clients (used in tests/overrides).
+ * When unset, each client evaluates against its workspace config (`getConfig(client.cwd).idleTimeoutMs`).
+ * @param ms - Timeout in milliseconds, or null/undefined to disable global override
  */
 export function setIdleTimeout(ms: number | null | undefined): void {
 	idleTimeoutMs = ms ?? null;
 
 	if (idleTimeoutMs && idleTimeoutMs > 0) {
 		startIdleChecker();
-	} else {
+	} else if (clients.size === 0) {
 		stopIdleChecker();
 	}
 }
@@ -92,10 +94,10 @@ export function isIdleClient(client: LspClient, now: number, timeoutMs: number):
 function startIdleChecker(): void {
 	if (idleCheckInterval) return;
 	idleCheckInterval = setInterval(() => {
-		if (!idleTimeoutMs) return;
 		const now = Date.now();
 		for (const [key, client] of Array.from(clients.entries())) {
-			if (isIdleClient(client, now, idleTimeoutMs)) {
+			const timeoutMs = idleTimeoutMs ?? getConfig(client.cwd).idleTimeoutMs;
+			if (timeoutMs && timeoutMs > 0 && isIdleClient(client, now, timeoutMs)) {
 				void shutdownClient(key);
 			}
 		}
@@ -1121,6 +1123,7 @@ export async function getOrCreateClient(
 				throw new Error(`LSP configuration was superseded during initialization: ${config.command}`);
 			}
 			clients.set(key, client);
+			startIdleChecker();
 			initFailures.delete(key);
 			return client;
 		} catch (err) {
@@ -1493,6 +1496,9 @@ async function waitForExit(client: LspClient, timeoutMs: number): Promise<boolea
  */
 export async function shutdownClientInstance(client: LspClient): Promise<boolean> {
 	if (clients.get(client.name) === client) clients.delete(client.name);
+	if (clients.size === 0 && !idleTimeoutMs) {
+		stopIdleChecker();
+	}
 
 	const err = new Error("LSP client shutdown");
 	for (const pending of Array.from(client.pendingRequests.values())) {

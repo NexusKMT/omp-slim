@@ -9,7 +9,6 @@ import {
 	notifySaved,
 	sendNotification,
 	sendRequest,
-	setIdleTimeout,
 	shutdownClientInstance,
 	syncContent,
 	WARMUP_TIMEOUT_MS,
@@ -17,6 +16,8 @@ import {
 import { getServersForFile, type LspConfig, loadConfig } from "./config";
 import { MUX_RESTART_METHOD } from "./mux/protocol";
 import type { LspClient, ServerConfig } from "./types";
+
+export { configCache, getConfig } from "./config";
 
 /**
  * LSP actions that do not mutate the workspace or language-server state.
@@ -75,7 +76,6 @@ export function discoverStartupLspServers(
  */
 export async function warmupLspServers(cwd: string, options?: LspWarmupOptions): Promise<LspWarmupResult> {
 	const config = loadConfig(cwd);
-	setIdleTimeout(config.idleTimeoutMs);
 	const servers: LspWarmupResult["servers"] = [];
 	const lspServers = getLspServers(config);
 
@@ -189,19 +189,6 @@ export async function notifyFileSaved(
 		}),
 	);
 	throwIfAborted(signal);
-}
-
-// Cache config per cwd to avoid repeated file I/O
-export const configCache = new Map<string, LspConfig>();
-
-export function getConfig(cwd: string): LspConfig {
-	let config = configCache.get(cwd);
-	if (!config) {
-		config = loadConfig(cwd);
-		configCache.set(cwd, config);
-	}
-	setIdleTimeout(config.idleTimeoutMs);
-	return config;
 }
 
 function isCustomLinter(serverConfig: ServerConfig): boolean {
