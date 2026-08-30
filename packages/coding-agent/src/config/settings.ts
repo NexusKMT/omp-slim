@@ -1416,7 +1416,18 @@ export class Settings {
 			if ((await fs.promises.lstat(filePath)).isSymbolicLink()) {
 				let current = filePath;
 				for (;;) {
-					const target = await fs.promises.readlink(current);
+					let target: string;
+					try {
+						target = await fs.promises.readlink(current);
+					} catch (error) {
+						if (!isEnoent(error)) throw error;
+						// An intermediate link vanished mid-walk: it was confirmed a
+						// symlink by the lstat below on the prior hop, then removed
+						// before this readlink. Land on the deepest hop we resolved
+						// rather than collapsing to the chain head, which would let the
+						// atomic rename replace the first user-managed symlink.
+						return current === filePath ? path.resolve(filePath) : current;
+					}
 					const resolved = path.resolve(path.dirname(current), target);
 					let nextIsSymlink = false;
 					try {

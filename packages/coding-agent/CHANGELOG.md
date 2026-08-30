@@ -11,7 +11,7 @@
 
 ### Fixed
 
-- Fixed config writes through a dangling symlink chain so the write lands on the chain's final target and preserves every intermediate link, instead of clobbering an intermediate link into a regular file on first run.
+- Fixed config writes through a dangling symlink chain so the write lands on the chain's final target and preserves every intermediate link, instead of clobbering an intermediate link into a regular file on first run ([#10285](https://github.com/can1357/oh-my-pi/pull/10285) by [@mattwilkinsonn](https://github.com/mattwilkinsonn)).
 
 ## [18.0.11] - 2026-08-29
 

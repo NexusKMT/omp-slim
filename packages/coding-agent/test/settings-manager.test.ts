@@ -334,6 +334,41 @@ describe("Settings", () => {
 			expect(YAML.parse(await Bun.file(finalPath).text())).toEqual({ setupVersion: 3 });
 		});
 
+		it("lands on the deepest resolved hop when an intermediate link vanishes mid-walk", async () => {
+			// config.yml -> mid.yml -> final.yml (final dangling). The resolver
+			// confirms mid.yml is a symlink via lstat, then a concurrent process
+			// removes mid.yml before readlink(mid.yml) runs. The ENOENT must not
+			// collapse the write back to the chain head (config.yml) — that would
+			// let the atomic rename replace the first user-managed link.
+			const finalPath = tempDir.join("final-config.yml");
+			const midPath = tempDir.join("mid-config.yml");
+			await fs.promises.symlink(finalPath, midPath, "file");
+			await fs.promises.symlink(midPath, getConfigPath(), "file");
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			const readlink = fs.promises.readlink.bind(fs.promises);
+			let injected = false;
+			vi.spyOn(fs.promises, "readlink").mockImplementation((async (target: fs.PathLike) => {
+				if (!injected && String(target) === midPath) {
+					injected = true;
+					await fs.promises.unlink(midPath);
+					throw new FsCodeError("ENOENT", "injected mid-chain link removal");
+				}
+				return readlink(target);
+			}) as typeof fs.promises.readlink);
+
+			settings.set("setupVersion", 4);
+			await settings.flush();
+
+			expect(injected).toBe(true);
+			// The chain head must survive as a symlink; the write lands on the
+			// deepest resolved hop (mid.yml), never clobbering config.yml.
+			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
+			expect(fs.lstatSync(midPath).isSymbolicLink()).toBe(false);
+			expect(YAML.parse(await Bun.file(midPath).text())).toEqual({ setupVersion: 4 });
+			expect(fs.existsSync(finalPath)).toBe(false);
+		});
+
 		it("falls back to move-aside replacement when Windows reports EPERM", async () => {
 			await writeSettings({ setupVersion: 1 });
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
