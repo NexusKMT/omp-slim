@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed sub-second duration formatting exposing floating-point precision noise.
+
 ## [18.0.11] - 2026-08-29
 
 ### Fixed

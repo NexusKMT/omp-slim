@@ -18,6 +18,7 @@
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
+- Fixed retry countdowns and capped-wait errors displaying floating-point noise in millisecond durations.
 
 ## [18.0.11] - 2026-08-29
 
