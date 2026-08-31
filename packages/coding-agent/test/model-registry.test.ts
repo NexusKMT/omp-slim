@@ -601,7 +601,6 @@ describe("ModelRegistry", () => {
 						apiKey: "ANTHROPIC_PROXY_KEY",
 						api: "anthropic-messages",
 						compat: {
-							supportsContextManagement: false,
 							supportsEagerToolInputStreaming: true,
 							allowAnthropicHeaderOverrides: true,
 						},
@@ -626,7 +625,6 @@ describe("ModelRegistry", () => {
 						api: "openai-codex-responses",
 						compat: {
 							supportsImageDetailOriginal: false,
-							supportsReasoningSummary: false,
 						},
 						remoteCompaction: {
 							enabled: true,
@@ -704,10 +702,9 @@ describe("ModelRegistry", () => {
 			expect(compat?.cacheControlFormat).toBe("anthropic");
 		});
 
-		test("custom Anthropic providers preserve authored compatibility", () => {
+		test("custom Anthropic providers can opt into eager tool input streaming", () => {
 			const model = customAnthropicCompat.find("anthropic-proxy", "claude-haiku-4.5");
 			expect(model?.compat).toMatchObject({
-				supportsContextManagement: false,
 				supportsEagerToolInputStreaming: true,
 				allowAnthropicHeaderOverrides: true,
 			});
@@ -739,11 +736,10 @@ describe("ModelRegistry", () => {
 			expect(getReplayUnsignedThinking(registry.find("anthropic", "claude-sonnet-5"))).toBe(false);
 		});
 
-		test("custom Responses providers preserve authored compatibility", () => {
+		test("custom Responses providers can disable original image detail", () => {
 			const model = customResponsesCompat.find("cc-switch", "gpt-5.5");
 			const compat = getOpenAICompat(model);
 			expect(compat?.supportsImageDetailOriginal).toBe(false);
-			expect(compat?.supportsReasoningSummary).toBe(false);
 		});
 
 		test("custom Responses providers preserve compaction config", () => {
