@@ -407,6 +407,26 @@ describe("advisor", () => {
 			expect(expanded).toContain("-tail");
 			expect(Buffer.byteLength(expanded)).toBeLessThan(9 * 1024);
 		});
+
+		it("keeps failure details alongside a partial edit diff", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "edit-1",
+				toolName: "edit",
+				content: [{ type: "text", text: "Applied first file.\nFailed to match second file; no later edits ran." }],
+				details: { diff: "--- a/first.ts\n+++ b/first.ts\n@@\n-old\n+new" },
+				isError: true,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], {
+				expandEditDiffs: true,
+				expandToolIO: true,
+			});
+
+			expect(expanded).toContain("+++ b/first.ts");
+			expect(expanded).toContain("Failed to match second file");
+		});
 	});
 
 	describe("advisor yield-queue dispatcher", () => {

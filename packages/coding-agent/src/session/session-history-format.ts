@@ -269,7 +269,11 @@ function toolCallLine(
 		}
 		if (
 			result &&
-			!(expandEditDiffs && typeof (result.details as { diff?: unknown } | undefined)?.diff === "string")
+			!(
+				expandEditDiffs &&
+				!result.isError &&
+				typeof (result.details as { diff?: unknown } | undefined)?.diff === "string"
+			)
 		) {
 			const resultText = contentToText(result.content).trim();
 			const visibleResult = name === "ask" ? resultText : boundedToolContext(resultText);
