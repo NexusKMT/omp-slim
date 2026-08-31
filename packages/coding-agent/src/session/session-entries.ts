@@ -1,5 +1,12 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent, MessageAttribution, ServiceTierByFamily, TextContent, Usage } from "@oh-my-pi/pi-ai";
+import type {
+	ImageContent,
+	MessageAttribution,
+	ServiceTierByFamily,
+	StopReason,
+	TextContent,
+	Usage,
+} from "@oh-my-pi/pi-ai";
 import type { StructuredSubagentSchemaMode } from "../task/types";
 import type { CompactionMethod } from "./compaction-methods";
 
@@ -78,6 +85,8 @@ export interface ModelUsageEntry extends SessionEntryBase {
 	provider: string;
 	model: string;
 	usage: Usage;
+	stopReason: StopReason;
+	errorMessage?: string;
 }
 
 export interface ThinkingLevelChangeEntry extends SessionEntryBase {

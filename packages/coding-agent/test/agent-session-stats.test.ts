@@ -38,6 +38,7 @@ describe("AgentSession session stats", () => {
 				api: "anthropic-messages",
 				provider: "anthropic",
 				model: "claude-haiku-4-5",
+				stopReason: "stop",
 				usage: {
 					input: 11,
 					output: 2,
@@ -85,6 +86,7 @@ describe("AgentSession session stats", () => {
 			api: model.api,
 			provider: model.provider,
 			model: model.id,
+			stopReason: "stop" as const,
 			usage: {
 				input,
 				output: 0,
@@ -127,6 +129,7 @@ describe("AgentSession session stats", () => {
 					api: model.api,
 					provider: model.provider,
 					model: model.id,
+					stopReason: "stop" as const,
 					usage: {
 						input,
 						output: 0,

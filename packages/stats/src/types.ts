@@ -86,6 +86,8 @@ export interface SessionModelUsageEntry {
 	provider: string;
 	model: string;
 	usage: Usage;
+	stopReason?: StopReason;
+	errorMessage?: string;
 }
 
 export type SessionEntry =

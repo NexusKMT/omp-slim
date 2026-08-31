@@ -102,6 +102,8 @@ export interface ClassifierUsage {
 	provider: string;
 	model: string;
 	usage: Usage;
+	stopReason: AssistantMessage["stopReason"];
+	errorMessage?: string;
 }
 
 /**
@@ -163,6 +165,8 @@ async function classifyOnline(input: string, deps: ClassifyDifficultyDeps, ceili
 				provider: attempt.provider,
 				model: attempt.model,
 				usage: attempt.usage,
+				stopReason: attempt.stopReason,
+				errorMessage: attempt.errorMessage,
 			});
 			return attempt;
 		},

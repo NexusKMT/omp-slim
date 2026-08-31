@@ -8,6 +8,7 @@ describe("SessionManager usage statistics", () => {
 		api: "anthropic-messages",
 		provider: "anthropic",
 		model: "claude-haiku-4-5",
+		stopReason: "stop",
 		usage: {
 			input: 11,
 			output: 2,

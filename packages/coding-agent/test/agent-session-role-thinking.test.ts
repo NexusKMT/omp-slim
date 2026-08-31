@@ -393,6 +393,7 @@ describe("AgentSession role model thinking behavior", () => {
 				api: model.api,
 				provider: model.provider,
 				model: model.id,
+				stopReason: "stop",
 				usage: {
 					input: 3,
 					output: 1,

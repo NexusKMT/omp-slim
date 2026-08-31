@@ -255,6 +255,8 @@ describe("auto thinking classifier helpers", () => {
 			provider: fixture.classifierModel.provider,
 			model: fixture.classifierModel.id,
 			usage: fixture.usage,
+			stopReason: "stop",
+			errorMessage: undefined,
 		});
 	});
 
@@ -276,6 +278,11 @@ describe("auto thinking classifier helpers", () => {
 
 		expect(fixture.completeSimpleMock).toHaveBeenCalledTimes(2);
 		expect(onUsage).toHaveBeenCalledTimes(2);
+		expect(onUsage).toHaveBeenNthCalledWith(
+			1,
+			expect.objectContaining({ stopReason: "error", errorMessage: "Internal Server Error" }),
+		);
+		expect(onUsage).toHaveBeenNthCalledWith(2, expect.objectContaining({ stopReason: "stop" }));
 	});
 
 	it("offers the max label only when opted in on a model that exposes the tier", async () => {

@@ -2302,7 +2302,10 @@ export class SessionManager {
 
 	/** Record usage on its initiating branch without moving a successor branch or session. */
 	appendModelUsage(
-		usage: Pick<ModelUsageEntry, "purpose" | "role" | "api" | "provider" | "model" | "usage">,
+		usage: Pick<
+			ModelUsageEntry,
+			"purpose" | "role" | "api" | "provider" | "model" | "usage" | "stopReason" | "errorMessage"
+		>,
 		owner: { sessionId: string; parentId: string | null },
 	): string | undefined {
 		if (this.#sessionId !== owner.sessionId || (owner.parentId !== null && !this.#index.has(owner.parentId))) {

@@ -25,6 +25,8 @@ describe("model usage session entries", () => {
 				api: "anthropic-messages",
 				provider: "anthropic",
 				model: "claude-haiku-4-5",
+				stopReason: "error",
+				errorMessage: "Internal Server Error",
 				usage: {
 					input: 11,
 					output: 2,
@@ -43,6 +45,8 @@ describe("model usage session entries", () => {
 				api: "anthropic-messages",
 				provider: "anthropic",
 				model: "claude-haiku-4-5",
+				stopReason: "error",
+				errorMessage: "Internal Server Error",
 				usage: { input: 11, output: 2, cacheRead: 3, totalTokens: 16 },
 			},
 		]);
@@ -54,6 +58,8 @@ describe("model usage session entries", () => {
 			api: "anthropic-messages",
 			provider: "anthropic",
 			model: "claude-haiku-4-5",
+			stopReason: "error",
+			errorMessage: "Internal Server Error",
 			usage: { totalTokens: 16, cost: { total: 6 } },
 		});
 	});
