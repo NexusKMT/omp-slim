@@ -648,6 +648,15 @@ describe("truncateMiddle", () => {
 		expect(result.outputBytes).toBeLessThanOrEqual(8192 + 64);
 	});
 
+	test("marks single-line byte windows so line ranges can be omitted", () => {
+		const result = truncateMiddle("x".repeat(20_000), { maxBytes: 8192, maxLines: 80 });
+
+		expect(result.truncatedBy).toBe("middle");
+		expect(result.singleLineByteWindows).toBe(true);
+		expect(result.headLines).toBe(1);
+		expect(result.tailLines).toBe(1);
+	});
+
 	test("formatMiddleElisionMarker uses lines, falling back to bytes for <=1 line", () => {
 		expect(formatMiddleElisionMarker(0, 512)).toBe("[…512B elided…]");
 		expect(formatMiddleElisionMarker(1, 100)).toBe("[…100B elided…]");

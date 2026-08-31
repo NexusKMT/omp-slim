@@ -765,11 +765,15 @@ async function spillLargeResultToArtifact(
 			outputLines,
 			outputBytes,
 			maxBytes: headBytes + tailBytes,
-			headRange: headLines > 0 ? { start: 1, end: headLines } : undefined,
-			tailRange:
-				tailLineCount > 0
-					? { start: truncated.totalLines - tailLineCount + 1, end: truncated.totalLines }
-					: undefined,
+			...(truncated.totalLines > 1 && !truncated.singleLineByteWindows
+				? {
+						headRange: headLines > 0 ? { start: 1, end: headLines } : undefined,
+						tailRange:
+							tailLineCount > 0
+								? { start: truncated.totalLines - tailLineCount + 1, end: truncated.totalLines }
+								: undefined,
+					}
+				: {}),
 			elidedLines,
 			elidedBytes,
 			artifactId,

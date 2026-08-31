@@ -106,6 +106,8 @@ export interface TruncationResult {
 	/** Exact source-line counts retained before/after the middle marker. */
 	headLines?: number;
 	tailLines?: number;
+	/** True when both retained windows are partial byte ranges of one source line. */
+	singleLineByteWindows?: boolean;
 	lastLinePartial?: boolean;
 	firstLineExceedsLimit?: boolean;
 }
@@ -585,6 +587,7 @@ export function truncateMiddle(content: string, options: TruncationOptions = {})
 			elidedLines: Math.max(0, totalLines - actualHeadLines - actualTailLines),
 			headLines: actualHeadLines,
 			tailLines: actualTailLines,
+			singleLineByteWindows: totalLines === 1,
 			elidedBytes,
 			lastLinePartial: true,
 			firstLineExceedsLimit: false,
