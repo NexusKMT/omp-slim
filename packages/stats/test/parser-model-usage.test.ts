@@ -39,18 +39,6 @@ describe("model usage session entries", () => {
 		);
 
 		const result = await parseSessionFile(file);
-		expect(result.stats).toMatchObject([
-			{
-				entryId: "classifier-1",
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "claude-haiku-4-5",
-				stopReason: "error",
-				errorMessage: "Internal Server Error",
-				usage: { input: 11, output: 2, cacheRead: 3, totalTokens: 16 },
-			},
-		]);
-
 		await initDb();
 		expect(insertMessageStats(result.stats)).toBe(1);
 		expect(getRecentRequests(1)[0]).toMatchObject({

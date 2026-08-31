@@ -144,8 +144,8 @@ async function classifyOnline(input: string, deps: ClassifyDifficultyDeps, ceili
 	const maxTokens = ONLINE_REASONING_SAFE_MAX_TOKENS;
 
 	const response = await retryTransientCompletion(
-		async () => {
-			const attempt = await completeSimple(
+		() =>
+			completeSimple(
 				model,
 				{
 					systemPrompt: [difficultySystemPromptFor(ceiling)],
@@ -157,19 +157,18 @@ async function classifyOnline(input: string, deps: ClassifyDifficultyDeps, ceili
 					disableReasoning: true,
 					metadata,
 					signal: deps.signal,
+					onAttempt: attempt =>
+						deps.onUsage?.({
+							role: resolved.role,
+							api: attempt.api,
+							provider: attempt.provider,
+							model: attempt.model,
+							usage: attempt.usage,
+							stopReason: attempt.stopReason,
+							errorMessage: attempt.errorMessage,
+						}),
 				},
-			);
-			deps.onUsage?.({
-				role: resolved.role,
-				api: attempt.api,
-				provider: attempt.provider,
-				model: attempt.model,
-				usage: attempt.usage,
-				stopReason: attempt.stopReason,
-				errorMessage: attempt.errorMessage,
-			});
-			return attempt;
-		},
+			),
 		{ signal: deps.signal },
 	);
 

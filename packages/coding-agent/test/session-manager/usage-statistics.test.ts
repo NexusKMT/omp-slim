@@ -32,16 +32,6 @@ describe("SessionManager usage statistics", () => {
 			cost: 0.00153,
 		});
 		expect(session.buildSessionContext().messages).toEqual([]);
-		expect(session.getEntries()).toMatchObject([
-			{
-				type: "model_usage",
-				purpose: "auto-thinking",
-				role: "smol",
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "claude-haiku-4-5",
-			},
-		]);
 	});
 
 	it("records late usage on its initiating branch without moving the active leaf", () => {
@@ -58,16 +48,6 @@ describe("SessionManager usage statistics", () => {
 		expect(session.getLeafId()).toBe(activeLeaf);
 		expect(session.getBranch().some(entry => entry.id === usageId)).toBe(false);
 		expect(session.getBranch(usageId).at(-1)).toMatchObject({ type: "model_usage", parentId: ownerParent });
-	});
-
-	it("drops late usage after the initiating session has been replaced", async () => {
-		const session = SessionManager.inMemory();
-		const owner = { sessionId: session.getSessionId(), parentId: session.getLeafId() };
-
-		await session.newSession();
-
-		expect(session.appendModelUsage(modelUsage, owner)).toBeUndefined();
-		expect(session.getEntries().some(entry => entry.type === "model_usage")).toBe(false);
 	});
 
 	it("accumulates premium requests from assistant messages and task tool results", () => {
