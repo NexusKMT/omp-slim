@@ -231,21 +231,9 @@ function expandedAskArguments(args: Record<string, unknown> | undefined): string
 
 /** One line per tool call: `→ read(src/foo.ts:50-80) ⇒ ok · 31 lines`. */
 
-function expandedToolResultText(result: ToolResultMessage, expandEditDiffs: boolean | undefined): string | undefined {
+function expandedToolResultText(result: ToolResultMessage): string | undefined {
 	const text = contentToText(result.content).trim();
-	if (!text) return undefined;
-	const details = result.details as { diff?: unknown; move?: unknown; perFileResults?: unknown } | undefined;
-	const diff = details?.diff;
-	if (!expandEditDiffs || result.isError || typeof diff !== "string" || !diff.trim()) return text;
-	const supplementary = text.split("\n").filter(line => line.startsWith("Moved to ") || line === "Warnings:");
-	const warningMarker = "\n\nWarnings:\n";
-	const warningIndex = text.indexOf(warningMarker);
-	if (warningIndex >= 0)
-		return [...supplementary.filter(line => line !== "Warnings:"), text.slice(warningIndex + 2)].join("\n");
-	if (typeof details?.move === "string" && !supplementary.some(line => line.startsWith("Moved to "))) {
-		supplementary.push(`Moved to ${details.move}`);
-	}
-	return supplementary.length > 0 ? supplementary.join("\n") : undefined;
+	return text || undefined;
 }
 function toolCallLine(
 	name: string,
@@ -285,7 +273,7 @@ function toolCallLine(
 			if (askArguments) sections.push(`Ask input:\n${fencedText(askArguments, "json")}`);
 		}
 		if (result) {
-			const resultText = expandedToolResultText(result, expandEditDiffs);
+			const resultText = expandedToolResultText(result);
 			if (resultText) {
 				const visibleResult = name === "ask" ? resultText : boundedToolContext(resultText);
 				sections.push(`Tool result:\n${fencedText(visibleResult)}`);
