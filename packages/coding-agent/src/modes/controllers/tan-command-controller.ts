@@ -77,6 +77,17 @@ export class TanCommandController {
 		const systemPrompt = [...session.systemPrompt];
 		const toolNames = session.getEnabledToolNames();
 		const modelRegistry = session.modelRegistry;
+		// Snapshot the parent's rebindable extensions and root policy at dispatch.
+		// The child rebinds these (skipping discovery) so it re-registers the
+		// parent's runtime providers on the shared model registry before the SDK's
+		// syncExtensionSources prune runs — without this the child builds an empty
+		// extension set and unregisters the parent's provider auth (no-key error).
+		const parentPreparedExtensions = session.preparedExtensions;
+		// Path-list fallback for the (rare) parent build path that produced no
+		// prepared factories; the child rebinds from paths so it still re-registers
+		// providers rather than pruning the shared registry from an empty set.
+		const parentExtensionPaths = session.extensionPaths;
+		const parentExtensionRoots = session.effectiveExtensionRoots;
 		const ownerId = session.getAgentId() ?? MAIN_AGENT_ID;
 		const mcpManager = this.ctx.mcpManager;
 		const cwd = this.ctx.sessionManager.getCwd();
@@ -146,6 +157,13 @@ export class TanCommandController {
 							parentAgentId: ownerId,
 							agentRegistry,
 							disableExtensionDiscovery: true,
+							// `[]` is truthy and would make the child pick bindPreparedExtensions([])
+							// over a populated path fallback, so collapse an empty list to undefined.
+							preloadedPreparedExtensions: parentPreparedExtensions?.length
+								? parentPreparedExtensions
+								: undefined,
+							preloadedExtensionPaths: parentExtensionPaths?.length ? [...parentExtensionPaths] : undefined,
+							extensionRoots: () => parentExtensionRoots,
 							localProtocolOptions,
 						});
 						clone = created.session;

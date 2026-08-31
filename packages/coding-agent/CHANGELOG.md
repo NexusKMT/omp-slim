@@ -20,6 +20,7 @@
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
+- Fixed `/tan` background agents failing with "No API key found" when the active provider comes from an extension; the tangent now inherits the parent session's loaded extensions so its provider credentials resolve.
 
 ## [18.0.11] - 2026-08-29
 
