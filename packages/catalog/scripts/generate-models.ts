@@ -17,6 +17,7 @@ import { getGitLabDuoModels } from "@oh-my-pi/pi-ai/providers/gitlab-duo";
 import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
 import { $env } from "@oh-my-pi/pi-utils";
 import { buildModel } from "../src/build";
+import { isRetiredProvider } from "../src/compat/behavior";
 import { collapseVariants } from "../src/compat/collapse";
 import { ANTIGRAVITY_PRIMARY_ENDPOINT, fetchAntigravityDiscoveryModels } from "../src/discovery/antigravity";
 import { buildGitLabDuoWorkflowFallbackModel } from "../src/discovery/gitlab-duo-workflow";
@@ -83,15 +84,6 @@ const packageRoot = path.join(import.meta.dir, "..");
  * and never written to models.json.
  */
 const DISCOVERY_ONLY_PROVIDERS = new Set(["ollama", "vllm", "lm-studio", "litellm"]);
-/**
- * Retired provider ids whose previous-snapshot rows must never be resurrected.
- * `opencode` was split into `opencode-go` / `opencode-zen`; models.dev's
- * `opencode` key now maps to `opencode-zen` (OPENCODE_MODELS_DEV_DESCRIPTORS),
- * so fresh discovery never emits it, but its legacy rows survived as
- * previous-snapshot zombies (no descriptor makes it authoritative to prune),
- * surfacing a dead, un-authable `opencode` provider in the picker.
- */
-const RETIRED_PROVIDERS = new Set(["wafer-pass", "wandb", "opencode"]);
 /**
  * Credential-scoped catalogs (Devin's Cascade roster is gated per account/team
  * via `allowed_model_uids`). Fetching them during generation would bake one
@@ -698,7 +690,7 @@ async function generateModels() {
 				// Yolo-Auto's documented static seed is the complete fallback
 				// catalog; never resurrect retired ids from the previous snapshot.
 				model.provider !== "yolo-auto" &&
-				!RETIRED_PROVIDERS.has(model.provider) &&
+				!isRetiredProvider(model.provider) &&
 				!authoritativeCatalogProviders.has(model.provider) &&
 				!authoritativeSpecialDiscoveryProviders.has(model.provider) &&
 				!modelsDevSnapshotExcludedProviders.has(model.provider)
@@ -757,7 +749,7 @@ async function generateModels() {
 	// Group by provider and sort each provider's models
 	const providers: Record<string, Record<string, ModelSpec>> = {};
 	for (const model of allModels) {
-		if (DISCOVERY_ONLY_PROVIDERS.has(model.provider) || RETIRED_PROVIDERS.has(model.provider)) continue;
+		if (DISCOVERY_ONLY_PROVIDERS.has(model.provider) || isRetiredProvider(model.provider)) continue;
 		if (!providers[model.provider]) {
 			providers[model.provider] = {};
 		}

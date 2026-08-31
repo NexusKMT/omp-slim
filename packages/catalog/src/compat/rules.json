@@ -13843,6 +13843,11 @@
 				}
 			}
 		],
+		"retiredProviders": [
+			"wafer-pass",
+			"wandb",
+			"opencode"
+		],
 		"planRequirements": [
 			{
 				"provider": "openai-codex",
