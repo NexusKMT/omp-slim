@@ -214,20 +214,6 @@ function boundedToolContext(text: string): string {
 	}).content;
 }
 
-function boundedFencedToolContext(text: string, language: string): string {
-	let bounded = boundedToolContext(text);
-	for (;;) {
-		const fenced = fencedText(bounded, language);
-		if (Buffer.byteLength(fenced, "utf-8") <= EXPANDED_TOOL_IO_MAX_BYTES) return fenced;
-		const longestFence = bounded.match(/`+/g)?.reduce((max, run) => Math.max(max, run.length), 0) ?? 0;
-		const fenceBytes = Math.max(3, longestFence + 1) * 2 + language.length + 2;
-		bounded = truncateMiddle(bounded, {
-			maxBytes: Math.max(1, EXPANDED_TOOL_IO_MAX_BYTES - fenceBytes),
-			maxLines: EXPANDED_TOOL_IO_MAX_LINES,
-		}).content;
-	}
-}
-
 function boundedAskJson(value: unknown): string {
 	return boundedToolContext(
 		JSON.stringify(
@@ -241,6 +227,28 @@ function boundedAskJson(value: unknown): string {
 					: nested,
 			2,
 		),
+	);
+}
+
+function boundedFencedToolContext(text: string, language: string): string {
+	const longestFence = text.match(/`+/g)?.reduce((max, run) => Math.max(max, run.length), 0) ?? 0;
+	// A pathological run can make Markdown fences larger than the whole budget.
+	// Use indented code in that case: constant wrapper cost and no delimiter collision.
+	if (longestFence * 2 > EXPANDED_TOOL_IO_MAX_BYTES / 2) {
+		const marker = "[…content elided to fit advisor context…]";
+		const bounded = truncateMiddle(text, {
+			maxBytes: EXPANDED_TOOL_IO_MAX_BYTES - Buffer.byteLength(marker) - 2,
+			maxLines: EXPANDED_TOOL_IO_MAX_LINES,
+		}).content;
+		return `${marker}\n${bounded}`.replace(/^/gm, "    ");
+	}
+	const fenceBytes = Math.max(3, longestFence + 1) * 2 + language.length + 2;
+	return fencedText(
+		truncateMiddle(text, {
+			maxBytes: Math.max(1, EXPANDED_TOOL_IO_MAX_BYTES - fenceBytes),
+			maxLines: EXPANDED_TOOL_IO_MAX_LINES,
+		}).content,
+		language,
 	);
 }
 
