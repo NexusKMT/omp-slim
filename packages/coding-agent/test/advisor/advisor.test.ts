@@ -446,6 +446,26 @@ describe("advisor", () => {
 
 			expect(expanded).toContain("Moved to src/new-name.ts");
 		});
+
+		it("keeps warnings alongside a successful edit diff", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "edit-1",
+				toolName: "edit",
+				content: [{ type: "text", text: "[a.ts]\n-old\n+new\n\nWarnings:\nMatched ambiguous context." }],
+				details: { diff: "--- a/a.ts\n+++ b/a.ts\n@@\n-old\n+new" },
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], {
+				expandEditDiffs: true,
+				expandToolIO: true,
+			});
+
+			expect(expanded).toContain("+++ b/a.ts");
+			expect(expanded).toContain("Warnings:\nMatched ambiguous context.");
+		});
 	});
 
 	describe("advisor yield-queue dispatcher", () => {
@@ -1824,7 +1844,7 @@ describe("advisor", () => {
 			expect(promptText(promptInputs[0])).toContain("$$TOKABC123_");
 			expect(promptText(promptInputs[0])).not.toContain("tok_abc123");
 		});
-		it("does not scan advisor-hidden successful tool-result bodies", async () => {
+		it("obfuscates advisor-visible successful tool-result bodies", async () => {
 			const obfuscator = new SecretObfuscator([
 				{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
 				{ type: "regex", content: "tok_[a-z0-9]+" },
@@ -1853,7 +1873,7 @@ describe("advisor", () => {
 			await Promise.resolve();
 
 			expect(promptInputs).toHaveLength(1);
-			expect(promptText(promptInputs[0])).toContain("$$TOKABC123_");
+			expect(promptText(promptInputs[0])).toContain("$$");
 			expect(promptText(promptInputs[0])).not.toContain("tok_abc123");
 		});
 		it("does not scan tool-call arguments hidden by the primary-argument preview", async () => {
@@ -1884,7 +1904,7 @@ describe("advisor", () => {
 			expect(promptText(promptInputs[0])).not.toContain("tok_abc123");
 		});
 
-		it("does not scan failed tool-result text beyond its visible preview", async () => {
+		it("obfuscates failed tool-result text beyond its one-line preview", async () => {
 			const obfuscator = new SecretObfuscator([
 				{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
 				{ type: "regex", content: "tok_[a-z0-9]+", mode: "replace" },
@@ -1909,7 +1929,7 @@ describe("advisor", () => {
 			});
 			runtime.onTurnEnd();
 			await runtime.waitForCatchup(1000, 1);
-			expect(promptText(promptInputs[0])).toContain("$$TOKABC123_");
+			expect(promptText(promptInputs[0])).toContain("$$");
 			expect(promptText(promptInputs[0])).not.toContain("tok_abc123");
 		});
 

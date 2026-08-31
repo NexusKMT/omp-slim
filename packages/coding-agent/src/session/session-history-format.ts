@@ -230,6 +230,16 @@ function expandedAskArguments(args: Record<string, unknown> | undefined): string
 }
 
 /** One line per tool call: `→ read(src/foo.ts:50-80) ⇒ ok · 31 lines`. */
+
+function expandedToolResultText(result: ToolResultMessage, expandEditDiffs: boolean | undefined): string | undefined {
+	const text = contentToText(result.content).trim();
+	if (!text) return undefined;
+	const diff = (result.details as { diff?: unknown } | undefined)?.diff;
+	if (!expandEditDiffs || result.isError || typeof diff !== "string" || !diff.trim()) return text;
+	const warningMarker = "\n\nWarnings:\n";
+	const warningIndex = text.indexOf(warningMarker);
+	return warningIndex < 0 ? undefined : text.slice(warningIndex + 2);
+}
 function toolCallLine(
 	name: string,
 	args: Record<string, unknown> | undefined,
@@ -267,18 +277,12 @@ function toolCallLine(
 			const askArguments = expandedAskArguments(args);
 			if (askArguments) sections.push(`Ask input:\n${fencedText(askArguments, "json")}`);
 		}
-		if (
-			result &&
-			!(
-				expandEditDiffs &&
-				!result.isError &&
-				typeof (result.details as { diff?: unknown } | undefined)?.diff === "string" &&
-				(result.details as { diff: string }).diff.trim().length > 0
-			)
-		) {
-			const resultText = contentToText(result.content).trim();
-			const visibleResult = name === "ask" ? resultText : boundedToolContext(resultText);
-			if (visibleResult) sections.push(`Tool result:\n${fencedText(visibleResult)}`);
+		if (result) {
+			const resultText = expandedToolResultText(result, expandEditDiffs);
+			if (resultText) {
+				const visibleResult = name === "ask" ? resultText : boundedToolContext(resultText);
+				sections.push(`Tool result:\n${fencedText(visibleResult)}`);
+			}
 		}
 		if (sections.length > 0) base = `${base}\n${sections.join("\n")}`;
 	}
