@@ -461,8 +461,10 @@ export function formatTruncationMetaNotice(truncation: TruncationMeta): string {
 		const tailPart = tail ? `${tail.start}-${tail.end}` : "";
 		if (headPart && tailPart) {
 			notice = `Showing ${headPart} and ${tailPart} of ${totalLines}; ${elidedLines.toLocaleString()} middle line${elidedLines === 1 ? "" : "s"} (${formatBytes(elidedBytes)}) elided`;
+		} else if (totalLines === 1 && elidedBytes > 0) {
+			notice = `Showing head and tail bytes of 1 line; ${formatBytes(elidedBytes)} elided`;
 		} else {
-			notice = `Showing ${truncation.outputLines} of ${totalLines} lines; middle elided`;
+			notice = `Showing ${Math.min(truncation.outputLines, totalLines)} of ${totalLines} lines; middle elided`;
 		}
 		if (truncation.nextOffset != null) {
 			notice += `. Use :${truncation.nextOffset} to continue`;
