@@ -74,6 +74,7 @@ export interface ModelUsageEntry extends SessionEntryBase {
 	purpose: string;
 	/** Resolved model role used for the call, such as `tiny` or `smol`. */
 	role?: string;
+	api: string;
 	provider: string;
 	model: string;
 	usage: Usage;

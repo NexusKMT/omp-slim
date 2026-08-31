@@ -17,6 +17,7 @@ import type {
 	MessageStats,
 	SessionEntry,
 	SessionMessageEntry,
+	SessionModelUsageEntry,
 	SessionServiceTierChangeEntry,
 	ToolCallStats,
 	ToolResultLink,
@@ -72,6 +73,12 @@ function isAssistantMessage(entry: SessionEntry): entry is SessionMessageEntry {
 	// constraint, so skip them at the parser boundary.
 	if (typeof msgEntry.id !== "string" || msgEntry.id.length === 0) return false;
 	return msgEntry.message?.role === "assistant";
+}
+
+function isModelUsage(entry: SessionEntry): entry is SessionModelUsageEntry {
+	if (entry.type !== "model_usage") return false;
+	const usageEntry = entry as SessionModelUsageEntry;
+	return typeof usageEntry.id === "string" && usageEntry.id.length > 0;
 }
 
 /**
@@ -218,6 +225,37 @@ function extractStats(
 		usage,
 		agentType,
 	};
+}
+
+function extractModelUsageStats(
+	sessionFile: string,
+	folder: string,
+	entry: SessionModelUsageEntry,
+	agentType: AgentType,
+): MessageStats | null {
+	const timestamp = Date.parse(entry.timestamp);
+	return extractStats(
+		sessionFile,
+		folder,
+		{
+			type: "message",
+			id: entry.id,
+			parentId: entry.parentId,
+			timestamp: entry.timestamp,
+			message: {
+				role: "assistant",
+				content: [],
+				api: entry.api,
+				provider: entry.provider,
+				model: entry.model,
+				usage: entry.usage,
+				stopReason: "stop",
+				timestamp: Number.isFinite(timestamp) ? timestamp : 0,
+			},
+		},
+		undefined,
+		agentType,
+	);
 }
 
 /** Message timestamp, falling back to the entry's ISO timestamp, then 0. */
@@ -414,6 +452,11 @@ export async function parseSessionFile(sessionPath: string, fromOffset = 0): Pro
 		if (isToolResultMessage(entry)) {
 			const link = extractToolResultLink(sessionPath, entry);
 			if (link) toolResults.push(link);
+			continue;
+		}
+		if (isModelUsage(entry)) {
+			const modelUsageStats = extractModelUsageStats(sessionPath, folder, entry, agentType);
+			if (modelUsageStats) stats.push(modelUsageStats);
 			continue;
 		}
 		if (isAssistantMessage(entry)) {

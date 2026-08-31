@@ -75,7 +75,25 @@ export interface SessionServiceTierChangeEntry {
 	serviceTier: ServiceTierByFamily | ServiceTier | null;
 }
 
-export type SessionEntry = SessionHeader | SessionMessageEntry | SessionServiceTierChangeEntry | { type: string };
+export interface SessionModelUsageEntry {
+	type: "model_usage";
+	id: string;
+	parentId: string | null;
+	timestamp: string;
+	purpose: string;
+	role?: string;
+	api: string;
+	provider: string;
+	model: string;
+	usage: Usage;
+}
+
+export type SessionEntry =
+	| SessionHeader
+	| SessionMessageEntry
+	| SessionServiceTierChangeEntry
+	| SessionModelUsageEntry
+	| { type: string };
 
 /**
  * Behavioral stats extracted from a single user message.

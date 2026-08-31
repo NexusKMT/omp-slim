@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `omp stats` omitting usage from online auto-thinking classifier calls.
+
 ## [18.0.9] - 2026-08-28
 
 ### Fixed

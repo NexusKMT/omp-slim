@@ -98,6 +98,7 @@ export interface ClassifyDifficultyDeps {
 
 export interface ClassifierUsage {
 	role: string;
+	api: string;
 	provider: string;
 	model: string;
 	usage: Usage;
@@ -158,6 +159,7 @@ async function classifyOnline(input: string, deps: ClassifyDifficultyDeps, ceili
 			);
 			deps.onUsage?.({
 				role: resolved.role,
+				api: attempt.api,
 				provider: attempt.provider,
 				model: attempt.model,
 				usage: attempt.usage,

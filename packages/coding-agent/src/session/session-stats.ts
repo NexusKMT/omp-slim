@@ -16,6 +16,7 @@ import {
 } from "../modes/utils/context-usage";
 import type { ContextUsageBreakdown, SessionStats } from "./agent-session-types";
 import { getLatestCompactionEntry } from "./session-context";
+import type { ModelUsageEntry, SessionEntry } from "./session-entries";
 import type { SessionManager } from "./session-manager";
 
 interface PendingContextSnapshot {
@@ -43,6 +44,32 @@ export interface SessionStatsTrackerHost {
 function correctedPromptTokens(assistant: AssistantMessage): number {
 	const providerPromptTokens = assistant.contextSnapshot?.promptTokens ?? calculatePromptTokens(assistant.usage);
 	return Math.max(0, providerPromptTokens - (assistant.contextSnapshot?.historyRewriteTokensRemoved ?? 0));
+}
+
+function isUsageWindowBoundary(entry: SessionEntry): boolean {
+	return (
+		entry.type === "message" ||
+		entry.type === "custom_message" ||
+		entry.type === "branch_summary" ||
+		entry.type === "compaction" ||
+		entry.type === "reset_boundary"
+	);
+}
+
+/** Model calls belonging to the same active transcript window as `agent.state.messages`. */
+function activeModelUsageEntries(branch: SessionEntry[]): ModelUsageEntry[] {
+	const latestCompaction = getLatestCompactionEntry(branch);
+	const compactionIndex = latestCompaction ? branch.lastIndexOf(latestCompaction) : -1;
+	const resetIndex = branch.reduce((latest, entry, index) => (entry.type === "reset_boundary" ? index : latest), -1);
+	let startIndex = 0;
+	if (resetIndex > compactionIndex) {
+		startIndex = resetIndex + 1;
+	} else if (latestCompaction) {
+		const firstKeptIndex = branch.findIndex(entry => entry.id === latestCompaction.firstKeptEntryId);
+		startIndex = firstKeptIndex >= 0 ? firstKeptIndex : compactionIndex + 1;
+		while (startIndex > 0 && !isUsageWindowBoundary(branch[startIndex - 1])) startIndex--;
+	}
+	return branch.slice(startIndex).filter((entry): entry is ModelUsageEntry => entry.type === "model_usage");
 }
 
 /** Computes session totals and tracks the in-flight context estimate. */
@@ -135,9 +162,7 @@ export class SessionStatsTracker {
 				addUsage(usage);
 			}
 		}
-		for (const entry of this.#host.sessionManager.getBranch()) {
-			if (entry.type === "model_usage") addUsage(entry.usage);
-		}
+		for (const entry of activeModelUsageEntries(this.#host.sessionManager.getBranch())) addUsage(entry.usage);
 		return {
 			sessionFile: this.#host.sessionManager.getSessionFile(),
 			sessionId: this.#host.sessionId(),

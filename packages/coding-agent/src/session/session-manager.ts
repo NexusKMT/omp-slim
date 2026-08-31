@@ -2300,10 +2300,24 @@ export class SessionManager {
 		return entry.id;
 	}
 
-	/** Record usage from a model call that must not enter the conversation transcript. */
-	appendModelUsage(usage: Pick<ModelUsageEntry, "purpose" | "role" | "provider" | "model" | "usage">): string {
-		const entry: ModelUsageEntry = { type: "model_usage", ...this.#freshEntryFields(), ...usage };
+	/** Record usage on its initiating branch without moving a successor branch or session. */
+	appendModelUsage(
+		usage: Pick<ModelUsageEntry, "purpose" | "role" | "api" | "provider" | "model" | "usage">,
+		owner: { sessionId: string; parentId: string | null },
+	): string | undefined {
+		if (this.#sessionId !== owner.sessionId || (owner.parentId !== null && !this.#index.has(owner.parentId))) {
+			return undefined;
+		}
+		const activeLeafId = this.#index.leafId();
+		const entry: ModelUsageEntry = {
+			type: "model_usage",
+			id: generateId(this.#index),
+			parentId: owner.parentId,
+			timestamp: nowIso(),
+			...usage,
+		};
 		this.#recordEntry(entry);
+		if (activeLeafId !== owner.parentId) this.#index.setLeaf(activeLeafId);
 		return entry.id;
 	}
 

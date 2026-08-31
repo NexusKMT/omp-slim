@@ -214,6 +214,7 @@ describe("auto thinking classifier helpers", () => {
 			cost: { input: 0.0011, output: 0.0004, cacheRead: 0.00003, cacheWrite: 0, total: 0.00153 },
 		};
 		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockResolvedValue({
+			api: classifierModel.api,
 			provider: classifierModel.provider,
 			model: classifierModel.id,
 			usage,
@@ -250,6 +251,7 @@ describe("auto thinking classifier helpers", () => {
 
 		expect(onUsage).toHaveBeenCalledWith({
 			role: "smol",
+			api: fixture.classifierModel.api,
 			provider: fixture.classifierModel.provider,
 			model: fixture.classifierModel.id,
 			usage: fixture.usage,
@@ -259,6 +261,7 @@ describe("auto thinking classifier helpers", () => {
 	it("reports usage for each response when a transient classifier failure is retried", async () => {
 		const fixture = createOnlineFixture(buildLadderModel("mock-max", MAX_LADDER), "high");
 		fixture.completeSimpleMock.mockResolvedValueOnce({
+			api: fixture.classifierModel.api,
 			provider: fixture.classifierModel.provider,
 			model: fixture.classifierModel.id,
 			usage: fixture.usage,
