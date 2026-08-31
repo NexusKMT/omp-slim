@@ -201,10 +201,11 @@ function windowsDriveAliasPath(filePath: string): string | undefined {
 const WINDOWS_DRIVE_PATH_RE = /^([A-Za-z]):[\\/](.*)$/;
 
 function wslWindowsDrivePath(filePath: string): string | undefined {
-	const match = WINDOWS_DRIVE_PATH_RE.exec(filePath);
+	const normalized = path.win32.normalize(filePath);
+	const match = WINDOWS_DRIVE_PATH_RE.exec(normalized);
 	if (!match) return undefined;
 	const [, drive, rest] = match;
-	const segments = rest.replace(/\\/g, "/").split("/").filter(Boolean);
+	const segments = rest.split("\\").filter(Boolean);
 	return path.posix.join("/mnt", drive!.toLowerCase(), ...segments);
 }
 

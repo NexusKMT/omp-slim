@@ -31,6 +31,11 @@ describe("Windows drive alias paths", () => {
 		expect(normalizeWindowsDriveAliasPath("C:\\", "linux", wsl)).toBe("/mnt/c");
 	});
 
+	it("clamps parent traversal at the Windows drive root", () => {
+		const wsl = { WSL_INTEROP: "/run/WSL/1_interop" } as NodeJS.ProcessEnv;
+		expect(normalizeWindowsDriveAliasPath("C:\\..\\Windows\\x", "linux", wsl)).toBe("/mnt/c/Windows/x");
+	});
+
 	it("leaves paths untranslated on plain linux without WSL interop vars", () => {
 		const plain = {} as NodeJS.ProcessEnv;
 		expect(normalizeWindowsDriveAliasPath("C:\\Users\\me\\pic.png", "linux", plain)).toBe("C:\\Users\\me\\pic.png");
