@@ -2108,8 +2108,10 @@ mod tests {
 	#[test]
 	#[ignore = "spawned by process-control tests"]
 	fn process_test_sleeper() {
-		let duration_ms = std::env::var("PI_SHELL_PROCESS_TEST_SLEEP_MS")
-			.expect("process test sleep duration")
+		let Ok(duration_ms) = std::env::var("PI_SHELL_PROCESS_TEST_SLEEP_MS") else {
+			return;
+		};
+		let duration_ms = duration_ms
 			.parse()
 			.expect("valid process test sleep duration");
 		std::thread::sleep(Duration::from_millis(duration_ms));
