@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed inline images leaving blank rows when outer-terminal identity variables leak into Herdr panes ([#10353](https://github.com/can1357/oh-my-pi/issues/10353)).
+
 ## [18.0.11] - 2026-08-29
 
 ### Added
