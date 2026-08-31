@@ -427,6 +427,25 @@ describe("advisor", () => {
 			expect(expanded).toContain("+++ b/first.ts");
 			expect(expanded).toContain("Failed to match second file");
 		});
+
+		it("keeps successful edit results when no textual diff was rendered", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "edit-1",
+				toolName: "edit",
+				content: [{ type: "text", text: "Moved to src/new-name.ts" }],
+				details: { diff: "" },
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], {
+				expandEditDiffs: true,
+				expandToolIO: true,
+			});
+
+			expect(expanded).toContain("Moved to src/new-name.ts");
+		});
 	});
 
 	describe("advisor yield-queue dispatcher", () => {

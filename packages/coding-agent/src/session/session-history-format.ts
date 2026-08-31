@@ -272,7 +272,8 @@ function toolCallLine(
 			!(
 				expandEditDiffs &&
 				!result.isError &&
-				typeof (result.details as { diff?: unknown } | undefined)?.diff === "string"
+				typeof (result.details as { diff?: unknown } | undefined)?.diff === "string" &&
+				(result.details as { diff: string }).diff.trim().length > 0
 			)
 		) {
 			const resultText = contentToText(result.content).trim();
