@@ -17,6 +17,8 @@
 
 ### Fixed
 
+- Browser startup on Linux ARM64 now reports that managed Chrome-for-Testing builds are unavailable and directs users to a system Chromium or `PUPPETEER_EXECUTABLE_PATH`.
+
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Managed Chrome-for-Testing downloads now reject unsupported Linux ARM64 hosts instead of installing an x86_64 browser.
+
 ## [18.0.11] - 2026-08-29
 
 ### Fixed
