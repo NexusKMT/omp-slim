@@ -16,6 +16,7 @@ from robomp.dashboard import tail_jsonl
 from robomp.db import Database, close_database, get_database, issue_key
 from robomp.github_client import GitHubClient
 from robomp.manual_triage import InvalidIssueRef, ManualTriageTimeout, await_terminal_state, parse_issue_ref
+from robomp.queue import WorkerPool
 from robomp.sandbox import LocalGitTransport
 from robomp.server import create_app
 
@@ -382,6 +383,16 @@ def _enable_replay(monkeypatch: pytest.MonkeyPatch) -> str:
 def _install_github_mock(app, transport: httpx.MockTransport) -> None:
     """Replace the real GitHub client with one wired to a MockTransport."""
     app.state.bag["github"] = GitHubClient("token", transport=transport)
+
+
+@pytest.fixture(autouse=True)
+def paused_dispatcher(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep API state assertions isolated from the background worker pool."""
+
+    async def _claim_none(_pool: WorkerPool) -> None:
+        return None
+
+    monkeypatch.setattr(WorkerPool, "_claim_next_unique", _claim_none)
 
 
 def test_trigger_returns_404_when_token_disabled(settings: Settings) -> None:
