@@ -1961,6 +1961,37 @@ describe("advisor", () => {
 			expect(promptText(promptInputs[0])).toContain("$$");
 			expect(promptText(promptInputs[0])).not.toContain("tok_abc123");
 		});
+
+		it("redacts expanded tool results before middle truncation", async () => {
+			const secret = `BEGIN_SECRET_${"x".repeat(5_000)}_END_SECRET`;
+			const obfuscator = new SecretObfuscator([{ type: "plain", content: secret }]);
+			const placeholder = obfuscator.obfuscate(secret);
+			const promptInputs: Array<string | AgentMessage[]> = [];
+			const agent = makeAgent(promptInputs);
+			const messages: AgentMessage[] = [
+				{
+					role: "toolResult",
+					toolCallId: "c1",
+					toolName: "read",
+					content: `${"head".repeat(1_000)}${secret}${"tail".repeat(1_000)}`,
+					isError: false,
+					timestamp: 1,
+				} as unknown as AgentMessage,
+			];
+			const runtime = new AdvisorRuntime(agent, {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+				obfuscator,
+			});
+
+			runtime.onTurnEnd();
+			await runtime.waitForCatchup(1_000, 1);
+
+			const rendered = promptText(promptInputs[0]);
+			expect(rendered).toContain(placeholder);
+			expect(rendered).not.toContain("BEGIN_SECRET_");
+			expect(rendered).not.toContain("_END_SECRET");
+		});
 		it("does not scan tool-call arguments hidden by the primary-argument preview", async () => {
 			const obfuscator = new SecretObfuscator([
 				{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },

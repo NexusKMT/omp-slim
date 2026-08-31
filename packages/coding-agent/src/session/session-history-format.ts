@@ -53,6 +53,8 @@ export interface HistoryFormatOptions {
 	 * evidence returned by primary tools without admitting unbounded output.
 	 */
 	expandToolIO?: boolean;
+	/** Transform expanded tool input/output before any byte or line truncation. */
+	transformExpandedToolIO?: (text: string) => string;
 	/**
 	 * Chunked rendering support: a caller formatting one logical transcript in
 	 * several calls (the advisor's chunked delta render) passes a result index
@@ -214,17 +216,17 @@ function boundedToolContext(text: string): string {
 	}).content;
 }
 
-function boundedAskJson(value: unknown): string {
+function boundedAskJson(value: unknown, transform?: (text: string) => string): string {
 	return boundedToolContext(
 		JSON.stringify(
 			value,
-			(_key, nested) =>
-				typeof nested === "string"
-					? truncateMiddle(nested, {
-							maxBytes: EXPANDED_ASK_FIELD_MAX_BYTES,
-							maxLines: EXPANDED_ASK_FIELD_MAX_LINES,
-						}).content
-					: nested,
+			(_key, nested) => {
+				if (typeof nested !== "string") return nested;
+				return truncateMiddle(transform?.(nested) ?? nested, {
+					maxBytes: EXPANDED_ASK_FIELD_MAX_BYTES,
+					maxLines: EXPANDED_ASK_FIELD_MAX_LINES,
+				}).content;
+			},
 			2,
 		),
 	);
@@ -252,17 +254,23 @@ function boundedFencedToolContext(text: string, language: string): string {
 	);
 }
 
-function expandedAskArguments(args: Record<string, unknown> | undefined): string | undefined {
+function expandedAskArguments(
+	args: Record<string, unknown> | undefined,
+	transform?: (text: string) => string,
+): string | undefined {
 	if (!args) return undefined;
 	const visibleArgs = Object.fromEntries(Object.entries(args).filter(([key]) => key !== INTENT_FIELD));
 	try {
-		return boundedAskJson(visibleArgs);
+		return boundedAskJson(visibleArgs, transform);
 	} catch {
 		return undefined;
 	}
 }
 
-function expandedAskDetails(result: ToolResultMessage | undefined): string | undefined {
+function expandedAskDetails(
+	result: ToolResultMessage | undefined,
+	transform?: (text: string) => string,
+): string | undefined {
 	if (!result?.details || typeof result.details !== "object") return undefined;
 	const details = result.details as {
 		question?: unknown;
@@ -282,14 +290,13 @@ function expandedAskDetails(result: ToolResultMessage | undefined): string | und
 			: typeof details.question === "string"
 				? [details.question]
 				: [];
-	return questions.length > 0 ? boundedAskJson({ questions }) : undefined;
+	return questions.length > 0 ? boundedAskJson({ questions }, transform) : undefined;
 }
 
 /** One line per tool call: `→ read(src/foo.ts:50-80) ⇒ ok · 31 lines`. */
 
-function expandedToolResultText(result: ToolResultMessage): string | undefined {
-	const text = contentToText(result.content);
-	return text.trim() ? text : undefined;
+function expandedToolResultText(text: string | undefined): string | undefined {
+	return text?.trim() ? text : undefined;
 }
 function toolCallLine(
 	name: string,
@@ -298,17 +305,20 @@ function toolCallLine(
 	includeToolIntent?: boolean,
 	expandEditDiffs?: boolean,
 	expandToolIO?: boolean,
+	transformExpandedToolIO?: (text: string) => string,
 ): string {
 	const head = `→ ${name}(${formatToolCallPrimaryArg(name, args)})`;
+	const rawResultText = result ? contentToText(result.content) : undefined;
+	const visibleResultText =
+		rawResultText === undefined ? undefined : (transformExpandedToolIO?.(rawResultText) ?? rawResultText);
 	let base: string;
 	if (!result) {
 		base = `${head} ⇒ pending`;
 	} else {
-		const text = contentToText(result.content);
-		const lines = lineCount(text);
+		const lines = lineCount(rawResultText ?? "");
 		const count = `${lines} ${lines === 1 ? "line" : "lines"}`;
 		if (result.isError) {
-			const firstLine = formatToolResultErrorPreview(result.content);
+			const firstLine = formatToolResultErrorPreview(visibleResultText ?? "");
 			base = firstLine ? `${head} ⇒ error · ${count} — ${firstLine}` : `${head} ⇒ error · ${count}`;
 		} else {
 			base = `${head} ⇒ ok · ${count}`;
@@ -325,11 +335,12 @@ function toolCallLine(
 	if (expandToolIO) {
 		const sections: string[] = [];
 		if (name === "ask") {
-			const askArguments = expandedAskArguments(args) ?? expandedAskDetails(result);
+			const askArguments =
+				expandedAskArguments(args, transformExpandedToolIO) ?? expandedAskDetails(result, transformExpandedToolIO);
 			if (askArguments) sections.push(`Ask input:\n${boundedFencedToolContext(askArguments, "json")}`);
 		}
 		if (result) {
-			const resultText = expandedToolResultText(result);
+			const resultText = expandedToolResultText(visibleResultText);
 			if (resultText) {
 				sections.push(`Tool result:\n${boundedFencedToolContext(resultText, "text")}`);
 			}
@@ -489,6 +500,7 @@ export function formatSessionHistoryMarkdown(messages: unknown[], opts?: History
 								opts?.includeToolIntent,
 								opts?.expandEditDiffs,
 								opts?.expandToolIO,
+								opts?.transformExpandedToolIO,
 							),
 						);
 					} else if (opts?.includeThinking && block.type === "thinking" && block.thinking.trim()) {
@@ -521,6 +533,7 @@ export function formatSessionHistoryMarkdown(messages: unknown[], opts?: History
 						opts?.includeToolIntent,
 						opts?.expandEditDiffs,
 						opts?.expandToolIO,
+						opts?.transformExpandedToolIO,
 					),
 					"",
 				);
