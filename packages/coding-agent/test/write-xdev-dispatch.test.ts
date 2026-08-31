@@ -686,7 +686,7 @@ describe("xd:// and top-level calls share the canonical tool map", () => {
 		}
 	});
 
-	it("resolves a direct device call whether the name is bare or carries the advertised xd:// prefix (#10342)", () => {
+	it("resolves bare and case-insensitive xd:// direct device names (#10342)", () => {
 		const githubDevice = {
 			name: "github",
 			label: "GitHub",
@@ -698,14 +698,12 @@ describe("xd:// and top-level calls share the canonical tool map", () => {
 		};
 		const xdev = createTestXdevState([githubDevice]);
 
-		// A model calling the device directly may emit either the bare mounted
-		// name or the exact `xd://github` spelling the device docs advertise;
-		// both must land on the same canonical tool. Before the fix the prefixed
-		// form missed the resolver and the agent loop threw `Tool xd://github
-		// not found`.
+		// Direct calls accept the same case-insensitive xd scheme as read/write
+		// URL dispatch while preserving the canonical device name.
 		expect(resolveMountedXdevTool(xdev, "github")).toBe(githubDevice);
 		expect(resolveMountedXdevTool(xdev, "xd://github")).toBe(githubDevice);
-
+		expect(resolveMountedXdevTool(xdev, "XD://github")).toBe(githubDevice);
+		expect(resolveMountedXdevTool(xdev, "Xd://github")).toBe(githubDevice);
 		// A genuinely unmounted name still misses, prefixed or not.
 		expect(resolveMountedXdevTool(xdev, "xd://no_such_tool")).toBeUndefined();
 	});

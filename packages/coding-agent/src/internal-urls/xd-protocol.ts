@@ -5,7 +5,7 @@ export const XD_URL_PREFIX = "xd://";
 
 /** Returns the canonical tool name from a bare or `xd://`-prefixed spelling. */
 export function stripXdUrlPrefix(name: string): string {
-	return name.startsWith(XD_URL_PREFIX) ? name.slice(XD_URL_PREFIX.length) : name;
+	return name.toLowerCase().startsWith(XD_URL_PREFIX) ? name.slice(XD_URL_PREFIX.length) : name;
 }
 
 /**
