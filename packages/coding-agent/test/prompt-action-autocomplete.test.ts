@@ -61,9 +61,7 @@ describe("prompt action autocomplete", () => {
 		expect(suggestions?.items.find(item => item.label === "Copy whole prompt")?.description).toBe(
 			"Alt+Shift+C/Ctrl+Shift+C",
 		);
-		expect(suggestions?.items.find(item => item.label === "Move cursor to line start")?.description).toBe(
-			"Home/F6",
-		);
+		expect(suggestions?.items.find(item => item.label === "Move cursor to line start")?.description).toBe("Home/F6");
 		expect(suggestions?.items.find(item => item.label === "Move cursor to line end")?.description).toBe("F7");
 		expect(suggestions?.items.find(item => item.label === "Undo")?.description).toBe("F8");
 	});
