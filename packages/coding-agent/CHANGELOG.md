@@ -18,6 +18,7 @@
 ### Fixed
 
 - Fixed an issue where custom model overrides were lost during configuration updates
+- Clarified that the default task-delegation setting follows the selected model's policy.
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
 
