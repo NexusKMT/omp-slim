@@ -454,6 +454,10 @@
 					{
 						"kind": "bounded",
 						"token": "glm"
+					},
+					{
+						"kind": "bounded",
+						"token": "zai-glm"
 					}
 				],
 				"families": [
