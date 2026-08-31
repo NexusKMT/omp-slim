@@ -17,6 +17,7 @@
 ### Fixed
 
 - Fixed an issue where custom model overrides were lost during configuration updates
+- Fixed entering `/rename` without a title interrupting active session activity ([#10326](https://github.com/can1357/oh-my-pi/issues/10326)).
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
 
