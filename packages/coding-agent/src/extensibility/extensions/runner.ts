@@ -1135,6 +1135,17 @@ export class ExtensionRunner {
 	}
 
 	/**
+	 * Run an extension-owned callback within this session's settings scope, so a
+	 * synchronous `SettingsManager.create(ctx.cwd)` inside it resolves THIS
+	 * session's manager rather than a same-cwd sibling's. Event handlers get this
+	 * scope via {@link #runHandlerWithTimeout}; slash commands and shortcuts are
+	 * invoked directly by their controllers and route through here instead.
+	 */
+	runScoped<T>(fn: () => T): T {
+		return withActiveSettings(this.settings, fn);
+	}
+
+	/**
 	 * Creates an extension context, optionally scoped to a provider request model.
 	 *
 	 * `delegation` wires the same-tool `ctx.invokeTool` for a re-registered built-in: when `toolName`

@@ -156,4 +156,64 @@ describe("legacy pi SettingsManager shim (issue #10397)", () => {
 			authStorage.close();
 		}
 	});
+
+	it("scopes slash-command and shortcut callbacks to the active session settings", async () => {
+		// Same setup as the event-handler case: an explicit SDK manager plus a
+		// same-cwd singleton that would otherwise be the newest matching fallback.
+		const sdkAgentDir = tempDir.join("cmd-sdk-agent");
+		fs.mkdirSync(sdkAgentDir, { recursive: true });
+		await Bun.write(path.join(sdkAgentDir, "config.yml"), YAML.stringify({ piVim: { session: "sdk" } }));
+
+		const sdkSettings = await Settings.loadIsolated({ cwd: projectDir, agentDir: sdkAgentDir });
+		const singleton = await Settings.init({ cwd: projectDir, agentDir });
+
+		let commandObserved: Settings | undefined;
+		let shortcutObserved: Settings | undefined;
+		const runtime = new ExtensionRuntime();
+		const extension = await loadExtensionFromFactory(
+			pi => {
+				pi.registerCommand("vimcmd", {
+					handler: async (_args, ctx) => {
+						commandObserved = SettingsManager.create(ctx.cwd);
+					},
+				});
+				pi.registerShortcut("alt+j", {
+					handler: ctx => {
+						shortcutObserved = SettingsManager.create(ctx.cwd);
+					},
+				});
+			},
+			projectDir,
+			new EventBus(),
+			runtime,
+		);
+		const authStorage = await AuthStorage.create(tempDir.join("cmd-auth.db"));
+		try {
+			const runner = new ExtensionRunner(
+				[extension],
+				runtime,
+				projectDir,
+				SessionManager.inMemory(projectDir),
+				new ModelRegistry(authStorage),
+				undefined,
+				sdkSettings,
+			);
+
+			// Invoked exactly as agent-session.ts / input-controller.ts do: outside
+			// #runHandlerWithTimeout, through runScoped so the active store is set.
+			const command = runner.getCommand("vimcmd");
+			if (!command) throw new Error("command not registered");
+			await runner.runScoped(() => command.handler("", runner.createCommandContext()));
+			const shortcut = runner.getShortcuts().get("alt+j");
+			if (!shortcut) throw new Error("shortcut not registered");
+			runner.runScoped(() => shortcut.handler(runner.createCommandContext()));
+
+			expect(commandObserved).toBe(sdkSettings);
+			expect(shortcutObserved).toBe(sdkSettings);
+			// Without the scope the same call leaks the newest same-cwd manager.
+			expect(SettingsManager.create(projectDir)).toBe(singleton);
+		} finally {
+			authStorage.close();
+		}
+	});
 });

@@ -6202,7 +6202,7 @@ export class AgentSession {
 		const ctx = this.#extensionRunner.createCommandContext();
 
 		try {
-			await command.handler(args, ctx);
+			await this.#extensionRunner.runScoped(() => command.handler(args, ctx));
 			return true;
 		} catch (err) {
 			// Emit error via extension runner
