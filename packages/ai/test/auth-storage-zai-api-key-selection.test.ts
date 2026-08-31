@@ -151,8 +151,45 @@ describe("AuthStorage Z.AI API-key usage ranking", () => {
 				},
 			],
 		});
-
 		expect(await authStorage.getApiKey("zai")).toBe("zai-healthy");
+	});
+
+	test("markUsageLimitReached inspects usage report for API keys to determine accurate reset time", async () => {
+		if (!authStorage) throw new Error("test setup failed");
+
+		await authStorage.set("zai", [
+			{ type: "api_key", key: "zai-acc1", source: "login" },
+			{ type: "api_key", key: "zai-acc2", source: "login" },
+		]);
+		const futureReset = Date.now() + 24 * HOUR_MS;
+		usageByKey.set("zai-acc1", {
+			provider: "zai",
+			fetchedAt: Date.now(),
+			limits: [
+				{
+					id: "zai:credits:1w",
+					label: "ZAI Weekly Credit Quota",
+					scope: { provider: "zai", windowId: "1w", shared: true },
+					window: { id: "1w", label: "Weekly", durationMs: 7 * 24 * HOUR_MS, resetsAt: futureReset },
+					amount: {
+						unit: "credits",
+						used: 140000,
+						limit: 140000,
+						remaining: 0,
+						usedFraction: 1,
+						remainingFraction: 0,
+					},
+					status: "exhausted",
+				},
+			],
+		});
+
+		const outcome = await authStorage.markUsageLimitReached("zai", "session-xyz", {
+			apiKey: "zai-acc1",
+		});
+
+		expect(outcome.switched).toBe(true);
+		expect(await authStorage.getApiKey("zai", "session-xyz")).toBe("zai-acc2");
 	});
 
 	test("ignores exhausted Z.AI feature quotas for model request routing", async () => {

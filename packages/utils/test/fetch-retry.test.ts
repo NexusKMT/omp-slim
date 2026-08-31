@@ -134,4 +134,27 @@ describe("extractRetryHint", () => {
 	it("prefers the account reset window over a shorter retry hint", () => {
 		expect(extractRetryHint(undefined, "Please retry in 5s. Your limit will reset in 13 minutes")).toBe(13 * 60_000);
 	});
+
+	it("parses retry-after-ms in error body", () => {
+		expect(
+			extractRetryHint(
+				undefined,
+				'429 {"type":"error","error":{"type":"rate_limit_error","code":"1310"}} retry-after-ms=98497000',
+			),
+		).toBe(98497000);
+	});
+
+	it("parses 'will reset at YYYY-MM-DD HH:MM:SS' timestamp in error body", () => {
+		const future = new Date(Date.now() + 3_600_000).toISOString().replace("T", " ").slice(0, 19);
+		const hint = extractRetryHint(undefined, `Your limit will reset at ${future}`);
+		expect(hint).toBeGreaterThan(3_500_000);
+		expect(hint).toBeLessThanOrEqual(3_600_000);
+	});
+
+	it("parses Chinese '将在 YYYY-MM-DD HH:MM:SS 重置' reset timestamp in error body", () => {
+		const future = new Date(Date.now() + 3_600_000).toISOString().replace("T", " ").slice(0, 19);
+		const hint = extractRetryHint(undefined, `已达到使用上限。您的限额将在 ${future} 重置。`);
+		expect(hint).toBeGreaterThan(3_500_000);
+		expect(hint).toBeLessThanOrEqual(3_600_000);
+	});
 });

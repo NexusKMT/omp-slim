@@ -12,6 +12,12 @@ const RETRY_DELAY_FIELD_PATTERN = /"retryDelay":\s*"([0-9.]+)(ms|s)"/i;
 const TRY_AGAIN_PATTERN = /try again in\s+~?\s*([0-9.]+)\s*(ms|sec|s|minutes?|mins?|m|hours?|hrs?|h)\b/i;
 // "Your limit will reset in 13 minutes" / "reset in 13 minutes" / "will reset in 2h"
 const WILL_RESET_IN_PATTERN = /(?:will\s+)?reset in\s+~?\s*([0-9.]+)\s*(ms|sec|s|minutes?|mins?|m|hours?|hrs?|h)\b/i;
+// "Your limit will reset at 2026-09-01 09:44:51" / "reset at 2026-09-01T09:44:51Z"
+const WILL_RESET_AT_PATTERN =
+	/(?:will\s+)?reset at\s+([0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:?[0-9]{2})?)/i;
+const CN_RESET_AT_PATTERN = /将在\s*([0-9]{4}-[0-9]{2}-[0-9]{2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2})\s*重置/;
+// "retry-after-ms=98497000"
+const RETRY_AFTER_MS_BODY_PATTERN = /\bretry-after-ms=([0-9]+)\b/i;
 
 /**
  * Server-suggested retry delay extraction. Merges the patterns historically used
@@ -83,6 +89,22 @@ export function extractRetryHint(source: Response | Headers | null | undefined, 
 		if (!Number.isNaN(seconds)) {
 			const totalMs = ((hours * 60 + minutes) * 60 + seconds) * 1000;
 			if (totalMs > 0) return totalMs;
+		}
+	}
+	const retryAfterMsMatch = RETRY_AFTER_MS_BODY_PATTERN.exec(body);
+	if (retryAfterMsMatch?.[1]) {
+		const ms = Number(retryAfterMsMatch[1]);
+		if (Number.isFinite(ms) && ms > 0) return ms;
+	}
+
+	for (const pattern of [WILL_RESET_AT_PATTERN, CN_RESET_AT_PATTERN]) {
+		const match = pattern.exec(body);
+		if (match?.[1]) {
+			const isoStr = match[1].includes("T") ? match[1] : `${match[1].replace(" ", "T")}Z`;
+			const parsed = Date.parse(isoStr);
+			if (!Number.isNaN(parsed) && parsed > Date.now()) {
+				return parsed - Date.now();
+			}
 		}
 	}
 	// Account-reset hints ("will reset in …") take precedence over short
