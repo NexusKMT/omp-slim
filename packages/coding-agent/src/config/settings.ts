@@ -428,6 +428,15 @@ function resolvePathScopedStringArray(settingPath: SettingPath, value: unknown, 
 	return resolved;
 }
 
+/**
+ * Upper bound on symlink hops while resolving a dangling config chain by hand.
+ * `realpath()` already rejects a fully-linked cycle with ELOOP; this caps the
+ * manual walk so a chain that turns cyclic AFTER realpath reported ENOENT (a
+ * concurrent retarget mid-walk) surfaces a bounded ELOOP instead of spinning
+ * forever. Matches Linux's MAXSYMLINKS (40).
+ */
+const MAX_SYMLINK_HOPS = 40;
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Settings Class
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1415,7 +1424,20 @@ export class Settings {
 		try {
 			if ((await fs.promises.lstat(filePath)).isSymbolicLink()) {
 				let current = filePath;
-				for (;;) {
+				for (let hops = 0; ; hops++) {
+					// realpath() rejects a fully-linked cycle up front, so we only
+					// reach the manual walk on a chain that dangles today. It can
+					// still turn cyclic mid-walk if another process retargets an
+					// intermediate link, at which point readlink() would alternate
+					// forever. Cap the hops and surface an ELOOP so a cycle has
+					// bounded behavior instead of hanging flush().
+					if (hops >= MAX_SYMLINK_HOPS) {
+						const cyclic = new Error(
+							`ELOOP: symlink chain for ${filePath} exceeds ${MAX_SYMLINK_HOPS} hops (possible cycle)`,
+						) as Error & { code?: string };
+						cyclic.code = "ELOOP";
+						throw cyclic;
+					}
 					let target: string;
 					try {
 						target = await fs.promises.readlink(current);
@@ -1447,7 +1469,33 @@ export class Settings {
 						} catch (error) {
 							if (!isEnoent(error)) throw error;
 						}
-						resolved = path.resolve(canonicalDir, target);
+						// Resolve the relative target one segment at a time so an
+						// intermediate directory symlink WITHIN the target is followed
+						// by the filesystem BEFORE a later `..` is applied. Normalizing
+						// the whole target string up front (path.resolve) collapses
+						// `alias/..` lexically to the config dir, but the kernel follows
+						// `alias` first and then pops its PHYSICAL parent, so the two
+						// disagree whenever an alias precedes a `..`. realpath() on the
+						// deepest existing prefix keeps `acc` canonical, so each `..`
+						// pops the real parent; a missing component (the dangling final
+						// referent, or a vanished intermediate) falls back to a lexical
+						// join since there is nothing left to follow.
+						let acc = canonicalDir;
+						for (const segment of target.split(/[\\/]+/)) {
+							if (segment === "" || segment === ".") continue;
+							if (segment === "..") {
+								acc = path.dirname(acc);
+								continue;
+							}
+							const candidate = path.join(acc, segment);
+							try {
+								acc = await fs.promises.realpath(candidate);
+							} catch (error) {
+								if (!isEnoent(error)) throw error;
+								acc = candidate;
+							}
+						}
+						resolved = acc;
 					}
 					let nextIsSymlink = false;
 					try {

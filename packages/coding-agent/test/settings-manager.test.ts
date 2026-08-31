@@ -402,6 +402,71 @@ describe("Settings", () => {
 			expect(fs.lstatSync(midPath).isSymbolicLink()).toBe(true);
 		});
 
+		it("throws a bounded ELOOP when the chain turns cyclic after realpath reports ENOENT", async () => {
+			// config.yml -> mid.yml -> final.yml (final missing), so the initial
+			// realpath() reports ENOENT and the manual chain walk runs. A
+			// concurrent process then retargets mid.yml back at the chain head, so
+			// readlink() alternates head<->mid forever. The resolver must cap its
+			// hops and throw an ELOOP-style error rather than hang flush().
+			const finalPath = tempDir.join("final-config.yml");
+			const midPath = tempDir.join("mid-config.yml");
+			await fs.promises.symlink(finalPath, midPath, "file");
+			await fs.promises.symlink(midPath, getConfigPath(), "file");
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+
+			const readlink = fs.promises.readlink.bind(fs.promises);
+			let readlinkCalls = 0;
+			// Bounded safety valve set far above the resolver's hop cap: the fixed
+			// resolver throws ELOOP well before this fires, so it never trips. An
+			// unbounded walk (pre-fix) only stops here, surfacing a distinct error
+			// that proves no ELOOP was raised — RED without hanging the suite.
+			const safetyValve = 500;
+			vi.spyOn(fs.promises, "readlink").mockImplementation((async (target: fs.PathLike) => {
+				readlinkCalls++;
+				if (readlinkCalls > safetyValve) {
+					throw new FsCodeError("ETESTVALVE", "unbounded symlink walk");
+				}
+				// Retarget mid back at the chain head to close the cycle.
+				if (String(target) === midPath) return getConfigPath();
+				return readlink(target);
+			}) as typeof fs.promises.readlink);
+
+			settings.set("setupVersion", 5);
+			await expect(settings.flush()).rejects.toThrow(/ELOOP/);
+			expect(readlinkCalls).toBeLessThanOrEqual(safetyValve);
+		});
+
+		it("follows an intermediate directory symlink inside a relative target before applying ..", async () => {
+			// config.yml -> alias/../final.yml, where `alias` is a symlinked
+			// directory (alias -> elsewhere/deep) and final.yml is missing. The
+			// filesystem follows `alias` first and then pops its PHYSICAL parent,
+			// landing on elsewhere/final.yml. A lexical normalization of the whole
+			// target collapses `alias/..` to the config dir up front and would
+			// clobber <configdir>/final.yml while leaving the real chain dangling.
+			const elsewhereDir = tempDir.join("elsewhere");
+			const deepDir = path.join(elsewhereDir, "deep");
+			fs.mkdirSync(deepDir, { recursive: true });
+			const aliasDir = path.join(agentDir, "alias");
+			await fs.promises.symlink(deepDir, aliasDir, "dir");
+
+			await fs.promises.symlink("alias/../final-config.yml", getConfigPath(), "file");
+
+			const physicalFinal = path.join(elsewhereDir, "final-config.yml");
+			const lexicalSibling = path.join(agentDir, "final-config.yml");
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			settings.set("setupVersion", 8);
+			await settings.flush();
+
+			// The write lands on the physical target (fs semantics), recreating it,
+			// while the lexically collapsed sibling stays untouched.
+			expect(YAML.parse(await Bun.file(physicalFinal).text())).toEqual({ setupVersion: 8 });
+			expect(fs.existsSync(lexicalSibling)).toBe(false);
+			// The user-managed chain head survives as a symlink.
+			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
+		});
+
 		it("falls back to move-aside replacement when Windows reports EPERM", async () => {
 			await writeSettings({ setupVersion: 1 });
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
