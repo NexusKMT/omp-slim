@@ -408,6 +408,23 @@ describe("advisor", () => {
 			expect(Buffer.byteLength(expanded)).toBeLessThan(9 * 1024);
 		});
 
+		it("still adds its own head-tail marker when retained output contains an upstream elision marker", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "read-1",
+				toolName: "read",
+				content: [{ type: "text", text: `head-${"x".repeat(20_000)}-[…9B elided…]-tail` }],
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], { expandToolIO: true });
+
+			expect(expanded).toContain("head-");
+			expect(expanded).toContain("-tail");
+			expect(expanded.match(/elided/g)).toHaveLength(2);
+		});
+
 		it("keeps failure details alongside a partial edit diff", () => {
 			const result = {
 				role: "toolResult",

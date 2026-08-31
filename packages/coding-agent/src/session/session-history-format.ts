@@ -211,7 +211,7 @@ function boundedToolContext(text: string): string {
 		maxBytes: EXPANDED_TOOL_IO_MAX_BYTES,
 		maxLines: EXPANDED_TOOL_IO_MAX_LINES,
 	});
-	if (!truncated.truncated || truncated.content.includes(" elided…]")) return truncated.content;
+	if (!truncated.truncated || truncated.truncatedBy === "middle") return truncated.content;
 	const windowBytes = Math.floor((EXPANDED_TOOL_IO_MAX_BYTES - 64) / 2);
 	const head = truncateHeadBytes(text, windowBytes);
 	const tail = truncateTailBytes(text, windowBytes);
