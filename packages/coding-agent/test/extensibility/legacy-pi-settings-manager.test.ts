@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
+import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import { SettingsManager } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-pi-coding-agent-shim";
+import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "../helpers/settings-test-state";
@@ -103,5 +109,51 @@ describe("legacy pi SettingsManager shim (issue #10397)", () => {
 		expect(SettingsManager.create(projectDir)).toBe(singleton);
 		expect(SettingsManager.create(projectB)).toBe(sessionB);
 		expect(SettingsManager.create(projectB).getProjectSettings().piVim).toEqual({ session: "b" });
+	});
+
+	it("uses the active session settings when same-cwd sessions have different managers", async () => {
+		const sdkAgentDir = tempDir.join("sdk-agent");
+		fs.mkdirSync(sdkAgentDir, { recursive: true });
+		await Bun.write(path.join(agentDir, "config.yml"), YAML.stringify({ piVim: { session: "default" } }));
+		await Bun.write(path.join(sdkAgentDir, "config.yml"), YAML.stringify({ piVim: { session: "sdk" } }));
+
+		// Construct the explicit SDK instance first, then the same-cwd singleton.
+		// Outside active extension execution the singleton is therefore the newest
+		// matching fallback — exactly the leak this regression must distinguish.
+		const sdkSettings = await Settings.loadIsolated({ cwd: projectDir, agentDir: sdkAgentDir });
+		const singleton = await Settings.init({ cwd: projectDir, agentDir });
+		expect(SettingsManager.create(projectDir)).toBe(singleton);
+
+		let observed: Settings | undefined;
+		const runtime = new ExtensionRuntime();
+		const extension = await loadExtensionFromFactory(
+			pi => {
+				pi.on("session_start", (_event, ctx) => {
+					observed = SettingsManager.create(ctx.cwd);
+				});
+			},
+			projectDir,
+			new EventBus(),
+			runtime,
+		);
+		const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+		try {
+			const runner = new ExtensionRunner(
+				[extension],
+				runtime,
+				projectDir,
+				SessionManager.inMemory(projectDir),
+				new ModelRegistry(authStorage),
+				undefined,
+				sdkSettings,
+			);
+
+			await runner.emit({ type: "session_start" });
+
+			expect(observed).toBe(sdkSettings);
+			expect(observed?.getGlobalSettings().piVim).toEqual({ session: "sdk" });
+		} finally {
+			authStorage.close();
+		}
 	});
 });
