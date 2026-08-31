@@ -637,6 +637,17 @@ describe("truncateMiddle", () => {
 		expect(result.outputBytes).toBeLessThanOrEqual(8192 + 64);
 	});
 
+	test("keeps a giant trailing line within budget", () => {
+		const content = `label\n${"x".repeat(20_000)}`;
+		const result = truncateMiddle(content, { maxBytes: 8192, maxLines: 80 });
+
+		expect(result.truncated).toBe(true);
+		expect(result.truncatedBy).toBe("middle");
+		expect(result.content.startsWith("label\n")).toBe(true);
+		expect(result.content).toContain("elided");
+		expect(result.outputBytes).toBeLessThanOrEqual(8192 + 64);
+	});
+
 	test("formatMiddleElisionMarker uses lines, falling back to bytes for <=1 line", () => {
 		expect(formatMiddleElisionMarker(0, 512)).toBe("[…512B elided…]");
 		expect(formatMiddleElisionMarker(1, 100)).toBe("[…100B elided…]");

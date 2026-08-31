@@ -590,8 +590,9 @@ export function truncateMiddle(content: string, options: TruncationOptions = {})
 			firstLineExceedsLimit: false,
 		};
 	}
-	// Windows overlap → no meaningful elision; return content untruncated.
-	if (headLinesKept + tailLinesKept >= totalLines) {
+	// Fully retained line windows need no marker. A partial tail still omitted
+	// bytes from its source line even when the windows account for every line.
+	if (headLinesKept + tailLinesKept >= totalLines && !tail.lastLinePartial) {
 		return noTruncResult(content, totalLines, totalBytes);
 	}
 
