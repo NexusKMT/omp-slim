@@ -238,11 +238,12 @@ function boundedFencedToolContext(text: string, language: string): string {
 	// Use indented code in that case: constant wrapper cost and no delimiter collision.
 	if (longestFence * 2 > EXPANDED_TOOL_IO_MAX_BYTES / 2) {
 		const marker = "[…content elided to fit advisor context…]";
-		const bounded = truncateMiddle(text, {
+		const truncated = truncateMiddle(text, {
 			maxBytes: EXPANDED_TOOL_IO_MAX_BYTES - Buffer.byteLength(marker) - 2,
 			maxLines: EXPANDED_TOOL_IO_MAX_LINES,
-		}).content;
-		return `${marker}\n${bounded}`.replace(/^/gm, "    ");
+		});
+		const bounded = truncated.truncated ? `${marker}\n${truncated.content}` : truncated.content;
+		return bounded.replace(/^/gm, "    ");
 	}
 	const fenceBytes = Math.max(3, longestFence + 1) * 2 + language.length + 2;
 	return fencedText(

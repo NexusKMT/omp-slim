@@ -438,6 +438,22 @@ describe("advisor", () => {
 			expect(Buffer.byteLength(expanded)).toBeLessThan(9 * 1024);
 		});
 
+		it("does not mark complete pathological fence content as elided", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "read-fence-complete",
+				toolName: "read",
+				content: [{ type: "text", text: "`".repeat(3_000) }],
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], { expandToolIO: true });
+
+			expect(expanded).not.toContain("elided");
+			expect(expanded).toContain("`".repeat(3_000));
+		});
+
 		it("preserves head and tail for oversized single-line results", () => {
 			const result = {
 				role: "toolResult",
