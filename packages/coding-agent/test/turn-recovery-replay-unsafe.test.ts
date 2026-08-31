@@ -282,8 +282,7 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		);
 		const message = {
 			...makeMessage([{ type: "text", text: "Already shown to the user" }], openCodeModel),
-			errorMessage:
-				"429 Weekly usage limit reached. type=GoUsageLimitError retry-after-ms=3242000",
+			errorMessage: "429 Weekly usage limit reached. type=GoUsageLimitError retry-after-ms=3242000",
 		} as AssistantMessage;
 		expect(recovery.isRetryableError(message)).toBe(false);
 	});

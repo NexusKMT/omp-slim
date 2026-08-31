@@ -216,8 +216,7 @@ describe("AgentSession retry delay cap", () => {
 					stopReason: "error",
 				},
 				{
-					throw:
-						"429 Weekly usage limit reached. Resets in 55min. type=GoUsageLimitError retry-after-ms=3242000",
+					throw: "429 Weekly usage limit reached. Resets in 55min. type=GoUsageLimitError retry-after-ms=3242000",
 				},
 				{ content: ["recovered on cross-provider fallback"], stopReason: "stop" },
 			],
