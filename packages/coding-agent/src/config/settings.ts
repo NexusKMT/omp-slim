@@ -1450,53 +1450,65 @@ export class Settings {
 						// atomic rename replace the first user-managed symlink.
 						return current === filePath ? path.resolve(filePath) : current;
 					}
-					// A relative target resolves against the link's REAL parent dir,
-					// not its lexical one. When `current` sits under a symlinked
-					// directory alias, a target with enough `..` to climb out of the
-					// alias must pop off the PHYSICAL parent — a lexical resolve would
-					// collapse `..` against the alias and land on an unrelated sibling,
-					// letting the write clobber a foreign file. Absolute targets are
-					// already anchored, so canonicalize only for relative ones and fall
-					// back to the lexical parent if realpath throws (a dangling parent).
-					let resolved: string;
+					// Resolve the target one physical segment at a time so an
+					// intermediate directory symlink is followed by the filesystem
+					// BEFORE a later `..` pops its PHYSICAL parent. Both absolute and
+					// relative targets take the same walk: normalizing the whole
+					// string up front (path.resolve) collapses `alias/..` lexically
+					// to the anchor, but the kernel follows `alias` first and then
+					// pops its real parent, so the two disagree whenever an alias
+					// precedes a `..` — the lexical result can escape to an unrelated
+					// sibling and let the write clobber a foreign file. An absolute
+					// target seeds the accumulator at its filesystem anchor; a
+					// relative one seeds at the link's REAL parent dir.
+					let acc: string;
 					if (path.isAbsolute(target)) {
-						resolved = path.resolve(target);
+						acc = path.parse(target).root;
 					} else {
 						const lexicalDir = path.dirname(current);
-						let canonicalDir = lexicalDir;
+						acc = lexicalDir;
 						try {
-							canonicalDir = await fs.promises.realpath(lexicalDir);
+							acc = await fs.promises.realpath(lexicalDir);
 						} catch (error) {
 							if (!isEnoent(error)) throw error;
 						}
-						// Resolve the relative target one segment at a time so an
-						// intermediate directory symlink WITHIN the target is followed
-						// by the filesystem BEFORE a later `..` is applied. Normalizing
-						// the whole target string up front (path.resolve) collapses
-						// `alias/..` lexically to the config dir, but the kernel follows
-						// `alias` first and then pops its PHYSICAL parent, so the two
-						// disagree whenever an alias precedes a `..`. realpath() on the
-						// deepest existing prefix keeps `acc` canonical, so each `..`
-						// pops the real parent; a missing component (the dangling final
-						// referent, or a vanished intermediate) falls back to a lexical
-						// join since there is nothing left to follow.
-						let acc = canonicalDir;
-						for (const segment of target.split(/[\\/]+/)) {
-							if (segment === "" || segment === ".") continue;
-							if (segment === "..") {
-								acc = path.dirname(acc);
-								continue;
-							}
-							const candidate = path.join(acc, segment);
-							try {
-								acc = await fs.promises.realpath(candidate);
-							} catch (error) {
-								if (!isEnoent(error)) throw error;
-								acc = candidate;
-							}
-						}
-						resolved = acc;
 					}
+					// realpath() on the deepest existing prefix keeps `acc` canonical
+					// so each `..` pops the real parent. Once a NAMED component does
+					// not exist on disk, stop physically resolving: the remainder is
+					// joined lexically, and a following `..` must NOT pop a component
+					// that was never traversed (`missing/../final` must not climb to a
+					// sibling of `missing`). Track the depth appended after that point
+					// so `..` only unwinds segments actually entered post-miss.
+					let frozen = false;
+					let lexicalDepth = 0;
+					for (const segment of target.split(/[\\/]+/)) {
+						if (segment === "" || segment === ".") continue;
+						if (segment === "..") {
+							if (!frozen) {
+								acc = path.dirname(acc);
+							} else if (lexicalDepth > 0) {
+								acc = path.dirname(acc);
+								lexicalDepth--;
+							}
+							continue;
+						}
+						if (frozen) {
+							acc = path.join(acc, segment);
+							lexicalDepth++;
+							continue;
+						}
+						const candidate = path.join(acc, segment);
+						try {
+							acc = await fs.promises.realpath(candidate);
+						} catch (error) {
+							if (!isEnoent(error)) throw error;
+							acc = candidate;
+							frozen = true;
+							lexicalDepth = 0;
+						}
+					}
+					const resolved = acc;
 					let nextIsSymlink = false;
 					try {
 						nextIsSymlink = (await fs.promises.lstat(resolved)).isSymbolicLink();

@@ -467,6 +467,64 @@ describe("Settings", () => {
 			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
 		});
 
+		it("resolves an absolute target's intermediate directory symlink before applying ..", async () => {
+			// config.yml -> /base/alias/../final.yml (ABSOLUTE target), where
+			// `alias` is a symlinked directory (alias -> elsewhere/deep) and
+			// final.yml is missing. The filesystem follows `alias` first and then
+			// pops its PHYSICAL parent, landing on elsewhere/final.yml. Lexically
+			// collapsing the absolute string up front turns `/base/alias/..` into
+			// /base and would clobber /base/final.yml while leaving the real chain
+			// dangling — the same bug already fixed for relative targets.
+			const elsewhereDir = tempDir.join("elsewhere");
+			const deepDir = path.join(elsewhereDir, "deep");
+			fs.mkdirSync(deepDir, { recursive: true });
+			const baseDir = tempDir.join("base");
+			fs.mkdirSync(baseDir, { recursive: true });
+			const aliasDir = path.join(baseDir, "alias");
+			await fs.promises.symlink(deepDir, aliasDir, "dir");
+
+			// Build the target string manually so path.join does not collapse the
+			// `..` before the symlink can be written.
+			const absTarget = `${aliasDir}${path.sep}..${path.sep}final-config.yml`;
+			await fs.promises.symlink(absTarget, getConfigPath(), "file");
+
+			const physicalFinal = path.join(elsewhereDir, "final-config.yml");
+			const lexicalSibling = path.join(baseDir, "final-config.yml");
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			settings.set("setupVersion", 9);
+			await settings.flush();
+
+			// The write lands on the physical target (fs semantics), recreating it,
+			// while the lexically collapsed sibling stays untouched.
+			expect(YAML.parse(await Bun.file(physicalFinal).text())).toEqual({ setupVersion: 9 });
+			expect(fs.existsSync(lexicalSibling)).toBe(false);
+			// The user-managed chain head survives as a symlink.
+			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
+		});
+
+		it("does not write to an unrelated sibling when a non-final component is missing before ..", async () => {
+			// config.yml -> missing/../final.yml, where `missing` does not exist.
+			// Filesystem lookup fails at `missing`, so a following `..` must NOT
+			// pop a component that was never entered. Collapsing the target
+			// lexically instead pops `missing` and lands on <configdir>/final.yml,
+			// clobbering an unrelated sibling while the real (dangling) target is
+			// never written. The resolver must not escape to that sibling.
+			await fs.promises.symlink("missing/../final-config.yml", getConfigPath(), "file");
+			const lexicalSibling = path.join(agentDir, "final-config.yml");
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			settings.set("setupVersion", 10);
+			// The resolved path sits under the never-entered `missing` dir (fs
+			// semantics), whose parent does not exist, so the atomic write fails
+			// rather than clobbering the sibling.
+			await expect(settings.flush()).rejects.toThrow();
+
+			expect(fs.existsSync(lexicalSibling)).toBe(false);
+			// The user-managed chain head survives as a symlink.
+			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
+		});
+
 		it("falls back to move-aside replacement when Windows reports EPERM", async () => {
 			await writeSettings({ setupVersion: 1 });
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
