@@ -607,17 +607,31 @@ describe("truncateMiddle", () => {
 		expect(result.elidedBytes).toBeGreaterThan(0);
 	});
 
-	test("falls back to tail-only when head budget cannot accept the first line", () => {
+	test("uses non-overlapping byte windows when the first line exceeds the head budget", () => {
 		const giantFirstLine = `${"x".repeat(200)}\nshort-2\nshort-3`;
 		const result = truncateMiddle(giantFirstLine, {
 			maxBytes: 40,
 			maxLines: 10,
-			maxHeadBytes: 8, // first line is 200 bytes — exceeds head budget
+			maxHeadBytes: 8,
 			maxHeadLines: 1,
 		});
 		expect(result.truncated).toBe(true);
-		// Should not contain the elision marker; it's a regular tail truncation.
-		expect(result.content).not.toContain("elided");
+		expect(result.truncatedBy).toBe("middle");
+		expect(result.content.startsWith("xxxxxxxx")).toBe(true);
+		expect(result.content.endsWith("short-3")).toBe(true);
+		expect(result.content).toContain("elided");
+		expect(result.elidedBytes).toBeGreaterThan(0);
+	});
+
+	test("does not duplicate overlapping fallback windows", () => {
+		const content = `${"x".repeat(5000)}\n${Array.from({ length: 100 }, (_, i) => `line-${i}`).join("\n")}`;
+		const result = truncateMiddle(content, { maxBytes: 8192, maxLines: 80 });
+
+		expect(result.truncatedBy).toBe("middle");
+		expect(result.elidedBytes).toBeGreaterThan(0);
+		expect(result.content).not.toContain("[…0B elided…]");
+		expect(result.outputLines).toBeLessThanOrEqual(42);
+		expect(result.outputBytes).toBeLessThanOrEqual(8192 + 64);
 	});
 
 	test("formatMiddleElisionMarker uses lines, falling back to bytes for <=1 line", () => {

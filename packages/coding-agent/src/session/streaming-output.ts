@@ -547,10 +547,42 @@ export function truncateMiddle(content: string, options: TruncationOptions = {})
 	const headBytesKept = head.outputBytes ?? Buffer.byteLength(head.content, "utf-8");
 	const tailBytesKept = tail.outputBytes ?? Buffer.byteLength(tail.content, "utf-8");
 
-	// Head unusable (first line exceeds budget) → tail-only.
-	if (headLinesKept === 0 || head.firstLineExceedsLimit) return tail;
-	// Tail unusable → head-only.
-	if (tailLinesKept === 0) return head;
+	// A giant first/last line cannot use one of the line-preserving windows. Use
+	// a byte window only for that side and retain the normal line cap on the other.
+	if (headLinesKept === 0 || head.firstLineExceedsLimit || tailLinesKept === 0) {
+		const byteHead =
+			headLinesKept === 0 || head.firstLineExceedsLimit
+				? truncateHeadBytes(content, Math.min(headBytes, totalBytes))
+				: { text: head.content, bytes: headBytesKept };
+		const remainingBytes = Math.max(0, totalBytes - byteHead.bytes);
+		const byteTail =
+			tailLinesKept === 0
+				? truncateTailBytes(content, Math.min(tailBytes, remainingBytes))
+				: (() => {
+						const limited = truncateTail(content, {
+							maxBytes: Math.min(tailBytes, remainingBytes),
+							maxLines: tailLines,
+						});
+						return { text: limited.content, bytes: limited.outputBytes ?? Buffer.byteLength(limited.content) };
+					})();
+		const elidedBytes = Math.max(0, totalBytes - byteHead.bytes - byteTail.bytes);
+		if (elidedBytes === 0) return noTruncResult(content, totalLines, totalBytes);
+		const marker = formatMiddleElisionMarker(0, elidedBytes);
+		const composed = `${byteHead.text}\n${marker}\n${byteTail.text}`;
+		return {
+			content: composed,
+			truncated: true,
+			truncatedBy: "middle",
+			totalLines,
+			totalBytes,
+			outputLines: countNewlines(composed) + 1,
+			outputBytes: Buffer.byteLength(composed, "utf-8"),
+			elidedLines: Math.max(0, totalLines - headLines - tailLines),
+			elidedBytes,
+			lastLinePartial: true,
+			firstLineExceedsLimit: false,
+		};
+	}
 	// Windows overlap → no meaningful elision; return content untruncated.
 	if (headLinesKept + tailLinesKept >= totalLines) {
 		return noTruncResult(content, totalLines, totalBytes);
