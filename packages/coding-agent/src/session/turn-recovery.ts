@@ -20,6 +20,7 @@ import type {
 } from "@oh-my-pi/pi-ai";
 import { calculateRateLimitBackoffMs, parseRateLimitReason } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { resolveModelPolicy } from "@oh-my-pi/pi-catalog/compat/resolve";
 import { isFireworksFastModelId, toFireworksBaseModelId } from "@oh-my-pi/pi-catalog/fireworks-model-id";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { extractRetryHint, logger, prompt } from "@oh-my-pi/pi-utils";
@@ -2129,6 +2130,10 @@ export class TurnRecovery {
 		// Set when a usage-limit error pinned the wait to credential
 		// availability — suppresses the generic retry-after bump below.
 		let usageLimitWaitMs: number | undefined;
+		const siblingAvailabilityWaitMs =
+			recordedUsageLimitOutcome?.retryAtMs === undefined
+				? undefined
+				: Math.max(0, recordedUsageLimitOutcome.retryAtMs - Date.now()) + SIBLING_UNBLOCK_BUFFER_MS;
 
 		if (staleOpenAIResponsesReplayError) {
 			this.#host.resetCurrentResponsesProviderSession("stale replay error");
@@ -2155,12 +2160,8 @@ export class TurnRecovery {
 				// recoverable situation into the provider's multi-hour wait and
 				// trips the fail-fast cap below.
 				usageLimitWaitMs = recordedUsageLimitOutcome.retryAfterMs;
-				if (recordedUsageLimitOutcome.retryAtMs !== undefined) {
-					const siblingWaitMs =
-						Math.max(0, recordedUsageLimitOutcome.retryAtMs - Date.now()) + SIBLING_UNBLOCK_BUFFER_MS;
-					if (siblingWaitMs < usageLimitWaitMs) {
-						usageLimitWaitMs = siblingWaitMs;
-					}
+				if (siblingAvailabilityWaitMs !== undefined && siblingAvailabilityWaitMs < usageLimitWaitMs) {
+					usageLimitWaitMs = siblingAvailabilityWaitMs;
 				}
 				if (usageLimitWaitMs > delayMs) {
 					delayMs = usageLimitWaitMs;
@@ -2189,11 +2190,24 @@ export class TurnRecovery {
 		// contents, not model health (issue #8760). Keep it on the same model; the
 		// retry budget still bounds a genuinely stuck stream.
 		const thinkingLoop = AIError.is(id, AIError.Flag.ThinkingLoop);
-		const longOpenCodeUsageLimit =
-			currentModel?.provider === "opencode-go" &&
+		const effectiveUsageLimitWaitMs =
+			usageLimitWaitMs ??
+			(siblingAvailabilityWaitMs === undefined
+				? (recordedUsageLimitOutcome?.retryAfterMs ?? parsedRetryAfterMs)
+				: Math.min(
+						recordedUsageLimitOutcome?.retryAfterMs ?? parsedRetryAfterMs ?? Infinity,
+						siblingAvailabilityWaitMs,
+					));
+		const waitForSiblingCredential =
+			siblingAvailabilityWaitMs !== undefined &&
+			effectiveUsageLimitWaitMs !== undefined &&
+			effectiveUsageLimitWaitMs <= retrySettings.maxDelayMs;
+		const longUsageLimitFallback =
+			currentModel !== undefined &&
+			resolveModelPolicy(currentModel).catalog.longUsageLimitFallback === true &&
 			retrySettings.maxDelayMs > 0 &&
-			parsedRetryAfterMs !== undefined &&
-			parsedRetryAfterMs > retrySettings.maxDelayMs &&
+			effectiveUsageLimitWaitMs !== undefined &&
+			effectiveUsageLimitWaitMs > retrySettings.maxDelayMs &&
 			/\bGoUsageLimitError\b/.test(errorMessage) &&
 			(!this.#hasReplayUnsafeOutput(message) || this.#unexecutedToolCallsReplaySafe(message));
 
@@ -2204,16 +2218,17 @@ export class TurnRecovery {
 				allowModelFallback &&
 				retrySettings.modelFallback &&
 				!thinkingLoop &&
+				!waitForSiblingCredential &&
 				!(retryBudgetExhausted && classifierRefusal)
 			) {
 				if (!classifierRefusal) {
 					this.noteRetryFallbackCooldown(currentSelector, parsedRetryAfterMs, errorMessage);
 				}
 				switchedModel = await this.#tryRetryModelFallback(currentSelector, message, {
-					excludeProvider: longOpenCodeUsageLimit ? "opencode-go" : undefined,
+					excludeProvider: longUsageLimitFallback ? currentModel.provider : undefined,
 					pinFallback: classifierRefusal,
 					preserveFailedTurn,
-					wrapAround: longOpenCodeUsageLimit,
+					wrapAround: longUsageLimitFallback,
 				});
 			}
 			// Auto fallback from a Fireworks Fast variant to its base model. Independent

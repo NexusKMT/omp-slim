@@ -1,6 +1,9 @@
 // Provider-wire compat for "opencode-go"; regenerated from the frozen census using deployment contract selectors.
 
 provider "opencode-go" {
+	// The gateway's usage-limit error means a provider-wide quota window; when it
+	// exceeds the retry cap, recovery may route to a different provider.
+	long-usage-limit-fallback #true
 	class "deepseek" {
 		thinking-mode "effort"
 		family "flash" {

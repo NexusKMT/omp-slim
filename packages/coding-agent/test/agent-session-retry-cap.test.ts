@@ -286,6 +286,87 @@ describe("AgentSession retry delay cap", () => {
 			text: "recovered on cross-provider fallback",
 		});
 	});
+	it("waits for a short OpenCode Go sibling credential before model fallback", async () => {
+		const exhaustedModel = getBundledModel("opencode-go", "deepseek-v4-flash");
+		const fallbackModel = getBundledModel("openai", "gpt-5.5");
+		if (!exhaustedModel || !fallbackModel) {
+			throw new Error("Expected bundled OpenCode Go and fallback test models to exist");
+		}
+
+		await authStorage.set("opencode-go", [
+			{ type: "api_key", key: "opencode-go-key-1" },
+			{ type: "api_key", key: "opencode-go-key-2" },
+		]);
+		authStorage.setRuntimeApiKey("openai", "openai-test-key");
+		await modelRegistry.getApiKeyForProvider("opencode-go", "other-session");
+		const blocked = await authStorage.markUsageLimitReached("opencode-go", "other-session", {
+			retryAfterMs: 2_000,
+		});
+		expect(blocked.switched).toBe(true);
+		const usageLimitSpy = vi.spyOn(authStorage, "markUsageLimitReached");
+
+		const mock = createMockModel();
+		const requestedModels: string[] = [];
+		let agent!: Agent;
+		agent = new Agent({
+			getApiKey: model => modelRegistry.resolver(model, agent.sessionId),
+			initialState: {
+				model: exhaustedModel,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+			},
+			streamFn: (requestedModel, context, options) => {
+				requestedModels.push(`${requestedModel.provider}/${requestedModel.id}`);
+				mock.push(
+					requestedModels.length === 1
+						? {
+								throw: "429 Weekly usage limit reached. type=GoUsageLimitError retry-after-ms=3242000",
+							}
+						: { content: ["recovered after sibling unblock"], stopReason: "stop" },
+				);
+				return mock.stream(requestedModel, context, options);
+			},
+		});
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.maxDelayMs": 300_000,
+			"retry.maxRetries": 2,
+			"retry.modelFallback": true,
+			"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
+		});
+		settings.setModelRole("default", `${exhaustedModel.provider}/${exhaustedModel.id}`);
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+		const waitSpy = vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
+		session.subscribe(event => {
+			if (event.type === "retry_fallback_applied") fallbackEvents.push(event);
+		});
+
+		await session.prompt("Trigger the long OpenCode Go limit while a sibling is briefly blocked");
+		await session.waitForIdle();
+		expect(usageLimitSpy).toHaveBeenCalledTimes(1);
+		const usageLimitResult = usageLimitSpy.mock.results[0]?.value;
+		expect(usageLimitResult).toBeDefined();
+		expect(await usageLimitResult).toMatchObject({ retryAtMs: expect.any(Number), switched: false });
+
+		expect(requestedModels).toEqual([
+			`${exhaustedModel.provider}/${exhaustedModel.id}`,
+			`${exhaustedModel.provider}/${exhaustedModel.id}`,
+		]);
+		expect(fallbackEvents).toEqual([]);
+		expect(waitSpy.mock.calls.some(call => call[0] >= 1_000 && call[0] <= 3_000)).toBe(true);
+		expect(lastAssistant(session).content).toContainEqual({
+			type: "text",
+			text: "recovered after sibling unblock",
+		});
+	});
 
 	it("honors the reason backoff for a transient rate-limit 429 without a provider hint", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
