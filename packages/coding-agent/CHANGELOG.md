@@ -53,6 +53,7 @@
 - Fixed `lsp diagnostics` incorrectly reporting success for project-aware pull-diagnostic servers when diagnostics time out or fail.
 - Corrected labels under `Settings > Context > Compaction Token Limit`.
 - Fixed orphaned pages, iframes, and workers accumulating in the shared headless browser after abnormal OMP session termination.
+- Fixed long OpenCode Go usage-limit waits to immediately switch replay-safe turns to a distinct configured provider when the retry delay exceeds `retry.maxDelayMs`.
 
 ## [18.0.10] - 2026-08-28
 

@@ -86,7 +86,15 @@ describe("AgentSession retry delay cap", () => {
 		for (const provider of ["anthropic", "openai-codex"]) {
 			await authStorage.remove(provider);
 		}
-		for (const provider of ["anthropic", "openai", "openai-codex", "openrouter", "github-copilot", "cursor"]) {
+		for (const provider of [
+			"anthropic",
+			"openai",
+			"openai-codex",
+			"opencode-go",
+			"openrouter",
+			"github-copilot",
+			"cursor",
+		]) {
 			authStorage.removeRuntimeApiKey(provider);
 		}
 		authStorage.setRuntimeApiKey("anthropic", "anthropic-test-key");
