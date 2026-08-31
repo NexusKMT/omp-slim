@@ -194,16 +194,15 @@ export function formatToolResultErrorPreview(content: string | readonly (TextCon
  * run inside it, so a diff that touches markdown (triple backticks) can't break
  * out of the fence. Info string `diff` for syntax highlighting.
  */
-function fenceDiff(diff: string): string {
-	const longest = diff.match(/`+/g)?.reduce((m, run) => Math.max(m, run.length), 0) ?? 0;
-	const fence = "`".repeat(Math.max(3, longest + 1));
-	return `${fence}diff\n${diff}\n${fence}`;
-}
-
-function fencedText(text: string, language = "text"): string {
+function fencedText(text: string, language: string): string {
 	const longest = text.match(/`+/g)?.reduce((max, run) => Math.max(max, run.length), 0) ?? 0;
 	const fence = "`".repeat(Math.max(3, longest + 1));
 	return `${fence}${language}\n${text}\n${fence}`;
+}
+
+/** Wrap a diff in the shared adaptive Markdown fence. */
+function fenceDiff(diff: string): string {
+	return fencedText(diff, "diff");
 }
 
 function boundedToolContext(text: string): string {
@@ -232,8 +231,8 @@ function expandedAskArguments(args: Record<string, unknown> | undefined): string
 /** One line per tool call: `→ read(src/foo.ts:50-80) ⇒ ok · 31 lines`. */
 
 function expandedToolResultText(result: ToolResultMessage): string | undefined {
-	const text = contentToText(result.content).trim();
-	return text || undefined;
+	const text = contentToText(result.content);
+	return text.trim() ? text : undefined;
 }
 function toolCallLine(
 	name: string,
@@ -276,7 +275,7 @@ function toolCallLine(
 			const resultText = expandedToolResultText(result);
 			if (resultText) {
 				const visibleResult = name === "ask" ? resultText : boundedToolContext(resultText);
-				sections.push(`Tool result:\n${fencedText(visibleResult)}`);
+				sections.push(`Tool result:\n${fencedText(visibleResult, "text")}`);
 			}
 		}
 		if (sections.length > 0) base = `${base}\n${sections.join("\n")}`;
