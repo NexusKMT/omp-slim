@@ -103,6 +103,9 @@ export interface TruncationResult {
 	elidedBytes?: number;
 	/** Lines elided from the middle (truncateMiddle only). */
 	elidedLines?: number;
+	/** Exact source-line counts retained before/after the middle marker. */
+	headLines?: number;
+	tailLines?: number;
 	lastLinePartial?: boolean;
 	firstLineExceedsLimit?: boolean;
 }
@@ -550,21 +553,23 @@ export function truncateMiddle(content: string, options: TruncationOptions = {})
 	// A giant first/last line cannot use one of the line-preserving windows. Use
 	// a byte window only for that side and retain the normal line cap on the other.
 	if (headLinesKept === 0 || head.firstLineExceedsLimit || tailLinesKept === 0) {
-		const byteHead =
-			headLinesKept === 0 || head.firstLineExceedsLimit
-				? truncateHeadBytes(content, Math.min(headBytes, totalBytes))
-				: { text: head.content, bytes: headBytesKept };
+		const useByteHead = headLinesKept === 0 || head.firstLineExceedsLimit;
+		const byteHead = useByteHead
+			? truncateHeadBytes(content, Math.min(headBytes, totalBytes))
+			: { text: head.content, bytes: headBytesKept };
+		const actualHeadLines = useByteHead ? 1 : headLinesKept;
 		const remainingBytes = Math.max(0, totalBytes - byteHead.bytes);
-		const byteTail =
-			tailLinesKept === 0
-				? truncateTailBytes(content, Math.min(tailBytes, remainingBytes))
-				: (() => {
-						const limited = truncateTail(content, {
-							maxBytes: Math.min(tailBytes, remainingBytes),
-							maxLines: tailLines,
-						});
-						return { text: limited.content, bytes: limited.outputBytes ?? Buffer.byteLength(limited.content) };
-					})();
+		const useByteTail = tailLinesKept === 0;
+		const byteTail = useByteTail
+			? truncateTailBytes(content, Math.min(tailBytes, remainingBytes))
+			: (() => {
+					const limited = truncateTail(content, {
+						maxBytes: Math.min(tailBytes, remainingBytes),
+						maxLines: tailLines,
+					});
+					return { text: limited.content, bytes: limited.outputBytes ?? Buffer.byteLength(limited.content) };
+				})();
+		const actualTailLines = useByteTail ? 1 : Math.min(tailLinesKept, tailLines);
 		const elidedBytes = Math.max(0, totalBytes - byteHead.bytes - byteTail.bytes);
 		if (elidedBytes === 0) return noTruncResult(content, totalLines, totalBytes);
 		const marker = formatMiddleElisionMarker(0, elidedBytes);
@@ -575,9 +580,11 @@ export function truncateMiddle(content: string, options: TruncationOptions = {})
 			truncatedBy: "middle",
 			totalLines,
 			totalBytes,
-			outputLines: countNewlines(composed) + 1,
+			outputLines: actualHeadLines + actualTailLines + 1,
 			outputBytes: Buffer.byteLength(composed, "utf-8"),
-			elidedLines: Math.max(0, totalLines - headLines - tailLines),
+			elidedLines: Math.max(0, totalLines - actualHeadLines - actualTailLines),
+			headLines: actualHeadLines,
+			tailLines: actualTailLines,
 			elidedBytes,
 			lastLinePartial: true,
 			firstLineExceedsLimit: false,
@@ -606,6 +613,8 @@ export function truncateMiddle(content: string, options: TruncationOptions = {})
 		outputBytes: headBytesKept + tailBytesKept + markerBytes + 2,
 		elidedLines,
 		elidedBytes,
+		headLines: headLinesKept,
+		tailLines: tailLinesKept,
 		lastLinePartial: tail.lastLinePartial,
 		firstLineExceedsLimit: false,
 	};

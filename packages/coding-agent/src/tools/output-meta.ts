@@ -144,8 +144,8 @@ export class OutputMetaBuilder {
 			// `headLines` lines and the last `tailLines` lines of the source; lines
 			// in the middle (count == elidedLines) are dropped.
 			const keptLines = Math.max(0, outputLines - 1); // -1 for marker line
-			const headLines = Math.ceil(keptLines / 2);
-			const tailLines = keptLines - headLines;
+			const headLines = result.headLines ?? Math.ceil(keptLines / 2);
+			const tailLines = result.tailLines ?? keptLines - headLines;
 			this.#meta.truncation = {
 				direction: "middle",
 				truncatedBy: "middle",
@@ -755,8 +755,8 @@ async function spillLargeResultToArtifact(
 		const elidedLines = truncated.elidedLines ?? Math.max(0, truncated.totalLines - outputLines);
 		const elidedBytes = truncated.elidedBytes ?? Math.max(0, truncated.totalBytes - outputBytes);
 		const keptLines = Math.max(0, outputLines - 1); // -1 for marker line
-		const headLines = Math.ceil(keptLines / 2);
-		const tailLineCount = keptLines - headLines;
+		const headLines = truncated.headLines ?? Math.ceil(keptLines / 2);
+		const tailLineCount = truncated.tailLines ?? keptLines - headLines;
 		truncationMeta = {
 			direction: "middle",
 			truncatedBy: "middle",

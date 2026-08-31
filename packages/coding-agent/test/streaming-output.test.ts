@@ -621,6 +621,8 @@ describe("truncateMiddle", () => {
 		expect(result.content.endsWith("short-3")).toBe(true);
 		expect(result.content).toContain("elided");
 		expect(result.elidedBytes).toBeGreaterThan(0);
+		expect(result.headLines).toBe(1);
+		expect(result.tailLines).toBe(2);
 	});
 
 	test("does not duplicate overlapping fallback windows", () => {
@@ -630,7 +632,8 @@ describe("truncateMiddle", () => {
 		expect(result.truncatedBy).toBe("middle");
 		expect(result.elidedBytes).toBeGreaterThan(0);
 		expect(result.content).not.toContain("[…0B elided…]");
-		expect(result.outputLines).toBeLessThanOrEqual(42);
+		expect(result.headLines).toBe(1);
+		expect(result.tailLines).toBeLessThanOrEqual(40);
 		expect(result.outputBytes).toBeLessThanOrEqual(8192 + 64);
 	});
 
