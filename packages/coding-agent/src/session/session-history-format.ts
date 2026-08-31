@@ -19,6 +19,7 @@ import type {
 	HookMessage,
 	PythonExecutionMessage,
 } from "./messages";
+import { truncateMiddle } from "./streaming-output";
 
 export interface HistoryFormatOptions {
 	/** Optional H1 prepended to the transcript. */
@@ -47,6 +48,12 @@ export interface HistoryFormatOptions {
 	 */
 	expandEditDiffs?: boolean;
 	/**
+	 * Append bounded tool-result text and, for `ask`, the structured questions.
+	 * Advisor transcripts enable this so reviewers see user decisions and the
+	 * evidence returned by primary tools without admitting unbounded output.
+	 */
+	expandToolIO?: boolean;
+	/**
 	 * Chunked rendering support: a caller formatting one logical transcript in
 	 * several calls (the advisor's chunked delta render) passes a result index
 	 * built over the WHOLE delta plus one shared consumed-id set, so a toolCall
@@ -67,6 +74,9 @@ export interface HistoryFormatOptions {
 
 /** Max length of the primary-arg summary inside `→ tool(...)` lines. */
 const PRIMARY_ARG_MAX = 120;
+/** Per-tool budget for expanded advisor input/output. */
+const EXPANDED_TOOL_IO_MAX_BYTES = 8 * 1024;
+const EXPANDED_TOOL_IO_MAX_LINES = 80;
 
 /** Per-tool preference order for the most informative scalar argument. */
 const PRIMARY_ARG_KEYS = [
@@ -190,6 +200,29 @@ function fenceDiff(diff: string): string {
 	return `${fence}diff\n${diff}\n${fence}`;
 }
 
+function fencedText(text: string, language = "text"): string {
+	const longest = text.match(/`+/g)?.reduce((max, run) => Math.max(max, run.length), 0) ?? 0;
+	const fence = "`".repeat(Math.max(3, longest + 1));
+	return `${fence}${language}\n${text}\n${fence}`;
+}
+
+function boundedToolContext(text: string): string {
+	return truncateMiddle(text, {
+		maxBytes: EXPANDED_TOOL_IO_MAX_BYTES,
+		maxLines: EXPANDED_TOOL_IO_MAX_LINES,
+	}).content;
+}
+
+function expandedAskArguments(args: Record<string, unknown> | undefined): string | undefined {
+	if (!args) return undefined;
+	const visibleArgs = Object.fromEntries(Object.entries(args).filter(([key]) => key !== INTENT_FIELD));
+	try {
+		return JSON.stringify(visibleArgs, undefined, 2);
+	} catch {
+		return undefined;
+	}
+}
+
 /** One line per tool call: `→ read(src/foo.ts:50-80) ⇒ ok · 31 lines`. */
 function toolCallLine(
 	name: string,
@@ -197,6 +230,7 @@ function toolCallLine(
 	result: ToolResultMessage | undefined,
 	includeToolIntent?: boolean,
 	expandEditDiffs?: boolean,
+	expandToolIO?: boolean,
 ): string {
 	const head = `→ ${name}(${formatToolCallPrimaryArg(name, args)})`;
 	let base: string;
@@ -219,6 +253,23 @@ function toolCallLine(
 		if (typeof diff === "string" && diff.trim()) {
 			base = `${base}\n${fenceDiff(diff)}`;
 		}
+	}
+
+	if (expandToolIO) {
+		const sections: string[] = [];
+		if (name === "ask") {
+			const askArguments = expandedAskArguments(args);
+			if (askArguments) sections.push(`Ask input:\n${fencedText(askArguments, "json")}`);
+		}
+		if (
+			result &&
+			!(expandEditDiffs && typeof (result.details as { diff?: unknown } | undefined)?.diff === "string")
+		) {
+			const resultText = contentToText(result.content).trim();
+			const visibleResult = name === "ask" ? resultText : boundedToolContext(resultText);
+			if (visibleResult) sections.push(`Tool result:\n${fencedText(visibleResult)}`);
+		}
+		if (sections.length > 0) base = `${base}\n${sections.join("\n")}`;
 	}
 
 	const formattedIntent = includeToolIntent ? formatToolCallIntentPreview(args) : undefined;
@@ -366,7 +417,14 @@ export function formatSessionHistoryMarkdown(messages: unknown[], opts?: History
 						const result = resultsByCallId.get(block.id);
 						if (result) consumed.add(block.id);
 						body.push(
-							toolCallLine(block.name, block.arguments, result, opts?.includeToolIntent, opts?.expandEditDiffs),
+							toolCallLine(
+								block.name,
+								block.arguments,
+								result,
+								opts?.includeToolIntent,
+								opts?.expandEditDiffs,
+								opts?.expandToolIO,
+							),
 						);
 					} else if (opts?.includeThinking && block.type === "thinking" && block.thinking.trim()) {
 						body.push(`_thinking:_ ${block.thinking}`);
@@ -390,7 +448,17 @@ export function formatSessionHistoryMarkdown(messages: unknown[], opts?: History
 			case "toolResult": {
 				// Normally consumed by its toolCall; orphans (e.g. truncated history) get their own line.
 				if (consumed.has(msg.toolCallId)) break;
-				lines.push(toolCallLine(msg.toolName, undefined, msg, opts?.includeToolIntent, opts?.expandEditDiffs), "");
+				lines.push(
+					toolCallLine(
+						msg.toolName,
+						undefined,
+						msg,
+						opts?.includeToolIntent,
+						opts?.expandEditDiffs,
+						opts?.expandToolIO,
+					),
+					"",
+				);
 				lastWatchedLabel = undefined;
 				break;
 			}

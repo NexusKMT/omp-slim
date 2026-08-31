@@ -298,6 +298,99 @@ describe("advisor", () => {
 		});
 	});
 
+	describe("formatSessionHistoryMarkdown expandToolIO", () => {
+		const askCall = {
+			role: "assistant",
+			content: [
+				{
+					type: "toolCall",
+					id: "ask-1",
+					name: "ask",
+					arguments: {
+						questions: [
+							{
+								id: "deploy",
+								question: "Authorize deployment?",
+								options: [{ label: "Yes" }, { label: "No" }],
+							},
+						],
+					},
+				},
+			],
+			timestamp: 1,
+		} as unknown as AgentMessage;
+		const askResult = {
+			role: "toolResult",
+			toolCallId: "ask-1",
+			toolName: "ask",
+			content: [{ type: "text", text: "User selected: Yes" }],
+			details: { selectedOptions: ["Yes"] },
+			isError: false,
+			timestamp: 2,
+		} as unknown as AgentMessage;
+
+		it("includes the full ask question and user answer for advisor reviews", () => {
+			const compact = formatSessionHistoryMarkdown([askCall, askResult], { watchedRoles: true });
+			const expanded = formatSessionHistoryMarkdown([askCall, askResult], {
+				watchedRoles: true,
+				expandToolIO: true,
+			});
+
+			expect(compact).not.toContain("User selected: Yes");
+			expect(expanded).toContain('"question": "Authorize deployment?"');
+			expect(expanded).toContain('"label": "Yes"');
+			expect(expanded).toContain("User selected: Yes");
+		});
+
+		it("does not truncate long ask questions or custom answers", () => {
+			const marker = "authorization-at-end";
+			const longQuestion = {
+				...(askCall as unknown as { content: { arguments: { questions: unknown[] } }[] }),
+				content: [
+					{
+						...(askCall as unknown as { content: Record<string, unknown>[] }).content[0],
+						arguments: {
+							questions: [
+								{
+									id: "deploy",
+									question: `${"context ".repeat(1200)}${marker}`,
+									options: [{ label: "Custom" }],
+								},
+							],
+						},
+					},
+				],
+			} as unknown as AgentMessage;
+			const longAnswer = {
+				...(askResult as unknown as Record<string, unknown>),
+				content: [{ type: "text", text: `${"detail ".repeat(1200)}${marker}` }],
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([longQuestion, longAnswer], { expandToolIO: true });
+
+			expect(expanded.split(marker)).toHaveLength(3);
+			expect(expanded).not.toContain("elided");
+		});
+
+		it("bounds expanded tool results with visible head and tail context", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "read-1",
+				toolName: "read",
+				content: [{ type: "text", text: `first\n${"middle\n".repeat(2000)}last` }],
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], { expandToolIO: true });
+
+			expect(expanded).toContain("first");
+			expect(expanded).toContain("last");
+			expect(expanded).toContain("elided");
+			expect(Buffer.byteLength(expanded)).toBeLessThan(9 * 1024);
+		});
+	});
+
 	describe("advisor yield-queue dispatcher", () => {
 		it("batches advice notes into one custom message", async () => {
 			const injected: AgentMessage[] = [];

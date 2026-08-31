@@ -19,6 +19,7 @@
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
+- Advisors now receive bounded tool-result excerpts and complete `ask` questions and answers, preventing reviews from missing user decisions ([#5266](https://github.com/can1357/oh-my-pi/issues/5266)).
 
 ## [18.0.11] - 2026-08-29
 
