@@ -342,8 +342,9 @@ describe("advisor", () => {
 			expect(expanded).toContain("User selected: Yes");
 		});
 
-		it("does not truncate long ask questions or custom answers", () => {
-			const marker = "authorization-at-end";
+		it("bounds long ask questions and custom answers with visible head and tail context", () => {
+			const questionEnd = "question-at-end";
+			const answerEnd = "answer-at-end";
 			const longQuestion = {
 				...(askCall as unknown as { content: { arguments: { questions: unknown[] } }[] }),
 				content: [
@@ -353,7 +354,7 @@ describe("advisor", () => {
 							questions: [
 								{
 									id: "deploy",
-									question: `${"context ".repeat(1200)}${marker}`,
+									question: `question-start ${"context ".repeat(1200)}${questionEnd}`,
 									options: [{ label: "Custom" }],
 								},
 							],
@@ -363,13 +364,17 @@ describe("advisor", () => {
 			} as unknown as AgentMessage;
 			const longAnswer = {
 				...(askResult as unknown as Record<string, unknown>),
-				content: [{ type: "text", text: `${"detail ".repeat(1200)}${marker}` }],
+				content: [{ type: "text", text: `answer-start ${"detail ".repeat(1200)}${answerEnd}` }],
 			} as unknown as AgentMessage;
 
 			const expanded = formatSessionHistoryMarkdown([longQuestion, longAnswer], { expandToolIO: true });
 
-			expect(expanded.split(marker)).toHaveLength(3);
-			expect(expanded).not.toContain("elided");
+			expect(expanded).toContain("question-start");
+			expect(expanded).toContain(questionEnd);
+			expect(expanded).toContain("answer-start");
+			expect(expanded).toContain(answerEnd);
+			expect(expanded.match(/elided/g)?.length).toBeGreaterThanOrEqual(2);
+			expect(Buffer.byteLength(expanded)).toBeLessThan(18 * 1024);
 		});
 
 		it("recovers questions from orphaned ask result details", () => {

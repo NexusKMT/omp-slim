@@ -19,7 +19,7 @@ import type {
 	HookMessage,
 	PythonExecutionMessage,
 } from "./messages";
-import { truncateHeadBytes, truncateMiddle, truncateTailBytes } from "./streaming-output";
+import { truncateMiddle } from "./streaming-output";
 
 export interface HistoryFormatOptions {
 	/** Optional H1 prepended to the transcript. */
@@ -77,6 +77,8 @@ const PRIMARY_ARG_MAX = 120;
 /** Per-tool budget for expanded advisor input/output. */
 const EXPANDED_TOOL_IO_MAX_BYTES = 8 * 1024;
 const EXPANDED_TOOL_IO_MAX_LINES = 80;
+const EXPANDED_ASK_FIELD_MAX_BYTES = 2 * 1024;
+const EXPANDED_ASK_FIELD_MAX_LINES = 20;
 
 /** Per-tool preference order for the most informative scalar argument. */
 const PRIMARY_ARG_KEYS = [
@@ -206,23 +208,33 @@ function fenceDiff(diff: string): string {
 }
 
 function boundedToolContext(text: string): string {
-	const truncated = truncateMiddle(text, {
+	return truncateMiddle(text, {
 		maxBytes: EXPANDED_TOOL_IO_MAX_BYTES,
 		maxLines: EXPANDED_TOOL_IO_MAX_LINES,
-	});
-	if (!truncated.truncated || truncated.truncatedBy === "middle") return truncated.content;
-	const windowBytes = Math.floor((EXPANDED_TOOL_IO_MAX_BYTES - 64) / 2);
-	const head = truncateHeadBytes(text, windowBytes);
-	const tail = truncateTailBytes(text, windowBytes);
-	const omittedBytes = Math.max(0, truncated.totalBytes - head.bytes - tail.bytes);
-	return `${head.text}\n[…${omittedBytes}B elided…]\n${tail.text}`;
+	}).content;
+}
+
+function boundedAskJson(value: unknown): string {
+	return boundedToolContext(
+		JSON.stringify(
+			value,
+			(_key, nested) =>
+				typeof nested === "string"
+					? truncateMiddle(nested, {
+							maxBytes: EXPANDED_ASK_FIELD_MAX_BYTES,
+							maxLines: EXPANDED_ASK_FIELD_MAX_LINES,
+						}).content
+					: nested,
+			2,
+		),
+	);
 }
 
 function expandedAskArguments(args: Record<string, unknown> | undefined): string | undefined {
 	if (!args) return undefined;
 	const visibleArgs = Object.fromEntries(Object.entries(args).filter(([key]) => key !== INTENT_FIELD));
 	try {
-		return JSON.stringify(visibleArgs, undefined, 2);
+		return boundedAskJson(visibleArgs);
 	} catch {
 		return undefined;
 	}
@@ -248,7 +260,7 @@ function expandedAskDetails(result: ToolResultMessage | undefined): string | und
 			: typeof details.question === "string"
 				? [details.question]
 				: [];
-	return questions.length > 0 ? JSON.stringify({ questions }, undefined, 2) : undefined;
+	return questions.length > 0 ? boundedAskJson({ questions }) : undefined;
 }
 
 /** One line per tool call: `→ read(src/foo.ts:50-80) ⇒ ok · 31 lines`. */
@@ -297,7 +309,7 @@ function toolCallLine(
 		if (result) {
 			const resultText = expandedToolResultText(result);
 			if (resultText) {
-				const visibleResult = name === "ask" ? resultText : boundedToolContext(resultText);
+				const visibleResult = boundedToolContext(resultText);
 				sections.push(`Tool result:\n${fencedText(visibleResult, "text")}`);
 			}
 		}
