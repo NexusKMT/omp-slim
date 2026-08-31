@@ -108,11 +108,14 @@ describe("detectKittyUnicodePlaceholdersSupport", () => {
 		expect(detectKittyUnicodePlaceholdersSupport("alacritty", env())).toBe(false);
 	});
 
-	it("uses scroll-aware placeholders when Kitty is explicitly forced through tmux", () => {
-		const forced = env({ TMUX: "/tmp/tmux-1000/default,1,0", PI_FORCE_IMAGE_PROTOCOL: "kitty" });
-		expect(detectKittyUnicodePlaceholdersSupport("base", forced)).toBe(true);
-		expect(detectKittyUnicodePlaceholdersSupport("wezterm", forced)).toBe(true);
-		// Automatic tmux fallback remains conservative when the outer terminal is unknown.
+	it("uses scroll-aware placeholders when Kitty is explicitly forced through a multiplexer", () => {
+		const forcedTmux = env({ TMUX: "/tmp/tmux-1000/default,1,0", PI_FORCE_IMAGE_PROTOCOL: "kitty" });
+		expect(detectKittyUnicodePlaceholdersSupport("base", forcedTmux)).toBe(true);
+		expect(detectKittyUnicodePlaceholdersSupport("wezterm", forcedTmux)).toBe(true);
+		expect(
+			detectKittyUnicodePlaceholdersSupport("ghostty", env({ HERDR_ENV: "1", PI_FORCE_IMAGE_PROTOCOL: "kitty" })),
+		).toBe(true);
+		// Automatic multiplexer fallback remains conservative when the outer terminal is unknown.
 		expect(detectKittyUnicodePlaceholdersSupport("base", env({ TMUX: "/tmp/tmux-1000/default,1,0" }))).toBe(false);
 	});
 
