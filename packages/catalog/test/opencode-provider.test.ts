@@ -7,7 +7,7 @@ import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { readModelCache, writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
-import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
+import { getBundledModels, getBundledProviders } from "@oh-my-pi/pi-catalog/models";
 import { PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import {
 	fetchWellKnownModels,
@@ -788,5 +788,25 @@ describe("OpenCode provider discovery", () => {
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("issue #10416 — retired bare opencode provider", () => {
+	// #309 split `opencode` into `opencode-go` / `opencode-zen`, and models.dev's
+	// `opencode` key is remapped to `opencode-zen`. The legacy `opencode` rows
+	// survived as previous-snapshot zombies and surfaced in the picker as a dead
+	// provider with no descriptor/auth path. `RETIRED_PROVIDERS` must keep them out.
+	test("bundled catalog exposes no bare `opencode` provider", () => {
+		// getBundledProviders() is every top-level key of models.json, which is
+		// exactly what ModelRegistry.#loadBuiltInModels iterates to fill the picker.
+		expect(getBundledProviders()).not.toContain("opencode");
+	});
+
+	test("the split OpenCode providers remain populated", () => {
+		const providers = getBundledProviders();
+		expect(providers).toContain("opencode-go");
+		expect(providers).toContain("opencode-zen");
+		expect(getBundledModels("opencode-go").length).toBeGreaterThan(0);
+		expect(getBundledModels("opencode-zen").length).toBeGreaterThan(0);
 	});
 });

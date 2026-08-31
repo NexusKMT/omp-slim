@@ -83,7 +83,15 @@ const packageRoot = path.join(import.meta.dir, "..");
  * and never written to models.json.
  */
 const DISCOVERY_ONLY_PROVIDERS = new Set(["ollama", "vllm", "lm-studio", "litellm"]);
-const RETIRED_PROVIDERS = new Set(["wafer-pass", "wandb"]);
+/**
+ * Retired provider ids whose previous-snapshot rows must never be resurrected.
+ * `opencode` was split into `opencode-go` / `opencode-zen`; models.dev's
+ * `opencode` key now maps to `opencode-zen` (OPENCODE_MODELS_DEV_DESCRIPTORS),
+ * so fresh discovery never emits it, but its legacy rows survived as
+ * previous-snapshot zombies (no descriptor makes it authoritative to prune),
+ * surfacing a dead, un-authable `opencode` provider in the picker.
+ */
+const RETIRED_PROVIDERS = new Set(["wafer-pass", "wandb", "opencode"]);
 /**
  * Credential-scoped catalogs (Devin's Cascade roster is gated per account/team
  * via `allowed_model_uids`). Fetching them during generation would bake one

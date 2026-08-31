@@ -19,6 +19,7 @@
 
 ### Fixed
 
+- Fixed the bundled catalog shipping a dead `opencode` provider (5 leftover Zen models) that surfaced in the model picker alongside `opencode-zen` with no auth path; the id was retired when it split into `opencode-go` / `opencode-zen`, so its previous-snapshot rows are now pruned during generation ([#10416](https://github.com/can1357/oh-my-pi/issues/10416)).
 - Model-id revision parsing no longer mistakes parameter-count tokens for versions (`qwen3-32b` is generation 3, not 3.32), Fireworks' `p`-spelled Kimi ids classify as K2.6 (restoring their widened reasoning stream timeout), and Kimi K3's `reasoning_effort` remap now applies on any OpenAI-compatible host (LiteLLM, vLLM) instead of only census-listed providers.
 - Cursor's wrapped per-tier Grok ids (`cursor-grok-4.5`, `cursor-grok-4.6-high`) now carry structured xAI identity with a parsed revision, so revision-gated behavior (reasoning classification, thinking-loop guard) applies to them like any other Grok deployment.
 - Codex Daybreak aliases keep their standard API list price through the rule tree (`cost-patch`) instead of a TypeScript pricing table, covering the `-wm` worker siblings that the old exact-id switch missed.
