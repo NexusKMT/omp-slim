@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Gemini 3 sessions on Cloud Code Assist providers (`google-antigravity`, `google-gemini-cli`) and Vertex AI failing every turn with `400 INVALID_ARGUMENT` once the history contained parallel tool calls: the `skip_thought_signature_validator` bypass sentinel (accepted only by the public Gemini API) is no longer emitted for unsigned tool calls, which are sent without a `thoughtSignature` as those backends require ([#9638](https://github.com/can1357/oh-my-pi/issues/9638)).
+
 ## [18.0.4] - 2026-08-24
 
 ### Fixed

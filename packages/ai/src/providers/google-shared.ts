@@ -138,8 +138,6 @@ export function retainThoughtSignature(existing: string | undefined, incoming: s
 // Thought signatures must be base64 for Google APIs (TYPE_BYTES).
 const base64SignaturePattern = /^[A-Za-z0-9+/]+={0,2}$/;
 
-const SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator";
-
 function isValidThoughtSignature(signature: string | undefined): boolean {
 	if (!signature) return false;
 	if (signature.length % 4 !== 0) return false;
@@ -268,9 +266,12 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 					}
 				} else if (block.type === "toolCall") {
 					emittedToolCallNames.set(block.id, block.name);
+					// Gemini 3 requires a thought signature only on the FIRST function call
+					// of a turn; unsigned parallel calls simply omit it. Do NOT substitute a
+					// bypass sentinel here — `skip_thought_signature_validator` is honored
+					// only by the public Gemini API and is rejected as INVALID_ARGUMENT by
+					// Cloud Code Assist / Antigravity and Vertex AI. (#9638)
 					const thoughtSignature = resolveThoughtSignature(isSameProviderAndModel, block.thoughtSignature);
-					const effectiveSignature =
-						thoughtSignature || (isGemini3Model(model.id) ? SKIP_THOUGHT_SIGNATURE : undefined);
 
 					const part: Part = {
 						functionCall: {
@@ -282,8 +283,8 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 					if (model.provider === "google-vertex" && part?.functionCall?.id) {
 						delete part.functionCall.id; // Vertex AI GenerateContent rejects 'id' in functionCall parts.
 					}
-					if (effectiveSignature) {
-						part.thoughtSignature = effectiveSignature;
+					if (thoughtSignature) {
+						part.thoughtSignature = thoughtSignature;
 					}
 					parts.push(part);
 				}
