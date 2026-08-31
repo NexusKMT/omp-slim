@@ -2300,8 +2300,8 @@ export class TUI extends Container {
 		const geometryStable = this.#hasEverRendered && this.#previousWidth === width && this.#previousHeight === height;
 		const startTop = destructiveReset ? 0 : Math.min(this.#providerViewportTop, Math.max(0, height - 1));
 		const newTop = Math.max(0, Math.min(startTop + historyRows.length, height - rows));
-		let buffer = this.#paintBeginSequence + this.#pendingAltExit;
-		this.#pendingAltExit = "";
+		const pendingAltExit = this.#pendingAltExit;
+		let buffer = this.#paintBeginSequence + pendingAltExit;
 		if (destructiveReset && TERMINAL.imageProtocol === ImageProtocol.Kitty) {
 			// ED2/ED3 erase text cells but leave Kitty graphics visible. A reset is
 			// explicitly destructive, so remove every placement—not only the ones
@@ -2402,6 +2402,10 @@ export class TUI extends Container {
 		}
 		buffer += this.#paintEndSequence;
 		this.terminal.write(buffer);
+		if (pendingAltExit) {
+			this.#pendingAltExit = "";
+			setAltScreenActive(false);
+		}
 		if (target) this.#recordHardwareCursorState(target);
 		else this.#recordHardwareCursorHidden();
 		this.#providerWindow = mutablePrepared;
@@ -2469,9 +2473,12 @@ export class TUI extends Container {
 			// Session replacement finishes while its fullscreen selector still
 			// covers the old normal buffer. Fuse the restore into the destructive
 			// repaint so no stale frame can become visible between writes.
-			if (this.#clearScrollbackOnNextRender) this.#pendingAltExit = exitSequence;
-			else this.terminal.write(exitSequence);
-			setAltScreenActive(false);
+			if (this.#clearScrollbackOnNextRender) {
+				this.#pendingAltExit = exitSequence;
+			} else {
+				this.terminal.write(exitSequence);
+				setAltScreenActive(false);
+			}
 			this.#forgetHardwareCursorState();
 			this.#altActive = false;
 			this.#altMouseTrackingActive = false;
