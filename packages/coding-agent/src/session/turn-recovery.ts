@@ -1515,12 +1515,14 @@ export class TurnRecovery {
 		role: string,
 		currentSelector: string,
 		currentModel: Model | null | undefined = this.#host.model(),
+		options?: { wrapAround?: boolean },
 	): RetryFallbackSelector[] {
 		return findRetryFallbackCandidates(
 			this.#getRetryFallbackResolutionContext(),
 			role,
 			currentSelector,
 			currentModel,
+			options,
 		);
 	}
 
@@ -1775,7 +1777,12 @@ export class TurnRecovery {
 	async #tryRetryModelFallback(
 		currentSelector: string,
 		failedMessage: AssistantMessage,
-		options?: { pinFallback?: boolean; preserveFailedTurn?: boolean },
+		options?: {
+			excludeProvider?: string;
+			pinFallback?: boolean;
+			preserveFailedTurn?: boolean;
+			wrapAround?: boolean;
+		},
 	): Promise<boolean> {
 		const ceiling = this.#host.thinkingLevelCeiling();
 		const latestAssistant = options?.preserveFailedTurn
@@ -1784,11 +1791,12 @@ export class TurnRecovery {
 					(message): message is AssistantMessage => message.role === "assistant" && message !== failedMessage,
 				);
 		for (const role of this.retryFallbackChainKeys(currentSelector)) {
-			for (const selector of this.findRetryFallbackCandidates(role, currentSelector)) {
+			for (const selector of this.findRetryFallbackCandidates(role, currentSelector, undefined, options)) {
 				if (this.isRetryFallbackSelectorSuppressed(selector)) continue;
 				const resolved = resolveModelOverride([selector.raw], this.#host.modelRegistry, this.#host.settings);
 				const candidate = resolved.model ?? this.#host.modelRegistry.find(selector.provider, selector.id);
 				if (!candidate) continue;
+				if (options?.excludeProvider === candidate.provider) continue;
 				// Anthropic signatures and redacted blocks are model-bound, while the
 				// latest assistant response must remain byte-identical. A same-provider
 				// model switch can satisfy neither constraint, so keep retrying the
@@ -2181,6 +2189,14 @@ export class TurnRecovery {
 		// contents, not model health (issue #8760). Keep it on the same model; the
 		// retry budget still bounds a genuinely stuck stream.
 		const thinkingLoop = AIError.is(id, AIError.Flag.ThinkingLoop);
+		const longOpenCodeUsageLimit =
+			currentModel?.provider === "opencode-go" &&
+			retrySettings.maxDelayMs > 0 &&
+			parsedRetryAfterMs !== undefined &&
+			parsedRetryAfterMs > retrySettings.maxDelayMs &&
+			/\bGoUsageLimitError\b/.test(errorMessage) &&
+			(!this.#hasReplayUnsafeOutput(message) || this.#unexecutedToolCallsReplaySafe(message));
+
 		if (!staleOpenAIResponsesReplayError && !switchedCredential && currentSelector) {
 			// A refusal chain stops at the retry budget: the exhausted-attempt
 			// last resort is for provider failures, not classifier decisions.
@@ -2194,8 +2210,10 @@ export class TurnRecovery {
 					this.noteRetryFallbackCooldown(currentSelector, parsedRetryAfterMs, errorMessage);
 				}
 				switchedModel = await this.#tryRetryModelFallback(currentSelector, message, {
+					excludeProvider: longOpenCodeUsageLimit ? "opencode-go" : undefined,
 					pinFallback: classifierRefusal,
 					preserveFailedTurn,
+					wrapAround: longOpenCodeUsageLimit,
 				});
 			}
 			// Auto fallback from a Fireworks Fast variant to its base model. Independent

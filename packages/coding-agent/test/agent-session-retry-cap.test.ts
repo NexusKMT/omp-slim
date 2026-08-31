@@ -180,6 +180,106 @@ describe("AgentSession retry delay cap", () => {
 		expect(session.isRetrying).toBe(false);
 	});
 
+	it("switches a long OpenCode Go usage limit to an earlier cross-provider fallback", async () => {
+		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const alternateOpenCodeModel = getBundledModel("opencode-go", "deepseek-v4-pro");
+		const exhaustedModel = getBundledModel("opencode-go", "deepseek-v4-flash");
+		const fallbackModel = getBundledModel("openai", "gpt-5.5");
+		if (!primaryModel || !alternateOpenCodeModel || !exhaustedModel || !fallbackModel) {
+			throw new Error("Expected bundled primary, OpenCode Go, and cross-provider fallback test models to exist");
+		}
+
+		authStorage.setRuntimeApiKey("opencode-go", "opencode-go-test-key");
+		authStorage.setRuntimeApiKey("openai", "openai-test-key");
+
+		const mock = createMockModel({
+			responses: [
+				{ throw: "503 service unavailable: overloaded_error retry-after-ms=60000" },
+				{
+					content: [{ type: "thinking", thinking: "Classifier refusal." }],
+					errorMessage: "Refusal (cyber): Declined.",
+					stopDetails: { type: "refusal", category: "cyber", explanation: "Declined." },
+					stopReason: "error",
+				},
+				{
+					content: [{ type: "thinking", thinking: "Classifier refusal." }],
+					errorMessage: "Refusal (cyber): Declined.",
+					stopDetails: { type: "refusal", category: "cyber", explanation: "Declined." },
+					stopReason: "error",
+				},
+				{
+					throw:
+						"429 Weekly usage limit reached. Resets in 55min. type=GoUsageLimitError retry-after-ms=3242000",
+				},
+				{ content: ["recovered on cross-provider fallback"], stopReason: "stop" },
+			],
+		});
+		const requestedModels: string[] = [];
+		const agent = new Agent({
+			getApiKey: requestedModel => `${requestedModel.provider}-test-key`,
+			initialState: {
+				model: primaryModel,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+			},
+			streamFn: (requestedModel, context, options) => {
+				requestedModels.push(`${requestedModel.provider}/${requestedModel.id}`);
+				return mock.stream(requestedModel, context, options);
+			},
+		});
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.maxDelayMs": 300_000,
+			"retry.maxRetries": 3,
+			"retry.modelFallback": true,
+			"retry.fallbackChains": {
+				default: [
+					`${alternateOpenCodeModel.provider}/${alternateOpenCodeModel.id}`,
+					`${fallbackModel.provider}/${fallbackModel.id}`,
+					`${exhaustedModel.provider}/${exhaustedModel.id}`,
+				],
+			},
+		});
+		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+		const waitSpy = vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
+		session.subscribe(event => {
+			if (event.type === "retry_fallback_applied") fallbackEvents.push(event);
+		});
+
+		await session.prompt("Trigger the long OpenCode Go weekly usage limit");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual([
+			`${primaryModel.provider}/${primaryModel.id}`,
+			`${alternateOpenCodeModel.provider}/${alternateOpenCodeModel.id}`,
+			`${fallbackModel.provider}/${fallbackModel.id}`,
+			`${exhaustedModel.provider}/${exhaustedModel.id}`,
+			`${fallbackModel.provider}/${fallbackModel.id}`,
+		]);
+		expect(fallbackEvents).toContainEqual({
+			type: "retry_fallback_applied",
+			from: `${exhaustedModel.provider}/${exhaustedModel.id}`,
+			to: `${fallbackModel.provider}/${fallbackModel.id}`,
+			role: "default",
+		});
+		for (const call of waitSpy.mock.calls) {
+			expect(call[0]).toBeLessThan(300_000);
+		}
+		expect(lastAssistant(session).content).toContainEqual({
+			type: "text",
+			text: "recovered on cross-provider fallback",
+		});
+	});
+
 	it("honors the reason backoff for a transient rate-limit 429 without a provider hint", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) {
