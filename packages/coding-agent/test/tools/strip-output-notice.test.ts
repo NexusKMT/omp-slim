@@ -130,7 +130,7 @@ describe("stripOutputNotice", () => {
 					elidedLines: 0,
 					headLines: 1,
 					tailLines: 1,
-					singleLineByteWindows: true,
+					partialByteWindows: true,
 				},
 				{ direction: "middle" },
 			)

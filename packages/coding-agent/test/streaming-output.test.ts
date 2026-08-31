@@ -637,6 +637,15 @@ describe("truncateMiddle", () => {
 		expect(result.outputBytes).toBeLessThanOrEqual(8192 + 64);
 	});
 
+	test("marks multi-line partial byte windows so exact ranges are omitted", () => {
+		const content = `${"x".repeat(20_000)}\n${"y".repeat(20_000)}`;
+		const result = truncateMiddle(content, { maxBytes: 8192, maxLines: 80 });
+
+		expect(result.truncatedBy).toBe("middle");
+		expect(result.partialByteWindows).toBe(true);
+		expect(result.elidedBytes).toBeGreaterThan(0);
+	});
+
 	test("keeps a giant trailing line within budget", () => {
 		const content = `label\n${"x".repeat(20_000)}`;
 		const result = truncateMiddle(content, { maxBytes: 8192, maxLines: 80 });
@@ -652,7 +661,7 @@ describe("truncateMiddle", () => {
 		const result = truncateMiddle("x".repeat(20_000), { maxBytes: 8192, maxLines: 80 });
 
 		expect(result.truncatedBy).toBe("middle");
-		expect(result.singleLineByteWindows).toBe(true);
+		expect(result.partialByteWindows).toBe(true);
 		expect(result.headLines).toBe(1);
 		expect(result.tailLines).toBe(1);
 	});

@@ -153,7 +153,7 @@ export class OutputMetaBuilder {
 				totalBytes: result.totalBytes,
 				outputLines,
 				outputBytes,
-				...(effectiveTotalLines > 1 && !result.singleLineByteWindows
+				...(effectiveTotalLines > 1 && !result.partialByteWindows
 					? {
 							headRange: headLines > 0 ? { start: 1, end: headLines } : undefined,
 							tailRange:
@@ -461,8 +461,8 @@ export function formatTruncationMetaNotice(truncation: TruncationMeta): string {
 		const tailPart = tail ? `${tail.start}-${tail.end}` : "";
 		if (headPart && tailPart) {
 			notice = `Showing ${headPart} and ${tailPart} of ${totalLines}; ${elidedLines.toLocaleString()} middle line${elidedLines === 1 ? "" : "s"} (${formatBytes(elidedBytes)}) elided`;
-		} else if (totalLines === 1 && elidedBytes > 0) {
-			notice = `Showing head and tail bytes of 1 line; ${formatBytes(elidedBytes)} elided`;
+		} else if (elidedBytes > 0) {
+			notice = `Showing head and tail bytes of ${totalLines.toLocaleString()} line${totalLines === 1 ? "" : "s"}; ${formatBytes(elidedBytes)} elided`;
 		} else {
 			notice = `Showing ${Math.min(truncation.outputLines, totalLines)} of ${totalLines} lines; middle elided`;
 		}
@@ -773,7 +773,7 @@ async function spillLargeResultToArtifact(
 			outputLines,
 			outputBytes,
 			maxBytes: headBytes + tailBytes,
-			...(truncated.totalLines > 1 && !truncated.singleLineByteWindows
+			...(truncated.totalLines > 1 && !truncated.partialByteWindows
 				? {
 						headRange: headLines > 0 ? { start: 1, end: headLines } : undefined,
 						tailRange:
