@@ -34,7 +34,7 @@ import { type Tool as AiTool, jsonSchemaToTypeScript, toolWireSchema, validateTo
 import { type Component, Container, Text } from "@oh-my-pi/pi-tui";
 import { parseStreamingJson } from "@oh-my-pi/pi-utils";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
-import { XD_URL_PREFIX } from "../internal-urls/xd-protocol";
+import { stripXdUrlPrefix, XD_URL_PREFIX } from "../internal-urls/xd-protocol";
 import { parseMCPToolName } from "../mcp/tool-bridge";
 import type { Theme } from "../modes/theme/theme";
 import { truncateHeadBytes } from "../session/streaming-output";
@@ -279,8 +279,8 @@ export function resolveXdevTool(state: XdevState, name: string): Tool | undefine
  * (`xd://github`) — strip it so both spellings resolve to the same device.
  */
 export function resolveMountedXdevTool(state: XdevState, name: string): Tool | undefined {
-	const bare = name.startsWith(XD_URL_PREFIX) ? name.slice(XD_URL_PREFIX.length) : name;
-	return state.mountedNames.has(bare) ? state.tools.get(bare) : undefined;
+	const canonicalName = stripXdUrlPrefix(name);
+	return state.mountedNames.has(canonicalName) ? state.tools.get(canonicalName) : undefined;
 }
 
 /** Resolve a mounted tool with its execution-only permission decorator. */
