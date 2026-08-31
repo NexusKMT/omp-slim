@@ -25,7 +25,14 @@ import { wrapToolWithMetaNotice } from "../tools/output-meta";
 import { isFilesystemSourcePath } from "../tools/path-utils";
 import { supportsExternalThinking } from "../tools/think";
 import { ToolAbortError, ToolError } from "../tools/tool-errors";
-import { isMountableUnderXdev, listXdevTools, type XdevState, xdevDocsFor, xdevEntries } from "../tools/xdev";
+import {
+	isMountableUnderXdev,
+	listXdevTools,
+	resolveMountedXdevTool,
+	type XdevState,
+	xdevDocsFor,
+	xdevEntries,
+} from "../tools/xdev";
 import { type EditMode, resolveEditMode } from "../utils/edit-mode";
 import { type InspectImageMode, isInspectImageToolActive } from "../utils/inspect-image-mode";
 import {
@@ -415,9 +422,9 @@ export class SessionTools {
 		return this.#toolRegistry.has("edit");
 	}
 
-	/** Looks up a registered tool by name. */
+	/** Looks up a registered tool by its canonical name or mounted `xd://` alias. */
 	getToolByName(name: string): AgentTool | undefined {
-		return this.#toolRegistry.get(name);
+		return this.#toolRegistry.get(name) ?? (this.#xdev ? resolveMountedXdevTool(this.#xdev, name) : undefined);
 	}
 
 	/** Looks up an enabled tool through the same ACP permission gate as direct calls. */

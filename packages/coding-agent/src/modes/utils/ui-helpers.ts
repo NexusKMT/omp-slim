@@ -34,7 +34,11 @@ import {
 import { SkillMessageComponent } from "../../modes/components/skill-message";
 import { StrippedToolCallsPlaceholder } from "../../modes/components/stripped-tool-calls-placeholder";
 import { ToolActivityContainer } from "../../modes/components/tool-activity";
-import { ToolExecutionComponent, type ToolExecutionHandle } from "../../modes/components/tool-execution";
+import {
+	ToolExecutionComponent,
+	type ToolExecutionHandle,
+	toolRenderName,
+} from "../../modes/components/tool-execution";
 import { TranscriptBlock, TranscriptContainer } from "../../modes/components/transcript-container";
 import { createUsageRowBlock, turnElapsedMs } from "../../modes/components/usage-row";
 import { UserMessageComponent } from "../../modes/components/user-message";
@@ -510,9 +514,11 @@ export class UiHelpers {
 						appendAssistantSegment(afterToolSegment);
 						continue;
 					}
-					resolveWaitingPoll(content.name);
+					const tool = this.ctx.viewSession.getToolByName(content.name);
+					const renderToolName = toolRenderName(content.name, tool);
+					resolveWaitingPoll(renderToolName);
 
-					if (content.name === "read" && readArgsCollapseIntoGroup(content.arguments)) {
+					if (renderToolName === "read" && readArgsCollapseIntoGroup(content.arguments)) {
 						if (hasErrorStop && errorMessage) {
 							if (!readGroup) {
 								readGroup = new ReadToolGroupComponent({
@@ -553,7 +559,6 @@ export class UiHelpers {
 
 					readGroup?.seal();
 					readGroup = null;
-					const tool = this.ctx.viewSession.getToolByName(content.name);
 					const partialJson = getStreamingPartialJson(content);
 					// Mid-stream rebuild (theme change, settings, focus replay): decode
 					// display args from the raw stream exactly like the live reveal path.
@@ -565,14 +570,14 @@ export class UiHelpers {
 						? decodeStreamedToolArgs(partialJson, {
 								rawInput,
 								fullArgs: content.arguments,
-								streamingStringKeys: streamingStringKeysForTool(content.name, rawInput),
+								streamingStringKeys: streamingStringKeysForTool(renderToolName, rawInput),
 							})
 						: content.arguments;
 					const component = new ToolExecutionComponent(
-						content.name,
+						renderToolName,
 						renderArgs,
 						{
-							useBuiltInRenderer: this.ctx.viewSession.hasBuiltInTool(content.name),
+							useBuiltInRenderer: this.ctx.viewSession.hasBuiltInTool(renderToolName),
 							snapshots: getFileSnapshotStore(this.ctx.viewSession),
 							clipboard: getEditClipboard(this.ctx.viewSession),
 							showImages: settings.get("terminal.showImages"),
