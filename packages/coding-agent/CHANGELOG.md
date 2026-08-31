@@ -19,6 +19,7 @@
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
+- A direct tool call naming a mounted `xd://` device by its full URL (e.g. `xd://github`) now resolves to that device instead of failing with `Tool xd://<name> not found` ([#10342](https://github.com/can1357/oh-my-pi/issues/10342)).
 
 ## [18.0.11] - 2026-08-29
 

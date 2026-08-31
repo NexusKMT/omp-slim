@@ -685,6 +685,30 @@ describe("xd:// and top-level calls share the canonical tool map", () => {
 			await removeWithRetries(tempDir);
 		}
 	});
+
+	it("resolves a direct device call whether the name is bare or carries the advertised xd:// prefix (#10342)", () => {
+		const githubDevice = {
+			name: "github",
+			label: "GitHub",
+			description: "fixture",
+			parameters: type({ op: "string" }),
+			async execute() {
+				return { content: [{ type: "text" as const, text: "ok" }] };
+			},
+		};
+		const xdev = createTestXdevState([githubDevice]);
+
+		// A model calling the device directly may emit either the bare mounted
+		// name or the exact `xd://github` spelling the device docs advertise;
+		// both must land on the same canonical tool. Before the fix the prefixed
+		// form missed the resolver and the agent loop threw `Tool xd://github
+		// not found`.
+		expect(resolveMountedXdevTool(xdev, "github")).toBe(githubDevice);
+		expect(resolveMountedXdevTool(xdev, "xd://github")).toBe(githubDevice);
+
+		// A genuinely unmounted name still misses, prefixed or not.
+		expect(resolveMountedXdevTool(xdev, "xd://no_such_tool")).toBeUndefined();
+	});
 });
 
 describe("device-only write transport for explicit lists omitting write", () => {

@@ -270,9 +270,17 @@ export function resolveXdevTool(state: XdevState, name: string): Tool | undefine
 	return state.tools.get(name);
 }
 
-/** Resolve a mounted tool for top-level fallback execution. */
+/**
+ * Resolve a mounted tool for top-level fallback execution.
+ *
+ * A model may reach a mounted device by emitting a direct tool call instead of
+ * a `write`; the fallback in `sdk.ts` routes that here. Names arrive both bare
+ * (`github`) and carrying the very `xd://` prefix the device docs advertise
+ * (`xd://github`) — strip it so both spellings resolve to the same device.
+ */
 export function resolveMountedXdevTool(state: XdevState, name: string): Tool | undefined {
-	return state.mountedNames.has(name) ? state.tools.get(name) : undefined;
+	const bare = name.startsWith(XD_URL_PREFIX) ? name.slice(XD_URL_PREFIX.length) : name;
+	return state.mountedNames.has(bare) ? state.tools.get(bare) : undefined;
 }
 
 /** Resolve a mounted tool with its execution-only permission decorator. */
