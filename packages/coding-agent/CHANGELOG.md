@@ -20,6 +20,7 @@
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
+- Fixed the legacy Pi `SettingsManager` shim so `create()` is synchronous and returns a manager exposing `getGlobalSettings()`/`getProjectSettings()`, unbreaking pi extensions like pi-vim that read settings on startup ([#10397](https://github.com/can1357/oh-my-pi/issues/10397))
 
 ## [18.0.11] - 2026-08-29
 

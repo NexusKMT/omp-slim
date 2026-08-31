@@ -885,6 +885,27 @@ export class Settings {
 		return this.#agentDir;
 	}
 
+	/**
+	 * Raw global settings layer (`config.yml`/`config.yaml`), deep-cloned.
+	 *
+	 * Exposes arbitrary namespaced keys (e.g. an extension's own `piVim` block)
+	 * that the typed, schema-bound {@link get} cannot reach. Used by the legacy
+	 * pi `SettingsManager` shim to match upstream Pi's `getGlobalSettings()`.
+	 * The clone means callers cannot mutate internal state.
+	 */
+	getGlobalSettings(): RawSettings {
+		return structuredClone(this.#global);
+	}
+
+	/**
+	 * Raw project settings layer (`.claude/settings.yml`, `.omp/config.yml`,
+	 * etc.), deep-cloned. Companion to {@link getGlobalSettings} for the legacy
+	 * pi `SettingsManager` shim's `getProjectSettings()`.
+	 */
+	getProjectSettings(): RawSettings {
+		return structuredClone(this.#project);
+	}
+
 	getPlansDirectory(): string {
 		return path.join(this.#agentDir, "plans");
 	}
