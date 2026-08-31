@@ -19,7 +19,7 @@ import type {
 	HookMessage,
 	PythonExecutionMessage,
 } from "./messages";
-import { truncateMiddle } from "./streaming-output";
+import { truncateHeadBytes, truncateMiddle, truncateTailBytes } from "./streaming-output";
 
 export interface HistoryFormatOptions {
 	/** Optional H1 prepended to the transcript. */
@@ -212,8 +212,11 @@ function boundedToolContext(text: string): string {
 		maxLines: EXPANDED_TOOL_IO_MAX_LINES,
 	});
 	if (!truncated.truncated || truncated.content.includes(" elided…]")) return truncated.content;
-	const omittedBytes = Math.max(0, truncated.totalBytes - (truncated.outputBytes ?? 0));
-	return `[…${omittedBytes}B elided…]\n${truncated.content}`;
+	const windowBytes = Math.floor((EXPANDED_TOOL_IO_MAX_BYTES - 64) / 2);
+	const head = truncateHeadBytes(text, windowBytes);
+	const tail = truncateTailBytes(text, windowBytes);
+	const omittedBytes = Math.max(0, truncated.totalBytes - head.bytes - tail.bytes);
+	return `${head.text}\n[…${omittedBytes}B elided…]\n${tail.text}`;
 }
 
 function expandedAskArguments(args: Record<string, unknown> | undefined): string | undefined {

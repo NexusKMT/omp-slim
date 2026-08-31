@@ -390,7 +390,7 @@ describe("advisor", () => {
 			expect(Buffer.byteLength(expanded)).toBeLessThan(9 * 1024);
 		});
 
-		it("marks oversized single-line results as incomplete", () => {
+		it("preserves head and tail for oversized single-line results", () => {
 			const result = {
 				role: "toolResult",
 				toolCallId: "read-1",
@@ -402,6 +402,7 @@ describe("advisor", () => {
 
 			const expanded = formatSessionHistoryMarkdown([result], { expandToolIO: true });
 
+			expect(expanded).toContain("head-");
 			expect(expanded).toContain("elided");
 			expect(expanded).toContain("-tail");
 			expect(Buffer.byteLength(expanded)).toBeLessThan(9 * 1024);
