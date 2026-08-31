@@ -27,6 +27,50 @@ describe("AgentSession session stats", () => {
 		session = undefined;
 	});
 
+	it("includes non-transcript model usage without inflating message counts", () => {
+		const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
+		if (!model) throw new Error("Expected a bundled model");
+		const sessionManager = SessionManager.inMemory();
+		sessionManager.appendModelUsage({
+			purpose: "auto-thinking",
+			role: "smol",
+			provider: "anthropic",
+			model: "claude-haiku-4-5",
+			usage: {
+				input: 11,
+				output: 2,
+				cacheRead: 3,
+				cacheWrite: 0,
+				totalTokens: 16,
+				reasoningTokens: 1,
+				cost: { input: 0.0011, output: 0.0004, cacheRead: 0.00003, cacheWrite: 0, total: 0.00153 },
+			},
+		});
+		const agent = new Agent({
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+		});
+		session = new AgentSession({
+			agent,
+			sessionManager,
+			settings: Settings.isolated({ "compaction.enabled": false }),
+			modelRegistry,
+		});
+
+		const stats = session.getSessionStats();
+
+		expect(stats.tokens).toEqual({
+			input: 11,
+			output: 2,
+			reasoning: 1,
+			cacheRead: 3,
+			cacheWrite: 0,
+			total: 16,
+		});
+		expect(stats.cost).toBeCloseTo(0.00153, 8);
+		expect(stats.totalMessages).toBe(0);
+		expect(stats.assistantMessages).toBe(0);
+	});
+
 	it("preserves authoritative provider occupancy above the local transcript estimate", () => {
 		const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
 		if (!model?.contextWindow) {

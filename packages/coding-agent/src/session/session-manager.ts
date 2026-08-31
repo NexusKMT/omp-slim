@@ -44,6 +44,7 @@ import {
 	type LabelEntry,
 	type ModeChangeEntry,
 	type ModelChangeEntry,
+	type ModelUsageEntry,
 	type NewSessionOptions,
 	type ResetBoundaryEntry,
 	type ServiceTierChangeEntry,
@@ -177,6 +178,7 @@ function taskUsageFrom(details: unknown): Usage | undefined {
 }
 
 function entryUsage(entry: SessionEntry): Usage | undefined {
+	if (entry.type === "model_usage") return entry.usage;
 	if (entry.type !== "message") return undefined;
 	const message = entry.message;
 	if (message.role === "assistant") return message.usage;
@@ -2295,6 +2297,13 @@ export class SessionManager {
 		};
 		this.#recordEntry(entry);
 		this.#index.setLeaf(activeLeafId);
+		return entry.id;
+	}
+
+	/** Record usage from a model call that must not enter the conversation transcript. */
+	appendModelUsage(usage: Pick<ModelUsageEntry, "purpose" | "role" | "provider" | "model" | "usage">): string {
+		const entry: ModelUsageEntry = { type: "model_usage", ...this.#freshEntryFields(), ...usage };
+		this.#recordEntry(entry);
 		return entry.id;
 	}
 

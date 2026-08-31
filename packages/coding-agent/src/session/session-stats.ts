@@ -100,6 +100,23 @@ export class SessionStatsTracker {
 		let committedAcuCost = 0;
 		let hasCredits = false;
 		const routedModels: Record<string, number> = {};
+		const addUsage = (usage: Usage): void => {
+			totalInput += usage.input;
+			totalOutput += usage.output;
+			totalReasoning += usage.reasoningTokens ?? 0;
+			totalCacheRead += usage.cacheRead;
+			totalCacheWrite += usage.cacheWrite;
+			totalTokens += usage.totalTokens;
+			totalPremiumRequests += usage.premiumRequests ?? 0;
+			totalCost += usage.cost.total;
+			const credits = usage.credits;
+			if (credits !== undefined) {
+				hasCredits = true;
+				creditCost += credits.cost ?? 0;
+				committedCreditCost += credits.committedCost ?? 0;
+				committedAcuCost += credits.acuCost ?? 0;
+			}
+		};
 		for (const message of state.messages) {
 			if (message.role === "assistant") {
 				const assistant = message;
@@ -107,21 +124,7 @@ export class SessionStatsTracker {
 				// Persisted and imported transcripts can predate usage metadata despite the current message type.
 				const usage = assistant.usage;
 				if (!usage) continue;
-				totalInput += usage.input;
-				totalOutput += usage.output;
-				totalReasoning += usage.reasoningTokens ?? 0;
-				totalCacheRead += usage.cacheRead;
-				totalCacheWrite += usage.cacheWrite;
-				totalTokens += usage.totalTokens;
-				totalPremiumRequests += usage.premiumRequests ?? 0;
-				totalCost += usage.cost.total;
-				const credits = usage.credits;
-				if (credits !== undefined) {
-					hasCredits = true;
-					creditCost += credits.cost ?? 0;
-					committedCreditCost += credits.committedCost ?? 0;
-					committedAcuCost += credits.acuCost ?? 0;
-				}
+				addUsage(usage);
 				if (assistant.upstreamModel !== undefined) {
 					routedModels[assistant.upstreamModel] = (routedModels[assistant.upstreamModel] ?? 0) + 1;
 				}
@@ -129,22 +132,11 @@ export class SessionStatsTracker {
 			if (message.role === "toolResult" && message.toolName === "task") {
 				const usage = taskToolUsage(message.details);
 				if (!usage) continue;
-				totalInput += usage.input;
-				totalOutput += usage.output;
-				totalReasoning += usage.reasoningTokens ?? 0;
-				totalCacheRead += usage.cacheRead;
-				totalCacheWrite += usage.cacheWrite;
-				totalTokens += usage.totalTokens;
-				totalPremiumRequests += usage.premiumRequests ?? 0;
-				totalCost += usage.cost.total;
-				const credits = usage.credits;
-				if (credits !== undefined) {
-					hasCredits = true;
-					creditCost += credits.cost ?? 0;
-					committedCreditCost += credits.committedCost ?? 0;
-					committedAcuCost += credits.acuCost ?? 0;
-				}
+				addUsage(usage);
 			}
+		}
+		for (const entry of this.#host.sessionManager.getBranch()) {
+			if (entry.type === "model_usage") addUsage(entry.usage);
 		}
 		return {
 			sessionFile: this.#host.sessionManager.getSessionFile(),

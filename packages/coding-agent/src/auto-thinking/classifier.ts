@@ -14,7 +14,14 @@
  * Throws on any failure (no model, no key, unparseable output, abort/timeout);
  * the caller falls back to a concrete level and continues the turn.
  */
-import { type AssistantMessage, completeSimple, Effort, type Model, retryTransientCompletion } from "@oh-my-pi/pi-ai";
+import {
+	type AssistantMessage,
+	completeSimple,
+	Effort,
+	type Model,
+	retryTransientCompletion,
+	type Usage,
+} from "@oh-my-pi/pi-ai";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { prompt } from "@oh-my-pi/pi-utils";
 
@@ -86,6 +93,14 @@ export interface ClassifyDifficultyDeps {
 	sessionId?: string;
 	signal?: AbortSignal;
 	metadataResolver?: (provider: string) => Record<string, unknown> | undefined;
+	onUsage?: (usage: ClassifierUsage) => void;
+}
+
+export interface ClassifierUsage {
+	role: string;
+	provider: string;
+	model: string;
+	usage: Usage;
 }
 
 /**
@@ -126,8 +141,8 @@ async function classifyOnline(input: string, deps: ClassifyDifficultyDeps, ceili
 	const maxTokens = ONLINE_REASONING_SAFE_MAX_TOKENS;
 
 	const response = await retryTransientCompletion(
-		() =>
-			completeSimple(
+		async () => {
+			const attempt = await completeSimple(
 				model,
 				{
 					systemPrompt: [difficultySystemPromptFor(ceiling)],
@@ -140,7 +155,15 @@ async function classifyOnline(input: string, deps: ClassifyDifficultyDeps, ceili
 					metadata,
 					signal: deps.signal,
 				},
-			),
+			);
+			deps.onUsage?.({
+				role: resolved.role,
+				provider: attempt.provider,
+				model: attempt.model,
+				usage: attempt.usage,
+			});
+			return attempt;
+		},
 		{ signal: deps.signal },
 	);
 

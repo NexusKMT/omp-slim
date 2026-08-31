@@ -620,6 +620,7 @@ export class ModelControls {
 					sessionId: this.#host.sessionId(),
 					signal: controller.signal,
 					metadataResolver: provider => this.#host.agent.metadataForProvider(provider),
+					onUsage: usage => this.#host.sessionManager.appendModelUsage({ purpose: "auto-thinking", ...usage }),
 				});
 			} catch (error) {
 				logger.debug("auto-thinking: classification failed; using fallback level", {

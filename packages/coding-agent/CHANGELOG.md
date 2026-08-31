@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- Fixed online auto-thinking classifier calls being omitted from session token and cost totals.
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
