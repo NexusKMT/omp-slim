@@ -20,6 +20,10 @@
 - Devin auth, model assignment, and chat requests now send the native Devin CLI identity (`ideName: devin-cli`, `ideType: chisel`, `extensionName: chisel`, mapped `os`) instead of the Windsurf IDE identity; `ideType: chisel` is what the backend requires for router assignment ([#8590](https://github.com/can1357/oh-my-pi/pull/8590) by [@will-bogusz](https://github.com/will-bogusz)).
 - Devin parallel tool calls follow `compat.supportsParallelToolCalls` instead of being disabled unconditionally, so natively discovered configs that support parallelism can use it ([#8590](https://github.com/can1357/oh-my-pi/pull/8590) by [@will-bogusz](https://github.com/will-bogusz)).
 
+### Fixed
+
+- Fixed native Responses history replay so a malformed or truncated `function_call` arguments string no longer wedges the session with repeated 400 JSON parse errors; the item-level replay sanitizer drops the invalid item so the turn recovers.
+
 ## [18.0.11] - 2026-08-29
 
 ### Fixed
