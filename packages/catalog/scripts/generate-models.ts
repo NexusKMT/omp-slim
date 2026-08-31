@@ -97,6 +97,38 @@ const DISCOVERY_ONLY_PROVIDERS = new Set(["ollama", "vllm", "lm-studio", "litell
  */
 const CREDENTIAL_SCOPED_PROVIDERS = new Set(["devin"]);
 
+/**
+ * Restores unfetched rows from a previous generated catalog while pruning
+ * providers whose snapshots are no longer valid.
+ */
+export function mergePreviousSnapshotModels(
+	models: readonly ModelSpec[],
+	previousModels: Readonly<Record<string, Readonly<Record<string, Model<Api>>>>>,
+	excludedProviders: ReadonlySet<string>,
+): ModelSpec[] {
+	const merged = [...models];
+	const fetchedKeys = new Set(models.map(model => `${model.provider}/${model.id}`));
+	for (const provider in previousModels) {
+		const providerModels = previousModels[provider];
+		for (const id in providerModels) {
+			const model = toModelSpec(providerModels[id]);
+			if (
+				!fetchedKeys.has(`${model.provider}/${model.id}`) &&
+				!DISCOVERY_ONLY_PROVIDERS.has(model.provider) &&
+				!CREDENTIAL_SCOPED_PROVIDERS.has(model.provider) &&
+				// Yolo-Auto's documented static seed is the complete fallback
+				// catalog; never resurrect retired ids from the previous snapshot.
+				model.provider !== "yolo-auto" &&
+				!isRetiredProvider(model.provider) &&
+				!excludedProviders.has(model.provider)
+			) {
+				merged.push(model);
+			}
+		}
+	}
+	return merged;
+}
+
 async function resolveProviderApiKey(providerId: string, catalog: CatalogDiscoveryConfig): Promise<string | undefined> {
 	for (const envVar of catalog.envVars ?? []) {
 		const value = $env[envVar as keyof typeof $env];
@@ -675,30 +707,20 @@ async function generateModels() {
 	// or authoritative stencil.so sources keep that upstream list exactly, so
 	// retired entries from the previous snapshot do not reappear during regeneration.
 	// Discovery-only providers (local inference servers) — never bundle static models.
-	const fetchedKeys = new Set(allModels.map(model => `${model.provider}/${model.id}`));
+	const previousSnapshotExcludedProviders = new Set([
+		...authoritativeCatalogProviders,
+		...authoritativeSpecialDiscoveryProviders,
+		...modelsDevSnapshotExcludedProviders,
+	]);
 
 	// Previous-snapshot entries may carry an older ThinkingConfig vocabulary;
 	// applyGeneratedModelPolicies re-bakes `thinking` for every model, so the
 	// inbound shape is irrelevant beyond identity/pricing/compat fields.
-	for (const models of Object.values(prevModelsJson as unknown as Record<string, Record<string, Model<Api>>>)) {
-		for (const bundledModel of Object.values(models)) {
-			const model = toModelSpec(bundledModel);
-			if (
-				!fetchedKeys.has(`${model.provider}/${model.id}`) &&
-				!DISCOVERY_ONLY_PROVIDERS.has(model.provider) &&
-				!CREDENTIAL_SCOPED_PROVIDERS.has(model.provider) &&
-				// Yolo-Auto's documented static seed is the complete fallback
-				// catalog; never resurrect retired ids from the previous snapshot.
-				model.provider !== "yolo-auto" &&
-				!isRetiredProvider(model.provider) &&
-				!authoritativeCatalogProviders.has(model.provider) &&
-				!authoritativeSpecialDiscoveryProviders.has(model.provider) &&
-				!modelsDevSnapshotExcludedProviders.has(model.provider)
-			) {
-				allModels.push(model);
-			}
-		}
-	}
+	allModels = mergePreviousSnapshotModels(
+		allModels,
+		prevModelsJson as unknown as Record<string, Record<string, Model<Api>>>,
+		previousSnapshotExcludedProviders,
+	);
 
 	allModels = applyGlobalModelsDevFallback(allModels, modelsDevModels);
 	// Seed QwenCloud's documented Token Plan models when credentialed
@@ -812,5 +834,6 @@ function canonicalizeModelCompat(model: ModelSpec<Api>): void {
 	}
 }
 
-// Run the generator
-generateModels().catch(console.error);
+if (import.meta.main) {
+	generateModels().catch(console.error);
+}

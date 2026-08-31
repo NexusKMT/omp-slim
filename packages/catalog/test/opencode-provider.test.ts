@@ -7,7 +7,7 @@ import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { readModelCache, writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
-import { getBundledModels, getBundledProviders } from "@oh-my-pi/pi-catalog/models";
+import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import {
 	fetchWellKnownModels,
@@ -18,6 +18,7 @@ import {
 } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import type { FetchImpl } from "@oh-my-pi/pi-utils";
+import { mergePreviousSnapshotModels } from "../scripts/generate-models";
 
 const LIVE_FREE_MODEL_IDS = [
 	"deepseek-v4-flash-free",
@@ -795,17 +796,46 @@ describe("issue #10416 — retired bare opencode provider", () => {
 	// #309 split `opencode` into `opencode-go` / `opencode-zen`, and models.dev's
 	// `opencode` key is remapped to `opencode-zen`. The legacy `opencode` rows
 	// survived as previous-snapshot zombies and surfaced in the picker as a dead
-	// provider with no descriptor/auth path. `RETIRED_PROVIDERS` must keep them out.
-	test("bundled catalog exposes no bare `opencode` provider", () => {
-		// getBundledProviders() is every top-level key of models.json, which is
-		// exactly what ModelRegistry.#loadBuiltInModels iterates to fill the picker.
-		expect(getBundledProviders()).not.toContain("opencode");
+	// provider with no descriptor/auth path.
+	test("prunes bare `opencode` rows while restoring live previous-snapshot providers", () => {
+		const staleModel = buildModel({
+			id: "legacy-opencode-model",
+			name: "Legacy OpenCode Model",
+			api: "openai-completions",
+			provider: "opencode",
+			baseUrl: "https://legacy.invalid/v1",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128_000,
+			maxTokens: 16_384,
+		});
+		const liveModel = buildModel({
+			id: "live-fallback-model",
+			name: "Live Fallback Model",
+			api: "openai-completions",
+			provider: "fixture-provider",
+			baseUrl: "https://fixture.invalid/v1",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128_000,
+			maxTokens: 16_384,
+		});
+
+		const merged = mergePreviousSnapshotModels(
+			[],
+			{
+				opencode: { [staleModel.id]: staleModel },
+				"fixture-provider": { [liveModel.id]: liveModel },
+			},
+			new Set(),
+		);
+
+		expect(merged.map(model => `${model.provider}/${model.id}`)).toEqual(["fixture-provider/live-fallback-model"]);
 	});
 
 	test("the split OpenCode providers remain populated", () => {
-		const providers = getBundledProviders();
-		expect(providers).toContain("opencode-go");
-		expect(providers).toContain("opencode-zen");
 		expect(getBundledModels("opencode-go").length).toBeGreaterThan(0);
 		expect(getBundledModels("opencode-zen").length).toBeGreaterThan(0);
 	});
