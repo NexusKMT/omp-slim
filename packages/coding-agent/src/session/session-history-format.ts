@@ -214,6 +214,20 @@ function boundedToolContext(text: string): string {
 	}).content;
 }
 
+function boundedFencedToolContext(text: string, language: string): string {
+	let bounded = boundedToolContext(text);
+	for (;;) {
+		const fenced = fencedText(bounded, language);
+		if (Buffer.byteLength(fenced, "utf-8") <= EXPANDED_TOOL_IO_MAX_BYTES) return fenced;
+		const longestFence = bounded.match(/`+/g)?.reduce((max, run) => Math.max(max, run.length), 0) ?? 0;
+		const fenceBytes = Math.max(3, longestFence + 1) * 2 + language.length + 2;
+		bounded = truncateMiddle(bounded, {
+			maxBytes: Math.max(1, EXPANDED_TOOL_IO_MAX_BYTES - fenceBytes),
+			maxLines: EXPANDED_TOOL_IO_MAX_LINES,
+		}).content;
+	}
+}
+
 function boundedAskJson(value: unknown): string {
 	return boundedToolContext(
 		JSON.stringify(
@@ -304,13 +318,12 @@ function toolCallLine(
 		const sections: string[] = [];
 		if (name === "ask") {
 			const askArguments = expandedAskArguments(args) ?? expandedAskDetails(result);
-			if (askArguments) sections.push(`Ask input:\n${fencedText(askArguments, "json")}`);
+			if (askArguments) sections.push(`Ask input:\n${boundedFencedToolContext(askArguments, "json")}`);
 		}
 		if (result) {
 			const resultText = expandedToolResultText(result);
 			if (resultText) {
-				const visibleResult = boundedToolContext(resultText);
-				sections.push(`Tool result:\n${fencedText(visibleResult, "text")}`);
+				sections.push(`Tool result:\n${boundedFencedToolContext(resultText, "text")}`);
 			}
 		}
 		if (sections.length > 0) base = `${base}\n${sections.join("\n")}`;

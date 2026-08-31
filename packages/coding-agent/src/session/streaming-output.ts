@@ -587,7 +587,7 @@ export function truncateMiddle(content: string, options: TruncationOptions = {})
 			elidedLines: Math.max(0, totalLines - actualHeadLines - actualTailLines),
 			headLines: actualHeadLines,
 			tailLines: actualTailLines,
-			partialByteWindows: useByteHead || useByteTail,
+			partialByteWindows: useByteHead || useByteTail || tail.lastLinePartial === true,
 			elidedBytes,
 			lastLinePartial: true,
 			firstLineExceedsLimit: false,

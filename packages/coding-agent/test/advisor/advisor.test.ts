@@ -422,6 +422,22 @@ describe("advisor", () => {
 			expect(Buffer.byteLength(expanded)).toBeLessThan(9 * 1024);
 		});
 
+		it("counts adaptive Markdown fences inside the result budget", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "read-fence",
+				toolName: "read",
+				content: [{ type: "text", text: "`".repeat(8_000) }],
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], { expandToolIO: true });
+
+			expect(expanded).toContain("Tool result:");
+			expect(Buffer.byteLength(expanded)).toBeLessThan(9 * 1024);
+		});
+
 		it("preserves head and tail for oversized single-line results", () => {
 			const result = {
 				role: "toolResult",
