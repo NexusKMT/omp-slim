@@ -1428,7 +1428,27 @@ export class Settings {
 						// atomic rename replace the first user-managed symlink.
 						return current === filePath ? path.resolve(filePath) : current;
 					}
-					const resolved = path.resolve(path.dirname(current), target);
+					// A relative target resolves against the link's REAL parent dir,
+					// not its lexical one. When `current` sits under a symlinked
+					// directory alias, a target with enough `..` to climb out of the
+					// alias must pop off the PHYSICAL parent — a lexical resolve would
+					// collapse `..` against the alias and land on an unrelated sibling,
+					// letting the write clobber a foreign file. Absolute targets are
+					// already anchored, so canonicalize only for relative ones and fall
+					// back to the lexical parent if realpath throws (a dangling parent).
+					let resolved: string;
+					if (path.isAbsolute(target)) {
+						resolved = path.resolve(target);
+					} else {
+						const lexicalDir = path.dirname(current);
+						let canonicalDir = lexicalDir;
+						try {
+							canonicalDir = await fs.promises.realpath(lexicalDir);
+						} catch (error) {
+							if (!isEnoent(error)) throw error;
+						}
+						resolved = path.resolve(canonicalDir, target);
+					}
 					let nextIsSymlink = false;
 					try {
 						nextIsSymlink = (await fs.promises.lstat(resolved)).isSymbolicLink();

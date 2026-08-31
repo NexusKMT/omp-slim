@@ -369,6 +369,39 @@ describe("Settings", () => {
 			expect(fs.existsSync(finalPath)).toBe(false);
 		});
 
+		it("resolves a relative intermediate target against the link's physical parent, not a symlinked alias", async () => {
+			// config.yml -> alias/sub/mid.yml, where `alias` is a symlinked
+			// directory (alias -> physical/deep) and mid.yml is a dangling link
+			// whose relative target has enough `..` to climb out of the alias.
+			// Popping `..` off the PHYSICAL parent lands on physical/final.yml; a
+			// lexical resolve would collapse `..` against the alias and clobber an
+			// unrelated sibling of the alias while leaving the real chain dangling.
+			const deepDir = tempDir.join("physical", "deep");
+			const subDir = path.join(deepDir, "sub");
+			fs.mkdirSync(subDir, { recursive: true });
+			const aliasDir = tempDir.join("alias");
+			await fs.promises.symlink(deepDir, aliasDir, "dir");
+
+			const midPath = path.join(aliasDir, "sub", "mid-config.yml");
+			await fs.promises.symlink("../../final-config.yml", midPath, "file");
+			await fs.promises.symlink(midPath, getConfigPath(), "file");
+
+			const physicalFinal = tempDir.join("physical", "final-config.yml");
+			const lexicalSibling = tempDir.join("final-config.yml");
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			settings.set("setupVersion", 7);
+			await settings.flush();
+
+			// The write lands on the physical target, recreating it, while the
+			// alias's lexical sibling (the mis-resolution) stays untouched.
+			expect(YAML.parse(await Bun.file(physicalFinal).text())).toEqual({ setupVersion: 7 });
+			expect(fs.existsSync(lexicalSibling)).toBe(false);
+			// Every user-managed link in the chain survives.
+			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
+			expect(fs.lstatSync(midPath).isSymbolicLink()).toBe(true);
+		});
+
 		it("falls back to move-aside replacement when Windows reports EPERM", async () => {
 			await writeSettings({ setupVersion: 1 });
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
