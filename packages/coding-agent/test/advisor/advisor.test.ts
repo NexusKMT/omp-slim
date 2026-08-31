@@ -389,6 +389,23 @@ describe("advisor", () => {
 			expect(expanded).toContain("elided");
 			expect(Buffer.byteLength(expanded)).toBeLessThan(9 * 1024);
 		});
+
+		it("marks oversized single-line results as incomplete", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "read-1",
+				toolName: "read",
+				content: [{ type: "text", text: `head-${"x".repeat(20_000)}-tail` }],
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], { expandToolIO: true });
+
+			expect(expanded).toContain("elided");
+			expect(expanded).toContain("-tail");
+			expect(Buffer.byteLength(expanded)).toBeLessThan(9 * 1024);
+		});
 	});
 
 	describe("advisor yield-queue dispatcher", () => {

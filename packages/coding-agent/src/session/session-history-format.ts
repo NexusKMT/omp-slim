@@ -207,10 +207,13 @@ function fencedText(text: string, language = "text"): string {
 }
 
 function boundedToolContext(text: string): string {
-	return truncateMiddle(text, {
+	const truncated = truncateMiddle(text, {
 		maxBytes: EXPANDED_TOOL_IO_MAX_BYTES,
 		maxLines: EXPANDED_TOOL_IO_MAX_LINES,
-	}).content;
+	});
+	if (!truncated.truncated || truncated.content.includes(" elided…]")) return truncated.content;
+	const omittedBytes = Math.max(0, truncated.totalBytes - (truncated.outputBytes ?? 0));
+	return `[…${omittedBytes}B elided…]\n${truncated.content}`;
 }
 
 function expandedAskArguments(args: Record<string, unknown> | undefined): string | undefined {
