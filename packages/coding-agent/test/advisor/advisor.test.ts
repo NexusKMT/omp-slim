@@ -466,6 +466,26 @@ describe("advisor", () => {
 			expect(expanded).toContain("+++ b/a.ts");
 			expect(expanded).toContain("Warnings:\nMatched ambiguous context.");
 		});
+
+		it("keeps rename metadata alongside a successful edit diff", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "edit-1",
+				toolName: "edit",
+				content: [{ type: "text", text: "[src/old.ts]\nMoved to src/new.ts\n-old\n+new" }],
+				details: { diff: "@@\n-old\n+new", move: "src/new.ts" },
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], {
+				expandEditDiffs: true,
+				expandToolIO: true,
+			});
+
+			expect(expanded).toContain("@@\n-old\n+new");
+			expect(expanded).toContain("Moved to src/new.ts");
+		});
 	});
 
 	describe("advisor yield-queue dispatcher", () => {

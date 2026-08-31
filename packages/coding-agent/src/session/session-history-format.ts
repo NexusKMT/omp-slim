@@ -234,11 +234,18 @@ function expandedAskArguments(args: Record<string, unknown> | undefined): string
 function expandedToolResultText(result: ToolResultMessage, expandEditDiffs: boolean | undefined): string | undefined {
 	const text = contentToText(result.content).trim();
 	if (!text) return undefined;
-	const diff = (result.details as { diff?: unknown } | undefined)?.diff;
+	const details = result.details as { diff?: unknown; move?: unknown; perFileResults?: unknown } | undefined;
+	const diff = details?.diff;
 	if (!expandEditDiffs || result.isError || typeof diff !== "string" || !diff.trim()) return text;
+	const supplementary = text.split("\n").filter(line => line.startsWith("Moved to ") || line === "Warnings:");
 	const warningMarker = "\n\nWarnings:\n";
 	const warningIndex = text.indexOf(warningMarker);
-	return warningIndex < 0 ? undefined : text.slice(warningIndex + 2);
+	if (warningIndex >= 0)
+		return [...supplementary.filter(line => line !== "Warnings:"), text.slice(warningIndex + 2)].join("\n");
+	if (typeof details?.move === "string" && !supplementary.some(line => line.startsWith("Moved to "))) {
+		supplementary.push(`Moved to ${details.move}`);
+	}
+	return supplementary.length > 0 ? supplementary.join("\n") : undefined;
 }
 function toolCallLine(
 	name: string,
