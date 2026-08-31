@@ -187,12 +187,17 @@ const taskBudgetBeta = "task-budgets-2026-03-13";
 const effortBeta = "effort-2025-11-24";
 const serverSideFallbackBeta = "server-side-fallback-2026-06-01";
 
-function buildCoworkBetas(
-	agentRequest: boolean,
-	thinkingRequest: boolean,
+function buildCoworkBetas({
+	agentRequest,
+	thinkingRequest,
 	disableStrictTools = false,
 	supportsContextManagement = true,
-): readonly string[] {
+}: {
+	agentRequest: boolean;
+	thinkingRequest: boolean;
+	disableStrictTools?: boolean;
+	supportsContextManagement?: boolean;
+}): readonly string[] {
 	// `context-1m-2025-08-07` is intentionally never advertised. OAuth
 	// subscription credentials have no long-context credit balance, so Anthropic
 	// hard-429s ("Usage credits are required for long context requests") on any
@@ -253,7 +258,7 @@ export function buildAnthropicHeaders(options: AnthropicHeaderOptions): Record<s
 	// Cowork's beta profile is part of the OAuth fingerprint; API-key requests
 	// default to extras only, matching the streaming path.
 	const betaHeader = buildBetaHeader(
-		options.coworkBetas ?? (oauthToken ? buildCoworkBetas(true, true) : []),
+		options.coworkBetas ?? (oauthToken ? buildCoworkBetas({ agentRequest: true, thinkingRequest: true }) : []),
 		extraBetas,
 	);
 	const acceptHeader = oauthToken ? "application/json" : stream ? "text/event-stream" : "application/json";
@@ -3054,12 +3059,12 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 		allowAnthropicHeaderOverrides: model.compat.allowAnthropicHeaderOverrides,
 		claudeCodeSessionId,
 		coworkBetas: oauthToken
-			? buildCoworkBetas(
-					hasTools || thinkingEnabled,
-					thinkingEnabled,
+			? buildCoworkBetas({
+					agentRequest: hasTools || thinkingEnabled,
+					thinkingRequest: thinkingEnabled,
 					disableStrictTools,
-					model.compat.supportsContextManagement,
-				)
+					supportsContextManagement: model.compat.supportsContextManagement,
+				})
 			: [],
 	});
 
