@@ -23,7 +23,7 @@
 
 ### Fixed
 
-- Fixed OpenAI remote-compaction replay sending output-only `status` fields on `compaction` and `compaction_summary` items, allowing already-persisted sessions to resume without `input[N].status` request failures.
+- Fixed OpenAI remote-compaction replay sending output-only `status` fields on `compaction` and `compaction_summary` items, allowing already-persisted sessions to resume without `input[N].status` request failures. ([#10415](https://github.com/can1357/oh-my-pi/pull/10415) by [@spgsroot](https://github.com/spgsroot))
 - Fixed Z.AI (GLM Coding Plan) browser sign-in being rejected with "Redirect URI not registered for this client": the flow now advertises the ZCode-registered CLI callback `http://127.0.0.1:9999/callback` instead of the unregistered `localhost:54548` ([#10245](https://github.com/can1357/oh-my-pi/issues/10245)).
 
 ## [18.0.11] - 2026-08-29
