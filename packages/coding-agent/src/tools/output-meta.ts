@@ -153,9 +153,15 @@ export class OutputMetaBuilder {
 				totalBytes: result.totalBytes,
 				outputLines,
 				outputBytes,
-				headRange: headLines > 0 ? { start: 1, end: headLines } : undefined,
-				tailRange:
-					tailLines > 0 ? { start: effectiveTotalLines - tailLines + 1, end: effectiveTotalLines } : undefined,
+				...(effectiveTotalLines > 1 && !result.singleLineByteWindows
+					? {
+							headRange: headLines > 0 ? { start: 1, end: headLines } : undefined,
+							tailRange:
+								tailLines > 0
+									? { start: effectiveTotalLines - tailLines + 1, end: effectiveTotalLines }
+									: undefined,
+						}
+					: {}),
 				elidedLines,
 				elidedBytes,
 				artifactId,
