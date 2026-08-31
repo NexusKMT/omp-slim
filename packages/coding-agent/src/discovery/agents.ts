@@ -6,6 +6,7 @@
  * Project-level discovery walks up from cwd to repoRoot.
  */
 import * as path from "node:path";
+import { isWsl } from "@oh-my-pi/pi-utils";
 import { registerProvider } from "../capability";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
 import { readFile } from "../capability/fs";
@@ -36,10 +37,6 @@ interface UserPathCandidateOptions {
 }
 
 const WINDOWS_DRIVE_PROFILE_PATTERN = /^([A-Za-z]):[\\/](.*)$/;
-
-function isWsl(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): boolean {
-	return platform === "linux" && Boolean(env.WSL_DISTRO_NAME || env.WSL_INTEROP);
-}
 
 function convertWindowsPathToDefaultWslMount(windowsPath: string): string | undefined {
 	const trimmed = windowsPath.trim();

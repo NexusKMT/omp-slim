@@ -20,6 +20,7 @@
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
+- Fixed pasting a Windows drive path (e.g. `C:\Users\me\pic.png`) into omp under WSL failing with "Image not found"; drive paths now resolve to their `/mnt/<drive>` mount for image paste and all file reads ([#10426](https://github.com/can1357/oh-my-pi/issues/10426))
 
 ## [18.0.11] - 2026-08-29
 
