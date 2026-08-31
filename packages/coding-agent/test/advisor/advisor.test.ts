@@ -372,6 +372,33 @@ describe("advisor", () => {
 			expect(expanded).not.toContain("elided");
 		});
 
+		it("recovers questions from orphaned ask result details", () => {
+			const orphan = {
+				role: "toolResult",
+				toolCallId: "ask-orphan",
+				toolName: "ask",
+				content: [{ type: "text", text: "deploy: Yes" }],
+				details: {
+					results: [
+						{
+							id: "deploy",
+							question: "Authorize production deployment?",
+							options: ["Yes", "No"],
+							multi: false,
+							selectedOptions: ["Yes"],
+						},
+					],
+				},
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([orphan], { expandToolIO: true });
+
+			expect(expanded).toContain("Authorize production deployment?");
+			expect(expanded).toContain("deploy: Yes");
+		});
+
 		it("bounds expanded tool results with visible head and tail context", () => {
 			const result = {
 				role: "toolResult",

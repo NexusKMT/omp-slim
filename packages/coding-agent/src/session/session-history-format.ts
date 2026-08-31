@@ -228,6 +228,29 @@ function expandedAskArguments(args: Record<string, unknown> | undefined): string
 	}
 }
 
+function expandedAskDetails(result: ToolResultMessage | undefined): string | undefined {
+	if (!result?.details || typeof result.details !== "object") return undefined;
+	const details = result.details as {
+		question?: unknown;
+		questions?: unknown;
+		results?: unknown;
+	};
+	const questions = Array.isArray(details.results)
+		? details.results
+				.map(item =>
+					item && typeof item === "object" && typeof (item as { question?: unknown }).question === "string"
+						? (item as { question: string }).question
+						: undefined,
+				)
+				.filter((question): question is string => question !== undefined)
+		: Array.isArray(details.questions)
+			? details.questions.filter((question): question is string => typeof question === "string")
+			: typeof details.question === "string"
+				? [details.question]
+				: [];
+	return questions.length > 0 ? JSON.stringify({ questions }, undefined, 2) : undefined;
+}
+
 /** One line per tool call: `→ read(src/foo.ts:50-80) ⇒ ok · 31 lines`. */
 
 function expandedToolResultText(result: ToolResultMessage): string | undefined {
@@ -268,7 +291,7 @@ function toolCallLine(
 	if (expandToolIO) {
 		const sections: string[] = [];
 		if (name === "ask") {
-			const askArguments = expandedAskArguments(args);
+			const askArguments = expandedAskArguments(args) ?? expandedAskDetails(result);
 			if (askArguments) sections.push(`Ask input:\n${fencedText(askArguments, "json")}`);
 		}
 		if (result) {
