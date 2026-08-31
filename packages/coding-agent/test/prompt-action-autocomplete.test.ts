@@ -4,8 +4,8 @@ import {
 	setKeyHintPlatform,
 } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import { createPromptActionAutocompleteProvider } from "@oh-my-pi/pi-coding-agent/modes/prompt-action-autocomplete";
+import { getSelectListTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { KeybindingsManager, SelectList, setKeybindings, TUI_KEYBINDINGS } from "@oh-my-pi/pi-tui";
-import type { SelectListTheme } from "@oh-my-pi/pi-tui/components/select-list";
 
 describe("prompt action autocomplete", () => {
 	beforeEach(() => {
@@ -53,7 +53,7 @@ describe("prompt action autocomplete", () => {
 			"Move cursor to line start",
 			"Move cursor to line end",
 		]);
-		const rendered = new SelectList(suggestions?.items ?? [], 10, {} as SelectListTheme).render(80).join("\n");
+		const rendered = new SelectList(suggestions?.items ?? [], 10, getSelectListTheme()).render(80).join("\n");
 		for (const item of suggestions?.items ?? []) {
 			expect(rendered).toContain(item.label);
 		}
