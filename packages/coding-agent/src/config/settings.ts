@@ -2908,6 +2908,37 @@ export function isSettingsInitialized(): boolean {
 }
 
 /**
+ * Resolve a live, loaded `Settings` instance scoped to `cwd` (and `agentDir`,
+ * when supplied), preferring the global singleton. Returns `undefined` when no
+ * loaded instance matches the requested scope.
+ *
+ * Backs the legacy pi `SettingsManager.create(cwd, agentDir)` shim, which must
+ * resolve a requested session's settings synchronously. Selecting the global
+ * singleton alone is wrong for SDK hosts: a session created with an explicit
+ * `settings`/`settingsManager` never initializes the singleton (its instance
+ * would be missed), and a concurrent session's singleton would leak in when the
+ * requested cwd is unrelated. Matching against every constructed instance —
+ * most-recent wins — keeps each session reading its own layers.
+ */
+export function findScopedSettings(cwd?: string, agentDir?: string): Settings | undefined {
+	const wantCwd = cwd === undefined ? undefined : path.normalize(cwd);
+	const wantAgentDir = agentDir === undefined ? undefined : path.normalize(agentDir);
+	const matches = (instance: Settings): boolean =>
+		(wantCwd === undefined || instance.getCwd() === wantCwd) &&
+		(wantAgentDir === undefined || instance.getAgentDir() === wantAgentDir);
+
+	if (globalInstance && matches(globalInstance)) return globalInstance;
+	if (wantCwd === undefined && wantAgentDir === undefined) return globalInstance ?? undefined;
+
+	let found: Settings | undefined;
+	for (const ref of liveSettingsInstances) {
+		const instance = ref.deref();
+		if (instance && matches(instance)) found = instance;
+	}
+	return found;
+}
+
+/**
  * Reset the global singleton for testing.
  * @internal
  */

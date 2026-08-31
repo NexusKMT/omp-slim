@@ -86,4 +86,22 @@ describe("legacy pi SettingsManager shim (issue #10397)", () => {
 		expect(typeof inMemory.getProjectSettings).toBe("function");
 		expect(inMemory.getProjectSettings()).toEqual({});
 	});
+
+	it("resolves settings by requested cwd instead of leaking another session's singleton", async () => {
+		// Session B is an SDK session with its own loaded Settings for a different
+		// project. Its cwd must win over the global singleton session A initializes.
+		const projectB = tempDir.join("project-b");
+		fs.mkdirSync(getProjectAgentDir(projectB), { recursive: true });
+		fs.mkdirSync(path.join(projectDir, ".claude"), { recursive: true });
+		fs.mkdirSync(path.join(projectB, ".claude"), { recursive: true });
+		await Bun.write(path.join(projectDir, ".claude", "settings.json"), JSON.stringify({ piVim: { session: "a" } }));
+		await Bun.write(path.join(projectB, ".claude", "settings.json"), JSON.stringify({ piVim: { session: "b" } }));
+
+		const singleton = await Settings.init({ cwd: projectDir, agentDir });
+		const sessionB = await Settings.loadIsolated({ cwd: projectB, agentDir });
+
+		expect(SettingsManager.create(projectDir)).toBe(singleton);
+		expect(SettingsManager.create(projectB)).toBe(sessionB);
+		expect(SettingsManager.create(projectB).getProjectSettings().piVim).toEqual({ session: "b" });
+	});
 });
