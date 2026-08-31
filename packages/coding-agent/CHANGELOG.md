@@ -20,7 +20,7 @@
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
-- Fixed Mnemopi storing session transcripts on exit when automatic retention is disabled.
+- Fixed Mnemopi storing session transcripts on exit when automatic retention is disabled ([#10408](https://github.com/can1357/oh-my-pi/pull/10408) by [@kml93](https://github.com/kml93)).
 
 ## [18.0.11] - 2026-08-29
 

@@ -507,13 +507,13 @@ export class MnemopiSessionState {
 		this.lastRetainedTurn = userTurns;
 	}
 
-	async forceRetainCurrentSession(options: { extract?: boolean; force?: boolean } = {}): Promise<void> {
-		if ((!this.config.autoRetain && !options.force) || this.aliasOf) return;
+	async forceRetainCurrentSession(options: { extract?: boolean } = {}): Promise<void> {
+		if (this.aliasOf) return;
 		const flat = extractMessages(this.session.sessionManager);
 		this.#restoreRetainedTurnCursor();
 		const userTurns = flat.filter(message => message.role === "user").length;
 		await this.retainMessages(sliceUnretainedMessages(flat, this.lastRetainedTurn), this.sessionId, {
-			extract: options.extract,
+			...options,
 			retainedThroughUserTurn: userTurns,
 		});
 		this.lastRetainedTurn = Math.max(this.lastRetainedTurn, userTurns);
@@ -655,7 +655,9 @@ export class MnemopiSessionState {
 	async consolidate(
 		options: { full?: boolean; extract?: boolean; sleep?: boolean; retain?: boolean } = {},
 	): Promise<void> {
-		await this.forceRetainCurrentSession({ extract: options.extract, force: options.retain });
+		if (this.config.autoRetain || options.retain) {
+			await this.forceRetainCurrentSession({ extract: options.extract });
+		}
 		for (const memory of this.scoped.owned) {
 			await memory.flushExtractions();
 			if (options.sleep === false) continue;

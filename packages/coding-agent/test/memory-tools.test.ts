@@ -576,6 +576,24 @@ describe("Mnemopi backend lifecycle", () => {
 		expect(row?.count).toBe(0);
 	});
 
+	it("explicit force-retention stores the current session when auto-retain is disabled", async () => {
+		const entries = [{ type: "message", message: { role: "user", content: "explicitly forced turn" } }];
+		const state = registerMnemopiState(makeMnemopiConfig({ autoRetain: false }), {
+			entries: () => entries,
+		});
+
+		await state.forceRetainCurrentSession();
+
+		const row = state.memory.beam.db
+			.prepare<{ count: number }, []>(`
+				SELECT COUNT(*) AS count
+				FROM working_memory
+				WHERE source = 'coding-agent-transcript'
+			`)
+			.get();
+		expect(row?.count).toBe(1);
+	});
+
 	it("explicit enqueue retains the current session when auto-retain is disabled", async () => {
 		const entries = [{ type: "message", message: { role: "user", content: "explicitly retained turn" } }];
 		const state = registerMnemopiState(makeMnemopiConfig({ autoRetain: false }), {
