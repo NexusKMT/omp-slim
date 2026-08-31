@@ -20,6 +20,7 @@
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
+- Fixed sloppy/SPARSE edit no-match guidance emitting a mislabeled "Copy-ready corrected operation" that guessed a fuzzy anchor and dropped sibling operations; low-confidence matches are now surfaced as non-copyable guidance ([#10411](https://github.com/can1357/oh-my-pi/issues/10411)).
 
 ## [18.0.11] - 2026-08-29
 
