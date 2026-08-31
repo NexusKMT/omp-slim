@@ -488,10 +488,32 @@
   text-overflow: ellipsis;
 }
 
+.stats-select:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background-color: var(--bg-hover);
+}
+
+.stats-select:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 1px;
+}
+
+.stats-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Dropdown list itself follows the page theme via color-scheme. */
 .stats-select option {
   background-color: var(--surface);
   color: var(--text);
+}
+/* Forced-colors (Windows High Contrast) suppresses background images, so the
+   custom chevron vanishes; restore the native indicator instead. */
+@media (forced-colors: active) {
+  .stats-select {
+    appearance: auto;
+  }
 }
 
 /* Sync Button & Container */
