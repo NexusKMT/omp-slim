@@ -5,6 +5,10 @@ import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
+import {
+	ExtensionToolWrapper,
+	wrapRegisteredTool,
+} from "@oh-my-pi/pi-coding-agent/extensibility/extensions/wrapper";
 import { SettingsManager } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-pi-coding-agent-shim";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -211,6 +215,56 @@ describe("legacy pi SettingsManager shim (issue #10397)", () => {
 			expect(commandObserved).toBe(sdkSettings);
 			expect(shortcutObserved).toBe(sdkSettings);
 			// Without the scope the same call leaks the newest same-cwd manager.
+			expect(SettingsManager.create(projectDir)).toBe(singleton);
+		} finally {
+			authStorage.close();
+		}
+	});
+	it("scopes registered tool execution to the active session settings", async () => {
+		const sdkAgentDir = tempDir.join("tool-sdk-agent");
+		fs.mkdirSync(sdkAgentDir, { recursive: true });
+		await Bun.write(path.join(sdkAgentDir, "config.yml"), YAML.stringify({ piVim: { session: "sdk" } }));
+
+		const sdkSettings = await Settings.loadIsolated({ cwd: projectDir, agentDir: sdkAgentDir });
+		const singleton = await Settings.init({ cwd: projectDir, agentDir });
+
+		let observed: Settings | undefined;
+		const runtime = new ExtensionRuntime();
+		const extension = await loadExtensionFromFactory(
+			pi => {
+				pi.registerTool({
+					name: "settings_scope",
+					label: "Settings Scope",
+					description: "Observe the settings manager visible during tool execution.",
+					parameters: pi.typebox.Type.Object({}),
+					execute: async () => {
+						observed = SettingsManager.create(projectDir);
+						return { content: [{ type: "text", text: "ok" }], details: {} };
+					},
+				});
+			},
+			projectDir,
+			new EventBus(),
+			runtime,
+		);
+		const authStorage = await AuthStorage.create(tempDir.join("tool-auth.db"));
+		try {
+			const runner = new ExtensionRunner(
+				[extension],
+				runtime,
+				projectDir,
+				SessionManager.inMemory(projectDir),
+				new ModelRegistry(authStorage),
+				undefined,
+				sdkSettings,
+			);
+			const registered = runner.getRegisteredTool("settings_scope");
+			if (!registered) throw new Error("tool not registered");
+			const wrapped = new ExtensionToolWrapper(wrapRegisteredTool(registered, runner), runner);
+
+			await wrapped.execute("tool-call-id", {});
+
+			expect(observed).toBe(sdkSettings);
 			expect(SettingsManager.create(projectDir)).toBe(singleton);
 		} finally {
 			authStorage.close();
