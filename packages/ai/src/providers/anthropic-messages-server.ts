@@ -790,10 +790,10 @@ export function encodeStream(
 									delta: {
 										stop_reason: mapStopReasonOut(ev.reason),
 										stop_sequence: null,
-										...(bindingControlsRequested
-											? { input_transformations: ev.message.inputTransformations ?? [] }
-											: {}),
 									},
+									...(bindingControlsRequested
+										? { input_transformations: ev.message.inputTransformations ?? [] }
+										: {}),
 									usage: encodeUsage(ev.message),
 								}),
 							);

@@ -4,15 +4,13 @@
 
 ### Added
 
-- Added support for turn-scoped system messages, mid-conversation tool changes, and per-message effort
-- Added support for Claude Fable 5.1 models and enabled improved thinking prefix binding across supported Claude models
-- Added DeepSeek V4 Flash Vision Exp
-- Added Mercury 2.5 Preview
-- Added Xiaomi MiMo V2.5 Pro UltraSpeed
+- Added support for turn-scoped system messages, changing tools during a conversation, and setting effort on individual messages.
+- Added support for Claude Fable 5.1 models, with improved thinking-prefix handling across supported Claude models.
+- Added DeepSeek V4 Flash Vision Exp, Mercury 2.5 Preview, and Xiaomi MiMo V2.5 Pro UltraSpeed models.
 
 ### Changed
 
-- Updated pricing and context window limits for various models
+- Updated model pricing and context-window limits.
 
 ## [18.1.0] - 2026-09-01
 
