@@ -2,15 +2,17 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed sub-second duration formatting exposing floating-point precision noise.
+- Managed Chrome-for-Testing downloads now reject unsupported Linux ARM64 hosts instead of installing an x86_64 browser.
+- Fixed the Markdown lexer treating reference-link labels that collide with `Object.prototype` members (`constructor`, `__proto__`, …) as definitions; such labels no longer produce link tokens with an undefined `href` ([#10283](https://github.com/can1357/oh-my-pi/issues/10283)).
 ### Added
 
 - Added `postmortem.fatal` for terminal-safe top-level failure reporting.
 
 ### Fixed
 
-- Fixed sub-second duration formatting exposing floating-point precision noise.
-- Managed Chrome-for-Testing downloads now reject unsupported Linux ARM64 hosts instead of installing an x86_64 browser.
-- Fixed the Markdown lexer treating reference-link labels that collide with `Object.prototype` members (`constructor`, `__proto__`, …) as definitions; such labels no longer produce link tokens with an undefined `href` ([#10283](https://github.com/can1357/oh-my-pi/issues/10283)).
 - Fatal reports now begin registered display cleanup before writing to stderr ([#10275](https://github.com/can1357/oh-my-pi/issues/10275)).
 
 ## [18.0.11] - 2026-08-29

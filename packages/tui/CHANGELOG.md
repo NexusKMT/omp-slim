@@ -2,10 +2,6 @@
 
 ## [Unreleased]
 
-### Added
-
-- Fixed resumed sessions sometimes showing stale background bands until the next keypress on WSL and Windows Terminal ([#9799](https://github.com/can1357/oh-my-pi/issues/9799)).
-
 ### Fixed
 
 - Fixed the stdout backlog guard tearing the terminal down on a single large-but-draining frame (a resumed transcript repaint of many inline images); a stall is now declared only when the backlog stays over the cap without draining ([#10430](https://github.com/can1357/oh-my-pi/issues/10430)).
@@ -79,6 +75,7 @@
 ### Added
 
 - Added `Markdown.getLastRenderStableText()` to expose the stable prefix of streamed Markdown text for append-only transcript publication.
+- Fixed resumed sessions sometimes showing stale background bands until the next keypress on WSL and Windows Terminal ([#9799](https://github.com/can1357/oh-my-pi/issues/9799)).
 
 ## [18.0.5] - 2026-08-25
 
