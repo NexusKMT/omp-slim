@@ -23,6 +23,7 @@
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
+- Fixed custom discovery providers sending unresolved `!command` header values (e.g. `!basename $PWD`) verbatim on inference requests; command-backed provider headers now resolve on discovered models too ([#10457](https://github.com/can1357/oh-my-pi/issues/10457)).
 
 ## [18.0.11] - 2026-08-29
 

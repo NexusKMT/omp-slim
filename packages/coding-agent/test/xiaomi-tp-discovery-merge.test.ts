@@ -110,4 +110,24 @@ describe("mergeDiscoveredModel", () => {
 		const merged = mergeDiscoveredModel(discovered, undefined);
 		expect(merged).toEqual(discovered);
 	});
+
+	test("resolves provider-override `!command` headers on the inference path (#10457)", () => {
+		const discovered = bundled(STANDARD);
+		const merged = mergeDiscoveredModel(discovered, undefined, {
+			headers: { "X-Project-Id": "!echo resolved-value" },
+		});
+		// Discovery providers previously carried the raw `!command` literal into
+		// the model's headers, leaking it verbatim to the upstream server.
+		expect(merged.headers?.["X-Project-Id"]).toBe("resolved-value");
+	});
+
+	test("resolves `!command` headers merged from a bundled entry (#10457)", () => {
+		const discovered = bundled(STANDARD);
+		const existing: Model<"openai-completions"> = {
+			...bundled(STANDARD),
+			headers: { "X-Project-Id": "!echo resolved-value" },
+		};
+		const merged = mergeDiscoveredModel(discovered, existing);
+		expect(merged.headers?.["X-Project-Id"]).toBe("resolved-value");
+	});
 });
