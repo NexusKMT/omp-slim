@@ -684,6 +684,111 @@ describe("Settings", () => {
 			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
 		});
 
+		it("rejects with ENOTDIR when a trailing-slash target's directory is removed before the validation stat", async () => {
+			// config.yml -> racetarget/, where `racetarget` does not exist when the
+			// initial realpath(config.yml) runs, so the manual segment walk begins.
+			// A concurrent process creates `racetarget` as a real DIRECTORY before
+			// the walk's realpath(candidate) reaches it, so that realpath succeeds
+			// and the walk stays UNFROZEN, reaching the trailing-slash
+			// directory-requirement stat. The directory is then removed between that
+			// realpath and this stat, so the stat throws ENOENT. The requirement —
+			// `racetarget` must be a traversable directory — provably cannot hold
+			// now the component is gone. Letting the ENOENT reach the outer catch
+			// would swallow it and return path.resolve(config.yml), so the atomic
+			// rename would replace config.yml ITSELF with a regular file while the
+			// dangling symlink survives. Surface ENOTDIR instead.
+			await fs.promises.symlink("racetarget/", getConfigPath(), "file");
+			const raceTarget = path.join(agentDir, "racetarget");
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			const realpath = fs.promises.realpath.bind(fs.promises);
+			const stat = fs.promises.stat.bind(fs.promises);
+			let created = false;
+			let removed = false;
+			vi.spyOn(fs.promises, "realpath").mockImplementation((async (target: fs.PathLike, ...rest: unknown[]) => {
+				if (!created && String(target) === raceTarget) {
+					created = true;
+					// Win the first half of the race: materialize the component as a
+					// real directory so this realpath resolves it and the walk stays
+					// unfrozen.
+					fs.mkdirSync(raceTarget);
+				}
+				return (realpath as (t: fs.PathLike, ...r: unknown[]) => Promise<string>)(target, ...rest);
+			}) as typeof fs.promises.realpath);
+			vi.spyOn(fs.promises, "stat").mockImplementation((async (target: fs.PathLike, ...rest: unknown[]) => {
+				if (!removed && String(target) === raceTarget) {
+					removed = true;
+					// Win the second half: remove the required directory after
+					// realpath resolved it but before this validation stat inspects
+					// it, so the stat throws ENOENT.
+					fs.rmSync(raceTarget, { recursive: true, force: true });
+				}
+				return (stat as (t: fs.PathLike, ...r: unknown[]) => Promise<fs.Stats>)(target, ...rest);
+			}) as typeof fs.promises.stat);
+
+			settings.set("setupVersion", 17);
+			await expect(settings.flush()).rejects.toThrow(/ENOTDIR/);
+
+			expect(created).toBe(true);
+			expect(removed).toBe(true);
+			// config.yml itself was NOT clobbered into a regular file.
+			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
+		});
+
+		it("rejects with ENOTDIR when a `..` target's directory is removed before the validation stat", async () => {
+			// config.yml -> racetarget/../victim.yml, where `racetarget` does not
+			// exist when the initial realpath(config.yml) runs, so the manual walk
+			// begins. A concurrent process creates `racetarget` as a real DIRECTORY
+			// before the walk's realpath(candidate) reaches it, so that realpath
+			// succeeds and the walk stays UNFROZEN, reaching the `..`
+			// directory-requirement stat. The directory is then removed between that
+			// realpath and this stat, so the stat throws ENOENT. The `..` still
+			// requires `racetarget` to be a traversable directory to pop its parent,
+			// and that provably cannot hold now. Letting the ENOENT reach the outer
+			// catch would swallow it and return path.resolve(config.yml), clobbering
+			// config.yml itself while the dangling symlink survives. Surface ENOTDIR.
+			await fs.promises.symlink("racetarget/../victim.yml", getConfigPath(), "file");
+			const raceTarget = path.join(agentDir, "racetarget");
+			const victim = path.join(agentDir, "victim.yml");
+			await Bun.write(victim, "keep: me");
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			const realpath = fs.promises.realpath.bind(fs.promises);
+			const stat = fs.promises.stat.bind(fs.promises);
+			let created = false;
+			let removed = false;
+			vi.spyOn(fs.promises, "realpath").mockImplementation((async (target: fs.PathLike, ...rest: unknown[]) => {
+				if (!created && String(target) === raceTarget) {
+					created = true;
+					// Win the first half of the race: materialize the component as a
+					// real directory so this realpath resolves it and the walk stays
+					// unfrozen.
+					fs.mkdirSync(raceTarget);
+				}
+				return (realpath as (t: fs.PathLike, ...r: unknown[]) => Promise<string>)(target, ...rest);
+			}) as typeof fs.promises.realpath);
+			vi.spyOn(fs.promises, "stat").mockImplementation((async (target: fs.PathLike, ...rest: unknown[]) => {
+				if (!removed && String(target) === raceTarget) {
+					removed = true;
+					// Win the second half: remove the required directory after
+					// realpath resolved it but before this validation stat inspects
+					// it, so the stat throws ENOENT.
+					fs.rmSync(raceTarget, { recursive: true, force: true });
+				}
+				return (stat as (t: fs.PathLike, ...r: unknown[]) => Promise<fs.Stats>)(target, ...rest);
+			}) as typeof fs.promises.stat);
+
+			settings.set("setupVersion", 18);
+			await expect(settings.flush()).rejects.toThrow(/ENOTDIR/);
+
+			expect(created).toBe(true);
+			expect(removed).toBe(true);
+			// The unrelated sibling was NOT overwritten with YAML.
+			expect(await Bun.file(victim).text()).toBe("keep: me");
+			// config.yml itself was NOT clobbered into a regular file.
+			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
+		});
+
 		it("does not re-emit the filesystem root as a segment for an absolute Windows target", async () => {
 			// On Windows the flush walk seeds the accumulator at parse(target).root
 			// (`C:\`) and then walks the segments. If the root is left in the string

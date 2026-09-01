@@ -1540,7 +1540,27 @@ export class Settings {
 							// and dropping the segment would land the atomic rename on top
 							// of it while the logical config path is really ENOTDIR. Verify
 							// the requirement holds instead of assuming it.
-							if (!(await fs.promises.stat(acc)).isDirectory()) {
+							let accStat: fs.Stats;
+							try {
+								accStat = await fs.promises.stat(acc);
+							} catch (error) {
+								// `acc` was resolved by realpath() moments ago, but a
+								// concurrent process can remove the component between that
+								// realpath and this stat (`config.yml -> dir/../final.yml`
+								// while `dir` is deleted). The trailing `/` or `/.` still
+								// requires `acc` to be a traversable directory, and that
+								// requirement provably cannot hold once the component is
+								// gone. Surface ENOTDIR here instead of letting the ENOENT
+								// reach the outer catch, which would swallow it and return
+								// the chain head — clobbering config.yml itself.
+								if (!isEnoent(error)) throw error;
+								const notDir = new Error(
+									`ENOTDIR: symlink target requires a directory but ${acc} is gone for ${filePath}`,
+								) as Error & { code?: string };
+								notDir.code = "ENOTDIR";
+								throw notDir;
+							}
+							if (!accStat.isDirectory()) {
 								const notDir = new Error(
 									`ENOTDIR: symlink target requires a directory but ${acc} is not one for ${filePath}`,
 								) as Error & { code?: string };
@@ -1579,7 +1599,26 @@ export class Settings {
 							// the atomic rename land on a mislocated sibling
 							// (`config.yml -> racetarget/../victim.yml`) while the logical
 							// config path is really ENOTDIR. Verify before popping.
-							if (!(await fs.promises.stat(acc)).isDirectory()) {
+							let accStat: fs.Stats;
+							try {
+								accStat = await fs.promises.stat(acc);
+							} catch (error) {
+								// `acc` was resolved by realpath() moments ago, but a
+								// concurrent process can remove the component between that
+								// realpath and this stat. The `..` still requires `acc` to
+								// be a traversable directory to pop its parent, and that
+								// requirement provably cannot hold once the component is
+								// gone. Surface ENOTDIR here instead of letting the ENOENT
+								// reach the outer catch, which would swallow it and return
+								// the chain head — clobbering config.yml itself.
+								if (!isEnoent(error)) throw error;
+								const notDir = new Error(
+									`ENOTDIR: symlink target requires a directory but ${acc} is gone for ${filePath}`,
+								) as Error & { code?: string };
+								notDir.code = "ENOTDIR";
+								throw notDir;
+							}
+							if (!accStat.isDirectory()) {
 								const notDir = new Error(
 									`ENOTDIR: symlink target requires a directory but ${acc} is not one for ${filePath}`,
 								) as Error & { code?: string };
