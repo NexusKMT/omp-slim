@@ -8,6 +8,7 @@ import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock
 import { __providerInFlightForTesting, streamSimple } from "@oh-my-pi/pi-ai/stream";
 import type { Context } from "@oh-my-pi/pi-ai/types";
 import {
+	__physicalTargetSegmentsForTesting,
 	onAppendOnlyModeChanged,
 	onCodeModeChanged,
 	onModelRolesChanged,
@@ -523,6 +524,45 @@ describe("Settings", () => {
 			expect(fs.existsSync(lexicalSibling)).toBe(false);
 			// The user-managed chain head survives as a symlink.
 			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
+		});
+
+		it("does not re-emit the filesystem root as a segment for an absolute Windows target", async () => {
+			// On Windows the flush walk seeds the accumulator at parse(target).root
+			// (`C:\`) and then walks the segments. If the root is left in the string
+			// that is split, it is re-emitted as a leading `C:` segment and joined
+			// on top of the seeded root — `C:\managed\final.yml` resolves to
+			// `C:\C:\managed\final.yml`, so flushing through a dangling absolute link
+			// fails. Drive the splitter with the win32 engine so the bug reproduces
+			// on this POSIX host.
+			const segments = __physicalTargetSegmentsForTesting("C:\\managed\\final.yml", path.win32).filter(
+				segment => segment !== "" && segment !== ".",
+			);
+			expect(segments).toEqual(["managed", "final.yml"]);
+			// A UNC target seeds at the `\\server\share\` root, which must likewise
+			// be stripped rather than re-walked as `server` / `share` segments.
+			const uncSegments = __physicalTargetSegmentsForTesting(
+				"\\\\server\\share\\managed\\final.yml",
+				path.win32,
+			).filter(segment => segment !== "" && segment !== ".");
+			expect(uncSegments).toEqual(["managed", "final.yml"]);
+			// A relative Windows target seeds at the link's real parent, so every
+			// segment is preserved unchanged.
+			expect(__physicalTargetSegmentsForTesting("managed\\final.yml", path.win32)).toEqual(["managed", "final.yml"]);
+		});
+
+		it("treats a backslash as a filename character on POSIX, not a separator", async () => {
+			// `\` is a valid filename character on POSIX. A dangling target literally
+			// named `managed\config.yml` must stay ONE segment; splitting it into
+			// `managed`/`config.yml` makes flush either fail on the missing dir or
+			// write an unrelated file while the real link stays dangling. Drive the
+			// splitter with the posix engine so the bug reproduces on any host.
+			expect(__physicalTargetSegmentsForTesting("managed\\config.yml", path.posix)).toEqual(["managed\\config.yml"]);
+			// Forward slashes still split, and the leading `/` of an absolute POSIX
+			// target strips to no extra segment (root seeded separately).
+			const absSegments = __physicalTargetSegmentsForTesting("/managed/final.yml", path.posix).filter(
+				segment => segment !== "" && segment !== ".",
+			);
+			expect(absSegments).toEqual(["managed", "final.yml"]);
 		});
 
 		it("falls back to move-aside replacement when Windows reports EPERM", async () => {

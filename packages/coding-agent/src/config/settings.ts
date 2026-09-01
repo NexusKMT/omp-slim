@@ -437,6 +437,35 @@ function resolvePathScopedStringArray(settingPath: SettingPath, value: unknown, 
  */
 const MAX_SYMLINK_HOPS = 40;
 
+/**
+ * Split a dangling symlink target into the physical path segments the flush
+ * walk should follow. Two platform-correctness rules that a naive
+ * `target.split(/[\\/]+/)` gets wrong:
+ *
+ *  1. Root double-count. An ABSOLUTE target seeds the accumulator at
+ *     `parse(target).root` — `C:\` on Windows, the `\\server\share\` prefix of
+ *     a UNC path, `/` on POSIX. The root must therefore be STRIPPED from the
+ *     string before splitting; otherwise it is re-emitted as a leading segment
+ *     and `C:\managed\final.yml` resolves to `C:\` + `C:` + `managed` + … =
+ *     `C:\C:\managed\final.yml`, so the flush fails against a dangling absolute
+ *     link on Windows. (POSIX escaped this by luck: the leading `/` splits to an
+ *     empty leading segment that the walk already skips.) A RELATIVE target
+ *     seeds at the link's real parent dir and keeps every segment unchanged.
+ *  2. Separator set. `\` is a separator only on Windows. On POSIX it is a valid
+ *     filename character, so a target literally named `managed\config.yml` must
+ *     stay ONE segment, not two. Split on the platform separator set: `/` only
+ *     on POSIX, `/` or `\` on Windows. Keyed off `pathApi.sep` so the rule is
+ *     driven by the platform, not a hardcoded cross-platform class.
+ *
+ * `pathApi` is injectable so the platform-specific behavior is testable off the
+ * host OS (drive with `path.win32` / `path.posix`); it defaults to the host.
+ */
+function physicalTargetSegments(target: string, pathApi: typeof path = path): string[] {
+	const separator = pathApi.sep === "\\" ? /[\\/]+/ : /\/+/;
+	const body = pathApi.isAbsolute(target) ? target.slice(pathApi.parse(target).root.length) : target;
+	return body.split(separator);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Settings Class
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1482,7 +1511,7 @@ export class Settings {
 					// so `..` only unwinds segments actually entered post-miss.
 					let frozen = false;
 					let lexicalDepth = 0;
-					for (const segment of target.split(/[\\/]+/)) {
+					for (const segment of physicalTargetSegments(target)) {
 						if (segment === "" || segment === ".") continue;
 						if (segment === "..") {
 							if (!frozen) {
@@ -3011,6 +3040,15 @@ export function resetSettingsForTest(): void {
 	configureProviderMaxInFlightRequests(undefined);
 	configureCredentialRedaction(false);
 }
+
+/**
+ * Exposes the dangling-symlink target segment splitter for platform-specific
+ * tests: the root-double-count and POSIX-backslash bugs only reproduce with an
+ * explicit `path.win32` / `path.posix` engine, which cannot be forced from the
+ * host OS otherwise.
+ * @internal
+ */
+export const __physicalTargetSegmentsForTesting = physicalTargetSegments;
 
 /**
  * The global settings singleton.
