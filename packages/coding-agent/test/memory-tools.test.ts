@@ -593,6 +593,23 @@ describe("Mnemopi backend lifecycle", () => {
 			.get();
 		expect(row?.count).toBe(1);
 	});
+	it("explicit consolidation stores the current session when auto-retain is disabled", async () => {
+		const entries = [{ type: "message", message: { role: "user", content: "explicitly consolidated turn" } }];
+		const state = registerMnemopiState(makeMnemopiConfig({ autoRetain: false }), {
+			entries: () => entries,
+		});
+
+		await state.consolidate({ sleep: false });
+
+		const row = state.memory.beam.db
+			.prepare<{ count: number }, []>(`
+				SELECT COUNT(*) AS count
+				FROM working_memory
+				WHERE source = 'coding-agent-transcript'
+			`)
+			.get();
+		expect(row?.count).toBe(1);
+	});
 
 	it("explicit enqueue retains the current session when auto-retain is disabled", async () => {
 		const entries = [{ type: "message", message: { role: "user", content: "explicitly retained turn" } }];

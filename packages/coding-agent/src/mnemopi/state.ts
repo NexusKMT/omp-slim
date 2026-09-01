@@ -624,9 +624,9 @@ export class MnemopiSessionState {
 	}
 
 	/**
-	 * Capture the current transcript when auto-retention is enabled or explicitly
-	 * requested, drain in-flight fact extraction, and optionally run beam
-	 * consolidation on every owned bank. The explicit `/memory enqueue` path
+	 * Capture the current transcript by default, drain in-flight fact extraction,
+	 * and optionally run beam consolidation on every owned bank.
+	 * The explicit `/memory enqueue` path
 	 * requests retention plus full cross-session consolidation; disposal composes
 	 * the lighter configured-retain-and-flush path with closing the DB handles.
 	 *
@@ -649,13 +649,14 @@ export class MnemopiSessionState {
 	 * @param options.extract - When false, any retained transcript is stored but no
 	 *  LLM fact extraction is scheduled. Used on the interactive shutdown path so
 	 *  `dispose` does not block on a fresh LLM round-trip.
-	 * @param options.retain - When true, explicitly retain the transcript even when
-	 *  automatic retention is disabled. Used by `/memory enqueue`.
+	 * @param options.retain - When false, skip transcript retention.
+	 *  Explicit consolidation retains by default; disposal passes the configured
+	 *  automatic-retention setting.
 	 */
 	async consolidate(
 		options: { full?: boolean; extract?: boolean; sleep?: boolean; retain?: boolean } = {},
 	): Promise<void> {
-		if (this.config.autoRetain || options.retain) {
+		if (options.retain !== false) {
 			await this.forceRetainCurrentSession({ extract: options.extract });
 		}
 		for (const memory of this.scoped.owned) {
@@ -717,7 +718,12 @@ export class MnemopiSessionState {
 		const boundedTimeoutMs = timeoutMs !== undefined && timeoutMs > 0 ? timeoutMs : undefined;
 		const deadline = boundedTimeoutMs !== undefined ? performance.now() + boundedTimeoutMs : undefined;
 		if (boundedTimeoutMs !== undefined) this.#boundOwnedBusyTimeout(boundedTimeoutMs);
-		const consolidatePromise = this.consolidate({ full: false, extract: false, sleep: false }).catch(
+		const consolidatePromise = this.consolidate({
+			full: false,
+			extract: false,
+			sleep: false,
+			retain: this.config.autoRetain,
+		}).catch(
 			(error: unknown) => {
 				logger.warn("Mnemopi: consolidation on dispose failed.", { error: String(error) });
 			},
