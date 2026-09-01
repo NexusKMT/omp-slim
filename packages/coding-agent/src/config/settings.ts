@@ -1568,6 +1568,24 @@ export class Settings {
 								notDir.code = "ENOTDIR";
 								throw notDir;
 							}
+							// `acc` was resolved by realpath() and exists on disk, but a
+							// `..` demands it be a traversable directory to pop its parent.
+							// A concurrent process can win a TOCTOU race: the initial
+							// realpath(filePath) saw the component missing, then it was
+							// created as a REGULAR FILE before realpath(candidate) reached
+							// it, so that call succeeded and left `frozen` false. The
+							// kernel cannot take the parent of `regularfile/..` — it fails
+							// with ENOTDIR — so lexically popping and continuing would let
+							// the atomic rename land on a mislocated sibling
+							// (`config.yml -> racetarget/../victim.yml`) while the logical
+							// config path is really ENOTDIR. Verify before popping.
+							if (!(await fs.promises.stat(acc)).isDirectory()) {
+								const notDir = new Error(
+									`ENOTDIR: symlink target requires a directory but ${acc} is not one for ${filePath}`,
+								) as Error & { code?: string };
+								notDir.code = "ENOTDIR";
+								throw notDir;
+							}
 							acc = path.dirname(acc);
 							continue;
 						}
