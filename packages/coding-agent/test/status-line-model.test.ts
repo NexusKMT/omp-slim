@@ -93,7 +93,11 @@ describe("status line model segment advisor badge", () => {
 		});
 		const rendered = renderSegment("model", ctx).content;
 		expect(rendered).toContain(theme.fg("success", ` ${theme.icon.advisorClosed}`));
-		expect(rendered).not.toContain(theme.icon.advisor);
+		// ASCII mode resolves both icons to `(adv)`, so absence is only provable
+		// when the two tokens differ.
+		if (theme.icon.advisorClosed !== theme.icon.advisor) {
+			expect(rendered).not.toContain(theme.icon.advisor);
+		}
 	});
 
 	it("keeps the eye open while any advisor may still comment", () => {
@@ -107,7 +111,9 @@ describe("status line model segment advisor badge", () => {
 		});
 		const rendered = renderSegment("model", ctx).content;
 		expect(rendered).toContain(theme.fg("success", ` ${theme.icon.advisor}`));
-		expect(rendered).not.toContain(theme.icon.advisorClosed);
+		if (theme.icon.advisorClosed !== theme.icon.advisor) {
+			expect(rendered).not.toContain(theme.icon.advisorClosed);
+		}
 	});
 
 	it("omits the badge when the advisor is inactive", () => {

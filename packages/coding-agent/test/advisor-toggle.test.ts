@@ -420,6 +420,22 @@ describe("AgentSession advisor toggle", () => {
 		expect(sid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
 		expect(sid).not.toContain("-advisor");
 	});
+	it("keeps the advisor eye open until the primary has yielded", () => {
+		// Regression for the review note on #10463: a fresh/empty-backlog runtime
+		// reports `yielded`, but the status line must only close the eye once the
+		// primary itself has stopped streaming — mid-turn repaints (agent_start,
+		// message events) must keep showing the open eye.
+		enableAdvisor();
+
+		const overview = () => session.getAdvisorStatusOverview();
+		expect(overview().advisors[0]?.yielded).toBe(true);
+
+		session.agent.state.isStreaming = true;
+		expect(overview().advisors[0]?.yielded).toBe(false);
+
+		session.agent.state.isStreaming = false;
+		expect(overview().advisors[0]?.yielded).toBe(true);
+	});
 	it("retains cumulative advisor cost after the advisor is disabled", () => {
 		const advisor = enableAdvisor();
 

@@ -1907,9 +1907,13 @@ export class SessionAdvisors {
 			return {
 				name,
 				status: live?.status ?? status,
-				// Roster entries without a live runtime (disabled, no model, paused)
-				// will never comment again — treat them as yielded.
-				yielded: live?.yielded ?? true,
+				// The eye only closes after the primary itself has yielded: while it
+				// is streaming, the advisor may still receive (and comment on) new
+				// deltas even when its current backlog is empty, so a mid-turn
+				// repaint must never show the closed eye. Roster entries without a
+				// live runtime (disabled, no model, paused) never comment again —
+				// treat them as yielded regardless.
+				yielded: this.#host.agent.state.isStreaming ? false : (live?.yielded ?? true),
 			};
 		});
 		return { configured: this.#advisorEnabled, advisors };
