@@ -137,6 +137,61 @@ const taskProgressUpdate = {
 	},
 } satisfies Extract<AgentSessionEvent, { type: "tool_execution_update" }>;
 
+const backgroundTaskCall = {
+	role: "assistant",
+	content: [
+		{
+			type: "toolCall",
+			id: "task-bg",
+			name: "task",
+			arguments: { tasks: [{ name: "Bg", agent: "task", task: "background work" }] },
+		},
+	],
+	api: "anthropic-messages",
+	provider: "anthropic",
+	model: "claude-sonnet-4-5",
+	stopReason: "toolUse",
+	usage,
+	timestamp: Date.now(),
+} as unknown as AgentMessage;
+
+// The initial `async.state === "running"` snapshot the detached call persists:
+// a bare parent row, no current-tool line to distinguish it from a later frame.
+const backgroundTaskRunningResult = {
+	role: "toolResult",
+	toolCallId: "task-bg",
+	toolName: "task",
+	content: [{ type: "text", text: "Spawned agent `Bg`..." }],
+	details: {
+		projectAgentsDir: null,
+		results: [],
+		totalDurationMs: 10,
+		progress: [runningProgress("Bg", "Background work", { currentTool: undefined, currentToolArgs: undefined })],
+		async: { state: "running", jobId: "job-bg", type: "task" },
+	},
+	isError: false,
+	timestamp: Date.now(),
+} as unknown as ToolResultMessage;
+
+function backgroundProgressUpdate(marker: string): Extract<AgentSessionEvent, { type: "tool_execution_update" }> {
+	return {
+		type: "tool_execution_update",
+		toolCallId: "task-bg",
+		toolName: "task",
+		args: { tasks: [{ name: "Bg", agent: "task", task: "background work" }] },
+		partialResult: {
+			content: [{ type: "text", text: "Running background task Bg..." }],
+			details: {
+				projectAgentsDir: null,
+				results: [],
+				totalDurationMs: 20,
+				progress: [runningProgress("Bg", "Background work", { currentTool: "grep", currentToolArgs: marker })],
+				async: { state: "running", jobId: "job-bg", type: "task" },
+			} satisfies TaskToolDetails,
+		},
+	} satisfies Extract<AgentSessionEvent, { type: "tool_execution_update" }>;
+}
+
 interface SessionStub {
 	session: AgentSession;
 	hasListener(): boolean;
@@ -317,5 +372,33 @@ describe("#10446 task progress across a focus rebuild", () => {
 		const after = Bun.stripANSI(fixture.ctx.chatContainer.render(120).join("\n"));
 		expect(after).toContain("Parent>Child");
 		expect(after).toContain("packages/coding-agent/src/modes");
+	});
+});
+
+describe("#10447 persisted background task board across a focus rebuild", () => {
+	it("keeps a returned detached task parked so cached and later progress land after return", async () => {
+		// Detached task: its call already returned an async.state "running" result
+		// (persisted), and the main session is idle while the job keeps streaming.
+		const main = makeSession([backgroundTaskCall, backgroundTaskRunningResult], false);
+		const fixture = createFixture(main);
+
+		await fixture.ctx.renderInitialMessages();
+		await main.emitToolUpdate(backgroundProgressUpdate("cached-progress-marker"));
+		const before = Bun.stripANSI(fixture.ctx.chatContainer.render(120).join("\n"));
+		expect(before).toContain("cached-progress-marker");
+
+		await fixture.focus.focusAgent("Worker");
+		await fixture.focus.unfocus();
+
+		// The rebuilt board replays the cached snapshot instead of collapsing to
+		// the persisted "running" result, and the card is still parked as pending.
+		const after = Bun.stripANSI(fixture.ctx.chatContainer.render(120).join("\n"));
+		expect(after).toContain("cached-progress-marker");
+		expect(fixture.ctx.pendingTools.has("task-bg")).toBe(true);
+
+		// A live frame emitted after return still routes to the preserved card.
+		await main.emitToolUpdate(backgroundProgressUpdate("post-return-marker"));
+		const live = Bun.stripANSI(fixture.ctx.chatContainer.render(120).join("\n"));
+		expect(live).toContain("post-return-marker");
 	});
 });

@@ -1084,6 +1084,19 @@ export class EventController {
 		if (turnStartedAt !== undefined) this.#turnStartedAt = turnStartedAt;
 	}
 
+	/**
+	 * Re-register parked background task cards after a transcript rebuild so a
+	 * detached task's replayed and live progress frames keep routing to the
+	 * preserved component. Focus attach clears {@link #backgroundTaskCallIds}
+	 * via {@link resetTranscriptAnchors} before the rebuild repopulates it.
+	 * Ids whose component did not survive into `pendingTools` are skipped.
+	 */
+	markBackgroundTaskCalls(toolCallIds: Iterable<string>): void {
+		for (const toolCallId of toolCallIds) {
+			if (this.ctx.pendingTools.has(toolCallId)) this.#backgroundTaskCallIds.add(toolCallId);
+		}
+	}
+
 	async #handleNotice(event: Extract<AgentSessionEvent, { type: "notice" }>): Promise<void> {
 		const message = event.source ? `${event.source}: ${event.message}` : event.message;
 		if (event.level === "error") {
