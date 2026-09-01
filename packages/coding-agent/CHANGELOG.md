@@ -20,6 +20,7 @@
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
+- Fixed agents in a `hub` wait loop leaving a user's message unanswered: the tool prompt now separates a user steering message from the pollable wake reasons, and states that only a plain text block reaches the user ([#10437](https://github.com/can1357/oh-my-pi/pull/10437)).
 
 ## [18.0.11] - 2026-08-29
 
