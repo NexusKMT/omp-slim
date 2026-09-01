@@ -6,6 +6,7 @@
 
 - Fixed the stdout backlog guard tearing the terminal down on a single large-but-draining frame (a resumed transcript repaint of many inline images); a stall is now declared only when the backlog stays over the cap without draining ([#10430](https://github.com/can1357/oh-my-pi/issues/10430)).
 - Fixed image-heavy session resumes exceeding the terminal output limit before the inline-image budget was applied ([#10305](https://github.com/can1357/oh-my-pi/issues/10305)).
+- Fixed inline images leaving blank rows when outer-terminal identity variables leak into Herdr panes ([#10353](https://github.com/can1357/oh-my-pi/issues/10353)).
 
 ## [18.0.11] - 2026-08-29
 
