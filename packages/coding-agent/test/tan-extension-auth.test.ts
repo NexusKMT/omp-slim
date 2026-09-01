@@ -14,6 +14,7 @@ import { describe, expect, it } from "bun:test";
 import * as path from "node:path";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -22,6 +23,9 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 const PROVIDER = "tan-fixture-gw";
 const MODEL_ID = "tan-fixture-model";
 const SENTINEL = "tan-fixture-sentinel-key";
+const INLINE_PROVIDER = "tan-inline-fixture-gw";
+const INLINE_MODEL_ID = "tan-inline-fixture-model";
+const INLINE_SENTINEL = "tan-inline-fixture-sentinel-key";
 
 // No streamSimple / oauth: registration mutates only this ModelRegistry
 // instance, never a process-global custom-API/OAuth table.
@@ -42,6 +46,24 @@ const EXTENSION_SOURCE = `export default function (pi) {
 	});
 }
 `;
+const INLINE_EXTENSION: ExtensionFactory = pi => {
+	pi.registerProvider(INLINE_PROVIDER, {
+		baseUrl: "https://tan-inline-fixture.example.invalid/v1",
+		apiKey: INLINE_SENTINEL,
+		api: "openai-completions",
+		models: [
+			{
+				id: INLINE_MODEL_ID,
+				name: "Tan Inline Fixture Model",
+				reasoning: false,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 128000,
+				maxTokens: 8192,
+			},
+		],
+	});
+};
 
 function baseOptions(cwd: string) {
 	return {
@@ -76,12 +98,16 @@ describe("/tan extension auth over a shared registry", () => {
 				authStorage,
 				modelRegistry,
 				additionalExtensionPaths: [extPath],
+				extensions: [INLINE_EXTENSION],
 				disableExtensionDiscovery: true,
 			});
 
 			const model = modelRegistry.find(PROVIDER, MODEL_ID);
+			const inlineModel = modelRegistry.find(INLINE_PROVIDER, INLINE_MODEL_ID);
 			expect(model).toBeDefined();
+			expect(inlineModel).toBeDefined();
 			expect(await modelRegistry.getApiKey(model!)).toBe(SENTINEL);
+			expect(await modelRegistry.getApiKey(inlineModel!)).toBe(INLINE_SENTINEL);
 			expect(parent.preparedExtensions?.length).toBeGreaterThan(0);
 
 			// Tan child: forwards the parent's prepared extensions + root policy, so
@@ -99,7 +125,9 @@ describe("/tan extension auth over a shared registry", () => {
 			// Child request auth resolves AND the parent's registration survives on
 			// the shared registry instance.
 			expect(await tanChild.modelRegistry.getApiKey(model!)).toBe(SENTINEL);
+			expect(await tanChild.modelRegistry.getApiKey(inlineModel!)).toBe(INLINE_SENTINEL);
 			expect(await modelRegistry.getApiKey(model!)).toBe(SENTINEL);
+			expect(await modelRegistry.getApiKey(inlineModel!)).toBe(INLINE_SENTINEL);
 
 			await tanChild.dispose();
 			await parent.dispose();
