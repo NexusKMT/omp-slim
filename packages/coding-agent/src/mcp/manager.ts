@@ -1543,7 +1543,11 @@ export class MCPManager {
 				const nextEnv: Record<string, string> = {};
 				for (const [key, value] of Object.entries(resolved.env)) {
 					const resolvedValue = await resolveConfigValue(value);
-					if (resolvedValue) nextEnv[key] = resolvedValue;
+					// Preserve explicitly empty values (e.g. a `${VAR:-}` expanded to
+					// "") so the subprocess gets the explicit override instead of
+					// inheriting a stale host value; only unresolvable values are
+					// omitted.
+					if (resolvedValue !== undefined) nextEnv[key] = resolvedValue;
 				}
 				resolved = { ...resolved, env: nextEnv };
 			}

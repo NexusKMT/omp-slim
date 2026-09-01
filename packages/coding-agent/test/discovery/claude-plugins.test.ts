@@ -766,11 +766,6 @@ describe("listClaudePluginRoots", () => {
 				IDA_NEXUS_CACHE_DIR: "/tmp/ida-nexus-cache",
 				PLUGIN_ROOT: pluginPath,
 			});
-			// Expanded env values are final package data: literal policy exempts
-			// them from env-name/`!command` resolution and the empty-value
-			// dropping that would defeat the `${NAME:-}` empty default.
-			expect(server?.envPolicy).toBe("literal");
-
 			// The empty expanded value must survive discovery→config conversion
 			// and auth resolution: StdioTransport merges Bun.env underneath the
 			// config env, so a dropped entry would silently inherit a stale host
@@ -790,6 +785,74 @@ describe("listClaudePluginRoots", () => {
 			restoreEnvValue("OMP_PLUGIN_MCP_NEXUS_ID", originalNexusId);
 			restoreEnvValue("OMP_PLUGIN_MCP_STATE_DIR", originalStateDir);
 			restoreEnvValue("OMP_PLUGIN_MCP_CACHE_DIR", originalCacheDir);
+		}
+	});
+
+	test("keeps legacy env-name and !command indirection for marketplace plugin env", async () => {
+		const pluginsDir = path.join(tempDir, ".claude", "plugins");
+		const pluginPath = path.join(tempDir, "plugins", "legacy-mcp");
+		const originalTokenEnv = process.env.OMP_PLUGIN_MCP_TOKEN_ENV;
+		restoreEnvValue("OMP_PLUGIN_MCP_TOKEN_ENV", "test-nexus-token");
+
+		try {
+			await fs.mkdir(pluginsDir, { recursive: true });
+			await fs.mkdir(pluginPath, { recursive: true });
+			await fs.writeFile(
+				path.join(pluginsDir, "installed_plugins.json"),
+				JSON.stringify({
+					version: 2,
+					plugins: {
+						"legacy-mcp@market": [
+							{
+								scope: "user",
+								installPath: pluginPath,
+								version: "1.0.0",
+								installedAt: "2026-09-01T00:00:00Z",
+								lastUpdated: "2026-09-01T00:00:00Z",
+							},
+						],
+					},
+				}),
+			);
+			await fs.writeFile(
+				path.join(pluginPath, ".mcp.json"),
+				JSON.stringify({
+					legacy: {
+						command: "uv",
+						env: {
+							TOKEN: "OMP_PLUGIN_MCP_TOKEN_ENV",
+							SECRET: "!echo plugin-secret",
+						},
+					},
+				}),
+			);
+
+			const result = await loadCapability<MCPServer>(mcpCapability.id, {
+				cwd: tempDir,
+				providers: ["claude-plugins"],
+			});
+			const server = result.all.find(item => item.name === "legacy-mcp:legacy");
+
+			// Discovery only expands ${VAR} placeholders; bare env names and
+			// !command values pass through for auth resolution.
+			expect(server?.env).toEqual({
+				TOKEN: "OMP_PLUGIN_MCP_TOKEN_ENV",
+				SECRET: "!echo plugin-secret",
+			});
+
+			// prepareConfig resolves the legacy indirection: the env-var name
+			// yields the host value and the !command yields its trimmed stdout.
+			const { configs } = await loadAllMCPConfigs(tempDir);
+			const delivered = await new MCPManager(tempDir).prepareConfig(configs["legacy-mcp:legacy"]);
+			expect(delivered).toMatchObject({
+				type: "stdio",
+				env: {
+					TOKEN: "test-nexus-token",
+					SECRET: "plugin-secret",
+				},
+			});
+		} finally {
+			restoreEnvValue("OMP_PLUGIN_MCP_TOKEN_ENV", originalTokenEnv);
 		}
 	});
 

@@ -609,12 +609,10 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 				...(raw.env !== undefined && {
 					env: expandEnvVarsDeep(substitutePluginRoot(raw.env, root.path)),
 				}),
-				// Marketplace plugin env values are package data: the provider
-				// already applied the only permitted expansion (plugin-root
-				// substitution + ${VAR} placeholders), so they are exempt from
-				// further env-name/`!command` resolution — including the empty-
-				// value dropping that would defeat `${VAR:-}` empty defaults.
-				...(raw.env !== undefined && { envPolicy: "literal" as const }),
+				// Marketplace plugin env values keep legacy indirection: bare
+				// env-var names and `!command` values are resolved by
+				// MCPManager.#resolveAuthConfig like any other stdio config;
+				// expanded empties are preserved there (see manager.ts).
 				...(rooted.cwd !== undefined && { cwd: rooted.cwd }),
 				...(raw.url !== undefined && { url: expandEnvVarsDeep(raw.url) }),
 				...(raw.headers !== undefined && { headers: expandEnvVarsDeep(raw.headers) }),
