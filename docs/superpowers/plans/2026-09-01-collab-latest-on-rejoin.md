@@ -174,14 +174,16 @@ Start the local web app:
 bun run --cwd packages/collab-web dev
 ```
 
-Use the Mayor room fragment with `http://localhost:3000/#<roomId>.<key>`. In a browser:
+Create a verified live Mayor collab link, preserve its `#<roomId>.<key>` fragment, and open `http://localhost:3000/#<roomId>.<key>` with the browser tool. Keep the Mayor host connected so the relay retains the room. Then:
 
-1. Confirm that the transcript opens at the latest message.
-2. Scroll more than 40 pixels upward and confirm that new content does not move the viewport.
-3. Use the existing rejoin action after a disconnect.
-4. Confirm that the transcript returns to the latest message without manual scrolling.
+1. Wait until the `reconnecting…` status banner is absent.
+2. Read `.tr-root` geometry and confirm that `scrollHeight - scrollTop - clientHeight <= 40`.
+3. Set `.tr-root.scrollTop = 0`, dispatch a `scroll` event, and confirm that the distance from the bottom exceeds 40 pixels.
+4. Call Puppeteer's `page.setOfflineMode(true)` and wait for the `reconnecting…` status banner.
+5. Call `page.setOfflineMode(false)` and wait until the status banner disappears, which proves that the same room returned from `reconnecting` to `live`.
+6. Read `.tr-root` geometry again and confirm that `scrollHeight - scrollTop - clientHeight <= 40`.
 
-Expected: Initial join and rejoin show the latest message, while manual scrolling still pauses tail-follow between connections.
+Expected: The initial live connection opens at the tail, manual scrolling releases the bottom lock, and reconnecting the same live room restores the tail without an explicit **Rejoin** action.
 
 - [ ] **Step 4: Commit the changelog**
 
