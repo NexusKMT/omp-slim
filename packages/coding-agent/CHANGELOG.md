@@ -47,6 +47,7 @@
 - Fixed agents in a `hub` wait loop leaving a user's message unanswered: the tool prompt now separates a user steering message from the pollable wake reasons, and states that only a plain text block reaches the user ([#10437](https://github.com/can1357/oh-my-pi/pull/10437)).
 - Fixed `/tan` sessions inheriting the parent's accumulated cost, which exaggerated subagent totals in the Agents view ([#10317](https://github.com/can1357/oh-my-pi/issues/10317)).
 - Fixed truncated labels of prompt actions
+- Fixed trailing assistant text being truncated when a tool call started mid-stream: the smooth-streaming reveal now force-completes at the tool-call boundary instead of leaving un-revealed text to be committed to scrollback ([#10318](https://github.com/can1357/oh-my-pi/issues/10318)).
 
 ## [18.0.11] - 2026-08-29
 
