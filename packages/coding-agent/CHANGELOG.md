@@ -14,6 +14,7 @@
 
 ### Fixed
 
+- Improved chat history stability during long-running sessions by preventing unnecessary message modification when date or directory context changes
 - Fixed `bun claude:trace` hanging due to a TLS ClientHello race condition in the proxy MITM bridge and added forward HTTP proxy support.
 - Fixed an invalid Lark grammar error in sloppy edit constrained decoding caused by unsupported regex lookahead.
 

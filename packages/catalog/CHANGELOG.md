@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added support for Claude Fable 5.1 models
+- Added support for Claude Fable 5.1 models, including improved thinking prefix binding and controls
 - Added DeepSeek V4 Flash Vision Exp
 - Added Mercury 2.5 Preview
 - Added Xiaomi MiMo V2.5 Pro UltraSpeed

@@ -153,7 +153,7 @@ import {
 import { AgentSession, type InitialRetryFallbackState, type PlanYolo, type Prewalk } from "./session/agent-session";
 import { discoverAuthStorage as discoverAuthStorageFromConfig } from "./session/auth-broker-config";
 import type { AuthStorage } from "./session/auth-storage";
-import { withDateCwdReminder } from "./session/date-cwd-reminder";
+import { DateCwdReminderInjector } from "./session/date-cwd-reminder";
 import { createInterruptedTurnAbortMessage } from "./session/exit-diagnostics";
 import { recoverInlineSloppyEdit } from "./session/inline-edit-recovery";
 import {
@@ -3372,6 +3372,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			modelRegistry.getApiKey(model, providerSessionId),
 		);
 		blobBroker?.prewarm();
+		const dateCwdReminder = new DateCwdReminderInjector();
 		const snapcompactSystemPromptMode = settings.get("snapcompact.systemPrompt");
 		const snapcompactInline =
 			snapcompactSystemPromptMode !== "none" || settings.get("snapcompact.toolResults")
@@ -3402,7 +3403,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// Keep per-request volatility out of the system prompt: the date/cwd
 			// reminder rides on the first user turn so open-weight providers keep
 			// their tool-schema prefix cache (#7404).
-			return withDateCwdReminder(
+			return dateCwdReminder.transform(
 				transformed,
 				formatLocalCalendarDate(),
 				normalizePromptPath(sessionManager.getCwd()),
@@ -4079,6 +4080,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				const captureModel = captureOptions.initialState?.model;
 				const captureSessionId = captureOptions.sessionId;
 				if (!captureModel || !captureSessionId) throw new Error("Auto-learn capture identity is incomplete");
+				const captureDateCwdReminder = new DateCwdReminderInjector();
 				return new Agent({
 					...captureOptions,
 					cwd: sessionManager.getCwd(),
@@ -4091,7 +4093,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						transformed = await normalizeProviderContextImagesForModel(transformed, transformModel);
 						transformed = await dropUnreadableContextImages(transformed, transformModel);
 						if (blobBroker) transformed = await blobBroker.decorateContext(transformed, transformModel);
-						return withDateCwdReminder(
+						return captureDateCwdReminder.transform(
 							transformed,
 							formatLocalCalendarDate(),
 							normalizePromptPath(sessionManager.getCwd()),
