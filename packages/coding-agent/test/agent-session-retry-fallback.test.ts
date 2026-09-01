@@ -5434,6 +5434,7 @@ describe("AgentSession retry fallback", () => {
 			sessionManager: SessionManager.inMemory(),
 			settings,
 			modelRegistry: registry,
+			rebindModelAfterDiscovery: true,
 			toolRegistry: new Map([[inspectImageTool.name, inspectImageTool]]),
 		});
 

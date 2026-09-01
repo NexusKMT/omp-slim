@@ -1762,7 +1762,7 @@ export class AgentSession {
 		// its refreshed same-selector entry (#10488) once discovery settles.
 		void this.#retryInactiveAdvisorAfterModelDiscovery();
 		void this.#revalidateFallbackChainsAfterModelDiscovery();
-		void this.#rebindActiveModelAfterModelDiscovery();
+		if (config.rebindModelAfterDiscovery) void this.#rebindActiveModelAfterModelDiscovery();
 	}
 	/** Model registry for API key resolution and model discovery */
 	get modelRegistry(): ModelRegistry {
