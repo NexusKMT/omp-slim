@@ -11,6 +11,8 @@ import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import { prompt } from "@oh-my-pi/pi-utils";
 import { ModelRegistry } from "../../config/model-registry";
 import { settings } from "../../config/settings";
+import type { CustomTool, CustomToolContext, RenderResultOptions } from "../../extensibility/custom-tools/types";
+import type { Theme } from "../../modes/theme/theme";
 import webSearchSystemPrompt from "../../prompts/system/web-search.md" with { type: "text" };
 import webSearchDescription from "../../prompts/tools/web-search.md" with { type: "text" };
 import { discoverAuthStorage } from "../../sdk";
@@ -27,7 +29,7 @@ import {
 	type SearchProviderCandidate,
 } from "./provider";
 import { applyQueryConstraints, parseSearchQuery } from "./query";
-import type { SearchRenderDetails } from "./render";
+import { renderSearchCall, renderSearchResult, type SearchRenderDetails } from "./render";
 import {
 	DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS,
 	MAX_WEB_SEARCH_TIMEOUT_SECONDS,
@@ -346,6 +348,44 @@ export class WebSearchTool implements AgentTool<typeof webSearchSchema, SearchRe
 			signal,
 		});
 	}
+}
+
+/** Web search tool as CustomTool for consumers embedding the custom-tool API. */
+export const webSearchCustomTool: CustomTool<typeof webSearchSchema, SearchRenderDetails> = {
+	name: "web_search",
+	label: "Web Search",
+	description: prompt.render(webSearchDescription),
+	parameters: webSearchSchema,
+
+	approval: "read",
+	async execute(
+		toolCallId: string,
+		params: SearchToolParams,
+		_onUpdate,
+		ctx: CustomToolContext,
+		signal?: AbortSignal,
+	) {
+		const authStorage = ctx.modelRegistry?.authStorage ?? (await discoverAuthStorage());
+		const sessionId = ctx.sessionManager.getSessionId();
+		return executeSearch(toolCallId, params, {
+			authStorage,
+			modelRegistry: ctx.modelRegistry,
+			sessionId,
+			signal,
+		});
+	},
+
+	renderCall(args: SearchToolParams, options: RenderResultOptions, theme: Theme) {
+		return renderSearchCall(args, options, theme);
+	},
+
+	renderResult(result, options: RenderResultOptions, theme: Theme, args) {
+		return renderSearchResult(result, options, theme, args);
+	},
+};
+
+export function getSearchTools(): CustomTool<any, any>[] {
+	return [webSearchCustomTool];
 }
 
 export { getSearchProvider, setExcludedSearchProviders, setSearchProviderOrder } from "./provider";
