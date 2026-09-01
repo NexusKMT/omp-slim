@@ -687,13 +687,11 @@ function resolveDefaultCodexImageModel(modelRegistry: ModelRegistry): Model | un
 }
 
 /**
- * Codex subscription (ChatGPT OAuth) image credentials — engages OpenAI's hosted
- * `image_generation` tool through a CONNECTED Codex account, independent of the
- * active chat model. This is what lets image generation run on a ChatGPT
- * subscription (no metered OPENAI_API_KEY) even when the active model is, e.g.,
- * Claude. The active-model-is-codex case is already served by
- * {@link findOpenAIHostedImageCredentials}, so it is skipped here to avoid a
- * duplicate resolution.
+ * Codex image credentials — engages OpenAI's hosted `image_generation` tool
+ * through a connected ChatGPT account or custom Codex-compatible endpoint,
+ * independent of the active chat model. The active-model-is-codex case is
+ * already served by {@link findOpenAIHostedImageCredentials}, so it is skipped
+ * here to avoid a duplicate resolution.
  */
 async function findCodexSubscriptionImageCredentials(
 	modelRegistry: ModelRegistry | undefined,
@@ -704,15 +702,14 @@ async function findCodexSubscriptionImageCredentials(
 	if (isOpenAIHostedImageModel(activeModel) && getOpenAIHostedImageProvider(activeModel) === "openai-codex") {
 		return null;
 	}
-	// A Codex subscription credential is an OAuth JWT with an account claim. API
-	// keys stored under this provider cannot use the ChatGPT backend and must not
-	// prevent fallback providers from being selected.
 	const token = await modelRegistry.getApiKeyForProvider("openai-codex", sessionId);
-	if (!token || !getCodexAccountId(token)) return null;
+	if (!token) return null;
 	const model = resolveDefaultCodexImageModel(modelRegistry);
 	if (!model) return null;
+	const acceptsOpaqueCredentials = getOpenAIBaseUrl(model) !== CODEX_BASE_URL;
+	if (!acceptsOpaqueCredentials && !getCodexAccountId(token)) return null;
 	const apiKey = await modelRegistry.getApiKey(model, sessionId);
-	if (!isAuthenticated(apiKey) || !getCodexAccountId(apiKey)) return null;
+	if (!isAuthenticated(apiKey) || (!acceptsOpaqueCredentials && !getCodexAccountId(apiKey))) return null;
 	return { provider: "openai-codex", apiKey, model };
 }
 
