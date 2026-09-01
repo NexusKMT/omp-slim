@@ -17,6 +17,7 @@
 
 ### Fixed
 
+- Fixed `HookUIContext.custom` types and docs so custom hook UI factories receive the `keybindings` argument the runner already passes ([#10424](https://github.com/can1357/oh-my-pi/pull/10424) by [@kvnloo](https://github.com/kvnloo)).
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
@@ -1722,3 +1723,4 @@
 - Fixed MCP sessions dropping tools from servers that finished connecting after the initial startup window.
 
 Older entries are archived in [packages/coding-agent/CHANGELOG.md@9f06f7133fbe](https://github.com/can1357/oh-my-pi/blob/9f06f7133fbe877f89fc04cb4843472dc06988e9/packages/coding-agent/CHANGELOG.md).
+
