@@ -91,6 +91,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+/** Env maps must hold only string values; anything else is malformed. */
+function isStringRecord(value: unknown): value is Record<string, string> {
+	return isRecord(value) && Object.values(value).every(v => typeof v === "string");
+}
+
 async function skillsManifestReplacesFallback(root: ClaudePluginRoot): Promise<boolean> {
 	const raw = await readFile(path.join(root.path, "marketplace.json"));
 	if (raw === null) return false;
@@ -627,6 +632,14 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 			// Root relative command/cwd at the plugin's config directory, not the
 			// session cwd (MCP stdio spawning resolves relative values there).
 			const rooted = resolvePluginStdioPaths({ command: substitutedCommand, cwd: substitutedCwd }, baseDir);
+			// Malformed env (e.g. `"env": null` in a hand-edited marketplace JSON)
+			// must not throw inside resolveMarketplaceEnv: the capability loader
+			// catches at provider scope and would discard every marketplace
+			// server, not just this entry.
+			if (raw.env !== undefined && !isStringRecord(raw.env)) {
+				warnings.push(`[claude-plugins] Skipping MCP server "${serverName}" in ${sourcePath}: malformed env`);
+				continue;
+			}
 			const resolvedEnv = raw.env !== undefined ? await resolveMarketplaceEnv(raw.env, root.path) : undefined;
 			const server: MCPServer = {
 				name: namespacedName,

@@ -939,6 +939,106 @@ describe("listClaudePluginRoots", () => {
 		}
 	});
 
+	test("keeps stdio servers distinct when env policy metadata differs", async () => {
+		const pluginsDir = path.join(tempDir, ".claude", "plugins");
+		const pluginPath = path.join(tempDir, "plugins", "alias-mcp");
+		const originalTrap = process.env.OMP_PLUGIN_MCP_TRAP_ENV;
+		const envPlaceholder = (name: string): string => ["$", "{", name, ":-}"].join("");
+		restoreEnvValue("OMP_PLUGIN_MCP_TRAP_ENV", "HOME");
+
+		try {
+			await fs.mkdir(pluginsDir, { recursive: true });
+			await fs.mkdir(pluginPath, { recursive: true });
+			await fs.writeFile(
+				path.join(pluginsDir, "installed_plugins.json"),
+				JSON.stringify({
+					version: 2,
+					plugins: {
+						"alias-mcp@market": [
+							{
+								scope: "user",
+								installPath: pluginPath,
+								version: "1.0.0",
+								installedAt: "2026-09-01T00:00:00Z",
+								lastUpdated: "2026-09-01T00:00:00Z",
+							},
+						],
+					},
+				}),
+			);
+			await fs.writeFile(
+				path.join(pluginPath, ".mcp.json"),
+				JSON.stringify({
+					literal: {
+						command: "uv",
+						env: {
+							TOKEN: envPlaceholder("OMP_PLUGIN_MCP_TRAP_ENV"),
+						},
+					},
+					raw: {
+						command: "uv",
+						env: {
+							TOKEN: "HOME",
+						},
+					},
+				}),
+			);
+
+			// Both servers carry the same env text { TOKEN: "HOME" }, but
+			// `literal` expanded a placeholder (envLiteralKeys) while `raw` keeps
+			// legacy indirection - the delivered subprocess env differs, so they
+			// are distinct connections and neither may shadow the other.
+			const result = await loadCapability<MCPServer>(mcpCapability.id, {
+				cwd: tempDir,
+				providers: ["claude-plugins"],
+			});
+			expect(result.items.map(item => item.name).sort()).toEqual(["alias-mcp:literal", "alias-mcp:raw"]);
+		} finally {
+			restoreEnvValue("OMP_PLUGIN_MCP_TRAP_ENV", originalTrap);
+		}
+	});
+
+	test("skips servers with malformed env instead of discarding the provider", async () => {
+		const pluginsDir = path.join(tempDir, ".claude", "plugins");
+		const pluginPath = path.join(tempDir, "plugins", "bad-env-mcp");
+
+		await fs.mkdir(pluginsDir, { recursive: true });
+		await fs.mkdir(pluginPath, { recursive: true });
+		await fs.writeFile(
+			path.join(pluginsDir, "installed_plugins.json"),
+			JSON.stringify({
+				version: 2,
+				plugins: {
+					"bad-env-mcp@market": [
+						{
+							scope: "user",
+							installPath: pluginPath,
+							version: "1.0.0",
+							installedAt: "2026-09-01T00:00:00Z",
+							lastUpdated: "2026-09-01T00:00:00Z",
+						},
+					],
+				},
+			}),
+		);
+		await fs.writeFile(
+			path.join(pluginPath, ".mcp.json"),
+			JSON.stringify({
+				bad: { command: "uv", env: null },
+				good: { command: "uv" },
+			}),
+		);
+
+		const result = await loadCapability<MCPServer>(mcpCapability.id, {
+			cwd: tempDir,
+			providers: ["claude-plugins"],
+		});
+		// One malformed env must not throw at provider scope and discard the
+		// sibling servers: the bad entry is skipped with a warning.
+		expect(result.items.map(item => item.name)).toEqual(["bad-env-mcp:good"]);
+		expect(result.warnings.join("\n")).toContain("malformed env");
+	});
+
 	test("uses OMP then Claude manifest mcpServers paths before .mcp.json", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const ompPluginPath = path.join(tempDir, "plugins", "omp-pointer");
