@@ -202,36 +202,6 @@ describe("AgentSession branch title metadata", () => {
 			await ctx.cleanup();
 		}
 	});
-
-	it("runs the session-switch reconciler against the branched session (issue #10468)", async () => {
-		const ctx = await createTestSession({ inMemory: true });
-		try {
-			ctx.sessionManager.appendMessage({ role: "user", content: "first", timestamp: Date.now() - 3 });
-			ctx.sessionManager.appendMessage(assistantMsg("ok"));
-			const entryId = ctx.sessionManager.appendMessage({
-				role: "user",
-				content: "second",
-				timestamp: Date.now() - 1,
-			});
-			const originalId = ctx.sessionManager.getSessionId();
-
-			// Branching mints a new session id; mode reconciliation must run against
-			// it so vibe/plan/goal state re-anchors to the branched session instead
-			// of the stale pre-branch owner scope (which left vibe mode un-exitable).
-			const observedIds: string[] = [];
-			ctx.session.setSessionSwitchReconciler(async () => {
-				observedIds.push(ctx.sessionManager.getSessionId());
-			});
-
-			const result = await ctx.session.branch(entryId);
-
-			expect(result.cancelled).toBe(false);
-			expect(observedIds).toEqual([ctx.sessionManager.getSessionId()]);
-			expect(observedIds[0]).not.toBe(originalId);
-		} finally {
-			await ctx.cleanup();
-		}
-	});
 });
 
 describe("AgentSession historical image prompts", () => {

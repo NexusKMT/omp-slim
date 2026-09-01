@@ -16,6 +16,7 @@ import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -653,5 +654,66 @@ describe("InteractiveMode vibe mode toggle", () => {
 
 		await mode.handleVibeModeCommand();
 		expect(mode.vibeModeEnabled).toBe(false);
+	});
+
+	it("exits vibe mode after a tree branch re-anchors the owner scope (issue #10468)", async () => {
+		// Status-line worktree discovery hits the native VCS addon during init,
+		// which is irrelevant here; short-circuit it to the no-repository case.
+		vi.spyOn(vcs, "git").mockReturnValue(null);
+		vi.spyOn(vcs, "repo").mockReturnValue(null);
+		await mode.init({ suppressWelcomeIntro: true });
+		await mode.handleVibeModeCommand();
+		expect(mode.vibeModeEnabled).toBe(true);
+
+		// A user turn taken while in vibe mode, so branching from it carries the
+		// vibe mode_change entry and the branch reopens in vibe mode.
+		const entryId = session.sessionManager.appendMessage({
+			role: "user",
+			content: "keep going",
+			timestamp: Date.now(),
+		});
+		await session.sessionManager.ensureOnDisk();
+		const originalSessionId = session.sessionManager.getSessionId();
+
+		const result = await session.branch(entryId);
+		expect(result.cancelled).toBe(false);
+		expect(session.sessionManager.getSessionId()).not.toBe(originalSessionId);
+		// Reconciliation re-anchored the vibe owner scope to the branched session.
+		expect(mode.vibeModeEnabled).toBe(true);
+
+		// Before the fix this threw "Vibe parent session changed before mode exit
+		// could be persisted." because the owner scope stayed on the pre-branch
+		// session; the toggle must now disable vibe mode cleanly.
+		await mode.handleVibeModeCommand();
+		expect(mode.vibeModeEnabled).toBe(false);
+		expect(session.getVibeModeState()).toBeUndefined();
+	});
+
+	it("exits vibe mode after a /btw branch re-anchors the owner scope (issue #10468)", async () => {
+		vi.spyOn(vcs, "git").mockReturnValue(null);
+		vi.spyOn(vcs, "repo").mockReturnValue(null);
+		await mode.init({ suppressWelcomeIntro: true });
+		session.sessionManager.appendMessage({ role: "user", content: "seed", timestamp: Date.now() - 2 });
+		session.sessionManager.appendMessage(createAssistantMessage("seed response"));
+		await mode.handleVibeModeCommand();
+		expect(mode.vibeModeEnabled).toBe(true);
+		await session.sessionManager.ensureOnDisk();
+		const originalSessionId = session.sessionManager.getSessionId();
+		const leafId = session.sessionManager.getLeafId();
+		if (!leafId) throw new Error("Expected session leaf");
+
+		const result = await session.branchFromBtw(
+			"why did that happen?",
+			createAssistantMessage("because reasons"),
+			leafId,
+			originalSessionId,
+		);
+		expect(result.cancelled).toBe(false);
+		expect(session.sessionManager.getSessionId()).not.toBe(originalSessionId);
+		expect(mode.vibeModeEnabled).toBe(true);
+
+		await mode.handleVibeModeCommand();
+		expect(mode.vibeModeEnabled).toBe(false);
+		expect(session.getVibeModeState()).toBeUndefined();
 	});
 });
