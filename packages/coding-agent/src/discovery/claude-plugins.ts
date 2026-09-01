@@ -547,10 +547,14 @@ async function resolveMarketplaceEnv(
 	const resolved: Record<string, string> = Object.create(null);
 	const literalKeys: string[] = [];
 	for (const [key, rawValue] of Object.entries(env)) {
-		// Expand placeholders before substituting the plugin root so a `${...}`
-		// sequence inside the install path is never scanned a second time.
-		const envExpanded = expandEnvVarsDeep(rawValue) as string;
-		const final = substitutePluginRoot(envExpanded, rootPath);
+		// Feed the reserved plugin-root names through extraEnv: expansion then
+		// cannot consume an ambient CLAUDE_PLUGIN_ROOT/OMP_PLUGIN_ROOT, and
+		// the registered root inserted as the value is never re-scanned
+		// for `${...}`.
+		const final = expandEnvVarsDeep(rawValue, {
+			CLAUDE_PLUGIN_ROOT: rootPath,
+			OMP_PLUGIN_ROOT: rootPath,
+		}) as string;
 		if (final !== rawValue) literalKeys.push(key);
 		resolved[key] = final;
 	}

@@ -1201,6 +1201,57 @@ describe("listClaudePluginRoots", () => {
 		}
 	});
 
+	test("prefers the registered plugin root over ambient reserved env vars", async () => {
+		const pluginsDir = path.join(tempDir, ".claude", "plugins");
+		const pluginPath = path.join(tempDir, "plugins", "reserved-mcp");
+		const originalRoot = process.env.CLAUDE_PLUGIN_ROOT;
+		restoreEnvValue("CLAUDE_PLUGIN_ROOT", path.join(tempDir, "ambient-plugin"));
+
+		try {
+			await fs.mkdir(pluginsDir, { recursive: true });
+			await fs.mkdir(pluginPath, { recursive: true });
+			await fs.writeFile(
+				path.join(pluginsDir, "installed_plugins.json"),
+				JSON.stringify({
+					version: 2,
+					plugins: {
+						"reserved-mcp@market": [
+							{
+								scope: "user",
+								installPath: pluginPath,
+								version: "1.0.0",
+								installedAt: "2026-09-01T00:00:00Z",
+								lastUpdated: "2026-09-01T00:00:00Z",
+							},
+						],
+					},
+				}),
+			);
+			await fs.writeFile(
+				path.join(pluginPath, ".mcp.json"),
+				JSON.stringify({
+					reserved: {
+						command: "uv",
+						env: {
+							DATA: ["$", "{CLAUDE_PLUGIN_ROOT}", "/data"].join(""),
+						},
+					},
+				}),
+			);
+
+			// An ambient CLAUDE_PLUGIN_ROOT must never override the registered
+			// install path of the plugin being discovered.
+			const result = await loadCapability<MCPServer>(mcpCapability.id, {
+				cwd: tempDir,
+				providers: ["claude-plugins"],
+			});
+			const server = result.all.find(item => item.name === "reserved-mcp:reserved");
+			expect(server?.env).toEqual({ DATA: pluginPath + "/data" });
+		} finally {
+			restoreEnvValue("CLAUDE_PLUGIN_ROOT", originalRoot);
+		}
+	});
+
 	test("uses OMP then Claude manifest mcpServers paths before .mcp.json", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const ompPluginPath = path.join(tempDir, "plugins", "omp-pointer");
