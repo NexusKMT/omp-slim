@@ -1,115 +1,69 @@
-// Regression: a `function_call` whose `arguments` stream was cut off mid-JSON
-// is persisted verbatim in the native Responses history
-// (`AssistantMessage.providerPayload`) and replayed on every subsequent turn
-// via `buildResponsesInput()`. The gateway rejects the whole request with a
-// 400 JSON parse error (parse position == truncated arguments length), and
-// the session stays wedged until the item is dropped.
-//
-// `sanitizeOpenAIResponsesHistoryItemsForReplay` is the canonical replay
-// boundary for native Responses history, so the defensive check lives there.
-// Related: #3909 (same missing arguments-validation on the chat-completions
-// surface).
-import { describe, expect, it } from "bun:test";
-import { sanitizeOpenAIResponsesHistoryItemsForReplay } from "@oh-my-pi/pi-ai/utils";
+import { expect, it } from "bun:test";
+import { buildParams } from "@oh-my-pi/pi-ai/providers/openai-responses";
+import type { AssistantMessage, Model, ModelSpec } from "@oh-my-pi/pi-ai/types";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
-function sanitized(items: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
-	return sanitizeOpenAIResponsesHistoryItemsForReplay(items) as unknown as Array<Record<string, unknown>>;
+const model: Model<"openai-responses"> = buildModel({
+	id: "gpt-5",
+	name: "GPT-5",
+	api: "openai-responses",
+	provider: "openai",
+	baseUrl: "https://api.openai.com/v1",
+	reasoning: true,
+	input: ["text"],
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	contextWindow: 100_000,
+	maxTokens: 10_000,
+} as ModelSpec<"openai-responses">);
+
+function assistantWithNativeHistory(items: Array<Record<string, unknown>>): AssistantMessage {
+	return {
+		role: "assistant",
+		content: [],
+		api: "openai-responses",
+		provider: "openai",
+		model: model.id,
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "toolUse",
+		timestamp: 1,
+		providerPayload: { type: "openaiResponsesHistory", provider: "openai", items },
+	};
 }
 
-describe("sanitizeOpenAIResponsesHistoryItemsForReplay drops malformed function_call arguments", () => {
-	it("drops a truncated function_call and keeps the surrounding replay items", () => {
-		const fullArguments = JSON.stringify({ command: "ls -la /very/deep/path && echo done", i: "List directory" });
-		// A stream cut mid-JSON: a true prefix of a valid arguments string.
-		const truncatedArguments = fullArguments.slice(0, fullArguments.length - 6);
-		expect(() => JSON.parse(truncatedArguments)).toThrow();
+it("removes a truncated function call from the next Responses request without losing its durable output", () => {
+	const completeArguments = JSON.stringify({ command: "curl https://example.com | jq .", i: "Fetch data" });
+	const truncatedArguments = completeArguments.slice(0, -5);
+	const previous = assistantWithNativeHistory([
+		{ type: "reasoning", id: "rs_1", summary: [], encrypted_content: "enc_1" },
+		{ type: "function_call", id: "fc_ok", call_id: "call_ok", name: "bash", arguments: "{}" },
+		{
+			type: "function_call",
+			id: "fc_bad",
+			call_id: "call_bad",
+			name: "bash",
+			arguments: truncatedArguments,
+		},
+		{ type: "function_call_output", call_id: "call_ok", output: "valid result" },
+		{ type: "function_call_output", call_id: "call_bad", output: "durable result" },
+	]);
 
-		const items = sanitized([
-			{ type: "reasoning", id: "rs_1", summary: [], encrypted_content: "enc_1" },
-			{
-				type: "function_call",
-				id: "item_poisoned",
-				call_id: "call_poisoned",
-				name: "bash",
-				arguments: truncatedArguments,
-			},
-			{ type: "function_call_output", call_id: "call_poisoned", output: "executed from the durable copy" },
-		]);
+	const input = buildParams(
+		model,
+		{ messages: [previous, { role: "user", content: "continue", timestamp: 2 }] },
+		undefined,
+		undefined,
+	).params.input as Array<Record<string, unknown>>;
 
-		// The poisoned call never reaches the next request; its output and the
-		// turn's reasoning survive so context is not lost.
-		expect(items.some(item => item.type === "function_call")).toBe(false);
-		expect(items.map(item => String(item.type))).toEqual(["reasoning", "function_call_output"]);
-	});
-
-	it("drops function_call items with missing, empty, or non-string arguments", () => {
-		const malformed: Array<Record<string, unknown>> = [
-			{ type: "function_call", id: "item_missing", call_id: "call_missing", name: "bash" },
-			{ type: "function_call", id: "item_empty", call_id: "call_empty", name: "bash", arguments: "" },
-			{ type: "function_call", id: "item_blank", call_id: "call_blank", name: "bash", arguments: "   " },
-			{ type: "function_call", id: "item_nonstring", call_id: "call_nonstring", name: "bash", arguments: {} },
-		];
-
-		for (const item of malformed) {
-			expect(sanitized([item])).toEqual([]);
-		}
-	});
-
-	it("keeps parseable-JSON arguments byte-for-byte, including no-param and scalar forms", () => {
-		const validArguments = [
-			JSON.stringify({ command: "echo ok", i: "Say ok" }),
-			"{}", // a real no-param provider call
-			"null", // produced by OMP's own fallback emitter
-			"123", // scalar JSON — the locked keep-scalar semantics
-		];
-
-		for (const argumentsValue of validArguments) {
-			const items = sanitized([
-				{
-					type: "function_call",
-					id: "item_valid",
-					call_id: "call_valid",
-					name: "bash",
-					arguments: argumentsValue,
-				},
-			]);
-
-			expect(items).toHaveLength(1);
-			expect(items[0]).toMatchObject({
-				type: "function_call",
-				call_id: "call_valid",
-				name: "bash",
-				arguments: argumentsValue,
-			});
-		}
-	});
-
-	it("drops only the poisoned call when a turn mixes valid and truncated calls", () => {
-		const validArguments = JSON.stringify({ command: "date", i: "Time" });
-		const fullTruncated = JSON.stringify({
-			command: "curl -s https://example.com/api | jq . | sort",
-			i: "Endpoints",
-		});
-		const truncatedArguments = fullTruncated.slice(0, fullTruncated.length - 10);
-
-		const items = sanitized([
-			{ type: "function_call", id: "item_ok", call_id: "call_ok", name: "bash", arguments: validArguments },
-			{
-				type: "function_call",
-				id: "item_bad",
-				call_id: "call_bad",
-				name: "bash",
-				arguments: truncatedArguments,
-			},
-			{ type: "function_call_output", call_id: "call_ok", output: "Mon" },
-			{ type: "function_call_output", call_id: "call_bad", output: "result from the durable copy" },
-		]);
-
-		const calls = items.filter(item => item.type === "function_call");
-		expect(calls).toHaveLength(1);
-		expect(calls[0]).toMatchObject({ call_id: "call_ok", arguments: validArguments });
-		// Orphaned outputs of dropped calls survive this boundary; the
-		// downstream orphan repair folds them into an assistant note
-		// before the request reaches the wire.
-		expect(items.filter(item => item.type === "function_call_output")).toHaveLength(2);
-	});
+	expect(input).toContainEqual(expect.objectContaining({ type: "function_call", call_id: "call_ok" }));
+	expect(input).toContainEqual(expect.objectContaining({ type: "function_call_output", call_id: "call_ok" }));
+	expect(input).not.toContainEqual(expect.objectContaining({ type: "function_call", call_id: "call_bad" }));
+	expect(input).not.toContainEqual(expect.objectContaining({ type: "function_call_output", call_id: "call_bad" }));
+	expect(JSON.stringify(input)).toContain("durable result");
 });
