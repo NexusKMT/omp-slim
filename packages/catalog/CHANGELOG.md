@@ -27,11 +27,6 @@
 - Variant collapse moved to `@oh-my-pi/pi-catalog/compat/collapse` with a consolidated API (`collapseVariants`/`collapseBuiltVariants`/`resolveVariantSelector`/`resolveBareVariantSelector`/`isCollapsedVariantSpec`); the reviewed per-provider families (Antigravity, Gemini CLI, Devin, Cursor) are authored in `_collapse.kdl` and compiled, not hand-written tables.
 - The identity surface is rebuilt around `classifyModel`/`ModelIdentity`: version floors, family checks, and capability predicates resolve from structured identity and rules instead of id regexes, and trailing-marker/thinking-pair vocabularies are compiled from the rule tree.
 
-### Removed
-
-- Removed legacy DeepSeek V3 model variants from the Novita provider catalog
-- Removed the legacy id-heuristic identity modules (`identity/classify`, `identity/family`, `identity/markers`), the per-model TypeScript policy tables in the generator, and the hand-maintained variant-collapse table exports.
-
 ### Fixed
 
 - Vendor-prefixed bare GLM ids (`zai-glm-5-2` on Mistral, `zai-glm-4.7` on Cerebras) classify as GLM again, restoring their tokenizer and `<think>` history-replay dialect lost in the KDL taxonomy migration.
@@ -43,6 +38,11 @@
 - Fixed native Devin families with independent Thinking and 1M Context axes losing wire variants or advertising the wrong context window; each context lane now preserves its complete off/effort routing and server-selected default ([#8590](https://github.com/can1357/oh-my-pi/pull/8590) by [@will-bogusz](https://github.com/will-bogusz)).
 - Stripped the image modality from Devin's `swe-1-6`/`swe-1-6-fast`: their configs advertise `supports_images` but the backend silently drops inline images (verified live against every other Cascade model), so clients now engage their text-only image fallback instead of losing attachments ([#6072](https://github.com/can1357/oh-my-pi/issues/6072)).
 - Devin discovery now logs a warning when the backend returns an empty native catalog, the failure signature of a stale pinned CLI identity ([#8590](https://github.com/can1357/oh-my-pi/pull/8590) by [@will-bogusz](https://github.com/will-bogusz)).
+
+### Removed
+
+- Removed legacy DeepSeek V3 model variants from the Novita provider catalog
+- Removed the legacy id-heuristic identity modules (`identity/classify`, `identity/family`, `identity/markers`), the per-model TypeScript policy tables in the generator, and the hand-maintained variant-collapse table exports.
 
 ## [18.0.11] - 2026-08-29
 
