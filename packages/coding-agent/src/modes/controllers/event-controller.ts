@@ -357,6 +357,20 @@ export class EventController {
 		this.#backgroundTaskCallIds = new Set(
 			Array.from(this.#backgroundTaskCallIds).filter(toolCallId => this.ctx.pendingTools.has(toolCallId)),
 		);
+		this.#finalizeAbandonedPostToolSegments();
+	}
+	/**
+	 * Finalize post-tool assistant segments whose `message_end` never fired (a
+	 * mid-stream throw or dropped agent_end). They are created unfinalized at
+	 * `message_update` and finalized only at `message_end`, so a dropped end
+	 * leaves one permanently active block — and one unfinalized block at the
+	 * transcript frontier blocks history retirement, degrading every later
+	 * block to its one-line live allocation. Idempotent for settled segments.
+	 */
+	#finalizeAbandonedPostToolSegments(): void {
+		for (const component of this.#postToolAssistantComponents.values()) {
+			component.markTranscriptBlockFinalized();
+		}
 	}
 	#approvalPreviewGate(toolCallId: string): ApprovalPreviewGate {
 		let gate = this.#approvalPreviewGates.get(toolCallId);
@@ -952,6 +966,7 @@ export class EventController {
 				}
 				abandoned.markTranscriptBlockFinalized();
 			}
+			this.#finalizeAbandonedPostToolSegments();
 			this.#lastVisibleBlockCount = 0;
 			this.#streamedToolCallIdByIndex.clear();
 			this.ctx.streamingComponent = createAssistantMessageComponent(this.ctx);

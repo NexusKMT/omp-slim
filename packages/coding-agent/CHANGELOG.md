@@ -30,6 +30,7 @@
 - Fixed `--resume` self-terminating (exit 129) while replaying a session whose transcript repaint emits more than 64 MiB of inline images; the stdout backlog is now torn down only when it stalls without draining, so image-heavy sessions reopen normally ([#10430](https://github.com/can1357/oh-my-pi/issues/10430)).
 - Fixed custom agents that declare `hub` being incorrectly advertised as read-only despite its process-control operations.
 - Fixed `omp plugin install` failing for legacy pi extensions that import `calculateContextTokens` (e.g. pi-blackhole) by re-exporting it from the coding-agent compat shim ([#10278](https://github.com/can1357/oh-my-pi/issues/10278))
+- Fixed the transcript occasionally wedging into one-line "compressed" tool rows for the rest of the session: a post-tool assistant segment orphaned by a dropped message_end stayed unfinalized and pinned history retirement, keeping every later block in the live viewport
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Clarified that the default task-delegation setting follows the selected model's policy.
 - Fixed entering `/rename` without a title interrupting active session activity ([#10326](https://github.com/can1357/oh-my-pi/issues/10326)).
