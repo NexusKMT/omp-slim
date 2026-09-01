@@ -89,7 +89,8 @@ function isSameMCPConnection(left: MCPServer, right: MCPServer): boolean {
 			Bun.deepEquals(left.env, right.env) &&
 			// Policy metadata changes what the subprocess receives: an expanded
 			// key delivers the literal value, a raw key resolves it.
-			Bun.deepEquals(left.envLiteralKeys, right.envLiteralKeys) &&
+			// Key insertion order does not affect delivery; compare as sets.
+			Bun.deepEquals([...(left.envLiteralKeys ?? [])].sort(), [...(right.envLiteralKeys ?? [])].sort()) &&
 			left.envPolicy === right.envPolicy &&
 			left.cwd === right.cwd
 		);

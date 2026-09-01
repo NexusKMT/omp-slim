@@ -1039,6 +1039,168 @@ describe("listClaudePluginRoots", () => {
 		expect(result.warnings.join("\n")).toContain("malformed env");
 	});
 
+	test("does not re-expand placeholders inside the substituted plugin root", async () => {
+		const pluginsDir = path.join(tempDir, ".claude", "plugins");
+		const pluginPath = path.join(tempDir, "plugins", ["$", "{HOME}-plugin"].join(""));
+
+		await fs.mkdir(pluginsDir, { recursive: true });
+		await fs.mkdir(pluginPath, { recursive: true });
+		await fs.writeFile(
+			path.join(pluginsDir, "installed_plugins.json"),
+			JSON.stringify({
+				version: 2,
+				plugins: {
+					"root-mcp@market": [
+						{
+							scope: "user",
+							installPath: pluginPath,
+							version: "1.0.0",
+							installedAt: "2026-09-01T00:00:00Z",
+							lastUpdated: "2026-09-01T00:00:00Z",
+						},
+					],
+				},
+			}),
+		);
+		await fs.writeFile(
+			path.join(pluginPath, ".mcp.json"),
+			JSON.stringify({
+				root: {
+					command: "uv",
+					env: {
+						DATA: ["$", "{CLAUDE_PLUGIN_ROOT}", "/data"].join(""),
+					},
+				},
+			}),
+		);
+
+		// The install path itself contains ${HOME}; substituting the root
+		// must not re-scan it as a placeholder and expand it to the ambient
+		// home directory.
+		const result = await loadCapability<MCPServer>(mcpCapability.id, {
+			cwd: tempDir,
+			providers: ["claude-plugins"],
+		});
+		const server = result.all.find(item => item.name === "root-mcp:root");
+		expect(server?.env).toEqual({ DATA: pluginPath + "/data" });
+	});
+
+	test("preserves a __proto__ env key through discovery and delivery", async () => {
+		const pluginsDir = path.join(tempDir, ".claude", "plugins");
+		const pluginPath = path.join(tempDir, "plugins", "proto-mcp");
+		const originalNexusId = process.env.OMP_PLUGIN_MCP_NEXUS_ID;
+		const envPlaceholder = (name: string): string => ["$", "{", name, ":-}"].join("");
+		restoreEnvValue("OMP_PLUGIN_MCP_NEXUS_ID", "test-nexus");
+
+		try {
+			await fs.mkdir(pluginsDir, { recursive: true });
+			await fs.mkdir(pluginPath, { recursive: true });
+			await fs.writeFile(
+				path.join(pluginsDir, "installed_plugins.json"),
+				JSON.stringify({
+					version: 2,
+					plugins: {
+						"proto-mcp@market": [
+							{
+								scope: "user",
+								installPath: pluginPath,
+								version: "1.0.0",
+								installedAt: "2026-09-01T00:00:00Z",
+								lastUpdated: "2026-09-01T00:00:00Z",
+							},
+						],
+					},
+				}),
+			);
+			await fs.writeFile(
+				path.join(pluginPath, ".mcp.json"),
+				JSON.stringify({
+					proto: {
+						command: "uv",
+						env: {
+							["__proto__"]: envPlaceholder("OMP_PLUGIN_MCP_NEXUS_ID"),
+						},
+					},
+				}),
+			);
+
+			const result = await loadCapability<MCPServer>(mcpCapability.id, {
+				cwd: tempDir,
+				providers: ["claude-plugins"],
+			});
+			const server = result.all.find(item => item.name === "proto-mcp:proto");
+			expect(Object.keys(server?.env ?? {})).toContain("__proto__");
+			expect(server?.env?.["__proto__"]).toBe("test-nexus");
+
+			const { configs } = await loadAllMCPConfigs(tempDir);
+			const delivered = await new MCPManager(tempDir).prepareConfig(configs["proto-mcp:proto"]);
+			expect("env" in delivered && Object.keys(delivered.env ?? {})).toContain("__proto__");
+			expect("env" in delivered && delivered.env?.["__proto__"]).toBe("test-nexus");
+		} finally {
+			restoreEnvValue("OMP_PLUGIN_MCP_NEXUS_ID", originalNexusId);
+		}
+	});
+
+	test("treats env policy metadata as a set during connection dedup", async () => {
+		const pluginsDir = path.join(tempDir, ".claude", "plugins");
+		const pluginPath = path.join(tempDir, "plugins", "order-mcp");
+		const originalTrap = process.env.OMP_PLUGIN_MCP_TRAP_ENV;
+		const envPlaceholder = (name: string): string => ["$", "{", name, ":-}"].join("");
+		restoreEnvValue("OMP_PLUGIN_MCP_TRAP_ENV", "HOME");
+
+		try {
+			await fs.mkdir(pluginsDir, { recursive: true });
+			await fs.mkdir(pluginPath, { recursive: true });
+			await fs.writeFile(
+				path.join(pluginsDir, "installed_plugins.json"),
+				JSON.stringify({
+					version: 2,
+					plugins: {
+						"order-mcp@market": [
+							{
+								scope: "user",
+								installPath: pluginPath,
+								version: "1.0.0",
+								installedAt: "2026-09-01T00:00:00Z",
+								lastUpdated: "2026-09-01T00:00:00Z",
+							},
+						],
+					},
+				}),
+			);
+			await fs.writeFile(
+				path.join(pluginPath, ".mcp.json"),
+				JSON.stringify({
+					first: {
+						command: "uv",
+						env: {
+							FIRST: envPlaceholder("OMP_PLUGIN_MCP_TRAP_ENV"),
+							SECOND: envPlaceholder("OMP_PLUGIN_MCP_TRAP_ENV"),
+						},
+					},
+					second: {
+						command: "uv",
+						env: {
+							SECOND: envPlaceholder("OMP_PLUGIN_MCP_TRAP_ENV"),
+							FIRST: envPlaceholder("OMP_PLUGIN_MCP_TRAP_ENV"),
+						},
+					},
+				}),
+			);
+
+			// Identical env values, but literal keys listed in different JSON
+			// insertion order: the delivered environment is the same, so the
+			// aliases must dedupe (one survivor) instead of launching twice.
+			const result = await loadCapability<MCPServer>(mcpCapability.id, {
+				cwd: tempDir,
+				providers: ["claude-plugins"],
+			});
+			expect(result.items.map(item => item.name)).toEqual(["order-mcp:first"]);
+		} finally {
+			restoreEnvValue("OMP_PLUGIN_MCP_TRAP_ENV", originalTrap);
+		}
+	});
+
 	test("uses OMP then Claude manifest mcpServers paths before .mcp.json", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const ompPluginPath = path.join(tempDir, "plugins", "omp-pointer");

@@ -542,13 +542,17 @@ async function resolveMarketplaceEnv(
 	env: Record<string, string>,
 	rootPath: string,
 ): Promise<{ env: Record<string, string>; literalKeys: string[] }> {
-	const resolved: Record<string, string> = {};
+	// Null prototype: a `__proto__` env key must become an own property, not
+	// mutate the prototype chain (it would silently vanish before spawn).
+	const resolved: Record<string, string> = Object.create(null);
 	const literalKeys: string[] = [];
 	for (const [key, rawValue] of Object.entries(env)) {
-		const substituted = substitutePluginRoot(rawValue, rootPath);
-		const expanded = expandEnvVarsDeep(substituted) as string;
-		if (expanded !== rawValue) literalKeys.push(key);
-		resolved[key] = expanded;
+		// Expand placeholders before substituting the plugin root so a `${...}`
+		// sequence inside the install path is never scanned a second time.
+		const envExpanded = expandEnvVarsDeep(rawValue) as string;
+		const final = substitutePluginRoot(envExpanded, rootPath);
+		if (final !== rawValue) literalKeys.push(key);
+		resolved[key] = final;
 	}
 	return { env: resolved, literalKeys };
 }
