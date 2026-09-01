@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- `TtyWriter.pending()` now decrements per flushed chunk instead of per whole batch, so it reports real drain progress during a large single write ([#10430](https://github.com/can1357/oh-my-pi/issues/10430)).
+- Fixed TTY output backpressure reporting so pending write progress is accurately reflected during large writes.
 
 ## [18.0.11] - 2026-08-29
 
