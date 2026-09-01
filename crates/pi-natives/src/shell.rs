@@ -493,7 +493,8 @@ mod tests {
 			observed.store(true, Ordering::Release);
 			true
 		}));
-		tx.send("accepted".to_string()).expect("pump should be connected");
+		tx.send("accepted".to_string())
+			.expect("pump should be connected");
 		drop(tx);
 		let result = Ok(ShellRunResult {
 			exit_code:   Some(0),
@@ -509,7 +510,10 @@ mod tests {
 		)
 		.await
 		.expect("successful completion must drain slow accepted output");
-		assert!(forwarded.load(Ordering::Acquire), "accepted output was dropped before success returned");
+		assert!(
+			forwarded.load(Ordering::Acquire),
+			"accepted output was dropped before success returned"
+		);
 	}
 
 	/// Regression for #10308: a grandchild that inherits the stdout pipe keeps a
@@ -543,7 +547,10 @@ mod tests {
 		);
 		// The pump was aborted, so its receiver is dropped: the orphaned sender
 		// now observes a disconnected channel instead of parking forever.
-		assert!(orphan.send("late".to_string()).is_err(), "aborting the pump must disconnect the channel");
+		assert!(
+			orphan.send("late".to_string()).is_err(),
+			"aborting the pump must disconnect the channel"
+		);
 	}
 
 	mod child_session_action_tests {
