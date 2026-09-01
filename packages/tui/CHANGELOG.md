@@ -8,6 +8,7 @@
 - Fixed image-heavy session resumes exceeding the terminal output limit before the inline-image budget was applied ([#10305](https://github.com/can1357/oh-my-pi/issues/10305)).
 - Fixed inline images leaving blank rows when outer-terminal identity variables leak into Herdr panes ([#10353](https://github.com/can1357/oh-my-pi/issues/10353)).
 - Fixed a crash when rendering a reference-style Markdown link whose label matches a JavaScript built-in name (e.g. `[x][constructor]`, `[x][__proto__]`); such links now render as plain text instead of terminating the TUI, including during session resume ([#10283](https://github.com/can1357/oh-my-pi/issues/10283)).
+- Fixed fatal cleanup leaving the cursor inside a focused input before stderr output ([#10275](https://github.com/can1357/oh-my-pi/issues/10275)).
 
 ## [18.0.11] - 2026-08-29
 

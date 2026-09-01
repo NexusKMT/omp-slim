@@ -14,7 +14,7 @@
  */
 import * as fs from "node:fs";
 import { performance } from "node:perf_hooks";
-import { $flag, getDebugLogPath, logger } from "@oh-my-pi/pi-utils";
+import { $flag, getDebugLogPath, logger, postmortem } from "@oh-my-pi/pi-utils";
 import { DEFAULT_MAX_INLINE_IMAGES, ImageBudget } from "./components/image";
 import { TuiDebugServer } from "./debug-server";
 import { isKeyRelease, matchesKey } from "./keys";
@@ -799,6 +799,7 @@ export class TUI extends Container {
 	#forceViewportRepaintOnNextRender = false;
 	#hasEverRendered = false;
 	#stopped = false;
+	#cancelPostmortemRestore?: () => void;
 	/** True between a `deferInput` start() and enableInput(). */
 	#inputDeferred = false;
 	// Always-on event-loop lag probe. The high default threshold keeps it quiet;
@@ -1130,6 +1131,8 @@ export class TUI extends Container {
 			{ deferInput: this.#inputDeferred },
 		);
 		if (this.#stopped) return;
+		this.#cancelPostmortemRestore?.();
+		this.#cancelPostmortemRestore = postmortem.register("tui-restore", () => this.stop());
 		for (const listener of this.#startListeners) {
 			try {
 				listener();
@@ -1623,6 +1626,8 @@ export class TUI extends Container {
 	}
 
 	stop(): void {
+		this.#cancelPostmortemRestore?.();
+		this.#cancelPostmortemRestore = undefined;
 		this.#debugServer?.stop();
 		this.#debugServer = undefined;
 		this.#resizeSettleTimer?.cancel();

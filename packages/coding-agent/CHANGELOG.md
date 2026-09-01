@@ -59,6 +59,7 @@
 - Fixed retry countdowns and capped-wait errors displaying floating-point noise in millisecond durations.
 - Prevented browser `app.path` from terminating pre-existing same-executable applications when no reusable CDP endpoint is available ([#10264](https://github.com/can1357/oh-my-pi/issues/10264)).
 - Advisors now receive bounded tool-result excerpts and complete `ask` questions and answers, preventing reviews from missing user decisions ([#5266](https://github.com/can1357/oh-my-pi/issues/5266)).
+- Fixed top-level errors overwriting the active composer before the terminal was restored ([#10275](https://github.com/can1357/oh-my-pi/issues/10275)).
 
 ## [18.0.11] - 2026-08-29
 
