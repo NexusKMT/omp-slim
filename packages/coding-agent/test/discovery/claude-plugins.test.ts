@@ -14,6 +14,8 @@ import { discoverAgents } from "@oh-my-pi/pi-coding-agent/task/discovery";
 import { __resetDirsFromEnvForTests, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 import "@oh-my-pi/pi-coding-agent/discovery/claude-plugins";
 import { type MCPServer, mcpCapability } from "@oh-my-pi/pi-coding-agent/capability/mcp";
+import { loadAllMCPConfigs } from "@oh-my-pi/pi-coding-agent/mcp/config";
+import { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
 import type { Rule } from "@oh-my-pi/pi-coding-agent/capability/rule";
 import type { Skill } from "@oh-my-pi/pi-coding-agent/capability/skill";
 import type { SlashCommand } from "@oh-my-pi/pi-coding-agent/capability/slash-command";
@@ -757,6 +759,25 @@ describe("listClaudePluginRoots", () => {
 				IDA_NEXUS_ID: "test-nexus",
 				IDA_NEXUS_STATE_DIR: "",
 				PLUGIN_ROOT: pluginPath,
+			});
+			// Expanded env values are final package data: literal policy exempts
+			// them from env-name/`!command` resolution and the empty-value
+			// dropping that would defeat the `${NAME:-}` empty default.
+			expect(server?.envPolicy).toBe("literal");
+
+			// The empty expanded value must survive discovery→config conversion
+			// and auth resolution: StdioTransport merges Bun.env underneath the
+			// config env, so a dropped entry would silently inherit a stale host
+			// value instead of delivering the explicit empty override.
+			const { configs } = await loadAllMCPConfigs(tempDir);
+			const delivered = await new MCPManager(tempDir).prepareConfig(configs["ida-mcp:ida"]);
+			expect(delivered).toMatchObject({
+				type: "stdio",
+				env: {
+					IDA_NEXUS_ID: "test-nexus",
+					IDA_NEXUS_STATE_DIR: "",
+					PLUGIN_ROOT: pluginPath,
+				},
 			});
 		} finally {
 			restoreEnvValue("OMP_PLUGIN_MCP_NEXUS_ID", originalNexusId);
