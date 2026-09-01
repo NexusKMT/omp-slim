@@ -5381,7 +5381,7 @@ describe("AgentSession retry fallback", () => {
 		// the GitHub Copilot gpt-5.6-sol split, where the bundled base ships the
 		// full long-context window and discovery caps it to the default tier.
 		authStorage.setRuntimeApiKey("ollama-cloud", "ollama-cloud-test-key");
-		const buildTieredModel = (contextWindow: number): Model<"ollama-chat"> =>
+		const buildTieredModel = (contextWindow: number, input: Model<"ollama-chat">["input"]): Model<"ollama-chat"> =>
 			buildModel({
 				id: "deepseek-v4-tiered",
 				name: "DeepSeek V4 Tiered",
@@ -5389,7 +5389,7 @@ describe("AgentSession retry fallback", () => {
 				provider: "ollama-cloud",
 				baseUrl: "https://ollama.com",
 				reasoning: true,
-				input: ["text"],
+				input,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 				contextWindow,
 				maxTokens: 32_000,
@@ -5399,7 +5399,7 @@ describe("AgentSession retry fallback", () => {
 		writeModelCache(
 			"ollama-cloud",
 			Date.now(),
-			[buildTieredModel(400_000)],
+			[buildTieredModel(400_000, ["text"])],
 			true,
 			"",
 			path.join(tempDir.path(), "models.db"),
@@ -5409,7 +5409,7 @@ describe("AgentSession retry fallback", () => {
 		// The startup-bound model is the pre-discovery snapshot for the SAME
 		// selector with the full long-context window — what buildSessionOptions
 		// pins as options.model before discovery runs.
-		const staleModel = buildTieredModel(1_050_000);
+		const staleModel = buildTieredModel(1_050_000, ["text", "image"]);
 		const settings = Settings.isolated({ "compaction.enabled": false });
 		const agent = new Agent({
 			getApiKey: model => `${model.provider}-test-key`,
@@ -5418,24 +5418,36 @@ describe("AgentSession retry fallback", () => {
 				throw new Error("Not exercised");
 			},
 		});
+		const inspectImageTool: AgentTool = {
+			name: "inspect_image",
+			label: "Inspect Image",
+			description: "Inspect an image",
+			parameters: type({ value: "string" }),
+			strict: true,
+			async execute() {
+				return { content: [{ type: "text", text: "inspected" }] };
+			},
+		};
 
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(),
 			settings,
 			modelRegistry: registry,
+			toolRegistry: new Map([[inspectImageTool.name, inspectImageTool]]),
 		});
 
 		// Stale until discovery settles: the active model and its context-usage
 		// derivation both carry the 1.05M window that contradicts the catalog.
 		expect(session.model?.contextWindow).toBe(1_050_000);
 		expect(session.getContextUsage()?.contextWindow).toBe(1_050_000);
+		expect(session.inspectImageState().active).toBe(false);
 
-		const modelChanged = new Promise<void>(resolve => {
+		const inspectImageActiveAtNotification = new Promise<boolean>(resolve => {
 			const unsubscribe = session!.subscribe(event => {
 				if (event.type === "model_changed") {
 					unsubscribe();
-					resolve();
+					resolve(session!.inspectImageState().active);
 				}
 			});
 		});
@@ -5443,8 +5455,8 @@ describe("AgentSession retry fallback", () => {
 		// The CLI starts discovery only after the session is built; the rebind
 		// waiter armed in the constructor resolves once this settles.
 		registry.refreshInBackground("offline");
-		await Promise.race([
-			modelChanged,
+		const activeAtNotification = await Promise.race([
+			inspectImageActiveAtNotification,
 			scheduler.wait(5_000).then(() => {
 				throw new Error("model_changed was not emitted after discovery settled");
 			}),
@@ -5455,6 +5467,8 @@ describe("AgentSession retry fallback", () => {
 		expect(session.model?.id).toBe("deepseek-v4-tiered");
 		expect(session.model?.contextWindow).toBe(400_000);
 		expect(session.getContextUsage()?.contextWindow).toBe(400_000);
+		expect(activeAtNotification).toBe(true);
+		expect(session.inspectImageState().active).toBe(true);
 	});
 
 	it("warns on unknown or malformed model-selector chain keys at startup", () => {

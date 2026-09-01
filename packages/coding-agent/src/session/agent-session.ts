@@ -7843,7 +7843,6 @@ export class AgentSession {
 	async #setModelWithProviderSessionReset(model: Model): Promise<void> {
 		const currentModel = this.model;
 		const isChanging = !currentModel || !modelsAreEqual(currentModel, model);
-		const codeModeChanged = this.#tools.codeModeChangesBetween(currentModel, model);
 		if (currentModel) {
 			this.#closeProviderSessionsForModelSwitch(currentModel, model);
 			if (isChanging) {
@@ -7868,10 +7867,14 @@ export class AgentSession {
 			this.#emit({ type: "model_changed" });
 		}
 
+		await this.#reconcileModelDependentState(currentModel, model);
+	}
+
+	async #reconcileModelDependentState(previousModel: Model | undefined, model: Model): Promise<void> {
 		// Re-evaluate append-only context mode — provider or setting may have changed
 		this.#syncAppendOnlyContext(model);
 
-		if (codeModeChanged || this.#tools.codeModeDirectWireMetadataChanged()) {
+		if (this.#tools.codeModeChangesBetween(previousModel, model) || this.#tools.codeModeDirectWireMetadataChanged()) {
 			try {
 				await this.#tools.reconcileCodeMode();
 			} catch (error) {
@@ -7880,9 +7883,8 @@ export class AgentSession {
 		}
 
 		// inspect_image auto mode keys off model image capability. Reconcile
-		// centrally here so retry-fallback model changes (turn-recovery.ts),
-		// which bypass syncAfterModelChange, cannot leave the tool set stale —
-		// callers await, so a scheduled retry never races the reconciled slate.
+		// centrally here so retry-fallback and metadata-only model changes cannot
+		// leave the tool set stale.
 		try {
 			await this.#tools.reconcileInspectImageAfterModelChange();
 		} catch (error) {
@@ -10009,13 +10011,14 @@ export class AgentSession {
 	 * 400K catalog value until the user re-selects the same model. Re-look-up the
 	 * active selector post-discovery and, when its context window changed, fold
 	 * the refreshed spec into the live model. Same selector, so this is a metadata
-	 * refresh (compaction thresholds, context display, `get_state`) — no
-	 * provider-session reset — mirroring `#refreshLazyLocalContext`;
-	 * `model_changed` notifies the status line and RPC subscribers. Issue #10488.
+	 * refresh with no provider-session reset; reconcile model-dependent tools and
+	 * append-only state before `model_changed` notifies the status line and RPC
+	 * subscribers. Issue #10488.
 	 */
 	async #rebindActiveModelAfterModelDiscovery(): Promise<void> {
 		const boundAtStartup = this.model;
 		if (this.#isDisposed || !boundAtStartup) return;
+		if (typeof this.#modelRegistry.awaitInitialBackgroundRefresh !== "function") return;
 		await this.#modelRegistry.awaitInitialBackgroundRefresh(this.#modelDiscoveryAbortController.signal);
 		if (this.#isDisposed) return;
 		// Only silently re-metadata the startup-bound selector: bail if the user
@@ -10025,6 +10028,8 @@ export class AgentSession {
 		const refreshed = this.#modelRegistry.find(current.provider, current.id);
 		if (!refreshed || refreshed.contextWindow === current.contextWindow) return;
 		this.agent.setModel(refreshed);
+		await this.#reconcileModelDependentState(current, refreshed);
+		if (this.#isDisposed) return;
 		this.#emit({ type: "model_changed" });
 	}
 
