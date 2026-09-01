@@ -624,10 +624,11 @@ export class MnemopiSessionState {
 	}
 
 	/**
-	 * Capture the current transcript, drain in-flight fact extraction, and
-	 * optionally run beam consolidation on every owned bank. The explicit
-	 * `/memory enqueue` path requests full cross-session consolidation; disposal
-	 * composes the lighter retain-and-flush path with closing the DB handles.
+	 * Capture the current transcript when auto-retention is enabled or explicitly
+	 * requested, drain in-flight fact extraction, and optionally run beam
+	 * consolidation on every owned bank. The explicit `/memory enqueue` path
+	 * requests retention plus full cross-session consolidation; disposal composes
+	 * the lighter configured-retain-and-flush path with closing the DB handles.
 	 *
 	 * Aliased subagent states share `scoped` (and therefore the actual SQLite
 	 * banks) with their parent. `consolidate()` deliberately does NOT
@@ -645,12 +646,18 @@ export class MnemopiSessionState {
 	 * @param options.sleep - When false, skips the bank sleep step entirely.
 	 *  Used on the interactive shutdown path so `dispose` does not block on
 	 *  synchronous consolidation of old working rows from previous sessions.
-	 * @param options.extract - When false, the retained transcript is stored but
-	 *  no LLM fact extraction is scheduled. Used on the interactive shutdown path
-	 *  so `dispose` does not block on a fresh LLM round-trip.
+	 * @param options.extract - When false, any retained transcript is stored but no
+	 *  LLM fact extraction is scheduled. Used on the interactive shutdown path so
+	 *  `dispose` does not block on a fresh LLM round-trip.
+	 * @param options.retain - When true, explicitly retain the transcript even when
+	 *  automatic retention is disabled. Used by `/memory enqueue`.
 	 */
-	async consolidate(options: { full?: boolean; extract?: boolean; sleep?: boolean } = {}): Promise<void> {
-		await this.forceRetainCurrentSession({ extract: options.extract });
+	async consolidate(
+		options: { full?: boolean; extract?: boolean; sleep?: boolean; retain?: boolean } = {},
+	): Promise<void> {
+		if (this.config.autoRetain || options.retain) {
+			await this.forceRetainCurrentSession({ extract: options.extract });
+		}
 		for (const memory of this.scoped.owned) {
 			await memory.flushExtractions();
 			if (options.sleep === false) continue;
@@ -665,8 +672,9 @@ export class MnemopiSessionState {
 	/**
 	 * Release the per-session resources. Defaults to running a lighter
 	 * {@link consolidate} pass before closing handles: it retains the current
-	 * transcript and flushes in-flight extractions, but skips the synchronous
-	 * bank sleep so normal session shutdown returns promptly. Full age-gated
+	 * transcript only when auto-retention is enabled and flushes in-flight
+	 * extractions, but skips the synchronous bank sleep so normal session
+	 * shutdown returns promptly. Full age-gated
 	 * promotion of eligible working memory is still requested by the explicit
 	 * `/memory enqueue` and backend enqueue paths. Callers that are about to
 	 * delete the DB files — e.g. `mnemopiBackend.clear` — pass
