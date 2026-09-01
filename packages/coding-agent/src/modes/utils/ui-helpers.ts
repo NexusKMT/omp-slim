@@ -363,6 +363,8 @@ export class UiHelpers {
 	): Generator<void, void, void> {
 		// Preserved: message_start handler owns this lifecycle (see #783)
 		this.ctx.pendingTools.clear();
+		const activeToolExecutionUpdates = this.ctx.viewSession.activeToolExecutionUpdates?.() ?? [];
+		const runningAsyncJobs = this.ctx.viewSession.getAsyncJobSnapshot?.()?.running ?? [];
 		// Reseed the cache-invalidation baseline: this rebuild re-derives every
 		// turn's marker from usage, and the last turn becomes the live baseline.
 		this.ctx.lastAssistantUsage = undefined;
@@ -676,8 +678,14 @@ export class UiHelpers {
 				// Match tool results to pending tool components
 				const component = this.ctx.pendingTools.get(message.toolCallId);
 				if (component) {
-					const asyncState = (message.details as { async?: { state?: string } } | undefined)?.async?.state;
-					const isBackgroundTask = message.toolName === "task" && asyncState === "running";
+					const asyncDetails = (
+						message.details as { async?: { state?: string; jobId?: string } } | undefined
+					)?.async;
+					const isBackgroundTask =
+						message.toolName === "task" &&
+						asyncDetails?.state === "running" &&
+						(activeToolExecutionUpdates.some(event => event.toolCallId === message.toolCallId) ||
+							runningAsyncJobs.some(job => job.id === asyncDetails.jobId));
 					// A detached task's persisted result is only its "still running"
 					// snapshot. Keep the card partial, parked, and in `pendingTools` so
 					// the snapshot replay and later live progress frames land on it

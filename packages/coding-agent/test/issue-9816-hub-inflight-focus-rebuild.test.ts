@@ -173,7 +173,10 @@ const backgroundTaskRunningResult = {
 	timestamp: Date.now(),
 } as unknown as ToolResultMessage;
 
-function backgroundProgressUpdate(marker: string): Extract<AgentSessionEvent, { type: "tool_execution_update" }> {
+function backgroundProgressUpdate(
+	marker: string,
+	state: "running" | "completed" | "failed" = "running",
+): Extract<AgentSessionEvent, { type: "tool_execution_update" }> {
 	return {
 		type: "tool_execution_update",
 		toolCallId: "task-bg",
@@ -186,7 +189,7 @@ function backgroundProgressUpdate(marker: string): Extract<AgentSessionEvent, { 
 				results: [],
 				totalDurationMs: 20,
 				progress: [runningProgress("Bg", "Background work", { currentTool: "grep", currentToolArgs: marker })],
-				async: { state: "running", jobId: "job-bg", type: "task" },
+				async: { state, jobId: "job-bg", type: "task" },
 			} satisfies TaskToolDetails,
 		},
 	} satisfies Extract<AgentSessionEvent, { type: "tool_execution_update" }>;
@@ -199,7 +202,11 @@ interface SessionStub {
 	stagePersistedCompletion(): () => void;
 }
 
-function makeSession(initialMessages: AgentMessage[], initialStreaming: boolean): SessionStub {
+function makeSession(
+	initialMessages: AgentMessage[],
+	initialStreaming: boolean,
+	runningJobIds: string[] = [],
+): SessionStub {
 	let messages = initialMessages;
 	let streaming = initialStreaming;
 	let listener: ((event: AgentSessionEvent) => Promise<void> | void) | undefined;
@@ -225,6 +232,7 @@ function makeSession(initialMessages: AgentMessage[], initialStreaming: boolean)
 		},
 		getToolByName: () => undefined,
 		activeToolExecutionUpdates: () => [...activeToolUpdates.values()],
+		getAsyncJobSnapshot: () => ({ running: runningJobIds.map(id => ({ id })) }),
 		hasBuiltInTool: () => true,
 		sessionManager: {
 			getCwd: () => process.cwd(),
@@ -379,7 +387,7 @@ describe("#10447 persisted background task board across a focus rebuild", () => 
 	it("keeps a returned detached task parked so cached and later progress land after return", async () => {
 		// Detached task: its call already returned an async.state "running" result
 		// (persisted), and the main session is idle while the job keeps streaming.
-		const main = makeSession([backgroundTaskCall, backgroundTaskRunningResult], false);
+		const main = makeSession([backgroundTaskCall, backgroundTaskRunningResult], false, ["job-bg"]);
 		const fixture = createFixture(main);
 
 		await fixture.ctx.renderInitialMessages();
@@ -400,5 +408,28 @@ describe("#10447 persisted background task board across a focus rebuild", () => 
 		await main.emitToolUpdate(backgroundProgressUpdate("post-return-marker"));
 		const live = Bun.stripANSI(fixture.ctx.chatContainer.render(120).join("\n"));
 		expect(live).toContain("post-return-marker");
+	});
+
+	it("replays a terminal frame that lands while another session is focused", async () => {
+		const main = makeSession([backgroundTaskCall, backgroundTaskRunningResult], false, ["job-bg"]);
+		const fixture = createFixture(main);
+
+		await fixture.ctx.renderInitialMessages();
+		await fixture.focus.focusAgent("Worker");
+		await main.emitToolUpdate(backgroundProgressUpdate("completed-while-focused", "completed"));
+		await fixture.focus.unfocus();
+
+		const after = Bun.stripANSI(fixture.ctx.chatContainer.render(120).join("\n"));
+		expect(after).toContain("completed-while-focused");
+		expect(fixture.ctx.pendingTools.has("task-bg")).toBe(false);
+	});
+
+	it("finalizes a persisted running snapshot when its job no longer exists", async () => {
+		const main = makeSession([backgroundTaskCall, backgroundTaskRunningResult], false);
+		const fixture = createFixture(main);
+
+		await fixture.ctx.renderInitialMessages();
+
+		expect(fixture.ctx.pendingTools.has("task-bg")).toBe(false);
 	});
 });

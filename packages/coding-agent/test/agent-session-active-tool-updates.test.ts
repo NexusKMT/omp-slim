@@ -4,7 +4,7 @@
  * mixed blocking+async calls can report a settled async subset while blocking
  * work continues, while an already-returned background call uses that same
  * settled update as its terminal frame. Logical session transitions must clear
- * both snapshots and returned-background lifecycle markers.
+ * every snapshot.
  */
 import { afterEach, describe, expect, it } from "bun:test";
 import { Agent, type AgentEvent } from "@oh-my-pi/pi-agent-core";
@@ -89,15 +89,15 @@ describe("AgentSession.activeToolExecutionUpdates cache lifecycle", () => {
 		expect(session.activeToolExecutionUpdates()).toHaveLength(0);
 	});
 
-	it("evicts a terminal background snapshot after the original task call returned", async () => {
+	it("retains a terminal background snapshot after the original task call returned", async () => {
 		session = await makeSession();
 
 		session.agent.emitExternalEvent(taskEnd("running"));
 		session.agent.emitExternalEvent(taskUpdate("completed"));
-		expect(session.activeToolExecutionUpdates()).toHaveLength(0);
+		expect(session.activeToolExecutionUpdates().map(event => event.toolCallId)).toEqual(["task-1"]);
 	});
 
-	it("clears snapshots and returned-background markers across a new session", async () => {
+	it("clears snapshots across a new session", async () => {
 		session = await makeSession();
 
 		session.agent.emitExternalEvent(taskUpdate("running", "cached-call"));
