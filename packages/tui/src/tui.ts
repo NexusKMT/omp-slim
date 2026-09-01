@@ -1109,13 +1109,13 @@ export class TUI extends Container {
 		// implementing DECRQM, so retain the statically detected default instead of
 		// exposing destructive full paints. An explicit user opt-out/force still
 		// wins, so skip every probe result in that case.
-		this.terminal.onPrivateModeReport?.((mode, supported, confirmed = true) => {
+		this.terminal.onPrivateModeReport?.((mode, supported, confirmed = true, status) => {
 			if (mode !== 2026 || !confirmed) return;
 			if (synchronizedOutputUserOverride() !== null) return;
 			// Herdr's Ghostty VTE honors DEC 2026 even when DECRQM is unanswered or
-			// reports unrecognized; keep the static herdr-on default instead of
-			// exposing the dirty-row tear the mux-off policy was written to avoid.
-			if (!supported && isInsideHerdr()) return;
+			// reports unrecognized (status 0). Status 4 is permanently reset: the
+			// terminal cannot enable the mode, so honor the disable.
+			if (!supported && isInsideHerdr() && status !== 4) return;
 			this.#setSynchronizedOutput(supported);
 		});
 		this.terminal.start(
