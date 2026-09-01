@@ -161,17 +161,6 @@ export function normalizeConnectedCdpUrl(rawCdpUrl: string): string {
 	return cdpUrl;
 }
 
-function hasIsolatedUserDataDir(args: string[] | undefined): boolean {
-	if (!args) return false;
-	const inlinePrefix = "--user-data-dir=";
-	return args.some((arg, index) => {
-		if (arg.startsWith(inlinePrefix)) return arg.length > inlinePrefix.length;
-		if (arg !== "--user-data-dir") return false;
-		const value = args[index + 1];
-		return value !== undefined && value.length > 0 && !value.startsWith("--");
-	});
-}
-
 async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions): Promise<BrowserHandle> {
 	if (kind.kind === "cmux") {
 		const client = new CmuxSocketClient({ socketPath: kind.socketPath, password: kind.password });
@@ -272,7 +261,7 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
 	}
 	const reused = await findReusableCdp(exe, {
 		signal: opts.signal,
-		allowOccupied: hasIsolatedUserDataDir(opts.appArgs),
+		appArgs: opts.appArgs,
 	});
 	let cdpUrl: string;
 	let pid: number;

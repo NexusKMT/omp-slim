@@ -62,13 +62,13 @@ interface DisposableExecutable {
 	close(): Promise<void>;
 }
 
-async function spawnDisposableExecutable(): Promise<DisposableExecutable> {
+async function spawnDisposableExecutable(args: string[] = []): Promise<DisposableExecutable> {
 	const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-browser-app-path-"));
 	const executablePath = path.join(tempDir, path.basename(process.execPath));
 	await Bun.write(executablePath, Bun.file(process.execPath));
 	if (process.platform !== "win32") await fs.chmod(executablePath, 0o755);
 	const executable = await fs.realpath(executablePath);
-	const child = Bun.spawn([executable, "--eval", 'process.stdout.write("ready\\n"); await Bun.stdin.text()'], {
+	const child = Bun.spawn([executable, "--eval", 'process.stdout.write("ready\\n"); await Bun.stdin.text()', ...args], {
 		stdin: "pipe",
 		stdout: "pipe",
 		stderr: "ignore",
@@ -176,6 +176,26 @@ describe("pickElectronTarget", () => {
 				acquireBrowser(
 					{ kind: "spawned", path: existing.path },
 					{ cwd: process.cwd(), signal: AbortSignal.timeout(2_000) },
+				),
+			).rejects.toThrow("already running without a reusable CDP endpoint");
+			expect(Process.fromPid(existing.pid)?.status()).toBe(ProcessStatus.Running);
+		} finally {
+			await existing.close();
+		}
+	}, 10_000);
+
+	test("rejects a user-data-dir already used by the running executable", async () => {
+		const profile = path.join(os.tmpdir(), `omp-browser-profile-${process.pid}-${Date.now()}`);
+		const existing = await spawnDisposableExecutable([`--user-data-dir=${profile}`]);
+		try {
+			await expect(
+				acquireBrowser(
+					{ kind: "spawned", path: existing.path },
+					{
+						cwd: process.cwd(),
+						appArgs: [`--user-data-dir=${profile}`],
+						signal: AbortSignal.timeout(2_000),
+					},
 				),
 			).rejects.toThrow("already running without a reusable CDP endpoint");
 			expect(Process.fromPid(existing.pid)?.status()).toBe(ProcessStatus.Running);

@@ -142,6 +142,29 @@ function findCdpPortInArgs(args: string[]): number | null {
 	return null;
 }
 
+function findUserDataDirInArgs(args: string[] | undefined): string | null {
+	if (!args) return null;
+	let result: string | null = null;
+	const inlinePrefix = "--user-data-dir=";
+	for (let index = 0; index < args.length; index++) {
+		const arg = args[index]!;
+		if (arg.startsWith(inlinePrefix)) {
+			result = arg.length > inlinePrefix.length ? arg.slice(inlinePrefix.length) : null;
+			continue;
+		}
+		if (arg !== "--user-data-dir") continue;
+		const value = args[index + 1];
+		result = value !== undefined && value.length > 0 && !value.startsWith("--") ? value : null;
+		if (result !== null) index++;
+	}
+	return result;
+}
+
+function normalizeUserDataDir(userDataDir: string): string {
+	const normalized = path.resolve(userDataDir);
+	return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
 /** One-shot probe: returns true when `/json/version` answers 200 within the timeout. */
 async function probeCdpAt(port: number, signal?: AbortSignal): Promise<boolean> {
 	const status = await probeCdpStatus(`http://127.0.0.1:${port}/json/version`, { timeoutMs: 1500, signal });
@@ -155,23 +178,43 @@ async function probeCdpAt(port: number, signal?: AbortSignal): Promise<boolean> 
  */
 export async function findReusableCdp(
 	exe: string,
-	options: { signal?: AbortSignal; allowOccupied?: boolean } = {},
+	options: { signal?: AbortSignal; appArgs?: string[] } = {},
 ): Promise<{ cdpUrl: string; pid: number } | null> {
 	const candidates = Process.fromPath(exe).filter(process => process.status() === ProcessStatus.Running);
+	const candidateArgs: string[][] = [];
+	let hasUnreadableCandidate = false;
 	for (const process of candidates) {
 		let args: string[];
 		try {
 			args = process.args();
 		} catch {
+			hasUnreadableCandidate = true;
 			continue;
 		}
+		candidateArgs.push(args);
 		const port = findCdpPortInArgs(args);
 		if (port === null) continue;
 		if (await probeCdpAt(port, options.signal)) {
 			return { cdpUrl: `http://127.0.0.1:${port}`, pid: process.pid };
 		}
 	}
-	if (!options.allowOccupied && candidates.length > 0) {
+	const requestedUserDataDir = findUserDataDirInArgs(options.appArgs);
+	const normalizedRequestedUserDataDir =
+		requestedUserDataDir !== null && path.isAbsolute(requestedUserDataDir)
+			? normalizeUserDataDir(requestedUserDataDir)
+			: null;
+	const canLaunchIsolatedProfile =
+		normalizedRequestedUserDataDir !== null &&
+		!hasUnreadableCandidate &&
+		candidateArgs.every(args => {
+			const existingUserDataDir = findUserDataDirInArgs(args);
+			return (
+				existingUserDataDir === null ||
+				(path.isAbsolute(existingUserDataDir) &&
+					normalizeUserDataDir(existingUserDataDir) !== normalizedRequestedUserDataDir)
+			);
+		});
+	if (!canLaunchIsolatedProfile && candidates.length > 0) {
 		const name = path.basename(exe);
 		throw new ToolError(
 			`Cannot launch ${name} because it is already running without a reusable CDP endpoint. Close ${name}, relaunch it with --remote-debugging-port, or pass app.cdp_url for an existing endpoint.`,
