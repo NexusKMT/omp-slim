@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.2] - 2026-09-01
+
 ### Added
 
 - Added thinking controls for Amazon Bedrock models.

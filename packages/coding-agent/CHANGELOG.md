@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.2] - 2026-09-01
+
 ### Added
 
 - Recover stray <SM:EDIT> payloads emitted as plain text into real edit tool calls, with support for disabling this behavior through the edit.recoverInlineEdits setting.

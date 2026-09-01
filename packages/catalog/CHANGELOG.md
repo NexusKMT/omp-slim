@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.2] - 2026-09-01
+
 ### Added
 
 - Added support for turn-scoped system messages, changing tools during a conversation, and setting effort on individual messages.

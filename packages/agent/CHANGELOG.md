@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.2] - 2026-09-01
+
 ### Fixed
 
 - Fixed preservation of Claude thinking/reasoning context when conversations are compacted or tool results are pruned.
