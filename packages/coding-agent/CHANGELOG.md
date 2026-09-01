@@ -17,6 +17,7 @@
 
 ### Fixed
 
+- Fixed `--resume` self-terminating (exit 129) while replaying a session whose transcript repaint emits more than 64 MiB of inline images; the stdout backlog is now torn down only when it stalls without draining, so image-heavy sessions reopen normally ([#10430](https://github.com/can1357/oh-my-pi/issues/10430)).
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)

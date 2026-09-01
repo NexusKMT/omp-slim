@@ -142,62 +142,83 @@ export function chunkForConPTY(data: string, maxChunkBytes: number = MAX_CONPTY_
 }
 
 /**
- * Hard cap on bytes queued to a stalled stdout before its consumer is declared
- * gone. A live terminal drains within milliseconds, so a backlog this large —
- * far above any legitimate paint (a full session resume is a few MiB) — means
- * the PTY reader has stopped consuming entirely. Without the cap, `#safeWrite`
- * keeps handing cosmetic frames (the `hub wait` spinner, 500 ms progress
- * snapshots) to a writable buffer that never drains, growing RSS without bound
- * until the host runs out of memory. See #6854.
+ * Backlog ceiling that arms the stall watchdog. A live terminal keeps this
+ * near zero; crossing it means either a genuinely wedged PTY reader (#6854) or
+ * a single legitimately-huge frame — a `--resume` transcript repaint of many
+ * inline images is one multi-tens-of-MiB write (#10430). The two are told
+ * apart by {@link StdoutStallWatchdog} (drain progress), not by this number
+ * alone: inter-frame production is already gated at 256 KiB
+ * (`TUI.#deferRenderForOutputBacklog`), so the only way to reach this cap is a
+ * lone oversized frame or a reader that has stopped consuming entirely.
  */
 const MAX_STDOUT_BACKLOG_BYTES = 64 * 1024 * 1024;
 
 /**
- * Turns an unbounded, never-draining stdout writable buffer into a bounded
- * disconnect signal.
+ * How long the backlog may sit above the cap with no drain progress before the
+ * consumer is declared gone. A slow-but-alive terminal keeps flushing chunks
+ * (so it never trips), while a wedged one that flushes nothing is torn down
+ * within this window.
+ */
+const STDOUT_STALL_TIMEOUT_MS = 2_000;
+
+/** Cadence at which {@link ProcessTerminal} re-samples the backlog while over cap. */
+const STDOUT_STALL_POLL_MS = 250;
+
+/**
+ * Bounds a never-draining stdout backlog without killing a single large but
+ * actively-draining frame.
  *
  * `process.stdout.write()` returns `false` once its buffer exceeds the stream
- * high-water mark; the bytes stay queued and are only freed when the consumer
- * drains (the `drain` event). While the consumer keeps up, writes are accepted
- * and nothing accumulates. When it stalls, every subsequent write piles onto
- * the buffer — a stalled-but-alive PTY reader never throws, so the write path
- * has no other signal that output is going nowhere. This guard sums the bytes
- * queued since backpressure began and reports when that backlog crosses the
- * cap, at which point the caller treats the terminal as disconnected.
+ * high-water mark, and the off-thread pump's `pending()` climbs the same way;
+ * a stalled-but-alive PTY reader never throws, so the byte count is the only
+ * signal that output is going nowhere. Tripping on the instantaneous count
+ * alone is wrong: a legitimate oversized frame (a resume repaint of dozens of
+ * inline screenshots, #10430) briefly exceeds the cap and then drains. This
+ * watchdog declares the terminal disconnected only when the backlog stays
+ * above `capBytes` *without reaching a new low-water mark* for `stallMs` — a
+ * draining terminal keeps lowering the mark and never trips, while a wedged
+ * one (#6854) still tears down within the window.
  *
  * Exported for unit testing; `ProcessTerminal` is the sole production user.
  */
-export class OutputBacklogGuard {
-	#bytes = 0;
-	#tracking = false;
+export class StdoutStallWatchdog {
+	#lowWater = Number.POSITIVE_INFINITY;
+	#stalledSinceMs = 0;
+	#armed = false;
 
-	constructor(private readonly capBytes: number = MAX_STDOUT_BACKLOG_BYTES) {}
-
-	/** True once a refused write started a backlog that has not yet drained. */
-	get tracking(): boolean {
-		return this.#tracking;
-	}
+	constructor(
+		private readonly capBytes: number = MAX_STDOUT_BACKLOG_BYTES,
+		private readonly stallMs: number = STDOUT_STALL_TIMEOUT_MS,
+	) {}
 
 	/**
-	 * Record one `stdout.write()`: `accepted` is that call's return value and
-	 * `bytes` its encoded size. Returns true when the pending backlog now
-	 * exceeds the cap and the terminal should be treated as disconnected.
+	 * Feed the current pending-byte count and clock reading. Returns true once
+	 * the backlog has sat above the cap with no drain progress for `stallMs`,
+	 * at which point the caller treats the terminal as disconnected.
 	 */
-	record(accepted: boolean, bytes: number): boolean {
-		if (!this.#tracking) {
-			// Consumer is keeping up; nothing is queued.
-			if (accepted) return false;
-			// First refused write: backpressure has begun.
-			this.#tracking = true;
+	sample(pending: number, nowMs: number): boolean {
+		if (pending <= this.capBytes) {
+			// Drained to/below the cap: healthy, nothing to watch.
+			this.reset();
+			return false;
 		}
-		this.#bytes += bytes;
-		return this.#bytes > this.capBytes;
+		if (!this.#armed || pending < this.#lowWater) {
+			// Newly over cap, or the pump reached a new low-water mark since the
+			// last sample: forward progress. (Re)start the stall clock.
+			this.#armed = true;
+			this.#lowWater = pending;
+			this.#stalledSinceMs = nowMs;
+			return false;
+		}
+		// Over cap and no new low-water mark since the clock started.
+		return nowMs - this.#stalledSinceMs >= this.stallMs;
 	}
 
-	/** Called on the stdout `drain` event: the buffer emptied, backlog cleared. */
+	/** Backlog cleared (drain) or terminal torn down: stop watching. */
 	reset(): void {
-		this.#bytes = 0;
-		this.#tracking = false;
+		this.#armed = false;
+		this.#lowWater = Number.POSITIVE_INFINITY;
+		this.#stalledSinceMs = 0;
 	}
 }
 
@@ -640,22 +661,19 @@ export class ProcessTerminal implements Terminal {
 	#stdoutErrorHandler = (err: Error) => {
 		this.#markTerminalDisconnected("stdout failed", err);
 	};
-	// Bounds the stdout writable buffer against a stalled PTY consumer: a
-	// stalled-but-alive reader never throws, so #safeWrite has no error to catch
-	// and the writable buffer grows without bound as cosmetic frames pile up.
-	// See OutputBacklogGuard and #6854.
-	#stdoutBacklog = new OutputBacklogGuard();
+	// Bounds the stdout backlog against a stalled PTY consumer without killing a
+	// single large-but-draining frame: a stalled-but-alive reader never throws,
+	// so the pending byte count is the only stall signal, and a legitimate
+	// oversized frame (a resume repaint of many inline images) must be allowed
+	// to drain. See StdoutStallWatchdog, #6854, and #10430.
+	#stdoutStall = new StdoutStallWatchdog();
+	#stdoutStallTimer?: Timer;
 	// Off-thread output pump (unix TTYs): Bun's `process.stdout.write` blocks
 	// the event loop until the terminal drains, so a slow/occluded emulator
 	// froze the whole TUI for the duration of a multi-MB repaint. The pump
 	// enqueues frames and performs the blocking write(2) on its own thread;
 	// `pendingOutputBytes` exposes the backlog for render-side frame skipping.
 	#outputPump?: TtyWriter;
-	#stdoutDrainArmed = false;
-	#stdoutDrainHandler = () => {
-		this.#stdoutDrainArmed = false;
-		this.#stdoutBacklog.reset();
-	};
 
 	#windowsVTInputRestore?: () => void;
 	#xtermScrollToBottomRestoreModes = new Set<number>();
@@ -1759,11 +1777,7 @@ export class ProcessTerminal implements Terminal {
 			process.stdout.removeListener("resize", this.#stdoutResizeListener);
 			this.#stdoutResizeListener = undefined;
 		}
-		if (this.#stdoutDrainArmed) {
-			process.stdout.removeListener("drain", this.#stdoutDrainHandler);
-			this.#stdoutDrainArmed = false;
-		}
-		this.#stdoutBacklog.reset();
+		this.#disarmStdoutStallWatchdog();
 		this.#resizeHandler = undefined;
 		// Flush the restore sequences enqueued above (bounded — a stalled PTY
 		// must not wedge exit), then retire the pump. Later writes (emergency
@@ -1802,6 +1816,7 @@ export class ProcessTerminal implements Terminal {
 	#markTerminalDisconnected(reason: string, err?: unknown): void {
 		if (this.#dead) return;
 		this.#dead = true;
+		this.#disarmStdoutStallWatchdog();
 		logger.warn("terminal disconnected; stopping interactive rendering", { reason, err });
 
 		const disconnectHandler = this.#disconnectHandler;
@@ -1854,11 +1869,11 @@ export class ProcessTerminal implements Terminal {
 				return;
 			}
 			try {
-				// Same stalled-consumer bound as the stream path (#6854): a PTY reader
-				// that never drains must tear the terminal down, not grow the queue.
-				if (pump.write(data) > MAX_STDOUT_BACKLOG_BYTES) {
-					this.#markTerminalDisconnected("stdout backlog exceeded cap; PTY consumer stalled");
-				}
+				// Feed the live backlog to the stall watchdog rather than tripping on
+				// the instantaneous byte count: a single large-but-draining frame (a
+				// resume repaint of many inline images) must open normally, while a
+				// never-draining reader is still torn down (#6854, #10430).
+				this.#trackStdoutBacklog(pump.write(data));
 			} catch (err) {
 				this.#markTerminalDisconnected("stdout failed", err);
 			}
@@ -1882,26 +1897,19 @@ export class ProcessTerminal implements Terminal {
 			// and a code-unit cap would let CJK transcript rows expand past the
 			// threshold. See #2034 and #2095.
 			const bytes = Buffer.byteLength(data, "utf8");
-			let accepted: boolean;
 			if (this.#conpty && bytes > MAX_CONPTY_WRITE_CHUNK_BYTES) {
-				accepted = true;
 				for (const chunk of chunkForConPTY(data, MAX_CONPTY_WRITE_CHUNK_BYTES)) {
 					if (this.#dead) break;
-					accepted = process.stdout.write(chunk);
+					process.stdout.write(chunk);
 				}
 			} else {
-				accepted = process.stdout.write(data);
+				process.stdout.write(data);
 			}
-			// A stalled-but-alive PTY consumer never throws: write() just returns
-			// false and queues the bytes. Bound that never-draining backlog by
-			// declaring the terminal disconnected once it crosses the cap — the
-			// same clean-exit path a dead terminal takes (#6854).
-			if (this.#stdoutBacklog.record(accepted, bytes)) {
-				this.#markTerminalDisconnected("stdout backlog exceeded cap; PTY consumer stalled");
-			} else if (this.#stdoutBacklog.tracking && !this.#stdoutDrainArmed) {
-				this.#stdoutDrainArmed = true;
-				process.stdout.once("drain", this.#stdoutDrainHandler);
-			}
+			// A stalled-but-alive PTY consumer never throws: write() just queues the
+			// bytes and writableLength grows. Feed that backlog to the stall watchdog
+			// so a genuinely wedged reader is bounded (#6854) without killing a lone
+			// oversized frame that is still draining (#10430).
+			this.#trackStdoutBacklog(process.stdout.writableLength ?? 0);
 		} catch (err) {
 			this.#markTerminalDisconnected("stdout failed", err);
 		}
@@ -1915,6 +1923,47 @@ export class ProcessTerminal implements Terminal {
 		if (this.#outputPump) return this.#outputPump.pending();
 		// Stream fallback: bytes queued past the high-water mark by refused writes.
 		return process.stdout.writableLength ?? 0;
+	}
+
+	/**
+	 * Reconcile the stdout backlog after a write or a poll. Under the cap the
+	 * consumer is healthy and the watchdog is disarmed; over it, the watchdog
+	 * decides whether the backlog is draining (keep polling) or wedged (tear
+	 * down). See {@link StdoutStallWatchdog}, #6854, and #10430.
+	 */
+	#trackStdoutBacklog(pending: number): void {
+		if (pending <= MAX_STDOUT_BACKLOG_BYTES) {
+			this.#disarmStdoutStallWatchdog();
+			return;
+		}
+		if (this.#stdoutStall.sample(pending, Date.now())) {
+			this.#disarmStdoutStallWatchdog();
+			this.#markTerminalDisconnected("stdout backlog exceeded cap without draining; PTY consumer stalled");
+			return;
+		}
+		// Over cap but still draining: re-sample the backlog until it clears or
+		// stalls. Writes stop once the frame gate (256 KiB) engages, so without
+		// this poll a wedged consumer would never be re-checked.
+		if (!this.#stdoutStallTimer) {
+			this.#stdoutStallTimer = setInterval(() => this.#pollStdoutStall(), STDOUT_STALL_POLL_MS);
+			this.#stdoutStallTimer.unref?.();
+		}
+	}
+
+	#pollStdoutStall(): void {
+		if (this.#dead) {
+			this.#disarmStdoutStallWatchdog();
+			return;
+		}
+		this.#trackStdoutBacklog(this.pendingOutputBytes);
+	}
+
+	#disarmStdoutStallWatchdog(): void {
+		this.#stdoutStall.reset();
+		if (this.#stdoutStallTimer) {
+			clearInterval(this.#stdoutStallTimer);
+			this.#stdoutStallTimer = undefined;
+		}
 	}
 
 	get rows(): number {

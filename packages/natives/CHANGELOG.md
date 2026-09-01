@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `TtyWriter.pending()` now decrements per flushed chunk instead of per whole batch, so it reports real drain progress during a large single write ([#10430](https://github.com/can1357/oh-my-pi/issues/10430)).
+
 ## [18.0.11] - 2026-08-29
 
 ### Fixed
