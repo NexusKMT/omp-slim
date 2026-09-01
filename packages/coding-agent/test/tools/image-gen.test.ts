@@ -339,7 +339,7 @@ describe("imageGenTool", () => {
 			provider: "openai-codex",
 			id: "gpt-5.5",
 			name: "GPT-5.5",
-			baseUrl: "HTTPS://CHATGPT.COM/backend-api/",
+			baseUrl: "HTTPS://CHATGPT.COM/ignored/../backend-api/",
 		} as Model;
 		let requestUrl: string | undefined;
 		const fetchMock: typeof fetch = (async (input: string | URL | Request) => {
