@@ -2,7 +2,15 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import { type ApiKey, type FetchImpl, getEnvApiKey, getOpenRouterHeaders, type Model, withAuth } from "@oh-my-pi/pi-ai";
+import {
+	type ApiKey,
+	type FetchImpl,
+	getEnvApiKey,
+	getOpenRouterHeaders,
+	isOfficialCodexApiUrl,
+	type Model,
+	withAuth,
+} from "@oh-my-pi/pi-ai";
 import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
 import {
 	applyCodexResidencyHeader,
@@ -706,7 +714,7 @@ async function findCodexSubscriptionImageCredentials(
 	if (!token) return null;
 	const model = resolveDefaultCodexImageModel(modelRegistry);
 	if (!model) return null;
-	const acceptsOpaqueCredentials = getOpenAIBaseUrl(model) !== CODEX_BASE_URL;
+	const acceptsOpaqueCredentials = !isOfficialCodexApiUrl(getOpenAIBaseUrl(model));
 	if (!acceptsOpaqueCredentials && !getCodexAccountId(token)) return null;
 	const apiKey = await modelRegistry.getApiKey(model, sessionId);
 	if (!isAuthenticated(apiKey) || (!acceptsOpaqueCredentials && !getCodexAccountId(apiKey))) return null;
