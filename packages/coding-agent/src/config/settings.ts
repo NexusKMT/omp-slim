@@ -11,6 +11,7 @@
  *   const isolated = Settings.isolated({ "compaction.enabled": false });
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -883,6 +884,27 @@ export class Settings {
 
 	getAgentDir(): string {
 		return this.#agentDir;
+	}
+
+	/**
+	 * Raw global settings layer (`config.yml`/`config.yaml`), deep-cloned.
+	 *
+	 * Exposes arbitrary namespaced keys (e.g. an extension's own `piVim` block)
+	 * that the typed, schema-bound {@link get} cannot reach. Used by the legacy
+	 * pi `SettingsManager` shim to match upstream Pi's `getGlobalSettings()`.
+	 * The clone means callers cannot mutate internal state.
+	 */
+	getGlobalSettings(): RawSettings {
+		return structuredClone(this.#global);
+	}
+
+	/**
+	 * Raw project settings layer (`.claude/settings.yml`, `.omp/config.yml`,
+	 * etc.), deep-cloned. Companion to {@link getGlobalSettings} for the legacy
+	 * pi `SettingsManager` shim's `getProjectSettings()`.
+	 */
+	getProjectSettings(): RawSettings {
+		return structuredClone(this.#project);
 	}
 
 	getPlansDirectory(): string {
@@ -2877,6 +2899,20 @@ export const onHindsightScopeChanged = (cb: () => void) => hindsightScopeSignal.
  */
 const liveSettingsInstances = new Set<WeakRef<Settings>>();
 
+const activeSettingsScope = new AsyncLocalStorage<Settings>();
+
+/**
+ * Run extension-owned work with the settings instance of its active session.
+ *
+ * Legacy Pi extensions synchronously call `SettingsManager.create(ctx.cwd)`;
+ * `cwd` alone cannot distinguish concurrent sessions that use different
+ * settings for the same project. The async scope supplies that missing session
+ * identity without process-global mutation.
+ */
+export function withActiveSettings<T>(instance: Settings | undefined, fn: () => T): T {
+	return instance ? activeSettingsScope.run(instance, fn) : fn();
+}
+
 let globalInstance: Settings | null = null;
 let globalInstancePromise: Promise<Settings> | null = null;
 let boundSettingsInstance: Settings | null = null;
@@ -2889,6 +2925,36 @@ function clearBoundSettingsMethods(): void {
 
 export function isSettingsInitialized(): boolean {
 	return globalInstance !== null;
+}
+
+/**
+ * Resolve the settings visible to a legacy Pi `SettingsManager.create()` call.
+ *
+ * An active extension session is authoritative because `cwd`/`agentDir` cannot
+ * uniquely identify concurrent SDK sessions with per-session overrides. Outside
+ * extension execution, the most recently constructed matching instance is the
+ * best available scope; an unscoped lookup falls back to the global singleton.
+ */
+export function findScopedSettings(cwd?: string, agentDir?: string): Settings | undefined {
+	const active = activeSettingsScope.getStore();
+	if (active) return active;
+
+	const wantCwd = cwd === undefined ? undefined : path.normalize(cwd);
+	const wantAgentDir = agentDir === undefined ? undefined : path.normalize(agentDir);
+	if (wantCwd === undefined && wantAgentDir === undefined) return globalInstance ?? undefined;
+
+	let found: Settings | undefined;
+	for (const ref of liveSettingsInstances) {
+		const instance = ref.deref();
+		if (
+			instance &&
+			(wantCwd === undefined || instance.getCwd() === wantCwd) &&
+			(wantAgentDir === undefined || instance.getAgentDir() === wantAgentDir)
+		) {
+			found = instance;
+		}
+	}
+	return found;
 }
 
 /**

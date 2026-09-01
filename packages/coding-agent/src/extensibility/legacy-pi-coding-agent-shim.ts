@@ -35,7 +35,7 @@ import {
 import { getPackageDir as getOmpPackageDir } from "../config";
 import { formatKeyHints } from "../config/keybindings";
 import type { PromptTemplate } from "../config/prompt-templates";
-import { type SettingPath, Settings } from "../config/settings";
+import { findScopedSettings, type SettingPath, Settings } from "../config/settings";
 import { EditTool } from "../edit";
 import type { CreateAgentSessionOptions, CreateAgentSessionResult, LoadExtensionsResult } from "../sdk";
 import {
@@ -757,9 +757,22 @@ export function createReadOnlyTools(cwd: string): ToolDefinition[] {
 	});
 }
 
+/**
+ * Legacy pi `SettingsManager` shim.
+ *
+ * Upstream Pi's `SettingsManager.create(cwd)` is **synchronous** and returns a
+ * manager exposing `getGlobalSettings()`/`getProjectSettings()` (plus the typed
+ * `get(path)`). OMP's `Settings` is that manager, so the shim resolves the
+ * active extension session's instance first, then falls back to a live instance
+ * matching the requested `cwd`/`agentDir`, or an isolated instance when nothing
+ * matches. Returning the promise from `Settings.init()` here broke every pi
+ * extension that read settings synchronously — e.g. pi-vim's `session_start`
+ * handler (#10397); selecting a process-global instance would leak one session's
+ * settings into another.
+ */
 export const SettingsManager = {
-	create(cwd: string, agentDir?: string): Promise<Settings> {
-		return Settings.init({ cwd, agentDir });
+	create(cwd?: string, agentDir?: string): Settings {
+		return findScopedSettings(cwd, agentDir) ?? Settings.isolated();
 	},
 
 	inMemory(): Settings {
