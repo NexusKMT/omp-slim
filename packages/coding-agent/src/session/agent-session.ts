@@ -559,6 +559,8 @@ export class AgentSession {
 	/** Last (enable, providerId) tuple resolved by `#syncAppendOnlyContext` — used to skip no-op invalidations. */
 	#lastAppendOnlyResolution?: { enable: boolean; providerId: string | undefined };
 	#eventListeners: AgentSessionEventListener[] = [];
+	#activeToolExecutionUpdates = new Map<string, Extract<AgentSessionEvent, { type: "tool_execution_update" }>>();
+	#returnedBackgroundToolCallIds = new Set<string>();
 	#runStateListeners = new Set<(state: "running" | "idle") => void>();
 	#commandMetadataChangedListeners: CommandMetadataChangedListener[] = [];
 	#sessionChangeCallbacks = new Set<() => void>();
@@ -2224,6 +2226,30 @@ export class AgentSession {
 	#subscriberEmitGate: Promise<void> = Promise.resolve();
 
 	async #emitSessionEvent(event: AgentSessionEvent, options: { detachExtensions?: boolean } = {}): Promise<void> {
+		if (event.type === "tool_execution_update") {
+			const asyncState = (event.partialResult as { details?: { async?: { state?: string } } } | undefined)?.details
+				?.async?.state;
+			const asyncSettled = asyncState === "completed" || asyncState === "failed";
+			// A final async snapshot is terminal only after the original call
+			// returned its parked-background result. Mixed blocking+async task
+			// calls can reach the same async state while their blocking subset is
+			// still running; retain that frame until tool_execution_end so a focus
+			// rebuild keeps the full live board (#10447 review).
+			if (asyncSettled && this.#returnedBackgroundToolCallIds.delete(event.toolCallId)) {
+				this.#activeToolExecutionUpdates.delete(event.toolCallId);
+			} else {
+				this.#activeToolExecutionUpdates.set(event.toolCallId, event);
+			}
+		} else if (event.type === "tool_execution_end") {
+			const asyncState = (event.result as { details?: { async?: { state?: string } } } | undefined)?.details?.async
+				?.state;
+			if (event.toolName === "task" && asyncState === "running") {
+				this.#returnedBackgroundToolCallIds.add(event.toolCallId);
+			} else {
+				this.#returnedBackgroundToolCallIds.delete(event.toolCallId);
+			}
+			this.#activeToolExecutionUpdates.delete(event.toolCallId);
+		}
 		if (event.type === "message_update") {
 			this.#emit(event);
 			void this.#queueExtensionEvent(event);
@@ -4011,6 +4037,14 @@ export class AgentSession {
 	}
 
 	/**
+	 * Snapshot the latest partial result for each tool that is still executing.
+	 * Focus rebuilds replay these after reconstructing persisted transcript state.
+	 */
+	activeToolExecutionUpdates(): readonly Extract<AgentSessionEvent, { type: "tool_execution_update" }>[] {
+		return [...this.#activeToolExecutionUpdates.values()];
+	}
+
+	/**
 	 * Observe authoritative run-state transitions before public `agent_end`
 	 * deferral, for lifecycle owners that must not remain stale while prompts unwind.
 	 */
@@ -5333,6 +5367,11 @@ export class AgentSession {
 		this.#toolChoiceQueue.clear();
 		this.#tools.clearAcpPermissionDecisions();
 		this.#tools.resetAnnouncedMounts();
+		// A `/new`, session switch, or tree navigation reuses tool-call ids, so a
+		// still-cached background-task snapshot from the old conversation must not
+		// survive to be replayed by a focus rebuild in the reset session (#10447).
+		this.#activeToolExecutionUpdates.clear();
+		this.#returnedBackgroundToolCallIds.clear();
 	}
 
 	/**

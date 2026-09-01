@@ -458,6 +458,11 @@ export class UiHelpers {
 			todoSnapshot = null;
 			previous.seal();
 		};
+		// Detached task calls persist their initial `async.state === "running"`
+		// result, but the job keeps streaming progress afterwards. Parked here
+		// (not finalized) so replayed and live frames still route to the card;
+		// the ids are handed back to the controller after the loop (#10447).
+		const backgroundTaskCallIds = new Set<string>();
 		const messages = sessionContext.messages;
 		const count = messages.length;
 		for (let i = 0; i < count; i++) {
@@ -671,24 +676,35 @@ export class UiHelpers {
 				// Match tool results to pending tool components
 				const component = this.ctx.pendingTools.get(message.toolCallId);
 				if (component) {
-					component.updateResult(message, false, message.toolCallId);
-					this.ctx.pendingTools.delete(message.toolCallId);
-					if (
-						message.toolName === "hub" &&
-						component instanceof ToolExecutionComponent &&
-						component.isDisplaceableBlock()
-					) {
-						waitingPoll = component;
-					} else if (
-						message.toolName === "todo" &&
-						component instanceof ToolExecutionComponent &&
-						component.canBeDisplacedBy("todo")
-					) {
-						// A successful todo result supersedes the prior live snapshot. Failed
-						// follow-ups return false from canBeDisplacedBy("todo"), so the
-						// last-good panel stays on screen.
-						resolveTodoSnapshot("todo");
-						todoSnapshot = component;
+					const asyncState = (message.details as { async?: { state?: string } } | undefined)?.async?.state;
+					const isBackgroundTask = message.toolName === "task" && asyncState === "running";
+					// A detached task's persisted result is only its "still running"
+					// snapshot. Keep the card partial, parked, and in `pendingTools` so
+					// the snapshot replay and later live progress frames land on it
+					// instead of hitting the no-pending-component early return (#10447).
+					component.updateResult(message, isBackgroundTask, message.toolCallId);
+					if (isBackgroundTask) {
+						component.parkAsBackground();
+						backgroundTaskCallIds.add(message.toolCallId);
+					} else {
+						this.ctx.pendingTools.delete(message.toolCallId);
+						if (
+							message.toolName === "hub" &&
+							component instanceof ToolExecutionComponent &&
+							component.isDisplaceableBlock()
+						) {
+							waitingPoll = component;
+						} else if (
+							message.toolName === "todo" &&
+							component instanceof ToolExecutionComponent &&
+							component.canBeDisplacedBy("todo")
+						) {
+							// A successful todo result supersedes the prior live snapshot. Failed
+							// follow-ups return false from canBeDisplacedBy("todo"), so the
+							// last-good panel stays on screen.
+							resolveTodoSnapshot("todo");
+							todoSnapshot = component;
+						}
 					}
 				}
 			} else {
@@ -744,6 +760,14 @@ export class UiHelpers {
 		if (this.ctx.viewSession.isStreaming) {
 			this.ctx.eventController?.inheritTurnStart(turnStartedAt);
 		}
+		// Re-register parked background task cards with the controller: focus
+		// attach resets its `#backgroundTaskCallIds` before replaying, and unlike
+		// the todo/turn handoffs this must run whether or not the session streams
+		// — a detached task keeps running while the main session sits idle
+		// (#10447). Membership is re-checked against `pendingTools`.
+		if (backgroundTaskCallIds.size > 0) {
+			this.ctx.eventController?.markBackgroundTaskCalls(backgroundTaskCallIds);
+		}
 
 		// Entries still in `pendingTools` are toolCalls whose result never landed
 		// during the replay — with `keepDanglingToolCalls` these are exactly the
@@ -765,10 +789,17 @@ export class UiHelpers {
 				}
 			}
 		} else {
-			for (const component of this.ctx.pendingTools.values()) {
+			for (const [toolCallId, component] of this.ctx.pendingTools) {
+				// A parked background task keeps running even while the main session
+				// is idle, so leave its card pending — sealing and clearing it would
+				// drop the replayed snapshot and every later job frame (#10447).
+				if (backgroundTaskCallIds.has(toolCallId)) {
+					component.setArgsComplete(toolCallId);
+					continue;
+				}
 				component.seal();
+				this.ctx.pendingTools.delete(toolCallId);
 			}
-			this.ctx.pendingTools.clear();
 		}
 		this.ctx.ui.requestRender();
 	}
