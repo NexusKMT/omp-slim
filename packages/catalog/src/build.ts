@@ -55,6 +55,8 @@ function applyCatalogAssignments<TApi extends Api>(model: Model<TApi>, catalog: 
 	const requiresCursorToolSchemaProjection = catalog.requiresCursorToolSchemaProjection;
 	if (requiresCursorToolSchemaProjection === true) {
 		model.requiresCursorToolSchemaProjection = true;
+	} else {
+		delete model.requiresCursorToolSchemaProjection;
 	}
 	const contextPromotionTarget = catalog.contextPromotionTarget;
 	if (typeof contextPromotionTarget === "string" && model.contextPromotionTarget === undefined) {

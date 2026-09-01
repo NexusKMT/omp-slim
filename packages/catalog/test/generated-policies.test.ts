@@ -123,6 +123,13 @@ describe("generated model policies", () => {
 		}
 		expect(grok.requiresCursorToolSchemaProjection).toBeUndefined();
 		expect(otherCursorAnthropic.requiresCursorToolSchemaProjection).toBeUndefined();
+
+		const rebuiltGrok = buildModel({
+			...fableModels[0],
+			id: "cursor-grok-4.6",
+			name: "cursor-grok-4.6",
+		});
+		expect(rebuiltGrok.requiresCursorToolSchemaProjection).toBeUndefined();
 	});
 
 	it("preserves OpenRouter's mandatory provider-authored effort ladder", () => {
