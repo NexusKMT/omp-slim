@@ -5,9 +5,10 @@ import { withoutTerminalMultiplexer } from "./helpers/terminal-multiplexer";
 import { VirtualTerminal } from "./virtual-terminal";
 
 /**
- * Contract: after TUI.start(), a confirmed unsupported DECRQM 2026 report
- * must not restore the Herdr dirty-row tear (top frozen, bottom-only refresh)
- * unless the terminal reports the mode as permanently reset.
+ * Contract: after TUI.start(), a confirmed DECRPM 2026 “unrecognized”
+ * report (status 0) must not restore the Herdr dirty-row tear (top frozen,
+ * bottom-only refresh). Permanently-reset (status 4) and three-argument
+ * unsupported reports still disable synchronized output.
  *
  * Static `shouldEnableSynchronizedOutputByDefault()` tests cannot catch a
  * regression in this start() handler.
@@ -53,7 +54,7 @@ describe("TUI Herdr synchronized-output DECRQM carve-out", () => {
 		previous.clear();
 	});
 
-	it("keeps synchronized output on in Herdr after a confirmed unsupported ?2026 report", () => {
+	it("keeps synchronized output on in Herdr after a DECRPM unrecognized ?2026 report", () => {
 		// If this regresses, Herdr panes tear: the live viewport's top stays frozen
 		// while only the bottom refreshes after the startup DECRQM probe.
 		Bun.env.HERDR_ENV = "1";
@@ -77,6 +78,22 @@ describe("TUI Herdr synchronized-output DECRQM carve-out", () => {
 			expect(tui.synchronizedOutput).toBe(true);
 			tui.start();
 			terminal.report(2026, false, true, 0);
+			expect(tui.synchronizedOutput).toBe(false);
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("turns synchronized output off in Herdr when a three-argument unsupported ?2026 report omits DECRPM status", () => {
+		// Custom Terminals may still call (2026, false, true) without status.
+		// That is a definitive unsupported, not Herdr's unrecognized (status 0).
+		Bun.env.HERDR_ENV = "1";
+		const terminal = new ReportingTerminal(80, 24);
+		const tui = new TUI(terminal);
+		try {
+			expect(tui.synchronizedOutput).toBe(true);
+			tui.start();
+			terminal.report(2026, false, true);
 			expect(tui.synchronizedOutput).toBe(false);
 		} finally {
 			tui.stop();

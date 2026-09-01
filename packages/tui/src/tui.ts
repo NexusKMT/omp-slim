@@ -1113,9 +1113,11 @@ export class TUI extends Container {
 			if (mode !== 2026 || !confirmed) return;
 			if (synchronizedOutputUserOverride() !== null) return;
 			// Herdr's Ghostty VTE honors DEC 2026 even when DECRQM is unanswered or
-			// reports unrecognized (status 0). Status 4 is permanently reset: the
-			// terminal cannot enable the mode, so honor the disable.
-			if (!supported && isInsideHerdr() && status !== 4) return;
+			// reports unrecognized (status 0). Other confirmed unsupported reports
+			// still disable: status 4 is permanently reset, and a three-argument
+			// callback (`status` omitted) is a definitive unsupported from a
+			// custom Terminal that does not distinguish DECRPM codes.
+			if (!supported && isInsideHerdr() && status === 0) return;
 			this.#setSynchronizedOutput(supported);
 		});
 		this.terminal.start(
