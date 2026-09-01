@@ -788,6 +788,72 @@ describe("listClaudePluginRoots", () => {
 		}
 	});
 
+	test("defers legacy !command resolution until the enabled server is prepared", async () => {
+		const pluginsDir = path.join(tempDir, ".claude", "plugins");
+		const pluginPath = path.join(tempDir, "plugins", "defer-mcp");
+		const activeSentinel = path.join(tempDir, "active-sentinel");
+		const disabledSentinel = path.join(tempDir, "disabled-sentinel");
+		const command = (sentinel: string): string => "!touch " + sentinel.replaceAll("\\", "/");
+
+		try {
+			await fs.mkdir(pluginsDir, { recursive: true });
+			await fs.mkdir(pluginPath, { recursive: true });
+			await fs.writeFile(
+				path.join(pluginsDir, "installed_plugins.json"),
+				JSON.stringify({
+					version: 2,
+					plugins: {
+						"defer-mcp@market": [
+							{
+								scope: "user",
+								installPath: pluginPath,
+								version: "1.0.0",
+								installedAt: "2026-09-01T00:00:00Z",
+								lastUpdated: "2026-09-01T00:00:00Z",
+							},
+						],
+					},
+				}),
+			);
+			await fs.writeFile(
+				path.join(pluginPath, ".mcp.json"),
+				JSON.stringify({
+					active: {
+						command: "uv",
+						env: {
+							SECRET: command(activeSentinel),
+						},
+					},
+					disabled: {
+						command: "uv",
+						enabled: false,
+						env: {
+							SECRET: command(disabledSentinel),
+						},
+					},
+				}),
+			);
+
+			// Discovery must not execute credential commands: suppression and
+			// deduplication run after provider.load(), so a disabled or shadowed
+			// server must never run its command.
+			const { configs } = await loadAllMCPConfigs(tempDir);
+			expect(configs["defer-mcp:active"]).toBeDefined();
+			expect(configs["defer-mcp:disabled"]).toBeUndefined();
+			expect(await Bun.file(activeSentinel).exists()).toBe(false);
+			expect(await Bun.file(disabledSentinel).exists()).toBe(false);
+
+			// Preparing the surviving enabled server resolves its command; the
+			// disabled server's command still never runs.
+			await new MCPManager(tempDir).prepareConfig(configs["defer-mcp:active"]);
+			expect(await Bun.file(activeSentinel).exists()).toBe(true);
+			expect(await Bun.file(disabledSentinel).exists()).toBe(false);
+		} finally {
+			await fs.rm(activeSentinel, { force: true });
+			await fs.rm(disabledSentinel, { force: true });
+		}
+	});
+
 	test("resolves legacy env indirection once for marketplace plugin env", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const pluginPath = path.join(tempDir, "plugins", "legacy-mcp");
@@ -842,18 +908,19 @@ describe("listClaudePluginRoots", () => {
 			});
 			const server = result.all.find(item => item.name === "legacy-mcp:legacy");
 
-			// Discovery resolves legacy indirection (bare env name, !command) once,
-			// while expanded values stay final even when they look like indirection.
+			// Discovery expands placeholders (final) but keeps raw legacy values
+			// unresolved: bare env names and !commands resolve only when the
+			// server is actually prepared (connected).
 			expect(server?.env).toEqual({
-				TOKEN: "test-nexus-token",
-				SECRET: "plugin-secret",
+				TOKEN: "OMP_PLUGIN_MCP_TOKEN_ENV",
+				SECRET: "!echo plugin-secret",
 				TRAP_ENV_NAME: "HOME",
 				TRAP_BANG: "!echo must-not-run",
 			});
 
-			// prepareConfig (envPolicy literal) must not reinterpret anything:
-			// TRAP_BANG is never executed and TRAP_ENV_NAME stays the literal
-			// string rather than the home directory.
+			// prepareConfig resolves the legacy values once and never reinterprets
+			// literal keys: TRAP_BANG is not executed and TRAP_ENV_NAME stays
+			// the literal string rather than the home directory.
 			const { configs } = await loadAllMCPConfigs(tempDir);
 			const delivered = await new MCPManager(tempDir).prepareConfig(configs["legacy-mcp:legacy"]);
 			expect(delivered).toMatchObject({

@@ -1541,7 +1541,15 @@ export class MCPManager {
 			// no env-name lookup, no `!command` execution, no dropping empty values.
 			if (resolved.env && resolved.envPolicy !== "literal") {
 				const nextEnv: Record<string, string> = {};
+				const literalKeys = new Set(resolved.envLiteralKeys);
 				for (const [key, value] of Object.entries(resolved.env)) {
+					// Provider-expanded keys are final package data: keep them
+					// verbatim (including empties) so they are never reinterpreted
+					// as a bare env name or !command.
+					if (literalKeys.has(key)) {
+						nextEnv[key] = value;
+						continue;
+					}
 					const resolvedValue = await resolveConfigValue(value);
 					if (resolvedValue) nextEnv[key] = resolvedValue;
 				}

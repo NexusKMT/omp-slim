@@ -32,6 +32,8 @@ export interface MCPServer {
 	 * §§4.1/9.2) — exempt from env-name lookup and `!command` resolution.
 	 */
 	envPolicy?: "literal";
+	/** Env keys whose values are final package data (expanded by the provider). */
+	envLiteralKeys?: string[];
 	/** Working directory for stdio transport */
 	cwd?: string;
 	/** URL (for HTTP/SSE transport) */

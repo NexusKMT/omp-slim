@@ -28,7 +28,6 @@ import {
 } from "./helpers";
 
 import { resolvePluginStdioPaths, substitutePluginRoot } from "./substitute-plugin-root";
-import { resolveConfigValue } from "../config/resolve-config-value";
 
 const PROVIDER_ID = "claude-plugins";
 const DISPLAY_NAME = "Claude Code Marketplace";
@@ -523,31 +522,30 @@ async function resolvePluginMCPConfig(root: ClaudePluginRoot): Promise<ResolvedM
 }
 
 /**
- * Resolve a marketplace stdio env map to its final values.
+ * Split a marketplace stdio env map into final values and legacy values.
  *
  * `${VAR}`/`${VAR:-default}` placeholders (and `${CLAUDE_PLUGIN_ROOT}` /
- * `${OMP_PLUGIN_ROOT}`) are expanded here and the result is final package
- * data: it must never be reinterpreted later as a bare env name or
- * `!command` (a second resolution would execute expanded values or
- * substitute ambient variables). Values that contained no placeholder
- * keep the legacy indirection (bare env-name lookup and `!command`
- * execution), resolved once by this provider.
+ * `${OMP_PLUGIN_ROOT}`) are expanded here and recorded as literal keys: the
+ * result is final package data and must never be reinterpreted later as a
+ * bare env name or `!command` (a second resolution would execute expanded
+ * values or substitute ambient variables). Values that contained no
+ * placeholder keep the legacy indirection (bare env-name lookup and
+ * `!command` execution) unresolved, so it only runs when the surviving
+ * enabled server is actually connected.
  */
-async function resolveMarketplaceEnv(env: Record<string, string>, rootPath: string): Promise<Record<string, string>> {
+async function resolveMarketplaceEnv(
+	env: Record<string, string>,
+	rootPath: string,
+): Promise<{ env: Record<string, string>; literalKeys: string[] }> {
 	const resolved: Record<string, string> = {};
+	const literalKeys: string[] = [];
 	for (const [key, rawValue] of Object.entries(env)) {
 		const substituted = substitutePluginRoot(rawValue, rootPath);
 		const expanded = expandEnvVarsDeep(substituted) as string;
-		if (expanded === rawValue) {
-			// No placeholder applied: keep legacy indirection.
-			const legacy = await resolveConfigValue(expanded);
-			if (legacy !== undefined) resolved[key] = legacy;
-		} else {
-			// Placeholder result is final; keep it verbatim.
-			resolved[key] = expanded;
-		}
+		if (expanded !== rawValue) literalKeys.push(key);
+		resolved[key] = expanded;
 	}
-	return resolved;
+	return { env: resolved, literalKeys };
 }
 
 async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
@@ -636,12 +634,14 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 				...(raw.timeout !== undefined && { timeout: raw.timeout }),
 				...(rooted.command !== undefined && { command: rooted.command }),
 				...(raw.args !== undefined && { args: substitutePluginRoot(raw.args, root.path) }),
-				...(resolvedEnv !== undefined && { env: resolvedEnv }),
-				// All env values are final: placeholders were expanded and legacy
-				// bare env-name/`!command` indirection was applied by this
-				// provider, so auth resolution must not reinterpret them (it
-				// would execute expanded values and leak env-named results).
-				...(resolvedEnv !== undefined && { envPolicy: "literal" as const }),
+				...(resolvedEnv !== undefined && { env: resolvedEnv.env }),
+				// Placeholder-expanded keys are final package data (literal);
+				// raw values keep legacy indirection, resolved by
+				// #resolveAuthConfig only when the server connects.
+				...(resolvedEnv !== undefined &&
+					resolvedEnv.literalKeys.length > 0 && {
+						envLiteralKeys: resolvedEnv.literalKeys,
+					}),
 				...(rooted.cwd !== undefined && { cwd: rooted.cwd }),
 				...(raw.url !== undefined && { url: expandEnvVarsDeep(raw.url) }),
 				...(raw.headers !== undefined && { headers: expandEnvVarsDeep(raw.headers) }),
