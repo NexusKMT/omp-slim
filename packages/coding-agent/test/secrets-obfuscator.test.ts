@@ -820,6 +820,7 @@ describe("SecretObfuscator friendlyName placeholders", () => {
 		const obfuscated = obfuscator.obfuscate(`api_key=${token}XYZ`);
 
 		expect(obfuscated).not.toContain("api_key=");
+		expect(obfuscated.replaceAll(token, "")).not.toContain("XYZ");
 		expect(obfuscator.deobfuscate(obfuscated)).toBe("api_key=abcdefghXYZ");
 		expect(obfuscated).toContain(token);
 		expect(obfuscator.obfuscate(obfuscated)).toBe(obfuscated);
