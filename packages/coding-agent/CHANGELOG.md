@@ -55,6 +55,7 @@
 - Fixed bash tool timeouts hanging an extra 5 seconds and reporting empty output identical to a silent success when a grandchild process held the command's output pipe open; the native shell now bounds its output-drain so the timeout fires on time, timeouts that the safety net had to enforce say the shell backend did not respond, and a wedged run no longer leaks its session ([#10308](https://github.com/can1357/oh-my-pi/issues/10308)).
 - Fixed retry countdowns and capped-wait errors displaying floating-point noise in millisecond durations.
 - Prevented browser `app.path` from terminating pre-existing same-executable applications when no reusable CDP endpoint is available ([#10264](https://github.com/can1357/oh-my-pi/issues/10264)).
+- Advisors now receive bounded tool-result excerpts and complete `ask` questions and answers, preventing reviews from missing user decisions ([#5266](https://github.com/can1357/oh-my-pi/issues/5266)).
 
 ## [18.0.11] - 2026-08-29
 

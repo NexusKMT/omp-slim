@@ -299,6 +299,277 @@ describe("advisor", () => {
 		});
 	});
 
+	describe("formatSessionHistoryMarkdown expandToolIO", () => {
+		const askCall = {
+			role: "assistant",
+			content: [
+				{
+					type: "toolCall",
+					id: "ask-1",
+					name: "ask",
+					arguments: {
+						questions: [
+							{
+								id: "deploy",
+								question: "Authorize deployment?",
+								options: [{ label: "Yes" }, { label: "No" }],
+							},
+						],
+					},
+				},
+			],
+			timestamp: 1,
+		} as unknown as AgentMessage;
+		const askResult = {
+			role: "toolResult",
+			toolCallId: "ask-1",
+			toolName: "ask",
+			content: [{ type: "text", text: "User selected: Yes" }],
+			details: { selectedOptions: ["Yes"] },
+			isError: false,
+			timestamp: 2,
+		} as unknown as AgentMessage;
+
+		it("includes the full ask question and user answer for advisor reviews", () => {
+			const compact = formatSessionHistoryMarkdown([askCall, askResult], { watchedRoles: true });
+			const expanded = formatSessionHistoryMarkdown([askCall, askResult], {
+				watchedRoles: true,
+				expandToolIO: true,
+			});
+
+			expect(compact).not.toContain("User selected: Yes");
+			expect(expanded).toContain('"question": "Authorize deployment?"');
+			expect(expanded).toContain('"label": "Yes"');
+			expect(expanded).toContain("User selected: Yes");
+		});
+
+		it("bounds long ask questions and custom answers with visible head and tail context", () => {
+			const questionEnd = "question-at-end";
+			const answerEnd = "answer-at-end";
+			const longQuestion = {
+				...(askCall as unknown as { content: { arguments: { questions: unknown[] } }[] }),
+				content: [
+					{
+						...(askCall as unknown as { content: Record<string, unknown>[] }).content[0],
+						arguments: {
+							questions: [
+								{
+									id: "deploy",
+									question: `question-start ${"context ".repeat(1200)}${questionEnd}`,
+									options: [{ label: "Custom" }],
+								},
+							],
+						},
+					},
+				],
+			} as unknown as AgentMessage;
+			const longAnswer = {
+				...(askResult as unknown as Record<string, unknown>),
+				content: [{ type: "text", text: `answer-start ${"detail ".repeat(1200)}${answerEnd}` }],
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([longQuestion, longAnswer], { expandToolIO: true });
+
+			expect(expanded).toContain("question-start");
+			expect(expanded).toContain(questionEnd);
+			expect(expanded).toContain("answer-start");
+			expect(expanded).toContain(answerEnd);
+			expect(expanded.match(/elided/g)?.length).toBeGreaterThanOrEqual(2);
+			expect(Buffer.byteLength(expanded)).toBeLessThan(18 * 1024);
+		});
+
+		it("recovers questions from orphaned ask result details", () => {
+			const orphan = {
+				role: "toolResult",
+				toolCallId: "ask-orphan",
+				toolName: "ask",
+				content: [{ type: "text", text: "deploy: Yes" }],
+				details: {
+					results: [
+						{
+							id: "deploy",
+							question: "Authorize production deployment?",
+							options: ["Yes", "No"],
+							multi: false,
+							selectedOptions: ["Yes"],
+						},
+					],
+				},
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([orphan], { expandToolIO: true });
+
+			expect(expanded).toContain("Authorize production deployment?");
+			expect(expanded).toContain("deploy: Yes");
+		});
+
+		it("bounds expanded tool results with visible head and tail context", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "read-1",
+				toolName: "read",
+				content: [{ type: "text", text: `first\n${"middle\n".repeat(2000)}last` }],
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], { expandToolIO: true });
+
+			expect(expanded).toContain("first");
+			expect(expanded).toContain("last");
+			expect(expanded).toContain("elided");
+			expect(Buffer.byteLength(expanded)).toBeLessThan(9 * 1024);
+		});
+
+		it("counts adaptive Markdown fences inside the result budget", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "read-fence",
+				toolName: "read",
+				content: [{ type: "text", text: "`".repeat(8_000) }],
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], { expandToolIO: true });
+
+			expect(expanded).toContain("Tool result:");
+			expect(Buffer.byteLength(expanded)).toBeLessThan(9 * 1024);
+		});
+
+		it("does not mark complete pathological fence content as elided", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "read-fence-complete",
+				toolName: "read",
+				content: [{ type: "text", text: "`".repeat(3_000) }],
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], { expandToolIO: true });
+
+			expect(expanded).not.toContain("elided");
+			expect(expanded).toContain("`".repeat(3_000));
+		});
+
+		it("preserves head and tail for oversized single-line results", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "read-1",
+				toolName: "read",
+				content: [{ type: "text", text: `head-${"x".repeat(20_000)}-tail` }],
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], { expandToolIO: true });
+
+			expect(expanded).toContain("head-");
+			expect(expanded).toContain("elided");
+			expect(expanded).toContain("-tail");
+			expect(Buffer.byteLength(expanded)).toBeLessThan(9 * 1024);
+		});
+
+		it("still adds its own head-tail marker when retained output contains an upstream elision marker", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "read-1",
+				toolName: "read",
+				content: [{ type: "text", text: `head-${"x".repeat(20_000)}-[…9B elided…]-tail` }],
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], { expandToolIO: true });
+
+			expect(expanded).toContain("head-");
+			expect(expanded).toContain("-tail");
+			expect(expanded.match(/elided/g)).toHaveLength(2);
+		});
+
+		it("keeps failure details alongside a partial edit diff", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "edit-1",
+				toolName: "edit",
+				content: [{ type: "text", text: "Applied first file.\nFailed to match second file; no later edits ran." }],
+				details: { diff: "--- a/first.ts\n+++ b/first.ts\n@@\n-old\n+new" },
+				isError: true,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], {
+				expandEditDiffs: true,
+				expandToolIO: true,
+			});
+
+			expect(expanded).toContain("+++ b/first.ts");
+			expect(expanded).toContain("Failed to match second file");
+		});
+
+		it("keeps successful edit results when no textual diff was rendered", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "edit-1",
+				toolName: "edit",
+				content: [{ type: "text", text: "Moved to src/new-name.ts" }],
+				details: { diff: "" },
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], {
+				expandEditDiffs: true,
+				expandToolIO: true,
+			});
+
+			expect(expanded).toContain("Moved to src/new-name.ts");
+		});
+
+		it("keeps warnings alongside a successful edit diff", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "edit-1",
+				toolName: "edit",
+				content: [{ type: "text", text: "[a.ts]\n-old\n+new\n\nWarnings:\nMatched ambiguous context." }],
+				details: { diff: "--- a/a.ts\n+++ b/a.ts\n@@\n-old\n+new" },
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], {
+				expandEditDiffs: true,
+				expandToolIO: true,
+			});
+
+			expect(expanded).toContain("+++ b/a.ts");
+			expect(expanded).toContain("Warnings:\nMatched ambiguous context.");
+		});
+
+		it("keeps rename metadata alongside a successful edit diff", () => {
+			const result = {
+				role: "toolResult",
+				toolCallId: "edit-1",
+				toolName: "edit",
+				content: [{ type: "text", text: "[src/old.ts]\nMoved to src/new.ts\n-old\n+new" }],
+				details: { diff: "@@\n-old\n+new", move: "src/new.ts" },
+				isError: false,
+				timestamp: 2,
+			} as unknown as AgentMessage;
+
+			const expanded = formatSessionHistoryMarkdown([result], {
+				expandEditDiffs: true,
+				expandToolIO: true,
+			});
+
+			expect(expanded).toContain("@@\n-old\n+new");
+			expect(expanded).toContain("Moved to src/new.ts");
+		});
+	});
+
 	describe("advisor yield-queue dispatcher", () => {
 		it("batches advice notes into one custom message", async () => {
 			const injected: AgentMessage[] = [];
@@ -1819,7 +2090,7 @@ describe("advisor", () => {
 			expect(promptText(promptInputs[0])).toContain("$$TOKABC123_");
 			expect(promptText(promptInputs[0])).not.toContain("tok_abc123");
 		});
-		it("does not scan advisor-hidden successful tool-result bodies", async () => {
+		it("obfuscates advisor-visible successful tool-result bodies", async () => {
 			const obfuscator = new SecretObfuscator([
 				{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
 				{ type: "regex", content: "tok_[a-z0-9]+" },
@@ -1848,8 +2119,39 @@ describe("advisor", () => {
 			await Promise.resolve();
 
 			expect(promptInputs).toHaveLength(1);
-			expect(promptText(promptInputs[0])).toContain("$$TOKABC123_");
+			expect(promptText(promptInputs[0])).toContain("$$");
 			expect(promptText(promptInputs[0])).not.toContain("tok_abc123");
+		});
+
+		it("redacts expanded tool results before middle truncation", async () => {
+			const secret = `BEGIN_SECRET_${"x".repeat(5_000)}_END_SECRET`;
+			const obfuscator = new SecretObfuscator([{ type: "plain", content: secret }]);
+			const placeholder = obfuscator.obfuscate(secret);
+			const promptInputs: Array<string | AgentMessage[]> = [];
+			const agent = makeAgent(promptInputs);
+			const messages: AgentMessage[] = [
+				{
+					role: "toolResult",
+					toolCallId: "c1",
+					toolName: "read",
+					content: `${"head".repeat(1_000)}${secret}${"tail".repeat(1_000)}`,
+					isError: false,
+					timestamp: 1,
+				} as unknown as AgentMessage,
+			];
+			const runtime = new AdvisorRuntime(agent, {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+				obfuscator,
+			});
+
+			runtime.onTurnEnd();
+			await runtime.waitForCatchup(1_000, 1);
+
+			const rendered = promptText(promptInputs[0]);
+			expect(rendered).toContain(placeholder);
+			expect(rendered).not.toContain("BEGIN_SECRET_");
+			expect(rendered).not.toContain("_END_SECRET");
 		});
 		it("does not scan tool-call arguments hidden by the primary-argument preview", async () => {
 			const obfuscator = new SecretObfuscator([
@@ -1879,7 +2181,7 @@ describe("advisor", () => {
 			expect(promptText(promptInputs[0])).not.toContain("tok_abc123");
 		});
 
-		it("does not scan failed tool-result text beyond its visible preview", async () => {
+		it("obfuscates failed tool-result text beyond its one-line preview", async () => {
 			const obfuscator = new SecretObfuscator([
 				{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
 				{ type: "regex", content: "tok_[a-z0-9]+", mode: "replace" },
@@ -1904,7 +2206,7 @@ describe("advisor", () => {
 			});
 			runtime.onTurnEnd();
 			await runtime.waitForCatchup(1000, 1);
-			expect(promptText(promptInputs[0])).toContain("$$TOKABC123_");
+			expect(promptText(promptInputs[0])).toContain("$$");
 			expect(promptText(promptInputs[0])).not.toContain("tok_abc123");
 		});
 
