@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Google Antigravity model-quota errors switching models instead of rotating to another account with available usage.
+- Fixed the Claude Code fingerprint version being rejected by Anthropic for newer models by updating to `2.1.251`.
+
 ## [18.1.0] - 2026-09-01
 
 ### Added
