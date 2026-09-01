@@ -526,6 +526,28 @@ describe("Settings", () => {
 			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
 		});
 
+		it("does not mislocate when a dangling symlink component is followed by ..", async () => {
+			// config.yml -> link/.., where `link -> missing` and `missing` does
+			// not exist. The filesystem follows `link` to its missing referent, so
+			// looking up `link/..` fails: there is no parent of a path that was
+			// never entered. Leaving the accumulator on the dangling `link` and
+			// then following it to `missing` would create a regular file at the
+			// wrong path and report success while the config path still fails with
+			// ENOTDIR. The resolver must surface the failure instead.
+			await fs.promises.symlink("missing", path.join(agentDir, "link"), "file");
+			await fs.promises.symlink("link/..", getConfigPath(), "file");
+			const misplaced = path.join(agentDir, "missing");
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			settings.set("setupVersion", 11);
+			await expect(settings.flush()).rejects.toThrow();
+
+			// No regular file was landed at the wrong resolved location.
+			expect(fs.existsSync(misplaced)).toBe(false);
+			// The user-managed chain head survives as a symlink.
+			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
+		});
+
 		it("does not re-emit the filesystem root as a segment for an absolute Windows target", async () => {
 			// On Windows the flush walk seeds the accumulator at parse(target).root
 			// (`C:\`) and then walks the segments. If the root is left in the string

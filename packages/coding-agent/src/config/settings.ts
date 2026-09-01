@@ -1519,6 +1519,22 @@ export class Settings {
 							} else if (lexicalDepth > 0) {
 								acc = path.dirname(acc);
 								lexicalDepth--;
+							} else {
+								// `..` immediately follows a component that could not be
+								// physically traversed — a missing name or, worse, a
+								// dangling symlink. The kernel cannot take the parent of a
+								// path it never entered: `link/..` with `link -> missing`
+								// fails once `missing` is found absent. Popping nothing here
+								// and continuing would leave `acc` on the frozen component;
+								// a dangling symlink is then followed to its missing referent
+								// and the write lands a regular file at the wrong path while
+								// reporting success. Surface the same ENOTDIR the filesystem
+								// raises so the save fails instead of mislocating.
+								const notDir = new Error(
+									`ENOTDIR: cannot resolve '..' past an unresolved component in symlink target for ${filePath}`,
+								) as Error & { code?: string };
+								notDir.code = "ENOTDIR";
+								throw notDir;
 							}
 							continue;
 						}
