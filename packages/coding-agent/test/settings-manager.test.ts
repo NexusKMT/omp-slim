@@ -62,6 +62,8 @@ describe("Settings", () => {
 	});
 
 	const getConfigPath = () => path.join(agentDir, "config.yml");
+	const withCanonicalParent = async (filePath: string) =>
+		path.join(await fs.promises.realpath(path.dirname(filePath)), path.basename(filePath));
 
 	const writeSettings = async (settings: Record<string, unknown>) => {
 		await Bun.write(getConfigPath(), YAML.stringify(settings, null, 2));
@@ -345,12 +347,13 @@ describe("Settings", () => {
 			const midPath = tempDir.join("mid-config.yml");
 			await fs.promises.symlink(finalPath, midPath, "file");
 			await fs.promises.symlink(midPath, getConfigPath(), "file");
+			const canonicalMidPath = await withCanonicalParent(midPath);
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 			const readlink = fs.promises.readlink.bind(fs.promises);
 			let injected = false;
 			vi.spyOn(fs.promises, "readlink").mockImplementation((async (target: fs.PathLike) => {
-				if (!injected && String(target) === midPath) {
+				if (!injected && String(target) === canonicalMidPath) {
 					injected = true;
 					await fs.promises.unlink(midPath);
 					throw new FsCodeError("ENOENT", "injected mid-chain link removal");
@@ -413,6 +416,7 @@ describe("Settings", () => {
 			const midPath = tempDir.join("mid-config.yml");
 			await fs.promises.symlink(finalPath, midPath, "file");
 			await fs.promises.symlink(midPath, getConfigPath(), "file");
+			const canonicalMidPath = await withCanonicalParent(midPath);
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 
@@ -429,7 +433,7 @@ describe("Settings", () => {
 					throw new FsCodeError("ETESTVALVE", "unbounded symlink walk");
 				}
 				// Retarget mid back at the chain head to close the cycle.
-				if (String(target) === midPath) return getConfigPath();
+				if (String(target) === canonicalMidPath) return getConfigPath();
 				return readlink(target);
 			}) as typeof fs.promises.readlink);
 
@@ -620,12 +624,13 @@ describe("Settings", () => {
 			// atomic rename overwrite it and falsely report success. Surface it.
 			await fs.promises.symlink("racetarget/", getConfigPath(), "file");
 			const raceTarget = path.join(agentDir, "racetarget");
+			const canonicalRaceTarget = await withCanonicalParent(raceTarget);
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 			const realpath = fs.promises.realpath.bind(fs.promises);
 			let injected = false;
 			vi.spyOn(fs.promises, "realpath").mockImplementation((async (target: fs.PathLike, ...rest: unknown[]) => {
-				if (!injected && String(target) === raceTarget) {
+				if (!injected && String(target) === canonicalRaceTarget) {
 					injected = true;
 					// Win the race: materialize the target as a regular file so this
 					// realpath resolves it and the walk never freezes.
@@ -658,6 +663,7 @@ describe("Settings", () => {
 			// reporting success. Surface it.
 			await fs.promises.symlink("racetarget/../victim.yml", getConfigPath(), "file");
 			const raceTarget = path.join(agentDir, "racetarget");
+			const canonicalRaceTarget = await withCanonicalParent(raceTarget);
 			const victim = path.join(agentDir, "victim.yml");
 			await Bun.write(victim, "keep: me");
 
@@ -665,7 +671,7 @@ describe("Settings", () => {
 			const realpath = fs.promises.realpath.bind(fs.promises);
 			let injected = false;
 			vi.spyOn(fs.promises, "realpath").mockImplementation((async (target: fs.PathLike, ...rest: unknown[]) => {
-				if (!injected && String(target) === raceTarget) {
+				if (!injected && String(target) === canonicalRaceTarget) {
 					injected = true;
 					// Win the race: materialize the component as a regular file so this
 					// realpath resolves it and the walk never freezes.
@@ -699,6 +705,7 @@ describe("Settings", () => {
 			// dangling symlink survives. Surface ENOTDIR instead.
 			await fs.promises.symlink("racetarget/", getConfigPath(), "file");
 			const raceTarget = path.join(agentDir, "racetarget");
+			const canonicalRaceTarget = await withCanonicalParent(raceTarget);
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 			const realpath = fs.promises.realpath.bind(fs.promises);
@@ -706,7 +713,7 @@ describe("Settings", () => {
 			let created = false;
 			let removed = false;
 			vi.spyOn(fs.promises, "realpath").mockImplementation((async (target: fs.PathLike, ...rest: unknown[]) => {
-				if (!created && String(target) === raceTarget) {
+				if (!created && String(target) === canonicalRaceTarget) {
 					created = true;
 					// Win the first half of the race: materialize the component as a
 					// real directory so this realpath resolves it and the walk stays
@@ -716,7 +723,7 @@ describe("Settings", () => {
 				return (realpath as (t: fs.PathLike, ...r: unknown[]) => Promise<string>)(target, ...rest);
 			}) as typeof fs.promises.realpath);
 			vi.spyOn(fs.promises, "stat").mockImplementation((async (target: fs.PathLike, ...rest: unknown[]) => {
-				if (!removed && String(target) === raceTarget) {
+				if (!removed && String(target) === canonicalRaceTarget) {
 					removed = true;
 					// Win the second half: remove the required directory after
 					// realpath resolved it but before this validation stat inspects
@@ -749,6 +756,7 @@ describe("Settings", () => {
 			// config.yml itself while the dangling symlink survives. Surface ENOTDIR.
 			await fs.promises.symlink("racetarget/../victim.yml", getConfigPath(), "file");
 			const raceTarget = path.join(agentDir, "racetarget");
+			const canonicalRaceTarget = await withCanonicalParent(raceTarget);
 			const victim = path.join(agentDir, "victim.yml");
 			await Bun.write(victim, "keep: me");
 
@@ -758,7 +766,7 @@ describe("Settings", () => {
 			let created = false;
 			let removed = false;
 			vi.spyOn(fs.promises, "realpath").mockImplementation((async (target: fs.PathLike, ...rest: unknown[]) => {
-				if (!created && String(target) === raceTarget) {
+				if (!created && String(target) === canonicalRaceTarget) {
 					created = true;
 					// Win the first half of the race: materialize the component as a
 					// real directory so this realpath resolves it and the walk stays
@@ -768,7 +776,7 @@ describe("Settings", () => {
 				return (realpath as (t: fs.PathLike, ...r: unknown[]) => Promise<string>)(target, ...rest);
 			}) as typeof fs.promises.realpath);
 			vi.spyOn(fs.promises, "stat").mockImplementation((async (target: fs.PathLike, ...rest: unknown[]) => {
-				if (!removed && String(target) === raceTarget) {
+				if (!removed && String(target) === canonicalRaceTarget) {
 					removed = true;
 					// Win the second half: remove the required directory after
 					// realpath resolved it but before this validation stat inspects
