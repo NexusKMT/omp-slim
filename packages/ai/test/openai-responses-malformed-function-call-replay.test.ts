@@ -59,7 +59,7 @@ it("removes a truncated function call from the next Responses request without lo
 		{ messages: [previous, { role: "user", content: "continue", timestamp: 2 }] },
 		undefined,
 		undefined,
-	).params.input as Array<Record<string, unknown>>;
+	).params.input as unknown as Array<Record<string, unknown>>;
 
 	expect(input).toContainEqual(expect.objectContaining({ type: "function_call", call_id: "call_ok" }));
 	expect(input).toContainEqual(expect.objectContaining({ type: "function_call_output", call_id: "call_ok" }));
