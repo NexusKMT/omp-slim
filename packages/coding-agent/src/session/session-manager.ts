@@ -44,6 +44,7 @@ import {
 	type LabelEntry,
 	type ModeChangeEntry,
 	type ModelChangeEntry,
+	type ModelUsageEntry,
 	type NewSessionOptions,
 	type ResetBoundaryEntry,
 	type ServiceTierChangeEntry,
@@ -177,6 +178,7 @@ function taskUsageFrom(details: unknown): Usage | undefined {
 }
 
 function entryUsage(entry: SessionEntry): Usage | undefined {
+	if (entry.type === "model_usage") return entry.usage;
 	if (entry.type !== "message") return undefined;
 	const message = entry.message;
 	if (message.role === "assistant") return message.usage;
@@ -2295,6 +2297,30 @@ export class SessionManager {
 		};
 		this.#recordEntry(entry);
 		this.#index.setLeaf(activeLeafId);
+		return entry.id;
+	}
+
+	/** Record usage on its initiating branch without moving a successor branch or session. */
+	appendModelUsage(
+		usage: Pick<
+			ModelUsageEntry,
+			"purpose" | "role" | "api" | "provider" | "model" | "usage" | "stopReason" | "errorMessage"
+		>,
+		owner: { sessionId: string; parentId: string | null },
+	): string | undefined {
+		if (this.#sessionId !== owner.sessionId || (owner.parentId !== null && !this.#index.has(owner.parentId))) {
+			return undefined;
+		}
+		const activeLeafId = this.#index.leafId();
+		const entry: ModelUsageEntry = {
+			type: "model_usage",
+			id: generateId(this.#index),
+			parentId: owner.parentId,
+			timestamp: nowIso(),
+			...usage,
+		};
+		this.#recordEntry(entry);
+		if (activeLeafId !== owner.parentId) this.#index.setLeaf(activeLeafId);
 		return entry.id;
 	}
 
