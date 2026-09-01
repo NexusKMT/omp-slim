@@ -23,6 +23,7 @@
 - Fixed online auto-thinking classifier calls being omitted from session token and cost totals.
 - Fixed `generate_image` skipping opaque `openai-codex` credentials for custom provider endpoints when a non-OpenAI chat model is active ([#10459](https://github.com/can1357/oh-my-pi/issues/10459)).
 - Fixed `HookUIContext.custom` types and docs so custom hook UI factories receive the `keybindings` argument the runner already passes ([#10424](https://github.com/can1357/oh-my-pi/pull/10424) by [@kvnloo](https://github.com/kvnloo)).
+- Fixed MCP OAuth token exchange when authorization endpoints embed a different resource indicator ([#10299](https://github.com/can1357/oh-my-pi/issues/10299)).
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Clarified that the default task-delegation setting follows the selected model's policy.
 - Fixed entering `/rename` without a title interrupting active session activity ([#10326](https://github.com/can1357/oh-my-pi/issues/10326)).
