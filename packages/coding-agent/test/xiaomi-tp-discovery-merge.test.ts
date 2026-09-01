@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { invalidateCommandConfig } from "@oh-my-pi/pi-coding-agent/config/model-config-values";
 import { mergeDiscoveredModel } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 
 /**
@@ -129,5 +133,34 @@ describe("mergeDiscoveredModel", () => {
 		};
 		const merged = mergeDiscoveredModel(discovered, existing);
 		expect(merged.headers?.["X-Project-Id"]).toBe("resolved-value");
+	});
+
+	test("raw provider `!command` headers win over the discovery snapshot and re-resolve on rotation (#10458)", async () => {
+		const tokenFile = path.join(os.tmpdir(), `omp-rot-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`);
+		const command = `!cat ${tokenFile}`;
+		await Bun.write(tokenFile, "token-A");
+		try {
+			// The discovered model carries the discovery-time resolved snapshot,
+			// and the existing entry stands in for a prior-merge value — either
+			// would shadow the live provider header if ordered last.
+			const discovered: Model<"openai-completions"> = {
+				...bundled(STANDARD),
+				headers: { "X-Token": "stale-snapshot" },
+			};
+			const existing: Model<"openai-completions"> = {
+				...bundled(STANDARD),
+				headers: { "X-Token": "stale-snapshot" },
+			};
+			const merged = mergeDiscoveredModel(discovered, existing, { headers: { "X-Token": command } });
+			// Raw provider header wins over the discovery snapshot...
+			expect(merged.headers?.["X-Token"]).toBe("token-A");
+			// ...and a 401 auth-retry rotation (cache invalidation) reaches it.
+			await Bun.write(tokenFile, "token-B");
+			invalidateCommandConfig(command);
+			expect(merged.headers?.["X-Token"]).toBe("token-B");
+		} finally {
+			invalidateCommandConfig(command);
+			await fs.rm(tokenFile, { force: true });
+		}
 	});
 });

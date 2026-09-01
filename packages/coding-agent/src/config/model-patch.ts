@@ -61,7 +61,11 @@ export function mergeDiscoveredModel<TApi extends Api>(
 		return buildModel({
 			...toModelSpec(model),
 			baseUrl: providerOverride?.baseUrl ?? model.baseUrl ?? existing.baseUrl,
-			headers: createLiveConfigHeaders([existing.headers, model.headers]),
+			// providerOverride.headers (raw `!command`) must be the last live
+			// source: `model.headers` is a discovery-time resolved snapshot, so
+			// without this a rotated credential (401 → cache invalidation) would
+			// stay shadowed by the stale snapshot on the inference path (#10458).
+			headers: createLiveConfigHeaders([existing.headers, model.headers, providerOverride?.headers]),
 			transport: providerOverride?.transport ?? existing.transport ?? model.transport,
 			remoteCompaction: mergeProviderRemoteCompactionConfig(
 				mergeRemoteCompactionConfig(existing.remoteCompaction, model.remoteCompaction),
