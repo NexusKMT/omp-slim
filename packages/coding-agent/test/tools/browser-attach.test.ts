@@ -64,9 +64,10 @@ interface DisposableExecutable {
 
 async function spawnDisposableExecutable(): Promise<DisposableExecutable> {
 	const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-browser-app-path-"));
-	const executable = path.join(tempDir, path.basename(process.execPath));
-	await Bun.write(executable, Bun.file(process.execPath));
-	if (process.platform !== "win32") await fs.chmod(executable, 0o755);
+	const executablePath = path.join(tempDir, path.basename(process.execPath));
+	await Bun.write(executablePath, Bun.file(process.execPath));
+	if (process.platform !== "win32") await fs.chmod(executablePath, 0o755);
+	const executable = await fs.realpath(executablePath);
 	const child = Bun.spawn([executable, "--eval", 'process.stdout.write("ready\\n"); await Bun.stdin.text()'], {
 		stdin: "pipe",
 		stdout: "pipe",
