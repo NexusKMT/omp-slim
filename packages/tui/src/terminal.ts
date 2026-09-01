@@ -154,14 +154,24 @@ export function chunkForConPTY(data: string, maxChunkBytes: number = MAX_CONPTY_
 const MAX_STDOUT_BACKLOG_BYTES = 64 * 1024 * 1024;
 
 /**
- * How long the backlog may sit above the cap with no drain progress before the
- * consumer is declared gone. A slow-but-alive terminal keeps flushing chunks
- * (so it never trips), while a wedged one that flushes nothing is torn down
- * within this window.
+ * Backlog at or below which stdout is healthy again: the pump has kept up, the
+ * TUI resumes composing frames, and a {@link StdoutStallWatchdog} episode ends.
+ * The TUI render gate (`TUI.#MAX_PENDING_OUTPUT_BYTES`) is this same value, so
+ * the watchdog stays armed across the entire range where frames are deferred —
+ * otherwise a consumer that wedges between this level and the arm cap is never
+ * re-sampled and the session freezes instead of disconnecting (#10434 review).
+ */
+export const STDOUT_BACKLOG_CLEAR_BYTES = 256 * 1024;
+
+/**
+ * How long an armed backlog may go without any drain progress before the
+ * consumer is declared gone. A slow-but-alive terminal keeps reaching new
+ * low-water marks (so it never trips); a wedged one that flushes nothing is
+ * torn down within this window.
  */
 const STDOUT_STALL_TIMEOUT_MS = 2_000;
 
-/** Cadence at which {@link ProcessTerminal} re-samples the backlog while over cap. */
+/** Cadence at which {@link ProcessTerminal} re-samples the backlog while an episode is armed. */
 const STDOUT_STALL_POLL_MS = 250;
 
 /**
@@ -173,10 +183,14 @@ const STDOUT_STALL_POLL_MS = 250;
  * a stalled-but-alive PTY reader never throws, so the byte count is the only
  * signal that output is going nowhere. Tripping on the instantaneous count
  * alone is wrong: a legitimate oversized frame (a resume repaint of dozens of
- * inline screenshots, #10430) briefly exceeds the cap and then drains. This
- * watchdog declares the terminal disconnected only when the backlog stays
- * above `capBytes` *without reaching a new low-water mark* for `stallMs` — a
- * draining terminal keeps lowering the mark and never trips, while a wedged
+ * inline screenshots, #10430) briefly exceeds the cap and then drains.
+ *
+ * An episode starts when the backlog first exceeds `armBytes` and lasts until
+ * it drains back to `clearBytes` (healthy). The backlog can fall below
+ * `armBytes` while still unhealthy, so the episode must outlive that dip
+ * (#10434): during it the watchdog declares the terminal disconnected only when
+ * the backlog makes no drain progress (no new low-water mark) for `stallMs` —
+ * a draining terminal keeps lowering the mark and never trips, while a wedged
  * one (#6854) still tears down within the window.
  *
  * Exported for unit testing; `ProcessTerminal` is the sole production user.
@@ -187,34 +201,46 @@ export class StdoutStallWatchdog {
 	#armed = false;
 
 	constructor(
-		private readonly capBytes: number = MAX_STDOUT_BACKLOG_BYTES,
+		private readonly armBytes: number = MAX_STDOUT_BACKLOG_BYTES,
+		private readonly clearBytes: number = STDOUT_BACKLOG_CLEAR_BYTES,
 		private readonly stallMs: number = STDOUT_STALL_TIMEOUT_MS,
 	) {}
 
+	/** True while an episode is active and the backlog must be polled to completion. */
+	get armed(): boolean {
+		return this.#armed;
+	}
+
 	/**
-	 * Feed the current pending-byte count and clock reading. Returns true once
-	 * the backlog has sat above the cap with no drain progress for `stallMs`,
-	 * at which point the caller treats the terminal as disconnected.
+	 * Feed the current pending-byte count and clock reading. Returns true once an
+	 * armed episode has gone `stallMs` with no drain progress, at which point the
+	 * caller treats the terminal as disconnected.
 	 */
 	sample(pending: number, nowMs: number): boolean {
-		if (pending <= this.capBytes) {
-			// Drained to/below the cap: healthy, nothing to watch.
-			this.reset();
-			return false;
-		}
-		if (!this.#armed || pending < this.#lowWater) {
-			// Newly over cap, or the pump reached a new low-water mark since the
-			// last sample: forward progress. (Re)start the stall clock.
+		if (!this.#armed) {
+			// Idle: only an oversized backlog starts an episode.
+			if (pending <= this.armBytes) return false;
 			this.#armed = true;
 			this.#lowWater = pending;
 			this.#stalledSinceMs = nowMs;
 			return false;
 		}
-		// Over cap and no new low-water mark since the clock started.
+		if (pending <= this.clearBytes) {
+			// Drained back to a healthy level: the episode is over.
+			this.reset();
+			return false;
+		}
+		if (pending < this.#lowWater) {
+			// Drain progress: a new low-water mark restarts the stall clock.
+			this.#lowWater = pending;
+			this.#stalledSinceMs = nowMs;
+			return false;
+		}
+		// Still unhealthy with no new low-water mark since the clock started.
 		return nowMs - this.#stalledSinceMs >= this.stallMs;
 	}
 
-	/** Backlog cleared (drain) or terminal torn down: stop watching. */
+	/** Episode ended (drained) or terminal torn down: stop watching. */
 	reset(): void {
 		this.#armed = false;
 		this.#lowWater = Number.POSITIVE_INFINITY;
@@ -1926,24 +1952,24 @@ export class ProcessTerminal implements Terminal {
 	}
 
 	/**
-	 * Reconcile the stdout backlog after a write or a poll. Under the cap the
-	 * consumer is healthy and the watchdog is disarmed; over it, the watchdog
-	 * decides whether the backlog is draining (keep polling) or wedged (tear
-	 * down). See {@link StdoutStallWatchdog}, #6854, and #10430.
+	 * Reconcile the stdout backlog after a write or a poll. The watchdog runs an
+	 * episode from the moment the backlog crosses the arm cap until it drains to
+	 * a healthy level; while an episode is armed we keep a poll running because,
+	 * once the render gate (256 KiB) defers frames, no write is guaranteed to
+	 * re-sample the backlog — so a consumer that wedges anywhere above the
+	 * healthy threshold, even after the backlog dips below the arm cap, is still
+	 * caught. See {@link StdoutStallWatchdog}, #6854, #10430, and #10434.
 	 */
 	#trackStdoutBacklog(pending: number): void {
-		if (pending <= MAX_STDOUT_BACKLOG_BYTES) {
-			this.#disarmStdoutStallWatchdog();
-			return;
-		}
 		if (this.#stdoutStall.sample(pending, Date.now())) {
 			this.#disarmStdoutStallWatchdog();
-			this.#markTerminalDisconnected("stdout backlog exceeded cap without draining; PTY consumer stalled");
+			this.#markTerminalDisconnected("stdout backlog stalled without draining; PTY consumer stalled");
 			return;
 		}
-		// Over cap but still draining: re-sample the backlog until it clears or
-		// stalls. Writes stop once the frame gate (256 KiB) engages, so without
-		// this poll a wedged consumer would never be re-checked.
+		if (!this.#stdoutStall.armed) {
+			this.#disarmStdoutStallWatchdog();
+			return;
+		}
 		if (!this.#stdoutStallTimer) {
 			this.#stdoutStallTimer = setInterval(() => this.#pollStdoutStall(), STDOUT_STALL_POLL_MS);
 			this.#stdoutStallTimer.unref?.();
