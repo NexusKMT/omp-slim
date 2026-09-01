@@ -314,6 +314,18 @@ describe("AgentSession advisor toggle", () => {
 			"Advisor setting is enabled, but no model is assigned to the 'advisor' role.",
 		);
 	});
+	it("keeps advisors without a live runtime yielded during a primary turn", () => {
+		// A configured advisor with no resolvable model has no runtime and can
+		// never review — the streaming mask must not reopen its eye mid-turn.
+		session.settings.setModelRole("advisor", "nonexistent/advisor-model");
+		expect(session.setAdvisorEnabled(true)).toBe(false);
+
+		const yielded = () => session.getAdvisorStatusOverview().advisors[0]?.yielded;
+		expect(yielded()).toBe(true);
+		session.agent.state.isStreaming = true;
+		expect(yielded()).toBe(true);
+		session.agent.state.isStreaming = false;
+	});
 
 	it("activates an enabled advisor once background model discovery settles", async () => {
 		// Advisor role points at a valid model that is missing from the catalog at
@@ -989,11 +1001,10 @@ describe("AgentSession advisor toggle", () => {
 			const markUsageLimitReached = vi
 				.spyOn(authStorage, "markUsageLimitReached")
 				.mockResolvedValue({ switched: false });
-			// The quota latch makes `yielded` true even though the failed batch is
-			// requeued — the runtime must still emit advisor_yielded so the status
-			// line repaints the closed eye without waiting for unrelated activity.
-			const events: string[] = [];
-			const unsubscribe = quotaSession.subscribe(event => events.push(event.type));
+			const advisorYielded = Promise.withResolvers<void>();
+			const unsubscribe = quotaSession.subscribe(event => {
+				if (event.type === "advisor_yielded") advisorYielded.resolve();
+			});
 
 			await quotaSession.prompt("Trigger advisor");
 			await quotaSession.waitForIdle();
@@ -1001,12 +1012,16 @@ describe("AgentSession advisor toggle", () => {
 			expect(markUsageLimitReached).toHaveBeenCalledTimes(1);
 			expect(markUsageLimitReached.mock.calls[0]?.[0]).toBe(model.provider);
 			expect(quotaSession.getAdvisorStatusOverview().advisors[0]?.yielded).toBe(true);
-			const deadline = Date.now() + 2000;
-			while (!events.includes("advisor_yielded") && Date.now() < deadline) {
-				await Bun.sleep(10);
-			}
+			// A quota-paused runtime cannot accept work either — the streaming
+			// mask must not reopen its eye mid-turn.
+			quotaSession.agent.state.isStreaming = true;
+			expect(quotaSession.getAdvisorStatusOverview().advisors[0]?.yielded).toBe(true);
+			quotaSession.agent.state.isStreaming = false;
+
+			// Repaint contract: advisor_yielded must have fired even though the
+			// failed batch stays requeued (the quota latch makes yielded true).
+			await advisorYielded.promise;
 			unsubscribe();
-			expect(events).toContain("advisor_yielded");
 		} finally {
 			await quotaSession.dispose();
 			vi.restoreAllMocks();

@@ -1897,11 +1897,15 @@ export class SessionAdvisors {
 	getAdvisorStatusOverview(): { configured: boolean; advisors: AdvisorStatusOverviewEntry[] } {
 		// Override stale map entries with live runtime status: failureNotified/quotaExhausted
 		// clear on reset() but #advisorStatuses lags until the next build.
-		const liveStatusBySlug = new Map<string, { status: AdvisorRuntimeStatus; yielded: boolean }>();
+		const liveStatusBySlug = new Map<
+			string,
+			{ status: AdvisorRuntimeStatus; yielded: boolean; canReview: boolean }
+		>();
 		for (const a of this.#advisors) {
 			liveStatusBySlug.set(a.slug, {
 				status: a.runtime.quotaExhausted ? "quota_exhausted" : a.runtime.failureNotified ? "error" : "running",
 				yielded: a.runtime.yielded,
+				canReview: !a.runtime.quotaExhausted && !a.runtime.halted && !a.runtime.disposed,
 			});
 		}
 		const advisors = [...this.#advisorStatuses.entries()].map(([slug, { name, status }]) => {
@@ -1910,12 +1914,12 @@ export class SessionAdvisors {
 				name,
 				status: live?.status ?? status,
 				// The eye only closes after the primary itself has yielded: while it
-				// is streaming, the advisor may still receive (and comment on) new
-				// deltas even when its current backlog is empty, so a mid-turn
-				// repaint must never show the closed eye. Roster entries without a
-				// live runtime (disabled, no model, paused) never comment again —
-				// treat them as yielded regardless.
-				yielded: this.#host.agent.state.isStreaming ? false : (live?.yielded ?? true),
+				// is streaming, an advisor that can still accept review work may
+				// receive (and comment on) new deltas even when its backlog is
+				// empty. Advisors that cannot accept work — no live runtime
+				// (paused/no-model) or a quota-exhausted/halted runtime — stay
+				// yielded regardless of the primary's stream state.
+				yielded: live?.canReview && this.#host.agent.state.isStreaming ? false : (live?.yielded ?? true),
 			};
 		});
 		return { configured: this.#advisorEnabled, advisors };
