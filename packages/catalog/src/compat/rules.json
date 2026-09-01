@@ -64,7 +64,6 @@
 		"providers/openai.kdl",
 		"providers/opencode-go.kdl",
 		"providers/opencode-zen.kdl",
-		"providers/opencode.kdl",
 		"providers/openrouter.kdl",
 		"providers/qianfan.kdl",
 		"providers/sakana.kdl",
@@ -5177,7 +5176,6 @@
 					"nanogpt",
 					"novita",
 					"nvidia",
-					"opencode",
 					"opencode-go",
 					"opencode-zen",
 					"together",
@@ -11416,15 +11414,6 @@
 				}
 			},
 			{
-				"source": "providers/opencode.kdl:3",
-				"providers": [
-					"opencode"
-				],
-				"thinking": {
-					"mode": "effort"
-				}
-			},
-			{
 				"source": "providers/openrouter.kdl:10",
 				"class": "anthropic",
 				"providers": [
@@ -14365,6 +14354,11 @@
 					]
 				}
 			}
+		],
+		"retiredProviders": [
+			"wafer-pass",
+			"wandb",
+			"opencode"
 		],
 		"planRequirements": [
 			{

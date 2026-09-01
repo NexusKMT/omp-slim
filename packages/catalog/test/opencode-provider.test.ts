@@ -18,6 +18,7 @@ import {
 } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import type { FetchImpl } from "@oh-my-pi/pi-utils";
+import { mergePreviousSnapshotModels } from "../scripts/generate-models";
 
 const LIVE_FREE_MODEL_IDS = [
 	"deepseek-v4-flash-free",
@@ -788,5 +789,54 @@ describe("OpenCode provider discovery", () => {
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("issue #10416 — retired bare opencode provider", () => {
+	// #309 split `opencode` into `opencode-go` / `opencode-zen`, and models.dev's
+	// `opencode` key is remapped to `opencode-zen`. The legacy `opencode` rows
+	// survived as previous-snapshot zombies and surfaced in the picker as a dead
+	// provider with no descriptor/auth path.
+	test("prunes bare `opencode` rows while restoring live previous-snapshot providers", () => {
+		const staleModel = buildModel({
+			id: "legacy-opencode-model",
+			name: "Legacy OpenCode Model",
+			api: "openai-completions",
+			provider: "opencode",
+			baseUrl: "https://legacy.invalid/v1",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128_000,
+			maxTokens: 16_384,
+		});
+		const liveModel = buildModel({
+			id: "live-fallback-model",
+			name: "Live Fallback Model",
+			api: "openai-completions",
+			provider: "fixture-provider",
+			baseUrl: "https://fixture.invalid/v1",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128_000,
+			maxTokens: 16_384,
+		});
+
+		const merged = mergePreviousSnapshotModels(
+			[],
+			{
+				opencode: { [staleModel.id]: staleModel },
+				"fixture-provider": { [liveModel.id]: liveModel },
+			},
+			new Set(),
+		);
+
+		expect(merged.map(model => `${model.provider}/${model.id}`)).toEqual(["fixture-provider/live-fallback-model"]);
+	});
+
+	test("the split OpenCode providers remain populated", () => {
+		expect(getBundledModels("opencode-go").length).toBeGreaterThan(0);
+		expect(getBundledModels("opencode-zen").length).toBeGreaterThan(0);
 	});
 });
