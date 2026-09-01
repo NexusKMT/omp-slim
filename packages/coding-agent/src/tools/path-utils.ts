@@ -3,7 +3,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as url from "node:url";
 import { glob } from "@oh-my-pi/pi-natives";
-import { hasFsCode, isEnoent, isEnotdir, isWsl, stripWindowsExtendedLengthPathPrefix } from "@oh-my-pi/pi-utils";
+import {
+	hasFsCode,
+	isEnoent,
+	isEnotdir,
+	isWsl,
+	stripWindowsExtendedLengthPathPrefix,
+	windowsPathToWslMount,
+} from "@oh-my-pi/pi-utils";
 import type { Skill } from "../extensibility/skills";
 import { InternalUrlRouter, type LocalProtocolOptions } from "../internal-urls";
 import { ToolAbortError, ToolError } from "./tool-errors";
@@ -197,18 +204,6 @@ function windowsDriveAliasPath(filePath: string): string | undefined {
 	return tail ? `${drive}:\\${tail}` : `${drive}:\\`;
 }
 
-/** `C:\Users\me` / `C:/Users/me` → `/mnt/c/Users/me` (the default WSL drive mount). */
-const WINDOWS_DRIVE_PATH_RE = /^([A-Za-z]):[\\/](.*)$/;
-
-function wslWindowsDrivePath(filePath: string): string | undefined {
-	const normalized = path.win32.normalize(filePath);
-	const match = WINDOWS_DRIVE_PATH_RE.exec(normalized);
-	if (!match) return undefined;
-	const [, drive, rest] = match;
-	const segments = rest.split("\\").filter(Boolean);
-	return path.posix.join("/mnt", drive!.toLowerCase(), ...segments);
-}
-
 /**
  * Reconcile a drive-alias path with the current host so filesystem reads land
  * on the same bytes the user meant, in either translation direction:
@@ -225,7 +220,7 @@ export function normalizeWindowsDriveAliasPath(
 	env: NodeJS.ProcessEnv = process.env,
 ): string {
 	if (platform === "win32") return windowsDriveAliasPath(filePath) ?? filePath;
-	if (isWsl(platform, env)) return wslWindowsDrivePath(filePath) ?? filePath;
+	if (isWsl(platform, env)) return windowsPathToWslMount(filePath) ?? filePath;
 	return filePath;
 }
 
