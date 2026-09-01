@@ -704,6 +704,66 @@ describe("listClaudePluginRoots", () => {
 		}
 	});
 
+	test("expands env placeholders in marketplace plugin MCP stdio environment", async () => {
+		const pluginsDir = path.join(tempDir, ".claude", "plugins");
+		const pluginPath = path.join(tempDir, "plugins", "ida-mcp");
+		const originalNexusId = process.env.OMP_PLUGIN_MCP_NEXUS_ID;
+		const originalStateDir = process.env.OMP_PLUGIN_MCP_STATE_DIR;
+		const envPlaceholder = (name: string): string => ["$", "{", name, ":-}"].join("");
+		restoreEnvValue("OMP_PLUGIN_MCP_NEXUS_ID", "test-nexus");
+		restoreEnvValue("OMP_PLUGIN_MCP_STATE_DIR", undefined);
+
+		try {
+			await fs.mkdir(pluginsDir, { recursive: true });
+			await fs.mkdir(pluginPath, { recursive: true });
+			await fs.writeFile(
+				path.join(pluginsDir, "installed_plugins.json"),
+				JSON.stringify({
+					version: 2,
+					plugins: {
+						"ida-mcp@hex-rays": [
+							{
+								scope: "user",
+								installPath: pluginPath,
+								version: "1.0.0",
+								installedAt: "2026-09-01T00:00:00Z",
+								lastUpdated: "2026-09-01T00:00:00Z",
+							},
+						],
+					},
+				}),
+			);
+			await fs.writeFile(
+				path.join(pluginPath, ".mcp.json"),
+				JSON.stringify({
+					ida: {
+						command: "uv",
+						env: {
+							IDA_NEXUS_ID: envPlaceholder("OMP_PLUGIN_MCP_NEXUS_ID"),
+							IDA_NEXUS_STATE_DIR: envPlaceholder("OMP_PLUGIN_MCP_STATE_DIR"),
+							PLUGIN_ROOT: ["$", "{CLAUDE_PLUGIN_ROOT}"].join(""),
+						},
+					},
+				}),
+			);
+
+			const result = await loadCapability<MCPServer>(mcpCapability.id, {
+				cwd: tempDir,
+				providers: ["claude-plugins"],
+			});
+			const server = result.all.find(item => item.name === "ida-mcp:ida");
+
+			expect(server?.env).toEqual({
+				IDA_NEXUS_ID: "test-nexus",
+				IDA_NEXUS_STATE_DIR: "",
+				PLUGIN_ROOT: pluginPath,
+			});
+		} finally {
+			restoreEnvValue("OMP_PLUGIN_MCP_NEXUS_ID", originalNexusId);
+			restoreEnvValue("OMP_PLUGIN_MCP_STATE_DIR", originalStateDir);
+		}
+	});
+
 	test("uses OMP then Claude manifest mcpServers paths before .mcp.json", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const ompPluginPath = path.join(tempDir, "plugins", "omp-pointer");
