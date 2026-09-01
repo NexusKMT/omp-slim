@@ -5,6 +5,7 @@
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ChatTranscriptBuilder } from "@oh-my-pi/pi-coding-agent/modes/components/chat-transcript-builder";
 import { ReadToolGroupComponent } from "@oh-my-pi/pi-coding-agent/modes/components/read-tool-group";
@@ -183,7 +184,7 @@ describe("ChatTranscriptBuilder token-usage row timestamp", () => {
 			cwd: process.cwd(),
 			requestRender: () => {},
 		});
-		const message: Extract<AgentMessage, { role: "assistant" }> = {
+		const message: AssistantMessage = {
 			role: "assistant",
 			content: [{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "echo ok" } }],
 			api: "anthropic-messages",
