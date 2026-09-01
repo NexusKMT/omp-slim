@@ -12,7 +12,7 @@ import { CustomToolAdapter } from "../extensibility/custom-tools/wrapper";
 import type { ExtensionRunner, SourceInfo, ToolInfo } from "../extensibility/extensions";
 import { ExtensionToolWrapper } from "../extensibility/extensions/wrapper";
 import { loadSkills, type Skill, type SkillWarning, setActiveSkills } from "../extensibility/skills";
-import { type LocalProtocolOptions, XD_URL_PREFIX } from "../internal-urls";
+import { stripXdUrlPrefix, type LocalProtocolOptions, XD_URL_PREFIX } from "../internal-urls";
 import { deduplicateMCPToolsByName } from "../mcp/tool-bridge";
 import { resolveMemoryBackend } from "../memory-backend/resolve";
 import { MEMORY_BACKEND_TOOL_NAMES } from "../memory-backend/tool-names";
@@ -28,7 +28,6 @@ import { ToolAbortError, ToolError } from "../tools/tool-errors";
 import {
 	isMountableUnderXdev,
 	listXdevTools,
-	resolveMountedXdevTool,
 	type XdevState,
 	xdevDocsFor,
 	xdevEntries,
@@ -422,9 +421,9 @@ export class SessionTools {
 		return this.#toolRegistry.has("edit");
 	}
 
-	/** Looks up a registered tool by its canonical name or mounted `xd://` alias. */
+	/** Looks up a registered tool by its canonical name or `xd://` alias. */
 	getToolByName(name: string): AgentTool | undefined {
-		return this.#toolRegistry.get(name) ?? (this.#xdev ? resolveMountedXdevTool(this.#xdev, name) : undefined);
+		return this.#toolRegistry.get(name) ?? this.#toolRegistry.get(stripXdUrlPrefix(name));
 	}
 
 	/** Looks up an enabled tool through the same ACP permission gate as direct calls. */

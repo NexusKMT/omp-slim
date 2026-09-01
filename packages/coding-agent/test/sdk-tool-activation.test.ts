@@ -150,6 +150,12 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(session.getActiveToolNames()).not.toContain("default_inactive_tool");
 			expect(session.systemPrompt.join("\n")).toContain("default_active_tool");
 			expect(session.systemPrompt.join("\n")).not.toContain("default_inactive_tool");
+
+			// Presentation lookup must survive Code Mode clearing the live mount set
+			// so historical prefixed calls retain their canonical renderer.
+			await session.setActiveToolPresentation(session.getActiveToolNames(), []);
+			expect(session.getMountedXdevToolNames()).not.toContain("default_active_tool");
+			expect(session.getToolByName("xd://default_active_tool")?.name).toBe("default_active_tool");
 		} finally {
 			await session.dispose();
 		}
