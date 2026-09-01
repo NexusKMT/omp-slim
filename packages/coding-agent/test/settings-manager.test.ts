@@ -548,6 +548,66 @@ describe("Settings", () => {
 			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
 		});
 
+		it("does not mislocate when a dangling component precedes further names then ..", async () => {
+			// config.yml -> missing/child/.., where `missing` does not exist. The
+			// walk freezes at `missing`, appends `child` lexically, then hits `..`.
+			// `missing` was never entered, so `child` is not a real component the
+			// kernel can pop: `missing/child/..` fails with ENOTDIR. Lexically
+			// popping `child` and returning `missing` would land a regular file at
+			// the wrong path and report success while config.yml stays unusable.
+			await fs.promises.symlink("missing/child/..", getConfigPath(), "file");
+			const misplaced = path.join(agentDir, "missing");
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			settings.set("setupVersion", 12);
+			await expect(settings.flush()).rejects.toThrow();
+
+			// No regular file was landed at the frozen component.
+			expect(fs.existsSync(misplaced)).toBe(false);
+			// The user-managed chain head survives as a symlink.
+			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
+		});
+
+		it("still pops correctly when a real child/.. was actually traversed", async () => {
+			// config.yml -> realdir/child/final.yml, where realdir and
+			// realdir/child both exist on disk and final.yml is missing. The `..`
+			// after `child` pops a component that WAS entered, so the write must
+			// still land on realdir/final.yml — proving the frozen-branch throw
+			// does not over-reject a legitimate physically traversed `..`.
+			const realDir = path.join(agentDir, "realdir");
+			const childDir = path.join(realDir, "child");
+			fs.mkdirSync(childDir, { recursive: true });
+			await fs.promises.symlink("realdir/child/../final-config.yml", getConfigPath(), "file");
+			const finalPath = path.join(realDir, "final-config.yml");
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			settings.set("setupVersion", 13);
+			await settings.flush();
+
+			expect(YAML.parse(await Bun.file(finalPath).text())).toEqual({ setupVersion: 13 });
+			// The user-managed chain head survives as a symlink.
+			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
+		});
+
+		it("does not mislocate when a dangling target ends in a trailing slash", async () => {
+			// config.yml -> missing/, where `missing` does not exist. The trailing
+			// slash demands `missing` be a traversable directory. Dropping the
+			// terminal empty segment and returning `missing` would land a regular
+			// file there and report success, while opening config.yml then fails
+			// with ENOTDIR because a file is not a directory. Surface the failure.
+			await fs.promises.symlink("missing/", getConfigPath(), "file");
+			const misplaced = path.join(agentDir, "missing");
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			settings.set("setupVersion", 14);
+			await expect(settings.flush()).rejects.toThrow();
+
+			// No regular file was landed at the frozen component.
+			expect(fs.existsSync(misplaced)).toBe(false);
+			// The user-managed chain head survives as a symlink.
+			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
+		});
+
 		it("does not re-emit the filesystem root as a segment for an absolute Windows target", async () => {
 			// On Windows the flush walk seeds the accumulator at parse(target).root
 			// (`C:\`) and then walks the segments. If the root is left in the string

@@ -1502,45 +1502,59 @@ export class Settings {
 							if (!isEnoent(error)) throw error;
 						}
 					}
-					// realpath() on the deepest existing prefix keeps `acc` canonical
-					// so each `..` pops the real parent. Once a NAMED component does
-					// not exist on disk, stop physically resolving: the remainder is
-					// joined lexically, and a following `..` must NOT pop a component
-					// that was never traversed (`missing/../final` must not climb to a
-					// sibling of `missing`). Track the depth appended after that point
-					// so `..` only unwinds segments actually entered post-miss.
+					// realpath() on the deepest existing prefix keeps `acc` canonical so
+					// each `..` pops the real parent. Once a NAMED component does not
+					// exist on disk the walk is FROZEN: the remainder is joined
+					// lexically, but nothing past the miss was physically traversable,
+					// so any construct that requires ENTERING the frozen component — a
+					// `..`, or a trailing `/` or `/.` that demands it be a directory —
+					// cannot be satisfied by the filesystem and must surface ENOTDIR
+					// rather than lexically landing a regular file at a mislocated path.
 					let frozen = false;
-					let lexicalDepth = 0;
 					for (const segment of physicalTargetSegments(target)) {
-						if (segment === "" || segment === ".") continue;
-						if (segment === "..") {
-							if (!frozen) {
-								acc = path.dirname(acc);
-							} else if (lexicalDepth > 0) {
-								acc = path.dirname(acc);
-								lexicalDepth--;
-							} else {
-								// `..` immediately follows a component that could not be
-								// physically traversed — a missing name or, worse, a
-								// dangling symlink. The kernel cannot take the parent of a
-								// path it never entered: `link/..` with `link -> missing`
-								// fails once `missing` is found absent. Popping nothing here
-								// and continuing would leave `acc` on the frozen component;
-								// a dangling symlink is then followed to its missing referent
-								// and the write lands a regular file at the wrong path while
-								// reporting success. Surface the same ENOTDIR the filesystem
-								// raises so the save fails instead of mislocating.
+						if (segment === "" || segment === ".") {
+							if (frozen) {
+								// A trailing `/` (empty segment) or `/.` demands the
+								// preceding component be a traversable directory. Before the
+								// freeze that component was confirmed on disk, so the
+								// requirement holds and the segment is inert. After the
+								// freeze the component is a nonexistent/dangling name that
+								// can never be a directory (`config.yml -> missing/`):
+								// dropping the segment and writing a regular file there
+								// mislocates and falsely reports success while the logical
+								// config path stays unusable with ENOTDIR. Surface it.
 								const notDir = new Error(
-									`ENOTDIR: cannot resolve '..' past an unresolved component in symlink target for ${filePath}`,
+									`ENOTDIR: symlink target requires an unresolved component to be a directory for ${filePath}`,
 								) as Error & { code?: string };
 								notDir.code = "ENOTDIR";
 								throw notDir;
 							}
 							continue;
 						}
+						if (segment === "..") {
+							if (frozen) {
+								// `..` after a component that could not be physically
+								// traversed — a missing name or a dangling symlink — whether
+								// the `..` follows it immediately (`link/..`) or after further
+								// lexical names (`missing/child/..`). The kernel cannot take
+								// the parent of a path it never entered: `missing/child/..`
+								// fails because `missing` was never a directory to descend,
+								// so the lexically appended `child` is not a real component to
+								// pop. Popping and continuing would leave `acc` on a
+								// mislocated path and land a regular file there while
+								// reporting success. Surface the ENOTDIR the filesystem
+								// raises instead.
+								const notDir = new Error(
+									`ENOTDIR: cannot resolve '..' past an unresolved component in symlink target for ${filePath}`,
+								) as Error & { code?: string };
+								notDir.code = "ENOTDIR";
+								throw notDir;
+							}
+							acc = path.dirname(acc);
+							continue;
+						}
 						if (frozen) {
 							acc = path.join(acc, segment);
-							lexicalDepth++;
 							continue;
 						}
 						const candidate = path.join(acc, segment);
@@ -1550,7 +1564,6 @@ export class Settings {
 							if (!isEnoent(error)) throw error;
 							acc = candidate;
 							frozen = true;
-							lexicalDepth = 0;
 						}
 					}
 					const resolved = acc;
