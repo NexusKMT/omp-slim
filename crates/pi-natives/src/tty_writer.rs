@@ -401,27 +401,22 @@ mod tests {
 		// and then blocks on the remainder with no reader draining.
 		let total = 1024 * 1024;
 		push(&writer, &vec![b'x'; total]);
-		// Wait until the pump has filled the pipe buffer and stopped making
-		// progress (blocked on the undrained tail).
-		let mut last = writer.pending();
+		// Wait until the pump has written at least one chunk, but remains blocked
+		// on the undrained tail. Do not treat one unchanged sample as stability:
+		// under full-suite load the pump thread may not be scheduled before the
+		// first poll.
 		let deadline = Instant::now() + Duration::from_secs(2);
 		loop {
 			std::thread::sleep(Duration::from_millis(20));
-			let now = writer.pending();
-			if now == last || Instant::now() >= deadline {
+			let pending = writer.pending();
+			if pending > 0 && pending < total as u32 {
 				break;
 			}
-			last = now;
+			assert!(
+				Instant::now() < deadline,
+				"pump made no observable partial progress; pending {pending} of {total}"
+			);
 		}
-		// Per-chunk accounting: the bytes already in the pipe are subtracted, so
-		// `pending()` has fallen below the full batch while the pump is still
-		// blocked — whole-batch accounting would report the full `total` here.
-		let pending = writer.pending();
-		assert!(pending > 0, "pump should still be blocked with data queued");
-		assert!(
-			pending < total as u32,
-			"pending must reflect partial drain, got {pending} of {total}"
-		);
 		// Drain the rest so stop() can join the pump thread.
 		let reader = std::thread::spawn(move || {
 			let mut buf = vec![0u8; 64 * 1024];
