@@ -43,6 +43,7 @@
 - Fixed custom discovery providers sending unresolved `!command` header values (e.g. `!basename $PWD`) verbatim on inference requests; command-backed provider headers now resolve on discovered models too ([#10457](https://github.com/can1357/oh-my-pi/issues/10457)).
 - Fixed pasting a Windows drive path (e.g. `C:\Users\me\pic.png`) into omp under WSL failing with "Image not found"; drive paths now resolve to their `/mnt/<drive>` mount for image paste and all file reads ([#10426](https://github.com/can1357/oh-my-pi/issues/10426))
 - Fixed sloppy/SPARSE edit no-match guidance emitting a mislabeled "Copy-ready corrected operation" that guessed a fuzzy anchor and dropped sibling operations; low-confidence matches are now surfaced as non-copyable guidance ([#10411](https://github.com/can1357/oh-my-pi/issues/10411)).
+- Fixed agents in a `hub` wait loop leaving a user's message unanswered: the tool prompt now separates a user steering message from the pollable wake reasons, and states that only a plain text block reaches the user ([#10437](https://github.com/can1357/oh-my-pi/pull/10437)).
 
 ## [18.0.11] - 2026-08-29
 
