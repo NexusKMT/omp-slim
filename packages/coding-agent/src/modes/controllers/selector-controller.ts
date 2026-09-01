@@ -108,7 +108,6 @@ import { ToolExecutionComponent } from "../components/tool-execution";
 import { TranscriptBlock } from "../components/transcript-container";
 import { TreeSelectorComponent } from "../components/tree-selector";
 import type { SessionObserverRegistry } from "../session-observer-registry";
-import { buildCopyTargets } from "../utils/copy-targets";
 
 const MANUAL_LOGIN_PROMPT = "Paste the authorization code (or full redirect URL), then press Enter:";
 
@@ -1371,32 +1370,53 @@ export class SelectorController {
 	}
 
 	showCopySelector(): void {
-		const targets = buildCopyTargets(this.ctx.session);
-		if (targets.length === 0) {
+		const entries = this.ctx.sessionManager
+			.getBranch()
+			.filter((entry): entry is SessionMessageEntry => entry.type === "message");
+		if (entries.length === 0) {
 			this.ctx.showStatus("Nothing to copy yet.");
 			return;
 		}
 
 		let overlayHandle: OverlayHandle | undefined;
+		let selector: CopySelectorComponent | undefined;
 		const done = () => {
 			overlayHandle?.hide();
+			selector?.dispose();
+			this.focusActiveEditorArea();
 			this.ctx.ui.requestRender();
 		};
-		const selector = new CopySelectorComponent(targets, {
-			onPick: target => {
+		selector = new CopySelectorComponent(entries, {
+			ui: this.ctx.ui,
+			getTool: name => this.ctx.session.getToolByName(name),
+			isBuiltInTool: name => this.ctx.session.hasBuiltInTool(name),
+			getMessageRenderer: type => this.ctx.session.extensionRunner?.getMessageRenderer(type),
+			cwd: this.ctx.sessionManager.getCwd(),
+			hideThinkingBlock: () => this.ctx.effectiveHideThinkingBlock,
+			proseOnlyThinking: () => this.ctx.proseOnlyThinking,
+			requestRender: () => this.ctx.ui.requestRender(),
+			onPick: (content, label) => {
 				done();
-				if (target.content === undefined) return;
-				void copyToClipboard(target.content);
-				this.ctx.showStatus(target.copyMessage ?? "Copied to clipboard");
+				if (!content.trim()) {
+					this.ctx.showStatus("Nothing to copy in that item");
+					return;
+				}
+				void copyToClipboard(content);
+				this.ctx.showStatus(`Copied ${label} to clipboard`);
 			},
 			onCancel: done,
 		});
-
+		if (selector.targetCount === 0) {
+			selector.dispose();
+			this.ctx.showStatus("Nothing to copy yet.");
+			return;
+		}
 		overlayHandle = this.ctx.ui.showOverlay(selector, {
 			anchor: "bottom-center",
 			width: "100%",
 			maxHeight: "100%",
 			margin: 0,
+			fullscreen: true,
 		});
 		this.ctx.ui.setFocus(selector);
 		this.ctx.ui.requestRender();

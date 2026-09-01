@@ -32,7 +32,6 @@ import {
 	sliceByColumn,
 	type TUI,
 	truncateToWidth,
-	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import type { MessageRenderer } from "../../extensibility/extensions/types";
 import type { SessionMessageEntry } from "../../session/session-entries";
@@ -46,7 +45,17 @@ import {
 import { ChatTranscriptBuilder } from "./chat-transcript-builder";
 import { DynamicBorder } from "./dynamic-border";
 import { fit } from "./overlay-box";
-import { isUsageRowBlock } from "./usage-row";
+import {
+	appendOutlineEntries,
+	type ComposedColumn,
+	composeOutlineColumn,
+	type OutlineTarget,
+	outlineVisibility,
+	positionRail,
+	stripPromptZones,
+	userMessageHasText,
+	userMessageText,
+} from "./transcript-outline";
 
 /** One alternate branch at a divergence: its root and message path root → most-recent leaf. */
 export interface BranchVariantPath {
@@ -71,34 +80,13 @@ export interface RewindSelectorDeps {
 	onCancel: () => void;
 }
 
-/** One selectable rewind point: a message entry plus its rendered block range. */
-interface RewindTarget {
-	/** Entry the rewind lands on; extended over trailing componentless tool results. */
-	entryId: string;
-	/** Entry that opened this turn (pre-fold) — the anchor for sibling-branch lookup. */
-	turnId: string;
-	/** Real user prompt — the Left/Right jump set and the branch-and-redraft flow. */
-	isUserTurn: boolean;
-	/** First transcript-container child rendered by this entry. */
-	start: number;
-	/** One past the last child rendered by this entry. */
-	end: number;
-}
-
 /** Lazily built transcript column for one alternate branch. */
 interface SiblingColumn {
 	rootId: string;
 	builder: ChatTranscriptBuilder;
-	targets: RewindTarget[];
+	targets: OutlineTarget[];
 	/** Short label for the column header: the branch's first user prompt. */
 	label: string;
-}
-
-/** Composed rows of one column plus the outline's line range within them. */
-interface ComposedColumn {
-	lines: string[];
-	selStart: number;
-	selEnd: number;
 }
 
 /** Rows the frame chrome occupies: top rule, header, rule, footer hint, bottom rule. */
@@ -108,28 +96,11 @@ const STRIP_GAP = 2;
 /** Duration of the branch-swap camera slide. */
 const SLIDE_MS = 160;
 
-// User bubbles wrap their rows in OSC 133 prompt-zone marks (see
-// user-message.ts). Re-emitting those inside the alternate-screen overlay
-// latches the terminal's prompt semantics onto overlay rows and garbles the
-// frame, so embedded rows shed them; the transcript proper keeps its zones.
-const OSC133_SPAN_REGEX = /\x1b\]133;[^\x07\x1b]*(?:\x07|\x1b\\)/g;
-
-/** Copy-on-write removal of OSC 133 spans from a rendered row array. */
-function stripPromptZones(rows: readonly string[]): readonly string[] {
-	let sanitized: string[] | undefined;
-	for (let index = 0; index < rows.length; index++) {
-		if (!rows[index]!.includes("\x1b]133;")) continue;
-		sanitized ??= rows.slice();
-		sanitized[index] = rows[index]!.replace(OSC133_SPAN_REGEX, "");
-	}
-	return sanitized ?? rows;
-}
-
 export class RewindSelectorComponent implements Component {
 	#builder: ChatTranscriptBuilder;
 	#scrollView: ScrollView;
 	#border = new DynamicBorder();
-	#targets: RewindTarget[] = [];
+	#targets: OutlineTarget[] = [];
 	#selected = 0;
 	/** Per-main-target "renders at least one non-blank row", refreshed each frame. */
 	#mainVisible: boolean[] | undefined;
@@ -154,7 +125,7 @@ export class RewindSelectorComponent implements Component {
 		private readonly deps: RewindSelectorDeps,
 	) {
 		this.#builder = this.#newBuilder();
-		this.#targets = this.#appendEntries(this.#builder, entries);
+		this.#targets = appendOutlineEntries(this.#builder, entries);
 		this.#selected = Math.max(0, this.#targets.length - 1);
 		this.#scrollView = new ScrollView([], {
 			height: 10,
@@ -179,41 +150,6 @@ export class RewindSelectorComponent implements Component {
 			proseOnlyThinking: this.deps.proseOnlyThinking,
 			requestRender: this.deps.requestRender,
 		});
-	}
-
-	/** Append `entries` to `builder`, returning the selectable targets they produce. */
-	#appendEntries(builder: ChatTranscriptBuilder, entries: SessionMessageEntry[]): RewindTarget[] {
-		const targets: RewindTarget[] = [];
-		for (const entry of entries) {
-			const children = builder.container.children;
-			const before = children.length;
-			builder.append([entry]);
-			const after = children.length;
-			let start = before;
-			// A usage row flushed at the head of this append reports the previous
-			// turn's metrics — attribute it to the previous target's outline.
-			while (start < after && isUsageRowBlock(children[start]!)) {
-				const previous = targets.at(-1);
-				if (previous && previous.end === start) previous.end = start + 1;
-				start++;
-			}
-			if (start >= after) {
-				// Rendered nothing of its own. A tool result folds into the turn
-				// that rendered its call card, so rewinding that turn keeps the
-				// result; anything else (notices, hidden messages) is skipped.
-				const previous = targets.at(-1);
-				if (entry.message.role === "toolResult" && previous) previous.entryId = entry.id;
-				continue;
-			}
-			targets.push({
-				entryId: entry.id,
-				turnId: entry.id,
-				isUserTurn: entry.message.role === "user" && userMessageHasText(entry.message),
-				start,
-				end: after,
-			});
-		}
-		return targets;
 	}
 
 	invalidate(): void {
@@ -247,7 +183,7 @@ export class RewindSelectorComponent implements Component {
 			if (sibling.entries.length === 0) continue;
 			const builder = this.#newBuilder();
 			builder.setExpanded(this.#expanded);
-			const targets = this.#appendEntries(builder, sibling.entries);
+			const targets = appendOutlineEntries(builder, sibling.entries);
 			const firstUser = sibling.entries.find(
 				entry => entry.message.role === "user" && userMessageHasText(entry.message),
 			);
@@ -260,7 +196,7 @@ export class RewindSelectorComponent implements Component {
 	}
 
 	/** The target the dotted outline currently rests on. */
-	#outlinedTarget(): RewindTarget | undefined {
+	#outlinedTarget(): OutlineTarget | undefined {
 		if (this.#activeVariant > 0) {
 			return this.#stripColumns()[this.#activeVariant - 1]?.targets[this.#siblingSelected];
 		}
@@ -381,7 +317,7 @@ export class RewindSelectorComponent implements Component {
 	}
 
 	/** Step the main selection by `delta` to the nearest visible target passing `accept`. */
-	#move(delta: -1 | 1, accept: (target: RewindTarget) => boolean): void {
+	#move(delta: -1 | 1, accept: (target: OutlineTarget) => boolean): void {
 		let index = this.#selected + delta;
 		while (index >= 0 && index < this.#targets.length) {
 			if (this.#isMainSelectable(index) && accept(this.#targets[index]!)) {
@@ -415,12 +351,7 @@ export class RewindSelectorComponent implements Component {
 		const mainInner = Math.max(10, contentWidth - 4);
 		const childRows = children.map(child => stripPromptZones(child.render(mainInner)));
 
-		this.#mainVisible = this.#targets.map(target => {
-			for (let index = target.start; index < target.end; index++) {
-				if (childRows[index]!.some(row => /\S/.test(row))) return true;
-			}
-			return false;
-		});
+		this.#mainVisible = outlineVisibility(childRows, this.#targets);
 		if (!this.#isMainSelectable(this.#selected)) {
 			// The current target collapsed (e.g. expansion toggle): rest on the
 			// nearest visible one above, falling back to the nearest below.
@@ -438,7 +369,7 @@ export class RewindSelectorComponent implements Component {
 		const composed =
 			columns.length > 0
 				? this.#renderStrip(childRows, columns, contentWidth)
-				: this.#composeColumn(
+				: composeOutlineColumn(
 						childRows,
 						0,
 						children.length,
@@ -476,52 +407,6 @@ export class RewindSelectorComponent implements Component {
 	}
 
 	/**
-	 * Compose one column: gutter-prefixed rows for `childRows[from, to)` with a
-	 * dotted outline around `targets[selected]`. `header` rows, when given,
-	 * lead the column (branch strip captions).
-	 */
-	#composeColumn(
-		childRows: (readonly string[])[],
-		from: number,
-		to: number,
-		targets: readonly RewindTarget[],
-		selected: number,
-		columnWidth: number,
-		header: string[] | undefined,
-	): ComposedColumn {
-		const inner = Math.max(10, columnWidth - 4);
-		const lines: string[] = header ? [...header] : [];
-		let selStart = -1;
-		let selEnd = -1;
-		const target = selected >= 0 ? targets[selected] : undefined;
-		for (let index = from; index < to; index++) {
-			if (target && index === target.start && target.end <= to) {
-				const segment: string[] = [];
-				for (let child = target.start; child < target.end; child++) segment.push(...childRows[child]!);
-				// Outline only the non-blank core; edge spacers stay outside.
-				let head = 0;
-				let tail = segment.length;
-				while (head < tail && !/\S/.test(segment[head]!)) head++;
-				while (tail > head && !/\S/.test(segment[tail - 1]!)) tail--;
-				for (let row = 0; row < head; row++) lines.push("");
-				selStart = lines.length;
-				lines.push(this.#outlineRule(theme.boxRound.topLeft, theme.boxRound.topRight, inner));
-				const vertical = theme.fg("accent", theme.boxDotted.vertical);
-				for (let row = head; row < tail; row++) {
-					lines.push(`${vertical} ${fit(segment[row]!, inner)} ${vertical}`);
-				}
-				lines.push(this.#outlineRule(theme.boxRound.bottomLeft, theme.boxRound.bottomRight, inner));
-				selEnd = lines.length;
-				for (let row = tail; row < segment.length; row++) lines.push("");
-				index = target.end - 1;
-				continue;
-			}
-			for (const row of childRows[index]!) lines.push(row ? `  ${row}` : row);
-		}
-		return { lines, selStart, selEnd };
-	}
-
-	/**
 	 * Shared prefix at full width, then the divergence as a camera-positioned
 	 * strip of half-width branch columns (current path first, siblings after).
 	 */
@@ -532,7 +417,7 @@ export class RewindSelectorComponent implements Component {
 		const count = columns.length + 1;
 
 		// Shared history above the fork, full width, never outlined.
-		const prefix = this.#composeColumn(mainRows, 0, anchor.start, [], -1, contentWidth, undefined);
+		const prefix = composeOutlineColumn(mainRows, 0, anchor.start, [], -1, contentWidth, undefined);
 
 		// Column 0: the current path from the fork down, re-rendered at column width.
 		const suffixRows: (readonly string[])[] = [];
@@ -545,7 +430,7 @@ export class RewindSelectorComponent implements Component {
 			end: target.end - anchor.start,
 		}));
 		const composedColumns: ComposedColumn[] = [
-			this.#composeColumn(
+			composeOutlineColumn(
 				suffixRows,
 				0,
 				suffixRows.length,
@@ -559,15 +444,10 @@ export class RewindSelectorComponent implements Component {
 			const column = columns[index]!;
 			const rows = column.builder.container.children.map(child => stripPromptZones(child.render(colInner)));
 			if (this.#activeVariant === index + 1) {
-				this.#siblingVisible = column.targets.map(target => {
-					for (let child = target.start; child < target.end; child++) {
-						if (rows[child]!.some(row => /\S/.test(row))) return true;
-					}
-					return false;
-				});
+				this.#siblingVisible = outlineVisibility(rows, column.targets);
 			}
 			composedColumns.push(
-				this.#composeColumn(
+				composeOutlineColumn(
 					rows,
 					0,
 					rows.length,
@@ -594,23 +474,20 @@ export class RewindSelectorComponent implements Component {
 		const lines = prefix.lines;
 		// With more branches than the window fits, a dot rail tracks the active
 		// column and dim ellipses flag content beyond the visible edge.
+		// Edge markers follow the slide's destination, not the eased camera,
+		// so they flip in step with the dot rail.
 		if (count > 2) {
-			const dots: string[] = [];
-			for (let index = 0; index < count; index++) {
-				dots.push(
-					index === this.#activeVariant
-						? theme.fg("accent", theme.radio.selected)
-						: theme.fg("dim", theme.radio.unselected),
-				);
-			}
-			// Edge markers follow the slide's destination, not the eased camera,
-			// so they flip in step with the dot rail.
 			const settled = cameraAt(this.#activeVariant);
-			const moreLeft = settled > 0.5 ? theme.fg("dim", "… ") : "  ";
-			const moreRight = settled + contentWidth < totalWidth - 0.5 ? theme.fg("dim", " …") : "";
-			const rail = `${moreLeft}${dots.join(" ")}${moreRight}`;
-			const pad = Math.max(0, Math.floor((contentWidth - visibleWidth(rail)) / 2));
-			lines.push(padding(pad) + rail, "");
+			lines.push(
+				positionRail(
+					count,
+					this.#activeVariant,
+					settled > 0.5,
+					settled + contentWidth < totalWidth - 0.5,
+					contentWidth,
+				),
+				"",
+			);
 		}
 		const active = composedColumns[this.#activeVariant]!;
 		const selStart = active.selStart >= 0 ? lines.length + active.selStart : -1;
@@ -643,28 +520,4 @@ export class RewindSelectorComponent implements Component {
 		const active = index === this.#activeVariant;
 		return [` ${theme.fg(active ? "accent" : "dim", caption)}`, ""];
 	}
-
-	/** Dotted horizontal rule with rounded corners, spanning the outline width. */
-	#outlineRule(left: string, right: string, innerWidth: number): string {
-		return theme.fg("accent", left + theme.boxDotted.horizontal.repeat(innerWidth + 2) + right);
-	}
-}
-
-/** Plain text of a user message (string or text blocks), single line. */
-function userMessageText(message: Extract<SessionMessageEntry["message"], { role: "user" }>): string {
-	const text =
-		typeof message.content === "string"
-			? message.content
-			: message.content
-					.filter((block): block is { type: "text"; text: string } => block.type === "text")
-					.map(block => block.text)
-					.join(" ");
-	return text.replace(/\s+/g, " ").trim();
-}
-
-/** Whether a user message carries prompt text (string or text blocks). */
-function userMessageHasText(message: SessionMessageEntry["message"]): boolean {
-	if (message.role !== "user") return false;
-	if (typeof message.content === "string") return message.content.trim().length > 0;
-	return message.content.some(block => block.type === "text" && block.text.trim().length > 0);
 }
