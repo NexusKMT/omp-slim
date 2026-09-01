@@ -17,6 +17,9 @@
 - Improved chat history stability during long-running sessions by preventing unnecessary message modification when date or directory context changes
 - Fixed `bun claude:trace` hanging due to a TLS ClientHello race condition in the proxy MITM bridge and added forward HTTP proxy support.
 - Fixed an invalid Lark grammar error in sloppy edit constrained decoding caused by unsupported regex lookahead.
+### Fixed
+
+- Fixed a fresh session keeping a stale pre-discovery context window (e.g. GitHub Copilot `gpt-5.6-sol` running at 1.05M instead of 400K) when background discovery re-clamps a selector after startup; the active model now rebinds to its refreshed catalog entry once discovery settles, so context usage and compaction thresholds match the catalog without a manual re-selection ([#10488](https://github.com/can1357/oh-my-pi/issues/10488)).
 
 ## [18.1.1] - 2026-09-01
 
