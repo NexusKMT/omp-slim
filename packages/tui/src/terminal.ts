@@ -5,6 +5,7 @@ import {
 	$env,
 	isBunTestRuntime,
 	isTerminalHeadless,
+	isWsl,
 	logger,
 	postmortem,
 	restoreTerminalStderr,
@@ -542,9 +543,9 @@ export interface Terminal {
  * single predicate.
  */
 export function isConPTYHosted(): boolean {
-	if (process.platform === "win32") return true;
-	// WSL: stdout still crosses into ConPTY at the `wslhost` boundary.
-	return process.platform === "linux" && (!!$env.WSL_DISTRO_NAME || !!$env.WSL_INTEROP);
+	// win32 always hosts through ConPTY; under WSL stdout still crosses into
+	// ConPTY at the `wslhost` boundary.
+	return process.platform === "win32" || isWsl(process.platform, $env);
 }
 
 /** Discriminated owner of an outstanding DA1 sentinel in the unified probe FIFO. */
