@@ -1449,7 +1449,8 @@ async function renderUrl(
 			throw new ToolAbortError();
 		}
 
-		// 5E: Render HTML via the reader-backend chain (native/trafilatura/lynx/parallel/jina)
+		// 5E: Render HTML via the reader-backend chain
+		// (native/trafilatura/lynx/parallel/firecrawl/jina)
 		const htmlResult = await renderHtmlToText(
 			finalUrl,
 			rawContent,

@@ -9,10 +9,13 @@
  * See https://docs.firecrawl.dev/api-reference/endpoint/scrape.
  */
 import { type FetchImpl, getEnvApiKey } from "@oh-my-pi/pi-ai";
+import { fetchWithRetry } from "@oh-my-pi/pi-utils";
 import type { AgentStorage } from "../session/agent-storage";
 import { findCredential, withHardTimeout } from "./search/providers/utils";
 
 const FIRECRAWL_DEFAULT_BASE_URL = "https://api.firecrawl.dev/v2";
+/** Cap on honoured `Retry-After` hints; longer hints fail fast to the next backend. */
+const RETRY_MAX_DELAY_MS = 2_000;
 
 /**
  * Resolve a Firecrawl endpoint URL, applying the `FIRECRAWL_BASE_URL` (or its
@@ -36,9 +39,11 @@ export function resolveFirecrawlUrl(endpoint: "/search" | "/scrape"): string {
 	}
 	url.search = "";
 	url.hash = "";
-	url.pathname = url.pathname.replace(/\/+$/, "");
-	if (!/\/v[12]$/i.test(url.pathname)) url.pathname += "/v2";
-	url.pathname += endpoint;
+	// Build the path in a local string: assigning "" to `URL.pathname` normalizes
+	// straight back to "/", so a bare origin would otherwise yield "//v2/scrape".
+	let basePath = url.pathname.replace(/\/+$/, "");
+	if (!/\/v[12]$/i.test(basePath)) basePath += "/v2";
+	url.pathname = basePath + endpoint;
 	return url.toString();
 }
 
@@ -110,8 +115,7 @@ export async function scrapeWithFirecrawl(
 	const body: Record<string, unknown> = { url, formats: ["markdown"] };
 	if (options.onlyMainContent !== undefined) body.onlyMainContent = options.onlyMainContent;
 
-	const fetchImpl = options.fetch ?? fetch;
-	const response = await fetchImpl(resolveFirecrawlUrl("/scrape"), {
+	const response = await fetchWithRetry(resolveFirecrawlUrl("/scrape"), {
 		method: "POST",
 		headers: {
 			Accept: "application/json",
@@ -120,6 +124,14 @@ export async function scrapeWithFirecrawl(
 		},
 		body: JSON.stringify(body),
 		signal: withHardTimeout(options.signal, options.timeoutMs),
+		fetch: options.fetch,
+		// Firecrawl marks 408/429/5xx retryable. The reader chain gives each remote
+		// backend a short slice of its budget before falling through to the next
+		// renderer, so allow a single quick retry and let a longer `Retry-After`
+		// hint return the response as-is instead of sleeping until the signal
+		// aborts. The abort signal bounds both attempts and the backoff sleep.
+		maxAttempts: 2,
+		maxDelayMs: RETRY_MAX_DELAY_MS,
 	});
 	if (!response.ok) {
 		throw parseFirecrawlErrorResponse(response.status, await response.text());

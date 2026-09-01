@@ -24,6 +24,7 @@
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
+- Fixed a self-hosted `FIRECRAWL_BASE_URL` that names only an origin (for example `http://localhost:3002`) resolving to a doubled slash such as `http://localhost:3002//v2/search`, which could miss the server's route.
 
 ## [18.0.11] - 2026-08-29
 
