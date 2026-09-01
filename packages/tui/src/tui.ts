@@ -19,7 +19,7 @@ import { DEFAULT_MAX_INLINE_IMAGES, ImageBudget } from "./components/image";
 import { TuiDebugServer } from "./debug-server";
 import { isKeyRelease, matchesKey } from "./keys";
 import { LoopWatchdog } from "./loop-watchdog";
-import { setAltScreenActive, type Terminal } from "./terminal";
+import { STDOUT_BACKLOG_CLEAR_BYTES, setAltScreenActive, type Terminal } from "./terminal";
 import {
 	encodeKittyDeleteAllImages,
 	encodeKittyDeleteImage,
@@ -753,8 +753,12 @@ export class TUI extends Container {
 	 * render (keeping its forced/clear-scrollback intent) and retry shortly;
 	 * the eventual frame composes the latest component state, so a slow
 	 * terminal receives only fresh frames instead of every intermediate one.
+	 *
+	 * This is the terminal's healthy-backlog level ({@link STDOUT_BACKLOG_CLEAR_BYTES}):
+	 * gating here and ending a StdoutStallWatchdog episode there keeps the stall
+	 * watchdog armed across exactly the range where frames are deferred (#10434).
 	 */
-	static readonly #MAX_PENDING_OUTPUT_BYTES = 256 * 1024;
+	static readonly #MAX_PENDING_OUTPUT_BYTES = STDOUT_BACKLOG_CLEAR_BYTES;
 	/** Retry cadence while the output backlog gate is holding renders back. */
 	static readonly #OUTPUT_BACKLOG_RETRY_MS = 10;
 	/** Quiet window before restoring the normal buffer after resize. */
