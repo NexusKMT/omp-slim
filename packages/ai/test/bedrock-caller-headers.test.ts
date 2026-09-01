@@ -1,10 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import { streamBedrock } from "@oh-my-pi/pi-ai/providers/amazon-bedrock";
+import { streamSimple } from "@oh-my-pi/pi-ai/stream";
 import type { Model } from "@oh-my-pi/pi-ai/types";
 import { USER_AGENT } from "@oh-my-pi/pi-utils";
 import {
 	bedrockTestModel,
 	BEDROCK_TEST_CONTEXT,
+	type BedrockCapture,
 	capturingBedrockFetch,
 	withSkippedBedrockAuth,
 } from "./helpers/bedrock-stream";
@@ -138,5 +140,17 @@ describe("amazon-bedrock user-agent default", () => {
 		for (const field of ["host", "content-type"]) {
 			expect(names.filter(name => name === field).length).toBe(1);
 		}
+	});
+
+	it("carries per-call headers from streamSimple through the option mapper", async () => {
+		const seen: BedrockCapture = {};
+		await withSkippedBedrockAuth(async () => {
+			await streamSimple(bedrockTestModel(), BEDROCK_TEST_CONTEXT, {
+				fetch: capturingBedrockFetch(seen),
+				headers: { "User-Agent": "from-options" },
+			}).result();
+		});
+
+		expect(seen.headers?.["user-agent"]).toBe("from-options");
 	});
 });
