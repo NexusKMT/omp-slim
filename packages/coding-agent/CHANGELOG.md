@@ -33,6 +33,10 @@
 - Fixed the legacy Pi `SettingsManager` shim so `create()` is synchronous and returns a manager exposing `getGlobalSettings()`/`getProjectSettings()`, unbreaking pi extensions like pi-vim that read settings on startup ([#10397](https://github.com/can1357/oh-my-pi/issues/10397))
 - Fixed Mnemopi storing session transcripts on exit when automatic retention is disabled ([#10408](https://github.com/can1357/oh-my-pi/pull/10408) by [@kml93](https://github.com/kml93)).
 
+### Fixed
+
+- Fixed config writes through a dangling symlink chain so the write lands on the chain's final target and preserves every intermediate link, instead of clobbering an intermediate link into a regular file on first run ([#10285](https://github.com/can1357/oh-my-pi/pull/10285) by [@mattwilkinsonn](https://github.com/mattwilkinsonn)).
+
 ## [18.0.11] - 2026-08-29
 
 ### Added
