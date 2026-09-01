@@ -22,6 +22,7 @@
 
 ### Fixed
 
+- Fixed vibe mode becoming un-exitable after branching a session (including via `/btw`), which previously failed with "Vibe parent session changed before mode exit could be persisted." ([#10468](https://github.com/can1357/oh-my-pi/issues/10468)).
 - Fixed OAuth provider `modifyModels` projections being silently dropped after a discovery refresh introduced live-config headers.
 - Fixed ordinary CLI startup eagerly loading the computer worker graph (native desktop addon and early environment), restoring lazy startup and profile `.env` ordering.
 - Fixed online auto-thinking classifier usage being omitted from session token and cost totals.

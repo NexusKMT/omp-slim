@@ -425,4 +425,32 @@ describe("AgentSession.branchFromBtw", () => {
 			),
 		).rejects.toThrow("Cannot branch /btw: session is not persisted");
 	});
+
+	it("runs the session-switch reconciler against the branched session (issue #10468)", async () => {
+		const activeSession = await createSession();
+		activeSession.sessionManager.appendMessage({ role: "user", content: "seed", timestamp: Date.now() - 1 });
+		activeSession.agent.replaceMessages(activeSession.sessionManager.buildSessionContext().messages);
+		await activeSession.sessionManager.flush();
+		const originalId = activeSession.sessionManager.getSessionId();
+
+		// Mode reconciliation (vibe/plan/goal) re-anchors to the live session id.
+		// Before the fix, /btw branch minted a new session but never ran this hook,
+		// leaving vibe mode pinned to the pre-branch owner scope so it could not be
+		// disabled. The reconciler must fire once and observe the branched id.
+		const observedIds: string[] = [];
+		activeSession.setSessionSwitchReconciler(async () => {
+			observedIds.push(activeSession.sessionManager.getSessionId());
+		});
+
+		const result = await activeSession.branchFromBtw(
+			"why did this fail?",
+			createBtwAssistant(),
+			requiredLeafId(activeSession),
+			originalId,
+		);
+
+		expect(result.cancelled).toBe(false);
+		expect(observedIds).toEqual([activeSession.sessionManager.getSessionId()]);
+		expect(observedIds[0]).not.toBe(originalId);
+	});
 });
