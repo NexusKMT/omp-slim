@@ -40,6 +40,7 @@
 - A direct tool call naming a mounted `xd://` device by its full URL (e.g. `xd://github`) now resolves to that device instead of failing with `Tool xd://<name> not found` ([#10342](https://github.com/can1357/oh-my-pi/issues/10342)).
 - Fixed custom discovery providers sending unresolved `!command` header values (e.g. `!basename $PWD`) verbatim on inference requests; command-backed provider headers now resolve on discovered models too ([#10457](https://github.com/can1357/oh-my-pi/issues/10457)).
 - Fixed pasting a Windows drive path (e.g. `C:\Users\me\pic.png`) into omp under WSL failing with "Image not found"; drive paths now resolve to their `/mnt/<drive>` mount for image paste and all file reads ([#10426](https://github.com/can1357/oh-my-pi/issues/10426))
+- Fixed sloppy/SPARSE edit no-match guidance emitting a mislabeled "Copy-ready corrected operation" that guessed a fuzzy anchor and dropped sibling operations; low-confidence matches are now surfaced as non-copyable guidance ([#10411](https://github.com/can1357/oh-my-pi/issues/10411)).
 
 ## [18.0.11] - 2026-08-29
 
