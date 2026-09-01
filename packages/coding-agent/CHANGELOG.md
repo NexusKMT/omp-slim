@@ -29,6 +29,7 @@
 - Browser startup on Linux ARM64 now reports that managed Chrome-for-Testing builds are unavailable and directs users to a system Chromium or `PUPPETEER_EXECUTABLE_PATH`.
 
 - Fixed `--resume` self-terminating (exit 129) while replaying a session whose transcript repaint emits more than 64 MiB of inline images; the stdout backlog is now torn down only when it stalls without draining, so image-heavy sessions reopen normally ([#10430](https://github.com/can1357/oh-my-pi/issues/10430)).
+- Fixed custom agents that declare `hub` being incorrectly advertised as read-only despite its process-control operations.
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Clarified that the default task-delegation setting follows the selected model's policy.
 - Fixed entering `/rename` without a title interrupting active session activity ([#10326](https://github.com/can1357/oh-my-pi/issues/10326)).
