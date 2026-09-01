@@ -177,6 +177,38 @@ describe("ChatTranscriptBuilder token-usage row timestamp", () => {
 		expect(rendered).toContain(USAGE_LABEL);
 	});
 
+	it("deep-links tool-only assistant entries to their first rendered row", () => {
+		const builder = new ChatTranscriptBuilder({
+			ui: { requestRender: () => {}, requestComponentRender: () => {} } as unknown as TUI,
+			cwd: process.cwd(),
+			requestRender: () => {},
+		});
+		const message = {
+			role: "assistant",
+			content: [{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "echo ok" } }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet-4-5",
+			stopReason: "toolUse",
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: 1_000,
+		} as unknown as AgentMessage;
+		builder.rebuild([
+			{ type: "message", id: "tool-entry", parentId: null, timestamp: new Date(0).toISOString(), message },
+		]);
+
+		const rendered = builder.container.render(120);
+		expect(Bun.stripANSI(rendered.join("\n"))).toContain("echo ok");
+		expect(builder.rowForEntry("tool-entry")).toBe(0);
+	});
+
 	it("keeps grouped read metrics nested on the reusable transcript-builder path", () => {
 		const builder = new ChatTranscriptBuilder({
 			ui: { requestRender: () => {}, requestComponentRender: () => {} } as unknown as TUI,

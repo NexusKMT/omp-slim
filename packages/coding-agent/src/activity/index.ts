@@ -361,6 +361,16 @@ export class AgentActivityIndex {
 		if (!state) {
 			state = { offset: 0, mtimeMs: 0, pending: "", rows: [], toolRows: new Map() };
 			this.#states.set(agentId, state);
+			// The host returns the actual EOF when asked beyond it. Probe once so
+			// historical sessions start at the same bounded tail as local files.
+			let probe: AgentActivityTranscript | null | undefined;
+			try {
+				probe = await this.#remote?.readTranscript(agentId, Number.MAX_SAFE_INTEGER);
+			} catch {
+				return;
+			}
+			if (!probe || probe.error) return;
+			state.offset = Math.max(0, probe.newSize - INITIAL_TAIL_BYTES);
 		}
 		let result: AgentActivityTranscript | null | undefined;
 		try {
@@ -370,14 +380,19 @@ export class AgentActivityIndex {
 		}
 		if (!result || result.error) return;
 		if (result.newSize < state.offset) {
-			state.offset = 0;
+			state.offset = Math.max(0, result.newSize - INITIAL_TAIL_BYTES);
 			state.pending = "";
 			state.rows = [];
 			state.toolRows.clear();
-			return;
+			try {
+				result = await this.#remote?.readTranscript(agentId, state.offset);
+			} catch {
+				return;
+			}
+			if (!result || result.error) return;
 		}
 		if (result.newSize === state.offset && !result.text) return;
-		this.#consume(agentId, state, result.text, false);
+		this.#consume(agentId, state, result.text, state.offset > 0 && state.rows.length === 0);
 		state.offset = result.newSize;
 	}
 

@@ -99,7 +99,7 @@ export class ChatTranscriptBuilder {
 	#todoSnapshot: ToolExecutionComponent | null = null;
 	#expandables: Array<{ setExpanded(expanded: boolean): void }> = [];
 	#expanded = false;
-	#entryComponents = new Map<string, Component>();
+	#entryComponents = new Map<string, Component[]>();
 
 	constructor(private readonly deps: ChatTranscriptBuilderDeps) {
 		this.container.setToolActivityVisible(!settings.get("display.hideToolActivity"));
@@ -138,8 +138,11 @@ export class ChatTranscriptBuilder {
 
 	/** Rendered row where a persisted entry begins, after the container has painted once. */
 	rowForEntry(entryId: string): number | undefined {
-		const component = this.#entryComponents.get(entryId);
-		return component ? this.container.getChildStartRow(component) : undefined;
+		for (const component of this.#entryComponents.get(entryId) ?? []) {
+			const row = this.container.getChildStartRow(component);
+			if (row !== undefined) return row;
+		}
+		return undefined;
 	}
 
 	/** Tear down components (sealing pending spinners) and clear build state. */
@@ -171,8 +174,8 @@ export class ChatTranscriptBuilder {
 	#appendEntry(entry: SessionMessageEntry): void {
 		const before = this.container.children.length;
 		this.#appendChatMessage(entry.message);
-		const component = this.container.children[before];
-		if (component) this.#entryComponents.set(entry.id, component);
+		const components = this.container.children.slice(before);
+		if (components.length > 0) this.#entryComponents.set(entry.id, components);
 	}
 
 	#trackExpandable(component: { setExpanded(expanded: boolean): void }): void {
