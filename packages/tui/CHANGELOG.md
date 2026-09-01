@@ -72,6 +72,7 @@
 ### Added
 
 - Added `Markdown.getLastRenderStableText()` to expose the stable prefix of streamed Markdown text for append-only transcript publication.
+- Fixed resumed sessions sometimes showing stale background bands until the next keypress on WSL and Windows Terminal ([#9799](https://github.com/can1357/oh-my-pi/issues/9799)).
 
 ## [18.0.5] - 2026-08-25
 
