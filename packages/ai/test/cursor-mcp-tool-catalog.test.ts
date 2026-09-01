@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { buildMcpToolDefinitions } from "@oh-my-pi/pi-ai/providers/cursor";
 import type { Tool, TSchema } from "@oh-my-pi/pi-ai/types";
-import { sanitizeSchemaForCursor, toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
+import { isJsonSchemaValueValid, sanitizeSchemaForCursor, toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { decodeJsonValue } from "@oh-my-pi/pi-catalog/discovery/protobuf";
 
 const tool = (name: string, parameters: TSchema = { type: "object", properties: {} }): Tool => ({
@@ -129,22 +129,49 @@ describe("sanitizeSchemaForCursor", () => {
 		};
 		expect(sanitizeSchemaForCursor(schema)).toEqual({
 			type: "object",
-			properties: { id: { type: "string" }, mode: { type: "string" } },
+			properties: { id: { type: "string" }, mode: {} },
 			required: ["id"],
 		});
 	});
 
-	it("merges oneOf object branches with no shared required into all-optional properties", () => {
+	it("preserves property guidance from closed oneOf object branches", () => {
 		const schema = {
 			oneOf: [
-				{ type: "object", properties: { element_token: { type: "string" } }, required: ["element_token"] },
-				{ type: "object", properties: { x: { type: "number" }, y: { type: "number" } }, required: ["x", "y"] },
+				{
+					type: "object",
+					properties: { element_token: { type: "string" } },
+					required: ["element_token"],
+					additionalProperties: false,
+				},
+				{
+					type: "object",
+					properties: { x: { type: "number" }, y: { type: "number" } },
+					required: ["x", "y"],
+					additionalProperties: false,
+				},
 			],
 		};
 		expect(sanitizeSchemaForCursor(schema)).toEqual({
 			type: "object",
 			properties: { element_token: { type: "string" }, x: { type: "number" }, y: { type: "number" } },
 		});
+	});
+
+	it("widens properties omitted by an anyOf or oneOf branch", () => {
+		for (const combiner of ["anyOf", "oneOf"] as const) {
+			const schema = {
+				[combiner]: [
+					{ type: "object", properties: { x: { type: "string" } }, required: ["x"] },
+					{ type: "object", properties: { y: { type: "number" } }, required: ["y"] },
+				],
+			};
+			const accepted = { x: 1, y: 2 };
+			const projected = sanitizeSchemaForCursor(schema);
+
+			expect(isJsonSchemaValueValid(schema, accepted)).toBe(true);
+			expect(projected).toEqual({ type: "object", properties: { x: {}, y: {} } });
+			expect(isJsonSchemaValueValid(projected, accepted)).toBe(true);
+		}
 	});
 
 	it("merges allOf object branches with the union of their required fields", () => {
@@ -180,6 +207,18 @@ describe("sanitizeSchemaForCursor", () => {
 			type: "object",
 			properties: { choice: { enum: ["a", "b"] } },
 		});
+	});
+
+	it("drops a negation whose local reference resolves to a stripped combiner", () => {
+		const schema = {
+			$defs: { bad: { anyOf: [{ const: "bad" }] } },
+			not: { $ref: "#/$defs/bad" },
+		};
+		const projected = sanitizeSchemaForCursor(schema);
+
+		expect(isJsonSchemaValueValid(schema, "ok")).toBe(true);
+		expect(projected).toEqual({});
+		expect(isJsonSchemaValueValid(projected, "ok")).toBe(true);
 	});
 
 	it("preserves a negation whose constraint is representable", () => {

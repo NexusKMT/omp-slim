@@ -1127,11 +1127,42 @@ function projectNodeCombinersForCursor(node: JsonObject): JsonObject {
 		changed = false;
 		for (const combiner of SCHEMA_COMPOSITION_COMBINERS) {
 			if (!Array.isArray(current[combiner])) continue;
+			const source = current;
 			const merged = mergeObjectCombinerVariants(current, combiner);
 			if (merged !== current) {
 				current = merged;
 				const properties = current.properties;
 				if (isJsonObject(properties)) {
+					if (combiner !== "allOf") {
+						const sourceProperties = isJsonObject(source.properties) ? source.properties : {};
+						const sourceVariants = source[combiner] as JsonObject[];
+						for (const name in properties) {
+							if (!Object.hasOwn(properties, name)) continue;
+							if (Object.hasOwn(sourceProperties, name)) {
+								properties[name] = sourceProperties[name];
+								continue;
+							}
+							let widenedProperty: unknown;
+							for (const variant of sourceVariants) {
+								const variantProperties = isJsonObject(variant.properties) ? variant.properties : {};
+								let constraint: unknown;
+								if (Object.hasOwn(variantProperties, name)) {
+									constraint = variantProperties[name];
+								} else if (variant.additionalProperties === false) {
+									continue;
+								} else if (isJsonObject(variant.additionalProperties)) {
+									constraint = variant.additionalProperties;
+								} else {
+									constraint = {};
+								}
+								widenedProperty =
+									widenedProperty === undefined
+										? constraint
+										: mergePropertySchemas(widenedProperty, constraint);
+							}
+							properties[name] = widenedProperty ?? {};
+						}
+					}
 					for (const name in properties) {
 						if (Object.hasOwn(properties, name)) {
 							properties[name] = projectSchemaForCursor(properties[name], false);
@@ -1190,7 +1221,7 @@ function projectSchemaForCursor(value: unknown, insideSchemaMap: boolean, epoch:
  * execution-time argument validation) is never mutated.
  */
 export function sanitizeSchemaForCursor(schema: JsonObject): JsonObject {
-	return projectSchemaForCursor(schema, false) as JsonObject;
+	return projectSchemaForCursor(dereferenceJsonSchema(schema), false) as JsonObject;
 }
 
 export function normalizeSchema(value: unknown, options: NormalizeSchemaOptions): unknown {
