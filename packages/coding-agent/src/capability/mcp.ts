@@ -72,7 +72,7 @@ export interface MCPServer {
 }
 
 /** Compare the transport inputs that determine which MCP endpoint gets connected. */
-function isSameMCPConnection(left: MCPServer, right: MCPServer): boolean {
+export function isSameMCPConnection(left: MCPServer, right: MCPServer): boolean {
 	if (!Bun.deepEquals(left.auth, right.auth) || !Bun.deepEquals(left.oauth, right.oauth)) return false;
 	// Normalize against the allocator's own default so an explicit "number" is
 	// equivalent to leaving the option unset, not a distinct connection.
@@ -83,15 +83,19 @@ function isSameMCPConnection(left: MCPServer, right: MCPServer): boolean {
 	if (leftTransport !== rightTransport) return false;
 
 	if (leftTransport === "stdio") {
+		// Effective literal keys: `envPolicy: "literal"` makes every env value
+		// literal (equivalent to an envLiteralKeys set covering all keys), and an
+		// inert policy on an env-less server must not distinguish otherwise
+		// identical connections. Insertion order is irrelevant; compare as sets.
+		const literalKeysOf = (server: MCPServer): string[] =>
+			server.envPolicy === "literal"
+				? Object.keys(server.env ?? {}).sort()
+				: [...(server.envLiteralKeys ?? [])].sort();
 		return (
 			left.command === right.command &&
 			Bun.deepEquals(left.args, right.args) &&
 			Bun.deepEquals(left.env, right.env) &&
-			// Policy metadata changes what the subprocess receives: an expanded
-			// key delivers the literal value, a raw key resolves it.
-			// Key insertion order does not affect delivery; compare as sets.
-			Bun.deepEquals([...(left.envLiteralKeys ?? [])].sort(), [...(right.envLiteralKeys ?? [])].sort()) &&
-			left.envPolicy === right.envPolicy &&
+			Bun.deepEquals(literalKeysOf(left), literalKeysOf(right)) &&
 			left.cwd === right.cwd
 		);
 	}

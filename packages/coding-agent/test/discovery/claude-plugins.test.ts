@@ -14,6 +14,7 @@ import { discoverAgents } from "@oh-my-pi/pi-coding-agent/task/discovery";
 import { __resetDirsFromEnvForTests, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 import "@oh-my-pi/pi-coding-agent/discovery/claude-plugins";
 import { type MCPServer, mcpCapability } from "@oh-my-pi/pi-coding-agent/capability/mcp";
+import { isSameMCPConnection } from "@oh-my-pi/pi-coding-agent/capability/mcp";
 import { loadAllMCPConfigs } from "@oh-my-pi/pi-coding-agent/mcp/config";
 import { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
 import type { Rule } from "@oh-my-pi/pi-coding-agent/capability/rule";
@@ -1309,6 +1310,47 @@ describe("listClaudePluginRoots", () => {
 		} finally {
 			delete Bun.env["__proto__"];
 		}
+	});
+
+	describe("isSameMCPConnection stdio equivalence", () => {
+		// The reserved PLUGIN_ROOT/PLUGIN_DATA injection means a truly env-less
+		// agent-plugin server cannot be mirrored by another provider, so the
+		// policy normalization is pinned at the comparator contract.
+		const server = (partial: Record<string, unknown>): MCPServer =>
+			({ _source: {} as MCPServer["_source"], ...partial }) as unknown as MCPServer;
+
+		test("treats an inert envPolicy as equivalent to no policy", () => {
+			expect(isSameMCPConnection(server({ command: "uv" }), server({ command: "uv", envPolicy: "literal" }))).toBe(
+				true,
+			);
+		});
+
+		test("normalizes a full literal policy against per-key literal sets", () => {
+			expect(
+				isSameMCPConnection(
+					server({ command: "uv", env: { A: "x" }, envPolicy: "literal" }),
+					server({ command: "uv", env: { A: "x" }, envLiteralKeys: ["A"] }),
+				),
+			).toBe(true);
+		});
+
+		test("keeps differing effective literal sets distinct", () => {
+			expect(
+				isSameMCPConnection(
+					server({ command: "uv", env: { A: "x", B: "y" }, envPolicy: "literal" }),
+					server({ command: "uv", env: { A: "x", B: "y" }, envLiteralKeys: ["A"] }),
+				),
+			).toBe(false);
+		});
+
+		test("compares literal keys order-insensitively", () => {
+			expect(
+				isSameMCPConnection(
+					server({ command: "uv", env: { A: "x", B: "y" }, envLiteralKeys: ["A", "B"] }),
+					server({ command: "uv", env: { A: "x", B: "y" }, envLiteralKeys: ["B", "A"] }),
+				),
+			).toBe(true);
+		});
 	});
 
 	test("uses OMP then Claude manifest mcpServers paths before .mcp.json", async () => {
