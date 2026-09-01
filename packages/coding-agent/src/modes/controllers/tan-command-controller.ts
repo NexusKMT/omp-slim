@@ -125,6 +125,10 @@ export class TanCommandController {
 				copyArtifacts: false,
 				suppressBreadcrumb: true,
 				sessionFile: cloneFile,
+				// A tan is a fresh agent forking the parent's transcript only for
+				// context; its cost must reflect its own work, not the parent's
+				// accumulated spend that session cost is otherwise derived from.
+				resetInheritedCost: true,
 			});
 
 			jobId = manager.register(

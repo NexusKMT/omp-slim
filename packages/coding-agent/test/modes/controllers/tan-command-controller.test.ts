@@ -226,7 +226,12 @@ describe("TanCommandController", () => {
 			harness.tempDir.path(),
 			harness.parentFile.slice(0, -6),
 			undefined,
-			{ copyArtifacts: false, suppressBreadcrumb: true, sessionFile: expect.stringMatching(/Tan-.+\.jsonl$/) },
+			{
+				copyArtifacts: false,
+				suppressBreadcrumb: true,
+				sessionFile: expect.stringMatching(/Tan-.+\.jsonl$/),
+				resetInheritedCost: true,
+			},
 		);
 		expect(harness.register).toHaveBeenCalledWith("task", "/tan write the release note", expect.any(Function), {
 			ownerId: MAIN_AGENT_ID,
