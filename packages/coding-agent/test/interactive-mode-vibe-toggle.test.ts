@@ -18,6 +18,7 @@ import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mod
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import { convertToLlm, VIBE_MODE_CONTEXT_MESSAGE_TYPE } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { FileSessionStorage, type WriteTextAtomicOptions } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import { VIBE_TOOL_NAMES } from "@oh-my-pi/pi-coding-agent/tools/vibe";
@@ -115,6 +116,7 @@ describe("InteractiveMode vibe mode toggle", () => {
 					tools: [],
 					messages: [],
 				},
+				convertToLlm,
 				streamFn: (...args) => {
 					if (!streamFn) throw new Error("No test stream configured");
 					return streamFn(...args);
@@ -164,6 +166,37 @@ describe("InteractiveMode vibe mode toggle", () => {
 		expect(mode.vibeModeEnabled).toBe(false);
 		expect(session.getActiveToolNames()).toEqual([]);
 		expect(session.getAllToolNames().toSorted()).toEqual(["read", "todo"]);
+	});
+
+	it("removes the Vibe directive from provider context on exit", async () => {
+		const vibeDirectivePerCall: boolean[] = [];
+		streamFn = (_model, context) => {
+			vibeDirectivePerCall.push(JSON.stringify(context).includes("<vibe-mode>"));
+			const stream = new AssistantMessageEventStream();
+			queueMicrotask(() => {
+				stream.push({ type: "done", reason: "stop", message: createAssistantMessage("Done") });
+			});
+			return stream;
+		};
+
+		await mode.handleVibeModeCommand();
+		await session.prompt("Delegate this");
+		await mode.handleVibeModeCommand();
+		await session.prompt("Use the restored tools");
+
+		expect(vibeDirectivePerCall).toEqual([true, false]);
+	});
+
+	it("omits persisted Vibe directives from restored model context", () => {
+		session.sessionManager.appendCustomMessageEntry(
+			VIBE_MODE_CONTEXT_MESSAGE_TYPE,
+			"<vibe-mode>stale</vibe-mode>",
+			false,
+		);
+
+		const restoredMessages = convertToLlm(session.sessionManager.buildSessionContext().messages);
+
+		expect(JSON.stringify(restoredMessages)).not.toContain("<vibe-mode>");
 	});
 
 	it("cancels an in-flight model turn before removing Vibe tools", async () => {
