@@ -67,12 +67,6 @@ interface FirecrawlScrapeResponse {
 }
 
 export interface FirecrawlScrapeOptions {
-	/**
-	 * Drop nav/header/footer chrome. Defaults to Firecrawl's own `true`; on
-	 * chrome-heavy pages it can strip the page down to very little, in which
-	 * case the reader chain's quality gate falls through to the next backend.
-	 */
-	onlyMainContent?: boolean;
 	signal?: AbortSignal;
 	timeoutMs?: number;
 	fetch?: FetchImpl;
@@ -112,8 +106,7 @@ export async function scrapeWithFirecrawl(
 		throw new FirecrawlApiError("Firecrawl credentials not found. Set FIRECRAWL_API_KEY.");
 	}
 
-	const body: Record<string, unknown> = { url, formats: ["markdown"] };
-	if (options.onlyMainContent !== undefined) body.onlyMainContent = options.onlyMainContent;
+	const body = { url, formats: ["markdown"] };
 
 	const response = await fetchWithRetry(resolveFirecrawlUrl("/scrape"), {
 		method: "POST",
