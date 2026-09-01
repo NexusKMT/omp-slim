@@ -38,6 +38,7 @@
 
 - Fixed config writes through a dangling symlink chain so the write lands on the chain's final target and preserves every intermediate link, instead of clobbering an intermediate link into a regular file on first run ([#10285](https://github.com/can1357/oh-my-pi/pull/10285) by [@mattwilkinsonn](https://github.com/mattwilkinsonn)).
 - A direct tool call naming a mounted `xd://` device by its full URL (e.g. `xd://github`) now resolves to that device instead of failing with `Tool xd://<name> not found` ([#10342](https://github.com/can1357/oh-my-pi/issues/10342)).
+- Fixed custom discovery providers sending unresolved `!command` header values (e.g. `!basename $PWD`) verbatim on inference requests; command-backed provider headers now resolve on discovered models too ([#10457](https://github.com/can1357/oh-my-pi/issues/10457)).
 
 ## [18.0.11] - 2026-08-29
 
