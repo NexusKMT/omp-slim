@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Changed
+
+- Reworked the sloppy edit format's payload surface from `§`/`«`/`»`/`⟪│⟫` markers to XML tags: `<SM:EDIT path="…">` (with optional `all`), `<SM:FIND>` current text, `<SM:PUT>` final text; content between tags is raw file bytes with no entity escaping, and edit errors now return copy-ready XML payloads.
 
 ## [18.1.1] - 2026-09-01
 
