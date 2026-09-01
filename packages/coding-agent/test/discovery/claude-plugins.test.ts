@@ -711,9 +711,13 @@ describe("listClaudePluginRoots", () => {
 		const pluginPath = path.join(tempDir, "plugins", "ida-mcp");
 		const originalNexusId = process.env.OMP_PLUGIN_MCP_NEXUS_ID;
 		const originalStateDir = process.env.OMP_PLUGIN_MCP_STATE_DIR;
+		const originalCacheDir = process.env.OMP_PLUGIN_MCP_CACHE_DIR;
 		const envPlaceholder = (name: string): string => ["$", "{", name, ":-}"].join("");
+		const envPlaceholderWithDefault = (name: string, defaultValue: string): string =>
+			["$", "{", name, ":-", defaultValue, "}"].join("");
 		restoreEnvValue("OMP_PLUGIN_MCP_NEXUS_ID", "test-nexus");
 		restoreEnvValue("OMP_PLUGIN_MCP_STATE_DIR", undefined);
+		restoreEnvValue("OMP_PLUGIN_MCP_CACHE_DIR", "");
 
 		try {
 			await fs.mkdir(pluginsDir, { recursive: true });
@@ -743,6 +747,7 @@ describe("listClaudePluginRoots", () => {
 						env: {
 							IDA_NEXUS_ID: envPlaceholder("OMP_PLUGIN_MCP_NEXUS_ID"),
 							IDA_NEXUS_STATE_DIR: envPlaceholder("OMP_PLUGIN_MCP_STATE_DIR"),
+							IDA_NEXUS_CACHE_DIR: envPlaceholderWithDefault("OMP_PLUGIN_MCP_CACHE_DIR", "/tmp/ida-nexus-cache"),
 							PLUGIN_ROOT: ["$", "{CLAUDE_PLUGIN_ROOT}"].join(""),
 						},
 					},
@@ -758,6 +763,7 @@ describe("listClaudePluginRoots", () => {
 			expect(server?.env).toEqual({
 				IDA_NEXUS_ID: "test-nexus",
 				IDA_NEXUS_STATE_DIR: "",
+				IDA_NEXUS_CACHE_DIR: "/tmp/ida-nexus-cache",
 				PLUGIN_ROOT: pluginPath,
 			});
 			// Expanded env values are final package data: literal policy exempts
@@ -776,12 +782,14 @@ describe("listClaudePluginRoots", () => {
 				env: {
 					IDA_NEXUS_ID: "test-nexus",
 					IDA_NEXUS_STATE_DIR: "",
+					IDA_NEXUS_CACHE_DIR: "/tmp/ida-nexus-cache",
 					PLUGIN_ROOT: pluginPath,
 				},
 			});
 		} finally {
 			restoreEnvValue("OMP_PLUGIN_MCP_NEXUS_ID", originalNexusId);
 			restoreEnvValue("OMP_PLUGIN_MCP_STATE_DIR", originalStateDir);
+			restoreEnvValue("OMP_PLUGIN_MCP_CACHE_DIR", originalCacheDir);
 		}
 	});
 
