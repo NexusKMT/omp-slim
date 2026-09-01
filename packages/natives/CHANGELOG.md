@@ -7,6 +7,18 @@
 ### Fixed
 
 - Fixed TTY output backpressure reporting so pending write progress is accurately reflected during large writes.
+### Breaking Changes
+
+- Renamed `MacOSPowerAssertion` to `PowerAssertion` and `MacOSPowerAssertionOptions` to `PowerAssertionOptions`. The options and handle shape are unchanged.
+
+### Added
+
+- Added Linux sleep inhibition to `PowerAssertion` through a logind (`org.freedesktop.login1`) inhibitor descriptor, supplemented for `display` by a best-effort `org.freedesktop.ScreenSaver` cookie.
+- Added Windows sleep inhibition to `PowerAssertion` through `SetThreadExecutionState` on a dedicated thread.
+
+### Changed
+
+- `PowerAssertion.start` reports acquisition failures on Linux and Windows rather than returning a handle that silently does nothing. Platforms with no implementation still receive a no-op handle.
 
 ## [18.0.11] - 2026-08-29
 

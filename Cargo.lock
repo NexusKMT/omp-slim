@@ -6230,6 +6230,7 @@ dependencies = [
  "image",
  "inferno",
  "libc",
+ "log",
  "napi",
  "napi-build",
  "napi-derive",
@@ -6272,6 +6273,7 @@ dependencies = [
  "xkeysym",
  "xutf",
  "xxhash-rust",
+ "zbus",
  "zstd",
  "zune-jpeg",
 ]
