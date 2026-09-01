@@ -209,7 +209,6 @@ import {
 	EvalTool,
 	GlobTool,
 	GrepTool,
-	getSearchTools,
 	HIDDEN_TOOLS,
 	isMountableUnderXdev,
 	type LspStartupServerInfo,
@@ -2045,11 +2044,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 			if (settings.get("speechgen.enabled")) {
 				customTools.push(ttsTool as unknown as CustomTool);
-			}
-
-			// Add web search tools
-			if (options.toolNames?.includes("web_search")) {
-				customTools.push(...getSearchTools());
 			}
 
 			// Discover custom tools from `.omp/tools/`, `.claude/tools/`, plugins, etc.
