@@ -67,8 +67,8 @@ export interface KittyGraphicsFeatures {
  * cannot use cursor-positioned placements because the outer terminal does not
  * know pane scroll/reflow state. An explicit `PI_FORCE_IMAGE_PROTOCOL=kitty`
  * opts into placeholders under any multiplexer — matching `timg -pk`.
- * Automatic multiplexer fallback stays off because the unknown outer terminal may render
- * U+10EEEE as literal PUA boxes (#1877).
+ * Automatic Herdr fallback stays off because its pane marker does not prove
+ * that the experimental Kitty renderer is enabled.
  *
  * `PI_NO_KITTY_PLACEHOLDERS=1` and `PI_KITTY_PLACEHOLDERS=0` remain hard
  * opt-outs; `PI_KITTY_PLACEHOLDERS=1` explicitly opts in anywhere else.
@@ -81,7 +81,7 @@ export function detectKittyUnicodePlaceholdersSupport(terminalId: string, env: N
 	if (force === "0" || force === "false" || force === "off" || force === "no" || force === "n") return false;
 	const insideMultiplexer = isInsideTerminalMultiplexer(env);
 	if (insideMultiplexer && env.PI_FORCE_IMAGE_PROTOCOL?.trim().toLowerCase() === "kitty") return true;
-	if (insideMultiplexer) return false;
+	if (env.HERDR_ENV === "1") return false;
 	return terminalId === "kitty" || terminalId === "ghostty";
 }
 

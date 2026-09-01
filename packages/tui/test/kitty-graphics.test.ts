@@ -117,6 +117,10 @@ describe("detectKittyUnicodePlaceholdersSupport", () => {
 		).toBe(true);
 		// Automatic multiplexer fallback remains conservative when the outer terminal is unknown.
 		expect(detectKittyUnicodePlaceholdersSupport("base", env({ TMUX: "/tmp/tmux-1000/default,1,0" }))).toBe(false);
+		// A detected capable terminal still needs placeholders because direct placement cannot follow pane reflow.
+		expect(detectKittyUnicodePlaceholdersSupport("ghostty", env({ TMUX: "/tmp/tmux-1000/default,1,0" }))).toBe(
+			true,
+		);
 	});
 
 	it("ignores leaked Kitty-capable terminal identities inside Herdr unless placeholders are explicitly forced", () => {
