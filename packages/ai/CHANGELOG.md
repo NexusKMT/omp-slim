@@ -4,13 +4,15 @@
 
 ### Added
 
+- Enable dynamic mid-conversation updates for system prompts, toolsets, and reasoning effort on Anthropic models
+- Add support for deferred tool loading on Anthropic models
 - Add support for automatic recovery from "preserved-thinking" signature errors during conversation history rewrites
 - Add `anthropicPrefixMismatchBehavior` option to control handling of invalid thinking blocks
 - Enable prompt caching for system instructions to improve performance
 
 ### Fixed
 
-- Resolve 400 "Invalid signature" errors by automatically dropping mismatched thinking blocks after history rewrites
+- Resolve 400 "Invalid signature" errors by preserving valid same-deployment signatures while dropping incompatible blocks across deployment boundaries
 - Fix incorrect OS reporting in request headers for non-Linux systems
 - Fixed Google Antigravity model-quota errors switching models instead of rotating to another account with available usage.
 - Fixed the Claude Code fingerprint being rejected by Anthropic for newer models by aligning with the `2.1.257` CLI request signature.
