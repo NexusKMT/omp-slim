@@ -2163,13 +2163,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			for (let i = 0; i < inlineExtensions.length; i++) {
 				const factory = inlineExtensions[i];
 				const sourceId = `<inline-${nextInlineExtensionIndex++}>`;
-				const loaded = await loadExtensionFromFactory(
-					factory,
-					cwd,
-					eventBus,
-					extensionsResult.runtime,
-					sourceId,
-				);
+				const loaded = await loadExtensionFromFactory(factory, cwd, eventBus, extensionsResult.runtime, sourceId);
 				extensionsResult.extensions.push(loaded);
 				if (i < rebindableInlineExtensionCount) {
 					extensionsResult.preparedExtensions ??= [];

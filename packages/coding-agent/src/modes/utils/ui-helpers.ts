@@ -678,9 +678,8 @@ export class UiHelpers {
 				// Match tool results to pending tool components
 				const component = this.ctx.pendingTools.get(message.toolCallId);
 				if (component) {
-					const asyncDetails = (
-						message.details as { async?: { state?: string; jobId?: string } } | undefined
-					)?.async;
+					const asyncDetails = (message.details as { async?: { state?: string; jobId?: string } } | undefined)
+						?.async;
 					const isBackgroundTask =
 						message.toolName === "task" &&
 						asyncDetails?.state === "running" &&

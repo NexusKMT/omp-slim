@@ -2273,9 +2273,7 @@ function noMatchGuidance(
 			previewOffset: anchorOffset ?? closest.offset,
 			correctedPattern,
 			copyReady: confidentCorrection,
-			nonCopyReadyReason: confidentCorrection
-				? undefined
-				: "the closest current text is only a fuzzy match",
+			nonCopyReadyReason: confidentCorrection ? undefined : "the closest current text is only a fuzzy match",
 			additionRetry:
 				looksLikeAddition && additionText !== undefined && neighborLine.trim() !== ""
 					? `If you are ADDING this text: match the existing neighbor line it belongs next to, and put the new text in the REWRITE —\n${OPENER}\n${SELECT_OPEN}${SELECT_CLOSE}${neighborLine}\n${REWRITE_HEADER}\n${additionText}`

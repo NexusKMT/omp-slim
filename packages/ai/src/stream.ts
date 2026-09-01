@@ -155,8 +155,7 @@ export function isOfficialCodexApiUrl(baseUrl: string | undefined): boolean {
 		const candidatePath = candidate.pathname.replace(/\/+$/, "");
 		return (
 			candidate.origin === OFFICIAL_CODEX_URL.origin &&
-			(candidatePath === OFFICIAL_CODEX_URL.pathname ||
-				candidatePath.startsWith(`${OFFICIAL_CODEX_URL.pathname}/`))
+			(candidatePath === OFFICIAL_CODEX_URL.pathname || candidatePath.startsWith(`${OFFICIAL_CODEX_URL.pathname}/`))
 		);
 	} catch {
 		return false;

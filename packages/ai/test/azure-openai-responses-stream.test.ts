@@ -108,7 +108,7 @@ describe("azure openai responses streaming", () => {
 						id: "fc_bad",
 						call_id: "call_bad",
 						name: "bash",
-						arguments: "{\"command\":\"unterminated",
+						arguments: '{"command":"unterminated',
 					},
 					{ type: "function_call_output", call_id: "call_bad", output: "durable result" },
 				],

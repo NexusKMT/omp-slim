@@ -723,11 +723,9 @@ export class MnemopiSessionState {
 			extract: false,
 			sleep: false,
 			retain: this.config.autoRetain,
-		}).catch(
-			(error: unknown) => {
-				logger.warn("Mnemopi: consolidation on dispose failed.", { error: String(error) });
-			},
-		);
+		}).catch((error: unknown) => {
+			logger.warn("Mnemopi: consolidation on dispose failed.", { error: String(error) });
+		});
 		if (deadline !== undefined) {
 			const remainingMs = deadline - performance.now();
 			const completed =

@@ -68,11 +68,14 @@ async function spawnDisposableExecutable(args: string[] = []): Promise<Disposabl
 	await Bun.write(executablePath, Bun.file(process.execPath));
 	if (process.platform !== "win32") await fs.chmod(executablePath, 0o755);
 	const executable = await fs.realpath(executablePath);
-	const child = Bun.spawn([executable, "--eval", 'process.stdout.write("ready\\n"); await Bun.stdin.text()', ...args], {
-		stdin: "pipe",
-		stdout: "pipe",
-		stderr: "ignore",
-	});
+	const child = Bun.spawn(
+		[executable, "--eval", 'process.stdout.write("ready\\n"); await Bun.stdin.text()', ...args],
+		{
+			stdin: "pipe",
+			stdout: "pipe",
+			stderr: "ignore",
+		},
+	);
 	const readiness = child.stdout.getReader();
 	await readiness.read();
 	readiness.releaseLock();

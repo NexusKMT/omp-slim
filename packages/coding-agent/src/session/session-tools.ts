@@ -12,7 +12,7 @@ import { CustomToolAdapter } from "../extensibility/custom-tools/wrapper";
 import type { ExtensionRunner, SourceInfo, ToolInfo } from "../extensibility/extensions";
 import { ExtensionToolWrapper } from "../extensibility/extensions/wrapper";
 import { loadSkills, type Skill, type SkillWarning, setActiveSkills } from "../extensibility/skills";
-import { stripXdUrlPrefix, type LocalProtocolOptions, XD_URL_PREFIX } from "../internal-urls";
+import { type LocalProtocolOptions, stripXdUrlPrefix, XD_URL_PREFIX } from "../internal-urls";
 import { deduplicateMCPToolsByName } from "../mcp/tool-bridge";
 import { resolveMemoryBackend } from "../memory-backend/resolve";
 import { MEMORY_BACKEND_TOOL_NAMES } from "../memory-backend/tool-names";
@@ -25,13 +25,7 @@ import { wrapToolWithMetaNotice } from "../tools/output-meta";
 import { isFilesystemSourcePath } from "../tools/path-utils";
 import { supportsExternalThinking } from "../tools/think";
 import { ToolAbortError, ToolError } from "../tools/tool-errors";
-import {
-	isMountableUnderXdev,
-	listXdevTools,
-	type XdevState,
-	xdevDocsFor,
-	xdevEntries,
-} from "../tools/xdev";
+import { isMountableUnderXdev, listXdevTools, type XdevState, xdevDocsFor, xdevEntries } from "../tools/xdev";
 import { type EditMode, resolveEditMode } from "../utils/edit-mode";
 import { type InspectImageMode, isInspectImageToolActive } from "../utils/inspect-image-mode";
 import {
