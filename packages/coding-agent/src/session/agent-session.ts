@@ -2203,7 +2203,18 @@ export class AgentSession {
 
 	async #emitSessionEvent(event: AgentSessionEvent, options: { detachExtensions?: boolean } = {}): Promise<void> {
 		if (event.type === "tool_execution_update") {
-			this.#activeToolExecutionUpdates.set(event.toolCallId, event);
+			// A detached background task streams its terminal snapshot as a
+			// tool_execution_update carrying async.state "completed"/"failed" — not a
+			// second tool_execution_end — so evict on a settled async state. Otherwise
+			// each finished board lingers in the cache (unbounded retention) and a
+			// later focus rebuild could replay it into a reused tool-call id (#10447).
+			const asyncState = (event.partialResult as { details?: { async?: { state?: string } } } | undefined)?.details
+				?.async?.state;
+			if (asyncState === "completed" || asyncState === "failed") {
+				this.#activeToolExecutionUpdates.delete(event.toolCallId);
+			} else {
+				this.#activeToolExecutionUpdates.set(event.toolCallId, event);
+			}
 		} else if (event.type === "tool_execution_end") {
 			this.#activeToolExecutionUpdates.delete(event.toolCallId);
 		}
@@ -5324,6 +5335,10 @@ export class AgentSession {
 		this.#toolChoiceQueue.clear();
 		this.#tools.clearAcpPermissionDecisions();
 		this.#tools.resetAnnouncedMounts();
+		// A `/new`, session switch, or tree navigation reuses tool-call ids, so a
+		// still-cached background-task snapshot from the old conversation must not
+		// survive to be replayed by a focus rebuild in the reset session (#10447).
+		this.#activeToolExecutionUpdates.clear();
 	}
 
 	/**
