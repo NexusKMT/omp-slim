@@ -11,9 +11,18 @@ import { setTerminalHeadless } from "@oh-my-pi/pi-utils";
 // alive-but-slow terminal could drain it. The write path now feeds the backlog
 // to a progress-aware watchdog, so a single oversized frame must not
 // synchronously tear the terminal down.
-const stdinIsTty = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
-const stdoutIsTty = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
-const stdoutWritableLength = Object.getOwnPropertyDescriptor(process.stdout, "writableLength");
+const stdinIsTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+const stdoutIsTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+const stdinSetRawModeDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "setRawMode");
+const stdoutWritableLengthDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "writableLength");
+
+function restoreProperty(target: object, key: string, descriptor: PropertyDescriptor | undefined): void {
+	if (descriptor) {
+		Object.defineProperty(target, key, descriptor);
+		return;
+	}
+	delete (target as Record<string, unknown>)[key];
+}
 
 describe("ProcessTerminal oversized-frame backlog (#10430)", () => {
 	let prevHeadless: boolean;
@@ -40,9 +49,10 @@ describe("ProcessTerminal oversized-frame backlog (#10430)", () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks();
-		if (stdinIsTty) Object.defineProperty(process.stdin, "isTTY", stdinIsTty);
-		if (stdoutIsTty) Object.defineProperty(process.stdout, "isTTY", stdoutIsTty);
-		if (stdoutWritableLength) Object.defineProperty(process.stdout, "writableLength", stdoutWritableLength);
+		restoreProperty(process.stdin, "isTTY", stdinIsTtyDescriptor);
+		restoreProperty(process.stdout, "isTTY", stdoutIsTtyDescriptor);
+		restoreProperty(process.stdin, "setRawMode", stdinSetRawModeDescriptor);
+		restoreProperty(process.stdout, "writableLength", stdoutWritableLengthDescriptor);
 		setTerminalHeadless(prevHeadless);
 	});
 
