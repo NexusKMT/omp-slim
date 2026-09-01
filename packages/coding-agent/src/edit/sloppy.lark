@@ -20,7 +20,7 @@ find: "<SM:FIND>" LF content_line* "</SM:FIND>" LF
 put: "<SM:PUT>" LF content_line* "</SM:PUT>" LF
    | "<SM:PUT></SM:PUT>" LF
 content_line: TEXT LF | LF
-TEXT: /(?!<\/?SM:(?:FIND|PUT|EDIT)[>\s\/])[^\n]+/
+TEXT: /[^\n]+/
 
 %import common.LF
 %import common.WS_INLINE

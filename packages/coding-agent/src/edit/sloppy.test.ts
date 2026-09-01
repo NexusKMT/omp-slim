@@ -5,7 +5,9 @@ import {
 	applySloppy,
 	computeSloppySectionDiff,
 	executeSloppy,
+	extractInlineSloppyRegions,
 	SLOPPY_MARKERS,
+	sloppyGrammar,
 	splitSloppySections,
 	sloppyVariant as variant,
 } from "./sloppy";
@@ -731,6 +733,72 @@ describe("sloppy v8", () => {
 	test("trims whitespace inside the path attribute", () => {
 		const sections = splitSloppySections('<SM:EDIT path=" index.ts ">\n<SM:FIND>\nx()\n</SM:FIND>');
 		expect(sections.map(section => section.path)).toEqual(["index.ts"]);
+	});
+
+	test("extracts an inline payload region without swallowing surrounding prose", () => {
+		const payload = [
+			'<SM:EDIT path="src/a.ts">',
+			"<SM:FIND>",
+			"const x = 1;",
+			"</SM:FIND>",
+			"<SM:PUT>",
+			"const x = 2;",
+			"</SM:PUT>",
+			"</SM:EDIT>",
+		].join("\n");
+		const text = `I'll fix the constant now.\n\n${payload}\n\nThat updates the default.`;
+
+		const regions = extractInlineSloppyRegions(text);
+		expect(regions.length).toBe(1);
+		expect(regions[0].payload).toBe(payload);
+		const excised = text.slice(0, regions[0].start) + text.slice(regions[0].end);
+		expect(excised).toBe("I'll fix the constant now.\n\n\nThat updates the default.");
+	});
+
+	test("ends an inline region at trailing prose even without a </SM:EDIT> close", () => {
+		const payload = [
+			'<SM:EDIT path="src/a.ts">',
+			"<SM:FIND>",
+			"old();",
+			"</SM:FIND>",
+			"<SM:PUT>",
+			"new();",
+			"</SM:PUT>",
+		].join("\n");
+		const regions = extractInlineSloppyRegions(`${payload}\nDone — the call site now uses new().`);
+
+		expect(regions.length).toBe(1);
+		expect(regions[0].payload).toBe(payload);
+	});
+
+	test("extracts disjoint inline regions with narration between them", () => {
+		const first = '<SM:EDIT path="a.ts">\n<SM:FIND>\none();\n</SM:FIND>\n<SM:PUT>\ntwo();\n</SM:PUT>\n</SM:EDIT>';
+		const second = '<SM:EDIT path="b.ts">\n<SM:FIND>\nred();\n</SM:FIND>\n<SM:PUT>\nblue();\n</SM:PUT>';
+		const regions = extractInlineSloppyRegions(`${first}\nNow the second file:\n${second}`);
+
+		expect(regions.map(region => region.payload)).toEqual([first, second]);
+	});
+
+	test("ignores a payload quoted inside a markdown code fence", () => {
+		const text = [
+			"Here is the payload I would send:",
+			"```text",
+			'<SM:EDIT path="src/a.ts">',
+			"<SM:FIND>",
+			"const x = 1;",
+			"</SM:FIND>",
+			"<SM:PUT>",
+			"const x = 2;",
+			"</SM:PUT>",
+			"```",
+		].join("\n");
+
+		expect(extractInlineSloppyRegions(text)).toEqual([]);
+	});
+
+	test("drops an inline region that compiles to no sections", () => {
+		expect(extractInlineSloppyRegions('<SM:EDIT path="src/a.ts">\n</SM:EDIT>\nprose')).toEqual([]);
+		expect(extractInlineSloppyRegions("<SM:EDIT>\n<SM:FIND>\nx()\n</SM:FIND>\n<SM:PUT>\ny()\n</SM:PUT>")).toEqual([]);
 	});
 
 	test("recovers selections trailing their own retyped line with elided lines between", () => {
@@ -2584,5 +2652,10 @@ describe("xml surface", () => {
 
 		expect(applySloppy(content, input, { path: "i.ts", notes })).toBe("    if (entryRow)\n      throw invalid();\n");
 		expect(notes.join("\n")).toMatch(/closest matching block was replaced/);
+	});
+
+	test("sloppy grammar does not use regex lookarounds unsupported by constrained decoding engines", () => {
+		expect(sloppyGrammar).not.toMatch(/\(\?[!=]|\(\?<[!=]/);
+		expect(sloppyGrammar).toContain("TEXT: /[^\\n]+/");
 	});
 });

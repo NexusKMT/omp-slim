@@ -269,6 +269,87 @@ export function splitSloppySections(input: string): SloppySection[] {
 	return ordered;
 }
 
+/** One stray sloppy payload region located inside plain prose. */
+export interface InlineSloppyRegion {
+	/** Character offset of the opener line's first byte within the scanned text. */
+	start: number;
+	/** Character offset one past the last payload line (its newline included). */
+	end: number;
+	/** Verbatim payload text, opener line through last structural line. */
+	payload: string;
+}
+
+/**
+ * Find sloppy payload regions the model emitted as plain prose instead of an
+ * `edit` tool call. A region starts at a pathful `<SM:EDIT path="…">` opener on
+ * its own line and extends only while lines stay structural: tag lines
+ * anywhere, arbitrary content only inside an open `<SM:FIND>`/`<SM:PUT>` block,
+ * blanks between structure. The first prose line outside a block ends the
+ * region — stricter than {@link applySloppy}'s lenient parse, so surrounding
+ * commentary is never swallowed into an edit. Openers inside markdown code
+ * fences (``` / ~~~) are presentational and skipped. Regions that do not
+ * compile to at least one pathful section are dropped.
+ */
+export function extractInlineSloppyRegions(text: string): InlineSloppyRegion[] {
+	if (!text.includes("<SM:EDIT")) return [];
+	const regions: InlineSloppyRegion[] = [];
+	const lines = text.split("\n");
+	const starts: number[] = [];
+	for (let index = 0, position = 0; index < lines.length; index++) {
+		starts.push(position);
+		position += lines[index].length + 1;
+	}
+	const lineEnd = (index: number): number => Math.min(text.length, starts[index] + lines[index].length + 1);
+	let inFence = false;
+	let index = 0;
+	while (index < lines.length) {
+		const line = lines[index];
+		if (/^\s*(?:```|~~~)/.test(line)) {
+			inFence = !inFence;
+			index++;
+			continue;
+		}
+		const opener = inFence ? undefined : parseTagLine(line);
+		if (opener?.kind !== "open" || opener.path === undefined) {
+			index++;
+			continue;
+		}
+		let last = index;
+		let block: "outside" | "find" | "put" = "outside";
+		let scan = index + 1;
+		for (; scan < lines.length; scan++) {
+			const tag = parseTagLine(lines[scan]);
+			if (tag === undefined) {
+				if (block === "outside") {
+					// Blank gap: kept only if more structure follows; prose ends the region.
+					if (lines[scan].trim() === "") continue;
+					break;
+				}
+				last = scan;
+				continue;
+			}
+			switch (tag.kind) {
+				case "find":
+					block = tag.inline === undefined ? "find" : "outside";
+					break;
+				case "put":
+					block = tag.inline === undefined ? "put" : "outside";
+					break;
+				default:
+					block = "outside";
+					break;
+			}
+			last = scan;
+		}
+		const payload = lines.slice(index, last + 1).join("\n");
+		if (splitSloppySections(payload).length > 0) {
+			regions.push({ start: starts[index], end: lineEnd(last), payload });
+		}
+		index = Math.max(scan, last + 1);
+	}
+	return regions;
+}
+
 /**
  * Preview one payload section against the file on disk: apply in memory and
  * diff. Used by the streaming edit preview; never writes.
