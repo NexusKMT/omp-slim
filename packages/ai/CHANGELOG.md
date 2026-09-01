@@ -5,6 +5,7 @@
 ### Fixed
 
 - Preserved Anthropic thinking now survives side requests, tool-description drift, turn-scoped reminders, and recoverable prefix mismatches without corrupting the conversation prefix.
+- Fixed the tool-call loop guard counting multi-call turns: a model reissuing the same batch of parallel tool calls was previously invisible to the guard, which only tracked turns containing exactly one call; identical multi-call batches now accumulate toward the threshold, all-exempt batches reset it, and the redirect reports the first non-exempt call.
 
 ## [18.1.2] - 2026-09-01
 
