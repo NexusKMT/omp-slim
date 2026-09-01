@@ -3633,6 +3633,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			settings,
 			additionalExtensionPaths: options.additionalExtensionPaths,
 			extensionRoots: buildSessionExtensionRoots,
+			preparedExtensions: extensionsResult.preparedExtensions,
+			extensionPaths,
 			disableExtensionDiscovery: options.disableExtensionDiscovery,
 			autoApprove: options.autoApprove,
 			scoutAllowedBySpawnPolicy: isScoutSpawnable(undefined, options.spawns ?? "*"),

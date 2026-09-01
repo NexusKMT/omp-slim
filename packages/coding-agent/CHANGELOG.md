@@ -29,6 +29,7 @@
 ### Fixed
 
 - Fixed OpenAI Codex Responses tool results being dropped when their composite id (`call_X|fc_Y`) failed to pair with the assistant call's plain id (`call_X`), so the model saw a synthetic "No result provided" stub in place of a tool result it had actually produced ([#10284](https://github.com/can1357/oh-my-pi/pull/10284) by [@mattwilkinsonn](https://github.com/mattwilkinsonn)).
+- Fixed `/tan` background agents failing with "No API key found" when the active provider comes from an extension; the tangent now inherits the parent session's loaded extensions so its provider credentials resolve.
 
 ## [18.0.11] - 2026-08-29
 
