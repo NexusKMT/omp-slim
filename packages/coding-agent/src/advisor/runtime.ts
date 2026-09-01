@@ -1477,7 +1477,12 @@ export class AdvisorRuntime {
 		} finally {
 			this.#iterationAbort = undefined;
 			this.#busy = false;
-			if (!this.disposed && this.#backlog === 0 && this.#pending.length === 0) {
+			// Notify on EVERY path that lands the runtime in the yielded state —
+			// not just an empty backlog. The quota branch requeues the failed
+			// batch (backlog/pending stay non-empty) yet `yielded` is true via
+			// the quota latch, and the eye must close without waiting for an
+			// unrelated repaint. Same for halt.
+			if (!this.disposed && this.yielded) {
 				try {
 					this.host.notifyIdle?.();
 				} catch (err) {

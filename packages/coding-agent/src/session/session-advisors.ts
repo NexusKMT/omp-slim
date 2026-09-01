@@ -1113,10 +1113,12 @@ export class SessionAdvisors {
 					);
 				},
 				notifyIdle: () => {
-					// Only surface the yield once the primary has stopped streaming:
-					// mid-turn drain completions keep the eye open (more deltas are
-					// coming), and the agent_end repaint already covered them.
-					if (this.#host.agent.state.isStreaming) return;
+					// Repaint on every idle transition, streaming or not: the status
+					// line masks `yielded` back to open while the primary streams, so
+					// mid-turn drain completions stay open, while post-yield
+					// completions — including the quota/halt latches, which can land
+					// after the agent_end repaint — close the eye without waiting for
+					// an unrelated event.
 					void this.#host
 						.emitSessionEvent({ type: "advisor_yielded" })
 						.catch(err => logger.debug("advisor yield notification failed", { err: String(err) }));

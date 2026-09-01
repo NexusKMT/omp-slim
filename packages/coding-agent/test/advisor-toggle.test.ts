@@ -989,12 +989,24 @@ describe("AgentSession advisor toggle", () => {
 			const markUsageLimitReached = vi
 				.spyOn(authStorage, "markUsageLimitReached")
 				.mockResolvedValue({ switched: false });
+			// The quota latch makes `yielded` true even though the failed batch is
+			// requeued — the runtime must still emit advisor_yielded so the status
+			// line repaints the closed eye without waiting for unrelated activity.
+			const events: string[] = [];
+			const unsubscribe = quotaSession.subscribe(event => events.push(event.type));
 
 			await quotaSession.prompt("Trigger advisor");
 			await quotaSession.waitForIdle();
 
 			expect(markUsageLimitReached).toHaveBeenCalledTimes(1);
 			expect(markUsageLimitReached.mock.calls[0]?.[0]).toBe(model.provider);
+			expect(quotaSession.getAdvisorStatusOverview().advisors[0]?.yielded).toBe(true);
+			const deadline = Date.now() + 2000;
+			while (!events.includes("advisor_yielded") && Date.now() < deadline) {
+				await Bun.sleep(10);
+			}
+			unsubscribe();
+			expect(events).toContain("advisor_yielded");
 		} finally {
 			await quotaSession.dispose();
 			vi.restoreAllMocks();
