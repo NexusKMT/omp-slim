@@ -26,6 +26,7 @@
 - Fixed OpenAI remote-compaction replay sending output-only `status` fields on `compaction` and `compaction_summary` items, allowing already-persisted sessions to resume without `input[N].status` request failures. ([#10415](https://github.com/can1357/oh-my-pi/pull/10415) by [@spgsroot](https://github.com/spgsroot))
 - Fixed Z.AI (GLM Coding Plan) browser sign-in being rejected with "Redirect URI not registered for this client": the flow now advertises the ZCode-registered CLI callback `http://127.0.0.1:9999/callback` instead of the unregistered `localhost:54548` ([#10245](https://github.com/can1357/oh-my-pi/issues/10245)).
 - Fixed OpenAI Codex/Responses tool results being dropped when their composite id (`call_X|fc_Y`) failed to pair with the assistant call, so the model no longer sees a synthetic "No result provided" stub in place of a result it produced; opaque Chat Completions ids are left untouched and pairing survives a cross-provider session switch ([#10284](https://github.com/can1357/oh-my-pi/pull/10284) by [@mattwilkinsonn](https://github.com/mattwilkinsonn)).
+- Fixed native Responses history replay so a malformed or truncated `function_call` arguments string no longer wedges the session with repeated 400 JSON parse errors; the item-level replay sanitizer drops the invalid item so the turn recovers.
 
 ## [18.0.11] - 2026-08-29
 
