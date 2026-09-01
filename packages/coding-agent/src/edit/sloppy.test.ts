@@ -1517,6 +1517,31 @@ describe("sloppy v8", () => {
 		);
 	});
 
+	test("does not label a partial retry copy-ready when an atomic payload has sibling operations", () => {
+		const content = [
+			"real: 2;",
+			"function load() {",
+			"  const result = fetchCurrent();",
+			"  return result;",
+			"}",
+			"",
+		].join("\n");
+		const input = `${M.open}\nreal: ⟪2│TWO⟫;\n${M.open}\nfunction load() {…\n⟪const result = fetchLegacy();│const result = fetchCurrent();⟫…\nreturn result;\n}`;
+
+		let message = "";
+		try {
+			variant.apply(content, input, { path: "bt.txt" });
+		} catch (error) {
+			message = (error as Error).message;
+		}
+
+		expect(message).not.toContain("Copy-ready corrected operation:");
+		expect(message).toContain("retrying this operation alone would drop sibling operations");
+		expect(message).toContain(
+			"No operations were applied — ops apply atomically; re-send the full corrected payload.",
+		);
+	});
+
 	test("teaches insert intent when MATCH is text the author meant to add", () => {
 		const content = ["switch (event.type) {", "  case 'message':", "    handleMessage(event);", "}", ""].join("\n");
 		const input = operation("  case 'end_turn':", "  case 'end_turn':\n    finishTurn();");

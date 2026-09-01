@@ -2224,7 +2224,14 @@ function noMatchGuidance(
 	normalized: NormalizedText,
 	pattern: ParsedPattern,
 	operation: Operation,
-): { reason: string; previewOffset: number; correctedPattern: string; copyReady: boolean; additionRetry?: string } {
+): {
+	reason: string;
+	previewOffset: number;
+	correctedPattern: string;
+	copyReady: boolean;
+	nonCopyReadyReason?: string;
+	additionRetry?: string;
+} {
 	const literals = pattern.tokens.flatMap((token, index) =>
 		token.kind === "literal" ? [{ index, token, occurrences: occurrencesForLiteral(normalized, token) }] : [],
 	);
@@ -2266,6 +2273,9 @@ function noMatchGuidance(
 			previewOffset: anchorOffset ?? closest.offset,
 			correctedPattern,
 			copyReady: confidentCorrection,
+			nonCopyReadyReason: confidentCorrection
+				? undefined
+				: "the closest current text is only a fuzzy match",
 			additionRetry:
 				looksLikeAddition && additionText !== undefined && neighborLine.trim() !== ""
 					? `If you are ADDING this text: match the existing neighbor line it belongs next to, and put the new text in the REWRITE —\n${OPENER}\n${SELECT_OPEN}${SELECT_CLOSE}${neighborLine}\n${REWRITE_HEADER}\n${additionText}`
@@ -2300,6 +2310,7 @@ function noMatchGuidance(
 			previewOffset: only?.occurrences[0] ? sourceStart(normalized, only.occurrences[0].start, 0) : 0,
 			correctedPattern: operation.patternText,
 			copyReady: false,
+			nonCopyReadyReason: "the current text could not be aligned safely",
 		};
 	}
 
@@ -2318,6 +2329,10 @@ function noMatchGuidance(
 		previewOffset: sourceStart(normalized, broken.left.occurrences[0]?.start ?? 0, 0),
 		correctedPattern,
 		copyReady: correctedPattern !== operation.patternText,
+		nonCopyReadyReason:
+			correctedPattern === operation.patternText
+				? "the matched anchors are in a different order and no safe correction is available"
+				: undefined,
 	};
 }
 function nonConsecutiveGuidance(
@@ -2424,6 +2439,7 @@ function locate(
 	operationNumber: number,
 	path: string,
 	exclusions?: ReadonlyArray<{ start: number; end: number }>,
+	standaloneOperation = true,
 ): Candidate[] {
 	const normalized = normalizeText(content);
 	const raw = collectCandidates(content, normalized, pattern, "raw");
@@ -2530,13 +2546,15 @@ function locate(
 					: `Operation ${operationNumber} did not match ${path}. ${guidance.reason}`,
 				"Current file content near the closest match (no re-read needed):",
 				numberedPreview(content, guidance.previewOffset),
-				...(guidance.copyReady
+				...(guidance.copyReady && standaloneOperation
 					? [
 							"Copy-ready corrected operation:",
 							operationPayload(operation, operation.all ? "*" : "", guidance.correctedPattern),
 						]
 					: [
-							"No copy-ready correction — the closest current text is only a fuzzy match. Re-read the region above and rebuild MATCH from the exact current text.",
+							guidance.copyReady
+								? "No copy-ready correction — retrying this operation alone would drop sibling operations. Rebuild it inside the full payload."
+								: `No copy-ready correction — ${guidance.nonCopyReadyReason ?? "no safe correction is available"}. Re-read the region above and rebuild MATCH from the exact current text.`,
 						]),
 				...(guidance.additionRetry ? [guidance.additionRetry] : []),
 			].join("\n"),
@@ -3474,10 +3492,15 @@ function locateWithEchoRecovery(
 	operationNumber: number,
 	path: string,
 	exclusions?: ReadonlyArray<{ start: number; end: number }>,
+	standaloneOperation = true,
 ): { operation: Operation; pattern: ParsedPattern; candidates: Candidate[] } {
 	const pattern = parsePattern(operation.patternText, operationNumber);
 	try {
-		return { operation, pattern, candidates: locate(content, pattern, operation, operationNumber, path, exclusions) };
+		return {
+			operation,
+			pattern,
+			candidates: locate(content, pattern, operation, operationNumber, path, exclusions, standaloneOperation),
+		};
 	} catch (error) {
 		const nonConsecutive = recoverNonConsecutiveOperation(content, operation);
 		if (nonConsecutive) {
@@ -3594,6 +3617,7 @@ function applyOperations(content: string, input: string, context: SloppyApplyCon
 				operationNumber,
 				context.path,
 				deferredAmbiguous.has(index) ? planned.map(edit => ({ start: edit.start, end: edit.end })) : undefined,
+				operations.length === 1,
 			);
 		} catch (error) {
 			if (!deferredAmbiguous.has(index) && error instanceof Error && error.message.includes(" is ambiguous: ")) {
