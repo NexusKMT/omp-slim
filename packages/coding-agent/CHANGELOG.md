@@ -25,6 +25,7 @@
 - Fixed `HookUIContext.custom` types and docs so custom hook UI factories receive the `keybindings` argument the runner already passes ([#10424](https://github.com/can1357/oh-my-pi/pull/10424) by [@kvnloo](https://github.com/kvnloo)).
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Clarified that the default task-delegation setting follows the selected model's policy.
+- Fixed entering `/rename` without a title interrupting active session activity ([#10326](https://github.com/can1357/oh-my-pi/issues/10326)).
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
 - Fixed long OpenCode Go usage-limit waits to immediately switch replay-safe turns to a distinct configured provider when the retry delay exceeds `retry.maxDelayMs`.
