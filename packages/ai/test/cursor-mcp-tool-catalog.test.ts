@@ -1,11 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import { buildMcpToolDefinitions } from "@oh-my-pi/pi-ai/providers/cursor";
-import type { Tool } from "@oh-my-pi/pi-ai/types";
+import type { Tool, TSchema } from "@oh-my-pi/pi-ai/types";
+import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
+import { decodeJsonValue } from "@oh-my-pi/pi-catalog/discovery/protobuf";
 
-const tool = (name: string): Tool => ({
+const tool = (name: string, parameters: TSchema = { type: "object", properties: {} }): Tool => ({
 	name,
 	description: `${name} tool`,
-	parameters: { type: "object", properties: {} },
+	parameters,
 });
 
 describe("cursor buildMcpToolDefinitions", () => {
@@ -66,5 +68,61 @@ describe("cursor buildMcpToolDefinitions", () => {
 		expect(editDef?.providerIdentifier).toBe("pi-agent");
 		expect(editDef?.toolName).toBe("edit");
 		expect(defs.map(def => def.name)).not.toContain("read");
+	});
+
+	it("removes rejected combiners while preserving accepted schema fields and local validation input", () => {
+		const schema = {
+			type: "object",
+			anyOf: [{ required: ["top"] }],
+			properties: {
+				nested: {
+					description: "kept",
+					oneOf: [{ type: "string" }, { type: "number" }],
+				},
+				list: {
+					type: "array",
+					items: {
+						title: "kept",
+						allOf: [{ type: "string" }],
+					},
+				},
+				guarded: {
+					enum: ["a", "b"],
+					not: {
+						anyOf: [{ const: null }],
+					},
+				},
+				anyOf: { type: "string" },
+			},
+			required: ["nested"],
+		};
+		const composedTool = tool("composed", schema);
+		const wireSchema = toolWireSchema(composedTool);
+		const originalWireSchema = structuredClone(wireSchema);
+
+		const [definition] = buildMcpToolDefinitions([composedTool]);
+
+		expect(decodeJsonValue(definition.inputSchema)).toEqual({
+			type: "object",
+			properties: {
+				nested: {
+					description: "kept",
+				},
+				list: {
+					type: "array",
+					items: {
+						title: "kept",
+					},
+				},
+				guarded: {
+					enum: ["a", "b"],
+					type: "string",
+					not: {},
+				},
+				anyOf: { type: "string" },
+			},
+			required: ["nested"],
+		});
+		expect(structuredClone(wireSchema)).toEqual(originalWireSchema);
 	});
 });

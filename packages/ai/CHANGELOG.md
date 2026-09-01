@@ -23,6 +23,7 @@
 
 ### Fixed
 
+- Fixed Cursor Fable turns failing before output when advertised tools use JSON Schema composition keywords ([#10432](https://github.com/can1357/oh-my-pi/issues/10432)).
 - Fixed Z.AI (GLM Coding Plan) browser sign-in being rejected with "Redirect URI not registered for this client": the flow now advertises the ZCode-registered CLI callback `http://127.0.0.1:9999/callback` instead of the unregistered `localhost:54548` ([#10245](https://github.com/can1357/oh-my-pi/issues/10245)).
 
 ## [18.0.11] - 2026-08-29

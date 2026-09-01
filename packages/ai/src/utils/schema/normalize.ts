@@ -87,6 +87,11 @@ const SNAKE_TO_CAMEL_RENAMES = new Map<string, string>([
 
 const JSON_SCHEMA_COMBINERS = ["anyOf", "oneOf"] as const;
 const CCA_FORBIDDEN_COMBINERS = new Set(["anyOf", "oneOf", "allOf"]);
+const CURSOR_UNSUPPORTED_SCHEMA_FIELDS: Record<string, true> = {
+	allOf: true,
+	anyOf: true,
+	oneOf: true,
+};
 
 /**
  * Keywords whose value is a single subschema (draft 2020-12). A bare `true` /
@@ -1065,6 +1070,41 @@ function hasResidualSchemaIncompatibilities(
 		}
 	}
 	return false;
+}
+
+function sanitizeCursorSchemaValue(value: unknown, insideSchemaMap: boolean): unknown {
+	if (Array.isArray(value)) {
+		if (!enter(value)) return [];
+		try {
+			return value.map(entry => sanitizeCursorSchemaValue(entry, false));
+		} finally {
+			exit(value);
+		}
+	}
+	if (!isJsonObject(value)) return value;
+	if (!enter(value)) return {};
+	try {
+		return sanitizeCursorSchemaObject(value, insideSchemaMap);
+	} finally {
+		exit(value);
+	}
+}
+
+function sanitizeCursorSchemaObject(value: JsonObject, insideSchemaMap: boolean): JsonObject {
+	const result: JsonObject = {};
+	for (const key in value) {
+		if (!Object.hasOwn(value, key)) continue;
+		if (!insideSchemaMap && Object.hasOwn(CURSOR_UNSUPPORTED_SCHEMA_FIELDS, key)) continue;
+		const entry = value[key];
+		const childKind = classifySchemaChild(key, entry, insideSchemaMap);
+		result[key] = childKind ? sanitizeCursorSchemaValue(entry, childKind === "map") : entry;
+	}
+	return result;
+}
+
+/** Remove schema composition keywords rejected by Cursor's MCP tool catalog. */
+export function sanitizeSchemaForCursor(schema: JsonObject): JsonObject {
+	return sanitizeCursorSchemaObject(schema, false);
 }
 
 export function normalizeSchema(value: unknown, options: NormalizeSchemaOptions): unknown {
