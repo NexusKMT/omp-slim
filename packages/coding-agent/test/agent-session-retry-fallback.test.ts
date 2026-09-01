@@ -5443,13 +5443,13 @@ describe("AgentSession retry fallback", () => {
 		expect(session.getContextUsage()?.contextWindow).toBe(1_050_000);
 		expect(session.inspectImageState().active).toBe(false);
 
-		const inspectImageActiveAtNotification = new Promise<boolean>(resolve => {
-			const unsubscribe = session!.subscribe(event => {
-				if (event.type === "model_changed") {
-					unsubscribe();
-					resolve(session!.inspectImageState().active);
-				}
-			});
+		const { promise: inspectImageActiveAtNotification, resolve: resolveInspectImageActiveAtNotification } =
+			Promise.withResolvers<boolean>();
+		const unsubscribe = session.subscribe(event => {
+			if (event.type === "model_changed") {
+				unsubscribe();
+				resolveInspectImageActiveAtNotification(session!.inspectImageState().active);
+			}
 		});
 
 		// The CLI starts discovery only after the session is built; the rebind
