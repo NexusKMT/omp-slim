@@ -286,6 +286,17 @@ export interface SessionAdvisorsHost {
 	sessionId(): string;
 }
 
+/**
+ * One advisor's status-line slice: runtime status plus whether it has
+ * finished reviewing the current yield — i.e. it is not going to add any
+ * more comments until a new primary turn starts (or an explicit reset).
+ */
+export interface AdvisorStatusOverviewEntry {
+	name: string;
+	status: AdvisorRuntimeStatus;
+	yielded: boolean;
+}
+
 /** Owns advisor runtimes, delivery policy, context maintenance, and status reporting. */
 export class SessionAdvisors {
 	readonly #host: SessionAdvisorsHost;
@@ -1101,6 +1112,15 @@ export class SessionAdvisors {
 						"advisor",
 					);
 				},
+				notifyIdle: () => {
+					// Only surface the yield once the primary has stopped streaming:
+					// mid-turn drain completions keep the eye open (more deltas are
+					// coming), and the agent_end repaint already covered them.
+					if (this.#host.agent.state.isStreaming) return;
+					void this.#host
+						.emitSessionEvent({ type: "advisor_yielded" })
+						.catch(err => logger.debug("advisor yield notification failed", { err: String(err) }));
+				},
 			});
 
 			const advisorRef: ActiveAdvisor = {
@@ -1872,20 +1892,26 @@ export class SessionAdvisors {
 	 * flag and per-advisor name/status without computing token/cost breakdowns.
 	 * Avoids re-tokenizing the advisor transcript on every render frame.
 	 */
-	getAdvisorStatusOverview(): { configured: boolean; advisors: { name: string; status: AdvisorRuntimeStatus }[] } {
+	getAdvisorStatusOverview(): { configured: boolean; advisors: AdvisorStatusOverviewEntry[] } {
 		// Override stale map entries with live runtime status: failureNotified/quotaExhausted
 		// clear on reset() but #advisorStatuses lags until the next build.
-		const liveStatusBySlug = new Map<string, AdvisorRuntimeStatus>();
+		const liveStatusBySlug = new Map<string, { status: AdvisorRuntimeStatus; yielded: boolean }>();
 		for (const a of this.#advisors) {
-			liveStatusBySlug.set(
-				a.slug,
-				a.runtime.quotaExhausted ? "quota_exhausted" : a.runtime.failureNotified ? "error" : "running",
-			);
+			liveStatusBySlug.set(a.slug, {
+				status: a.runtime.quotaExhausted ? "quota_exhausted" : a.runtime.failureNotified ? "error" : "running",
+				yielded: a.runtime.yielded,
+			});
 		}
-		const advisors = [...this.#advisorStatuses.entries()].map(([slug, { name, status }]) => ({
-			name,
-			status: liveStatusBySlug.get(slug) ?? status,
-		}));
+		const advisors = [...this.#advisorStatuses.entries()].map(([slug, { name, status }]) => {
+			const live = liveStatusBySlug.get(slug);
+			return {
+				name,
+				status: live?.status ?? status,
+				// Roster entries without a live runtime (disabled, no model, paused)
+				// will never comment again — treat them as yielded.
+				yielded: live?.yielded ?? true,
+			};
+		});
 		return { configured: this.#advisorEnabled, advisors };
 	}
 

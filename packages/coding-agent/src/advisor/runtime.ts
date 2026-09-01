@@ -86,6 +86,10 @@ export interface AdvisorRuntimeHost {
 	notifyQuotaExhausted?(): void;
 	/** Stable identity for the live advisor model. Used to restore full transcript rendering after a model switch. */
 	getModelIdentity?(): string;
+	/** Called once the runtime finishes draining its review backlog (or
+	 *  hard-stops), so the host can repaint UI that reflects whether the
+	 *  advisor is still going to comment on the current yield. */
+	notifyIdle?(): void;
 }
 
 /**
@@ -353,6 +357,18 @@ export class AdvisorRuntime {
 	/** True after the runtime hard-stopped on repeated or permanent failures. */
 	get halted(): boolean {
 		return this.#halted;
+	}
+	/** True once the runtime has no queued or in-flight review work left and
+	 *  will not resume it on its own (finished, halted, or quota-paused): the
+	 *  advisor is not going to add any more comments until a new primary turn
+	 *  (or an explicit reset). Drives the status-line closed-eye state. */
+	get yielded(): boolean {
+		return (
+			this.disposed ||
+			this.#quotaExhausted ||
+			this.#halted ||
+			(!this.#busy && this.#backlog === 0 && this.#pending.length === 0)
+		);
 	}
 
 	/**
@@ -1449,6 +1465,13 @@ export class AdvisorRuntime {
 		} finally {
 			this.#iterationAbort = undefined;
 			this.#busy = false;
+			if (!this.disposed && this.#backlog === 0 && this.#pending.length === 0) {
+				try {
+					this.host.notifyIdle?.();
+				} catch (err) {
+					logger.debug("advisor idle notification failed", { err: String(err) });
+				}
+			}
 		}
 	}
 }
