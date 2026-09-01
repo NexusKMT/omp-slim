@@ -1,4 +1,5 @@
 import type { KnownProvider } from "@oh-my-pi/pi-catalog";
+import { abliterationProvider } from "./abliteration";
 import { aiandProvider } from "./aiand";
 import { aimlApiProvider } from "./aimlapi";
 import { alibabaCodingPlanProvider } from "./alibaba-coding-plan";
@@ -107,6 +108,7 @@ const ALL = [
 	alibabaCodingPlanProvider,
 	alibabaTokenPlanProvider,
 	aiandProvider,
+	abliterationProvider,
 	aimlApiProvider,
 	zhipuCodingPlanProvider,
 	umansProvider,

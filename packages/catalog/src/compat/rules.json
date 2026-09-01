@@ -501,6 +501,32 @@
 						"provenance": "models.json census",
 						"provider": "umans",
 						"class": "glm"
+					},
+					{
+						"id": "abliteration-glm-5-3-family",
+						"model": "abliterated-model-large-v2",
+						"rationale": "Abliteration's Large V2 is an abliterated GLM 5.3 deployment",
+						"provenance": "docs.abliteration.ai/models (2026-09)",
+						"provider": "abliteration",
+						"class": "glm",
+						"revision": "5.3.0"
+					},
+					{
+						"id": "abliteration-glm-5-2-family",
+						"model": "abliterated-model-large",
+						"rationale": "Abliteration's Large is an abliterated GLM 5.2 deployment",
+						"provenance": "docs.abliteration.ai/models (2026-09)",
+						"provider": "abliteration",
+						"class": "glm",
+						"revision": "5.2.0"
+					},
+					{
+						"id": "abliteration-glm-base-family",
+						"model": "abliterated-model",
+						"rationale": "Abliteration's base deployment is GLM-derived; the docs do not pin the revision",
+						"provenance": "docs.abliteration.ai/models (2026-09)",
+						"provider": "abliteration",
+						"class": "glm"
 					}
 				]
 			},
@@ -4945,7 +4971,29 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:36",
+				"source": "classes/glm.kdl:37",
+				"class": "glm",
+				"providers": [
+					"abliteration"
+				],
+				"revision": [
+					{
+						"op": ">=",
+						"revision": "5.3.0"
+					}
+				],
+				"thinking": {
+					"defaultLevel": "max",
+					"efforts": [
+						"low",
+						"high",
+						"max"
+					],
+					"requiresEffort": true
+				}
+			},
+			{
+				"source": "classes/glm.kdl:46",
 				"class": "glm",
 				"providers": [
 					"zai",
@@ -4973,7 +5021,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:46",
+				"source": "classes/glm.kdl:56",
 				"class": "glm",
 				"providers": [
 					"zai"
@@ -4994,7 +5042,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:58",
+				"source": "classes/glm.kdl:68",
 				"class": "glm",
 				"providers": [
 					"zai",
@@ -5014,7 +5062,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:62",
+				"source": "classes/glm.kdl:72",
 				"class": "glm",
 				"providers": [
 					"alibaba-coding-plan",
@@ -5026,7 +5074,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:66",
+				"source": "classes/glm.kdl:76",
 				"class": "glm",
 				"providers": [
 					"openrouter",
@@ -5043,7 +5091,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:77",
+				"source": "classes/glm.kdl:87",
 				"class": "glm",
 				"models": [
 					{

@@ -4873,7 +4873,140 @@ export function aiandModelManagerOptions(config?: AiandModelManagerConfig): Mode
 }
 
 // ---------------------------------------------------------------------------
-// 16.7 Yolo-Auto (yolo-auto.com)
+// 16.7 Abliteration (abliteration.ai)
+// ---------------------------------------------------------------------------
+
+const ABLITERATION_DEFAULT_BASE_URL = "https://api.abliteration.ai/v1";
+const ABLITERATION_MODEL_COST = { input: 3, output: 3, cacheRead: 0.3, cacheWrite: 0 } as const;
+const ABLITERATION_LARGE_COST = { input: 5, output: 5, cacheRead: 0.5, cacheWrite: 0 } as const;
+const ABLITERATION_FULL_LADDER: ThinkingConfig = {
+	mode: "effort",
+	efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
+};
+// abliterated-model-large-v2 runs three reasoning modes (low/high/max) and maps
+// disable-shaped controls to hidden low reasoning instead of honoring them.
+const ABLITERATION_LARGE_V2_LADDER: ThinkingConfig = {
+	mode: "effort",
+	efforts: [Effort.Low, Effort.High, Effort.Max],
+};
+const ABLITERATION_RESPONSES_COMPAT: ModelSpec<"openai-responses">["compat"] = {
+	includeEncryptedReasoning: false,
+	streamIdleTimeoutMs: 0,
+};
+
+function normalizeAbliterationBaseUrl(baseUrl: string | undefined): string {
+	const value = baseUrl?.trim() || ABLITERATION_DEFAULT_BASE_URL;
+	const normalized = value.replace(/\/+$/, "");
+	return normalized.endsWith("/v1") ? normalized : `${normalized}/v1`;
+}
+
+function createAbliterationStaticModel(
+	id: string,
+	name: string,
+	cost: ModelSpec<"openai-responses">["cost"],
+	contextWindow: number,
+	maxTokens: number,
+	input: ModelSpec<"openai-responses">["input"],
+	thinking: ThinkingConfig,
+): ModelSpec<"openai-responses"> {
+	return {
+		id,
+		name,
+		api: "openai-responses",
+		provider: "abliteration",
+		baseUrl: ABLITERATION_DEFAULT_BASE_URL,
+		reasoning: true,
+		input: [...input],
+		cost: { ...cost },
+		contextWindow,
+		maxTokens,
+		thinking: { ...thinking },
+		compat: { ...ABLITERATION_RESPONSES_COMPAT },
+	};
+}
+
+/**
+ * Documented abliteration.ai catalog (docs.abliteration.ai/models, 2026-09)
+ * bundled so the provider is usable when generation and first boot have no
+ * live key. The `/v1/models` response is authoritative once discovery runs.
+ */
+export const ABLITERATION_STATIC_MODELS: readonly ModelSpec<"openai-responses">[] = [
+	createAbliterationStaticModel(
+		"abliterated-model",
+		"Abliterated Model",
+		ABLITERATION_MODEL_COST,
+		262_144,
+		262_134,
+		["text", "image"],
+		ABLITERATION_FULL_LADDER,
+	),
+	createAbliterationStaticModel(
+		"abliterated-model-large-v2",
+		"Abliterated Model Large V2",
+		ABLITERATION_LARGE_COST,
+		1_000_000,
+		999_990,
+		["text"],
+		ABLITERATION_LARGE_V2_LADDER,
+	),
+	createAbliterationStaticModel(
+		"abliterated-model-large",
+		"Abliterated Model Large",
+		ABLITERATION_LARGE_COST,
+		1_000_000,
+		999_990,
+		["text"],
+		ABLITERATION_FULL_LADDER,
+	),
+];
+
+const ABLITERATION_STATIC_MODEL_BY_ID = new Map(ABLITERATION_STATIC_MODELS.map(model => [model.id, model] as const));
+const ABLITERATION_STATIC_MODEL_IDS = ABLITERATION_STATIC_MODELS.map(model => model.id);
+
+export interface AbliterationModelManagerConfig {
+	apiKey?: string;
+	baseUrl?: string;
+	fetch?: FetchImpl;
+}
+
+export function abliterationModelManagerOptions(
+	config?: AbliterationModelManagerConfig,
+): ModelManagerOptions<"openai-responses"> {
+	const apiKey = config?.apiKey;
+	const baseUrl = normalizeAbliterationBaseUrl(config?.baseUrl);
+	const references = createBundledReferenceMap<"openai-responses">("abliteration");
+	return {
+		providerId: "abliteration",
+		dynamicModelsAuthoritative: true,
+		dropCachedModelIdsOnStaticMismatch: ABLITERATION_STATIC_MODEL_IDS,
+		...(apiKey && {
+			fetchDynamicModels: () =>
+				fetchOpenAICompatibleModels({
+					api: "openai-responses",
+					provider: "abliteration",
+					baseUrl,
+					apiKey,
+					mapModel: (entry, defaults) => {
+						const reference = references.get(defaults.id) ?? ABLITERATION_STATIC_MODEL_BY_ID.get(defaults.id);
+						const model = mapWithBundledReference(entry, defaults, reference);
+						if (!reference) {
+							return {
+								...model,
+								reasoning: true,
+								thinking: { ...ABLITERATION_FULL_LADDER },
+								compat: { ...ABLITERATION_RESPONSES_COMPAT },
+							};
+						}
+						return model;
+					},
+					fetch: config?.fetch,
+				}),
+		}),
+	};
+}
+
+// ---------------------------------------------------------------------------
+// 16.8 Yolo-Auto (yolo-auto.com)
 // ---------------------------------------------------------------------------
 
 const YOLO_AUTO_BASE_URL = "https://yolo-auto.com/v1";
