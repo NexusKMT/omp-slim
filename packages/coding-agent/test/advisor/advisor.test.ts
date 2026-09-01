@@ -611,7 +611,8 @@ describe("advisor", () => {
 		it("delivers a blocker escalation of a reserved note live instead of dropping it as already seen", async () => {
 			// P1 review regression: a note reserved as a nit/concern during an
 			// in-progress update, then escalated to blocker before the backlog flushes,
-			// must interrupt at blocker severity now — not be rejected as already-seen
+			// even with casing/punctuation changed, must reuse its normalized reservation,
+			// and interrupt at blocker severity now — not be rejected as already-seen
 			// and arrive late at the lower deferred severity.
 			const delivered: { note: string; severity?: string }[] = [];
 			const guard = new AdvisorEmissionGuard();
@@ -624,6 +625,7 @@ describe("advisor", () => {
 				guard.beginUpdate();
 			};
 			const note = "The migration drops the users table without a backup.";
+			const escalatedNote = "THE MIGRATION DROPS THE USERS TABLE WITHOUT A BACKUP!";
 
 			beginUpdate(true);
 			await tool.execute("e-0", { note, severity: "concern" });
@@ -631,13 +633,13 @@ describe("advisor", () => {
 			expect(delivered).toEqual([]);
 
 			beginUpdate(true);
-			await tool.execute("e-1", { note, severity: "blocker" });
+			await tool.execute("e-1", { note: escalatedNote, severity: "blocker" });
 			// The blocker escalation is delivered live, at blocker severity.
-			expect(delivered).toEqual([{ note, severity: "blocker" }]);
+			expect(delivered).toEqual([{ note: escalatedNote, severity: "blocker" }]);
 
 			// The consumed reservation is not re-delivered as a stale concern at flush.
 			beginUpdate(false);
-			expect(delivered).toEqual([{ note, severity: "blocker" }]);
+			expect(delivered).toEqual([{ note: escalatedNote, severity: "blocker" }]);
 		});
 
 		it("validates parameters using ArkType", () => {
