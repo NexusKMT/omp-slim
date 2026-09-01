@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Amazon Bedrock `requestMetadata` support for cost and usage attribution in AWS invocation logs, including forwarding through the pi-native gateway transport.
+
+### Changed
+
+- Amazon Bedrock requests now send an `omp/<version>` User-Agent instead of the runtime default, and honor a configured `User-Agent` override.
+
 ## [18.1.0] - 2026-09-01
 
 ### Added

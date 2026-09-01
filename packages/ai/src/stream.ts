@@ -1610,6 +1610,15 @@ function streamSimpleRequest<TApi extends Api>(
 								guardrailIdentifier: model.guardrailIdentifier ?? opts?.guardrailIdentifier,
 								guardrailVersion: model.guardrailVersion ?? opts?.guardrailVersion,
 								guardrailTrace: model.guardrailTrace ?? opts?.guardrailTrace,
+								// The model itself never crosses the wire — the client sends only
+								// `modelId` and the gateway resolves its own model — so the model's
+								// tags must be flattened in here or they are lost entirely. Per-call
+								// entries win per key; the merged map then wins per key over the
+								// gateway-resolved model's own tags in its `streamBedrock`.
+								requestMetadata:
+									model.requestMetadata || opts?.requestMetadata
+										? { ...model.requestMetadata, ...opts?.requestMetadata }
+										: undefined,
 							}
 						: opts;
 				return streamPiNative(model, context, nativeOptions);
@@ -2101,6 +2110,7 @@ function mapOptionsForApi<TApi extends Api>(
 				guardrailIdentifier: model.guardrailIdentifier ?? options?.guardrailIdentifier,
 				guardrailVersion: model.guardrailVersion ?? options?.guardrailVersion,
 				guardrailTrace: model.guardrailTrace ?? options?.guardrailTrace,
+				requestMetadata: options?.requestMetadata,
 			};
 			// Effort modes send effort directly, no budget_tokens — skip budget inflation.
 			if (model.thinking?.mode === "effort" || model.thinking?.mode === "anthropic-adaptive") {

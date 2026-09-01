@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `providers.<provider>.requestMetadata` in `models.yml` to tag Amazon Bedrock requests for cost and usage attribution.
+
+### Changed
+
+- `providers.amazon-bedrock.headers` in `models.yml` now applies to Bedrock requests, including a `User-Agent` override.
+
 ## [18.1.1] - 2026-09-01
 
 ### Fixed

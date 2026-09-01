@@ -220,6 +220,22 @@ describe("streamPiNative request shape", () => {
 			guardrailTrace: "enabled_full",
 		});
 	});
+	it("forwards requestMetadata flattened from the model and per-call options, per-call winning on collision", async () => {
+		const captured: { init?: RequestInit } = {};
+		const fetchImpl: FetchImpl = (async (_input, init) => {
+			captured.init = init;
+			return fakeResponse([{ type: "done", reason: "stop", message: baseAssistant() }]);
+		}) as FetchImpl;
+
+		await streamSimple(fakeBedrockModel({ requestMetadata: { team: "growth", environment: "prod" } }), baseContext, {
+			apiKey: "gw-bearer",
+			fetch: fetchImpl,
+			requestMetadata: { environment: "staging", run: "42" },
+		}).result();
+
+		const body = JSON.parse(captured.init?.body as string);
+		expect(body.options.requestMetadata).toEqual({ team: "growth", environment: "staging", run: "42" });
+	});
 
 	it("strips non-wire fields (signal, apiKey, fetch, callbacks) from `options`", async () => {
 		// `apiKey` must ride in the Authorization header, never the body — sending
