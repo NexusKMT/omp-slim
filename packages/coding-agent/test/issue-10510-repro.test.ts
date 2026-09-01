@@ -73,9 +73,11 @@ describe("issue #10510: prewalk + eager-todo conflict", () => {
 	}
 
 	/** Runs a first-turn prompt and returns every hidden/visible text sent to the model. */
-	async function collectInjectedText(options: { prewalk: boolean }): Promise<string> {
+	async function collectInjectedText(options: { prewalk: "handoff" | "noop" | "off" }): Promise<string> {
 		const primary = modelOrThrow("claude-sonnet-4-5");
-		const target = modelOrThrow("claude-sonnet-4-6");
+		const handoffTarget = modelOrThrow("claude-sonnet-4-6");
+		const prewalkTarget =
+			options.prewalk === "handoff" ? handoffTarget : options.prewalk === "noop" ? primary : undefined;
 		const recordTool = mkTool("record", "ok");
 		const writeTool = mkTool("write", "wrote");
 		const todoTool = mkTool("todo", "listed");
@@ -116,7 +118,7 @@ describe("issue #10510: prewalk + eager-todo conflict", () => {
 			}),
 			modelRegistry,
 			toolRegistry,
-			...(options.prewalk ? { prewalk: { target } } : {}),
+			...(prewalkTarget ? { prewalk: { target: prewalkTarget } } : {}),
 		});
 
 		await session.prompt("do the task");
@@ -125,13 +127,19 @@ describe("issue #10510: prewalk + eager-todo conflict", () => {
 	}
 
 	it("suppresses the forced eager-todo prelude while prewalk is armed", async () => {
-		const text = await collectInjectedText({ prewalk: true });
+		const text = await collectInjectedText({ prewalk: "handoff" });
 		expect(text.includes("write complete plan")).toBe(true);
 		expect(text.includes("You MUST call") && text.includes("first in this turn")).toBe(false);
 	});
 
 	it("still injects the forced eager-todo prelude when prewalk is not armed", async () => {
-		const text = await collectInjectedText({ prewalk: false });
+		const text = await collectInjectedText({ prewalk: "off" });
+		expect(text.includes("write complete plan")).toBe(false);
+		expect(text.includes("You MUST call") && text.includes("first in this turn")).toBe(true);
+	});
+
+	it("keeps the forced eager-todo prelude when the armed prewalk is a no-op", async () => {
+		const text = await collectInjectedText({ prewalk: "noop" });
 		expect(text.includes("write complete plan")).toBe(false);
 		expect(text.includes("You MUST call") && text.includes("first in this turn")).toBe(true);
 	});
