@@ -49,10 +49,9 @@ describe("stdio env value resolution policy", () => {
 				env: { LOOKUP: "HOME", EMPTY: "" },
 			}),
 		);
-		// Non-literal servers keep legacy indirection: a value naming an
-		// ambient variable expands, and explicitly empty values are preserved
-		// so they reach the subprocess instead of dropping into inheritance.
+		// Non-plugin servers keep the existing contract: a value naming an
+		// ambient variable expands, and empty values are dropped.
 		expect(resolved.env?.LOOKUP).toBe(process.env.HOME ?? "HOME");
-		expect(resolved.env?.EMPTY).toBe("");
+		expect(resolved.env?.EMPTY).toBeUndefined();
 	});
 });

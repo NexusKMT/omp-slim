@@ -788,11 +788,18 @@ describe("listClaudePluginRoots", () => {
 		}
 	});
 
-	test("keeps legacy env-name and !command indirection for marketplace plugin env", async () => {
+	test("resolves legacy env indirection once for marketplace plugin env", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const pluginPath = path.join(tempDir, "plugins", "legacy-mcp");
 		const originalTokenEnv = process.env.OMP_PLUGIN_MCP_TOKEN_ENV;
+		const originalTrapEnv = process.env.OMP_PLUGIN_MCP_TRAP_ENV;
+		const originalTrapBang = process.env.OMP_PLUGIN_MCP_TRAP_BANG;
+		const envPlaceholder = (name: string): string => ["$", "{", name, ":-}"].join("");
 		restoreEnvValue("OMP_PLUGIN_MCP_TOKEN_ENV", "test-nexus-token");
+		// The expanded results below LOOK like legacy indirection (an env-var
+		// name and a !command) but must stay literal, never re-resolved.
+		restoreEnvValue("OMP_PLUGIN_MCP_TRAP_ENV", "HOME");
+		restoreEnvValue("OMP_PLUGIN_MCP_TRAP_BANG", "!echo must-not-run");
 
 		try {
 			await fs.mkdir(pluginsDir, { recursive: true });
@@ -822,6 +829,8 @@ describe("listClaudePluginRoots", () => {
 						env: {
 							TOKEN: "OMP_PLUGIN_MCP_TOKEN_ENV",
 							SECRET: "!echo plugin-secret",
+							TRAP_ENV_NAME: envPlaceholder("OMP_PLUGIN_MCP_TRAP_ENV"),
+							TRAP_BANG: envPlaceholder("OMP_PLUGIN_MCP_TRAP_BANG"),
 						},
 					},
 				}),
@@ -833,15 +842,18 @@ describe("listClaudePluginRoots", () => {
 			});
 			const server = result.all.find(item => item.name === "legacy-mcp:legacy");
 
-			// Discovery only expands ${VAR} placeholders; bare env names and
-			// !command values pass through for auth resolution.
+			// Discovery resolves legacy indirection (bare env name, !command) once,
+			// while expanded values stay final even when they look like indirection.
 			expect(server?.env).toEqual({
-				TOKEN: "OMP_PLUGIN_MCP_TOKEN_ENV",
-				SECRET: "!echo plugin-secret",
+				TOKEN: "test-nexus-token",
+				SECRET: "plugin-secret",
+				TRAP_ENV_NAME: "HOME",
+				TRAP_BANG: "!echo must-not-run",
 			});
 
-			// prepareConfig resolves the legacy indirection: the env-var name
-			// yields the host value and the !command yields its trimmed stdout.
+			// prepareConfig (envPolicy literal) must not reinterpret anything:
+			// TRAP_BANG is never executed and TRAP_ENV_NAME stays the literal
+			// string rather than the home directory.
 			const { configs } = await loadAllMCPConfigs(tempDir);
 			const delivered = await new MCPManager(tempDir).prepareConfig(configs["legacy-mcp:legacy"]);
 			expect(delivered).toMatchObject({
@@ -849,10 +861,14 @@ describe("listClaudePluginRoots", () => {
 				env: {
 					TOKEN: "test-nexus-token",
 					SECRET: "plugin-secret",
+					TRAP_ENV_NAME: "HOME",
+					TRAP_BANG: "!echo must-not-run",
 				},
 			});
 		} finally {
 			restoreEnvValue("OMP_PLUGIN_MCP_TOKEN_ENV", originalTokenEnv);
+			restoreEnvValue("OMP_PLUGIN_MCP_TRAP_ENV", originalTrapEnv);
+			restoreEnvValue("OMP_PLUGIN_MCP_TRAP_BANG", originalTrapBang);
 		}
 	});
 

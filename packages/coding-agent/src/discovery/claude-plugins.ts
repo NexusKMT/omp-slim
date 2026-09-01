@@ -28,6 +28,7 @@ import {
 } from "./helpers";
 
 import { resolvePluginStdioPaths, substitutePluginRoot } from "./substitute-plugin-root";
+import { resolveConfigValue } from "../config/resolve-config-value";
 
 const PROVIDER_ID = "claude-plugins";
 const DISPLAY_NAME = "Claude Code Marketplace";
@@ -521,6 +522,34 @@ async function resolvePluginMCPConfig(root: ClaudePluginRoot): Promise<ResolvedM
 	};
 }
 
+/**
+ * Resolve a marketplace stdio env map to its final values.
+ *
+ * `${VAR}`/`${VAR:-default}` placeholders (and `${CLAUDE_PLUGIN_ROOT}` /
+ * `${OMP_PLUGIN_ROOT}`) are expanded here and the result is final package
+ * data: it must never be reinterpreted later as a bare env name or
+ * `!command` (a second resolution would execute expanded values or
+ * substitute ambient variables). Values that contained no placeholder
+ * keep the legacy indirection (bare env-name lookup and `!command`
+ * execution), resolved once by this provider.
+ */
+async function resolveMarketplaceEnv(env: Record<string, string>, rootPath: string): Promise<Record<string, string>> {
+	const resolved: Record<string, string> = {};
+	for (const [key, rawValue] of Object.entries(env)) {
+		const substituted = substitutePluginRoot(rawValue, rootPath);
+		const expanded = expandEnvVarsDeep(substituted) as string;
+		if (expanded === rawValue) {
+			// No placeholder applied: keep legacy indirection.
+			const legacy = await resolveConfigValue(expanded);
+			if (legacy !== undefined) resolved[key] = legacy;
+		} else {
+			// Placeholder result is final; keep it verbatim.
+			resolved[key] = expanded;
+		}
+	}
+	return resolved;
+}
+
 async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
 	const items: MCPServer[] = [];
 	const warnings: string[] = [];
@@ -600,19 +629,19 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 			// Root relative command/cwd at the plugin's config directory, not the
 			// session cwd (MCP stdio spawning resolves relative values there).
 			const rooted = resolvePluginStdioPaths({ command: substitutedCommand, cwd: substitutedCwd }, baseDir);
+			const resolvedEnv = raw.env !== undefined ? await resolveMarketplaceEnv(raw.env, root.path) : undefined;
 			const server: MCPServer = {
 				name: namespacedName,
 				...(raw.enabled !== undefined && { enabled: raw.enabled }),
 				...(raw.timeout !== undefined && { timeout: raw.timeout }),
 				...(rooted.command !== undefined && { command: rooted.command }),
 				...(raw.args !== undefined && { args: substitutePluginRoot(raw.args, root.path) }),
-				...(raw.env !== undefined && {
-					env: expandEnvVarsDeep(substitutePluginRoot(raw.env, root.path)),
-				}),
-				// Marketplace plugin env values keep legacy indirection: bare
-				// env-var names and `!command` values are resolved by
-				// MCPManager.#resolveAuthConfig like any other stdio config;
-				// expanded empties are preserved there (see manager.ts).
+				...(resolvedEnv !== undefined && { env: resolvedEnv }),
+				// All env values are final: placeholders were expanded and legacy
+				// bare env-name/`!command` indirection was applied by this
+				// provider, so auth resolution must not reinterpret them (it
+				// would execute expanded values and leak env-named results).
+				...(resolvedEnv !== undefined && { envPolicy: "literal" as const }),
 				...(rooted.cwd !== undefined && { cwd: rooted.cwd }),
 				...(raw.url !== undefined && { url: expandEnvVarsDeep(raw.url) }),
 				...(raw.headers !== undefined && { headers: expandEnvVarsDeep(raw.headers) }),
