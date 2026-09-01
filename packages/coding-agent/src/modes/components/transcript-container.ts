@@ -370,6 +370,26 @@ export class TranscriptContainer extends Container {
 		return this.#peekBatch(width, 0, "flush");
 	}
 
+	/** Recompose the unacknowledged batch so a discarded TUI frame can be rendered again. */
+	rerenderOfferedBatch(width: number): HistoryBatch | undefined {
+		const offered = this.#offered;
+		if (offered === undefined) return undefined;
+		let rows: readonly string[];
+		if (offered.kind === "append") {
+			const entry = this.#entries[offered.entry];
+			if (entry === undefined) return undefined;
+			const before = this.#renderStablePrefix(entry, entry.emitted, width);
+			const after = this.#renderStablePrefix(entry, offered.emittedEnd, width);
+			rows = after.slice(before.length);
+		} else if (offered.kind === "commit") {
+			rows = this.#renderRange(this.#frontier, offered.end, width, true);
+		} else {
+			rows = this.#renderReplay(width);
+		}
+		offered.batch = { id: offered.batch.id, rows, kind: offered.batch.kind };
+		return offered.batch;
+	}
+
 	#peekBatch(width: number, capacity: number, policy: RetirementPolicy): HistoryBatch | undefined {
 		this.#syncEntries();
 		this.#settleFinalized();
