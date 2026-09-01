@@ -1529,6 +1529,24 @@ export class Settings {
 								notDir.code = "ENOTDIR";
 								throw notDir;
 							}
+							// The walk is not frozen, so `acc` was resolved by realpath()
+							// and exists on disk — but existence is not enough. A trailing
+							// `/` or `/.` demands `acc` be a directory, and a concurrent
+							// process can win a TOCTOU race: the initial realpath(filePath)
+							// saw the target missing, then the target was created as a
+							// REGULAR FILE before this segment walk reached it, so
+							// realpath(candidate) succeeded and left `frozen` false. The
+							// preceding component is now a regular file, not a directory,
+							// and dropping the segment would land the atomic rename on top
+							// of it while the logical config path is really ENOTDIR. Verify
+							// the requirement holds instead of assuming it.
+							if (!(await fs.promises.stat(acc)).isDirectory()) {
+								const notDir = new Error(
+									`ENOTDIR: symlink target requires a directory but ${acc} is not one for ${filePath}`,
+								) as Error & { code?: string };
+								notDir.code = "ENOTDIR";
+								throw notDir;
+							}
 							continue;
 						}
 						if (segment === "..") {

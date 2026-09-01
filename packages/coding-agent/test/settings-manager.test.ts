@@ -608,6 +608,42 @@ describe("Settings", () => {
 			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
 		});
 
+		it("rejects with ENOTDIR when a trailing-slash target is created as a regular file mid-walk", async () => {
+			// config.yml -> racetarget/, where `racetarget` does not exist when the
+			// initial realpath(config.yml) runs, so it reports ENOENT and the manual
+			// segment walk begins. A concurrent process then creates `racetarget` as
+			// a REGULAR FILE before the walk's realpath(candidate) reaches it, so
+			// that realpath succeeds and the walk stays UNFROZEN. The trailing slash
+			// still demands `racetarget` be a traversable directory; a regular file
+			// is not, so opening config.yml really fails with ENOTDIR. Dropping the
+			// terminal empty segment and returning the regular file would let the
+			// atomic rename overwrite it and falsely report success. Surface it.
+			await fs.promises.symlink("racetarget/", getConfigPath(), "file");
+			const raceTarget = path.join(agentDir, "racetarget");
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			const realpath = fs.promises.realpath.bind(fs.promises);
+			let injected = false;
+			vi.spyOn(fs.promises, "realpath").mockImplementation((async (target: fs.PathLike, ...rest: unknown[]) => {
+				if (!injected && String(target) === raceTarget) {
+					injected = true;
+					// Win the race: materialize the target as a regular file so this
+					// realpath resolves it and the walk never freezes.
+					await Bun.write(raceTarget, "not a dir");
+				}
+				return (realpath as (t: fs.PathLike, ...r: unknown[]) => Promise<string>)(target, ...rest);
+			}) as typeof fs.promises.realpath);
+
+			settings.set("setupVersion", 15);
+			await expect(settings.flush()).rejects.toThrow(/ENOTDIR/);
+
+			expect(injected).toBe(true);
+			// The concurrently created regular file was NOT overwritten with YAML.
+			expect(await Bun.file(raceTarget).text()).toBe("not a dir");
+			// The user-managed chain head survives as a symlink.
+			expect(fs.lstatSync(getConfigPath()).isSymbolicLink()).toBe(true);
+		});
+
 		it("does not re-emit the filesystem root as a segment for an absolute Windows target", async () => {
 			// On Windows the flush walk seeds the accumulator at parse(target).root
 			// (`C:\`) and then walks the segments. If the root is left in the string
