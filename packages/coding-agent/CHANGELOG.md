@@ -51,6 +51,7 @@
 - Fixed truncated labels of prompt actions
 - Fixed trailing assistant text being truncated when a tool call started mid-stream: the smooth-streaming reveal now force-completes at the tool-call boundary instead of leaving un-revealed text to be committed to scrollback ([#10318](https://github.com/can1357/oh-my-pi/issues/10318)).
 - Fixed the advisor dropping all but one concern when it caught up on several turns in a single update (e.g. yolo mode); the deferred-note backlog is now delivered in full ([#10271](https://github.com/can1357/oh-my-pi/issues/10271))
+- Fixed bash tool timeouts hanging an extra 5 seconds and reporting empty output identical to a silent success when a grandchild process held the command's output pipe open; the native shell now bounds its output-drain so the timeout fires on time, timeouts that the safety net had to enforce say the shell backend did not respond, and a wedged run no longer leaks its session ([#10308](https://github.com/can1357/oh-my-pi/issues/10308)).
 
 ## [18.0.11] - 2026-08-29
 
