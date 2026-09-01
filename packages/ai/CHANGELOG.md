@@ -2,10 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Enable prompt caching for system instructions to improve performance
+
 ### Fixed
 
+- Fix incorrect OS reporting in request headers for non-Linux systems
 - Fixed Google Antigravity model-quota errors switching models instead of rotating to another account with available usage.
-- Fixed the Claude Code fingerprint version being rejected by Anthropic for newer models by updating to `2.1.251`.
+- Fixed the Claude Code fingerprint being rejected by Anthropic for newer models by aligning with the `2.1.257` CLI request signature.
 
 ## [18.1.0] - 2026-09-01
 

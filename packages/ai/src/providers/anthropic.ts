@@ -92,7 +92,7 @@ import {
 	claudeCodeSystemInstruction,
 	claudeCodeVersion,
 	claudeToolPrefix,
-	coworkUserAgent,
+	claudeCodeUserAgent,
 } from "./claude-code-fingerprint";
 import {
 	buildCopilotDynamicHeaders,
@@ -112,7 +112,7 @@ export type AnthropicHeaderOptions = {
 	modelHeaders?: Record<string, string>;
 	isCloudflareAiGateway?: boolean;
 	claudeCodeSessionId?: string;
-	coworkBetas?: readonly string[];
+	claudeCodeBetas?: readonly string[];
 	/** Allow explicit fingerprint headers to replace OAuth defaults on non-official endpoints. */
 	allowAnthropicHeaderOverrides?: boolean;
 };
@@ -161,7 +161,7 @@ const contextManagementBeta = "context-management-2025-06-27";
 const structuredOutputsBeta = "structured-outputs-2025-12-15";
 const thinkingTokenCountBeta = "thinking-token-count-2026-05-13";
 const fallbackCreditBeta = "fallback-credit-2026-06-01";
-const coworkUtilityBetaDefaults = [
+const claudeCodeUtilityBetaDefaults = [
 	oauthAuthBeta,
 	"interleaved-thinking-2025-05-14",
 	thinkingTokenCountBeta,
@@ -169,7 +169,7 @@ const coworkUtilityBetaDefaults = [
 	"prompt-caching-scope-2026-01-05",
 	structuredOutputsBeta,
 ] as const;
-const coworkAgentBetaDefaults = [
+const claudeCodeAgentBetaDefaults = [
 	"claude-code-20250219",
 	oauthAuthBeta,
 	"interleaved-thinking-2025-05-14",
@@ -177,7 +177,6 @@ const coworkAgentBetaDefaults = [
 	contextManagementBeta,
 	"prompt-caching-scope-2026-01-05",
 	midConversationSystemBeta,
-	"advanced-tool-use-2025-11-20",
 ] as const;
 const extendedCacheTtlBeta = "extended-cache-ttl-2025-04-11";
 const fineGrainedToolStreamingBeta = "fine-grained-tool-streaming-2025-05-14";
@@ -187,7 +186,7 @@ const taskBudgetBeta = "task-budgets-2026-03-13";
 const effortBeta = "effort-2025-11-24";
 const serverSideFallbackBeta = "server-side-fallback-2026-06-01";
 
-function buildCoworkBetas({
+function buildClaudeCodeBetas({
 	agentRequest,
 	thinkingRequest,
 	disableStrictTools = false,
@@ -203,9 +202,9 @@ function buildCoworkBetas({
 	// hard-429s ("Usage credits are required for long context requests") on any
 	// beta-gated 1M model regardless of prompt size (#7238). Natively-1M models
 	// (e.g. claude-sonnet-5) serve their full window without the beta anyway.
-	if (!agentRequest && !disableStrictTools && supportsContextManagement) return coworkUtilityBetaDefaults;
+	if (!agentRequest && !disableStrictTools && supportsContextManagement) return claudeCodeUtilityBetaDefaults;
 	const betas: string[] = [];
-	for (const beta of agentRequest ? coworkAgentBetaDefaults : coworkUtilityBetaDefaults) {
+	for (const beta of agentRequest ? claudeCodeAgentBetaDefaults : claudeCodeUtilityBetaDefaults) {
 		if (disableStrictTools && beta === structuredOutputsBeta) continue;
 		if (!supportsContextManagement && beta === contextManagementBeta) continue;
 		betas.push(beta);
@@ -255,10 +254,11 @@ export function buildAnthropicHeaders(options: AnthropicHeaderOptions): Record<s
 	const incomingUserAgent = getHeaderCaseInsensitive(options.modelHeaders, "User-Agent");
 	const incomingAuthorization = getHeaderCaseInsensitive(options.modelHeaders, "Authorization");
 	const incomingApiKey = getHeaderCaseInsensitive(options.modelHeaders, "X-Api-Key");
-	// Cowork's beta profile is part of the OAuth fingerprint; API-key requests
-	// default to extras only, matching the streaming path.
+	// Claude Code's beta profile is part of the OAuth fingerprint; API-key
+	// requests default to extras only, matching the streaming path.
 	const betaHeader = buildBetaHeader(
-		options.coworkBetas ?? (oauthToken ? buildCoworkBetas({ agentRequest: true, thinkingRequest: true }) : []),
+		options.claudeCodeBetas ??
+			(oauthToken ? buildClaudeCodeBetas({ agentRequest: true, thinkingRequest: true }) : []),
 		extraBetas,
 	);
 	const acceptHeader = oauthToken ? "application/json" : stream ? "text/event-stream" : "application/json";
@@ -316,20 +316,19 @@ export function buildAnthropicHeaders(options: AnthropicHeaderOptions): Record<s
 	}
 
 	if (oauthToken) {
-		const userAgent = isClaudeCodeClientUserAgent(incomingUserAgent) ? incomingUserAgent : coworkUserAgent;
+		const userAgent = isClaudeCodeClientUserAgent(incomingUserAgent) ? incomingUserAgent : claudeCodeUserAgent;
 		const headers = {
 			...modelHeaders,
 			Accept: acceptHeader,
 			"Content-Type": "application/json",
 			"User-Agent": userAgent,
 			...(options.claudeCodeSessionId ? { "X-Claude-Code-Session-Id": options.claudeCodeSessionId } : {}),
-			...coworkHeaders,
+			...claudeCodeHeaders,
 			...(betaHeader ? { "anthropic-beta": betaHeader } : {}),
 			"anthropic-dangerous-direct-browser-access": "true",
 			"anthropic-version": "2023-06-01",
 			Authorization: `Bearer ${options.apiKey}`,
 			"x-app": "cli",
-			"x-client-request-id": nodeCrypto.randomUUID(),
 			Connection: "keep-alive",
 			"Accept-Encoding": "gzip, deflate, br, zstd",
 			...(incomingApiKey ? { "X-Api-Key": incomingApiKey } : {}),
@@ -508,10 +507,28 @@ function getCacheControl(
 	};
 }
 
-// Cowork mode: mimic the desktop agent's direct inference transport. Constants
-// live in the leaf module so registry/usage consumers avoid an init cycle.
+// Claude Code mode: mimic the CLI's direct inference transport. Constants live
+// in the leaf module so registry/usage consumers avoid an init cycle.
 export * from "./claude-code-fingerprint";
 
+/** Maps Node's platform identifier to the Stainless wire value. */
+export function mapStainlessOs(platform: string): "MacOS" | "Windows" | "Linux" | "FreeBSD" | `Other::${string}` {
+	switch (platform.toLowerCase()) {
+		case "darwin":
+			return "MacOS";
+		case "windows":
+		case "win32":
+			return "Windows";
+		case "linux":
+			return "Linux";
+		case "freebsd":
+			return "FreeBSD";
+		default:
+			return `Other::${platform.toLowerCase()}`;
+	}
+}
+
+/** Maps Node's architecture identifier to the Stainless wire value. */
 export function mapStainlessArch(arch: string): "x64" | "arm64" | "x86" | `other::${string}` {
 	switch (arch.toLowerCase()) {
 		case "amd64":
@@ -529,11 +546,11 @@ export function mapStainlessArch(arch: string): "x64" | "arm64" | "x86" | `other
 	}
 }
 
-/** Static headers emitted by Cowork's Linux Claude runtime. */
-export const coworkHeaders = {
+/** Static headers emitted by Claude Code's CLI runtime. */
+export const claudeCodeHeaders = {
 	"X-Stainless-Arch": mapStainlessArch(process.arch),
 	"X-Stainless-Lang": "js",
-	"X-Stainless-OS": "Linux",
+	"X-Stainless-OS": mapStainlessOs(process.platform),
 	"X-Stainless-Package-Version": claudeCodeSdkVersion,
 	"X-Stainless-Retry-Count": "0",
 	"X-Stainless-Runtime": "node",
@@ -543,7 +560,7 @@ export const coworkHeaders = {
 
 const enforcedHeaderKeys = new Set(
 	[
-		...Object.keys(coworkHeaders),
+		...Object.keys(claudeCodeHeaders),
 		"Accept",
 		"Accept-Encoding",
 		"Connection",
@@ -562,7 +579,7 @@ const enforcedHeaderKeys = new Set(
 );
 
 const overridableAnthropicHeaderKeys = new Set(
-	[...Object.keys(coworkHeaders), "anthropic-beta", "User-Agent", "x-app"].map(key => key.toLowerCase()),
+	[...Object.keys(claudeCodeHeaders), "anthropic-beta", "User-Agent", "x-app"].map(key => key.toLowerCase()),
 );
 
 const CLAUDE_BILLING_HEADER_PREFIX = "x-anthropic-billing-header:";
@@ -579,7 +596,7 @@ function createClaudeBillingHeader(firstUserMessageText: string): string {
 		.slice(0, 3);
 	// cch=00000: placeholder replaced with the real attestation hash by wrapFetchForCch
 	// before the request hits the wire (see below).
-	return `${CLAUDE_BILLING_HEADER_PREFIX} cc_version=${claudeCodeVersion}.${versionSuffix}; cc_entrypoint=claude-desktop; ${CCH_PLACEHOLDER_STR};`;
+	return `${CLAUDE_BILLING_HEADER_PREFIX} cc_version=${claudeCodeVersion}.${versionSuffix}; cc_entrypoint=cli; ${CCH_PLACEHOLDER_STR};`;
 }
 
 // cch attestation: XXHash64(body_with_placeholder, seed) low-20-bits, 5 hex chars.
@@ -1166,7 +1183,7 @@ export type AnthropicClientOptionsResult = {
 	fetchOptions?: AnthropicFetchOptions;
 };
 
-const COWORK_TLS_CIPHERS = tls.DEFAULT_CIPHERS;
+const CLAUDE_CODE_TLS_CIPHERS = tls.DEFAULT_CIPHERS;
 
 type FoundryTlsOptions = {
 	ca?: string | string[];
@@ -1339,7 +1356,7 @@ function resolveFoundryTlsOptions(model: Model<"anthropic-messages">): FoundryTl
 	return resolved;
 }
 
-function buildCoworkTlsFetchOptions(
+function buildClaudeCodeTlsFetchOptions(
 	model: Model<"anthropic-messages">,
 	baseUrl: string | undefined,
 ): AnthropicFetchOptions | undefined {
@@ -1361,7 +1378,7 @@ function buildCoworkTlsFetchOptions(
 		tls: {
 			rejectUnauthorized: true,
 			serverName,
-			...(COWORK_TLS_CIPHERS ? { ciphers: COWORK_TLS_CIPHERS } : {}),
+			...(CLAUDE_CODE_TLS_CIPHERS ? { ciphers: CLAUDE_CODE_TLS_CIPHERS } : {}),
 			...foundryTlsOptions,
 		},
 	};
@@ -2889,6 +2906,7 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (model, con
 export type AnthropicSystemBlock = {
 	type: "text";
 	text: string;
+	cache_control?: AnthropicCacheControl;
 };
 type SystemBlockOptions = {
 	includeClaudeCodeInstruction?: boolean;
@@ -2909,7 +2927,7 @@ export function buildAnthropicSystemBlocks(
 	if (includeClaudeCodeInstruction && !hasBillingHeader) {
 		const blocks: AnthropicSystemBlock[] = [
 			{ type: "text", text: createClaudeBillingHeader(firstUserMessageText ?? "") },
-			{ type: "text", text: claudeCodeSystemInstruction },
+			{ type: "text", text: claudeCodeSystemInstruction, cache_control: { type: "ephemeral" } },
 		];
 
 		for (const instruction of trimmedInstructions) {
@@ -2986,7 +3004,7 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 	const needsFineGrainedToolStreamingBeta =
 		hasTools && isOfficialAnthropicApiUrl(baseUrl) && !supportsEagerToolInputStreaming;
 	const foundryCustomHeaders = resolveAnthropicCustomHeaders(model, baseUrl);
-	const tlsFetchOptions = buildCoworkTlsFetchOptions(model, baseUrl);
+	const tlsFetchOptions = buildClaudeCodeTlsFetchOptions(model, baseUrl);
 	// Disable Bun's native ~300s pre-response fetch timeout (issue #2422).
 	// `AnthropicMessagesClient` already arms its own DEFAULT_TIMEOUT_MS timer
 	// per request, so the native ceiling can only short-circuit slow-prefill
@@ -3052,8 +3070,8 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 		isCloudflareAiGateway: model.provider === "cloudflare-ai-gateway",
 		allowAnthropicHeaderOverrides: model.compat.allowAnthropicHeaderOverrides,
 		claudeCodeSessionId,
-		coworkBetas: oauthToken
-			? buildCoworkBetas({
+		claudeCodeBetas: oauthToken
+			? buildClaudeCodeBetas({
 					agentRequest: hasTools || thinkingEnabled,
 					thinkingRequest: thinkingEnabled,
 					disableStrictTools,
