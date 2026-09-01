@@ -48,6 +48,7 @@
 - Fixed `/tan` sessions inheriting the parent's accumulated cost, which exaggerated subagent totals in the Agents view ([#10317](https://github.com/can1357/oh-my-pi/issues/10317)).
 - Fixed truncated labels of prompt actions
 - Fixed trailing assistant text being truncated when a tool call started mid-stream: the smooth-streaming reveal now force-completes at the tool-call boundary instead of leaving un-revealed text to be committed to scrollback ([#10318](https://github.com/can1357/oh-my-pi/issues/10318)).
+- Fixed the advisor dropping all but one concern when it caught up on several turns in a single update (e.g. yolo mode); the deferred-note backlog is now delivered in full ([#10271](https://github.com/can1357/oh-my-pi/issues/10271))
 
 ## [18.0.11] - 2026-08-29
 

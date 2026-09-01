@@ -8,6 +8,7 @@ import type { TUI } from "@oh-my-pi/pi-tui";
 import {
 	AdviseTool,
 	type AdvisorAgent,
+	AdvisorEmissionGuard,
 	type AdvisorNote,
 	AdvisorOutputQuarantinedError,
 	AdvisorRuntime,
@@ -440,21 +441,24 @@ describe("advisor", () => {
 			expect(onAdvice).toHaveBeenNthCalledWith(3, note, "blocker");
 		});
 
-		it("defers non-blockers during in-progress updates and flushes them on the next completed update", async () => {
+		it("defers non-blockers per update and flushes the backlog on the next completed update", async () => {
 			const onAdvice = vi.fn();
 			const tool = new AdviseTool(onAdvice);
 			const note = "The result still needs a focused regression test.";
 
 			tool.beginUpdate(true);
 			const deferred = await tool.execute("tc-1", { note, severity: "concern" });
-			await tool.execute("tc-2", { note: "Minor naming cleanup.", severity: "nit" });
-			await tool.execute("tc-3", { note: "A destructive command is running.", severity: "blocker" });
+			await tool.execute("tc-2", { note: "A destructive command is running.", severity: "blocker" });
 
 			// Deferred notes are NOT delivered mid-turn; blocker still goes through.
 			expect(onAdvice).toHaveBeenCalledTimes(1);
 			expect(onAdvice).toHaveBeenCalledWith("A destructive command is running.", "blocker");
 			// The tool tells the advisor the note is deferred, not silently "Recorded.".
 			expect(JSON.stringify(deferred.content)).toContain("Deferred");
+
+			// A second distinct concern in a later in-progress update queues its own slot.
+			tool.beginUpdate(true);
+			await tool.execute("tc-3", { note: "Minor naming cleanup.", severity: "nit" });
 
 			// Completing the turn deterministically flushes both withheld notes,
 			// oldest first — no reliance on the advisor model re-raising them.
@@ -495,6 +499,145 @@ describe("advisor", () => {
 			tool.beginUpdate(false);
 			expect(onAdvice).toHaveBeenCalledTimes(1);
 			expect(onAdvice).toHaveBeenCalledWith("Same point raised repeatedly.", "concern");
+		});
+
+		it("flushes one deferred concern per update past the per-update emission budget on a late catch-up", async () => {
+			// Regression for #10271 ("The Advisor is Late"): in yolo mode the primary
+			// is continuously mid-turn, so the advisor runs many in-progress updates
+			// (one concern each) and the whole backlog is replayed in a single catch-up
+			// flush. Each note cleared the emission guard when it was emitted, so the
+			// flush must deliver the full backlog instead of collapsing it to one note.
+			const delivered: string[] = [];
+			const guard = new AdvisorEmissionGuard();
+			// Mirror AgentSession: accept (filter + per-update budget) runs at emission;
+			// routing never re-filters.
+			const tool = new AdviseTool(
+				note => delivered.push(note),
+				note => guard.accept(note),
+			);
+			const beginUpdate = (inProgress: boolean) => {
+				tool.beginUpdate(inProgress);
+				guard.beginUpdate();
+			};
+			const concerns = [
+				"Bare `location` cannot work outside the page; inspect with `await page.url()`.",
+				"Scope navigation to the visualizer's own `.viz-container`.",
+				'BFS uses `progressType="bar"`, so it has no `.viz-pill` controls.',
+				"Tab switching delegates from a trusted click; a dispatched KeyboardEvent is untrusted.",
+			];
+
+			// Each concern arrives in its own in-progress advisor update.
+			for (const [i, note] of concerns.entries()) {
+				beginUpdate(true);
+				await tool.execute(`c-${i}`, { note, severity: "concern" });
+			}
+			// All withheld mid-turn — nothing reaches the primary yet.
+			expect(delivered).toEqual([]);
+
+			// Turn completes: the deferred backlog flushes, oldest first, in full.
+			beginUpdate(false);
+			expect(delivered).toEqual(concerns);
+		});
+
+		it("caps a single in-progress prompt spraying distinct notes to one deferred note", async () => {
+			// A single in-progress advisor prompt that emits several distinct notes
+			// spends the update's one budget slot on the first; the rest are dropped
+			// at emission, so the flush cannot deliver an unbounded batch (#3520).
+			const delivered: string[] = [];
+			const guard = new AdvisorEmissionGuard();
+			const tool = new AdviseTool(
+				note => delivered.push(note),
+				note => guard.accept(note),
+			);
+			const beginUpdate = (inProgress: boolean) => {
+				tool.beginUpdate(inProgress);
+				guard.beginUpdate();
+			};
+
+			beginUpdate(true);
+			await tool.execute("x-0", { note: "First mid-turn concern.", severity: "concern" });
+			await tool.execute("x-1", { note: "Second mid-turn concern.", severity: "concern" });
+			await tool.execute("x-2", { note: "Third mid-turn concern.", severity: "concern" });
+			beginUpdate(false);
+			expect(delivered).toEqual(["First mid-turn concern."]);
+		});
+
+		it("does not let a suppressed phrase burn the deferred slot ahead of a real concern", async () => {
+			// P1 review regression: a noise phrase emitted before a substantive concern
+			// in the same in-progress update must not consume the update's slot. The
+			// emission guard filters it out at emission without spending the budget, so
+			// the following concern is still reserved and flushed.
+			const delivered: string[] = [];
+			const guard = new AdvisorEmissionGuard();
+			const tool = new AdviseTool(
+				note => delivered.push(note),
+				note => guard.accept(note),
+			);
+			const beginUpdate = (inProgress: boolean) => {
+				tool.beginUpdate(inProgress);
+				guard.beginUpdate();
+			};
+
+			beginUpdate(true);
+			await tool.execute("n-0", { note: "Stop.", severity: "concern" });
+			await tool.execute("n-1", {
+				note: "The migration drops the users table without a backup.",
+				severity: "concern",
+			});
+			beginUpdate(false);
+			expect(delivered).toEqual(["The migration drops the users table without a backup."]);
+		});
+
+		it("still caps a single model turn spraying many distinct notes to one accepted note", async () => {
+			// Live path: notes emitted in one completed-turn update stay capped at one.
+			const delivered: string[] = [];
+			const guard = new AdvisorEmissionGuard();
+			const tool = new AdviseTool(
+				note => delivered.push(note),
+				note => guard.accept(note),
+			);
+			const beginUpdate = (inProgress: boolean) => {
+				tool.beginUpdate(inProgress);
+				guard.beginUpdate();
+			};
+
+			beginUpdate(false);
+			await tool.execute("s-0", { note: "First distinct live concern.", severity: "concern" });
+			await tool.execute("s-1", { note: "Second distinct live concern.", severity: "concern" });
+			await tool.execute("s-2", { note: "Third distinct live concern.", severity: "concern" });
+			expect(delivered).toEqual(["First distinct live concern."]);
+		});
+
+		it("delivers a blocker escalation of a reserved note live instead of dropping it as already seen", async () => {
+			// P1 review regression: a note reserved as a nit/concern during an
+			// in-progress update, then escalated to blocker before the backlog flushes,
+			// must interrupt at blocker severity now — not be rejected as already-seen
+			// and arrive late at the lower deferred severity.
+			const delivered: { note: string; severity?: string }[] = [];
+			const guard = new AdvisorEmissionGuard();
+			const tool = new AdviseTool(
+				(note, severity) => delivered.push({ note, severity }),
+				note => guard.accept(note),
+			);
+			const beginUpdate = (inProgress: boolean) => {
+				tool.beginUpdate(inProgress);
+				guard.beginUpdate();
+			};
+			const note = "The migration drops the users table without a backup.";
+
+			beginUpdate(true);
+			await tool.execute("e-0", { note, severity: "concern" });
+			// Reserved, not delivered.
+			expect(delivered).toEqual([]);
+
+			beginUpdate(true);
+			await tool.execute("e-1", { note, severity: "blocker" });
+			// The blocker escalation is delivered live, at blocker severity.
+			expect(delivered).toEqual([{ note, severity: "blocker" }]);
+
+			// The consumed reservation is not re-delivered as a stale concern at flush.
+			beginUpdate(false);
+			expect(delivered).toEqual([{ note, severity: "blocker" }]);
 		});
 
 		it("validates parameters using ArkType", () => {
