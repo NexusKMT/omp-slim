@@ -54,7 +54,7 @@ export function classifyAgentType(sessionPath: string): AgentType {
  * Session files are named like: --work--pi--/timestamp_uuid.jsonl
  * The folder part uses -- as path separator.
  */
-function extractFolderFromPath(sessionPath: string): string {
+export function extractFolderFromPath(sessionPath: string): string {
 	const sessionsDir = getSessionsDir();
 	const rel = path.relative(sessionsDir, sessionPath);
 	const projectDir = rel.split(path.sep)[0];
@@ -379,6 +379,10 @@ function parseSessionEntriesLenient(bytes: Uint8Array): { entries: SessionEntry[
 	const entries: SessionEntry[] = [];
 	const read = visitSessionEntriesLenient(bytes, entry => entries.push(entry));
 	return { entries, read };
+}
+/** Parse every well-formed entry in a transcript buffer (malformed lines skipped). */
+export function parseAllSessionEntries(bytes: Uint8Array): SessionEntry[] {
+	return parseSessionEntriesLenient(bytes).entries;
 }
 
 function scanLastServiceTier(bytes: Uint8Array): ServiceTierByFamily | undefined {

@@ -5,6 +5,13 @@
 ### Fixed
 
 - Fixed `omp stats` omitting usage from online auto-thinking classifier calls.
+### Added
+
+- Added Traces dashboard for detailed session visualization
+- Implemented interactive flamegraph timeline with zooming and panning
+- Added transcript list view with search and filtering capabilities
+- Included performance summary panel with token and cost metrics
+- Added aggregate panel for analyzing tool usage and timing
 
 ## [18.0.9] - 2026-08-28
 
