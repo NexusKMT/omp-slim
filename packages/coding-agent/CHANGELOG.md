@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The debug terminal snapshot now reports Herdr (and CMUX) as the multiplexer wrapping the session, matching the TUI's pane-identity detection instead of only tmux/screen/zellij.
+
 ## [18.1.0] - 2026-09-01
 
 ### Added

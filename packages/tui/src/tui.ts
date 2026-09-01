@@ -26,6 +26,7 @@ import {
 	encodeKittyPlacementLine,
 	ImageProtocol,
 	isImageProtocolForced,
+	isInsideHerdr,
 	isInsideTerminalMultiplexer,
 	parseKittyDirectPlacementLine,
 	setCellDimensions,
@@ -1111,6 +1112,10 @@ export class TUI extends Container {
 		this.terminal.onPrivateModeReport?.((mode, supported, confirmed = true) => {
 			if (mode !== 2026 || !confirmed) return;
 			if (synchronizedOutputUserOverride() !== null) return;
+			// Herdr's Ghostty VTE honors DEC 2026 even when DECRQM is unanswered or
+			// reports unrecognized; keep the static herdr-on default instead of
+			// exposing the dirty-row tear the mux-off policy was written to avoid.
+			if (!supported && isInsideHerdr()) return;
 			this.#setSynchronizedOutput(supported);
 		});
 		this.terminal.start(
