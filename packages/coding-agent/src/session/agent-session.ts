@@ -538,6 +538,7 @@ export class AgentSession {
 	/** Last (enable, providerId) tuple resolved by `#syncAppendOnlyContext` — used to skip no-op invalidations. */
 	#lastAppendOnlyResolution?: { enable: boolean; providerId: string | undefined };
 	#eventListeners: AgentSessionEventListener[] = [];
+	#activeToolExecutionUpdates = new Map<string, Extract<AgentSessionEvent, { type: "tool_execution_update" }>>();
 	#runStateListeners = new Set<(state: "running" | "idle") => void>();
 	#commandMetadataChangedListeners: CommandMetadataChangedListener[] = [];
 	#sessionChangeCallbacks = new Set<() => void>();
@@ -2201,6 +2202,11 @@ export class AgentSession {
 	#subscriberEmitGate: Promise<void> = Promise.resolve();
 
 	async #emitSessionEvent(event: AgentSessionEvent, options: { detachExtensions?: boolean } = {}): Promise<void> {
+		if (event.type === "tool_execution_update") {
+			this.#activeToolExecutionUpdates.set(event.toolCallId, event);
+		} else if (event.type === "tool_execution_end") {
+			this.#activeToolExecutionUpdates.delete(event.toolCallId);
+		}
 		if (event.type === "message_update") {
 			this.#emit(event);
 			void this.#queueExtensionEvent(event);
@@ -3985,6 +3991,14 @@ export class AgentSession {
 				this.#eventListeners.splice(index, 1);
 			}
 		};
+	}
+
+	/**
+	 * Snapshot the latest partial result for each tool that is still executing.
+	 * Focus rebuilds replay these after reconstructing persisted transcript state.
+	 */
+	activeToolExecutionUpdates(): readonly Extract<AgentSessionEvent, { type: "tool_execution_update" }>[] {
+		return [...this.#activeToolExecutionUpdates.values()];
 	}
 
 	/**

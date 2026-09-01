@@ -20,6 +20,7 @@
 
 ### Fixed
 
+- Fixed returning from a focused Agent Hub session collapsing live task boards to summary rows ([#10446](https://github.com/can1357/oh-my-pi/issues/10446)).
 - Fixed an issue where custom model overrides were lost during configuration updates
 - Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
 - Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
