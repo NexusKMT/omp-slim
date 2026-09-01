@@ -57,6 +57,8 @@ export interface TodoTrackerHost {
 	getEnabledToolNames(): string[];
 	toolRegistry(): Map<string, AgentTool>;
 	planModeEnabled(): boolean;
+	/** Whether a one-way prewalk switch is armed; its plan nudge owns todo creation. */
+	prewalkArmed(): boolean;
 	consumeLastServedToolChoiceLabel(): string | undefined;
 }
 
@@ -134,6 +136,9 @@ export class TodoTracker {
 		const mode = this.#host.settings.get("todo.eager");
 		if (mode === "default" || !this.#host.settings.get("todo.enabled")) return undefined;
 		if (this.#host.planModeEnabled() || this.#phases.length > 0) return undefined;
+		// A prewalk plan nudge drives todo creation in a plan-first-then-todo order;
+		// the forced eager prelude's "call todo first this turn" contradicts it (#10510).
+		if (this.#host.prewalkArmed()) return undefined;
 		if (promptText !== undefined) {
 			if (this.#host.agent.state.messages.some(message => message.role === "user")) return undefined;
 			const trimmedPromptText = promptText.trimEnd();
