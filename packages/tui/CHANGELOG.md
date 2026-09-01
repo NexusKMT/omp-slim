@@ -9,6 +9,7 @@
 - Fixed inline images leaving blank rows when outer-terminal identity variables leak into Herdr panes ([#10353](https://github.com/can1357/oh-my-pi/issues/10353)).
 - Fixed a crash when rendering a reference-style Markdown link whose label matches a JavaScript built-in name (e.g. `[x][constructor]`, `[x][__proto__]`); such links now render as plain text instead of terminating the TUI, including during session resume ([#10283](https://github.com/can1357/oh-my-pi/issues/10283)).
 - Fixed fatal cleanup leaving the cursor inside a focused input before stderr output ([#10275](https://github.com/can1357/oh-my-pi/issues/10275)).
+- Fixed resumed sessions sometimes showing stale background bands until the next keypress on WSL and Windows Terminal ([#9799](https://github.com/can1357/oh-my-pi/issues/9799)).
 
 ## [18.0.11] - 2026-08-29
 
@@ -75,7 +76,6 @@
 ### Added
 
 - Added `Markdown.getLastRenderStableText()` to expose the stable prefix of streamed Markdown text for append-only transcript publication.
-- Fixed resumed sessions sometimes showing stale background bands until the next keypress on WSL and Windows Terminal ([#9799](https://github.com/can1357/oh-my-pi/issues/9799)).
 
 ## [18.0.5] - 2026-08-25
 
