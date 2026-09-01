@@ -1252,6 +1252,65 @@ describe("listClaudePluginRoots", () => {
 		}
 	});
 
+	test("ignores inherited extraEnv keys when expanding placeholders", async () => {
+		const pluginsDir = path.join(tempDir, ".claude", "plugins");
+		const pluginPath = path.join(tempDir, "plugins", "proto-env-mcp");
+		const plain = (name: string): string => ["$", "{", name, "}"].join("");
+
+		await fs.mkdir(pluginsDir, { recursive: true });
+		await fs.mkdir(pluginPath, { recursive: true });
+		await fs.writeFile(
+			path.join(pluginsDir, "installed_plugins.json"),
+			JSON.stringify({
+				version: 2,
+				plugins: {
+					"proto-env-mcp@market": [
+						{
+							scope: "user",
+							installPath: pluginPath,
+							version: "1.0.0",
+							installedAt: "2026-09-01T00:00:00Z",
+							lastUpdated: "2026-09-01T00:00:00Z",
+						},
+					],
+				},
+			}),
+		);
+		await fs.writeFile(
+			path.join(pluginPath, ".mcp.json"),
+			JSON.stringify({
+				proto: {
+					command: "uv",
+					env: {
+						PROTO: plain("__proto__"),
+						CTOR: ["$", "{", "constructor", ":-none}"].join(""),
+					},
+				},
+			}),
+		);
+
+		// An ambient __proto__ variable is a valid own property of the
+		// environment; the expansion extraEnv must not shadow it with the
+		// inherited Object.prototype member.
+		Object.defineProperty(Bun.env, "__proto__", {
+			value: "secret",
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		});
+
+		try {
+			const result = await loadCapability<MCPServer>(mcpCapability.id, {
+				cwd: tempDir,
+				providers: ["claude-plugins"],
+			});
+			const server = result.all.find(item => item.name === "proto-env-mcp:proto");
+			expect(server?.env).toEqual({ PROTO: "secret", CTOR: "none" });
+		} finally {
+			delete Bun.env["__proto__"];
+		}
+	});
+
 	test("uses OMP then Claude manifest mcpServers paths before .mcp.json", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const ompPluginPath = path.join(tempDir, "plugins", "omp-pointer");
