@@ -155,17 +155,33 @@ describe("AuthStorage Z.AI API-key usage ranking", () => {
 	});
 
 	test("markUsageLimitReached inspects usage report for API keys to determine accurate reset time", async () => {
-		if (!authStorage) throw new Error("test setup failed");
+		if (!authStorage || !store?.getCredentialBlock) throw new Error("test setup failed");
 
 		await authStorage.set("zai", [
 			{ type: "api_key", key: "zai-acc1", source: "login" },
 			{ type: "api_key", key: "zai-acc2", source: "login" },
 		]);
+		const earlyReset = Date.now() + HOUR_MS;
 		const futureReset = Date.now() + 24 * HOUR_MS;
 		usageByKey.set("zai-acc1", {
 			provider: "zai",
 			fetchedAt: Date.now(),
 			limits: [
+				{
+					id: "zai:requests:5h",
+					label: "ZAI Request Quota",
+					scope: { provider: "zai", windowId: "5h", shared: true },
+					window: { id: "5h", label: "5 Hour", durationMs: 5 * HOUR_MS, resetsAt: earlyReset },
+					amount: {
+						unit: "requests",
+						used: 100,
+						limit: 100,
+						remaining: 0,
+						usedFraction: 1,
+						remainingFraction: 0,
+					},
+					status: "exhausted",
+				},
 				{
 					id: "zai:credits:1w",
 					label: "ZAI Weekly Credit Quota",
@@ -188,7 +204,12 @@ describe("AuthStorage Z.AI API-key usage ranking", () => {
 			apiKey: "zai-acc1",
 		});
 
+		const blockedRow = store
+			.listAuthCredentials("zai")
+			.find(entry => entry.credential.type === "api_key" && entry.credential.key === "zai-acc1");
+		if (!blockedRow) throw new Error("blocked credential missing");
 		expect(outcome.switched).toBe(true);
+		expect(store.getCredentialBlock(blockedRow.id, "zai:api_key", "")).toBe(futureReset);
 		expect(await authStorage.getApiKey("zai", "session-xyz")).toBe("zai-acc2");
 	});
 

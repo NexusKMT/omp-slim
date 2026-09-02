@@ -3873,7 +3873,7 @@ export class AuthStorage {
 		return limits.some(limit => this.#isUsageLimitExhausted(limit));
 	}
 
-	/** Extracts the earliest reset timestamp from exhausted windows (in ms). */
+	/** Extracts when every currently exhausted window has reset (in ms). */
 	#getUsageResetAtMs(limits: UsageLimit[], nowMs: number): number | undefined {
 		const candidates: number[] = [];
 		for (const limit of limits) {
@@ -3884,7 +3884,7 @@ export class AuthStorage {
 			}
 		}
 		if (candidates.length === 0) return undefined;
-		return Math.min(...candidates);
+		return Math.max(...candidates);
 	}
 
 	async #getUsageReport(

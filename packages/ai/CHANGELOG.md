@@ -49,6 +49,10 @@
 - Fixed OpenAI Codex/Responses tool results being lost when composite call identifiers could not be paired with the corresponding assistant call.
 - Fixed native OpenAI Responses history replay becoming stuck on malformed or truncated function-call arguments; invalid history items are now discarded so the session can recover.
 
+### Fixed
+
+- Fixed API-key account rotation to honor provider-reported quota reset windows, including overlapping exhausted windows ([#10325](https://github.com/can1357/oh-my-pi/pull/10325) by [@usr-bin-roygbiv](https://github.com/usr-bin-roygbiv)).
+
 ## [18.0.11] - 2026-08-29
 
 ### Fixed

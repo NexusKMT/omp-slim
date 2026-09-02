@@ -35,6 +35,8 @@ const RETRY_AFTER_MS_BODY_PATTERN = /\bretry-after-ms=([0-9]+)\b/i;
  *  - `Please retry in 250ms` / `Please retry in 12s`
  *  - `"retryDelay": "34.074824224s"` (JSON error detail field)
  *  - `try again in 250ms` / `try again in 12s` / `try again in 5 min` / `try again in ~158 min`
+ *  - `retry-after-ms=98497000`
+ *  - `Your limit will reset at 2026-09-01 09:44:51` / `将在 2026-09-01 09:44:51 重置`
  *
  * Returns `undefined` if no signal is found.
  */
@@ -91,17 +93,13 @@ export function extractRetryHint(source: Response | Headers | null | undefined, 
 			if (totalMs > 0) return totalMs;
 		}
 	}
-	const retryAfterMsMatch = RETRY_AFTER_MS_BODY_PATTERN.exec(body);
-	if (retryAfterMsMatch?.[1]) {
-		const ms = Number(retryAfterMsMatch[1]);
-		if (Number.isFinite(ms) && ms > 0) return ms;
-	}
-
 	for (const pattern of [WILL_RESET_AT_PATTERN, CN_RESET_AT_PATTERN]) {
 		const match = pattern.exec(body);
 		if (match?.[1]) {
-			const isoStr = match[1].includes("T") ? match[1] : `${match[1].replace(" ", "T")}Z`;
-			const parsed = Date.parse(isoStr);
+			// Provider timestamps without an explicit offset are interpreted as UTC.
+			const normalized = match[1].replace(" ", "T");
+			const hasOffset = /(?:Z|[+-][0-9]{2}:?[0-9]{2})$/i.test(normalized);
+			const parsed = Date.parse(hasOffset ? normalized : `${normalized}Z`);
 			if (!Number.isNaN(parsed) && parsed > Date.now()) {
 				return parsed - Date.now();
 			}
@@ -111,7 +109,22 @@ export function extractRetryHint(source: Response | Headers | null | undefined, 
 	// retry hints ("please retry in 5s"): a body carrying both must honour the
 	// longer account window, not the shorter generic one. QUOTA_RESET_PATTERN
 	// ("reset after …") above already runs first and stays first.
-	for (const pattern of [WILL_RESET_IN_PATTERN, PLEASE_RETRY_PATTERN, RETRY_DELAY_FIELD_PATTERN, TRY_AGAIN_PATTERN]) {
+	const accountResetMatch = WILL_RESET_IN_PATTERN.exec(body);
+	if (accountResetMatch?.[1]) {
+		const value = Number.parseFloat(accountResetMatch[1]);
+		if (Number.isFinite(value) && value > 0) {
+			const unitMs = unitToMs(accountResetMatch[2]!);
+			if (unitMs !== undefined) return value * unitMs;
+		}
+	}
+
+	const retryAfterMsMatch = RETRY_AFTER_MS_BODY_PATTERN.exec(body);
+	if (retryAfterMsMatch?.[1]) {
+		const ms = Number(retryAfterMsMatch[1]);
+		if (Number.isFinite(ms) && ms > 0) return ms;
+	}
+
+	for (const pattern of [PLEASE_RETRY_PATTERN, RETRY_DELAY_FIELD_PATTERN, TRY_AGAIN_PATTERN]) {
 		const match = pattern.exec(body);
 		if (match?.[1]) {
 			const value = Number.parseFloat(match[1]);

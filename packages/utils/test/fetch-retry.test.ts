@@ -144,9 +144,20 @@ describe("extractRetryHint", () => {
 		).toBe(98497000);
 	});
 
-	it("parses 'will reset at YYYY-MM-DD HH:MM:SS' timestamp in error body", () => {
-		const future = new Date(Date.now() + 3_600_000).toISOString().replace("T", " ").slice(0, 19);
-		const hint = extractRetryHint(undefined, `Your limit will reset at ${future}`);
+	it.each([
+		["space-separated UTC", "2099-09-01 09:44:51", Date.UTC(2099, 8, 1, 9, 44, 51)],
+		["ISO-separated UTC", "2099-09-01T09:44:51", Date.UTC(2099, 8, 1, 9, 44, 51)],
+		["explicit offset", "2099-09-01 09:44:51+08:00", Date.parse("2099-09-01T09:44:51+08:00")],
+	])("parses %s absolute reset timestamp", (_label, timestamp, targetMs) => {
+		const expected = targetMs - Date.now();
+		const hint = extractRetryHint(undefined, `Your limit will reset at ${timestamp}`);
+		expect(hint).toBeDefined();
+		expect(Math.abs(hint! - expected)).toBeLessThan(100);
+	});
+
+	it("prefers an absolute account reset over retry-after-ms", () => {
+		const future = new Date(Date.now() + 3_600_000).toISOString();
+		const hint = extractRetryHint(undefined, `Your limit will reset at ${future} retry-after-ms=5000`);
 		expect(hint).toBeGreaterThan(3_500_000);
 		expect(hint).toBeLessThanOrEqual(3_600_000);
 	});
