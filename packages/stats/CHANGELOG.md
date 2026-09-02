@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Provider, tool, and project `<select>` dropdowns are now styled to match the dashboard design, with dark and light theme support.
+
 ## [18.1.0] - 2026-09-01
 
 ### Added
@@ -12,9 +16,6 @@
 ### Fixed
 
 - Fixed `omp stats` omitting usage from online auto-thinking classifier calls.
-### Changed
-
-- Provider, tool, and project `<select>` dropdowns are now styled to match the dashboard design, with dark and light theme support.
 
 ## [18.0.9] - 2026-08-28
 
