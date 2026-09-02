@@ -5307,12 +5307,24 @@ export class AgentSession {
 		this.#vibeModeState = state;
 		if (state?.enabled) return;
 
+		const isVibeContext = (message: AgentMessage): boolean =>
+			message.role === "custom" && message.customType === VIBE_MODE_CONTEXT_MESSAGE_TYPE;
 		const messages = this.agent.state.messages;
-		const filtered = messages.filter(
-			message => message.role !== "custom" || message.customType !== VIBE_MODE_CONTEXT_MESSAGE_TYPE,
-		);
-		if (filtered.length === messages.length) return;
-		this.agent.replaceMessages(filtered);
+		const filtered = messages.filter(message => !isVibeContext(message));
+		const historyChanged = filtered.length !== messages.length;
+		if (historyChanged) this.agent.replaceMessages(filtered);
+
+		const steering = this.agent.peekSteeringQueue();
+		const followUp = this.agent.peekFollowUpQueue();
+		const filteredSteering = steering.filter(message => !isVibeContext(message));
+		const filteredFollowUp = followUp.filter(message => !isVibeContext(message));
+		if (filteredSteering.length !== steering.length || filteredFollowUp.length !== followUp.length) {
+			this.agent.replaceQueues(filteredSteering, filteredFollowUp);
+			this.#reconcileQueuedMessageDrain();
+		}
+		this.#pendingNextTurnMessages = this.#pendingNextTurnMessages.filter(message => !isVibeContext(message));
+
+		if (!historyChanged) return;
 		this.#advisors.resetAllRuntimes("vibe-mode-exit");
 		this.#closeCodexProviderSessionsForHistoryRewrite();
 	}

@@ -187,6 +187,45 @@ describe("InteractiveMode vibe mode toggle", () => {
 		expect(vibeDirectivePerCall).toEqual([true, false]);
 	});
 
+	it("removes a queued Vibe directive when exiting during a model turn", async () => {
+		const vibeDirectivePerCall: boolean[] = [];
+		const firstStarted = Promise.withResolvers<void>();
+		streamFn = (_model, context, options) => {
+			vibeDirectivePerCall.push(JSON.stringify(context).includes("<vibe-mode>"));
+			const stream = new AssistantMessageEventStream();
+			queueMicrotask(() => {
+				stream.push({ type: "start", partial: createAssistantMessage("") });
+				if (vibeDirectivePerCall.length === 1) {
+					options?.signal?.addEventListener(
+						"abort",
+						() => stream.push({ type: "error", reason: "aborted", error: createAssistantMessage("Aborted") }),
+						{ once: true },
+					);
+					firstStarted.resolve();
+				} else {
+					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("Done") });
+				}
+			});
+			return stream;
+		};
+
+		const prompt = session.prompt("Start normally");
+		await firstStarted.promise;
+		await mode.handleVibeModeCommand();
+		expect(
+			session.agent
+				.peekSteeringQueue()
+				.some(message => message.role === "custom" && message.customType === VIBE_MODE_CONTEXT_MESSAGE_TYPE),
+		).toBe(true);
+
+		await mode.handleVibeModeCommand();
+		await prompt;
+		await session.waitForIdle();
+		await session.prompt("Use the restored tools");
+
+		expect(vibeDirectivePerCall).toEqual([false, false]);
+	});
+
 	it("omits persisted Vibe directives from restored model context", () => {
 		session.sessionManager.appendCustomMessageEntry(
 			VIBE_MODE_CONTEXT_MESSAGE_TYPE,
