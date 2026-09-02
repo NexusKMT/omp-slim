@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.3] - 2026-09-02
+
 ### Fixed
 
 - The guest transcript now returns to the latest message after an initial connection or reconnect.

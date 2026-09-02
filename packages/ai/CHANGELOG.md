@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.3] - 2026-09-02
+
 ### Fixed
 
 - Fixed Gemini 3 sessions on Antigravity/Cloud Code Assist and Vertex AI getting permanently stuck on `400 INVALID_ARGUMENT` after a turn with parallel tool calls ([#9638](https://github.com/can1357/oh-my-pi/issues/9638)).

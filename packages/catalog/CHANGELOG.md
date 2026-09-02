@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.3] - 2026-09-02
+
 ### Added
 
 - Added support for Claude Fable 5.1
