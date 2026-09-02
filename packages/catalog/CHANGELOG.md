@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `opencode-go/muse-spark-1.3-contributor` and `opencode-zen/muse-spark-1.3-contributor-free` now route over the Responses API like their 1.2 siblings, instead of 500ing on every request because they fell through to chat completions ([#10610](https://github.com/can1357/oh-my-pi/issues/10610)).
+
 ## [18.1.4] - 2026-09-02
 
 ### Changed

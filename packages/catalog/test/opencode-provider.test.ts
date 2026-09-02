@@ -660,6 +660,24 @@ describe("OpenCode provider discovery", () => {
 		}
 	});
 
+	test("routes muse-spark-1.3 contributor ids to the responses API (#10610)", () => {
+		// models.dev omits the muse-spark-1.3 ids under both gateways, so without
+		// an override they fall through to openai-completions even though the Go
+		// and Zen gateways serve them only at /v1/responses
+		// (opencode.ai/docs/go/#endpoints, opencode.ai/docs/zen/#endpoints).
+		// Sending completions requests 500s on every turn.
+		const goDescriptor = MODELS_DEV_PROVIDER_DESCRIPTORS.find(item => item.providerId === "opencode-go");
+		expect(goDescriptor?.resolveApi?.("muse-spark-1.3-contributor", { tool_call: true })).toEqual({
+			api: "openai-responses",
+			baseUrl: "https://opencode.ai/zen/go/v1",
+		});
+		const zenDescriptor = MODELS_DEV_PROVIDER_DESCRIPTORS.find(item => item.providerId === "opencode-zen");
+		expect(zenDescriptor?.resolveApi?.("muse-spark-1.3-contributor-free", { tool_call: true })).toEqual({
+			api: "openai-responses",
+			baseUrl: "https://opencode.ai/zen/v1",
+		});
+	});
+
 	test("pins gateway-only muse-spark ids to responses in live discovery (#8957)", async () => {
 		// models.dev omits muse-spark-1.2[-contributor] under opencode-go, so
 		// there is no bundled reference row. Without the discovery-side pin the
