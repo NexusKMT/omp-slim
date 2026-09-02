@@ -67,7 +67,12 @@ async function run(args: TtsrCommandArgs): Promise<void> {
 	}
 }
 
-async function writeTempRule(condition: string, scope: string[], astCondition?: string): Promise<string> {
+async function writeTempRule(
+	condition: string,
+	scope: string[],
+	astCondition?: string,
+	agents?: string[],
+): Promise<string> {
 	// Stable basename "test-rule.md" so buildRuleFromMarkdown derives name
 	// "test-rule" — assertions rely on it. Each call uses a unique parent dir
 	// to avoid collisions across tests.
@@ -77,6 +82,7 @@ async function writeTempRule(condition: string, scope: string[], astCondition?: 
 	const fm: string[] = [`description: test rule`, `condition: "${condition.replace(/"/g, '\\"')}"`];
 	if (astCondition) fm.push(`astCondition: "${astCondition.replace(/"/g, '\\"')}"`);
 	fm.push(`scope: [${scope.map(s => `"${s}"`).join(", ")}]`);
+	if (agents) fm.push(`agents: [${agents.map(a => `"${a}"`).join(", ")}]`);
 	await Bun.write(tmp, `---\n${fm.join("\n")}\n---\nbody\n`);
 	return tmp;
 }
@@ -226,6 +232,25 @@ describe("omp ttsr", () => {
 			await run({ action: "test", test: { rule: rulePath, file: snippetPath, source: "text" }, json: true });
 			const report = JSON.parse(stdout);
 			expect(report.inferenceNote).toBeUndefined();
+		});
+
+		it("triggers for a matching --agent and rejects for a non-matching one", async () => {
+			captureStreams();
+			const rulePath = await writeTempRule(": any", ["tool:edit(*.ts)"], undefined, ["scout"]);
+			const test: TtsrTestArgs = {
+				rule: rulePath,
+				source: "tool",
+				filePath: "src/foo.ts",
+				snippet: "const x: any = 1",
+				agent: "scout",
+			};
+			await run({ action: "test", test });
+			expect(stdout).toContain("Triggered");
+			expect(stdout).toContain("agents: scout");
+
+			await expect(runTtsrCommand({ action: "test", test: { ...test, agent: "main" } })).rejects.toThrow(
+				/scoped to agents/,
+			);
 		});
 	});
 
