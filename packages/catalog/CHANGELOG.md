@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added the `auth/*.kdl` rule stratum: every provider's login, refresh, env-key and credential policy is now declared in KDL and compiled into `rules.json` (`bun run gen:compat`), with typed accessors in `compat/auth` and generated provider-id unions in `compat/auth-ids`
 - Added GLM 5.3 Promo 50 model
 - Added support for computer-use capabilities in model configurations
 
@@ -19,7 +20,7 @@
 - GitHub Copilot discovery now uses the Copilot CLI identity so account-eligible enterprise and experimental models are returned
 - Discovered Bedrock-style `mistral.mixtral-*` models no longer abort startup with an ambiguous family classification ([#10598](https://github.com/can1357/oh-my-pi/issues/10598)).
 - `opencode-go/muse-spark-1.3-contributor` and `opencode-zen/muse-spark-1.3-contributor-free` now route over the Responses API like their 1.2 siblings, instead of 500ing on every request because they fell through to chat completions ([#10610](https://github.com/can1357/oh-my-pi/issues/10610)).
-- `meta/muse-spark-1.3` and `meta/muse-spark-1.3-contributor` now carry their 1M context window, thinking levels, image input, and pricing instead of surfacing as a text-only model with an unknown context window and "Current model does not support thinking"; Meta's roster no longer lists the `muse-image-*` / `muse-voice-*` media SKUs as chat models.
+- `meta/muse-spark-1.3` and `meta/muse-spark-1.3-contributor` now carry their 1M context window, thinking levels, image input, and pricing instead of surfacing as a text-only model with an unknown context window and "Current model does not support thinking"; Meta's roster no longer lists the `muse-image-*` / `muse-voice-*` media SKUs as chat models. Future Muse Spark revisions Meta or the OpenCode gateways ship before the catalog lists them inherit the lineage's context window, thinking levels, pricing tier, Responses route, and `Muse Spark <rev>` naming.
 
 ## [18.1.4] - 2026-09-02
 

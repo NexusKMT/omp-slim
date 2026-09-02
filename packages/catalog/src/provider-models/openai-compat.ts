@@ -12,7 +12,7 @@ import {
 import { xaiResponsesReasoningEffortMap } from "../compat/openai";
 import { resolveModelPolicy } from "../compat/resolve";
 import { compareRevision, parseRevision } from "../compat/revision";
-import { classifyModel, discoveryVocabulary } from "../compat/taxonomy";
+import { billingVariantPlain, classifyModel, discoveryVocabulary } from "../compat/taxonomy";
 import {
 	DEFAULT_OPENAI_COMPATIBLE_DISCOVERY_TIMEOUT_MS,
 	fetchOpenAICompatibleModels,
@@ -3061,13 +3061,13 @@ function openCodeModelManagerOptions(
 						// stencil fallback; the fallback never selects a transport.
 						const api = resolveApi(defaults.id, defaults.api);
 						const baseUrl = openCodeBaseUrlForApi(api, basePath);
-						const identity = classifyModel(providerId, defaults.id, { lenient: true });
-						if (identity.class === "meta" && identity.family === undefined) {
-							// Gateway lists these as bare ids with no capability
-							// metadata and no local bundled row, so the generic
-							// defaults would hide the effort dial
-							// (`reasoning: false`). Keep the pinned/fallback route
-							// and restore the documented thinking surface.
+						const lineage = museSparkLineageSpec(defaults.id);
+						if (lineage) {
+							// Gateway lists Muse Spark as bare ids with no capability
+							// metadata and often no local bundled row, so the generic
+							// defaults would hide the effort dial (`reasoning: false`).
+							// Keep the pinned/fallback route and restore the lineage's
+							// thinking surface.
 							return {
 								...(reference ?? defaults),
 								id: defaults.id,
@@ -3076,10 +3076,16 @@ function openCodeModelManagerOptions(
 								provider: providerId,
 								baseUrl,
 								reasoning: true,
-								input: reference?.input ?? ["text", "image"],
-								thinking: reference?.thinking ?? META_MUSE_SPARK_THINKING,
-								contextWindow: toPositiveNumber(entry.context_length, reference?.contextWindow ?? 1_048_576),
-								maxTokens: toPositiveNumber(entry.max_completion_tokens, reference?.maxTokens ?? 131_072),
+								input: reference?.input ?? lineage.input,
+								thinking: reference?.thinking ?? lineage.thinking,
+								contextWindow: toPositiveNumber(
+									entry.context_length,
+									reference?.contextWindow ?? lineage.contextWindow,
+								),
+								maxTokens: toPositiveNumber(
+									entry.max_completion_tokens,
+									reference?.maxTokens ?? lineage.maxTokens,
+								),
 							};
 						}
 						if (!reference) {
@@ -4401,6 +4407,21 @@ const META_MUSE_MODEL_BY_ID: Partial<Record<string, ModelSpec<"openai-responses"
 	META_MUSE_STATIC_MODELS.map(model => [model.id, model]),
 );
 
+/**
+ * Lineage reference for a Muse Spark revision Meta ships before the seed
+ * lists it. Every revision so far has kept the 1M window, the effort ladder,
+ * and per-tier pricing, so a new one inherits them (with its own display
+ * name) instead of surfacing as a text-only model with no limits. Only ids
+ * that classify into the `muse-spark` family with a revision qualify.
+ */
+function museSparkLineageSpec(id: string): ModelSpec<"openai-responses"> | undefined {
+	const identity = classifyModel("meta", id, { lenient: true });
+	if (identity.family !== "muse-spark" || identity.revision === undefined) return undefined;
+	const [major, minor, patch] = parseRevision(identity.revision) ?? [0, 0, 0];
+	const revision = patch === 0 ? `${major}.${minor}` : identity.revision;
+	return museSparkSpec(revision, billingVariantPlain(id) === undefined ? "standard" : "contributor");
+}
+
 // ---------------------------------------------------------------------------
 // 15.76 Amazon Bedrock Mantle
 // ---------------------------------------------------------------------------
@@ -4536,9 +4557,14 @@ export function metaModelManagerOptions(config?: MetaModelManagerConfig): ModelM
 			config,
 			requireApiKey: true,
 			filterModel: (_entry, model) => !isExcludedModel("meta", model.id),
-			// The seed backs ids the bundle has not been regenerated with yet.
+			// The seed backs ids the bundle has not been regenerated with yet;
+			// the lineage spec backs revisions the seed has not been taught.
 			mapModel: (entry, defaults, reference) =>
-				mapWithBundledReference(entry, defaults, reference ?? META_MUSE_MODEL_BY_ID[defaults.id]),
+				mapWithBundledReference(
+					entry,
+					defaults,
+					reference ?? META_MUSE_MODEL_BY_ID[defaults.id] ?? museSparkLineageSpec(defaults.id),
+				),
 		}),
 		staticModels: META_MUSE_STATIC_MODELS,
 	};
@@ -6506,7 +6532,7 @@ const COPILOT_BASE_URL = "https://api.githubcopilot.com";
 
 const ZAI_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
 // The `zai` catalog provider is the GLM Coding Plan: `/login zai` validates and
-// stores credentials against the coding-plan endpoint (see registry/zai.ts), so
+// stores credentials against the coding-plan endpoint (see auth/zai.kdl), so
 // the native OpenAI transport must ride the coding-plan base rather than the
 // general PAYG `/api/paas/v4`, which would bypass plan quota or fail auth.
 const ZAI_OPENAI_BASE_URL = "https://api.z.ai/api/coding/paas/v4";

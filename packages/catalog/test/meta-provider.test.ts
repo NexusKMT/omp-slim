@@ -74,6 +74,33 @@ describe("Meta Model API provider", () => {
 		expect(byId.has("muse-image-1.0")).toBe(false);
 	});
 
+	test("unseeded Muse Spark revisions inherit lineage capabilities and tier naming", async () => {
+		// Meta ships revisions gateway-first; until the seed lists one it must
+		// still resolve with the lineage's window, thinking ladder, and pricing
+		// rather than the bare discovery defaults.
+		const options = metaModelManagerOptions({
+			apiKey: "meta-key",
+			fetch: async () => modelListResponse(["muse-spark-1.4", "muse-spark-1.4-contributor", "muse-spark-2.0.1"]),
+		});
+		const models = await options.fetchDynamicModels?.();
+		const byId = new Map((models ?? []).map(model => [model.id, model]));
+		expect(byId.get("muse-spark-1.4")).toMatchObject({
+			name: "Muse Spark 1.4",
+			reasoning: true,
+			input: ["text", "image"],
+			contextWindow: 1_048_576,
+			maxTokens: 131_072,
+			cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
+			thinking: MUSE_SPARK_THINKING,
+		});
+		expect(byId.get("muse-spark-1.4-contributor")).toMatchObject({
+			name: "Muse Spark 1.4 (C)",
+			cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
+			thinking: MUSE_SPARK_THINKING,
+		});
+		expect(byId.get("muse-spark-2.0.1")).toMatchObject({ name: "Muse Spark 2.0.1", reasoning: true });
+	});
+
 	test("prefers Meta's documented key name while accepting the provider-specific alias", () => {
 		const descriptor = CATALOG_PROVIDERS.find(provider => provider.id === "meta");
 		expect(descriptor).toMatchObject({
