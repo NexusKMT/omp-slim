@@ -622,6 +622,52 @@ describe("lsp regressions", () => {
 		}
 	});
 
+	it("re-arms the idle checker after a config-only reload when timeout is added (#8389)", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-rearm-config-");
+		const config: ServerConfig = {
+			command: "fake-lsp-rearm-config",
+			fileTypes: ["ts"],
+			rootMarkers: [],
+		};
+
+		try {
+			// Initially no timeout configured: checker interval should remain stopped
+			configCache.set(tempDir.path(), { servers: { [config.command]: config } });
+			installHandshakeLsp();
+			const client = await lspClient.getOrCreateClient(config, tempDir.path(), 1_000);
+
+			expect(lspClient.isIdleCheckerRunning()).toBe(false);
+
+			// Config-only change: user adds idleTimeoutMs to config
+			configCache.delete(tempDir.path());
+			configCache.set(tempDir.path(), { servers: { [config.command]: config }, idleTimeoutMs: 5_000 });
+
+			// Simulate config reload (as done in `lsp reload *`)
+			getConfig(tempDir.path());
+			lspClient.reconcileIdleChecker();
+
+			// Checker must now be re-armed even though client identity is unchanged
+			expect(lspClient.isIdleCheckerRunning()).toBe(true);
+
+			// Client becomes idle and is reaped on sweep
+			client.lastActivity = Date.now() - 6_000;
+			await lspClient.checkIdleClients();
+			expect(lspClient.getActiveClients().map(c => c.name)).not.toContain("fake-lsp-rearm-config");
+
+			// Removing timeout and reloading stops the checker again
+			configCache.delete(tempDir.path());
+			configCache.set(tempDir.path(), { servers: { [config.command]: config } });
+			getConfig(tempDir.path());
+			lspClient.reconcileIdleChecker();
+			expect(lspClient.isIdleCheckerRunning()).toBe(false);
+		} finally {
+			lspClient.setIdleTimeout(null);
+			configCache.delete(tempDir.path());
+			await lspClient.shutdownAll();
+			tempDir.removeSync();
+		}
+	});
+
 	it("returns an already-starting client without creating a second client", async () => {
 		const tempDir = TempDir.createSync("@omp-lsp-pending-client-");
 		const initialize = Promise.withResolvers<void>();

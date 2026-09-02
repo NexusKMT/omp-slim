@@ -24,6 +24,7 @@ import {
 	getOrCreateClient,
 	isRustAnalyzerClient,
 	type LspServerStatus,
+	reconcileIdleChecker,
 	refreshFile,
 	sendNotification,
 	sendRequest,
@@ -1093,6 +1094,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 			// the process lifetime (#3546).
 			configCache.delete(this.session.cwd);
 			const refreshedConfig = getConfig(this.session.cwd);
+			reconcileIdleChecker();
 			const servers = getLspServers(refreshedConfig);
 			// Identity-aware client keys make a changed server resolve to a fresh
 			// client below, but the process spawned from the superseded config

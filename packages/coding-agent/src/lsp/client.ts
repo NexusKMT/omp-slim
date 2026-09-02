@@ -64,12 +64,7 @@ export function setSharedLspEnabled(enabled: boolean): void {
  */
 export function setIdleTimeout(ms: number | null | undefined): void {
 	idleTimeoutMs = ms ?? null;
-
-	if (idleTimeoutMs && idleTimeoutMs > 0) {
-		startIdleChecker();
-	} else {
-		maybeStopIdleChecker();
-	}
+	reconcileIdleChecker();
 }
 
 /**
@@ -110,11 +105,28 @@ function maybeStartIdleChecker(client?: LspClient): void {
 	}
 }
 
-function maybeStopIdleChecker(): void {
-	if (clients.size === 0 && !idleTimeoutMs) {
+/**
+ * Whether the background idle checker interval is currently active.
+ * Exported for tests.
+ */
+export function isIdleCheckerRunning(): boolean {
+	return idleCheckInterval !== null;
+}
+
+/**
+ * Reconcile the background idle checker interval against currently configured timeouts.
+ * Starts the checker if any registered client or workspace has a positive timeout,
+ * or stops it if none do.
+ */
+export function reconcileIdleChecker(): void {
+	if (hasConfiguredIdleTimeout()) {
+		startIdleChecker();
+	} else {
 		stopIdleChecker();
-		return;
 	}
+}
+
+function maybeStopIdleChecker(): void {
 	if (!hasConfiguredIdleTimeout()) {
 		stopIdleChecker();
 	}
@@ -990,6 +1002,7 @@ export async function getOrCreateClient(
 	const existingClient = clients.get(key);
 	if (existingClient && !invalidatedClientKeys.has(key)) {
 		existingClient.lastActivity = Date.now();
+		maybeStartIdleChecker(existingClient);
 		return existingClient;
 	}
 
@@ -1014,6 +1027,7 @@ export async function getOrCreateClient(
 		const clientAfterReload = clients.get(key);
 		if (clientAfterReload && !invalidatedClientKeys.has(key)) {
 			clientAfterReload.lastActivity = Date.now();
+			maybeStartIdleChecker(clientAfterReload);
 			return clientAfterReload;
 		}
 		const lockAfterReload = clientLocks.get(key);
