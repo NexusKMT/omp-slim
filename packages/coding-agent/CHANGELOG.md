@@ -60,9 +60,6 @@
 - Added an Activity view to Agent Hub with searchable and filterable timelines spanning live progress and persisted transcripts; `/hub` is now the live-operations entry point while `/agents` retains Control Center behavior.
 - Added an `icon.advisorClosed` symbol-theme token: the advisor eye in the status line now closes once the advisor has finished reviewing and will not add further comments.
 
-### Fixed
-
-- Fixed HTML session exports reordering interleaved assistant text, thinking, images, and tool calls in the transcript, and split matching text/tool sidebar rows with block-accurate navigation. ([#10253](https://github.com/can1357/oh-my-pi/pull/10253) by [@realcoderandom](https://github.com/realcoderandom))
 ### Changed
 
 - Disabled hashline editing for Kimi, Mimo, DeepSeek Flash, and Stepfun models for improved stability.
@@ -114,6 +111,10 @@
 - Prevented browser `app.path` from terminating existing same-executable applications when no reusable CDP endpoint is available.
 - Fixed top-level errors overwriting the active composer before terminal restoration.
 - Fixed Enter being ignored during the first turn when omp starts with an initial prompt.
+- Fixed HTML session exports reordering interleaved assistant text, thinking, images, and tool calls in the transcript, and split matching text/tool sidebar rows with block-accurate navigation. ([#10253](https://github.com/can1357/oh-my-pi/pull/10253) by [@realcoderandom](https://github.com/realcoderandom))
+- Fixed an issue where custom model overrides were lost during configuration updates
+- Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
+- Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
 
 ## [18.0.11] - 2026-08-29
 
