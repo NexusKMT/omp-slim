@@ -703,6 +703,29 @@ describe("AgentLifecycleManager", () => {
 		expect(restoredRegistry.get(workerId)?.status).toBe("aborted");
 	});
 
+	it("publishes an aborted status only after the session is detached", async () => {
+		const stub = makeSessionStub();
+		const ref = registry.register({
+			id: "Published-Aborted",
+			displayName: "task",
+			kind: "sub",
+			session: stub.session,
+			sessionFile: null,
+			status: "running",
+		});
+		let observed: { status: string; session: AgentSession | null } | undefined;
+		const unsubscribe = registry.onChange(event => {
+			if (event.type === "status_changed" && event.ref.id === ref.id) {
+				observed = { status: event.ref.status, session: event.ref.session };
+			}
+		});
+
+		await lifecycle.release(ref.id, ref, { tombstone: true });
+		unsubscribe();
+
+		expect(observed).toEqual({ status: "aborted", session: null });
+	});
+
 	it("tombstone release survives the dispose-path unregister racing the sidecar write (#10531)", async () => {
 		using tempDir = TempDir.createSync("@omp-lifecycle-tombstone-race-");
 		const workerId = "Raced-Sub";

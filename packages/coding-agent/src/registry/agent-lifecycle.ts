@@ -447,10 +447,11 @@ export class AgentLifecycleManager {
 			// via the `if (!registry.get(id))` discovery guard, and the sidecar
 			// only needs to exist before a later cross-restart discovery pass —
 			// release awaits the write below before returning.
-			if (!this.#registry.setStatus(id, "aborted", ref)) {
+			// Detach before publishing `aborted`: setStatus emits synchronously, so
+			// every subscriber must observe a terminal ref with session === null.
+			if (!this.#registry.detachSession(id, ref) || !this.#registry.setStatus(id, "aborted", ref)) {
 				logger.warn("AgentLifecycleManager.release: terminal transition rejected", { id });
 			}
-			this.#registry.detachSession(id, ref);
 		}
 		try {
 			if (options?.tombstone && ref.sessionFile) await persistAgentTombstone(ref.sessionFile);
