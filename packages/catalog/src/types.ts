@@ -1212,16 +1212,15 @@ export interface Model<TApi extends Api = Api> {
  * vocabulary of `buildModel`. Identical to `Model` except `compat` carries the
  * sparse override shape and nothing is resolved yet.
  */
-export interface ModelSpec<TApi extends Api = Api>
-	extends Omit<
-		Model<TApi>,
-		| "compat"
-		| "identity"
-		| "compatConfig"
-		| "requiresGlyphTokenization"
-		| "requiresCursorToolSchemaProjection"
-		| "supportsComputerUseConfig"
-	> {
+export interface ModelSpec<TApi extends Api = Api> extends Omit<
+	Model<TApi>,
+	| "compat"
+	| "identity"
+	| "compatConfig"
+	| "requiresGlyphTokenization"
+	| "requiresCursorToolSchemaProjection"
+	| "supportsComputerUseConfig"
+> {
 	/** Sparse compatibility overrides; resolved into `Model.compat` by `buildModel`. */
 	compat?: CompatConfigOf<TApi>;
 }

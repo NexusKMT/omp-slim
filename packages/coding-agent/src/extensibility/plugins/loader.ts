@@ -126,11 +126,7 @@ async function collectPluginsAtRoot(
 		// only for linked plugins (`omp plugin link`, marketplace runtime
 		// registration), which are symlinks into node_modules. Without a
 		// manifest, retain the established lockfile-only directory layout.
-		if (
-			hasPackageManifest &&
-			!depsKeys.includes(name) &&
-			!(await isSymlink(path.join(nodeModulesPath, name)))
-		) {
+		if (hasPackageManifest && !depsKeys.includes(name) && !(await isSymlink(path.join(nodeModulesPath, name)))) {
 			logger.warn("plugins: skipping stale lockfile entry not declared in package.json", {
 				name,
 				root,

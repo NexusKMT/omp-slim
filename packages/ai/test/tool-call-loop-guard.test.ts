@@ -329,14 +329,10 @@ describe("ToolCallLoopGuard multi-call turns", () => {
 	test("treats reordered parallel calls as the same batch", () => {
 		const guard = new ToolCallLoopGuard({ threshold: 2, exemptTools: [] });
 		expect(
-			guard.recordTurn(
-				turn([toolCall("bash", { command: "echo a" }), toolCall("read", { path: "a.ts" })]),
-			),
+			guard.recordTurn(turn([toolCall("bash", { command: "echo a" }), toolCall("read", { path: "a.ts" })])),
 		).toBeNull();
 		expect(
-			guard.recordTurn(
-				turn([toolCall("read", { path: "a.ts" }), toolCall("bash", { command: "echo a" })]),
-			),
+			guard.recordTurn(turn([toolCall("read", { path: "a.ts" }), toolCall("bash", { command: "echo a" })])),
 		).toMatchObject({ count: 2 });
 	});
 
