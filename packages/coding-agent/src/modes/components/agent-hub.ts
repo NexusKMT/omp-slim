@@ -522,8 +522,10 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 					b.lastActivity - a.lastActivity ||
 					a.id.localeCompare(b.id),
 			);
-			this.#rowOrder = new Map();
-			for (const ref of ordered) this.#rowOrder.set(ref.id, this.#nextRowOrder++);
+			if (ordered.length > 0) {
+				this.#rowOrder = new Map();
+				for (const ref of ordered) this.#rowOrder.set(ref.id, this.#nextRowOrder++);
+			}
 		} else {
 			ordered = refs.sort(
 				(a, b) => (rowOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rowOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER),

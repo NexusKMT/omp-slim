@@ -153,6 +153,35 @@ describe("Agent hub row ordering", () => {
 		}
 	});
 
+	it("captures initial ranking when agents load after empty construction", () => {
+		vi.useFakeTimers();
+		geometry = stubStdoutGeometry(120);
+		const agents = new AgentRegistry();
+		const hub = makeHub(agents);
+
+		try {
+			expect(renderedAgentIds(hub)).toEqual([]);
+
+			setSystemTime(3000);
+			agents.register({
+				id: "Parked",
+				displayName: "Parked",
+				kind: "sub",
+				session: null,
+				status: "parked",
+			});
+			setSystemTime(1000);
+			agents.register({ id: "Older", displayName: "Older", kind: "sub", session: {} as AgentSession });
+			setSystemTime(2000);
+			agents.register({ id: "Newer", displayName: "Newer", kind: "sub", session: {} as AgentSession });
+
+			vi.advanceTimersByTime(100);
+			expect(renderedAgentIds(hub)).toEqual(["Newer", "Older", "Parked"]);
+		} finally {
+			hub.dispose();
+		}
+	});
+
 	it("keeps row order stable as agents heartbeat and appends new agents", () => {
 		vi.useFakeTimers();
 		let hub: AgentHubOverlayComponent | undefined;
