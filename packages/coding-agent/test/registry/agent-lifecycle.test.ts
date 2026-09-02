@@ -754,6 +754,27 @@ describe("AgentLifecycleManager", () => {
 		expect(await Bun.file(`${workerSessionFile}.tombstone`).exists()).toBe(true);
 	});
 
+	it("tombstone release disposes the detached session when sidecar persistence fails", async () => {
+		const stub = makeSessionStub();
+		const ref = registry.register({
+			id: "Persist-Failure",
+			displayName: "task",
+			kind: "sub",
+			session: stub.session,
+			sessionFile: "/tmp/Persist-Failure.jsonl",
+			status: "running",
+		});
+		const failure = Object.assign(new Error("no space left on device"), { code: "ENOSPC" });
+		vi.spyOn(fsp, "writeFile").mockRejectedValueOnce(failure);
+
+		await expect(lifecycle.release("Persist-Failure", ref, { tombstone: true })).rejects.toBe(failure);
+
+		// Persistence still surfaces to the caller, but the detached session cannot
+		// leak its MCP, kernel, browser, or nested-job resources.
+		expect(stub.disposeCalls()).toBe(1);
+		expect(registry.get("Persist-Failure")).toMatchObject({ status: "aborted", session: null });
+	});
+
 	it("a cold revive whose factory resolves after dispose rejects without adopting or arming a TTL", async () => {
 		vi.useFakeTimers();
 		const gate = deferred();

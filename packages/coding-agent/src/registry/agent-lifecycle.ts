@@ -451,13 +451,18 @@ export class AgentLifecycleManager {
 				logger.warn("AgentLifecycleManager.release: terminal transition rejected", { id });
 			}
 			this.#registry.detachSession(id, ref);
-			if (ref.sessionFile) await persistAgentTombstone(ref.sessionFile);
 		}
-		if (live) {
-			try {
-				await live.dispose();
-			} catch (error) {
-				logger.warn("AgentLifecycleManager.release: session dispose failed", { id, error: String(error) });
+		try {
+			if (options?.tombstone && ref.sessionFile) await persistAgentTombstone(ref.sessionFile);
+		} finally {
+			// Detaching removes the registry's only route to the live session. Always
+			// dispose the captured session, even when tombstone persistence fails.
+			if (live) {
+				try {
+					await live.dispose();
+				} catch (error) {
+					logger.warn("AgentLifecycleManager.release: session dispose failed", { id, error: String(error) });
+				}
 			}
 		}
 		if (!options?.tombstone) this.#registry.unregister(id, ref);
