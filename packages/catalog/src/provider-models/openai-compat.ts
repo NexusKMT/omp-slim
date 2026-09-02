@@ -2958,6 +2958,7 @@ function openCodeBaseUrlForApi(api: Api, basePath: string): string {
 // Runtime-discovered rows cached before model-identity corrections retain
 // stale capability metadata until the authoritative catalog TTL expires.
 const OPENCODE_CACHE_MIGRATION_MODEL_IDS = ["glm-5.3-flash"] as const;
+const OPENCODE_ZEN_CACHE_MIGRATION_MODEL_IDS = ["gemini-3.7-flash"] as const;
 
 // Billing-variant suffixes the OpenCode gateways append to a base model id
 // without changing its transport (`deepseek-v4-flash-free`,
@@ -3026,8 +3027,12 @@ function openCodeModelManagerOptions(
 		dynamicModelsAuthoritative: true,
 		// Per-id route pins and capability migrations are cache identity:
 		// without this, rows cached before a correction keep the stale route or
-		// thinking surface until TTL expiry (#8957, #9960).
-		dropCachedModelIdsOnStaticMismatch: [...apiRouteExactModelIds(providerId), ...OPENCODE_CACHE_MIGRATION_MODEL_IDS],
+		// thinking surface until TTL expiry (#8957, #9960, #10543).
+		dropCachedModelIdsOnStaticMismatch: [
+			...apiRouteExactModelIds(providerId),
+			...OPENCODE_CACHE_MIGRATION_MODEL_IDS,
+			...(providerId === "opencode-zen" ? OPENCODE_ZEN_CACHE_MIGRATION_MODEL_IDS : []),
+		],
 		modelsDev: {
 			fetch: () => fetchRevalidatedWellKnownModelsWithTimeout(config?.fetch),
 			map: payload => {
