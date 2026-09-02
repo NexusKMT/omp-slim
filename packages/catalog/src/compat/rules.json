@@ -13284,7 +13284,7 @@
 				}
 			},
 			{
-				"source": "providers/zai.kdl:29",
+				"source": "providers/zai.kdl:32",
 				"providers": [
 					"zai"
 				],
@@ -13294,6 +13294,9 @@
 						"value": "glm-5.3-flash"
 					}
 				],
+				"wire": {
+					"clampOutputToModelMax": true
+				},
 				"thinking": {
 					"mode": "anthropic-budget-effort"
 				}
@@ -14186,6 +14189,20 @@
 					}
 				],
 				"default": "openai-completions"
+			},
+			{
+				"provider": "zai",
+				"routes": [
+					{
+						"api": "openai-completions",
+						"match": {
+							"exact": [
+								"glm-5.3-flash"
+							]
+						}
+					}
+				],
+				"default": "anthropic-messages"
 			},
 			{
 				"provider": "opencode-zen",

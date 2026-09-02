@@ -6514,6 +6514,26 @@ const OPENCODE_GO_API_RESOLUTION = createOpenCodeApiResolution("https://opencode
 
 const COPILOT_BASE_URL = "https://api.githubcopilot.com";
 
+const ZAI_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
+// The `zai` catalog provider is the GLM Coding Plan: `/login zai` validates and
+// stores credentials against the coding-plan endpoint (see registry/zai.ts), so
+// the native OpenAI transport must ride the coding-plan base rather than the
+// general PAYG `/api/paas/v4`, which would bypass plan quota or fail auth.
+const ZAI_OPENAI_BASE_URL = "https://api.z.ai/api/coding/paas/v4";
+
+/** Resolves the transport and endpoint for one Z.AI model catalog entry. */
+export function resolveZaiApi(modelId: string): { api: "anthropic-messages" | "openai-completions"; baseUrl: string } {
+	const api = apiRouteFor("zai", modelId)?.api ?? "anthropic-messages";
+	switch (api) {
+		case "anthropic-messages":
+			return { api, baseUrl: ZAI_ANTHROPIC_BASE_URL };
+		case "openai-completions":
+			return { api, baseUrl: ZAI_OPENAI_BASE_URL };
+		default:
+			throw new Error(`Unsupported Z.AI API route: ${api}`);
+	}
+}
+
 const COPILOT_DEFAULT_RESOLUTION = {
 	api: "openai-completions",
 	baseUrl: COPILOT_BASE_URL,
@@ -6791,7 +6811,9 @@ const MODELS_DEV_PROVIDER_DESCRIPTORS_CODING_PLANS: readonly ModelsDevProviderDe
 	// SKU as "Free" in `/models`. The PAYG key carries the real per-token rates for
 	// the identical model ids, so the enumerated token costs line up with the other
 	// subscription providers for comparison (issue #5598).
-	anthropicMessagesDescriptor("zai", "zai", "https://api.z.ai/api/anthropic"),
+	anthropicMessagesDescriptor("zai", "zai", ZAI_ANTHROPIC_BASE_URL, {
+		resolveApi: modelId => resolveZaiApi(modelId),
+	}),
 	// --- Umans AI ---
 	// Source the pay-as-you-go catalog: the coding-plan key publishes subscription
 	// costs as zero, while `/models/info` omits pricing entirely. The generator
