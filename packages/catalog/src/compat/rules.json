@@ -4720,7 +4720,34 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:71",
+				"source": "classes/gemini.kdl:79",
+				"class": "gemini",
+				"providers": [
+					"google",
+					"google-vertex",
+					"opencode-zen"
+				],
+				"family": "flash",
+				"revision": [
+					{
+						"op": ">=",
+						"revision": "3.7.0"
+					},
+					{
+						"op": "<",
+						"revision": "3.8.0"
+					}
+				],
+				"thinking": {
+					"efforts": [
+						"low",
+						"medium",
+						"high"
+					]
+				}
+			},
+			{
+				"source": "classes/gemini.kdl:86",
 				"class": "gemini",
 				"revision": [
 					{
@@ -4737,7 +4764,7 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:79",
+				"source": "classes/gemini.kdl:94",
 				"class": "gemini",
 				"providers": [
 					"google",
@@ -4754,7 +4781,7 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:84",
+				"source": "classes/gemini.kdl:99",
 				"class": "gemini",
 				"providers": [
 					"google-antigravity",
