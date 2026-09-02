@@ -33,6 +33,10 @@
 - Improved chat history stability in long-running sessions by avoiding unnecessary updates when date or directory context changes.
 - Fixed the trace CLI hanging during proxy connections and added support for forward HTTP proxies.
 - Fixed newly started sessions using stale model context-window limits after background model discovery completes; the active model now refreshes automatically so context usage and compaction thresholds match the model catalog.
+- Improved chat history stability during long-running sessions by preventing unnecessary message modification when date or directory context changes
+- Fixed `bun claude:trace` hanging due to a TLS ClientHello race condition in the proxy MITM bridge and added forward HTTP proxy support.
+- Fixed an invalid Lark grammar error in sloppy edit constrained decoding caused by unsupported regex lookahead.
+- Fixed all-sessions listing (`Tab` in session picker) and cross-project resume failing when sessions are stored under `XDG_DATA_HOME`; `listAllSessions` now scans the active `getSessionsDir()` root instead of hardcoding `~/.omp/agent/sessions`.
 
 ## [18.1.1] - 2026-09-01
 
