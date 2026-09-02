@@ -33,7 +33,7 @@ describe("zai bundled catalog", () => {
 
 		expect(model).toBeDefined();
 		expect(model.api).toBe("openai-completions");
-		expect(model.baseUrl).toBe("https://api.z.ai/api/paas/v4");
+		expect(model.baseUrl).toBe("https://api.z.ai/api/coding/paas/v4");
 		expect(model.contextWindow).toBe(1_000_000);
 		expect(model.maxTokens).toBe(131_072);
 		// Keep the permanent catalog on list price; the 50%-off launch

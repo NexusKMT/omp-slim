@@ -82,7 +82,7 @@ describe("zai API routing", () => {
 		});
 		expect(glm53Flash).toMatchObject({
 			api: "openai-completions",
-			baseUrl: "https://api.z.ai/api/paas/v4",
+			baseUrl: "https://api.z.ai/api/coding/paas/v4",
 		});
 	});
 });

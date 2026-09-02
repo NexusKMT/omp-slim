@@ -6496,7 +6496,11 @@ const OPENCODE_GO_API_RESOLUTION = createOpenCodeApiResolution("https://opencode
 const COPILOT_BASE_URL = "https://api.githubcopilot.com";
 
 const ZAI_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
-const ZAI_OPENAI_BASE_URL = "https://api.z.ai/api/paas/v4";
+// The `zai` catalog provider is the GLM Coding Plan: `/login zai` validates and
+// stores credentials against the coding-plan endpoint (see registry/zai.ts), so
+// the native OpenAI transport must ride the coding-plan base rather than the
+// general PAYG `/api/paas/v4`, which would bypass plan quota or fail auth.
+const ZAI_OPENAI_BASE_URL = "https://api.z.ai/api/coding/paas/v4";
 
 /** Resolves the transport and endpoint for one Z.AI model catalog entry. */
 export function resolveZaiApi(modelId: string): { api: "anthropic-messages" | "openai-completions"; baseUrl: string } {
