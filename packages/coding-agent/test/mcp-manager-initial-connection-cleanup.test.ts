@@ -95,6 +95,7 @@ describe("MCPManager initial connection ownership", () => {
 		const manager = new MCPManager(workDir);
 		const rebound = Promise.withResolvers<void>();
 		const statusTypes: string[] = [];
+		const statusSettled = Promise.withResolvers<void>();
 		const marker = path.join(workDir, "first-start");
 		const config: MCPStdioServerConfig = {
 			type: "stdio",
@@ -107,14 +108,17 @@ describe("MCPManager initial connection ownership", () => {
 		});
 
 		try {
-			const result = await manager.connectServers({ server: config }, {}, event => statusTypes.push(event.type));
+			const result = await manager.connectServers({ server: config }, {}, event => {
+				statusTypes.push(event.type);
+				if (event.type === "connected") statusSettled.resolve();
+			});
 			expect(result.errors.get("server")).toBe('Connection to MCP server "server" timed out after 100ms');
 			await rebound.promise;
+			await statusSettled.promise;
 
 			expect(manager.getConnectionStatus("server")).toBe("connected");
 			expect(manager.getTools().map(tool => tool.name)).toEqual([`mcp__server_${DELAYED_TOOL_NAME}`]);
-			expect(statusTypes.filter(type => type === "connecting")).toHaveLength(1);
-			expect(statusTypes).toContain("reconnecting");
+			expect(statusTypes).toEqual(["connecting", "failed", "reconnecting", "connected"]);
 		} finally {
 			await manager.disconnectAll();
 			await removeWithRetries(workDir);

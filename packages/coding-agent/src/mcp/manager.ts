@@ -661,7 +661,16 @@ export class MCPManager {
 					}
 					if (error instanceof MCPConnectionTimeoutError) {
 						notify({ type: "reconnecting", serverName: name });
-						void this.reconnectServer(name);
+						const stopForwarding = onStatus
+							? this.addConnectionStatusListener(event => {
+									if ((event.type === "connected" || event.type === "failed") && event.serverName === name) {
+										onStatus(event);
+									}
+								})
+							: undefined;
+						const retry = this.reconnectServer(name);
+						if (stopForwarding) void retry.then(stopForwarding, stopForwarding);
+						else void retry;
 					}
 				});
 		}
