@@ -17,7 +17,7 @@ import {
 	listClaudePluginRoots,
 } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
 import { getPluginsDir, removeWithRetries } from "@oh-my-pi/pi-utils";
-import "@oh-my-pi/pi-coding-agent/discovery/agent-plugins";
+import { restoreEnvValue } from "../helpers/settings-test-state";
 import "@oh-my-pi/pi-coding-agent/discovery/claude-plugins";
 import type { MCPServer } from "@oh-my-pi/pi-coding-agent/capability/mcp";
 import type { Skill } from "@oh-my-pi/pi-coding-agent/capability/skill";
@@ -255,6 +255,7 @@ describe("parseAgentPluginMcp", () => {
 describe("agent-plugins discovery", () => {
 	let tempDir: string;
 	let pluginPath: string;
+	let originalClaudeConfigDir: string | undefined;
 
 	const writeRegistry = async (installPath: string, id = "std-plugin@market") => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
@@ -295,6 +296,9 @@ describe("agent-plugins discovery", () => {
 		clearClaudePluginRootsCache();
 		clearAgentPluginRootCache();
 		clearFsCache();
+		originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+		delete process.env.CLAUDE_CONFIG_DIR;
+		delete Bun.env.CLAUDE_CONFIG_DIR;
 		tempDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "agent-plugins-test-")));
 		pluginPath = path.join(tempDir, "plugins", "std-plugin");
 		await fs.mkdir(pluginPath, { recursive: true });
@@ -306,6 +310,7 @@ describe("agent-plugins discovery", () => {
 		clearAgentPluginRootCache();
 		clearFsCache();
 		vi.restoreAllMocks();
+		restoreEnvValue("CLAUDE_CONFIG_DIR", originalClaudeConfigDir);
 		await removeWithRetries(tempDir);
 	});
 
