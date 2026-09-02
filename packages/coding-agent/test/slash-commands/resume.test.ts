@@ -170,7 +170,7 @@ describe("/resume slash command", () => {
 		expect(harness.handleResumeSession).not.toHaveBeenCalled();
 	});
 
-	it("lists and resumes sessions stored in XDG_DATA_HOME", async () => {
+	it.skipIf(process.platform === "win32")("lists and resumes sessions stored in XDG_DATA_HOME", async () => {
 		const xdgDataDir = path.join(tempDir, "xdg-data");
 		const xdgOmpDir = path.join(xdgDataDir, "omp");
 		await fs.mkdir(xdgOmpDir, { recursive: true });
