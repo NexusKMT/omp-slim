@@ -6,15 +6,7 @@
  */
 import { type } from "@oh-my-pi/omptype";
 import type { FetchImpl, Provider } from "./types";
-export type UsageUnit =
-	| "percent"
-	| "tokens"
-	| "requests"
-	| "credits"
-	| "usd"
-	| "minutes"
-	| "bytes"
-	| "unknown";
+export type UsageUnit = "percent" | "tokens" | "requests" | "credits" | "usd" | "minutes" | "bytes" | "unknown";
 
 export type UsageStatus = "ok" | "warning" | "exhausted" | "unknown";
 
@@ -134,17 +126,11 @@ export interface UsageReport {
 export function resolveUsedFraction(limit: UsageLimit): number | undefined {
 	const amount = limit.amount;
 	if (amount.usedFraction !== undefined) return amount.usedFraction;
-	if (
-		amount.used !== undefined &&
-		amount.limit !== undefined &&
-		amount.limit > 0
-	) {
+	if (amount.used !== undefined && amount.limit !== undefined && amount.limit > 0) {
 		return amount.used / amount.limit;
 	}
-	if (amount.unit === "percent" && amount.used !== undefined)
-		return amount.used / 100;
-	if (amount.remainingFraction !== undefined)
-		return Math.max(0, 1 - amount.remainingFraction);
+	if (amount.unit === "percent" && amount.used !== undefined) return amount.used / 100;
+	if (amount.remainingFraction !== undefined) return Math.max(0, 1 - amount.remainingFraction);
 	return undefined;
 }
 
@@ -257,9 +243,7 @@ export interface ClientUsageSummary {
 export const usageUnitSchema = type(
 	"'percent' | 'tokens' | 'requests' | 'credits' | 'usd' | 'minutes' | 'bytes' | 'unknown'",
 );
-export const usageStatusSchema = type(
-	"'ok' | 'warning' | 'exhausted' | 'unknown'",
-);
+export const usageStatusSchema = type("'ok' | 'warning' | 'exhausted' | 'unknown'");
 
 export const usageWindowSchema = type({
 	id: "string",
@@ -367,15 +351,9 @@ export interface UsageFetchContext {
 /** Provider implementation for fetching usage information. */
 export interface UsageProvider {
 	id: Provider;
-	fetchUsage(
-		params: UsageFetchParams,
-		ctx: UsageFetchContext,
-	): Promise<UsageReport | null>;
+	fetchUsage(params: UsageFetchParams, ctx: UsageFetchContext): Promise<UsageReport | null>;
 	/** Parse provider rate-limit response headers (lowercased keys) into a usage report, if supported. */
-	parseRateLimitHeaders?(
-		headers: Record<string, string>,
-		now?: number,
-	): UsageReport | null;
+	parseRateLimitHeaders?(headers: Record<string, string>, now?: number): UsageReport | null;
 	supports?(params: UsageFetchParams): boolean;
 	/** True when fetchUsage contacts upstream and can authenticate the credential for health checks. */
 	validatesCredentials?: boolean;
@@ -404,10 +382,7 @@ export interface CredentialRankingStrategy {
 	 * credential-wide exhaustion checks and ranking. Providers with shared
 	 * account-wide quotas can omit this and use all limits.
 	 */
-	scopeLimits?(
-		report: UsageReport,
-		context?: CredentialRankingContext,
-	): UsageLimit[];
+	scopeLimits?(report: UsageReport, context?: CredentialRankingContext): UsageLimit[];
 	/**
 	 * Restrict limits for the opt-in, non-destructive usage-reserve health
 	 * check ({@link AuthStorage.getModelUsageHealth}). Distinct from
@@ -417,10 +392,7 @@ export interface CredentialRankingStrategy {
 	 * the mapped quota before it hits the cap. Falls back to {@link scopeLimits}
 	 * when omitted.
 	 */
-	scopeLimitsForReserve?(
-		report: UsageReport,
-		context?: CredentialRankingContext,
-	): UsageLimit[];
+	scopeLimitsForReserve?(report: UsageReport, context?: CredentialRankingContext): UsageLimit[];
 	/**
 	 * Return a provider-local backoff scope for the requested model. Providers
 	 * with backend-specific quotas use this so one exhausted model family does
@@ -445,9 +417,7 @@ export interface CredentialRankingStrategy {
 	 * clock runs out. Scopes not returned expire by clock only. Codex heals
 	 * through its meter metadata instead and omits this.
 	 */
-	healableBlockScopes?(
-		report: UsageReport,
-	): { blockScope: string; limits: UsageLimit[] }[];
+	healableBlockScopes?(report: UsageReport): { blockScope: string; limits: UsageLimit[] }[];
 	/** Fallback window durations (ms) when limits don't specify durationMs. */
 	windowDefaults: {
 		primaryMs: number;

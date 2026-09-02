@@ -6,23 +6,12 @@
  */
 import { describe, expect, it } from "bun:test";
 import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
-import type {
-	UsageFetchContext,
-	UsageFetchParams,
-	UsageLimit,
-} from "@oh-my-pi/pi-ai/usage";
-import {
-	antigravityRankingStrategy,
-	antigravityUsageProvider,
-} from "@oh-my-pi/pi-ai/usage/google-antigravity";
+import type { UsageFetchContext, UsageFetchParams, UsageLimit } from "@oh-my-pi/pi-ai/usage";
+import { antigravityRankingStrategy, antigravityUsageProvider } from "@oh-my-pi/pi-ai/usage/google-antigravity";
 
 const accessTokenFixture = (() => {
-	const header = Buffer.from(
-		JSON.stringify({ alg: "none", typ: "JWT" }),
-	).toString("base64url");
-	const body = Buffer.from(JSON.stringify({ sub: "user-fixture" })).toString(
-		"base64url",
-	);
+	const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
+	const body = Buffer.from(JSON.stringify({ sub: "user-fixture" })).toString("base64url");
 	return `${header}.${body}.sig`;
 })();
 
@@ -214,12 +203,8 @@ describe("antigravity usage provider", () => {
 			makeCtx(fakeFetch(payload)),
 		);
 		expect(report!.limits.length).toBe(2);
-		const googleLimit = report!.limits.find(
-			(limit) => limit.label === "Usage (Google)",
-		);
-		const anthropicLimit = report!.limits.find(
-			(limit) => limit.label === "Usage (Anthropic)",
-		);
+		const googleLimit = report!.limits.find(limit => limit.label === "Usage (Google)");
+		const anthropicLimit = report!.limits.find(limit => limit.label === "Usage (Anthropic)");
 		expect(googleLimit?.amount.remainingFraction).toBe(0);
 		expect(googleLimit?.status).toBe("exhausted");
 		expect(anthropicLimit?.amount.remainingFraction).toBe(1);
@@ -284,12 +269,8 @@ describe("antigravity usage provider", () => {
 			makeCtx(fakeFetch(payload)),
 		);
 
-		const daily = report!.limits.find(
-			(limit) => limit.scope.windowId === "daily",
-		);
-		const weekly = report!.limits.find(
-			(limit) => limit.scope.windowId === "weekly",
-		);
+		const daily = report!.limits.find(limit => limit.scope.windowId === "daily");
+		const weekly = report!.limits.find(limit => limit.scope.windowId === "weekly");
 		expect(report!.limits.length).toBe(2);
 		expect(daily?.label).toBe("Usage (Google)");
 		expect(daily?.window?.label).toBe("Daily");
@@ -354,12 +335,8 @@ describe("antigravity usage provider", () => {
 			makeCtx(fakeFetch(payload)),
 		);
 
-		const daily = report!.limits.find(
-			(limit) => limit.scope.windowId === "daily",
-		);
-		const weekly = report!.limits.find(
-			(limit) => limit.scope.windowId === "weekly",
-		);
+		const daily = report!.limits.find(limit => limit.scope.windowId === "daily");
+		const weekly = report!.limits.find(limit => limit.scope.windowId === "weekly");
 		expect(report!.limits).toHaveLength(2);
 		expect(daily?.window?.label).toBe("Daily");
 		expect(daily?.amount.remainingFraction).toBe(0.9);
@@ -486,12 +463,7 @@ describe("antigravity ranking strategy", () => {
 				used: usedFraction * 100,
 				limit: 100,
 			},
-			status:
-				remainingFraction <= 0
-					? "exhausted"
-					: remainingFraction <= 0.1
-						? "warning"
-						: "ok",
+			status: remainingFraction <= 0 ? "exhausted" : remainingFraction <= 0.1 ? "warning" : "ok",
 		};
 	}
 
@@ -505,14 +477,9 @@ describe("antigravity ranking strategy", () => {
 		const report = {
 			provider: "google-antigravity" as const,
 			fetchedAt: Date.now(),
-			limits: [
-				makeLimit(0.05, "Anthropic"),
-				makeLimit(0.4, "Google"),
-				makeLimit(0.9, "OpenAI"),
-			],
+			limits: [makeLimit(0.05, "Anthropic"), makeLimit(0.4, "Google"), makeLimit(0.9, "OpenAI")],
 		};
-		const { primary, secondary } =
-			antigravityRankingStrategy.findWindowLimits(report);
+		const { primary, secondary } = antigravityRankingStrategy.findWindowLimits(report);
 		expect(primary?.label).toBe("Anthropic");
 		expect(secondary).toBeUndefined();
 	});
@@ -538,8 +505,7 @@ describe("antigravity ranking strategy", () => {
 			limits: [weekly, daily],
 		};
 
-		const { primary, secondary } =
-			antigravityRankingStrategy.findWindowLimits(report);
+		const { primary, secondary } = antigravityRankingStrategy.findWindowLimits(report);
 		expect(primary).toBe(weekly);
 		expect(secondary).toBeUndefined();
 	});
@@ -550,8 +516,7 @@ describe("antigravity ranking strategy", () => {
 			fetchedAt: Date.now(),
 			limits: [],
 		};
-		const { primary, secondary } =
-			antigravityRankingStrategy.findWindowLimits(report);
+		const { primary, secondary } = antigravityRankingStrategy.findWindowLimits(report);
 		expect(primary).toBeUndefined();
 		expect(secondary).toBeUndefined();
 	});
@@ -562,11 +527,7 @@ describe("antigravity ranking strategy", () => {
 		// match the daily quota Antigravity actually applies; if it drifts, two
 		// credentials with identical headroom but different windowIds will be
 		// ranked unfairly.
-		expect(antigravityRankingStrategy.windowDefaults.primaryMs).toBe(
-			24 * 60 * 60 * 1000,
-		);
-		expect(antigravityRankingStrategy.windowDefaults.secondaryMs).toBe(
-			24 * 60 * 60 * 1000,
-		);
+		expect(antigravityRankingStrategy.windowDefaults.primaryMs).toBe(24 * 60 * 60 * 1000);
+		expect(antigravityRankingStrategy.windowDefaults.secondaryMs).toBe(24 * 60 * 60 * 1000);
 	});
 });

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Removed incorrect retry instructions from unsupported model error messages
+
+### Fixed
+
+- Provider errors in the transcript and the pinned error banner now wrap to the terminal width instead of being cut at a fixed column with no way to read the rest; long bodies keep a bounded number of rows and end with the `Ctrl+O to expand` hint.
+
 ## [18.1.3] - 2026-09-02
 
 ### Changed

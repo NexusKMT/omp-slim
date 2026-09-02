@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- GitHub Copilot `HTTP 400 model_not_supported` now fails immediately with GitHub's own response instead of being retried eight times per request, re-run by the turn-level retry, and replaced with a hardcoded "only part of its fleet" message ([#7819](https://github.com/can1357/oh-my-pi/issues/7819)).
+- GitHub Copilot requests and new sign-ins now use the official Copilot CLI identity and OAuth app, restoring access to client-gated models while keeping existing credentials valid
 - Improved account recovery when Google rate limits are lifted before the reported reset time
 - Resolved an issue where unmetered autocomplete models surfaced as exhausted when quota is limited
 
