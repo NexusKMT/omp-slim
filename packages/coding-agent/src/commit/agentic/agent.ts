@@ -71,6 +71,7 @@ export async function runCommitAgentSession(input: CommitAgentInput): Promise<Co
 		toolNames: tools.map(tool => tool.name),
 		restrictToolNames: true,
 		allowRestrictedCustomTools: true,
+		contextFiles: input.contextFiles,
 		disableExtensionDiscovery: true,
 		skills: [],
 		promptTemplates: [],
