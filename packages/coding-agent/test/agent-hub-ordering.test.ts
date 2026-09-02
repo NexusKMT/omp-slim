@@ -218,6 +218,13 @@ describe("Agent hub row ordering", () => {
 			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A"]);
 			vi.advanceTimersByTime(100);
 			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A", "D"]);
+
+			// Reusing an unregistered id creates a new agent generation. It must
+			// append rather than reclaiming the removed generation's old rank.
+			agents.unregister("B", sessionB);
+			agents.register({ id: "B", displayName: "Beta 2", kind: "sub", session: {} as AgentSession });
+			vi.advanceTimersByTime(100);
+			expect(renderedAgentIds(hub)).toEqual(["C", "A", "D", "B"]);
 		} finally {
 			hub?.dispose();
 			vi.useRealTimers();

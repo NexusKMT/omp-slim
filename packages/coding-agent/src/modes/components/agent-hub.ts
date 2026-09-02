@@ -223,9 +223,9 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	#statusCounts: Record<AgentStatus, number> = { running: 0, idle: 0, parked: 0, aborted: 0 };
 	#selectedRow = 0;
 	/** Stable roster order captured on first refresh: keyboard navigation must
-	 *  not jump as agents heartbeat. Existing rows keep their rank while the hub
-	 *  is open; newly appearing agents append at the end. */
-	#rowOrder: Map<string, number> | undefined;
+	 *  not jump as agents heartbeat. Existing agent generations keep their rank
+	 *  while the hub is open; newly appearing generations append at the end. */
+	#rowOrder: Map<AgentRef, number> | undefined;
 	#nextRowOrder = 0;
 	#hoveredRow: number | null = null;
 	/** Per-render screen-line to agent-row map, shared by click and hover routing. */
@@ -529,14 +529,17 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			);
 			if (!this.#loadingPersistedSubagents && ordered.length > 0) {
 				this.#rowOrder = new Map();
-				for (const ref of ordered) this.#rowOrder.set(ref.id, this.#nextRowOrder++);
+				for (const ref of ordered) this.#rowOrder.set(ref, this.#nextRowOrder++);
 			}
 		} else {
+			for (const rankedRef of rowOrder.keys()) {
+				if (!refs.includes(rankedRef)) rowOrder.delete(rankedRef);
+			}
 			ordered = refs.sort(
-				(a, b) => (rowOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rowOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+				(a, b) => (rowOrder.get(a) ?? Number.MAX_SAFE_INTEGER) - (rowOrder.get(b) ?? Number.MAX_SAFE_INTEGER),
 			);
 			for (const ref of ordered) {
-				if (!rowOrder.has(ref.id)) rowOrder.set(ref.id, this.#nextRowOrder++);
+				if (!rowOrder.has(ref)) rowOrder.set(ref, this.#nextRowOrder++);
 			}
 		}
 		const query = this.#agentFilter.trim();
