@@ -329,15 +329,17 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 			: registerPersistedSubagents(this.#registry, deps.sessionFile, {
 					shouldContinue: () => !this.#disposed,
 				})
-					.then(() => {
-						if (!this.#disposed) this.#refreshRows();
-					})
 					.catch((error: unknown) => {
 						logger.warn("Failed to register persisted subagents", { error });
 					})
 					.finally(() => {
+						// Clear the loading flag first so this refresh captures the
+						// full status/recency ranking rather than a partial roster.
 						this.#loadingPersistedSubagents = false;
-						if (!this.#disposed) this.#requestRender();
+						if (!this.#disposed) {
+							this.#refreshRows();
+							this.#requestRender();
+						}
 					});
 		this.#refreshRows();
 	}
@@ -513,6 +515,9 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		// Stable roster order: capture the status+recency ranking once so keyboard
 		// navigation is not disrupted by heartbeats (issue #10524). Existing rows
 		// keep their rank while the hub is open; new agents append at the end.
+		// Defer the capture until persisted-subagent discovery settles so a
+		// mid-scan refresh cannot freeze a partial roster (the remaining agents
+		// would otherwise append in readdir order instead of being ranked).
 		const rowOrder = this.#rowOrder;
 		let ordered: AgentRef[];
 		if (!rowOrder) {
@@ -522,7 +527,7 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 					b.lastActivity - a.lastActivity ||
 					a.id.localeCompare(b.id),
 			);
-			if (ordered.length > 0) {
+			if (!this.#loadingPersistedSubagents && ordered.length > 0) {
 				this.#rowOrder = new Map();
 				for (const ref of ordered) this.#rowOrder.set(ref.id, this.#nextRowOrder++);
 			}
