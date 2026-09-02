@@ -410,10 +410,10 @@ pub(crate) fn ere_repetition_operand_missing(pattern: &str) -> bool {
 			},
 			'(' | '|' => has_atom = false,
 			')' => has_atom = true,
-			// Anchors are not atoms: they leave the operand state alone, so
-			// `^*` has nothing to repeat while `[^x]*` still quantifies the
-			// bracket expression.
-			'^' | '$' => {},
+			// Anchors are not atoms and break adjacency to any earlier atom:
+			// `a^+` repeats the anchor, not `a`. Clear the operand state so
+			// repetition after an anchor is rejected wherever it appears.
+			'^' | '$' => has_atom = false,
 			'*' | '+' | '?' if !has_atom => return true,
 			// A `{` is only a repetition operator when it actually opens an
 			// interval. Measured: `grep -E '^{'` matches nothing and reports

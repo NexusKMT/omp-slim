@@ -1808,10 +1808,13 @@ mod tests {
 		}
 
 		// ERE rejects it outright, as the real grep does, rather than
-		// silently returning every line.
-		let (code, _, err) = run(&["-Ec", "^+"], input);
-		assert_eq!(code, 2, "-E '^+' must be rejected");
-		assert!(err.contains("grep:"), "{err}");
+		// silently accepting a repeated anchor. The anchor breaks adjacency
+		// to an earlier atom too: `a^+` repeats `^`, not `a`.
+		for pattern in ["^+", "a^+", "a$*"] {
+			let (code, _, err) = run(&["-Ec", pattern], input);
+			assert_eq!(code, 2, "-E {pattern:?} must be rejected");
+			assert!(err.contains("grep:"), "{pattern}: {err}");
+		}
 	}
 
 	#[test]
