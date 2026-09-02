@@ -13,6 +13,7 @@
 ### Fixed
 
 - Claude Sonnet 5 no longer advertises unsupported mid-conversation system messages.
+- Custom GLM 5.2 models on `alibaba-coding-plan` (and other blanket-GLM hosts) no longer crash startup with `AmbiguousOverlapError` ([#10553](https://github.com/can1357/oh-my-pi/issues/10553)).
 
 ## [18.1.2] - 2026-09-01
 
