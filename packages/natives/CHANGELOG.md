@@ -2,11 +2,6 @@
 
 ## [Unreleased]
 
-## [18.1.0] - 2026-09-01
-
-### Fixed
-
-- Fixed TTY output backpressure reporting so pending write progress is accurately reflected during large writes.
 ### Breaking Changes
 
 - Renamed `MacOSPowerAssertion` to `PowerAssertion` and `MacOSPowerAssertionOptions` to `PowerAssertionOptions`. The options and handle shape are unchanged.
@@ -19,6 +14,12 @@
 ### Changed
 
 - `PowerAssertion.start` reports acquisition failures on Linux and Windows rather than returning a handle that silently does nothing. Platforms with no implementation still receive a no-op handle.
+
+## [18.1.0] - 2026-09-01
+
+### Fixed
+
+- Fixed TTY output backpressure reporting so pending write progress is accurately reflected during large writes.
 
 ## [18.0.11] - 2026-08-29
 

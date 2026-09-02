@@ -494,17 +494,17 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
-	// macOS power assertions (caffeinate flags). No-op on other platforms.
+	// Power assertions: macOS IOKit, Linux login1/ScreenSaver, Windows execution state.
 	"power.sleepPrevention": {
 		type: "enum",
 		values: ["off", "idle", "display", "system"] as const,
 		default: "idle",
 		ui: {
 			tab: "interaction",
-			group: "Power (macOS)",
+			group: "Power",
 			label: "Sleep Prevention",
 			description:
-				"Prevent macOS sleep during active sessions. Each level is cumulative — it adds the flags of all lower levels.",
+				"Prevent the system sleeping during active sessions. Each level is cumulative — it adds the flags of all lower levels.",
 			options: [
 				{
 					value: "off",
@@ -514,17 +514,18 @@ export const SETTINGS_SCHEMA = {
 				{
 					value: "idle",
 					label: "Prevent Idle Sleep",
-					description: "Keep the system awake while a session is open (caffeinate -i)",
+					description: "Keep the system awake while a session is open (macOS `caffeinate -i`)",
 				},
 				{
 					value: "display",
 					label: "Prevent Display Sleep",
-					description: "Also keep the display from idle-sleeping (caffeinate -i -d)",
+					description: "Also keep the display from idle-sleeping (macOS `caffeinate -i -d`)",
 				},
 				{
 					value: "system",
 					label: "Prevent System Sleep",
-					description: "Also block all system sleep on AC and declare the user active (caffeinate -i -d -s -u)",
+					description:
+						"Also block all system sleep on AC and declare the user active (macOS `caffeinate -i -d -s -u`)",
 				},
 			],
 		},

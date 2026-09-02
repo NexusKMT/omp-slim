@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `power.sleepPrevention` now takes effect on Linux and Windows, where it previously did nothing. Its `idle` default means a long session keeps those hosts awake the way it already did on macOS; set it to `off` to restore the old behavior.
+
 ### Fixed
 
 - Anthropic sessions now keep tool-roster changes and warm-prefix pruning from invalidating preserved thinking or the prompt cache.

@@ -247,9 +247,14 @@ mod platform {
 
 		fn start_login1(what: &str, reason: &str) -> Result<OwnedFd> {
 			let mut system_bus = SYSTEM_BUS.lock();
-			let connection = system_bus.get_or_insert(Connection::system().map_err(|error| {
-				Error::from_reason(format!("Unable to connect to the system bus: {error}"))
-			})?);
+			// Connect only when the cache is empty: `get_or_insert` would open and
+			// drop a fresh connection on every acquisition.
+			let connection = match &mut *system_bus {
+				Some(connection) => connection,
+				slot => slot.insert(Connection::system().map_err(|error| {
+					Error::from_reason(format!("Unable to connect to the system bus: {error}"))
+				})?),
+			};
 			let reply = match connection.call_method(
 				Some(LOGIN1_DESTINATION),
 				LOGIN1_PATH,
@@ -270,9 +275,12 @@ mod platform {
 
 		fn start_screensaver(reason: &str) -> Result<u32> {
 			let mut session_bus = SESSION_BUS.lock();
-			let connection = session_bus.get_or_insert(Connection::session().map_err(|error| {
-				Error::from_reason(format!("Unable to connect to the session bus: {error}"))
-			})?);
+			let connection = match &mut *session_bus {
+				Some(connection) => connection,
+				slot => slot.insert(Connection::session().map_err(|error| {
+					Error::from_reason(format!("Unable to connect to the session bus: {error}"))
+				})?),
+			};
 			let reply = match connection.call_method(
 				Some(SCREENSAVER_DESTINATION),
 				SCREENSAVER_PATH,
@@ -467,6 +475,8 @@ impl PowerAssertion {
 			};
 
 			let _ = user;
+			// ES_CONTINUOUS makes the state persist until the handle clears it.
+			let mut flags = ES_CONTINUOUS;
 			// Windows has no separate system-sleep assertion: `ES_SYSTEM_REQUIRED`
 			// is the strongest available equivalent for both `idle` and `system`.
 			if effective_idle || system {

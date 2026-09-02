@@ -81,7 +81,7 @@ import { resetOpenAICodexHistoryAfterCompaction } from "@oh-my-pi/pi-ai/provider
 import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { PowerAssertion } from "@oh-my-pi/pi-natives";
+import { PowerAssertion, type PowerAssertionOptions } from "@oh-my-pi/pi-natives";
 import {
 	$env,
 	escapeXmlText,
@@ -495,6 +495,21 @@ function cloneMessageEndNotification(message: AgentMessage): AgentMessage {
 const INTERRUPTED_THINKING_MIN_CHARS = 60;
 const SESSION_CWD_CHANGE_REJECTED = Symbol("sessionCwdChangeRejected");
 
+/**
+ * Translate a `power.sleepPrevention` mode into `PowerAssertion.start` options,
+ * or `undefined` when the mode asks for no assertion at all.
+ */
+export function powerAssertionOptions(mode: "off" | "idle" | "display" | "system"): PowerAssertionOptions | undefined {
+	if (mode === "off") return undefined;
+	return {
+		reason: "Oh My Pi agent session",
+		idle: true,
+		display: mode === "display" || mode === "system",
+		system: mode === "system",
+		user: mode === "system",
+	};
+}
+
 export class AgentSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
@@ -765,19 +780,12 @@ export class AgentSession {
 	}
 
 	#acquirePowerAssertion(): void {
-		if (process.platform !== "darwin") return;
 		if (isBunTestRuntime()) return;
 		if (this.#powerAssertion) return;
-		const mode = this.settings.get("power.sleepPrevention");
-		if (mode === "off") return;
+		const options = powerAssertionOptions(this.settings.get("power.sleepPrevention"));
+		if (!options) return;
 		try {
-			this.#powerAssertion = PowerAssertion.start({
-				reason: "Oh My Pi agent session",
-				idle: true,
-				display: mode === "display" || mode === "system",
-				system: mode === "system",
-				user: mode === "system",
-			});
+			this.#powerAssertion = PowerAssertion.start(options);
 		} catch (error) {
 			logger.warn("Failed to acquire power assertion", { error: String(error) });
 		}
