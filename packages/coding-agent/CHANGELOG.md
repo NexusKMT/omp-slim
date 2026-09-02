@@ -142,6 +142,7 @@
 - Fixed `lsp diagnostics` incorrectly reporting success for project-aware pull-diagnostic servers when diagnostics time out or fail.
 - Corrected labels under `Settings > Context > Compaction Token Limit`.
 - Fixed orphaned pages, iframes, and workers accumulating in the shared headless browser after abnormal OMP session termination.
+- Fixed stale `omp-plugins.lock.json` entries loading leftover `node_modules` trees for plugins no longer declared in `package.json` — the orphaned copy double-loaded its extensions. Lockfile-only plugins now load only when they are symlinks (`omp plugin link`, marketplace runtime packages); stale entries are skipped with a warning.
 
 ## [18.0.10] - 2026-08-28
 

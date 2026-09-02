@@ -6,7 +6,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getPluginsDir, getPluginsLockfile, isEnoent } from "@oh-my-pi/pi-utils";
+import { getPluginsDir, getPluginsLockfile, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { getConfigDirPaths } from "../../config";
 import { registerPluginCacheInvalidator, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
 import { installLegacyPiSpecifierShim } from "./legacy-pi-compat";
@@ -110,8 +110,29 @@ async function collectPluginsAtRoot(
 		names.add(name);
 	}
 
+	const isSymlink = async (target: string): Promise<boolean> => {
+		try {
+			return (await fs.promises.lstat(target)).isSymbolicLink();
+		} catch (err) {
+			if (isEnoent(err)) return false;
+			throw err;
+		}
+	};
 	const plugins: ScopedInstalledPlugin[] = [];
 	for (const name of names) {
+		// A lockfile entry without a declared dependency is legitimate only for
+		// linked plugins (`omp plugin link`, marketplace runtime registration),
+		// which are always symlinks into node_modules. A lockfile-only entry
+		// backed by a real directory is a stale leftover — the package was
+		// removed from package.json outside `omp plugin remove`, and loading
+		// whatever tree bun left behind double-loads extensions.
+		if (!depsKeys.includes(name) && !(await isSymlink(path.join(nodeModulesPath, name)))) {
+			logger.warn("plugins: skipping stale lockfile entry not declared in package.json", {
+				name,
+				root,
+			});
+			continue;
+		}
 		const pluginPkgPath = path.join(nodeModulesPath, name, "package.json");
 		let pluginPkg: { version: string; omp?: PluginManifest; pi?: PluginManifest };
 		try {
