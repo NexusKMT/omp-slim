@@ -319,6 +319,7 @@ import {
 	SKILL_PROMPT_MESSAGE_TYPE,
 	sanitizeAssistantForReparentedHistory,
 	USER_INTERRUPT_LABEL,
+	VIBE_MODE_CONTEXT_MESSAGE_TYPE,
 } from "./messages";
 import { ModelControls, type ModelControlsHost } from "./model-controls";
 import { isPrewalkPlanNudge, PrewalkCoordinator, type PrewalkCoordinatorHost } from "./prewalk";
@@ -2572,9 +2573,9 @@ export class AgentSession {
 
 	#persistMessageEnd(message: AgentMessage): void {
 		if (message.role === "hookMessage" || message.role === "custom") {
-			// Prewalk's plan nudge is a one-run steering instruction. Persisting it would
-			// resurrect the consumed prompt on resume, fork, or any context rebuild.
-			if (!isPrewalkPlanNudge(message)) {
+			// One-run instructions must not return from persisted history: prewalk
+			// nudges are consumed once, and Vibe context is rebuilt only while active.
+			if (!isPrewalkPlanNudge(message) && message.customType !== VIBE_MODE_CONTEXT_MESSAGE_TYPE) {
 				this.sessionManager.appendCustomMessageEntry(
 					message.customType,
 					message.content,
@@ -5304,6 +5305,16 @@ export class AgentSession {
 
 	setVibeModeState(state: VibeModeState | undefined): void {
 		this.#vibeModeState = state;
+		if (state?.enabled) return;
+
+		const messages = this.agent.state.messages;
+		const filtered = messages.filter(
+			message => message.role !== "custom" || message.customType !== VIBE_MODE_CONTEXT_MESSAGE_TYPE,
+		);
+		if (filtered.length === messages.length) return;
+		this.agent.replaceMessages(filtered);
+		this.#advisors.resetAllRuntimes("vibe-mode-exit");
+		this.#closeCodexProviderSessionsForHistoryRewrite();
 	}
 
 	#assertVibeSessionTransitionAllowed(action: string): void {
@@ -5618,7 +5629,7 @@ export class AgentSession {
 		if (!this.#vibeModeState?.enabled) return null;
 		return {
 			role: "custom",
-			customType: "vibe-mode-context",
+			customType: VIBE_MODE_CONTEXT_MESSAGE_TYPE,
 			content: prompt.render(vibeModeActivePrompt, {
 				todoAvailable: this.getActiveToolNames().includes("todo"),
 			}),
