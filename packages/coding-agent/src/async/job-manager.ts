@@ -1,4 +1,5 @@
 import { logger } from "@oh-my-pi/pi-utils";
+import type { StructuredSubagentOutput } from "../task/types";
 
 const DELIVERY_RETRY_BASE_MS = 500;
 const DELIVERY_RETRY_MAX_MS = 30_000;
@@ -32,6 +33,26 @@ interface PollEscalationState {
 /** Kind of work a managed job runs; drives job-row badges and delivery labels. */
 export type AsyncJobType = "bash" | "task" | "eval";
 
+/** Settled job-body payload: delivery text plus its parsed structured output. */
+export interface AsyncJobRunResult {
+	text: string;
+	structured?: StructuredSubagentOutput;
+}
+
+/**
+ * Job-body failure that still carries the run's structured output, so a
+ * strict-mode schema violation fails the job without dropping the parsed
+ * (invalid) payload.
+ */
+export class AsyncJobError extends Error {
+	constructor(
+		message: string,
+		readonly structured?: StructuredSubagentOutput,
+	) {
+		super(message);
+	}
+}
+
 export interface AsyncJob {
 	id: string;
 	type: AsyncJobType;
@@ -42,6 +63,13 @@ export interface AsyncJob {
 	promise: Promise<void>;
 	resultText?: string;
 	errorText?: string;
+	/**
+	 * Parsed structured completion for a job whose work selected an output
+	 * schema. Set from the body's {@link AsyncJobRunResult} or from an
+	 * {@link AsyncJobError}. The job row is the carrier — every delivery
+	 * attempt, redelivery, and `hub` snapshot reads it from here.
+	 */
+	structured?: StructuredSubagentOutput;
 	/** Latest tool-render details reported by the running job. */
 	latestDetails?: Record<string, unknown>;
 	/**
@@ -195,7 +223,7 @@ export class AsyncJobManager {
 			reportProgress: (text: string, details?: Record<string, unknown>) => Promise<void>;
 			/** Clear the queued flag once the job actually starts executing. */
 			markRunning: () => void;
-		}) => Promise<string>,
+		}) => Promise<string | AsyncJobRunResult>,
 		options?: AsyncJobRegisterOptions,
 	): string {
 		if (this.#disposed) {
@@ -246,7 +274,7 @@ export class AsyncJobManager {
 		};
 		job.promise = (async () => {
 			try {
-				const text = await run({
+				const outcome = await run({
 					jobId: id,
 					signal: abortController.signal,
 					reportProgress,
@@ -254,6 +282,9 @@ export class AsyncJobManager {
 						job.queued = false;
 					},
 				});
+				const text = typeof outcome === "string" ? outcome : outcome.text;
+				const structured = typeof outcome === "string" ? undefined : outcome.structured;
+				if (structured) job.structured = structured;
 				if (job.status === "cancelled") {
 					job.resultText = text;
 					this.#scheduleEviction(id);
@@ -264,6 +295,7 @@ export class AsyncJobManager {
 				this.#enqueueDelivery(id, text);
 				this.#scheduleEviction(id);
 			} catch (error) {
+				if (error instanceof AsyncJobError && error.structured) job.structured = error.structured;
 				if (job.status === "cancelled") {
 					job.errorText = error instanceof Error ? error.message : String(error);
 					this.#scheduleEviction(id);

@@ -4,6 +4,7 @@
  * Runs each subagent on the main thread and forwards AgentEvents for progress tracking.
  */
 
+import * as fs from "node:fs/promises";
 import path from "node:path";
 import type { AgentEvent, AgentIdentity, AgentMessage, AgentTelemetryConfig } from "@oh-my-pi/pi-agent-core";
 import { EventLoopKeepalive, recordHandoff, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
@@ -2287,6 +2288,33 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 				path: candidatePath,
 				error: error instanceof Error ? error.message : String(error),
 			});
+		}
+		const structured = finalized.structuredOutput;
+		const sidecarPath = path.join(args.artifactsDir, `${id}.json`);
+		if (outputPath && structured?.status === "valid" && Object.hasOwn(structured, "data")) {
+			try {
+				const serialized = JSON.stringify(structured.data, null, 2);
+				if (serialized !== undefined) await writeArtifact(sidecarPath, `${serialized}\n`);
+			} catch (error) {
+				logger.warn("Failed to persist subagent structured output sidecar", {
+					agentId: id,
+					path: sidecarPath,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		} else if (outputPath) {
+			// This turn republished <id>.md; a stale sidecar from an earlier
+			// turn would keep answering agent://<id>/<field> with the
+			// superseded payload, so it must not outlive its <id>.md.
+			try {
+				await fs.rm(sidecarPath, { force: true });
+			} catch (error) {
+				logger.warn("Failed to drop stale subagent structured output sidecar", {
+					agentId: id,
+					path: sidecarPath,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
 		}
 	}
 

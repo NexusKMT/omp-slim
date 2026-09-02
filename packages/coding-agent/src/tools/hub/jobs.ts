@@ -12,7 +12,9 @@ import { settings } from "../../config/settings";
 import type { RenderResultOptions } from "../../extensibility/custom-tools/types";
 import { shimmerEnabled, shimmerText } from "../../modes/theme/shimmer";
 import type { Theme } from "../../modes/theme/theme";
+import { renderStructuredJson } from "../../session/async-job-delivery";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
+import type { StructuredSubagentOutput } from "../../task/types";
 import { Ellipsis, Hasher, type RenderCache, renderStatusLine, renderTreeList, truncateToWidth } from "../../tui";
 import type { ToolSession } from "..";
 import {
@@ -152,6 +154,7 @@ interface TrackedJobLike {
 	latestDetails?: Record<string, unknown>;
 	resultText?: string;
 	errorText?: string;
+	structured?: StructuredSubagentOutput;
 }
 
 export function snapshotJobs(session: ToolSession, jobs: TrackedJobLike[]): JobSnapshot[] {
@@ -190,6 +193,7 @@ export function snapshotJobs(session: ToolSession, jobs: TrackedJobLike[]): JobS
 			...(resolvedModel ? { resolvedModel } : {}),
 			...(!resultConsumed && latest.resultText ? { resultText: latest.resultText } : {}),
 			...(!resultConsumed && latest.errorText ? { errorText: latest.errorText } : {}),
+			...(!resultConsumed && latest.structured ? { structured: latest.structured } : {}),
 		};
 	});
 }
@@ -242,6 +246,10 @@ export function buildJobResult(
 			}
 			if (j.errorText) {
 				lines.push(`Error: ${j.errorText}`);
+			}
+			if (j.structured) {
+				const block = renderStructuredJson(j.structured);
+				if (block) lines.push(`Structured output (schema ${j.structured.status}):`, "```json", block, "```");
 			}
 			lines.push("");
 		}

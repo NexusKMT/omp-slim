@@ -7,6 +7,7 @@
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { AsyncJobType } from "../../async";
 import type { IrcDeliveryReceipt, IrcMessage } from "../../irc/bus";
+import type { StructuredSubagentOutput } from "../../task/types";
 import type { LaunchParams, LaunchToolDetails } from "./launch";
 
 /**
@@ -66,6 +67,7 @@ export interface JobSnapshot {
 	resolvedModel?: string;
 	resultText?: string;
 	errorText?: string;
+	structured?: StructuredSubagentOutput;
 }
 
 export type CancelStatus = "cancelled" | "not_found" | "already_completed";

@@ -11,7 +11,9 @@
 import { prompt } from "@oh-my-pi/pi-utils";
 import type { AsyncJob, AsyncJobType } from "../async";
 import asyncResultTemplate from "../prompts/tools/async-result.md" with { type: "text" };
+import type { StructuredSubagentOutput } from "../task/types";
 import type { CustomMessage } from "./messages";
+import { truncateMiddle } from "./streaming-output";
 
 /**
  * `customType` of the injected async-result follow-up message. The task
@@ -44,27 +46,55 @@ type AsyncResultJobDetails = {
 	type?: AsyncJobType;
 	label?: string;
 	durationMs?: number;
+	schema?: { status: StructuredSubagentOutput["status"]; error?: string };
 };
 
 export type AsyncResultDetails = {
 	jobs: AsyncResultJobDetails[];
 };
 
+/**
+ * Compact, size-capped JSON block for the delivery text, used only for
+ * schema-invalid/error results (valid results point to `agent://<jobId>`
+ * instead, since the sidecar's `<output>` block already carries the full
+ * JSON — no need to duplicate it here).
+ */
+export function renderStructuredJson(structured: StructuredSubagentOutput): string | undefined {
+	if (!Object.hasOwn(structured, "data")) return undefined;
+	let serialized: string;
+	try {
+		serialized = JSON.stringify(structured.data, null, 2) ?? "null";
+	} catch {
+		return undefined;
+	}
+	return truncateMiddle(serialized, { maxBytes: ASYNC_PREVIEW_MAX_CHARS }).content;
+}
+
 export function buildAsyncResultBatchMessage(entries: AsyncResultEntry[]): CustomMessage<AsyncResultDetails> | null {
 	if (entries.length === 0) return null;
-	const jobs = entries.map(entry => ({
-		jobId: entry.jobId,
-		result: entry.result,
-		type: entry.job?.type,
-		label: entry.job?.label,
-		durationMs: entry.durationMs,
-	}));
+	const jobs = entries.map(entry => {
+		const structured = entry.job?.structured;
+		const structuredJson = structured && structured.status !== "valid" ? renderStructuredJson(structured) : undefined;
+		return {
+			jobId: entry.jobId,
+			result: entry.result,
+			type: entry.job?.type,
+			label: entry.job?.label,
+			durationMs: entry.durationMs,
+			structured,
+			structuredJson,
+			schemaStatus: structured?.status,
+			schemaError: structured?.error,
+			schemaValid: structured?.status === "valid",
+		};
+	});
 	const details: AsyncResultDetails = {
 		jobs: jobs.map(job => ({
 			jobId: job.jobId,
 			type: job.type,
 			label: job.label,
 			durationMs: job.durationMs,
+			...(job.structured ? { schema: { status: job.structured.status, error: job.structured.error } } : {}),
 		})),
 	};
 	return {
