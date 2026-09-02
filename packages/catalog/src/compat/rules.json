@@ -4701,7 +4701,7 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:93",
+				"source": "classes/gemini.kdl:94",
 				"class": "gemini",
 				"providers": [
 					"google",
@@ -4719,7 +4719,24 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:99",
+				"source": "classes/gemini.kdl:100",
+				"class": "gemini",
+				"providers": [
+					"google-antigravity",
+					"google-gemini-cli"
+				],
+				"revision": [
+					{
+						"op": ">=",
+						"revision": "3.0.0"
+					}
+				],
+				"wire": {
+					"requiresSkipThoughtSignatureOnFirstFunctionCall": true
+				}
+			},
+			{
+				"source": "classes/gemini.kdl:103",
 				"class": "gemini",
 				"providers": [
 					"google-antigravity",
