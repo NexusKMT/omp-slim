@@ -1,4 +1,4 @@
-import type { Agent } from "@oh-my-pi/pi-agent-core";
+import type { Agent, AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { Settings } from "../config/settings";
 import { IrcBus, type IrcMessage } from "../irc/bus";
@@ -19,15 +19,15 @@ export interface IrcBridgeHost {
 	isStreaming(): boolean;
 	planModeEnabled(): boolean;
 	emitSessionEvent(event: AgentSessionEvent): Promise<void>;
-	wakeForIrc(records: CustomMessage[]): void;
+	wakeForIrc(records: AgentMessage[]): void;
 	runEphemeralTurn(args: { promptText: string }): Promise<{ replyText: string }>;
 }
 
-/** Owns incoming IRC queues, injection, and side-channel auto-replies. */
+/** Owns incoming IRC queues, the session's non-interrupting aside queue, injection, and side-channel auto-replies. */
 export class IrcBridge {
 	readonly #host: IrcBridgeHost;
-	#interrupts: CustomMessage[] = [];
-	#asides: CustomMessage[] = [];
+	#interrupts: AgentMessage[] = [];
+	#asides: AgentMessage[] = [];
 	readonly #autoReplies = new Set<Promise<void>>();
 
 	constructor(host: IrcBridgeHost) {
@@ -52,29 +52,34 @@ export class IrcBridge {
 	}
 
 	/** Takes every queued IRC record in interrupt-before-aside order. */
-	drainPending(): CustomMessage[] {
+	drainPending(): AgentMessage[] {
 		const records = [...this.#interrupts, ...this.#asides];
 		this.#interrupts = [];
 		this.#asides = [];
 		return records;
 	}
 
-	/** Queues records whose idle wake must wait for a session transition to finish. */
-	deferWake(records: CustomMessage[]): void {
+	/** Queues records for the next step-boundary aside injection: IRC wakes deferred by a
+	 *  session transition, and extension `deliverAs: "aside"` sends. */
+	queueAside(records: AgentMessage[]): void {
 		this.#asides.push(...records);
 	}
 
 	/** Surfaces and consumes queued incoming records before automatic injection. */
 	drainInboxMessages(agentId: string, opts?: { from?: string; limit?: number }): IrcMessage[] {
 		const messages: IrcMessage[] = [];
-		const remainingInterrupts: CustomMessage[] = [];
-		const remainingAsides: CustomMessage[] = [];
+		const remainingInterrupts: AgentMessage[] = [];
+		const remainingAsides: AgentMessage[] = [];
 		const queues = [
 			{ records: this.#interrupts, remaining: remainingInterrupts },
 			{ records: this.#asides, remaining: remainingAsides },
 		];
 		for (const queue of queues) {
 			for (const record of queue.records) {
+				if (record.role !== "custom") {
+					queue.remaining.push(record);
+					continue;
+				}
 				if (record.customType !== "irc:incoming") {
 					queue.remaining.push(record);
 					continue;

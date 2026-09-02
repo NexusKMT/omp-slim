@@ -646,7 +646,7 @@ export class AgentSession {
 
 	readonly #irc: IrcBridge;
 	#ircWakeTurnObserver:
-		| ((records: CustomMessage[]) => ((error?: unknown) => void | Promise<void>) | undefined)
+		| ((records: AgentMessage[]) => ((error?: unknown) => void | Promise<void>) | undefined)
 		| undefined;
 	// Agent identity (registry id) used for IRC routing and job ownership.
 	#agentId: string | undefined;
@@ -879,7 +879,33 @@ export class AgentSession {
 		if (this.#planModeState?.enabled) {
 			// Plan mode: fold stranded IRC asides into context without waking an
 			// autonomous turn. Convergence to ask/resolve stays user-driven.
+			this.#foldStrandedIrcAsidesIntoContext(records);
+			return;
+		}
+		if (this.#advisors.autoResumeSuppressed) {
+			// A user interrupt is still in effect (clearQueue({ forInterrupt: true }) already
+			// dropped these same records from the agent-core queues to keep the run the user
+			// stopped from auto-resuming). Only a real peer IRC message justifies waking a fresh
+			// turn here; extension/user asides fold into context like the plan-mode branch above,
+			// staying user-driven until the next deliberate prompt.
+			const wake: AgentMessage[] = [];
+			const fold: AgentMessage[] = [];
 			for (const record of records) {
+				if (record.role === "custom" && record.customType === "irc:incoming") wake.push(record);
+				else fold.push(record);
+			}
+			this.#foldStrandedIrcAsidesIntoContext(fold);
+			if (wake.length > 0) this.#wakeForIrc(wake);
+			return;
+		}
+		this.#wakeForIrc(records);
+	}
+
+	/** Persist stranded IRC/extension asides into context without starting a turn — shared by the
+	 *  plan-mode branch and the post-interrupt fold branch of #resumeStrandedIrcAsides. */
+	#foldStrandedIrcAsidesIntoContext(records: AgentMessage[]): void {
+		for (const record of records) {
+			if (record.role === "custom") {
 				this.agent.appendMessage(record);
 				this.sessionManager.appendCustomMessageEntry(
 					record.customType,
@@ -888,10 +914,13 @@ export class AgentSession {
 					record.details,
 					record.attribution ?? "agent",
 				);
+				continue;
 			}
-			return;
+			// Non-custom asides (extension user-role sends) persist through #persistMessageEnd,
+			// same as IrcBridge.flushPending().
+			this.agent.emitExternalEvent({ type: "message_start", message: record });
+			this.agent.emitExternalEvent({ type: "message_end", message: record });
 		}
-		this.#wakeForIrc(records);
 	}
 
 	/** Fire-and-forget wake turn for incoming IRC — idle delivery and stranded-aside resume both
@@ -901,9 +930,9 @@ export class AgentSession {
 	 *  it, so park the follow-up queue across the wake and restore it after. It stays queued post-wake
 	 *  because #canAutoContinueForFollowUp suppresses follow-up auto-resume while a user interrupt is
 	 *  in effect, even though the wake left a provider-valid tail. */
-	#wakeForIrc(records: CustomMessage[]): void {
+	#wakeForIrc(records: AgentMessage[]): void {
 		if (this.#modeExitDrainSuppressionDepth > 0) {
-			this.#irc.deferWake(records);
+			this.#irc.queueAside(records);
 			return;
 		}
 		// Park only a *blocked* follow-up (one a user interrupt is intentionally holding); an
@@ -5474,7 +5503,7 @@ export class AgentSession {
 	/**
 	 * Inject the plan mode context message into the conversation history.
 	 */
-	async sendPlanModeContext(options?: { deliverAs?: "steer" | "followUp" | "nextTurn" }): Promise<void> {
+	async sendPlanModeContext(options?: { deliverAs?: "steer" | "followUp" | "nextTurn" | "aside" }): Promise<void> {
 		const message = await this.#buildPlanModeMessage();
 		if (!message) return;
 		await this.sendCustomMessage(
@@ -5488,7 +5517,7 @@ export class AgentSession {
 		);
 	}
 
-	async sendGoalModeContext(options?: { deliverAs?: "steer" | "followUp" | "nextTurn" }): Promise<void> {
+	async sendGoalModeContext(options?: { deliverAs?: "steer" | "followUp" | "nextTurn" | "aside" }): Promise<void> {
 		const message = this.#buildGoalModeMessage();
 		if (!message) return;
 		await this.sendCustomMessage(
@@ -5503,7 +5532,7 @@ export class AgentSession {
 		);
 	}
 
-	async sendVibeModeContext(options?: { deliverAs?: "steer" | "followUp" | "nextTurn" }): Promise<void> {
+	async sendVibeModeContext(options?: { deliverAs?: "steer" | "followUp" | "nextTurn" | "aside" }): Promise<void> {
 		const message = this.#buildVibeModeMessage();
 		if (!message) return;
 		await this.sendCustomMessage(
@@ -6563,7 +6592,7 @@ export class AgentSession {
 	async #queueUserMessage(
 		text: string,
 		images: ImageContent[] | undefined,
-		mode: "steer" | "followUp",
+		mode: "steer" | "followUp" | "aside",
 		timestamp?: number,
 		preprocessed?: { images: ImageContent[] | undefined; descriptionNotice: CustomMessage | undefined },
 	): Promise<void> {
@@ -6586,6 +6615,18 @@ export class AgentSession {
 			: normalizedImages?.length
 				? await this.#buildImageDescriptionNotice(normalizedImages)
 				: undefined;
+		if (mode === "aside") {
+			const records: AgentMessage[] = [];
+			if (imageDescriptionNotice) records.push(imageDescriptionNotice);
+			records.push({ role: "user", content, attribution: "user", timestamp: timestamp ?? Date.now() });
+			this.#irc.queueAside(records);
+			// The awaits above (image normalization / vision description) can span the run's
+			// settle, so the run may already be idle by the time the record lands in the aside
+			// queue with no loop left to drain it. Resuming here is a no-op while streaming and
+			// wakes/folds correctly once idle (see #resumeStrandedIrcAsides).
+			this.#resumeStrandedIrcAsides();
+			return;
+		}
 		this.#allowQueuedMessageDrainRetry();
 		if (mode === "followUp") {
 			if (imageDescriptionNotice) this.agent.followUp(imageDescriptionNotice);
@@ -6829,7 +6870,7 @@ export class AgentSession {
 	 * Send a custom message to the session. Creates a CustomMessageEntry.
 	 *
 	 * Handles three cases:
-	 * - Streaming: queue as steer/follow-up or store for next turn
+	 * - Streaming: queue as steer/follow-up, aside (next step boundary), or store for next turn
 	 * - Not streaming + triggerTurn: appends to state/session, starts new turn unless the client cannot own it
 	 * - Not streaming + no trigger: appends to state/session, no turn
 	 *
@@ -6843,14 +6884,15 @@ export class AgentSession {
 		message: CustomMessagePayload<T>,
 		options?: {
 			triggerTurn?: boolean;
-			deliverAs?: "steer" | "followUp" | "nextTurn";
+			deliverAs?: "steer" | "followUp" | "nextTurn" | "aside";
 			queueChipText?: string;
 			acceptTerminalEmptyStop?: boolean;
 		},
 	): Promise<boolean> {
 		const normalizedPayload = normalizeCustomMessagePayload<T>(message);
+		const suppressQueueChip = options?.deliverAs === "nextTurn" || options?.deliverAs === "aside";
 		const details =
-			options?.queueChipText && options.deliverAs !== "nextTurn"
+			options?.queueChipText && !suppressQueueChip
 				? ({
 						...((normalizedPayload.details && typeof normalizedPayload.details === "object"
 							? normalizedPayload.details
@@ -6871,6 +6913,14 @@ export class AgentSession {
 		if (this.isStreaming) {
 			if (options?.deliverAs === "nextTurn") {
 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, options?.triggerTurn ?? false);
+				return false;
+			}
+			if (options?.deliverAs === "aside") {
+				// Non-interrupting: the agent loop's step-boundary poll (see the setAsideMessageProvider
+				// registration in the constructor) picks this up without interrupting the current tool
+				// batch. Not an agent-core queue entry, so no drain-retry latch and no idle-queue drain
+				// scheduling here.
+				this.#irc.queueAside([normalizedAppMessage]);
 				return false;
 			}
 			this.#allowQueuedMessageDrainRetry();
@@ -6906,6 +6956,30 @@ export class AgentSession {
 			return false;
 		}
 
+		if (options?.deliverAs === "aside") {
+			if (this.#planModeState?.enabled) {
+				// Plan mode stays user-driven: fold into context without an autonomous turn,
+				// same as IrcBridge.deliver()/#resumeStrandedIrcAsides do in plan mode.
+				this.agent.appendMessage(normalizedAppMessage);
+				this.sessionManager.appendCustomMessageEntry(
+					normalizedAppMessage.customType,
+					normalizedAppMessage.content,
+					normalizedAppMessage.display,
+					normalizedAppMessage.details,
+					normalizedAppMessage.attribution,
+				);
+				return false;
+			}
+			if (this.#clientBridge?.deferAgentInitiatedTurns && !this.#allowAcpAgentInitiatedTurns) {
+				this.#queueHiddenNextTurnMessage(normalizedAppMessage, false);
+				return false;
+			}
+			await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
+				acceptTerminalEmptyStop: options.acceptTerminalEmptyStop === true,
+			});
+			return true;
+		}
+
 		if (options?.triggerTurn) {
 			if (this.#clientBridge?.deferAgentInitiatedTurns && !this.#allowAcpAgentInitiatedTurns) {
 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, false);
@@ -6930,11 +7004,12 @@ export class AgentSession {
 	 * Send a user message through the prompt flow.
 	 *
 	 * Omitted `deliverAs` starts a turn when idle and queues as a steer while streaming.
-	 * Explicit `deliverAs` queues without starting a turn in either state.
+	 * Explicit `deliverAs` queues without starting a turn in either state; `aside` at
+	 * an idle session instead starts a turn, since there is no live run to inject into.
 	 */
 	async sendUserMessage(
 		content: string | (TextContent | ImageContent)[],
-		options?: { deliverAs?: "steer" | "followUp" },
+		options?: { deliverAs?: "steer" | "followUp" | "aside" },
 	): Promise<void> {
 		// Normalize content to text string + optional images
 		let text: string;
@@ -6956,12 +7031,27 @@ export class AgentSession {
 			if (images.length === 0) images = undefined;
 		}
 
-		if (options?.deliverAs === "followUp") {
+		let deliveredAsAside = false;
+		if (options?.deliverAs === "aside") {
+			if (this.isStreaming) {
+				await this.#queueUserMessage(text, images, "aside");
+				return;
+			}
+			// Idle: fall through to the prompt flow below (starts a turn, like an omitted
+			// deliverAs). Re-checked immediately before the prompt() call in case streaming
+			// starts in the gap — prompt()'s own re-check would otherwise degrade a
+			// non-interrupting aside into a tool-skipping steer.
+			deliveredAsAside = true;
+		} else if (options?.deliverAs === "followUp") {
 			await this.#queueUserMessage(text, images, "followUp");
 			return;
-		}
-		if (options?.deliverAs === "steer") {
+		} else if (options?.deliverAs === "steer") {
 			await this.#queueUserMessage(text, images, "steer");
+			return;
+		}
+
+		if (deliveredAsAside && this.isStreaming) {
+			await this.#queueUserMessage(text, images, "aside");
 			return;
 		}
 
@@ -8245,7 +8335,7 @@ export class AgentSession {
 
 	/** Installs task-executor monitoring around autonomous IRC wake turns. */
 	setIrcWakeTurnObserver(
-		observer: ((records: CustomMessage[]) => ((error?: unknown) => void | Promise<void>) | undefined) | undefined,
+		observer: ((records: AgentMessage[]) => ((error?: unknown) => void | Promise<void>) | undefined) | undefined,
 	): void {
 		this.#ircWakeTurnObserver = observer;
 	}

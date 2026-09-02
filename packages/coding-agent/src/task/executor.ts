@@ -2384,6 +2384,16 @@ export interface IrcWakeTurnMonitorOptions {
  * subagents are not blind spots. The observer runs after the session has
  * flushed its post-prompt settle (see {@link AgentSession.setIrcWakeTurnObserver}).
  */
+/** Extracts display text from an IRC/aside record's content, shared by the custom-role and
+ *  user-role branches below (both fields share the same string | text-part-array shape). */
+function extractIrcRecordText(content: string | ReadonlyArray<{ type: string; text?: string }>): string {
+	if (typeof content === "string") return content;
+	return content
+		.filter(part => part.type === "text")
+		.map(part => part.text ?? "")
+		.join("\n");
+}
+
 export function attachIrcWakeTurnMonitor(session: AgentSession, options: IrcWakeTurnMonitorOptions): void {
 	const { id, agent } = options;
 	const index = options.index ?? 0;
@@ -2392,11 +2402,16 @@ export function attachIrcWakeTurnMonitor(session: AgentSession, options: IrcWake
 		const ircTask =
 			records
 				.map(record => {
-					const body =
-						record.details && typeof record.details === "object"
-							? Reflect.get(record.details, "message")
-							: undefined;
-					return typeof body === "string" ? body : record.content;
+					if (record.role === "custom") {
+						const body =
+							record.details && typeof record.details === "object"
+								? Reflect.get(record.details, "message")
+								: undefined;
+						if (typeof body === "string") return body;
+						return extractIrcRecordText(record.content);
+					}
+					if (record.role === "user") return extractIrcRecordText(record.content);
+					return "";
 				})
 				.filter(Boolean)
 				.join("\n\n") || "IRC follow-up";

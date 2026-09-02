@@ -31,6 +31,9 @@
 ### Removed
 
 - Removed the bundled `designer` subagent and `designer` model role; `modelRoles.designer` and `@designer` are no longer built in.
+### Added
+
+- Extensions can deliver messages without interrupting the agent: `pi.sendMessage`/`pi.sendUserMessage` now accept `deliverAs: "aside"`, which injects at the next step boundary instead of interrupting the current tool batch.
 
 ## [18.1.3] - 2026-09-02
 
