@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.4] - 2026-09-02
+
 ### Changed
 
 - Enabled Cursor tool schema projection for supported models
