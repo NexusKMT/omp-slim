@@ -762,6 +762,7 @@ export class AgentSession {
 
 	#resetPromptMaintenanceState(): void {
 		this.#recovery.resetForNewPrompt();
+		this.#maintenance.resetForNewPrompt();
 		this.#yieldTerminationPending = false;
 	}
 
