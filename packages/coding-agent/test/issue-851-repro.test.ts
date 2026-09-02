@@ -7,6 +7,7 @@ import { clearCache as clearFsCache } from "@oh-my-pi/pi-coding-agent/capability
 import { clearClaudePluginRootsCache } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
 import { restoreEnvValue } from "./helpers/settings-test-state";
+import "@oh-my-pi/pi-coding-agent/discovery/claude-plugins";
 import type { MCPServer } from "@oh-my-pi/pi-coding-agent/capability/mcp";
 
 describe("issue-851: claude-plugins loads flat .mcp.json shape", () => {

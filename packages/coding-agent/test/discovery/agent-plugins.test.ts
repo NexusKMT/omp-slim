@@ -18,6 +18,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
 import { getPluginsDir, removeWithRetries } from "@oh-my-pi/pi-utils";
 import { restoreEnvValue } from "../helpers/settings-test-state";
+import "@oh-my-pi/pi-coding-agent/discovery/agent-plugins";
 import "@oh-my-pi/pi-coding-agent/discovery/claude-plugins";
 import type { MCPServer } from "@oh-my-pi/pi-coding-agent/capability/mcp";
 import type { Skill } from "@oh-my-pi/pi-coding-agent/capability/skill";

@@ -2379,9 +2379,12 @@ describe("lsp regressions", () => {
 			expect(config.servers["csharp-ls"]?.rootMarkers).toEqual(["."]);
 			expect(whichSpy).toHaveBeenCalledWith("csharp-ls");
 		} finally {
-			restoreEnvValue("CLAUDE_CONFIG_DIR", originalClaudeConfigDir);
-			await preloadPluginRoots(path.join(tempDir.path(), "empty-home"), cwd);
-			tempDir.removeSync();
+			try {
+				await preloadPluginRoots(path.join(tempDir.path(), "empty-home"), cwd);
+			} finally {
+				restoreEnvValue("CLAUDE_CONFIG_DIR", originalClaudeConfigDir);
+				tempDir.removeSync();
+			}
 		}
 	});
 	it("rename_file applies LSP willRenameFiles edits and renames the file", async () => {
