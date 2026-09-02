@@ -11,6 +11,7 @@ import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { CompactionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { INCOMPLETE_RECOVERY_MAX_RETRIES } from "@oh-my-pi/pi-coding-agent/session/session-maintenance";
 
 it("clamps a reserve exceeding the window for small-window threshold recovery bands", () => {
 	const settings = {
@@ -933,6 +934,74 @@ describe("AgentSession auto-compaction progress guard", () => {
 					role: "assistant",
 					stopReason: "length",
 				}),
+			}),
+		);
+	});
+
+	it("caps repeated empty length-stop recovery instead of looping forever", async () => {
+		// #10594: a model (zai/glm-4.5-flash) kept returning an empty zero-token
+		// `length` turn. Handoff generation produced no document, so recovery fell
+		// to shake-retry, which re-entered the same empty turn ~once/second for 20
+		// minutes and persisted hundreds of empty assistant turns until manual abort.
+		session.settings.set("compaction.methodOrder", ["shake"]);
+		session.settings.set("compaction.enabled", true);
+		session.settings.set("compaction.keepRecentTokens", 1);
+		session.settings.set("contextPromotion.enabled", false);
+		compactHookEnabled = false;
+		// Shake schedules a `shake-retry` continuation each pass (nothing to reclaim,
+		// but the incomplete turn is not over threshold), re-entering Case 3 on the
+		// next empty length turn — the loop the report hit. Without a cap it never
+		// terminates.
+		vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined as never);
+		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
+
+		const errorNotices: string[] = [];
+		session.subscribe(event => {
+			if (event.type === "notice" && event.level === "error") errorNotices.push(event.message);
+		});
+
+		const emptyLengthStop = (offset: number): AssistantMessage => ({
+			role: "assistant",
+			content: [],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet-4-5",
+			stopReason: "length",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now() + offset,
+		});
+
+		// Drive the shake-retry loop: each retry produces another empty length turn.
+		// Stop the moment recovery declines to schedule a continuation — that is the
+		// point where a real session would yield instead of re-prompting the model.
+		let attempts = 0;
+		for (let i = 0; i < 20; i++) {
+			const before = continueSpy.mock.calls.length;
+			const msg = emptyLengthStop(i);
+			sessionManager.appendMessage(msg);
+			session.agent.emitExternalEvent({ type: "message_end", message: msg });
+			session.agent.emitExternalEvent({ type: "agent_end", messages: [msg] });
+			await session.waitForIdle();
+			attempts++;
+			if (continueSpy.mock.calls.length === before) break;
+		}
+
+		// Bounded: one blocked attempt past the retry cap, not an unbounded loop.
+		expect(attempts).toBe(INCOMPLETE_RECOVERY_MAX_RETRIES + 1);
+		expect(continueSpy).toHaveBeenCalledTimes(INCOMPLETE_RECOVERY_MAX_RETRIES);
+		expect(errorNotices.some(message => /length/i.test(message))).toBe(true);
+		// The pathological empty turn must not be left persisted on the branch.
+		expect(sessionManager.getBranch()).not.toContainEqual(
+			expect.objectContaining({
+				type: "message",
+				message: expect.objectContaining({ role: "assistant", stopReason: "length" }),
 			}),
 		);
 	});
