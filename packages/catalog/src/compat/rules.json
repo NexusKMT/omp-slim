@@ -4592,13 +4592,13 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:24",
+				"source": "classes/gemini.kdl:20",
 				"class": "gemini",
 				"family": "flash",
 				"revision": [
 					{
-						"op": "<",
-						"revision": "3.7.0"
+						"op": ">=",
+						"revision": "0.0.0"
 					}
 				],
 				"thinking": {
@@ -4611,48 +4611,7 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:27",
-				"class": "gemini",
-				"family": "flash",
-				"revision": [
-					{
-						"op": ">=",
-						"revision": "3.7.0"
-					},
-					{
-						"op": "<",
-						"revision": "3.8.0"
-					}
-				],
-				"thinking": {
-					"efforts": [
-						"low",
-						"medium",
-						"high"
-					]
-				}
-			},
-			{
-				"source": "classes/gemini.kdl:30",
-				"class": "gemini",
-				"family": "flash",
-				"revision": [
-					{
-						"op": ">=",
-						"revision": "3.8.0"
-					}
-				],
-				"thinking": {
-					"efforts": [
-						"minimal",
-						"low",
-						"medium",
-						"high"
-					]
-				}
-			},
-			{
-				"source": "classes/gemini.kdl:35",
+				"source": "classes/gemini.kdl:25",
 				"class": "gemini",
 				"family": "lite",
 				"revision": [
@@ -4671,7 +4630,7 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:43",
+				"source": "classes/gemini.kdl:33",
 				"class": "gemini",
 				"providers": [
 					"google",
@@ -4701,7 +4660,7 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:55",
+				"source": "classes/gemini.kdl:45",
 				"class": "gemini",
 				"providers": [
 					"google",
@@ -4731,7 +4690,7 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:67",
+				"source": "classes/gemini.kdl:57",
 				"class": "gemini",
 				"providers": [
 					"google",
@@ -4761,7 +4720,34 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:81",
+				"source": "classes/gemini.kdl:79",
+				"class": "gemini",
+				"providers": [
+					"google",
+					"google-vertex",
+					"opencode-zen"
+				],
+				"family": "flash",
+				"revision": [
+					{
+						"op": ">=",
+						"revision": "3.7.0"
+					},
+					{
+						"op": "<",
+						"revision": "3.8.0"
+					}
+				],
+				"thinking": {
+					"efforts": [
+						"low",
+						"medium",
+						"high"
+					]
+				}
+			},
+			{
+				"source": "classes/gemini.kdl:86",
 				"class": "gemini",
 				"revision": [
 					{
@@ -4778,7 +4764,7 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:89",
+				"source": "classes/gemini.kdl:94",
 				"class": "gemini",
 				"providers": [
 					"google",
@@ -4795,7 +4781,7 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:94",
+				"source": "classes/gemini.kdl:99",
 				"class": "gemini",
 				"providers": [
 					"google-antigravity",

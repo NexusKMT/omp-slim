@@ -13,7 +13,7 @@
 ### Fixed
 
 - Claude Sonnet 5 no longer advertises unsupported mid-conversation system messages.
-- Gemini 3.7 Flash no longer offers the `minimal` thinking effort on direct google-level hosts (`google`, `google-vertex`, `opencode-zen`) and OpenAI-compat Google resellers, which the API rejects with `THINKING_LEVEL_MINIMAL is unsupported` ([#10543](https://github.com/can1357/oh-my-pi/issues/10543)).
+- Gemini 3.7 Flash no longer offers the `minimal` thinking effort on direct google-level hosts (`google`, `google-vertex`, `opencode-zen`), which reject `thinkingLevel: MINIMAL` with a 400; budget and reasoning-effort resellers keep the tier ([#10543](https://github.com/can1357/oh-my-pi/issues/10543)).
 
 ## [18.1.2] - 2026-09-01
 
