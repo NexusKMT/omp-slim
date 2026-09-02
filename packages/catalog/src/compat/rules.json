@@ -14149,6 +14149,20 @@
 				"default": "openai-completions"
 			},
 			{
+				"provider": "zai",
+				"routes": [
+					{
+						"api": "openai-completions",
+						"match": {
+							"exact": [
+								"glm-5.3-flash"
+							]
+						}
+					}
+				],
+				"default": "anthropic-messages"
+			},
+			{
 				"provider": "opencode-zen",
 				"routes": [
 					{

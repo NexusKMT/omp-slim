@@ -32,15 +32,15 @@ describe("zai bundled catalog", () => {
 		const model = zaiModels["glm-5.3-flash"];
 
 		expect(model).toBeDefined();
-		expect(model.api).toBe("anthropic-messages");
-		expect(model.baseUrl).toBe("https://api.z.ai/api/anthropic");
+		expect(model.api).toBe("openai-completions");
+		expect(model.baseUrl).toBe("https://api.z.ai/api/paas/v4");
 		expect(model.contextWindow).toBe(1_000_000);
 		expect(model.maxTokens).toBe(131_072);
 		// Keep the permanent catalog on list price; the 50%-off launch
 		// promotion expires on 2026-09-09.
 		expect(model.cost).toEqual({ input: 0.15, output: 0.5, cacheRead: 0.03, cacheWrite: 0 });
-		// Natively multimodal: the id carries no `v` marker, but the Anthropic
-		// endpoint accepts image blocks.
+		// Natively multimodal: the id carries no `v` marker, but the native
+		// OpenAI-compatible endpoint accepts image input.
 		expect(model.input).toEqual(["text", "image"]);
 		expect(model.reasoning).toBe(true);
 		// Thinking cannot be disabled and defaults to `max`.
