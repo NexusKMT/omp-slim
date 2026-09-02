@@ -4354,64 +4354,52 @@ export function coreWeaveModelManagerOptions(
 
 const META_MODEL_API_BASE_URL = "https://api.meta.ai/v1";
 const META_MUSE_SPARK_COST = { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 } as const;
+// Contributor SKUs (`-contributor`): same model, discounted because prompts
+// are used for training.
+const META_MUSE_SPARK_CONTRIBUTOR_COST = { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 } as const;
 const META_MUSE_SPARK_THINKING: ThinkingConfig = {
 	mode: "effort",
 	efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
 };
 
+function museSparkSpec(revision: string, tier: "standard" | "contributor"): ModelSpec<"openai-responses"> {
+	const contributor = tier === "contributor";
+	return {
+		id: contributor ? `muse-spark-${revision}-contributor` : `muse-spark-${revision}`,
+		name: contributor ? `Muse Spark ${revision} (C)` : `Muse Spark ${revision}`,
+		api: "openai-responses",
+		provider: "meta",
+		baseUrl: META_MODEL_API_BASE_URL,
+		reasoning: true,
+		input: ["text", "image"],
+		cost: contributor ? META_MUSE_SPARK_CONTRIBUTOR_COST : META_MUSE_SPARK_COST,
+		contextWindow: 1_048_576,
+		maxTokens: 131_072,
+		thinking: META_MUSE_SPARK_THINKING,
+		compat: {
+			supportsReasoningEffort: true,
+			includeEncryptedReasoning: true,
+		},
+	};
+}
+
+/**
+ * Muse Spark revisions served by Meta's first-party Responses API. Meta's
+ * `/v1/models` lists bare ids with no capability metadata, so every revision
+ * must be seeded here or discovery yields a text-only, non-reasoning model
+ * with an unknown context window.
+ */
 export const META_MUSE_STATIC_MODELS: readonly ModelSpec<"openai-responses">[] = [
-	{
-		id: "muse-spark-1.1",
-		name: "Muse Spark 1.1",
-		api: "openai-responses",
-		provider: "meta",
-		baseUrl: META_MODEL_API_BASE_URL,
-		reasoning: true,
-		input: ["text", "image"],
-		cost: META_MUSE_SPARK_COST,
-		contextWindow: 1_048_576,
-		maxTokens: 131_072,
-		thinking: META_MUSE_SPARK_THINKING,
-		compat: {
-			supportsReasoningEffort: true,
-			includeEncryptedReasoning: true,
-		},
-	},
-	{
-		id: "muse-spark-1.2",
-		name: "Muse Spark 1.2",
-		api: "openai-responses",
-		provider: "meta",
-		baseUrl: META_MODEL_API_BASE_URL,
-		reasoning: true,
-		input: ["text", "image"],
-		cost: META_MUSE_SPARK_COST,
-		contextWindow: 1_048_576,
-		maxTokens: 131_072,
-		thinking: META_MUSE_SPARK_THINKING,
-		compat: {
-			supportsReasoningEffort: true,
-			includeEncryptedReasoning: true,
-		},
-	},
-	{
-		id: "muse-spark-1.2-contributor",
-		name: "Muse Spark 1.2 Contributor (Data Used for Training)",
-		api: "openai-responses",
-		provider: "meta",
-		baseUrl: META_MODEL_API_BASE_URL,
-		reasoning: true,
-		input: ["text", "image"],
-		cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
-		contextWindow: 1_048_576,
-		maxTokens: 131_072,
-		thinking: META_MUSE_SPARK_THINKING,
-		compat: {
-			supportsReasoningEffort: true,
-			includeEncryptedReasoning: true,
-		},
-	},
+	museSparkSpec("1.1", "standard"),
+	museSparkSpec("1.2", "standard"),
+	museSparkSpec("1.2", "contributor"),
+	museSparkSpec("1.3", "standard"),
+	museSparkSpec("1.3", "contributor"),
 ];
+
+const META_MUSE_MODEL_BY_ID: Partial<Record<string, ModelSpec<"openai-responses">>> = Object.fromEntries(
+	META_MUSE_STATIC_MODELS.map(model => [model.id, model]),
+);
 
 // ---------------------------------------------------------------------------
 // 15.76 Amazon Bedrock Mantle
@@ -4547,7 +4535,10 @@ export function metaModelManagerOptions(config?: MetaModelManagerConfig): ModelM
 			defaultBaseUrl: META_MODEL_API_BASE_URL,
 			config,
 			requireApiKey: true,
-			mapModel: mapWithBundledReference,
+			filterModel: (_entry, model) => !isExcludedModel("meta", model.id),
+			// The seed backs ids the bundle has not been regenerated with yet.
+			mapModel: (entry, defaults, reference) =>
+				mapWithBundledReference(entry, defaults, reference ?? META_MUSE_MODEL_BY_ID[defaults.id]),
 		}),
 		staticModels: META_MUSE_STATIC_MODELS,
 	};

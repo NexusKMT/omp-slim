@@ -124,6 +124,9 @@ behavior {
 	// SuperGrok's roster interleaves media models the chat picker cannot
 	// serve; the dedicated tool surfaces route them instead.
 	exclude-models provider="xai-oauth" prefix="grok-imagine-" prefix="grok-stt-" prefix="grok-voice-"
+	// Meta's /v1/models lists image generation and transcription SKUs beside
+	// the Muse Spark chat models.
+	exclude-models provider="meta" prefix="muse-image-" prefix="muse-voice-"
 	// NanoGPT's roster interleaves non-text SKUs by name token.
 	exclude-models provider="nanogpt" substring="embedding" substring="image" substring="vision" \
 		substring="audio" substring="speech" substring="transcribe" substring="moderation" \
@@ -175,8 +178,8 @@ behavior {
 	// responses pins are gateway-verified (deepseek-v4-flash 2026-08-08;
 	// muse-spark per opencode.ai/docs/go/#endpoints, #8957, #10610).
 	api-routes provider="opencode-go" {
-		route "openai-responses" exact="deepseek-v4-flash" exact="muse-spark-1.2" \
-			exact="muse-spark-1.2-contributor" exact="muse-spark-1.3-contributor"
+		route "openai-responses" exact="deepseek-v4-flash" exact="muse-spark-1.2" exact="muse-spark-1.2-contributor" \
+			exact="muse-spark-1.3" exact="muse-spark-1.3-contributor"
 		route "openai-completions" exact="minimax-m2.7" exact="minimax-m3" exact="minimax-m3-free" \
 			exact="qwen3.5-plus" exact="qwen3.6-plus"
 	}

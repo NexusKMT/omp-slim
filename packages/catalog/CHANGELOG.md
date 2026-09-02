@@ -4,20 +4,22 @@
 
 ### Added
 
+- Added GLM 5.3 Promo 50 model
 - Added support for computer-use capabilities in model configurations
 
 ### Changed
 
+- Gemini 3.8 Flash now supports reasoning modes and image inputs
 - Updated GitHub Copilot API version to 2026-08-01
 - Reduced input cost for minimax/minimax-m2 model
+- Meta Model API contributor SKUs are named `Muse Spark 1.x (C)`.
 
 ### Fixed
 
 - GitHub Copilot discovery now uses the Copilot CLI identity so account-eligible enterprise and experimental models are returned
 - Discovered Bedrock-style `mistral.mixtral-*` models no longer abort startup with an ambiguous family classification ([#10598](https://github.com/can1357/oh-my-pi/issues/10598)).
-### Fixed
-
 - `opencode-go/muse-spark-1.3-contributor` and `opencode-zen/muse-spark-1.3-contributor-free` now route over the Responses API like their 1.2 siblings, instead of 500ing on every request because they fell through to chat completions ([#10610](https://github.com/can1357/oh-my-pi/issues/10610)).
+- `meta/muse-spark-1.3` and `meta/muse-spark-1.3-contributor` now carry their 1M context window, thinking levels, image input, and pricing instead of surfacing as a text-only model with an unknown context window and "Current model does not support thinking"; Meta's roster no longer lists the `muse-image-*` / `muse-voice-*` media SKUs as chat models.
 
 ## [18.1.4] - 2026-09-02
 
