@@ -9,6 +9,7 @@
 ### Fixed
 
 - Provider errors in the transcript and the pinned error banner now wrap to the terminal width instead of being cut at a fixed column with no way to read the rest; long bodies keep a bounded number of rows and end with the `Ctrl+O to expand` hint.
+- Gemini `MALFORMED_FUNCTION_CALL` turns where the model wrote the call as text (`call:default_api:read{…}`) no longer stop on a pinned error: the session keeps the turn, tells the model the call was rejected, and continues (bounded to three attempts per prompt).
 
 ## [18.1.3] - 2026-09-02
 
