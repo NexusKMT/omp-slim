@@ -13,6 +13,7 @@ import { resolveConfigValue } from "../config/resolve-config-value";
 import type { CustomTool } from "../extensibility/custom-tools/types";
 import type { AuthStorage } from "../session/auth-storage";
 import {
+	MCPConnectionTimeoutError,
 	connectToServer,
 	disconnectServer,
 	getPrompt,
@@ -601,7 +602,7 @@ export class MCPManager {
 					// network interruption).
 					connection.transport.onClose = () => {
 						logger.debug("MCP transport lost, triggering reconnect", { path: `mcp:${name}` });
-						this.#emitConnectionStatus({ type: "connecting", serverNames: [name] });
+						this.#emitConnectionStatus({ type: "reconnecting", serverName: name });
 						void this.reconnectServer(name);
 					};
 
@@ -655,8 +656,22 @@ export class MCPManager {
 					this.#pendingToolLoads.delete(name);
 					const message = error instanceof Error ? error.message : String(error);
 					notify(createMcpStartupFailure(name, message, sources[name]));
-					if (!allowBackgroundLogging || reportedErrors.has(name)) return;
-					logger.error("MCP tool load failed", { path: `mcp:${name}`, error: message });
+					if (allowBackgroundLogging && !reportedErrors.has(name)) {
+						logger.error("MCP tool load failed", { path: `mcp:${name}`, error: message });
+					}
+					if (error instanceof MCPConnectionTimeoutError) {
+						notify({ type: "reconnecting", serverName: name });
+						const stopForwarding = onStatus
+							? this.addConnectionStatusListener(event => {
+									if ((event.type === "connected" || event.type === "failed") && event.serverName === name) {
+										onStatus(event);
+									}
+								})
+							: undefined;
+						const retry = this.reconnectServer(name);
+						if (stopForwarding) void retry.then(stopForwarding, stopForwarding);
+						else void retry;
+					}
 				});
 		}
 
@@ -1226,7 +1241,7 @@ export class MCPManager {
 		}
 		connection.transport.onClose = () => {
 			logger.debug("MCP transport lost, triggering reconnect", { path: `mcp:${name}` });
-			this.#emitConnectionStatus({ type: "connecting", serverNames: [name] });
+			this.#emitConnectionStatus({ type: "reconnecting", serverName: name });
 			void this.reconnectServer(name);
 		};
 		try {
