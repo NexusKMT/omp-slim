@@ -7459,7 +7459,18 @@
 				}
 			},
 			{
-				"source": "providers/cursor.kdl:9",
+				"source": "providers/cursor.kdl:6",
+				"class": "anthropic",
+				"providers": [
+					"cursor"
+				],
+				"family": "fable",
+				"catalog": {
+					"requiresCursorToolSchemaProjection": true
+				}
+			},
+			{
+				"source": "providers/cursor.kdl:14",
 				"class": "kimi",
 				"providers": [
 					"cursor"
@@ -7474,7 +7485,7 @@
 				}
 			},
 			{
-				"source": "providers/cursor.kdl:14",
+				"source": "providers/cursor.kdl:19",
 				"providers": [
 					"cursor"
 				],
@@ -7497,7 +7508,7 @@
 				}
 			},
 			{
-				"source": "providers/cursor.kdl:20",
+				"source": "providers/cursor.kdl:25",
 				"providers": [
 					"cursor"
 				],
@@ -7531,7 +7542,7 @@
 				}
 			},
 			{
-				"source": "providers/cursor.kdl:23",
+				"source": "providers/cursor.kdl:28",
 				"providers": [
 					"cursor"
 				],
@@ -7565,7 +7576,7 @@
 				}
 			},
 			{
-				"source": "providers/cursor.kdl:27",
+				"source": "providers/cursor.kdl:32",
 				"providers": [
 					"cursor"
 				],
@@ -7583,7 +7594,7 @@
 				}
 			},
 			{
-				"source": "providers/cursor.kdl:31",
+				"source": "providers/cursor.kdl:36",
 				"providers": [
 					"cursor"
 				],
@@ -7616,7 +7627,7 @@
 				}
 			},
 			{
-				"source": "providers/cursor.kdl:35",
+				"source": "providers/cursor.kdl:40",
 				"providers": [
 					"cursor"
 				],
@@ -7656,7 +7667,7 @@
 				}
 			},
 			{
-				"source": "providers/cursor.kdl:40",
+				"source": "providers/cursor.kdl:45",
 				"providers": [
 					"cursor"
 				],
@@ -7675,7 +7686,7 @@
 				}
 			},
 			{
-				"source": "providers/cursor.kdl:44",
+				"source": "providers/cursor.kdl:49",
 				"providers": [
 					"cursor"
 				],

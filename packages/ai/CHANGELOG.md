@@ -39,7 +39,7 @@
 ### Fixed
 
 - Fixed OpenAI remote-compaction replay for persisted sessions, allowing sessions with previously stored compaction items to resume successfully.
-- Fixed Cursor Fable requests failing when advertised tools used JSON Schema composition keywords.
+- Fixed Cursor tool-schema composition failures by projecting unsupported keywords only for confirmed Fable models; Grok and other Cursor models retain canonical schemas.
 - Fixed Z.AI (GLM Coding Plan) browser sign-in by using the registered CLI callback address.
 - Fixed OpenAI Codex/Responses tool results being lost when composite call identifiers could not be paired with the corresponding assistant call.
 - Fixed native OpenAI Responses history replay becoming stuck on malformed or truncated function-call arguments; invalid history items are now discarded so the session can recover.
