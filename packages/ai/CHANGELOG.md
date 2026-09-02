@@ -8,6 +8,7 @@
 - GitHub Copilot requests and new sign-ins now use the official Copilot CLI identity and OAuth app, restoring access to client-gated models while keeping existing credentials valid
 - Improved account recovery when Google rate limits are lifted before the reported reset time
 - Resolved an issue where unmetered autocomplete models surfaced as exhausted when quota is limited
+- Fixed Gemini 3 cross-model sessions on Cloud Code Assist failing with `400 INVALID_ARGUMENT` when the first replayed tool call has no thought signature ([#10602](https://github.com/can1357/oh-my-pi/issues/10602)).
 
 ## [18.1.3] - 2026-09-02
 
