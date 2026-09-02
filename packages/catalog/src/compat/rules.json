@@ -4747,7 +4747,7 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:86",
+				"source": "classes/gemini.kdl:85",
 				"class": "gemini",
 				"revision": [
 					{
@@ -4756,15 +4756,14 @@
 					}
 				],
 				"wire": {
-					"multimodalFunctionResponse": true,
-					"requiresSkipThoughtSignature": true
+					"multimodalFunctionResponse": true
 				},
 				"thinking": {
 					"requiresEffort": true
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:94",
+				"source": "classes/gemini.kdl:93",
 				"class": "gemini",
 				"providers": [
 					"google",
@@ -4777,6 +4776,7 @@
 					}
 				],
 				"wire": {
+					"requiresSkipThoughtSignature": true,
 					"supportsFunctionPartId": true
 				}
 			},

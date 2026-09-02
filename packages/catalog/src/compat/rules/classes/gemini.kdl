@@ -82,16 +82,16 @@ class "gemini" {
 		}
 	}
 
-	// Gemini 3 tool calls require the sentinel signature on unsigned replay.
 	revision ">=3" {
 		// Replaces the Google multimodal function-response baseline.
 		multimodal-function-response #true
-		requires-skip-thought-signature #true
 		// Replaces the Gemini 3+ mandatory-reasoning fallback.
 		thinking-requires-effort #true
 	}
+	// Only public-Gemini-compatible transports accept the bypass sentinel for unsigned calls.
 	on "google" "opencode-zen" {
 		revision ">=3" {
+			requires-skip-thought-signature #true
 			supports-function-part-id #true
 		}
 	}
