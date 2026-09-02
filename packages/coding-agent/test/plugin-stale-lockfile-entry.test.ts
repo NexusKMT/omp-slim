@@ -80,3 +80,28 @@ test("stale lockfile-only directory plugin is skipped while declared and linked 
 
 	expect(names).toEqual(["declared-plugin", "linked-plugin"]);
 });
+
+test("manifest-less project roots retain lockfile-only directory plugins", async () => {
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-project-plugin-"));
+	tempRoots.push(root);
+	const home = path.join(root, "home");
+	const cwd = path.join(root, "project");
+	const pluginsDir = path.join(cwd, ".omp", "plugins");
+	const installedDir = path.join(pluginsDir, "node_modules", "project-plugin");
+	await fs.mkdir(installedDir, { recursive: true });
+	await writeJson(path.join(installedDir, "package.json"), {
+		name: "project-plugin",
+		version: "1.0.0",
+		omp: { extensions: ["ext.ts"] },
+	});
+	await writeJson(path.join(pluginsDir, "omp-plugins.lock.json"), {
+		plugins: {
+			"project-plugin": { version: "1.0.0", enabled: true, enabledFeatures: null },
+		},
+		settings: {},
+	});
+
+	const plugins = await getEnabledPlugins(cwd, { home });
+
+	expect(plugins.map(plugin => [plugin.name, plugin.scope])).toContainEqual(["project-plugin", "project"]);
+});

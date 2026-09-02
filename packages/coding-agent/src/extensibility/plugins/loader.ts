@@ -83,10 +83,12 @@ async function collectPluginsAtRoot(
 	if (!fs.existsSync(nodeModulesPath)) return [];
 
 	let depsKeys: string[] = [];
+	let hasPackageManifest = false;
 	const pkgJsonPath = path.join(root, "package.json");
 	try {
 		const pkg: { dependencies?: Record<string, string> } = await Bun.file(pkgJsonPath).json();
 		depsKeys = Object.keys(pkg.dependencies ?? {});
+		hasPackageManifest = true;
 	} catch (err) {
 		// Linked-only setups may have no `<root>/package.json` yet — that's
 		// fine, the lockfile still records the link.
@@ -120,13 +122,15 @@ async function collectPluginsAtRoot(
 	};
 	const plugins: ScopedInstalledPlugin[] = [];
 	for (const name of names) {
-		// A lockfile entry without a declared dependency is legitimate only for
-		// linked plugins (`omp plugin link`, marketplace runtime registration),
-		// which are always symlinks into node_modules. A lockfile-only entry
-		// backed by a real directory is a stale leftover — the package was
-		// removed from package.json outside `omp plugin remove`, and loading
-		// whatever tree bun left behind double-loads extensions.
-		if (!depsKeys.includes(name) && !(await isSymlink(path.join(nodeModulesPath, name)))) {
+		// When a package manifest exists, a lockfile-only entry is legitimate
+		// only for linked plugins (`omp plugin link`, marketplace runtime
+		// registration), which are symlinks into node_modules. Without a
+		// manifest, retain the established lockfile-only directory layout.
+		if (
+			hasPackageManifest &&
+			!depsKeys.includes(name) &&
+			!(await isSymlink(path.join(nodeModulesPath, name)))
+		) {
 			logger.warn("plugins: skipping stale lockfile entry not declared in package.json", {
 				name,
 				root,
