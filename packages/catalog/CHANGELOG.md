@@ -15,6 +15,9 @@
 
 - GitHub Copilot discovery now uses the Copilot CLI identity so account-eligible enterprise and experimental models are returned
 - Discovered Bedrock-style `mistral.mixtral-*` models no longer abort startup with an ambiguous family classification ([#10598](https://github.com/can1357/oh-my-pi/issues/10598)).
+### Fixed
+
+- `opencode-go/muse-spark-1.3-contributor` and `opencode-zen/muse-spark-1.3-contributor-free` now route over the Responses API like their 1.2 siblings, instead of 500ing on every request because they fell through to chat completions ([#10610](https://github.com/can1357/oh-my-pi/issues/10610)).
 
 ## [18.1.4] - 2026-09-02
 

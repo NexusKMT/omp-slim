@@ -163,16 +163,20 @@ behavior {
 	api-routes provider="zai" default="anthropic-messages" {
 		route "openai-completions" exact="glm-5.3-flash"
 	}
-	// OpenCode Zen: models.dev declares these with `@ai-sdk/anthropic`, but the
-	// gateway serves them only at /v1/chat/completions (#1617).
+	// OpenCode Zen: models.dev declares minimax-m3 with `@ai-sdk/anthropic`, but
+	// the gateway serves it only at /v1/chat/completions (#1617). models.dev
+	// omits muse-spark-1.3-contributor-free entirely, so pin its Responses route
+	// per opencode.ai/docs/zen/#endpoints (#10610).
 	api-routes provider="opencode-zen" {
+		route "openai-responses" exact="muse-spark-1.3-contributor-free"
 		route "openai-completions" exact="minimax-m3" exact="minimax-m3-free"
 	}
 	// OpenCode Go: models.dev's npm hints misroute these (#887, #1617); the
 	// responses pins are gateway-verified (deepseek-v4-flash 2026-08-08;
-	// muse-spark per opencode.ai/docs/go/#endpoints, #8957).
+	// muse-spark per opencode.ai/docs/go/#endpoints, #8957, #10610).
 	api-routes provider="opencode-go" {
-		route "openai-responses" exact="deepseek-v4-flash" exact="muse-spark-1.2" exact="muse-spark-1.2-contributor"
+		route "openai-responses" exact="deepseek-v4-flash" exact="muse-spark-1.2" \
+			exact="muse-spark-1.2-contributor" exact="muse-spark-1.3-contributor"
 		route "openai-completions" exact="minimax-m2.7" exact="minimax-m3" exact="minimax-m3-free" \
 			exact="qwen3.5-plus" exact="qwen3.6-plus"
 	}
