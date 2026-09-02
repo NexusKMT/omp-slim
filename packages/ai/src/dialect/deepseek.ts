@@ -34,6 +34,10 @@ const DSML_TOOL_CALLS_OPEN_FULLWIDTH = "<｜DSML｜tool_calls>";
 const DSML_TOOL_CALLS_CLOSE_FULLWIDTH = "</｜DSML｜tool_calls>";
 const DSML_TOOL_CALLS_OPEN_ASCII = "<|DSML|tool_calls>";
 const DSML_TOOL_CALLS_CLOSE_ASCII = "</|DSML|tool_calls>";
+const DSML_INVOKE_CLOSE_FULLWIDTH = "</｜DSML｜invoke>";
+const DSML_INVOKE_CLOSE_ASCII = "</|DSML|invoke>";
+const DSML_PARAMETER_CLOSE_FULLWIDTH = "</｜DSML｜parameter>";
+const DSML_PARAMETER_CLOSE_ASCII = "</|DSML|parameter>";
 
 const CONTROL_TOKENS = [
 	DEEPSEEK_BOS,
@@ -53,6 +57,18 @@ const CONTROL_TOKENS = [
 	DEEPSEEK_TOOL_OUTPUT_END,
 ] as const;
 
+// Bare DSML invoke/parameter close tags with no matching open — leaked into
+// visible text once a session's history is poisoned (issue #10556). Stripped in
+// the `outside` state so they never reach stored assistant content and reinforce
+// the model's XML-protocol mimicry. Inside a well-formed envelope these closers
+// are consumed by the `dsmlInvoke`/`dsmlParam` states and never reach `outside`.
+const DSML_ORPHAN_CLOSE_TOKENS = [
+	DSML_INVOKE_CLOSE_FULLWIDTH,
+	DSML_INVOKE_CLOSE_ASCII,
+	DSML_PARAMETER_CLOSE_FULLWIDTH,
+	DSML_PARAMETER_CLOSE_ASCII,
+] as const;
+
 const OUTSIDE_TOKENS = [
 	DEEPSEEK_TOOL_CALLS_BEGIN,
 	DEEPSEEK_TOOL_CALLS_END,
@@ -63,6 +79,7 @@ const OUTSIDE_TOKENS = [
 	DSML_TOOL_CALLS_OPEN_ASCII,
 	DSML_TOOL_CALLS_CLOSE_FULLWIDTH,
 	DSML_TOOL_CALLS_CLOSE_ASCII,
+	...DSML_ORPHAN_CLOSE_TOKENS,
 	...CONTROL_TOKENS,
 ] as const;
 
@@ -73,8 +90,13 @@ const DSML_SECTION_TOKENS = [
 	"<｜DSML｜invoke",
 	"<|DSML|invoke",
 ] as const;
-const DSML_INVOKE_TOKENS = ["</｜DSML｜invoke>", "</|DSML|invoke>", "<｜DSML｜parameter", "<|DSML|parameter"] as const;
-const DSML_PARAMETER_CLOSE_TOKENS = ["</｜DSML｜parameter>", "</|DSML|parameter>"] as const;
+const DSML_INVOKE_TOKENS = [
+	DSML_INVOKE_CLOSE_FULLWIDTH,
+	DSML_INVOKE_CLOSE_ASCII,
+	"<｜DSML｜parameter",
+	"<|DSML|parameter",
+] as const;
+const DSML_PARAMETER_CLOSE_TOKENS = [DSML_PARAMETER_CLOSE_FULLWIDTH, DSML_PARAMETER_CLOSE_ASCII] as const;
 
 type State =
 	| "outside"
@@ -483,6 +505,9 @@ export class DeepSeekInbandScanner implements InbandScanner {
 		if (this.#buffer.startsWith(THINK_CLOSE)) return THINK_CLOSE;
 		if (this.#buffer.startsWith(DSML_TOOL_CALLS_CLOSE_FULLWIDTH)) return DSML_TOOL_CALLS_CLOSE_FULLWIDTH;
 		if (this.#buffer.startsWith(DSML_TOOL_CALLS_CLOSE_ASCII)) return DSML_TOOL_CALLS_CLOSE_ASCII;
+		for (const token of DSML_ORPHAN_CLOSE_TOKENS) {
+			if (this.#buffer.startsWith(token)) return token;
+		}
 		for (const token of CONTROL_TOKENS) {
 			if (this.#buffer.startsWith(token)) return token;
 		}

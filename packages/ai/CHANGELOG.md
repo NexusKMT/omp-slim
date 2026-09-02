@@ -5,6 +5,7 @@
 ### Fixed
 
 - Preserved Anthropic thinking now survives side requests, tool-description drift, turn-scoped reminders, and recoverable prefix mismatches without corrupting the conversation prefix.
+- Fixed the DeepSeek DSML markup healer leaking orphan `</｜DSML｜parameter>`/`</｜DSML｜invoke>` close tags into visible text, which poisoned long-session history and reinforced the model's XML-protocol mimicry until tool calls stopped dispatching ([#10556](https://github.com/can1357/oh-my-pi/issues/10556)).
 
 ## [18.1.2] - 2026-09-01
 
