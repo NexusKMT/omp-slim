@@ -503,6 +503,13 @@
   cursor: not-allowed;
 }
 
+/* Prevent iOS from zooming the viewport when a select receives focus. */
+@media (pointer: coarse) {
+  .stats-select {
+    font-size: 16px;
+  }
+}
+
 /* Dropdown list itself follows the page theme via color-scheme. */
 .stats-select option {
   background-color: var(--surface);
