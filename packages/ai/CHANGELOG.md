@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Cursor models behind auth-gateway retrying client-declared tool calls after the gateway incorrectly reported them as missing.
+
 ## [18.1.3] - 2026-09-02
 
 ### Fixed
