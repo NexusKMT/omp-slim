@@ -1999,7 +1999,12 @@ export class SessionMaintenance {
 				if (this.#incompleteRecoveryAttempts >= INCOMPLETE_RECOVERY_MAX_RETRIES) {
 					const attempts = this.#incompleteRecoveryAttempts;
 					this.#incompleteRecoveryAttempts = 0;
-					await this.#host.dropPersistedAssistantTurn(assistantMessage);
+					const droppedEntryId = await this.#host.dropPersistedAssistantTurn(assistantMessage);
+					// Reparenting the live branch is insufficient when this terminal path
+					// appends no successor: on restart, the loader selects the last physical
+					// journal entry and revives the discarded length turn. Persist the branch
+					// marker/rewrite before blocking further continuation.
+					if (droppedEntryId) await this.#host.sessionManager.discardEntryDurably(droppedEntryId);
 					const finalError = `Compaction recovery gave up after ${attempts} consecutive empty \`length\` responses from ${assistantMessage.provider}/${assistantMessage.model}; the model produced no output. Try switching models or raising the model's max output tokens.`;
 					logger.warn("response.incomplete recovery cap reached; halting retries", {
 						model: `${assistantMessage.provider}/${assistantMessage.model}`,
