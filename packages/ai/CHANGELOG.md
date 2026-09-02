@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Improved account recovery when Google rate limits are lifted before the reported reset time
+- Resolved an issue where unmetered autocomplete models surfaced as exhausted when quota is limited
+
 ## [18.1.3] - 2026-09-02
 
 ### Fixed

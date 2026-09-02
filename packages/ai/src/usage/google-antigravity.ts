@@ -35,9 +35,18 @@ interface AntigravityModelInfo {
 	dailyQuotaInfos?: AntigravityQuotaInfo[];
 	weeklyQuotaInfo?: AntigravityQuotaInfo | AntigravityQuotaInfo[];
 	weeklyQuotaInfos?: AntigravityQuotaInfo[];
-	quotaInfoByTier?: Record<string, AntigravityQuotaInfo | AntigravityQuotaInfo[]>;
-	quotaInfoByWindow?: Record<string, AntigravityQuotaInfo | AntigravityQuotaInfo[]>;
-	quotaInfosByWindow?: Record<string, AntigravityQuotaInfo | AntigravityQuotaInfo[]>;
+	quotaInfoByTier?: Record<
+		string,
+		AntigravityQuotaInfo | AntigravityQuotaInfo[]
+	>;
+	quotaInfoByWindow?: Record<
+		string,
+		AntigravityQuotaInfo | AntigravityQuotaInfo[]
+	>;
+	quotaInfosByWindow?: Record<
+		string,
+		AntigravityQuotaInfo | AntigravityQuotaInfo[]
+	>;
 	apiProvider?: string;
 	modelProvider?: string;
 }
@@ -55,19 +64,34 @@ interface AntigravityWindowDescriptor {
 	durationMs?: number;
 }
 
-function classifyWindow(id: string | undefined, label: string | undefined): AntigravityWindowDescriptor | undefined {
+function classifyWindow(
+	id: string | undefined,
+	label: string | undefined,
+): AntigravityWindowDescriptor | undefined {
 	const source = `${id ?? ""} ${label ?? ""}`.toLowerCase();
-	if (source.includes("week") || source.includes("7d") || /7[\s_-]*day/.test(source)) {
+	if (
+		source.includes("week") ||
+		source.includes("7d") ||
+		/7[\s_-]*day/.test(source)
+	) {
 		return { id: "weekly", label: "Weekly", durationMs: WEEK_MS };
 	}
-	if (source.includes("day") || source.includes("daily") || source.includes("24h")) {
+	if (
+		source.includes("day") ||
+		source.includes("daily") ||
+		source.includes("24h")
+	) {
 		return { id: "daily", label: "Daily", durationMs: DAY_MS };
 	}
-	if (id || label) return { id: id ?? label ?? "default", label: label ?? id ?? "Default" };
+	if (id || label)
+		return { id: id ?? label ?? "default", label: label ?? id ?? "Default" };
 	return undefined;
 }
 
-function inferWindowFromReset(resetAt: number | undefined, nowMs: number): AntigravityWindowDescriptor {
+function inferWindowFromReset(
+	resetAt: number | undefined,
+	nowMs: number,
+): AntigravityWindowDescriptor {
 	if (resetAt !== undefined && resetAt - nowMs > DAY_MS) {
 		return { id: "weekly", label: "Weekly", durationMs: WEEK_MS };
 	}
@@ -75,15 +99,25 @@ function inferWindowFromReset(resetAt: number | undefined, nowMs: number): Antig
 }
 
 function quotaInferenceKey(info: AntigravityQuotaInfo): string {
-	return [info.modelProvider ?? "", info.apiProvider ?? "", info.tier ?? ""].join("|");
+	return [
+		info.modelProvider ?? "",
+		info.apiProvider ?? "",
+		info.tier ?? "",
+	].join("|");
 }
 
 function inferWindowDescriptors(
 	quotaInfos: AntigravityQuotaInfo[],
 	nowMs: number,
 ): WeakMap<AntigravityQuotaInfo, AntigravityWindowDescriptor> {
-	const descriptors = new WeakMap<AntigravityQuotaInfo, AntigravityWindowDescriptor>();
-	const groups = new Map<string, { info: AntigravityQuotaInfo; resetAt: number | undefined }[]>();
+	const descriptors = new WeakMap<
+		AntigravityQuotaInfo,
+		AntigravityWindowDescriptor
+	>();
+	const groups = new Map<
+		string,
+		{ info: AntigravityQuotaInfo; resetAt: number | undefined }[]
+	>();
 
 	for (const info of quotaInfos) {
 		const explicitDescriptor = classifyWindow(info.windowId, info.windowLabel);
@@ -97,9 +131,13 @@ function inferWindowDescriptors(
 	}
 
 	for (const group of groups.values()) {
-		const resetTimes = [...new Set(group.map(entry => entry.resetAt).filter(resetAt => resetAt !== undefined))].sort(
-			(a, b) => a - b,
-		);
+		const resetTimes = [
+			...new Set(
+				group
+					.map((entry) => entry.resetAt)
+					.filter((resetAt) => resetAt !== undefined),
+			),
+		].sort((a, b) => a - b);
 		const latestReset = resetTimes.length > 1 ? resetTimes.at(-1) : undefined;
 		for (const entry of group) {
 			const descriptor =
@@ -132,7 +170,9 @@ function clampFraction(value: number | undefined): number | undefined {
 	return value;
 }
 
-function getUsageStatus(remainingFraction: number | undefined): UsageStatus | undefined {
+function getUsageStatus(
+	remainingFraction: number | undefined,
+): UsageStatus | undefined {
 	if (remainingFraction === undefined) return "unknown";
 	if (remainingFraction <= 0) return "exhausted";
 	if (remainingFraction <= 0.1) return "warning";
@@ -149,7 +189,9 @@ function parseWindow(
 	return {
 		id: descriptor?.id ?? info.windowId ?? "default",
 		label: info.windowLabel ?? descriptor?.label ?? "Default",
-		...(descriptor?.durationMs !== undefined ? { durationMs: descriptor.durationMs } : {}),
+		...(descriptor?.durationMs !== undefined
+			? { durationMs: descriptor.durationMs }
+			: {}),
 		...(hasResetAt ? { resetsAt: resetAt } : {}),
 	};
 }
@@ -160,7 +202,8 @@ function buildAmount(info: AntigravityQuotaInfo): UsageAmount {
 	// Google/Gemini counters and keep only resetTime. Treat that shape as
 	// "blocked until reset" rather than unknown so a healthy sibling backend
 	// counter cannot mask it during dedupe.
-	const remainingFraction = apiRemainingFraction ?? (info.resetTime ? 0 : undefined);
+	const remainingFraction =
+		apiRemainingFraction ?? (info.resetTime ? 0 : undefined);
 	const amount: UsageAmount = { unit: "percent" };
 	if (remainingFraction === undefined) return amount;
 	const usedFraction = 1 - remainingFraction;
@@ -188,14 +231,24 @@ function formatCounterName(info: AntigravityQuotaInfo): string | undefined {
 	}
 }
 
-function normalizeQuotaInfos(info: AntigravityModelInfo): AntigravityQuotaInfo[] {
+function normalizeQuotaInfos(
+	info: AntigravityModelInfo,
+): AntigravityQuotaInfo[] {
 	const results: AntigravityQuotaInfo[] = [];
 	const source = {
 		...(info.apiProvider ? { apiProvider: info.apiProvider } : {}),
 		...(info.modelProvider ? { modelProvider: info.modelProvider } : {}),
 	};
-	const addInfo = (value: AntigravityQuotaInfo, tier?: string, windowDescriptor?: AntigravityWindowDescriptor) => {
-		results.push({ ...source, ...withWindowDescriptor(value, windowDescriptor), ...(tier ? { tier } : {}) });
+	const addInfo = (
+		value: AntigravityQuotaInfo,
+		tier?: string,
+		windowDescriptor?: AntigravityWindowDescriptor,
+	) => {
+		results.push({
+			...source,
+			...withWindowDescriptor(value, windowDescriptor),
+			...(tier ? { tier } : {}),
+		});
 	};
 	const addValue = (
 		value: AntigravityQuotaInfo | AntigravityQuotaInfo[] | undefined,
@@ -215,7 +268,11 @@ function normalizeQuotaInfos(info: AntigravityModelInfo): AntigravityQuotaInfo[]
 	addValue(info.dailyQuotaInfo, undefined, classifyWindow("daily", "Daily"));
 	addValue(info.dailyQuotaInfos, undefined, classifyWindow("daily", "Daily"));
 	addValue(info.weeklyQuotaInfo, undefined, classifyWindow("weekly", "Weekly"));
-	addValue(info.weeklyQuotaInfos, undefined, classifyWindow("weekly", "Weekly"));
+	addValue(
+		info.weeklyQuotaInfos,
+		undefined,
+		classifyWindow("weekly", "Weekly"),
+	);
 
 	if (info.quotaInfoByTier) {
 		for (const [tier, value] of Object.entries(info.quotaInfoByTier)) {
@@ -223,7 +280,9 @@ function normalizeQuotaInfos(info: AntigravityModelInfo): AntigravityQuotaInfo[]
 		}
 	}
 
-	const addWindowMap = (values?: Record<string, AntigravityQuotaInfo | AntigravityQuotaInfo[]>) => {
+	const addWindowMap = (
+		values?: Record<string, AntigravityQuotaInfo | AntigravityQuotaInfo[]>,
+	) => {
 		if (!values) return;
 		for (const [windowId, value] of Object.entries(values)) {
 			addValue(value, undefined, classifyWindow(windowId, undefined));
@@ -244,13 +303,19 @@ function normalizeQuotaInfos(info: AntigravityModelInfo): AntigravityQuotaInfo[]
 function resolveAccessToken(params: UsageFetchParams): string | undefined {
 	const { credential } = params;
 	if (!credential.accessToken) return undefined;
-	if (credential.expiresAt !== undefined && credential.expiresAt <= Date.now()) {
+	if (
+		credential.expiresAt !== undefined &&
+		credential.expiresAt <= Date.now()
+	) {
 		return undefined;
 	}
 	return credential.accessToken;
 }
 
-async function fetchAntigravityUsage(params: UsageFetchParams, ctx: UsageFetchContext): Promise<UsageReport | null> {
+async function fetchAntigravityUsage(
+	params: UsageFetchParams,
+	ctx: UsageFetchContext,
+): Promise<UsageReport | null> {
 	const credential = params.credential;
 	if (!credential.projectId) return null;
 
@@ -260,7 +325,9 @@ async function fetchAntigravityUsage(params: UsageFetchParams, ctx: UsageFetchCo
 	if (!accessToken) return null;
 
 	const baseUrl = params.baseUrl?.replace(/\/+$/, "");
-	const endpoints = baseUrl ? [baseUrl] : [DEFAULT_ENDPOINT, "https://daily-cloudcode-pa.sandbox.googleapis.com"];
+	const endpoints = baseUrl
+		? [baseUrl]
+		: [DEFAULT_ENDPOINT, "https://daily-cloudcode-pa.sandbox.googleapis.com"];
 
 	let response: Response | undefined;
 	let successfulEndpoint = DEFAULT_ENDPOINT;
@@ -328,7 +395,9 @@ async function fetchAntigravityUsage(params: UsageFetchParams, ctx: UsageFetchCo
 			const amount = buildAmount(quotaInfo);
 			const window = parseWindow(quotaInfo, inferredDescriptors.get(quotaInfo));
 			if (window?.resetsAt) {
-				earliestReset = earliestReset ? Math.min(earliestReset, window.resetsAt) : window.resetsAt;
+				earliestReset = earliestReset
+					? Math.min(earliestReset, window.resetsAt)
+					: window.resetsAt;
 			}
 			const tierKey = (quotaInfo.tier ?? "default").toLowerCase();
 			const counterName = formatCounterName(quotaInfo);
@@ -340,7 +409,15 @@ async function fetchAntigravityUsage(params: UsageFetchParams, ctx: UsageFetchCo
 			const key = `${counterKey}|${tierKey}|${windowId}`;
 			const existing = deduped.get(key);
 			if (!existing) {
-				deduped.set(key, { amount, window, tier: quotaInfo.tier, tierKey, windowId, counterName, counterKey });
+				deduped.set(key, {
+					amount,
+					window,
+					tier: quotaInfo.tier,
+					tierKey,
+					windowId,
+					counterName,
+					counterKey,
+				});
 				continue;
 			}
 			// Merge: keep the entry with fraction data for the bar, but
@@ -351,7 +428,9 @@ async function fetchAntigravityUsage(params: UsageFetchParams, ctx: UsageFetchCo
 			const cHasFrac = cFrac !== undefined;
 
 			let bestAmount = existing.amount;
-			let bestWindow = existing.window?.resetsAt ? existing.window : (window ?? existing.window);
+			let bestWindow = existing.window?.resetsAt
+				? existing.window
+				: (window ?? existing.window);
 			let bestTier = existing.tier ?? quotaInfo.tier;
 
 			if (!eHasFrac && cHasFrac) {
@@ -378,8 +457,26 @@ async function fetchAntigravityUsage(params: UsageFetchParams, ctx: UsageFetchCo
 		}
 	}
 
+	// Autocomplete models (`tab_*`, internal `chat_*`) report a bare
+	// `{ remainingFraction: 1 }` with no reset time on the Google counter. When
+	// the metered Gemini window is exhausted, Google reports only the weekly
+	// reset, so that unmetered entry no longer merges into a daily sibling and
+	// would surface as a phantom "Daily 0%" beside "Weekly 100%". A counter with
+	// any windowed entry keeps only its windowed entries.
+	const meteredCounters = new Set<string>();
+	for (const entry of deduped.values()) {
+		if (entry.window?.resetsAt !== undefined)
+			meteredCounters.add(`${entry.counterKey}|${entry.tierKey}`);
+	}
+
 	const limits: UsageLimit[] = [];
 	for (const entry of deduped.values()) {
+		if (
+			entry.window?.resetsAt === undefined &&
+			meteredCounters.has(`${entry.counterKey}|${entry.tierKey}`)
+		) {
+			continue;
+		}
 		const label = entry.counterName ? `Usage (${entry.counterName})` : "Usage";
 		limits.push({
 			id: `${params.provider}:${entry.counterKey}:${entry.tierKey}:${entry.windowId}`,
@@ -424,17 +521,24 @@ async function fetchAntigravityUsage(params: UsageFetchParams, ctx: UsageFetchCo
 export const antigravityUsageProvider: UsageProvider = {
 	id: "google-antigravity",
 	fetchUsage: fetchAntigravityUsage,
-	supports: params => params.provider === "google-antigravity",
+	supports: (params) => params.provider === "google-antigravity",
 };
 
 /** Map an Antigravity model id to its backend quota-counter key. */
-export function getAntigravityCounterKeyForModel(modelId: string | undefined): string | undefined {
+export function getAntigravityCounterKeyForModel(
+	modelId: string | undefined,
+): string | undefined {
 	return modelId ? quotaTierFor("google-antigravity", modelId) : undefined;
 }
 
-function getAntigravityCounterLimits(report: UsageReport, counterKey: string): UsageLimit[] {
+function getAntigravityCounterLimits(
+	report: UsageReport,
+	counterKey: string,
+): UsageLimit[] {
 	const prefix = `${report.provider}:${counterKey}:`;
-	return report.limits.filter(limit => limit.id.toLowerCase().startsWith(prefix));
+	return report.limits.filter((limit) =>
+		limit.id.toLowerCase().startsWith(prefix),
+	);
 }
 
 /**
@@ -456,7 +560,10 @@ export function scopeAntigravityLimitsForModel(
 	return getAntigravityCounterLimits(report, "default");
 }
 
-function rankAntigravityLimits(report: UsageReport, context: CredentialRankingContext | undefined): UsageLimit[] {
+function rankAntigravityLimits(
+	report: UsageReport,
+	context: CredentialRankingContext | undefined,
+): UsageLimit[] {
 	const counterKey = getAntigravityCounterKeyForModel(context?.modelId);
 	if (!counterKey) return report.limits;
 	return scopeAntigravityLimitsForModel(report, context);
@@ -484,6 +591,21 @@ export const antigravityRankingStrategy: CredentialRankingStrategy = {
 	blockScope(context) {
 		const counterKey = getAntigravityCounterKeyForModel(context?.modelId);
 		return `counter:${counterKey ?? "unknown"}`;
+	},
+	// One scope per backend counter the report covers, judged by that
+	// counter's own windows. A 429 can carry a retry-after at the weekly reset
+	// while Google restores the quota days earlier; the next `/usage` fetch
+	// then lifts the block instead of the account idling until the clock runs out.
+	healableBlockScopes(report) {
+		const counterKeys = new Set<string>();
+		for (const limit of report.limits) {
+			const counterKey = limit.id.split(":")[1];
+			if (counterKey) counterKeys.add(counterKey.toLowerCase());
+		}
+		return [...counterKeys].map((counterKey) => ({
+			blockScope: `counter:${counterKey}`,
+			limits: getAntigravityCounterLimits(report, counterKey),
+		}));
 	},
 	// Antigravity windows carry `durationMs` when the response identifies them
 	// as daily/weekly. Fall back to daily for legacy unlabelled quotaInfo
