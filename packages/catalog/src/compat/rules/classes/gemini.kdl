@@ -17,7 +17,17 @@ class "gemini" {
 		}
 	}
 	family "flash" {
-		revision ">=0" {
+		// Gemini 3.7 Flash is the one Flash revision Google's thinkingLevel table
+		// marks `minimal` as unsupported (400 THINKING_LEVEL_MINIMAL); every other
+		// Flash revision keeps the four-tier scale.
+		// https://ai.google.dev/gemini-api/docs/generate-content/thinking#thinking-levels
+		revision "<3.7" {
+			thinking-efforts "minimal" "low" "medium" "high"
+		}
+		revision ">=3.7 <3.8" {
+			thinking-efforts "low" "medium" "high"
+		}
+		revision ">=3.8" {
 			thinking-efforts "minimal" "low" "medium" "high"
 		}
 	}

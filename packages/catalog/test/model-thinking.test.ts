@@ -523,6 +523,26 @@ describe("model thinking derivation", () => {
 		expect(mapEffortToGoogleThinkingLevel(Effort.Minimal)).toBe("MINIMAL");
 	});
 
+	it("drops minimal from Gemini 3.7 Flash on direct google-level hosts but keeps it for 3.6 (#10543)", () => {
+		// Google's thinkingLevel table marks `minimal` unsupported for 3.7 Flash
+		// (400 THINKING_LEVEL_MINIMAL); every other Flash revision keeps it. These
+		// specs carry no explicit thinking, so efforts derive from the KDL cascade.
+		const flash37 = createModel({
+			id: "gemini-3.7-flash",
+			api: "google-vertex",
+			provider: "google-vertex",
+		});
+		expect(getSupportedEfforts(flash37)).toEqual([Effort.Low, Effort.Medium, Effort.High]);
+		expect(() => requireSupportedEffort(flash37, Effort.Minimal)).toThrow(/not supported/);
+
+		const flash36 = createModel({
+			id: "gemini-3.6-flash",
+			api: "google-vertex",
+			provider: "google-vertex",
+		});
+		expect(getSupportedEfforts(flash36)).toEqual([Effort.Minimal, Effort.Low, Effort.Medium, Effort.High]);
+	});
+
 	it("bakes requiresEffort for Gemini 3.x on any provider and backfills explicit metadata", () => {
 		// Derivation: aggregator-hosted Gemini 3.5 gets the flag, 2.5 does not.
 		const openRouterFlash = createModel({
