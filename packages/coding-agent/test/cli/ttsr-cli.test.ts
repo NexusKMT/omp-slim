@@ -70,8 +70,7 @@ async function run(args: TtsrCommandArgs): Promise<void> {
 async function writeTempRule(
 	condition: string,
 	scope: string[],
-	astCondition?: string,
-	agents?: string[],
+	options: { astCondition?: string; agents?: string[] } = {},
 ): Promise<string> {
 	// Stable basename "test-rule.md" so buildRuleFromMarkdown derives name
 	// "test-rule" — assertions rely on it. Each call uses a unique parent dir
@@ -80,9 +79,9 @@ async function writeTempRule(
 	fs.mkdirSync(dir, { recursive: true });
 	const tmp = path.join(dir, "test-rule.md");
 	const fm: string[] = [`description: test rule`, `condition: "${condition.replace(/"/g, '\\"')}"`];
-	if (astCondition) fm.push(`astCondition: "${astCondition.replace(/"/g, '\\"')}"`);
+	if (options.astCondition) fm.push(`astCondition: "${options.astCondition.replace(/"/g, '\\"')}"`);
 	fm.push(`scope: [${scope.map(s => `"${s}"`).join(", ")}]`);
-	if (agents) fm.push(`agents: [${agents.map(a => `"${a}"`).join(", ")}]`);
+	if (options.agents) fm.push(`agents: [${options.agents.map(a => `"${a}"`).join(", ")}]`);
 	await Bun.write(tmp, `---\n${fm.join("\n")}\n---\nbody\n`);
 	return tmp;
 }
@@ -174,11 +173,9 @@ describe("omp ttsr", () => {
 
 		it("astCondition matches via checkAstSnapshot with a tool + .ts path", async () => {
 			captureStreams();
-			const rulePath = await writeTempRule(
-				"never-matches-regex-zzz",
-				["tool:edit(*.ts)"],
-				"($X as { $$$BODY }).$PROP",
-			);
+			const rulePath = await writeTempRule("never-matches-regex-zzz", ["tool:edit(*.ts)"], {
+				astCondition: "($X as { $$$BODY }).$PROP",
+			});
 			const test: TtsrTestArgs = {
 				rule: rulePath,
 				source: "tool",
@@ -236,7 +233,7 @@ describe("omp ttsr", () => {
 
 		it("triggers for a matching --agent and rejects for a non-matching one", async () => {
 			captureStreams();
-			const rulePath = await writeTempRule(": any", ["tool:edit(*.ts)"], undefined, ["scout"]);
+			const rulePath = await writeTempRule(": any", ["tool:edit(*.ts)"], { agents: ["scout"] });
 			const test: TtsrTestArgs = {
 				rule: rulePath,
 				source: "tool",
@@ -248,9 +245,10 @@ describe("omp ttsr", () => {
 			expect(stdout).toContain("Triggered");
 			expect(stdout).toContain("agents: scout");
 
-			await expect(runTtsrCommand({ action: "test", test: { ...test, agent: "main" } })).rejects.toThrow(
-				/scoped to agents/,
-			);
+			captureStreams();
+			await run({ action: "test", test: { ...test, agent: "main" }, json: true });
+			const report = JSON.parse(stdout);
+			expect(report.error).toMatch(/scoped to agents/);
 		});
 	});
 
@@ -497,11 +495,9 @@ describe("omp ttsr", () => {
 			setProjectDir(projectDir);
 
 			await Bun.write(path.join(projectDir, "src/foo.ts"), "const y = (x as\n{ z }).z;");
-			const rulePath = await writeTempRule(
-				"never-matches-regex-zzz",
-				["tool:edit(src/**/*.ts)"],
-				"($X as { $$$BODY }).$PROP",
-			);
+			const rulePath = await writeTempRule("never-matches-regex-zzz", ["tool:edit(src/**/*.ts)"], {
+				astCondition: "($X as { $$$BODY }).$PROP",
+			});
 			const scan: TtsrScanArgs = {
 				directory: "src",
 				rule: rulePath,

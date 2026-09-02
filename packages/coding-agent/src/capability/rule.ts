@@ -189,7 +189,7 @@ export function parseRuleAgents(value: unknown): string[] | undefined {
 	if (!tokens) {
 		return undefined;
 	}
-	return Array.from(new Set(tokens.map(token => token.toLowerCase())));
+	return Array.from(new Set(tokens.map(token => token.replace(/\s*,\s*/g, ",").toLowerCase())));
 }
 
 /** Agent name used for the top-level (non-sub) session when evaluating `agents`. */
@@ -210,11 +210,7 @@ export function ruleAppliesToAgent(rule: Pick<Rule, "agents">, agentName: string
 		if (pattern === name) {
 			return true;
 		}
-		try {
-			return new Bun.Glob(pattern).match(name);
-		} catch {
-			return false;
-		}
+		return new Bun.Glob(pattern).match(name);
 	});
 }
 /**

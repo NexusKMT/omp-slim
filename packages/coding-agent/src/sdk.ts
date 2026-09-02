@@ -52,7 +52,7 @@ import { AsyncJobManager } from "./async";
 import { AutoLearnController, buildAutoLearnInstructions } from "./autolearn/controller";
 import { createAutoresearchExtension } from "./autoresearch";
 import { loadCapability } from "./capability";
-import { type Rule, ruleCapability, setActiveRules } from "./capability/rule";
+import { MAIN_AGENT_RULE_NAME, type Rule, ruleCapability, setActiveRules } from "./capability/rule";
 import { bucketRules } from "./capability/rule-buckets";
 import type { EffectiveExtensionRoots } from "./capability/types";
 import { shouldEnableAppendOnlyContext } from "./config/append-only-context-mode";
@@ -141,7 +141,7 @@ import type { MnemopiSessionState } from "./mnemopi/state";
 import mcpXdevGuidanceTemplate from "./prompts/system/mcp-xdev-guidance.md" with { type: "text" };
 import lateDiagnosticTemplate from "./prompts/tools/lsp-late-diagnostic.md" with { type: "text" };
 import { AgentLifecycleManager } from "./registry/agent-lifecycle";
-import { type AgentRef, AgentRegistry, MAIN_AGENT_ID } from "./registry/agent-registry";
+import { type AgentKind, type AgentRef, AgentRegistry, MAIN_AGENT_ID } from "./registry/agent-registry";
 import {
 	buildSecretObfuscator,
 	deobfuscateSessionContext,
@@ -571,7 +571,7 @@ export interface CreateAgentSessionOptions {
 	agentDisplayName?: string;
 	/**
 	 * Agent definition name used to evaluate rule `agents` scoping. Defaults to
-	 * `agentDisplayName`, else "main" for a top-level session / "sub" for a subagent.
+	 * "main" for a top-level session / "sub" for a subagent.
 	 */
 	agentName?: string;
 	/** Optional shared agent registry for IRC routing. Default: AgentRegistry.global(). */
@@ -1643,8 +1643,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	// Agent identity must resolve before rule discovery: `agents` frontmatter decides
 	// which rules are bucketed into this session at all.
 	const isSubagentSession = (options.taskDepth ?? 0) > 0 || Boolean(options.parentTaskPrefix);
-	const agentKind = isSubagentSession ? ("sub" as const) : ("main" as const);
-	const resolvedAgentName = (options.agentName ?? options.agentDisplayName ?? agentKind).trim().toLowerCase();
+	const agentKind: AgentKind = isSubagentSession ? "sub" : MAIN_AGENT_RULE_NAME;
+	const resolvedAgentName = (options.agentName ?? agentKind).trim().toLowerCase();
 
 	// Discover rules and bucket them in one pass to avoid repeated scans over large rule sets.
 	const { ttsrManager, rulebookRules, alwaysApplyRules, allRules } = await logger.time(

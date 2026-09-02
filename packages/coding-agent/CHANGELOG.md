@@ -33,7 +33,7 @@
 
 ### Added
 - Rules accept an `agents` frontmatter field so a rule applies only to matching agents (glob patterns against the agent name; `main` targets the top-level agent), surfaced in `omp ttsr list` and testable with `omp ttsr test --agent <name>`.
-- TTSR rules can now scope themselves to specific agent names via an `agents` frontmatter field. `omp ttsr test --agent <name>` and `omp ttsr list` now surface agent scoping in rule details
+
 ## [18.1.3] - 2026-09-02
 
 ### Changed

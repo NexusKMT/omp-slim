@@ -21,6 +21,7 @@ import { getProjectDir } from "@oh-my-pi/pi-utils/dirs";
 import {
 	BUILTIN_DEFAULTS_PROVIDER_ID,
 	compileRuleCondition,
+	MAIN_AGENT_RULE_NAME,
 	ruleAppliesToAgent,
 	type Rule,
 	ruleCapability,
@@ -324,12 +325,16 @@ async function readIsolatedRule(rulePath: string): Promise<Rule> {
 	});
 }
 
-async function loadIsolatedRule(rulePath: string, agentName: string): Promise<{ rules: Rule[]; manager: TtsrManager }> {
+async function loadIsolatedRule(
+	rulePath: string,
+	agentName: string,
+): Promise<{ ok: true; rules: Rule[]; manager: TtsrManager } | { ok: false; unavailableMsg: string }> {
 	const rule = await readIsolatedRule(rulePath);
 	if (!ruleAppliesToAgent(rule, agentName)) {
-		throw new Error(
-			`Rule "${rule.name}" is scoped to agents [${(rule.agents ?? []).join(", ")}] and does not apply to agent "${agentName}". Re-run with --agent <one of those names>.`,
-		);
+		return {
+			ok: false,
+			unavailableMsg: `Rule "${rule.name}" is scoped to agents [${(rule.agents ?? []).join(", ")}] and does not apply to agent "${agentName}". Re-run with --agent <one of those names>.`,
+		};
 	}
 	const manager = await createTtsrManager({
 		enabled: true,
@@ -345,7 +350,7 @@ async function loadIsolatedRule(rulePath: string, agentName: string): Promise<{ 
 			`Rule "${rule.name}" has no usable TTSR condition. Add a \`condition\` (regex) or \`astCondition\` (ast-grep pattern) to its frontmatter.`,
 		);
 	}
-	return { rules: manager.getRules(), manager };
+	return { ok: true, rules: manager.getRules(), manager };
 }
 
 async function loadIsolatedScanRule(rulePath: string): Promise<Rule[]> {
@@ -382,15 +387,26 @@ async function runTest(args: TtsrTestArgs, json: boolean, cwd: string): Promise<
 		filePaths: filePath ? [filePath] : undefined,
 	};
 
-	const agent = (args.agent ?? "main").trim().toLowerCase();
-	const { rules, manager } = args.rule
+	const agent = (args.agent ?? "").trim().toLowerCase() || MAIN_AGENT_RULE_NAME;
+	const loaded = args.rule
 		? await loadIsolatedRule(args.rule, agent)
-		: await loadProjectTtsrRules(cwd, agent);
+		: { ok: true as const, ...(await loadProjectTtsrRules(cwd, agent)) };
+
+	if (!loaded.ok) {
+		if (json) {
+			process.stdout.write(`${JSON.stringify({ error: loaded.unavailableMsg })}\n`);
+		} else {
+			process.stderr.write(`${chalk.yellow(loaded.unavailableMsg)}\n`);
+		}
+		process.exit(1);
+	}
+
+	const { rules, manager } = loaded;
 
 	if (rules.length === 0) {
 		const msg = args.rule
 			? "Rule registered but produced no TTSR entry."
-			: "No TTSR rules registered for this project. Add a `condition` or `astCondition` to a rule file, then re-run.";
+			: `No TTSR rules registered for this project as agent "${agent}". Rules scoped to other agents via \`agents\` are excluded — run \`omp ttsr list\` to see every rule, or pass --agent <name>.`;
 		if (json) {
 			process.stdout.write(`${JSON.stringify({ error: msg })}\n`);
 		} else {

@@ -51,7 +51,7 @@ export default class Ttsr extends Command {
 			description: "Candidate file path for scope/glob matching and AST language inference",
 		}),
 		agent: Flags.string({
-			description: "Agent name to evaluate rule `agents` scoping as; defaults to main (ttsr test)",
+			description: "Agent name to evaluate rule `agents` scoping as (ttsr test); defaults to main",
 		}),
 		verbose: Flags.boolean({ char: "v", description: "Show every evaluated rule, not just triggered ones" }),
 		json: Flags.boolean({ description: "Output JSON" }),

@@ -10,7 +10,6 @@ It reflects the current implementation, including partial semantics and metadata
 ## Implementation files
 
 - [`packages/coding-agent/src/capability/rule.ts`](../packages/coding-agent/src/capability/rule.ts)
-- [`packages/coding-agent/src/cli/ttsr-cli.ts`](../packages/coding-agent/src/cli/ttsr-cli.ts)
 - [`packages/coding-agent/src/capability/rule-buckets.ts`](../packages/coding-agent/src/capability/rule-buckets.ts)
 - [`packages/coding-agent/src/capability/index.ts`](../packages/coding-agent/src/capability/index.ts)
 - [`packages/coding-agent/src/discovery/index.ts`](../packages/coding-agent/src/discovery/index.ts)
@@ -26,6 +25,7 @@ It reflects the current implementation, including partial semantics and metadata
 - [`packages/coding-agent/src/sdk.ts`](../packages/coding-agent/src/sdk.ts)
 - [`packages/coding-agent/src/system-prompt.ts`](../packages/coding-agent/src/system-prompt.ts)
 - [`packages/coding-agent/src/internal-urls/rule-protocol.ts`](../packages/coding-agent/src/internal-urls/rule-protocol.ts)
+- [`packages/coding-agent/src/cli/ttsr-cli.ts`](../packages/coding-agent/src/cli/ttsr-cli.ts)
 - [`packages/utils/src/frontmatter.ts`](../packages/utils/src/frontmatter.ts)
 
 ## 1. Canonical rule shape
@@ -254,7 +254,7 @@ After rule discovery in `createAgentSession` (`sdk.ts`), `bucketRules(...)` appl
 
 ### `agents`
 
-- Restricts a rule to matching agents. Accepts a YAML sequence, a single string, or a comma-separated string; patterns are lowercased glob patterns matched case-insensitively against the agent definition name (`scout`, `reviewer`, `foreman-*`).
+- Restricts a rule to matching agents. Accepts a YAML sequence, a single string, or a comma-separated string; patterns are lowercased glob patterns matched case-insensitively against the agent definition name (`scout`, `reviewer`, `foreman-*`). Whitespace around commas inside a `{a, b}` glob-brace group is tolerated and normalized away.
 - The literal `main` matches the top-level session; a subagent with no definition name falls back to `sub`.
 - Omitted (or an empty list) means the rule applies to every agent — the pre-existing behavior.
 - Filtering happens once, in `bucketRules(...)` at session creation, before TTSR registration: an unmatched rule joins no bucket, is never compiled into `TtsrManager`, and is not addressable via `rule://` in that session.

@@ -135,6 +135,7 @@ export function createPersistedSubagentReviverFactory(
 				sessionManager: reopened,
 				agentId: ref.id,
 				agentDisplayName: ref.displayName,
+				agentName: ref.displayName,
 				parentTaskPrefix: ref.id,
 				parentAgentId: ref.parentId,
 				expectedAgentRef: expectedRef,
