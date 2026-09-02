@@ -153,7 +153,7 @@ describe("Agent hub row ordering", () => {
 		}
 	});
 
-	it("re-sorts rows by most-recent activity while the hub is open", () => {
+	it("keeps row order stable as agents heartbeat and appends new agents", () => {
 		vi.useFakeTimers();
 		let hub: AgentHubOverlayComponent | undefined;
 		try {
@@ -172,19 +172,23 @@ describe("Agent hub row ordering", () => {
 			agents.register({ id: "C", displayName: "Gamma", kind: "sub", session: sessionC });
 
 			hub = makeHub(agents);
+			// Captured once on open: status then recency (most-recent first).
 			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A"]);
-			// Bump A's lastActivity far ahead of the others; recency wins live.
+
+			// A heartbeats far ahead of the others; a stable roster must NOT bubble
+			// it to the top while the hub is open (issue #10524).
 			setSystemTime(4000);
 			agents.setActivity("A", "still running");
 
-			// A parked agent sorts below live ones by status order.
+			// A new agent appears and forces a refresh: existing rows keep their
+			// captured order, and the newcomer appends at the end.
 			setSystemTime(5000);
 			const sessionD = {} as AgentSession;
 			agents.register({ id: "D", displayName: "Delta", kind: "sub", session: sessionD, status: "parked" });
 			// Renders coalesce: the immediate frame still shows the captured order.
 			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A"]);
 			vi.advanceTimersByTime(100);
-			expect(renderedAgentIds(hub)).toEqual(["A", "C", "B", "D"]);
+			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A", "D"]);
 		} finally {
 			hub?.dispose();
 			vi.useRealTimers();

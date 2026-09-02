@@ -222,6 +222,11 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 	#rows: AgentRef[] = [];
 	#statusCounts: Record<AgentStatus, number> = { running: 0, idle: 0, parked: 0, aborted: 0 };
 	#selectedRow = 0;
+	/** Stable roster order captured on first refresh: keyboard navigation must
+	 *  not jump as agents heartbeat. Existing rows keep their rank while the hub
+	 *  is open; newly appearing agents append at the end. */
+	#rowOrder: Map<string, number> | undefined;
+	#nextRowOrder = 0;
 	#hoveredRow: number | null = null;
 	/** Per-render screen-line to agent-row map, shared by click and hover routing. */
 	#hitRows: Array<number | undefined> = [];
@@ -505,17 +510,33 @@ export class AgentHubOverlayComponent extends Container implements SelectListMou
 		const refs = this.#registry.list().filter(ref => ref.id !== MAIN_AGENT_ID);
 		this.#observedById = new Map();
 		for (const session of this.#observers.getSessions()) this.#observedById.set(session.id, session);
+		// Stable roster order: capture the status+recency ranking once so keyboard
+		// navigation is not disrupted by heartbeats (issue #10524). Existing rows
+		// keep their rank while the hub is open; new agents append at the end.
+		const rowOrder = this.#rowOrder;
+		let ordered: AgentRef[];
+		if (!rowOrder) {
+			ordered = refs.sort(
+				(a, b) =>
+					STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
+					b.lastActivity - a.lastActivity ||
+					a.id.localeCompare(b.id),
+			);
+			this.#rowOrder = new Map();
+			for (const ref of ordered) this.#rowOrder.set(ref.id, this.#nextRowOrder++);
+		} else {
+			ordered = refs.sort(
+				(a, b) => (rowOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rowOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+			);
+			for (const ref of ordered) {
+				if (!rowOrder.has(ref.id)) rowOrder.set(ref.id, this.#nextRowOrder++);
+			}
+		}
 		const query = this.#agentFilter.trim();
-		const filtered =
-			query.length > 0 ? refs.filter(ref => fuzzyAgentMatch(query, `${ref.id} ${ref.displayName ?? ""}`)) : refs;
-		// Live recency ordering: the most recently active agent surfaces first and
-		// rows move as activity changes, matching the recency-first tree summary.
-		const rosterRows = filtered.sort(
-			(a, b) =>
-				STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
-				b.lastActivity - a.lastActivity ||
-				a.id.localeCompare(b.id),
-		);
+		const rosterRows =
+			query.length > 0
+				? ordered.filter(ref => fuzzyAgentMatch(query, `${ref.id} ${ref.displayName ?? ""}`))
+				: ordered;
 
 		if (this.#viewMode === "tree") {
 			const tree = projectAgentTree(rosterRows);
