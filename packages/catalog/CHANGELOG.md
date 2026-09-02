@@ -14,6 +14,9 @@
 ### Fixed
 
 - GitHub Copilot discovery now uses the Copilot CLI identity so account-eligible enterprise and experimental models are returned
+### Fixed
+
+- Discovered Bedrock-style `mistral.mixtral-*` models no longer abort startup with an ambiguous family classification ([#10598](https://github.com/can1357/oh-my-pi/issues/10598)).
 
 ## [18.1.4] - 2026-09-02
 
