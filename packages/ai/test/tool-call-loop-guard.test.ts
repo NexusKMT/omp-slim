@@ -1,97 +1,300 @@
-import { describe, expect, it } from "bun:test";
-import type { AssistantMessage, ToolCall } from "../src/types";
-import { ToolCallLoopGuard } from "../src/utils/tool-call-loop-guard";
+import { describe, expect, test } from "bun:test";
+import type { AssistantMessage, ToolCall } from "@oh-my-pi/pi-ai";
+import { ToolCallLoopGuard } from "@oh-my-pi/pi-ai/utils/tool-call-loop-guard";
+import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 
-let nextId = 0;
-
-function toolCall(name: string, args: Record<string, unknown>): ToolCall {
-	return { type: "toolCall", id: `tc_${nextId++}`, name, arguments: args };
-}
-
-function turn(...calls: ToolCall[]): { message: AssistantMessage; toolResults: [] } {
-	return {
-		message: { role: "assistant", content: calls, stopReason: "toolUse" } as unknown as AssistantMessage,
-		toolResults: [],
-	};
-}
-
-function batchA(): ToolCall[] {
-	return [toolCall("bash", { command: "echo a" }), toolCall("read", { path: "a.ts" })];
-}
-
-function batchB(): ToolCall[] {
-	return [toolCall("bash", { command: "echo b" })];
-}
+const zeroUsage = {
+	input: 0,
+	output: 0,
+	cacheRead: 0,
+	cacheWrite: 0,
+	totalTokens: 0,
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+} satisfies AssistantMessage["usage"];
 
 describe("ToolCallLoopGuard", () => {
-	it("resets on a turn with no tool calls", () => {
+	test("detects the fifth consecutive identical tool call", () => {
+		const guard = new ToolCallLoopGuard({ threshold: 5, exemptTools: ["job", "irc"] });
+		let detection = null;
+		for (let index = 0; index < 5; index++) {
+			const toolCallId = `call-${index}`;
+			detection = guard.recordTurn({
+				message: {
+					role: "assistant",
+					content: [
+						{ type: "toolCall", id: toolCallId, name: "bash", arguments: { command: "pytest -q", timeout: 120 } },
+					],
+					api: "openai-responses",
+					provider: "openai",
+					model: "test-model",
+					usage: zeroUsage,
+					stopReason: "toolUse",
+					timestamp: Date.now(),
+				},
+				toolResults: [
+					{
+						role: "toolResult",
+						toolCallId,
+						toolName: "bash",
+						content: [{ type: "text", text: "1263 passed, 4 skipped" }],
+						isError: false,
+						timestamp: Date.now(),
+					},
+				],
+			});
+		}
+
+		expect(detection).toEqual({
+			kind: "repeated_tool_call",
+			toolName: "bash",
+			count: 5,
+			resultSummary: "1263 passed, 4 skipped",
+			argumentsSummary: '{"command":"pytest -q","timeout":120}',
+		});
+	});
+
+	test("canonicalizes argument key order and ignores harness intent fields", () => {
 		const guard = new ToolCallLoopGuard({ threshold: 2, exemptTools: [] });
-		expect(guard.recordTurn(turn(...batchA()))).toBeNull();
-		expect(guard.recordTurn(turn())).toBeNull();
-		expect(guard.recordTurn(turn(...batchA()))).toBeNull();
+		expect(
+			guard.recordTurn({
+				message: {
+					role: "assistant",
+					content: [
+						{ type: "toolCall", id: "first", name: "read", arguments: { path: "a.ts", [INTENT_FIELD]: "first" } },
+					],
+					api: "openai-responses",
+					provider: "openai",
+					model: "test-model",
+					usage: zeroUsage,
+					stopReason: "toolUse",
+					timestamp: Date.now(),
+				},
+				toolResults: [
+					{
+						role: "toolResult",
+						toolCallId: "first",
+						toolName: "read",
+						content: [{ type: "text", text: "1263 passed, 4 skipped" }],
+						isError: false,
+						timestamp: Date.now(),
+					},
+				],
+			}),
+		).toBeNull();
+		expect(
+			guard.recordTurn({
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "toolCall",
+							id: "second",
+							name: "read",
+							arguments: { [INTENT_FIELD]: "second", path: "a.ts" },
+						},
+					],
+					api: "openai-responses",
+					provider: "openai",
+					model: "test-model",
+					usage: zeroUsage,
+					stopReason: "toolUse",
+					timestamp: Date.now(),
+				},
+				toolResults: [
+					{
+						role: "toolResult",
+						toolCallId: "second",
+						toolName: "read",
+						content: [{ type: "text", text: "1263 passed, 4 skipped" }],
+						isError: false,
+						timestamp: Date.now(),
+					},
+				],
+			}),
+		).toMatchObject({ toolName: "read", count: 2 });
 	});
 
-	it("detects consecutive identical multi-call turns at the threshold", () => {
+	test("resets the consecutive count on a different call", () => {
 		const guard = new ToolCallLoopGuard({ threshold: 3, exemptTools: [] });
-		expect(guard.recordTurn(turn(...batchA()))).toBeNull();
-		expect(guard.recordTurn(turn(...batchA()))).toBeNull();
-		const hit = guard.recordTurn(turn(...batchA()));
-		expect(hit).not.toBeNull();
-		expect(hit!.kind).toBe("repeated_tool_call");
-		expect(hit!.count).toBe(3);
+		expect(
+			guard.recordTurn({
+				message: {
+					role: "assistant",
+					content: [{ type: "toolCall", id: "first", name: "bash", arguments: { command: "pytest -q" } }],
+					api: "openai-responses",
+					provider: "openai",
+					model: "test-model",
+					usage: zeroUsage,
+					stopReason: "toolUse",
+					timestamp: Date.now(),
+				},
+				toolResults: [
+					{
+						role: "toolResult",
+						toolCallId: "first",
+						toolName: "bash",
+						content: [{ type: "text", text: "1263 passed, 4 skipped" }],
+						isError: false,
+						timestamp: Date.now(),
+					},
+				],
+			}),
+		).toBeNull();
+		expect(
+			guard.recordTurn({
+				message: {
+					role: "assistant",
+					content: [{ type: "toolCall", id: "second", name: "read", arguments: { path: "src/index.ts" } }],
+					api: "openai-responses",
+					provider: "openai",
+					model: "test-model",
+					usage: zeroUsage,
+					stopReason: "toolUse",
+					timestamp: Date.now(),
+				},
+				toolResults: [
+					{
+						role: "toolResult",
+						toolCallId: "second",
+						toolName: "read",
+						content: [{ type: "text", text: "1263 passed, 4 skipped" }],
+						isError: false,
+						timestamp: Date.now(),
+					},
+				],
+			}),
+		).toBeNull();
+		expect(
+			guard.recordTurn({
+				message: {
+					role: "assistant",
+					content: [{ type: "toolCall", id: "third", name: "bash", arguments: { command: "pytest -q" } }],
+					api: "openai-responses",
+					provider: "openai",
+					model: "test-model",
+					usage: zeroUsage,
+					stopReason: "toolUse",
+					timestamp: Date.now(),
+				},
+				toolResults: [
+					{
+						role: "toolResult",
+						toolCallId: "third",
+						toolName: "bash",
+						content: [{ type: "text", text: "1263 passed, 4 skipped" }],
+						isError: false,
+						timestamp: Date.now(),
+					},
+				],
+			}),
+		).toBeNull();
 	});
 
-	it("does not count a turn whose calls are all exempt", () => {
-		const guard = new ToolCallLoopGuard({ threshold: 2, exemptTools: ["read"] });
-		expect(guard.recordTurn(turn(toolCall("read", { path: "a.ts" })))).toBeNull();
-		const hit = guard.recordTurn(turn(toolCall("read", { path: "a.ts" })));
-		expect(hit).toBeNull();
+	test("ignores exempt polling tools", () => {
+		const guard = new ToolCallLoopGuard({ threshold: 2, exemptTools: ["job"] });
+		expect(
+			guard.recordTurn({
+				message: {
+					role: "assistant",
+					content: [{ type: "toolCall", id: "first", name: "job", arguments: { poll: ["abc"] } }],
+					api: "openai-responses",
+					provider: "openai",
+					model: "test-model",
+					usage: zeroUsage,
+					stopReason: "toolUse",
+					timestamp: Date.now(),
+				},
+				toolResults: [
+					{
+						role: "toolResult",
+						toolCallId: "first",
+						toolName: "job",
+						content: [{ type: "text", text: "1263 passed, 4 skipped" }],
+						isError: false,
+						timestamp: Date.now(),
+					},
+				],
+			}),
+		).toBeNull();
+		expect(
+			guard.recordTurn({
+				message: {
+					role: "assistant",
+					content: [{ type: "toolCall", id: "second", name: "job", arguments: { poll: ["abc"] } }],
+					api: "openai-responses",
+					provider: "openai",
+					model: "test-model",
+					usage: zeroUsage,
+					stopReason: "toolUse",
+					timestamp: Date.now(),
+				},
+				toolResults: [
+					{
+						role: "toolResult",
+						toolCallId: "second",
+						toolName: "job",
+						content: [{ type: "text", text: "1263 passed, 4 skipped" }],
+						isError: false,
+						timestamp: Date.now(),
+					},
+				],
+			}),
+		).toBeNull();
+	});
+});
+
+describe("ToolCallLoopGuard multi-call turns", () => {
+	let nextId = 0;
+
+	function toolCall(name: string, args: Record<string, unknown>): ToolCall {
+		return { type: "toolCall", id: `tc_${nextId++}`, name, arguments: args };
+	}
+
+	function turn(...calls: ToolCall[]) {
+		return {
+			message: { role: "assistant", content: calls } as unknown as AssistantMessage,
+			toolResults: [],
+		};
+	}
+
+	test("counts consecutive identical multi-call batches toward the threshold", () => {
+		const guard = new ToolCallLoopGuard({ threshold: 3, exemptTools: [] });
+		const batch = () => [toolCall("bash", { command: "echo a" }), toolCall("read", { path: "a.ts" })];
+		expect(guard.recordTurn(turn(...batch()))).toBeNull();
+		expect(guard.recordTurn(turn(...batch()))).toBeNull();
+		expect(guard.recordTurn(turn(...batch()))).toMatchObject({ toolName: "bash", count: 3 });
 	});
 
-	it("resets when every call in a multi-call turn is exempt", () => {
+	test("resets on a turn with no tool calls", () => {
+		const guard = new ToolCallLoopGuard({ threshold: 2, exemptTools: [] });
+		const batch = () => [toolCall("bash", { command: "echo a" }), toolCall("read", { path: "a.ts" })];
+		expect(guard.recordTurn(turn(...batch()))).toBeNull();
+		expect(guard.recordTurn(turn())).toBeNull();
+		expect(guard.recordTurn(turn(...batch()))).toBeNull();
+	});
+
+	test("resets when every call in a multi-call turn is exempt", () => {
 		const guard = new ToolCallLoopGuard({ threshold: 2, exemptTools: ["read"] });
-		expect(guard.recordTurn(turn(...batchA()))).toBeNull();
+		const batch = () => [toolCall("bash", { command: "echo a" }), toolCall("read", { path: "a.ts" })];
+		expect(guard.recordTurn(turn(...batch()))).toBeNull();
 		expect(guard.recordTurn(turn(toolCall("read", { path: "x.ts" }), toolCall("read", { path: "y.ts" })))).toBeNull();
-		expect(guard.recordTurn(turn(...batchA()))).toBeNull();
+		expect(guard.recordTurn(turn(...batch()))).toBeNull();
 	});
 
-	it("counts a mixed batch and reports the first non-exempt call", () => {
+	test("counts a mixed batch and reports the first non-exempt call", () => {
 		const guard = new ToolCallLoopGuard({ threshold: 2, exemptTools: ["read"] });
 		const mixed = () => [toolCall("read", { path: "a.ts" }), toolCall("bash", { command: "echo a" })];
 		expect(guard.recordTurn(turn(...mixed()))).toBeNull();
-		const hit = guard.recordTurn(turn(...mixed()));
-		expect(hit).not.toBeNull();
-		expect(hit!.toolName).toBe("bash");
+		expect(guard.recordTurn(turn(...mixed()))).toMatchObject({ toolName: "bash", count: 2 });
 	});
 
-	it("does not count alternating distinct batches", () => {
+	test("does not count alternating distinct batches", () => {
 		const guard = new ToolCallLoopGuard({ threshold: 2, exemptTools: [] });
-		expect(guard.recordTurn(turn(...batchA()))).toBeNull();
-		expect(guard.recordTurn(turn(...batchB()))).toBeNull();
-		expect(guard.recordTurn(turn(...batchA()))).toBeNull();
-		expect(guard.recordTurn(turn(...batchB()))).toBeNull();
-	});
-
-	it("keeps single-call behavior: identical single calls are detected", () => {
-		const guard = new ToolCallLoopGuard({ threshold: 2, exemptTools: [] });
-		expect(guard.recordTurn(turn(toolCall("bash", { command: "echo a" })))).toBeNull();
-		const hit = guard.recordTurn(turn(toolCall("bash", { command: "echo a" })));
-		expect(hit).not.toBeNull();
-		expect(hit!.toolName).toBe("bash");
-	});
-
-	it("keeps single-call behavior: differing args reset the counter", () => {
-		const guard = new ToolCallLoopGuard({ threshold: 2, exemptTools: [] });
-		expect(guard.recordTurn(turn(toolCall("bash", { command: "echo a" })))).toBeNull();
-		expect(guard.recordTurn(turn(toolCall("bash", { command: "echo b" })))).toBeNull();
-	});
-
-	it("canonicalizes argument key order across a multi-call batch", () => {
-		const guard = new ToolCallLoopGuard({ threshold: 2, exemptTools: [] });
-		const a = () => turn(toolCall("write", { path: "x.ts", content: "hi" }));
-		const reordered = () => turn(toolCall("write", { content: "hi", path: "x.ts" }));
-		expect(guard.recordTurn(a())).toBeNull();
-		const hit = guard.recordTurn(reordered());
-		expect(hit).not.toBeNull();
+		const a = () => [toolCall("bash", { command: "echo a" }), toolCall("read", { path: "a.ts" })];
+		const b = () => [toolCall("bash", { command: "echo b" })];
+		expect(guard.recordTurn(turn(...a()))).toBeNull();
+		expect(guard.recordTurn(turn(...b()))).toBeNull();
+		expect(guard.recordTurn(turn(...a()))).toBeNull();
+		expect(guard.recordTurn(turn(...b()))).toBeNull();
 	});
 });
