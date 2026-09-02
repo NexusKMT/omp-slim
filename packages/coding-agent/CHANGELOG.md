@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Updated the visual representation for the IRC tool from "irc" to "#"
+
 ## [18.1.3] - 2026-09-02
 
 ### Changed
