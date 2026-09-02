@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { convertMessages } from "@oh-my-pi/pi-ai/providers/google-shared";
 import type { Context, Model, ToolCall, Usage } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 
 // Regression for #9638 and #10602. A Gemini 3 parallel turn carries a thought
 // signature only on the first call, while cross-model replay can make the first
@@ -98,6 +99,16 @@ describe("Gemini 3 unsigned tool-call signatures (#9638, #10602)", () => {
 			const unsigned = unsignedFirstCall("google-gemini-cli", provider, "gemini-3.7-flash");
 			expect(toolCallParts(model, unsigned)[0]?.thoughtSignature).toBe(SENTINEL);
 		}
+	});
+
+	it("carries the first-call bypass policy on the bundled CCA catalog entry", () => {
+		// The runtime consumes models.json rows verbatim, so the baked compat — not
+		// the KDL — is what actually reaches convertMessages for a selected model.
+		const model = getBundledModel<"google-gemini-cli">("google-antigravity", "gemini-3.7-flash");
+		expect(model.compat.requiresSkipThoughtSignatureOnFirstFunctionCall).toBe(true);
+
+		const unsigned = unsignedFirstCall("google-gemini-cli", "google-antigravity", "gemini-3.7-flash");
+		expect(toolCallParts(model as Model<GoogleApi>, unsigned)[0]?.thoughtSignature).toBe(SENTINEL);
 	});
 
 	it("omits unsigned signatures and never emits the sentinel on Vertex", () => {
