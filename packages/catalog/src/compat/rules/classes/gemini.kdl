@@ -88,8 +88,8 @@ class "gemini" {
 		// Replaces the Gemini 3+ mandatory-reasoning fallback.
 		thinking-requires-effort #true
 	}
-	// Public Gemini requires the bypass sentinel on every unsigned call. Cloud
-	// Code Assist requires it only when the first call of the turn is unsigned.
+	// Public Gemini requires the bypass sentinel on every unsigned call. The
+	// Cloud Code Assist first-call variant is a host contract in providers/.
 	on "google" "opencode-zen" {
 		revision ">=3" {
 			requires-skip-thought-signature #true
@@ -97,9 +97,6 @@ class "gemini" {
 		}
 	}
 	on "google-antigravity" "google-gemini-cli" {
-		revision ">=3" {
-			requires-skip-thought-signature-on-first-function-call #true
-		}
 		family "flash" {
 			stream-first-event-timeout-ms 60000
 			flash-stream-leak-workaround #true
