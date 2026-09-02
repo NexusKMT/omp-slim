@@ -4572,7 +4572,7 @@ export class AuthStorage {
 		const now = Date.now();
 		let blockedUntil = now + (options?.retryAfterMs ?? AuthStorage.#defaultBackoffMs);
 
-		if (credentialType === "oauth" && target.credential.type === "oauth" && routing.strategy) {
+		if (target && routing.strategy) {
 			const report = await raceUsageWithSignal(
 				this.#getUsageReport(provider, target.credential, options),
 				options?.signal,
