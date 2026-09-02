@@ -13,6 +13,7 @@
 ### Fixed
 
 - Claude Sonnet 5 no longer advertises unsupported mid-conversation system messages.
+- Fixed Alibaba Token Plan discovery for `qwen3.8-flash` to include its context limits, reasoning support, and image input.
 
 ## [18.1.2] - 2026-09-01
 
