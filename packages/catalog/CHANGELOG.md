@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added support for computer-use capabilities in model configurations
+
+### Changed
+
+- Updated GitHub Copilot API version to 2026-08-01
+- Reduced input cost for minimax/minimax-m2 model
+
+### Fixed
+
+- GitHub Copilot discovery now uses the Copilot CLI identity so account-eligible enterprise and experimental models are returned
+- Discovered Bedrock-style `mistral.mixtral-*` models no longer abort startup with an ambiguous family classification ([#10598](https://github.com/can1357/oh-my-pi/issues/10598)).
+
+## [18.1.4] - 2026-09-02
+
+### Changed
+
+- Enabled Cursor tool schema projection for supported models
+
+### Fixed
+
+- Antigravity and Gemini CLI now collapse every Gemini Flash generation from 3.6 on (`gemini-3.8-flash-low/-medium/-high` and the `-tiered` alias, and future revisions) into one routed `gemini-<rev>-flash` entry via a revision-templated `variant-family`, instead of surfacing raw per-level ids until a per-revision rule lands.
+
 ## [18.1.3] - 2026-09-02
 
 ### Added

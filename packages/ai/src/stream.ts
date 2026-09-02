@@ -2412,6 +2412,7 @@ function mapOptionsForApi<TApi extends Api>(
 				...base,
 				execHandlers,
 				onToolResult,
+				externalToolExecutor: options?.cursorExternalToolExecutor,
 				wireModelId: resolveWireModelId(cursorModel, effort),
 			});
 		}

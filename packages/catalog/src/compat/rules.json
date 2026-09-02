@@ -41,6 +41,7 @@
 		"providers/gitlab-duo.kdl",
 		"providers/gmi-cloud.kdl",
 		"providers/google-antigravity.kdl",
+		"providers/google-gemini-cli.kdl",
 		"providers/google-vertex.kdl",
 		"providers/google.kdl",
 		"providers/groq.kdl",
@@ -1323,64 +1324,26 @@
 					"provider": "cursor",
 					"logical": "gpt-5.6-terra",
 					"aliases": []
-				},
-				{
-					"provider": "google-antigravity",
-					"logical": "gemini-3.6-flash",
-					"aliases": [
-						"gemini-3.6-flash-tiered"
-					]
-				},
-				{
-					"provider": "google-antigravity",
-					"logical": "gemini-3.7-flash",
-					"aliases": [
-						"gemini-3.7-flash-tiered"
-					]
 				}
 			],
 			"variantFamilies": [
 				{
 					"provider": "google-antigravity",
-					"id": "gemini-3.6-flash",
-					"name": "Gemini 3.6 Flash",
+					"id": "gemini-{rev}-flash",
+					"name": "Gemini {rev} Flash",
 					"members": [
-						"gemini-3.6-flash-low",
-						"gemini-3.6-flash-medium",
-						"gemini-3.6-flash-high",
-						"gemini-3.6-flash-tiered"
+						"gemini-{rev}-flash-low",
+						"gemini-{rev}-flash-medium",
+						"gemini-{rev}-flash-high",
+						"gemini-{rev}-flash-tiered"
 					],
 					"routing": {
-						"minimal": "gemini-3.6-flash-low",
-						"low": "gemini-3.6-flash-low",
-						"medium": "gemini-3.6-flash-medium",
-						"high": "gemini-3.6-flash-high"
+						"minimal": "gemini-{rev}-flash-low",
+						"low": "gemini-{rev}-flash-low",
+						"medium": "gemini-{rev}-flash-medium",
+						"high": "gemini-{rev}-flash-high"
 					},
-					"mode": "google-level",
-					"efforts": [
-						"minimal",
-						"low",
-						"medium",
-						"high"
-					],
-					"requiresEffort": true
-				},
-				{
-					"provider": "google-antigravity",
-					"id": "gemini-3.7-flash",
-					"name": "Gemini 3.7 Flash",
-					"members": [
-						"gemini-3.7-flash-low",
-						"gemini-3.7-flash-medium",
-						"gemini-3.7-flash-high",
-						"gemini-3.7-flash-tiered"
-					],
-					"routing": {
-						"minimal": "gemini-3.7-flash-low",
-						"low": "gemini-3.7-flash-low",
-						"medium": "gemini-3.7-flash-medium",
-						"high": "gemini-3.7-flash-high"
-					},
+					"revision": ">=3.6",
 					"mode": "google-level",
 					"efforts": [
 						"minimal",
@@ -1602,45 +1565,21 @@
 				},
 				{
 					"provider": "google-gemini-cli",
-					"id": "gemini-3.6-flash",
-					"name": "Gemini 3.6 Flash",
+					"id": "gemini-{rev}-flash",
+					"name": "Gemini {rev} Flash",
 					"members": [
-						"gemini-3.6-flash-low",
-						"gemini-3.6-flash-medium",
-						"gemini-3.6-flash-high",
-						"gemini-3.6-flash-tiered"
+						"gemini-{rev}-flash-low",
+						"gemini-{rev}-flash-medium",
+						"gemini-{rev}-flash-high",
+						"gemini-{rev}-flash-tiered"
 					],
 					"routing": {
-						"minimal": "gemini-3.6-flash-low",
-						"low": "gemini-3.6-flash-low",
-						"medium": "gemini-3.6-flash-medium",
-						"high": "gemini-3.6-flash-high"
+						"minimal": "gemini-{rev}-flash-low",
+						"low": "gemini-{rev}-flash-low",
+						"medium": "gemini-{rev}-flash-medium",
+						"high": "gemini-{rev}-flash-high"
 					},
-					"mode": "google-level",
-					"efforts": [
-						"minimal",
-						"low",
-						"medium",
-						"high"
-					],
-					"requiresEffort": true
-				},
-				{
-					"provider": "google-gemini-cli",
-					"id": "gemini-3.7-flash",
-					"name": "Gemini 3.7 Flash",
-					"members": [
-						"gemini-3.7-flash-low",
-						"gemini-3.7-flash-medium",
-						"gemini-3.7-flash-high",
-						"gemini-3.7-flash-tiered"
-					],
-					"routing": {
-						"minimal": "gemini-3.7-flash-low",
-						"low": "gemini-3.7-flash-low",
-						"medium": "gemini-3.7-flash-medium",
-						"high": "gemini-3.7-flash-high"
-					},
+					"revision": ">=3.6",
 					"mode": "google-level",
 					"efforts": [
 						"minimal",
@@ -4763,7 +4702,7 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:93",
+				"source": "classes/gemini.kdl:94",
 				"class": "gemini",
 				"providers": [
 					"google",
@@ -4781,7 +4720,7 @@
 				}
 			},
 			{
-				"source": "classes/gemini.kdl:99",
+				"source": "classes/gemini.kdl:100",
 				"class": "gemini",
 				"providers": [
 					"google-antigravity",
@@ -8311,7 +8250,23 @@
 				}
 			},
 			{
-				"source": "providers/google-antigravity.kdl:11",
+				"source": "providers/google-antigravity.kdl:13",
+				"class": "gemini",
+				"providers": [
+					"google-antigravity"
+				],
+				"revision": [
+					{
+						"op": ">=",
+						"revision": "3.0.0"
+					}
+				],
+				"wire": {
+					"requiresSkipThoughtSignatureOnFirstFunctionCall": true
+				}
+			},
+			{
+				"source": "providers/google-antigravity.kdl:17",
 				"class": "gemini",
 				"providers": [
 					"google-antigravity"
@@ -8339,7 +8294,7 @@
 				}
 			},
 			{
-				"source": "providers/google-antigravity.kdl:21",
+				"source": "providers/google-antigravity.kdl:27",
 				"class": "gemini",
 				"providers": [
 					"google-antigravity"
@@ -8349,10 +8304,6 @@
 					{
 						"op": ">=",
 						"revision": "3.6.0"
-					},
-					{
-						"op": "<",
-						"revision": "3.8.0"
 					}
 				],
 				"thinking": {
@@ -8361,7 +8312,7 @@
 				}
 			},
 			{
-				"source": "providers/google-antigravity.kdl:27",
+				"source": "providers/google-antigravity.kdl:33",
 				"class": "gemini",
 				"providers": [
 					"google-antigravity"
@@ -8382,7 +8333,7 @@
 				}
 			},
 			{
-				"source": "providers/google-antigravity.kdl:33",
+				"source": "providers/google-antigravity.kdl:39",
 				"providers": [
 					"google-antigravity"
 				],
@@ -8402,7 +8353,7 @@
 				}
 			},
 			{
-				"source": "providers/google-antigravity.kdl:37",
+				"source": "providers/google-antigravity.kdl:43",
 				"providers": [
 					"google-antigravity"
 				],
@@ -8417,7 +8368,7 @@
 				}
 			},
 			{
-				"source": "providers/google-antigravity.kdl:41",
+				"source": "providers/google-antigravity.kdl:47",
 				"providers": [
 					"google-antigravity"
 				],
@@ -8433,7 +8384,7 @@
 				}
 			},
 			{
-				"source": "providers/google-antigravity.kdl:46",
+				"source": "providers/google-antigravity.kdl:52",
 				"providers": [
 					"google-antigravity"
 				],
@@ -8449,6 +8400,22 @@
 						"low": 1001
 					},
 					"mode": "budget"
+				}
+			},
+			{
+				"source": "providers/google-gemini-cli.kdl:8",
+				"class": "gemini",
+				"providers": [
+					"google-gemini-cli"
+				],
+				"revision": [
+					{
+						"op": ">=",
+						"revision": "3.0.0"
+					}
+				],
+				"wire": {
+					"requiresSkipThoughtSignatureOnFirstFunctionCall": true
 				}
 			},
 			{
