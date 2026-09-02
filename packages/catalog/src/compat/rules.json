@@ -4847,7 +4847,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:13",
+				"source": "classes/glm.kdl:16",
 				"class": "glm",
 				"revision": [
 					{
@@ -4859,6 +4859,7 @@
 						"revision": "5.3.0"
 					}
 				],
+				"priority": 10,
 				"thinking": {
 					"efforts": [
 						"minimal",
@@ -4870,7 +4871,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:17",
+				"source": "classes/glm.kdl:20",
 				"class": "glm",
 				"providers": [
 					"zai",
@@ -4892,7 +4893,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:23",
+				"source": "classes/glm.kdl:26",
 				"class": "glm",
 				"providers": [
 					"zai",
@@ -4919,7 +4920,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:29",
+				"source": "classes/glm.kdl:32",
 				"class": "glm",
 				"providers": [
 					"vercel-ai-gateway"
@@ -4945,7 +4946,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:36",
+				"source": "classes/glm.kdl:39",
 				"class": "glm",
 				"providers": [
 					"zai",
@@ -4973,7 +4974,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:46",
+				"source": "classes/glm.kdl:49",
 				"class": "glm",
 				"providers": [
 					"zai"
@@ -4994,7 +4995,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:58",
+				"source": "classes/glm.kdl:61",
 				"class": "glm",
 				"providers": [
 					"zai",
@@ -5014,7 +5015,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:62",
+				"source": "classes/glm.kdl:65",
 				"class": "glm",
 				"providers": [
 					"alibaba-coding-plan",
@@ -5026,7 +5027,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:66",
+				"source": "classes/glm.kdl:69",
 				"class": "glm",
 				"providers": [
 					"openrouter",
@@ -5043,7 +5044,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:77",
+				"source": "classes/glm.kdl:80",
 				"class": "glm",
 				"models": [
 					{
