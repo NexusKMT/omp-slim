@@ -11,6 +11,7 @@ interface BundledModel {
 	input?: readonly string[];
 	reasoning?: boolean;
 	thinking?: { efforts?: readonly string[]; defaultLevel?: string; requiresEffort?: boolean };
+	compat?: { clampOutputToModelMax?: boolean };
 }
 
 describe("zai bundled catalog", () => {
@@ -47,5 +48,9 @@ describe("zai bundled catalog", () => {
 		expect(model.thinking?.efforts).toEqual(["low", "high", "max"]);
 		expect(model.thinking?.requiresEffort).toBe(true);
 		expect(model.thinking?.defaultLevel).toBe("max");
+		// Native OpenAI-completions route: send the advertised 131K cap instead
+		// of the 64K OpenAI default (resolveOpenAICompletionsOutputClamp reads
+		// this wire field).
+		expect(model.compat?.clampOutputToModelMax).toBe(true);
 	});
 });

@@ -13245,7 +13245,7 @@
 				}
 			},
 			{
-				"source": "providers/zai.kdl:29",
+				"source": "providers/zai.kdl:32",
 				"providers": [
 					"zai"
 				],
@@ -13255,6 +13255,9 @@
 						"value": "glm-5.3-flash"
 					}
 				],
+				"wire": {
+					"clampOutputToModelMax": true
+				},
 				"thinking": {
 					"mode": "anthropic-budget-effort"
 				}
