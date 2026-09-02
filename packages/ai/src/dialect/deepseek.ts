@@ -238,6 +238,11 @@ export class DeepSeekInbandScanner implements InbandScanner {
 				this.#state = "dsmlSection";
 				return;
 			}
+			const orphanClose = this.#matchingOrphanDsmlClose();
+			if (orphanClose) {
+				this.#buffer = this.#buffer.slice(orphanClose.length);
+				continue;
+			}
 			const control = this.#matchingControlToken();
 			if (control) {
 				this.#buffer = this.#buffer.slice(control.length);
@@ -500,14 +505,18 @@ export class DeepSeekInbandScanner implements InbandScanner {
 		return "";
 	}
 
+	#matchingOrphanDsmlClose(): string | undefined {
+		for (const token of DSML_ORPHAN_CLOSE_TOKENS) {
+			if (this.#buffer.startsWith(token)) return token;
+		}
+		return undefined;
+	}
+
 	#matchingControlToken(): string | undefined {
 		if (this.#buffer.startsWith(DEEPSEEK_TOOL_CALLS_END)) return DEEPSEEK_TOOL_CALLS_END;
 		if (this.#buffer.startsWith(THINK_CLOSE)) return THINK_CLOSE;
 		if (this.#buffer.startsWith(DSML_TOOL_CALLS_CLOSE_FULLWIDTH)) return DSML_TOOL_CALLS_CLOSE_FULLWIDTH;
 		if (this.#buffer.startsWith(DSML_TOOL_CALLS_CLOSE_ASCII)) return DSML_TOOL_CALLS_CLOSE_ASCII;
-		for (const token of DSML_ORPHAN_CLOSE_TOKENS) {
-			if (this.#buffer.startsWith(token)) return token;
-		}
 		for (const token of CONTROL_TOKENS) {
 			if (this.#buffer.startsWith(token)) return token;
 		}
