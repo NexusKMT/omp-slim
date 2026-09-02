@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ToolCall } from "@oh-my-pi/pi-ai";
 import { ToolCallLoopGuard } from "@oh-my-pi/pi-ai/utils/tool-call-loop-guard";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 
@@ -240,5 +240,61 @@ describe("ToolCallLoopGuard", () => {
 				],
 			}),
 		).toBeNull();
+	});
+});
+
+describe("ToolCallLoopGuard multi-call turns", () => {
+	let nextId = 0;
+
+	function toolCall(name: string, args: Record<string, unknown>): ToolCall {
+		return { type: "toolCall", id: `tc_${nextId++}`, name, arguments: args };
+	}
+
+	function turn(...calls: ToolCall[]) {
+		return {
+			message: { role: "assistant", content: calls } as unknown as AssistantMessage,
+			toolResults: [],
+		};
+	}
+
+	test("counts consecutive identical multi-call batches toward the threshold", () => {
+		const guard = new ToolCallLoopGuard({ threshold: 3, exemptTools: [] });
+		const batch = () => [toolCall("bash", { command: "echo a" }), toolCall("read", { path: "a.ts" })];
+		expect(guard.recordTurn(turn(...batch()))).toBeNull();
+		expect(guard.recordTurn(turn(...batch()))).toBeNull();
+		expect(guard.recordTurn(turn(...batch()))).toMatchObject({ toolName: "bash", count: 3 });
+	});
+
+	test("resets on a turn with no tool calls", () => {
+		const guard = new ToolCallLoopGuard({ threshold: 2, exemptTools: [] });
+		const batch = () => [toolCall("bash", { command: "echo a" }), toolCall("read", { path: "a.ts" })];
+		expect(guard.recordTurn(turn(...batch()))).toBeNull();
+		expect(guard.recordTurn(turn())).toBeNull();
+		expect(guard.recordTurn(turn(...batch()))).toBeNull();
+	});
+
+	test("resets when every call in a multi-call turn is exempt", () => {
+		const guard = new ToolCallLoopGuard({ threshold: 2, exemptTools: ["read"] });
+		const batch = () => [toolCall("bash", { command: "echo a" }), toolCall("read", { path: "a.ts" })];
+		expect(guard.recordTurn(turn(...batch()))).toBeNull();
+		expect(guard.recordTurn(turn(toolCall("read", { path: "x.ts" }), toolCall("read", { path: "y.ts" })))).toBeNull();
+		expect(guard.recordTurn(turn(...batch()))).toBeNull();
+	});
+
+	test("counts a mixed batch and reports the first non-exempt call", () => {
+		const guard = new ToolCallLoopGuard({ threshold: 2, exemptTools: ["read"] });
+		const mixed = () => [toolCall("read", { path: "a.ts" }), toolCall("bash", { command: "echo a" })];
+		expect(guard.recordTurn(turn(...mixed()))).toBeNull();
+		expect(guard.recordTurn(turn(...mixed()))).toMatchObject({ toolName: "bash", count: 2 });
+	});
+
+	test("does not count alternating distinct batches", () => {
+		const guard = new ToolCallLoopGuard({ threshold: 2, exemptTools: [] });
+		const a = () => [toolCall("bash", { command: "echo a" }), toolCall("read", { path: "a.ts" })];
+		const b = () => [toolCall("bash", { command: "echo b" })];
+		expect(guard.recordTurn(turn(...a()))).toBeNull();
+		expect(guard.recordTurn(turn(...b()))).toBeNull();
+		expect(guard.recordTurn(turn(...a()))).toBeNull();
+		expect(guard.recordTurn(turn(...b()))).toBeNull();
 	});
 });
