@@ -211,7 +211,7 @@ export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
 		"Collab",
 		"Magic Keywords",
 		"Startup & Updates",
-		"Power (macOS)",
+		"Power",
 		"Agent",
 		"Git",
 	],
