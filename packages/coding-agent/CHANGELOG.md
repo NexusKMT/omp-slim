@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed user-scope marketplace plugins installed through `omp` losing their skills unless the Claude plugin source was separately enabled ([#10662](https://github.com/can1357/oh-my-pi/issues/10662)).
+- Fixed MCP tools discovered during startup disappearing after approving or leaving default-on plan mode ([#10683](https://github.com/can1357/oh-my-pi/issues/10683)).
 
 ## [18.1.6] - 2026-09-03
 
