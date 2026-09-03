@@ -4,6 +4,11 @@ import { parseAgentFields } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
 import { AUTO_THINKING } from "@oh-my-pi/pi-coding-agent/thinking";
 
 describe("parseAgentFields", () => {
+	test("rejects the reserved `main` agent definition name", () => {
+		expect(parseAgentFields({ name: "main", description: "desc" })).toBeNull();
+		expect(parseAgentFields({ name: " Main ", description: "desc" })).toBeNull();
+	});
+
 	test("parses blocking from boolean frontmatter", () => {
 		const fields = parseAgentFields({
 			name: "reviewer",
