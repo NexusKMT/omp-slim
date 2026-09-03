@@ -358,7 +358,6 @@ describe("persisted subagent revival", () => {
 		expect(capturedOptions?.agentName).not.toBe("sub");
 	});
 
-
 	it("restores the persisted per-agent advisor opt-in on cold revival", async () => {
 		const cwd = makeTempDir("@pi-advisor-revive-");
 		const advisedFile = await createPersistedSession(cwd, undefined, undefined, "moonshot/k3");
