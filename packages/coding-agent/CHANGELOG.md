@@ -33,6 +33,17 @@
 - Fixed the status line missing from the first frame at startup; its normal icons, colors, and chrome now appear immediately with ellipses in dynamic fields until the live values replace them in place.
 - Fixed Bash builtins (`cut`, `sed`, `ls`, `sort`, `uniq`, `cat`, and the rest) printing `<name>: Broken pipe (os error 32)` / `write error` and exiting 1 when a downstream stage quit early (`cut f | head`, `cut f | sed 'bad'`); they now die silently with status 141 like standalone utilities under SIGPIPE.
 - Fixed provider-qualified model roles written with a dotted revision (`anthropic/claude-fable-5.1:high`) silently resolving to OpenRouter's same-named flat id instead of the first-party `claude-fable-5-1`, which surfaced when a plan-mode tier or cycle-order role was applied; the dotted spelling now binds inside the named provider and fails closed when that provider is unavailable.
+### Added
+
+- Rules accept an `agents` frontmatter field so a rule applies only to matching agents (glob patterns against the agent name; `main` targets the top-level agent), surfaced in `omp ttsr list` and testable with `omp ttsr test --agent <name>`.
+
+### Fixed
+
+- Fixed cold-revived subagents losing `agents`-scoped rules by restoring the persisted agent definition name instead of the registry's generated display label.
+- Fixed `rule://<name>` resolving `Unknown rule` inside a subagent whose rules are scoped away from the main session's snapshot; `rule://` now resolves against the calling session's own applicable rule set.
+- Fixed the rule inspector showing "(no apply conditions)" on rules that are scoped only by `agents`.
+- Fixed `rule://<name>` and other internal-URL resolution inside a bash command run by a subagent to use that subagent's scoped rule set instead of the top-level session's, so `cat rule://<scoped-rule>` resolves correctly.
+- Reserved `main` and `sub` as subagent definition names: a custom agent named `main` or `sub` could previously masquerade as the corresponding session-kind sentinel for `agents`-scoped rule matching, including in a persisted transcript from before this reservation existed.
 
 ## [18.1.5] - 2026-09-03
 
