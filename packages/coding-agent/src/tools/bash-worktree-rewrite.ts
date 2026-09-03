@@ -1,6 +1,6 @@
 import { extractFlatShellCommandSegments, tokenizeShellSegments } from "./shell-tokenize";
 
-const SHELL_EXPANSION = /[$`~*?\[\]{}<>]/;
+const SHELL_EXPANSION = /[$`~*?[\]{}<>]/;
 const BARE_SAFE = /^[A-Za-z0-9_./:@%+=,-]+$/;
 
 function shellQuote(value: string): string {

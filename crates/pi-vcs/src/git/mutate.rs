@@ -464,6 +464,18 @@ impl GitRepo {
 				"destination already exists and is not empty",
 			));
 		}
+		if options.keep_changes {
+			let source_head = repo
+				.head_id()
+				.map_err(|e| Error::backend("git worktree add", e))?
+				.detach();
+			if source_head != id {
+				return Err(Error::backend(
+					"git worktree add",
+					"keeping uncommitted changes requires the target to be the source HEAD",
+				));
+			}
+		}
 		let head = if options.detach {
 			id.to_hex().to_string()
 		} else {
@@ -504,7 +516,7 @@ impl GitRepo {
 		let mut clone_error = None;
 		if let Some(preferred) = preferred {
 			for kind in pi_iso::clone_candidates(preferred) {
-				match self.worktree_add_cloned(path, id, &head, kind) {
+				match self.worktree_add_cloned(path, id, &head, kind, options.keep_changes) {
 					Ok(()) => {
 						return Ok(WorktreeAddResult { cloned_with: Some(kind), clone_error });
 					},
@@ -517,11 +529,55 @@ impl GitRepo {
 		}
 
 		fs::create_dir_all(path)?;
-		register_worktree(path, &self.info().common_dir, &head)?;
+		let admin = register_worktree(path, &self.info().common_dir, &head)?;
 		let linked = Self::require(path)?;
 		let linked_repo = linked.gix()?;
 		checkout_tree(&linked, &linked_repo, id, true)?;
+		if options.keep_changes {
+			self.seed_worktree_changes(path, &admin)?;
+		}
 		Ok(WorktreeAddResult { cloned_with: None, clone_error })
+	}
+
+	/// Replicate the source checkout's uncommitted state onto a freshly
+	/// materialized worktree at `path`: copy every dirty tracked and
+	/// untracked file (deleting what the source deleted), then install the
+	/// source index so staged hunks stay staged.
+	fn seed_worktree_changes(&self, path: &Path, admin: &Path) -> Result<()> {
+		let repo = self.gix()?;
+		let (dirty_tracked, untracked) = collect_clone_reconciliation_paths(&repo)?;
+		for relative in dirty_tracked.iter().chain(untracked.iter()) {
+			let relative = relative.to_path_lossy();
+			let src = self.root().join(&relative);
+			let dst = path.join(&relative);
+			match fs::symlink_metadata(&src) {
+				Ok(meta) if meta.file_type().is_symlink() => {
+					remove_existing(&dst)?;
+					if let Some(parent) = dst.parent() {
+						fs::create_dir_all(parent)?;
+					}
+					copy_symlink(&src, &dst)?;
+				},
+				Ok(meta) if meta.is_file() => {
+					remove_existing(&dst)?;
+					if let Some(parent) = dst.parent() {
+						fs::create_dir_all(parent)?;
+					}
+					fs::copy(&src, &dst)?;
+				},
+				Ok(_) => {},
+				Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+					remove_existing(&dst)?;
+					prune_empty_parents(path, dst.parent());
+				},
+				Err(err) => return Err(err.into()),
+			}
+		}
+		let source_index = self.info().git_dir.join("index");
+		if source_index.is_file() {
+			fs::copy(source_index, admin.join("index"))?;
+		}
+		Ok(())
 	}
 
 	fn worktree_add_cloned(
@@ -530,6 +586,7 @@ impl GitRepo {
 		id: gix::hash::ObjectId,
 		head: &str,
 		kind: pi_iso::BackendKind,
+		keep_changes: bool,
 	) -> Result<()> {
 		let repo = self.gix()?;
 		for key in ["core.sparseCheckout", "core.splitIndex"] {
@@ -553,7 +610,28 @@ impl GitRepo {
 		let (dirty_tracked, untracked) = collect_clone_reconciliation_paths(&repo)?;
 		let linked = Self::require(path)?;
 		let linked_repo = linked.gix()?;
-		let current = load_index_or_empty(&linked_repo, "git worktree add")?;
+		let mut current = load_index_or_empty(&linked_repo, "git worktree add")?;
+		if keep_changes {
+			// The clone already mirrors the source's live tree and the copied
+			// index carries its staged state. Only the stat cache is stale
+			// (new inodes); refresh it for entries the source reports clean so
+			// dirty files still hash on the next status.
+			for (entry, entry_path) in current.entries_mut_with_paths() {
+				if dirty_tracked.contains(entry_path) {
+					continue;
+				}
+				let Ok(metadata) = gix::index::fs::Metadata::from_path_no_follow(
+					&path.join(entry_path.to_path_lossy()),
+				) else {
+					continue;
+				};
+				entry.stat = gix::index::entry::Stat::from_fs(&metadata)
+					.map_err(|err| Error::backend("git worktree add", err))?;
+			}
+			return current
+				.write(INDEX_WRITE)
+				.map_err(|err| Error::backend("git worktree add", err));
+		}
 		let tree = commit_tree(&linked_repo, &id)?;
 		let mut target = linked_repo
 			.index_from_tree(&tree)
@@ -1448,6 +1526,28 @@ fn cleanup_worktree_add(path: &Path, common: &Path) {
 	}
 }
 
+/// Remove a file, symlink, or directory tree at `path`; missing is fine.
+fn remove_existing(path: &Path) -> Result<()> {
+	match fs::symlink_metadata(path) {
+		Ok(meta) if meta.is_dir() => fs::remove_dir_all(path)?,
+		Ok(_) => fs::remove_file(path)?,
+		Err(err) if err.kind() == std::io::ErrorKind::NotFound => {},
+		Err(err) => return Err(err.into()),
+	}
+	Ok(())
+}
+
+/// Recreate the symlink at `src` as `dst` (a plain file holding the link
+/// target on platforms without symlinks, matching git's `core.symlinks=false`).
+fn copy_symlink(src: &Path, dst: &Path) -> Result<()> {
+	let target = fs::read_link(src)?;
+	#[cfg(unix)]
+	std::os::unix::fs::symlink(&target, dst)?;
+	#[cfg(not(unix))]
+	fs::write(dst, target.to_string_lossy().as_bytes())?;
+	Ok(())
+}
+
 fn prune_empty_parents(root: &Path, mut parent: Option<&Path>) {
 	while let Some(dir) = parent {
 		if dir == root || fs::remove_dir(dir).is_err() {
@@ -1795,8 +1895,9 @@ mod tests {
 		let _ = fs::remove_dir_all(&linked);
 		repo
 			.worktree_add(&linked, "main", WorktreeAddOptions {
-				detach: true,
-				clone:  WorktreeClone::Off,
+				detach:       true,
+				clone:        WorktreeClone::Off,
+				keep_changes: false,
 			})
 			.unwrap();
 		let common = fs::canonicalize(repo.info().common_dir.clone()).unwrap();
@@ -1839,8 +1940,9 @@ mod tests {
 		let _ = fs::remove_dir_all(&linked);
 		let result = repo
 			.worktree_add(&linked, "target", WorktreeAddOptions {
-				detach: false,
-				clone:  WorktreeClone::Auto,
+				detach:       false,
+				clone:        WorktreeClone::Auto,
+				keep_changes: false,
 			})
 			.unwrap();
 
@@ -1880,14 +1982,73 @@ mod tests {
 	}
 
 	#[test]
+	fn worktree_add_keep_changes_carries_dirty_state_on_both_paths() {
+		for clone in [WorktreeClone::Auto, WorktreeClone::Off] {
+			let (temp, repo) = fixture();
+			fs::write(temp.path().join(".gitignore"), "build/\n").unwrap();
+			git(temp.path(), &["add", ".gitignore"]);
+			git(temp.path(), &["commit", "-qm", "ignore build"]);
+			fs::write(temp.path().join("a"), "staged\n").unwrap();
+			git(temp.path(), &["add", "a"]);
+			fs::write(temp.path().join("a"), "staged then edited\n").unwrap();
+			fs::remove_file(temp.path().join("b")).unwrap();
+			fs::create_dir_all(temp.path().join("new/dir")).unwrap();
+			fs::write(temp.path().join("new/dir/untracked"), "untracked\n").unwrap();
+			fs::create_dir_all(temp.path().join("build")).unwrap();
+			fs::write(temp.path().join("build/out.txt"), "ignored\n").unwrap();
+			git(temp.path(), &["branch", "kept"]);
+
+			let linked = temp.path().join(format!("../linked-keep-{clone:?}"));
+			let _ = fs::remove_dir_all(&linked);
+			let result = repo
+				.worktree_add(&linked, "kept", WorktreeAddOptions {
+					detach: false,
+					clone,
+					keep_changes: true,
+				})
+				.unwrap();
+			if clone == WorktreeClone::Off {
+				assert!(result.cloned_with.is_none());
+			}
+
+			assert_eq!(fs::read_to_string(linked.join("a")).unwrap(), "staged then edited\n");
+			assert!(!linked.join("b").exists());
+			assert_eq!(fs::read_to_string(linked.join("new/dir/untracked")).unwrap(), "untracked\n");
+			assert_eq!(
+				linked.join("build/out.txt").exists(),
+				result.cloned_with.is_some(),
+				"ignored files ride along only with a clone"
+			);
+			assert_eq!(
+				git(&linked, &["status", "--porcelain"]),
+				git(temp.path(), &["status", "--porcelain"]),
+				"linked worktree must report the same staged/unstaged/untracked set"
+			);
+			assert_eq!(git(&linked, &["rev-parse", "HEAD"]), git(temp.path(), &["rev-parse", "HEAD"]));
+			assert_eq!(git(&linked, &["symbolic-ref", "HEAD"]), "refs/heads/kept");
+			// The source keeps its own dirty state untouched.
+			assert_eq!(fs::read_to_string(temp.path().join("a")).unwrap(), "staged then edited\n");
+
+			let rejected = repo.worktree_add(
+				&temp.path().join("../linked-keep-rejected"),
+				"HEAD~1",
+				WorktreeAddOptions { detach: true, clone, keep_changes: true },
+			);
+			assert!(rejected.is_err(), "keep_changes must require the source HEAD as target");
+			let _ = repo.worktree_remove(&linked, true);
+		}
+	}
+
+	#[test]
 	fn mutate_worktree_and_detach() {
 		let (temp, repo) = fixture();
 		let linked = temp.path().join("../linked-mut");
 		let _ = fs::remove_dir_all(&linked);
 		repo
 			.worktree_add(&linked, "main", WorktreeAddOptions {
-				detach: true,
-				clone:  WorktreeClone::Off,
+				detach:       true,
+				clone:        WorktreeClone::Off,
+				keep_changes: false,
 			})
 			.unwrap();
 		assert!(
@@ -1900,8 +2061,9 @@ mod tests {
 		let _ = fs::remove_dir_all(&linked);
 		repo
 			.worktree_add(&linked, "main", WorktreeAddOptions {
-				detach: true,
-				clone:  WorktreeClone::Off,
+				detach:       true,
+				clone:        WorktreeClone::Off,
+				keep_changes: false,
 			})
 			.unwrap();
 		let common = fs::canonicalize(repo.info().common_dir.clone()).unwrap();

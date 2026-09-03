@@ -125,9 +125,12 @@ pub struct VcsWorktreeEntry {
 /// Worktree creation options.
 #[napi(object)]
 pub struct VcsWorktreeAddOptions {
-	pub detach:  bool,
-	pub clone:   bool,
-	pub backend: Option<IsoBackendKind>,
+	pub detach:       bool,
+	pub clone:        bool,
+	pub backend:      Option<IsoBackendKind>,
+	/// Carry the source checkout's uncommitted changes into the new worktree
+	/// (target must be the source `HEAD`).
+	pub keep_changes: Option<bool>,
 }
 /// Worktree creation outcome.
 #[napi(object)]
@@ -875,6 +878,7 @@ impl VcsGitRepo {
 			r.worktree_add(Path::new(&path), &ref_name, core::WorktreeAddOptions {
 				detach: options.detach,
 				clone,
+				keep_changes: options.keep_changes.unwrap_or(false),
 			})
 			.map(|result| VcsWorktreeAddResult {
 				cloned_with: result.cloned_with.map(to_napi_kind),

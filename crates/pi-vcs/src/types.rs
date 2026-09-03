@@ -121,8 +121,12 @@ pub enum WorktreeClone {
 /// Options for linked-worktree creation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorktreeAddOptions {
-	pub detach: bool,
-	pub clone:  WorktreeClone,
+	pub detach:       bool,
+	pub clone:        WorktreeClone,
+	/// Carry the source checkout's staged, unstaged, and untracked changes
+	/// into the new worktree instead of starting from a clean tree. Requires
+	/// the target ref to resolve to the source `HEAD` commit.
+	pub keep_changes: bool,
 }
 
 /// Outcome of linked-worktree creation.

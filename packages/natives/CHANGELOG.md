@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Updated `worktreeAdd` signature to support additional creation options and return results
+- Updated `worktreeAdd` to support additional creation options, including keeping uncommitted changes
 
 ## [18.1.3] - 2026-09-02
 

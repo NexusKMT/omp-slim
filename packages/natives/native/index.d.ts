@@ -2594,6 +2594,11 @@ export interface VcsWorktreeAddOptions {
   detach: boolean
   clone: boolean
   backend?: IsoBackendKind
+  /**
+   * Carry the source checkout's uncommitted changes into the new worktree
+   * (target must be the source `HEAD`).
+   */
+  keepChanges?: boolean
 }
 
 /** Worktree creation outcome. */
