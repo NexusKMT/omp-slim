@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.7] - 2026-09-03
+
 ### Breaking Changes
 
 - Removed the Ruby and Julia eval backends and related interpreter configuration; eval now supports Python and JavaScript only.
