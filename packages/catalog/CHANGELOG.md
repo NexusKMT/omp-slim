@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.6] - 2026-09-03
+
 ### Added
 
 - Added catalog-delivered model intelligence scores and estimated output throughput to help compare model capabilities and performance.

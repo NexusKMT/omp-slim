@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.6] - 2026-09-03
+
 ### Added
 
 - Added `IncomingDoc` (`@oh-my-pi/pi-utils/incoming-json`) for incrementally reading path-addressed JSON data as text arrives, including string chunks and lines, array elements, and keyed object values, with structured errors for missing, incomplete, aborted, malformed, or mismatched data.

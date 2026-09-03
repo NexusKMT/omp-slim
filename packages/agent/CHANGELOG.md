@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.6] - 2026-09-03
+
 ### Added
 
 - Added support for streaming tool argument updates, providing more responsive tool-call progress.
