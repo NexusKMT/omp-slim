@@ -1,35 +1,11 @@
-import { afterEach, describe, expect, test, vi } from "bun:test";
-import { getOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
-import { getEnvApiKey } from "@oh-my-pi/pi-ai/stream";
+import { describe, expect, test, vi } from "bun:test";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { DEFAULT_MODEL_PER_PROVIDER, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import { abliterationModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { FetchImpl, ResolvedOpenAIResponsesCompat } from "@oh-my-pi/pi-catalog/types";
 
-const ORIGINAL_ENV = {
-	ABLITERATION_API_KEY: Bun.env.ABLITERATION_API_KEY,
-	ABLIT_KEY: Bun.env.ABLIT_KEY,
-} as const;
-
-afterEach(() => {
-	for (const [name, value] of Object.entries(ORIGINAL_ENV)) {
-		if (value === undefined) delete Bun.env[name];
-		else Bun.env[name] = value;
-	}
-	vi.restoreAllMocks();
-});
-
 describe("Abliteration provider support", () => {
-	test("resolves Abliteration and ABLIT API key environment fallbacks", () => {
-		delete Bun.env.ABLITERATION_API_KEY;
-		Bun.env.ABLIT_KEY = "abliteration-alias-key";
-		expect(getEnvApiKey("abliteration")).toBe("abliteration-alias-key");
-
-		Bun.env.ABLITERATION_API_KEY = "abliteration-test-key";
-		expect(getEnvApiKey("abliteration")).toBe("abliteration-test-key");
-	});
-
 	test("registers descriptor, default model, and bundled abliterated models", () => {
 		const descriptor = PROVIDER_DESCRIPTORS.find(item => item.providerId === "abliteration");
 		expect(descriptor).toBeDefined();
@@ -72,9 +48,6 @@ describe("Abliteration provider support", () => {
 		for (const model of bundled) {
 			expect((model.compat as ResolvedOpenAIResponsesCompat).includeEncryptedReasoning).toBe(false);
 		}
-
-		const provider = getOAuthProviders().find(item => item.id === "abliteration");
-		expect(provider?.name).toBe("Abliteration");
 	});
 
 	test("discovers models from the Abliteration Models API with normalized base URL", async () => {

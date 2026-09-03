@@ -24,8 +24,6 @@ interface HostClassSpec {
 }
 
 export const KNOWN_HOSTS = {
-	/** Abliteration (`api.abliteration.ai`). OpenAI-compatible; OpenAI-style `reasoning_effort` ladder with a legacy top-level `thinking` toggle. */
-	abliteration: { providers: ["abliteration"], urlMarkers: ["api.abliteration.ai"] },
 	openai: { providers: ["openai"], urlMarkers: ["api.openai.com"] },
 	azureOpenAI: {
 		providers: ["azure"],
