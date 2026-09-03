@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added native Windows ARM64 binaries with architecture-aware installation and updates.
+
 ### Fixed
 
 - Fixed user-scope marketplace plugins installed through `omp` losing their skills unless the Claude plugin source was separately enabled ([#10662](https://github.com/can1357/oh-my-pi/issues/10662)).

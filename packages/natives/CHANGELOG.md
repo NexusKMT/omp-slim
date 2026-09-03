@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Windows ARM64 native addon builds and npm leaf packages.
+
 ## [18.1.6] - 2026-09-03
 
 ### Breaking Changes
