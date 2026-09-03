@@ -20,6 +20,18 @@
 ### Fixed
 
 - Fixed `grep` and `sed` treating basic regular expressions as extended ones, which silently matched every line for patterns like `^+` or `s/^\+/` and swapped the meanings of `+` and `\+` ([#10298](https://github.com/can1357/oh-my-pi/pull/10298) by [@mruangutai](https://github.com/mruangutai)).
+### Breaking Changes
+
+- Renamed `MacOSPowerAssertion` to `PowerAssertion` and `MacOSPowerAssertionOptions` to `PowerAssertionOptions`. The options and handle shape are unchanged.
+
+### Added
+
+- Added Linux sleep inhibition to `PowerAssertion` through a logind (`org.freedesktop.login1`) inhibitor descriptor, supplemented for `display` by a best-effort `org.freedesktop.ScreenSaver` cookie.
+- Added Windows sleep inhibition to `PowerAssertion` through `SetThreadExecutionState` on a dedicated thread.
+
+### Changed
+
+- `PowerAssertion.start` reports acquisition failures on Linux and Windows rather than returning a handle that silently does nothing. Platforms with no implementation still receive a no-op handle.
 
 ## [18.1.0] - 2026-09-01
 

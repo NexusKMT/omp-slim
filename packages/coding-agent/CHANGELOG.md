@@ -101,6 +101,9 @@
 - The `doubleEscapeAction` setting now accepts `tree`, so double-Escape can open the session tree instead of the rewind selector.
 - Updated the visual representation for the IRC tool from "irc" to "#"
 - Rewinding to a user message (double-Escape, `/branch`) now branches within the current session — the old path stays reachable in `/tree` — instead of forking a child session; `/rewind` is an alias for `/branch` ([#10565](https://github.com/can1357/oh-my-pi/pull/10565) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
+### Changed
+
+- `power.sleepPrevention` now takes effect on Linux and Windows, where it previously did nothing. Its `idle` default means a long session keeps those hosts awake the way it already did on macOS; set it to `off` to restore the old behavior.
 
 ### Fixed
 
