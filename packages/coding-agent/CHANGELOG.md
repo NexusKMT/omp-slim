@@ -6,6 +6,10 @@
 
 - Removed incorrect retry instructions from unsupported model error messages
 
+### Removed
+
+- Removed the bundled `designer` subagent and the `designer` model role; `modelRoles.designer` and `@designer` are no longer built in.
+
 ### Fixed
 
 - Provider errors in the transcript and the pinned error banner now wrap to the terminal width instead of being cut at a fixed column with no way to read the rest; long bodies keep a bounded number of rows and end with the `Ctrl+O to expand` hint.
