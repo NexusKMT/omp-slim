@@ -1950,11 +1950,10 @@ mod tests {
 		assert_eq!(fs::read_to_string(linked.join("c")).unwrap(), "added\n");
 		assert!(!linked.join("b").exists());
 		assert!(!linked.join("untracked").exists());
-		assert_eq!(
+		assert!(
 			fs::read_to_string(linked.join(".git"))
 				.unwrap()
-				.starts_with("gitdir: "),
-			true
+				.starts_with("gitdir: ")
 		);
 		let linked_repo = GitRepo::require(&linked).unwrap();
 		assert_eq!(
