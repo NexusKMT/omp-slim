@@ -9,6 +9,8 @@
 
 ### Changed
 
+- Amazon Bedrock requests now send an `omp/<version>` User-Agent instead of the runtime default, and honor a configured `User-Agent` override.
+- Codex GPT-5.6 turns now use full Responses by default, allowing independent tool calls to run in parallel; provider-native compaction continues to use catalog-selected Responses Lite.
 - Inference requests now identify as omp by default while preserving explicit provider and OAuth User-Agent fingerprints.
 
 ### Fixed
