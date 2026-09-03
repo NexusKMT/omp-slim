@@ -73,6 +73,8 @@
 - Fixed a user aside whose image normalization resolved after a `newSession()`/`switchSession()` had disconnected the agent but before it bumped the session generation, which could wake a fresh `agent.prompt()` on the disconnected agent and race the transition's own reset instead of being dropped like other stranded records.
 - Fixed the `#sessionGeneration` guard in `sendUserMessage(..., { deliverAs: "aside" })`/`sendMessage(..., { deliverAs: "aside" })` permanently discarding a record on any generation mismatch, even when a `switchSession()` that bumped the generation subsequently failed and rolled back to the exact same session — the record now waits out the in-flight transition and is preserved.
 - Fixed a self-hosted `FIRECRAWL_BASE_URL` that names only an origin (for example `http://localhost:3002`) resolving to a doubled slash such as `http://localhost:3002//v2/search`, which could miss the server's route.
+- Fixed a parent `hub send` arriving while a subagent streams its final `yield` marking the yield "Skipped due to pending parent steering message" and leaving the task running; the already-emitted yield now commits and settles the task ([#10645](https://github.com/can1357/oh-my-pi/issues/10645)).
+- Fixed typing a message while the model streams an `edit`/`write` discarding the finished tool call as "Skipped" and forcing a full regeneration; already-emitted tools now run and the message lands right after them ([#10439](https://github.com/can1357/oh-my-pi/issues/10439)).
 
 ## [18.1.5] - 2026-09-03
 

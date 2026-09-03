@@ -9,6 +9,9 @@
 ### Changed
 
 - Normalize trailing periods in tool intents
+### Changed
+
+- Queued steering no longer skips already-emitted non-interruptible tool calls; only interruptible waits are aborted or skipped, and the steer injects after the batch ([#10439](https://github.com/can1357/oh-my-pi/issues/10439), [#10645](https://github.com/can1357/oh-my-pi/issues/10645)).
 
 ## [18.1.2] - 2026-09-01
 
