@@ -44,6 +44,24 @@
 - Fixed the rule inspector showing "(no apply conditions)" on rules that are scoped only by `agents`.
 - Fixed `rule://<name>` and other internal-URL resolution inside a bash command run by a subagent to use that subagent's scoped rule set instead of the top-level session's, so `cat rule://<scoped-rule>` resolves correctly.
 - Reserved `main` and `sub` as subagent definition names: a custom agent named `main` or `sub` could previously masquerade as the corresponding session-kind sentinel for `agents`-scoped rule matching, including in a persisted transcript from before this reservation existed.
+### Added
+
+- Extensions can deliver messages without interrupting the agent: `pi.sendMessage`/`pi.sendUserMessage` now accept `deliverAs: "aside"`, which injects at the next step boundary instead of interrupting the current tool batch.
+
+### Fixed
+
+- Fixed a stranded extension/user aside surviving a `newSession()`/`switchSession()` transition and leaking into the new session's transcript on its first prompt.
+- Fixed a displayable custom aside folded into context after going stranded mid-stream never emitting the `message_end` its sender's UI rebuild-skip decision was waiting on, leaving the message invisible until an unrelated transcript rebuild.
+- Fixed `sendUserMessage(..., { deliverAs: "aside" })` degrading into a tool-batch-aborting steer when a turn started streaming during `prompt()`'s own setup (manual-compaction cleanup or image normalization), instead of staying non-interrupting.
+- Fixed `sendMessage(..., { deliverAs: "aside" })` remaining undelivered until an unrelated prompt if the active run settled while the custom aside awaited image normalization, instead of resuming into the documented idle wake turn.
+- Fixed `sendMessage(..., { deliverAs: "aside" })` starting a fresh autonomous turn and undoing a user's Esc interrupt when image normalization outlasted the interrupt, instead of folding the aside into context and staying user-driven.
+- Fixed `sendCustomMessage(..., { deliverAs: "aside" | "nextTurn", triggerTurn: true })` always reporting a started turn even when an abort or session-generation change raced the usage-aware preflight and the agent turn never actually dispatched, which could leave RPC callers waiting on agent events that never arrive.
+- Fixed `IrcBridge.restorePending()` discarding IRC/extension records queued while a rolled-back `switchSession()` was still tearing down, instead of merging them back in delivery order.
+- Fixed `sendUserMessage(..., { deliverAs: "aside" })`/`sendMessage(..., { deliverAs: "aside" })` leaking a record into the wrong session's transcript when image normalization outlived a concurrent `newSession()`/`switchSession()`, instead of dropping it once the source session generation changes.
+- Fixed the plan-mode and post-interrupt fold branches for `sendCustomMessage(..., { deliverAs: "aside" })` appending directly to context instead of routing through the event-emitting fold path, so a displayable aside that began streaming again emits the `message_end` its sender's UI rebuild-skip decision expects.
+- Fixed `sendCustomMessage(..., { deliverAs: "aside" })`'s idle-session branch (plan-mode fold, post-interrupt fold, or an autonomous turn) never validating the source session generation, so an aside whose image normalization outlived a concurrent `newSession()`/`switchSession()` could still land in the newly selected session.
+- Fixed a user aside whose image normalization resolved after a `newSession()`/`switchSession()` had disconnected the agent but before it bumped the session generation, which could wake a fresh `agent.prompt()` on the disconnected agent and race the transition's own reset instead of being dropped like other stranded records.
+- Fixed the `#sessionGeneration` guard in `sendUserMessage(..., { deliverAs: "aside" })`/`sendMessage(..., { deliverAs: "aside" })` permanently discarding a record on any generation mismatch, even when a `switchSession()` that bumped the generation subsequently failed and rolled back to the exact same session — the record now waits out the in-flight transition and is preserved.
 
 ## [18.1.5] - 2026-09-03
 
