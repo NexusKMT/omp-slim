@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `getTinyWorkerRuntimeDir()` (~/.omp/run/tiny) for the per-model tiny-worker sockets and logs.
+
 ## [18.1.6] - 2026-09-03
 
 ### Added

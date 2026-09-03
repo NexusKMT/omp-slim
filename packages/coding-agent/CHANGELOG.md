@@ -5,12 +5,12 @@
 ### Added
 
 - Added native Windows ARM64 binaries with architecture-aware installation and updates.
-- Added an MLX backend for local tiny models on Apple silicon: set `providers.tinyModelDevice` to `mlx` (or `PI_TINY_DEVICE=mlx`/`metal`) to download each model's MLX weights and run titles, memory tasks, and the `auto` thinking classifier through an on-demand `mlx-lm` daemon (`omp.tiny.mlx` in `omp ps --all`); falls back to ONNX CPU when Python is unavailable.
+- Added an MLX backend for local tiny models on Apple silicon: set `providers.tinyModelDevice` to `mlx` (or `PI_TINY_DEVICE=mlx`/`metal`) to download each model's MLX weights and run titles, memory tasks, and the `auto` thinking classifier through an on-demand `mlx-lm` worker; falls back to ONNX CPU when Python is unavailable.
 - Qwen3 1.7B is now usable as a local memory/classifier model on the MLX backend (it stays blocked on ONNX).
 
 ### Changed
 
-- Local tiny models (titles, memory, `auto` thinking) now run in one worker shared by every omp process on the machine (`omp.tiny.worker` in `omp ps --all`) instead of one per instance; it starts on demand, stops when the last omp exits, and exits by itself after 15 idle minutes.
+- Local tiny models (titles, memory, `auto` thinking) now run in one worker per model shared by every omp process on the machine instead of one worker per instance; workers start on demand and exit by themselves after 15 idle minutes.
 - `PI_TINY_DEVICE=metal` now selects the MLX backend instead of being forced back to CPU on macOS.
 
 ### Fixed
