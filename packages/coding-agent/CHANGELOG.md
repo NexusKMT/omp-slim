@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Rules accept an `agents` frontmatter field so a rule applies only to matching agents (glob patterns against the agent name; `main` targets the top-level agent), surfaced in `omp ttsr list` and testable with `omp ttsr test --agent <name>`.
+
 ### Fixed
 
 - Fixed cold-revived subagents losing `agents`-scoped rules by restoring the persisted agent definition name instead of the registry's generated display label.
@@ -36,9 +40,6 @@
 ### Removed
 
 - Removed the bundled `designer` subagent and `designer` model role; `modelRoles.designer` and `@designer` are no longer built in.
-
-### Added
-- Rules accept an `agents` frontmatter field so a rule applies only to matching agents (glob patterns against the agent name; `main` targets the top-level agent), surfaced in `omp ttsr list` and testable with `omp ttsr test --agent <name>`.
 
 ## [18.1.3] - 2026-09-02
 
