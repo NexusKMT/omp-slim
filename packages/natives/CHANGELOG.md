@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Updated `worktreeAdd` to support additional creation options, including keeping uncommitted changes
+- Updated `worktreeAdd` to support additional worktree creation options, including preserving uncommitted changes.
 
 ## [18.1.3] - 2026-09-02
 
