@@ -315,6 +315,29 @@ describe("persisted subagent revival", () => {
 		expect(capturedOptions?.agentName).toBe(ref.displayName);
 		expect(capturedOptions?.agentName).not.toBe("main");
 	});
+	it("treats a persisted legacy 'sub'-named subagent as scoped to the ref display name, not the shared sub sentinel", async () => {
+		const cwd = makeTempDir("@pi-revive-agent-name-legacy-sub-");
+		const sessionFile = await createPersistedSession(cwd, undefined, undefined, undefined, { agent: "sub" });
+		let capturedOptions: CreateAgentSessionOptions | undefined;
+		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async options => {
+			capturedOptions = options;
+			return { session: createRevivedSession([]).session } as CreateAgentSessionResult;
+		});
+
+		const ref = createRef(sessionFile);
+		const reviver = await createFactory(cwd)(ref);
+		if (!reviver) throw new Error("Expected a persisted reviver");
+		await reviver(ref);
+
+		// A parked transcript from before "sub" was reserved as a definition
+		// name could still carry `init.agent === "sub"`. That must not resolve
+		// to the shared subagent-fallback sentinel here, or `agents: [sub]`
+		// rules meant for that specific legacy definition would load into every
+		// unnamed subagent session.
+		expect(capturedOptions?.agentName).toBe(ref.displayName);
+		expect(capturedOptions?.agentName).not.toBe("sub");
+	});
+
 
 	it("restores the persisted per-agent advisor opt-in on cold revival", async () => {
 		const cwd = makeTempDir("@pi-advisor-revive-");

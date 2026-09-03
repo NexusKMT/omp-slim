@@ -195,6 +195,9 @@ export function parseRuleAgents(value: unknown): string[] | undefined {
 /** Agent name used for the top-level (non-sub) session when evaluating `agents`. */
 export const MAIN_AGENT_RULE_NAME = "main";
 
+/** Fallback agent name used for a subagent session with no explicit `agentName` (see sdk.ts). */
+export const SUB_AGENT_RULE_NAME = "sub";
+
 /**
  * Whether a rule's `agents` scope admits `agentName`. A rule without `agents`
  * applies everywhere; `agentName === undefined` disables scoping entirely

@@ -20,6 +20,7 @@ import {
 	parseRuleConditionAndScope,
 	type Rule,
 	type RuleFrontmatter,
+	SUB_AGENT_RULE_NAME,
 } from "../capability/rule";
 import type { Skill, SkillFrontmatter } from "../capability/skill";
 import type { LoadContext, LoadResult, SourceMeta } from "../capability/types";
@@ -269,10 +270,13 @@ export function parseAgentFields(frontmatter: Record<string, unknown>): ParsedAg
 		return null;
 	}
 	// "main" is the sentinel `agentName` for the top-level session (see
-	// MAIN_AGENT_RULE_NAME). A subagent definition sharing that name would
-	// resolve to the same value, letting it load rules scoped `agents: [main]`
-	// that are documented as top-level-only.
-	if (name.trim().toLowerCase() === MAIN_AGENT_RULE_NAME) {
+	// MAIN_AGENT_RULE_NAME); "sub" is the fallback `agentName` for a subagent
+	// session with no explicit name (see SUB_AGENT_RULE_NAME / sdk.ts). A
+	// custom agent definition sharing either name would resolve to the same
+	// sentinel value, letting it load rules scoped `agents: [main]` or
+	// `agents: [sub]` that are documented to target only that session kind.
+	const normalizedName = name.trim().toLowerCase();
+	if (normalizedName === MAIN_AGENT_RULE_NAME || normalizedName === SUB_AGENT_RULE_NAME) {
 		return null;
 	}
 
