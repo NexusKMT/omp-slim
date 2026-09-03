@@ -71,10 +71,14 @@ export class IrcBridge {
 		return snapshot;
 	}
 
-	/** Restores a snapshot taken by `clearPending`, for a rolled-back session transition. */
+	/** Restores a snapshot taken by `clearPending`, for a rolled-back session transition. Merges
+	 *  ahead of whatever queued in the meantime (e.g. an in-flight IRC auto-reply appending while
+	 *  the rolled-back switch's async load/hooks were still running) instead of overwriting it, so
+	 *  those newly arrived records aren't silently discarded — snapshot records precede them since
+	 *  they arrived first. */
 	restorePending(snapshot: { interrupts: AgentMessage[]; asides: AgentMessage[] }): void {
-		this.#interrupts = snapshot.interrupts;
-		this.#asides = snapshot.asides;
+		this.#interrupts = [...snapshot.interrupts, ...this.#interrupts];
+		this.#asides = [...snapshot.asides, ...this.#asides];
 	}
 
 	/** Queues records for the next step-boundary aside injection: IRC wakes deferred by a

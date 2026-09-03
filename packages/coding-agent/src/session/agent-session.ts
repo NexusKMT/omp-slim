@@ -6802,13 +6802,17 @@ export class AgentSession {
 		}
 	}
 
+	/** @returns true iff `agent.prompt` was actually invoked. An abort or session-generation
+	 *  change racing the usage-aware preflight can return before dispatch — callers that treat
+	 *  this as proof of agent work (e.g. suppressing a local prompt_result because agent events
+	 *  are expected) must not assume dispatch happened just because this was awaited. */
 	async #promptAgentInitiatedMessage(
 		message: CustomMessage,
 		options?: { acceptTerminalEmptyStop?: boolean },
-	): Promise<void> {
+	): Promise<boolean> {
 		this.#beginInFlight();
 		try {
-			if (!(await this.#runUsageAwarePreflightForNextModelCall())) return;
+			if (!(await this.#runUsageAwarePreflightForNextModelCall())) return false;
 			const acceptTerminalEmptyStop = options?.acceptTerminalEmptyStop === true;
 			if (acceptTerminalEmptyStop) {
 				this.#resetPromptMaintenanceState();
@@ -6816,6 +6820,7 @@ export class AgentSession {
 			this.#recovery.setAcceptTerminalEmptyStop(acceptTerminalEmptyStop);
 			await this.agent.prompt(message);
 			await this.#waitForPostPromptRecovery();
+			return true;
 		} finally {
 			this.#usagePreflightReadyForNextModelCall = false;
 			this.#recovery.setAcceptTerminalEmptyStop(false);
@@ -6944,10 +6949,9 @@ export class AgentSession {
 					this.#queueHiddenNextTurnMessage(normalizedAppMessage, false);
 					return false;
 				}
-				await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
+				return await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
 					acceptTerminalEmptyStop: options.acceptTerminalEmptyStop === true,
 				});
-				return true;
 			}
 			this.agent.appendMessage(normalizedAppMessage);
 			this.sessionManager.appendCustomMessageEntry(
@@ -6974,14 +6978,29 @@ export class AgentSession {
 				);
 				return false;
 			}
+			if (this.#advisors.autoResumeSuppressed) {
+				// A user interrupt (Esc) is still in effect. isStreaming was true when this method
+				// was entered but image normalization above outlasted the interrupt, landing here
+				// instead of the streaming branch's queueAside — starting a fresh autonomous turn
+				// would undo the user's deliberate stop. Fold into context and stay user-driven,
+				// matching #resumeStrandedIrcAsides's post-interrupt fold branch.
+				this.agent.appendMessage(normalizedAppMessage);
+				this.sessionManager.appendCustomMessageEntry(
+					normalizedAppMessage.customType,
+					normalizedAppMessage.content,
+					normalizedAppMessage.display,
+					normalizedAppMessage.details,
+					normalizedAppMessage.attribution,
+				);
+				return false;
+			}
 			if (this.#clientBridge?.deferAgentInitiatedTurns && !this.#allowAcpAgentInitiatedTurns) {
 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, false);
 				return false;
 			}
-			await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
+			return await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
 				acceptTerminalEmptyStop: options.acceptTerminalEmptyStop === true,
 			});
-			return true;
 		}
 
 		if (options?.triggerTurn) {
@@ -6989,8 +7008,7 @@ export class AgentSession {
 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, false);
 				return false;
 			}
-			await this.#promptAgentInitiatedMessage(normalizedAppMessage);
-			return true;
+			return await this.#promptAgentInitiatedMessage(normalizedAppMessage);
 		}
 
 		this.agent.appendMessage(normalizedAppMessage);

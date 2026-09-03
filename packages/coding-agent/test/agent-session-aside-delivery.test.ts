@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
-import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
+import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Context } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
@@ -9,7 +9,8 @@ import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
+import { IrcBridge, type IrcBridgeHost } from "@oh-my-pi/pi-coding-agent/session/irc-bridge";
+import { convertToLlm, USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
@@ -614,5 +615,195 @@ describe("AgentSession aside delivery", () => {
 		expect(JSON.stringify(observedRecords)).toContain("SETTLED_RACE_ASIDE");
 		expect(contexts).toHaveLength(1);
 		expect(JSON.stringify(contexts[0]!.messages)).toContain("SETTLED_RACE_ASIDE");
+	});
+
+	it("sendCustomMessage(deliverAs: 'aside') folds into context instead of starting a turn when a user interrupt outlasted normalization", async () => {
+		// Regression: this branch is only reached once isStreaming reads false — which can happen
+		// either because the session was already idle, or because image normalization above
+		// outlasted a user Esc that settled the run in the meantime. The old code treated both
+		// cases identically and always started a fresh autonomous turn, undoing a deliberate
+		// interrupt. Simulate the second case directly: abort with a user interrupt (which sets
+		// autoResumeSuppressed), then send the aside on the now-idle session.
+		const model = createMockModel({ provider: "openai", id: "gpt-test" }).model;
+		const modelRegistry = new ModelRegistry(authStorage);
+		const contexts: Context[] = [];
+
+		const started = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		const slowTool: AgentTool = {
+			name: "slow",
+			label: "Slow",
+			description: "Blocks until released",
+			parameters: type({}),
+			execute: async (_id, _params, _signal) => {
+				started.resolve();
+				await release.promise;
+				return { content: [{ type: "text", text: "SLOW_DONE" }] };
+			},
+		};
+
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [slowTool], messages: [] },
+			convertToLlm,
+			streamFn: (_model, context) => {
+				contexts.push(context);
+				const message: AssistantMessage = {
+					role: "assistant",
+					content: [{ type: "toolCall", id: "tc-0", name: "slow", arguments: {} }],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					usage: zeroUsage,
+					stopReason: "toolUse",
+					timestamp: Date.now(),
+				};
+				const stream = new AssistantMessageEventStream();
+				queueMicrotask(() => {
+					stream.push({ type: "start", partial: message });
+					stream.push({ type: "done", reason: "toolUse", message });
+				});
+				return stream;
+			},
+		});
+		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
+		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(tempDir.path()),
+			settings,
+			modelRegistry,
+			toolRegistry: new Map([[slowTool.name, slowTool]]),
+		});
+
+		const run = session.prompt("go");
+		await started.promise;
+		release.resolve();
+		await session.abort({ reason: USER_INTERRUPT_LABEL });
+		await run.catch(() => {});
+		await session.waitForIdle();
+		contexts.length = 0;
+
+		const dispatched = await session.sendCustomMessage(
+			{ customType: "ext-aside", content: "SUPPRESSED_ASIDE", display: false, attribution: "agent" },
+			{ deliverAs: "aside" },
+		);
+
+		expect(dispatched).toBe(false);
+		expect(contexts).toHaveLength(0);
+		const persisted = session.agent.state.messages.some(
+			message => message.role === "custom" && message.customType === "ext-aside",
+		);
+		expect(persisted).toBe(true);
+	});
+
+	it("sendCustomMessage(deliverAs: 'aside'/'nextTurn') reports false when the agent-initiated turn never dispatches", async () => {
+		// Regression: #promptAgentInitiatedMessage used to return void, so its callers hard-coded
+		// `return true` unconditionally. If an abort races the usage-aware preflight (which
+		// registers an AbortController and captures the prompt generation before its first real
+		// await), the helper returns before ever calling agent.prompt — callers that treat the
+		// boolean as proof of dispatched agent work (e.g. RPC's hasAgentMessageTask gate) must see
+		// `false`, not a stale `true` that leaves them waiting on events that never arrive.
+		const model = createMockModel({ provider: "openai", id: "gpt-test" }).model;
+		const modelRegistry = new ModelRegistry(authStorage);
+		const contexts: Context[] = [];
+
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+			convertToLlm,
+			streamFn: (_model, context) => {
+				contexts.push(context);
+				const message: AssistantMessage = {
+					role: "assistant",
+					content: [{ type: "text", text: "Acknowledged." }],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					usage: zeroUsage,
+					stopReason: "stop",
+					timestamp: Date.now(),
+				};
+				const stream = new AssistantMessageEventStream();
+				queueMicrotask(() => {
+					stream.push({ type: "start", partial: message });
+					stream.push({ type: "done", reason: "stop", message });
+				});
+				return stream;
+			},
+		});
+		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
+		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(tempDir.path()),
+			settings,
+			modelRegistry,
+			toolRegistry: new Map(),
+		});
+
+		const dispatchedPromise = session.sendCustomMessage(
+			{ customType: "ext-aside", content: "PREFLIGHT_RACE_ASIDE", display: false, attribution: "agent" },
+			{ deliverAs: "aside" },
+		);
+		// #beginInFlight() (which flips isStreaming) and the usage-aware preflight's abort
+		// controller registration + generation capture run synchronously together with no
+		// intervening await; poll until the first observable side effect (isStreaming) confirms
+		// that stretch has run, then abort — landing inside the preflight's own first await,
+		// exactly the race the fix covers.
+		while (!session.isStreaming) {
+			await Promise.resolve();
+		}
+		await session.abort({ reason: "internal" });
+
+		expect(await dispatchedPromise).toBe(false);
+		await session.waitForIdle();
+		expect(contexts).toHaveLength(0);
+	});
+
+	it("IrcBridge.restorePending merges a rolled-back snapshot ahead of records queued during the rollback instead of discarding them", () => {
+		// Regression: restorePending used to overwrite the queues wholesale, silently dropping any
+		// record queued between clearPending() and restorePending() (e.g. an in-flight IRC
+		// auto-reply appending while a rolled-back switchSession's async load/hooks were still
+		// running). Exercise the bridge directly with a minimal host stub — the queue ops under
+		// test never touch the host.
+		const host: IrcBridgeHost = {
+			agent: {} as Agent,
+			sessionManager: {} as SessionManager,
+			settings: {} as Settings,
+			isDisposed: () => false,
+			isStreaming: () => false,
+			planModeEnabled: () => false,
+			emitSessionEvent: async () => {},
+			wakeForIrc: () => {},
+			runEphemeralTurn: async () => ({ replyText: "" }),
+		};
+		const irc = new IrcBridge(host);
+
+		const original: AgentMessage = {
+			role: "user",
+			content: [{ type: "text", text: "ORIGINAL" }],
+			attribution: "user",
+			timestamp: Date.now(),
+		};
+		irc.queueAside([original]);
+		const snapshot = irc.clearPending();
+		expect(irc.hasPending()).toBe(false);
+
+		// Simulates a record arriving while the rolled-back transition's async work was in flight.
+		const duringRollback: AgentMessage = {
+			role: "user",
+			content: [{ type: "text", text: "DURING_ROLLBACK" }],
+			attribution: "user",
+			timestamp: Date.now(),
+		};
+		irc.queueAside([duringRollback]);
+
+		irc.restorePending(snapshot);
+
+		const drained = irc.drainPending();
+		expect(drained).toHaveLength(2);
+		expect(drained[0]).toBe(original);
+		expect(drained[1]).toBe(duringRollback);
 	});
 });

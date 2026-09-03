@@ -12,6 +12,9 @@
 - Fixed a displayable custom aside folded into context after going stranded mid-stream never emitting the `message_end` its sender's UI rebuild-skip decision was waiting on, leaving the message invisible until an unrelated transcript rebuild.
 - Fixed `sendUserMessage(..., { deliverAs: "aside" })` degrading into a tool-batch-aborting steer when a turn started streaming during `prompt()`'s own setup (manual-compaction cleanup or image normalization), instead of staying non-interrupting.
 - Fixed `sendMessage(..., { deliverAs: "aside" })` remaining undelivered until an unrelated prompt if the active run settled while the custom aside awaited image normalization, instead of resuming into the documented idle wake turn.
+- Fixed `sendMessage(..., { deliverAs: "aside" })` starting a fresh autonomous turn and undoing a user's Esc interrupt when image normalization outlasted the interrupt, instead of folding the aside into context and staying user-driven.
+- Fixed `sendCustomMessage(..., { deliverAs: "aside" | "nextTurn", triggerTurn: true })` always reporting a started turn even when an abort or session-generation change raced the usage-aware preflight and the agent turn never actually dispatched, which could leave RPC callers waiting on agent events that never arrive.
+- Fixed `IrcBridge.restorePending()` discarding IRC/extension records queued while a rolled-back `switchSession()` was still tearing down, instead of merging them back in delivery order.
 
 ## [18.1.5] - 2026-09-03
 
