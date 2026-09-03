@@ -17,6 +17,9 @@
 - Fixed `IrcBridge.restorePending()` discarding IRC/extension records queued while a rolled-back `switchSession()` was still tearing down, instead of merging them back in delivery order.
 - Fixed `sendUserMessage(..., { deliverAs: "aside" })`/`sendMessage(..., { deliverAs: "aside" })` leaking a record into the wrong session's transcript when image normalization outlived a concurrent `newSession()`/`switchSession()`, instead of dropping it once the source session generation changes.
 - Fixed the plan-mode and post-interrupt fold branches for `sendCustomMessage(..., { deliverAs: "aside" })` appending directly to context instead of routing through the event-emitting fold path, so a displayable aside that began streaming again emits the `message_end` its sender's UI rebuild-skip decision expects.
+- Fixed `sendCustomMessage(..., { deliverAs: "aside" })`'s idle-session branch (plan-mode fold, post-interrupt fold, or an autonomous turn) never validating the source session generation, so an aside whose image normalization outlived a concurrent `newSession()`/`switchSession()` could still land in the newly selected session.
+- Fixed a user aside whose image normalization resolved after a `newSession()`/`switchSession()` had disconnected the agent but before it bumped the session generation, which could wake a fresh `agent.prompt()` on the disconnected agent and race the transition's own reset instead of being dropped like other stranded records.
+- Fixed the `#sessionGeneration` guard in `sendUserMessage(..., { deliverAs: "aside" })`/`sendMessage(..., { deliverAs: "aside" })` permanently discarding a record on any generation mismatch, even when a `switchSession()` that bumped the generation subsequently failed and rolled back to the exact same session — the record now waits out the in-flight transition and is preserved.
 
 ## [18.1.5] - 2026-09-03
 

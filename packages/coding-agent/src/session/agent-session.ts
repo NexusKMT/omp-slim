@@ -744,6 +744,13 @@ export class AgentSession {
 	 *  enqueue and fold/resume normally across an in-session interrupt, only a session identity
 	 *  change should drop them. */
 	#sessionGeneration = 0;
+	/** Resolves when the currently in-flight `switchSession()` transition settles (success or
+	 *  rollback). newSession() never rolls #sessionGeneration back so it leaves this unset. An
+	 *  aside-queueing call that hits a #sessionGeneration mismatch awaits this (via
+	 *  #sessionGenerationChanged) before giving up, so a record for the still-live session isn't
+	 *  discarded moments before a rolled-back switchSession() restores the exact generation it
+	 *  was captured against. */
+	#sessionTransitionSettled: Promise<void> | undefined;
 	#promptSequence = 0;
 	#skippedPostTurnSpeculationCompletion: Promise<void> | undefined;
 	#pendingAgentEndEmit: AgentSessionEvent | undefined;
@@ -883,6 +890,12 @@ export class AgentSession {
 		if (this.#modeExitDrainSuppressionDepth > 0 || this.#isDisposed || this.isStreaming || !this.#irc.hasPending()) {
 			return;
 		}
+		// Session transitions call #disconnectFromAgent() BEFORE `await abort()`, and only bump
+		// #sessionGeneration/clear the IRC queue several awaits later once they reach agent.reset().
+		// A normalization await that resolves in that gap sees an unchanged generation and an idle,
+		// non-streaming session, so without this guard it would wake/fold into the still-old context
+		// and race the transition's own reset — same rationale as #drainStrandedQueuedMessages.
+		if (this.#unsubscribeAgent === undefined) return;
 		if (this.#canAutoContinueForFollowUp() && this.agent.hasQueuedMessages()) return;
 		const records = this.#irc.drainPending();
 		if (this.#planModeState?.enabled) {
@@ -922,6 +935,21 @@ export class AgentSession {
 			this.agent.emitExternalEvent({ type: "message_start", message: record });
 			this.agent.emitExternalEvent({ type: "message_end", message: record });
 		}
+	}
+
+	/** Re-validates a #sessionGeneration snapshot captured before an aside-queueing call's
+	 *  normalization await. A mismatch alone does not mean the record's source session is gone —
+	 *  switchSession() restores the exact prior generation on rollback — so wait out any in-flight
+	 *  transition (#sessionTransitionSettled) and recheck rather than discarding immediately.
+	 *  Returns true when the caller should drop its record (no in-flight transition to wait for, or
+	 *  the generation is still different once one settles); false once the generation matches again. */
+	async #sessionGenerationChanged(sessionGeneration: number): Promise<boolean> {
+		while (this.#sessionGeneration !== sessionGeneration) {
+			const settled = this.#sessionTransitionSettled;
+			if (!settled) return true;
+			await settled;
+		}
+		return false;
 	}
 
 	/** Fire-and-forget wake turn for incoming IRC — idle delivery and stranded-aside resume both
@@ -6622,7 +6650,7 @@ export class AgentSession {
 				? await this.#buildImageDescriptionNotice(normalizedImages)
 				: undefined;
 		if (mode === "aside") {
-			if (this.#sessionGeneration !== sessionGeneration) return;
+			if (await this.#sessionGenerationChanged(sessionGeneration)) return;
 			const records: AgentMessage[] = [];
 			if (imageDescriptionNotice) records.push(imageDescriptionNotice);
 			records.push({ role: "user", content, attribution: "user", timestamp: timestamp ?? Date.now() });
@@ -6872,7 +6900,7 @@ export class AgentSession {
 		};
 		const normalizedAppMessage = await this.#normalizeAgentMessageImages(appMessage);
 		if (deliverAs === "aside") {
-			if (this.#sessionGeneration !== sessionGeneration) return;
+			if (await this.#sessionGenerationChanged(sessionGeneration)) return;
 			// Non-interrupting: rides the same step-boundary aside poll as
 			// sendCustomMessage's streaming aside branch — not an agent-core queue
 			// entry, so no drain-retry latch and no idle-queue drain scheduling.
@@ -6945,7 +6973,7 @@ export class AgentSession {
 				return false;
 			}
 			if (options?.deliverAs === "aside") {
-				if (this.#sessionGeneration !== sessionGeneration) return false;
+				if (await this.#sessionGenerationChanged(sessionGeneration)) return false;
 				// Non-interrupting: the agent loop's step-boundary poll (see the setAsideMessageProvider
 				// registration in the constructor) picks this up without interrupting the current tool
 				// batch. Not an agent-core queue entry, so no drain-retry latch and no idle-queue drain
@@ -6986,6 +7014,7 @@ export class AgentSession {
 		}
 
 		if (options?.deliverAs === "aside") {
+			if (await this.#sessionGenerationChanged(sessionGeneration)) return false;
 			if (this.#planModeState?.enabled) {
 				// Plan mode stays user-driven: fold into context without an autonomous turn, same as
 				// IrcBridge.deliver()/#resumeStrandedIrcAsides do in plan mode. Routed through the
@@ -8642,6 +8671,9 @@ export class AgentSession {
 		// record on success but stays valid if the switch is rolled back to this same session.
 		const previousIrcPending = this.#irc.clearPending();
 		const previousSessionGeneration = this.#sessionGeneration++;
+		const transitionSettled = Promise.withResolvers<void>();
+		const previousSessionTransitionSettled = this.#sessionTransitionSettled;
+		this.#sessionTransitionSettled = transitionSettled.promise;
 		this.#pendingNextTurnMessages = [];
 		this.#scheduledHiddenNextTurnGeneration = undefined;
 		this.#queuedMessageDrainBlocked = false;
@@ -8823,6 +8855,8 @@ export class AgentSession {
 			if (previousSessionState.sessionId !== this.sessionManager.getSessionId()) {
 				this.#notifySessionChangeCallbacks();
 			}
+			transitionSettled.resolve();
+			this.#sessionTransitionSettled = previousSessionTransitionSettled;
 			return true;
 		} catch (error) {
 			this.sessionManager.restoreState(previousSessionState);
@@ -8837,6 +8871,8 @@ export class AgentSession {
 			this.agent.replaceQueues(previousSteeringMessages, previousFollowUpMessages);
 			this.#irc.restorePending(previousIrcPending);
 			this.#sessionGeneration = previousSessionGeneration;
+			transitionSettled.resolve();
+			this.#sessionTransitionSettled = previousSessionTransitionSettled;
 			this.#pendingNextTurnMessages = previousPendingNextTurnMessages;
 			this.#scheduledHiddenNextTurnGeneration = previousScheduledHiddenNextTurnGeneration;
 			this.#queuedMessageDrainBlocked = previousQueuedMessageDrainBlocked;

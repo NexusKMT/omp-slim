@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, Context } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Context, ImageContent } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -11,6 +11,7 @@ import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { IrcBridge, type IrcBridgeHost } from "@oh-my-pi/pi-coding-agent/session/irc-bridge";
 import { convertToLlm, USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
+import { SessionAdvisors } from "@oh-my-pi/pi-coding-agent/session/session-advisors";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import * as imageLoading from "@oh-my-pi/pi-coding-agent/utils/image-loading";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -922,5 +923,239 @@ describe("AgentSession aside delivery", () => {
 			message => message.role === "custom" && message.customType === "ext-aside",
 		);
 		expect(persisted).toBe(true);
+	});
+
+	it("validates the session generation before an idle sendCustomMessage aside dispatch", async () => {
+		// Regression: the streaming branch of sendCustomMessage's aside delivery checks
+		// #sessionGeneration before enqueueing (#queueCustomMessage), but the idle branch (plan
+		// mode fold / post-interrupt fold / #promptAgentInitiatedMessage) never compared its own
+		// captured generation. An image attachment whose normalization outlives a concurrent
+		// newSession() used to prompt or fold the stale message into the newly created session.
+		const modelRegistry = new ModelRegistry(authStorage);
+		const mock = createMockModel({ provider: "openai", id: "gpt-test" });
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model: mock.model, systemPrompt: ["Test"], tools: [], messages: [] },
+			convertToLlm,
+			streamFn: mock.stream,
+		});
+		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
+		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(tempDir.path()),
+			settings,
+			modelRegistry,
+			toolRegistry: new Map(),
+		});
+
+		const normalizeStarted = Promise.withResolvers<void>();
+		const releaseNormalize = Promise.withResolvers<void>();
+		const normalizeSpy = spyOn(imageLoading, "normalizeModelContextImages").mockImplementation(async images => {
+			normalizeStarted.resolve();
+			await releaseNormalize.promise;
+			return images;
+		});
+		try {
+			expect(session.isStreaming).toBe(false);
+			const image: ImageContent = { type: "image", data: "aW1hZ2U=", mimeType: "image/png" };
+			const dispatched = session.sendCustomMessage(
+				{
+					customType: "ext-aside",
+					content: [{ type: "text", text: "IDLE_GENERATION_ASIDE" }, image],
+					display: true,
+					attribution: "agent",
+				},
+				{ deliverAs: "aside" },
+			);
+			await normalizeStarted.promise;
+
+			await session.newSession();
+			releaseNormalize.resolve();
+
+			expect(await dispatched).toBe(false);
+			expect(JSON.stringify(session.agent.state.messages)).not.toContain("IDLE_GENERATION_ASIDE");
+		} finally {
+			normalizeSpy.mockRestore();
+		}
+	});
+
+	it("does not wake a stranded aside into an agent disconnected by an in-flight newSession()", async () => {
+		// Regression: #disconnectFromAgent() runs at the very top of newSession(), well before
+		// #sessionGeneration bumps (which happens only after agent.reset() and
+		// sessionManager.newSession() complete). A user aside's normalization that resolves in
+		// that gap sees an unchanged generation and a non-streaming agent, so
+		// #resumeStrandedIrcAsides used to wake a fresh agent.prompt() on the disconnected agent,
+		// racing the transition's own reset.
+		const modelRegistry = new ModelRegistry(authStorage);
+		const started = Promise.withResolvers<void>();
+		let callCount = 0;
+		const mock = createMockModel({
+			provider: "openai",
+			id: "gpt-test",
+			responses: [
+				() => {
+					started.resolve();
+					callCount++;
+					return { content: ["working"], delayMs: 60_000 };
+				},
+				() => {
+					callCount++;
+					return { content: ["woken reply"] };
+				},
+			],
+		});
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model: mock.model, systemPrompt: ["Test"], tools: [], messages: [] },
+			convertToLlm,
+			streamFn: mock.stream,
+		});
+		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
+		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(tempDir.path()),
+			settings,
+			modelRegistry,
+			toolRegistry: new Map(),
+		});
+
+		const run = session.prompt("go");
+		await started.promise;
+
+		const advisorsGateReached = Promise.withResolvers<void>();
+		const releaseAdvisorsGate = Promise.withResolvers<void>();
+		const originalDrainAndDetachRecorders = SessionAdvisors.prototype.drainAndDetachRecorders;
+		const advisorsSpy = spyOn(SessionAdvisors.prototype, "drainAndDetachRecorders").mockImplementation(
+			async function (this: SessionAdvisors) {
+				advisorsGateReached.resolve();
+				await releaseAdvisorsGate.promise;
+				return originalDrainAndDetachRecorders.call(this);
+			},
+		);
+		const normalizeStarted = Promise.withResolvers<void>();
+		const releaseNormalize = Promise.withResolvers<void>();
+		const normalizeSpy = spyOn(imageLoading, "normalizeModelContextImages").mockImplementation(async images => {
+			normalizeStarted.resolve();
+			await releaseNormalize.promise;
+			return images;
+		});
+
+		try {
+			const asidePromise = session.sendUserMessage("DISCONNECTED_ASIDE", { deliverAs: "aside" });
+			await normalizeStarted.promise;
+
+			const newSessionPromise = session.newSession();
+			// #disconnectFromAgent()/abort() have run; agent.reset() and the generation bump have not.
+			await advisorsGateReached.promise;
+
+			releaseNormalize.resolve();
+			await asidePromise;
+			// Flush any fire-and-forget microtask chain a stray #wakeForIrc call would have started
+			// (agent.prompt() is invoked asynchronously, not synchronously, from #wakeForIrc).
+			for (let i = 0; i < 5; i++) await Promise.resolve();
+
+			expect(callCount).toBe(1);
+
+			releaseAdvisorsGate.resolve();
+			expect(await newSessionPromise).toBe(true);
+			await run.catch(() => {});
+			await session.waitForIdle();
+
+			expect(JSON.stringify(session.agent.state.messages)).not.toContain("DISCONNECTED_ASIDE");
+		} finally {
+			normalizeSpy.mockRestore();
+			advisorsSpy.mockRestore();
+		}
+	});
+
+	it("preserves a normalized aside across a rolled-back switchSession()", async () => {
+		// Regression: the #sessionGeneration guard in #queueUserMessage's aside branch used to
+		// discard a record outright on any generation mismatch. switchSession() bumps the
+		// generation before its transition and only rolls it back to the exact prior value in its
+		// catch block, so a record whose normalization resolved during that window was lost even
+		// though the switch ultimately failed and the original session stayed live.
+		const sessionDir = path.join(tempDir.path(), "sessions");
+		const modelRegistry = new ModelRegistry(authStorage);
+		const started = Promise.withResolvers<void>();
+		const contexts: Context[] = [];
+		const mock = createMockModel({
+			provider: "openai",
+			id: "gpt-test",
+			responses: [
+				() => {
+					started.resolve();
+					return { content: ["working"], delayMs: 60_000 };
+				},
+				context => {
+					contexts.push(context);
+					return { content: ["woken reply"] };
+				},
+			],
+		});
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model: mock.model, systemPrompt: ["Test"], tools: [], messages: [] },
+			convertToLlm,
+			streamFn: mock.stream,
+		});
+		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
+		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.create(tempDir.path(), sessionDir),
+			settings,
+			modelRegistry,
+			toolRegistry: new Map(),
+		});
+
+		const targetManager = SessionManager.create(tempDir.path(), sessionDir);
+		targetManager.appendMessage({ role: "user", content: "target", timestamp: Date.now() });
+		await targetManager.ensureOnDisk();
+		const targetFile = targetManager.getSessionFile();
+		if (!targetFile) throw new Error("Expected target session file");
+		await targetManager.close();
+
+		const run = session.prompt("go");
+		await started.promise;
+
+		const normalizeStarted = Promise.withResolvers<void>();
+		const releaseNormalize = Promise.withResolvers<void>();
+		const normalizeSpy = spyOn(imageLoading, "normalizeModelContextImages").mockImplementation(async images => {
+			normalizeStarted.resolve();
+			await releaseNormalize.promise;
+			return images;
+		});
+		const setSessionFileReached = Promise.withResolvers<void>();
+		const releaseSetSessionFileFailure = Promise.withResolvers<void>();
+		const setSessionFileSpy = spyOn(SessionManager.prototype, "setSessionFile").mockImplementation(async () => {
+			setSessionFileReached.resolve();
+			await releaseSetSessionFileFailure.promise;
+			throw new Error("forced switchSession failure");
+		});
+
+		try {
+			const asidePromise = session.sendUserMessage("ROLLBACK_ASIDE", { deliverAs: "aside" });
+			await normalizeStarted.promise;
+
+			const switchedPromise = session.switchSession(targetFile);
+			// #sessionGeneration has bumped by now; setSessionFile is paused before it fails.
+			await setSessionFileReached.promise;
+
+			releaseNormalize.resolve();
+			releaseSetSessionFileFailure.resolve();
+
+			await expect(switchedPromise).rejects.toThrow("forced switchSession failure");
+			await asidePromise;
+			await run.catch(() => {});
+			await session.waitForIdle();
+
+			expect(contexts).toHaveLength(1);
+			expect(JSON.stringify(contexts[0]!.messages)).toContain("ROLLBACK_ASIDE");
+		} finally {
+			normalizeSpy.mockRestore();
+			setSessionFileSpy.mockRestore();
+		}
 	});
 });
