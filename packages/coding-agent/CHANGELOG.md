@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed ACP clients receiving non-file read locations and updates for released terminals, preventing invalid worktree scans and terminal errors on Windows ([#10678](https://github.com/can1357/oh-my-pi/issues/10678)).
+
 ## [18.1.6] - 2026-09-03
 
 ### Breaking Changes
