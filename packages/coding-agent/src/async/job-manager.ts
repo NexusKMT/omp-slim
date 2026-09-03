@@ -14,6 +14,16 @@ const DEFAULT_RETENTION_MS = 5 * 60 * 1000;
  * `<id>.md`/`.json` files disappear out from under an advertised `agent://` URL.
  */
 const RETAINED_ARTIFACTS_CLEANUP_GRACE_MS = 60_000;
+/**
+ * Upper bound on how long retained-artifacts cleanup waits for a hung
+ * delivery sink before giving up and running cleanup anyway. Without this,
+ * a sink that never settles (e.g. a yield-queue receipt whose owning
+ * session is gone) would leak the temp directory for the process lifetime
+ * (PR #10625 review). Matches {@link DEFAULT_RETENTION_MS}: by the time a
+ * job would have been evicted anyway, there is no realistic path left for
+ * the model to still read the advertised `agent://` pointer.
+ */
+const RETAINED_ARTIFACTS_CLEANUP_MAX_WAIT_MS = DEFAULT_RETENTION_MS;
 const DEFAULT_MAX_RUNNING_JOBS = 15;
 /** Abort reason used only when the owning session shuts down the entire manager. */
 export const ASYNC_JOB_MANAGER_SHUTDOWN_REASON = Symbol("AsyncJobManager shutdown");
@@ -133,6 +143,14 @@ export interface AsyncJobManagerOptions {
 	 * without a real-time wait.
 	 */
 	retainedArtifactsCleanupGraceMs?: number;
+	/**
+	 * Upper bound on how long retained-artifacts cleanup waits for a job's
+	 * delivery to settle before giving up and running cleanup anyway (see
+	 * {@link RETAINED_ARTIFACTS_CLEANUP_MAX_WAIT_MS}). Defaults to that
+	 * constant; tests override to a small value to assert the bound without
+	 * a real-time wait.
+	 */
+	retainedArtifactsCleanupMaxWaitMs?: number;
 }
 
 interface AsyncJobDelivery {
@@ -218,6 +236,7 @@ export class AsyncJobManager {
 	readonly #maxRunningJobs: number;
 	readonly #retentionMs: number;
 	readonly #retainedArtifactsCleanupGraceMs: number;
+	readonly #retainedArtifactsCleanupMaxWaitMs: number;
 	#deliveryLoop: Promise<void> | undefined;
 	#deliveryQueueChanged = Promise.withResolvers<void>();
 	#disposed = false;
@@ -239,6 +258,10 @@ export class AsyncJobManager {
 		this.#retainedArtifactsCleanupGraceMs = Math.max(
 			0,
 			Math.floor(options.retainedArtifactsCleanupGraceMs ?? RETAINED_ARTIFACTS_CLEANUP_GRACE_MS),
+		);
+		this.#retainedArtifactsCleanupMaxWaitMs = Math.max(
+			0,
+			Math.floor(options.retainedArtifactsCleanupMaxWaitMs ?? RETAINED_ARTIFACTS_CLEANUP_MAX_WAIT_MS),
 		);
 	}
 
@@ -778,7 +801,7 @@ export class AsyncJobManager {
 		job.retainedArtifactsCleanup = undefined;
 		const jobId = job.id;
 		const bypassGrace = options?.bypassGrace === true;
-		void this.#waitForJobDeliverySettled(jobId)
+		void this.#waitForJobDeliverySettledBounded(jobId)
 			.then(() =>
 				!bypassGrace && this.#retainedArtifactsCleanupGraceMs > 0
 					? Bun.sleep(this.#retainedArtifactsCleanupGraceMs)
@@ -791,6 +814,38 @@ export class AsyncJobManager {
 					error: error instanceof Error ? error.message : String(error),
 				});
 			});
+	}
+
+	/**
+	 * Bounded variant of {@link #waitForJobDeliverySettled}: gives up and
+	 * resolves after {@link #retainedArtifactsCleanupMaxWaitMs} even if the
+	 * delivery sink never settles (e.g. a yield-queue receipt whose owning
+	 * session is gone) so a hung sink cannot leak the retained temp
+	 * directory for the process lifetime (PR #10625 review). The unbounded
+	 * wait keeps running in the background after the bound trips; it is
+	 * harmless once orphaned since cleanup no longer depends on it.
+	 */
+	async #waitForJobDeliverySettledBounded(jobId: string): Promise<void> {
+		const timedOut = Promise.withResolvers<true>();
+		const timer = setTimeout(() => timedOut.resolve(true), this.#retainedArtifactsCleanupMaxWaitMs);
+		timer.unref();
+		try {
+			const timedOutFirst = await Promise.race([
+				this.#waitForJobDeliverySettled(jobId).then(() => false as const),
+				timedOut.promise,
+			]);
+			if (timedOutFirst) {
+				logger.warn(
+					"Async job delivery did not settle before the retained artifacts cleanup bound; running cleanup anyway",
+					{
+						jobId,
+						maxWaitMs: this.#retainedArtifactsCleanupMaxWaitMs,
+					},
+				);
+			}
+		} finally {
+			clearTimeout(timer);
+		}
 	}
 
 	/**

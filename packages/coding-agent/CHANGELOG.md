@@ -11,6 +11,7 @@
 - A detached background `task` that fails without valid structured output now keeps its temporary artifacts until eviction instead of deleting them immediately, so the failed agent stays interrogable via `agent://<id>`/`history://<id>`.
 - Fixed a stale `<id>.json` structured-output sidecar surviving when the serialized payload was `undefined`.
 - `AsyncJobManager.dispose()` no longer sleeps out the full retained-artifacts grace period on shutdown.
+- Retained-artifacts cleanup for a background task now gives up waiting on a hung delivery sink after a bounded timeout, instead of waiting on it forever and leaking the retained temp directory for the process lifetime.
 
 ## [18.1.7] - 2026-09-03
 

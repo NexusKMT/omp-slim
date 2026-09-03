@@ -289,6 +289,36 @@ describe("AsyncJobManager", () => {
 		expect(sleepSpy.mock.calls.some(([duration]) => duration === 45_000)).toBe(false);
 	});
 
+	test("bounds the wait for a hung delivery sink so retained artifacts cleanup still runs", async () => {
+		// Regression: #waitForJobDeliverySettled loops forever awaiting an
+		// in-flight delivery promise. A sink that never settles (e.g. a
+		// yield-queue receipt whose owning session is gone) would leak the
+		// retained temp directory for the process lifetime without a bound
+		// (PR #10625 review).
+		const cleanupCalls: string[] = [];
+		const manager = new AsyncJobManager({
+			retentionMs: 0,
+			retainedArtifactsCleanupGraceMs: 0,
+			retainedArtifactsCleanupMaxWaitMs: 20,
+			onJobComplete: () => {},
+		});
+		manager.registerDeliverySink("Main", async () => {
+			await Promise.withResolvers<never>().promise;
+		});
+
+		const jobId = manager.register("task", "agent task", async () => "task done", { ownerId: "Main" });
+		const job = manager.getJob(jobId);
+		job!.retainedArtifactsCleanup = async () => {
+			cleanupCalls.push(jobId);
+		};
+
+		await manager.waitForAll();
+		await waitForJobEviction(manager, jobId);
+		await waitForCondition(() => cleanupCalls.length > 0, 2_000);
+
+		expect(cleanupCalls).toEqual([jobId]);
+	});
+
 	test("fails the job but keeps structured output from AsyncJobError", async () => {
 		const manager = new AsyncJobManager({
 			onJobComplete: async () => {},
