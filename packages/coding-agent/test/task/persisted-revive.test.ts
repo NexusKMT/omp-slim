@@ -69,7 +69,7 @@ async function createPersistedSession(
 	restrictToolNames?: boolean,
 	modelRole?: string,
 	advisor?: string,
-	contract?: { tools?: string[]; readOnly?: boolean },
+	contract?: { tools?: string[]; readOnly?: boolean; agent?: string },
 ): Promise<string> {
 	const manager = SessionManager.create(cwd, path.join(cwd, "sessions"));
 	const sessionFile = manager.getSessionFile();
@@ -83,6 +83,7 @@ async function createPersistedSession(
 		resolvedModel: modelRole ? "anthropic/claude-sonnet-4-5" : undefined,
 		advisor,
 		readOnly: contract?.readOnly,
+		agent: contract?.agent,
 	});
 	manager.appendMessage({
 		role: "assistant",
@@ -255,6 +256,43 @@ describe("persisted subagent revival", () => {
 		expect(capturedOptions?.enableLsp).toBe(true);
 		expect(capturedOptions?.mcpManager).toBe(hostileMcp);
 		expect(capturedOptions?.customTools?.map(tool => tool.name)).toEqual(["mcp__server_read"]);
+	});
+
+	it("restores the persisted agent definition name on cold revival so agent-scoped rules keep matching", async () => {
+		const cwd = makeTempDir("@pi-revive-agent-name-");
+		const sessionFile = await createPersistedSession(cwd, undefined, undefined, undefined, { agent: "scout" });
+		let capturedOptions: CreateAgentSessionOptions | undefined;
+		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async options => {
+			capturedOptions = options;
+			return { session: createRevivedSession([]).session } as CreateAgentSessionResult;
+		});
+
+		const ref = createRef(sessionFile);
+		const reviver = await createFactory(cwd)(ref);
+		if (!reviver) throw new Error("Expected a persisted reviver");
+		await reviver(ref);
+
+		// `ref.displayName` is the registry's generated label ("Persisted
+		// Restricted") for a cold-revived ref, not the durable agent definition
+		// name. `agents: [scout]` rule scoping must key on the latter.
+		expect(capturedOptions?.agentName).toBe("scout");
+	});
+
+	it("falls back to the ref display name reviving a legacy session file without a persisted agent name", async () => {
+		const cwd = makeTempDir("@pi-revive-agent-name-legacy-");
+		const sessionFile = await createPersistedSession(cwd);
+		let capturedOptions: CreateAgentSessionOptions | undefined;
+		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async options => {
+			capturedOptions = options;
+			return { session: createRevivedSession([]).session } as CreateAgentSessionResult;
+		});
+
+		const ref = createRef(sessionFile);
+		const reviver = await createFactory(cwd)(ref);
+		if (!reviver) throw new Error("Expected a persisted reviver");
+		await reviver(ref);
+
+		expect(capturedOptions?.agentName).toBe(ref.displayName);
 	});
 	it("restores the persisted per-agent advisor opt-in on cold revival", async () => {
 		const cwd = makeTempDir("@pi-advisor-revive-");

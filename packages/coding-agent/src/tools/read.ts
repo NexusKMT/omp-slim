@@ -1178,6 +1178,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					signal,
 					localProtocolOptions: this.session.localProtocolOptions,
 					skills: this.session.skills,
+					rules: this.session.activeRules,
 				});
 				if (localFile) {
 					readPath = localFile.path;
@@ -1993,6 +1994,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			signal,
 			localProtocolOptions: this.session.localProtocolOptions,
 			skills: this.session.skills,
+			rules: this.session.activeRules,
 		});
 		const artifactUrl = `artifact://${artifact.id}`;
 		const details: ReadToolDetails = {
@@ -2223,6 +2225,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			sessionFile: this.session.getSessionFile() ?? undefined,
 			localProtocolOptions: this.session.localProtocolOptions,
 			skills: this.session.skills,
+			rules: this.session.activeRules,
 			xd: {
 				read: async name => {
 					if (name === REPORT_ISSUE_DEVICE_NAME) return reportIssueDeviceUsage();

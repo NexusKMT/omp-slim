@@ -11,6 +11,7 @@ import {
 	stripWindowsExtendedLengthPathPrefix,
 	windowsPathToWslMount,
 } from "@oh-my-pi/pi-utils";
+import type { Rule } from "../capability/rule";
 import type { Skill } from "../extensibility/skills";
 import { InternalUrlRouter, type LocalProtocolOptions } from "../internal-urls";
 import { ToolAbortError, ToolError } from "./tool-errors";
@@ -1488,6 +1489,8 @@ export interface ToolScopeOptions {
 	localProtocolOptions?: LocalProtocolOptions;
 	/** Calling session's loaded skills — lets skill:// resolve without process-global state. */
 	skills?: readonly Skill[];
+	/** Calling session's agent-scoped applicable rules — lets rule:// resolve without process-global state. */
+	rules?: readonly Rule[];
 	/** Calling session's session file — lets history:///agent:// resolve against the caller's root. */
 	sessionFile?: string;
 	/** Materialize readable external URLs to local text files before scope derivation. */
@@ -1580,6 +1583,7 @@ export async function resolveToolSearchScope(opts: ToolScopeOptions): Promise<To
 			sessionFile: opts.sessionFile,
 			localProtocolOptions: opts.localProtocolOptions,
 			skills: opts.skills,
+			rules: opts.rules,
 			// Tool-scope resolution only needs `sourcePath`; skip content
 			// materialization so large artifacts (or any handler that separates
 			// path from content) stay searchable without OOM risk.

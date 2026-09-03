@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed cold-revived subagents losing `agents`-scoped rules by restoring the persisted agent definition name instead of the registry's generated display label.
+- Fixed `rule://<name>` resolving `Unknown rule` inside a subagent whose rules are scoped away from the main session's snapshot; `rule://` now resolves against the calling session's own applicable rule set.
+- Fixed the rule inspector showing "(no apply conditions)" on rules that are scoped only by `agents`.
+
 ## [18.1.5] - 2026-09-03
 
 ### Added

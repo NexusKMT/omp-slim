@@ -1802,6 +1802,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			},
 			refreshSkills: () => session.refreshSkills(),
 			rules: allRules,
+			activeRules: [...rulebookRules, ...alwaysApplyRules, ...ttsrManager.getRules()],
 			eventBus,
 			subagentEventBus,
 			outputSchema: options.outputSchema,
