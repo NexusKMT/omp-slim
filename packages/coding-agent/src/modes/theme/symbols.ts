@@ -108,6 +108,7 @@ export type SymbolKey =
 	| "icon.input"
 	| "icon.output"
 	| "icon.throughput"
+	| "icon.intelligence"
 	| "icon.host"
 	| "icon.session"
 	| "icon.package"
@@ -460,6 +461,7 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"icon.input": "⤵",
 	"icon.output": "⤴",
 	"icon.throughput": "⚡",
+	"icon.intelligence": "🧠",
 	"icon.host": "🖥",
 	"icon.session": "🆔",
 	"icon.package": "📦",
@@ -820,6 +822,8 @@ const NERD_SYMBOLS: SymbolMap = {
 	"icon.output": "\uf08b",
 	// pick:  (nf-fa-tachometer) | alt:  ⚡ ↬
 	"icon.throughput": "\uf0e4",
+	// findnerd brain:  (nf-fa-brain)
+	"icon.intelligence": "\uee9c",
 	// pick:  | alt:  
 	"icon.host": "\uf109",
 	// pick: 󰁑 (nf-md-arrow_left_bold_hexagon_outline) | alt:  
@@ -1161,6 +1165,7 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"icon.job": "bg",
 	"icon.output": "out:",
 	"icon.throughput": "tok/s:",
+	"icon.intelligence": "IQ",
 	"icon.cache": "cache",
 	"icon.cacheMiss": "!",
 	"icon.input": "in:",
