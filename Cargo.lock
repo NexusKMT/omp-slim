@@ -6337,6 +6337,7 @@ name = "pi-vcs"
 version = "18.1.5"
 dependencies = [
  "gix",
+ "gix-utils",
  "jj-lib",
  "libc",
  "pi-iso",

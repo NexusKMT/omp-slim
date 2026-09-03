@@ -122,6 +122,9 @@
 ### Added
 
 - `/copy` block view: every block caption now carries a clickable `⧉ copy` control, and a turn's links are listed as blocks with `⧉ copy` and `↗ open`. Click the icon (the overlay receives mouse input) or use Enter / `o`; a URL that wrapped across terminal rows needs neither a careful selection nor cmd-click. `/copy link` copies the last link; new `/open` opens it. Link detection uses the renderer's own markdown lexer (`extractMarkdownLinks` in `@oh-my-pi/pi-tui`).
+### Fixed
+
+- Fixed `omp commit` auto-staging so it no longer picks up macOS Unicode-normalization duplicate paths or files ignored only by a nested `.gitignore`.
 
 ## [18.1.3] - 2026-09-02
 
