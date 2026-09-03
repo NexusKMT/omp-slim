@@ -2,39 +2,34 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Renamed `MacOSPowerAssertion` to `PowerAssertion` and `MacOSPowerAssertionOptions` to `PowerAssertionOptions`; the options and handle shapes are unchanged.
+
 ### Added
 
-- Added EditSession and EditStore types for managing edit states and snapshots
-- Added utility functions for handling hashline operations and formatting
-- Added utility functions for managing edit mode and generating edit descriptions
-- Added notebookToEditableText and extractInlineSloppyRegions utilities
+- Added edit-session and edit-store types and utilities for managing edit states, snapshots, hashline operations, edit modes, edit descriptions, editable notebook text, and inline sloppy regions.
+- Added cross-platform sleep inhibition to `PowerAssertion` on Linux and Windows.
+
+### Changed
+
+- `PowerAssertion.start` now reports acquisition failures on Linux and Windows instead of returning a handle that silently does nothing; platforms without an implementation continue to receive a no-op handle.
+
+### Fixed
+
+- Fixed native `git add` so staging an empty file list no longer stages macOS filename-normalization duplicates of tracked paths or files ignored only by a nested `.gitignore`.
 
 ## [18.1.5] - 2026-09-03
 
 ### Changed
 
 - Updated `worktreeAdd` to support additional worktree creation options, including preserving uncommitted changes.
-### Fixed
-
-- Fixed native `git add` (`stageFiles([])`) so it no longer stages macOS NFD duplicates of already-tracked NFC paths, or files ignored only by a nested `.gitignore`.
 
 ## [18.1.3] - 2026-09-02
 
 ### Fixed
 
 - Fixed `grep` and `sed` treating basic regular expressions as extended ones, which silently matched every line for patterns like `^+` or `s/^\+/` and swapped the meanings of `+` and `\+` ([#10298](https://github.com/can1357/oh-my-pi/pull/10298) by [@mruangutai](https://github.com/mruangutai)).
-### Breaking Changes
-
-- Renamed `MacOSPowerAssertion` to `PowerAssertion` and `MacOSPowerAssertionOptions` to `PowerAssertionOptions`. The options and handle shape are unchanged.
-
-### Added
-
-- Added Linux sleep inhibition to `PowerAssertion` through a logind (`org.freedesktop.login1`) inhibitor descriptor, supplemented for `display` by a best-effort `org.freedesktop.ScreenSaver` cookie.
-- Added Windows sleep inhibition to `PowerAssertion` through `SetThreadExecutionState` on a dedicated thread.
-
-### Changed
-
-- `PowerAssertion.start` reports acquisition failures on Linux and Windows rather than returning a handle that silently does nothing. Platforms with no implementation still receive a no-op handle.
 
 ## [18.1.0] - 2026-09-01
 

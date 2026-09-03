@@ -4,20 +4,24 @@
 
 ### Breaking Changes
 
-- Renamed `claudeCodeSessionId` to `sessionId` in `AnthropicClientOptionsArgs`
-- Renamed `openAISessionId` to `sessionId` in `OpenAIRequestSetupOptions`
+- Renamed `claudeCodeSessionId` to `sessionId` in `AnthropicClientOptionsArgs`.
+- Renamed `openAISessionId` to `sessionId` in `OpenAIRequestSetupOptions`.
+
+### Added
+
+- Added Amazon Bedrock `requestMetadata` support for cost and usage attribution in AWS invocation logs.
 
 ### Changed
 
-- Amazon Bedrock requests now send an `omp/<version>` User-Agent instead of the runtime default, and honor a configured `User-Agent` override.
-- Codex GPT-5.6 turns now use full Responses by default, allowing independent tool calls to run in parallel; provider-native compaction continues to use catalog-selected Responses Lite.
-- Inference requests now identify as omp by default while preserving explicit provider and OAuth User-Agent fingerprints.
+- Codex GPT-5.6 requests now use full Responses by default, enabling independent tool calls to run in parallel; provider-native compaction continues to use catalog-selected Responses Lite.
+- Inference requests now identify as omp by default while preserving explicit provider and OAuth User-Agent fingerprints. Amazon Bedrock requests use an `omp/<version>` User-Agent by default and honor configured `User-Agent` overrides.
 
 ### Fixed
 
-- Anthropic and OpenRouter 402 credit-exhaustion errors ("would exceed your available credits", "Insufficient credits") now switch to a sibling account instead of stopping the turn with a retry hint.
-- OpenCode Go (and Zen) requests now carry the required `x-opencode-session` header with a stable per-conversation id, so they keep working once the gateway starts rejecting headerless requests.
-- Anthropic prompt caching now anchors explicit cache breakpoints on the last tool definition and last system block, so a stable tools/system head stays cache-reusable when the message tail changes ([#10603](https://github.com/can1357/oh-my-pi/pull/10603) by [@khrm](https://github.com/khrm)).
+- Fixed Antigravity usage reporting to match the official client's five-hour and weekly quota buckets.
+- Anthropic and OpenRouter credit-exhaustion errors now automatically switch to a sibling account instead of stopping the turn with a retry hint.
+- Fixed OpenCode Go and Zen requests by including the required stable per-conversation session identification.
+- Improved Anthropic prompt caching so explicit cache breakpoints preserve reusable tools and system prompts when the message tail changes.
 
 ## [18.1.5] - 2026-09-03
 
@@ -28,13 +32,6 @@
 ### Changed
 
 - Modernized provider authentication and token refresh across the catalog, with shared support for API-key, authorization-code, and device-code sign-in flows and clearer sign-in progress messages for OpenRouter, Kimi, and xAI.
-### Added
-
-- Added Amazon Bedrock `requestMetadata` support for cost and usage attribution in AWS invocation logs, including forwarding through the pi-native gateway transport.
-
-### Changed
-
-- Amazon Bedrock requests now send an `omp/<version>` User-Agent instead of the runtime default, and honor a configured `User-Agent` override.
 
 ### Fixed
 
