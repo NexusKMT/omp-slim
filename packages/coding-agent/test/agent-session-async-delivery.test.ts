@@ -130,6 +130,36 @@ describe("AgentSession owner-routed async delivery", () => {
 		expect(message?.content).not.toContain("```json");
 	});
 
+	it("advertises the agent:// URL using the task's agent id, not a disambiguated job id", () => {
+		// Regression: AsyncJobManager suffixes a requested job id when it
+		// collides with another live job (e.g. a task id reusing a vibe turn's
+		// job id), but the task's artifacts are still written under its own
+		// unsuffixed agent id. Advertising the suffixed job id points at a
+		// handle with no backing `<id>.md`/`.json` on disk (PR #10625 review).
+		const job: AsyncJob = {
+			id: "Foo-t1-2",
+			agentId: "Foo-t1",
+			type: "task",
+			status: "completed",
+			startTime: Date.now(),
+			label: "Foo-t1",
+			abortController: new AbortController(),
+			promise: Promise.resolve(),
+			resultText: "done",
+			structured: { source: "caller", mode: "permissive", status: "valid", data: { summary: "ok" } },
+		};
+		const entry: AsyncResultEntry = {
+			jobId: "Foo-t1-2",
+			result: "done",
+			job,
+			durationMs: 1000,
+			epoch: 0,
+		};
+		const message = buildAsyncResultBatchMessage([entry]);
+		expect(message?.content).toContain("agent://Foo-t1,");
+		expect(message?.content).not.toContain("agent://Foo-t1-2");
+	});
+
 	it("carries a schema-invalid background task's parsed payload inline only", () => {
 		const job: AsyncJob = {
 			id: "SchemaProbe",

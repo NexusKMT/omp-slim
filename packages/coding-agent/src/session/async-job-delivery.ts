@@ -78,6 +78,13 @@ export function buildAsyncResultBatchMessage(entries: AsyncResultEntry[]): Custo
 		const structuredJson = structured && structured.status !== "valid" ? renderStructuredJson(structured) : undefined;
 		return {
 			jobId: entry.jobId,
+			// The job manager disambiguates a requested job id when it collides
+			// with another live job (e.g. a task job reusing a vibe turn's job
+			// id), suffixing `jobId` — but the task's artifacts are still
+			// written under its own agent id (`AsyncJob.agentId`). Build the
+			// advertised `agent://` URL from that, or the delivery would point
+			// at an id with no backing `<id>.md`/`.json` on disk.
+			agentUrlId: entry.job?.agentId ?? entry.jobId,
 			result: entry.result,
 			type: entry.job?.type,
 			label: entry.job?.label,

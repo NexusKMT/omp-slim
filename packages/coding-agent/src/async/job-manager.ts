@@ -727,20 +727,50 @@ export class AsyncJobManager {
 	}
 
 	/**
-	 * Fire a retained temporary artifacts cleanup exactly once. Errors are
-	 * logged, not thrown — a failed disposal must not block job eviction or
-	 * manager teardown.
+	 * Fire a retained temporary artifacts cleanup exactly once, deferred
+	 * until this job's `async-result` delivery has settled (delivered,
+	 * dead-lettered, or given up retrying). Job-row eviction happens on its
+	 * own timer independent of delivery — a still-streaming owner session
+	 * can leave a delivery in flight (its sink awaits
+	 * `yieldQueue.enqueueWithReceipt()`) well past the retention window, and
+	 * deleting the retained directory before that receipt commits would
+	 * advertise an `agent://` URL whose backing files are already gone.
+	 * Errors are logged, not thrown — a failed disposal must not block job
+	 * eviction or manager teardown.
 	 */
 	#runRetainedArtifactsCleanup(job: AsyncJob): void {
 		const cleanup = job.retainedArtifactsCleanup;
 		if (!cleanup) return;
 		job.retainedArtifactsCleanup = undefined;
-		void cleanup().catch(error => {
-			logger.warn("Async job retained artifacts cleanup failed", {
-				jobId: job.id,
-				error: error instanceof Error ? error.message : String(error),
+		const jobId = job.id;
+		void this.#waitForJobDeliverySettled(jobId)
+			.then(cleanup)
+			.catch(error => {
+				logger.warn("Async job retained artifacts cleanup failed", {
+					jobId,
+					error: error instanceof Error ? error.message : String(error),
+				});
 			});
-		});
+	}
+
+	/**
+	 * Resolve once no delivery for `jobId` is queued or in flight. Loops
+	 * because a failed in-flight attempt may requeue itself for retry;
+	 * terminates once the delivery succeeds, is dead-lettered (no live
+	 * sink), or stops retrying (job already evicted from `#jobs`).
+	 */
+	async #waitForJobDeliverySettled(jobId: string): Promise<void> {
+		for (;;) {
+			const inFlight = this.#inFlightDeliveries.find(delivery => delivery.jobId === jobId);
+			if (inFlight) {
+				await inFlight.promise?.catch(() => {});
+				continue;
+			}
+			const queued = this.#deliveries.find(delivery => delivery.jobId === jobId);
+			if (!queued) return;
+			this.#ensureDeliveryLoop();
+			await this.#waitForDeliveryQueueChange(Math.max(50, queued.nextAttemptAt - Date.now()));
+		}
 	}
 
 	#evictJob(jobId: string): boolean {

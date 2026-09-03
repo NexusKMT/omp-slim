@@ -10,6 +10,14 @@ async function waitForJobEviction(manager: AsyncJobManager, jobId: string): Prom
 	}
 }
 
+async function waitForCondition(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (!predicate()) {
+		if (Date.now() >= deadline) throw new Error("Timed out waiting for condition");
+		await scheduler.yield();
+	}
+}
+
 describe("AsyncJobManager", () => {
 	test("forwards progress updates and delivers completion", async () => {
 		const progressEvents: Array<{ text: string; details?: Record<string, unknown> }> = [];
@@ -139,6 +147,43 @@ describe("AsyncJobManager", () => {
 		expect(delivered).toEqual([
 			{ jobId, structured: { source: "caller", mode: "permissive", status: "valid", data: { count: 7 } } },
 		]);
+	});
+
+	test("defers retained artifacts cleanup until this job's delivery settles", async () => {
+		// Regression: job-row eviction runs on its own retention timer,
+		// independent of delivery — a still-in-flight delivery sink (e.g. one
+		// awaiting a yield-queue receipt) must not have its retained
+		// artifacts deleted out from under it before the sink resolves (PR
+		// #10625 review).
+		const cleanupCalls: string[] = [];
+		const deliveryGate = Promise.withResolvers<void>();
+		const manager = new AsyncJobManager({
+			retentionMs: 0,
+			onJobComplete: async () => {
+				await deliveryGate.promise;
+			},
+		});
+
+		const jobId = manager.register("task", "agent task", async () => "task done");
+		const job = manager.getJob(jobId);
+		job!.retainedArtifactsCleanup = async () => {
+			cleanupCalls.push(jobId);
+		};
+
+		await manager.waitForAll();
+		await waitForJobEviction(manager, jobId);
+
+		// The job row is gone (retentionMs: 0), but the delivery sink is still
+		// blocked on the gate — cleanup must not have run yet.
+		await scheduler.yield();
+		await scheduler.yield();
+		expect(cleanupCalls).toEqual([]);
+
+		deliveryGate.resolve();
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+		await waitForCondition(() => cleanupCalls.length > 0);
+
+		expect(cleanupCalls).toEqual([jobId]);
 	});
 
 	test("fails the job but keeps structured output from AsyncJobError", async () => {
