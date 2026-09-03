@@ -735,6 +735,15 @@ export class AgentSession {
 	// Cursor exec, TUI listeners) is held back. Without this, a client that resumes
 	// on `agent_end` can fire its next `prompt` before #promptWithMessage's finally
 	#promptGeneration = 0;
+	/** Bumped by newSession()/switchSession() at the same point they clear the pending IRC/aside
+	 *  queue (restored on a rolled-back switchSession()). A message-queueing call that spans an
+	 *  await (image normalization, vision description) captures this before the await and checks
+	 *  it again right before enqueueing into IrcBridge, so a record started for the outgoing
+	 *  session cannot land in a different session's queue after the transition. Deliberately
+	 *  distinct from #promptGeneration, which also changes on a plain abort() — asides must still
+	 *  enqueue and fold/resume normally across an in-session interrupt, only a session identity
+	 *  change should drop them. */
+	#sessionGeneration = 0;
 	#promptSequence = 0;
 	#skippedPostTurnSpeculationCompletion: Promise<void> | undefined;
 	#pendingAgentEndEmit: AgentSessionEvent | undefined;
@@ -6584,6 +6593,11 @@ export class AgentSession {
 		timestamp?: number,
 		preprocessed?: { images: ImageContent[] | undefined; descriptionNotice: CustomMessage | undefined },
 	): Promise<void> {
+		// Captured before any await below so the aside branch can detect a
+		// newSession()/switchSession() that completed while normalization/vision
+		// description was in flight and drop a record that would otherwise land in a
+		// different session's queue.
+		const sessionGeneration = this.#sessionGeneration;
 		// A queued user message (RPC/SDK/collab steer or follow-up, or a typed message
 		// while streaming) is a deliberate resume; re-enable advisor auto-resume that
 		// a user interrupt suppressed. An aside is non-interrupting by design — it must
@@ -6608,6 +6622,7 @@ export class AgentSession {
 				? await this.#buildImageDescriptionNotice(normalizedImages)
 				: undefined;
 		if (mode === "aside") {
+			if (this.#sessionGeneration !== sessionGeneration) return;
 			const records: AgentMessage[] = [];
 			if (imageDescriptionNotice) records.push(imageDescriptionNotice);
 			records.push({ role: "user", content, attribution: "user", timestamp: timestamp ?? Date.now() });
@@ -6834,6 +6849,8 @@ export class AgentSession {
 		deliverAs: "steer" | "followUp" | "aside",
 		queueChipText?: string,
 	): Promise<void> {
+		// Captured before the normalization await below — see #sessionGeneration's doc comment.
+		const sessionGeneration = this.#sessionGeneration;
 		const details =
 			queueChipText !== undefined
 				? ({
@@ -6855,6 +6872,7 @@ export class AgentSession {
 		};
 		const normalizedAppMessage = await this.#normalizeAgentMessageImages(appMessage);
 		if (deliverAs === "aside") {
+			if (this.#sessionGeneration !== sessionGeneration) return;
 			// Non-interrupting: rides the same step-boundary aside poll as
 			// sendCustomMessage's streaming aside branch — not an agent-core queue
 			// entry, so no drain-retry latch and no idle-queue drain scheduling.
@@ -6898,6 +6916,8 @@ export class AgentSession {
 			acceptTerminalEmptyStop?: boolean;
 		},
 	): Promise<boolean> {
+		// Captured before the normalization await below — see #sessionGeneration's doc comment.
+		const sessionGeneration = this.#sessionGeneration;
 		const normalizedPayload = normalizeCustomMessagePayload<T>(message);
 		const suppressQueueChip = options?.deliverAs === "nextTurn" || options?.deliverAs === "aside";
 		const details =
@@ -6925,6 +6945,7 @@ export class AgentSession {
 				return false;
 			}
 			if (options?.deliverAs === "aside") {
+				if (this.#sessionGeneration !== sessionGeneration) return false;
 				// Non-interrupting: the agent loop's step-boundary poll (see the setAsideMessageProvider
 				// registration in the constructor) picks this up without interrupting the current tool
 				// batch. Not an agent-core queue entry, so no drain-retry latch and no idle-queue drain
@@ -6966,32 +6987,21 @@ export class AgentSession {
 
 		if (options?.deliverAs === "aside") {
 			if (this.#planModeState?.enabled) {
-				// Plan mode stays user-driven: fold into context without an autonomous turn,
-				// same as IrcBridge.deliver()/#resumeStrandedIrcAsides do in plan mode.
-				this.agent.appendMessage(normalizedAppMessage);
-				this.sessionManager.appendCustomMessageEntry(
-					normalizedAppMessage.customType,
-					normalizedAppMessage.content,
-					normalizedAppMessage.display,
-					normalizedAppMessage.details,
-					normalizedAppMessage.attribution,
-				);
+				// Plan mode stays user-driven: fold into context without an autonomous turn, same as
+				// IrcBridge.deliver()/#resumeStrandedIrcAsides do in plan mode. Routed through the
+				// event-emitting fold path (not a direct append) so a displayable aside that began
+				// streaming still gets the message_end its sender's rebuild-skip decision expects.
+				this.#foldStrandedIrcAsidesIntoContext([normalizedAppMessage]);
 				return false;
 			}
 			if (this.#advisors.autoResumeSuppressed) {
 				// A user interrupt (Esc) is still in effect. isStreaming was true when this method
 				// was entered but image normalization above outlasted the interrupt, landing here
 				// instead of the streaming branch's queueAside — starting a fresh autonomous turn
-				// would undo the user's deliberate stop. Fold into context and stay user-driven,
-				// matching #resumeStrandedIrcAsides's post-interrupt fold branch.
-				this.agent.appendMessage(normalizedAppMessage);
-				this.sessionManager.appendCustomMessageEntry(
-					normalizedAppMessage.customType,
-					normalizedAppMessage.content,
-					normalizedAppMessage.display,
-					normalizedAppMessage.details,
-					normalizedAppMessage.attribution,
-				);
+				// would undo the user's deliberate stop. Fold into context (same event-emitting path
+				// as the plan-mode branch above) and stay user-driven, matching
+				// #resumeStrandedIrcAsides's post-interrupt fold branch.
+				this.#foldStrandedIrcAsidesIntoContext([normalizedAppMessage]);
 				return false;
 			}
 			if (this.#clientBridge?.deferAgentInitiatedTurns && !this.#allowAcpAgentInitiatedTurns) {
@@ -7514,8 +7524,11 @@ export class AgentSession {
 			// The abort above may have skipped the loop's final aside poll (issue: stranded
 			// asides survive an aborted turn by design so a resumed session can still see
 			// them); discard here so they cannot leak into the new session's transcript via
-			// the first ordinary prompt's IrcBridge.flushPending().
+			// the first ordinary prompt's IrcBridge.flushPending(). Bump #sessionGeneration in
+			// the same breath so an aside-queueing call still awaiting normalization for the
+			// outgoing session also drops its record instead of landing in this new one.
 			this.#irc.clearPending();
+			this.#sessionGeneration++;
 			this.#scheduledHiddenNextTurnGeneration = undefined;
 			this.#queuedMessageDrainBlocked = false;
 			this.#usagePreflightReadyForNextModelCall = false;
@@ -8624,7 +8637,11 @@ export class AgentSession {
 		// Same rationale as newSession: an aborted turn can skip its final aside poll,
 		// stranding IRC/extension asides meant for the outgoing transcript. Snapshot so a
 		// rolled-back switch (catch block below) restores them for the still-live session.
+		// #sessionGeneration bumps in the same breath (and rolls back with it) so an
+		// aside-queueing call still awaiting normalization when the switch started drops its
+		// record on success but stays valid if the switch is rolled back to this same session.
 		const previousIrcPending = this.#irc.clearPending();
+		const previousSessionGeneration = this.#sessionGeneration++;
 		this.#pendingNextTurnMessages = [];
 		this.#scheduledHiddenNextTurnGeneration = undefined;
 		this.#queuedMessageDrainBlocked = false;
@@ -8819,6 +8836,7 @@ export class AgentSession {
 			this.agent.replaceMessages(previousAgentMessages);
 			this.agent.replaceQueues(previousSteeringMessages, previousFollowUpMessages);
 			this.#irc.restorePending(previousIrcPending);
+			this.#sessionGeneration = previousSessionGeneration;
 			this.#pendingNextTurnMessages = previousPendingNextTurnMessages;
 			this.#scheduledHiddenNextTurnGeneration = previousScheduledHiddenNextTurnGeneration;
 			this.#queuedMessageDrainBlocked = previousQueuedMessageDrainBlocked;

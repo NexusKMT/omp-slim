@@ -15,6 +15,8 @@
 - Fixed `sendMessage(..., { deliverAs: "aside" })` starting a fresh autonomous turn and undoing a user's Esc interrupt when image normalization outlasted the interrupt, instead of folding the aside into context and staying user-driven.
 - Fixed `sendCustomMessage(..., { deliverAs: "aside" | "nextTurn", triggerTurn: true })` always reporting a started turn even when an abort or session-generation change raced the usage-aware preflight and the agent turn never actually dispatched, which could leave RPC callers waiting on agent events that never arrive.
 - Fixed `IrcBridge.restorePending()` discarding IRC/extension records queued while a rolled-back `switchSession()` was still tearing down, instead of merging them back in delivery order.
+- Fixed `sendUserMessage(..., { deliverAs: "aside" })`/`sendMessage(..., { deliverAs: "aside" })` leaking a record into the wrong session's transcript when image normalization outlived a concurrent `newSession()`/`switchSession()`, instead of dropping it once the source session generation changes.
+- Fixed the plan-mode and post-interrupt fold branches for `sendCustomMessage(..., { deliverAs: "aside" })` appending directly to context instead of routing through the event-emitting fold path, so a displayable aside that began streaming again emits the `message_end` its sender's UI rebuild-skip decision expects.
 
 ## [18.1.5] - 2026-09-03
 

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
@@ -12,6 +12,7 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { IrcBridge, type IrcBridgeHost } from "@oh-my-pi/pi-coding-agent/session/irc-bridge";
 import { convertToLlm, USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import * as imageLoading from "@oh-my-pi/pi-coding-agent/utils/image-loading";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 const zeroUsage = {
@@ -805,5 +806,121 @@ describe("AgentSession aside delivery", () => {
 		expect(drained).toHaveLength(2);
 		expect(drained[0]).toBe(original);
 		expect(drained[1]).toBe(duringRollback);
+	});
+
+	it("drops a queued aside whose normalization outlives a concurrent newSession()", async () => {
+		// Regression: #queueUserMessage's aside branch used to enqueue into IrcBridge
+		// unconditionally after its normalization/vision-description awaits. If a
+		// newSession()/switchSession() completes (clearing the queue and, per the earlier
+		// stranded-aside fix, discarding whatever was queued at that instant) WHILE this
+		// call's own normalization is still in flight, the record lands in the queue only
+		// after the clear already ran — leaking the outgoing session's aside into the new
+		// session's transcript. Gate normalizeImagesForModel (always awaited, even without
+		// images) to force that exact interleaving.
+		const modelRegistry = new ModelRegistry(authStorage);
+		const started = Promise.withResolvers<void>();
+		const mock = createMockModel({
+			provider: "openai",
+			id: "gpt-test",
+			responses: [
+				() => {
+					started.resolve();
+					return { content: ["working"], delayMs: 60_000 };
+				},
+			],
+		});
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model: mock.model, systemPrompt: ["Test"], tools: [], messages: [] },
+			convertToLlm,
+			streamFn: mock.stream,
+		});
+		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
+		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(tempDir.path()),
+			settings,
+			modelRegistry,
+			toolRegistry: new Map(),
+		});
+
+		const run = session.prompt("go");
+		await started.promise;
+
+		const normalizeStarted = Promise.withResolvers<void>();
+		const releaseNormalize = Promise.withResolvers<void>();
+		const normalizeSpy = spyOn(imageLoading, "normalizeModelContextImages").mockImplementation(async images => {
+			normalizeStarted.resolve();
+			await releaseNormalize.promise;
+			return images;
+		});
+		try {
+			const asidePromise = session.sendUserMessage("GENERATION_RACE_ASIDE", { deliverAs: "aside" });
+			await normalizeStarted.promise;
+
+			// The session transition completes (clearing the queue and bumping
+			// #sessionGeneration) while the aside above is still gated in normalization.
+			await session.newSession();
+			await run.catch(() => {});
+
+			releaseNormalize.resolve();
+			await asidePromise;
+			await session.waitForIdle();
+
+			expect(JSON.stringify(session.agent.state.messages)).not.toContain("GENERATION_RACE_ASIDE");
+		} finally {
+			normalizeSpy.mockRestore();
+		}
+	});
+
+	it("routes a custom aside folded in plan mode through the event-emitting path so message_end fires", async () => {
+		// Regression: the plan-mode (and adjacent post-Esc-suppression) fold branches in
+		// sendCustomMessage used to append directly to agent state + session storage, emitting
+		// no message_end. The interactive extension sender skips its own transcript rebuild
+		// when the send began while streaming because it expects that event — without it the
+		// persisted message stays invisible until an unrelated rebuild. Plan mode is the
+		// deterministic way to reach the fold branch without racing a real stream settle.
+		const model = createMockModel({ provider: "openai", id: "gpt-test" }).model;
+		const modelRegistry = new ModelRegistry(authStorage);
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+			convertToLlm,
+			streamFn: () => new AssistantMessageEventStream(),
+		});
+		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
+		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(tempDir.path()),
+			settings,
+			modelRegistry,
+			toolRegistry: new Map(),
+		});
+		session.setPlanModeState({ enabled: true, planFilePath: "local://PLAN.md" });
+
+		const messageEndTypes: string[] = [];
+		const messageEndSeen = Promise.withResolvers<void>();
+		session.subscribe(event => {
+			if (event.type === "message_end" && event.message.role === "custom") {
+				messageEndTypes.push(event.message.customType);
+				messageEndSeen.resolve();
+			}
+		});
+
+		expect(session.isStreaming).toBe(false);
+		const dispatched = await session.sendCustomMessage(
+			{ customType: "ext-aside", content: "PLAN_MODE_FOLD_ASIDE", display: true, attribution: "agent" },
+			{ deliverAs: "aside" },
+		);
+		await messageEndSeen.promise;
+
+		expect(dispatched).toBe(false);
+		expect(messageEndTypes).toContain("ext-aside");
+		const persisted = session.agent.state.messages.some(
+			message => message.role === "custom" && message.customType === "ext-aside",
+		);
+		expect(persisted).toBe(true);
 	});
 });
