@@ -5,6 +5,7 @@
 ### Changed
 
 - Removed incorrect retry instructions from unsupported model error messages
+- Refreshed the built-in `smol`/`slow` model priority chains: `slow` now prefers Codex GPT-5.6 Sol, then Claude Fable 5.1/5, Kimi K3, GLM-5.3, Opus 5; `smol` prefers the newest Gemini Flash, then gpt-oss-120b, Cerebras GLM, Haiku 4.5, GPT-5.6 Luna. Older generations (Opus 4.1–4.7, GPT-5.1–5.4) dropped from the chains.
 
 ### Removed
 
