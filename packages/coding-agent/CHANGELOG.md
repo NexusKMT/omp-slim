@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Replaced the local session-title model choices with LFM2.5 230M, LFM2.5 350M, and Falcon H1 Tiny 90M.
+
 ### Added
 
 - The model picker now shows a brain-icon intelligence column and uses catalog TPS as an estimate until local performance data exists.
@@ -18,6 +22,7 @@
 
 ### Fixed
 
+- Fixed embedded title models receiving online few-shot examples and failing on tokenizer templates containing generation-mask statements.
 - Fixed Alt+P model searches retaining the current model's list position after results changed; selection now moves to the best match unless every preceding choice remains unchanged
 - Fixed model picker searches ignoring provider preferences; explicitly ordered, role-assigned, and recently used providers now rank first among similarly relevant matches
 - Fixed `/new` reviving the previous conversation in-process or after a restart, including across terminal changes and delayed extension events
