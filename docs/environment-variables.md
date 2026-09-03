@@ -345,14 +345,13 @@ therefore completes through the paste-code path.
 | --------------------------------------------------- | ------------------------------------------------------------------------- |
 | `EXA_API_KEY`                                       | Exa search/MCP; alternatively use `/login exa`                            |
 | `TINYFISH_API_KEY`                                  | TinyFish search provider (required)                                       |
-| `FIRECRAWL_API_KEY`                                 | Firecrawl search provider; when unset Firecrawl falls back to keyless mode |
 | `BRAVE_API_KEY`                                     | Brave search provider                                                     |
 | `PERPLEXITY_API_KEY`                                | Perplexity search provider API-key mode                                   |
 | `PERPLEXITY_COOKIES`                                | Perplexity cookie-auth search mode                                        |
 | `PI_PERPLEXITY_RESPONSES`                           | `1` selects the Perplexity Responses endpoint instead of Chat Completions |
 | `PI_PERPLEXITY_MODEL`                               | Perplexity consumer-subscription model preference (default `experimental`) |
 | `PI_PERPLEXITY_API_MODEL`                           | Perplexity direct API model override (default `sonar-pro`)                |
-| `FIRECRAWL_API_KEY`                                 | Firecrawl search provider and fetch reader backend                        |
+| `FIRECRAWL_API_KEY`                                 | Firecrawl search provider (keyless fallback when unset) and fetch reader backend (required) |
 | `FIRECRAWL_BASE_URL`                                | Firecrawl API endpoint override (`FIRECRAWL_API_URL` is a fallback alias) |
 | `GOOGLE_GEMINI_BASE_URL`                            | Gemini search endpoint override; must be a valid absolute HTTP(S) URL     |
 | `TAVILY_API_KEY`                                    | Tavily search provider                                                    |
