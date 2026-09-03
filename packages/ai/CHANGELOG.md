@@ -25,6 +25,13 @@
 ### Changed
 
 - Modernized provider authentication and token refresh across the catalog, with shared support for API-key, authorization-code, and device-code sign-in flows and clearer sign-in progress messages for OpenRouter, Kimi, and xAI.
+### Added
+
+- Added Amazon Bedrock `requestMetadata` support for cost and usage attribution in AWS invocation logs, including forwarding through the pi-native gateway transport.
+
+### Changed
+
+- Amazon Bedrock requests now send an `omp/<version>` User-Agent instead of the runtime default, and honor a configured `User-Agent` override.
 
 ### Fixed
 

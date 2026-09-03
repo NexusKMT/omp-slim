@@ -57,6 +57,9 @@
 ### Added
 
 - Added an opt-in `status` custom status-line segment for rendering extension statuses inline ([#10622](https://github.com/can1357/oh-my-pi/pull/10622) by [@Visvaldis](https://github.com/Visvaldis)).
+### Added
+
+- Added `providers.<provider>.requestMetadata` in `models.yml` to tag Amazon Bedrock requests for cost and usage attribution.
 
 ### Changed
 
@@ -64,6 +67,8 @@
 - Split subagent isolation configuration into `task.isolation.enabled` and `isolation.backend`; existing `task.isolation.mode` settings are migrated automatically.
 - Updated the built-in `smol` and `slow` model priority chains to favor newer recommended models and remove older model generations.
 - Improved unsupported-model error messages by removing retry guidance that does not apply.
+- Removed incorrect retry instructions from unsupported model error messages
+- `providers.amazon-bedrock.headers` in `models.yml` now applies to Bedrock requests, including a `User-Agent` override.
 
 ### Fixed
 

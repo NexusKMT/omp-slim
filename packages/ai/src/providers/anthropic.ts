@@ -48,7 +48,13 @@ import type {
 	ToolResultMessage,
 	Usage,
 } from "../types";
-import { isRecord, normalizeSystemPrompts, normalizeToolCallId, resolveCacheRetention } from "../utils";
+import {
+	getHeaderCaseInsensitive,
+	isRecord,
+	normalizeSystemPrompts,
+	normalizeToolCallId,
+	resolveCacheRetention,
+} from "../utils";
 import { createAbortSourceTracker } from "../utils/abort";
 import {
 	clearStreamingPartialJson,
@@ -233,15 +239,6 @@ function buildClaudeCodeBetas({
 	if (thinkingRequest) betas.push(effortBeta);
 	betas.push(fallbackCreditBeta);
 	return betas;
-}
-
-function getHeaderCaseInsensitive(headers: Record<string, string> | undefined, headerName: string): string | undefined {
-	if (!headers) return undefined;
-	const normalizedName = headerName.toLowerCase();
-	for (const [key, value] of Object.entries(headers)) {
-		if (key.toLowerCase() === normalizedName) return value;
-	}
-	return undefined;
 }
 
 function isClaudeCodeClientUserAgent(userAgent: string | undefined): userAgent is string {
