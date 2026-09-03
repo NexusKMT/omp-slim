@@ -33,7 +33,7 @@ afterEach(async () => {
 });
 
 describe("AgentSession title generation disposal", () => {
-	it("uses the active provider session and aborts an in-flight title request during disposal", async () => {
+	it("uses an isolated provider session and aborts an in-flight title request during disposal", async () => {
 		authStorage = await AuthStorage.create(":memory:");
 		authStorage.setRuntimeApiKey("anthropic", "test-key");
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
@@ -72,8 +72,10 @@ describe("AgentSession title generation disposal", () => {
 
 		const generation = session.generateTitle("Investigate shutdown");
 		await started.promise;
-		expect(getApiKey.mock.calls[0]?.[1]).toBe(providerSessionId);
-		expect(resolver.mock.calls[0]?.[1]).toBe(providerSessionId);
+		const titleSessionId = getApiKey.mock.calls[0]?.[1];
+		expect(titleSessionId).toBeTruthy();
+		expect(titleSessionId).not.toBe(providerSessionId);
+		expect(resolver.mock.calls[0]?.[1]).toBe(titleSessionId);
 		session.beginDispose();
 
 		expect(requestSignal?.aborted).toBe(true);
