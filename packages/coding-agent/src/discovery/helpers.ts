@@ -144,12 +144,18 @@ export function resolveCopilotHome(home: string): string {
 /**
  * Create source metadata for an item.
  */
-export function createSourceMeta(provider: string, filePath: string, level: "user" | "project"): SourceMeta {
+export function createSourceMeta(
+	provider: string,
+	filePath: string,
+	level: "user" | "project",
+	origin?: string,
+): SourceMeta {
 	return {
 		provider,
 		providerName: "", // Filled in by registry
 		path: path.resolve(filePath),
 		level,
+		...(origin !== undefined && { origin }),
 	};
 }
 
@@ -393,6 +399,12 @@ export interface ScanSkillsFromDirOptions {
 	 * semantic every non-Claude provider relies on.
 	 */
 	includeSelf?: boolean;
+	/**
+	 * Registry/CLI origin of the plugin root supplying these skills, forwarded
+	 * to {@link SourceMeta.origin} so user-scope gating can tell omp's own
+	 * installs (`omp`, `plugin-dir`) from the foreign Claude tree (`claude`).
+	 */
+	origin?: string;
 }
 
 // Stable ordering used for skill lists in prompts: name (case-insensitive), then name, then path.
@@ -442,7 +454,7 @@ export async function scanSkillsFromDir(
 				content: body,
 				frontmatter: frontmatter as SkillFrontmatter,
 				level,
-				_source: createSourceMeta(providerId, skillPath, level),
+				_source: createSourceMeta(providerId, skillPath, level, options.origin),
 			});
 		} catch {
 			warnings.push(`Failed to read skill file: ${skillPath}`);
