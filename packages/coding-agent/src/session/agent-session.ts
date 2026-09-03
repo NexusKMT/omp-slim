@@ -1203,12 +1203,10 @@ export class AgentSession {
 			emitNotice: (level, message, source) => this.emitNotice(level, message, source),
 			setModelTemporary: (model, thinkingLevel, options) => this.setModelTemporary(model, thinkingLevel, options),
 			setActiveToolsByName: names => this.setActiveToolsByName(names),
-			setActiveToolPresentation: (toolNames, mountedToolNames) =>
-				this.setActiveToolPresentation(toolNames, mountedToolNames),
-			runToolRegistryMutation: mutation => this.runToolRegistryMutation(mutation),
+			restoreNonMCPToolPresentation: (nonMCPToolNames, nonMCPMountedToolNames) =>
+				this.restoreNonMCPToolPresentation(nonMCPToolNames, nonMCPMountedToolNames),
 			getActiveToolNames: () => this.getActiveToolNames(),
 			getEnabledToolNames: () => this.getEnabledToolNames(),
-			getSelectedMCPToolNames: () => this.getSelectedMCPToolNames(),
 			getMountedXdevToolNames: () => this.getMountedXdevToolNames(),
 			hasBuiltInTool: name => this.hasBuiltInTool(name),
 			getPlanModeState: () => this.getPlanModeState(),
@@ -5118,6 +5116,11 @@ export class AgentSession {
 		signal?: AbortSignal,
 	): Promise<void> {
 		return this.#tools.setActiveToolPresentation(toolNames, mountedToolNames, forcePromptRefresh, signal);
+	}
+
+	/** Restores a non-MCP presentation snapshot while retaining the current MCP selection. */
+	restoreNonMCPToolPresentation(nonMCPToolNames: string[], nonMCPMountedToolNames: string[]): Promise<void> {
+		return this.#tools.restoreNonMCPToolPresentation(nonMCPToolNames, nonMCPMountedToolNames);
 	}
 
 	/**
