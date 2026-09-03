@@ -1983,7 +1983,7 @@ mod tests {
 		fs::hard_link(temp.path().join("a"), temp.path().join("link")).unwrap();
 		repo.stage_files(&["link".into()]).unwrap();
 		let files = git(temp.path(), &["ls-files"]);
-		assert!(files.contains("a"), "tracked original must remain:\n{files}");
+		assert!(files.contains('a'), "tracked original must remain:\n{files}");
 		assert!(
 			files.contains("link"),
 			"unrelated hardlink name must be staged as its own path:\n{files}"

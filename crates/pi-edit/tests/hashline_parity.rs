@@ -374,7 +374,7 @@ fn snapshot_store_matches_snapshot_contract_cases() {
 	matches.sort();
 	assert_eq!(
 		matches,
-		vec![other.clone(), path.clone()],
+		vec![other, path.clone()],
 		"findByHash returns every retained version with that tag across paths"
 	);
 

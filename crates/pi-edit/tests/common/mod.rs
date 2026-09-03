@@ -306,7 +306,7 @@ async fn run_case(case: &Value, default_mode: EditMode) -> Result<(), String> {
 		},
 		(Err(err), None) => problems.push(format!("unexpected error: {err}")),
 		(Ok(_), Some(pattern)) => {
-			problems.push(format!("expected error {pattern:?} but apply succeeded"))
+			problems.push(format!("expected error {pattern:?} but apply succeeded"));
 		},
 		(Ok(_), None) => {},
 	}
