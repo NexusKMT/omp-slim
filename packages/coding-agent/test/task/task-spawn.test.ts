@@ -12,6 +12,7 @@
  * test/task/task-schema.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs/promises";
 import { type AsyncJob, AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
@@ -146,6 +147,43 @@ describe("task spawn routing", () => {
 		expect(job!.resultText).toContain("history://Spawnling");
 		expect(runSpy).toHaveBeenCalledTimes(1);
 		expect(runSpy.mock.calls[0]?.[0].modelOverride).toEqual(["openai/gpt-4.1-mini"]);
+	});
+
+	it("retains the temporary artifacts directory for a completed async spawn (in-memory session)", async () => {
+		// Regression: with no session file (in-memory session), leaseArtifacts()
+		// allocates a temporary directory that runStructuredSubagent() deletes
+		// on completion unless retainArtifacts is requested. Detached (async)
+		// spawns advertise `agent://<id>` handles in the eventual async-result
+		// delivery, so the directory must survive past this call returning
+		// (PR #10625 review).
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		let capturedArtifactsDir: string | undefined;
+		const runSpy = vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			capturedArtifactsDir = options.artifactsDir;
+			return makeResult(options.id ?? "?");
+		});
+
+		const manager = createManager();
+		const tool = await TaskTool.create(createSession({ manager }));
+
+		const result = await tool.execute("tc-retain", {
+			agent: "task",
+			name: "Retainling",
+			task: "Do the thing.",
+		} as TaskParams);
+
+		const jobId = result.details?.async?.jobId;
+		const job = manager.getJob(jobId!);
+		await job!.promise;
+
+		expect(job!.status).toBe("completed");
+		expect(runSpy).toHaveBeenCalledTimes(1);
+		expect(capturedArtifactsDir).toBeTruthy();
+		await expect(fs.stat(capturedArtifactsDir!)).resolves.toBeDefined();
+		await fs.rm(capturedArtifactsDir!, { recursive: true, force: true });
 	});
 
 	it("bounds concurrent job bodies with the session spawn semaphore", async () => {
