@@ -7388,6 +7388,11 @@ export class AgentSession {
 			this.#freshProviderSessionId = undefined;
 			this.#clearInheritedProviderPromptCacheKey();
 			this.#syncAgentSessionId();
+			// Drop the frozen system-prompt/tool snapshot and synced message bytes
+			// (mirrors freshSession()/resetSessionContext()): without this the first
+			// post-/new turns keep sending the previous session's StablePrefix, and
+			// #syncAppendOnlyContext only re-runs on model or setting changes.
+			this.agent.appendOnlyContext?.invalidateForModelChange();
 			this.#memory.rekeyForCurrentSessionId();
 			await this.#memory.resetContextForNewTranscript();
 			this.#pendingNextTurnMessages = [];
