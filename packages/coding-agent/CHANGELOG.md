@@ -12,7 +12,7 @@
 - Added `/wt` (alias `/worktree`) to create a linked worktree with uncommitted changes and move the current session into it while leaving the original checkout untouched.
 ### Added
 
-- Added an opt-in `status` custom status-line segment for rendering extension statuses inline.
+- Added an opt-in `status` custom status-line segment for rendering extension statuses inline ([#10622](https://github.com/can1357/oh-my-pi/pull/10622) by [@Visvaldis](https://github.com/Visvaldis)).
 
 ### Changed
 
