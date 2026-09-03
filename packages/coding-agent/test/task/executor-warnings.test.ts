@@ -22,6 +22,24 @@ describe("subagent warning injection", () => {
 		expect(result.hasYield).toBe(true);
 	});
 
+	it("marks structured output invalid, not silently valid, when a schema-bearing yield has no data", () => {
+		const result = finalizeSubprocessOutput({
+			rawOutput: "partial output",
+			exitCode: 0,
+			stderr: "",
+			doneAborted: false,
+			signalAborted: false,
+			yieldItems: [{ status: "success" }],
+			outputSchema: { type: "object", properties: { count: { type: "number" } }, required: ["count"] },
+			outputSchemaSource: "caller",
+			outputSchemaMode: "strict",
+		});
+
+		expect(result.structuredOutput?.status).toBe("invalid");
+		expect(result.structuredOutput?.error).toBe(SUBAGENT_WARNING_NULL_YIELD);
+		expect(result.structuredOutput?.data).toBeUndefined();
+	});
+
 	it("injects missing-submit warning when subagent exits cleanly without yield", () => {
 		const result = finalizeSubprocessOutput({
 			rawOutput: "",

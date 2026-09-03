@@ -689,6 +689,9 @@ export function finalizeSubprocessOutput(args: FinalizeSubprocessOutputArgs): Fi
 			const assembled = assembleYieldResult(yieldItems, lastAssistantText, arrayValuedLabels(outputSchema));
 			if (!assembled || assembled.missingData) {
 				rawOutput = rawOutput ? `${SUBAGENT_WARNING_NULL_YIELD}\n\n${rawOutput}` : SUBAGENT_WARNING_NULL_YIELD;
+				if (includeStructuredOutput) {
+					structuredOutput = { source, mode, status: "invalid", error: SUBAGENT_WARNING_NULL_YIELD };
+				}
 			} else {
 				const { validator, error: schemaError, normalized } = buildOutputValidator(outputSchema);
 				const completeData = assembled.rawText ? assembled.data : parseStringifiedJson(assembled.data ?? null);
@@ -2301,6 +2304,18 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 					path: sidecarPath,
 					error: error instanceof Error ? error.message : String(error),
 				});
+				// A stale sidecar from an earlier turn must not outlive this
+				// turn's <id>.md just because the replacement write failed —
+				// agent://<id>/<field> would keep answering with superseded data.
+				try {
+					await fs.rm(sidecarPath, { force: true });
+				} catch (rmError) {
+					logger.warn("Failed to drop stale subagent structured output sidecar", {
+						agentId: id,
+						path: sidecarPath,
+						error: rmError instanceof Error ? rmError.message : String(rmError),
+					});
+				}
 			}
 		} else if (outputPath) {
 			// This turn republished <id>.md; a stale sidecar from an earlier

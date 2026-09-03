@@ -119,6 +119,10 @@
 ### Removed
 
 - Removed the bundled `designer` subagent and `designer` model role; `modelRoles.designer` and `@designer` are no longer built in.
+### Fixed
+
+- Background (non-blocking) `task` spawns with an `outputSchema` now deliver their parsed structured output and expose it at `agent://<id>`.
+
 ## [18.1.5] - 2026-09-03
 
 ### Added
@@ -148,9 +152,6 @@
 ### Removed
 
 - Removed the bundled `designer` subagent and `designer` model role; `modelRoles.designer` and `@designer` are no longer built in.
-### Fixed
-
-- Background (non-blocking) `task` spawns with an `outputSchema` now deliver their parsed structured output and expose it at `agent://<id>`.
 
 ## [18.1.3] - 2026-09-02
 
