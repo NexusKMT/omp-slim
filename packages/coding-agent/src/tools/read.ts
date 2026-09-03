@@ -107,6 +107,20 @@ import {
 	type SuffixMatchCache,
 } from "./read-path-resolution";
 import { type PdfImageReadTarget, renderPdfPageScreenshot, splitPdfImageReadPath } from "./read-pdf";
+import { formatDimensionNote, resizeImage } from "../utils/image-resize";
+import {
+	VideoError,
+	buildVideoContactSheetPng,
+	extractVideoFramePng,
+	formatVideoDetails,
+	isVideoPath,
+	parseVideoSelector,
+	probeVideo,
+	splitVideoReadTarget,
+	videoMimeForPath,
+	type VideoMetadata,
+	type VideoPng,
+} from "../utils/video";
 import {
 	isMultiRange,
 	isRawSelector,
@@ -794,6 +808,121 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		return toolResult<ReadToolDetails>({ notes, displayReadTargets }).content(content).done();
 	}
 
+	/**
+	 * Reinterpret a read target pointing at a video file. Timestamp selectors
+	 * (`clip.mp4:1h5m42s`, `clip.mp4:0:05`) never survive line-selector parsing,
+	 * so peel one off the raw path whenever the base names an existing video
+	 * file; a literal file named by the full path (colon included) still wins.
+	 */
+	async #applyVideoSelectorFallback(
+		literalSplit: { path: string; sel?: string },
+		readPath: string,
+	): Promise<{ path: string; sel?: string }> {
+		const videoSplit = splitVideoReadTarget(readPath);
+		if (!videoSplit) return literalSplit;
+		if ((await probeLiteralPathExists(videoSplit.path, this.session.cwd)) === "missing") return literalSplit;
+		if ((await probeLiteralPathExists(readPath, this.session.cwd)) === "exists") return literalSplit;
+		return videoSplit;
+	}
+
+	/**
+	 * Read a video file as a contact-sheet preview grid (bare read) or a single
+	 * frame (`:412` frame index, `:1h5m42s`/`:90s` timestamp). Both ride the
+	 * image pipeline so model context sees real pixels plus a metadata block.
+	 */
+	async #readVideoFile(
+		absolutePath: string,
+		sel: string | undefined,
+		fileSize: number,
+		suffixResolution: { from: string; to: string } | undefined,
+		signal?: AbortSignal,
+	): Promise<AgentToolResult<ReadToolDetails>> {
+		const resolvedDisplayPath = formatPathRelativeToCwd(absolutePath, this.session.cwd);
+		const mimeType = videoMimeForPath(absolutePath);
+		const selector = parseVideoSelector(sel);
+		if (selector === null && sel !== undefined) {
+			throw new ToolError(
+				`Invalid selector ':${sel}' on '${resolvedDisplayPath}'. Use :<frame> (e.g. :412) or :<timestamp> (e.g. :1h5m42s, :90s) to extract a frame, or read without a selector for a preview grid.`,
+			);
+		}
+		const applySuffix = (text: string): string =>
+			suffixResolution ? prependSuffixResolutionNotice(text, suffixResolution) : text;
+		let meta: VideoMetadata;
+		try {
+			meta = await probeVideo(absolutePath, signal);
+		} catch (error) {
+			if (error instanceof VideoError) throw new ToolError(error.message);
+			throw error;
+		}
+		if (this.syncInspectImageState()) {
+			const hint =
+				"\n\nIf you want to see the video, read a frame with " +
+				`${resolvedDisplayPath}:<timestamp> (e.g. :0:05) or ${resolvedDisplayPath}:<frame> (e.g. :412).`;
+			return toolResult<ReadToolDetails>({
+				resolvedPath: absolutePath,
+				contentType: mimeType,
+				fileSize,
+				suffixResolution,
+			})
+				.text(
+					applySuffix(
+						`${formatVideoDetails(resolvedDisplayPath, meta, fileSize, mimeType)}${selector ? "" : hint}`,
+					),
+				)
+				.sourcePath(absolutePath)
+				.done();
+		}
+		let png: VideoPng;
+		let label: string;
+		try {
+			if (selector) {
+				png = await extractVideoFramePng(absolutePath, selector, signal);
+				label =
+					selector.kind === "time"
+						? `Video frame: ${resolvedDisplayPath} @ ${selector.raw}`
+						: `Video frame: ${resolvedDisplayPath} (frame ${selector.frame})`;
+			} else {
+				const sheet = await buildVideoContactSheetPng(absolutePath, meta, signal);
+				png = sheet.png;
+				label = `Video preview grid: ${resolvedDisplayPath} (${sheet.thumbs} frames, ${sheet.cols}x${sheet.rows})`;
+			}
+		} catch (error) {
+			if (error instanceof VideoError) throw new ToolError(error.message);
+			throw error;
+		}
+		let image: ImageContent = { type: "image", data: png.data, mimeType: png.mimeType };
+		let dimensionNote: string | undefined;
+		if (this.#autoResizeImages) {
+			try {
+				const resized = await resizeImage(image, {
+					excludeWebP: webpExclusionForModel(this.session.getActiveModel?.()),
+				});
+				dimensionNote = formatDimensionNote(resized);
+				image = { type: "image", data: resized.data, mimeType: resized.mimeType };
+			} catch {
+				// Fall back to the extracted PNG when resize fails.
+			}
+		}
+		const previewBytes = Buffer.from(image.data, "base64").length;
+		if (previewBytes > MAX_IMAGE_SIZE) {
+			throw new ToolError(
+				`Video preview too large: ${formatBytes(previewBytes)} exceeds ${formatBytes(MAX_IMAGE_SIZE)} limit.`,
+			);
+		}
+		const text = applySuffix(
+			`${label}\n${formatVideoDetails(resolvedDisplayPath, meta, fileSize, mimeType)}${dimensionNote ? `\n${dimensionNote}` : ""}`,
+		);
+		return toolResult<ReadToolDetails>({
+			resolvedPath: absolutePath,
+			contentType: mimeType,
+			fileSize,
+			suffixResolution,
+		})
+			.content([{ type: "text", text }, image])
+			.sourcePath(absolutePath)
+			.done();
+	}
+
 	async #readPdfPageScreenshot(options: {
 		readPath: string;
 		absolutePdfPath: string;
@@ -1246,9 +1375,17 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					: null;
 		}
 
-		const localTarget = pdfImageRead ? { path: pdfImageRead.pdfPath, sel: undefined } : literalSplit;
+		const localTarget = pdfImageRead
+			? { path: pdfImageRead.pdfPath, sel: undefined }
+			: await this.#applyVideoSelectorFallback(literalSplit, readPath);
 		const localReadPath = localTarget.path;
-		const parsed = parseSel(localTarget.sel);
+		// Video frame selectors (`:412`, `:1h5m42s`, `:0:05`) are not line selectors;
+		// keep them out of the line parser so they reach the video reader intact.
+		const parsed =
+			isVideoPath(localTarget.path) &&
+			(localTarget.sel === undefined || parseVideoSelector(localTarget.sel) !== null)
+				? { kind: "none" as const }
+				: parseSel(localTarget.sel);
 
 		let absolutePath = resolveReadPath(localReadPath, this.session.cwd);
 		let suffixResolution: { from: string; to: string } | undefined;
@@ -1374,6 +1511,9 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			| { result: TruncationResult; options: { direction: "head"; startLine?: number; totalFileLines?: number } }
 			| undefined;
 
+		if (isVideoPath(absolutePath)) {
+			return this.#readVideoFile(absolutePath, localTarget.sel, fileSize, suffixResolution, signal);
+		}
 		if (parsed.kind === "image") {
 			({ content, details, sourcePath } = await this.#loadImageContent({
 				readPath: localReadPath,

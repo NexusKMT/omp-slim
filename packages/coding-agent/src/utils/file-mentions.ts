@@ -22,6 +22,15 @@ import {
 } from "../session/streaming-output";
 import { resolveReadPath } from "../tools/path-utils";
 import { formatDimensionNote, resizeImage } from "./image-resize";
+import {
+	VideoError,
+	buildVideoContactSheetPng,
+	createVideoPreviewImage,
+	formatVideoDetails,
+	isVideoPath,
+	probeVideo,
+	videoMimeForPath,
+} from "./video";
 
 /** Regex to match @filepath patterns in text */
 const FILE_MENTION_REGEX = /@(?:"([^"]+)"|'([^']+)'|([^\s@]+))/g;
@@ -245,6 +254,39 @@ export async function generateFileMentionMessages(
 				}
 
 				files.push({ path: resolvedPath, content: dimensionNote ?? "", image });
+				continue;
+			}
+
+			if (isVideoPath(absolutePath)) {
+				try {
+					const meta = await probeVideo(absolutePath);
+					const sheet = await buildVideoContactSheetPng(absolutePath, meta);
+					let image: ImageContent = { type: "image", data: sheet.png.data, mimeType: sheet.png.mimeType };
+					let dimensionNote: string | undefined;
+					if (autoResizeImages) {
+						try {
+							const resized = await resizeImage(image);
+							dimensionNote = formatDimensionNote(resized);
+							image = { type: "image", mimeType: resized.mimeType, data: resized.data };
+						} catch {
+							// Keep the extracted sheet when resize fails.
+						}
+					}
+					const details = formatVideoDetails(resolvedPath, meta, stat.size, videoMimeForPath(absolutePath));
+					files.push({
+						path: resolvedPath,
+						content: `${details}\nPreview grid: ${sheet.thumbs} frames (${sheet.cols}x${sheet.rows})${dimensionNote ? `\n${dimensionNote}` : ""}`,
+						image: createVideoPreviewImage(image, absolutePath),
+					});
+				} catch (error) {
+					const reason = error instanceof VideoError ? error.message : "video preview failed";
+					files.push({
+						path: resolvedPath,
+						content: `(skipped auto-read: ${reason})`,
+						byteSize: stat.size,
+						skippedReason: "binary",
+					});
+				}
 				continue;
 			}
 

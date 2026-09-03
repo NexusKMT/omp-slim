@@ -8,6 +8,7 @@
 
 ### Added
 
+- Video files can be attached or read through system ffmpeg as preview grids with metadata; use `:412` or `:1h5m42s` to inspect individual frames.
 - The model picker now shows a brain-icon intelligence column and uses catalog TPS as an estimate until local performance data exists.
 - Added `report` field to scout agent definitions for detailed, non-summarized findings
 - Subagents now automatically relay turn results to the originating agent, enabling read-only agents to return data

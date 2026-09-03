@@ -42,6 +42,7 @@ import { createUsageRowBlock, turnElapsedMs } from "../../modes/components/usage
 import { UserMessageComponent } from "../../modes/components/user-message";
 import { decodeStreamedToolArgs, streamingStringKeysForTool } from "../../modes/controllers/tool-args-reveal";
 import { materializeImageReferenceLinksSync } from "../../modes/image-references";
+import { videoPreviewSource } from "../../utils/video";
 import { theme } from "../../modes/theme/theme";
 import type { CompactionQueuedMessage, InteractiveModeContext, RenderSessionContextOptions } from "../../modes/types";
 import { LAUNCH_COMPLETION_MESSAGE_TYPE } from "../../session/launch-completion";
@@ -113,7 +114,8 @@ function imageLinksForMessage(
 		(content): content is ImageContent =>
 			content.type === "image" && typeof content.data === "string" && typeof content.mimeType === "string",
 	);
-	return materializeImageReferenceLinksSync(images, putBlobSync);
+	const materialized = materializeImageReferenceLinksSync(images, putBlobSync);
+	return images.map((image, index) => videoPreviewSource(image) ?? materialized?.[index]);
 }
 
 export class UiHelpers {

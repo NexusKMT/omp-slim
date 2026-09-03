@@ -176,6 +176,7 @@ import planModeToolDecisionReminderPrompt from "../prompts/system/plan-mode-tool
 import rewindReportTemplate from "../prompts/system/rewind-report.md" with { type: "text" };
 import sideChannelNoToolsReminder from "../prompts/system/side-channel-no-tools.md" with { type: "text" };
 import vibeModeActivePrompt from "../prompts/system/vibe-mode-active.md" with { type: "text" };
+import videoAttachmentPrompt from "../prompts/system/video-attachment.md" with { type: "text" };
 import {
 	deobfuscateAssistantContent,
 	deobfuscateSessionContext,
@@ -217,6 +218,7 @@ import type { EditMode } from "../utils/edit-mode";
 import { resolveFileDisplayMode } from "../utils/file-display-mode";
 import { extractFileMentions, generateFileMentionMessages } from "../utils/file-mentions";
 import { normalizeModelContextImages } from "../utils/image-loading";
+import { videoPreviewSource } from "../utils/video";
 import type { InspectImageMode } from "../utils/inspect-image-mode";
 import { resumeCommand } from "../utils/resume-command";
 import { generateSessionTitle } from "../utils/title-generator";
@@ -5725,6 +5727,30 @@ export class AgentSession {
 		return normalizeModelContextImages(images, { model: this.model });
 	}
 
+	/**
+	 * Emit source paths for video contact-sheet images as hidden user context.
+	 * The visible message deliberately contains only its `[Video #N]` marker and
+	 * preview image, while the agent gets the path required for `read` frame
+	 * subselectors without exposing the user's filesystem layout in the TUI.
+	 */
+	#createVideoAttachmentNotices(images: readonly ImageContent[] | undefined, timestamp: number): CustomMessage[] {
+		if (!images?.length) return [];
+		const notices: CustomMessage[] = [];
+		for (let index = 0; index < images.length; index++) {
+			const sourcePath = videoPreviewSource(images[index]!);
+			if (!sourcePath) continue;
+			notices.push({
+				role: "custom",
+				customType: "video-attachment",
+				content: prompt.render(videoAttachmentPrompt, { index: String(index + 1), path: sourcePath }),
+				display: false,
+				attribution: "user",
+				timestamp,
+			});
+		}
+		return notices;
+	}
+
 	#buildImageDescriptionNotice(
 		normalizedImages: ImageContent[],
 		signal?: AbortSignal,
@@ -5897,6 +5923,7 @@ export class AgentSession {
 			!options?.synthetic && !hasPendingUserDirective ? this.#todo.createEagerTodoPrelude(expandedText) : undefined;
 		const eagerTaskPrelude =
 			!options?.synthetic && !hasPendingUserDirective ? this.#todo.createEagerTaskPrelude(expandedText) : undefined;
+		const videoAttachmentNotices = this.#createVideoAttachmentNotices(options?.images, submittedAt);
 		const normalizedImages = await this.#normalizeImagesForModel(options?.images);
 
 		const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
@@ -5967,8 +5994,16 @@ export class AgentSession {
 				...options,
 				images: normalizedImages,
 				prependMessages:
-					preludeMessages.length > 0 || keywordNotices.length > 0 || imageDescriptionNotice
-						? [...preludeMessages, ...keywordNotices, ...(imageDescriptionNotice ? [imageDescriptionNotice] : [])]
+					preludeMessages.length > 0 ||
+					keywordNotices.length > 0 ||
+					videoAttachmentNotices.length > 0 ||
+					imageDescriptionNotice
+						? [
+								...preludeMessages,
+								...keywordNotices,
+								...videoAttachmentNotices,
+								...(imageDescriptionNotice ? [imageDescriptionNotice] : []),
+							]
 						: undefined,
 			});
 		} finally {
@@ -6573,6 +6608,7 @@ export class AgentSession {
 		// The pre-dispatch re-check in prompt() arrives with normalization and the
 		// vision description already done — reuse them instead of paying a second
 		// vision-model request for the same attachment.
+		const videoAttachmentNotices = this.#createVideoAttachmentNotices(images, timestamp ?? Date.now());
 		const normalizedImages = preprocessed ? preprocessed.images : await this.#normalizeImagesForModel(images);
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
 		if (normalizedImages?.length) {
@@ -6587,6 +6623,7 @@ export class AgentSession {
 				: undefined;
 		this.#allowQueuedMessageDrainRetry();
 		if (mode === "followUp") {
+			for (const notice of videoAttachmentNotices) this.agent.followUp(notice);
 			if (imageDescriptionNotice) this.agent.followUp(imageDescriptionNotice);
 			this.agent.followUp({
 				role: "user",
@@ -6595,6 +6632,7 @@ export class AgentSession {
 				timestamp: timestamp ?? Date.now(),
 			});
 		} else {
+			for (const notice of videoAttachmentNotices) this.agent.steer(notice);
 			if (imageDescriptionNotice) this.agent.steer(imageDescriptionNotice);
 			this.agent.steer({
 				role: "user",

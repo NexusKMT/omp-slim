@@ -239,8 +239,9 @@ export type SymbolKey =
 	| "lang.pdf"
 	| "lang.archive"
 	| "lang.binary"
-	// Composer attachment chips (image paste / large text paste)
+	// Composer attachment chips (image/video paste / large text paste)
 	| "chip.image"
+	| "chip.video"
 	| "chip.paste"
 	// Settings tab icons
 	| "tab.appearance"
@@ -593,6 +594,7 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"lang.binary": "⚙",
 	// Composer attachment chips
 	"chip.image": "🖼",
+	"chip.video": "🎞",
 	"chip.paste": "📄",
 	// Settings tabs
 	"tab.appearance": "🎨",
@@ -1026,6 +1028,8 @@ const NERD_SYMBOLS: SymbolMap = {
 	// Composer attachment chips
 	// pick:  (fa-image, matches omp2) | alt: 󰋩 (md-image) 󰈟 (md-file_image)
 	"chip.image": "\uf03e",
+	// pick:  (fa-film)
+	"chip.video": "\uf008",
 	// pick:  (fa-file_text, matches omp2) | alt: 󰈙 (md-file_document)  (cod-file)
 	"chip.paste": "\uf15c",
 	// Settings tab icons
@@ -1297,6 +1301,7 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"lang.binary": "bin",
 	// Composer attachment chips
 	"chip.image": "img",
+	"chip.video": "vid",
 	"chip.paste": "txt",
 	// Settings tab icons
 	"tab.appearance": "[A]",
