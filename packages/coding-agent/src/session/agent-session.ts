@@ -2591,7 +2591,12 @@ export class AgentSession {
 		};
 	}
 
-	#persistMessageEnd(message: AgentMessage): void {
+	#persistMessageEnd(message: AgentMessage, promptGeneration: number): void {
+		// Session transitions bump the prompt generation before replacing the
+		// transcript. A message_end handler may still be awaiting an extension at
+		// that boundary; never let its delayed persistence append the previous
+		// conversation to the replacement session.
+		if (this.#promptGeneration !== promptGeneration) return;
 		if (message.role === "hookMessage" || message.role === "custom") {
 			// One-run instructions must not return from persisted history: prewalk
 			// nudges are consumed once, and Vibe context is rebuilt only while active.
@@ -2696,6 +2701,7 @@ export class AgentSession {
 	}
 
 	#processAgentEvent = async (event: AgentEvent): Promise<void> => {
+		const eventPromptGeneration = this.#promptGeneration;
 		// A fresh run supersedes the previously settled (and pruned) refusal
 		// turn: state-based lookups take over again.
 		if (event.type === "agent_start") {
@@ -2849,10 +2855,14 @@ export class AgentSession {
 				await this.#emitSessionEvent(displayEvent);
 			} catch (error) {
 				if (event.type === "message_end") {
-					const persistMessageEnd = () => this.#persistMessageEnd(event.message);
 					try {
-						if (messageEndPersistence) await messageEndPersistence.persist(persistMessageEnd);
-						else persistMessageEnd();
+						if (messageEndPersistence) {
+							await messageEndPersistence.persist(() =>
+								this.#persistMessageEnd(event.message, eventPromptGeneration),
+							);
+						} else {
+							this.#persistMessageEnd(event.message, eventPromptGeneration);
+						}
 					} catch (persistenceError) {
 						logger.warn("Failed to persist message after session event emission failed", {
 							error: String(persistenceError),
@@ -2915,12 +2925,12 @@ export class AgentSession {
 
 		// Handle session persistence
 		if (event.type === "message_end") {
-			const persistMessageEnd = () => this.#persistMessageEnd(event.message);
 			if (messageEndPersistence) {
-				await messageEndPersistence.persist(persistMessageEnd);
+				await messageEndPersistence.persist(() => this.#persistMessageEnd(event.message, eventPromptGeneration));
 			} else {
-				persistMessageEnd();
+				this.#persistMessageEnd(event.message, eventPromptGeneration);
 			}
+			if (this.#promptGeneration !== eventPromptGeneration) return;
 			if (interruptedThinkingMessage) {
 				this.sessionManager.appendCustomMessageEntry(
 					interruptedThinkingMessage.customType,

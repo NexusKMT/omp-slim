@@ -10,6 +10,7 @@
 
 ### Changed
 
+- Session history is now sorted by modification time, then creation time, then file path
 - Cleaned up trailing periods from agent activity descriptions in the UI
 - Increased maximum file snapshot size to 4MB
 - Edit tool engines (replace/patch/apply_patch/hashline/sloppy) now run natively with streamed diff previews computed off the main thread
