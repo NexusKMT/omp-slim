@@ -46,7 +46,8 @@ type AsyncResultJobDetails = {
 	type?: AsyncJobType;
 	label?: string;
 	durationMs?: number;
-	schema?: { status: StructuredSubagentOutput["status"]; error?: string };
+	/** Full structured payload (source/mode/status/data/error), when the job used an output schema. */
+	schema?: StructuredSubagentOutput;
 };
 
 export type AsyncResultDetails = {
@@ -94,7 +95,7 @@ export function buildAsyncResultBatchMessage(entries: AsyncResultEntry[]): Custo
 			type: job.type,
 			label: job.label,
 			durationMs: job.durationMs,
-			...(job.structured ? { schema: { status: job.structured.status, error: job.structured.error } } : {}),
+			...(job.structured ? { schema: job.structured } : {}),
 		})),
 	};
 	return {

@@ -119,7 +119,12 @@ describe("AgentSession owner-routed async delivery", () => {
 			epoch: 0,
 		};
 		const message = buildAsyncResultBatchMessage([entry]);
-		expect(message?.details?.jobs[0]?.schema).toEqual({ status: "valid" });
+		expect(message?.details?.jobs[0]?.schema).toEqual({
+			source: "caller",
+			mode: "permissive",
+			status: "valid",
+			data: { summary: "ok", count: 7 },
+		});
 		expect(message?.content).toContain("schema valid");
 		expect(message?.content).toContain("agent://SchemaProbe");
 		expect(message?.content).not.toContain("```json");
@@ -152,8 +157,11 @@ describe("AgentSession owner-routed async delivery", () => {
 		};
 		const message = buildAsyncResultBatchMessage([entry]);
 		expect(message?.details?.jobs[0]?.schema).toEqual({
+			source: "caller",
+			mode: "strict",
 			status: "invalid",
 			error: "missing required field 'count'",
+			data: { summary: "ok" },
 		});
 		expect(message?.content).toMatch(/```json[\s\S]*"summary": "ok"[\s\S]*```/);
 		expect(message?.content).toContain("missing required field 'count'");
