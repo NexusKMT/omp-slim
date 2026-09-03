@@ -54,6 +54,9 @@
 - Added the `omp worktree add` command with Git-compatible branch, detach, path, and commit options.
 - Added `/wt` (alias `/worktree`) to create a linked worktree with uncommitted changes and move the current session into it while leaving the original checkout untouched.
 - Added the `:-N` read selector to tail the last N lines of files, directories, archives, artifacts, internal URLs (`history://`, `skill://`, …), and web URLs; combines with `:raw` (`:raw:-60`).
+### Added
+
+- Added an opt-in `status` custom status-line segment for rendering extension statuses inline ([#10622](https://github.com/can1357/oh-my-pi/pull/10622) by [@Visvaldis](https://github.com/Visvaldis)).
 
 ### Changed
 
