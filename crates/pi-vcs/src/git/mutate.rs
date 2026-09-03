@@ -1473,13 +1473,13 @@ fn collect_clone_reconciliation_paths(
 		};
 		use gix::status::index_worktree;
 		match change {
-			index_worktree::Item::Modification { rela_path, status, .. } => {
+			index_worktree::Item::Modification { rela_path, status, .. }
 				if !matches!(
 					status,
 					gix::status::plumbing::index_as_worktree::EntryStatus::NeedsUpdate(_)
-				) {
-					dirty_tracked.insert(rela_path);
-				}
+				) =>
+			{
+				dirty_tracked.insert(rela_path);
 			},
 			index_worktree::Item::DirectoryContents { entry, .. }
 				if entry.status == gix::dir::entry::Status::Untracked =>
