@@ -289,6 +289,7 @@ export async function generateTitleOnline(
 					},
 					{
 						apiKey: registry.resolver(model, sessionId),
+						sessionId,
 						maxTokens,
 						disableReasoning: true,
 						// Greedy decode: titling is extraction, not generation. Backends that

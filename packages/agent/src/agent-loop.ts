@@ -925,7 +925,10 @@ function extractIntent(args: Record<string, unknown>): { intent?: string; stripp
 	if (typeof intent !== "string") {
 		return { strippedArgs };
 	}
-	const trimmed = intent.trim();
+	const trimmed = intent
+		.trim()
+		.replace(/\s*\.+$/, "")
+		.trim();
 	return { intent: trimmed.length > 0 ? trimmed : undefined, strippedArgs };
 }
 

@@ -558,7 +558,10 @@ export class EventController {
 		// Streamed JSON can deliver non-string `i` (object, number, boolean) before
 		// schema validation; `?.` only guards null/undefined, so guard the type too.
 		if (typeof intent !== "string") return;
-		const trimmed = intent.trim();
+		const trimmed = intent
+			.trim()
+			.replace(/\s*\.+$/, "")
+			.trim();
 		if (!trimmed || trimmed === this.#lastIntent) return;
 		this.#lastIntent = trimmed;
 		this.ctx.setWorkingMessage(trimmed);

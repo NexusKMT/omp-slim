@@ -320,6 +320,7 @@ export async function attemptEditAutoRepair(options: {
 					{ messages: [{ role: "user", content: builtPrompt, timestamp: Date.now() }] },
 					{
 						apiKey: registry.resolver(model, sessionId),
+						sessionId,
 						maxTokens: COMPLETION_MAX_TOKENS,
 						disableReasoning: true,
 						signal,

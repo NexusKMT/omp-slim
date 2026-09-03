@@ -17,7 +17,7 @@ import { Database } from "bun:sqlite";
  *   bun scripts/bench-title-models.ts
  *   bun scripts/bench-title-models.ts --count 30 --seed 42
  *   bun scripts/bench-title-models.ts --models lfm2-350m,gemma-270m
- *   bun scripts/bench-title-models.ts --ollama-url http://spark.internal:11434 --ollama-models llama3.2:3b,lfm2:2.6b
+ *   bun scripts/bench-title-models.ts --ollama-url http://spark.internal:11434 --ollama-models llama3.2:3b,lfm2.5:2.6b
  *   bun scripts/bench-title-models.ts --db ~/.omp/agent/history.db --out bench.json
  */
 import * as os from "node:os";
@@ -76,7 +76,7 @@ interface BenchConfig {
 
 const DEFAULT_LOCAL_MODELS = ["lfm2-350m", "lfm2-700m", "gemma-270m"];
 const DEFAULT_OLLAMA_URL = "http://spark.internal:11434";
-const DEFAULT_OLLAMA_MODELS = ["llama3.2:3b", "lfm2:2.6b"];
+const DEFAULT_OLLAMA_MODELS = ["llama3.2:3b", "lfm2.5:2.6b"];
 const MIN_INPUT_CHARS = 10;
 const MAX_INPUT_CHARS = 800;
 
@@ -162,12 +162,13 @@ async function runOllamaLane(baseUrl: string, model: string, prompts: PreparedPr
 			body: JSON.stringify({
 				model,
 				stream: false,
+				think: false,
 				keep_alive: "10m",
 				messages: [
 					{ role: "system", content: TITLE_PROMPT_WITH_EXAMPLES },
 					{ role: "user", content: `<user>\n${item.input}\n</user>` },
 				],
-				options: { temperature: 0, num_predict: 32 },
+				options: { temperature: 0, num_predict: 1024 },
 			}),
 		});
 		if (!response.ok) throw new Error(`Ollama ${response.status}: ${await response.text()}`);

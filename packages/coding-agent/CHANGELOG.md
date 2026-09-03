@@ -10,6 +10,7 @@
 
 ### Changed
 
+- Cleaned up trailing periods from agent activity descriptions in the UI
 - Increased maximum file snapshot size to 4MB
 - Edit tool engines (replace/patch/apply_patch/hashline/sloppy) now run natively with streamed diff previews computed off the main thread
 - Inlined approved plan content directly into agent history to reduce redundant read operations
