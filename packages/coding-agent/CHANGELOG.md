@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the Abliteration provider to `/login` and `ABLITERATION_API_KEY` to `--help` ([#10515](https://github.com/can1357/oh-my-pi/pull/10515) by [@kmccleary3301](https://github.com/kmccleary3301))
+
 ### Changed
 
 - Removed incorrect retry instructions from unsupported model error messages
