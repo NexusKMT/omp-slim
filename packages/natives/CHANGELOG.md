@@ -4,7 +4,8 @@
 
 ### Fixed
 
-- Fixed native VCS clean to resolve nested `.gitignore` files and skip nested repositories and submodules.
+- Fixed native VCS clean to resolve nested `.gitignore` files, global `core.excludesFile`, and `.git/info/exclude`, safely unlink directory symlinks without modifying target trees, respect pathspec boundaries when pruning empty directories, and skip nested repositories and submodules.
+
 ## [18.1.7] - 2026-09-03
 
 ### Added

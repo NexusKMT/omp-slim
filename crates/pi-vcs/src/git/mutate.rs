@@ -12,7 +12,7 @@ use gix::bstr::{BString, ByteSlice};
 
 use super::{
 	GitRepo, normalize_path,
-	open::{load_index_or_empty, load_index_or_head, status_with_fresh_index},
+	open::{load_index_or_empty, load_index_or_head, status_with_fresh_index, status_with_index},
 	read::literal_pathspec,
 };
 use crate::{
@@ -395,14 +395,20 @@ impl GitRepo {
 			.collect();
 
 		let repo = self.gix()?;
-		let mut platform = status_with_fresh_index(&repo, "git clean")?
-			.untracked_files(gix::status::UntrackedFiles::Files);
+		let mut platform =
+			status_with_index(&repo, "git clean", load_index_or_head(&repo, "git clean")?)?
+				.untracked_files(gix::status::UntrackedFiles::Files);
+		let emit_ignored = options.include_ignored || options.ignored_only;
+		let for_deletion = if emit_ignored {
+			gix::dir::walk::ForDeletionMode::FindNonBareRepositoriesInIgnoredDirectories
+		} else {
+			gix::dir::walk::ForDeletionMode::IgnoredDirectoriesCanHideNestedRepositories
+		};
 		platform = platform.dirwalk_options(|opts| {
 			let opts = opts
 				.emit_empty_directories(true)
-				.for_deletion(Some(gix::dir::walk::ForDeletionMode::FindNonBareRepositoriesInIgnoredDirectories))
-				.recurse_repositories(false);
-			if options.include_ignored || options.ignored_only {
+				.for_deletion(Some(for_deletion));
+			if emit_ignored {
 				opts.emit_ignored(Some(gix::dir::walk::EmissionMode::Matching))
 			} else {
 				opts
@@ -437,11 +443,8 @@ impl GitRepo {
 				continue;
 			}
 			let full = self.root().join(entry.rela_path.to_str_lossy().as_ref());
-			if entry.disk_kind == Some(gix::dir::entry::Kind::Directory) && contains_nested_repo(&full) {
-				continue;
-			}
 			remove_existing(&full)?;
-			prune_empty_parents(self.root(), full.parent());
+			prune_empty_parents_scoped(self.root(), full.parent(), &paths);
 		}
 		Ok(())
 	}
@@ -1550,25 +1553,6 @@ fn collect_clone_reconciliation_paths(
 	Ok((dirty_tracked, untracked))
 }
 
-fn contains_nested_repo(dir: &Path) -> bool {
-	if dir.join(".git").exists() {
-		return true;
-	}
-	let Ok(entries) = fs::read_dir(dir) else {
-		return false;
-	};
-	for entry in entries.flatten() {
-		if entry.file_type().is_ok_and(|ft| ft.is_dir()) {
-			if contains_nested_repo(&entry.path()) {
-				return true;
-			}
-		}
-	}
-	false
-}
-
-/// Remove a file, symlink, or directory tree at `path`; missing is fine.
-
 fn register_worktree(path: &Path, common: &Path, head: &str) -> Result<PathBuf> {
 	fs::create_dir_all(path)?;
 	let name = worktree_admin_name(common, path);
@@ -1614,6 +1598,30 @@ fn copy_symlink(src: &Path, dst: &Path) -> Result<()> {
 fn prune_empty_parents(root: &Path, mut parent: Option<&Path>) {
 	while let Some(dir) = parent {
 		if dir == root || fs::remove_dir(dir).is_err() {
+			break;
+		}
+		parent = dir.parent();
+	}
+}
+
+fn prune_empty_parents_scoped(root: &Path, mut parent: Option<&Path>, paths: &BTreeSet<String>) {
+	while let Some(dir) = parent {
+		if dir == root {
+			break;
+		}
+		if !paths.is_empty() {
+			let Ok(rel) = dir.strip_prefix(root) else {
+				break;
+			};
+			let rel_str = rel.to_string_lossy().replace('\\', "/");
+			let allowed = paths
+				.iter()
+				.any(|p| p == &rel_str || rel_str.starts_with(&format!("{p}/")));
+			if !allowed {
+				break;
+			}
+		}
+		if fs::remove_dir(dir).is_err() {
 			break;
 		}
 		parent = dir.parent();
@@ -2121,6 +2129,7 @@ mod tests {
 	#[test]
 	fn clean_respects_nested_ignores_and_preserves_submodules() {
 		let (temp, repo) = fixture();
+		let outside = tempfile::tempdir().unwrap();
 		// 1. Nested gitignore
 		let nested = temp.path().join("nested");
 		fs::create_dir_all(&nested).unwrap();
@@ -2142,10 +2151,15 @@ mod tests {
 		git(&sub, &["add", "."]);
 		git(&sub, &["commit", "-qm", "sub init"]);
 
-		git(
-			temp.path(),
-			&["-c", "protocol.file.allow=always", "submodule", "-q", "add", sub.to_str().unwrap(), "my-submodule"],
-		);
+		git(temp.path(), &[
+			"-c",
+			"protocol.file.allow=always",
+			"submodule",
+			"-q",
+			"add",
+			sub.to_str().unwrap(),
+			"my-submodule",
+		]);
 		git(temp.path(), &["commit", "-qm", "add submodule"]);
 
 		let checked_out_sub = temp.path().join("my-submodule");
@@ -2156,10 +2170,9 @@ mod tests {
 		fs::write(temp.path().join("parent-untracked.txt"), "delete\n").unwrap();
 
 		// 4. Global excludesfile (core.excludesFile)
-		let global_exclude = temp.path().join("../global-excludes");
+		let global_exclude = outside.path().join("global-excludes");
 		fs::write(&global_exclude, "global.env\n").unwrap();
 		git(temp.path(), &["config", "core.excludesFile", global_exclude.to_str().unwrap()]);
-		let repo = GitRepo::require(temp.path()).unwrap();
 		fs::write(temp.path().join("global.env"), "global-secret\n").unwrap();
 		// 5. Untracked nested repository
 		let untracked_repo = temp.path().join("untracked-nested-repo");
@@ -2167,12 +2180,12 @@ mod tests {
 		git(&untracked_repo, &["init", "-q", "-b", "main"]);
 		fs::write(untracked_repo.join("nested.txt"), "nested content\n").unwrap();
 
-		// 6. Symlink to directory (must unlink the symlink, not delete the target directory)
+		// 6. Symlink to directory (must unlink the symlink, not delete the target
+		//    directory)
 		#[cfg(unix)]
-		let target_dir = temp.path().join("../target-dir");
+		let target_dir = outside.path().join("target-dir");
 		#[cfg(unix)]
 		{
-			let _ = fs::remove_dir_all(&target_dir);
 			fs::create_dir_all(&target_dir).unwrap();
 			fs::write(target_dir.join("important.txt"), "keep this\n").unwrap();
 			std::os::unix::fs::symlink(&target_dir, temp.path().join("symlink-to-dir")).unwrap();
@@ -2196,12 +2209,52 @@ mod tests {
 		fs::write(&sub_gitignore, current_gitignore).unwrap();
 		let repo = GitRepo::require(temp.path()).unwrap();
 
+		repo
+			.clean(&CleanOptions { paths: vec!["nested".into()], ..Default::default() })
+			.unwrap();
+		assert!(
+			!nested.join("untracked.txt").exists(),
+			"pathspec-scoped clean removes matches under the path"
+		);
+		assert!(
+			nested.join("secret.env").exists(),
+			"pathspec-scoped clean still honors nested ignores"
+		);
+		assert!(
+			temp.path().join("parent-untracked.txt").exists(),
+			"pathspec-scoped clean leaves paths outside the pathspec"
+		);
+		assert!(
+			initially_empty.exists(),
+			"pathspec-scoped clean leaves directories outside the pathspec"
+		);
+		// 10. Pathspec scoping: cleaning with a pathspec prunes empty dirs inside the pathspec but preserves the parent
+		let pathspec_dir = temp.path().join("pathspec-parent/child/grandchild");
+		fs::create_dir_all(&pathspec_dir).unwrap();
+		fs::write(pathspec_dir.join("leaf.txt"), "leaf\n").unwrap();
+		repo
+			.clean(&CleanOptions {
+				paths: vec!["pathspec-parent/child".into()],
+				..Default::default()
+			})
+			.unwrap();
+		assert!(
+			!temp.path().join("pathspec-parent/child").exists(),
+			"empty dir inside pathspec must be pruned"
+		);
+		assert!(
+			temp.path().join("pathspec-parent").exists(),
+			"parent directory outside pathspec must not be pruned"
+		);
+
+
 		repo.clean(&CleanOptions::default()).unwrap();
 
 		// Untracked files deleted and parent directories pruned
 		assert!(!temp.path().join("parent-untracked.txt").exists());
 		assert!(!nested.join("untracked.txt").exists());
 		assert!(!temp.path().join("untracked-dir").exists());
+		assert!(!temp.path().join("pathspec-parent").exists());
 		assert!(!initially_empty.exists(), "empty untracked directory must be pruned by -d");
 
 		// Ignored empty directory MUST SURVIVE
@@ -2218,7 +2271,10 @@ mod tests {
 		// Submodule files and .git MUST SURVIVE
 		assert!(checked_out_sub.join(".git").exists());
 		assert!(checked_out_sub.join("sub-file.txt").exists());
-		assert_eq!(fs::read_to_string(checked_out_sub.join("sub-file.txt")).unwrap(), "sub modified\n");
+		assert_eq!(
+			fs::read_to_string(checked_out_sub.join("sub-file.txt")).unwrap(),
+			"sub modified\n"
+		);
 		assert!(checked_out_sub.join("dirty-untracked.txt").exists());
 
 		// Untracked nested repo MUST SURVIVE
@@ -2229,11 +2285,8 @@ mod tests {
 		{
 			assert!(!temp.path().join("symlink-to-dir").exists());
 			assert!(target_dir.join("important.txt").exists());
-			let _ = fs::remove_dir_all(&target_dir);
 		}
-		let _ = fs::remove_file(&global_exclude);
 	}
-
 
 	#[cfg(unix)]
 	#[test]
