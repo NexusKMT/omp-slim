@@ -7170,8 +7170,7 @@ export class AgentSession {
 			});
 	}
 
-	#resolveTitleProviderSessionId(): string {
-		const parentSessionId = this.sessionId;
+	#resolveTitleProviderSessionId(parentSessionId: string): string {
 		if (this.#titleProviderParentSessionId === parentSessionId && this.#titleProviderSessionId) {
 			return this.#titleProviderSessionId;
 		}
@@ -7191,7 +7190,8 @@ export class AgentSession {
 	 * (e.g. plan-save filename topics) without touching the session override.
 	 */
 	generateTitle(firstMessage: string, customSystemPrompt?: string): Promise<string | null> {
-		const sessionId = this.#resolveTitleProviderSessionId();
+		const parentSessionId = this.sessionId;
+		const sessionId = this.#resolveTitleProviderSessionId(parentSessionId);
 		return generateSessionTitle(
 			firstMessage,
 			this.#modelRegistry,
@@ -7201,6 +7201,7 @@ export class AgentSession {
 			provider => buildSessionMetadata(sessionId, provider, this.#modelRegistry.authStorage),
 			customSystemPrompt ?? this.#titleSystemPrompt,
 			this.#titleGenerationAbortController.signal,
+			parentSessionId,
 		);
 	}
 
