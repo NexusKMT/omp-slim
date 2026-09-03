@@ -12,6 +12,14 @@
 - The model picker now shows a brain-icon intelligence column and uses catalog TPS as an estimate until local performance data exists.
 - Added `report` field to scout agent definitions for detailed, non-summarized findings
 - Subagents now automatically relay turn results to the originating agent, enabling read-only agents to return data
+- Rules accept an `agents` frontmatter field so a rule applies only to matching agents (glob patterns against the agent name; `main` targets the top-level agent), surfaced in `omp ttsr list` and testable with `omp ttsr test --agent <name>` ([#10624](https://github.com/can1357/oh-my-pi/pull/10624) by [@andyhite](https://github.com/andyhite)).
+- Extensions can deliver messages without interrupting the agent: `pi.sendMessage`/`pi.sendUserMessage` now accept `deliverAs: "aside"`, which injects at the next step boundary instead of interrupting the current tool batch ([#10629](https://github.com/can1357/oh-my-pi/pull/10629) by [@andyhite](https://github.com/andyhite)).
+- `/copy` block view: every block caption now carries a clickable `⧉ copy` control, and a turn's links are listed as blocks with `⧉ copy` and `↗ open`. `/copy link` copies the last link; new `/open` opens it ([#10606](https://github.com/can1357/oh-my-pi/pull/10606) by [@mustafaabidali](https://github.com/mustafaabidali)).
+- Option-clicking in the prompt entry box now moves the cursor directly to the clicked location ([#10584](https://github.com/can1357/oh-my-pi/pull/10584) by [@kevcube](https://github.com/kevcube)).
+- Added `display.layout` setting (Appearance → Display) with an `opencode` option: a flat, opencode-style transcript where collapsed tool calls render as one status line (Ctrl+O expands), framed tool output renders without borders, and user messages get a left accent gutter. A new setup-wizard scene offers the choice on first run and on upgrade ([#10530](https://github.com/can1357/oh-my-pi/pull/10530) by [@sethmorton](https://github.com/sethmorton)).
+- Added an opt-in `status` custom status-line segment for rendering extension statuses inline ([#10622](https://github.com/can1357/oh-my-pi/pull/10622) by [@Visvaldis](https://github.com/Visvaldis)).
+- Added Firecrawl `/scrape` as a `providers.fetch` reader backend for the fetch/read URL tool, sitting between Parallel and Jina in the automatic chain. It requires `FIRECRAWL_API_KEY` and honours the existing `FIRECRAWL_BASE_URL` self-hosting override ([#10451](https://github.com/can1357/oh-my-pi/pull/10451) by [@erikengervall](https://github.com/erikengervall)).
+- Added `providers.<provider>.requestMetadata` in `models.yml` to tag Amazon Bedrock requests for cost and usage attribution, and `providers.amazon-bedrock.headers` now applies to Bedrock requests, including a `User-Agent` override ([#10487](https://github.com/can1357/oh-my-pi/pull/10487) by [@jzhn](https://github.com/jzhn)).
 
 ### Changed
 
@@ -20,6 +28,8 @@
 - Increased maximum file snapshot size to 4MB
 - Edit tool engines (replace/patch/apply_patch/hashline/sloppy) now run natively with streamed diff previews computed off the main thread
 - Inlined approved plan content directly into agent history to reduce redundant read operations
+- `power.sleepPrevention` now takes effect on Linux and Windows, where it previously did nothing. Its `idle` default means a long session keeps those hosts awake the way it already did on macOS; set it to `off` to restore the old behavior ([#10492](https://github.com/can1357/oh-my-pi/pull/10492) by [@ParadaCarleton](https://github.com/ParadaCarleton)).
+- Reserved `main` and `sub` as subagent definition names; a custom agent with either name is rejected so it cannot masquerade as the session-kind sentinel used by `agents`-scoped rules.
 
 ### Fixed
 
@@ -62,6 +72,7 @@
 - Fixed `sendCustomMessage(..., { deliverAs: "aside" })`'s idle-session branch (plan-mode fold, post-interrupt fold, or an autonomous turn) never validating the source session generation, so an aside whose image normalization outlived a concurrent `newSession()`/`switchSession()` could still land in the newly selected session.
 - Fixed a user aside whose image normalization resolved after a `newSession()`/`switchSession()` had disconnected the agent but before it bumped the session generation, which could wake a fresh `agent.prompt()` on the disconnected agent and race the transition's own reset instead of being dropped like other stranded records.
 - Fixed the `#sessionGeneration` guard in `sendUserMessage(..., { deliverAs: "aside" })`/`sendMessage(..., { deliverAs: "aside" })` permanently discarding a record on any generation mismatch, even when a `switchSession()` that bumped the generation subsequently failed and rolled back to the exact same session — the record now waits out the in-flight transition and is preserved.
+- Fixed a self-hosted `FIRECRAWL_BASE_URL` that names only an origin (for example `http://localhost:3002`) resolving to a doubled slash such as `http://localhost:3002//v2/search`, which could miss the server's route.
 
 ## [18.1.5] - 2026-09-03
 
@@ -233,10 +244,6 @@
 - Prevented browser `app.path` from terminating existing same-executable applications when no reusable CDP endpoint is available.
 - Fixed top-level errors overwriting the active composer before terminal restoration.
 - Fixed Enter being ignored during the first turn when omp starts with an initial prompt.
-- Fixed an issue where custom model overrides were lost during configuration updates
-- Fixed "Please use nerdfont" notification incorrectly persisting after theme configuration
-- Fixed sampling parameter errors for newer Anthropic models (Opus 4.7+, Sonnet 5+)
-- Fixed a self-hosted `FIRECRAWL_BASE_URL` that names only an origin (for example `http://localhost:3002`) resolving to a doubled slash such as `http://localhost:3002//v2/search`, which could miss the server's route.
 
 ## [18.0.11] - 2026-08-29
 

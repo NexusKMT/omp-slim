@@ -15,6 +15,7 @@
 
 - Anthropic and OpenRouter 402 credit-exhaustion errors ("would exceed your available credits", "Insufficient credits") now switch to a sibling account instead of stopping the turn with a retry hint.
 - OpenCode Go (and Zen) requests now carry the required `x-opencode-session` header with a stable per-conversation id, so they keep working once the gateway starts rejecting headerless requests.
+- Anthropic prompt caching now anchors explicit cache breakpoints on the last tool definition and last system block, so a stable tools/system head stays cache-reusable when the message tail changes ([#10603](https://github.com/can1357/oh-my-pi/pull/10603) by [@khrm](https://github.com/khrm)).
 
 ## [18.1.5] - 2026-09-03
 
