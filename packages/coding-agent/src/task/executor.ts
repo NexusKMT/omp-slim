@@ -692,6 +692,20 @@ export function finalizeSubprocessOutput(args: FinalizeSubprocessOutputArgs): Fi
 				if (includeStructuredOutput) {
 					structuredOutput = { source, mode, status: "invalid", error: SUBAGENT_WARNING_NULL_YIELD };
 				}
+				// Strict mode promises a schema violation fails the run, not a
+				// warning-decorated success (exitCode 0); build the same
+				// non-zero-exit outcome the validated-data path uses below so
+				// async job delivery marks the job failed instead of completed.
+				if (mode === "strict" && includeStructuredOutput) {
+					const { validator } = buildOutputValidator(outputSchema);
+					const outcome = buildSchemaViolationOutcome(
+						{ message: SUBAGENT_WARNING_NULL_YIELD, missingRequired: [...(validator?.requiredFields ?? [])] },
+						undefined,
+					);
+					rawOutput = outcome.rawOutput;
+					stderr = outcome.stderr;
+					exitCode = outcome.exitCode;
+				}
 			} else {
 				const { validator, error: schemaError, normalized } = buildOutputValidator(outputSchema);
 				const completeData = assembled.rawText ? assembled.data : parseStringifiedJson(assembled.data ?? null);

@@ -91,6 +91,15 @@ export interface AsyncJob {
 	 * until the caller invokes `markRunning()` from the run context.
 	 */
 	queued?: boolean;
+	/**
+	 * Disposal closure for a detached spawn's temporary artifacts directory
+	 * that `runStructuredSubagent()` retained past completion (so a
+	 * delayed `agent://<id>` handle in an `async-result` delivery still
+	 * resolves). The manager invokes and clears this exactly once — on
+	 * eviction or manager disposal — so the retained directory does not
+	 * outlive the job row it was kept alive for.
+	 */
+	retainedArtifactsCleanup?: () => Promise<void>;
 }
 
 /** Delivery callback for a settled job's result text. */
@@ -671,6 +680,7 @@ export class AsyncJobManager {
 		const jobsSettled = await this.#waitForAllUntil(deadline);
 		const drained = await this.drainDeliveries({ timeoutMs: Math.max(deadline - Date.now(), 0) });
 		this.#clearEvictionTimers();
+		for (const job of this.#jobs.values()) this.#runRetainedArtifactsCleanup(job);
 		this.#jobs.clear();
 		this.#deliveries.length = 0;
 		this.#notifyDeliveryQueueChanged();
@@ -716,12 +726,31 @@ export class AsyncJobManager {
 		return candidate;
 	}
 
+	/**
+	 * Fire a retained temporary artifacts cleanup exactly once. Errors are
+	 * logged, not thrown — a failed disposal must not block job eviction or
+	 * manager teardown.
+	 */
+	#runRetainedArtifactsCleanup(job: AsyncJob): void {
+		const cleanup = job.retainedArtifactsCleanup;
+		if (!cleanup) return;
+		job.retainedArtifactsCleanup = undefined;
+		void cleanup().catch(error => {
+			logger.warn("Async job retained artifacts cleanup failed", {
+				jobId: job.id,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		});
+	}
+
 	#evictJob(jobId: string): boolean {
 		clearTimeout(this.#evictionTimers.get(jobId));
 		this.#evictionTimers.delete(jobId);
 		this.#suppressedDeliveries.delete(jobId);
 		this.#watchedJobs.delete(jobId);
 		this.#consumedJobResults.delete(jobId);
+		const job = this.#jobs.get(jobId);
+		if (job) this.#runRetainedArtifactsCleanup(job);
 		return this.#jobs.delete(jobId);
 	}
 

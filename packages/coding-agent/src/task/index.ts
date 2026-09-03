@@ -1184,6 +1184,15 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 						progress.index,
 						true,
 						{ invokedAt: startedAt, acquiredAt },
+						cleanup => {
+							// Tie the retained temp directory's lifetime to this job
+							// row: the manager runs `cleanup` exactly once, on
+							// eviction or manager disposal, instead of it leaking
+							// for the process lifetime.
+							const job = manager.getJob(agentId);
+							if (job) job.retainedArtifactsCleanup = cleanup;
+							else void cleanup();
+						},
 					);
 					const finalText = result.content.find(part => part.type === "text")?.text ?? "(no output)";
 					const singleResult = result.details?.results[0];
@@ -1415,8 +1424,19 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		spawnIndex = 0,
 		detached = false,
 		launchTiming?: { invokedAt: number; acquiredAt: number },
+		onArtifactsRetained?: (cleanup: () => Promise<void>) => void,
 	): Promise<AgentToolResult<TaskToolDetails>> {
-		return this.#runSpawn(toolCallId, params, signal, onUpdate, preAllocatedId, spawnIndex, detached, launchTiming);
+		return this.#runSpawn(
+			toolCallId,
+			params,
+			signal,
+			onUpdate,
+			preAllocatedId,
+			spawnIndex,
+			detached,
+			launchTiming,
+			onArtifactsRetained,
+		);
 	}
 
 	/** Spawn a fresh subagent and run it to completion. */
@@ -1429,6 +1449,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		spawnIndex = 0,
 		detached = false,
 		launchTiming?: { invokedAt: number; acquiredAt: number },
+		onArtifactsRetained?: (cleanup: () => Promise<void>) => void,
 	): Promise<AgentToolResult<TaskToolDetails>> {
 		const startTime = Date.now();
 		const assignment = (params.task ?? "").trim();
@@ -1464,6 +1485,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				// artifacts directory is deleted immediately on completion and the
 				// advertised URL 404s by the time delivery happens.
 				retainArtifacts: detached,
+				...(onArtifactsRetained ? { onArtifactsRetained } : {}),
 				invokedAt: launchTiming?.invokedAt,
 				acquiredAt: launchTiming?.acquiredAt,
 				...("isolated" in params ? { isolation: { requested: params.isolated } } : {}),

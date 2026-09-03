@@ -186,6 +186,56 @@ describe("task spawn routing", () => {
 		await fs.rm(capturedArtifactsDir!, { recursive: true, force: true });
 	});
 
+	it("cleans up the retained artifacts directory once the job is evicted", async () => {
+		// Regression: retainArtifacts kept the temp directory alive past
+		// completion, but nothing ever deleted it afterward — a long-running
+		// SDK process accumulated every detached task's transcript forever.
+		// Cleanup must run once the job actually leaves the manager (eviction
+		// or disposal), not never (PR #10625 review).
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		let capturedArtifactsDir: string | undefined;
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			capturedArtifactsDir = options.artifactsDir;
+			return makeResult(options.id ?? "?");
+		});
+
+		// Cleanup runs fire-and-forget off the job's own settle chain; spy on
+		// the real `fs.rm` call to await its actual completion instead of
+		// guessing a wait duration.
+		const rmCalled = deferred();
+		const realRm = fs.rm.bind(fs);
+		vi.spyOn(fs, "rm").mockImplementation(async (target, opts) => {
+			const outcome = await realRm(target as Parameters<typeof fs.rm>[0], opts as Parameters<typeof fs.rm>[1]);
+			if (capturedArtifactsDir && target === capturedArtifactsDir) rmCalled.resolve();
+			return outcome;
+		});
+
+		// retentionMs: 0 evicts synchronously once the job settles so the
+		// test does not have to wait out the real 5-minute default
+		// retention window.
+		const manager = new AsyncJobManager({ onJobComplete: () => {}, retentionMs: 0 });
+		managers.push(manager);
+		const tool = await TaskTool.create(createSession({ manager }));
+
+		const result = await tool.execute("tc-evict", {
+			agent: "task",
+			name: "Evictling",
+			task: "Do the thing.",
+		} as TaskParams);
+
+		const jobId = result.details?.async?.jobId;
+		const job = manager.getJob(jobId!);
+		await job!.promise;
+
+		expect(capturedArtifactsDir).toBeTruthy();
+		expect(manager.getJob(jobId!)).toBeUndefined();
+		await rmCalled.promise;
+		await expect(fs.stat(capturedArtifactsDir!)).rejects.toThrow();
+	});
+
 	it("bounds concurrent job bodies with the session spawn semaphore", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
 			agents: [taskAgent],
