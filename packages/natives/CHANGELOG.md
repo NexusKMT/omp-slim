@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed native VCS clean to resolve nested `.gitignore` files and skip nested repositories and submodules.
+
 ## [18.1.6] - 2026-09-03
 
 ### Breaking Changes
