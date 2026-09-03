@@ -118,6 +118,15 @@ interface AsyncJobDelivery {
 	lastError?: string;
 	ownerId?: string;
 	promise?: Promise<void>;
+	/**
+	 * Job-body metadata a sink needs to render the delivered result,
+	 * snapshotted at enqueue time. `#deliverDelivery` falls back to
+	 * reconstructing an `AsyncJob`-shaped record from this when the live job
+	 * row has already been evicted (retention elapsed while delivery kept
+	 * retrying) — without it, a recovered delivery would silently drop
+	 * `structured` even though `text` survives on the delivery itself.
+	 */
+	jobSnapshot?: Pick<AsyncJob, "type" | "status" | "startTime" | "label" | "structured">;
 }
 
 export interface AsyncJobDeliveryState {
@@ -799,12 +808,22 @@ export class AsyncJobManager {
 		if (this.isDeliverySuppressed(jobId)) {
 			return;
 		}
+		const job = this.#jobs.get(jobId);
 		this.#queueDelivery({
 			jobId,
 			text,
 			attempt: 0,
 			nextAttemptAt: Date.now(),
-			ownerId: this.#jobs.get(jobId)?.ownerId,
+			ownerId: job?.ownerId,
+			jobSnapshot: job
+				? {
+						type: job.type,
+						status: job.status,
+						startTime: job.startTime,
+						label: job.label,
+						structured: job.structured,
+					}
+				: undefined,
 		});
 		this.#ensureDeliveryLoop();
 	}
@@ -881,7 +900,11 @@ export class AsyncJobManager {
 		const promise = (async () => {
 			this.#inFlightDeliveries.push(delivery);
 			try {
-				await sink(delivery.jobId, delivery.text, this.#jobs.get(delivery.jobId));
+				await sink(
+					delivery.jobId,
+					delivery.text,
+					this.#jobs.get(delivery.jobId) ?? this.#reconstructEvictedJob(delivery),
+				);
 				this.#consumeJobResult(delivery.jobId);
 			} catch (error) {
 				delivery.attempt += 1;
@@ -904,6 +927,30 @@ export class AsyncJobManager {
 		})();
 		delivery.promise = promise;
 		return promise;
+	}
+
+	/**
+	 * Rebuild a minimal {@link AsyncJob} from a delivery's enqueue-time
+	 * snapshot when the live job row was already evicted by the time this
+	 * delivery attempt runs (retention elapsed while delivery kept retrying).
+	 * Lets the sink still render `type`/`label`/`structured` instead of
+	 * silently losing them, matching what `job.resultText` would have carried
+	 * had the row survived.
+	 */
+	#reconstructEvictedJob(delivery: AsyncJobDelivery): AsyncJob | undefined {
+		const snapshot = delivery.jobSnapshot;
+		if (!snapshot) return undefined;
+		return {
+			id: delivery.jobId,
+			type: snapshot.type,
+			status: snapshot.status,
+			startTime: snapshot.startTime,
+			label: snapshot.label,
+			abortController: new AbortController(),
+			promise: Promise.resolve(),
+			resultText: delivery.text,
+			structured: snapshot.structured,
+		};
 	}
 
 	#queueDelivery(delivery: AsyncJobDelivery): void {

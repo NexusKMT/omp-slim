@@ -111,6 +111,36 @@ describe("AsyncJobManager", () => {
 		expect(manager.getJob(jobId)?.structured?.data).toEqual({ count: 7 });
 	});
 
+	test("keeps structured output for a delivery that only succeeds after the job row is evicted", async () => {
+		let sinkCalls = 0;
+		const delivered: Array<{ jobId: string; structured: unknown }> = [];
+		const manager = new AsyncJobManager({
+			retentionMs: 25,
+			onJobComplete: async (jobId, _text, job) => {
+				sinkCalls += 1;
+				if (sinkCalls === 1) throw new Error("simulated delivery failure");
+				delivered.push({ jobId, structured: job?.structured });
+			},
+		});
+
+		const jobId = manager.register("task", "agent task", async () => ({
+			text: "task done",
+			structured: { source: "caller", mode: "permissive", status: "valid", data: { count: 7 } },
+		}));
+
+		await manager.waitForAll();
+		await waitForJobEviction(manager, jobId);
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+
+		// The job row is gone by the time the retried delivery lands, but the
+		// delivery must still carry the structured payload it snapshotted at
+		// enqueue time — not silently drop it because the row was evicted.
+		expect(sinkCalls).toBe(2);
+		expect(delivered).toEqual([
+			{ jobId, structured: { source: "caller", mode: "permissive", status: "valid", data: { count: 7 } } },
+		]);
+	});
+
 	test("fails the job but keeps structured output from AsyncJobError", async () => {
 		const manager = new AsyncJobManager({
 			onJobComplete: async () => {},
