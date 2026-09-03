@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Updated `worktreeAdd` signature to support additional creation options and return results
+
 ## [18.1.3] - 2026-09-02
 
 ### Fixed

@@ -5,9 +5,12 @@
 ### Added
 
 - Added the Abliteration provider to `/login` and `ABLITERATION_API_KEY` to `--help` ([#10515](https://github.com/can1357/oh-my-pi/pull/10515) by [@kmccleary3301](https://github.com/kmccleary3301))
+- New git worktrees now start as a copy-on-write clone of the current checkout (APFS clonefile, Linux reflink, Windows block clone) and are then reconciled to the target ref, so ignored build artifacts such as `node_modules` and `target/` carry over instead of being rebuilt; applies to `github pr_checkout`, the new `omp worktree add` subcommand, and `git worktree add` typed into the bash tool. Controlled by the `worktree.clone` setting (default on) with a plain checkout fallback.
+- Added `omp worktree add [-C <dir>] [-b|-B <branch>] [--detach] <path> [<commit-ish>]`, a git-compatible `worktree add` that uses the clone-first path.
 
 ### Changed
 
+- Split subagent isolation settings: `task.isolation.enabled` toggles subagent isolation and the new `isolation.backend` picks the backend shared by subagent isolation and worktree cloning. `task.isolation.mode` migrates automatically (`none` → disabled, any backend → enabled with that backend).
 - Removed incorrect retry instructions from unsupported model error messages
 - Refreshed the built-in `smol`/`slow` model priority chains: `slow` now prefers Codex GPT-5.6 Sol, then Claude Fable 5.1/5, Kimi K3, GLM-5.3, Opus 5; `smol` prefers the newest Gemini Flash, then gpt-oss-120b, Cerebras GLM, Haiku 4.5, GPT-5.6 Luna. Older generations (Opus 4.1–4.7, GPT-5.1–5.4) dropped from the chains.
 

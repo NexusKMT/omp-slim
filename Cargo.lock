@@ -6311,6 +6311,7 @@ dependencies = [
  "gix",
  "jj-lib",
  "libc",
+ "pi-iso",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",

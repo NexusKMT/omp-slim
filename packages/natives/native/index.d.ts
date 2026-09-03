@@ -381,7 +381,7 @@ export declare class VcsGitRepo {
   /** List worktrees. */
   worktrees(signal?: unknown | undefined | null): Promise<Array<VcsWorktreeEntry>>
   /** Add worktree. */
-  worktreeAdd(path: string, refName: string, detach: boolean, signal?: unknown | undefined | null): Promise<undefined>
+  worktreeAdd(path: string, refName: string, options: VcsWorktreeAddOptions, signal?: unknown | undefined | null): Promise<VcsWorktreeAddResult>
   /** Remove worktree. */
   worktreeRemove(path: string, force: boolean, signal?: unknown | undefined | null): Promise<boolean>
   /** Prune worktrees. */
@@ -2588,6 +2588,19 @@ export interface VcsStatusSummary {
 
 /** Validate hunk selections. */
 export declare function vcsValidateHunkSelections(rawDiff: string, selections: Array<VcsHunkSelection>): Array<VcsHunkSelectionError>
+
+/** Worktree creation options. */
+export interface VcsWorktreeAddOptions {
+  detach: boolean
+  clone: boolean
+  backend?: IsoBackendKind
+}
+
+/** Worktree creation outcome. */
+export interface VcsWorktreeAddResult {
+  clonedWith?: IsoBackendKind
+  cloneError?: string
+}
 
 /** One worktree listing row. */
 export interface VcsWorktreeEntry {
