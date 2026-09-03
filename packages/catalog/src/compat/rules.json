@@ -101,6 +101,7 @@
 		"classes/qwen.kdl",
 		"classes/stepfun.kdl",
 		"classes/xai.kdl",
+		"providers/abliteration.kdl",
 		"providers/aiand.kdl",
 		"providers/aimlapi.kdl",
 		"providers/alibaba-coding-plan.kdl",
@@ -5029,7 +5030,37 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:40",
+				"source": "classes/glm.kdl:46",
+				"class": "glm",
+				"providers": [
+					"abliteration"
+				],
+				"revision": [
+					{
+						"op": ">=",
+						"revision": "5.2.0"
+					},
+					{
+						"op": "<",
+						"revision": "5.3.0"
+					}
+				],
+				"wire": {
+					"reasoningEffortMap": {
+						"xhigh": "max"
+					}
+				},
+				"thinking": {
+					"defaultLevel": "high",
+					"efforts": [
+						"high",
+						"xhigh",
+						"max"
+					]
+				}
+			},
+			{
+				"source": "classes/glm.kdl:55",
 				"class": "glm",
 				"providers": [
 					"abliteration"
@@ -5040,18 +5071,42 @@
 						"revision": "5.3.0"
 					}
 				],
+				"wire": {
+					"reasoningEffortMap": {
+						"medium": "high",
+						"xhigh": "max"
+					}
+				},
 				"thinking": {
 					"defaultLevel": "max",
 					"efforts": [
 						"low",
+						"medium",
 						"high",
+						"xhigh",
 						"max"
 					],
 					"requiresEffort": true
 				}
 			},
 			{
-				"source": "classes/glm.kdl:49",
+				"source": "classes/glm.kdl:42",
+				"class": "glm",
+				"providers": [
+					"abliteration"
+				],
+				"thinking": {
+					"efforts": [
+						"minimal",
+						"low",
+						"medium",
+						"high",
+						"xhigh"
+					]
+				}
+			},
+			{
+				"source": "classes/glm.kdl:68",
 				"class": "glm",
 				"providers": [
 					"zai",
@@ -5079,7 +5134,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:59",
+				"source": "classes/glm.kdl:78",
 				"class": "glm",
 				"providers": [
 					"zai"
@@ -5100,7 +5155,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:71",
+				"source": "classes/glm.kdl:90",
 				"class": "glm",
 				"providers": [
 					"zai",
@@ -5120,7 +5175,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:75",
+				"source": "classes/glm.kdl:94",
 				"class": "glm",
 				"providers": [
 					"alibaba-coding-plan",
@@ -5132,7 +5187,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:79",
+				"source": "classes/glm.kdl:98",
 				"class": "glm",
 				"providers": [
 					"openrouter",
@@ -5149,7 +5204,7 @@
 				}
 			},
 			{
-				"source": "classes/glm.kdl:90",
+				"source": "classes/glm.kdl:109",
 				"class": "glm",
 				"models": [
 					{
@@ -6563,6 +6618,16 @@
 				"class": "xai",
 				"wire": {
 					"thinkingLoopGuard": "xai"
+				}
+			},
+			{
+				"source": "providers/abliteration.kdl:5",
+				"providers": [
+					"abliteration"
+				],
+				"wire": {
+					"includeEncryptedReasoning": false,
+					"streamIdleTimeoutMs": 0
 				}
 			},
 			{

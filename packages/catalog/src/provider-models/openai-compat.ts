@@ -4917,20 +4917,6 @@ export function aiandModelManagerOptions(config?: AiandModelManagerConfig): Mode
 const ABLITERATION_DEFAULT_BASE_URL = "https://api.abliteration.ai/v1";
 const ABLITERATION_MODEL_COST = { input: 3, output: 3, cacheRead: 0.3, cacheWrite: 0 } as const;
 const ABLITERATION_LARGE_COST = { input: 5, output: 5, cacheRead: 0.5, cacheWrite: 0 } as const;
-const ABLITERATION_FULL_LADDER: ThinkingConfig = {
-	mode: "effort",
-	efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
-};
-// abliterated-model-large-v2 runs three reasoning modes (low/high/max) and maps
-// disable-shaped controls to hidden low reasoning instead of honoring them.
-const ABLITERATION_LARGE_V2_LADDER: ThinkingConfig = {
-	mode: "effort",
-	efforts: [Effort.Low, Effort.High, Effort.Max],
-};
-const ABLITERATION_RESPONSES_COMPAT: ModelSpec<"openai-responses">["compat"] = {
-	includeEncryptedReasoning: false,
-	streamIdleTimeoutMs: 0,
-};
 
 function normalizeAbliterationBaseUrl(baseUrl: string | undefined): string {
 	const value = baseUrl?.trim() || ABLITERATION_DEFAULT_BASE_URL;
@@ -4945,7 +4931,6 @@ function createAbliterationStaticModel(
 	contextWindow: number,
 	maxTokens: number,
 	input: ModelSpec<"openai-responses">["input"],
-	thinking: ThinkingConfig,
 ): ModelSpec<"openai-responses"> {
 	return {
 		id,
@@ -4958,8 +4943,6 @@ function createAbliterationStaticModel(
 		cost: { ...cost },
 		contextWindow,
 		maxTokens,
-		thinking: { ...thinking },
-		compat: { ...ABLITERATION_RESPONSES_COMPAT },
 	};
 }
 
@@ -4967,17 +4950,15 @@ function createAbliterationStaticModel(
  * Documented abliteration.ai catalog (docs.abliteration.ai/models, 2026-09)
  * bundled so the provider is usable when generation and first boot have no
  * live key. The `/v1/models` response is authoritative once discovery runs.
+ * Rows carry only the documented limits and pricing; the per-model reasoning
+ * ladders, alias map and wire quirks come from `rules/classes/glm.kdl` and
+ * `rules/providers/abliteration.kdl` via `buildModel`.
  */
 export const ABLITERATION_STATIC_MODELS: readonly ModelSpec<"openai-responses">[] = [
-	createAbliterationStaticModel(
-		"abliterated-model",
-		"Abliterated Model",
-		ABLITERATION_MODEL_COST,
-		262_144,
-		262_134,
-		["text", "image"],
-		ABLITERATION_FULL_LADDER,
-	),
+	createAbliterationStaticModel("abliterated-model", "Abliterated Model", ABLITERATION_MODEL_COST, 262_144, 262_134, [
+		"text",
+		"image",
+	]),
 	createAbliterationStaticModel(
 		"abliterated-model-large-v2",
 		"Abliterated Model Large V2",
@@ -4985,7 +4966,6 @@ export const ABLITERATION_STATIC_MODELS: readonly ModelSpec<"openai-responses">[
 		1_000_000,
 		999_990,
 		["text"],
-		ABLITERATION_LARGE_V2_LADDER,
 	),
 	createAbliterationStaticModel(
 		"abliterated-model-large",
@@ -4994,7 +4974,6 @@ export const ABLITERATION_STATIC_MODELS: readonly ModelSpec<"openai-responses">[
 		1_000_000,
 		999_990,
 		["text"],
-		ABLITERATION_FULL_LADDER,
 	),
 ];
 
@@ -5027,15 +5006,10 @@ export function abliterationModelManagerOptions(
 					mapModel: (entry, defaults) => {
 						const reference = references.get(defaults.id) ?? ABLITERATION_STATIC_MODEL_BY_ID.get(defaults.id);
 						const model = mapWithBundledReference(entry, defaults, reference);
-						if (!reference) {
-							return {
-								...model,
-								reasoning: true,
-								thinking: { ...ABLITERATION_FULL_LADDER },
-								compat: { ...ABLITERATION_RESPONSES_COMPAT },
-							};
-						}
-						return model;
+						// Every abliteration.ai model reasons; `/v1/models` carries no
+						// capability metadata, so an unseeded id would otherwise lose
+						// its effort dial.
+						return reference ? model : { ...model, reasoning: true };
 					},
 					fetch: config?.fetch,
 				}),
