@@ -4,17 +4,12 @@
 
 ### Fixed
 
-- Preserved the full parsed payload of a schema-invalid background task result: it is now persisted to the `<id>.json` sidecar and advertised via `agent://<id>` alongside the inline preview, instead of only showing a size-capped, unrecoverable inline JSON block.
-- Delayed retained-artifact cleanup for background task spawns by a grace period after delivery settles, so the model's next turn has time to read the advertised `agent://` pointer before the backing files are removed.
-- Background (non-blocking) `task` spawns with an `outputSchema` now deliver their parsed structured output and expose it at `agent://<id>`.
-- `hub wait`/`jobs` no longer inlines a truncated (and potentially invalid) JSON block for schema-valid background job results; it now points to `agent://<id>` instead, matching the async-result follow-up.
-- A detached background `task` that fails without valid structured output now keeps its temporary artifacts until eviction instead of deleting them immediately, so the failed agent stays interrogable via `agent://<id>`/`history://<id>`.
-- Fixed a stale `<id>.json` structured-output sidecar surviving when the serialized payload was `undefined`.
-- `AsyncJobManager.dispose()` no longer sleeps out the full retained-artifacts grace period on shutdown.
-- Retained-artifacts cleanup for a background task now gives up waiting on a hung delivery sink after a bounded timeout, instead of waiting on it forever and leaking the retained temp directory for the process lifetime.
-- Fixed snapcompact accepting a context-inflating result when the archived history carried a large opaque reasoning-replay signature (e.g. OpenAI Codex `encrypted_content`); the no-reduction guard now excludes opaque reasoning bytes symmetrically so an inflating archive is rejected and the next compaction method runs ([#10716](https://github.com/can1357/oh-my-pi/issues/10716)).
-- Fixed the Model Hub sidebar scroll/selection jumping to the top when an on-focus provider refresh rebuilt the list; the focused entry (or its nearest survivor) now stays put ([#10722](https://github.com/can1357/oh-my-pi/issues/10722)).
-- Fixed the `inspect_image` status hint naming the previous model after cycling roles (Ctrl+P) between two models that share image-input capability ([#10729](https://github.com/can1357/oh-my-pi/issues/10729)).
+- Improved background task results with structured output schemas: parsed results are now available through the `agent://<id>` resource, while large or invalid inline JSON is replaced with a reliable pointer to the complete result.
+- Background task artifacts are retained long enough for follow-up turns to read them, including failed tasks that lack valid structured output, and are cleaned up without blocking shutdown or leaking resources.
+- Fixed context compaction incorrectly accepting archived history that was larger because of opaque reasoning data, allowing the next compaction strategy to run instead.
+- Fixed the Model Hub sidebar jumping to the top when provider refreshes rebuild the list; the focused model, or its nearest remaining entry, is now preserved.
+- Fixed the `inspect_image` status hint showing the wrong model after switching between image-capable model roles.
+- Fixed multi-minute TUI freezes during subagent activity and batch execution.
 
 ## [18.1.7] - 2026-09-03
 
@@ -133,8 +128,6 @@
 ### Removed
 
 - Removed the bundled `designer` subagent and `designer` model role; `modelRoles.designer` and `@designer` are no longer built in.
-- Fixed multi-minute TUI freezes during subagent batches caused by re-wrapped live model-header proxies resolving in exponential time; nested header sources are now folded so resolution stays linear ([#10605](https://github.com/can1357/oh-my-pi/issues/10605)).
-- Fixed subagent activity freezing the TUI by repeatedly rediscovering the current VCS repository during status-line repaints ([#10605](https://github.com/can1357/oh-my-pi/issues/10605)).
 
 ## [18.1.3] - 2026-09-02
 

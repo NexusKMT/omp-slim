@@ -6226,6 +6226,19 @@
 			{
 				"source": "classes/openai.kdl:36",
 				"class": "openai",
+				"models": [
+					{
+						"kind": "exact",
+						"value": "gpt-6-astra"
+					}
+				],
+				"wire": {
+					"supportsConfigurationUpdate": true
+				}
+			},
+			{
+				"source": "classes/openai.kdl:42",
+				"class": "openai",
 				"family": "codex",
 				"revision": [
 					{
@@ -10650,7 +10663,7 @@
 					},
 					{
 						"op": "<",
-						"revision": "6.0.0"
+						"revision": "7.0.0"
 					}
 				],
 				"catalog": {
@@ -10955,7 +10968,7 @@
 					},
 					{
 						"op": "<",
-						"revision": "6.0.0"
+						"revision": "7.0.0"
 					}
 				],
 				"catalog": {
