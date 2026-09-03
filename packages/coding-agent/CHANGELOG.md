@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed user-scope marketplace plugins installed through `omp` losing their skills unless the Claude plugin source was separately enabled ([#10662](https://github.com/can1357/oh-my-pi/issues/10662)).
+- Fixed bracketed hashline edit targets appearing as `undefined` to extension path allowlists ([#10688](https://github.com/can1357/oh-my-pi/issues/10688)).
 
 ## [18.1.6] - 2026-09-03
 
