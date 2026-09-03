@@ -474,7 +474,9 @@ impl PowerAssertion {
 				ES_CONTINUOUS, ES_DISPLAY_REQUIRED, ES_SYSTEM_REQUIRED,
 			};
 
-			let _ = user;
+			// SetThreadExecutionState carries no diagnostic string, so `reason`
+			// has nowhere to go on Windows.
+			let _ = (user, reason);
 			// ES_CONTINUOUS makes the state persist until the handle clears it.
 			let mut flags = ES_CONTINUOUS;
 			// Windows has no separate system-sleep assertion: `ES_SYSTEM_REQUIRED`
