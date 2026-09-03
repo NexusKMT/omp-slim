@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/usage` freezing the TUI for several seconds while it loaded the activity heatmap on a large stats database; the dashboard now opens immediately and the heatmap plus session sync load from a background subprocess.
+- Fixed the status band appearing only after startup finished, shifting the prompt down a row; the band row is reserved from the first frame.
+
 ## [18.1.5] - 2026-09-03
 
 ### Added
