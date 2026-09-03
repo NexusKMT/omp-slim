@@ -452,4 +452,103 @@ describe("AgentSession aside delivery", () => {
 		expect(contexts).toHaveLength(1);
 		expect(JSON.stringify(contexts[0]!.messages)).not.toContain("LEAK_CANDIDATE_ASIDE");
 	});
+
+	it("prompt()'s internal streaming re-check queues streamingBehavior 'aside' as a non-interrupting aside, not a steer", async () => {
+		// Regression for the race sendUserMessage(..., { deliverAs: "aside" }) hands to prompt():
+		// prompt() awaits manual-compaction cleanup / image normalization between its idle
+		// observation and dispatch, so a turn can start streaming in that gap. Its internal
+		// isStreaming re-check must honor the caller's original "aside" intent (via
+		// `streamingBehavior: "aside"`) instead of degrading it into a tool-aborting steer.
+		const model = createMockModel({ provider: "openai", id: "gpt-test" }).model;
+		const modelRegistry = new ModelRegistry(authStorage);
+		const contexts: Context[] = [];
+
+		const started = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		let abortSeen = false;
+
+		const slowTool: AgentTool = {
+			name: "slow",
+			label: "Slow",
+			description: "Blocks until released",
+			parameters: type({}),
+			execute: async (_id, _params, signal) => {
+				started.resolve();
+				signal?.addEventListener("abort", () => {
+					abortSeen = true;
+				});
+				await release.promise;
+				return { content: [{ type: "text", text: "SLOW_DONE" }] };
+			},
+		};
+
+		let callCount = 0;
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [slowTool], messages: [] },
+			convertToLlm,
+			streamFn: (_model, context) => {
+				contexts.push(context);
+				const isFirstCall = callCount === 0;
+				callCount++;
+				const message: AssistantMessage = isFirstCall
+					? {
+							role: "assistant",
+							content: [{ type: "toolCall", id: "tc-0", name: "slow", arguments: {} }],
+							api: model.api,
+							provider: model.provider,
+							model: model.id,
+							usage: zeroUsage,
+							stopReason: "toolUse",
+							timestamp: Date.now(),
+						}
+					: {
+							role: "assistant",
+							content: [{ type: "text", text: "Done." }],
+							api: model.api,
+							provider: model.provider,
+							model: model.id,
+							usage: zeroUsage,
+							stopReason: "stop",
+							timestamp: Date.now(),
+						};
+				const stream = new AssistantMessageEventStream();
+				queueMicrotask(() => {
+					stream.push({ type: "start", partial: message });
+					stream.push({ type: "done", reason: isFirstCall ? "toolUse" : "stop", message });
+				});
+				return stream;
+			},
+		});
+		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
+		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(tempDir.path()),
+			settings,
+			modelRegistry,
+			toolRegistry: new Map([[slowTool.name, slowTool]]),
+		});
+
+		const run = session.prompt("go");
+		await started.promise;
+
+		// Simulates prompt()'s own internal isStreaming re-check landing while the tool is still
+		// running — exactly what sendUserMessage's race threads through as streamingBehavior: "aside".
+		await session.prompt("RACE_ASIDE_TEXT", {
+			expandPromptTemplates: false,
+			streamingBehavior: "aside",
+		});
+
+		expect(abortSeen).toBe(false);
+		expect(session.agent.hasQueuedMessages()).toBe(false);
+		expect(session.agent.peekSteeringQueue()).toHaveLength(0);
+
+		release.resolve();
+		await run;
+		await session.waitForIdle();
+
+		expect(JSON.stringify(contexts[1]!.messages)).toContain("SLOW_DONE");
+		expect(JSON.stringify(contexts[1]!.messages)).toContain("RACE_ASIDE_TEXT");
+	});
 });

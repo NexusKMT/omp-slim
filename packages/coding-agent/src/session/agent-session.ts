@@ -5886,21 +5886,17 @@ export class AgentSession {
 			this.#toolChoiceQueue.removeByLabel("plan-mode-decision");
 		}
 
-		// If streaming, queue via steer() or followUp() based on option
+		// If streaming, queue via steer()/followUp()/aside based on option
 		if (this.isStreaming) {
 			const streamingBehavior = options?.streamingBehavior;
 			if (!streamingBehavior) throw new AgentBusyError();
 
-			// Steer/follow-up the keyword notices BEFORE the queued user message so the
+			// Steer/follow-up/aside the keyword notices BEFORE the queued user message so the
 			// model reads the steering notice ahead of the prompt it modifies.
 			for (const notice of keywordNotices) {
 				await this.#queueCustomMessage(notice, streamingBehavior);
 			}
-			if (streamingBehavior === "followUp") {
-				await this.#queueUserMessage(expandedText, options?.images, "followUp", submittedAt);
-			} else {
-				await this.#queueUserMessage(expandedText, options?.images, "steer", submittedAt);
-			}
+			await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, submittedAt);
 			return true;
 		}
 
@@ -6827,10 +6823,10 @@ export class AgentSession {
 		}
 	}
 
-	/** Queue a custom message without starting a turn, matching steer/follow-up delivery. */
+	/** Queue a custom message without starting a turn, matching steer/follow-up/aside delivery. */
 	async #queueCustomMessage<T = unknown>(
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
-		deliverAs: "steer" | "followUp",
+		deliverAs: "steer" | "followUp" | "aside",
 		queueChipText?: string,
 	): Promise<void> {
 		const details =
@@ -6853,6 +6849,13 @@ export class AgentSession {
 			timestamp: Date.now(),
 		};
 		const normalizedAppMessage = await this.#normalizeAgentMessageImages(appMessage);
+		if (deliverAs === "aside") {
+			// Non-interrupting: rides the same step-boundary aside poll as
+			// sendCustomMessage's streaming aside branch — not an agent-core queue
+			// entry, so no drain-retry latch and no idle-queue drain scheduling.
+			this.#irc.queueAside([normalizedAppMessage]);
+			return;
+		}
 		this.#allowQueuedMessageDrainRetry();
 		if (deliverAs === "followUp") {
 			this.agent.followUp(normalizedAppMessage);
@@ -7034,9 +7037,7 @@ export class AgentSession {
 				return;
 			}
 			// Idle: fall through to the prompt flow below (starts a turn, like an omitted
-			// deliverAs). Re-checked immediately before the prompt() call in case streaming
-			// starts in the gap — prompt()'s own re-check would otherwise degrade a
-			// non-interrupting aside into a tool-skipping steer.
+			// deliverAs) — there is no live run to inject an aside into.
 			deliveredAsAside = true;
 		} else if (options?.deliverAs === "followUp") {
 			await this.#queueUserMessage(text, images, "followUp");
@@ -7046,18 +7047,17 @@ export class AgentSession {
 			return;
 		}
 
-		if (deliveredAsAside && this.isStreaming) {
-			await this.#queueUserMessage(text, images, "aside");
-			return;
-		}
-
-		// Use prompt() with expandPromptTemplates: false to skip command handling and template expansion.
-		// `streamingBehavior: "steer"` preserves prompt-flow side effects during streaming while
-		// covering the narrow race where a stream starts before prompt() acquires the turn.
+		// Use prompt() with expandPromptTemplates: false to skip command handling and template
+		// expansion. prompt() awaits manual-compaction cleanup and (on the non-streaming path)
+		// image normalization/vision description before dispatching, so a stream can start in
+		// that gap; prompt() re-checks isStreaming at each await boundary and queues via
+		// `streamingBehavior` when it does. Passing "aside" through (instead of hard-coding
+		// "steer") keeps that race from degrading a non-interrupting aside into a
+		// tool-batch-aborting steer.
 		await this.prompt(text, {
 			expandPromptTemplates: false,
 			images,
-			streamingBehavior: "steer",
+			streamingBehavior: deliveredAsAside ? "aside" : "steer",
 		});
 	}
 
