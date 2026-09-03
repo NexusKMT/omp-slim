@@ -2384,9 +2384,10 @@ interface WakeSource {
 	messageId?: string;
 }
 
-function wakeSources(records: CustomMessage[], selfId: string): WakeSource[] {
+function wakeSources(records: AgentMessage[], selfId: string): WakeSource[] {
 	const sources: WakeSource[] = [];
 	for (const record of records) {
+		if (record.role !== "custom") continue;
 		const details = record.details && typeof record.details === "object" ? record.details : undefined;
 		const from = details ? Reflect.get(details, "from") : undefined;
 		if (typeof from !== "string" || from === selfId || sources.some(source => source.from === from)) continue;
@@ -2407,7 +2408,7 @@ function wakeSources(records: CustomMessage[], selfId: string): WakeSource[] {
  */
 async function relayWakeTurnOutput(args: {
 	id: string;
-	records: CustomMessage[];
+	records: AgentMessage[];
 	turnStartTime: number;
 	yielded: boolean;
 	result: SingleResult;
