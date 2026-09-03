@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added `getTinyWorkerRuntimeDir()` (~/.omp/run/tiny) for the per-model tiny-worker sockets and logs.
+- Added the public `getTinyWorkerRuntimeDir()` utility, which returns the standard `~/.omp/run/tiny` directory for tiny-worker runtime data.
 
 ## [18.1.6] - 2026-09-03
 

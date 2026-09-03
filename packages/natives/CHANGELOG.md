@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added Windows ARM64 native addon builds and npm leaf packages.
+- Added Windows ARM64 native addon support, including platform-specific npm packages.
 
 ## [18.1.6] - 2026-09-03
 

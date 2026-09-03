@@ -2,26 +2,35 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Removed the Ruby and Julia eval backends and related interpreter configuration; eval now supports Python and JavaScript only.
+- Removed the eval parallel() and pipeline() helpers. agent() and completion() now return handles immediately, and wait(handles) provides synchronization.
+- Python eval tool calls are now asynchronous coroutines, matching JavaScript; use await tool.read({...}) and similar calls.
+
 ### Added
 
+- Added asynchronous eval agent and completion handles with status, cancellation, messaging, waiting, and automatic result delivery for unwaited background work.
+- Added eval workpools for queueing items onto the least context-loaded keep-alive subagent with configurable concurrency; the pool name is its async-job ID for `hub wait`, `.peek()` gives a non-consuming snapshot, per-item `{key, data|error}` yields finish batches incrementally, and `eval.workpool.freshAgents` opts into a new agent per item.
+- Added support for defining eval tools in Python with @tool or JavaScript with tool(fn, schema), and exposing them to subagents through task, agent, and workpool calls. Configure availability with eval.tools.enabled.
 - Added native Windows ARM64 binaries with architecture-aware installation and updates.
-- Added an MLX backend for local tiny models on Apple silicon: set `providers.tinyModelDevice` to `mlx` (or `PI_TINY_DEVICE=mlx`/`metal`) to download each model's MLX weights and run titles, memory tasks, and the `auto` thinking classifier through an on-demand `mlx-lm` worker; falls back to ONNX CPU when Python is unavailable.
-- Qwen3 1.7B is now usable as a local memory/classifier model on the MLX backend (it stays blocked on ONNX).
+- Added an MLX backend for running local tiny models on Apple silicon. Configure providers.tinyModelDevice=mlx, or use PI_TINY_DEVICE=mlx or metal, to run title generation, memory tasks, and automatic thinking classification with MLX models, with an ONNX CPU fallback when Python is unavailable.
+- Added Qwen3 1.7B as a local memory and thinking-classification model for the MLX backend.
 
 ### Changed
 
-- Local tiny models (titles, memory, `auto` thinking) now run in one worker per model shared by every omp process on the machine instead of one worker per instance; workers start on demand and exit by themselves after 15 idle minutes.
-- `PI_TINY_DEVICE=metal` now selects the MLX backend instead of being forced back to CPU on macOS.
+- Local tiny models for titles, memory, and automatic thinking classification now share on-demand workers across omp processes, reducing redundant resource usage; workers stop automatically after inactivity.
+- PI_TINY_DEVICE=metal now selects the MLX backend on macOS.
+- Updated agent reactions to trigger on the opening emoji instead of requiring a newline, consuming any following whitespace.
 
 ### Fixed
 
-- Fixed user-scope marketplace plugins installed through `omp` losing their skills unless the Claude plugin source was separately enabled ([#10662](https://github.com/can1357/oh-my-pi/issues/10662)).
-- Hashline edits whose section header carries an `apply_patch` envelope marker (`[*** Begin Patch] [src/a.ts#1A2B]`) now apply to the real file instead of failing with `File not found: Begin Patch] [src/a.ts`; a header holding two unrelated bracket groups is rejected outright rather than editing a file named after the noise.
-- Fixed bracketed hashline edit targets appearing as `undefined` to extension path allowlists ([#10688](https://github.com/can1357/oh-my-pi/issues/10688)).
-- Fixed MCP tools discovered during startup disappearing after approving or leaving default-on plan mode ([#10683](https://github.com/can1357/oh-my-pi/issues/10683)).
-### Fixed
-
-- Fixed ACP clients receiving non-file read locations and updates for released terminals, preventing invalid worktree scans and terminal errors on Windows ([#10678](https://github.com/can1357/oh-my-pi/issues/10678)).
+- Fixed transient provider retries incorrectly failing with an “Agent is already processing” error.
+- Fixed user-scope marketplace plugins installed through omp losing their skills when the Claude plugin source was not separately enabled.
+- Fixed hashline edits failing when targets included apply_patch markers, while rejecting ambiguous bracketed targets instead of editing the wrong path.
+- Fixed bracketed hashline edit targets being reported as undefined to extension path allowlists.
+- Fixed MCP tools discovered during startup disappearing after plan-mode approval or when leaving default-on plan mode.
+- Fixed ACP clients receiving invalid file locations or updates for released terminals, preventing invalid worktree scans and terminal errors on Windows.
 
 ## [18.1.6] - 2026-09-03
 
