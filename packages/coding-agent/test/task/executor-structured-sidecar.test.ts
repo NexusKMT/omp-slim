@@ -1,8 +1,9 @@
 /**
  * Regression coverage for the `<id>.json` structured-output sidecar
  * lifecycle: a replacement write failure must not leave a stale sidecar from
- * an earlier turn answering `agent://<id>/<field>` with superseded data (PR
- * #10625 review).
+ * an earlier turn answering `agent://<id>/<field>` with superseded data, and
+ * a schema-invalid yield with parsed data must still get a sidecar so its
+ * full payload stays recoverable via `agent://<id>` (PR #10625 review).
  */
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
@@ -131,5 +132,37 @@ describe("structured output sidecar lifecycle", () => {
 		// ...but the sidecar write failed, so the stale sidecar must not survive
 		// to keep answering agent://<id>/<field> with the superseded payload.
 		await expect(fs.stat(sidecarPath)).rejects.toThrow();
+	});
+
+	it("persists the sidecar for a schema-invalid yield that still carries parsed data", async () => {
+		// Regression: previously the sidecar was written only for
+		// `status === "valid"`, so an oversized invalid payload had no
+		// recovery path beyond the truncated inline preview.
+		artifactsDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-sidecar-test-"));
+		const id = "InvalidSidecarProbe";
+
+		// `ok` is a string, not a boolean — violates the schema below, but the
+		// data still parses and must be preserved.
+		const session = yieldEmittingSession({ ok: "not-a-boolean" });
+		vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));
+
+		const result = await runSubprocess({
+			cwd: "/tmp",
+			agent: baseAgent,
+			task: "do work",
+			index: 0,
+			id,
+			settings: Settings.isolated(),
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			enableLsp: false,
+			artifactsDir,
+			outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+		});
+
+		expect(result.structuredOutput?.status).toBe("invalid");
+		const sidecarPath = path.join(artifactsDir, `${id}.json`);
+		await expect(fs.stat(sidecarPath)).resolves.toBeDefined();
+		const sidecar = JSON.parse(await fs.readFile(sidecarPath, "utf-8"));
+		expect(sidecar).toEqual({ ok: "not-a-boolean" });
 	});
 });

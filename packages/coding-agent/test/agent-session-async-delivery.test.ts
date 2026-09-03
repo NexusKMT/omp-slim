@@ -160,7 +160,12 @@ describe("AgentSession owner-routed async delivery", () => {
 		expect(message?.content).not.toContain("agent://Foo-t1-2");
 	});
 
-	it("carries a schema-invalid background task's parsed payload inline only", () => {
+	it("carries a schema-invalid background task's parsed payload as both a pointer and an inline preview", () => {
+		// Regression: an invalid result's data is now also persisted to the
+		// `<id>.json` sidecar (PR #10625 review), so the delivery must
+		// advertise the same `agent://` recovery pointer as a valid result,
+		// not just the size-capped inline preview (which alone would be the
+		// only model-visible copy for oversized payloads).
 		const job: AsyncJob = {
 			id: "SchemaProbe",
 			type: "task",
@@ -195,7 +200,36 @@ describe("AgentSession owner-routed async delivery", () => {
 		});
 		expect(message?.content).toMatch(/```json[\s\S]*"summary": "ok"[\s\S]*```/);
 		expect(message?.content).toContain("missing required field 'count'");
-		expect(message?.content).not.toContain("full payload at agent://SchemaProbe");
+		expect(message?.content).toContain("full payload at agent://SchemaProbe");
+	});
+
+	it("omits the agent:// pointer for an invalid result with no data to recover", () => {
+		const job: AsyncJob = {
+			id: "SchemaProbe",
+			type: "task",
+			status: "completed",
+			startTime: Date.now(),
+			label: "SchemaProbe",
+			abortController: new AbortController(),
+			promise: Promise.resolve(),
+			resultText: "done",
+			structured: {
+				source: "caller",
+				mode: "strict",
+				status: "invalid",
+				error: "subagent yielded no data",
+			},
+		};
+		const entry: AsyncResultEntry = {
+			jobId: "SchemaProbe",
+			result: "done",
+			job,
+			durationMs: 1000,
+			epoch: 0,
+		};
+		const message = buildAsyncResultBatchMessage([entry]);
+		expect(message?.content).not.toContain("agent://SchemaProbe");
+		expect(message?.content).toContain("subagent yielded no data");
 	});
 
 	it("routes an advisor-owned launch completion through the session", async () => {

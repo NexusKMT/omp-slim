@@ -75,6 +75,7 @@ export function buildAsyncResultBatchMessage(entries: AsyncResultEntry[]): Custo
 	if (entries.length === 0) return null;
 	const jobs = entries.map(entry => {
 		const structured = entry.job?.structured;
+		const hasStructuredData = structured ? Object.hasOwn(structured, "data") : false;
 		const structuredJson = structured && structured.status !== "valid" ? renderStructuredJson(structured) : undefined;
 		return {
 			jobId: entry.jobId,
@@ -91,6 +92,7 @@ export function buildAsyncResultBatchMessage(entries: AsyncResultEntry[]): Custo
 			durationMs: entry.durationMs,
 			structured,
 			structuredJson,
+			hasStructuredData,
 			schemaStatus: structured?.status,
 			schemaError: structured?.error,
 			schemaValid: structured?.status === "valid",

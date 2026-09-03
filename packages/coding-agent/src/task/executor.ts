@@ -2308,7 +2308,7 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 		}
 		const structured = finalized.structuredOutput;
 		const sidecarPath = path.join(args.artifactsDir, `${id}.json`);
-		if (outputPath && structured?.status === "valid" && Object.hasOwn(structured, "data")) {
+		if (outputPath && structured && Object.hasOwn(structured, "data")) {
 			try {
 				const serialized = JSON.stringify(structured.data, null, 2);
 				if (serialized !== undefined) await writeArtifact(sidecarPath, `${serialized}\n`);

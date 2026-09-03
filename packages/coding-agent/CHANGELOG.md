@@ -33,6 +33,10 @@
 - Fixed bracketed hashline edit targets being reported as undefined to extension path allowlists.
 - Fixed MCP tools discovered during startup disappearing after plan-mode approval or when leaving default-on plan mode.
 - Fixed ACP clients receiving invalid file locations or updates for released terminals, preventing invalid worktree scans and terminal errors on Windows.
+### Fixed
+
+- Preserved the full parsed payload of a schema-invalid background task result: it is now persisted to the `<id>.json` sidecar and advertised via `agent://<id>` alongside the inline preview, instead of only showing a size-capped, unrecoverable inline JSON block.
+- Delayed retained-artifact cleanup for background task spawns by a grace period after delivery settles, so the model's next turn has time to read the advertised `agent://` pointer before the backing files are removed.
 
 ## [18.1.6] - 2026-09-03
 

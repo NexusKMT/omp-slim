@@ -216,7 +216,11 @@ describe("task spawn routing", () => {
 		// retentionMs: 0 evicts synchronously once the job settles so the
 		// test does not have to wait out the real 5-minute default
 		// retention window.
-		const manager = new AsyncJobManager({ onJobComplete: () => {}, retentionMs: 0 });
+		const manager = new AsyncJobManager({
+			onJobComplete: () => {},
+			retentionMs: 0,
+			retainedArtifactsCleanupGraceMs: 0,
+		});
 		managers.push(manager);
 		const tool = await TaskTool.create(createSession({ manager }));
 

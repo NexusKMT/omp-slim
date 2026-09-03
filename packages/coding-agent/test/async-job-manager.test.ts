@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test, vi } from "bun:test";
 import { scheduler } from "node:timers/promises";
 import { AsyncJobError, AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 
@@ -18,7 +18,20 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 2_000): Pr
 	}
 }
 
+/** Resolve positive-duration sleeps immediately so grace-period waits don't cost real wall-clock time. */
+function mockPositiveSleepsImmediate() {
+	const realSleep = Bun.sleep.bind(Bun);
+	return vi.spyOn(Bun, "sleep").mockImplementation((duration?: number | Date) => {
+		if (typeof duration === "number" && duration > 0) return Promise.resolve();
+		return realSleep(duration ?? 0);
+	});
+}
+
 describe("AsyncJobManager", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
 	test("forwards progress updates and delivers completion", async () => {
 		const progressEvents: Array<{ text: string; details?: Record<string, unknown> }> = [];
 		const completions: Array<{ jobId: string; text: string }> = [];
@@ -191,6 +204,7 @@ describe("AsyncJobManager", () => {
 		const deliveryGate = Promise.withResolvers<void>();
 		const manager = new AsyncJobManager({
 			retentionMs: 0,
+			retainedArtifactsCleanupGraceMs: 0,
 			onJobComplete: async () => {
 				await deliveryGate.promise;
 			},
@@ -216,6 +230,35 @@ describe("AsyncJobManager", () => {
 		await waitForCondition(() => cleanupCalls.length > 0);
 
 		expect(cleanupCalls).toEqual([jobId]);
+	});
+
+	test("waits out a grace period after delivery settles before cleanup, using the configured duration", async () => {
+		// Regression: the settlement receipt resolves at `ASIDE_MESSAGE_COMMIT`
+		// — when the follow-up is inserted into the transcript, but *before*
+		// the next provider call that actually shows it to the model. Running
+		// cleanup immediately on settlement raced ahead of the model's next
+		// turn reading the advertised `agent://` pointer (PR #10625 review).
+		const cleanupCalls: string[] = [];
+		const sleepSpy = mockPositiveSleepsImmediate();
+		const manager = new AsyncJobManager({
+			retentionMs: 0,
+			retainedArtifactsCleanupGraceMs: 45_000,
+			onJobComplete: async () => {},
+		});
+
+		const jobId = manager.register("task", "agent task", async () => "task done");
+		const job = manager.getJob(jobId);
+		job!.retainedArtifactsCleanup = async () => {
+			cleanupCalls.push(jobId);
+		};
+
+		await manager.waitForAll();
+		await waitForJobEviction(manager, jobId);
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+		await waitForCondition(() => cleanupCalls.length > 0);
+
+		expect(cleanupCalls).toEqual([jobId]);
+		expect(sleepSpy.mock.calls.some(([duration]) => duration === 45_000)).toBe(true);
 	});
 
 	test("fails the job but keeps structured output from AsyncJobError", async () => {

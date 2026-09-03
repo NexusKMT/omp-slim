@@ -5,6 +5,15 @@ const DELIVERY_RETRY_BASE_MS = 500;
 const DELIVERY_RETRY_MAX_MS = 30_000;
 const DELIVERY_RETRY_JITTER_MS = 200;
 const DEFAULT_RETENTION_MS = 5 * 60 * 1000;
+/**
+ * Extra delay after an `async-result` delivery settles (its `ASIDE_MESSAGE_COMMIT`
+ * hook fires, resolving `enqueueWithReceipt()`) before retained artifacts are
+ * removed. The commit hook fires when the follow-up is inserted into the
+ * transcript, not after the model's next provider call has actually read it —
+ * this window gives that round trip time to complete before the backing
+ * `<id>.md`/`.json` files disappear out from under an advertised `agent://` URL.
+ */
+const RETAINED_ARTIFACTS_CLEANUP_GRACE_MS = 60_000;
 const DEFAULT_MAX_RUNNING_JOBS = 15;
 /** Abort reason used only when the owning session shuts down the entire manager. */
 export const ASYNC_JOB_MANAGER_SHUTDOWN_REASON = Symbol("AsyncJobManager shutdown");
@@ -117,6 +126,13 @@ export interface AsyncJobManagerOptions {
 	onJobComplete?: AsyncJobDeliverySink;
 	maxRunningJobs?: number;
 	retentionMs?: number;
+	/**
+	 * Delay after a job's `async-result` delivery settles before its retained
+	 * artifacts are removed (see {@link RETAINED_ARTIFACTS_CLEANUP_GRACE_MS}).
+	 * Defaults to that constant; tests override to `0` to assert cleanup
+	 * without a real-time wait.
+	 */
+	retainedArtifactsCleanupGraceMs?: number;
 }
 
 interface AsyncJobDelivery {
@@ -201,6 +217,7 @@ export class AsyncJobManager {
 	readonly #onJobComplete: AsyncJobManagerOptions["onJobComplete"];
 	readonly #maxRunningJobs: number;
 	readonly #retentionMs: number;
+	readonly #retainedArtifactsCleanupGraceMs: number;
 	#deliveryLoop: Promise<void> | undefined;
 	#deliveryQueueChanged = Promise.withResolvers<void>();
 	#disposed = false;
@@ -219,6 +236,10 @@ export class AsyncJobManager {
 		this.#onJobComplete = options.onJobComplete;
 		this.#maxRunningJobs = Math.max(1, Math.floor(options.maxRunningJobs ?? DEFAULT_MAX_RUNNING_JOBS));
 		this.#retentionMs = Math.max(0, Math.floor(options.retentionMs ?? DEFAULT_RETENTION_MS));
+		this.#retainedArtifactsCleanupGraceMs = Math.max(
+			0,
+			Math.floor(options.retainedArtifactsCleanupGraceMs ?? RETAINED_ARTIFACTS_CLEANUP_GRACE_MS),
+		);
 	}
 
 	/** True when the running-job count has reached the configured cap. */
@@ -729,12 +750,20 @@ export class AsyncJobManager {
 	/**
 	 * Fire a retained temporary artifacts cleanup exactly once, deferred
 	 * until this job's `async-result` delivery has settled (delivered,
-	 * dead-lettered, or given up retrying). Job-row eviction happens on its
-	 * own timer independent of delivery — a still-streaming owner session
-	 * can leave a delivery in flight (its sink awaits
-	 * `yieldQueue.enqueueWithReceipt()`) well past the retention window, and
-	 * deleting the retained directory before that receipt commits would
-	 * advertise an `agent://` URL whose backing files are already gone.
+	 * dead-lettered, or given up retrying) plus a grace period. Job-row
+	 * eviction happens on its own timer independent of delivery — a still-
+	 * streaming owner session can leave a delivery in flight (its sink
+	 * awaits `yieldQueue.enqueueWithReceipt()`) well past the retention
+	 * window, and deleting the retained directory before that receipt
+	 * settles would advertise an `agent://` URL whose backing files are
+	 * already gone.
+	 * The receipt itself resolves at `ASIDE_MESSAGE_COMMIT` — when the
+	 * follow-up is inserted into the transcript, but *before* the next
+	 * provider call that actually shows it to the model (agent-loop fires
+	 * the commit hook, then starts the call). Running cleanup immediately
+	 * on settlement would delete the artifacts before the model's very next
+	 * turn has any chance to read the pointer via a tool call, so a grace
+	 * period covers that round trip.
 	 * Errors are logged, not thrown — a failed disposal must not block job
 	 * eviction or manager teardown.
 	 */
@@ -744,6 +773,9 @@ export class AsyncJobManager {
 		job.retainedArtifactsCleanup = undefined;
 		const jobId = job.id;
 		void this.#waitForJobDeliverySettled(jobId)
+			.then(() =>
+				this.#retainedArtifactsCleanupGraceMs > 0 ? Bun.sleep(this.#retainedArtifactsCleanupGraceMs) : undefined,
+			)
 			.then(cleanup)
 			.catch(error => {
 				logger.warn("Async job retained artifacts cleanup failed", {
