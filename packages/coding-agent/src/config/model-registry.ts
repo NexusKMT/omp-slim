@@ -17,6 +17,7 @@ import type {
 import type { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { collapseBuiltVariants } from "@oh-my-pi/pi-catalog/compat/collapse";
+import { applyCatalogMetrics, CatalogMetricsIndex } from "@oh-my-pi/pi-catalog/identity/metrics";
 import { readModelCache, writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import {
 	createModelManager,
@@ -196,53 +197,6 @@ function isExtendedContextEnabledFromSettings(settingsInstance?: Settings): bool
 	}
 }
 
-interface CatalogModelMetrics {
-	int?: number;
-	tps?: number;
-}
-
-function collectCatalogModelMetrics(models: readonly Model<Api>[]): Map<string, CatalogModelMetrics> {
-	const metrics = new Map<string, CatalogModelMetrics>();
-	for (const model of models) {
-		const int = model.int != null && Number.isFinite(model.int) ? model.int : undefined;
-		const tps = model.tps != null && Number.isFinite(model.tps) && model.tps > 0 ? model.tps : undefined;
-		if (int === undefined && tps === undefined) continue;
-		const key = model.id.toLowerCase();
-		const current = metrics.get(key);
-		metrics.set(key, {
-			...(int !== undefined || current?.int !== undefined ? { int: int ?? current?.int } : {}),
-			...(tps !== undefined || current?.tps !== undefined ? { tps: tps ?? current?.tps } : {}),
-		});
-	}
-	return metrics;
-}
-
-function applyCatalogModelMetrics(
-	models: Model<Api>[],
-	metrics: ReadonlyMap<string, CatalogModelMetrics>,
-): Model<Api>[] {
-	if (metrics.size === 0) return models;
-	let changed: Model<Api>[] | undefined;
-	for (let index = 0; index < models.length; index++) {
-		const model = models[index];
-		const metric = metrics.get(model.id.toLowerCase());
-		if (!metric) continue;
-		if (
-			(metric.int === undefined || metric.int === model.int) &&
-			(metric.tps === undefined || metric.tps === model.tps)
-		) {
-			continue;
-		}
-		changed ??= [...models];
-		changed[index] = {
-			...model,
-			...(metric.int !== undefined ? { int: metric.int } : {}),
-			...(metric.tps !== undefined ? { tps: metric.tps } : {}),
-		};
-	}
-	return changed ?? models;
-}
-
 /** Authentication material returned to legacy extensions for one model request. */
 export type ResolvedRequestAuth =
 	| {
@@ -266,7 +220,7 @@ export class ModelRegistry {
 	#cachedAuthoritativeProviders: Set<string> = new Set();
 	#runtimeDiscoveredModels: Model<Api>[] = [];
 	#runtimeAuthoritativeProviders: Set<string> = new Set();
-	#catalogMetrics: Map<string, CatalogModelMetrics> = new Map();
+	#catalogMetrics = new CatalogMetricsIndex();
 	#internedStaticModels: Map<string, Model<Api>> = new Map();
 	#providerLookupSnapshots: Map<string, Model<Api>[]> = new Map();
 	#customProviderApiKeys: Map<string, string> = new Map();
@@ -319,17 +273,16 @@ export class ModelRegistry {
 	#settings: Settings | undefined;
 
 	#captureCatalogMetrics(models: readonly Model<Api>[], replace: boolean): void {
-		const incoming = collectCatalogModelMetrics(models);
-		if (incoming.size === 0) return;
 		if (replace) {
-			this.#catalogMetrics = incoming;
+			const incoming = new CatalogMetricsIndex(models);
+			if (!incoming.isEmpty) this.#catalogMetrics = incoming;
 			return;
 		}
-		for (const [id, metrics] of incoming) this.#catalogMetrics.set(id, metrics);
+		this.#catalogMetrics.add(models);
 	}
 
 	#withCatalogMetrics(models: Model<Api>[]): Model<Api>[] {
-		return applyCatalogModelMetrics(models, this.#catalogMetrics);
+		return applyCatalogMetrics(models, this.#catalogMetrics);
 	}
 
 	#resolveCommandBackedApiKey(provider: string, options?: { forceCommandRefresh?: boolean }): CommandApiKeyResolution {
