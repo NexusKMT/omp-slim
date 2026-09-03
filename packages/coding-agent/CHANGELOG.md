@@ -132,6 +132,7 @@
 ### Removed
 
 - Removed the bundled `designer` subagent and `designer` model role; `modelRoles.designer` and `@designer` are no longer built in.
+- Fixed subagent activity freezing the TUI by repeatedly rediscovering the current VCS repository during status-line repaints ([#10605](https://github.com/can1357/oh-my-pi/issues/10605)).
 
 ## [18.1.3] - 2026-09-02
 
