@@ -10,6 +10,9 @@
 - Added clone-first Git worktree support that carries over ignored build artifacts when creating worktrees, with a configurable `worktree.clone` setting and fallback to a standard checkout. This is supported by `github pr_checkout`, `omp worktree add`, and `git worktree add` commands entered through the Bash tool.
 - Added the `omp worktree add` command with Git-compatible branch, detach, path, and commit options.
 - Added `/wt` (alias `/worktree`) to create a linked worktree with uncommitted changes and move the current session into it while leaving the original checkout untouched.
+### Added
+
+- Added an opt-in `status` custom status-line segment for rendering extension statuses inline.
 
 ### Changed
 
