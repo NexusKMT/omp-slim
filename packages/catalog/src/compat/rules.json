@@ -14919,7 +14919,7 @@
 					"authorizeParams": {
 						"id_token_add_organizations": "true",
 						"codex_cli_simplified_flow": "true",
-						"originator": "pi"
+						"originator": "omp"
 					},
 					"clientId": {
 						"value": "app_EMoamEEZ73f0CkXaXp7hrann"

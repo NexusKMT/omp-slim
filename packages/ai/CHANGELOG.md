@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- OpenAI Codex requests now send the `x-codex-routing-hint` header (model and service tier) on Responses, WebSocket, and remote-compaction calls, matching codex-rs.
+
 ## [18.1.7] - 2026-09-03
 
 ### Fixed
