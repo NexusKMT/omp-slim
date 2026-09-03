@@ -12,7 +12,7 @@
 - Fixed `rule://<name>` resolving `Unknown rule` inside a subagent whose rules are scoped away from the main session's snapshot; `rule://` now resolves against the calling session's own applicable rule set.
 - Fixed the rule inspector showing "(no apply conditions)" on rules that are scoped only by `agents`.
 - Fixed `rule://<name>` and other internal-URL resolution inside a bash command run by a subagent to use that subagent's scoped rule set instead of the top-level session's, so `cat rule://<scoped-rule>` resolves correctly.
-- Reserved `main` as a subagent definition name: a custom agent named `main` could previously masquerade as the top-level session for `agents`-scoped rule matching.
+- Reserved `main` as a subagent definition name: a custom agent named `main` could previously masquerade as the top-level session for `agents`-scoped rule matching, including a persisted transcript from before this reservation existed.
 
 ## [18.1.5] - 2026-09-03
 

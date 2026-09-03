@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises";
 import { logger } from "@oh-my-pi/pi-utils";
+import { MAIN_AGENT_RULE_NAME } from "../capability/rule";
 import type { ModelRegistry } from "../config/model-registry";
 import { formatModelRoleAlias } from "../config/model-roles";
 import type { Settings } from "../config/settings";
@@ -140,8 +141,13 @@ export function createPersistedSubagentReviverFactory(
 				// register with `displayName: id` (registry/persisted-agents.ts), so a
 				// generated task id would silently drop every agent-scoped rule.
 				// `init.agent` carries the real name; only files predating that field
-				// fall back to the display label.
-				agentName: init.agent ?? ref.displayName,
+				// fall back to the display label. A parked transcript may also predate
+				// the `main`-as-definition-name reservation (discovery/helpers.ts): a
+				// persisted `init.agent === "main"` from such a legacy custom agent
+				// must not masquerade as the top-level sentinel here, so it falls back
+				// to the display label too, keeping it scoped as an ordinary subagent.
+				agentName:
+					init.agent && init.agent.trim().toLowerCase() !== MAIN_AGENT_RULE_NAME ? init.agent : ref.displayName,
 				parentTaskPrefix: ref.id,
 				parentAgentId: ref.parentId,
 				expectedAgentRef: expectedRef,

@@ -294,6 +294,28 @@ describe("persisted subagent revival", () => {
 
 		expect(capturedOptions?.agentName).toBe(ref.displayName);
 	});
+	it("treats a persisted legacy 'main'-named subagent as scoped to the ref display name, not the top-level sentinel", async () => {
+		const cwd = makeTempDir("@pi-revive-agent-name-legacy-main-");
+		const sessionFile = await createPersistedSession(cwd, undefined, undefined, undefined, { agent: "main" });
+		let capturedOptions: CreateAgentSessionOptions | undefined;
+		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async options => {
+			capturedOptions = options;
+			return { session: createRevivedSession([]).session } as CreateAgentSessionResult;
+		});
+
+		const ref = createRef(sessionFile);
+		const reviver = await createFactory(cwd)(ref);
+		if (!reviver) throw new Error("Expected a persisted reviver");
+		await reviver(ref);
+
+		// A parked transcript from before "main" was reserved as a definition
+		// name could still carry `init.agent === "main"`. That must not resolve
+		// to the top-level sentinel here, or `agents: [main]` rules documented
+		// as top-level-only would load into this subagent.
+		expect(capturedOptions?.agentName).toBe(ref.displayName);
+		expect(capturedOptions?.agentName).not.toBe("main");
+	});
+
 	it("restores the persisted per-agent advisor opt-in on cold revival", async () => {
 		const cwd = makeTempDir("@pi-advisor-revive-");
 		const advisedFile = await createPersistedSession(cwd, undefined, undefined, "moonshot/k3");
