@@ -134,6 +134,54 @@ describe("structured output sidecar lifecycle", () => {
 		await expect(fs.stat(sidecarPath)).rejects.toThrow();
 	});
 
+	it("removes a stale sidecar instead of leaving it when the serialized data is undefined", async () => {
+		// Regression: `Object.hasOwn(structured, "data")` can be true while
+		// `JSON.stringify(structured.data, null, 2)` itself returns
+		// `undefined` (e.g. `structured.data === undefined`) — previously
+		// neither a write nor a removal happened, leaving a stale sidecar
+		// from an earlier turn behind (PR #10625 review).
+		artifactsDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-sidecar-test-"));
+		const id = "UndefinedDataProbe";
+		const sidecarPath = path.join(artifactsDir, `${id}.json`);
+		await fs.writeFile(sidecarPath, JSON.stringify({ summary: "stale from an earlier turn" }));
+
+		const session = yieldEmittingSession({ ok: true });
+		vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));
+
+		const originalStringify = JSON.stringify.bind(JSON);
+		vi.spyOn(JSON, "stringify").mockImplementation(((value: unknown, ...rest: unknown[]) => {
+			// Narrowly target only the yielded `{ ok: true }` payload so other
+			// concurrent JSON.stringify calls in the pipeline are unaffected.
+			if (
+				value !== null &&
+				typeof value === "object" &&
+				!Array.isArray(value) &&
+				Object.keys(value).length === 1 &&
+				"ok" in value &&
+				value.ok === true
+			) {
+				return undefined as unknown as string;
+			}
+			return (originalStringify as (...args: unknown[]) => unknown)(value, ...rest) as string;
+		}) as typeof JSON.stringify);
+
+		const result = await runSubprocess({
+			cwd: "/tmp",
+			agent: baseAgent,
+			task: "do work",
+			index: 0,
+			id,
+			settings: Settings.isolated(),
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			enableLsp: false,
+			artifactsDir,
+			outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+		});
+
+		expect(result.structuredOutput?.data).toEqual({ ok: true });
+		await expect(fs.stat(sidecarPath)).rejects.toThrow();
+	});
+
 	it("persists the sidecar for a schema-invalid yield that still carries parsed data", async () => {
 		// Regression: previously the sidecar was written only for
 		// `status === "valid"`, so an oversized invalid payload had no

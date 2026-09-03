@@ -701,7 +701,12 @@ export class AsyncJobManager {
 		const jobsSettled = await this.#waitForAllUntil(deadline);
 		const drained = await this.drainDeliveries({ timeoutMs: Math.max(deadline - Date.now(), 0) });
 		this.#clearEvictionTimers();
-		for (const job of this.#jobs.values()) this.#runRetainedArtifactsCleanup(job);
+		// Bypass the grace-period sleep: dispose has already drained/cancelled
+		// deliveries above, so there is nothing left for the model to read via
+		// `agent://<id>` — sleeping the retention window here would only leak
+		// temp dirs for up to `retainedArtifactsCleanupGraceMs` (or past
+		// process exit, since dispose does not await these cleanups).
+		for (const job of this.#jobs.values()) this.#runRetainedArtifactsCleanup(job, { bypassGrace: true });
 		this.#jobs.clear();
 		this.#deliveries.length = 0;
 		this.#notifyDeliveryQueueChanged();
@@ -767,14 +772,17 @@ export class AsyncJobManager {
 	 * Errors are logged, not thrown — a failed disposal must not block job
 	 * eviction or manager teardown.
 	 */
-	#runRetainedArtifactsCleanup(job: AsyncJob): void {
+	#runRetainedArtifactsCleanup(job: AsyncJob, options?: { bypassGrace?: boolean }): void {
 		const cleanup = job.retainedArtifactsCleanup;
 		if (!cleanup) return;
 		job.retainedArtifactsCleanup = undefined;
 		const jobId = job.id;
+		const bypassGrace = options?.bypassGrace === true;
 		void this.#waitForJobDeliverySettled(jobId)
 			.then(() =>
-				this.#retainedArtifactsCleanupGraceMs > 0 ? Bun.sleep(this.#retainedArtifactsCleanupGraceMs) : undefined,
+				!bypassGrace && this.#retainedArtifactsCleanupGraceMs > 0
+					? Bun.sleep(this.#retainedArtifactsCleanupGraceMs)
+					: undefined,
 			)
 			.then(cleanup)
 			.catch(error => {

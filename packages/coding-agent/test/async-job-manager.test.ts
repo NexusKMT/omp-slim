@@ -261,6 +261,34 @@ describe("AsyncJobManager", () => {
 		expect(sleepSpy.mock.calls.some(([duration]) => duration === 45_000)).toBe(true);
 	});
 
+	test("bypasses the retained-artifacts grace period during dispose", async () => {
+		// Regression: dispose() previously ran retained-artifacts cleanup
+		// through the full configured grace-period sleep even though every
+		// delivery has already been drained/cancelled by that point —
+		// leaking temp dirs for up to the grace window, or past process
+		// exit since dispose does not await these cleanups (PR #10625
+		// review).
+		const cleanupCalls: string[] = [];
+		const sleepSpy = mockPositiveSleepsImmediate();
+		const manager = new AsyncJobManager({
+			retainedArtifactsCleanupGraceMs: 45_000,
+			onJobComplete: async () => {},
+		});
+
+		const jobId = manager.register("task", "agent task", async () => "task done");
+		const job = manager.getJob(jobId);
+		job!.retainedArtifactsCleanup = async () => {
+			cleanupCalls.push(jobId);
+		};
+
+		await manager.waitForAll();
+		await manager.dispose();
+		await waitForCondition(() => cleanupCalls.length > 0);
+
+		expect(cleanupCalls).toEqual([jobId]);
+		expect(sleepSpy.mock.calls.some(([duration]) => duration === 45_000)).toBe(false);
+	});
+
 	test("fails the job but keeps structured output from AsyncJobError", async () => {
 		const manager = new AsyncJobManager({
 			onJobComplete: async () => {},

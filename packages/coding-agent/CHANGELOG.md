@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserved the full parsed payload of a schema-invalid background task result: it is now persisted to the `<id>.json` sidecar and advertised via `agent://<id>` alongside the inline preview, instead of only showing a size-capped, unrecoverable inline JSON block.
+- Delayed retained-artifact cleanup for background task spawns by a grace period after delivery settles, so the model's next turn has time to read the advertised `agent://` pointer before the backing files are removed.
+- Background (non-blocking) `task` spawns with an `outputSchema` now deliver their parsed structured output and expose it at `agent://<id>`.
+- `hub wait`/`jobs` no longer inlines a truncated (and potentially invalid) JSON block for schema-valid background job results; it now points to `agent://<id>` instead, matching the async-result follow-up.
+- A detached background `task` that fails without valid structured output now keeps its temporary artifacts until eviction instead of deleting them immediately, so the failed agent stays interrogable via `agent://<id>`/`history://<id>`.
+- Fixed a stale `<id>.json` structured-output sidecar surviving when the serialized payload was `undefined`.
+- `AsyncJobManager.dispose()` no longer sleeps out the full retained-artifacts grace period on shutdown.
+
 ## [18.1.7] - 2026-09-03
 
 ### Breaking Changes
@@ -33,10 +43,6 @@
 - Fixed bracketed hashline edit targets being reported as undefined to extension path allowlists.
 - Fixed MCP tools discovered during startup disappearing after plan-mode approval or when leaving default-on plan mode.
 - Fixed ACP clients receiving invalid file locations or updates for released terminals, preventing invalid worktree scans and terminal errors on Windows.
-### Fixed
-
-- Preserved the full parsed payload of a schema-invalid background task result: it is now persisted to the `<id>.json` sidecar and advertised via `agent://<id>` alongside the inline preview, instead of only showing a size-capped, unrecoverable inline JSON block.
-- Delayed retained-artifact cleanup for background task spawns by a grace period after delivery settles, so the model's next turn has time to read the advertised `agent://` pointer before the backing files are removed.
 
 ## [18.1.6] - 2026-09-03
 
@@ -93,39 +99,6 @@
 - Fixed messages typed while an edit or write tool was streaming from discarding the completed tool call and triggering unnecessary regeneration.
 - Fixed self-hosted Firecrawl URLs with origin-only base URLs from gaining an extra slash.
 - Fixed omp commit auto-staging from including macOS Unicode-normalization duplicates or files ignored by nested .gitignore rules.
-
-## [18.1.5] - 2026-09-03
-
-### Added
-
-- Added Abliteration provider support to `/login`, including `ABLITERATION_API_KEY` configuration and help text.
-- Added clone-first Git worktree support that carries over ignored build artifacts when creating worktrees, with a configurable `worktree.clone` setting and fallback to a standard checkout. This is supported by `github pr_checkout`, `omp worktree add`, and `git worktree add` commands entered through the Bash tool.
-- Added the `omp worktree add` command with Git-compatible branch, detach, path, and commit options.
-- Added `/wt` (alias `/worktree`) to create a linked worktree with uncommitted changes and move the current session into it while leaving the original checkout untouched.
-
-### Changed
-
-- Foreign user-level configuration sources (`~/.cursor`, `~/.codex`, `~/.claude`, `~/.gemini`, `~/.config/opencode`, `~/.codeium/windsurf`) are now opt-in via `enabledProviders`, while project-level configurations in CWD and `.agents` continue to load by default.
-- Split subagent isolation configuration into `task.isolation.enabled` and `isolation.backend`; existing `task.isolation.mode` settings are migrated automatically.
-- Updated the built-in `smol` and `slow` model priority chains to favor newer recommended models and remove older model generations.
-- Improved unsupported-model error messages by removing retry guidance that does not apply.
-
-### Fixed
-
-- Fixed automatic title generation so `--no-title` also prevents todo-initialization title refreshes, while automatic titles retain the selected OAuth account without sharing foreground request identity.
-- Fixed provider errors so they wrap to the terminal width and remain readable in the transcript and pinned error banner, with long messages available through the expansion hint.
-- Fixed Gemini malformed function-call turns so textual tool-call output is rejected conversationally and the session can continue instead of stopping with a pinned error.
-- Fixed auto-compaction recovery getting stuck in repeated retries when models return empty length-limited responses; it now stops with an actionable error.
-- Fixed MCP servers failing to reconnect after transient startup handshake timeouts.
-- Fixed programs supervised by `hub start` hanging when querying terminal capabilities.
-- Fixed large pastes followed immediately by Enter so the input is submitted with the pasted content instead of being left in the large-paste menu.
-
-### Removed
-
-- Removed the bundled `designer` subagent and `designer` model role; `modelRoles.designer` and `@designer` are no longer built in.
-### Fixed
-
-- Background (non-blocking) `task` spawns with an `outputSchema` now deliver their parsed structured output and expose it at `agent://<id>`.
 
 ## [18.1.5] - 2026-09-03
 

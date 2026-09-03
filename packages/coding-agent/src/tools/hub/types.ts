@@ -68,6 +68,12 @@ export interface JobSnapshot {
 	resultText?: string;
 	errorText?: string;
 	structured?: StructuredSubagentOutput;
+	/**
+	 * `agent://<id>` handle backing this job's artifacts — the job-row's
+	 * registry `agentId` when the manager disambiguated a requested job id
+	 * on collision, else the job id itself. See {@link AsyncJob.agentId}.
+	 */
+	agentUrlId?: string;
 }
 
 export type CancelStatus = "cancelled" | "not_found" | "already_completed";

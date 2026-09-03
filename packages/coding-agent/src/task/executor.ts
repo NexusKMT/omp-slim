@@ -2311,7 +2311,13 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 		if (outputPath && structured && Object.hasOwn(structured, "data")) {
 			try {
 				const serialized = JSON.stringify(structured.data, null, 2);
+				// `structured.data === undefined` (an own "data" key holding
+				// `undefined`) makes JSON.stringify return `undefined` too —
+				// neither a write nor a removal, which would leave a stale
+				// sidecar from an earlier turn answering agent://<id>/<field>
+				// with superseded data (PR #10625 review).
 				if (serialized !== undefined) await writeArtifact(sidecarPath, `${serialized}\n`);
+				else await fs.rm(sidecarPath, { force: true });
 			} catch (error) {
 				logger.warn("Failed to persist subagent structured output sidecar", {
 					agentId: id,

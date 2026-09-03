@@ -634,6 +634,28 @@ describe("structured subagent primitive", () => {
 		await expect(fs.stat(artifactsDir ?? "")).rejects.toThrow();
 	});
 
+	it("retains a detached task's artifacts on failure even without valid structured output", async () => {
+		// Regression: a detached (async) task job that fails with schema
+		// status "invalid" (not "valid") previously had its temp dir wiped
+		// immediately, breaking the "failed agent stays interrogable"
+		// invariant (task/index.ts) — the model could no longer read the
+		// failure via agent://<id> or history://<id> (PR #10625 review).
+		mockDiscovery();
+		let artifactsDir: string | undefined;
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			artifactsDir = options.artifactsDir;
+			return { ...result(), exitCode: 1, error: "agent failed" };
+		});
+
+		const settled = await runStructuredSubagent(request({ retainArtifacts: true, detached: true }));
+
+		expect(settled.result.exitCode).toBe(1);
+		expect(settled.result.structuredOutput?.status).toBe("invalid");
+		expect(artifactsDirsFromRegistry()).toContain(settled.artifactsDir);
+		await expect(fs.stat(artifactsDir ?? "")).resolves.toBeDefined();
+		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
+	});
+
 	it("retains isolated failure artifacts needed for recovery", async () => {
 		mockDiscovery();
 		let artifactsDir: string | undefined;

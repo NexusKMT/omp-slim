@@ -689,6 +689,7 @@ export async function runStructuredSubagent(request: StructuredSubagentRequest):
 		);
 	} finally {
 		const shouldRetainArtifacts =
+			request.detached === true ||
 			(request.retainArtifacts && (completedSuccessfully || hasValidStructuredOutput)) ||
 			(policy.isIsolated && (!policy.applyChanges || changesApplied === false || requiresRecoveryArtifacts));
 		const shouldCleanup = lease.temporary && !shouldRetainArtifacts;

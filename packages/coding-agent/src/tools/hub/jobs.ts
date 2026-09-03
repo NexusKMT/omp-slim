@@ -193,7 +193,9 @@ export function snapshotJobs(session: ToolSession, jobs: TrackedJobLike[]): JobS
 			...(resolvedModel ? { resolvedModel } : {}),
 			...(!resultConsumed && latest.resultText ? { resultText: latest.resultText } : {}),
 			...(!resultConsumed && latest.errorText ? { errorText: latest.errorText } : {}),
-			...(!resultConsumed && latest.structured ? { structured: latest.structured } : {}),
+			...(!resultConsumed && latest.structured
+				? { structured: latest.structured, agentUrlId: current?.agentId ?? latest.id }
+				: {}),
 		};
 	});
 }
@@ -248,8 +250,20 @@ export function buildJobResult(
 				lines.push(`Error: ${j.errorText}`);
 			}
 			if (j.structured) {
-				const block = renderStructuredJson(j.structured);
-				if (block) lines.push(`Structured output (schema ${j.structured.status}):`, "```json", block, "```");
+				const hasData = Object.hasOwn(j.structured, "data");
+				let header = `Structured output: schema ${j.structured.status}`;
+				if (j.structured.error) header += `: ${j.structured.error}`;
+				// Valid results never inline the JSON here — it duplicates the
+				// `<output>` block above (or breaks mid-JSON once truncated at
+				// 4k), which contradicts async-result.md's contract of pointing
+				// to `agent://<id>` instead (PR #10625 review).
+				if (hasData)
+					header += `; full payload at agent://${j.agentUrlId}, fields via agent://${j.agentUrlId}?q=.<field>`;
+				lines.push(header);
+				if (j.structured.status !== "valid") {
+					const block = renderStructuredJson(j.structured);
+					if (block) lines.push("```json", block, "```");
+				}
 			}
 			lines.push("");
 		}
