@@ -1540,6 +1540,18 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	skillful: {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "model",
+			group: "Prompt",
+			label: "List Skills in Prompt",
+			description:
+				"List available skills in the system prompt; disable to save context and toggle per-session with /skillful",
+		},
+	},
+
 	"workspace.additionalDirectories": {
 		type: "array",
 		default: [] as string[],

@@ -175,6 +175,7 @@ import planModeReferencePrompt from "../prompts/system/plan-mode-reference.md" w
 import planModeToolDecisionReminderPrompt from "../prompts/system/plan-mode-tool-decision-reminder.md" with { type: "text" };
 import rewindReportTemplate from "../prompts/system/rewind-report.md" with { type: "text" };
 import sideChannelNoToolsReminder from "../prompts/system/side-channel-no-tools.md" with { type: "text" };
+import skillfulNoticePrompt from "../prompts/system/skillful-notice.md" with { type: "text" };
 import vibeModeActivePrompt from "../prompts/system/vibe-mode-active.md" with { type: "text" };
 import videoAttachmentPrompt from "../prompts/system/video-attachment.md" with { type: "text" };
 import {
@@ -7836,6 +7837,47 @@ export class AgentSession {
 	/** Toggles priority service for the active model family. */
 	toggleFastMode(): boolean {
 		return this.#models.toggleFastMode();
+	}
+
+	/** Flips the `skillful` setting for this session only. See {@link setSkillful}. */
+	async toggleSkillful(): Promise<boolean> {
+		return this.setSkillful(!this.settings.get("skillful"));
+	}
+
+	/**
+	 * Sets the `skillful` setting for this session only (never persisted).
+	 * Returns the new value.
+	 *
+	 * With an empty transcript the rebuilt system prompt simply carries or
+	 * drops the `<skills>` listing. Mid-session the provider-visible prompt
+	 * stays byte-stable: disabling is a no-op until the next session, and
+	 * enabling appends a single hidden notice carrying the listing so the
+	 * model learns the skills without a prompt-prefix rewrite.
+	 */
+	async setSkillful(enabled: boolean): Promise<boolean> {
+		if (enabled === this.settings.get("skillful")) return enabled;
+		this.settings.override("skillful", enabled);
+		if (this.agent.state.messages.length === 0) {
+			await this.refreshBaseSystemPrompt();
+		} else if (enabled) {
+			const renderedSkills = this.getActiveToolNames().includes("read")
+				? this.skills.filter(skill => skill.hide !== true)
+				: [];
+			const alreadyAnnounced = this.agent.state.messages.some(
+				message => message.role === "custom" && message.customType === "skillful-notice",
+			);
+			if (renderedSkills.length > 0 && !alreadyAnnounced) {
+				await this.sendCustomMessage(
+					{
+						customType: "skillful-notice",
+						content: prompt.render(skillfulNoticePrompt, { skills: renderedSkills }),
+						display: false,
+					},
+					{ deliverAs: "nextTurn" },
+				);
+			}
+		}
+		return enabled;
 	}
 
 	/** Lists thinking levels supported by the active model. */
