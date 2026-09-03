@@ -59,7 +59,7 @@ fn legacy_error(message: &str) -> &str {
 		.unwrap_or(message)
 }
 
-fn file_op_value(op: &Option<FileOp>) -> Value {
+fn file_op_value(op: Option<&FileOp>) -> Value {
 	match op {
 		None => Value::Null,
 		Some(FileOp::Rem) => json!({ "kind": "rem" }),
@@ -77,10 +77,11 @@ fn check_parse(source: &str, case_name: &str, call: &Value) {
 				expected["editCount"].as_u64().expect("editCount"),
 				"{source}: {case_name}: edit count for {input:?}"
 			);
+
 			assert_eq!(
-				file_op_value(&parsed.file_op),
+				file_op_value(parsed.file_op.as_ref()),
 				expected["fileOp"],
-				"{source}: {case_name}: file op for {input:?}"
+				"{source}: {case_name}: file_op for {input:?}"
 			);
 			assert_eq!(
 				json!(parsed.warnings),

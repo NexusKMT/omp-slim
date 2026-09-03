@@ -40,13 +40,15 @@ use pi_edit::{
 };
 use serde_json::Value;
 
+pub type RewriteFn = Box<dyn Fn(&WriteRequest) -> String + Send + Sync>;
+
 /// Writer that persists to disk (so `expect.files` reflects the real
 /// post-state) and records every request.
 #[derive(Default)]
 pub struct DiskWriter {
 	pub requests: Mutex<Vec<WriteRequest>>,
 	/// Optional override of the text the writer reports as persisted.
-	pub rewrite:  Option<Box<dyn Fn(&WriteRequest) -> String + Send + Sync>>,
+	pub rewrite:  Option<RewriteFn>,
 	/// When set, the Nth (0-based) write fails with this message.
 	pub fail_at:  Option<(usize, String)>,
 }
