@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.5] - 2026-09-03
+
 ### Fixed
 
 - Fixed terminal query support in supervised PTY processes, including cursor position reports.

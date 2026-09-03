@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.5] - 2026-09-03
+
 ### Added
 
 - Added Abliteration provider support to `/login`, including `ABLITERATION_API_KEY` configuration and help text.

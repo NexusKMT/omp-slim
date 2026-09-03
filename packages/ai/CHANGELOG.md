@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.5] - 2026-09-03
+
 ### Added
 
 - Added `/login abliteration` with API key validation against `/v1/models`, supporting the `ABLITERATION_API_KEY` and `ABLIT_KEY` environment variables.

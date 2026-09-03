@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.5] - 2026-09-03
+
 ### Added
 
 - Added the Abliteration (abliteration.ai) provider, including its documented abliterated-model catalog and live model discovery.
