@@ -4,9 +4,12 @@ auth "zai-coding-plan" {
 		client-id "client_P8X5CMWmlaRO9gyO-KSqtg" env="ZAI_OAUTH_CLIENT_ID"
 		authorize-url "https://chat.z.ai/api/oauth/authorize" env="ZAI_OAUTH_AUTHORIZE_URL"
 		// No PKCE: matches ZCode's authorize request verbatim.
-		// ZCode registers this exact loopback URI; any other host/port is rejected (#10245).
-		callback port=9999 path="/callback" hostname="127.0.0.1" redirect-uri="http://127.0.0.1:9999/callback" port-fallback=#false
-		instructions "Complete Z.ai login in your browser. If the browser cannot reach this machine, paste the final redirect URL or authorization code when prompted."
+		// Z.AI's server-side allowlist now rejects every loopback redirect_uri for
+		// this client (#10745); only ZCode's desktop scheme still validates. Advertise
+		// it and complete via the pasted redirect URL/code — no local callback binds.
+		// `redirect-uri-env` lets users adapt to further allowlist shifts without a release.
+		callback port=0 redirect-uri="zcode://zai-auth/callback" redirect-uri-env="ZAI_OAUTH_REDIRECT_URI" manual-only=#true
+		instructions "Complete Z.ai login in your browser. After you approve, the browser may show an unknown-scheme (zcode://) page or appear to do nothing — that is expected. Copy that final redirect URL (or the authorization code from it) and paste it back here when prompted."
 		token url="https://zcode.z.ai/api/v1/oauth/token" url-env="ZAI_OAUTH_TOKEN_URL" body="json" standard=#false {
 			params {
 				provider "zai"

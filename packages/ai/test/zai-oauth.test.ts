@@ -10,7 +10,7 @@ const TOKEN_URL = "https://zcode.z.ai/api/v1/oauth/token";
 const BUSINESS_LOGIN_URL = "https://api.z.ai/api/auth/z/login";
 const BIZ_BASE = "https://api.z.ai";
 const KEYS_URL = `${BIZ_BASE}/api/biz/v1/organization/org-1/projects/proj-1/api_keys`;
-const REDIRECT_URI = "http://127.0.0.1:9999/callback";
+const REDIRECT_URI = "zcode://zai-auth/callback";
 
 interface RecordedRequest {
 	url: string;
@@ -119,19 +119,24 @@ afterEach(() => {
 });
 
 describe("zai oauth flow", () => {
-	it("generates a no-PKCE authorization URL with the ZCode client id", async () => {
-		vi.spyOn(Bun, "serve").mockReturnValue({ port: 9999, stop: () => {} } as unknown as Bun.Server<unknown>);
+	it("advertises the ZCode desktop-scheme redirect and binds no callback server (#10745)", async () => {
+		// Z.AI's server-side allowlist now rejects every loopback redirect_uri for the
+		// reused ZCode client; only `zcode://zai-auth/callback` validates, so the flow
+		// runs manual-only — no local callback server is bound and the user pastes the
+		// redirect URL/code back.
+		const serveSpy = vi.spyOn(Bun, "serve");
 		const controller = new AbortController();
 		let url = "";
 		const login = getProviderDefinition("zai-coding-plan")?.login;
 		if (!login) throw new Error("zai-coding-plan login is unavailable");
-		await login({
+		const error = await login({
 			signal: controller.signal,
 			onAuth: info => {
 				url = info.url;
+				// Stop before waiting on pasted input that never arrives in the test.
 				controller.abort();
 			},
-		}).catch(() => undefined);
+		}).catch((caught: unknown) => caught);
 		const authUrl = new URL(url);
 
 		expect(authUrl.origin + authUrl.pathname).toBe(AUTHORIZE_URL);
@@ -141,51 +146,9 @@ describe("zai oauth flow", () => {
 		expect(authUrl.searchParams.get("state")).not.toBeNull();
 		expect(authUrl.searchParams.get("code_challenge")).toBeNull();
 		expect(authUrl.searchParams.get("code_challenge_method")).toBeNull();
-	});
-
-	it("advertises the ZCode-registered CLI redirect, never a random port (#10245)", async () => {
-		const serveSpy = vi
-			.spyOn(Bun, "serve")
-			.mockReturnValue({ port: 9999, stop: () => {} } as unknown as Bun.Server<unknown>);
-		const controller = new AbortController();
-		const captured: { redirect: string | null } = { redirect: null };
-		const login = getProviderDefinition("zai-coding-plan")?.login;
-		if (!login) throw new Error("zai-coding-plan login is unavailable");
-		const error = await login({
-			signal: controller.signal,
-			onAuth: ({ url }) => {
-				captured.redirect = new URL(url).searchParams.get("redirect_uri");
-				// Stop before waiting on a callback that never arrives in the test.
-				controller.abort();
-			},
-		}).catch((caught: unknown) => caught);
-
-		// Z.AI's allowlist only registers this exact CLI redirect for the reused
-		// ZCode client id; anything else is rejected before the login page.
-		expect(captured.redirect).toBe(REDIRECT_URI);
 		expect(error).toBeInstanceOf(AIError.LoginCancelledError);
-		// Bound the IPv4 loopback on the exact registered port — no fallback.
-		expect(serveSpy.mock.calls.every(([options]) => options.hostname === "127.0.0.1" && options.port === 9999)).toBe(
-			true,
-		);
-	});
-
-	it("rejects an occupied fixed callback port before opening the browser", async () => {
-		const serveSpy = vi.spyOn(Bun, "serve").mockImplementation(() => {
-			throw Object.assign(new Error("EADDRINUSE"), { code: "EADDRINUSE" });
-		});
-		const onAuth = vi.fn();
-		const login = getProviderDefinition("zai-coding-plan")?.login;
-		if (!login) throw new Error("zai-coding-plan login is unavailable");
-		const error = await login({ onAuth }).catch((caught: unknown) => caught);
-
-		expect(error).toBeInstanceOf(AIError.ConfigurationError);
-		if (!(error instanceof AIError.ConfigurationError)) throw error;
-		expect(error.message).toContain(
-			"OAuth callback port 9999 is in use, but oauth.redirectUri (http://127.0.0.1:9999/callback) requires this exact port",
-		);
-		expect(onAuth).not.toHaveBeenCalled();
-		expect(serveSpy.mock.calls.every(([options]) => options.port === 9999)).toBe(true);
+		// Manual-only: never binds a loopback callback server.
+		expect(serveSpy).not.toHaveBeenCalled();
 	});
 
 	it("exchanges the code, does business-login, then mints an id.secret key (create path)", async () => {
