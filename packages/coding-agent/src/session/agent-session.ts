@@ -902,22 +902,14 @@ export class AgentSession {
 	}
 
 	/** Persist stranded IRC/extension asides into context without starting a turn — shared by the
-	 *  plan-mode branch and the post-interrupt fold branch of #resumeStrandedIrcAsides. */
+	 *  plan-mode branch and the post-interrupt fold branch of #resumeStrandedIrcAsides. All records
+	 *  (custom and non-custom alike) route through emitExternalEvent so message_end both appends to
+	 *  context and notifies event listeners — #persistMessageEnd handles custom-role persistence
+	 *  (sessionManager.appendCustomMessageEntry) from that event, and a displayable custom aside that
+	 *  went stranded mid-stream gets the message_end its sender's rebuild-skip decision expects
+	 *  (extension-ui-controller's #applyCustomMessageDisplay), matching IrcBridge.flushPending(). */
 	#foldStrandedIrcAsidesIntoContext(records: AgentMessage[]): void {
 		for (const record of records) {
-			if (record.role === "custom") {
-				this.agent.appendMessage(record);
-				this.sessionManager.appendCustomMessageEntry(
-					record.customType,
-					record.content,
-					record.display,
-					record.details,
-					record.attribution ?? "agent",
-				);
-				continue;
-			}
-			// Non-custom asides (extension user-role sends) persist through #persistMessageEnd,
-			// same as IrcBridge.flushPending().
 			this.agent.emitExternalEvent({ type: "message_start", message: record });
 			this.agent.emitExternalEvent({ type: "message_end", message: record });
 		}
@@ -6598,8 +6590,12 @@ export class AgentSession {
 	): Promise<void> {
 		// A queued user message (RPC/SDK/collab steer or follow-up, or a typed message
 		// while streaming) is a deliberate resume; re-enable advisor auto-resume that
-		// a user interrupt suppressed.
-		this.#advisors.autoResumeSuppressed = false;
+		// a user interrupt suppressed. An aside is non-interrupting by design — it must
+		// not re-enable auto-resume a user interrupt deliberately suppressed, so it stays
+		// user-driven (folds into context via #resumeStrandedIrcAsides's post-interrupt
+		// branch) until the next deliberate steer/follow-up/prompt, matching the
+		// sendCustomMessage aside path (queueAside), which never touches this flag.
+		if (mode !== "aside") this.#advisors.autoResumeSuppressed = false;
 		// The pre-dispatch re-check in prompt() arrives with normalization and the
 		// vision description already done — reuse them instead of paying a second
 		// vision-model request for the same attachment.
@@ -7492,6 +7488,11 @@ export class AgentSession {
 			this.#memory.rekeyForCurrentSessionId();
 			await this.#memory.resetContextForNewTranscript();
 			this.#pendingNextTurnMessages = [];
+			// The abort above may have skipped the loop's final aside poll (issue: stranded
+			// asides survive an aborted turn by design so a resumed session can still see
+			// them); discard here so they cannot leak into the new session's transcript via
+			// the first ordinary prompt's IrcBridge.flushPending().
+			this.#irc.clearPending();
 			this.#scheduledHiddenNextTurnGeneration = undefined;
 			this.#queuedMessageDrainBlocked = false;
 			this.#usagePreflightReadyForNextModelCall = false;
@@ -8597,6 +8598,10 @@ export class AgentSession {
 		const previousRewoundToolResultIds = new Set(this.#rewoundToolResultIds);
 
 		this.agent.clearAllQueues();
+		// Same rationale as newSession: an aborted turn can skip its final aside poll,
+		// stranding IRC/extension asides meant for the outgoing transcript. Snapshot so a
+		// rolled-back switch (catch block below) restores them for the still-live session.
+		const previousIrcPending = this.#irc.clearPending();
 		this.#pendingNextTurnMessages = [];
 		this.#scheduledHiddenNextTurnGeneration = undefined;
 		this.#queuedMessageDrainBlocked = false;
@@ -8790,6 +8795,7 @@ export class AgentSession {
 			this.agent.setSystemPrompt(previousSystemPrompt);
 			this.agent.replaceMessages(previousAgentMessages);
 			this.agent.replaceQueues(previousSteeringMessages, previousFollowUpMessages);
+			this.#irc.restorePending(previousIrcPending);
 			this.#pendingNextTurnMessages = previousPendingNextTurnMessages;
 			this.#scheduledHiddenNextTurnGeneration = previousScheduledHiddenNextTurnGeneration;
 			this.#queuedMessageDrainBlocked = previousQueuedMessageDrainBlocked;

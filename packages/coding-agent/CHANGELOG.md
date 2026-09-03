@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Extensions can deliver messages without interrupting the agent: `pi.sendMessage`/`pi.sendUserMessage` now accept `deliverAs: "aside"`, which injects at the next step boundary instead of interrupting the current tool batch.
+
+### Fixed
+
+- Fixed a stranded extension/user aside surviving a `newSession()`/`switchSession()` transition and leaking into the new session's transcript on its first prompt.
+- Fixed a displayable custom aside folded into context after going stranded mid-stream never emitting the `message_end` its sender's UI rebuild-skip decision was waiting on, leaving the message invisible until an unrelated transcript rebuild.
+
 ## [18.1.5] - 2026-09-03
 
 ### Added
@@ -31,9 +40,6 @@
 ### Removed
 
 - Removed the bundled `designer` subagent and `designer` model role; `modelRoles.designer` and `@designer` are no longer built in.
-### Added
-
-- Extensions can deliver messages without interrupting the agent: `pi.sendMessage`/`pi.sendUserMessage` now accept `deliverAs: "aside"`, which injects at the next step boundary instead of interrupting the current tool batch.
 
 ## [18.1.3] - 2026-09-02
 

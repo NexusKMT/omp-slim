@@ -59,6 +59,24 @@ export class IrcBridge {
 		return records;
 	}
 
+	/** Snapshots and discards every queued IRC record — used when a session-boundary transition
+	 *  (new/switch) begins, since an aborted turn skips its final aside poll and would otherwise
+	 *  leak the outgoing transcript's extension/peer content into the next session via the first
+	 *  ordinary prompt's `flushPending()`. Pass the snapshot to `restorePending` to undo the clear
+	 *  if the transition is rolled back. */
+	clearPending(): { interrupts: AgentMessage[]; asides: AgentMessage[] } {
+		const snapshot = { interrupts: this.#interrupts, asides: this.#asides };
+		this.#interrupts = [];
+		this.#asides = [];
+		return snapshot;
+	}
+
+	/** Restores a snapshot taken by `clearPending`, for a rolled-back session transition. */
+	restorePending(snapshot: { interrupts: AgentMessage[]; asides: AgentMessage[] }): void {
+		this.#interrupts = snapshot.interrupts;
+		this.#asides = snapshot.asides;
+	}
+
 	/** Queues records for the next step-boundary aside injection: IRC wakes deferred by a
 	 *  session transition, and extension `deliverAs: "aside"` sends. */
 	queueAside(records: AgentMessage[]): void {

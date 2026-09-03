@@ -335,4 +335,121 @@ describe("AgentSession aside delivery", () => {
 		expect(contexts).toHaveLength(1);
 		expect(JSON.stringify(contexts[0]!.messages)).toContain("IDLE_ASIDE_BODY");
 	});
+
+	it("a stranded aside queued during an aborted turn does not leak into a fresh session (newSession)", async () => {
+		const modelRegistry = new ModelRegistry(authStorage);
+		const started = Promise.withResolvers<void>();
+		const contexts: Context[] = [];
+		const mock = createMockModel({
+			provider: "openai",
+			id: "gpt-test",
+			responses: [
+				() => {
+					started.resolve();
+					return { content: ["working"], delayMs: 60_000 };
+				},
+				context => {
+					contexts.push(context);
+					return { content: ["fresh reply"] };
+				},
+			],
+		});
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model: mock.model, systemPrompt: ["Test"], tools: [], messages: [] },
+			convertToLlm,
+			streamFn: mock.stream,
+		});
+		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
+		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(tempDir.path()),
+			settings,
+			modelRegistry,
+			toolRegistry: new Map(),
+		});
+
+		const run = session.prompt("go");
+		await started.promise;
+		await session.sendUserMessage("LEAK_CANDIDATE_ASIDE", { deliverAs: "aside" });
+
+		// newSession() aborts the run first; the abort skips the loop's final aside poll, so
+		// without a clear the queued aside would still be sitting in IrcBridge and would flush
+		// into the new session's transcript at the first ordinary prompt below.
+		expect(await session.newSession()).toBe(true);
+		await run.catch(() => {});
+		await session.waitForIdle();
+
+		expect(
+			session.agent.state.messages.some(message => JSON.stringify(message).includes("LEAK_CANDIDATE_ASIDE")),
+		).toBe(false);
+
+		await session.prompt("ping");
+		await session.waitForIdle();
+
+		expect(contexts).toHaveLength(1);
+		expect(JSON.stringify(contexts[0]!.messages)).not.toContain("LEAK_CANDIDATE_ASIDE");
+	});
+
+	it("a stranded aside queued during an aborted turn does not leak into the target session (switchSession)", async () => {
+		const sessionDir = path.join(tempDir.path(), "sessions");
+		const modelRegistry = new ModelRegistry(authStorage);
+		const started = Promise.withResolvers<void>();
+		const contexts: Context[] = [];
+		const mock = createMockModel({
+			provider: "openai",
+			id: "gpt-test",
+			responses: [
+				() => {
+					started.resolve();
+					return { content: ["working"], delayMs: 60_000 };
+				},
+				context => {
+					contexts.push(context);
+					return { content: ["target reply"] };
+				},
+			],
+		});
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model: mock.model, systemPrompt: ["Test"], tools: [], messages: [] },
+			convertToLlm,
+			streamFn: mock.stream,
+		});
+		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
+		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.create(tempDir.path(), sessionDir),
+			settings,
+			modelRegistry,
+			toolRegistry: new Map(),
+		});
+
+		const targetManager = SessionManager.create(tempDir.path(), sessionDir);
+		targetManager.appendMessage({ role: "user", content: "target", timestamp: Date.now() });
+		await targetManager.ensureOnDisk();
+		const targetFile = targetManager.getSessionFile();
+		if (!targetFile) throw new Error("Expected target session file");
+		await targetManager.close();
+
+		const run = session.prompt("go");
+		await started.promise;
+		await session.sendUserMessage("LEAK_CANDIDATE_ASIDE", { deliverAs: "aside" });
+
+		expect(await session.switchSession(targetFile)).toBe(true);
+		await run.catch(() => {});
+		await session.waitForIdle();
+
+		expect(
+			session.agent.state.messages.some(message => JSON.stringify(message).includes("LEAK_CANDIDATE_ASIDE")),
+		).toBe(false);
+
+		await session.prompt("ping");
+		await session.waitForIdle();
+
+		expect(contexts).toHaveLength(1);
+		expect(JSON.stringify(contexts[0]!.messages)).not.toContain("LEAK_CANDIDATE_ASIDE");
+	});
 });
