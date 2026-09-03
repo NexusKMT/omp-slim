@@ -19,6 +19,9 @@
 - Hashline edits whose section header carries an `apply_patch` envelope marker (`[*** Begin Patch] [src/a.ts#1A2B]`) now apply to the real file instead of failing with `File not found: Begin Patch] [src/a.ts`; a header holding two unrelated bracket groups is rejected outright rather than editing a file named after the noise.
 - Fixed bracketed hashline edit targets appearing as `undefined` to extension path allowlists ([#10688](https://github.com/can1357/oh-my-pi/issues/10688)).
 - Fixed MCP tools discovered during startup disappearing after approving or leaving default-on plan mode ([#10683](https://github.com/can1357/oh-my-pi/issues/10683)).
+### Fixed
+
+- Fixed ACP clients receiving non-file read locations and updates for released terminals, preventing invalid worktree scans and terminal errors on Windows ([#10678](https://github.com/can1357/oh-my-pi/issues/10678)).
 
 ## [18.1.6] - 2026-09-03
 
