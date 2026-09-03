@@ -73,6 +73,7 @@ import type {
 	AgentMessage,
 	AgentPreModelCallResult,
 	AgentTool,
+	AgentToolArgStream,
 	AgentToolCall,
 	AgentToolResult,
 	AgentTurnEndContext,
@@ -1775,6 +1776,17 @@ async function streamAssistantResponse(
 			let partialMessage: AssistantMessage | null = null;
 			let addedPartial = false;
 			const completedToolCallIds = new Set<string>();
+			const argStreams = new Map<number, { id: string; stream: AgentToolArgStream }>();
+			const cancelArgStreams = (): void => {
+				for (const { id, stream: argStream } of argStreams.values()) {
+					try {
+						argStream.cancel();
+					} catch (error) {
+						logger.debug("Tool argument stream cancel failed", { toolCallId: id, error });
+					}
+				}
+				argStreams.clear();
+			};
 
 			const responseIterator = response[Symbol.asyncIterator]();
 			const finishAbortedStream = async (): Promise<AssistantMessage> => {
@@ -1888,6 +1900,52 @@ async function streamAssistantResponse(
 					// when the LLM is streaming chunks faster than the loop can rest.
 					await yieldIfDue();
 
+					if (event.type === "toolcall_start") {
+						const block = event.partial.content[event.contentIndex];
+						if (block?.type === "toolCall") {
+							const tool = resolveToolForCall(context.tools, block, config.resolveFallbackTool);
+							if (tool?.openArgStream) {
+								try {
+									const argStream = tool.openArgStream({
+										toolCallId: block.id,
+										toolName: block.name,
+										customWireName: block.customWireName,
+										emit: update =>
+											stream.push({
+												type: "tool_stream_update",
+												toolCallId: block.id,
+												toolName: block.name,
+												update,
+											}),
+									});
+									if (argStream) argStreams.set(event.contentIndex, { id: block.id, stream: argStream });
+								} catch (error) {
+									logger.debug("Tool argument stream open failed", { toolCallId: block.id, error });
+								}
+							}
+						}
+					} else if (event.type === "toolcall_delta") {
+						const entry = argStreams.get(event.contentIndex);
+						if (entry) {
+							try {
+								entry.stream.push(event.delta);
+							} catch (error) {
+								logger.debug("Tool argument stream push failed", { toolCallId: entry.id, error });
+							}
+						}
+					} else if (event.type === "toolcall_end") {
+						const entry = argStreams.get(event.contentIndex);
+						if (entry) {
+							try {
+								entry.stream.end(event.toolCall.arguments);
+							} catch (error) {
+								logger.debug("Tool argument stream end failed", { toolCallId: entry.id, error });
+							} finally {
+								argStreams.delete(event.contentIndex);
+							}
+						}
+					}
+
 					switch (event.type) {
 						case "start":
 							partialMessage = event.partial;
@@ -1944,6 +2002,7 @@ async function streamAssistantResponse(
 				}
 			} finally {
 				detachAbortListener?.();
+				cancelArgStreams();
 			}
 
 			let trailing = await response.result();

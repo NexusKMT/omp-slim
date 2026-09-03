@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { splitAddressableFileLines } from "@oh-my-pi/hashline";
+import { notebookToEditableText } from "@oh-my-pi/pi-natives";
 import { type } from "@oh-my-pi/omptype";
 import type {
 	AgentTool,
@@ -15,19 +15,13 @@ import {
 	type ImageMetadata,
 	isProbablyBinary,
 	isProbablyBinaryHeader,
+	isEnoent,
 	logger,
 	prompt,
 	readImageMetadata,
 } from "@oh-my-pi/pi-utils";
-import {
-	canonicalSnapshotKey,
-	getFileSnapshotStore,
-	recordFileSnapshot,
-	recordSeenLinesFromBody,
-	SNAPSHOT_MAX_BYTES,
-} from "../edit/file-snapshot-store";
 import { normalizeToLF } from "../edit/normalize";
-import { isNotebookPath, readEditableNotebookText } from "../edit/notebook";
+import { getEditStore } from "../edit/store";
 import { InternalUrlRouter, resolveLocalUrlToFile, resolveLocalUrlToPath } from "../internal-urls";
 import { type ResolvedArtifactFile, resolveArtifactFile } from "../internal-urls/artifact-protocol";
 import { parseInternalUrl } from "../internal-urls/parse";
@@ -122,6 +116,7 @@ import {
 	resolveTailSelector,
 	selToOffsetLimit,
 } from "./read-selector";
+import { splitAddressableFileLines } from "./hashline-format";
 import { readSqlite, resolveSqliteReadPath } from "./read-sqlite";
 import { isProseSummaryPath, renderSummary, routeReadThroughBridge, trySummarize } from "./read-summary";
 import { formatBytes, shortenPath } from "./render-utils";
@@ -136,6 +131,7 @@ export { readToolRenderer } from "./read-renderer";
 /** Largest profile (`*.sample.txt`, `*.cpuprofile`) converted to a bottleneck summary; bigger files read as plain text. */
 const MAX_PROFILE_SUMMARY_BYTES = 32 * 1024 * 1024;
 const MAX_ARTIFACT_RAW_INLINE_BYTES = DEFAULT_MAX_BYTES;
+const SNAPSHOT_MAX_BYTES = 4 * 1024 * 1024;
 
 /** LF byte, scanned natively to find line boundaries in a buffered file. */
 const LF_BYTE = 0x0a;
@@ -1067,23 +1063,19 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		}
 		if (shouldAddHashLines && outputText) {
 			const tag = buffered
-				? getFileSnapshotStore(this.session).record(canonicalSnapshotKey(absolutePath), buffered.normalizedText)
-				: await recordFileSnapshot(this.session, absolutePath);
+				? getEditStore(this.session).recordSnapshot(absolutePath, buffered.normalizedText)
+				: getEditStore(this.session).recordSnapshotFile(absolutePath);
 			if (tag) {
-				recordSeenLinesFromBody(this.session, absolutePath, tag, outputText);
+				getEditStore(this.session).recordSeenLinesFromBody(absolutePath, tag, outputText);
 				outputText = `${formatReadHashlineHeader(formatPathRelativeToCwd(absolutePath, this.session.cwd), tag)}\n${outputText}`;
 			}
 		} else if (rawSelector && visibleSpans.length > 0) {
 			const rawSeenLines = lineNumbersFromSpans(visibleSpans);
 			if (rawSeenLines.length > 0) {
 				if (buffered) {
-					getFileSnapshotStore(this.session).record(
-						canonicalSnapshotKey(absolutePath),
-						buffered.normalizedText,
-						rawSeenLines,
-					);
+					getEditStore(this.session).recordSnapshot(absolutePath, buffered.normalizedText, rawSeenLines);
 				} else {
-					await recordFileSnapshot(this.session, absolutePath, rawSeenLines);
+					getEditStore(this.session).recordSnapshotFile(absolutePath, rawSeenLines);
 				}
 			}
 		}
@@ -1400,8 +1392,15 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				imageMetadata,
 				fileSize,
 			}));
-		} else if (isNotebookPath(absolutePath) && !isRawSelector(parsed)) {
-			const notebookText = await readEditableNotebookText(absolutePath, resolvedDisplayPath);
+		} else if (absolutePath.toLowerCase().endsWith(".ipynb") && !isRawSelector(parsed)) {
+			let notebookJson: string;
+			try {
+				notebookJson = await Bun.file(absolutePath).text();
+			} catch (error) {
+				if (isEnoent(error)) throw new Error(`File not found: ${resolvedDisplayPath}`);
+				throw error;
+			}
+			const notebookText = notebookToEditableText(notebookJson, resolvedDisplayPath);
 			return buildInMemorySelectorResult(this.session, notebookText, parsed, {
 				details: { resolvedPath: absolutePath },
 				sourcePath: absolutePath,
@@ -1489,7 +1488,11 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					const bodyText = footer ? `${renderedSummary.text}\n\n${footer}` : renderedSummary.text;
 					const modelText = prependHashlineHeader(bodyText, summaryHashContext);
 					if (summaryHashContext?.tag) {
-						recordSeenLinesFromBody(this.session, absolutePath, summaryHashContext.tag, renderedSummary.text);
+						getEditStore(this.session).recordSeenLinesFromBody(
+							absolutePath,
+							summaryHashContext.tag,
+							renderedSummary.text,
+						);
 					}
 					details = {
 						displayContent: { text: renderedSummary.displayText, startLine: 1 },
@@ -1681,16 +1684,13 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 						// non-truncated whole-file window can supply it.
 						const isWholeFile = offset === undefined && limit === undefined && !wasTruncated;
 						const tag = buffered
-							? getFileSnapshotStore(this.session).record(
-									canonicalSnapshotKey(absolutePath),
-									buffered.normalizedText,
-								)
+							? getEditStore(this.session).recordSnapshot(absolutePath, buffered.normalizedText)
 							: isWholeFile
-								? getFileSnapshotStore(this.session).record(
-										canonicalSnapshotKey(absolutePath),
+								? getEditStore(this.session).recordSnapshot(
+										absolutePath,
 										normalizeToLF(`${collectedLines.join("\n")}${hasTrailingNewline ? "\n" : ""}`),
 									)
-								: await recordFileSnapshot(this.session, absolutePath);
+								: getEditStore(this.session).recordSnapshotFile(absolutePath);
 						if (tag) {
 							hashContext = hashlineHeaderContext(formatPathRelativeToCwd(absolutePath, this.session.cwd), tag);
 						}
@@ -1801,20 +1801,16 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					if (reachedEof) details.totalLines = totalFileLines;
 
 					if (hashContext?.tag) {
-						recordSeenLinesFromBody(this.session, absolutePath, hashContext.tag, outputText);
+						getEditStore(this.session).recordSeenLinesFromBody(absolutePath, hashContext.tag, outputText);
 					}
 					if (rawSelector && !firstLineExceedsLimit && collectedLines.length > 0) {
 						// A raw read emits no header, but recording the range it displayed
 						// lets a same-content hashline tag inherit its provenance.
 						const seenLines = contiguousLineNumbers(startLineDisplay, collectedLines.length);
 						if (buffered) {
-							getFileSnapshotStore(this.session).record(
-								canonicalSnapshotKey(absolutePath),
-								buffered.normalizedText,
-								seenLines,
-							);
+							getEditStore(this.session).recordSnapshot(absolutePath, buffered.normalizedText, seenLines);
 						} else {
-							await recordFileSnapshot(this.session, absolutePath, seenLines);
+							getEditStore(this.session).recordSnapshotFile(absolutePath, seenLines);
 						}
 					}
 
@@ -1905,7 +1901,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		const shouldAddLineNumbers = shouldAddHashLines ? false : displayMode.lineNumbers;
 
 		const rawText = region.lines.join("\n");
-		const tag = shouldAddHashLines ? await recordFileSnapshot(this.session, entry.absolutePath) : undefined;
+		const tag = shouldAddHashLines ? getEditStore(this.session).recordSnapshotFile(entry.absolutePath) : undefined;
 		const hashContext = tag
 			? hashlineHeaderContext(formatPathRelativeToCwd(entry.absolutePath, this.session.cwd), tag)
 			: undefined;

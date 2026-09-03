@@ -19,7 +19,6 @@ import * as path from "node:path";
 import { scheduler } from "node:timers/promises";
 import { isPromise } from "node:util/types";
 
-import type { Clipboard, InMemorySnapshotStore } from "@oh-my-pi/hashline";
 import {
 	type AfterToolCallContext,
 	type AfterToolCallResult,
@@ -81,7 +80,7 @@ import { resetOpenAICodexHistoryAfterCompaction } from "@oh-my-pi/pi-ai/provider
 import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { MacOSPowerAssertion } from "@oh-my-pi/pi-natives";
+import { type EditStore, MacOSPowerAssertion } from "@oh-my-pi/pi-natives";
 import {
 	$env,
 	escapeXmlText,
@@ -114,7 +113,7 @@ import {
 	onModelRolesChanged,
 } from "../config/settings";
 import { RawSseDebugBuffer } from "../debug/raw-sse-buffer";
-import { getFileSnapshotStore } from "../edit/file-snapshot-store";
+import { getEditStore } from "../edit/store";
 import type { PythonResult } from "../eval/py/executor";
 import type { BashPtyOptions, BashResult } from "../exec/bash-executor";
 import type { TtsrManager } from "../export/ttsr";
@@ -503,9 +502,7 @@ export class AgentSession {
 	/** Entries of tools mounted under `xd://`; empty when virtual devices are unmounted. */
 	getXdevToolEntries: () => Array<{ name: string; summary: string }>;
 	readonly yieldQueue: YieldQueue;
-	fileSnapshotStore?: InMemorySnapshotStore;
-	/** Per-session `CUT`/`PASTE` clipboard register shared across edit calls. */
-	editClipboard?: Clipboard;
+	editStore?: EditStore;
 
 	/** Materializes this session's live extension-root policy per discovery call. */
 	readonly #extensionRoots: () => EffectiveExtensionRoots;
@@ -2896,6 +2893,8 @@ export class AgentSession {
 			}
 		}
 
+		if (event.type === "tool_stream_update") this.#streamingEditGuard.maybeAbort(event);
+
 		if (await this.#ttsr.checkMessageUpdate(event)) return;
 
 		if (
@@ -2991,11 +2990,6 @@ export class AgentSession {
 				const details = isRecord(event.message.details) ? event.message.details : undefined;
 				const semanticResult = semanticToolResult(toolName, event.message);
 				const semanticDetails = isRecord(semanticResult?.details) ? semanticResult.details : undefined;
-				// Invalidate streaming edit cache when edit tool completes to prevent stale data
-				const editedPath = details ? stringProperty(details, "path") : undefined;
-				if (toolName === "edit" && editedPath) {
-					this.#streamingEditGuard.invalidate(editedPath);
-				}
 				if (toolName === "todo" && !isError && details && this.#todo.onTodoResultDetails(details, toolCallId)) {
 					this.#scheduleReplanTitleRefresh();
 				}
@@ -6168,7 +6162,7 @@ export class AgentSession {
 				const fileMentionMessages = await generateFileMentionMessages(fileMentions, this.sessionManager.getCwd(), {
 					autoResizeImages: this.settings.get("images.autoResize"),
 					useHashLines: resolveFileDisplayMode(this).hashLines,
-					snapshotStore: getFileSnapshotStore(this),
+					snapshotStore: getEditStore(this),
 				});
 				for (const fileMentionMessage of fileMentionMessages) {
 					messages.push(await this.#normalizeAgentMessageImages(fileMentionMessage));
