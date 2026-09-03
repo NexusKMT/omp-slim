@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.8] - 2026-09-03
+
 ### Added
 
 - Added GPT-6 Astra to the OpenAI Codex model catalog, including support for configuration updates and requests using the freeform `apply_patch` tool.

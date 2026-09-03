@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.8] - 2026-09-03
+
 ### Fixed
 
 - Improved background task results with structured output schemas: parsed results are now available through the `agent://<id>` resource, while large or invalid inline JSON is replaced with a reliable pointer to the complete result.
