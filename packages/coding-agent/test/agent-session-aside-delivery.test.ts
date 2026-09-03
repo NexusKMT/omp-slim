@@ -551,4 +551,68 @@ describe("AgentSession aside delivery", () => {
 		expect(JSON.stringify(contexts[1]!.messages)).toContain("SLOW_DONE");
 		expect(JSON.stringify(contexts[1]!.messages)).toContain("RACE_ASIDE_TEXT");
 	});
+
+	it("#queueCustomMessage resumes a stranded aside instead of leaving it queued with no loop to drain it", async () => {
+		// Regression for the race Codex flagged in #queueCustomMessage: it awaits image
+		// normalization before calling IrcBridge.queueAside, so the active run can settle to
+		// idle during that await. If the queueAside call doesn't also resume stranded asides
+		// (as #queueUserMessage's aside branch already does), the record sits in the queue with
+		// no loop left to drain it until an unrelated prompt happens to flush it. Exercising
+		// promptCustomMessage's queueOnly path (used by main.ts's synthetic-continue queue) on an
+		// already-idle session hits the exact same #queueCustomMessage code path this covers.
+		const model = createMockModel({ provider: "openai", id: "gpt-test" }).model;
+		const modelRegistry = new ModelRegistry(authStorage);
+		const contexts: Context[] = [];
+
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+			convertToLlm,
+			streamFn: (_model, context) => {
+				contexts.push(context);
+				const message: AssistantMessage = {
+					role: "assistant",
+					content: [{ type: "text", text: "Acknowledged." }],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					usage: zeroUsage,
+					stopReason: "stop",
+					timestamp: Date.now(),
+				};
+				const stream = new AssistantMessageEventStream();
+				queueMicrotask(() => {
+					stream.push({ type: "start", partial: message });
+					stream.push({ type: "done", reason: "stop", message });
+				});
+				return stream;
+			},
+		});
+		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
+		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(tempDir.path()),
+			settings,
+			modelRegistry,
+			toolRegistry: new Map(),
+		});
+
+		let observedRecords: unknown[] | undefined;
+		session.setIrcWakeTurnObserver(records => {
+			observedRecords = records;
+			return undefined;
+		});
+
+		await session.promptCustomMessage(
+			{ customType: "ext-aside", content: "SETTLED_RACE_ASIDE", display: false, attribution: "agent" },
+			{ streamingBehavior: "aside", queueOnly: true },
+		);
+		await session.waitForIdle();
+
+		expect(observedRecords).toBeDefined();
+		expect(JSON.stringify(observedRecords)).toContain("SETTLED_RACE_ASIDE");
+		expect(contexts).toHaveLength(1);
+		expect(JSON.stringify(contexts[0]!.messages)).toContain("SETTLED_RACE_ASIDE");
+	});
 });

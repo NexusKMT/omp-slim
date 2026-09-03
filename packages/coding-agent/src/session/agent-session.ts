@@ -6854,6 +6854,11 @@ export class AgentSession {
 			// sendCustomMessage's streaming aside branch — not an agent-core queue
 			// entry, so no drain-retry latch and no idle-queue drain scheduling.
 			this.#irc.queueAside([normalizedAppMessage]);
+			// The image-normalization await above can span the run's settle, so the run may
+			// already be idle by the time the record lands in the aside queue with no loop
+			// left to drain it. Resuming here is a no-op while streaming and wakes/folds
+			// correctly once idle, matching #queueUserMessage's aside branch.
+			this.#resumeStrandedIrcAsides();
 			return;
 		}
 		this.#allowQueuedMessageDrainRetry();

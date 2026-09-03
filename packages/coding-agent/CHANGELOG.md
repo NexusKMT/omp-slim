@@ -11,6 +11,7 @@
 - Fixed a stranded extension/user aside surviving a `newSession()`/`switchSession()` transition and leaking into the new session's transcript on its first prompt.
 - Fixed a displayable custom aside folded into context after going stranded mid-stream never emitting the `message_end` its sender's UI rebuild-skip decision was waiting on, leaving the message invisible until an unrelated transcript rebuild.
 - Fixed `sendUserMessage(..., { deliverAs: "aside" })` degrading into a tool-batch-aborting steer when a turn started streaming during `prompt()`'s own setup (manual-compaction cleanup or image normalization), instead of staying non-interrupting.
+- Fixed `sendMessage(..., { deliverAs: "aside" })` remaining undelivered until an unrelated prompt if the active run settled while the custom aside awaited image normalization, instead of resuming into the documented idle wake turn.
 
 ## [18.1.5] - 2026-09-03
 
