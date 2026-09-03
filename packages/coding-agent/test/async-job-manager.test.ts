@@ -149,6 +149,38 @@ describe("AsyncJobManager", () => {
 		]);
 	});
 
+	test("preserves agentId in a delayed delivery rebuilt after eviction", async () => {
+		// Regression: a collision-suffixed job id (e.g. `Foo-t1` -> `Foo-t1-2`)
+		// still writes artifacts under the unsuffixed `agentId`. When the row
+		// is evicted before a retried delivery lands, the delivery must be
+		// rebuilt from a snapshot that still carries `agentId`, or the
+		// reconstructed job falls back to the suffixed `jobId` and the
+		// advertised `agent://` URL points at nothing on disk (PR #10625
+		// review).
+		let sinkCalls = 0;
+		const delivered: Array<{ jobId: string; agentId: string | undefined }> = [];
+		const manager = new AsyncJobManager({
+			retentionMs: 25,
+			onJobComplete: async (jobId, _text, job) => {
+				sinkCalls += 1;
+				if (sinkCalls === 1) throw new Error("simulated delivery failure");
+				delivered.push({ jobId, agentId: job?.agentId });
+			},
+		});
+
+		const jobId = manager.register("task", "agent task", async () => "task done", {
+			id: "Foo-t1-2",
+			agentId: "Foo-t1",
+		});
+
+		await manager.waitForAll();
+		await waitForJobEviction(manager, jobId);
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+
+		expect(sinkCalls).toBe(2);
+		expect(delivered).toEqual([{ jobId: "Foo-t1-2", agentId: "Foo-t1" }]);
+	});
+
 	test("defers retained artifacts cleanup until this job's delivery settles", async () => {
 		// Regression: job-row eviction runs on its own retention timer,
 		// independent of delivery — a still-in-flight delivery sink (e.g. one

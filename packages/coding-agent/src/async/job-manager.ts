@@ -135,7 +135,7 @@ interface AsyncJobDelivery {
 	 * retrying) — without it, a recovered delivery would silently drop
 	 * `structured` even though `text` survives on the delivery itself.
 	 */
-	jobSnapshot?: Pick<AsyncJob, "type" | "status" | "startTime" | "label" | "structured">;
+	jobSnapshot?: Pick<AsyncJob, "type" | "status" | "startTime" | "label" | "structured" | "agentId">;
 }
 
 export interface AsyncJobDeliveryState {
@@ -881,6 +881,7 @@ export class AsyncJobManager {
 						startTime: job.startTime,
 						label: job.label,
 						structured: job.structured,
+						agentId: job.agentId,
 					}
 				: undefined,
 		});
@@ -1009,6 +1010,7 @@ export class AsyncJobManager {
 			promise: Promise.resolve(),
 			resultText: delivery.text,
 			structured: snapshot.structured,
+			agentId: snapshot.agentId,
 		};
 	}
 

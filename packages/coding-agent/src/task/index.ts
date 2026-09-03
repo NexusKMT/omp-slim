@@ -1108,7 +1108,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		return manager.register(
 			"task",
 			agentId,
-			async ({ signal: runSignal, reportProgress, markRunning }) => {
+			async ({ jobId, signal: runSignal, reportProgress, markRunning }) => {
 				const startedAt = Date.now();
 				const semaphore = this.#getSpawnSemaphore();
 				let semaphoreHeld = false;
@@ -1188,8 +1188,11 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 							// Tie the retained temp directory's lifetime to this job
 							// row: the manager runs `cleanup` exactly once, on
 							// eviction or manager disposal, instead of it leaking
-							// for the process lifetime.
-							const job = manager.getJob(agentId);
+							// for the process lifetime. Look up by the resolved
+							// `jobId`, not the requested `agentId` — `register()`
+							// suffixes `jobId` on collision, and looking up the
+							// requested id would hit an unrelated pre-existing row.
+							const job = manager.getJob(jobId);
 							if (job) job.retainedArtifactsCleanup = cleanup;
 							else void cleanup();
 						},
