@@ -14,6 +14,7 @@
 - Retained-artifacts cleanup for a background task now gives up waiting on a hung delivery sink after a bounded timeout, instead of waiting on it forever and leaking the retained temp directory for the process lifetime.
 - Fixed snapcompact accepting a context-inflating result when the archived history carried a large opaque reasoning-replay signature (e.g. OpenAI Codex `encrypted_content`); the no-reduction guard now excludes opaque reasoning bytes symmetrically so an inflating archive is rejected and the next compaction method runs ([#10716](https://github.com/can1357/oh-my-pi/issues/10716)).
 - Fixed the Model Hub sidebar scroll/selection jumping to the top when an on-focus provider refresh rebuilt the list; the focused entry (or its nearest survivor) now stays put ([#10722](https://github.com/can1357/oh-my-pi/issues/10722)).
+- Fixed the `inspect_image` status hint naming the previous model after cycling roles (Ctrl+P) between two models that share image-input capability ([#10729](https://github.com/can1357/oh-my-pi/issues/10729)).
 
 ## [18.1.7] - 2026-09-03
 
