@@ -275,6 +275,26 @@ it("always-ask: granted ACP permission bypasses the inner ExtensionToolWrapper g
 	expect(bashTool.executeCalls).toBe(1);
 });
 
+it("always-ask: an ordinary edit without an ACP grant still faces the inner approval gate", async () => {
+	const editTool = makeFakeTool("edit");
+	editTool.approval = "write";
+	const wrapped = new ExtensionToolWrapper(editTool, noUiRunner()) as unknown as AgentTool;
+	const bridge = makeBridge({ outcome: "selected", optionId: "allow_once", kind: "allow_once" });
+	const permissionSpy = spyOn(bridge, "requestPermission");
+	session = await createSession([wrapped], bridge, { "tools.approvalMode": "always-ask" });
+
+	await session.setActiveToolsByName(["edit"]);
+	const gatedEdit = session.agent.state.tools.find(t => t.name === "edit");
+	const ctx = { settings: Settings.isolated({ "tools.approvalMode": "always-ask" }) } as never;
+
+	await expect(
+		gatedEdit!.execute("call-edit", { path: "/tmp/foo.ts" }, undefined, undefined as never, ctx),
+	).rejects.toThrow(/requires approval but no interactive UI/);
+
+	expect(permissionSpy).not.toHaveBeenCalled();
+	expect(editTool.executeCalls).toBe(0);
+});
+
 it("delete and move tools request ACP permission before executing", async () => {
 	const deleteTool = makeFakeTool("delete");
 	const moveTool = makeFakeTool("move");

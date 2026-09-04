@@ -728,16 +728,13 @@ export class SessionTools {
 					onUpdate: never,
 					ctx: AgentToolContext | undefined,
 				) => {
-					// Reaching a target.execute below means this ACP-gated call is
-					// authorized (granted, persisted-allow, or no ACP prompt needed).
-					// The registry tool is an ExtensionToolWrapper whose own tier gate
-					// would otherwise re-prompt and fail closed in ACP (no interactive
-					// UI), so flag the call approved exactly like the xd:// device gate.
-					const approvedCtx = (ctx ? { ...ctx, xdevApproved: true } : ctx) as never;
 					const permissionIntent = getPermissionIntent(target.name, args);
 					if (!permissionIntent) {
-						return await target.execute(toolCallId, args as never, signal, onUpdate, approvedCtx);
+						return await target.execute(toolCallId, args as never, signal, onUpdate, ctx as never);
 					}
+					// A selected or persisted ACP grant is the interactive approval
+					// for this call; prevent the inner wrapper from prompting again.
+					const approvedCtx = (ctx ? { ...ctx, xdevApproved: true } : ctx) as never;
 					const command =
 						target.name === "bash" && args && typeof args === "object" && !Array.isArray(args)
 							? stringProperty(args, "command")
