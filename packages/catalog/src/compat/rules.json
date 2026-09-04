@@ -15181,7 +15181,7 @@
 							]
 						}
 					},
-					"instructions": "Complete Z.ai login in your browser. On macOS, omp captures the zcode:// callback and restores its previous handler automatically. On other platforms, copy the final redirect URL (or authorization code) and paste it back when prompted.",
+					"instructions": "Complete Z.ai login in your browser. On supported local desktops, omp captures the zcode:// callback and restores its previous handler automatically. You can also paste the final redirect URL or authorization code when prompted.",
 					"token": {
 						"url": {
 							"value": "https://zcode.z.ai/api/v1/oauth/token",

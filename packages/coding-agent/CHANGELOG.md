@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Fixed fallback authorization-code prompts remaining active after native OAuth callback completion.
 - Fixed a rare issue where reciprocal idle subagents could continue waking one another indefinitely.
 - Fixed `/wt` and `git worktree add` failing when the new worktree targeted the same commit as the clean source checkout.
 ### Fixed

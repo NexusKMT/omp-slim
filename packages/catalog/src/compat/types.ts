@@ -434,7 +434,7 @@ export interface CompiledCallback {
 	nativeScheme: boolean;
 }
 
-/** Authorization-code login through the loopback callback server. */
+/** Authorization-code login through a loopback, native-scheme, or manual callback. */
 export interface CompiledOAuthCodeLogin {
 	kind: "oauth-code";
 	clientId?: CompiledAuthValue;

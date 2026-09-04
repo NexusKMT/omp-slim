@@ -4,10 +4,11 @@
 
 ### Added
 
-- Added support for native custom-scheme OAuth callbacks on macOS for improved authentication flows
+- Added recoverable native custom-scheme OAuth callbacks on macOS, Linux desktops, and Windows, with manual fallback for unavailable or remote sessions.
 
 ### Fixed
 
+- Fixed race condition causing duplicate manual code prompts during OAuth flows
 - Fixed Gemini tool continuations through custom Anthropic Messages proxies and OpenAI Responses relays, ensuring tool calls and results remain correctly associated across multi-turn requests.
 
 ## [18.1.8] - 2026-09-03

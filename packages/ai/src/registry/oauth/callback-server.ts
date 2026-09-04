@@ -11,6 +11,7 @@
  * - exchangeToken(): Exchange authorization code for tokens
  */
 import * as os from "node:os";
+import { logger } from "@oh-my-pi/pi-utils";
 import * as AIError from "../../error";
 import * as nativeSchemeCallback from "./native-scheme-callback";
 import type { NativeSchemeCallbackReceiver } from "./native-scheme-callback";
@@ -242,16 +243,39 @@ export abstract class OAuthCallbackFlow {
 			: await this.#startCallbackServer(state);
 		const receiverAbort = new AbortController();
 		let receiver: NativeSchemeCallbackReceiver | undefined;
+		let nativeCallback: Promise<CallbackResult> | undefined;
 
 		try {
 			this.#throwIfCancelled();
 			if (this.#nativeScheme) {
 				const redirect = new URL(redirectUri);
 				if (redirect.protocol !== "http:" && redirect.protocol !== "https:") {
-					receiver = await nativeSchemeCallback.createNativeSchemeCallbackReceiver(redirect.protocol.slice(0, -1));
+					try {
+						receiver = await nativeSchemeCallback.createNativeSchemeCallbackReceiver(
+							redirect.protocol.slice(0, -1),
+							{ signal: this.ctrl.signal },
+						);
+					} catch (error) {
+						this.#throwIfCancelled();
+						this.#reportNativeWarning(
+							"Native OAuth callback setup failed; paste the authorization code instead",
+							error,
+						);
+					}
 				}
 			}
 			this.#throwIfCancelled();
+
+			// Attach rejection handling before invoking callbacks: onAuth and
+			// onProgress are allowed to cancel synchronously, which aborts the
+			// native waiter before #waitForCallback gets a chance to observe it.
+			if (receiver) {
+				nativeCallback = receiver
+					.waitForCallback(receiverAbort.signal)
+					.then(input => parseNativeCallback(input, redirectUri, state));
+				void nativeCallback.catch(() => undefined);
+			}
+
 			// Generate auth URL with the ACTUAL redirect URI (may differ from expected if port was busy)
 			const { url: authUrl, instructions } = await this.generateAuthUrl(state, redirectUri);
 			this.#throwIfCancelled();
@@ -264,36 +288,64 @@ export abstract class OAuthCallbackFlow {
 
 			// Notify controller that auth is ready
 			this.ctrl.onAuth?.({ url: authUrl, launchUrl, instructions });
+			this.#throwIfCancelled();
 			this.ctrl.onProgress?.(
 				receiver || !this.#manualInputOnly
 					? "Waiting for browser authentication..."
 					: "Waiting for pasted authorization code...",
 			);
-
-			const nativeCallback = receiver
-				? receiver
-						.waitForCallback(receiverAbort.signal)
-						.then(input => parseNativeCallback(input, redirectUri, state))
-				: undefined;
-			const { code } = await this.#waitForCallback(state, nativeCallback);
 			this.#throwIfCancelled();
 
-			if (receiver) {
-				receiverAbort.abort("OAuth callback received");
-				await receiver.dispose();
-				receiver = undefined;
+			let callback: CallbackResult;
+			try {
+				callback = await this.#waitForCallback(state, nativeCallback);
+			} catch (error) {
+				// UI escape handlers commonly abort the controller and reject the
+				// active manual prompt in the same turn. Cancellation remains the
+				// authoritative outcome regardless of which rejection wins the race.
+				this.#throwIfCancelled();
+				throw error;
 			}
-			this.ctrl.onProgress?.("Exchanging authorization code for tokens...");
+			this.#throwIfCancelled();
 
-			return await this.exchangeToken(code, state, redirectUri);
+			receiverAbort.abort("OAuth callback received");
+			await nativeCallback?.catch(() => undefined);
+			this.ctrl.onProgress?.("Exchanging authorization code for tokens...");
+			this.#throwIfCancelled();
+
+			return await this.exchangeToken(callback.code, state, redirectUri);
 		} finally {
 			this.#pendingAuthUrl = undefined;
 			receiverAbort.abort("OAuth login finished");
-			try {
-				await receiver?.dispose();
-			} finally {
-				server?.stop();
+			await nativeCallback?.catch(() => undefined);
+			if (receiver) {
+				try {
+					await receiver.dispose();
+				} catch (error) {
+					this.#reportNativeWarning(
+						"Native OAuth callback cleanup failed; recovery information was retained",
+						error,
+					);
+				}
 			}
+			server?.stop();
+		}
+	}
+
+	/**
+	 * Surface native callback failures without allowing reporting hooks to
+	 * replace the login result they are meant to describe.
+	 */
+	#reportNativeWarning(message: string, error: unknown): void {
+		const detail = error instanceof Error ? error.message : String(error);
+		const warning = `${message}: ${detail}`;
+		logger.warn(warning, { error });
+		try {
+			this.ctrl.onProgress?.(warning);
+		} catch (progressError) {
+			logger.warn("OAuth progress callback failed while reporting a native callback warning", {
+				error: progressError,
+			});
 		}
 	}
 
@@ -562,30 +614,31 @@ export abstract class OAuthCallbackFlow {
 		this.#callbackResolve = callback.resolve;
 		this.#callbackReject = callback.reject;
 
-		signal.addEventListener("abort", () => {
-			this.#callbackResolve = undefined;
-			this.#callbackReject = undefined;
-			callback.reject(new AIError.LoginCancelledError(`OAuth callback cancelled: ${signal.reason}`));
-		});
+		signal.addEventListener(
+			"abort",
+			() => {
+				this.#callbackResolve = undefined;
+				this.#callbackReject = undefined;
+				callback.reject(new AIError.LoginCancelledError(`OAuth callback cancelled: ${signal.reason}`));
+			},
+			{ once: true },
+		);
 		const callbackPromise = callback.promise;
 
 		const candidates = [callbackPromise];
-		if (nativeCallback) {
-			candidates.push(nativeCallback);
-		} else if (this.ctrl.onManualCodeInput) {
+		if (nativeCallback) candidates.push(nativeCallback);
+		if (this.ctrl.onManualCodeInput) {
 			const requestManualInput = this.ctrl.onManualCodeInput;
 			const manualPromise = (async (): Promise<CallbackResult> => {
 				while (true) {
 					const result = await Promise.race([
 						callbackPromise,
-						requestManualInput()
-							.then((input): CallbackResult | null => {
-								const parsed = parseCallbackInput(input);
-								if (!parsed.code) return null;
-								if (expectedState && parsed.state && parsed.state !== expectedState) return null;
-								return { code: parsed.code, state: parsed.state ?? "" };
-							})
-							.catch((): CallbackResult | null => null),
+						requestManualInput(signal).then((input): CallbackResult | null => {
+							const parsed = parseCallbackInput(input);
+							if (!parsed.code) return null;
+							if (expectedState && parsed.state && parsed.state !== expectedState) return null;
+							return { code: parsed.code, state: parsed.state ?? "" };
+						}),
 					]);
 					if (result) return result;
 				}

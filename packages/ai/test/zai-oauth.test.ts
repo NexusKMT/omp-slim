@@ -133,8 +133,8 @@ describe("zai oauth flow", () => {
 	it("advertises the ZCode desktop-scheme redirect and binds no callback server (#10745)", async () => {
 		// Z.AI's server-side allowlist now rejects every loopback redirect_uri for the
 		// reused ZCode client; only `zcode://zai-auth/callback` validates, so the flow
-		// runs manual-only — no local callback server is bound and the user pastes the
-		// redirect URL/code back.
+		// skips the local callback server and uses native capture when available,
+		// while retaining pasted input as its portable fallback.
 		const serveSpy = vi.spyOn(Bun, "serve");
 		const controller = new AbortController();
 		let url = "";
@@ -160,18 +160,49 @@ describe("zai oauth flow", () => {
 		expect(error).toBeInstanceOf(AIError.LoginCancelledError);
 		// Manual-only: never binds a loopback callback server.
 		expect(serveSpy).not.toHaveBeenCalled();
-		expect(nativeReceiverSpy).toHaveBeenCalledWith("zcode");
+		expect(nativeReceiverSpy).toHaveBeenCalledWith("zcode", { signal: controller.signal });
 	});
 
-	it("captures the registered zcode callback before exchanging tokens on macOS", async () => {
+	it("falls back to pasted input when native callback setup fails", async () => {
+		const { fetchMock } = makeBizFetch();
+		const progress: string[] = [];
+		const controller = new AbortController();
+		let authUrl = "";
+		nativeReceiverSpy.mockRejectedValueOnce(new Error("registration denied"));
+		const login = getProviderDefinition("zai-coding-plan")?.login;
+		if (!login) throw new Error("zai-coding-plan login is unavailable");
+
+		const credentials = await login({
+			fetch: fetchMock as unknown as FetchImpl,
+			signal: controller.signal,
+			onAuth: info => {
+				authUrl = info.url;
+			},
+			onProgress: message => progress.push(message),
+			onManualCodeInput: async () => `auth-code#${new URL(authUrl).searchParams.get("state")}`,
+		});
+
+		if (typeof credentials === "string") throw new Error("expected structured credentials");
+		expect(credentials.access).toBe("created-key.real-secret");
+		expect(nativeReceiverSpy).toHaveBeenCalledWith("zcode", { signal: controller.signal });
+		expect(progress).toContain(
+			"Native OAuth callback setup failed; paste the authorization code instead: registration denied",
+		);
+	});
+
+	it("captures the registered zcode callback without requiring pasted input", async () => {
 		const { fetchMock } = makeBizFetch();
 		const events: string[] = [];
 		let authUrl = "";
+		const authReady = Promise.withResolvers<void>();
+		const manualInput = Promise.withResolvers<string>();
+		let manualInputAborted = false;
 		const receiver: NativeSchemeCallbackReceiver = {
 			async dispose() {
 				events.push("dispose");
 			},
 			async waitForCallback() {
+				await authReady.promise;
 				events.push("callback");
 				const state = new URL(authUrl).searchParams.get("state");
 				return `${REDIRECT_URI}?code=auth-code&state=${state}`;
@@ -181,8 +212,16 @@ describe("zai oauth flow", () => {
 			events.push(`listen:${scheme}`);
 			return receiver;
 		});
-		const manualInput = vi.fn(async () => {
-			throw new Error("manual input must not open when the native callback receiver is active");
+		const requestManualInput = vi.fn((signal?: AbortSignal) => {
+			signal?.addEventListener(
+				"abort",
+				() => {
+					manualInputAborted = true;
+					manualInput.reject(new Error("manual input settled"));
+				},
+				{ once: true },
+			);
+			return manualInput.promise;
 		});
 		const login = getProviderDefinition("zai-coding-plan")?.login;
 		if (!login) throw new Error("zai-coding-plan login is unavailable");
@@ -192,14 +231,171 @@ describe("zai oauth flow", () => {
 			onAuth: info => {
 				authUrl = info.url;
 				events.push("auth");
+				authReady.resolve();
 			},
-			onManualCodeInput: manualInput,
+			onManualCodeInput: requestManualInput,
 		});
 
 		if (typeof credentials === "string") throw new Error("expected structured credentials");
 		expect(credentials.access).toBe("created-key.real-secret");
 		expect(events).toEqual(["listen:zcode", "auth", "callback", "dispose"]);
-		expect(manualInput).not.toHaveBeenCalled();
+		expect(requestManualInput).toHaveBeenCalledTimes(1);
+		expect(manualInputAborted).toBe(true);
+	});
+
+	it("keeps pasted input usable while native callback capture is active", async () => {
+		const { fetchMock } = makeBizFetch();
+		const nativeWait = Promise.withResolvers<string>();
+		let nativeWaitAborted = false;
+		let authUrl = "";
+		const receiver: NativeSchemeCallbackReceiver = {
+			async dispose() {},
+			waitForCallback(signal) {
+				signal?.addEventListener(
+					"abort",
+					() => {
+						nativeWaitAborted = true;
+						nativeWait.reject(new Error("native wait aborted"));
+					},
+					{ once: true },
+				);
+				return nativeWait.promise;
+			},
+		};
+		nativeReceiverSpy.mockResolvedValueOnce(receiver);
+		const login = getProviderDefinition("zai-coding-plan")?.login;
+		if (!login) throw new Error("zai-coding-plan login is unavailable");
+
+		const credentials = await login({
+			fetch: fetchMock as unknown as FetchImpl,
+			onAuth: info => {
+				authUrl = info.url;
+			},
+			onManualCodeInput: async () => `manual-code#${new URL(authUrl).searchParams.get("state")}`,
+		});
+
+		if (typeof credentials === "string") throw new Error("expected structured credentials");
+		expect(credentials.access).toBe("created-key.real-secret");
+		expect(nativeWaitAborted).toBe(true);
+		expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ code: "manual-code" });
+	});
+
+	it("settles an attached native wait when onAuth cancels synchronously", async () => {
+		const controller = new AbortController();
+		const events: string[] = [];
+		const nativeWait = Promise.withResolvers<string>();
+		const receiver: NativeSchemeCallbackReceiver = {
+			async dispose() {
+				events.push("dispose");
+			},
+			waitForCallback(signal) {
+				events.push("wait");
+				signal?.addEventListener(
+					"abort",
+					() => {
+						events.push("wait-abort");
+						nativeWait.reject(new Error("native wait aborted"));
+					},
+					{ once: true },
+				);
+				return nativeWait.promise;
+			},
+		};
+		nativeReceiverSpy.mockResolvedValueOnce(receiver);
+		const login = getProviderDefinition("zai-coding-plan")?.login;
+		if (!login) throw new Error("zai-coding-plan login is unavailable");
+
+		const error = await login({
+			signal: controller.signal,
+			onAuth: () => controller.abort("cancelled in onAuth"),
+			onManualCodeInput: async () => "unused",
+		}).catch((caught: unknown) => caught);
+
+		expect(error).toBeInstanceOf(AIError.LoginCancelledError);
+		expect(events).toEqual(["wait", "wait-abort", "dispose"]);
+	});
+
+	it("returns exchanged credentials when native callback disposal fails", async () => {
+		const { fetchMock, requests } = makeBizFetch();
+		const progress: string[] = [];
+		const disposeRequestCounts: number[] = [];
+		let authUrl = "";
+		const authReady = Promise.withResolvers<void>();
+		const manualInput = Promise.withResolvers<string>();
+		const receiver: NativeSchemeCallbackReceiver = {
+			async dispose() {
+				disposeRequestCounts.push(requests.length);
+				throw new Error("restore retained in recovery journal");
+			},
+			async waitForCallback() {
+				await authReady.promise;
+				const state = new URL(authUrl).searchParams.get("state");
+				return `${REDIRECT_URI}?code=auth-code&state=${state}`;
+			},
+		};
+		nativeReceiverSpy.mockResolvedValueOnce(receiver);
+		const login = getProviderDefinition("zai-coding-plan")?.login;
+		if (!login) throw new Error("zai-coding-plan login is unavailable");
+
+		const credentials = await login({
+			fetch: fetchMock as unknown as FetchImpl,
+			onAuth: info => {
+				authUrl = info.url;
+				authReady.resolve();
+			},
+			onProgress: message => progress.push(message),
+			onManualCodeInput: () => manualInput.promise,
+		});
+
+		if (typeof credentials === "string") throw new Error("expected structured credentials");
+		expect(credentials.access).toBe("created-key.real-secret");
+		expect(disposeRequestCounts).toEqual([6]);
+		expect(progress).toContain(
+			"Native OAuth callback cleanup failed; recovery information was retained: restore retained in recovery journal",
+		);
+	});
+
+	it("does not mask a token exchange error with a native disposal failure", async () => {
+		const { fetchMock } = makeBizFetch({
+			tokenResponse: new Response(JSON.stringify({ code: 1, msg: "token rejected" }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			}),
+		});
+		const progress: string[] = [];
+		let authUrl = "";
+		const authReady = Promise.withResolvers<void>();
+		const manualInput = Promise.withResolvers<string>();
+		const receiver: NativeSchemeCallbackReceiver = {
+			async dispose() {
+				throw new Error("restore still pending");
+			},
+			async waitForCallback() {
+				await authReady.promise;
+				const state = new URL(authUrl).searchParams.get("state");
+				return `${REDIRECT_URI}?code=auth-code&state=${state}`;
+			},
+		};
+		nativeReceiverSpy.mockResolvedValueOnce(receiver);
+		const login = getProviderDefinition("zai-coding-plan")?.login;
+		if (!login) throw new Error("zai-coding-plan login is unavailable");
+
+		const error = await login({
+			fetch: fetchMock as unknown as FetchImpl,
+			onAuth: info => {
+				authUrl = info.url;
+				authReady.resolve();
+			},
+			onProgress: message => progress.push(message),
+			onManualCodeInput: () => manualInput.promise,
+		}).catch((caught: unknown) => caught);
+
+		expect(error).toBeInstanceOf(AIError.OAuthError);
+		if (!(error instanceof Error)) throw new Error("expected token exchange error");
+		expect(error.message).toContain("token rejected");
+		expect(progress).toContain(
+			"Native OAuth callback cleanup failed; recovery information was retained: restore still pending",
+		);
 	});
 
 	it("exchanges the code, does business-login, then mints an id.secret key (create path)", async () => {

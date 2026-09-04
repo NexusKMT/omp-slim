@@ -1,6 +1,6 @@
 /**
  * `login "oauth-code"` engine: authorization-code grant (optionally PKCE)
- * through the loopback callback server, followed by the declared token
+ * through the configured callback transport, followed by the declared token
  * exchange, credential projection, userinfo enrichment and after-exchange hook.
  */
 import type { CompiledAuthProvider, CompiledCallback, CompiledOAuthCodeLogin } from "@oh-my-pi/pi-catalog/compat/types";
