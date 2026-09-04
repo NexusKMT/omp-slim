@@ -9,6 +9,7 @@
 
 ### Added
 
+- Bash now extracts Kitty and Sixel terminal graphics into image result blocks across foreground, failed, manual, and background executions.
 - Made Markdown links to existing local files and resources clickable while preserving their displayed URLs.
 - Added the `/switch <model>` command for session-only model changes from the prompt, with support for the same model selectors and completions used by `--model`; ACP `/model <model>` accepts these selectors as well.
 - Added the `worktree.cleanSource` setting to reset and clean the original checkout when creating a worktree with `/wt`.

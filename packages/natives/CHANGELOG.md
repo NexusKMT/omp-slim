@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added native Sixel-to-PNG decoding for terminal graphics returned by shell commands.
 - Added transactional native OAuth callback registration and one-shot delivery across macOS, Linux desktops, and Windows.
 
 ### Fixed

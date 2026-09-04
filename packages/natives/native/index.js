@@ -47,6 +47,7 @@ export const blockRangeAt = nativeBindings.blockRangeAt;
 export const copyToClipboard = nativeBindings.copyToClipboard;
 export const cosineSimilarityPairs = nativeBindings.cosineSimilarityPairs;
 export const countTokens = nativeBindings.countTokens;
+export const decodeSixelToPng = nativeBindings.decodeSixelToPng;
 export const detectMacOSAppearance = nativeBindings.detectMacOSAppearance;
 export const deviceCheckGenerateToken = nativeBindings.deviceCheckGenerateToken;
 export const diffLineRuns = nativeBindings.diffLineRuns;
