@@ -13,8 +13,6 @@
 - Fixed fallback authorization-code prompts remaining active after native OAuth callback completion.
 - Fixed a rare issue where reciprocal idle subagents could continue waking one another indefinitely.
 - Fixed `/wt` and `git worktree add` failing when the new worktree targeted the same commit as the clean source checkout.
-### Fixed
-
 - Fixed omp-installed marketplace plugins and `--plugin-dir` plugins still losing their skills when the Claude plugin source was not separately enabled, completing the #10666 fix ([#10743](https://github.com/can1357/oh-my-pi/issues/10743)).
 - Fixed session accent colors rendering as bright white in terminals without truecolor support, including Terminal.app ([#10759](https://github.com/can1357/oh-my-pi/issues/10759)).
 - Rules with `enabled: false` frontmatter are now omitted during discovery, matching disabled skills ([#10769](https://github.com/can1357/oh-my-pi/issues/10769)).
