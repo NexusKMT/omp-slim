@@ -10,7 +10,7 @@ import { describe, expect, it } from "bun:test";
 // leaves `theme` defined process-wide; a fresh subprocess is the only way to exercise the
 // unguarded branch deterministically, regardless of suite ordering.
 describe("gradient highlight before theme init (#10864)", () => {
-	it("paints magic keywords in a fresh module graph where the global theme is unassigned", async () => {
+	it("uses detected terminal capabilities when the global theme is unassigned", async () => {
 		const entry = new URL("../../src/modes/magic-keywords.ts", import.meta.url).pathname;
 		const text = "please ultrathink about this";
 		const script = [
@@ -18,9 +18,14 @@ describe("gradient highlight before theme init (#10864)", () => {
 			`const text = ${JSON.stringify(text)};`,
 			`const out = highlightMagicKeywords(text, undefined, 0);`,
 			`if (out.replaceAll(/\\x1b\\[[0-9;]*m/g, "") !== text) { console.error("visible-text-changed"); process.exit(2); }`,
-			`if (!out.includes("\\x1b[")) { console.error("no-gradient-escapes"); process.exit(3); }`,
+			`if (!out.includes("\\x1b[38;5;")) { console.error("no-256-color-gradient"); process.exit(3); }`,
+			`if (out.includes("\\x1b[38;2;")) { console.error("unsupported-truecolor-gradient"); process.exit(4); }`,
 		].join("\n");
-		const proc = Bun.spawn(["bun", "-e", script], { stdout: "pipe", stderr: "pipe" });
+		const proc = Bun.spawn(["bun", "-e", script], {
+			stdout: "pipe",
+			stderr: "pipe",
+			env: { ...Bun.env, TERM_PROGRAM: "Apple_Terminal", TERM: "xterm-256color", WT_SESSION: "" },
+		});
 		const stderr = await new Response(proc.stderr).text();
 		const code = await proc.exited;
 		expect(stderr).toBe("");

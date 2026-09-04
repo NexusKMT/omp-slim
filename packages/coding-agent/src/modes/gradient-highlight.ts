@@ -1,4 +1,5 @@
 import { maskNonProse } from "./markdown-prose";
+import { detectColorMode } from "./theme/color";
 import { theme } from "./theme/theme";
 
 /** A gradient keyword highlighter.
@@ -45,9 +46,9 @@ export function createGradientHighlighter(spec: GradientHighlightSpec): KeywordH
 	/** Gradient foreground escapes for the active color mode, compiled once per mode. */
 	const palette = (): readonly string[] => {
 		// `theme` is unassigned on early-render paths (before initTheme/initThemeSync)
-		// and on cross-module-instance plugin calls; fall back to truecolor so the
-		// gradient still paints instead of crashing. See #2998, #4766.
-		const mode = typeof theme === "undefined" ? "truecolor" : theme.getColorMode();
+		// and on cross-module-instance plugin calls. Detect terminal capabilities
+		// directly so the gradient still paints safely. See #2998, #4766.
+		const mode = typeof theme === "undefined" ? detectColorMode() : theme.getColorMode();
 		if (cachedPalette && cachedMode === mode) return cachedPalette;
 		const format = mode === "truecolor" ? "ansi-16m" : "ansi-256";
 		const next: string[] = [];
