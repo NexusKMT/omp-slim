@@ -750,8 +750,11 @@ mod tests {
 
 	#[test]
 	fn removes_only_the_generated_default_section_that_owned_the_entry() {
-		let before = "[Default Applications]\ntext/plain=editor.desktop;\n\n[Other]\nkey=value\n\\
-		              n[Default Applications]\nx-scheme-handler/test=owned.desktop;\n";
+		let before = concat!(
+			"[Default Applications]\ntext/plain=editor.desktop;\n\n",
+			"[Other]\nkey=value\n\n",
+			"[Default Applications]\nx-scheme-handler/test=owned.desktop;\n",
+		);
 		let without_entry = change_default(before, "x-scheme-handler/test", &DefaultEntry {
 			present: false,
 			value:   String::new(),
