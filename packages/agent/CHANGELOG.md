@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.10] - 2026-09-04
+
 ### Fixed
 
 - Fixed Codex V2 remote compaction ignoring explicit thinking-off.

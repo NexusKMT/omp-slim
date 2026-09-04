@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.10] - 2026-09-04
+
 ### Changed
 
 - Subagent `yield` now takes `data`/`error` directly instead of nesting them under a `result` wrapper.
