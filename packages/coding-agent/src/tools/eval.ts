@@ -18,6 +18,7 @@ import type { EvalCellResult, EvalDisplayOutput, EvalLanguage, EvalStatusEvent, 
 import evalDescription from "../prompts/tools/eval.md" with { type: "text" };
 import evalCodeModeDescription from "../prompts/tools/eval-code-mode.md" with { type: "text" };
 import { DEFAULT_MAX_BYTES, OutputSink, type OutputSummary, TailBuffer } from "../session/streaming-output";
+import { sessionDelegationBias } from "../task/prompt-policy";
 import { resolveSpawnPolicy } from "../task/spawn-policy";
 import { webpExclusionForModel } from "../utils/image-loading";
 import { formatDimensionNote, resizeImage } from "../utils/image-resize";
@@ -164,6 +165,8 @@ export interface EvalToolDescriptionOptions {
 	autoBackgroundEnabled?: boolean;
 	/** Advertise `@tool` / `tool(fn)` and the `tools` spawn option (`eval.tools.enabled`). */
 	evalTools?: boolean;
+	/** Push `workpool()` as the default for independent items (model delegation bias `eager`). Default: true. */
+	eagerDelegation?: boolean;
 }
 
 export function getEvalToolDescription(options: EvalToolDescriptionOptions = {}): string {
@@ -174,6 +177,7 @@ export function getEvalToolDescription(options: EvalToolDescriptionOptions = {})
 		py,
 		js,
 		evalTools: options.evalTools ?? true,
+		eagerDelegation: options.eagerDelegation ?? true,
 		autoBackgroundEnabled: options.autoBackgroundEnabled ?? false,
 		spawns: spawnPolicy.enabled,
 		spawnDefaultAgent: spawnPolicy.defaultAgent,
@@ -278,6 +282,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 				spawns: sessionSpawns,
 				autoBackgroundEnabled: this.session.settings.get("eval.autoBackground.enabled"),
 				evalTools: this.session.settings.get("eval.tools.enabled"),
+				eagerDelegation: sessionDelegationBias(this.session) === "eager",
 			});
 		}
 		return this.#codeModeDescription(base) ?? base;

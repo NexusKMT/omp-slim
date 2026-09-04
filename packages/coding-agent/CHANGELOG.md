@@ -13,6 +13,14 @@
 - Added the `/switch <model>` command for session-only model changes from the prompt, with support for the same model selectors and completions used by `--model`; ACP `/model <model>` accepts these selectors as well.
 - Added the `worktree.cleanSource` setting to reset and clean the original checkout when creating a worktree with `/wt`.
 
+### Changed
+
+- Agent delegation behavior is now model-aware; some models now adopt a "restrained" policy that prefers inline work over spawning subagents
+
+### Removed
+
+- Removed the librarian agent
+
 ### Fixed
 
 - Fixed fallback authorization-code prompts remaining active after native OAuth callback completion.

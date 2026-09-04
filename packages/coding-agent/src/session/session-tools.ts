@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Agent, AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
+import { resolveDelegationBias } from "@oh-my-pi/pi-catalog/compat/delegation";
 import { isRecord, logger, prompt, stringProperty, untilAborted } from "@oh-my-pi/pi-utils";
 import { reset as resetCapabilities } from "../capability";
 import type { EffectiveExtensionRoots } from "../capability/types";
@@ -19,7 +20,6 @@ import { MEMORY_BACKEND_TOOL_NAMES } from "../memory-backend/tool-names";
 import type { MemoryBackendStartOptions } from "../memory-backend/types";
 import toolRosterNoticePrompt from "../prompts/system/tool-roster-notice.md" with { type: "text" };
 import xdevMountNoticePrompt from "../prompts/system/xdev-mount-notice.md" with { type: "text" };
-import { usesCodexTaskPrompt } from "../task/prompt-policy";
 import { isMCPToolName, normalizeToolNames } from "../tools/builtin-names";
 import { computerExposureMode } from "../tools/computer/exposure";
 import { wrapToolWithMetaNotice } from "../tools/output-meta";
@@ -627,9 +627,9 @@ export class SessionTools {
 
 	#currentPromptModelKey(): string | undefined {
 		const activeModel = this.#host.model();
-		const model = activeModel ? formatModelString(activeModel) : undefined;
-		if (!model || this.#host.settings.get("includeModelInPrompt")) return model;
-		return usesCodexTaskPrompt(model) ? "task-policy:gpt-5.6" : "task-policy:default";
+		if (!activeModel) return undefined;
+		if (this.#host.settings.get("includeModelInPrompt")) return formatModelString(activeModel);
+		return `delegation-bias:${resolveDelegationBias(activeModel)}`;
 	}
 
 	#logComputerState(message: string, enabled: boolean): void {
