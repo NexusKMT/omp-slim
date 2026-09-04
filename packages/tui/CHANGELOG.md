@@ -4,7 +4,7 @@
 
 ### Added
 
-- Enable clickable system links for local files and artifacts within chat markdown
+- Added Markdown hyperlink target resolution while preserving the displayed URL text.
 
 ## [18.1.6] - 2026-09-03
 

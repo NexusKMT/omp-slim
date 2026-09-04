@@ -900,6 +900,18 @@ export class UiHelpers {
 	}
 
 	async renderInitialMessages(options: RenderInitialMessagesOptions = {}): Promise<void> {
+		// Collapsed replay keeps in-flight calls so pending tools remain routable during mid-turn rebuilds.
+		let context = this.ctx.viewSession.buildTranscriptSessionContext({
+			collapseCompactedHistory: settings.get("display.collapseCompacted"),
+			keepDanglingToolCalls: this.ctx.viewSession.isStreaming,
+		});
+		let replayEntryCount = this.ctx.viewSession.sessionManager.getEntries().length;
+		// Resolve before replacing live component maps: streaming events may arrive during filesystem I/O.
+		await refreshAssistantMessageLinkTargets(
+			this.ctx,
+			context.messages.filter((message): message is AssistantMessage => message.role === "assistant"),
+		);
+
 		// Build against a detached container. Incremental construction still yields
 		// to terminal input, while paints keep using the complete visible transcript
 		// until the replacement is ready to swap in.
@@ -921,21 +933,6 @@ export class UiHelpers {
 		this.ctx.pendingBashComponents = [];
 		this.ctx.pendingPythonComponents = [];
 
-		// Live display collapses to the compacted transcript tail unless the
-		// user opted into the full inline history; export/resume callers can
-		// still request either mode. Mid-turn rebuilds
-		// (focus attach/unfocus while a tool executes) keep dangling toolCalls so
-		// the in-flight call re-renders as pending instead of vanishing;
-		// renderSessionContext then keeps it in `pendingTools` for live routing.
-		let context = this.ctx.viewSession.buildTranscriptSessionContext({
-			collapseCompactedHistory: settings.get("display.collapseCompacted"),
-			keepDanglingToolCalls: this.ctx.viewSession.isStreaming,
-		});
-		await refreshAssistantMessageLinkTargets(
-			this.ctx,
-			context.messages.filter((message): message is AssistantMessage => message.role === "assistant"),
-		);
-		let replayEntryCount = this.ctx.viewSession.sessionManager.getEntries().length;
 		const renderOptions = {
 			updateFooter: true,
 		};
@@ -970,20 +967,20 @@ export class UiHelpers {
 				// yielded. The display callback stayed gated by initialChatRendered;
 				// discard the stale partial tree and replay the current session once
 				// more instead of letting a reentrant synchronous rebuild interleave.
+				context = this.ctx.viewSession.buildTranscriptSessionContext({
+					collapseCompactedHistory: settings.get("display.collapseCompacted"),
+					keepDanglingToolCalls: this.ctx.viewSession.isStreaming,
+				});
+				replayEntryCount = this.ctx.viewSession.sessionManager.getEntries().length;
+				await refreshAssistantMessageLinkTargets(
+					this.ctx,
+					context.messages.filter((message): message is AssistantMessage => message.role === "assistant"),
+				);
 				stagedChatContainer.disposeChildren();
 				this.ctx.transcriptMessageComponents = new WeakMap<AgentMessage, Component>();
 				this.ctx.pendingTools.clear();
 				this.ctx.pendingBashComponents = [];
 				this.ctx.pendingPythonComponents = [];
-				context = this.ctx.viewSession.buildTranscriptSessionContext({
-					collapseCompactedHistory: settings.get("display.collapseCompacted"),
-					keepDanglingToolCalls: this.ctx.viewSession.isStreaming,
-				});
-				await refreshAssistantMessageLinkTargets(
-					this.ctx,
-					context.messages.filter((message): message is AssistantMessage => message.role === "assistant"),
-				);
-				replayEntryCount = this.ctx.viewSession.sessionManager.getEntries().length;
 			}
 
 			const replayedChatChildren = [...stagedChatContainer.children];

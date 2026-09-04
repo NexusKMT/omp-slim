@@ -776,7 +776,10 @@ impl GitRepo {
 		};
 
 		for (entry, entry_path) in target.entries_mut_with_paths() {
-			if let Some(written) = changed.as_ref().and_then(|changed| changed.entry_by_path(entry_path)) {
+			if let Some(written) = changed
+				.as_ref()
+				.and_then(|changed| changed.entry_by_path(entry_path))
+			{
 				entry.stat = written.stat;
 			} else {
 				let metadata = gix::index::fs::Metadata::from_path_no_follow(

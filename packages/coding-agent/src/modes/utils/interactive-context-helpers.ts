@@ -10,8 +10,11 @@ import { resolveMarkdownLinkTargets } from "../../tui/hyperlink";
 import { AssistantMessageComponent } from "../components/assistant-message";
 import type { InteractiveModeContext } from "../types";
 
-const linkTargetsBySession = new WeakMap<AgentSession, ReadonlyMap<string, string>>();
+const kMarkdownLinkTargets = Symbol("markdownLinkTargets");
 const EMPTY_LINK_TARGETS: ReadonlyMap<string, string> = new Map();
+type SessionWithMarkdownLinkTargets = AgentSession & {
+	[kMarkdownLinkTargets]?: ReadonlyMap<string, string>;
+};
 
 function assistantTextBlocks(messages: readonly AssistantMessage[]): string[] {
 	const texts: string[] = [];
@@ -33,7 +36,7 @@ export async function refreshAssistantMessageLinkTargets(
 	ctx: InteractiveModeContext,
 	messages: readonly AssistantMessage[],
 ): Promise<ReadonlyMap<string, string>> {
-	const session = ctx.viewSession;
+	const session: SessionWithMarkdownLinkTargets = ctx.viewSession;
 	const texts = assistantTextBlocks(messages);
 	const resolved = await resolveMarkdownLinkTargets(texts, {
 		cwd: session.sessionManager.getCwd(),
@@ -46,7 +49,7 @@ export async function refreshAssistantMessageLinkTargets(
 		skills: session.skills,
 		rules: session.ttsrManager?.getRules(),
 	});
-	const previous = linkTargetsBySession.get(session) ?? EMPTY_LINK_TARGETS;
+	const previous = session[kMarkdownLinkTargets] ?? EMPTY_LINK_TARGETS;
 	const hrefs = new Set<string>();
 	for (const text of texts) {
 		for (const href of getMarkdownLinkUrls(text)) hrefs.add(href);
@@ -62,13 +65,14 @@ export async function refreshAssistantMessageLinkTargets(
 	const next = new Map(previous);
 	for (const href of hrefs) next.delete(href);
 	for (const [href, target] of resolved) next.set(href, target);
-	linkTargetsBySession.set(session, next);
+	session[kMarkdownLinkTargets] = next;
 	return next;
 }
 
 /** Current resolved destinations for synchronous component construction. */
 export function getAssistantMessageLinkTargets(ctx: InteractiveModeContext): ReadonlyMap<string, string> {
-	return linkTargetsBySession.get(ctx.viewSession) ?? EMPTY_LINK_TARGETS;
+	const session: SessionWithMarkdownLinkTargets = ctx.viewSession;
+	return session[kMarkdownLinkTargets] ?? EMPTY_LINK_TARGETS;
 }
 
 /** Limit a session snapshot to destinations authored by one rendered segment. */

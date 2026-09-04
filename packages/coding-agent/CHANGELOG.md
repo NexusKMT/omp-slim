@@ -4,13 +4,14 @@
 
 ### Added
 
-- Resolved local and internal resource links in chat markdown to clickable filesystem paths
-- Added `/switch <model>` for session-only model switches straight from the prompt: selectors resolve like `omp bench` and `--model` (fuzzy ids such as `opus`, `provider/id`, `@smol`-style role aliases, `:level` thinking suffixes), with model and role completions while typing; `/model <model>` in ACP accepts the same selectors.
+- Made Markdown links to existing local files and resources clickable while preserving their displayed URLs.
+- Added the `/switch <model>` command for session-only model changes from the prompt, with support for the same model selectors and completions used by `--model`; ACP `/model <model>` accepts these selectors as well.
+- Added the `worktree.cleanSource` setting to reset and clean the original checkout when creating a worktree with `/wt`.
 
 ### Fixed
 
-- Fixed two idle subagents exchanging a single IRC message ping-ponging forever: wake-turn relays are now tagged and never relayed back, so each automated relay is delivered exactly once instead of waking a reciprocal relay until manual cancellation.
-- Fixed `git worktree add` (and `/wt`) failing with a native `cannot take out backing multiple times` panic when the new worktree targets a commit identical to the clean source checkout.
+- Fixed a rare issue where reciprocal idle subagents could continue waking one another indefinitely.
+- Fixed `/wt` and `git worktree add` failing when the new worktree targeted the same commit as the clean source checkout.
 
 ## [18.1.8] - 2026-09-03
 
@@ -45,9 +46,6 @@
 - Local tiny models for titles, memory, and automatic thinking classification now share on-demand workers across omp processes, reducing redundant resource usage; workers stop automatically after inactivity.
 - PI_TINY_DEVICE=metal now selects the MLX backend on macOS.
 - Updated agent reactions to trigger on the opening emoji instead of requiring a newline, consuming any following whitespace.
-### Added
-
-- Added the `worktree.cleanSource` setting to reset and clean the original checkout when creating a worktree with `/wt`.
 
 ### Fixed
 
