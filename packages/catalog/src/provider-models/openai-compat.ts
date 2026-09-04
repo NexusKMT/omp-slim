@@ -4,6 +4,7 @@ import { toClinePassPublicModelId } from "../cline-pass-model-id";
 import {
 	apiRouteExactModelIds,
 	apiRouteFor,
+	isExcludedDiscoveryMode,
 	isExcludedModel,
 	isLikelyOpenAIResponsesId,
 	modelLimitsFor,
@@ -5330,21 +5331,6 @@ type LiteLLMRichEndpointResult<TApi extends Api> =
 	| { failure: LiteLLMRichEndpointFailure };
 
 const LITELLM_RICH_ENDPOINTS = ["/model_group/info", "/v2/model/info", "/model/info", "/v1/model/info"] as const;
-const LITELLM_NON_CONVERSATIONAL_MODES: ReadonlySet<string> = new Set([
-	"audio_speech",
-	"audio_transcription",
-	"batch",
-	"embedding",
-	"guardrail",
-	"image_edit",
-	"image_generation",
-	"moderation",
-	"ocr",
-	"rerank",
-	"search",
-	"vector_store",
-	"video_generation",
-]);
 export const OPENAI_COMPAT_DISCOVERY_DEFAULT_CONTEXT_WINDOW = 128_000;
 export const OPENAI_COMPAT_DISCOVERY_DEFAULT_MAX_TOKENS = 32_768;
 const UNKNOWN_PROXY_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const;
@@ -5372,7 +5358,7 @@ function warnLiteLLMMetadataFallback(managementBaseUrl: string, failure: LiteLLM
 
 /** Exclude only known non-conversational modes; unknown and non-string modes remain selectable for aliases. */
 export function isSelectableLiteLLMModelMode(mode: unknown): boolean {
-	return typeof mode !== "string" || !LITELLM_NON_CONVERSATIONAL_MODES.has(mode);
+	return typeof mode !== "string" || !isExcludedDiscoveryMode("litellm", mode);
 }
 
 export function normalizeLiteLLMManagementBaseUrl(baseUrl: string): string {
