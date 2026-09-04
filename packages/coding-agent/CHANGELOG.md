@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed two idle subagents exchanging a single IRC message ping-ponging forever: wake-turn relays are now tagged and never relayed back, so each automated relay is delivered exactly once instead of waking a reciprocal relay until manual cancellation.
+- Fixed `git worktree add` (and `/wt`) failing with a native `cannot take out backing multiple times` panic when the new worktree targets a commit identical to the clean source checkout.
 
 ## [18.1.8] - 2026-09-03
 
