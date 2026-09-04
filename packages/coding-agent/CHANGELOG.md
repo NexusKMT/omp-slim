@@ -12,6 +12,9 @@
 - Fixed the Model Hub sidebar jumping to the top when provider refreshes rebuild the list; the focused model, or its nearest remaining entry, is now preserved.
 - Fixed the `inspect_image` status hint showing the wrong model after switching between image-capable model roles.
 - Fixed multi-minute TUI freezes during subagent activity and batch execution.
+### Fixed
+
+- Fixed two idle subagents exchanging a single IRC message ping-ponging forever: wake-turn relays are now tagged and never relayed back, so each automated relay is delivered exactly once instead of waking a reciprocal relay until manual cancellation.
 
 ## [18.1.7] - 2026-09-03
 
