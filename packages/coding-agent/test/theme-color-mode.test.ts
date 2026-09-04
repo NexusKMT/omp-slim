@@ -21,6 +21,12 @@ describe("theme color mode", () => {
 				cwd: path.resolve(import.meta.dir, "../../.."),
 				env: {
 					...process.env,
+					KITTY_WINDOW_ID: "",
+					GHOSTTY_RESOURCES_DIR: "",
+					WEZTERM_PANE: "",
+					ITERM_SESSION_ID: "",
+					VSCODE_PID: "",
+					ALACRITTY_WINDOW_ID: "",
 					TERM_PROGRAM: "Apple_Terminal",
 					TERM: "xterm-256color",
 					COLORTERM: "",
