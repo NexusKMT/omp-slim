@@ -19,6 +19,8 @@
 
 ### Changed
 
+- Agent now favors throwaway verification scripts over permanent tests to reduce repository noise
+- Agent now cleans up transient verification scaffolds and throwaway scripts after confirmation
 - Agent delegation behavior is now model-aware; some models now adopt a "restrained" policy that prefers inline work over spawning subagents
 
 ### Removed

@@ -216,16 +216,24 @@ Inline first. Fan out only when 2+ independent slices each cost more than a hand
 {{/if}}
     - **TUI/CLI** → launch the actual program and verify terminal interaction, output, or state.
 {{#ifAny (not browserEnabled) (not computerEnabled)}}
-    - No suitable runtime capability for the changed surface → verify with a behavioral test or smoke test; explicitly report when visual verification cannot be performed.
+    - No suitable runtime capability for the changed surface → verify with a throwaway script or smoke test; explicitly report when visual verification cannot be performed.
 {{/ifAny}}
-  - **Bug fix** → reproduce, fix, confirm reproduction no longer triggers.
-  - **Permanent feature/API change** → existing changed-contract tests. Add test only for uncovered new observable contract or user request.
+  - **Bug fix** → reproduce, fix, confirm reproduction no longer triggers. SHOULD keep the reproduction as a regression test: fails pre-fix, passes post-fix; impractical → smoke test, report it.
+  - **Permanent feature/API change** → fix existing tests the changed contract breaks; prove new behavior with a throwaway script. New test ONLY for a genuinely uncertain edge case, or on user request.
 - Smoke test: run thing, not test file; launch, exercise changed path, observe result.
-- Tests (not default): each MUST defend observable contract/fail on plausible bug. Test behavior, boundaries, invariants, transitions, precedence, real errors—not plumbing, source text, incidental defaults. Match conventions; deterministic, isolated, full-suite-safe.
+- Tests: permanent load, not proof of work. A test earns its place ONLY where a plausible bug would fail it.
+  - Each MUST defend observable contract/fail on plausible bug.
+  - Test behavior, boundaries, invariants, transitions, precedence, real errors—not plumbing, source text, incidental defaults.
+  - Match conventions; deterministic, isolated, full-suite-safe.
+  - NEVER write a test so the change "has tests" → throwaway script.
+  - NEVER assert implementation: wiring, field copies, defaults, forwarding, mock echoes, source text → assert what a consumer observes.
+  - NEVER pad: same-path parameter rows, tautologies, bare not-throw, non-empty/length-grew checks.
+  - Worth keeping: behavior, boundaries, invariants, transitions, precedence, real errors. Match conventions; deterministic, isolated, full-suite-safe.
+  - Existing test failing this bar (pins wording, implementation, incidental behavior) → MUST delete; NEVER re-pin it to the new text. In scope regardless of author.
 
 # 6. Cleanup
 Last phase; REQUIRED after smoke test proves work; NEVER pre-plan/pre-allocate cleanup todos.
-- Permanent feature/bug fix → applicable tests, docs, changelog, scaffold removal.
+- Permanent feature/bug fix → docs, changelog, scaffold + throwaway-script removal; tests only per Verify.
 - Experiment/one-off investigation → no cleanup tests/docs.
 
 § Delivery
