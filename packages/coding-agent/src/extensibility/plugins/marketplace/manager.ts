@@ -39,7 +39,7 @@ import type {
 	MarketplacePluginEntry,
 	MarketplaceRegistryEntry,
 } from "./types";
-import { buildPluginId, parsePluginId } from "./types";
+import { buildPluginId, nameSegmentCollisionKey, parsePluginId } from "./types";
 
 const RUNTIME_PACKAGE_NAME_RE = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
 const MAX_RUNTIME_PACKAGE_NAME_LENGTH = 214;
@@ -91,15 +91,21 @@ export class MarketplaceManager {
 
 	async addMarketplace(source: string): Promise<MarketplaceRegistryEntry> {
 		const reg = await readMarketplacesRegistry(this.#opts.marketplacesRegistryPath);
-		const existingNames = new Set(reg.marketplaces.map(m => m.name));
 
 		const { catalog, clonePath } = await fetchMarketplace(source, this.#opts.marketplacesCacheDir);
 
-		if (existingNames.has(catalog.name)) {
+		const catalogKey = nameSegmentCollisionKey(catalog.name);
+		const existingName = reg.marketplaces.find(m => nameSegmentCollisionKey(m.name) === catalogKey)?.name;
+		if (existingName) {
 			if (clonePath) {
 				await fs.rm(clonePath, { recursive: true, force: true }).catch(() => {});
 			}
-			throw new Error(`Marketplace "${catalog.name}" already exists`);
+			if (existingName === catalog.name) {
+				throw new Error(`Marketplace "${catalog.name}" already exists`);
+			}
+			throw new Error(
+				`Marketplace "${catalog.name}" conflicts with existing marketplace "${existingName}" on case-insensitive filesystems`,
+			);
 		}
 
 		// Promote the temp clone to its final cache location now that we know it's not a duplicate.

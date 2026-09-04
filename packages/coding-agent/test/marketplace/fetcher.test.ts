@@ -101,6 +101,21 @@ describe("parseMarketplaceCatalog", () => {
 		expect(catalog.name).toBe("HexRaysSA");
 	});
 
+	it("skips plugin names that differ only by case to prevent cache collisions", () => {
+		const catalog = parseMarketplaceCatalog(
+			JSON.stringify({
+				name: "HexRaysSA",
+				owner: { name: "HexRaysSA" },
+				plugins: [
+					{ name: "IDA-MCP", source: "./plugins/ida-mcp" },
+					{ name: "ida-mcp", source: "./plugins/ida-mcp-lowercase" },
+				],
+			}),
+			"/f.json",
+		);
+		expect(catalog.plugins.map(plugin => plugin.name)).toEqual(["IDA-MCP"]);
+	});
+
 	it("throws on missing name", () => {
 		const bad = JSON.stringify({ owner: { name: "x" }, plugins: [] });
 		expect(() => parseMarketplaceCatalog(bad, "/f.json")).toThrow(/"name"/);

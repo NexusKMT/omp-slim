@@ -141,6 +141,31 @@ describe("MarketplaceManager", () => {
 		await expect(ctx.manager.addMarketplace(FIXTURE_DIR)).rejects.toThrow(/already exists/);
 	});
 
+	it("rejects a case-equivalent marketplace before replacing its cache", async () => {
+		const existing = await ctx.manager.addMarketplace(FIXTURE_DIR);
+		const cachedCatalog = await Bun.file(existing.catalogPath).text();
+		const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					name: "Test-Marketplace",
+					owner: { name: "Test Author" },
+					plugins: [],
+				}),
+			),
+		);
+
+		try {
+			await expect(ctx.manager.addMarketplace("https://example.com/marketplace.json")).rejects.toThrow(
+				'conflicts with existing marketplace "test-marketplace"',
+			);
+			expect(await Bun.file(existing.catalogPath).text()).toBe(cachedCatalog);
+			expect(fs.existsSync(path.join(ctx.tmpDir, "cache", "marketplaces", "Test-Marketplace"))).toBe(false);
+			expect(await ctx.manager.listMarketplaces()).toHaveLength(1);
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
 	it("removeMarketplace → gone from list and catalog cache removed", async () => {
 		const entry = await ctx.manager.addMarketplace(FIXTURE_DIR);
 

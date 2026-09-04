@@ -20,6 +20,11 @@ export function isValidNameSegment(s: string): boolean {
 	return s.length > 0 && s.length <= MAX_NAME_LENGTH && NAME_RE.test(s);
 }
 
+/** Return the case-insensitive key used to detect cache-path name collisions. */
+export function nameSegmentCollisionKey(s: string): string {
+	return s.toLowerCase();
+}
+
 /** Build canonical plugin ID: `"name@marketplace"`. Both segments are validated. */
 export function buildPluginId(name: string, marketplace: string): string {
 	if (!isValidNameSegment(name)) {
