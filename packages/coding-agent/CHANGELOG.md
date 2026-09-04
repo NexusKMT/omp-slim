@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed two idle subagents exchanging a single IRC message ping-ponging forever: wake-turn relays are now tagged and never relayed back, so each automated relay is delivered exactly once instead of waking a reciprocal relay until manual cancellation.
+- Fixed Mnemopi silently deleting explicitly retained/learned long-term memory after a session gap over 24h: eligible working memory is now consolidated to episodic at session start (before the first write can TTL-trim unpromoted rows), instead of only when `/memory enqueue` was run manually ([#10770](https://github.com/can1357/oh-my-pi/issues/10770)).
 
 ## [18.1.8] - 2026-09-03
 

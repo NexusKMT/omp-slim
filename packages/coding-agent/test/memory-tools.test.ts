@@ -632,6 +632,85 @@ describe("Mnemopi backend lifecycle", () => {
 		expect(retainMemory.sleepAllSessions).toHaveBeenCalledTimes(1);
 	});
 
+	it("consolidates age-eligible working memory at session start so the next write does not TTL-trim it (#10770)", () => {
+		const state = registerMnemopiState();
+		const memory = state.getScopedRetainTarget().memory;
+		const beam = memory.beam;
+		// Explicit retain from a prior session: STATED, unconsolidated.
+		const retainId = memory.remember("durable lesson worth keeping across sessions", {
+			source: "coding-agent-retain",
+			importance: 0.75,
+			scope: "bank",
+			extract: false,
+		});
+		// Simulate a >24h session gap: past the 24h TTL and the 12h sleep gate.
+		const oldTs = new Date(Date.now() - 48 * 3_600_000).toISOString();
+		beam.db.run("UPDATE working_memory SET timestamp = ? WHERE id = ?", [oldTs, retainId]);
+
+		// Session start consolidation stamps consolidated_at before any write.
+		state.promoteEligibleWorkingMemory();
+		const consolidatedAt = (
+			beam.db.query("SELECT consolidated_at FROM working_memory WHERE id = ?").get(retainId) as {
+				consolidated_at: string | null;
+			} | null
+		)?.consolidated_at;
+		expect(consolidatedAt).not.toBeNull();
+
+		// A later write triggers trimWorkingMemory(); the consolidated row survives.
+		memory.remember("a fresh note in the new session", { source: "coding-agent-transcript", scope: "bank" });
+		expect(memory.get(retainId)).not.toBeNull();
+	});
+
+	it("promotes aged working memory when the backend starts a top-level session (#10770)", async () => {
+		const settings = Settings.isolated({
+			"memory.backend": "mnemopi",
+			"mnemopi.noEmbeddings": true,
+			"mnemopi.llmMode": "none",
+		});
+		// Seed an aged, unconsolidated retain row, then close the bank handles so
+		// backend.start reopens the same DB file from disk.
+		const seed = registerMnemopiState();
+		const seedMemory = seed.getScopedRetainTarget().memory;
+		const retainId = seedMemory.remember("aged durable lesson", {
+			source: "coding-agent-retain",
+			scope: "bank",
+			extract: false,
+		});
+		seedMemory.beam.db.run("UPDATE working_memory SET timestamp = ? WHERE id = ?", [
+			new Date(Date.now() - 48 * 3_600_000).toISOString(),
+			retainId,
+		]);
+		await seed.dispose({ consolidate: false });
+		registeredMnemopiState = undefined;
+		resetMemoryForTests();
+
+		const session = {
+			sessionId: TEST_SESSION_ID,
+			settings,
+			modelRegistry: { getApiKeyForProvider: async () => undefined, resolver: () => async () => undefined },
+			sessionManager: { getEntries: () => [], getCwd: () => "/tmp" },
+			emitNotice: () => {},
+			getHindsightSessionState: () => undefined,
+			subscribe: () => () => {},
+		} as never;
+		await mnemopiBackend.start({
+			session,
+			settings,
+			modelRegistry: { getApiKeyForProvider: async () => undefined, resolver: () => async () => undefined } as never,
+			agentDir: path.dirname(tempDbPath!),
+			taskDepth: 0,
+		});
+
+		const started = getMnemopiSessionState(session);
+		expect(started).toBeDefined();
+		registeredMnemopiState = started;
+		const row = started!
+			.getScopedRetainTarget()
+			.memory.beam.db.query("SELECT consolidated_at FROM working_memory WHERE id = ?")
+			.get(retainId) as { consolidated_at: string | null } | null;
+		expect(row?.consolidated_at).not.toBeNull();
+	});
+
 	it("does not re-store retained turns during consolidation or after resume", async () => {
 		const entries = Array.from({ length: 6 }, (_, index) => ({
 			type: "message",
