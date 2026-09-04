@@ -59,6 +59,22 @@ function buildMinimalFixture(): string {
 	return root;
 }
 
+function buildNamedMarketplace(root: string, marketplaceName: string, pluginName: string): string {
+	const pluginDir = path.join(root, "plugins", pluginName);
+	fs.mkdirSync(path.join(root, ".claude-plugin"), { recursive: true });
+	fs.mkdirSync(pluginDir, { recursive: true });
+	fs.writeFileSync(
+		path.join(root, ".claude-plugin", "marketplace.json"),
+		JSON.stringify({
+			name: marketplaceName,
+			owner: { name: "Test Author" },
+			plugins: [{ name: pluginName, source: `./plugins/${pluginName}`, version: "1.0.0" }],
+		}),
+	);
+	fs.writeFileSync(path.join(pluginDir, "package.json"), JSON.stringify({ name: pluginName, version: "1.0.0" }));
+	return root;
+}
+
 // ── Test helper ───────────────────────────────────────────────────────────────
 
 interface TestContext {
@@ -320,6 +336,25 @@ describe("MarketplaceManager", () => {
 		} finally {
 			for (const spy of spies) spy.mockRestore();
 		}
+	});
+
+	it("rejects case-equivalent runtime package names before replacing the installed link", async () => {
+		const upperMarketplace = buildNamedMarketplace(path.join(ctx.tmpDir, "upper-marketplace"), "upper-market", "Foo");
+		const lowerMarketplace = buildNamedMarketplace(path.join(ctx.tmpDir, "lower-marketplace"), "lower-market", "foo");
+		await ctx.manager.addMarketplace(upperMarketplace);
+		await ctx.manager.addMarketplace(lowerMarketplace);
+		const installed = await ctx.manager.installPlugin("Foo", "upper-market");
+		const linkPath = path.join(ctx.tmpDir, "node_modules", "Foo");
+		const installedRealpath = fs.realpathSync(installed.installPath);
+
+		await expect(ctx.manager.installPlugin("foo", "lower-market")).rejects.toThrow(
+			'Runtime package name "foo" conflicts with installed plugin "Foo@upper-market"',
+		);
+		expect(fs.realpathSync(linkPath)).toBe(installedRealpath);
+		const runtimeConfig = await Bun.file(path.join(ctx.tmpDir, "omp-plugins.lock.json")).json();
+		expect(Object.keys(runtimeConfig.plugins)).toEqual(["Foo"]);
+		expect((await ctx.manager.listInstalledPlugins()).map(plugin => plugin.id)).toEqual(["Foo@upper-market"]);
+		expect(fs.existsSync(path.join(ctx.tmpDir, "cache", "plugins", "lower-market___foo___1.0.0"))).toBe(false);
 	});
 
 	it("installPlugin rejects package names that escape node_modules", async () => {

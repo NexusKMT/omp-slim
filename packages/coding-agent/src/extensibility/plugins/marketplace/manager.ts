@@ -320,6 +320,16 @@ export class MarketplaceManager {
 		}
 
 		const packageName = await this.#resolvePluginPackageName(cachePath, name);
+		try {
+			await this.#assertRuntimePackageNameAvailable(
+				packageName,
+				await readInstalledPluginsRegistry(registryPath),
+				pluginId,
+			);
+		} catch (err) {
+			await fs.rm(cachePath, { recursive: true, force: true }).catch(() => {});
+			throw err;
+		}
 		const previousPackageNames = await this.#resolveInstalledPackageNames(existing ?? [], name);
 
 		// Only now clean up old entries — new cache succeeded, so it is safe to remove old ones.
@@ -817,6 +827,29 @@ export class MarketplaceManager {
 			throw new Error(`Marketplace plugin package path escapes node_modules: ${JSON.stringify(packageName)}`);
 		}
 		return linkPath;
+	}
+
+	async #assertRuntimePackageNameAvailable(
+		packageName: string,
+		registry: InstalledPluginsRegistry,
+		pluginId: string,
+	): Promise<void> {
+		const key = packageName.toLowerCase();
+		for (const installedPluginId in registry.plugins) {
+			if (installedPluginId === pluginId) continue;
+			const fallbackName = parsePluginId(installedPluginId)?.name ?? installedPluginId;
+			const installedNames = await this.#resolveInstalledPackageNames(
+				registry.plugins[installedPluginId],
+				fallbackName,
+			);
+			for (const installedName of installedNames) {
+				if (installedName.toLowerCase() === key) {
+					throw new Error(
+						`Runtime package name "${packageName}" conflicts with installed plugin "${installedPluginId}"`,
+					);
+				}
+			}
+		}
 	}
 
 	async #resolveInstalledPackageNames(
