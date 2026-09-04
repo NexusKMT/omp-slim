@@ -154,6 +154,16 @@ describe("truncateTail", () => {
 		expect(result.truncatedBy).toBe("bytes");
 		expect(result.lastLinePartial).toBe(true);
 	});
+
+	test("fills the remaining byte budget from a giant line before smaller trailing lines", () => {
+		const result = truncateTail("abcdefghijk\n}\n```", { maxLines: 10, maxBytes: 10 });
+
+		expect(result.content).toBe("hijk\n}\n```");
+		expect(result.truncatedBy).toBe("bytes");
+		expect(result.outputLines).toBe(3);
+		expect(result.outputBytes).toBe(10);
+		expect(result.lastLinePartial).toBe(true);
+	});
 });
 
 describe("truncateLine", () => {
@@ -622,7 +632,7 @@ describe("truncateMiddle", () => {
 		expect(result.content).toContain("elided");
 		expect(result.elidedBytes).toBeGreaterThan(0);
 		expect(result.headLines).toBe(1);
-		expect(result.tailLines).toBe(2);
+		expect(result.tailLines).toBe(3);
 	});
 
 	test("does not duplicate overlapping fallback windows", () => {

@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed two idle subagents exchanging a single IRC message ping-ponging forever: wake-turn relays are now tagged and never relayed back, so each automated relay is delivered exactly once instead of waking a reciprocal relay until manual cancellation.
+- Fixed large MCP tool-result previews collapsing their tail window to closing braces when an oversized output line preceded them ([#10761](https://github.com/can1357/oh-my-pi/issues/10761)).
 
 ## [18.1.8] - 2026-09-03
 

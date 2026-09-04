@@ -429,58 +429,51 @@ export function truncateTail(content: string, options: TruncationOptions = {}): 
 		}
 
 		const lineCodeUnits = end - lineStart;
+		let partialLine: ByteTruncationResult | undefined;
 
-		// Fast reject huge line without slicing/encoding.
-		if (lineCodeUnits > remaining) {
+		// Fast reject a giant line without slicing/encoding.
+		if (lineCodeUnits > maxBytes) {
 			truncatedBy = "bytes";
-			if (includedLines === 0) {
-				// Window the line substring to avoid materializing a giant string.
-				const windowStart = Math.max(lineStart, end - maxBytes);
-				const window = content.substring(windowStart, end);
-				const tail = truncateTailBytes(window, maxBytes);
-				return {
-					content: tail.text,
-					truncated: true,
-					truncatedBy: "bytes",
-					totalLines,
-					totalBytes,
-					outputLines: 1,
-					outputBytes: tail.bytes,
-					lastLinePartial: true,
-					firstLineExceedsLimit: false,
-				};
+			// Window the line substring to avoid materializing a giant string.
+			const windowStart = Math.max(lineStart, end - remaining);
+			const window = content.substring(windowStart, end);
+			partialLine = truncateTailBytes(window, remaining);
+		} else {
+			const lineText = content.slice(lineStart, end);
+			const lineBytes = Buffer.byteLength(lineText, "utf-8");
+
+			if (lineBytes > remaining) {
+				truncatedBy = "bytes";
+				if (lineBytes > maxBytes) partialLine = truncateTailBytes(lineText, remaining);
+			} else {
+				bytesUsed += sepBytes + lineBytes;
+				includedLines++;
+				startIndex = lineStart;
+
+				if (nl === -1) break;
+				end = nl; // exclude the newline itself; it'll be accounted as sepBytes in the next iteration
+				continue;
 			}
-			break;
 		}
 
-		const lineText = content.slice(lineStart, end);
-		const lineBytes = Buffer.byteLength(lineText, "utf-8");
-
-		if (lineBytes > remaining) {
-			truncatedBy = "bytes";
-			if (includedLines === 0) {
-				const tail = truncateTailBytes(lineText, maxBytes);
-				return {
-					content: tail.text,
-					truncated: true,
-					truncatedBy: "bytes",
-					totalLines,
-					totalBytes,
-					outputLines: 1,
-					outputBytes: tail.bytes,
-					lastLinePartial: true,
-					firstLineExceedsLimit: false,
-				};
-			}
-			break;
+		if (partialLine && (partialLine.bytes > 0 || includedLines === 0)) {
+			const hasCompleteLines = includedLines > 0;
+			const separator = hasCompleteLines && partialLine.bytes > 0 ? NL : "";
+			const completeTail = hasCompleteLines ? content.slice(startIndex) : "";
+			const output = materializeString(`${partialLine.text}${separator}${completeTail}`);
+			return {
+				content: output,
+				truncated: true,
+				truncatedBy: "bytes",
+				totalLines,
+				totalBytes,
+				outputLines: includedLines + (partialLine.bytes > 0 ? 1 : 0),
+				outputBytes: bytesUsed + separator.length + partialLine.bytes,
+				lastLinePartial: partialLine.bytes > 0,
+				firstLineExceedsLimit: false,
+			};
 		}
-
-		bytesUsed += sepBytes + lineBytes;
-		includedLines++;
-		startIndex = lineStart;
-
-		if (nl === -1) break;
-		end = nl; // exclude the newline itself; it'll be accounted as sepBytes in the next iteration
+		break;
 	}
 
 	if (includedLines >= maxLines && bytesUsed <= maxBytes) truncatedBy = "lines";
