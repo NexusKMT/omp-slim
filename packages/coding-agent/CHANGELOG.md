@@ -18,6 +18,7 @@
 - Fixed omp-installed marketplace plugins and `--plugin-dir` plugins still losing their skills when the Claude plugin source was not separately enabled, completing the #10666 fix ([#10743](https://github.com/can1357/oh-my-pi/issues/10743)).
 - Fixed session accent colors rendering as bright white in terminals without truecolor support, including Terminal.app ([#10759](https://github.com/can1357/oh-my-pi/issues/10759)).
 - Fixed two idle subagents exchanging a single IRC message ping-ponging forever: wake-turn relays are now tagged and never relayed back, so each automated relay is delivered exactly once instead of waking a reciprocal relay until manual cancellation.
+- Fixed large MCP tool-result previews collapsing their tail window to closing braces when an oversized output line preceded them ([#10761](https://github.com/can1357/oh-my-pi/issues/10761)).
 
 ## [18.1.8] - 2026-09-03
 
