@@ -2288,7 +2288,9 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			.text(outputText)
 			.sourcePath(artifact.path)
 			.sourceInternal(url.href);
-		if (truncationInfo) resultBuilder.truncation(truncationInfo.result, truncationInfo.options);
+		if (truncationInfo) {
+			resultBuilder.truncation(truncationInfo.result, { ...truncationInfo.options, maxBytes: maxBytesForRead });
+		}
 		return resultBuilder.done();
 	}
 

@@ -91,6 +91,8 @@ export interface TruncationOptions {
 	startLine?: number;
 	totalFileLines?: number;
 	artifactId?: string;
+	/** Byte budget that stopped the read, when truncation is byte-limited. */
+	maxBytes?: number;
 }
 
 export interface TruncationSummaryOptions {
@@ -125,7 +127,7 @@ export class OutputMetaBuilder {
 	truncation(result: TruncationResult, options: TruncationOptions): this {
 		if (!result.truncated) return this;
 
-		const { direction, startLine = 1, totalFileLines, artifactId } = options;
+		const { direction, startLine = 1, totalFileLines, artifactId, maxBytes } = options;
 		const outputLines = result.outputLines ?? result.totalLines;
 		const outputBytes = result.outputBytes ?? result.totalBytes;
 		const isMiddle = direction === "middle" || result.truncatedBy === "middle";
@@ -187,6 +189,7 @@ export class OutputMetaBuilder {
 			totalBytes: result.totalBytes,
 			outputLines,
 			outputBytes,
+			maxBytes,
 			shownRange: { start: shownStart, end: shownEnd },
 			artifactId,
 			nextOffset: direction === "head" ? shownEnd + 1 : undefined,
