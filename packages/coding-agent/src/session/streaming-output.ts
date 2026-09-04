@@ -108,6 +108,7 @@ export interface TruncationResult {
 	tailLines?: number;
 	/** True when either retained side is a partial byte range of a source line. */
 	partialByteWindows?: boolean;
+	/** True when the retained suffix ends with a partial final source line. */
 	lastLinePartial?: boolean;
 	firstLineExceedsLimit?: boolean;
 }
@@ -469,7 +470,8 @@ export function truncateTail(content: string, options: TruncationOptions = {}): 
 				totalBytes,
 				outputLines: includedLines + (partialLine.bytes > 0 ? 1 : 0),
 				outputBytes: bytesUsed + separator.length + partialLine.bytes,
-				lastLinePartial: partialLine.bytes > 0,
+				partialByteWindows: partialLine.bytes > 0,
+				lastLinePartial: partialLine.bytes > 0 && !hasCompleteLines,
 				firstLineExceedsLimit: false,
 			};
 		}
@@ -544,6 +546,7 @@ export function truncateMiddle(content: string, options: TruncationOptions = {})
 	const tailLinesKept = tail.outputLines ?? 0;
 	const headBytesKept = head.outputBytes ?? Buffer.byteLength(head.content, "utf-8");
 	const tailBytesKept = tail.outputBytes ?? Buffer.byteLength(tail.content, "utf-8");
+	const tailHasPartialWindow = tail.partialByteWindows === true || tail.lastLinePartial === true;
 
 	// A giant first/last line cannot use one of the line-preserving windows. Use
 	// a byte window only for that side and retain the normal line cap on the other.
@@ -580,15 +583,15 @@ export function truncateMiddle(content: string, options: TruncationOptions = {})
 			elidedLines: Math.max(0, totalLines - actualHeadLines - actualTailLines),
 			headLines: actualHeadLines,
 			tailLines: actualTailLines,
-			partialByteWindows: useByteHead || useByteTail || tail.lastLinePartial === true,
+			partialByteWindows: useByteHead || useByteTail || tailHasPartialWindow,
 			elidedBytes,
-			lastLinePartial: true,
+			lastLinePartial: tail.lastLinePartial,
 			firstLineExceedsLimit: false,
 		};
 	}
 	// Fully retained line windows need no marker. A partial tail still omitted
 	// bytes from its source line even when the windows account for every line.
-	if (headLinesKept + tailLinesKept >= totalLines && !tail.lastLinePartial) {
+	if (headLinesKept + tailLinesKept >= totalLines && !tailHasPartialWindow) {
 		return noTruncResult(content, totalLines, totalBytes);
 	}
 
@@ -612,6 +615,7 @@ export function truncateMiddle(content: string, options: TruncationOptions = {})
 		elidedBytes,
 		headLines: headLinesKept,
 		tailLines: tailLinesKept,
+		partialByteWindows: tailHasPartialWindow,
 		lastLinePartial: tail.lastLinePartial,
 		firstLineExceedsLimit: false,
 	};
@@ -1447,6 +1451,8 @@ export function formatTailTruncationNotice(
 			lastLineSizePart = ` (line is ${formatBytes(Buffer.byteLength(lastLine, "utf-8"))})`;
 		}
 		notice = `[Showing last ${formatBytes(truncation.outputBytes ?? truncation.totalBytes)} of line ${endLine}${lastLineSizePart}${fullOutputPart}${suffix}]`;
+	} else if (truncation.partialByteWindows) {
+		notice = `[Showing last ${formatBytes(truncation.outputBytes ?? truncation.totalBytes)} across lines ${startLine}-${endLine} of ${truncation.totalLines}; line ${startLine} is partial${fullOutputPart}${suffix}]`;
 	} else {
 		notice = `[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}${fullOutputPart}${suffix}]`;
 	}
