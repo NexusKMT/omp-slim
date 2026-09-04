@@ -267,6 +267,49 @@ describe("MarketplaceManager", () => {
 		expect(installed[0].id).toBe("hello-plugin@test-marketplace");
 	});
 
+	it("installs mixed-case plugin names with lowercase runtime package keys", async () => {
+		const marketplaceDir = path.join(ctx.tmpDir, "mixed-case-marketplace");
+		const noManifestDir = path.join(marketplaceDir, "plugins", "No-Manifest");
+		const manifestDir = path.join(marketplaceDir, "plugins", "Manifest-Name");
+		fs.mkdirSync(path.join(marketplaceDir, ".claude-plugin"), { recursive: true });
+		fs.mkdirSync(noManifestDir, { recursive: true });
+		fs.mkdirSync(manifestDir, { recursive: true });
+		await Bun.write(
+			path.join(marketplaceDir, ".claude-plugin", "marketplace.json"),
+			`${JSON.stringify(
+				{
+					name: "Mixed-Marketplace",
+					owner: { name: "Test Author" },
+					plugins: [
+						{ name: "No-Manifest", source: "./plugins/No-Manifest", version: "1.0.0" },
+						{ name: "Manifest-Name", source: "./plugins/Manifest-Name", version: "2.0.0" },
+					],
+				},
+				null,
+				2,
+			)}\n`,
+		);
+		await Bun.write(path.join(manifestDir, "package.json"), `${JSON.stringify({ name: "Manifest-Name" })}\n`);
+
+		await ctx.manager.addMarketplace(marketplaceDir);
+		const noManifest = await ctx.manager.installPlugin("No-Manifest", "Mixed-Marketplace");
+		const manifest = await ctx.manager.installPlugin("Manifest-Name", "Mixed-Marketplace");
+
+		expect(fs.realpathSync(path.join(ctx.tmpDir, "node_modules", "no-manifest"))).toBe(
+			fs.realpathSync(noManifest.installPath),
+		);
+		expect(fs.realpathSync(path.join(ctx.tmpDir, "node_modules", "manifest-name"))).toBe(
+			fs.realpathSync(manifest.installPath),
+		);
+		const runtimeConfig = await Bun.file(path.join(ctx.tmpDir, "omp-plugins.lock.json")).json();
+		expect(Object.keys(runtimeConfig.plugins).sort()).toEqual(["manifest-name", "no-manifest"]);
+		const installed = await ctx.manager.listInstalledPlugins();
+		expect(installed.map(plugin => plugin.id).sort()).toEqual([
+			"Manifest-Name@Mixed-Marketplace",
+			"No-Manifest@Mixed-Marketplace",
+		]);
+	});
+
 	it("installPlugin rejects package names that escape node_modules", async () => {
 		const marketplaceDir = path.join(ctx.tmpDir, "bad-package-marketplace");
 		const pluginDir = path.join(marketplaceDir, "plugins", "bad-package");
