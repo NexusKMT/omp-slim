@@ -44,7 +44,10 @@ export function createGradientHighlighter(spec: GradientHighlightSpec): KeywordH
 
 	/** Gradient foreground escapes for the active color mode, compiled once per mode. */
 	const palette = (): readonly string[] => {
-		const mode = theme.getColorMode();
+		// `theme` is unassigned on early-render paths (before initTheme/initThemeSync)
+		// and on cross-module-instance plugin calls; fall back to truecolor so the
+		// gradient still paints instead of crashing. See #2998, #4766.
+		const mode = typeof theme === "undefined" ? "truecolor" : theme.getColorMode();
 		if (cachedPalette && cachedMode === mode) return cachedPalette;
 		const format = mode === "truecolor" ? "ansi-16m" : "ansi-256";
 		const next: string[] = [];

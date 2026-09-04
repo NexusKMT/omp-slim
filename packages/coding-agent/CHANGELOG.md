@@ -11,6 +11,7 @@
 - Report oversized selected lines that cannot fit after read context, with a working raw recovery selector instead of a looping continuation hint ([#10775](https://github.com/can1357/oh-my-pi/issues/10775)).
 - Fixed WorkPool child sessions crashing during startup while constructing their incremental `yield` tool schema.
 - Commit summaries written in Vietnamese, Korean, and other accented scripts are no longer rejected for exceeding the length limit, and keep their accents as typed.
+- Fixed a mid-session render crash (`undefined is not an object (evaluating 'theme.getColorMode')`) when a magic keyword (`ultrathink`/`orchestrate`/`workflowz`) is painted before the theme finishes initializing ([#10864](https://github.com/can1357/oh-my-pi/issues/10864)).
 
 ## [18.1.10] - 2026-09-04
 
