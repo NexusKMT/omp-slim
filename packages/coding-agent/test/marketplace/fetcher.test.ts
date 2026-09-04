@@ -89,6 +89,18 @@ describe("parseMarketplaceCatalog", () => {
 		expect(catalog.plugins[0].name).toBe("hello-plugin");
 	});
 
+	it("parses a catalog whose name has uppercase letters (#10827)", () => {
+		const catalog = parseMarketplaceCatalog(
+			JSON.stringify({
+				name: "HexRaysSA",
+				owner: { name: "HexRaysSA" },
+				plugins: [{ name: "ida-mcp", source: "./plugins/ida-mcp" }],
+			}),
+			"/f.json",
+		);
+		expect(catalog.name).toBe("HexRaysSA");
+	});
+
 	it("throws on missing name", () => {
 		const bad = JSON.stringify({ owner: { name: "x" }, plugins: [] });
 		expect(() => parseMarketplaceCatalog(bad, "/f.json")).toThrow(/"name"/);
