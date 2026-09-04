@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed two idle subagents exchanging a single IRC message ping-ponging forever: wake-turn relays are now tagged and never relayed back, so each automated relay is delivered exactly once instead of waking a reciprocal relay until manual cancellation.
+- Fixed the read tool's truncation notice reporting `Showing 0 of N lines` (with `outputLines`/`outputBytes` of 0) when a single line larger than the byte budget is shown as a partial preview; it now reports the delivered partial line, e.g. `Showing line N (partial, 50.0KB of 68.4KB) of N` ([#10768](https://github.com/can1357/oh-my-pi/issues/10768)).
 
 ## [18.1.8] - 2026-09-03
 
