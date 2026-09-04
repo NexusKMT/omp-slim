@@ -1476,12 +1476,14 @@ export class ModelRegistry {
 		if (
 			discovered.length === 0 &&
 			builtInDiscovery.authoritativeProviders.size === 0 &&
+			builtInDiscovery.clearRuntimeProviders.size === 0 &&
 			clearedConfiguredProviders.length === 0
 		) {
 			return;
 		}
 		const touchedProviders = new Set(discovered.map(model => model.provider));
 		for (const provider of clearedConfiguredProviders) touchedProviders.add(provider);
+		for (const provider of builtInDiscovery.clearRuntimeProviders) touchedProviders.add(provider);
 		for (const provider of builtInDiscovery.authoritativeProviders) touchedProviders.add(provider);
 		const existingModels = this.#hasFullSnapshot
 			? this.#unprojectedModels
@@ -1500,10 +1502,16 @@ export class ModelRegistry {
 			authoritativeProviders.add(provider);
 		}
 
-		const clearedConfiguredProviderSet = new Set(clearedConfiguredProviders);
-		if (clearedConfiguredProviderSet.size > 0) {
+		const clearedProviderSet = new Set(clearedConfiguredProviders);
+		for (const provider of builtInDiscovery.clearRuntimeProviders) {
+			clearedProviderSet.add(provider);
+			this.#cachedStandardModelsByProvider.delete(provider);
+			this.#pendingStandardCacheProviders.delete(provider);
+			this.#cachedAuthoritativeProviders.delete(provider);
+		}
+		if (clearedProviderSet.size > 0) {
 			this.#cachedDiscoverableModels = this.#cachedDiscoverableModels.filter(
-				model => !clearedConfiguredProviderSet.has(model.provider),
+				model => !clearedProviderSet.has(model.provider),
 			);
 		}
 		this.#runtimeDiscoveredModels = this.#runtimeDiscoveredModels.filter(
@@ -1521,10 +1529,10 @@ export class ModelRegistry {
 		if (!this.#hasFullSnapshot) return;
 
 		let baseModels = this.#unprojectedModels;
-		if (clearedConfiguredProviderSet.size > 0) {
+		if (clearedProviderSet.size > 0) {
 			baseModels = this.#mergeResolvedModels(
-				dropProviderModels(baseModels, clearedConfiguredProviderSet),
-				this.#composeUnprojectedStaticModels(clearedConfiguredProviderSet),
+				dropProviderModels(baseModels, clearedProviderSet),
+				this.#composeUnprojectedStaticModels(clearedProviderSet),
 			);
 		}
 		if (authoritativeProviders.size > 0) {
@@ -1737,20 +1745,24 @@ export class ModelRegistry {
 			configuredDiscoveryProviders,
 		);
 		if (managerOptions.length === 0) {
-			return { models: [], authoritativeProviders: new Set() };
+			return { models: [], authoritativeProviders: new Set(), clearRuntimeProviders: new Set() };
 		}
 		const discoveries = await Promise.all(
 			managerOptions.map(options => this.#discoverWithModelManager(options, strategy)),
 		);
 		const authoritativeProviders = new Set<string>();
+		const clearRuntimeProviders = new Set<string>();
 		const models: Model<Api>[] = [];
 		for (const discovery of discoveries) {
 			models.push(...discovery.models);
 			for (const provider of discovery.authoritativeProviders) {
 				authoritativeProviders.add(provider);
 			}
+			for (const provider of discovery.clearRuntimeProviders) {
+				clearRuntimeProviders.add(provider);
+			}
 		}
-		return { models, authoritativeProviders };
+		return { models, authoritativeProviders, clearRuntimeProviders };
 	}
 
 	async #resolveBuiltInDiscoveryApiKey(
@@ -2002,13 +2014,17 @@ export class ModelRegistry {
 			if (options.dynamicModelsAuthoritative && !result.stale) {
 				authoritativeProviders.add(options.providerId);
 			}
-			return { models, authoritativeProviders };
+			const clearRuntimeProviders = new Set<string>();
+			if (result.source === "provider" && result.models.length === 0) {
+				clearRuntimeProviders.add(options.providerId);
+			}
+			return { models, authoritativeProviders, clearRuntimeProviders };
 		} catch (error) {
 			logger.warn("model discovery failed for provider", {
 				provider: options.providerId,
 				error: error instanceof Error ? error.message : String(error),
 			});
-			return { models: [], authoritativeProviders: new Set() };
+			return { models: [], authoritativeProviders: new Set(), clearRuntimeProviders: new Set() };
 		}
 	}
 

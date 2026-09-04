@@ -88,7 +88,13 @@ describe("ModelRegistry runtime discovery", () => {
 	}
 
 	function withEnv(
-		name: "LLAMA_CPP_BASE_URL" | "LM_STUDIO_BASE_URL" | "OLLAMA_BASE_URL" | "OLLAMA_CONTEXT_LENGTH" | "OLLAMA_HOST",
+		name:
+			| "LITELLM_BASE_URL"
+			| "LLAMA_CPP_BASE_URL"
+			| "LM_STUDIO_BASE_URL"
+			| "OLLAMA_BASE_URL"
+			| "OLLAMA_CONTEXT_LENGTH"
+			| "OLLAMA_HOST",
 		value: string | undefined,
 	) {
 		const original = Bun.env[name];
@@ -2717,6 +2723,45 @@ providers:
 		modelGroups = [{ model_group: "embedding-only", mode: "embedding" }];
 		await registry.refresh("online");
 		expect(getModelsForProvider(registry, "litellm-test")).toEqual([]);
+	});
+
+	test("built-in litellm discovery clears models when a filtered rich refresh is empty", async () => {
+		using _litellmBaseUrl = withEnv("LITELLM_BASE_URL", "http://127.0.0.1:4007/v1");
+		writeRawModelsJson({});
+		authStorage.setRuntimeApiKey("litellm", "sk-litellm-test");
+		let modelGroups: Record<string, unknown>[] = [
+			{
+				model_group: "keep-chat",
+				mode: "chat",
+				providers: ["openai"],
+				supports_vision: false,
+			},
+		];
+		const fetchMock: FetchImpl = async input => {
+			const url = String(input);
+			if (url === "https://catalog.stencil.so/models.json.zstd") {
+				return Response.json({});
+			}
+			if (url === "http://127.0.0.1:4007/model_group/info") {
+				return Response.json({ data: modelGroups });
+			}
+			if (
+				url === "http://127.0.0.1:4007/v2/model/info" ||
+				url === "http://127.0.0.1:4007/model/info" ||
+				url === "http://127.0.0.1:4007/v1/model/info"
+			) {
+				return new Response("Not Found", { status: 404 });
+			}
+			throw new Error(`/v1/models must not reintroduce the excluded model: ${url}`);
+		};
+
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+		await registry.refreshProvider("litellm", "online");
+		expect(getModelsForProvider(registry, "litellm").map(model => model.id)).toEqual(["keep-chat"]);
+
+		modelGroups = [{ model_group: "embedding-only", mode: "embedding" }];
+		await registry.refreshProvider("litellm", "online");
+		expect(getModelsForProvider(registry, "litellm")).toEqual([]);
 	});
 
 	test("litellm discovery enriches configured proxy models with bundled references", async () => {

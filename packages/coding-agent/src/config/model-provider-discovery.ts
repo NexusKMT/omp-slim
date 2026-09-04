@@ -76,6 +76,8 @@ export async function withModelDiscoveryTimeout<T>(timeoutMs: number, run: () =>
 export interface BuiltInDiscoveryResult {
 	models: Model<Api>[];
 	authoritativeProviders: Set<string>;
+	/** Providers whose successful endpoint refresh returned empty and must clear prior discovered rows. */
+	clearRuntimeProviders: Set<string>;
 }
 
 export type ProviderDiscoveryStatus = "idle" | "ok" | "empty" | "cached" | "unavailable" | "unauthenticated";
