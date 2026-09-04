@@ -253,15 +253,17 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 			throw denyError(resolved, this.tool.name);
 		}
 		const pendingSafetyChecks = computerSafetyChecks(context);
-		// Outer approvals only cover the original input. An extension revision may
-		// raise the tier, so revised input always faces the full gate. `xd://`
-		// approval skips tier-only prompts; ACP approval also satisfies explicit
-		// prompts because the client answered that exact request. Denies were
+		// Outer approvals only cover the original input. `xd://` approval skips
+		// tier-only prompts while the same object flows through; ACP approval also
+		// satisfies explicit prompts, but compares against a deep snapshot because
+		// handlers can mutate the original argument object in place. Denies were
 		// enforced above, and provider safety checks remain independently required.
 		const explicitPrompt = resolved.override || Object.hasOwn(userPolicies, resolved.policyKey ?? this.tool.name);
-		const originalInput = effectiveParams === params;
-		const xdevBypass = context?.xdevApproved === true && originalInput;
-		const acpBypass = context?.acpApproved === true && originalInput;
+		const xdevBypass = context?.xdevApproved === true && effectiveParams === params;
+		const acpBypass =
+			context !== undefined &&
+			Object.hasOwn(context, "acpApprovedArgs") &&
+			Bun.deepEquals(effectiveParams, context.acpApprovedArgs);
 		const approvalCheck = {
 			required:
 				pendingSafetyChecks.length > 0 ||

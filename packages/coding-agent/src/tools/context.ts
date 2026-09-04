@@ -12,10 +12,10 @@ declare module "@oh-my-pi/pi-agent-core" {
 		 *  at the mounted tool's tier. The inner wrapper skips its tier-only
 		 *  prompt, while explicit policies and overrides still apply. */
 		xdevApproved?: boolean;
-		/** Set after an ACP client approves the exact original tool call. The
-		 *  inner wrapper skips tier and explicit prompts; deny policies, provider
-		 *  safety checks, and extension-revised inputs still require resolution. */
-		acpApproved?: boolean;
+		/** Immutable snapshot of the arguments an ACP client approved. The inner
+		 *  wrapper skips tier and explicit prompts only while the effective input
+		 *  remains equal; deny policies and provider safety checks still apply. */
+		acpApprovedArgs?: unknown;
 		/** Reports the approval tier resolved after an extension rewrites an
 		 *  xd:// device call, so dispatch metadata describes the input that ran. */
 		xdevTierResolved?(tier: "read" | "write" | "exec"): void;
