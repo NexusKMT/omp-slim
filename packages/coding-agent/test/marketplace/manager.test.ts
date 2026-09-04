@@ -267,7 +267,7 @@ describe("MarketplaceManager", () => {
 		expect(installed[0].id).toBe("hello-plugin@test-marketplace");
 	});
 
-	it("installs mixed-case plugin names with lowercase runtime package keys", async () => {
+	it("installs mixed-case plugin names without duplicating them in the npm plugin list", async () => {
 		const marketplaceDir = path.join(ctx.tmpDir, "mixed-case-marketplace");
 		const noManifestDir = path.join(marketplaceDir, "plugins", "No-Manifest");
 		const manifestDir = path.join(marketplaceDir, "plugins", "Manifest-Name");
@@ -289,25 +289,37 @@ describe("MarketplaceManager", () => {
 				2,
 			)}\n`,
 		);
+		// A Claude-style plugin whose package.json repeats the mixed-case catalog name.
 		await Bun.write(path.join(manifestDir, "package.json"), `${JSON.stringify({ name: "Manifest-Name" })}\n`);
 
 		await ctx.manager.addMarketplace(marketplaceDir);
 		const noManifest = await ctx.manager.installPlugin("No-Manifest", "Mixed-Marketplace");
 		const manifest = await ctx.manager.installPlugin("Manifest-Name", "Mixed-Marketplace");
 
-		expect(fs.realpathSync(path.join(ctx.tmpDir, "node_modules", "no-manifest"))).toBe(
+		// Runtime symlink and lock key keep the declared casing, matching the manifest identity.
+		expect(fs.realpathSync(path.join(ctx.tmpDir, "node_modules", "No-Manifest"))).toBe(
 			fs.realpathSync(noManifest.installPath),
 		);
-		expect(fs.realpathSync(path.join(ctx.tmpDir, "node_modules", "manifest-name"))).toBe(
+		expect(fs.realpathSync(path.join(ctx.tmpDir, "node_modules", "Manifest-Name"))).toBe(
 			fs.realpathSync(manifest.installPath),
 		);
 		const runtimeConfig = await Bun.file(path.join(ctx.tmpDir, "omp-plugins.lock.json")).json();
-		expect(Object.keys(runtimeConfig.plugins).sort()).toEqual(["manifest-name", "no-manifest"]);
+		expect(Object.keys(runtimeConfig.plugins).sort()).toEqual(["Manifest-Name", "No-Manifest"]);
 		const installed = await ctx.manager.listInstalledPlugins();
 		expect(installed.map(plugin => plugin.id).sort()).toEqual([
 			"Manifest-Name@Mixed-Marketplace",
 			"No-Manifest@Mixed-Marketplace",
 		]);
+
+		// Both links are recognized as marketplace-owned, so PluginManager never
+		// surfaces them as duplicate npm plugins (the runtime key drift regression).
+		const spies = mockPluginManagerPaths(ctx.tmpDir);
+		try {
+			const plugins = await new PluginManager(ctx.tmpDir).list();
+			expect(plugins.map(plugin => plugin.name)).toEqual([]);
+		} finally {
+			for (const spy of spies) spy.mockRestore();
+		}
 	});
 
 	it("installPlugin rejects package names that escape node_modules", async () => {

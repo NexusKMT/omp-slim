@@ -41,15 +41,14 @@ import type {
 } from "./types";
 import { buildPluginId, nameSegmentCollisionKey, parsePluginId } from "./types";
 
-const RUNTIME_PACKAGE_NAME_RE = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
+const RUNTIME_PACKAGE_NAME_RE = /^(?:@[a-zA-Z0-9][a-zA-Z0-9._~-]*\/)?[a-zA-Z0-9][a-zA-Z0-9._~-]*$/;
 const MAX_RUNTIME_PACKAGE_NAME_LENGTH = 214;
 
-function normalizeRuntimePackageName(name: string): string {
-	const normalized = name.toLowerCase();
-	if (normalized.length > MAX_RUNTIME_PACKAGE_NAME_LENGTH || !RUNTIME_PACKAGE_NAME_RE.test(normalized)) {
+function assertRuntimePackageName(name: string): string {
+	if (name.length > MAX_RUNTIME_PACKAGE_NAME_LENGTH || !RUNTIME_PACKAGE_NAME_RE.test(name)) {
 		throw new Error(`Invalid marketplace plugin package name: ${JSON.stringify(name)}`);
 	}
-	return normalized;
+	return name;
 }
 
 // ── Options ──────────────────────────────────────────────────────────────────
@@ -803,16 +802,16 @@ export class MarketplaceManager {
 		try {
 			const pkg: { name?: unknown } = await Bun.file(path.join(installPath, "package.json")).json();
 			const name = typeof pkg.name === "string" && pkg.name.length > 0 ? pkg.name : fallbackName;
-			return normalizeRuntimePackageName(name);
+			return assertRuntimePackageName(name);
 		} catch (err) {
-			if (isEnoent(err)) return normalizeRuntimePackageName(fallbackName);
+			if (isEnoent(err)) return assertRuntimePackageName(fallbackName);
 			throw err;
 		}
 	}
 
 	#runtimePackagePath(scope: "user" | "project", packageName: string): string {
 		const nodeModules = path.resolve(this.#nodeModulesPath(scope));
-		const linkPath = path.resolve(nodeModules, normalizeRuntimePackageName(packageName));
+		const linkPath = path.resolve(nodeModules, assertRuntimePackageName(packageName));
 		const relative = path.relative(nodeModules, linkPath);
 		if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
 			throw new Error(`Marketplace plugin package path escapes node_modules: ${JSON.stringify(packageName)}`);
