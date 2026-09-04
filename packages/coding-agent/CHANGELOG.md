@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Replaced the `inspect_image` tool and `/vision` controls with `read <image>?q=<question>`; text-only models now receive image metadata plus this selector hint.
+- Renamed `inspect_image.timeoutMs` to `images.questionTimeoutMs`; existing settings migrate automatically.
+
 ### Added
 
 - Made Markdown links to existing local files and resources clickable while preserving their displayed URLs.

@@ -28,7 +28,6 @@ import { supportsExternalThinking } from "../tools/think";
 import { ToolAbortError, ToolError } from "../tools/tool-errors";
 import { isMountableUnderXdev, listXdevTools, type XdevState, xdevDocsFor, xdevEntries } from "../tools/xdev";
 import { type EditMode, resolveEditMode } from "../utils/edit-mode";
-import { type InspectImageMode, isInspectImageToolActive } from "../utils/inspect-image-mode";
 import {
 	extractPermissionLocations,
 	getPermissionIntent,
@@ -64,9 +63,6 @@ export interface SessionToolsHost {
 	emitNotice(level: "info" | "warning" | "error", message: string, source?: string): void;
 	notifyCommandMetadataChanged(): void;
 	localProtocolOptions(): LocalProtocolOptions;
-	/** Session-scoped `/vision` override; undefined means "follow the persisted setting". */
-	getInspectImageModeOverride(): InspectImageMode | undefined;
-	setInspectImageModeOverride(mode: InspectImageMode | undefined): void;
 	/** Publishes the current Codex Code Mode tool exposure snapshot for turn metadata; undefined clears it. */
 	setCodeModeNamespacesInfo?(info: unknown): void;
 }
@@ -78,8 +74,6 @@ interface SessionToolsOptions {
 	createComputerTool?: () => Promise<AgentTool | null>;
 	/** Creates the private `think` scratchpad tool for runtime setting changes. */
 	createThinkTool?: () => Promise<AgentTool | null>;
-	/** Creates the built-in `inspect_image` tool for session-scoped runtime enablement (see {@link SessionTools.setInspectImageMode}). */
-	createInspectImageTool?: () => Promise<AgentTool | null>;
 	builtInToolNames?: Iterable<string>;
 	presentationPinnedToolNames?: ReadonlySet<string>;
 	/** MCP tool names whose current registry entries came from the manager snapshot. */
@@ -201,7 +195,6 @@ export class SessionTools {
 	#createVibeTools: (() => AgentTool[]) | undefined;
 	#createComputerTool: SessionToolsOptions["createComputerTool"];
 	#createThinkTool: SessionToolsOptions["createThinkTool"];
-	#createInspectImageTool: SessionToolsOptions["createInspectImageTool"];
 	#installedVibeToolNames = new Set<string>();
 	#builtInToolNames: Set<string>;
 	#rpcHostToolNames = new Set<string>();
@@ -250,14 +243,6 @@ export class SessionTools {
 	#toolRegistryMutationScope = new AsyncLocalStorage<boolean>();
 	#toolRegistryMutationTail: Promise<void> = Promise.resolve();
 	#promptModelKey: string | undefined;
-	/**
-	 * Model identity (`formatModelString`) last named by an inspect_image
-	 * status notice. Consulted by {@link reconcileInspectImageAfterModelChange}
-	 * to refresh the hint when consecutive switches keep the tool hidden but
-	 * change the active model — otherwise the notice keeps naming the previous
-	 * model (issue #10729).
-	 */
-	#lastInspectImageNoticeModel: string | undefined;
 	#rebuildSystemPrompt: SessionToolsOptions["rebuildSystemPrompt"];
 	#getMcpServerInstructions: SessionToolsOptions["getMcpServerInstructions"];
 	#setActiveToolNames: SessionToolsOptions["setActiveToolNames"];
@@ -284,7 +269,6 @@ export class SessionTools {
 		this.#createVibeTools = options.createVibeTools;
 		this.#createComputerTool = options.createComputerTool;
 		this.#createThinkTool = options.createThinkTool;
-		this.#createInspectImageTool = options.createInspectImageTool;
 		this.#builtInToolNames = new Set(options.builtInToolNames ?? []);
 		this.#mcpManagerToolNames = new Set(options.mcpManagerToolNames ?? []);
 		if (options.mcpManagerToolNames === undefined) {
@@ -319,8 +303,8 @@ export class SessionTools {
 		this.#skillsReloadable = options.skillsReloadable ?? true;
 		// Seed from the construction slate (top-level tools plus xd:// mounts).
 		// Left empty, getEnabledToolNames() falls back to live agent.state.tools,
-		// so an early reconcile (think/inspect_image/Code Mode after the startup
-		// model resolution) landing while the live set is transiently narrow
+		// so an early reconcile (think/Code Mode after the startup model
+		// resolution) landing while the live set is transiently narrow
 		// commits that narrow set as the sticky slate — the session keeps almost
 		// no tools and the prompt rebuild without `read` empties the skill list.
 		for (const tool of host.agent.state.tools) this.#enabledToolNames.add(tool.name);
@@ -682,10 +666,6 @@ export class SessionTools {
 		} else if (computerExpected) {
 			this.#logComputerState("Computer tool retained after model change", true);
 		}
-
-		// inspect_image auto mode keys off model image capability, so a model
-		// switch can flip the tool either way.
-		await this.reconcileInspectImageAfterModelChange();
 	}
 
 	/** Whether a model transition crosses a Code Mode presentation boundary. */
@@ -1539,123 +1519,6 @@ export class SessionTools {
 				await this.#applyActiveToolsByName([...active, "think"]);
 			}
 			return true;
-		});
-	}
-
-	/** Current effective inspect_image state for `/vision status`. */
-	inspectImageState(): { mode: InspectImageMode; active: boolean; model: string | undefined } {
-		const model = this.#host.model();
-		return {
-			mode: this.#host.getInspectImageModeOverride() ?? this.#host.settings.get("inspect_image.mode"),
-			active: this.getEnabledToolNames().includes("inspect_image"),
-			model: model ? formatModelString(model) : undefined,
-		};
-	}
-
-	/**
-	 * Brings the active tool set in line with the effective inspect_image state
-	 * (mode setting, `/vision` override, active-model image capability).
-	 * Mirrors {@link setComputerToolEnabled}: enabling builds the tool through
-	 * the config factory on first use and reuses the registry entry afterwards.
-	 * Idempotent — safe to call from every model/settings change path.
-	 *
-	 * @returns false when the tool should be active but this session cannot
-	 *   build it (e.g. restricted child sessions have no factory).
-	 */
-	reconcileInspectImageTool(): Promise<boolean> {
-		return this.runToolRegistryMutation(async () => {
-			const expected = isInspectImageToolActive({
-				settings: this.#host.settings,
-				getActiveModel: () => this.#host.model(),
-				getInspectImageModeOverride: () => this.#host.getInspectImageModeOverride(),
-			});
-			// Keep the read tool's advertised description in sync BEFORE any prompt
-			// rebuild below, passing the post-change availability so the prompt never
-			// lags a flip in either direction. Per-read lazy sync is the backstop.
-			const syncReadDescription = (available: boolean): void => {
-				const readTool = this.#toolRegistry.get("read") as
-					| { syncInspectImageState?: (available?: boolean) => boolean }
-					| undefined;
-				readTool?.syncInspectImageState?.(available);
-			};
-			const active = this.getEnabledToolNames();
-			const isActive = active.includes("inspect_image");
-			if (expected === isActive) {
-				syncReadDescription(isActive);
-				return true;
-			}
-			if (!expected) {
-				syncReadDescription(false);
-				await this.#applyActiveToolsByName(active.filter(name => name !== "inspect_image"));
-				return true;
-			}
-			if (!this.#toolRegistry.has("inspect_image")) {
-				const tool = await this.#createInspectImageTool?.();
-				if (tool?.name !== "inspect_image") {
-					logger.warn("inspect_image tool could not be created", {
-						model: this.#host.model()?.id,
-					});
-					syncReadDescription(false);
-					return false;
-				}
-				const wrapped = this.#wrapRuntimeTool(tool);
-				this.#toolRegistry.set(wrapped.name, wrapped);
-				this.#builtInToolNames.add(wrapped.name);
-			}
-			syncReadDescription(true);
-			await this.#applyActiveToolsByName([...active, "inspect_image"]);
-			return true;
-		});
-	}
-
-	/**
-	 * Reconciles inspect_image after a model change and surfaces a notice when
-	 * the visible tool set flips, or when consecutive switches keep the tool
-	 * hidden for image capability but change the active model (the hint names
-	 * the model, so it would otherwise keep naming the previous one — issue
-	 * #10729). Called from every model-change path — including retry-fallback
-	 * switches that bypass {@link syncAfterModelChange}.
-	 */
-	reconcileInspectImageAfterModelChange(): Promise<void> {
-		return this.runToolRegistryMutation(async () => {
-			const before = this.getEnabledToolNames().includes("inspect_image");
-			const reconciled = await this.reconcileInspectImageTool();
-			if (!reconciled) return;
-			const after = this.getEnabledToolNames().includes("inspect_image");
-			const model = this.#host.model();
-			const modelName = model ? formatModelString(model) : "the current model";
-			const flipped = before !== after;
-			// The hidden-state hint names the active model to explain why
-			// inspect_image vanished; refresh it when the model changed while the
-			// tool stays hidden, otherwise the prior hint keeps naming the old model.
-			const staleHiddenModel = !after && !flipped && modelName !== this.#lastInspectImageNoticeModel;
-			if (!flipped && !staleHiddenModel) return;
-			this.#lastInspectImageNoticeModel = modelName;
-			this.#host.emitNotice(
-				"info",
-				after
-					? `inspect_image is now available: ${modelName} has no native image input.`
-					: `inspect_image ${flipped ? "is now hidden" : "stays hidden"}: ${modelName} supports image input natively. Override with /vision on.`,
-				"vision",
-			);
-		});
-	}
-
-	/**
-	 * Session-scoped `/vision` override. `auto` clears the override so the
-	 * persisted `inspect_image.mode` setting (itself possibly `auto`) decides;
-	 * `on`/`off` force the tool for this session only. Takes effect before the
-	 * next model call.
-	 *
-	 * @returns false when `on` was requested but the tool cannot be built here.
-	 */
-	setInspectImageMode(mode: InspectImageMode): Promise<boolean> {
-		return this.runToolRegistryMutation(async () => {
-			this.#host.setInspectImageModeOverride(mode === "auto" ? undefined : mode);
-			const applied = await this.reconcileInspectImageTool();
-			const { active, model } = this.inspectImageState();
-			logger.debug("inspect_image mode changed", { mode, active, model });
-			return applied;
 		});
 	}
 
