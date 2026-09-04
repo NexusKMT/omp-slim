@@ -15166,16 +15166,19 @@
 						]
 					},
 					"callback": {
-						"port": 9999,
+						"port": 0,
 						"path": "/callback",
-						"hostname": "127.0.0.1",
-						"portFallback": false,
-						"manualOnly": false,
+						"hostname": "localhost",
+						"portFallback": true,
+						"manualOnly": true,
 						"redirectUri": {
-							"value": "http://127.0.0.1:9999/callback"
+							"value": "zcode://zai-auth/callback",
+							"env": [
+								"ZAI_OAUTH_REDIRECT_URI"
+							]
 						}
 					},
-					"instructions": "Complete Z.ai login in your browser. If the browser cannot reach this machine, paste the final redirect URL or authorization code when prompted.",
+					"instructions": "Complete Z.ai login in your browser. After you approve, the browser may show an unknown-scheme (zcode://) page or appear to do nothing — that is expected. Copy that final redirect URL (or the authorization code from it) and paste it back here when prompted.",
 					"token": {
 						"url": {
 							"value": "https://zcode.z.ai/api/v1/oauth/token",
@@ -15216,7 +15219,7 @@
 				"refresh": {
 					"kind": "none"
 				},
-				"callbackPort": 9999,
+				"callbackPort": 0,
 				"pasteCode": true
 			},
 			{

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/login zai` (Z.AI GLM Coding Plan sign-in) failing at the authorize step after Z.AI stopped registering loopback redirect URIs: the flow now uses the ZCode desktop scheme `zcode://zai-auth/callback` with the paste-code fallback, and honors a `ZAI_OAUTH_REDIRECT_URI` override ([#10745](https://github.com/can1357/oh-my-pi/issues/10745)).
+
 ## [18.1.8] - 2026-09-03
 
 ### Added
