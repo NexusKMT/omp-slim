@@ -2678,7 +2678,7 @@ providers:
 		).toEqual(["keep-chat", "maven-auto"]);
 	});
 
-	test("configured litellm discovery keeps a filtered rich catalog authoritative", async () => {
+	test("configured litellm discovery clears models when a filtered rich refresh is empty", async () => {
 		writeRawModelsJson({
 			"litellm-test": {
 				baseUrl: "http://127.0.0.1:4006/v1",
@@ -2687,10 +2687,18 @@ providers:
 				discovery: { type: "litellm" },
 			},
 		});
+		let modelGroups: Record<string, unknown>[] = [
+			{
+				model_group: "keep-chat",
+				mode: "chat",
+				providers: ["openai"],
+				supports_vision: false,
+			},
+		];
 		const fetchMock: FetchImpl = async input => {
 			const url = String(input);
 			if (url === "http://127.0.0.1:4006/model_group/info") {
-				return Response.json({ data: [{ model_group: "embedding-only", mode: "embedding" }] });
+				return Response.json({ data: modelGroups });
 			}
 			if (
 				url === "http://127.0.0.1:4006/v2/model/info" ||
@@ -2703,8 +2711,11 @@ providers:
 		};
 
 		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
-		await registry.refresh();
+		await registry.refresh("online");
+		expect(getModelsForProvider(registry, "litellm-test").map(model => model.id)).toEqual(["keep-chat"]);
 
+		modelGroups = [{ model_group: "embedding-only", mode: "embedding" }];
+		await registry.refresh("online");
 		expect(getModelsForProvider(registry, "litellm-test")).toEqual([]);
 	});
 

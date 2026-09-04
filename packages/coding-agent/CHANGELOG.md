@@ -11,6 +11,7 @@
 - Report oversized selected lines that cannot fit after read context, with a working raw recovery selector instead of a looping continuation hint ([#10775](https://github.com/can1357/oh-my-pi/issues/10775)).
 - Fixed WorkPool child sessions crashing during startup while constructing their incremental `yield` tool schema.
 - Commit summaries written in Vietnamese, Korean, and other accented scripts are no longer rejected for exceeding the length limit, and keep their accents as typed.
+- Configured LiteLLM discovery no longer exposes embedding, reranking, speech, transcription, or image-generation models in model selectors.
 
 ## [18.1.10] - 2026-09-04
 
@@ -22,7 +23,6 @@
 
 - Fixed Codex V2 remote compaction rebuilding the request prefix differently from normal turns, restoring prompt-cache reuse ([#10786](https://github.com/can1357/oh-my-pi/issues/10786)).
 - Restored mouse clicks, hover, and wheel scrolling in Plan Review.
-- Configured LiteLLM discovery no longer exposes embedding, reranking, speech, transcription, or image-generation models in model selectors.
 
 ## [18.1.9] - 2026-09-04
 

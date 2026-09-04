@@ -5362,6 +5362,7 @@ function warnLiteLLMMetadataFallback(managementBaseUrl: string, failure: LiteLLM
 	});
 }
 
+/** Exclude only known non-conversational modes; unknown and non-string modes remain selectable for aliases. */
 export function isSelectableLiteLLMModelMode(mode: unknown): boolean {
 	return typeof mode !== "string" || !LITELLM_NON_CONVERSATIONAL_MODES.has(mode);
 }

@@ -171,6 +171,11 @@ interface CustomModelsResult {
 	found: boolean;
 }
 
+interface ConfiguredModelDiscoveryResult {
+	models: Model<Api>[];
+	clearRuntimeModels: boolean;
+}
+
 /**
  * Credential-aware model projection supplied by an extension provider. Receives
  * the fully composed catalog and returns the list the host should serve.
@@ -247,8 +252,10 @@ export class ModelRegistry {
 	/** Waiter armed before the initial background refresh starts (CLI kicks it off after the session is built, #10048). */
 	#initialRefreshWaiters = new Set<() => void>();
 	#credentialScopedCacheHydration?: Promise<void>;
-	#configuredDiscoveryInFlight: Map<DiscoveryProviderConfig, Map<ModelRefreshStrategy, Promise<Model<Api>[]>>> =
-		new Map();
+	#configuredDiscoveryInFlight: Map<
+		DiscoveryProviderConfig,
+		Map<ModelRefreshStrategy, Promise<ConfiguredModelDiscoveryResult>>
+	> = new Map();
 	#policyReapply?: Promise<void>;
 	#lastDiscoveryWarnings: Map<string, string> = new Map();
 	// Runtime extension model overlays — persist across refresh() cycles so that
@@ -1445,11 +1452,11 @@ export class ModelRegistry {
 		).filter(provider => !disabledProviders.has(provider.provider));
 		const configuredDiscoveriesPromise =
 			selectedDiscoverableProviders.length === 0
-				? Promise.resolve<{ provider: DiscoveryProviderConfig; models: Model<Api>[] }[]>([])
+				? Promise.resolve<Array<ConfiguredModelDiscoveryResult & { provider: DiscoveryProviderConfig }>>([])
 				: Promise.all(
 						selectedDiscoverableProviders.map(async provider => ({
 							provider,
-							models: await this.#discoverProviderModelsCoalesced(provider, strategy),
+							...(await this.#discoverProviderModelsCoalesced(provider, strategy)),
 						})),
 					);
 		const [configuredDiscoveryResults, builtInDiscovery] = await Promise.all([
@@ -1458,14 +1465,23 @@ export class ModelRegistry {
 		]);
 		this.#captureCatalogMetrics(builtInDiscovery.models, providerFilter === undefined);
 		const currentDiscoverableProviders = new Set(this.#discoverableProviders);
-		const configuredDiscovered = configuredDiscoveryResults
-			.filter(result => currentDiscoverableProviders.has(result.provider))
-			.flatMap(result => result.models);
+		const currentConfiguredDiscoveryResults = configuredDiscoveryResults.filter(result =>
+			currentDiscoverableProviders.has(result.provider),
+		);
+		const configuredDiscovered = currentConfiguredDiscoveryResults.flatMap(result => result.models);
+		const clearedConfiguredProviders = currentConfiguredDiscoveryResults.flatMap(result =>
+			result.clearRuntimeModels ? [result.provider.provider] : [],
+		);
 		const discovered = [...configuredDiscovered, ...builtInDiscovery.models];
-		if (discovered.length === 0 && builtInDiscovery.authoritativeProviders.size === 0) {
+		if (
+			discovered.length === 0 &&
+			builtInDiscovery.authoritativeProviders.size === 0 &&
+			clearedConfiguredProviders.length === 0
+		) {
 			return;
 		}
 		const touchedProviders = new Set(discovered.map(model => model.provider));
+		for (const provider of clearedConfiguredProviders) touchedProviders.add(provider);
 		for (const provider of builtInDiscovery.authoritativeProviders) touchedProviders.add(provider);
 		const existingModels = this.#hasFullSnapshot
 			? this.#unprojectedModels
@@ -1484,6 +1500,12 @@ export class ModelRegistry {
 			authoritativeProviders.add(provider);
 		}
 
+		const clearedConfiguredProviderSet = new Set(clearedConfiguredProviders);
+		if (clearedConfiguredProviderSet.size > 0) {
+			this.#cachedDiscoverableModels = this.#cachedDiscoverableModels.filter(
+				model => !clearedConfiguredProviderSet.has(model.provider),
+			);
+		}
 		this.#runtimeDiscoveredModels = this.#runtimeDiscoveredModels.filter(
 			model => !touchedProviders.has(model.provider),
 		);
@@ -1498,10 +1520,16 @@ export class ModelRegistry {
 		}
 		if (!this.#hasFullSnapshot) return;
 
-		const baseModels =
-			authoritativeProviders.size > 0
-				? dropProviderModels(this.#unprojectedModels, authoritativeProviders)
-				: this.#unprojectedModels;
+		let baseModels = this.#unprojectedModels;
+		if (clearedConfiguredProviderSet.size > 0) {
+			baseModels = this.#mergeResolvedModels(
+				dropProviderModels(baseModels, clearedConfiguredProviderSet),
+				this.#composeUnprojectedStaticModels(clearedConfiguredProviderSet),
+			);
+		}
+		if (authoritativeProviders.size > 0) {
+			baseModels = dropProviderModels(baseModels, authoritativeProviders);
+		}
 		const resolved = this.#mergeResolvedModels(baseModels, discoveredModels);
 		const withConfigModels = this.#mergeCustomModels(resolved, this.#customModelOverlays);
 		const combined = this.#mergeCustomModels(withConfigModels, this.#runtimeModelOverlays);
@@ -1520,7 +1548,7 @@ export class ModelRegistry {
 	#discoverProviderModelsCoalesced(
 		providerConfig: DiscoveryProviderConfig,
 		strategy: ModelRefreshStrategy,
-	): Promise<Model<Api>[]> {
+	): Promise<ConfiguredModelDiscoveryResult> {
 		let providerInFlight = this.#configuredDiscoveryInFlight.get(providerConfig);
 		const inFlight = providerInFlight?.get(strategy);
 		if (inFlight) return inFlight;
@@ -1571,7 +1599,7 @@ export class ModelRegistry {
 	async #discoverProviderModels(
 		providerConfig: DiscoveryProviderConfig,
 		strategy: ModelRefreshStrategy,
-	): Promise<Model<Api>[]> {
+	): Promise<ConfiguredModelDiscoveryResult> {
 		const cacheProviderId = this.#configuredDiscoveryCacheProviderId(providerConfig);
 		const cached = readModelCache<Api>(cacheProviderId, 24 * 60 * 60 * 1000, Date.now, this.#cacheDbPath);
 		const cacheOlderThanConfig = cached !== null && this.#isDiscoveryCacheOlderThanModelsConfig(cached.updatedAt);
@@ -1591,12 +1619,15 @@ export class ModelRegistry {
 					models: cached?.models.map(model => model.id) ?? [],
 				});
 				this.#lastDiscoveryWarnings.delete(providerConfig.provider);
-				return cached
-					? this.#normalizeDiscoverableModels(
-							providerConfig,
-							cached.models.map(model => buildModel(model)),
-						)
-					: [];
+				return {
+					models: cached
+						? this.#normalizeDiscoverableModels(
+								providerConfig,
+								cached.models.map(model => buildModel(model)),
+							)
+						: [],
+					clearRuntimeModels: false,
+				};
 			}
 		}
 
@@ -1649,13 +1680,16 @@ export class ModelRegistry {
 		if (discoveryError) {
 			this.#warnProviderDiscoveryFailure(providerConfig, discoveryError);
 		}
-		return this.#applyProviderModelOverrides(
-			providerId,
-			this.#normalizeDiscoverableModels(
-				providerConfig,
-				this.#applyProviderCompat(providerConfig.compat, result.models),
+		return {
+			models: this.#applyProviderModelOverrides(
+				providerId,
+				this.#normalizeDiscoverableModels(
+					providerConfig,
+					this.#applyProviderCompat(providerConfig.compat, result.models),
+				),
 			),
-		);
+			clearRuntimeModels: result.source === "provider" && result.models.length === 0,
+		};
 	}
 
 	#discoveryContext(): DiscoveryContext {
