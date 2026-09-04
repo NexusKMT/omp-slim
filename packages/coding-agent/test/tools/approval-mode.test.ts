@@ -287,7 +287,7 @@ describe("tools.approvalMode setting", () => {
 						pendingSafetyChecks: [{ id: "safety-check" }],
 					},
 				},
-			} as AgentToolContext),
+			} as never),
 		).rejects.toThrow(/pending provider safety checks but no interactive UI/);
 	});
 
