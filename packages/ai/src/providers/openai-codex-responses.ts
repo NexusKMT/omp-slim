@@ -1541,10 +1541,11 @@ export async function buildTransformedCodexRequestBody(
 	context: Context,
 	options: OpenAICodexResponsesOptions | undefined,
 	promptCacheKey = getOpenAIPromptCacheKey(options),
+	inputPrefix: InputItem[] = [],
 ): Promise<RequestBody> {
 	const params: RequestBody = {
 		model: model.requestModelId ?? model.id,
-		input: convertMessages(model, context),
+		input: [...inputPrefix, ...convertMessages(model, context)],
 		stream: true,
 		prompt_cache_key: promptCacheKey,
 	};

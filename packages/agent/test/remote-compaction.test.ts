@@ -23,7 +23,10 @@ import {
 } from "@oh-my-pi/pi-agent-core/compaction/openai";
 import * as ai from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { getOpenAICodexTransportDetails } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
+import {
+	buildTransformedCodexRequestBody,
+	getOpenAICodexTransportDetails,
+} from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import type {
 	AssistantMessage,
 	CodexCompactionContext,
@@ -1196,6 +1199,46 @@ describe("Responses Lite remote compaction", () => {
 			content: [{ type: "input_text", text: "compact instructions" }],
 		});
 		expect(captured?.body.input?.at(-1)).toEqual({ type: "compaction_trigger" });
+	});
+
+	test("V2 compaction preserves the normal Codex Lite input prefix", async () => {
+		const model = makeCodexLiteModel();
+		const systemPrompt = ["base instructions", "workspace instructions"];
+		const messages = [
+			{ role: "user" as const, content: "first user request", timestamp: 1 },
+			{ role: "user" as const, content: "second user request", timestamp: 2 },
+		];
+		const normalBody = await buildTransformedCodexRequestBody(
+			model,
+			{ systemPrompt, messages },
+			{ sessionId: "codex-cache-session", responsesLite: true },
+		);
+		const preparation: CompactionPreparation = {
+			firstKeptEntryId: "kept-1",
+			messagesToSummarize: [messages[0]],
+			turnPrefixMessages: [],
+			recentMessages: [messages[1]],
+			isSplitTurn: false,
+			tokensBefore: 100_000,
+			fileOps: createFileOps(),
+			settings: {
+				...DEFAULT_COMPACTION_SETTINGS,
+				remoteStreamingV2Enabled: true,
+			},
+		};
+		let captured: CapturedLiteExchange | undefined;
+		const fetchMock: FetchImpl = async (_input, init) => {
+			captured = captureStreamLite(init);
+			return sseResponse(compactionV2Events("enc-cache"));
+		};
+
+		await compact(preparation, model, CODEX_RESIDENCY_TOKEN, undefined, undefined, {
+			fetch: fetchMock,
+			remoteSystemPrompt: systemPrompt,
+			sessionId: "codex-cache-session",
+		});
+
+		expect(JSON.stringify(captured?.body.input?.slice(0, -1))).toBe(JSON.stringify(normalBody.input));
 	});
 
 	test("V2 compaction isolates its Lite WebSocket from the full Responses session", async () => {
