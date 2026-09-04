@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Gemini 3 tool continuations through OpenAI Responses relays by preserving provider call IDs verbatim ([#10749](https://github.com/can1357/oh-my-pi/issues/10749)).
+
 ## [18.1.8] - 2026-09-03
 
 ### Added
