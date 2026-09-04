@@ -1,5 +1,6 @@
 use std::{
 	collections::BTreeSet,
+	fmt::Write as _,
 	fs,
 	os::unix::fs::PermissionsExt,
 	path::{Component, Path, PathBuf},
@@ -274,10 +275,8 @@ fn change_default(
 		let Some((key, _)) = line.split_once('=') else {
 			continue;
 		};
-		if key.trim() == mime_type {
-			if entry_index.replace(index).is_some() {
-				bail!("ambiguous duplicate {mime_type} defaults");
-			}
+		if key.trim() == mime_type && entry_index.replace(index).is_some() {
+			bail!("ambiguous duplicate {mime_type} defaults");
 		}
 	}
 
@@ -313,10 +312,11 @@ fn change_default(
 	if !result.is_empty() && !has_blank_separator {
 		result.push_str(newline);
 	}
-	result.push_str(&format!(
+	let _ = write!(
+		result,
 		"[{DEFAULT_APPLICATIONS_SECTION}]{newline}{mime_type}={}{newline}",
 		desired.value
-	));
+	);
 	Ok(result)
 }
 
