@@ -52,6 +52,7 @@ function createFixture(streamingMessage: AssistantMessage, tool?: AgentTool) {
 			};
 		},
 	};
+	const sessionManager = { getCwd: () => process.cwd() };
 	const ctx = {
 		isInitialized: true,
 		init: vi.fn(async () => {}),
@@ -59,16 +60,21 @@ function createFixture(streamingMessage: AssistantMessage, tool?: AgentTool) {
 		settings,
 		statusLine: { invalidate: vi.fn() },
 		updateEditorTopBorder: vi.fn(),
-		streamingComponent: { updateContent: vi.fn(), markTranscriptBlockFinalized: vi.fn() },
+		streamingComponent: {
+			updateContent: vi.fn(),
+			setLinkTargets: vi.fn(),
+			isTranscriptBlockFinalized: () => false,
+			markTranscriptBlockFinalized: vi.fn(),
+		},
 		streamingMessage,
 		transcriptMessageComponents: new WeakMap(),
 		pendingTools,
 		noteDisplayableThinkingContent: vi.fn(() => false),
 		chatContainer: { addChild: vi.fn() },
 		toolOutputExpanded: false,
-		session: { getToolByName: () => tool, hasBuiltInTool: () => true, extensionRunner },
-		viewSession: { getToolByName: () => tool, hasBuiltInTool: () => true },
-		sessionManager: { getCwd: () => process.cwd() },
+		session: { getToolByName: () => tool, hasBuiltInTool: () => true, extensionRunner, sessionManager },
+		viewSession: { getToolByName: () => tool, hasBuiltInTool: () => true, sessionManager },
+		sessionManager,
 	} as unknown as InteractiveModeContext;
 
 	return {

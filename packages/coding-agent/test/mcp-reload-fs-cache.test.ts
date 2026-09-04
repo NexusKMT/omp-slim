@@ -77,6 +77,7 @@ function createController(discoveredCommands: string[]) {
 		session: {
 			refreshMCPTools,
 			setMCPPromptCommands,
+			getEvalPreludes: () => [],
 			modelRegistry: { authStorage: undefined },
 		},
 		settings,

@@ -49,8 +49,11 @@ function createFixture(streamingMessage: AssistantMessage) {
 	const markTranscriptBlockFinalized = vi.fn();
 	const streamingComponent = {
 		updateContent: vi.fn(),
+		setLinkTargets: vi.fn(),
+		isTranscriptBlockFinalized: () => false,
 		markTranscriptBlockFinalized,
 	};
+	const sessionManager = { getCwd: () => process.cwd() };
 	const chatChildren: unknown[] = [];
 	const chatContainer = {
 		children: chatChildren,
@@ -78,10 +81,10 @@ function createFixture(streamingMessage: AssistantMessage) {
 		chatContainer,
 		toolOutputExpanded: false,
 		settings,
-		session: { getToolByName: () => undefined, hasBuiltInTool: () => true },
-		viewSession: { getToolByName: () => undefined, hasBuiltInTool: () => true },
+		session: { getToolByName: () => undefined, hasBuiltInTool: () => true, sessionManager },
+		viewSession: { getToolByName: () => undefined, hasBuiltInTool: () => true, sessionManager },
 		clearTransientSessionUi: () => {},
-		sessionManager: { getCwd: () => process.cwd() },
+		sessionManager,
 	} as unknown as InteractiveModeContext;
 
 	const controller = new EventController(ctx);

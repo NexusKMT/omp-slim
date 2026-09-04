@@ -49,6 +49,7 @@ function deviceWrite(id: string, name: string, inner: Record<string, unknown>) {
 
 function createFixture(streamingMessage: AssistantMessage) {
 	const pendingTools = new Map<string, ToolExecutionComponent>();
+	let transcriptBlockFinalized = false;
 	const ctx = {
 		isInitialized: true,
 		init: vi.fn(async () => {}),
@@ -56,7 +57,14 @@ function createFixture(streamingMessage: AssistantMessage) {
 		settings,
 		statusLine: { invalidate: vi.fn() },
 		updateEditorTopBorder: vi.fn(),
-		streamingComponent: { updateContent: vi.fn(), markTranscriptBlockFinalized: vi.fn() },
+		streamingComponent: {
+			updateContent: vi.fn(),
+			setLinkTargets: vi.fn(),
+			isTranscriptBlockFinalized: () => transcriptBlockFinalized,
+			markTranscriptBlockFinalized: vi.fn(() => {
+				transcriptBlockFinalized = true;
+			}),
+		},
 		streamingMessage,
 		transcriptMessageComponents: new WeakMap(),
 		pendingTools,
