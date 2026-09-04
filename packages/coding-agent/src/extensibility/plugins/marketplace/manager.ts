@@ -322,6 +322,7 @@ export class MarketplaceManager {
 		const packageName = await this.#resolvePluginPackageName(cachePath, name);
 		try {
 			await this.#assertRuntimePackageNameAvailable(
+				scope,
 				packageName,
 				await readInstalledPluginsRegistry(registryPath),
 				pluginId,
@@ -828,13 +829,15 @@ export class MarketplaceManager {
 		}
 		return linkPath;
 	}
-
 	async #assertRuntimePackageNameAvailable(
+		scope: "user" | "project",
 		packageName: string,
 		registry: InstalledPluginsRegistry,
 		pluginId: string,
 	): Promise<void> {
 		const key = packageName.toLowerCase();
+
+		// Marketplace plugins recorded in this scope's installed registry (keyed by plugin id).
 		for (const installedPluginId in registry.plugins) {
 			if (installedPluginId === pluginId) continue;
 			const fallbackName = parsePluginId(installedPluginId)?.name ?? installedPluginId;
@@ -850,6 +853,34 @@ export class MarketplaceManager {
 				}
 			}
 		}
+
+		// Ordinary npm plugins live in the runtime root's package.json dependencies,
+		// not installed_plugins.json; their node_modules link would still be
+		// clobbered by registration on a case-insensitive filesystem. Marketplace
+		// installs never add themselves here, so this cannot self-conflict on
+		// reinstall. Runtime-config keys mirror installed_plugins, already covered.
+		for (const dependencyName of await this.#readRuntimeDependencyNames(scope)) {
+			if (dependencyName.toLowerCase() === key) {
+				throw new Error(
+					`Runtime package name "${packageName}" conflicts with installed package "${dependencyName}"`,
+				);
+			}
+		}
+	}
+
+	async #readRuntimeDependencyNames(scope: "user" | "project"): Promise<Set<string>> {
+		const names = new Set<string>();
+		try {
+			const pkg: { dependencies?: Record<string, unknown> } = await Bun.file(
+				path.join(this.#runtimeRoot(scope), "package.json"),
+			).json();
+			if (pkg.dependencies && typeof pkg.dependencies === "object") {
+				for (const dep in pkg.dependencies) names.add(dep);
+			}
+		} catch (err) {
+			if (!isEnoent(err)) throw err;
+		}
+		return names;
 	}
 
 	async #resolveInstalledPackageNames(

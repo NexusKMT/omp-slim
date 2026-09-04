@@ -357,6 +357,28 @@ describe("MarketplaceManager", () => {
 		expect(fs.existsSync(path.join(ctx.tmpDir, "cache", "plugins", "lower-market___foo___1.0.0"))).toBe(false);
 	});
 
+	it("rejects a marketplace plugin that case-collides with an npm-managed dependency", async () => {
+		// An ordinary npm plugin recorded in the runtime root package.json + node_modules.
+		const npmPackage = path.join(ctx.tmpDir, "npm-foo");
+		fs.mkdirSync(npmPackage, { recursive: true });
+		fs.writeFileSync(path.join(npmPackage, "package.json"), JSON.stringify({ name: "foo", version: "9.9.9" }));
+		fs.writeFileSync(path.join(ctx.tmpDir, "package.json"), JSON.stringify({ dependencies: { foo: "9.9.9" } }));
+		const npmLink = path.join(ctx.tmpDir, "node_modules", "foo");
+		fs.mkdirSync(path.dirname(npmLink), { recursive: true });
+		fs.symlinkSync(npmPackage, npmLink, "dir");
+
+		const marketplaceDir = buildNamedMarketplace(path.join(ctx.tmpDir, "upper-marketplace"), "upper-market", "Foo");
+		await ctx.manager.addMarketplace(marketplaceDir);
+
+		await expect(ctx.manager.installPlugin("Foo", "upper-market")).rejects.toThrow(
+			'Runtime package name "Foo" conflicts with installed package "foo"',
+		);
+		// The npm-managed link is untouched and no marketplace cache was left behind.
+		expect(fs.realpathSync(npmLink)).toBe(fs.realpathSync(npmPackage));
+		expect(fs.existsSync(path.join(ctx.tmpDir, "node_modules", "Foo"))).toBe(false);
+		expect(fs.existsSync(path.join(ctx.tmpDir, "cache", "plugins", "upper-market___Foo___1.0.0"))).toBe(false);
+	});
+
 	it("installPlugin rejects package names that escape node_modules", async () => {
 		const marketplaceDir = path.join(ctx.tmpDir, "bad-package-marketplace");
 		const pluginDir = path.join(marketplaceDir, "plugins", "bad-package");
