@@ -302,10 +302,20 @@ describe("readTextFromClipboard", () => {
 
 		expect(await readTextFromClipboard()).toBe("from xsel");
 		expect(calls.map(call => call.cmd)).toEqual([
-			["wl-paste", "--type", "text/plain", "--no-newline"],
+			["wl-paste", "--no-newline"],
 			["xclip", "-selection", "clipboard", "-o"],
 			["xsel", "--clipboard", "--output"],
 		]);
+	});
+
+	it("lets wl-paste negotiate the UTF-8 text representation on Wayland", async () => {
+		setPlatform("linux");
+		process.env.WAYLAND_DISPLAY = "wayland-0";
+		const calls: SpawnCall[] = [];
+		spySpawn(calls, "已提交75个样本");
+
+		expect(await readTextFromClipboard()).toBe("已提交75个样本");
+		expect(calls.map(call => call.cmd)).toEqual([["wl-paste", "--no-newline"]]);
 	});
 
 	it("returns pbpaste stdout on darwin without touching execSync", async () => {
