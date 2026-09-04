@@ -40,6 +40,7 @@ export function normalizeToolCallId(id: string): string {
 
 type ResponsesToolItemIdPrefix = "fc" | "ctc";
 
+/** Preserve opaque call IDs for Responses replay while normalizing or generating the separate item ID. */
 export function normalizeResponsesToolCallId(
 	id: string,
 	itemPrefix: ResponsesToolItemIdPrefix = "fc",
@@ -49,8 +50,7 @@ export function normalizeResponsesToolCallId(
 		return { callId, itemId: normalizeResponsesItemId(itemId, itemPrefix) };
 	}
 	const hash = Bun.hash(id).toString(36);
-	const normalizedCallId = id.startsWith("call_") ? truncateResponseItemId(id, "call") : `call_${hash}`;
-	return { callId: normalizedCallId, itemId: `${itemPrefix}_${hash}` };
+	return { callId: id, itemId: `${itemPrefix}_${hash}` };
 }
 
 function getExplicitIdPrefix(id: string): string | undefined {

@@ -4,8 +4,8 @@
 
 ### Fixed
 
-- Fixed custom `anthropic-messages` providers (e.g. a Gemini proxy that encodes the thought signature in the tool-call id) having same-model tool-call ids mangled to Anthropic's `^[a-zA-Z0-9_-]{1,64}$` charset; opaque ids from non-official endpoints now round-trip verbatim ([#10753](https://github.com/can1357/oh-my-pi/issues/10753)).
-- Fixed Gemini 3 tool continuations through OpenAI Responses relays by preserving provider call IDs verbatim ([#10749](https://github.com/can1357/oh-my-pi/issues/10749)).
+- Fixed Gemini tool continuations through custom Anthropic Messages proxies by preserving same-model tool-call IDs ([#10753](https://github.com/can1357/oh-my-pi/issues/10753)).
+- Fixed Gemini 3 tool continuations through OpenAI Responses relays by preserving provider call IDs and pairing results across bare and composite IDs ([#10749](https://github.com/can1357/oh-my-pi/issues/10749)).
 
 ## [18.1.8] - 2026-09-03
 

@@ -1182,6 +1182,51 @@ describe("OpenAI responses history payload", () => {
 		]);
 	});
 
+	it.each([
+		{ callSuffix: "|fc_call", resultSuffix: "" },
+		{ callSuffix: "", resultSuffix: "|fc_result" },
+	])("preserves real output for mixed Responses ids ($callSuffix, $resultSuffix)", ({ callSuffix, resultSuffix }) => {
+		const callId = `googleai-ts1:${"opaque/signature+token=".repeat(12)}`;
+		const context: Context = {
+			messages: [
+				{ role: "user", content: "weather?", timestamp: 0 },
+				{
+					...makeAssistantMessage([]),
+					content: [
+						{
+							type: "toolCall",
+							id: `${callId}${callSuffix}`,
+							name: "get_weather",
+							arguments: { city: "Paris" },
+						},
+					],
+					providerPayload: undefined,
+					stopReason: "toolUse",
+					timestamp: 0,
+				},
+				{
+					role: "toolResult",
+					toolCallId: `${callId}${resultSuffix}`,
+					toolName: "get_weather",
+					content: [{ type: "text", text: "15C" }],
+					isError: false,
+					timestamp: 0,
+				},
+			],
+		};
+		const input = buildResponsesInput({
+			model: getOpenAIReasoningModel("openai", "gpt-5-mini"),
+			context,
+			strictResponsesPairing: true,
+			supportsImageDetailOriginal: true,
+		});
+
+		expect(findResponsesInputItem(input, "function_call")?.call_id).toBe(callId);
+		expect(input.filter(item => item.type === "function_call_output")).toEqual([
+			{ type: "function_call_output", call_id: callId, output: "15C" },
+		]);
+	});
+
 	it("strips output-only replay metadata while echoing opaque call_id values verbatim", async () => {
 		const opaqueReasoningId = `item_${"copilot/reasoning+token=".repeat(8)}`;
 		const opaqueMessageId = `item_${"copilot/message+opaque=".repeat(8)}`;

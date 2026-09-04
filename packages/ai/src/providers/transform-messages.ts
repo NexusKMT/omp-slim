@@ -948,18 +948,8 @@ export function transformMessages<TApi extends Api>(
 
 					let normalizedId: string | undefined;
 					if (isAnthropicTarget) {
-						// A same-model tool-call id is the endpoint's own opaque
-						// correlation token and MUST round-trip verbatim: a custom
-						// `anthropic-messages` proxy fronting Gemini encodes the thought
-						// signature in it (#10753), and any id an endpoint minted it will
-						// accept back. Anthropic's `^[a-zA-Z0-9_-]{1,64}$` rule is only
-						// enforced on the wire by official endpoints, so we still
-						// normalize there (a real Claude id already matches, making this
-						// a no-op for genuine data while defending against a foreign id
-						// that slipped in mislabeled as same-model). Cross-model replay
-						// always normalizes — the id is not the target's token. Mirrors
-						// the same-model opaque-id preservation in openai-completions
-						// (#8642) and openai-responses (#10749).
+						// Custom same-model endpoints own opaque correlation IDs; official
+						// endpoints and cross-model replays require Anthropic-valid IDs.
 						if (!isSameModel || model.compat.officialEndpoint) {
 							normalizedId = normalizeAnthropicTargetToolCallId(
 								toolCall.id,
