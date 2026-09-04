@@ -12,6 +12,9 @@
 
 - Fixed a rare issue where reciprocal idle subagents could continue waking one another indefinitely.
 - Fixed `/wt` and `git worktree add` failing when the new worktree targeted the same commit as the clean source checkout.
+### Fixed
+
+- Fixed omp-installed marketplace plugins and `--plugin-dir` plugins still losing their skills when the Claude plugin source was not separately enabled, completing the #10666 fix ([#10743](https://github.com/can1357/oh-my-pi/issues/10743)).
 
 ## [18.1.8] - 2026-09-03
 
