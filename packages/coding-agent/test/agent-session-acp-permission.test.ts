@@ -254,20 +254,23 @@ function noUiRunner(): ExtensionRunner {
 	} as unknown as ExtensionRunner;
 }
 
-it("always-ask: granted ACP permission bypasses the inner ExtensionToolWrapper gate", async () => {
+it("always-ask: an ACP grant satisfies the inner wrapper's explicit prompt policy", async () => {
 	// In a real ACP session every registry tool is wrapped by ExtensionToolWrapper,
-	// then again by the ACP permission gate. Without the ACP grant marking the call
-	// approved, the inner wrapper re-resolves approval (bash is exec-tier, always-ask
-	// caps at read) and throws "no interactive UI", stranding the tool call pending.
+	// then again by the ACP permission gate. The client has answered the explicit
+	// prompt, so the inner wrapper must not request the unavailable interactive UI.
 	const bashTool = makeFakeTool("bash");
 	const wrapped = new ExtensionToolWrapper(bashTool, noUiRunner()) as unknown as AgentTool;
 	const bridge = makeBridge({ outcome: "selected", optionId: "allow_once", kind: "allow_once" });
 	const permissionSpy = spyOn(bridge, "requestPermission");
-	session = await createSession([wrapped], bridge, { "tools.approvalMode": "always-ask" });
+	const approvalSettings: Partial<Record<SettingPath, unknown>> = {
+		"tools.approvalMode": "always-ask",
+		"tools.approval": { bash: "prompt" },
+	};
+	session = await createSession([wrapped], bridge, approvalSettings);
 
 	await session.setActiveToolsByName(["bash"]);
 	const gatedBash = session.agent.state.tools.find(t => t.name === "bash");
-	const ctx = { settings: Settings.isolated({ "tools.approvalMode": "always-ask" }) } as never;
+	const ctx = { settings: Settings.isolated(approvalSettings) } as never;
 
 	await gatedBash!.execute("call-1", { command: "echo hi" }, undefined, undefined as never, ctx);
 

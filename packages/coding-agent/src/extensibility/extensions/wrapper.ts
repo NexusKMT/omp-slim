@@ -253,18 +253,19 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 			throw denyError(resolved, this.tool.name);
 		}
 		const pendingSafetyChecks = computerSafetyChecks(context);
-		// An xd:// device dispatch already cleared the write tool's outer gate at
-		// this tool's tier — re-prompting would double-ask for one action. The
-		// bypass only holds while the input is exactly what that outer gate
-		// approved: a handler revision here may have raised the tier, so revised
-		// input always faces the full gate. Explicit per-tool "prompt" policies
-		// and tool-demanded overrides still prompt. Provider safety checks are
-		// stronger: yolo, per-tool allow, and xdev approval never acknowledge
-		// them on the user's behalf.
+		// Outer approvals only cover the original input. An extension revision may
+		// raise the tier, so revised input always faces the full gate. `xd://`
+		// approval skips tier-only prompts; ACP approval also satisfies explicit
+		// prompts because the client answered that exact request. Denies were
+		// enforced above, and provider safety checks remain independently required.
 		const explicitPrompt = resolved.override || Object.hasOwn(userPolicies, resolved.policyKey ?? this.tool.name);
-		const xdevBypass = context?.xdevApproved === true && effectiveParams === params;
+		const originalInput = effectiveParams === params;
+		const xdevBypass = context?.xdevApproved === true && originalInput;
+		const acpBypass = context?.acpApproved === true && originalInput;
 		const approvalCheck = {
-			required: pendingSafetyChecks.length > 0 || (resolved.policy === "prompt" && (explicitPrompt || !xdevBypass)),
+			required:
+				pendingSafetyChecks.length > 0 ||
+				(resolved.policy === "prompt" && !acpBypass && (explicitPrompt || !xdevBypass)),
 			reason: resolved.reason,
 		};
 

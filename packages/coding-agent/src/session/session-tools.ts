@@ -733,8 +733,8 @@ export class SessionTools {
 						return await target.execute(toolCallId, args as never, signal, onUpdate, ctx as never);
 					}
 					// A selected or persisted ACP grant is the interactive approval
-					// for this call; prevent the inner wrapper from prompting again.
-					const approvedCtx = (ctx ? { ...ctx, xdevApproved: true } : ctx) as never;
+					// for this exact call; prevent the inner wrapper from prompting again.
+					const approvedCtx = (ctx ? { ...ctx, acpApproved: true } : ctx) as never;
 					const command =
 						target.name === "bash" && args && typeof args === "object" && !Array.isArray(args)
 							? stringProperty(args, "command")
