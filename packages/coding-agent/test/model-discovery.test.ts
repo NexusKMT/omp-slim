@@ -2694,7 +2694,7 @@ providers:
 		).toEqual(["keep-chat", "keep-completion", "keep-realtime", "maven-auto"]);
 	});
 
-	test("configured litellm discovery clears models when a filtered rich refresh is empty", async () => {
+	test("configured litellm discovery replaces partially and fully filtered rich refreshes", async () => {
 		writeRawModelsJson({
 			"litellm-test": {
 				baseUrl: "http://127.0.0.1:4006/v1",
@@ -2705,7 +2705,13 @@ providers:
 		});
 		let modelGroups: Record<string, unknown>[] = [
 			{
-				model_group: "keep-chat",
+				model_group: "keep-chat-a",
+				mode: "chat",
+				providers: ["openai"],
+				supports_vision: false,
+			},
+			{
+				model_group: "keep-chat-b",
 				mode: "chat",
 				providers: ["openai"],
 				supports_vision: false,
@@ -2728,20 +2734,36 @@ providers:
 
 		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
 		await registry.refresh("online");
-		expect(getModelsForProvider(registry, "litellm-test").map(model => model.id)).toEqual(["keep-chat"]);
+		expect(getModelsForProvider(registry, "litellm-test").map(model => model.id)).toEqual([
+			"keep-chat-a",
+			"keep-chat-b",
+		]);
 
-		modelGroups = [{ model_group: "embedding-only", mode: "embedding" }];
+		modelGroups = [
+			{ model_group: "keep-chat-a", mode: "chat", providers: ["openai"], supports_vision: false },
+			{ model_group: "keep-chat-b", mode: "embedding" },
+		];
+		await registry.refresh("online");
+		expect(getModelsForProvider(registry, "litellm-test").map(model => model.id)).toEqual(["keep-chat-a"]);
+
+		modelGroups = [{ model_group: "keep-chat-a", mode: "embedding" }];
 		await registry.refresh("online");
 		expect(getModelsForProvider(registry, "litellm-test")).toEqual([]);
 	});
 
-	test("built-in litellm discovery clears models when a filtered rich refresh is empty", async () => {
+	test("built-in litellm discovery replaces partially and fully filtered rich refreshes", async () => {
 		using _litellmBaseUrl = withEnv("LITELLM_BASE_URL", "http://127.0.0.1:4007/v1");
 		writeRawModelsJson({});
 		authStorage.setRuntimeApiKey("litellm", "sk-litellm-test");
 		let modelGroups: Record<string, unknown>[] = [
 			{
-				model_group: "keep-chat",
+				model_group: "keep-chat-a",
+				mode: "chat",
+				providers: ["openai"],
+				supports_vision: false,
+			},
+			{
+				model_group: "keep-chat-b",
 				mode: "chat",
 				providers: ["openai"],
 				supports_vision: false,
@@ -2767,9 +2789,16 @@ providers:
 
 		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
 		await registry.refreshProvider("litellm", "online");
-		expect(getModelsForProvider(registry, "litellm").map(model => model.id)).toEqual(["keep-chat"]);
+		expect(getModelsForProvider(registry, "litellm").map(model => model.id)).toEqual(["keep-chat-a", "keep-chat-b"]);
 
-		modelGroups = [{ model_group: "embedding-only", mode: "embedding" }];
+		modelGroups = [
+			{ model_group: "keep-chat-a", mode: "chat", providers: ["openai"], supports_vision: false },
+			{ model_group: "keep-chat-b", mode: "embedding" },
+		];
+		await registry.refreshProvider("litellm", "online");
+		expect(getModelsForProvider(registry, "litellm").map(model => model.id)).toEqual(["keep-chat-a"]);
+
+		modelGroups = [{ model_group: "keep-chat-a", mode: "embedding" }];
 		await registry.refreshProvider("litellm", "online");
 		expect(getModelsForProvider(registry, "litellm")).toEqual([]);
 	});
