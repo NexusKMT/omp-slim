@@ -40,6 +40,7 @@
 - Fixed `Ctrl+V` preserving CJK text from XWayland clipboard owners on Wayland instead of replacing characters with `?` ([#10762](https://github.com/can1357/oh-my-pi/issues/10762)).
 - Fixed byte-limited artifact reads reporting the displayed byte count as the read limit instead of the actual budget ([#10764](https://github.com/can1357/oh-my-pi/issues/10764)).
 - Fixed the read tool's truncation notice reporting `Showing 0 of N lines` (with `outputLines`/`outputBytes` of 0) when a single line larger than the byte budget is shown as a partial preview; it now reports the delivered partial line, e.g. `Showing line N (partial, 50.0KB of 68.4KB) of N` ([#10768](https://github.com/can1357/oh-my-pi/issues/10768)).
+- Fixed Mnemopi silently deleting explicitly retained/learned long-term memory after a session gap over 24h: eligible working memory is now consolidated to episodic at session start (before the first write can TTL-trim unpromoted rows), instead of only when `/memory enqueue` was run manually ([#10770](https://github.com/can1357/oh-my-pi/issues/10770)).
 
 ## [18.1.8] - 2026-09-03
 
