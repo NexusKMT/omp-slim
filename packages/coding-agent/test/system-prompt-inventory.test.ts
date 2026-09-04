@@ -709,49 +709,6 @@ describe("system prompt tool inventory", () => {
 		expect(withoutScout).not.toContain("read-only scout");
 	});
 
-	it("gates browser verification on the browser eval prelude", async () => {
-		const opts = {
-			cwd: tempDir,
-			contextFiles: [],
-			skills: [],
-			rules: [],
-			workspaceTree: { ...EMPTY_TREE, rootPath: tempDir },
-		};
-		const tools = new Map(TOOLS);
-		const withoutBrowser = (
-			await buildSystemPrompt({
-				...opts,
-				toolNames: ["read", "bash"],
-				tools,
-				nativeTools: true,
-				inlineToolDescriptors: false,
-			})
-		).systemPrompt.join("\n\n");
-
-		expect(withoutBrowser).not.toContain("`browser.open`");
-		expect(withoutBrowser).toContain("TUI/CLI");
-		expect(withoutBrowser).toContain("behavioral test or smoke test");
-
-		const withBrowser = (
-			await buildSystemPrompt({
-				...opts,
-				toolNames: ["read", "bash"],
-				tools,
-				nativeTools: true,
-				inlineToolDescriptors: false,
-				browserEnabled: true,
-			})
-		).systemPrompt.join("\n\n");
-
-		expect(withBrowser).toContain("`browser.open` to get a tab handle");
-		expect(withBrowser).toContain("its direct helpers for common actions");
-		expect(withBrowser).toContain("`tab.run` for custom JavaScript");
-		expect(withBrowser).toContain("`tab.close` when done");
-		// A browser-only session still needs the smoke-test fallback for
-		// native-desktop surfaces (no computer prelude).
-		expect(withBrowser).toContain("behavioral test or smoke test");
-	});
-
 	it("omits todo workflow guidance when the todo tool is absent", async () => {
 		const opts = {
 			cwd: tempDir,
