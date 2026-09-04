@@ -762,6 +762,46 @@ describe("LiteLLM provider discovery", () => {
 		},
 	);
 
+	test("ignores excluded modes on sentinel placeholders before /v1/models fallback", async () => {
+		const calls: string[] = [];
+		const fetchMock = vi.fn(async (input: string | URL | Request) => {
+			const url = inputUrl(input);
+			calls.push(url);
+			if (url === MODELS_DEV_URL) {
+				return Response.json({});
+			}
+			if (url === "http://primary:4000/model_group/info") {
+				return Response.json({
+					data: [
+						{
+							...ALL_TEAM_MODELS_PLACEHOLDER,
+							model_info: { ...ALL_TEAM_MODELS_PLACEHOLDER.model_info, mode: "embedding" },
+						},
+					],
+				});
+			}
+			if (
+				url === "http://primary:4000/v2/model/info" ||
+				url === "http://primary:4000/model/info" ||
+				url === "http://primary:4000/v1/model/info"
+			) {
+				return new Response("Not Found", { status: 404 });
+			}
+			if (url === "http://primary:4000/v1/models") {
+				return Response.json({ data: [{ id: "fallback-chat", mode: "chat" }] });
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		}) as FetchImpl;
+
+		const models = await litellmModelManagerOptions({
+			baseUrl: "http://primary:4000/v1",
+			fetch: fetchMock,
+		}).fetchDynamicModels?.();
+
+		expect(calls).toContain("http://primary:4000/v1/models");
+		expect(models?.map(model => model.id)).toEqual(["fallback-chat"]);
+	});
+
 	test("filters all-team-models placeholder from mixed model_group info", async () => {
 		const calls: string[] = [];
 		const fetchMock = vi.fn(async (input: string | URL | Request) => {
