@@ -57,7 +57,11 @@ import {
 import type { SessionContext, StrippedToolCallsMarker } from "../../session/session-context";
 import { replaceTabs } from "../../tools/render-utils";
 import { buildSkillCommandPrompt, invokeSkillCommandFromText, isKnownSkillCommand } from "../skill-command";
-import { createAssistantMessageComponent } from "./interactive-context-helpers";
+import {
+	createAssistantMessageComponent,
+	getAssistantMessageLinkTargets,
+	refreshAssistantMessageLinkTargets,
+} from "./interactive-context-helpers";
 import {
 	assistantHasVisibleContent,
 	assistantUsageIsBilled,
@@ -305,7 +309,11 @@ export class UiHelpers {
 				const assistantComponent =
 					cached instanceof AssistantMessageComponent
 						? cached
-						: createAssistantMessageComponent(this.ctx, splitAssistantMessageToolTimeline(message).beforeTools);
+						: createAssistantMessageComponent(
+								this.ctx,
+								splitAssistantMessageToolTimeline(message).beforeTools,
+								getAssistantMessageLinkTargets(this.ctx),
+							);
 				if (cached !== assistantComponent) {
 					this.ctx.transcriptMessageComponents.set(message, assistantComponent);
 				}
@@ -509,7 +517,11 @@ export class UiHelpers {
 				const errorMessage = hasErrorStop ? errorPresentation.text : null;
 				const appendAssistantSegment = (segment: AssistantMessage | undefined) => {
 					if (!segment || !assistantHasVisibleContent(segment)) return;
-					const component = createAssistantMessageComponent(this.ctx, segment);
+					const component = createAssistantMessageComponent(
+						this.ctx,
+						segment,
+						getAssistantMessageLinkTargets(this.ctx),
+					);
 					this.ctx.chatContainer.addChild(component);
 				};
 
@@ -919,6 +931,10 @@ export class UiHelpers {
 			collapseCompactedHistory: settings.get("display.collapseCompacted"),
 			keepDanglingToolCalls: this.ctx.viewSession.isStreaming,
 		});
+		await refreshAssistantMessageLinkTargets(
+			this.ctx,
+			context.messages.filter((message): message is AssistantMessage => message.role === "assistant"),
+		);
 		let replayEntryCount = this.ctx.viewSession.sessionManager.getEntries().length;
 		const renderOptions = {
 			updateFooter: true,
@@ -963,6 +979,10 @@ export class UiHelpers {
 					collapseCompactedHistory: settings.get("display.collapseCompacted"),
 					keepDanglingToolCalls: this.ctx.viewSession.isStreaming,
 				});
+				await refreshAssistantMessageLinkTargets(
+					this.ctx,
+					context.messages.filter((message): message is AssistantMessage => message.role === "assistant"),
+				);
 				replayEntryCount = this.ctx.viewSession.sessionManager.getEntries().length;
 			}
 
