@@ -662,14 +662,19 @@ describe("Mnemopi backend lifecycle", () => {
 	});
 
 	it("promotes aged working memory when the backend starts a top-level session (#10770)", async () => {
+		// Resolve seed and started session to the SAME bank/db: `global` scoping
+		// with the shared `default` bank maps the retain bank straight to dbPath.
 		const settings = Settings.isolated({
 			"memory.backend": "mnemopi",
 			"mnemopi.noEmbeddings": true,
 			"mnemopi.llmMode": "none",
+			"mnemopi.scoping": "global",
+			"mnemopi.bank": "default",
+			"mnemopi.dbPath": makeMnemopiConfig().dbPath,
 		});
 		// Seed an aged, unconsolidated retain row, then close the bank handles so
 		// backend.start reopens the same DB file from disk.
-		const seed = registerMnemopiState();
+		const seed = registerMnemopiState(makeMnemopiConfig({ scoping: "global", bank: "default" }));
 		const seedMemory = seed.getScopedRetainTarget().memory;
 		const retainId = seedMemory.remember("aged durable lesson", {
 			source: "coding-agent-retain",
@@ -684,10 +689,11 @@ describe("Mnemopi backend lifecycle", () => {
 		registeredMnemopiState = undefined;
 		resetMemoryForTests();
 
+		const modelRegistry = { getApiKeyForProvider: async () => undefined, resolver: () => async () => undefined };
 		const session = {
 			sessionId: TEST_SESSION_ID,
 			settings,
-			modelRegistry: { getApiKeyForProvider: async () => undefined, resolver: () => async () => undefined },
+			modelRegistry,
 			sessionManager: { getEntries: () => [], getCwd: () => "/tmp" },
 			emitNotice: () => {},
 			getHindsightSessionState: () => undefined,
@@ -696,7 +702,7 @@ describe("Mnemopi backend lifecycle", () => {
 		await mnemopiBackend.start({
 			session,
 			settings,
-			modelRegistry: { getApiKeyForProvider: async () => undefined, resolver: () => async () => undefined } as never,
+			modelRegistry: modelRegistry as never,
 			agentDir: path.dirname(tempDbPath!),
 			taskDepth: 0,
 		});
@@ -704,11 +710,13 @@ describe("Mnemopi backend lifecycle", () => {
 		const started = getMnemopiSessionState(session);
 		expect(started).toBeDefined();
 		registeredMnemopiState = started;
-		const row = started!
-			.getScopedRetainTarget()
-			.memory.beam.db.query("SELECT consolidated_at FROM working_memory WHERE id = ?")
-			.get(retainId) as { consolidated_at: string | null } | null;
-		expect(row?.consolidated_at).not.toBeNull();
+		const memory = started!.getScopedRetainTarget().memory;
+		// The row must have survived start into the reopened bank, and a later
+		// write (which triggers trimWorkingMemory) must not remove it — start
+		// promoted it to episodic, so the TTL trim skips it.
+		expect(memory.get(retainId)).not.toBeNull();
+		memory.remember("a fresh note after start", { source: "coding-agent-transcript", scope: "bank" });
+		expect(memory.get(retainId)).not.toBeNull();
 	});
 
 	it("does not re-store retained turns during consolidation or after resume", async () => {
