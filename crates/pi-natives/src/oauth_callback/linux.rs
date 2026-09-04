@@ -782,10 +782,10 @@ mod tests {
 	#[test]
 	fn chooses_first_valid_current_desktop_for_highest_user_precedence() {
 		let root = TempDir::new();
-		let context = context(&root, " INVALID! :KDE:GNOME:KDE", "inherited.desktop");
-		let expected = expected_paths(&context).unwrap();
-		assert_eq!(expected.preference_path, context.home.join("xdg-config/kde-mimeapps.list"));
-		assert_eq!(expected.applications_directory, context.home.join("xdg-data/applications"));
+		let kde = context(&root, " INVALID! :KDE:GNOME:KDE", "inherited.desktop");
+		let expected = expected_paths(&kde).unwrap();
+		assert_eq!(expected.preference_path, kde.home.join("xdg-config/kde-mimeapps.list"));
+		assert_eq!(expected.applications_directory, kde.home.join("xdg-data/applications"));
 
 		let no_desktop = context(&root, "", "inherited.desktop");
 		assert_eq!(
