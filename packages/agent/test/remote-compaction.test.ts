@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
-import { Tokenizer } from "@oh-my-pi/pi-agent-core";
+import { ThinkingLevel, Tokenizer } from "@oh-my-pi/pi-agent-core";
 import {
 	type CompactionPreparation,
 	compact,
@@ -34,6 +34,7 @@ import type {
 	Model,
 	ProviderSessionState,
 	ToolResultMessage,
+	UserMessage,
 } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
@@ -1207,45 +1208,52 @@ describe("Responses Lite remote compaction", () => {
 		expect(captured?.body.input?.at(-1)).toEqual({ type: "compaction_trigger" });
 	});
 
-	test("V2 compaction preserves the normal Codex Lite input prefix", async () => {
-		const model = makeCodexLiteModel();
-		const systemPrompt = ["base instructions", "workspace instructions"];
-		const messages = [
-			{ role: "user" as const, content: "first user request", timestamp: 1 },
-			{ role: "user" as const, content: "second user request", timestamp: 2 },
-		];
-		const normalBody = await buildTransformedCodexRequestBody(
-			model,
-			{ systemPrompt, messages },
-			{ sessionId: "codex-cache-session", responsesLite: true },
-		);
-		const preparation: CompactionPreparation = {
-			firstKeptEntryId: "kept-1",
-			messagesToSummarize: [messages[0]],
-			turnPrefixMessages: [],
-			recentMessages: [messages[1]],
-			isSplitTurn: false,
-			tokensBefore: 100_000,
-			fileOps: createFileOps(),
-			settings: {
-				...DEFAULT_COMPACTION_SETTINGS,
-				remoteStreamingV2Enabled: true,
-			},
-		};
-		let captured: CapturedLiteExchange | undefined;
-		const fetchMock: FetchImpl = async (_input, init) => {
-			captured = captureStreamLite(init);
-			return sseResponse(compactionV2Events("enc-cache"));
-		};
+	test.each([false, true])(
+		"V2 compaction preserves Codex input and disabled reasoning (Lite: %s)",
+		async responsesLite => {
+			const model = makeCodexLiteModel({ useResponsesLite: responsesLite });
+			const systemPrompt = ["base instructions", "workspace instructions"];
+			const messages: UserMessage[] = [
+				{ role: "user", content: "first user request", timestamp: 1 },
+				{ role: "user", content: "second user request", timestamp: 2 },
+			];
+			const normalBody = await buildTransformedCodexRequestBody(
+				model,
+				{ systemPrompt, messages },
+				{ sessionId: "codex-cache-session", responsesLite, forceReasoningOff: true },
+			);
+			const preparation: CompactionPreparation = {
+				firstKeptEntryId: "kept-1",
+				messagesToSummarize: [messages[0]],
+				turnPrefixMessages: [],
+				recentMessages: [messages[1]],
+				isSplitTurn: false,
+				tokensBefore: 100_000,
+				fileOps: createFileOps(),
+				settings: {
+					...DEFAULT_COMPACTION_SETTINGS,
+					remoteStreamingV2Enabled: true,
+				},
+			};
+			let captured: CapturedLiteExchange | undefined;
+			const fetchMock: FetchImpl = async (_input, init) => {
+				captured = captureStreamLite(init);
+				return sseResponse(compactionV2Events("enc-cache"));
+			};
 
-		await compact(preparation, model, CODEX_RESIDENCY_TOKEN, undefined, undefined, {
-			fetch: fetchMock,
-			remoteSystemPrompt: systemPrompt,
-			sessionId: "codex-cache-session",
-		});
+			await compact(preparation, model, CODEX_RESIDENCY_TOKEN, undefined, undefined, {
+				fetch: fetchMock,
+				remoteSystemPrompt: systemPrompt,
+				sessionId: "codex-cache-session",
+				thinkingLevel: ThinkingLevel.Off,
+			});
 
-		expect(JSON.stringify(captured?.body.input?.slice(0, -1))).toBe(JSON.stringify(normalBody.input));
-	});
+			expect(JSON.stringify(captured?.body.input?.slice(0, -1))).toBe(JSON.stringify(normalBody.input));
+			expect(captured?.body.instructions).toEqual(normalBody.instructions);
+			expect(captured?.body.reasoning).toEqual(normalBody.reasoning);
+			expect(captured?.body.reasoning?.effort).toBe("none");
+		},
+	);
 
 	test("V2 compaction isolates its Lite WebSocket from the full Responses session", async () => {
 		const providerSessionState = new Map<string, ProviderSessionState>();
