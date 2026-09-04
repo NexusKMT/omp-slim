@@ -304,11 +304,21 @@ export class MarketplaceManager {
 			tmpDir: os.tmpdir(),
 		});
 
-		// 5. Determine version: catalog entry > plugin manifest > git SHA > fallback
+		// 5. Resolve registration identity before replacing an active cache. A
+		// forced reinstall can reuse the same cache key, so validation after
+		// cachePlugin would already have destroyed the prior contents on failure.
 		let version!: string;
 		let cachePath!: string;
+		let packageName!: string;
 		try {
 			version = await this.#resolvePluginVersion(pluginEntry, sourcePath);
+			packageName = await this.#resolvePluginPackageName(sourcePath, name);
+			await this.#assertRuntimePackageNameAvailable(
+				scope,
+				packageName,
+				await readInstalledPluginsRegistry(registryPath),
+				pluginId,
+			);
 			cachePath = await cachePlugin(sourcePath, this.#opts.pluginsCacheDir, marketplace, name, version);
 			await this.#writeEmbeddedLspConfig(pluginEntry, cachePath);
 			await this.#writeEmbeddedDapConfig(pluginEntry, cachePath);
@@ -319,18 +329,6 @@ export class MarketplaceManager {
 			}
 		}
 
-		const packageName = await this.#resolvePluginPackageName(cachePath, name);
-		try {
-			await this.#assertRuntimePackageNameAvailable(
-				scope,
-				packageName,
-				await readInstalledPluginsRegistry(registryPath),
-				pluginId,
-			);
-		} catch (err) {
-			await fs.rm(cachePath, { recursive: true, force: true }).catch(() => {});
-			throw err;
-		}
 		const previousPackageNames = await this.#resolveInstalledPackageNames(existing ?? [], name);
 
 		// Only now clean up old entries — new cache succeeded, so it is safe to remove old ones.

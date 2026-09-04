@@ -379,6 +379,48 @@ describe("MarketplaceManager", () => {
 		expect(fs.existsSync(path.join(ctx.tmpDir, "cache", "plugins", "upper-market___Foo___1.0.0"))).toBe(false);
 	});
 
+	it("preserves the active cache when a forced reinstall changes to a colliding runtime name", async () => {
+		const firstMarketplace = buildNamedMarketplace(
+			path.join(ctx.tmpDir, "first-marketplace"),
+			"first-market",
+			"first-plugin",
+		);
+		const secondMarketplace = buildNamedMarketplace(
+			path.join(ctx.tmpDir, "second-marketplace"),
+			"second-market",
+			"second-plugin",
+		);
+		const firstSourcePackage = path.join(firstMarketplace, "plugins", "first-plugin", "package.json");
+		const secondSourcePackage = path.join(secondMarketplace, "plugins", "second-plugin", "package.json");
+		fs.writeFileSync(firstSourcePackage, JSON.stringify({ name: "original-runtime", version: "1.0.0" }));
+		fs.writeFileSync(secondSourcePackage, JSON.stringify({ name: "taken-runtime", version: "1.0.0" }));
+		await ctx.manager.addMarketplace(firstMarketplace);
+		await ctx.manager.addMarketplace(secondMarketplace);
+		const first = await ctx.manager.installPlugin("first-plugin", "first-market");
+		await ctx.manager.installPlugin("second-plugin", "second-market");
+		const firstLink = path.join(ctx.tmpDir, "node_modules", "original-runtime");
+		const firstRealpath = fs.realpathSync(first.installPath);
+
+		// Same marketplace/plugin/version cache key, but the source manifest now
+		// claims a runtime name owned by the second installed plugin.
+		fs.writeFileSync(firstSourcePackage, JSON.stringify({ name: "TAKEN-RUNTIME", version: "1.0.0" }));
+		await expect(ctx.manager.installPlugin("first-plugin", "first-market", { force: true })).rejects.toThrow(
+			'Runtime package name "TAKEN-RUNTIME" conflicts with installed plugin "second-plugin@second-market"',
+		);
+
+		expect(fs.realpathSync(firstLink)).toBe(firstRealpath);
+		expect(await Bun.file(path.join(first.installPath, "package.json")).json()).toEqual({
+			name: "original-runtime",
+			version: "1.0.0",
+		});
+		expect((await ctx.manager.listInstalledPlugins()).map(plugin => plugin.id).sort()).toEqual([
+			"first-plugin@first-market",
+			"second-plugin@second-market",
+		]);
+		const runtimeConfig = await Bun.file(path.join(ctx.tmpDir, "omp-plugins.lock.json")).json();
+		expect(Object.keys(runtimeConfig.plugins).sort()).toEqual(["original-runtime", "taken-runtime"]);
+	});
+
 	it("installPlugin rejects package names that escape node_modules", async () => {
 		const marketplaceDir = path.join(ctx.tmpDir, "bad-package-marketplace");
 		const pluginDir = path.join(marketplaceDir, "plugins", "bad-package");
