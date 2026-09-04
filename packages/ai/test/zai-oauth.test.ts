@@ -1,6 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import type { Mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
+import * as nativeSchemeCallback from "@oh-my-pi/pi-ai/registry/oauth/native-scheme-callback";
+import type { NativeSchemeCallbackReceiver } from "@oh-my-pi/pi-ai/registry/oauth/native-scheme-callback";
 import type { OAuthCredentials, OAuthController } from "@oh-my-pi/pi-ai/registry/oauth/types";
 import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
 
@@ -114,6 +117,14 @@ function makeBizFetch(
 	return { fetchMock, requests };
 }
 
+let nativeReceiverSpy: Mock<typeof nativeSchemeCallback.createNativeSchemeCallbackReceiver>;
+
+beforeEach(() => {
+	nativeReceiverSpy = vi
+		.spyOn(nativeSchemeCallback, "createNativeSchemeCallbackReceiver")
+		.mockResolvedValue(undefined);
+});
+
 afterEach(() => {
 	vi.restoreAllMocks();
 });
@@ -149,6 +160,46 @@ describe("zai oauth flow", () => {
 		expect(error).toBeInstanceOf(AIError.LoginCancelledError);
 		// Manual-only: never binds a loopback callback server.
 		expect(serveSpy).not.toHaveBeenCalled();
+		expect(nativeReceiverSpy).toHaveBeenCalledWith("zcode");
+	});
+
+	it("captures the registered zcode callback before exchanging tokens on macOS", async () => {
+		const { fetchMock } = makeBizFetch();
+		const events: string[] = [];
+		let authUrl = "";
+		const receiver: NativeSchemeCallbackReceiver = {
+			async dispose() {
+				events.push("dispose");
+			},
+			async waitForCallback() {
+				events.push("callback");
+				const state = new URL(authUrl).searchParams.get("state");
+				return `${REDIRECT_URI}?code=auth-code&state=${state}`;
+			},
+		};
+		nativeReceiverSpy.mockImplementation(async scheme => {
+			events.push(`listen:${scheme}`);
+			return receiver;
+		});
+		const manualInput = vi.fn(async () => {
+			throw new Error("manual input must not open when the native callback receiver is active");
+		});
+		const login = getProviderDefinition("zai-coding-plan")?.login;
+		if (!login) throw new Error("zai-coding-plan login is unavailable");
+
+		const credentials = await login({
+			fetch: fetchMock as unknown as FetchImpl,
+			onAuth: info => {
+				authUrl = info.url;
+				events.push("auth");
+			},
+			onManualCodeInput: manualInput,
+		});
+
+		if (typeof credentials === "string") throw new Error("expected structured credentials");
+		expect(credentials.access).toBe("created-key.real-secret");
+		expect(events).toEqual(["listen:zcode", "auth", "callback", "dispose"]);
+		expect(manualInput).not.toHaveBeenCalled();
 	});
 
 	it("exchanges the code, does business-login, then mints an id.secret key (create path)", async () => {

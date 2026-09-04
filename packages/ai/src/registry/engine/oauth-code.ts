@@ -42,6 +42,7 @@ export async function resolveCallbackOptions(
 		callbackHostname: callback.hostname,
 		allowPortFallback: callback.portFallback,
 		manualInputOnly: callback.manualOnly,
+		nativeScheme: callback.nativeScheme,
 	};
 	if (!callback.redirectUri) return base;
 	const redirectUri = await resolveValue(callback.redirectUri, signal);
@@ -79,6 +80,7 @@ export async function resolveCallbackOptions(
 		redirectUri,
 		allowPortFallback: false,
 		manualInputOnly: callback.manualOnly,
+		nativeScheme: callback.nativeScheme,
 	};
 }
 
