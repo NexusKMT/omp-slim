@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.9] - 2026-09-04
+
 ### Breaking Changes
 
 - Browser and computer automation now use JavaScript/Python evaluation preludes with reusable tab and element handles, replacing the previous standalone tool schemas and object-shaped run APIs.

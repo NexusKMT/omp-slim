@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.9] - 2026-09-04
+
 ### Added
 
 - Added recoverable native custom-scheme OAuth callbacks for macOS, Linux desktops, and Windows, with a manual fallback for unavailable or remote sessions.

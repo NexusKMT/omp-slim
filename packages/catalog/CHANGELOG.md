@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.9] - 2026-09-04
+
 ### Added
 
 - Added the `delegation-bias` capability for tuning how agents delegate work to subagents.

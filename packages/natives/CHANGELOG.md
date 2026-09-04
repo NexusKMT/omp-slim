@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.9] - 2026-09-04
+
 ### Added
 
 - Added native Sixel-to-PNG decoding for terminal graphics returned by shell commands.
