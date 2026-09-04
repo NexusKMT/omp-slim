@@ -20,6 +20,7 @@
 - Fixed two idle subagents exchanging a single IRC message ping-ponging forever: wake-turn relays are now tagged and never relayed back, so each automated relay is delivered exactly once instead of waking a reciprocal relay until manual cancellation.
 - Fixed large MCP tool-result previews collapsing their tail window to closing braces when an oversized output line preceded them ([#10761](https://github.com/can1357/oh-my-pi/issues/10761)).
 - Fixed `Ctrl+V` preserving CJK text from XWayland clipboard owners on Wayland instead of replacing characters with `?` ([#10762](https://github.com/can1357/oh-my-pi/issues/10762)).
+- Fixed byte-limited artifact reads reporting the displayed byte count as the read limit instead of the actual budget ([#10764](https://github.com/can1357/oh-my-pi/issues/10764)).
 
 ## [18.1.8] - 2026-09-03
 
