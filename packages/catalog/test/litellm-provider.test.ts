@@ -131,7 +131,7 @@ describe("LiteLLM provider discovery", () => {
 		const models = await options.fetchDynamicModels?.();
 
 		expect(options.cacheProviderId).toBe(
-			`litellm:rich-v8:${Bun.hash("http://litellm.example:4100/v1").toString(36)}`,
+			`litellm:rich-v9:${Bun.hash("http://litellm.example:4100/v1").toString(36)}`,
 		);
 		expect(fetchMock).toHaveBeenCalledTimes(6);
 		expect(models).toHaveLength(1);
@@ -155,7 +155,7 @@ describe("LiteLLM provider discovery", () => {
 		const models = await options.fetchDynamicModels?.();
 
 		expect(options.cacheProviderId).toBe(
-			`litellm:rich-v8:${Bun.hash("http://litellm-config.example:4200/v1/").toString(36)}`,
+			`litellm:rich-v9:${Bun.hash("http://litellm-config.example:4200/v1/").toString(36)}`,
 		);
 		expect(fetchMock).toHaveBeenCalledTimes(6);
 		expect(models).toHaveLength(1);
@@ -413,6 +413,109 @@ describe("LiteLLM provider discovery", () => {
 			},
 			supportsTools: true,
 		});
+	});
+
+	test("filters only known non-conversational modes from rich discovery", async () => {
+		const fetchMock = vi.fn(async (input: string | URL | Request) => {
+			const url = inputUrl(input);
+			if (url === "http://primary:4000/model_group/info") {
+				return Response.json({
+					data: [
+						{ model_group: "drop-embedding", mode: "embedding", supports_vision: false },
+						{ model_group: "drop-rerank", mode: "rerank", supports_vision: false },
+						{ model_group: "drop-audio-speech", mode: "audio_speech", supports_vision: false },
+						{
+							model_group: "drop-audio-transcription",
+							model_info: { mode: "audio_transcription", supports_vision: false },
+						},
+						{ model_group: "drop-image-generation", mode: "image_generation", supports_vision: false },
+						{ model_group: "keep-chat", mode: "chat", supports_vision: false },
+						{ model_group: "keep-responses", mode: "responses", supports_vision: false },
+						{ model_group: "keep-null", mode: null, supports_vision: false },
+						{ model_group: "keep-missing", supports_vision: false },
+						{ model_group: "keep-unknown", mode: "future_mode", supports_vision: false },
+						{ model_group: "keep-malformed", mode: { unexpected: true }, supports_vision: false },
+					],
+				});
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		}) as FetchImpl;
+
+		const models = await fetchLiteLLMRichModels({
+			api: "openai-completions",
+			provider: "litellm",
+			baseUrl: "http://primary:4000/v1",
+			fetch: fetchMock,
+		});
+
+		expect(models?.map(model => model.id)).toEqual([
+			"keep-chat",
+			"keep-malformed",
+			"keep-missing",
+			"keep-null",
+			"keep-responses",
+			"keep-unknown",
+		]);
+	});
+
+	test("does not reintroduce a non-conversational model from later rich metadata", async () => {
+		const calls: string[] = [];
+		const fetchMock = vi.fn(async (input: string | URL | Request) => {
+			const url = inputUrl(input);
+			calls.push(url);
+			if (url === "http://primary:4000/model_group/info") {
+				return Response.json({ data: [{ model_group: "shared-model", mode: "embedding" }] });
+			}
+			if (url === "http://primary:4000/v2/model/info") {
+				return Response.json({
+					data: [
+						{ model_name: "shared-model", model_info: { supports_vision: false } },
+						{ model_name: "keep-chat", model_info: { mode: "chat", supports_vision: false } },
+					],
+				});
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		}) as FetchImpl;
+
+		const models = await fetchLiteLLMRichModels({
+			api: "openai-completions",
+			provider: "litellm",
+			baseUrl: "http://primary:4000/v1",
+			fetch: fetchMock,
+		});
+
+		expect(calls).toEqual(["http://primary:4000/model_group/info", "http://primary:4000/v2/model/info"]);
+		expect(models?.map(model => model.id)).toEqual(["keep-chat"]);
+	});
+
+	test("does not fall back when rich discovery contains only non-conversational models", async () => {
+		const calls: string[] = [];
+		const fetchMock = vi.fn(async (input: string | URL | Request) => {
+			const url = inputUrl(input);
+			calls.push(url);
+			if (url === MODELS_DEV_URL) {
+				return Response.json({});
+			}
+			if (url === "http://primary:4000/model_group/info") {
+				return Response.json({ data: [{ model_group: "embedding-only", mode: "embedding" }] });
+			}
+			if (
+				url === "http://primary:4000/v2/model/info" ||
+				url === "http://primary:4000/model/info" ||
+				url === "http://primary:4000/v1/model/info"
+			) {
+				return new Response("Not Found", { status: 404 });
+			}
+			throw new Error(`/v1/models must not reintroduce the excluded model: ${url}`);
+		}) as FetchImpl;
+
+		const models = await litellmModelManagerOptions({
+			baseUrl: "http://primary:4000/v1",
+			fetch: fetchMock,
+		}).fetchDynamicModels?.();
+
+		expect(models).toEqual([]);
+		expect(calls).not.toContain("http://primary:4000/v1/models");
 	});
 
 	test("warns once when forbidden rich metadata forces /v1/models fallback", async () => {
@@ -1201,6 +1304,55 @@ describe("LiteLLM provider discovery", () => {
 			contextWindow: 262_144,
 			maxTokens: 8_192,
 		});
+	});
+
+	test("filters known non-conversational modes from the built-in /v1/models fallback", async () => {
+		const fetchMock = vi.fn(async (input: string | URL | Request) => {
+			const url = inputUrl(input);
+			if (url === MODELS_DEV_URL) {
+				return Response.json({});
+			}
+			if (
+				url === "http://fallback:4000/model_group/info" ||
+				url === "http://fallback:4000/v2/model/info" ||
+				url === "http://fallback:4000/model/info" ||
+				url === "http://fallback:4000/v1/model/info"
+			) {
+				return new Response("Not Found", { status: 404 });
+			}
+			if (url === "http://fallback:4000/v1/models") {
+				return Response.json({
+					data: [
+						{ id: "drop-embedding", mode: "embedding" },
+						{ id: "drop-rerank", mode: "rerank" },
+						{ id: "drop-audio-speech", mode: "audio_speech" },
+						{ id: "drop-audio-transcription", mode: "audio_transcription" },
+						{ id: "drop-image-generation", mode: "image_generation" },
+						{ id: "keep-chat", mode: "chat" },
+						{ id: "keep-responses", mode: "responses" },
+						{ id: "keep-null", mode: null },
+						{ id: "keep-missing" },
+						{ id: "keep-unknown", mode: "future_mode" },
+						{ id: "keep-malformed", mode: ["embedding"] },
+					],
+				});
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		}) as FetchImpl;
+
+		const models = await litellmModelManagerOptions({
+			baseUrl: "http://fallback:4000/v1",
+			fetch: fetchMock,
+		}).fetchDynamicModels?.();
+
+		expect(models?.map(model => model.id)).toEqual([
+			"keep-chat",
+			"keep-malformed",
+			"keep-missing",
+			"keep-null",
+			"keep-responses",
+			"keep-unknown",
+		]);
 	});
 
 	test("enriches LiteLLM /v1/models fallback entries missing from stencil.so with bundled reasoning metadata", async () => {

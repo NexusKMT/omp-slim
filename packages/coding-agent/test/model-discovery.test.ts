@@ -2641,6 +2641,73 @@ providers:
 		expect(model?.api).toBe("openai-responses");
 	});
 
+	test("configured litellm discovery omits non-conversational rich modes", async () => {
+		writeRawModelsJson({
+			"litellm-test": {
+				baseUrl: "http://127.0.0.1:4004/v1",
+				api: "openai-completions",
+				auth: "none",
+				discovery: { type: "litellm" },
+			},
+		});
+		const fetchMock: FetchImpl = async input => {
+			const url = String(input);
+			if (url === "http://127.0.0.1:4004/model_group/info") {
+				return Response.json({
+					data: [
+						{ model_group: "drop-embedding", mode: "embedding", supports_vision: false },
+						{ model_group: "drop-rerank", mode: "rerank", supports_vision: false },
+						{ model_group: "drop-audio-speech", mode: "audio_speech", supports_vision: false },
+						{ model_group: "drop-audio-transcription", mode: "audio_transcription", supports_vision: false },
+						{ model_group: "drop-image-generation", mode: "image_generation", supports_vision: false },
+						{ model_group: "keep-chat", mode: "chat", supports_vision: false },
+						{ model_group: "maven-auto", mode: null, supports_vision: false },
+					],
+				});
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		};
+
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+		await registry.refresh();
+
+		expect(
+			getModelsForProvider(registry, "litellm-test")
+				.map(model => model.id)
+				.sort(),
+		).toEqual(["keep-chat", "maven-auto"]);
+	});
+
+	test("configured litellm discovery keeps a filtered rich catalog authoritative", async () => {
+		writeRawModelsJson({
+			"litellm-test": {
+				baseUrl: "http://127.0.0.1:4006/v1",
+				api: "openai-completions",
+				auth: "none",
+				discovery: { type: "litellm" },
+			},
+		});
+		const fetchMock: FetchImpl = async input => {
+			const url = String(input);
+			if (url === "http://127.0.0.1:4006/model_group/info") {
+				return Response.json({ data: [{ model_group: "embedding-only", mode: "embedding" }] });
+			}
+			if (
+				url === "http://127.0.0.1:4006/v2/model/info" ||
+				url === "http://127.0.0.1:4006/model/info" ||
+				url === "http://127.0.0.1:4006/v1/model/info"
+			) {
+				return new Response("Not Found", { status: 404 });
+			}
+			throw new Error(`/v1/models must not reintroduce the excluded model: ${url}`);
+		};
+
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+		await registry.refresh();
+
+		expect(getModelsForProvider(registry, "litellm-test")).toEqual([]);
+	});
+
 	test("litellm discovery enriches configured proxy models with bundled references", async () => {
 		writeRawModelsJson({
 			"litellm-test": {
@@ -2697,6 +2764,55 @@ providers:
 
 		expect(registry.find("litellm-test", "default-litellm")?.baseUrl).toBe("http://localhost:4000/v1");
 		expect(registry.find("litellm-test", "openai/gpt-5")?.api).toBe("openai-responses");
+	});
+
+	test("configured litellm /v1/models fallback preserves only selectable modes", async () => {
+		writeRawModelsJson({
+			"litellm-test": {
+				baseUrl: "http://127.0.0.1:4005/v1",
+				api: "openai-completions",
+				auth: "none",
+				discovery: { type: "litellm" },
+			},
+		});
+		const fetchMock: FetchImpl = async input => {
+			const url = String(input);
+			if (
+				url === "http://127.0.0.1:4005/model_group/info" ||
+				url === "http://127.0.0.1:4005/v2/model/info" ||
+				url === "http://127.0.0.1:4005/model/info" ||
+				url === "http://127.0.0.1:4005/v1/model/info"
+			) {
+				return new Response("Not Found", { status: 404 });
+			}
+			if (url === "http://127.0.0.1:4005/v1/models") {
+				return Response.json({
+					data: [
+						{ id: "drop-embedding", mode: "embedding" },
+						{ id: "drop-rerank", mode: "rerank" },
+						{ id: "drop-audio-speech", mode: "audio_speech" },
+						{ id: "drop-audio-transcription", mode: "audio_transcription" },
+						{ id: "drop-image-generation", mode: "image_generation" },
+						{ id: "keep-chat", mode: "chat" },
+						{ id: "keep-responses", mode: "responses" },
+						{ id: "keep-null", mode: null },
+						{ id: "keep-missing" },
+						{ id: "keep-unknown", mode: "future_mode" },
+						{ id: "keep-malformed", mode: { unexpected: true } },
+					],
+				});
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		};
+
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+		await registry.refresh();
+
+		expect(
+			getModelsForProvider(registry, "litellm-test")
+				.map(model => model.id)
+				.sort(),
+		).toEqual(["keep-chat", "keep-malformed", "keep-missing", "keep-null", "keep-responses", "keep-unknown"]);
 	});
 
 	test("litellm discovery reuses configured bearer on rich and fallback requests", async () => {

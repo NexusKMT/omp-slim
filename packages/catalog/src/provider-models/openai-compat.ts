@@ -5322,10 +5322,21 @@ type LiteLLMRichEndpointFailure = {
 	error?: unknown;
 };
 type LiteLLMRichEndpointResult<TApi extends Api> =
-	| { models: LiteLLMRichEndpointModel<TApi>[]; incompleteVisionMetadata: boolean }
+	| {
+			models: LiteLLMRichEndpointModel<TApi>[];
+			excludedModelIds: ReadonlySet<string>;
+			incompleteVisionMetadata: boolean;
+	  }
 	| { failure: LiteLLMRichEndpointFailure };
 
 const LITELLM_RICH_ENDPOINTS = ["/model_group/info", "/v2/model/info", "/model/info", "/v1/model/info"] as const;
+const LITELLM_NON_CONVERSATIONAL_MODES: ReadonlySet<string> = new Set([
+	"embedding",
+	"rerank",
+	"audio_speech",
+	"audio_transcription",
+	"image_generation",
+]);
 export const OPENAI_COMPAT_DISCOVERY_DEFAULT_CONTEXT_WINDOW = 128_000;
 export const OPENAI_COMPAT_DISCOVERY_DEFAULT_MAX_TOKENS = 32_768;
 const UNKNOWN_PROXY_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const;
@@ -5349,6 +5360,10 @@ function warnLiteLLMMetadataFallback(managementBaseUrl: string, failure: LiteLLM
 			: {}),
 		...(failure.error !== undefined ? { error: failure.error } : {}),
 	});
+}
+
+export function isSelectableLiteLLMModelMode(mode: unknown): boolean {
+	return typeof mode !== "string" || !LITELLM_NON_CONVERSATIONAL_MODES.has(mode);
 }
 
 export function normalizeLiteLLMManagementBaseUrl(baseUrl: string): string {
@@ -5391,7 +5406,10 @@ function mapLiteLLMOpenAICompatibleModel(
 	entry: OpenAICompatibleModelRecord,
 	defaults: ModelSpec<Api>,
 	reference: ModelSpec<Api> | undefined,
-): ModelSpec<Api> {
+): ModelSpec<Api> | null {
+	if (!isSelectableLiteLLMModelMode(entry.mode)) {
+		return null;
+	}
 	const model = mapWithBundledReference(entry, defaults, reference);
 	return {
 		...model,
@@ -5587,7 +5605,10 @@ function mapLiteLLMRichEntry<TApi extends Api>(
 	options: FetchLiteLLMRichModelsOptions<TApi>,
 	runtimeBaseUrl: string,
 ): ModelSpec<TApi> | null {
-	if (isLiteLLMUnusableSentinelPlaceholder(entry)) {
+	if (
+		!isSelectableLiteLLMModelMode(getLiteLLMMetadataValue(entry, "mode")) ||
+		isLiteLLMUnusableSentinelPlaceholder(entry)
+	) {
 		return null;
 	}
 	const id = getLiteLLMRichModelId(entry);
@@ -5742,7 +5763,19 @@ async function fetchLiteLLMRichEndpoint<TApi extends Api>(
 		return null;
 	}
 	const deduped = new Map<string, LiteLLMRichEndpointModel<TApi>>();
+	const excludedModelIds = new Set<string>();
 	for (const entry of entries) {
+		const modelId = getLiteLLMRichModelId(entry);
+		if (!isSelectableLiteLLMModelMode(getLiteLLMMetadataValue(entry, "mode"))) {
+			if (modelId) {
+				excludedModelIds.add(modelId);
+				deduped.delete(modelId);
+			}
+			continue;
+		}
+		if (modelId && excludedModelIds.has(modelId)) {
+			continue;
+		}
 		const model = mapLiteLLMRichEntry(entry, options, runtimeBaseUrl);
 		if (model) {
 			const supportsVision = getLiteLLMMetadataValue(entry, "supports_vision");
@@ -5768,12 +5801,13 @@ async function fetchLiteLLMRichEndpoint<TApi extends Api>(
 			deduped.set(model.id, existing ? mergeLiteLLMRichEndpointModels(existing, next) : next);
 		}
 	}
-	if (deduped.size === 0) {
+	if (deduped.size === 0 && excludedModelIds.size === 0) {
 		return null;
 	}
 	const models = Array.from(deduped.values()).sort((left, right) => left.model.id.localeCompare(right.model.id));
 	return {
 		models,
+		excludedModelIds,
 		incompleteVisionMetadata: models.some(entry => entry.supportsVision !== true && entry.supportsVision !== false),
 	};
 }
@@ -5788,6 +5822,7 @@ async function fetchLiteLLMRichModelsInternal<TApi extends Api>(
 	}
 	const fetchModels = async (signal?: AbortSignal): Promise<ModelSpec<TApi>[] | null> => {
 		const deduped = new Map<string, LiteLLMRichEndpointModel<TApi>>();
+		const excludedModelIds = new Set<string>();
 		let metadataFailure: LiteLLMRichEndpointFailure | undefined;
 		for (const endpoint of LITELLM_RICH_ENDPOINTS) {
 			const result = await fetchLiteLLMRichEndpoint(endpoint, options, managementBaseUrl, runtimeBaseUrl, signal);
@@ -5809,8 +5844,15 @@ async function fetchLiteLLMRichModelsInternal<TApi extends Api>(
 				}
 				continue;
 			}
+			for (const modelId of result.excludedModelIds) {
+				excludedModelIds.add(modelId);
+				deduped.delete(modelId);
+			}
 			const hadPriorModels = deduped.size > 0;
 			for (const next of result.models) {
+				if (excludedModelIds.has(next.model.id)) {
+					continue;
+				}
 				const existing = deduped.get(next.model.id);
 				if (!existing) {
 					if (!hadPriorModels) {
@@ -5819,6 +5861,9 @@ async function fetchLiteLLMRichModelsInternal<TApi extends Api>(
 					continue;
 				}
 				deduped.set(next.model.id, mergeLiteLLMRichEndpointModels(existing, next));
+			}
+			if (deduped.size === 0) {
+				continue;
 			}
 			let needsMoreMetadata = false;
 			for (const entry of deduped.values()) {
@@ -5840,6 +5885,9 @@ async function fetchLiteLLMRichModelsInternal<TApi extends Api>(
 			}
 		}
 		if (deduped.size === 0) {
+			if (excludedModelIds.size > 0) {
+				return [];
+			}
 			if (metadataFailure) {
 				warnLiteLLMMetadataFallback(managementBaseUrl, metadataFailure);
 			}
@@ -5866,13 +5914,11 @@ export function litellmModelManagerOptions(config?: LiteLLMModelManagerConfig): 
 	const baseUrl = config?.baseUrl ?? getDefaultModelDiscoveryBaseUrl("litellm")!;
 	return {
 		providerId: "litellm",
-		// rich-v8 invalidates rows whose `compatConfig` retained a colliding
-		// bundled model's provider-specific transport (e.g. Fireworks
-		// `wireModelIdMode`) before that leak was fixed. Earlier versions added
-		// bundled reference fallback, moved OpenAI models to Responses, continued
-		// past incomplete vision/API metadata and endpoints omitting cache
-		// pricing, stripped reseller usage suffixes, filtered placeholder rows,
-		// and mapped rich pricing. Bump the version whenever these mappers change,
+		// rich-v9 invalidates rows written before known non-conversational modes
+		// were filtered. Earlier versions added bundled reference fallback, moved
+		// OpenAI models to Responses, continued past incomplete metadata, stripped
+		// reseller usage suffixes, filtered placeholders, mapped rich pricing, and
+		// removed colliding provider transport. Bump whenever these mappers change,
 		// or warm authoritative caches keep serving pre-change rows for the full TTL.
 		cacheProviderId: resolveModelCacheProviderId("litellm", { baseUrl }),
 		// litellm is a local-only proxy and is never bundled in models.json (that
@@ -5892,7 +5938,7 @@ export function litellmModelManagerOptions(config?: LiteLLMModelManagerConfig): 
 				resolveApi: resolveLiteLLMApi,
 				timeoutMs: 10_000,
 			});
-			if (richModels && richModels.length > 0) {
+			if (richModels !== null) {
 				return richModels;
 			}
 			return fetchOpenAICompatibleModels<Api>({

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- LiteLLM discovery no longer exposes embedding, reranking, speech, transcription, or image-generation models as coding models.
+
 ## [18.1.9] - 2026-09-04
 
 ### Added
