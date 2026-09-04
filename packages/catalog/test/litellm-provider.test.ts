@@ -421,15 +421,25 @@ describe("LiteLLM provider discovery", () => {
 			if (url === "http://primary:4000/model_group/info") {
 				return Response.json({
 					data: [
-						{ model_group: "drop-embedding", mode: "embedding", supports_vision: false },
-						{ model_group: "drop-rerank", mode: "rerank", supports_vision: false },
 						{ model_group: "drop-audio-speech", mode: "audio_speech", supports_vision: false },
 						{
 							model_group: "drop-audio-transcription",
 							model_info: { mode: "audio_transcription", supports_vision: false },
 						},
+						{ model_group: "drop-batch", mode: "batch", supports_vision: false },
+						{ model_group: "drop-embedding", mode: "embedding", supports_vision: false },
+						{ model_group: "drop-guardrail", mode: "guardrail", supports_vision: false },
+						{ model_group: "drop-image-edit", mode: "image_edit", supports_vision: false },
 						{ model_group: "drop-image-generation", mode: "image_generation", supports_vision: false },
+						{ model_group: "drop-moderation", mode: "moderation", supports_vision: false },
+						{ model_group: "drop-ocr", mode: "ocr", supports_vision: false },
+						{ model_group: "drop-rerank", mode: "rerank", supports_vision: false },
+						{ model_group: "drop-search", mode: "search", supports_vision: false },
+						{ model_group: "drop-vector-store", mode: "vector_store", supports_vision: false },
+						{ model_group: "drop-video-generation", mode: "video_generation", supports_vision: false },
 						{ model_group: "keep-chat", mode: "chat", supports_vision: false },
+						{ model_group: "keep-completion", mode: "completion", supports_vision: false },
+						{ model_group: "keep-realtime", mode: "realtime", supports_vision: false },
 						{ model_group: "keep-responses", mode: "responses", supports_vision: false },
 						{ model_group: "keep-null", mode: null, supports_vision: false },
 						{ model_group: "keep-missing", supports_vision: false },
@@ -450,9 +460,11 @@ describe("LiteLLM provider discovery", () => {
 
 		expect(models?.map(model => model.id)).toEqual([
 			"keep-chat",
+			"keep-completion",
 			"keep-malformed",
 			"keep-missing",
 			"keep-null",
+			"keep-realtime",
 			"keep-responses",
 			"keep-unknown",
 		]);
@@ -1363,12 +1375,22 @@ describe("LiteLLM provider discovery", () => {
 			if (url === "http://fallback:4000/v1/models") {
 				return Response.json({
 					data: [
-						{ id: "drop-embedding", mode: "embedding" },
-						{ id: "drop-rerank", mode: "rerank" },
 						{ id: "drop-audio-speech", mode: "audio_speech" },
 						{ id: "drop-audio-transcription", mode: "audio_transcription" },
+						{ id: "drop-batch", mode: "batch" },
+						{ id: "drop-embedding", mode: "embedding" },
+						{ id: "drop-guardrail", mode: "guardrail" },
+						{ id: "drop-image-edit", mode: "image_edit" },
 						{ id: "drop-image-generation", mode: "image_generation" },
+						{ id: "drop-moderation", mode: "moderation" },
+						{ id: "drop-ocr", mode: "ocr" },
+						{ id: "drop-rerank", mode: "rerank" },
+						{ id: "drop-search", mode: "search" },
+						{ id: "drop-vector-store", mode: "vector_store" },
+						{ id: "drop-video-generation", mode: "video_generation" },
 						{ id: "keep-chat", mode: "chat" },
+						{ id: "keep-completion", mode: "completion" },
+						{ id: "keep-realtime", mode: "realtime" },
 						{ id: "keep-responses", mode: "responses" },
 						{ id: "keep-null", mode: null },
 						{ id: "keep-missing" },
@@ -1387,9 +1409,11 @@ describe("LiteLLM provider discovery", () => {
 
 		expect(models?.map(model => model.id)).toEqual([
 			"keep-chat",
+			"keep-completion",
 			"keep-malformed",
 			"keep-missing",
 			"keep-null",
+			"keep-realtime",
 			"keep-responses",
 			"keep-unknown",
 		]);

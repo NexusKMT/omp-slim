@@ -5331,11 +5331,19 @@ type LiteLLMRichEndpointResult<TApi extends Api> =
 
 const LITELLM_RICH_ENDPOINTS = ["/model_group/info", "/v2/model/info", "/model/info", "/v1/model/info"] as const;
 const LITELLM_NON_CONVERSATIONAL_MODES: ReadonlySet<string> = new Set([
-	"embedding",
-	"rerank",
 	"audio_speech",
 	"audio_transcription",
+	"batch",
+	"embedding",
+	"guardrail",
+	"image_edit",
 	"image_generation",
+	"moderation",
+	"ocr",
+	"rerank",
+	"search",
+	"vector_store",
+	"video_generation",
 ]);
 export const OPENAI_COMPAT_DISCOVERY_DEFAULT_CONTEXT_WINDOW = 128_000;
 export const OPENAI_COMPAT_DISCOVERY_DEFAULT_MAX_TOKENS = 32_768;
