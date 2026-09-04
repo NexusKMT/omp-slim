@@ -934,6 +934,7 @@ describe("requestCompactionV2Streaming", () => {
 		);
 		let betaFeaturesHeader: string | undefined;
 		let residencyHeader: string | undefined;
+		let clientMetadata: Record<string, unknown> | undefined;
 		const fetchMock: FetchImpl = async (_input, init) => {
 			if (!init?.headers || init.headers instanceof Headers || Array.isArray(init.headers)) {
 				throw new Error("Expected V2 compaction to send headers as a plain object");
@@ -942,6 +943,10 @@ describe("requestCompactionV2Streaming", () => {
 			const rawResidencyHeader = init.headers["x-openai-internal-codex-residency"];
 			betaFeaturesHeader = typeof rawBetaFeaturesHeader === "string" ? rawBetaFeaturesHeader : undefined;
 			residencyHeader = typeof rawResidencyHeader === "string" ? rawResidencyHeader : undefined;
+			const parsedBody: unknown = JSON.parse(String(init.body));
+			if (isRecord(parsedBody) && isRecord(parsedBody.client_metadata)) {
+				clientMetadata = parsedBody.client_metadata;
+			}
 			return sseResponse([
 				{
 					type: "response.output_item.done",
@@ -956,6 +961,7 @@ describe("requestCompactionV2Streaming", () => {
 
 		expect(betaFeaturesHeader).toBe("remote_compaction_v2");
 		expect(residencyHeader).toBe("us");
+		expect(clientMetadata?.["x-codex-installation-id"]).toBe(TEST_INSTALLATION_ID);
 	});
 
 	test("retries transient V2 stream failures with a fresh request attempt", async () => {

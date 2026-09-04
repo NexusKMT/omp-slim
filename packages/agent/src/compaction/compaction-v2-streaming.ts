@@ -347,6 +347,9 @@ async function attemptCompactionV2Streaming(
 		store: false,
 		stream: true,
 	};
+	if (options.codexMetadata) {
+		body.client_metadata = options.codexMetadata.clientMetadata;
+	}
 
 	if (shouldUseCodexProviderTransport(model)) {
 		const eventStream = await openCodexCompactionEventStream(model, body, {
