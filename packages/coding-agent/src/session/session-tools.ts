@@ -21,7 +21,6 @@ import type { MemoryBackendStartOptions } from "../memory-backend/types";
 import toolRosterNoticePrompt from "../prompts/system/tool-roster-notice.md" with { type: "text" };
 import xdevMountNoticePrompt from "../prompts/system/xdev-mount-notice.md" with { type: "text" };
 import { isMCPToolName, normalizeToolNames } from "../tools/builtin-names";
-import { computerExposureMode } from "../tools/computer/exposure";
 import { wrapToolWithMetaNotice } from "../tools/output-meta";
 import { isFilesystemSourcePath } from "../tools/path-utils";
 import { supportsExternalThinking } from "../tools/think";
@@ -71,7 +70,6 @@ interface SessionToolsOptions {
 	autoApprove?: boolean;
 	toolRegistry?: Map<string, AgentTool>;
 	createVibeTools?: () => AgentTool[];
-	createComputerTool?: () => Promise<AgentTool | null>;
 	/** Creates the private `think` scratchpad tool for runtime setting changes. */
 	createThinkTool?: () => Promise<AgentTool | null>;
 	builtInToolNames?: Iterable<string>;
@@ -193,7 +191,6 @@ export class SessionTools {
 	#autoApprove: boolean;
 	#toolRegistry: Map<string, AgentTool>;
 	#createVibeTools: (() => AgentTool[]) | undefined;
-	#createComputerTool: SessionToolsOptions["createComputerTool"];
 	#createThinkTool: SessionToolsOptions["createThinkTool"];
 	#installedVibeToolNames = new Set<string>();
 	#builtInToolNames: Set<string>;
@@ -267,7 +264,6 @@ export class SessionTools {
 		this.#autoApprove = options.autoApprove === true;
 		this.#toolRegistry = options.toolRegistry ?? new Map();
 		this.#createVibeTools = options.createVibeTools;
-		this.#createComputerTool = options.createComputerTool;
 		this.#createThinkTool = options.createThinkTool;
 		this.#builtInToolNames = new Set(options.builtInToolNames ?? []);
 		this.#mcpManagerToolNames = new Set(options.mcpManagerToolNames ?? []);
@@ -632,16 +628,6 @@ export class SessionTools {
 		return `delegation-bias:${resolveDelegationBias(activeModel)}`;
 	}
 
-	#logComputerState(message: string, enabled: boolean): void {
-		const model = this.#host.model();
-		logger.debug(message, {
-			enabled,
-			active: this.getEnabledToolNames().includes("computer"),
-			model: model ? formatModelString(model) : undefined,
-			exposure: computerExposureMode(model),
-		});
-	}
-
 	/** Rebuilds model-dependent tool prompts after a model change. */
 	async syncAfterModelChange(previousEditMode: EditMode): Promise<void> {
 		const currentEditMode = this.resolveActiveEditMode();
@@ -650,21 +636,6 @@ export class SessionTools {
 		const modelChanged = this.#currentPromptModelKey() !== this.#promptModelKey;
 		if (editModeChanged || modelChanged) {
 			await this.refreshBaseSystemPrompt();
-		}
-		const computerExpected = this.#host.settings.get("computer.enabled");
-		const computerActive = this.getEnabledToolNames().includes("computer");
-		if (computerExpected && !computerActive) {
-			const model = this.#host.model();
-			const modelName = model ? formatModelString(model) : "the current model";
-
-			logger.warn("Enabled computer tool missing after model change", { model: modelName });
-			this.#host.emitNotice(
-				"warning",
-				`Computer use remains enabled, but the computer tool is unavailable to ${modelName}.`,
-				"computer",
-			);
-		} else if (computerExpected) {
-			this.#logComputerState("Computer tool retained after model change", true);
 		}
 	}
 
@@ -1432,51 +1403,6 @@ export class SessionTools {
 				nextActive.push(wrapped.name);
 			}
 			await this.#applyActiveToolsByName([...new Set(nextActive)]);
-		});
-	}
-
-	/**
-	 * Session-scoped enable/disable for the settings-gated `computer` tool.
-	 *
-	 * `createTools` derives the built-in slate once at session start, so a runtime
-	 * `computer.enabled` override alone never changes the active tools. Enabling
-	 * builds the tool through the config factory on first use (later toggles reuse
-	 * the registry entry, so only one desktop controller is ever registered) and
-	 * activates it; disabling drops it from the active set while keeping the
-	 * registry entry. Takes effect before the next model call.
-	 *
-	 * @returns false when enabling was requested but this session cannot build the
-	 * tool (e.g. restricted child sessions have no factory).
-	 */
-	setComputerToolEnabled(enabled: boolean): Promise<boolean> {
-		return this.runToolRegistryMutation(async () => {
-			const logState = (): void => this.#logComputerState("Computer tool state changed", enabled);
-			const active = this.getEnabledToolNames();
-			if (!enabled) {
-				if (active.includes("computer")) {
-					await this.#applyActiveToolsByName(active.filter(name => name !== "computer"));
-				}
-				logState();
-				return true;
-			}
-			if (!this.#toolRegistry.has("computer")) {
-				const tool = await this.#createComputerTool?.();
-				if (tool?.name !== "computer") {
-					const model = this.#host.model();
-					logger.warn("Computer tool could not be created", {
-						model: model ? formatModelString(model) : undefined,
-					});
-					return false;
-				}
-				const wrapped = this.#wrapRuntimeTool(tool);
-				this.#toolRegistry.set(wrapped.name, wrapped);
-				this.#builtInToolNames.add(wrapped.name);
-			}
-			if (!active.includes("computer")) {
-				await this.#applyActiveToolsByName([...active, "computer"]);
-			}
-			logState();
-			return true;
 		});
 	}
 

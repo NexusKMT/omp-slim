@@ -11,8 +11,6 @@ export const BUILTIN_TOOL_NAMES = [
 	"glob",
 	"grep",
 	"lsp",
-	"browser",
-	"computer",
 	"checkpoint",
 	"rewind",
 	"security_scan",

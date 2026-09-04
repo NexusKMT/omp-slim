@@ -12,6 +12,7 @@ import { jsBackend, pythonBackend } from "../eval";
 import type { ExecutorBackend, ExecutorBackendResult } from "../eval/backend";
 import { EVAL_TIMEOUT_PAUSE_OP, EVAL_TIMEOUT_RESUME_OP } from "../eval/bridge-timeout";
 import { IdleTimeout } from "../eval/idle-timeout";
+import { getEnabledEvalPreludes } from "../eval/preludes";
 import type { BackendProbeOptions } from "../eval/probe";
 import { defaultEvalSessionId } from "../eval/session-id";
 import type { EvalCellResult, EvalDisplayOutput, EvalLanguage, EvalStatusEvent, EvalToolDetails } from "../eval/types";
@@ -167,6 +168,8 @@ export interface EvalToolDescriptionOptions {
 	evalTools?: boolean;
 	/** Push `workpool()` as the default for independent items (model delegation bias `eager`). Default: true. */
 	eagerDelegation?: boolean;
+	/** Enabled capability documentation appended to the eval-only prompt. */
+	preludeDocumentation?: string;
 }
 
 export function getEvalToolDescription(options: EvalToolDescriptionOptions = {}): string {
@@ -182,6 +185,7 @@ export function getEvalToolDescription(options: EvalToolDescriptionOptions = {})
 		spawns: spawnPolicy.enabled,
 		spawnDefaultAgent: spawnPolicy.defaultAgent,
 		spawnAllowedAgentsText: spawnPolicy.allowedPromptText,
+		preludeDocumentation: options.preludeDocumentation,
 	});
 }
 
@@ -276,6 +280,10 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 		} else {
 			const backends = resolveEvalBackends(this.session);
 			const sessionSpawns = this.session.getSessionSpawns?.() ?? "*";
+			const preludeDocumentation = getEnabledEvalPreludes(this.session.getEvalPreludes?.() ?? [])
+				.map(definition => definition.documentation.trim())
+				.filter(Boolean)
+				.join("\n\n");
 			base = getEvalToolDescription({
 				py: backends.python,
 				js: backends.js,
@@ -283,6 +291,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 				autoBackgroundEnabled: this.session.settings.get("eval.autoBackground.enabled"),
 				evalTools: this.session.settings.get("eval.tools.enabled"),
 				eagerDelegation: sessionDelegationBias(this.session) === "eager",
+				preludeDocumentation,
 			});
 		}
 		return this.#codeModeDescription(base) ?? base;
@@ -306,7 +315,11 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 				return tool ? [{ name, parameters: (tool as { parameters?: unknown }).parameters }] : [];
 			}),
 		);
-		return prompt.render(evalCodeModeDescription, { baseDescription, declarations });
+		const preludeDeclarations = getEnabledEvalPreludes(session.getEvalPreludes?.() ?? [])
+			.map(definition => definition.codeModeDeclarations?.trim())
+			.filter((declaration): declaration is string => Boolean(declaration))
+			.join("\n\n");
+		return prompt.render(evalCodeModeDescription, { baseDescription, declarations, preludeDeclarations });
 	}
 	/** All reuse-chain examples; the `examples` getter filters by enabled languages. */
 	private static readonly ALL_EXAMPLES: readonly ToolExample<typeof evalSchema.infer>[] = [
@@ -481,6 +494,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 					});
 					const finalText = result.content.find(block => block.type === "text")?.text ?? "";
 					latestText = finalText;
+					latestDetails = result.details;
 					// Hand the full result (images included) to the foreground waiter
 					// before deciding the job's terminal state.
 					completion.resolve({ kind: "completed", result });
@@ -490,13 +504,19 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 						// records it as failed and delivers the error text.
 						throw new ToolError(finalText || "Eval cell failed");
 					}
-					await reportProgress(finalText, { async: { state: "completed", jobId, type: "eval" } });
+					await reportProgress(finalText, {
+						...result.details,
+						async: { state: "completed", jobId, type: "eval" },
+					});
 					return finalText;
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
 					latestText = message;
 					completion.resolve({ kind: "failed", error });
-					await reportProgress(message, { async: { state: "failed", jobId, type: "eval" } });
+					await reportProgress(message, {
+						...latestDetails,
+						async: { state: "failed", jobId, type: "eval" },
+					});
 					throw error;
 				}
 			},

@@ -36,6 +36,10 @@ log(message) → None         phase(title) → None
 budget → {{#if py}}`budget.total` (ceiling or None), `budget.spent()`, `budget.remaining()`{{/if}}{{#if js}}`await budget.total()`, `await budget.spent()`, `await budget.remaining()`{{/if}}; ceiling `+Nk` advisory, `+Nk!` hard.
 ```
 </prelude>
+{{#if preludeDocumentation}}
+
+{{{preludeDocumentation}}}
+{{/if}}
 {{#if spawns}}
 <dag>
 Acyclic waves of handles:

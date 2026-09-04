@@ -5,6 +5,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 import type { AsyncJobManager } from "../async/job-manager";
 import type { Rule } from "../capability/rule";
 import type { EffectiveExtensionRoots } from "../capability/types";
+import type { EvalPreludeDefinition } from "../eval/preludes";
 import type { PromptTemplate } from "../config/prompt-templates";
 import type { Settings } from "../config/settings";
 import { EditTool } from "../edit";
@@ -40,10 +41,8 @@ import { AskTool } from "./ask";
 import { AstEditTool } from "./ast-edit";
 import { AstGrepTool } from "./ast-grep";
 import { BashTool } from "./bash";
-import { BrowserTool } from "./browser";
 import { type BuiltinToolName, type HiddenToolName, normalizeToolNames } from "./builtin-names";
 import { type CheckpointState, CheckpointTool, type CompletedRewindState, RewindTool } from "./checkpoint";
-import { ComputerTool } from "./computer";
 import { DebugTool } from "./debug";
 import { EvalTool } from "./eval";
 import { resolveEvalBackends } from "./eval-backends";
@@ -266,6 +265,8 @@ export interface ToolSession {
 	sessionManager?: Pick<SessionManager, "appendCustomEntry" | "ensureOnDisk" | "flush" | "getBranch" | "getEntries">;
 	/** Get eval kernel owner ID for session-scoped retained-kernel cleanup. */
 	getEvalKernelOwnerId?: () => string | null;
+	/** Current enabled eval prelude definitions. */
+	getEvalPreludes?: () => readonly EvalPreludeDefinition[];
 	/** Reject new eval work once session disposal has started. */
 	assertEvalExecutionAllowed?: () => void;
 	/** Track tool-owned eval work so session disposal can await/abort it like direct session eval runs. */
@@ -466,8 +467,6 @@ export const BUILTIN_TOOLS: Record<BuiltinToolName, ToolFactory> = {
 	glob: s => new GlobTool(s, { rootPathAlias: true }),
 	grep: s => new GrepTool(s),
 	lsp: LspTool.createIf,
-	browser: s => new BrowserTool(s),
-	computer: s => new ComputerTool(s),
 	checkpoint: CheckpointTool.createIf,
 	rewind: RewindTool.createIf,
 	task: s => TaskTool.create(s),
@@ -632,8 +631,6 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		if (name === "security_scan") return session.settings.get("security.enabled");
 		if (name === "think") return externalThinkingActive;
 		if (name === "ask") return session.settings.get("ask.enabled");
-		if (name === "browser") return session.settings.get("browser.enabled");
-		if (name === "computer") return session.settings.get("computer.enabled");
 		if (name === "checkpoint" || name === "rewind")
 			return (
 				session.settings.get("checkpoint.enabled") &&

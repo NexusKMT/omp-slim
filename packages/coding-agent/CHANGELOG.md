@@ -4,6 +4,8 @@
 
 ### Breaking Changes
 
+- Browser and computer automation now use enabled JavaScript/Python Eval preludes instead of standalone tool schemas.
+- Replaced object-shaped browser/computer runs with reusable tab and element handles plus function-or-string run forms that return structured values directly.
 - Replaced the `inspect_image` tool and `/vision` controls with `read <image>?q=<question>`; text-only models now receive image metadata plus this selector hint.
 - Renamed `inspect_image.timeoutMs` to `images.questionTimeoutMs`; existing settings migrate automatically.
 
@@ -13,6 +15,7 @@
 - Made Markdown links to existing local files and resources clickable while preserving their displayed URLs.
 - Added the `/switch <model>` command for session-only model changes from the prompt, with support for the same model selectors and completions used by `--model`; ACP `/model <model>` accepts these selectors as well.
 - Added the `worktree.cleanSource` setting to reset and clean the original checkout when creating a worktree with `/wt`.
+- The `computer` Eval prelude now exposes desktop, window, and element helpers directly (`computer.window(...)`, `win.screenshot()`, `win.ax()`, `el.press()`, …) in JavaScript and Python, with inspection helpers auto-approved at the read tier; `computer.run` remains for multi-step scripts.
 
 ### Changed
 

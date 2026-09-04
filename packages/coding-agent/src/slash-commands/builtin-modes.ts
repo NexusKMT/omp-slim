@@ -10,8 +10,6 @@ import type { SettingPath, Settings } from "../config/settings";
 import { describeLoopLimitRuntime } from "../modes/loop-limit";
 import type { InteractiveModeContext } from "../modes/types";
 import type { AgentSession } from "../session/agent-session";
-import type { ComputerTool } from "../tools/computer";
-import { computerExposureMode } from "../tools/computer/exposure";
 import { commandConsumed, errorMessage, usage } from "./helpers/parse";
 import { handleSecurityCommand } from "./helpers/security";
 import type { ParsedSlashCommand, SlashCommandSpec, TuiSlashCommandRuntime } from "./types";
@@ -102,59 +100,40 @@ function applyExtendedContextCommand(settings: Settings, args: string): string |
 }
 
 /** Detailed, session-effective `/computer status` diagnostics. */
-async function formatComputerUseStatus(session: AgentSession): Promise<string> {
+function formatComputerUseStatus(session: AgentSession): string {
 	const enabled = session.settings.get("computer.enabled");
-	const active = session.getEnabledToolNames().includes("computer");
-	const model = session.model;
-	const modelName = model ? formatModelString(model) : "none";
-	const exposure = !enabled
-		? "not exposed (disabled)"
-		: !active
-			? "not exposed (tool inactive)"
-			: computerExposureMode(model);
+	const active = session.getEvalPreludes().some(definition => definition.name === "computer");
 	const configured = {
 		display: session.settings.get("computer.display"),
 		maxWidth: session.settings.get("computer.maxWidth"),
 		maxHeight: session.settings.get("computer.maxHeight"),
 	};
-	const computerTool = active
-		? (session.getToolByName("computer") as Pick<ComputerTool, "capabilities"> | undefined)
-		: undefined;
-	const capabilities = await computerTool?.capabilities();
-	const capabilityStatus = capabilities
-		? [
-				`backend=${capabilities.backend}${capabilities.displayServer ? `/${capabilities.displayServer}` : ""}`,
-				`capture=${capabilities.capture} (${capabilities.capturePermission})`,
-				`input=${capabilities.input} (${capabilities.inputPermission})`,
-				`ax=${capabilities.ax} (${capabilities.axPermission})`,
-				`backgroundWindowInput=${capabilities.backgroundWindowInput}`,
-				`deliveryModes=${capabilities.deliveryModes.join(",") || "none"}`,
-			].join(", ")
-		: "session not started";
 	return [
 		`Computer use: ${enabled ? "enabled" : "disabled"}`,
-		`tool: ${active ? "active" : "inactive"}`,
-		`exposure: ${exposure}`,
-		`model: ${modelName}`,
+		`prelude: ${active ? "active" : "inactive"}`,
 		`configured: display=${configured.display}, maxWidth=${configured.maxWidth}, maxHeight=${configured.maxHeight}`,
-		`capabilities: ${capabilityStatus}`,
 	].join(" · ");
 }
 
 /**
- * Apply a session-scoped computer-use toggle: flip the active tool slate first
- * (so a failed enable never leaves a stale settings override), then record the
- * runtime override — never `settings.set`, which would persist to settings.json.
- * Returns the operator feedback line.
+ * Apply a session-scoped computer-use toggle and rebuild the current prompt.
+ * The override is never persisted to settings.json.
  */
 async function applyComputerUseToggle(session: AgentSession, enable: boolean): Promise<string> {
-	const applied = await session.setComputerToolEnabled(enable);
-	if (enable && !applied) {
+	const previous = session.settings.get("computer.enabled");
+	session.settings.override("computer.enabled", enable);
+	if (enable && !session.getEvalPreludes().some(definition => definition.name === "computer")) {
+		session.settings.override("computer.enabled", previous);
 		return "Computer use is unavailable in this session.";
 	}
-	session.settings.override("computer.enabled", enable);
+	try {
+		await session.refreshBaseSystemPrompt();
+	} catch (error) {
+		session.settings.override("computer.enabled", previous);
+		throw error;
+	}
 	return enable
-		? `Computer use enabled for this session. ${await formatComputerUseStatus(session)}`
+		? `Computer use enabled for this session. ${formatComputerUseStatus(session)}`
 		: "Computer use disabled for this session.";
 }
 
@@ -587,7 +566,7 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 	{
 		name: "computer",
 		icon: "computer",
-		description: "Toggle the native computer-use tool for this session",
+		description: "Toggle the native computer-use eval prelude for this session",
 		acpDescription: "Toggle computer use",
 		acpInputHint: "[on|off|status]",
 		subcommands: [
@@ -601,7 +580,7 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		handle: async (command, runtime) => {
 			const arg = command.args.trim().toLowerCase();
 			if (arg === "status") {
-				await runtime.output(await formatComputerUseStatus(runtime.session));
+				await runtime.output(formatComputerUseStatus(runtime.session));
 				return commandConsumed();
 			}
 			if (!arg || arg === "toggle" || arg === "on" || arg === "off") {
@@ -614,7 +593,7 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		handleTui: async (command, runtime) => {
 			const arg = command.args.trim().toLowerCase();
 			if (arg === "status") {
-				runtime.ctx.showStatus(await formatComputerUseStatus(runtime.ctx.session));
+				runtime.ctx.showStatus(formatComputerUseStatus(runtime.ctx.session));
 				runtime.ctx.editor.setText("");
 				return;
 			}

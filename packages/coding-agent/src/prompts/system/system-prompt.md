@@ -85,12 +85,13 @@ Most FS/bash tools auto-resolve these to FS paths.
 {{/if}}
 {{/if}}
 
-{{#has tools "computer"}}
+{{#if computerEnabled}}
 # Computer Use
-`{{toolRefs.computer}}` enabled/available.
-- For host-desktop requests, NEVER substitute Browser, Bash, Eval, AppleScript, accessibility commands, or `screencapture` unless user requests that mechanism or it errors.
-- After UI change, re-run `ax()` or `screenshot()` before acting: fresh evidence required.
-{{/has}}
+The `computer` eval prelude is enabled.
+- Direct helpers from JavaScript or Python Eval: `computer.window(…)`, `win.screenshot()`, `win.ax()`, `el.press()`, …; `computer.run(fnOrCode, options)` for multi-step sequences. Use `computer.capabilities()` and `computer.close()` as needed.
+- For host-desktop requests, NEVER substitute Browser, Bash, AppleScript, accessibility commands, or `screencapture` unless user requests that mechanism or it errors.
+- After UI change, gather fresh accessibility or screenshot evidence before acting.
+{{/if}}
 
 {{#if xdevTools.length}}
 # xd:// Tool Devices
@@ -207,15 +208,15 @@ Inline first. Fan out only when 2+ independent slices each cost more than a hand
 - NEVER yield non-trivial work without deliverable proof:
   - **Experiment/investigation** → run; output is proof; no tests.
   - **UI change** → verify against the actual surface:
-{{#has tools "browser"}}
-    - **Web UI** → browser-drive with `{{toolRefs.browser}}`; visual confirmation is proof; no tests unless existing suite really breaks.
-{{/has}}
-{{#has tools "computer"}}
-    - **Native desktop UI** → drive with `{{toolRefs.computer}}`; ground every claim in fresh screenshot or accessibility evidence.
-{{/has}}
+{{#if browserEnabled}}
+    - **Web UI** → use `browser.open` to get a tab handle, its direct helpers for common actions, `tab.run` for custom JavaScript, and `tab.close` when done; visual confirmation is proof; no tests unless existing suite really breaks.
+{{/if}}
+{{#if computerEnabled}}
+    - **Native desktop UI** → use the `computer` helpers from JavaScript or Python eval; ground every claim in fresh screenshot or accessibility evidence.
+{{/if}}
     - **TUI/CLI** → launch the actual program and verify terminal interaction, output, or state.
-{{#ifAny (not (includes tools "browser")) (not (includes tools "computer"))}}
-    - No suitable runtime tool for the changed surface → verify with a behavioral test or smoke test; explicitly report when visual verification cannot be performed.
+{{#ifAny (not browserEnabled) (not computerEnabled)}}
+    - No suitable runtime capability for the changed surface → verify with a behavioral test or smoke test; explicitly report when visual verification cannot be performed.
 {{/ifAny}}
   - **Bug fix** → reproduce, fix, confirm reproduction no longer triggers.
   - **Permanent feature/API change** → existing changed-contract tests. Add test only for uncovered new observable contract or user request.

@@ -497,6 +497,7 @@ export class Settings {
 	#merged: RawSettings = {};
 	/** Cached resolved values from the merged view, including defaults/path scoping */
 	#resolvedCache = new Map<SettingPath, unknown>();
+	#effectiveChangeListeners = new Set<(path: SettingPath, value: unknown, previous: unknown) => void>();
 	#editVariantCache: readonly EditVariantEntry[] | undefined;
 
 	/** Paths modified during this session (for partial save) */
@@ -724,6 +725,13 @@ export class Settings {
 
 	#fireEffectiveSettingChanged(path: SettingPath, value: unknown, prev: unknown): void {
 		if (Object.is(value, prev)) return;
+		for (const listener of Array.from(this.#effectiveChangeListeners)) {
+			try {
+				listener(path, value, prev);
+			} catch (error) {
+				logger.warn("Settings: effective-change listener failed", { path, error: String(error) });
+			}
+		}
 		if (path === "statusLine.sessionAccent") {
 			statusLineSessionAccentSignal.fire();
 		}
@@ -733,6 +741,14 @@ export class Settings {
 		if (CODE_MODE_SIGNAL_PATHS.includes(path)) {
 			codeModeSignal.fire();
 		}
+	}
+
+	/** Observe effective changes on this settings instance. */
+	onEffectiveChange(listener: (path: SettingPath, value: unknown, previous: unknown) => void): () => void {
+		this.#effectiveChangeListeners.add(listener);
+		return () => {
+			this.#effectiveChangeListeners.delete(listener);
+		};
 	}
 
 	/** Set once this instance is discarded; background saves become no-ops. */

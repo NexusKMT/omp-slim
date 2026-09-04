@@ -425,6 +425,8 @@ export class SelectorController {
 				listLiveTools: () => listLiveToolRecords(this.ctx.session),
 			},
 			onMcpToolsChanged: tools => this.ctx.session.refreshMCPTools(tools),
+			browserMcpFilterEnabled: () =>
+				this.ctx.session.getEvalPreludes().some(definition => definition.name === "browser"),
 		});
 		// Fullscreen dashboard on the alternate screen (the /settings idiom): the
 		// overlay borrows the terminal's alt buffer and enables mouse tracking for

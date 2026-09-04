@@ -4305,7 +4305,7 @@ export const SETTINGS_SCHEMA = {
 			tab: "tools",
 			group: "Available Tools",
 			label: "Computer",
-			description: "Enable the scriptable host-desktop control tool (screenshots, input, accessibility)",
+			description: "Enable the scriptable host-desktop eval prelude (screenshots, input, accessibility)",
 		},
 	},
 
@@ -4484,7 +4484,7 @@ export const SETTINGS_SCHEMA = {
 			tab: "tools",
 			group: "Available Tools",
 			label: "Browser",
-			description: "Enable the browser tool for scripted Chromium automation (puppeteer)",
+			description: "Enable the browser eval prelude for scripted Chromium automation (Puppeteer)",
 		},
 	},
 
@@ -4508,7 +4508,7 @@ export const SETTINGS_SCHEMA = {
 			group: "Grep & Browser",
 			label: "Browser Relay",
 			description:
-				"Drive your own Chrome tabs through the omp browser relay. Install the extension once (`omp browser-relay install`); the relay server auto-starts when the browser tool needs it. Takes precedence over Browser CDP URL; set PI_BROWSER_RELAY=0 or PI_BROWSER_RELAY=1 to override.",
+				"Drive your own Chrome tabs through the omp browser relay. Install the extension once (`omp browser-relay install`); the relay server auto-starts when the browser prelude needs it. Takes precedence over Browser CDP URL; set PI_BROWSER_RELAY=0 or PI_BROWSER_RELAY=1 to override.",
 		},
 	},
 
