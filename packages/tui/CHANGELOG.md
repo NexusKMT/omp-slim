@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Enable clickable system links for local files and artifacts within chat markdown
+
 ## [18.1.6] - 2026-09-03
 
 ### Fixed

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Resolved local and internal resource links in chat markdown to clickable filesystem paths
+- Added `/switch <model>` for session-only model switches straight from the prompt: selectors resolve like `omp bench` and `--model` (fuzzy ids such as `opus`, `provider/id`, `@smol`-style role aliases, `:level` thinking suffixes), with model and role completions while typing; `/model <model>` in ACP accepts the same selectors.
+
 ### Fixed
 
 - Fixed two idle subagents exchanging a single IRC message ping-ponging forever: wake-turn relays are now tagged and never relayed back, so each automated relay is delivered exactly once instead of waking a reciprocal relay until manual cancellation.
