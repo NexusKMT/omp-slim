@@ -79,6 +79,15 @@ export interface LimitsMeta {
 	columnTruncated?: { maxColumn: number; unit?: "bytes" | "chars" };
 }
 
+/** Input for {@link OutputMetaBuilder.limits}. `columnUnit` defaults to `chars`. */
+export interface LimitsInput {
+	matchLimit?: number;
+	resultLimit?: number;
+	headLimit?: number;
+	columnMax?: number;
+	columnUnit?: "bytes" | "chars";
+}
+
 /**
  * Structured metadata for tool outputs.
  */
@@ -353,13 +362,7 @@ export class OutputMetaBuilder {
 	}
 
 	/** Add limit notices in one call. */
-	limits(limits: {
-		matchLimit?: number;
-		resultLimit?: number;
-		headLimit?: number;
-		columnMax?: number;
-		columnUnit?: "bytes" | "chars";
-	}): this {
+	limits(limits: LimitsInput): this {
 		if (limits.matchLimit !== undefined) {
 			this.matchLimit(limits.matchLimit);
 		}
