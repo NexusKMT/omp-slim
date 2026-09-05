@@ -85,17 +85,25 @@ export class TtsrCoordinator {
 		const assistantEvent = event.assistantMessageEvent;
 		let matchContext: TtsrMatchContext | undefined;
 		let streamingToolCall: ToolCall | undefined;
+		let delta: string | undefined;
 		if (assistantEvent.type === "text_delta") {
 			matchContext = { source: "text" };
+			delta = assistantEvent.delta;
 		} else if (assistantEvent.type === "thinking_delta") {
 			matchContext = { source: "thinking" };
+			delta = assistantEvent.delta;
 		} else if (assistantEvent.type === "toolcall_delta") {
 			streamingToolCall = this.#getStreamingToolCallBlock(event.message, assistantEvent.contentIndex);
 			matchContext = this.#getToolMatchContext(streamingToolCall, assistantEvent.contentIndex);
+			delta = assistantEvent.delta;
+		} else if (assistantEvent.type === "toolcall_end") {
+			streamingToolCall = assistantEvent.toolCall;
+			matchContext = this.#getToolMatchContext(streamingToolCall, assistantEvent.contentIndex);
+			delta = "";
 		}
-		if (!matchContext || !("delta" in assistantEvent)) return false;
+		if (!matchContext || delta === undefined) return false;
 		const targetMessageTimestamp = event.message.role === "assistant" ? event.message.timestamp : undefined;
-		const matches = this.#checkStream(assistantEvent.delta, matchContext, streamingToolCall);
+		const matches = this.#checkStream(delta, matchContext, streamingToolCall);
 		if (matches.length > 0 && this.#handleMatches(matches, matchContext, targetMessageTimestamp)) return true;
 		// AST rules use the reconstructed edit/write snapshot and are awaited so
 		// the manager self-throttles native matching.
