@@ -451,6 +451,24 @@ export function buildSessionContext(
 		// Find compaction index in path
 		const compactionIdx = path.findIndex(e => e.type === "compaction" && e.id === compaction.id);
 
+		// Notes-backed windows do not summarize a discarded turn prefix. Recover
+		// its latest user request verbatim, independently of the disposable tail.
+		// Resolve from the branch journal so repeated rollovers and resume retain
+		// it too, without copying messages into compaction metadata or transcripts.
+		if (
+			!options?.transcript &&
+			isRecord(compaction.details) &&
+			compaction.details.kind === "experimental-context-rollover"
+		) {
+			const firstKeptIdx = path.findIndex(entry => entry.id === compaction.firstKeptEntryId);
+			for (let i = compactionIdx - 1; i > resetBoundaryIdx; i--) {
+				const entry = path[i];
+				if (entry.type !== "message" || entry.message.role !== "user") continue;
+				if (i < firstKeptIdx) appendMessage(entry);
+				break;
+			}
+		}
+
 		// The remote replacement payload (OpenAI remote compaction) carries the
 		// kept turns for the LLM context only; it is not rendered as visible
 		// messages. The collapsed display transcript must still emit the kept

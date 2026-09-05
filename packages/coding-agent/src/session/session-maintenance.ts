@@ -1315,7 +1315,19 @@ export class SessionMaintenance {
 		const detachPostCommit = options.detachPostCommit === true;
 		try {
 			await this.#emitLifecycleEvent({ type: "auto_compaction_start", reason, action: "context-full" }, false);
-			if (controller.signal.aborted) return COMPACTION_CHECK_NONE;
+			if (controller.signal.aborted) {
+				await this.#emitLifecycleEvent(
+					{
+						type: "auto_compaction_end",
+						action: "context-full",
+						result: undefined,
+						aborted: true,
+						willRetry: false,
+					},
+					detachPostCommit,
+				);
+				return COMPACTION_CHECK_NONE;
+			}
 
 			let hookCompaction: CompactionResult | undefined;
 			let fromExtension = false;
