@@ -89,7 +89,7 @@ async function createClaudeFixture(): Promise<{ info: ForeignSessionInfo; store:
 }
 
 describe("ClaudeSessionStore", () => {
-	it("imports an API error as a failed turn a prune can reach", async () => {
+	it("imports an API error as a failed turn", async () => {
 		const root = path.join(tempRoot, ".claude");
 		const cwd = path.join(tempRoot, "overloaded");
 		const id = "22222222-2222-4222-8222-222222222222";
