@@ -47,22 +47,44 @@ function toolSession(
 }
 
 describe("experimental context notes", () => {
-	it("rejects an oversized UTF-8 replacement before recording a new notebook revision", async () => {
+	it("rejects an oversized UTF-8 replacement while retaining the current notebook revision", async () => {
 		const sessionManager = SessionManager.inMemory();
 		const settings = Settings.isolated({ "compaction.experimentalContextManagement": true });
 		const session = toolSession(settings, sessionManager);
 		const tool = ContextNotesTool.createIf(session);
 		if (!tool) throw new Error("expected context notes tool");
 
-		await expect(tool.execute("overflow", { text: "x".repeat(MAX_CONTEXT_NOTES_BYTES + 1) })).rejects.toThrow(
+		await tool.execute("initial", { text: "Retain this notebook after an invalid replacement." });
+		const multibyteCharacter = "€";
+		const oversized = multibyteCharacter.repeat(
+			Math.floor(MAX_CONTEXT_NOTES_BYTES / Buffer.byteLength(multibyteCharacter, "utf8")) + 1,
+		);
+		await expect(tool.execute("overflow", { text: oversized })).rejects.toThrow(
 			`${MAX_CONTEXT_NOTES_BYTES} UTF-8 bytes`,
 		);
-		expect(getContextNotes(sessionManager.getBranch())).toBeUndefined();
+		expect(Buffer.byteLength(oversized, "utf8")).toBeGreaterThan(MAX_CONTEXT_NOTES_BYTES);
+		expect(getContextNotes(sessionManager.getBranch())?.text).toBe(
+			"Retain this notebook after an invalid replacement.",
+		);
 		expect(
 			sessionManager
 				.getBranch()
-				.some(entry => entry.type === "custom" && entry.customType === CONTEXT_NOTES_ENTRY_TYPE),
-		).toBe(false);
+				.filter(entry => entry.type === "custom" && entry.customType === CONTEXT_NOTES_ENTRY_TYPE),
+		).toHaveLength(1);
+	});
+
+	it("reports a missing notebook without writing a journal entry", async () => {
+		const sessionManager = SessionManager.inMemory();
+		const settings = Settings.isolated({ "compaction.experimentalContextManagement": true });
+		const tool = ContextNotesTool.createIf(toolSession(settings, sessionManager));
+		if (!tool) throw new Error("expected context notes tool");
+
+		const result = await tool.execute("read-missing", {});
+		const message = result.content.find(content => content.type === "text");
+		if (message?.type !== "text") throw new Error("Expected context-notes read output");
+		expect(message.text).toBe("No context notes are stored for this session branch.");
+		expect(getContextNotes(sessionManager.getBranch())).toBeUndefined();
+		expect(sessionManager.getBranch()).toHaveLength(0);
 	});
 
 	it("uses only the active branch's latest notebook and hides it after a context reset", () => {
