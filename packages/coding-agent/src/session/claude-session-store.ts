@@ -121,6 +121,19 @@ function projectCwd(encoded: string, registered: readonly string[]): string {
 	return encoded.replaceAll("-", path.sep);
 }
 
+/**
+ * The working directory Claude recorded for a session, taken from the
+ * transcript itself. Stops at the first record that carries one, so a listing
+ * reads a short prefix rather than the body.
+ */
+async function recordedCwd(file: string): Promise<string | undefined> {
+	for await (const { value } of readForeignJsonRecords(file)) {
+		const cwd = stringField(value, "cwd");
+		if (cwd) return cwd;
+	}
+	return undefined;
+}
+
 async function projectFiles(root: string): Promise<Array<{ file: string; cwd: string }>> {
 	const registered = await readRegisteredProjects(root);
 	const found: Array<{ file: string; cwd: string }> = [];
@@ -329,7 +342,7 @@ export class ClaudeSessionStore implements ForeignSessionStore {
 					source: this.source,
 					id,
 					path: item.file,
-					cwd: indexed?.cwd ?? item.cwd,
+					cwd: indexed?.cwd ?? (await recordedCwd(item.file)) ?? item.cwd,
 					created: new Date(createdMs),
 					modified: new Date(modifiedMs),
 					firstMessage: indexed?.firstMessage,
