@@ -43,7 +43,7 @@ export interface OutputSummary {
 	columnDroppedBytes?: number;
 	/** Number of distinct lines that hit the per-line column cap. */
 	columnTruncatedLines?: number;
-	/** Configured per-line column cap in effect (chars), when > 0. */
+	/** Configured per-line column cap in effect (UTF-8 bytes), when > 0. */
 	columnMax?: number;
 	/** Artifact ID for internal URL access (artifact://<id>) when truncated */
 	artifactId?: string;
