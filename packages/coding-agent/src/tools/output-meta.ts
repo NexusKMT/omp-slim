@@ -75,7 +75,8 @@ export interface LimitsMeta {
 	matchLimit?: { reached: number; suggestion: number };
 	resultLimit?: { reached: number; suggestion: number };
 	headLimit?: { reached: number; suggestion: number };
-	columnTruncated?: { maxColumn: number; unit: "bytes" | "chars" };
+	/** `unit` may be absent in sessions persisted before it was recorded. */
+	columnTruncated?: { maxColumn: number; unit?: "bytes" | "chars" };
 }
 
 /**
@@ -589,7 +590,11 @@ export function formatOutputNotice(meta: OutputMeta | undefined): string {
 	}
 	if (meta.limits?.columnTruncated) {
 		const c = meta.limits.columnTruncated;
-		parts.push(`Some lines truncated to ${c.maxColumn} ${c.unit}`);
+		// Sessions persisted before the unit field carry only `maxColumn`; those
+		// notices always read "chars", so default missing units to it. Otherwise
+		// a resumed legacy session renders "… 768 undefined" and stripOutputNotice
+		// stops matching the persisted "… 768 chars" text.
+		parts.push(`Some lines truncated to ${c.maxColumn} ${c.unit ?? "chars"}`);
 	}
 
 	// Diagnostics

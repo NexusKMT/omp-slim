@@ -16,7 +16,7 @@ import {
 	truncateTail,
 	truncateTailBytes,
 } from "@oh-my-pi/pi-coding-agent/session/streaming-output";
-import { formatOutputNotice, outputMeta } from "@oh-my-pi/pi-coding-agent/tools/output-meta";
+import { formatOutputNotice, outputMeta, stripOutputNotice } from "@oh-my-pi/pi-coding-agent/tools/output-meta";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 const createdTempDirs: string[] = [];
@@ -844,6 +844,17 @@ describe("OutputSink maxColumns (per-line cap)", () => {
 
 		const meta = outputMeta().truncationFromSummary(dumped, { direction: "tail" }).get();
 		expect(formatOutputNotice(meta)).toContain("Some lines truncated to 768 bytes");
+	});
+
+	test("legacy metadata without a unit falls back to chars", () => {
+		// Sessions persisted before the unit field carry `{ maxColumn }` only.
+		// Resuming one must not render "768 undefined", and the reconstructed
+		// notice must still match the persisted "768 chars" text so stripping works.
+		const legacyMeta = { limits: { columnTruncated: { maxColumn: 768 } } };
+		const notice = formatOutputNotice(legacyMeta);
+		expect(notice).toContain("Some lines truncated to 768 chars");
+		expect(notice).not.toContain("undefined");
+		expect(stripOutputNotice(`body${notice}`, legacyMeta)).toBe("body");
 	});
 
 	test("persists per-line state across chunk boundaries", async () => {
