@@ -730,6 +730,8 @@ describe("agent() through eval runtimes", () => {
 		const { session, sessionFile } = makeEvalSession(tempDir, "js-agent-progress");
 		mockAgents();
 
+		const runningObserved = Promise.withResolvers<void>();
+
 		const makeProgress = (options: ExecutorOptions, overrides: Partial<AgentProgress>): AgentProgress => ({
 			index: options.index,
 			id: options.id,
@@ -764,6 +766,8 @@ describe("agent() through eval runtimes", () => {
 					resolvedModel: "p/model",
 				}),
 			);
+			// Keep the job running until its progress reaches the cell consumer.
+			await runningObserved.promise;
 			options.onProgress?.(
 				makeProgress(options, {
 					status: "completed",
@@ -786,7 +790,10 @@ describe("agent() through eval runtimes", () => {
 				sessionId: sharedJsSessionId,
 				session,
 				sessionFile,
-				onStatus: event => events.push(event),
+				onStatus: event => {
+					events.push(event);
+					if (event.op === "agent" && event.status === "running") runningObserved.resolve();
+				},
 			},
 		);
 
@@ -795,21 +802,22 @@ describe("agent() through eval runtimes", () => {
 		// Wait-start, interval, and wait-end snapshots may all be delivered.
 		// Assert the final enriched state, not a timing-dependent event count (#10821).
 		const agentEvents = events.filter(event => event.op === "agent");
+		expect(agentEvents.some(event => event.status === "running" && event.currentTool === "read")).toBe(true);
 
-		const completed = agentEvents.at(-1);
-		expect(completed?.status).toBe("completed");
-		expect(completed?.toolCount).toBe(7);
-		expect(completed?.cost).toBeCloseTo(0.06);
-		expect(completed?.contextTokens).toBe(8000);
-		expect(completed?.taskPreview).toBe("investigate");
-		expect(typeof completed?.id).toBe("string");
+		const completed = agentEvents.at(-1)!;
+		expect(completed.status).toBe("completed");
+		expect(completed.toolCount).toBe(7);
+		expect(completed.cost).toBeCloseTo(0.06);
+		expect(completed.contextTokens).toBe(8000);
+		expect(completed.taskPreview).toBe("investigate");
+		expect(typeof completed.id).toBe("string");
 
-		// The same final snapshot is retained in the executor's display outputs.
+		// Wait emits initial, periodic and final snapshots; their count depends on
+		// scheduling. Every delivered snapshot must also remain in display output.
 		const displayAgentEvents = result.displayOutputs.filter(
 			(output): output is Extract<typeof output, { type: "status" }> => output.type === "status",
 		);
-		expect(displayAgentEvents.at(-1)?.event.status).toBe("completed");
-		expect(displayAgentEvents.at(-1)?.event.toolCount).toBe(7);
+		expect(displayAgentEvents.map(output => output.event)).toEqual(agentEvents);
 	});
 
 	it("pauses the idle watchdog while a quiet agent() runs past the budget", async () => {

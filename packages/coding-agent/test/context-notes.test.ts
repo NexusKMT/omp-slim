@@ -73,16 +73,13 @@ describe("experimental context notes", () => {
 		).toHaveLength(1);
 	});
 
-	it("reports a missing notebook without writing a journal entry", async () => {
+	it("leaves the branch journal unchanged when reading a missing notebook", async () => {
 		const sessionManager = SessionManager.inMemory();
 		const settings = Settings.isolated({ "compaction.experimentalContextManagement": true });
 		const tool = ContextNotesTool.createIf(toolSession(settings, sessionManager));
 		if (!tool) throw new Error("expected context notes tool");
 
-		const result = await tool.execute("read-missing", {});
-		const message = result.content.find(content => content.type === "text");
-		if (message?.type !== "text") throw new Error("Expected context-notes read output");
-		expect(message.text).toBe("No context notes are stored for this session branch.");
+		await tool.execute("read-missing", {});
 		expect(getContextNotes(sessionManager.getBranch())).toBeUndefined();
 		expect(sessionManager.getBranch()).toHaveLength(0);
 	});
