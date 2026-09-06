@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed `/copy` link captions showing Markdown delimiters for formatted labels and splitting across two rows for multiline labels.
+- Fixed `/copy` link captions showing Markdown delimiters for formatted labels and splitting across two rows for multiline labels ([#11086](https://github.com/can1357/oh-my-pi/pull/11086) by [@mustafaabidali](https://github.com/mustafaabidali)).
 
 ## [18.1.12] - 2026-09-06
 
