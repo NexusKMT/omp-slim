@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `extractMarkdownLinks()` now returns one-row visible labels for formatted and multiline links.
+
 ## [18.1.12] - 2026-09-06
 
 ### Fixed
