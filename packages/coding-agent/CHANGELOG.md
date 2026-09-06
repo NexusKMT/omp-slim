@@ -27,6 +27,7 @@
 ### Fixed
 
 - Fixed GPT-6 Astra requiring `/extended-context` for its full context window: it now keeps the documented 1.05M-token window with the setting on or off, and explicit per-model `contextWindow` overrides still win.
+- Advisor notes now report rate limiting accurately and deferred notes flush when the primary turn completes, including after advisor quota exhaustion ([#11062](https://github.com/can1357/oh-my-pi/issues/11062)).
 
 ## [18.1.12] - 2026-09-06
 
