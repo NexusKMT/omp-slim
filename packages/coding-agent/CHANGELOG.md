@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed `/copy` link captions showing Markdown delimiters for formatted labels and misaligning later click targets for multiline labels.
+- Fixed `/copy` link captions showing Markdown delimiters for formatted labels and splitting across two rows for multiline labels.
 
 ## [18.1.12] - 2026-09-06
 
