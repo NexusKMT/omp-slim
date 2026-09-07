@@ -139,6 +139,7 @@
 - Fixed bracketed hashline edit targets being reported as undefined to extension path allowlists.
 - Fixed MCP tools discovered during startup disappearing after plan-mode approval or when leaving default-on plan mode.
 - Fixed ACP clients receiving invalid file locations or updates for released terminals, preventing invalid worktree scans and terminal errors on Windows.
+- Fixed the ask dialog splattering option descriptions and previews one word per row when a model injects `\r` runs into tool-call string values (observed with GLM via OpenRouter); stray carriage returns are now sanitized in ask params, the live dialog, and ask transcript rendering.
 
 ## [18.1.6] - 2026-09-03
 

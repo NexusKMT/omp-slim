@@ -1804,3 +1804,64 @@ describe("AskTool rich ask dialog", () => {
 		expect(reservedNext instanceof type.errors).toBe(true);
 	});
 });
+
+describe("AskTool carriage-return sanitization", () => {
+	it("strips \\r runs from dialog input and result echo (GLM-style degenerate JSON strings)", async () => {
+		const tool = new AskTool(createSession());
+		let captured: ExtensionAskDialogQuestion[] = [];
+		const context = createContext({
+			askDialog: async questions => {
+				captured = questions;
+				return {
+					kind: "submit",
+					results: [
+						{
+							id: "q3a",
+							question: "Q3 A  —  Fallback  path .  What  happens ?",
+							options: ["Abort   +  log", "Continue  anyway"],
+							multi: false,
+							selectedOptions: ["Abort   +  log"],
+						},
+					],
+				};
+			},
+		});
+		const result = await tool.execute(
+			"call-cr-sanitize",
+			{
+				questions: [
+					{
+						id: "q3a",
+						question: "Q3\r\rA\r\r —\r\r Fallback\r\r path\r\r.\r\r What\r\r happens\r\r?",
+						header: "Fallback\r\r path",
+						options: [
+							{
+								label: "Abort\r\r \r\r+\r\r log",
+								description: "The\r\r worker\r\r pool\r\r sees\r\r nothing\r\r.",
+								preview: 'idle\r\r loop\r\r:\r\n\r\r \r\r if\r\r "done"\r\r in\r\r state',
+							},
+							{ label: "Continue\r\r anyway" },
+						],
+					},
+				],
+			},
+			undefined,
+			undefined,
+			context,
+		);
+
+		expect(captured).toHaveLength(1);
+		const [dialogQuestion] = captured;
+		expect(dialogQuestion?.question).toBe("Q3 A  —  Fallback  path .  What  happens ?");
+		expect(dialogQuestion?.header).toBe("Fallback  path");
+		expect(dialogQuestion?.options[0]?.label).toBe("Abort   +  log");
+		expect(dialogQuestion?.options[0]?.description).toBe("The  worker  pool  sees  nothing .");
+		expect(dialogQuestion?.options[0]?.preview).toBe('idle  loop :\n    if  "done"  in  state');
+		expect(JSON.stringify(captured)).not.toContain("\r");
+
+		expect(result.content[0]?.type).toBe("text");
+		if (result.content[0]?.type !== "text") throw new Error("Expected text result");
+		expect(result.content[0].text).toContain("User selected: Abort   +  log");
+		expect(result.content[0].text).not.toContain("\r");
+	});
+});

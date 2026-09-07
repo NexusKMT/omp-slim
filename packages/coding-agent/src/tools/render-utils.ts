@@ -22,6 +22,19 @@ import { formatDimensionNote, type ResizedImage } from "../utils/image-resize";
 export { Ellipsis } from "@oh-my-pi/pi-natives";
 export { replaceTabs, truncateToWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 
+/**
+ * Normalize stray carriage returns in model-authored display text. Some models
+ * (observed with GLM via OpenRouter) degenerate into injecting `\r` runs between
+ * words inside JSON string values; CommonMark treats a lone `\r` as a line
+ * ending, which splatters the text one word per row. CRLF becomes LF, CR runs
+ * collapse to a single space — word separators in prose, one indent unit in
+ * mangled code previews.
+ */
+export function sanitizeCarriageReturns(text: string): string {
+	if (!text.includes("\r")) return text;
+	return text.replaceAll("\r\n", "\n").replace(/\r+/g, " ");
+}
+
 // =============================================================================
 // Standardized Display Constants
 // =============================================================================

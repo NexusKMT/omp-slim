@@ -38,7 +38,7 @@ import askDescription from "../prompts/tools/ask.md" with { type: "text" };
 import { vocalizer } from "../tts/vocalizer";
 import { framedBlock, outputBlockContentWidth, renderStatusLine } from "../tui";
 import type { ToolSession } from ".";
-import { formatErrorMessage, formatMeta, formatTitle } from "./render-utils";
+import { formatErrorMessage, formatMeta, formatTitle, sanitizeCarriageReturns } from "./render-utils";
 import { ToolAbortError } from "./tool-errors";
 
 // =============================================================================
@@ -859,6 +859,10 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 			context?.abort();
 			throw new ToolAbortError("Ask tool requires interactive mode");
 		}
+		// Models occasionally inject `\r` runs into string values (observed with
+		// GLM via OpenRouter); sanitize before the dialog renders or the answer
+		// echoes back into session history.
+		params = sanitizeAskParams(params);
 
 		const extensionUi = context.ui;
 		const ui: UIContext = {
@@ -1144,17 +1148,38 @@ function normalizeRenderOptions(raw: unknown): AskRenderOption[] | undefined {
 	const out: AskRenderOption[] = [];
 	for (const entry of raw) {
 		if (typeof entry === "string") {
-			out.push({ label: entry });
+			out.push({ label: sanitizeCarriageReturns(entry) });
 			continue;
 		}
 		if (!entry || typeof entry !== "object") continue;
 		const { label, description } = entry as Partial<AskRenderOption>;
 		if (typeof label !== "string") continue;
-		out.push(typeof description === "string" ? { label, description } : { label });
+		out.push(
+			typeof description === "string"
+				? { label: sanitizeCarriageReturns(label), description: sanitizeCarriageReturns(description) }
+				: { label: sanitizeCarriageReturns(label) },
+		);
 	}
 	return out;
 }
 
+/** Strip the `\r` runs degenerate models inject, so persisted call args render as prose. */
+function sanitizeAskParams(params: AskParams): AskParams {
+	return {
+		...params,
+		questions: params.questions.map(question => ({
+			...question,
+			question: sanitizeCarriageReturns(question.question),
+			...(question.header !== undefined ? { header: sanitizeCarriageReturns(question.header) } : {}),
+			options: question.options.map(option => ({
+				...option,
+				label: sanitizeCarriageReturns(option.label),
+				...(option.description !== undefined ? { description: sanitizeCarriageReturns(option.description) } : {}),
+				...(option.preview !== undefined ? { preview: sanitizeCarriageReturns(option.preview) } : {}),
+			})),
+		})),
+	};
+}
 /**
  * Coerce untrusted `questions` call args into a renderable array. Models
  * occasionally double-encode the array as a JSON string — a bare string passes
@@ -1176,7 +1201,7 @@ function normalizeRenderQuestions(raw: unknown): NonNullable<AskRenderArgs["ques
 		const q = entry as Partial<NonNullable<AskRenderArgs["questions"]>[number]>;
 		out.push({
 			id: typeof q.id === "string" ? q.id : "?",
-			question: typeof q.question === "string" ? q.question : "",
+			question: typeof q.question === "string" ? sanitizeCarriageReturns(q.question) : "",
 			options: normalizeRenderOptions(q.options) ?? [],
 			multi: q.multi === true,
 		});

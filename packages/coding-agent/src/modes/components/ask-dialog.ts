@@ -22,7 +22,7 @@ import type {
 	ExtensionAskDialogResultItem,
 	ExtensionAskDialogSubmitResult,
 } from "../../extensibility/extensions";
-import { expandKeyHint } from "../../tools/render-utils";
+import { expandKeyHint, sanitizeCarriageReturns } from "../../tools/render-utils";
 import { getTabBarTheme } from "../shared";
 import { getMarkdownTheme, highlightCode, theme } from "../theme/theme";
 import {
@@ -372,16 +372,16 @@ function normalizeDialogQuestions(questions: ExtensionAskDialogQuestion[]): Exte
 				if (!opt || typeof opt !== "object") continue;
 				const o = opt as Partial<ExtensionAskDialogOption>;
 				options.push({
-					label: typeof o.label === "string" ? o.label : "",
-					...(typeof o.description === "string" ? { description: o.description } : {}),
-					...(typeof o.preview === "string" ? { preview: o.preview } : {}),
+					label: sanitizeCarriageReturns(typeof o.label === "string" ? o.label : ""),
+					...(typeof o.description === "string" ? { description: sanitizeCarriageReturns(o.description) } : {}),
+					...(typeof o.preview === "string" ? { preview: sanitizeCarriageReturns(o.preview) } : {}),
 				});
 			}
 		}
 		out.push({
 			id: typeof q.id === "string" ? q.id : "?",
-			question: typeof q.question === "string" ? q.question : "",
-			...(typeof q.header === "string" ? { header: q.header } : {}),
+			question: typeof q.question === "string" ? sanitizeCarriageReturns(q.question) : "",
+			...(typeof q.header === "string" ? { header: sanitizeCarriageReturns(q.header) } : {}),
 			options,
 			...(typeof q.multi === "boolean" ? { multi: q.multi } : {}),
 			...(Number.isInteger(q.recommended) ? { recommended: q.recommended } : {}),

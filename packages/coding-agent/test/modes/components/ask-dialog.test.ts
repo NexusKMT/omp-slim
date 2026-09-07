@@ -1635,4 +1635,36 @@ describe("AskDialogComponent", () => {
 		expect(result.question).toBe("");
 		expect(result.selectedOptions).toEqual(["Option A"]);
 	});
+
+	it("sanitizes carriage-return runs so degenerate model args render as prose", () => {
+		// GLM-via-OpenRouter degeneration: `\r` runs injected between words in
+		// JSON string values. CommonMark treats a lone `\r` as a line ending, so
+		// an unsanitized description/preview used to splatter one word per row.
+		const component = new AskDialogComponent(
+			[
+				{
+					id: "q3a",
+					question: "Q3\r\rA\r\r —\r\r Fallback\r\r path\r\r.\r\r What\r\r happens\r\r?",
+					header: "Fallback\r\r path",
+					options: [
+						{
+							label: "Abort\r\r \r\r+\r\r log",
+							description: "The\r\r worker\r\r pool\r\r sees\r\r nothing\r\r.",
+							preview: 'idle\r\r loop\r\r:\r\n\r\r \r\r if\r\r "done"\r\r in\r\r state',
+						},
+						{ label: "Continue\r\r anyway" },
+					],
+				},
+			],
+			{ onSubmit: vi.fn(), onCancel: vi.fn(), onPrompt: vi.fn() },
+		);
+
+		const rendered = render(component);
+		expect(rendered).not.toContain("\r");
+		expect(rendered).toContain("Q3 A  —  Fallback  path .  What  happens ?");
+		expect(rendered).toContain("Abort   +  log");
+		expect(rendered).toContain("The  worker  pool  sees  nothing .");
+		expect(rendered).toContain("idle  loop :");
+		expect(rendered).toContain('if  "done"  in  state');
+	});
 });
