@@ -578,7 +578,24 @@ describe("title generator", () => {
 		expect(mockComplete.mock.calls[0]?.[0]).toBe(smolModel);
 	});
 
-	it("walks retry.fallbackChains when the title model returns a provider error", async () => {
+	it("does not attempt the current model when no registry models are available", async () => {
+		const model = getModelOrThrow("claude-sonnet-4-5");
+		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockResolvedValue({
+			stopReason: "stop",
+			content: [{ type: "text", text: "<title>Unexpected</title>" }],
+		} as never);
+		const registry = {
+			getAvailable: () => [],
+			getApiKey: async () => "test-key",
+			resolver: () => async () => "test-key",
+		};
+		expect(
+			await generateSessionTitle("Investigate", registry as never, createSettings(model), undefined, model),
+		).toBeNull();
+		expect(completeSimpleMock).not.toHaveBeenCalled();
+	});
+
+	it.each([true, false])("honors modelFallback=%s when the title model returns a provider error", async enabled => {
 		const smolModel = getModelOrThrow("claude-opus-4-8");
 		const fallbackModel = getModelOrThrow("claude-sonnet-4-5");
 		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockImplementation(async model => {
@@ -599,12 +616,14 @@ describe("title generator", () => {
 			get(path: string) {
 				if (path === "providers.tinyModel") return "online";
 				if (path === "retry.fallbackChains") {
-					return { smol: [`${fallbackModel.provider}/${fallbackModel.id}`] };
+					return { [`${smolModel.provider}/${smolModel.id}`]: [`${fallbackModel.provider}/${fallbackModel.id}`] };
 				}
+				if (path === "retry.modelFallback") return enabled;
 				return undefined;
 			},
 			getModelRole(role: string) {
-				return role === "smol" ? `${smolModel.provider}/${smolModel.id}` : undefined;
+				if (role === "smol") return `${smolModel.provider}/${smolModel.id}`;
+				return undefined;
 			},
 			getStorage() {
 				return undefined;
@@ -618,7 +637,19 @@ describe("title generator", () => {
 			resolver: () => async () => "test-key",
 		} as never;
 
-		const title = await generateSessionTitle("Investigate the resolver", registry, settings);
+		const title = await generateSessionTitle(
+			"Investigate the resolver",
+			registry,
+			settings,
+			undefined,
+			fallbackModel,
+		);
+		if (!enabled) {
+			expect(title).toBeNull();
+			expect(completeSimpleMock).toHaveBeenCalledTimes(1);
+			expect(completeSimpleMock.mock.calls[0]?.[0]).toBe(smolModel);
+			return;
+		}
 		expect(title).toBe("Recovered Title");
 		expect(completeSimpleMock).toHaveBeenCalledTimes(2);
 		expect(completeSimpleMock.mock.calls[0]?.[0]).toBe(smolModel);

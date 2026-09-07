@@ -112,13 +112,14 @@ const LEADING_PROSE_THINKING_PREAMBLE_RE =
 
 function getTitleModels(registry: ModelRegistry, settings: Settings, currentModel?: Model<Api>): Model<Api>[] {
 	const availableModels = registry.getAvailable();
-	if (availableModels.length === 0) return currentModel ? [currentModel] : [];
+	if (availableModels.length === 0) return [];
 
 	const models = collectOnlineTinyCandidates(["tiny", "commit", "smol"], settings, availableModels).map(
 		candidate => candidate.model,
 	);
 	if (
 		currentModel &&
+		(models.length === 0 || settings.get("retry.modelFallback") !== false) &&
 		!models.some(model => model.provider === currentModel.provider && model.id === currentModel.id)
 	) {
 		models.push(currentModel);

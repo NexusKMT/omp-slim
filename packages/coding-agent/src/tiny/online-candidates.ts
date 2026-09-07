@@ -1,7 +1,12 @@
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import { resolveRoleSelection } from "../config/model-resolver";
 import type { Settings } from "../config/settings";
-import { parseRetryFallbackSelector } from "../session/retry-fallback-chains";
+import {
+	expandDefaultRetryFallbackChains,
+	findRetryFallbackCandidates,
+	type RetryFallbackResolutionContext,
+	resolveRetryFallbackChainKey,
+} from "../session/retry-fallback-chains";
 
 /** Role-resolved model used by online tiny tasks (auto-thinking, titles). */
 export interface OnlineTinyCandidate {
@@ -16,10 +21,8 @@ function modelKey(model: Model<Api>): string {
 /**
  * Collect unique online models for lightweight background tasks.
  *
- * Order: each requested role's primary, then `retry.fallbackChains` for those
- * roles (and `default`) when `retry.modelFallback` is not disabled. Auto-thinking
- * and titles previously pinned the first resolvable tiny/smol model and ignored
- * fallback chains, so a 400 on that primary failed the whole background task.
+ * Order: each requested role's primary, then its canonical retry fallback chain.
+ * Disabling model fallback restricts attempts to the first resolvable primary.
  */
 export function collectOnlineTinyCandidates(
 	roles: readonly string[],
@@ -35,29 +38,33 @@ export function collectOnlineTinyCandidates(
 		out.push({ role, model });
 	};
 
+	// Retain every role even if primaries coincide: their fallback chains can differ.
+	const primaries: OnlineTinyCandidate[] = [];
 	for (const role of roles) {
 		const resolved = resolveRoleSelection([role], settings, availableModels);
-		if (resolved?.model) add(resolved.role, resolved.model);
+		if (!resolved?.model) continue;
+		add(resolved.role, resolved.model);
+		if (settings.get("retry.modelFallback") === false) return out;
+		primaries.push({ role: resolved.role, model: resolved.model });
 	}
 
-	if (settings.get("retry.modelFallback") === false) return out;
-
-	const chains = settings.get("retry.fallbackChains");
-	if (!chains || typeof chains !== "object") return out;
-	const lookup = {
-		find(provider: string, id: string) {
-			return availableModels.find(model => model.provider === provider && model.id === id);
+	const configuredChains = settings.get("retry.fallbackChains");
+	if (!configuredChains || typeof configuredChains !== "object") return out;
+	const context: RetryFallbackResolutionContext = {
+		chains: expandDefaultRetryFallbackChains(configuredChains, roles),
+		getModelRole: role => settings.getModelRole(role),
+		modelLookup: {
+			find: (provider, id) => availableModels.find(model => model.provider === provider && model.id === id),
+			hasProvider: provider => availableModels.some(model => model.provider === provider),
 		},
 	};
-	for (const role of [...roles, "default"]) {
-		const chain = chains[role];
-		if (!Array.isArray(chain)) continue;
-		for (const selector of chain) {
-			if (typeof selector !== "string") continue;
-			const parsed = parseRetryFallbackSelector(selector, lookup);
-			if (!parsed) continue;
-			const model = lookup.find(parsed.provider, parsed.id);
-			if (model) add(role, model);
+	for (const { role, model } of primaries) {
+		const selector = settings.getModelRole(role) ?? modelKey(model);
+		const chainKey = resolveRetryFallbackChainKey(context, selector, model, role);
+		if (!chainKey) continue;
+		for (const candidate of findRetryFallbackCandidates(context, chainKey, selector, model)) {
+			const fallback = context.modelLookup.find(candidate.provider, candidate.id);
+			if (fallback) add(role, fallback);
 		}
 	}
 	return out;
