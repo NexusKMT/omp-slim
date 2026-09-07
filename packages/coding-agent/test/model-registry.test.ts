@@ -1726,6 +1726,14 @@ describe("ModelRegistry", () => {
 			expect(registry.find("openai-codex", "gpt-6-astra")?.contextWindow).toBe(272_000);
 		});
 
+		test("keeps bundled Astra at its default window without a settings source", () => {
+			// `beforeEach` leaves global settings uninitialized, so this
+			// reaches the no-settings fallback: it must match the schema
+			// default (off), never silently elevated windows.
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+			expect(registry.find("openai-codex", "gpt-6-astra")?.contextWindow).toBe(272_000);
+		});
+
 		test("preserves an explicit Astra context override across extended context toggles", async () => {
 			writeRawModelsJson({
 				"openai-codex": { modelOverrides: { "gpt-6-astra": { contextWindow: 400_000 } } },

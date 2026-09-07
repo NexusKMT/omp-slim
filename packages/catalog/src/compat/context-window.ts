@@ -31,24 +31,6 @@ export function resolveMaxContextWindow(model: Model): number | undefined {
 }
 
 /**
- * Codex-faithful resolution (openai/codex `ModelInfo::resolved_context_window`
- * in `protocol/src/openai_models.rs`): prefers `context_window`, falls back
- * to `max_context_window`. Upstream treats `max_context_window` as the ceiling
- * for config overrides, not as an alternate window.
- */
-export function codexResolvedContextWindow(model: Model): number | undefined {
-	const current = model.contextWindow;
-	if (typeof current === "number" && Number.isFinite(current) && current > 0) {
-		return current;
-	}
-	const maximum = model.maxContextWindow;
-	if (typeof maximum === "number" && Number.isFinite(maximum) && maximum > 0) {
-		return maximum;
-	}
-	return undefined;
-}
-
-/**
  * Override ceiling for Codex models. Upstream clamps `model_context_window`
  * to `min(override, max_context_window)` (`with_config_overrides` in
  * `models-manager/src/model_info.rs`); the ceiling here is stale-aware — the

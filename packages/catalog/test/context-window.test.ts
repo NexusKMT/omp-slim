@@ -3,7 +3,6 @@ import {
 	clampCodexContextWindow,
 	clampsContextOverride,
 	codexOverrideCeiling,
-	codexResolvedContextWindow,
 	resolveMaxContextWindow,
 } from "@oh-my-pi/pi-catalog/compat/context-window";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
@@ -44,13 +43,6 @@ test("leaves models without a curated maximum to the live value or undefined", (
 	expect(resolveMaxContextWindow({ ...legacy, maxContextWindow: undefined })).toBeUndefined();
 	expect(resolveMaxContextWindow({ ...legacy, maxContextWindow: 0 })).toBeUndefined();
 	expect(resolveMaxContextWindow({ ...legacy, maxContextWindow: Number.NaN })).toBeUndefined();
-});
-
-test("prefers context_window over max_context_window like upstream resolved", () => {
-	const astra = bundledAstra();
-	expect(codexResolvedContextWindow({ ...astra, maxContextWindow: 872_000 })).toBe(272_000);
-	expect(codexResolvedContextWindow({ ...astra, contextWindow: null, maxContextWindow: 872_000 })).toBe(872_000);
-	expect(codexResolvedContextWindow({ ...astra, contextWindow: null, maxContextWindow: undefined })).toBeUndefined();
 });
 
 test("clamps Codex overrides to the stale-aware ceiling", () => {
