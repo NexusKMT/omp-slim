@@ -1,8 +1,13 @@
-import { describe, expect, it, vi } from "bun:test";
+import { describe, expect, it, type Mock, vi } from "bun:test";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+type Spy = Mock<(...args: unknown[]) => unknown>;
 
-function createLoopContext(options: { isStreaming: boolean; onInputCallback?: (...args: never[]) => void }) {
+function createLoopContext(options: {
+	isStreaming: boolean;
+	isCompacting?: boolean;
+	onInputCallback?: (...args: never[]) => void;
+}) {
 	let loopPrompt: string | undefined = "original loop prompt";
 	const setLoopPrompt = vi.fn((prompt: string) => {
 		loopPrompt = prompt;
@@ -24,7 +29,7 @@ function createLoopContext(options: { isStreaming: boolean; onInputCallback?: (.
 		ui: { requestRender: vi.fn() },
 		session: {
 			isStreaming: options.isStreaming,
-			isCompacting: false,
+			isCompacting: options.isCompacting ?? false,
 			isBashRunning: false,
 			isEvalRunning: false,
 			queuedMessageCount: 0,
@@ -48,7 +53,7 @@ function createLoopContext(options: { isStreaming: boolean; onInputCallback?: (.
 		withLocalSubmission: async (_text: string, fn: () => unknown) => fn(),
 		updatePendingMessagesDisplay: vi.fn(),
 		updateEditorBorderColor: vi.fn(),
-		showError: vi.fn(),
+		queueCompactionMessage: vi.fn(),
 		onInputCallback: options.onInputCallback,
 		skillCommands: new Map(),
 		fileSlashCommands: new Set<string>(),
@@ -58,7 +63,14 @@ function createLoopContext(options: { isStreaming: boolean; onInputCallback?: (.
 		compactionQueuedMessages: [],
 		locallySubmittedUserSignatures: new Set<string>(),
 	} as unknown as InteractiveModeContext;
-	return { ctx, editor, setLoopPrompt, prompt, getLoopPrompt: () => loopPrompt };
+	return {
+		ctx,
+		editor,
+		setLoopPrompt,
+		prompt,
+		getLoopPrompt: () => loopPrompt,
+		queueCompactionMessage: ctx.queueCompactionMessage as Spy,
+	};
 }
 
 describe("loop mode interjections", () => {
@@ -100,5 +112,23 @@ describe("loop mode interjections", () => {
 		expect(setLoopPrompt).toHaveBeenCalledWith("inline loop body");
 		expect(getLoopPrompt()).toBe("inline loop body");
 		expect(prompt).toHaveBeenCalledTimes(1);
+	});
+
+	it("records an inline /loop prompt queued during compaction", async () => {
+		const { ctx, setLoopPrompt, getLoopPrompt, queueCompactionMessage } = createLoopContext({
+			isStreaming: false,
+			isCompacting: true,
+		});
+		// Mirror handleLoopCommand: enabling loop mode hands the inline prompt
+		// back to the dispatcher for normal submission.
+		(ctx as unknown as Record<string, unknown>).handleLoopCommand = vi.fn(async () => "compact loop body");
+		const controller = new InputController(ctx);
+		controller.setupEditorSubmitHandler();
+
+		await ctx.editor.onSubmit?.("/loop 3 compact loop body");
+
+		expect(setLoopPrompt).toHaveBeenCalledWith("compact loop body");
+		expect(getLoopPrompt()).toBe("compact loop body");
+		expect(queueCompactionMessage).toHaveBeenCalledTimes(1);
 	});
 });
