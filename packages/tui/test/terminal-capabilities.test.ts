@@ -558,10 +558,10 @@ describe("shouldEnableHyperlinksByDefault", () => {
 
 describe("detectStyledUnderlineSupport", () => {
 	it("enables the colon form only on terminals that implement styled underlines", () => {
-		expect(detectStyledUnderlineSupport("kitty")).toBe(true);
-		expect(detectStyledUnderlineSupport("ghostty")).toBe(true);
-		expect(detectStyledUnderlineSupport("wezterm")).toBe(true);
-		expect(detectStyledUnderlineSupport("iterm2")).toBe(true);
+		expect(detectStyledUnderlineSupport("kitty", {})).toBe(true);
+		expect(detectStyledUnderlineSupport("ghostty", {})).toBe(true);
+		expect(detectStyledUnderlineSupport("wezterm", {})).toBe(true);
+		expect(detectStyledUnderlineSupport("iterm2", { TERM_PROGRAM_VERSION: "3.5.0" })).toBe(true);
 	});
 
 	it("keeps Apple Terminal and other unproven hosts on the flat underline", () => {
