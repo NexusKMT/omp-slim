@@ -8,7 +8,6 @@ import { theme } from "../../modes/theme/theme";
 import type { AgentSession } from "../../session/agent-session";
 import { shortenPath } from "../../tools/render-utils";
 import { sanitizeStatusText } from "../shared";
-import { colocatedJjWorkspace } from "./status-line/git-utils";
 import { formatContextUsage, getContextUsageLevel, getContextUsageThemeColor } from "./status-line/context-thresholds";
 
 /**
@@ -58,7 +57,7 @@ export class FooterComponent implements Component {
 		this.#gitUnwatch = null;
 
 		if (!settings.get("git.enabled")) return;
-		const repository = vcs.repo(getProjectDir());
+		const repository = vcs.repoForDisplay(getProjectDir());
 		if (!repository) return;
 
 		try {
@@ -104,7 +103,7 @@ export class FooterComponent implements Component {
 
 		const repository = (() => {
 			try {
-				return vcs.repo(getProjectDir());
+				return vcs.repoForDisplay(getProjectDir());
 			} catch {
 				return null;
 			}
@@ -122,33 +121,6 @@ export class FooterComponent implements Component {
 				this.#branchResolve = request;
 				void repository
 					.label(request.signal)
-					.then(label => {
-						if (this.#disposed || this.#branchGeneration !== generation) return;
-						const changed = this.#cachedBranch !== label;
-						this.#cachedBranch = label;
-						if (changed) this.#onBranchChange?.();
-					})
-					.catch(() => {
-						if (this.#disposed || this.#branchGeneration !== generation) return;
-						this.#cachedBranch = null;
-					})
-					.finally(() => {
-						if (this.#branchResolve === request) this.#branchResolve = undefined;
-					});
-			}
-			return this.#cachedBranch ?? null;
-		}
-		// Colocated jj-git checkout: jj owns the working-copy label even though
-		// `detect()` resolves the directory to Git (same root-equality
-		// predicate as the status line, independent of git HEAD state).
-		const colocatedJj = colocatedJjWorkspace(getProjectDir(), repository);
-		if (colocatedJj) {
-			if (!this.#branchResolve) {
-				const request = new AbortController();
-				const generation = this.#branchGeneration;
-				this.#branchResolve = request;
-				void colocatedJj
-					.workingCopyLabel(request.signal)
 					.then(label => {
 						if (this.#disposed || this.#branchGeneration !== generation) return;
 						const changed = this.#cachedBranch !== label;

@@ -35,13 +35,7 @@ import {
 	type CodexResetUsageSnapshot,
 	detectCodexResetFireworks,
 } from "../codex-reset-fireworks";
-import {
-	canReuseCachedPr,
-	colocatedJjWorkspace,
-	createPrCacheContext,
-	isSamePrCacheContext,
-	type PrCacheContext,
-} from "./git-utils";
+import { canReuseCachedPr, createPrCacheContext, isSamePrCacheContext, type PrCacheContext } from "./git-utils";
 import { getPreset } from "./presets";
 import { renderSegment, type SegmentContext } from "./segments";
 import { getSeparator } from "./separators";
@@ -248,6 +242,8 @@ interface ActiveRepoCache {
 	activeRepo: ActiveRepoContext | null;
 	effectiveGitCwd: string;
 	repository: VcsRepo | null;
+	displayRepository: VcsRepo | null;
+	displayRepositoryCheckedAt: number;
 	repositoryCheckedAt: number;
 	/** Project + worktree dir name when `projectDir` is a linked worktree, else null. */
 	worktree: WorktreeContext | null;
@@ -547,6 +543,18 @@ export class StatusLineComponent implements Component {
 		const activeRepo = projectRepository ? null : resolveActiveRepoContextSync(projectDir);
 		const effectiveGitCwd = activeRepo?.repoRoot ?? projectDir;
 		const repository = projectRepository ?? (activeRepo ? vcs.repo(effectiveGitCwd) : null);
+		// Presentation follows a second detector whose only policy difference
+		// is preferring jj on equal-root ties (see detect_for_display);
+		// automation keeps `repository` above. A failed display lookup (or a
+		// caller that only stubs the operational detector) degrades to the
+		// operational repository rather than hiding the segment.
+		let displayRepository: VcsRepo | null;
+		try {
+			displayRepository = vcs.repoForDisplay(effectiveGitCwd);
+		} catch {
+			displayRepository = null;
+		}
+		displayRepository ??= repository;
 		// Only collapse the bare-cwd case: a single-direct-child-repo context
 		// (activeRepo set) renders `<parent> ↳ <child>`, which we leave intact.
 		const worktree = activeRepo ? null : resolveWorktreeContext(effectiveGitCwd);
@@ -555,6 +563,8 @@ export class StatusLineComponent implements Component {
 			activeRepo,
 			effectiveGitCwd,
 			repository,
+			displayRepository,
+			displayRepositoryCheckedAt: Date.now(),
 			repositoryCheckedAt: Date.now(),
 			worktree,
 		};
@@ -568,6 +578,21 @@ export class StatusLineComponent implements Component {
 		cache.repository = vcs.repo(cache.effectiveGitCwd);
 		cache.repositoryCheckedAt = now;
 		return cache.repository;
+	}
+
+	#resolveDisplayRepository(cache: ActiveRepoCache): VcsRepo | null {
+		if (cache.displayRepository) return cache.displayRepository;
+		const now = Date.now();
+		if (now - cache.displayRepositoryCheckedAt < WATCHER_FAILURE_POLL_TTL_MS) return null;
+		let display: VcsRepo | null;
+		try {
+			display = vcs.repoForDisplay(cache.effectiveGitCwd);
+		} catch {
+			display = null;
+		}
+		cache.displayRepository = display ?? cache.repository;
+		cache.displayRepositoryCheckedAt = now;
+		return cache.displayRepository;
 	}
 
 	/**
@@ -791,7 +816,7 @@ export class StatusLineComponent implements Component {
 		}
 
 		const activeRepoCache = this.#resolveActiveRepoCache();
-		const repository = this.#resolveRepository(activeRepoCache);
+		const repository = this.#resolveDisplayRepository(activeRepoCache);
 		if (!repository) {
 			// There is no path to watch yet. Cache the negative result only for the
 			// fallback poll interval so a later `git init` becomes visible without
@@ -1054,11 +1079,15 @@ export class StatusLineComponent implements Component {
 		this.#jjStatusActive?.controller.abort();
 		this.#jjStatusActive = undefined;
 	}
-	#getBranchLabel(activeRepoCache: ActiveRepoCache = this.#resolveActiveRepoCache()): string | null {
+	#getBranchLabel(
+		activeRepoCache: ActiveRepoCache = this.#resolveActiveRepoCache(),
+		// Presentation defaults to the display detector; PR lookup passes the
+		// operational repository so a jj label never becomes a GitHub head.
+		repository: VcsRepo | null = this.#resolveDisplayRepository(activeRepoCache),
+	): string | null {
 		if (!this.#gitEnabled()) return null;
 
 		const gitCwd = activeRepoCache.effectiveGitCwd;
-		const repository = this.#resolveRepository(activeRepoCache);
 		if (!repository) return null;
 		const gitRepository = repository.asGit();
 		if (!gitRepository) {
@@ -1089,14 +1118,6 @@ export class StatusLineComponent implements Component {
 			})();
 			return this.#cachedJjBranch;
 		}
-		// Colocated jj-git checkout: jj owns the working-copy label even though
-		// `detect()` resolves the directory to Git. The predicate is root
-		// equality (see colocatedJjWorkspace), independent of git HEAD state.
-		const colocatedJj = colocatedJjWorkspace(gitCwd, repository);
-		if (colocatedJj) {
-			return this.#colocatedJjBranchLabel(gitCwd, colocatedJj);
-		}
-
 		const fallbackCacheExpired =
 			this.#gitWatcherUnavailable &&
 			(this.#branchLastFetch === undefined || Date.now() - this.#branchLastFetch >= WATCHER_FAILURE_POLL_TTL_MS);
@@ -1178,52 +1199,6 @@ export class StatusLineComponent implements Component {
 		return this.#cachedBranch ?? null;
 	}
 
-	/**
-	 * Working-copy label for a colocated jj-git checkout.
-	 *
-	 * Mirrors the pure-jj fetch above (same throttle state, same invalidation
-	 * lifecycle): the render path never blocks, the first paint returns the
-	 * cached label, and the resolve requests a repaint on change. The result
-	 * is mirrored into the git-branch cache so PR and default-branch lookups
-	 * follow the displayed jj bookmark.
-	 */
-	#colocatedJjBranchLabel(gitCwd: string, jj: VcsJjWorkspace): string | null {
-		if (this.#jjBranchActive || Date.now() - this.#jjBranchLastFetch < JJ_REFRESH_TTL_MS) {
-			return this.#cachedJjBranch;
-		}
-		const request: JjResolveRequest = {
-			id: ++this.#jjResolveSeq,
-			controller: new AbortController(),
-		};
-		this.#jjBranchActive = request;
-		const generation = this.#jjCacheGeneration;
-		(async () => {
-			let next: string | null = null;
-			try {
-				next =
-					(await jj.workingCopyLabel(withTimeoutSignal(JJ_COMMAND_TIMEOUT_MS, request.controller.signal))) ?? null;
-			} catch {
-				next = null;
-			} finally {
-				if (this.#jjBranchActive?.id === request.id) this.#jjBranchActive = undefined;
-				if (this.#jjCacheGeneration === generation) this.#jjBranchLastFetch = Date.now();
-			}
-			if (this.#jjCacheGeneration !== generation || this.#disposed) return;
-			const changed = next !== this.#cachedJjBranch;
-			this.#cachedJjBranch = next;
-			this.#cachedBranchCwd = gitCwd;
-			try {
-				this.#cachedBranchRepoId = vcs.gitInfo(gitCwd)?.headPath ?? null;
-			} catch {
-				this.#cachedBranchRepoId = null;
-			}
-			this.#cachedBranch = next;
-			this.#branchLastFetch = Date.now();
-			if (changed) this.#onBranchChange?.();
-		})();
-		return this.#cachedJjBranch;
-	}
-
 	#isDefaultBranch(branch: string, effectiveGitCwd: string): boolean {
 		if (this.#defaultBranchCwd !== effectiveGitCwd) {
 			this.#defaultBranch = undefined;
@@ -1255,7 +1230,7 @@ export class StatusLineComponent implements Component {
 		if (!this.#gitEnabled()) return null;
 
 		const gitCwd = activeRepoCache.effectiveGitCwd;
-		const repository = this.#resolveRepository(activeRepoCache);
+		const repository = this.#resolveDisplayRepository(activeRepoCache);
 		if (!repository) return null;
 		if (repository.kind() === "jj") {
 			if (this.#jjStatusActive || Date.now() - this.#jjStatusLastFetch < JJ_REFRESH_TTL_MS) {
@@ -1327,7 +1302,7 @@ export class StatusLineComponent implements Component {
 
 		const gitCwd = activeRepoCache.effectiveGitCwd;
 		if (this.#resolveRepository(activeRepoCache)?.kind() !== "git") return null;
-		const branch = this.#getBranchLabel(activeRepoCache);
+		const branch = this.#getBranchLabel(activeRepoCache, this.#resolveRepository(activeRepoCache));
 		const currentContext = branch ? createPrCacheContext(branch, this.#cachedBranchRepoId ?? null) : null;
 
 		if (canReuseCachedPr(this.#cachedPr, this.#cachedPrContext, currentContext)) {
@@ -1357,7 +1332,10 @@ export class StatusLineComponent implements Component {
 			const setCachedPr = (value: { number: number; url: string } | null) => {
 				const latestActiveRepoCache = this.#resolveActiveRepoCache();
 				if (latestActiveRepoCache.effectiveGitCwd !== lookupCwd) return;
-				const latestBranch = this.#getBranchLabel(latestActiveRepoCache);
+				const latestBranch = this.#getBranchLabel(
+					latestActiveRepoCache,
+					this.#resolveRepository(latestActiveRepoCache),
+				);
 				const latestContext = latestBranch
 					? createPrCacheContext(latestBranch, this.#cachedBranchRepoId ?? null)
 					: undefined;
@@ -1952,6 +1930,8 @@ export class StatusLineComponent implements Component {
 					activeRepo: null,
 					effectiveGitCwd: projectDir,
 					repository: null,
+					displayRepository: null,
+					displayRepositoryCheckedAt: Date.now(),
 					repositoryCheckedAt: Date.now(),
 					worktree: null,
 				};

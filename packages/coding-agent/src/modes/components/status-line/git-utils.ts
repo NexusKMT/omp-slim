@@ -1,32 +1,3 @@
-import type { VcsJjWorkspace, VcsRepo } from "@oh-my-pi/pi-natives";
-import * as vcs from "@oh-my-pi/pi-natives/vcs";
-
-/**
- * Jujutsu workspace colocated with the checkout `repository` was discovered
- * from (same root), or null.
- *
- * `detect()` still resolves colocated directories to Git (git automation is
- * safe there), so presentation code must ask jj directly through the
- * independent `vcs.jj()` discovery. The predicate is root equality — not git
- * HEAD state: detached is valid in ordinary Git, and a colocated checkout
- * can have an attached HEAD. A jj workspace at a *different* root (e.g. a
- * nested git checkout under an outer jj tree) is not colocation: the git
- * branch stays authoritative there.
- */
-export function colocatedJjWorkspace(dir: string, repository: VcsRepo): VcsJjWorkspace | null {
-	let jj: VcsJjWorkspace | null;
-	try {
-		jj = vcs.jj(dir);
-	} catch {
-		return null;
-	}
-	if (!jj) return null;
-	try {
-		return jj.root() === repository.root() ? jj : null;
-	} catch {
-		return null;
-	}
-}
 /**
  * Extract "owner/repo" from a GitHub remote URL.
  * Handles HTTPS, SSH (scp-style), and git:// protocols.

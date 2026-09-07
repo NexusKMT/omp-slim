@@ -1,22 +1,23 @@
 /**
  * #11071: a colocated jj-git checkout resolved to Git in `detect()`, so the
- * status line showed the git HEAD ("detached" in practice, or a stale git
- * branch) instead of the active jj bookmark/change id.
+ * status line showed the git HEAD ("detached" in practice) instead of the
+ * active jj bookmark/change id.
  *
- * `detect()` intentionally still resolves colocated directories to Git (git
- * automation is safe there). Presentation instead consults the independent
- * `vcs.jj()` discovery and prefers the jj label when both discoveries share
- * the same root — regardless of git HEAD state. A jj workspace at a
- * different root (nested git under an outer jj tree) keeps the git branch,
- * and ordinary git without jj keeps "detached".
+ * Presentation now follows a second detector, `vcs.repoForDisplay()`, whose
+ * only policy difference is preferring jj on equal-root ties; automation
+ * keeps `vcs.repo()`. The component (and legacy footer) split accordingly:
+ * branch label, status counts, and the head watcher come from the display
+ * repository, while PR lookup keeps resolving the operational git branch —
+ * a jj bookmark/change id must never become a GitHub head.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { StatusLineSettings } from "@oh-my-pi/pi-coding-agent/modes/components/status-line";
 import { StatusLineComponent } from "@oh-my-pi/pi-coding-agent/modes/components/status-line";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import type { VcsGitRepo, VcsGitRepoInfo, VcsHeadState, VcsJjWorkspace, VcsRepo } from "@oh-my-pi/pi-natives";
+import type { VcsGitRepo, VcsGitRepoInfo, VcsHeadState, VcsRepo } from "@oh-my-pi/pi-natives";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
+import { github } from "@oh-my-pi/pi-coding-agent/utils/github";
 import { getProjectDir, setProjectDir } from "@oh-my-pi/pi-utils";
 
 type GitStatus = { staged: number; unstaged: number; untracked: number };
@@ -55,7 +56,7 @@ function makeSession() {
 		getAsyncJobSnapshot: () => ({ running: [] }),
 		modelRegistry: { isUsingOAuth: () => false },
 		sessionManager: {
-			getSessionName: () => "colocated-jj test",
+			getSessionName: () => "display-detector test",
 			getUsageStatistics: () => ({
 				input: 0,
 				output: 0,
@@ -68,20 +69,11 @@ function makeSession() {
 	} as unknown as ConstructorParameters<typeof StatusLineComponent>[0];
 }
 
-const attachedHead: VcsHeadState = {
-	kind: "ref",
-	branch: "git-branch-name",
-	refName: "refs/heads/git-branch-name",
-	commit: undefined,
-};
+function headFor(branch: string): VcsHeadState {
+	return { kind: "ref", branch, refName: `refs/heads/${branch}`, commit: undefined };
+}
 const detachedHead: VcsHeadState = { kind: "detached" };
 
-function jjWorkspace(root: string, workingCopyLabel: () => Promise<string | null>): VcsJjWorkspace {
-	return {
-		root: () => root,
-		workingCopyLabel,
-	} as unknown as VcsJjWorkspace;
-}
 function repoInfoFor(root: string): VcsGitRepoInfo {
 	return {
 		commonDir: `${root}/.git`,
@@ -93,7 +85,7 @@ function repoInfoFor(root: string): VcsGitRepoInfo {
 	};
 }
 
-function gitRepo(head: VcsHeadState | null, _root: string): VcsGitRepo {
+function gitHandle(head: VcsHeadState | null): VcsGitRepo {
 	return {
 		headSync: () => head,
 		linkedWorktree: () => null,
@@ -101,14 +93,31 @@ function gitRepo(head: VcsHeadState | null, _root: string): VcsGitRepo {
 	} as unknown as VcsGitRepo;
 }
 
-function unifiedGit(repository: VcsGitRepo, root: string): VcsRepo {
+function gitWithDefaultBranch(branch: string): VcsGitRepo {
+	return { defaultBranch: async () => branch, linkedWorktree: () => null } as unknown as VcsGitRepo;
+}
+
+function operationalGit(root: string, head: VcsHeadState | null): VcsRepo {
+	const handle = gitHandle(head);
 	return {
 		kind: () => "git",
-		asGit: () => repository,
+		asGit: () => handle,
 		asJj: () => null,
 		root: () => root,
 		watchTarget: () => `${root}/.git/HEAD`,
-		statusSummary: (signal?: AbortSignal) => repository.statusSummary(signal),
+		statusSummary: (signal?: AbortSignal) => handle.statusSummary(signal),
+	} as unknown as VcsRepo;
+}
+
+function displayJj(root: string, label: () => Promise<string | null>, status: GitStatus): VcsRepo {
+	return {
+		kind: () => "jj",
+		asGit: () => null,
+		asJj: () => ({}) as never,
+		root: () => root,
+		watchTarget: () => `${root}/.jj/repo/op_heads/heads`,
+		label,
+		statusSummary: async () => status,
 	} as unknown as VcsRepo;
 }
 
@@ -120,22 +129,36 @@ const gitSegment: StatusLineSettings = {
 	sessionAccent: false,
 	transparent: false,
 };
+const gitPrSegments: StatusLineSettings = {
+	...gitSegment,
+	leftSegments: ["git", "pr"],
+};
 
 async function flush(): Promise<void> {
 	await Promise.resolve();
 	await Promise.resolve();
 	await Promise.resolve();
+	await Promise.resolve();
 }
 
-describe("StatusLineComponent colocated jj-git label", () => {
-	it("prefers the jj bookmark over an attached git HEAD when roots match", async () => {
+function mockRepos(operational: VcsRepo, display: VcsRepo, root: string): void {
+	vi.spyOn(vcs, "gitInfo").mockReturnValue(repoInfoFor(root));
+	vi.spyOn(vcs, "git").mockReturnValue(null);
+	vi.spyOn(vcs, "repo").mockReturnValue(operational);
+	vi.spyOn(vcs, "repoForDisplay").mockReturnValue(display);
+}
+
+describe("StatusLineComponent display detector", () => {
+	it("shows the jj bookmark and jj status with the jj watch target when colocated", async () => {
 		const root = "/repo/colocated";
-		vi.spyOn(vcs, "gitInfo").mockReturnValue(repoInfoFor(root));
-		vi.spyOn(vcs, "git").mockReturnValue(gitRepo(attachedHead, root));
-		vi.spyOn(vcs, "repo").mockReturnValue(unifiedGit(gitRepo(attachedHead, root), root));
-		const label = Promise.withResolvers<string | null>();
-		const workingCopyLabel = vi.fn(() => label.promise);
-		vi.spyOn(vcs, "jj").mockReturnValue(jjWorkspace(root, workingCopyLabel));
+		const operational = operationalGit(root, headFor("main"));
+		const display = displayJj(root, async () => "my-bookmark", { staged: 1, unstaged: 2, untracked: 3 });
+		mockRepos(operational, display, root);
+		let watched: VcsRepo | null = null;
+		vi.spyOn(vcs, "watch").mockImplementation(((repo: VcsRepo) => {
+			watched = repo;
+			return () => {};
+		}) as unknown as typeof vcs.watch);
 
 		const onBranchChange = vi.fn();
 		const component = new StatusLineComponent(makeSession());
@@ -143,47 +166,86 @@ describe("StatusLineComponent colocated jj-git label", () => {
 		component.watchBranch(onBranchChange);
 
 		component.getTopBorder(80);
-		expect(workingCopyLabel).toHaveBeenCalled();
-
-		label.resolve("my-bookmark");
 		await flush();
 
+		expect(vcs.repoForDisplay).toHaveBeenCalled();
 		expect(onBranchChange).toHaveBeenCalled();
 		expect(component.getTopBorder(80).content).toContain("my-bookmark");
+		expect((watched as VcsRepo | null)?.watchTarget()).toBe(`${root}/.jj/repo/op_heads/heads`);
 		component.dispose();
 	});
 
 	it("keeps the git branch for a nested git checkout under an outer jj workspace", async () => {
 		const root = "/repo/nested";
-		vi.spyOn(vcs, "gitInfo").mockReturnValue(repoInfoFor(root));
-		vi.spyOn(vcs, "git").mockReturnValue(gitRepo(attachedHead, root));
-		vi.spyOn(vcs, "repo").mockReturnValue(unifiedGit(gitRepo(attachedHead, root), root));
-		const workingCopyLabel = vi.fn(async (): Promise<string | null> => "outer-bookmark");
-		vi.spyOn(vcs, "jj").mockReturnValue(jjWorkspace("/outer", workingCopyLabel));
+		const operational = operationalGit(root, headFor("git-branch-name"));
+		mockRepos(operational, operationalGit(root, headFor("git-branch-name")), root);
 
 		const component = new StatusLineComponent(makeSession());
 		component.updateSettings(gitSegment);
 		component.watchBranch(() => {});
 
+		component.getTopBorder(80);
 		await flush();
-		expect(workingCopyLabel).not.toHaveBeenCalled();
 		expect(component.getTopBorder(80).content).toContain("git-branch-name");
 		component.dispose();
 	});
 
 	it("keeps detached for ordinary git with no jj workspace", async () => {
 		const root = "/repo/plain";
-		vi.spyOn(vcs, "gitInfo").mockReturnValue(repoInfoFor(root));
-		vi.spyOn(vcs, "git").mockReturnValue(gitRepo(detachedHead, root));
-		vi.spyOn(vcs, "repo").mockReturnValue(unifiedGit(gitRepo(detachedHead, root), root));
-		vi.spyOn(vcs, "jj").mockReturnValue(null);
+		const operational = operationalGit(root, detachedHead);
+		mockRepos(operational, operationalGit(root, detachedHead), root);
 
 		const component = new StatusLineComponent(makeSession());
 		component.updateSettings(gitSegment);
 		component.watchBranch(() => {});
 
+		component.getTopBorder(80);
 		await flush();
 		expect(component.getTopBorder(80).content).toContain("detached");
+		component.dispose();
+	});
+
+	it("does not send the jj bookmark to PR lookup when the git branch is default", async () => {
+		const root = "/repo/colocated-pr";
+		const operational = operationalGit(root, headFor("main"));
+		const display = displayJj(root, async () => "feature-x", { staged: 0, unstaged: 0, untracked: 0 });
+		mockRepos(operational, display, root);
+		vi.spyOn(vcs, "git").mockReturnValue(gitWithDefaultBranch("main"));
+		const run = vi.spyOn(github, "run").mockResolvedValue({ exitCode: 0, stdout: "{}", stderr: "" });
+
+		const component = new StatusLineComponent(makeSession());
+		component.updateSettings(gitPrSegments);
+		component.watchBranch(() => {});
+
+		component.getTopBorder(80);
+		await flush();
+
+		expect(component.getTopBorder(80).content).toContain("feature-x");
+		expect(run).not.toHaveBeenCalled();
+		component.dispose();
+	});
+
+	it("still looks up PRs by the operational git branch when it is not default", async () => {
+		const root = "/repo/colocated-pr-live";
+		const operational = operationalGit(root, headFor("git-branch-name"));
+		const display = displayJj(root, async () => "feature-x", { staged: 0, unstaged: 0, untracked: 0 });
+		mockRepos(operational, display, root);
+		vi.spyOn(vcs, "git").mockReturnValue(gitWithDefaultBranch("main"));
+		const run = vi
+			.spyOn(github, "run")
+			.mockResolvedValue({ exitCode: 0, stdout: '{"number":7,"url":"https://example.test/x/7"}', stderr: "" });
+
+		const component = new StatusLineComponent(makeSession());
+		component.updateSettings(gitPrSegments);
+		component.watchBranch(() => {});
+
+		component.getTopBorder(80);
+		await flush();
+
+		expect(run).toHaveBeenCalledTimes(1);
+		expect(run.mock.calls[0]?.[1]).toEqual(["pr", "view", "--json", "number,url"]);
+		expect(component.getTopBorder(80).content).toContain("feature-x");
+		expect(component.getTopBorder(80).content).toContain("#7");
 		component.dispose();
 	});
 });
