@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.14] - 2026-09-07
+
 ### Fixed
 
 - Bills Astra API requests above 272K input at the documented 2x input / 1.5x output long-context tier; the Codex subscription route stays exempt with free cache writes ([#11157](https://github.com/can1357/oh-my-pi/pull/11157) by [@H4vC](https://github.com/H4vC)).
