@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import http2 from "node:http2";
+import { splitCursorEffortSuffix } from "@oh-my-pi/pi-catalog/compat/collapse";
 import { classifyModel } from "@oh-my-pi/pi-catalog/compat/taxonomy";
 import type {
 	ConversationStep,
@@ -5259,19 +5260,19 @@ function resolveCursorWireModel(
 	if (wireMode === "discovered") return { modelId: wireModelId, parameters: [] };
 	// Cursor's fast lane follows the effort token (`-high-fast`), while the
 	// standard lane ends at it (`-high`). Preserve the lane in the base id.
-	const match = /^(.*)-(none|extra-high|minimal|low|medium|high|xhigh|max)(-fast)?$/.exec(wireModelId);
-	const base = match?.[1];
-	const tier = match?.[2];
-	const lane = match?.[3] ?? "";
-	if (base && tier && classifyModel("cursor", base).class === "openai") {
-		if (tier === "none") {
+	// Tier vocabulary comes from the catalog (`splitCursorEffortSuffix`), so
+	// KDL tier corrections govern the Run request too.
+	const split = splitCursorEffortSuffix(wireModelId);
+	const base = split?.baseId;
+	if (base && split && classifyModel("cursor", base).class === "openai") {
+		const lane = split.fast ? "-fast" : "";
+		if (split.tier === "none") {
 			return { modelId: `${base}${lane}`, parameters: [] };
 		}
-		const effort = tier === "extra-high" ? "xhigh" : tier;
-		if ((THINKING_EFFORTS as readonly string[]).includes(effort)) {
+		if ((THINKING_EFFORTS as readonly string[]).includes(split.tier)) {
 			return {
 				modelId: `${base}${lane}`,
-				parameters: [create(RequestedModel_ModelParameterbytesSchema, { id: "reasoning", value: effort })],
+				parameters: [create(RequestedModel_ModelParameterbytesSchema, { id: "reasoning", value: split.tier })],
 			};
 		}
 	}

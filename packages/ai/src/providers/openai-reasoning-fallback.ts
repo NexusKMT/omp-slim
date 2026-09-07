@@ -228,7 +228,11 @@ function isInvalidReasoningEffortError(
 		return true;
 	}
 	// Gateways put the rejected value first (`level "none" not supported`), the
-	// official API puts the verdict first (`Unsupported value: 'none'`).
+	// official API puts the verdict first (`Unsupported value: 'none'`). Without
+	// a field naming, only the reasoning-off value is trusted: sibling
+	// tier-valued fields (e.g. text verbosity) share the low..max vocabulary,
+	// so a non-none match cannot establish which field was rejected.
+	if (currentEffort.toLowerCase() !== "none") return false;
 	const quoted = `["'\`]${escapeRegExp(currentEffort)}["'\`]`;
 	return (
 		new RegExp(`(?:invalid|unsupported|not supported)[^\\n]*${quoted}`, "i").test(message) ||

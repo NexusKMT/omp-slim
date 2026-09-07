@@ -149,6 +149,19 @@ function summaryReasoningErrorResponse(): Response {
 }
 
 /**
+ * Rejection aimed at a sibling tier-valued field: the current reasoning
+ * effort is quoted, but the verdict is about text verbosity. Must not
+ * trigger a reasoning-effort retry.
+ */
+function unsupportedVerbosityResponse(): Response {
+	const message = "Unsupported value: 'high' for text verbosity. Supported values are: 'low', 'medium'.";
+	return new Response(JSON.stringify({ error: { message, type: "invalid_request_body" } }), {
+		status: 400,
+		headers: { "content-type": "application/json" },
+	});
+}
+
+/**
  * Ninfer-style strict kwargs whitelist: the server rejects the
  * `chat_template_kwargs.reasoning_effort` spelling itself, not the value.
  */
@@ -461,6 +474,27 @@ describe("OpenAI reasoning effort fallback retry", () => {
 
 		expect(result.stopReason).toBe("stop");
 		expect(bodies.map(body => (body.reasoning as { effort?: string } | undefined)?.effort)).toEqual(["none", "low"]);
+	});
+
+	it("does not retry a Supported-values rejection aimed at another field", async () => {
+		let attempts = 0;
+		const fetchMock: FetchImpl = Object.assign(
+			async (_input: string | URL | Request, _init?: RequestInit): Promise<Response> => {
+				attempts += 1;
+				return unsupportedVerbosityResponse();
+			},
+			{ preconnect: fetch.preconnect },
+		);
+
+		const result = await streamOpenAIResponses(createMaxLadderResponsesModel(), testContext, {
+			apiKey: "test-key",
+			fetch: fetchMock,
+			reasoning: "high",
+		}).result();
+
+		expect(result.stopReason).toBe("error");
+		expect(result.errorStatus).toBe(400);
+		expect(attempts).toBe(1);
 	});
 
 	it("does not retry unrelated reasoning parameter errors", async () => {

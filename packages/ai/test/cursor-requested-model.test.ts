@@ -52,6 +52,14 @@ describe("Cursor requestedModel wire shape", () => {
 		]);
 	});
 
+	it("maps the extra-high sibling to the xhigh reasoning parameter", async () => {
+		const payload = await capture(cursorModel("gpt-5.6-sol-extra-high"));
+		expect(payload.requestedModel?.modelId).toBe("gpt-5.6-sol");
+		expect(payload.requestedModel?.parameters).toEqual([
+			expect.objectContaining({ id: "reasoning", value: "xhigh" }),
+		]);
+	});
+
 	it("normalizes an off-tier sibling to the base id with no parameters", async () => {
 		const payload = await capture(cursorModel("gpt-5.6-sol-none"));
 		expect(payload.requestedModel?.modelId).toBe("gpt-5.6-sol");
