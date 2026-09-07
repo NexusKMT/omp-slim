@@ -7,7 +7,7 @@ import {
 } from "@oh-my-pi/pi-ai/usage/google-antigravity";
 import { getNextTimeBasedPricingTransition } from "@oh-my-pi/pi-catalog/models";
 import type { ModelCost } from "@oh-my-pi/pi-catalog/types";
-import type { VcsRepo } from "@oh-my-pi/pi-natives";
+import type { VcsJjWorkspace, VcsRepo } from "@oh-my-pi/pi-natives";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import {
 	type Component,
@@ -35,7 +35,13 @@ import {
 	type CodexResetUsageSnapshot,
 	detectCodexResetFireworks,
 } from "../codex-reset-fireworks";
-import { canReuseCachedPr, createPrCacheContext, isSamePrCacheContext, type PrCacheContext } from "./git-utils";
+import {
+	canReuseCachedPr,
+	colocatedJjWorkspace,
+	createPrCacheContext,
+	isSamePrCacheContext,
+	type PrCacheContext,
+} from "./git-utils";
 import { getPreset } from "./presets";
 import { renderSegment, type SegmentContext } from "./segments";
 import { getSeparator } from "./separators";
@@ -1083,6 +1089,13 @@ export class StatusLineComponent implements Component {
 			})();
 			return this.#cachedJjBranch;
 		}
+		// Colocated jj-git checkout: jj owns the working-copy label even though
+		// `detect()` resolves the directory to Git. The predicate is root
+		// equality (see colocatedJjWorkspace), independent of git HEAD state.
+		const colocatedJj = colocatedJjWorkspace(gitCwd, repository);
+		if (colocatedJj) {
+			return this.#colocatedJjBranchLabel(gitCwd, colocatedJj);
+		}
 
 		const fallbackCacheExpired =
 			this.#gitWatcherUnavailable &&
@@ -1163,6 +1176,52 @@ export class StatusLineComponent implements Component {
 		}
 		this.#cachedBranch = head.kind === "ref" ? (head.branch ?? head.refName ?? "HEAD") : "detached";
 		return this.#cachedBranch ?? null;
+	}
+
+	/**
+	 * Working-copy label for a colocated jj-git checkout.
+	 *
+	 * Mirrors the pure-jj fetch above (same throttle state, same invalidation
+	 * lifecycle): the render path never blocks, the first paint returns the
+	 * cached label, and the resolve requests a repaint on change. The result
+	 * is mirrored into the git-branch cache so PR and default-branch lookups
+	 * follow the displayed jj bookmark.
+	 */
+	#colocatedJjBranchLabel(gitCwd: string, jj: VcsJjWorkspace): string | null {
+		if (this.#jjBranchActive || Date.now() - this.#jjBranchLastFetch < JJ_REFRESH_TTL_MS) {
+			return this.#cachedJjBranch;
+		}
+		const request: JjResolveRequest = {
+			id: ++this.#jjResolveSeq,
+			controller: new AbortController(),
+		};
+		this.#jjBranchActive = request;
+		const generation = this.#jjCacheGeneration;
+		(async () => {
+			let next: string | null = null;
+			try {
+				next =
+					(await jj.workingCopyLabel(withTimeoutSignal(JJ_COMMAND_TIMEOUT_MS, request.controller.signal))) ?? null;
+			} catch {
+				next = null;
+			} finally {
+				if (this.#jjBranchActive?.id === request.id) this.#jjBranchActive = undefined;
+				if (this.#jjCacheGeneration === generation) this.#jjBranchLastFetch = Date.now();
+			}
+			if (this.#jjCacheGeneration !== generation || this.#disposed) return;
+			const changed = next !== this.#cachedJjBranch;
+			this.#cachedJjBranch = next;
+			this.#cachedBranchCwd = gitCwd;
+			try {
+				this.#cachedBranchRepoId = vcs.gitInfo(gitCwd)?.headPath ?? null;
+			} catch {
+				this.#cachedBranchRepoId = null;
+			}
+			this.#cachedBranch = next;
+			this.#branchLastFetch = Date.now();
+			if (changed) this.#onBranchChange?.();
+		})();
+		return this.#cachedJjBranch;
 	}
 
 	#isDefaultBranch(branch: string, effectiveGitCwd: string): boolean {
