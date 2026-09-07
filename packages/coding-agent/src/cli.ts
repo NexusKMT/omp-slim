@@ -327,10 +327,9 @@ async function runIpcSubprocessWorker<In, Out>(
 	});
 	let parentWatchdog: NodeJS.Timeout | undefined;
 	const initialParentPid = process.ppid;
-	const isOrphanPid = (pid: number): boolean => pid <= (process.platform === "win32" ? 0 : 1);
-	if (isOrphanPid(initialParentPid)) {
+	if (process.platform === "win32" && initialParentPid <= 0) {
 		shutdown();
-	} else {
+	} else if (initialParentPid > 0) {
 		let parentProcess: Process | null = null;
 		let runningStatus: ProcessStatus | undefined;
 		try {
@@ -340,7 +339,7 @@ async function runIpcSubprocessWorker<In, Out>(
 		} catch {}
 
 		const isParentAlive = (): boolean => {
-			if (process.ppid !== initialParentPid || isOrphanPid(process.ppid)) {
+			if (process.ppid !== initialParentPid) {
 				return false;
 			}
 			if (parentProcess && runningStatus !== undefined) {
