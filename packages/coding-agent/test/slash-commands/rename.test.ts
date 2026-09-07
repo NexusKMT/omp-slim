@@ -240,6 +240,42 @@ for (const mode of ["TUI", "headless"] as const) {
 			});
 		}
 
+		it.each(["abort", "switch", "rename"] as const)(
+			"suppresses completion when %s occurs during title persistence",
+			async interruption => {
+				const { session, sessionManager, execute, ctx, runtime } = createRuntime(mode);
+				const output = mode === "TUI" ? vi.spyOn(ctx, "showStatus") : vi.spyOn(runtime, "output");
+				const notify = vi.fn();
+				runtime.notifyTitleChanged = notify;
+				vi.spyOn(tinyTitleClient, "generate").mockResolvedValue("Generated title");
+				const started = Promise.withResolvers<void>();
+				const persisted = Promise.withResolvers<void>();
+				const store = sessionManager.setSessionName.bind(sessionManager);
+				vi.spyOn(sessionManager, "setSessionName").mockImplementationOnce(async (...args) => {
+					const result = await store(...args);
+					started.resolve();
+					await persisted.promise;
+					return result;
+				});
+				const pending = execute("/rename");
+				try {
+					await Promise.race([started.promise, pending]);
+					if (interruption === "abort") await session.abort();
+					else if (interruption === "switch") await session.newSession();
+					else await store("Generated title", "user");
+					const currentTitle = session.sessionName;
+					persisted.resolve();
+					await pending;
+					expect(session.sessionName).toBe(currentTitle);
+					expect(output).not.toHaveBeenCalled();
+					expect(notify).not.toHaveBeenCalled();
+				} finally {
+					persisted.resolve();
+					await pending;
+				}
+			},
+		);
+
 		it("does not rename a replacement session when an earlier generation completes", async () => {
 			const { session, sessionManager, execute, ctx, runtime } = createRuntime(mode);
 			const output = mode === "TUI" ? vi.spyOn(ctx, "showStatus") : vi.spyOn(runtime, "output");
@@ -319,6 +355,30 @@ for (const mode of ["TUI", "headless"] as const) {
 		});
 	});
 }
+it("suppresses confirmation when the prompt is cancelled during title notification", async () => {
+	const { runtime, execute } = createRuntime("headless");
+	const controller = new AbortController();
+	runtime.signal = controller.signal;
+	const output = vi.spyOn(runtime, "output");
+	const started = Promise.withResolvers<void>();
+	const notified = Promise.withResolvers<void>();
+	runtime.notifyTitleChanged = () => {
+		started.resolve();
+		return notified.promise;
+	};
+	vi.spyOn(tinyTitleClient, "generate").mockResolvedValue("Generated title");
+	const pending = execute("/rename");
+	try {
+		await Promise.race([started.promise, pending]);
+		controller.abort();
+		notified.resolve();
+		await pending;
+		expect(output).not.toHaveBeenCalled();
+	} finally {
+		notified.resolve();
+		await pending;
+	}
+});
 
 it("releases the RPC command while title inference runs in the background and preserves a newer rename", async () => {
 	const { session, sessionManager, runtime } = createRuntime("headless");

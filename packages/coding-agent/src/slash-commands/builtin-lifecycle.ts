@@ -655,25 +655,46 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 		allowArgs: true,
 		handle: async (command, runtime) => {
 			const session = runtime.session;
+			const sessionManager = runtime.sessionManager;
 			const runRename = async (): Promise<void> => {
-				const title = command.args || (await generateRenameTitle(session, runtime.signal));
-				if (runtime.session !== session || runtime.signal?.aborted || title === undefined) return;
-				if (!title) {
-					await runtime.output("Could not generate a session title. Use /rename <title> to set one.");
-					return;
+				const sessionId = sessionManager.getSessionId();
+				const titleSignal = session.titleGenerationSignal;
+				let titleRevision = sessionManager.titleRevision;
+				const isCurrent = () =>
+					runtime.session === session &&
+					runtime.sessionManager === sessionManager &&
+					!runtime.signal?.aborted &&
+					!titleSignal.aborted &&
+					sessionManager.getSessionId() === sessionId &&
+					sessionManager.titleRevision === titleRevision;
+				try {
+					const generation = command.args || generateRenameTitle(session, runtime.signal);
+					titleRevision = sessionManager.titleRevision;
+					const title = typeof generation === "string" ? generation : await generation;
+					if (!isCurrent() || title === undefined) return;
+					if (!title) {
+						await runtime.output("Could not generate a session title. Use /rename <title> to set one.");
+						return;
+					}
+					const persistence = sessionManager.setSessionName(title, "user");
+					titleRevision = sessionManager.titleRevision;
+					const ok = await persistence;
+					if (!isCurrent()) return;
+					if (!ok) {
+						await runtime.output("Session name not changed (a user-set name takes precedence).");
+						return;
+					}
+					await runtime.notifyTitleChanged?.();
+					if (!isCurrent()) return;
+					await runtime.output(`Session renamed to ${title}.`);
+				} catch (err) {
+					if (!isCurrent()) return;
+					if (command.args || !runtime.runCommandInBackground) throw err;
+					await runtime.output(`Rename failed: ${errorMessage(err)}`);
 				}
-				const ok = await runtime.sessionManager.setSessionName(title, "user");
-				if (!ok) {
-					await runtime.output("Session name not changed (a user-set name takes precedence).");
-					return;
-				}
-				await runtime.notifyTitleChanged?.();
-				await runtime.output(`Session renamed to ${title}.`);
 			};
 			if (!command.args && runtime.runCommandInBackground) {
-				runtime.runCommandInBackground(() =>
-					runRename().catch(err => runtime.output(`Rename failed: ${errorMessage(err)}`)),
-				);
+				runtime.runCommandInBackground(runRename);
 				return commandConsumed();
 			}
 			await runRename();
