@@ -106,6 +106,45 @@ An intervening paragraph closes the list.
 		expect(selection.categoryCounts).toEqual({ Fixed: 2 });
 	});
 
+	test("does not count a one-space-indented detail bullet as a separate change", () => {
+		const selection = summarize(`
+### Fixed
+
+- Fixed a thing.
+
+ - detail kept inside the item above
+`);
+
+		expect(selection.changeCount).toBe(1);
+		expect(selection.categoryCounts).toEqual({ Fixed: 1 });
+	});
+
+	test("counts dedented bullets against the open list", () => {
+		const selection = summarize(`
+### Fixed
+
+  - First fix.
+- Second fix.
+ - Third fix.
+`);
+
+		expect(selection.changeCount).toBe(3);
+		expect(selection.categoryCounts).toEqual({ Fixed: 3 });
+	});
+
+	test("treats a deeper bullet after an indented list as nested", () => {
+		const selection = summarize(`
+### Fixed
+
+   - First fix.
+
+    - detail kept inside the item above
+`);
+
+		expect(selection.changeCount).toBe(1);
+		expect(selection.categoryCounts).toEqual({ Fixed: 1 });
+	});
+
 	test("does not count a bullet indented into a code block", () => {
 		const selection = summarize(`
 ### Fixed

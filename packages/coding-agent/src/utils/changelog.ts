@@ -89,7 +89,9 @@ function summarizeChangelogEntries(entries: readonly ChangelogEntry[]): {
 
 	for (const entry of entries) {
 		let category = UNCATEGORIZED_CHANGELOG_CATEGORY;
-		// Indent of the open top-level list, so deeper bullets are attributed to the change above them.
+		// Indent of the first item of the open list block. The renderer absorbs every
+		// whitespace-indented line into the open item, so only an unindented line
+		// (paragraph, heading, fence, ...) closes the block. Blank lines never do.
 		let listIndent: number | undefined;
 		for (const line of entry.content.split("\n")) {
 			const heading = line.match(/^###\s+(.+?)\s*$/);
@@ -100,23 +102,18 @@ function summarizeChangelogEntries(entries: readonly ChangelogEntry[]): {
 			}
 			const indent = changelogBulletIndent(line);
 			if (indent === undefined) {
-				// A block boundary closes the open list, so a later 1-3-column bullet is a new
-				// top-level change rather than a sub-item of the earlier list. Blank lines are
-				// allowed inside lists and never close one; lines indented to the open item's
-				// content column are continuations of that item.
-				if (line.trim() === "" || listIndent === undefined) continue;
-				if (changelogLineIndent(line) < listIndent + 2) listIndent = undefined;
+				// An unindented block boundary ends the open item, so a later indented
+				// bullet opens a new top-level list instead of nesting under the old one.
+				if (!/^\s*$/.test(line) && changelogLineIndent(line) === 0) listIndent = undefined;
 				continue;
 			}
 			if (listIndent === undefined) {
 				// With no list open, four columns of indent is an indented code block, not a list item.
 				if (indent >= 4) continue;
 				listIndent = indent;
-			} else if (indent >= listIndent + 2) {
-				// At or past the content column of the item above: a sub-item, not a separate change.
+			} else if (indent > listIndent) {
+				// Deeper than the block's first item: absorbed into the item above, not a separate change.
 				continue;
-			} else if (indent < listIndent) {
-				listIndent = indent;
 			}
 			categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
 			changeCount++;
