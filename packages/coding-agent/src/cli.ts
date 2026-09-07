@@ -15,7 +15,7 @@ try {
  * lightweight CLI runner from pi-utils.
  */
 import { parentPort } from "node:worker_threads";
-import { Process, ProcessStatus } from "@oh-my-pi/pi-natives";
+import type { Process, ProcessStatus } from "@oh-my-pi/pi-natives";
 import type { CliConfig, CommandMetadata } from "@oh-my-pi/pi-utils/cli";
 import {
 	APP_NAME,
@@ -325,24 +325,31 @@ async function runIpcSubprocessWorker<In, Out>(
 			};
 		},
 	});
-	let parentWatchdog: ReturnType<typeof setInterval> | undefined;
-	const parentPid = process.ppid;
-	if (process.platform === "win32" && parentPid <= 0) {
+	let parentWatchdog: NodeJS.Timeout | undefined;
+	const initialParentPid = process.ppid;
+	const isOrphanPid = (pid: number): boolean => pid <= (process.platform === "win32" ? 0 : 1);
+	if (isOrphanPid(initialParentPid)) {
 		shutdown();
-	} else if (parentPid > 0 && (process.platform === "win32" || parentPid > 1)) {
+	} else {
 		let parentProcess: Process | null = null;
+		let runningStatus: ProcessStatus | undefined;
 		try {
-			parentProcess = Process.fromPid(parentPid);
+			const natives = await import("@oh-my-pi/pi-natives");
+			parentProcess = natives.Process.fromPid(initialParentPid);
+			runningStatus = natives.ProcessStatus.Running;
 		} catch {}
 
 		const isParentAlive = (): boolean => {
-			if (parentProcess) {
+			if (process.ppid !== initialParentPid || isOrphanPid(process.ppid)) {
+				return false;
+			}
+			if (parentProcess && runningStatus !== undefined) {
 				try {
-					return parentProcess.status() === ProcessStatus.Running;
+					return parentProcess.status() === runningStatus;
 				} catch {}
 			}
 			try {
-				process.kill(parentPid, 0);
+				process.kill(initialParentPid, 0);
 				return true;
 			} catch (err: unknown) {
 				return (err as NodeJS.ErrnoException)?.code === "EPERM";
