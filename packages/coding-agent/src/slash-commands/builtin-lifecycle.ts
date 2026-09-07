@@ -38,16 +38,22 @@ function formatFreshSessionResult(result: FreshSessionResult): string {
 	return `Fresh provider session started (${result.closedProviderSessions} ${stateLabel} pruned).`;
 }
 
-async function generateRenameTitle(session: AgentSession, signal?: AbortSignal): Promise<string | null> {
+/** Null reports no usable title; undefined silently discards an invalidated request. */
+async function generateRenameTitle(session: AgentSession, signal?: AbortSignal): Promise<string | null | undefined> {
 	const { sessionManager } = session;
 	const revision = sessionManager.reserveTitleRevision();
 	const context = buildReplanTitleContext(session.messages);
 	if (!context || isLowSignalTitleInput(context)) return null;
 	const sessionId = sessionManager.getSessionId();
+	const titleSignal = session.titleGenerationSignal;
 	const cleanupProgress = session.notifyTitleGenerationStart();
 	try {
 		const title = await session.generateTitle(context, undefined, signal);
-		return sessionManager.getSessionId() === sessionId && sessionManager.titleRevision === revision ? title : null;
+		return !titleSignal.aborted &&
+			sessionManager.getSessionId() === sessionId &&
+			sessionManager.titleRevision === revision
+			? title
+			: undefined;
 	} finally {
 		cleanupProgress?.();
 	}
@@ -651,7 +657,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 			const session = runtime.session;
 			const runRename = async (): Promise<void> => {
 				const title = command.args || (await generateRenameTitle(session, runtime.signal));
-				if (runtime.session !== session || runtime.signal?.aborted) return;
+				if (runtime.session !== session || runtime.signal?.aborted || title === undefined) return;
 				if (!title) {
 					await runtime.output("Could not generate a session title. Use /rename <title> to set one.");
 					return;
@@ -677,7 +683,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 			runtime.ctx.editor.setText("");
 			const session = runtime.ctx.session;
 			const title = command.args.trim() || (await generateRenameTitle(session));
-			if (runtime.ctx.session !== session) return;
+			if (runtime.ctx.session !== session || title === undefined) return;
 			if (!title) {
 				runtime.ctx.showStatus("Could not generate a session title. Use /rename <title> to set one.");
 				return;

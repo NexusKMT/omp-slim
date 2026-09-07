@@ -7405,8 +7405,8 @@ export class AgentSession {
 
 	/**
 	 * Generate an automatic session title tied to this session's lifecycle.
-	 * Input and replan callers share the signal so disposal cancels provider and
-	 * local-worker requests instead of leaving background inference alive.
+	 * Input and replan callers share the signal so interruption and disposal cancel
+	 * provider and local-worker requests instead of leaving background inference alive.
 	 * Online calls use a stable side-request identity so they cannot advance the
 	 * foreground provider session while its request is waiting.
 	 * `customSystemPrompt` swaps the title prompt for special-purpose titling
@@ -7437,6 +7437,11 @@ export class AgentSession {
 		);
 		if (await this.#sessionGenerationChanged(sessionGeneration)) return null;
 		return !titleSignal.aborted && this.sessionId === parentSessionId ? title : null;
+	}
+
+	/** Capture before generation to detect interruption or disposal of a title request. */
+	get titleGenerationSignal(): AbortSignal {
+		return this.#titleGenerationAbortController.signal;
 	}
 
 	async #refreshTitleAfterReplan(context: string, sessionId: string): Promise<void> {
@@ -7510,6 +7515,8 @@ export class AgentSession {
 		// auto-starting a fresh turn during cleanup.
 		this.#abortInProgress = true;
 		try {
+			this.#titleGenerationAbortController.abort();
+			if (!this.#isDisposed) this.#titleGenerationAbortController = new AbortController();
 			this.#abortAutolearnCapture();
 			for (const controller of this.#usagePreflightAbortControllers) controller.abort();
 			this.abortRetry();

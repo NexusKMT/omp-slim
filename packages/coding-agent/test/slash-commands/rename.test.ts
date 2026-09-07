@@ -241,7 +241,8 @@ for (const mode of ["TUI", "headless"] as const) {
 		}
 
 		it("does not rename a replacement session when an earlier generation completes", async () => {
-			const { session, sessionManager, execute } = createRuntime(mode);
+			const { session, sessionManager, execute, ctx, runtime } = createRuntime(mode);
+			const output = mode === "TUI" ? vi.spyOn(ctx, "showStatus") : vi.spyOn(runtime, "output");
 			const { started, response, generate } = deferTitle();
 			const pending = execute("/rename");
 			try {
@@ -258,6 +259,7 @@ for (const mode of ["TUI", "headless"] as const) {
 
 				expect(session.sessionName).toBeUndefined();
 				expect(sessionManager.getEntries()).toEqual(entries);
+				expect(output).not.toHaveBeenCalled();
 			} finally {
 				response.resolve(null);
 				await pending;
@@ -267,7 +269,8 @@ for (const mode of ["TUI", "headless"] as const) {
 		it("discards a pending rename after switching away and back to the same session", async () => {
 			const storage = new MemorySessionStorage();
 			const source = SessionManager.create("/tmp/rename-switch", "/sessions", storage);
-			const { session, sessionManager, execute } = createRuntime(mode, undefined, source);
+			const { session, sessionManager, execute, ctx, runtime } = createRuntime(mode, undefined, source);
+			const output = mode === "TUI" ? vi.spyOn(ctx, "showStatus") : vi.spyOn(runtime, "output");
 			await source.ensureOnDisk();
 			await source.flush();
 			const sourceFile = source.getSessionFile()!;
@@ -286,6 +289,7 @@ for (const mode of ["TUI", "headless"] as const) {
 				await pending;
 				expect(session.sessionName).toBeUndefined();
 				expect(sessionManager.getEntries()).toEqual(entries);
+				expect(output).not.toHaveBeenCalled();
 			} finally {
 				response.resolve(null);
 				await pending;
@@ -341,6 +345,34 @@ it("releases the RPC command while title inference runs in the background and pr
 	} finally {
 		response.resolve(null);
 		await dispatched;
+		await backgroundTask;
+	}
+});
+
+it("aborts a background RPC rename silently and allows a later rename", async () => {
+	const { session, runtime } = createRuntime("headless");
+	const { started, response, generate } = deferTitle();
+	const output = vi.spyOn(runtime, "output");
+	let backgroundTask: Promise<void> | undefined;
+	runtime.runCommandInBackground = task => {
+		backgroundTask = task();
+	};
+	try {
+		await executeAcpBuiltinSlashCommand("/rename", runtime);
+		await started.promise;
+		await session.abort();
+		expect(generate.mock.calls[0]?.[2]?.signal?.aborted).toBe(true);
+		response.resolve("Cancelled RPC title");
+		await backgroundTask;
+		expect(session.sessionName).toBeUndefined();
+		expect(output).not.toHaveBeenCalled();
+
+		generate.mockResolvedValue("Fresh RPC title");
+		await executeAcpBuiltinSlashCommand("/rename", runtime);
+		await backgroundTask;
+		expect(session.sessionName).toBe("Fresh RPC title");
+	} finally {
+		response.resolve(null);
 		await backgroundTask;
 	}
 });
