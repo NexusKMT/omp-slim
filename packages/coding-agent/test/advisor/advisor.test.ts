@@ -6402,5 +6402,32 @@ describe("advisor", () => {
 			expect(savedDoc?.maxNotesPerUpdate).toBe(3);
 			expect(savedDoc?.advisors).toEqual([{ name: "default", instructions: "custom" }]);
 		});
+
+		it("preserves top-level instructions while stripping the synthetic default advisor on save", async () => {
+			let savedDoc: WatchdogConfigDoc | undefined;
+			const overlay = new AdvisorConfigOverlayComponent(
+				{} as unknown as TUI,
+				{ ...deps },
+				"project",
+				{ instructions: "baseline rules", advisors: [] },
+				{
+					...callbacks,
+					save: async (_scope, doc) => {
+						savedDoc = doc;
+					},
+				},
+			);
+			overlay.render(200);
+			// Arrow down 4 times to "Save & apply" (advisor:0, add, shared, scope, save)
+			overlay.handleInput("\x1b[B");
+			overlay.handleInput("\x1b[B");
+			overlay.handleInput("\x1b[B");
+			overlay.handleInput("\x1b[B");
+			overlay.handleInput("\r");
+			await Promise.resolve();
+			expect(savedDoc).toBeDefined();
+			expect(savedDoc?.instructions).toBe("baseline rules");
+			expect(savedDoc?.advisors).toEqual([]);
+		});
 	});
 });

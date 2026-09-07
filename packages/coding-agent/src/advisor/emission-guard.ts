@@ -101,6 +101,8 @@ const DEFAULT_HISTORY_CAPACITY = 4096;
 /** Maximum non-blocker advise notes allowed per update cycle across all configurations. */
 export const ADVISOR_MAX_BUDGET_PER_UPDATE = 32;
 
+/** Default non-blocker advise notes allowed per update cycle when unspecified. */
+export const ADVISOR_DEFAULT_BUDGET_PER_UPDATE = 4;
 /** Why an advisor note was accepted or rejected by the emission policy. */
 export type AdvisorEmissionDecision = "accepted" | "duplicate" | "rate_limited" | "suppressed_noise";
 /**
@@ -132,7 +134,7 @@ export class AdvisorEmissionGuard {
 		this.#budgetPerUpdate =
 			typeof budget === "number" && Number.isFinite(budget)
 				? Math.min(ADVISOR_MAX_BUDGET_PER_UPDATE, Math.max(1, Math.trunc(budget)))
-				: 4;
+				: ADVISOR_DEFAULT_BUDGET_PER_UPDATE;
 	}
 
 	/**
