@@ -828,11 +828,16 @@ const streamOpenAICompletionsOnce = (
 					attemptedReasoningEffortFallbacks.add(retryMarker);
 					requestReasoningEffortFallbacks.set(activeReasoningEffortFallbackKey, reasoningEffortFallback);
 					openaiStream = await createCompletionsStream();
-					rememberOpenAIReasoningEffortFallback(
-						providerSessionState,
-						activeReasoningEffortFallbackKey,
-						reasoningEffortFallback,
-					);
+					// Explicit-disable fallbacks stay per-request so a reasoning-off
+					// side request cannot downgrade later normal turns sharing
+					// the session state.
+					if (!(options?.disableReasoning === true && options.reasoning === undefined)) {
+						rememberOpenAIReasoningEffortFallback(
+							providerSessionState,
+							activeReasoningEffortFallbackKey,
+							reasoningEffortFallback,
+						);
+					}
 				} else if (
 					model.compat.retryWithoutStrictOnGrammarError &&
 					!disableStrictTools &&

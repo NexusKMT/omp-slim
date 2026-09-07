@@ -104,6 +104,27 @@ describe("github copilot model limits mapping", () => {
 		expect(models).toEqual([]);
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
+	it("drops cross-provider wire routing from enterprise-only sibling ids", async () => {
+		const { models } = await discoverCopilotModels({
+			data: [
+				{
+					id: "gpt-5.6-sol-fast",
+					name: "GPT-5.6 Sol Fast (Internal only)",
+					capabilities: {
+						type: "chat",
+						limits: { max_context_window_tokens: 1_050_000, max_output_tokens: 128_000 },
+					},
+				},
+			],
+		});
+		const sol = models.find(m => m.id === "gpt-5.6-sol-fast");
+		expect(sol?.api).toBe("openai-responses");
+		// The global fallback reference is the Cursor collapsed family; its
+		// off-tier requestModelId pin and effort routing must not transfer or
+		// every request goes out as gpt-5.6-sol-none-fast regardless of effort.
+		expect(sol).not.toHaveProperty("requestModelId");
+		expect(sol?.thinking?.effortRouting).toBeUndefined();
+	});
 	it("does not reuse another token's authoritative cache after COPILOT_GITHUB_TOKEN switches", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-ai-copilot-token-switch-"));
 		const cacheDbPath = path.join(tempDir, "models.db");

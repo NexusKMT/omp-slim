@@ -476,6 +476,43 @@ describe("OpenAI reasoning effort fallback retry", () => {
 		expect(bodies.map(body => (body.reasoning as { effort?: string } | undefined)?.effort)).toEqual(["none", "low"]);
 	});
 
+	it("does not leak an explicit-disable fallback into later normal turns", async () => {
+		const bodies: Record<string, unknown>[] = [];
+		const providerSessionState = new Map<string, ProviderSessionState>();
+		const fetchMock: FetchImpl = Object.assign(
+			async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+				const body = parseJsonBody(init);
+				bodies.push(body);
+				const effort = (body.reasoning as { effort?: string } | undefined)?.effort;
+				if (effort === "none") return copilotUnsupportedValueResponse("none", "gpt-6-astra");
+				return createResponsesSseResponse();
+			},
+			{ preconnect: fetch.preconnect },
+		);
+
+		const off = await streamOpenAIResponses(createMaxLadderResponsesModel(), testContext, {
+			apiKey: "test-key",
+			fetch: fetchMock,
+			reasoning: "high",
+			forceReasoningOff: true,
+			providerSessionState,
+		}).result();
+		expect(off.stopReason).toBe("stop");
+
+		const normal = await streamOpenAIResponses(createMaxLadderResponsesModel(), testContext, {
+			apiKey: "test-key",
+			fetch: fetchMock,
+			reasoning: "high",
+			providerSessionState,
+		}).result();
+		expect(normal.stopReason).toBe("stop");
+		expect(bodies.map(body => (body.reasoning as { effort?: string } | undefined)?.effort)).toEqual([
+			"none",
+			"low",
+			"high",
+		]);
+	});
+
 	it("does not retry a Supported-values rejection aimed at another field", async () => {
 		let attempts = 0;
 		const fetchMock: FetchImpl = Object.assign(
