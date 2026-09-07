@@ -114,6 +114,11 @@ describe("github copilot model limits mapping", () => {
 						type: "chat",
 						limits: { max_context_window_tokens: 1_050_000, max_output_tokens: 128_000 },
 					},
+					billing: {
+						token_prices: {
+							default: { context_max: 200_000, input_price: 234, output_price: 1234, cache_price: 56 },
+						},
+					},
 				},
 			],
 		});
@@ -123,7 +128,13 @@ describe("github copilot model limits mapping", () => {
 		// off-tier requestModelId pin and effort routing must not transfer or
 		// every request goes out as gpt-5.6-sol-none-fast regardless of effort.
 		expect(sol).not.toHaveProperty("requestModelId");
-		expect(sol?.thinking?.effortRouting).toBeUndefined();
+		// The discovered default-tier prices still apply on the reference branch.
+		expect(sol?.cost).toMatchObject({ input: 2.34, output: 12.34, cacheRead: 0.56 });
+		// The strip must not mutate the shared bundled Cursor entry the global
+		// reference points at: it keeps its routing for Cursor consumers.
+		expect(getBundledModels("cursor").find(m => m.id === "gpt-5.6-sol-fast")?.thinking?.effortRouting).toMatchObject({
+			off: "gpt-5.6-sol-none-fast",
+		});
 	});
 	it("does not reuse another token's authoritative cache after COPILOT_GITHUB_TOKEN switches", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-ai-copilot-token-switch-"));

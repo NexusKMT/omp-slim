@@ -6388,9 +6388,19 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 						// regardless of thinking level.
 						if (reference && reference.provider !== "github-copilot") {
 							delete base.requestModelId;
-							if (base.thinking) delete base.thinking.effortRouting;
+							if (base.thinking) {
+								// `base` is a shallow copy of the shared global
+								// reference: clone before deleting or the bundled
+								// entry loses its routing process-wide.
+								base.thinking = { ...base.thinking };
+								delete base.thinking.effortRouting;
+							}
 						}
 						const defaultCost = copilotTierCost(tokenPrices.defaultTier);
+						if (defaultCost) {
+							// Cache writes are not reported per tier; retain the bundled provider rate.
+							base.cost = { ...defaultCost, cacheWrite: base.cost.cacheWrite };
+						}
 						const variant = createCopilotLongContextVariant(
 							base,
 							contextWindow,
