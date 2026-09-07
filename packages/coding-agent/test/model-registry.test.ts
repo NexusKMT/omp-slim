@@ -1762,6 +1762,29 @@ describe("ModelRegistry", () => {
 			expect(registry.find("openai-codex", "gpt-6-astra")?.contextWindow).toBe(922_000);
 		});
 
+		test("clamps a cached Astra row already carrying the applied override", async () => {
+			writeRawModelsJson({
+				"openai-codex": { modelOverrides: { "gpt-6-astra": { contextWindow: 2_000_000 } } },
+			});
+			const testSettings = Settings.isolated({ extendedContext: true });
+			const registry = new ModelRegistry(authStorage, modelsJsonPath, { settings: testSettings });
+			const astra = registry.find("openai-codex", "gpt-6-astra");
+			if (!astra) throw new Error("Expected bundled Astra model");
+			// Wire-value row, as discovery persists it; the cache loader
+			// applies the models.yml override before composition sees it, so
+			// the clamp must hold on every override pass, not just the last.
+			writeModelCache(
+				"openai-codex",
+				Date.now(),
+				[{ ...astra, contextWindow: 272_000, maxContextWindow: 872_000 }],
+				true,
+				"",
+				path.join(tempDir, "models.db"),
+			);
+			await registry.reapplyModelPolicies();
+			expect(registry.find("openai-codex", "gpt-6-astra")?.contextWindow).toBe(922_000);
+		});
+
 		test("restores the opt-in for cached Astra and worker rows with stale or invalid maxima", async () => {
 			const testSettings = Settings.isolated();
 			const registry = new ModelRegistry(authStorage, modelsJsonPath, { settings: testSettings });

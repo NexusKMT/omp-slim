@@ -1999,7 +1999,7 @@ export class ModelRegistry {
 		return models.map(model => {
 			const override = resolveModelOverrideWithAliases(overrides, model, hasLiveModel);
 			if (!override) return model;
-			return applyModelOverride(model, override);
+			return this.#applyModelOverrideWithClamp(model, override);
 		});
 	}
 
@@ -2129,24 +2129,33 @@ export class ModelRegistry {
 			if (!providerOverrides) return model;
 			const override = resolveModelOverrideWithAliases(providerOverrides, model, hasLiveModel);
 			if (!override) return model;
-			const overridden = applyModelOverride(model, override);
-			// KDL-owned override ceiling (`clamp-context-override`, mirroring
-			// openai/codex `with_config_overrides`): an explicit context window
-			// clamps to the server-honored maximum instead of widening without
-			// bound. Base catalog windows are untouched — upstream only clamps
-			// config overrides.
-			if (
-				override.contextWindow === undefined ||
-				overridden.contextWindow === null ||
-				!clampsContextOverride(overridden)
-			) {
-				return overridden;
-			}
-			const clamped = clampCodexContextWindow(model, overridden.contextWindow);
-			if (clamped === overridden.contextWindow) return overridden;
-			return applyModelOverride(overridden, { contextWindow: clamped });
+			return this.#applyModelOverrideWithClamp(model, override);
 		});
 	}
+
+	/**
+	 * Applies one explicit model override, clamping KDL-governed
+	 * (`clamp-context-override`) context windows to the server-honored maximum
+	 * instead of widening without bound — mirroring openai/codex
+	 * `with_config_overrides`. `model` is the pre-override row, so the ceiling
+	 * never shrinks the request below the window that already works. Shared by
+	 * every override pass (cache load and composition): overrides apply on
+	 * both, so the clamp must hold on both.
+	 */
+	#applyModelOverrideWithClamp(model: Model<Api>, override: ModelOverride): Model<Api> {
+		const overridden = applyModelOverride(model, override);
+		if (
+			override.contextWindow === undefined ||
+			overridden.contextWindow === null ||
+			!clampsContextOverride(overridden)
+		) {
+			return overridden;
+		}
+		const clamped = clampCodexContextWindow(model, overridden.contextWindow);
+		if (clamped === overridden.contextWindow) return overridden;
+		return applyModelOverride(overridden, { contextWindow: clamped });
+	}
+
 	#applyHardcodedModelPolicies(models: Model<Api>[]): Model<Api>[] {
 		const extendedContext = isExtendedContextEnabledFromSettings(this.#settings);
 		return models.map(model => {
