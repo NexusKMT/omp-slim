@@ -161,6 +161,28 @@ it("releases progress listeners after repeated warm-model renames with no progre
 	}
 });
 
+it("cancels title inference without applying or announcing a late rename", async () => {
+	const { session, sessionManager, runtime, execute } = createRuntime("headless");
+	await sessionManager.setSessionName("Keep this title", "user");
+	const controller = new AbortController();
+	runtime.signal = controller.signal;
+	const output = vi.spyOn(runtime, "output");
+	const { started, response, generate } = deferTitle();
+	const pending = execute("/rename");
+	try {
+		await Promise.race([started.promise, pending]);
+		controller.abort();
+		expect(generate.mock.calls[0]?.[2]?.signal?.aborted).toBe(true);
+		response.resolve("Late cancelled title");
+		await pending;
+		expect(session.sessionName).toBe("Keep this title");
+		expect(output).not.toHaveBeenCalled();
+	} finally {
+		response.resolve(null);
+		await pending;
+	}
+});
+
 for (const mode of ["TUI", "headless"] as const) {
 	describe(`/rename (${mode})`, () => {
 		it("replaces a manual title from conversation context and protects the result from automatic titles", async () => {

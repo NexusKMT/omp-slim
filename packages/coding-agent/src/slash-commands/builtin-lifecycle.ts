@@ -38,7 +38,7 @@ function formatFreshSessionResult(result: FreshSessionResult): string {
 	return `Fresh provider session started (${result.closedProviderSessions} ${stateLabel} pruned).`;
 }
 
-async function generateRenameTitle(session: AgentSession): Promise<string | null> {
+async function generateRenameTitle(session: AgentSession, signal?: AbortSignal): Promise<string | null> {
 	const { sessionManager } = session;
 	const revision = sessionManager.reserveTitleRevision();
 	const context = buildReplanTitleContext(session.messages);
@@ -46,7 +46,7 @@ async function generateRenameTitle(session: AgentSession): Promise<string | null
 	const sessionId = sessionManager.getSessionId();
 	const cleanupProgress = session.notifyTitleGenerationStart();
 	try {
-		const title = await session.generateTitle(context);
+		const title = await session.generateTitle(context, undefined, signal);
 		return sessionManager.getSessionId() === sessionId && sessionManager.titleRevision === revision ? title : null;
 	} finally {
 		cleanupProgress?.();
@@ -650,8 +650,8 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 		handle: async (command, runtime) => {
 			const session = runtime.session;
 			const runRename = async (): Promise<void> => {
-				const title = command.args || (await generateRenameTitle(session));
-				if (runtime.session !== session) return;
+				const title = command.args || (await generateRenameTitle(session, runtime.signal));
+				if (runtime.session !== session || runtime.signal?.aborted) return;
 				if (!title) {
 					await runtime.output("Could not generate a session title. Use /rename <title> to set one.");
 					return;

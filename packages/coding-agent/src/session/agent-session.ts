@@ -7412,10 +7412,18 @@ export class AgentSession {
 	 * `customSystemPrompt` swaps the title prompt for special-purpose titling
 	 * (e.g. plan-save filename topics) without touching the session override.
 	 */
-	async generateTitle(firstMessage: string, customSystemPrompt?: string): Promise<string | null> {
+	async generateTitle(
+		firstMessage: string,
+		customSystemPrompt?: string,
+		signal?: AbortSignal,
+	): Promise<string | null> {
 		const parentSessionId = this.sessionId;
 		const sessionGeneration = this.#sessionGeneration;
 		const sessionId = this.#resolveTitleProviderSessionId(parentSessionId);
+		const titleSignal = signal
+			? AbortSignal.any([signal, this.#titleGenerationAbortController.signal])
+			: this.#titleGenerationAbortController.signal;
+		if (titleSignal.aborted) return null;
 		const title = await generateSessionTitle(
 			firstMessage,
 			this.#modelRegistry,
@@ -7424,11 +7432,11 @@ export class AgentSession {
 			this.model,
 			provider => buildSessionMetadata(sessionId, provider, this.#modelRegistry.authStorage),
 			customSystemPrompt ?? this.#titleSystemPrompt,
-			this.#titleGenerationAbortController.signal,
+			titleSignal,
 			parentSessionId,
 		);
 		if (await this.#sessionGenerationChanged(sessionGeneration)) return null;
-		return this.sessionId === parentSessionId ? title : null;
+		return !titleSignal.aborted && this.sessionId === parentSessionId ? title : null;
 	}
 
 	async #refreshTitleAfterReplan(context: string, sessionId: string): Promise<void> {
