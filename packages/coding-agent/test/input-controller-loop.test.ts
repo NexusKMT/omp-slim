@@ -1,0 +1,89 @@
+import { describe, expect, it, vi } from "bun:test";
+import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
+import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+
+function createLoopContext(options: { isStreaming: boolean; onInputCallback?: (...args: never[]) => void }) {
+	let loopPrompt: string | undefined = "original loop prompt";
+	const setLoopPrompt = vi.fn((prompt: string) => {
+		loopPrompt = prompt;
+	});
+	const prompt = vi.fn(async () => {});
+	const editor = {
+		pendingImages: [],
+		pendingImageLinks: [],
+		imageLinks: undefined,
+		addToHistory: vi.fn(),
+		setText: vi.fn(),
+		getText: () => "",
+		getExpandedText: () => "",
+		clearDraft: vi.fn(),
+		setCollapsedText: vi.fn(),
+	} as unknown as InteractiveModeContext["editor"];
+	const ctx = {
+		editor,
+		ui: { requestRender: vi.fn() },
+		session: {
+			isStreaming: options.isStreaming,
+			isCompacting: false,
+			isBashRunning: false,
+			isEvalRunning: false,
+			queuedMessageCount: 0,
+			extensionRunner: undefined,
+			customCommands: [],
+			promptTemplates: [],
+			prompt,
+			maybeStartTitleGeneration: vi.fn(),
+		},
+		sessionManager: { putBlob: vi.fn() },
+		loopModeEnabled: true,
+		get loopPrompt() {
+			return loopPrompt;
+		},
+		set loopPrompt(value: string | undefined) {
+			loopPrompt = value;
+		},
+		setLoopPrompt,
+		flushPendingBashComponents: vi.fn(),
+		startPendingSubmission: vi.fn((input: { text: string }) => ({ ...input, cancelled: false, started: false })),
+		withLocalSubmission: async (_text: string, fn: () => unknown) => fn(),
+		updatePendingMessagesDisplay: vi.fn(),
+		updateEditorBorderColor: vi.fn(),
+		showError: vi.fn(),
+		onInputCallback: options.onInputCallback,
+		skillCommands: new Map(),
+		fileSlashCommands: new Set<string>(),
+		isBashMode: false,
+		isPythonMode: false,
+		focusedAgentId: undefined,
+		compactionQueuedMessages: [],
+		locallySubmittedUserSignatures: new Set<string>(),
+	} as unknown as InteractiveModeContext;
+	return { ctx, editor, setLoopPrompt, prompt, getLoopPrompt: () => loopPrompt };
+}
+
+describe("loop mode interjections", () => {
+	it("keeps the original loop prompt when steering mid-turn", async () => {
+		const { ctx, setLoopPrompt, prompt, getLoopPrompt } = createLoopContext({ isStreaming: true });
+		const controller = new InputController(ctx);
+		controller.setupEditorSubmitHandler();
+
+		await ctx.editor.onSubmit?.("one-off correction");
+
+		// One-off steer reaches the session but must not replace the loop body.
+		expect(prompt).toHaveBeenCalledTimes(1);
+		expect(setLoopPrompt).not.toHaveBeenCalled();
+		expect(getLoopPrompt()).toBe("original loop prompt");
+	});
+
+	it("adopts an idle submission as the new loop prompt", async () => {
+		const onInputCallback = vi.fn();
+		const { ctx, setLoopPrompt } = createLoopContext({ isStreaming: false, onInputCallback });
+		const controller = new InputController(ctx);
+		controller.setupEditorSubmitHandler();
+
+		await ctx.editor.onSubmit?.("new loop body");
+
+		expect(setLoopPrompt).toHaveBeenCalledWith("new loop body");
+		expect(onInputCallback).toHaveBeenCalledTimes(1);
+	});
+});

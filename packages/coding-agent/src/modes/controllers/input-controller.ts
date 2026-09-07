@@ -909,12 +909,6 @@ export class InputController {
 				}
 			}
 
-			// While loop mode is on, every user-typed prompt becomes the new loop
-			// prompt that auto-resubmits after each yield.
-			if (this.ctx.loopModeEnabled) {
-				this.ctx.setLoopPrompt(text);
-			}
-
 			// Queue input during compaction
 			if (this.ctx.session.isCompacting) {
 				const images = inputImages && inputImages.length > 0 ? [...inputImages] : undefined;
@@ -980,6 +974,13 @@ export class InputController {
 			}
 
 			// Normal message submission
+			// While loop mode is on, an idle user-typed prompt becomes the new loop
+			// prompt that auto-resubmits after each yield. This sits after the
+			// compaction, extension-command, and streaming-steer early returns so
+			// those one-off inputs never replace the loop body.
+			if (this.ctx.loopModeEnabled) {
+				this.ctx.setLoopPrompt(text);
+			}
 			// First, move any pending bash components to chat
 			this.ctx.flushPendingBashComponents();
 
