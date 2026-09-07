@@ -827,11 +827,6 @@ export class InputController {
 					// "/loop 10 fix bug" rather than just "fix bug".
 					if (!shouldSkipHistory(text)) this.ctx.editor.addToHistory(text);
 					text = slashResult;
-					// An inline `/loop` prompt must stick even when the streaming
-					// or compaction branches below return early: otherwise the
-					// prompt is sent once as a steer while loopPrompt stays unset
-					// and loop mode idles instead of repeating it.
-					if (submittedMode === "loop") this.ctx.setLoopPrompt(text);
 				}
 			}
 
@@ -918,8 +913,10 @@ export class InputController {
 			if (this.ctx.session.isCompacting) {
 				const images = inputImages && inputImages.length > 0 ? [...inputImages] : undefined;
 				this.ctx.queueCompactionMessage(text, "steer", images);
+				if (submittedMode === "loop") this.ctx.setLoopPrompt(text);
 				return;
 			}
+
 			// Extension commands are local actions. Execute them before the normal
 			// submission path creates an optimistic user message; otherwise a
 			// consumed command remains rendered like a prompt sent to the model.
@@ -940,6 +937,13 @@ export class InputController {
 				}
 				return;
 			}
+
+			// An inline `/loop` body arms the loop only after surviving
+			// local-command dispatch: a body like `!echo hi` is consumed by its
+			// command branch without submitting a turn, and recording it would
+			// report a running loop that never starts. (The compaction branch
+			// above arms separately so queued bodies keep the explicit prompt.)
+			if (submittedMode === "loop") this.ctx.setLoopPrompt(text);
 
 			// If streaming, use prompt() with steer behavior
 			// This handles extension commands (execute immediately), prompt template expansion, and queueing

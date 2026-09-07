@@ -53,6 +53,7 @@ function createLoopContext(options: {
 		withLocalSubmission: async (_text: string, fn: () => unknown) => fn(),
 		updatePendingMessagesDisplay: vi.fn(),
 		updateEditorBorderColor: vi.fn(),
+		handleBashCommand: vi.fn(),
 		queueCompactionMessage: vi.fn(),
 		onInputCallback: options.onInputCallback,
 		skillCommands: new Map(),
@@ -70,6 +71,7 @@ function createLoopContext(options: {
 		prompt,
 		getLoopPrompt: () => loopPrompt,
 		queueCompactionMessage: ctx.queueCompactionMessage as Spy,
+		handleBashCommand: ctx.handleBashCommand as Spy,
 	};
 }
 
@@ -130,5 +132,20 @@ describe("loop mode interjections", () => {
 		expect(setLoopPrompt).toHaveBeenCalledWith("compact loop body");
 		expect(getLoopPrompt()).toBe("compact loop body");
 		expect(queueCompactionMessage).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not arm the loop when the inline body is a local command", async () => {
+		const { ctx, setLoopPrompt, getLoopPrompt, handleBashCommand } = createLoopContext({ isStreaming: false });
+		// Mirror handleLoopCommand: enabling loop mode hands the inline body
+		// back to the dispatcher, where the bash branch consumes it.
+		(ctx as unknown as Record<string, unknown>).handleLoopCommand = vi.fn(async () => "!echo hi");
+		const controller = new InputController(ctx);
+		controller.setupEditorSubmitHandler();
+
+		await ctx.editor.onSubmit?.("/loop 3 !echo hi");
+
+		expect(handleBashCommand).toHaveBeenCalledWith("echo hi", false);
+		expect(setLoopPrompt).not.toHaveBeenCalled();
+		expect(getLoopPrompt()).toBe("original loop prompt");
 	});
 });
