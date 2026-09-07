@@ -52,6 +52,20 @@ describe("Cursor requestedModel wire shape", () => {
 		]);
 	});
 
+	it("normalizes an off-tier sibling to the base id with no parameters", async () => {
+		const payload = await capture(cursorModel("gpt-5.6-sol-none"));
+		expect(payload.requestedModel?.modelId).toBe("gpt-5.6-sol");
+		expect(payload.requestedModel?.parameters).toEqual([]);
+		expect(payload.modelDetails?.modelId).toBe("gpt-5.6-sol");
+	});
+
+	it("normalizes a fast-lane off-tier sibling preserving the lane", async () => {
+		const payload = await capture(cursorModel("gpt-5.6-sol-none-fast"));
+		expect(payload.requestedModel?.modelId).toBe("gpt-5.6-sol-fast");
+		expect(payload.requestedModel?.parameters).toEqual([]);
+		expect(payload.modelDetails?.modelId).toBe("gpt-5.6-sol-fast");
+	});
+
 	it("leaves Cursor-native ids untouched with no parameters", async () => {
 		const payload = await capture(cursorModel("cursor-composer-2.5"));
 		expect(payload.requestedModel?.modelId).toBe("cursor-composer-2.5");

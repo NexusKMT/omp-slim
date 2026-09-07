@@ -120,6 +120,21 @@ function unsupportedLevelResponse(value: string): Response {
 	});
 }
 
+/**
+ * GitHub Copilot-style rejection: the field is never named and the allowed
+ * list is phrased as `Supported values are: …` (e.g. gpt-6-astra refusing
+ * `reasoning.effort: "none"`).
+ */
+function copilotUnsupportedValueResponse(value: string, modelId: string): Response {
+	const message =
+		`Unsupported value: '${value}' is not supported with the '${modelId}' model. ` +
+		`Supported values are: 'low', 'medium', 'high', 'xhigh', and 'max'.`;
+	return new Response(JSON.stringify({ error: { message, type: "invalid_request_body" } }), {
+		status: 400,
+		headers: { "content-type": "application/json" },
+	});
+}
+
 function summaryReasoningErrorResponse(): Response {
 	return new Response(
 		JSON.stringify({
@@ -409,6 +424,30 @@ describe("OpenAI reasoning effort fallback retry", () => {
 				const body = parseJsonBody(init);
 				bodies.push(body);
 				return bodies.length === 1 ? unsupportedLevelResponse("none") : createResponsesSseResponse();
+			},
+			{ preconnect: fetch.preconnect },
+		);
+
+		const result = await streamOpenAIResponses(createMaxLadderResponsesModel(), testContext, {
+			apiKey: "test-key",
+			fetch: fetchMock,
+			reasoning: "high",
+			forceReasoningOff: true,
+		}).result();
+
+		expect(result.stopReason).toBe("stop");
+		expect(bodies.map(body => (body.reasoning as { effort?: string } | undefined)?.effort)).toEqual(["none", "low"]);
+	});
+
+	it("clamps a Copilot Supported-values rejection of reasoning-off to the lowest allowed level", async () => {
+		const bodies: Record<string, unknown>[] = [];
+		const fetchMock: FetchImpl = Object.assign(
+			async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+				const body = parseJsonBody(init);
+				bodies.push(body);
+				return bodies.length === 1
+					? copilotUnsupportedValueResponse("none", "gpt-6-astra")
+					: createResponsesSseResponse();
 			},
 			{ preconnect: fetch.preconnect },
 		);

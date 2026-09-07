@@ -183,9 +183,11 @@ function collectMessageParts(error: unknown, captured: CapturedHttpErrorResponse
  * Text that identifies a 400 as being about the reasoning-effort field.
  * OpenAI-compatible gateways (cliproxy, …) never name the field — they reject
  * the value alone with `level "none" not supported, valid levels: low, …` — so
- * the allowed-level phrasing counts as a mention too.
+ * the allowed-level phrasing counts as a mention too. GitHub Copilot phrases
+ * the same rejection with `Supported values are: …`, so value lists count too.
  */
-const REASONING_EFFORT_FIELD_PATTERN = /reasoning[_. ]effort|reasoning value|(?:valid|supported|allowed) levels?/i;
+const REASONING_EFFORT_FIELD_PATTERN =
+	/reasoning[_. ]effort|reasoning value|(?:valid|supported|allowed) (?:levels?|values?)/i;
 
 function mentionsReasoningEffort(error: unknown, captured: CapturedHttpErrorResponse | undefined): boolean {
 	const param = capturedStringField(captured, "param");

@@ -5237,7 +5237,9 @@ function extractImages(content: (TextContent | ImageContent)[]) {
  * `resource_exhausted` (errorId 528384); the official `cursor-agent` splits the
  * slug into its base model id plus a `reasoning` effort parameter. Mirror that
  * for OpenAI-family ids: strip a trailing effort tier and emit
- * `{ id: "reasoning", value: <effort> }`.
+ * `{ id: "reasoning", value: <effort> }`. The off tier (`-none`) is a sibling
+ * slug too, so it normalizes to the bare (lane-preserving) base with no
+ * reasoning parameter instead of going out raw.
  *
  * Non-OpenAI ids pass through unchanged — Cursor-native ids (`composer-*`,
  * `cursor-grok-*`, `default`) carry no effort suffix, and Claude/other siblings
@@ -5257,19 +5259,21 @@ function resolveCursorWireModel(
 	if (wireMode === "discovered") return { modelId: wireModelId, parameters: [] };
 	// Cursor's fast lane follows the effort token (`-high-fast`), while the
 	// standard lane ends at it (`-high`). Preserve the lane in the base id.
-	const match = /^(.*)-(minimal|low|medium|high|xhigh|max)(-fast)?$/.exec(wireModelId);
+	const match = /^(.*)-(none|extra-high|minimal|low|medium|high|xhigh|max)(-fast)?$/.exec(wireModelId);
 	const base = match?.[1];
-	const effort = match?.[2];
-	if (
-		base &&
-		effort &&
-		(THINKING_EFFORTS as readonly string[]).includes(effort) &&
-		classifyModel("cursor", base).class === "openai"
-	) {
-		return {
-			modelId: `${base}${match[3] ?? ""}`,
-			parameters: [create(RequestedModel_ModelParameterbytesSchema, { id: "reasoning", value: effort })],
-		};
+	const tier = match?.[2];
+	const lane = match?.[3] ?? "";
+	if (base && tier && classifyModel("cursor", base).class === "openai") {
+		if (tier === "none") {
+			return { modelId: `${base}${lane}`, parameters: [] };
+		}
+		const effort = tier === "extra-high" ? "xhigh" : tier;
+		if ((THINKING_EFFORTS as readonly string[]).includes(effort)) {
+			return {
+				modelId: `${base}${lane}`,
+				parameters: [create(RequestedModel_ModelParameterbytesSchema, { id: "reasoning", value: effort })],
+			};
+		}
 	}
 	// A bare `composer-2.5` id resolves to the Fast variant server-side
 	// (can1357/oh-my-pi#9012). Pin the Standard tier explicitly; `-fast`
