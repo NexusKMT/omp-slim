@@ -443,11 +443,12 @@ export function detectStyledUnderlineSupport(terminalId: TerminalId, env: NodeJS
 		case "wezterm":
 			return true;
 		case "iterm2": {
-			// iTerm2 gained styled underlines in 3.0; 2.x never did. Detection via
-			// ITERM_SESSION_ID can arrive without a version (e.g. through tmux) —
-			// every shipping iTerm2 is 3.x, so an absent version is treated as capable.
+			// iTerm2 gained styled underlines in 3.0; 2.x never did. Enable only on a
+			// confirmed major >= 3: an absent or unparseable version (e.g. a 2.x
+			// session whose TERM_PROGRAM_VERSION was dropped through tmux) keeps the
+			// flat-underline fallback so only proven terminals get the colon form.
 			const version = parseMajorMinorVersion(env.TERM_PROGRAM_VERSION);
-			return !version || version.major >= 3;
+			return version !== null && version.major >= 3;
 		}
 		default:
 			return false;

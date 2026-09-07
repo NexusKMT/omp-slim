@@ -576,9 +576,9 @@ describe("detectStyledUnderlineSupport", () => {
 		expect(detectStyledUnderlineSupport("orca")).toBe(false);
 	});
 
-	it("gates iTerm2 on major version >= 3 but treats an absent version as capable", () => {
+	it("enables iTerm2 only on a confirmed major version >= 3, else flat fallback", () => {
 		expect(detectStyledUnderlineSupport("iterm2", { TERM_PROGRAM_VERSION: "2.1.4" })).toBe(false);
 		expect(detectStyledUnderlineSupport("iterm2", { TERM_PROGRAM_VERSION: "3.5.0" })).toBe(true);
-		expect(detectStyledUnderlineSupport("iterm2", {})).toBe(true);
+		expect(detectStyledUnderlineSupport("iterm2", {})).toBe(false);
 	});
 });
