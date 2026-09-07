@@ -284,6 +284,8 @@ async function runIpcSubprocessWorker<In, Out>(
 	// there's no one to talk to.
 	const ipcSend = (): IpcSend | undefined => (process as NodeJS.Process & { send?: IpcSend }).send;
 	if (!ipcSend()) {
+		// Intentional fall-through: shutdown() only resolves the promise;
+		// the await + SIGKILL tail below is what actually exits.
 		shutdown();
 	}
 	const send = (message: Out): void => {
@@ -330,14 +332,30 @@ async function runIpcSubprocessWorker<In, Out>(
 	if (process.platform === "win32" && initialParentPid <= 0) {
 		shutdown();
 	} else if (initialParentPid > 0) {
+		let nativesAvailable = false;
 		let parentProcess: Process | null = null;
 		let runningStatus: ProcessStatus | undefined;
 		try {
-			const natives = await import("@oh-my-pi/pi-natives");
-			parentProcess = natives.Process.fromPid(initialParentPid);
-			runningStatus = natives.ProcessStatus.Running;
+			if (!process.env.PI_TEST_NO_NATIVES) {
+				const natives = await import("@oh-my-pi/pi-natives");
+				nativesAvailable = true;
+				parentProcess = natives.Process.fromPid(initialParentPid);
+				runningStatus = natives.ProcessStatus.Running;
+			}
 		} catch {}
 
+		// If the native addon is available and Process.fromPid returned null,
+		// the parent process handle could not be opened because the parent has
+		// already terminated. Treat null as dead at boot to prevent PID reuse.
+		if (nativesAvailable && !parentProcess) {
+			shutdown();
+		}
+
+		// Note on container environments (Docker/Kubernetes): omp often runs as
+		// PID 1, so workers start with process.ppid === 1. Treating ppid <= 1 as
+		// an orphan at boot would break containerized workers. Instead, we allow
+		// PID 1 to boot normally and detect post-spawn reparenting dynamically via
+		// `process.ppid !== initialParentPid`.
 		const isParentAlive = (): boolean => {
 			if (process.ppid !== initialParentPid) {
 				return false;

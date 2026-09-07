@@ -93,6 +93,78 @@ describe("worker selector dispatch", () => {
 		}
 		expect(running).toBe(false);
 	});
+
+	it("reaps orphaned IPC worker using fallback watchdog when native process handles are unavailable", async () => {
+		const repoRoot = path.resolve(__dirname, "../../..");
+		const parent = Bun.spawn({
+			cmd: [
+				process.execPath,
+				"-e",
+				`
+				const child = Bun.spawn({
+					cmd: [process.execPath, "packages/coding-agent/src/cli.ts", "__omp_worker_js_eval_process"],
+					cwd: ${JSON.stringify(repoRoot)},
+					env: { ...process.env, PI_TEST_NO_NATIVES: "1" },
+					ipc(msg) {},
+					serialization: "advanced",
+					windowsHide: true,
+					stdin: "ignore",
+					stdout: "ignore",
+					stderr: "ignore",
+				});
+				console.log("CHILD_PID:" + child.pid);
+				setTimeout(() => process.exit(0), 500);
+				`,
+			],
+			cwd: repoRoot,
+			stdout: "pipe",
+		});
+
+		const text = await new Response(parent.stdout).text();
+		const match = text.match(/CHILD_PID:(\d+)/);
+		expect(match).not.toBeNull();
+		const childPid = Number(match?.[1]);
+		expect(childPid).toBeGreaterThan(0);
+
+		await parent.exited;
+
+		let running = isPidRunning(childPid);
+		for (let i = 0; i < 30 && running; i++) {
+			await Bun.sleep(100);
+			running = isPidRunning(childPid);
+		}
+		expect(running).toBe(false);
+	});
+
+	it("does not treat PID 1 as an immediate orphan at boot in container environments", async () => {
+		const repoRoot = path.resolve(__dirname, "../../..");
+		const childScript = `
+			Object.defineProperty(process, "ppid", { value: 1, configurable: true });
+			process.env.PI_TEST_NO_NATIVES = "1";
+			const originalKill = process.kill;
+			process.kill = (pid, sig) => {
+				if (pid === 1 && sig === 0) return true;
+				return originalKill.call(process, pid, sig);
+			};
+			const { runCli } = await import("./packages/coding-agent/src/cli.ts");
+			await runCli(["__omp_worker_js_eval_process"]);
+		`;
+
+		const child = Bun.spawn({
+			cmd: [process.execPath, "-e", childScript],
+			cwd: repoRoot,
+			ipc() {},
+			serialization: "advanced",
+			stdin: "ignore",
+			stdout: "ignore",
+			stderr: "ignore",
+		});
+
+		await Bun.sleep(400);
+		const alive = !child.killed && child.exitCode === null;
+		child.kill("SIGKILL");
+		expect(alive).toBe(true);
+	});
 });
 
 describe("computer worker entry", () => {
