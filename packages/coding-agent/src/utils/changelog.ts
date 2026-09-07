@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import { getLastChangelogVersionPath, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { isHr } from "@oh-my-pi/pi-utils/marked";
 import type { BunFile } from "bun";
 import bundledChangelogPath from "../../CHANGELOG.md" with { type: "file" };
 import type { SettingValue } from "../config/settings";
@@ -73,9 +74,6 @@ function changelogLineIndent(line: string): number {
 	return indent;
 }
 
-/** Thematic breaks (`* * *`, `- - -`) render as `hr`, never as list items — unless the run uses the open list's own marker, in which case the lexer keeps it as an item. Mirrors `isHr` plus the same-delimiter continuation in `parseList` (`packages/utils/src/marked/core.ts`). */
-const CHANGELOG_THEMATIC_BREAK = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/;
-
 /** A Markdown list bullet's indent columns and marker, or undefined when the line opens no list item. Tabs advance to the next 4-column stop. */
 function changelogBullet(line: string): { indent: number; marker: string } | undefined {
 	const match = line.match(/^([ \t]*)([-+*])[ \t]+\S/);
@@ -115,8 +113,8 @@ function summarizeChangelogEntries(entries: readonly ChangelogEntry[]): {
 				}
 				continue;
 			}
-			if (CHANGELOG_THEMATIC_BREAK.test(line) && bullet.marker !== listMarker) {
-				// Renders as `hr`, not a list item: ends the block when at or above the open
+			if (isHr(line) && bullet.marker !== listMarker) {
+				// Shared `hr` grammar with the renderer: ends the block when at or above the open
 				// indent. A deeper break is absorbed into the open item, so the block stays open.
 				if (listIndent === undefined || changelogLineIndent(line) <= listIndent) {
 					listIndent = undefined;
