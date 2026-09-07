@@ -38,6 +38,7 @@ import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { extractHttpStatusFromError, extractRetryHint, logger, prompt } from "@oh-my-pi/pi-utils";
 import {
 	ADVISOR_DEFAULT_TOOL_NAMES,
+	ADVISOR_MAX_BUDGET_PER_UPDATE,
 	AdviseTool,
 	type AdvisorAgent,
 	type AdvisorConfig,
@@ -621,15 +622,15 @@ export class SessionAdvisors {
 	#advisorMaxNotesPerUpdate(config?: AdvisorConfig): number {
 		const perAdvisor = config?.maxNotesPerUpdate;
 		if (typeof perAdvisor === "number" && Number.isFinite(perAdvisor) && perAdvisor >= 1) {
-			return Math.min(32, Math.trunc(perAdvisor));
+			return Math.min(ADVISOR_MAX_BUDGET_PER_UPDATE, Math.trunc(perAdvisor));
 		}
 		const shared = this.#advisorSharedMaxNotesPerUpdate;
 		if (typeof shared === "number" && Number.isFinite(shared) && shared >= 1) {
-			return Math.min(32, Math.trunc(shared));
+			return Math.min(ADVISOR_MAX_BUDGET_PER_UPDATE, Math.trunc(shared));
 		}
 		const setting = this.#host.settings.get("advisor.maxNotesPerUpdate") as number;
 		if (typeof setting === "number" && Number.isFinite(setting) && setting >= 1) {
-			return Math.min(32, Math.trunc(setting));
+			return Math.min(ADVISOR_MAX_BUDGET_PER_UPDATE, Math.trunc(setting));
 		}
 		return 4;
 	}

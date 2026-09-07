@@ -6349,7 +6349,7 @@ describe("advisor", () => {
 			expect(text).toContain("● on");
 		});
 
-		it("preserves top-level maxNotesPerUpdate without stripping to an empty roster on save", async () => {
+		it("preserves top-level maxNotesPerUpdate while stripping the synthetic default advisor on save", async () => {
 			let savedDoc: WatchdogConfigDoc | undefined;
 			const overlay = new AdvisorConfigOverlayComponent(
 				{} as unknown as TUI,
@@ -6373,8 +6373,34 @@ describe("advisor", () => {
 			await Promise.resolve();
 			expect(savedDoc).toBeDefined();
 			expect(savedDoc?.maxNotesPerUpdate).toBe(3);
-			expect(savedDoc?.advisors).toHaveLength(1);
-			expect(savedDoc?.advisors[0]?.name).toBe("default");
+			expect(savedDoc?.advisors).toEqual([]);
+		});
+
+		it("preserves customized default advisor and top-level maxNotesPerUpdate on save", async () => {
+			let savedDoc: WatchdogConfigDoc | undefined;
+			const overlay = new AdvisorConfigOverlayComponent(
+				{} as unknown as TUI,
+				{ ...deps },
+				"project",
+				{ maxNotesPerUpdate: 3, advisors: [{ name: "default", instructions: "custom" }] },
+				{
+					...callbacks,
+					save: async (_scope, doc) => {
+						savedDoc = doc;
+					},
+				},
+			);
+			overlay.render(200);
+			// Arrow down 4 times to "Save & apply" (advisor:0, add, shared, scope, save)
+			overlay.handleInput("\x1b[B");
+			overlay.handleInput("\x1b[B");
+			overlay.handleInput("\x1b[B");
+			overlay.handleInput("\x1b[B");
+			overlay.handleInput("\r");
+			await Promise.resolve();
+			expect(savedDoc).toBeDefined();
+			expect(savedDoc?.maxNotesPerUpdate).toBe(3);
+			expect(savedDoc?.advisors).toEqual([{ name: "default", instructions: "custom" }]);
 		});
 	});
 });
