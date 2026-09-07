@@ -6080,9 +6080,6 @@ const COPILOT_CACHE_INVALIDATED_MODEL_IDS = [
 	"grok-4.6",
 	"grok-4.6-1m",
 	"mai-code-1-flash-picker",
-	// Enterprise-only Cursor-family id: caches written before the
-	// cross-provider routing strip pin every request to `-none-fast`.
-	"gpt-5.6-sol-fast",
 ];
 
 function inferCopilotApi(modelId: string): Api {

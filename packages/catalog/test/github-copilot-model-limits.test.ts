@@ -524,7 +524,6 @@ describe("github copilot model limits mapping", () => {
 	it("refetches a cached enterprise sibling still pinned to -none-fast", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-ai-copilot-solfast-cache-"));
 		const cacheDbPath = path.join(tempDir, "models.db");
-		const cacheProviderId = "github-copilot-solfast-cache-test";
 		try {
 			const poisoned: ModelSpec<"openai-responses"> = {
 				id: "gpt-5.6-sol-fast",
@@ -575,37 +574,26 @@ describe("github copilot model limits mapping", () => {
 					},
 				);
 			});
-			// Seed the poisoned row through the previous fingerprint (drop list
-			// without sol-fast) while keeping the real restore options: the
-			// written cache is fully usable, so only the fingerprint migration
-			// can force the refetch — the upgraded-installation scenario.
+			// Seed the poisoned row under the previous cache namespace, mirroring
+			// exactly what a pre-fix binary wrote: same DB, same credential scope,
+			// v1 scheme. The v2 namespace must orphan it and force a refetch.
+			const previousNamespace = `github-copilot:models-v1:${Bun.hash("copilot-test-key\0https://api.githubcopilot.com").toString(36)}`;
 			const oldManager = createModelManager({
 				...githubCopilotModelManagerOptions({ apiKey: "copilot-test-key", fetch: fetchMock }),
-				dropCachedModelIdsOnStaticMismatch: [
-					"gpt-6-astra",
-					"gpt-6-astra-1m",
-					"grok-4.5",
-					"grok-4.5-1m",
-					"grok-4.6",
-					"grok-4.6-1m",
-					"mai-code-1-flash-picker",
-				],
-				cacheProviderId,
+				cacheProviderId: previousNamespace,
 				cacheDbPath,
 				fetchDynamicModels: async () => [poisoned],
 			});
 			await oldManager.refresh("online");
-
 			const manager = createModelManager({
 				...githubCopilotModelManagerOptions({ apiKey: "copilot-test-key", fetch: fetchMock }),
-				cacheProviderId,
 				cacheDbPath,
 			});
 			const { models } = await manager.refresh("online-if-uncached");
 			const model = models.find(candidate => candidate.id === "gpt-5.6-sol-fast");
 
-			// The fingerprint migration must refetch instead of serving the
-			// poisoned cache row; the remapped row carries no off-tier pin.
+			// The v2 namespace orphans the poisoned v1 row, forcing a refetch;
+			// the remapped row carries no off-tier pin.
 			expect(fetchMock).toHaveBeenCalled();
 			expect(model?.api).toBe("openai-responses");
 			expect(model).not.toHaveProperty("requestModelId");
