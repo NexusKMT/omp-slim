@@ -332,30 +332,27 @@ async function runIpcSubprocessWorker<In, Out>(
 	if (process.platform === "win32" && initialParentPid <= 0) {
 		shutdown();
 	} else if (initialParentPid > 0) {
-		let nativesAvailable = false;
 		let parentProcess: Process | null = null;
 		let runningStatus: ProcessStatus | undefined;
 		try {
 			if (!process.env.PI_TEST_NO_NATIVES) {
 				const natives = await import("@oh-my-pi/pi-natives");
-				nativesAvailable = true;
 				parentProcess = natives.Process.fromPid(initialParentPid);
 				runningStatus = natives.ProcessStatus.Running;
 			}
 		} catch {}
-
-		// If the native addon is available and Process.fromPid returned null,
-		// the parent process handle could not be opened because the parent has
-		// already terminated. Treat null as dead at boot to prevent PID reuse.
-		if (nativesAvailable && !parentProcess) {
-			shutdown();
-		}
 
 		// Note on container environments (Docker/Kubernetes): omp often runs as
 		// PID 1, so workers start with process.ppid === 1. Treating ppid <= 1 as
 		// an orphan at boot would break containerized workers. Instead, we allow
 		// PID 1 to boot normally and detect post-spawn reparenting dynamically via
 		// `process.ppid !== initialParentPid`.
+		//
+		// Note on Linux seccomp/kernels: On hosts where pidfd_open is blocked or
+		// unavailable (e.g. pre-5.3 kernels, restrictive seccomp), Process.fromPid
+		// returns null even when the parent is alive. We treat null as the native
+		// handle being unavailable and fall through to the isParentAlive() check
+		// rather than assuming null means dead at boot.
 		const isParentAlive = (): boolean => {
 			if (process.ppid !== initialParentPid) {
 				return false;
