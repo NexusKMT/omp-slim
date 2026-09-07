@@ -236,6 +236,34 @@ function createCompletionsModel(): Model<"openai-completions"> {
 	});
 }
 
+/**
+ * First-party OpenAI 5.6 model: disabled reasoning goes out as wire `none`
+ * (`reasoning-disable-mode: none-effort`), unlike the default lowest-effort dialects.
+ */
+function createNoneEffortCompletionsModel(): Model<"openai-completions"> {
+	return buildModel({
+		id: "gpt-5.6-none-effort-test",
+		name: "None Effort Test",
+		api: "openai-completions",
+		provider: "openai",
+		baseUrl: "https://api.openai.com/v1",
+		reasoning: true,
+		compat: {
+			thinkingFormat: "openai",
+			supportsReasoningParams: true,
+			supportsReasoningEffort: true,
+		},
+		thinking: {
+			mode: "effort",
+			efforts: [Effort.Low, Effort.Medium, Effort.High],
+		},
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 128_000,
+		maxTokens: 16_384,
+	});
+}
+
 function createResponsesModel(): Model<"openai-responses"> {
 	return buildModel({
 		id: "fallback-responses-reasoner",
@@ -511,6 +539,47 @@ describe("OpenAI reasoning effort fallback retry", () => {
 			"low",
 			"high",
 		]);
+	});
+
+	it("retries a disabled-with-effort none rejection at lowest without poisoning later turns", async () => {
+		const bodies: Record<string, unknown>[] = [];
+		const providerSessionState = new Map<string, ProviderSessionState>();
+		const fetchMock: FetchImpl = Object.assign(
+			async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+				const body = parseJsonBody(init);
+				bodies.push(body);
+				if (body.reasoning_effort === "none") {
+					const message =
+						"Unsupported value: 'none' is not supported. Supported values are: 'low', 'medium', 'high'.";
+					return new Response(JSON.stringify({ error: { message, type: "invalid_request_body" } }), {
+						status: 400,
+						headers: { "content-type": "application/json" },
+					});
+				}
+				return createChatSseResponse();
+			},
+			{ preconnect: fetch.preconnect },
+		);
+
+		const disabled = await streamOpenAICompletions(createNoneEffortCompletionsModel(), testContext, {
+			apiKey: "test-key",
+			fetch: fetchMock,
+			reasoning: "high",
+			disableReasoning: true,
+			providerSessionState,
+		}).result();
+		expect(disabled.stopReason).toBe("stop");
+
+		const enabled = await streamOpenAICompletions(createNoneEffortCompletionsModel(), testContext, {
+			apiKey: "test-key",
+			fetch: fetchMock,
+			reasoning: "high",
+			providerSessionState,
+		}).result();
+		expect(enabled.stopReason).toBe("stop");
+		// Explicit disable retries at the lowest allowed tier (not a field
+		// delete), and nothing cached may strip the later enabled turn.
+		expect(bodies.map(body => body.reasoning_effort)).toEqual(["none", "low", "high"]);
 	});
 
 	it("does not retry a Supported-values rejection aimed at another field", async () => {

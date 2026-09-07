@@ -594,10 +594,11 @@ const streamOpenAIResponsesOnce = (
 							// Explicit-disable fallbacks (none -> lowest allowed) are
 							// per-request: persisting them under the model key would
 							// silently downgrade later normal turns sharing the
-							// session state. Keep them in the per-request map only.
+							// session state. A retained effort preference does not
+							// make the disable less explicit. Keep them in the
+							// per-request map only.
 							const isExplicitDisable =
-								options?.forceReasoningOff === true ||
-								(options?.disableReasoning === true && options.reasoning === undefined);
+								options?.forceReasoningOff === true || options?.disableReasoning === true;
 							if (!isExplicitDisable) {
 								rememberOpenAIReasoningEffortFallback(
 									providerSessionState,
@@ -614,8 +615,7 @@ const streamOpenAIResponsesOnce = (
 							activeReasoningEffortFallbackKey && activeRequestParams && !requestSignal.aborted
 								? resolveOpenAIReasoningEffortFallback(error, capturedErrorResponse, activeRequestParams, {
 										explicitDisable:
-											options?.forceReasoningOff === true ||
-											(options?.disableReasoning === true && options.reasoning === undefined),
+											options?.forceReasoningOff === true || options?.disableReasoning === true,
 									})
 								: undefined;
 						if (reasoningEffortFallback !== undefined && activeReasoningEffortFallbackKey) {
