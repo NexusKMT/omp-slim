@@ -90,27 +90,37 @@ function summarizeChangelogEntries(entries: readonly ChangelogEntry[]): {
 	for (const entry of entries) {
 		let category = UNCATEGORIZED_CHANGELOG_CATEGORY;
 		// Indent and marker of the first item of the open list block. The renderer absorbs every
-		// whitespace-indented line into the open item, so only an unindented line
-		// (paragraph, heading, fence, ...) closes the block — plus a differently marked
-		// thematic break at or above the open indent, which lexes as `hr`. Blank lines never do.
+		// whitespace-indented line into the open item, so an unindented line (paragraph, heading,
+		// fence, ...) closes the block — as does a blank-separated line at or above the open
+		// indent, which the blank lookahead detaches from the item. Blank lines never do alone.
 		let listIndent: number | undefined;
 		let listMarker: string | undefined;
+		// Whether the previous line was blank: only then does an indented line end the block.
+		let sawBlank = false;
 		for (const line of entry.content.split("\n")) {
 			const heading = line.match(/^###\s+(.+?)\s*$/);
 			if (heading) {
 				category = heading[1] ?? UNCATEGORIZED_CHANGELOG_CATEGORY;
 				listIndent = undefined;
 				listMarker = undefined;
+				sawBlank = false;
+				continue;
+			}
+			if (/^\s*$/.test(line)) {
+				sawBlank = true;
 				continue;
 			}
 			const bullet = changelogBullet(line);
 			if (bullet === undefined) {
-				// An unindented block boundary ends the open item, so a later indented
-				// bullet opens a new top-level list instead of nesting under the old one.
-				if (!/^\s*$/.test(line) && changelogLineIndent(line) === 0) {
+				// A block boundary ends the open item, so a later indented bullet opens a new
+				// top-level list instead of nesting under the old one: always at column zero,
+				// and at any indent at or above the open list when blank-separated.
+				const indent = changelogLineIndent(line);
+				if (indent === 0 || (sawBlank && listIndent !== undefined && indent <= listIndent)) {
 					listIndent = undefined;
 					listMarker = undefined;
 				}
+				sawBlank = false;
 				continue;
 			}
 			if (isHr(line) && bullet.marker !== listMarker) {
@@ -120,8 +130,10 @@ function summarizeChangelogEntries(entries: readonly ChangelogEntry[]): {
 					listIndent = undefined;
 					listMarker = undefined;
 				}
+				sawBlank = false;
 				continue;
 			}
+			sawBlank = false;
 			if (listIndent === undefined) {
 				// With no list open, four columns of indent is an indented code block, not a list item.
 				if (bullet.indent >= 4) continue;

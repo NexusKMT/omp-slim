@@ -304,6 +304,42 @@ An intervening paragraph closes the list.
 		expect(selection.categoryCounts).toEqual({ Fixed: 3 });
 	});
 
+	test("restarts the list after a blank-separated indented paragraph", () => {
+		// The blank lookahead detaches the paragraph from the open item, so the deeper
+		// bullet below it opens a new top-level list instead of nesting under the old one.
+		const selection = summarize(`
+### Fixed
+
+  - First fix.
+ * Second fix.
+
+ Paragraph.
+
+  * Third fix.
+`);
+
+		expect(selection.changeCount).toBe(3);
+		expect(selection.categoryCounts).toEqual({ Fixed: 3 });
+	});
+
+	test("keeps the list open across a blank-separated deep continuation", () => {
+		// Past the open indent the continuation stays absorbed, so the bullet below it
+		// is still nested — resetting on any blank-separated line would overcount here.
+		const selection = summarize(`
+### Fixed
+
+- First fix.
+
+  Continued description.
+  - nested detail
+
+- Second fix.
+`);
+
+		expect(selection.changeCount).toBe(2);
+		expect(selection.categoryCounts).toEqual({ Fixed: 2 });
+	});
+
 	test("announces unreleased-shaped notes truthfully", () => {
 		const selection = summarize(`
 - Uncategorized note.
