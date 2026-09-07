@@ -576,9 +576,18 @@ describe("detectStyledUnderlineSupport", () => {
 		expect(detectStyledUnderlineSupport("orca")).toBe(false);
 	});
 
-	it("enables iTerm2 only on a confirmed major version >= 3, else flat fallback", () => {
+	it("enables iTerm2 only on a confirmed version >= 3.5, else flat fallback", () => {
 		expect(detectStyledUnderlineSupport("iterm2", { TERM_PROGRAM_VERSION: "2.1.4" })).toBe(false);
+		expect(detectStyledUnderlineSupport("iterm2", { TERM_PROGRAM_VERSION: "3.4.0" })).toBe(false);
 		expect(detectStyledUnderlineSupport("iterm2", { TERM_PROGRAM_VERSION: "3.5.0" })).toBe(true);
+		expect(detectStyledUnderlineSupport("iterm2", { TERM_PROGRAM_VERSION: "4.0.0" })).toBe(true);
 		expect(detectStyledUnderlineSupport("iterm2", {})).toBe(false);
+	});
+
+	it("disables the colon form under a multiplexer even when a proven terminal id leaks through", () => {
+		expect(detectStyledUnderlineSupport("kitty", { TMUX: "/tmp/tmux-1000/default,1,0" })).toBe(false);
+		expect(detectStyledUnderlineSupport("ghostty", { STY: "1234.pts-0.host" })).toBe(false);
+		expect(detectStyledUnderlineSupport("wezterm", { TERM: "screen-256color" })).toBe(false);
+		expect(detectStyledUnderlineSupport("iterm2", { TERM_PROGRAM_VERSION: "3.5.0", ZELLIJ: "0" })).toBe(false);
 	});
 });
