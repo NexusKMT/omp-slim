@@ -52,10 +52,10 @@ export function codexResolvedContextWindow(model: Model): number | undefined {
  * Override ceiling for Codex models. Upstream clamps `model_context_window`
  * to `min(override, max_context_window)` (`with_config_overrides` in
  * `models-manager/src/model_info.rs`); the ceiling here is stale-aware — the
- * curated maximum corrects a lower server value (Astra reports 272K/872K,
- * documented 1.05M) while a higher live maximum still wins. No curated or
- * live maximum means no ceiling: overrides pass through, matching upstream's
- * unclamped branch.
+ * curated maximum corrects a lower server value (Astra reports a stale 872K
+ * maximum; OpenAI documents at most 922K input) while a higher live maximum
+ * still wins. No curated or live maximum means no ceiling: overrides pass
+ * through, matching upstream's unclamped branch.
  */
 export function codexOverrideCeiling(model: Model): number | undefined {
 	return resolveMaxContextWindow(model);

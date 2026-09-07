@@ -1718,7 +1718,7 @@ describe("ModelRegistry", () => {
 
 			testSettings.set("extendedContext", true);
 			await registry.reapplyModelPolicies();
-			expect(registry.find("openai-codex", "gpt-6-astra")?.contextWindow).toBe(1_050_000);
+			expect(registry.find("openai-codex", "gpt-6-astra")?.contextWindow).toBe(922_000);
 			expect(registry.find("openai-codex", "gpt-5.5")?.contextWindow).toBe(272_000);
 
 			testSettings.set("extendedContext", false);
@@ -1750,8 +1750,8 @@ describe("ModelRegistry", () => {
 			const testSettings = Settings.isolated({ extendedContext: true });
 			const registry = new ModelRegistry(authStorage, modelsJsonPath, { settings: testSettings });
 			// Explicit intent wins over the toggle, but upstream never honors
-			// more than the server ceiling (curated 1.05M here).
-			expect(registry.find("openai-codex", "gpt-6-astra")?.contextWindow).toBe(1_050_000);
+			// more than the server ceiling (curated 922K input cap here).
+			expect(registry.find("openai-codex", "gpt-6-astra")?.contextWindow).toBe(922_000);
 		});
 
 		test("restores the opt-in for cached Astra and worker rows with stale or invalid maxima", async () => {
@@ -1778,7 +1778,7 @@ describe("ModelRegistry", () => {
 			testSettings.set("extendedContext", true);
 			await registry.reapplyModelPolicies();
 			for (const id of ["gpt-6-astra", "gpt-6-astra-wm"]) {
-				expect(registry.find("openai-codex", id)?.contextWindow).toBe(1_050_000);
+				expect(registry.find("openai-codex", id)?.contextWindow).toBe(922_000);
 			}
 
 			testSettings.set("extendedContext", false);
@@ -1801,7 +1801,7 @@ describe("ModelRegistry", () => {
 
 			writeModelCache("openai-codex", Date.now(), [{ ...astra, maxContextWindow: 872_000 }], true, "", dbPath);
 			await registry.reapplyModelPolicies();
-			expect(registry.find("openai-codex", "gpt-6-astra")?.contextWindow).toBe(1_050_000);
+			expect(registry.find("openai-codex", "gpt-6-astra")?.contextWindow).toBe(922_000);
 		});
 
 		test("restores a discovered maximum from cache ahead of the default on each toggle", async () => {

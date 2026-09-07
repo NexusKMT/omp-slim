@@ -32,7 +32,9 @@ provider "openai-codex" {
 	// Codex reports a 272K default and a stale 872K maximum for Astra. Keep
 	// the default explicit so cached 1.05M rows from #11089 cannot bypass the
 	// opt-in; the curated maximum is applied only with extended context on.
-	// The documented total window is 1.05M (922K input plus 128K output).
+	// OpenAI documents 1.05M total context with at most 922K input and 128K
+	// output, so the input ceiling is 922K — not the total. A higher live
+	// maximum still wins as the ceiling.
 	// Codex pricing remains exempt from the API long-context multiplier.
 	models "gpt-6-astra" "gpt-6-astra-wm" {
 		cost-patch {
@@ -48,7 +50,7 @@ provider "openai-codex" {
 		limits-patch {
 			context-window 272000
 		}
-		max-context-window 1050000
+		max-context-window 922000
 	}
 	class "openai" {
 		revision ">=5.3 <5.7" {

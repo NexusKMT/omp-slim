@@ -20,7 +20,7 @@ function bundledLegacy() {
 
 test("corrects a stale live maximum up to the curated window", () => {
 	const astra = bundledAstra();
-	expect(resolveMaxContextWindow({ ...astra, maxContextWindow: 872_000 })).toBe(1_050_000);
+	expect(resolveMaxContextWindow({ ...astra, maxContextWindow: 872_000 })).toBe(922_000);
 });
 
 test("keeps a higher live maximum above the curated window", () => {
@@ -30,9 +30,9 @@ test("keeps a higher live maximum above the curated window", () => {
 
 test("falls back to the curated window when the live maximum is missing or invalid", () => {
 	const astra = bundledAstra();
-	expect(resolveMaxContextWindow({ ...astra, maxContextWindow: undefined })).toBe(1_050_000);
-	expect(resolveMaxContextWindow({ ...astra, maxContextWindow: 0 })).toBe(1_050_000);
-	expect(resolveMaxContextWindow({ ...astra, maxContextWindow: Number.NaN })).toBe(1_050_000);
+	expect(resolveMaxContextWindow({ ...astra, maxContextWindow: undefined })).toBe(922_000);
+	expect(resolveMaxContextWindow({ ...astra, maxContextWindow: 0 })).toBe(922_000);
+	expect(resolveMaxContextWindow({ ...astra, maxContextWindow: Number.NaN })).toBe(922_000);
 });
 
 test("leaves models without a curated maximum to the live value or undefined", () => {
@@ -54,9 +54,9 @@ test("prefers context_window over max_context_window like upstream resolved", ()
 
 test("clamps Codex overrides to the stale-aware ceiling", () => {
 	const astra = bundledAstra();
-	// Stale 872K server maximum: curated 1.05M is the ceiling.
-	expect(codexOverrideCeiling({ ...astra, maxContextWindow: 872_000 })).toBe(1_050_000);
-	expect(clampCodexContextWindow({ ...astra, maxContextWindow: 872_000 }, 2_000_000)).toBe(1_050_000);
+	// Stale 872K server maximum: the curated 922K input cap is the ceiling.
+	expect(codexOverrideCeiling({ ...astra, maxContextWindow: 872_000 })).toBe(922_000);
+	expect(clampCodexContextWindow({ ...astra, maxContextWindow: 872_000 }, 2_000_000)).toBe(922_000);
 	// Fitting requests pass through untouched.
 	expect(clampCodexContextWindow({ ...astra, maxContextWindow: 872_000 }, 400_000)).toBe(400_000);
 	// A higher live maximum still wins as the ceiling.
