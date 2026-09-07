@@ -232,6 +232,36 @@ An intervening paragraph closes the list.
 		expect(selection.categoryCounts).toEqual({ Fixed: 3 });
 	});
 
+	test("restarts the list after an indented thematic break", () => {
+		// The renderer lexes the `* * *` run as `hr`, closing the open list, so the
+		// deeper bullet below it opens a new top-level list instead of nesting.
+		const selection = summarize(`
+### Fixed
+
+ - First fix.
+ * * *
+  - Second fix.
+`);
+
+		expect(selection.changeCount).toBe(2);
+		expect(selection.categoryCounts).toEqual({ Fixed: 2 });
+	});
+
+	test("keeps the list open across a deeper thematic break", () => {
+		// Indented past the open item, the break run is absorbed into the item above,
+		// so the bullet below it stays nested rather than starting a new list.
+		const selection = summarize(`
+### Fixed
+
+- First fix.
+   * * *
+  - nested detail
+`);
+
+		expect(selection.changeCount).toBe(1);
+		expect(selection.categoryCounts).toEqual({ Fixed: 1 });
+	});
+
 	test("refreshes the tracked marker when the list changes delimiters", () => {
 		// The renderer starts a new `*` list at the second line, so the run below it
 		// is an item of that list — not `hr` against the stale `-` marker.

@@ -93,7 +93,8 @@ function summarizeChangelogEntries(entries: readonly ChangelogEntry[]): {
 		let category = UNCATEGORIZED_CHANGELOG_CATEGORY;
 		// Indent and marker of the first item of the open list block. The renderer absorbs every
 		// whitespace-indented line into the open item, so only an unindented line
-		// (paragraph, heading, fence, ...) closes the block. Blank lines never do.
+		// (paragraph, heading, fence, ...) closes the block — plus a differently marked
+		// thematic break at or above the open indent, which lexes as `hr`. Blank lines never do.
 		let listIndent: number | undefined;
 		let listMarker: string | undefined;
 		for (const line of entry.content.split("\n")) {
@@ -115,8 +116,9 @@ function summarizeChangelogEntries(entries: readonly ChangelogEntry[]): {
 				continue;
 			}
 			if (CHANGELOG_THEMATIC_BREAK.test(line) && bullet.marker !== listMarker) {
-				// Renders as `hr`, not a list item: ends the block like any unindented boundary.
-				if (changelogLineIndent(line) === 0) {
+				// Renders as `hr`, not a list item: ends the block when at or above the open
+				// indent. A deeper break is absorbed into the open item, so the block stays open.
+				if (listIndent === undefined || changelogLineIndent(line) <= listIndent) {
 					listIndent = undefined;
 					listMarker = undefined;
 				}
