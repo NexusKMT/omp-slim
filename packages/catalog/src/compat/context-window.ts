@@ -29,3 +29,50 @@ export function resolveMaxContextWindow(model: Model): number | undefined {
 	}
 	return curated ?? undefined;
 }
+
+/**
+ * Codex-faithful resolution (openai/codex `ModelInfo::resolved_context_window`
+ * in `protocol/src/openai_models.rs`): prefers `context_window`, falls back
+ * to `max_context_window`. Upstream treats `max_context_window` as the ceiling
+ * for config overrides, not as an alternate window.
+ */
+export function codexResolvedContextWindow(model: Model): number | undefined {
+	const current = model.contextWindow;
+	if (typeof current === "number" && Number.isFinite(current) && current > 0) {
+		return current;
+	}
+	const maximum = model.maxContextWindow;
+	if (typeof maximum === "number" && Number.isFinite(maximum) && maximum > 0) {
+		return maximum;
+	}
+	return undefined;
+}
+
+/**
+ * Override ceiling for Codex models. Upstream clamps `model_context_window`
+ * to `min(override, max_context_window)` (`with_config_overrides` in
+ * `models-manager/src/model_info.rs`); the ceiling here is stale-aware — the
+ * curated maximum corrects a lower server value (Astra reports 272K/872K,
+ * documented 1.05M) while a higher live maximum still wins. No curated or
+ * live maximum means no ceiling: overrides pass through, matching upstream's
+ * unclamped branch.
+ */
+export function codexOverrideCeiling(model: Model): number | undefined {
+	return resolveMaxContextWindow(model);
+}
+
+/**
+ * Clamp a requested Codex context window to the override ceiling, mirroring
+ * upstream. Returns the request unchanged when no ceiling applies or it
+ * already fits.
+ */
+export function clampCodexContextWindow(model: Model, requested: number): number {
+	if (!Number.isFinite(requested) || requested <= 0) {
+		return requested;
+	}
+	const ceiling = codexOverrideCeiling(model);
+	if (ceiling === undefined || requested <= ceiling) {
+		return requested;
+	}
+	return ceiling;
+}

@@ -1743,6 +1743,17 @@ describe("ModelRegistry", () => {
 			expect(registry.find("openai-codex", "gpt-6-astra")?.contextWindow).toBe(400_000);
 		});
 
+		test("clamps an explicit Astra override to the Codex ceiling", async () => {
+			writeRawModelsJson({
+				"openai-codex": { modelOverrides: { "gpt-6-astra": { contextWindow: 2_000_000 } } },
+			});
+			const testSettings = Settings.isolated({ extendedContext: true });
+			const registry = new ModelRegistry(authStorage, modelsJsonPath, { settings: testSettings });
+			// Explicit intent wins over the toggle, but upstream never honors
+			// more than the server ceiling (curated 1.05M here).
+			expect(registry.find("openai-codex", "gpt-6-astra")?.contextWindow).toBe(1_050_000);
+		});
+
 		test("restores the opt-in for cached Astra and worker rows with stale or invalid maxima", async () => {
 			const testSettings = Settings.isolated();
 			const registry = new ModelRegistry(authStorage, modelsJsonPath, { settings: testSettings });

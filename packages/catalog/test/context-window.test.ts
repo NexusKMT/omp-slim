@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test";
-import { resolveMaxContextWindow } from "@oh-my-pi/pi-catalog/compat/context-window";
+import {
+	clampCodexContextWindow,
+	codexOverrideCeiling,
+	codexResolvedContextWindow,
+	resolveMaxContextWindow,
+} from "@oh-my-pi/pi-catalog/compat/context-window";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
-
 function bundledAstra() {
 	const astra = getBundledModels("openai-codex").find(model => model.id === "gpt-6-astra");
 	if (!astra) throw new Error("Expected bundled Astra model");
@@ -39,4 +43,28 @@ test("leaves models without a curated maximum to the live value or undefined", (
 	expect(resolveMaxContextWindow({ ...legacy, maxContextWindow: undefined })).toBeUndefined();
 	expect(resolveMaxContextWindow({ ...legacy, maxContextWindow: 0 })).toBeUndefined();
 	expect(resolveMaxContextWindow({ ...legacy, maxContextWindow: Number.NaN })).toBeUndefined();
+});
+
+test("prefers context_window over max_context_window like upstream resolved", () => {
+	const astra = bundledAstra();
+	expect(codexResolvedContextWindow({ ...astra, maxContextWindow: 872_000 })).toBe(272_000);
+	expect(codexResolvedContextWindow({ ...astra, contextWindow: null, maxContextWindow: 872_000 })).toBe(872_000);
+	expect(codexResolvedContextWindow({ ...astra, contextWindow: null, maxContextWindow: undefined })).toBeUndefined();
+});
+
+test("clamps Codex overrides to the stale-aware ceiling", () => {
+	const astra = bundledAstra();
+	// Stale 872K server maximum: curated 1.05M is the ceiling.
+	expect(codexOverrideCeiling({ ...astra, maxContextWindow: 872_000 })).toBe(1_050_000);
+	expect(clampCodexContextWindow({ ...astra, maxContextWindow: 872_000 }, 2_000_000)).toBe(1_050_000);
+	// Fitting requests pass through untouched.
+	expect(clampCodexContextWindow({ ...astra, maxContextWindow: 872_000 }, 400_000)).toBe(400_000);
+	// A higher live maximum still wins as the ceiling.
+	expect(clampCodexContextWindow({ ...astra, maxContextWindow: 1_200_000 }, 2_000_000)).toBe(1_200_000);
+});
+
+test("leaves models without a ceiling unclamped", () => {
+	const legacy = bundledLegacy();
+	expect(codexOverrideCeiling({ ...legacy, maxContextWindow: undefined })).toBeUndefined();
+	expect(clampCodexContextWindow({ ...legacy, maxContextWindow: undefined }, 2_000_000)).toBe(2_000_000);
 });
