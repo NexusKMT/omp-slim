@@ -9,6 +9,7 @@ import { ensureTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import { executeAcpBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/acp-builtins";
 import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import type { SlashCommandRuntime } from "@oh-my-pi/pi-coding-agent/slash-commands/types";
@@ -20,7 +21,11 @@ import { createInteractiveModeContext } from "../helpers/interactive-mode-contex
 let session: AgentSession | undefined;
 let authStorage: AuthStorage | undefined;
 
-function createRuntime(mode: "TUI" | "headless", topic: string | null = "Repair cache invalidation after writes") {
+function createRuntime(
+	mode: "TUI" | "headless",
+	topic: string | null = "Repair cache invalidation after writes",
+	sessionManager = SessionManager.inMemory(),
+) {
 	authStorage = createInMemoryAuthStorage();
 	const settings = Settings.isolated({
 		"compaction.enabled": false,
@@ -29,7 +34,6 @@ function createRuntime(mode: "TUI" | "headless", topic: string | null = "Repair 
 	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 	if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 	const agent = new Agent({ initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] } });
-	const sessionManager = SessionManager.inMemory();
 	session = new AgentSession({ agent, sessionManager, settings, modelRegistry: new ModelRegistry(authStorage) });
 	if (topic !== null) {
 		const message = { role: "user" as const, content: topic, timestamp: 1 };
@@ -136,6 +140,27 @@ it("shows local model download progress while a TUI rename waits for a cold mode
 	}
 });
 
+it("releases progress listeners after repeated warm-model renames with no progress events", async () => {
+	await ensureTheme();
+	const { session, execute, ctx } = createRuntime("TUI");
+	const input = new InputController(ctx);
+	session.setTitleGenerationStart(() => input.notifyTitleGenerationStart());
+	const listeners = new Set<Parameters<typeof tinyTitleClient.onProgress>[0]>();
+	vi.spyOn(tinyTitleClient, "onProgress").mockImplementation(listener => {
+		listeners.add(listener);
+		return () => {
+			listeners.delete(listener);
+		};
+	});
+	const generate = vi.spyOn(tinyTitleClient, "generate");
+	for (const title of ["First warm title", "Second warm title", "Third warm title"]) {
+		generate.mockResolvedValueOnce(title);
+		await execute("/rename");
+		expect(session.sessionName).toBe(title);
+		expect(listeners.size).toBe(0);
+	}
+});
+
 for (const mode of ["TUI", "headless"] as const) {
 	describe(`/rename (${mode})`, () => {
 		it("replaces a manual title from conversation context and protects the result from automatic titles", async () => {
@@ -209,6 +234,34 @@ for (const mode of ["TUI", "headless"] as const) {
 				response.resolve("Old conversation topic");
 				await pending;
 
+				expect(session.sessionName).toBeUndefined();
+				expect(sessionManager.getEntries()).toEqual(entries);
+			} finally {
+				response.resolve(null);
+				await pending;
+			}
+		});
+
+		it("discards a pending rename after switching away and back to the same session", async () => {
+			const storage = new MemorySessionStorage();
+			const source = SessionManager.create("/tmp/rename-switch", "/sessions", storage);
+			const { session, sessionManager, execute } = createRuntime(mode, undefined, source);
+			await source.ensureOnDisk();
+			await source.flush();
+			const sourceFile = source.getSessionFile()!;
+			const other = SessionManager.create("/tmp/rename-switch", "/sessions", storage);
+			await other.ensureOnDisk();
+			const otherFile = other.getSessionFile()!;
+			await other.close();
+			const { started, response } = deferTitle();
+			const pending = execute("/rename");
+			try {
+				await Promise.race([started.promise, pending]);
+				expect(await session.switchSession(otherFile)).toBe(true);
+				expect(await session.switchSession(sourceFile)).toBe(true);
+				const entries = sessionManager.getEntries();
+				response.resolve("Stale title from before switching");
+				await pending;
 				expect(session.sessionName).toBeUndefined();
 				expect(sessionManager.getEntries()).toEqual(entries);
 			} finally {

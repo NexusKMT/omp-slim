@@ -44,9 +44,13 @@ async function generateRenameTitle(session: AgentSession): Promise<string | null
 	const context = buildReplanTitleContext(session.messages);
 	if (!context || isLowSignalTitleInput(context)) return null;
 	const sessionId = sessionManager.getSessionId();
-	session.notifyTitleGenerationStart();
-	const title = await session.generateTitle(context);
-	return sessionManager.getSessionId() === sessionId && sessionManager.titleRevision === revision ? title : null;
+	const cleanupProgress = session.notifyTitleGenerationStart();
+	try {
+		const title = await session.generateTitle(context);
+		return sessionManager.getSessionId() === sessionId && sessionManager.titleRevision === revision ? title : null;
+	} finally {
+		cleanupProgress?.();
+	}
 }
 
 export const shutdownHandlerTui = (
