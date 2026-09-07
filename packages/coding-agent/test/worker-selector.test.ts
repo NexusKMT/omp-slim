@@ -87,9 +87,17 @@ describe("worker selector dispatch", () => {
 		await parent.exited;
 
 		let running = isPidRunning(childPid);
-		for (let i = 0; i < 30 && running; i++) {
-			await Bun.sleep(100);
-			running = isPidRunning(childPid);
+		try {
+			for (let i = 0; i < 30 && running; i++) {
+				await Bun.sleep(100);
+				running = isPidRunning(childPid);
+			}
+		} finally {
+			if (running) {
+				try {
+					process.kill(childPid, "SIGKILL");
+				} catch {}
+			}
 		}
 		expect(running).toBe(false);
 	});
@@ -105,7 +113,7 @@ describe("worker selector dispatch", () => {
 					cmd: [process.execPath, "packages/coding-agent/src/cli.ts", "__omp_worker_js_eval_process"],
 					cwd: ${JSON.stringify(repoRoot)},
 					env: { ...process.env, PI_TEST_NO_NATIVES: "1" },
-					ipc(msg) {},
+					ipc() {},
 					serialization: "advanced",
 					windowsHide: true,
 					stdin: "ignore",
@@ -129,9 +137,17 @@ describe("worker selector dispatch", () => {
 		await parent.exited;
 
 		let running = isPidRunning(childPid);
-		for (let i = 0; i < 30 && running; i++) {
-			await Bun.sleep(100);
-			running = isPidRunning(childPid);
+		try {
+			for (let i = 0; i < 30 && running; i++) {
+				await Bun.sleep(100);
+				running = isPidRunning(childPid);
+			}
+		} finally {
+			if (running) {
+				try {
+					process.kill(childPid, "SIGKILL");
+				} catch {}
+			}
 		}
 		expect(running).toBe(false);
 	});
