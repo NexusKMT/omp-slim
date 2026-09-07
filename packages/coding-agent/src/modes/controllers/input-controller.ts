@@ -827,6 +827,11 @@ export class InputController {
 					// "/loop 10 fix bug" rather than just "fix bug".
 					if (!shouldSkipHistory(text)) this.ctx.editor.addToHistory(text);
 					text = slashResult;
+					// An inline `/loop` prompt must stick even when the streaming
+					// or compaction branches below return early: otherwise the
+					// prompt is sent once as a steer while loopPrompt stays unset
+					// and loop mode idles instead of repeating it.
+					if (submittedMode === "loop") this.ctx.setLoopPrompt(text);
 				}
 			}
 

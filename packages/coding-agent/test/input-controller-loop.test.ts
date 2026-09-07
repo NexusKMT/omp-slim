@@ -86,4 +86,19 @@ describe("loop mode interjections", () => {
 		expect(setLoopPrompt).toHaveBeenCalledWith("new loop body");
 		expect(onInputCallback).toHaveBeenCalledTimes(1);
 	});
+
+	it("records an inline /loop prompt even while streaming", async () => {
+		const { ctx, setLoopPrompt, prompt, getLoopPrompt } = createLoopContext({ isStreaming: true });
+		// Mirror handleLoopCommand: enabling loop mode hands the inline prompt
+		// back to the dispatcher for normal submission.
+		(ctx as unknown as Record<string, unknown>).handleLoopCommand = vi.fn(async () => "inline loop body");
+		const controller = new InputController(ctx);
+		controller.setupEditorSubmitHandler();
+
+		await ctx.editor.onSubmit?.("/loop 3 inline loop body");
+
+		expect(setLoopPrompt).toHaveBeenCalledWith("inline loop body");
+		expect(getLoopPrompt()).toBe("inline loop body");
+		expect(prompt).toHaveBeenCalledTimes(1);
+	});
 });
