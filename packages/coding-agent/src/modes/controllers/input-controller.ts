@@ -986,13 +986,13 @@ export class InputController {
 				return;
 			}
 			// Normal message submission
-			// While loop mode is on, an idle user-typed prompt handed to the input
-			// waiter becomes the new loop prompt that auto-resubmits after each
-			// yield. This sits after the compaction, extension-command, and
-			// streaming-steer early returns so those one-off inputs never replace
-			// the loop body. The waiter-less direct path below arms only after its
-			// own dispatch succeeds, so a rejection never retains a failed body.
-			if (this.ctx.loopModeEnabled && this.ctx.onInputCallback) {
+			// While loop mode is on, an idle user-typed prompt becomes the new loop
+			// prompt that auto-resubmits after each yield. This arms synchronously,
+			// before any await: arming after a turn-length dispatch would race the
+			// reschedule timer and strand the waiter. Non-forward outcomes (local
+			// consume, rejection) park the loop at their own dispatch sites, so a
+			// failed body degrades to idle instead of looping errors.
+			if (this.ctx.loopModeEnabled) {
 				this.ctx.setLoopPrompt(text);
 			}
 			// First, move any pending bash components to chat
@@ -1043,10 +1043,10 @@ export class InputController {
 							imageCount: images?.length ?? 0,
 						},
 					);
-					// No waiter took this submission, so the idle block above did not
-					// arm it: record it as the loop body only after dispatch
-					// confirms it was forwarded, mirroring the streaming branch.
-					if (forwarded) this.ctx.setLoopPrompt(text);
+					// The idle block above already armed this body synchronously.
+					// A locally-consumed dispatch starts no turn: park the armed
+					// loop instead of resubmitting a local action on next idle.
+					if (!forwarded && this.ctx.loopPrompt === text) this.ctx.pauseLoop();
 				} catch (error) {
 					// Don't lose the message: hand images then collapsed text back to the
 					// editor so the user can retry (e.g. prompt dispatch rejecting an
@@ -1060,6 +1060,9 @@ export class InputController {
 					}
 					this.ctx.editor.setCollapsedText(text);
 					this.ctx.showError(error instanceof Error ? error.message : String(error));
+					// Dispatch rejected after the body was armed: park it so the
+					// failed prompt is not resubmitted on next idle.
+					if (this.ctx.loopPrompt === text) this.ctx.pauseLoop();
 				}
 				this.ctx.updatePendingMessagesDisplay();
 				this.ctx.ui.requestRender();

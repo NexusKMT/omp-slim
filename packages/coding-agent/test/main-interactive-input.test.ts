@@ -307,4 +307,54 @@ describe("submitInteractiveInput", () => {
 		expect(mode.pauseLoop).not.toHaveBeenCalled();
 		expect(mode.showError).not.toHaveBeenCalled();
 	});
+
+	it("parks the loop when dispatch rejects the armed body", async () => {
+		const mode = {
+			markPendingSubmissionStarted: vi.fn(() => true),
+			finishPendingSubmission: vi.fn(),
+			showError: vi.fn(),
+			checkShutdownRequested: vi.fn(async () => {}),
+			loopPrompt: "failing body",
+			pauseLoop: vi.fn(),
+		};
+		const session = {
+			prompt: vi.fn(async () => {
+				throw new Error("attachment too large");
+			}),
+			promptCustomMessage: vi.fn(async () => true),
+			isStreaming: false,
+		};
+		const input = createInput({ text: "failing body" });
+
+		await submitInteractiveInput(mode, session, input);
+
+		expect(mode.pauseLoop).toHaveBeenCalledTimes(1);
+		expect(mode.showError).toHaveBeenCalledWith("attachment too large");
+		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input);
+	});
+
+	it("ignores dispatch rejection when it is not the armed body", async () => {
+		const mode = {
+			markPendingSubmissionStarted: vi.fn(() => true),
+			finishPendingSubmission: vi.fn(),
+			showError: vi.fn(),
+			checkShutdownRequested: vi.fn(async () => {}),
+			loopPrompt: "repeat me",
+			pauseLoop: vi.fn(),
+		};
+		const session = {
+			prompt: vi.fn(async () => {
+				throw new Error("attachment too large");
+			}),
+			promptCustomMessage: vi.fn(async () => true),
+			isStreaming: false,
+		};
+		const input = createInput({ text: "/other-cmd" });
+
+		await submitInteractiveInput(mode, session, input);
+
+		expect(mode.pauseLoop).not.toHaveBeenCalled();
+		expect(mode.showError).toHaveBeenCalledWith("attachment too large");
+		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input);
+	});
 });

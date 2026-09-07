@@ -7,14 +7,22 @@ beforeAll(() => {
 	initTheme();
 });
 
-function makeCtx(initialQueue: CompactionQueuedMessage[], loopPrompt: string | undefined) {
+function makeCtx(
+	initialQueue: CompactionQueuedMessage[],
+	loopPrompt: string | undefined,
+	promptBehavior: "forward" | "consume" | "throw" = "consume",
+) {
 	let currentLoopPrompt = loopPrompt;
 	const pauseLoop = mock(() => {
 		currentLoopPrompt = undefined;
 	});
 	// Mirror AgentSession.prompt: a void custom command is consumed locally
 	// (false) instead of starting a turn (true).
-	const prompt = mock(async (text: string): Promise<boolean> => text !== "/void-cmd");
+	const prompt = mock(async (text: string): Promise<boolean> => {
+		if (promptBehavior === "throw") throw new Error("attachment too large");
+		if (promptBehavior === "forward") return true;
+		return text !== "/void-cmd";
+	});
 	const ctx = {
 		session: {
 			prompt,
@@ -84,5 +92,20 @@ describe("flushCompactionQueue loop parking", () => {
 
 		expect(pauseLoop).not.toHaveBeenCalled();
 		expect(getLoopPrompt()).toBe("plain body");
+	});
+
+	test("failed drain restores the queue and leaves loop state alone", async () => {
+		const queued: CompactionQueuedMessage[] = [{ text: "queued body", mode: "steer" }];
+		const { ctx, pauseLoop, getLoopPrompt } = makeCtx(queued, "queued body", "throw");
+
+		await new UiHelpers(ctx).flushCompactionQueue({ willRetry: false });
+		await Promise.resolve();
+		await Promise.resolve();
+
+		// The message stays queued for retry; loop parking happens when the
+		// main turn later observes the rejection, not in the drain.
+		expect(ctx.compactionQueuedMessages).toEqual(queued);
+		expect(pauseLoop).not.toHaveBeenCalled();
+		expect(getLoopPrompt()).toBe("queued body");
 	});
 });

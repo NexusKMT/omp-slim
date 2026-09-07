@@ -356,10 +356,17 @@ export async function submitInteractiveInput(
 				userInitiated: input.userInitiated,
 			});
 		} else {
-			const forwarded = await session.prompt(input.text, { images: input.images, streamingBehavior });
-			// Dispatch consumed the body locally (void custom command) instead of
-			// starting a turn: when it is the armed loop body, park the loop rather
-			// than resubmitting a local action after every yield.
+			let forwarded = false;
+			try {
+				forwarded = await session.prompt(input.text, { images: input.images, streamingBehavior });
+			} catch (error: unknown) {
+				mode.showError(error instanceof Error ? error.message : "Unknown error occurred");
+			}
+			// Dispatch consumed the body locally (void custom command) or rejected
+			// instead of starting a turn: when it is the armed loop body, park the
+			// loop rather than resubmitting a failed or local-only body after
+			// every yield. A failed body degrades to idle like any other
+			// submission failure instead of error-looping.
 			if (!forwarded && mode.loopPrompt === input.text) mode.pauseLoop?.();
 		}
 	} catch (error: unknown) {
