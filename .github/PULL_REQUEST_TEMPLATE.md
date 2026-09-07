@@ -14,4 +14,4 @@
 
 - [ ] `bun check` passes
 - [ ] Tested locally
-- [ ] CHANGELOG updated (if user-facing)
+- [ ] CHANGELOG updated with the required link and attribution (if user-facing; add the PR number after creation)

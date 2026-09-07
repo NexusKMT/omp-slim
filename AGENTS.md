@@ -30,6 +30,14 @@ Unless user tells you exactly what to write:
 - **Never comment on GitHub** (issues, PRs, discussions).
 - **Never create issues on GitHub**.
 
+### Pull requests
+
+When authorized to create or edit a PR:
+
+- MUST read `.github/PULL_REQUEST_TEMPLATE.md` first and preserve its sections and checklist, including when shortening an existing description.
+- For user-facing changes, MUST follow the [Changelog](#changelog) attribution rules. After GitHub assigns the PR number, update the entry and push it before marking the changelog checklist item complete.
+- MUST read back the published PR description after creating or editing it. Check only verified checklist items; explain skipped or inapplicable checks in `Testing`.
+
 ## Code Quality
 
 - No `any` unless absolutely necessary.
