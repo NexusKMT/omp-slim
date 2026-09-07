@@ -130,6 +130,10 @@ function summarizeChangelogEntries(entries: readonly ChangelogEntry[]): {
 			} else if (bullet.indent > listIndent) {
 				// Deeper than the block's first item: absorbed into the item above, not a separate change.
 				continue;
+			} else if (bullet.marker !== listMarker) {
+				// A different delimiter starts a new list: adopt its first item as reference.
+				listIndent = bullet.indent;
+				listMarker = bullet.marker;
 			}
 			categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
 			changeCount++;

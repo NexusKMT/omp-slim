@@ -232,6 +232,48 @@ An intervening paragraph closes the list.
 		expect(selection.categoryCounts).toEqual({ Fixed: 3 });
 	});
 
+	test("refreshes the tracked marker when the list changes delimiters", () => {
+		// The renderer starts a new `*` list at the second line, so the run below it
+		// is an item of that list — not `hr` against the stale `-` marker.
+		const selection = summarize(`
+### Fixed
+
+- First fix.
+* Second fix.
+* * *
+`);
+
+		expect(selection.changeCount).toBe(3);
+		expect(selection.categoryCounts).toEqual({ Fixed: 3 });
+	});
+
+	test("treats a break with a stale marker as a separator", () => {
+		// The second line opens a `*` list, so the `- - -` run below renders as `hr`.
+		const selection = summarize(`
+### Fixed
+
+- First fix.
+* Second fix.
+- - -
+`);
+
+		expect(selection.changeCount).toBe(2);
+		expect(selection.categoryCounts).toEqual({ Fixed: 2 });
+	});
+
+	test("adopts the new list indent on delimiter change", () => {
+		const selection = summarize(`
+### Fixed
+
+  - First fix.
+  * Second fix.
+ - Third fix.
+`);
+
+		expect(selection.changeCount).toBe(3);
+		expect(selection.categoryCounts).toEqual({ Fixed: 3 });
+	});
+
 	test("announces unreleased-shaped notes truthfully", () => {
 		const selection = summarize(`
 - Uncategorized note.
