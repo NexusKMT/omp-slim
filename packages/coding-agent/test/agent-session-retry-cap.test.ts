@@ -3222,24 +3222,30 @@ describe("AgentSession retry delay cap", () => {
 		expect(last.content).toContainEqual({ type: "text", text: "recovered after partial socket close" });
 	});
 
-	it("retries on Bun HTTP/2 stream reset errors", async () => {
-		// Regression: Bun's fetch surfaces HTTP/2 RST_STREAM as `Error: HTTP2StreamReset
-		// fetching "<url>". For more information, pass \`verbose: true\` ...`. The verbatim
-		// message contains no "503", "overloaded", or "network error" hooks, so without the
-		// dedicated HTTP2(StreamReset|RefusedStream|EnhanceYourCalm) carveout the assistant
-		// turn fails terminally even though the underlying condition is transient.
+	it.each([
+		[
+			"Bun HTTP/2",
+			{
+				throw: 'HTTP2StreamReset fetching "https://chatgpt.com/backend-api/codex/responses". For more information, pass `verbose: true` in the second argument to fetch()',
+			},
+		],
+		[
+			"proxied Python HTTP/2",
+			{
+				content: [{ type: "thinking", thinking: "Checking the request." }],
+				stopReason: "error",
+				errorMessage:
+					"Codex error event: <StreamReset stream_id:1283, error_code:2, remote_reset:True> (code=api_error)",
+			},
+		],
+	] satisfies [string, MockResponse][])("retries on %s stream reset errors", async (_label, failure) => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) {
 			throw new Error("Expected bundled Anthropic test model to exist");
 		}
 
 		const mock = createMockModel({
-			responses: [
-				{
-					throw: 'HTTP2StreamReset fetching "https://chatgpt.com/backend-api/codex/responses". For more information, pass `verbose: true` in the second argument to fetch()',
-				},
-				{ content: ["recovered after stream reset"] },
-			],
+			responses: [failure, { content: ["recovered after stream reset"] }],
 		});
 		const agent = new Agent({
 			getApiKey: model => `${model.provider}-test-key`,

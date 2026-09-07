@@ -729,6 +729,38 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 			return new TurnRecovery(createHost(model, modelRegistry, { messages: [message as AgentMessage, ...tail] }));
 		}
 
+		function pythonResetMessage(content: AssistantMessage["content"]): AssistantMessage {
+			return {
+				...makeMessage(content, model),
+				api: "openai-codex-responses",
+				provider: "openai-codex",
+				errorId: 0,
+				errorMessage:
+					"Codex error event: <StreamReset stream_id:1283, error_code:2, remote_reset:True> (code=api_error)",
+			};
+		}
+
+		it("preserves the replay veto after a Python reset with committed text", () => {
+			const message = pythonResetMessage([{ type: "text", text: "Partial answer." }]);
+			const recovery = recoveryForReset(message, []);
+			expect(recovery.isRetryableError(message)).toBe(false);
+			expect(recovery.classifyResolvedInterruptedToolTurn(message)).toBeUndefined();
+		});
+
+		it("continues a Python reset with completed tools through preserved-turn recovery", () => {
+			const message = pythonResetMessage([execToolCall("call-1")]);
+			const recovery = recoveryForReset(message, [realResult("call-1")]);
+			expect(recovery.isRetryableError(message)).toBe(false);
+			expect(recovery.classifyResolvedInterruptedToolTurn(message)).toBe("stream-stall");
+		});
+
+		it("keeps a Python reset with an unresolved tool outside recovery", () => {
+			const message = pythonResetMessage([execToolCall("call-1")]);
+			const recovery = recoveryForReset(message, []);
+			expect(recovery.isRetryableError(message)).toBe(false);
+			expect(recovery.classifyResolvedInterruptedToolTurn(message)).toBeUndefined();
+		});
+
 		it("continues a Cursor NGHTTP2_INTERNAL_ERROR after a marked exec result", () => {
 			const message = cursorMessage([execToolCall("call-1", true)], nghttp2Internal);
 			const recovery = recoveryForReset(message, [realResult("call-1")]);
