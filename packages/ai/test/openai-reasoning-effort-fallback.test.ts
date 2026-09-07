@@ -497,6 +497,27 @@ describe("OpenAI reasoning effort fallback retry", () => {
 		expect(attempts).toBe(1);
 	});
 
+	it("still remaps a fieldless levels-list rejection for a real effort tier", async () => {
+		const bodies: Record<string, unknown>[] = [];
+		const fetchMock: FetchImpl = Object.assign(
+			async (_input: string | URL | Request, _init?: RequestInit): Promise<Response> => {
+				const body = parseJsonBody(_init);
+				bodies.push(body);
+				return bodies.length === 1 ? unsupportedLevelResponse("xhigh") : createResponsesSseResponse();
+			},
+			{ preconnect: fetch.preconnect },
+		);
+
+		const result = await streamOpenAIResponses(createMaxLadderResponsesModel(), testContext, {
+			apiKey: "test-key",
+			fetch: fetchMock,
+			reasoning: "xhigh",
+		}).result();
+
+		expect(result.stopReason).toBe("stop");
+		expect(bodies.map(body => (body.reasoning as { effort?: string } | undefined)?.effort)).toEqual(["xhigh", "max"]);
+	});
+
 	it("does not retry unrelated reasoning parameter errors", async () => {
 		let attempts = 0;
 		const fetchMock: FetchImpl = Object.assign(

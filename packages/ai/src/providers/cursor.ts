@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import http2 from "node:http2";
-import { splitCursorEffortSuffix } from "@oh-my-pi/pi-catalog/compat/collapse";
-import { classifyModel } from "@oh-my-pi/pi-catalog/compat/taxonomy";
+import { classifyModel, collapseVariantId } from "@oh-my-pi/pi-catalog/compat/taxonomy";
 import type {
 	ConversationStep,
 	CursorRule,
@@ -5237,7 +5236,8 @@ function extractImages(content: (TextContent | ImageContent)[]) {
  * The Run endpoint rejects a sibling slug as the wire `model_id` with
  * `resource_exhausted` (errorId 528384); the official `cursor-agent` splits the
  * slug into its base model id plus a `reasoning` effort parameter. Mirror that
- * for OpenAI-family ids: strip a trailing effort tier and emit
+ * for OpenAI-family ids: split the tier with the compiled catalog policy
+ * (`collapseVariantId`, KDL suffix/lane rules) and emit
  * `{ id: "reasoning", value: <effort> }`. The off tier (`-none`) is a sibling
  * slug too, so it normalizes to the bare (lane-preserving) base with no
  * reasoning parameter instead of going out raw.
@@ -5258,21 +5258,21 @@ function resolveCursorWireModel(
 } {
 	const wireModelId = requestModelId ?? model.requestModelId ?? model.id;
 	if (wireMode === "discovered") return { modelId: wireModelId, parameters: [] };
-	// Cursor's fast lane follows the effort token (`-high-fast`), while the
-	// standard lane ends at it (`-high`). Preserve the lane in the base id.
-	// Tier vocabulary comes from the catalog (`splitCursorEffortSuffix`), so
-	// KDL tier corrections govern the Run request too.
-	const split = splitCursorEffortSuffix(wireModelId);
-	const base = split?.baseId;
-	if (base && split && classifyModel("cursor", base).class === "openai") {
-		const lane = split.fast ? "-fast" : "";
-		if (split.tier === "none") {
-			return { modelId: `${base}${lane}`, parameters: [] };
+	// `collapseVariantId` keeps the lane in the logical id (`-high-fast` →
+	// base `-fast`) and decodes the KDL effort (`-none` → `off`).
+	const collapsed = collapseVariantId("cursor", wireModelId);
+	const effort = collapsed.effort;
+	const base = effort !== undefined ? collapsed.logicalId : undefined;
+	if (effort !== undefined && base && classifyModel("cursor", base).class === "openai") {
+		if (effort === "off") {
+			return { modelId: base, parameters: [] };
 		}
-		if ((THINKING_EFFORTS as readonly string[]).includes(split.tier)) {
+		if ((THINKING_EFFORTS as readonly string[]).includes(effort)) {
 			return {
-				modelId: `${base}${lane}`,
-				parameters: [create(RequestedModel_ModelParameterbytesSchema, { id: "reasoning", value: split.tier })],
+				modelId: base,
+				parameters: [
+					create(RequestedModel_ModelParameterbytesSchema, { id: "reasoning", value: collapsed.effort }),
+				],
 			};
 		}
 	}

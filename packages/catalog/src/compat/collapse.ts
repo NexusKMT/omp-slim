@@ -338,8 +338,7 @@ function buildCompiledTables(): Readonly<Record<string, VariantCollapseTable>> {
 	return tables;
 }
 
-/** Effort tier decoded from a Cursor sibling slug (`-extra-high` normalizes to `xhigh`; `-none` is the off tier). */
-export type CursorTierToken = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+type CursorTierToken = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 interface CursorTierMember<TSpec extends VariantSpecLike> {
 	baseId: string;
@@ -361,29 +360,6 @@ const CURSOR_TIER_BY_TOKEN: Readonly<Record<string, CursorTierToken | undefined>
 	xhigh: "xhigh",
 	max: "max",
 };
-
-/** Split of a Cursor per-effort sibling slug into logical base, effort tier, and SKU lane. */
-export interface CursorEffortSuffix {
-	baseId: string;
-	tier: CursorTierToken;
-	/** True for the parallel `-fast` SKU lane (`-high-fast`); the lane stays in the logical id. */
-	fast: boolean;
-}
-
-/**
- * Split a Cursor per-effort sibling slug (`gpt-5.6-sol-high-fast`) into its
- * logical base, effort tier, and SKU lane. Shared with the cursor-agent
- * transport so the Run wire mapping tracks the catalog tier vocabulary
- * instead of duplicating it.
- */
-export function splitCursorEffortSuffix(id: string): CursorEffortSuffix | undefined {
-	const match = CURSOR_TIER_ID_PATTERN.exec(id);
-	if (!match) return undefined;
-	const tier = CURSOR_TIER_BY_TOKEN[match[2] ?? ""];
-	const baseId = match[1];
-	if (!baseId || !tier) return undefined;
-	return { baseId, tier, fast: match[3] !== undefined };
-}
 
 /** Whether an existing logical row already routes every live member in `members`. */
 function collapsedCursorLogicalMatches<TSpec extends VariantSpecLike>(
