@@ -2142,7 +2142,7 @@ export class ModelRegistry {
 			) {
 				return overridden;
 			}
-			const clamped = clampCodexContextWindow(overridden, overridden.contextWindow);
+			const clamped = clampCodexContextWindow(model, overridden.contextWindow);
 			if (clamped === overridden.contextWindow) return overridden;
 			return applyModelOverride(overridden, { contextWindow: clamped });
 		});

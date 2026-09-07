@@ -56,6 +56,16 @@ test("clamps Codex overrides to the stale-aware ceiling", () => {
 	expect(clampCodexContextWindow({ ...astra, maxContextWindow: 1_200_000 }, 2_000_000)).toBe(1_200_000);
 });
 
+test("never clamps below the working window on a stale-low maximum", () => {
+	const legacy = bundledLegacy();
+	// 128K base with a 64K advertised maximum: the ceiling is discredited,
+	// so an explicit override falls back to the working window.
+	const stale = { ...legacy, contextWindow: 128_000, maxContextWindow: 64_000 };
+	expect(codexOverrideCeiling(stale)).toBe(64_000);
+	expect(clampCodexContextWindow(stale, 200_000)).toBe(128_000);
+	expect(clampCodexContextWindow(stale, 100_000)).toBe(100_000);
+});
+
 test("leaves models without a ceiling unclamped", () => {
 	const legacy = bundledLegacy();
 	expect(codexOverrideCeiling({ ...legacy, maxContextWindow: undefined })).toBeUndefined();

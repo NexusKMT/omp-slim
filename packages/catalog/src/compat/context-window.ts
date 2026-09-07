@@ -54,7 +54,10 @@ export function clampsContextOverride(model: Model): boolean {
 
 /**
  * Clamp a requested Codex context window to the override ceiling, mirroring
- * upstream. Returns the request unchanged when no ceiling applies or it
+ * upstream. `model` is the pre-override model: the ceiling never shrinks the
+ * request below the window that already works, so a stale-low live maximum
+ * (e.g. 128K base with a 64K advertised maximum) cannot punish an explicit
+ * override. Returns the request unchanged when no ceiling applies or it
  * already fits.
  */
 export function clampCodexContextWindow(model: Model, requested: number): number {
@@ -65,5 +68,7 @@ export function clampCodexContextWindow(model: Model, requested: number): number
 	if (ceiling === undefined || requested <= ceiling) {
 		return requested;
 	}
-	return ceiling;
+	const current = model.contextWindow;
+	const floor = typeof current === "number" && Number.isFinite(current) && current > 0 ? current : 0;
+	return Math.min(requested, Math.max(ceiling, floor));
 }
