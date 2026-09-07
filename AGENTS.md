@@ -25,10 +25,10 @@ This repo contains multiple packages, but **`packages/coding-agent/`** is the pr
 
 ## GitHub
 
-Unless user tells you exactly what to write:
-
-- **Never comment on GitHub** (issues, PRs, discussions).
-- **Never create issues on GitHub**.
+- Before posting a GitHub comment or creating an issue, MUST show the target and proposed text and obtain user confirmation. An explicit instruction to post supplied text to a specified target already counts as confirmation.
+- A request to address or fix PR feedback permits drafting replies, not posting them without confirmation. A request only to get or check comments is read-only.
+- When authorized to resolve review feedback, MUST verify the fix, obtain approval for a factual reply citing the change and verification, and post it in the existing thread before resolving. NEVER resolve if the reply is unapproved or posting fails.
+- Permission to work on a PR does not authorize unrelated comments or issue creation.
 
 ### Pull requests
 
