@@ -913,7 +913,12 @@ export class InputController {
 			if (this.ctx.session.isCompacting) {
 				const images = inputImages && inputImages.length > 0 ? [...inputImages] : undefined;
 				this.ctx.queueCompactionMessage(text, "steer", images);
-				if (submittedMode === "loop") this.ctx.setLoopPrompt(text);
+				// An inline `/loop` body queued here arms the loop only when it is
+				// an actual model prompt. Skill/bash/python bodies never reach this
+				// branch, but an extension-command body would otherwise be retained
+				// as loopPrompt while the drain executes it locally — and idle
+				// submissions never arm commands.
+				if (submittedMode === "loop" && !this.#isLocalExtensionCommand(text)) this.ctx.setLoopPrompt(text);
 				return;
 			}
 

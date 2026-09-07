@@ -6,8 +6,17 @@ type Spy = Mock<(...args: unknown[]) => unknown>;
 function createLoopContext(options: {
 	isStreaming: boolean;
 	isCompacting?: boolean;
+	extensionCommandNames?: string[];
 	onInputCallback?: (...args: never[]) => void;
 }) {
+	const extensionCommandNames = options.extensionCommandNames ?? [];
+	const extensionRunner =
+		extensionCommandNames.length > 0
+			? {
+					hasHandlers: () => false,
+					getCommand: (name: string) => (extensionCommandNames.includes(name) ? {} : undefined),
+				}
+			: undefined;
 	let loopPrompt: string | undefined = "original loop prompt";
 	const setLoopPrompt = vi.fn((prompt: string) => {
 		loopPrompt = prompt;
@@ -33,7 +42,7 @@ function createLoopContext(options: {
 			isBashRunning: false,
 			isEvalRunning: false,
 			queuedMessageCount: 0,
-			extensionRunner: undefined,
+			extensionRunner,
 			customCommands: [],
 			promptTemplates: [],
 			prompt,
@@ -145,6 +154,25 @@ describe("loop mode interjections", () => {
 		await ctx.editor.onSubmit?.("/loop 3 !echo hi");
 
 		expect(handleBashCommand).toHaveBeenCalledWith("echo hi", false);
+		expect(setLoopPrompt).not.toHaveBeenCalled();
+		expect(getLoopPrompt()).toBe("original loop prompt");
+	});
+
+	it("does not arm the loop when the compacted body is a local command", async () => {
+		const { ctx, setLoopPrompt, getLoopPrompt, queueCompactionMessage } = createLoopContext({
+			isStreaming: false,
+			isCompacting: true,
+			extensionCommandNames: ["ext-cmd"],
+		});
+		// Mirror handleLoopCommand: enabling loop mode hands the inline body
+		// back to the dispatcher, where it queues for compaction.
+		(ctx as unknown as Record<string, unknown>).handleLoopCommand = vi.fn(async () => "/ext-cmd args");
+		const controller = new InputController(ctx);
+		controller.setupEditorSubmitHandler();
+
+		await ctx.editor.onSubmit?.("/loop 3 /ext-cmd args");
+
+		expect(queueCompactionMessage).toHaveBeenCalledTimes(1);
 		expect(setLoopPrompt).not.toHaveBeenCalled();
 		expect(getLoopPrompt()).toBe("original loop prompt");
 	});
