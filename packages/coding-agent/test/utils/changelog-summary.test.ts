@@ -384,6 +384,52 @@ An intervening paragraph closes the list.
 		expect(selection.categoryCounts).toEqual({ Fixed: 2 });
 	});
 
+	test("restarts the list after an indented blockquote", () => {
+		// The blockquote closes the open list, so the deeper bullet below it opens a new
+		// top-level list instead of nesting under the old one.
+		const selection = summarize(`
+### Fixed
+
+  - First fix.
+ + Second fix.
+ > Quote.
+  - Third fix.
+`);
+
+		expect(selection.changeCount).toBe(3);
+		expect(selection.categoryCounts).toEqual({ Fixed: 3 });
+	});
+
+	test("does not count bullets inside a fenced code block", () => {
+		const selection = summarize(`
+### Fixed
+
+- First fix.
+
+\`\`\`
+- not a change
+\`\`\`
+
+- Second fix.
+`);
+
+		expect(selection.changeCount).toBe(2);
+		expect(selection.categoryCounts).toEqual({ Fixed: 2 });
+	});
+
+	test("counts ordered list items like unordered ones", () => {
+		// The renderer shows them as list items, so the announced count includes them.
+		const selection = summarize(`
+### Fixed
+
+1. First fix.
+2. Second fix.
+`);
+
+		expect(selection.changeCount).toBe(2);
+		expect(selection.categoryCounts).toEqual({ Fixed: 2 });
+	});
+
 	test("announces unreleased-shaped notes truthfully", () => {
 		const selection = summarize(`
 - Uncategorized note.

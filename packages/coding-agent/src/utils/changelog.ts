@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { getLastChangelogVersionPath, isEnoent, logger } from "@oh-my-pi/pi-utils";
-import { isHr } from "@oh-my-pi/pi-utils/marked";
+import { Lexer } from "@oh-my-pi/pi-utils/marked";
 import type { BunFile } from "bun";
 import bundledChangelogPath from "../../CHANGELOG.md" with { type: "file" };
 import type { SettingValue } from "../config/settings";
@@ -63,102 +63,30 @@ function emptyStartupSelection(persistCurrentVersion: boolean): StartupChangelog
 /** Bucket for release bullets written above any `###` category heading, so the breakdown never loses them. */
 const UNCATEGORIZED_CHANGELOG_CATEGORY = "Other";
 
-/** Leading indent columns of a line. Tabs advance to the next 4-column stop. */
-function changelogLineIndent(line: string): number {
-	let indent = 0;
-	for (const char of line) {
-		if (char === " ") indent += 1;
-		else if (char === "\t") indent += 4 - (indent % 4);
-		else break;
-	}
-	return indent;
-}
-
-/** A Markdown list bullet's indent columns and marker, or undefined when the line opens no list item. Tabs advance to the next 4-column stop. */
-function changelogBullet(line: string): { indent: number; marker: string } | undefined {
-	const match = line.match(/^([ \t]*)([-+*])[ \t]+\S/);
-	if (!match) return undefined;
-	return { indent: changelogLineIndent(match[1] ?? ""), marker: match[2] ?? "" };
-}
-
 function summarizeChangelogEntries(entries: readonly ChangelogEntry[]): {
 	changeCount: number;
 	categoryCounts: Record<string, number>;
 } {
 	const categoryCounts: Record<string, number> = {};
 	let changeCount = 0;
+
 	for (const entry of entries) {
 		let category = UNCATEGORIZED_CHANGELOG_CATEGORY;
-		// Indent and marker of the first item of the open list block. The renderer absorbs every
-		// whitespace-indented line into the open item, so an unindented line (paragraph, heading,
-		// fence, ...) closes the block — as does a blank-separated line at or above the open
-		// indent, which the blank lookahead detaches from the item. Blank lines never do alone.
-		let listIndent: number | undefined;
-		let listMarker: string | undefined;
-		// Whether the previous line was blank: only then does an indented line end the block.
-		let sawBlank = false;
-		for (const line of entry.content.split("\n")) {
-			const heading = line.match(/^###\s+(.+?)\s*$/);
-			if (heading) {
-				category = heading[1] ?? UNCATEGORIZED_CHANGELOG_CATEGORY;
-				listIndent = undefined;
-				listMarker = undefined;
-				sawBlank = false;
+		// Count what the renderer shows: top-level list items per `###` section, straight
+		// from the shared lexer. There is no parallel list grammar left here to drift.
+		for (const token of Lexer.lex(entry.content)) {
+			if (token.type === "heading" && token.depth === 3) {
+				const name = token.text.trim();
+				category = name === "" ? UNCATEGORIZED_CHANGELOG_CATEGORY : name;
 				continue;
 			}
-			if (/^\s*$/.test(line)) {
-				sawBlank = true;
-				continue;
+			if (token.type !== "list") continue;
+			for (const item of token.items) {
+				// A bare marker renders an empty item; it announces no change.
+				if (!item.task && item.text.trim() === "") continue;
+				categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
+				changeCount++;
 			}
-			const bullet = changelogBullet(line);
-			if (bullet === undefined) {
-				if (isHr(line)) {
-					// Breaks without a list marker (`_ _ _`, `***`): always `hr`, never an
-					// item. Ends the block like a differently marked break.
-					if (listIndent === undefined || changelogLineIndent(line) <= listIndent) {
-						listIndent = undefined;
-						listMarker = undefined;
-					}
-					sawBlank = false;
-					continue;
-				}
-				// A block boundary ends the open item, so a later indented bullet opens a new
-				// top-level list instead of nesting under the old one: always at column zero,
-				// and at any indent at or above the open list when blank-separated.
-				const indent = changelogLineIndent(line);
-				if (indent === 0 || (sawBlank && listIndent !== undefined && indent <= listIndent)) {
-					listIndent = undefined;
-					listMarker = undefined;
-				}
-				sawBlank = false;
-				continue;
-			}
-			if (isHr(line) && bullet.marker !== listMarker) {
-				// Shared `hr` grammar with the renderer: ends the block when at or above the open
-				// indent. A deeper break is absorbed into the open item, so the block stays open.
-				if (listIndent === undefined || changelogLineIndent(line) <= listIndent) {
-					listIndent = undefined;
-					listMarker = undefined;
-				}
-				sawBlank = false;
-				continue;
-			}
-			sawBlank = false;
-			if (listIndent === undefined) {
-				// With no list open, four columns of indent is an indented code block, not a list item.
-				if (bullet.indent >= 4) continue;
-				listIndent = bullet.indent;
-				listMarker = bullet.marker;
-			} else if (bullet.indent > listIndent) {
-				// Deeper than the block's first item: absorbed into the item above, not a separate change.
-				continue;
-			} else if (bullet.marker !== listMarker) {
-				// A different delimiter starts a new list: adopt its first item as reference.
-				listIndent = bullet.indent;
-				listMarker = bullet.marker;
-			}
-			categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
-			changeCount++;
 		}
 	}
 

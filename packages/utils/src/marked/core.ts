@@ -711,8 +711,7 @@ function isFence(line: string): RegExpExecArray | null {
 function isHeading(line: string): boolean {
 	return /^ {0,3}#{1,6}(?:\s|$)/.test(line);
 }
-/** Shared thematic-break predicate: the startup changelog counter reuses it, so announced counts never drift from rendered output. */
-export function isHr(line: string): boolean {
+function isHr(line: string): boolean {
 	return /^ {0,3}((?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})(?:\n|$)$/.test(line);
 }
 function isList(line: string): RegExpExecArray | null {
