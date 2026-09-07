@@ -21,7 +21,10 @@ function createLoopContext(options: {
 	const setLoopPrompt = vi.fn((prompt: string) => {
 		loopPrompt = prompt;
 	});
-	const prompt = vi.fn(async () => {});
+	const prompt = vi.fn(async () => true);
+	const pauseLoop = vi.fn(() => {
+		loopPrompt = undefined;
+	});
 	const editor = {
 		pendingImages: [],
 		pendingImageLinks: [],
@@ -57,6 +60,7 @@ function createLoopContext(options: {
 			loopPrompt = value;
 		},
 		setLoopPrompt,
+		pauseLoop,
 		flushPendingBashComponents: vi.fn(),
 		startPendingSubmission: vi.fn((input: { text: string }) => ({ ...input, cancelled: false, started: false })),
 		withLocalSubmission: async (_text: string, fn: () => unknown) => fn(),
@@ -77,6 +81,7 @@ function createLoopContext(options: {
 		ctx,
 		editor,
 		setLoopPrompt,
+		pauseLoop,
 		prompt,
 		getLoopPrompt: () => loopPrompt,
 		queueCompactionMessage: ctx.queueCompactionMessage as Spy,
@@ -175,5 +180,36 @@ describe("loop mode interjections", () => {
 		expect(queueCompactionMessage).toHaveBeenCalledTimes(1);
 		expect(setLoopPrompt).not.toHaveBeenCalled();
 		expect(getLoopPrompt()).toBe("original loop prompt");
+	});
+
+	it("parks the loop when a streamed body is consumed locally", async () => {
+		const { ctx, setLoopPrompt, pauseLoop, prompt, getLoopPrompt } = createLoopContext({ isStreaming: true });
+		// Mirror handleLoopCommand: enabling loop mode hands the inline body
+		// back to the dispatcher for normal submission.
+		(ctx as unknown as Record<string, unknown>).handleLoopCommand = vi.fn(async () => "/void-cmd");
+		// Mirror AgentSession.prompt reporting local consumption (void custom
+		// command) instead of a started turn.
+		prompt.mockResolvedValueOnce(false);
+		const controller = new InputController(ctx);
+		controller.setupEditorSubmitHandler();
+
+		await ctx.editor.onSubmit?.("/loop 3 /void-cmd");
+
+		expect(setLoopPrompt).toHaveBeenCalledWith("/void-cmd");
+		expect(pauseLoop).toHaveBeenCalledTimes(1);
+		expect(getLoopPrompt()).toBeUndefined();
+	});
+
+	it("parks the loop when a direct submission is consumed locally", async () => {
+		const { ctx, pauseLoop, prompt, getLoopPrompt } = createLoopContext({ isStreaming: false });
+		prompt.mockResolvedValueOnce(false);
+		const controller = new InputController(ctx);
+		controller.setupEditorSubmitHandler();
+
+		await ctx.editor.onSubmit?.("/void-cmd");
+
+		expect(prompt).toHaveBeenCalledTimes(1);
+		expect(pauseLoop).toHaveBeenCalledTimes(1);
+		expect(getLoopPrompt()).toBeUndefined();
 	});
 });

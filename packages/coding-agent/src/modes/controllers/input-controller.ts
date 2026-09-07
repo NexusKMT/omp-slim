@@ -964,11 +964,15 @@ export class InputController {
 				// typed since queuing intact. Same protection as #783, applied to
 				// the streaming/queue path.
 				try {
-					await this.ctx.withLocalSubmission(
+					const forwarded = await this.ctx.withLocalSubmission(
 						text,
 						() => this.ctx.session.prompt(text, { streamingBehavior: "steer", images }),
 						{ imageCount: images?.length ?? 0 },
 					);
+					// A steer consumed locally (void custom command) starts no turn:
+					// when it is the armed inline loop body, park the loop instead
+					// of resubmitting a local action once the turn ends.
+					if (!forwarded && this.ctx.loopPrompt === text) this.ctx.pauseLoop();
 				} catch (error) {
 					// Don't lose the queued steer draft: restore images then the collapsed
 					// text so chip tokens (and band cards) survive the retry.
@@ -1036,13 +1040,15 @@ export class InputController {
 				this.ctx.editor.pendingImageLinks = [];
 				this.#maybeStartTitleGeneration(text);
 				try {
-					await this.ctx.withLocalSubmission(
+					const forwarded = await this.ctx.withLocalSubmission(
 						text,
 						() => this.ctx.session.prompt(text, { streamingBehavior: "steer", images }),
 						{
 							imageCount: images?.length ?? 0,
 						},
 					);
+					// Same locally-consumed guard as the streaming branch above.
+					if (!forwarded && this.ctx.loopPrompt === text) this.ctx.pauseLoop();
 				} catch (error) {
 					// Don't lose the message: hand images then collapsed text back to the
 					// editor so the user can retry (e.g. prompt dispatch rejecting an

@@ -306,7 +306,8 @@ export async function submitInteractiveInput(
 	mode: Pick<
 		InteractiveMode,
 		"markPendingSubmissionStarted" | "finishPendingSubmission" | "showError" | "checkShutdownRequested"
-	>,
+	> &
+		Partial<Pick<InteractiveMode, "loopPrompt" | "pauseLoop">>,
 	session: Pick<AgentSession, "prompt" | "promptCustomMessage" | "isStreaming">,
 	input: SubmittedUserInput,
 ): Promise<void> {
@@ -355,7 +356,11 @@ export async function submitInteractiveInput(
 				userInitiated: input.userInitiated,
 			});
 		} else {
-			await session.prompt(input.text, { images: input.images, streamingBehavior });
+			const forwarded = await session.prompt(input.text, { images: input.images, streamingBehavior });
+			// Dispatch consumed the body locally (void custom command) instead of
+			// starting a turn: when it is the armed loop body, park the loop rather
+			// than resubmitting a local action after every yield.
+			if (!forwarded && mode.loopPrompt === input.text) mode.pauseLoop?.();
 		}
 	} catch (error: unknown) {
 		const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
