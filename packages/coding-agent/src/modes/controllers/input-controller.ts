@@ -943,13 +943,6 @@ export class InputController {
 				return;
 			}
 
-			// An inline `/loop` body arms the loop only after surviving
-			// local-command dispatch: a body like `!echo hi` is consumed by its
-			// command branch without submitting a turn, and recording it would
-			// report a running loop that never starts. (The compaction branch
-			// above arms separately so queued bodies keep the explicit prompt.)
-			if (submittedMode === "loop") this.ctx.setLoopPrompt(text);
-
 			// If streaming, use prompt() with steer behavior
 			// This handles extension commands (execute immediately), prompt template expansion, and queueing
 			if (this.ctx.session.isStreaming) {
@@ -969,10 +962,12 @@ export class InputController {
 						() => this.ctx.session.prompt(text, { streamingBehavior: "steer", images }),
 						{ imageCount: images?.length ?? 0 },
 					);
-					// A steer consumed locally (void custom command) starts no turn:
-					// when it is the armed inline loop body, park the loop instead
-					// of resubmitting a local action once the turn ends.
-					if (!forwarded && this.ctx.loopPrompt === text) this.ctx.pauseLoop();
+					// An inline `/loop` body arms the loop only after dispatch
+					// confirms it was forwarded: arming before the await would
+					// retain a body whose dispatch rejects, resubmitting a failed
+					// prompt after every yield. A rejection leaves prior loop
+					// state untouched, so the previous body (if any) survives.
+					if (submittedMode === "loop" && forwarded) this.ctx.setLoopPrompt(text);
 				} catch (error) {
 					// Don't lose the queued steer draft: restore images then the collapsed
 					// text so chip tokens (and band cards) survive the retry.
@@ -990,13 +985,14 @@ export class InputController {
 				this.ctx.ui.requestRender();
 				return;
 			}
-
 			// Normal message submission
-			// While loop mode is on, an idle user-typed prompt becomes the new loop
-			// prompt that auto-resubmits after each yield. This sits after the
-			// compaction, extension-command, and streaming-steer early returns so
-			// those one-off inputs never replace the loop body.
-			if (this.ctx.loopModeEnabled) {
+			// While loop mode is on, an idle user-typed prompt handed to the input
+			// waiter becomes the new loop prompt that auto-resubmits after each
+			// yield. This sits after the compaction, extension-command, and
+			// streaming-steer early returns so those one-off inputs never replace
+			// the loop body. The waiter-less direct path below arms only after its
+			// own dispatch succeeds, so a rejection never retains a failed body.
+			if (this.ctx.loopModeEnabled && this.ctx.onInputCallback) {
 				this.ctx.setLoopPrompt(text);
 			}
 			// First, move any pending bash components to chat
@@ -1047,8 +1043,10 @@ export class InputController {
 							imageCount: images?.length ?? 0,
 						},
 					);
-					// Same locally-consumed guard as the streaming branch above.
-					if (!forwarded && this.ctx.loopPrompt === text) this.ctx.pauseLoop();
+					// No waiter took this submission, so the idle block above did not
+					// arm it: record it as the loop body only after dispatch
+					// confirms it was forwarded, mirroring the streaming branch.
+					if (forwarded) this.ctx.setLoopPrompt(text);
 				} catch (error) {
 					// Don't lose the message: hand images then collapsed text back to the
 					// editor so the user can retry (e.g. prompt dispatch rejecting an

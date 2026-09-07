@@ -66,6 +66,7 @@ function createLoopContext(options: {
 		withLocalSubmission: async (_text: string, fn: () => unknown) => fn(),
 		updatePendingMessagesDisplay: vi.fn(),
 		updateEditorBorderColor: vi.fn(),
+		showError: vi.fn(),
 		handleBashCommand: vi.fn(),
 		queueCompactionMessage: vi.fn(),
 		onInputCallback: options.onInputCallback,
@@ -86,6 +87,7 @@ function createLoopContext(options: {
 		getLoopPrompt: () => loopPrompt,
 		queueCompactionMessage: ctx.queueCompactionMessage as Spy,
 		handleBashCommand: ctx.handleBashCommand as Spy,
+		showError: ctx.showError as Spy,
 	};
 }
 
@@ -182,7 +184,7 @@ describe("loop mode interjections", () => {
 		expect(getLoopPrompt()).toBe("original loop prompt");
 	});
 
-	it("parks the loop when a streamed body is consumed locally", async () => {
+	it("leaves the loop untouched when a streamed body is consumed locally", async () => {
 		const { ctx, setLoopPrompt, pauseLoop, prompt, getLoopPrompt } = createLoopContext({ isStreaming: true });
 		// Mirror handleLoopCommand: enabling loop mode hands the inline body
 		// back to the dispatcher for normal submission.
@@ -195,13 +197,14 @@ describe("loop mode interjections", () => {
 
 		await ctx.editor.onSubmit?.("/loop 3 /void-cmd");
 
-		expect(setLoopPrompt).toHaveBeenCalledWith("/void-cmd");
-		expect(pauseLoop).toHaveBeenCalledTimes(1);
-		expect(getLoopPrompt()).toBeUndefined();
+		expect(prompt).toHaveBeenCalledTimes(1);
+		expect(setLoopPrompt).not.toHaveBeenCalled();
+		expect(pauseLoop).not.toHaveBeenCalled();
+		expect(getLoopPrompt()).toBe("original loop prompt");
 	});
 
-	it("parks the loop when a direct submission is consumed locally", async () => {
-		const { ctx, pauseLoop, prompt, getLoopPrompt } = createLoopContext({ isStreaming: false });
+	it("leaves the loop untouched when a direct submission is consumed locally", async () => {
+		const { ctx, setLoopPrompt, pauseLoop, prompt, getLoopPrompt } = createLoopContext({ isStreaming: false });
 		prompt.mockResolvedValueOnce(false);
 		const controller = new InputController(ctx);
 		controller.setupEditorSubmitHandler();
@@ -209,7 +212,55 @@ describe("loop mode interjections", () => {
 		await ctx.editor.onSubmit?.("/void-cmd");
 
 		expect(prompt).toHaveBeenCalledTimes(1);
-		expect(pauseLoop).toHaveBeenCalledTimes(1);
-		expect(getLoopPrompt()).toBeUndefined();
+		expect(setLoopPrompt).not.toHaveBeenCalled();
+		expect(pauseLoop).not.toHaveBeenCalled();
+		expect(getLoopPrompt()).toBe("original loop prompt");
+	});
+
+	it("arms a direct submission after dispatch succeeds", async () => {
+		const { ctx, setLoopPrompt, getLoopPrompt } = createLoopContext({ isStreaming: false });
+		const controller = new InputController(ctx);
+		controller.setupEditorSubmitHandler();
+
+		await ctx.editor.onSubmit?.("direct body");
+
+		expect(setLoopPrompt).toHaveBeenCalledWith("direct body");
+		expect(getLoopPrompt()).toBe("direct body");
+	});
+
+	it("keeps the prior body when a streamed inline body is rejected", async () => {
+		const { ctx, setLoopPrompt, pauseLoop, prompt, getLoopPrompt, showError } = createLoopContext({
+			isStreaming: true,
+		});
+		// Mirror handleLoopCommand: enabling loop mode hands the inline body
+		// back to the dispatcher for normal submission.
+		(ctx as unknown as Record<string, unknown>).handleLoopCommand = vi.fn(async () => "new body");
+		// Mirror attachment normalization failing inside prompt dispatch.
+		prompt.mockRejectedValueOnce(new Error("attachment too large"));
+		const controller = new InputController(ctx);
+		controller.setupEditorSubmitHandler();
+
+		await ctx.editor.onSubmit?.("/loop 3 new body");
+
+		expect(setLoopPrompt).not.toHaveBeenCalled();
+		expect(pauseLoop).not.toHaveBeenCalled();
+		expect(getLoopPrompt()).toBe("original loop prompt");
+		expect(showError).toHaveBeenCalledWith("attachment too large");
+	});
+
+	it("keeps the prior body when a direct submission is rejected", async () => {
+		const { ctx, setLoopPrompt, pauseLoop, prompt, getLoopPrompt, showError } = createLoopContext({
+			isStreaming: false,
+		});
+		prompt.mockRejectedValueOnce(new Error("attachment too large"));
+		const controller = new InputController(ctx);
+		controller.setupEditorSubmitHandler();
+
+		await ctx.editor.onSubmit?.("direct body");
+
+		expect(setLoopPrompt).not.toHaveBeenCalled();
+		expect(pauseLoop).not.toHaveBeenCalled();
+		expect(getLoopPrompt()).toBe("original loop prompt");
+		expect(showError).toHaveBeenCalledWith("attachment too large");
 	});
 });
