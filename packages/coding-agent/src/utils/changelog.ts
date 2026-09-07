@@ -112,6 +112,16 @@ function summarizeChangelogEntries(entries: readonly ChangelogEntry[]): {
 			}
 			const bullet = changelogBullet(line);
 			if (bullet === undefined) {
+				if (isHr(line)) {
+					// Breaks without a list marker (`_ _ _`, `***`): always `hr`, never an
+					// item. Ends the block like a differently marked break.
+					if (listIndent === undefined || changelogLineIndent(line) <= listIndent) {
+						listIndent = undefined;
+						listMarker = undefined;
+					}
+					sawBlank = false;
+					continue;
+				}
 				// A block boundary ends the open item, so a later indented bullet opens a new
 				// top-level list instead of nesting under the old one: always at column zero,
 				// and at any indent at or above the open list when blank-separated.

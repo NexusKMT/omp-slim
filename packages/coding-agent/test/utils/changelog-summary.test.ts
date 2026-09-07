@@ -304,6 +304,50 @@ An intervening paragraph closes the list.
 		expect(selection.categoryCounts).toEqual({ Fixed: 3 });
 	});
 
+	test("restarts the list after an underscore thematic break", () => {
+		// `_ _ _` never parses as a list bullet, but the renderer still lexes it as `hr`
+		// and closes the list — the deeper bullet below opens a new top-level list.
+		const selection = summarize(`
+### Fixed
+
+ - First fix.
+ _ _ _
+  - Second fix.
+`);
+
+		expect(selection.changeCount).toBe(2);
+		expect(selection.categoryCounts).toEqual({ Fixed: 2 });
+	});
+
+	test("restarts the list after a spaceless thematic break", () => {
+		// `***` carries no list marker either, yet still renders as `hr`.
+		const selection = summarize(`
+### Fixed
+
+ - First fix.
+ ***
+  - Second fix.
+`);
+
+		expect(selection.changeCount).toBe(2);
+		expect(selection.categoryCounts).toEqual({ Fixed: 2 });
+	});
+
+	test("keeps the list open across a deeper underscore break", () => {
+		// Past the open indent the break is absorbed into the item above, so the
+		// bullet below it stays nested rather than starting a new list.
+		const selection = summarize(`
+### Fixed
+
+- First fix.
+   _ _ _
+  - nested detail
+`);
+
+		expect(selection.changeCount).toBe(1);
+		expect(selection.categoryCounts).toEqual({ Fixed: 1 });
+	});
+
 	test("restarts the list after a blank-separated indented paragraph", () => {
 		// The blank lookahead detaches the paragraph from the open item, so the deeper
 		// bullet below it opens a new top-level list instead of nesting under the old one.
