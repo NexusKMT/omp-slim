@@ -6,6 +6,7 @@ import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { createModelManager } from "@oh-my-pi/pi-catalog/model-manager";
 import { getBundledModel, getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { githubCopilotModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
+import { COPILOT_API_HEADERS } from "@oh-my-pi/pi-catalog/wire/github-copilot";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 
 function getHeaderValue(headers: unknown, key: string): string | undefined {
@@ -515,6 +516,100 @@ describe("github copilot model limits mapping", () => {
 			// so it stays dropped.
 			expect(models.find(candidate => candidate.id === "grok-4.5")?.api).toBe("openai-responses");
 			expect(models.find(candidate => candidate.id === "grok-4.5-1m")).toBeUndefined();
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("refetches a cached enterprise sibling still pinned to -none-fast", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-ai-copilot-solfast-cache-"));
+		const cacheDbPath = path.join(tempDir, "models.db");
+		const cacheProviderId = "github-copilot-solfast-cache-test";
+		try {
+			const poisoned: ModelSpec<"openai-responses"> = {
+				id: "gpt-5.6-sol-fast",
+				name: "GPT-5.6 Sol Fast (Internal only)",
+				api: "openai-responses",
+				provider: "github-copilot",
+				baseUrl: "https://api.githubcopilot.com",
+				reasoning: true,
+				requestModelId: "gpt-5.6-sol-none-fast",
+				// Faithful to a real pre-fix mapper row: headers present, so the
+				// header-restore path cannot force the refetch by itself and only
+				// the fingerprint migration distinguishes fixed from broken.
+				headers: { ...COPILOT_API_HEADERS },
+				thinking: {
+					mode: "effort",
+					efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
+					effortRouting: {
+						off: "gpt-5.6-sol-none-fast",
+						[Effort.Low]: "gpt-5.6-sol-low-fast",
+						[Effort.Medium]: "gpt-5.6-sol-medium-fast",
+						[Effort.High]: "gpt-5.6-sol-high-fast",
+						[Effort.XHigh]: "gpt-5.6-sol-xhigh-fast",
+						[Effort.Max]: "gpt-5.6-sol-max-fast",
+					},
+				},
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 1_050_000,
+				maxTokens: 128_000,
+			};
+			const fetchMock = vi.fn(async () => {
+				return new Response(
+					JSON.stringify({
+						data: [
+							{
+								id: "gpt-5.6-sol-fast",
+								name: "GPT-5.6 Sol Fast (Internal only)",
+								capabilities: {
+									type: "chat",
+									limits: { max_context_window_tokens: 1_050_000, max_output_tokens: 128_000 },
+								},
+							},
+						],
+					}),
+					{
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					},
+				);
+			});
+			// Seed the poisoned row through the previous fingerprint (drop list
+			// without sol-fast) while keeping the real restore options: the
+			// written cache is fully usable, so only the fingerprint migration
+			// can force the refetch — the upgraded-installation scenario.
+			const oldManager = createModelManager({
+				...githubCopilotModelManagerOptions({ apiKey: "copilot-test-key", fetch: fetchMock }),
+				dropCachedModelIdsOnStaticMismatch: [
+					"gpt-6-astra",
+					"gpt-6-astra-1m",
+					"grok-4.5",
+					"grok-4.5-1m",
+					"grok-4.6",
+					"grok-4.6-1m",
+					"mai-code-1-flash-picker",
+				],
+				cacheProviderId,
+				cacheDbPath,
+				fetchDynamicModels: async () => [poisoned],
+			});
+			await oldManager.refresh("online");
+
+			const manager = createModelManager({
+				...githubCopilotModelManagerOptions({ apiKey: "copilot-test-key", fetch: fetchMock }),
+				cacheProviderId,
+				cacheDbPath,
+			});
+			const { models } = await manager.refresh("online-if-uncached");
+			const model = models.find(candidate => candidate.id === "gpt-5.6-sol-fast");
+
+			// The fingerprint migration must refetch instead of serving the
+			// poisoned cache row; the remapped row carries no off-tier pin.
+			expect(fetchMock).toHaveBeenCalled();
+			expect(model?.api).toBe("openai-responses");
+			expect(model).not.toHaveProperty("requestModelId");
+			expect(model?.thinking?.effortRouting).toBeUndefined();
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
