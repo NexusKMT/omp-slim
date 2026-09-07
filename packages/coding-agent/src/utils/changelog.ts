@@ -62,13 +62,22 @@ function emptyStartupSelection(persistCurrentVersion: boolean): StartupChangelog
 /** Bucket for release bullets written above any `###` category heading, so the breakdown never loses them. */
 const UNCATEGORIZED_CHANGELOG_CATEGORY = "Other";
 
+/** Leading indent columns of a line. Tabs advance to the next 4-column stop. */
+function changelogLineIndent(line: string): number {
+	let indent = 0;
+	for (const char of line) {
+		if (char === " ") indent += 1;
+		else if (char === "\t") indent += 4 - (indent % 4);
+		else break;
+	}
+	return indent;
+}
+
 /** Indent columns of a Markdown list bullet, or undefined when the line opens no list item. Tabs advance to the next 4-column stop. */
 function changelogBulletIndent(line: string): number | undefined {
 	const match = line.match(/^([ \t]*)[-+*][ \t]+\S/);
 	if (!match) return undefined;
-	let indent = 0;
-	for (const char of match[1] ?? "") indent = char === "\t" ? indent + 4 - (indent % 4) : indent + 1;
-	return indent;
+	return changelogLineIndent(match[1] ?? "");
 }
 
 function summarizeChangelogEntries(entries: readonly ChangelogEntry[]): {
@@ -90,7 +99,15 @@ function summarizeChangelogEntries(entries: readonly ChangelogEntry[]): {
 				continue;
 			}
 			const indent = changelogBulletIndent(line);
-			if (indent === undefined) continue;
+			if (indent === undefined) {
+				// A block boundary closes the open list, so a later 1-3-column bullet is a new
+				// top-level change rather than a sub-item of the earlier list. Blank lines are
+				// allowed inside lists and never close one; lines indented to the open item's
+				// content column are continuations of that item.
+				if (line.trim() === "" || listIndent === undefined) continue;
+				if (changelogLineIndent(line) < listIndent + 2) listIndent = undefined;
+				continue;
+			}
 			if (listIndent === undefined) {
 				// With no list open, four columns of indent is an indented code block, not a list item.
 				if (indent >= 4) continue;

@@ -62,6 +62,50 @@ describe("startup changelog summary", () => {
 		expect(selection.categoryCounts).toEqual({ Fixed: 2 });
 	});
 
+	test("counts a top-level bullet after an intervening paragraph", () => {
+		const selection = summarize(`
+### Fixed
+
+- First fix.
+
+An intervening paragraph closes the list.
+
+   - Second fix.
+`);
+
+		expect(selection.changeCount).toBe(2);
+		expect(selection.categoryCounts).toEqual({ Fixed: 2 });
+	});
+
+	test("counts a top-level bullet after a subheading", () => {
+		const selection = summarize(`
+### Fixed
+
+- First fix.
+
+#### Subheading
+
+   - Second fix.
+`);
+
+		expect(selection.changeCount).toBe(2);
+		expect(selection.categoryCounts).toEqual({ Fixed: 2 });
+	});
+
+	test("keeps a list open across an indented continuation line", () => {
+		const selection = summarize(`
+### Fixed
+
+- First fix.
+  Continued description of the first fix.
+  - nested detail
+- Second fix.
+`);
+
+		expect(selection.changeCount).toBe(2);
+		expect(selection.categoryCounts).toEqual({ Fixed: 2 });
+	});
+
 	test("does not count a bullet indented into a code block", () => {
 		const selection = summarize(`
 ### Fixed
