@@ -504,6 +504,32 @@ describe("OpenAI reasoning effort fallback retry", () => {
 		expect(bodies.map(body => (body.reasoning as { effort?: string } | undefined)?.effort)).toEqual(["none", "low"]);
 	});
 
+	it("does not retry when the error param names another none-valued field", async () => {
+		let attempts = 0;
+		const fetchMock: FetchImpl = Object.assign(
+			async (_input: string | URL | Request, _init?: RequestInit): Promise<Response> => {
+				attempts += 1;
+				const message = "Unsupported value: 'none' is not supported. Supported values are: 'auto', 'required'.";
+				return new Response(
+					JSON.stringify({ error: { message, param: "tool_choice", type: "invalid_request_error" } }),
+					{ status: 400, headers: { "content-type": "application/json" } },
+				);
+			},
+			{ preconnect: fetch.preconnect },
+		);
+
+		const result = await streamOpenAIResponses(createMaxLadderResponsesModel(), testContext, {
+			apiKey: "test-key",
+			fetch: fetchMock,
+			reasoning: "high",
+			forceReasoningOff: true,
+		}).result();
+
+		expect(result.stopReason).toBe("error");
+		expect(result.errorStatus).toBe(400);
+		expect(attempts).toBe(1);
+	});
+
 	it("does not leak an explicit-disable fallback into later normal turns", async () => {
 		const bodies: Record<string, unknown>[] = [];
 		const providerSessionState = new Map<string, ProviderSessionState>();

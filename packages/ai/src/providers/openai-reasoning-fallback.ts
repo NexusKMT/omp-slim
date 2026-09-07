@@ -235,6 +235,11 @@ function isInvalidReasoningEffortError(
 	// naming only the reasoning-off value is trusted.
 	const namesField = /reasoning[_. ]effort|reasoning value/i.test(message);
 	const listsLevels = /(?:valid|supported|allowed) levels?/i.test(message);
+	// An explicit error param naming another field defeats the fieldless
+	// heuristic entirely: e.g. `tool_choice: "none"` rejected with its own
+	// Supported-values list must not trigger a reasoning-effort retry.
+	const errorParam = capturedStringField(captured, "param") ?? "";
+	if (errorParam !== "" && !/reasoning[_. ]effort|reasoning value/i.test(errorParam) && !namesField) return false;
 	if (currentEffort.toLowerCase() !== "none" && !namesField && !listsLevels) return false;
 	const quoted = `["'\`]${escapeRegExp(currentEffort)}["'\`]`;
 	return (
