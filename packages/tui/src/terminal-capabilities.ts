@@ -425,6 +425,35 @@ export function detectRectangularSgrSupport(terminalId: TerminalId, env: NodeJS.
 	return true;
 }
 /**
+ * Whether the terminal implements colon-subparameter SGR styled underlines —
+ * `CSI 4 : 3 m` (curly) plus `CSI 58` / `CSI 59` underline color — as opposed to
+ * only the legacy `CSI 4 m` / `CSI 24 m` on/off underline.
+ *
+ * This is an underline-style capability, not a color depth, so it is keyed on
+ * the detected terminal, never on `TERM`/`COLORTERM`. kitty, Ghostty, WezTerm,
+ * and iTerm2 (>= 3) implement the colon form. Apple Terminal does NOT: it
+ * renders `CSI 4 : 0 m` (the reset half) as a solid black background that
+ * persists to end of line, and ignores SGR 58/59 — so it, along with every
+ * other unproven terminal, gets the flat underline instead.
+ */
+export function detectStyledUnderlineSupport(terminalId: TerminalId, env: NodeJS.ProcessEnv = Bun.env): boolean {
+	switch (terminalId) {
+		case "kitty":
+		case "ghostty":
+		case "wezterm":
+			return true;
+		case "iterm2": {
+			// iTerm2 gained styled underlines in 3.0; 2.x never did. Detection via
+			// ITERM_SESSION_ID can arrive without a version (e.g. through tmux) —
+			// every shipping iTerm2 is 3.x, so an absent version is treated as capable.
+			const version = parseMajorMinorVersion(env.TERM_PROGRAM_VERSION);
+			return !version || version.major >= 3;
+		}
+		default:
+			return false;
+	}
+}
+/**
  * Resolve an explicit user override for OSC 8 hyperlinks. Returns `false` for
  * an opt-out, `true` for a force-on, or `null` when the user has expressed no
  * preference. Opt-out beats force-on so a kill switch is unambiguous, mirroring
@@ -671,6 +700,8 @@ export interface RuntimeTerminal extends TerminalInfo {
 	supportsScreenToScrollback: boolean;
 	/** Whether OSC 66 text sizing is currently enabled. */
 	textSizing: boolean;
+	/** Whether the terminal implements colon-subparameter styled underlines (curly + colored). */
+	styledUnderlines: boolean;
 }
 
 export const TERMINAL: RuntimeTerminal = (() => {
@@ -697,6 +728,11 @@ export const TERMINAL: RuntimeTerminal = (() => {
 	// ignores DECCARA) exercises the padded-string fallback. Integration tests opt
 	// in explicitly through setTerminalDeccara.
 	resolved.deccara = detectRectangularSgrSupport(resolved.id, Bun.env) && !isBunTestRuntime();
+	// Styled-underline capability: colon-form curly underline + SGR 58/59 color.
+	// Keyed on the detected terminal (an underline-style capability, not a color
+	// depth), so Apple Terminal and other unproven hosts fall back to the flat
+	// CSI 4 m / CSI 24 m underline the typo renderer needs to avoid black bars.
+	resolved.styledUnderlines = detectStyledUnderlineSupport(resolved.id, Bun.env);
 	return resolved;
 })();
 

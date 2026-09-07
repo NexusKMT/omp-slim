@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+	detectStyledUnderlineSupport,
 	detectTerminalId,
 	getTerminalInfo,
 	hyperlinksUserOverride,
@@ -552,5 +553,32 @@ describe("shouldEnableHyperlinksByDefault", () => {
 		expect(shouldEnableHyperlinksByDefault({ PI_FORCE_HYPERLINKS: "1" }, "base")).toBe(true);
 		expect(shouldEnableHyperlinksByDefault({ PI_FORCE_HYPERLINKS: "1", TMUX: "1" }, "wezterm")).toBe(true);
 		expect(shouldEnableHyperlinksByDefault({ PI_FORCE_HYPERLINKS: "1", STY: "1.pts-0" }, "kitty")).toBe(true);
+	});
+});
+
+describe("detectStyledUnderlineSupport", () => {
+	it("enables the colon form only on terminals that implement styled underlines", () => {
+		expect(detectStyledUnderlineSupport("kitty")).toBe(true);
+		expect(detectStyledUnderlineSupport("ghostty")).toBe(true);
+		expect(detectStyledUnderlineSupport("wezterm")).toBe(true);
+		expect(detectStyledUnderlineSupport("iterm2")).toBe(true);
+	});
+
+	it("keeps Apple Terminal and other unproven hosts on the flat underline", () => {
+		// Apple Terminal advertises no id marker and resolves to `base`, where the
+		// colon-form reset paints a black bar — so base and every fallback stay off.
+		expect(detectTerminalId({ TERM_PROGRAM: "Apple_Terminal" })).toBe("base");
+		expect(detectStyledUnderlineSupport("base")).toBe(false);
+		expect(detectStyledUnderlineSupport("trueColor")).toBe(false);
+		expect(detectStyledUnderlineSupport("vscode")).toBe(false);
+		expect(detectStyledUnderlineSupport("alacritty")).toBe(false);
+		expect(detectStyledUnderlineSupport("warp")).toBe(false);
+		expect(detectStyledUnderlineSupport("orca")).toBe(false);
+	});
+
+	it("gates iTerm2 on major version >= 3 but treats an absent version as capable", () => {
+		expect(detectStyledUnderlineSupport("iterm2", { TERM_PROGRAM_VERSION: "2.1.4" })).toBe(false);
+		expect(detectStyledUnderlineSupport("iterm2", { TERM_PROGRAM_VERSION: "3.5.0" })).toBe(true);
+		expect(detectStyledUnderlineSupport("iterm2", {})).toBe(true);
 	});
 });
