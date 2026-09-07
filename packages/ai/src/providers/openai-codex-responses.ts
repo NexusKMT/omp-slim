@@ -3883,8 +3883,15 @@ class CodexWebSocketConnection {
 			const requestPayload = JSON.stringify(request);
 			notifyCodexWebSocketOutbound(onSseEvent, request, requestPayload);
 			// Re-check liveness: the debug-session await above can outlive the socket.
+			// Preserve the abort cause: onAbort already queued a caused error, but this
+			// throw would otherwise mask it before #nextMessage() drains the queue.
 			const socket = this.#socket;
 			if (!socket || socket.readyState !== WebSocket.OPEN) {
+				if (signal?.aborted) {
+					throw new CodexWebSocketTransportError(`websocket connection is unavailable`, {
+						cause: signal.reason,
+					});
+				}
 				throw new CodexWebSocketTransportError(`websocket connection is unavailable`);
 			}
 			try {
