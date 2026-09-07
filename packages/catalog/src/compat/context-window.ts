@@ -62,6 +62,15 @@ export function codexOverrideCeiling(model: Model): number | undefined {
 }
 
 /**
+ * Whether explicit context-window overrides for this model clamp to the
+ * server-honored ceiling. KDL-owned (`clamp-context-override`): branching on
+ * it here keeps provider deployment contracts out of TypeScript.
+ */
+export function clampsContextOverride(model: Model): boolean {
+	return resolveModelPolicy(toModelSpec(model)).catalog.clampContextOverride === true;
+}
+
+/**
  * Clamp a requested Codex context window to the override ceiling, mirroring
  * upstream. Returns the request unchanged when no ceiling applies or it
  * already fits.

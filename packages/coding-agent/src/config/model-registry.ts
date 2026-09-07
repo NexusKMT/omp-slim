@@ -17,7 +17,11 @@ import type {
 import type { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { collapseBuiltVariants } from "@oh-my-pi/pi-catalog/compat/collapse";
-import { clampCodexContextWindow, resolveMaxContextWindow } from "@oh-my-pi/pi-catalog/compat/context-window";
+import {
+	clampCodexContextWindow,
+	clampsContextOverride,
+	resolveMaxContextWindow,
+} from "@oh-my-pi/pi-catalog/compat/context-window";
 import { applyCatalogMetrics, CatalogMetricsIndex } from "@oh-my-pi/pi-catalog/identity/metrics";
 import { readModelCache, writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import {
@@ -2126,14 +2130,15 @@ export class ModelRegistry {
 			const override = resolveModelOverrideWithAliases(providerOverrides, model, hasLiveModel);
 			if (!override) return model;
 			const overridden = applyModelOverride(model, override);
-			// Codex-faithful ceiling (openai/codex `with_config_overrides`):
-			// an explicit `model_context_window` clamps to the server-honored
-			// maximum instead of widening without bound. Base catalog windows
-			// are untouched — upstream only clamps config overrides.
+			// KDL-owned override ceiling (`clamp-context-override`, mirroring
+			// openai/codex `with_config_overrides`): an explicit context window
+			// clamps to the server-honored maximum instead of widening without
+			// bound. Base catalog windows are untouched — upstream only clamps
+			// config overrides.
 			if (
-				overridden.provider !== "openai-codex" ||
+				override.contextWindow === undefined ||
 				overridden.contextWindow === null ||
-				override.contextWindow === undefined
+				!clampsContextOverride(overridden)
 			) {
 				return overridden;
 			}

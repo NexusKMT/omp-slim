@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
 	clampCodexContextWindow,
+	clampsContextOverride,
 	codexOverrideCeiling,
 	codexResolvedContextWindow,
 	resolveMaxContextWindow,
@@ -67,4 +68,16 @@ test("leaves models without a ceiling unclamped", () => {
 	const legacy = bundledLegacy();
 	expect(codexOverrideCeiling({ ...legacy, maxContextWindow: undefined })).toBeUndefined();
 	expect(clampCodexContextWindow({ ...legacy, maxContextWindow: undefined }, 2_000_000)).toBe(2_000_000);
+});
+
+test("reads the override-clamp contract from KDL policy, not provider ids", () => {
+	const astra = bundledAstra();
+	const legacy = bundledLegacy();
+	// Provider-wide Codex semantics: every Codex SKU clamps, on any route.
+	expect(clampsContextOverride(astra)).toBe(true);
+	expect(clampsContextOverride({ ...legacy, maxContextWindow: 640_000 })).toBe(true);
+	expect(clampsContextOverride({ ...legacy, id: "gpt-5.5-wm" })).toBe(true);
+	// Other providers never clamp, even with a live maximum present.
+	expect(clampsContextOverride({ ...legacy, provider: "openai" })).toBe(false);
+	expect(clampsContextOverride({ ...legacy, provider: "openrouter", maxContextWindow: 640_000 })).toBe(false);
 });
