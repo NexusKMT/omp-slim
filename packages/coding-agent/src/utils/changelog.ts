@@ -73,11 +73,14 @@ function changelogLineIndent(line: string): number {
 	return indent;
 }
 
-/** Indent columns of a Markdown list bullet, or undefined when the line opens no list item. Tabs advance to the next 4-column stop. */
-function changelogBulletIndent(line: string): number | undefined {
-	const match = line.match(/^([ \t]*)[-+*][ \t]+\S/);
+/** Thematic breaks (`* * *`, `- - -`) render as `hr`, never as list items — unless the run uses the open list's own marker, in which case the lexer keeps it as an item. Mirrors `isHr` plus the same-delimiter continuation in `parseList` (`packages/utils/src/marked/core.ts`). */
+const CHANGELOG_THEMATIC_BREAK = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/;
+
+/** A Markdown list bullet's indent columns and marker, or undefined when the line opens no list item. Tabs advance to the next 4-column stop. */
+function changelogBullet(line: string): { indent: number; marker: string } | undefined {
+	const match = line.match(/^([ \t]*)([-+*])[ \t]+\S/);
 	if (!match) return undefined;
-	return changelogLineIndent(match[1] ?? "");
+	return { indent: changelogLineIndent(match[1] ?? ""), marker: match[2] ?? "" };
 }
 
 function summarizeChangelogEntries(entries: readonly ChangelogEntry[]): {
@@ -86,32 +89,45 @@ function summarizeChangelogEntries(entries: readonly ChangelogEntry[]): {
 } {
 	const categoryCounts: Record<string, number> = {};
 	let changeCount = 0;
-
 	for (const entry of entries) {
 		let category = UNCATEGORIZED_CHANGELOG_CATEGORY;
-		// Indent of the first item of the open list block. The renderer absorbs every
+		// Indent and marker of the first item of the open list block. The renderer absorbs every
 		// whitespace-indented line into the open item, so only an unindented line
 		// (paragraph, heading, fence, ...) closes the block. Blank lines never do.
 		let listIndent: number | undefined;
+		let listMarker: string | undefined;
 		for (const line of entry.content.split("\n")) {
 			const heading = line.match(/^###\s+(.+?)\s*$/);
 			if (heading) {
 				category = heading[1] ?? UNCATEGORIZED_CHANGELOG_CATEGORY;
 				listIndent = undefined;
+				listMarker = undefined;
 				continue;
 			}
-			const indent = changelogBulletIndent(line);
-			if (indent === undefined) {
+			const bullet = changelogBullet(line);
+			if (bullet === undefined) {
 				// An unindented block boundary ends the open item, so a later indented
 				// bullet opens a new top-level list instead of nesting under the old one.
-				if (!/^\s*$/.test(line) && changelogLineIndent(line) === 0) listIndent = undefined;
+				if (!/^\s*$/.test(line) && changelogLineIndent(line) === 0) {
+					listIndent = undefined;
+					listMarker = undefined;
+				}
+				continue;
+			}
+			if (CHANGELOG_THEMATIC_BREAK.test(line) && bullet.marker !== listMarker) {
+				// Renders as `hr`, not a list item: ends the block like any unindented boundary.
+				if (changelogLineIndent(line) === 0) {
+					listIndent = undefined;
+					listMarker = undefined;
+				}
 				continue;
 			}
 			if (listIndent === undefined) {
 				// With no list open, four columns of indent is an indented code block, not a list item.
-				if (indent >= 4) continue;
-				listIndent = indent;
-			} else if (indent > listIndent) {
+				if (bullet.indent >= 4) continue;
+				listIndent = bullet.indent;
+				listMarker = bullet.marker;
+			} else if (bullet.indent > listIndent) {
 				// Deeper than the block's first item: absorbed into the item above, not a separate change.
 				continue;
 			}

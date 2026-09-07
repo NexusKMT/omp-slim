@@ -203,34 +203,48 @@ An intervening paragraph closes the list.
 		expect(selection.categoryCounts.Other).toBe(1);
 	});
 
-	test("unreleased section has no bullet the startup notice would misread", async () => {
-		const changelog = await Bun.file(shippedChangelogPath).text();
-		const unreleasedStart = changelog.indexOf("## [Unreleased]");
-		expect(unreleasedStart).toBeGreaterThanOrEqual(0);
-		const rest = changelog.slice(unreleasedStart + "## [Unreleased]".length);
-		const nextRelease = rest.indexOf("\n## ");
-		const unreleased = nextRelease === -1 ? rest : rest.slice(0, nextRelease);
+	test("does not count a thematic break as a change", () => {
+		const selection = summarize(`
+### Fixed
 
-		const misread: string[] = [];
-		let sawHeading = false;
-		let sawTopLevelBullet = false;
-		for (const line of unreleased.split("\n")) {
-			if (/^###\s/.test(line)) {
-				sawHeading = true;
-				sawTopLevelBullet = false;
-				continue;
-			}
-			if (/^[-+*][ \t]+\S/.test(line)) {
-				if (!sawHeading) misread.push(`above any heading: ${line.slice(0, 60)}`);
-				sawTopLevelBullet = true;
-				continue;
-			}
-			// An indented bullet with no shallower bullet above it renders as a code block, not a change.
-			if (/^[ \t]+[-+*][ \t]+\S/.test(line) && !sawTopLevelBullet) {
-				misread.push(`indented into a code block: ${line.trim().slice(0, 60)}`);
-			}
-		}
+- First fix.
 
-		expect(misread).toEqual([]);
+* * *
+
+- Second fix.
+`);
+
+		expect(selection.changeCount).toBe(2);
+		expect(selection.categoryCounts).toEqual({ Fixed: 2 });
+	});
+
+	test("counts a separator run that continues the open list", () => {
+		// The renderer lexes `- - -` with the open list's own marker as an item, not `hr`.
+		const selection = summarize(`
+### Fixed
+
+- First fix.
+- - -
+- Second fix.
+`);
+
+		expect(selection.changeCount).toBe(3);
+		expect(selection.categoryCounts).toEqual({ Fixed: 3 });
+	});
+
+	test("announces unreleased-shaped notes truthfully", () => {
+		const selection = summarize(`
+- Uncategorized note.
+
+### Fixed
+
+   - Indented fix.
+- Ordinary fix.
+`);
+
+		const breakdown = Object.values(selection.categoryCounts).reduce((total, count) => total + count, 0);
+		expect(selection.changeCount).toBe(breakdown);
+		expect(selection.changeCount).toBe(3);
+		expect(selection.categoryCounts).toEqual({ Other: 1, Fixed: 2 });
 	});
 });
