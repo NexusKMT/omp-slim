@@ -1,4 +1,6 @@
+import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { isPidRunning } from "@oh-my-pi/pi-utils/procmgr";
 import { runCli } from "../src/cli";
 import * as computerWorkerEntry from "../src/tools/computer/worker-entry";
 
@@ -34,6 +36,62 @@ describe("worker selector dispatch", () => {
 		expect(process.exitCode).toBe(0);
 		expect(stdout).toHaveBeenCalled();
 		expect(stderr).not.toHaveBeenCalledWith(expect.stringContaining("unknown worker selector"));
+	});
+
+	it("exits promptly when an IPC worker selector is launched without an IPC channel", async () => {
+		const proc = Bun.spawn({
+			cmd: [process.execPath, "packages/coding-agent/src/cli.ts", "__omp_worker_js_eval_process"],
+			cwd: path.resolve(__dirname, "../../.."),
+			stdin: "ignore",
+			stdout: "ignore",
+			stderr: "ignore",
+		});
+		const exited = await Promise.race([proc.exited.then(() => true), Bun.sleep(2000).then(() => false)]);
+		if (!exited) {
+			proc.kill("SIGKILL");
+		}
+		expect(exited).toBe(true);
+	});
+
+	it("reaps orphaned IPC worker when parent process terminates", async () => {
+		const repoRoot = path.resolve(__dirname, "../../..");
+		const parent = Bun.spawn({
+			cmd: [
+				process.execPath,
+				"-e",
+				`
+				const child = Bun.spawn({
+					cmd: [process.execPath, "packages/coding-agent/src/cli.ts", "__omp_worker_js_eval_process"],
+					cwd: ${JSON.stringify(repoRoot)},
+					ipc(msg) {},
+					serialization: "advanced",
+					windowsHide: true,
+					stdin: "ignore",
+					stdout: "ignore",
+					stderr: "ignore",
+				});
+				console.log("CHILD_PID:" + child.pid);
+				setTimeout(() => process.exit(0), 500);
+				`,
+			],
+			cwd: repoRoot,
+			stdout: "pipe",
+		});
+
+		const text = await new Response(parent.stdout).text();
+		const match = text.match(/CHILD_PID:(\d+)/);
+		expect(match).not.toBeNull();
+		const childPid = Number(match?.[1]);
+		expect(childPid).toBeGreaterThan(0);
+
+		await parent.exited;
+
+		let running = isPidRunning(childPid);
+		for (let i = 0; i < 30 && running; i++) {
+			await Bun.sleep(100);
+			running = isPidRunning(childPid);
+		}
+		expect(running).toBe(false);
 	});
 });
 

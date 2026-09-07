@@ -15,6 +15,7 @@ try {
  * lightweight CLI runner from pi-utils.
  */
 import { parentPort } from "node:worker_threads";
+import { Process, ProcessStatus } from "@oh-my-pi/pi-natives";
 import type { CliConfig, CommandMetadata } from "@oh-my-pi/pi-utils/cli";
 import {
 	APP_NAME,
@@ -282,6 +283,9 @@ async function runIpcSubprocessWorker<In, Out>(
 	// always spawns us that way. If it's missing, the parent vanished and
 	// there's no one to talk to.
 	const ipcSend = (): IpcSend | undefined => (process as NodeJS.Process & { send?: IpcSend }).send;
+	if (!ipcSend()) {
+		shutdown();
+	}
 	const send = (message: Out): void => {
 		const sender = ipcSend();
 		if (!sender) {
@@ -321,6 +325,47 @@ async function runIpcSubprocessWorker<In, Out>(
 			};
 		},
 	});
+	let parentWatchdog: ReturnType<typeof setInterval> | undefined;
+	const parentPid = process.ppid;
+	if (process.platform === "win32" && parentPid <= 0) {
+		shutdown();
+	} else if (parentPid > 0 && (process.platform === "win32" || parentPid > 1)) {
+		let parentProcess: Process | null = null;
+		try {
+			parentProcess = Process.fromPid(parentPid);
+		} catch {}
+
+		const isParentAlive = (): boolean => {
+			if (parentProcess) {
+				try {
+					return parentProcess.status() === ProcessStatus.Running;
+				} catch {}
+			}
+			try {
+				process.kill(parentPid, 0);
+				return true;
+			} catch (err: unknown) {
+				return (err as NodeJS.ErrnoException)?.code === "EPERM";
+			}
+		};
+
+		if (!isParentAlive()) {
+			shutdown();
+		} else {
+			if (parentProcess) {
+				void parentProcess.waitForExit().then(
+					() => shutdown(),
+					() => shutdown(),
+				);
+			}
+			parentWatchdog = setInterval(() => {
+				if (!isParentAlive()) {
+					shutdown();
+				}
+			}, 1000);
+			parentWatchdog.unref();
+		}
+	}
 	const keepalive = setInterval(() => {}, 2 ** 30);
 	// Parent went away (crashed, SIGKILL, etc.) — commit suicide so we don't
 	// linger as an orphan. SIGKILL via `process.kill` keeps us symmetrical with
@@ -330,6 +375,7 @@ async function runIpcSubprocessWorker<In, Out>(
 		await shuttingDown;
 	} finally {
 		clearInterval(keepalive);
+		if (parentWatchdog) clearInterval(parentWatchdog);
 	}
 	process.kill(process.pid, "SIGKILL");
 }
