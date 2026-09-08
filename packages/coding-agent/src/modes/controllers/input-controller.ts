@@ -9,6 +9,7 @@ import { AskDialogComponent } from "../../modes/components/ask-dialog";
 import { AssistantMessageComponent } from "../../modes/components/assistant-message";
 import { extractImagePathFromText } from "../../modes/components/custom-editor";
 import { HistorySearchComponent } from "../../modes/components/history-search";
+import { HookEditorComponent } from "../../modes/components/hook-editor";
 import { ReadToolGroupComponent } from "../../modes/components/read-tool-group";
 import { renderSegmentTrack } from "../../modes/components/segment-track";
 import { TinyTitleDownloadProgressComponent } from "../../modes/components/tiny-title-download-progress";
@@ -331,9 +332,9 @@ export class InputController {
 					if (this.ctx.ui.hasOverlay()) return undefined;
 					const focused = this.ctx.ui.getFocused();
 					if (
+						focused instanceof HookEditorComponent ||
 						focused === this.ctx.hookSelector ||
-						focused === this.ctx.hookInput ||
-						focused === this.ctx.hookEditor
+						focused === this.ctx.hookInput
 					) {
 						return undefined;
 					}

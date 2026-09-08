@@ -719,7 +719,7 @@ describe("InputController global editor actions", () => {
 		expect(context.ctx.toggleThinkingBlockVisibility).not.toHaveBeenCalled();
 	});
 
-	it("defers external editing to a focused hook editor", async () => {
+	it("defers external editing to a focused ask-dialog prompt editor untracked by ctx.hookEditor", async () => {
 		const context = await createContext();
 		const controller = new context.InputController(context.ctx);
 		const openExternalEditor = vi.spyOn(controller, "openExternalEditor").mockResolvedValue();
@@ -731,7 +731,8 @@ describe("InputController global editor actions", () => {
 			() => {},
 			() => {},
 		);
-		context.ctx.hookEditor = hookEditor;
+		// The ask dialog's "Other" prompt focuses a HookEditorComponent without
+		// assigning ctx.hookEditor; the defer must recognize it structurally.
 		context.setFocused(hookEditor);
 		const listeners = registeredInputListeners(context.spies.addInputListener);
 
