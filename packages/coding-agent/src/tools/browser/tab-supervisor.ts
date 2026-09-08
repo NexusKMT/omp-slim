@@ -300,16 +300,21 @@ async function acquireTabImpl(
 				// error a run would raise, instead of reporting a reuse
 				// that can never execute.
 				existing.lastActivityAt = Date.now();
-				// The creator may opt out later: an explicit `persist` on
-				// reuse by the owning session updates the tab (omitted
-				// leaves it). Reuse by any other session never changes it.
-				if (opts.persist !== undefined && existing.ownerSessionId === opts.ownerSessionId) {
-					existing.persist = opts.persist;
-				}
+				// Resume BEFORE applying `persist` below: flipping the flag
+				// first would make `isSettleManaged` reject this very
+				// resume, so reopening a frozen tab with `persist: true`
+				// would always fail.
 				if (!(await unfreezeTabSession(existing))) {
 					throw new ToolError(
 						`Tab ${JSON.stringify(name)} is frozen and could not be resumed. Close and reopen it.`,
 					);
+				}
+				// The creator may opt out later: an explicit `persist` on
+				// reuse by the owning session updates the tab (omitted
+				// leaves it). Reuse by any other session never changes it.
+				// Applied after the resume above for the reason stated there.
+				if (opts.persist !== undefined && existing.ownerSessionId === opts.ownerSessionId) {
+					existing.persist = opts.persist;
 				}
 				const reuseSteps: string[] = [];
 				if (opts.viewport && browser.kind.kind !== "cmux") {

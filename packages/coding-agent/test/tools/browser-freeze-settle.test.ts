@@ -658,6 +658,27 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			expect(getTabsMapForTest().has(name)).toBe(false);
 		}, 120_000);
 
+		it("reopens a frozen tab with persist without failing the resume", async () => {
+			const browser = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+			const name = `settle-frozpersist-${process.pid}`;
+			const first = await acquireTab(name, browser, { timeoutMs: 30_000, ownerSessionId: "session-frozpersist" });
+			expect(first.tab.persist).toBe(false);
+			expect(await freezeTabsForOwner("session-frozpersist")).toBe(1);
+			expect(first.tab.frozen).toBe(true);
+
+			// The resume must run while the tab is still managed; applying
+			// `persist` first would gate the resume off and always throw.
+			const second = await acquireTab(name, browser, {
+				timeoutMs: 30_000,
+				ownerSessionId: "session-frozpersist",
+				persist: true,
+			});
+			expect(second.created).toBe(false);
+			expect(second.tab).toBe(first.tab);
+			expect(second.tab.frozen).toBe(false);
+			expect(second.tab.persist).toBe(true);
+		}, 120_000);
+
 		it("recreates a tab reused after eviction instead of resurrecting state", async () => {
 			// Worker-tab release→recreate cannot run in this environment
 			// (Bun worker re-spawn fails even on the clean tree); the
