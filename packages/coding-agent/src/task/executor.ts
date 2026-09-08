@@ -2486,7 +2486,7 @@ async function relayWakeTurnOutput(args: {
 	yielded: boolean;
 	result: SingleResult | undefined;
 	turnText: string;
-	/** Attributed provider/model error text when the turn died on a provider error. */
+	/** Short, attributed peer-visible error text (no stack) when the turn died on an error. */
 	error: string | undefined;
 	/** Whether the turn was aborted (runtime limit, cancellation, hard abort). */
 	aborted: boolean;
@@ -2496,13 +2496,20 @@ async function relayWakeTurnOutput(args: {
 	finalizeError: unknown;
 }): Promise<void> {
 	const bus = IrcBus.global();
-	const pending = wakeSources(args.records, args.id).filter(
-		source => !bus.sentSince(args.id, source.from, args.turnStartTime),
-	);
-	if (pending.length === 0) return;
-	const body = buildWakeRelayBody(args);
-	if (!body) return;
-	for (const source of pending) {
+	const sources = wakeSources(args.records, args.id);
+	if (sources.length === 0) return;
+	const failed = args.error !== undefined || args.aborted;
+	for (const source of sources) {
+		const alreadyMessaged = bus.sentSince(args.id, source.from, args.turnStartTime);
+		// A completed turn's answer would duplicate what the agent already sent
+		// this waker, so dedup stays. A failed/cancelled turn is a distinct
+		// lifecycle fact: `sentSince` cannot tell "already answered you" from
+		// "pinged you 'on it'", and suppressing the failure notice on a mere ping
+		// strands the waker exactly as before — one message later. So the failure
+		// lane always notifies, flavoured to acknowledge the earlier message.
+		if (alreadyMessaged && !failed) continue;
+		const body = buildWakeRelayBody({ ...args, alreadyMessaged });
+		if (!body) continue;
 		const receipt = await bus.send({
 			from: args.id,
 			to: source.from,
@@ -2521,11 +2528,15 @@ async function relayWakeTurnOutput(args: {
  * would otherwise see as the same generic "stopped without replying" note:
  * a real answer (yield summary or turn text), a provider failure carrying the
  * attributed `[provider/model] <error>`, a cancellation with its reason, a
- * finalization throw, or a turn that ran and produced nothing. Every
+ * finalization throw, or a turn that ran and produced nothing. A turn that
+ * yielded an artifact before failing is reported via that artifact's summary
+ * rather than contradicted with a "no output" claim; a partial-answer waker
+ * (`alreadyMessaged`) is told the earlier message was not the answer. Every
  * non-answer notice carries a `history://<id>` pointer so the peer can inspect
- * the transcript.
+ * the transcript. Exported for a focused contract test of the yielded-failure
+ * branch, which the observer seam cannot drive.
  */
-function buildWakeRelayBody(args: {
+export function buildWakeRelayBody(args: {
 	id: string;
 	yielded: boolean;
 	result: SingleResult | undefined;
@@ -2534,23 +2545,38 @@ function buildWakeRelayBody(args: {
 	aborted: boolean;
 	abortReason: string | undefined;
 	finalizeError: unknown;
+	alreadyMessaged: boolean;
 }): string {
 	const transcript = `See history://${args.id} for details.`;
-	if (args.error) {
-		return `Wake turn failed: ${args.error}. No answer was produced — ${transcript}`;
-	}
-	if (args.aborted) {
-		const reason = args.abortReason?.trim();
-		return `Wake turn was cancelled${reason ? `: ${reason}` : ""}. No answer was produced — ${transcript}`;
-	}
-	const answer =
+	// Computed once, above the completed/failed split: a turn that yielded an
+	// artifact before failing must be reported, never contradicted.
+	const summary =
 		args.yielded && args.result?.outputPath
 			? formatTaskResultSummary(args.result, { totalDurationMs: args.result.durationMs })
-			: args.turnText.trim();
+			: undefined;
+
+	const headline = args.error
+		? `Wake turn failed: ${args.error}.`
+		: args.aborted
+			? `Wake turn was cancelled${args.abortReason?.trim() ? `: ${args.abortReason.trim()}` : ""}.`
+			: undefined;
+	if (headline) {
+		if (summary) {
+			return `${headline} A result was recorded before the turn ended:\n\n${summary}\n\n${transcript}`;
+		}
+		const context = args.alreadyMessaged
+			? "You received a message earlier in this turn, but that was not the answer and nothing further was sent."
+			: "No answer was produced.";
+		return `${headline} ${context} ${transcript}`;
+	}
+
+	// Completed lane. `alreadyMessaged` completed turns were filtered upstream
+	// (their answer would duplicate what the agent already sent).
+	const answer = summary ?? args.turnText.trim();
 	if (answer) return answer;
 	if (args.finalizeError) {
 		const message = args.finalizeError instanceof Error ? args.finalizeError.message : String(args.finalizeError);
-		return `Wake turn failed to finalize: ${message}. No answer was produced — ${transcript}`;
+		return `Wake turn failed to finalize: ${message}. No answer was produced. ${transcript}`;
 	}
 	return `Wake turn produced no output. ${transcript}`;
 }
@@ -2644,14 +2670,25 @@ export function attachIrcWakeTurnMonitor(session: AgentSession, options: IrcWake
 			const yielded = turnMonitor.yieldCalled();
 			const runtimeLimitExceeded = turnMonitor.runtimeLimitExceeded();
 			const aborted = runtimeLimitExceeded || (lastAssistant?.stopReason === "aborted" && !yielded);
-			const error =
+			// Two error lanes. `error` carries full diagnostics (a thrown turn
+			// error's stack) for `done.error`, logs, and lifecycle. `errorForPeer`
+			// carries only the short, attributed message: a stack trace injected
+			// into another agent's model context is noise, not signal.
+			const providerError =
 				lastAssistant?.stopReason === "error"
 					? attributeSubagentError(lastAssistant.errorMessage, lastAssistant)
-					: turnError !== undefined && !yielded
-						? turnError instanceof Error
-							? turnError.stack || turnError.message
-							: String(turnError)
-						: undefined;
+					: undefined;
+			const thrown = providerError === undefined && turnError !== undefined && !yielded ? turnError : undefined;
+			const error =
+				providerError ??
+				(thrown instanceof Error
+					? thrown.stack || thrown.message
+					: thrown === undefined
+						? undefined
+						: String(thrown));
+			const errorForPeer =
+				providerError ??
+				(thrown instanceof Error ? thrown.message : thrown === undefined ? undefined : String(thrown));
 			turnMonitor.finish();
 			// Read before finalization: a schema-bearing agent that answered in
 			// prose gets a missing-yield warning prepended to `result.output`.
@@ -2705,7 +2742,7 @@ export function attachIrcWakeTurnMonitor(session: AgentSession, options: IrcWake
 						yielded,
 						result,
 						turnText,
-						error,
+						error: errorForPeer,
 						aborted,
 						abortReason,
 						finalizeError,

@@ -14,6 +14,8 @@ import type { AgentSession, AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { createPersistedSubagentReviverFactory } from "@oh-my-pi/pi-coding-agent/task/persisted-revive";
+import { buildWakeRelayBody } from "@oh-my-pi/pi-coding-agent/task/executor";
+import type { SingleResult } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { IrcBus, type IrcMessage } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -762,5 +764,118 @@ describe("persisted subagent revival", () => {
 			AgentRegistry.resetGlobalForTests();
 			IrcBus.resetGlobalForTests();
 		});
+
+		it("reports the failure even after the agent sent a progress ping to the waker", async () => {
+			// `sentSince` cannot tell "already answered" from "pinged 'on it'".
+			// A progress ping is not an answer, so a failed wake turn must still
+			// tell the waker it died instead of being suppressed as a duplicate.
+			const cwd = makeTempDir("@pi-revive-relay-partial-");
+			const { ref, handle } = await reviveWithWaker(cwd);
+			const observer = handle.observer();
+			expect(observer).toBeDefined();
+
+			const delivered: IrcMessage[] = [];
+			AgentRegistry.global().register({
+				id: "Main",
+				displayName: "Main",
+				kind: "main",
+				status: "idle",
+				session: {
+					deliverIrcMessage: async (msg: IrcMessage) => {
+						delivered.push(msg);
+						return "injected" as const;
+					},
+				} as unknown as AgentSession,
+			});
+			const bus = IrcBus.global();
+			const finish = observer?.([wakeRecord("Main")]);
+			await bus.send({ from: ref.id, to: "Main", body: "on it" });
+			handle.setLastAssistantStop({
+				stopReason: "error",
+				errorMessage: "402 usage balance exhausted",
+				provider: "some-provider",
+				model: "some-model",
+			});
+			await finish?.();
+			await handle.trackedReplies[0];
+
+			expect(delivered).toHaveLength(2);
+			expect(delivered[0]?.body).toBe("on it");
+			const notice = delivered[1];
+			expect(notice?.wakeRelay).toBe(true);
+			expect(notice?.body).toContain("402 usage balance exhausted");
+			expect(notice?.body.toLowerCase()).toContain("earlier in this turn");
+			AgentLifecycleManager.resetGlobalForTests();
+			AgentRegistry.resetGlobalForTests();
+			IrcBus.resetGlobalForTests();
+		});
+
+		it("relays the error message without the stack trace when the wake turn throws", async () => {
+			// A thrown turn error's stack belongs in `done.error`/logs, not in the
+			// waking peer's model context.
+			const cwd = makeTempDir("@pi-revive-relay-thrown-");
+			const { ref, handle } = await reviveWithWaker(cwd);
+			const observer = handle.observer();
+			expect(observer).toBeDefined();
+
+			const boom = new Error("boom while waking");
+			boom.stack = "boom while waking\n    at deepInternal (secret.ts:99:1)";
+			const finish = observer?.([wakeRecord("Main")]);
+			const reply = IrcBus.global().wait("Main", { from: ref.id }, 5000);
+			await finish?.(boom);
+			await handle.trackedReplies[0];
+
+			const msg = await reply;
+			expect(msg).not.toBeNull();
+			expect(msg?.body).toContain("boom while waking");
+			expect(msg?.body).not.toContain("secret.ts:99");
+			expect(msg?.body).not.toContain("at deepInternal");
+			AgentLifecycleManager.resetGlobalForTests();
+			AgentRegistry.resetGlobalForTests();
+			IrcBus.resetGlobalForTests();
+		});
+	});
+});
+
+describe("buildWakeRelayBody", () => {
+	// A wake turn can yield an artifact and then fail on a later provider call
+	// (`finalizeRunResult` rewrites `<id>.md` on `hasYield`, and the error lane
+	// does not exclude a prior yield). The observer seam cannot drive a real
+	// yield, so pin the message contract here: the failure notice must report
+	// the recorded artifact, never claim nothing was produced.
+	it("reports the recorded artifact when a yielded turn then fails", () => {
+		const result = {
+			index: 0,
+			id: "SmokeKid",
+			agent: "scout",
+			agentSource: "bundled",
+			task: "follow up",
+			exitCode: 1,
+			output: "# Partial report\n\nrows written before the 402",
+			stderr: "",
+			truncated: false,
+			durationMs: 1200,
+			tokens: 0,
+			requests: 2,
+			error: "402 usage balance exhausted",
+			outputPath: "/tmp/SmokeKid.md",
+		} satisfies SingleResult;
+
+		const body = buildWakeRelayBody({
+			id: "SmokeKid",
+			yielded: true,
+			result,
+			turnText: "",
+			error: "[some-provider/some-model] 402 usage balance exhausted",
+			aborted: false,
+			abortReason: undefined,
+			finalizeError: undefined,
+			alreadyMessaged: false,
+		});
+
+		expect(body).toContain("Wake turn failed: [some-provider/some-model] 402 usage balance exhausted");
+		expect(body).not.toContain("No answer was produced");
+		expect(body).toContain("# Partial report");
+		expect(body).toContain("history://SmokeKid");
 	});
 });
