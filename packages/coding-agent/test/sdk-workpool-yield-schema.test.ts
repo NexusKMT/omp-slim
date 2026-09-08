@@ -131,5 +131,45 @@ describe("SDK workpool yield schema", () => {
 			expect(clearedProperties).not.toHaveProperty("key");
 			await expectProviderYieldContract(session, dialect, false);
 		});
+		it("serializes concurrent yield contract transitions in call order (" + dialect + ")", async () => {
+			const { session } = await createAgentSession({
+				cwd: registryDir,
+				agentDir: registryDir,
+				modelRegistry,
+				sessionManager: SessionManager.inMemory(),
+				settings: Settings.isolated({ ...toolSettings, inlineToolDescriptors: "on" }),
+				model: getBundledModel("openai", "gpt-4o-mini"),
+				disableExtensionDiscovery: true,
+				skills: [],
+				contextFiles: [],
+				promptTemplates: [],
+				slashCommands: [],
+				enableMCP: false,
+				enableLsp: false,
+				skipPythonPreflight: true,
+				requireYieldTool: true,
+				toolNames: ["yield"],
+				outputSchema: {
+					type: "object",
+					properties: { "pool#1": {} },
+					required: ["pool#1"],
+					additionalProperties: false,
+				},
+				parentTaskPrefix: "workpool-chain",
+				agentId: "workpool-chain",
+				agentName: "scout",
+				agentDisplayName: "scout",
+				taskDepth: 1,
+			});
+			sessions.push(session);
+			// A pooled install racing a clear must settle in call order: the clear
+			// runs after the install even though neither was awaited, so the wake
+			// gate joined here observes the cleared ordinary contract.
+			const install = session.setWorkPoolYieldItems([{ id: "pool#1", index: 1 }]);
+			const clear = session.setWorkPoolYieldItems([]);
+			await Promise.all([install, clear, session.whenWorkPoolYieldSettled()]);
+			expect(session.getWorkPoolYieldItems()).toEqual([]);
+			await expectProviderYieldContract(session, dialect, false);
+		});
 	}
 });

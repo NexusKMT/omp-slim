@@ -5,6 +5,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionActions, LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
+import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession, AgentSessionEvent, PromptOptions } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import {
@@ -243,6 +244,52 @@ describe("runSubprocess yield reminders", () => {
 		expect(systemPrompt?.[2]).not.toMatch(/CONTEXT\n=+/);
 		expect(systemPrompt?.[3]).toBe("now");
 		expect(userPrompt).not.toMatch(/CONTEXT\n=+/);
+	});
+	it("derives pooled yield instructions from the live registry session", async () => {
+		const session = createMockSession(({ emit }) => {
+			emit({
+				type: "tool_execution_end",
+				toolCallId: "tool-live-yield",
+				toolName: "yield",
+				result: {
+					content: [{ type: "text", text: "Result submitted." }],
+					details: { status: "success", data: { ok: true } },
+				},
+				isError: false,
+			});
+		});
+		const createAgentSessionSpy = mockCreateAgentSession(session);
+
+		await runSubprocess({
+			...baseOptions,
+			id: "subagent-live-yield",
+			task: "Do the task.",
+		});
+
+		const systemPromptBuilder = createAgentSessionSpy.mock.calls[0]?.[0]?.systemPrompt;
+		expect(systemPromptBuilder).toBeFunction();
+		if (typeof systemPromptBuilder !== "function") throw new Error("Expected system prompt builder");
+		// The prompt callback is re-invoked on every base-prompt refresh, so it
+		// must follow the live contract (e.g. after WorkPool clears pooled items)
+		// rather than the options captured at startup.
+		const liveItems = [{ id: "pool#1", index: 1 }];
+		AgentRegistry.global().register({
+			id: "subagent-live-yield",
+			displayName: "subagent-live-yield",
+			kind: "sub",
+			status: "idle",
+			session: { getWorkPoolYieldItems: () => liveItems } as unknown as AgentSession,
+		});
+		try {
+			const pooled = systemPromptBuilder(["system"]);
+			expect(pooled?.[0]).toContain("Workpool yield protocol:");
+			liveItems.length = 0;
+			const cleared = systemPromptBuilder(["system"]);
+			expect(cleared?.[0]).toContain("Yield protocol:");
+			expect(cleared?.[0]).not.toContain("Workpool yield protocol:");
+		} finally {
+			AgentRegistry.global().unregister("subagent-live-yield");
+		}
 	});
 
 	it("sends reminder prompt when subagent stops without yield", async () => {

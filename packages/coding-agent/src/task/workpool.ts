@@ -3,6 +3,7 @@ import type { CustomTool } from "../extensibility/custom-tools/types";
 import workpoolBatchTemplate from "../prompts/tools/workpool-batch.md" with { type: "text" };
 import workpoolTurnResultTemplate from "../prompts/tools/workpool-turn-result.md" with { type: "text" };
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
+import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import type { CustomMessage } from "../session/messages";
 import type { ToolSession } from "../tools";
 import { isIrcEnabled } from "../tools/hub";
@@ -451,6 +452,23 @@ export class WorkPool {
 				batch: batch.id,
 				error: error instanceof Error ? error.message : String(error),
 			});
+			// The runtime already flipped to the ordinary schema while the prompt
+			// still advertises the keyed one. The worker must not survive as a
+			// messageable session: release the lifecycle adoption (guarded by the
+			// registry ref so a newer same-id ref is never taken down) so neither
+			// pool reuse nor an IRC wake can reach the inconsistent contract.
+			if (ref) {
+				try {
+					await AgentLifecycleManager.global().release(agent.id, ref);
+				} catch (releaseError) {
+					logger.warn("workpool: failed to release worker after yield clear failure", {
+						pool: this.name,
+						agent: agent.id,
+						batch: batch.id,
+						error: releaseError instanceof Error ? releaseError.message : String(releaseError),
+					});
+				}
+			}
 		}
 		if (this.freshAgents) {
 			agent.state = "dead";

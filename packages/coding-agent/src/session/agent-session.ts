@@ -628,6 +628,8 @@ export class AgentSession {
 	#planModeReminderAwaitingProgress = false;
 	readonly #todo: TodoTracker;
 	#workPoolYieldItems: readonly WorkPoolYieldItem[] = [];
+	/** Serialized tail of pooled-turn yield contract transitions; never rejects. */
+	#workPoolYieldTransition: Promise<void> = Promise.resolve();
 	#replanTitleRefreshInFlight: Promise<void> | undefined = undefined;
 	/** Resolved TITLE_SYSTEM.md override applied to every automatic session-title
 	 *  generation path. Refresh via {@link AgentSession.setTitleSystemPrompt} when
@@ -1013,8 +1015,12 @@ export class AgentSession {
 		const generation = this.#promptGeneration;
 		this.#beginInFlight();
 		let turnError: unknown;
-		void this.agent
-			.prompt(records)
+		// A pooled-turn yield transition (item-set mutation + prompt rebuild) may be
+		// in flight when the wake lands. Starting the turn on the stale prompt would
+		// advertise one yield schema while the runtime enforces the other, so join
+		// the transition before building the turn from a consistent contract.
+		void this.whenWorkPoolYieldSettled()
+			.then(() => this.agent.prompt(records))
 			.catch(error => {
 				turnError = error;
 				logger.warn("IRC wake turn failed", { error: String(error) });
@@ -7380,7 +7386,23 @@ export class AgentSession {
 	}
 
 	/** Replace the pooled-turn yield contract and rebuild the provider prompt when it changes. */
-	async setWorkPoolYieldItems(items: readonly WorkPoolYieldItem[]): Promise<void> {
+	setWorkPoolYieldItems(items: readonly WorkPoolYieldItem[]): Promise<void> {
+		// Serialize transitions so a pooled install racing a clear (or an IRC
+		// wake racing either) observes them in call order. The change check runs
+		// inside the chain against the live set: a call-time check could no-op
+		// against a contract a queued transition has not applied yet.
+		const run = this.#workPoolYieldTransition.then(() => this.#applyWorkPoolYieldItems(items));
+		this.#workPoolYieldTransition = run.catch(() => {});
+		return run;
+	}
+
+	/** Settles when any in-flight yield contract transition completes. Wake-turn
+	 *  entry joins it so a turn never builds from a half-applied contract. */
+	whenWorkPoolYieldSettled(): Promise<void> {
+		return this.#workPoolYieldTransition;
+	}
+
+	async #applyWorkPoolYieldItems(items: readonly WorkPoolYieldItem[]): Promise<void> {
 		const current = this.#workPoolYieldItems;
 		if (
 			current.length === items.length &&
