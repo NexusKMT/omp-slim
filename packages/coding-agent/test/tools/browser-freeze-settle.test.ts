@@ -518,6 +518,60 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			expect(getTabsMapForTest().has("settle-twice")).toBe(false);
 		});
 
+		it("rejects reuse when the frozen tab cannot resume", async () => {
+			mockCmuxSocket();
+			const browser = await acquireBrowser(makeKind("settle-reuse-frozen"), { cwd: "/tmp" });
+			await acquireTab("settle-frozreuse", browser, { timeoutMs: 1_000, ownerSessionId: "session-A" });
+			const tab = getTabsMapForTest().get("settle-frozreuse");
+			expect(tab).toBeDefined();
+			if (tab) tab.frozen = true;
+
+			await expect(
+				acquireTab("settle-frozreuse", browser, { timeoutMs: 1_000, ownerSessionId: "session-A" }),
+			).rejects.toThrow(/could not be resumed/);
+		});
+
+		it("tears down once when two releases race the same tab", async () => {
+			let clientCloses = 0;
+			const closedSurfaces: string[] = [];
+			spyOn(CmuxSocketClient.prototype, "connect").mockResolvedValue(undefined);
+			spyOn(CmuxSocketClient.prototype, "close").mockImplementation(() => {
+				clientCloses++;
+			});
+			spyOn(CmuxSocketClient.prototype, "request").mockImplementation(
+				async (method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> => {
+					if (method === "browser.open_split") {
+						return { surface_id: `surface-join-${++mockSurfaceSeq}`, url: "about:blank" };
+					}
+					if (method === "surface.close") {
+						closedSurfaces.push(String(params.surface_id ?? ""));
+						return {};
+					}
+					return {};
+				},
+			);
+			// No pre-attached surface: the tab owns its split, so the race
+			// below contends over one real teardown.
+			const browser = await acquireBrowser(
+				{ kind: "cmux", socketPath: "/tmp/omp-test-settle-join.sock" },
+				{ cwd: "/tmp" },
+			);
+			await acquireTab("settle-join", browser, { timeoutMs: 1_000, ownerSessionId: "session-A" });
+
+			// Both expressions run their synchronous prefixes in order: the
+			// second lookup provably observes the first release in flight,
+			// so it must join instead of redoubling teardown.
+			const [first, second] = await Promise.all([
+				releaseTab("settle-join", { kill: false }),
+				releaseTab("settle-join", { kill: false }),
+			]);
+			expect(first).toBe(true);
+			expect(second).toBe(true);
+			expect(closedSurfaces.length).toBe(1);
+			expect(clientCloses).toBe(1);
+			expect(getTabsMapForTest().has("settle-join")).toBe(false);
+		});
+
 		it("settle is a no-op for unknown owners", async () => {
 			expect(await freezeTabsForOwner("session-nobody")).toBe(0);
 			expect(await releaseIdleTabsForOwner("session-nobody", { idleMs: 0 })).toBe(0);

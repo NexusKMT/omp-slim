@@ -295,10 +295,16 @@ async function acquireTabImpl(
 				await releaseTab(name, { kill: false });
 			} else {
 				// Reuse counts as use: refresh the idle clock and resume a
-				// settle-frozen page before driving it again. Unfreeze is a
-				// flag-check no-op unless a previous settle froze the tab.
+				// settle-frozen page before driving it again. A refused
+				// resume fails the open here with the same actionable
+				// error a run would raise, instead of reporting a reuse
+				// that can never execute.
 				existing.lastActivityAt = Date.now();
-				await unfreezeTabSession(existing);
+				if (!(await unfreezeTabSession(existing))) {
+					throw new ToolError(
+						`Tab ${JSON.stringify(name)} is frozen and could not be resumed. Close and reopen it.`,
+					);
+				}
 				const reuseSteps: string[] = [];
 				if (opts.viewport && browser.kind.kind !== "cmux") {
 					const dsf = opts.viewport.deviceScaleFactor;
@@ -694,12 +700,34 @@ async function runInTabWithSnapshot(
 	}
 }
 
+/**
+ * In-flight releases by tab object. A second `releaseTab` for a tab already
+ * being torn down joins the first instead of redoubling teardown: without
+ * this, a same-name acquire racing a sweep's release would publish a
+ * replacement that the first release's unconditional delete then removes
+ * (and the shared browser hold would release twice). Joiners share the
+ * first release's outcome.
+ */
+const releaseInflight = new WeakMap<TabSession, Promise<boolean>>();
+
 export async function releaseTab(name: string, opts: ReleaseTabOptions = {}): Promise<boolean> {
 	const tab = tabs.get(name);
 	if (!tab) {
 		logger.debug("releaseTab: unknown tab", { name });
 		return false;
 	}
+	const ongoing = releaseInflight.get(tab);
+	if (ongoing) return await ongoing;
+	const run = releaseTabInner(tab, name, opts);
+	releaseInflight.set(tab, run);
+	try {
+		return await run;
+	} finally {
+		releaseInflight.delete(tab);
+	}
+}
+
+async function releaseTabInner(tab: TabSession, name: string, opts: ReleaseTabOptions): Promise<boolean> {
 	const wasAlive = tab.state === "alive";
 	tab.state = "dead";
 	const closeError = postmortem.markExpectedCleanupError(new ToolError(`Tab ${JSON.stringify(name)} was closed`));
