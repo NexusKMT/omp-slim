@@ -249,6 +249,77 @@ describe("history:// protocol", () => {
 		expect(content).toContain("Output:");
 	});
 
+	it("retains every assistant block variant in current-branch full history", () => {
+		const longPayload = `research finding ${"x".repeat(5200)}`;
+		const content = formatCurrentBranchFullHistory([
+			{
+				type: "message",
+				id: "assistant-entry",
+				parentId: null,
+				timestamp: new Date().toISOString(),
+				message: {
+					role: "assistant",
+					content: [
+						{ type: "text", text: "answer text" },
+						{ type: "thinking", thinking: "visible reasoning" },
+						{ type: "redactedThinking", data: "ENCRYPTED-BLOB" },
+						{
+							type: "anthropicServerTool",
+							block: {
+								type: "server_tool_use",
+								id: "srvtoolu_1",
+								name: "web_search",
+								input: { query: "release migration guide" },
+								caller: "assistant",
+							},
+						},
+						{
+							type: "anthropicServerTool",
+							block: {
+								type: "web_search_tool_result",
+								tool_use_id: "srvtoolu_1",
+								content: [
+									{
+										type: "web_search_result",
+										url: "https://example.com",
+										title: "result",
+										encrypted_index: 0,
+									},
+								],
+								result: longPayload,
+							},
+						},
+						{ type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+						{ type: "fallback", from: { model: "claude-primary" }, to: { model: "claude-backup" } },
+					],
+					api: "anthropic-messages",
+					provider: "anthropic",
+					model: "test-model",
+					usage: {},
+					stopReason: "stop",
+					timestamp: 3,
+				},
+			},
+		] as unknown as SessionEntry[]);
+
+		expect(content).toContain("answer text");
+		expect(content).toContain("visible reasoning");
+		// Redacted reasoning stays opaque: the marker is present, the blob is not.
+		expect(content).toContain("[redacted thinking:");
+		expect(content).not.toContain("ENCRYPTED-BLOB");
+		// The complete retained server block survives, including non-core
+		// metadata like `caller`, with no truncation of long payloads.
+		expect(content).toContain("#### server tool: server_tool_use");
+		expect(content).toContain('"caller": "assistant"');
+		expect(content).toContain("release migration guide");
+		expect(content).toContain("#### server tool: web_search_tool_result");
+		expect(content).toContain(longPayload);
+		// Image blocks render as metadata without base64 bytes.
+		expect(content).toContain("[image: image/png,");
+		expect(content).not.toContain("aGVsbG8=");
+		expect(content).toContain("[provider fallback: claude-primary to claude-backup]");
+	});
+
 	it("renders the caller-bound branch's full pre-compaction transcript without a disk source", async () => {
 		const branch = currentBranchFixture();
 		const siblingOnly = "sibling branch text must not leak";

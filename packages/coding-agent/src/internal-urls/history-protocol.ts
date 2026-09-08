@@ -96,6 +96,23 @@ function appendRawMessage(lines: string[], message: AgentMessage): void {
 				else if (block.type === "toolCall") {
 					lines.push(`#### tool call: ${block.name} (${block.id})`);
 					lines.push(jsonFence(JSON.stringify(block.arguments, null, 2) ?? "null"));
+				} else if (block.type === "redactedThinking") {
+					// Opaque provider-encrypted reasoning: keep a marker for the
+					// block's presence, not the undecipherable blob.
+					lines.push(`[redacted thinking: ${block.data.length} chars omitted]`);
+				} else if (block.type === "anthropicServerTool") {
+					// Serialize the complete retained server block. Reconstructing a
+					// projected subset silently drops metadata (e.g. `caller`) that
+					// recovery may need, and server-side search results can hold the
+					// only copy of research from before the rollover.
+					lines.push(`#### server tool: ${block.block.type}`);
+					lines.push(jsonFence(JSON.stringify(block.block, null, 2) ?? "null"));
+				} else if (block.type === "image") {
+					// Metadata only: base64 bytes are not recoverable text and would
+					// dominate the rendered history.
+					lines.push(`[image: ${block.mimeType}, ${block.data.length} base64 chars omitted]`);
+				} else if (block.type === "fallback") {
+					lines.push(`[provider fallback: ${block.from.model} to ${block.to.model}]`);
 				}
 			}
 			return;
