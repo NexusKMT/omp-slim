@@ -1,5 +1,13 @@
 /**
- * GitHub Copilot OAuth flow using the official Copilot CLI app.
+ * GitHub Copilot OAuth flow (OpenCode OAuth app, minimal read:user grant).
+ *
+ * The device flow intentionally uses the OpenCode app identity rather than
+ * the official Copilot CLI app: GitHub renders each app's existing per-user
+ * grant (Existing access) on the consent page, and Enterprise orgs that
+ * restrict OAuth apps block the CLI app's broad historic grant
+ * (repo/gist/codespace) no matter what scope this request asks for
+ * (issue #11275). API request identity still mimics the Copilot CLI via
+ * COPILOT_API_HEADERS.
  */
 import { scheduler } from "node:timers/promises";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
@@ -15,7 +23,7 @@ import * as AIError from "../../error";
 import type { FetchImpl } from "../../types";
 import type { OAuthController, OAuthCredentials } from "./types";
 
-const CLIENT_ID = "Ov23ctDVkRmgkPke0Mmm";
+const CLIENT_ID = "Ov23li8tweQw6odWQebz";
 const OAUTH_SCOPE = "read:user";
 const OAUTH_HEADERS = {
 	Accept: "application/json",
@@ -207,7 +215,7 @@ const FAR_FUTURE_MS = Date.now() + 10 * 365.25 * 24 * 60 * 60 * 1000;
 
 /**
  * Refresh GitHub Copilot token.
- * GitHub OAuth tokens from both the former OpenCode app and the Copilot CLI app
+ * GitHub OAuth tokens from both the OpenCode app and the Copilot CLI app
  * remain directly usable, so existing logins need no token exchange or migration.
  */
 export function refreshGitHubCopilotToken(
@@ -335,8 +343,8 @@ export async function loginGitHubCopilot(options: GitHubCopilotLoginOptions): Pr
 
 	const apiEndpoint = await discoverGitHubCopilotApiEndpoint(githubAccessToken, fetchImpl);
 
-	// Keep storing the GitHub token directly so credentials minted by the former
-	// OpenCode OAuth app remain valid alongside new Copilot CLI app logins.
+	// Keep storing the GitHub token directly so credentials minted by the
+	// Copilot CLI OAuth app remain valid alongside new OpenCode app logins.
 	const credentials: OAuthCredentials = {
 		refresh: githubAccessToken,
 		access: githubAccessToken,
