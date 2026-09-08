@@ -1717,6 +1717,54 @@ describe("ModelRegistry", () => {
 			defaultLevel: Effort.Low,
 		};
 
+		test.each(
+			[
+				["openai-codex", "gpt-6-astra"],
+				["openai-codex", "gpt-5.6-luna"],
+				["anthropic", "claude-opus-5"],
+				["anthropic", "claude-mythos-5"],
+				["amazon-bedrock", "anthropic.claude-opus-5"],
+				["amazon-bedrock", "au.anthropic.claude-opus-5"],
+				["amazon-bedrock", "eu.anthropic.claude-opus-5"],
+				["amazon-bedrock", "global.anthropic.claude-opus-5"],
+				["amazon-bedrock", "us-gov.anthropic.claude-opus-5"],
+				["amazon-bedrock", "us.anthropic.claude-opus-5"],
+				["amazon-bedrock", "global.openai.gpt-5.6-luna"],
+				["bedrock-mantle", "openai.gpt-5.6-luna"],
+			].flatMap(([provider, id]) => [false, true].map(extendedContext => [provider, id, extendedContext] as const)),
+		)("%s/%s extendedContext=%j preserves capacity across effort restrictions", (provider, id, extendedContext) => {
+			const testSettings = Settings.isolated({ extendedContext });
+			const baselineRegistry = new ModelRegistry(authStorage, modelsJsonPath, { settings: testSettings });
+			const baseline = baselineRegistry.find(provider, id);
+			expect(baseline).toBeDefined();
+			if (!baseline?.thinking) throw new Error(`Missing thinking-capable model: ${provider}/${id}`);
+			const variants = [
+				{ name: "unrestricted", efforts: baseline.thinking.efforts },
+				{ name: "low/medium", efforts: [Effort.Low, Effort.Medium] },
+				...baseline.thinking.efforts.map(effort => ({ name: effort, efforts: [effort] })),
+			];
+			for (const [index, variant] of variants.entries()) {
+				const overrideThinking: ThinkingConfig = {
+					...baseline.thinking,
+					efforts: variant.efforts,
+					defaultLevel: variant.efforts[0],
+				};
+				const overridePath = path.join(tempDir, `effort-${index}.json`);
+				fs.writeFileSync(
+					overridePath,
+					JSON.stringify({
+						providers: { [provider]: { modelOverrides: { [id]: { thinking: overrideThinking } } } },
+					}),
+				);
+				const registry = new ModelRegistry(authStorage, overridePath, { settings: testSettings });
+				const actual = registry.find(provider, id);
+				const label = `${provider}/${id}, extendedContext=${extendedContext}, efforts=${variant.name}`;
+				expect(actual?.thinking, label).toEqual(overrideThinking);
+				expect(actual?.contextWindow, label).toBe(baseline.contextWindow);
+				expect(actual?.maxTokens, label).toBe(baseline.maxTokens);
+			}
+		});
+
 		test("preserves Astra capacity with a thinking-only override across policy toggles", async () => {
 			writeRawModelsJson({
 				"openai-codex": { modelOverrides: { "gpt-6-astra": { thinking } } },
