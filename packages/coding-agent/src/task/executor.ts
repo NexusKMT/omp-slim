@@ -2844,7 +2844,7 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 	const { id, agent, message, signal } = options;
 	const index = options.index ?? 0;
 	const startTime = Date.now();
-	const session = await AgentLifecycleManager.global().ensureLive(id);
+	let session = await AgentLifecycleManager.global().ensureLive(id);
 	// Acquire turn ownership before mutating the shared yield contract: installing
 	// pooled items under a running ordinary wake would reject its in-flight tool
 	// calls. The check-to-install section below has no await, so once idle is
@@ -2865,6 +2865,12 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 			`Subagent ${id} stayed busy through 3 ownership waits; refusing to install the pooled yield contract under an active turn`,
 		);
 	}
+	await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
+	// Reacquire: the waits/rebuild above can outlast the idle TTL, letting park()
+	// detach this instance before the turn starts. A revived replacement starts
+	// with an empty contract, so reinstall (a no-op unless revived); a released
+	// worker throws here instead of driving a corpse.
+	session = await AgentLifecycleManager.global().ensureLive(id);
 	await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
 	const ref = AgentRegistry.global().get(id);
 	const sessionFile = ref?.sessionFile ?? undefined;

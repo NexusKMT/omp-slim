@@ -926,7 +926,9 @@ export class AgentSession {
 		// and race the transition's own reset — same rationale as #drainStrandedQueuedMessages.
 		if (this.#unsubscribeAgent === undefined) return;
 		if (this.#canAutoContinueForFollowUp() && this.agent.hasQueuedMessages()) return;
-		const records = this.#irc.drainPending();
+		// Parked wake records resume alongside ordinary stranded asides; they were
+		// already decided wake-intended at deferral time.
+		const records = [...this.#irc.drainDeferredWakes(), ...this.#irc.drainPending()];
 		if (this.#planModeState?.enabled) {
 			// Plan mode: fold stranded IRC asides into context without waking an
 			// autonomous turn. Convergence to ask/resolve stays user-driven.
@@ -1029,12 +1031,20 @@ export class AgentSession {
 				// Synchronous ownership check, atomic with the dispatch below:
 				// agent.prompt() claims streaming with no await in between, and the
 				// yield contract above mutates synchronously, so no install can
-				// interleave here. Never start an ordinary wake under an installed
-				// pooled contract (it would emit keyed yields against another
-				// turn's items); preserve the records as asides instead.
-				if (this.agent.state.isStreaming || this.#workPoolYieldItems.length > 0) {
+				// interleave here.
+				if (this.#workPoolYieldItems.length > 0) {
+					// A pooled turn owns this worker (installed, running, or
+					// dispatch-imminent): park wake-intended records where pooled
+					// turns cannot flush them, for a monitored wake after clearing.
+					// Flushing them as ordinary asides would feed them to the batch
+					// with no observer to reply to the sender.
+					this.#irc.queueDeferredWake(records);
+					logger.debug("IRC wake turn parked while pooled");
+					return;
+				}
+				if (this.agent.state.isStreaming) {
 					this.#irc.queueAside(records);
-					logger.debug("IRC wake turn deferred: worker busy or pooled");
+					logger.debug("IRC wake turn deferred behind the running turn");
 					return;
 				}
 				try {
@@ -1046,11 +1056,16 @@ export class AgentSession {
 			})
 			.catch(error => {
 				if (error instanceof AgentBusyError) {
-					// Lost the prompt race (e.g. a WorkPool follow-up dispatched
-					// first): preserve the records as asides for the running turn
-					// instead of dropping them with the failed wake.
-					this.#irc.queueAside(records);
-					logger.debug("IRC wake turn deferred behind the running turn");
+					// Lost the prompt race after passing the checks above: an
+					// ordinary running turn takes these as asides, but a pooled
+					// turn must not flush them, so park them instead.
+					if (this.#workPoolYieldItems.length > 0) {
+						this.#irc.queueDeferredWake(records);
+						logger.debug("IRC wake turn parked while pooled");
+					} else {
+						this.#irc.queueAside(records);
+						logger.debug("IRC wake turn deferred behind the running turn");
+					}
 					return;
 				}
 				turnError = error;

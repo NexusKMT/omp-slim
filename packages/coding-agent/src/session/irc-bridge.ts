@@ -28,6 +28,10 @@ export class IrcBridge {
 	readonly #host: IrcBridgeHost;
 	#interrupts: AgentMessage[] = [];
 	#asides: AgentMessage[] = [];
+	/** Wake-intended records parked while a pooled yield contract owns the worker.
+	 *  Pooled turns must not flush these (no observer would reply to the sender);
+	 *  they resume into a monitored wake once the contract clears. */
+	#deferredWakes: AgentMessage[] = [];
 	/** In-flight replies owed to peers: side-channel auto-replies and wake-turn relays. */
 	readonly #pendingReplies = new Set<Promise<void>>();
 
@@ -42,7 +46,7 @@ export class IrcBridge {
 
 	/** Whether any undelivered IRC record remains queued. */
 	hasPending(): boolean {
-		return this.#interrupts.length > 0 || this.#asides.length > 0;
+		return this.#interrupts.length > 0 || this.#asides.length > 0 || this.#deferredWakes.length > 0;
 	}
 
 	/**
@@ -97,6 +101,20 @@ export class IrcBridge {
 	 *  session transition, and extension `deliverAs: "aside"` sends. */
 	queueAside(records: AgentMessage[]): void {
 		this.#asides.push(...records);
+	}
+
+	/** Parks wake-intended records while a pooled contract owns the worker. Unlike
+	 *  asides, these are invisible to turn injection (`flushPending`, the loop
+	 *  aside poll) and resume into a monitored wake once the contract clears. */
+	queueDeferredWake(records: AgentMessage[]): void {
+		this.#deferredWakes.push(...records);
+	}
+
+	/** Takes parked wake records for a post-clear monitored wake, oldest first. */
+	drainDeferredWakes(): AgentMessage[] {
+		const records = this.#deferredWakes;
+		this.#deferredWakes = [];
+		return records;
 	}
 
 	/** Surfaces and consumes queued incoming records before automatic injection. */

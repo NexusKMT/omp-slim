@@ -1266,8 +1266,8 @@ describe("IRC", () => {
 				observations++;
 			});
 			await session.setWorkPoolYieldItems([{ id: "pool#1", index: 1 }]);
-			const queueAside = vi.spyOn(IrcBridge.prototype, "queueAside");
-			queueAside.mockClear();
+			const queueDeferredWake = vi.spyOn(IrcBridge.prototype, "queueDeferredWake");
+			queueDeferredWake.mockClear();
 			const outcome = await session.deliverIrcMessage({
 				id: "msg-pooled",
 				from: "0-Peer",
@@ -1281,30 +1281,30 @@ describe("IRC", () => {
 			// another turn's items, so no turn starts while the contract is pooled.
 			expect(promptSpy).not.toHaveBeenCalled();
 			// The deferral must not re-arm itself through the idle drain: the
-			// records stay pending until the contract clears instead of chaining
+			// records stay parked until the contract clears instead of chaining
 			// wake observers indefinitely.
 			// Yield the event loop repeatedly: a re-armed chain would schedule more
-			// queueAside calls per turn of the loop, while fixed code schedules
+			// parking calls per turn of the loop, while fixed code schedules
+			// nothing further, so extra yields cannot flake this assertion.
 			for (let i = 0; i < 20; i++) {
 				const { promise, resolve } = Promise.withResolvers<void>();
 				setImmediate(resolve);
 				await promise;
 			}
-			expect(queueAside).toHaveBeenCalledTimes(1);
+			expect(queueDeferredWake).toHaveBeenCalledTimes(1);
 			// No turn ran, so the wake observer must never have attached: otherwise
 			// it would finalize the next turn's output as this wake's reply.
 			expect(observations).toBe(0);
+			// Clearing publishes the ordinary contract; the resume drain must turn
+			// the parked record into a monitored wake with no later message.
+			promptSpy.mockClear();
 			await session.setWorkPoolYieldItems([]);
-			await session.deliverIrcMessage({
-				id: "msg-clear",
-				from: "0-Peer",
-				to: "0-Me",
-				body: "status?",
-				ts: Date.now(),
-			});
 			for (let i = 0; i < 10; i++) await Promise.resolve();
-			// Liveness: the worker still wakes once the contract is ordinary (the
-			// deferred record may additionally resume as its own turn).
+			for (let i = 0; i < 20; i++) {
+				const { promise, resolve } = Promise.withResolvers<void>();
+				setImmediate(resolve);
+				await promise;
+			}
 			expect(promptSpy).toHaveBeenCalled();
 		});
 

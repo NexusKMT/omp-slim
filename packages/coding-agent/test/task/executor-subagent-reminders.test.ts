@@ -6,6 +6,7 @@ import type { ExtensionActions, LoadExtensionsResult } from "@oh-my-pi/pi-coding
 import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import type { AgentSession, AgentSessionEvent, PromptOptions } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import {
@@ -388,6 +389,51 @@ describe("runSubprocess yield reminders", () => {
 			expect(calls).not.toContain("setYield");
 		} finally {
 			AgentRegistry.global().unregister("subagent-wedged");
+		}
+	});
+	it("drives the reacquired session when parking replaces the worker mid-install", async () => {
+		const calls: string[] = [];
+		const stale = createMockSession(() => {});
+		const revived = createMockSession(({ emit }) => {
+			emit({
+				type: "tool_execution_end",
+				toolCallId: "tool-revive",
+				toolName: "yield",
+				result: {
+					content: [{ type: "text", text: "Result submitted." }],
+					details: { status: "success", data: { revived: true } },
+				},
+				isError: false,
+			});
+		});
+		// Mock sessions lack the real yield-contract method; attach a tracker.
+		const staleMutable = stale as unknown as {
+			setWorkPoolYieldItems: (items: unknown[]) => Promise<void>;
+		};
+		staleMutable.setWorkPoolYieldItems = async () => {
+			calls.push("setYield:stale");
+		};
+		const revivedMutable = revived as unknown as {
+			setWorkPoolYieldItems: (items: unknown[]) => Promise<void>;
+		};
+		revivedMutable.setWorkPoolYieldItems = async () => {
+			calls.push("setYield:revived");
+		};
+		// The idle TTL fires during the install rebuild: the follow-up must drive
+		// the revived replacement (reinstalling its empty contract) instead of
+		// the detached corpse.
+		const ensureLive = vi
+			.spyOn(AgentLifecycleManager.global(), "ensureLive")
+			.mockResolvedValueOnce(stale)
+			.mockResolvedValue(revived);
+		try {
+			const result = await runSubagentFollowUpTurn({ ...baseOptions, id: "subagent-revive", message: "batch work" });
+			expect(ensureLive).toHaveBeenCalledTimes(2);
+			expect(calls).toEqual(["setYield:stale", "setYield:revived"]);
+			expect(result.exitCode).toBe(0);
+			expect(result.output).toContain('"revived": true');
+		} finally {
+			AgentRegistry.global().unregister("subagent-revive");
 		}
 	});
 	it("sends reminder prompt when subagent stops without yield", async () => {
