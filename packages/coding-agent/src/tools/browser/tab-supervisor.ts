@@ -1015,7 +1015,10 @@ export async function releaseIdleTabsForOwner(
 }
 
 /** Per-owner one-shot timers arming the idle-close backstop. Always unref'd. */
-const idleCloseTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const idleCloseTimers = new Map<string, NodeJS.Timeout>();
+
+/** Recheck cadence when a firing sweep skips due-but-busy tabs. Overridable in tests. */
+const IDLE_DUE_RETRY_MS = 30_000;
 
 /**
  * Milliseconds until the owner's next managed tab goes idle, `0` when one
@@ -1035,6 +1038,14 @@ export function earliestIdleCloseInMs(ownerId: string, idleMs: number, nowMs: nu
 	return earliest;
 }
 
+/** Drop a pending idle-close deadline, e.g. when the timeout is disabled at runtime. */
+export function cancelIdleCloseForOwner(ownerId: string): void {
+	const existing = idleCloseTimers.get(ownerId);
+	if (existing === undefined) return;
+	idleCloseTimers.delete(ownerId);
+	clearTimeout(existing);
+}
+
 /**
  * (Re)arm the owner-scoped one-shot that closes idle tabs when the timeout
  * elapses without further activity. Without this, a tab used in the final
@@ -1043,25 +1054,21 @@ export function earliestIdleCloseInMs(ownerId: string, idleMs: number, nowMs: nu
  * holds the process open (print/RPC exits are unaffected), firing
  * re-enters through `releaseIdleTabsForOwner` — which re-arms while
  * survivors remain — and disposal needs no cleanup since a fired sweep
- * over released tabs is a no-op.
+ * over released tabs is a no-op. Due-but-busy survivors re-arm on a short
+ * retry cadence instead of losing their deadline until the next sweep.
  */
-export function armIdleCloseForOwner(ownerId: string, idleMs: number): void {
-	const existing = idleCloseTimers.get(ownerId);
-	if (existing !== undefined) {
-		idleCloseTimers.delete(ownerId);
-		clearTimeout(existing);
-	}
+export function armIdleCloseForOwner(ownerId: string, idleMs: number, retryMs: number = IDLE_DUE_RETRY_MS): void {
+	cancelIdleCloseForOwner(ownerId);
+	if (!ownerId || !(idleMs > 0)) return;
 	const delay = earliestIdleCloseInMs(ownerId, idleMs);
-	if (delay === undefined || delay <= 0) return;
-	const timer = setTimeout(
-		() => {
-			idleCloseTimers.delete(ownerId);
-			void releaseIdleTabsForOwner(ownerId, { idleMs })
-				.then(() => armIdleCloseForOwner(ownerId, idleMs))
-				.catch(() => undefined);
-		},
-		Math.min(delay, 2_147_483_647),
-	);
+	if (delay === undefined) return;
+	const wait = delay <= 0 ? retryMs : Math.min(delay, 2_147_483_647);
+	const timer = setTimeout(() => {
+		idleCloseTimers.delete(ownerId);
+		void releaseIdleTabsForOwner(ownerId, { idleMs })
+			.then(() => armIdleCloseForOwner(ownerId, idleMs, retryMs))
+			.catch(() => undefined);
+	}, wait);
 	timer.unref();
 	idleCloseTimers.set(ownerId, timer);
 }

@@ -202,7 +202,12 @@ import { shutdownTinyTitleClient } from "../tiny/title-client";
 import type { ImageAttachmentEntry } from "../tools";
 import { resolveApproval } from "../tools/approval";
 import { type AskToolDetails, type AskToolInput, recoverAskQuestions } from "../tools/ask";
-import { freezeTabsForOwner, releaseIdleTabsForOwner, releaseTabsForOwner } from "../tools/browser/tab-supervisor";
+import {
+	cancelIdleCloseForOwner,
+	freezeTabsForOwner,
+	releaseIdleTabsForOwner,
+	releaseTabsForOwner,
+} from "../tools/browser/tab-supervisor";
 import type { CheckpointState, CompletedRewindState } from "../tools/checkpoint";
 import { releaseComputerSessionsForOwner } from "../tools/computer/supervisor";
 import { normalizeLocalScheme, resolveToCwd } from "../tools/path-utils";
@@ -4479,6 +4484,10 @@ export class AgentSession {
 				if (closed > 0) {
 					logger.debug("Closed idle owned browser tabs at turn settle", { ownerId, closed });
 				}
+			} else {
+				// Idle close disabled at runtime: drop any deadline armed
+				// under a previous positive value so it cannot fire stale.
+				cancelIdleCloseForOwner(ownerId);
 			}
 			if (this.settings.get("browser.freezeOnTurnEnd")) {
 				const frozen = await withTimeout(

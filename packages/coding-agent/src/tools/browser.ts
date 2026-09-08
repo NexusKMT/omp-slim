@@ -25,6 +25,7 @@ import type { OutputMeta } from "./output-meta";
 import {
 	type AcquireTabResult,
 	acquireTab,
+	cancelIdleCloseForOwner,
 	dropHeadlessTabs,
 	getTab,
 	releaseAllTabs,
@@ -167,8 +168,12 @@ export async function restartBrowserForModeChange(): Promise<void> {
  */
 function sweepIdleOwnedTabs(session: ToolSession): Promise<number> {
 	const ownerId = session.getSessionId?.() ?? undefined;
+	if (!ownerId) return Promise.resolve(0);
 	const idleSec = session.settings.get("browser.idleCloseSec");
-	if (!ownerId || !(idleSec > 0)) return Promise.resolve(0);
+	if (!(idleSec > 0)) {
+		cancelIdleCloseForOwner(ownerId);
+		return Promise.resolve(0);
+	}
 	return releaseIdleTabsForOwner(ownerId, { idleMs: idleSec * 1000 }).catch((error: unknown) => {
 		logger.debug("Browser idle-close sweep failed", {
 			error: error instanceof Error ? error.message : String(error),

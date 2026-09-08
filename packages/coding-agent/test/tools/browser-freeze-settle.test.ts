@@ -23,6 +23,7 @@ import { acquireBrowser } from "@oh-my-pi/pi-coding-agent/tools/browser/registry
 import {
 	acquireTab,
 	armIdleCloseForOwner,
+	cancelIdleCloseForOwner,
 	earliestIdleCloseInMs,
 	freezeTabsForOwner,
 	getTabsMapForTest,
@@ -580,6 +581,39 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			armIdleCloseForOwner("session-retimer", 3_600_000);
 			// Real clock required (see above): past the first deadline with
 			// the replacement armed, the tab must still be tracked.
+			await Bun.sleep(600);
+			expect(getTabsMapForTest().has(name)).toBe(true);
+		}, 120_000);
+
+		it("re-arms when the timer fires into an in-flight run", async () => {
+			const browser = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+			const name = `settle-retry-${process.pid}`;
+			const session = makeSession(process.cwd());
+			await acquireTab(name, browser, { timeoutMs: 30_000, ownerSessionId: "session-retry" });
+
+			const run = runInTab(name, { code: "await wait(2000); return 1;", timeoutMs: 30_000, session });
+			void run.catch(() => undefined);
+			armIdleCloseForOwner("session-retry", 300, 150);
+			// The 300ms deadline fires mid-run: skipped, not closed.
+			// Real clock required (see above).
+			await Bun.sleep(1000);
+			expect(getTabsMapForTest().has(name)).toBe(true);
+			expect((await run).returnValue).toBe(1);
+			// After completion the chain re-arms from the fresh timestamp
+			// and the tab closes without any further settle or open.
+			for (let i = 0; i < 120 && getTabsMapForTest().has(name); i++) await Bun.sleep(50);
+			expect(getTabsMapForTest().has(name)).toBe(false);
+		}, 120_000);
+
+		it("cancelling drops the armed deadline", async () => {
+			const browser = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+			const name = `settle-cancel-${process.pid}`;
+			await acquireTab(name, browser, { timeoutMs: 30_000, ownerSessionId: "session-cancel" });
+
+			armIdleCloseForOwner("session-cancel", 200);
+			cancelIdleCloseForOwner("session-cancel");
+			// Real clock required (see above): past the deadline with the
+			// timer cancelled, the tab must still be tracked.
 			await Bun.sleep(600);
 			expect(getTabsMapForTest().has(name)).toBe(true);
 		}, 120_000);
