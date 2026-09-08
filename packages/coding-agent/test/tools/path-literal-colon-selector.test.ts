@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
-import * as fsBase from "node:fs";
-import * as fs from "node:fs/promises";
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -39,7 +38,7 @@ describe("literal colon filename resolution (issue #4618)", () => {
 	const sessionSettings = Settings.isolated({ "grep.contextBefore": 0, "grep.contextAfter": 0 });
 
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "literal-colon-"));
+		tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "literal-colon-"));
 	});
 
 	afterEach(async () => {
@@ -70,7 +69,7 @@ describe("literal colon filename resolution (issue #4618)", () => {
 		});
 
 		it("keeps a shell-escaped literal path intact when the resolved file exists", async () => {
-			await fs.mkdir(path.join(tmpDir, "dir"), { recursive: true });
+			await fs.promises.mkdir(path.join(tmpDir, "dir"), { recursive: true });
 			await Bun.write(path.join(tmpDir, "dir", "a b:1-2"), "escaped literal\n");
 
 			expect(await splitPathAndSelPreferringLiteral("dir/a\\ b:1-2", tmpDir)).toEqual({
@@ -92,8 +91,8 @@ describe("literal colon filename resolution (issue #4618)", () => {
 			const platform = Object.getOwnPropertyDescriptor(process, "platform");
 			if (platform === undefined) throw new Error("process.platform descriptor is unavailable");
 			Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
-			const lstat = spyOn(fsBase.promises, "lstat").mockRejectedValue(busy);
-			const lstatSync = spyOn(fsBase, "lstatSync").mockImplementation(() => {
+			const lstat = spyOn(fs.promises, "lstat").mockRejectedValue(busy);
+			const lstatSync = spyOn(fs, "lstatSync").mockImplementation(() => {
 				throw busy;
 			});
 
@@ -118,7 +117,7 @@ describe("literal colon filename resolution (issue #4618)", () => {
 
 		it("keeps a literal dangling symlink intact (lstat exists even though stat fails)", async () => {
 			const literal = path.join(tmpDir, "test:1-2");
-			await fs.symlink(path.join(tmpDir, "missing-target"), literal);
+			await fs.promises.symlink(path.join(tmpDir, "missing-target"), literal);
 
 			expect(await probeLiteralPathExists(literal, tmpDir)).toBe("exists");
 			expect(await splitPathAndSelPreferringLiteral(literal, tmpDir)).toEqual({ path: literal });
@@ -144,7 +143,7 @@ describe("literal colon filename resolution (issue #4618)", () => {
 
 		it('returns "exists" for a dangling symlink', async () => {
 			const literal = path.join(tmpDir, "dangling:1-2");
-			await fs.symlink(path.join(tmpDir, "nowhere"), literal);
+			await fs.promises.symlink(path.join(tmpDir, "nowhere"), literal);
 			expect(await probeLiteralPathExists(literal, tmpDir)).toBe("exists");
 		});
 
@@ -173,7 +172,7 @@ describe("literal colon filename resolution (issue #4618)", () => {
 		});
 
 		it("reads a shell-escaped literal file whose name ends in a selector-shaped suffix", async () => {
-			await fs.mkdir(path.join(tmpDir, "dir"), { recursive: true });
+			await fs.promises.mkdir(path.join(tmpDir, "dir"), { recursive: true });
 			await Bun.write(path.join(tmpDir, "dir", "a b:1-2"), "escaped literal read\n");
 
 			const tool = new ReadTool(createSession());
@@ -279,7 +278,7 @@ describe("literal colon filename resolution (issue #4618)", () => {
 		});
 
 		it("searches a shell-escaped literal file whose name ends in a selector-shaped suffix", async () => {
-			await fs.mkdir(path.join(tmpDir, "dir"), { recursive: true });
+			await fs.promises.mkdir(path.join(tmpDir, "dir"), { recursive: true });
 			await Bun.write(path.join(tmpDir, "dir", "a b:1-2"), "escaped literal needle\n");
 
 			const tool = new GrepTool(createSession());
@@ -363,7 +362,7 @@ describe("leading-colon path recovery (issue #5508)", () => {
 
 	beforeEach(async () => {
 		resetSettingsForTest();
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "leading-colon-"));
+		tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "leading-colon-"));
 	});
 
 	afterEach(async () => {
@@ -477,7 +476,7 @@ describe("grep CLI subcommand leading-colon path (issue #5624)", () => {
 	let tmpDir: string;
 
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "grep-cli-colon-"));
+		tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "grep-cli-colon-"));
 		await initTheme();
 	});
 
