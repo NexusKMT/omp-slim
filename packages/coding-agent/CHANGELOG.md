@@ -24,6 +24,7 @@
 
 - Python cells are no longer replayed automatically after a kernel crash, preventing duplicate side effects; the next call starts a fresh kernel.
 - Session rewrites preserve open-reader snapshots and replacement identity when a rename needs an EPERM fallback.
+- Fixed WorkPool children retaining a stale Gemini-formatted `yield` declaration when pooled items were installed or cleared.
 ### Changed
 
 - When enabled (`task.showResolvedModelBadge`), subagent model badges show the thinking-level icon, model name, and attached-advisor eye before the agent name in task, eval, job, and HUD rows.
