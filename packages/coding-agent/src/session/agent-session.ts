@@ -628,6 +628,12 @@ export class AgentSession {
 	#planModeReminderAwaitingProgress = false;
 	readonly #todo: TodoTracker;
 	#workPoolYieldItems: readonly WorkPoolYieldItem[] = [];
+	/** Item set matching the last successfully rebuilt provider prompt. The base
+	 *  prompt starts consistent with the empty set; every later value is a
+	 *  snapshot taken after a prompt rebuild resolves. Rollback restores this —
+	 *  never the merely requested previous set, which may belong to a transition
+	 *  that itself failed. Never mutated in place; replaced wholesale. */
+	#lastPublishedWorkPoolYieldItems: readonly WorkPoolYieldItem[] = [];
 	/** Serialized tail of pooled-turn yield contract transitions; never rejects. */
 	#workPoolYieldTransition: Promise<void> = Promise.resolve();
 	#replanTitleRefreshInFlight: Promise<void> | undefined = undefined;
@@ -7448,19 +7454,20 @@ export class AgentSession {
 		) {
 			return this.#workPoolYieldTransition;
 		}
-		const previous = current;
 		const applied = items.map(item => ({ ...item }));
 		this.#workPoolYieldItems = applied;
 		const run = this.#workPoolYieldTransition.then(async () => {
 			try {
 				await this.refreshBaseSystemPrompt();
 			} catch (error) {
-				// Roll back to the pre-transition contract so gated readers never
-				// observe a half-applied runtime/provider pair. A newer transition
-				// may have replaced the set meanwhile; only restore what this one
-				// installed.
+				// Roll back to the last successfully published contract so gated
+				// readers never observe a half-applied runtime/provider pair. A
+				// newer transition may have replaced the set meanwhile; only
+				// restore what this one installed. `previous` is deliberately not
+				// the target: when overlapping transitions fail in sequence, it can
+				// belong to a transition whose caller already saw a rejection.
 				if (this.#workPoolYieldItems === applied) {
-					this.#workPoolYieldItems = previous;
+					this.#workPoolYieldItems = this.#lastPublishedWorkPoolYieldItems;
 					// Republish inline so waiters gated on this transition observe
 					// the restored pair: a trailing entry would settle those
 					// waiters before the repair runs. An overlapping refresh may
@@ -7479,11 +7486,13 @@ export class AgentSession {
 				}
 				throw error;
 			}
+			// Record what this rebuild published for future rollbacks: the live set
+			// as of success. Then drain any wake parked while pooled.
+			this.#lastPublishedWorkPoolYieldItems = this.#workPoolYieldItems.map(item => ({ ...item }));
 			// A deferred wake may be parked while pooled; now that the fresh
 			// contract is published, let it wake (or stay parked when pooled).
 			this.#resumeStrandedIrcAsides();
 		});
-		this.#workPoolYieldTransition = run.catch(() => {});
 		return run;
 	}
 
