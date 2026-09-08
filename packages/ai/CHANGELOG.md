@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed custom `google-generative-ai` providers failing mid-turn model fallback when Gemini 3 tool calls are replayed without their original thought signature ([#11270](https://github.com/can1357/oh-my-pi/issues/11270)).
+
 ## [18.1.14] - 2026-09-07
 
 ### Fixed
