@@ -1661,10 +1661,24 @@ export class CommandController {
 				this.ctx.showError(`Handoff failed: ${message}`);
 			}
 		} finally {
-			handoffLoader.stop();
-			this.ctx.statusContainer.disposeChildren();
+			this.#finishHandoffUi(handoffLoader);
 		}
 		this.ctx.ui.requestRender(true, { clearScrollback: true });
+	}
+
+	#finishHandoffUi(handoffLoader: Loader): void {
+		handoffLoader.stop();
+		this.ctx.statusContainer.disposeChildren();
+		if (this.ctx.session.isStreaming) {
+			// A new turn won the race with handoff cleanup; restore its loader
+			// after removing the handoff overlay.
+			this.ctx.ensureLoadingAnimation();
+		} else if (this.ctx.loadingAnimation) {
+			// Session events are dispatched asynchronously. A delayed agent_start
+			// can mount the prior turn's loader while transcript replay yields.
+			this.ctx.loadingAnimation.stop();
+			this.ctx.loadingAnimation = undefined;
+		}
 	}
 }
 

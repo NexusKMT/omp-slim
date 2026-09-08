@@ -90,6 +90,53 @@ describe("/handoff command", () => {
 		expect(ctx.session.handoff).toHaveBeenCalledWith("focus on tests");
 	});
 
+	it("clears a working loader mounted while the completed handoff rebuilds the transcript", async () => {
+		const statusContainer = createContainer();
+		const lateWorkingLoader = { stop: vi.fn() };
+		let loadingAnimation: { stop: () => void } | undefined;
+		const ctx = {
+			sessionManager: {
+				getEntries: () => [{ type: "message" }, { type: "message" }],
+			},
+			session: {
+				isStreaming: false,
+				handoff: vi.fn(async () => ({ document: "## Goal\nContinue" })),
+			},
+			get loadingAnimation() {
+				return loadingAnimation;
+			},
+			set loadingAnimation(value: { stop: () => void } | undefined) {
+				loadingAnimation = value;
+			},
+			statusContainer,
+			ui: { requestRender: vi.fn(), requestComponentRender: vi.fn() },
+			clearTransientSessionUi: vi.fn(() => {
+				loadingAnimation?.stop();
+				loadingAnimation = undefined;
+				statusContainer.disposeChildren();
+			}),
+			renderInitialMessages: vi.fn(async () => {
+				// Simulate a delayed agent_start event landing while transcript replay yields.
+				loadingAnimation = lateWorkingLoader;
+				statusContainer.addChild(lateWorkingLoader);
+			}),
+			statusLine: { invalidate: vi.fn() },
+			updateEditorBorderColor: vi.fn(),
+			reloadTodos: vi.fn(async () => undefined),
+			present: vi.fn(),
+			showStatus: vi.fn(),
+			showWarning: vi.fn(),
+			showError: vi.fn(),
+		} as unknown as InteractiveModeContext;
+		const controller = new CommandController(ctx);
+
+		await controller.handleHandoffCommand();
+
+		expect(lateWorkingLoader.stop).toHaveBeenCalledTimes(1);
+		expect(loadingAnimation).toBeUndefined();
+		expect(statusContainer.children).toHaveLength(0);
+	});
+
 	it("surfaces a provider failure named AbortError as a real error, not a cancellation", async () => {
 		// Regression: the catch used to map any name==="AbortError" error to
 		// "Handoff cancelled". session.handoff() now normalizes genuine cancellations
