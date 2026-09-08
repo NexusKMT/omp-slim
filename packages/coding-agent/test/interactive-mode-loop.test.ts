@@ -310,5 +310,30 @@ describe("InteractiveMode loop auto-submit", () => {
 			expect(resolved).toHaveLength(0);
 			expect(mode.loopModeEnabled).toBe(true);
 		});
+
+		// A manual submit while the gate is still running supersedes it: the
+		// stale-verdict guard alone would let a `sleep 30`-style condition (or a
+		// mutating command) keep running concurrently with the replacement turn
+		// for up to the configured timeout instead of being killed immediately.
+		it("aborts an in-flight condition as soon as a manual prompt supersedes it", async () => {
+			vi.useFakeTimers();
+			idleSession();
+			const pending = Promise.withResolvers<LoopConditionVerdict>();
+			let captured: AbortSignal | undefined;
+			vi.spyOn(loopCondition, "evaluateLoopCondition").mockImplementation(async (_condition, options) => {
+				captured = options.signal;
+				return await pending.promise;
+			});
+			mode.loopCondition = { command: "sleep 30", until: false };
+
+			armLoop("keep going");
+			vi.advanceTimersByTime(800);
+			await flushMicrotasks();
+
+			expect(captured?.aborted).toBe(false);
+
+			mode.setLoopPrompt("a different manual prompt");
+			expect(captured?.aborted).toBe(true);
+		});
 	});
 });

@@ -44,11 +44,15 @@ export interface LoopConditionOptions {
 	/** Deadline for one evaluation; `0` disables it (`loop.conditionTimeoutMs`). */
 	timeoutMs: number;
 	signal?: AbortSignal;
+	/** Owning session id, so the condition's shell session cannot leak state into (or from) another session's. */
+	sessionId: string;
 }
 
 /**
  * Keeps condition commands out of the agent's own persistent shell session, so
- * a `cd` inside a condition cannot move the session's working directory.
+ * a `cd` inside a condition cannot move the session's working directory. Scoped
+ * per owning session below so two loop sessions cannot observe each other's
+ * exported shell state through this shared prefix.
  */
 const LOOP_CONDITION_SESSION_KEY = "loop-condition";
 
@@ -108,7 +112,7 @@ export async function evaluateLoopCondition(
 			cwd: options.cwd,
 			timeout: options.timeoutMs,
 			signal: options.signal,
-			sessionKey: LOOP_CONDITION_SESSION_KEY,
+			sessionKey: `${LOOP_CONDITION_SESSION_KEY}:${options.sessionId}`,
 		});
 	} catch (error) {
 		logger.error("loop condition failed to start", { command: condition.command, error: String(error) });

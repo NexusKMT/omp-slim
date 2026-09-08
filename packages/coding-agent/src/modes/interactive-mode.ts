@@ -1855,6 +1855,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				cwd: this.sessionManager.getCwd(),
 				timeoutMs: settings.get("loop.conditionTimeoutMs"),
 				signal: controller.signal,
+				sessionId: this.sessionManager.getSessionId(),
 			});
 		} finally {
 			if (this.#loopConditionAbort === controller) this.#loopConditionAbort = undefined;
@@ -1904,6 +1905,10 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	setLoopPrompt(prompt: string): void {
 		if (!this.loopModeEnabled) return;
+		// A manual submit supersedes whatever prompt the pending gate is checking;
+		// abort it immediately instead of letting it run for up to the configured
+		// timeout in parallel with the turn it can no longer gate.
+		if (this.loopPrompt !== prompt) this.#abortLoopCondition();
 		this.loopPrompt = prompt;
 		this.loopModePaused = false;
 		this.#syncLoopModeStatus();
@@ -4949,6 +4954,12 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	/** Shared `shutdown()`/`restart()` teardown: dispose the session and hand the terminal back. */
 	async #teardown(): Promise<void> {
+		// An in-flight loop condition (or a deferred auto-submit timer) must not
+		// outlive session disposal: an unaborted `sleep 30`-style condition can
+		// resolve mid-teardown and drive `#passesLoopCondition` into invoking the
+		// pending input callback against a session that is already disposing.
+		this.#abortLoopCondition();
+		this.#cancelLoopAutoSubmit();
 		await this.#liveCommandController.stop();
 
 		this.#btwController.dispose();

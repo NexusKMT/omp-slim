@@ -24,11 +24,16 @@ describe("evaluateLoopCondition", () => {
 	function run(
 		command: string,
 		until: boolean,
-		options?: { timeoutMs?: number; signal?: AbortSignal },
+		options?: { timeoutMs?: number; signal?: AbortSignal; sessionId?: string },
 	): Promise<LoopConditionVerdict> {
 		return evaluateLoopCondition(
 			{ command, until },
-			{ cwd: tempDir.path(), timeoutMs: options?.timeoutMs ?? 30_000, signal: options?.signal },
+			{
+				cwd: tempDir.path(),
+				timeoutMs: options?.timeoutMs ?? 30_000,
+				signal: options?.signal,
+				sessionId: options?.sessionId ?? "test-session",
+			},
 		);
 	}
 
@@ -87,6 +92,17 @@ describe("evaluateLoopCondition", () => {
 	it("ignores stdout when it contradicts the exit status", async () => {
 		// `echo false` exits 0. Reading stdout would halt a --while loop here.
 		expect(await run("echo false", false)).toEqual({ kind: "continue" });
+	});
+
+	// Regression: the persistent shell backing condition evaluation is keyed
+	// off the process-wide `LOOP_CONDITION_SESSION_KEY` constant. Without
+	// folding in the owning session id, one session's `export` is visible to
+	// every other session's condition, which can flip an unrelated loop's
+	// verdict.
+	it("scopes the persistent condition shell per owning session", async () => {
+		expect(await run("export LOOP_READY=1", false, { sessionId: "session-a" })).toEqual({ kind: "continue" });
+		expect(await run('test -n "$LOOP_READY"', false, { sessionId: "session-a" })).toEqual({ kind: "continue" });
+		expect(await run('test -z "$LOOP_READY"', false, { sessionId: "session-b" })).toEqual({ kind: "continue" });
 	});
 });
 

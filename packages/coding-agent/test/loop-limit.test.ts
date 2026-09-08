@@ -153,6 +153,31 @@ describe("loop condition parsing", () => {
 	test("leaves prose prompts that merely contain a dash untouched", () => {
 		expect(parseLoopArgs("keep going --until it works")).toEqual({ prompt: "keep going --until it works" });
 	});
+
+	// A quoted condition can legitimately contain an escaped instance of its
+	// own outer delimiter (e.g. a `node -e` one-liner). An `indexOf`-based
+	// scanner treats that escaped quote as the closing delimiter and silently
+	// splits the command into condition/prompt text; the escape-aware scanner
+	// must keep it intact end to end.
+	test("handles an escaped instance of the outer delimiter inside a quoted condition", () => {
+		expect(parseLoopArgs(`--until "node -e \\"process.exit(0)\\"" fix it`)).toEqual({
+			condition: { command: 'node -e "process.exit(0)"', until: true },
+			prompt: "fix it",
+		});
+		expect(parseLoopArgs(`--while "test \\"$READY\\" = yes" continue`)).toEqual({
+			condition: { command: 'test "$READY" = yes', until: false },
+			prompt: "continue",
+		});
+	});
+
+	// A malformed flag whose valid name is immediately followed by a digit or
+	// punctuation (no whitespace/`=` delimiter) must still be reported as an
+	// unknown flag, not matched as a truncated known flag with the remainder
+	// swallowed into the condition/prompt text.
+	test("requires whitespace, `=`, or end-of-input after the flag name", () => {
+		expect(parseLoopArgs("--until123 fix")).toContain("Unknown /loop flag --until123");
+		expect(parseLoopArgs("--until, keep going")).toContain("Unknown /loop flag --until,");
+	});
 });
 
 describe("loop limit runtime", () => {

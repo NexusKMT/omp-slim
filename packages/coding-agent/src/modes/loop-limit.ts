@@ -1,3 +1,4 @@
+import { readShellWord } from "../tools/shell-tokenize";
 import type { LoopConditionConfig } from "./loop-condition";
 
 export type LoopLimitConfig =
@@ -131,7 +132,7 @@ function takeLoopCondition(input: string): { condition?: LoopConditionConfig; re
 	let condition: LoopConditionConfig | undefined;
 
 	while (rest.startsWith("--")) {
-		const name = /^--[a-z][a-z-]*/.exec(rest)?.[0];
+		const name = /^(--[a-z][a-z-]*)(?=[\s=]|$)/.exec(rest)?.[1];
 		const until = name === undefined ? undefined : CONDITION_FLAGS[name];
 		if (name === undefined || until === undefined) {
 			return `Unknown /loop flag ${name ?? rest.split(/\s+/, 1)[0]}. ${LOOP_USAGE}`;
@@ -140,7 +141,7 @@ function takeLoopCondition(input: string): { condition?: LoopConditionConfig; re
 
 		const afterName = rest.slice(name.length);
 		const valueText = afterName.startsWith("=") ? afterName.slice(1) : afterName;
-		const value = readFlagValue(valueText);
+		const value = readShellWord(valueText);
 		if (value === "unterminated") return `${name} has an unterminated quote.`;
 		if (value === undefined || !value.value.trim() || valueText.trim().startsWith("-")) {
 			return `${name} needs a shell command. Quote it when it contains spaces: /loop ${name} 'bun test'.`;
@@ -150,25 +151,6 @@ function takeLoopCondition(input: string): { condition?: LoopConditionConfig; re
 	}
 
 	return { condition, rest };
-}
-
-/**
- * Read one flag value: a single- or double-quoted run, so a multi-word command
- * survives intact, otherwise a single whitespace-delimited token. Returns
- * `undefined` when no value follows and `"unterminated"` for an unclosed quote.
- */
-function readFlagValue(input: string): { value: string; rest: string } | "unterminated" | undefined {
-	const text = input.trim();
-	if (!text) return undefined;
-	const quote = text[0];
-	if (quote === "'" || quote === '"') {
-		const end = text.indexOf(quote, 1);
-		if (end === -1) return "unterminated";
-		return { value: text.slice(1, end), rest: text.slice(end + 1).trim() };
-	}
-	const space = text.search(/\s/);
-	if (space === -1) return { value: text, rest: "" };
-	return { value: text.slice(0, space), rest: text.slice(space + 1).trim() };
 }
 
 function makeIterations(amountText: string): LoopLimitConfig | string {
