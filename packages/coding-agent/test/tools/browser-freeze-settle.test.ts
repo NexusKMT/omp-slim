@@ -1,0 +1,279 @@
+/**
+ * Regression tests for issue #8246: session-owned headless tabs outlive their
+ * purpose and burn CPU/GPU (unthrottled rAF + SwiftShader) until session
+ * dispose. The settle machinery under test:
+ *
+ * - `freezeTabsForOwner` pauses rAF/timers via `Page.setWebLifecycleState`
+ *   while keeping renderer/worker/DOM state for millisecond resume;
+ * - `releaseIdleTabsForOwner` closes tabs idle past the timeout as the
+ *   memory backstop;
+ * - reuse/run refresh `lastActivityAt` and resume frozen tabs.
+ *
+ * Scope contract (the thing that must never regress): settle touches ONLY
+ * OMP-launched headless worker tabs of the owning session that did not opt
+ * out with `persist`. Relay/connected/spawned tabs drive the user's own
+ * pages, cmux is a different backend with no CDP lifecycle, and other
+ * sessions' tabs belong to their owners.
+ */
+
+import { afterEach, describe, expect, it, spyOn, vi } from "bun:test";
+import type { CmuxKind } from "@oh-my-pi/pi-coding-agent/tools/browser/cmux/rpc";
+import { CmuxSocketClient } from "@oh-my-pi/pi-coding-agent/tools/browser/cmux/socket-client";
+import { acquireBrowser } from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
+import {
+	acquireTab,
+	freezeTabsForOwner,
+	getTabsMapForTest,
+	releaseIdleTabsForOwner,
+	releaseTab,
+	runInTab,
+	setTabFrozenForTest,
+} from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
+import type { TabSession } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
+import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
+import { chromiumAvailable } from "./chromium-probe";
+
+const CHROMIUM_AVAILABLE = await chromiumAvailable();
+function makeKind(socketSuffix: string): CmuxKind {
+	return { kind: "cmux", socketPath: `/tmp/omp-test-${socketSuffix}.sock`, surface: `surface-${socketSuffix}` };
+}
+
+function makeSession(cwd: string): ToolSession {
+	return {
+		cwd,
+		hasUI: false,
+		settings: { get: () => undefined },
+		getSessionFile: () => null,
+	} as unknown as ToolSession;
+}
+
+function mockCmuxSocket(): void {
+	spyOn(CmuxSocketClient.prototype, "connect").mockResolvedValue(undefined);
+	spyOn(CmuxSocketClient.prototype, "close").mockImplementation(() => undefined);
+	spyOn(CmuxSocketClient.prototype, "request").mockImplementation(
+		async (method: string): Promise<Record<string, unknown>> => {
+			if (method === "browser.open_split")
+				return { surface_id: `surface-${method}-${Date.now()}`, url: "about:blank" };
+			if (method === "browser.url.get") return { url: "about:blank" };
+			if (method === "browser.snapshot") return { page: { html: "" } };
+			if (method === "browser.geometry") return {};
+			if (method === "browser.eval") return { value: "" };
+			return {};
+		},
+	);
+}
+
+async function drainAllTabs(): Promise<void> {
+	// oxlint-disable-next-line unicorn/no-useless-spread -- releasing tabs mutates the map
+	for (const name of [...getTabsMapForTest().keys()]) {
+		await releaseTab(name, { kill: false }).catch(() => undefined);
+	}
+}
+
+interface CdpCall {
+	method: string;
+	params?: unknown;
+}
+
+/** Minimal worker-tab double: `_targetId` hits the fast path in target lookup. */
+function makeStubTab(overrides: Record<string, unknown> = {}): { tab: TabSession; calls: CdpCall[] } {
+	const calls: CdpCall[] = [];
+	const session = {
+		send: async (method: string, params?: unknown): Promise<Record<string, unknown>> => {
+			calls.push({ method, params });
+			return {};
+		},
+		detach: async (): Promise<void> => undefined,
+	};
+	const target = {
+		_targetId: "stub-target-1",
+		createCDPSession: async () => session,
+	};
+	const tab = {
+		name: "stub-tab",
+		browser: { browser: { targets: () => [target] } },
+		targetId: "stub-target-1",
+		backend: "worker",
+		state: "alive",
+		info: {},
+		pending: new Map(),
+		kindTag: "headless",
+		ownerSessionId: "session-stub",
+		persist: false,
+		lastActivityAt: Date.now(),
+		frozen: false,
+		...overrides,
+	} as unknown as TabSession;
+	return { tab, calls };
+}
+
+describe("browser settle — lifecycle freeze via CDP", () => {
+	it("freezes a managed headless tab and resumes it", async () => {
+		const { tab, calls } = makeStubTab();
+
+		expect(await setTabFrozenForTest(tab, true)).toBe(true);
+		expect(tab.frozen).toBe(true);
+		expect(calls.map(call => call.method)).toEqual(["Page.enable", "Page.setWebLifecycleState"]);
+		expect(calls[1]?.params).toEqual({ state: "frozen" });
+
+		expect(await setTabFrozenForTest(tab, false)).toBe(true);
+		expect(tab.frozen).toBe(false);
+		expect(calls.at(-1)).toEqual({ method: "Page.setWebLifecycleState", params: { state: "active" } });
+	});
+
+	it("a repeated transition without state change issues no CDP call", async () => {
+		const { tab, calls } = makeStubTab();
+		expect(await setTabFrozenForTest(tab, true)).toBe(true);
+		const sendCount = calls.length;
+
+		expect(await setTabFrozenForTest(tab, true)).toBe(false);
+		expect(calls.length).toBe(sendCount);
+	});
+
+	it("never touches tabs outside the settle scope", async () => {
+		const cases: Array<{ label: string; overrides: Record<string, unknown> }> = [
+			{ label: "relay", overrides: { kindTag: "relay" } },
+			{ label: "connected", overrides: { kindTag: "connected" } },
+			{ label: "spawned", overrides: { kindTag: "spawned" } },
+			{ label: "cmux backend", overrides: { backend: "cmux", kindTag: "cmux" } },
+			{ label: "persist opt-out", overrides: { persist: true } },
+			{ label: "dead tab", overrides: { state: "dead" } },
+			{ label: "in-flight run", overrides: { pending: new Map([["run-1", {}]]) } },
+		];
+		for (const { label, overrides } of cases) {
+			const { tab, calls } = makeStubTab(overrides);
+			expect(await setTabFrozenForTest(tab, true), label).toBe(false);
+			expect(tab.frozen, label).toBe(false);
+			expect(calls.length, label).toBe(0);
+		}
+	});
+
+	it("leaves the tab unfrozen when its target is gone", async () => {
+		const { tab, calls } = makeStubTab({
+			browser: { browser: { targets: () => [] } },
+		});
+		expect(await setTabFrozenForTest(tab, true)).toBe(false);
+		expect(tab.frozen).toBe(false);
+		expect(calls.length).toBe(0);
+	});
+
+	it("leaves the tab unfrozen when the protocol call fails", async () => {
+		const { tab, calls } = makeStubTab({
+			browser: {
+				browser: {
+					targets: () => [
+						{
+							_targetId: "stub-target-1",
+							createCDPSession: async () => {
+								throw new Error("target crashed");
+							},
+						},
+					],
+				},
+			},
+		});
+		expect(await setTabFrozenForTest(tab, true)).toBe(false);
+		expect(tab.frozen).toBe(false);
+		expect(calls.length).toBe(0);
+	});
+
+	describe("browser settle — ownership and bookkeeping", () => {
+		afterEach(async () => {
+			try {
+				await drainAllTabs();
+			} finally {
+				vi.restoreAllMocks();
+			}
+		});
+
+		it("acquireTab records persist and activity; reuse preserves persist and refreshes activity", async () => {
+			mockCmuxSocket();
+			const browser = await acquireBrowser(makeKind("settle-bookkeeping"), { cwd: "/tmp" });
+
+			const before = Date.now();
+			const first = await acquireTab("settle-book", browser, {
+				timeoutMs: 1_000,
+				ownerSessionId: "session-A",
+				persist: true,
+			});
+			expect(first.tab.persist).toBe(true);
+			expect(first.tab.frozen).toBe(false);
+			expect(first.tab.lastActivityAt).toBeGreaterThanOrEqual(before);
+			// Backdate, then reuse under a different session without persist: the
+			// creator's opt-out and ownership survive, the clock refreshes.
+			first.tab.lastActivityAt -= 60_000;
+			const stale = first.tab.lastActivityAt;
+			const second = await acquireTab("settle-book", browser, { timeoutMs: 1_000, ownerSessionId: "session-B" });
+			expect(second.tab).toBe(first.tab);
+			expect(second.created).toBe(false);
+			expect(second.tab.ownerSessionId).toBe("session-A");
+			expect(second.tab.persist).toBe(true);
+			expect(second.tab.lastActivityAt).toBeGreaterThan(stale);
+		});
+
+		it("tabs without persist default to reaping", async () => {
+			mockCmuxSocket();
+			const browser = await acquireBrowser(makeKind("settle-default"), { cwd: "/tmp" });
+			const { tab } = await acquireTab("settle-plain", browser, { timeoutMs: 1_000, ownerSessionId: "session-A" });
+			expect(tab.persist).toBe(false);
+		});
+
+		it("freezeTabsForOwner skips non-headless tabs", async () => {
+			mockCmuxSocket();
+			const browser = await acquireBrowser(makeKind("settle-freeze-skip"), { cwd: "/tmp" });
+			const { tab } = await acquireTab("settle-cmux", browser, { timeoutMs: 1_000, ownerSessionId: "session-A" });
+
+			expect(await freezeTabsForOwner("session-A")).toBe(0);
+			expect(tab.frozen).toBe(false);
+			expect(tab.state).toBe("alive");
+		});
+
+		it("releaseIdleTabsForOwner skips non-headless tabs even when ancient", async () => {
+			mockCmuxSocket();
+			const browser = await acquireBrowser(makeKind("settle-idle-skip"), { cwd: "/tmp" });
+			const { tab } = await acquireTab("settle-old", browser, { timeoutMs: 1_000, ownerSessionId: "session-A" });
+			tab.lastActivityAt = Date.now() - 3_600_000;
+
+			expect(await releaseIdleTabsForOwner("session-A", { idleMs: 60_000 })).toBe(0);
+			expect(getTabsMapForTest().has("settle-old")).toBe(true);
+		});
+
+		it("settle is a no-op for unknown owners", async () => {
+			expect(await freezeTabsForOwner("session-nobody")).toBe(0);
+			expect(await releaseIdleTabsForOwner("session-nobody", { idleMs: 0 })).toBe(0);
+			expect(await freezeTabsForOwner("")).toBe(0);
+			expect(await releaseIdleTabsForOwner("", { idleMs: 0 })).toBe(0);
+		});
+	});
+
+	describe.skipIf(!CHROMIUM_AVAILABLE)("browser settle — real headless Chromium", () => {
+		afterEach(async () => {
+			await drainAllTabs();
+		});
+
+		it("freezes at settle, resumes transparently on run, and idle-closes", async () => {
+			const session = makeSession(process.cwd());
+			const browser = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+			const name = `settle-real-${process.pid}`;
+			const { tab } = await acquireTab(name, browser, {
+				url: "about:blank",
+				timeoutMs: 30_000,
+				ownerSessionId: "session-settle-real",
+			});
+			expect(tab.frozen).toBe(false);
+
+			expect(await freezeTabsForOwner("session-settle-real")).toBe(1);
+			expect(tab.frozen).toBe(true);
+
+			// A run resumes the page without the caller knowing it was frozen.
+			const result = await runInTab(name, { code: "return 40 + 2;", timeoutMs: 30_000, session });
+			expect(tab.frozen).toBe(false);
+			expect(result.returnValue).toBe(42);
+
+			// Backdated past the timeout, the owned tab closes.
+			tab.lastActivityAt = Date.now() - 3_600_000;
+			expect(await releaseIdleTabsForOwner("session-settle-real", { idleMs: 60_000 })).toBe(1);
+			expect(getTabsMapForTest().has(name)).toBe(false);
+		}, 120_000);
+	});
+});

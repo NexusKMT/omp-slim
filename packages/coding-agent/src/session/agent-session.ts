@@ -202,7 +202,7 @@ import { shutdownTinyTitleClient } from "../tiny/title-client";
 import type { ImageAttachmentEntry } from "../tools";
 import { resolveApproval } from "../tools/approval";
 import { type AskToolDetails, type AskToolInput, recoverAskQuestions } from "../tools/ask";
-import { releaseTabsForOwner } from "../tools/browser/tab-supervisor";
+import { freezeTabsForOwner, releaseIdleTabsForOwner, releaseTabsForOwner } from "../tools/browser/tab-supervisor";
 import type { CheckpointState, CompletedRewindState } from "../tools/checkpoint";
 import { releaseComputerSessionsForOwner } from "../tools/computer/supervisor";
 import { normalizeLocalScheme, resolveToCwd } from "../tools/path-utils";
@@ -2976,6 +2976,13 @@ export class AgentSession {
 				this.#toolChoiceQueue.resolve();
 			}
 		}
+		// Settle owned headless browser tabs: freeze live pages so animated
+		// content stops burning CPU/GPU while idle (issue #8246), then close
+		// tabs idle past the timeout. Detached — tool results for this turn
+		// are already paired, and teardown must never block the event flow.
+		if (event.type === "turn_end") {
+			void this.#settleOwnedBrowserTabs();
+		}
 		if (event.type === "tool_execution_end") {
 			if (event.toolName === "goal") {
 				await this.#goalRuntime.onGoalToolCompleted();
@@ -4446,6 +4453,45 @@ export class AgentSession {
 			}
 		} catch (error) {
 			logger.warn("Failed to release owned browser tabs during dispose", { error: String(error) });
+		}
+	}
+
+	/**
+	 * Turn-settle checkpoint for owned headless browser tabs (issue #8246).
+	 * Freeze first so idle animated pages stop burning CPU/GPU while keeping
+	 * their state for millisecond resume, then close tabs idle past
+	 * `browser.idleCloseSec` as the memory backstop. Scoped to OMP-owned
+	 * headless tabs of this session only — relay/CDP/spawned tabs, other
+	 * sessions' tabs, and `persist` tabs are never touched. Best-effort:
+	 * never throws, so teardown cannot break the event flow.
+	 */
+	async #settleOwnedBrowserTabs(): Promise<void> {
+		const ownerId = this.sessionManager.getSessionId();
+		if (!ownerId) return;
+		try {
+			const idleSec = this.settings.get("browser.idleCloseSec");
+			if (idleSec > 0) {
+				const closed = await withTimeout(
+					releaseIdleTabsForOwner(ownerId, { idleMs: idleSec * 1000 }),
+					3_000,
+					"Timed out closing idle browser tabs at turn settle",
+				);
+				if (closed > 0) {
+					logger.debug("Closed idle owned browser tabs at turn settle", { ownerId, closed });
+				}
+			}
+			if (this.settings.get("browser.freezeOnTurnEnd")) {
+				const frozen = await withTimeout(
+					freezeTabsForOwner(ownerId),
+					3_000,
+					"Timed out freezing owned browser tabs at turn settle",
+				);
+				if (frozen > 0) {
+					logger.debug("Froze owned browser tabs at turn settle", { ownerId, frozen });
+				}
+			}
+		} catch (error) {
+			logger.warn("Failed to settle owned browser tabs at turn end", { error: String(error) });
 		}
 	}
 

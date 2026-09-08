@@ -246,7 +246,7 @@ def _make_browser():
             viewport=None,
             wait_until=None,
             dialogs=None,
-            timeout=None,
+            persist=None,
         ):
             """Open or attach to a browser tab and return its handle."""
             if name is not None:
@@ -260,7 +260,7 @@ def _make_browser():
                     "viewport": viewport,
                     "wait_until": wait_until,
                     "dialogs": dialogs,
-                    "timeout": timeout,
+                    "persist": persist,
                 },
             )
             opened_name = details.get("name")

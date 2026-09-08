@@ -85,6 +85,21 @@ interface TabSessionBase<TBrowser extends BrowserHandle = BrowserHandle> {
 	 * Undefined when the acquirer did not identify itself.
 	 */
 	ownerSessionId?: string;
+	/**
+	 * Opt out of settle-freeze and idle-close reaping. Recorded on the tab
+	 * when created (never on reuse), mirroring `ownerSessionId`: keeping a
+	 * tab live across turns is the creator's explicit decision.
+	 */
+	persist?: boolean;
+	/** Wall-clock (`Date.now()`) last use: create, reuse, or run start. Drives idle-close. */
+	lastActivityAt: number;
+	/**
+	 * True after a successful settle-freeze (`Page.setWebLifecycleState`
+	 * frozen). Cleared on unfreeze/create. Freeze pauses rAF/timers so an
+	 * idle animated page stops burning CPU/GPU; the renderer, worker, and
+	 * DOM state stay alive for millisecond resume.
+	 */
+	frozen: boolean;
 }
 
 export interface WorkerTabSession extends TabSessionBase<PuppeteerBrowserHandle> {
@@ -126,6 +141,12 @@ export interface AcquireTabOptions {
 	 * dispose. Optional — omitting it opts the tab out of session-scoped reap.
 	 */
 	ownerSessionId?: string;
+	/**
+	 * Keep the tab live across turn settle and idle close. Recorded on the
+	 * tab when created (never on reuse) so a later caller cannot silently
+	 * extend another session's tab lifetime.
+	 */
+	persist?: boolean;
 }
 
 export interface AcquireTabResult {
@@ -273,6 +294,11 @@ async function acquireTabImpl(
 				tempHold = true;
 				await releaseTab(name, { kill: false });
 			} else {
+				// Reuse counts as use: refresh the idle clock and resume a
+				// settle-frozen page before driving it again. Unfreeze is a
+				// flag-check no-op unless a previous settle froze the tab.
+				existing.lastActivityAt = Date.now();
+				await unfreezeTabSession(existing);
 				const reuseSteps: string[] = [];
 				if (opts.viewport && browser.kind.kind !== "cmux") {
 					const dsf = opts.viewport.deviceScaleFactor;
@@ -405,6 +431,9 @@ async function acquireTabImpl(
 		kindTag: browser.kind.kind,
 		activateForScreenshot: initPayload.mode === "headless" || initPayload.activateForScreenshot !== false,
 		ownerSessionId: opts.ownerSessionId,
+		persist: opts.persist ?? false,
+		lastActivityAt: Date.now(),
+		frozen: false,
 	};
 	worker.onMessage(msg => handleTabMessage(tab, msg));
 	tabs.set(name, tab);
@@ -480,6 +509,9 @@ async function acquireCmuxTab(
 			kindTag: browser.kind.kind,
 			cmuxAttachedSurface: attachedSurface,
 			ownerSessionId: opts.ownerSessionId,
+			persist: opts.persist ?? false,
+			lastActivityAt: Date.now(),
+			frozen: false,
 		};
 		tabs.set(name, tab);
 		return { tab, created: true };
@@ -518,6 +550,11 @@ async function runInTabWithSnapshot(
 		);
 	}
 	if (tab.pending.size > 0) throw new ToolError(`Tab ${JSON.stringify(name)} is busy`);
+	// A run is use: refresh the idle clock and resume a settle-frozen page
+	// first so frozen rAF/timers cannot hang the execution below. Unfreeze
+	// never throws — on failure the run proceeds and surfaces the page error.
+	tab.lastActivityAt = Date.now();
+	await unfreezeTabSession(tab);
 	const id = Snowflake.next();
 	const { promise, resolve, reject } = Promise.withResolvers<RunResultOk>();
 	// `releaseTab` calls `pending.reject(closeError)` when the tab dies
@@ -749,6 +786,131 @@ export async function dropHeadlessTabs(): Promise<void> {
 export async function releaseTabsForOwner(ownerId: string, opts: ReleaseTabOptions = {}): Promise<number> {
 	if (!ownerId) return 0;
 	const names = [...tabs.values()].filter(tab => tab.ownerSessionId === ownerId).map(tab => tab.name);
+	let count = 0;
+	for (const name of names) {
+		if (await releaseTab(name, opts)) count++;
+	}
+	return count;
+}
+
+/**
+ * Tabs this settle machinery may ever touch: OMP-launched headless puppeteer
+ * tabs (`kindTag === "headless"` covers hidden and visible shared-daemon
+ * tabs) that are alive and not opted out with `persist`. Connected, relay,
+ * and spawned tabs drive the user's own pages/apps, and cmux surfaces are a
+ * different backend with no CDP lifecycle — all are never frozen or reaped
+ * here. Ownership follows the `releaseTabsForOwner` contract: recorded on
+ * creation, never transferred by reuse.
+ */
+function isSettleManaged(tab: TabSession): boolean {
+	return tab.backend === "worker" && tab.kindTag === "headless" && tab.state === "alive" && !tab.persist;
+}
+
+/**
+ * Find the live puppeteer target backing a tab. Mirrors the tab worker's
+ * attach scan: fast `_targetId` path first, CDP comparison across targets
+ * otherwise. Returns undefined when the target is already gone.
+ */
+async function findTargetForTab(tab: WorkerTabSession): Promise<Target | undefined> {
+	for (const target of tab.browser.browser.targets()) {
+		if ((await targetIdForTarget(target).catch(() => "")) !== tab.targetId) continue;
+		return target;
+	}
+	return undefined;
+}
+
+/**
+ * Set a tab's web lifecycle state through a supervisor-owned CDP session —
+ * no worker-protocol change needed; CDP allows multiple sessions per target.
+ * `frozen` pauses rAF/timers (the SwiftShader burn in #8246); `active`
+ * resumes. Best-effort in the safe direction: false when the tab is gone or
+ * the protocol call fails, leaving `frozen` untouched so the next checkpoint
+ * retries and close paths still apply.
+ */
+async function setTabFrozen(tab: TabSession, frozen: boolean): Promise<boolean> {
+	if (!isSettleManaged(tab) || tab.backend !== "worker") return false;
+	if (tab.pending.size > 0) return false;
+	if (tab.frozen === frozen) return false;
+	const target = await findTargetForTab(tab).catch(() => undefined);
+	if (!target) return false;
+	const session = await target.createCDPSession().catch(() => null);
+	if (!session) return false;
+	try {
+		await session.send("Page.enable").catch(() => undefined);
+		await session.send("Page.setWebLifecycleState", { state: frozen ? "frozen" : "active" });
+	} catch (error) {
+		logger.debug("Browser tab lifecycle transition failed; leaving tab unfrozen", {
+			name: tab.name,
+			frozen,
+			error: error instanceof Error ? error.message : String(error),
+		});
+		return false;
+	} finally {
+		await session.detach().catch(() => undefined);
+	}
+	tab.frozen = frozen;
+	return true;
+}
+
+/** Test hook for the lifecycle transition without a tabs-map entry. */
+export function setTabFrozenForTest(tab: TabSession, frozen: boolean): Promise<boolean> {
+	return setTabFrozen(tab, frozen);
+}
+
+/** Freeze one managed tab by name. No-op (false) unless a transition happened. */
+export async function freezeTab(name: string): Promise<boolean> {
+	const tab = tabs.get(name);
+	if (!tab) return false;
+	return await setTabFrozen(tab, true);
+}
+
+/** Resume one frozen tab by name. No-op (false) unless a transition happened. */
+export async function unfreezeTab(name: string): Promise<boolean> {
+	const tab = tabs.get(name);
+	if (!tab) return false;
+	return await setTabFrozen(tab, false);
+}
+
+/**
+ * Resume a tab before driving it. Never throws: a failed unfreeze leaves
+ * `frozen` set so the next checkpoint retries, and the caller's run proceeds
+ * to surface the underlying page error itself.
+ */
+async function unfreezeTabSession(tab: TabSession): Promise<void> {
+	if (!tab.frozen) return;
+	await setTabFrozen(tab, false).catch(() => false);
+}
+
+/**
+ * Freeze every managed tab owned by `ownerId` (issue #8246). Turn-settle
+ * checkpoint: an idle animated page stops burning CPU/GPU while keeping its
+ * renderer, worker, and DOM state for millisecond resume on next use. Tabs
+ * with in-flight runs are skipped and picked up at the next settle.
+ */
+export async function freezeTabsForOwner(ownerId: string): Promise<number> {
+	if (!ownerId) return 0;
+	let count = 0;
+	for (const tab of tabs.values()) {
+		if (tab.ownerSessionId !== ownerId) continue;
+		if (await setTabFrozen(tab, true).catch(() => false)) count++;
+	}
+	return count;
+}
+
+/**
+ * Close managed tabs owned by `ownerId` idle longer than `idleMs` — the
+ * memory backstop under settle-freeze (frozen tabs still hold their renderer
+ * and worker). Frozen or not, `persist` tabs are never touched.
+ */
+export async function releaseIdleTabsForOwner(
+	ownerId: string,
+	opts: { idleMs: number } & ReleaseTabOptions = { idleMs: 0 },
+): Promise<number> {
+	if (!ownerId) return 0;
+	const now = Date.now();
+	const names = [...tabs.values()]
+		.filter(tab => tab.ownerSessionId === ownerId && isSettleManaged(tab) && now - tab.lastActivityAt >= opts.idleMs)
+		.map(tab => tab.name);
 	let count = 0;
 	for (const name of names) {
 		if (await releaseTab(name, opts)) count++;
