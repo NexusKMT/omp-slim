@@ -571,7 +571,8 @@ export function extractLeadingCdTarget(command: string): { path: string; rest: s
  * follows the same rules as {@link tokenizeShellSegments} (no escapes inside
  * single quotes; `\"`, `\\`, `\$`, `` \` `` inside double quotes; backslash
  * escapes the next character when unquoted), and the word ends at the first
- * unquoted whitespace character or the end of the string.
+ * unquoted whitespace character (space, tab, `\n`, or `\r`) or the end of
+ * the string.
  *
  * Shared so callers reading one quoted flag value (`/loop --until "…"`) do not
  * each maintain their own `indexOf`-based quote scanner, which breaks on an
@@ -582,7 +583,7 @@ export function extractLeadingCdTarget(command: string): { path: string; rest: s
  */
 export function readShellWord(text: string): { value: string; rest: string } | "unterminated" | undefined {
 	let i = 0;
-	while (i < text.length && (text[i] === " " || text[i] === "\t")) i++;
+	while (i < text.length && /[ \t\n\r]/.test(text[i])) i++;
 	if (i >= text.length) return undefined;
 
 	let value = "";
@@ -627,7 +628,7 @@ export function readShellWord(text: string): { value: string; rest: string } | "
 			i++;
 			continue;
 		}
-		if (ch === " " || ch === "\t") break;
+		if (/[ \t\n\r]/.test(ch)) break;
 		value += ch;
 	}
 	if (inSingle || inDouble) return "unterminated";

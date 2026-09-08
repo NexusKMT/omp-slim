@@ -1905,10 +1905,12 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	setLoopPrompt(prompt: string): void {
 		if (!this.loopModeEnabled) return;
-		// A manual submit supersedes whatever prompt the pending gate is checking;
-		// abort it immediately instead of letting it run for up to the configured
-		// timeout in parallel with the turn it can no longer gate.
-		if (this.loopPrompt !== prompt) this.#abortLoopCondition();
+		// Any manual submit supersedes whatever gate is currently pending, even
+		// one resubmitting identical text: the gate was checking the *previous*
+		// iteration, and that iteration's turn is about to be superseded either
+		// way. Abort immediately instead of letting it run for up to the
+		// configured timeout in parallel with the turn it can no longer gate.
+		this.#abortLoopCondition();
 		this.loopPrompt = prompt;
 		this.loopModePaused = false;
 		this.#syncLoopModeStatus();

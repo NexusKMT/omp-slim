@@ -178,6 +178,17 @@ describe("loop condition parsing", () => {
 		expect(parseLoopArgs("--until123 fix")).toContain("Unknown /loop flag --until123");
 		expect(parseLoopArgs("--until, keep going")).toContain("Unknown /loop flag --until,");
 	});
+
+	// A multiline invocation puts the prompt on the next line. A scanner that
+	// only treats space/tab as unquoted whitespace folds that next line into
+	// the condition command, which then runs part of the prompt as a shell
+	// command and typically disables the loop with exit 127.
+	test("ends a quoted condition at a newline, leaving the next line as the prompt", () => {
+		expect(parseLoopArgs("--until 'bun test'\nfix the tests")).toEqual({
+			condition: { command: "bun test", until: true },
+			prompt: "fix the tests",
+		});
+	});
 });
 
 describe("loop limit runtime", () => {

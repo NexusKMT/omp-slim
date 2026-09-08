@@ -335,5 +335,30 @@ describe("InteractiveMode loop auto-submit", () => {
 			mode.setLoopPrompt("a different manual prompt");
 			expect(captured?.aborted).toBe(true);
 		});
+
+		// A manual submit that happens to repeat the current loop prompt still
+		// supersedes the pending gate: an equality check on the prompt text alone
+		// would leave a `sleep 30`-style condition running concurrently with the
+		// resubmitted turn instead of aborting it immediately.
+		it("aborts an in-flight condition when the manual submission repeats the loop prompt", async () => {
+			vi.useFakeTimers();
+			idleSession();
+			const pending = Promise.withResolvers<LoopConditionVerdict>();
+			let captured: AbortSignal | undefined;
+			vi.spyOn(loopCondition, "evaluateLoopCondition").mockImplementation(async (_condition, options) => {
+				captured = options.signal;
+				return await pending.promise;
+			});
+			mode.loopCondition = { command: "sleep 30", until: false };
+
+			armLoop("keep going");
+			vi.advanceTimersByTime(800);
+			await flushMicrotasks();
+
+			expect(captured?.aborted).toBe(false);
+
+			mode.setLoopPrompt("keep going");
+			expect(captured?.aborted).toBe(true);
+		});
 	});
 });

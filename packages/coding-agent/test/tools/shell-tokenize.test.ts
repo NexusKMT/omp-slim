@@ -82,6 +82,15 @@ describe("readShellWord", () => {
 		});
 	});
 
+	// Regression: a scanner that only checks space/tab does not end a quoted
+	// value at a newline, so a multiline invocation folds the next line's
+	// prompt text into the condition command.
+	it("stops on a newline or carriage return, not just space and tab", () => {
+		expect(readShellWord("'bun test'\nfix the tests")).toEqual({ value: "bun test", rest: "fix the tests" });
+		expect(readShellWord("bun\ntest")).toEqual({ value: "bun", rest: "test" });
+		expect(readShellWord("bun\r\ntest")).toEqual({ value: "bun", rest: "test" });
+	});
+
 	it("does not un-escape inside single quotes", () => {
 		expect(readShellWord(String.raw`'a\"b' rest`)).toEqual({ value: 'a\\"b', rest: "rest" });
 	});
