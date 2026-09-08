@@ -20,11 +20,13 @@ import { afterEach, describe, expect, it, spyOn, vi } from "bun:test";
 import type { CmuxKind } from "@oh-my-pi/pi-coding-agent/tools/browser/cmux/rpc";
 import { CmuxSocketClient } from "@oh-my-pi/pi-coding-agent/tools/browser/cmux/socket-client";
 import { acquireBrowser } from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
+import type { BrowserHandle } from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
 import {
 	acquireTab,
 	armIdleCloseForOwner,
 	cancelIdleCloseForOwner,
 	earliestIdleCloseInMs,
+	ensureSpawnedKilledForTest,
 	freezeTabsForOwner,
 	getTabsMapForTest,
 	hasIdleCloseTimerForTest,
@@ -229,6 +231,48 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			expect(calls.at(-1)?.params).toEqual({ state: "active" });
 		});
 
+		it("backs out when the tab opts out mid-transition", async () => {
+			const calls: CdpCall[] = [];
+			const frozenStarted = Promise.withResolvers<void>();
+			const releaseFrozenSend = Promise.withResolvers<void>();
+			let lifecycleSends = 0;
+			const session = {
+				send: async (method: string, params?: unknown): Promise<Record<string, unknown>> => {
+					calls.push({ method, params });
+					if (method === "Page.setWebLifecycleState") {
+						lifecycleSends++;
+						if (lifecycleSends === 1) {
+							frozenStarted.resolve();
+							await releaseFrozenSend.promise;
+						}
+					}
+					return {};
+				},
+				detach: async (): Promise<void> => undefined,
+			};
+			const { tab } = makeStubTab({
+				browser: {
+					browser: { targets: () => [{ _targetId: "stub-target-1", createCDPSession: async () => session }] },
+				},
+			});
+
+			const freeze = setTabFrozenForTest(tab, true);
+			await frozenStarted.promise;
+			// Owner promotes to persist with no run involved: the freeze
+			// must still undo instead of recording a frozen persist tab.
+			tab.persist = true;
+			releaseFrozenSend.resolve();
+
+			expect(await freeze).toBe(false);
+			expect(tab.frozen).toBe(false);
+			expect(calls.map(call => call.method)).toEqual([
+				"Page.enable",
+				"Page.setWebLifecycleState",
+				"Page.setWebLifecycleState",
+			]);
+			expect(calls.at(-1)?.params).toEqual({ state: "active" });
+		});
+
 		it("records frozen when the race undo itself fails", async () => {
 			const calls: CdpCall[] = [];
 			const frozenStarted = Promise.withResolvers<void>();
@@ -365,6 +409,33 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			});
 			expect(await unfreezeTabSessionForTest(tab)).toBe(true);
 			expect(calls.length).toBe(0);
+		});
+	});
+
+	describe("browser settle — spawned kill guards", () => {
+		function stubBrowser(overrides: Record<string, unknown> = {}): BrowserHandle {
+			return { kind: { kind: "headless" }, ...overrides } as unknown as BrowserHandle;
+		}
+
+		it("never touches non-spawned browsers", async () => {
+			await expect(ensureSpawnedKilledForTest(stubBrowser())).resolves.toBeUndefined();
+			await expect(
+				ensureSpawnedKilledForTest(stubBrowser({ kind: { kind: "connected", cdpUrl: "http://x" } })),
+			).resolves.toBeUndefined();
+		});
+
+		it("skips exited or untracked spawned apps", async () => {
+			await expect(
+				ensureSpawnedKilledForTest(
+					stubBrowser({ kind: { kind: "spawned", path: "/x" }, pid: 1, subprocess: { exitCode: 0 } }),
+				),
+			).resolves.toBeUndefined();
+			await expect(
+				ensureSpawnedKilledForTest(stubBrowser({ kind: { kind: "spawned", path: "/x" }, pid: 1 })),
+			).resolves.toBeUndefined();
+			await expect(
+				ensureSpawnedKilledForTest(stubBrowser({ kind: { kind: "spawned", path: "/x" } })),
+			).resolves.toBeUndefined();
 		});
 	});
 

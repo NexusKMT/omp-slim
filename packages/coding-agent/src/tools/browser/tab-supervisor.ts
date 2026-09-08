@@ -13,7 +13,7 @@ import { webpExclusionForModel } from "../../utils/image-loading";
 import type { ToolSession } from "../index";
 import { expandPath } from "../path-utils";
 import { ToolAbortError, ToolError } from "../tool-errors";
-import { pickElectronTarget, shouldPreserveConnectedBrowserFocus } from "./attach";
+import { gracefulKillTreeOnce, pickElectronTarget, shouldPreserveConnectedBrowserFocus } from "./attach";
 import { CmuxTab, runCmuxCode } from "./cmux/cmux-tab";
 import { mapWaitUntil } from "./cmux/rpc";
 import { DEFAULT_VIEWPORT } from "./launch";
@@ -735,7 +735,12 @@ export async function releaseTab(name: string, opts: ReleaseTabOptions = {}): Pr
 		// as the first release has not finished. (Not directly testable
 		// in-process: observing it needs a real spawned application.)
 		ongoing.opts.kill = ongoing.opts.kill || opts.kill;
-		return await ongoing.promise;
+		const joined = await ongoing.promise;
+		// The upgrade above lands too late when the first release already
+		// passed `releaseBrowser`: verify a still-running spawned app is
+		// terminated rather than trusting the joined outcome.
+		if (opts.kill) await ensureSpawnedKilled(tab.browser);
+		return joined;
 	}
 	const entry = { promise: releaseTabInner(tab, name, opts), opts };
 	releaseInflight.set(tab, entry);
@@ -744,6 +749,23 @@ export async function releaseTab(name: string, opts: ReleaseTabOptions = {}): Pr
 	} finally {
 		releaseInflight.delete(tab);
 	}
+}
+
+/**
+ * Best-effort termination of a spawned app that outlived a joined teardown.
+ * Fires only behind a live subprocess handle (kernel-tracked, so no
+ * pid-reuse hazard): anything else already died or was never ours to kill.
+ */
+async function ensureSpawnedKilled(browser: BrowserHandle): Promise<void> {
+	if (browser.kind.kind !== "spawned" || !("subprocess" in browser)) return;
+	const { pid, subprocess } = browser;
+	if (pid === undefined || !subprocess || subprocess.exitCode !== null) return;
+	await gracefulKillTreeOnce(pid).catch(() => undefined);
+}
+
+/** Test hook for the kill guards without a live application. */
+export function ensureSpawnedKilledForTest(browser: BrowserHandle): Promise<void> {
+	return ensureSpawnedKilled(browser);
 }
 
 async function releaseTabInner(tab: TabSession, name: string, opts: ReleaseTabOptions): Promise<boolean> {
@@ -939,7 +961,13 @@ async function setTabFrozen(tab: TabSession, frozen: boolean): Promise<boolean> 
 		if (tab.state !== "alive") return false;
 		if (frozen) {
 			if (tab.frozen) return false;
-			if (tab.pending.size > 0) {
+			if (tab.pending.size > 0 || tab.persist) {
+				// A run registered, or the owner opted out with `persist`,
+				// while our CDP roundtrip was in flight. Either way the
+				// frozen frame may already have landed, so re-assert
+				// `active` instead of recording frozen — a persist tab left
+				// frozen could never resume (unfreeze is rejected by the
+				// same persist eligibility gate).
 				if (await sendLifecycleState(session, "active")) return false;
 				// One retry for the in-flight run's sake: a brief frozen
 				// blip is harmless (rAF just skips frames), but an
