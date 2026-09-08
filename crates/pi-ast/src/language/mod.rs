@@ -827,3 +827,20 @@ static LANG_ALIASES: phf::Map<&'static str, SupportLang> = phf_map! {
 "yml"            => SupportLang::Yaml,
 "zig"            => SupportLang::Zig,
 };
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn infers_cuda_sources_and_headers_as_cpp() {
+		assert_eq!(SupportLang::from_path(Path::new("kernel.cu")), Some(SupportLang::Cpp));
+		assert_eq!(SupportLang::from_path(Path::new("kernel.cuh")), Some(SupportLang::Cpp));
+	}
+
+	#[test]
+	fn resolves_cuda_language_aliases_as_cpp() {
+		assert_eq!(SupportLang::from_alias("cu"), Some(SupportLang::Cpp));
+		assert_eq!(SupportLang::from_alias("cuh"), Some(SupportLang::Cpp));
+	}
+}
