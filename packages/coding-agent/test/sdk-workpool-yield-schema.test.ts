@@ -171,5 +171,53 @@ describe("SDK workpool yield schema", () => {
 			expect(session.getWorkPoolYieldItems()).toEqual([]);
 			await expectProviderYieldContract(session, dialect, false);
 		});
+		it("re-renders prompt sections from the live yield contract (" + dialect + ")", async () => {
+			// The base-prompt rebuild must re-invoke the prompt closure against the
+			// live item set on every transition: install renders pooled, clearing
+			// renders ordinary. Markers are test-local; no prompt wording is pinned.
+			// oxlint-disable-next-line prefer-const -- captured by the prompt closure before assignment
+			let live: AgentSession | undefined;
+			const { session } = await createAgentSession({
+				cwd: registryDir,
+				agentDir: registryDir,
+				modelRegistry,
+				sessionManager: SessionManager.inMemory(),
+				settings: Settings.isolated({ ...toolSettings, inlineToolDescriptors: "on" }),
+				model: getBundledModel("openai", "gpt-4o-mini"),
+				disableExtensionDiscovery: true,
+				skills: [],
+				contextFiles: [],
+				promptTemplates: [],
+				slashCommands: [],
+				enableMCP: false,
+				enableLsp: false,
+				skipPythonPreflight: true,
+				requireYieldTool: true,
+				toolNames: ["yield"],
+				outputSchema: {
+					type: "object",
+					properties: { "pool#1": {} },
+					required: ["pool#1"],
+					additionalProperties: false,
+				},
+				systemPrompt: base => [
+					...base,
+					`yield-contract:${live ? (live.getWorkPoolYieldItems().length > 0 ? "pooled" : "ordinary") : "boot"}`,
+				],
+				parentTaskPrefix: "workpool-prompt-sync",
+				agentId: "workpool-prompt-sync",
+				agentName: "scout",
+				agentDisplayName: "scout",
+				taskDepth: 1,
+			});
+			sessions.push(session);
+			live = session;
+			const promptText = () => session.agent.state.systemPrompt.join("\n");
+			await session.setWorkPoolYieldItems([{ id: "pool#1", index: 1 }]);
+			expect(promptText()).toContain("yield-contract:pooled");
+			await session.setWorkPoolYieldItems([]);
+			expect(promptText()).toContain("yield-contract:ordinary");
+			expect(promptText()).not.toContain("yield-contract:pooled");
+		});
 	}
 });

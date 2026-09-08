@@ -1022,6 +1022,14 @@ export class AgentSession {
 		void this.whenWorkPoolYieldSettled()
 			.then(() => this.agent.prompt(records))
 			.catch(error => {
+				if (error instanceof AgentBusyError) {
+					// Lost the prompt race (e.g. a WorkPool follow-up dispatched
+					// first): preserve the records as asides for the running turn
+					// instead of dropping them with the failed wake.
+					this.#irc.queueAside(records);
+					logger.debug("IRC wake turn deferred behind the running turn");
+					return;
+				}
 				turnError = error;
 				logger.warn("IRC wake turn failed", { error: String(error) });
 			})

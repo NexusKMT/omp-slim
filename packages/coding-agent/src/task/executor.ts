@@ -7,7 +7,7 @@
 import * as fs from "node:fs/promises";
 import path from "node:path";
 import type { AgentEvent, AgentIdentity, AgentMessage, AgentTelemetryConfig } from "@oh-my-pi/pi-agent-core";
-import { EventLoopKeepalive, recordHandoff, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
+import { AgentBusyError, EventLoopKeepalive, recordHandoff, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
 import type { Api, Model, ServiceTierByFamily, Usage } from "@oh-my-pi/pi-ai";
 import { logger, popLoopPhase, prompt, pushLoopPhase, untilAborted } from "@oh-my-pi/pi-utils";
 import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, AsyncJobManager } from "../async";
@@ -2866,8 +2866,29 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 	monitor.setActiveSession(session);
 	const unsubscribe = monitor.attach(session);
 	let outcome: DriveOutcome;
+	// An IRC wake may win the prompt race while this turn installs its pooled
+	// contract. On AgentBusyError back off: restore the ordinary contract so the
+	// running wake cannot consume pooled items, wait it out, then reinstall and
+	// retry. Bounded so a wedged worker still fails the batch instead of hanging it.
+	let dispatchAttempts = 0;
 	try {
-		outcome = await driveSessionToYield(session, monitor, message);
+		for (;;) {
+			try {
+				outcome = await driveSessionToYield(session, monitor, message);
+				break;
+			} catch (error) {
+				dispatchAttempts++;
+				if (!(error instanceof AgentBusyError) || dispatchAttempts >= 3 || signal?.aborted) throw error;
+				logger.debug("Subagent follow-up lost the prompt race to an IRC wake; backing off", { id });
+				await session.setWorkPoolYieldItems([]);
+				if (signal) {
+					await untilAborted(signal, () => session.waitForIdle());
+				} else {
+					await session.waitForIdle();
+				}
+				await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
+			}
+		}
 	} finally {
 		try {
 			await untilAborted(AbortSignal.timeout(5000), () => monitor.waitForActiveSessionAbort());
@@ -3327,6 +3348,12 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			const buildSubagentSessionOptions = (
 				sessionManagerForRun: SessionManager,
 				expectedAgentRef: CreateAgentSessionOptions["expectedAgentRef"],
+				// Parked workers always revive with an empty runtime yield set; a
+				// pooled follow-up reinstalls its items explicitly before turning.
+				// Without this, the registry lookup below misses (session === null
+				// while the replacement builds) and the revived prompt resurrects
+				// the launch-time pooled instructions against an ordinary runtime.
+				forRevive = false,
 			): CreateAgentSessionOptions => ({
 				cwd: worktree ?? cwd,
 				additionalDirectories: worktree !== undefined ? undefined : options.additionalDirectories,
@@ -3373,11 +3400,12 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						// Read the live item set through the registry instead of capturing
 						// the session: this callback outlives the turn via the lifecycle
 						// reviver, and a captured session would pin its whole graph past
-						// TTL park disposal.
+						// TTL park disposal. Parked revivals build while the registry
+						// session is null, so render the cleared set rather than
+						// resurrecting the launch-time pooled instructions.
 						workPoolYieldItems:
 							AgentRegistry.global().get(id)?.session?.getWorkPoolYieldItems?.() ??
-							options.workPoolYieldItems ??
-							[],
+							(forRevive ? [] : (options.workPoolYieldItems ?? [])),
 						ircPeers: ircRoster?.peers ?? [],
 						ircParkedCount: ircRoster?.parkedCount ?? 0,
 						ircOmittedCount: ircRoster?.omittedCount ?? 0,
@@ -3472,7 +3500,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						);
 					}
 					const { session: revived } = await createAgentSession(
-						buildSubagentSessionOptions(reopened, expectedAgentRef),
+						buildSubagentSessionOptions(reopened, expectedAgentRef, true),
 					);
 					// Re-run the executor's extension wiring on the rebuilt session.
 					// Skipping it leaves the runner pre-init, so a `tool_call` handler
