@@ -49,7 +49,7 @@ describe("experimental context tool registration", () => {
 
 	test("advisor identities cannot acquire a parent's journal tools", async () => {
 		const session = createSession(true);
-		session.getSessionId = () => `${session.sessionManager!.getSessionId()}-advisor`;
+		session.getSessionId = () => `${session.sessionManager!.getSessionId!()}-advisor`;
 		const tools = await createTools(session, ["context_notes", "new_context"]);
 		expect(tools.map(tool => tool.name)).not.toContain("context_notes");
 		expect(tools.map(tool => tool.name)).not.toContain("new_context");
