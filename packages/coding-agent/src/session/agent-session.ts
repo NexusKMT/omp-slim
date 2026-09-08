@@ -1006,12 +1006,10 @@ export class AgentSession {
 			this.agent.replaceQueues([...this.agent.peekSteeringQueue()], []);
 			if (parkedQueueDrainBlocked) this.#queuedMessageDrainBlocked = false;
 		}
+		// The wake observer is attached only once prompt ownership is won below: a
+		// deferred wake runs no turn, so observing it would capture the next
+		// turn's yield/output and relay it as this wake's reply.
 		let finishObservation: ((error?: unknown) => void | Promise<void>) | undefined;
-		try {
-			finishObservation = this.#ircWakeTurnObserver?.(records);
-		} catch (error) {
-			logger.warn("IRC wake turn observer failed to start", { error: String(error) });
-		}
 		this.#resetPromptMaintenanceState();
 		// Capture the generation before the wake so its post-prompt recovery wait
 		// bails the instant an abort (which bumps #promptGeneration) supersedes
@@ -1038,6 +1036,11 @@ export class AgentSession {
 					this.#irc.queueAside(records);
 					logger.debug("IRC wake turn deferred: worker busy or pooled");
 					return;
+				}
+				try {
+					finishObservation = this.#ircWakeTurnObserver?.(records);
+				} catch (error) {
+					logger.warn("IRC wake turn observer failed to start", { error: String(error) });
 				}
 				return this.agent.prompt(records);
 			})
@@ -7453,11 +7456,16 @@ export class AgentSession {
 							logger.warn("WorkPool yield contract republish failed", {
 								error: republishError instanceof Error ? republishError.message : String(republishError),
 							});
+							return;
 						}
+						this.#resumeStrandedIrcAsides();
 					});
 				}
 				throw error;
 			}
+			// A deferred wake may be parked while pooled; now that the fresh
+			// contract is published, let it wake (or stay parked when pooled).
+			this.#resumeStrandedIrcAsides();
 		});
 		this.#workPoolYieldTransition = run.catch(() => {});
 		return run;

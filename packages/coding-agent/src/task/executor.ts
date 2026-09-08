@@ -2902,10 +2902,11 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 	emitSubagentFrame(options.eventBus, options.subagentEventBus, TASK_SUBAGENT_LIFECYCLE_CHANNEL, startedPayload);
 
 	monitor.setActiveSession(session);
+	// The batch monitor attaches per attempt; the hook below detaches before each
+	// backoff and reattaches for the retry, so the teardown always releases the
+	// current attempt — including when the drive rejects and no winning attempt
+	// was ever assigned.
 	let outcome: DriveOutcome;
-	// The batch monitor attaches per attempt (see below); this holds the winning
-	// attempt's unsubscribe for the shared teardown.
-	let unsubscribe: (() => void) | undefined;
 	// An IRC wake may own the session when this turn dispatches. drive retries the
 	// initial prompt through this hook: detach first so the wake turn's `yield`
 	// neither marks this batch yielded nor leaks into its result, restore the
@@ -2925,14 +2926,13 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 			await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
 			attemptUnsubscribe = monitor.attach(session);
 		});
-		unsubscribe = attemptUnsubscribe;
 	} finally {
 		try {
 			await untilAborted(AbortSignal.timeout(5000), () => monitor.waitForActiveSessionAbort());
 		} catch {
 			// Ignore abort cleanup timeouts; the session stays adopted either way.
 		}
-		unsubscribe?.();
+		attemptUnsubscribe();
 		const active = monitor.takeActiveSession();
 		if (active) monitor.captureSalvage(active);
 		monitor.finish();

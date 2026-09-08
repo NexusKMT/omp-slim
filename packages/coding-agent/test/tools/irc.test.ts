@@ -1261,6 +1261,10 @@ describe("IRC", () => {
 			sessions.push(session);
 			vi.spyOn(session, "refreshBaseSystemPrompt").mockResolvedValue(undefined);
 			const promptSpy = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined);
+			let observations = 0;
+			session.setIrcWakeTurnObserver(() => () => {
+				observations++;
+			});
 			await session.setWorkPoolYieldItems([{ id: "pool#1", index: 1 }]);
 			const queueAside = vi.spyOn(IrcBridge.prototype, "queueAside");
 			queueAside.mockClear();
@@ -1281,9 +1285,15 @@ describe("IRC", () => {
 			// wake observers indefinitely.
 			// Yield the event loop repeatedly: a re-armed chain would schedule more
 			// queueAside calls per turn of the loop, while fixed code schedules
-			// nothing further, so extra yields cannot flake this assertion.
-			for (let i = 0; i < 20; i++) await new Promise<void>(resolve => setImmediate(resolve));
+			for (let i = 0; i < 20; i++) {
+				const { promise, resolve } = Promise.withResolvers<void>();
+				setImmediate(resolve);
+				await promise;
+			}
 			expect(queueAside).toHaveBeenCalledTimes(1);
+			// No turn ran, so the wake observer must never have attached: otherwise
+			// it would finalize the next turn's output as this wake's reply.
+			expect(observations).toBe(0);
 			await session.setWorkPoolYieldItems([]);
 			await session.deliverIrcMessage({
 				id: "msg-clear",
