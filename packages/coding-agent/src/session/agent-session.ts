@@ -7493,6 +7493,7 @@ export class AgentSession {
 			// contract is published, let it wake (or stay parked when pooled).
 			this.#resumeStrandedIrcAsides();
 		});
+		this.#workPoolYieldTransition = run.catch(() => {});
 		return run;
 	}
 
