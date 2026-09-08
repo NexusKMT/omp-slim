@@ -338,16 +338,17 @@ describe("Warp echo expectation is single-shot", () => {
 			scheduler.settle();
 			expect(countNeedle(writes.join(""), "\x1b[6n")).toBe(1);
 
-			// The +1 alt-toggle echo is swallowed and consumes the expectation: no
-			// new probe starts, so nothing is queued and no drain is needed.
+			// The +1 alt-toggle echo retires the probe and reissues it at the new
+			// geometry: a second DSR, but no alt re-borrow.
 			term.resize(40, 21);
-			expect(countNeedle(writes.join(""), "\x1b[6n")).toBe(1);
+			expect(countNeedle(writes.join(""), "\x1b[6n")).toBe(2);
+			expect(countNeedle(writes.join(""), ALT_ENTER)).toBe(1);
 
 			// A real one-row resize back to the baseline restarts the transaction.
 			term.resize(40, 20);
 			scheduler.settle();
 			const all = writes.join("");
-			expect(countNeedle(all, "\x1b[6n")).toBe(2);
+			expect(countNeedle(all, "\x1b[6n")).toBe(3);
 			expect(countNeedle(all, ALT_ENTER)).toBe(2);
 		} finally {
 			tui.stop();

@@ -1148,11 +1148,18 @@ export class TUI extends Container {
 			data => this.#handleInput(data),
 			() => {
 				if (this.#resizeProbe) {
-					// Warp echoes a height-only ±1 SIGWINCH on CSI ?1049l; the probed
-					// anchor is still valid, so swallow it without painting (#doRender
-					// is probe-blocked anyway). A real geometry change (width, or
-					// height delta > 1) restarts the transaction below.
-					if (this.#isWarpAltToggleEcho()) return;
+					// Warp echoes a height-only ±1 SIGWINCH on CSI ?1049l. The echo
+					// must not restart the alt borrow (that is the flicker loop),
+					// but the terminal really did adopt the echoed size, so a CPR
+					// reply already in flight may predate it: retire the probe and
+					// reissue it at the new geometry. DSR-only, no toggle, so this
+					// terminates. A real geometry change restarts the transaction below.
+					if (this.#isWarpAltToggleEcho()) {
+						this.#cancelResizeProbe();
+						this.#trackResizeBurst();
+						this.#beginResizeAnchorProbe();
+						return;
+					}
 					this.#cancelResizeProbe();
 					this.#altToggleEchoPending = false;
 					if (this.#resizeRepaintsInPlace()) this.#beginResizeInPlacePaint();
