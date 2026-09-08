@@ -7,7 +7,9 @@
  * restrict OAuth apps block the CLI app's broad historic grant
  * (repo/gist/codespace) no matter what scope this request asks for
  * (issue #11275). API request identity still mimics the Copilot CLI via
- * COPILOT_API_HEADERS.
+ * COPILOT_API_HEADERS. Enterprise domains keep the GitHub-owned Copilot CLI
+ * client: private instances run their own OAuth registry and reject the
+ * github.com-registered OpenCode client.
  */
 import { scheduler } from "node:timers/promises";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
@@ -23,7 +25,18 @@ import * as AIError from "../../error";
 import type { FetchImpl } from "../../types";
 import type { OAuthController, OAuthCredentials } from "./types";
 
-const CLIENT_ID = "Ov23li8tweQw6odWQebz";
+const OPENCODE_CLIENT_ID = "Ov23li8tweQw6odWQebz";
+const COPILOT_CLI_CLIENT_ID = "Ov23ctDVkRmgkPke0Mmm";
+
+/**
+ * OAuth client for the device flow. Public github.com uses the minimal-grant
+ * OpenCode app (narrow consent, issue #11275); private GitHub Enterprise
+ * instances run their own OAuth registry, which does not know that github.com
+ * registration, so they keep the GitHub-owned Copilot CLI client.
+ */
+function resolveOAuthClientId(domain: string): string {
+	return isPublicGitHubHost(domain) ? OPENCODE_CLIENT_ID : COPILOT_CLI_CLIENT_ID;
+}
 const OAUTH_SCOPE = "read:user";
 const OAUTH_HEADERS = {
 	Accept: "application/json",
@@ -90,7 +103,7 @@ async function startDeviceFlow(domain: string, fetchImpl: FetchImpl): Promise<De
 			method: "POST",
 			headers: OAUTH_HEADERS,
 			body: new URLSearchParams({
-				client_id: CLIENT_ID,
+				client_id: resolveOAuthClientId(domain),
 				scope: OAUTH_SCOPE,
 			}),
 		},
@@ -164,7 +177,7 @@ async function pollForGitHubAccessToken(
 				method: "POST",
 				headers: OAUTH_HEADERS,
 				body: new URLSearchParams({
-					client_id: CLIENT_ID,
+					client_id: resolveOAuthClientId(domain),
 					device_code: deviceCode,
 					grant_type: "urn:ietf:params:oauth:grant-type:device_code",
 				}),
