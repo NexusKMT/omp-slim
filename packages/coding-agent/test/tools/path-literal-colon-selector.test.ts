@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import * as fsBase from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -11,6 +12,7 @@ import {
 	resolveToCwd,
 	splitPathAndSel,
 	splitPathAndSelPreferringLiteral,
+	splitPathAndSelPreferringLiteralSync,
 } from "@oh-my-pi/pi-coding-agent/tools/path-utils";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
 import { GrepOutputMode } from "@oh-my-pi/pi-natives";
@@ -83,6 +85,29 @@ describe("literal colon filename resolution (issue #4618)", () => {
 				path: "test",
 				sel: "1-2",
 			});
+		});
+
+		it("always interprets selector-shaped suffixes on Windows without probing", async () => {
+			const busy = Object.assign(new Error("resource busy"), { code: "EBUSY" });
+			const platform = Object.getOwnPropertyDescriptor(process, "platform");
+			if (platform === undefined) throw new Error("process.platform descriptor is unavailable");
+			Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
+			const lstat = spyOn(fsBase.promises, "lstat").mockRejectedValue(busy);
+			const lstatSync = spyOn(fsBase, "lstatSync").mockImplementation(() => {
+				throw busy;
+			});
+
+			try {
+				const expected = { path: "test.ts", sel: "1-2" };
+				expect(await splitPathAndSelPreferringLiteral("test.ts:1-2", tmpDir)).toEqual(expected);
+				expect(splitPathAndSelPreferringLiteralSync("test.ts:1-2", tmpDir)).toEqual(expected);
+				expect(lstat).not.toHaveBeenCalled();
+				expect(lstatSync).not.toHaveBeenCalled();
+			} finally {
+				lstatSync.mockRestore();
+				lstat.mockRestore();
+				Object.defineProperty(process, "platform", platform);
+			}
 		});
 
 		it("also protects `:raw`-shaped literal filenames", async () => {
