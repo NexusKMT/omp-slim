@@ -204,7 +204,7 @@ export class AdviseTool implements AgentTool<typeof adviseSchema, AdviseDetails>
 	 * @param onAdvice Route an accepted note to the primary (channel selection +
 	 *   delivery). Never re-filters — the note already cleared `accept`.
 	 * @param accept The emission guard's noise/empty/dedupe classification plus
-	 *   the one-advise-per-update budget, consumed the moment a note is emitted
+	 *   the per-update advice budget, consumed the moment a note is emitted
 	 *   (live or deferred). A rejected note reports the specific reason without
 	 *   spending the budget. Defaults to accepted for standalone use/tests.
 	 */

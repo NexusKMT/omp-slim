@@ -33,8 +33,6 @@ import { getThemeByName, setThemeInstance } from "../../src/modes/theme/theme";
 import { SecretObfuscator } from "../../src/secrets/obfuscator";
 import { formatSessionHistoryMarkdown } from "../../src/session/session-history-format";
 import { YieldQueue } from "../../src/session/yield-queue";
-import { prompt } from "@oh-my-pi/pi-utils";
-import advisorSystemPrompt from "../../src/prompts/advisor/system.md" with { type: "text" };
 
 /** Poll until the drain loop reaches the asserted state — waitForCatchup
  *  releases IMMEDIATELY on advisor failure (the primary must never park on a
@@ -943,14 +941,6 @@ describe("advisor", () => {
 			await tool.execute("s-3", { note: "Note 3", severity: "concern" });
 			await tool.execute("s-4", { note: "Note 4", severity: "concern" });
 			expect(delivered).toEqual(["Note 0", "Note 1", "Note 2", "Note 3"]);
-		});
-
-		it("renders max_notes_per_update into the advisor system prompt", () => {
-			const renderedDefault = prompt.render(advisorSystemPrompt, { max_notes_per_update: 4 });
-			expect(renderedDefault).toContain("max 4 non-blockers/update (`blocker` exempt)");
-
-			const renderedStrict = prompt.render(advisorSystemPrompt, { max_notes_per_update: 1 });
-			expect(renderedStrict).toContain("max 1 non-blockers/update (`blocker` exempt)");
 		});
 
 		it("delivers a blocker escalation of a reserved note live instead of dropping it as already seen", async () => {

@@ -1116,6 +1116,24 @@ describe("AgentSession advisor toggle", () => {
 		expect(advisor2).not.toBe(advisor1);
 	});
 
+	it("propagates the resolved budget into the advisor model-visible system prompt", () => {
+		// Contract: SessionAdvisors must render the resolved budget into the
+		// prompt the advisor model actually receives. If the runtime stopped
+		// supplying it, the template falls back to 4 and this fails.
+		expect(session.setAdvisorEnabled(true)).toBe(true);
+		session.applyAdvisorConfigs([{ name: "Strict", maxNotesPerUpdate: 1 }], undefined);
+		let advisor = session.getAdvisorAgent();
+		if (!advisor) throw new Error("Expected advisor agent");
+		expect(advisor.state.systemPrompt.join("\n")).toContain("max 1 non-blockers/update (`blocker` exempt)");
+
+		session.settings.set("advisor.maxNotesPerUpdate", 3);
+		session.applyAdvisorConfigs([{ name: "Lenient" }], undefined, undefined);
+		expect(session.setAdvisorEnabled(true)).toBe(true);
+		advisor = session.getAdvisorAgent();
+		if (!advisor) throw new Error("Expected advisor agent");
+		expect(advisor.state.systemPrompt.join("\n")).toContain("max 3 non-blockers/update (`blocker` exempt)");
+	});
+
 	it("enforces precedence: per-advisor > shared WATCHDOG.yml > settings > default", async () => {
 		session.settings.set("advisor.maxNotesPerUpdate", 2);
 		expect(session.setAdvisorEnabled(true)).toBe(true);

@@ -1,9 +1,10 @@
 /**
  * Per-session policy gate for advisor `advise()` calls.
  *
- * The advisor system prompt tells the watcher model:
+ * The advisor system prompt tells the watcher model a per-update advice budget
+ * (default 4 non-blockers, `blocker` exempt):
  *
- * > at most one `advise` per update
+ * > max N non-blockers/update (`blocker` exempt)
  * > NEVER repeat advice you already gave, and NEVER send the same advice twice
  *
  * Real advisor models violate this. Issue #3520 captured a session where
@@ -110,7 +111,7 @@ export type AdvisorEmissionDecision = "accepted" | "duplicate" | "rate_limited" 
  *
  * Enforces — in this order — the noise filter, session-scoped exact-text
  * dedupe (FIFO-evicted at {@link DEFAULT_HISTORY_CAPACITY}), and a per-update
- * rate limit of one accepted note per advisor model prompt. Suppressed calls
+ * budget of accepted notes per advisor model prompt. Suppressed calls
  * never consume the per-update budget — a noise call doesn't burn the slot
  * for a real concern that follows in the same update. A `blocker` is exempt
  * from the budget: it must always interrupt, so a lower-severity note emitted
@@ -152,7 +153,7 @@ export class AdvisorEmissionGuard {
 	/**
 	 * Clear the per-update rate-limit gate. Called by `AdvisorRuntime` right
 	 * before each `agent.prompt(batch)` invocation so the next advisor model
-	 * cycle starts with a fresh budget of one advise.
+	 * cycle starts with a fresh budget.
 	 */
 	beginUpdate(): void {
 		this.#acceptedThisUpdate = 0;
@@ -162,7 +163,7 @@ export class AdvisorEmissionGuard {
 	 * Classify and reserve a proposed note. Accepted notes consume the update
 	 * budget and enter the dedupe history; rejected notes leave both unchanged.
 	 * A `blocker` still runs the noise and dedupe filters but bypasses the
-	 * one-note-per-update budget so it always reaches the primary.
+	 * per-update budget so it always reaches the primary.
 	 */
 	accept(note: string, severity?: AdvisorSeverity): AdvisorEmissionDecision {
 		const key = normalizeAdvisorNote(note);

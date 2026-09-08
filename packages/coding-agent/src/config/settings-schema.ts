@@ -1,3 +1,4 @@
+import { ADVISOR_DEFAULT_BUDGET_PER_UPDATE } from "../advisor/emission-guard";
 import { THINKING_EFFORTS } from "@oh-my-pi/pi-ai";
 import { DEFAULT_SHARE_URL } from "@oh-my-pi/pi-wire";
 import { SHAPE_VARIANT_NAMES } from "@oh-my-pi/snapcompact";
@@ -588,13 +589,13 @@ export const SETTINGS_SCHEMA = {
 	},
 	"advisor.maxNotesPerUpdate": {
 		type: "number",
-		default: 4,
+		default: ADVISOR_DEFAULT_BUDGET_PER_UPDATE,
 		ui: {
 			tab: "model",
 			group: "Advisor",
 			label: "Advisor Max Notes Per Update",
 			description:
-				"Maximum non-blocker advice notes accepted per advisor prompt update. Defaults to 4. Blockers are exempt.",
+				"Maximum non-blocker advice notes accepted per advisor prompt update (1–32; UI offers 1–5 quick picks). Blockers are exempt.",
 			options: [
 				{ value: "1", label: "1 note", description: "Anti-flood (strict)." },
 				{ value: "2", label: "2 notes" },
