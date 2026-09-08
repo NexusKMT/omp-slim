@@ -1959,25 +1959,28 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * Reconcile the optimistic `/skill:` row against the canonical message emitted
 	 * by the session (mirrors {@link replaceOptimisticUserMessage} for skills).
 	 *
-	 * While the row is still live it is removed and the canonical message appended
-	 * in its place. If it already retired into native scrollback before the
-	 * canonical `message_start` arrived, {@link TranscriptContainer.removeChild}
-	 * refuses silently — appending the canonical then would leave two identical
-	 * cards (issue #11217). In that case the existing row is adopted in place
-	 * (finalized so it can retire normally) and the append is skipped.
+	 * The row is adopted in place — finalized, with the append skipped — only when
+	 * it is still on screen but no longer removable: it retired into native
+	 * scrollback before the canonical `message_start` arrived, so appending would
+	 * trail it with a second identical card (issue #11217). Otherwise the canonical
+	 * message is appended after clearing the tracked row, covering both a still-live
+	 * row (clean replace) and a row a transcript rebuild already detached from the
+	 * container (e.g. a display-setting toggle calling {@link rebuildChatFromMessages}),
+	 * whose card would otherwise vanish.
 	 */
 	reconcileOptimisticSkillMessage(message: AgentMessage): void {
 		this.optimisticSkillMessagePending = false;
 		const components = this.#optimisticSkillMessageComponents;
 		this.#optimisticSkillMessageComponents = [];
-		if (components.every(component => this.chatContainer.canRemoveBlock(component))) {
-			for (const component of components) this.chatContainer.removeChild(component);
-			this.addMessageToChat(message);
+		const present = components.filter(component => this.chatContainer.children.includes(component));
+		if (present.length > 0 && present.every(component => !this.chatContainer.canRemoveBlock(component))) {
+			for (const component of present) {
+				if (component instanceof SkillMessageComponent) component.markTranscriptBlockFinalized();
+			}
 			return;
 		}
-		for (const component of components) {
-			if (component instanceof SkillMessageComponent) component.markTranscriptBlockFinalized();
-		}
+		for (const component of components) this.chatContainer.removeChild(component);
+		this.addMessageToChat(message);
 	}
 
 	/** Drop the optimistic `/skill:` row when dispatch fails or bails before the

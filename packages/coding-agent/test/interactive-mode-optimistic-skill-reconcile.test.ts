@@ -123,4 +123,18 @@ describe("InteractiveMode optimistic skill reconcile (#11217)", () => {
 		expect(cards).toHaveLength(1);
 		expect(cards[0]).toBe(card);
 	});
+
+	it("appends the canonical card when a transcript rebuild detached the optimistic row", () => {
+		mode.renderOptimisticSkillMessage(skillMessage(1));
+		expect(skillCards(mode)).toHaveLength(1);
+
+		// A mid-preflight transcript rebuild (e.g. a display-setting toggle) clears
+		// the container; the UI-only optimistic row is not replayed, so it is
+		// detached while still tracked for reconcile. canRemoveBlock reports false
+		// for the absent component, but the canonical card must still be appended.
+		mode.chatContainer.clear();
+
+		mode.reconcileOptimisticSkillMessage(skillMessage(2));
+		expect(skillCards(mode)).toHaveLength(1);
+	});
 });
