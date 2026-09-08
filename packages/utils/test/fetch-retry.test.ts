@@ -213,6 +213,16 @@ describe("extractRetryHint", () => {
 		expect(Math.abs(hint! - expected)).toBeLessThan(100);
 	});
 
+	// Z.AI's English code-1308 body reports its Beijing-time reset stamp
+	// without an offset alongside an unambiguous retry-after-ms. Reading the
+	// naive stamp as UTC would win longest-wins and sleep ~8h too long, so the
+	// explicit relative hint must take precedence.
+	it("prefers an explicit retry-after-ms over a naive absolute reset stamp", () => {
+		const body =
+			"429 Usage limit reached for 5 hour. Your limit will reset at 2099-09-01 03:40:47 retry-after-ms=2325000";
+		expect(extractRetryHint(undefined, body)).toBe(2_325_000);
+	});
+
 	// Zero-valued and elapsed signals are authoritative "retry now" replies:
 	// collapsing them into `undefined` lets callers substitute a heuristic
 	// wait (30-minute quota guess) for a provider that said retry immediately.

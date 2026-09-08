@@ -102,6 +102,14 @@ export function extractRetryHint(source: Response | Headers | null | undefined, 
 	// when the parse returns undefined, which would sleep a session the
 	// provider told to retry immediately.
 	let retryNow = false;
+	// A naive absolute reset stamp (no explicit offset) is timezone-ambiguous:
+	// English providers historically report UTC, but Z.AI/Zhipu report Beijing
+	// time in both their Chinese ("将在 … 重置") and English ("reset at …")
+	// bodies. Held back as a fallback so it never outranks an unambiguous
+	// signal (an explicit `retry-after-ms`, or an offset-qualified stamp);
+	// Z.AI's 1308 body carries such a relative hint, so the wrong UTC reading
+	// can no longer win the longest-wins merge and sleep ~8h too long.
+	let naiveResetMs: number | undefined;
 	const consider = (ms: number | undefined): void => {
 		if (ms !== undefined && ms > 0 && (longestMs === undefined || ms > longestMs)) longestMs = ms;
 	};
@@ -123,15 +131,20 @@ export function extractRetryHint(source: Response | Headers | null | undefined, 
 	}
 	for (const { pattern, assumedOffset } of RESET_AT_PATTERNS) {
 		const match = pattern.exec(body);
-		if (match?.[1]) {
-			// English providers historically report naive UTC stamps; Zhipu's
-			// Chinese response reports its naive stamp in Beijing time.
-			const normalized = match[1].replace(" ", "T");
-			const hasOffset = /(?:Z|[+-][0-9]{2}:?[0-9]{2})$/i.test(normalized);
-			const parsed = Date.parse(hasOffset ? normalized : `${normalized}${assumedOffset}`);
-			if (!Number.isNaN(parsed) && parsed > Date.now()) {
-				consider(parsed - Date.now());
-			}
+		if (!match?.[1]) continue;
+		const normalized = match[1].replace(" ", "T");
+		const hasOffset = /(?:Z|[+-][0-9]{2}:?[0-9]{2})$/i.test(normalized);
+		if (hasOffset) {
+			// An explicit offset is authoritative; compete in longest-wins.
+			const parsed = Date.parse(normalized);
+			if (!Number.isNaN(parsed) && parsed > Date.now()) consider(parsed - Date.now());
+			continue;
+		}
+		// Defer the assumed-offset reading of a naive stamp to the fallback.
+		const parsed = Date.parse(`${normalized}${assumedOffset}`);
+		if (!Number.isNaN(parsed) && parsed > Date.now()) {
+			const delta = parsed - Date.now();
+			if (naiveResetMs === undefined || delta > naiveResetMs) naiveResetMs = delta;
 		}
 	}
 	const accountResetMatch = WILL_RESET_IN_PATTERN.exec(body);
@@ -193,6 +206,9 @@ export function extractRetryHint(source: Response | Headers | null | undefined, 
 			considerClamped(resetSeconds > 1_000_000_000 ? resetSeconds * 1000 - Date.now() : resetSeconds * 1000);
 		}
 	}
+	// Only trust a naive absolute reset when nothing unambiguous was found and
+	// the provider did not ask to retry now.
+	if (longestMs === undefined && !retryNow) longestMs = naiveResetMs;
 	return longestMs ?? (retryNow ? 0 : undefined);
 }
 
