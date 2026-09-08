@@ -53,7 +53,7 @@ import type { AssistantMessage, CodexCompactionContext, Message, Model, Provider
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { logger, Snowflake } from "@oh-my-pi/pi-utils";
+import { isRecord, logger, Snowflake } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import type { ModelRegistry } from "../config/model-registry";
 import { MODEL_ROLE_IDS } from "../config/model-roles";
@@ -86,7 +86,7 @@ import {
 	resolveRoleModelFull,
 } from "./role-models";
 import type { SessionContext } from "./session-context";
-import { getLatestCompactionEntry, getOpenAiRemoteCompactionPayload } from "./session-context";
+import { buildSessionContext, getLatestCompactionEntry, getOpenAiRemoteCompactionPayload } from "./session-context";
 import type { CompactionEntry, SessionEntry } from "./session-entries";
 import type { SessionManager } from "./session-manager";
 import type { ShakeMode, ShakeResult } from "./shake-types";
@@ -1231,7 +1231,9 @@ export class SessionMaintenance {
 		) {
 			throw new CompactionCancelledError(undefined, { cause: signalController.signal.reason });
 		}
-		const prepared = await this.#prepareCompactionFromHooks(preparation, hookCompaction);
+		const prepared = await this.#prepareCompactionFromHooks(preparation, hookCompaction, {
+			collectMemoryContext: false,
+		});
 		if (
 			signalController.signal.aborted ||
 			!this.#usesExperimentalContextManagement() ||
@@ -1372,7 +1374,9 @@ export class SessionMaintenance {
 				return COMPACTION_CHECK_NONE;
 			}
 
-			const prepared = await this.#prepareCompactionFromHooks(preparation, hookCompaction);
+			const prepared = await this.#prepareCompactionFromHooks(preparation, hookCompaction, {
+				collectMemoryContext: false,
+			});
 			if (
 				controller.signal.aborted ||
 				!this.#usesExperimentalContextManagement() ||
@@ -1863,7 +1867,10 @@ export class SessionMaintenance {
 				preserveData: args.preserveData,
 				method: args.method,
 				providerReplayThroughEntryId: args.providerReplayThroughEntryId,
-				tokensAfter: this.#projectCompactedContextTokens(args),
+				tokensAfter:
+					isRecord(args.details) && args.details.kind === "experimental-context-rollover"
+						? this.#projectExperimentalContextRolloverTokens(args)
+						: this.#projectCompactedContextTokens(args),
 			},
 		);
 		const newEntries = this.#host.sessionManager.getEntries();
@@ -2059,8 +2066,12 @@ export class SessionMaintenance {
 		const experimentalNewContextRequest =
 			this.#usesExperimentalContextManagement() && this.#host.takeExperimentalContextRolloverRequest(context);
 
+		// An explicit model-requested rollover bypasses the Auto-Compact toggle:
+		// `new_context` already acknowledged the request, so silently dropping it
+		// here would leave the model believing a boundary landed. Automatic
+		// threshold rollover remains gated by `compaction.enabled`.
 		if (
-			!compactionSettings.enabled ||
+			(!compactionSettings.enabled && !experimentalNewContextRequest) ||
 			(!this.#usesExperimentalContextManagement() && !hasConfiguredCompactionMethod(compactionSettings)) ||
 			(!experimentalNewContextRequest && compactionSettings.midTurnEnabled === false)
 		) {
@@ -2068,12 +2079,17 @@ export class SessionMaintenance {
 		}
 		if (experimentalNewContextRequest) {
 			if (!(await this.#host.persistTurnMessagesForMidRunCompaction(context))) return;
+			// An abort or disposal that raced the awaited persistence barrier must
+			// not commit a boundary the interrupted turn never observed.
+			if (signal?.aborted || this.#host.isDisposed()) return;
 			const result = await this.runAutoCompaction("threshold", false, false, false, {
 				autoContinue: false,
 				suppressContinuation: true,
 				phase: "mid_turn",
 				detachPostCommit: true,
+				explicitNewContextRequest: true,
 			});
+
 			if (result.automaticContinuationBlocked) {
 				this.#midTurnCompactionDeadEnds.add(activeMessages);
 				this.#midTurnDeadEndPendingPrePrompt = true;
@@ -2729,6 +2745,18 @@ export class SessionMaintenance {
 	async #prepareCompactionFromHooks(
 		preparation: CompactionPreparation,
 		hookCompaction: CompactionResult | undefined,
+		options?: {
+			/**
+			 * Collect built-in remote memory-backend recall context for the LLM
+			 * summary. Notes-backed rollover consumes only preservation data, so
+			 * it passes `false`: no remote `recallForCompaction()` round-trip
+			 * whose recalled context would be discarded. Extension
+			 * `session.compacting` handlers still run for their preservation
+			 * data; this does not promise arbitrary extension hooks are
+			 * network-free.
+			 */
+			collectMemoryContext?: boolean;
+		},
 	): Promise<
 		| {
 				kind: "fromHook";
@@ -2763,9 +2791,11 @@ export class SessionMaintenance {
 			preserveData = result?.preserveData;
 		}
 
-		const memoryBackendContext = await this.#collectMemoryBackendContext(preparation);
-		if (memoryBackendContext) {
-			hookContext = hookContext ? [...hookContext, memoryBackendContext] : [memoryBackendContext];
+		if (options?.collectMemoryContext !== false) {
+			const memoryBackendContext = await this.#collectMemoryBackendContext(preparation);
+			if (memoryBackendContext) {
+				hookContext = hookContext ? [...hookContext, memoryBackendContext] : [memoryBackendContext];
+			}
 		}
 
 		if (hookCompaction) {
@@ -2944,6 +2974,45 @@ export class SessionMaintenance {
 			if (entry.type === "message") tokens += this.#tokenizer.countMessage(entry.message);
 		}
 		return tokens;
+	}
+
+	/**
+	 * Project `tokensAfter` for a notes-backed rollover from the same
+	 * reconstruction the commit will perform — summary, retained
+	 * user-attributed request, kept tail, and the injected notebook — by
+	 * resolving a synthetic pending boundary through `buildSessionContext`. The
+	 * ordinary projector counts only the summary and kept tail, understating
+	 * the boundary by the notebook (up to 16 KiB) plus the retained request.
+	 * Pure projection: the synthetic entry never reaches the journal, and the
+	 * value remains a local estimate, not provider-billed usage.
+	 */
+	#projectExperimentalContextRolloverTokens(args: {
+		summary: string;
+		shortSummary: string | undefined;
+		tokensBefore: number;
+		firstKeptEntryId: string;
+		preserveData: Record<string, unknown> | undefined;
+	}): number {
+		const branch = this.#host.sessionManager.getBranch();
+		const leaf = branch.at(-1);
+		if (!leaf) return this.#projectCompactedContextTokens(args);
+		const pending: CompactionEntry = {
+			type: "compaction",
+			id: `${leaf.id}:rollover-tokens-projection`,
+			parentId: leaf.id,
+			timestamp: new Date().toISOString(),
+			summary: args.summary,
+			shortSummary: args.shortSummary,
+			firstKeptEntryId: args.firstKeptEntryId,
+			tokensBefore: args.tokensBefore,
+			details: { kind: "experimental-context-rollover", version: 1 },
+			preserveData: args.preserveData,
+		};
+		const rebuilt = buildSessionContext([...branch, pending]);
+		return (
+			computeNonMessageTokens(this.#host.nonMessageTokenSource(), this.#tokenizer) +
+			this.#tokenizer.countMessages(rebuilt.messages)
+		);
 	}
 
 	/**
@@ -3352,13 +3421,31 @@ export class SessionMaintenance {
 			methodIndex?: number;
 			/** A preceding shake already rewrote history before this fallback attempt. */
 			fallbackFromShake?: boolean;
+			/**
+			 * This call services an explicit model-requested rollover
+			 * (`new_context`): it bypasses the Auto-Compact toggle, and never
+			 * falls through to ordinary summary compaction when the experimental
+			 * capability is no longer present at dispatch time.
+			 */
+			explicitNewContextRequest?: boolean;
 		} = {},
 	): Promise<CompactionCheckResult> {
 		const compactionSettings = this.#host.settings.getGroup("compaction");
-		if (reason !== "idle" && !compactionSettings.enabled) return COMPACTION_CHECK_NONE;
+		// An explicit model-requested rollover bypasses the Auto-Compact toggle;
+		// automatic threshold rollover stays gated exactly as before.
+		const explicitNewContextRequest = options.explicitNewContextRequest === true;
+		if (reason !== "idle" && !compactionSettings.enabled && !explicitNewContextRequest) {
+			return COMPACTION_CHECK_NONE;
+		}
 		if (this.#usesExperimentalContextManagement()) {
 			return await this.#runExperimentalContextRollover(reason, willRetry, options);
 		}
+		// The explicit request is valid only on the notes-backed rollover path.
+		// If the experimental capability disappeared between request recognition
+		// and this dispatch (tool surface or settings changed while tool results
+		// were being persisted), drop the stale request rather than fall through
+		// to ordinary summary compaction: no summary-provider request was agreed.
+		if (explicitNewContextRequest) return COMPACTION_CHECK_NONE;
 		const methods = resolveCompactionMethodOrder(compactionSettings.methodOrder);
 		if (methods.length === 0) return COMPACTION_CHECK_NONE;
 		const generation = this.#host.promptGeneration();
@@ -3385,6 +3472,7 @@ export class SessionMaintenance {
 			methodIndex = index;
 			break;
 		}
+
 		if (!method) return COMPACTION_CHECK_NONE;
 
 		// A speculative pass may have already produced this compaction's summary
