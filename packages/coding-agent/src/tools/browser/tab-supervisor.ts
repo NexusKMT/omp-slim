@@ -550,11 +550,8 @@ async function runInTabWithSnapshot(
 		);
 	}
 	if (tab.pending.size > 0) throw new ToolError(`Tab ${JSON.stringify(name)} is busy`);
-	// A run is use: refresh the idle clock and resume a settle-frozen page
-	// first so frozen rAF/timers cannot hang the execution below. Unfreeze
-	// never throws — on failure the run proceeds and surfaces the page error.
+	// A run is use: refresh the idle clock for idle-close.
 	tab.lastActivityAt = Date.now();
-	await unfreezeTabSession(tab);
 	const id = Snowflake.next();
 	const { promise, resolve, reject } = Promise.withResolvers<RunResultOk>();
 	// `releaseTab` calls `pending.reject(closeError)` when the tab dies
@@ -581,7 +578,29 @@ async function runInTabWithSnapshot(
 		toolCalls: new Map(),
 		closeAc,
 	};
+	// Register BEFORE the unfreeze await below. Settle-freeze guards on
+	// `pending` (and undoes a transition already in flight when it observes
+	// one at completion), so a turn-end freeze can neither start nor land
+	// mid-run. Without this ordering a parent's settle could freeze a tab a
+	// subagent is reusing between our unfreeze check and this registration,
+	// stalling timer/rAF-dependent code to timeout.
 	tab.pending.set(id, pending);
+	// Resume a settle-frozen page before driving it — frozen rAF/timers would
+	// otherwise hang the execution below. Never throws: on failure the run
+	// proceeds and surfaces the underlying page error itself.
+	await unfreezeTabSession(tab);
+	const current = tabs.get(name);
+	if (current !== tab || current.state === "dead") {
+		// A teardown won the race with our unfreeze roundtrip. Prefer its
+		// close error when one was recorded (`releaseTab` rejects `pending`
+		// synchronously, so it is already settled here); otherwise surface
+		// the closure. `race` — not a bare `await promise` — so a teardown
+		// that never settled the run cannot hang us, and `race` observes
+		// every rejection (issue #4499).
+		tab.pending.delete(id);
+		const notAlive = new ToolError(`Tab ${JSON.stringify(name)} is not alive. Open it first with action:"open".`);
+		return await Promise.race([promise, Promise.reject(notAlive)]);
+	}
 	if (tab.backend === "cmux") {
 		const runSignal = opts.signal ? AbortSignal.any([opts.signal, closeAc.signal]) : closeAc.signal;
 		try {
@@ -826,11 +845,20 @@ async function findTargetForTab(tab: WorkerTabSession): Promise<Target | undefin
  * resumes. Best-effort in the safe direction: false when the tab is gone or
  * the protocol call fails, leaving `frozen` untouched so the next checkpoint
  * retries and close paths still apply.
+ *
+ * Race protocol (all flag reads/writes below run atomically between awaits):
+ * runs register `pending` before driving the page, so a freeze that starts
+ * after a run began stands down at the guard. A freeze already past the
+ * guard when a run registers rechecks `pending` after its CDP roundtrip and
+ * re-asserts `active` on the same session — a frozen frame already sent
+ * cannot be unsent, so the undo guarantees the run never executes on a
+ * frozen page. Unfreezing always proceeds: resuming is safe under any
+ * pending state.
  */
 async function setTabFrozen(tab: TabSession, frozen: boolean): Promise<boolean> {
 	if (!isSettleManaged(tab) || tab.backend !== "worker") return false;
-	if (tab.pending.size > 0) return false;
 	if (tab.frozen === frozen) return false;
+	if (frozen && tab.pending.size > 0) return false;
 	const target = await findTargetForTab(tab).catch(() => undefined);
 	if (!target) return false;
 	const session = await target.createCDPSession().catch(() => null);
@@ -838,8 +866,20 @@ async function setTabFrozen(tab: TabSession, frozen: boolean): Promise<boolean> 
 	try {
 		await session.send("Page.enable").catch(() => undefined);
 		await session.send("Page.setWebLifecycleState", { state: frozen ? "frozen" : "active" });
+		if (tab.state !== "alive") return false;
+		if (frozen) {
+			if (tab.frozen) return false;
+			if (tab.pending.size > 0) {
+				await session.send("Page.setWebLifecycleState", { state: "active" }).catch(() => undefined);
+				return false;
+			}
+			tab.frozen = true;
+			return true;
+		}
+		tab.frozen = false;
+		return true;
 	} catch (error) {
-		logger.debug("Browser tab lifecycle transition failed; leaving tab unfrozen", {
+		logger.debug("Browser tab lifecycle transition failed; leaving tab lifecycle state unchanged", {
 			name: tab.name,
 			frozen,
 			error: error instanceof Error ? error.message : String(error),
@@ -848,8 +888,6 @@ async function setTabFrozen(tab: TabSession, frozen: boolean): Promise<boolean> 
 	} finally {
 		await session.detach().catch(() => undefined);
 	}
-	tab.frozen = frozen;
-	return true;
 }
 
 /** Test hook for the lifecycle transition without a tabs-map entry. */
@@ -885,7 +923,9 @@ async function unfreezeTabSession(tab: TabSession): Promise<void> {
  * Freeze every managed tab owned by `ownerId` (issue #8246). Turn-settle
  * checkpoint: an idle animated page stops burning CPU/GPU while keeping its
  * renderer, worker, and DOM state for millisecond resume on next use. Tabs
- * with in-flight runs are skipped and picked up at the next settle.
+ * with in-flight runs are skipped at the guard; a freeze already past the
+ * guard when a run registers undoes itself at completion (see
+ * `setTabFrozen`), so neither path can stall a run mid-execution.
  */
 export async function freezeTabsForOwner(ownerId: string): Promise<number> {
 	if (!ownerId) return 0;
@@ -896,12 +936,20 @@ export async function freezeTabsForOwner(ownerId: string): Promise<number> {
 	}
 	return count;
 }
-
 /**
- * Close managed tabs owned by `ownerId` idle longer than `idleMs` — the
- * memory backstop under settle-freeze (frozen tabs still hold their renderer
- * and worker). Frozen or not, `persist` tabs are never touched.
+ * Idle-close eligibility: owned, settle-managed, no in-flight run, and idle
+ * past the deadline. An executing tab is not idle even when its run outlasts
+ * the timeout. Exported so the never-touch contract is unit-testable;
+ * `releaseIdleTabsForOwner` walks the map with exactly this predicate.
  */
+export function isIdleCloseCandidate(tab: TabSession, ownerId: string, nowMs: number, idleMs: number): boolean {
+	return (
+		tab.ownerSessionId === ownerId &&
+		isSettleManaged(tab) &&
+		tab.pending.size === 0 &&
+		nowMs - tab.lastActivityAt >= idleMs
+	);
+}
 export async function releaseIdleTabsForOwner(
 	ownerId: string,
 	opts: { idleMs: number } & ReleaseTabOptions = { idleMs: 0 },
@@ -909,7 +957,7 @@ export async function releaseIdleTabsForOwner(
 	if (!ownerId) return 0;
 	const now = Date.now();
 	const names = [...tabs.values()]
-		.filter(tab => tab.ownerSessionId === ownerId && isSettleManaged(tab) && now - tab.lastActivityAt >= opts.idleMs)
+		.filter(tab => isIdleCloseCandidate(tab, ownerId, now, opts.idleMs))
 		.map(tab => tab.name);
 	let count = 0;
 	for (const name of names) {

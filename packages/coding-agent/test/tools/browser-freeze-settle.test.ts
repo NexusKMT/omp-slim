@@ -24,12 +24,13 @@ import {
 	acquireTab,
 	freezeTabsForOwner,
 	getTabsMapForTest,
+	isIdleCloseCandidate,
 	releaseIdleTabsForOwner,
 	releaseTab,
 	runInTab,
 	setTabFrozenForTest,
 } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
-import type { TabSession } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
+import type { PendingRun, TabSession } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
 import { chromiumAvailable } from "./chromium-probe";
 
@@ -175,6 +176,85 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 		expect(await setTabFrozenForTest(tab, true)).toBe(false);
 		expect(tab.frozen).toBe(false);
 		expect(calls.length).toBe(0);
+	});
+	describe("browser settle — freeze vs run race", () => {
+		it("a run that registers mid-transition forces the freeze to undo itself", async () => {
+			const calls: CdpCall[] = [];
+			const frozenStarted = Promise.withResolvers<void>();
+			const releaseFrozenSend = Promise.withResolvers<void>();
+			let lifecycleSends = 0;
+			const session = {
+				send: async (method: string, params?: unknown): Promise<Record<string, unknown>> => {
+					calls.push({ method, params });
+					if (method === "Page.setWebLifecycleState" && lifecycleSends++ === 0) {
+						frozenStarted.resolve();
+						await releaseFrozenSend.promise;
+					}
+					return {};
+				},
+				detach: async (): Promise<void> => undefined,
+			};
+			const { tab } = makeStubTab({
+				browser: {
+					browser: { targets: () => [{ _targetId: "stub-target-1", createCDPSession: async () => session }] },
+				},
+			});
+
+			const freeze = setTabFrozenForTest(tab, true);
+			await frozenStarted.promise;
+			// The run path registers `pending` before driving the page; the
+			// freeze observes it at completion and must back out.
+			const inFlight = {} as unknown as PendingRun;
+			tab.pending.set("run-1", inFlight);
+			releaseFrozenSend.resolve();
+
+			expect(await freeze).toBe(false);
+			expect(tab.frozen).toBe(false);
+			expect(calls.map(call => call.method)).toEqual([
+				"Page.enable",
+				"Page.setWebLifecycleState",
+				"Page.setWebLifecycleState",
+			]);
+			expect(calls.at(-1)?.params).toEqual({ state: "active" });
+		});
+	});
+
+	describe("browser settle — idle-close eligibility", () => {
+		const NOW = 1_000_000;
+		function candidate(overrides: Record<string, unknown> = {}): TabSession {
+			return makeStubTab({ lastActivityAt: NOW - 120_000, ...overrides }).tab;
+		}
+
+		it("selects owned managed tabs idle past the deadline, including the boundary", () => {
+			expect(isIdleCloseCandidate(candidate(), "session-stub", NOW, 60_000)).toBe(true);
+			expect(isIdleCloseCandidate(candidate({ lastActivityAt: NOW - 60_000 }), "session-stub", NOW, 60_000)).toBe(
+				true,
+			);
+		});
+
+		it("holds back fresh tabs", () => {
+			expect(isIdleCloseCandidate(candidate({ lastActivityAt: NOW - 1_000 }), "session-stub", NOW, 60_000)).toBe(
+				false,
+			);
+		});
+
+		it("never selects other owners, opt-outs, foreign kinds, dead, or executing tabs", () => {
+			const cases: Array<[string, Record<string, unknown>]> = [
+				["other owner", { ownerSessionId: "session-other" }],
+				["persist opt-out", { persist: true }],
+				["relay", { kindTag: "relay" }],
+				["connected", { kindTag: "connected" }],
+				["spawned", { kindTag: "spawned" }],
+				["cmux backend", { backend: "cmux", kindTag: "cmux" }],
+				["dead tab", { state: "dead" }],
+			];
+			for (const [label, overrides] of cases) {
+				expect(isIdleCloseCandidate(candidate(overrides), "session-stub", NOW, 60_000), label).toBe(false);
+			}
+			const executing = candidate();
+			executing.pending.set("run-1", {} as unknown as PendingRun);
+			expect(isIdleCloseCandidate(executing, "session-stub", NOW, 60_000)).toBe(false);
+		});
 	});
 
 	describe("browser settle — ownership and bookkeeping", () => {
