@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- xAI search answers no longer mix in relay narration between search steps; only the final message and substantive earlier ones (citations or long text) are kept.
 - GitHub Copilot model-policy 403s (plan, model policy, org restriction) no longer delete stored credentials, so the provider stays listed in `/model` after a per-model access denial instead of disappearing until the next `/login` ([#11280](https://github.com/can1357/oh-my-pi/pull/11280) by [@H4vC](https://github.com/H4vC)).
 
 ### Added

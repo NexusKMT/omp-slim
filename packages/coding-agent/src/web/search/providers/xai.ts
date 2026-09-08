@@ -18,6 +18,8 @@ const XAI_WEB_SEARCH_MODEL = "grok-4.5";
 const XAI_WEB_SEARCH_REASONING_EFFORT = "low";
 const DEFAULT_NUM_RESULTS = 10;
 const MAX_NUM_RESULTS = 30;
+/** Messages at least this long are treated as substantive content, not relay narration. */
+const NARRATION_MAX_CHARS = 300;
 
 interface XAIUrlCitationAnnotation {
 	type?: string;
@@ -269,19 +271,49 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 	const topLevelText = response.output_text?.trim();
 	if (topLevelText) return topLevelText;
 
-	const answerParts: string[] = [];
+	// Relays that lack top-level `output_text` return every between-call
+	// narration ("I'll search for…") as a message item. The answer is the last
+	// message; an earlier one survives only when it is substantive — carrying
+	// URL citations (part- or message-level) or exceeding the narration length
+	// threshold. Parts are grouped per message so every part of the final
+	// message is kept, and the citation check matches the url_citation shape
+	// used by source extraction. A last message with no text yields no answer
+	// rather than promoting an earlier narration message.
+	const messages: Array<{ texts: string[]; hasCitations: boolean }> = [];
 	const output = Array.isArray(response.output) ? response.output : [];
 	for (const item of output) {
-		if (!item || typeof item !== "object") continue;
+		if (!item || typeof item !== "object" || item.type !== "message") continue;
 		const content = Array.isArray(item.content) ? item.content : [];
+		const entry: { texts: string[]; hasCitations: boolean } = { texts: [], hasCitations: false };
 		for (const part of content) {
 			if (!part || typeof part !== "object") continue;
-			const text = part.output_text ?? part.text;
-			if (text?.trim()) answerParts.push(text.trim());
+			const text = (part.output_text ?? part.text)?.trim();
+			if (text) entry.texts.push(text);
+			for (const annotation of Array.isArray(part.annotations) ? part.annotations : []) {
+				if (annotation?.type === "url_citation" && typeof annotation.url === "string") {
+					entry.hasCitations = true;
+					break;
+				}
+			}
 		}
+		for (const annotation of Array.isArray(item.annotations) ? item.annotations : []) {
+			if (annotation?.type === "url_citation" && typeof annotation.url === "string") {
+				entry.hasCitations = true;
+				break;
+			}
+		}
+		messages.push(entry);
 	}
+	if (messages.length === 0 || messages[messages.length - 1].texts.length === 0) return undefined;
+	const kept = messages.filter(
+		(entry, index) =>
+			index === messages.length - 1 || entry.hasCitations || entry.texts.join("").length >= NARRATION_MAX_CHARS,
+	);
 
-	const answer = answerParts.join("\n").trim();
+	const answer = kept
+		.flatMap(entry => entry.texts)
+		.join("\n")
+		.trim();
 	return answer ? answer : undefined;
 }
 
