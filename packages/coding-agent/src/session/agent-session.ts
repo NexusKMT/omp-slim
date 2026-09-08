@@ -7443,23 +7443,21 @@ export class AgentSession {
 				// installed.
 				if (this.#workPoolYieldItems === applied) {
 					this.#workPoolYieldItems = previous;
-					// Republish the restored contract through a trailing entry: an
-					// overlapping refresh may already have published newer bytes,
-					// and the equality fast path would otherwise never repair the
-					// mismatch. Appending (never awaiting the tail here) cannot
-					// deadlock; a republish failure only warns since the caller
-					// already sees this transition's error.
-					this.#workPoolYieldTransition = this.#workPoolYieldTransition.then(async () => {
-						try {
-							await this.refreshBaseSystemPrompt();
-						} catch (republishError) {
-							logger.warn("WorkPool yield contract republish failed", {
-								error: republishError instanceof Error ? republishError.message : String(republishError),
-							});
-							return;
-						}
-						this.#resumeStrandedIrcAsides();
-					});
+					// Republish inline so waiters gated on this transition observe
+					// the restored pair: a trailing entry would settle those
+					// waiters before the repair runs. An overlapping refresh may
+					// already have published newer bytes, and the equality fast
+					// path would otherwise never repair the mismatch. A republish
+					// failure only warns since the caller already sees error.
+					try {
+						await this.refreshBaseSystemPrompt();
+					} catch (republishError) {
+						logger.warn("WorkPool yield contract republish failed", {
+							error: republishError instanceof Error ? republishError.message : String(republishError),
+						});
+						throw error;
+					}
+					this.#resumeStrandedIrcAsides();
 				}
 				throw error;
 			}
