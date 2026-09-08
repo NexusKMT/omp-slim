@@ -172,4 +172,16 @@ describe("retry fallback selector resolution", () => {
 		const maxWithHint = createContext({ [max]: ["openai/gpt-4o-mini:max"], smol: ["openai/gpt-4o-mini:medium"] });
 		expect(resolveRetryFallbackChainKey(maxWithHint, low, model, "smol")).toBe("smol");
 	});
+
+	it("treats effort aliases as equivalent to their canonical form when matching keys", () => {
+		const model = getBundledModel("google", "gemini-2.5-flash");
+		const canonicalHigh = "google/gemini-2.5-flash:high";
+		const aliasKey = "google/gemini-2.5-flash:hi";
+
+		const context = createContext({ [aliasKey]: ["openai/gpt-4o-mini:high"] });
+		expect(resolveRetryFallbackChainKey(context, canonicalHigh, model)).toBe(aliasKey);
+		expect(
+			findRetryFallbackCandidates(context, aliasKey, canonicalHigh, model).map(candidate => candidate.raw),
+		).toEqual(["openai/gpt-4o-mini:high"]);
+	});
 });

@@ -252,9 +252,11 @@ type SelectorMatchKind = "exact" | "base" | "none";
 
 /**
  * Classify how a chain key's primary selector matches the current selector.
+ * Comparisons are on parsed model + thinking-level values, so effort aliases
+ * (`hi`/`med`/`min`) match their canonical forms (`high`/`medium`/`minimal`).
  *
- * - `exact` — same model *and* effort (raw selector equality, checked against
- *   both the routed selector and its plain, unrouted variant).
+ * - `exact` — same provider/model *and* effort, against either the routed
+ *   current selector or its plain, unrouted variant.
  * - `base` — a suffixless key (no explicit effort) naming the same
  *   provider/model, so it applies to that model at any effort.
  * - `none` — no match. A key carrying a *different* explicit effort lands here:
@@ -262,20 +264,29 @@ type SelectorMatchKind = "exact" | "base" | "none";
  */
 function selectorMatchKind(
 	primary: RetryFallbackSelector | undefined,
-	currentSelector: string,
-	currentBaseSelector: string,
-	currentPlainSelector: string | undefined,
-	currentPlainBaseSelector: string | undefined,
+	current: RetryFallbackSelector,
+	currentPlain: RetryFallbackSelector | undefined,
 ): SelectorMatchKind {
 	if (!primary) return "none";
-	if (primary.raw === currentSelector || (currentPlainSelector && primary.raw === currentPlainSelector)) {
+	const provider = primary.provider;
+	const id = primary.id;
+	const level = primary.thinkingLevel;
+	if (
+		(provider === current.provider && id === current.id && level === current.thinkingLevel) ||
+		(currentPlain !== undefined &&
+			provider === currentPlain.provider &&
+			id === currentPlain.id &&
+			level === currentPlain.thinkingLevel)
+	) {
 		return "exact";
 	}
 	// An explicit-effort key only matches that effort (handled above); only a
 	// suffixless key falls back to matching the model at any effort.
-	if (primary.thinkingLevel !== undefined) return "none";
-	const base = formatRetryFallbackBaseSelector(primary);
-	if (base === currentBaseSelector || (!!currentPlainBaseSelector && base === currentPlainBaseSelector)) {
+	if (level !== undefined) return "none";
+	if (
+		(provider === current.provider && id === current.id) ||
+		(currentPlain !== undefined && provider === currentPlain.provider && id === currentPlain.id)
+	) {
 		return "base";
 	}
 	return "none";
@@ -303,10 +314,9 @@ export function resolveRetryFallbackChainKey(
 		if (roleHint && Array.isArray(context.chains[roleHint])) return roleHint;
 		return undefined;
 	}
-	const currentBaseSelector = formatRetryFallbackBaseSelector(parsedCurrent);
-	const currentPlainBaseSelector =
+	const parsedPlainCurrent =
 		currentPlainSelector && currentPlainSelector !== currentSelector
-			? formatRetryFallbackBaseSelector(parseRetryFallbackSelector(currentPlainSelector) ?? parsedCurrent)
+			? (parseRetryFallbackSelector(currentPlainSelector, context.modelLookup) ?? parsedCurrent)
 			: undefined;
 
 	// 1. Exact model-selector keys — most specific. An exact model+effort match
@@ -315,13 +325,7 @@ export function resolveRetryFallbackChainKey(
 	let baseModelKey: string | undefined;
 	for (const key in context.chains) {
 		if (!isRetryFallbackModelKey(key) || isRetryFallbackWildcardKey(key)) continue;
-		const kind = selectorMatchKind(
-			getRetryFallbackPrimarySelector(context, key),
-			currentSelector,
-			currentBaseSelector,
-			currentPlainSelector,
-			currentPlainBaseSelector,
-		);
+		const kind = selectorMatchKind(getRetryFallbackPrimarySelector(context, key), parsedCurrent, parsedPlainCurrent);
 		if (kind === "exact") return key;
 		if (kind === "base") baseModelKey ??= key;
 	}
@@ -355,13 +359,7 @@ export function resolveRetryFallbackChainKey(
 	for (const key in context.chains) {
 		if (isRetryFallbackModelKey(key)) continue;
 		if (
-			selectorMatchKind(
-				getRetryFallbackPrimarySelector(context, key),
-				currentSelector,
-				currentBaseSelector,
-				currentPlainSelector,
-				currentPlainBaseSelector,
-			) !== "none"
+			selectorMatchKind(getRetryFallbackPrimarySelector(context, key), parsedCurrent, parsedPlainCurrent) !== "none"
 		) {
 			if (key === "default") return "default";
 			matchedRole ??= key;
