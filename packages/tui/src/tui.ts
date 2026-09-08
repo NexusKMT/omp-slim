@@ -1161,14 +1161,21 @@ export class TUI extends Container {
 						return;
 					}
 					this.#cancelResizeProbe();
-					this.#altToggleEchoPending = false;
 					if (this.#resizeRepaintsInPlace()) this.#beginResizeInPlacePaint();
 					else this.#beginResizeAltPaint(true);
 					return;
 				}
-				// The echo expectation is single-shot: any SIGWINCH that arrives with
-				// no probe in flight is a real transaction start, not an echo.
-				this.#altToggleEchoPending = false;
+				if (this.#isWarpAltToggleEcho()) {
+					// Delayed echo that lost the signal-vs-pty race with its own
+					// probe's CPR reply: the probe already resolved, so re-probe at
+					// the echoed size instead of painting on a stale anchor or
+					// suppressing into a forced replay. DSR-only, no borrow.
+					this.#resizeProbeWindow = this.#providerWindow;
+					this.#resizeProbeOffset = this.#parkedViewportOffset;
+					this.#trackResizeBurst();
+					this.#beginResizeAnchorProbe();
+					return;
+				}
 				if (this.#renderScheduler.now() < this.#suppressResizeUntil) {
 					this.requestRender(true);
 					return;

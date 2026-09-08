@@ -354,6 +354,44 @@ describe("Warp echo expectation is single-shot", () => {
 			tui.stop();
 		}
 	});
+	it("re-probes a delayed echo that arrives after its probe resolved", () => {
+		Bun.env.TERM_PROGRAM = "WarpTerminal";
+		Bun.env.PI_TUI_RESIZE_IN_PLACE = "0";
+		const term = new VirtualTerminal(40, 12);
+		const writes: string[] = [];
+		const originalWrite = term.write.bind(term);
+		term.write = (data: string) => {
+			writes.push(data);
+			originalWrite(data);
+		};
+		const scheduler = new SyncScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		tui.addChild(new LineComponent("row-", 8));
+		try {
+			tui.start();
+			scheduler.settle();
+			scheduler.t += 200;
+			writes.length = 0;
+
+			term.resize(40, 20);
+			scheduler.settle();
+			const tag = writes.join("").match(/\x1b\[(\d+)G\x1b\[6n/);
+			expect(tag).not.toBeNull();
+
+			// The CPR wins the race against the echo: the probe resolves first.
+			term.sendInput(`\x1b[19;${tag![1]}R`);
+			scheduler.settle();
+
+			// The delayed echo re-probes at the echoed size instead of borrowing
+			// or painting on the resolved anchor.
+			term.resize(40, 21);
+			const all = writes.join("");
+			expect(countNeedle(all, "\x1b[6n")).toBe(2);
+			expect(countNeedle(all, ALT_ENTER)).toBe(1);
+		} finally {
+			tui.stop();
+		}
+	});
 });
 
 /** Synchronous scheduler: delay-ignoring timers fire on settle(). */
