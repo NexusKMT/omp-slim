@@ -437,7 +437,21 @@ export class WorkPool {
 		agent.jobId = undefined;
 		const ref = AgentRegistry.global().get(agent.id);
 		// Retained idle workers can wake through IRC, so clear the runtime schema and cached inline declaration together.
-		await ref?.session?.setWorkPoolYieldItems([]);
+		// A refresh failure must not strand the pool in #waitForDrain(): items are
+		// already terminal, so keep the turn result, drop the worker instead of
+		// reusing it with a stale keyed declaration, and still notify drain.
+		let yieldCleared = true;
+		try {
+			await ref?.session?.setWorkPoolYieldItems([]);
+		} catch (error) {
+			yieldCleared = false;
+			logger.warn("workpool: failed to clear yield contract", {
+				pool: this.name,
+				agent: agent.id,
+				batch: batch.id,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
 		if (this.freshAgents) {
 			agent.state = "dead";
 			const index = this.agents.indexOf(agent);
@@ -447,7 +461,7 @@ export class WorkPool {
 			this.#notifyDrained();
 			return;
 		}
-		if (ref && (ref.status === "idle" || ref.status === "parked")) {
+		if (yieldCleared && ref && (ref.status === "idle" || ref.status === "parked")) {
 			this.#drain(agent);
 		} else {
 			agent.state = "dead";

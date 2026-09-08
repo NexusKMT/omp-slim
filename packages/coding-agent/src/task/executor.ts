@@ -3319,6 +3319,12 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			// Root resolved by the latest roster ensure; the prompt callback renders
 			// live peer rows scoped to it, so a session switch hides stale parked trees.
 			let ircRootSessionFile: string | undefined;
+			// Live session for prompt rebuilds: the systemPrompt callback is
+			// re-invoked by refreshBaseSystemPrompt() after setWorkPoolYieldItems()
+			// mutates the session. Reading the live item set keeps the rendered
+			// Workpool completion block in sync when pooled items are cleared
+			// before a retained-worker wake turn; the captured options alone stay stale.
+			let liveSubagentSession: AgentSession | undefined;
 
 			// Captured by the lifecycle reviver: rebuilding an equivalent session from
 			// the same JSONL file re-invokes createAgentSession with the exact options
@@ -3370,7 +3376,8 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						worktree: worktree ?? "",
 						outputSchema: normalizedOutputSchema,
 						outputSchemaOverridesAgent: options.outputSchemaOverridesAgent === true,
-						workPoolYieldItems: options.workPoolYieldItems ?? [],
+						workPoolYieldItems:
+							liveSubagentSession?.getWorkPoolYieldItems?.() ?? options.workPoolYieldItems ?? [],
 						ircPeers: ircRoster?.peers ?? [],
 						ircParkedCount: ircRoster?.parkedCount ?? 0,
 						ircOmittedCount: ircRoster?.omittedCount ?? 0,
@@ -3430,6 +3437,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			let session: AgentSession;
 			try {
 				({ session } = await awaitAbortable(sessionPromise));
+				liveSubagentSession = session;
 			} catch (err) {
 				// Abort raced session startup. The session may still resolve later
 				// holding live LSP/MCP child processes — dispose it when it does so
@@ -3479,6 +3487,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					});
 					AgentRegistry.global().syncSessionStatus(id, revived);
 					installIrcWakeTurnMonitor(revived);
+					liveSubagentSession = revived;
 					return revived;
 				};
 			}
