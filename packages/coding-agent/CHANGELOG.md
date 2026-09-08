@@ -81,8 +81,8 @@
 - Restored mouse clicks, hover, and wheel scrolling in Plan Review.
 ### Fixed
 
-- Fixed the built-in clangd registration omitting CUDA source and header files (`.cu` and `.cuh`).
-- Fixed `ast_grep` skipping CUDA headers and ignoring an explicit `lang` override for ambiguous file extensions.
+- Fixed the built-in clangd registration omitting CUDA source and header files (`.cu` and `.cuh`) ([#10782](https://github.com/can1357/oh-my-pi/pull/10782) by [@alphastorm](https://github.com/alphastorm)).
+- Fixed `ast_grep` skipping CUDA headers and ignoring an explicit `lang` override for ambiguous file extensions ([#10782](https://github.com/can1357/oh-my-pi/pull/10782) by [@alphastorm](https://github.com/alphastorm)).
 
 ## [18.1.9] - 2026-09-04
 
