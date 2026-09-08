@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Read error and preview rendering now sanitizes tabs and Windows-style CRLF (e.g. ssh host-key failures, tab-indented fetched content) so raw output can no longer tear the result frame.
+
 ## [18.1.15] - 2026-09-08
 
 ### Added
