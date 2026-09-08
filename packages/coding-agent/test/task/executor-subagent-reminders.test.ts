@@ -428,12 +428,42 @@ describe("runSubprocess yield reminders", () => {
 			.mockResolvedValue(revived);
 		try {
 			const result = await runSubagentFollowUpTurn({ ...baseOptions, id: "subagent-revive", message: "batch work" });
-			expect(ensureLive).toHaveBeenCalledTimes(2);
+			expect(ensureLive).toHaveBeenCalledTimes(3);
 			expect(calls).toEqual(["setYield:stale", "setYield:revived"]);
 			expect(result.exitCode).toBe(0);
 			expect(result.output).toContain('"revived": true');
 		} finally {
 			AgentRegistry.global().unregister("subagent-revive");
+		}
+	});
+	it("fails fast when parking replaces the worker on every install", async () => {
+		const sessions = [
+			createMockSession(() => {}),
+			createMockSession(() => {}),
+			createMockSession(() => {}),
+			createMockSession(() => {}),
+		];
+		for (const session of sessions) {
+			const mutable: { setWorkPoolYieldItems: (items: unknown[]) => Promise<void> } = session as unknown as {
+				setWorkPoolYieldItems: (items: unknown[]) => Promise<void>;
+			};
+			mutable.setWorkPoolYieldItems = async () => {};
+		}
+		// A park slipping into every rebuild window replaces the worker each
+		// round trip: fail after three instead of chasing replacements forever.
+		const ensureLive = vi
+			.spyOn(AgentLifecycleManager.global(), "ensureLive")
+			.mockResolvedValueOnce(sessions[0]!)
+			.mockResolvedValueOnce(sessions[1]!)
+			.mockResolvedValueOnce(sessions[2]!)
+			.mockResolvedValue(sessions[3]!);
+		try {
+			await expect(
+				runSubagentFollowUpTurn({ ...baseOptions, id: "subagent-churn", message: "batch work" }),
+			).rejects.toThrow("was replaced during every install attempt");
+			expect(ensureLive).toHaveBeenCalledTimes(4);
+		} finally {
+			AgentRegistry.global().unregister("subagent-churn");
 		}
 	});
 	it("sends reminder prompt when subagent stops without yield", async () => {

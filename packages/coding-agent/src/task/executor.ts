@@ -2866,12 +2866,23 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 		);
 	}
 	await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
-	// Reacquire: the waits/rebuild above can outlast the idle TTL, letting park()
-	// detach this instance before the turn starts. A revived replacement starts
-	// with an empty contract, so reinstall (a no-op unless revived); a released
-	// worker throws here instead of driving a corpse.
-	session = await AgentLifecycleManager.global().ensureLive(id);
-	await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
+	// Revalidate until the worker survives an install round-trip unchanged: the
+	// waits/rebuild above can outlast the idle TTL, letting park() detach this
+	// instance mid-install. Each observed replacement means another full park
+	// cycle, so reinstall on the fresh session (revivals start empty) and check
+	// again; genuine churn fails fast instead of driving a stale instance, and
+	// a released worker throws instead of driving a corpse.
+	for (let acquireAttempts = 0; ; acquireAttempts++) {
+		const live = await AgentLifecycleManager.global().ensureLive(id);
+		if (live === session) break;
+		if (acquireAttempts >= 2) {
+			throw new Error(
+				`Subagent ${id} was replaced during every install attempt; refusing to drive a stale worker session`,
+			);
+		}
+		session = live;
+		await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
+	}
 	const ref = AgentRegistry.global().get(id);
 	const sessionFile = ref?.sessionFile ?? undefined;
 
