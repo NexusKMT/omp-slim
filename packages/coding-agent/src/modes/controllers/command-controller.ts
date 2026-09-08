@@ -1669,15 +1669,19 @@ export class CommandController {
 	#finishHandoffUi(handoffLoader: Loader): void {
 		handoffLoader.stop();
 		this.ctx.statusContainer.disposeChildren();
-		if (this.ctx.session.isStreaming) {
-			// A new turn won the race with handoff cleanup; restore its loader
-			// after removing the handoff overlay.
-			this.ctx.ensureLoadingAnimation();
-		} else if (this.ctx.loadingAnimation) {
-			// Session events are dispatched asynchronously. A delayed agent_start
-			// can mount the prior turn's loader while transcript replay yields.
+		// `disposeChildren()` disposed any working loader mounted by a delayed
+		// `agent_start` during transcript replay, which stops its animation timer.
+		// Drop the now-frozen reference so the reconciler below never reattaches it
+		// (`ensureLoadingAnimation()` only re-adds an existing instance, never
+		// restarts it).
+		if (this.ctx.loadingAnimation) {
 			this.ctx.loadingAnimation.stop();
 			this.ctx.loadingAnimation = undefined;
+		}
+		if (this.ctx.session.isStreaming) {
+			// A new turn won the race with handoff cleanup; mount a fresh, running
+			// loader for it now that the stale reference is cleared.
+			this.ctx.ensureLoadingAnimation();
 		}
 	}
 }

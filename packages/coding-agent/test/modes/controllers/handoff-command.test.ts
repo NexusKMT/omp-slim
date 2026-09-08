@@ -137,6 +137,69 @@ describe("/handoff command", () => {
 		expect(statusContainer.children).toHaveLength(0);
 	});
 
+	it("recreates a fresh working loader when a new turn is streaming after handoff", async () => {
+		const statusContainer = createContainer();
+		const staleWorkingLoader = { stop: vi.fn() };
+		const freshWorkingLoader = { stop: vi.fn() };
+		let loadingAnimation: { stop: () => void } | undefined;
+		let isStreaming = false;
+		let loaderAtEnsureCall: { stop: () => void } | undefined | "unset" = "unset";
+		const ctx = {
+			sessionManager: {
+				getEntries: () => [{ type: "message" }, { type: "message" }],
+			},
+			session: {
+				get isStreaming() {
+					return isStreaming;
+				},
+				handoff: vi.fn(async () => ({ document: "## Goal\nContinue" })),
+			},
+			get loadingAnimation() {
+				return loadingAnimation;
+			},
+			set loadingAnimation(value: { stop: () => void } | undefined) {
+				loadingAnimation = value;
+			},
+			statusContainer,
+			ui: { requestRender: vi.fn(), requestComponentRender: vi.fn() },
+			clearTransientSessionUi: vi.fn(() => {
+				loadingAnimation?.stop();
+				loadingAnimation = undefined;
+				statusContainer.disposeChildren();
+			}),
+			renderInitialMessages: vi.fn(async () => {
+				// A new turn begins and a delayed agent_start mounts its loader while
+				// handoff cleanup is still running.
+				isStreaming = true;
+				loadingAnimation = staleWorkingLoader;
+				statusContainer.addChild(staleWorkingLoader);
+			}),
+			ensureLoadingAnimation: vi.fn(() => {
+				loaderAtEnsureCall = loadingAnimation;
+				loadingAnimation = freshWorkingLoader;
+				statusContainer.addChild(freshWorkingLoader);
+			}),
+			statusLine: { invalidate: vi.fn() },
+			updateEditorBorderColor: vi.fn(),
+			reloadTodos: vi.fn(async () => undefined),
+			present: vi.fn(),
+			showStatus: vi.fn(),
+			showWarning: vi.fn(),
+			showError: vi.fn(),
+		} as unknown as InteractiveModeContext;
+		const controller = new CommandController(ctx);
+
+		await controller.handleHandoffCommand();
+
+		// The frozen loader (its timer stopped by disposeChildren) must be dropped
+		// before ensureLoadingAnimation runs, so it builds a fresh running loader
+		// instead of reattaching the stale one.
+		expect(staleWorkingLoader.stop).toHaveBeenCalledTimes(1);
+		expect(loaderAtEnsureCall).toBeUndefined();
+		expect(ctx.ensureLoadingAnimation).toHaveBeenCalledTimes(1);
+		expect(loadingAnimation).toBe(freshWorkingLoader);
+	});
+
 	it("surfaces a provider failure named AbortError as a real error, not a cancellation", async () => {
 		// Regression: the catch used to map any name==="AbortError" error to
 		// "Handoff cancelled". session.handoff() now normalizes genuine cancellations
