@@ -110,6 +110,20 @@ describe("ClaudeSessionStore", () => {
 		expect(info?.cwd).toBe(cwd);
 	});
 
+	it("bounds cwd discovery to the transcript prefix before using the encoded fallback", async () => {
+		const root = path.join(tempRoot, ".claude");
+		const cwd = path.join(tempRoot, "late-project.dir");
+		const encoded = cwd.replace(/[/\\._]/g, "-");
+		const id = "55555555-5555-4555-8555-555555555555";
+		await writeJsonl(path.join(root, "projects", encoded, `${id}.jsonl`), [
+			{ type: "file-history-snapshot", snapshot: "x".repeat(128 * 1024) },
+			{ type: "user", cwd, message: { content: "." } },
+		]);
+
+		const info = (await new ClaudeSessionStore(root).list()).find(item => item.id === id);
+		expect(info?.cwd).toBe(encoded.replaceAll("-", path.sep));
+	});
+
 	it("prefers the history index cwd over the transcript's", async () => {
 		const root = path.join(tempRoot, ".claude");
 		const indexedCwd = path.join(tempRoot, "indexed-project");
