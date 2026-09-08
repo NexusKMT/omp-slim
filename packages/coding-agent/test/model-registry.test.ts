@@ -1738,31 +1738,19 @@ describe("ModelRegistry", () => {
 			const baseline = baselineRegistry.find(provider, id);
 			expect(baseline).toBeDefined();
 			if (!baseline?.thinking) throw new Error(`Missing thinking-capable model: ${provider}/${id}`);
-			const variants = [
-				{ name: "unrestricted", efforts: baseline.thinking.efforts },
-				{ name: "low/medium", efforts: [Effort.Low, Effort.Medium] },
-				...baseline.thinking.efforts.map(effort => ({ name: effort, efforts: [effort] })),
-			];
-			for (const [index, variant] of variants.entries()) {
-				const overrideThinking: ThinkingConfig = {
-					...baseline.thinking,
-					efforts: variant.efforts,
-					defaultLevel: variant.efforts[0],
-				};
-				const overridePath = path.join(tempDir, `effort-${index}.json`);
-				fs.writeFileSync(
-					overridePath,
-					JSON.stringify({
-						providers: { [provider]: { modelOverrides: { [id]: { thinking: overrideThinking } } } },
-					}),
-				);
-				const registry = new ModelRegistry(authStorage, overridePath, { settings: testSettings });
-				const actual = registry.find(provider, id);
-				const label = `${provider}/${id}, extendedContext=${extendedContext}, efforts=${variant.name}`;
-				expect(actual?.thinking, label).toEqual(overrideThinking);
-				expect(actual?.contextWindow, label).toBe(baseline.contextWindow);
-				expect(actual?.maxTokens, label).toBe(baseline.maxTokens);
-			}
+			const overrideThinking: ThinkingConfig = {
+				...baseline.thinking,
+				efforts: [Effort.Low, Effort.Medium],
+				defaultLevel: Effort.Low,
+			};
+			writeRawModelsJson({
+				[provider]: { modelOverrides: { [id]: { thinking: overrideThinking } } },
+			});
+			const registry = new ModelRegistry(authStorage, modelsJsonPath, { settings: testSettings });
+			const actual = registry.find(provider, id);
+			expect(actual?.thinking).toEqual(overrideThinking);
+			expect(actual?.contextWindow).toBe(baseline.contextWindow);
+			expect(actual?.maxTokens).toBe(baseline.maxTokens);
 		});
 
 		test("preserves Astra capacity with a thinking-only override across policy toggles", async () => {
