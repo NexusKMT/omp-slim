@@ -184,6 +184,35 @@ describe("resize on Warp, which SIGWINCHes on alt-buffer toggle", () => {
 			tui.stop();
 		}
 	});
+	it("repaints the modal instead of probing on an overlay toggle echo", async () => {
+		Bun.env.TERM_PROGRAM = "WarpTerminal";
+		const term = new VirtualTerminal(40, 12);
+		const writes: string[] = [];
+		const originalWrite = term.write.bind(term);
+		term.write = (data: string) => {
+			writes.push(data);
+			originalWrite(data);
+		};
+		const scheduler = new VirtualRenderScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		tui.addChild(new LineComponent("row-", 8));
+		try {
+			tui.start();
+			await scheduler.settle(term);
+			tui.showOverlay({ render: () => ["modal"] }, { width: "100%", maxHeight: "100%", fullscreen: true });
+			await scheduler.settle(term);
+			expect(writes.join("")).toContain(ALT_ENTER);
+			writes.length = 0;
+
+			// Zero-delta SIGWINCH from the overlay's own alt-buffer toggle: the
+			// modal repaints, but no normal-buffer anchor probe may start.
+			term.resize(40, 12);
+			await scheduler.settle(term);
+			expect(writes.join("")).not.toContain("\x1b[6n");
+		} finally {
+			tui.stop();
+		}
+	});
 });
 
 describe("Warp in-place resize with a frame provider in rebuild mode", () => {
@@ -271,11 +300,12 @@ describe("Warp in-place resize with a frame provider in rebuild mode", () => {
 			writes.length = 0;
 
 			// A streaming tick racing the drag must not paint on the stale anchor.
+			// The pre-erase may write escapes, but no viewport rows may paint.
 			term.resize(40, 20);
 			tui.renderNow();
 			tui.requestRender();
 			await scheduler.settle(term);
-			expect(writes.join("")).toBe("");
+			expect(writes.join("")).not.toContain("live-");
 
 			// The settled probe still resolves and repaints exactly once.
 			await scheduler.advance(term, 150);
@@ -287,6 +317,33 @@ describe("Warp in-place resize with a frame provider in rebuild mode", () => {
 			expect(provider.lastViewport?.columns).toBe(40);
 			expect(provider.lastViewport?.rows).toBe(20);
 			expect(writes.join("")).not.toContain("\x1b[3J");
+		} finally {
+			tui.stop();
+		}
+	});
+	it("settles a shrink drag in place with history and viewport intact", async () => {
+		Bun.env.TERM_PROGRAM = "WarpTerminal";
+		const term = new VirtualTerminal(40, 12);
+		const scheduler = new VirtualRenderScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		const provider = new RebuildProvider();
+		tui.setResizeScrollback("rebuild");
+		tui.setFrameProvider(provider);
+		try {
+			tui.start();
+			await scheduler.settle(term);
+
+			// The in-place pre-erase blanks the live region up front. It must
+			// never touch committed rows, and the settled repaint must restore
+			// the live rows exactly once.
+			term.resize(40, 8);
+			await scheduler.advance(term, 150);
+			const joined = term.getScrollBuffer().join("\n");
+			const liveRows = joined.match(/^live-\d$/gm) ?? [];
+			expect(liveRows).toHaveLength(8);
+			for (const row of ["committed-0", "committed-1", "committed-2"]) {
+				expect(countNeedle(joined, row)).toBe(1);
+			}
 		} finally {
 			tui.stop();
 		}

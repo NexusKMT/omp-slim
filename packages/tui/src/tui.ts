@@ -1165,6 +1165,13 @@ export class TUI extends Container {
 					else this.#beginResizeAltPaint(true);
 					return;
 				}
+				if (this.#altActive) {
+					// A fullscreen overlay owns the alt buffer: repaint the modal at
+					// the new size. Never snapshot the normal window or probe its
+					// anchor against the alternate grid — not even for a toggle echo.
+					this.requestRender(true);
+					return;
+				}
 				if (this.#isWarpAltToggleEcho()) {
 					// Delayed echo that lost the signal-vs-pty race with its own
 					// probe's CPR reply: the probe already resolved, so re-probe at
@@ -1267,6 +1274,13 @@ export class TUI extends Container {
 		this.#trackResizeBurst();
 		this.#resizeInPlaceActive = true;
 		this.#resizeSettleTimer?.cancel();
+		this.#forgetHardwareCursorState();
+		this.#recordHardwareCursorHidden();
+		if (this.#eraseLiveViewportForResize()) {
+			// The erase parked the hardware cursor on the viewport's top row;
+			// snapshot the parked offset so the settled probe anchors there.
+			this.#parkedViewportOffset = 0;
+		}
 		this.#resizeSettleTimer = this.#renderScheduler.scheduleRender(() => {
 			this.#resizeSettleTimer = undefined;
 			if (this.#stopped) return;
@@ -1279,6 +1293,46 @@ export class TUI extends Container {
 			this.#resizeProbeOffset = this.#parkedViewportOffset;
 			this.#beginResizeAnchorProbe();
 		}, TUI.#RESIZE_VIEWPORT_SETTLE_MS);
+	}
+
+	/**
+	 * Blank the mutable live viewport on the normal screen before a resize
+	 * transaction waits out the drag. The terminal keeps reflowing the normal
+	 * buffer during the drag, and a height shrink pushes its top rows into
+	 * scrollback; with the live region blanked, only committed history rows
+	 * (correct to push) or blanks can leave the screen — never live placeholder
+	 * rows such as compact tool dots, whose real blocks must enter scrollback
+	 * through the ordered history path. Addressing depends on the resize
+	 * direction. Terminals keep the parked cursor attached to its logical line
+	 * through width rewrap and height-grow scrollback pull-down, so
+	 * cursor-relative movement lands on the viewport's top row. On height shrink
+	 * kitty clamps the cursor instead of moving it with pushed rows, so
+	 * cursor-relative addressing would start rows late; fall back to the same
+	 * bottom-preserving bound as resize-anchor recovery.
+	 *
+	 * Both erase paths leave the cursor on the viewport's top row. Returns true
+	 * when it erased (multiplexers skip it: an immediate erase races the pane
+	 * re-layout and blanks pulled-back committed rows).
+	 */
+	#eraseLiveViewportForResize(): boolean {
+		if (!this.#hasEverRendered || this.#providerWindow.length === 0 || isInsideTerminalMultiplexer()) {
+			return false;
+		}
+		if (this.terminal.rows < this.#previousHeight) {
+			const staleRows = this.#reflowedRowCount(
+				this.#providerWindow,
+				0,
+				this.#providerWindow.length,
+				this.terminal.columns,
+			);
+			const top = Math.max(0, Math.min(this.#providerViewportTop, this.terminal.rows - staleRows));
+			this.terminal.write(`\x1b[?25l${this.#eraseBelowRow(top, this.terminal.rows)}`);
+		} else {
+			const up = this.#reflowedRowCount(this.#providerWindow, 0, this.#parkedViewportOffset, this.terminal.columns);
+			const eraseBelow = this.#eraseBelowCursorRow(this.terminal.columns, this.terminal.rows);
+			this.terminal.write(`\x1b[?25l${up > 0 ? `\x1b[${up}A` : ""}${eraseBelow}`);
+		}
+		return true;
 	}
 
 	/**
@@ -1300,51 +1354,19 @@ export class TUI extends Container {
 			this.#altPreviousLines = [];
 			this.#forgetHardwareCursorState();
 			this.#recordHardwareCursorHidden();
-			// Erase the mutable live viewport from the normal screen before borrowing
-			// the alt buffer. The terminal keeps reflowing the normal buffer during
-			// the drag, and a height shrink pushes its top rows into scrollback;
-			// with the live region blanked, only committed history rows (correct to
-			// push) or blanks can leave the screen — never live placeholder rows
-			// such as compact tool dots, whose real blocks must enter scrollback
-			// through the ordered history path. Addressing depends on the resize
-			// direction. Terminals keep the parked cursor attached to its logical
-			// line through width rewrap and height-grow scrollback pull-down, so
-			// cursor-relative movement lands on the viewport's top row. On height
-			// shrink kitty clamps the cursor instead of moving it with pushed rows,
-			// so cursor-relative addressing would start rows late; fall back to the
-			// same bottom-preserving bound as resize-anchor recovery. The pre-erase
-			// window is stashed for the settled CPR probe: its reflowed row count
-			// bounds the anchor to `height - staleRows`, so a mis-parked cursor (a
-			// single-step tmux zoom re-lays the pane before SIGWINCH delivery,
-			// moving the park target under us) cannot anchor the settled repaint
-			// over pulled-back history rows or scroll-push the frame into
-			// scrollback again.
-			let erase = "";
+			// Blank the live region up front so a reflow-driven scroll can only push
+			// committed rows into scrollback. The pre-erase window is stashed for
+			// the settled CPR probe: its reflowed row count bounds the anchor to
+			// `height - staleRows`, so a mis-parked cursor (a single-step tmux zoom
+			// re-lays the pane before SIGWINCH delivery, moving the park target
+			// under us) cannot anchor the settled repaint over pulled-back history
+			// rows or scroll-push the frame into scrollback again.
 			if (!restartingProbe) {
 				this.#resizeProbeWindow = this.#providerWindow;
 				this.#resizeProbeOffset = this.#parkedViewportOffset;
 			}
-			if (this.#hasEverRendered && this.#providerWindow.length > 0 && !isInsideTerminalMultiplexer()) {
-				if (this.terminal.rows < this.#previousHeight) {
-					const staleRows = this.#reflowedRowCount(
-						this.#providerWindow,
-						0,
-						this.#providerWindow.length,
-						this.terminal.columns,
-					);
-					const top = Math.max(0, Math.min(this.#providerViewportTop, this.terminal.rows - staleRows));
-					erase = `\x1b[?25l${this.#eraseBelowRow(top, this.terminal.rows)}`;
-				} else {
-					const up = this.#reflowedRowCount(
-						this.#providerWindow,
-						0,
-						this.#parkedViewportOffset,
-						this.terminal.columns,
-					);
-					const eraseBelow = this.#eraseBelowCursorRow(this.terminal.columns, this.terminal.rows);
-					erase = `\x1b[?25l${up > 0 ? `\x1b[${up}A` : ""}${eraseBelow}`;
-				}
-				// Both erase paths leave the cursor on the viewport's top row, so the
+			if (this.#eraseLiveViewportForResize()) {
+				// The erase parked the cursor on the viewport's top row, so the
 				// parked offset no longer applies; carrying a stale nonzero offset
 				// into the probe would anchor the settled repaint above the real
 				// viewport top and overwrite visible committed rows.
@@ -1364,7 +1386,7 @@ export class TUI extends Container {
 				this.#parkedViewportOffset = 0;
 			}
 			this.#noteAltBufferToggle();
-			this.terminal.write(`${erase}\x1b[?1049h${this.#keyboardEnhancementEnter()}`);
+			this.terminal.write(`\x1b[?1049h${this.#keyboardEnhancementEnter()}`);
 		}
 		this.#resizeSettleTimer?.cancel();
 		this.#resizeSettleTimer = this.#renderScheduler.scheduleRender(() => {
