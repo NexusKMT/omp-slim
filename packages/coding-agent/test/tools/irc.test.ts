@@ -9,6 +9,7 @@ import { IrcBus, type IrcMessage } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { IrcBridge } from "@oh-my-pi/pi-coding-agent/session/irc-bridge";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -1261,6 +1262,8 @@ describe("IRC", () => {
 			vi.spyOn(session, "refreshBaseSystemPrompt").mockResolvedValue(undefined);
 			const promptSpy = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined);
 			await session.setWorkPoolYieldItems([{ id: "pool#1", index: 1 }]);
+			const queueAside = vi.spyOn(IrcBridge.prototype, "queueAside");
+			queueAside.mockClear();
 			const outcome = await session.deliverIrcMessage({
 				id: "msg-pooled",
 				from: "0-Peer",
@@ -1273,6 +1276,14 @@ describe("IRC", () => {
 			// An ordinary wake under pooled items would emit keyed yields against
 			// another turn's items, so no turn starts while the contract is pooled.
 			expect(promptSpy).not.toHaveBeenCalled();
+			// The deferral must not re-arm itself through the idle drain: the
+			// records stay pending until the contract clears instead of chaining
+			// wake observers indefinitely.
+			// Yield the event loop repeatedly: a re-armed chain would schedule more
+			// queueAside calls per turn of the loop, while fixed code schedules
+			// nothing further, so extra yields cannot flake this assertion.
+			for (let i = 0; i < 20; i++) await new Promise<void>(resolve => setImmediate(resolve));
+			expect(queueAside).toHaveBeenCalledTimes(1);
 			await session.setWorkPoolYieldItems([]);
 			await session.deliverIrcMessage({
 				id: "msg-clear",

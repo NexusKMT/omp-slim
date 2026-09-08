@@ -912,6 +912,13 @@ export class AgentSession {
 		if (this.#modeExitDrainSuppressionDepth > 0 || this.#isDisposed || this.isStreaming || !this.#irc.hasPending()) {
 			return;
 		}
+		// A pooled yield contract means a pool turn owns this worker (installed,
+		// dispatching, or dispatch-imminent). Waking here would either emit keyed
+		// yields against its items or re-queue into the deferral path forever, so
+		// leave the records pending until the contract clears.
+		if (this.#workPoolYieldItems.length > 0) {
+			return;
+		}
 		// Session transitions call #disconnectFromAgent() BEFORE `await abort()`, and only bump
 		// #sessionGeneration/clear the IRC queue several awaits later once they reach agent.reset().
 		// A normalization await that resolves in that gap sees an unchanged generation and an idle,
