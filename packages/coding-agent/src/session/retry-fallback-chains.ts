@@ -8,7 +8,7 @@ import {
 	parseModelString,
 } from "../config/model-resolver";
 import type { Settings } from "../config/settings";
-import { type ConfiguredThinkingLevel, concreteThinkingLevel } from "../thinking";
+import { type ConfiguredThinkingLevel, concreteThinkingLevel, resolveThinkingLevelForModel } from "../thinking";
 
 /** Configured fallback chains keyed by role or model selector. */
 export type RetryFallbackChains = Record<string, string[]>;
@@ -248,46 +248,47 @@ function getRetryFallbackPrimarySelector(
 }
 
 /** How a chain key's primary selector matches the current selector. */
-type SelectorMatchKind = "exact" | "base" | "none";
+type SelectorMatchKind = "exact" | "normalized" | "base" | "none";
 
 /**
  * Classify how a chain key's primary selector matches the current selector.
- * Comparisons are on parsed model + thinking-level values, so effort aliases
+ * Comparisons use parsed model + thinking-level values, so effort aliases
  * (`hi`/`med`/`min`) match their canonical forms (`high`/`medium`/`minimal`).
  *
- * - `exact` — same provider/model *and* effort, against either the routed
- *   current selector or its plain, unrouted variant.
- * - `base` — a suffixless key (no explicit effort) naming the same
- *   provider/model, so it applies to that model at any effort.
- * - `none` — no match. A key carrying a *different* explicit effort lands here:
- *   it must never masquerade as an exact match for another effort.
+ * - `exact` — same provider/model and parsed effort.
+ * - `normalized` — same provider/model and both efforts clamp to the same
+ *   level supported by the active model (`max` and `high` on a high-capped
+ *   model).
+ * - `base` — a suffixless key naming the same provider/model, so it applies
+ *   to that model at any effort.
+ * - `none` — no match. Explicit efforts that remain distinct after model
+ *   normalization must never masquerade as exact matches.
  */
 function selectorMatchKind(
 	primary: RetryFallbackSelector | undefined,
 	current: RetryFallbackSelector,
 	currentPlain: RetryFallbackSelector | undefined,
+	currentModel: Model | null | undefined,
 ): SelectorMatchKind {
 	if (!primary) return "none";
 	const provider = primary.provider;
 	const id = primary.id;
 	const level = primary.thinkingLevel;
-	if (
-		(provider === current.provider && id === current.id && level === current.thinkingLevel) ||
-		(currentPlain !== undefined &&
-			provider === currentPlain.provider &&
-			id === currentPlain.id &&
-			level === currentPlain.thinkingLevel)
-	) {
-		return "exact";
+	let matchedCurrent: RetryFallbackSelector | undefined;
+	if (provider === current.provider && id === current.id) {
+		matchedCurrent = current;
+	} else if (currentPlain !== undefined && provider === currentPlain.provider && id === currentPlain.id) {
+		matchedCurrent = currentPlain;
 	}
-	// An explicit-effort key only matches that effort (handled above); only a
-	// suffixless key falls back to matching the model at any effort.
-	if (level !== undefined) return "none";
+	if (!matchedCurrent) return "none";
+	if (level === matchedCurrent.thinkingLevel) return "exact";
+	if (level === undefined) return "base";
 	if (
-		(provider === current.provider && id === current.id) ||
-		(currentPlain !== undefined && provider === currentPlain.provider && id === currentPlain.id)
+		currentModel &&
+		resolveThinkingLevelForModel(currentModel, level) ===
+			resolveThinkingLevelForModel(currentModel, matchedCurrent.thinkingLevel)
 	) {
-		return "base";
+		return "normalized";
 	}
 	return "none";
 }
@@ -319,16 +320,25 @@ export function resolveRetryFallbackChainKey(
 			? (parseRetryFallbackSelector(currentPlainSelector, context.modelLookup) ?? parsedCurrent)
 			: undefined;
 
-	// 1. Exact model-selector keys — most specific. An exact model+effort match
-	//    wins over a suffixless (any-effort) key regardless of object/YAML
-	//    order; a key naming a different explicit effort never matches here.
+	// 1. Model-selector keys — most specific. Parsed exact effort beats
+	//    model-normalized effort, which beats a suffixless (any-effort) key,
+	//    regardless of object/YAML order. Efforts that remain distinct after
+	//    normalization never match.
+	let normalizedModelKey: string | undefined;
 	let baseModelKey: string | undefined;
 	for (const key in context.chains) {
 		if (!isRetryFallbackModelKey(key) || isRetryFallbackWildcardKey(key)) continue;
-		const kind = selectorMatchKind(getRetryFallbackPrimarySelector(context, key), parsedCurrent, parsedPlainCurrent);
+		const kind = selectorMatchKind(
+			getRetryFallbackPrimarySelector(context, key),
+			parsedCurrent,
+			parsedPlainCurrent,
+			currentModel,
+		);
 		if (kind === "exact") return key;
+		if (kind === "normalized") normalizedModelKey ??= key;
 		if (kind === "base") baseModelKey ??= key;
 	}
+	if (normalizedModelKey) return normalizedModelKey;
 	if (baseModelKey) return baseModelKey;
 
 	// 2. Provider wildcards — an id-prefixed key (`openrouter/google/*`)
@@ -359,7 +369,12 @@ export function resolveRetryFallbackChainKey(
 	for (const key in context.chains) {
 		if (isRetryFallbackModelKey(key)) continue;
 		if (
-			selectorMatchKind(getRetryFallbackPrimarySelector(context, key), parsedCurrent, parsedPlainCurrent) !== "none"
+			selectorMatchKind(
+				getRetryFallbackPrimarySelector(context, key),
+				parsedCurrent,
+				parsedPlainCurrent,
+				currentModel,
+			) !== "none"
 		) {
 			if (key === "default") return "default";
 			matchedRole ??= key;

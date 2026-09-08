@@ -184,4 +184,22 @@ describe("retry fallback selector resolution", () => {
 			findRetryFallbackCandidates(context, aliasKey, canonicalHigh, model).map(candidate => candidate.raw),
 		).toEqual(["openai/gpt-4o-mini:high"]);
 	});
+
+	it("matches a requested effort key to the active model's clamped effort", () => {
+		const model = getBundledModel("google", "gemini-2.5-flash");
+		const high = "google/gemini-2.5-flash:high";
+		const max = "google/gemini-2.5-flash:max";
+
+		const maxOnly = createContext({ [max]: ["openai/gpt-4o-mini:max"] });
+		expect(resolveRetryFallbackChainKey(maxOnly, high, model)).toBe(max);
+		expect(findRetryFallbackCandidates(maxOnly, max, high, model).map(candidate => candidate.raw)).toEqual([
+			"openai/gpt-4o-mini:max",
+		]);
+
+		const exactHigh = createContext({
+			[max]: ["openai/gpt-4o-mini:max"],
+			[high]: ["openai/gpt-4o-mini:high"],
+		});
+		expect(resolveRetryFallbackChainKey(exactHigh, high, model)).toBe(high);
+	});
 });
