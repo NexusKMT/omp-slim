@@ -5,6 +5,7 @@ import {
 	TUI,
 	type ViewportSize,
 } from "@oh-my-pi/pi-tui";
+import type { RenderTimer } from "@oh-my-pi/pi-tui/tui";
 import { withoutTerminalMultiplexer } from "./helpers/terminal-multiplexer";
 import { VirtualRenderScheduler } from "./virtual-render-scheduler";
 import { VirtualTerminal } from "./virtual-terminal";
@@ -218,8 +219,131 @@ describe("Warp in-place resize with a frame provider in rebuild mode", () => {
 			tui.stop();
 		}
 	});
+
+	it("drops ordinary paints while the in-place resize settles", async () => {
+		Bun.env.TERM_PROGRAM = "WarpTerminal";
+		const term = new VirtualTerminal(40, 12);
+		const writes: string[] = [];
+		const originalWrite = term.write.bind(term);
+		term.write = (data: string) => {
+			writes.push(data);
+			originalWrite(data);
+		};
+		const scheduler = new VirtualRenderScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		const provider = new RebuildProvider();
+		tui.setResizeScrollback("rebuild");
+		tui.setFrameProvider(provider);
+		try {
+			tui.start();
+			await scheduler.settle(term);
+			writes.length = 0;
+
+			// A streaming tick racing the drag must not paint on the stale anchor.
+			term.resize(40, 20);
+			tui.renderNow();
+			tui.requestRender();
+			await scheduler.settle(term);
+			expect(writes.join("")).toBe("");
+
+			// The settled probe still resolves and repaints exactly once.
+			await scheduler.advance(term, 150);
+			const joined = writes.join("");
+			const tag = joined.match(/\x1b\[(\d+)G\x1b\[6n/);
+			expect(tag).not.toBeNull();
+			term.sendInput(`\x1b[18;${tag![1]}R`);
+			await scheduler.settle(term);
+			expect(provider.lastViewport?.columns).toBe(40);
+			expect(provider.lastViewport?.rows).toBe(20);
+			expect(writes.join("")).not.toContain("\x1b[3J");
+		} finally {
+			tui.stop();
+		}
+	});
 });
 
+describe("Warp echo expectation is single-shot", () => {
+	let saved: Record<string, string | undefined> = {};
+
+	beforeEach(() => {
+		saved = {};
+		for (const key of TERMINAL_ENV) {
+			saved[key] = Bun.env[key];
+			delete Bun.env[key];
+		}
+	});
+
+	afterEach(() => {
+		for (const key of TERMINAL_ENV) {
+			if (saved[key] === undefined) delete Bun.env[key];
+			else Bun.env[key] = saved[key];
+		}
+		saved = {};
+	});
+
+	it("consumes the echo expectation so a later one-row resize restarts", () => {
+		Bun.env.TERM_PROGRAM = "WarpTerminal";
+		Bun.env.PI_TUI_RESIZE_IN_PLACE = "0";
+		const term = new VirtualTerminal(40, 12);
+		const writes: string[] = [];
+		const originalWrite = term.write.bind(term);
+		term.write = (data: string) => {
+			writes.push(data);
+			originalWrite(data);
+		};
+		const scheduler = new SyncScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		tui.addChild(new LineComponent("row-", 8));
+		try {
+			tui.start();
+			scheduler.settle();
+			scheduler.t += 200;
+			writes.length = 0;
+
+			// Forced borrow: settle exits alt and starts the anchor probe. Never
+			// awaiting keeps the engine's own CPR reply queued, so each step below
+			// observes exactly the SIGWINCH it simulates.
+			term.resize(40, 20);
+			scheduler.settle();
+			expect(countNeedle(writes.join(""), "\x1b[6n")).toBe(1);
+
+			// The +1 alt-toggle echo is swallowed and consumes the expectation: no
+			// new probe starts, so nothing is queued and no drain is needed.
+			term.resize(40, 21);
+			expect(countNeedle(writes.join(""), "\x1b[6n")).toBe(1);
+
+			// A real one-row resize back to the baseline restarts the transaction.
+			term.resize(40, 20);
+			scheduler.settle();
+			const all = writes.join("");
+			expect(countNeedle(all, "\x1b[6n")).toBe(2);
+			expect(countNeedle(all, ALT_ENTER)).toBe(2);
+		} finally {
+			tui.stop();
+		}
+	});
+});
+
+/** Synchronous scheduler: delay-ignoring timers fire on settle(). */
+class SyncScheduler {
+	#pending = new Set<() => void>();
+	t = 0;
+	now(): number {
+		return this.t;
+	}
+	scheduleImmediate(callback: () => void): void {
+		callback();
+	}
+	scheduleRender(callback: () => void): RenderTimer {
+		this.#pending.add(callback);
+		return { cancel: () => this.#pending.delete(callback) };
+	}
+	settle(): void {
+		const pending = [...this.#pending];
+		this.#pending.clear();
+		for (const callback of pending) callback();
+	}
+}
 /** Frame provider mirroring the coding-agent transcript: committed history plus live rows. */
 class RebuildProvider implements TerminalFrameProvider {
 	replayCalls = 0;

@@ -834,10 +834,18 @@ export class TUI extends Container {
 	#resizeAltActive = false;
 	#resizeSettleTimer: RenderTimer | undefined;
 	#suppressResizeUntil = 0;
-	// Baseline geometry at the last alt-buffer toggle. A Warp-only echo is a
-	// height-only ±1 SIGWINCH against this baseline while the CPR probe is in flight.
+	// Baseline geometry at the last alt-buffer toggle, plus whether its echo is
+	// still pending. A Warp-only echo is a height-only ±1 SIGWINCH against this
+	// baseline while the CPR probe is in flight. The expectation is single-shot:
+	// the first SIGWINCH after the toggle consumes it, so a real one-row resize
+	// back to the baseline can never be mistaken for the echo.
 	#altToggleColumns = 0;
 	#altToggleRows = 0;
+	#altToggleEchoPending = false;
+	// True while an in-place resize transaction (Warp) is inside its settle
+	// window: the normal-buffer anchor is stale until the settled CPR probe
+	// resolves, so ordinary paints are dropped until then.
+	#resizeInPlaceActive = false;
 	#resizeScrollbackMode: ResizeScrollbackMode = TUI.#initialResizeScrollbackMode();
 	#resizeReplaySize: string | undefined;
 	// Holds an alternate-screen exit until its replacement full paint can emit it
@@ -1146,10 +1154,14 @@ export class TUI extends Container {
 					// height delta > 1) restarts the transaction below.
 					if (this.#isWarpAltToggleEcho()) return;
 					this.#cancelResizeProbe();
+					this.#altToggleEchoPending = false;
 					if (this.#resizeRepaintsInPlace()) this.#beginResizeInPlacePaint();
 					else this.#beginResizeAltPaint(true);
 					return;
 				}
+				// The echo expectation is single-shot: any SIGWINCH that arrives with
+				// no probe in flight is a real transaction start, not an echo.
+				this.#altToggleEchoPending = false;
 				if (this.#renderScheduler.now() < this.#suppressResizeUntil) {
 					this.requestRender(true);
 					return;
@@ -1195,10 +1207,17 @@ export class TUI extends Container {
 	#noteAltBufferToggle(): void {
 		this.#altToggleColumns = this.terminal.columns;
 		this.#altToggleRows = this.terminal.rows;
+		this.#altToggleEchoPending = true;
 	}
 
-	/** Warp-only echo: height-only ±1 SIGWINCH against the last alt-toggle baseline. */
+	/**
+	 * Warp-only echo: height-only ±1 SIGWINCH against the pending alt-toggle
+	 * baseline. Single-shot: the first SIGWINCH after the toggle consumes the
+	 * expectation either way, so at most one signal is ever swallowed per toggle.
+	 */
 	#isWarpAltToggleEcho(): boolean {
+		if (!this.#altToggleEchoPending) return false;
+		this.#altToggleEchoPending = false;
 		if (Bun.env.TERM_PROGRAM?.toLowerCase() !== "warpterminal") return false;
 		return (
 			this.terminal.columns === this.#altToggleColumns && Math.abs(this.terminal.rows - this.#altToggleRows) <= 1
@@ -1232,10 +1251,16 @@ export class TUI extends Container {
 			return;
 		}
 		this.#trackResizeBurst();
+		this.#resizeInPlaceActive = true;
 		this.#resizeSettleTimer?.cancel();
 		this.#resizeSettleTimer = this.#renderScheduler.scheduleRender(() => {
 			this.#resizeSettleTimer = undefined;
 			if (this.#stopped) return;
+			this.#resizeInPlaceActive = false;
+			if (this.#altActive) {
+				this.requestRender(true);
+				return;
+			}
 			this.#resizeProbeWindow = this.#providerWindow;
 			this.#resizeProbeOffset = this.#parkedViewportOffset;
 			this.#beginResizeAnchorProbe();
@@ -1342,14 +1367,15 @@ export class TUI extends Container {
 		this.requestRender(true);
 	}
 	/**
-	 * Recover the reflowed viewport anchor after the resize alt-buffer borrow
-	 * ends. The terminal reflowed the restored normal buffer during the drag, so
+	 * Recover the reflowed viewport anchor after the resize settle window ends.
+	 * The terminal reflowed the restored normal buffer during the drag, so
 	 * `#providerViewportTop` is in stale grid coordinates; a DSR (CSI 6n) round
 	 * trip against the parked cursor reports where the viewport's logical line
 	 * landed. The settled repaint waits for the reply (or a short timeout).
 	 */
 	#beginResizeAnchorProbe(retry = false): void {
 		this.#cancelResizeProbe();
+		this.#resizeInPlaceActive = false;
 		const timer = this.#renderScheduler.scheduleRender(() => {
 			const probe = this.#resizeProbe;
 			if (probe !== undefined && !probe.retried && (isInsideTerminalMultiplexer() || this.#resizeBurstGrew)) {
@@ -2672,6 +2698,14 @@ export class TUI extends Container {
 		if (this.#resizeProbe) {
 			// The settled repaint lands via #resolveResizeAnchor; painting now would
 			// use the stale pre-resize anchor.
+			return;
+		}
+		if (this.#resizeInPlaceActive && !this.#altActive) {
+			// In-place resize settling (Warp): the normal-buffer anchor is stale until
+			// the settled CPR probe resolves. Painting now would overwrite retained
+			// history and record the new geometry over the pending recovery, so drop
+			// the frame — the resolve repaints. Fullscreen overlay paints are
+			// buffer-isolated and still allowed.
 			return;
 		}
 
