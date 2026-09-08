@@ -422,21 +422,22 @@ export class WorkPool {
 		manager.watchJobs([jobId]);
 	}
 
-	#settleTurn(agent: WorkPoolAgent, batch: WorkPoolBatch, result: TurnOutcome): string {
-		this.#finishTurn(agent, batch, result);
+	async #settleTurn(agent: WorkPoolAgent, batch: WorkPoolBatch, result: TurnOutcome): Promise<string> {
+		await this.#finishTurn(agent, batch, result);
 		const delivery = this.#renderTurnResult(agent, batch, result);
 		if (batch.status !== "completed") throw new Error(delivery);
 		return delivery;
 	}
 
-	#finishTurn(agent: WorkPoolAgent, batch: WorkPoolBatch, result: TurnOutcome): void {
+	async #finishTurn(agent: WorkPoolAgent, batch: WorkPoolBatch, result: TurnOutcome): Promise<void> {
 		batch.status = result.aborted ? "cancelled" : result.exitCode !== 0 || result.error ? "failed" : "completed";
 		batch.output = result.output;
 		for (const item of batch.items) item.status = batch.status;
 		agent.turns++;
 		agent.jobId = undefined;
 		const ref = AgentRegistry.global().get(agent.id);
-		ref?.session?.setWorkPoolYieldItems([]);
+		// Retained idle workers can wake through IRC, so clear the runtime schema and cached inline declaration together.
+		await ref?.session?.setWorkPoolYieldItems([]);
 		if (this.freshAgents) {
 			agent.state = "dead";
 			const index = this.agents.indexOf(agent);

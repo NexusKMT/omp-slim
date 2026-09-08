@@ -11,6 +11,47 @@ import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-sessi
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 
+async function expectProviderYieldContract(
+	session: AgentSession,
+	dialect: "native" | "gemini",
+	pooled: boolean,
+): Promise<void> {
+	const providerContext = await session.agent.buildSideRequestContext([]);
+	if (dialect === "native") {
+		const providerTool = providerContext.tools?.find(candidate => candidate.name === "yield");
+		if (!providerTool) throw new Error("Missing provider yield tool");
+		const properties = Reflect.get(providerTool.parameters, "properties");
+		if (pooled) {
+			expect(Reflect.get(providerTool.parameters, "required")).toEqual(["key"]);
+			expect(properties).toHaveProperty("key");
+			expect(properties).not.toHaveProperty("type");
+		} else {
+			expect(properties).toHaveProperty("type");
+			expect(properties).not.toHaveProperty("key");
+		}
+		return;
+	}
+
+	const providerSystemPrompt = providerContext.systemPrompt;
+	if (!providerSystemPrompt) throw new Error("Missing provider system prompt");
+	const providerPrompt = providerSystemPrompt.join("\n");
+	expect(providerPrompt.match(/type yield =/g)).toHaveLength(1);
+	const yieldStart = providerPrompt.indexOf("type yield =");
+	const nextType = providerPrompt.indexOf("\ntype ", yieldStart + 1);
+	const namespaceEnd = providerPrompt.indexOf("\n\n} // namespace functions", yieldStart + 1);
+	let yieldEnd = nextType;
+	if (yieldEnd < 0 || (namespaceEnd >= 0 && namespaceEnd < yieldEnd)) yieldEnd = namespaceEnd;
+	if (yieldEnd < 0) throw new Error("Missing provider yield declaration boundary");
+	const yieldDeclaration = providerPrompt.slice(yieldStart, yieldEnd);
+	if (pooled) {
+		expect(yieldDeclaration).toContain("key: 1,");
+		expect(yieldDeclaration).not.toContain("type?:");
+	} else {
+		expect(yieldDeclaration).toContain("type?:");
+		expect(yieldDeclaration).not.toContain("key:");
+	}
+}
+
 describe("SDK workpool yield schema", () => {
 	let registryDir: string;
 	let authStorage: AuthStorage;
@@ -35,7 +76,7 @@ describe("SDK workpool yield schema", () => {
 		["native", {}],
 		["gemini", { "tools.format": "gemini" }],
 	] as const) {
-		it("switches the constructed yield tool before a pooled turn starts (" + dialect + ")", async () => {
+		it("keeps the provider yield contract synchronized through a pooled turn (" + dialect + ")", async () => {
 			const { session } = await createAgentSession({
 				cwd: registryDir,
 				agentDir: registryDir,
@@ -70,9 +111,9 @@ describe("SDK workpool yield schema", () => {
 			if (!tool) throw new Error("Missing yield tool");
 			expect(Reflect.get(tool.parameters, "properties")).toHaveProperty("type");
 			expect(Reflect.get(tool.parameters, "properties")).not.toHaveProperty("key");
+			await expectProviderYieldContract(session, dialect, false);
 
-			session.setWorkPoolYieldItems([{ id: "pool#1", index: 1 }]);
-			await session.refreshBaseSystemPrompt();
+			await session.setWorkPoolYieldItems([{ id: "pool#1", index: 1 }]);
 			expect(Reflect.get(tool.parameters, "required")).toEqual(["key"]);
 			const properties = Reflect.get(tool.parameters, "properties");
 			expect(properties).toHaveProperty("key");
@@ -80,24 +121,15 @@ describe("SDK workpool yield schema", () => {
 			const activeTool = session.agent.state.tools.find(candidate => candidate.name === "yield");
 			if (!activeTool) throw new Error("Missing active yield tool");
 			expect(Reflect.get(activeTool.parameters, "required")).toEqual(["key"]);
-			const providerContext = await session.agent.buildSideRequestContext([]);
-			if (dialect === "native") {
-				const providerTool = providerContext.tools?.find(candidate => candidate.name === "yield");
-				if (!providerTool) throw new Error("Missing provider yield tool");
-				expect(Reflect.get(providerTool.parameters, "required")).toEqual(["key"]);
-			} else {
-				const providerSystemPrompt = providerContext.systemPrompt;
-				if (!providerSystemPrompt) throw new Error("Missing provider system prompt");
-				const providerPrompt = providerSystemPrompt.join("\n");
-				expect(providerPrompt.match(/type yield =/g)).toHaveLength(1);
-				const yieldStart = providerPrompt.indexOf("type yield =");
-				const nextType = providerPrompt.indexOf("\ntype ", yieldStart + 1);
-				const yieldDeclaration = providerPrompt.slice(yieldStart, nextType < 0 ? providerPrompt.length : nextType);
-				expect(yieldDeclaration).toContain("key: 1,");
-				expect(yieldDeclaration).not.toContain("result:");
-			}
+			await expectProviderYieldContract(session, dialect, true);
 			const result = await tool.execute("yield-pool-1", { key: 1, data: { answer: 42 } });
 			expect(result.details).toMatchObject({ type: ["pool#1"], complete: true });
+
+			await session.setWorkPoolYieldItems([]);
+			const clearedProperties = Reflect.get(tool.parameters, "properties");
+			expect(clearedProperties).toHaveProperty("type");
+			expect(clearedProperties).not.toHaveProperty("key");
+			await expectProviderYieldContract(session, dialect, false);
 		});
 	}
 });

@@ -16,6 +16,7 @@
 
 - Python cells are no longer replayed automatically after a kernel crash, preventing duplicate side effects; the next call starts a fresh kernel.
 - Session rewrites preserve open-reader snapshots and replacement identity when a rename needs an EPERM fallback.
+- Fixed WorkPool children retaining a stale Gemini-formatted `yield` declaration when pooled items were installed or cleared.
 
 ## [18.1.14] - 2026-09-07
 
@@ -80,9 +81,6 @@
 
 - Fixed Codex V2 remote compaction rebuilding the request prefix differently from normal turns, restoring prompt-cache reuse ([#10786](https://github.com/can1357/oh-my-pi/issues/10786)).
 - Restored mouse clicks, hover, and wheel scrolling in Plan Review.
-### Fixed
-
-- Fixed WorkPool children receiving the ordinary `yield` contract in Gemini-formatted tool prompts after pooled items were installed.
 
 ## [18.1.9] - 2026-09-04
 

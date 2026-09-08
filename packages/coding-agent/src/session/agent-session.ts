@@ -7379,9 +7379,17 @@ export class AgentSession {
 		return this.#workPoolYieldItems;
 	}
 
-	/** Replace the item labels before starting a pooled turn. */
-	setWorkPoolYieldItems(items: readonly WorkPoolYieldItem[]): void {
+	/** Replace the pooled-turn yield contract and rebuild the provider prompt when it changes. */
+	async setWorkPoolYieldItems(items: readonly WorkPoolYieldItem[]): Promise<void> {
+		const current = this.#workPoolYieldItems;
+		if (
+			current.length === items.length &&
+			current.every((item, index) => item.id === items[index]?.id && item.index === items[index]?.index)
+		) {
+			return;
+		}
 		this.#workPoolYieldItems = items.map(item => ({ ...item }));
+		await this.refreshBaseSystemPrompt();
 	}
 
 	#buildReplanTitleContext(): string {
