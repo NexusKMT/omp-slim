@@ -2852,27 +2852,31 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 	// Bounded: a worker that never settles fails its batch instead of installing
 	// under the active turn or hanging the pool.
 	let ownershipWaits = 0;
-	while (session.isStreaming && ownershipWaits < 3) {
-		ownershipWaits++;
-		if (signal) {
-			await untilAborted(signal, () => session.waitForIdle());
-		} else {
-			await session.waitForIdle();
+	const acquireOwnership = async (): Promise<void> => {
+		while (session.isStreaming && ownershipWaits < 3) {
+			ownershipWaits++;
+			if (signal) {
+				await untilAborted(signal, () => session.waitForIdle());
+			} else {
+				await session.waitForIdle();
+			}
 		}
-	}
-	if (session.isStreaming) {
-		throw new Error(
-			`Subagent ${id} stayed busy through 3 ownership waits; refusing to install the pooled yield contract under an active turn`,
-		);
-	}
-	await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
+		if (session.isStreaming) {
+			throw new Error(
+				`Subagent ${id} stayed busy through 3 ownership waits; refusing to install the pooled yield contract under an active turn`,
+			);
+		}
+	};
+	await acquireOwnership();
 	// Revalidate until the worker survives an install round-trip unchanged: the
 	// waits/rebuild above can outlast the idle TTL, letting park() detach this
 	// instance mid-install. Each observed replacement means another full park
 	// cycle, so reinstall on the fresh session (revivals start empty) and check
 	// again; genuine churn fails fast instead of driving a stale instance, and
-	// a released worker throws instead of driving a corpse.
+	// a released worker throws instead of driving a corpse. A replacement may
+	// already be streaming a wake, so ownership is reacquired every round.
 	for (let acquireAttempts = 0; ; acquireAttempts++) {
+		await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
 		const live = await AgentLifecycleManager.global().ensureLive(id);
 		if (live === session) break;
 		if (acquireAttempts >= 2) {
@@ -2881,7 +2885,7 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 			);
 		}
 		session = live;
-		await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
+		await acquireOwnership();
 	}
 	const ref = AgentRegistry.global().get(id);
 	const sessionFile = ref?.sessionFile ?? undefined;

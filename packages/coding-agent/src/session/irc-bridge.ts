@@ -78,12 +78,15 @@ export class IrcBridge {
 	/** Snapshots and discards every queued IRC record — used when a session-boundary transition
 	 *  (new/switch) begins, since an aborted turn skips its final aside poll and would otherwise
 	 *  leak the outgoing transcript's extension/peer content into the next session via the first
-	 *  ordinary prompt's `flushPending()`. Pass the snapshot to `restorePending` to undo the clear
+	 *  ordinary prompt's `flushPending()`. Deferred wakes ride along: without them a later
+	 *  contract clear could wake the new transcript with a peer message belonging to the
+	 *  previous session. Pass the snapshot to `restorePending` to undo the clear
 	 *  if the transition is rolled back. */
-	clearPending(): { interrupts: AgentMessage[]; asides: AgentMessage[] } {
-		const snapshot = { interrupts: this.#interrupts, asides: this.#asides };
+	clearPending(): { interrupts: AgentMessage[]; asides: AgentMessage[]; deferredWakes: AgentMessage[] } {
+		const snapshot = { interrupts: this.#interrupts, asides: this.#asides, deferredWakes: this.#deferredWakes };
 		this.#interrupts = [];
 		this.#asides = [];
+		this.#deferredWakes = [];
 		return snapshot;
 	}
 
@@ -92,9 +95,14 @@ export class IrcBridge {
 	 *  the rolled-back switch's async load/hooks were still running) instead of overwriting it, so
 	 *  those newly arrived records aren't silently discarded — snapshot records precede them since
 	 *  they arrived first. */
-	restorePending(snapshot: { interrupts: AgentMessage[]; asides: AgentMessage[] }): void {
+	restorePending(snapshot: {
+		interrupts: AgentMessage[];
+		asides: AgentMessage[];
+		deferredWakes: AgentMessage[];
+	}): void {
 		this.#interrupts = [...snapshot.interrupts, ...this.#interrupts];
 		this.#asides = [...snapshot.asides, ...this.#asides];
+		this.#deferredWakes = [...snapshot.deferredWakes, ...this.#deferredWakes];
 	}
 
 	/** Queues records for the next step-boundary aside injection: IRC wakes deferred by a

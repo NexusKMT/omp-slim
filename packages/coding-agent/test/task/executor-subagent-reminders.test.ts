@@ -466,6 +466,62 @@ describe("runSubprocess yield reminders", () => {
 			AgentRegistry.global().unregister("subagent-churn");
 		}
 	});
+	it("waits out a wake running on the replacement worker before reinstalling", async () => {
+		const calls: string[] = [];
+		let revivedStreaming = true;
+		const stale = createMockSession(() => {});
+		const revived = createMockSession(({ emit }) => {
+			emit({
+				type: "tool_execution_end",
+				toolCallId: "tool-revive-wake",
+				toolName: "yield",
+				result: {
+					content: [{ type: "text", text: "Result submitted." }],
+					details: { status: "success", data: { revived: true } },
+				},
+				isError: false,
+			});
+		});
+		// Mock sessions lack the real session surface; attach trackers.
+		const staleMutable = stale as unknown as {
+			setWorkPoolYieldItems: (items: unknown[]) => Promise<void>;
+		};
+		staleMutable.setWorkPoolYieldItems = async () => {
+			calls.push("setYield:stale");
+		};
+		const revivedMutable = revived as unknown as {
+			isStreaming: boolean;
+			setWorkPoolYieldItems: (items: unknown[]) => Promise<void>;
+			waitForIdle: () => Promise<void>;
+		};
+		Object.defineProperty(revivedMutable, "isStreaming", { get: () => revivedStreaming, configurable: true });
+		revivedMutable.setWorkPoolYieldItems = async () => {
+			calls.push("setYield:revived");
+		};
+		revivedMutable.waitForIdle = async () => {
+			calls.push("waitForIdle:revived");
+			revivedStreaming = false;
+		};
+		// Parking swaps the worker mid-install while an IRC delivery revives the
+		// replacement straight into an ordinary wake: the follow-up must wait out
+		// that wake before installing the keyed contract, not reject its yield.
+		const ensureLive = vi
+			.spyOn(AgentLifecycleManager.global(), "ensureLive")
+			.mockResolvedValueOnce(stale)
+			.mockResolvedValue(revived);
+		try {
+			const result = await runSubagentFollowUpTurn({
+				...baseOptions,
+				id: "subagent-revive-wake",
+				message: "batch work",
+			});
+			expect(calls).toEqual(["setYield:stale", "waitForIdle:revived", "setYield:revived"]);
+			expect(result.exitCode).toBe(0);
+			expect(result.output).toContain('"revived": true');
+		} finally {
+			AgentRegistry.global().unregister("subagent-revive-wake");
+		}
+	});
 	it("sends reminder prompt when subagent stops without yield", async () => {
 		const prompts: string[] = [];
 		const promptOptions: Array<PromptOptions | undefined> = [];
