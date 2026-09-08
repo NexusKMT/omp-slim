@@ -917,7 +917,7 @@ function renderAgentProgress(
 				: "accent";
 
 	// Reserve the name and required badges before optional model metadata and details.
-	const fullDescription = progress.description ? sanitizeText(progress.description).trim() : undefined;
+	const fullDescription = progress.description ? replaceTabs(sanitizeText(progress.description)).trim() : undefined;
 	const indent = prefix ? `${prefix} ` : "";
 	let statusBadge = "";
 	// Provider retry state takes precedence over the generic failure marker.
@@ -1283,7 +1283,7 @@ function renderAgentResult(
 					: "failed";
 
 	// Reserve the name and required badges before optional model metadata and details.
-	const fullDescription = result.description ? sanitizeText(result.description).trim() : undefined;
+	const fullDescription = result.description ? replaceTabs(sanitizeText(result.description)).trim() : undefined;
 	const indent = prefix ? `${prefix} ` : "";
 	const statusBadge = ` ${formatBadge(statusText, iconColor, theme)}`;
 	const displayId = truncateTaskRow(

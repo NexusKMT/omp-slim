@@ -703,6 +703,42 @@ describe("task progress rendering", () => {
 		expect(collapsed).toContain("5 succeeded");
 		expect(collapsed).toContain("1 failed");
 	});
+	it("expands tabs in task descriptions before measuring and rendering", async () => {
+		const theme = (await getThemeByName("dark"))!;
+		const description = "Inspect\trendering\tboundaries";
+		const snapshots: TaskToolDetails[] = [
+			detailsFor(runningProgress({ id: "TabWorker", description })),
+			{ projectAgentsDir: null, totalDurationMs: 0, results: [finishedResult({ id: "TabWorker", description })] },
+		];
+		for (const details of snapshots) {
+			const rows = taskToolRenderer
+				.renderResult({ content: [], details }, { expanded: false, isPartial: !!details.progress }, theme)
+				.render(120);
+			for (const row of rows) expect(Bun.stripANSI(row)).not.toContain("\t");
+			const text = rows.map(row => Bun.stripANSI(row)).join("\n");
+			expect(text).toContain("TabWorker");
+			expect(text).toContain("Inspect");
+			expect(text).toContain("rendering");
+		}
+		const longDescription = `First\tsection with a tab followed by enough detail to force the continuation line at narrow widths`;
+		const narrow: TaskToolDetails[] = [
+			detailsFor(runningProgress({ id: "TabNarrow", description: longDescription })),
+			{
+				projectAgentsDir: null,
+				totalDurationMs: 0,
+				results: [finishedResult({ id: "TabNarrow", description: longDescription })],
+			},
+		];
+		for (const details of narrow) {
+			const rows = taskToolRenderer
+				.renderResult({ content: [], details }, { expanded: false, isPartial: !!details.progress }, theme)
+				.render(40);
+			for (const row of rows) {
+				expect(Bun.stripANSI(row)).not.toContain("\t");
+				expect(visibleWidth(row)).toBeLessThanOrEqual(40);
+			}
+		}
+	});
 });
 
 describe("task result detail-less state", () => {
