@@ -220,7 +220,7 @@ describe("WorkPool dispatch", () => {
 		follow.resolve();
 		await finishPool(session, workpool);
 	});
-	it("releases the worker session when clearing the yield contract fails", async () => {
+	it("tombstones the worker session when clearing the yield contract fails", async () => {
 		const session = makeSession([], 1);
 		let workerId = "";
 		let disposed = false;
@@ -249,11 +249,13 @@ describe("WorkPool dispatch", () => {
 		workpool.push(["one"]);
 		await finishPool(session, workpool);
 		// The successful turn result survives the cleanup failure, but the
-		// poisoned worker is gone locally and unmessageable via the registry.
+		// poisoned worker is gone locally and left terminal in the registry: a
+		// later persisted-agent scan must not resurrect it as parked.
 		expect(workpool.batches[0]?.status).toBe("completed");
 		expect(workpool.agents.length).toBe(0);
 		expect(disposed).toBe(true);
-		expect(AgentRegistry.global().get(workerId)).toBeUndefined();
+		expect(AgentRegistry.global().get(workerId)?.status).toBe("aborted");
+		expect(AgentRegistry.global().get(workerId)?.session).toBeNull();
 	});
 
 	it("requeues a dead agent's queued items onto another worker", async () => {

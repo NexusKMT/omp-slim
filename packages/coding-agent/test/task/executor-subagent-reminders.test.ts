@@ -356,6 +356,40 @@ describe("runSubprocess yield reminders", () => {
 			AgentRegistry.global().unregister("subagent-prewait");
 		}
 	});
+	it("fails the follow-up instead of installing under a wedged turn", async () => {
+		const calls: string[] = [];
+		const session = createMockSession(() => {});
+		const mutable = session as unknown as {
+			isStreaming: boolean;
+			setWorkPoolYieldItems: (items: unknown[]) => Promise<void>;
+			waitForIdle: () => Promise<void>;
+		};
+		Object.defineProperty(mutable, "isStreaming", { value: true, configurable: true });
+		mutable.setWorkPoolYieldItems = async () => {
+			calls.push("setYield");
+		};
+		mutable.waitForIdle = async () => {
+			calls.push("waitForIdle");
+		};
+		AgentRegistry.global().register({
+			id: "subagent-wedged",
+			displayName: "subagent-wedged",
+			kind: "sub",
+			status: "idle",
+			session,
+		});
+		try {
+			// Three waits still streaming: installing now would corrupt the active
+			// turn, and waiting forever would hang the pool, so fail instead.
+			await expect(
+				runSubagentFollowUpTurn({ ...baseOptions, id: "subagent-wedged", message: "batch work" }),
+			).rejects.toThrow("stayed busy through 3 ownership waits");
+			expect(calls).toEqual(["waitForIdle", "waitForIdle", "waitForIdle"]);
+			expect(calls).not.toContain("setYield");
+		} finally {
+			AgentRegistry.global().unregister("subagent-wedged");
+		}
+	});
 	it("sends reminder prompt when subagent stops without yield", async () => {
 		const prompts: string[] = [];
 		const promptOptions: Array<PromptOptions | undefined> = [];

@@ -456,10 +456,13 @@ export class WorkPool {
 			// still advertises the keyed one. The worker must not survive as a
 			// messageable session: release the lifecycle adoption (guarded by the
 			// registry ref so a newer same-id ref is never taken down) so neither
-			// pool reuse nor an IRC wake can reach the inconsistent contract.
+			// pool reuse nor an IRC wake can reach the inconsistent contract. The
+			// tombstone keeps the ref terminal so a later persisted-agent scan
+			// cannot resurrect the transcript as parked with a stale pooled
+			// declaration and an empty runtime set.
 			if (ref) {
 				try {
-					await AgentLifecycleManager.global().release(agent.id, ref);
+					await AgentLifecycleManager.global().release(agent.id, ref, { tombstone: true });
 				} catch (releaseError) {
 					logger.warn("workpool: failed to release worker after yield clear failure", {
 						pool: this.name,

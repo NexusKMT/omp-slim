@@ -2849,7 +2849,8 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 	// pooled items under a running ordinary wake would reject its in-flight tool
 	// calls. The check-to-install section below has no await, so once idle is
 	// observed no wake dispatch can interleave before the synchronous mutation.
-	// Bounded so a wedged worker fails its batch instead of hanging the pool.
+	// Bounded: a worker that never settles fails its batch instead of installing
+	// under the active turn or hanging the pool.
 	let ownershipWaits = 0;
 	while (session.isStreaming && ownershipWaits < 3) {
 		ownershipWaits++;
@@ -2858,6 +2859,11 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 		} else {
 			await session.waitForIdle();
 		}
+	}
+	if (session.isStreaming) {
+		throw new Error(
+			`Subagent ${id} stayed busy through 3 ownership waits; refusing to install the pooled yield contract under an active turn`,
+		);
 	}
 	await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
 	const ref = AgentRegistry.global().get(id);
