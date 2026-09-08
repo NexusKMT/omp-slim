@@ -550,6 +550,10 @@ async function runInTabWithSnapshot(
 		);
 	}
 	if (tab.pending.size > 0) throw new ToolError(`Tab ${JSON.stringify(name)} is busy`);
+	// An already-aborted call never runs: without this early exit the worker
+	// branch below would send `abort` before `run`, which the worker ignores
+	// for a not-yet-active run and then execute anyway.
+	if (opts.signal?.aborted) throw new ToolAbortError();
 	// A run is use: refresh the idle clock for idle-close.
 	tab.lastActivityAt = Date.now();
 	const id = Snowflake.next();
@@ -585,6 +589,11 @@ async function runInTabWithSnapshot(
 	// subagent is reusing between our unfreeze check and this registration,
 	// stalling timer/rAF-dependent code to timeout.
 	tab.pending.set(id, pending);
+	// Observe the run promise from registration on: every exit below this
+	// point (resume failure, teardown race) throws before the backends
+	// attach their consumers, and an unobserved `pending.reject` would fire
+	// `unhandledRejection` and tear the whole session down (issue #4499).
+	promise.catch(() => undefined);
 	// Resume a settle-frozen page before driving it — frozen rAF/timers would
 	// otherwise hang the execution below. A refused resume fails the run
 	// here with an actionable error instead of stalling to timeout.
@@ -592,14 +601,19 @@ async function runInTabWithSnapshot(
 		tab.pending.delete(id);
 		throw new ToolError(`Tab ${JSON.stringify(name)} is frozen and could not be resumed. Close and reopen it.`);
 	}
+	// An abort that landed during the resume roundtrip must not dispatch:
+	// the worker ignores `abort` for a run that was never started.
+	if (opts.signal?.aborted) {
+		tab.pending.delete(id);
+		throw new ToolAbortError();
+	}
 	const current = tabs.get(name);
 	if (current !== tab || current.state === "dead") {
 		// A teardown won the race with our unfreeze roundtrip. Prefer its
 		// close error when one was recorded (`releaseTab` rejects `pending`
 		// synchronously, so it is already settled here); otherwise surface
 		// the closure. `race` — not a bare `await promise` — so a teardown
-		// that never settled the run cannot hang us, and `race` observes
-		// every rejection (issue #4499).
+		// that never settled the run cannot hang us.
 		tab.pending.delete(id);
 		const notAlive = new ToolError(`Tab ${JSON.stringify(name)} is not alive. Open it first with action:"open".`);
 		return await Promise.race([promise, Promise.reject(notAlive)]);
@@ -1000,17 +1014,31 @@ export async function releaseIdleTabsForOwner(
 		.filter(tab => isIdleCloseCandidate(tab, ownerId, now, opts.idleMs))
 		.map(tab => tab.name);
 	let count = 0;
-	for (const name of names) {
-		// Revalidate immediately before closing: an earlier close in this
-		// loop awaits worker cleanup, during which a later candidate may
-		// have been reused or started a run.
-		const current = tabs.get(name);
-		if (!current || !isIdleCloseCandidate(current, ownerId, Date.now(), opts.idleMs)) continue;
-		if (await releaseTab(name, opts)) count++;
+	try {
+		for (const name of names) {
+			// Revalidate immediately before closing: an earlier close in this
+			// loop awaits worker cleanup, during which a later candidate may
+			// have been reused or started a run.
+			const current = tabs.get(name);
+			if (!current || !isIdleCloseCandidate(current, ownerId, Date.now(), opts.idleMs)) continue;
+			try {
+				if (await releaseTab(name, opts)) count++;
+			} catch (error) {
+				// One tab's wedged cleanup must not abandon the remaining
+				// candidates; the tab is already removed from the map, so
+				// the next sweep (or close path) retries it.
+				logger.debug("Failed to close idle browser tab; continuing sweep", {
+					name,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
+	} finally {
+		// Leave the next deadline armed even when a close threw: sweeps only
+		// fire on turns, opens, and timer callbacks, so without this the
+		// survivors would never close.
+		armIdleCloseForOwner(ownerId, opts.idleMs);
 	}
-	// Leave the next deadline armed: sweeps only fire on turns, opens, and
-	// timer callbacks, so without this an abandoned tab would never close.
-	armIdleCloseForOwner(ownerId, opts.idleMs);
 	return count;
 }
 

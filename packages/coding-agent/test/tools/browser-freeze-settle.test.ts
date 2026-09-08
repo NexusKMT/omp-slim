@@ -34,6 +34,7 @@ import {
 	setTabFrozenForTest,
 	unfreezeTabSessionForTest,
 } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
+import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 import type { PendingRun, TabSession } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
 import { chromiumAvailable } from "./chromium-probe";
@@ -433,13 +434,6 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			expect(second.tab.lastActivityAt).toBeGreaterThan(stale);
 		});
 
-		it("tabs without persist default to reaping", async () => {
-			mockCmuxSocket();
-			const browser = await acquireBrowser(makeKind("settle-default"), { cwd: "/tmp" });
-			const { tab } = await acquireTab("settle-plain", browser, { timeoutMs: 1_000, ownerSessionId: "session-A" });
-			expect(tab.persist).toBe(false);
-		});
-
 		it("freezeTabsForOwner skips non-headless tabs", async () => {
 			mockCmuxSocket();
 			const browser = await acquireBrowser(makeKind("settle-freeze-skip"), { cwd: "/tmp" });
@@ -488,6 +482,26 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			expect(getTabsMapForTest().has("settle-stuck")).toBe(true);
 		});
 
+		it("rejects an already-aborted run before dispatching", async () => {
+			mockCmuxSocket();
+			const browser = await acquireBrowser(makeKind("settle-abort"), { cwd: "/tmp" });
+			const { tab } = await acquireTab("settle-cancelled", browser, {
+				timeoutMs: 1_000,
+				ownerSessionId: "session-A",
+			});
+
+			await expect(
+				runInTab("settle-cancelled", {
+					code: "return 1;",
+					timeoutMs: 5_000,
+					session: makeSession("/tmp"),
+					signal: AbortSignal.abort(),
+				}),
+			).rejects.toThrow(ToolAbortError);
+			expect(tab.pending.size).toBe(0);
+			expect(getTabsMapForTest().has("settle-cancelled")).toBe(true);
+		});
+
 		it("settle is a no-op for unknown owners", async () => {
 			expect(await freezeTabsForOwner("session-nobody")).toBe(0);
 			expect(await releaseIdleTabsForOwner("session-nobody", { idleMs: 0 })).toBe(0);
@@ -529,7 +543,9 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			expect(tab.frozen).toBe(false);
 			expect(result.returnValue).toBe(42);
 
-			// Backdated past the timeout, the owned tab closes.
+			// Backdated past the timeout, the owned tab closes. Tabs default
+			// to reaping: no `persist` was passed at creation.
+			expect(tab.persist).toBe(false);
 			tab.lastActivityAt = Date.now() - 3_600_000;
 			expect(await releaseIdleTabsForOwner("session-settle-real", { idleMs: 60_000 })).toBe(1);
 			expect(getTabsMapForTest().has(name)).toBe(false);
