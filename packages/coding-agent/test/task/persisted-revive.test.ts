@@ -47,13 +47,33 @@ interface RevivedSessionHandle {
 	observer: () => IrcWakeObserver | undefined;
 	/** Reply obligations the wake monitor registered via `trackIrcReply`. */
 	trackedReplies: Promise<void>[];
-	/** Text the stubbed session reports as its last assistant message. */
+	/** Text the stubbed session reports as its last assistant message (a `stop`ped turn). */
 	setLastAssistantText: (text: string) => void;
+	/** Report a terminal wake turn: provider error, abort, or empty completion. */
+	setLastAssistantStop: (stop: LastAssistantStop) => void;
+}
+
+/** Shape of a terminal assistant message the stub can report from a failed/cancelled wake turn. */
+interface LastAssistantStop {
+	stopReason: string;
+	errorMessage?: string;
+	provider?: string;
+	model?: string;
+	content?: Array<{ type: string; text?: string }>;
 }
 
 function createRevivedSession(activeToolNames: string[][], extensionRunner?: unknown): RevivedSessionHandle {
 	let observer: IrcWakeObserver | undefined;
-	let lastAssistantText: string | undefined;
+	let lastAssistant:
+		| {
+				role: "assistant";
+				content: Array<{ type: string; text?: string }>;
+				stopReason: string;
+				errorMessage?: string;
+				provider?: string;
+				model?: string;
+		  }
+		| undefined;
 	const trackedReplies: Promise<void>[] = [];
 	const session = {
 		getMountedXdevToolNames: () => [],
@@ -68,10 +88,7 @@ function createRevivedSession(activeToolNames: string[][], extensionRunner?: unk
 			trackedReplies.push(pending);
 		},
 		subscribeRunState: () => () => {},
-		getLastAssistantMessage: () =>
-			lastAssistantText === undefined
-				? undefined
-				: { role: "assistant", content: [{ type: "text", text: lastAssistantText }], stopReason: "stop" },
+		getLastAssistantMessage: () => lastAssistant,
 		extensionRunner,
 	} as unknown as AgentSession;
 	return {
@@ -79,7 +96,17 @@ function createRevivedSession(activeToolNames: string[][], extensionRunner?: unk
 		observer: () => observer,
 		trackedReplies,
 		setLastAssistantText: text => {
-			lastAssistantText = text;
+			lastAssistant = { role: "assistant", content: [{ type: "text", text }], stopReason: "stop" };
+		},
+		setLastAssistantStop: stop => {
+			lastAssistant = {
+				role: "assistant",
+				content: stop.content ?? [],
+				stopReason: stop.stopReason,
+				errorMessage: stop.errorMessage,
+				provider: stop.provider,
+				model: stop.model,
+			};
 		},
 	};
 }
@@ -595,6 +622,82 @@ describe("persisted subagent revival", () => {
 				replyTo: "irc-42",
 				body: "# Full table\n\n| tool | file |\n|---|---|\n| read | read.ts |",
 			});
+			AgentLifecycleManager.resetGlobalForTests();
+			AgentRegistry.resetGlobalForTests();
+			IrcBus.resetGlobalForTests();
+		});
+
+		it("relays the attributed provider error when the wake turn fails", async () => {
+			// A failed wake turn (provider error / exhausted fallback chain) must not
+			// look like a healthy peer that chose not to answer: the waiter needs the
+			// attributed [provider/model] error, not a generic "stopped without replying".
+			const cwd = makeTempDir("@pi-revive-relay-failed-");
+			const { ref, handle } = await reviveWithWaker(cwd);
+			const observer = handle.observer();
+			expect(observer).toBeDefined();
+
+			const finish = observer?.([wakeRecord("Main")]);
+			handle.setLastAssistantStop({
+				stopReason: "error",
+				errorMessage: "402 usage balance exhausted",
+				provider: "some-provider",
+				model: "some-model",
+			});
+			const reply = IrcBus.global().wait("Main", { from: ref.id }, 5000);
+			await finish?.();
+			await handle.trackedReplies[0];
+
+			const msg = await reply;
+			expect(msg).not.toBeNull();
+			expect(msg?.replyTo).toBe("irc-42");
+			expect(msg?.body).toContain("[some-provider/some-model]");
+			expect(msg?.body).toContain("402 usage balance exhausted");
+			expect(msg?.body).toContain(`history://${ref.id}`);
+			AgentLifecycleManager.resetGlobalForTests();
+			AgentRegistry.resetGlobalForTests();
+			IrcBus.resetGlobalForTests();
+		});
+
+		it("relays a cancellation notice when the wake turn is aborted", async () => {
+			const cwd = makeTempDir("@pi-revive-relay-aborted-");
+			const { ref, handle } = await reviveWithWaker(cwd);
+			const observer = handle.observer();
+			expect(observer).toBeDefined();
+
+			const finish = observer?.([wakeRecord("Main")]);
+			handle.setLastAssistantStop({ stopReason: "aborted" });
+			const reply = IrcBus.global().wait("Main", { from: ref.id }, 5000);
+			await finish?.();
+			await handle.trackedReplies[0];
+
+			const msg = await reply;
+			expect(msg).not.toBeNull();
+			expect(msg?.replyTo).toBe("irc-42");
+			expect(msg?.body.toLowerCase()).toContain("cancel");
+			expect(msg?.body).toContain(`history://${ref.id}`);
+			AgentLifecycleManager.resetGlobalForTests();
+			AgentRegistry.resetGlobalForTests();
+			IrcBus.resetGlobalForTests();
+		});
+
+		it("relays a no-output notice when the wake turn completes without producing anything", async () => {
+			const cwd = makeTempDir("@pi-revive-relay-empty-");
+			const { ref, handle } = await reviveWithWaker(cwd);
+			const observer = handle.observer();
+			expect(observer).toBeDefined();
+
+			// No setLastAssistant* call: the turn completes with zero output and never
+			// answers its waker. Previously the relay dropped the empty body silently.
+			const finish = observer?.([wakeRecord("Main")]);
+			const reply = IrcBus.global().wait("Main", { from: ref.id }, 5000);
+			await finish?.();
+			await handle.trackedReplies[0];
+
+			const msg = await reply;
+			expect(msg).not.toBeNull();
+			expect(msg?.replyTo).toBe("irc-42");
+			expect(msg?.body.toLowerCase()).toContain("no output");
+			expect(msg?.body).toContain(`history://${ref.id}`);
 			AgentLifecycleManager.resetGlobalForTests();
 			AgentRegistry.resetGlobalForTests();
 			IrcBus.resetGlobalForTests();

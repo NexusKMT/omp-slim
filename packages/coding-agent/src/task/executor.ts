@@ -2484,18 +2484,23 @@ async function relayWakeTurnOutput(args: {
 	records: AgentMessage[];
 	turnStartTime: number;
 	yielded: boolean;
-	result: SingleResult;
+	result: SingleResult | undefined;
 	turnText: string;
+	/** Attributed provider/model error text when the turn died on a provider error. */
+	error: string | undefined;
+	/** Whether the turn was aborted (runtime limit, cancellation, hard abort). */
+	aborted: boolean;
+	/** Reason text for an aborted turn, from {@link SubagentRunMonitor.resolveAbortReasonText}. */
+	abortReason: string | undefined;
+	/** A {@link finalizeRunResult} throw, so the waiter is notified instead of stranded. */
+	finalizeError: unknown;
 }): Promise<void> {
 	const bus = IrcBus.global();
 	const pending = wakeSources(args.records, args.id).filter(
 		source => !bus.sentSince(args.id, source.from, args.turnStartTime),
 	);
 	if (pending.length === 0) return;
-	const body =
-		args.yielded && args.result.outputPath
-			? formatTaskResultSummary(args.result, { totalDurationMs: args.result.durationMs })
-			: args.turnText.trim();
+	const body = buildWakeRelayBody(args);
 	if (!body) return;
 	for (const source of pending) {
 		const receipt = await bus.send({
@@ -2509,6 +2514,45 @@ async function relayWakeTurnOutput(args: {
 			logger.warn("IRC wake-turn relay failed", { from: args.id, to: source.from, error: receipt.error });
 		}
 	}
+}
+
+/**
+ * Body for a wake-turn relay, distinguishing the terminal outcomes a waiter
+ * would otherwise see as the same generic "stopped without replying" note:
+ * a real answer (yield summary or turn text), a provider failure carrying the
+ * attributed `[provider/model] <error>`, a cancellation with its reason, a
+ * finalization throw, or a turn that ran and produced nothing. Every
+ * non-answer notice carries a `history://<id>` pointer so the peer can inspect
+ * the transcript.
+ */
+function buildWakeRelayBody(args: {
+	id: string;
+	yielded: boolean;
+	result: SingleResult | undefined;
+	turnText: string;
+	error: string | undefined;
+	aborted: boolean;
+	abortReason: string | undefined;
+	finalizeError: unknown;
+}): string {
+	const transcript = `See history://${args.id} for details.`;
+	if (args.error) {
+		return `Wake turn failed: ${args.error}. No answer was produced — ${transcript}`;
+	}
+	if (args.aborted) {
+		const reason = args.abortReason?.trim();
+		return `Wake turn was cancelled${reason ? `: ${reason}` : ""}. No answer was produced — ${transcript}`;
+	}
+	const answer =
+		args.yielded && args.result?.outputPath
+			? formatTaskResultSummary(args.result, { totalDurationMs: args.result.durationMs })
+			: args.turnText.trim();
+	if (answer) return answer;
+	if (args.finalizeError) {
+		const message = args.finalizeError instanceof Error ? args.finalizeError.message : String(args.finalizeError);
+		return `Wake turn failed to finalize: ${message}. No answer was produced — ${transcript}`;
+	}
+	return `Wake turn produced no output. ${transcript}`;
 }
 
 /**
@@ -2612,14 +2656,17 @@ export function attachIrcWakeTurnMonitor(session: AgentSession, options: IrcWake
 			// Read before finalization: a schema-bearing agent that answered in
 			// prose gets a missing-yield warning prepended to `result.output`.
 			const turnText = turnMonitor.rawOutput() || (turnMonitor.lastAssistantSalvageText() ?? "");
+			const abortReason = aborted ? turnMonitor.resolveAbortReasonText() : undefined;
+			let result: SingleResult | undefined;
+			let finalizeError: unknown;
 			try {
-				const result = await finalizeRunResult({
+				result = await finalizeRunResult({
 					monitor: turnMonitor,
 					done: {
 						exitCode: aborted || error ? 1 : 0,
 						error,
 						aborted,
-						abortReason: aborted ? turnMonitor.resolveAbortReasonText() : undefined,
+						abortReason,
 						durationMs: Date.now() - turnStartTime,
 					},
 					index,
@@ -2640,16 +2687,37 @@ export function attachIrcWakeTurnMonitor(session: AgentSession, options: IrcWake
 					sessionFile,
 					startTime: turnStartTime,
 				});
-				if (!aborted && !error) {
-					await relayWakeTurnOutput({ id, records, turnStartTime, yielded, result, turnText });
-				}
-			} catch (finalizeError) {
+			} catch (caught) {
+				finalizeError = caught;
 				logger.warn("IRC subagent turn finalization failed", {
 					id,
-					error: finalizeError instanceof Error ? finalizeError.message : String(finalizeError),
+					error: caught instanceof Error ? caught.message : String(caught),
 				});
 			} finally {
-				relay.resolve();
+				// Unconditional: a failed, cancelled, empty, or even un-finalized
+				// wake turn must still tell whoever woke it, or a `send await:true`
+				// waiter mistakes a dead peer for a healthy-but-silent one.
+				try {
+					await relayWakeTurnOutput({
+						id,
+						records,
+						turnStartTime,
+						yielded,
+						result,
+						turnText,
+						error,
+						aborted,
+						abortReason,
+						finalizeError,
+					});
+				} catch (relayError) {
+					logger.warn("IRC wake-turn relay threw", {
+						id,
+						error: relayError instanceof Error ? relayError.message : String(relayError),
+					});
+				} finally {
+					relay.resolve();
+				}
 			}
 		};
 	});
