@@ -9,7 +9,7 @@
  */
 import { createHash } from "node:crypto";
 import { planRequirementFor } from "@oh-my-pi/pi-catalog/compat/behavior";
-import { $env, $envExact, extractRetryHint, getAgentDbPath, logger, untilAborted } from "@oh-my-pi/pi-utils";
+import { $env, $envExact, getAgentDbPath, logger, untilAborted } from "@oh-my-pi/pi-utils";
 import {
 	isSqliteCorruptionError,
 	resolveCredentialIdentityKey,
@@ -31,6 +31,7 @@ import type {
 } from "./registry/oauth/types";
 import { AUTHENTICATED_SENTINEL } from "./registry/types";
 import { getEnvApiKey, getEnvApiKeyName } from "./stream";
+import { extractProviderRetryHint } from "./utils/retry-after";
 import type { Provider } from "./types";
 import type {
 	ClientUsageIdentity,
@@ -6868,7 +6869,7 @@ export class AuthStorage {
 			// Thread the provider-specified reset window (e.g. Devin "Your limit
 			// will reset in 13 minutes") into the block duration so the credential
 			// is not reselected and hammered while the cap remains active.
-			const retryAfterMs = extractRetryHint(undefined, message);
+			const retryAfterMs = extractProviderRetryHint(provider, message);
 			return (
 				await this.markUsageLimitReached(provider, sessionId, {
 					retryAfterMs,

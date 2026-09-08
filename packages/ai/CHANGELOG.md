@@ -6,6 +6,10 @@
 
 - Added Muse Code subscription sign-in, credential refresh, inference, and quota reporting in `/usage`, with durable rate-limit backoff so quota refresh recovers instead of repeatedly retrying.
 
+### Fixed
+
+- Fixed Z.AI and Zhipu usage-limit credential blocks expiring eight hours late when provider responses omit the reset timestamp timezone ([#11014](https://github.com/can1357/oh-my-pi/issues/11014)).
+
 ## [18.1.11] - 2026-09-05
 
 ### Fixed

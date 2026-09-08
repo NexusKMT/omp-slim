@@ -34,8 +34,9 @@ import type {
 } from "@oh-my-pi/pi-ai";
 import { isUsageLimitOutcome, resolveModelServiceTier, streamSimple } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { extractProviderRetryHint } from "@oh-my-pi/pi-ai/utils/retry-after";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { extractHttpStatusFromError, extractRetryHint, logger } from "@oh-my-pi/pi-utils";
+import { extractHttpStatusFromError, logger } from "@oh-my-pi/pi-utils";
 import {
 	ADVISOR_DEFAULT_TOOL_NAMES,
 	AdviseTool,
@@ -1441,7 +1442,7 @@ export class SessionAdvisors {
 			if (switched) return true;
 		}
 
-		const retryAfterMs = extractRetryHint(undefined, message);
+		const retryAfterMs = extractProviderRetryHint(currentModel.provider, message);
 		const usageLimit =
 			AIError.is(errorId, AIError.Flag.UsageLimit) ||
 			isUsageLimitOutcome(extractHttpStatusFromError(error), message);

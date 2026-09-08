@@ -20,10 +20,11 @@ import type {
 } from "@oh-my-pi/pi-ai";
 import { calculateRateLimitBackoffMs, parseRateLimitReason } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { extractProviderRetryHint } from "@oh-my-pi/pi-ai/utils/retry-after";
 import { resolveModelPolicy } from "@oh-my-pi/pi-catalog/compat/resolve";
 import { isFireworksFastModelId, toFireworksBaseModelId } from "@oh-my-pi/pi-catalog/fireworks-model-id";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { extractRetryHint, logger, prompt } from "@oh-my-pi/pi-utils";
+import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import { formatModelStringWithRouting, resolveModelOverride } from "../config/model-resolver";
 
@@ -2076,11 +2077,11 @@ export class TurnRecovery {
 	}
 
 	#parseRetryAfterMsFromError(errorMessage: string): number | undefined {
-		// Single call into the centralized parser: it merges every supported
+		// Single call into the provider-aware parser: it merges every supported
 		// form (account resets, retry-after-ms, legacy retry-after /
 		// x-ratelimit-reset text) by longest-wins, so a shorter reset phrase
 		// can never shadow a longer retry signal carried in the same message.
-		return extractRetryHint(undefined, errorMessage);
+		return extractProviderRetryHint(this.#host.model()?.provider, errorMessage);
 	}
 
 	/**

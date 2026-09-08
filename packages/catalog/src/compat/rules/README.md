@@ -247,6 +247,7 @@ behavior {
     model-limits provider="github-copilot" { limits "gpt-5.6" context=272000 max-tokens=128000 }
     exclude-models provider="nanogpt" substring="embed" substring="tts"
     plan-requirement provider="openai-codex" { tier "pro" substring="-spark" }
+    retry-reset-timezone provider="zai" offset="+08:00"
     pricing-peer provider="google-antigravity" peers="google" "google-vertex" {
         alias "gemini-3-pro" peer-id="gemini-3-pro-preview"
     }

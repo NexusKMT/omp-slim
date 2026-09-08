@@ -23,6 +23,12 @@ const RESET_AT_PATTERNS: readonly { pattern: RegExp; assumedOffset: string }[] =
 // "retry-after-ms=98497000" / "retry-after-ms: 7200000" / "retry-after-ms = 7200000"
 const RETRY_AFTER_MS_BODY_PATTERN = /\bretry-after-ms\s*[:=]\s*([0-9]+)\b/i;
 
+/** Provider-specific interpretation for timezone-naive retry timestamps. */
+export interface RetryHintOptions {
+	/** UTC offset appended to an absolute reset stamp that omits its timezone. */
+	naiveResetTimezoneOffset?: string;
+}
+
 /**
  * Server-suggested retry delay extraction. Merges the patterns historically used
  * by the OpenAI Codex and Google Gemini retry helpers.
@@ -46,7 +52,11 @@ const RETRY_AFTER_MS_BODY_PATTERN = /\bretry-after-ms\s*[:=]\s*([0-9]+)\b/i;
  * explicitly asks for an immediate retry (`retry-after…=0`, or an absolute
  * reset timestamp that has already elapsed).
  */
-export function extractRetryHint(source: Response | Headers | null | undefined, body?: string): number | undefined {
+export function extractRetryHint(
+	source: Response | Headers | null | undefined,
+	body?: string,
+	options?: RetryHintOptions,
+): number | undefined {
 	const headers = source instanceof Headers ? source : (source?.headers ?? undefined);
 	if (headers) {
 		const retryAfterMs = headers.get("retry-after-ms");
@@ -102,14 +112,6 @@ export function extractRetryHint(source: Response | Headers | null | undefined, 
 	// when the parse returns undefined, which would sleep a session the
 	// provider told to retry immediately.
 	let retryNow = false;
-	// A naive absolute reset stamp (no explicit offset) is timezone-ambiguous:
-	// English providers historically report UTC, but Z.AI/Zhipu report Beijing
-	// time in both their Chinese ("将在 … 重置") and English ("reset at …")
-	// bodies. Held back as a fallback so it never outranks an unambiguous
-	// signal (an explicit `retry-after-ms`, or an offset-qualified stamp);
-	// Z.AI's 1308 body carries such a relative hint, so the wrong UTC reading
-	// can no longer win the longest-wins merge and sleep ~8h too long.
-	let naiveResetMs: number | undefined;
 	const consider = (ms: number | undefined): void => {
 		if (ms !== undefined && ms > 0 && (longestMs === undefined || ms > longestMs)) longestMs = ms;
 	};
@@ -134,18 +136,9 @@ export function extractRetryHint(source: Response | Headers | null | undefined, 
 		if (!match?.[1]) continue;
 		const normalized = match[1].replace(" ", "T");
 		const hasOffset = /(?:Z|[+-][0-9]{2}:?[0-9]{2})$/i.test(normalized);
-		if (hasOffset) {
-			// An explicit offset is authoritative; compete in longest-wins.
-			const parsed = Date.parse(normalized);
-			if (!Number.isNaN(parsed) && parsed > Date.now()) consider(parsed - Date.now());
-			continue;
-		}
-		// Defer the assumed-offset reading of a naive stamp to the fallback.
-		const parsed = Date.parse(`${normalized}${assumedOffset}`);
-		if (!Number.isNaN(parsed) && parsed > Date.now()) {
-			const delta = parsed - Date.now();
-			if (naiveResetMs === undefined || delta > naiveResetMs) naiveResetMs = delta;
-		}
+		const offset = options?.naiveResetTimezoneOffset ?? assumedOffset;
+		const parsed = Date.parse(hasOffset ? normalized : `${normalized}${offset}`);
+		if (!Number.isNaN(parsed) && parsed > Date.now()) consider(parsed - Date.now());
 	}
 	const accountResetMatch = WILL_RESET_IN_PATTERN.exec(body);
 	if (accountResetMatch?.[1]) {
@@ -206,9 +199,6 @@ export function extractRetryHint(source: Response | Headers | null | undefined, 
 			considerClamped(resetSeconds > 1_000_000_000 ? resetSeconds * 1000 - Date.now() : resetSeconds * 1000);
 		}
 	}
-	// Only trust a naive absolute reset when nothing unambiguous was found and
-	// the provider did not ask to retry now.
-	if (longestMs === undefined && !retryNow) longestMs = naiveResetMs;
 	return longestMs ?? (retryNow ? 0 : undefined);
 }
 

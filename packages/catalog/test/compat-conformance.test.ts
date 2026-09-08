@@ -54,6 +54,7 @@ function collectReferencedProviders(): Map<string, string> {
 		behavior.modelLimits,
 		behavior.excludeModels,
 		behavior.planRequirements,
+		behavior.retryResetTimezones,
 		behavior.pricingPeers,
 	];
 	for (const list of lists) {

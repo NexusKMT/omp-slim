@@ -14961,6 +14961,16 @@
 				]
 			}
 		],
+		"retryResetTimezones": [
+			{
+				"provider": "zai",
+				"offset": "+08:00"
+			},
+			{
+				"provider": "zhipu-coding-plan",
+				"offset": "+08:00"
+			}
+		],
 		"pricingPeers": [
 			{
 				"provider": "google-antigravity",

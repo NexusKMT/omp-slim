@@ -103,6 +103,11 @@ export function quotaTierFor(provider: string, model: string): string | undefine
 	return undefined;
 }
 
+/** UTC offset for a provider's timezone-naive absolute retry-reset timestamps. */
+export function retryResetTimezoneOffsetFor(provider: string): string | undefined {
+	return behavior.retryResetTimezones.find(rule => rule.provider === provider)?.offset;
+}
+
 /** Whether a provider has catalog-authored model quota scopes. */
 export function hasQuotaTierPolicy(provider: string): boolean {
 	return behavior.quotaTiers.some(rule => rule.provider === provider);

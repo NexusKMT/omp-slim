@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed Zhipu/Z.AI usage-limit reset timestamps making `waitForUsageReset` sessions resume up to eight hours late: naive Chinese stamps are read as UTC+8, and a naive absolute reset stamp no longer outranks an explicit `retry-after-ms` hint ([#11014](https://github.com/can1357/oh-my-pi/issues/11014)).
+- Fixed provider-local usage-limit reset timestamps making `waitForUsageReset` sessions resume up to eight hours late while preserving longest-window semantics for naive UTC timestamps ([#11014](https://github.com/can1357/oh-my-pi/issues/11014)).
 
 ## [18.1.11] - 2026-09-05
 

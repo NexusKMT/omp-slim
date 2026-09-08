@@ -19,7 +19,7 @@
  */
 
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
-import { extractHttpStatusFromError, extractRetryHint, logger } from "@oh-my-pi/pi-utils";
+import { extractHttpStatusFromError, logger } from "@oh-my-pi/pi-utils";
 import type { ApiKeyResolver } from "../auth-retry";
 import type { AuthStorage } from "../auth-storage";
 import * as AIError from "../error";
@@ -34,6 +34,7 @@ import type { Api, AssistantMessage, AssistantMessageEventStream, Context, Model
 import type { ClientUsageIdentity } from "../usage";
 import { deterministicUuid } from "../utils/deterministic-id";
 import { parseBind } from "../utils/parse-bind";
+import { extractProviderRetryHint } from "../utils/retry-after";
 import {
 	captureRequestHeaders,
 	corsHeaders,
@@ -248,7 +249,7 @@ async function refreshGatewayApiKeyAfterAuthError(
 	const message = error instanceof Error ? error.message : String(error);
 	const status = extractHttpStatusFromError(error);
 	if (AIError.isUsageLimit(error) || isUsageLimitOutcome(status, message)) {
-		const retryAfterMs = extractRetryHint(undefined, message);
+		const retryAfterMs = extractProviderRetryHint(provider, message);
 		const { switched, retryAtMs } = await storage.markUsageLimitReached(provider, sessionId, {
 			retryAfterMs,
 			providerTimed: retryAfterMs !== undefined,
