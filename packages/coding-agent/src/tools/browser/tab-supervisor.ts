@@ -990,6 +990,12 @@ export function isIdleCloseCandidate(tab: TabSession, ownerId: string, nowMs: nu
 		nowMs - tab.lastActivityAt >= idleMs
 	);
 }
+/**
+ * Close managed tabs owned by `ownerId` idle longer than `idleMs` — the
+ * memory backstop under settle-freeze (frozen tabs still hold their renderer
+ * and worker). Never throws: a wedged tab counts as unclosed and the sweep
+ * continues, returning the partial count — reapers must not fail callers.
+ */
 export async function releaseIdleTabsForOwner(
 	ownerId: string,
 	opts: { idleMs: number } & ReleaseTabOptions = { idleMs: 0 },

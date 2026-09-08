@@ -203,6 +203,7 @@ import type { ImageAttachmentEntry } from "../tools";
 import { resolveApproval } from "../tools/approval";
 import { type AskToolDetails, type AskToolInput, recoverAskQuestions } from "../tools/ask";
 import {
+	armIdleCloseForOwner,
 	cancelIdleCloseForOwner,
 	freezeTabsForOwner,
 	releaseIdleTabsForOwner,
@@ -1843,11 +1844,16 @@ export class AgentSession {
 			});
 		});
 		this.#unsubscribeIdleCloseSetting = this.settings.onEffectiveChange((path, value) => {
-			// Dropping the idle-close timeout to "never" at runtime must
-			// invalidate a deadline armed under the previous value; the
-			// turn/open checkpoints below only cancel when they run.
-			if (path !== "browser.idleCloseSec" || value) return;
-			cancelIdleCloseForOwner(this.sessionManager.getSessionId() ?? "");
+			if (path !== "browser.idleCloseSec") return;
+			const ownerId = this.sessionManager.getSessionId() ?? "";
+			// Any change invalidates the armed deadline: cancel first (its
+			// sequence bump stops an in-flight sweep re-arming the old
+			// value), then re-arm under the new one. A non-positive value
+			// arms nothing, which is the disable path.
+			cancelIdleCloseForOwner(ownerId);
+			if (typeof value === "number" && value > 0) {
+				armIdleCloseForOwner(ownerId, value * 1000);
+			}
 		});
 		this.#unsubscribeCodeMode = onCodeModeChanged(() => {
 			void this.#tools.reconcileCodeMode().catch(error => {
