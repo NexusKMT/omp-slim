@@ -1172,11 +1172,14 @@ export class TUI extends Container {
 					this.requestRender(true);
 					return;
 				}
-				if (this.#isWarpAltToggleEcho()) {
+				if (!this.#resizeAltActive && this.#isWarpAltToggleEcho()) {
 					// Delayed echo that lost the signal-vs-pty race with its own
 					// probe's CPR reply: the probe already resolved, so re-probe at
 					// the echoed size instead of painting on a stale anchor or
 					// suppressing into a forced replay. DSR-only, no borrow.
+					// While the resize borrow is active the echo is swallowed
+					// without probing: a CPR issued now would snapshot the
+					// alternate grid and anchor the normal viewport to its row.
 					this.#resizeProbeWindow = this.#providerWindow;
 					this.#resizeProbeOffset = this.#parkedViewportOffset;
 					this.#trackResizeBurst();

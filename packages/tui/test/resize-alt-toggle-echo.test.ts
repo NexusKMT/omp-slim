@@ -449,6 +449,40 @@ describe("Warp echo expectation is single-shot", () => {
 			tui.stop();
 		}
 	});
+	it("never probes while the resize borrow owns the alt buffer", () => {
+		Bun.env.TERM_PROGRAM = "WarpTerminal";
+		Bun.env.PI_TUI_RESIZE_IN_PLACE = "0";
+		const term = new VirtualTerminal(40, 12);
+		const writes: string[] = [];
+		const originalWrite = term.write.bind(term);
+		term.write = (data: string) => {
+			writes.push(data);
+			originalWrite(data);
+		};
+		const scheduler = new SyncScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		tui.addChild(new LineComponent("row-", 8));
+		try {
+			tui.start();
+			scheduler.settle();
+			scheduler.t += 200;
+			writes.length = 0;
+
+			// Borrow owns the alt buffer; its enter echo must not start a
+			// normal-screen anchor probe against the alternate grid.
+			term.resize(40, 20);
+			term.resize(40, 19);
+			expect(writes.join("")).not.toContain("\x1b[6n");
+
+			// The settle exit starts the only probe of this transaction.
+			scheduler.settle();
+			const all = writes.join("");
+			expect(countNeedle(all, "\x1b[6n")).toBe(1);
+			expect(countNeedle(all, ALT_ENTER)).toBe(1);
+		} finally {
+			tui.stop();
+		}
+	});
 });
 
 /** Synchronous scheduler: delay-ignoring timers fire on settle(). */
