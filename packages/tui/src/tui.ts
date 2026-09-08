@@ -1139,25 +1139,23 @@ export class TUI extends Container {
 		this.terminal.start(
 			data => this.#handleInput(data),
 			() => {
-				if (this.#resizeRepaintsInPlace()) {
-					this.requestRender(true);
-					return;
-				}
 				if (this.#resizeProbe) {
-					// Warp echoes a height-only ±1 SIGWINCH on CSI ?1049l. Restarting
-					// the alt borrow here is the flicker loop; a real geometry change
-					// (width, or height delta > 1) still restarts.
-					if (this.#isWarpAltToggleEcho()) {
-						this.requestRender(true);
-						return;
-					}
-					// The anchor being probed is already stale; restart the transaction.
+					// Warp echoes a height-only ±1 SIGWINCH on CSI ?1049l; the probed
+					// anchor is still valid, so swallow it without painting (#doRender
+					// is probe-blocked anyway). A real geometry change (width, or
+					// height delta > 1) restarts the transaction below.
+					if (this.#isWarpAltToggleEcho()) return;
 					this.#cancelResizeProbe();
-					this.#beginResizeAltPaint(true);
+					if (this.#resizeRepaintsInPlace()) this.#beginResizeInPlacePaint();
+					else this.#beginResizeAltPaint(true);
 					return;
 				}
 				if (this.#renderScheduler.now() < this.#suppressResizeUntil) {
 					this.requestRender(true);
+					return;
+				}
+				if (this.#resizeRepaintsInPlace()) {
+					this.#beginResizeInPlacePaint();
 					return;
 				}
 				this.#beginResizeAltPaint();
@@ -1208,6 +1206,43 @@ export class TUI extends Container {
 	}
 
 	/**
+	 * Fold one SIGWINCH step into the coalesced resize-burst accounting shared by
+	 * both resize paths: any grow step poisons the multiplexer clip model, the
+	 * accumulated pull bounds CPR-less grow anchors, and the epoch retires the
+	 * in-flight CPR tag so a rewrap-invalidated reply cannot anchor a new geometry.
+	 */
+	#trackResizeBurst(): void {
+		const burstLastHeight = this.#resizeBurstLastHeight ?? this.#previousHeight;
+		if (this.terminal.rows > burstLastHeight) this.#resizeBurstGrew = true;
+		this.#resizeBurstLastHeight = this.terminal.rows;
+		this.#resizeBurstPull += Math.max(0, this.terminal.rows - burstLastHeight);
+		this.#geometryEpoch++;
+	}
+
+	/**
+	 * Coalesced in-place resize transaction for Warp-class terminals: never
+	 * borrows the alt buffer. Drag SIGWINCHes only re-arm the settle window, so a
+	 * drag emits no paints and no scrollback replay; once quiet, the transaction
+	 * snapshots the live window and runs the CPR anchor probe, and the single
+	 * settled repaint lands on the recovered anchor with no ED3 rewrap.
+	 */
+	#beginResizeInPlacePaint(): void {
+		if (this.#altActive) {
+			this.requestRender(true);
+			return;
+		}
+		this.#trackResizeBurst();
+		this.#resizeSettleTimer?.cancel();
+		this.#resizeSettleTimer = this.#renderScheduler.scheduleRender(() => {
+			this.#resizeSettleTimer = undefined;
+			if (this.#stopped) return;
+			this.#resizeProbeWindow = this.#providerWindow;
+			this.#resizeProbeOffset = this.#parkedViewportOffset;
+			this.#beginResizeAnchorProbe();
+		}, TUI.#RESIZE_VIEWPORT_SETTLE_MS);
+	}
+
+	/**
 	 * Borrow the alternate buffer for stable, history-free resize repainting.
 	 * `restartingProbe` marks a transaction restarted by a SIGWINCH that
 	 * arrived while the settled anchor probe was in flight: the live window
@@ -1219,15 +1254,7 @@ export class TUI extends Container {
 			this.requestRender(true);
 			return;
 		}
-		if (this.#resizeRepaintsInPlace()) {
-			this.requestRender(true);
-			return;
-		}
-		const burstLastHeight = this.#resizeBurstLastHeight ?? this.#previousHeight;
-		if (this.terminal.rows > burstLastHeight) this.#resizeBurstGrew = true;
-		this.#resizeBurstLastHeight = this.terminal.rows;
-		this.#resizeBurstPull += Math.max(0, this.terminal.rows - burstLastHeight);
-		this.#geometryEpoch++;
+		this.#trackResizeBurst();
 		if (!this.#resizeAltActive) {
 			this.#resizeAltActive = true;
 			setAltScreenActive(true);
@@ -2376,7 +2403,11 @@ export class TUI extends Container {
 			!this.#hasEverRendered ||
 			(this.#previousWidth === width && this.#previousHeight === height) ||
 			this.#resizeReplaySize === size ||
-			this.#resizeScrollbackMode === "preserve"
+			this.#resizeScrollbackMode === "preserve" ||
+			// In-place resizes (Warp) repaint the settled viewport once the drag
+			// goes quiet: no alt borrow, and no ED3 rewrap or history replay, so a
+			// drag can neither loop on its own echo nor flash destructive repaints.
+			this.#resizeRepaintsInPlace()
 		) {
 			return;
 		}

@@ -3,7 +3,7 @@
 ## [Unreleased]
 ### Fixed
 
-- Stopped long flicker when moving or resizing an omp pane in Warp. Resize no longer borrows the alternate screen there (override with `PI_TUI_RESIZE_IN_PLACE=0`), and a Warp height-only ±1 SIGWINCH during the post-resize cursor probe no longer restarts that borrow (by [@h4vc](https://github.com/h4vc)).
+- Stopped long flicker when moving or resizing an omp pane in Warp. Resize repaints in place there after the drag settles (override with `PI_TUI_RESIZE_IN_PLACE=0`), with no alternate-screen borrow, no scrollback replay, and no height-only ±1 echo restart during the post-resize cursor probe ([#11247](https://github.com/can1357/oh-my-pi/pull/11247) by [@H4vC](https://github.com/H4vC)).
 
 ## [18.1.14] - 2026-09-07
 

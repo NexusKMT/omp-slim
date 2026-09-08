@@ -1,5 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { type Component, TUI } from "@oh-my-pi/pi-tui";
+import {
+	type Component,
+	type TerminalFramePlan,
+	type TerminalFrameProvider,
+	TUI,
+	type ViewportSize,
+} from "@oh-my-pi/pi-tui";
 import { withoutTerminalMultiplexer } from "./helpers/terminal-multiplexer";
 import { VirtualRenderScheduler } from "./virtual-render-scheduler";
 import { VirtualTerminal } from "./virtual-terminal";
@@ -148,3 +153,95 @@ describe("resize on Warp, which SIGWINCHes on alt-buffer toggle", () => {
 		}
 	});
 });
+
+describe("Warp in-place resize with a frame provider in rebuild mode", () => {
+	let saved: Record<string, string | undefined> = {};
+
+	beforeEach(() => {
+		saved = {};
+		for (const key of TERMINAL_ENV) {
+			saved[key] = Bun.env[key];
+			delete Bun.env[key];
+		}
+	});
+
+	afterEach(() => {
+		for (const key of TERMINAL_ENV) {
+			if (saved[key] === undefined) delete Bun.env[key];
+			else Bun.env[key] = saved[key];
+		}
+		saved = {};
+	});
+
+	it("coalesces a drag into one ED3-free repaint with no alt borrow", async () => {
+		Bun.env.TERM_PROGRAM = "WarpTerminal";
+		const term = new VirtualTerminal(40, 12);
+		const writes: string[] = [];
+		const originalWrite = term.write.bind(term);
+		term.write = (data: string) => {
+			writes.push(data);
+			originalWrite(data);
+		};
+		const scheduler = new VirtualRenderScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		const provider = new RebuildProvider();
+		tui.setResizeScrollback("rebuild");
+		tui.setFrameProvider(provider);
+		try {
+			tui.start();
+			await scheduler.settle(term);
+			writes.length = 0;
+
+			// Two drag frames before the quiet window: one settled repaint.
+			term.resize(40, 20);
+			term.resize(44, 20);
+			await scheduler.advance(term, 150);
+
+			const joined = writes.join("");
+			expect(joined).not.toContain(ALT_ENTER);
+			expect(countNeedle(joined, "\x1b[6n")).toBe(1);
+
+			// Answer the anchor probe, then drain past every deferred window.
+			const tag = joined.match(/\x1b\[(\d+)G\x1b\[6n/);
+			expect(tag).not.toBeNull();
+			term.sendInput(`\x1b[18;${tag![1]}R`);
+			await scheduler.settle(term);
+			await scheduler.advance(term, 300);
+
+			const all = writes.join("");
+			expect(all).not.toContain(ALT_ENTER);
+			expect(all).not.toContain("\x1b[3J");
+			expect(provider.replayCalls).toBe(0);
+			expect(provider.lastViewport?.columns).toBe(44);
+			expect(provider.lastViewport?.rows).toBe(20);
+		} finally {
+			tui.stop();
+		}
+	});
+});
+
+/** Frame provider mirroring the coding-agent transcript: committed history plus live rows. */
+class RebuildProvider implements TerminalFrameProvider {
+	replayCalls = 0;
+	lastViewport: ViewportSize | undefined;
+	history: { id: number; rows: string[] } | undefined = {
+		id: 1,
+		rows: ["committed-0", "committed-1", "committed-2"],
+	};
+
+	renderFrame(viewport: ViewportSize): TerminalFramePlan {
+		this.lastViewport = viewport;
+		return {
+			history: this.history,
+			viewport: Array.from({ length: Math.min(8, viewport.rows) }, (_, i) => `live-${i}`),
+		};
+	}
+
+	acknowledgeHistory(): void {
+		this.history = undefined;
+	}
+
+	beginHistoryReplay(): void {
+		this.replayCalls++;
+	}
+}

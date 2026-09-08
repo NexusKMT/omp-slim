@@ -95,6 +95,8 @@ During resize, TUI borrows the alternate buffer. The frame provider supplies a f
 
 Warp is the exception: it re-reports size on `CSI ?1049h` / `CSI ?1049l`, so borrowing that buffer loops. Warp (and `PI_TUI_RESIZE_IN_PLACE=1`) repaint in place; `PI_TUI_RESIZE_IN_PLACE=0` forces the borrow even on Warp. A Warp height-only ±1 SIGWINCH while the post-resize CPR probe is in flight is treated as that echo and does not restart the borrow.
 
+Warp drags therefore only re-arm the settle window and paint nothing until it goes quiet; the single settled repaint runs the same CPR anchor probe and skips the `ResizeScrollbackMode` replay, so native scrollback keeps whatever width it reflowed at instead of an ED3 rewrap.
+
 A settled resize then applies `ResizeScrollbackMode`. `rebuild` clears native history with ED3 and asks the provider to replay the complete committed transcript under fresh monotonic ids. `append` performs the same independent replay below retained history. `preserve` skips replay and only repaints the anchored viewport. The raw TUI default is `preserve`; the coding agent sets `rebuild`.
 
 A shrink can make the terminal itself push live viewport rows into scrollback before the app hears about the resize; those rows are unreachable to an inline app and may remain above the repainted frame at their old width. The screen itself always converges to exactly one copy. Likewise, when a history append overflows the screen, the writer first erases the old live viewport region so a scroll can only push committed rows and blanks into scrollback, never an unfinished frame.
