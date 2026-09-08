@@ -483,6 +483,45 @@ describe("Warp echo expectation is single-shot", () => {
 			tui.stop();
 		}
 	});
+	it("keeps the borrow path for Warp sessions inside a multiplexer", () => {
+		Bun.env.TERM_PROGRAM = "WarpTerminal";
+		const previousTmux = Bun.env.TMUX;
+		Bun.env.TMUX = "/tmp/tmux-1000/default,1,0";
+		const term = new VirtualTerminal(40, 12);
+		const writes: string[] = [];
+		const originalWrite = term.write.bind(term);
+		term.write = (data: string) => {
+			writes.push(data);
+			originalWrite(data);
+		};
+		const scheduler = new SyncScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		tui.addChild(new LineComponent("row-", 8));
+		try {
+			tui.start();
+			scheduler.settle();
+			scheduler.t += 200;
+			writes.length = 0;
+
+			// The mux owns the grid and consumes the toggles itself, so the
+			// inherited Warp marker must not divert the mux-tuned borrow path.
+			term.resize(40, 20);
+			scheduler.settle();
+			expect(countNeedle(writes.join(""), ALT_ENTER)).toBe(1);
+
+			// And a ±1 resize during the probe is real (muxes never echo), so
+			// it restarts the transaction instead of re-probing.
+			term.resize(40, 21);
+			scheduler.settle();
+			const all = writes.join("");
+			expect(countNeedle(all, ALT_ENTER)).toBe(2);
+			expect(countNeedle(all, "\x1b[6n")).toBe(2);
+		} finally {
+			tui.stop();
+			if (previousTmux === undefined) delete Bun.env.TMUX;
+			else Bun.env.TMUX = previousTmux;
+		}
+	});
 });
 
 /** Synchronous scheduler: delay-ignoring timers fire on settle(). */

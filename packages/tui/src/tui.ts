@@ -1220,11 +1220,14 @@ export class TUI extends Container {
 	/**
 	 * Whether a resize repaints the visible window in place — no alternate-screen
 	 * borrow. Warp-only: Warp re-reports its size on alt-buffer toggles, so borrowing
-	 * there self-sustains. Every other terminal keeps the alt-borrow path.
+	 * there self-sustains. Every other terminal keeps the alt-borrow path. Inside a
+	 * multiplexer the mux owns the grid and consumes the toggles itself, so an
+	 * inherited Warp marker must not divert the mux-tuned borrow path.
 	 */
 	#resizeRepaintsInPlace(): boolean {
 		const override = resizeInPlaceOverride();
 		if (override !== null) return override;
+		if (isInsideTerminalMultiplexer()) return false;
 		return Bun.env.TERM_PROGRAM?.toLowerCase() === "warpterminal";
 	}
 
@@ -1238,10 +1241,14 @@ export class TUI extends Container {
 	 * Warp-only echo: height-only ±1 SIGWINCH against the pending alt-toggle
 	 * baseline. Single-shot: the first SIGWINCH after the toggle consumes the
 	 * expectation either way, so at most one signal is ever swallowed per toggle.
+	 * Never inside a multiplexer, which consumes the toggles itself.
 	 */
 	#isWarpAltToggleEcho(): boolean {
 		if (!this.#altToggleEchoPending) return false;
 		this.#altToggleEchoPending = false;
+		// Inside a multiplexer the mux consumes alt toggles itself, so no echo is
+		// possible: every ±1 resize is real and must restart the transaction.
+		if (isInsideTerminalMultiplexer()) return false;
 		if (Bun.env.TERM_PROGRAM?.toLowerCase() !== "warpterminal") return false;
 		return (
 			this.terminal.columns === this.#altToggleColumns && Math.abs(this.terminal.rows - this.#altToggleRows) <= 1
