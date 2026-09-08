@@ -32,7 +32,7 @@ function accessTokenResponse(token = "ghu_test") {
 	};
 }
 
-function expectOfficialOAuthRequest(init: RequestInit | undefined, body: Record<string, string>) {
+function expectOAuthRequest(init: RequestInit | undefined, body: Record<string, string>) {
 	const headers = new Headers(init?.headers);
 	expect(headers.get("Accept")).toBe("application/json");
 	expect(headers.get("Content-Type")).toBe("application/x-www-form-urlencoded");
@@ -48,14 +48,14 @@ function modelPolicyOk() {
 }
 
 describe("loginGitHubCopilot", () => {
-	it("requests only the scopes needed for Copilot API access", async () => {
+	it("uses the minimal-grant OpenCode app with read:user only", async () => {
 		let pollCount = 0;
 		const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
 			const url = typeof input === "string" ? input : input.toString();
 			if (url === "https://github.com/login/device/code") {
 				expect(init?.method).toBe("POST");
-				expectOfficialOAuthRequest(init, {
-					client_id: "Ov23ctDVkRmgkPke0Mmm",
+				expectOAuthRequest(init, {
+					client_id: "Ov23li8tweQw6odWQebz",
 					scope: "read:user",
 				});
 				return new Response(JSON.stringify(deviceCodeResponse()), {
@@ -65,8 +65,8 @@ describe("loginGitHubCopilot", () => {
 			}
 			if (url === "https://github.com/login/oauth/access_token") {
 				pollCount++;
-				expectOfficialOAuthRequest(init, {
-					client_id: "Ov23ctDVkRmgkPke0Mmm",
+				expectOAuthRequest(init, {
+					client_id: "Ov23li8tweQw6odWQebz",
 					device_code: "dc_test",
 					grant_type: "urn:ietf:params:oauth:grant-type:device_code",
 				});
