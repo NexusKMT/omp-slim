@@ -216,6 +216,58 @@ describe("SDK workpool yield schema", () => {
 			await session.setWorkPoolYieldItems([{ id: "pool#1", index: 1 }]);
 			await expectProviderYieldContract(session, dialect, true);
 		});
+		it(
+			"republishes the restored prompt when a queued clear fails after overlapping an install (" + dialect + ")",
+			async () => {
+				const { session } = await createAgentSession({
+					cwd: registryDir,
+					agentDir: registryDir,
+					modelRegistry,
+					sessionManager: SessionManager.inMemory(),
+					settings: Settings.isolated({ ...toolSettings, inlineToolDescriptors: "on" }),
+					model: getBundledModel("openai", "gpt-4o-mini"),
+					disableExtensionDiscovery: true,
+					skills: [],
+					contextFiles: [],
+					promptTemplates: [],
+					slashCommands: [],
+					enableMCP: false,
+					enableLsp: false,
+					skipPythonPreflight: true,
+					requireYieldTool: true,
+					toolNames: ["yield"],
+					outputSchema: {
+						type: "object",
+						properties: { "pool#1": {} },
+						required: ["pool#1"],
+						additionalProperties: false,
+					},
+					parentTaskPrefix: "workpool-republish",
+					agentId: "workpool-republish",
+					agentName: "scout",
+					agentDisplayName: "scout",
+					taskDepth: 1,
+				});
+				sessions.push(session);
+				// Overlapping install then clear: the first queued refresh reads the
+				// newer (cleared) live set, so when the clear's refresh rejects, the
+				// rollback restores pooled items against ordinary bytes. The trailing
+				// republish must restore the pooled prompt too, or a same-items retry
+				// takes the equality fast path and the mismatch persists.
+				const refresh = vi.spyOn(session, "refreshBaseSystemPrompt");
+				refresh.mockResolvedValueOnce(undefined);
+				refresh.mockRejectedValueOnce(new Error("rebuild boom"));
+				const install = session.setWorkPoolYieldItems([{ id: "pool#1", index: 1 }]);
+				const clear = session.setWorkPoolYieldItems([]);
+				await install;
+				await expect(clear).rejects.toThrow("rebuild boom");
+				await session.whenWorkPoolYieldSettled();
+				expect(session.getWorkPoolYieldItems()).toEqual([{ id: "pool#1", index: 1 }]);
+				await expectProviderYieldContract(session, dialect, true);
+				await session.setWorkPoolYieldItems([{ id: "pool#1", index: 1 }]);
+				await expectProviderYieldContract(session, dialect, true);
+			},
+		);
 		it("re-renders the pooled instructions from the live yield contract (" + dialect + ")", async () => {
 			// The base-prompt rebuild must re-render the real subagent completion
 			// block against the live item set on every transition: install shows the
