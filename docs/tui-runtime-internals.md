@@ -73,8 +73,8 @@ A provider frame contains two channels:
 
 ```ts
 interface TerminalFramePlan {
-  history?: { id: number; rows: readonly string[] };
-  viewport: readonly string[];
+	history?: { id: number; rows: readonly string[] };
+	viewport: readonly string[];
 }
 ```
 
@@ -92,6 +92,8 @@ Viewport-only frames cannot create history. Theme changes leave native history t
 ## Resize
 
 During resize, TUI borrows the alternate buffer. The frame provider supplies a full semantic viewport tail for that transient buffer; history offers are never acknowledged there. After a short quiet window TUI restores the normal buffer — which the terminal has reflowed — and recovers the viewport anchor with a DSR (CSI 6n) round trip: every normal paint parks the hardware cursor at a known viewport offset, terminals keep that cursor attached to its logical line through width rewrap, and the settled anchor is `min(reported − parkOffset, height − staleReflowedRows)`. The second bound reconstructs height-shrink scrollback pushes that clamp the cursor instead of scrolling it (bottom-preserving resize guarantees the stale viewport ends on the last screen row whenever a push happened); multiplexers clip instead of rewrapping, so the stale-row measure counts one row per row there. The repaint waits for the CPR reply (200 ms timeout falls back to the bounded retained anchor); `packages/tui/test/resize-anchor-recovery.test.ts` validates the formula against kitty's real core.
+
+Warp is the exception: it re-reports size on `CSI ?1049h` / `CSI ?1049l`, so borrowing that buffer loops. Warp (and `PI_TUI_RESIZE_IN_PLACE=1`) repaint in place; `PI_TUI_RESIZE_IN_PLACE=0` forces the borrow even on Warp. A Warp height-only ±1 SIGWINCH while the post-resize CPR probe is in flight is treated as that echo and does not restart the borrow.
 
 A settled resize then applies `ResizeScrollbackMode`. `rebuild` clears native history with ED3 and asks the provider to replay the complete committed transcript under fresh monotonic ids. `append` performs the same independent replay below retained history. `preserve` skips replay and only repaints the anchored viewport. The raw TUI default is `preserve`; the coding agent sets `rebuild`.
 
