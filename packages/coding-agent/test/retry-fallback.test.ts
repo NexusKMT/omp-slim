@@ -127,4 +127,49 @@ describe("retry fallback selector resolution", () => {
 		expect(expanded.task).toBe(defaultChain);
 		expect(expanded.slow).toEqual(["google/gemini-2.5-flash"]);
 	});
+
+	it("prefers an exact model+effort key over a different-effort key regardless of object order", () => {
+		const model = getBundledModel("google", "gemini-2.5-flash");
+		const low = "google/gemini-2.5-flash:low";
+		const max = "google/gemini-2.5-flash:max";
+
+		const maxFirst = createContext({ [max]: ["openai/gpt-4o-mini:max"], [low]: ["openai/gpt-4o-mini:low"] });
+		expect(resolveRetryFallbackChainKey(maxFirst, low, model)).toBe(low);
+		expect(findRetryFallbackCandidates(maxFirst, low, low, model).map(candidate => candidate.raw)).toEqual([
+			"openai/gpt-4o-mini:low",
+		]);
+
+		const lowFirst = createContext({ [low]: ["openai/gpt-4o-mini:low"], [max]: ["openai/gpt-4o-mini:max"] });
+		expect(resolveRetryFallbackChainKey(lowFirst, low, model)).toBe(low);
+	});
+
+	it("lets a suffixless key match any effort but an exact effort key still wins", () => {
+		const model = getBundledModel("google", "gemini-2.5-flash");
+		const low = "google/gemini-2.5-flash:low";
+		const suffixless = "google/gemini-2.5-flash";
+
+		const baseOnly = createContext({ [suffixless]: ["openai/gpt-4o-mini"] });
+		expect(resolveRetryFallbackChainKey(baseOnly, low, model)).toBe(suffixless);
+
+		const suffixlessFirst = createContext({
+			[suffixless]: ["openai/gpt-4o-mini"],
+			[low]: ["openai/gpt-4o-mini:low"],
+		});
+		expect(resolveRetryFallbackChainKey(suffixlessFirst, low, model)).toBe(low);
+	});
+
+	it("never escalates to a different-effort chain when no matching effort is configured", () => {
+		const model = getBundledModel("google", "gemini-2.5-flash");
+		const low = "google/gemini-2.5-flash:low";
+		const max = "google/gemini-2.5-flash:max";
+
+		const maxOnly = createContext({ [max]: ["openai/gpt-4o-mini:max"] });
+		expect(resolveRetryFallbackChainKey(maxOnly, low, model)).toBeUndefined();
+
+		const maxWithDefault = createContext({ [max]: ["openai/gpt-4o-mini:max"], default: ["openai/gpt-4o-mini"] });
+		expect(resolveRetryFallbackChainKey(maxWithDefault, low, model)).toBe("default");
+
+		const maxWithHint = createContext({ [max]: ["openai/gpt-4o-mini:max"], smol: ["openai/gpt-4o-mini:medium"] });
+		expect(resolveRetryFallbackChainKey(maxWithHint, low, model, "smol")).toBe("smol");
+	});
 });

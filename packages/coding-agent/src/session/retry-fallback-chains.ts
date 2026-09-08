@@ -247,17 +247,38 @@ function getRetryFallbackPrimarySelector(
 	return configuredSelector ? parseRetryFallbackSelector(configuredSelector, context.modelLookup) : undefined;
 }
 
-function selectorMatchesCurrent(
+/** How a chain key's primary selector matches the current selector. */
+type SelectorMatchKind = "exact" | "base" | "none";
+
+/**
+ * Classify how a chain key's primary selector matches the current selector.
+ *
+ * - `exact` — same model *and* effort (raw selector equality, checked against
+ *   both the routed selector and its plain, unrouted variant).
+ * - `base` — a suffixless key (no explicit effort) naming the same
+ *   provider/model, so it applies to that model at any effort.
+ * - `none` — no match. A key carrying a *different* explicit effort lands here:
+ *   it must never masquerade as an exact match for another effort.
+ */
+function selectorMatchKind(
 	primary: RetryFallbackSelector | undefined,
 	currentSelector: string,
 	currentBaseSelector: string,
 	currentPlainSelector: string | undefined,
 	currentPlainBaseSelector: string | undefined,
-): boolean {
-	if (!primary) return false;
-	if (primary.raw === currentSelector || (currentPlainSelector && primary.raw === currentPlainSelector)) return true;
+): SelectorMatchKind {
+	if (!primary) return "none";
+	if (primary.raw === currentSelector || (currentPlainSelector && primary.raw === currentPlainSelector)) {
+		return "exact";
+	}
+	// An explicit-effort key only matches that effort (handled above); only a
+	// suffixless key falls back to matching the model at any effort.
+	if (primary.thinkingLevel !== undefined) return "none";
 	const base = formatRetryFallbackBaseSelector(primary);
-	return base === currentBaseSelector || (!!currentPlainBaseSelector && base === currentPlainBaseSelector);
+	if (base === currentBaseSelector || (!!currentPlainBaseSelector && base === currentPlainBaseSelector)) {
+		return "base";
+	}
+	return "none";
 }
 
 /**
@@ -288,22 +309,23 @@ export function resolveRetryFallbackChainKey(
 			? formatRetryFallbackBaseSelector(parseRetryFallbackSelector(currentPlainSelector) ?? parsedCurrent)
 			: undefined;
 
-	// 1. Exact model-selector keys — most specific.
+	// 1. Exact model-selector keys — most specific. An exact model+effort match
+	//    wins over a suffixless (any-effort) key regardless of object/YAML
+	//    order; a key naming a different explicit effort never matches here.
+	let baseModelKey: string | undefined;
 	for (const key in context.chains) {
-		if (isRetryFallbackModelKey(key) && !isRetryFallbackWildcardKey(key)) {
-			if (
-				selectorMatchesCurrent(
-					getRetryFallbackPrimarySelector(context, key),
-					currentSelector,
-					currentBaseSelector,
-					currentPlainSelector,
-					currentPlainBaseSelector,
-				)
-			) {
-				return key;
-			}
-		}
+		if (!isRetryFallbackModelKey(key) || isRetryFallbackWildcardKey(key)) continue;
+		const kind = selectorMatchKind(
+			getRetryFallbackPrimarySelector(context, key),
+			currentSelector,
+			currentBaseSelector,
+			currentPlainSelector,
+			currentPlainBaseSelector,
+		);
+		if (kind === "exact") return key;
+		if (kind === "base") baseModelKey ??= key;
 	}
+	if (baseModelKey) return baseModelKey;
 
 	// 2. Provider wildcards — an id-prefixed key (`openrouter/google/*`)
 	//    beats the plain `provider/*` key for ids under its prefix.
@@ -333,13 +355,13 @@ export function resolveRetryFallbackChainKey(
 	for (const key in context.chains) {
 		if (isRetryFallbackModelKey(key)) continue;
 		if (
-			selectorMatchesCurrent(
+			selectorMatchKind(
 				getRetryFallbackPrimarySelector(context, key),
 				currentSelector,
 				currentBaseSelector,
 				currentPlainSelector,
 				currentPlainBaseSelector,
-			)
+			) !== "none"
 		) {
 			if (key === "default") return "default";
 			matchedRole ??= key;
