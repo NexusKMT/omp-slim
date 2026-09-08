@@ -217,6 +217,49 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			]);
 			expect(calls.at(-1)?.params).toEqual({ state: "active" });
 		});
+
+		it("records frozen when the race undo itself fails", async () => {
+			const calls: CdpCall[] = [];
+			const frozenStarted = Promise.withResolvers<void>();
+			const releaseFrozenSend = Promise.withResolvers<void>();
+			let lifecycleSends = 0;
+			const session = {
+				send: async (method: string, params?: unknown): Promise<Record<string, unknown>> => {
+					calls.push({ method, params });
+					if (method === "Page.setWebLifecycleState") {
+						lifecycleSends++;
+						if (lifecycleSends === 1) {
+							frozenStarted.resolve();
+							await releaseFrozenSend.promise;
+						} else {
+							throw new Error("undo lost");
+						}
+					}
+					return {};
+				},
+				detach: async (): Promise<void> => undefined,
+			};
+			const { tab } = makeStubTab({
+				browser: {
+					browser: { targets: () => [{ _targetId: "stub-target-1", createCDPSession: async () => session }] },
+				},
+			});
+
+			const freeze = setTabFrozenForTest(tab, true);
+			await frozenStarted.promise;
+			tab.pending.set("run-1", {} as unknown as PendingRun);
+			releaseFrozenSend.resolve();
+
+			// No transition happened, but the frozen frame very likely landed
+			// while its undo did not: later runs must resume via unfreeze.
+			expect(await freeze).toBe(false);
+			expect(tab.frozen).toBe(true);
+			expect(calls.map(call => call.method)).toEqual([
+				"Page.enable",
+				"Page.setWebLifecycleState",
+				"Page.setWebLifecycleState",
+			]);
+		});
 	});
 
 	describe("browser settle — idle-close eligibility", () => {
@@ -318,6 +361,21 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			expect(getTabsMapForTest().has("settle-old")).toBe(true);
 		});
 
+		it("refreshes activity when a run completes", async () => {
+			mockCmuxSocket();
+			const browser = await acquireBrowser(makeKind("settle-complete"), { cwd: "/tmp" });
+			const { tab } = await acquireTab("settle-done", browser, { timeoutMs: 1_000, ownerSessionId: "session-A" });
+			tab.lastActivityAt = Date.now() - 3_600_000;
+
+			const result = await runInTab("settle-done", {
+				code: "return 42;",
+				timeoutMs: 5_000,
+				session: makeSession("/tmp"),
+			});
+			expect(result.returnValue).toBe(42);
+			expect(tab.lastActivityAt).toBeGreaterThan(Date.now() - 5_000);
+		});
+
 		it("settle is a no-op for unknown owners", async () => {
 			expect(await freezeTabsForOwner("session-nobody")).toBe(0);
 			expect(await releaseIdleTabsForOwner("session-nobody", { idleMs: 0 })).toBe(0);
@@ -354,6 +412,27 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			tab.lastActivityAt = Date.now() - 3_600_000;
 			expect(await releaseIdleTabsForOwner("session-settle-real", { idleMs: 60_000 })).toBe(1);
 			expect(getTabsMapForTest().has(name)).toBe(false);
+		}, 120_000);
+
+		it("revalidates candidates mid-drain: reuse during an earlier close is honored", async () => {
+			const browser = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+			const base = `settle-reval-${process.pid}`;
+			const a = await acquireTab(`${base}-a`, browser, { timeoutMs: 30_000, ownerSessionId: "session-reval" });
+			const b = await acquireTab(`${base}-b`, browser, { timeoutMs: 30_000, ownerSessionId: "session-reval" });
+			const ancient = Date.now() - 3_600_000;
+			a.tab.lastActivityAt = ancient;
+			b.tab.lastActivityAt = ancient;
+
+			const closing = releaseIdleTabsForOwner("session-reval", { idleMs: 60_000 });
+			void closing.catch(() => undefined);
+			// Refresh b synchronously in this same task: the touch provably
+			// precedes the loop's second-iteration recheck, which runs only
+			// after a's full worker teardown. Without the recheck, b would
+			// close from the stale snapshot and this would return 2.
+			await acquireTab(`${base}-b`, browser, { timeoutMs: 30_000, ownerSessionId: "session-reval" });
+			expect(await closing).toBe(1);
+			expect(getTabsMapForTest().has(`${base}-a`)).toBe(false);
+			expect(getTabsMapForTest().has(`${base}-b`)).toBe(true);
 		}, 120_000);
 	});
 });

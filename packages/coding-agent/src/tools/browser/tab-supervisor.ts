@@ -619,6 +619,9 @@ async function runInTabWithSnapshot(
 			return await promise;
 		} finally {
 			tab.pending.delete(id);
+			// Completion is use too: a run outlasting the idle timeout must
+			// not look stale to the sweep right after it finishes.
+			tab.lastActivityAt = Date.now();
 		}
 	}
 	const abort = (): void => {
@@ -668,6 +671,9 @@ async function runInTabWithSnapshot(
 	} finally {
 		opts.signal?.removeEventListener("abort", abort);
 		tab.pending.delete(id);
+		// Completion is use too: a run outlasting the idle timeout must
+		// not look stale to the sweep right after it finishes.
+		tab.lastActivityAt = Date.now();
 	}
 }
 
@@ -870,7 +876,19 @@ async function setTabFrozen(tab: TabSession, frozen: boolean): Promise<boolean> 
 		if (frozen) {
 			if (tab.frozen) return false;
 			if (tab.pending.size > 0) {
-				await session.send("Page.setWebLifecycleState", { state: "active" }).catch(() => undefined);
+				const undone = await session.send("Page.setWebLifecycleState", { state: "active" }).then(
+					() => true,
+					() => false,
+				);
+				if (!undone) {
+					// The frozen frame very likely landed while its undo did
+					// not. Record frozen so the owning run and later runs
+					// resume via unfreeze instead of executing against a
+					// paused page; a redundant `active` on an already-active
+					// page is harmless, and idle-close still bounds a tab
+					// that never runs again.
+					tab.frozen = true;
+				}
 				return false;
 			}
 			tab.frozen = true;
@@ -961,6 +979,11 @@ export async function releaseIdleTabsForOwner(
 		.map(tab => tab.name);
 	let count = 0;
 	for (const name of names) {
+		// Revalidate immediately before closing: an earlier close in this
+		// loop awaits worker cleanup, during which a later candidate may
+		// have been reused or started a run.
+		const current = tabs.get(name);
+		if (!current || !isIdleCloseCandidate(current, ownerId, Date.now(), opts.idleMs)) continue;
 		if (await releaseTab(name, opts)) count++;
 	}
 	return count;
