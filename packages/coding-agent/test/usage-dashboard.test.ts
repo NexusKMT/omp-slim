@@ -1,7 +1,12 @@
-import { describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it } from "bun:test";
 import type { DailyActivityPoint } from "@oh-my-pi/omp-stats/shared-types";
 import type { UsageReport } from "@oh-my-pi/pi-ai";
-import { buildHeatmapLayout, buildProviderCards } from "@oh-my-pi/pi-coding-agent/modes/components/usage-dashboard";
+import {
+	buildHeatmapLayout,
+	buildProviderCards,
+	UsageDashboardComponent,
+} from "@oh-my-pi/pi-coding-agent/modes/components/usage-dashboard";
+import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 
 function day(day: string, cost: number, requests = 1): DailyActivityPoint {
 	return { day, cost, requests, totalTokens: 0 };
@@ -106,5 +111,25 @@ describe("buildProviderCards", () => {
 		expect(idle.sort()).toEqual(["cursor", "ollama-cloud"]);
 		const unlimited = cards.find(card => card.provider === "ollama-cloud");
 		expect(unlimited?.unlimited).toBe(true);
+	});
+});
+describe("UsageDashboardComponent", () => {
+	beforeAll(async () => {
+		await initTheme(false);
+	});
+	it("renders specific error reason when activity loading fails instead of generic DB read error", async () => {
+		const { promise: rendered, resolve: markRendered } = Promise.withResolvers<void>();
+		const component = new UsageDashboardComponent({
+			reports: [],
+			renderDetail: () => "",
+			loadActivity: () => Promise.reject(new Error("worker spawn failed")),
+			requestRender: () => markRendered(),
+			onClose: () => {},
+		});
+
+		await rendered;
+		const lines = component.render(80).join("\n");
+		expect(lines).toContain("Usage history unavailable (worker spawn failed).");
+		expect(lines).not.toContain("stats database could not be read");
 	});
 });
