@@ -86,25 +86,36 @@ describe("literal colon filename resolution (issue #4618)", () => {
 			});
 		});
 
-		it("always interprets selector-shaped suffixes on Windows without probing", async () => {
-			const busy = Object.assign(new Error("resource busy"), { code: "EBUSY" });
+		it("uses only confirmed Windows literal paths", async () => {
+			const literal = "base.txt:1-2";
+			await Bun.write(path.join(tmpDir, literal), "stream\n");
 			const platform = Object.getOwnPropertyDescriptor(process, "platform");
 			if (platform === undefined) throw new Error("process.platform descriptor is unavailable");
 			Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
-			const lstat = spyOn(fs.promises, "lstat").mockRejectedValue(busy);
-			const lstatSync = spyOn(fs, "lstatSync").mockImplementation(() => {
-				throw busy;
-			});
 
 			try {
-				const expected = { path: "test.ts", sel: "1-2" };
-				expect(await splitPathAndSelPreferringLiteral("test.ts:1-2", tmpDir)).toEqual(expected);
-				expect(splitPathAndSelPreferringLiteralSync("test.ts:1-2", tmpDir)).toEqual(expected);
-				expect(lstat).not.toHaveBeenCalled();
-				expect(lstatSync).not.toHaveBeenCalled();
+				const expectedLiteral = { path: literal };
+				expect(await splitPathAndSelPreferringLiteral(literal, tmpDir)).toEqual(expectedLiteral);
+				expect(splitPathAndSelPreferringLiteralSync(literal, tmpDir)).toEqual(expectedLiteral);
+				await fs.promises.rm(path.join(tmpDir, literal));
+
+				const busy = Object.assign(new Error("resource busy"), { code: "EBUSY" });
+				const lstat = spyOn(fs.promises, "lstat").mockRejectedValue(busy);
+				const lstatSync = spyOn(fs, "lstatSync").mockImplementation(() => {
+					throw busy;
+				});
+
+				try {
+					const expectedSelector = { path: "base.txt", sel: "1-2" };
+					expect(await splitPathAndSelPreferringLiteral(literal, tmpDir)).toEqual(expectedSelector);
+					expect(splitPathAndSelPreferringLiteralSync(literal, tmpDir)).toEqual(expectedSelector);
+					expect(lstat).toHaveBeenCalledTimes(1);
+					expect(lstatSync).toHaveBeenCalledTimes(1);
+				} finally {
+					lstatSync.mockRestore();
+					lstat.mockRestore();
+				}
 			} finally {
-				lstatSync.mockRestore();
-				lstat.mockRestore();
 				Object.defineProperty(process, "platform", platform);
 			}
 		});
