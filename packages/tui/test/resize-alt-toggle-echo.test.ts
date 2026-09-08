@@ -154,6 +154,36 @@ describe("resize on Warp, which SIGWINCHes on alt-buffer toggle", () => {
 			tui.stop();
 		}
 	});
+
+	it("paints after a restart during the in-place settle window", async () => {
+		Bun.env.TERM_PROGRAM = "WarpTerminal";
+		const term = new VirtualTerminal(40, 12);
+		const writes: string[] = [];
+		const originalWrite = term.write.bind(term);
+		term.write = (data: string) => {
+			writes.push(data);
+			originalWrite(data);
+		};
+		const scheduler = new VirtualRenderScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		tui.addChild(new LineComponent("row-", 8));
+		try {
+			tui.start();
+			await scheduler.settle(term);
+
+			// Stop mid-settle: the pending transaction must not wedge the next
+			// session's paints.
+			term.resize(40, 20);
+			tui.stop();
+			writes.length = 0;
+
+			tui.start();
+			await scheduler.settle(term);
+			expect(writes.join("")).toContain("row-0");
+		} finally {
+			tui.stop();
+		}
+	});
 });
 
 describe("Warp in-place resize with a frame provider in rebuild mode", () => {

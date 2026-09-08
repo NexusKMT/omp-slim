@@ -1750,6 +1750,8 @@ export class TUI extends Container {
 		this.#debugServer = undefined;
 		this.#resizeSettleTimer?.cancel();
 		this.#resizeSettleTimer = undefined;
+		this.#resizeInPlaceActive = false;
+		this.#altToggleEchoPending = false;
 		this.#cancelResizeProbe();
 		if (this.#resizeAltActive) {
 			this.#resizeAltActive = false;
