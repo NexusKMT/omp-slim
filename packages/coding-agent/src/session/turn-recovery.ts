@@ -1336,7 +1336,8 @@ export class TurnRecovery {
 		const transportReset =
 			message.stopReason === "error" &&
 			(HTTP2_STREAM_RESET_ERROR_RE.test(errorMessage) ||
-				AIError.PYTHON_HTTP2_STREAM_RESET_PATTERN.test(errorMessage)) &&
+				AIError.PYTHON_HTTP2_STREAM_RESET_PATTERN.test(errorMessage) ||
+				AIError.PYTHON_HTTP_INCOMPLETE_CHUNK_PATTERN.test(errorMessage)) &&
 			AIError.retriable(id) &&
 			!this.#host.abortInProgress() &&
 			!this.#host.isDisposed() &&

@@ -270,6 +270,21 @@ describe("error-id classification", () => {
 		}
 	});
 
+	it("keeps generic API and chunk-format errors outside transient recovery", () => {
+		for (const errorMessage of [
+			"Codex error event: invalid chunk header (code=api_error)",
+			"Codex error event: malformed chunk footer (code=api_error)",
+			"Codex error event: invalid request body (code=api_error)",
+		]) {
+			const assistant = message({
+				api: "openai-codex-responses",
+				provider: "openai-codex",
+				errorMessage,
+			});
+			expect(AIError.retriable(AIError.classifyMessage(assistant))).toBe(false);
+		}
+	});
+
 	it("merges existing cause-chain kinds with finalized error text kinds", () => {
 		const assistant = message({
 			errorId: AIError.create(AIError.Flag.ThinkingLoop),

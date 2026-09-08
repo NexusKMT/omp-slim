@@ -3238,7 +3238,16 @@ describe("AgentSession retry delay cap", () => {
 					"Codex error event: <StreamReset stream_id:1283, error_code:2, remote_reset:True> (code=api_error)",
 			},
 		],
-	] satisfies [string, MockResponse][])("retries on %s stream reset errors", async (_label, failure) => {
+		[
+			"proxied Python HTTP/1.1 chunked body",
+			{
+				content: [],
+				stopReason: "error",
+				errorMessage:
+					"Codex error event: peer closed connection without sending complete message body (incomplete chunked read) (code=api_error)",
+			},
+		],
+	] satisfies [string, MockResponse][])("retries on %s stream interruption errors", async (_label, failure) => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) {
 			throw new Error("Expected bundled Anthropic test model to exist");
@@ -3280,7 +3289,7 @@ describe("AgentSession retry delay cap", () => {
 			if (event.type === "auto_retry_end") retryEndEvents.push(event);
 		});
 
-		await session.prompt("Trigger HTTP/2 stream reset");
+		await session.prompt("Trigger stream interruption");
 		await session.waitForIdle();
 
 		expect(retryStartEvents).toHaveLength(1);
