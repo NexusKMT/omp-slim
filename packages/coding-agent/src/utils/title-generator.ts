@@ -301,7 +301,7 @@ export async function generateTitleOnline(
 						signal,
 					},
 				),
-			{ signal },
+			{ signal, provider: model.provider },
 		);
 
 		if (response.stopReason === "error") {

@@ -8,7 +8,7 @@
 
 ### Fixed
 
-- Fixed Z.AI and Zhipu usage-limit credential blocks expiring eight hours late when provider responses omit the reset timestamp timezone ([#11014](https://github.com/can1357/oh-my-pi/issues/11014)).
+- Fixed Z.AI and Zhipu usage-limit credential blocks and oneshot completion retries (titles, summaries, classifiers) resolving eight hours late when provider responses omit the reset timestamp timezone ([#11014](https://github.com/can1357/oh-my-pi/issues/11014)).
 
 ## [18.1.11] - 2026-09-05
 

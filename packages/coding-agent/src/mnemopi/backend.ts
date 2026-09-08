@@ -579,20 +579,22 @@ async function resolveMnemopiProviderOptions(
 					});
 					return null;
 				}
-				const message = await retryTransientCompletion(() =>
-					completeSimple(
-						model,
-						{
-							...(request.systemPrompt ? { systemPrompt: [request.systemPrompt] } : {}),
-							messages: [{ role: "user", content: request.prompt, timestamp: Date.now() }],
-						},
-						{
-							apiKey: modelRegistry.resolver(model, sessionId),
-							sessionId,
-							maxTokens: opts?.maxTokens,
-							temperature: opts?.temperature,
-						},
-					),
+				const message = await retryTransientCompletion(
+					() =>
+						completeSimple(
+							model,
+							{
+								...(request.systemPrompt ? { systemPrompt: [request.systemPrompt] } : {}),
+								messages: [{ role: "user", content: request.prompt, timestamp: Date.now() }],
+							},
+							{
+								apiKey: modelRegistry.resolver(model, sessionId),
+								sessionId,
+								maxTokens: opts?.maxTokens,
+								temperature: opts?.temperature,
+							},
+						),
+					{ provider: model.provider },
 				);
 				return message.content
 					.filter(

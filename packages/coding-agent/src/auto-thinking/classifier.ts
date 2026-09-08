@@ -170,7 +170,7 @@ async function classifyOnline(input: string, deps: ClassifyDifficultyDeps, ceili
 						}),
 				},
 			),
-		{ signal: deps.signal },
+		{ signal: deps.signal, provider: model.provider },
 	);
 
 	if (response.stopReason === "error") {
