@@ -2845,6 +2845,20 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 	const index = options.index ?? 0;
 	const startTime = Date.now();
 	const session = await AgentLifecycleManager.global().ensureLive(id);
+	// Acquire turn ownership before mutating the shared yield contract: installing
+	// pooled items under a running ordinary wake would reject its in-flight tool
+	// calls. The check-to-install section below has no await, so once idle is
+	// observed no wake dispatch can interleave before the synchronous mutation.
+	// Bounded so a wedged worker fails its batch instead of hanging the pool.
+	let ownershipWaits = 0;
+	while (session.isStreaming && ownershipWaits < 3) {
+		ownershipWaits++;
+		if (signal) {
+			await untilAborted(signal, () => session.waitForIdle());
+		} else {
+			await session.waitForIdle();
+		}
+	}
 	await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
 	const ref = AgentRegistry.global().get(id);
 	const sessionFile = ref?.sessionFile ?? undefined;

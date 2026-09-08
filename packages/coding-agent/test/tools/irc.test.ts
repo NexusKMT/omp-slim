@@ -1255,6 +1255,37 @@ describe("IRC", () => {
 			const event = await ircEvent;
 			expect(event.type).toBe("irc_message");
 		});
+		it("defers an idle wake while a pooled yield contract is installed", async () => {
+			const { session } = createRealSession();
+			sessions.push(session);
+			vi.spyOn(session, "refreshBaseSystemPrompt").mockResolvedValue(undefined);
+			const promptSpy = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined);
+			await session.setWorkPoolYieldItems([{ id: "pool#1", index: 1 }]);
+			const outcome = await session.deliverIrcMessage({
+				id: "msg-pooled",
+				from: "0-Peer",
+				to: "0-Me",
+				body: "status?",
+				ts: Date.now(),
+			});
+			expect(outcome).toBe("woken");
+			for (let i = 0; i < 10; i++) await Promise.resolve();
+			// An ordinary wake under pooled items would emit keyed yields against
+			// another turn's items, so no turn starts while the contract is pooled.
+			expect(promptSpy).not.toHaveBeenCalled();
+			await session.setWorkPoolYieldItems([]);
+			await session.deliverIrcMessage({
+				id: "msg-clear",
+				from: "0-Peer",
+				to: "0-Me",
+				body: "status?",
+				ts: Date.now(),
+			});
+			for (let i = 0; i < 10; i++) await Promise.resolve();
+			// Liveness: the worker still wakes once the contract is ordinary (the
+			// deferred record may additionally resume as its own turn).
+			expect(promptSpy).toHaveBeenCalled();
+		});
 
 		it("queues peer IRC as an interrupt while a turn is streaming", async () => {
 			const { session } = createRealSession();

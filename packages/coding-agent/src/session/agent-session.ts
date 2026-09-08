@@ -1020,7 +1020,20 @@ export class AgentSession {
 		// advertise one yield schema while the runtime enforces the other, so join
 		// the transition before building the turn from a consistent contract.
 		void this.whenWorkPoolYieldSettled()
-			.then(() => this.agent.prompt(records))
+			.then(() => {
+				// Synchronous ownership check, atomic with the dispatch below:
+				// agent.prompt() claims streaming with no await in between, and the
+				// yield contract above mutates synchronously, so no install can
+				// interleave here. Never start an ordinary wake under an installed
+				// pooled contract (it would emit keyed yields against another
+				// turn's items); preserve the records as asides instead.
+				if (this.agent.state.isStreaming || this.#workPoolYieldItems.length > 0) {
+					this.#irc.queueAside(records);
+					logger.debug("IRC wake turn deferred: worker busy or pooled");
+					return;
+				}
+				return this.agent.prompt(records);
+			})
 			.catch(error => {
 				if (error instanceof AgentBusyError) {
 					// Lost the prompt race (e.g. a WorkPool follow-up dispatched
@@ -7395,31 +7408,43 @@ export class AgentSession {
 
 	/** Replace the pooled-turn yield contract and rebuild the provider prompt when it changes. */
 	setWorkPoolYieldItems(items: readonly WorkPoolYieldItem[]): Promise<void> {
-		// Serialize transitions so a pooled install racing a clear (or an IRC
-		// wake racing either) observes them in call order. The change check runs
-		// inside the chain against the live set: a call-time check could no-op
-		// against a contract a queued transition has not applied yet.
-		const run = this.#workPoolYieldTransition.then(() => this.#applyWorkPoolYieldItems(items));
-		this.#workPoolYieldTransition = run.catch(() => {});
-		return run;
-	}
-
-	/** Settles when any in-flight yield contract transition completes. Wake-turn
-	 *  entry joins it so a turn never builds from a half-applied contract. */
-	whenWorkPoolYieldSettled(): Promise<void> {
-		return this.#workPoolYieldTransition;
-	}
-
-	async #applyWorkPoolYieldItems(items: readonly WorkPoolYieldItem[]): Promise<void> {
+		// Publish the new contract synchronously: prompt dispatchers (IRC wakes,
+		// follow-up turns) decide on live state in await-free sections, so the
+		// mutation must be visible before the first await. Live state is always
+		// post-last-call, so the change check cannot go stale; the prompt rebuild
+		// stays async on the serialized tail below.
 		const current = this.#workPoolYieldItems;
 		if (
 			current.length === items.length &&
 			current.every((item, index) => item.id === items[index]?.id && item.index === items[index]?.index)
 		) {
-			return;
+			return this.#workPoolYieldTransition;
 		}
-		this.#workPoolYieldItems = items.map(item => ({ ...item }));
-		await this.refreshBaseSystemPrompt();
+		const previous = current;
+		const applied = items.map(item => ({ ...item }));
+		this.#workPoolYieldItems = applied;
+		const run = this.#workPoolYieldTransition.then(async () => {
+			try {
+				await this.refreshBaseSystemPrompt();
+			} catch (error) {
+				// Roll back to the pre-transition contract so gated readers never
+				// observe a half-applied runtime/provider pair. A newer transition
+				// may have replaced the set meanwhile; only restore what this one
+				// installed.
+				if (this.#workPoolYieldItems === applied) {
+					this.#workPoolYieldItems = previous;
+				}
+				throw error;
+			}
+		});
+		this.#workPoolYieldTransition = run.catch(() => {});
+		return run;
+	}
+
+	/** Settles when any in-flight yield prompt rebuild completes. Wake-turn entry
+	 *  joins it so a turn never builds from stale provider bytes. */
+	whenWorkPoolYieldSettled(): Promise<void> {
+		return this.#workPoolYieldTransition;
 	}
 
 	#buildReplanTitleContext(): string {

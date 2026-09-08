@@ -306,6 +306,56 @@ describe("runSubprocess yield reminders", () => {
 			AgentRegistry.global().unregister("subagent-race");
 		}
 	});
+	it("waits out a running turn before installing the pooled contract", async () => {
+		const calls: string[] = [];
+		let streaming = true;
+		const session = createMockSession(({ emit }) => {
+			emit({
+				type: "tool_execution_end",
+				toolCallId: "tool-batch",
+				toolName: "yield",
+				result: {
+					content: [{ type: "text", text: "Result submitted." }],
+					details: { status: "success", data: { batch: true } },
+				},
+				isError: false,
+			});
+		});
+		const mutable = session as unknown as {
+			isStreaming: boolean;
+			setWorkPoolYieldItems: (items: unknown[]) => Promise<void>;
+			waitForIdle: () => Promise<void>;
+		};
+		Object.defineProperty(mutable, "isStreaming", { get: () => streaming, configurable: true });
+		mutable.setWorkPoolYieldItems = async () => {
+			calls.push("setYield");
+		};
+		mutable.waitForIdle = async () => {
+			calls.push("waitForIdle");
+			streaming = false;
+		};
+		AgentRegistry.global().register({
+			id: "subagent-prewait",
+			displayName: "subagent-prewait",
+			kind: "sub",
+			status: "idle",
+			session,
+		});
+		try {
+			// Installing pooled items under the running ordinary wake would reject
+			// its in-flight calls, so the follow-up must observe idle first.
+			const result = await runSubagentFollowUpTurn({
+				...baseOptions,
+				id: "subagent-prewait",
+				message: "batch work",
+			});
+			expect(calls.slice(0, 2)).toEqual(["waitForIdle", "setYield"]);
+			expect(result.exitCode).toBe(0);
+			expect(result.output).toContain('"batch": true');
+		} finally {
+			AgentRegistry.global().unregister("subagent-prewait");
+		}
+	});
 	it("sends reminder prompt when subagent stops without yield", async () => {
 		const prompts: string[] = [];
 		const promptOptions: Array<PromptOptions | undefined> = [];
