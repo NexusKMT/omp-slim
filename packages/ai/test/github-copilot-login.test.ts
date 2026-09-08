@@ -177,16 +177,25 @@ describe("loginGitHubCopilot", () => {
 		});
 	});
 
-	it("enterprise domain", async () => {
-		const fetchMock = vi.fn(async (input: string | URL) => {
+	it("enterprise domains keep the GitHub-owned Copilot CLI client", async () => {
+		const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
 			const url = typeof input === "string" ? input : input.toString();
 			if (url === "https://ghe.example.com/login/device/code") {
+				expectOAuthRequest(init, {
+					client_id: "Ov23ctDVkRmgkPke0Mmm",
+					scope: "read:user",
+				});
 				return new Response(JSON.stringify(deviceCodeResponse()), {
 					status: 200,
 					headers: { "Content-Type": "application/json" },
 				});
 			}
 			if (url === "https://ghe.example.com/login/oauth/access_token") {
+				expectOAuthRequest(init, {
+					client_id: "Ov23ctDVkRmgkPke0Mmm",
+					device_code: "dc_test",
+					grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+				});
 				return new Response(JSON.stringify(accessTokenResponse()), {
 					status: 200,
 					headers: { "Content-Type": "application/json" },
