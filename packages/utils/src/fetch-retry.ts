@@ -15,11 +15,11 @@ const WILL_RESET_IN_PATTERN = /(?:will\s+)?reset in\s+~?\s*([0-9.]+)\s*(ms|sec|s
 // "Your limit will reset at 2026-09-01 09:44:51" / "reset at 2026-09-01T09:44:51Z"
 const WILL_RESET_AT_PATTERN =
 	/(?:will\s+)?reset at\s+([0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:?[0-9]{2})?)/i;
+// Both grammars carry a timezone-naive wall clock. The default reading is UTC;
+// a provider-specific offset (Z.AI/Zhipu Beijing time) is applied only through
+// `RetryHintOptions.naiveResetTimezoneOffset`, never inferred from the language.
 const CN_RESET_AT_PATTERN = /将在\s*([0-9]{4}-[0-9]{2}-[0-9]{2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2})\s*重置/;
-const RESET_AT_PATTERNS: readonly { pattern: RegExp; assumedOffset: string }[] = [
-	{ pattern: WILL_RESET_AT_PATTERN, assumedOffset: "Z" },
-	{ pattern: CN_RESET_AT_PATTERN, assumedOffset: "+08:00" },
-];
+const RESET_AT_PATTERNS: readonly RegExp[] = [WILL_RESET_AT_PATTERN, CN_RESET_AT_PATTERN];
 // "retry-after-ms=98497000" / "retry-after-ms: 7200000" / "retry-after-ms = 7200000"
 const RETRY_AFTER_MS_BODY_PATTERN = /\bretry-after-ms\s*[:=]\s*([0-9]+)\b/i;
 
@@ -131,12 +131,12 @@ export function extractRetryHint(
 			consider(totalMs > 0 ? totalMs : undefined);
 		}
 	}
-	for (const { pattern, assumedOffset } of RESET_AT_PATTERNS) {
+	for (const pattern of RESET_AT_PATTERNS) {
 		const match = pattern.exec(body);
 		if (!match?.[1]) continue;
 		const normalized = match[1].replace(" ", "T");
 		const hasOffset = /(?:Z|[+-][0-9]{2}:?[0-9]{2})$/i.test(normalized);
-		const offset = options?.naiveResetTimezoneOffset ?? assumedOffset;
+		const offset = options?.naiveResetTimezoneOffset ?? "Z";
 		const parsed = Date.parse(hasOffset ? normalized : `${normalized}${offset}`);
 		if (!Number.isNaN(parsed) && parsed > Date.now()) consider(parsed - Date.now());
 	}

@@ -205,10 +205,20 @@ describe("extractRetryHint", () => {
 		expect(hint).toBeLessThanOrEqual(3_600_000);
 	});
 
-	it("interprets Chinese reset timestamps as Beijing time", () => {
-		const targetMs = Date.parse("2099-09-01T09:44:51+08:00");
+	it("reads a naive Chinese reset stamp as UTC without a provider offset", () => {
+		const targetMs = Date.parse("2099-09-01T09:44:51Z");
 		const expected = targetMs - Date.now();
 		const hint = extractRetryHint(undefined, "已达到使用上限。您的限额将在 2099-09-01 09:44:51 重置。");
+		expect(hint).toBeDefined();
+		expect(Math.abs(hint! - expected)).toBeLessThan(100);
+	});
+
+	it("applies naiveResetTimezoneOffset to a naive Chinese reset stamp", () => {
+		const targetMs = Date.parse("2099-09-01T09:44:51+08:00");
+		const expected = targetMs - Date.now();
+		const hint = extractRetryHint(undefined, "已达到使用上限。您的限额将在 2099-09-01 09:44:51 重置。", {
+			naiveResetTimezoneOffset: "+08:00",
+		});
 		expect(hint).toBeDefined();
 		expect(Math.abs(hint! - expected)).toBeLessThan(100);
 	});
