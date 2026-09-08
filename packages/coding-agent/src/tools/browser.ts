@@ -291,9 +291,9 @@ async function openBrowser(
 					dialogs: params.dialogs,
 					signal: openSignal,
 					ownerSessionId: session.getSessionId?.() ?? undefined,
-					// Recorded on the tab at creation only; later reuse
-					// cannot extend another session's tab lifetime.
-					persist: params.persist ?? false,
+					// Omitted stays undefined: creation defaults it to false
+					// while reuse by the owner leaves a set value alone.
+					persist: params.persist,
 				}),
 			);
 		} catch (error) {

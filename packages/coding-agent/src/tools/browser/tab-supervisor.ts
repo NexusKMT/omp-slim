@@ -300,6 +300,12 @@ async function acquireTabImpl(
 				// error a run would raise, instead of reporting a reuse
 				// that can never execute.
 				existing.lastActivityAt = Date.now();
+				// The creator may opt out later: an explicit `persist` on
+				// reuse by the owning session updates the tab (omitted
+				// leaves it). Reuse by any other session never changes it.
+				if (opts.persist !== undefined && existing.ownerSessionId === opts.ownerSessionId) {
+					existing.persist = opts.persist;
+				}
 				if (!(await unfreezeTabSession(existing))) {
 					throw new ToolError(
 						`Tab ${JSON.stringify(name)} is frozen and could not be resumed. Close and reopen it.`,
@@ -708,7 +714,7 @@ async function runInTabWithSnapshot(
  * (and the shared browser hold would release twice). Joiners share the
  * first release's outcome.
  */
-const releaseInflight = new WeakMap<TabSession, Promise<boolean>>();
+const releaseInflight = new WeakMap<TabSession, { promise: Promise<boolean>; opts: ReleaseTabOptions }>();
 
 export async function releaseTab(name: string, opts: ReleaseTabOptions = {}): Promise<boolean> {
 	const tab = tabs.get(name);
@@ -717,11 +723,19 @@ export async function releaseTab(name: string, opts: ReleaseTabOptions = {}): Pr
 		return false;
 	}
 	const ongoing = releaseInflight.get(tab);
-	if (ongoing) return await ongoing;
-	const run = releaseTabInner(tab, name, opts);
-	releaseInflight.set(tab, run);
+	if (ongoing) {
+		// Coalesce cleanup strength: a joining disposal must not lose its
+		// kill request to an earlier non-killing close — `releaseBrowser`
+		// reads `opts.kill` at teardown time, so the upgrade lands as long
+		// as the first release has not finished. (Not directly testable
+		// in-process: observing it needs a real spawned application.)
+		ongoing.opts.kill = ongoing.opts.kill || opts.kill;
+		return await ongoing.promise;
+	}
+	const entry = { promise: releaseTabInner(tab, name, opts), opts };
+	releaseInflight.set(tab, entry);
 	try {
-		return await run;
+		return await entry.promise;
 	} finally {
 		releaseInflight.delete(tab);
 	}

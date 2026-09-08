@@ -518,6 +518,34 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			expect(getTabsMapForTest().has("settle-twice")).toBe(false);
 		});
 
+		it("honors persist only on reuse by the owning session", async () => {
+			mockCmuxSocket();
+			const browser = await acquireBrowser(makeKind("settle-reuse-persist"), { cwd: "/tmp" });
+			const first = await acquireTab("settle-rp", browser, { timeoutMs: 1_000, ownerSessionId: "session-A" });
+			expect(first.tab.persist).toBe(false);
+
+			const second = await acquireTab("settle-rp", browser, {
+				timeoutMs: 1_000,
+				ownerSessionId: "session-A",
+				persist: true,
+			});
+			expect(second.tab).toBe(first.tab);
+			expect(second.tab.persist).toBe(true);
+
+			const third = await acquireTab("settle-rp", browser, {
+				timeoutMs: 1_000,
+				ownerSessionId: "session-B",
+				persist: false,
+			});
+			expect(third.tab).toBe(first.tab);
+			expect(third.tab.ownerSessionId).toBe("session-A");
+			expect(third.tab.persist).toBe(true);
+
+			// Omitted on reuse leaves a previously set value alone.
+			const fourth = await acquireTab("settle-rp", browser, { timeoutMs: 1_000, ownerSessionId: "session-A" });
+			expect(fourth.tab).toBe(first.tab);
+			expect(fourth.tab.persist).toBe(true);
+		});
 		it("rejects reuse when the frozen tab cannot resume", async () => {
 			mockCmuxSocket();
 			const browser = await acquireBrowser(makeKind("settle-reuse-frozen"), { cwd: "/tmp" });
