@@ -172,14 +172,20 @@ export class SelectorController {
 	}
 
 	/**
-	 * Shows a selector component in place of the editor.
-	 * @param create Factory that receives a `done` callback and returns the component and focus target
+	 * Temporarily replaces the editor slot with a selector, restoring the prior
+	 * slot contents and focus when the selector finishes.
 	 */
 	showSelector(create: (done: () => void) => { component: Component; focus: Component }): void {
+		const previousChildren = [...this.ctx.editorContainer.children];
+		const previousFocus = this.ctx.ui.getFocused();
 		const done = () => {
 			this.ctx.editorContainer.clear();
-			this.ctx.editorContainer.addChild(this.ctx.editor);
-			this.ctx.ui.setFocus(this.ctx.editor);
+			for (const child of previousChildren) this.ctx.editorContainer.addChild(child);
+			const focus =
+				previousFocus && previousChildren.includes(previousFocus)
+					? previousFocus
+					: (previousChildren[0] ?? this.ctx.editor);
+			this.ctx.ui.setFocus(focus);
 		};
 		const { component, focus } = create(done);
 		this.ctx.editorContainer.clear();

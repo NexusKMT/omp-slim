@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Editor shortcuts for thinking visibility, history search, external editing, and tool activity now work while the Ask dialog has focus ([#11213](https://github.com/can1357/oh-my-pi/issues/11213)).
+
 ## [18.1.14] - 2026-09-07
 
 ### Fixed
