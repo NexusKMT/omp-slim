@@ -176,6 +176,7 @@ import type { HookSelectorComponent, HookSelectorSlider } from "./components/hoo
 import { type PlanReviewAnnotationState, PlanReviewOverlay } from "./components/plan-review-overlay";
 import { PlanSaveOverlay, type PlanSaveOverlayResult } from "./components/plan-save-overlay";
 import { SessionInfoOverlay } from "./components/session-info-overlay";
+import { SkillMessageComponent } from "./components/skill-message";
 import { StatusLineComponent } from "./components/status-line";
 import { stopSharedSpinnerTicker, type ToolExecutionHandle } from "./components/tool-execution";
 import { TranscriptContainer } from "./components/transcript-container";
@@ -1944,19 +1945,39 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#optimisticSkillMessageComponents = this.#captureAddedChatComponents(() => {
 			this.addMessageToChat(message, options);
 		});
+		// Hold the row live (unfinalized) so it stays removable until reconcile,
+		// instead of settling and retiring into immutable scrollback mid-preflight
+		// where reconcile could no longer swap it out (issue #11217).
+		for (const component of this.#optimisticSkillMessageComponents) {
+			if (component instanceof SkillMessageComponent) component.markTranscriptBlockPending();
+		}
 		this.ensureLoadingAnimation();
 		this.ui.requestRender();
 	}
 
-	/** Replace the optimistic `/skill:` row with the canonical message emitted by
-	 *  the session, mirroring {@link replaceOptimisticUserMessage} for skills. */
+	/**
+	 * Reconcile the optimistic `/skill:` row against the canonical message emitted
+	 * by the session (mirrors {@link replaceOptimisticUserMessage} for skills).
+	 *
+	 * While the row is still live it is removed and the canonical message appended
+	 * in its place. If it already retired into native scrollback before the
+	 * canonical `message_start` arrived, {@link TranscriptContainer.removeChild}
+	 * refuses silently — appending the canonical then would leave two identical
+	 * cards (issue #11217). In that case the existing row is adopted in place
+	 * (finalized so it can retire normally) and the append is skipped.
+	 */
 	reconcileOptimisticSkillMessage(message: AgentMessage): void {
 		this.optimisticSkillMessagePending = false;
-		for (const component of this.#optimisticSkillMessageComponents) {
-			this.chatContainer.removeChild(component);
-		}
+		const components = this.#optimisticSkillMessageComponents;
 		this.#optimisticSkillMessageComponents = [];
-		this.addMessageToChat(message);
+		if (components.every(component => this.chatContainer.canRemoveBlock(component))) {
+			for (const component of components) this.chatContainer.removeChild(component);
+			this.addMessageToChat(message);
+			return;
+		}
+		for (const component of components) {
+			if (component instanceof SkillMessageComponent) component.markTranscriptBlockFinalized();
+		}
 	}
 
 	/** Drop the optimistic `/skill:` row when dispatch fails or bails before the
