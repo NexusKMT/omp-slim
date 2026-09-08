@@ -1294,11 +1294,6 @@ export class TUI extends Container {
 		this.#resizeSettleTimer = this.#renderScheduler.scheduleRender(() => {
 			this.#resizeSettleTimer = undefined;
 			if (this.#stopped) return;
-			this.#resizeInPlaceActive = false;
-			if (this.#altActive) {
-				this.requestRender(true);
-				return;
-			}
 			this.#resizeProbeWindow = this.#providerWindow;
 			this.#resizeProbeOffset = this.#parkedViewportOffset;
 			this.#beginResizeAnchorProbe();
@@ -1421,7 +1416,6 @@ export class TUI extends Container {
 	 */
 	#beginResizeAnchorProbe(retry = false): void {
 		this.#cancelResizeProbe();
-		this.#resizeInPlaceActive = false;
 		const timer = this.#renderScheduler.scheduleRender(() => {
 			const probe = this.#resizeProbe;
 			if (probe !== undefined && !probe.retried && (isInsideTerminalMultiplexer() || this.#resizeBurstGrew)) {
@@ -1501,6 +1495,7 @@ export class TUI extends Container {
 		if (!probe) return;
 		probe.timer.cancel();
 		this.#resizeProbe = undefined;
+		this.#resizeInPlaceActive = false;
 		// Column tags stay live across resolves: their replies are
 		// self-identifying and discarded by tag whenever they arrive.
 		const width = this.terminal.columns;
@@ -1796,6 +1791,14 @@ export class TUI extends Container {
 		this.#debugServer = undefined;
 		this.#resizeSettleTimer?.cancel();
 		this.#resizeSettleTimer = undefined;
+		if (this.#resizeInPlaceActive && this.terminal.rows > 0) {
+			// The hardware cursor sits wherever the drag left it, but tracking still
+			// describes the pre-resize row (no alt-buffer restore replays it back).
+			// The shell handoff below moves relatively from the tracked row, so park
+			// absolutely on the bottom row and record it first.
+			this.terminal.write(`\x1b[${this.terminal.rows};1H`);
+			this.#hardwareCursorRow = this.terminal.rows - 1;
+		}
 		this.#resizeInPlaceActive = false;
 		this.#altToggleEchoPending = false;
 		this.#cancelResizeProbe();
