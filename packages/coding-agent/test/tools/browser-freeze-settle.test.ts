@@ -22,6 +22,8 @@ import { CmuxSocketClient } from "@oh-my-pi/pi-coding-agent/tools/browser/cmux/s
 import { acquireBrowser } from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
 import {
 	acquireTab,
+	armIdleCloseForOwner,
+	earliestIdleCloseInMs,
 	freezeTabsForOwner,
 	getTabsMapForTest,
 	isIdleCloseCandidate,
@@ -29,6 +31,7 @@ import {
 	releaseTab,
 	runInTab,
 	setTabFrozenForTest,
+	unfreezeTabSessionForTest,
 } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import type { PendingRun, TabSession } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
@@ -251,14 +254,109 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			releaseFrozenSend.resolve();
 
 			// No transition happened, but the frozen frame very likely landed
-			// while its undo did not: later runs must resume via unfreeze.
+			// while its undo did not (initial attempt plus one retry): later
+			// runs must resume via unfreeze.
 			expect(await freeze).toBe(false);
 			expect(tab.frozen).toBe(true);
 			expect(calls.map(call => call.method)).toEqual([
 				"Page.enable",
 				"Page.setWebLifecycleState",
 				"Page.setWebLifecycleState",
+				"Page.setWebLifecycleState",
 			]);
+		});
+
+		it("recovers the in-flight run when the race undo succeeds on retry", async () => {
+			const calls: CdpCall[] = [];
+			const frozenStarted = Promise.withResolvers<void>();
+			const releaseFrozenSend = Promise.withResolvers<void>();
+			let lifecycleSends = 0;
+			const session = {
+				send: async (method: string, params?: unknown): Promise<Record<string, unknown>> => {
+					calls.push({ method, params });
+					if (method === "Page.setWebLifecycleState") {
+						lifecycleSends++;
+						if (lifecycleSends === 1) {
+							frozenStarted.resolve();
+							await releaseFrozenSend.promise;
+						} else if (lifecycleSends === 2) {
+							throw new Error("undo blip");
+						}
+					}
+					return {};
+				},
+				detach: async (): Promise<void> => undefined,
+			};
+			const { tab } = makeStubTab({
+				browser: {
+					browser: { targets: () => [{ _targetId: "stub-target-1", createCDPSession: async () => session }] },
+				},
+			});
+
+			const freeze = setTabFrozenForTest(tab, true);
+			await frozenStarted.promise;
+			tab.pending.set("run-1", {} as unknown as PendingRun);
+			releaseFrozenSend.resolve();
+
+			expect(await freeze).toBe(false);
+			expect(tab.frozen).toBe(false);
+			expect(calls.map(call => call.method)).toEqual([
+				"Page.enable",
+				"Page.setWebLifecycleState",
+				"Page.setWebLifecycleState",
+				"Page.setWebLifecycleState",
+			]);
+			expect(calls.at(-1)?.params).toEqual({ state: "active" });
+		});
+	});
+
+	describe("browser settle — pre-run resume", () => {
+		it("reports resumable tabs without touching CDP", async () => {
+			const { tab, calls } = makeStubTab();
+			expect(await unfreezeTabSessionForTest(tab)).toBe(true);
+			expect(calls.length).toBe(0);
+		});
+
+		it("resumes a frozen tab and clears the flag", async () => {
+			const { tab, calls } = makeStubTab({ frozen: true });
+			expect(await unfreezeTabSessionForTest(tab)).toBe(true);
+			expect(tab.frozen).toBe(false);
+			expect(calls.map(call => call.method)).toEqual(["Page.enable", "Page.setWebLifecycleState"]);
+			expect(calls.at(-1)?.params).toEqual({ state: "active" });
+		});
+
+		it("fails a refused resume so the run errors instead of stalling", async () => {
+			const { tab, calls } = makeStubTab({
+				frozen: true,
+				browser: {
+					browser: {
+						targets: () => [
+							{
+								_targetId: "stub-target-1",
+								createCDPSession: async () => ({
+									send: async (method: string, params?: unknown): Promise<Record<string, unknown>> => {
+										calls.push({ method, params });
+										if (method === "Page.setWebLifecycleState") throw new Error("refused");
+										return {};
+									},
+									detach: async (): Promise<void> => undefined,
+								}),
+							},
+						],
+					},
+				},
+			});
+			expect(await unfreezeTabSessionForTest(tab)).toBe(false);
+			expect(tab.frozen).toBe(true);
+		});
+
+		it("lets a run proceed when the frozen target is already gone", async () => {
+			const { tab, calls } = makeStubTab({
+				frozen: true,
+				browser: { browser: { targets: () => [] } },
+			});
+			expect(await unfreezeTabSessionForTest(tab)).toBe(true);
+			expect(calls.length).toBe(0);
 		});
 	});
 
@@ -376,11 +474,33 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			expect(tab.lastActivityAt).toBeGreaterThan(Date.now() - 5_000);
 		});
 
+		it("fails the run instead of dispatching onto an unresumable page", async () => {
+			mockCmuxSocket();
+			const browser = await acquireBrowser(makeKind("settle-unresumable"), { cwd: "/tmp" });
+			const { tab } = await acquireTab("settle-stuck", browser, { timeoutMs: 1_000, ownerSessionId: "session-A" });
+			tab.frozen = true;
+
+			await expect(
+				runInTab("settle-stuck", { code: "return 1;", timeoutMs: 5_000, session: makeSession("/tmp") }),
+			).rejects.toThrow(/could not be resumed/);
+			expect(tab.pending.size).toBe(0);
+			expect(getTabsMapForTest().has("settle-stuck")).toBe(true);
+		});
+
 		it("settle is a no-op for unknown owners", async () => {
 			expect(await freezeTabsForOwner("session-nobody")).toBe(0);
 			expect(await releaseIdleTabsForOwner("session-nobody", { idleMs: 0 })).toBe(0);
 			expect(await freezeTabsForOwner("")).toBe(0);
 			expect(await releaseIdleTabsForOwner("", { idleMs: 0 })).toBe(0);
+		});
+	});
+
+	describe("browser settle — idle deadline arithmetic", () => {
+		it("returns undefined without an owner, a timeout, or tracked tabs", () => {
+			expect(earliestIdleCloseInMs("session-nobody", 60_000)).toBeUndefined();
+			expect(earliestIdleCloseInMs("", 60_000)).toBeUndefined();
+			expect(earliestIdleCloseInMs("session-nobody", 0)).toBeUndefined();
+			expect(earliestIdleCloseInMs("session-nobody", -5)).toBeUndefined();
 		});
 	});
 
@@ -433,6 +553,35 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			expect(await closing).toBe(1);
 			expect(getTabsMapForTest().has(`${base}-a`)).toBe(false);
 			expect(getTabsMapForTest().has(`${base}-b`)).toBe(true);
+		}, 120_000);
+
+		it("closes idle tabs when the timeout elapses without further activity", async () => {
+			const browser = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+			const name = `settle-timer-${process.pid}`;
+			await acquireTab(name, browser, { timeoutMs: 30_000, ownerSessionId: "session-timer" });
+			const due = earliestIdleCloseInMs("session-timer", 60_000);
+			expect(due).toBeGreaterThan(0);
+			expect(due).toBeLessThanOrEqual(60_000);
+
+			armIdleCloseForOwner("session-timer", 200);
+			// Real clock required: the deadline, worker teardown, and CDP
+			// roundtrips all run on platform time; fake timers cannot advance
+			// real subprocess IPC, so poll the exercised condition instead.
+			for (let i = 0; i < 100 && getTabsMapForTest().has(name); i++) await Bun.sleep(50);
+			expect(getTabsMapForTest().has(name)).toBe(false);
+		}, 120_000);
+
+		it("re-arming replaces the pending deadline", async () => {
+			const browser = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+			const name = `settle-retimer-${process.pid}`;
+			await acquireTab(name, browser, { timeoutMs: 30_000, ownerSessionId: "session-retimer" });
+
+			armIdleCloseForOwner("session-retimer", 200);
+			armIdleCloseForOwner("session-retimer", 3_600_000);
+			// Real clock required (see above): past the first deadline with
+			// the replacement armed, the tab must still be tracked.
+			await Bun.sleep(600);
+			expect(getTabsMapForTest().has(name)).toBe(true);
 		}, 120_000);
 	});
 });

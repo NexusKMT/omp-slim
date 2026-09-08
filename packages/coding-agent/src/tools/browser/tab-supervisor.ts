@@ -7,7 +7,7 @@ import {
 	withTimeout,
 	workerHostEntry,
 } from "@oh-my-pi/pi-utils";
-import type { Page, Target } from "puppeteer-core";
+import type { CDPSession, Page, Target } from "puppeteer-core";
 import { callSessionTool } from "../../eval/js/tool-bridge";
 import { webpExclusionForModel } from "../../utils/image-loading";
 import type { ToolSession } from "../index";
@@ -586,9 +586,12 @@ async function runInTabWithSnapshot(
 	// stalling timer/rAF-dependent code to timeout.
 	tab.pending.set(id, pending);
 	// Resume a settle-frozen page before driving it — frozen rAF/timers would
-	// otherwise hang the execution below. Never throws: on failure the run
-	// proceeds and surfaces the underlying page error itself.
-	await unfreezeTabSession(tab);
+	// otherwise hang the execution below. A refused resume fails the run
+	// here with an actionable error instead of stalling to timeout.
+	if (!(await unfreezeTabSession(tab))) {
+		tab.pending.delete(id);
+		throw new ToolError(`Tab ${JSON.stringify(name)} is frozen and could not be resumed. Close and reopen it.`);
+	}
 	const current = tabs.get(name);
 	if (current !== tab || current.state === "dead") {
 		// A teardown won the race with our unfreeze roundtrip. Prefer its
@@ -876,19 +879,13 @@ async function setTabFrozen(tab: TabSession, frozen: boolean): Promise<boolean> 
 		if (frozen) {
 			if (tab.frozen) return false;
 			if (tab.pending.size > 0) {
-				const undone = await session.send("Page.setWebLifecycleState", { state: "active" }).then(
-					() => true,
-					() => false,
-				);
-				if (!undone) {
-					// The frozen frame very likely landed while its undo did
-					// not. Record frozen so the owning run and later runs
-					// resume via unfreeze instead of executing against a
-					// paused page; a redundant `active` on an already-active
-					// page is harmless, and idle-close still bounds a tab
-					// that never runs again.
-					tab.frozen = true;
-				}
+				if (await sendLifecycleState(session, "active")) return false;
+				// One retry for the in-flight run's sake: a brief frozen
+				// blip is harmless (rAF just skips frames), but an
+				// indefinite freeze stalls it to timeout.
+				await Bun.sleep(100);
+				if (await sendLifecycleState(session, "active")) return false;
+				tab.frozen = true;
 				return false;
 			}
 			tab.frozen = true;
@@ -905,6 +902,16 @@ async function setTabFrozen(tab: TabSession, frozen: boolean): Promise<boolean> 
 		return false;
 	} finally {
 		await session.detach().catch(() => undefined);
+	}
+}
+
+/** Best-effort lifecycle write on an owned CDP session; false when the call fails. */
+async function sendLifecycleState(session: CDPSession, state: "frozen" | "active"): Promise<boolean> {
+	try {
+		await session.send("Page.setWebLifecycleState", { state });
+		return true;
+	} catch {
+		return false;
 	}
 }
 
@@ -928,13 +935,28 @@ export async function unfreezeTab(name: string): Promise<boolean> {
 }
 
 /**
- * Resume a tab before driving it. Never throws: a failed unfreeze leaves
- * `frozen` set so the next checkpoint retries, and the caller's run proceeds
- * to surface the underlying page error itself.
+ * Resume a tab before driving it. Returns false only when the page target
+ * exists but refuses the `active` transition even after one retry — the
+ * page is most likely still paused, so the caller must not dispatch onto
+ * it. A vanished target returns true: the run proceeds and surfaces the
+ * real page error immediately instead of hanging to timeout.
  */
-async function unfreezeTabSession(tab: TabSession): Promise<void> {
-	if (!tab.frozen) return;
-	await setTabFrozen(tab, false).catch(() => false);
+async function unfreezeTabSession(tab: TabSession): Promise<boolean> {
+	if (!tab.frozen) return true;
+	if (tab.backend === "worker") {
+		const target = await findTargetForTab(tab).catch(() => undefined);
+		// Page target gone: let the run proceed and surface the real page
+		// error immediately instead of hanging to timeout.
+		if (!target) return true;
+	}
+	if (await setTabFrozen(tab, false).catch(() => false)) return true;
+	await Bun.sleep(100);
+	return await setTabFrozen(tab, false).catch(() => false);
+}
+
+/** Test hook for the pre-run resume without a tabs-map entry. */
+export function unfreezeTabSessionForTest(tab: TabSession): Promise<boolean> {
+	return unfreezeTabSession(tab);
 }
 
 /**
@@ -986,7 +1008,62 @@ export async function releaseIdleTabsForOwner(
 		if (!current || !isIdleCloseCandidate(current, ownerId, Date.now(), opts.idleMs)) continue;
 		if (await releaseTab(name, opts)) count++;
 	}
+	// Leave the next deadline armed: sweeps only fire on turns, opens, and
+	// timer callbacks, so without this an abandoned tab would never close.
+	armIdleCloseForOwner(ownerId, opts.idleMs);
 	return count;
+}
+
+/** Per-owner one-shot timers arming the idle-close backstop. Always unref'd. */
+const idleCloseTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * Milliseconds until the owner's next managed tab goes idle, `0` when one
+ * already is, or undefined when no managed tab is tracked. The sweep
+ * checkpoints (turn settle, open) handle the due case synchronously; the
+ * timer covers abandonment with no further activity.
+ */
+export function earliestIdleCloseInMs(ownerId: string, idleMs: number, nowMs: number = Date.now()): number | undefined {
+	if (!ownerId || !(idleMs > 0)) return undefined;
+	let earliest: number | undefined;
+	for (const tab of tabs.values()) {
+		if (tab.ownerSessionId !== ownerId || !isSettleManaged(tab)) continue;
+		const remaining = idleMs - (nowMs - tab.lastActivityAt);
+		if (remaining <= 0) return 0;
+		earliest = earliest === undefined ? remaining : Math.min(earliest, remaining);
+	}
+	return earliest;
+}
+
+/**
+ * (Re)arm the owner-scoped one-shot that closes idle tabs when the timeout
+ * elapses without further activity. Without this, a tab used in the final
+ * turn before an idle session would sit until the next turn, open, or
+ * dispose despite the advertised timeout. The timer is unref'd so it never
+ * holds the process open (print/RPC exits are unaffected), firing
+ * re-enters through `releaseIdleTabsForOwner` — which re-arms while
+ * survivors remain — and disposal needs no cleanup since a fired sweep
+ * over released tabs is a no-op.
+ */
+export function armIdleCloseForOwner(ownerId: string, idleMs: number): void {
+	const existing = idleCloseTimers.get(ownerId);
+	if (existing !== undefined) {
+		idleCloseTimers.delete(ownerId);
+		clearTimeout(existing);
+	}
+	const delay = earliestIdleCloseInMs(ownerId, idleMs);
+	if (delay === undefined || delay <= 0) return;
+	const timer = setTimeout(
+		() => {
+			idleCloseTimers.delete(ownerId);
+			void releaseIdleTabsForOwner(ownerId, { idleMs })
+				.then(() => armIdleCloseForOwner(ownerId, idleMs))
+				.catch(() => undefined);
+		},
+		Math.min(delay, 2_147_483_647),
+	);
+	timer.unref();
+	idleCloseTimers.set(ownerId, timer);
 }
 
 /** Test-only accessor for the module-global tabs map. */
