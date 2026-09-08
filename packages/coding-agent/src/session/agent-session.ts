@@ -584,6 +584,7 @@ export class AgentSession {
 	#unsubscribeExtendedContext?: () => void;
 	#unsubscribeCodeMode?: () => void;
 	#unsubscribeEvalPreludeSettings?: () => void;
+	#unsubscribeIdleCloseSetting?: () => void;
 	/** Last (enable, providerId) tuple resolved by `#syncAppendOnlyContext` — used to skip no-op invalidations. */
 	#lastAppendOnlyResolution?: { enable: boolean; providerId: string | undefined };
 	#eventListeners: AgentSessionEventListener[] = [];
@@ -1841,6 +1842,13 @@ export class AgentSession {
 				});
 			});
 		});
+		this.#unsubscribeIdleCloseSetting = this.settings.onEffectiveChange((path, value) => {
+			// Dropping the idle-close timeout to "never" at runtime must
+			// invalidate a deadline armed under the previous value; the
+			// turn/open checkpoints below only cancel when they run.
+			if (path !== "browser.idleCloseSec" || value) return;
+			cancelIdleCloseForOwner(this.sessionManager.getSessionId() ?? "");
+		});
 		this.#unsubscribeCodeMode = onCodeModeChanged(() => {
 			void this.#tools.reconcileCodeMode().catch(error => {
 				logger.warn("Code Mode reconcile after setting change failed", { error: String(error) });
@@ -2981,10 +2989,11 @@ export class AgentSession {
 				this.#toolChoiceQueue.resolve();
 			}
 		}
-		// Settle owned headless browser tabs: freeze live pages so animated
-		// content stops burning CPU/GPU while idle (issue #8246), then close
-		// tabs idle past the timeout. Detached — tool results for this turn
-		// are already paired, and teardown must never block the event flow.
+		// Settle owned headless browser tabs: close tabs idle past the
+		// timeout, then freeze the survivors so animated content stops
+		// burning CPU/GPU while idle (issue #8246). Detached — tool results
+		// for this turn are already paired, and teardown must never block
+		// the event flow.
 		if (event.type === "turn_end") {
 			void this.#settleOwnedBrowserTabs();
 		}
@@ -4463,9 +4472,9 @@ export class AgentSession {
 
 	/**
 	 * Turn-settle checkpoint for owned headless browser tabs (issue #8246).
-	 * Freeze first so idle animated pages stop burning CPU/GPU while keeping
-	 * their state for millisecond resume, then close tabs idle past
-	 * `browser.idleCloseSec` as the memory backstop. Scoped to OMP-owned
+	 * Close tabs idle past `browser.idleCloseSec` as the memory backstop,
+	 * then freeze the survivors so idle animated pages stop burning CPU/GPU
+	 * while keeping their state for millisecond resume. Scoped to OMP-owned
 	 * headless tabs of this session only — relay/CDP/spawned tabs, other
 	 * sessions' tabs, and `persist` tabs are never touched. Best-effort:
 	 * never throws, so teardown cannot break the event flow.
@@ -4631,6 +4640,10 @@ export class AgentSession {
 		if (this.#unsubscribeEvalPreludeSettings) {
 			this.#unsubscribeEvalPreludeSettings();
 			this.#unsubscribeEvalPreludeSettings = undefined;
+		}
+		if (this.#unsubscribeIdleCloseSetting) {
+			this.#unsubscribeIdleCloseSetting();
+			this.#unsubscribeIdleCloseSetting = undefined;
 		}
 		this.#eventListeners = [];
 		this.#runStateListeners.clear();

@@ -27,9 +27,11 @@ import {
 	earliestIdleCloseInMs,
 	freezeTabsForOwner,
 	getTabsMapForTest,
+	hasIdleCloseTimerForTest,
 	isIdleCloseCandidate,
 	releaseIdleTabsForOwner,
 	releaseTab,
+	releaseTabsForOwner,
 	runInTab,
 	setTabFrozenForTest,
 	unfreezeTabSessionForTest,
@@ -53,13 +55,17 @@ function makeSession(cwd: string): ToolSession {
 	} as unknown as ToolSession;
 }
 
+let mockSurfaceSeq = 0;
+
 function mockCmuxSocket(): void {
 	spyOn(CmuxSocketClient.prototype, "connect").mockResolvedValue(undefined);
 	spyOn(CmuxSocketClient.prototype, "close").mockImplementation(() => undefined);
 	spyOn(CmuxSocketClient.prototype, "request").mockImplementation(
 		async (method: string): Promise<Record<string, unknown>> => {
-			if (method === "browser.open_split")
-				return { surface_id: `surface-${method}-${Date.now()}`, url: "about:blank" };
+			if (method === "browser.open_split") {
+				mockSurfaceSeq++;
+				return { surface_id: `surface-mock-${mockSurfaceSeq}`, url: "about:blank" };
+			}
 			if (method === "browser.url.get") return { url: "about:blank" };
 			if (method === "browser.snapshot") return { page: { html: "" } };
 			if (method === "browser.geometry") return {};
@@ -502,6 +508,16 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			expect(getTabsMapForTest().has("settle-cancelled")).toBe(true);
 		});
 
+		it("double release is idempotent for concurrent sweep losers", async () => {
+			mockCmuxSocket();
+			const browser = await acquireBrowser(makeKind("settle-idempotent"), { cwd: "/tmp" });
+			await acquireTab("settle-twice", browser, { timeoutMs: 1_000, ownerSessionId: "session-A" });
+
+			expect(await releaseTab("settle-twice", { kill: false })).toBe(true);
+			expect(await releaseTab("settle-twice", { kill: false })).toBe(false);
+			expect(getTabsMapForTest().has("settle-twice")).toBe(false);
+		});
+
 		it("settle is a no-op for unknown owners", async () => {
 			expect(await freezeTabsForOwner("session-nobody")).toBe(0);
 			expect(await releaseIdleTabsForOwner("session-nobody", { idleMs: 0 })).toBe(0);
@@ -550,6 +566,39 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			expect(await releaseIdleTabsForOwner("session-settle-real", { idleMs: 60_000 })).toBe(1);
 			expect(getTabsMapForTest().has(name)).toBe(false);
 		}, 120_000);
+
+		it("closes a frozen tab directly", async () => {
+			const browser = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+			const name = `settle-frozclose-${process.pid}`;
+			await acquireTab(name, browser, { timeoutMs: 30_000, ownerSessionId: "session-frozclose" });
+			expect(await freezeTabsForOwner("session-frozclose")).toBe(1);
+			expect(await releaseTab(name, { kill: false })).toBe(true);
+			expect(getTabsMapForTest().has(name)).toBe(false);
+		}, 120_000);
+
+		it("recreates a tab reused after eviction instead of resurrecting state", async () => {
+			// Worker-tab release→recreate cannot run in this environment
+			// (Bun worker re-spawn fails even on the clean tree); the
+			// eviction→recreate shape is backend-independent — a missing
+			// name always takes the create path — so pin it on cmux while
+			// the worker half is covered by removal assertions above.
+			mockCmuxSocket();
+			// No pre-attached surface: each open mints an owned split, so
+			// the two generations land on distinct targets.
+			const browser = await acquireBrowser(
+				{ kind: "cmux", socketPath: "/tmp/omp-test-settle-recreate.sock" },
+				{ cwd: "/tmp" },
+			);
+			const first = await acquireTab("settle-gone", browser, { timeoutMs: 1_000, ownerSessionId: "session-A" });
+			expect(await releaseTabsForOwner("session-A", { kill: false })).toBe(1);
+			expect(getTabsMapForTest().has("settle-gone")).toBe(false);
+
+			const second = await acquireTab("settle-gone", browser, { timeoutMs: 1_000, ownerSessionId: "session-A" });
+			expect(second.created).toBe(true);
+			expect(second.tab.targetId).not.toBe(first.tab.targetId);
+			expect(second.tab.frozen).toBe(false);
+			expect(second.tab.ownerSessionId).toBe("session-A");
+		});
 
 		it("revalidates candidates mid-drain: reuse during an earlier close is honored", async () => {
 			const browser = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
@@ -632,6 +681,27 @@ describe("browser settle — lifecycle freeze via CDP", () => {
 			// timer cancelled, the tab must still be tracked.
 			await Bun.sleep(600);
 			expect(getTabsMapForTest().has(name)).toBe(true);
+		}, 120_000);
+
+		it("does not re-arm when cancelled mid-sweep", async () => {
+			const browser = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+			const base = `settle-cancelsweep-${process.pid}`;
+			const due = await acquireTab(`${base}-due`, browser, {
+				timeoutMs: 30_000,
+				ownerSessionId: "session-cancelsweep",
+			});
+			await acquireTab(`${base}-fresh`, browser, { timeoutMs: 30_000, ownerSessionId: "session-cancelsweep" });
+			due.tab.lastActivityAt = Date.now() - 3_600_000;
+
+			// Cancel strictly after the sweep entry takes its sequence
+			// token, while the first close is still awaiting worker
+			// teardown: the sweep completes, but no deadline may survive.
+			const closing = releaseIdleTabsForOwner("session-cancelsweep", { idleMs: 60_000 });
+			cancelIdleCloseForOwner("session-cancelsweep");
+			expect(await closing).toBe(1);
+			expect(getTabsMapForTest().has(`${base}-due`)).toBe(false);
+			expect(getTabsMapForTest().has(`${base}-fresh`)).toBe(true);
+			expect(hasIdleCloseTimerForTest("session-cancelsweep")).toBe(false);
 		}, 120_000);
 	});
 });

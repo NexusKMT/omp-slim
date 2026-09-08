@@ -934,20 +934,6 @@ export function setTabFrozenForTest(tab: TabSession, frozen: boolean): Promise<b
 	return setTabFrozen(tab, frozen);
 }
 
-/** Freeze one managed tab by name. No-op (false) unless a transition happened. */
-export async function freezeTab(name: string): Promise<boolean> {
-	const tab = tabs.get(name);
-	if (!tab) return false;
-	return await setTabFrozen(tab, true);
-}
-
-/** Resume one frozen tab by name. No-op (false) unless a transition happened. */
-export async function unfreezeTab(name: string): Promise<boolean> {
-	const tab = tabs.get(name);
-	if (!tab) return false;
-	return await setTabFrozen(tab, false);
-}
-
 /**
  * Resume a tab before driving it. Returns false only when the page target
  * exists but refuses the `active` transition even after one retry — the
@@ -1014,6 +1000,9 @@ export async function releaseIdleTabsForOwner(
 		.filter(tab => isIdleCloseCandidate(tab, ownerId, now, opts.idleMs))
 		.map(tab => tab.name);
 	let count = 0;
+	// Program-order token: a cancel landing after this increment suppresses
+	// the re-arm below, so disabling mid-sweep cannot resurrect the deadline.
+	const sweepSeq = ++idleCloseSeq;
 	try {
 		for (const name of names) {
 			// Revalidate immediately before closing: an earlier close in this
@@ -1034,16 +1023,27 @@ export async function releaseIdleTabsForOwner(
 			}
 		}
 	} finally {
-		// Leave the next deadline armed even when a close threw: sweeps only
-		// fire on turns, opens, and timer callbacks, so without this the
-		// survivors would never close.
-		armIdleCloseForOwner(ownerId, opts.idleMs);
+		// Leave the next deadline armed even when a close threw — unless
+		// cancelled mid-sweep. Sweeps only fire on turns, opens, and timer
+		// callbacks, so without re-arming the survivors would never close.
+		if ((idleCloseCancelSeq.get(ownerId) ?? 0) <= sweepSeq) {
+			armIdleCloseForOwner(ownerId, opts.idleMs);
+		}
 	}
 	return count;
 }
 
 /** Per-owner one-shot timers arming the idle-close backstop. Always unref'd. */
 const idleCloseTimers = new Map<string, NodeJS.Timeout>();
+
+/**
+ * Monotonic clock ordering sweeps against cancels: each sweep entry and
+ * each cancel takes the next value, so a sweep can tell whether a cancel
+ * landed mid-flight.
+ */
+let idleCloseSeq = 0;
+/** Last cancel sequence per owner; sweeps re-arm only when uncancelled. */
+const idleCloseCancelSeq = new Map<string, number>();
 
 /** Recheck cadence when a firing sweep skips due-but-busy tabs. Overridable in tests. */
 const IDLE_DUE_RETRY_MS = 30_000;
@@ -1066,8 +1066,19 @@ export function earliestIdleCloseInMs(ownerId: string, idleMs: number, nowMs: nu
 	return earliest;
 }
 
-/** Drop a pending idle-close deadline, e.g. when the timeout is disabled at runtime. */
+/** Drop a pending idle-close deadline and invalidate a sweep in flight. */
 export function cancelIdleCloseForOwner(ownerId: string): void {
+	if (!ownerId) return;
+	clearIdleCloseTimer(ownerId);
+	idleCloseCancelSeq.set(ownerId, ++idleCloseSeq);
+}
+
+/** Test probe: whether the owner currently has an armed deadline. */
+export function hasIdleCloseTimerForTest(ownerId: string): boolean {
+	return idleCloseTimers.has(ownerId);
+}
+
+function clearIdleCloseTimer(ownerId: string): void {
 	const existing = idleCloseTimers.get(ownerId);
 	if (existing === undefined) return;
 	idleCloseTimers.delete(ownerId);
@@ -1084,10 +1095,10 @@ export function cancelIdleCloseForOwner(ownerId: string): void {
  * survivors remain — and disposal needs no cleanup since a fired sweep
  * over released tabs is a no-op. Due-but-busy survivors re-arm on a short
  * retry cadence instead of losing their deadline until the next sweep.
+ * @param retryMs recheck cadence for due-but-busy survivors; keep well above zero.
  */
 export function armIdleCloseForOwner(ownerId: string, idleMs: number, retryMs: number = IDLE_DUE_RETRY_MS): void {
-	cancelIdleCloseForOwner(ownerId);
-	if (!ownerId || !(idleMs > 0)) return;
+	clearIdleCloseTimer(ownerId);
 	const delay = earliestIdleCloseInMs(ownerId, idleMs);
 	if (delay === undefined) return;
 	const wait = delay <= 0 ? retryMs : Math.min(delay, 2_147_483_647);
