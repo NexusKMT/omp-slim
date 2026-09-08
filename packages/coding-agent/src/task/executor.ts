@@ -1952,6 +1952,10 @@ async function driveSessionToYield(
 	session: AgentSession,
 	monitor: SubagentRunMonitor,
 	task: string,
+	// Invoked when the initial prompt loses a prompt race (AgentBusyError) before
+	// retrying. Lets the caller restore a safe contract and detach its monitor
+	// while backing off. Absent, the busy error keeps the old path.
+	onPromptBusy?: () => Promise<void>,
 ): Promise<DriveOutcome> {
 	using _keepalive = new EventLoopKeepalive();
 	const abortSignal = monitor.abortSignal;
@@ -1989,7 +1993,21 @@ async function driveSessionToYield(
 
 	try {
 		try {
-			await awaitAbortable(session.prompt(task, { attribution: "agent" }));
+			// An IRC wake may own the session when this turn dispatches. Its prompt
+			// wins the race and this prompt throws AgentBusyError; back off through
+			// the caller hook and retry. Bounded so a wedged worker still resolves
+			// instead of hanging the batch.
+			let promptAttempts = 0;
+			for (;;) {
+				try {
+					await awaitAbortable(session.prompt(task, { attribution: "agent" }));
+					break;
+				} catch (error) {
+					promptAttempts++;
+					if (!(error instanceof AgentBusyError) || promptAttempts >= 3 || !onPromptBusy) throw error;
+					await onPromptBusy();
+				}
+			}
 			await awaitAbortable(session.waitForIdle());
 		} catch (err) {
 			// A budget stop or a yield turn-stop (terminal yield parked behind
@@ -2864,38 +2882,37 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 	emitSubagentFrame(options.eventBus, options.subagentEventBus, TASK_SUBAGENT_LIFECYCLE_CHANNEL, startedPayload);
 
 	monitor.setActiveSession(session);
-	const unsubscribe = monitor.attach(session);
 	let outcome: DriveOutcome;
-	// An IRC wake may win the prompt race while this turn installs its pooled
-	// contract. On AgentBusyError back off: restore the ordinary contract so the
-	// running wake cannot consume pooled items, wait it out, then reinstall and
-	// retry. Bounded so a wedged worker still fails the batch instead of hanging it.
-	let dispatchAttempts = 0;
+	// The batch monitor attaches per attempt (see below); this holds the winning
+	// attempt's unsubscribe for the shared teardown.
+	let unsubscribe: (() => void) | undefined;
+	// An IRC wake may own the session when this turn dispatches. drive retries the
+	// initial prompt through this hook: detach first so the wake turn's `yield`
+	// neither marks this batch yielded nor leaks into its result, restore the
+	// ordinary contract so the wake cannot consume pooled items, wait it out,
+	// then reinstall and reattach for the retry.
+	let attemptUnsubscribe = monitor.attach(session);
 	try {
-		for (;;) {
-			try {
-				outcome = await driveSessionToYield(session, monitor, message);
-				break;
-			} catch (error) {
-				dispatchAttempts++;
-				if (!(error instanceof AgentBusyError) || dispatchAttempts >= 3 || signal?.aborted) throw error;
-				logger.debug("Subagent follow-up lost the prompt race to an IRC wake; backing off", { id });
-				await session.setWorkPoolYieldItems([]);
-				if (signal) {
-					await untilAborted(signal, () => session.waitForIdle());
-				} else {
-					await session.waitForIdle();
-				}
-				await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
+		outcome = await driveSessionToYield(session, monitor, message, async () => {
+			attemptUnsubscribe();
+			logger.debug("Subagent follow-up lost the prompt race to an IRC wake; backing off", { id });
+			await session.setWorkPoolYieldItems([]);
+			if (signal) {
+				await untilAborted(signal, () => session.waitForIdle());
+			} else {
+				await session.waitForIdle();
 			}
-		}
+			await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
+			attemptUnsubscribe = monitor.attach(session);
+		});
+		unsubscribe = attemptUnsubscribe;
 	} finally {
 		try {
 			await untilAborted(AbortSignal.timeout(5000), () => monitor.waitForActiveSessionAbort());
 		} catch {
 			// Ignore abort cleanup timeouts; the session stays adopted either way.
 		}
-		unsubscribe();
+		unsubscribe?.();
 		const active = monitor.takeActiveSession();
 		if (active) monitor.captureSalvage(active);
 		monitor.finish();

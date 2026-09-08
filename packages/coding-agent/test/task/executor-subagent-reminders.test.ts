@@ -5,10 +5,12 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionActions, LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
+import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession, AgentSessionEvent, PromptOptions } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import {
 	finalizeSubprocessOutput,
+	runSubagentFollowUpTurn,
 	runSubprocess,
 	SUBAGENT_WARNING_MISSING_YIELD,
 } from "@oh-my-pi/pi-coding-agent/task/executor";
@@ -243,6 +245,66 @@ describe("runSubprocess yield reminders", () => {
 		expect(systemPrompt?.[2]).not.toMatch(/CONTEXT\n=+/);
 		expect(systemPrompt?.[3]).toBe("now");
 		expect(userPrompt).not.toMatch(/CONTEXT\n=+/);
+	});
+	it("does not let an intervening wake yield satisfy the batch after a lost prompt race", async () => {
+		let prompts = 0;
+		let wakeEmitted = false;
+		let emitWake: ((event: AgentSessionEvent) => void) | undefined;
+		const session = createMockSession(({ emit }) => {
+			emitWake ??= emit;
+			prompts++;
+			// An IRC wake owns the session when the follow-up first dispatches.
+			if (prompts === 1) throw new AgentBusyError("wake turn is running");
+			emit({
+				type: "tool_execution_end",
+				toolCallId: "tool-batch",
+				toolName: "yield",
+				result: {
+					content: [{ type: "text", text: "Result submitted." }],
+					details: { status: "success", data: { batch: true } },
+				},
+				isError: false,
+			});
+		});
+		const mutable = session as unknown as {
+			setWorkPoolYieldItems: (items: unknown[]) => Promise<void>;
+			waitForIdle: () => Promise<void>;
+		};
+		mutable.setWorkPoolYieldItems = async () => {};
+		mutable.waitForIdle = async () => {
+			// The wake turn yields while the batch backs off. The batch monitor
+			// must be detached, so this yield neither marks the batch yielded
+			// nor leaks wake output into the batch result.
+			if (!wakeEmitted) {
+				wakeEmitted = true;
+				emitWake?.({
+					type: "tool_execution_end",
+					toolCallId: "tool-wake",
+					toolName: "yield",
+					result: {
+						content: [{ type: "text", text: "Wake done." }],
+						details: { status: "success", data: { intruder: true } },
+					},
+					isError: false,
+				});
+			}
+		};
+		AgentRegistry.global().register({
+			id: "subagent-race",
+			displayName: "subagent-race",
+			kind: "sub",
+			status: "idle",
+			session,
+		});
+		try {
+			const result = await runSubagentFollowUpTurn({ ...baseOptions, id: "subagent-race", message: "batch work" });
+			expect(prompts).toBe(2);
+			expect(result.exitCode).toBe(0);
+			expect(result.output).toContain('"batch": true');
+			expect(result.output).not.toContain("intruder");
+		} finally {
+			AgentRegistry.global().unregister("subagent-race");
+		}
 	});
 	it("sends reminder prompt when subagent stops without yield", async () => {
 		const prompts: string[] = [];
