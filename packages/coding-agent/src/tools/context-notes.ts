@@ -44,7 +44,7 @@ function resolveExperimentalContextSession(session: ToolSession): ExperimentalCo
 	}
 	const manager = session.sessionManager;
 	const ownerId = session.getSessionId?.();
-	if (!manager || !ownerId || manager.getSessionId() !== ownerId) return undefined;
+	if (!manager || !ownerId || manager.getSessionId?.() !== ownerId) return undefined;
 	return manager;
 }
 

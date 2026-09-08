@@ -2452,6 +2452,8 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			sessionFile: this.session.getSessionFile() ?? undefined,
 			experimentalContextManagement: this.session.settings.get("compaction.experimentalContextManagement") === true,
 			getSessionBranch: () => getExperimentalContextSession(this.session).getBranch(),
+			sessionId: this.session.sessionManager?.getSessionId?.() ?? this.session.getSessionId?.() ?? undefined,
+			agentRegistry: this.session.agentRegistry,
 			localProtocolOptions: this.session.localProtocolOptions,
 			skills: this.session.skills,
 			rules: this.session.activeRules,
