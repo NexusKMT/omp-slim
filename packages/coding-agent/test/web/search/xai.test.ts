@@ -293,4 +293,43 @@ describe("xAI Responses answer extraction from relay output items", () => {
 
 		expect(response.answer).toBe("Bun 1.3.12 is the latest release.");
 	});
+	it("honors explicit phases over citation, length, and last-message heuristics", async () => {
+		const response = await searchXAI(
+			makeParams(
+				makeFetchMock({
+					output: [
+						{
+							type: "message",
+							phase: "commentary",
+							content: [
+								{
+									text: "Searching the release notes. ".repeat(20),
+									annotations: [{ type: "url_citation", url: "https://bun.sh" }],
+								},
+							],
+						},
+						{ type: "message", phase: "final_answer", content: [{ text: "First finding." }] },
+						{ type: "message", phase: "final_answer", content: [{ text: "Second finding." }] },
+						{ type: "message", phase: "commentary", content: [{ text: "Finishing the search." }] },
+					],
+				}),
+			),
+		);
+		expect(response.answer).toBe("First finding.\nSecond finding.");
+	});
+
+	it("does not promote unphased narration when the last message is commentary", async () => {
+		await expect(
+			searchXAI(
+				makeParams(
+					makeFetchMock({
+						output: [
+							{ type: "message", content: [{ text: "I'll check." }] },
+							{ type: "message", phase: "commentary", content: [{ text: "Still checking." }] },
+						],
+					}),
+				),
+			),
+		).rejects.toMatchObject({ provider: "xai", status: 502 });
+	});
 });

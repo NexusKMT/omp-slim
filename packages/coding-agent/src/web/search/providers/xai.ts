@@ -47,6 +47,7 @@ interface XAIWebSearchSource {
 
 interface XAIResponseOutputItem {
 	type?: string;
+	phase?: "commentary" | "final_answer" | null;
 	content?: XAIResponseContentPart[] | null;
 	annotations?: XAIUrlCitationAnnotation[] | null;
 	action?: { sources?: XAIWebSearchSource[] | null } | null;
@@ -271,20 +272,15 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 	const topLevelText = response.output_text?.trim();
 	if (topLevelText) return topLevelText;
 
-	// Relays that lack top-level `output_text` return every between-call
-	// narration ("I'll search for…") as a message item. The answer is the last
-	// message; an earlier one survives only when it is substantive — carrying
-	// URL citations (part- or message-level) or exceeding the narration length
-	// threshold. Parts are grouped per message so every part of the final
-	// message is kept, and the citation check matches the url_citation shape
-	// used by source extraction. A last message with no text yields no answer
-	// rather than promoting an earlier narration message.
-	const messages: Array<{ texts: string[]; hasCitations: boolean }> = [];
+	// Explicit phases take precedence. Unphased relay messages use the last
+	// message/citation/length heuristic; keep commentary positions so removing
+	// one cannot promote preceding unphased narration into a final answer.
+	const messages: Array<{ texts: string[]; hasCitations: boolean; phase: XAIResponseOutputItem["phase"] }> = [];
 	const output = Array.isArray(response.output) ? response.output : [];
 	for (const item of output) {
 		if (!item || typeof item !== "object" || (item.type !== undefined && item.type !== "message")) continue;
 		const content = Array.isArray(item.content) ? item.content : [];
-		const entry: { texts: string[]; hasCitations: boolean } = { texts: [], hasCitations: false };
+		const entry = { texts: [] as string[], hasCitations: false, phase: item.phase };
 		for (const part of content) {
 			if (!part || typeof part !== "object") continue;
 			const text = (part.output_text ?? part.text)?.trim();
@@ -304,10 +300,15 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 		}
 		messages.push(entry);
 	}
-	if (messages.length === 0 || messages[messages.length - 1].texts.length === 0) return undefined;
+	const lastMessage = messages.at(-1);
+	if (!lastMessage || (lastMessage.texts.length === 0 && lastMessage.phase !== "commentary")) return undefined;
 	const kept = messages.filter(
 		(entry, index) =>
-			index === messages.length - 1 || entry.hasCitations || entry.texts.join("").length >= SUBSTANTIVE_MIN_CHARS,
+			entry.phase === "final_answer" ||
+			(entry.phase == null &&
+				(index === messages.length - 1 ||
+					entry.hasCitations ||
+					entry.texts.join("").length >= SUBSTANTIVE_MIN_CHARS)),
 	);
 
 	const answer = kept
