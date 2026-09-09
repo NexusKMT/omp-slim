@@ -10,7 +10,7 @@
 
 ### Fixed
 
-- xAI search answer extraction honors explicit `commentary`/`final_answer` phases, treats unrecognized or empty phase values as unphased, prefers phased messages over the aggregate `output_text`, keeps an explicit final answer followed by an empty final item, and never restores the aggregate (which mixes narration in) once commentary is tagged or a tagged final item is empty; unphased relay messages retain the final message and substantive earlier content (citations or long text).
+- xAI search answer extraction honors explicit `commentary`/`final_answer` phases, treats unrecognized or empty phase values as unphased, accepts `null` output-item types like omitted ones, prefers phased messages over the aggregate `output_text`, keeps an explicit final answer followed by an empty final item, and never restores the aggregate (which mixes narration in) once commentary is tagged or a tagged final item is empty; unphased relay messages retain the final message and substantive earlier content (citations or long text).
 - GitHub Copilot model-policy 403s (plan, model policy, org restriction) no longer delete stored credentials, so the provider stays listed in `/model` after a per-model access denial instead of disappearing until the next `/login` ([#11280](https://github.com/can1357/oh-my-pi/pull/11280) by [@H4vC](https://github.com/H4vC)).
 - Read error and preview rendering now sanitizes tabs and Windows-style CRLF (e.g. ssh host-key failures, tab-indented fetched content) so raw output can no longer tear the result frame.
 - Unset `tiny` model roles now honor the configured `@smol` fallback in direct execution and the `/models` Roles view ([#11311](https://github.com/can1357/oh-my-pi/issues/11311)).

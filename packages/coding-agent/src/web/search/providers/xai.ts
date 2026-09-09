@@ -285,7 +285,12 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 	// one cannot promote preceding unphased narration into a final answer.
 	const messages: Array<{ texts: string[]; hasCitations: boolean; phase: XAIResponseOutputItem["phase"] }> = [];
 	for (const item of output) {
-		if (!item || typeof item !== "object" || (item.type !== undefined && item.type !== "message")) continue;
+		if (
+			!item ||
+			typeof item !== "object" ||
+			(item.type !== null && item.type !== undefined && item.type !== "message")
+		)
+			continue;
 		const content = Array.isArray(item.content) ? item.content : [];
 		// Relays cast external JSON into the typed interface; normalize the
 		// phase to a recognized value so "" or unknown strings cannot strand a

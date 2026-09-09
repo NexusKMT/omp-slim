@@ -196,6 +196,25 @@ describe("xAI Responses answer extraction from relay output items", () => {
 		expect(response.answer).toBe("Bun 1.3.12 is the latest release.");
 	});
 
+	it("treats a null item type as a message, matching omitted types", async () => {
+		// Non-strict relays represent an omitted `type` as null; the item is
+		// still a message when it carries a valid content array, so null must
+		// not be rejected the way named non-message types are.
+		const relayResponse = {
+			id: "resp-relay",
+			model: "grok-4.5",
+			output: [
+				{ type: "reasoning", content: [{ type: "output_text", text: "Considering what to search." }] },
+				{ type: null, content: [{ type: "output_text", text: "Bun 1.3.12 is the latest release." }] },
+			],
+			usage: { input_tokens: 10, output_tokens: 5 },
+		};
+
+		const response = await searchXAI(makeParams(makeFetchMock(relayResponse)));
+
+		expect(response.answer).toBe("Bun 1.3.12 is the latest release.");
+	});
+
 	it("treats message-level url_citation annotations as substance", async () => {
 		const relayResponse = {
 			id: "resp-relay",
