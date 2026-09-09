@@ -14,6 +14,7 @@ import { Agent, type AgentTool, type StreamFn } from "@oh-my-pi/pi-agent-core";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { Skill } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
@@ -43,6 +44,47 @@ function stubTool(name: string): AgentTool {
 
 function vibeModeEntryCount(manager: SessionManager): number {
 	return manager.getEntries().filter(entry => entry.type === "mode_change" && entry.mode === "vibe").length;
+}
+
+async function registerOrderSkill(tempDir: TempDir, mode: InteractiveMode): Promise<void> {
+	const filePath = path.join(tempDir.path(), "order-skill.md");
+	await Bun.write(filePath, "---\nname: order-skill\n---\nDo it in order.\n");
+	const skill: Skill = {
+		name: "order-skill",
+		description: "",
+		filePath,
+		baseDir: tempDir.path(),
+		source: "test",
+	};
+	mode.skillCommands.set("skill:order-skill", skill);
+}
+
+function armOrderLoop(mode: InteractiveMode, session: AgentSession): { done: Promise<void>; order: string[] } {
+	const order: string[] = [];
+	vi.spyOn(session, "prompt").mockImplementation(async text => {
+		order.push(`plain:${text}`);
+		return true;
+	});
+	vi.spyOn(session, "promptCustomMessage").mockImplementation(async () => {
+		order.push("skill");
+		return true;
+	});
+	// Faithful main-loop dispatch: the waiter-delivered prompt travels the real
+	// getUserInput → submit path, so waiter-vs-steer order is agent-visible.
+	const done = (async () => {
+		const input = await mode.getUserInput();
+		if (mode.markPendingSubmissionStarted(input)) {
+			try {
+				await session.prompt(input.text, {
+					images: input.images,
+					streamingBehavior: input.streamingBehavior ?? "followUp",
+				});
+			} finally {
+				mode.finishPendingSubmission(input);
+			}
+		}
+	})();
+	return { done, order };
 }
 
 class ExitFaultStorage extends FileSessionStorage {
@@ -833,5 +875,56 @@ describe("InteractiveMode vibe mode toggle", () => {
 		expect(await second).toBe(true);
 		expect(mode.vibeModeEnabled).toBe(true);
 		expect(promptCalls).toEqual(["first prompt", "second prompt"]);
+	});
+
+	it("orders a skill vibe prompt before a concurrent plain prompt", async () => {
+		const gate = Promise.withResolvers<void>();
+		vi.spyOn(session, "activateVibeTools").mockImplementation(() => gate.promise);
+		await registerOrderSkill(tempDir, mode);
+		const loop = armOrderLoop(mode, session);
+		for (let index = 0; index < 5; index++) await Promise.resolve();
+
+		// Skill first: its file read yields before the turn reserves.
+		const first = mode.handleVibeModeCommand("/skill:order-skill do it");
+		for (let index = 0; index < 5; index++) await Promise.resolve();
+		expect(mode.vibeModeEnabled).toBe(false);
+
+		// Plain second must not take the still-armed waiter and start its turn
+		// first: the skill reservation owns the next turn.
+		const second = mode.handleVibeModeCommand("plain follow-up");
+		for (let index = 0; index < 5; index++) await Promise.resolve();
+		expect(loop.order).toHaveLength(0);
+
+		gate.resolve();
+		expect(await first).toBe(true);
+		expect(await second).toBe(true);
+		await loop.done;
+		expect(mode.vibeModeEnabled).toBe(true);
+		expect(loop.order).toEqual(["skill", "plain:plain follow-up"]);
+	});
+
+	it("orders a plain vibe prompt before a concurrent skill prompt", async () => {
+		const gate = Promise.withResolvers<void>();
+		vi.spyOn(session, "activateVibeTools").mockImplementation(() => gate.promise);
+		await registerOrderSkill(tempDir, mode);
+		const loop = armOrderLoop(mode, session);
+		for (let index = 0; index < 5; index++) await Promise.resolve();
+
+		const first = mode.handleVibeModeCommand("plain first");
+		for (let index = 0; index < 5; index++) await Promise.resolve();
+		expect(mode.vibeModeEnabled).toBe(false);
+
+		// Skill second must wait for the waiter-delivered prompt to reserve
+		// before reading its file and steering behind it.
+		const second = mode.handleVibeModeCommand("/skill:order-skill do it");
+		for (let index = 0; index < 5; index++) await Promise.resolve();
+		expect(loop.order).toHaveLength(0);
+
+		gate.resolve();
+		expect(await first).toBe(true);
+		expect(await second).toBe(true);
+		await loop.done;
+		expect(mode.vibeModeEnabled).toBe(true);
+		expect(loop.order).toEqual(["plain:plain first", "skill"]);
 	});
 });

@@ -785,6 +785,11 @@ export class InteractiveMode implements InteractiveModeContext {
 	// Loop reset guards treat a pending entry as active, and a concurrent /vibe
 	// command awaits it instead of dispatching its prompt on the stale toolset.
 	#vibeModeEntry: Promise<void> | undefined;
+	// Live skill-prompt reservation: set synchronously when a /vibe skill prompt
+	// starts dispatching (its file read yields before the turn reserves), so a
+	// concurrent prompt cannot take the idle waiter and start its turn first.
+	// Cleared when the skill dispatch settles.
+	#vibeSkillReservation: object | undefined;
 	#vibeScopeSuspendedForSwitch = false;
 	#goalContinuationTimer: NodeJS.Timeout | undefined;
 	#goalTurnHadToolCalls = false;
@@ -4199,13 +4204,26 @@ export class InteractiveMode implements InteractiveModeContext {
 		await this.#enterVibeMode();
 		if (!initialPrompt) return false;
 		if (isKnownSkillCommand(this, initialPrompt)) {
-			await invokeSkillCommandFromText(this, initialPrompt, "steer", {
-				images: input?.images,
-				propagateErrors: true,
-			});
-			return true;
+			// Claim synchronously: the skill file read below yields before the
+			// turn reserves, so a concurrent plain prompt must see this
+			// reservation before it can take the idle waiter.
+			const reservation = {};
+			this.#vibeSkillReservation = reservation;
+			try {
+				await this.#waitForInFlightSubmission(reservation);
+				await invokeSkillCommandFromText(this, initialPrompt, "steer", {
+					images: input?.images,
+					propagateErrors: true,
+				});
+				return true;
+			} finally {
+				if (this.#vibeSkillReservation === reservation) this.#vibeSkillReservation = undefined;
+			}
 		}
 		if (this.session.isStreaming) {
+			// Same ordering covenant as below: a skill prompt may be reserving
+			// ahead of us even though the session looks continuously busy.
+			await this.#waitForInFlightSubmission();
 			const images = input?.images?.length ? input.images : undefined;
 			await this.withLocalSubmission(
 				initialPrompt,
@@ -4214,10 +4232,10 @@ export class InteractiveMode implements InteractiveModeContext {
 			);
 			return true;
 		}
-		// Fresh CFA scope per call (a repeat read of the property would stay
-		// narrowed). Invoked synchronously so the first resumer always wins the
-		// one-shot waiter.
 		const dispatchViaWaiter = (): boolean => {
+			// A skill prompt reserving ahead of us owns the next turn: leave the
+			// waiter armed until it reserves, so the main loop submits in order.
+			if (this.#vibeSkillReservation) return false;
 			const onInput = this.onInputCallback;
 			if (!onInput) return false;
 			onInput(this.startPendingSubmission({ text: initialPrompt, ...input }, { preserveDraft: true }));
@@ -4243,26 +4261,28 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	/**
-	 * Yield until a waiter-delivered submission reserves its turn (streaming,
-	 * queued, or dropped) or a fresh waiter arms. Without this, a prompt
-	 * dispatched right after a concurrent submit resolved the one-shot input
-	 * waiter would reach {@link session.prompt} before the main loop submits
-	 * the earlier input, reversing their order. No-op when nothing is in
-	 * flight; bounded so a stalled loop degrades to immediate dispatch.
+	 * Yield until prior dispatches reserve their turn (streaming, queued, or
+	 * dropped) or a fresh waiter arms. Without this, a prompt dispatched right
+	 * after a concurrent submit resolved the one-shot input waiter — or while a
+	 * skill prompt is still reading its file — would reach
+	 * {@link session.prompt} before the main loop submits the earlier input,
+	 * reversing their order. No-op when nothing is in flight; bounded so a
+	 * stalled loop degrades to immediate dispatch. `ignoreSkillReservation`
+	 * lets a skill dispatch wait for earlier submissions without hanging on
+	 * its own reservation.
 	 */
-	async #waitForInFlightSubmission(): Promise<void> {
-		const awaited = this.#pendingSubmittedInput;
-		if (!awaited || awaited.cancelled) return;
+	async #waitForInFlightSubmission(ignoreSkillReservation?: object): Promise<void> {
 		for (let index = 0; index < 200; index++) {
-			if (
-				this.#pendingSubmittedInput !== awaited ||
-				awaited.cancelled ||
-				this.session.isStreaming ||
-				this.session.queuedMessageCount > 0 ||
-				this.onInputCallback
-			) {
-				return;
-			}
+			const skillBlocked =
+				this.#vibeSkillReservation !== undefined && this.#vibeSkillReservation !== ignoreSkillReservation;
+			const awaited = this.#pendingSubmittedInput;
+			const pendingBlocked =
+				awaited !== undefined &&
+				!awaited.cancelled &&
+				!this.session.isStreaming &&
+				this.session.queuedMessageCount === 0 &&
+				!this.onInputCallback;
+			if (!skillBlocked && !pendingBlocked) return;
 			await Bun.sleep(10);
 		}
 	}
