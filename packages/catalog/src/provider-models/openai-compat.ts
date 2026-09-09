@@ -7295,3 +7295,57 @@ export function modelsDevCatalogFallback(
 		map: payload => (isRecord(payload) ? filterModelsDevCatalogRows(mapModelsDevToModels(payload, descriptors)) : []),
 	};
 }
+
+// ---------------------------------------------------------------------------
+// Command Code
+// ---------------------------------------------------------------------------
+
+export interface CommandCodeModelManagerConfig {
+	apiKey?: string;
+	baseUrl?: string;
+	fetch?: FetchImpl;
+}
+
+const COMMAND_CODE_PROVIDER_BASE_PATH = "https://api.commandcode.ai/provider";
+
+function normalizeCommandCodeBasePath(baseUrl: string | undefined): string {
+	const normalized = (baseUrl ?? COMMAND_CODE_PROVIDER_BASE_PATH).trim().replace(/\/+$/, "");
+	return normalized.endsWith("/v1") ? normalized.slice(0, -3) : normalized;
+}
+
+export function commandCodeModelManagerOptions(config?: CommandCodeModelManagerConfig): ModelManagerOptions<Api> {
+	const basePath = normalizeCommandCodeBasePath(config?.baseUrl);
+	const discoveryBaseUrl = `${basePath}/v1`;
+	return {
+		providerId: "commandcode",
+		cacheProviderId: resolveModelCacheProviderId("commandcode", {
+			apiKey: config?.apiKey,
+			baseUrl: discoveryBaseUrl,
+		}),
+		dynamicModelsAuthoritative: true,
+		fetchDynamicModels: () => {
+			const references = getBundledModelReferenceIndex();
+			return fetchOpenAICompatibleModels<Api>({
+				api: "openai-completions",
+				provider: "commandcode",
+				baseUrl: discoveryBaseUrl,
+				mapModel: (entry, defaults) => {
+					const route = apiRouteFor("commandcode", defaults.id);
+					const api = route?.api === "anthropic-messages" ? route.api : "openai-completions";
+					const reference = resolveModelReference(defaults.id, references);
+					return {
+						...defaults,
+						name: toModelName(entry.name, reference?.name ?? defaults.name),
+						api,
+						baseUrl: api === "anthropic-messages" ? basePath : discoveryBaseUrl,
+						reasoning: reference?.reasoning ?? defaults.reasoning,
+						input: reference?.input ?? defaults.input,
+						contextWindow: toPositiveNumber(entry.context_length, reference?.contextWindow ?? null),
+						maxTokens: null,
+					};
+				},
+				fetch: config?.fetch,
+			});
+		},
+	};
+}

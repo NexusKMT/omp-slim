@@ -15,6 +15,7 @@
 		"auth/cerebras.kdl",
 		"auth/cline-pass.kdl",
 		"auth/cloudflare-ai-gateway.kdl",
+		"auth/commandcode.kdl",
 		"auth/coreweave.kdl",
 		"auth/cursor.kdl",
 		"auth/deepinfra.kdl",
@@ -115,6 +116,7 @@
 		"providers/cerebras.kdl",
 		"providers/cline-pass.kdl",
 		"providers/cloudflare-ai-gateway.kdl",
+		"providers/commandcode.kdl",
 		"providers/coreweave.kdl",
 		"providers/cursor.kdl",
 		"providers/deepseek.kdl",
@@ -7631,6 +7633,393 @@
 				}
 			},
 			{
+				"source": "providers/commandcode.kdl:12",
+				"class": "anthropic",
+				"providers": [
+					"commandcode"
+				],
+				"wire": {
+					"supportsEagerToolInputStreaming": false,
+					"supportsLongCacheRetention": false
+				},
+				"thinking": {
+					"mode": "anthropic-adaptive"
+				}
+			},
+			{
+				"source": "providers/commandcode.kdl:17",
+				"providers": [
+					"commandcode"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "claude-fable-5"
+					},
+					{
+						"kind": "exact",
+						"value": "claude-fable-5-1"
+					},
+					{
+						"kind": "exact",
+						"value": "claude-opus-4-7"
+					},
+					{
+						"kind": "exact",
+						"value": "claude-opus-4-8"
+					},
+					{
+						"kind": "exact",
+						"value": "claude-opus-5"
+					},
+					{
+						"kind": "exact",
+						"value": "claude-sonnet-4-6"
+					},
+					{
+						"kind": "exact",
+						"value": "claude-sonnet-5"
+					}
+				],
+				"thinking": {
+					"efforts": [
+						"low",
+						"medium",
+						"high",
+						"xhigh",
+						"max"
+					]
+				}
+			},
+			{
+				"source": "providers/commandcode.kdl:21",
+				"providers": [
+					"commandcode"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "deepseek/deepseek-v4-flash"
+					},
+					{
+						"kind": "exact",
+						"value": "deepseek/deepseek-v4-flash-vision-exp"
+					},
+					{
+						"kind": "exact",
+						"value": "deepseek/deepseek-v4-pro"
+					},
+					{
+						"kind": "exact",
+						"value": "zai-org/GLM-5.2"
+					}
+				],
+				"thinking": {
+					"efforts": [
+						"high",
+						"max"
+					]
+				}
+			},
+			{
+				"source": "providers/commandcode.kdl:25",
+				"providers": [
+					"commandcode"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "deepseek/deepseek-v4-flash-fast"
+					},
+					{
+						"kind": "exact",
+						"value": "moonshotai/Kimi-K3"
+					},
+					{
+						"kind": "exact",
+						"value": "z-ai/glm-5.3-flash"
+					},
+					{
+						"kind": "exact",
+						"value": "zai-org/GLM-5.3"
+					}
+				],
+				"thinking": {
+					"efforts": [
+						"low",
+						"high",
+						"max"
+					]
+				}
+			},
+			{
+				"source": "providers/commandcode.kdl:29",
+				"providers": [
+					"commandcode"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "google/gemini-3.1-flash-lite"
+					},
+					{
+						"kind": "exact",
+						"value": "google/gemini-3.5-flash"
+					},
+					{
+						"kind": "exact",
+						"value": "google/gemini-3.5-flash-lite"
+					},
+					{
+						"kind": "exact",
+						"value": "google/gemini-3.6-flash"
+					},
+					{
+						"kind": "exact",
+						"value": "google/gemini-3.7-flash"
+					},
+					{
+						"kind": "exact",
+						"value": "google/gemini-3.8-flash"
+					},
+					{
+						"kind": "exact",
+						"value": "gpt-5.4-mini"
+					},
+					{
+						"kind": "exact",
+						"value": "xai/grok-4.5"
+					}
+				],
+				"thinking": {
+					"efforts": [
+						"low",
+						"medium",
+						"high"
+					]
+				}
+			},
+			{
+				"source": "providers/commandcode.kdl:34",
+				"providers": [
+					"commandcode"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "gpt-5.3-codex"
+					},
+					{
+						"kind": "exact",
+						"value": "gpt-5.4"
+					},
+					{
+						"kind": "exact",
+						"value": "gpt-5.5"
+					},
+					{
+						"kind": "exact",
+						"value": "xai/grok-4.6"
+					}
+				],
+				"thinking": {
+					"efforts": [
+						"low",
+						"medium",
+						"high",
+						"xhigh"
+					]
+				}
+			},
+			{
+				"source": "providers/commandcode.kdl:37",
+				"providers": [
+					"commandcode"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "gpt-5.6-luna"
+					},
+					{
+						"kind": "exact",
+						"value": "gpt-5.6-sol"
+					},
+					{
+						"kind": "exact",
+						"value": "gpt-5.6-terra"
+					}
+				],
+				"thinking": {
+					"efforts": [
+						"low",
+						"medium",
+						"high",
+						"xhigh",
+						"max"
+					]
+				}
+			},
+			{
+				"source": "providers/commandcode.kdl:40",
+				"providers": [
+					"commandcode"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "meta/muse-spark-1.1"
+					},
+					{
+						"kind": "exact",
+						"value": "meta/muse-spark-1.2"
+					},
+					{
+						"kind": "exact",
+						"value": "meta/muse-spark-1.2-contributor"
+					},
+					{
+						"kind": "exact",
+						"value": "meta/muse-spark-1.3"
+					},
+					{
+						"kind": "exact",
+						"value": "meta/muse-spark-1.3-contributor"
+					}
+				],
+				"thinking": {
+					"efforts": [
+						"minimal",
+						"low",
+						"medium",
+						"high",
+						"xhigh"
+					]
+				}
+			},
+			{
+				"source": "providers/commandcode.kdl:44",
+				"providers": [
+					"commandcode"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "Qwen/Qwen3.8-27B"
+					},
+					{
+						"kind": "exact",
+						"value": "Qwen/Qwen3.8-Flash"
+					},
+					{
+						"kind": "exact",
+						"value": "Qwen/Qwen3.8-Max"
+					},
+					{
+						"kind": "exact",
+						"value": "Qwen/Qwen3.8-Max-0902"
+					}
+				],
+				"thinking": {
+					"efforts": [
+						"low",
+						"medium",
+						"xhigh"
+					]
+				}
+			},
+			{
+				"source": "providers/commandcode.kdl:47",
+				"providers": [
+					"commandcode"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "sakana/fugu-ultra"
+					}
+				],
+				"thinking": {
+					"efforts": [
+						"high",
+						"xhigh"
+					]
+				}
+			},
+			{
+				"source": "providers/commandcode.kdl:50",
+				"providers": [
+					"commandcode"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "tencent/hy4-preview"
+					}
+				],
+				"thinking": {
+					"efforts": [
+						"low",
+						"medium",
+						"high"
+					]
+				}
+			},
+			{
+				"source": "providers/commandcode.kdl:53",
+				"providers": [
+					"commandcode"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "Qwen/Qwen3.8-27B"
+					}
+				],
+				"catalog": {
+					"limitsPatch": {
+						"maxTokens": 32768
+					}
+				}
+			},
+			{
+				"source": "providers/commandcode.kdl:58",
+				"providers": [
+					"commandcode"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "z-ai/glm-5.3-flash"
+					}
+				],
+				"catalog": {
+					"limitsPatch": {
+						"maxTokens": 131072
+					}
+				}
+			},
+			{
+				"source": "providers/commandcode.kdl:3",
+				"providers": [
+					"commandcode"
+				],
+				"wire": {
+					"supportsDeveloperRole": false,
+					"supportsStore": false,
+					"supportsReasoningEffort": true,
+					"maxTokensField": "max_tokens"
+				},
+				"thinking": {
+					"mode": "effort"
+				},
+				"catalog": {
+					"limitsPatch": {
+						"maxTokens": 65536
+					}
+				}
+			},
+			{
 				"source": "providers/coreweave.kdl:5",
 				"class": "unknown",
 				"providers": [
@@ -14516,6 +14905,20 @@
 				"default": "openai-completions"
 			},
 			{
+				"provider": "commandcode",
+				"routes": [
+					{
+						"api": "anthropic-messages",
+						"match": {
+							"prefix": [
+								"claude-"
+							]
+						}
+					}
+				],
+				"default": "openai-completions"
+			},
+			{
 				"provider": "zenmux",
 				"routes": [
 					{
@@ -16448,6 +16851,24 @@
 						"url": "https://api.cline.bot/api/v1/users/me",
 						"headersHook": "cline-pass-client"
 					}
+				}
+			},
+			{
+				"id": "commandcode",
+				"apiKeyFormat": "bearer",
+				"name": "Command Code",
+				"env": {
+					"vars": [
+						"COMMAND_CODE_API_KEY",
+						"COMMANDCODE_API_KEY"
+					]
+				},
+				"login": {
+					"kind": "api-key",
+					"authUrl": "https://commandcode.ai/studio",
+					"instructions": "Create or copy a Provider API key from Command Code Studio",
+					"prompt": "Paste your Command Code API key",
+					"placeholder": "user_..."
 				}
 			},
 			{
