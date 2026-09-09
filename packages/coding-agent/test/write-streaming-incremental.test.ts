@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as themeModule from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { writeToolRenderer } from "@oh-my-pi/pi-coding-agent/tools/write";
+import type { HighlightStream } from "@oh-my-pi/pi-natives";
 
 const stripAnsi = (s: string): string => s.replace(/\[[0-9;]*m/g, "");
 const hasLine = (lines: readonly string[], n: number): boolean =>
@@ -108,27 +109,80 @@ describe("write streaming preview incremental line tracking", () => {
 		expect(highlightSpy).not.toHaveBeenCalled();
 	});
 
-	it("does not compare the full accumulated payload when validating append-only growth", async () => {
+	it("resets on same-length prefix replacement above a preserved tail", async () => {
+		// A restarted stream can reuse the render state with a replacement that
+		// preserves more tail than any bounded suffix guard could validate, so
+		// only an exact append check may treat growth as incremental.
 		const uiTheme = await getUiTheme();
-		const options = { expanded: false, isPartial: true, spinnerFrame: 0 };
-		const first = Array.from({ length: 2_000 }, () => "x".repeat(64)).join("\n");
-		writeToolRenderer.renderCall({ path: "/tmp/inc.ts", content: first }, options, uiTheme)?.render(120);
-
-		const originalStartsWith = String.prototype.startsWith;
-		let wholePrefixComparisons = 0;
-		String.prototype.startsWith = function (this: string, searchString: string, position?: number): boolean {
-			if (searchString === first) wholePrefixComparisons++;
-			return originalStartsWith.call(this, searchString, position);
+		const options = { expanded: true, isPartial: true, spinnerFrame: 0 };
+		const render = (content: string) => {
+			const component = writeToolRenderer.renderCall({ path: "/tmp/restart.ts", content }, options, uiTheme);
+			if (!component) throw new Error("expected a rendered component for a non-xdev write path");
+			return component.render(120);
 		};
-		try {
-			writeToolRenderer
-				.renderCall({ path: "/tmp/inc.ts", content: `${first}\nlast` }, options, uiTheme)
-				?.render(120);
-		} finally {
-			String.prototype.startsWith = originalStartsWith;
-		}
+		const tail = `${"x".repeat(80)}\n`;
+		render(`const original = 1;\n${tail}`);
 
-		expect(wholePrefixComparisons).toBe(0);
+		const text = stripAnsi(render(`const replaced = 1;\n${tail}const extra = 3;\n`).join("\n"));
+		expect(text).toContain("replaced");
+		expect(text).not.toContain("original");
+		expect(text).toContain("extra");
+	});
+
+	it("feeds only newline-terminated chunks to the highlight stream", async () => {
+		const uiTheme = await getUiTheme();
+		const pushes: string[] = [];
+		vi.spyOn(themeModule, "createHighlightStream").mockImplementation(
+			() =>
+				({
+					push: (chunk: string) => {
+						pushes.push(chunk);
+						return chunk;
+					},
+				}) as unknown as HighlightStream,
+		);
+		const options = { expanded: false, isPartial: true, spinnerFrame: 0 };
+		let acc = "";
+		for (const piece of ["const a = ", "1;\nconst b = ", "2;\nconst c = 3"]) {
+			acc += piece;
+			const component = writeToolRenderer.renderCall({ path: "/tmp/chunks.ts", content: acc }, options, uiTheme);
+			if (!component) throw new Error("expected a rendered component for a non-xdev write path");
+			component.render(120);
+		}
+		expect(pushes).toEqual(["const a = 1;\n", "const b = 2;\n"]);
+		const component = writeToolRenderer.renderCall({ path: "/tmp/chunks.ts", content: acc }, options, uiTheme);
+		if (!component) throw new Error("expected a rendered component for a non-xdev write path");
+		expect(stripAnsi(component.render(120).join("\n"))).toContain("const c = 3");
+	});
+
+	it("highlights the trailing line once args are complete", async () => {
+		const uiTheme = await getUiTheme();
+		const pushes: string[] = [];
+		vi.spyOn(themeModule, "createHighlightStream").mockImplementation(
+			() =>
+				({
+					push: (chunk: string) => {
+						pushes.push(chunk);
+						return `H(${chunk})`;
+					},
+				}) as unknown as HighlightStream,
+		);
+		const content = "const solo = 1;";
+		const streamingOptions = { expanded: true, isPartial: true, spinnerFrame: 0 };
+		const streaming = writeToolRenderer.renderCall({ path: "/tmp/solo.ts", content }, streamingOptions, uiTheme);
+		if (!streaming) throw new Error("expected a rendered component for a non-xdev write path");
+		const streamingText = stripAnsi(streaming.render(120).join("\n"));
+		expect(streamingText).toContain("const solo = 1;");
+		expect(streamingText).not.toContain("H(");
+		expect(pushes).toEqual([]);
+
+		const settledOptions = { expanded: true, isPartial: true, spinnerFrame: 0, argsComplete: true };
+		const settled = writeToolRenderer.renderCall({ path: "/tmp/solo.ts", content }, settledOptions, uiTheme);
+		if (!settled) throw new Error("expected a rendered component for a non-xdev write path");
+		expect(stripAnsi(settled.render(120).join("\n"))).toContain("H(const solo = 1;)");
+		expect(pushes).toEqual(["const solo = 1;"]);
+		settled.render(120);
+		expect(pushes).toEqual(["const solo = 1;"]);
 	});
 
 	it("normalizes CRLF only in the rendered tail, with correct line numbers", async () => {

@@ -1436,10 +1436,8 @@ const writeStreamingPreviewStateKey = Symbol("writeStreamingPreviewState");
  * it lives exactly as long as the component and cannot leak across tool calls.
  */
 interface WriteStreamingPreviewState {
-	/** Number of content code units scanned so far. */
-	length: number;
-	/** Bounded suffix used to detect a restarted/non-append stream. */
-	suffix: string;
+	/** Prior full content; append-only growth is validated with an exact prefix check. */
+	previous: string;
 	/** `1 + count("\n")` over the scanned content. */
 	lineCount: number;
 	/** Raw offset immediately after the last newline consumed by `highlighter`. */
@@ -1450,25 +1448,27 @@ interface WriteStreamingPreviewState {
 	highlighter: HighlightStream | null;
 	language: string | undefined;
 	uiTheme: Theme;
+	/** Content length for which the trailing line was flushed as final (`argsComplete`); -1 when none. */
+	finalFlushedLength: number;
+	/** Highlighted trailing line from the final flush; rendered in place of the plain tail. */
+	finalTrailing: string;
 }
 
 interface WriteStreamingPreviewStateCarrier {
 	[writeStreamingPreviewStateKey]?: WriteStreamingPreviewState;
 }
 
-/** Keep append validation constant-time instead of comparing the entire prior payload. */
-const WRITE_STREAMING_APPEND_GUARD_LENGTH = 64;
-
 function createWriteStreamingPreviewState(language: string | undefined, uiTheme: Theme): WriteStreamingPreviewState {
 	return {
-		length: 0,
-		suffix: "",
+		previous: "",
 		lineCount: 1,
 		completeLength: 0,
 		highlightedLines: [],
 		highlighter: createHighlightStream(language, uiTheme),
 		language,
 		uiTheme,
+		finalFlushedLength: -1,
+		finalTrailing: "",
 	};
 }
 
@@ -1476,12 +1476,16 @@ function createWriteStreamingPreviewState(language: string | undefined, uiTheme:
  * Advance line counting and syntax highlighting only across newly appended
  * content. Complete lines are retained because Ctrl+O can expand the preview;
  * the current partial line stays plain until its terminating newline arrives.
+ * Once args are final, the trailing line is flushed through the highlighter
+ * (its only push without a trailing newline) so a settled-but-queued preview
+ * keeps syntax colors, including for one-line files.
  */
 function updateStreamingPreview(
 	streamKey: WriteStreamingPreviewStateCarrier | undefined,
 	content: string,
 	language: string | undefined,
 	uiTheme: Theme,
+	argsComplete = false,
 ): WriteStreamingPreviewState | undefined {
 	if (streamKey === undefined) return undefined;
 
@@ -1490,15 +1494,18 @@ function updateStreamingPreview(
 		state === undefined ||
 		state.language !== language ||
 		state.uiTheme !== uiTheme ||
-		content.length < state.length ||
-		!content.startsWith(state.suffix, state.length - state.suffix.length)
+		content.length < state.previous.length ||
+		!content.startsWith(state.previous) ||
+		// A final flush consumed the trailing partial line; later growth would
+		// re-feed it, so restart the parser instead of corrupting its state.
+		(state.finalFlushedLength !== -1 && content.length !== state.finalFlushedLength)
 	) {
 		state = createWriteStreamingPreviewState(language, uiTheme);
 		streamKey[writeStreamingPreviewStateKey] = state;
 	}
 
 	let completeLength = state.completeLength;
-	for (let i = state.length; i < content.length; i++) {
+	for (let i = state.previous.length; i < content.length; i++) {
 		if (content.charCodeAt(i) === 10) {
 			state.lineCount++;
 			completeLength = i + 1;
@@ -1506,14 +1513,35 @@ function updateStreamingPreview(
 	}
 	if (completeLength > state.completeLength) {
 		const chunk = content.slice(state.completeLength, completeLength).replace(/\r/g, "");
-		const highlighted = state.highlighter?.push(chunk) ?? chunk;
-		const lines = highlighted.split("\n");
+		let chunkHighlighted = chunk;
+		if (state.highlighter) {
+			try {
+				chunkHighlighted = state.highlighter.push(chunk);
+			} catch {
+				state.highlighter = null;
+			}
+		}
+		const lines = chunkHighlighted.split("\n");
 		lines.pop();
 		state.highlightedLines.push(...lines);
 		state.completeLength = completeLength;
 	}
-	state.length = content.length;
-	state.suffix = content.slice(-WRITE_STREAMING_APPEND_GUARD_LENGTH);
+	if (argsComplete && state.finalFlushedLength !== content.length && !content.endsWith("\n")) {
+		const trailing = content.slice(state.completeLength).replace(/\r/g, "");
+		if (trailing.length > 0) {
+			let trailingHighlighted = trailing;
+			if (state.highlighter) {
+				try {
+					trailingHighlighted = state.highlighter.push(trailing);
+				} catch {
+					state.highlighter = null;
+				}
+			}
+			state.finalTrailing = trailingHighlighted;
+			state.finalFlushedLength = content.length;
+		}
+	}
+	state.previous = content;
 	return state;
 }
 
@@ -1525,17 +1553,19 @@ function formatStreamingContent(
 	spinnerFrame?: number,
 	cache?: RenderedStringCache,
 	streamKey?: WriteStreamingPreviewStateCarrier,
+	argsComplete?: boolean,
 ): string {
 	if (!content) return "";
 	const bodyText = cachedRenderedString(cache, uiTheme, expanded, language ?? "", content, () => {
-		const state = updateStreamingPreview(streamKey, content, language, uiTheme);
+		const state = updateStreamingPreview(streamKey, content, language, uiTheme, argsComplete === true);
 		let totalLines: number;
 		let startIndex: number;
 		let visibleLines: string[];
 		if (state) {
 			totalLines = state.lineCount;
 			startIndex = expanded ? 0 : Math.max(0, totalLines - WRITE_STREAMING_PREVIEW_LINES);
-			const trailingLine = content.slice(state.completeLength).replace(/\r/g, "");
+			const flushed = argsComplete === true && state.finalFlushedLength === content.length;
+			const trailingLine = flushed ? state.finalTrailing : content.slice(state.completeLength).replace(/\r/g, "");
 			if (totalLines === 1 && trailingLine.length === 0) return "";
 			visibleLines = [...state.highlightedLines.slice(startIndex), trailingLine];
 		} else {
@@ -1682,8 +1712,10 @@ export const writeToolRenderer = {
 						streamingCache,
 						// `options` is the ToolExecutionComponent's persistent
 						// render-state object — a stable identity across reveal ticks
-						// that keys the incremental line index.
+						// that keys the incremental preview state. `argsComplete`
+						// flushes the trailing line through the highlighter once.
 						options,
+						options?.argsComplete,
 					)
 				: "";
 			const bodyLines = body ? body.split("\n") : [];
