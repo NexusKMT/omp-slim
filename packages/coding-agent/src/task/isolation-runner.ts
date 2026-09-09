@@ -34,6 +34,7 @@ import {
 	captureDeltaPatch,
 	cleanupIsolation,
 	cleanupTaskBranches,
+	type CommitToBranchResult,
 	commitToBranch,
 	ensureIsolation,
 	getRepoRoot,
@@ -45,13 +46,14 @@ import {
 
 type IsoBackendKind = natives.IsoBackendKind;
 
+/** Record artifact locations for `agent://` and mark the result as an isolated run. */
 function rememberAgentArtifacts(result: SingleResult): SingleResult {
 	AgentRegistry.global().setHistory(result.id, {
 		outputPath: result.outputPath,
 		patchPath: result.patchPath,
 		branchName: result.branchName,
 	});
-	return result;
+	return { ...result, isolated: true };
 }
 
 /**
@@ -164,39 +166,88 @@ export interface IsolatedRunOptions {
 	onSubprocessResult?: (result: SingleResult) => void;
 }
 
+/**
+ * Write each nested-repo patch to `${artifactsDir}/${agentId}.nested-<n>-<path>.patch`
+ * and return the paths. Throws on the first write failure: the caller must
+ * then keep the isolation workspace alive, because it is the only other copy.
+ */
+export async function persistNestedPatches(
+	artifactsDir: string,
+	agentId: string,
+	nestedPatches: readonly NestedRepoPatch[],
+): Promise<string[]> {
+	const saved: string[] = [];
+	for (const [index, nestedPatch] of nestedPatches.entries()) {
+		const destination = path.join(
+			artifactsDir,
+			`${agentId}.nested-${index}-${nestedPatch.relativePath.replace(/[^a-zA-Z0-9._-]/g, "_") || "root"}.patch`,
+		);
+		await Bun.write(destination, nestedPatch.patch);
+		saved.push(destination);
+	}
+	return saved;
+}
+
+interface IsolationPatchArtifacts {
+	patchPath: string;
+	hasRootChanges: boolean;
+	nestedPatches: NestedRepoPatch[];
+	nestedPatchPaths: string[];
+}
+
+/**
+ * Capture the isolation delta and write every part of it to disk — the root
+ * patch and one file per nested repo — before the caller tears the workspace
+ * down. Throws when any write fails so nothing captured is ever the only copy.
+ */
 async function writeIsolationPatch(
 	isolationDir: string,
 	baseline: WorktreeBaseline,
 	artifactsDir: string,
 	agentId: string,
-): Promise<{ patchPath: string; nestedPatches: NestedRepoPatch[] }> {
+): Promise<IsolationPatchArtifacts> {
 	const delta = await captureDeltaPatch(isolationDir, baseline);
 	const patchPath = path.join(artifactsDir, `${agentId}.patch`);
 	await Bun.write(patchPath, delta.rootPatch);
-	return { patchPath, nestedPatches: delta.nestedPatches };
+	const nestedPatchPaths = await persistNestedPatches(artifactsDir, agentId, delta.nestedPatches);
+	return {
+		patchPath,
+		hasRootChanges: delta.rootPatch.trim().length > 0,
+		nestedPatches: delta.nestedPatches,
+		nestedPatchPaths,
+	};
+}
+
+function retainedWorkspaceNote(isolationDir: string): string {
+	return ` Isolation workspace retained at ${isolationDir} — recover the changes from it before running \`omp worktree clear\`.`;
 }
 
 /**
  * Run a subagent inside an isolation worktree and capture its changes.
  *
  * Branch mode: on success, commits the diff onto `omp/task/${agentId}` and
- * returns `branchName` + `nestedPatches`. On commit failure the still-live
- * isolation diff is written to `${artifactsDir}/${agentId}.patch`, the task
- * branch is kept when it already carries commits (deleted otherwise), and
- * `result.error` carries the merge-failure message plus recovery hint.
+ * returns `branchName` + `nestedPatches` (+ `nestedPatchPaths`). On commit
+ * failure the still-live isolation diff is written to
+ * `${artifactsDir}/${agentId}.patch`, the task branch is kept when it already
+ * carries commits (deleted otherwise), and `result.error` carries the
+ * merge-failure message plus recovery hint.
  *
- * Patch mode: on success, writes `${artifactsDir}/${agentId}.patch` and
- * returns `patchPath` + `nestedPatches`.
+ * Patch mode: on success, writes `${artifactsDir}/${agentId}.patch` plus one
+ * `${agentId}.nested-<n>-<path>.patch` per nested repo and returns
+ * `patchPath` + `nestedPatches` + `nestedPatchPaths`.
  *
  * Failure paths preserve the underlying `SingleResult` whenever possible so
  * the caller can still surface the subagent's output; only isolation setup
  * itself routes through {@link IsolatedRunOptions.buildFailureResult}.
  *
- * The isolation handle is always torn down in `finally`.
+ * The isolation handle is torn down in `finally` — except when captured
+ * changes could not be written to disk, in which case the workspace is the
+ * only remaining copy and is retained (its path is named in `result.error`).
  */
 export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<SingleResult> {
 	let handle: IsolationHandle | undefined;
 	let deferredCleanup: Promise<void> | undefined;
+	let retainWorkspace = false;
 	try {
 		const taskBaseline = structuredClone(opts.context.baseline);
 		handle = await ensureIsolation(opts.context.repoRoot, opts.agentId, opts.preferredBackend);
@@ -220,20 +271,15 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 			await deferredCleanup;
 		}
 		if (opts.mergeMode === "branch" && result.exitCode === 0) {
+			let commitResult: CommitToBranchResult | null;
 			try {
-				const commitResult = await commitToBranch(
+				commitResult = await commitToBranch(
 					isolationDir,
 					taskBaseline,
 					opts.agentId,
 					opts.description,
 					opts.buildCommitMessage?.(),
 				);
-				return rememberAgentArtifacts({
-					...result,
-					branchName: commitResult?.branchName,
-					branchBaseSha: commitResult?.baseSha,
-					nestedPatches: commitResult?.nestedPatches,
-				});
 			} catch (mergeErr) {
 				// Agent succeeded but the branch commit failed. `commitToBranch`
 				// is not atomic: the clean-baseline path fetches the agent's
@@ -261,37 +307,63 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 					);
 					return rememberAgentArtifacts({
 						...result,
-						patchPath: patchResult.patchPath,
-						nestedPatches: patchResult.nestedPatches,
+						...patchResult,
 						error: `Merge failed: ${msg}.${rescueNote}`,
 					});
 				} catch (patchErr) {
+					retainWorkspace = true;
 					const patchMsg = patchErr instanceof Error ? patchErr.message : String(patchErr);
 					return rememberAgentArtifacts({
 						...result,
-						error: `Merge failed: ${msg}; patch capture failed: ${patchMsg}.${rescueNote}`,
+						error: `Merge failed: ${msg}; patch capture failed: ${patchMsg}.${rescueNote}${retainedWorkspaceNote(isolationDir)}`,
 					});
 				}
+			}
+			// The branch holds the root-repo work, but nested-repo patches exist
+			// only in memory until written; the workspace goes away in `finally`.
+			try {
+				const nestedPatchPaths = await persistNestedPatches(
+					opts.artifactsDir,
+					opts.agentId,
+					commitResult?.nestedPatches ?? [],
+				);
+				return rememberAgentArtifacts({
+					...result,
+					branchName: commitResult?.branchName,
+					branchBaseSha: commitResult?.baseSha,
+					nestedPatches: commitResult?.nestedPatches,
+					nestedPatchPaths,
+				});
+			} catch (persistErr) {
+				retainWorkspace = true;
+				const persistMsg = persistErr instanceof Error ? persistErr.message : String(persistErr);
+				return rememberAgentArtifacts({
+					...result,
+					branchName: commitResult?.branchName,
+					branchBaseSha: commitResult?.baseSha,
+					nestedPatches: commitResult?.nestedPatches,
+					error: `Nested patch capture failed: ${persistMsg}.${retainedWorkspaceNote(isolationDir)}`,
+				});
 			}
 		}
 		if (result.exitCode === 0) {
 			try {
 				const patchResult = await writeIsolationPatch(isolationDir, taskBaseline, opts.artifactsDir, opts.agentId);
+				return rememberAgentArtifacts({ ...result, ...patchResult });
+			} catch (patchErr) {
+				retainWorkspace = true;
+				const msg = patchErr instanceof Error ? patchErr.message : String(patchErr);
 				return rememberAgentArtifacts({
 					...result,
-					patchPath: patchResult.patchPath,
-					nestedPatches: patchResult.nestedPatches,
+					error: `Patch capture failed: ${msg}.${retainedWorkspaceNote(isolationDir)}`,
 				});
-			} catch (patchErr) {
-				const msg = patchErr instanceof Error ? patchErr.message : String(patchErr);
-				return rememberAgentArtifacts({ ...result, error: `Patch capture failed: ${msg}` });
 			}
 		}
 		return rememberAgentArtifacts(result);
 	} catch (err) {
 		return rememberAgentArtifacts(opts.buildFailureResult(err));
 	} finally {
-		if (handle) {
+		if (handle && !retainWorkspace) {
 			const isolationHandle = handle;
 			if (deferredCleanup) {
 				trackLateCleanup(
@@ -497,8 +569,13 @@ export async function applyEligibleNestedPatches(opts: NestedPatchApplyOptions):
 		const warnings = await applyNestedPatches(repoRoot, nestedPatches, commitMessage);
 		if (warnings.length === 0) return "";
 		return `\n\n<system-notification>${warnings.join("\n")}</system-notification>`;
-	} catch {
-		// Nested patch failures are non-fatal to the parent merge.
-		return "\n\n<system-notification>Some nested repository patches failed to apply.</system-notification>";
+	} catch (applyErr) {
+		// Nested patch failures are non-fatal to the parent merge, but the patch
+		// files are the only surviving copy of that work — name them.
+		const msg = applyErr instanceof Error ? applyErr.message : String(applyErr);
+		const preserved = result.nestedPatchPaths?.length
+			? `\nCaptured nested patches preserved at:\n${result.nestedPatchPaths.map(p => `- ${p}`).join("\n")}`
+			: "";
+		return `\n\n<system-notification>Some nested repository patches failed to apply: ${msg}${preserved}</system-notification>`;
 	}
 }

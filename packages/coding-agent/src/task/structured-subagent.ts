@@ -29,6 +29,7 @@ import {
 	type IsolationContext,
 	makeIsolationCommitMessage,
 	mergeIsolatedChanges,
+	persistNestedPatches,
 	prepareIsolationContext,
 	runIsolatedSubprocess,
 } from "./isolation-runner";
@@ -43,7 +44,7 @@ import {
 	type StructuredSubagentOutput,
 } from "./types";
 import type { WorkPoolYieldItem } from "./workpool-yield";
-import { type NestedRepoPatch, parseIsolationBackend } from "./worktree";
+import { parseIsolationBackend } from "./worktree";
 
 /** Validation behavior requested for an effective output schema. */
 export type StructuredSubagentSchemaMode = "permissive" | "strict";
@@ -519,33 +520,66 @@ function buildFailureResult(
 	};
 }
 
-async function persistNestedPatches(
+/**
+ * Paths of the on-disk nested patches for `result`. The isolation runner
+ * writes them before tearing the workspace down; a result that carries
+ * `nestedPatches` without paths (older producers, direct callers) is written
+ * here as a fallback. Returns the paths and a note when that fallback failed.
+ */
+async function resolveNestedPatchPaths(
+	result: SingleResult,
 	artifactsDir: string,
-	agentId: string,
-	nestedPatches: NestedRepoPatch[],
-): Promise<string[]> {
-	const saved: string[] = [];
-	for (const [index, nestedPatch] of nestedPatches.entries()) {
-		const destination = path.join(
-			artifactsDir,
-			`${agentId}.nested-${index}-${nestedPatch.relativePath.replace(/[^a-zA-Z0-9._-]/g, "_") || "root"}.patch`,
-		);
-		try {
-			await fs.writeFile(destination, nestedPatch.patch);
-			saved.push(destination);
-		} catch {}
+): Promise<{ paths: string[]; failure?: string }> {
+	if (result.nestedPatchPaths) return { paths: result.nestedPatchPaths };
+	try {
+		return { paths: await persistNestedPatches(artifactsDir, result.id, result.nestedPatches ?? []) };
+	} catch (error) {
+		return { paths: [], failure: error instanceof Error ? error.message : String(error) };
 	}
-	return saved;
 }
 
 async function isolationRecoveryHint(result: SingleResult, artifactsDir: string): Promise<string> {
 	const hints: string[] = [];
 	if (result.patchPath) hints.push(`Captured patch preserved at ${result.patchPath}.`);
-	for (const nestedPath of await persistNestedPatches(artifactsDir, result.id, result.nestedPatches ?? [])) {
-		hints.push(`Captured nested patch preserved at ${nestedPath}.`);
-	}
+	const nested = await resolveNestedPatchPaths(result, artifactsDir);
+	for (const nestedPath of nested.paths) hints.push(`Captured nested patch preserved at ${nestedPath}.`);
+	if (nested.failure) hints.push(`Nested patches could not be written: ${nested.failure}.`);
 	if (result.branchName) hints.push(`Captured branch preserved as ${result.branchName}.`);
 	return hints.length > 0 ? ` ${hints.join(" ")}` : "";
+}
+
+/**
+ * One line per on-disk artifact the runner wrote for `result`: the root patch
+ * when it holds changes, and each nested-repo patch file. Empty when nothing
+ * was written.
+ */
+function describeCapturedArtifacts(result: SingleResult): string {
+	const lines: string[] = [];
+	if (result.patchPath && result.hasRootChanges !== false) lines.push(`\n- patch: \`${result.patchPath}\``);
+	for (const nestedPath of result.nestedPatchPaths ?? []) lines.push(`\n- nested repository patch: \`${nestedPath}\``);
+	return lines.join("");
+}
+
+/**
+ * Summary for an isolated run whose changes are captured but deliberately not
+ * applied (`task.isolation.apply=false`). Every captured artifact is named:
+ * the root patch only when it holds changes, and each nested-repo patch file,
+ * so the parent knows exactly where the work lives.
+ */
+function describeCapturedChanges(result: SingleResult): string {
+	const nestedPaths = result.nestedPatchPaths ?? [];
+	const nestedCount = nestedPaths.length || (result.nestedPatches?.length ?? 0);
+	const nestedList = nestedPaths.map(p => `\n- nested repository patch: \`${p}\``).join("");
+	if (result.branchName) {
+		return `\n\nIsolation: changes captured on branch \`${result.branchName}\` (apply=false). Not merged.${nestedList}`;
+	}
+	if (result.patchPath && result.hasRootChanges !== false) {
+		return `\n\nIsolation: changes captured at \`${result.patchPath}\` (apply=false). Not applied.${nestedList}`;
+	}
+	if (nestedCount > 0) {
+		return `\n\nIsolation: changes captured for ${nestedCount} nested ${nestedCount === 1 ? "repository" : "repositories"} (apply=false). Not applied.${nestedList}`;
+	}
+	return "\n\nIsolation: no changes captured.";
 }
 
 function attachStructuredOutputMetadata(result: SingleResult, schema: StructuredSubagentSchemaResolution): void {
@@ -661,14 +695,13 @@ export async function runStructuredSubagent(request: StructuredSubagentRequest):
 				requiresRecoveryArtifacts ||=
 					nestedPatchSummary.includes("<system-notification>") && (result.nestedPatches?.length ?? 0) > 0;
 			}
+		} else if (policy.isIsolated && isolationContext && result.exitCode === 0 && result.error && !result.aborted) {
+			// The agent finished but the runner could not capture, persist, or
+			// commit its changes. `result.error` names the recovery route (retained
+			// workspace, rescued branch); it is the parent's only way to find it.
+			mergeSummary = `\n\n<system-notification>Isolation: ${result.error}</system-notification>${describeCapturedArtifacts(result)}`;
 		} else if (policy.isIsolated && isolationContext && !policy.applyChanges) {
-			if (result.branchName)
-				mergeSummary = `\n\nIsolation: changes captured on branch \`${result.branchName}\` (apply=false). Not merged.`;
-			else if (result.patchPath)
-				mergeSummary = `\n\nIsolation: changes captured at \`${result.patchPath}\` (apply=false). Not applied.`;
-			else if ((result.nestedPatches?.length ?? 0) > 0)
-				mergeSummary = `\n\nIsolation: changes captured for ${result.nestedPatches?.length} nested ${(result.nestedPatches?.length ?? 0) === 1 ? "repository" : "repositories"} (apply=false). Not applied.`;
-			else mergeSummary = "\n\nIsolation: no changes captured.";
+			mergeSummary = describeCapturedChanges(result);
 		}
 
 		completedSuccessfully = result.exitCode === 0 && !result.error && !result.aborted;

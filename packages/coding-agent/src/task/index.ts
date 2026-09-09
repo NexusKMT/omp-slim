@@ -1091,16 +1091,25 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		const { manager, toolCallId, spawnParams, agentId, progress, ircEnabled, buildDetails, onUpdate, onSettled } =
 			options;
 		const buildFollowUpHint = async (aborted: boolean): Promise<string> => {
+			// Isolated runs are parked without a reviver once the run ends
+			// (`finalizeSubagentLifecycle`), so "message it" would point the
+			// caller at a follow-up path that no longer exists. Say nothing about
+			// the worktree itself: the runner keeps it when captured changes could
+			// not be written, and names that path in the result.
+			const isolated = spawnParams.isolated === true;
 			if (aborted) {
 				const ref = AgentRegistry.global().get(agentId);
 				const transcript = (await hasResolvableTranscript(agentId))
 					? `transcript at history://${agentId}`
 					: "transcript unavailable";
-				if (ref?.status === "idle" || ref?.status === "parked") {
+				if (!isolated && (ref?.status === "idle" || ref?.status === "parked")) {
 					const followUp = ircEnabled ? "message it via `hub` to resume; " : "";
 					return `\n\n${agentId} was stopped but is still resumable — ${followUp}${transcript}`;
 				}
 				return `\n\n${agentId} was aborted — ${transcript}`;
+			}
+			if (isolated) {
+				return `\n\n${agentId} ran isolated and cannot be resumed or messaged — transcript at history://${agentId}`;
 			}
 			const followUp = ircEnabled ? "message it via `hub` to follow up; " : "";
 			return `\n\n${agentId} is now idle — ${followUp}transcript at history://${agentId}`;

@@ -5,6 +5,7 @@
 ### Fixed
 
 - Read error and preview rendering now sanitizes tabs and Windows-style CRLF (e.g. ssh host-key failures, tab-indented fetched content) so raw output can no longer tear the result frame.
+- Isolated tasks no longer lose changes made inside nested git repositories: each nested-repo diff is written to `<agent>.nested-<n>-<path>.patch` next to the root patch before the isolation worktree is removed, the worktree is retained (and its path reported) when that write fails, and `apply=false` summaries name every captured file instead of claiming an empty root patch captured the work. Runner errors after a successful run (capture, persist, or branch-commit failure) now reach the parent instead of collapsing to `status="merge failed"`, and isolated agents are reported as not resumable rather than "idle — message it via `hub`".
 ### Added
 
 - Added opt-in experimental notes-backed context windows with persistent branch-local notes, searchable original session history, retained latest user requests, and a model-callable rollover tool, including in Code Mode.
