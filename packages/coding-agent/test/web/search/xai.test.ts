@@ -332,4 +332,35 @@ describe("xAI Responses answer extraction from relay output items", () => {
 			),
 		).rejects.toMatchObject({ provider: "xai", status: 502 });
 	});
+
+	it("treats unrecognized phase values as unphased", async () => {
+		// The interface types phase as a union, but relays cast external JSON;
+		// "" or unknown strings must not strand a message outside both the
+		// final_answer branch and the unphased heuristic (old behavior: every
+		// message dropped, 502 no-answer error even with content present).
+		const relayResponse = {
+			id: "resp-relay",
+			model: "grok-4.5",
+			output: [
+				{
+					type: "message",
+					phase: "starting",
+					content: [
+						{
+							type: "output_text",
+							text: "Bun 1.3.12 is documented.",
+							annotations: [{ type: "url_citation", url: "https://bun.sh" }],
+						},
+					],
+				},
+				{ type: "message", phase: "wip", content: [{ type: "output_text", text: "I'll check." }] },
+				{ type: "message", phase: "done", content: [{ type: "output_text", text: "Second finding." }] },
+			],
+			usage: { input_tokens: 10, output_tokens: 5 },
+		};
+
+		const response = await searchXAI(makeParams(makeFetchMock(relayResponse)));
+
+		expect(response.answer).toBe("Bun 1.3.12 is documented.\nSecond finding.");
+	});
 });

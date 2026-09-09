@@ -280,7 +280,12 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 	for (const item of output) {
 		if (!item || typeof item !== "object" || (item.type !== undefined && item.type !== "message")) continue;
 		const content = Array.isArray(item.content) ? item.content : [];
-		const entry = { texts: [] as string[], hasCitations: false, phase: item.phase };
+		// Relays cast external JSON into the typed interface; normalize the
+		// phase to a recognized value so "" or unknown strings cannot strand a
+		// message outside both the final_answer branch and the unphased
+		// heuristic.
+		const phase = item.phase === "commentary" || item.phase === "final_answer" ? item.phase : null;
+		const entry = { texts: [] as string[], hasCitations: false, phase };
 		for (const part of content) {
 			if (!part || typeof part !== "object") continue;
 			const text = (part.output_text ?? part.text)?.trim();
