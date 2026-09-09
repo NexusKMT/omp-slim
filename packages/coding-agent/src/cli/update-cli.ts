@@ -1414,15 +1414,15 @@ export function buildMiseForceInstallArgs(expectedVersion: string): string[] {
  * freshness window (24h by default); left in place it silently drops a
  * just-published version and leaves `omp update` reporting the old one
  * (issue #11316). The override wins over any user-set `MISE_MINIMUM_RELEASE_AGE`
- * because the user asked for the update directly. We clear it via the env var
- * rather than `--minimum-release-age=0` because that flag was, on some mise
- * versions, indistinguishable from an active cutoff (jdx/mise#10303); the env
- * override is the reliable path.
+ * because the user asked for the update directly. `0s` includes the duration
+ * unit mise's parser requires; a bare `0` is rejected. We use the env var
+ * rather than `--minimum-release-age=0s` because that flag was, on some mise
+ * versions, indistinguishable from an active cutoff (jdx/mise#10303).
  */
 export function buildMiseUpdateEnv(
 	base: Record<string, string | undefined> = process.env,
 ): Record<string, string | undefined> {
-	return { ...base, MISE_MINIMUM_RELEASE_AGE: "0" };
+	return { ...base, MISE_MINIMUM_RELEASE_AGE: "0s" };
 }
 
 /**

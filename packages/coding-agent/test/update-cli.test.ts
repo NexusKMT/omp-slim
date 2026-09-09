@@ -38,9 +38,11 @@ import {
 	updateViaShimTakeover,
 } from "@oh-my-pi/pi-coding-agent/cli/update-cli";
 import Update from "@oh-my-pi/pi-coding-agent/commands/update";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { $which, removeWithRetries } from "@oh-my-pi/pi-utils";
 import type { CliConfig } from "@oh-my-pi/pi-utils/cli";
 import { getThemeByName, setThemeInstance } from "../src/modes/theme/theme";
+
+const miseBinary = Bun.env.MISE_BIN ?? $which("mise");
 
 const tempDirs: string[] = [];
 
@@ -438,8 +440,30 @@ describe("update-cli package manager commands", () => {
 
 	it("clears mise's minimum_release_age gate for attended updates, overriding a user-set value", () => {
 		const env = buildMiseUpdateEnv({ PATH: "/bin", MISE_MINIMUM_RELEASE_AGE: "24h" });
-		expect(env.MISE_MINIMUM_RELEASE_AGE).toBe("0");
+		expect(env.MISE_MINIMUM_RELEASE_AGE).toBe("0s");
 		expect(env.PATH).toBe("/bin");
+	});
+
+	it.skipIf(!miseBinary)("uses release-age syntax accepted by mise's parser", async () => {
+		if (!miseBinary) throw new Error("mise binary unavailable");
+		const home = await makeTempDir();
+		const result = Bun.spawnSync([miseBinary, "latest", "node"], {
+			env: buildMiseUpdateEnv({
+				...process.env,
+				HOME: home,
+				MISE_CACHE_DIR: path.join(home, "cache"),
+				MISE_CONFIG_DIR: path.join(home, "config"),
+				MISE_DATA_DIR: path.join(home, "data"),
+				MISE_STATE_DIR: path.join(home, "state"),
+			}),
+			stdin: "ignore",
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		if (result.exitCode !== 0) {
+			throw new Error(`mise rejected the update environment: ${result.stderr.toString()}`);
+		}
+		expect(result.exitCode).toBe(0);
 	});
 
 	it("pins npm package installs to the official registry and the checked native package versions", () => {
