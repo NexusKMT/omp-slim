@@ -248,4 +248,24 @@ describe("StatusLineComponent display detector", () => {
 		expect(component.getTopBorder(80).content).toContain("#7");
 		component.dispose();
 	});
+	it("sanitizes control characters from the jj label", async () => {
+		const root = "/repo/sanitize";
+		const operational = operationalGit(root, headFor("main"));
+		const display = displayJj(root, async () => `evil-${String.fromCharCode(27)}[2J-bookmark`, { staged: 0, unstaged: 0, untracked: 0 });
+		mockRepos(operational, display, root);
+
+		const component = new StatusLineComponent(makeSession());
+		component.updateSettings(gitSegment);
+		component.watchBranch(() => {});
+
+		component.getTopBorder(80);
+		await flush();
+		const content = component.getTopBorder(80).content;
+		expect(content).toContain("evil-");
+		expect(content).toContain("bookmark");
+		// The raw erase-display payload is gone (theme ANSI aside, which is
+		// emitted by the renderer itself, not the label).
+		expect(content).not.toContain("[2J");
+		component.dispose();
+	});
 });

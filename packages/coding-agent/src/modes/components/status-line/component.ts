@@ -1103,8 +1103,12 @@ export class StatusLineComponent implements Component {
 			(async () => {
 				let next: string | null = null;
 				try {
-					next =
+					const raw =
 						(await repository.label(withTimeoutSignal(JJ_COMMAND_TIMEOUT_MS, request.controller.signal))) ?? null;
+					// Repository-controlled jj metadata can carry control
+					// characters; sanitize at the cache boundary (the git segment
+					// renders the label verbatim).
+					next = raw === null ? null : sanitizeStatusText(raw);
 				} catch {
 					next = null;
 				} finally {

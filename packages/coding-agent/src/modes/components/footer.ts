@@ -123,8 +123,9 @@ export class FooterComponent implements Component {
 					.label(request.signal)
 					.then(label => {
 						if (this.#disposed || this.#branchGeneration !== generation) return;
-						const changed = this.#cachedBranch !== label;
-						this.#cachedBranch = label;
+						const clean = typeof label === "string" ? sanitizeStatusText(label) : label;
+						const changed = this.#cachedBranch !== clean;
+						this.#cachedBranch = clean;
 						if (changed) this.#onBranchChange?.();
 					})
 					.catch(() => {
