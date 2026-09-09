@@ -27,6 +27,7 @@ import {
 	replaceTabs,
 	shortenPath,
 	type ToolUIStatus,
+	TRUNCATE_LENGTHS,
 	truncateToWidth,
 } from "../tools/render-utils";
 import {
@@ -1458,13 +1459,19 @@ function renderAgentResult(
 	// Artifact rows: paths shortened (home → `~`) and width-bounded like every
 	// other rendered line; the full paths live in the model-facing summary.
 	if (result.patchPath && !aborted && result.exitCode === 0) {
-		lines.push(`${continuePrefix}${theme.fg("dim", truncateToWidth(`Patch: ${shortenPath(result.patchPath)}`, 80))}`);
+		lines.push(
+			`${continuePrefix}${theme.fg("dim", truncateToWidth(`Patch: ${shortenPath(result.patchPath)}`, TRUNCATE_LENGTHS.CONTENT))}`,
+		);
 	} else if (result.branchName && !aborted && result.exitCode === 0) {
-		lines.push(`${continuePrefix}${theme.fg("dim", truncateToWidth(`Branch: ${sanitizeText(result.branchName)}`, 80))}`);
+		lines.push(
+			`${continuePrefix}${theme.fg("dim", truncateToWidth(`Branch: ${sanitizeText(result.branchName)}`, TRUNCATE_LENGTHS.CONTENT))}`,
+		);
 	}
 	if (!aborted && result.exitCode === 0) {
 		for (const nestedPath of result.nestedPatchPaths ?? []) {
-			lines.push(`${continuePrefix}${theme.fg("dim", truncateToWidth(`Nested patch: ${shortenPath(nestedPath)}`, 80))}`);
+			lines.push(
+				`${continuePrefix}${theme.fg("dim", truncateToWidth(`Nested patch: ${shortenPath(nestedPath)}`, TRUNCATE_LENGTHS.CONTENT))}`,
+			);
 		}
 	}
 
