@@ -1818,6 +1818,16 @@ export class InteractiveMode implements InteractiveModeContext {
 		// a streaming turn cannot re-run the command on every retry tick.
 		if (this.loopCondition && !(await this.#passesLoopCondition(prompt))) return;
 
+		// The gate awaited a child process: a turn may have started meanwhile
+		// (async job, idle flush), so re-check before spending budget or
+		// compacting/resetting into the now-busy session.
+		if (this.#isAutoSubmitBlocked()) {
+			this.#deferLoopAutoSubmit(() => {
+				void this.#runLoopIteration(action, prompt);
+			});
+			return;
+		}
+
 		if (!consumeLoopLimitIteration(this.loopLimit)) {
 			this.disableLoopMode("Loop limit reached. Loop mode disabled.");
 			return;
