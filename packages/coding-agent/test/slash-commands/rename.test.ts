@@ -183,6 +183,33 @@ it("cancels title inference without applying or announcing a late rename", async
 	}
 });
 
+it("preserves a newer TUI rename made while title generation finishes", async () => {
+	const { session, sessionManager, execute } = createRuntime("TUI");
+	let newerRename: Promise<boolean> | undefined;
+	let entries = sessionManager.getEntries();
+	session.setTitleGenerationStart(() => () => {
+		// Cleanup runs after generation's return guard, before the TUI handler resumes.
+		newerRename = sessionManager.setSessionName("Newer chosen title", "user");
+		entries = sessionManager.getEntries();
+	});
+	const { started, response } = deferTitle();
+	const pending = execute("/rename");
+	try {
+		await Promise.race([started.promise, pending]);
+		response.resolve("Stale generated title");
+		await pending;
+		await newerRename;
+
+		expect(session.sessionName).toBe("Newer chosen title");
+		expect(sessionManager.getEntries()).toEqual(entries);
+	} finally {
+		session.setTitleGenerationStart(undefined);
+		response.resolve(null);
+		await pending;
+		await newerRename;
+	}
+});
+
 for (const mode of ["TUI", "headless"] as const) {
 	describe(`/rename (${mode})`, () => {
 		it("replaces a manual title from conversation context and protects the result from automatic titles", async () => {
@@ -222,6 +249,34 @@ for (const mode of ["TUI", "headless"] as const) {
 			expect(sessionManager.getEntries()).toEqual(entries);
 			expect(generate).not.toHaveBeenCalled();
 		});
+
+		it.each(["empty", "low-signal"] as const)(
+			"keeps a pending rename when another request has %s context",
+			async context => {
+				const { session, execute } = createRuntime(mode);
+				const messages = session.messages;
+				const { started, response, generate } = deferTitle();
+				const pending = execute("/rename");
+				try {
+					await Promise.race([started.promise, pending]);
+					session.agent.replaceMessages(
+						context === "empty" ? [] : [{ role: "user", content: "hello", timestamp: 2 }],
+					);
+					generate.mockResolvedValueOnce(null);
+					await execute("/rename");
+					expect(generate).toHaveBeenCalledTimes(1);
+
+					session.agent.replaceMessages(messages);
+					response.resolve("Cache invalidation repair");
+					await pending;
+					expect(session.sessionName).toBe("Cache invalidation repair");
+				} finally {
+					session.agent.replaceMessages(messages);
+					response.resolve(null);
+					await pending;
+				}
+			},
+		);
 
 		for (const outcome of ["no title", "failure"] as const) {
 			it(`preserves the previous title when generation returns ${outcome}`, async () => {

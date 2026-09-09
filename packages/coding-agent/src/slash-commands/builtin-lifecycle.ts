@@ -41,9 +41,9 @@ function formatFreshSessionResult(result: FreshSessionResult): string {
 /** Null reports no usable title; undefined silently discards an invalidated request. */
 async function generateRenameTitle(session: AgentSession, signal?: AbortSignal): Promise<string | null | undefined> {
 	const { sessionManager } = session;
-	const revision = sessionManager.reserveTitleRevision();
 	const context = buildReplanTitleContext(session.messages);
 	if (!context || isLowSignalTitleInput(context)) return null;
+	const revision = sessionManager.reserveTitleRevision();
 	const sessionId = sessionManager.getSessionId();
 	const titleSignal = session.titleGenerationSignal;
 	const cleanupProgress = session.notifyTitleGenerationStart();
@@ -703,8 +703,21 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 		handleTui: async (command, runtime) => {
 			runtime.ctx.editor.setText("");
 			const session = runtime.ctx.session;
-			const title = command.args.trim() || (await generateRenameTitle(session));
-			if (runtime.ctx.session !== session || title === undefined) return;
+			const sessionManager = runtime.ctx.sessionManager;
+			const sessionId = sessionManager.getSessionId();
+			const titleSignal = session.titleGenerationSignal;
+			const generation = command.args.trim() || generateRenameTitle(session);
+			const titleRevision = sessionManager.titleRevision;
+			const title = typeof generation === "string" ? generation : await generation;
+			if (
+				runtime.ctx.session !== session ||
+				runtime.ctx.sessionManager !== sessionManager ||
+				titleSignal.aborted ||
+				sessionManager.getSessionId() !== sessionId ||
+				sessionManager.titleRevision !== titleRevision ||
+				title === undefined
+			)
+				return;
 			if (!title) {
 				runtime.ctx.showStatus("Could not generate a session title. Use /rename <title> to set one.");
 				return;
