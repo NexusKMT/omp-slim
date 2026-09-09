@@ -200,6 +200,58 @@ describe("/handoff command", () => {
 		expect(loadingAnimation).toBe(freshWorkingLoader);
 	});
 
+	it("preserves a retry loader that replaces the handoff overlay during replay", async () => {
+		const statusContainer = createContainer();
+		const retryLoader = { stop: vi.fn() };
+		let isStreaming = false;
+		let activeRetryLoader: { stop: () => void } | undefined;
+		const ensureLoadingAnimation = vi.fn();
+		const ctx = {
+			sessionManager: {
+				getEntries: () => [{ type: "message" }, { type: "message" }],
+			},
+			session: {
+				get isStreaming() {
+					return isStreaming;
+				},
+				handoff: vi.fn(async () => ({ document: "## Goal\nContinue" })),
+			},
+			loadingAnimation: undefined,
+			autoCompactionLoader: undefined,
+			get retryLoader() {
+				return activeRetryLoader;
+			},
+			set retryLoader(value: { stop: () => void } | undefined) {
+				activeRetryLoader = value;
+			},
+			statusContainer,
+			ui: { requestRender: vi.fn(), requestComponentRender: vi.fn() },
+			clearTransientSessionUi: vi.fn(() => {
+				statusContainer.disposeChildren();
+			}),
+			renderInitialMessages: vi.fn(async () => {
+				isStreaming = true;
+				activeRetryLoader = retryLoader;
+				statusContainer.addChild(retryLoader);
+			}),
+			ensureLoadingAnimation,
+			statusLine: { invalidate: vi.fn() },
+			updateEditorBorderColor: vi.fn(),
+			reloadTodos: vi.fn(async () => undefined),
+			present: vi.fn(),
+			showStatus: vi.fn(),
+			showWarning: vi.fn(),
+			showError: vi.fn(),
+		} as unknown as InteractiveModeContext;
+		const controller = new CommandController(ctx);
+
+		await controller.handleHandoffCommand();
+
+		expect(statusContainer.children).toEqual([retryLoader]);
+		expect(activeRetryLoader).toBe(retryLoader);
+		expect(ensureLoadingAnimation).not.toHaveBeenCalled();
+	});
+
 	it("surfaces a provider failure named AbortError as a real error, not a cancellation", async () => {
 		// Regression: the catch used to map any name==="AbortError" error to
 		// "Handoff cancelled". session.handoff() now normalizes genuine cancellations

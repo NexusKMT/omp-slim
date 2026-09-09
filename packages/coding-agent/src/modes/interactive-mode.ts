@@ -5243,6 +5243,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	ensureLoadingAnimation(): void {
+		if (this.autoCompactionLoader || this.retryLoader) return;
 		if (!this.loadingAnimation) {
 			this.#clearWorkingMessageAccentCache();
 			this.statusContainer.disposeChildren();
@@ -5272,6 +5273,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.statusContainer.addChild(this.loadingAnimation);
 		} else if (!this.statusContainer.children.includes(this.loadingAnimation)) {
 			this.statusContainer.disposeChildren();
+			this.loadingAnimation.start();
 			this.statusContainer.addChild(this.loadingAnimation);
 			this.ui.requestRender();
 		}

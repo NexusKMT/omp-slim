@@ -1668,6 +1668,9 @@ export class CommandController {
 
 	#finishHandoffUi(handoffLoader: Loader): void {
 		handoffLoader.stop();
+		// A retry/compaction event has already replaced the handoff overlay with
+		// its own live status. Leave that loader mounted; its end event owns cleanup.
+		if (this.ctx.autoCompactionLoader || this.ctx.retryLoader) return;
 		this.ctx.statusContainer.disposeChildren();
 		// `disposeChildren()` disposed any working loader mounted by a delayed
 		// `agent_start` during transcript replay, which stops its animation timer.
