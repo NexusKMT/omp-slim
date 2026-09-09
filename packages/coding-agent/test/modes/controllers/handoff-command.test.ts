@@ -315,4 +315,38 @@ describe("/handoff command", () => {
 		expect(showWarning).toHaveBeenCalledTimes(1);
 		expect(statusContainer.children).toHaveLength(0);
 	});
+
+	it("preserves idle auto-compaction UI instead of starting handoff", async () => {
+		const statusContainer = createContainer();
+		const autoCompactionLoader = { stop: vi.fn() };
+		statusContainer.addChild(autoCompactionLoader);
+		const handoff = vi.fn(async () => {
+			throw new Error("Compaction already in progress");
+		});
+		const showWarning = vi.fn();
+		const ctx = {
+			sessionManager: {
+				getEntries: () => [{ type: "message" }, { type: "message" }],
+			},
+			session: { isStreaming: false, isCompacting: true, handoff },
+			loadingAnimation: undefined,
+			autoCompactionLoader,
+			retryLoader: undefined,
+			statusContainer,
+			ui: { requestRender: vi.fn(), requestComponentRender: vi.fn() },
+			showWarning,
+			showError: vi.fn(),
+			showStatus: vi.fn(),
+		} as unknown as InteractiveModeContext;
+		const controller = new CommandController(ctx);
+
+		await controller.handleHandoffCommand();
+
+		expect(handoff).not.toHaveBeenCalled();
+		expect(statusContainer.children).toEqual([autoCompactionLoader]);
+		expect(autoCompactionLoader.stop).not.toHaveBeenCalled();
+		expect(showWarning).toHaveBeenCalledWith(
+			"Wait for context compaction to finish or cancel it before handing off.",
+		);
+	});
 });
