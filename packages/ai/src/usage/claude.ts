@@ -346,7 +346,30 @@ async function fetchUsagePayload(
 				continue;
 			}
 
-			const parsed = (await response.json()) as unknown;
+			const body = await response.text();
+			if (body.trim().length === 0) {
+				// An empty 2xx serves nothing here; a gateway answering unknown paths
+				// this way has no usage endpoint to poll.
+				return { payload: lastPayload, endpointAbsent: true };
+			}
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(body) as unknown;
+			} catch {
+				// A non-JSON 2xx is this host answering something else at this path
+				// (an index page, a plain-text notice). A body that claims JSON and
+				// fails to parse is truncated or garbled instead, so keep retrying it
+				// against this host rather than moving the request.
+				const claimsJson = /json/i.test(response.headers.get("content-type") ?? "");
+				ctx.logger?.warn("Claude usage response was not JSON", {
+					contentType: response.headers.get("content-type") ?? undefined,
+					attempt,
+					willRetry: claimsJson && attempt < MAX_ATTEMPTS - 1,
+				});
+				if (!claimsJson) return { payload: lastPayload, endpointAbsent: true };
+				if (!(await waitBeforeRetry(attempt, null, signal, ctx.retryWait))) break;
+				continue;
+			}
 			if (isRecord(parsed)) {
 				const payload = parsed as ClaudeUsageResponse;
 				lastPayload = payload;

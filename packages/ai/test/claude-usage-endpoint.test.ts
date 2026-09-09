@@ -121,4 +121,46 @@ describe("claudeUsageProvider usage endpoint resolution", () => {
 		]);
 		expect(report?.metadata?.endpoint).toBe(CANONICAL_USAGE_URL);
 	});
+
+	it("falls back when a custom baseUrl answers 200 with an SPA index page", async () => {
+		const { fetch, urls } = recordingFetch(url =>
+			url === CANONICAL_USAGE_URL
+				? jsonResponse(200, USAGE_PAYLOAD)
+				: new Response("<!doctype html><title>gateway</title>", {
+						status: 200,
+						headers: { "Content-Type": "text/html" },
+					}),
+		);
+
+		const report = await claudeUsageProvider.fetchUsage(params("https://gateway.example.com/v1"), context(fetch));
+
+		// A single probe is enough: an HTML 200 is not a usage endpoint having a
+		// bad moment, so retrying it only delays the canonical fallback.
+		expect(urls).toEqual(["https://gateway.example.com/api/oauth/usage", CANONICAL_USAGE_URL]);
+		expect(report?.metadata?.endpoint).toBe(CANONICAL_USAGE_URL);
+	});
+
+	it("falls back when a custom baseUrl answers 200 with an empty body", async () => {
+		const { fetch, urls } = recordingFetch(url =>
+			url === CANONICAL_USAGE_URL ? jsonResponse(200, USAGE_PAYLOAD) : new Response("", { status: 200 }),
+		);
+
+		const report = await claudeUsageProvider.fetchUsage(params("https://gateway.example.com/v1"), context(fetch));
+
+		expect(urls).toEqual(["https://gateway.example.com/api/oauth/usage", CANONICAL_USAGE_URL]);
+		expect(report?.metadata?.endpoint).toBe(CANONICAL_USAGE_URL);
+	});
+
+	it("keeps retrying a truncated JSON body on the configured host", async () => {
+		const { fetch, urls } = recordingFetch(
+			() => new Response('{"five_hour":{"utiliz', { status: 200, headers: { "Content-Type": "application/json" } }),
+		);
+
+		const report = await claudeUsageProvider.fetchUsage(params("https://mirror.example.com/v1"), context(fetch));
+
+		// A JSON content type that fails to parse is a damaged response from a host
+		// that does serve usage — the request must not move.
+		expect(report).toBeNull();
+		expect(urls).toEqual(Array.from({ length: 3 }, () => "https://mirror.example.com/api/oauth/usage"));
+	});
 });
