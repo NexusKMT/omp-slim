@@ -43,7 +43,9 @@ describe("Command Code provider support", () => {
 			"https://api.commandcode.ai/provider/v1/models",
 			expect.objectContaining({ method: "GET" }),
 		);
-		expect(requestHeaders).not.toHaveProperty("Authorization");
+		// The key is forwarded so entitled rows resolve like inference; the
+		// public catalog ignores unknown credentials.
+		expect(requestHeaders).toHaveProperty("Authorization", "Bearer user_test");
 		expect(models.find(model => model.id === "claude-sonnet-4-6")).toMatchObject({
 			api: "anthropic-messages",
 			baseUrl: "https://api.commandcode.ai/provider",
@@ -73,6 +75,20 @@ describe("Command Code provider support", () => {
 				maxTokensField: "max_tokens",
 			},
 		});
+	});
+
+	test("discovers the public catalog without credentials", async () => {
+		let requestHeaders: RequestInit["headers"];
+		const fetchMock: FetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+			requestHeaders = init?.headers;
+			return Response.json({
+				data: [{ id: "gpt-5.6-sol", name: "GPT-5.6 Sol", context_length: 1_050_000 }],
+			});
+		});
+		const options = commandCodeModelManagerOptions({ fetch: fetchMock });
+		const specs = await options.fetchDynamicModels?.();
+		expect(specs).toHaveLength(1);
+		expect(requestHeaders).not.toHaveProperty("Authorization");
 	});
 
 	test("preserves disjoint cache usage and timing through both native transports", async () => {
@@ -213,8 +229,10 @@ describe("Command Code provider support", () => {
 				longContext: { inputThreshold: 32_000, input: 0.1, output: 0.4, cacheRead: 0.02, cacheWrite: 0.125 },
 			},
 		});
-		// Grok 4.6's whole-request 2x tier overrides the xai class multiplier
-		// rule; resolution throwing here means the priority tie regressed.
+
+		// Grok 4.6's whole-request 2x tier above 200K input, as absolute rates
+		// (the xai class multiplier rule is scoped to xai/xai-oauth and never
+		// matches this provider).
 		expect(models.find(model => model.id === "xai/grok-4.6")).toMatchObject({
 			cost: {
 				input: 2,
@@ -228,5 +246,103 @@ describe("Command Code provider support", () => {
 		expect(models.find(model => model.id === "poolside/laguna-s-2.1-free")).toMatchObject({
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		});
+	});
+
+	test("prices every served catalog id; only documented-free models stay zero", async () => {
+		// Snapshot of GET /provider/v1/models ids on 2026-09-09. A newly
+		// served id without a cost-patch rule fails here instead of silently
+		// billing at zero.
+		const servedIds = [
+			"MiniMaxAI/MiniMax-M2.5",
+			"MiniMaxAI/MiniMax-M2.7",
+			"MiniMaxAI/MiniMax-M3",
+			"Qwen/Qwen3.6-Max-Preview",
+			"Qwen/Qwen3.6-Plus",
+			"Qwen/Qwen3.7-Flash",
+			"Qwen/Qwen3.7-Max",
+			"Qwen/Qwen3.7-Plus",
+			"Qwen/Qwen3.8-27B",
+			"Qwen/Qwen3.8-Flash",
+			"Qwen/Qwen3.8-Max",
+			"Qwen/Qwen3.8-Max-0902",
+			"claude-fable-5",
+			"claude-fable-5-1",
+			"claude-haiku-4-5-20251001",
+			"claude-opus-4-7",
+			"claude-opus-4-8",
+			"claude-opus-5",
+			"claude-sonnet-4-6",
+			"claude-sonnet-5",
+			"deepseek/deepseek-v4-flash",
+			"deepseek/deepseek-v4-flash-fast",
+			"deepseek/deepseek-v4-flash-vision-exp",
+			"deepseek/deepseek-v4-pro",
+			"google/gemini-3.1-flash-lite",
+			"google/gemini-3.5-flash",
+			"google/gemini-3.5-flash-lite",
+			"google/gemini-3.6-flash",
+			"google/gemini-3.7-flash",
+			"google/gemini-3.8-flash",
+			"gpt-5.3-codex",
+			"gpt-5.4",
+			"gpt-5.4-mini",
+			"gpt-5.5",
+			"gpt-5.6-luna",
+			"gpt-5.6-sol",
+			"gpt-5.6-terra",
+			"inclusionai/ling-3.0-flash-sante:free",
+			"meituan/LongCat-2.0:free",
+			"meta/muse-spark-1.1",
+			"meta/muse-spark-1.2",
+			"meta/muse-spark-1.2-contributor",
+			"meta/muse-spark-1.3",
+			"meta/muse-spark-1.3-contributor",
+			"moonshotai/Kimi-K2.5",
+			"moonshotai/Kimi-K2.6",
+			"moonshotai/Kimi-K2.7-Code",
+			"moonshotai/Kimi-K2.7-Code-Highspeed",
+			"moonshotai/Kimi-K3",
+			"nvidia/nemotron-3-ultra-550b-a55b",
+			"poolside/laguna-s-2.1-free",
+			"sakana/fugu-ultra",
+			"stepfun/Step-3.5-Flash",
+			"stepfun/Step-3.7-Flash",
+			"tencent/hy3-paid",
+			"tencent/hy4-preview",
+			"thinkingmachines/inkling",
+			"thinkingmachines/inkling-small",
+			"xai/grok-4.5",
+			"xai/grok-4.6",
+			"xiaomi/mimo-v2.5",
+			"xiaomi/mimo-v2.5-pro",
+			"z-ai/glm-5.3-flash",
+			"zai-org/GLM-5",
+			"zai-org/GLM-5.1",
+			"zai-org/GLM-5.2",
+			"zai-org/GLM-5.2-Fast",
+			"zai-org/GLM-5.3",
+		];
+		const freeIds: Record<string, true> = {
+			"inclusionai/ling-3.0-flash-sante:free": true,
+			"meituan/LongCat-2.0:free": true,
+			"poolside/laguna-s-2.1-free": true,
+		};
+		const fetchMock: FetchImpl = vi.fn(async () =>
+			Response.json({
+				data: servedIds.map(id => ({ id, name: id, context_length: 1_000_000 })),
+			}),
+		);
+		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
+		const specs = await options.fetchDynamicModels?.();
+		const models = (specs ?? []).map(spec => buildModel(spec as ModelSpec<Api>));
+		expect(models).toHaveLength(servedIds.length);
+		for (const model of models) {
+			if (freeIds[model.id]) {
+				expect(model.cost).toMatchObject({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+			} else {
+				expect(model.cost.input).toBeGreaterThan(0);
+				expect(model.cost.output).toBeGreaterThan(0);
+			}
+		}
 	});
 });

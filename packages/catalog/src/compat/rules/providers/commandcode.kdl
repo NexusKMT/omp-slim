@@ -1,11 +1,19 @@
 // Command Code Provider API deployment contract. Model capabilities and effort
-// ladders follow command-code@1.44.0, as tracked by pi-commandcode-provider.
+// ladders follow command-code@1.44.0: the thinking-efforts below reproduce the
+// bundle's 36-id effort registry 1:1 (verified against its effort map), plus
+// the 5 Muse Spark lineage ids whose ladder OMP's classes/meta.kdl carries.
+// Every other served id exposes no effort dial upstream (`modelSupports-
+// ReasoningEffort` is false for them in the CLI), so a missing ladder here
+// is a deliberate absence, not a gap.
 provider "commandcode" {
 	supports-developer-role #false
 	supports-store #false
 	supports-reasoning-effort #true
 	max-tokens-field "max_tokens"
 	thinking-mode "effort"
+	// Default output cap: the Provider API exposes no per-model maximum and
+	// the CLI requests 64K by default, so 64K (2^16); the two registry caps
+	// below are the only per-model maxOutputTokens in command-code@1.44.0.
 	limits-patch {
 		max-tokens 65536
 	}
@@ -64,14 +72,16 @@ provider "commandcode" {
 	// Provider pricing. Every model id served by GET /provider/v1/models is
 	// priced here; discovery defaults each model to zero cost and the mapper
 	// never inherits another provider's rates, so this table is the sole
-	// pricing source. Rates are Command Code's per-1M-token USD list prices,
-	// verified against https://commandcode.ai/docs/resources/pricing-limits on
-	// 2026-09-09 against the live catalog (the page's Sonnet 4.5 / Opus 4.6 /
-	// GPT-6 Astra rows are not served by the Provider API and stay absent).
-	// A "—" Cache Write column on the page means 0. Standing deals
-	// (MiniMax M3 50% off, MiMo V2.5 discounts) are priced at their current
-	// effective rates. Free models (`poolside/laguna-s-2.1-free`,
-	// `meituan/LongCat-2.0:free`) keep the zero discovery default.
+	// pricing source. Base rates are Command Code's per-1M-token USD list
+	// prices, cross-checked 1:1 against the rate card bundled in
+	// command-code@1.44.0 (67 rows, zero mismatches) and the live catalog on
+	// 2026-09-09 (68 rows: the bundle plus `inclusionai/ling-3.0-flash-sante:free`).
+	// The page's Sonnet 4.5 / Opus 4.6 / GPT-6 Astra rows are not served by
+	// the Provider API and stay absent. A "—" Cache Write column on the page
+	// means 0. Standing deals (MiniMax M3 50% off, MiMo V2.5 discounts) are
+	// priced at their current effective rates. Free models
+	// (`poolside/laguna-s-2.1-free`, `meituan/LongCat-2.0:free`,
+	// `inclusionai/ling-3.0-flash-sante:free`) keep the zero discovery default.
 	// ---------------------------------------------------------------------------
 	models "claude-sonnet-5" {
 		cost-patch {
@@ -533,11 +543,10 @@ provider "commandcode" {
 		}
 	}
 	// Grok 4.6 bills a whole-request 2x tier above 200K input. Absolute rates
-	// (not the classes/xai.kdl multiplier form): discovery specs carry zero
-	// base cost, so a multiplier derives nothing. priority=10 resolves the
-	// intentional overlap with the xai class rule, which would otherwise tie
-	// on the long-context axis.
-	models "xai/grok-4.6" priority=10 {
+	// (not the classes/xai.kdl multiplier form, which is scoped to providers
+	// "xai"/"xai-oauth" and never matches here): discovery specs carry zero
+	// base cost, so a multiplier derives nothing.
+	models "xai/grok-4.6" {
 		cost-patch {
 			input 2.0
 			output 6.0

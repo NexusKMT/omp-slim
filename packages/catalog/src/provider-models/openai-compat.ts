@@ -7329,6 +7329,10 @@ export function commandCodeModelManagerOptions(config?: CommandCodeModelManagerC
 				api: "openai-completions",
 				provider: "commandcode",
 				baseUrl: discoveryBaseUrl,
+				// The catalog endpoint is public, but forward the key when the
+				// caller has one so entitled rows resolve identically to
+				// inference. The helper only sends Authorization when set.
+				apiKey: config?.apiKey,
 				mapModel: (entry, defaults) => {
 					const route = apiRouteFor("commandcode", defaults.id);
 					const api = route?.api === "anthropic-messages" ? route.api : "openai-completions";
