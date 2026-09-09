@@ -1140,14 +1140,25 @@ describe("resolveAgentModelPatterns", () => {
 
 	test("breaks the tiny/smol fallback cycle via a default alias", () => {
 		const settings = Settings.isolated({ modelRoles: { default: "@tiny" } });
+		const baseline = resolveAgentModelPatterns({ agentModel: "@smol", settings: Settings.isolated() });
 
 		const tiny = resolveAgentModelPatterns({ agentModel: "@tiny", settings });
 		const smol = resolveAgentModelPatterns({ agentModel: "@smol", settings });
 
+		expect(baseline.length).toBeGreaterThan(0);
 		expect(tiny).not.toContain("@tiny");
 		expect(smol).not.toContain("@tiny");
-		expect(tiny[0]).toBe("google-antigravity/gemini-3.8-flash");
+		expect(tiny).toEqual(baseline);
 		expect(smol).toEqual(tiny);
+	});
+
+	test("preserves thinking suffix when breaking the smol fallback cycle", () => {
+		const settings = Settings.isolated({ modelRoles: { smol: "@tiny:high" } });
+		const baseline = resolveAgentModelPatterns({ agentModel: "@smol", settings: Settings.isolated() });
+
+		const tiny = resolveAgentModelPatterns({ agentModel: "@tiny", settings });
+
+		expect(tiny).toEqual(baseline.map(pattern => `${pattern}:high`));
 	});
 
 	test("expands cross-role default aliases when inheriting for an unset role", () => {

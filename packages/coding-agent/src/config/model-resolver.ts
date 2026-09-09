@@ -1230,14 +1230,18 @@ function resolveConfiguredRolePattern(
 			? undefined
 			: (
 					resolveConfiguredRolePattern(formatModelRoleAlias(configuredFallback), settings, new Set(visited)) ?? []
-				).filter(pattern => {
-					const { base } = splitThinkingSuffix(
+				).flatMap(pattern => {
+					const { base, level } = splitThinkingSuffix(
 						pattern,
 						modelRoleAliasPrefixLength(pattern) ?? LEGACY_MODEL_ROLE_ALIAS_PREFIX.length,
 						MAX_THINKING_SUFFIX_OPTIONS,
 					);
 					const patternRole = getModelRoleAlias(base, settings);
-					return !patternRole || !visited.has(patternRole);
+					if (!patternRole || !visited.has(patternRole)) return [pattern];
+					// Cyclic fallback alias (e.g. smol = "@tiny:high" while resolving
+					// @tiny): expand to the built-in chain, preserving the requested
+					// thinking level instead of dropping the suffix.
+					return level ? roleDefaults.map(defaultPattern => `${defaultPattern}:${level}`) : [];
 				});
 	const resolved = configured
 		? normalizeModelPatternList(configured)
