@@ -5,10 +5,11 @@
  *
  * Presentation now follows a second detector, `vcs.repoForDisplay()`, whose
  * only policy difference is preferring jj on equal-root ties; automation
- * keeps `vcs.repo()`. The component (and legacy footer) split accordingly:
- * branch label, status counts, and the head watcher come from the display
- * repository, while PR lookup keeps resolving the operational git branch —
- * a jj bookmark/change id must never become a GitHub head.
+ * keeps `vcs.repo()`. The component (and footer) split accordingly:
+ * branch label and the head watcher come from the display
+ * repository (status counts stay on the operational repository), while PR
+ * lookup keeps resolving the operational git branch — a jj bookmark/change
+ * id must never become a GitHub head.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -149,10 +150,10 @@ function mockRepos(operational: VcsRepo, display: VcsRepo, root: string): void {
 }
 
 describe("StatusLineComponent display detector", () => {
-	it("shows the jj bookmark and jj status with the jj watch target when colocated", async () => {
+	it("shows the jj bookmark with the jj watch target when colocated", async () => {
 		const root = "/repo/colocated";
 		const operational = operationalGit(root, headFor("main"));
-		const display = displayJj(root, async () => "my-bookmark", { staged: 1, unstaged: 2, untracked: 3 });
+		const display = displayJj(root, async () => "my-bookmark", { staged: 0, unstaged: 0, untracked: 0 });
 		mockRepos(operational, display, root);
 		let watched: VcsRepo | null = null;
 		vi.spyOn(vcs, "watch").mockImplementation(((repo: VcsRepo) => {
@@ -170,7 +171,8 @@ describe("StatusLineComponent display detector", () => {
 
 		expect(vcs.repoForDisplay).toHaveBeenCalled();
 		expect(onBranchChange).toHaveBeenCalled();
-		expect(component.getTopBorder(80).content).toContain("my-bookmark");
+		const content = component.getTopBorder(80).content;
+		expect(content).toContain("my-bookmark");
 		expect((watched as VcsRepo | null)?.watchTarget()).toBe(`${root}/.jj/repo/op_heads/heads`);
 		component.dispose();
 	});
@@ -251,7 +253,11 @@ describe("StatusLineComponent display detector", () => {
 	it("sanitizes control characters from the jj label", async () => {
 		const root = "/repo/sanitize";
 		const operational = operationalGit(root, headFor("main"));
-		const display = displayJj(root, async () => `evil-${String.fromCharCode(27)}[2J-bookmark`, { staged: 0, unstaged: 0, untracked: 0 });
+		const display = displayJj(root, async () => `evil-${String.fromCharCode(27)}[2J-bookmark`, {
+			staged: 0,
+			unstaged: 0,
+			untracked: 0,
+		});
 		mockRepos(operational, display, root);
 
 		const component = new StatusLineComponent(makeSession());

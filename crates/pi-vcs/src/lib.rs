@@ -282,15 +282,16 @@ pub fn detect(dir: &Path) -> Result<Option<Repo>> {
 	}
 }
 
-/// Detect which VCS should present `dir` in human-facing surfaces.
+/// Detect which VCS should present `dir` in the status line and footer.
 ///
 /// Same as [`detect`], except equal-root jj+git ties prefer Jujutsu:
 /// colocated workspaces resolve to [`Repo::Jj`]. A strictly deeper nested
 /// git checkout still wins (it is the tree the user works in), and
 /// [`is_pure_jj`] keeps using [`detect`], so git-mutating automation policy
 /// is unchanged. Existing [`Repo`] dispatch serves both detectors without a
-/// colocated variant: presentation reads label/status through the returned
-/// backend, while automation keeps the [`detect`] result.
+/// colocated variant: presentation reads the label through the returned
+/// backend (status counts stay on the operational handle), while automation
+/// keeps the [`detect`] result.
 pub fn detect_for_display(dir: &Path) -> Result<Option<Repo>> {
 	let jj = jj::JjWorkspace::discover(dir)?;
 	let Some(jj) = jj else {

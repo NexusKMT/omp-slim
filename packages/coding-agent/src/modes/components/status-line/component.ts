@@ -7,7 +7,7 @@ import {
 } from "@oh-my-pi/pi-ai/usage/google-antigravity";
 import { getNextTimeBasedPricingTransition } from "@oh-my-pi/pi-catalog/models";
 import type { ModelCost } from "@oh-my-pi/pi-catalog/types";
-import type { VcsJjWorkspace, VcsRepo } from "@oh-my-pi/pi-natives";
+import type { VcsRepo } from "@oh-my-pi/pi-natives";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import {
 	type Component,
@@ -1234,7 +1234,7 @@ export class StatusLineComponent implements Component {
 		if (!this.#gitEnabled()) return null;
 
 		const gitCwd = activeRepoCache.effectiveGitCwd;
-		const repository = this.#resolveDisplayRepository(activeRepoCache);
+		const repository = this.#resolveRepository(activeRepoCache);
 		if (!repository) return null;
 		if (repository.kind() === "jj") {
 			if (this.#jjStatusActive || Date.now() - this.#jjStatusLastFetch < JJ_REFRESH_TTL_MS) {
