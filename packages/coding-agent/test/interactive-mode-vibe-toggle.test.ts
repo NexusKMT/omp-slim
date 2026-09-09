@@ -64,7 +64,11 @@ async function registerOrderSkill(
 	mode.skillCommands.set(`skill:${name}`, skill);
 }
 
-function armOrderLoop(mode: InteractiveMode, session: AgentSession): { done: Promise<void>; order: string[] } {
+function armOrderLoop(
+	mode: InteractiveMode,
+	session: AgentSession,
+	onDispatch?: (label: string) => void,
+): { done: Promise<void>; order: string[] } {
 	const order: string[] = [];
 	vi.spyOn(session, "prompt").mockImplementation(async text => {
 		order.push(`plain:${text}`);
@@ -72,9 +76,11 @@ function armOrderLoop(mode: InteractiveMode, session: AgentSession): { done: Pro
 	});
 	vi.spyOn(session, "promptCustomMessage").mockImplementation(async message => {
 		const text = typeof message.content === "string" ? message.content : "";
-		if (text.includes("Skill A body")) order.push("skill-a");
-		else if (text.includes("Skill B body")) order.push("skill-b");
-		else order.push("skill");
+		let label = "skill";
+		if (text.includes("Skill A body")) label = "skill-a";
+		else if (text.includes("Skill B body")) label = "skill-b";
+		order.push(label);
+		onDispatch?.(label);
 		return true;
 	});
 	// Faithful main-loop dispatch: the waiter-delivered prompt travels the real
@@ -941,7 +947,14 @@ describe("InteractiveMode vibe mode toggle", () => {
 		vi.spyOn(session, "activateVibeTools").mockImplementation(() => gate.promise);
 		await registerOrderSkill(tempDir, mode, "order-skill-a", "Skill A body.");
 		await registerOrderSkill(tempDir, mode, "order-skill-b", "Skill B body.");
-		const loop = armOrderLoop(mode, session);
+		// Signal, not a timer: the first skill must dispatch without stalling
+		// behind the second (parked on the first's own link). A
+		// successor-inclusive count leaves this unsettled until the ~2s bound
+		// expires instead, so this hangs to the test timeout pre-fix.
+		const aDispatched = Promise.withResolvers<void>();
+		const loop = armOrderLoop(mode, session, label => {
+			if (label === "skill-a") aDispatched.resolve();
+		});
 		for (let index = 0; index < 5; index++) await Promise.resolve();
 
 		const first = mode.handleVibeModeCommand("plain first");
@@ -958,11 +971,23 @@ describe("InteractiveMode vibe mode toggle", () => {
 		expect(loop.order).toHaveLength(0);
 
 		gate.resolve();
+		// Wall-clock bound, not a guessed duration: the first skill must dispatch
+		// without stalling behind the second (parked on the first's own link). A
+		// successor-inclusive count burns 200 sequential 10ms sleeps (provably
+		// >=2000ms — timers never fire early), while the fixed path does
+		// millisecond-scale I/O with no wall waits; fake timers cannot drive the
+		// real file reads, so assert absence of the stall instead of exact order
+		// timing. Awaiting the dispatch signal above would merely pass slowly.
+		const startedAt = performance.now();
+		await aDispatched.promise;
+		expect(loop.order[0]).toBe("plain:plain first");
+		expect(loop.order).toContain("skill-a");
 		expect(await first).toBe(true);
 		expect(await second).toBe(true);
 		expect(await third).toBe(true);
 		await loop.done;
 		expect(mode.vibeModeEnabled).toBe(true);
 		expect(loop.order).toEqual(["plain:plain first", "skill-a", "skill-b"]);
+		expect(performance.now() - startedAt).toBeLessThan(1500);
 	});
 });

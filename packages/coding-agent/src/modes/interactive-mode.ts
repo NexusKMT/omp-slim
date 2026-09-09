@@ -4277,14 +4277,14 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * skill prompt is still reading its file — would reach
 	 * {@link session.prompt} before the main loop submits the earlier input,
 	 * reversing their order. No-op when nothing is in flight; bounded so a
-	 * stalled loop degrades to immediate dispatch. `excludeOwnSkill` lets a
-	 * skill dispatch wait for earlier submissions without hanging on the unit
-	 * it just appended (concurrent skills order themselves through the tail
-	 * chain instead).
+	 * stalled loop degrades to immediate dispatch. `ignoreSkills` lets a skill
+	 * dispatch wait for earlier plain submissions only: concurrent skills order
+	 * themselves through the tail chain, and counting the live total here would
+	 * stall an earlier skill behind a later one it must precede.
 	 */
-	async #waitForInFlightSubmission(excludeOwnSkill = false): Promise<void> {
+	async #waitForInFlightSubmission(ignoreSkills = false): Promise<void> {
 		for (let index = 0; index < 200; index++) {
-			const skillBlocked = this.#vibeSkillInFlight - (excludeOwnSkill ? 1 : 0) > 0;
+			const skillBlocked = !ignoreSkills && this.#vibeSkillInFlight > 0;
 			const awaited = this.#pendingSubmittedInput;
 			const pendingBlocked =
 				awaited !== undefined &&
