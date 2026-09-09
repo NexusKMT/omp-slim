@@ -86,4 +86,39 @@ describe("claudeUsageProvider usage endpoint resolution", () => {
 		expect(report).toBeNull();
 		expect(urls).toEqual([CANONICAL_USAGE_URL]);
 	});
+
+	it("keeps the request on a custom baseUrl that refuses the credential", async () => {
+		const { fetch, urls } = recordingFetch(() => jsonResponse(401, { error: "unauthorized" }));
+
+		const report = await claudeUsageProvider.fetchUsage(params("https://gateway.example.com/v1"), context(fetch));
+
+		// A 401 is the configured host's answer about this account, not a missing
+		// endpoint: moving the token to another destination is not ours to decide.
+		expect(report).toBeNull();
+		expect(urls).toEqual(["https://gateway.example.com/api/oauth/usage"]);
+	});
+
+	it("keeps the request on a custom baseUrl that fails transiently", async () => {
+		const { fetch, urls } = recordingFetch(() => jsonResponse(503, { error: "unavailable" }));
+
+		const report = await claudeUsageProvider.fetchUsage(params("https://gateway.example.com/v1"), context(fetch));
+
+		expect(report).toBeNull();
+		// Retried on the configured host only; the next poll tries it again.
+		expect(urls).toEqual(Array.from({ length: 3 }, () => "https://gateway.example.com/api/oauth/usage"));
+	});
+
+	it("falls back when a custom baseUrl answers 200 with an unrelated body", async () => {
+		const { fetch, urls } = recordingFetch(url =>
+			url === CANONICAL_USAGE_URL ? jsonResponse(200, USAGE_PAYLOAD) : jsonResponse(200, { hello: "world" }),
+		);
+
+		const report = await claudeUsageProvider.fetchUsage(params("https://gateway.example.com/v1"), context(fetch));
+
+		expect(urls).toEqual([
+			...Array.from({ length: 3 }, () => "https://gateway.example.com/api/oauth/usage"),
+			CANONICAL_USAGE_URL,
+		]);
+		expect(report?.metadata?.endpoint).toBe(CANONICAL_USAGE_URL);
+	});
 });

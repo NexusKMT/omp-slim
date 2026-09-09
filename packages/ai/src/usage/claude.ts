@@ -57,10 +57,15 @@ function normalizeClaudeBaseUrl(baseUrl?: string): string {
  * Subscription usage is served by Anthropic's OAuth API, which a custom
  * `baseUrl` pointed at a Messages-only endpoint does not expose. Probe the
  * configured host first so a full mirror keeps answering (including its own
- * `/profile` identity), then fall back to the canonical endpoint: without it
- * the report degrades to rate-limit headers, and those carry the model-scoped
- * weekly row only on responses for that model family, so a scoped window can
- * read far below its real utilization until a request hits the family again.
+ * `/profile` identity), then fall back to the canonical endpoint — but only
+ * when the configured host answered that it has no usage endpoint there (see
+ * {@link ClaudeUsagePayloadResult.endpointAbsent}), so a host that refuses the
+ * credential or fails transiently keeps the request.
+ *
+ * Without the fallback the report degrades to rate-limit headers, and those
+ * carry the model-scoped weekly row only on responses for that model family,
+ * so a scoped window can read far below its real utilization until a request
+ * hits the family again.
  */
 function claudeUsageBaseUrls(baseUrl?: string): readonly string[] {
 	const configured = normalizeClaudeBaseUrl(baseUrl);
@@ -288,15 +293,41 @@ async function waitBeforeRetry(
 	}
 }
 
+/** Statuses that answer "this host does not implement the endpoint". */
+const ENDPOINT_ABSENT_STATUSES = new Set([404, 405, 410, 501]);
+
+interface ClaudeUsagePayloadResult {
+	/** Best payload seen; may lack usage data when the retries gave up. */
+	payload: ClaudeUsageResponse | null;
+	/** The host answered, but does not serve subscription usage at this path. */
+	endpointAbsent: boolean;
+}
+
+/**
+ * A body with none of the usage keys is a host answering something else at this
+ * path (an error document, an index page), not an account whose windows are all
+ * empty — the latter still carries the keys.
+ */
+function looksLikeUsagePayload(payload: ClaudeUsageResponse): boolean {
+	return (
+		"five_hour" in payload ||
+		"seven_day" in payload ||
+		"limits" in payload ||
+		"extra_usage" in payload ||
+		"spend" in payload
+	);
+}
+
 async function fetchUsagePayload(
 	url: string,
 	headers: Record<string, string>,
 	ctx: UsageFetchContext,
 	signal?: AbortSignal,
-): Promise<ClaudeUsageResponse | null> {
-	if (signal?.aborted) return null;
+): Promise<ClaudeUsagePayloadResult> {
+	if (signal?.aborted) return { payload: null, endpointAbsent: false };
 
 	let lastPayload: ClaudeUsageResponse | null = null;
+	let endpointAbsent = false;
 	for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
 		try {
 			const response = await ctx.fetch(url, { headers, signal });
@@ -309,7 +340,7 @@ async function fetchUsagePayload(
 					attempt,
 					willRetry: retryable && attempt < MAX_ATTEMPTS - 1,
 				});
-				if (!retryable) return null;
+				if (!retryable) return { payload: null, endpointAbsent: ENDPOINT_ABSENT_STATUSES.has(response.status) };
 				const retryAfter = response.headers.get("retry-after");
 				if (!(await waitBeforeRetry(attempt, retryAfter, signal, ctx.retryWait))) break;
 				continue;
@@ -319,7 +350,10 @@ async function fetchUsagePayload(
 			if (isRecord(parsed)) {
 				const payload = parsed as ClaudeUsageResponse;
 				lastPayload = payload;
-				if (hasUsageData(payload)) return payload;
+				if (hasUsageData(payload)) return { payload, endpointAbsent: false };
+				endpointAbsent = !looksLikeUsagePayload(payload);
+			} else {
+				endpointAbsent = true;
 			}
 
 			ctx.logger?.warn("Claude usage response missing usage data", {
@@ -328,7 +362,7 @@ async function fetchUsagePayload(
 			});
 			if (!(await waitBeforeRetry(attempt, null, signal, ctx.retryWait))) break;
 		} catch (error) {
-			if (isAbortError(error, signal)) return null;
+			if (isAbortError(error, signal)) return { payload: null, endpointAbsent: false };
 			ctx.logger?.warn("Claude usage fetch error", {
 				error: String(error),
 				attempt,
@@ -338,7 +372,7 @@ async function fetchUsagePayload(
 		}
 	}
 
-	return lastPayload;
+	return { payload: lastPayload, endpointAbsent };
 }
 
 interface ClaudeProfile {
@@ -630,19 +664,24 @@ async function fetchClaudeUsage(params: UsageFetchParams, ctx: UsageFetchContext
 	let baseUrl: string | undefined;
 	let payload: ClaudeUsageResponse | null = null;
 	for (const candidate of claudeUsageBaseUrls(params.baseUrl)) {
-		const candidatePayload = await fetchUsagePayload(`${candidate}/usage`, headers, ctx, params.signal);
-		if (candidatePayload && hasUsageData(candidatePayload)) {
+		const result = await fetchUsagePayload(`${candidate}/usage`, headers, ctx, params.signal);
+		if (result.payload && hasUsageData(result.payload)) {
 			baseUrl = candidate;
-			payload = candidatePayload;
+			payload = result.payload;
 			break;
 		}
-		// Recognized shape without usage data: retries already gave up on fresher
+		// Usage-shaped body without numbers: retries already gave up on fresher
 		// numbers here, so hold it while the remaining candidate is probed.
-		if (candidatePayload && !payload) {
+		if (result.payload && !payload) {
 			baseUrl = candidate;
-			payload = candidatePayload;
+			payload = result.payload;
 		}
 		if (params.signal?.aborted) break;
+		// Only a host that answered "no usage endpoint here" justifies moving the
+		// request off the configured one. A refused credential (401/403) or a
+		// transient failure is that host's answer about this account, so it stands
+		// and the next poll retries it.
+		if (!result.endpointAbsent) break;
 	}
 	if (!payload || baseUrl === undefined) return null;
 	const url = `${baseUrl}/usage`;
