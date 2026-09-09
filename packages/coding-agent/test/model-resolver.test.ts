@@ -1138,6 +1138,18 @@ describe("resolveAgentModelPatterns", () => {
 		expect(resolveAgentModelPatterns({ agentModel: "@tiny", settings })).toEqual(["baseten/custom-smol:max"]);
 	});
 
+	test("breaks the tiny/smol fallback cycle via a default alias", () => {
+		const settings = Settings.isolated({ modelRoles: { default: "@tiny" } });
+
+		const tiny = resolveAgentModelPatterns({ agentModel: "@tiny", settings });
+		const smol = resolveAgentModelPatterns({ agentModel: "@smol", settings });
+
+		expect(tiny).not.toContain("@tiny");
+		expect(smol).not.toContain("@tiny");
+		expect(tiny[0]).toBe("google-antigravity/gemini-3.8-flash");
+		expect(smol).toEqual(tiny);
+	});
+
 	test("expands cross-role default aliases when inheriting for an unset role", () => {
 		const settings = Settings.isolated({
 			modelRoles: { default: "@slow", slow: "anthropic/claude-sonnet-4-5" },
