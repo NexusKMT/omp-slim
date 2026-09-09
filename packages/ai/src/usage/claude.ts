@@ -53,6 +53,20 @@ function normalizeClaudeBaseUrl(baseUrl?: string): string {
 	return `${url.origin}${path}/api/oauth`;
 }
 
+/**
+ * Subscription usage is served by Anthropic's OAuth API, which a custom
+ * `baseUrl` pointed at a Messages-only endpoint does not expose. Probe the
+ * configured host first so a full mirror keeps answering (including its own
+ * `/profile` identity), then fall back to the canonical endpoint: without it
+ * the report degrades to rate-limit headers, and those carry the model-scoped
+ * weekly row only on responses for that model family, so a scoped window can
+ * read far below its real utilization until a request hits the family again.
+ */
+function claudeUsageBaseUrls(baseUrl?: string): readonly string[] {
+	const configured = normalizeClaudeBaseUrl(baseUrl);
+	return configured === DEFAULT_ENDPOINT ? [DEFAULT_ENDPOINT] : [configured, DEFAULT_ENDPOINT];
+}
+
 interface ClaudeUsageBucket {
 	utilization?: number;
 	resets_at?: string;
@@ -608,15 +622,30 @@ async function fetchClaudeUsage(params: UsageFetchParams, ctx: UsageFetchContext
 	const credential = params.credential;
 	if (credential.type !== "oauth" || !credential.accessToken) return null;
 
-	const baseUrl = normalizeClaudeBaseUrl(params.baseUrl);
-	const url = `${baseUrl}/usage`;
 	const headers: Record<string, string> = {
 		...CLAUDE_HEADERS,
 		authorization: `Bearer ${credential.accessToken}`,
 	};
 
-	const payload = await fetchUsagePayload(url, headers, ctx, params.signal);
-	if (!payload || !isRecord(payload)) return null;
+	let baseUrl: string | undefined;
+	let payload: ClaudeUsageResponse | null = null;
+	for (const candidate of claudeUsageBaseUrls(params.baseUrl)) {
+		const candidatePayload = await fetchUsagePayload(`${candidate}/usage`, headers, ctx, params.signal);
+		if (candidatePayload && hasUsageData(candidatePayload)) {
+			baseUrl = candidate;
+			payload = candidatePayload;
+			break;
+		}
+		// Recognized shape without usage data: retries already gave up on fresher
+		// numbers here, so hold it while the remaining candidate is probed.
+		if (candidatePayload && !payload) {
+			baseUrl = candidate;
+			payload = candidatePayload;
+		}
+		if (params.signal?.aborted) break;
+	}
+	if (!payload || baseUrl === undefined) return null;
+	const url = `${baseUrl}/usage`;
 
 	const apiLimitEntries = parseApiLimitEntries(payload.limits);
 	const fiveHour = parseBucket(payload.five_hour) ?? apiLimitEntries.find(entry => entry.kind === "session")?.bucket;

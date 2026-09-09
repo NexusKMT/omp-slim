@@ -5,6 +5,7 @@
 ### Fixed
 
 - Codex SSE streams that end without a terminal completion event now retry when replay-safe and remain transient errors when partial output prevents replay ([#11349](https://github.com/can1357/oh-my-pi/issues/11349)).
+- Anthropic subscription usage now falls back to the canonical `api.anthropic.com` OAuth usage endpoint when a custom provider `baseUrl` does not serve it, instead of leaving the report to rate-limit headers — those carry the model-scoped weekly window only on responses for that model family, so `/usage` could report a scoped window far below its real utilization.
 
 ## [18.1.15] - 2026-09-08
 
