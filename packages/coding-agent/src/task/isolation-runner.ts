@@ -22,6 +22,7 @@ import * as path from "node:path";
 import type * as natives from "@oh-my-pi/pi-natives";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import { prompt } from "@oh-my-pi/pi-utils";
+import isolationErrorTemplate from "../prompts/tools/isolation-error.md" with { type: "text" };
 import isolationSummaryTemplate from "../prompts/tools/isolation-summary.md" with { type: "text" };
 import { AgentRegistry } from "../registry/agent-registry";
 import type { ToolSession } from "../tools";
@@ -83,6 +84,7 @@ function rememberAgentArtifacts(result: SingleResult): SingleResult {
 		outputPath: result.outputPath,
 		patchPath: result.patchPath,
 		branchName: result.branchName,
+		nestedPatchPaths: result.nestedPatchPaths,
 	});
 	return { ...result, isolated: true };
 }
@@ -249,8 +251,18 @@ async function writeIsolationPatch(
 	};
 }
 
-function retainedWorkspaceNote(isolationDir: string): string {
-	return ` Isolation workspace retained at ${isolationDir} — recover the changes from it before running \`omp worktree clear\`.`;
+/** Context for `isolation-error.md`: the `result.error` text for a run whose changes could not be captured or landed. */
+interface IsolationErrorContext {
+	kind: "merge-failed" | "patch-capture-failed" | "nested-capture-failed";
+	message: string;
+	captureError?: string;
+	rescueBranch?: string;
+	/** Set when the workspace was kept because its changes could not be written out. */
+	retainedDir?: string;
+}
+
+function renderIsolationError(context: IsolationErrorContext): string {
+	return prompt.render(isolationErrorTemplate, { ...context });
 }
 
 /**
@@ -325,9 +337,6 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 				const baseSha = taskBaseline.root.headCommit;
 				const branchName = `omp/task/${opts.agentId}`;
 				const rescueBranch = await rescueTaskBranch(opts.context.repoRoot, branchName, baseSha);
-				const rescueNote = rescueBranch
-					? ` The agent's commits are preserved on branch ${rescueBranch} — merge or cherry-pick it manually.`
-					: "";
 				const msg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
 				try {
 					const patchResult = await writeIsolationPatch(
@@ -339,14 +348,19 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 					return rememberAgentArtifacts({
 						...result,
 						...patchResult,
-						error: `Merge failed: ${msg}.${rescueNote}`,
+						error: renderIsolationError({ kind: "merge-failed", message: msg, rescueBranch }),
 					});
 				} catch (patchErr) {
 					retainWorkspace = true;
-					const patchMsg = patchErr instanceof Error ? patchErr.message : String(patchErr);
 					return rememberAgentArtifacts({
 						...result,
-						error: `Merge failed: ${msg}; patch capture failed: ${patchMsg}.${rescueNote}${retainedWorkspaceNote(isolationDir)}`,
+						error: renderIsolationError({
+							kind: "merge-failed",
+							message: msg,
+							captureError: patchErr instanceof Error ? patchErr.message : String(patchErr),
+							rescueBranch,
+							retainedDir: isolationDir,
+						}),
 					});
 				}
 			}
@@ -367,13 +381,16 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 				});
 			} catch (persistErr) {
 				retainWorkspace = true;
-				const persistMsg = persistErr instanceof Error ? persistErr.message : String(persistErr);
 				return rememberAgentArtifacts({
 					...result,
 					branchName: commitResult?.branchName,
 					branchBaseSha: commitResult?.baseSha,
 					nestedPatches: commitResult?.nestedPatches,
-					error: `Nested patch capture failed: ${persistMsg}.${retainedWorkspaceNote(isolationDir)}`,
+					error: renderIsolationError({
+						kind: "nested-capture-failed",
+						message: persistErr instanceof Error ? persistErr.message : String(persistErr),
+						retainedDir: isolationDir,
+					}),
 				});
 			}
 		}
@@ -383,10 +400,13 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 				return rememberAgentArtifacts({ ...result, ...patchResult });
 			} catch (patchErr) {
 				retainWorkspace = true;
-				const msg = patchErr instanceof Error ? patchErr.message : String(patchErr);
 				return rememberAgentArtifacts({
 					...result,
-					error: `Patch capture failed: ${msg}.${retainedWorkspaceNote(isolationDir)}`,
+					error: renderIsolationError({
+						kind: "patch-capture-failed",
+						message: patchErr instanceof Error ? patchErr.message : String(patchErr),
+						retainedDir: isolationDir,
+					}),
 				});
 			}
 		}

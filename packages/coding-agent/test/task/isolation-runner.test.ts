@@ -481,6 +481,13 @@ describe("runIsolatedSubprocess", () => {
 			nestedPatches: [{ relativePath: "inner", patch: nestedPatch }],
 		});
 		const cleanupSpy = vi.spyOn(worktreeModule, "cleanupIsolation").mockResolvedValue();
+		AgentRegistry.global().register({
+			id: "NestedPersist",
+			displayName: "NestedPersist",
+			kind: "sub",
+			session: null,
+			status: "parked",
+		});
 
 		const outcome = await runIsolatedSubprocess({
 			baseOptions: {
@@ -504,6 +511,8 @@ describe("runIsolatedSubprocess", () => {
 		expect(outcome.nestedPatchPaths).toEqual([nestedPath]);
 		expect(await Bun.file(nestedPath).text()).toBe(nestedPatch);
 		expect(cleanupSpy).toHaveBeenCalledTimes(1);
+		// `agent://NestedPersist` and the Hub read the history record, not the result.
+		expect(AgentRegistry.global().get("NestedPersist")?.history?.nestedPatchPaths).toEqual([nestedPath]);
 	});
 
 	it("retains the workspace when captured changes cannot be written", async () => {

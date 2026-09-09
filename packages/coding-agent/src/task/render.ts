@@ -1459,6 +1459,11 @@ function renderAgentResult(
 	} else if (result.branchName && !aborted && result.exitCode === 0) {
 		lines.push(`${continuePrefix}${theme.fg("dim", `Branch: ${result.branchName}`)}`);
 	}
+	if (!aborted && result.exitCode === 0) {
+		for (const nestedPath of result.nestedPatchPaths ?? []) {
+			lines.push(`${continuePrefix}${theme.fg("dim", `Nested patch: ${nestedPath}`)}`);
+		}
+	}
 
 	// Error message
 	if (result.error && (!success || mergeFailed) && (!aborted || result.error !== result.abortReason)) {

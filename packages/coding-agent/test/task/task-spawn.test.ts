@@ -165,11 +165,13 @@ describe("task spawn routing", () => {
 		},
 		{
 			// The runner keeps the workspace when captured changes could not be
-			// written; the follow-up hint must not contradict that recovery path.
+			// written; the follow-up hint must not contradict that recovery path,
+			// and a run that needs manual recovery must not be reported as a
+			// completed job.
 			label: "does not claim the worktree is gone when the runner retained it",
 			runnerOverrides: {
 				patchPath: undefined,
-				error: "Patch capture failed: EACCES. Isolation workspace retained at /wt/sandboxed/m — recover the changes from it before running `omp worktree clear`.",
+				error: "Patch capture failed: EACCES. Isolation workspace retained at /wt/sandboxed/m — recover the changes from it; `omp worktree clear` reclaims it once this session has exited.",
 			},
 			expectRetained: true,
 		},
@@ -214,8 +216,12 @@ describe("task spawn routing", () => {
 			expect(delivered).not.toContain("is now idle");
 			expect(delivered).not.toContain("message it via");
 			expect(delivered).not.toContain("removed");
-			if (expectRetained) expect(delivered).toContain("Isolation workspace retained at /wt/sandboxed/m");
-			else expect(job!.status).toBe("completed");
+			if (expectRetained) {
+				expect(job!.status).toBe("failed");
+				expect(delivered).toContain("Isolation workspace retained at /wt/sandboxed/m");
+			} else {
+				expect(job!.status).toBe("completed");
+			}
 		});
 	}
 
