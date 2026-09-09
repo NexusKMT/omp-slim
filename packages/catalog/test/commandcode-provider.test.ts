@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "bun:test";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
 import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
-import { getEnvApiKey } from "@oh-my-pi/pi-ai/stream";
+import { getEnvApiKey, streamSimple } from "@oh-my-pi/pi-ai/stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { DEFAULT_MODEL_PER_PROVIDER, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import { commandCodeModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
@@ -73,6 +73,79 @@ describe("Command Code provider support", () => {
 				maxTokensField: "max_tokens",
 			},
 		});
+	});
+
+	test("preserves disjoint cache usage and timing through both native transports", async () => {
+		const catalog = commandCodeModelManagerOptions({
+			fetch: async () =>
+				Response.json({
+					data: [
+						{ id: "gpt-5.6-sol", name: "GPT-5.6 Sol", context_length: 1_050_000 },
+						{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", context_length: 1_000_000 },
+					],
+				}),
+		});
+		const specs = await catalog.fetchDynamicModels?.();
+		const models = (specs ?? []).map(spec => buildModel(spec as ModelSpec<Api>));
+		const gpt = models.find(model => model.id === "gpt-5.6-sol");
+		const claude = models.find(model => model.id === "claude-sonnet-4-6");
+		if (!gpt || !claude) throw new Error("Expected Command Code transport fixtures");
+		let clock = 0;
+		vi.spyOn(performance, "now").mockImplementation(() => ++clock);
+
+		const fetchMock: FetchImpl = vi.fn(async input => {
+			const url = String(input);
+			if (url.endsWith("/chat/completions")) {
+				return new Response(
+					[
+						'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"gpt-5.6-sol","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":null}]}',
+						'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"gpt-5.6-sol","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12,"prompt_tokens_details":{"cached_tokens":3,"cache_write_tokens":2}}}',
+						"data: [DONE]",
+						"",
+					].join("\n\n"),
+					{ headers: { "content-type": "text/event-stream" } },
+				);
+			}
+			if (url.endsWith("/messages")) {
+				return new Response(
+					[
+						'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_test","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":5,"output_tokens":0,"cache_read_input_tokens":3,"cache_creation_input_tokens":2}}}',
+						'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+						'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}',
+						'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}',
+						'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":2}}',
+						'event: message_stop\ndata: {"type":"message_stop"}',
+						"",
+					].join("\n\n"),
+					{ headers: { "content-type": "text/event-stream" } },
+				);
+			}
+			return new Response("unexpected route", { status: 404 });
+		});
+		const context = { messages: [{ role: "user" as const, content: "Reply ok", timestamp: Date.now() }] };
+		const gptResult = await streamSimple(gpt, context, { apiKey: "user_test", fetch: fetchMock }).result();
+		const claudeResult = await streamSimple(claude, context, { apiKey: "user_test", fetch: fetchMock }).result();
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(gptResult.usage).toMatchObject({
+			input: 5,
+			output: 2,
+			cacheRead: 3,
+			cacheWrite: 2,
+			totalTokens: 12,
+		});
+		expect(claudeResult.usage).toMatchObject({
+			input: 5,
+			output: 2,
+			cacheRead: 3,
+			cacheWrite: 2,
+			totalTokens: 12,
+		});
+		for (const result of [gptResult, claudeResult]) {
+			expect(result.duration).toBeGreaterThan(0);
+			expect(result.ttft).toBeGreaterThan(0);
+			expect(result.ttft).toBeLessThanOrEqual(result.duration ?? 0);
+		}
 	});
 
 	test("registers discovery, defaults, and both API key environment names", () => {
