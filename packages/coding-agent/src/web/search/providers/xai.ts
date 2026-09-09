@@ -314,6 +314,10 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 	}
 	const hasFinalAnswerContent = messages.some(m => m.phase === "final_answer" && m.texts.length > 0);
 	if (!hasFinalAnswerContent) {
+		// A tagged-but-empty final is authoritative: the relay uses the phase
+		// protocol and produced no answer, so the aggregate — which mixes the
+		// narration in — must not be promoted either.
+		if (messages.some(m => m.phase === "final_answer")) return undefined;
 		// Without authoritative phased content, an empty final message means
 		// no answer — do not promote heuristic-kept earlier content.
 		const lastMessage = messages.at(-1);

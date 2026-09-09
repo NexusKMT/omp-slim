@@ -426,4 +426,25 @@ describe("xAI Responses answer extraction from relay output items", () => {
 			status: 502,
 		});
 	});
+
+	it("does not fall back to the aggregate when unphased narration precedes an empty final item", async () => {
+		// A relay that tags a final_answer item — even an empty one — uses the
+		// phase protocol; its authoritative final is empty, so the aggregate
+		// (populated from the unphased narration) must not be promoted either.
+		const relayResponse = {
+			id: "resp-relay",
+			model: "grok-4.5",
+			output_text: "I'll search for it. ",
+			output: [
+				{ type: "message", content: [{ type: "output_text", text: "I'll search for it." }] },
+				{ type: "message", phase: "final_answer", content: [] },
+			],
+			usage: { input_tokens: 10, output_tokens: 5 },
+		};
+
+		await expect(searchXAI(makeParams(makeFetchMock(relayResponse)))).rejects.toMatchObject({
+			provider: "xai",
+			status: 502,
+		});
+	});
 });
