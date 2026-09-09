@@ -444,26 +444,36 @@ describe("update-cli package manager commands", () => {
 		expect(env.PATH).toBe("/bin");
 	});
 
-	it.skipIf(!miseBinary)("uses release-age syntax accepted by mise's parser", async () => {
+	it.skipIf(!miseBinary)("uses a release-age value mise's duration parser accepts", async () => {
 		if (!miseBinary) throw new Error("mise binary unavailable");
 		const home = await makeTempDir();
-		const result = Bun.spawnSync([miseBinary, "latest", "node"], {
-			env: buildMiseUpdateEnv({
-				...process.env,
-				HOME: home,
-				MISE_CACHE_DIR: path.join(home, "cache"),
-				MISE_CONFIG_DIR: path.join(home, "config"),
-				MISE_DATA_DIR: path.join(home, "data"),
-				MISE_STATE_DIR: path.join(home, "state"),
-			}),
-			stdin: "ignore",
-			stdout: "pipe",
-			stderr: "pipe",
-		});
-		if (result.exitCode !== 0) {
-			throw new Error(`mise rejected the update environment: ${result.stderr.toString()}`);
-		}
-		expect(result.exitCode).toBe(0);
+		// mise's duration parser runs before any network version discovery, so
+		// asserting on the parse-error string keeps this offline-safe: a flaky or
+		// absent network surfaces a different error, never a false "rejected".
+		const parseError = /Invalid date or duration/;
+		const releaseAge = (value: string): string => {
+			const result = Bun.spawnSync([miseBinary, "latest", "node"], {
+				env: {
+					...process.env,
+					HOME: home,
+					MISE_CACHE_DIR: path.join(home, "cache"),
+					MISE_CONFIG_DIR: path.join(home, "config"),
+					MISE_DATA_DIR: path.join(home, "data"),
+					MISE_STATE_DIR: path.join(home, "state"),
+					MISE_MINIMUM_RELEASE_AGE: value,
+				},
+				stdin: "ignore",
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			return result.stdout.toString() + result.stderr.toString();
+		};
+		// Negative control: the original bare `0` is rejected at parse time.
+		expect(releaseAge("0")).toMatch(parseError);
+		// The override we ship must clear the parser without a syntax rejection.
+		const shipped = buildMiseUpdateEnv().MISE_MINIMUM_RELEASE_AGE;
+		if (shipped === undefined) throw new Error("buildMiseUpdateEnv did not set MISE_MINIMUM_RELEASE_AGE");
+		expect(releaseAge(shipped)).not.toMatch(parseError);
 	});
 
 	it("pins npm package installs to the official registry and the checked native package versions", () => {
