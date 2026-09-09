@@ -780,6 +780,10 @@ export class InteractiveMode implements InteractiveModeContext {
 	#goalModePreviousTools: string[] | undefined;
 	#vibeModePreviousTools: string[] | undefined;
 	#vibeModeOwnerScope: VibeOwnerScope | undefined;
+	// True while #enterVibeMode awaits activateVibeTools: vibeModeEnabled is
+	// still false, but a reset iteration must already treat vibe as active so
+	// it cannot slip in concurrently with the toolset switch.
+	#vibeModeEntering = false;
 	#vibeScopeSuspendedForSwitch = false;
 	#goalContinuationTimer: NodeJS.Timeout | undefined;
 	#goalTurnHadToolCalls = false;
@@ -1834,7 +1838,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			return;
 		}
 
-		if (action === "reset" && this.vibeModeEnabled) {
+		if (action === "reset" && (this.vibeModeEnabled || this.#vibeModeEntering)) {
 			this.disableLoopMode("Exit vibe mode before using reset loops. Loop mode disabled.");
 			return;
 		}
@@ -1863,8 +1867,10 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		// /vibe can be enabled while the gate was awaiting: the pre-gate guard
 		// above is stale, and handleClearCommand would only warn and then let
-		// the iteration submit without resetting.
-		if (action === "reset" && this.vibeModeEnabled) {
+		// the iteration submit without resetting. Check the entering transition
+		// too: vibeModeEnabled is still false while activateVibeTools is in
+		// flight, but the reset must not run concurrently with the toolset switch.
+		if (action === "reset" && (this.vibeModeEnabled || this.#vibeModeEntering)) {
 			this.disableLoopMode("Exit vibe mode before using reset loops. Loop mode disabled.");
 			return;
 		}
@@ -4215,7 +4221,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	async #enterVibeMode(options?: { persistModeChange?: boolean; previousTools?: string[] }): Promise<void> {
-		if (this.vibeModeEnabled) {
+		if (this.vibeModeEnabled || this.#vibeModeEntering) {
 			return;
 		}
 		if (this.planModeEnabled || this.planModePaused) {
@@ -4238,10 +4244,17 @@ export class InteractiveMode implements InteractiveModeContext {
 		const previousTools = options?.previousTools ?? this.session.getEnabledToolNames();
 		const vibeBaseTools = ["read"];
 		if (this.session.hasBuiltInTool("todo")) vibeBaseTools.push("todo");
-		await this.session.activateVibeTools(vibeBaseTools);
+		this.#vibeModeEntering = true;
+		try {
+			await this.session.activateVibeTools(vibeBaseTools);
+		} catch (error) {
+			this.#vibeModeEntering = false;
+			throw error;
+		}
 		this.#vibeModePreviousTools = previousTools;
 		this.#vibeModeOwnerScope = ownerScope;
 		this.vibeModeEnabled = true;
+		this.#vibeModeEntering = false;
 		// Suppress cache-miss marker on the next turn: vibe mode changes the
 		// injected context, which predictably invalidates the cache.
 		this.lastAssistantUsage = undefined;
