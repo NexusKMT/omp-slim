@@ -1397,32 +1397,21 @@ export function buildHomebrewUpdateArgs(force: boolean): string[] {
 	return [force ? "reinstall" : "upgrade", HOMEBREW_FORMULA];
 }
 
+/**
+ * Build the attended mise update command.
+ *
+ * `--before 0s` overrides global and per-tool release-age settings for this
+ * invocation. Unlike `MISE_MINIMUM_RELEASE_AGE`, the command option has the
+ * precedence required when the tool entry itself sets `minimum_release_age`.
+ * `--before` is accepted by both older mise releases and current versions,
+ * where it is the hidden compatibility name for `--minimum-release-age`.
+ */
 export function buildMiseUpgradeArgs(): string[] {
-	return ["upgrade", MISE_TOOL, "--bump"];
+	return ["upgrade", MISE_TOOL, "--bump", "--before", "0s"];
 }
 
 export function buildMiseForceInstallArgs(expectedVersion: string): string[] {
 	return ["install", "--force", `${MISE_TOOL}@${expectedVersion}`];
-}
-
-/**
- * Environment for the attended mise update path.
- *
- * `omp update` is an explicit, user-initiated request for the latest release,
- * so it must bypass mise's `minimum_release_age` gate. That gate keeps
- * *unattended* `mise upgrade` runs from pulling releases younger than a
- * freshness window (24h by default); left in place it silently drops a
- * just-published version and leaves `omp update` reporting the old one
- * (issue #11316). The override wins over any user-set `MISE_MINIMUM_RELEASE_AGE`
- * because the user asked for the update directly. `0s` includes the duration
- * unit mise's parser requires; a bare `0` is rejected. We use the env var
- * rather than `--minimum-release-age=0s` because that flag was, on some mise
- * versions, indistinguishable from an active cutoff (jdx/mise#10303).
- */
-export function buildMiseUpdateEnv(
-	base: Record<string, string | undefined> = process.env,
-): Record<string, string | undefined> {
-	return { ...base, MISE_MINIMUM_RELEASE_AGE: "0s" };
 }
 
 /**
@@ -1692,16 +1681,15 @@ async function updateViaHomebrew(expectedVersion: string, force: boolean): Promi
 
 async function updateViaMise(expectedVersion: string, force: boolean): Promise<void> {
 	console.log(chalk.dim("Updating via mise..."));
-	const env = buildMiseUpdateEnv();
 	const args = buildMiseUpgradeArgs();
-	const result = await $`mise ${args}`.env(env).nothrow();
+	const result = await $`mise ${args}`.nothrow();
 	if (result.exitCode !== 0) {
 		throw new Error(`mise upgrade failed with exit code ${result.exitCode}`);
 	}
 
 	if (force) {
 		const forceArgs = buildMiseForceInstallArgs(expectedVersion);
-		const forceResult = await $`mise ${forceArgs}`.env(env).nothrow();
+		const forceResult = await $`mise ${forceArgs}`.nothrow();
 		if (forceResult.exitCode !== 0) {
 			throw new Error(`mise install --force failed with exit code ${forceResult.exitCode}`);
 		}
