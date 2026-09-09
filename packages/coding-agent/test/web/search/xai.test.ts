@@ -405,4 +405,25 @@ describe("xAI Responses answer extraction from relay output items", () => {
 
 		expect(response.answer).toBe("Bun 1.3.12 is the latest release.");
 	});
+
+	it("does not fall back to the aggregate when commentary is present but the final answer is empty", async () => {
+		// The aggregate mixes the explicitly tagged commentary in with the
+		// answer; restoring it because the phased final item is empty would
+		// expose narration as the answer.
+		const relayResponse = {
+			id: "resp-relay",
+			model: "grok-4.5",
+			output_text: "I'll search for it. ",
+			output: [
+				{ type: "message", phase: "commentary", content: [{ type: "output_text", text: "I'll search for it." }] },
+				{ type: "message", phase: "final_answer", content: [] },
+			],
+			usage: { input_tokens: 10, output_tokens: 5 },
+		};
+
+		await expect(searchXAI(makeParams(makeFetchMock(relayResponse)))).rejects.toMatchObject({
+			provider: "xai",
+			status: 502,
+		});
+	});
 });
