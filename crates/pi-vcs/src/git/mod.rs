@@ -52,6 +52,8 @@ impl std::fmt::Debug for GitRepo {
 impl GitRepo {
 	/// Discover the repository containing `dir` by walking toward the root.
 	///
+	/// A `.git` entry only counts when its resolved git dir contains `HEAD`;
+	/// unpopulated `.git` directories are skipped, as `git rev-parse` does.
 	/// Returns `Ok(None)` when `dir` is outside any git repository, or when a
 	/// `.git` pointer file is unreadable due to permissions (matching the
 	/// historical wrapper, which treated that as "not a repo" rather than an
@@ -202,6 +204,16 @@ fn resolve_info(
 			resolved
 		},
 	};
+	// Match git's `is_git_directory()`: a `.git` directory (or gitfile target)
+	// without `HEAD` was never populated by git — typically an empty `.git`
+	// planted as a walk fence or left behind by a wiped store — so it is not a
+	// repository. Returning `None` keeps the walk moving toward the root, as
+	// `git rev-parse` does, instead of adopting the entry and failing later
+	// with a raw ENOENT on the first `HEAD` read. Checking the resolved dir
+	// keeps linked worktrees and submodules valid: their `HEAD` lives there.
+	if !git_dir.join("HEAD").is_file() {
+		return Ok(None);
+	}
 	let common_dir = resolve_common_dir(&git_dir);
 	let is_reftable =
 		read_optional(&common_dir.join("config")).is_some_and(|config| config_has_reftable(&config));
