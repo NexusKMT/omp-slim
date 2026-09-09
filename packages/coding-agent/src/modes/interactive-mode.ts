@@ -4214,14 +4214,25 @@ export class InteractiveMode implements InteractiveModeContext {
 			);
 			return true;
 		}
-		if (this.onInputCallback) {
-			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt, ...input }, { preserveDraft: true }));
+		// Fresh CFA scope per call (a repeat read of the property would stay
+		// narrowed). Invoked synchronously so the first resumer always wins the
+		// one-shot waiter.
+		const dispatchViaWaiter = (): boolean => {
+			const onInput = this.onInputCallback;
+			if (!onInput) return false;
+			onInput(this.startPendingSubmission({ text: initialPrompt, ...input }, { preserveDraft: true }));
 			return true;
-		}
-		// No input waiter: a concurrent /vibe consumed the one-shot waiter, or
-		// the main loop is between turns. Steer directly instead of silently
-		// swallowing the prompt — the same fallback the normal submit path uses
-		// when its waiter is gone.
+		};
+		if (dispatchViaWaiter()) return true;
+		// No input waiter: a concurrent dispatch may have just taken the one-shot
+		// waiter — its submission exists but the main loop hasn't handed it to the
+		// session yet. Steering now would overtake it and reverse prompt order, so
+		// yield until it reserves its turn, then re-check for a fresh waiter.
+		await this.#waitForInFlightSubmission();
+		if (dispatchViaWaiter()) return true;
+		// Still no waiter (the main loop is between turns): steer directly instead
+		// of silently swallowing the prompt — the same fallback the normal submit
+		// path uses when its waiter is gone.
 		const images = input?.images?.length ? input.images : undefined;
 		await this.withLocalSubmission(
 			initialPrompt,
@@ -4229,6 +4240,31 @@ export class InteractiveMode implements InteractiveModeContext {
 			{ imageCount: images?.length ?? 0 },
 		);
 		return true;
+	}
+
+	/**
+	 * Yield until a waiter-delivered submission reserves its turn (streaming,
+	 * queued, or dropped) or a fresh waiter arms. Without this, a prompt
+	 * dispatched right after a concurrent submit resolved the one-shot input
+	 * waiter would reach {@link session.prompt} before the main loop submits
+	 * the earlier input, reversing their order. No-op when nothing is in
+	 * flight; bounded so a stalled loop degrades to immediate dispatch.
+	 */
+	async #waitForInFlightSubmission(): Promise<void> {
+		const awaited = this.#pendingSubmittedInput;
+		if (!awaited || awaited.cancelled) return;
+		for (let index = 0; index < 200; index++) {
+			if (
+				this.#pendingSubmittedInput !== awaited ||
+				awaited.cancelled ||
+				this.session.isStreaming ||
+				this.session.queuedMessageCount > 0 ||
+				this.onInputCallback
+			) {
+				return;
+			}
+			await Bun.sleep(10);
+		}
 	}
 
 	async #enterVibeMode(options?: { persistModeChange?: boolean; previousTools?: string[] }): Promise<void> {

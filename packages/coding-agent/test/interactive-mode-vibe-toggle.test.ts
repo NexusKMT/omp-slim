@@ -789,14 +789,30 @@ describe("InteractiveMode vibe mode toggle", () => {
 		expect(session.getVibeModeState()).toBeUndefined();
 	});
 
-	it("preserves every prompt when a concurrent /vibe joins activation", async () => {
+	it("preserves submission order when a concurrent /vibe joins activation", async () => {
 		const gate = Promise.withResolvers<void>();
 		vi.spyOn(session, "activateVibeTools").mockImplementation(() => gate.promise);
-		const promptSpy = vi.spyOn(session, "prompt").mockResolvedValue(true);
-		// Real one-shot waiter, like the main loop installs while idle: the
-		// first dispatch consumes it, so a reusable stub would hide the loss.
-		const received: string[] = [];
-		void mode.getUserInput().then(input => received.push(input.text));
+		const promptCalls: string[] = [];
+		vi.spyOn(session, "prompt").mockImplementation(async text => {
+			promptCalls.push(text);
+			return true;
+		});
+		// Faithful main-loop dispatch: the waiter-delivered prompt travels the
+		// real getUserInput → submit path (mark + session.prompt + finish), so
+		// merely recording the waiter result cannot hide an order reversal.
+		void (async () => {
+			const input = await mode.getUserInput();
+			if (mode.markPendingSubmissionStarted(input)) {
+				try {
+					await session.prompt(input.text, {
+						images: input.images,
+						streamingBehavior: input.streamingBehavior ?? "followUp",
+					});
+				} finally {
+					mode.finishPendingSubmission(input);
+				}
+			}
+		})();
 		for (let index = 0; index < 5; index++) await Promise.resolve();
 
 		// First /vibe <prompt> parks on tool activation with vibe not yet enabled.
@@ -806,19 +822,16 @@ describe("InteractiveMode vibe mode toggle", () => {
 
 		// A second submit while activation is in flight (the editor fires
 		// onSubmit without awaiting the first handler) must wait for vibe
-		// instead of dispatching on the stale toolset — and must not lose its
-		// prompt to the consumed waiter.
+		// instead of dispatching on the stale toolset — and must not overtake
+		// the first prompt, which is still on its way through the main loop.
 		const second = mode.handleVibeModeCommand("second prompt");
 		for (let index = 0; index < 5; index++) await Promise.resolve();
-		expect(received).toHaveLength(0);
-		expect(promptSpy).not.toHaveBeenCalled();
+		expect(promptCalls).toHaveLength(0);
 
 		gate.resolve();
 		expect(await first).toBe(true);
 		expect(await second).toBe(true);
 		expect(mode.vibeModeEnabled).toBe(true);
-		expect(received).toEqual(["first prompt"]);
-		expect(promptSpy).toHaveBeenCalledTimes(1);
-		expect(promptSpy).toHaveBeenCalledWith("second prompt", { streamingBehavior: "steer", images: undefined });
+		expect(promptCalls).toEqual(["first prompt", "second prompt"]);
 	});
 });
