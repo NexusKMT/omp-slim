@@ -19,7 +19,7 @@ const XAI_WEB_SEARCH_REASONING_EFFORT = "low";
 const DEFAULT_NUM_RESULTS = 10;
 const MAX_NUM_RESULTS = 30;
 /** Messages at least this long are treated as substantive content, not relay narration. */
-const NARRATION_MAX_CHARS = 300;
+const SUBSTANTIVE_MIN_CHARS = 300;
 
 interface XAIUrlCitationAnnotation {
 	type?: string;
@@ -282,7 +282,7 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 	const messages: Array<{ texts: string[]; hasCitations: boolean }> = [];
 	const output = Array.isArray(response.output) ? response.output : [];
 	for (const item of output) {
-		if (!item || typeof item !== "object" || item.type !== "message") continue;
+		if (!item || typeof item !== "object" || (item.type !== undefined && item.type !== "message")) continue;
 		const content = Array.isArray(item.content) ? item.content : [];
 		const entry: { texts: string[]; hasCitations: boolean } = { texts: [], hasCitations: false };
 		for (const part of content) {
@@ -307,7 +307,7 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 	if (messages.length === 0 || messages[messages.length - 1].texts.length === 0) return undefined;
 	const kept = messages.filter(
 		(entry, index) =>
-			index === messages.length - 1 || entry.hasCitations || entry.texts.join("").length >= NARRATION_MAX_CHARS,
+			index === messages.length - 1 || entry.hasCitations || entry.texts.join("").length >= SUBSTANTIVE_MIN_CHARS,
 	);
 
 	const answer = kept

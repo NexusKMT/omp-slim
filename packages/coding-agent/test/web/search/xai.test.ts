@@ -176,6 +176,26 @@ describe("xAI Responses answer extraction from relay output items", () => {
 		expect(response.answer).toBe("Bun 1.3.12 is the latest release.");
 	});
 
+	it("treats an untyped output item as a message, not as ignorable", async () => {
+		// Relays may omit the output item's `type`; a valid content array on
+		// an untyped item still contributes to the answer (matches the
+		// pre-filter fallback contract), while explicit non-message types
+		// like `reasoning` stay ignored.
+		const relayResponse = {
+			id: "resp-relay",
+			model: "grok-4.5",
+			output: [
+				{ type: "reasoning", content: [{ type: "output_text", text: "Considering what to search." }] },
+				{ content: [{ type: "output_text", text: "Bun 1.3.12 is the latest release." }] },
+			],
+			usage: { input_tokens: 10, output_tokens: 5 },
+		};
+
+		const response = await searchXAI(makeParams(makeFetchMock(relayResponse)));
+
+		expect(response.answer).toBe("Bun 1.3.12 is the latest release.");
+	});
+
 	it("treats message-level url_citation annotations as substance", async () => {
 		const relayResponse = {
 			id: "resp-relay",
