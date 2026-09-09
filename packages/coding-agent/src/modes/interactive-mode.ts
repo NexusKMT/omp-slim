@@ -780,10 +780,11 @@ export class InteractiveMode implements InteractiveModeContext {
 	#goalModePreviousTools: string[] | undefined;
 	#vibeModePreviousTools: string[] | undefined;
 	#vibeModeOwnerScope: VibeOwnerScope | undefined;
-	// True while #enterVibeMode awaits activateVibeTools: vibeModeEnabled is
-	// still false, but a reset iteration must already treat vibe as active so
-	// it cannot slip in concurrently with the toolset switch.
-	#vibeModeEntering = false;
+	// In-flight #enterVibeMode promise: set before the activateVibeTools await
+	// (while vibeModeEnabled is still false) and cleared when entry settles.
+	// Loop reset guards treat a pending entry as active, and a concurrent /vibe
+	// command awaits it instead of dispatching its prompt on the stale toolset.
+	#vibeModeEntry: Promise<void> | undefined;
 	#vibeScopeSuspendedForSwitch = false;
 	#goalContinuationTimer: NodeJS.Timeout | undefined;
 	#goalTurnHadToolCalls = false;
@@ -1838,7 +1839,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			return;
 		}
 
-		if (action === "reset" && (this.vibeModeEnabled || this.#vibeModeEntering)) {
+		if (action === "reset" && (this.vibeModeEnabled || this.#vibeModeEntry !== undefined)) {
 			this.disableLoopMode("Exit vibe mode before using reset loops. Loop mode disabled.");
 			return;
 		}
@@ -1870,7 +1871,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// the iteration submit without resetting. Check the entering transition
 		// too: vibeModeEnabled is still false while activateVibeTools is in
 		// flight, but the reset must not run concurrently with the toolset switch.
-		if (action === "reset" && (this.vibeModeEnabled || this.#vibeModeEntering)) {
+		if (action === "reset" && (this.vibeModeEnabled || this.#vibeModeEntry !== undefined)) {
 			this.disableLoopMode("Exit vibe mode before using reset loops. Loop mode disabled.");
 			return;
 		}
@@ -4221,7 +4222,17 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	async #enterVibeMode(options?: { persistModeChange?: boolean; previousTools?: string[] }): Promise<void> {
-		if (this.vibeModeEnabled || this.#vibeModeEntering) {
+		if (this.vibeModeEnabled) {
+			return;
+		}
+		const inFlight = this.#vibeModeEntry;
+		if (inFlight) {
+			// A second /vibe (possibly with a prompt) submitted while activation
+			// is still in flight must not dispatch on the stale toolset: wait for
+			// the first entry, then return with vibe active. A failed entry
+			// rejects here too, so the prompt is dropped instead of running
+			// outside vibe mode.
+			await inFlight;
 			return;
 		}
 		if (this.planModeEnabled || this.planModePaused) {
@@ -4244,29 +4255,34 @@ export class InteractiveMode implements InteractiveModeContext {
 		const previousTools = options?.previousTools ?? this.session.getEnabledToolNames();
 		const vibeBaseTools = ["read"];
 		if (this.session.hasBuiltInTool("todo")) vibeBaseTools.push("todo");
-		this.#vibeModeEntering = true;
-		try {
+		// The entry runs as a stored promise so a concurrent /vibe joins it
+		// above instead of dispatching on the stale toolset. The first caller
+		// awaits it below, so a failure is always observed (no unhandled
+		// rejection) and propagates to every joiner, dropping their prompts.
+		const entry = (async () => {
 			await this.session.activateVibeTools(vibeBaseTools);
-		} catch (error) {
-			this.#vibeModeEntering = false;
-			throw error;
+			this.#vibeModePreviousTools = previousTools;
+			this.#vibeModeOwnerScope = ownerScope;
+			this.vibeModeEnabled = true;
+			// Suppress cache-miss marker on the next turn: vibe mode changes the
+			// injected context, which predictably invalidates the cache.
+			this.lastAssistantUsage = undefined;
+			this.session.setVibeModeState({ enabled: true });
+			if (this.session.isStreaming) {
+				await this.session.sendVibeModeContext({ deliverAs: "steer" });
+			}
+			this.#updateVibeModeStatus();
+			if (options?.persistModeChange !== false) this.sessionManager.appendModeChange("vibe", { previousTools });
+			this.showStatus(
+				"Vibe mode enabled. You direct fast/good worker sessions; toolset is read + optional parent Todo + vibe tools.",
+			);
+		})();
+		this.#vibeModeEntry = entry;
+		try {
+			await entry;
+		} finally {
+			if (this.#vibeModeEntry === entry) this.#vibeModeEntry = undefined;
 		}
-		this.#vibeModePreviousTools = previousTools;
-		this.#vibeModeOwnerScope = ownerScope;
-		this.vibeModeEnabled = true;
-		this.#vibeModeEntering = false;
-		// Suppress cache-miss marker on the next turn: vibe mode changes the
-		// injected context, which predictably invalidates the cache.
-		this.lastAssistantUsage = undefined;
-		this.session.setVibeModeState({ enabled: true });
-		if (this.session.isStreaming) {
-			await this.session.sendVibeModeContext({ deliverAs: "steer" });
-		}
-		this.#updateVibeModeStatus();
-		if (options?.persistModeChange !== false) this.sessionManager.appendModeChange("vibe", { previousTools });
-		this.showStatus(
-			"Vibe mode enabled. You direct fast/good worker sessions; toolset is read + optional parent Todo + vibe tools.",
-		);
 	}
 
 	async #exitVibeMode(): Promise<void> {

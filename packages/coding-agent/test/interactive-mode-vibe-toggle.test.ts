@@ -788,4 +788,31 @@ describe("InteractiveMode vibe mode toggle", () => {
 		expect(mode.vibeModeEnabled).toBe(false);
 		expect(session.getVibeModeState()).toBeUndefined();
 	});
+
+	it("holds a concurrent /vibe prompt until activation finishes", async () => {
+		const gate = Promise.withResolvers<void>();
+		vi.spyOn(session, "activateVibeTools").mockImplementation(() => gate.promise);
+		const dispatched: string[] = [];
+		mode.onInputCallback = input => {
+			dispatched.push(input.text);
+		};
+
+		// First /vibe <prompt> parks on tool activation with vibe not yet enabled.
+		const first = mode.handleVibeModeCommand("first prompt");
+		for (let index = 0; index < 5; index++) await Promise.resolve();
+		expect(mode.vibeModeEnabled).toBe(false);
+
+		// A second submit while activation is in flight (the editor fires
+		// onSubmit without awaiting the first handler) must wait for vibe
+		// instead of dispatching its prompt on the stale toolset.
+		const second = mode.handleVibeModeCommand("second prompt");
+		for (let index = 0; index < 5; index++) await Promise.resolve();
+		expect(dispatched).toHaveLength(0);
+
+		gate.resolve();
+		expect(await first).toBe(true);
+		expect(await second).toBe(true);
+		expect(mode.vibeModeEnabled).toBe(true);
+		expect(dispatched).toEqual(["first prompt", "second prompt"]);
+	});
 });
