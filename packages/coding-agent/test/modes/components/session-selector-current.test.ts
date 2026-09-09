@@ -94,4 +94,46 @@ describe("SessionSelectorComponent current session marker", () => {
 		expect(sessionSection(rendered, "Alpha work")).toContain(`${cursor} Alpha work`);
 		expect(sessionSection(rendered, "Alpha other")).not.toContain(`${cursor} Alpha other`);
 	});
+
+	it("keeps the neighboring row focused after deleting with an empty query", () => {
+		const alpha = createSession("alpha", "Alpha", "2024-01-03T00:00:00Z");
+		const bravo = createSession("bravo", "Bravo", "2024-01-02T00:00:00Z");
+		const live = createSession("live", "Charlie live", "2024-01-01T00:00:00Z");
+		const selector = new SessionSelectorComponent(
+			[alpha, bravo, live],
+			() => {},
+			() => {},
+			() => {},
+			{
+				getTerminalRows: () => 100,
+				currentSessionPath: live.path,
+			},
+		);
+		selector.handleInput("\x1b[A");
+		selector.handleInput("\x1b[A");
+		selector.getSessionList().removeSession(alpha.path);
+		const rendered = stripAnsi(selector.render(120).join("\n"));
+		const cursor = theme.nav.cursor;
+		expect(sessionSection(rendered, "Bravo")).toContain(`${cursor} Bravo`);
+		expect(sessionSection(rendered, "Charlie live")).not.toContain(`${cursor} Charlie live`);
+	});
+
+	it("restores live-session focus when the search query is cleared", () => {
+		const selector = new SessionSelectorComponent(
+			[newer, older],
+			() => {},
+			() => {},
+			() => {},
+			{
+				getTerminalRows: () => 100,
+				currentSessionPath: older.path,
+			},
+		);
+		selector.handleInput("x");
+		selector.handleInput("\x7f");
+		const rendered = stripAnsi(selector.render(120).join("\n"));
+		const cursor = theme.nav.cursor;
+		expect(sessionSection(rendered, "Older session")).toContain(`${cursor} Older session`);
+		expect(sessionSection(rendered, "Newer session")).not.toContain(`${cursor} Newer session`);
+	});
 });

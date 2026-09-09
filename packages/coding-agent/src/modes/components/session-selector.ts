@@ -307,6 +307,8 @@ class SessionList implements Component {
 	 * only append below the literal group, which never shifts existing rows.)
 	 */
 	#selectionMoved = false;
+	/** True after a nonempty query; empty refilter restores current only then. */
+	#hadFilterQuery = false;
 
 	constructor(
 		sessions: SessionInfo[],
@@ -387,10 +389,12 @@ class SessionList implements Component {
 		this.#fuzzyRanked = [];
 
 		const tokens = tokenizeSessionQuery(query);
+		const hadQuery = this.#hadFilterQuery;
+		this.#hadFilterQuery = tokens.length > 0;
 		if (tokens.length === 0) {
 			this.#filteredSessions = this.#allSessions;
 			this.#selectedIndex = Math.min(this.#selectedIndex, Math.max(0, this.#filteredSessions.length - 1));
-			this.#selectCurrentSession();
+			if (hadQuery) this.#selectCurrentSession();
 			this.#scheduleHistoryMerge(query);
 			return;
 		}
