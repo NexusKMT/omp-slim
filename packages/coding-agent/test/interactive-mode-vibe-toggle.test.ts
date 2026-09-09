@@ -46,17 +46,22 @@ function vibeModeEntryCount(manager: SessionManager): number {
 	return manager.getEntries().filter(entry => entry.type === "mode_change" && entry.mode === "vibe").length;
 }
 
-async function registerOrderSkill(tempDir: TempDir, mode: InteractiveMode): Promise<void> {
-	const filePath = path.join(tempDir.path(), "order-skill.md");
-	await Bun.write(filePath, "---\nname: order-skill\n---\nDo it in order.\n");
+async function registerOrderSkill(
+	tempDir: TempDir,
+	mode: InteractiveMode,
+	name = "order-skill",
+	body = "Do it in order.",
+): Promise<void> {
+	const filePath = path.join(tempDir.path(), `${name}.md`);
+	await Bun.write(filePath, `---\nname: ${name}\n---\n${body}\n`);
 	const skill: Skill = {
-		name: "order-skill",
+		name,
 		description: "",
 		filePath,
 		baseDir: tempDir.path(),
 		source: "test",
 	};
-	mode.skillCommands.set("skill:order-skill", skill);
+	mode.skillCommands.set(`skill:${name}`, skill);
 }
 
 function armOrderLoop(mode: InteractiveMode, session: AgentSession): { done: Promise<void>; order: string[] } {
@@ -65,8 +70,11 @@ function armOrderLoop(mode: InteractiveMode, session: AgentSession): { done: Pro
 		order.push(`plain:${text}`);
 		return true;
 	});
-	vi.spyOn(session, "promptCustomMessage").mockImplementation(async () => {
-		order.push("skill");
+	vi.spyOn(session, "promptCustomMessage").mockImplementation(async message => {
+		const text = typeof message.content === "string" ? message.content : "";
+		if (text.includes("Skill A body")) order.push("skill-a");
+		else if (text.includes("Skill B body")) order.push("skill-b");
+		else order.push("skill");
 		return true;
 	});
 	// Faithful main-loop dispatch: the waiter-delivered prompt travels the real
@@ -926,5 +934,35 @@ describe("InteractiveMode vibe mode toggle", () => {
 		await loop.done;
 		expect(mode.vibeModeEnabled).toBe(true);
 		expect(loop.order).toEqual(["plain:plain first", "skill"]);
+	});
+
+	it("orders two skill vibe prompts behind a plain prompt in arrival order", async () => {
+		const gate = Promise.withResolvers<void>();
+		vi.spyOn(session, "activateVibeTools").mockImplementation(() => gate.promise);
+		await registerOrderSkill(tempDir, mode, "order-skill-a", "Skill A body.");
+		await registerOrderSkill(tempDir, mode, "order-skill-b", "Skill B body.");
+		const loop = armOrderLoop(mode, session);
+		for (let index = 0; index < 5; index++) await Promise.resolve();
+
+		const first = mode.handleVibeModeCommand("plain first");
+		for (let index = 0; index < 5; index++) await Promise.resolve();
+		expect(mode.vibeModeEnabled).toBe(false);
+
+		// Each skill links behind its predecessor instead of overwriting a
+		// shared slot, so the second skill cannot dispatch ahead of the first
+		// once the plain prompt reserves.
+		const second = mode.handleVibeModeCommand("/skill:order-skill-a go a");
+		for (let index = 0; index < 5; index++) await Promise.resolve();
+		const third = mode.handleVibeModeCommand("/skill:order-skill-b go b");
+		for (let index = 0; index < 5; index++) await Promise.resolve();
+		expect(loop.order).toHaveLength(0);
+
+		gate.resolve();
+		expect(await first).toBe(true);
+		expect(await second).toBe(true);
+		expect(await third).toBe(true);
+		await loop.done;
+		expect(mode.vibeModeEnabled).toBe(true);
+		expect(loop.order).toEqual(["plain:plain first", "skill-a", "skill-b"]);
 	});
 });

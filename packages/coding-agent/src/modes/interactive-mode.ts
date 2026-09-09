@@ -785,11 +785,14 @@ export class InteractiveMode implements InteractiveModeContext {
 	// Loop reset guards treat a pending entry as active, and a concurrent /vibe
 	// command awaits it instead of dispatching its prompt on the stale toolset.
 	#vibeModeEntry: Promise<void> | undefined;
-	// Live skill-prompt reservation: set synchronously when a /vibe skill prompt
-	// starts dispatching (its file read yields before the turn reserves), so a
-	// concurrent prompt cannot take the idle waiter and start its turn first.
-	// Cleared when the skill dispatch settles.
-	#vibeSkillReservation: object | undefined;
+	// FIFO tail + live count for concurrent /vibe skill dispatches. A skill
+	// prompt yields on its file read before the turn reserves, so each skill
+	// links behind its predecessor (arrival order) while the count — visible
+	// synchronously, unlike a single shared slot — stops later prompts from
+	// overtaking any of them. Both settle when the dispatch settles, so a
+	// failure unblocks every waiter instead of hanging it.
+	#vibeSkillTail: Promise<void> = Promise.resolve();
+	#vibeSkillInFlight = 0;
 	#vibeScopeSuspendedForSwitch = false;
 	#goalContinuationTimer: NodeJS.Timeout | undefined;
 	#goalTurnHadToolCalls = false;
@@ -4204,21 +4207,28 @@ export class InteractiveMode implements InteractiveModeContext {
 		await this.#enterVibeMode();
 		if (!initialPrompt) return false;
 		if (isKnownSkillCommand(this, initialPrompt)) {
-			// Claim synchronously: the skill file read below yields before the
-			// turn reserves, so a concurrent plain prompt must see this
-			// reservation before it can take the idle waiter.
-			const reservation = {};
-			this.#vibeSkillReservation = reservation;
-			try {
-				await this.#waitForInFlightSubmission(reservation);
-				await invokeSkillCommandFromText(this, initialPrompt, "steer", {
-					images: input?.images,
-					propagateErrors: true,
-				});
-				return true;
-			} finally {
-				if (this.#vibeSkillReservation === reservation) this.#vibeSkillReservation = undefined;
-			}
+			// Append synchronously: the skill file read below yields before the
+			// turn reserves, so a concurrent plain prompt must see this claim
+			// before it can take the idle waiter — and a later skill must queue
+			// behind this one rather than overwrite a shared slot.
+			const prev = this.#vibeSkillTail;
+			this.#vibeSkillInFlight++;
+			const mine = (async () => {
+				try {
+					await prev;
+					await this.#waitForInFlightSubmission(true);
+					await invokeSkillCommandFromText(this, initialPrompt, "steer", {
+						images: input?.images,
+						propagateErrors: true,
+					});
+				} finally {
+					this.#vibeSkillInFlight--;
+				}
+			})();
+			// Never reject: a failed skill must not break the chain for later ones.
+			this.#vibeSkillTail = mine.catch(() => {});
+			await mine;
+			return true;
 		}
 		if (this.session.isStreaming) {
 			// Same ordering covenant as below: a skill prompt may be reserving
@@ -4235,7 +4245,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		const dispatchViaWaiter = (): boolean => {
 			// A skill prompt reserving ahead of us owns the next turn: leave the
 			// waiter armed until it reserves, so the main loop submits in order.
-			if (this.#vibeSkillReservation) return false;
+			if (this.#vibeSkillInFlight > 0) return false;
 			const onInput = this.onInputCallback;
 			if (!onInput) return false;
 			onInput(this.startPendingSubmission({ text: initialPrompt, ...input }, { preserveDraft: true }));
@@ -4267,14 +4277,14 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * skill prompt is still reading its file — would reach
 	 * {@link session.prompt} before the main loop submits the earlier input,
 	 * reversing their order. No-op when nothing is in flight; bounded so a
-	 * stalled loop degrades to immediate dispatch. `ignoreSkillReservation`
-	 * lets a skill dispatch wait for earlier submissions without hanging on
-	 * its own reservation.
+	 * stalled loop degrades to immediate dispatch. `excludeOwnSkill` lets a
+	 * skill dispatch wait for earlier submissions without hanging on the unit
+	 * it just appended (concurrent skills order themselves through the tail
+	 * chain instead).
 	 */
-	async #waitForInFlightSubmission(ignoreSkillReservation?: object): Promise<void> {
+	async #waitForInFlightSubmission(excludeOwnSkill = false): Promise<void> {
 		for (let index = 0; index < 200; index++) {
-			const skillBlocked =
-				this.#vibeSkillReservation !== undefined && this.#vibeSkillReservation !== ignoreSkillReservation;
+			const skillBlocked = this.#vibeSkillInFlight - (excludeOwnSkill ? 1 : 0) > 0;
 			const awaited = this.#pendingSubmittedInput;
 			const pendingBlocked =
 				awaited !== undefined &&
