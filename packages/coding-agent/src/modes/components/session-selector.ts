@@ -309,6 +309,8 @@ class SessionList implements Component {
 	#selectionMoved = false;
 	/** True after a nonempty query; empty refilter restores current only then. */
 	#hadFilterQuery = false;
+	/** Last query passed to {@link #filterSessions}; same-query refilter keeps the index. */
+	#lastFilterQuery = "";
 
 	constructor(
 		sessions: SessionInfo[],
@@ -392,7 +394,9 @@ class SessionList implements Component {
 
 		const tokens = tokenizeSessionQuery(query);
 		const hadQuery = this.#hadFilterQuery;
+		const queryChanged = query !== this.#lastFilterQuery;
 		this.#hadFilterQuery = tokens.length > 0;
+		this.#lastFilterQuery = query;
 		if (tokens.length === 0) {
 			this.#filteredSessions = this.#allSessions;
 			this.#selectedIndex = Math.min(this.#selectedIndex, Math.max(0, this.#filteredSessions.length - 1));
@@ -422,11 +426,11 @@ class SessionList implements Component {
 		// and spill the remainder into async chunks.
 		this.#scanFuzzySlice(this.#scanGeneration, tokens, rest, 0, FUZZY_SCAN_INLINE_COUNT);
 		this.#composeFiltered();
-		// Query change rebuilds ranking; keep the numeric index only for async
-		// compose (fuzzy chunks / history merge) so an arrow selection survives
-		// those. A live-session index > 0 would otherwise clamp onto a lower
-		// match instead of the top-ranked hit.
-		this.#selectedIndex = 0;
+		// New query rebuilds ranking from scratch. Same-query refilter (delete)
+		// and async compose (fuzzy chunks / history merge) only clamp so an
+		// arrow selection survives. A live-session index > 0 would otherwise
+		// land on a lower-ranked match after the first keystroke.
+		if (queryChanged) this.#selectedIndex = 0;
 		this.#scheduleHistoryMerge(query);
 	}
 

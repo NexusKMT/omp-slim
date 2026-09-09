@@ -118,6 +118,30 @@ describe("SessionSelectorComponent current session marker", () => {
 		expect(sessionSection(rendered, "Charlie live")).not.toContain(`${cursor} Charlie live`);
 	});
 
+	it("keeps the neighboring row focused after deleting a filtered result", () => {
+		const alpha = createSession("alpha", "Alpha work", "2024-01-03T00:00:00Z");
+		const bravo = createSession("bravo", "Alpha bravo", "2024-01-02T00:00:00Z");
+		const charlie = createSession("charlie", "Alpha charlie", "2024-01-01T00:00:00Z");
+		const live = createSession("live", "Beta live", "2023-12-31T00:00:00Z");
+		const selector = new SessionSelectorComponent(
+			[alpha, bravo, charlie, live],
+			() => {},
+			() => {},
+			() => {},
+			{
+				getTerminalRows: () => 100,
+				currentSessionPath: live.path,
+			},
+		);
+		for (const ch of "alpha") selector.handleInput(ch);
+		selector.handleInput("\x1b[B");
+		selector.getSessionList().removeSession(bravo.path);
+		const rendered = stripAnsi(selector.render(120).join("\n"));
+		const cursor = theme.nav.cursor;
+		expect(sessionSection(rendered, "Alpha charlie")).toContain(`${cursor} Alpha charlie`);
+		expect(sessionSection(rendered, "Alpha work")).not.toContain(`${cursor} Alpha work`);
+	});
+
 	it("restores live-session focus when the search query is cleared", () => {
 		const selector = new SessionSelectorComponent(
 			[newer, older],
