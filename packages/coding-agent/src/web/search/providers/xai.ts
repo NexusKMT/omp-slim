@@ -269,14 +269,19 @@ function collectWebSearchSources(
 }
 
 function parseAnswer(response: XAIResponsesResponse): string | undefined {
+	const output = Array.isArray(response.output) ? response.output : [];
+	// The top-level aggregate (`output_text`) mixes commentary text in with
+	// the answer, so when the relay phases its messages the phase-aware
+	// extraction wins; the aggregate is trusted only when no explicit phases
+	// are present or the phased extraction yields nothing.
+	const hasExplicitPhases = output.some(item => item?.phase === "commentary" || item?.phase === "final_answer");
 	const topLevelText = response.output_text?.trim();
-	if (topLevelText) return topLevelText;
+	if (!hasExplicitPhases && topLevelText) return topLevelText;
 
 	// Explicit phases take precedence. Unphased relay messages use the last
 	// message/citation/length heuristic; keep commentary positions so removing
 	// one cannot promote preceding unphased narration into a final answer.
 	const messages: Array<{ texts: string[]; hasCitations: boolean; phase: XAIResponseOutputItem["phase"] }> = [];
-	const output = Array.isArray(response.output) ? response.output : [];
 	for (const item of output) {
 		if (!item || typeof item !== "object" || (item.type !== undefined && item.type !== "message")) continue;
 		const content = Array.isArray(item.content) ? item.content : [];
@@ -305,8 +310,15 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 		}
 		messages.push(entry);
 	}
-	const lastMessage = messages.at(-1);
-	if (!lastMessage || (lastMessage.texts.length === 0 && lastMessage.phase !== "commentary")) return undefined;
+	const hasFinalAnswerContent = messages.some(m => m.phase === "final_answer" && m.texts.length > 0);
+	if (!hasFinalAnswerContent) {
+		// Without authoritative phased content, an empty final message means
+		// no answer — do not promote heuristic-kept earlier content.
+		const lastMessage = messages.at(-1);
+		if (!lastMessage || (lastMessage.texts.length === 0 && lastMessage.phase !== "commentary")) {
+			return topLevelText || undefined;
+		}
+	}
 	const kept = messages.filter(
 		(entry, index) =>
 			entry.phase === "final_answer" ||
@@ -320,7 +332,7 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 		.flatMap(entry => entry.texts)
 		.join("\n")
 		.trim();
-	return answer ? answer : undefined;
+	return answer || topLevelText || undefined;
 }
 
 function parseUsage(usage: XAIResponsesUsage | null | undefined): SearchUsage | undefined {

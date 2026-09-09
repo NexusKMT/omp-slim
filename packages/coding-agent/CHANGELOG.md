@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- xAI search answer extraction honors explicit `commentary`/`final_answer` phases and treats unrecognized or empty phase values as unphased; unphased relay messages retain the final message and substantive earlier content (citations or long text).
+- xAI search answer extraction honors explicit `commentary`/`final_answer` phases, treats unrecognized or empty phase values as unphased, prefers phased messages over the aggregate `output_text`, and keeps an explicit final answer followed by an empty final item; unphased relay messages retain the final message and substantive earlier content (citations or long text).
 - GitHub Copilot model-policy 403s (plan, model policy, org restriction) no longer delete stored credentials, so the provider stays listed in `/model` after a per-model access denial instead of disappearing until the next `/login` ([#11280](https://github.com/can1357/oh-my-pi/pull/11280) by [@H4vC](https://github.com/H4vC)).
 
 ### Added

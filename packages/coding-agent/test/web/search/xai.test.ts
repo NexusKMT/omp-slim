@@ -363,4 +363,46 @@ describe("xAI Responses answer extraction from relay output items", () => {
 
 		expect(response.answer).toBe("Bun 1.3.12 is documented.\nSecond finding.");
 	});
+
+	it("prefers phased messages over the aggregate output_text", async () => {
+		// A relay that populates the top-level aggregate AND phases its
+		// messages mixes commentary into the aggregate; the phase-aware
+		// extraction must win so narration stays excluded.
+		const relayResponse = {
+			id: "resp-relay",
+			model: "grok-4.5",
+			output_text: "I'll search for it. The answer is 42.",
+			output: [
+				{ type: "message", phase: "commentary", content: [{ type: "output_text", text: "I'll search for it." }] },
+				{ type: "message", phase: "final_answer", content: [{ type: "output_text", text: "The answer is 42." }] },
+			],
+			usage: { input_tokens: 10, output_tokens: 5 },
+		};
+
+		const response = await searchXAI(makeParams(makeFetchMock(relayResponse)));
+
+		expect(response.answer).toBe("The answer is 42.");
+	});
+
+	it("keeps an explicit final answer followed by an empty final item", async () => {
+		// An empty trailing final_answer item is a relay artifact; it must not
+		// discard the authoritative content that precedes it.
+		const relayResponse = {
+			id: "resp-relay",
+			model: "grok-4.5",
+			output: [
+				{
+					type: "message",
+					phase: "final_answer",
+					content: [{ type: "output_text", text: "Bun 1.3.12 is the latest release." }],
+				},
+				{ type: "message", phase: "final_answer", content: [] },
+			],
+			usage: { input_tokens: 10, output_tokens: 5 },
+		};
+
+		const response = await searchXAI(makeParams(makeFetchMock(relayResponse)));
+
+		expect(response.answer).toBe("Bun 1.3.12 is the latest release.");
+	});
 });
