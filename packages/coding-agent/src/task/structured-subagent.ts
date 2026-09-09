@@ -16,6 +16,7 @@ import { MCPManager } from "../mcp/manager";
 import { loadOverallPlanReference } from "../plan-mode/plan-handoff";
 import planModeSubagentPrompt from "../prompts/system/plan-mode-subagent.md" with { type: "text" };
 import subagentUserPromptTemplate from "../prompts/system/subagent-user-prompt.md" with { type: "text" };
+import isolationRecoveryHintTemplate from "../prompts/tools/isolation-recovery-hint.md" with { type: "text" };
 import { MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { TaskEffort } from "../thinking";
 import type { ToolSession } from "../tools";
@@ -539,14 +540,16 @@ async function resolveNestedPatchPaths(
 	}
 }
 
+/** Recovery hint appended to an isolated run's failure: every preserved artifact, and the nested-persist fallback failure when there is one. */
 async function isolationRecoveryHint(result: SingleResult, artifactsDir: string): Promise<string> {
-	const hints: string[] = [];
-	if (result.patchPath) hints.push(`Captured patch preserved at ${result.patchPath}.`);
 	const nested = await resolveNestedPatchPaths(result, artifactsDir);
-	for (const nestedPath of nested.paths) hints.push(`Captured nested patch preserved at ${nestedPath}.`);
-	if (nested.failure) hints.push(`Nested patches could not be written: ${nested.failure}.`);
-	if (result.branchName) hints.push(`Captured branch preserved as ${result.branchName}.`);
-	return hints.length > 0 ? ` ${hints.join(" ")}` : "";
+	const hint = prompt.render(isolationRecoveryHintTemplate, {
+		patchPath: result.patchPath,
+		nestedPatchPaths: nested.paths,
+		nestedFailure: nested.failure,
+		branchName: result.branchName,
+	});
+	return hint ? ` ${hint}` : "";
 }
 
 /**
