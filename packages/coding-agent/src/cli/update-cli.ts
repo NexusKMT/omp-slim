@@ -1406,6 +1406,26 @@ export function buildMiseForceInstallArgs(expectedVersion: string): string[] {
 }
 
 /**
+ * Environment for the attended mise update path.
+ *
+ * `omp update` is an explicit, user-initiated request for the latest release,
+ * so it must bypass mise's `minimum_release_age` gate. That gate keeps
+ * *unattended* `mise upgrade` runs from pulling releases younger than a
+ * freshness window (24h by default); left in place it silently drops a
+ * just-published version and leaves `omp update` reporting the old one
+ * (issue #11316). The override wins over any user-set `MISE_MINIMUM_RELEASE_AGE`
+ * because the user asked for the update directly. We clear it via the env var
+ * rather than `--minimum-release-age=0` because that flag was, on some mise
+ * versions, indistinguishable from an active cutoff (jdx/mise#10303); the env
+ * override is the reliable path.
+ */
+export function buildMiseUpdateEnv(
+	base: Record<string, string | undefined> = process.env,
+): Record<string, string | undefined> {
+	return { ...base, MISE_MINIMUM_RELEASE_AGE: "0" };
+}
+
+/**
  * Old-name globals a rename migration removes after the new install exists:
  * the set difference between the old install's top-level globals
  * ({@link buildVersionedPackageInstallArgs} installs the agent, natives core,
@@ -1672,15 +1692,16 @@ async function updateViaHomebrew(expectedVersion: string, force: boolean): Promi
 
 async function updateViaMise(expectedVersion: string, force: boolean): Promise<void> {
 	console.log(chalk.dim("Updating via mise..."));
+	const env = buildMiseUpdateEnv();
 	const args = buildMiseUpgradeArgs();
-	const result = await $`mise ${args}`.nothrow();
+	const result = await $`mise ${args}`.env(env).nothrow();
 	if (result.exitCode !== 0) {
 		throw new Error(`mise upgrade failed with exit code ${result.exitCode}`);
 	}
 
 	if (force) {
 		const forceArgs = buildMiseForceInstallArgs(expectedVersion);
-		const forceResult = await $`mise ${forceArgs}`.nothrow();
+		const forceResult = await $`mise ${forceArgs}`.env(env).nothrow();
 		if (forceResult.exitCode !== 0) {
 			throw new Error(`mise install --force failed with exit code ${forceResult.exitCode}`);
 		}

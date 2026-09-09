@@ -10,6 +10,7 @@ import {
 	buildBunInstallArgs,
 	buildHomebrewUpdateArgs,
 	buildMiseForceInstallArgs,
+	buildMiseUpdateEnv,
 	buildMiseUpgradeArgs,
 	buildNpmInstallArgs,
 	buildRenameCleanupPackages,
@@ -433,6 +434,12 @@ describe("update-cli package manager commands", () => {
 	it("targets the mise GitHub backend tool and force-reinstalls the checked version when requested", () => {
 		expect(buildMiseUpgradeArgs()).toEqual(["upgrade", "github:can1357/oh-my-pi", "--bump"]);
 		expect(buildMiseForceInstallArgs("15.10.5")).toEqual(["install", "--force", "github:can1357/oh-my-pi@15.10.5"]);
+	});
+
+	it("clears mise's minimum_release_age gate for attended updates, overriding a user-set value", () => {
+		const env = buildMiseUpdateEnv({ PATH: "/bin", MISE_MINIMUM_RELEASE_AGE: "24h" });
+		expect(env.MISE_MINIMUM_RELEASE_AGE).toBe("0");
+		expect(env.PATH).toBe("/bin");
 	});
 
 	it("pins npm package installs to the official registry and the checked native package versions", () => {
