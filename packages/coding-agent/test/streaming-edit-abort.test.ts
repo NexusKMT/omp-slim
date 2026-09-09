@@ -14,12 +14,13 @@ function createGuard(
 	streamingAbort: boolean,
 	cwd = process.cwd(),
 	settings = Settings.isolated({ "edit.streamingAbort": streamingAbort }),
-): { guard: StreamingEditGuard; aborts: { count: number } } {
-	const aborts = { count: 0 };
+): { guard: StreamingEditGuard; aborts: { count: number; reason?: unknown } } {
+	const aborts: { count: number; reason?: unknown } = { count: 0 };
 	const guard = new StreamingEditGuard({
 		agent: {
-			abort() {
+			abort(reason?: unknown) {
 				aborts.count++;
+				aborts.reason = reason;
 			},
 		} as Agent,
 		settings,
@@ -108,6 +109,25 @@ describe("streaming edit abort", () => {
 		);
 		expect(aborts.count).toBe(1);
 		expect(guard.abortTriggered).toBe(true);
+	});
+
+	test("does not abort on a no-op identical replacement preview error", () => {
+		const { guard, aborts } = createGuard(true);
+		guard.maybeAbort(
+			previewEvent(false, [{ path: "src/unchanged.ts", error: "No changes would be made to src/unchanged.ts." }]),
+		);
+		expect(aborts.count).toBe(0);
+		expect(guard.abortTriggered).toBe(false);
+	});
+
+	test("carries tool-scoped diagnostic through abort reason on patch preview failure", () => {
+		const { guard, aborts } = createGuard(true);
+		guard.maybeAbort(previewEvent(false, [{ path: "src/broken.ts", error: "Line 99 does not exist" }]));
+		expect(aborts.count).toBe(1);
+		expect(guard.abortTriggered).toBe(true);
+		expect(aborts.reason).toBeDefined();
+		const reason = aborts.reason as { toolCallMessages?: Record<string, string> };
+		expect(reason.toolCallMessages?.["call-edit-1"]).toContain("Line 99 does not exist");
 	});
 
 	test("does not abort for transient streaming errors", () => {

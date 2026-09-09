@@ -1,4 +1,10 @@
-import type { Agent, AgentEvent, AgentMessage, AgentTurnEndContext } from "@oh-my-pi/pi-agent-core";
+import {
+	type Agent,
+	type AgentEvent,
+	type AgentMessage,
+	type AgentTurnEndContext,
+	createToolScopedAbortReason,
+} from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, AssistantMessageEvent, Model, ToolCall } from "@oh-my-pi/pi-ai";
 import { GeminiHeaderRunDetector } from "@oh-my-pi/pi-ai/utils/thinking-loop";
 import { type RepeatedToolCallDetection, ToolCallLoopGuard } from "@oh-my-pi/pi-ai/utils/tool-call-loop-guard";
@@ -109,7 +115,8 @@ export class StreamingEditGuard {
 				typeof file.path === "string" &&
 				"error" in file &&
 				typeof file.error === "string" &&
-				file.error.length > 0,
+				file.error.length > 0 &&
+				!file.error.startsWith("No changes would be made"),
 		);
 		if (failed) this.#abortPatch(event.toolCallId, failed.path, failed.error);
 	}
@@ -158,7 +165,14 @@ export class StreamingEditGuard {
 	#abortPatch(toolCallId: string, filePath: string, error: string): void {
 		this.#abortTriggered = true;
 		logger.warn("Streaming edit aborted due to patch preview failure", { toolCallId, path: filePath, error });
-		this.#host.agent.abort();
+		const diagnostic = `Streaming edit preview failed for ${filePath}: ${error}`;
+		this.#host.agent.abort(
+			createToolScopedAbortReason(
+				"Streaming edit preview failed",
+				{ [toolCallId]: diagnostic },
+				"Streaming edit preview failed",
+			),
+		);
 	}
 }
 
