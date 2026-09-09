@@ -48,6 +48,7 @@ interface Harness {
 	handledEvents: unknown[];
 	setSessionCalls: Array<[AgentSession, string | undefined]>;
 	reloadTodoSessions: AgentSession[];
+	pendingDisplayTargets: AgentSession[];
 	counts: {
 		clearTransientSessionUi: () => number;
 		resetTranscriptAnchors: () => number;
@@ -61,6 +62,7 @@ function makeHarness(options: { renderInitialMessages?: () => void | Promise<voi
 	const handledEvents: unknown[] = [];
 	const setSessionCalls: Array<[AgentSession, string | undefined]> = [];
 	const reloadTodoSessions: AgentSession[] = [];
+	const pendingDisplayTargets: AgentSession[] = [];
 	let clearTransientSessionUi = 0;
 	let resetTranscriptAnchors = 0;
 	let renderInitialMessages = 0;
@@ -95,6 +97,10 @@ function makeHarness(options: { renderInitialMessages?: () => void | Promise<voi
 		reloadTodos: async (source?: AgentSession) => {
 			reloadTodoSessions.push(source ?? main.session);
 		},
+		updatePendingMessagesDisplay: () => {
+			// Mirror the real method, which rebuilds from viewSession (target ?? main).
+			pendingDisplayTargets.push(controller.target ?? main.session);
+		},
 		updateEditorBorderColor() {},
 		ui: { requestRender() {} },
 		showStatus() {},
@@ -113,6 +119,7 @@ function makeHarness(options: { renderInitialMessages?: () => void | Promise<voi
 		handledEvents,
 		setSessionCalls,
 		reloadTodoSessions,
+		pendingDisplayTargets,
 		counts: {
 			clearTransientSessionUi: () => clearTransientSessionUi,
 			resetTranscriptAnchors: () => resetTranscriptAnchors,
@@ -170,6 +177,23 @@ describe("SessionFocusController", () => {
 		expect(h.controller.focusedAgentId).toBeUndefined();
 		expect(h.setSessionCalls.at(-1)).toEqual([h.main.session, undefined]);
 		expect(h.reloadTodoSessions).toEqual([worker.session, h.main.session]);
+	});
+
+	it("re-derives the pending steering/follow-up block on both focus directions so it can't stay blank after focus (#11379)", async () => {
+		// clearTransientSessionUi() disposes pendingMessagesContainer on every attach.
+		// The queue survives, but nothing repainted it, so returning from a focused
+		// agent left the steering block permanently blank. #attach() must re-derive it
+		// from viewSession in both directions: main's queue on unfocus, the subagent's
+		// own queue on focus.
+		const h = makeHarness();
+		const worker = makeSessionStub();
+		registerSub(h.registry, "Worker", worker.session, MAIN_AGENT_ID);
+
+		await h.controller.focusAgent("Worker");
+		expect(h.pendingDisplayTargets).toEqual([worker.session]);
+
+		await h.controller.unfocus();
+		expect(h.pendingDisplayTargets).toEqual([worker.session, h.main.session]);
 	});
 
 	it("does not let a superseded focus attachment restore the worker todo HUD after unfocusing", async () => {
