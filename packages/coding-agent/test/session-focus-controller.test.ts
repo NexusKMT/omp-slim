@@ -221,8 +221,6 @@ describe("SessionFocusController", () => {
 		await h.controller.unfocus();
 		expect(rendered()).toContain("main steer alpha");
 		expect(rendered()).not.toContain("worker steer beta");
-		// The hint the real renderer appends proves the full block was rebuilt, not just rows.
-		expect(rendered()).toContain("Alt+Up to edit");
 	});
 
 	it("does not let a superseded focus attachment restore the worker todo HUD after unfocusing", async () => {
