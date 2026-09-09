@@ -6,6 +6,7 @@
 
 - Read error and preview rendering now sanitizes tabs and Windows-style CRLF (e.g. ssh host-key failures, tab-indented fetched content) so raw output can no longer tear the result frame.
 - Unset `tiny` model roles now honor the configured `@smol` fallback in direct execution and the `/models` Roles view ([#11311](https://github.com/can1357/oh-my-pi/issues/11311)).
+- Codex turns interrupted before terminal completion now auto-continue after resolved tool calls instead of stopping ([#11349](https://github.com/can1357/oh-my-pi/issues/11349)).
 ### Added
 
 - Added opt-in experimental notes-backed context windows with persistent branch-local notes, searchable original session history, retained latest user requests, and a model-callable rollover tool, including in Code Mode.
@@ -65,6 +66,7 @@
 
 - Ranged reads of text without bracket characters skip unnecessary lexical context scanning.
 - Muse Code sessions send a compact hashline edit description (~3 KB less per request); all other models keep the full prompt.
+- Transcript usage row now shows the prompt-to-yield time as a bare delta, keeping the clock icon for time to first token only.
 
 ### Fixed
 
