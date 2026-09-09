@@ -789,13 +789,15 @@ describe("InteractiveMode vibe mode toggle", () => {
 		expect(session.getVibeModeState()).toBeUndefined();
 	});
 
-	it("holds a concurrent /vibe prompt until activation finishes", async () => {
+	it("preserves every prompt when a concurrent /vibe joins activation", async () => {
 		const gate = Promise.withResolvers<void>();
 		vi.spyOn(session, "activateVibeTools").mockImplementation(() => gate.promise);
-		const dispatched: string[] = [];
-		mode.onInputCallback = input => {
-			dispatched.push(input.text);
-		};
+		const promptSpy = vi.spyOn(session, "prompt").mockResolvedValue(true);
+		// Real one-shot waiter, like the main loop installs while idle: the
+		// first dispatch consumes it, so a reusable stub would hide the loss.
+		const received: string[] = [];
+		void mode.getUserInput().then(input => received.push(input.text));
+		for (let index = 0; index < 5; index++) await Promise.resolve();
 
 		// First /vibe <prompt> parks on tool activation with vibe not yet enabled.
 		const first = mode.handleVibeModeCommand("first prompt");
@@ -804,15 +806,19 @@ describe("InteractiveMode vibe mode toggle", () => {
 
 		// A second submit while activation is in flight (the editor fires
 		// onSubmit without awaiting the first handler) must wait for vibe
-		// instead of dispatching its prompt on the stale toolset.
+		// instead of dispatching on the stale toolset — and must not lose its
+		// prompt to the consumed waiter.
 		const second = mode.handleVibeModeCommand("second prompt");
 		for (let index = 0; index < 5; index++) await Promise.resolve();
-		expect(dispatched).toHaveLength(0);
+		expect(received).toHaveLength(0);
+		expect(promptSpy).not.toHaveBeenCalled();
 
 		gate.resolve();
 		expect(await first).toBe(true);
 		expect(await second).toBe(true);
 		expect(mode.vibeModeEnabled).toBe(true);
-		expect(dispatched).toEqual(["first prompt", "second prompt"]);
+		expect(received).toEqual(["first prompt"]);
+		expect(promptSpy).toHaveBeenCalledTimes(1);
+		expect(promptSpy).toHaveBeenCalledWith("second prompt", { streamingBehavior: "steer", images: undefined });
 	});
 });

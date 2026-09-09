@@ -4218,7 +4218,17 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt, ...input }, { preserveDraft: true }));
 			return true;
 		}
-		return false;
+		// No input waiter: a concurrent /vibe consumed the one-shot waiter, or
+		// the main loop is between turns. Steer directly instead of silently
+		// swallowing the prompt — the same fallback the normal submit path uses
+		// when its waiter is gone.
+		const images = input?.images?.length ? input.images : undefined;
+		await this.withLocalSubmission(
+			initialPrompt,
+			() => this.session.prompt(initialPrompt, { streamingBehavior: "steer", images }),
+			{ imageCount: images?.length ?? 0 },
+		);
+		return true;
 	}
 
 	async #enterVibeMode(options?: { persistModeChange?: boolean; previousTools?: string[] }): Promise<void> {
