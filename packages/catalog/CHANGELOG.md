@@ -5,6 +5,7 @@
 ### Added
 
 - Added Command Code as a built-in provider with API-key login, live model discovery, native OpenAI/Anthropic-compatible routing, cache-aware token usage, and TTFT metrics.
+- Added per-model Provider API pricing for all 67 Command Code catalog models (cost-patch rules in `providers/commandcode.kdl`), including Qwen 3.7 Plus/Flash and Grok 4.6 long-context tiers; discovery previously reported zero cost for every model.
 - Updated Fire Pass (`firepass`) login validation probe to `accounts/fireworks/routers/glm-5p2-fast` and bundled `glm-5.2-fast` and `kimi-k3-fast` models in place of decommissioned `kimi-k2.6-turbo` ([#10859](https://github.com/can1357/oh-my-pi/pull/10859) by [@olegpulatov](https://github.com/olegpulatov)).
 
 ## [18.1.14] - 2026-09-07

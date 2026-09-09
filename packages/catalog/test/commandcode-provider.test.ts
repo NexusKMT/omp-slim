@@ -182,4 +182,51 @@ describe("Command Code provider support", () => {
 			instructions: "Create or copy a Provider API key from Command Code Studio",
 		});
 	});
+
+	test("prices live-discovered models from the Command Code rate card", async () => {
+		const fetchMock: FetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+			expect(init?.method).toBe("GET");
+			return Response.json({
+				data: [
+					{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", context_length: 1_000_000 },
+					{ id: "Qwen/Qwen3.7-Flash", name: "Qwen 3.7 Flash", context_length: 1_000_000 },
+					{ id: "xai/grok-4.6", name: "Grok 4.6", context_length: 500_000 },
+					{ id: "poolside/laguna-s-2.1-free", name: "Laguna S 2.1", context_length: 256_000 },
+				],
+			});
+		});
+		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
+		const specs = await options.fetchDynamicModels?.();
+		const models = (specs ?? []).map(spec => buildModel(spec as ModelSpec<Api>));
+
+		expect(models.find(model => model.id === "claude-sonnet-4-6")).toMatchObject({
+			cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+		});
+		// Qwen 3.7 Flash crosses its 32K tier: request-wide rates apply from
+		// input + cacheRead + cacheWrite, so cache reads alone can cross it.
+		expect(models.find(model => model.id === "Qwen/Qwen3.7-Flash")).toMatchObject({
+			cost: {
+				input: 0.03,
+				output: 0.13,
+				cacheRead: 0.006,
+				cacheWrite: 0.038,
+				longContext: { inputThreshold: 32_000, input: 0.1, output: 0.4, cacheRead: 0.02, cacheWrite: 0.125 },
+			},
+		});
+		// Grok 4.6's whole-request 2x tier overrides the xai class multiplier
+		// rule; resolution throwing here means the priority tie regressed.
+		expect(models.find(model => model.id === "xai/grok-4.6")).toMatchObject({
+			cost: {
+				input: 2,
+				output: 6,
+				cacheRead: 0.5,
+				cacheWrite: 0,
+				longContext: { inputThreshold: 200_000, input: 4, output: 12, cacheRead: 1, cacheWrite: 0 },
+			},
+		});
+		// Documented-free model keeps the zero discovery default.
+		expect(models.find(model => model.id === "poolside/laguna-s-2.1-free")).toMatchObject({
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		});
+	});
 });
