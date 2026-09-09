@@ -31,6 +31,7 @@ import {
 	mergeIsolatedChanges,
 	persistNestedPatches,
 	prepareIsolationContext,
+	renderIsolationSummary,
 	runIsolatedSubprocess,
 } from "./isolation-runner";
 import { generateTaskName } from "./name-generator";
@@ -549,37 +550,20 @@ async function isolationRecoveryHint(result: SingleResult, artifactsDir: string)
 }
 
 /**
- * One line per on-disk artifact the runner wrote for `result`: the root patch
- * when it holds changes, and each nested-repo patch file. Empty when nothing
- * was written.
- */
-function describeCapturedArtifacts(result: SingleResult): string {
-	const lines: string[] = [];
-	if (result.patchPath && result.hasRootChanges !== false) lines.push(`\n- patch: \`${result.patchPath}\``);
-	for (const nestedPath of result.nestedPatchPaths ?? []) lines.push(`\n- nested repository patch: \`${nestedPath}\``);
-	return lines.join("");
-}
-
-/**
  * Summary for an isolated run whose changes are captured but deliberately not
  * applied (`task.isolation.apply=false`). Every captured artifact is named:
  * the root patch only when it holds changes, and each nested-repo patch file,
  * so the parent knows exactly where the work lives.
  */
 function describeCapturedChanges(result: SingleResult): string {
-	const nestedPaths = result.nestedPatchPaths ?? [];
-	const nestedCount = nestedPaths.length || (result.nestedPatches?.length ?? 0);
-	const nestedList = nestedPaths.map(p => `\n- nested repository patch: \`${p}\``).join("");
-	if (result.branchName) {
-		return `\n\nIsolation: changes captured on branch \`${result.branchName}\` (apply=false). Not merged.${nestedList}`;
-	}
-	if (result.patchPath && result.hasRootChanges !== false) {
-		return `\n\nIsolation: changes captured at \`${result.patchPath}\` (apply=false). Not applied.${nestedList}`;
-	}
-	if (nestedCount > 0) {
-		return `\n\nIsolation: changes captured for ${nestedCount} nested ${nestedCount === 1 ? "repository" : "repositories"} (apply=false). Not applied.${nestedList}`;
-	}
-	return "\n\nIsolation: no changes captured.";
+	const nestedPatchPaths = result.nestedPatchPaths ?? [];
+	return renderIsolationSummary({
+		kind: "captured",
+		branchName: result.branchName,
+		rootPatchPath: result.hasRootChanges === false ? undefined : result.patchPath,
+		nestedCount: nestedPatchPaths.length || (result.nestedPatches?.length ?? 0),
+		nestedPatchPaths,
+	});
 }
 
 function attachStructuredOutputMetadata(result: SingleResult, schema: StructuredSubagentSchemaResolution): void {
@@ -699,7 +683,12 @@ export async function runStructuredSubagent(request: StructuredSubagentRequest):
 			// The agent finished but the runner could not capture, persist, or
 			// commit its changes. `result.error` names the recovery route (retained
 			// workspace, rescued branch); it is the parent's only way to find it.
-			mergeSummary = `\n\n<system-notification>Isolation: ${result.error}</system-notification>${describeCapturedArtifacts(result)}`;
+			mergeSummary = renderIsolationSummary({
+				kind: "capture-error",
+				error: result.error,
+				rootPatchPath: result.hasRootChanges === false ? undefined : result.patchPath,
+				nestedPatchPaths: result.nestedPatchPaths ?? [],
+			});
 		} else if (policy.isIsolated && isolationContext && !policy.applyChanges) {
 			mergeSummary = describeCapturedChanges(result);
 		}

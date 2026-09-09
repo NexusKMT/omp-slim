@@ -652,6 +652,28 @@ describe("mergeIsolatedChanges", () => {
 		expect(await git(repoRoot, "ls-files", "-u", "--", "foo.txt")).toBe("");
 	});
 
+	it("names the persisted nested patches when the root patch cannot be applied", async () => {
+		const { repoRoot, patchPath } = await seedFooRepo("other\n");
+		const nestedPatchPath = "/artifacts/NestedOnly.nested-0-inner.patch";
+
+		const outcome = await mergeIsolatedChanges({
+			repoRoot,
+			mergeMode: "patch",
+			result: result({
+				patchPath,
+				nestedPatches: [{ relativePath: "inner", patch: "diff --git a/b.txt b/b.txt\n" }],
+				nestedPatchPaths: [nestedPatchPath],
+			}),
+		});
+
+		// Nested apply is skipped after a root failure, so the files are the
+		// parent's only route to that work — the notification must point at them.
+		expect(outcome.changesApplied).toBe(false);
+		expect(outcome.summary).toContain("Patches were not applied");
+		expect(outcome.summary).toContain(`Patch artifact:\n- ${patchPath}`);
+		expect(outcome.summary).toContain(`Nested repository patches (not applied):\n- ${nestedPatchPath}`);
+	});
+
 	it("applies a fresh patch-mode diff when context matches", async () => {
 		const { repoRoot, patchPath } = await seedFooRepo("old\n");
 

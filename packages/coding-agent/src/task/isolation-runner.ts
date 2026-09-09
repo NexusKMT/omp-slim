@@ -21,6 +21,8 @@
 import * as path from "node:path";
 import type * as natives from "@oh-my-pi/pi-natives";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
+import { prompt } from "@oh-my-pi/pi-utils";
+import isolationSummaryTemplate from "../prompts/tools/isolation-summary.md" with { type: "text" };
 import { AgentRegistry } from "../registry/agent-registry";
 import type { ToolSession } from "../tools";
 import { generateCommitMessage } from "../utils/commit-message-generator";
@@ -45,6 +47,35 @@ import {
 } from "./worktree";
 
 type IsoBackendKind = natives.IsoBackendKind;
+
+/** Which isolation outcome `isolation-summary.md` should describe. */
+export type IsolationSummaryKind =
+	| "captured"
+	| "capture-error"
+	| "nested-apply-failed"
+	| "not-applied"
+	| "branch-merge-failed";
+
+/** Context for `isolation-summary.md`; unused fields are simply absent. */
+export interface IsolationSummaryContext {
+	kind: IsolationSummaryKind;
+	branchName?: string;
+	/** Root patch path, only when it holds changes. */
+	rootPatchPath?: string;
+	nestedCount?: number;
+	nestedPatchPaths?: string[];
+	error?: string;
+	conflict?: string;
+}
+
+/**
+ * Render one isolation outcome as the model-facing suffix appended to a task
+ * result. Always starts with a blank line so it separates from the output it
+ * follows.
+ */
+export function renderIsolationSummary(context: IsolationSummaryContext): string {
+	return `\n\n${prompt.render(isolationSummaryTemplate, { ...context })}`;
+}
 
 /** Record artifact locations for `agent://` and mark the result as an isolated run. */
 function rememberAgentArtifacts(result: SingleResult): SingleResult {
@@ -451,8 +482,14 @@ export async function mergeIsolatedChanges(opts: IsolationMergeOptions): Promise
 			if (changesApplied) {
 				summary = hadAnyChanges ? `\n\nMerged branch: ${result.branchName}` : "\n\nNo changes to apply.";
 			} else {
-				const conflictPart = mergeResult.conflict ? `\nConflict: ${mergeResult.conflict}` : "";
-				summary = `\n\n<system-notification>Branch merge failed: ${result.branchName}.${conflictPart}\nThe unmerged branch remains for manual resolution.</system-notification>`;
+				// The nested patches are skipped when the branch did not merge; name
+				// their files so the parent can recover them alongside the branch.
+				summary = renderIsolationSummary({
+					kind: "branch-merge-failed",
+					branchName: result.branchName,
+					conflict: mergeResult.conflict,
+					nestedPatchPaths: result.nestedPatchPaths,
+				});
 			}
 			if (mergeResult.stashConflict) {
 				summary += `\n\n<system-notification>${mergeResult.stashConflict}</system-notification>`;
@@ -516,10 +553,13 @@ export async function mergeIsolatedChanges(opts: IsolationMergeOptions): Promise
 		if (changesApplied) {
 			summary = hadAnyChanges ? "\n\nApplied patches: yes" : "\n\nNo changes to apply.";
 		} else {
-			const notification =
-				"<system-notification>Patches were not applied and must be handled manually.</system-notification>";
-			const patchList = result.patchPath ? `\n\nPatch artifact:\n- ${result.patchPath}` : "";
-			summary = `\n\n${notification}${patchList}`;
+			// Nested apply is skipped when the root patch did not apply; the
+			// persisted nested patches are the parent's only pointer to that work.
+			summary = renderIsolationSummary({
+				kind: "not-applied",
+				rootPatchPath: result.patchPath,
+				nestedPatchPaths: result.nestedPatchPaths,
+			});
 		}
 		return { summary, changesApplied, hadAnyChanges, mergedBranchForNestedPatches: false };
 	} catch (mergeErr) {
@@ -572,10 +612,10 @@ export async function applyEligibleNestedPatches(opts: NestedPatchApplyOptions):
 	} catch (applyErr) {
 		// Nested patch failures are non-fatal to the parent merge, but the patch
 		// files are the only surviving copy of that work — name them.
-		const msg = applyErr instanceof Error ? applyErr.message : String(applyErr);
-		const preserved = result.nestedPatchPaths?.length
-			? `\nCaptured nested patches preserved at:\n${result.nestedPatchPaths.map(p => `- ${p}`).join("\n")}`
-			: "";
-		return `\n\n<system-notification>Some nested repository patches failed to apply: ${msg}${preserved}</system-notification>`;
+		return renderIsolationSummary({
+			kind: "nested-apply-failed",
+			error: applyErr instanceof Error ? applyErr.message : String(applyErr),
+			nestedPatchPaths: result.nestedPatchPaths,
+		});
 	}
 }
