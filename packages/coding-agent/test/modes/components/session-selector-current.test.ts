@@ -136,4 +136,36 @@ describe("SessionSelectorComponent current session marker", () => {
 		expect(sessionSection(rendered, "Older session")).toContain(`${cursor} Older session`);
 		expect(sessionSection(rendered, "Newer session")).not.toContain(`${cursor} Newer session`);
 	});
+
+	it("drops a deleted live session from the cached all-projects list", async () => {
+		const alpha = createSession("alpha", "Alpha", "2024-01-03T00:00:00Z");
+		const live = createSession("live", "Charlie live", "2024-01-02T00:00:00Z");
+		const other = createSession("other", "Other project", "2024-01-01T00:00:00Z");
+		let currentPath: string | undefined = live.path;
+		const selector = new SessionSelectorComponent(
+			[alpha, live],
+			() => {},
+			() => {},
+			() => {},
+			{
+				getTerminalRows: () => 100,
+				currentSessionPath: () => currentPath,
+				allSessions: [alpha, live, other],
+				onDelete: async () => {
+					currentPath = "/work/fresh.jsonl";
+					return true;
+				},
+			},
+		);
+		selector.handleInput("\x1b[3~");
+		selector.handleInput("\n");
+		await Promise.resolve();
+		selector.handleInput("\t");
+		const rendered = stripAnsi(selector.render(120).join("\n"));
+		expect(rendered).toContain("(all projects)");
+		expect(rendered).toContain("Other project");
+		expect(rendered).not.toContain("Charlie live");
+		expect(sessionSection(rendered, "Alpha")).not.toContain("current");
+		expect(sessionSection(rendered, "Other project")).not.toContain("current");
+	});
 });

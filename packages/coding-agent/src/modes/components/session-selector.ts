@@ -282,7 +282,7 @@ class SessionList implements Component {
 	#allSessions: SessionInfo[];
 	#showCwd: boolean;
 	#pinnedIds: ReadonlySet<string>;
-	#currentSessionPath: string | undefined;
+	readonly #getCurrentSessionPath: () => string | undefined;
 	readonly #historyMatcher?: SessionHistoryMatcher;
 	#historyMergeTimer: NodeJS.Timeout | undefined;
 	/** Re-render hook for async list updates (fuzzy scan chunks, history merge). */
@@ -316,13 +316,14 @@ class SessionList implements Component {
 		historyMatcher?: SessionHistoryMatcher,
 		getTerminalRows: () => number = () => 24,
 		pinnedIds: ReadonlySet<string> = new Set(),
-		currentSessionPath?: string,
+		currentSessionPath?: string | (() => string | undefined),
 	) {
 		this.#getTerminalRows = getTerminalRows;
 		this.#allSessions = sessions;
 		this.#showCwd = showCwd;
 		this.#pinnedIds = pinnedIds;
-		this.#currentSessionPath = currentSessionPath;
+		this.#getCurrentSessionPath =
+			typeof currentSessionPath === "function" ? currentSessionPath : () => currentSessionPath;
 		this.#historyMatcher = historyMatcher;
 		this.#filteredSessions = sessions;
 		this.#selectCurrentSession();
@@ -362,8 +363,9 @@ class SessionList implements Component {
 
 	/** Focus the live session when it is in the visible list. */
 	#selectCurrentSession(): void {
-		if (!this.#currentSessionPath) return;
-		const index = this.#filteredSessions.findIndex(s => s.path === this.#currentSessionPath);
+		const currentPath = this.#getCurrentSessionPath();
+		if (!currentPath) return;
+		const index = this.#filteredSessions.findIndex(s => s.path === currentPath);
 		if (index >= 0) this.#selectedIndex = index;
 	}
 
@@ -616,6 +618,7 @@ class SessionList implements Component {
 		const sessionRowIndex: number[] = [];
 		const overflow = startIndex > 0 || endIndex < filtered.length;
 		const rowWidth = Math.max(0, width - (overflow ? 1 : 0));
+		const currentPath = this.#getCurrentSessionPath();
 		for (let i = startIndex; i < endIndex; i++) {
 			const blockStart = sessionLines.length;
 			const session = this.#filteredSessions[i];
@@ -659,7 +662,7 @@ class SessionList implements Component {
 			const dot = dim(theme.sep.dot);
 			const modified = formatDate(session.modified);
 			let metadata = `  ${dim(modified)} ${dot} ${dim(formatBytes(session.size))}`;
-			if (this.#currentSessionPath !== undefined && session.path === this.#currentSessionPath) {
+			if (currentPath !== undefined && session.path === currentPath) {
 				metadata += ` ${dot} ${theme.fg("accent", "current")}`;
 			}
 			const status = formatSessionStatus(session.status);
@@ -808,8 +811,8 @@ export interface SessionSelectorOptions {
 	fillHeight?: boolean;
 	/** Set of pinned session ids to display with a pin indicator. */
 	pinnedIds?: ReadonlySet<string>;
-	/** Path of the live session; marked `current` and focused on open. */
-	currentSessionPath?: string;
+	/** Path of the live session, or a getter so detach/newSession stays accurate. */
+	currentSessionPath?: string | (() => string | undefined);
 }
 
 /**
@@ -1006,6 +1009,10 @@ export class SessionSelectorComponent extends OverlayPanel {
 						const deleted = await this.#onDelete(session);
 						if (deleted) {
 							this.#sessionList.removeSession(session.path);
+							this.#folderSessions = this.#folderSessions.filter(s => s.path !== session.path);
+							if (this.#globalSessions) {
+								this.#globalSessions = this.#globalSessions.filter(s => s.path !== session.path);
+							}
 						}
 					} catch (err) {
 						this.#showError(err instanceof Error ? err.message : String(err));
