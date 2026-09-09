@@ -27,14 +27,21 @@ function createSession(id: string, title: string, modified: string): SessionInfo
 }
 
 function renderPlain(sessions: SessionInfo[], currentSessionPath?: string): string {
-	const selector = new SessionSelectorComponent(sessions, () => {}, () => {}, () => {}, {
-		getTerminalRows: () => 100,
-		currentSessionPath,
-	});
-	return selector
-		.render(120)
-		.join("\n")
-		.replace(/\x1b\[[0-9;]*m/g, "");
+	const selector = new SessionSelectorComponent(
+		sessions,
+		() => {},
+		() => {},
+		() => {},
+		{
+			getTerminalRows: () => 100,
+			currentSessionPath,
+		},
+	);
+	return stripAnsi(selector.render(120).join("\n"));
+}
+
+function stripAnsi(text: string): string {
+	return text.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
 function sessionSection(rendered: string, title: string): string {
@@ -65,5 +72,26 @@ describe("SessionSelectorComponent current session marker", () => {
 		const cursor = theme.nav.cursor;
 		expect(sessionSection(rendered, "Older session")).toContain(`${cursor} Older session`);
 		expect(sessionSection(rendered, "Newer session")).not.toContain(`${cursor} Newer session`);
+	});
+
+	it("resets focus to the top search match when the live session is excluded", () => {
+		const work = createSession("work", "Alpha work", "2024-01-03T00:00:00Z");
+		const live = createSession("live", "Beta live", "2024-01-02T00:00:00Z");
+		const other = createSession("other", "Alpha other", "2024-01-01T00:00:00Z");
+		const selector = new SessionSelectorComponent(
+			[work, live, other],
+			() => {},
+			() => {},
+			() => {},
+			{
+				getTerminalRows: () => 100,
+				currentSessionPath: live.path,
+			},
+		);
+		for (const ch of "alpha") selector.handleInput(ch);
+		const rendered = stripAnsi(selector.render(120).join("\n"));
+		const cursor = theme.nav.cursor;
+		expect(sessionSection(rendered, "Alpha work")).toContain(`${cursor} Alpha work`);
+		expect(sessionSection(rendered, "Alpha other")).not.toContain(`${cursor} Alpha other`);
 	});
 });

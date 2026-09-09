@@ -390,6 +390,7 @@ class SessionList implements Component {
 		if (tokens.length === 0) {
 			this.#filteredSessions = this.#allSessions;
 			this.#selectedIndex = Math.min(this.#selectedIndex, Math.max(0, this.#filteredSessions.length - 1));
+			this.#selectCurrentSession();
 			this.#scheduleHistoryMerge(query);
 			return;
 		}
@@ -415,6 +416,11 @@ class SessionList implements Component {
 		// and spill the remainder into async chunks.
 		this.#scanFuzzySlice(this.#scanGeneration, tokens, rest, 0, FUZZY_SCAN_INLINE_COUNT);
 		this.#composeFiltered();
+		// Query change rebuilds ranking; keep the numeric index only for async
+		// compose (fuzzy chunks / history merge) so an arrow selection survives
+		// those. A live-session index > 0 would otherwise clamp onto a lower
+		// match instead of the top-ranked hit.
+		this.#selectedIndex = 0;
 		this.#scheduleHistoryMerge(query);
 	}
 
