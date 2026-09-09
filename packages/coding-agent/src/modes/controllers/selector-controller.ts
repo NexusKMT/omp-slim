@@ -1819,6 +1819,7 @@ export class SelectorController {
 				historyMatcher,
 				loadAllSessions: () => SessionManager.listAll(),
 				pinnedIds,
+				currentSessionPath: this.ctx.sessionManager.getSessionFile(),
 			};
 		}
 

@@ -282,6 +282,7 @@ class SessionList implements Component {
 	#allSessions: SessionInfo[];
 	#showCwd: boolean;
 	#pinnedIds: ReadonlySet<string>;
+	#currentSessionPath: string | undefined;
 	readonly #historyMatcher?: SessionHistoryMatcher;
 	#historyMergeTimer: NodeJS.Timeout | undefined;
 	/** Re-render hook for async list updates (fuzzy scan chunks, history merge). */
@@ -313,13 +314,16 @@ class SessionList implements Component {
 		historyMatcher?: SessionHistoryMatcher,
 		getTerminalRows: () => number = () => 24,
 		pinnedIds: ReadonlySet<string> = new Set(),
+		currentSessionPath?: string,
 	) {
 		this.#getTerminalRows = getTerminalRows;
 		this.#allSessions = sessions;
 		this.#showCwd = showCwd;
 		this.#pinnedIds = pinnedIds;
+		this.#currentSessionPath = currentSessionPath;
 		this.#historyMatcher = historyMatcher;
 		this.#filteredSessions = sessions;
+		this.#selectCurrentSession();
 		this.#searchInput = new Input();
 
 		// Handle Enter in search input - select current item
@@ -354,6 +358,13 @@ class SessionList implements Component {
 		return Math.max(2, Math.floor(this.#lineBudget() / 4));
 	}
 
+	/** Focus the live session when it is in the visible list. */
+	#selectCurrentSession(): void {
+		if (!this.#currentSessionPath) return;
+		const index = this.#filteredSessions.findIndex(s => s.path === this.#currentSessionPath);
+		if (index >= 0) this.#selectedIndex = index;
+	}
+
 	/** Replace the visible dataset, e.g. when toggling folder/all-projects scope. */
 	setSessions(sessions: SessionInfo[], showCwd: boolean, pinnedIds?: ReadonlySet<string>): void {
 		this.#allSessions = sessions;
@@ -361,6 +372,7 @@ class SessionList implements Component {
 		if (pinnedIds !== undefined) this.#pinnedIds = pinnedIds;
 		this.#selectedIndex = 0;
 		this.#filterSessions(this.#searchInput.getValue());
+		this.#selectCurrentSession();
 	}
 
 	#filterSessions(query: string): void {
@@ -629,13 +641,17 @@ class SessionList implements Component {
 				sessionLines.push(messageLine);
 			}
 
-			// Metadata line: date + file size + lifecycle status (+ project dir in
-			// all-projects scope). The status segment carries its own color, so each
-			// segment is dimmed individually rather than wrapping the whole line.
+			// Metadata line: date + file size + current marker + lifecycle status
+			// (+ project dir in all-projects scope). The status segment carries
+			// its own color, so each segment is dimmed individually rather than
+			// wrapping the whole line.
 			const dim = (s: string) => theme.fg("dim", s);
 			const dot = dim(theme.sep.dot);
 			const modified = formatDate(session.modified);
 			let metadata = `  ${dim(modified)} ${dot} ${dim(formatBytes(session.size))}`;
+			if (this.#currentSessionPath !== undefined && session.path === this.#currentSessionPath) {
+				metadata += ` ${dot} ${theme.fg("accent", "current")}`;
+			}
 			const status = formatSessionStatus(session.status);
 			if (status) {
 				metadata += ` ${dot} ${status}`;
@@ -782,6 +798,8 @@ export interface SessionSelectorOptions {
 	fillHeight?: boolean;
 	/** Set of pinned session ids to display with a pin indicator. */
 	pinnedIds?: ReadonlySet<string>;
+	/** Path of the live session; marked `current` and focused on open. */
+	currentSessionPath?: string;
 }
 
 /**
@@ -852,6 +870,7 @@ export class SessionSelectorComponent extends OverlayPanel {
 			options.historyMatcher,
 			options.getTerminalRows,
 			options.pinnedIds,
+			options.currentSessionPath,
 		);
 		// Every exit path cancels the list's pending history merge, so a stale
 		// debounce timer can never run its SQLite lookup after the picker closed.
