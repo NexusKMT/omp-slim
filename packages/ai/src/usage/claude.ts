@@ -333,14 +333,17 @@ async function fetchUsagePayload(
 			const response = await ctx.fetch(url, { headers, signal });
 
 			if (!response.ok) {
-				const retryable = isRetryableStatus(response.status);
+				// Absence outranks the generic transient classification: 501 is a 5xx,
+				// but "not implemented" does not become implemented on replay.
+				const absent = ENDPOINT_ABSENT_STATUSES.has(response.status);
+				const retryable = !absent && isRetryableStatus(response.status);
 				ctx.logger?.warn("Claude usage fetch failed", {
 					status: response.status,
 					statusText: response.statusText,
 					attempt,
 					willRetry: retryable && attempt < MAX_ATTEMPTS - 1,
 				});
-				if (!retryable) return { payload: null, endpointAbsent: ENDPOINT_ABSENT_STATUSES.has(response.status) };
+				if (!retryable) return { payload: null, endpointAbsent: absent };
 				const retryAfter = response.headers.get("retry-after");
 				if (!(await waitBeforeRetry(attempt, retryAfter, signal, ctx.retryWait))) break;
 				continue;
