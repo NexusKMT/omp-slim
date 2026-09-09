@@ -18,7 +18,7 @@ import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/ex
 import { ChatTranscriptBuilder } from "@oh-my-pi/pi-coding-agent/modes/components/chat-transcript-builder";
 import { formatUsageRow } from "@oh-my-pi/pi-coding-agent/modes/components/usage-row";
 import { EventController } from "@oh-my-pi/pi-coding-agent/modes/controllers/event-controller";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -90,9 +90,11 @@ describe("formatUsageRow turn elapsed", () => {
 	});
 
 	it("renders the bare-delta prompt→yield time right after the timestamp", () => {
-		const row = formatUsageRow(assistantMessage().usage as Usage, REQUEST_DURATION_MS, undefined, PROMPT_AT, 60_000);
+		const row = formatUsageRow(assistantMessage().usage as Usage, REQUEST_DURATION_MS, 6_700, PROMPT_AT, 60_000);
 		expect(row.indexOf("2026-01-02 03:04:05")).toBeLessThan(row.indexOf(TURN_ELAPSED_LABEL));
 		expect(row).toContain(TURN_ELAPSED_LABEL);
+		expect(row).not.toContain(`${theme.icon.time}Δ`);
+		expect(row).toContain(`${theme.icon.time} 6.7s`);
 	});
 
 	it("omits the delta when no elapsed is supplied", () => {
