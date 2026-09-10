@@ -790,14 +790,26 @@ export class ExtensionUiController {
 		// Sanitize display copies for the guest wire (same degeneration as
 		// the local dialog). `selected` and results keep the ORIGINAL labels
 		// so both race winners echo identical correlation values.
-		const displayLabels = question.options.map(option => sanitizeCarriageReturns(option.label));
+		// Display labels must stay actionable: a sanitized label colliding
+		// with another option (`Retry\rnow`/`Retry now`) or a runtime
+		// sentinel (`Other (type your own)` et al.) would answer the wrong
+		// row, so colliding rows take a numeric suffix. The suffix is part of
+		// the echoed wire value and maps back to the original label below.
+		const takenLabels = new Set<string>([ASK_OTHER_OPTION, ASK_CHAT_OPTION, ASK_NEXT_OPTION]);
+		const displayLabels = question.options.map(option => {
+			const base = sanitizeCarriageReturns(option.label);
+			let candidate = base;
+			for (let suffix = 2; takenLabels.has(candidate); suffix++) candidate = `${base} (${suffix})`;
+			takenLabels.add(candidate);
+			return candidate;
+		});
 		const originalByDisplay = new Map<string, string>();
 		question.options.forEach((option, index) => {
-			if (!originalByDisplay.has(displayLabels[index]!)) originalByDisplay.set(displayLabels[index]!, option.label);
+			originalByDisplay.set(displayLabels[index]!, option.label);
 		});
-		// Map a guest answer (a sanitized display label) back to the original
-		// correlation value; unknown values pass through and are ignored at
-		// result build, as before.
+		// Map a guest answer (a display label, suffix included) back to the
+		// original correlation value; unknown values pass through and are
+		// ignored at result build, as before.
 		const resolveGuestLabel = (value: string): string => originalByDisplay.get(value) ?? value;
 		const displayQuestion = sanitizeCarriageReturns(question.question);
 		const baseOptions: CollabUiSelectItem[] = question.options.map((option, index) =>
