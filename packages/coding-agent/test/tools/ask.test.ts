@@ -1864,4 +1864,48 @@ describe("AskTool carriage-return sanitization", () => {
 		expect(result.content[0].text).toContain("User selected: Abort   +  log");
 		expect(result.content[0].text).not.toContain("\r");
 	});
+	it("fails closed when sanitization collapses a label into a reserved runtime label", async () => {
+		const tool = new AskTool(createSession());
+		const askDialog = vi.fn(async () => undefined);
+		const context = createContext({ askDialog: askDialog as never });
+		// Raw args pass schema validation — no literal reserved label — but
+		// sanitizing `Other\r(type your own)` forms the exact custom-input
+		// sentinel, which would hijack the OTHER_OPTION branch and duplicate
+		// the rich dialog row.
+		const args = {
+			questions: [{ id: "q1", question: "Q?", options: [{ label: "Other\r(type your own)" }] }],
+		};
+		expect(tool.parameters(args) instanceof type.errors).toBe(false);
+		const result = await tool.execute("call-cr-reserved", args, undefined, undefined, context);
+		expect(askDialog).not.toHaveBeenCalled();
+		expect(result.content[0]?.type).toBe("text");
+		if (result.content[0]?.type !== "text") throw new Error("Expected text result");
+		expect(result.content[0].text).toContain("reserved runtime labels");
+		expect(result.content[0].text).toContain("Other (type your own)");
+		expect(result.content[0].text).not.toContain("\r");
+	});
+
+	it("sanitizes carriage returns in legacy question text and transcript question ids", async () => {
+		const theme = darkTheme;
+		const rendered = askToolRenderer.renderCall(
+			{
+				questions: [{ id: "q\r\r3a", question: "Q3\r\rA?", options: [{ label: "Alpha" }] }],
+			} as never,
+			{ expanded: true, isPartial: true },
+			theme!,
+		);
+		const text = stripAnsi(rendered.render(120).join("\n"));
+		expect(text).toContain("[q 3a]");
+		expect(text).toContain("Q3 A?");
+		expect(text).not.toContain("\r");
+
+		const legacy = askToolRenderer.renderCall(
+			{ question: "Idle\r\rloop?", options: [{ label: "Alpha" }] },
+			{ expanded: true, isPartial: false },
+			theme!,
+		);
+		const legacyText = stripAnsi(legacy.render(120).join("\n"));
+		expect(legacyText).toContain("Idle loop?");
+		expect(legacyText).not.toContain("\r");
+	});
 });

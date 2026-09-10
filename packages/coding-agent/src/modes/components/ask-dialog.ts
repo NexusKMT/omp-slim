@@ -379,7 +379,7 @@ function normalizeDialogQuestions(questions: ExtensionAskDialogQuestion[]): Exte
 			}
 		}
 		out.push({
-			id: typeof q.id === "string" ? q.id : "?",
+			id: typeof q.id === "string" ? sanitizeCarriageReturns(q.id) : "?",
 			question: typeof q.question === "string" ? sanitizeCarriageReturns(q.question) : "",
 			...(typeof q.header === "string" ? { header: sanitizeCarriageReturns(q.header) } : {}),
 			options,

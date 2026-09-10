@@ -863,6 +863,24 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 		// GLM via OpenRouter); sanitize before the dialog renders or the answer
 		// echoes back into session history.
 		params = sanitizeAskParams(params);
+		// Sanitizing `\r` runs can collapse a crafted label into a reserved
+		// runtime label (`Other\r(type your own)` → `Other (type your own)`),
+		// which would hijack the custom-input branch and duplicate the rich
+		// dialog row — fail closed like schema validation does.
+		const reservedCollision = params.questions
+			.flatMap(question => question.options)
+			.find(option => RESERVED_OPTION_LABELS[option.label] === true);
+		if (reservedCollision !== undefined) {
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: `Error: option labels must not collide with reserved runtime labels: ${reservedCollision.label}`,
+					},
+				],
+				details: {},
+			};
+		}
 
 		const extensionUi = context.ui;
 		const ui: UIContext = {
@@ -1169,6 +1187,7 @@ function sanitizeAskParams(params: AskParams): AskParams {
 		...params,
 		questions: params.questions.map(question => ({
 			...question,
+			id: sanitizeCarriageReturns(question.id),
 			question: sanitizeCarriageReturns(question.question),
 			...(question.header !== undefined ? { header: sanitizeCarriageReturns(question.header) } : {}),
 			options: question.options.map(option => ({
@@ -1200,7 +1219,7 @@ function normalizeRenderQuestions(raw: unknown): NonNullable<AskRenderArgs["ques
 		if (!entry || typeof entry !== "object") continue;
 		const q = entry as Partial<NonNullable<AskRenderArgs["questions"]>[number]>;
 		out.push({
-			id: typeof q.id === "string" ? q.id : "?",
+			id: typeof q.id === "string" ? sanitizeCarriageReturns(q.id) : "?",
 			question: typeof q.question === "string" ? sanitizeCarriageReturns(q.question) : "",
 			options: normalizeRenderOptions(q.options) ?? [],
 			multi: q.multi === true,
@@ -1346,7 +1365,7 @@ export const askToolRenderer = {
 			}));
 		}
 
-		const question = args.question;
+		const question = sanitizeCarriageReturns(args.question);
 		const meta: string[] = [];
 		if (args.multi) meta.push("multi");
 		const questionOptions = normalizeRenderOptions(args.options);

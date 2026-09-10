@@ -1667,4 +1667,27 @@ describe("AskDialogComponent", () => {
 		expect(rendered).toContain("idle  loop :");
 		expect(rendered).toContain('if  "done"  in  state');
 	});
+
+	it("sanitizes carriage returns in question ids used as tab labels", () => {
+		const component = new AskDialogComponent(
+			[
+				{
+					id: "q\r\r3a",
+					question: "Pick one?",
+					options: [{ label: "Alpha" }, { label: "Beta" }],
+				},
+				{
+					id: "q3b",
+					question: "Pick another?",
+					options: [{ label: "Gamma" }],
+				},
+			],
+			{ onSubmit: vi.fn(), onCancel: vi.fn(), onPrompt: vi.fn() },
+		);
+
+		const rendered = render(component);
+		expect(rendered).not.toContain("\r");
+		expect(rendered).toContain("q 3a");
+		expect(rendered).toContain("q3b");
+	});
 });
