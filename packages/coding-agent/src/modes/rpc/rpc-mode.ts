@@ -38,6 +38,7 @@ import { buildAvailableSlashCommands } from "../../slash-commands/available-comm
 import { defaultLoadModeForToolName } from "../../tools/essential-tools";
 import type { EventBus } from "../../utils/event-bus";
 import { calculateTokensPerSecond } from "../../utils/token-rate";
+import { formatPersistenceFailure } from "../persistence-failure";
 import { initializeExtensions } from "../runtime-init";
 import { isRpcHostToolResult, isRpcHostToolUpdate, RpcHostToolBridge } from "./host-tools";
 import { isRpcHostUriResult, RpcHostUriBridge } from "./host-uris";
@@ -766,6 +767,25 @@ export function requestRpcDialog<T>(
 	return promise;
 }
 /**
+ * A store that latched a failure is invisible to an RPC client: the TUI banner
+ * has no headless counterpart and `logger.error` never writes to stdio. Emit
+ * the existing `notice` event — already typed by `rpc-client` and documented in
+ * `docs/rpc.md`, so no new frame type is needed — and mirror it on stderr for
+ * hosts that do not render notices (issue #11493).
+ *
+ * @returns the unsubscribe function from `onPersistenceError`.
+ */
+export function registerRpcPersistenceSurface(
+	session: Pick<AgentSession, "emitNotice" | "sessionManager">,
+): () => void {
+	return session.sessionManager.onPersistenceError(error => {
+		const message = formatPersistenceFailure(error.message);
+		session.emitNotice("error", message, "session-persistence");
+		process.stderr.write(`${message}\n`);
+	});
+}
+
+/**
  * Run in RPC mode.
  * Listens for JSON commands on stdin, outputs events and responses on stdout.
  */
@@ -1051,6 +1071,8 @@ export async function runRpcMode(
 	session.subscribe(event => {
 		output(event);
 	});
+
+	registerRpcPersistenceSurface(session);
 
 	const getAvailableCommands = async () => buildAvailableSlashCommands(session);
 	const reloadPluginState = async () => {

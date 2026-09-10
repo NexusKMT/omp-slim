@@ -34,7 +34,12 @@ describe("print-mode error exit disposes the session before terminating", () => 
 			extensionRunner: undefined,
 			subscribe: () => {},
 			settings: { get: () => false },
-			sessionManager: { buildSessionContext: () => ({ messages: [] }), getEntries: () => [] },
+			sessionManager: {
+				buildSessionContext: () => ({ messages: [] }),
+				getEntries: () => [],
+				// Print mode subscribes to store failures (issue #11493).
+				onPersistenceError: () => () => {},
+			},
 			state: { messages: [errorMsg] },
 			getLastAssistantMessage: () => errorMsg,
 			prepareForHeadlessAdvisorDrain: () => {},

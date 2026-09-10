@@ -11,6 +11,7 @@ import { logger, sanitizeText } from "@oh-my-pi/pi-utils";
 import { type AgentSession, type AgentSessionEvent, SHUTDOWN_CONSOLIDATE_BUDGET_MS } from "../session/agent-session";
 import { isSilentAbort } from "../session/messages";
 import { flushTelemetryExport } from "../telemetry-export";
+import { formatPersistenceFailure } from "./persistence-failure";
 import { initializeExtensions } from "./runtime-init";
 
 /**
@@ -161,6 +162,16 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 		}
 	});
 
+	// A scripted run has no banner: consume the store's failure callback so lost
+	// durability reaches stderr instead of only the debug log, and remember that
+	// the transcript stopped being durable. The flag discriminates a store
+	// failure from any other dispose rejection below (issue #11493).
+	let persistenceFailure: Error | undefined;
+	session.sessionManager.onPersistenceError(error => {
+		persistenceFailure = error;
+		process.stderr.write(`${formatPersistenceFailure(error.message)}\n`);
+	});
+
 	let wroteTextWorkingIndicator = false;
 	const writeTextWorkingIndicator = (): void => {
 		if (mode !== "text" || wroteTextWorkingIndicator) return;
@@ -239,7 +250,19 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 	// Dispose before returning the status instead of hard-exiting ahead of it:
 	// the awaited `dispose()` runs the browser reaper (releaseTabsForOwner), so
 	// an OMP-owned Chromium cannot survive the exit (issue #5643).
-	await session.dispose({ mnemopiConsolidateTimeoutMs: SHUTDOWN_CONSOLIDATE_BUDGET_MS });
+	//
+	// `dispose()` rethrows a latched store failure from the manager's `close()`,
+	// which would otherwise escape as a raw fatal dump after a run that already
+	// produced its output. A store failure is reported above and folded into the
+	// exit code, so the caller reports success only when the transcript is
+	// durable; any other dispose rejection keeps its previous behaviour.
+	let durabilityFailure = false;
+	try {
+		await session.dispose({ mnemopiConsolidateTimeoutMs: SHUTDOWN_CONSOLIDATE_BUDGET_MS });
+	} catch (error) {
+		if (!persistenceFailure) throw error;
+		durabilityFailure = true;
+	}
 
 	// Text mode reports the terminal failure on stderr exactly as before: same
 	// line, same ordering after dispose, without terminating the process here.
@@ -252,5 +275,5 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 		}
 	}
 
-	return terminalFailure ? 1 : 0;
+	return terminalFailure || durabilityFailure ? 1 : 0;
 }
