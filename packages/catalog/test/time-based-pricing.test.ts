@@ -397,16 +397,19 @@ describe("pricing discovery and cache", () => {
 });
 
 describe("deepseek provider metadata corrections", () => {
-	// The bare alias is the one first-party Flash id upstream discovery leaves
-	// without limits, and the agent sizes its context budget from the resolved
-	// model: with a null window it skips over-context compaction entirely.
+	// The bundled bare alias predates the discovery metadata that carries its
+	// limits, and the agent sizes its context budget from the resolved model:
+	// with a null window it skips over-context compaction entirely. The manager
+	// takes spec-shaped rows and re-builds them, so the bundled row is cast here
+	// exactly as the other catalog tests do.
 	it("gives the bare Flash alias its documented limits through provider resolution", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-bare-alias-limits-"));
 		const bundled = getBundledModels("deepseek").find(model => model.id === "deepseek-flash");
 		if (!bundled) throw new Error("Expected a bundled deepseek-flash row");
+		const staticSpec = bundled as ModelSpec<"openai-completions">;
 		try {
 			const { models } = await resolveProviderModels<"openai-completions">(
-				{ providerId: "deepseek", staticModels: [bundled], cacheDbPath: path.join(tempDir, "models.db") },
+				{ providerId: "deepseek", staticModels: [staticSpec], cacheDbPath: path.join(tempDir, "models.db") },
 				"offline",
 			);
 			const resolved = models.find(model => model.id === "deepseek-flash");
