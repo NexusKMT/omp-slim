@@ -649,11 +649,14 @@ export class VimState {
 			}
 			case "D":
 			case "C": {
-				this.#takeCount();
+				// Like Vim, `D`/`C` take a count: `2D` deletes to the end of the next line, not just
+				// this one (`:h D` — "and [count]-1 more lines").
+				const span = this.#takeCount();
+				const last = Math.min(buf.cursorLine + span - 1, buf.lines.length - 1);
 				return this.#operate(
 					key === "C" ? "c" : "d",
 					{ line: buf.cursorLine, col: buf.cursorCol },
-					{ line: buf.cursorLine, col: line.length },
+					{ line: last, col: (buf.lines[last] ?? "").length },
 					false,
 				);
 			}

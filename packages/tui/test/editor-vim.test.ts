@@ -220,6 +220,22 @@ describe("Editor vim mode", () => {
 			expect(editor.getText()).toBe("new");
 		});
 
+		it("D and C honor a count across lines", () => {
+			const deleter = vimEditor("alfa beta\ngamma delta\nepsilon");
+			deleter.handleInput("w");
+			deleter.handleInput("2");
+			deleter.handleInput("D");
+			expect(deleter.getText()).toBe("alfa \nepsilon");
+
+			const changer = vimEditor("alfa beta\ngamma delta\nepsilon");
+			changer.handleInput("w");
+			changer.handleInput("2");
+			changer.handleInput("C");
+			expect(changer.vimMode).toBe("insert");
+			changer.handleInput("new");
+			expect(changer.getText()).toBe("alfa new\nepsilon");
+		});
+
 		it("dw deletes a word and dd deletes a line", () => {
 			const editor = vimEditor("alfa beta\nsecond line");
 			editor.handleInput("d");

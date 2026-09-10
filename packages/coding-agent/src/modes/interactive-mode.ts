@@ -3839,7 +3839,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		try {
 			await copyToClipboard(content);
 		} catch (error) {
-			this.showWarning(`Failed to copy selection: ${error instanceof Error ? error.message : String(error)}`);
+			// Best-effort: the yank already landed in the internal register, so `p` still puts it
+			// back. A per-yank warning would spam headless/SSH sessions on every `yy`.
+			logger.debug("Vim yank clipboard copy failed", {
+				error: error instanceof Error ? error.message : String(error),
+			});
 		}
 	}
 
