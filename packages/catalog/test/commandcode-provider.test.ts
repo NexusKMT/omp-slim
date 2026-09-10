@@ -5,7 +5,7 @@ import { getEnvApiKey, streamSimple } from "@oh-my-pi/pi-ai/stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { DEFAULT_MODEL_PER_PROVIDER, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import { commandCodeModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
-import type { Api, FetchImpl, ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
 
 const originalPrimaryKey = Bun.env.COMMAND_CODE_API_KEY;
 const originalLegacyKey = Bun.env.COMMANDCODE_API_KEY;
@@ -37,7 +37,7 @@ describe("Command Code provider support", () => {
 		});
 		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
 		const specs = await options.fetchDynamicModels?.();
-		const models = (specs ?? []).map(spec => buildModel(spec as ModelSpec<Api>));
+		const models = (specs ?? []).map(spec => buildModel(spec));
 
 		expect(fetchMock).toHaveBeenCalledWith(
 			"https://api.commandcode.ai/provider/v1/models",
@@ -50,7 +50,9 @@ describe("Command Code provider support", () => {
 			api: "anthropic-messages",
 			baseUrl: "https://api.commandcode.ai/provider",
 			reasoning: true,
-			input: ["text", "image"],
+			// Neutral discovery default: the catalog row carries no modality
+			// metadata, so no bundled reference may advertise image support.
+			input: ["text"],
 			contextWindow: 1_000_000,
 			maxTokens: 65_536,
 			thinking: {
@@ -102,7 +104,7 @@ describe("Command Code provider support", () => {
 				}),
 		});
 		const specs = await catalog.fetchDynamicModels?.();
-		const models = (specs ?? []).map(spec => buildModel(spec as ModelSpec<Api>));
+		const models = (specs ?? []).map(spec => buildModel(spec));
 		const gpt = models.find(model => model.id === "gpt-5.6-sol");
 		const claude = models.find(model => model.id === "claude-sonnet-4-6");
 		if (!gpt || !claude) throw new Error("Expected Command Code transport fixtures");
@@ -213,20 +215,21 @@ describe("Command Code provider support", () => {
 		});
 		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
 		const specs = await options.fetchDynamicModels?.();
-		const models = (specs ?? []).map(spec => buildModel(spec as ModelSpec<Api>));
+		const models = (specs ?? []).map(spec => buildModel(spec));
 
 		expect(models.find(model => model.id === "claude-sonnet-4-6")).toMatchObject({
 			cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
 		});
-		// Qwen 3.7 Flash crosses its 32K tier: request-wide rates apply from
-		// input + cacheRead + cacheWrite, so cache reads alone can cross it.
+		// Qwen 3.7 Flash has two upstream tiers (>32K at 0.10/0.40, >256K at
+		// 0.20/0.80); the single long-context slot encodes the highest tier
+		// from the first crossing so spend above 256K never under-reports.
 		expect(models.find(model => model.id === "Qwen/Qwen3.7-Flash")).toMatchObject({
 			cost: {
 				input: 0.03,
 				output: 0.13,
 				cacheRead: 0.006,
 				cacheWrite: 0.038,
-				longContext: { inputThreshold: 32_000, input: 0.1, output: 0.4, cacheRead: 0.02, cacheWrite: 0.125 },
+				longContext: { inputThreshold: 32_000, input: 0.2, output: 0.8, cacheRead: 0.04, cacheWrite: 0.25 },
 			},
 		});
 
@@ -334,7 +337,7 @@ describe("Command Code provider support", () => {
 		);
 		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
 		const specs = await options.fetchDynamicModels?.();
-		const models = (specs ?? []).map(spec => buildModel(spec as ModelSpec<Api>));
+		const models = (specs ?? []).map(spec => buildModel(spec));
 		expect(models).toHaveLength(servedIds.length);
 		for (const model of models) {
 			if (freeIds[model.id]) {
@@ -343,6 +346,33 @@ describe("Command Code provider support", () => {
 				expect(model.cost.input).toBeGreaterThan(0);
 				expect(model.cost.output).toBeGreaterThan(0);
 			}
+		}
+	});
+	test("omits effort controls for ids outside the verified effort registry", async () => {
+		// Negative contract: ids absent from the exact `thinking-efforts`
+		// groups expose no effort dial upstream, so the provider-default
+		// `supports-reasoning-effort #false` must hold and the OpenAI path
+		// must omit `reasoning_effort` even though bundled class ladders
+		// exist for these lineages on other hosts.
+		const fetchMock: FetchImpl = vi.fn(async () =>
+			Response.json({
+				data: [
+					{ id: "moonshotai/Kimi-K2.7-Code", name: "Kimi K2.7 Code", context_length: 262_144 },
+					{ id: "moonshotai/Kimi-K2.5", name: "Kimi K2.5", context_length: 262_144 },
+					{ id: "Qwen/Qwen3.7-Max", name: "Qwen 3.7 Max", context_length: 1_000_000 },
+				],
+			}),
+		);
+		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
+		const specs = await options.fetchDynamicModels?.();
+		const models = (specs ?? []).map(spec => buildModel(spec));
+		expect(models).toHaveLength(3);
+		for (const model of models) {
+			expect(model.api).toBe("openai-completions");
+			expect(model.compat).toMatchObject({
+				supportsReasoningEffort: false,
+				omitReasoningEffort: true,
+			});
 		}
 	});
 });

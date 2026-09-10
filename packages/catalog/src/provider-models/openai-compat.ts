@@ -7300,6 +7300,14 @@ export function modelsDevCatalogFallback(
 // Command Code
 // ---------------------------------------------------------------------------
 
+/**
+ * Configuration for the Command Code Provider API model manager.
+ *
+ * `baseUrl` overrides the Provider API base path for testing; it is
+ * normalized to the shared `/provider` root (a trailing `/v1` is stripped)
+ * so Claude ids route to the Anthropic-compatible Messages endpoint at the
+ * root while every other id uses chat completions under `/v1`.
+ */
 export interface CommandCodeModelManagerConfig {
 	apiKey?: string;
 	baseUrl?: string;
@@ -7313,6 +7321,16 @@ function normalizeCommandCodeBasePath(baseUrl: string | undefined): string {
 	return normalized.endsWith("/v1") ? normalized.slice(0, -3) : normalized;
 }
 
+/**
+ * Builds the Command Code model manager: a mixed-protocol OpenAI-compatible
+ * discovery client. The public `/v1/models` catalog is fetched once per
+ * options instance; `mapModel` pins each row's transport from the
+ * `api-routes` table (Claude ids to `anthropic-messages`, everything else to
+ * `openai-completions`) and seeds neutral capability defaults. Reviewed
+ * Command Code policy (effort ladders, pricing, limits, modalities) is
+ * applied later by `buildModel` from `providers/commandcode.kdl` — the
+ * mapper never inherits another provider's rates or image support.
+ */
 export function commandCodeModelManagerOptions(config?: CommandCodeModelManagerConfig): ModelManagerOptions<Api> {
 	const basePath = normalizeCommandCodeBasePath(config?.baseUrl);
 	const discoveryBaseUrl = `${basePath}/v1`;
@@ -7343,7 +7361,12 @@ export function commandCodeModelManagerOptions(config?: CommandCodeModelManagerC
 						api,
 						baseUrl: api === "anthropic-messages" ? basePath : discoveryBaseUrl,
 						reasoning: reference?.reasoning ?? defaults.reasoning,
-						input: reference?.input ?? defaults.input,
+						// Keep the discovery default (`["text"]`): the catalog
+						// row carries no modality metadata and a bundled
+						// reference from another host must not advertise image
+						// support for this deployment. Verified image routes
+						// opt back in via `input-modalities` in KDL.
+						input: defaults.input,
 						contextWindow: toPositiveNumber(entry.context_length, reference?.contextWindow ?? null),
 						maxTokens: null,
 					};
