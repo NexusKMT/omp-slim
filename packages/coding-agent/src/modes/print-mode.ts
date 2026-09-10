@@ -162,10 +162,7 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 		}
 	});
 
-	// A scripted run has no banner: consume the store's failure callback so lost
-	// durability reaches stderr instead of only the debug log, and remember that
-	// the transcript stopped being durable. The flag discriminates a store
-	// failure from any other dispose rejection below (issue #11493).
+	// Discriminates a store failure from any other dispose rejection below.
 	let persistenceFailure: Error | undefined;
 	session.sessionManager.onPersistenceError(error => {
 		persistenceFailure = error;
@@ -251,11 +248,8 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 	// the awaited `dispose()` runs the browser reaper (releaseTabsForOwner), so
 	// an OMP-owned Chromium cannot survive the exit (issue #5643).
 	//
-	// `dispose()` rethrows a latched store failure from the manager's `close()`,
-	// which would otherwise escape as a raw fatal dump after a run that already
-	// produced its output. A store failure is reported above and folded into the
-	// exit code, so the caller reports success only when the transcript is
-	// durable; any other dispose rejection keeps its previous behaviour.
+	// A latched store failure rethrows from `dispose()`; report it as lost
+	// durability rather than letting it escape as a raw fatal dump.
 	let durabilityFailure = false;
 	try {
 		await session.dispose({ mnemopiConsolidateTimeoutMs: SHUTDOWN_CONSOLIDATE_BUDGET_MS });

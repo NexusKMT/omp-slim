@@ -766,15 +766,7 @@ export function requestRpcDialog<T>(
 	output({ type: "extension_ui_request", id, ...request } as RpcExtensionUIRequest);
 	return promise;
 }
-/**
- * A store that latched a failure is invisible to an RPC client: the TUI banner
- * has no headless counterpart and `logger.error` never writes to stdio. Emit
- * the existing `notice` event — already typed by `rpc-client` and documented in
- * `docs/rpc.md`, so no new frame type is needed — and mirror it on stderr for
- * hosts that do not render notices (issue #11493).
- *
- * @returns the unsubscribe function from `onPersistenceError`.
- */
+/** Report a store failure as a `notice` (plus a stderr mirror) — issue #11493. */
 export function registerRpcPersistenceSurface(
 	session: Pick<AgentSession, "emitNotice" | "sessionManager">,
 ): () => void {

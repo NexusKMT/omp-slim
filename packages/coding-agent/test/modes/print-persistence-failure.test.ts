@@ -1,12 +1,7 @@
 /**
- * Contract (issue #11493): a session store that latched a persistence failure
- * must reach a headless consumer. `#diskFailure` is private and `logger.error`
- * never writes to stdio, so print mode consumes `onPersistenceError` itself and
- * must not report success for a run whose transcript never became durable,
- * while RPC mode must surface the same failure as a `notice` event.
- *
- * Before this, print mode's unguarded `session.dispose()` let the latched
- * failure escape as a raw fatal dump, and RPC clients learned nothing at all.
+ * Contract (issue #11493): a latched store failure reaches a headless consumer —
+ * print mode reports it on stderr and returns a nonzero code, RPC mode emits a
+ * `notice` — instead of escaping as a raw fatal dump or going unreported.
  */
 import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs";
@@ -40,7 +35,6 @@ function assistant(text: string): AssistantMessage {
 	} as unknown as AssistantMessage;
 }
 
-/** Make the store fail every write, the way a full disk or locked file does. */
 function failWrites(): () => void {
 	const spy = spyOn(fs, "writeSync").mockImplementation(() => {
 		throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
@@ -60,8 +54,8 @@ function captureStderr(): { written: () => string; restore: () => void } {
 describe("headless persistence-failure surface", () => {
 	it("reports the store failure on stderr and returns a nonzero code from print mode", async () => {
 		const manager = makeSessionManager();
-		// The lazy gate withholds a session file until an assistant message
-		// exists, so materialize the store before the writes start failing.
+		// No session file exists until an assistant message does, so the appends
+		// below would never reach a writer without this.
 		await manager.ensureOnDisk();
 		manager.appendMessage(assistant("seed"));
 
@@ -77,12 +71,9 @@ describe("headless persistence-failure surface", () => {
 			prepareForHeadlessAdvisorDrain: () => {},
 			setTextOutputCommitted: () => {},
 			waitForAdvisorCatchup: async () => true,
-			// The mid-run write the store cannot land: the #11493 trigger.
 			prompt: async () => {
 				manager.appendMessage({ role: "user", content: "boom-user", timestamp: Date.now() } as never);
 			},
-			// Production dispose closes the session manager, which rethrows the
-			// latched failure.
 			dispose: async () => {
 				await manager.close();
 			},
@@ -101,7 +92,6 @@ describe("headless persistence-failure surface", () => {
 		expect(line).toContain("ENOSPC");
 		expect(line).not.toContain("\u001b");
 		expect(exitCode).toBe(1);
-		// The store really latched rather than the stub taking a shortcut.
 		expect(() => manager.flushSync()).toThrow("ENOSPC");
 	});
 
