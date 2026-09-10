@@ -1021,6 +1021,7 @@ interface RuleThinking {
 	suppressWhenOff?: boolean;
 	supportsDisplay?: boolean;
 	prefixBinding?: boolean;
+	upgradeNeutral?: boolean;
 }
 
 function readRuleThinking(axes: ResolvedAxes): RuleThinking {
@@ -1040,6 +1041,7 @@ function readRuleThinking(axes: ResolvedAxes): RuleThinking {
 	if (typeof raw.suppressWhenOff === "boolean") out.suppressWhenOff = raw.suppressWhenOff;
 	if (typeof raw.supportsDisplay === "boolean") out.supportsDisplay = raw.supportsDisplay;
 	if (typeof raw.prefixBinding === "boolean") out.prefixBinding = raw.prefixBinding;
+	if (typeof raw.upgradeNeutral === "boolean") out.upgradeNeutral = raw.upgradeNeutral;
 	return out;
 }
 
@@ -1066,14 +1068,17 @@ function resolveThinkingPolicy<TApi extends Api>(
 	compat: CompatOf<TApi>,
 ): ThinkingConfig | undefined {
 	const rule = readRuleThinking(axes);
-	// Command Code discovery deliberately seeds `reasoning: false` (the
-	// catalog rows carry no reasoning metadata and must not inherit another
-	// host's). The cascade upgrades such a target when an exact model
-	// selector declares `thinking-efforts` — a reviewed correction to stale
-	// source capability metadata — so honor the upgrade for this provider
-	// and let KDL-owned ladders materialize. Every other provider keeps the
-	// legacy gate until its bundle is regenerated against it.
-	if (!spec.reasoning && !(spec.provider === "commandcode" && rule.efforts !== undefined)) return undefined;
+	const explicitThinking =
+		spec.thinking !== undefined && Array.isArray(spec.thinking.efforts) && spec.thinking.efforts.length > 0
+			? spec.thinking
+			: undefined;
+	// An explicit wire vocabulary is authoritative when discovery reports no
+	// reasoning (e.g. Synthetic's `none`-only off-switch): reviewed KDL must
+	// not re-expand it into an unadvertised ladder. Absent metadata is
+	// repaired only where KDL opts in with `thinking-upgrade-neutral`
+	// alongside an exact `thinking-efforts` ladder (the cascade upgrade for
+	// stale source capability data); otherwise the neutral default holds.
+	if (!spec.reasoning && (explicitThinking !== undefined || rule.upgradeNeutral !== true)) return undefined;
 	if (
 		spec.provider === "cline-pass" &&
 		compat !== undefined &&
@@ -1083,8 +1088,8 @@ function resolveThinkingPolicy<TApi extends Api>(
 		return undefined;
 	}
 	if (omitsWireReasoningEffort(spec.api, compat)) return undefined;
-	if (spec.thinking && Array.isArray(spec.thinking.efforts) && spec.thinking.efforts.length > 0) {
-		return fillExplicitThinking(spec, facts, compat, spec.thinking, rule);
+	if (explicitThinking !== undefined) {
+		return fillExplicitThinking(spec, facts, compat, explicitThinking, rule);
 	}
 	if (compat !== undefined && "trustExplicitThinkingOnly" in compat && compat.trustExplicitThinkingOnly === true) {
 		return undefined;

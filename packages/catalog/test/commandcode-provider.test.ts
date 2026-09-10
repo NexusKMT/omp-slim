@@ -3,6 +3,7 @@ import { getOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
 import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
 import { getEnvApiKey, streamSimple } from "@oh-my-pi/pi-ai/stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { DEFAULT_MODEL_PER_PROVIDER, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import { commandCodeModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
@@ -175,6 +176,11 @@ describe("Command Code provider support", () => {
 			catalogDiscovery: { label: "Command Code", allowUnauthenticated: true },
 		});
 		expect(DEFAULT_MODEL_PER_PROVIDER.commandcode).toBe("claude-sonnet-4-6");
+		// Fresh installs resolve the default synchronously from the bundle:
+		// dropping the default id from models.json must fail here, not at boot.
+		expect(getBundledModels("commandcode").some(model => model.id === DEFAULT_MODEL_PER_PROVIDER.commandcode)).toBe(
+			true,
+		);
 
 		delete Bun.env.COMMAND_CODE_API_KEY;
 		Bun.env.COMMANDCODE_API_KEY = "legacy-key";
@@ -279,7 +285,7 @@ describe("Command Code provider support", () => {
 			"deepseek/deepseek-v4-flash",
 			"deepseek/deepseek-v4-flash-fast",
 			"deepseek/deepseek-v4-flash-vision-exp",
-			"deepseek/deepseek-v4-pro",
+			"deepseek/deepseek-v4.1-flash",
 			"google/gemini-3.1-flash-lite",
 			"google/gemini-3.5-flash",
 			"google/gemini-3.5-flash-lite",

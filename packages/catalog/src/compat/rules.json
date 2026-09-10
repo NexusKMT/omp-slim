@@ -7633,7 +7633,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:23",
+				"source": "providers/commandcode.kdl:27",
 				"class": "anthropic",
 				"providers": [
 					"commandcode"
@@ -7647,7 +7647,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:28",
+				"source": "providers/commandcode.kdl:32",
 				"providers": [
 					"commandcode"
 				],
@@ -7695,7 +7695,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:33",
+				"source": "providers/commandcode.kdl:37",
 				"providers": [
 					"commandcode"
 				],
@@ -7728,7 +7728,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:38",
+				"source": "providers/commandcode.kdl:42",
 				"providers": [
 					"commandcode"
 				],
@@ -7762,7 +7762,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:43",
+				"source": "providers/commandcode.kdl:47",
 				"providers": [
 					"commandcode"
 				],
@@ -7812,7 +7812,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:49",
+				"source": "providers/commandcode.kdl:53",
 				"providers": [
 					"commandcode"
 				],
@@ -7847,7 +7847,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:53",
+				"source": "providers/commandcode.kdl:57",
 				"providers": [
 					"commandcode"
 				],
@@ -7879,7 +7879,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:57",
+				"source": "providers/commandcode.kdl:61",
 				"providers": [
 					"commandcode"
 				],
@@ -7919,7 +7919,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:62",
+				"source": "providers/commandcode.kdl:66",
 				"providers": [
 					"commandcode"
 				],
@@ -7953,7 +7953,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:66",
+				"source": "providers/commandcode.kdl:70",
 				"providers": [
 					"commandcode"
 				],
@@ -7974,7 +7974,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:70",
+				"source": "providers/commandcode.kdl:74",
 				"providers": [
 					"commandcode"
 				],
@@ -7996,7 +7996,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:74",
+				"source": "providers/commandcode.kdl:78",
 				"providers": [
 					"commandcode"
 				],
@@ -8013,7 +8013,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:79",
+				"source": "providers/commandcode.kdl:83",
 				"providers": [
 					"commandcode"
 				],
@@ -8030,7 +8030,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:99",
+				"source": "providers/commandcode.kdl:103",
 				"providers": [
 					"commandcode"
 				],
@@ -8050,7 +8050,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:107",
+				"source": "providers/commandcode.kdl:111",
 				"providers": [
 					"commandcode"
 				],
@@ -8070,7 +8070,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:116",
+				"source": "providers/commandcode.kdl:120",
 				"providers": [
 					"commandcode"
 				],
@@ -8090,7 +8090,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:124",
+				"source": "providers/commandcode.kdl:128",
 				"providers": [
 					"commandcode"
 				],
@@ -8110,7 +8110,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:132",
+				"source": "providers/commandcode.kdl:136",
 				"providers": [
 					"commandcode"
 				],
@@ -8138,7 +8138,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:140",
+				"source": "providers/commandcode.kdl:144",
 				"providers": [
 					"commandcode"
 				],
@@ -8158,7 +8158,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:148",
+				"source": "providers/commandcode.kdl:152",
 				"providers": [
 					"commandcode"
 				],
@@ -8178,7 +8178,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:156",
+				"source": "providers/commandcode.kdl:160",
 				"providers": [
 					"commandcode"
 				],
@@ -8198,7 +8198,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:164",
+				"source": "providers/commandcode.kdl:168",
 				"providers": [
 					"commandcode"
 				],
@@ -8218,7 +8218,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:172",
+				"source": "providers/commandcode.kdl:176",
 				"providers": [
 					"commandcode"
 				],
@@ -8238,7 +8238,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:180",
+				"source": "providers/commandcode.kdl:184",
 				"providers": [
 					"commandcode"
 				],
@@ -8258,7 +8258,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:188",
+				"source": "providers/commandcode.kdl:192",
 				"providers": [
 					"commandcode"
 				],
@@ -8278,7 +8278,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:196",
+				"source": "providers/commandcode.kdl:200",
 				"providers": [
 					"commandcode"
 				],
@@ -8298,7 +8298,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:207",
+				"source": "providers/commandcode.kdl:211",
 				"providers": [
 					"commandcode"
 				],
@@ -8318,7 +8318,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:215",
+				"source": "providers/commandcode.kdl:219",
 				"providers": [
 					"commandcode"
 				],
@@ -8342,7 +8342,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:223",
+				"source": "providers/commandcode.kdl:227",
 				"providers": [
 					"commandcode"
 				],
@@ -8362,7 +8362,27 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:231",
+				"source": "providers/commandcode.kdl:237",
+				"providers": [
+					"commandcode"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "deepseek/deepseek-v4.1-flash"
+					}
+				],
+				"catalog": {
+					"costPatch": {
+						"input": 0.15,
+						"output": 0.6,
+						"cacheRead": 0.003,
+						"cacheWrite": 0
+					}
+				}
+			},
+			{
+				"source": "providers/commandcode.kdl:245",
 				"providers": [
 					"commandcode"
 				],
@@ -8382,7 +8402,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:239",
+				"source": "providers/commandcode.kdl:253",
 				"providers": [
 					"commandcode"
 				],
@@ -8402,7 +8422,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:247",
+				"source": "providers/commandcode.kdl:261",
 				"providers": [
 					"commandcode"
 				],
@@ -8422,7 +8442,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:255",
+				"source": "providers/commandcode.kdl:269",
 				"providers": [
 					"commandcode"
 				],
@@ -8442,7 +8462,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:263",
+				"source": "providers/commandcode.kdl:277",
 				"providers": [
 					"commandcode"
 				],
@@ -8462,7 +8482,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:273",
+				"source": "providers/commandcode.kdl:287",
 				"providers": [
 					"commandcode"
 				],
@@ -8482,7 +8502,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:281",
+				"source": "providers/commandcode.kdl:295",
 				"providers": [
 					"commandcode"
 				],
@@ -8510,7 +8530,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:289",
+				"source": "providers/commandcode.kdl:303",
 				"providers": [
 					"commandcode"
 				],
@@ -8530,7 +8550,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:297",
+				"source": "providers/commandcode.kdl:311",
 				"providers": [
 					"commandcode"
 				],
@@ -8550,7 +8570,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:306",
+				"source": "providers/commandcode.kdl:320",
 				"providers": [
 					"commandcode"
 				],
@@ -8574,7 +8594,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:314",
+				"source": "providers/commandcode.kdl:328",
 				"providers": [
 					"commandcode"
 				],
@@ -8594,7 +8614,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:324",
+				"source": "providers/commandcode.kdl:338",
 				"providers": [
 					"commandcode"
 				],
@@ -8614,7 +8634,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:332",
+				"source": "providers/commandcode.kdl:346",
 				"providers": [
 					"commandcode"
 				],
@@ -8634,7 +8654,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:340",
+				"source": "providers/commandcode.kdl:354",
 				"providers": [
 					"commandcode"
 				],
@@ -8654,7 +8674,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:348",
+				"source": "providers/commandcode.kdl:362",
 				"providers": [
 					"commandcode"
 				],
@@ -8674,7 +8694,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:356",
+				"source": "providers/commandcode.kdl:370",
 				"providers": [
 					"commandcode"
 				],
@@ -8694,7 +8714,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:364",
+				"source": "providers/commandcode.kdl:378",
 				"providers": [
 					"commandcode"
 				],
@@ -8714,7 +8734,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:372",
+				"source": "providers/commandcode.kdl:386",
 				"providers": [
 					"commandcode"
 				],
@@ -8734,7 +8754,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:380",
+				"source": "providers/commandcode.kdl:394",
 				"providers": [
 					"commandcode"
 				],
@@ -8761,7 +8781,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:399",
+				"source": "providers/commandcode.kdl:413",
 				"providers": [
 					"commandcode"
 				],
@@ -8788,7 +8808,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:414",
+				"source": "providers/commandcode.kdl:428",
 				"providers": [
 					"commandcode"
 				],
@@ -8808,7 +8828,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:422",
+				"source": "providers/commandcode.kdl:436",
 				"providers": [
 					"commandcode"
 				],
@@ -8828,7 +8848,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:430",
+				"source": "providers/commandcode.kdl:444",
 				"providers": [
 					"commandcode"
 				],
@@ -8848,7 +8868,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:438",
+				"source": "providers/commandcode.kdl:452",
 				"providers": [
 					"commandcode"
 				],
@@ -8868,7 +8888,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:446",
+				"source": "providers/commandcode.kdl:460",
 				"providers": [
 					"commandcode"
 				],
@@ -8888,7 +8908,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:454",
+				"source": "providers/commandcode.kdl:468",
 				"providers": [
 					"commandcode"
 				],
@@ -8908,7 +8928,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:462",
+				"source": "providers/commandcode.kdl:476",
 				"providers": [
 					"commandcode"
 				],
@@ -8932,7 +8952,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:471",
+				"source": "providers/commandcode.kdl:485",
 				"providers": [
 					"commandcode"
 				],
@@ -8952,7 +8972,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:479",
+				"source": "providers/commandcode.kdl:493",
 				"providers": [
 					"commandcode"
 				],
@@ -8972,7 +8992,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:487",
+				"source": "providers/commandcode.kdl:501",
 				"providers": [
 					"commandcode"
 				],
@@ -8992,7 +9012,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:495",
+				"source": "providers/commandcode.kdl:509",
 				"providers": [
 					"commandcode"
 				],
@@ -9012,7 +9032,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:503",
+				"source": "providers/commandcode.kdl:517",
 				"providers": [
 					"commandcode"
 				],
@@ -9032,7 +9052,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:511",
+				"source": "providers/commandcode.kdl:525",
 				"providers": [
 					"commandcode"
 				],
@@ -9052,7 +9072,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:519",
+				"source": "providers/commandcode.kdl:533",
 				"providers": [
 					"commandcode"
 				],
@@ -9072,7 +9092,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:527",
+				"source": "providers/commandcode.kdl:541",
 				"providers": [
 					"commandcode"
 				],
@@ -9092,7 +9112,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:535",
+				"source": "providers/commandcode.kdl:549",
 				"providers": [
 					"commandcode"
 				],
@@ -9120,7 +9140,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:543",
+				"source": "providers/commandcode.kdl:557",
 				"providers": [
 					"commandcode"
 				],
@@ -9144,7 +9164,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:551",
+				"source": "providers/commandcode.kdl:565",
 				"providers": [
 					"commandcode"
 				],
@@ -9164,7 +9184,7 @@
 				}
 			},
 			{
-				"source": "providers/commandcode.kdl:563",
+				"source": "providers/commandcode.kdl:577",
 				"providers": [
 					"commandcode"
 				],
@@ -9202,6 +9222,7 @@
 					"maxTokensField": "max_tokens"
 				},
 				"thinking": {
+					"upgradeNeutral": true,
 					"mode": "effort"
 				},
 				"catalog": {
