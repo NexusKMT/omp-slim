@@ -11,7 +11,7 @@ import { logger, sanitizeText } from "@oh-my-pi/pi-utils";
 import { type AgentSession, type AgentSessionEvent, SHUTDOWN_CONSOLIDATE_BUDGET_MS } from "../session/agent-session";
 import { isSilentAbort } from "../session/messages";
 import { flushTelemetryExport } from "../telemetry-export";
-import { formatPersistenceFailure } from "./persistence-failure";
+import { formatPersistenceDurabilityFailure, formatPersistenceFailure } from "./persistence-failure";
 import { initializeExtensions } from "./runtime-init";
 
 /**
@@ -162,11 +162,25 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 		}
 	});
 
+	// process.stderr.write is fire-and-forget as well: a diagnostic buffered
+	// behind a backpressured pipe would still be undelivered when runPrintMode
+	// returns, and the caller drains stdout only. Serialize the persistence
+	// diagnostics and await the tail before returning.
+	let stderrTail: Promise<void> = Promise.resolve();
+	const writeStderrLine = (line: string): void => {
+		stderrTail = stderrTail.then(async () => {
+			if (process.stderr.write(`${line}\n`)) return;
+			const { promise, resolve } = Promise.withResolvers<void>();
+			process.stderr.once("drain", resolve);
+			await promise;
+		});
+	};
+
 	// Discriminates a store failure from any other dispose rejection below.
 	let persistenceFailure: Error | undefined;
 	session.sessionManager.onPersistenceError(error => {
 		persistenceFailure = error;
-		process.stderr.write(`${formatPersistenceFailure(error.message)}\n`);
+		writeStderrLine(formatPersistenceFailure(error.message));
 	});
 
 	let wroteTextWorkingIndicator = false;
@@ -256,6 +270,10 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 	} catch (error) {
 		if (!persistenceFailure) throw error;
 		durabilityFailure = true;
+		// The store is still failing at teardown, so this is the moment the
+		// transcript stops being retryable and becomes lost.
+		writeStderrLine(formatPersistenceDurabilityFailure(persistenceFailure.message));
+		await stderrTail;
 	}
 
 	// Text mode reports the terminal failure on stderr exactly as before: same
@@ -269,5 +287,6 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 		}
 	}
 
+	await stderrTail;
 	return terminalFailure || durabilityFailure ? 1 : 0;
 }

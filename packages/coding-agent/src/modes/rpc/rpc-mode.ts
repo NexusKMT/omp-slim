@@ -38,7 +38,7 @@ import { buildAvailableSlashCommands } from "../../slash-commands/available-comm
 import { defaultLoadModeForToolName } from "../../tools/essential-tools";
 import type { EventBus } from "../../utils/event-bus";
 import { calculateTokensPerSecond } from "../../utils/token-rate";
-import { formatPersistenceFailure } from "../persistence-failure";
+import { formatPersistenceDurabilityFailure, formatPersistenceFailure } from "../persistence-failure";
 import { initializeExtensions } from "../runtime-init";
 import { isRpcHostToolResult, isRpcHostToolUpdate, RpcHostToolBridge } from "./host-tools";
 import { isRpcHostUriResult, RpcHostUriBridge } from "./host-uris";
@@ -766,11 +766,17 @@ export function requestRpcDialog<T>(
 	output({ type: "extension_ui_request", id, ...request } as RpcExtensionUIRequest);
 	return promise;
 }
-/** Report a store failure as a `notice` (plus a stderr mirror) — issue #11493. */
+/**
+ * Report a store failure as a `notice` (plus a stderr mirror) — issue #11493.
+ * `onFailure` records the failure for the mode's own teardown attribution: a
+ * failure still latched at dispose is what makes `session.dispose()` reject.
+ */
 export function registerRpcPersistenceSurface(
 	session: Pick<AgentSession, "emitNotice" | "sessionManager">,
+	onFailure?: (error: Error) => void,
 ): () => void {
 	return session.sessionManager.onPersistenceError(error => {
+		onFailure?.(error);
 		const message = formatPersistenceFailure(error.message);
 		session.emitNotice("error", message, "session-persistence");
 		process.stderr.write(`${message}\n`);
@@ -1064,7 +1070,35 @@ export async function runRpcMode(
 		output(event);
 	});
 
-	registerRpcPersistenceSurface(session);
+	// Discriminates a store failure from any other dispose rejection below.
+	let persistenceFailure: Error | undefined;
+	registerRpcPersistenceSurface(session, error => {
+		persistenceFailure = error;
+	});
+
+	/**
+	 * Dispose the session, then end the process. A store failure still latched
+	 * at dispose makes `dispose()` reject, and the `notice` frame it emits is
+	 * queued on the asynchronous `stdoutQueue`: drain that queue before exiting
+	 * or the client never learns the failure (review 3983906393). The durability
+	 * loss is mirrored on stderr and the exit code is nonzero. A dispose
+	 * rejection with no latched store failure still surfaces to the caller.
+	 */
+	const disposeAndExit = async (): Promise<never> => {
+		try {
+			await session.dispose();
+		} catch (error) {
+			if (!persistenceFailure) throw error;
+			await stdoutQueue;
+			if (!process.stderr.write(`${formatPersistenceDurabilityFailure(persistenceFailure.message)}\n`)) {
+				const { promise, resolve } = Promise.withResolvers<void>();
+				process.stderr.once("drain", resolve);
+				await promise;
+			}
+			process.exit(1);
+		}
+		process.exit(0);
+	};
 
 	const getAvailableCommands = async () => buildAvailableSlashCommands(session);
 	const reloadPluginState = async () => {
@@ -1591,8 +1625,7 @@ export async function runRpcMode(
 			// the process exits. dispose() also emits `session_shutdown`, so we
 			// must NOT emit it separately here or the event fires twice. Skipping
 			// dispose left OMP-owned Chromium alive after RPC shutdown (#5643).
-			await session.dispose();
-			process.exit(0);
+			await disposeAndExit();
 		},
 	});
 
@@ -1636,6 +1669,5 @@ export async function runRpcMode(
 	// bounded teardown run on the stdin-EOF path too (#5643). Idempotent: a
 	// prior pi.shutdown() through the coordinator makes this await settle
 	// immediately.
-	await session.dispose();
-	process.exit(0);
+	await disposeAndExit();
 }

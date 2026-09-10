@@ -123,6 +123,65 @@ describe("headless persistence-failure surface", () => {
 		expect(() => manager.flushSync()).toThrow("ENOSPC");
 	});
 
+	it("reports a recovered write failure as retryable instead of claiming lost durability", async () => {
+		const manager = makeSessionManager();
+		await manager.ensureOnDisk();
+		manager.appendMessage(assistant("seed"));
+
+		const restoreWritesOnce = failWrites();
+		let restored = false;
+		const restoreWrites = (): void => {
+			if (restored) return;
+			restored = true;
+			restoreWritesOnce();
+		};
+		const stderr = captureStderr();
+
+		const session = {
+			extensionRunner: undefined,
+			subscribe: () => {},
+			settings: { get: () => false },
+			sessionManager: manager,
+			getLastAssistantMessage: () => assistant(""),
+			prepareForHeadlessAdvisorDrain: () => {},
+			setTextOutputCommitted: () => {},
+			waitForAdvisorCatchup: async () => true,
+			prompt: async () => {
+				// The store rejects this entry and keeps it in memory...
+				manager.appendMessage({ role: "user", content: "boom-user", timestamp: Date.now() } as never);
+				// ...then accepts the next write, so the retry rewrites the whole
+				// transcript — both entries — and clears the store's failure latch.
+				restoreWrites();
+				manager.appendMessage({ role: "user", content: "recovered-user", timestamp: Date.now() } as never);
+			},
+			dispose: async () => {
+				await manager.close();
+			},
+		} as unknown as AgentSession;
+
+		let exitCode = -1;
+		try {
+			exitCode = await runPrintMode(session, { mode: "text", initialMessage: "hello" });
+		} finally {
+			stderr.restore();
+			restoreWrites();
+		}
+
+		const reported = stderr
+			.written()
+			.split("\n")
+			.filter(line => line.includes("Session persistence failed: "));
+		expect(reported).toHaveLength(1);
+		expect(reported[0]).toContain("Writes are retried");
+		// The transcript did become durable, so nothing may claim otherwise.
+		expect(stderr.written()).not.toContain("not durable");
+		expect(exitCode).toBe(0);
+
+		const transcript = fs.readFileSync(manager.getSessionFile() as string, "utf8");
+		expect(transcript).toContain("boom-user");
+		expect(transcript).toContain("recovered-user");
+	});
+
 	it("emits a notice and a stderr line when an RPC session's store fails", () => {
 		const manager = makeSessionManager();
 		manager.appendMessage(assistant("seed"));
