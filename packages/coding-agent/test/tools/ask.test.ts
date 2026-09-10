@@ -2136,4 +2136,37 @@ describe("AskTool carriage-return sanitization", () => {
 		expect(text).not.toContain("\r");
 		expect(text.length).toBeLessThan(250);
 	});
+
+	it("preserves suffixed labels through the degraded selector", async () => {
+		const tool = new AskTool(createSession());
+		// `Use cache\r(Recommended)` sanitizes to a label ending with the
+		// recommendation suffix; mapping the displayed choice back by
+		// stripping would corrupt it to `Use cache`.
+		const select = vi.fn(async (_prompt: string, options: ExtensionUISelectItem[]) => {
+			const selected = options[0];
+			return typeof selected === "string" ? selected : selected?.label;
+		});
+		const context = createContext({ select });
+		const result = await tool.execute(
+			"call-cr-suffix",
+			{
+				questions: [
+					{
+						id: "q1",
+						question: "Cache?",
+						options: [{ label: "Use cache\r(Recommended)" }, { label: "Fetch anew" }],
+						recommended: 0,
+					},
+				],
+			},
+			undefined,
+			undefined,
+			context,
+		);
+		expect(result.details?.selectedOptions).toEqual(["Use cache (Recommended)"]);
+		expect(result.content[0]?.type).toBe("text");
+		if (result.content[0]?.type !== "text") throw new Error("Expected text result");
+		expect(result.content[0].text).toContain("Use cache (Recommended)");
+		expect(result.content[0].text).not.toContain("\r");
+	});
 });

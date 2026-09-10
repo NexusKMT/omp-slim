@@ -686,7 +686,12 @@ async function askSingleQuestion(
 				selectedOptions = [];
 				break;
 			}
-			selectedOptions = [stripRecommendedSuffix(choice)];
+			// Map the displayed choice back to the offered option by identity:
+			// the label itself may end with the recommendation suffix
+			// (intrinsic or via `\r` normalization), so stripping would
+			// corrupt it. First display match wins on identical rows.
+			const pickedIndex = displayOptions.findIndex(option => getSelectOptionLabel(option) === choice);
+			selectedOptions = [pickedIndex >= 0 ? questionOptions[pickedIndex]!.label : stripRecommendedSuffix(choice)];
 			customInput = undefined;
 			break;
 		}
