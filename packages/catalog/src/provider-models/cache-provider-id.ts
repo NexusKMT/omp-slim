@@ -1,5 +1,6 @@
 import { CHARM_HYPER_API_BASE_URL, normalizeCharmHyperBaseUrl } from "../wire/charm-hyper";
 import { CODEX_CLIENT_VERSION } from "../wire/codex";
+import { CURSOR_DEFAULT_BASE_URL } from "../wire/cursor";
 import { PERSONAL_GITHUB_COPILOT_BASE_URL } from "../wire/github-copilot";
 import {
 	SINGULARITYAPI_DEV_API_BASE_URL,
@@ -17,6 +18,7 @@ const CREDENTIAL_SCOPED_MODEL_CACHE_PROVIDERS: Readonly<Record<string, true>> = 
 	"opencode-zen": true,
 	"github-copilot": true,
 	"muse-code": true,
+	cursor: true,
 	// Both SingularityAPI rosters are issued per key, so the namespace must be
 	// resolved with the credential (`hydrateCredentialScopedModelCaches`) rather
 	// than from the synchronous, credential-less startup read.
@@ -74,11 +76,16 @@ export function resolveModelCacheProviderId(providerId: string, options: ModelCa
 			return `${providerId}:${CODEX_CLIENT_VERSION}`;
 		case "ollama":
 			return resolveOllamaModelCacheProviderId(providerId, options.baseUrl);
-		case "cursor":
-			// v4: Grok 4.5/4.6 rows cached before the effort-less default-tier fix
-			// carry `requestModelId: *-low`, which the Start plan refuses; refetch
-			// so the collapsed default is re-pointed to `-medium` (issue #9478).
-			return "cursor:default-effort-v4";
+		case "cursor": {
+			// Cursor catalogs are entitlement-, admin-policy-, and privacy-mode
+			// scoped. A credential switch must never reuse another account's
+			// authoritative model rows.
+			// v3 invalidates zero-price rows written before discovery joined
+			// Cursor's first-party pricing document.
+			const baseUrl = (options.baseUrl ?? CURSOR_DEFAULT_BASE_URL).replace(/\/+$/, "");
+			const scope = `${options.apiKey ?? ""}\u0000${baseUrl}`;
+			return `cursor:rich-models-v3:${Bun.hash(scope).toString(36)}`;
+		}
 		case "charm-hyper": {
 			// Discovery is authoritative for this gateway, so a warm cache is served
 			// for its full TTL without re-probing: the namespace must follow the
