@@ -898,4 +898,48 @@ describe("guest ask multi-select Next gating (#4375 PRRT_kwDOQxs0bc6OFbDW)", () 
 			await host.stop("test done");
 		}
 	});
+
+	it("maps multi-select guest toggles back to original labels", async () => {
+		// Same display/identity split through the checkbox path: the guest
+		// toggles sanitized rows (checkedIndices round-trips against the
+		// originals), submits via Next, and the result echoes originals.
+		const ctx = makeAskHostContext();
+		const host = new CollabHost(ctx);
+		await host.start("ws://localhost:8787");
+		ctx.collabHost = host;
+		const controller = new ExtensionUiController(ctx);
+		try {
+			const guest = await joinRawGuest(host.link, COLLAB_PROTO);
+			const welcome = await guest.nextFrame();
+			if (welcome.t !== "welcome") throw new Error(`expected welcome, got ${welcome.t}`);
+
+			const questions: ExtensionAskDialogQuestion[] = [
+				{
+					id: "q2",
+					question: "Pick\rseveral?",
+					options: [{ label: "Gamma\rG" }, { label: "Delta" }],
+					multi: true,
+				},
+			];
+			const result = controller.showAskDialog(questions);
+
+			const first = await nextUiRequest(guest);
+			expect(JSON.stringify(first.request)).not.toContain("\r");
+			guest.socket.send({ t: "ui-response", reqId: first.request.reqId, value: "Gamma G" });
+
+			const second = await nextUiRequest(guest);
+			expect(selectLabels(second)).toContain("Next →");
+			guest.socket.send({ t: "ui-response", reqId: second.request.reqId, value: "Next →" });
+
+			const settled = await result;
+			expect(settled?.kind).toBe("submit");
+			if (settled?.kind === "submit") {
+				expect(settled.results[0]?.options).toEqual(["Gamma\rG", "Delta"]);
+				expect(settled.results[0]?.selectedOptions).toEqual(["Gamma\rG"]);
+			}
+			guest.socket.close();
+		} finally {
+			await host.stop("test done");
+		}
+	});
 });
