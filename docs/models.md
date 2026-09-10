@@ -557,7 +557,8 @@ Image handling:
   independently of the provider's own `input` declaration, so a model can declare `input: [text, image]`
   and still send no image. Per-model `compat` is deep-merged over those rules and wins: set
   `stripImageInput: false` for an id whose endpoint really accepts `image_url` — a vision-augmenting
-  proxy, for example. Default: auto (catalog class and provider rules).
+  proxy, for example. Default: auto (catalog class and provider rules). The Responses and Anthropic/Google
+  encoders ship the modalities the model declares.
 
 Reasoning / thinking:
 
