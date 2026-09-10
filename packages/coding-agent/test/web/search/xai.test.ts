@@ -32,6 +32,7 @@ describe("xAI Responses answer extraction from relay output items", () => {
 		const relayResponse = {
 			id: "resp-relay",
 			model: "grok-4.5",
+			output_text: "I'll search for the latest Bun release.\nBun 1.3.12 is the latest release.",
 			output: [
 				{ type: "message", content: [{ type: "output_text", text: "I'll search for the latest Bun release." }] },
 				{
@@ -246,6 +247,7 @@ describe("xAI Responses answer extraction from relay output items", () => {
 		const relayResponse = {
 			id: "resp-relay",
 			model: "grok-4.5",
+			output_text: "Earlier text that must not be restored after an empty final message.",
 			output: [
 				{ type: "message", content: [{ type: "output_text", text: "A".repeat(400) }] },
 				{ type: "message", content: [{ type: "output_text", text: "I'll search for the latest release." }] },
@@ -254,14 +256,10 @@ describe("xAI Responses answer extraction from relay output items", () => {
 			usage: { input_tokens: 10, output_tokens: 5 },
 		};
 
-		let thrown: unknown;
-		try {
-			await searchXAI(makeParams(makeFetchMock(relayResponse)));
-		} catch (err) {
-			thrown = err;
-		}
-
-		expect(String(thrown)).toContain("no answer or sources");
+		await expect(searchXAI(makeParams(makeFetchMock(relayResponse)))).rejects.toMatchObject({
+			provider: "xai",
+			status: 502,
+		});
 	});
 
 	it("keeps every part of the final message, not just its last part", async () => {

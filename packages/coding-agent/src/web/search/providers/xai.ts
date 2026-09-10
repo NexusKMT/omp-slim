@@ -270,15 +270,11 @@ function collectWebSearchSources(
 
 function parseAnswer(response: XAIResponsesResponse): string | undefined {
 	const output = Array.isArray(response.output) ? response.output : [];
-	// The top-level aggregate (`output_text`) mixes commentary text in with
-	// the answer. Once a relay explicitly tags commentary, the aggregate can
-	// never be trusted as the answer — the phase-aware extraction wins and
-	// its empty result yields no answer instead of restored narration.
+	// A top-level aggregate can contain narration even without explicit phases.
+	// Prefer filtered messages; use the aggregate only when no messages exist.
 	const hasExplicitCommentary = output.some(item => item?.phase === "commentary");
-	const hasPhasedMessages = output.some(item => item?.phase === "commentary" || item?.phase === "final_answer");
 	const topLevelText = response.output_text?.trim();
 	const usableAggregateText = hasExplicitCommentary ? undefined : topLevelText || undefined;
-	if (usableAggregateText && !hasPhasedMessages) return usableAggregateText;
 
 	// Explicit phases take precedence. Unphased relay messages use the last
 	// message/citation/length heuristic; keep commentary positions so removing
@@ -326,9 +322,8 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 		// Without authoritative phased content, an empty final message means
 		// no answer — do not promote heuristic-kept earlier content.
 		const lastMessage = messages.at(-1);
-		if (!lastMessage || (lastMessage.texts.length === 0 && lastMessage.phase !== "commentary")) {
-			return usableAggregateText;
-		}
+		if (!lastMessage) return usableAggregateText;
+		if (lastMessage.texts.length === 0 && lastMessage.phase !== "commentary") return undefined;
 	}
 	const kept = messages.filter(
 		(entry, index) =>
@@ -343,7 +338,7 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 		.flatMap(entry => entry.texts)
 		.join("\n")
 		.trim();
-	return answer || usableAggregateText;
+	return answer || undefined;
 }
 
 function parseUsage(usage: XAIResponsesUsage | null | undefined): SearchUsage | undefined {

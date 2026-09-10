@@ -25,6 +25,7 @@
 - Streaming edit guard (`edit.streamingAbort`) no longer aborts on no-op preview results when replacement content produces no file changes, and carries the native patch diagnostic through the abort reason on genuine preview failures.
 - Repeated soft compaction now includes messages retained by the previous pass instead of silently dropping them from model context.
 - `omp models` now reports whether a model's images actually reach the provider, so an id stripped by a text-only catalog rule no longer shows `images: yes` ([#9697](https://github.com/can1357/oh-my-pi/issues/9697)).
+- xAI web search omits relay narration while preserving substantive answers, including responses that also contain aggregate output text.
 
 ## [18.1.16] - 2026-09-09
 
@@ -36,8 +37,6 @@
 
 ### Fixed
 
-- xAI search answer extraction honors explicit `commentary`/`final_answer` phases, treats unrecognized or empty phase values as unphased, accepts `null` output-item types like omitted ones, prefers phased messages over the aggregate `output_text`, keeps an explicit final answer followed by an empty final item, and never restores the aggregate (which mixes narration in) once commentary is tagged or a tagged final item is empty; unphased relay messages retain the final message and substantive earlier content (citations or long text).
-- GitHub Copilot model-policy 403s (plan, model policy, org restriction) no longer delete stored credentials, so the provider stays listed in `/model` after a per-model access denial instead of disappearing until the next `/login` ([#11280](https://github.com/can1357/oh-my-pi/pull/11280) by [@H4vC](https://github.com/H4vC)).
 - Fixed automatic recovery from proxied Python HTTP/2 stream resets and HTTP/1.1 chunked response interruptions, including continuation after completed tool calls ([#11160](https://github.com/can1357/oh-my-pi/pull/11160) by [@cyriusweng](https://github.com/cyriusweng)).
 - Read error and preview rendering now sanitizes tabs and Windows-style CRLF (e.g. ssh host-key failures, tab-indented fetched content) so raw output can no longer tear the result frame.
 - Unset `tiny` model roles now honor the configured `@smol` fallback in direct execution and the `/models` Roles view ([#11311](https://github.com/can1357/oh-my-pi/issues/11311)).
