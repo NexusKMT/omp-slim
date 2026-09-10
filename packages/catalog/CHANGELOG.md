@@ -2,11 +2,18 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Cursor's model list now comes from the account's own catalog: one entry per model lane with its real context window, image support, and effort ladder, only models the account can run, and Cursor's account default marked ([#11613](https://github.com/can1357/oh-my-pi/pull/11613) by [@will-bogusz](https://github.com/will-bogusz)).
+
 ### Fixed
 
 - Fixed OpenRouter decision models that report no context/output limits (`respan/span-01`, `respan/span-01-lite`, `respan/span-01-lite:free`) missing from the judge model list ([#13888](https://github.com/can1357/oh-my-pi/issues/13888))
 - Fixed every `google-vertex/claude-sonnet-5-5` request failing with 400 `thinking.adaptive.block_binding: Extra inputs are not permitted` ([#13795](https://github.com/can1357/oh-my-pi/issues/13795))
 - Fixed Cursor Grok 4.7 appearing as separate `grok-4.7-{low,medium,high,xhigh}` and `-fast` models that each also offered an effort selector; they now show as `grok-4.7` and `grok-4.7-fast` with effort picked separately ([#12773](https://github.com/can1357/oh-my-pi/issues/12773))
+- Cursor models missing from the bundled rate card now take their prices from Cursor's published pricing page, and fast lanes use Cursor's declared fast multiplier instead of the base rate; the rate card still prices every lane it covers when that page is unreachable ([#11613](https://github.com/can1357/oh-my-pi/pull/11613) by [@will-bogusz](https://github.com/will-bogusz)).
+- Cursor's `default` (Auto) router is marked as variably priced instead of free ([#11613](https://github.com/can1357/oh-my-pi/pull/11613) by [@will-bogusz](https://github.com/will-bogusz)).
+- Switching Cursor accounts no longer shows the previous account's cached model list ([#11613](https://github.com/can1357/oh-my-pi/pull/11613) by [@will-bogusz](https://github.com/will-bogusz)).
 
 ## [18.4.4] - 2026-09-29
 
