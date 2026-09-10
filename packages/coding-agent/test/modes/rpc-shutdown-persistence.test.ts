@@ -16,8 +16,17 @@ afterEach(async () => {
 	await Promise.all(tempDirs.splice(0).map(dir => dir.remove()));
 });
 
-// chmod 0o500 and mkfifo are POSIX-only, and this test needs both.
-describe.skipIf(process.platform === "win32")("RPC shutdown on a failed session store", () => {
+/**
+ * The harness needs three preconditions it cannot synthesize: POSIX `chmod`
+ * (0o500 denies writes only to a non-root user), a non-blocking FIFO read, and
+ * the `mkfifo` tool. Where any is missing the test skips rather than erroring.
+ */
+const unsupportedHarness =
+	process.platform === "win32" ||
+	Bun.which("mkfifo") === null ||
+	(typeof process.getuid === "function" && process.getuid() === 0);
+
+describe.skipIf(unsupportedHarness)("RPC shutdown on a failed session store", () => {
 	it("drains the queued notice before exiting on a persistence failure", async () => {
 		const dir = TempDir.createSync("@pi-rpc-shutdown-");
 		tempDirs.push(dir);
@@ -35,8 +44,11 @@ describe.skipIf(process.platform === "win32")("RPC shutdown on a failed session 
 		// child never blocks on stdout and an undrained queue is invisible. The
 		// FIFO's 64 KiB kernel buffer is the backpressure this contract is about.
 		const fifoPath = path.join(root, "stdout.fifo");
-		Bun.spawnSync(["mkfifo", fifoPath]);
-		const fifo = fs.openSync(fifoPath, fs.constants.O_RDWR);
+		const mkfifo = Bun.spawnSync(["mkfifo", fifoPath]);
+		expect(mkfifo.exitCode, mkfifo.stderr.toString()).toBe(0);
+		// O_NONBLOCK is explicit: an empty blocking read on a FIFO never returns,
+		// and the drain loop's deadline check can only run between reads.
+		const fifo = fs.openSync(fifoPath, fs.constants.O_RDWR | fs.constants.O_NONBLOCK);
 
 		try {
 			const packageRoot = path.join(import.meta.dir, "..", "..");
