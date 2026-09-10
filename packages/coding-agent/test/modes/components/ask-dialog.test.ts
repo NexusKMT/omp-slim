@@ -1746,4 +1746,32 @@ describe("AskDialogComponent", () => {
 		expect(onSubmit).toHaveBeenCalledTimes(1);
 		expect(onSubmit.mock.calls[0][0].results[0].question).toBe("Pick\rnow?");
 	});
+
+	it("disambiguates local rows that sanitize alike, echoing originals", () => {
+		// Same display contract as the guest selector: colliding rows take a
+		// numeric suffix and sentinel matches never mimic the action row —
+		// results still echo the original correlation values.
+		const onSubmit = vi.fn();
+		const component = new AskDialogComponent(
+			[
+				{
+					id: "q1",
+					question: "Pick?",
+					options: [{ label: "Retry\rnow" }, { label: "Retry now" }, { label: "Chat\rabout this" }],
+				},
+			],
+			{ onSubmit, onCancel: vi.fn(), onPrompt: vi.fn() },
+		);
+
+		const rendered = render(component);
+		expect(rendered).not.toContain("\r");
+		expect(rendered).toContain("Retry now (2)");
+		expect(rendered).toContain("Chat about this (2)");
+
+		component.handleInput(ENTER);
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		const result = onSubmit.mock.calls[0][0].results[0];
+		expect(result.options).toEqual(["Retry\rnow", "Retry now", "Chat\rabout this"]);
+		expect(result.selectedOptions).toEqual(["Retry\rnow"]);
+	});
 });

@@ -31,7 +31,7 @@ import { HookSelectorComponent, type HookSelectorSlider } from "../../modes/comp
 import { getAvailableThemesWithPaths, getThemeByName, setTheme, type Theme, theme } from "../../modes/theme/theme";
 import type { InteractiveModeContext, InteractiveSelectorDialogOptions } from "../../modes/types";
 import { normalizeCustomMessagePayload, USER_INTERRUPT_LABEL } from "../../session/messages";
-import { sanitizeCarriageReturns } from "../../tools/render-utils";
+import { disambiguateDisplayLabels, sanitizeCarriageReturns } from "../../tools/render-utils";
 import { setExtensionTerminalTitle, setSessionTerminalTitle } from "../../utils/title-generator";
 
 const MAX_WIDGET_LINES = 10;
@@ -789,20 +789,12 @@ export class ExtensionUiController {
 		let customInput: string | undefined;
 		// Sanitize display copies for the guest wire (same degeneration as
 		// the local dialog). `selected` and results keep the ORIGINAL labels
-		// so both race winners echo identical correlation values.
-		// Display labels must stay actionable: a sanitized label colliding
-		// with another option (`Retry\rnow`/`Retry now`) or a runtime
-		// sentinel (`Other (type your own)` et al.) would answer the wrong
-		// row, so colliding rows take a numeric suffix. The suffix is part of
-		// the echoed wire value and maps back to the original label below.
-		const takenLabels = new Set<string>([ASK_OTHER_OPTION, ASK_CHAT_OPTION, ASK_NEXT_OPTION]);
-		const displayLabels = question.options.map(option => {
-			const base = sanitizeCarriageReturns(option.label);
-			let candidate = base;
-			for (let suffix = 2; takenLabels.has(candidate); suffix++) candidate = `${base} (${suffix})`;
-			takenLabels.add(candidate);
-			return candidate;
-		});
+		// so both race winners echo identical correlation values. Display
+		// labels are unique and sentinel-safe; the suffix maps back below.
+		const displayLabels = disambiguateDisplayLabels(
+			question.options.map(option => option.label),
+			[ASK_OTHER_OPTION, ASK_CHAT_OPTION, ASK_NEXT_OPTION],
+		);
 		const originalByDisplay = new Map<string, string>();
 		question.options.forEach((option, index) => {
 			originalByDisplay.set(displayLabels[index]!, option.label);

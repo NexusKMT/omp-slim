@@ -22,7 +22,7 @@ import type {
 	ExtensionAskDialogResultItem,
 	ExtensionAskDialogSubmitResult,
 } from "../../extensibility/extensions";
-import { expandKeyHint, sanitizeCarriageReturns } from "../../tools/render-utils";
+import { disambiguateDisplayLabels, expandKeyHint, sanitizeCarriageReturns } from "../../tools/render-utils";
 import { getTabBarTheme } from "../shared";
 import { getMarkdownTheme, highlightCode, theme } from "../theme/theme";
 import {
@@ -40,6 +40,11 @@ import { handleTabSwitchKey } from "./selector-helpers";
 
 const OTHER_OPTION = "Other (type your own)";
 const SUBMIT_OPTION = "Submit";
+
+// Action rows appended by the guest race participant. An option sanitizing
+// to one of these must disambiguate identically on both sides, or the same
+// question renders different rows depending on who answers.
+const GUEST_ACTION_LABELS = ["Chat about this", "Next →"];
 
 /** Fraction of the terminal the dialog may occupy. The box height is fixed
  *  at spawn from the tallest tab's content (re-measured only on viewport
@@ -262,12 +267,27 @@ function normalizedInlineInput(input: string): string {
 	return replaceTabs(input).replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Sanitized, unique, sentinel-safe display labels for a question's options.
+ * Mirrors the guest selector (`#runGuestAskQuestion`): same inputs, same
+ * rows, whichever participant answers. State and results keep originals.
+ */
+function displayOptionLabels(question: ExtensionAskDialogQuestion): string[] {
+	return disambiguateDisplayLabels(
+		question.options.map(option => option.label),
+		[OTHER_OPTION, ...GUEST_ACTION_LABELS],
+	);
+}
+
 function renderAnswerSummary(question: ExtensionAskDialogQuestion, state: QuestionState): string {
+	const display = displayOptionLabels(question);
 	const selected = question.options
-		.map(option => option.label)
-		.filter(label => state.selectedOptions.has(label))
-		// Display copy only — state and results keep the original labels.
-		.map(label => sanitizeCarriageReturns(label));
+		.map((option, index) => ({
+			raw: option.label,
+			display: display[index] ?? sanitizeCarriageReturns(option.label),
+		}))
+		.filter(entry => state.selectedOptions.has(entry.raw))
+		.map(entry => entry.display);
 	if (question.multi) {
 		const answers = [...selected];
 		if (state.customInput !== undefined) answers.push(`Other: “${normalizedInlineInput(state.customInput)}”`);
@@ -683,10 +703,11 @@ export class AskDialogComponent implements Component {
 	}
 
 	#questionRows(question: ExtensionAskDialogQuestion): QuestionRow[] {
+		const display = displayOptionLabels(question);
 		const rows: QuestionRow[] = question.options.map((option, index) => ({
 			kind: "option",
 			key: `option:${index}`,
-			label: this.#optionLabel(question, option.label, index),
+			label: this.#optionLabel(question, display[index] ?? sanitizeCarriageReturns(option.label), index),
 			optionIndex: index,
 		}));
 		rows.push({ kind: "other", key: "other", label: OTHER_OPTION, optionIndex: undefined });

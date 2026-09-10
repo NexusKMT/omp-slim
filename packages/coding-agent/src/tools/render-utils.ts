@@ -36,6 +36,27 @@ export function sanitizeCarriageReturns(text: string): string {
 	return text.replaceAll("\r\n", "\n").replace(/\r+/g, " ");
 }
 
+/**
+ * Sanitize raw ask option labels into unique, action-safe display copies.
+ * Degenerate input can sanitize alike (`Retry\rnow`/`Retry now`) or match a
+ * runtime action row (`Other (type your own)`); both would answer the wrong
+ * row, so colliding entries take a numeric suffix. Order and length are
+ * preserved, so indices still align with the original labels for mapping
+ * answers and dialog state back. Every ask race participant (local dialog,
+ * guest selector) must call this with the same `reservedLabels` so a
+ * question renders identically wherever it is answered.
+ */
+export function disambiguateDisplayLabels(rawLabels: string[], reservedLabels: readonly string[]): string[] {
+	const taken = new Set<string>(reservedLabels);
+	return rawLabels.map(raw => {
+		const base = sanitizeCarriageReturns(raw);
+		let candidate = base;
+		for (let suffix = 2; taken.has(candidate); suffix++) candidate = `${base} (${suffix})`;
+		taken.add(candidate);
+		return candidate;
+	});
+}
+
 // =============================================================================
 // Standardized Display Constants
 // =============================================================================
