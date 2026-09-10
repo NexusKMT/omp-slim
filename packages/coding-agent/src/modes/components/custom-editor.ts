@@ -470,12 +470,45 @@ export class CustomEditor extends Editor {
 	clearDraft(historyText?: string): void {
 		if (historyText !== undefined) this.addToHistory(historyText);
 		this.setText("");
-		this.clearAtoms();
+		this.clearPasteState();
 		this.imageLinks = undefined;
 		this.pendingImages = [];
 		this.pendingImageLinks = [];
 		this.pendingTexts = [];
 		this.#textAttachmentCounter = 0;
+	}
+
+	/** Preserve a canceled draft in local navigation, then clear the composer. */
+	clearDraftForRecall(): void {
+		if (!this.getText().trim()) {
+			this.clearDraft();
+			return;
+		}
+		const images = [...this.pendingImages];
+		const links = [...this.pendingImageLinks];
+		const imageLinks = this.imageLinks;
+		const texts = [...this.pendingTexts];
+		const counter = this.#textAttachmentCounter;
+		this.rememberDraft(() => {
+			this.pendingImages = [...images];
+			this.pendingImageLinks = [...links];
+			this.imageLinks = imageLinks;
+			this.pendingTexts = [...texts];
+			this.#textAttachmentCounter = counter;
+			if (this.pendingImages.length > 0 && this.pendingImageLinks.some(link => link === undefined)) {
+				void this.#materializeDraftLinks();
+			}
+		});
+		this.clearDraft();
+	}
+
+	override restoreHistoryState(restore?: () => void): void {
+		this.imageLinks = undefined;
+		this.pendingImages = [];
+		this.pendingImageLinks = [];
+		this.pendingTexts = [];
+		this.#textAttachmentCounter = 0;
+		super.restoreHistoryState(restore);
 	}
 
 	/** Replace the composer draft with a restored historical prompt: re-attaches the message's

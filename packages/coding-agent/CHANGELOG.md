@@ -17,6 +17,9 @@
 ### Fixed
 
 - Repeated soft compaction now includes messages retained by the previous pass instead of silently dropping them from model context.
+### Fixed
+
+- Unsent prompts cleared with Ctrl+C can now be recalled with Up, including pastes and images; disable Recall Cleared Drafts in settings to discard future clears instead.
 
 ## [18.1.16] - 2026-09-09
 

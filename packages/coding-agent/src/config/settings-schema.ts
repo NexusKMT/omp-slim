@@ -766,6 +766,17 @@ export const SETTINGS_SCHEMA = {
 			options: "runtime",
 		},
 	},
+	"composer.recallClearedDrafts": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "interaction",
+			group: "Composer",
+			label: "Recall Cleared Drafts",
+			description:
+				"Keep drafts cleared with Ctrl+C in local Up/Down history until exit; disabling affects future clears",
+		},
+	},
 
 	// Status line
 	"statusLine.preset": {

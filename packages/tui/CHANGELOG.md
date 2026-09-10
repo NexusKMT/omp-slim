@@ -13,6 +13,7 @@
 ### Changed
 
 - The software cursor now reflects the Vim mode: a reverse-video block in Normal/Visual and an underline in Insert. Both occupy one cell, so layout is unchanged, and non-modal editors keep the reverse-video block they always had.
+- Editor history can retain local draft snapshots with their paste expansions and host-owned attachment restoration, without writing them to persistent history.
 
 ## [18.1.15] - 2026-09-08
 
