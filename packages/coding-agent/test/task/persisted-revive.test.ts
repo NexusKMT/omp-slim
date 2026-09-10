@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -659,6 +660,63 @@ describe("persisted subagent revival", () => {
 			AgentLifecycleManager.resetGlobalForTests();
 			AgentRegistry.resetGlobalForTests();
 			IrcBus.resetGlobalForTests();
+		});
+	});
+
+	describe("fail-closed revival", () => {
+		function entryType(line: string): string | undefined {
+			const parsed: { type?: string } = JSON.parse(line);
+			return parsed.type;
+		}
+
+		function entriesOfType(sessionFile: string, keep: (type: string | undefined) => boolean): string[] {
+			return fs
+				.readFileSync(sessionFile, "utf8")
+				.split("\n")
+				.filter(line => line.trim().length > 0 && keep(entryType(line)));
+		}
+
+		it("refuses a transcript that vanished between the peek and the locked open", async () => {
+			const cwd = makeTempDir("@pi-revive-vanished-");
+			const sessionFile = await createPersistedSession(cwd);
+			const ref = createRef(sessionFile);
+			// The factory's lock-free peek succeeds here; the file disappears
+			// before the reviver takes the single-writer lock.
+			const reviver = await createFactory(cwd)(ref);
+			if (!reviver) throw new Error("Expected a persisted reviver");
+			fs.rmSync(sessionFile);
+
+			await expect(reviver(ref)).rejects.toThrow(/ENOENT/);
+			// Fail closed without minting: the missing path stays missing.
+			expect(fs.existsSync(sessionFile)).toBe(false);
+		});
+
+		it("refuses a transcript truncated to header+session_init without rewriting it", async () => {
+			const cwd = makeTempDir("@pi-revive-truncated-");
+			const sessionFile = await createPersistedSession(cwd);
+			const truncated = `${entriesOfType(sessionFile, type => type === "session" || type === "session_init").join("\n")}\n`;
+			fs.writeFileSync(sessionFile, truncated);
+			const ref = createRef(sessionFile);
+			const reviver = await createFactory(cwd)(ref);
+			if (!reviver) throw new Error("Expected a persisted reviver");
+
+			await expect(reviver(ref)).rejects.toThrow(/no message history/);
+			// The parked transcript is evidence, not scratch space: untouched.
+			expect(fs.readFileSync(sessionFile, "utf8")).toBe(truncated);
+		});
+
+		it("rebuilds the contract from the reopened file, not the stale peek capture", async () => {
+			const cwd = makeTempDir("@pi-revive-contract-");
+			const sessionFile = await createPersistedSession(cwd);
+			const ref = createRef(sessionFile);
+			const reviver = await createFactory(cwd)(ref);
+			if (!reviver) throw new Error("Expected a persisted reviver");
+			// The file is replaced after the peek: same messages, no session_init.
+			const withoutInit = `${entriesOfType(sessionFile, type => type !== "session_init").join("\n")}\n`;
+			fs.writeFileSync(sessionFile, withoutInit);
+
+			await expect(reviver(ref)).rejects.toThrow(/no persisted session contract/);
+			expect(fs.readFileSync(sessionFile, "utf8")).toBe(withoutInit);
 		});
 	});
 });
