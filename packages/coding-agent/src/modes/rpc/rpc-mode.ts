@@ -1684,6 +1684,8 @@ export async function runRpcMode(
 	// Dispose the main session before exiting so the browser reaper and other
 	// bounded teardown run on the stdin-EOF path too (#5643). Idempotent: a
 	// prior pi.shutdown() through the coordinator makes this await settle
-	// immediately.
-	await disposeAndExit();
+	// immediately. Returned rather than awaited: `runRpcMode` is typed
+	// `Promise<never>`, and only returning the `Promise<never>` keeps this end
+	// point unreachable for the compiler.
+	return disposeAndExit();
 }
