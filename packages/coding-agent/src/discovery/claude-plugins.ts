@@ -106,25 +106,34 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 }
 
 async function readMarketplaceRootManifest(root: ClaudePluginRoot): Promise<ClaudePluginManifest | null> {
-	const raw = await readFile(path.join(root.path, "marketplace.json"));
-	if (raw === null) return null;
+	const catalogs = await Promise.all(
+		[
+			path.join(root.path, "marketplace.json"),
+			path.join(root.path, ".omp-plugin", "marketplace.json"),
+			path.join(root.path, ".claude-plugin", "marketplace.json"),
+		].map(catalogPath => readFile(catalogPath)),
+	);
 
-	try {
-		const parsed: unknown = JSON.parse(raw);
-		if (!isRecord(parsed) || !Array.isArray(parsed.plugins)) return null;
-		const entry = parsed.plugins.find(
-			candidate => isRecord(candidate) && candidate.name === root.plugin && candidate.source === "./",
-		);
-		if (!isRecord(entry)) return null;
+	for (const raw of catalogs) {
+		if (raw === null) continue;
+		try {
+			const parsed: unknown = JSON.parse(raw);
+			if (!isRecord(parsed) || !Array.isArray(parsed.plugins)) continue;
+			const entry = parsed.plugins.find(
+				candidate => isRecord(candidate) && candidate.name === root.plugin && candidate.source === "./",
+			);
+			if (!isRecord(entry)) continue;
 
-		if (typeof entry.skills === "string") return { skills: entry.skills };
-		if (Array.isArray(entry.skills)) {
-			return { skills: entry.skills.filter((value): value is string => typeof value === "string") };
+			if (typeof entry.skills === "string") return { skills: entry.skills };
+			if (Array.isArray(entry.skills)) {
+				return { skills: entry.skills.filter((value): value is string => typeof value === "string") };
+			}
+			return {};
+		} catch {
+			continue;
 		}
-		return {};
-	} catch {
-		return null;
 	}
+	return null;
 }
 
 function isWithinPluginRoot(rootPath: string, targetPath: string): boolean {
