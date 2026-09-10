@@ -5780,7 +5780,9 @@ describe("advisor", () => {
 				prompt: async input => {
 					promptInputs.push(input);
 					if (promptText(input).includes("stale-turn")) {
-						throw new AdvisorOutputQuarantinedError("Advisor response quarantined: requested unavailable tool bash");
+						throw new AdvisorOutputQuarantinedError(
+							"Advisor response quarantined: requested unavailable tool bash",
+						);
 					}
 				},
 				abort: () => {},
