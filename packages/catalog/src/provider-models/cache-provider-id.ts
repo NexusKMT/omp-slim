@@ -68,6 +68,24 @@ export function resolveOllamaModelCacheProviderId(providerId: string, baseUrl?: 
 	return `${providerId}:ollama-models-v1:${Bun.hash(endpoint).toString(36)}`;
 }
 
+/**
+ * The `sub` claim of a Cursor access token. Cursor access tokens are JWTs
+ * that `refreshCursorToken` rotates (new `exp`/`iat`) for the same account,
+ * so the subject is the stable account scope. Non-JWT keys return undefined.
+ */
+function cursorCredentialSubject(apiKey: string): string | undefined {
+	const parts = apiKey.split(".");
+	if (parts.length !== 3 || !parts[1]) return undefined;
+	try {
+		const payload: unknown = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf-8"));
+		if (typeof payload !== "object" || payload === null) return undefined;
+		const subject = Reflect.get(payload, "sub");
+		return typeof subject === "string" && subject.length > 0 ? `sub:${subject}` : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /** Resolve the cache namespace used by a provider's model-manager options without constructing those options. */
 export function resolveModelCacheProviderId(providerId: string, options: ModelCacheProviderIdOptions = {}): string {
 	switch (providerId) {
@@ -81,10 +99,12 @@ export function resolveModelCacheProviderId(providerId: string, options: ModelCa
 			// scoped. A credential switch must never reuse another account's
 			// authoritative model rows.
 			// v3 invalidates zero-price rows written before discovery joined
-			// Cursor's first-party pricing document.
+			// Cursor's first-party pricing document; v4 keys the scope on the
+			// token's stable account subject instead of the rotating JWT.
 			const baseUrl = (options.baseUrl ?? CURSOR_DEFAULT_BASE_URL).replace(/\/+$/, "");
-			const scope = `${options.apiKey ?? ""}\u0000${baseUrl}`;
-			return `cursor:rich-models-v3:${Bun.hash(scope).toString(36)}`;
+			const apiKey = options.apiKey ?? "";
+			const scope = `${cursorCredentialSubject(apiKey) ?? apiKey}\u0000${baseUrl}`;
+			return `cursor:rich-models-v4:${Bun.hash(scope).toString(36)}`;
 		}
 		case "charm-hyper": {
 			// Discovery is authoritative for this gateway, so a warm cache is served
