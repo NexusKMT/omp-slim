@@ -675,8 +675,10 @@ export class ExtensionUiController {
 				promptResolve = undefined;
 				promptEditor?.dispose();
 				promptEditor = undefined;
-				restoreAskDialog();
 				resolvePrompt?.(value);
+				// Let AskDialog apply the answer and clear its prompt guard before
+				// making the dialog visible and interactive again.
+				queueMicrotask(restoreAskDialog);
 			};
 
 			const promptForText = (title: string, prefill?: string): Promise<string | undefined> => {
