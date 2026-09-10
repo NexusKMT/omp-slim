@@ -62,6 +62,7 @@ import type { MCPServerConfig } from "../../mcp/types";
 import { loadAllExtensions } from "../../modes/components/extensions/state-manager";
 import { theme } from "../../modes/theme/theme";
 import { normalizePlanTitle, type PlanApprovalDetails, resolveApprovedPlan } from "../../plan-mode/approved-plan";
+import { autosaveApprovedPlan } from "../../plan-mode/plan-autosave";
 import type { AgentSession, AgentSessionEvent } from "../../session/agent-session";
 import { BlobStore, resolveImageDataSync } from "../../session/blob-store";
 import { isSilentAbort, SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/messages";
@@ -1922,10 +1923,23 @@ export class AcpAgent implements Agent {
 		}
 		// Approved. Set the plan reference so the next turn injects the plan
 		// content as context (the file keeps its agent-chosen name — no rename),
-		// then exit plan mode so the agent regains full tools.
 		session.setPlanReferencePath(planFilePath);
 		session.setPlanProposalHandler?.(null);
 		session.setPlanModeState(undefined);
+		let autosavedPlan: string | null = null;
+		try {
+			autosavedPlan = await autosaveApprovedPlan({
+				settings: session.settings,
+				cwd: session.sessionManager.getCwd(),
+				title: resolvedTitle,
+				planContent,
+			});
+		} catch (error) {
+			logger.warn("Failed to autosave approved plan", {
+				sessionId: session.sessionId,
+				error,
+			});
+		}
 		try {
 			await this.#connection.sessionUpdate({
 				sessionId: session.sessionId,
@@ -1942,7 +1956,9 @@ export class AcpAgent implements Agent {
 			content: [
 				{
 					type: "text" as const,
-					text: `Plan approved at ${planFilePath}. Plan mode exited; proceed with the implementation.`,
+					text: autosavedPlan
+						? `Plan approved at ${planFilePath} (autosaved to ${autosavedPlan}). Plan mode exited; proceed with the implementation.`
+						: `Plan approved at ${planFilePath}. Plan mode exited; proceed with the implementation.`,
 				},
 			],
 			details,
