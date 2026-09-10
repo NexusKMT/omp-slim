@@ -1908,4 +1908,94 @@ describe("AskTool carriage-return sanitization", () => {
 		expect(legacyText).toContain("Idle loop?");
 		expect(legacyText).not.toContain("\r");
 	});
+
+	it("fails closed when sanitization merges distinct labels into one", async () => {
+		const tool = new AskTool(createSession());
+		const askDialog = vi.fn(async () => undefined);
+		const context = createContext({ askDialog: askDialog as never });
+		// Distinct raw labels, but dialog selection is label-keyed — sanitized,
+		// one row would check both and submit duplicates.
+		const args = {
+			questions: [{ id: "q1", question: "Q?", options: [{ label: "Retry\rnow" }, { label: "Retry now" }] }],
+		};
+		const result = await tool.execute("call-cr-duplicate", args, undefined, undefined, context);
+		expect(askDialog).not.toHaveBeenCalled();
+		expect(result.content[0]?.type).toBe("text");
+		if (result.content[0]?.type !== "text") throw new Error("Expected text result");
+		expect(result.content[0].text).toContain("unique within a question");
+		expect(result.content[0].text).toContain("Retry now");
+		expect(result.content[0].text).not.toContain("\r");
+	});
+
+	it("sanitizes persisted result details so pre-fix transcripts render as prose", async () => {
+		const theme = darkTheme;
+		// Multi-part branch: `\r`-laden id/question/labels flow into section labels and Markdown.
+		const multi = askToolRenderer.renderResult(
+			{
+				content: [{ type: "text", text: "" }],
+				details: {
+					results: [
+						{
+							id: "q\r\r3a",
+							question: "Q3\r\rA?",
+							options: ["Abort\r\rlog", "Continue\r\ranyway"],
+							multi: false,
+							selectedOptions: ["Abort\r\rlog"],
+						},
+					],
+				},
+			},
+			{ expanded: true, isPartial: false },
+			theme!,
+		);
+		const multiText = stripAnsi(multi.render(120).join("\n"));
+		expect(multiText).toContain("[q 3a]");
+		expect(multiText).toContain("Q3 A?");
+		expect(multiText).toContain("Abort log");
+		expect(multiText).not.toContain("\r");
+
+		// Single-question branch plus user-authored echo fields.
+		const single = askToolRenderer.renderResult(
+			{
+				content: [{ type: "text", text: "" }],
+				details: {
+					question: "Idle\r\rloop?",
+					options: ["Alpha"],
+					multi: false,
+					selectedOptions: ["Alpha"],
+					note: "a\r\rnote",
+				},
+			},
+			{ expanded: true, isPartial: false },
+			theme!,
+		);
+		const singleText = stripAnsi(single.render(120).join("\n"));
+		expect(singleText).toContain("Idle loop?");
+		expect(singleText).toContain("a note");
+		expect(singleText).not.toContain("\r");
+
+		// Chat-redirect branch.
+		const chat = askToolRenderer.renderResult(
+			{
+				content: [{ type: "text", text: "" }],
+				details: { chatRedirect: true, questions: ["Chat\r\rabout?"] },
+			},
+			{ expanded: true, isPartial: false },
+			theme!,
+		);
+		const chatText = stripAnsi(chat.render(120).join("\n"));
+		expect(chatText).toContain("Chat about?");
+		expect(chatText).not.toContain("\r");
+
+		// Content-text fallbacks (no details / no question).
+		for (const stale of [
+			{ content: [{ type: "text", text: "stale\r\rtranscript" }] },
+			{ content: [{ type: "text", text: "stale\r\rtranscript" }], details: {} },
+		]) {
+			const fallback = askToolRenderer.renderResult(stale, { expanded: true, isPartial: false }, theme!);
+			const fallbackText = stripAnsi(fallback.render(120).join("\n"));
+			expect(fallbackText).toContain("stale transcript");
+			expect(fallbackText).not.toContain("\r");
+		}
+	});
 });

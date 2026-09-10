@@ -881,6 +881,26 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 				details: {},
 			};
 		}
+		// Sanitizing `\r` runs can also merge distinct labels (`Retry\rnow` and
+		// `Retry now` become one); dialog selection is label-keyed, so one row
+		// would check both — fail closed like schema validation does.
+		for (const question of params.questions) {
+			const seenLabels = new Set<string>();
+			for (const option of question.options) {
+				if (seenLabels.has(option.label)) {
+					return {
+						content: [
+							{
+								type: "text" as const,
+								text: `Error: option labels must be unique within a question: ${option.label}`,
+							},
+						],
+						details: {},
+					};
+				}
+				seenLabels.add(option.label);
+			}
+		}
 
 		const extensionUi = context.ui;
 		const ui: UIContext = {
@@ -1199,6 +1219,40 @@ function sanitizeAskParams(params: AskParams): AskParams {
 		})),
 	};
 }
+
+/**
+ * Strip the `\r` runs degenerate models inject from persisted result details,
+ * so transcripts completed before params sanitization still render as prose.
+ * Display-only — the persisted payload is untouched.
+ */
+function sanitizeAskResultDetails(details: AskToolDetails): AskToolDetails {
+	return {
+		...details,
+		...(details.question !== undefined ? { question: sanitizeCarriageReturns(details.question) } : {}),
+		...(details.options !== undefined ? { options: details.options.map(sanitizeCarriageReturns) } : {}),
+		...(details.selectedOptions !== undefined
+			? { selectedOptions: details.selectedOptions.map(sanitizeCarriageReturns) }
+			: {}),
+		...(details.customInput !== undefined ? { customInput: sanitizeCarriageReturns(details.customInput) } : {}),
+		...(details.note !== undefined ? { note: sanitizeCarriageReturns(details.note) } : {}),
+		...(details.questions !== undefined ? { questions: details.questions.map(sanitizeCarriageReturns) } : {}),
+		...(details.results !== undefined
+			? {
+					results: details.results.map(entry => ({
+						...entry,
+						id: sanitizeCarriageReturns(entry.id),
+						question: sanitizeCarriageReturns(entry.question),
+						options: entry.options.map(sanitizeCarriageReturns),
+						selectedOptions: entry.selectedOptions.map(sanitizeCarriageReturns),
+						...(entry.customInput !== undefined
+							? { customInput: sanitizeCarriageReturns(entry.customInput) }
+							: {}),
+						...(entry.note !== undefined ? { note: sanitizeCarriageReturns(entry.note) } : {}),
+					})),
+				}
+			: {}),
+	};
+}
 /**
  * Coerce untrusted `questions` call args into a renderable array. Models
  * occasionally double-encode the array as a JSON string — a bare string passes
@@ -1393,19 +1447,20 @@ export const askToolRenderer = {
 		_options: RenderResultOptions,
 		uiTheme: Theme,
 	): Component {
-		const { details } = result;
+		const rawDetails = result.details;
 		const mdTheme = getMarkdownTheme();
 		const accentStyle = { color: (t: string) => uiTheme.fg("accent", t) };
 		const md = (text: string, width: number) =>
 			new Markdown(text, 1, 0, mdTheme, accentStyle).render(Math.max(1, outputBlockContentWidth(width) + 1));
 
-		if (!details) {
+		if (!rawDetails) {
 			const txt = result.content[0];
-			const fallback = txt?.type === "text" && txt.text ? txt.text : "";
+			const fallback = txt?.type === "text" && txt.text ? sanitizeCarriageReturns(txt.text) : "";
 			const header = renderStatusLine({ icon: "warning", title: "Ask" }, uiTheme);
 			const body = fallback ? `\n${uiTheme.fg("dim", fallback)}` : "";
 			return new Text(`${header}${body}`, 0, 0);
 		}
+		const details = sanitizeAskResultDetails(rawDetails);
 
 		// Chat redirect: user chose "Chat about this" instead of answering.
 		if (details.chatRedirect) {
@@ -1468,7 +1523,7 @@ export const askToolRenderer = {
 		// Single question result
 		if (!details.question) {
 			const txt = result.content[0];
-			const fallback = txt?.type === "text" && txt.text ? txt.text : "";
+			const fallback = txt?.type === "text" && txt.text ? sanitizeCarriageReturns(txt.text) : "";
 			return new Text(fallback, 0, 0);
 		}
 
