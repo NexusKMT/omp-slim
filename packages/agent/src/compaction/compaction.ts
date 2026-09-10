@@ -455,6 +455,17 @@ function findValidCutPoints(entries: SessionEntry[], startIndex: number, endInde
 	return cutPoints;
 }
 
+function isTurnStartEntry(entry: SessionEntry): boolean {
+	if (entry.type === "branch_summary" || entry.type === "custom_message") {
+		return true;
+	}
+	if (entry.type === "message") {
+		const role = entry.message.role as string;
+		return role === "user" || role === "bashExecution";
+	}
+	return false;
+}
+
 /**
  * Find the user message (or bashExecution) that starts the turn containing the given entry index.
  * Returns -1 if no turn start found before the index.
@@ -462,16 +473,8 @@ function findValidCutPoints(entries: SessionEntry[], startIndex: number, endInde
  */
 export function findTurnStartIndex(entries: SessionEntry[], entryIndex: number, startIndex: number): number {
 	for (let i = entryIndex; i >= startIndex; i--) {
-		const entry = entries[i];
-		// branch_summary and custom_message are user-role messages, can start a turn
-		if (entry.type === "branch_summary" || entry.type === "custom_message") {
+		if (isTurnStartEntry(entries[i])) {
 			return i;
-		}
-		if (entry.type === "message") {
-			const role = entry.message.role as string;
-			if (role === "user" || role === "bashExecution") {
-				return i;
-			}
 		}
 	}
 	return -1;
@@ -533,30 +536,28 @@ export function findCutPoint(
 		cutPointIndex--;
 	}
 
-	// Scan backwards from cutIndex to include any non-message entries (bash, settings, etc.)
+	const isTurnStart = isTurnStartEntry(entries[cutIndex]);
+	const turnStartIndex = isTurnStart ? -1 : findTurnStartIndex(entries, cutIndex, startIndex);
+
+	// Scan backwards from cutIndex to include any non-message entries (settings changes, etc.)
 	while (cutIndex > startIndex) {
 		const prevEntry = entries[cutIndex - 1];
-		// Stop at session header or compaction boundaries
-		if (prevEntry.type === "compaction") {
+		// Stop at session header, compaction, or reset boundaries
+		if (prevEntry.type === "compaction" || prevEntry.type === "reset_boundary") {
 			break;
 		}
-		if (prevEntry.type === "message") {
-			// Stop if we hit any message
+		if (getMessageFromEntry(prevEntry)) {
+			// Stop if we hit any entry that contributes a message
 			break;
 		}
-		// Include this non-message entry (bash, settings change, etc.)
+		// Include this non-message entry (settings change, label, etc.)
 		cutIndex--;
 	}
-
-	// Determine if this is a split turn
-	const cutEntry = entries[cutIndex];
-	const isUserMessage = cutEntry.type === "message" && cutEntry.message.role === "user";
-	const turnStartIndex = isUserMessage ? -1 : findTurnStartIndex(entries, cutIndex, startIndex);
 
 	return {
 		firstKeptEntryIndex: cutIndex,
 		turnStartIndex,
-		isSplitTurn: !isUserMessage && turnStartIndex !== -1,
+		isSplitTurn: !isTurnStart && turnStartIndex !== -1,
 	};
 }
 

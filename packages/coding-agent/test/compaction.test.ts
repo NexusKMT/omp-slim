@@ -20,7 +20,9 @@ import type { AssistantMessage, Model, ProviderPayload, Usage } from "@oh-my-pi/
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { buildSessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
 import type {
+	BranchSummaryEntry,
 	CompactionEntry,
+	CustomMessageEntry,
 	ModelChangeEntry,
 	SessionEntry,
 	SessionMessageEntry,
@@ -170,6 +172,35 @@ function createThinkingLevelEntry(thinkingLevel: string): ThinkingLevelChangeEnt
 		parentId: lastId,
 		timestamp: new Date().toISOString(),
 		thinkingLevel,
+	};
+	lastId = id;
+	return entry;
+}
+
+function createCustomMessageEntry(content: string, customType = "test"): CustomMessageEntry {
+	const id = `test-id-${entryCounter++}`;
+	const entry: CustomMessageEntry = {
+		type: "custom_message",
+		id,
+		parentId: lastId,
+		timestamp: new Date().toISOString(),
+		customType,
+		content,
+		display: true,
+	};
+	lastId = id;
+	return entry;
+}
+
+function createBranchSummaryEntry(summary: string, fromId = "branch-root"): BranchSummaryEntry {
+	const id = `test-id-${entryCounter++}`;
+	const entry: BranchSummaryEntry = {
+		type: "branch_summary",
+		id,
+		parentId: lastId,
+		timestamp: new Date().toISOString(),
+		fromId,
+		summary,
 	};
 	lastId = id;
 	return entry;
@@ -1179,6 +1210,38 @@ describe("findCutPoint", () => {
 		];
 		const cut = findCutPoint(entries, tokenizer, 0, entries.length, 20_000);
 		expect(cut.firstKeptEntryIndex).toBe(2);
+	});
+
+	it("does not re-admit an oversized custom_message during backward scan", () => {
+		const custom = createCustomMessageEntry("x".repeat(100_000));
+		const assistant = createMessageEntry(createAssistantMessage("small answer"));
+		const entries = [custom, assistant];
+
+		const cut = findCutPoint(entries, tokenizer, 0, entries.length, 20_000);
+		expect(cut.firstKeptEntryIndex).toBe(1);
+		expect(cut.isSplitTurn).toBe(true);
+		expect(cut.turnStartIndex).toBe(0);
+
+		const preparation = prepareCompaction(entries, { ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 20_000 });
+		expect(preparation?.firstKeptEntryId).toBe(assistant.id);
+		expect(preparation?.recentMessages).toEqual([assistant.message]);
+		expect(tokenizer.countMessages(preparation!.recentMessages)).toBeLessThanOrEqual(20_000);
+	});
+
+	it("does not re-admit an oversized branch_summary during backward scan", () => {
+		const branch = createBranchSummaryEntry("s".repeat(100_000));
+		const assistant = createMessageEntry(createAssistantMessage("small answer"));
+		const entries = [branch, assistant];
+
+		const cut = findCutPoint(entries, tokenizer, 0, entries.length, 20_000);
+		expect(cut.firstKeptEntryIndex).toBe(1);
+		expect(cut.isSplitTurn).toBe(true);
+		expect(cut.turnStartIndex).toBe(0);
+
+		const preparation = prepareCompaction(entries, { ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 20_000 });
+		expect(preparation?.firstKeptEntryId).toBe(assistant.id);
+		expect(preparation?.recentMessages).toEqual([assistant.message]);
+		expect(tokenizer.countMessages(preparation!.recentMessages)).toBeLessThanOrEqual(20_000);
 	});
 
 	it("should find cut point based on actual token differences", () => {
