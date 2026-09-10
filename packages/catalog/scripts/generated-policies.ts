@@ -124,6 +124,9 @@ export function rebakeModelThinking(model: ModelSpec<Api>): void {
 	const thinking = resolveModelPolicy({ ...model, thinking: undefined }).thinking;
 	if (thinking) {
 		model.thinking = requiresProviderAuthoredEffort ? { ...thinking, requiresEffort: true } : thinking;
+		// Mirror `buildModel`: an exact `thinking-efforts` rule upgrades a
+		// neutral discovery default, so the bundled row stays reasoning-capable.
+		model.reasoning = true;
 	} else {
 		delete model.thinking;
 	}
@@ -212,6 +215,10 @@ export function applyCanonicalLimitFallback(models: ModelSpec<Api>[]): void {
 	const referenceIndex = buildModelReferenceIndex(catalog);
 
 	for (const model of models) {
+		// Command Code rows keep an unknown limit (`null`) when the Provider
+		// API omits it; another host's deployment window must not fill it.
+		// Verified corrections live in KDL, never in a cross-provider lookup.
+		if (model.provider === "commandcode") continue;
 		if (model.contextWindow !== null && model.maxTokens !== null) {
 			continue;
 		}

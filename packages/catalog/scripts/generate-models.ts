@@ -267,7 +267,12 @@ function applyGlobalModelsDevFallback(
 			model.provider === "baseten" ||
 			// Meta's first-party rows come from the reviewed seed; a same-id
 			// gateway row would overwrite their display names.
-			model.provider === "meta"
+			model.provider === "meta" ||
+			// Command Code discovery is authoritative and neutral: the live
+			// rows carry no reasoning/modality metadata and KDL owns the
+			// deployment policy, so a same-id stencil.so overlay would
+			// reintroduce cross-provider reasoning, input, and limits.
+			model.provider === "commandcode"
 		) {
 			return model;
 		}

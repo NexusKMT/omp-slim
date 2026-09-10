@@ -350,29 +350,63 @@ describe("Command Code provider support", () => {
 	});
 	test("omits effort controls for ids outside the verified effort registry", async () => {
 		// Negative contract: ids absent from the exact `thinking-efforts`
-		// groups expose no effort dial upstream, so the provider-default
-		// `supports-reasoning-effort #false` must hold and the OpenAI path
-		// must omit `reasoning_effort` even though bundled class ladders
-		// exist for these lineages on other hosts.
+		// groups expose no effort dial upstream. Discovery stays neutral
+		// (`reasoning: false`, no cross-provider inheritance), the KDL
+		// cascade grants no ladder without an exact rule, and the OpenAI
+		// path omits `reasoning_effort` via the provider-default
+		// `supports-reasoning-effort #false` — including on the Anthropic
+		// route, where a fallback ladder would otherwise emit an
+		// unsupported thinking payload.
 		const fetchMock: FetchImpl = vi.fn(async () =>
 			Response.json({
 				data: [
 					{ id: "moonshotai/Kimi-K2.7-Code", name: "Kimi K2.7 Code", context_length: 262_144 },
 					{ id: "moonshotai/Kimi-K2.5", name: "Kimi K2.5", context_length: 262_144 },
 					{ id: "Qwen/Qwen3.7-Max", name: "Qwen 3.7 Max", context_length: 1_000_000 },
+					{ id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", context_length: 200_000 },
 				],
 			}),
 		);
 		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
 		const specs = await options.fetchDynamicModels?.();
 		const models = (specs ?? []).map(spec => buildModel(spec));
-		expect(models).toHaveLength(3);
+		expect(models).toHaveLength(4);
 		for (const model of models) {
-			expect(model.api).toBe("openai-completions");
+			expect(model.reasoning).toBe(false);
+			expect(model.thinking).toBeUndefined();
+		}
+		for (const model of models.filter(model => model.api === "openai-completions")) {
 			expect(model.compat).toMatchObject({
 				supportsReasoningEffort: false,
 				omitReasoningEffort: true,
 			});
+		}
+		expect(models.find(model => model.id === "claude-haiku-4-5-20251001")).toMatchObject({
+			api: "anthropic-messages",
+		});
+	});
+	test("keeps unknown context limits instead of copying another host", async () => {
+		// A catalog row that omits or misreports `context_length` retains a
+		// null window rather than inheriting another provider's deployment
+		// limit; verified corrections arrive through KDL, never the mapper.
+		const fetchMock: FetchImpl = vi.fn(async () =>
+			Response.json({
+				data: [
+					{ id: "mystery-model", name: "Mystery Model" },
+					{ id: "broken-model", name: "Broken Model", context_length: -5 },
+				],
+			}),
+		);
+		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
+		const specs = await options.fetchDynamicModels?.();
+		expect(specs).toHaveLength(2);
+		for (const spec of specs ?? []) {
+			expect(spec.contextWindow).toBeNull();
+		}
+		const models = (specs ?? []).map(spec => buildModel(spec));
+		for (const model of models) {
+			expect(model.contextWindow).toBeNull();
+			expect(model.input).toEqual(["text"]);
 		}
 	});
 });

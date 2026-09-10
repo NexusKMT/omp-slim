@@ -1065,7 +1065,15 @@ function resolveThinkingPolicy<TApi extends Api>(
 	axes: ResolvedAxes,
 	compat: CompatOf<TApi>,
 ): ThinkingConfig | undefined {
-	if (!spec.reasoning) return undefined;
+	const rule = readRuleThinking(axes);
+	// Command Code discovery deliberately seeds `reasoning: false` (the
+	// catalog rows carry no reasoning metadata and must not inherit another
+	// host's). The cascade upgrades such a target when an exact model
+	// selector declares `thinking-efforts` — a reviewed correction to stale
+	// source capability metadata — so honor the upgrade for this provider
+	// and let KDL-owned ladders materialize. Every other provider keeps the
+	// legacy gate until its bundle is regenerated against it.
+	if (!spec.reasoning && !(spec.provider === "commandcode" && rule.efforts !== undefined)) return undefined;
 	if (
 		spec.provider === "cline-pass" &&
 		compat !== undefined &&
@@ -1075,7 +1083,6 @@ function resolveThinkingPolicy<TApi extends Api>(
 		return undefined;
 	}
 	if (omitsWireReasoningEffort(spec.api, compat)) return undefined;
-	const rule = readRuleThinking(axes);
 	if (spec.thinking && Array.isArray(spec.thinking.efforts) && spec.thinking.efforts.length > 0) {
 		return fillExplicitThinking(spec, facts, compat, spec.thinking, rule);
 	}
