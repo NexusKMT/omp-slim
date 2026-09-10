@@ -97,7 +97,7 @@ describe("loginGitHubCopilot", () => {
 		expect(pollCount).toBeGreaterThanOrEqual(1);
 	});
 
-	async function collectPolicyIntegrationIds() {
+	async function collectPolicyIntegrationIds(integrationId?: unknown) {
 		const policyIntegrationIds: (string | null)[] = [];
 		const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
 			const url = typeof input === "string" ? input : input.toString();
@@ -125,34 +125,21 @@ describe("loginGitHubCopilot", () => {
 			fetch: fetchMock as unknown as typeof fetch,
 			onAuth: vi.fn(),
 			onPrompt: mockOnPrompt(""),
+			copilotIntegrationId: integrationId,
 		});
 		return policyIntegrationIds;
 	}
 
 	it("sends the chat-surface identity on model-policy enablement by default", async () => {
-		const previous = Bun.env.COPILOT_INTEGRATION_ID;
-		delete Bun.env.COPILOT_INTEGRATION_ID;
-		try {
-			const ids = await collectPolicyIntegrationIds();
-			expect(ids.length).toBeGreaterThan(0);
-			expect(ids.every(id => id === "copilot-chat")).toBe(true);
-		} finally {
-			if (previous === undefined) delete Bun.env.COPILOT_INTEGRATION_ID;
-			else Bun.env.COPILOT_INTEGRATION_ID = previous;
-		}
+		const ids = await collectPolicyIntegrationIds();
+		expect(ids.length).toBeGreaterThan(0);
+		expect(ids.every(id => id === "copilot-chat")).toBe(true);
 	});
 
 	it("sends COPILOT_INTEGRATION_ID on model-policy enablement when set", async () => {
-		const previous = Bun.env.COPILOT_INTEGRATION_ID;
-		Bun.env.COPILOT_INTEGRATION_ID = "vscode-chat";
-		try {
-			const ids = await collectPolicyIntegrationIds();
-			expect(ids.length).toBeGreaterThan(0);
-			expect(ids.every(id => id === "vscode-chat")).toBe(true);
-		} finally {
-			if (previous === undefined) delete Bun.env.COPILOT_INTEGRATION_ID;
-			else Bun.env.COPILOT_INTEGRATION_ID = previous;
-		}
+		const ids = await collectPolicyIntegrationIds("vscode-chat");
+		expect(ids.length).toBeGreaterThan(0);
+		expect(ids.every(id => id === "vscode-chat")).toBe(true);
 	});
 
 	it("preserves credentials minted by the former OAuth app", async () => {
@@ -466,58 +453,51 @@ describe("loginGitHubCopilot", () => {
 	});
 
 	it("retries a denied chat-identity policy post once as the Copilot CLI", async () => {
-		const previous = Bun.env.COPILOT_INTEGRATION_ID;
-		delete Bun.env.COPILOT_INTEGRATION_ID;
-		try {
-			let policyCalls = 0;
-			const seen: (string | null)[] = [];
-			const outcomesByUrl = new Map<string, number[]>();
-			const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
-				const url = typeof input === "string" ? input : input.toString();
-				if (url === "https://github.com/login/device/code") {
-					return new Response(JSON.stringify(deviceCodeResponse()), {
-						status: 200,
-						headers: { "Content-Type": "application/json" },
-					});
-				}
-				if (url === "https://github.com/login/oauth/access_token") {
-					return new Response(JSON.stringify(accessTokenResponse()), {
-						status: 200,
-						headers: { "Content-Type": "application/json" },
-					});
-				}
-				if (url.includes("/models/") && url.includes("/policy")) {
-					policyCalls++;
-					seen.push(new Headers(init?.headers).get("Copilot-Integration-Id"));
-					const status = policyCalls === 1 ? 403 : 200;
-					outcomesByUrl.set(url, [...(outcomesByUrl.get(url) ?? []), status]);
-					if (status === 403) {
-						return new Response(JSON.stringify({ error: { message: "denied" } }), {
-							status: 403,
-							headers: { "Content-Type": "application/json" },
-						});
-					}
-					return modelPolicyOk();
-				}
-				throw new Error(`Unexpected URL: ${url}`);
-			});
-
-			await loginGitHubCopilot({
-				...FAST_POLL_OPTIONS,
-				fetch: fetchMock as unknown as typeof fetch,
-				onAuth: vi.fn(),
-				onPrompt: mockOnPrompt(""),
-			});
-
-			expect(seen[0]).toBe("copilot-chat");
-			expect(seen).toContain("copilot-developer-cli");
-			expect(outcomesByUrl.size).toBeGreaterThan(0);
-			for (const statuses of outcomesByUrl.values()) {
-				expect(statuses).toContain(200);
+		let policyCalls = 0;
+		const seen: (string | null)[] = [];
+		const outcomesByUrl = new Map<string, number[]>();
+		const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+			const url = typeof input === "string" ? input : input.toString();
+			if (url === "https://github.com/login/device/code") {
+				return new Response(JSON.stringify(deviceCodeResponse()), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				});
 			}
-		} finally {
-			if (previous === undefined) delete Bun.env.COPILOT_INTEGRATION_ID;
-			else Bun.env.COPILOT_INTEGRATION_ID = previous;
+			if (url === "https://github.com/login/oauth/access_token") {
+				return new Response(JSON.stringify(accessTokenResponse()), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			if (url.includes("/models/") && url.includes("/policy")) {
+				policyCalls++;
+				seen.push(new Headers(init?.headers).get("Copilot-Integration-Id"));
+				const status = policyCalls === 1 ? 403 : 200;
+				outcomesByUrl.set(url, [...(outcomesByUrl.get(url) ?? []), status]);
+				if (status === 403) {
+					return new Response(JSON.stringify({ error: { message: "denied" } }), {
+						status: 403,
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+				return modelPolicyOk();
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		});
+
+		await loginGitHubCopilot({
+			...FAST_POLL_OPTIONS,
+			fetch: fetchMock as unknown as typeof fetch,
+			onAuth: vi.fn(),
+			onPrompt: mockOnPrompt(""),
+		});
+
+		expect(seen[0]).toBe("copilot-chat");
+		expect(seen).toContain("copilot-developer-cli");
+		expect(outcomesByUrl.size).toBeGreaterThan(0);
+		for (const statuses of outcomesByUrl.values()) {
+			expect(statuses).toContain(200);
 		}
 	});
 });

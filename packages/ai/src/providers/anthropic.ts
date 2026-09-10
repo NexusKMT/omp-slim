@@ -107,6 +107,7 @@ import {
 import {
 	buildCopilotDynamicHeaders,
 	hasCopilotVisionInput,
+	resolveCopilotRequestIdentity,
 	resolveGitHubCopilotBaseUrl,
 	wrapFetchForCopilotFallback,
 } from "./github-copilot-headers";
@@ -2027,6 +2028,7 @@ const streamAnthropicOnce = (
 							hasImages: hasCopilotVisionInput(context.messages),
 							premiumMultiplier: model.premiumMultiplier,
 							headers: { ...model.headers, ...options?.headers },
+							integrationId: resolveCopilotRequestIdentity(options?.headers),
 							initiatorOverride: options?.initiatorOverride,
 						})
 					: undefined;
@@ -3283,7 +3285,7 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 			maxRetries: 5,
 			maxRetryDelayMs,
 			defaultHeaders,
-			fetch: wrapFetchForCopilotFallback(cchFetch, true),
+			fetch: wrapFetchForCopilotFallback(cchFetch, true, resolveCopilotRequestIdentity(headers)),
 			fetchOptions,
 		};
 	}

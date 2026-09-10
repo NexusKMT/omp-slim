@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import {
 	buildCopilotDynamicHeaders,
 	getCopilotInitiatorOverride,
@@ -6,19 +6,12 @@ import {
 	hasCopilotVisionInput,
 	inferCopilotInitiator,
 	resolveCopilotIntegrationIdOverride,
+	resolveCopilotRequestIdentity,
 	wrapFetchForCopilotFallback,
 } from "@oh-my-pi/pi-ai/providers/github-copilot-headers";
 import { COPILOT_CHAT_INTEGRATION_ID } from "@oh-my-pi/pi-catalog/wire/github-copilot";
 import type { Message } from "@oh-my-pi/pi-ai/types";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-
-const ORIGINAL_INTEGRATION_ID = Bun.env.COPILOT_INTEGRATION_ID;
-
-afterEach(() => {
-	vi.restoreAllMocks();
-	if (ORIGINAL_INTEGRATION_ID === undefined) delete Bun.env.COPILOT_INTEGRATION_ID;
-	else Bun.env.COPILOT_INTEGRATION_ID = ORIGINAL_INTEGRATION_ID;
-});
 
 describe("inferCopilotInitiator", () => {
 	it("returns 'user' when there are no messages", () => {
@@ -324,29 +317,72 @@ describe("buildCopilotDynamicHeaders", () => {
 
 describe("resolveCopilotIntegrationIdOverride", () => {
 	it("returns undefined when COPILOT_INTEGRATION_ID is unset", () => {
-		delete Bun.env.COPILOT_INTEGRATION_ID;
-		expect(resolveCopilotIntegrationIdOverride()).toBeUndefined();
-	});
-
-	it("sends the configured id on chat requests without touching the rest of the identity", () => {
-		Bun.env.COPILOT_INTEGRATION_ID = "copilot-chat";
-		const { headers } = buildCopilotDynamicHeaders({ messages: [], hasImages: false });
-		expect(headers["Copilot-Integration-Id"]).toBe("copilot-chat");
-		expect(headers["Editor-Version"]).toBe("copilot/1.0.82");
+		expect(resolveCopilotIntegrationIdOverride({})).toBeUndefined();
 	});
 
 	it("trims surrounding whitespace", () => {
-		Bun.env.COPILOT_INTEGRATION_ID = "  vscode-chat  ";
-		expect(resolveCopilotIntegrationIdOverride()).toBe("vscode-chat");
+		expect(resolveCopilotIntegrationIdOverride({ COPILOT_INTEGRATION_ID: "  vscode-chat  " })).toBe("vscode-chat");
 	});
 
 	it("ignores blank and header-injection values", () => {
 		for (const value of ["", "   ", "chat\r\nX-Injected: 1"]) {
-			Bun.env.COPILOT_INTEGRATION_ID = value;
-			expect(resolveCopilotIntegrationIdOverride()).toBeUndefined();
+			expect(resolveCopilotIntegrationIdOverride({ COPILOT_INTEGRATION_ID: value })).toBeUndefined();
 		}
+	});
+});
+
+describe("resolveCopilotRequestIdentity", () => {
+	it("prefers an explicit value over headers and env", () => {
+		expect(
+			resolveCopilotRequestIdentity({ "Copilot-Integration-Id": "copilot-chat" }, "vscode-chat", {
+				COPILOT_INTEGRATION_ID: "other-chat",
+			}),
+		).toBe("vscode-chat");
+	});
+
+	it("reads caller headers case-insensitively ahead of env", () => {
+		expect(resolveCopilotRequestIdentity({ "copilot-integration-id": "copilot-chat" }, undefined, {})).toBe(
+			"copilot-chat",
+		);
+	});
+
+	it("falls back to COPILOT_INTEGRATION_ID", () => {
+		expect(resolveCopilotRequestIdentity(undefined, undefined, { COPILOT_INTEGRATION_ID: "copilot-chat" })).toBe(
+			"copilot-chat",
+		);
+	});
+
+	it("returns undefined when nothing is set", () => {
+		expect(resolveCopilotRequestIdentity(undefined, undefined, {})).toBeUndefined();
+	});
+
+	it("rejects header-injection values from every source", () => {
+		expect(resolveCopilotRequestIdentity({ "Copilot-Integration-Id": "a\r\nb" }, undefined, {})).toBeUndefined();
+		expect(resolveCopilotRequestIdentity(undefined, "a\r\nb", {})).toBeUndefined();
+	});
+});
+
+describe("buildCopilotDynamicHeaders integration identity", () => {
+	it("sends an explicit integration id without touching the rest of the identity", () => {
+		const { headers } = buildCopilotDynamicHeaders({
+			messages: [],
+			hasImages: false,
+			integrationId: "copilot-chat",
+		});
+		expect(headers["Copilot-Integration-Id"]).toBe("copilot-chat");
+		expect(headers["Editor-Version"]).toBe("copilot/1.0.82");
+	});
+
+	it("falls back to the chat-surface default", () => {
 		const { headers } = buildCopilotDynamicHeaders({ messages: [], hasImages: false });
 		expect(headers["Copilot-Integration-Id"]).toBe("copilot-chat");
+	});
+
+	it("treats invalid explicit values as unset", () => {
+		for (const value of ["", "chat\r\nX-Injected: 1"]) {
+			const { headers } = buildCopilotDynamicHeaders({ messages: [], hasImages: false, integrationId: value });
+			expect(headers["Copilot-Integration-Id"]).toBe("copilot-chat");
+		}
 	});
 });
 
@@ -394,11 +430,10 @@ describe("wrapFetchForCopilotFallback", () => {
 		expect(seen).toEqual(["copilot-developer-cli"]);
 	});
 
-	it("respects an explicit COPILOT_INTEGRATION_ID instead of retrying", async () => {
-		Bun.env.COPILOT_INTEGRATION_ID = "vscode-chat";
+	it("respects a resolved identity instead of retrying", async () => {
 		const denied = new Response("{}", { status: 403 });
 		const fetchMock = vi.fn(async () => denied);
-		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true);
+		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true, "vscode-chat");
 		await expect(wrapped(...chatRequest())).resolves.toBe(denied);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});

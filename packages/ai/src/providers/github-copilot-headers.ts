@@ -37,8 +37,40 @@ export function resolveGitHubCopilotBaseUrl(
  * unlocks enterprise/experimental models and listing models is not
  * policy-gated the way chat completions are (#11372).
  */
-export function resolveCopilotIntegrationIdOverride(): string | undefined {
-	return normalizeCopilotIntegrationId($env.COPILOT_INTEGRATION_ID);
+export function resolveCopilotIntegrationIdOverride(
+	env: Record<string, string | undefined> = $env,
+): string | undefined {
+	return normalizeCopilotIntegrationId(env.COPILOT_INTEGRATION_ID);
+}
+
+/**
+ * Explicit caller-supplied `Copilot-Integration-Id`, matched case-insensitively.
+ * Takes only caller layers (`extraHeaders` / `options.headers`) — never model
+ * catalog headers — so a catalog default can never masquerade as a choice.
+ */
+function explicitCopilotIntegrationId(headers: Record<string, string> | undefined): unknown {
+	if (!headers) return undefined;
+	for (const name of Object.keys(headers)) {
+		if (name.toLowerCase() === "copilot-integration-id") return headers[name];
+	}
+	return undefined;
+}
+
+/**
+ * Effective identity before the chat-surface default: explicit value, then
+ * request headers, then `COPILOT_INTEGRATION_ID`. Pure given its inputs, so
+ * tests inject literals instead of mutating process state.
+ */
+export function resolveCopilotRequestIdentity(
+	headers?: Record<string, string>,
+	explicit?: unknown,
+	env: Record<string, string | undefined> = $env,
+): string | undefined {
+	return (
+		normalizeCopilotIntegrationId(explicit) ??
+		normalizeCopilotIntegrationId(explicitCopilotIntegrationId(headers)) ??
+		resolveCopilotIntegrationIdOverride(env)
+	);
 }
 
 /**
@@ -47,20 +79,23 @@ export function resolveCopilotIntegrationIdOverride(): string | undefined {
  * Chat is the default surface (`COPILOT_CHAT_INTEGRATION_ID`) because Business
  * organizations that gate premium models per client surface commonly allow
  * chat while blocking CLI/agentic clients (issue #11372). The retry fires
- * only for requests carrying the chat default and only when no explicit
- * `COPILOT_INTEGRATION_ID` is set — an explicit choice is never
- * second-guessed. The denied body is drained before reissuing, and the retry
- * carries the CLI identity so the guard passes it through: at most two
- * requests, never a loop.
+ * only for requests carrying the chat default and only when the caller
+ * resolved no explicit identity — an explicit choice is never second-guessed.
+ * The denied body is drained before reissuing, and the retry carries the CLI
+ * identity so the guard passes it through: at most two requests, never a loop.
  */
-export function wrapFetchForCopilotFallback(base: FetchImpl | undefined, enabled: boolean): FetchImpl {
+export function wrapFetchForCopilotFallback(
+	base: FetchImpl | undefined,
+	enabled: boolean,
+	integrationId?: unknown,
+): FetchImpl {
 	const inner = base ?? fetch;
 	if (!enabled) return inner;
 	return async (input, init) => {
 		const response = await inner(input, init);
 		if (response.status !== 403) return response;
 		if (input instanceof Request) return response;
-		if (resolveCopilotIntegrationIdOverride() !== undefined) return response;
+		if (normalizeCopilotIntegrationId(integrationId) !== undefined) return response;
 		const outgoing = new Headers(init?.headers);
 		if (outgoing.get("Copilot-Integration-Id") !== COPILOT_CHAT_INTEGRATION_ID) {
 			return response;
@@ -169,6 +204,8 @@ export function buildCopilotDynamicHeaders(params: {
 	headers?: Record<string, string>;
 	initiatorOverride?: CopilotInitiator;
 	planTier?: string;
+	/** Raw explicit identity; validated here, chat default when absent/invalid. */
+	integrationId?: unknown;
 }): CopilotDynamicHeaders {
 	const initiator =
 		params.initiatorOverride ?? getCopilotInitiatorOverride(params.headers) ?? inferCopilotInitiator(params.messages);
@@ -177,7 +214,8 @@ export function buildCopilotDynamicHeaders(params: {
 		"X-Initiator": initiator,
 		"X-Interaction-Type": `conversation-${initiator}`,
 	};
-	headers["Copilot-Integration-Id"] = resolveCopilotIntegrationIdOverride() ?? COPILOT_CHAT_INTEGRATION_ID;
+	headers["Copilot-Integration-Id"] =
+		normalizeCopilotIntegrationId(params.integrationId) ?? COPILOT_CHAT_INTEGRATION_ID;
 
 	if (params.hasImages) {
 		headers["Copilot-Vision-Request"] = "true";

@@ -79,58 +79,45 @@ describe("GitHub Copilot OpenAI transport base URL", () => {
 		expect(requestedUrls[0]).toBe("https://api.githubcopilot.com/chat/completions");
 	});
 
-	it("sends the COPILOT_INTEGRATION_ID override on chat completions", async () => {
-		const previous = Bun.env.COPILOT_INTEGRATION_ID;
-		Bun.env.COPILOT_INTEGRATION_ID = "copilot-chat";
-		try {
-			const requestedIntegrationIds: (string | null)[] = [];
-			const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-				requestedIntegrationIds.push(getRequestHeader(input, init, "Copilot-Integration-Id"));
-				return createUnauthorizedResponse();
-			});
+	it("sends an explicit caller integration id on chat completions", async () => {
+		const requestedIntegrationIds: (string | null)[] = [];
+		const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+			requestedIntegrationIds.push(getRequestHeader(input, init, "Copilot-Integration-Id"));
+			return createUnauthorizedResponse();
+		});
 
-			const model = getBundledModel("github-copilot", "gpt-4o") as Model<"openai-completions">;
-			const result = await streamOpenAICompletions(model, testContext, {
-				apiKey: testToken,
-				fetch: fetchMock as unknown as typeof fetch,
-			}).result();
+		const model = getBundledModel("github-copilot", "gpt-4o") as Model<"openai-completions">;
+		const result = await streamOpenAICompletions(model, testContext, {
+			apiKey: testToken,
+			fetch: fetchMock as unknown as typeof fetch,
+			headers: { "Copilot-Integration-Id": "vscode-chat" },
+		}).result();
 
-			expect(result.stopReason).toBe("error");
-			expect(requestedIntegrationIds.length).toBeGreaterThan(0);
-			expect(requestedIntegrationIds.every(id => id === "copilot-chat")).toBe(true);
-		} finally {
-			if (previous === undefined) delete Bun.env.COPILOT_INTEGRATION_ID;
-			else Bun.env.COPILOT_INTEGRATION_ID = previous;
-		}
+		expect(result.stopReason).toBe("error");
+		expect(requestedIntegrationIds.length).toBeGreaterThan(0);
+		expect(requestedIntegrationIds.every(id => id === "vscode-chat")).toBe(true);
 	});
 
 	it("retries a denied chat-surface request once as the Copilot CLI", async () => {
-		const previous = Bun.env.COPILOT_INTEGRATION_ID;
-		delete Bun.env.COPILOT_INTEGRATION_ID;
-		try {
-			const seenIntegrationIds: (string | null)[] = [];
-			const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-				seenIntegrationIds.push(getRequestHeader(input, init, "Copilot-Integration-Id"));
-				return new Response(JSON.stringify({ error: { message: "denied" } }), {
-					status: 403,
-					headers: { "Content-Type": "application/json" },
-				});
+		const seenIntegrationIds: (string | null)[] = [];
+		const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+			seenIntegrationIds.push(getRequestHeader(input, init, "Copilot-Integration-Id"));
+			return new Response(JSON.stringify({ error: { message: "denied" } }), {
+				status: 403,
+				headers: { "Content-Type": "application/json" },
 			});
+		});
 
-			const model = getBundledModel("github-copilot", "gpt-4o") as Model<"openai-completions">;
-			const result = await streamOpenAICompletions(model, testContext, {
-				apiKey: testToken,
-				fetch: fetchMock as unknown as typeof fetch,
-			}).result();
+		const model = getBundledModel("github-copilot", "gpt-4o") as Model<"openai-completions">;
+		const result = await streamOpenAICompletions(model, testContext, {
+			apiKey: testToken,
+			fetch: fetchMock as unknown as typeof fetch,
+		}).result();
 
-			expect(result.stopReason).toBe("error");
-			expect(fetchMock).toHaveBeenCalledTimes(2);
-			expect(seenIntegrationIds).toEqual(["copilot-chat", "copilot-developer-cli"]);
-			expect(result.errorMessage).toContain("GitHub Copilot access denied (HTTP 403)");
-		} finally {
-			if (previous === undefined) delete Bun.env.COPILOT_INTEGRATION_ID;
-			else Bun.env.COPILOT_INTEGRATION_ID = previous;
-		}
+		expect(result.stopReason).toBe("error");
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(seenIntegrationIds).toEqual(["copilot-chat", "copilot-developer-cli"]);
+		expect(result.errorMessage).toContain("GitHub Copilot access denied (HTTP 403)");
 	});
 
 	it("uses model baseUrl for responses API", async () => {
