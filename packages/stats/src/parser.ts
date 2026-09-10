@@ -155,11 +155,16 @@ function extractUserStats(sessionFile: string, folder: string, entry: SessionMes
  * counter is whatever was persisted, not what `Usage` declares. A non-numeric
  * bucket (`input: "10"`) must never be parsed and must never be summed: `+`
  * would concatenate it into the derived total and SQLite would coerce the
- * resulting string to a different, far larger number. Malformed input counts
- * as absent.
+ * resulting string to a different, far larger number. A non-finite one
+ * (`input: 1e999` is legal JSON) must not reach a NOT NULL column either.
+ * Malformed input counts as absent.
  */
+function isFiniteCount(value: unknown): value is number {
+	return typeof value === "number" && Number.isFinite(value);
+}
+
 function finiteTokenCount(value: unknown): number {
-	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+	return isFiniteCount(value) ? value : 0;
 }
 
 /**
@@ -219,11 +224,11 @@ function extractStats(
 	const tier = resolveModelServiceTier(currentServiceTier, model);
 	const derived = recorded > 0 ? recorded : getPriorityPremiumRequests(tier, model);
 	const wellFormed =
-		typeof rawUsage.input === "number" &&
-		typeof rawUsage.output === "number" &&
-		typeof rawUsage.cacheRead === "number" &&
-		typeof rawUsage.cacheWrite === "number" &&
-		typeof rawUsage.totalTokens === "number";
+		isFiniteCount(rawUsage.input) &&
+		isFiniteCount(rawUsage.output) &&
+		isFiniteCount(rawUsage.cacheRead) &&
+		isFiniteCount(rawUsage.cacheWrite) &&
+		isFiniteCount(rawUsage.totalTokens);
 	const usage: MessageStatsInput["usage"] =
 		wellFormed && derived === recorded
 			? (rawUsage as Usage)

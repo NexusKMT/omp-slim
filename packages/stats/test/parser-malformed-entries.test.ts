@@ -298,4 +298,38 @@ describe("legacy entries without a recorded price", () => {
 		expect(request?.usage.totalTokens).toBe(0);
 		expect(request?.usage.input).toBe(0);
 	});
+
+	// `1e999` is legal JSON and parses to `Infinity`, so a bucket can be a
+	// number and still be unusable. It used to satisfy the "well-formed" fast
+	// path, skipping the repair branch entirely and binding an infinite token
+	// count into a NOT NULL column; a non-finite provider total did the same.
+	it("counts a non-finite token bucket as absent instead of binding it", async () => {
+		const peak = Date.parse("2026-09-10T02:00:00Z");
+		const entry = (id: string, usage: string) =>
+			`{"type":"message","id":"${id}","timestamp":"2026-09-10T02:00:00.000Z","message":{"role":"assistant","content":[],"provider":"deepseek","model":"deepseek-v4-flash","api":"openai-completions","stopReason":"stop","timestamp":${peak},"usage":${usage}}}`;
+		const file = await writeSession([
+			entry("infinite-bucket", '{"input":1e999,"output":0,"cacheRead":0,"cacheWrite":0}'),
+			entry("infinite-total", '{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":1e999}'),
+		]);
+
+		const result = await parseSessionFile(file);
+		expect(result.stats).toHaveLength(2);
+		expect(result.stats.map(s => [s.usage.input, s.usage.totalTokens])).toEqual([
+			[0, 0],
+			[10, 15],
+		]);
+
+		await initDb();
+		expect(insertMessageStats(result.stats)).toBe(2);
+
+		const stored = getRecentRequests(2);
+		const infiniteBucket = stored.find(request => request.entryId === "infinite-bucket");
+		const infiniteTotal = stored.find(request => request.entryId === "infinite-total");
+		expect(Number.isFinite(infiniteBucket?.usage.input)).toBe(true);
+		expect(infiniteBucket?.usage.input).toBe(0);
+		expect(infiniteBucket?.usage.totalTokens).toBe(0);
+		// A finite provider total is authoritative; only a non-finite one is derived.
+		expect(infiniteTotal?.usage.input).toBe(10);
+		expect(infiniteTotal?.usage.totalTokens).toBe(15);
+	});
 });
