@@ -1259,11 +1259,12 @@ function normalizeRenderOptions(raw: unknown): AskRenderOption[] | undefined {
 /**
  * Format a model-provided id/label for a validation error. Degenerate input
  * can carry tabs or kilobytes of text, and the error echoes through the
- * plain `Text` fallback renderer — expand tabs and clamp width like every
- * other error display path (`formatErrorMessage`).
+ * plain `Text` fallback renderer — expand tabs FIRST so the width bound
+ * applies to displayed cells, then clamp like every other error display
+ * path (`formatErrorMessage`).
  */
 function formatErrorValue(value: string): string {
-	return replaceTabs(truncateToWidth(value, TRUNCATE_LENGTHS.LINE));
+	return truncateToWidth(replaceTabs(value), TRUNCATE_LENGTHS.LINE);
 }
 /** Strip the `\r` runs degenerate models inject, so persisted call args render as prose. */
 function sanitizeAskParams(params: AskParams): AskParams {

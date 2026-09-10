@@ -2122,7 +2122,7 @@ describe("AskTool carriage-return sanitization", () => {
 		const context = createContext({ askDialog: askDialog as never });
 		// Degenerate duplicate values echo through the plain Text fallback
 		// renderer — raw tabs or kilobytes of text would corrupt the frame.
-		const dupe = `Tab\there${"x".repeat(500)}`;
+		const dupe = `Tab\there${"\t".repeat(40)}${"x".repeat(500)}`;
 		const args = {
 			questions: [{ id: "q1", question: "Q?", options: [{ label: dupe }, { label: dupe }] }],
 		};
