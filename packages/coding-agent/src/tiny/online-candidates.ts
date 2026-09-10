@@ -1,5 +1,5 @@
 import type { Api, Model } from "@oh-my-pi/pi-ai";
-import { resolveRoleSelection } from "../config/model-resolver";
+import { formatModelStringWithRouting, resolveRoleSelection } from "../config/model-resolver";
 import type { Settings } from "../config/settings";
 import {
 	expandDefaultRetryFallbackChains,
@@ -18,6 +18,11 @@ function modelKey(model: Model<Api>): string {
 	return `${model.provider}/${model.id}`;
 }
 
+/** Dedup key that keeps distinct `@upstream` routes as separate candidates. */
+function candidateKey(model: Model<Api>): string {
+	return formatModelStringWithRouting(model);
+}
+
 /**
  * Collect unique online models for lightweight background tasks.
  *
@@ -32,7 +37,7 @@ export function collectOnlineTinyCandidates(
 	const seen = new Set<string>();
 	const out: OnlineTinyCandidate[] = [];
 	const add = (role: string, model: Model<Api>) => {
-		const key = modelKey(model);
+		const key = candidateKey(model);
 		if (seen.has(key)) return;
 		seen.add(key);
 		out.push({ role, model });

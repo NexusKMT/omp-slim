@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { formatModelStringWithRouting } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { collectOnlineTinyCandidates } from "@oh-my-pi/pi-coding-agent/tiny/online-candidates";
 
@@ -117,5 +118,18 @@ describe("online tiny fallback candidates", () => {
 				candidate => `${candidate.model.provider}/${candidate.model.id}`,
 			),
 		).toEqual([`${routed.provider}/${routed.id}`, `${fallback.provider}/${fallback.id}`]);
+	});
+
+	it("keeps distinct @upstream routes for the same aggregator model", () => {
+		const routed = getBundledModel("openrouter", "google/gemini-2.5-flash")!;
+		const settings = Settings.isolated({ "retry.modelFallback": true });
+		settings.setModelRole("tiny", "openrouter/google/gemini-2.5-flash@cerebras");
+		settings.setModelRole("smol", "openrouter/google/gemini-2.5-flash@openai");
+		const result = collectOnlineTinyCandidates(["tiny", "smol"], settings, [...models, routed]);
+		expect(result.map(candidate => formatModelStringWithRouting(candidate.model))).toEqual([
+			"openrouter/google/gemini-2.5-flash@cerebras",
+			"openrouter/google/gemini-2.5-flash@openai",
+		]);
+		expect(result.map(candidate => candidate.role)).toEqual(["tiny", "smol"]);
 	});
 });
