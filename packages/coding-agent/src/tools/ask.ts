@@ -38,7 +38,14 @@ import askDescription from "../prompts/tools/ask.md" with { type: "text" };
 import { vocalizer } from "../tts/vocalizer";
 import { framedBlock, outputBlockContentWidth, renderStatusLine } from "../tui";
 import type { ToolSession } from ".";
-import { formatErrorMessage, formatMeta, formatTitle, sanitizeCarriageReturns, TRUNCATE_LENGTHS } from "./render-utils";
+import {
+	disambiguateDisplayLabels,
+	formatErrorMessage,
+	formatMeta,
+	formatTitle,
+	sanitizeCarriageReturns,
+	TRUNCATE_LENGTHS,
+} from "./render-utils";
 import { ToolAbortError } from "./tool-errors";
 
 // =============================================================================
@@ -636,7 +643,14 @@ async function askSingleQuestion(
 		selectedOptions = Array.from(selected);
 	} else {
 		while (true) {
-			const displayOptions = addRecommendedSuffix(questionOptions, recommended);
+			const baseDisplay = addRecommendedSuffix(questionOptions, recommended);
+			// Badging can collide rows (recommended `Retry now` vs a literal
+			// `Retry now (Recommended)`); disambiguate display copies like
+			// the rich dialog and map the choice back by identity below.
+			const displayLabels = disambiguateDisplayLabels(baseDisplay.map(getSelectOptionLabel), [OTHER_OPTION]);
+			const displayOptions: ExtensionUISelectItem[] = baseDisplay.map((option, index) =>
+				typeof option === "string" ? displayLabels[index]! : { ...option, label: displayLabels[index]! },
+			);
 			const optionsWithNavigation: ExtensionUISelectItem[] = [...displayOptions, OTHER_OPTION];
 
 			let initialIndex = recommended;
@@ -881,6 +895,27 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 					{
 						type: "text" as const,
 						text: `Error: option labels must not collide with reserved runtime labels: ${formatErrorValue(reservedCollision.label)}`,
+					},
+				],
+				details: {},
+			};
+		}
+		// The degraded multi-select completion row is theme-labeled and only
+		// appended after an answer exists, but the choice handler matches it
+		// unconditionally — a sanitized model label would exit instead of
+		// selecting. Fail closed like the other sentinels (multi-select only;
+		// single-select has no Done row).
+		const doneActionLabel = getDoneOptionLabel();
+		const doneCollision = params.questions
+			.filter(question => question.multi === true)
+			.flatMap(question => question.options)
+			.find(option => option.label === doneActionLabel);
+		if (doneCollision !== undefined) {
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: `Error: option labels must not collide with reserved runtime labels: ${formatErrorValue(doneCollision.label)}`,
 					},
 				],
 				details: {},

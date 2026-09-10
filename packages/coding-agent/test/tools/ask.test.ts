@@ -8,7 +8,7 @@ import type {
 	ExtensionAskDialogResult,
 	ExtensionUISelectItem,
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
-import { getThemeByName, initTheme, type Theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { getThemeByName, initTheme, theme, type Theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { AskTool, askToolRenderer } from "@oh-my-pi/pi-coding-agent/tools/ask";
 import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
@@ -2167,6 +2167,61 @@ describe("AskTool carriage-return sanitization", () => {
 		expect(result.content[0]?.type).toBe("text");
 		if (result.content[0]?.type !== "text") throw new Error("Expected text result");
 		expect(result.content[0].text).toContain("Use cache (Recommended)");
+		expect(result.content[0].text).not.toContain("\r");
+	});
+
+	it("disambiguates badged rows in the degraded selector", async () => {
+		const tool = new AskTool(createSession());
+		// Recommended `Retry\rnow` badges to `Retry now (Recommended)`,
+		// colliding with the literal second option — rows must stay distinct
+		// and the second row must map back to its own original.
+		const select = vi.fn(async (_prompt: string, options: ExtensionUISelectItem[]) => {
+			const labels = options.map(selectItemLabel);
+			expect(labels.slice(0, 2)).toEqual(["Retry now (Recommended)", "Retry now (Recommended) (2)"]);
+			return "Retry now (Recommended) (2)";
+		});
+		const context = createContext({ select });
+		const result = await tool.execute(
+			"call-cr-degraded-badge",
+			{
+				questions: [
+					{
+						id: "q1",
+						question: "Retry?",
+						options: [{ label: "Retry\rnow" }, { label: "Retry now (Recommended)" }],
+						recommended: 0,
+					},
+				],
+			},
+			undefined,
+			undefined,
+			context,
+		);
+		expect(result.details?.selectedOptions).toEqual(["Retry now (Recommended)"]);
+	});
+
+	it("fails closed when a label sanitizes to the multi-select Done action", async () => {
+		const tool = new AskTool(createSession());
+		const select = vi.fn(async () => "unreached");
+		const context = createContext({ select });
+		// The degraded Done row is theme-labeled and conditional, but the
+		// choice handler matches it unconditionally — a sanitized model
+		// label would exit instead of selecting.
+		const args = {
+			questions: [
+				{
+					id: "q1",
+					question: "Q?",
+					options: [{ label: `${theme.status.success}\rDone selecting` }, { label: "Other" }],
+					multi: true,
+				},
+			],
+		};
+		const result = await tool.execute("call-cr-done", args, undefined, undefined, context);
+		expect(select).not.toHaveBeenCalled();
+		expect(result.content[0]?.type).toBe("text");
+		if (result.content[0]?.type !== "text") throw new Error("Expected text result");
+		expect(result.content[0].text).toContain("reserved runtime labels");
 		expect(result.content[0].text).not.toContain("\r");
 	});
 });
