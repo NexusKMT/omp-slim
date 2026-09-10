@@ -516,7 +516,7 @@ export class CustomEditor extends Editor {
 	 *  chips band and atomic deletion return), and re-materializes `file://` links so the tokens
 	 *  are clickable again instead of degrading to dead text (esc-esc branch, `/tree`). */
 	setDraft(text: string, images?: readonly ImageContent[]): void {
-		this.clearAtoms();
+		this.clearPasteState();
 		this.pendingTexts = [];
 		this.#textAttachmentCounter = 0;
 		this.imageLinks = undefined;

@@ -154,6 +154,78 @@ describe("cleared draft recall", () => {
 		expect(editor.pendingTexts).toEqual([]);
 	});
 
+	it("does not submit a canceled image with another history entry after editing the recalled draft", () => {
+		const editor = new CustomEditor(getEditorTheme());
+		editor.setDraft("canceled [Image #1]", [image]);
+		editor.clearDraftForRecall();
+		editor.addToHistory("different [Image #1]");
+		editor.handleInput("\x1b[A");
+		editor.handleInput("\x1b[A");
+		expect(editor.pendingImages).toEqual([image]);
+		editor.handleInput("\x05");
+		editor.handleInput("\x15"); // Delete the recalled text without clearing its attachment state.
+		expect(editor.getText()).toBe("");
+		editor.handleInput("\x1b[A");
+		expect(editor.getText()).toBe("different [Image #1]");
+		const submitted: { text: string; images: ImageContent[] }[] = [];
+		editor.onSubmit = text => {
+			submitted.push({ text, images: [...editor.pendingImages] });
+		};
+		editor.handleInput("\r");
+		expect(submitted).toEqual([{ text: "different [Image #1]", images: [] }]);
+	});
+
+	it("does not expand another history entry with paste payloads from an edited recalled draft", () => {
+		const editor = new CustomEditor(getEditorTheme());
+		editor.insertTextAttachment("canceled text attachment");
+		editor.insertPaste("canceled legacy paste");
+		const otherPrompt = `different ${editor.getText()}`.trim();
+		editor.clearDraftForRecall();
+		editor.addToHistory(otherPrompt);
+		editor.handleInput("\x1b[A");
+		editor.handleInput("\x1b[A");
+		editor.handleInput("\x05");
+		editor.handleInput("\x15");
+		expect(editor.getText()).toBe("");
+		editor.handleInput("\x1b[A");
+		expect(editor.getText()).toBe(otherPrompt);
+		const submitted: string[] = [];
+		editor.onSubmit = text => {
+			submitted.push(text);
+		};
+		editor.handleInput("\r");
+		expect(submitted).toEqual([otherPrompt]);
+		expect(editor.pendingTexts).toEqual([]);
+	});
+
+	for (const transition of ["discard", "submit", "replace"] as const) {
+		it(`preserves a fresh image during normal history recall after ${transition} of a recalled draft`, () => {
+			const editor = new CustomEditor(getEditorTheme());
+			editor.setDraft("canceled [Image #1]", [image]);
+			editor.clearDraftForRecall();
+			editor.handleInput("\x1b[A");
+			if (transition === "discard") editor.clearDraft();
+			if (transition === "submit") editor.handleInput("\r");
+			const freshImage: ImageContent = { ...image, data: "ZnJlc2g=" };
+			if (transition === "replace") {
+				editor.setDraft("fresh [Image #1]", [freshImage]);
+			} else {
+				editor.pendingImages = [freshImage];
+				editor.setCollapsedText("fresh [Image #1]");
+			}
+			editor.addToHistory("submitted [Image #1]");
+			editor.handleInput("\x05");
+			editor.handleInput("\x15");
+			editor.handleInput("\x1b[A");
+			const submitted: { text: string; images: ImageContent[] }[] = [];
+			editor.onSubmit = text => {
+				submitted.push({ text, images: [...editor.pendingImages] });
+			};
+			editor.handleInput("\r");
+			expect(submitted).toEqual([{ text: "submitted [Image #1]", images: [freshImage] }]);
+		});
+	}
+
 	it("does not persist canceled drafts or hide prior history behind empty clears", () => {
 		const written: string[] = [];
 		const editor = new CustomEditor(getEditorTheme());

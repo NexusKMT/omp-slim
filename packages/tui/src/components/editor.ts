@@ -617,6 +617,8 @@ export class Editor implements Component, Focusable {
 	#history: LocalHistoryEntry[] = [];
 	#historyIndex: number = -1; // -1 = not browsing, 0 = most recent, 1 = older, etc.
 	#historyStorage?: HistoryStorage;
+	// Recalled payloads outlive browsing when an edit resets #historyIndex.
+	#historyDraftActive = false;
 
 	// Undo stack for editor state changes
 	#undoStack: EditorState[] = [];
@@ -902,6 +904,7 @@ export class Editor implements Component, Focusable {
 		this.#pastes.clear();
 		this.#pasteCounter = 0;
 		this.#atoms.clear();
+		this.#historyDraftActive = false;
 	}
 
 	/** Restore host-owned draft state before history text triggers onChange. */
@@ -935,14 +938,14 @@ export class Editor implements Component, Focusable {
 		if (this.#history.length === 0) return;
 		const newIndex = this.#historyIndex - direction; // Up(-1) increases index, Down(1) decreases
 		if (newIndex < -1 || newIndex >= this.#history.length) return;
-		const previousHadDraft = this.#history[this.#historyIndex]?.draft !== undefined;
 		this.#historyIndex = newIndex;
 		const entry = this.#history[this.#historyIndex];
-		if (entry?.draft || previousHadDraft) {
+		if (entry?.draft || this.#historyDraftActive) {
 			this.#pastes = new Map(entry?.draft?.pastes);
 			this.#atoms = new Map(entry?.draft?.atoms);
 			this.#pasteCounter = entry?.draft?.pasteCounter ?? 0;
 			this.restoreHistoryState(entry?.draft?.restore);
+			this.#historyDraftActive = entry?.draft !== undefined;
 		}
 		const cursorAnchor: HistoryCursorAnchor = direction === -1 ? "start" : "end";
 		this.#setTextInternal(entry?.text ?? "", cursorAnchor);
@@ -2918,9 +2921,7 @@ export class Editor implements Component, Focusable {
 		const result = this.#expandPasteMarkers(this.#state.lines.join("\n")).trim();
 
 		this.#state = { lines: [""], cursorLine: 0, cursorCol: 0 };
-		this.#pastes.clear();
-		this.#pasteCounter = 0;
-		this.#atoms.clear();
+		this.clearPasteState();
 		this.#historyIndex = -1;
 		this.#scrollOffset = 0;
 		this.#undoStack.length = 0;
