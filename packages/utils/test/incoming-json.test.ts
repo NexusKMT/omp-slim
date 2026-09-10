@@ -436,6 +436,13 @@ describe("incoming JSON cursors", () => {
 		feed.finish();
 		expect(await items.next()).toBeUndefined();
 		expect(sum).toBe((count * (count - 1)) / 2);
-		expect(performance.now() - started).toBeLessThan(2_000);
-	});
+		// Wall-clock ceiling, not a performance target: shared-core CI runners
+		// measured 2062 ms here against a 2 s bound, and a loaded local repro
+		// reached ~2.8 s. A rescanning regression would be orders of magnitude
+		// slower (quadratic over 20_000 elements), so 15 s keeps the guard
+		// while tolerating slow runners.
+		expect(performance.now() - started).toBeLessThan(15_000);
+		// Bun's 5 s default test timeout is tighter than the ceiling above;
+		// give loaded runners an explicit budget (logger-contract precedent).
+	}, 30_000);
 });
