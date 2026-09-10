@@ -168,12 +168,26 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 	// diagnostics and await the tail before returning.
 	let stderrTail: Promise<void> = Promise.resolve();
 	const writeStderrLine = (line: string): void => {
-		stderrTail = stderrTail.then(async () => {
-			if (process.stderr.write(`${line}\n`)) return;
-			const { promise, resolve } = Promise.withResolvers<void>();
-			process.stderr.once("drain", resolve);
-			await promise;
-		});
+		stderrTail = stderrTail
+			.then(async () => {
+				if (process.stderr.write(`${line}\n`)) return;
+				const { promise, resolve } = Promise.withResolvers<void>();
+				// A closed stream never emits `drain`; resolve on error/close too so
+				// an undeliverable diagnostic cannot strand the tail.
+				const settle = (): void => {
+					process.stderr.off("drain", settle);
+					process.stderr.off("error", settle);
+					process.stderr.off("close", settle);
+					resolve();
+				};
+				process.stderr.on("drain", settle);
+				process.stderr.on("error", settle);
+				process.stderr.on("close", settle);
+				await promise;
+			})
+			// A stderr that throws (EPIPE) must not poison the tail: it would skip
+			// every later diagnostic and reject the awaited tail below.
+			.catch(() => {});
 	};
 
 	// Discriminates a store failure from any other dispose rejection below.

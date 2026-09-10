@@ -1089,11 +1089,27 @@ export async function runRpcMode(
 			await session.dispose();
 		} catch (error) {
 			if (!persistenceFailure) throw error;
+			// The notice frame this failure queued must reach the client before the
+			// process ends (review 3983906393).
 			await stdoutQueue;
-			if (!process.stderr.write(`${formatPersistenceDurabilityFailure(persistenceFailure.message)}\n`)) {
-				const { promise, resolve } = Promise.withResolvers<void>();
-				process.stderr.once("drain", resolve);
-				await promise;
+			try {
+				if (!process.stderr.write(`${formatPersistenceDurabilityFailure(persistenceFailure.message)}\n`)) {
+					const { promise, resolve } = Promise.withResolvers<void>();
+					// A closed stream never emits `drain`; resolve on error/close too
+					// so an undeliverable mirror cannot strand the exit.
+					const settle = (): void => {
+						process.stderr.off("drain", settle);
+						process.stderr.off("error", settle);
+						process.stderr.off("close", settle);
+						resolve();
+					};
+					process.stderr.on("drain", settle);
+					process.stderr.on("error", settle);
+					process.stderr.on("close", settle);
+					await promise;
+				}
+			} catch {
+				// A mirror that cannot be written must not cost the exit code.
 			}
 			process.exit(1);
 		}

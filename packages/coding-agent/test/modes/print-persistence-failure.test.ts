@@ -182,6 +182,52 @@ describe("headless persistence-failure surface", () => {
 		expect(transcript).toContain("recovered-user");
 	});
 
+	it("keeps running, and keeps writing later diagnostics, when stderr throws", async () => {
+		const manager = makeSessionManager();
+		await manager.ensureOnDisk();
+		manager.appendMessage(assistant("seed"));
+
+		const restoreWrites = failWrites();
+		// A broken stderr pipe (EPIPE) on every persistence diagnostic.
+		const attempted: string[] = [];
+		const stderr = spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+			const text = String(chunk);
+			if (!text.includes("Session persistence")) return true;
+			attempted.push(text);
+			throw Object.assign(new Error("EPIPE: broken pipe"), { code: "EPIPE" });
+		}) as never);
+
+		const session = {
+			extensionRunner: undefined,
+			subscribe: () => {},
+			settings: { get: () => false },
+			sessionManager: manager,
+			getLastAssistantMessage: () => assistant(""),
+			prepareForHeadlessAdvisorDrain: () => {},
+			setTextOutputCommitted: () => {},
+			waitForAdvisorCatchup: async () => true,
+			prompt: async () => {
+				manager.appendMessage({ role: "user", content: "boom-user", timestamp: Date.now() } as never);
+			},
+			dispose: async () => {
+				await manager.close();
+			},
+		} as unknown as AgentSession;
+
+		let exitCode = -1;
+		try {
+			exitCode = await runPrintMode(session, { mode: "text", initialMessage: "hello" });
+		} finally {
+			stderr.mockRestore();
+			restoreWrites();
+		}
+
+		// The first-failure line and the teardown claim both reached the writer:
+		// one undeliverable diagnostic must not swallow the other.
+		expect(attempted).toHaveLength(2);
+		expect(exitCode).toBe(1);
+	});
+
 	it("emits a notice and a stderr line when an RPC session's store fails", () => {
 		const manager = makeSessionManager();
 		manager.appendMessage(assistant("seed"));
