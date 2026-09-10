@@ -33,7 +33,7 @@ export class TracePathError extends Error {}
  * span assembly changes so browsers don't revalidate stale cached bodies
  * against an unchanged transcript mtime.
  */
-export const TRACE_ETAG_VERSION = 2;
+export const TRACE_ETAG_VERSION = 3;
 
 const MAX_TRACK_DEPTH = 6;
 const LABEL_MAX = 80;
