@@ -353,6 +353,12 @@ export const AXES: Readonly<Record<string, AxisDef>> = {
 	"prompt-cache": { key: "promptCache", set: "catalog", shape: "object" },
 	"long-usage-limit-fallback": { key: "longUsageLimitFallback", set: "catalog", shape: "scalar" },
 	"max-context-window": { key: "maxContextWindow", set: "catalog", shape: "scalar" },
+	"pricing-status": {
+		key: "pricingStatus",
+		set: "catalog",
+		shape: "scalar",
+		values: ["free", "included", "variable", "unknown"],
+	},
 	"requires-cursor-tool-schema-projection": {
 		key: "requiresCursorToolSchemaProjection",
 		set: "catalog",
