@@ -1005,6 +1005,30 @@ export const BeforeSubmitPromptRequestResponseSchema: MessageCodec<BeforeSubmitP
 	{ no: 3, name: "additionalContext", kind: "string", optional: true },
 ]);
 
+/** Cursor agent message aiserver.v1.BidiAppendRequest. */
+export interface BidiAppendRequest extends ProtoMessage {
+	data: string;
+	requestId?: BidiRequestId;
+	appendSeqno: bigint;
+	dataBinary: Uint8Array;
+}
+
+export const BidiAppendRequestSchema: MessageCodec<BidiAppendRequest> = pb<BidiAppendRequest>("aiserver.v1.BidiAppendRequest", [
+	{ no: 1, name: "data", kind: "string" },
+	{ no: 2, name: "requestId", kind: "message", T: () => BidiRequestIdSchema },
+	{ no: 3, name: "appendSeqno", kind: "int64" },
+	{ no: 4, name: "dataBinary", kind: "bytes" },
+]);
+
+/** Cursor agent message agent.v1.BidiRequestId. */
+export interface BidiRequestId extends ProtoMessage {
+	requestId: string;
+}
+
+export const BidiRequestIdSchema: MessageCodec<BidiRequestId> = pb<BidiRequestId>("agent.v1.BidiRequestId", [
+	{ no: 1, name: "requestId", kind: "string" },
+]);
+
 /** Cursor agent message agent.v1.CallFrame. */
 export interface CallFrame extends ProtoMessage {
 	functionName?: string;
@@ -1729,6 +1753,25 @@ export interface CursorRuleTypeManuallyAttached extends ProtoMessage {
 export const CursorRuleTypeManuallyAttachedSchema: MessageCodec<CursorRuleTypeManuallyAttached> = pb<CursorRuleTypeManuallyAttached>("agent.v1.CursorRuleTypeManuallyAttached", [
 ]);
 
+/** Cursor agent message aiserver.v1.CustomErrorDetails. */
+export interface CustomErrorDetails extends ProtoMessage {
+	title: string;
+	detail: string;
+	allowCommandLinksPotentiallyUnsafePleaseOnlyUseForHandwrittenTrustedMarkdown?: boolean;
+	isRetryable?: boolean;
+	showRequestId?: boolean;
+	shouldShowImmediateError?: boolean;
+}
+
+export const CustomErrorDetailsSchema: MessageCodec<CustomErrorDetails> = pb<CustomErrorDetails>("aiserver.v1.CustomErrorDetails", [
+	{ no: 1, name: "title", kind: "string" },
+	{ no: 2, name: "detail", kind: "string" },
+	{ no: 3, name: "allowCommandLinksPotentiallyUnsafePleaseOnlyUseForHandwrittenTrustedMarkdown", kind: "bool", optional: true },
+	{ no: 4, name: "isRetryable", kind: "bool", optional: true },
+	{ no: 5, name: "showRequestId", kind: "bool", optional: true },
+	{ no: 6, name: "shouldShowImmediateError", kind: "bool", optional: true },
+]);
+
 /** Cursor agent message agent.v1.CustomSubagent. */
 export interface CustomSubagent extends ProtoMessage {
 	fullPath: string;
@@ -2181,6 +2224,19 @@ export interface Error extends ProtoMessage {
 
 export const ErrorSchema: MessageCodec<Error> = pb<Error>("agent.v1.Error", [
 	{ no: 1, name: "message", kind: "string" },
+]);
+
+/** Cursor agent message aiserver.v1.ErrorDetails. */
+export interface ErrorDetails extends ProtoMessage {
+	error: CursorError;
+	details?: CustomErrorDetails;
+	isExpected?: boolean;
+}
+
+export const ErrorDetailsSchema: MessageCodec<ErrorDetails> = pb<ErrorDetails>("aiserver.v1.ErrorDetails", [
+	{ no: 1, name: "error", kind: "enum" },
+	{ no: 2, name: "details", kind: "message", T: () => CustomErrorDetailsSchema },
+	{ no: 3, name: "isExpected", kind: "bool", optional: true },
 ]);
 
 /** Cursor agent message agent.v1.ExaFetchArgs. */
