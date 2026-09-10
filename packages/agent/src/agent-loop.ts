@@ -2292,23 +2292,25 @@ function suggestToolNames(
 	tools: ReadonlyArray<Pick<AgentTool, "name" | "customWireName">> | undefined,
 ): string[] {
 	if (!tools || tools.length === 0) return [];
-	const segments = new Set<string>();
+	const segments: string[] = [];
 	for (const boundary of ["__", "_"]) {
 		const idx = name.lastIndexOf(boundary);
 		if (idx < 0) continue;
 		const segment = name.slice(idx + boundary.length);
-		if (segment.length >= MIN_TOOL_NAME_SUGGESTION_SEGMENT) segments.add(segment);
+		if (segment.length >= MIN_TOOL_NAME_SUGGESTION_SEGMENT && !segments.includes(segment)) segments.push(segment);
 	}
-	if (segments.size === 0) return [];
+	if (segments.length === 0) return [];
+	// Longest tail first. A distinctive `__` tail (`resolve_library_get`) is a
+	// far stronger signal than the generic `_` tail it contains (`get`), and the
+	// caller truncates the list — so the strongest match has to sort ahead of
+	// however many tools happen to share the weak one.
+	segments.sort((a, b) => b.length - a.length);
 	const matches: string[] = [];
-	for (const tool of tools) {
-		for (const candidate of [tool.name, tool.customWireName]) {
-			if (candidate === undefined || candidate === name || matches.includes(candidate)) continue;
-			for (const segment of segments) {
-				if (candidate === segment || candidate.endsWith(`_${segment}`)) {
-					matches.push(candidate);
-					break;
-				}
+	for (const segment of segments) {
+		for (const tool of tools) {
+			for (const candidate of [tool.name, tool.customWireName]) {
+				if (candidate === undefined || candidate === name || matches.includes(candidate)) continue;
+				if (candidate === segment || candidate.endsWith(`_${segment}`)) matches.push(candidate);
 			}
 		}
 	}
