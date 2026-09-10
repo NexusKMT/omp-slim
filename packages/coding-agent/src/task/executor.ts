@@ -3564,15 +3564,8 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				reviveSession = async expectedAgentRef => {
 					const reopened = await SessionManager.open(sessionFile, undefined, undefined, {
 						suppressBreadcrumb: true,
-						// Park promises the JSONL holds this run's history, so a vanished
-						// transcript must not silently mint a fresh zero-history session
-						// (issue #11500).
 						throwIfMissing: true,
 					});
-					// A transcript that lost its messages must not be replayed as the
-					// agent's memory: refuse, naming the agent and the file, instead of
-					// running a zero-history agent that answers peers and writes
-					// attributed work.
 					if (!hasConversationalHistory(reopened.getEntries())) {
 						await reopened.close();
 						throw new Error(

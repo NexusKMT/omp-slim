@@ -62,11 +62,6 @@ export function createPersistedSubagentReviverFactory(
 	return async ref => {
 		const sessionFile = ref.sessionFile;
 		if (!sessionFile) return undefined;
-		// Advisory prefilter only: this peek runs WITHOUT the single-writer lock, so
-		// the file may vanish, truncate, or be swapped before the reviver's open
-		// below. A null peek declines the revive here (transcript-only, history://);
-		// a passing peek proves nothing — the inner reviver re-reads the file it
-		// actually opened and its verdict is the one that counts (issue #11500).
 		const peek = await SessionManager.peekSessionInit(sessionFile);
 		// No persisted contract (pre-session_init file) or the recorded workspace
 		// is gone (isolated/merged worktree, moved dir): leave it transcript-only
@@ -93,14 +88,8 @@ export function createPersistedSubagentReviverFactory(
 			// the single-writer lock cleanly and restores the full message history.
 			const reopened = await SessionManager.open(sessionFile, undefined, undefined, {
 				suppressBreadcrumb: true,
-				// Same fail-closed contract as the live reviver: no lock-free peek may
-				// authorise resurrecting a transcript that is gone (issue #11500).
 				throwIfMissing: true,
 			});
-			// Rebuild the contract from the file just opened, never from the peek
-			// captured before the lock: a transcript that lost its `session_init` or
-			// its messages in between must fail here rather than revive a
-			// zero-history agent.
 			const entries = reopened.getEntries();
 			const init = extractSessionInit(entries);
 			if (!init) {

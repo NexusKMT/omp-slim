@@ -3108,13 +3108,7 @@ export class SessionManager {
 	}
 }
 
-/**
- * True when already-loaded entries carry at least one real user/assistant
- * message. A transcript truncated to its header and `session_init`, or one that
- * never recorded a turn, has none: the revive call sites fail closed on this
- * rather than replay an empty conversation as the parked agent's history
- * (issue #11500).
- */
+/** True when already-loaded entries carry at least one real user/assistant message. */
 export function hasConversationalHistory(entries: readonly FileEntry[]): boolean {
 	return entries.some(e => e.type === "message" && (e.message.role === "user" || e.message.role === "assistant"));
 }
@@ -3141,9 +3135,7 @@ export interface PersistedSessionInit {
 
 /**
  * Latest persisted `session_init` contract among already-loaded entries, or
- * null when the transcript carries none. Revive reads the contract from the
- * file it holds open through this, rather than trusting the lock-free peek it
- * took before acquiring the writer lock.
+ * null when the transcript carries none.
  */
 export function extractSessionInit(entries: readonly FileEntry[]): PersistedSessionInit | null {
 	let init: PersistedSessionInit | null = null;

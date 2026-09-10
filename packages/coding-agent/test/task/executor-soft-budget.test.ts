@@ -365,10 +365,6 @@ describe("runSubprocess soft request budget", () => {
 
 		await AgentLifecycleManager.global().park(id);
 		expect(AgentRegistry.global().get(id)?.status).toBe("parked");
-		// The mocked session writes no transcript of its own, so the parked JSONL
-		// holds the header/session_init but no turns. Revival is fail-closed on a
-		// transcript without message history (issue #11500), so seed the turn a
-		// real run would have journaled before waking the parked agent.
 		const parked = await SessionManager.open(`${tempDir.path()}/${id}.jsonl`);
 		parked.appendMessage({
 			role: "user",
@@ -407,15 +403,10 @@ describe("runSubprocess soft request budget", () => {
 		await AgentLifecycleManager.global().park(id);
 		expect(AgentRegistry.global().get(id)?.status).toBe("parked");
 
-		// The mocked run journals no turns, so the parked JSONL carries only the
-		// header/session_init. Reviving it would fabricate a zero-history agent
-		// that runs and answers as if it remembered the run (issue #11500), so the
-		// wake must fail loudly — naming the agent and the file — instead.
 		const receipt = await new IrcBus().send({ from: "Main", to: id, body: "resume your inventory" });
 		expect(receipt.outcome).toBe("failed");
 		expect(receipt.error).toContain(`Cannot revive subagent "${id}"`);
 		expect(receipt.error).toContain("no message history");
-		// No phantom session was attached to the parked ref.
 		expect(AgentRegistry.global().get(id)?.session ?? null).toBeNull();
 	});
 
