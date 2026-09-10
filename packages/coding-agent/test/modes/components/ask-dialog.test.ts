@@ -1727,4 +1727,23 @@ describe("AskDialogComponent", () => {
 		expect(result.options).toEqual(["Retry\rnow", "Retry now"]);
 		expect(result.selectedOptions).toEqual(["Retry\rnow"]);
 	});
+
+	it("echoes the extension-supplied question verbatim in results", () => {
+		// The question text is echoed in results like ids and labels: the
+		// guest path returns it verbatim, so the local dialog must too —
+		// display sanitizes (title rows), results echo the original.
+		const onSubmit = vi.fn();
+		const component = new AskDialogComponent(
+			[{ id: "q1", question: "Pick\rnow?", options: [{ label: "Alpha" }, { label: "Beta" }] }],
+			{ onSubmit, onCancel: vi.fn(), onPrompt: vi.fn() },
+		);
+
+		const rendered = render(component);
+		expect(rendered).not.toContain("\r");
+		expect(rendered).toContain("Pick now?");
+
+		component.handleInput(ENTER);
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit.mock.calls[0][0].results[0].question).toBe("Pick\rnow?");
+	});
 });

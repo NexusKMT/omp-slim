@@ -2030,4 +2030,36 @@ describe("AskTool carriage-return sanitization", () => {
 		expect(rows[0]).not.toContain(checked);
 		expect(rows[1]).toContain(checked);
 	});
+
+	it("keeps every duplicate selection marked on pre-guard replay", async () => {
+		const theme = darkTheme;
+		// Before the duplicate-label guard, `options: ["A", "A"]` could record
+		// both rows selected. Each occurrence must consume a distinct index
+		// or replay unmarks history the old renderer showed as checked.
+		const rendered = askToolRenderer.renderResult(
+			{
+				content: [{ type: "text", text: "" }],
+				details: {
+					results: [
+						{
+							id: "q1",
+							question: "Pick?",
+							options: ["A", "A"],
+							multi: true,
+							selectedOptions: ["A", "A"],
+						},
+					],
+				},
+			},
+			{ expanded: true, isPartial: false },
+			theme!,
+		);
+		const text = stripAnsi(rendered.render(120).join("\n"));
+		const checked = theme!.checkbox.checked;
+		const unchecked = theme!.checkbox.unchecked;
+		const rows = text.split("\n").filter(line => line.includes(checked) || line.includes(unchecked));
+		expect(rows).toHaveLength(2);
+		expect(rows[0]).toContain(checked);
+		expect(rows[1]).toContain(checked);
+	});
 });

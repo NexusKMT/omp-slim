@@ -1340,6 +1340,9 @@ function renderQuestionOptionLines(
  * Sanitizing can merge distinct options (`Retry\rnow`/`Retry now`) into one
  * display label, after which a label set would mark every colliding row —
  * indices survive normalization because it preserves order and length.
+ * Each selected occurrence consumes a distinct unused option index, so a
+ * pre-guard duplicate (`options: ["A", "A"]`, both recorded selected) keeps
+ * both rows marked on replay instead of collapsing onto the first.
  * Returns undefined when raw options are missing so the caller falls back to
  * label matching.
  */
@@ -1350,7 +1353,7 @@ function selectedIndicesFor(
 	if (!rawOptions || rawOptions.length === 0) return undefined;
 	const indices = new Set<number>();
 	for (const label of rawSelected ?? []) {
-		const index = rawOptions.indexOf(label);
+		const index = rawOptions.findIndex((option, candidate) => option === label && !indices.has(candidate));
 		if (index >= 0) indices.add(index);
 	}
 	return indices;

@@ -146,7 +146,9 @@ function questionTabLabel(question: ExtensionAskDialogQuestion, index: number): 
 
 function wrapQuestionTitle(question: ExtensionAskDialogQuestion, width: number): string[] {
 	const mdTheme = getMarkdownTheme();
-	const questionText = renderInlineMarkdown(replaceTabs(question.question), mdTheme, t => theme.fg("text", t));
+	const questionText = renderInlineMarkdown(replaceTabs(sanitizeCarriageReturns(question.question)), mdTheme, t =>
+		theme.fg("text", t),
+	);
 	return wrapTextWithAnsi(questionText, Math.max(1, width));
 }
 
@@ -389,7 +391,9 @@ function normalizeDialogQuestions(questions: ExtensionAskDialogQuestion[]): Exte
 			// The id is a caller-supplied correlation key echoed verbatim in
 			// results — sanitize only the display copy (`questionTabLabel`).
 			id: typeof q.id === "string" ? q.id : "?",
-			question: typeof q.question === "string" ? sanitizeCarriageReturns(q.question) : "",
+			// The question is echoed verbatim in results (matching the guest
+			// path) — sanitize only the display copy (`wrapQuestionTitle`).
+			question: typeof q.question === "string" ? q.question : "",
 			...(typeof q.header === "string" ? { header: sanitizeCarriageReturns(q.header) } : {}),
 			options,
 			...(typeof q.multi === "boolean" ? { multi: q.multi } : {}),
