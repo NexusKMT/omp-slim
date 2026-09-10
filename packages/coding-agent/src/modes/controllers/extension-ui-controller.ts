@@ -22,7 +22,7 @@ import type {
 	TerminalInputHandler,
 } from "../../extensibility/extensions";
 import { getSessionSlashCommands } from "../../extensibility/extensions/get-commands-handler";
-import { AskDialogComponent, boundPromptTitle } from "../../modes/components/ask-dialog";
+import { AskDialogComponent, boundPromptTitle, normalizeDialogQuestions } from "../../modes/components/ask-dialog";
 import { installExtensionComposerShape } from "../../modes/components/composer-shape-registry";
 import { EditorTopGap } from "../../modes/components/editor-top-gap";
 import { HookEditorComponent } from "../../modes/components/hook-editor";
@@ -616,17 +616,22 @@ export class ExtensionUiController {
 		questions: ExtensionAskDialogQuestion[],
 		dialogOptions?: ExtensionUIDialogOptions,
 	): Promise<ExtensionAskDialogResult | undefined> {
+		// Normalize the public extension input once for both race participants:
+		// malformed entries (missing/non-string fields) coerce to empty
+		// strings/arrays here instead of throwing inside `sanitizeCarriageReturns`
+		// on the guest path or taking down the local render.
+		const normalized = normalizeDialogQuestions(questions);
 		const host = this.ctx.collabHost;
-		if (!host) return this.#showLocalAskDialog(questions, dialogOptions);
+		if (!host) return this.#showLocalAskDialog(normalized, dialogOptions);
 		const localAbort = new AbortController();
 		const remoteAbort = new AbortController();
 		const parentSignal = dialogOptions?.signal;
 		const localSignal = parentSignal ? AbortSignal.any([parentSignal, localAbort.signal]) : localAbort.signal;
 		const remoteSignal = parentSignal ? AbortSignal.any([parentSignal, remoteAbort.signal]) : remoteAbort.signal;
-		const localWinner = this.#showLocalAskDialog(questions, { ...dialogOptions, signal: localSignal }).then(
+		const localWinner = this.#showLocalAskDialog(normalized, { ...dialogOptions, signal: localSignal }).then(
 			(value): CollabAskDialogWinner => ({ source: "local", value }),
 		);
-		const remoteWinner: Promise<CollabAskDialogWinner> = this.#runGuestAskDialog(questions, remoteSignal).then(
+		const remoteWinner: Promise<CollabAskDialogWinner> = this.#runGuestAskDialog(normalized, remoteSignal).then(
 			result => (result === "unavailable" ? localWinner : { source: "remote", value: result }),
 		);
 		const winner = await Promise.race([localWinner, remoteWinner]);

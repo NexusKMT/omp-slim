@@ -994,4 +994,39 @@ describe("guest ask multi-select Next gating (#4375 PRRT_kwDOQxs0bc6OFbDW)", () 
 			await host.stop("test done");
 		}
 	});
+
+	it("coerces malformed guest questions instead of rejecting the race", async () => {
+		// A JS extension can supply a question entry without a string
+		// `question` field; the guest path must not throw inside the
+		// sanitizer and reject the whole showAskDialog race.
+		const ctx = makeAskHostContext();
+		const host = new CollabHost(ctx);
+		await host.start("ws://localhost:8787");
+		ctx.collabHost = host;
+		const controller = new ExtensionUiController(ctx);
+		try {
+			const guest = await joinRawGuest(host.link, COLLAB_PROTO);
+			const welcome = await guest.nextFrame();
+			if (welcome.t !== "welcome") throw new Error(`expected welcome, got ${welcome.t}`);
+
+			const questions = [{ id: "q1", options: [{ label: "Alpha" }] }] as unknown as ExtensionAskDialogQuestion[];
+			const result = controller.showAskDialog(questions);
+
+			const first = await nextUiRequest(guest);
+			if (first.request.kind !== "select") throw new Error(`expected select, got ${first.request.kind}`);
+			expect(first.request.title).toBe("");
+			guest.socket.send({ t: "ui-response", reqId: first.request.reqId, value: "Alpha" });
+
+			const settled = await result;
+			expect(settled?.kind).toBe("submit");
+			if (settled?.kind === "submit") {
+				expect(settled.results[0]?.id).toBe("q1");
+				expect(settled.results[0]?.question).toBe("");
+				expect(settled.results[0]?.selectedOptions).toEqual(["Alpha"]);
+			}
+			guest.socket.close();
+		} finally {
+			await host.stop("test done");
+		}
+	});
 });

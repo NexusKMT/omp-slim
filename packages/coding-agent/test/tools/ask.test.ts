@@ -2083,4 +2083,36 @@ describe("AskTool carriage-return sanitization", () => {
 		expect(result.content[0].text).toContain("deploy mode");
 		expect(result.content[0].text).not.toContain("\r");
 	});
+
+	it("marks every duplicate row for a single persisted occurrence", async () => {
+		const theme = darkTheme;
+		// The legacy selector recorded one occurrence for duplicate rows it
+		// marked together; the old label-keyed renderer showed both checked,
+		// so replay must too — not just the first index.
+		const rendered = askToolRenderer.renderResult(
+			{
+				content: [{ type: "text", text: "" }],
+				details: {
+					results: [
+						{
+							id: "q1",
+							question: "Pick?",
+							options: ["A", "A"],
+							multi: true,
+							selectedOptions: ["A"],
+						},
+					],
+				},
+			},
+			{ expanded: true, isPartial: false },
+			theme!,
+		);
+		const text = stripAnsi(rendered.render(120).join("\n"));
+		const checked = theme!.checkbox.checked;
+		const unchecked = theme!.checkbox.unchecked;
+		const rows = text.split("\n").filter(line => line.includes(checked) || line.includes(unchecked));
+		expect(rows).toHaveLength(2);
+		expect(rows[0]).toContain(checked);
+		expect(rows[1]).toContain(checked);
+	});
 });

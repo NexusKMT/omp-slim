@@ -391,7 +391,7 @@ function renderRowLabel(
  * entry throws and takes down the whole TUI render loop. Mirrors
  * `normalizeRenderQuestions` on the transcript path.
  */
-function normalizeDialogQuestions(questions: ExtensionAskDialogQuestion[]): ExtensionAskDialogQuestion[] {
+export function normalizeDialogQuestions(questions: ExtensionAskDialogQuestion[]): ExtensionAskDialogQuestion[] {
 	if (!Array.isArray(questions)) return [];
 	const out: ExtensionAskDialogQuestion[] = [];
 	for (const entry of questions) {
