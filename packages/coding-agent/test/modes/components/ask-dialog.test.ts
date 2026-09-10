@@ -1707,4 +1707,24 @@ describe("AskDialogComponent", () => {
 		expect(onSubmit).toHaveBeenCalledTimes(1);
 		expect(onSubmit.mock.calls[0][0].results[0].id).toBe("q\r\r3a");
 	});
+
+	it("echoes extension-supplied option labels verbatim in results", () => {
+		// Option labels are caller correlation keys like ids: the guest path
+		// returns them verbatim, so the local dialog must too — display
+		// sanitizes, results echo the original, or extension code comparing
+		// selectedOptions against supplied labels misses on \r-laden input.
+		const onSubmit = vi.fn();
+		const component = new AskDialogComponent(
+			[{ id: "q1", question: "Pick one?", options: [{ label: "Retry\rnow" }, { label: "Retry now" }] }],
+			{ onSubmit, onCancel: vi.fn(), onPrompt: vi.fn() },
+		);
+
+		expect(render(component)).not.toContain("\r");
+
+		component.handleInput(ENTER);
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		const result = onSubmit.mock.calls[0][0].results[0];
+		expect(result.options).toEqual(["Retry\rnow", "Retry now"]);
+		expect(result.selectedOptions).toEqual(["Retry\rnow"]);
+	});
 });

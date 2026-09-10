@@ -261,7 +261,11 @@ function normalizedInlineInput(input: string): string {
 }
 
 function renderAnswerSummary(question: ExtensionAskDialogQuestion, state: QuestionState): string {
-	const selected = question.options.map(option => option.label).filter(label => state.selectedOptions.has(label));
+	const selected = question.options
+		.map(option => option.label)
+		.filter(label => state.selectedOptions.has(label))
+		// Display copy only — state and results keep the original labels.
+		.map(label => sanitizeCarriageReturns(label));
 	if (question.multi) {
 		const answers = [...selected];
 		if (state.customInput !== undefined) answers.push(`Other: “${normalizedInlineInput(state.customInput)}”`);
@@ -372,7 +376,10 @@ function normalizeDialogQuestions(questions: ExtensionAskDialogQuestion[]): Exte
 				if (!opt || typeof opt !== "object") continue;
 				const o = opt as Partial<ExtensionAskDialogOption>;
 				options.push({
-					label: sanitizeCarriageReturns(typeof o.label === "string" ? o.label : ""),
+					// The label is a caller-supplied correlation key echoed verbatim
+					// in results (matching the guest path) — sanitize only the
+					// display copy (`#optionLabel`).
+					label: typeof o.label === "string" ? o.label : "",
 					...(typeof o.description === "string" ? { description: sanitizeCarriageReturns(o.description) } : {}),
 					...(typeof o.preview === "string" ? { preview: sanitizeCarriageReturns(o.preview) } : {}),
 				});
@@ -683,9 +690,12 @@ export class AskDialogComponent implements Component {
 	}
 
 	#optionLabel(question: ExtensionAskDialogQuestion, label: string, index: number): string {
+		// Sanitize the display copy only: the stored label is a caller
+		// correlation key echoed verbatim in results (matching the guest path).
+		const display = sanitizeCarriageReturns(label);
 		const suffix = " (Recommended)";
-		if (question.recommended !== index || label.endsWith(suffix)) return label;
-		return `${label}${suffix}`;
+		if (question.recommended !== index || display.endsWith(suffix)) return display;
+		return `${display}${suffix}`;
 	}
 
 	#activeQuestionState(): { question: ExtensionAskDialogQuestion; state: QuestionState } | undefined {
