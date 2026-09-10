@@ -70,6 +70,7 @@
 ### Fixed
 
 - Fixed Ollama Cloud model discovery synthesizing a generic `minimal`/`low`/`medium`/`high` effort ladder for every thinking-capable model, which shadowed the per-model compat rules and made `max` unreachable on the DeepSeek V4 line (including the served `deepseek-v4.1-flash`, `deepseek-v4-flash:0731`, and `deepseek-v4-pro:0813` ids): discovery now leaves the ladder to the rule tree, so those models advertise the wire-exact `low`/`high`/`max` and GLM-5.3 exposes `low`/`high`/`max` ([#8334](https://github.com/can1357/oh-my-pi/issues/8334)).
+- Fixed Meta Model API and Muse Code requests failing with 400 whenever omp forced a tool choice: `api.meta.ai/v1` accepts only `tool_choice: "auto"`, so `none`, `required`, and named choices (subagent final-retry `yield`, forced tools, structured output, compaction handoff) are now omitted instead of sent.
 
 ## [18.1.17] - 2026-09-10
 
