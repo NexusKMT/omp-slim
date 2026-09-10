@@ -12,7 +12,7 @@
  * forces the network (`online`).
  */
 import type { Api, Effort, Model } from "@oh-my-pi/pi-ai";
-import { supportsImageInput } from "@oh-my-pi/pi-ai/providers/vision-guard";
+import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { formatNumber, getProjectDir } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
@@ -256,7 +256,7 @@ export function renderProviderModels(
 			model.thinking ? getSupportedEfforts(model).join(",") : model.reasoning ? "yes" : "-",
 			// Wire truth, not the declared `input`: the transport drops image parts for
 			// models the catalog marks text-only (`compat.stripImageInput`, #9697).
-			supportsImageInput(model) ? "yes" : "no",
+			sendsImageInputOnWire(model) ? "yes" : "no",
 		]);
 		for (const line of boxTable(
 			[

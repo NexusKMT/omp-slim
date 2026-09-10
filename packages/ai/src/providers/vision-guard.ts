@@ -49,10 +49,10 @@ export function isOpenAICompletionsVisionSupported(model: Model<"openai-completi
  * OpenRouter chat fallback (`PI_OPENROUTER_RESPONSES=0`, which dispatches
  * `openrouter` models through `streamOpenAICompletions`); every other API
  * ships the modalities the model declares. Callers that report or gate on
- * image capability (e.g. the `omp models` table) must read this instead of
- * `model.input` alone, or they advertise support the wire silently strips.
+ * the wire (for example the `omp models` table) read this predicate; declared
+ * capability reads `model.input`.
  */
-export function supportsImageInput(model: Model<Api>): boolean {
+export function sendsImageInputOnWire(model: Model<Api>): boolean {
 	if (isGuardedCompletionsTransport(model)) return isOpenAICompletionsVisionSupported(model);
 	return model.input.includes("image");
 }
