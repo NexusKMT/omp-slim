@@ -1211,6 +1211,61 @@ describe("agentLoop with AgentMessage", () => {
 		);
 	});
 
+	it("suggests the intended tool when a miss shares its trailing segment", async () => {
+		const toolSchema = type({ path: "string" });
+		const makeTool = (name: string): AgentTool<typeof toolSchema, { path: string }> => ({
+			name,
+			label: name,
+			description: "Advertised tool",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				return { content: [{ type: "text", text: params.path }], details: params };
+			},
+		});
+		const context: AgentContext = {
+			systemPrompt: [""],
+			messages: [],
+			tools: [makeTool("read"), makeTool("mcp__context_resolve_library_id")],
+		};
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						// Whole id segment lost; only the trailing verb survived.
+						{ type: "toolCall", id: "tool-1", name: "mcp__abc123__xyz789_read", arguments: { path: "p" } },
+						// Separator lost; the tail after the last `__` still identifies it.
+						{
+							type: "toolCall",
+							id: "tool-2",
+							name: "mcp__context7__resolve_library_id",
+							arguments: { path: "p" },
+						},
+						// Nothing in the advertised set shares a trailing segment.
+						{ type: "toolCall", id: "tool-3", name: "totally_unrelated", arguments: {} },
+					],
+				},
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
+
+		const messages = await agentLoop([createUserMessage("go")], context, config, undefined, mock.stream).result();
+		const results = messages.filter((m): m is ToolResultMessage => m.role === "toolResult");
+		const textOf = (id: string): string =>
+			(results.find(r => r.toolCallId === id)?.content ?? [])
+				.filter((c): c is { type: "text"; text: string } => c.type === "text")
+				.map(c => c.text)
+				.join("\n");
+
+		// The model reliably keeps the trailing verb, so the miss is recoverable
+		// in-turn instead of costing a round trip.
+		expect(textOf("tool-1")).toContain("Did you mean read?");
+		expect(textOf("tool-2")).toContain("Did you mean mcp__context_resolve_library_id?");
+		// No plausible target: the bare failure is preserved, never a guess.
+		expect(textOf("tool-3")).toContain("Tool totally_unrelated not found");
+		expect(textOf("tool-3")).not.toContain("Did you mean");
+	});
+
 	it("injects and strips intent when intent tracing is enabled", async () => {
 		const toolSchema = type({ value: "string" });
 		const executedParams: Record<string, unknown>[] = [];
