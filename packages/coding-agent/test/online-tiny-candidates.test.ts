@@ -92,4 +92,30 @@ describe("online tiny fallback candidates", () => {
 	it("skips unavailable and invalid entries without duplicating a primary", () => {
 		expect(candidates({ tiny: ["missing/model", "invalid", primarySelector, fallbackSelector] })).toEqual(models);
 	});
+
+	it("preserves fallback chains for bare role selectors", () => {
+		const settings = Settings.isolated({
+			"retry.fallbackChains": { smol: [fallbackSelector] },
+		});
+		settings.setModelRole("smol", secondary.id);
+		expect(collectOnlineTinyCandidates(["smol"], settings, models).map(candidate => candidate.model)).toEqual([
+			secondary,
+			fallback,
+		]);
+	});
+
+	it("strips upstream routing before expanding wildcard fallbacks", () => {
+		const routed = getBundledModel("openrouter", "google/gemini-2.5-flash")!;
+		const settings = Settings.isolated({
+			"retry.fallbackChains": {
+				"openrouter/*": ["google-vertex/*"],
+			},
+		});
+		settings.setModelRole("tiny", "openrouter/google/gemini-2.5-flash@cerebras");
+		expect(
+			collectOnlineTinyCandidates(["tiny"], settings, [...models, routed]).map(
+				candidate => `${candidate.model.provider}/${candidate.model.id}`,
+			),
+		).toEqual([`${routed.provider}/${routed.id}`, `${fallback.provider}/${fallback.id}`]);
+	});
 });

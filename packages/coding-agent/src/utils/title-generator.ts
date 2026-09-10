@@ -262,6 +262,14 @@ export async function generateTitleOnline(
 		};
 		logger.debug("title-generator: start", modelContext);
 
+		if (signal?.aborted) {
+			logger.debug("title-generator: aborted before attempt", {
+				...modelContext,
+				reason: "aborted",
+			});
+			return null;
+		}
+
 		try {
 			if (credentialSourceSessionId && sessionId && credentialSourceSessionId !== sessionId) {
 				const foregroundCredential = registry.authStorage
@@ -279,6 +287,13 @@ export async function generateTitleOnline(
 			if (!apiKey) {
 				logger.warn("title-generator: no API key", { ...modelContext, reason: "missing-api-key" });
 				continue;
+			}
+			if (signal?.aborted) {
+				logger.debug("title-generator: aborted after credential", {
+					...modelContext,
+					reason: "aborted",
+				});
+				return null;
 			}
 			// Resolve metadata after getApiKey so the session-sticky credential for this
 			// request is already recorded; metadataResolver can then return the correct
@@ -315,6 +330,15 @@ export async function generateTitleOnline(
 				{ signal },
 			);
 
+			if (response.stopReason === "aborted" || signal?.aborted) {
+				logger.debug("title-generator: aborted", {
+					...modelContext,
+					reason: "aborted",
+					stopReason: response.stopReason,
+				});
+				return null;
+			}
+
 			if (response.stopReason === "error") {
 				logger.warn("title-generator: response error", {
 					...modelContext,
@@ -346,6 +370,17 @@ export async function generateTitleOnline(
 
 			return title;
 		} catch (err) {
+			if (
+				signal?.aborted ||
+				(err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError"))
+			) {
+				logger.debug("title-generator: aborted", {
+					...modelContext,
+					reason: "aborted",
+					error: err instanceof Error ? err.message : String(err),
+				});
+				return null;
+			}
 			logger.warn("title-generator: error", {
 				...modelContext,
 				reason: "exception",

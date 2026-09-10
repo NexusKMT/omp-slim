@@ -568,4 +568,87 @@ describe("auto thinking classifier helpers", () => {
 			expect(completeSimpleMock.mock.calls[1]?.[0]).toBe(fallback);
 		},
 	);
+
+	it("continues after credential resolution errors on the primary candidate", async () => {
+		const smol = getBundledModel("anthropic", "claude-sonnet-4-6");
+		if (!smol) throw new Error("Expected bundled Claude Sonnet 4.6 model");
+		const fallback = buildLadderModel("fallback-smol", XHIGH_LADDER);
+		const target = buildLadderModel("mock-max", MAX_LADDER);
+		const settings = {
+			get(path: string) {
+				if (path === "providers.autoThinkingModel") return "online";
+				if (path === "providers.autoThinkingMaxEffort") return "xhigh";
+				if (path === "retry.modelFallback") return true;
+				if (path === "retry.fallbackChains")
+					return { [`${smol.provider}/${smol.id}`]: [`${fallback.provider}/${fallback.id}`] };
+				return undefined;
+			},
+			getModelRole(role: string) {
+				if (role === "tiny") return `${smol.provider}/${smol.id}`;
+				return role === "smol" ? `${fallback.provider}/${fallback.id}` : undefined;
+			},
+			getStorage() {
+				return undefined;
+			},
+		} as never;
+		const registry = {
+			getAvailable: () => [smol, fallback],
+			getApiKey: async (model: Model) => {
+				if (model.id === smol.id) throw new Error("OAuth refresh failed");
+				return "test-key";
+			},
+			resolver: () => async () => "test-key",
+		} as never;
+		vi.spyOn(ai, "completeSimple").mockResolvedValue({
+			stopReason: "stop",
+			content: [{ type: "text", text: "medium" }],
+		} as never);
+
+		const effort = await classifyDifficulty("rename a helper", { settings, registry, model: target });
+		expect(effort).toBe(Effort.Medium);
+	});
+
+	it("propagates caller cancellation without trying later classifier candidates", async () => {
+		const smol = getBundledModel("anthropic", "claude-sonnet-4-6");
+		if (!smol) throw new Error("Expected bundled Claude Sonnet 4.6 model");
+		const fallback = buildLadderModel("fallback-smol", XHIGH_LADDER);
+		const target = buildLadderModel("mock-max", MAX_LADDER);
+		const settings = {
+			get(path: string) {
+				if (path === "providers.autoThinkingModel") return "online";
+				if (path === "providers.autoThinkingMaxEffort") return "xhigh";
+				if (path === "retry.modelFallback") return true;
+				if (path === "retry.fallbackChains")
+					return { [`${smol.provider}/${smol.id}`]: [`${fallback.provider}/${fallback.id}`] };
+				return undefined;
+			},
+			getModelRole(role: string) {
+				if (role === "tiny") return `${smol.provider}/${smol.id}`;
+				return role === "smol" ? `${fallback.provider}/${fallback.id}` : undefined;
+			},
+			getStorage() {
+				return undefined;
+			},
+		} as never;
+		const controller = new AbortController();
+		const registry = {
+			getAvailable: () => [smol, fallback],
+			getApiKey: async () => {
+				controller.abort();
+				throw new Error("OAuth refresh failed");
+			},
+			resolver: () => async () => "test-key",
+		} as never;
+		const completeSimpleMock = vi.spyOn(ai, "completeSimple");
+
+		await expect(
+			classifyDifficulty("rename a helper", {
+				settings,
+				registry,
+				model: target,
+				signal: controller.signal,
+			}),
+		).rejects.toThrow();
+		expect(completeSimpleMock).not.toHaveBeenCalled();
+	});
 });

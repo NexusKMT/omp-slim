@@ -59,10 +59,15 @@ export function collectOnlineTinyCandidates(
 		},
 	};
 	for (const { role, model } of primaries) {
-		const selector = settings.getModelRole(role) ?? modelKey(model);
-		const chainKey = resolveRetryFallbackChainKey(context, selector, model, role);
+		const configuredSelector = settings.getModelRole(role) ?? modelKey(model);
+		const chainKey = resolveRetryFallbackChainKey(context, configuredSelector, model, role);
 		if (!chainKey) continue;
-		for (const candidate of findRetryFallbackCandidates(context, chainKey, selector, model)) {
+		// Resolved provider/id is the chain primary: bare/fuzzy role selectors and
+		// `@upstream` routing suffixes must not empty the chain or poison wildcards.
+		const primarySelector = modelKey(model);
+		for (const candidate of findRetryFallbackCandidates(context, chainKey, primarySelector, model, {
+			allowMissingPrimary: true,
+		})) {
 			const fallback = context.modelLookup.find(candidate.provider, candidate.id);
 			if (fallback) add(role, fallback);
 		}

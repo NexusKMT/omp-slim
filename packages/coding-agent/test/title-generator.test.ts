@@ -350,6 +350,62 @@ describe("title generator", () => {
 		);
 	});
 
+
+	it("stops title fallback traversal after cancellation", async () => {
+		const primary = getModelOrThrow("claude-haiku-4-5");
+		const fallback = getModelOrThrow("claude-sonnet-4-5");
+		const controller = new AbortController();
+		let apiKeyCalls = 0;
+		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockImplementation(async () => {
+			controller.abort();
+			return {
+				stopReason: "aborted",
+				errorMessage: "Request was aborted",
+				content: [],
+			} as never;
+		});
+
+		const title = await generateSessionTitle(
+			"Investigate the resolver",
+			{
+				getAvailable: () => [primary, fallback],
+				getApiKey: async () => {
+					apiKeyCalls += 1;
+					return "test-key";
+				},
+				getApiKeyForProvider: async () => "test-key",
+				authStorage: { rotateSessionCredential: async () => false },
+				resolver: () => async () => "test-key",
+			} as never,
+			{
+				get(path: string) {
+					if (path === "providers.tinyModel") return "online";
+					if (path === "retry.modelFallback") return true;
+					if (path === "retry.fallbackChains")
+						return { [`${primary.provider}/${primary.id}`]: [`${fallback.provider}/${fallback.id}`] };
+					return undefined;
+				},
+				getModelRole(role: string) {
+					if (role === "tiny") return `${primary.provider}/${primary.id}`;
+					if (role === "smol") return `${fallback.provider}/${fallback.id}`;
+					return undefined;
+				},
+				getStorage() {
+					return undefined;
+				},
+			} as never,
+			"session-abort",
+			undefined,
+			undefined,
+			undefined,
+			controller.signal,
+		);
+
+		expect(title).toBeNull();
+		expect(completeSimpleMock).toHaveBeenCalledTimes(1);
+		expect(apiKeyCalls).toBe(1);
+	});
+
 	it("uses a reasoning-safe output budget for reasoning models", async () => {
 		const model = getModelOrThrow("claude-sonnet-4-5");
 		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockResolvedValue({

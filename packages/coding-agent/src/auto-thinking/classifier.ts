@@ -22,6 +22,7 @@ import {
 	retryTransientCompletion,
 	type Usage,
 } from "@oh-my-pi/pi-ai";
+import * as AIError from "@oh-my-pi/pi-ai/error";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { prompt } from "@oh-my-pi/pi-utils";
 
@@ -137,56 +138,80 @@ async function classifyOnline(input: string, deps: ClassifyDifficultyDeps, ceili
 	const maxTokens = ONLINE_REASONING_SAFE_MAX_TOKENS;
 	let lastError: string | undefined;
 	for (const resolved of candidates) {
+		if (deps.signal?.aborted) {
+			throw deps.signal.reason instanceof Error
+				? deps.signal.reason
+				: new AIError.AbortError("auto-thinking: classification aborted");
+		}
 		const model = resolved.model;
-		const apiKey = await deps.registry.getApiKey(model, deps.sessionId);
-		if (!apiKey) {
-			lastError = `no API key for ${model.provider}/${model.id}`;
-			continue;
-		}
-		// Resolve metadata after getApiKey so the session-sticky credential is recorded first.
-		const metadata = deps.metadataResolver?.(model.provider);
-		const response = await retryTransientCompletion(
-			() =>
-				completeSimple(
-					model,
-					{
-						systemPrompt: [difficultySystemPromptFor(ceiling)],
-						messages: [{ role: "user", content: input, timestamp: Date.now() }],
-					},
-					{
-						apiKey: deps.registry.resolver(model, deps.sessionId),
-						sessionId: deps.sessionId,
-						maxTokens,
-						disableReasoning: true,
-						metadata,
-						signal: deps.signal,
-						onAttempt: attempt =>
-							deps.onUsage?.({
-								role: resolved.role,
-								api: attempt.api,
-								provider: attempt.provider,
-								model: attempt.model,
-								usage: attempt.usage,
-								stopReason: attempt.stopReason,
-								errorMessage: attempt.errorMessage,
-							}),
-					},
-				),
-			{ signal: deps.signal },
-		);
+		try {
+			const apiKey = await deps.registry.getApiKey(model, deps.sessionId);
+			if (!apiKey) {
+				lastError = `no API key for ${model.provider}/${model.id}`;
+				continue;
+			}
+			// Resolve metadata after getApiKey so the session-sticky credential is recorded first.
+			const metadata = deps.metadataResolver?.(model.provider);
+			const response = await retryTransientCompletion(
+				() =>
+					completeSimple(
+						model,
+						{
+							systemPrompt: [difficultySystemPromptFor(ceiling)],
+							messages: [{ role: "user", content: input, timestamp: Date.now() }],
+						},
+						{
+							apiKey: deps.registry.resolver(model, deps.sessionId),
+							sessionId: deps.sessionId,
+							maxTokens,
+							disableReasoning: true,
+							metadata,
+							signal: deps.signal,
+							onAttempt: attempt =>
+								deps.onUsage?.({
+									role: resolved.role,
+									api: attempt.api,
+									provider: attempt.provider,
+									model: attempt.model,
+									usage: attempt.usage,
+									stopReason: attempt.stopReason,
+									errorMessage: attempt.errorMessage,
+								}),
+						},
+					),
+				{ signal: deps.signal },
+			);
 
-		if (response.stopReason === "error") {
-			lastError = response.errorMessage ?? "unknown error";
-			continue;
-		}
+			if (response.stopReason === "aborted" || deps.signal?.aborted) {
+				throw deps.signal?.reason instanceof Error
+					? deps.signal.reason
+					: new AIError.AbortError("auto-thinking: classification aborted");
+			}
+			if (response.stopReason === "error") {
+				lastError = response.errorMessage ?? "unknown error";
+				continue;
+			}
 
-		const text = extractText(response.content);
-		const effort = parseDifficultyLevel(text);
-		if (!effort) {
-			lastError = `unparseable online classification: ${JSON.stringify(text)}`;
-			continue;
+			const text = extractText(response.content);
+			const effort = parseDifficultyLevel(text);
+			if (!effort) {
+				lastError = `unparseable online classification: ${JSON.stringify(text)}`;
+				continue;
+			}
+			return effort;
+		} catch (err) {
+			if (deps.signal?.aborted) {
+				throw deps.signal.reason instanceof Error
+					? deps.signal.reason
+					: err instanceof Error
+						? err
+						: new AIError.AbortError("auto-thinking: classification aborted");
+			}
+			if (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError")) {
+				throw err;
+			}
+			lastError = err instanceof Error ? err.message : String(err);
 		}
-		return effort;
 	}
 	throw new Error(`auto-thinking: online classification failed: ${lastError ?? "unknown error"}`);
 }
