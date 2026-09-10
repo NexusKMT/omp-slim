@@ -76,6 +76,7 @@ import { refreshAgentDiscovery } from "../../task";
 import { AUTO_THINKING, parseConfiguredThinkingLevel } from "../../thinking";
 import { OTHER_OPTION } from "../../tools/ask";
 import { normalizeLocalScheme } from "../../tools/path-utils";
+import { shortenPath } from "../../tools/render-utils";
 import { ToolError } from "../../tools/tool-errors";
 import {
 	DEFAULT_TTS_LOCAL_MODEL_KEY,
@@ -1957,7 +1958,7 @@ export class AcpAgent implements Agent {
 				{
 					type: "text" as const,
 					text: autosavedPlan
-						? `Plan approved at ${planFilePath} (autosaved to ${autosavedPlan}). Plan mode exited; proceed with the implementation.`
+						? `Plan approved at ${planFilePath} (autosaved to ${shortenPath(autosavedPlan)}). Plan mode exited; proceed with the implementation.`
 						: `Plan approved at ${planFilePath}. Plan mode exited; proceed with the implementation.`,
 				},
 			],

@@ -14,6 +14,7 @@ import prewalkContinuePrompt from "../prompts/system/prewalk-continue.md" with {
 import prewalkPlanPrompt from "../prompts/system/prewalk-plan.md" with { type: "text" };
 import { type ConfiguredThinkingLevel, prewalkWouldBeNoop } from "../thinking";
 import { isMCPToolName } from "../tools/builtin-names";
+import { shortenPath } from "../tools/render-utils";
 import type { PlanProposalHandler } from "../tools/resolve";
 import { ToolError } from "../tools/tool-errors";
 import type { PlanYolo, Prewalk } from "./agent-session-types";
@@ -359,7 +360,7 @@ export class PrewalkCoordinator {
 				{
 					type: "text",
 					text: autosavedPlan
-						? `Plan approved. Implementing now with ${planYolo.target.id} (autosaved to ${autosavedPlan}).`
+						? `Plan approved. Implementing now with ${planYolo.target.id} (autosaved to ${shortenPath(autosavedPlan)}).`
 						: `Plan approved. Implementing now with ${planYolo.target.id}.`,
 				},
 			],

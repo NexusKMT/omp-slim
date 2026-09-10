@@ -57,22 +57,23 @@ function autosaveCandidate(dir: string, filename: string, index: number): string
 	return path.join(dir, `${stem}-${index}${ext}`);
 }
 
-async function autosavePathExists(candidate: string): Promise<boolean> {
-	try {
-		await fs.stat(candidate);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-/** First non-colliding `<dir>/<filename>` (`<stem>-<n><ext>` on collision). */
-export async function resolveUniqueAutosavePath(dir: string, filename: string): Promise<string> {
+/** Claim the first free `<dir>/<filename>` with an exclusive create, so two
+ *  sessions approving same-titled plans at once can't settle on the same
+ *  candidate (`<stem>-<n><ext>` on collision). `wx` (O_CREAT|O_EXCL) makes the
+ *  check-and-claim a single syscall; EEXIST advances to the next candidate. */
+async function claimAutosavePath(dir: string, filename: string, planContent: string): Promise<string> {
 	for (let index = 0; index < MAX_AUTOSAVE_CANDIDATES; index += 1) {
 		const candidate = autosaveCandidate(dir, filename, index);
-		if (!(await autosavePathExists(candidate))) return candidate;
+		try {
+			await fs.writeFile(candidate, planContent, { flag: "wx" });
+			return candidate;
+		} catch (error) {
+			if ((error as { code?: string }).code !== "EEXIST") throw error;
+		}
 	}
-	return path.join(dir, `${Date.now()}-${filename}`);
+	const fallback = path.join(dir, `${Date.now()}-${filename}`);
+	await fs.writeFile(fallback, planContent, { flag: "wx" });
+	return fallback;
 }
 
 /** Best-effort copy of an approved plan into the autosave dir.
@@ -86,8 +87,8 @@ export async function autosaveApprovedPlan(input: {
 	if (!isPlanAutosaveEnabled(input.settings)) return null;
 	if (input.planContent.trim() === "") return null;
 	const dir = resolvePlanAutosaveDir(input.settings, input.cwd);
-	const destination = await resolveUniqueAutosavePath(dir, planSaveFileName(input.title));
-	await fs.mkdir(path.dirname(destination), { recursive: true });
-	await Bun.write(destination, input.planContent);
-	return destination;
+	// fs.writeFile (unlike Bun.write) leaves parent creation to us; one mkdir
+	// up front covers every candidate the claim loop below may create.
+	await fs.mkdir(dir, { recursive: true });
+	return claimAutosavePath(dir, planSaveFileName(input.title), input.planContent);
 }
