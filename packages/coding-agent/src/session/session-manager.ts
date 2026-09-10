@@ -1822,7 +1822,9 @@ export class SessionManager {
 		// Drain any fire-and-forget backing writes (e.g. `writeTextSync` queued
 		// on IndexedSessionStorage during `flushSync`) so callers relying on
 		// flush() see the write durably visible to readers.
-		await this.#storage.drain();
+		await this.#scheduleDiskWork(async () => {
+			await this.#storage.drain();
+		});
 		if (this.#diskFailure) throw this.#diskFailure;
 	}
 
@@ -1890,7 +1892,9 @@ export class SessionManager {
 		// Wait for any queued backing writes (IndexedSessionStorage per-path
 		// tail) to become durable so a graceful shutdown does not exit while
 		// a fire-and-forget publish is still on the wire.
-		await this.#storage.drain();
+		await this.#scheduleDiskWork(async () => {
+			await this.#storage.drain();
+		});
 		if (this.#diskFailure) throw this.#diskFailure;
 	}
 
