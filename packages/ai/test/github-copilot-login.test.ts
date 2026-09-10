@@ -97,6 +97,47 @@ describe("loginGitHubCopilot", () => {
 		expect(pollCount).toBeGreaterThanOrEqual(1);
 	});
 
+	it("sends COPILOT_INTEGRATION_ID on model-policy enablement", async () => {
+		const previous = Bun.env.COPILOT_INTEGRATION_ID;
+		Bun.env.COPILOT_INTEGRATION_ID = "copilot-chat";
+		try {
+			const policyIntegrationIds: (string | null)[] = [];
+			const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+				const url = typeof input === "string" ? input : input.toString();
+				if (url === "https://github.com/login/device/code") {
+					return new Response(JSON.stringify(deviceCodeResponse()), {
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+				if (url === "https://github.com/login/oauth/access_token") {
+					return new Response(JSON.stringify(accessTokenResponse()), {
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+				if (url.includes("/models/") && url.includes("/policy")) {
+					policyIntegrationIds.push(new Headers(init?.headers).get("Copilot-Integration-Id"));
+					return modelPolicyOk();
+				}
+				throw new Error(`Unexpected URL: ${url}`);
+			});
+
+			await loginGitHubCopilot({
+				...FAST_POLL_OPTIONS,
+				fetch: fetchMock as unknown as typeof fetch,
+				onAuth: vi.fn(),
+				onPrompt: mockOnPrompt(""),
+			});
+
+			expect(policyIntegrationIds.length).toBeGreaterThan(0);
+			expect(policyIntegrationIds.every(id => id === "copilot-chat")).toBe(true);
+		} finally {
+			if (previous === undefined) delete Bun.env.COPILOT_INTEGRATION_ID;
+			else Bun.env.COPILOT_INTEGRATION_ID = previous;
+		}
+	});
+
 	it("preserves credentials minted by the former OAuth app", async () => {
 		const refreshToken = getProviderDefinition("github-copilot")?.refreshToken;
 		if (!refreshToken) throw new Error("expected github-copilot refresh");

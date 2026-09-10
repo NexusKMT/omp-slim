@@ -108,6 +108,7 @@ import {
 	buildCopilotDynamicHeaders,
 	hasCopilotVisionInput,
 	resolveGitHubCopilotBaseUrl,
+	wrapFetchForCopilotFallback,
 } from "./github-copilot-headers";
 import { getOpenAIPromptCacheKey } from "./openai-shared";
 import { applyInferenceHeaders } from "./inference-headers";
@@ -3282,7 +3283,7 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 			maxRetries: 5,
 			maxRetryDelayMs,
 			defaultHeaders,
-			fetch: cchFetch,
+			fetch: wrapFetchForCopilotFallback(cchFetch, true),
 			fetchOptions,
 		};
 	}

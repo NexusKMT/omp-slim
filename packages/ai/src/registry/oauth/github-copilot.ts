@@ -18,9 +18,11 @@ import {
 	discoverGitHubCopilotApiEndpoint,
 	getGitHubCopilotBaseUrl,
 	isPublicGitHubHost,
+	normalizeCopilotIntegrationId,
 	normalizeDomain,
 	normalizeGitHubCopilotEnterpriseDomain,
 } from "@oh-my-pi/pi-catalog/wire/github-copilot";
+import { $env } from "@oh-my-pi/pi-utils";
 import * as AIError from "../../error";
 import type { FetchImpl } from "../../types";
 import type { OAuthController, OAuthCredentials } from "./types";
@@ -264,12 +266,14 @@ async function enableGitHubCopilotModel(
 	const url = `${baseUrl}/models/${modelId}/policy`;
 
 	try {
+		const integrationIdOverride = normalizeCopilotIntegrationId($env.COPILOT_INTEGRATION_ID);
 		const response = await fetchImpl(url, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
 				Authorization: `Bearer ${token}`,
 				...COPILOT_API_HEADERS,
+				...(integrationIdOverride ? { "Copilot-Integration-Id": integrationIdOverride } : {}),
 				"Openai-Intent": "chat-policy",
 				"X-Initiator": "user",
 				"X-Interaction-Type": "chat-policy",

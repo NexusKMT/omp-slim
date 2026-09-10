@@ -1,9 +1,11 @@
 import {
 	COPILOT_CAPI_IDENTITY_HEADERS,
 	getGitHubCopilotBaseUrl,
+	normalizeCopilotIntegrationId,
 	parseGitHubCopilotApiKey,
 } from "@oh-my-pi/pi-catalog/wire/github-copilot";
-import type { Message } from "../types";
+import { $env, logger } from "@oh-my-pi/pi-utils";
+import type { FetchImpl, Message } from "../types";
 /**
  * Infer whether the current request to Copilot is user-initiated or agent-initiated.
  * Accepts `unknown[]` because providers may pass pre-converted message shapes.
@@ -25,6 +27,55 @@ export function resolveGitHubCopilotBaseUrl(
 	if (!enterpriseUrl) return baseUrl;
 	if (baseUrl && !baseUrl.includes("githubcopilot.com")) return baseUrl;
 	return getGitHubCopilotBaseUrl(enterpriseUrl);
+}
+
+/**
+ * Opt-in `Copilot-Integration-Id` override for chat and model-policy requests.
+ * Reads `COPILOT_INTEGRATION_ID`; unset/invalid keeps the CLI default. Model
+ * discovery keeps the CLI identity: it unlocks enterprise/experimental models
+ * and listing models is not policy-gated the way chat completions are (#11372).
+ */
+export function resolveCopilotIntegrationIdOverride(): string | undefined {
+	return normalizeCopilotIntegrationId($env.COPILOT_INTEGRATION_ID);
+}
+
+/** Chat-compatible identity for the single policy-denial retry (issue #11372). */
+export const COPILOT_CHAT_FALLBACK_INTEGRATION_ID = "copilot-chat" as const;
+
+/**
+ * Reissue default-identity Copilot 403s once as `copilot-chat`.
+ *
+ * Some Business organizations allow Chat clients but block CLI/agentic ones,
+ * so the default `copilot-developer-cli` identity is denied on an otherwise
+ * valid token. The retry fires only for requests carrying the default
+ * identity and only when no explicit `COPILOT_INTEGRATION_ID` is set — an
+ * explicit choice is never second-guessed. The denied body is drained before
+ * reissuing, and the retry carries the chat identity so the guard passes it
+ * through: at most two requests, never a loop.
+ */
+export function wrapFetchForCopilotFallback(base: FetchImpl | undefined, enabled: boolean): FetchImpl {
+	const inner = base ?? fetch;
+	if (!enabled) return inner;
+	return async (input, init) => {
+		const response = await inner(input, init);
+		if (response.status !== 403) return response;
+		if (resolveCopilotIntegrationIdOverride() !== undefined) return response;
+		const outgoing = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+		if (outgoing.get("Copilot-Integration-Id") !== COPILOT_CAPI_IDENTITY_HEADERS["Copilot-Integration-Id"]) {
+			return response;
+		}
+		try {
+			await response.arrayBuffer();
+		} catch {}
+		logger.warn("GitHub Copilot CLI identity denied (HTTP 403); retrying once as copilot-chat");
+		const retryHeaders = new Headers(outgoing);
+		retryHeaders.set("Copilot-Integration-Id", COPILOT_CHAT_FALLBACK_INTEGRATION_ID);
+		// Request-shaped inputs never occur on the installed paths (all three
+		// transports call fetch with a URL string); pass them through rather
+		// than rebuilding an already-consumed body.
+		if (input instanceof Request) return response;
+		return inner(input, { ...init, headers: retryHeaders });
+	};
 }
 export function inferCopilotInitiator(messages: unknown[]): CopilotInitiator {
 	if (messages.length === 0) return "user";
@@ -129,6 +180,8 @@ export function buildCopilotDynamicHeaders(params: {
 		"X-Initiator": initiator,
 		"X-Interaction-Type": `conversation-${initiator}`,
 	};
+	const integrationIdOverride = resolveCopilotIntegrationIdOverride();
+	if (integrationIdOverride) headers["Copilot-Integration-Id"] = integrationIdOverride;
 
 	if (params.hasImages) {
 		headers["Copilot-Vision-Request"] = "true";
