@@ -1,13 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as os from "node:os";
 import * as path from "node:path";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { resolveLocalUrlToPath } from "@oh-my-pi/pi-coding-agent/internal-urls";
 import { getSettingsForTab } from "@oh-my-pi/pi-coding-agent/modes/components/settings-defs";
 import {
 	autosaveApprovedPlan,
 	defaultPlanAutosaveDir,
 	resolvePlanAutosaveDir,
 } from "@oh-my-pi/pi-coding-agent/plan-mode/plan-autosave";
+import type { PlanModeState } from "@oh-my-pi/pi-coding-agent/plan-mode/state";
+import type { PlanYolo } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
+import { PrewalkCoordinator, type PrewalkCoordinatorHost } from "@oh-my-pi/pi-coding-agent/session/prewalk";
+import type { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 let tempDir: TempDir | undefined;
@@ -129,5 +135,108 @@ describe("autosaveApprovedPlan", () => {
 		const settings = Settings.isolated({ "plan.autosave": true });
 		const result = await autosaveApprovedPlan({ settings, cwd, title: "Auth", planContent: "  \n" });
 		expect(result).toBeNull();
+	});
+});
+
+describe("plan-yolo approval autosave", () => {
+	const target = buildModel({
+		id: "test-plan-target",
+		name: "Test Plan Target",
+		api: "anthropic-messages",
+		provider: "anthropic",
+		baseUrl: "https://example.invalid",
+		reasoning: true,
+		input: ["text", "image"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 200_000,
+		maxTokens: 8_192,
+	});
+
+	function setupPlanYolo(cwd: string, artifactsDir: string, settings: Settings) {
+		const notices: Array<{ level: "info" | "warning" | "error"; message: string; source?: string }> = [];
+		const modelTemporaryCalls: unknown[][] = [];
+		let capturedHandler: ((title: string) => Promise<unknown>) | undefined;
+		let planModeState: PlanModeState | undefined;
+		const localOptions = { getArtifactsDir: () => artifactsDir, getSessionId: () => "test-session" };
+		const host: PrewalkCoordinatorHost = {
+			agent: { steer: () => {} } as unknown as PrewalkCoordinatorHost["agent"],
+			sessionManager: { getCwd: () => cwd } as unknown as SessionManager,
+			settings,
+			model: () => undefined,
+			configuredThinkingLevel: () => undefined,
+			emitNotice: (level, message, source) => {
+				notices.push({ level, message, source });
+			},
+			setModelTemporary: async (...args: unknown[]) => {
+				modelTemporaryCalls.push(args);
+			},
+			setActiveToolsByName: async () => {},
+			restoreNonMCPToolPresentation: async () => {},
+			getActiveToolNames: () => [],
+			getEnabledToolNames: () => [],
+			getMountedXdevToolNames: () => [],
+			hasBuiltInTool: () => false,
+			getPlanModeState: () => planModeState,
+			setPlanModeState: state => {
+				planModeState = state;
+			},
+			getPlanReferencePath: () => "",
+			setPlanProposalHandler: handler => {
+				capturedHandler = handler ?? undefined;
+			},
+			waitForSessionMessagePersistence: async () => {},
+			localProtocolOptions: () => localOptions,
+		};
+		return { host, notices, modelTemporaryCalls, localOptions, getHandler: () => capturedHandler };
+	}
+
+	it("autosaves the approved plan and preserves the plan-yolo transition", async () => {
+		const cwd = makeCwd();
+		const artifactsDir = path.join(cwd, "artifacts");
+		const settings = Settings.isolated({ "plan.autosave": true });
+		const t = setupPlanYolo(cwd, artifactsDir, settings);
+		const coordinator = new PrewalkCoordinator(t.host, { planYolo: { target } satisfies PlanYolo });
+		await coordinator.armPlanYoloIfNeeded();
+		const planPath = resolveLocalUrlToPath("local://auth-plan.md", t.localOptions);
+		await Bun.write(planPath, "# Plan\n\nYolo.\n");
+		const handler = t.getHandler();
+		if (!handler) throw new Error("expected a plan proposal handler");
+		const result = (await handler("auth")) as {
+			content: Array<{ type: string; text: string }>;
+			details: { planFilePath: string; title: string; planExists: boolean };
+		};
+		expect(result.details).toMatchObject({ planFilePath: "local://auth-plan.md", title: "auth", planExists: true });
+		expect(result.content[0]?.text).toBe(`Plan approved. Implementing now with ${target.id}.`);
+		expect(result.content[0]?.text).not.toContain(cwd);
+		expect(await Bun.file(path.join(cwd, ".omp", "plans", "AUTH_PLAN.md")).text()).toBe("# Plan\n\nYolo.\n");
+		expect(t.notices).toContainEqual({
+			level: "info",
+			message: expect.stringContaining("Plan autosaved to"),
+			source: "plan-yolo",
+		});
+		expect(t.modelTemporaryCalls.length).toBe(1);
+	});
+
+	it("warns the operator but still implements when autosave fails", async () => {
+		const cwd = makeCwd();
+		const artifactsDir = path.join(cwd, "artifacts");
+		const blocker = path.join(cwd, "blocker");
+		await Bun.write(blocker, "x");
+		const settings = Settings.isolated({ "plan.autosave": true, "plan.autosaveDir": path.join(blocker, "sub") });
+		const t = setupPlanYolo(cwd, artifactsDir, settings);
+		const coordinator = new PrewalkCoordinator(t.host, { planYolo: { target } satisfies PlanYolo });
+		await coordinator.armPlanYoloIfNeeded();
+		const planPath = resolveLocalUrlToPath("local://auth-plan.md", t.localOptions);
+		await Bun.write(planPath, "# Plan\n\nYolo.\n");
+		const handler = t.getHandler();
+		if (!handler) throw new Error("expected a plan proposal handler");
+		const result = (await handler("auth")) as { content: Array<{ type: string; text: string }> };
+		expect(result.content[0]?.text).toBe(`Plan approved. Implementing now with ${target.id}.`);
+		expect(t.modelTemporaryCalls.length).toBe(1);
+		expect(t.notices).toContainEqual({
+			level: "warning",
+			message: expect.stringContaining("Plan autosave failed"),
+			source: "plan-yolo",
+		});
 	});
 });

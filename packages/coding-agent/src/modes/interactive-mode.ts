@@ -134,6 +134,7 @@ import {
 	formatMoreItems,
 	isFeedModelBadgeEnabled,
 	replaceTabs,
+	shortenEmbeddedPaths,
 	shortenPath,
 	TRUNCATE_LENGTHS,
 	truncateToWidth,
@@ -343,8 +344,6 @@ const PLAN_SAVE_AND_QUIT_OPTION = "Save and quit";
 const PLAN_SAVE_TITLE_LINE_LIMIT = 6;
 
 const PLAN_FILENAME_SYSTEM_PROMPT = prompt.render(planFilenamePrompt);
-/** Re-exported for tests and external importers; canonical implementation lives in plan-mode/plan-autosave. */
-export { planSaveFileName };
 
 function planSaveTitleExcerpt(planContent: string): string {
 	return planContent
@@ -4095,9 +4094,20 @@ export class InteractiveMode implements InteractiveModeContext {
 				title: options.title,
 				planContent,
 			});
-			if (autosaved) this.showStatus(`Saved plan to ${shortenPath(autosaved)}.`);
+			if (autosaved) {
+				const displayPath = truncateToWidth(replaceTabs(shortenPath(autosaved)), TRUNCATE_LENGTHS.CONTENT);
+				this.showStatus(`Saved plan to ${displayPath}.`);
+			}
 		} catch (error) {
-			this.showWarning(`Failed to autosave plan: ${error instanceof Error ? error.message : String(error)}`);
+			const detail = truncateToWidth(
+				shortenEmbeddedPaths(
+					replaceTabs(error instanceof Error ? error.message : String(error))
+						.replace(/[\r\n]+/g, " ")
+						.trim(),
+				),
+				TRUNCATE_LENGTHS.CONTENT,
+			);
+			this.showWarning(`Failed to autosave plan: ${detail}`);
 		}
 
 		// Resolve the deferred plan-approval model transition. On the compact path

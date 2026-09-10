@@ -14,7 +14,13 @@ import prewalkContinuePrompt from "../prompts/system/prewalk-continue.md" with {
 import prewalkPlanPrompt from "../prompts/system/prewalk-plan.md" with { type: "text" };
 import { type ConfiguredThinkingLevel, prewalkWouldBeNoop } from "../thinking";
 import { isMCPToolName } from "../tools/builtin-names";
-import { shortenPath } from "../tools/render-utils";
+import {
+	replaceTabs,
+	shortenEmbeddedPaths,
+	shortenPath,
+	TRUNCATE_LENGTHS,
+	truncateToWidth,
+} from "../tools/render-utils";
 import type { PlanProposalHandler } from "../tools/resolve";
 import { ToolError } from "../tools/tool-errors";
 import type { PlanYolo, Prewalk } from "./agent-session-types";
@@ -325,8 +331,25 @@ export class PrewalkCoordinator {
 				title: resolvedTitle,
 				planContent,
 			});
+			if (autosavedPlan) {
+				const displayPath = truncateToWidth(replaceTabs(shortenPath(autosavedPlan)), TRUNCATE_LENGTHS.CONTENT);
+				this.#host.emitNotice("info", `Plan autosaved to ${displayPath}.`, "plan-yolo");
+			}
 		} catch (error) {
 			logger.warn("Failed to autosave approved plan", { error });
+			const detail = truncateToWidth(
+				shortenEmbeddedPaths(
+					replaceTabs(error instanceof Error ? error.message : String(error))
+						.replace(/[\r\n]+/g, " ")
+						.trim(),
+				),
+				TRUNCATE_LENGTHS.CONTENT,
+			);
+			this.#host.emitNotice(
+				"warning",
+				`Plan autosave failed: ${detail} Continuing with implementation.`,
+				"plan-yolo",
+			);
 		}
 		this.#host.setPlanModeState(undefined);
 		const previousPresentation = this.#planYoloPreviousNonMCPPresentation;
@@ -356,14 +379,7 @@ export class PrewalkCoordinator {
 			timestamp: Date.now(),
 		});
 		return {
-			content: [
-				{
-					type: "text",
-					text: autosavedPlan
-						? `Plan approved. Implementing now with ${planYolo.target.id} (autosaved to ${shortenPath(autosavedPlan)}).`
-						: `Plan approved. Implementing now with ${planYolo.target.id}.`,
-				},
-			],
+			content: [{ type: "text", text: `Plan approved. Implementing now with ${planYolo.target.id}.` }],
 			details: { planFilePath, title: resolvedTitle, planExists: true },
 		};
 	}

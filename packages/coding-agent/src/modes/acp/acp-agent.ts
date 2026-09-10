@@ -76,7 +76,6 @@ import { refreshAgentDiscovery } from "../../task";
 import { AUTO_THINKING, parseConfiguredThinkingLevel } from "../../thinking";
 import { OTHER_OPTION } from "../../tools/ask";
 import { normalizeLocalScheme } from "../../tools/path-utils";
-import { shortenPath } from "../../tools/render-utils";
 import { ToolError } from "../../tools/tool-errors";
 import {
 	DEFAULT_TTS_LOCAL_MODEL_KEY,
@@ -1927,9 +1926,9 @@ export class AcpAgent implements Agent {
 		session.setPlanReferencePath(planFilePath);
 		session.setPlanProposalHandler?.(null);
 		session.setPlanModeState(undefined);
-		let autosavedPlan: string | null = null;
+		let autosaveFailed = false;
 		try {
-			autosavedPlan = await autosaveApprovedPlan({
+			await autosaveApprovedPlan({
 				settings: session.settings,
 				cwd: session.sessionManager.getCwd(),
 				title: resolvedTitle,
@@ -1940,6 +1939,7 @@ export class AcpAgent implements Agent {
 				sessionId: session.sessionId,
 				error,
 			});
+			autosaveFailed = true;
 		}
 		try {
 			await this.#connection.sessionUpdate({
@@ -1957,8 +1957,8 @@ export class AcpAgent implements Agent {
 			content: [
 				{
 					type: "text" as const,
-					text: autosavedPlan
-						? `Plan approved at ${planFilePath} (autosaved to ${shortenPath(autosavedPlan)}). Plan mode exited; proceed with the implementation.`
+					text: autosaveFailed
+						? `Plan approved at ${planFilePath}. Plan mode exited; proceed with the implementation. (Plan autosave failed; continuing.)`
 						: `Plan approved at ${planFilePath}. Plan mode exited; proceed with the implementation.`,
 				},
 			],
