@@ -552,7 +552,7 @@ Request shaping:
 
 Image handling:
 
-- `stripImageInput` — drop image parts before an `openai-completions` request is encoded. The catalog's
+- `stripImageInput` — drop image parts before an `openai-completions` request is encoded (including the OpenRouter chat fallback, `PI_OPENROUTER_RESPONSES=0`). The catalog's
   class rules set it for model lines that endpoints commonly serve as text-only (e.g. the DeepSeek class),
   independently of the provider's own `input` declaration, so a model can declare `input: [text, image]`
   and still send no image. Per-model `compat` is deep-merged over those rules and wins: set
