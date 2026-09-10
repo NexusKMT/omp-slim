@@ -487,10 +487,11 @@ export interface CutPointResult {
 }
 
 /**
- * Find the cut point in session entries that keeps approximately `keepRecentTokens`.
+ * Find the oldest complete recent-history suffix that fits `keepRecentTokens`.
  *
- * Algorithm: Walk backwards from newest, accumulating estimated message sizes.
- * Stop when we've accumulated >= keepRecentTokens. Cut at that point.
+ * Walk backwards by valid cut points, measuring whole assistant/tool groups.
+ * Keep the newest group even when it alone exceeds the budget; never retain
+ * an additional older group that would push an otherwise fitting suffix over.
  *
  * Can cut at user OR assistant messages (never tool results). When cutting at an
  * assistant message with tool calls, its tool results come after and will be kept.
@@ -515,29 +516,21 @@ export function findCutPoint(
 		return { firstKeptEntryIndex: startIndex, turnStartIndex: -1, isSplitTurn: false };
 	}
 
-	// Walk backwards from newest, accumulating estimated message sizes
+	// Evaluate the budget only at valid boundaries, after counting all results
+	// belonging to an assistant. Checking individual messages can either retain
+	// the oversized older assistant or miss its boundary and retain all history.
 	let accumulatedTokens = 0;
-	let cutIndex = cutPoints[0]; // Default: keep from first message (not header)
+	let cutPointIndex = cutPoints.length - 1;
+	let cutIndex = cutPoints[cutPointIndex];
 
 	for (let i = endIndex - 1; i >= startIndex; i--) {
 		const entry = entries[i];
-		if (entry.type !== "message") continue;
-
-		// Estimate this message's size
-		const messageTokens = tokenizer.countMessage(entry.message);
-		accumulatedTokens += messageTokens;
-
-		// Check if we've exceeded the budget
-		if (accumulatedTokens >= keepRecentTokens) {
-			// Find the closest valid cut point at or after this entry
-			for (let c = 0; c < cutPoints.length; c++) {
-				if (cutPoints[c] >= i) {
-					cutIndex = cutPoints[c];
-					break;
-				}
-			}
-			break;
-		}
+		const message = getMessageFromEntry(entry);
+		if (message) accumulatedTokens += tokenizer.countMessage(message);
+		if (i !== cutPoints[cutPointIndex]) continue;
+		if (accumulatedTokens > keepRecentTokens) break;
+		cutIndex = i;
+		cutPointIndex--;
 	}
 
 	// Scan backwards from cutIndex to include any non-message entries (bash, settings, etc.)
@@ -1349,7 +1342,21 @@ export function prepareCompaction(
 	if (resetBoundaryIndex > prevCompactionIndex) {
 		prevCompactionIndex = -1;
 	}
-	const boundaryStart = Math.max(prevCompactionIndex, resetBoundaryIndex) + 1;
+	let boundaryStart = Math.max(prevCompactionIndex, resetBoundaryIndex) + 1;
+	if (prevCompactionIndex >= 0) {
+		const previous = pathEntries[prevCompactionIndex] as CompactionEntry;
+		// A local summary covers only the discarded prefix. Its retained tail is
+		// still live input and must be eligible for the next compaction, even
+		// though those entries precede the journal's compaction marker. Remote
+		// replacement payloads already own that history and must not duplicate it.
+		const remote =
+			getCompactionV2PreserveData(previous.preserveData) ??
+			getPreservedOpenAiRemoteCompactionData(previous.preserveData);
+		if (!remote) {
+			const retainedStart = pathEntries.findIndex(entry => entry.id === previous.firstKeptEntryId);
+			if (retainedStart >= 0 && retainedStart < prevCompactionIndex) boundaryStart = retainedStart;
+		}
+	}
 	const boundaryEnd = pathEntries.length;
 
 	const lastUsage = getLastAssistantUsage(pathEntries);

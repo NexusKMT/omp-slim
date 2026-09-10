@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed compaction retaining oversized older steps beyond the recent-history budget and skipping previously retained history on later passes, preventing long tool loops from freeing enough context ([#11365](https://github.com/can1357/oh-my-pi/issues/11365)).
+
 ## [18.1.10] - 2026-09-04
 
 ### Fixed
