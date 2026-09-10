@@ -463,5 +463,6 @@ describe("wrapFetchForCopilotFallback", () => {
 		});
 		await expect(wrapped(request)).resolves.toBe(denied);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(denied.bodyUsed).toBe(false);
 	});
 });
