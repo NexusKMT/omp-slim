@@ -7963,7 +7963,7 @@
 				}
 			},
 			{
-				"source": "providers/deepseek.kdl:16",
+				"source": "providers/deepseek.kdl:18",
 				"providers": [
 					"deepseek"
 				],
@@ -8006,7 +8006,7 @@
 				}
 			},
 			{
-				"source": "providers/deepseek.kdl:40",
+				"source": "providers/deepseek.kdl:42",
 				"providers": [
 					"deepseek"
 				],
@@ -8050,7 +8050,7 @@
 				}
 			},
 			{
-				"source": "providers/deepseek.kdl:73",
+				"source": "providers/deepseek.kdl:75",
 				"providers": [
 					"deepseek"
 				],
