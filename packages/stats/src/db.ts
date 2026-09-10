@@ -55,17 +55,20 @@ const ZERO_USAGE_COST: UsageCost = {
  * Two shapes store that zero:
  *   - `xai-oauth` bills through the SuperGrok subscription, so ingestion
  *     deliberately records no per-request price;
- *   - a non-positive timestamp is the parser's "no recoverable time" sentinel,
- *     and `resolveStoredCost` refuses to price a scheduled (time-based) card
- *     without one — the epoch would silently become the tariff. Such a row
- *     keeps its real tokens and its zero until a re-parse recovers the time.
+ *   - `cost_unpriced = 1`, set by `insertMessageStats` when `resolveStoredCost`
+ *     refuses to price a scheduled (time-based) card whose entry carried no
+ *     recoverable request timestamp — the epoch would silently become the
+ *     tariff. Such a row keeps its real tokens and its zero until a re-parse
+ *     recovers the time.
  *
- * A row with a real timestamp and an explicit zero cost stays a genuine zero.
+ * Nothing else sets the marker: an explicit recorded zero, a free flat card,
+ * and a model with no catalog card at all keep `cost_unpriced = 0` even at the
+ * parser's timestamp sentinel, because their zero is a real price.
  * `prefix` qualifies the columns for queries that alias `messages`.
  */
 function unpricedRequestSql(prefix = ""): string {
 	return `CASE WHEN ${prefix}total_tokens > 0 AND ${prefix}cost_total = 0
-		AND (${prefix}provider = 'xai-oauth' OR ${prefix}timestamp <= 0) THEN 1 ELSE 0 END`;
+		AND (${prefix}provider = 'xai-oauth' OR ${prefix}cost_unpriced = 1) THEN 1 ELSE 0 END`;
 }
 
 const UNPRICED_REQUEST_SQL = unpricedRequestSql();
@@ -198,6 +201,7 @@ export async function initDb(): Promise<Database> {
 			cost_cache_write REAL NOT NULL,
 			cost_total REAL NOT NULL,
 			cost_no_cache_input REAL,
+			cost_unpriced INTEGER NOT NULL DEFAULT 0,
 			agent_type TEXT NOT NULL DEFAULT 'main',
 			UNIQUE(session_file, entry_id)
 		);
@@ -271,6 +275,11 @@ export async function initDb(): Promise<Database> {
 	}
 	if (!messageColumns.some(column => column.name === "cost_no_cache_input")) {
 		db.run("ALTER TABLE messages ADD COLUMN cost_no_cache_input REAL");
+	}
+	// Rows ingested before this column existed default to 0 (not unpriced), so
+	// their epoch-sentinel zeros read as free until a re-parse rewrites them.
+	if (!messageColumns.some(column => column.name === "cost_unpriced")) {
+		db.run("ALTER TABLE messages ADD COLUMN cost_unpriced INTEGER NOT NULL DEFAULT 0");
 	}
 	db.run("UPDATE messages SET premium_requests = 0 WHERE premium_requests IS NULL");
 	// Token-usage-by-agent: each message is classified main / subagent / advisor
@@ -429,7 +438,17 @@ function hasRequestTimestamp(timestamp: number): boolean {
 	return Number.isFinite(timestamp) && timestamp > 0;
 }
 
-function resolveStoredCost(stats: MessageStatsInput): UsageCost {
+interface ResolvedCost {
+	cost: UsageCost;
+	/**
+	 * The stored zero is unknown spend rather than a price: a scheduled card
+	 * with no recoverable request timestamp to select a tariff from. Persisted
+	 * as `cost_unpriced` so the aggregates do not have to infer it.
+	 */
+	unpriced: boolean;
+}
+
+function resolveStoredCost(stats: MessageStatsInput): ResolvedCost {
 	// `usage.cost` is absent when the session entry recorded no price at all, and
 	// legacy payloads can carry a partially-populated cost object (e.g. only
 	// `total`). The messages table declares every cost_* column as REAL NOT NULL,
@@ -441,19 +460,23 @@ function resolveStoredCost(stats: MessageStatsInput): UsageCost {
 	// Scheduled prices are frozen per request, including explicitly free usage.
 	// Preserve legacy zero-cost subscription correction for unscheduled models.
 	if (storedCost && Number.isFinite(storedCost.total) && (storedCost.total !== 0 || catalogCost?.timeBased)) {
-		return storedCost;
+		return { cost: storedCost, unpriced: false };
 	}
 
 	// Without a request timestamp a scheduled card has no tariff to select, and
 	// the epoch would silently become one. Leave the request unpriced; a re-parse
 	// of the session file repairs it once the timestamp is recoverable.
 	if (!hasRequestTimestamp(stats.timestamp) && catalogCost?.timeBased) {
-		return storedCost ?? ZERO_USAGE_COST;
+		return { cost: storedCost ?? ZERO_USAGE_COST, unpriced: true };
 	}
 
-	return (
-		calculateCatalogCost(stats.provider, stats.model, stats.usage, stats.timestamp) ?? storedCost ?? ZERO_USAGE_COST
-	);
+	return {
+		cost:
+			calculateCatalogCost(stats.provider, stats.model, stats.usage, stats.timestamp) ??
+			storedCost ??
+			ZERO_USAGE_COST,
+		unpriced: false,
+	};
 }
 
 function calculateNoCacheInputCost(
@@ -602,9 +625,10 @@ export function insertMessageStats(stats: MessageStatsInput[]): number {
 			session_file, entry_id, folder, model, provider, api, timestamp,
 			duration, ttft, stop_reason, error_message,
 			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens, premium_requests,
-			cost_input, cost_output, cost_cache_read, cost_cache_write, cost_total, cost_no_cache_input, agent_type
+			cost_input, cost_output, cost_cache_read, cost_cache_write, cost_total, cost_no_cache_input,
+			cost_unpriced, agent_type
 		)
-		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		WHERE NOT EXISTS (
 			SELECT 1 FROM messages
 			WHERE entry_id = ? AND timestamp = ? AND session_file <> ?
@@ -616,13 +640,14 @@ export function insertMessageStats(stats: MessageStatsInput[]): number {
 			cost_cache_read = excluded.cost_cache_read,
 			cost_cache_write = excluded.cost_cache_write,
 			cost_total = excluded.cost_total,
-			cost_no_cache_input = excluded.cost_no_cache_input
+			cost_no_cache_input = excluded.cost_no_cache_input,
+			cost_unpriced = excluded.cost_unpriced
 	`);
 
 	let inserted = 0;
 	const insert = db.transaction(() => {
 		for (const s of stats) {
-			const cost = resolveStoredCost(s);
+			const { cost, unpriced } = resolveStoredCost(s);
 			const noCacheInputCost = calculateNoCacheInputCost(s.provider, s.model, s.usage, s.timestamp) ?? 0;
 			const result = stmt.run(
 				s.sessionFile,
@@ -648,6 +673,7 @@ export function insertMessageStats(stats: MessageStatsInput[]): number {
 				cost.cacheWrite,
 				cost.total,
 				noCacheInputCost,
+				unpriced ? 1 : 0,
 				s.agentType,
 				// `WHERE NOT EXISTS` binds: skip when a different session_file
 				// already holds this (entry_id, timestamp).
@@ -1190,6 +1216,7 @@ function rowToMessageStats(row: any): MessageStats {
 			},
 		},
 		agentType: (row.agent_type as AgentType) ?? "main",
+		costUnpriced: row.cost_unpriced === 1,
 	};
 }
 

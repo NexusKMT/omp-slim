@@ -33,6 +33,20 @@ function selectCodexReferenceModel() {
 
 const codexReferenceModel = selectCodexReferenceModel();
 
+function selectFreeModel() {
+	const model = getBundledModels("ollama-cloud").find(
+		candidate =>
+			candidate.cost.input === 0 &&
+			candidate.cost.output === 0 &&
+			candidate.cost.cacheRead === 0 &&
+			candidate.cost.cacheWrite === 0,
+	);
+	if (!model) throw new Error("Expected a bundled zero-cost model");
+	return model;
+}
+
+const freeModel = selectFreeModel();
+
 function createCodexGptStats(entryId: string): MessageStats {
 	return {
 		sessionFile: "/tmp/session.jsonl",
@@ -410,30 +424,73 @@ describe("stats scheduled response costs", () => {
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		};
 
+		// A free flat card stores no billable price, so its zero is real: the
+		// timestamp sentinel must not turn it into unknown spend.
+		const freeFlat = createCodexGptStats("undated-free-flat");
+		freeFlat.provider = freeModel.provider;
+		freeFlat.model = freeModel.id;
+		freeFlat.api = freeModel.api;
+		freeFlat.timestamp = 0;
+		freeFlat.usage = {
+			input: 1_000_000,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 1_000_000,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		Reflect.deleteProperty(freeFlat.usage, "cost");
+
+		// A recorded zero is a charge, not absent pricing, even on a scheduled
+		// card whose timestamp never resolved.
+		const recordedZero = createCodexGptStats("undated-recorded-zero");
+		recordedZero.provider = "deepseek";
+		recordedZero.model = "deepseek-v4-flash";
+		recordedZero.api = "openai-completions";
+		recordedZero.timestamp = 0;
+		recordedZero.usage = {
+			input: 1_000_000,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 1_000_000,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+
 		const priced = createCodexGptStats("priced");
 		priced.model = "claude-sonnet-4-6";
 		priced.provider = "anthropic";
 		priced.api = "anthropic-messages";
 		priced.usage.cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 1.25 };
 
-		insertMessageStats([undated, free, priced]);
+		insertMessageStats([undated, free, freeFlat, recordedZero, priced]);
 
-		const stored = getRecentRequests(3);
+		const stored = getRecentRequests(5);
 		expect(stored.find(request => request.entryId === "undated-scheduled")?.usage.cost.total).toBe(0);
+		expect(stored.find(request => request.entryId === "undated-scheduled")?.costUnpriced).toBe(true);
 		expect(stored.find(request => request.entryId === "dated-explicit-zero")?.usage.cost.total).toBe(0);
+		expect(stored.find(request => request.entryId === "dated-explicit-zero")?.costUnpriced).toBe(false);
+		expect(stored.find(request => request.entryId === "undated-free-flat")?.usage.cost.total).toBe(0);
+		expect(stored.find(request => request.entryId === "undated-free-flat")?.costUnpriced).toBe(false);
+		expect(stored.find(request => request.entryId === "undated-recorded-zero")?.usage.cost.total).toBe(0);
+		expect(stored.find(request => request.entryId === "undated-recorded-zero")?.costUnpriced).toBe(false);
 		expect(stored.find(request => request.entryId === "priced")?.usage.cost.total).toBeCloseTo(1.25, 8);
 
-		expect(getOverallStats()).toMatchObject({ unpricedRequests: 1, totalRequests: 3 });
+		expect(getOverallStats()).toMatchObject({ unpricedRequests: 1, totalRequests: 5 });
 		expect(getOverallStats().totalCost).toBeCloseTo(1.25, 8);
 		expect(getStatsByModel().find(model => model.model === "deepseek-v4-flash")).toMatchObject({
 			totalCost: 0,
 			unpricedRequests: 1,
 		});
+		expect(getStatsByModel().find(model => model.model === freeModel.id)).toMatchObject({
+			totalCost: 0,
+			unpricedRequests: 0,
+		});
 		expect(getStatsByProvider().find(provider => provider.provider === "anthropic")).toMatchObject({
 			totalCost: 1.25,
 			unpricedRequests: 0,
 		});
-		// The undated row buckets at the epoch, so ask for the uncut series.
+		// The undated rows bucket at the epoch, so ask for the uncut series.
 		const series = getCostTimeSeries(90, null);
 		expect(series.reduce((sum, point) => sum + point.unpricedRequests, 0)).toBe(1);
 		expect(series.reduce((sum, point) => sum + point.cost, 0)).toBeCloseTo(1.25, 8);
@@ -441,6 +498,8 @@ describe("stats scheduled response costs", () => {
 		closeDb();
 		await initDb();
 		expect(getOverallStats()).toMatchObject({ unpricedRequests: 1, totalCost: 1.25 });
+		expect(getRecentRequests(5).find(request => request.entryId === "undated-scheduled")?.costUnpriced).toBe(true);
+		expect(getRecentRequests(5).find(request => request.entryId === "undated-free-flat")?.costUnpriced).toBe(false);
 	});
 
 	it("preserves recorded scheduled charges, including explicit zero, on ingest and reopen", async () => {

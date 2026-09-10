@@ -25,18 +25,18 @@ export function formatEstimatedCost(value: number, unpricedRequests: number, dig
 
 /**
  * Format one request's cost, distinguishing unpriced usage from free usage.
- * Mirrors the server's `unpricedRequestSql`: `xai-oauth` is subscription-billed,
- * and a non-positive timestamp is the parser's sentinel for an entry whose time
- * was unrecoverable, which leaves a scheduled card with no tariff to select.
+ * Mirrors the server's `unpricedRequestSql`: `xai-oauth` is billed through a
+ * subscription, and `costUnpriced` marks a row the ingest path could not price
+ * (a scheduled card with no recoverable request timestamp).
  */
 export function formatMessageCost(
-	message: Pick<MessageStats, "provider" | "usage" | "timestamp">,
+	message: Pick<MessageStats, "provider" | "usage" | "costUnpriced">,
 	digits?: number,
 ): string {
 	const unpricedRequests =
 		message.usage.totalTokens > 0 &&
 		message.usage.cost.total === 0 &&
-		(message.provider === "xai-oauth" || message.timestamp <= 0)
+		(message.provider === "xai-oauth" || message.costUnpriced === true)
 			? 1
 			: 0;
 	return formatEstimatedCost(message.usage.cost.total, unpricedRequests, digits);
