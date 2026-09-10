@@ -151,6 +151,11 @@ const TOOL_CALLS_BACKFILL_KEY = "tool_calls_v1";
 // reach the inclusive 200K tier. A one-time full re-parse repairs them through
 // the cost-refreshing UPSERT in `insertMessageStats`.
 const COST_REINGEST_BACKFILL_KEY = "messages_cost_reingest_v1";
+// The absence-aware `resolveStoredCost` and the `cost_unpriced` marker only
+// reach already-ingested rows through a re-parse, and the reingest sentinel
+// above is already spent for them — without this one, every historical row
+// keeps `cost_unpriced = 0` and unknown scheduled spend reports as free.
+const COST_UNPRICED_BACKFILL_KEY = "messages_cost_unpriced_v1";
 function shouldResetBackfill(value: string | undefined): boolean {
 	return value !== BACKFILL_COMPLETE && value !== BACKFILL_PENDING;
 }
@@ -360,6 +365,7 @@ export async function initDb(): Promise<Database> {
 	backfillUserMessages(db);
 	backfillToolCalls(db);
 	backfillReingestCosts(db);
+	backfillUnpricedCosts(db);
 	repairUserMessageLinks(db);
 	backfillPriorityPremiumRequests(db);
 	backfillAgentType(db);
@@ -1466,6 +1472,27 @@ function backfillReingestCosts(database: Database): void {
 }
 
 /**
+ * One-shot `file_offsets` wipe so the next sync re-parses every session and
+ * re-derives `cost_unpriced` from `resolveStoredCost`. Rows ingested before the
+ * marker existed defaulted to 0, and `INSERT ... ON CONFLICT DO UPDATE` only
+ * refreshes them when the session is re-parsed — which the spent reingest
+ * sentinel above will never do again. The re-parse also re-prices the
+ * previously absent legacy `cost` charges, since `resolveStoredCost` now reads
+ * absence as absence. Same sentinel protocol as {@link backfillReingestCosts}.
+ */
+function backfillUnpricedCosts(database: Database): void {
+	const row = database.prepare("SELECT value FROM meta WHERE key = ?").get(COST_UNPRICED_BACKFILL_KEY) as
+		| { value: string }
+		| undefined;
+	if (!shouldResetBackfill(row?.value)) return;
+
+	database.run("DELETE FROM file_offsets");
+	database
+		.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)")
+		.run(COST_UNPRICED_BACKFILL_KEY, BACKFILL_PENDING);
+}
+
+/**
  * Reclassify pre-existing `messages` rows by agent type once, after the
  * `agent_type` column is added to an older database (every prior row defaulted
  * to 'main' on the ALTER). Classification is purely path-based — derived from
@@ -1591,6 +1618,7 @@ export function markSessionBackfillsComplete(): void {
 			USER_MESSAGE_LINKS_REPAIR_KEY,
 			PRIORITY_PREMIUM_REQUESTS_BACKFILL_KEY,
 			COST_REINGEST_BACKFILL_KEY,
+			COST_UNPRICED_BACKFILL_KEY,
 		]) {
 			markComplete.run(key, BACKFILL_COMPLETE);
 		}

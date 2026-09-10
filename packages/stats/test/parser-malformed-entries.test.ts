@@ -1,8 +1,11 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { syncAllSessions } from "@oh-my-pi/omp-stats/aggregator";
 import {
 	closeDb,
+	getFileOffset,
 	getOverallStats,
 	getRecentRequests,
 	initDb,
@@ -10,7 +13,7 @@ import {
 	insertToolCalls,
 } from "@oh-my-pi/omp-stats/db";
 import { parseSessionFile } from "@oh-my-pi/omp-stats/parser";
-import { getSessionsDir } from "@oh-my-pi/pi-utils";
+import { getSessionsDir, getStatsDbPath } from "@oh-my-pi/pi-utils";
 import { installStatsTestIsolation } from "./helpers/temp-agent";
 
 installStatsTestIsolation("@pi-stats-malformed-");
@@ -331,5 +334,111 @@ describe("legacy entries without a recorded price", () => {
 		// A finite provider total is authoritative; only a non-finite one is derived.
 		expect(infiniteTotal?.usage.input).toBe(10);
 		expect(infiniteTotal?.usage.totalTokens).toBe(15);
+	});
+
+	// Regression: the marker only reaches history through a re-parse, and every
+	// earlier sentinel is already spent for an existing database. Without the
+	// unpriced sentinel, a row ingested before the column existed keeps
+	// `cost_unpriced = 0` forever and its unknown scheduled spend reports as free.
+	it("re-parses history to mark pre-existing unpriced rows once, then leaves offsets alone", async () => {
+		const file = await writeSession([
+			JSON.stringify({
+				type: "message",
+				id: "no-timestamp",
+				message: {
+					role: "assistant",
+					provider: "deepseek",
+					model: "deepseek-v4-flash",
+					api: "openai-completions",
+					stopReason: "stop",
+					content: [],
+					usage: { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 },
+				},
+			}),
+		]);
+
+		// Bootstrap the schema, then plant the pre-marker state directly.
+		await initDb();
+		closeDb();
+
+		const sessionStats = await fs.stat(file);
+		const raw = new Database(getStatsDbPath());
+		raw.exec("DELETE FROM messages");
+		raw.exec("DELETE FROM file_offsets");
+		// A database from the previous release has never seen this key at all.
+		raw.exec("DELETE FROM meta WHERE key = 'messages_cost_unpriced_v1'");
+		// Every sentinel that also wipes `file_offsets` is spent, so only the
+		// unpriced marker's sentinel can trigger the re-parse below.
+		const spent = [
+			"user_messages_v8",
+			"tool_calls_v1",
+			"user_message_links_v1",
+			"premium_requests_priority_v1",
+			"messages_cost_reingest_v1",
+		];
+		for (const key of spent) {
+			raw.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, 'complete')").run(key);
+		}
+		raw.prepare(
+			`INSERT INTO messages (
+				session_file, entry_id, folder, model, provider, api, timestamp,
+				duration, ttft, stop_reason, error_message,
+				input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens, premium_requests,
+				cost_input, cost_output, cost_cache_read, cost_cache_write, cost_total, cost_unpriced
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		).run(
+			file,
+			"no-timestamp",
+			"/tmp/malformed",
+			"deepseek-v4-flash",
+			"deepseek",
+			"openai-completions",
+			0,
+			null,
+			null,
+			"stop",
+			null,
+			1_000_000,
+			0,
+			0,
+			0,
+			1_000_000,
+			0,
+			0,
+			0,
+			0,
+			0,
+			0,
+			0,
+		);
+		raw.prepare("INSERT INTO file_offsets (session_file, offset, last_modified) VALUES (?, ?, ?)").run(
+			file,
+			sessionStats.size,
+			sessionStats.mtimeMs,
+		);
+		raw.close();
+
+		// The unpriced sentinel is absent, so this sync wipes the offsets and the
+		// UPSERT rewrites the row with the marker the ingest now derives.
+		await syncAllSessions();
+
+		const repaired = getRecentRequests(1)[0];
+		expect(repaired?.entryId).toBe("no-timestamp");
+		expect(repaired?.usage.cost.total).toBe(0);
+		expect(repaired?.costUnpriced).toBe(true);
+		expect(getOverallStats()).toMatchObject({ unpricedRequests: 1, totalCost: 0 });
+
+		// The sync settled the sentinel, so reopening must not wipe the offsets it
+		// just wrote — a stale enrolment would re-parse every session on every start.
+		const offsets = getFileOffset(file);
+		expect(offsets).not.toBeNull();
+		closeDb();
+		const meta = new Database(getStatsDbPath());
+		expect(meta.prepare("SELECT value FROM meta WHERE key = ?").get("messages_cost_unpriced_v1")).toEqual({
+			value: "complete",
+		});
+		meta.close();
+		await initDb();
+		expect(getFileOffset(file)).toEqual(offsets);
 	});
 });
