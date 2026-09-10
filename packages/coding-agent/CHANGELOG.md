@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Repeated soft compaction now includes messages retained by the previous pass instead of silently dropping them from model context.
+
 ## [18.1.16] - 2026-09-09
 
 ### Added
