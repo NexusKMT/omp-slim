@@ -174,6 +174,7 @@ describe("Command Code provider support", () => {
 			allowUnauthenticated: true,
 			dynamicModelsAuthoritative: true,
 			catalogDiscovery: { label: "Command Code", allowUnauthenticated: true },
+			skipCrossProviderReferenceFills: true,
 		});
 		expect(DEFAULT_MODEL_PER_PROVIDER.commandcode).toBe("claude-sonnet-4-6");
 		// Fresh installs resolve the default synchronously from the bundle:

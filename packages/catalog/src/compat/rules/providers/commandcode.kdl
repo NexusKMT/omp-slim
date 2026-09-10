@@ -85,6 +85,15 @@ provider "commandcode" {
 			max-tokens 131072
 		}
 	}
+	// Codex SKUs report the output budget inside the advertised window, so
+	// the class lineage pins the 272K prompt window; restate it here or the
+	// class rule wins the whole limits axis and drops the 64K provider cap.
+	models "gpt-5.3-codex" {
+		limits-patch {
+			context-window 272000
+			max-tokens 65536
+		}
+	}
 	// ---------------------------------------------------------------------------
 	// Provider pricing. Every model id served by GET /provider/v1/models is
 	// priced here; discovery defaults each model to zero cost and the mapper

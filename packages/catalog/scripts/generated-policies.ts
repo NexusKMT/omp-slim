@@ -14,6 +14,7 @@ import { bareModelId, getLongestModelLikeIdSegment } from "../src/identity/id";
 import { buildModelReferenceIndex, resolveModelReference } from "../src/identity/reference";
 import { isOllamaCloudOutputCapped, OLLAMA_CLOUD_MAX_OUTPUT_TOKENS } from "../src/provider-models/ollama";
 import { ALIBABA_TOKEN_PLAN_STATIC_MODELS } from "../src/provider-models/openai-compat";
+import { getCatalogProviderEntry } from "../src/provider-models/descriptors";
 import type { Api, Model, ModelSpec } from "../src/types";
 import { buildCanonicalModelIndex, buildCanonicalReferenceData } from "./equivalence";
 
@@ -215,10 +216,10 @@ export function applyCanonicalLimitFallback(models: ModelSpec<Api>[]): void {
 	const referenceIndex = buildModelReferenceIndex(catalog);
 
 	for (const model of models) {
-		// Command Code rows keep an unknown limit (`null`) when the Provider
-		// API omits it; another host's deployment window must not fill it.
-		// Verified corrections live in KDL, never in a cross-provider lookup.
-		if (model.provider === "commandcode") continue;
+		// Providers whose discovery is the deployment truth opt out of
+		// cross-provider fills (see the descriptor fact): an omitted
+		// upstream limit stays unknown, with KDL owning corrections.
+		if (getCatalogProviderEntry(model.provider)?.skipCrossProviderReferenceFills === true) continue;
 		if (model.contextWindow !== null && model.maxTokens !== null) {
 			continue;
 		}
