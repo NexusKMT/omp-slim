@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added DeepSeek V4.1 Flash on OpenRouter with image input and low/high/max reasoning levels.
 - Added DeepSeek cost estimates that follow published peak/off-peak rates.
 - Added dated, announced price changes to the catalog, so rates switch on their effective date (e.g. DeepSeek Pro moving to Flash rates).
 
