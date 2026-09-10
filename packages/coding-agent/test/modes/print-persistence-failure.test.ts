@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { disposeSessionQuietly } from "../../src/main";
 import { runPrintMode } from "../../src/modes/print-mode";
 import { formatPersistenceFailure } from "../../src/modes/persistence-failure";
 import { registerRpcPersistenceSurface } from "../../src/modes/rpc/rpc-mode";
@@ -49,6 +50,33 @@ function captureStderr(): { written: () => string; restore: () => void } {
 		return true;
 	}) as never);
 	return { written: () => chunks.join(""), restore: () => spy.mockRestore() };
+}
+
+/**
+ * AgentSession.dispose() caches its first call, so a second await rethrows the
+ * identical rejection instead of re-running teardown (agent-session.ts
+ * `#disposeCall`).
+ */
+function memoizingDispose(manager: SessionManager): () => Promise<void> {
+	let call: Promise<void> | undefined;
+	return () => {
+		call ??= manager.close();
+		return call;
+	};
+}
+
+function assistantSession(manager: SessionManager, dispose: () => Promise<void>): AgentSession {
+	return {
+		extensionRunner: undefined,
+		subscribe: () => {},
+		settings: { get: () => false },
+		sessionManager: manager,
+		getLastAssistantMessage: () => assistant(""),
+		prepareForHeadlessAdvisorDrain: () => {},
+		setTextOutputCommitted: () => {},
+		waitForAdvisorCatchup: async () => true,
+		dispose,
+	} as unknown as AgentSession;
 }
 
 describe("headless persistence-failure surface", () => {
@@ -131,5 +159,84 @@ describe("headless persistence-failure surface", () => {
 		expect(formatted).not.toContain("\t");
 		expect(formatted).not.toContain("\n");
 		expect(formatted).not.toContain("\u001b");
+	});
+
+	it("reports a store failure latched before print mode subscribed, exactly once", async () => {
+		const manager = makeSessionManager();
+		// No session file exists until an assistant message does, so the appends
+		// below would never reach a writer without this.
+		await manager.ensureOnDisk();
+		manager.appendMessage(assistant("seed"));
+
+		const restoreWrites = failWrites();
+		// Latch the failure while nobody is subscribed: the observer wired below
+		// never runs at latch time, so print mode can only recover it from the
+		// manager itself.
+		manager.appendMessage({ role: "user", content: "pre-latch", timestamp: Date.now() } as never);
+
+		const stderr = captureStderr();
+		const session = assistantSession(manager, memoizingDispose(manager));
+
+		let exitCode = -1;
+		try {
+			exitCode = await runPrintMode(session, { mode: "text" });
+		} finally {
+			stderr.restore();
+			restoreWrites();
+		}
+
+		const reported = stderr
+			.written()
+			.split("\n")
+			.filter(line => line.includes("Session persistence failed: "));
+		expect(reported).toHaveLength(1);
+		expect(reported[0]).toContain("ENOSPC");
+		expect(exitCode).toBe(1);
+	});
+
+	it("settles a memoized dispose rejection instead of rethrowing it into the fatal handler", async () => {
+		let call: Promise<void> | undefined;
+		const dispose = (): Promise<void> => {
+			call ??= Promise.resolve().then(() => {
+				throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+			});
+			return call;
+		};
+		const session = { dispose } as unknown as AgentSession;
+
+		// The hazard: runRootCommand disposed a second time after print mode, and
+		// the cached rejection escaped through main()'s fatal handler.
+		await expect(session.dispose()).rejects.toThrow("ENOSPC");
+		await expect(disposeSessionQuietly(session)).resolves.toBeUndefined();
+	});
+
+	it("replays a store failure latched before the RPC surface subscribed", async () => {
+		const manager = makeSessionManager();
+		await manager.ensureOnDisk();
+		manager.appendMessage(assistant("seed"));
+
+		const restoreWrites = failWrites();
+		manager.appendMessage({ role: "user", content: "pre-latch", timestamp: Date.now() } as never);
+
+		const notices: Array<{ level: string; message: string; source?: string }> = [];
+		const stderr = captureStderr();
+		try {
+			registerRpcPersistenceSurface({
+				sessionManager: manager,
+				emitNotice: (level, message, source) => {
+					notices.push({ level, message, source });
+				},
+			});
+		} finally {
+			stderr.restore();
+			restoreWrites();
+		}
+
+		expect(notices).toHaveLength(1);
+		expect(notices[0]?.level).toBe("error");
+		expect(notices[0]?.source).toBe("session-persistence");
+		expect(notices[0]?.message).toContain("Session persistence failed: ");
+		expect(notices[0]?.message).toContain("ENOSPC");
+		expect(stderr.written()).toContain("ENOSPC");
 	});
 });

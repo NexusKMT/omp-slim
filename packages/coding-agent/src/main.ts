@@ -1408,6 +1408,16 @@ interface RunRootCommandDependencies {
 }
 const DEFAULT_RUN_ROOT_DEPENDENCIES: RunRootCommandDependencies = {};
 
+/**
+ * Settle the session's dispose promise without letting a failure the caller has
+ * already reported escape as a raw fatal dump. `AgentSession.dispose()` memoizes
+ * its first call, so awaiting it again after print mode swallowed a store
+ * failure rethrows the identical rejection (issue #11493).
+ */
+export async function disposeSessionQuietly(session: AgentSession): Promise<void> {
+	await session.dispose().catch(() => undefined);
+}
+
 export async function runRootCommand(
 	parsed: Args,
 	rawArgs: string[],
@@ -2124,7 +2134,7 @@ export async function runRootCommand(
 				if ($env.PI_TIMING) {
 					logger.printTimings();
 				}
-				await session.dispose();
+				await disposeSessionQuietly(session);
 				stopThemeWatcher();
 				await postmortem.quit(exitCode);
 			}
