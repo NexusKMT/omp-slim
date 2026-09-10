@@ -49,8 +49,26 @@ const ZERO_USAGE_COST: UsageCost = {
 	total: 0,
 };
 
-const UNPRICED_XAI_OAUTH_SQL =
-	"CASE WHEN provider = 'xai-oauth' AND total_tokens > 0 AND cost_total = 0 THEN 1 ELSE 0 END";
+/**
+ * Predicate counting one stored request as "unpriced" — the public rate card
+ * has no charge for it, so its zero is unknown spend rather than free usage.
+ * Two shapes store that zero:
+ *   - `xai-oauth` bills through the SuperGrok subscription, so ingestion
+ *     deliberately records no per-request price;
+ *   - a non-positive timestamp is the parser's "no recoverable time" sentinel,
+ *     and `resolveStoredCost` refuses to price a scheduled (time-based) card
+ *     without one — the epoch would silently become the tariff. Such a row
+ *     keeps its real tokens and its zero until a re-parse recovers the time.
+ *
+ * A row with a real timestamp and an explicit zero cost stays a genuine zero.
+ * `prefix` qualifies the columns for queries that alias `messages`.
+ */
+function unpricedRequestSql(prefix = ""): string {
+	return `CASE WHEN ${prefix}total_tokens > 0 AND ${prefix}cost_total = 0
+		AND (${prefix}provider = 'xai-oauth' OR ${prefix}timestamp <= 0) THEN 1 ELSE 0 END`;
+}
+
+const UNPRICED_REQUEST_SQL = unpricedRequestSql();
 
 interface CostBackfillRow {
 	id: number;
@@ -724,7 +742,7 @@ export function getOverallStats(cutoff?: number): AggregatedStats {
 			SUM(cache_write_tokens) as total_cache_write_tokens,
 			SUM(premium_requests) as total_premium_requests,
 			SUM(cost_total) as total_cost,
-			SUM(${UNPRICED_XAI_OAUTH_SQL}) as unpriced_requests,
+			SUM(${UNPRICED_REQUEST_SQL}) as unpriced_requests,
 			SUM(CASE WHEN cost_no_cache_input > 0
 				THEN cost_input + cost_cache_read + cost_cache_write
 				ELSE 0 END) as total_cached_prompt_cost,
@@ -760,7 +778,7 @@ export function getStatsByModel(cutoff?: number): ModelStats[] {
 			SUM(cache_write_tokens) as total_cache_write_tokens,
 			SUM(premium_requests) as total_premium_requests,
 			SUM(cost_total) as total_cost,
-			SUM(${UNPRICED_XAI_OAUTH_SQL}) as unpriced_requests,
+			SUM(${UNPRICED_REQUEST_SQL}) as unpriced_requests,
 			SUM(CASE WHEN cost_no_cache_input > 0
 				THEN cost_input + cost_cache_read + cost_cache_write
 				ELSE 0 END) as total_cached_prompt_cost,
@@ -802,7 +820,7 @@ export function getStatsByFolder(cutoff?: number): FolderStats[] {
 			SUM(cache_write_tokens) as total_cache_write_tokens,
 			SUM(premium_requests) as total_premium_requests,
 			SUM(cost_total) as total_cost,
-			SUM(${UNPRICED_XAI_OAUTH_SQL}) as unpriced_requests,
+			SUM(${UNPRICED_REQUEST_SQL}) as unpriced_requests,
 			SUM(CASE WHEN cost_no_cache_input > 0
 				THEN cost_input + cost_cache_read + cost_cache_write
 				ELSE 0 END) as total_cached_prompt_cost,
@@ -951,7 +969,7 @@ export function getStatsByProvider(cutoff?: number | null): ProviderAggregate[] 
 			SUM(cache_write_tokens) as total_cache_write_tokens,
 			SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as total_tokens,
 			SUM(cost_total) as total_cost,
-			SUM(${UNPRICED_XAI_OAUTH_SQL}) as unpriced_requests,
+			SUM(${UNPRICED_REQUEST_SQL}) as unpriced_requests,
 			SUM(premium_requests) as total_premium_requests,
 			AVG(CASE WHEN duration > 0 THEN output_tokens * 1000.0 / duration ELSE NULL END) as avg_tokens_per_second
 		FROM messages
@@ -1049,7 +1067,7 @@ export function getProviderTimeSeries(
 			provider,
 			SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as total_tokens,
 			SUM(cost_total) as cost,
-			SUM(${UNPRICED_XAI_OAUTH_SQL}) as unpriced_requests,
+			SUM(${UNPRICED_REQUEST_SQL}) as unpriced_requests,
 			COUNT(*) as requests
 		FROM messages
 		${hasCutoff ? "WHERE timestamp >= ?" : ""}
@@ -1262,7 +1280,7 @@ export function getCostTimeSeries(days = 90, cutoff?: number | null): CostTimeSe
 			model,
 			provider,
 			SUM(cost_total) as cost,
-			SUM(${UNPRICED_XAI_OAUTH_SQL}) as unpriced_requests,
+			SUM(${UNPRICED_REQUEST_SQL}) as unpriced_requests,
 			SUM(cost_input) as cost_input,
 			SUM(cost_output) as cost_output,
 			SUM(cost_cache_read) as cost_cache_read,
@@ -1895,7 +1913,9 @@ export function updateToolResults(links: ToolResultLink[]): number {
 /**
  * Shared SELECT list for tool aggregates. Real provider usage comes from the
  * invoking assistant turn (`messages` join) divided by `calls_in_turn`, so
- * per-tool token/cost shares stay additive across tools.
+ * per-tool token/cost shares stay additive across tools. The unpriced share
+ * reuses the request predicate against the joined message, whose stored cost
+ * it attributes.
  */
 const TOOL_AGGREGATE_COLUMNS = `
 	COUNT(*) as calls,
@@ -1905,8 +1925,7 @@ const TOOL_AGGREGATE_COLUMNS = `
 	SUM(COALESCE(m.total_tokens, 0) * 1.0 / t.calls_in_turn) as total_tokens_share,
 	SUM(COALESCE(m.output_tokens, 0) * 1.0 / t.calls_in_turn) as output_tokens_share,
 	SUM(COALESCE(m.cost_total, 0) / t.calls_in_turn) as cost_share,
-	SUM(CASE WHEN t.provider = 'xai-oauth' AND COALESCE(m.total_tokens, 0) > 0 AND COALESCE(m.cost_total, 0) = 0
-		THEN 1.0 / t.calls_in_turn ELSE 0 END) as unpriced_requests_share,
+	SUM(${unpricedRequestSql("m.")} * 1.0 / t.calls_in_turn) as unpriced_requests_share,
 	MAX(t.timestamp) as last_used
 `;
 

@@ -374,6 +374,75 @@ describe("stats scheduled response costs", () => {
 		expect(getOverallStats().cacheSavings).toBeCloseTo(1 - 0.069 / 2.13, 8);
 	});
 
+	it("reports a scheduled request with no recoverable timestamp as unpriced, not free", async () => {
+		await initDb();
+		// `timestamp: 0` is what the parser stores when neither the message
+		// timestamp nor the entry timestamp parsed, which is exactly when
+		// `resolveStoredCost` cannot select a tariff from a scheduled card.
+		const undated = createCodexGptStats("undated-scheduled");
+		undated.provider = "deepseek";
+		undated.model = "deepseek-v4-flash";
+		undated.api = "openai-completions";
+		undated.timestamp = 0;
+		undated.usage = {
+			input: 1_000_000,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 1_000_000,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		Reflect.deleteProperty(undated.usage, "cost");
+
+		// A dated request whose recorded price is an explicit zero is genuinely
+		// free, so it must stay out of the unpriced count.
+		const free = createCodexGptStats("dated-explicit-zero");
+		free.provider = "deepseek";
+		free.model = "deepseek-v4-flash";
+		free.api = "openai-completions";
+		free.timestamp = Date.parse("2026-09-10T03:00:00Z");
+		free.usage = {
+			input: 1_000_000,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 1_000_000,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+
+		const priced = createCodexGptStats("priced");
+		priced.model = "claude-sonnet-4-6";
+		priced.provider = "anthropic";
+		priced.api = "anthropic-messages";
+		priced.usage.cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 1.25 };
+
+		insertMessageStats([undated, free, priced]);
+
+		const stored = getRecentRequests(3);
+		expect(stored.find(request => request.entryId === "undated-scheduled")?.usage.cost.total).toBe(0);
+		expect(stored.find(request => request.entryId === "dated-explicit-zero")?.usage.cost.total).toBe(0);
+		expect(stored.find(request => request.entryId === "priced")?.usage.cost.total).toBeCloseTo(1.25, 8);
+
+		expect(getOverallStats()).toMatchObject({ unpricedRequests: 1, totalRequests: 3 });
+		expect(getOverallStats().totalCost).toBeCloseTo(1.25, 8);
+		expect(getStatsByModel().find(model => model.model === "deepseek-v4-flash")).toMatchObject({
+			totalCost: 0,
+			unpricedRequests: 1,
+		});
+		expect(getStatsByProvider().find(provider => provider.provider === "anthropic")).toMatchObject({
+			totalCost: 1.25,
+			unpricedRequests: 0,
+		});
+		// The undated row buckets at the epoch, so ask for the uncut series.
+		const series = getCostTimeSeries(90, null);
+		expect(series.reduce((sum, point) => sum + point.unpricedRequests, 0)).toBe(1);
+		expect(series.reduce((sum, point) => sum + point.cost, 0)).toBeCloseTo(1.25, 8);
+
+		closeDb();
+		await initDb();
+		expect(getOverallStats()).toMatchObject({ unpricedRequests: 1, totalCost: 1.25 });
+	});
+
 	it("preserves recorded scheduled charges, including explicit zero, on ingest and reopen", async () => {
 		await initDb();
 		const requests = [0, 0.75, 1.5].map((total, index) => {

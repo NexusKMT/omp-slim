@@ -276,4 +276,26 @@ describe("legacy entries without a recorded price", () => {
 		expect(getOverallStats().totalCost).toBe(0);
 		expect(getOverallStats().cacheSavings).toBe(0);
 	});
+
+	// Regression: the derived total is summed with `+` over runtime values a
+	// foreign session can make any type. A string bucket passed the nullish
+	// check and concatenated — `input: "10"` plus the six absent buckets became
+	// "10000000", which SQLite coerced to ten million tokens for a ten-token
+	// request. A non-numeric bucket is malformed input, not a number to parse.
+	it("counts a non-numeric token bucket as absent instead of concatenating it", async () => {
+		const file = await writeSession([
+			deepseekEntry("string-bucket", { input: "10", output: 0, cacheRead: 0, cacheWrite: 0 }, DEEPSEEK_PEAK),
+		]);
+
+		const result = await parseSessionFile(file);
+		expect(result.stats).toHaveLength(1);
+
+		await initDb();
+		expect(insertMessageStats(result.stats)).toBe(1);
+
+		const request = getRecentRequests(1)[0];
+		expect(typeof request?.usage.totalTokens).toBe("number");
+		expect(request?.usage.totalTokens).toBe(0);
+		expect(request?.usage.input).toBe(0);
+	});
 });

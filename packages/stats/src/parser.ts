@@ -151,6 +151,18 @@ function extractUserStats(sessionFile: string, folder: string, entry: SessionMes
 }
 
 /**
+ * Session JSONL is written by older versions and foreign producers, so a token
+ * counter is whatever was persisted, not what `Usage` declares. A non-numeric
+ * bucket (`input: "10"`) must never be parsed and must never be summed: `+`
+ * would concatenate it into the derived total and SQLite would coerce the
+ * resulting string to a different, far larger number. Malformed input counts
+ * as absent.
+ */
+function finiteTokenCount(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/**
  * `Usage.totalTokens` per the documented contract: the conversation buckets plus
  * provider-reported orchestration tokens. Used when a legacy entry omits the
  * total, which would otherwise persist a zero total next to real token counts.
@@ -158,13 +170,13 @@ function extractUserStats(sessionFile: string, folder: string, entry: SessionMes
 function sumReportedTokens(usage: Partial<Usage>): number {
 	const orchestration = usage.orchestration;
 	return (
-		(usage.input ?? 0) +
-		(usage.output ?? 0) +
-		(usage.cacheRead ?? 0) +
-		(usage.cacheWrite ?? 0) +
-		(orchestration?.input ?? 0) +
-		(orchestration?.output ?? 0) +
-		(orchestration?.cacheRead ?? 0)
+		finiteTokenCount(usage.input) +
+		finiteTokenCount(usage.output) +
+		finiteTokenCount(usage.cacheRead) +
+		finiteTokenCount(usage.cacheWrite) +
+		finiteTokenCount(orchestration?.input) +
+		finiteTokenCount(orchestration?.output) +
+		finiteTokenCount(orchestration?.cacheRead)
 	);
 }
 
@@ -217,12 +229,16 @@ function extractStats(
 			? (rawUsage as Usage)
 			: {
 					...rawUsage,
-					input: rawUsage.input ?? 0,
-					output: rawUsage.output ?? 0,
-					cacheRead: rawUsage.cacheRead ?? 0,
-					cacheWrite: rawUsage.cacheWrite ?? 0,
+					input: finiteTokenCount(rawUsage.input),
+					output: finiteTokenCount(rawUsage.output),
+					cacheRead: finiteTokenCount(rawUsage.cacheRead),
+					cacheWrite: finiteTokenCount(rawUsage.cacheWrite),
+					// A present finite provider total stays authoritative; a missing
+					// or malformed one (absent, string, NaN) is derived below.
 					totalTokens:
-						typeof rawUsage.totalTokens === "number" ? rawUsage.totalTokens : sumReportedTokens(rawUsage),
+						typeof rawUsage.totalTokens === "number" && Number.isFinite(rawUsage.totalTokens)
+							? rawUsage.totalTokens
+							: sumReportedTokens(rawUsage),
 					// An omitted `cost` must stay omitted: `resolveStoredCost` reads
 					// absence as "no recorded price" and estimates the request, while
 					// a zero would read as an explicitly free request.
