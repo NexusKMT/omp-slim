@@ -24,6 +24,7 @@ import {
 	normalizeGitHubCopilotEnterpriseDomain,
 } from "@oh-my-pi/pi-catalog/wire/github-copilot";
 import { $env } from "@oh-my-pi/pi-utils";
+import { wrapFetchForCopilotFallback } from "../../providers/github-copilot-headers";
 import * as AIError from "../../error";
 import type { FetchImpl } from "../../types";
 import type { OAuthController, OAuthCredentials } from "./types";
@@ -301,12 +302,13 @@ async function enableAllGitHubCopilotModels(
 	// Synthesized catalog variants (Copilot long-context `-1m` entries) share
 	// the upstream model id; enable each wire id exactly once.
 	const wireModelIds = [...new Set(getBundledModels("github-copilot").map(model => model.requestModelId ?? model.id))];
+	const copilotFetch = wrapFetchForCopilotFallback(fetchImpl, true);
 	const BATCH_SIZE = 5;
 	for (let i = 0; i < wireModelIds.length; i += BATCH_SIZE) {
 		const batch = wireModelIds.slice(i, i + BATCH_SIZE);
 		await Promise.all(
 			batch.map(async modelId => {
-				const success = await enableGitHubCopilotModel(token, modelId, fetchImpl, enterpriseDomain, apiEndpoint);
+				const success = await enableGitHubCopilotModel(token, modelId, copilotFetch, enterpriseDomain, apiEndpoint);
 				onProgress?.(modelId, success);
 			}),
 		);
