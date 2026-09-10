@@ -243,6 +243,37 @@ describe("xAI Responses answer extraction from relay output items", () => {
 		expect(response.answer).toContain("Summarizing now.");
 	});
 
+	it.each([
+		["content-part", ""],
+		["message", " \t\n "],
+	])("drops narration with a blank %s citation URL", async (location, url) => {
+		const annotations = [{ type: "url_citation", url }];
+		const relayResponse = {
+			id: "resp-relay",
+			model: "grok-4.5",
+			output: [
+				{
+					type: "message",
+					annotations: location === "message" ? annotations : undefined,
+					content: [
+						{
+							type: "output_text",
+							text: "Checking the changelog now.",
+							annotations: location === "content-part" ? annotations : undefined,
+						},
+					],
+				},
+				{ type: "message", content: [{ type: "output_text", text: "Bun 1.3.12 is the latest release." }] },
+			],
+			usage: { input_tokens: 10, output_tokens: 5 },
+		};
+
+		const response = await searchXAI(makeParams(makeFetchMock(relayResponse)));
+
+		expect(response.answer).toBe("Bun 1.3.12 is the latest release.");
+		expect(response.sources).toEqual([]);
+	});
+
 	it("yields no answer when the last message is empty instead of promoting earlier text", async () => {
 		const relayResponse = {
 			id: "resp-relay",

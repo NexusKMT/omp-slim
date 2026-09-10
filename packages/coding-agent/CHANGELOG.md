@@ -25,7 +25,7 @@
 - Streaming edit guard (`edit.streamingAbort`) no longer aborts on no-op preview results when replacement content produces no file changes, and carries the native patch diagnostic through the abort reason on genuine preview failures.
 - Repeated soft compaction now includes messages retained by the previous pass instead of silently dropping them from model context.
 - `omp models` now reports whether a model's images actually reach the provider, so an id stripped by a text-only catalog rule no longer shows `images: yes` ([#9697](https://github.com/can1357/oh-my-pi/issues/9697)).
-- xAI web search omits relay narration while preserving substantive answers, including responses that also contain aggregate output text.
+- xAI web search omits relay narration even when responses include aggregate text or blank citation URLs, while preserving substantive answers.
 
 ## [18.1.16] - 2026-09-09
 

@@ -299,14 +299,14 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 			const text = (part.output_text ?? part.text)?.trim();
 			if (text) entry.texts.push(text);
 			for (const annotation of Array.isArray(part.annotations) ? part.annotations : []) {
-				if (annotation?.type === "url_citation" && typeof annotation.url === "string") {
+				if (annotation?.type === "url_citation" && typeof annotation.url === "string" && annotation.url.trim()) {
 					entry.hasCitations = true;
 					break;
 				}
 			}
 		}
 		for (const annotation of Array.isArray(item.annotations) ? item.annotations : []) {
-			if (annotation?.type === "url_citation" && typeof annotation.url === "string") {
+			if (annotation?.type === "url_citation" && typeof annotation.url === "string" && annotation.url.trim()) {
 				entry.hasCitations = true;
 				break;
 			}
