@@ -111,13 +111,55 @@ describe("streaming edit abort", () => {
 		expect(guard.abortTriggered).toBe(true);
 	});
 
-	test("does not abort on a no-op identical replacement preview error", () => {
-		const { guard, aborts } = createGuard(true);
-		guard.maybeAbort(
-			previewEvent(false, [{ path: "src/unchanged.ts", error: "No changes would be made to src/unchanged.ts." }]),
-		);
-		expect(aborts.count).toBe(0);
-		expect(guard.abortTriggered).toBe(false);
+	test("does not abort on a native no-op identical replacement preview", async () => {
+		const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "stream-preview-noop-"));
+		try {
+			await Bun.write(path.join(cwd, "sample.txt"), "alpha\n");
+			const settings = Settings.isolated({ "edit.mode": "replace", "edit.streamingAbort": true });
+			const { guard, aborts } = createGuard(true, cwd, settings);
+			const toolSession = {
+				cwd,
+				hasUI: false,
+				getSessionFile: () => null,
+				getSessionSpawns: () => "*",
+				enableLsp: false,
+				settings,
+				getArtifactsDir: () => null,
+				getSessionId: () => null,
+				getPlanModeState: () => undefined,
+			} as unknown as ToolSession;
+			const tool = new EditTool(toolSession, "replace");
+			const args = { path: "sample.txt", old_string: "alpha\n", new_string: "alpha\n" };
+			const finalPreview = Promise.withResolvers<string | undefined>();
+			const stream = tool.openArgStream({
+				toolCallId: "native-noop-stream",
+				toolName: "edit",
+				emit: update => {
+					guard.maybeAbort({
+						type: "tool_stream_update",
+						toolCallId: "native-noop-stream",
+						toolName: "edit",
+						update,
+					});
+					if (update && typeof update === "object" && "streaming" in update && update.streaming === false) {
+						const files = "files" in update && Array.isArray(update.files) ? update.files : [];
+						const first = files[0] as { error?: unknown } | undefined;
+						finalPreview.resolve(typeof first?.error === "string" ? first.error : undefined);
+					}
+				},
+			});
+			const encoded = JSON.stringify(args);
+			for (let offset = 0; offset < encoded.length; offset += 7) stream.push(encoded.slice(offset, offset + 7));
+			stream.end(args);
+			const previewError = await finalPreview.promise;
+			// Proves the test traversed the native no-op path (not a hand-built string).
+			expect(previewError).toContain("No changes would be made");
+			expect(aborts.count).toBe(0);
+			expect(guard.abortTriggered).toBe(false);
+			stream.cancel();
+		} finally {
+			await removeWithRetries(cwd);
+		}
 	});
 
 	test("carries tool-scoped diagnostic through abort reason on patch preview failure", () => {
