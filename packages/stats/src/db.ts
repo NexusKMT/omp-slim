@@ -55,6 +55,7 @@ interface CostBackfillRow {
 	id: number;
 	provider: string;
 	model: string;
+	timestamp: number;
 	input_tokens: number;
 	output_tokens: number;
 	cache_read_tokens: number;
@@ -65,6 +66,7 @@ interface NoCacheInputCostBackfillRow {
 	id: number;
 	provider: string;
 	model: string;
+	timestamp: number;
 	input_tokens: number;
 	cache_read_tokens: number;
 	cache_write_tokens: number;
@@ -365,7 +367,12 @@ function getCatalogCost(provider: string, modelId: string): ModelCost | null {
 	return null;
 }
 
-function calculateCatalogCost(provider: string, modelId: string, tokens: CostTokens): UsageCost | null {
+function calculateCatalogCost(
+	provider: string,
+	modelId: string,
+	tokens: CostTokens,
+	timestamp: number,
+): UsageCost | null {
 	const cost = getCatalogCost(provider, modelId);
 	if (!cost) return null;
 
@@ -382,7 +389,7 @@ function calculateCatalogCost(provider: string, modelId: string, tokens: CostTok
 			(orchestration?.cacheRead ?? 0),
 		cost: { ...ZERO_USAGE_COST },
 	};
-	return calculateUsageCost(cost, usage);
+	return calculateUsageCost(cost, usage, timestamp);
 }
 
 function normalizeUsageCost(cost: UsageCost): UsageCost {
@@ -402,14 +409,27 @@ function resolveStoredCost(stats: MessageStats): UsageCost {
 	const raw: UsageCost | undefined = stats.usage.cost;
 	const storedCost = raw ? normalizeUsageCost(raw) : undefined;
 
-	// A missing total is derived from the stored components. An explicit zero
-	// remains the sentinel for catalog-based correction.
-	if (storedCost && (raw?.total ?? storedCost.total) !== 0) return storedCost;
+	// Scheduled prices are frozen per request, including explicitly free usage.
+	// Preserve legacy zero-cost subscription correction for unscheduled models.
+	if (
+		storedCost &&
+		Number.isFinite(storedCost.total) &&
+		(storedCost.total !== 0 || getCatalogCost(stats.provider, stats.model)?.timeBased)
+	) {
+		return storedCost;
+	}
 
-	return calculateCatalogCost(stats.provider, stats.model, stats.usage) ?? storedCost ?? ZERO_USAGE_COST;
+	return (
+		calculateCatalogCost(stats.provider, stats.model, stats.usage, stats.timestamp) ?? storedCost ?? ZERO_USAGE_COST
+	);
 }
 
-function calculateNoCacheInputCost(provider: string, modelId: string, tokens: CostTokens): number | null {
+function calculateNoCacheInputCost(
+	provider: string,
+	modelId: string,
+	tokens: CostTokens,
+	timestamp: number,
+): number | null {
 	const cost = getCatalogCost(provider, modelId);
 	if (!cost) return null;
 	const promptInputTokens =
@@ -418,13 +438,13 @@ function calculateNoCacheInputCost(provider: string, modelId: string, tokens: Co
 		tokens.cacheWrite +
 		(tokens.orchestration?.input ?? 0) +
 		(tokens.orchestration?.cacheRead ?? 0);
-	return calculateUncachedInputCost(cost, promptInputTokens);
+	return calculateUncachedInputCost(cost, promptInputTokens, timestamp);
 }
 
 function backfillMissingCatalogCosts(database: Database): void {
 	const rows = database
 		.prepare(`
-			SELECT id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
+			SELECT id, provider, model, timestamp, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
 			FROM messages
 			WHERE cost_total = 0 AND total_tokens > 0
 		`)
@@ -440,12 +460,20 @@ function backfillMissingCatalogCosts(database: Database): void {
 
 	const applyBackfill = database.transaction(() => {
 		for (const row of rows) {
-			const cost = calculateCatalogCost(row.provider, row.model, {
-				input: row.input_tokens,
-				output: row.output_tokens,
-				cacheRead: row.cache_read_tokens,
-				cacheWrite: row.cache_write_tokens,
-			});
+			// A stored zero cannot distinguish missing historical prices from an
+			// explicitly free request. Never reprice recorded scheduled usage.
+			if (getCatalogCost(row.provider, row.model)?.timeBased) continue;
+			const cost = calculateCatalogCost(
+				row.provider,
+				row.model,
+				{
+					input: row.input_tokens,
+					output: row.output_tokens,
+					cacheRead: row.cache_read_tokens,
+					cacheWrite: row.cache_write_tokens,
+				},
+				row.timestamp,
+			);
 
 			if (!cost || cost.total === 0) continue;
 
@@ -459,7 +487,7 @@ function backfillMissingCatalogCosts(database: Database): void {
 function backfillNoCacheInputCosts(database: Database): void {
 	const rows = database
 		.prepare(`
-			SELECT id, provider, model, input_tokens, cache_read_tokens, cache_write_tokens
+			SELECT id, provider, model, timestamp, input_tokens, cache_read_tokens, cache_write_tokens
 			FROM messages
 			WHERE cost_no_cache_input IS NULL
 		`)
@@ -469,12 +497,17 @@ function backfillNoCacheInputCosts(database: Database): void {
 	const update = database.prepare("UPDATE messages SET cost_no_cache_input = ? WHERE id = ?");
 	const applyBackfill = database.transaction(() => {
 		for (const row of rows) {
-			const cost = calculateNoCacheInputCost(row.provider, row.model, {
-				input: row.input_tokens,
-				output: 0,
-				cacheRead: row.cache_read_tokens,
-				cacheWrite: row.cache_write_tokens,
-			});
+			const cost = calculateNoCacheInputCost(
+				row.provider,
+				row.model,
+				{
+					input: row.input_tokens,
+					output: 0,
+					cacheRead: row.cache_read_tokens,
+					cacheWrite: row.cache_write_tokens,
+				},
+				row.timestamp,
+			);
 			update.run(cost ?? 0, row.id);
 		}
 	});
@@ -551,7 +584,7 @@ export function insertMessageStats(stats: MessageStats[]): number {
 	const insert = db.transaction(() => {
 		for (const s of stats) {
 			const cost = resolveStoredCost(s);
-			const noCacheInputCost = calculateNoCacheInputCost(s.provider, s.model, s.usage) ?? 0;
+			const noCacheInputCost = calculateNoCacheInputCost(s.provider, s.model, s.usage, s.timestamp) ?? 0;
 			const result = stmt.run(
 				s.sessionFile,
 				s.entryId,

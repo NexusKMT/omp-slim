@@ -214,6 +214,22 @@ Provider defaults vs per-model overrides:
 - `compat` is deep-merged for nested routing blocks (`openRouterRouting`, `vercelGatewayRouting`,
   `extraBody`, and `whenThinking`).
 
+## Usage costs and time-based pricing
+
+OMP estimates token costs from the selected provider/model's catalog pricing, preferring server-reported monetary costs when available. Completed messages retain their recorded costs: crossing a pricing boundary, switching models, or reopening a session does not reprice accumulated usage.
+
+For the first-party `deepseek` provider, the catalog follows [DeepSeek's official pricing](https://api-docs.deepseek.com/quick_start/pricing):
+
+- Peak hours are **Monday–Friday, 01:00–04:00 and 06:00–10:00 UTC** (start inclusive, end exclusive). All other times, including weekends, cost **50% of peak rates**.
+- Flash pricing covers `deepseek-flash`, `deepseek-v4-flash`, and `deepseek-v4-flash-vision-exp`. Peak rates per million tokens are $0.30 uncached input, $0.006 cached input, and $1.20 output.
+- `deepseek-v4-pro` initially uses peak rates of $1.32 uncached input, $0.044 cached input, and $3.96 output per million tokens. From **2026-09-14 04:00 UTC**, its estimates use the Flash rate card, with the same peak/off-peak schedule.
+
+Local estimates use the assistant message's **request-start timestamp** to choose both the rate card and tariff for the whole request. This is OMP's estimation convention: DeepSeek's pricing page does not specify how its server bills a request spanning a boundary.
+
+The status line's `cost` segment appends **↑** for peak or **↓** for off-peak pricing on the **currently active provider/model**, using the current wall clock. It refreshes at tariff boundaries even while idle; the arrow is not a label for the accumulated session total. Models without scheduled pricing, including explicit flat-price overrides, show no arrow.
+
+An explicit model `cost` in `models.yml`, including `modelOverrides`, is a flat-price override and disables inherited time-based pricing for that model. Omitting `cost` preserves catalog pricing. `models.yml` does **not** accept a `timeBased` schedule; that metadata belongs to the catalog's [KDL pricing rules](../packages/catalog/src/compat/rules/README.md#time-based-pricing).
+
 ## Runtime discovery integration
 
 ### Implicit Ollama discovery
