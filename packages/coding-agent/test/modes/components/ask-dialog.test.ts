@@ -1774,4 +1774,27 @@ describe("AskDialogComponent", () => {
 		expect(result.options).toEqual(["Retry\rnow", "Retry now", "Chat\rabout this"]);
 		expect(result.selectedOptions).toEqual(["Retry\rnow"]);
 	});
+
+	it("disambiguates rows the recommendation badge collides", () => {
+		// Badging happens before disambiguation: a recommended `Retry\rnow`
+		// and a literal `Retry now (Recommended)` would otherwise render two
+		// identical rows with different result values.
+		const component = new AskDialogComponent(
+			[
+				{
+					id: "q1",
+					question: "Pick?",
+					options: [{ label: "Retry\rnow" }, { label: "Retry now (Recommended)" }],
+					recommended: 0,
+				},
+			],
+			{ onSubmit: vi.fn(), onCancel: vi.fn(), onPrompt: vi.fn() },
+		);
+
+		const rendered = render(component);
+		expect(rendered).not.toContain("\r");
+		const rows = rendered.split("\n").filter(line => line.includes("Retry now (Recommended)"));
+		expect(rows).toHaveLength(2);
+		expect(rows[1]).toContain("Retry now (Recommended) (2)");
+	});
 });

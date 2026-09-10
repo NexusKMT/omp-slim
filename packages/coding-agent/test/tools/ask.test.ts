@@ -2062,4 +2062,25 @@ describe("AskTool carriage-return sanitization", () => {
 		expect(rows[0]).toContain(checked);
 		expect(rows[1]).toContain(checked);
 	});
+
+	it("fails closed when sanitization merges distinct question ids", async () => {
+		const tool = new AskTool(createSession());
+		const askDialog = vi.fn(async () => undefined);
+		const context = createContext({ askDialog: askDialog as never });
+		// Distinct raw ids, but multi-question answers echo `id: ...` lines
+		// the model uses to correlate — merged ids would be unanswerable.
+		const args = {
+			questions: [
+				{ id: "deploy\rmode", question: "Deploy?", options: [{ label: "Yes" }] },
+				{ id: "deploy mode", question: "Really?", options: [{ label: "No" }] },
+			],
+		};
+		const result = await tool.execute("call-cr-id-collision", args, undefined, undefined, context);
+		expect(askDialog).not.toHaveBeenCalled();
+		expect(result.content[0]?.type).toBe("text");
+		if (result.content[0]?.type !== "text") throw new Error("Expected text result");
+		expect(result.content[0].text).toContain("question ids must be unique");
+		expect(result.content[0].text).toContain("deploy mode");
+		expect(result.content[0].text).not.toContain("\r");
+	});
 });

@@ -883,8 +883,23 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 		}
 		// Sanitizing `\r` runs can also merge distinct labels (`Retry\rnow` and
 		// `Retry now` become one); dialog selection is label-keyed, so one row
-		// would check both — fail closed like schema validation does.
+		// would check both — fail closed like schema validation does. The same
+		// holds for question ids (`deploy\rmode`/`deploy mode`), which the
+		// model uses to correlate multi-question answers.
+		const seenIds = new Set<string>();
 		for (const question of params.questions) {
+			if (seenIds.has(question.id)) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: `Error: question ids must be unique: ${question.id}`,
+						},
+					],
+					details: {},
+				};
+			}
+			seenIds.add(question.id);
 			const seenLabels = new Set<string>();
 			for (const option of question.options) {
 				if (seenLabels.has(option.label)) {

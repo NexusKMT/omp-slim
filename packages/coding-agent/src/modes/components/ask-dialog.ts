@@ -268,15 +268,20 @@ function normalizedInlineInput(input: string): string {
 }
 
 /**
- * Sanitized, unique, sentinel-safe display labels for a question's options.
- * Mirrors the guest selector (`#runGuestAskQuestion`): same inputs, same
- * rows, whichever participant answers. State and results keep originals.
+ * Final display labels for a question's options: sanitized, badged, unique,
+ * and sentinel-safe. The recommendation badge goes on BEFORE collision
+ * disambiguation — badging itself can collide two rows (`Retry\rnow`
+ * recommended vs a literal `Retry now (Recommended)`). Mirrors the guest
+ * selector (`#runGuestAskQuestion`): same inputs, same rows, whichever
+ * participant answers. State and results keep originals.
  */
 function displayOptionLabels(question: ExtensionAskDialogQuestion): string[] {
-	return disambiguateDisplayLabels(
-		question.options.map(option => option.label),
-		[OTHER_OPTION, ...GUEST_ACTION_LABELS],
-	);
+	const recommendedSuffix = " (Recommended)";
+	const badged = question.options.map((option, index) => {
+		const base = sanitizeCarriageReturns(option.label);
+		return question.recommended === index && !base.endsWith(recommendedSuffix) ? `${base}${recommendedSuffix}` : base;
+	});
+	return disambiguateDisplayLabels(badged, [OTHER_OPTION, ...GUEST_ACTION_LABELS]);
 }
 
 function renderAnswerSummary(question: ExtensionAskDialogQuestion, state: QuestionState): string {
@@ -400,7 +405,7 @@ function normalizeDialogQuestions(questions: ExtensionAskDialogQuestion[]): Exte
 				options.push({
 					// The label is a caller-supplied correlation key echoed verbatim
 					// in results (matching the guest path) — sanitize only the
-					// display copy (`#optionLabel`).
+					// display copy (`displayOptionLabels`).
 					label: typeof o.label === "string" ? o.label : "",
 					...(typeof o.description === "string" ? { description: sanitizeCarriageReturns(o.description) } : {}),
 					...(typeof o.preview === "string" ? { preview: sanitizeCarriageReturns(o.preview) } : {}),
@@ -707,20 +712,11 @@ export class AskDialogComponent implements Component {
 		const rows: QuestionRow[] = question.options.map((option, index) => ({
 			kind: "option",
 			key: `option:${index}`,
-			label: this.#optionLabel(question, display[index] ?? sanitizeCarriageReturns(option.label), index),
+			label: display[index] ?? sanitizeCarriageReturns(option.label),
 			optionIndex: index,
 		}));
 		rows.push({ kind: "other", key: "other", label: OTHER_OPTION, optionIndex: undefined });
 		return rows;
-	}
-
-	#optionLabel(question: ExtensionAskDialogQuestion, label: string, index: number): string {
-		// Sanitize the display copy only: the stored label is a caller
-		// correlation key echoed verbatim in results (matching the guest path).
-		const display = sanitizeCarriageReturns(label);
-		const suffix = " (Recommended)";
-		if (question.recommended !== index || display.endsWith(suffix)) return display;
-		return `${display}${suffix}`;
 	}
 
 	#activeQuestionState(): { question: ExtensionAskDialogQuestion; state: QuestionState } | undefined {
