@@ -304,7 +304,9 @@ function extractModelUsageStats(
 
 /** Message timestamp, falling back to the entry's ISO timestamp, then 0. */
 function coerceEntryTimestamp(timestamp: number | undefined, entry: SessionMessageEntry): number {
-	if (typeof timestamp === "number" && Number.isFinite(timestamp)) return timestamp;
+	// A stored zero is the "no timestamp" sentinel, not 1970: fall through to
+	// the entry envelope so a recoverable ISO time still selects its tariff.
+	if (typeof timestamp === "number" && Number.isFinite(timestamp) && timestamp > 0) return timestamp;
 	const ts = Date.parse(entry.timestamp);
 	return Number.isFinite(ts) ? ts : 0;
 }

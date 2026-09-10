@@ -401,6 +401,11 @@ function getCatalogCost(provider: string, modelId: string): ModelCost | null {
 	return null;
 }
 
+/** Whether the catalog prices this model on a time-based (scheduled) card. */
+export function isScheduledCatalogModel(provider: string, modelId: string): boolean {
+	return getCatalogCost(provider, modelId)?.timeBased != null;
+}
+
 function calculateCatalogCost(
 	provider: string,
 	modelId: string,
@@ -1264,6 +1269,7 @@ export interface SessionRollupRow {
 	endedAt: number;
 	totalTokens: number;
 	costTotal: number;
+	unpricedRequests: number;
 	/** Comma-joined DISTINCT models. */
 	models: string;
 }
@@ -1278,6 +1284,7 @@ export function getSessionRollups(): SessionRollupRow[] {
 		       MAX(timestamp + COALESCE(duration, 0)) AS endedAt,
 		       SUM(total_tokens) AS totalTokens,
 		       SUM(cost_total) AS costTotal,
+		       SUM(${UNPRICED_REQUEST_SQL}) AS unpricedRequests,
 		       GROUP_CONCAT(DISTINCT model) AS models
 		FROM messages
 		GROUP BY session_file

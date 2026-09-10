@@ -5,6 +5,7 @@ import {
 	getCostTimeSeries,
 	getOverallStats,
 	getRecentRequests,
+	getSessionRollups,
 	getStatsByModel,
 	getStatsByProvider,
 	initDb,
@@ -494,6 +495,8 @@ describe("stats scheduled response costs", () => {
 		const series = getCostTimeSeries(90, null);
 		expect(series.reduce((sum, point) => sum + point.unpricedRequests, 0)).toBe(1);
 		expect(series.reduce((sum, point) => sum + point.cost, 0)).toBeCloseTo(1.25, 8);
+		// The Traces session list reads the same marker through the rollup.
+		expect(getSessionRollups()).toMatchObject([{ unpricedRequests: 1, requests: 5 }]);
 
 		closeDb();
 		await initDb();

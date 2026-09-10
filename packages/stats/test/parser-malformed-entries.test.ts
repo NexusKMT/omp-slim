@@ -280,6 +280,38 @@ describe("legacy entries without a recorded price", () => {
 		expect(getOverallStats().cacheSavings).toBe(0);
 	});
 
+	it("recovers the entry timestamp when the message timestamp is the zero sentinel", async () => {
+		const file = await writeSession([
+			JSON.stringify({
+				type: "message",
+				id: "zero-sentinel",
+				timestamp: "2026-09-10T02:00:00.000Z",
+				message: {
+					role: "assistant",
+					provider: "deepseek",
+					model: "deepseek-v4-flash",
+					api: "openai-completions",
+					stopReason: "stop",
+					content: [],
+					timestamp: 0,
+					usage: { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 },
+				},
+			}),
+		]);
+
+		const result = await parseSessionFile(file);
+		expect(result.stats[0].timestamp).toBe(DEEPSEEK_PEAK);
+
+		await initDb();
+		expect(insertMessageStats(result.stats)).toBe(1);
+
+		// Recovered peak time prices at the peak card instead of unpriced.
+		expect(getRecentRequests(1)[0]?.usage.cost.total).toBeCloseTo(0.3, 8);
+		expect(getRecentRequests(1)[0]?.costUnpriced).toBe(false);
+		expect(getOverallStats()).toMatchObject({ unpricedRequests: 0 });
+		expect(getOverallStats().totalCost).toBeCloseTo(0.3, 8);
+	});
+
 	// Regression: the derived total is summed with `+` over runtime values a
 	// foreign session can make any type. A string bucket passed the nullish
 	// check and concatenated — `input: "10"` plus the six absent buckets became
