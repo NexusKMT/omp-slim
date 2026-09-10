@@ -558,7 +558,9 @@ Image handling:
   and still send no image. Per-model `compat` is deep-merged over those rules and wins: set
   `stripImageInput: false` for an id whose endpoint really accepts `image_url` — a vision-augmenting
   proxy, for example. Default: auto (catalog class and provider rules). The Responses and Anthropic/Google
-  encoders ship the modalities the model declares.
+  encoders ship the modalities the model declares, as does the `pi-native` transport (it forwards the
+  original context to the gateway, so the guard never runs client-side and the `images` column reports
+  the declared `input`).
 
 Reasoning / thinking:
 

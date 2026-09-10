@@ -45,14 +45,18 @@ export function isOpenAICompletionsVisionSupported(model: Model<"openai-completi
 /**
  * Whether the transport that will carry `model` sends image content on the wire.
  *
- * The OpenAI Chat Completions path applies the text-only guard, as does the
- * OpenRouter chat fallback (`PI_OPENROUTER_RESPONSES=0`, which dispatches
- * `openrouter` models through `streamOpenAICompletions`); every other API
- * ships the modalities the model declares. Callers that report or gate on
- * the wire (for example the `omp models` table) read this predicate; declared
- * capability reads `model.input`.
+ * The `pi-native` transport forwards the original context (images included) to
+ * the gateway, which resolves its own model server-side, so the Chat
+ * Completions guard below never runs client-side and the declared input
+ * applies. Otherwise the OpenAI Chat Completions path applies the text-only
+ * guard, as does the OpenRouter chat fallback (`PI_OPENROUTER_RESPONSES=0`,
+ * which dispatches `openrouter` models through `streamOpenAICompletions`);
+ * every other API ships the modalities the model declares. Callers that report
+ * or gate on the wire (for example the `omp models` table) read this
+ * predicate; declared capability reads `model.input`.
  */
 export function sendsImageInputOnWire(model: Model<Api>): boolean {
+	if (model.transport === "pi-native") return model.input.includes("image");
 	if (isGuardedCompletionsTransport(model)) return isOpenAICompletionsVisionSupported(model);
 	return model.input.includes("image");
 }

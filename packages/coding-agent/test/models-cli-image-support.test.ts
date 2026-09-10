@@ -16,6 +16,7 @@ function makeModel(spec: {
 	api: Api;
 	compat?: ModelSpec["compat"];
 	input?: readonly ("text" | "image")[];
+	transport?: ModelSpec["transport"];
 }) {
 	return buildModel({
 		id: spec.id,
@@ -29,6 +30,7 @@ function makeModel(spec: {
 		contextWindow: 128_000,
 		maxTokens: 8_192,
 		compat: spec.compat,
+		transport: spec.transport,
 	} as ModelSpec);
 }
 
@@ -123,5 +125,20 @@ describe("omp models image support column", () => {
 			if (previous === undefined) delete Bun.env.PI_OPENROUTER_RESPONSES;
 			else Bun.env.PI_OPENROUTER_RESPONSES = previous;
 		}
+	});
+	it("forwards declared images on the pi-native transport despite the strip rule", () => {
+		// pi-native short-circuits to streamPiNative before the Chat Completions
+		// encoder, so compat.stripImageInput never runs client-side.
+		expect(
+			imagesCell(makeModel({ id: "deepseek-v4-flash", api: "openai-completions", transport: "pi-native" })),
+		).toBe("yes");
+	});
+
+	it("keeps declared text-only pi-native models at no", () => {
+		expect(
+			imagesCell(
+				makeModel({ id: "text-only-model", api: "openai-completions", input: ["text"], transport: "pi-native" }),
+			),
+		).toBe("no");
 	});
 });
