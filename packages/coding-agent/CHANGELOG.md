@@ -14,6 +14,9 @@
 
 - Toggling `tui.vimMode` or `tui.vimModeDisplay` in `/settings` now takes effect immediately instead of requiring a restart; the editor, prompt border, status-line segment, and cursor shape all switch in place.
 - The prompt border now colors Insert mode too (green), instead of falling through to the session accent. Normal and Visual were already colored, so Insert was the one mode the border could not distinguish — on themes whose accent matches the session accent it was indistinguishable from Normal. Borders outside Vim mode are unchanged.
+### Fixed
+
+- Repeated soft compaction now includes messages retained by the previous pass instead of silently dropping them from model context.
 
 ## [18.1.16] - 2026-09-09
 
