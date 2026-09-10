@@ -31,6 +31,7 @@ import { HookSelectorComponent, type HookSelectorSlider } from "../../modes/comp
 import { getAvailableThemesWithPaths, getThemeByName, setTheme, type Theme, theme } from "../../modes/theme/theme";
 import type { InteractiveModeContext, InteractiveSelectorDialogOptions } from "../../modes/types";
 import { normalizeCustomMessagePayload, USER_INTERRUPT_LABEL } from "../../session/messages";
+import { sanitizeCarriageReturns } from "../../tools/render-utils";
 import { setExtensionTerminalTitle, setSessionTerminalTitle } from "../../utils/title-generator";
 
 const MAX_WIDGET_LINES = 10;
@@ -786,8 +787,23 @@ export class ExtensionUiController {
 	): Promise<ExtensionAskDialogResultItem | "chat" | "unavailable" | undefined> {
 		const selected = new Set<string>();
 		let customInput: string | undefined;
-		const baseOptions: CollabUiSelectItem[] = question.options.map(option =>
-			option.description?.trim() ? { label: option.label, description: option.description.trim() } : option.label,
+		// Sanitize display copies for the guest wire (same degeneration as
+		// the local dialog). `selected` and results keep the ORIGINAL labels
+		// so both race winners echo identical correlation values.
+		const displayLabels = question.options.map(option => sanitizeCarriageReturns(option.label));
+		const originalByDisplay = new Map<string, string>();
+		question.options.forEach((option, index) => {
+			if (!originalByDisplay.has(displayLabels[index]!)) originalByDisplay.set(displayLabels[index]!, option.label);
+		});
+		// Map a guest answer (a sanitized display label) back to the original
+		// correlation value; unknown values pass through and are ignored at
+		// result build, as before.
+		const resolveGuestLabel = (value: string): string => originalByDisplay.get(value) ?? value;
+		const displayQuestion = sanitizeCarriageReturns(question.question);
+		const baseOptions: CollabUiSelectItem[] = question.options.map((option, index) =>
+			option.description?.trim()
+				? { label: displayLabels[index]!, description: sanitizeCarriageReturns(option.description.trim()) }
+				: displayLabels[index]!,
 		);
 		if (question.multi) {
 			while (true) {
@@ -806,7 +822,7 @@ export class ExtensionUiController {
 				const choice = await this.#requestGuestUiString(
 					{
 						kind: "select",
-						title: question.question,
+						title: displayQuestion,
 						options,
 						selectionMarker: "checkbox",
 						checkedIndices,
@@ -823,7 +839,7 @@ export class ExtensionUiController {
 				if (choice.value === ASK_NEXT_OPTION) break;
 				if (choice.value === ASK_OTHER_OPTION) {
 					const input = await this.#requestGuestUiString(
-						{ kind: "editor", title: boundPromptTitle("Custom answer: ", question.question) },
+						{ kind: "editor", title: boundPromptTitle("Custom answer: ", displayQuestion) },
 						signal,
 					);
 					if (input.kind === "unavailable") return "unavailable";
@@ -833,8 +849,9 @@ export class ExtensionUiController {
 					customInput = input.value;
 					break;
 				}
-				if (selected.has(choice.value)) selected.delete(choice.value);
-				else selected.add(choice.value);
+				const picked = resolveGuestLabel(choice.value);
+				if (selected.has(picked)) selected.delete(picked);
+				else selected.add(picked);
 			}
 		} else {
 			const recommended =
@@ -846,7 +863,7 @@ export class ExtensionUiController {
 				const choice = await this.#requestGuestUiString(
 					{
 						kind: "select",
-						title: question.question,
+						title: displayQuestion,
 						options: [...baseOptions, ASK_OTHER_OPTION, ASK_CHAT_OPTION],
 						initialIndex,
 						selectionMarker: "radio",
@@ -860,7 +877,7 @@ export class ExtensionUiController {
 				if (choice.value === ASK_CHAT_OPTION) return "chat";
 				if (choice.value === ASK_OTHER_OPTION) {
 					const input = await this.#requestGuestUiString(
-						{ kind: "editor", title: boundPromptTitle("Custom answer: ", question.question) },
+						{ kind: "editor", title: boundPromptTitle("Custom answer: ", displayQuestion) },
 						signal,
 					);
 					if (input.kind === "unavailable") return "unavailable";
@@ -869,7 +886,7 @@ export class ExtensionUiController {
 					if (input.kind === "cancelled") continue;
 					customInput = input.value;
 				} else {
-					selected.add(choice.value);
+					selected.add(resolveGuestLabel(choice.value));
 				}
 				break;
 			}

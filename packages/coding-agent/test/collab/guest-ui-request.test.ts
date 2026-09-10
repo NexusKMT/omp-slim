@@ -857,4 +857,45 @@ describe("guest ask multi-select Next gating (#4375 PRRT_kwDOQxs0bc6OFbDW)", () 
 			await host.stop("test done");
 		}
 	});
+
+	it("sends sanitized display copies to the guest while echoing original labels", async () => {
+		// \r-degenerate args must not splatter the guest selector, and the
+		// guest's answer (given against display labels) must map back to the
+		// original correlation values in the result.
+		const ctx = makeAskHostContext();
+		const host = new CollabHost(ctx);
+		await host.start("ws://localhost:8787");
+		ctx.collabHost = host;
+		const controller = new ExtensionUiController(ctx);
+		try {
+			const guest = await joinRawGuest(host.link, COLLAB_PROTO);
+			const welcome = await guest.nextFrame();
+			if (welcome.t !== "welcome") throw new Error(`expected welcome, got ${welcome.t}`);
+
+			const questions: ExtensionAskDialogQuestion[] = [
+				{
+					id: "q1",
+					question: "Pick\r\rone?",
+					options: [{ label: "Retry\rnow", description: "Try\r\ragain." }, { label: "Abort" }],
+				},
+			];
+			const result = controller.showAskDialog(questions);
+
+			const first = await nextUiRequest(guest);
+			expect(JSON.stringify(first.request)).not.toContain("\r");
+			expect(selectLabels(first).slice(0, 2)).toEqual(["Retry now", "Abort"]);
+
+			// Guest answers with the sanitized display label.
+			guest.socket.send({ t: "ui-response", reqId: first.request.reqId, value: "Retry now" });
+			const settled = await result;
+			expect(settled?.kind).toBe("submit");
+			if (settled?.kind === "submit") {
+				expect(settled.results[0]?.options).toEqual(["Retry\rnow", "Abort"]);
+				expect(settled.results[0]?.selectedOptions).toEqual(["Retry\rnow"]);
+			}
+			guest.socket.close();
+		} finally {
+			await host.stop("test done");
+		}
+	});
 });
