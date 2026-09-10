@@ -140,7 +140,7 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function questionTabLabel(question: ExtensionAskDialogQuestion, index: number): string {
-	const base = question.header?.trim() || question.id || `Q${index + 1}`;
+	const base = question.header?.trim() || sanitizeCarriageReturns(question.id) || `Q${index + 1}`;
 	return truncateToWidth(replaceTabs(base), MAX_HEADER_CHIP_WIDTH, Ellipsis.Unicode);
 }
 
@@ -379,7 +379,9 @@ function normalizeDialogQuestions(questions: ExtensionAskDialogQuestion[]): Exte
 			}
 		}
 		out.push({
-			id: typeof q.id === "string" ? sanitizeCarriageReturns(q.id) : "?",
+			// The id is a caller-supplied correlation key echoed verbatim in
+			// results — sanitize only the display copy (`questionTabLabel`).
+			id: typeof q.id === "string" ? q.id : "?",
 			question: typeof q.question === "string" ? sanitizeCarriageReturns(q.question) : "",
 			...(typeof q.header === "string" ? { header: sanitizeCarriageReturns(q.header) } : {}),
 			options,

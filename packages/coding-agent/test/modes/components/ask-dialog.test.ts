@@ -1690,4 +1690,21 @@ describe("AskDialogComponent", () => {
 		expect(rendered).toContain("q 3a");
 		expect(rendered).toContain("q3b");
 	});
+
+	it("echoes extension-supplied question ids verbatim in results", () => {
+		// The id is a caller correlation key: display sanitizes it (tab
+		// labels), but submitted results must carry the original value or
+		// code indexing the response by request id will miss.
+		const onSubmit = vi.fn();
+		const component = new AskDialogComponent(
+			[{ id: "q\r\r3a", question: "Pick one?", options: [{ label: "Alpha" }, { label: "Beta" }] }],
+			{ onSubmit, onCancel: vi.fn(), onPrompt: vi.fn() },
+		);
+
+		expect(render(component)).not.toContain("\r");
+
+		component.handleInput(ENTER);
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		expect(onSubmit.mock.calls[0][0].results[0].id).toBe("q\r\r3a");
+	});
 });

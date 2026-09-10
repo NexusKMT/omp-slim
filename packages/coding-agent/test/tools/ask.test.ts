@@ -1998,4 +1998,36 @@ describe("AskTool carriage-return sanitization", () => {
 			expect(fallbackText).not.toContain("\r");
 		}
 	});
+
+	it("keeps pre-fix colliding selections on their original row", async () => {
+		const theme = darkTheme;
+		// Pre-fix persisted result: distinct raw options merged by
+		// sanitization, only the second selected. Label matching would mark
+		// both rows; resolving against the raw labels keeps the marker right.
+		const rendered = askToolRenderer.renderResult(
+			{
+				content: [{ type: "text", text: "" }],
+				details: {
+					results: [
+						{
+							id: "q1",
+							question: "Retry?",
+							options: ["Retry\rnow", "Retry now"],
+							multi: true,
+							selectedOptions: ["Retry now"],
+						},
+					],
+				},
+			},
+			{ expanded: true, isPartial: false },
+			theme!,
+		);
+		const text = stripAnsi(rendered.render(120).join("\n"));
+		expect(text).not.toContain("\r");
+		const rows = text.split("\n").filter(line => line.includes("Retry now"));
+		expect(rows).toHaveLength(2);
+		const checked = theme!.checkbox.checked;
+		expect(rows[0]).not.toContain(checked);
+		expect(rows[1]).toContain(checked);
+	});
 });

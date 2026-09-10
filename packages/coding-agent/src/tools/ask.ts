@@ -1336,6 +1336,26 @@ function renderQuestionOptionLines(
 }
 
 /**
+ * Resolve selected labels to option indices against the RAW persisted labels.
+ * Sanitizing can merge distinct options (`Retry\rnow`/`Retry now`) into one
+ * display label, after which a label set would mark every colliding row —
+ * indices survive normalization because it preserves order and length.
+ * Returns undefined when raw options are missing so the caller falls back to
+ * label matching.
+ */
+function selectedIndicesFor(
+	rawOptions: string[] | undefined,
+	rawSelected: string[] | undefined,
+): Set<number> | undefined {
+	if (!rawOptions || rawOptions.length === 0) return undefined;
+	const indices = new Set<number>();
+	for (const label of rawSelected ?? []) {
+		const index = rawOptions.indexOf(label);
+		if (index >= 0) indices.add(index);
+	}
+	return indices;
+}
+/**
  * Render the answered option list for a question: every offered option with its
  * selection marker filled in, plus any custom free-text answer. Flat marker
  * bullets — the frame is the container, so no tree guides are drawn.
@@ -1349,6 +1369,7 @@ function renderAnswerOptionLines(
 	customInput: string | undefined,
 	note: string | undefined,
 	width: number,
+	selectedIndices?: ReadonlySet<number>,
 ): string[] {
 	const selected = new Set(selectedOptions ?? []);
 	// Prefer the full recorded option set; fall back to the selected labels when
@@ -1361,8 +1382,8 @@ function renderAnswerOptionLines(
 	}
 
 	const out: string[] = [];
-	for (const label of list) {
-		const isSelected = selected.has(label);
+	for (const [index, label] of list.entries()) {
+		const isSelected = selectedIndices !== undefined ? selectedIndices.has(index) : selected.has(label);
 		const marker = optionMarker(uiTheme, multi, isSelected);
 		const markerStyled = isSelected ? uiTheme.fg("success", marker) : uiTheme.fg("dim", marker);
 		const labelStyled = renderInlineMarkdown(label, mdTheme, t =>
@@ -1493,7 +1514,10 @@ export const askToolRenderer = {
 				uiTheme,
 			);
 			return framedBlock(uiTheme, width => {
-				const sections = results.map(r => {
+				const rawResults = rawDetails.results ?? [];
+				const sections = results.map((r, index) => {
+					// Sanitizing preserves order and length, so raw indices align with `r`.
+					const raw = rawResults[index];
 					// md() returns a shared cached array (module-level Markdown LRU) — copy before appending.
 					const lines = [
 						...md(r.question, width),
@@ -1506,6 +1530,7 @@ export const askToolRenderer = {
 							r.customInput,
 							r.note,
 							width,
+							selectedIndicesFor(raw?.options, raw?.selectedOptions),
 						),
 					];
 					return { label: uiTheme.fg("dim", `[${r.id}]`), lines };
@@ -1548,7 +1573,17 @@ export const askToolRenderer = {
 			// md() returns a shared cached array (module-level Markdown LRU) — copy before appending.
 			const bodyLines = [
 				...md(question, width),
-				...renderAnswerOptionLines(uiTheme, mdTheme, dOptions, dSelected, dMulti, dCustom, dNote, width),
+				...renderAnswerOptionLines(
+					uiTheme,
+					mdTheme,
+					dOptions,
+					dSelected,
+					dMulti,
+					dCustom,
+					dNote,
+					width,
+					selectedIndicesFor(rawDetails.options, rawDetails.selectedOptions),
+				),
 			];
 			if (dTimedOut) {
 				// Distinguish auto-selection from a real user choice in the transcript.
