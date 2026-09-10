@@ -2373,6 +2373,7 @@ describe("openai-codex streaming", () => {
 			provider: "openai-codex",
 			baseUrl: "https://chatgpt.com/backend-api",
 			reasoning: true,
+			preferWebsockets: false,
 			input: ["text"],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			contextWindow: 400000,
@@ -2387,7 +2388,6 @@ describe("openai-codex streaming", () => {
 		const result = await completeSimple(model, context, {
 			apiKey: token,
 			fetch: fetchMock as FetchImpl,
-			transport: "sse",
 		});
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 		expect(result.stopReason).toBe("stop");
