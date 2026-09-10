@@ -677,7 +677,11 @@ export class ExtensionUiController {
 				promptEditor = undefined;
 				resolvePrompt?.(value);
 				// Let AskDialog apply the answer and clear its prompt guard before
-				// making the dialog visible and interactive again.
+				// making the dialog visible and interactive again. This single-hop
+				// deferral relies on #promptForCustomInput/#promptForNote clearing
+				// #promptActive in the synchronous resume after their lone
+				// `await onPrompt(...)` (no await before the `finally`); adding one
+				// there reopens the drop-Enter race, so revisit this deferral then.
 				queueMicrotask(restoreAskDialog);
 			};
 
