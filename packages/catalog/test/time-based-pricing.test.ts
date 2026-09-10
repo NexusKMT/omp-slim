@@ -10,6 +10,7 @@ import {
 	calculateUncachedInputCost,
 	calculateUsageCost,
 	getBundledModel,
+	getBundledModels,
 	getNextTimeBasedPricingTransition,
 	getTimeBasedPricingPeriod,
 } from "@oh-my-pi/pi-catalog/models";
@@ -389,6 +390,28 @@ describe("pricing discovery and cache", () => {
 			expect(calculateCost(online.models[0]!, usage(), offPeak).total).toBeCloseTo(5, 12);
 			const offline = await resolveProviderModels<"openai-completions">(options, "offline");
 			expect(calculateCost(offline.models[0]!, usage(), offPeak).total).toBeCloseTo(5, 12);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("deepseek provider metadata corrections", () => {
+	// The bare alias is the one first-party Flash id upstream discovery leaves
+	// without limits, and the agent sizes its context budget from the resolved
+	// model: with a null window it skips over-context compaction entirely.
+	it("gives the bare Flash alias its documented limits through provider resolution", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-bare-alias-limits-"));
+		const bundled = getBundledModels("deepseek").find(model => model.id === "deepseek-flash");
+		if (!bundled) throw new Error("Expected a bundled deepseek-flash row");
+		try {
+			const { models } = await resolveProviderModels<"openai-completions">(
+				{ providerId: "deepseek", staticModels: [bundled], cacheDbPath: path.join(tempDir, "models.db") },
+				"offline",
+			);
+			const resolved = models.find(model => model.id === "deepseek-flash");
+			expect(resolved?.contextWindow).toBe(1_000_000);
+			expect(resolved?.maxTokens).toBe(384_000);
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}

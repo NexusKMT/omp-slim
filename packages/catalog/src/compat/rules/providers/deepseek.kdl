@@ -38,6 +38,15 @@ provider "deepseek" {
 			cache-write 0
 		}
 	}
+	// residue: upstream discovery has not seeded the bare alias's limits; the
+	// pricing page documents this SKU (DeepSeek-V4.1-Flash) as 1M context / 384K
+	// output, and without them the agent cannot enforce its context budget.
+	models "deepseek-flash" {
+		limits-patch {
+			context-window 1000000
+			max-tokens 384000
+		}
+	}
 	// residue: the dated price transition applies to the documented exact Pro SKU only.
 	models "deepseek-v4-pro" {
 		cost-patch {
