@@ -466,6 +466,10 @@ Both surfaces keep provider-prefixed concrete models visible and selectable.
 
 Selecting a provider row stores its explicit `provider/modelId`.
 
+The table's `images` column reports what the transport will actually send, so a model whose images are
+stripped (`compat.stripImageInput`, see [Image handling](#compatibility-and-routing-fields)) shows `no`
+even when its spec declares `input: [text, image]`; `--json` keeps the declared `input`.
+
 ## Context promotion (model-level fallback chains)
 
 Context promotion is an overflow recovery mechanism for small-context variants (for example `*-spark`) that automatically promotes to a larger-context sibling when the API rejects a request with a context length error.
@@ -545,6 +549,15 @@ Request shaping:
 - `supportsImageDetailOriginal` — allow the Responses API's nonstandard `detail: "original"` image
   mode where the endpoint supports it.
 - `extraBody` — extra top-level fields merged into every request body (gateway hints, controller selectors, etc.).
+
+Image handling:
+
+- `stripImageInput` — drop image parts before an `openai-completions` request is encoded. The catalog's
+  class rules set it for model lines that endpoints commonly serve as text-only (e.g. the DeepSeek class),
+  independently of the provider's own `input` declaration, so a model can declare `input: [text, image]`
+  and still send no image. Per-model `compat` is deep-merged over those rules and wins: set
+  `stripImageInput: false` for an id whose endpoint really accepts `image_url` — a vision-augmenting
+  proxy, for example. Default: auto (catalog class and provider rules).
 
 Reasoning / thinking:
 

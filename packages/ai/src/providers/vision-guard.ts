@@ -1,4 +1,4 @@
-import type { ImageContent, Model, TextContent } from "../types";
+import type { Api, ImageContent, Model, TextContent } from "../types";
 
 export const NON_VISION_IMAGE_PLACEHOLDER = "[image omitted: model does not support vision]";
 export function partitionVisionContent(
@@ -39,4 +39,22 @@ export function isOpenAICompletionsVisionSupported(model: Model<"openai-completi
 	if (!model.input.includes("image")) return false;
 	if (model.compat.stripImageInput) return false;
 	return true;
+}
+
+/**
+ * Whether the transport that will carry `model` sends image content on the wire.
+ *
+ * Only the OpenAI Chat Completions path applies the text-only guard; every other
+ * API ships the modalities the model declares. Callers that report or gate on
+ * image capability (e.g. the `omp models` table) must read this instead of
+ * `model.input` alone, or they advertise support the wire silently strips.
+ */
+export function supportsImageInput(model: Model<Api>): boolean {
+	if (!isOpenAICompletionsModel(model)) return model.input.includes("image");
+	return isOpenAICompletionsVisionSupported(model);
+}
+
+/** Narrows the model union to the one API the text-only guard belongs to. */
+function isOpenAICompletionsModel(model: Model<Api>): model is Model<"openai-completions"> {
+	return model.api === "openai-completions";
 }

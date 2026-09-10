@@ -5,6 +5,7 @@
 ### Fixed
 
 - Repeated soft compaction now includes messages retained by the previous pass instead of silently dropping them from model context.
+- `omp models` now reports whether a model's images actually reach the provider, so an id stripped by a text-only catalog rule no longer shows `images: yes` ([#9697](https://github.com/can1357/oh-my-pi/issues/9697)).
 
 ## [18.1.16] - 2026-09-09
 
