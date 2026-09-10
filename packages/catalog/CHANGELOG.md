@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Gemini 2.5 Flash Lite on Vertex AI no longer requests `maxOutputTokens=65536`, which the endpoint rejects with a 400; the output cap is clamped to 65535 ([#10595](https://github.com/can1357/oh-my-pi/pull/10595) by [@WeMingT](https://github.com/WeMingT)).
+
 ## [18.1.16] - 2026-09-09
 
 - Updated Fire Pass (`firepass`) login validation probe to `accounts/fireworks/routers/glm-5p2-fast` and bundled `glm-5.2-fast` and `kimi-k3-fast` models in place of decommissioned `kimi-k2.6-turbo` ([#10859](https://github.com/can1357/oh-my-pi/pull/10859) by [@olegpulatov](https://github.com/olegpulatov)).
@@ -93,9 +97,6 @@
 - Fixed startup failures when discovering Bedrock-style Mistral Mixtral models.
 - Fixed Muse Spark 1.3 contributor models on OpenCode gateways so they use the correct Responses API route.
 - Updated Meta and OpenCode Muse Spark 1.3 model metadata and capabilities, including context windows, reasoning levels, image input, pricing, and model naming; media-only Muse SKUs are no longer presented as chat models.
-### Fixed
-
-- Gemini 2.5 Flash Lite on Vertex AI no longer requests `maxOutputTokens=65536`, which the endpoint rejects with a 400; the output cap is clamped to 65535 ([#10595](https://github.com/can1357/oh-my-pi/pull/10595) by [@WeMingT](https://github.com/WeMingT)).
 
 ## [18.1.4] - 2026-09-02
 
