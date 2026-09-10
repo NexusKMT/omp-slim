@@ -21,6 +21,7 @@ import type {
 	DailyActivityPoint,
 	FolderStats,
 	MessageStats,
+	MessageStatsInput,
 	ModelPerformancePoint,
 	ModelStats,
 	ModelTimeSeriesPoint,
@@ -392,7 +393,7 @@ function calculateCatalogCost(
 	return calculateUsageCost(cost, usage, timestamp);
 }
 
-function normalizeUsageCost(cost: UsageCost): UsageCost {
+function normalizeUsageCost(cost: Partial<UsageCost>): UsageCost {
 	const input = cost.input ?? 0;
 	const output = cost.output ?? 0;
 	const cacheRead = cost.cacheRead ?? 0;
@@ -401,22 +402,35 @@ function normalizeUsageCost(cost: UsageCost): UsageCost {
 	return { input, output, cacheRead, cacheWrite, total };
 }
 
-function resolveStoredCost(stats: MessageStats): UsageCost {
-	// `usage.cost` was optional in older session files, and legacy payloads
-	// can carry a partially-populated cost object (e.g. only `total`). The
-	// messages table declares every cost_* column as REAL NOT NULL, so any
-	// missing field must be normalised here before binding into SQLite.
-	const raw: UsageCost | undefined = stats.usage.cost;
+/**
+ * The parser records no timestamp for an entry that carries neither a numeric
+ * message timestamp nor a parseable entry timestamp, leaving this sentinel.
+ * Pricing such a request from the clock would bill it as a 1970 request.
+ */
+function hasRequestTimestamp(timestamp: number): boolean {
+	return Number.isFinite(timestamp) && timestamp > 0;
+}
+
+function resolveStoredCost(stats: MessageStatsInput): UsageCost {
+	// `usage.cost` is absent when the session entry recorded no price at all, and
+	// legacy payloads can carry a partially-populated cost object (e.g. only
+	// `total`). The messages table declares every cost_* column as REAL NOT NULL,
+	// so any missing field must be normalised here before binding into SQLite.
+	const raw: Partial<UsageCost> | undefined = stats.usage.cost;
 	const storedCost = raw ? normalizeUsageCost(raw) : undefined;
+	const catalogCost = getCatalogCost(stats.provider, stats.model);
 
 	// Scheduled prices are frozen per request, including explicitly free usage.
 	// Preserve legacy zero-cost subscription correction for unscheduled models.
-	if (
-		storedCost &&
-		Number.isFinite(storedCost.total) &&
-		(storedCost.total !== 0 || getCatalogCost(stats.provider, stats.model)?.timeBased)
-	) {
+	if (storedCost && Number.isFinite(storedCost.total) && (storedCost.total !== 0 || catalogCost?.timeBased)) {
 		return storedCost;
+	}
+
+	// Without a request timestamp a scheduled card has no tariff to select, and
+	// the epoch would silently become one. Leave the request unpriced; a re-parse
+	// of the session file repairs it once the timestamp is recoverable.
+	if (!hasRequestTimestamp(stats.timestamp) && catalogCost?.timeBased) {
+		return storedCost ?? ZERO_USAGE_COST;
 	}
 
 	return (
@@ -432,6 +446,9 @@ function calculateNoCacheInputCost(
 ): number | null {
 	const cost = getCatalogCost(provider, modelId);
 	if (!cost) return null;
+	// Mirrors `resolveStoredCost`: an unpriced scheduled request must not report
+	// its whole prompt as cache savings just because the clock could be read.
+	if (!hasRequestTimestamp(timestamp) && cost.timeBased) return null;
 	const promptInputTokens =
 		tokens.input +
 		tokens.cacheRead +
@@ -461,7 +478,11 @@ function backfillMissingCatalogCosts(database: Database): void {
 	const applyBackfill = database.transaction(() => {
 		for (const row of rows) {
 			// A stored zero cannot distinguish missing historical prices from an
-			// explicitly free request. Never reprice recorded scheduled usage.
+			// explicitly free request. Never reprice recorded scheduled usage: a
+			// zero ingested for a scheduled card is permanent, because this
+			// backfill skips those rows. Re-parsing the session file is the only
+			// repair, and it works only once the entry's absent `cost` reaches
+			// `resolveStoredCost` as absence rather than as a synthesized zero.
 			if (getCatalogCost(row.provider, row.model)?.timeBased) continue;
 			const cost = calculateCatalogCost(
 				row.provider,
@@ -555,7 +576,7 @@ export function setFileOffset(sessionFile: string, offset: number, lastModified:
  * stored cost (orchestration-aware) and keeps `premium_requests` monotonic, so
  * a forced re-parse repairs historical `premium_requests` and cost fix-ups.
  */
-export function insertMessageStats(stats: MessageStats[]): number {
+export function insertMessageStats(stats: MessageStatsInput[]): number {
 	if (!db || stats.length === 0) return 0;
 
 	const stmt = db.prepare(`

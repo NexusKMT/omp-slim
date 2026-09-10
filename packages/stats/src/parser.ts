@@ -14,7 +14,7 @@ import { classifyModel } from "@oh-my-pi/pi-catalog/compat/taxonomy";
 import { getSessionsDir, isEnoent, readLines } from "@oh-my-pi/pi-utils";
 import type {
 	AgentType,
-	MessageStats,
+	MessageStatsInput,
 	SessionEntry,
 	SessionMessageEntry,
 	SessionModelUsageEntry,
@@ -151,6 +151,24 @@ function extractUserStats(sessionFile: string, folder: string, entry: SessionMes
 }
 
 /**
+ * `Usage.totalTokens` per the documented contract: the conversation buckets plus
+ * provider-reported orchestration tokens. Used when a legacy entry omits the
+ * total, which would otherwise persist a zero total next to real token counts.
+ */
+function sumReportedTokens(usage: Partial<Usage>): number {
+	const orchestration = usage.orchestration;
+	return (
+		(usage.input ?? 0) +
+		(usage.output ?? 0) +
+		(usage.cacheRead ?? 0) +
+		(usage.cacheWrite ?? 0) +
+		(orchestration?.input ?? 0) +
+		(orchestration?.output ?? 0) +
+		(orchestration?.cacheRead ?? 0)
+	);
+}
+
+/**
  * Extract stats from an assistant message entry.
  *
  * Session JSONL on disk is not guaranteed to match the current
@@ -167,7 +185,7 @@ function extractStats(
 	entry: SessionMessageEntry,
 	currentServiceTier: ServiceTierByFamily | undefined,
 	agentType: AgentType,
-): MessageStats | null {
+): MessageStatsInput | null {
 	const msg = entry.message as AssistantMessage;
 	if (msg?.role !== "assistant") return null;
 	if (typeof msg.model !== "string" || typeof msg.provider !== "string" || typeof msg.api !== "string") return null;
@@ -194,7 +212,7 @@ function extractStats(
 		typeof rawUsage.cacheRead === "number" &&
 		typeof rawUsage.cacheWrite === "number" &&
 		typeof rawUsage.totalTokens === "number";
-	const usage: Usage =
+	const usage: MessageStatsInput["usage"] =
 		wellFormed && derived === recorded
 			? (rawUsage as Usage)
 			: {
@@ -203,8 +221,12 @@ function extractStats(
 					output: rawUsage.output ?? 0,
 					cacheRead: rawUsage.cacheRead ?? 0,
 					cacheWrite: rawUsage.cacheWrite ?? 0,
-					totalTokens: rawUsage.totalTokens ?? 0,
-					cost: rawUsage.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					totalTokens:
+						typeof rawUsage.totalTokens === "number" ? rawUsage.totalTokens : sumReportedTokens(rawUsage),
+					// An omitted `cost` must stay omitted: `resolveStoredCost` reads
+					// absence as "no recorded price" and estimates the request, while
+					// a zero would read as an explicitly free request.
+					cost: rawUsage.cost,
 					premiumRequests: derived,
 				};
 
@@ -232,7 +254,7 @@ function extractModelUsageStats(
 	folder: string,
 	entry: SessionModelUsageEntry,
 	agentType: AgentType,
-): MessageStats | null {
+): MessageStatsInput | null {
 	const timestamp = Date.parse(entry.timestamp);
 	return extractStats(
 		sessionFile,
@@ -409,7 +431,7 @@ function scanLastServiceTier(bytes: Uint8Array): ServiceTierByFamily | undefined
  * entries, preserving offset-based memory behavior for large sessions.
  */
 export interface ParseSessionResult {
-	stats: MessageStats[];
+	stats: MessageStatsInput[];
 	userStats: UserMessageStats[];
 	userLinks: UserMessageLink[];
 	toolCalls: ToolCallStats[];
@@ -428,7 +450,7 @@ export async function parseSessionFile(sessionPath: string, fromOffset = 0): Pro
 
 	const folder = extractFolderFromPath(sessionPath);
 	const agentType = classifyAgentType(sessionPath);
-	const stats: MessageStats[] = [];
+	const stats: MessageStatsInput[] = [];
 	const userStats: UserMessageStats[] = [];
 	const userLinks: UserMessageLink[] = [];
 	const toolCalls: ToolCallStats[] = [];

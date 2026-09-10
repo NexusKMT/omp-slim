@@ -1,7 +1,14 @@
 import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getRecentRequests, initDb, insertMessageStats, insertToolCalls } from "@oh-my-pi/omp-stats/db";
+import {
+	closeDb,
+	getOverallStats,
+	getRecentRequests,
+	initDb,
+	insertMessageStats,
+	insertToolCalls,
+} from "@oh-my-pi/omp-stats/db";
 import { parseSessionFile } from "@oh-my-pi/omp-stats/parser";
 import { getSessionsDir } from "@oh-my-pi/pi-utils";
 import { installStatsTestIsolation } from "./helpers/temp-agent";
@@ -174,5 +181,99 @@ describe("malformed session entries", () => {
 
 		await initDb();
 		expect(insertToolCalls(result.toolCalls)).toBe(1);
+	});
+});
+
+// Thursday 02:00 UTC, inside DeepSeek's weekday [01:00, 04:00) peak window.
+const DEEPSEEK_PEAK = Date.parse("2026-09-10T02:00:00Z");
+
+function deepseekEntry(id: string, usage: Record<string, unknown>, timestamp?: number): string {
+	return assistantEntry(id, {
+		provider: "deepseek",
+		model: "deepseek-v4-flash",
+		api: "openai-completions",
+		stopReason: "stop",
+		content: [],
+		usage,
+		...(timestamp === undefined ? {} : { timestamp }),
+	});
+}
+
+// Regression: an entry that omits `usage.cost` outright was ingested with a
+// synthesized zero, and `resolveStoredCost` freezes any recorded charge on a
+// scheduled card — so legacy DeepSeek peak usage was stored as exactly $0 and
+// `backfillMissingCatalogCosts` never revisits scheduled rows to repair it.
+// Absence must stay absent until the request timestamp prices it.
+describe("legacy entries without a recorded price", () => {
+	it("estimates the stored cost at the request timestamp instead of freezing zero", async () => {
+		const file = await writeSession([
+			deepseekEntry("unpriced", { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 }, DEEPSEEK_PEAK),
+			deepseekEntry(
+				"explicit-zero",
+				{
+					input: 1_000_000,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				DEEPSEEK_PEAK,
+			),
+		]);
+
+		const result = await parseSessionFile(file);
+		// The omitted counter is derived from the conversation buckets.
+		expect(result.stats.map(s => s.usage.totalTokens)).toEqual([1_000_000, 1_000_000]);
+
+		await initDb();
+		expect(insertMessageStats(result.stats)).toBe(2);
+
+		const stored = getRecentRequests(2);
+		// 1M uncached input tokens at the peak card's $0.30/M.
+		expect(stored.find(request => request.entryId === "unpriced")?.usage.cost.total).toBeCloseTo(0.3, 8);
+		// A recorded zero is a real charge and stays zero.
+		expect(stored.find(request => request.entryId === "explicit-zero")?.usage.cost.total).toBe(0);
+		expect(getOverallStats().totalCost).toBeCloseTo(0.3, 8);
+		// Uncached-equivalent prompt cost 2 x $0.30 against $0.30 of recorded
+		// prompt charges (the frozen zero row contributes none).
+		expect(getOverallStats().cacheSavings).toBeCloseTo(0.5, 8);
+
+		closeDb();
+		await initDb();
+
+		const reopened = getRecentRequests(2);
+		expect(reopened.find(request => request.entryId === "unpriced")?.usage.cost.total).toBeCloseTo(0.3, 8);
+		expect(reopened.find(request => request.entryId === "explicit-zero")?.usage.cost.total).toBe(0);
+		expect(getOverallStats().totalCost).toBeCloseTo(0.3, 8);
+	});
+
+	it("leaves scheduled usage unpriced when the entry has no recoverable timestamp", async () => {
+		const file = await writeSession([
+			JSON.stringify({
+				type: "message",
+				id: "no-timestamp",
+				message: {
+					role: "assistant",
+					provider: "deepseek",
+					model: "deepseek-v4-flash",
+					api: "openai-completions",
+					stopReason: "stop",
+					content: [],
+					usage: { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 },
+				},
+			}),
+		]);
+
+		const result = await parseSessionFile(file);
+		expect(result.stats[0].timestamp).toBe(0);
+
+		await initDb();
+		expect(insertMessageStats(result.stats)).toBe(1);
+
+		// The parser's `0` sentinel is not a 1970 request: never bill a peak or
+		// off-peak card from it, and never let the missing charge report savings.
+		expect(getRecentRequests(1)[0]?.usage.cost.total).toBe(0);
+		expect(getOverallStats().totalCost).toBe(0);
+		expect(getOverallStats().cacheSavings).toBe(0);
 	});
 });

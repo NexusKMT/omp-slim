@@ -38,6 +38,17 @@ export interface MessageStats {
 }
 
 /**
+ * Session-recorded token usage before pricing: counters are coerced to numbers
+ * because their columns are NOT NULL, but `cost` is only present when the
+ * session entry actually recorded one. Absence is meaningful — `resolveStoredCost`
+ * estimates a request with no recorded price, whereas a recorded zero is a real
+ * charge that scheduled cards freeze.
+ */
+export interface MessageStatsInput extends Omit<MessageStats, "usage"> {
+	usage: Omit<Usage, "cost"> & { cost?: Partial<Usage["cost"]> };
+}
+
+/**
  * Full details of a request, including content.
  */
 export interface RequestDetails extends MessageStats {
