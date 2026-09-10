@@ -15,6 +15,7 @@ import { scheduler } from "node:timers/promises";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import {
 	COPILOT_API_HEADERS,
+	COPILOT_CHAT_INTEGRATION_ID,
 	discoverGitHubCopilotApiEndpoint,
 	getGitHubCopilotBaseUrl,
 	isPublicGitHubHost,
@@ -266,14 +267,14 @@ async function enableGitHubCopilotModel(
 	const url = `${baseUrl}/models/${modelId}/policy`;
 
 	try {
-		const integrationIdOverride = normalizeCopilotIntegrationId($env.COPILOT_INTEGRATION_ID);
 		const response = await fetchImpl(url, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
 				Authorization: `Bearer ${token}`,
 				...COPILOT_API_HEADERS,
-				...(integrationIdOverride ? { "Copilot-Integration-Id": integrationIdOverride } : {}),
+				"Copilot-Integration-Id":
+					normalizeCopilotIntegrationId($env.COPILOT_INTEGRATION_ID) ?? COPILOT_CHAT_INTEGRATION_ID,
 				"Openai-Intent": "chat-policy",
 				"X-Initiator": "user",
 				"X-Interaction-Type": "chat-policy",

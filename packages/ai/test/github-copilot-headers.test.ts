@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import {
 	buildCopilotDynamicHeaders,
-	COPILOT_CHAT_FALLBACK_INTEGRATION_ID,
 	getCopilotInitiatorOverride,
 	getCopilotPremiumMultiplier,
 	hasCopilotVisionInput,
@@ -9,6 +8,7 @@ import {
 	resolveCopilotIntegrationIdOverride,
 	wrapFetchForCopilotFallback,
 } from "@oh-my-pi/pi-ai/providers/github-copilot-headers";
+import { COPILOT_CHAT_INTEGRATION_ID } from "@oh-my-pi/pi-catalog/wire/github-copilot";
 import type { Message } from "@oh-my-pi/pi-ai/types";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 
@@ -221,7 +221,7 @@ describe("buildCopilotDynamicHeaders", () => {
 		expect(headers).toEqual({
 			"User-Agent": "copilot/1.0.82",
 			"Editor-Version": "copilot/1.0.82",
-			"Copilot-Integration-Id": "copilot-developer-cli",
+			"Copilot-Integration-Id": "copilot-chat",
 			"Copilot-Harness-Id": "copilot-sdk",
 			"Openai-Intent": "conversation-agent",
 			"X-Initiator": "user",
@@ -346,20 +346,20 @@ describe("resolveCopilotIntegrationIdOverride", () => {
 			expect(resolveCopilotIntegrationIdOverride()).toBeUndefined();
 		}
 		const { headers } = buildCopilotDynamicHeaders({ messages: [], hasImages: false });
-		expect(headers["Copilot-Integration-Id"]).toBe("copilot-developer-cli");
+		expect(headers["Copilot-Integration-Id"]).toBe("copilot-chat");
 	});
 });
 
 describe("wrapFetchForCopilotFallback", () => {
 	const chatUrl = "https://api.githubcopilot.com/chat/completions";
-	function cliRequest(init?: RequestInit): [string, RequestInit | undefined] {
+	function chatRequest(init?: RequestInit): [string, RequestInit | undefined] {
 		return [
 			chatUrl,
 			{
 				...init,
 				headers: {
 					Authorization: "Bearer ghu_test",
-					"Copilot-Integration-Id": "copilot-developer-cli",
+					"Copilot-Integration-Id": COPILOT_CHAT_INTEGRATION_ID,
 				},
 			},
 		];
@@ -369,7 +369,7 @@ describe("wrapFetchForCopilotFallback", () => {
 		const ok = new Response("{}", { status: 200 });
 		const fetchMock = vi.fn(async () => ok);
 		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true);
-		await expect(wrapped(...cliRequest())).resolves.toBe(ok);
+		await expect(wrapped(...chatRequest())).resolves.toBe(ok);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
@@ -377,11 +377,11 @@ describe("wrapFetchForCopilotFallback", () => {
 		const denied = new Response("{}", { status: 403 });
 		const fetchMock = vi.fn(async () => denied);
 		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, false);
-		await expect(wrapped(...cliRequest())).resolves.toBe(denied);
+		await expect(wrapped(...chatRequest())).resolves.toBe(denied);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
-	it("ignores 403s without the default CLI identity", async () => {
+	it("ignores 403s without the default chat identity", async () => {
 		const denied = new Response("{}", { status: 403 });
 		const seen: (string | null)[] = [];
 		const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
@@ -389,9 +389,9 @@ describe("wrapFetchForCopilotFallback", () => {
 			return denied;
 		});
 		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true);
-		await wrapped(chatUrl, { headers: { "Copilot-Integration-Id": "copilot-chat" } });
+		await wrapped(chatUrl, { headers: { "Copilot-Integration-Id": "copilot-developer-cli" } });
 		expect(fetchMock).toHaveBeenCalledTimes(1);
-		expect(seen).toEqual(["copilot-chat"]);
+		expect(seen).toEqual(["copilot-developer-cli"]);
 	});
 
 	it("respects an explicit COPILOT_INTEGRATION_ID instead of retrying", async () => {
@@ -399,11 +399,11 @@ describe("wrapFetchForCopilotFallback", () => {
 		const denied = new Response("{}", { status: 403 });
 		const fetchMock = vi.fn(async () => denied);
 		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true);
-		await expect(wrapped(...cliRequest())).resolves.toBe(denied);
+		await expect(wrapped(...chatRequest())).resolves.toBe(denied);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
-	it("retries a default-identity 403 once as copilot-chat and returns the retry", async () => {
+	it("retries a chat-default 403 once as the Copilot CLI and returns the retry", async () => {
 		const seen: (string | null)[] = [];
 		let calls = 0;
 		let first: Response | undefined;
@@ -415,9 +415,9 @@ describe("wrapFetchForCopilotFallback", () => {
 			return response;
 		});
 		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true);
-		const result = await wrapped(...cliRequest());
+		const result = await wrapped(...chatRequest());
 		expect(result.status).toBe(200);
-		expect(seen).toEqual(["copilot-developer-cli", COPILOT_CHAT_FALLBACK_INTEGRATION_ID]);
+		expect(seen).toEqual([COPILOT_CHAT_INTEGRATION_ID, "copilot-developer-cli"]);
 		expect(first?.bodyUsed).toBe(true);
 	});
 
@@ -428,10 +428,10 @@ describe("wrapFetchForCopilotFallback", () => {
 			return new Response("{}", { status: 403 });
 		});
 		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true);
-		const result = await wrapped(...cliRequest());
+		const result = await wrapped(...chatRequest());
 		expect(result.status).toBe(403);
 		expect(fetchMock).toHaveBeenCalledTimes(2);
-		expect(seen).toEqual(["copilot-developer-cli", COPILOT_CHAT_FALLBACK_INTEGRATION_ID]);
+		expect(seen).toEqual([COPILOT_CHAT_INTEGRATION_ID, "copilot-developer-cli"]);
 	});
 
 	it("preserves method, auth, and body on the retry", async () => {
@@ -443,13 +443,13 @@ describe("wrapFetchForCopilotFallback", () => {
 			return new Response("{}", { status: 403 });
 		});
 		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true);
-		const [url, init] = cliRequest({ method: "POST", body: JSON.stringify({ model: "gpt-4o" }) });
+		const [url, init] = chatRequest({ method: "POST", body: JSON.stringify({ model: "gpt-4o" }) });
 		await wrapped(url, init);
 		const retryHeaders = new Headers(retryInit?.headers);
 		expect(retryInit?.method).toBe("POST");
 		expect(retryHeaders.get("Authorization")).toBe("Bearer ghu_test");
 		expect(retryInit?.body).toBe(JSON.stringify({ model: "gpt-4o" }));
-		expect(retryHeaders.get("Copilot-Integration-Id")).toBe(COPILOT_CHAT_FALLBACK_INTEGRATION_ID);
+		expect(retryHeaders.get("Copilot-Integration-Id")).toBe("copilot-developer-cli");
 	});
 
 	it("passes Request inputs through without retrying", async () => {
@@ -458,7 +458,7 @@ describe("wrapFetchForCopilotFallback", () => {
 		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true);
 		const request = new Request(chatUrl, {
 			method: "POST",
-			headers: { "Copilot-Integration-Id": "copilot-developer-cli" },
+			headers: { "Copilot-Integration-Id": COPILOT_CHAT_INTEGRATION_ID },
 			body: "{}",
 		});
 		await expect(wrapped(request)).resolves.toBe(denied);

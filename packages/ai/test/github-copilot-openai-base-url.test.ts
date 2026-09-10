@@ -104,7 +104,7 @@ describe("GitHub Copilot OpenAI transport base URL", () => {
 		}
 	});
 
-	it("retries a denied default-identity request once as copilot-chat", async () => {
+	it("retries a denied chat-surface request once as the Copilot CLI", async () => {
 		const previous = Bun.env.COPILOT_INTEGRATION_ID;
 		delete Bun.env.COPILOT_INTEGRATION_ID;
 		try {
@@ -125,7 +125,7 @@ describe("GitHub Copilot OpenAI transport base URL", () => {
 
 			expect(result.stopReason).toBe("error");
 			expect(fetchMock).toHaveBeenCalledTimes(2);
-			expect(seenIntegrationIds).toEqual(["copilot-developer-cli", "copilot-chat"]);
+			expect(seenIntegrationIds).toEqual(["copilot-chat", "copilot-developer-cli"]);
 			expect(result.errorMessage).toContain("GitHub Copilot access denied (HTTP 403)");
 		} finally {
 			if (previous === undefined) delete Bun.env.COPILOT_INTEGRATION_ID;

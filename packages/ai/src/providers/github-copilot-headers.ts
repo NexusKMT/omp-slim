@@ -1,5 +1,6 @@
 import {
 	COPILOT_CAPI_IDENTITY_HEADERS,
+	COPILOT_CHAT_INTEGRATION_ID,
 	getGitHubCopilotBaseUrl,
 	normalizeCopilotIntegrationId,
 	parseGitHubCopilotApiKey,
@@ -31,27 +32,26 @@ export function resolveGitHubCopilotBaseUrl(
 
 /**
  * Opt-in `Copilot-Integration-Id` override for chat and model-policy requests.
- * Reads `COPILOT_INTEGRATION_ID`; unset/invalid keeps the CLI default. Model
- * discovery keeps the CLI identity: it unlocks enterprise/experimental models
- * and listing models is not policy-gated the way chat completions are (#11372).
+ * Reads `COPILOT_INTEGRATION_ID`; unset/invalid keeps the chat-surface default
+ * (`COPILOT_CHAT_INTEGRATION_ID`). Model discovery keeps the CLI identity: it
+ * unlocks enterprise/experimental models and listing models is not
+ * policy-gated the way chat completions are (#11372).
  */
 export function resolveCopilotIntegrationIdOverride(): string | undefined {
 	return normalizeCopilotIntegrationId($env.COPILOT_INTEGRATION_ID);
 }
 
-/** Chat-compatible identity for the single policy-denial retry (issue #11372). */
-export const COPILOT_CHAT_FALLBACK_INTEGRATION_ID = "copilot-chat" as const;
-
 /**
- * Reissue default-identity Copilot 403s once as `copilot-chat`.
+ * Reissue chat-surface Copilot 403s once as the Copilot CLI.
  *
- * Some Business organizations allow Chat clients but block CLI/agentic ones,
- * so the default `copilot-developer-cli` identity is denied on an otherwise
- * valid token. The retry fires only for requests carrying the default
- * identity and only when no explicit `COPILOT_INTEGRATION_ID` is set — an
- * explicit choice is never second-guessed. The denied body is drained before
- * reissuing, and the retry carries the chat identity so the guard passes it
- * through: at most two requests, never a loop.
+ * Chat is the default surface (`COPILOT_CHAT_INTEGRATION_ID`) because Business
+ * organizations that gate premium models per client surface commonly allow
+ * chat while blocking CLI/agentic clients (issue #11372). The retry fires
+ * only for requests carrying the chat default and only when no explicit
+ * `COPILOT_INTEGRATION_ID` is set — an explicit choice is never
+ * second-guessed. The denied body is drained before reissuing, and the retry
+ * carries the CLI identity so the guard passes it through: at most two
+ * requests, never a loop.
  */
 export function wrapFetchForCopilotFallback(base: FetchImpl | undefined, enabled: boolean): FetchImpl {
 	const inner = base ?? fetch;
@@ -62,15 +62,15 @@ export function wrapFetchForCopilotFallback(base: FetchImpl | undefined, enabled
 		if (input instanceof Request) return response;
 		if (resolveCopilotIntegrationIdOverride() !== undefined) return response;
 		const outgoing = new Headers(init?.headers);
-		if (outgoing.get("Copilot-Integration-Id") !== COPILOT_CAPI_IDENTITY_HEADERS["Copilot-Integration-Id"]) {
+		if (outgoing.get("Copilot-Integration-Id") !== COPILOT_CHAT_INTEGRATION_ID) {
 			return response;
 		}
 		try {
 			await response.arrayBuffer();
 		} catch {}
-		logger.warn("GitHub Copilot CLI identity denied (HTTP 403); retrying once as copilot-chat");
+		logger.warn("GitHub Copilot chat identity denied (HTTP 403); retrying once as the Copilot CLI");
 		const retryHeaders = new Headers(outgoing);
-		retryHeaders.set("Copilot-Integration-Id", COPILOT_CHAT_FALLBACK_INTEGRATION_ID);
+		retryHeaders.set("Copilot-Integration-Id", COPILOT_CAPI_IDENTITY_HEADERS["Copilot-Integration-Id"]);
 		return inner(input, { ...init, headers: retryHeaders });
 	};
 }
@@ -177,8 +177,7 @@ export function buildCopilotDynamicHeaders(params: {
 		"X-Initiator": initiator,
 		"X-Interaction-Type": `conversation-${initiator}`,
 	};
-	const integrationIdOverride = resolveCopilotIntegrationIdOverride();
-	if (integrationIdOverride) headers["Copilot-Integration-Id"] = integrationIdOverride;
+	headers["Copilot-Integration-Id"] = resolveCopilotIntegrationIdOverride() ?? COPILOT_CHAT_INTEGRATION_ID;
 
 	if (params.hasImages) {
 		headers["Copilot-Vision-Request"] = "true";
