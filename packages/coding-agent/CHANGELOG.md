@@ -78,7 +78,7 @@
 ### Fixed
 
 - `omp update` now refuses to overwrite shebang scripts or non-OMP executables behind foreign symlinks and reports the physical binary path it verified ([#11152](https://github.com/can1357/oh-my-pi/issues/11152)).
-- Added peak `↑` / off-peak `↓` indicators to the DeepSeek cost display, refreshed automatically when the tariff changes.
+- Added peak `↑` / off-peak `↓` indicators to the cost display for models with scheduled pricing (DeepSeek), refreshed automatically when the tariff changes.
 
 ### Fixed
 
