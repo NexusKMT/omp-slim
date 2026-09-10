@@ -38,7 +38,7 @@ import askDescription from "../prompts/tools/ask.md" with { type: "text" };
 import { vocalizer } from "../tts/vocalizer";
 import { framedBlock, outputBlockContentWidth, renderStatusLine } from "../tui";
 import type { ToolSession } from ".";
-import { formatErrorMessage, formatMeta, formatTitle, sanitizeCarriageReturns } from "./render-utils";
+import { formatErrorMessage, formatMeta, formatTitle, sanitizeCarriageReturns, TRUNCATE_LENGTHS } from "./render-utils";
 import { ToolAbortError } from "./tool-errors";
 
 // =============================================================================
@@ -875,7 +875,7 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 				content: [
 					{
 						type: "text" as const,
-						text: `Error: option labels must not collide with reserved runtime labels: ${reservedCollision.label}`,
+						text: `Error: option labels must not collide with reserved runtime labels: ${formatErrorValue(reservedCollision.label)}`,
 					},
 				],
 				details: {},
@@ -893,7 +893,7 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 					content: [
 						{
 							type: "text" as const,
-							text: `Error: question ids must be unique: ${question.id}`,
+							text: `Error: question ids must be unique: ${formatErrorValue(question.id)}`,
 						},
 					],
 					details: {},
@@ -907,7 +907,7 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 						content: [
 							{
 								type: "text" as const,
-								text: `Error: option labels must be unique within a question: ${option.label}`,
+								text: `Error: option labels must be unique within a question: ${formatErrorValue(option.label)}`,
 							},
 						],
 						details: {},
@@ -1216,6 +1216,15 @@ function normalizeRenderOptions(raw: unknown): AskRenderOption[] | undefined {
 	return out;
 }
 
+/**
+ * Format a model-provided id/label for a validation error. Degenerate input
+ * can carry tabs or kilobytes of text, and the error echoes through the
+ * plain `Text` fallback renderer — expand tabs and clamp width like every
+ * other error display path (`formatErrorMessage`).
+ */
+function formatErrorValue(value: string): string {
+	return replaceTabs(truncateToWidth(value, TRUNCATE_LENGTHS.LINE));
+}
 /** Strip the `\r` runs degenerate models inject, so persisted call args render as prose. */
 function sanitizeAskParams(params: AskParams): AskParams {
 	return {

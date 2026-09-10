@@ -2115,4 +2115,25 @@ describe("AskTool carriage-return sanitization", () => {
 		expect(rows[0]).toContain(checked);
 		expect(rows[1]).toContain(checked);
 	});
+
+	it("expands tabs and clamps long values in validation errors", async () => {
+		const tool = new AskTool(createSession());
+		const askDialog = vi.fn(async () => undefined);
+		const context = createContext({ askDialog: askDialog as never });
+		// Degenerate duplicate values echo through the plain Text fallback
+		// renderer — raw tabs or kilobytes of text would corrupt the frame.
+		const dupe = `Tab\there${"x".repeat(500)}`;
+		const args = {
+			questions: [{ id: "q1", question: "Q?", options: [{ label: dupe }, { label: dupe }] }],
+		};
+		const result = await tool.execute("call-cr-error-value", args, undefined, undefined, context);
+		expect(askDialog).not.toHaveBeenCalled();
+		expect(result.content[0]?.type).toBe("text");
+		if (result.content[0]?.type !== "text") throw new Error("Expected text result");
+		const text = result.content[0].text;
+		expect(text).toContain("unique within a question");
+		expect(text).not.toContain("\t");
+		expect(text).not.toContain("\r");
+		expect(text.length).toBeLessThan(250);
+	});
 });
