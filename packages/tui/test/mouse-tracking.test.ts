@@ -146,3 +146,23 @@ describe("inline mouse tracking", () => {
 		}
 	});
 });
+
+describe("mutable viewport geometry", () => {
+	it("exposes the painted window and hides it behind the alt screen", () => {
+		const enabled = { current: true };
+		const { tui } = makeInlineTui(enabled);
+		try {
+			tui.start();
+			tui.addChild({ render: () => ["line"] });
+			tui.renderNow();
+			expect(tui.getMutableViewport().length).toBe(1);
+
+			const overlay = tui.showOverlay(new StaticOverlay(), { fullscreen: true });
+			tui.renderNow();
+			expect(tui.getMutableViewport()).toEqual({ top: 0, length: 0 });
+			overlay.hide();
+		} finally {
+			tui.stop();
+		}
+	});
+});

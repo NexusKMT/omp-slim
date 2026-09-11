@@ -1097,10 +1097,13 @@ export class TUI extends Container {
 	 * Mutable normal-buffer viewport from the last provider frame: screen row
 	 * where it begins plus its row count. Inline click targets are indexed
 	 * into this window (`screenRow - top`). Empty while the alt screen owns
-	 * the display.
+	 * the display, and while a resize transaction is settling — the anchor is
+	 * stale until the probe resolves, so hits would map to unrelated old rows.
 	 */
 	getMutableViewport(): { top: number; length: number } {
-		if (this.#altActive) return { top: 0, length: 0 };
+		if (this.#altActive || this.#resizeAltActive || this.#resizeProbe !== undefined || this.#resizeInPlaceActive) {
+			return { top: 0, length: 0 };
+		}
 		return { top: this.#providerViewportTop, length: this.#providerWindow.length };
 	}
 
