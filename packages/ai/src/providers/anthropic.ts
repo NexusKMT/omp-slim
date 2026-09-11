@@ -60,6 +60,10 @@ import {
 import { createAbortSourceTracker } from "../utils/abort";
 import {
 	clearStreamingPartialJson,
+	type ConversationalUserCarrier,
+	isConversationalUser,
+	isSyntheticUser,
+	kConversationalUser,
 	kStreamingBlockIndex,
 	kStreamingLastParseLen,
 	kStreamingPartialJson,
@@ -567,11 +571,14 @@ function dropAnthropicStrictTools(params: MessageCreateParamsStreaming): void {
 function getCacheControl(
 	model: Model<"anthropic-messages">,
 	cacheRetention: CacheRetention | undefined,
+	isOAuthToken = false,
 ): { retention: CacheRetention; cacheControl?: AnthropicCacheControl } {
-	// Five-minute writes are the cheapest cache population strategy. Longer
-	// retention remains an explicit PI_CACHE_RETENTION/request override; idle
-	// sessions keep the short entry warm with bounded read-only refreshes.
-	const retention = resolveCacheRetention(cacheRetention, "short");
+	// Five-minute writes are the cheapest cache population strategy for pay-per-token API keys.
+	// For OAuth (Claude Code subscriber seats), match Claude Code's native policy by defaulting
+	// to 1h retention where supported, avoiding cold cache re-writes after 15m idle intervals.
+	// An explicit cacheRetention ('short', 'long', 'none') or PI_CACHE_RETENTION always takes precedence.
+	const defaultRetention = isOAuthToken && model.compat.supportsLongCacheRetention ? "long" : "short";
+	const retention = resolveCacheRetention(cacheRetention, defaultRetention);
 	if (retention === "none") {
 		return { retention };
 	}
@@ -2358,12 +2365,14 @@ const streamAnthropicOnce = (
 					extraBetas.push(COMPACTION_BETA);
 				}
 				// `ttl: "1h"` requires the extended-cache-ttl beta on API-key
-				// requests. OAuth requests never add it here: agent requests
-				// already carry it in the Claude Code beta list, and utility
+				// requests. OAuth requests never add it here: Anthropic honors
+				// `ttl: "1h"` on the OAuth path without it (verified against live
+				// traffic: writes land in the `ephemeral_1h` bucket), and utility
 				// requests must not deviate from CC's header fingerprint.
+				const isOAuth = options?.isOAuth ?? isAnthropicOAuthToken(apiKey);
 				if (
-					!(options?.isOAuth ?? isAnthropicOAuthToken(apiKey)) &&
-					getCacheControl(model, options?.cacheRetention).cacheControl?.ttl === "1h" &&
+					!isOAuth &&
+					getCacheControl(model, options?.cacheRetention, isOAuth).cacheControl?.ttl === "1h" &&
 					!extraBetas.includes(extendedCacheTtlBeta)
 				) {
 					extraBetas.push(extendedCacheTtlBeta);
@@ -3782,9 +3791,43 @@ function applyCacheControlToLastBlock(blocks: ContentBlockParam[], cacheControl:
 	return false;
 }
 
+const ANTHROPIC_MAX_BREAKPOINTS = 4;
+const ANTHROPIC_DECIMATION_INTERVAL = 15;
+
+function countHeadBreakpoints(params: MessageCreateParamsStreaming): number {
+	let count = 0;
+	if (Array.isArray(params.system)) {
+		for (const block of params.system) {
+			if (typeof block !== "string" && block?.cache_control != null) count++;
+		}
+	}
+	if (Array.isArray(params.tools)) {
+		for (const tool of params.tools) {
+			if (tool?.cache_control != null) count++;
+		}
+	}
+	return count;
+}
+
+function applyCacheControlToMessage(message: MessageParam, cacheControl: AnthropicCacheControl): boolean {
+	if (typeof message.content === "string") {
+		message.content = [
+			{ type: "text", text: message.content, cache_control: cloneAnthropicCacheControl(cacheControl) },
+		];
+		return true;
+	} else if (Array.isArray(message.content)) {
+		return applyCacheControlToLastBlock(message.content, cacheControl);
+	}
+	return false;
+}
+
 function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?: AnthropicCacheControl): void {
 	if (!cacheControl) return;
-	// `convertAnthropicMessages` appends this neutral pad after a trailing
+
+	const headBreakpoints = countHeadBreakpoints(params);
+	const messageBudget = Math.max(0, ANTHROPIC_MAX_BREAKPOINTS - headBreakpoints);
+	if (messageBudget <= 0 || params.messages.length === 0) return;
+	// `convertAnthropicMessages` appends a neutral `Continue.` pad after a trailing
 	// assistant because Anthropic rejects assistant-prefill endings. It is absent
 	// from the next normal turn, so anchor the rolling window on the preceding
 	// real assistant instead.
@@ -3793,19 +3836,60 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
 	const hasTrailingAssistantPad =
 		trailingMessage?.role === "user" &&
 		trailingMessage.content === "Continue." &&
+		!isConversationalUser(trailingMessage) &&
 		params.messages[trailingIndex - 1]?.role === "assistant";
 	const messageEnd = hasTrailingAssistantPad ? trailingIndex - 1 : trailingIndex;
-	let eligibleMessages = 0;
-	for (let index = messageEnd; index >= 0 && eligibleMessages < 2; index--) {
+
+	// Decimation counts conversational turns, so it reads the provenance marker
+	// `convertAnthropicMessages` records rather than the wire role. A wire `user`
+	// can also be a serialized `developer` message, a tool_result run, or an
+	// interior `Continue.` pad, none of which advance the user turn ordinal.
+	const userIndices: number[] = [];
+	for (let index = 0; index <= messageEnd; index++) {
+		const message = params.messages[index];
+		if (message && message.clear_at !== "next_user_message" && isConversationalUser(message)) {
+			userIndices.push(index);
+		}
+	}
+
+	// Stable historical decimation checkpoint every 15 user turns (15th, 30th, 45th...)
+	const decimationIndices = userIndices.filter((_, ordinal) => (ordinal + 1) % ANTHROPIC_DECIMATION_INTERVAL === 0);
+
+	// Collect eligible trailing candidates (up to 2 messages walking backward from messageEnd).
+	const trailingCandidates: number[] = [];
+	for (let index = messageEnd; index >= 0 && trailingCandidates.length < 2; index--) {
 		const message = params.messages[index];
 		if (!message || message.clear_at === "next_user_message") continue;
-		eligibleMessages++;
-		if (typeof message.content === "string") {
-			message.content = [
-				{ type: "text", text: message.content, cache_control: cloneAnthropicCacheControl(cacheControl) },
-			];
-		} else if (Array.isArray(message.content)) {
-			applyCacheControlToLastBlock(message.content, cacheControl);
+		trailingCandidates.push(index);
+	}
+
+	// Prioritize:
+	// 1. Most recent trailing message
+	// 2. Latest decimation checkpoints (newest first) to maintain stable long-context anchors
+	// 3. Second trailing message
+	const candidateIndices: number[] = [];
+	if (trailingCandidates.length > 0) {
+		candidateIndices.push(trailingCandidates[0]);
+	}
+	for (let i = decimationIndices.length - 1; i >= 0; i--) {
+		if (!candidateIndices.includes(decimationIndices[i])) {
+			candidateIndices.push(decimationIndices[i]);
+		}
+	}
+	for (const index of trailingCandidates) {
+		if (!candidateIndices.includes(index)) {
+			candidateIndices.push(index);
+		}
+	}
+
+	// Count only successful block decorations toward the message budget so an uncacheable
+	// block (such as a thinking-only assistant) does not silently consume a breakpoint.
+	let appliedCount = 0;
+	for (const index of candidateIndices) {
+		if (appliedCount >= messageBudget) break;
+		const message = params.messages[index];
+		if (message && applyCacheControlToMessage(message, cacheControl)) {
+			appliedCount++;
 		}
 	}
 }
@@ -3822,8 +3906,8 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
  * moving message tail, so tail churn re-writes the whole head uncached.
  *
  * Anthropic allows at most 4 cache breakpoints per request. At most one is
- * spent on tools and one on system here, leaving two for the message tail in
- * `applyPromptCaching`.
+ * spent on tools and one on system here, leaving the remaining budget for
+ * the message tail and historical decimation checkpoints in `applyPromptCaching`.
  *
  * The tool array is anchored on both API-key and OAuth paths: the tool definitions
  * sit first in wire order and survive message rewrites, and sibling subagents of
@@ -4217,7 +4301,7 @@ function buildParams(
 		forceDemoteUnsignedThinking && model.compat.replayUnsignedThinking
 			? { ...model, compat: { ...model.compat, replayUnsignedThinking: false } }
 			: model;
-	const { cacheControl } = getCacheControl(model, options?.cacheRetention);
+	const { cacheControl } = getCacheControl(model, options?.cacheRetention, isOAuthToken);
 
 	// Pre-compute system blocks so they occupy the right slot in the serialized body.
 	const shouldInjectClaudeCodeInstruction = isOAuthToken && model.compat.injectClaudeCodeInstruction !== false;
@@ -4687,7 +4771,18 @@ export function convertAnthropicMessages(
 				content = blocks;
 			}
 			if (msg.role === "developer") developerParams.push({ index: params.length, payload });
-			params.push({ role: "user", content });
+			const param: AnthropicMessageParam & ConversationalUserCarrier = { role: "user", content };
+			// Record that this wire `user` came from a real conversational turn, so
+			// prompt-cache decimation can tell it apart from everything else that
+			// serializes as `role: "user"`: a `developer` message, a tool_result run,
+			// a synthetic `Continue.` pad, the stale-tool-result note, and any
+			// agent-authored turn (`synthetic`, or `attribution: "agent"`, which is
+			// what compaction and branch summaries carry).
+			const agentAuthored = msg.synthetic === true || msg.attribution === "agent";
+			if (msg.role === "user" && !agentAuthored && !isSyntheticUser(msg)) {
+				param[kConversationalUser] = true;
+			}
+			params.push(param);
 		} else if (msg.role === "assistant") {
 			const blocks: ContentBlockParam[] = [];
 			const hasSignedThinking = msg.content.some(
