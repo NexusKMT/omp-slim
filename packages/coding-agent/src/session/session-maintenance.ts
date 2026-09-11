@@ -230,6 +230,15 @@ interface ArmedSpeculation {
 	contextTokensAtStart: number;
 }
 
+type CompactionProjectionArgs = {
+	summary: string;
+	shortSummary?: string;
+	tokensBefore: number;
+	firstKeptEntryId: string;
+	preserveData?: Record<string, unknown>;
+	details?: unknown;
+};
+
 /** One background speculative-compaction run and (once resolved) its armed result. */
 interface SpeculationRun {
 	controller: AbortController;
@@ -1805,8 +1814,7 @@ export class SessionMaintenance {
 	 *
 	 * When the branch has grown past the snapshot leaf, the speculation is only
 	 * valid if applying it would still create sufficient headroom under the
-	 * recovery band without net context expansion, and (for handoffs) no subsequent
-	 * assistant or user turn was committed.
+	 * recovery band without net context expansion.
 	 */
 	#armedSpeculationValid(armed: ArmedSpeculation, triggerContextTokens?: number): boolean {
 		const model = this.#model;
@@ -2985,19 +2993,18 @@ export class SessionMaintenance {
 	}
 
 	/**
-	 * Estimated context tokens after a compaction commit: fixed non-message
-	 * overhead + the summary message (with any snapcompact frames re-attached)
-	 * + every message from `firstKeptEntryId` to the branch leaf. Mirrors the
-	 * post-commit context rebuild; persisted as `tokensAfter` on the entry so
-	 * the transcript divider can show the before → after amounts.
+	 * Estimated context tokens after a compaction commit. The projection uses the
+	 * same synthetic compaction boundary and `buildSessionContext` conversion as
+	 * the post-commit rebuild, so message-bearing custom entries and branch
+	 * summaries are counted alongside ordinary messages. The result is persisted
+	 * as `tokensAfter` on the entry so the transcript divider can show the before
+	 * → after amounts.
 	 */
-	#projectCompactedContextTokens(args: {
-		summary: string;
-		shortSummary?: string | undefined;
-		tokensBefore: number;
-		firstKeptEntryId: string;
-		preserveData?: Record<string, unknown> | undefined;
-	}): number {
+	#projectCompactedContextTokens(args: CompactionProjectionArgs): number {
+		return this.#projectCompactionContextTokens(args);
+	}
+
+	#projectCompactionContextTokens(args: CompactionProjectionArgs): number {
 		const archive = snapcompact.getPreservedArchive(args.preserveData);
 		const blocks = archive
 			? snapcompact.historyBlocks(archive, { maxFrameDataBytes: snapcompact.FRAME_DATA_BYTES_BUDGET })
@@ -3006,55 +3013,39 @@ export class SessionMaintenance {
 			shortSummary: args.shortSummary,
 			blocks,
 		});
-		let tokens =
-			computeNonMessageTokens(this.#host.nonMessageTokenSource(), this.#tokenizer) +
-			this.#tokenizer.countMessage(summaryMessage);
-		let inKeptRegion = false;
-		for (const entry of this.#host.sessionManager.getBranch()) {
-			if (entry.id === args.firstKeptEntryId) inKeptRegion = true;
-			if (!inKeptRegion) continue;
-			if (entry.type === "message") tokens += this.#tokenizer.countMessage(entry.message);
-		}
-		return tokens;
-	}
-
-	/**
-	 * Project `tokensAfter` for a notes-backed rollover from the same
-	 * reconstruction the commit will perform — summary, retained
-	 * user-attributed request, kept tail, and the injected notebook — by
-	 * resolving a synthetic pending boundary through `buildSessionContext`. The
-	 * ordinary projector counts only the summary and kept tail, understating
-	 * the boundary by the notebook (up to 16 KiB) plus the retained request.
-	 * Pure projection: the synthetic entry never reaches the journal, and the
-	 * value remains a local estimate, not provider-billed usage.
-	 */
-	#projectExperimentalContextRolloverTokens(args: {
-		summary: string;
-		shortSummary?: string | undefined;
-		tokensBefore: number;
-		firstKeptEntryId: string;
-		preserveData?: Record<string, unknown> | undefined;
-	}): number {
+		const nonMessageTokens = computeNonMessageTokens(this.#host.nonMessageTokenSource(), this.#tokenizer);
 		const branch = this.#host.sessionManager.getBranch();
 		const leaf = branch.at(-1);
-		if (!leaf) return this.#projectCompactedContextTokens(args);
+		if (!leaf) return nonMessageTokens + this.#tokenizer.countMessages(convertToLlm([summaryMessage]));
 		const pending: CompactionEntry = {
 			type: "compaction",
-			id: `${leaf.id}:rollover-tokens-projection`,
+			id: `${leaf.id}:compaction-tokens-projection`,
 			parentId: leaf.id,
 			timestamp: new Date().toISOString(),
 			summary: args.summary,
 			shortSummary: args.shortSummary,
 			firstKeptEntryId: args.firstKeptEntryId,
 			tokensBefore: args.tokensBefore,
-			details: { kind: "experimental-context-rollover", version: 1 },
+			details: args.details,
 			preserveData: args.preserveData,
 		};
 		const rebuilt = buildSessionContext([...branch, pending]);
-		return (
-			computeNonMessageTokens(this.#host.nonMessageTokenSource(), this.#tokenizer) +
-			this.#tokenizer.countMessages(rebuilt.messages)
-		);
+		return nonMessageTokens + this.#tokenizer.countMessages(convertToLlm(rebuilt.messages));
+	}
+
+	/**
+	 * Project `tokensAfter` for a notes-backed rollover from the same
+	 * reconstruction the commit will perform. The rollover details cause
+	 * `buildSessionContext` to retain the user-attributed request and injected
+	 * notebook in addition to the summary and kept tail. Pure projection: the
+	 * synthetic entry never reaches the journal, and the value remains a local
+	 * estimate, not provider-billed usage.
+	 */
+	#projectExperimentalContextRolloverTokens(args: CompactionProjectionArgs): number {
+		return this.#projectCompactionContextTokens({
+			...args,
+			details: { kind: "experimental-context-rollover", version: 1 },
+		});
 	}
 
 	/**

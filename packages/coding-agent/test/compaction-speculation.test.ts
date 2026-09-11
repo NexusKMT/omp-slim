@@ -479,6 +479,39 @@ describe("async speculative compaction", () => {
 		expect(entry?.type === "compaction" ? entry.summary : undefined).toBe("summary 2");
 	});
 
+	it("discards an armed summary when a persisted custom message prevents recovery headroom", async () => {
+		let invocation = 0;
+		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => ({
+			summary: `summary ${++invocation}`,
+			firstKeptEntryId: preparation.firstKeptEntryId,
+			tokensBefore: preparation.tokensBefore,
+			details: {},
+		}));
+		maintenance.maybeStartSpeculativeCompaction(SPECULATION_BAND_START, CONTEXT_WINDOW);
+		await waitForState("armed");
+		expect(compactSpy).toHaveBeenCalledTimes(1);
+
+		// Custom messages participate in the rebuilt model context and can be large
+		// enough to invalidate the stale projection just like an assistant turn.
+		sessionManager.appendCustomMessageEntry(
+			"skill-prompt",
+			"large-custom-token ".repeat(45_000),
+			true,
+			undefined,
+			"user",
+		);
+
+		await maintenance.runAutoCompaction("threshold", false, false, false, {
+			triggerContextTokens: THRESHOLD + 40_000,
+		});
+
+		// The custom-message growth is included in the projection, so stale
+		// speculation is discarded and fresh compaction runs on the new branch.
+		expect(compactSpy).toHaveBeenCalledTimes(2);
+		const entry = sessionManager.getEntries().findLast(item => item.type === "compaction");
+		expect(entry?.type === "compaction" ? entry.summary : undefined).toBe("summary 2");
+	});
+
 	it("discards an armed handoff summary when post-snapshot branch growth prevents recovery headroom", async () => {
 		let handoffInvocation = 0;
 		const generateHandoffDocument = vi.fn(async () => ({
