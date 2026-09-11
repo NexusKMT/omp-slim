@@ -150,6 +150,16 @@ export function describeRetainedTail(messages: readonly Message[]): RetainedTail
 		if (!(isToolResult && previousWasToolResult)) count += 1;
 		previousWasToolResult = isToolResult;
 	}
+	// Mirror the provider's trailing-assistant prefill: a tail ending in a
+	// live assistant turn gains a synthetic trailing user message on the
+	// wire, which stays verbatim too. Without it the scope understates the
+	// retained boundary by one and the summary duplicates the tail head. A
+	// content-less assistant emits no turn (the converter skips it), so no
+	// pad follows it.
+	const last = messages[messages.length - 1];
+	if (last?.role === "assistant" && last.content.length > 0) {
+		count += 1;
+	}
 	return { count, role: first.role === "assistant" ? "assistant" : "user" };
 }
 

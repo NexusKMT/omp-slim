@@ -12,6 +12,7 @@ import { afterEach, describe, expect, test, vi } from "bun:test";
 import {
 	ANTHROPIC_COMPACTION_MIN_CONTEXT_TOKENS,
 	buildAnthropicCompactionInstructions,
+	describeRetainedTail,
 	type CompactionPreparation,
 	compact,
 	createFileOps,
@@ -27,7 +28,7 @@ import {
 } from "@oh-my-pi/pi-agent-core/compaction";
 import * as ai from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Context, Message, Model, SimpleStreamOptions, Usage } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import * as snapcompact from "@oh-my-pi/snapcompact";
@@ -278,6 +279,41 @@ describe("compact() Anthropic native lane", () => {
 				"SCOPE: The conversation's final 3 messages, starting with a assistant message, stay in context verbatim",
 			),
 		).toBe(true);
+	});
+
+	test("describeRetainedTail counts the trailing pad for assistant-final tails", () => {
+		const user = (content: string): Message => ({ role: "user", content, timestamp: 1 });
+		const assistant = (text: string | undefined): Message => ({
+			role: "assistant",
+			content: text === undefined ? [] : [{ type: "text", text }],
+			provider: "anthropic",
+			model: "claude-fable-5",
+			api: "anthropic-messages",
+			usage: ZERO_USAGE,
+			stopReason: "stop",
+			timestamp: 2,
+		});
+
+		// The wire appends a synthetic trailing user message after an
+		// assistant turn, which stays verbatim like the rest of the tail.
+		expect(describeRetainedTail([user("old"), assistant("new")])).toEqual({ count: 3, role: "user" });
+		expect(describeRetainedTail([assistant("only")])).toEqual({ count: 2, role: "assistant" });
+		// No pad without a live final turn — and collapsing still applies.
+		expect(describeRetainedTail([assistant(undefined)])).toEqual({ count: 1, role: "assistant" });
+		expect(describeRetainedTail([])).toBeUndefined();
+		// Consecutive tool results still collapse into one wire message.
+		const toolResult = (id: string): Message => ({
+			role: "toolResult",
+			toolCallId: id,
+			toolName: "read",
+			content: [{ type: "text", text: "bytes" }],
+			isError: false,
+			timestamp: 1,
+		});
+		expect(describeRetainedTail([toolResult("a"), toolResult("b"), user("next")])).toEqual({
+			count: 2,
+			role: "user",
+		});
 	});
 
 	test("leads a follow-up compaction with the previous native summary as its replay payload", async () => {
