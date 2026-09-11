@@ -14,6 +14,7 @@ import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession, AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import { createPersistedSubagentReviverFactory } from "@oh-my-pi/pi-coding-agent/task/persisted-revive";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { IrcBus, type IrcMessage } from "@oh-my-pi/pi-coding-agent/irc/bus";
@@ -691,6 +692,35 @@ describe("persisted subagent revival", () => {
 			await expect(reviver(ref)).rejects.toThrow(/ENOENT/);
 			// Fail closed without minting: the missing path stays missing.
 			expect(await Bun.file(sessionFile).exists()).toBe(false);
+		});
+
+		it("refuses a transcript deleted between open's snapshot read and its adoption", async () => {
+			const cwd = makeTempDir("@pi-revive-stale-read-");
+			const sessionFile = await createPersistedSession(cwd);
+			const ref = createRef(sessionFile);
+			const reviver = await createFactory(cwd)(ref);
+			if (!reviver) throw new Error("Expected a persisted reviver");
+			// Delete the transcript from inside its own snapshot read: open()
+			// has resolved loadSessionFile but has not adopted the snapshot
+			// yet, so the reviver must fail closed on the fresh state instead
+			// of reviving stale history. Single-shot: only the snapshot read
+			// mutates, so the publish-time re-read observes the deletion.
+			const originalReadText = FileSessionStorage.prototype.readText;
+			const readTextSpy = vi.spyOn(FileSessionStorage.prototype, "readText").mockImplementationOnce(async function (
+				this: FileSessionStorage,
+				p: string,
+			) {
+				const text = await originalReadText.call(this, p);
+				await fs.promises.rm(p);
+				return text;
+			});
+			try {
+				await expect(reviver(ref)).rejects.toThrow(/ENOENT/);
+				// Fail closed without minting: the missing path stays missing.
+				expect(await Bun.file(sessionFile).exists()).toBe(false);
+			} finally {
+				readTextSpy.mockRestore();
+			}
 		});
 
 		it("refuses a transcript truncated to header+session_init without rewriting it", async () => {
