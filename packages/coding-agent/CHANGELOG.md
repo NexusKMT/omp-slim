@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Hand-authored `*.openapi.json` files can now be edited without disabling generated-file protection globally ([#11674](https://github.com/can1357/oh-my-pi/issues/11674)).
+
 ## [18.1.17] - 2026-09-10
 
 ### Added
