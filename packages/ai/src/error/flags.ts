@@ -498,7 +498,17 @@ function classifyText(
 		// the else-if) so a timeout whose text also reads as a truncation keeps
 		// Flag.Timeout alongside Flag.Transient. The string arm applies the strict
 		// STREAM_PARSE_DIAGNOSTIC_PATTERN, per the rationale on isTransientStreamParseError.
-		if (isTransientStreamParseError(errorMessage)) kinds |= Flag.Transient;
+		// Skip a truncation phrase that rides on a terminal 4xx (e.g. a malformed
+		// request rejected as "400 unexpected EOF"): that is a deterministic client
+		// error that replays identically, so keep it terminal — mirroring
+		// isProviderRetryableError, which rejects every 4xx except 408/429.
+		const isTerminalClientErrorStatus =
+			statusClean !== undefined &&
+			statusClean >= 400 &&
+			statusClean < 500 &&
+			statusClean !== 408 &&
+			statusClean !== 429;
+		if (!isTerminalClientErrorStatus && isTransientStreamParseError(errorMessage)) kinds |= Flag.Transient;
 		// A concurrency cap (e.g. Vertex "Online prediction concurrent requests
 		// quota exceeded") is transient — shed-and-backoff. The bare wording need
 		// not match TRANSIENT_TRANSPORT_PATTERN, so flag it explicitly to keep
