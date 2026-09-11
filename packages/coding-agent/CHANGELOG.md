@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- The `set_steering_mode`, `set_follow_up_mode`, and `set_interrupt_mode` RPC commands are now session-scoped like `set_thinking_level`, so a short-lived RPC client no longer silently writes queue-mode fields to the machine-global `config.yml` ([#11555](https://github.com/can1357/oh-my-pi/issues/11555)).
+- The `set_steering_mode`, `set_follow_up_mode`, and `set_interrupt_mode` RPC commands are now session-scoped, so a short-lived RPC client no longer silently writes queue-mode fields to the machine-global `config.yml`. The setters still persist by default, so the settings panel and existing callers are unaffected ([#11555](https://github.com/can1357/oh-my-pi/issues/11555)).
 
 ## [18.1.17] - 2026-09-10
 

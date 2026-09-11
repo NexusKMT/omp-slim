@@ -1355,17 +1355,20 @@ export async function runRpcMode(
 			// =================================================================
 
 			case "set_steering_mode": {
-				session.setSteeringMode(command.mode);
+				// RPC callers must not mutate the machine-global config (#11555).
+				session.setSteeringMode(command.mode, false);
 				return success(id, "set_steering_mode");
 			}
 
 			case "set_follow_up_mode": {
-				session.setFollowUpMode(command.mode);
+				// RPC callers must not mutate the machine-global config (#11555).
+				session.setFollowUpMode(command.mode, false);
 				return success(id, "set_follow_up_mode");
 			}
 
 			case "set_interrupt_mode": {
-				session.setInterruptMode(command.mode);
+				// RPC callers must not mutate the machine-global config (#11555).
+				session.setInterruptMode(command.mode, false);
 				return success(id, "set_interrupt_mode");
 			}
 

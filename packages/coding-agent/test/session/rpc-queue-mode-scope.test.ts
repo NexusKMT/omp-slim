@@ -12,9 +12,11 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 /**
- * Regression guard for #11555: RPC queue-mode setters must configure only the
- * calling session by default, never write the machine-global `config.yml` —
- * and never leak into later sessions via the shared Settings singleton.
+ * Regression guard for #11555: the RPC queue-mode path (`persist: false`)
+ * must configure only the calling session — never write the machine-global
+ * `config.yml`, and never leak into later sessions via the shared Settings
+ * singleton. The default (settings panel, existing SDK callers) still
+ * persists.
  */
 describe("AgentSession queue-mode controls are session-scoped by default", () => {
 	let tempDir: TempDir;
@@ -54,10 +56,10 @@ describe("AgentSession queue-mode controls are session-scoped by default", () =>
 		} catch {}
 	});
 
-	it("applies queue-mode changes to the live agent only, without touching Settings", async () => {
-		session.setSteeringMode("all");
-		session.setFollowUpMode("all");
-		session.setInterruptMode("wait");
+	it("applies queue-mode changes to the live agent only when persist=false (RPC path)", async () => {
+		session.setSteeringMode("all", false);
+		session.setFollowUpMode("all", false);
+		session.setInterruptMode("wait", false);
 		await settings.flush();
 
 		expect(session.steeringMode).toBe("all");
@@ -71,9 +73,9 @@ describe("AgentSession queue-mode controls are session-scoped by default", () =>
 	});
 
 	it("does not leak session-scoped queue modes into later sessions sharing the same Settings", () => {
-		session.setSteeringMode("all");
-		session.setFollowUpMode("all");
-		session.setInterruptMode("wait");
+		session.setSteeringMode("all", false);
+		session.setFollowUpMode("all", false);
+		session.setInterruptMode("wait", false);
 
 		// Later SDK sessions initialize their agent from Settings (sdk.ts),
 		// so an untouched Settings means defaults — not the caller's modes.
@@ -98,10 +100,10 @@ describe("AgentSession queue-mode controls are session-scoped by default", () =>
 		expect(session.interruptMode).toBe("wait");
 	});
 
-	it("persists to global config.yml when persist=true (settings panel path)", async () => {
-		session.setSteeringMode("all", true);
-		session.setFollowUpMode("all", true);
-		session.setInterruptMode("wait", true);
+	it("persists to global config.yml by default (settings panel and existing callers)", async () => {
+		session.setSteeringMode("all");
+		session.setFollowUpMode("all");
+		session.setInterruptMode("wait");
 		await settings.flush();
 
 		expect(settings.getGlobalSettings()).toMatchObject({
