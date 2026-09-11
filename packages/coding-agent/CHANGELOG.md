@@ -6,6 +6,10 @@
 
 - Muse Code sessions send a compact hashline edit description (~3 KB less per request); all other models keep the full prompt.
 
+### Fixed
+
+- Searching `free` in the model picker now finds every zero-cost model, not just the ones with `free` in their id.
+
 ## [18.1.11] - 2026-09-05
 
 ### Added
