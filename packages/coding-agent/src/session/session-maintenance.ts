@@ -49,11 +49,18 @@ import {
 	readToolSupersedeKey,
 } from "@oh-my-pi/pi-agent-core/compaction/pruning";
 import type { ProtectedToolMatcher } from "@oh-my-pi/pi-agent-core/compaction/tool-protection";
-import type { AssistantMessage, CodexCompactionContext, Message, Model, ProviderSessionState } from "@oh-my-pi/pi-ai";
+import type {
+	AssistantMessage,
+	CodexCompactionContext,
+	Message,
+	Model,
+	OpenAIResponsesHistoryPayload,
+	ProviderSessionState,
+} from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { isRecord, logger, Snowflake } from "@oh-my-pi/pi-utils";
+import { isRecord, logger, Snowflake, stringifyJson } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import type { ModelRegistry } from "../config/model-registry";
 import { MODEL_ROLE_IDS } from "../config/model-roles";
@@ -237,6 +244,7 @@ type CompactionProjectionArgs = {
 	firstKeptEntryId: string;
 	preserveData?: Record<string, unknown>;
 	details?: unknown;
+	providerReplayThroughEntryId?: string;
 };
 
 /** One background speculative-compaction run and (once resolved) its armed result. */
@@ -1837,7 +1845,12 @@ export class SessionMaintenance {
 			const keptIdx = branch.findIndex(entry => entry.id === armed.result.firstKeptEntryId);
 			if (keptIdx < 0) return false;
 
-			const projected = this.#projectCompactedContextTokens(armed.result);
+			const projected = this.#projectCompactedContextTokens({
+				...armed.result,
+				providerReplayThroughEntryId: isRecord(armed.result.preserveData?.openaiRemoteCompaction)
+					? armed.snapshotLeafId
+					: undefined,
+			});
 			const contextWindow = model.contextWindow ?? 0;
 			if (contextWindow > 0) {
 				const thresholdTokens = resolveThresholdTokens(contextWindow, settings);
@@ -3005,18 +3018,25 @@ export class SessionMaintenance {
 	}
 
 	#projectCompactionContextTokens(args: CompactionProjectionArgs): number {
+		const nonMessageTokens = computeNonMessageTokens(this.#host.nonMessageTokenSource(), this.#tokenizer);
+		const branch = this.#host.sessionManager.getBranch();
+		const leaf = branch.at(-1);
 		const archive = snapcompact.getPreservedArchive(args.preserveData);
 		const blocks = archive
 			? snapcompact.historyBlocks(archive, { maxFrameDataBytes: snapcompact.FRAME_DATA_BYTES_BUDGET })
 			: undefined;
-		const summaryMessage = createCompactionSummaryMessage(args.summary, args.tokensBefore, new Date().toISOString(), {
-			shortSummary: args.shortSummary,
-			blocks,
-		});
-		const nonMessageTokens = computeNonMessageTokens(this.#host.nonMessageTokenSource(), this.#tokenizer);
-		const branch = this.#host.sessionManager.getBranch();
-		const leaf = branch.at(-1);
-		if (!leaf) return nonMessageTokens + this.#tokenizer.countMessages(convertToLlm([summaryMessage]));
+		if (!leaf) {
+			const summaryMessage = createCompactionSummaryMessage(
+				args.summary,
+				args.tokensBefore,
+				new Date().toISOString(),
+				{
+					shortSummary: args.shortSummary,
+					blocks,
+				},
+			);
+			return nonMessageTokens + this.#tokenizer.countMessages(convertToLlm([summaryMessage]));
+		}
 		const pending: CompactionEntry = {
 			type: "compaction",
 			id: `${leaf.id}:compaction-tokens-projection`,
@@ -3028,9 +3048,26 @@ export class SessionMaintenance {
 			tokensBefore: args.tokensBefore,
 			details: args.details,
 			preserveData: args.preserveData,
+			providerReplayThroughEntryId: args.providerReplayThroughEntryId,
 		};
 		const rebuilt = buildSessionContext([...branch, pending]);
-		return nonMessageTokens + this.#tokenizer.countMessages(convertToLlm(rebuilt.messages));
+		const rebuiltMessages = convertToLlm(rebuilt.messages);
+		const providerPayload = getOpenAiRemoteCompactionPayload(pending);
+		if (!providerPayload) return nonMessageTokens + this.#tokenizer.countMessages(rebuiltMessages);
+
+		const summaryMessage = createCompactionSummaryMessage(args.summary, args.tokensBefore, new Date().toISOString(), {
+			shortSummary: args.shortSummary,
+			providerPayload,
+			blocks,
+		});
+		const summaryTokens = this.#tokenizer.countMessages(convertToLlm([summaryMessage]));
+		const nativeHistoryTokens = this.#countOpenAiNativeHistoryTokens(providerPayload);
+		return nonMessageTokens + this.#tokenizer.countMessages(rebuiltMessages) - summaryTokens + nativeHistoryTokens;
+	}
+
+	#countOpenAiNativeHistoryTokens(providerPayload: OpenAIResponsesHistoryPayload): number {
+		const serialized = stringifyJson(providerPayload.items);
+		return serialized === undefined ? 0 : this.#tokenizer.countTokens(serialized);
 	}
 
 	/**

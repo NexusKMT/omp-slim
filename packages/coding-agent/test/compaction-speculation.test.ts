@@ -320,6 +320,48 @@ describe("async speculative compaction", () => {
 		);
 	});
 
+	it("discards stale remote speculation when native replacement history exceeds recovery headroom", async () => {
+		const bundled = getBundledModel("openai", "gpt-5");
+		if (!bundled) throw new Error("Expected built-in OpenAI model");
+		model = { ...bundled, contextWindow: CONTEXT_WINDOW };
+		authStorage.setRuntimeApiKey("openai", "test-key");
+		maintenance = createMaintenance({ methodOrder: ["remote"] });
+		let invocation = 0;
+		const nativeCompactionItem = {
+			type: "compaction",
+			encrypted_content: "native-history-token ".repeat(45_000),
+		};
+		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => ({
+			summary: `remote summary ${++invocation}`,
+			firstKeptEntryId: preparation.firstKeptEntryId,
+			tokensBefore: preparation.tokensBefore,
+			details: {},
+			...(invocation === 1
+				? {
+						preserveData: {
+							openaiRemoteCompaction: {
+								provider: model.provider,
+								replacementHistory: [nativeCompactionItem],
+								compactionItem: nativeCompactionItem,
+							},
+						},
+					}
+				: {}),
+		}));
+
+		maintenance.maybeStartSpeculativeCompaction(SPECULATION_BAND_START, CONTEXT_WINDOW);
+		await waitForState("armed");
+		sessionManager.appendMessage(userMessage("post-snapshot request"));
+
+		await maintenance.runAutoCompaction("threshold", false, false, false, {
+			triggerContextTokens: THRESHOLD + 1_000,
+		});
+
+		expect(compactSpy).toHaveBeenCalledTimes(2);
+		const entry = sessionManager.getEntries().findLast(item => item.type === "compaction");
+		expect(entry?.type === "compaction" ? entry.summary : undefined).toBe("remote summary 2");
+	});
+
 	it("discards an armed summary after a reset boundary and re-summarizes the new branch", async () => {
 		let invocation = 0;
 		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => ({
