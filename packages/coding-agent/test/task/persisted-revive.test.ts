@@ -669,7 +669,10 @@ describe("persisted subagent revival", () => {
 			return parsed.type;
 		}
 
-		async function entriesOfType(sessionFile: string, keep: (type: string | undefined) => boolean): Promise<string[]> {
+		async function entriesOfType(
+			sessionFile: string,
+			keep: (type: string | undefined) => boolean,
+		): Promise<string[]> {
 			return (await Bun.file(sessionFile).text())
 				.split("\n")
 				.filter(line => line.trim().length > 0 && keep(entryType(line)));
