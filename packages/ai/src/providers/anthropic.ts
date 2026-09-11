@@ -1789,12 +1789,19 @@ export function supportsAnthropicCompaction(model: Model<"anthropic-messages">, 
 	if (!isCompactionCapableModel(model)) return false;
 	if (model.remoteCompaction?.enabled === true) return true;
 	// First-party provider is catalog policy (`first-party-provider` on the
-	// provider rules), never a provider-id literal: aliases and routing
-	// changes stay in KDL. The effective URL is still checked per request
-	// because a reroute leaves the resolved compat stale-true. This reads its
-	// own axis rather than `officialEndpoint`, which stays URL-derived: a
-	// custom `baseUrl` on this provider must keep `officialEndpoint: false`
-	// (SDK `X-Api-Key` suppression and friends read that flag).
+	// provider rules), never a provider-id literal. It reads its own axis
+	// rather than `officialEndpoint`, which stays URL-derived.
+	// A `transport: "pi-native"` baseUrl names the auth gateway, not the
+	// upstream model server: the gateway resolves official Anthropic
+	// server-side, so the upstream URL check cannot apply to the model's own
+	// transport URL. An explicitly supplied foreign endpoint (e.g. a
+	// caller-owned client's URL) is still judged on its own merits below.
+	if (
+		model.transport === "pi-native" &&
+		(effectiveBaseUrl === undefined || effectiveBaseUrl === normalizeAnthropicBaseUrl(model.baseUrl))
+	) {
+		return true;
+	}
 	return (
 		model.compat.firstPartyProvider === true &&
 		(effectiveBaseUrl === undefined

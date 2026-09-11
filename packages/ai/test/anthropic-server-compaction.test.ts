@@ -15,11 +15,15 @@
  *     endpoints without context management keep the text.
  *   • The empty-completion retry does not re-issue a compaction pause.
  */
-import { afterEach, describe, expect, it, vi } from "bun:test";
-import { convertAnthropicMessages, streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
+import {
+	convertAnthropicMessages,
+	streamAnthropic,
+	supportsAnthropicCompaction,
+} from "@oh-my-pi/pi-ai/providers/anthropic";
 import { AnthropicMessages } from "@oh-my-pi/pi-ai/providers/anthropic-client";
 import { configureCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import type { AssistantMessage, Context, Model, ModelSpec, UserMessage } from "@oh-my-pi/pi-ai/types";
+import { kConversationalUser } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { withEnv, withOfficialAnthropicEndpoint } from "./helpers";
 
@@ -279,6 +283,25 @@ describe("anthropic server-side compaction request", () => {
 		expect(payload.context_management).toBeUndefined();
 		expect(beta).not.toContain("compact-2026-01-12");
 	});
+
+	it("treats pi-native gateways as transports, not upstream endpoints", () => {
+		// A pi-native baseUrl names the auth gateway; the gateway resolves
+		// official Anthropic server-side, so no opt-in is needed. An
+		// explicitly supplied foreign endpoint is still judged on its merits.
+		const gateway = buildModel({
+			...fableSpec,
+			transport: "pi-native",
+			baseUrl: "https://gateway.example.test",
+		});
+		expect(supportsAnthropicCompaction(gateway)).toBe(true);
+		expect(
+			supportsAnthropicCompaction(
+				gateway,
+				"https://us-east5-aiplatform.googleapis.com/v1/projects/p/locations/us-east5/publishers/anthropic/models/claude-fable-5:rawPredict",
+			),
+		).toBe(false);
+	});
+
 	/**
 	 * Runs one request on a caller-owned client (its `baseURL` is the endpoint
 	 * the SDK would target) and returns the params and per-request headers.
@@ -606,7 +629,7 @@ describe("anthropic server-side compaction replay", () => {
 
 		expect(params).toEqual([
 			{ role: "assistant", content: [{ type: "compaction", content: SUMMARY }] },
-			{ role: "user", content: "next" },
+			{ role: "user", content: "next", [kConversationalUser]: true },
 		]);
 	});
 
@@ -646,7 +669,7 @@ describe("anthropic server-side compaction replay", () => {
 		expect(params).toEqual([
 			{ role: "assistant", content: [{ type: "compaction", content: SUMMARY, encrypted_content: ENCRYPTED }] },
 			{ role: "user", content: filesText },
-			{ role: "user", content: "next" },
+			{ role: "user", content: "next", [kConversationalUser]: true },
 		]);
 	});
 
@@ -697,7 +720,7 @@ describe("anthropic server-side compaction replay", () => {
 				],
 			},
 			{ role: "user", content: filesText },
-			{ role: "user", content: "next" },
+			{ role: "user", content: "next", [kConversationalUser]: true },
 		]);
 	});
 
@@ -827,7 +850,11 @@ describe("anthropic server-side compaction replay", () => {
 				role: "assistant",
 				content: [{ type: "compaction", content: SUMMARY, cache_control: { type: "ephemeral" } }],
 			},
-			{ role: "user", content: [{ type: "text", text: "next", cache_control: { type: "ephemeral" } }] },
+			{
+				role: "user",
+				content: [{ type: "text", text: "next", cache_control: { type: "ephemeral" } }],
+				[kConversationalUser]: true,
+			},
 		]);
 
 		const proxy = await captureRequest(noContextManagementModel, { thinkingEnabled: false }, [
@@ -896,7 +923,7 @@ describe("anthropic server-side compaction replay", () => {
 					{ type: "text", text: "Reading chunk 11 now." },
 				],
 			},
-			{ role: "user", content: "next" },
+			{ role: "user", content: "next", [kConversationalUser]: true },
 		]);
 	});
 });
