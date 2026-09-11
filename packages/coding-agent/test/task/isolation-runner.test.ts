@@ -577,7 +577,12 @@ describe("runIsolatedSubprocess", () => {
 		let calls = 0;
 		vi.spyOn(Bun, "write").mockImplementation(async (destination: unknown, content: unknown) => {
 			calls += 1;
-			if (calls === 2) throw new Error("ENOSPC");
+			if (calls === 2) {
+				// Simulate a mid-write failure (ENOSPC, quota): the destination
+				// exists but holds truncated content when the write rejects.
+				await originalWrite(destination as string, "truncated-partial");
+				throw new Error("ENOSPC");
+			}
 			return originalWrite(destination as string, content as string | Blob);
 		});
 

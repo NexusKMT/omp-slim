@@ -206,8 +206,10 @@ export interface IsolatedRunOptions {
  * Write each nested-repo patch to `${artifactsDir}/${agentId}.nested-<n>-<path>.patch`
  * and return the paths. Throws on the first write failure: the caller must
  * then keep the isolation workspace alive, because it is the only other copy.
- * Partial files from earlier in the same batch are removed best-effort so a
- * half-written set cannot be mistaken for the complete capture.
+ * Every attempted destination is removed best-effort on failure — including
+ * the in-progress file, which `Bun.write` may have created or truncated
+ * before rejecting — so a half-written set cannot be mistaken for the
+ * complete capture by the persisted-agent scanner.
  */
 export async function persistNestedPatches(
 	artifactsDir: string,
@@ -221,8 +223,11 @@ export async function persistNestedPatches(
 				artifactsDir,
 				`${agentId}.nested-${index}-${nestedPatch.relativePath.replace(/[^a-zA-Z0-9._-]/g, "_") || "root"}.patch`,
 			);
-			await Bun.write(destination, nestedPatch.patch);
+			// Track before writing: a mid-write failure (ENOSPC, quota) can
+			// leave a truncated file behind, and `force: true` makes removing
+			// a never-created path a no-op.
 			saved.push(destination);
+			await Bun.write(destination, nestedPatch.patch);
 		}
 	} catch (error) {
 		await Promise.all(saved.map(file => fs.rm(file, { force: true }).catch(() => undefined)));
