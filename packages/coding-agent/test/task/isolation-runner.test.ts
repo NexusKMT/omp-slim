@@ -568,6 +568,7 @@ describe("runIsolatedSubprocess", () => {
 
 		expect(outcome.error).toContain("Patch capture failed");
 		expect(outcome.error).toContain("Isolation workspace retained at /repo/isolated");
+		expect(outcome.error).not.toContain("mount metadata");
 		expect(outcome.nestedPatchPaths).toBeUndefined();
 		expect(cleanupSpy).not.toHaveBeenCalled();
 	});
@@ -613,15 +614,16 @@ describe("retainIsolationWorkspace", () => {
 		await fs.mkdir(isolationDir, { recursive: true });
 		await Bun.write(path.join(isolationDir, "work.txt"), "unrecovered");
 
-		const retainedDir = await retainIsolationWorkspace(isolationDir, natives.IsoBackendKind.Overlayfs);
+		const retained = await retainIsolationWorkspace(isolationDir, natives.IsoBackendKind.Overlayfs);
 
-		expect(retainedDir).not.toBe(isolationDir);
-		expect(path.dirname(retainedDir)).toContain(".retained-");
-		expect(await Bun.file(path.join(retainedDir, "work.txt")).text()).toBe("unrecovered");
+		expect(retained).toEqual({ dir: expect.any(String), sidecarOk: true });
+		expect(retained.dir).not.toBe(isolationDir);
+		expect(path.dirname(retained.dir)).toContain(".retained-");
+		expect(await Bun.file(path.join(retained.dir, "work.txt")).text()).toBe("unrecovered");
 		expect(await Bun.file(baseDir).exists()).toBe(false);
-		const sidecar = await Bun.file(path.join(path.dirname(retainedDir), RETAINED_BACKEND_FILE)).json();
+		const sidecar = await Bun.file(path.join(path.dirname(retained.dir), RETAINED_BACKEND_FILE)).json();
 		expect(sidecar.backend).toBe(natives.IsoBackendKind.Overlayfs);
-		tempRoots.push(path.dirname(retainedDir));
+		tempRoots.push(path.dirname(retained.dir));
 	});
 
 	it("records no sidecar for copy backends that need no unmount", async () => {
@@ -630,10 +632,11 @@ describe("retainIsolationWorkspace", () => {
 		const isolationDir = path.join(parent, "wt_abc123", "m");
 		await fs.mkdir(isolationDir, { recursive: true });
 
-		const retainedDir = await retainIsolationWorkspace(isolationDir, natives.IsoBackendKind.Rcopy);
+		const retained = await retainIsolationWorkspace(isolationDir, natives.IsoBackendKind.Rcopy);
 
-		expect(await Bun.file(path.join(path.dirname(retainedDir), RETAINED_BACKEND_FILE)).exists()).toBe(false);
-		tempRoots.push(path.dirname(retainedDir));
+		expect(retained.sidecarOk).toBe(true);
+		expect(await Bun.file(path.join(path.dirname(retained.dir), RETAINED_BACKEND_FILE)).exists()).toBe(false);
+		tempRoots.push(path.dirname(retained.dir));
 	});
 
 	it("reports the original dir when the move fails", async () => {
@@ -642,8 +645,32 @@ describe("retainIsolationWorkspace", () => {
 		const missingParent = path.join(os.tmpdir(), `omp-isolation-retain-missing-${Date.now()}`);
 		const isolationDir = path.join(missingParent, "wt_abc123", "m");
 
-		await expect(retainIsolationWorkspace(isolationDir)).resolves.toBe(isolationDir);
+		await expect(retainIsolationWorkspace(isolationDir)).resolves.toEqual({
+			dir: isolationDir,
+			sidecarOk: true,
+		});
 		await expect(fs.stat(missingParent)).rejects.toThrow();
+	});
+
+	it("reports missing metadata when the sidecar cannot be written", async () => {
+		const parent = await fs.mkdtemp(path.join(os.tmpdir(), "omp-isolation-retain-sidecar-"));
+		tempRoots.push(parent);
+		const isolationDir = path.join(parent, "wt_abc123", "m");
+		await fs.mkdir(isolationDir, { recursive: true });
+		await Bun.write(path.join(isolationDir, "work.txt"), "unrecovered");
+		const originalWrite = Bun.write.bind(Bun);
+		vi.spyOn(Bun, "write").mockImplementation(async (destination: unknown, content: unknown) => {
+			if (typeof destination === "string" && destination.endsWith(RETAINED_BACKEND_FILE)) {
+				throw new Error("ENOSPC");
+			}
+			return originalWrite(destination as string, content as string | Blob);
+		});
+
+		const retained = await retainIsolationWorkspace(isolationDir, natives.IsoBackendKind.Overlayfs);
+
+		expect(retained.sidecarOk).toBe(false);
+		expect(await Bun.file(path.join(retained.dir, "work.txt")).text()).toBe("unrecovered");
+		tempRoots.push(path.dirname(retained.dir));
 	});
 });
 

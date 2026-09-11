@@ -272,18 +272,31 @@ async function writeIsolationPatch(
  * (`repoRoot` + agent id) slot into a globally unique sibling, so a later
  * isolated run with the same id cannot wipe it: `ensureIsolation`
  * unconditionally removes the deterministic base dir before writing its
- * owner marker. Returns the workspace path to report (the sibling on
- * success, the original dir when the move fails). The owner marker and `m`
- * mount move along, so `omp worktree clear` still classifies and reclaims it.
- * Mounting backends record a sidecar so cleanup unmounts before recursive
- * removal instead of traversing — and failing on — the live mount.
+ * owner marker. The owner marker and `m` mount move along, so
+ * `omp worktree clear` still classifies and reclaims it. Mounting backends
+ * record a sidecar so cleanup unmounts before recursive removal instead of
+ * traversing — and failing on — the live mount.
  */
+export interface RetainedWorkspace {
+	/** Workspace path to report (unique sibling on success, original dir when the move fails). */
+	dir: string;
+	/**
+	 * False when cleanup metadata is missing that `clear` would need: the
+	 * move failed, or a mounting backend's sidecar could not be written
+	 * (plausible under the same disk pressure that forced retention). The
+	 * error must then say the mount needs a manual unmount instead of
+	 * advertising plain `worktree clear`.
+	 */
+	sidecarOk: boolean;
+}
+
 export async function retainIsolationWorkspace(
 	isolationDir: string,
 	backend?: natives.IsoBackendKind,
-): Promise<string> {
+): Promise<RetainedWorkspace> {
 	const baseDir = path.dirname(isolationDir);
 	const retainedBase = `${baseDir}.retained-${Date.now().toString(36)}-${Math.floor(Math.random() * 2 ** 32).toString(16)}`;
+	const needsSidecar = backend !== undefined && isMountingIsolationBackend(backend);
 	// A valid move can still fail transiently (Windows AV/indexer locks);
 	// retry briefly before conceding the deterministic slot.
 	for (let attempt = 0; attempt < 3; attempt++) {
@@ -291,18 +304,18 @@ export async function retainIsolationWorkspace(
 			await fs.rename(baseDir, retainedBase);
 			break;
 		} catch {
-			if (attempt === 2) return isolationDir;
+			if (attempt === 2) return { dir: isolationDir, sidecarOk: !needsSidecar };
 			await Bun.sleep(25);
 		}
 	}
-	if (backend !== undefined && isMountingIsolationBackend(backend)) {
-		// Best-effort: retention stays valid without it (cleanup falls back
-		// to plain recursive removal, as before).
+	if (needsSidecar && backend !== undefined) {
 		try {
 			await writeRetainedBackend(retainedBase, backend);
-		} catch {}
+		} catch {
+			return { dir: path.join(retainedBase, path.basename(isolationDir)), sidecarOk: false };
+		}
 	}
-	return path.join(retainedBase, path.basename(isolationDir));
+	return { dir: path.join(retainedBase, path.basename(isolationDir)), sidecarOk: true };
 }
 /** Context for `isolation-error.md`: the `result.error` text for a run whose changes could not be captured or landed. */
 interface IsolationErrorContext {
@@ -312,6 +325,12 @@ interface IsolationErrorContext {
 	rescueBranch?: string;
 	/** Set when the workspace was kept because its changes could not be written out. */
 	retainedDir?: string;
+	/**
+	 * Set when the retained mount's unmount metadata is missing: cleanup
+	 * cannot unmount before removal, so the message must direct a manual
+	 * unmount instead of advertising plain `worktree clear`.
+	 */
+	sidecarMissing?: boolean;
 }
 
 function renderIsolationError(context: IsolationErrorContext): string {
@@ -407,7 +426,7 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 					});
 				} catch (patchErr) {
 					retainWorkspace = true;
-					const retainedDir = await retainIsolationWorkspace(isolationDir, isolationBackend);
+					const retained = await retainIsolationWorkspace(isolationDir, isolationBackend);
 					return rememberAgentArtifacts({
 						...result,
 						error: renderIsolationError({
@@ -415,7 +434,8 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 							message: msg,
 							captureError: patchErr instanceof Error ? patchErr.message : String(patchErr),
 							rescueBranch,
-							retainedDir,
+							retainedDir: retained.dir,
+							sidecarMissing: !retained.sidecarOk,
 						}),
 					});
 				}
@@ -437,7 +457,7 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 				});
 			} catch (persistErr) {
 				retainWorkspace = true;
-				const retainedDir = await retainIsolationWorkspace(isolationDir, isolationBackend);
+				const retained = await retainIsolationWorkspace(isolationDir, isolationBackend);
 				return rememberAgentArtifacts({
 					...result,
 					branchName: commitResult?.branchName,
@@ -446,7 +466,8 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 					error: renderIsolationError({
 						kind: "nested-capture-failed",
 						message: persistErr instanceof Error ? persistErr.message : String(persistErr),
-						retainedDir,
+						retainedDir: retained.dir,
+						sidecarMissing: !retained.sidecarOk,
 					}),
 				});
 			}
@@ -457,13 +478,14 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 				return rememberAgentArtifacts({ ...result, ...patchResult });
 			} catch (patchErr) {
 				retainWorkspace = true;
-				const retainedDir = await retainIsolationWorkspace(isolationDir, isolationBackend);
+				const retained = await retainIsolationWorkspace(isolationDir, isolationBackend);
 				return rememberAgentArtifacts({
 					...result,
 					error: renderIsolationError({
 						kind: "patch-capture-failed",
 						message: patchErr instanceof Error ? patchErr.message : String(patchErr),
-						retainedDir,
+						retainedDir: retained.dir,
+						sidecarMissing: !retained.sidecarOk,
 					}),
 				});
 			}
