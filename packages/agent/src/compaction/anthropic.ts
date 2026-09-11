@@ -131,10 +131,16 @@ export function getAnthropicCompactionPayload(
  * summarizer never sees the tail, and the rebuilt context replays it after the
  * summary. Counting mirrors the provider's message conversion (consecutive
  * tool results collapse into one user message; developer messages are user
- * messages), and the description quotes no content: quoting the tail would
- * hand the summarizer the very facts it must leave to the tail.
+ * messages). Structured for the prompt template, which renders the
+ * singular/plural wording; the description quotes no content: quoting the
+ * tail would hand the summarizer the very facts it must leave to the tail.
  */
-export function describeRetainedTail(messages: readonly Message[]): string | undefined {
+export interface RetainedTailScope {
+	count: number;
+	role: "assistant" | "user";
+}
+
+export function describeRetainedTail(messages: readonly Message[]): RetainedTailScope | undefined {
 	const first = messages[0];
 	if (!first) return undefined;
 	let count = 0;
@@ -144,10 +150,7 @@ export function describeRetainedTail(messages: readonly Message[]): string | und
 		if (!(isToolResult && previousWasToolResult)) count += 1;
 		previousWasToolResult = isToolResult;
 	}
-	const role = first.role === "assistant" ? "assistant" : "user";
-	return count === 1
-		? `final ${role} message stays`
-		: `final ${count} messages, starting with a ${role} message, stay`;
+	return { count, role: first.role === "assistant" ? "assistant" : "user" };
 }
 
 /**
@@ -163,7 +166,7 @@ export function buildAnthropicCompactionInstructions(
 	basePrompt: string,
 	customInstructions: string | undefined,
 	extraContext: string | undefined,
-	retainedTail: string | undefined,
+	retainedTail: RetainedTailScope | undefined,
 ): string {
 	return prompt.render(anthropicCompactionInstructionsPrompt, {
 		basePrompt,

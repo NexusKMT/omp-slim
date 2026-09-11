@@ -11,6 +11,7 @@
 import { afterEach, describe, expect, test, vi } from "bun:test";
 import {
 	ANTHROPIC_COMPACTION_MIN_CONTEXT_TOKENS,
+	buildAnthropicCompactionInstructions,
 	type CompactionPreparation,
 	compact,
 	createFileOps,
@@ -259,6 +260,24 @@ describe("compact() Anthropic native lane", () => {
 			encryptedContent: "enc_state_1",
 			filesText: "<files>\n# /repo/src/\nhandlers.ts (Read)\n</files>",
 		});
+	});
+
+	test("renders the retained-tail scope singular and plural from structured scope", () => {
+		const singular = buildAnthropicCompactionInstructions("BASE", undefined, undefined, {
+			count: 1,
+			role: "user",
+		});
+		expect(singular.startsWith("SCOPE: The conversation's final user message stays in context verbatim")).toBe(true);
+
+		const plural = buildAnthropicCompactionInstructions("BASE", undefined, undefined, {
+			count: 3,
+			role: "assistant",
+		});
+		expect(
+			plural.startsWith(
+				"SCOPE: The conversation's final 3 messages, starting with a assistant message, stay in context verbatim",
+			),
+		).toBe(true);
 	});
 
 	test("leads a follow-up compaction with the previous native summary as its replay payload", async () => {
