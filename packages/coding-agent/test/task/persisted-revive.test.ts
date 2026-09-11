@@ -178,27 +178,45 @@ describe("persisted subagent revival", () => {
 	});
 
 	it("anchors wake-turn artifacts to the revived ref's own dir, not the root session's (#11563)", async () => {
+		AgentRegistry.resetGlobalForTests();
 		const cwd = makeTempDir("@pi-revive-artifacts-dir-");
 		const sessionFile = await createPersistedSession(cwd);
 		MCPManager.setInstance({ getTools: () => [] } as unknown as MCPManager);
+		// Run the real wake monitor (call through) so the assertion is tied to the
+		// component that actually writes <id>.md, not a stubbed seam.
+		const realAttach = executorModule.attachIrcWakeTurnMonitor;
 		let capturedArtifactsDir: string | undefined;
-		const attachSpy = vi.spyOn(executorModule, "attachIrcWakeTurnMonitor").mockImplementation((_session, options) => {
+		const attachSpy = vi.spyOn(executorModule, "attachIrcWakeTurnMonitor").mockImplementation((session, options) => {
 			capturedArtifactsDir = options.artifactsDir;
+			return realAttach(session, options);
 		});
-		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(
-			async () => ({ session: createRevivedSession([]).session }) as CreateAgentSessionResult,
-		);
+		let handle: RevivedSessionHandle | undefined;
+		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async () => {
+			handle = createRevivedSession([]);
+			return { session: handle.session } as CreateAgentSessionResult;
+		});
 
 		const ref = createRef(sessionFile);
+		AgentRegistry.global().register({
+			id: ref.id,
+			displayName: ref.displayName,
+			kind: "sub",
+			session: null,
+			sessionFile,
+			status: "parked",
+		});
 		const reviver = await createFactory(cwd)(ref);
 		if (!reviver) throw new Error("Expected a persisted reviver");
 		await reviver(ref);
 
+		// The real monitor ran and installed its observer...
 		expect(attachSpy).toHaveBeenCalledTimes(1);
-		// Artifacts must land under the revived ref's own tree (dirname of its
-		// session file), not the live root/parent session's dir.
+		expect(handle?.observer()).toBeDefined();
+		// ...anchored to the revived ref's own tree (dirname of its session file),
+		// which is where finalizeRunResult writes <id>.md, not the live root dir.
 		expect(capturedArtifactsDir).toBe(path.dirname(sessionFile));
 		expect(capturedArtifactsDir).not.toBe(path.join(cwd, "parent"));
+		AgentRegistry.resetGlobalForTests();
 	});
 
 	it("cold-revives a restricted contract without loading hostile same-name capabilities", async () => {
