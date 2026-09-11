@@ -18,6 +18,7 @@
  * Step 1 happens once per top-level call (the baseline is cloned per spawn
  * before mutation); steps 2 and 3 are per-spawn.
  */
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type * as natives from "@oh-my-pi/pi-natives";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
@@ -55,7 +56,9 @@ export type IsolationSummaryKind =
 	| "capture-error"
 	| "nested-apply-failed"
 	| "not-applied"
-	| "branch-merge-failed";
+	| "branch-merge-failed"
+	| "branch-capture-failed"
+	| "merge-error";
 
 /** Context for `isolation-summary.md`; unused fields are simply absent. */
 export interface IsolationSummaryContext {
@@ -203,6 +206,8 @@ export interface IsolatedRunOptions {
  * Write each nested-repo patch to `${artifactsDir}/${agentId}.nested-<n>-<path>.patch`
  * and return the paths. Throws on the first write failure: the caller must
  * then keep the isolation workspace alive, because it is the only other copy.
+ * Partial files from earlier in the same batch are removed best-effort so a
+ * half-written set cannot be mistaken for the complete capture.
  */
 export async function persistNestedPatches(
 	artifactsDir: string,
@@ -210,13 +215,18 @@ export async function persistNestedPatches(
 	nestedPatches: readonly NestedRepoPatch[],
 ): Promise<string[]> {
 	const saved: string[] = [];
-	for (const [index, nestedPatch] of nestedPatches.entries()) {
-		const destination = path.join(
-			artifactsDir,
-			`${agentId}.nested-${index}-${nestedPatch.relativePath.replace(/[^a-zA-Z0-9._-]/g, "_") || "root"}.patch`,
-		);
-		await Bun.write(destination, nestedPatch.patch);
-		saved.push(destination);
+	try {
+		for (const [index, nestedPatch] of nestedPatches.entries()) {
+			const destination = path.join(
+				artifactsDir,
+				`${agentId}.nested-${index}-${nestedPatch.relativePath.replace(/[^a-zA-Z0-9._-]/g, "_") || "root"}.patch`,
+			);
+			await Bun.write(destination, nestedPatch.patch);
+			saved.push(destination);
+		}
+	} catch (error) {
+		await Promise.all(saved.map(file => fs.rm(file, { force: true }).catch(() => undefined)));
+		throw error;
 	}
 	return saved;
 }
@@ -466,9 +476,13 @@ export async function mergeIsolatedChanges(opts: IsolationMergeOptions): Promise
 	try {
 		if (mergeMode === "branch") {
 			if (!result.branchName && result.exitCode === 0 && !result.aborted && result.error) {
-				const patchList = result.patchPath ? `\nPatch artifact:\n- ${result.patchPath}` : "";
 				return {
-					summary: `\n\n<system-notification>Branch merge failed while capturing the task branch: ${result.error}\nTask outputs are preserved but changes were not applied.${patchList}</system-notification>`,
+					summary: renderIsolationSummary({
+						kind: "branch-capture-failed",
+						error: result.error,
+						rootPatchPath: result.patchPath,
+						nestedPatchPaths: result.nestedPatchPaths,
+					}),
 					changesApplied: false,
 					hadAnyChanges: false,
 					mergedBranchForNestedPatches: false,
@@ -583,9 +597,13 @@ export async function mergeIsolatedChanges(opts: IsolationMergeOptions): Promise
 		}
 		return { summary, changesApplied, hadAnyChanges, mergedBranchForNestedPatches: false };
 	} catch (mergeErr) {
-		const msg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
 		return {
-			summary: `\n\n<system-notification>Merge phase failed: ${msg}\nTask outputs are preserved but changes were not applied.</system-notification>`,
+			summary: renderIsolationSummary({
+				kind: "merge-error",
+				error: mergeErr instanceof Error ? mergeErr.message : String(mergeErr),
+				rootPatchPath: result.patchPath,
+				nestedPatchPaths: result.nestedPatchPaths,
+			}),
 			changesApplied: false,
 			hadAnyChanges: false,
 			mergedBranchForNestedPatches: false,

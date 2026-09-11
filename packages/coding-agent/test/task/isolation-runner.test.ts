@@ -8,6 +8,7 @@ import * as executorModule from "@oh-my-pi/pi-coding-agent/task/executor";
 import {
 	applyEligibleNestedPatches,
 	mergeIsolatedChanges,
+	persistNestedPatches,
 	runIsolatedSubprocess,
 } from "@oh-my-pi/pi-coding-agent/task/isolation-runner";
 import type { SingleResult } from "@oh-my-pi/pi-coding-agent/task/types";
@@ -568,6 +569,27 @@ describe("runIsolatedSubprocess", () => {
 		expect(outcome.nestedPatchPaths).toBeUndefined();
 		expect(cleanupSpy).not.toHaveBeenCalled();
 	});
+
+	it("removes partial nested patches when a later write fails", async () => {
+		const artifactsDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-isolation-partial-"));
+		tempRoots.push(artifactsDir);
+		const originalWrite = Bun.write.bind(Bun);
+		let calls = 0;
+		vi.spyOn(Bun, "write").mockImplementation(async (destination: unknown, content: unknown) => {
+			calls += 1;
+			if (calls === 2) throw new Error("ENOSPC");
+			return originalWrite(destination as string, content as string | Blob);
+		});
+
+		await expect(
+			persistNestedPatches(artifactsDir, "Partial", [
+				{ relativePath: "a", patch: "diff --git a/a b/a\n" },
+				{ relativePath: "b", patch: "diff --git a/b b/b\n" },
+			]),
+		).rejects.toThrow("ENOSPC");
+		expect(await Bun.file(path.join(artifactsDir, "Partial.nested-0-a.patch")).exists()).toBe(false);
+		expect(await Bun.file(path.join(artifactsDir, "Partial.nested-1-b.patch")).exists()).toBe(false);
+	});
 });
 
 describe("mergeIsolatedChanges", () => {
@@ -603,6 +625,7 @@ describe("mergeIsolatedChanges", () => {
 			result: result({
 				error: "Merge failed: git apply --3way failed for task dirty-context: conflict",
 				patchPath: "/repo/artifacts/dirty-context.patch",
+				nestedPatchPaths: ["/repo/artifacts/dirty-context.nested-0-inner.patch"],
 			}),
 		});
 
@@ -613,7 +636,27 @@ describe("mergeIsolatedChanges", () => {
 		expect(outcome.summary).toContain("Branch merge failed while capturing the task branch");
 		expect(outcome.summary).toContain("git apply --3way failed");
 		expect(outcome.summary).toContain("/repo/artifacts/dirty-context.patch");
+		expect(outcome.summary).toContain("/repo/artifacts/dirty-context.nested-0-inner.patch");
 		expect(outcome.summary).not.toContain("No changes to apply");
+	});
+
+	it("lists captured artifacts when the merge phase throws", async () => {
+		vi.spyOn(vcs, "requireGit").mockReturnValue({} as natives.VcsGitRepo);
+		vi.spyOn(worktreeModule, "mergeTaskBranches").mockRejectedValue(new Error("EACCES"));
+		const outcome = await mergeIsolatedChanges({
+			repoRoot: "/repo",
+			mergeMode: "branch",
+			result: result({
+				branchName: "omp/task/Throwing",
+				patchPath: "/repo/artifacts/task.patch",
+				nestedPatchPaths: ["/repo/artifacts/task.nested-0-inner.patch"],
+			}),
+		});
+
+		expect(outcome.changesApplied).toBe(false);
+		expect(outcome.summary).toContain("Merge phase failed");
+		expect(outcome.summary).toContain("/repo/artifacts/task.patch");
+		expect(outcome.summary).toContain("/repo/artifacts/task.nested-0-inner.patch");
 	});
 
 	it("relays the rescued task branch into the merge summary", async () => {

@@ -49,3 +49,27 @@ Nested repository patches (not applied):
 {{#list nestedPatchPaths prefix="- "}}{{this}}{{/list}}
 {{/if}}
 {{/when}}
+{{#when kind "==" "branch-capture-failed"}}
+<system-notification>Branch merge failed while capturing the task branch: {{error}}
+Task outputs are preserved but changes were not applied.</system-notification>
+{{#if rootPatchPath}}
+Patch artifact:
+- {{rootPatchPath}}
+{{/if}}
+{{#if nestedPatchPaths}}
+Nested repository patches (not applied):
+{{#list nestedPatchPaths prefix="- "}}{{this}}{{/list}}
+{{/if}}
+{{/when}}
+{{#when kind "==" "merge-error"}}
+<system-notification>Merge phase failed: {{error}}
+Task outputs are preserved but changes were not applied.</system-notification>
+{{#if rootPatchPath}}
+Patch artifact:
+- {{rootPatchPath}}
+{{/if}}
+{{#if nestedPatchPaths}}
+Nested repository patches (not applied):
+{{#list nestedPatchPaths prefix="- "}}{{this}}{{/list}}
+{{/if}}
+{{/when}}

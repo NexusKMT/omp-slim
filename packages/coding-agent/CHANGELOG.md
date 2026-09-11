@@ -14,7 +14,7 @@
 - Extension Control Center (`/extensions`) search now accepts `j` and `k`, so extensions like `jira`/`json` are searchable; bare `j`/`k` no longer move the list selection (use arrow keys or the configured `tui.select.up`/`down`) ([#11350](https://github.com/can1357/oh-my-pi/issues/11350)).
 - Codex turns interrupted before terminal completion now auto-continue after resolved tool calls instead of stopping ([#11349](https://github.com/can1357/oh-my-pi/issues/11349)).
 - `/handoff` no longer leaves the TUI in a running state when completion races with delayed session events ([#11263](https://github.com/can1357/oh-my-pi/issues/11263)).
-- Isolated tasks no longer lose changes made inside nested git repositories: each nested-repo diff is written to `<agent>.nested-<n>-<path>.patch` next to the root patch before the isolation worktree is removed, the worktree is retained (and its path reported) when that write fails, and `apply=false` summaries name every captured file instead of claiming an empty root patch captured the work. Runner errors after a successful run (capture, persist, or branch-commit failure) now reach the parent instead of collapsing to `status="merge failed"`, and isolated agents are reported as not resumable rather than "idle — message it via `hub`". ([#11343](https://github.com/can1357/oh-my-pi/pull/11343))
+- Fixed isolated tasks dropping nested-repo work: nested diffs persist as `<agent>.nested-*.patch` before cleanup, `apply=false` lists each file, isolated agents report as non-resumable, and runs needing manual recovery report failed ([#11343](https://github.com/can1357/oh-my-pi/pull/11343) by [@grapexy](https://github.com/grapexy)).
 
 ## [18.1.15] - 2026-09-08
 
