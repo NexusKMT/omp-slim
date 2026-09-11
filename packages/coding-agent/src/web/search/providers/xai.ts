@@ -281,20 +281,16 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 	// one cannot promote preceding unphased narration into a final answer.
 	const messages: Array<{ texts: string[]; hasCitations: boolean; phase: XAIResponseOutputItem["phase"] }> = [];
 	for (const item of output) {
-		if (
-			!item ||
-			typeof item !== "object" ||
-			(item.type !== null && item.type !== undefined && item.type !== "message")
-		)
-			continue;
-		const content = Array.isArray(item.content) ? item.content : [];
+		if (!item || typeof item !== "object" || (item.type != null && item.type !== "message")) continue;
+		const content = Array.isArray(item.content) ? item.content : null;
+		if (content === null && item.type == null) continue;
 		// Relays cast external JSON into the typed interface; normalize the
 		// phase to a recognized value so "" or unknown strings cannot strand a
 		// message outside both the final_answer branch and the unphased
 		// heuristic.
 		const phase = item.phase === "commentary" || item.phase === "final_answer" ? item.phase : null;
 		const entry = { texts: [] as string[], hasCitations: false, phase };
-		for (const part of content) {
+		for (const part of content ?? []) {
 			if (!part || typeof part !== "object") continue;
 			const text = (part.output_text ?? part.text)?.trim();
 			if (text) entry.texts.push(text);

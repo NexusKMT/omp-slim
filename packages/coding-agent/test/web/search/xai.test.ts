@@ -216,6 +216,27 @@ describe("xAI Responses answer extraction from relay output items", () => {
 		expect(response.answer).toBe("Bun 1.3.12 is the latest release.");
 	});
 
+	it("uses aggregate text when untyped tool items have no content array", async () => {
+		const relayResponse = {
+			id: "resp-relay",
+			model: "grok-4.5",
+			output_text: "Bun 1.3.12 is the latest release.",
+			output: [
+				{ action: { type: "search", query: "Bun latest release" } },
+				{
+					type: null,
+					action: { type: "search", query: "Bun changelog" },
+					content: { text: "Search metadata, not message content." },
+				},
+			],
+			usage: { input_tokens: 10, output_tokens: 5 },
+		};
+
+		const response = await searchXAI(makeParams(makeFetchMock(relayResponse)));
+
+		expect(response.answer).toBe("Bun 1.3.12 is the latest release.");
+	});
+
 	it("treats message-level url_citation annotations as substance", async () => {
 		const relayResponse = {
 			id: "resp-relay",
@@ -274,7 +295,11 @@ describe("xAI Responses answer extraction from relay output items", () => {
 		expect(response.sources).toEqual([]);
 	});
 
-	it("yields no answer when the last message is empty instead of promoting earlier text", async () => {
+	it.each([
+		["an explicitly empty message", { type: "message", content: [] }],
+		["an explicit message without content", { type: "message" }],
+		["an untyped empty message", { content: [] }],
+	])("does not promote earlier text after %s", async (_label, lastMessage) => {
 		const relayResponse = {
 			id: "resp-relay",
 			model: "grok-4.5",
@@ -282,7 +307,7 @@ describe("xAI Responses answer extraction from relay output items", () => {
 			output: [
 				{ type: "message", content: [{ type: "output_text", text: "A".repeat(400) }] },
 				{ type: "message", content: [{ type: "output_text", text: "I'll search for the latest release." }] },
-				{ type: "message", content: [] },
+				lastMessage,
 			],
 			usage: { input_tokens: 10, output_tokens: 5 },
 		};
