@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import * as executorModule from "@oh-my-pi/pi-coding-agent/task/executor";
+import { RETAINED_BACKEND_FILE } from "@oh-my-pi/pi-coding-agent/task/isolation-ownership";
 import {
 	applyEligibleNestedPatches,
 	mergeIsolatedChanges,
@@ -612,12 +613,26 @@ describe("retainIsolationWorkspace", () => {
 		await fs.mkdir(isolationDir, { recursive: true });
 		await Bun.write(path.join(isolationDir, "work.txt"), "unrecovered");
 
-		const retainedDir = await retainIsolationWorkspace(isolationDir);
+		const retainedDir = await retainIsolationWorkspace(isolationDir, natives.IsoBackendKind.Overlayfs);
 
 		expect(retainedDir).not.toBe(isolationDir);
 		expect(path.dirname(retainedDir)).toContain(".retained-");
 		expect(await Bun.file(path.join(retainedDir, "work.txt")).text()).toBe("unrecovered");
 		expect(await Bun.file(baseDir).exists()).toBe(false);
+		const sidecar = await Bun.file(path.join(path.dirname(retainedDir), RETAINED_BACKEND_FILE)).json();
+		expect(sidecar.backend).toBe(natives.IsoBackendKind.Overlayfs);
+		tempRoots.push(path.dirname(retainedDir));
+	});
+
+	it("records no sidecar for copy backends that need no unmount", async () => {
+		const parent = await fs.mkdtemp(path.join(os.tmpdir(), "omp-isolation-retain-copy-"));
+		tempRoots.push(parent);
+		const isolationDir = path.join(parent, "wt_abc123", "m");
+		await fs.mkdir(isolationDir, { recursive: true });
+
+		const retainedDir = await retainIsolationWorkspace(isolationDir, natives.IsoBackendKind.Rcopy);
+
+		expect(await Bun.file(path.join(path.dirname(retainedDir), RETAINED_BACKEND_FILE)).exists()).toBe(false);
 		tempRoots.push(path.dirname(retainedDir));
 	});
 

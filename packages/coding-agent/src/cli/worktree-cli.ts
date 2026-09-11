@@ -18,11 +18,12 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import * as natives from "@oh-my-pi/pi-natives";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import { getWorktreesDir, isEnoent } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { Settings } from "../config/settings";
-import { hasLiveIsolationOwner, ISOLATION_OWNER_FILE } from "../task/isolation-ownership";
+import { hasLiveIsolationOwner, ISOLATION_OWNER_FILE, readRetainedMountBackend } from "../task/isolation-ownership";
 import { formatIsolationBackend, parseIsolationBackend } from "../task/worktree";
 
 type WorktreeKind = "pr-checkout" | "task-isolation" | "empty" | "stray";
@@ -62,6 +63,34 @@ export interface ClearWorktreesOptions {
 	/** Print what would be removed without touching the filesystem. */
 	dryRun: boolean;
 	json: boolean;
+}
+/**
+ * Unmount a retained mounting-backend workspace before recursive removal.
+ * Recursive `rm` through a live overlay mount destroys the preserved upper
+ * layer entry by entry and then fails on the mountpoint itself — and the
+ * mount survives the owning session, so the reclaim path (unlike teardown)
+ * cannot rely on the creator to stop it. Best-effort and side-effect-free
+ * without a retained-mount sidecar: returns whether an unmount was attempted
+ * and never throws, so removal always proceeds to `fs.rm` either way.
+ */
+export async function stopRetainedMount(dir: string): Promise<boolean> {
+	const backend = await readRetainedMountBackend(dir);
+	if (backend === undefined) return false;
+	for (const name of TASK_ISOLATION_MOUNT_DIRS) {
+		const candidate = path.join(dir, name);
+		if (
+			await fs
+				.stat(candidate)
+				.then(stat => stat.isDirectory())
+				.catch(() => false)
+		) {
+			try {
+				await natives.isoStop(backend, candidate);
+			} catch {}
+			return true;
+		}
+	}
+	return false;
 }
 
 export async function addWorktree(options: AddWorktreeOptions): Promise<void> {
@@ -193,6 +222,7 @@ export async function clearWorktrees(options: ClearWorktreesOptions): Promise<vo
 					parentsToPrune.add(target.parentRepo);
 				}
 			} else {
+				if (target.kind === "task-isolation") await stopRetainedMount(target.path);
 				await fs.rm(target.path, { recursive: true, force: true });
 				if (target.parentRepo) parentsToPrune.add(target.parentRepo);
 			}

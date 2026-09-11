@@ -7,7 +7,10 @@
  * subagent's sandbox from a crashed run's leftover instead of deleting both.
  */
 import * as path from "node:path";
+import * as natives from "@oh-my-pi/pi-natives";
 import { $ } from "bun";
+
+const { IsoBackendKind } = natives;
 
 /** Marker file written into a task-isolation base dir identifying its owner. */
 export const ISOLATION_OWNER_FILE = ".omp-isolation-owner.json";
@@ -103,4 +106,50 @@ export async function hasLiveIsolationOwner(baseDir: string): Promise<boolean> {
 		if (current !== null && current !== decoded.startToken) return false;
 	}
 	return true;
+}
+
+/** Sidecar recording the mounting backend of a retained workspace. */
+export const RETAINED_BACKEND_FILE = ".omp-retained-backend.json";
+
+/**
+ * Backends that mount a live filesystem over the workspace: recursive removal
+ * through the mount destroys the preserved layer and fails on the mountpoint,
+ * so these must be unmounted before `omp worktree clear` removes them. Copy
+ * and snapshot backends need no unmount — and their `stop` routines delete
+ * data themselves, so they must never be routed through unmount.
+ */
+export function isMountingIsolationBackend(backend: unknown): backend is number {
+	return backend === IsoBackendKind.Overlayfs || backend === IsoBackendKind.Projfs;
+}
+
+/**
+ * Record which backend mounted a retained workspace, so cleanup can unmount
+ * it before removal. Best-effort: retention stays valid without it (the
+ * workspace merely falls back to plain recursive removal).
+ */
+export async function writeRetainedBackend(baseDir: string, backend: number): Promise<void> {
+	await Bun.write(
+		path.join(baseDir, RETAINED_BACKEND_FILE),
+		JSON.stringify({ backend, retainedAt: new Date().toISOString() }),
+	);
+}
+
+/**
+ * Backend recorded for a retained workspace when it needs unmount-before-
+ * remove. `undefined` for ordinary sandboxes, foreign files, and malformed
+ * or non-mounting records — all of which keep today's removal behavior.
+ */
+export async function readRetainedMountBackend(dir: string): Promise<number | undefined> {
+	let decoded: unknown;
+	try {
+		decoded = await Bun.file(path.join(dir, RETAINED_BACKEND_FILE)).json();
+	} catch {
+		return undefined;
+	}
+	if (typeof decoded !== "object" || decoded === null || !("backend" in decoded)) return undefined;
+	const backend = decoded.backend;
+	if (typeof backend !== "number" || !Number.isInteger(backend) || !isMountingIsolationBackend(backend)) {
+		return undefined;
+	}
+	return backend;
 }

@@ -31,6 +31,7 @@ import { generateCommitMessage } from "../utils/commit-message-generator";
 import { trackLateCleanup } from "../utils/late-cleanup";
 import type { ExecutorOptions } from "./executor";
 import { runSubprocess } from "./executor";
+import { isMountingIsolationBackend, writeRetainedBackend } from "./isolation-ownership";
 import type { SingleResult } from "./types";
 import {
 	applyNestedPatches,
@@ -274,8 +275,13 @@ async function writeIsolationPatch(
  * owner marker. Returns the workspace path to report (the sibling on
  * success, the original dir when the move fails). The owner marker and `m`
  * mount move along, so `omp worktree clear` still classifies and reclaims it.
+ * Mounting backends record a sidecar so cleanup unmounts before recursive
+ * removal instead of traversing — and failing on — the live mount.
  */
-export async function retainIsolationWorkspace(isolationDir: string): Promise<string> {
+export async function retainIsolationWorkspace(
+	isolationDir: string,
+	backend?: natives.IsoBackendKind,
+): Promise<string> {
 	const baseDir = path.dirname(isolationDir);
 	const retainedBase = `${baseDir}.retained-${Date.now().toString(36)}-${Math.floor(Math.random() * 2 ** 32).toString(16)}`;
 	// A valid move can still fail transiently (Windows AV/indexer locks);
@@ -283,12 +289,20 @@ export async function retainIsolationWorkspace(isolationDir: string): Promise<st
 	for (let attempt = 0; attempt < 3; attempt++) {
 		try {
 			await fs.rename(baseDir, retainedBase);
-			return path.join(retainedBase, path.basename(isolationDir));
+			break;
 		} catch {
-			if (attempt < 2) await Bun.sleep(25);
+			if (attempt === 2) return isolationDir;
+			await Bun.sleep(25);
 		}
 	}
-	return isolationDir;
+	if (backend !== undefined && isMountingIsolationBackend(backend)) {
+		// Best-effort: retention stays valid without it (cleanup falls back
+		// to plain recursive removal, as before).
+		try {
+			await writeRetainedBackend(retainedBase, backend);
+		} catch {}
+	}
+	return path.join(retainedBase, path.basename(isolationDir));
 }
 /** Context for `isolation-error.md`: the `result.error` text for a run whose changes could not be captured or landed. */
 interface IsolationErrorContext {
@@ -335,6 +349,7 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 		const taskBaseline = structuredClone(opts.context.baseline);
 		handle = await ensureIsolation(opts.context.repoRoot, opts.agentId, opts.preferredBackend);
 		const isolationDir = handle.mergedDir;
+		const isolationBackend = handle.backend;
 		const result = await runSubprocess({
 			...opts.baseOptions,
 			worktree: isolationDir,
@@ -392,7 +407,7 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 					});
 				} catch (patchErr) {
 					retainWorkspace = true;
-					const retainedDir = await retainIsolationWorkspace(isolationDir);
+					const retainedDir = await retainIsolationWorkspace(isolationDir, isolationBackend);
 					return rememberAgentArtifacts({
 						...result,
 						error: renderIsolationError({
@@ -422,7 +437,7 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 				});
 			} catch (persistErr) {
 				retainWorkspace = true;
-				const retainedDir = await retainIsolationWorkspace(isolationDir);
+				const retainedDir = await retainIsolationWorkspace(isolationDir, isolationBackend);
 				return rememberAgentArtifacts({
 					...result,
 					branchName: commitResult?.branchName,
@@ -442,7 +457,7 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 				return rememberAgentArtifacts({ ...result, ...patchResult });
 			} catch (patchErr) {
 				retainWorkspace = true;
-				const retainedDir = await retainIsolationWorkspace(isolationDir);
+				const retainedDir = await retainIsolationWorkspace(isolationDir, isolationBackend);
 				return rememberAgentArtifacts({
 					...result,
 					error: renderIsolationError({
