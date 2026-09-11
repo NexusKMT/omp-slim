@@ -259,6 +259,7 @@ export const AXES: Readonly<Record<string, AxisDef>> = {
 	"thinking-prefix-binding": { key: "prefixBinding", set: "thinking", shape: "scalar" },
 	"thinking-suppress-when-off": { key: "suppressWhenOff", set: "thinking", shape: "scalar" },
 	"thinking-supports-display": { key: "supportsDisplay", set: "thinking", shape: "scalar" },
+	"thinking-upgrade-neutral": { key: "upgradeNeutral", set: "thinking", shape: "scalar" },
 
 	// ── catalog metadata ──
 	"apply-patch-tool-type": {
@@ -284,8 +285,14 @@ export const AXES: Readonly<Record<string, AxisDef>> = {
 		set: "catalog",
 		shape: "scalar",
 	},
+	"requires-tool-result-image-hoisting": {
+		key: "requiresToolResultImageHoisting",
+		set: "catalog",
+		shape: "scalar",
+	},
 	priority: { key: "priority", set: "catalog", shape: "scalar" },
 	"service-tier-cost": { key: "serviceTierCost", set: "catalog", shape: "object" },
+	"time-based-cost": { key: "timeBased", set: "catalog", shape: "object" },
 };
 
 /** Records applicable to each API family; used by `resolve.ts` when applying wire axes. */
