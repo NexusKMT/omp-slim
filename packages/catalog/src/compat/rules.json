@@ -7140,10 +7140,13 @@
 				],
 				"thinking": {
 					"mode": "effort"
+				},
+				"catalog": {
+					"requiresToolResultImageHoisting": true
 				}
 			},
 			{
-				"source": "providers/amazon-bedrock.kdl:19",
+				"source": "providers/amazon-bedrock.kdl:21",
 				"class": "deepseek",
 				"providers": [
 					"amazon-bedrock"
@@ -7161,7 +7164,7 @@
 				}
 			},
 			{
-				"source": "providers/amazon-bedrock.kdl:24",
+				"source": "providers/amazon-bedrock.kdl:26",
 				"class": "minimax",
 				"providers": [
 					"amazon-bedrock"
@@ -7172,7 +7175,7 @@
 				}
 			},
 			{
-				"source": "providers/amazon-bedrock.kdl:28",
+				"source": "providers/amazon-bedrock.kdl:30",
 				"class": "unknown",
 				"providers": [
 					"amazon-bedrock"
@@ -7185,10 +7188,13 @@
 						"high"
 					],
 					"mode": "budget"
+				},
+				"catalog": {
+					"requiresToolResultImageHoisting": true
 				}
 			},
 			{
-				"source": "providers/amazon-bedrock.kdl:33",
+				"source": "providers/amazon-bedrock.kdl:40",
 				"providers": [
 					"amazon-bedrock"
 				],
