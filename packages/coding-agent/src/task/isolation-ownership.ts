@@ -108,24 +108,32 @@ export async function hasLiveIsolationOwner(baseDir: string): Promise<boolean> {
 	return true;
 }
 
-/** Sidecar recording the mounting backend of a retained workspace. */
+/** Sidecar recording the native-teardown backend of a retained workspace. */
 export const RETAINED_BACKEND_FILE = ".omp-retained-backend.json";
 
 /**
- * Backends that mount a live filesystem over the workspace: recursive removal
- * through the mount destroys the preserved layer and fails on the mountpoint,
- * so these must be unmounted before `omp worktree clear` removes them. Copy
- * and snapshot backends need no unmount — and their `stop` routines delete
- * data themselves, so they must never be routed through unmount.
+ * Backends whose workspaces `omp worktree clear` must not remove with plain
+ * recursive `rm`, but route through native `isoStop` teardown instead:
+ * mounts (overlayfs, projfs), where `rm` destroys the preserved layer and
+ * fails on the mountpoint, and Btrfs subvolumes, whose root is only removable
+ * via subvolume delete (its `stop` falls back to plain `rm` for ordinary
+ * dirs, so routing it is always safe). Plain-copy and reflink backends need
+ * no teardown — and their `stop` routines delete data themselves, so they
+ * must never be routed through it.
+ *
+ * Notably absent: ZFS clones also need dataset-aware teardown, but `isoStop`
+ * locates the dataset by its recorded mountpoint property, which no longer
+ * matches after the retain rename — that needs pi-iso mount-table support
+ * before a sidecar here could help.
  */
-export function isMountingIsolationBackend(backend: unknown): backend is number {
-	return backend === IsoBackendKind.Overlayfs || backend === IsoBackendKind.Projfs;
+export function needsNativeTeardown(backend: unknown): backend is number {
+	return backend === IsoBackendKind.Overlayfs || backend === IsoBackendKind.Projfs || backend === IsoBackendKind.Btrfs;
 }
 
 /**
- * Record which backend mounted a retained workspace, so cleanup can unmount
- * it before removal. Best-effort: retention stays valid without it (the
- * workspace merely falls back to plain recursive removal).
+ * Record which backend built a retained workspace, so cleanup can route it
+ * through native teardown before removal. Best-effort: retention stays valid
+ * without it (the workspace merely falls back to plain recursive removal).
  */
 export async function writeRetainedBackend(baseDir: string, backend: number): Promise<void> {
 	await Bun.write(
@@ -135,9 +143,9 @@ export async function writeRetainedBackend(baseDir: string, backend: number): Pr
 }
 
 /**
- * Backend recorded for a retained workspace when it needs unmount-before-
- * remove. `undefined` for ordinary sandboxes, foreign files, and malformed
- * or non-mounting records — all of which keep today's removal behavior.
+ * Backend recorded for a retained workspace when it needs native teardown
+ * before remove. `undefined` for ordinary sandboxes, foreign files, and
+ * malformed or non-teardown records — all of which keep today's behavior.
  */
 export async function readRetainedMountBackend(dir: string): Promise<number | undefined> {
 	let decoded: unknown;
@@ -148,7 +156,7 @@ export async function readRetainedMountBackend(dir: string): Promise<number | un
 	}
 	if (typeof decoded !== "object" || decoded === null || !("backend" in decoded)) return undefined;
 	const backend = decoded.backend;
-	if (typeof backend !== "number" || !Number.isInteger(backend) || !isMountingIsolationBackend(backend)) {
+	if (typeof backend !== "number" || !Number.isInteger(backend) || !needsNativeTeardown(backend)) {
 		return undefined;
 	}
 	return backend;

@@ -31,7 +31,7 @@ import { generateCommitMessage } from "../utils/commit-message-generator";
 import { trackLateCleanup } from "../utils/late-cleanup";
 import type { ExecutorOptions } from "./executor";
 import { runSubprocess } from "./executor";
-import { isMountingIsolationBackend, writeRetainedBackend } from "./isolation-ownership";
+import { needsNativeTeardown, writeRetainedBackend } from "./isolation-ownership";
 import type { SingleResult } from "./types";
 import {
 	applyNestedPatches,
@@ -273,9 +273,10 @@ async function writeIsolationPatch(
  * isolated run with the same id cannot wipe it: `ensureIsolation`
  * unconditionally removes the deterministic base dir before writing its
  * owner marker. The owner marker and `m` mount move along, so
- * `omp worktree clear` still classifies and reclaims it. Mounting backends
- * record a sidecar so cleanup unmounts before recursive removal instead of
- * traversing — and failing on — the live mount.
+ * `omp worktree clear` still classifies and reclaims it. Backends needing
+ * native teardown (mounts, Btrfs subvolumes) record a sidecar so cleanup
+ * routes them through `isoStop` instead of traversing — and failing on —
+ * the live mount or subvolume root.
  */
 export interface RetainedWorkspace {
 	/** Workspace path to report (unique sibling on success, original dir when the move fails). */
@@ -296,7 +297,7 @@ export async function retainIsolationWorkspace(
 ): Promise<RetainedWorkspace> {
 	const baseDir = path.dirname(isolationDir);
 	const retainedBase = `${baseDir}.retained-${Date.now().toString(36)}-${Math.floor(Math.random() * 2 ** 32).toString(16)}`;
-	const needsSidecar = backend !== undefined && isMountingIsolationBackend(backend);
+	const needsSidecar = backend !== undefined && needsNativeTeardown(backend);
 	// A valid move can still fail transiently (Windows AV/indexer locks);
 	// retry briefly before conceding the deterministic slot.
 	for (let attempt = 0; attempt < 3; attempt++) {
