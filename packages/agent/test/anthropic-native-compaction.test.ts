@@ -234,17 +234,18 @@ describe("compact() Anthropic native lane", () => {
 		expect(instructions).toContain("MUST NOT call any tools");
 
 		// The API's summary is the entry text, with the file lists the local
-		// summarizer appends, and the identical text is the native replay.
+		// summarizer appends. The replay payload stays verbatim so the block
+		// matches the opaque state on the next request.
 		expect(result.summary).toContain(NATIVE_SUMMARY);
 		expect(result.summary).toContain("<files>\n# /repo/src/\nhandlers.ts (Read)\n</files>");
 		expect(result.shortSummary).toBe("Remote compaction");
 		expect(result.firstKeptEntryId).toBe("kept-1");
-		// The API's opaque state travels with the summary, verbatim, into the
+		// The API's opaque state travels with the verbatim summary into the
 		// entry and back out as the replay payload.
 		expect(result.preserveData).toEqual({
 			anthropicCompaction: {
 				provider: "anthropic",
-				content: result.summary,
+				content: NATIVE_SUMMARY,
 				encryptedContent: "enc_state_1",
 				model: "claude-fable-5",
 				usedTokens: 79_064,
@@ -253,7 +254,7 @@ describe("compact() Anthropic native lane", () => {
 		expect(getAnthropicCompactionPayload(result.preserveData)).toEqual({
 			type: "anthropicCompaction",
 			provider: "anthropic",
-			content: result.summary,
+			content: NATIVE_SUMMARY,
 			encryptedContent: "enc_state_1",
 		});
 	});

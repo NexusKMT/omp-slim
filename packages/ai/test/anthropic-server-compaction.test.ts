@@ -430,6 +430,7 @@ describe("anthropic server-side compaction response", () => {
 		expect(result.usage.cacheWrite).toBe(80_082);
 		expect(result.usage.cacheRead).toBe(0);
 		expect(result.usage.totalTokens).toBe(64 + 2002 + 80_082);
+		expect(result.usage.contextTokens).toBeUndefined();
 		expect(result.usage.cost.output).toBeCloseTo((2002 * 50) / 1_000_000, 10);
 		expect(result.usage.cost.cacheWrite).toBeCloseTo((80_082 * 12.5) / 1_000_000, 10);
 		// A compaction pause is a legitimate empty stop: no empty-completion retry.
@@ -481,6 +482,9 @@ describe("anthropic server-side compaction response", () => {
 		expect(result.usage.cost.output).toBeCloseTo((2_502 * 50) / 1_000_000, 10);
 		expect(result.usage.cost.cacheRead).toBeCloseTo((100_000 * 1) / 1_000_000, 10);
 		expect(result.usage.cost.cacheWrite).toBeCloseTo((80_082 * 12.5) / 1_000_000, 10);
+		// Billing still sums both samplings, but resident context is the
+		// post-compaction message sampling alone (30,000 + 100,000 + 0).
+		expect(result.usage.contextTokens).toBe(130_000);
 	});
 
 	it("yields no payload when the model called a tool instead of summarizing", async () => {

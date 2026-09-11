@@ -1910,8 +1910,8 @@ export async function compact(
 	let summary: string;
 
 	if (nativeSummary !== undefined) {
-		// The API wrote a real summary; it is the entry text and, after the file
-		// lists below, the exact block replayed natively.
+		// The API wrote a real summary; it is the entry text. The replayed
+		// block below stays verbatim so it matches the opaque state.
 		summary = nativeSummary;
 	} else if (usedRemoteCompaction) {
 		// Remote compaction (V2 or V1) already compacted remotely; the durable
@@ -1973,9 +1973,12 @@ export async function compact(
 	const { readFiles, modifiedFiles } = computeFileLists(fileOps);
 	summary = upsertFileOperations(summary, readFiles, modifiedFiles, fileOps.read);
 	if (nativeSummary !== undefined) {
+		// The replayed block stays byte-identical to the API's summary so it
+		// matches `encryptedContent`; the harness file lists above live only in
+		// the entry text every other provider reads.
 		preserveData = withAnthropicCompactionPreserveData(preserveData, {
 			provider: model.provider,
-			content: summary,
+			content: nativeSummary,
 			...(nativeEncryptedContent ? { encryptedContent: nativeEncryptedContent } : {}),
 			model: model.id,
 			usedTokens: nativeUsedTokens,

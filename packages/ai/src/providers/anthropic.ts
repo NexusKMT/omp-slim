@@ -1899,6 +1899,11 @@ function carriesCompactionEdit(params: MessageCreateParams): boolean {
  * its cache write, so the iteration list is the only consistent total for a
  * compacting request (and the documented one for billing). Requests without a
  * compaction iteration are left untouched.
+ *
+ * When generation continues after the compaction, both prompts are billed but
+ * only the post-compaction sampling stays resident: `contextTokens` carries
+ * that sampling's prompt so gauges do not treat both as live context and
+ * trigger another compaction right after the first.
  */
 function applyCompactionIterationUsage(usage: Usage, source: AnthropicWireUsage): boolean {
 	const iterations = source.iterations;
@@ -1918,6 +1923,15 @@ function applyCompactionIterationUsage(usage: Usage, source: AnthropicWireUsage)
 	usage.output = output;
 	usage.cacheRead = cacheRead;
 	usage.cacheWrite = cacheWrite;
+	for (let index = iterations.length - 1; index >= 0; index -= 1) {
+		const resumed = iterations[index];
+		if (resumed?.type !== "message" && resumed?.type !== "fallback_message") continue;
+		usage.contextTokens =
+			(resumed.input_tokens ?? 0) +
+			(resumed.cache_read_input_tokens ?? 0) +
+			(resumed.cache_creation_input_tokens ?? 0);
+		break;
+	}
 	return true;
 }
 
