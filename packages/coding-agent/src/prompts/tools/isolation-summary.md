@@ -64,6 +64,9 @@ Nested repository patches (not applied):
 {{#when kind "==" "merge-error"}}
 <system-notification>Merge phase failed: {{error}}
 Task outputs are preserved but changes were not applied.</system-notification>
+{{#if branchName}}
+Unmerged branch preserved as {{branchName}} for manual resolution.
+{{/if}}
 {{#if rootPatchPath}}
 Patch artifact:
 - {{rootPatchPath}}

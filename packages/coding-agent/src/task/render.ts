@@ -1460,17 +1460,17 @@ function renderAgentResult(
 	// like every other rendered line; the full paths live in the model-facing summary.
 	if (result.patchPath && !aborted && result.exitCode === 0) {
 		lines.push(
-			`${continuePrefix}${theme.fg("dim", truncateToWidth(replaceTabs(shortenPath(result.patchPath)), TRUNCATE_LENGTHS.CONTENT))}`,
+			`${continuePrefix}${theme.fg("dim", truncateToWidth(`Patch: ${replaceTabs(shortenPath(result.patchPath))}`, TRUNCATE_LENGTHS.CONTENT))}`,
 		);
 	} else if (result.branchName && !aborted && result.exitCode === 0) {
 		lines.push(
-			`${continuePrefix}${theme.fg("dim", truncateToWidth(replaceTabs(sanitizeText(result.branchName)), TRUNCATE_LENGTHS.CONTENT))}`,
+			`${continuePrefix}${theme.fg("dim", truncateToWidth(`Branch: ${replaceTabs(sanitizeText(result.branchName))}`, TRUNCATE_LENGTHS.CONTENT))}`,
 		);
 	}
 	if (!aborted && result.exitCode === 0) {
 		for (const nestedPath of result.nestedPatchPaths ?? []) {
 			lines.push(
-				`${continuePrefix}${theme.fg("dim", truncateToWidth(replaceTabs(shortenPath(nestedPath)), TRUNCATE_LENGTHS.CONTENT))}`,
+				`${continuePrefix}${theme.fg("dim", truncateToWidth(`Nested patch: ${replaceTabs(shortenPath(nestedPath))}`, TRUNCATE_LENGTHS.CONTENT))}`,
 			);
 		}
 	}

@@ -601,6 +601,7 @@ export async function mergeIsolatedChanges(opts: IsolationMergeOptions): Promise
 			summary: renderIsolationSummary({
 				kind: "merge-error",
 				error: mergeErr instanceof Error ? mergeErr.message : String(mergeErr),
+				branchName: result.branchName,
 				rootPatchPath: result.patchPath,
 				nestedPatchPaths: result.nestedPatchPaths,
 			}),

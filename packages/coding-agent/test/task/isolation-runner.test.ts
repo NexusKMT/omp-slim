@@ -655,6 +655,7 @@ describe("mergeIsolatedChanges", () => {
 
 		expect(outcome.changesApplied).toBe(false);
 		expect(outcome.summary).toContain("Merge phase failed");
+		expect(outcome.summary).toContain("omp/task/Throwing");
 		expect(outcome.summary).toContain("/repo/artifacts/task.patch");
 		expect(outcome.summary).toContain("/repo/artifacts/task.nested-0-inner.patch");
 	});
