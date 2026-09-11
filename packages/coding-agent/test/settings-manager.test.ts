@@ -2369,7 +2369,6 @@ describe("Settings", () => {
 	describe("project .claude/settings.json parse warnings", () => {
 		it("logs capability warnings when project settings.json fails to parse", async () => {
 			const claudeSettings = path.join(projectDir, ".claude", "settings.json");
-			await fsp.mkdir(path.dirname(claudeSettings), { recursive: true });
 			await Bun.write(claudeSettings, '{ "symbolPreset": "ascii", }');
 
 			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
@@ -2420,7 +2419,6 @@ describe("Settings", () => {
 
 		it("logs a persistently malformed project file once across reloads", async () => {
 			const claudeSettings = path.join(projectDir, ".claude", "settings.json");
-			await fsp.mkdir(path.dirname(claudeSettings), { recursive: true });
 			await Bun.write(claudeSettings, '{ "symbolPreset": "ascii", }');
 
 			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
@@ -2434,7 +2432,6 @@ describe("Settings", () => {
 
 		it("surfaces a project file that becomes malformed after startup", async () => {
 			const claudeSettings = path.join(projectDir, ".claude", "settings.json");
-			await fsp.mkdir(path.dirname(claudeSettings), { recursive: true });
 
 			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
