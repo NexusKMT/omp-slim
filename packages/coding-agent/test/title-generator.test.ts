@@ -351,7 +351,6 @@ describe("title generator", () => {
 		);
 	});
 
-
 	it("stops title fallback traversal after cancellation", async () => {
 		const primary = getModelOrThrow("claude-haiku-4-5");
 		const fallback = getModelOrThrow("claude-sonnet-4-5");
@@ -702,13 +701,7 @@ describe("title generator", () => {
 			resolver: () => async () => "test-key",
 		} as never;
 
-		const title = await generateSessionTitle(
-			"Investigate routing",
-			registry,
-			settings,
-			undefined,
-			openaiRouted,
-		);
+		const title = await generateSessionTitle("Investigate routing", registry, settings, undefined, openaiRouted);
 		expect(title).toBe("Routed Recovery");
 		const attempted = completeSimpleMock.mock.calls.map(call => formatModelStringWithRouting(call[0] as Model<Api>));
 		expect(attempted).toEqual([
@@ -717,6 +710,59 @@ describe("title generator", () => {
 		]);
 	});
 
+	it("expands appended currentModel fallbackChains without merging role chains", async () => {
+		const current = getModelOrThrow("claude-opus-4-8");
+		const currentFallback = getModelOrThrow("claude-sonnet-4-5");
+		const roleOnly = getModelFor("openai", "gpt-4o-mini");
+		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockImplementation(async model => {
+			if (model.id === current.id) {
+				return {
+					stopReason: "error",
+					errorStatus: 400,
+					errorMessage: "Model is not available in the active live catalog",
+					content: [],
+				} as never;
+			}
+			return {
+				stopReason: "stop",
+				content: [{ type: "text", text: `<title>From ${model.id}</title>` }],
+			} as never;
+		});
+		const settings = {
+			get(path: string) {
+				if (path === "providers.tinyModel") return "online";
+				if (path === "retry.modelFallback") return true;
+				if (path === "retry.fallbackChains") {
+					return {
+						[`${current.provider}/${current.id}`]: [`${currentFallback.provider}/${currentFallback.id}`],
+						// Role/default chains must not be merged onto the appended current model.
+						tiny: [`${roleOnly.provider}/${roleOnly.id}`],
+						default: [`${roleOnly.provider}/${roleOnly.id}`],
+					};
+				}
+				return undefined;
+			},
+			getModelRole() {
+				return undefined;
+			},
+			getStorage() {
+				return undefined;
+			},
+		} as never;
+		const registry = {
+			getAvailable: () => [current, currentFallback, roleOnly],
+			getApiKey: async () => "test-key",
+			getApiKeyForProvider: async () => "test-key",
+			authStorage: { rotateSessionCredential: async () => false },
+			resolver: () => async () => "test-key",
+		} as never;
+
+		const title = await generateSessionTitle("Investigate the resolver", registry, settings, undefined, current);
+		expect(title).toBe(`From ${currentFallback.id}`);
+		const attempted = completeSimpleMock.mock.calls.map(call => (call[0] as Model<Api>).id);
+		expect(attempted).toEqual([current.id, currentFallback.id]);
+		expect(attempted).not.toContain(roleOnly.id);
+	});
 
 	it.each([true, false])("honors modelFallback=%s when the title model returns a provider error", async enabled => {
 		const smolModel = getModelOrThrow("claude-opus-4-8");

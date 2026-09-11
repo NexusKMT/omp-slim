@@ -2,7 +2,10 @@ import { describe, expect, it } from "bun:test";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { formatModelStringWithRouting } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { collectOnlineTinyCandidates } from "@oh-my-pi/pi-coding-agent/tiny/online-candidates";
+import {
+	collectOnlineTinyCandidates,
+	expandOnlineTinyModelFallbacks,
+} from "@oh-my-pi/pi-coding-agent/tiny/online-candidates";
 
 const primary = getBundledModel("google", "gemini-2.5-flash")!;
 const secondary = getBundledModel("openai", "gpt-4o-mini")!;
@@ -156,10 +159,31 @@ describe("online tiny fallback candidates", () => {
 			},
 		});
 		settings.setModelRole("tiny", primarySelector);
-		expect(collectOnlineTinyCandidates(["tiny"], settings, models).map(candidate => candidate.model)).toEqual(
-			models,
-		);
+		expect(collectOnlineTinyCandidates(["tiny"], settings, models).map(candidate => candidate.model)).toEqual(models);
 	});
 
+	it("expands a seed model's own chain without merging role defaults", () => {
+		const settings = Settings.isolated({
+			"retry.fallbackChains": {
+				[primarySelector]: [fallbackSelector],
+				// Role chain must not be applied to the seed (no expandDefault merge).
+				tiny: [secondarySelector],
+			},
+		});
+		settings.setModelRole("tiny", primarySelector);
+		// Seed is primary: model-keyed hop to fallback must apply. Even though tiny
+		// is assigned the same primary, expandOnlineTinyModelFallbacks must not treat
+		// the seed as a tiny role primary (that would also queue secondary).
+		expect(expandOnlineTinyModelFallbacks(primary, settings, models)).toEqual([primary, fallback]);
+	});
 
+	it("traverses multi-hop chains from an appended seed model", () => {
+		const settings = Settings.isolated({
+			"retry.fallbackChains": {
+				[primarySelector]: [secondarySelector],
+				[secondarySelector]: [fallbackSelector],
+			},
+		});
+		expect(expandOnlineTinyModelFallbacks(primary, settings, models)).toEqual(models);
+	});
 });

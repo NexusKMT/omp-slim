@@ -11,7 +11,7 @@ import { isTerminalHeadless, logger, prompt } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 
 import { formatModelStringWithRouting } from "../config/model-resolver";
-import { collectOnlineTinyCandidates } from "../tiny/online-candidates";
+import { collectOnlineTinyCandidates, expandOnlineTinyModelFallbacks } from "../tiny/online-candidates";
 import type { Settings } from "../config/settings";
 import titleMarkerInstruction from "../prompts/system/title-marker-instruction.md" with { type: "text" };
 import titleSystemPrompt from "../prompts/system/title-system.md" with { type: "text" };
@@ -123,7 +123,15 @@ function getTitleModels(registry: ModelRegistry, settings: Settings, currentMode
 		(models.length === 0 || settings.get("retry.modelFallback") !== false) &&
 		!models.some(model => formatModelStringWithRouting(model) === formatModelStringWithRouting(currentModel))
 	) {
-		models.push(currentModel);
+		// Append currentModel and expand its own chain separately — never merge it
+		// into the tiny/commit/smol role collection (that would apply role defaults).
+		const seen = new Set(models.map(formatModelStringWithRouting));
+		for (const model of expandOnlineTinyModelFallbacks(currentModel, settings, availableModels)) {
+			const key = formatModelStringWithRouting(model);
+			if (seen.has(key)) continue;
+			seen.add(key);
+			models.push(model);
+		}
 	}
 	return models;
 }
@@ -371,10 +379,7 @@ export async function generateTitleOnline(
 
 			return title;
 		} catch (err) {
-			if (
-				signal?.aborted ||
-				(err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError"))
-			) {
+			if (signal?.aborted || (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError"))) {
 				logger.debug("title-generator: aborted", {
 					...modelContext,
 					reason: "aborted",
