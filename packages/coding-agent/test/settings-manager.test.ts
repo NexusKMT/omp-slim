@@ -2195,10 +2195,7 @@ describe("Settings", () => {
 
 		it("keeps settings.json when the migrated config.yml write fails", async () => {
 			const jsonPath = path.join(agentDir, "settings.json");
-			await fs.promises.writeFile(
-				jsonPath,
-				JSON.stringify({ symbolPreset: "ascii", queueMode: "all" }),
-			);
+			await fs.promises.writeFile(jsonPath, JSON.stringify({ symbolPreset: "ascii", queueMode: "all" }));
 
 			const open = fs.promises.open.bind(fs.promises);
 			vi.spyOn(fs.promises, "open").mockImplementation(async (filePath, flags, mode) => {
@@ -2226,10 +2223,7 @@ describe("Settings", () => {
 
 		it("recovers settings from settings.json.bak when config.yml is missing", async () => {
 			const jsonPath = path.join(agentDir, "settings.json");
-			await fs.promises.writeFile(
-				`${jsonPath}.bak`,
-				JSON.stringify({ symbolPreset: "ascii", queueMode: "all" }),
-			);
+			await fs.promises.writeFile(`${jsonPath}.bak`, JSON.stringify({ symbolPreset: "ascii", queueMode: "all" }));
 			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
