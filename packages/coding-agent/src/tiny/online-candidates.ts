@@ -1,5 +1,9 @@
 import type { Api, Model } from "@oh-my-pi/pi-ai";
-import { formatModelStringWithRouting, resolveRoleSelection } from "../config/model-resolver";
+import {
+	formatModelStringWithRouting,
+	resolveModelOverride,
+	resolveRoleSelection,
+} from "../config/model-resolver";
 import type { Settings } from "../config/settings";
 import {
 	expandDefaultRetryFallbackChains,
@@ -26,7 +30,8 @@ function candidateKey(model: Model<Api>): string {
 /**
  * Collect unique online models for lightweight background tasks.
  *
- * Order: each requested role's primary, then its canonical retry fallback chain.
+ * Order: each requested role's primary, then canonical retry fallback chains
+ * traversed transitively (so a hop onto B also consults B's own chain).
  * Disabling model fallback restricts attempts to the first resolvable primary.
  */
 export function collectOnlineTinyCandidates(
@@ -36,11 +41,12 @@ export function collectOnlineTinyCandidates(
 ): OnlineTinyCandidate[] {
 	const seen = new Set<string>();
 	const out: OnlineTinyCandidate[] = [];
-	const add = (role: string, model: Model<Api>) => {
+	const add = (role: string, model: Model<Api>): boolean => {
 		const key = candidateKey(model);
-		if (seen.has(key)) return;
+		if (seen.has(key)) return false;
 		seen.add(key);
 		out.push({ role, model });
+		return true;
 	};
 
 	// Retain every role even if primaries coincide: their fallback chains can differ.
@@ -63,18 +69,50 @@ export function collectOnlineTinyCandidates(
 			hasProvider: provider => availableModels.some(model => model.provider === provider),
 		},
 	};
-	for (const { role, model } of primaries) {
-		const configuredSelector = settings.getModelRole(role) ?? modelKey(model);
-		const chainKey = resolveRetryFallbackChainKey(context, configuredSelector, model, role);
+	const registryShim = { getAvailable: () => availableModels };
+
+	type ExpandItem = {
+		role: string;
+		model: Model<Api>;
+		/** Selector used to resolve which chain key applies. */
+		selector: string;
+		roleHint?: string;
+	};
+	const queue: ExpandItem[] = primaries.map(({ role, model }) => ({
+		role,
+		model,
+		selector: settings.getModelRole(role) ?? modelKey(model),
+		roleHint: role,
+	}));
+	const expanded = new Set<string>();
+
+	while (queue.length > 0) {
+		const { role, model, selector, roleHint } = queue.shift()!;
+		const chainKey = resolveRetryFallbackChainKey(context, selector, model, roleHint);
 		if (!chainKey) continue;
 		// Resolved provider/id is the chain primary: bare/fuzzy role selectors and
 		// `@upstream` routing suffixes must not empty the chain or poison wildcards.
 		const primarySelector = modelKey(model);
+		const expandKey = `${chainKey}\0${candidateKey(model)}`;
+		if (expanded.has(expandKey)) continue;
+		expanded.add(expandKey);
+
 		for (const candidate of findRetryFallbackCandidates(context, chainKey, primarySelector, model, {
 			allowMissingPrimary: true,
 		})) {
-			const fallback = context.modelLookup.find(candidate.provider, candidate.id);
-			if (fallback) add(role, fallback);
+			// Resolve raw selectors (including `@upstream` / fuzzy) the same way
+			// turn-recovery does, instead of exact (provider, id) lookup only.
+			const resolved = resolveModelOverride([candidate.raw], registryShim, settings);
+			const fallback = resolved.model ?? context.modelLookup.find(candidate.provider, candidate.id);
+			if (!fallback) continue;
+			if (!add(role, fallback)) continue;
+			// After landing on this fallback, consult its own chain key so configs
+			// like `tiny: [B]` + `B: [C]` reach C (session recovery does the same).
+			queue.push({
+				role,
+				model: fallback,
+				selector: formatModelStringWithRouting(fallback),
+			});
 		}
 	}
 	return out;

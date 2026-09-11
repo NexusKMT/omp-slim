@@ -132,4 +132,34 @@ describe("online tiny fallback candidates", () => {
 		]);
 		expect(result.map(candidate => candidate.role)).toEqual(["tiny", "smol"]);
 	});
+
+	it("resolves routed @upstream fallback selectors before lookup", () => {
+		const routed = getBundledModel("openrouter", "google/gemini-2.5-flash")!;
+		const settings = Settings.isolated({
+			"retry.fallbackChains": {
+				tiny: ["openrouter/google/gemini-2.5-flash@cerebras"],
+			},
+		});
+		settings.setModelRole("tiny", primarySelector);
+		const result = collectOnlineTinyCandidates(["tiny"], settings, [...models, routed]);
+		expect(result.map(candidate => formatModelStringWithRouting(candidate.model))).toEqual([
+			primarySelector,
+			"openrouter/google/gemini-2.5-flash@cerebras",
+		]);
+	});
+
+	it("traverses model-keyed fallback chains from each hop", () => {
+		const settings = Settings.isolated({
+			"retry.fallbackChains": {
+				tiny: [secondarySelector],
+				[secondarySelector]: [fallbackSelector],
+			},
+		});
+		settings.setModelRole("tiny", primarySelector);
+		expect(collectOnlineTinyCandidates(["tiny"], settings, models).map(candidate => candidate.model)).toEqual(
+			models,
+		);
+	});
+
+
 });

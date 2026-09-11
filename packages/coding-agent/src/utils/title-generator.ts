@@ -10,6 +10,7 @@ import { isConPTYHosted, writeThroughActiveTerminal } from "@oh-my-pi/pi-tui";
 import { isTerminalHeadless, logger, prompt } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 
+import { formatModelStringWithRouting } from "../config/model-resolver";
 import { collectOnlineTinyCandidates } from "../tiny/online-candidates";
 import type { Settings } from "../config/settings";
 import titleMarkerInstruction from "../prompts/system/title-marker-instruction.md" with { type: "text" };
@@ -120,7 +121,7 @@ function getTitleModels(registry: ModelRegistry, settings: Settings, currentMode
 	if (
 		currentModel &&
 		(models.length === 0 || settings.get("retry.modelFallback") !== false) &&
-		!models.some(model => model.provider === currentModel.provider && model.id === currentModel.id)
+		!models.some(model => formatModelStringWithRouting(model) === formatModelStringWithRouting(currentModel))
 	) {
 		models.push(currentModel);
 	}
