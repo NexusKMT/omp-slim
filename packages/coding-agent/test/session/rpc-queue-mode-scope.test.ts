@@ -5,6 +5,7 @@ import type { Model } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { applyRpcQueueModeCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
 import { SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
@@ -56,10 +57,10 @@ describe("AgentSession queue-mode controls are session-scoped by default", () =>
 		} catch {}
 	});
 
-	it("applies queue-mode changes to the live agent only when persist=false (RPC path)", async () => {
-		session.setSteeringMode("all", false);
-		session.setFollowUpMode("all", false);
-		session.setInterruptMode("wait", false);
+	it("applies RPC queue-mode commands to the live agent only, without touching Settings", async () => {
+		applyRpcQueueModeCommand(session, { type: "set_steering_mode", mode: "all" });
+		applyRpcQueueModeCommand(session, { type: "set_follow_up_mode", mode: "all" });
+		applyRpcQueueModeCommand(session, { type: "set_interrupt_mode", mode: "wait" });
 		await settings.flush();
 
 		expect(session.steeringMode).toBe("all");
