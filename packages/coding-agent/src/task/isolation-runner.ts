@@ -272,21 +272,21 @@ async function writeIsolationPatch(
  * (`repoRoot` + agent id) slot into a globally unique sibling, so a later
  * isolated run with the same id cannot wipe it: `ensureIsolation`
  * unconditionally removes the deterministic base dir before writing its
- * owner marker. The owner marker and `m` mount move along, so
- * `omp worktree clear` still classifies and reclaims it. Backends needing
- * native teardown (mounts, Btrfs subvolumes) record a sidecar so cleanup
- * routes them through `isoStop` instead of traversing — and failing on —
- * the live mount or subvolume root.
+ * owner marker. The owner marker, `m` mount, and backend sidecar move along,
+ * so `omp worktree clear` still classifies and reclaims the workspace with
+ * native teardown. Backends needing it (mounts, Btrfs subvolumes) record the
+ * sidecar BEFORE the move so it travels atomically — a crash between rename
+ * and a later write would leave a mounted workspace with a dead owner and
+ * no metadata, and cleanup would traverse the live mount.
  */
 export interface RetainedWorkspace {
 	/** Workspace path to report (unique sibling on success, original dir when the move fails). */
 	dir: string;
 	/**
 	 * False when cleanup metadata is missing that `clear` would need: the
-	 * move failed, or a mounting backend's sidecar could not be written
-	 * (plausible under the same disk pressure that forced retention). The
-	 * error must then say the mount needs a manual unmount instead of
-	 * advertising plain `worktree clear`.
+	 * sidecar could not be written (plausible under the same disk pressure
+	 * that forced retention). The error must then say the mount needs a
+	 * manual unmount instead of advertising plain `worktree clear`.
 	 */
 	sidecarOk: boolean;
 }
@@ -298,25 +298,27 @@ export async function retainIsolationWorkspace(
 	const baseDir = path.dirname(isolationDir);
 	const retainedBase = `${baseDir}.retained-${Date.now().toString(36)}-${Math.floor(Math.random() * 2 ** 32).toString(16)}`;
 	const needsSidecar = backend !== undefined && needsNativeTeardown(backend);
+	let sidecarOk = !needsSidecar;
+	if (needsSidecar && backend !== undefined) {
+		try {
+			await writeRetainedBackend(baseDir, backend);
+			sidecarOk = true;
+		} catch {
+			sidecarOk = false;
+		}
+	}
 	// A valid move can still fail transiently (Windows AV/indexer locks);
 	// retry briefly before conceding the deterministic slot.
 	for (let attempt = 0; attempt < 3; attempt++) {
 		try {
 			await fs.rename(baseDir, retainedBase);
-			break;
+			return { dir: path.join(retainedBase, path.basename(isolationDir)), sidecarOk };
 		} catch {
-			if (attempt === 2) return { dir: isolationDir, sidecarOk: !needsSidecar };
+			if (attempt === 2) return { dir: isolationDir, sidecarOk };
 			await Bun.sleep(25);
 		}
 	}
-	if (needsSidecar && backend !== undefined) {
-		try {
-			await writeRetainedBackend(retainedBase, backend);
-		} catch {
-			return { dir: path.join(retainedBase, path.basename(isolationDir)), sidecarOk: false };
-		}
-	}
-	return { dir: path.join(retainedBase, path.basename(isolationDir)), sidecarOk: true };
+	return { dir: isolationDir, sidecarOk };
 }
 /** Context for `isolation-error.md`: the `result.error` text for a run whose changes could not be captured or landed. */
 interface IsolationErrorContext {

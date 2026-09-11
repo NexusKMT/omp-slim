@@ -6,6 +6,7 @@ import * as natives from "@oh-my-pi/pi-natives";
 import { clearWorktrees } from "@oh-my-pi/pi-coding-agent/cli/worktree-cli";
 import {
 	ISOLATION_OWNER_FILE,
+	RETAINED_BACKEND_FILE,
 	writeIsolationOwner,
 	writeRetainedBackend,
 } from "@oh-my-pi/pi-coding-agent/task/isolation-ownership";
@@ -128,6 +129,21 @@ describe("worktree clear task-isolation ownership", () => {
 
 		await clearWorktrees({ all: false, dryRun: false, json: true });
 
+		expect(await Bun.file(path.join(retained, "m", "work.txt")).exists()).toBe(true);
+	});
+
+	it("keeps workspaces whose retained-mount metadata is unreadable", async () => {
+		const retained = await makeSandbox("tbad0010");
+		await Bun.write(
+			path.join(retained, ISOLATION_OWNER_FILE),
+			JSON.stringify({ pid: await deadPid(), id: "bad0010" }),
+		);
+		await Bun.write(path.join(retained, RETAINED_BACKEND_FILE), "{ not json");
+		const isoStopSpy = vi.spyOn(natives, "isoStop").mockResolvedValue(undefined);
+
+		await clearWorktrees({ all: false, dryRun: false, json: true });
+
+		expect(isoStopSpy).not.toHaveBeenCalled();
 		expect(await Bun.file(path.join(retained, "m", "work.txt")).exists()).toBe(true);
 	});
 });

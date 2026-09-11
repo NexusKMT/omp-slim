@@ -144,20 +144,24 @@ export async function writeRetainedBackend(baseDir: string, backend: number): Pr
 
 /**
  * Backend recorded for a retained workspace when it needs native teardown
- * before remove. `undefined` for ordinary sandboxes, foreign files, and
- * malformed or non-teardown records — all of which keep today's behavior.
+ * before remove. `undefined` only when no sidecar exists. Any other read
+ * problem (permissions, I/O, malformed JSON) throws instead of reading as
+ * absent: the workspace may be a live mount whose guard must not be silently
+ * bypassed — the caller then leaves it in place rather than removing through
+ * the mount. A well-formed record for a backend needing no teardown keeps
+ * today's removal behavior.
  */
 export async function readRetainedMountBackend(dir: string): Promise<number | undefined> {
-	let decoded: unknown;
-	try {
-		decoded = await Bun.file(path.join(dir, RETAINED_BACKEND_FILE)).json();
-	} catch {
-		return undefined;
+	const sidecar = path.join(dir, RETAINED_BACKEND_FILE);
+	if (!(await Bun.file(sidecar).exists())) return undefined;
+	const decoded: unknown = await Bun.file(sidecar).json();
+	if (typeof decoded !== "object" || decoded === null || !("backend" in decoded)) {
+		throw new Error(`retained-mount metadata at ${sidecar} is malformed`);
 	}
-	if (typeof decoded !== "object" || decoded === null || !("backend" in decoded)) return undefined;
 	const backend = decoded.backend;
-	if (typeof backend !== "number" || !Number.isInteger(backend) || !needsNativeTeardown(backend)) {
-		return undefined;
+	if (typeof backend !== "number" || !Number.isInteger(backend)) {
+		throw new Error(`retained-mount metadata at ${sidecar} is malformed`);
 	}
+	if (!needsNativeTeardown(backend)) return undefined;
 	return backend;
 }

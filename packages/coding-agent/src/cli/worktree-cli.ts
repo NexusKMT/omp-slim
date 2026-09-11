@@ -71,9 +71,10 @@ export interface ClearWorktreesOptions {
  * Btrfs subvolume root, removable only via subvolume delete) — and mounts
  * survive the owning session, so the reclaim path (unlike teardown) cannot
  * rely on the creator to stop them. Side-effect-free without a retained-
- * backend sidecar (returns false); throws when teardown itself fails so the
- * caller skips removal instead of traversing a live mount — the entry is
- * then reported failed with the teardown error, data intact.
+ * backend sidecar (returns false); throws when the sidecar cannot be read
+ * or teardown itself fails, so the caller skips removal instead of
+ * traversing a possibly live mount — the entry is then reported failed
+ * with the error, data intact.
  */
 export async function stopRetainedMount(dir: string): Promise<boolean> {
 	const backend = await readRetainedMountBackend(dir);
