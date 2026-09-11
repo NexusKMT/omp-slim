@@ -1822,10 +1822,16 @@ export class Settings {
 			const result = await loadCapability(settingsCapability.id, { cwd: this.#cwd });
 			// `loadCapability` aggregates warnings across every level, but this
 			// method only merges project items — user-level parse failures belong
-			// to the global layer and would misattribute here. Project files live
-			// under the cwd, so scope to warnings referencing it, and remember
-			// what was surfaced so reloads stay quiet while new failures still log.
-			const projectWarnings = (result.warnings ?? []).filter(warning => warning.includes(this.#cwd));
+			// to the global layer and would misattribute here. Warnings embed
+			// their source file's absolute path, so keep only warnings rooted at
+			// the resolved cwd (a bare substring would over-match relative
+			// scopes such as `cwd: "."` and sibling dir prefixes). Remember what
+			// was surfaced so reloads stay quiet while new failures still log.
+			// Level attribution below the path layer (e.g. a user-scoped dir
+			// mounted inside the project) needs warning metadata from the
+			// providers, which `LoadResult.warnings` does not carry.
+			const cwdRoot = path.resolve(this.#cwd) + path.sep;
+			const projectWarnings = (result.warnings ?? []).filter(warning => warning.includes(cwdRoot));
 			for (const warning of projectWarnings) {
 				if (this.#projectSettingsWarningsSeen.has(warning)) continue;
 				logger.warn(`Settings: ${warning}`);

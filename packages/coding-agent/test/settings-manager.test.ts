@@ -2390,6 +2390,7 @@ describe("Settings", () => {
 				all: [],
 				warnings: [
 					`[Claude Code] Failed to parse JSON in ${path.join(tempDir.path(), "home", ".claude", "settings.json")}`,
+					"[Claude Code] Failed to load: boom",
 					`[Claude Code] Failed to parse JSON in ${projectSettingsJson}`,
 				],
 				providers: [],
@@ -2399,6 +2400,7 @@ describe("Settings", () => {
 			await Settings.init({ cwd: projectDir, agentDir, inMemory: true });
 			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(projectSettingsJson));
 			expect(warnSpy.mock.calls.filter(args => String(args[0]).includes("home"))).toEqual([]);
+			expect(warnSpy.mock.calls.filter(args => String(args[0]).includes("Failed to load"))).toEqual([]);
 		});
 
 		it("logs a persistently malformed project file once across reloads", async () => {
