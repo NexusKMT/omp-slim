@@ -182,7 +182,12 @@ describe("compact() Anthropic native lane", () => {
 		const model = makeAnthropicModel();
 		const { calls, completeImpl } = recordingCompleteImpl(() =>
 			assistantMessage(model, {
-				providerPayload: { type: "anthropicCompaction", provider: "anthropic", content: NATIVE_SUMMARY },
+				providerPayload: {
+					type: "anthropicCompaction",
+					provider: "anthropic",
+					content: NATIVE_SUMMARY,
+					encryptedContent: "enc_state_1",
+				},
 				stopDetails: { type: "compaction" },
 				usage: { ...ZERO_USAGE, input: 64, output: 2002, cacheRead: 79_000, totalTokens: 81_066 },
 			}),
@@ -234,10 +239,13 @@ describe("compact() Anthropic native lane", () => {
 		expect(result.summary).toContain("<files>\n# /repo/src/\nhandlers.ts (Read)\n</files>");
 		expect(result.shortSummary).toBe("Remote compaction");
 		expect(result.firstKeptEntryId).toBe("kept-1");
+		// The API's opaque state travels with the summary, verbatim, into the
+		// entry and back out as the replay payload.
 		expect(result.preserveData).toEqual({
 			anthropicCompaction: {
 				provider: "anthropic",
 				content: result.summary,
+				encryptedContent: "enc_state_1",
 				model: "claude-fable-5",
 				usedTokens: 79_064,
 			},
@@ -246,6 +254,7 @@ describe("compact() Anthropic native lane", () => {
 			type: "anthropicCompaction",
 			provider: "anthropic",
 			content: result.summary,
+			encryptedContent: "enc_state_1",
 		});
 	});
 
@@ -259,7 +268,12 @@ describe("compact() Anthropic native lane", () => {
 		const preparation = makePreparation({
 			previousSummary: "first summary",
 			previousPreserveData: {
-				anthropicCompaction: { provider: "anthropic", content: "first summary", model: "claude-fable-5" },
+				anthropicCompaction: {
+					provider: "anthropic",
+					content: "first summary",
+					encryptedContent: "enc_state_0",
+					model: "claude-fable-5",
+				},
 				appKey: "kept",
 			},
 		});
@@ -269,7 +283,12 @@ describe("compact() Anthropic native lane", () => {
 		const [{ ctx }] = calls;
 		expect(ctx.messages[0]).toMatchObject({
 			role: "user",
-			providerPayload: { type: "anthropicCompaction", provider: "anthropic", content: "first summary" },
+			providerPayload: {
+				type: "anthropicCompaction",
+				provider: "anthropic",
+				content: "first summary",
+				encryptedContent: "enc_state_0",
+			},
 		});
 		expect(ctx.messages.slice(1).map(message => message.content)).toEqual(["long history", "recent"]);
 		// The stale slot is replaced, unrelated preserve data survives.
@@ -324,6 +343,36 @@ describe("compact() Anthropic native lane", () => {
 		await expect(
 			compact(makePreparation(), model, "sk-ant-test", undefined, controller.signal, { completeImpl }),
 		).rejects.toBeInstanceOf(AIError.AbortError);
+	});
+
+	test("a resolved aborted response is the abort too: completeSimple reports cancellation as a message", async () => {
+		const model = makeAnthropicModel();
+		const controller = new AbortController();
+		const { completeImpl } = recordingCompleteImpl(() => {
+			controller.abort();
+			return assistantMessage(model, { stopReason: "aborted", errorMessage: "Request was aborted" });
+		});
+
+		await expect(
+			compact(makePreparation(), model, "sk-ant-test", undefined, controller.signal, { completeImpl }),
+		).rejects.toBeInstanceOf(AIError.AbortError);
+	});
+
+	test("a resolved error response keeps its HTTP status for downstream classification", async () => {
+		const model = makeAnthropicModel();
+		const { completeImpl } = recordingCompleteImpl(() =>
+			assistantMessage(model, { stopReason: "error", errorMessage: "invalid x-api-key", errorStatus: 401 }),
+		);
+
+		const failure = await compact(makePreparation(), model, "sk-ant-test", undefined, undefined, {
+			completeImpl,
+		}).catch((error: unknown) => error);
+
+		expect(failure).toBeInstanceOf(NativeCompactionError);
+		const cause = (failure as NativeCompactionError).cause;
+		expect(cause).toBeInstanceOf(AIError.ProviderHttpError);
+		expect((cause as AIError.ProviderHttpError).status).toBe(401);
+		expect(AIError.is(AIError.classify(cause), AIError.Flag.AuthFailed)).toBe(true);
 	});
 
 	test("honors the caller's oneshot retry opt-out: one full-context attempt, then the native failure", async () => {

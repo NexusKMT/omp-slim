@@ -469,6 +469,12 @@ describe("AgentSession advisor context maintenance", () => {
 			`${nativeModel.provider}/${nativeModel.id}`,
 			`${sameProviderModel.provider}/${sameProviderModel.id}`,
 		]);
+		// Provider-native compaction re-issues the advisor's own request, so
+		// every candidate receives the advisor's live system prompt.
+		expect(advisor.state.systemPrompt.length).toBeGreaterThan(0);
+		for (const call of compactSpy.mock.calls) {
+			expect(call[5]?.remoteSystemPrompt).toEqual(advisor.state.systemPrompt);
+		}
 		expect(JSON.stringify(advisor.state.messages)).toContain("same-provider native summary");
 	});
 

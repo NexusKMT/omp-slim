@@ -22,6 +22,7 @@ import type {
 	Tool,
 	Usage,
 } from "@oh-my-pi/pi-ai";
+import * as AIError from "@oh-my-pi/pi-ai/error";
 import { supportsAnthropicCompaction } from "@oh-my-pi/pi-ai/providers/anthropic";
 import { isRecord, prompt } from "@oh-my-pi/pi-utils";
 import { type InstrumentedChatSpanOptions, instrumentedCompleteSimple } from "../telemetry";
@@ -44,6 +45,8 @@ export const ANTHROPIC_COMPACTION_MIN_CONTEXT_TOKENS = 55_000;
 export interface AnthropicCompactionPreserveData {
 	provider: string;
 	content: string;
+	/** Opaque provider state the API attached to the block; replayed verbatim. */
+	encryptedContent?: string;
 	/** Model that wrote the summary. */
 	model?: string;
 	/** Prompt tokens the compaction request processed, for display. */
@@ -76,6 +79,9 @@ export function getPreservedAnthropicCompactionData(
 	return {
 		provider: candidate.provider,
 		content: candidate.content,
+		...(typeof candidate.encryptedContent === "string" && candidate.encryptedContent.length > 0
+			? { encryptedContent: candidate.encryptedContent }
+			: {}),
 		...(typeof candidate.model === "string" ? { model: candidate.model } : {}),
 		...(typeof candidate.usedTokens === "number" ? { usedTokens: candidate.usedTokens } : {}),
 	};
@@ -102,7 +108,12 @@ export function getAnthropicCompactionPayload(
 ): AnthropicCompactionPayload | undefined {
 	const preserved = getPreservedAnthropicCompactionData(preserveData);
 	if (!preserved) return undefined;
-	return { type: "anthropicCompaction", provider: preserved.provider, content: preserved.content };
+	return {
+		type: "anthropicCompaction",
+		provider: preserved.provider,
+		content: preserved.content,
+		...(preserved.encryptedContent ? { encryptedContent: preserved.encryptedContent } : {}),
+	};
 }
 
 /**
@@ -167,6 +178,7 @@ export interface AnthropicNativeCompactionRequest {
 
 export interface AnthropicNativeCompactionResponse {
 	content: string;
+	encryptedContent?: string;
 	usage: Usage;
 	model: string;
 }
@@ -186,10 +198,15 @@ export interface AnthropicNativeCompactionOptions
 		Pick<InstrumentedChatSpanOptions, "completeImpl" | "telemetry" | "retry"> {}
 
 /**
- * Run one compaction request and return the summary the API wrote. Throws
- * when the response is an error or carries no summary — the API answers the
- * prompt instead when its input never reached the trigger, and returns an
- * empty block when the model called a tool during summarization.
+ * Run one compaction request and return the summary the API wrote, with the
+ * opaque `encrypted_content` the API attached for the replay. `completeSimple`
+ * resolves terminal failures as messages, so their classification is restored
+ * here: an aborted response is an `AbortError` (a cancellation, never a native
+ * failure) and an error response keeps its HTTP status, so auth and timeout
+ * handling downstream classify it the same way as the OpenAI lanes. A response
+ * without a summary is a native failure — the API answers the prompt instead
+ * when its input never reached the trigger, and returns an empty block when
+ * the model called a tool during summarization.
  */
 export async function requestAnthropicNativeCompaction(
 	model: Model<"anthropic-messages">,
@@ -226,8 +243,14 @@ export async function requestAnthropicNativeCompaction(
 			retry: options.retry,
 		},
 	);
+	if (response.stopReason === "aborted") {
+		throw new AIError.AbortError("Anthropic compaction aborted", { cause: signal?.reason });
+	}
 	if (response.stopReason === "error") {
-		throw new Error(`Anthropic compaction failed: ${response.errorMessage ?? "unknown error"}`);
+		const message = `Anthropic compaction failed: ${response.errorMessage ?? "unknown error"}`;
+		throw response.errorStatus === undefined
+			? new Error(message)
+			: new AIError.ProviderHttpError(message, response.errorStatus);
 	}
 	const payload = response.providerPayload;
 	if (payload?.type !== "anthropicCompaction" || payload.content.length === 0) {
@@ -237,5 +260,10 @@ export async function requestAnthropicNativeCompaction(
 				: "Anthropic compaction response carried no compaction block",
 		);
 	}
-	return { content: payload.content, usage: response.usage, model: response.model };
+	return {
+		content: payload.content,
+		encryptedContent: payload.encryptedContent,
+		usage: response.usage,
+		model: response.model,
+	};
 }

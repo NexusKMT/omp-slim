@@ -1903,20 +1903,6 @@ function fallbackServedModelFromUsage(source: AnthropicWireUsage): string | unde
 }
 
 /**
- * Price a fallback turn per the fallback billing cookbook §4:
- *   • A pre-served attempt with zero output/cache-creation is not billed
- *     (waived classifier block); its iteration is skipped.
- *   • Mid-stream refusals bill their attempting model's input+output at
- *     that model's normal rates.
- *   • The `fallback_message` attempt's input tokens are rebilled at the
- *     served model's cache-read rate (fallback credit — 10% of base input).
- *
- * Top-level `usage.input/output/cacheRead/cacheWrite` stay Anthropic's raw
- * served-attempt counts; `usage.cost` reflects the per-iteration attributed
- * total. Non-fallback turns skip this path entirely and use the requested
- * model at the normal `calculateCost` call.
- */
-/**
  * Resolve a served/iteration model id to its bundled catalog entry when
  * possible so the per-iteration cost uses the served model's pricing
  * (e.g. Opus 4.8 rates for a Fable→Opus fallback). Falls back to
@@ -1939,7 +1925,26 @@ function resolveIterationModel(
 	return requestModel;
 }
 
-function calculateFallbackTurnCost(
+/**
+ * Price a turn per sampling iteration whenever the API reports one per
+ * iteration — a server-side fallback or a server-side compaction. Each
+ * iteration is priced on its own prompt size, so a long-context tier applies
+ * only to an iteration that itself crosses the threshold, never to the
+ * summed totals of two sub-threshold samplings. Fallback turns follow the
+ * fallback billing cookbook §4 on top:
+ *   • A pre-served attempt with zero output/cache-creation is not billed
+ *     (waived classifier block); its iteration is skipped.
+ *   • Mid-stream refusals bill their attempting model's input+output at
+ *     that model's normal rates.
+ *   • The `fallback_message` attempt's input tokens are rebilled at the
+ *     served model's cache-read rate (fallback credit — 10% of base input).
+ *
+ * Top-level `usage.input/output/cacheRead/cacheWrite` keep their summed
+ * counts; `usage.cost` reflects the per-iteration attributed total. Turns
+ * without iterations use the requested model at the normal `calculateCost`
+ * call.
+ */
+function calculateIterationTurnCost(
 	requestModel: Model<"anthropic-messages">,
 	usage: Usage,
 	source: AnthropicWireUsage,
@@ -2627,8 +2632,10 @@ const streamAnthropicOnce = (
 					// Server-side compaction summary (compact-2026-01-12). Never an
 					// assistant content block: it becomes the message's providerPayload
 					// once its block closes. `null` is the API's "model called a tool
-					// instead of summarizing" outcome and yields no payload.
+					// instead of summarizing" outcome and yields no payload. The opaque
+					// `encrypted_content` travels with it, verbatim, for the replay.
 					let compactionContent: string | null | undefined;
+					let compactionEncryptedContent: string | undefined;
 
 					// Pings keep the idle deadline alive once content is flowing (Anthropic
 					// bridges legitimate generation gaps with keepalives), but only within a
@@ -2697,16 +2704,17 @@ const streamAnthropicOnce = (
 								output.usage.output = startUsage.output_tokens || 0;
 								output.usage.cacheRead = startUsage.cache_read_input_tokens || 0;
 								output.usage.cacheWrite = startUsage.cache_creation_input_tokens || 0;
-								applyCompactionIterationUsage(output.usage, startUsage);
+								const compacted = applyCompactionIterationUsage(output.usage, startUsage);
 								output.usage.totalTokens =
 									output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
 								if (serverSideFallback) {
 									const served = fallbackServedModelFromUsage(startUsage);
 									if (served) output.model = served;
-									if (!calculateFallbackTurnCost(model, output.usage, startUsage, output.timestamp)) {
-										calculateCost(model, output.usage, output.timestamp);
-									}
-								} else {
+								}
+								if (
+									!(serverSideFallback || compacted) ||
+									!calculateIterationTurnCost(model, output.usage, startUsage, output.timestamp)
+								) {
 									calculateCost(model, output.usage, output.timestamp);
 								}
 							} else {
@@ -2868,6 +2876,7 @@ const streamAnthropicOnce = (
 							} else if (event.content_block.type === "compaction") {
 								const started = event.content_block.content;
 								compactionContent = typeof started === "string" && started.length > 0 ? started : undefined;
+								compactionEncryptedContent = event.content_block.encrypted_content ?? undefined;
 								openBlocks.set(event.index, { contentIndex: -1, kind: "compaction" });
 							} else {
 								openBlocks.set(event.index, { contentIndex: -1, kind: "ignored" });
@@ -2962,6 +2971,7 @@ const streamAnthropicOnce = (
 								// One delta carries the whole summary; `null` means the model
 								// called a tool during summarization instead of writing one.
 								compactionContent = event.delta.content ?? null;
+								if (event.delta.encrypted_content) compactionEncryptedContent = event.delta.encrypted_content;
 							}
 						} else if (event.type === "content_block_stop") {
 							if (sawTerminalEnvelope) {
@@ -2985,6 +2995,7 @@ const streamAnthropicOnce = (
 										type: "anthropicCompaction",
 										provider: model.provider,
 										content: compactionContent,
+										...(compactionEncryptedContent ? { encryptedContent: compactionEncryptedContent } : {}),
 									};
 								} else {
 									logger.warn("anthropic: server-side compaction produced no summary", {
@@ -2993,6 +3004,7 @@ const streamAnthropicOnce = (
 									});
 								}
 								compactionContent = undefined;
+								compactionEncryptedContent = undefined;
 								continue;
 							}
 							const block = blocks[openBlock.contentIndex];
@@ -3064,16 +3076,17 @@ const streamAnthropicOnce = (
 									output.usage.cacheWrite = deltaUsage.cache_creation_input_tokens;
 								}
 								applyAnthropicUsageExtras(output.usage, deltaUsage);
-								applyCompactionIterationUsage(output.usage, deltaUsage);
+								const compacted = applyCompactionIterationUsage(output.usage, deltaUsage);
 								output.usage.totalTokens =
 									output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
 								if (serverSideFallback) {
 									const served = fallbackServedModelFromUsage(deltaUsage);
 									if (served) output.model = served;
-									if (!calculateFallbackTurnCost(model, output.usage, deltaUsage, output.timestamp)) {
-										calculateCost(model, output.usage, output.timestamp);
-									}
-								} else {
+								}
+								if (
+									!(serverSideFallback || compacted) ||
+									!calculateIterationTurnCost(model, output.usage, deltaUsage, output.timestamp)
+								) {
 									calculateCost(model, output.usage, output.timestamp);
 								}
 							}
@@ -4513,7 +4526,13 @@ export function convertAnthropicMessages(
 			(msg.role === "user" || msg.role === "developer") &&
 			isReplayableAnthropicCompaction(msg.providerPayload, model)
 		) {
-			params.push({ role: "assistant", content: [{ type: "compaction", content: msg.providerPayload.content }] });
+			const { content, encryptedContent } = msg.providerPayload;
+			params.push({
+				role: "assistant",
+				content: [
+					{ type: "compaction", content, ...(encryptedContent ? { encrypted_content: encryptedContent } : {}) },
+				],
+			});
 			continue;
 		}
 		if (msg.role === "user" || msg.role === "developer") {

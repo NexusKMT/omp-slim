@@ -923,6 +923,8 @@ export interface AnthropicCompactionPayload {
 	/** Provider that produced the summary; only that provider replays it natively. */
 	provider: string;
 	content: string;
+	/** Opaque provider state the API attached to the block; replayed verbatim when present. */
+	encryptedContent?: string;
 }
 
 export type ProviderPayload = OpenAIResponsesHistoryPayload | AnthropicMessagePayload | AnthropicCompactionPayload;

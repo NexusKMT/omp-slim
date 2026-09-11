@@ -22,7 +22,7 @@ import type { AssistantMessage, Context, Model, ModelSpec, UserMessage } from "@
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { withEnv, withOfficialAnthropicEndpoint } from "./helpers";
 
-const fableModel: Model<"anthropic-messages"> = buildModel({
+const fableSpec: ModelSpec<"anthropic-messages"> = {
 	id: "claude-fable-5",
 	name: "Claude Fable 5",
 	api: "anthropic-messages",
@@ -33,7 +33,9 @@ const fableModel: Model<"anthropic-messages"> = buildModel({
 	cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
 	contextWindow: 1_000_000,
 	maxTokens: 128_000,
-});
+};
+
+const fableModel: Model<"anthropic-messages"> = buildModel(fableSpec);
 
 const noContextManagementModel: Model<"anthropic-messages"> = buildModel({
 	id: "claude-haiku-4-5",
@@ -71,8 +73,18 @@ function createMockRequest(events: MockAnthropicEvent[]) {
 	};
 }
 
-/** The stream observed live on 2026-09-11 for a paused compaction request. */
-function createPausedCompactionEvents(content: string | null): MockAnthropicEvent[] {
+const ENCRYPTED = "enc_opaque_compaction_state";
+
+/**
+ * The stream observed live on 2026-09-11 for a paused compaction request. The
+ * block and its delta carry `encrypted_content` per the SDK contract
+ * (`BetaCompactionBlock` / `BetaCompactionContentBlockDelta`); `iterations`
+ * appends further sampling iterations after the compaction one.
+ */
+function createPausedCompactionEvents(
+	content: string | null,
+	iterations: Record<string, unknown>[] = [],
+): MockAnthropicEvent[] {
 	return [
 		{
 			type: "message_start",
@@ -87,9 +99,17 @@ function createPausedCompactionEvents(content: string | null): MockAnthropicEven
 				},
 			},
 		},
-		{ type: "content_block_start", index: 0, content_block: { type: "compaction", content: "" } },
+		{
+			type: "content_block_start",
+			index: 0,
+			content_block: { type: "compaction", content: "", encrypted_content: null },
+		},
 		{ type: "ping" },
-		{ type: "content_block_delta", index: 0, delta: { type: "compaction_delta", content } },
+		{
+			type: "content_block_delta",
+			index: 0,
+			delta: { type: "compaction_delta", content, encrypted_content: content === null ? null : ENCRYPTED },
+		},
 		{ type: "content_block_stop", index: 0 },
 		{
 			type: "message_delta",
@@ -105,6 +125,7 @@ function createPausedCompactionEvents(content: string | null): MockAnthropicEven
 						cache_read_input_tokens: 0,
 						cache_creation_input_tokens: 80_082,
 					},
+					...iterations,
 				],
 			},
 		},
@@ -139,11 +160,16 @@ async function captureRequest(
 	return { beta, payload: await promise };
 }
 
-function compactionSummaryMessage(provider: string, content = SUMMARY): UserMessage {
+function compactionSummaryMessage(provider: string, content = SUMMARY, encryptedContent?: string): UserMessage {
 	return {
 		role: "user",
 		content: [{ type: "text", text: `Prior model work available.\n\n<summary>\n${content}\n</summary>` }],
-		providerPayload: { type: "anthropicCompaction", provider, content },
+		providerPayload: {
+			type: "anthropicCompaction",
+			provider,
+			content,
+			...(encryptedContent ? { encryptedContent } : {}),
+		},
 		timestamp: 1,
 	};
 }
@@ -305,7 +331,12 @@ describe("anthropic server-side compaction response", () => {
 		}
 		const result = await s.result();
 
-		expect(result.providerPayload).toEqual({ type: "anthropicCompaction", provider: "anthropic", content: SUMMARY });
+		expect(result.providerPayload).toEqual({
+			type: "anthropicCompaction",
+			provider: "anthropic",
+			content: SUMMARY,
+			encryptedContent: ENCRYPTED,
+		});
 		expect(result.content).toEqual([]);
 		expect(result.stopReason).toBe("stop");
 		expect(result.stopDetails).toEqual({ type: "compaction" });
@@ -321,6 +352,53 @@ describe("anthropic server-side compaction response", () => {
 		expect(result.usage.cost.cacheWrite).toBeCloseTo((80_082 * 12.5) / 1_000_000, 10);
 		// A compaction pause is a legitimate empty stop: no empty-completion retry.
 		expect(create).toHaveBeenCalledTimes(1);
+	});
+
+	it("prices each sampling iteration on its own prompt size, not the summed total", async () => {
+		// Two sub-threshold iterations (80,146 + 130,000 prompt tokens) whose
+		// sum crosses a 200k long-context threshold stay at base rates.
+		const longContextModel: Model<"anthropic-messages"> = buildModel({
+			...fableSpec,
+			cost: {
+				input: 10,
+				output: 50,
+				cacheRead: 1,
+				cacheWrite: 12.5,
+				longContext: { inputThreshold: 200_000, input: 20, output: 100, cacheRead: 2, cacheWrite: 25 },
+			},
+		});
+		vi.spyOn(AnthropicMessages.prototype, "create").mockImplementation(
+			() =>
+				createMockRequest(
+					createPausedCompactionEvents(SUMMARY, [
+						{
+							type: "message",
+							input_tokens: 30_000,
+							output_tokens: 500,
+							cache_read_input_tokens: 100_000,
+							cache_creation_input_tokens: 0,
+						},
+					]),
+				) as never,
+		);
+
+		const s = streamAnthropic(longContextModel, context, {
+			apiKey: "sk-ant-test",
+			anthropicCompaction: { triggerInputTokens: 50_000 },
+		});
+		for await (const _ of s) {
+			// drain
+		}
+		const result = await s.result();
+
+		expect(result.usage.input).toBe(30_064);
+		expect(result.usage.output).toBe(2_502);
+		expect(result.usage.cacheRead).toBe(100_000);
+		expect(result.usage.cacheWrite).toBe(80_082);
+		expect(result.usage.cost.input).toBeCloseTo((30_064 * 10) / 1_000_000, 10);
+		expect(result.usage.cost.output).toBeCloseTo((2_502 * 50) / 1_000_000, 10);
+		expect(result.usage.cost.cacheRead).toBeCloseTo((100_000 * 1) / 1_000_000, 10);
+		expect(result.usage.cost.cacheWrite).toBeCloseTo((80_082 * 12.5) / 1_000_000, 10);
 	});
 
 	it("yields no payload when the model called a tool instead of summarizing", async () => {
@@ -356,6 +434,20 @@ describe("anthropic server-side compaction replay", () => {
 			{ role: "assistant", content: [{ type: "compaction", content: SUMMARY }] },
 			{ role: "user", content: "next" },
 		]);
+	});
+
+	it("round-trips the opaque encrypted_content verbatim with the block", () => {
+		const params = convertAnthropicMessages(
+			[compactionSummaryMessage("anthropic", SUMMARY, ENCRYPTED), { role: "user", content: "next", timestamp: 2 }],
+			fableModel,
+			false,
+			{ replayCompaction: true },
+		);
+
+		expect(params[0]).toEqual({
+			role: "assistant",
+			content: [{ type: "compaction", content: SUMMARY, encrypted_content: ENCRYPTED }],
+		});
 	});
 
 	it("keeps the summary text for another provider's payload and when replay is off", () => {

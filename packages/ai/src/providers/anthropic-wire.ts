@@ -174,11 +174,13 @@ export const COMPACTION_BETA = "compact-2026-01-12";
 /**
  * Server-side compaction summary (compact-2026-01-12). Returned at the start
  * of the assistant response that crossed the trigger; on replay the API drops
- * every block that precedes it, so it may open the messages array.
+ * every block that precedes it, so it may open the messages array. The
+ * `encrypted_content` is opaque provider state, round-tripped verbatim.
  */
 export type CompactionBlockParam = {
 	type: "compaction";
 	content: string;
+	encrypted_content?: string | null;
 	cache_control?: CacheControlEphemeral | null;
 };
 
@@ -431,14 +433,14 @@ export type ResponseContentBlock =
 	| WebSearchToolResultBlockParam
 	| ToolSearchToolResultBlockParam
 	| { type: "fallback"; from: { model: string }; to: { model: string } }
-	| { type: "compaction"; content?: string | null };
+	| { type: "compaction"; content?: string | null; encrypted_content?: string | null };
 
 export type ContentBlockDelta =
 	| { type: "text_delta"; text: string }
 	| { type: "input_json_delta"; partial_json: string }
 	| { type: "thinking_delta"; thinking: string }
 	| { type: "signature_delta"; signature: string }
-	| { type: "compaction_delta"; content?: string | null };
+	| { type: "compaction_delta"; content?: string | null; encrypted_content?: string | null };
 
 export type StopDetails = {
 	type: string;

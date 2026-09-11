@@ -1722,6 +1722,9 @@ export class SessionAdvisors {
 						convertToLlm: messages => this.#host.convertToLlmForSideRequest(messages),
 						telemetry,
 						tools: agent.state.tools,
+						// The advisor's own live prompt, so a provider-native compaction
+						// re-issues the advisor's request shape and reads its cached prefix.
+						remoteSystemPrompt: agent.state.systemPrompt,
 						sessionId: advisorProviderSessionId,
 						promptCacheKey: advisorProviderSessionId,
 						metadata: advisorMetadata,

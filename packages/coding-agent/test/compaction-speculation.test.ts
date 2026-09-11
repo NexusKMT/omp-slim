@@ -400,6 +400,30 @@ describe("async speculative compaction", () => {
 		expect(maintenance.speculationState).toBe("idle");
 	});
 
+	it("re-issues the agent's effective system prompt, not the base, on every compaction path", async () => {
+		// A per-turn `before_agent_start` override lives only on the agent
+		// (`agent.state.systemPrompt`); provider-native compaction re-issues the
+		// live request, so it must carry that prompt to share the cached prefix.
+		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => ({
+			summary: "summary",
+			firstKeptEntryId: preparation.firstKeptEntryId,
+			tokensBefore: preparation.tokensBefore,
+			details: {},
+		}));
+		agent.setSystemPrompt(["per-turn override"]);
+
+		maintenance.maybeStartSpeculativeCompaction(SPECULATION_BAND_START, CONTEXT_WINDOW);
+		await waitForState("armed");
+		await maintenance.compact();
+
+		// The speculative pass and the manual pass both carried the agent's
+		// prompt; the threshold auto-compaction pass reads the same source.
+		expect(compactSpy).toHaveBeenCalledTimes(2);
+		for (const call of compactSpy.mock.calls) {
+			expect(call[5]?.remoteSystemPrompt).toEqual(["per-turn override"]);
+		}
+	});
+
 	it("defers a threshold pass that jumped past the band, then commits the armed result for free", async () => {
 		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => ({
 			summary: "grace summary",

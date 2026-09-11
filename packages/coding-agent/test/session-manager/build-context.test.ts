@@ -315,7 +315,12 @@ describe("buildSessionContext", () => {
 			const nativeCompaction: CompactionEntry = {
 				...compaction("3", "2", "Native summary", "2"),
 				preserveData: {
-					anthropicCompaction: { provider: "anthropic", content: "Native summary", model: "claude-fable-5" },
+					anthropicCompaction: {
+						provider: "anthropic",
+						content: "Native summary",
+						encryptedContent: "enc_state",
+						model: "claude-fable-5",
+					},
 				},
 			};
 			const entries: SessionEntry[] = [
@@ -334,6 +339,7 @@ describe("buildSessionContext", () => {
 				type: "anthropicCompaction",
 				provider: "anthropic",
 				content: "Native summary",
+				encryptedContent: "enc_state",
 			});
 		});
 

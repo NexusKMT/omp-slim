@@ -1798,6 +1798,7 @@ export async function compact(
 	// and takes the local summarizer instead — an eligibility boundary, not a
 	// failure.
 	let nativeSummary: string | undefined;
+	let nativeEncryptedContent: string | undefined;
 	let nativeUsedTokens: number | undefined;
 	if (
 		!usedRemoteCompaction &&
@@ -1819,6 +1820,9 @@ export async function compact(
 									type: "anthropicCompaction",
 									provider: previousNative.provider,
 									content: previousNative.content,
+									...(previousNative.encryptedContent
+										? { encryptedContent: previousNative.encryptedContent }
+										: {}),
 								}
 							: undefined,
 				})
@@ -1864,6 +1868,7 @@ export async function compact(
 				},
 			);
 			nativeSummary = remote.content;
+			nativeEncryptedContent = remote.encryptedContent;
 			nativeUsedTokens = calculatePromptTokens(remote.usage);
 			usedRemoteCompaction = true;
 		} catch (err) {
@@ -1954,6 +1959,7 @@ export async function compact(
 		preserveData = withAnthropicCompactionPreserveData(preserveData, {
 			provider: model.provider,
 			content: summary,
+			...(nativeEncryptedContent ? { encryptedContent: nativeEncryptedContent } : {}),
 			model: model.id,
 			usedTokens: nativeUsedTokens,
 		});
