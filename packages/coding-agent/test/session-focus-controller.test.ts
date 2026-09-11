@@ -412,7 +412,7 @@ describe("SessionFocusController", () => {
 		expect(controller.target).toBeUndefined();
 	});
 
-	it("drops a superseded attachment while a newer revive is pending", async () => {
+	it("drops a superseded attachment once the newer request attaches", async () => {
 		const slowA = makeSessionStub();
 		const slowB = makeSessionStub();
 		const { promise: renderGate, resolve: releaseRender } = Promise.withResolvers<void>();
@@ -438,14 +438,52 @@ describe("SessionFocusController", () => {
 		expect(renderCalls).toBe(1);
 
 		const focusB = controller.focusAgent("B");
+		releaseReviveB(slowB.session);
+		// B's attach starts first and dooms A's; releasing the shared render
+		// gate lets A bail out while B runs to completion.
+		for (let i = 0; i < 50 && renderCalls < 2; i++) await Promise.resolve();
 		releaseRender();
 		await focusA;
-		expect(h.reloadTodoSessions).toEqual([]);
-
-		releaseReviveB(slowB.session);
 		await focusB;
 		expect(controller.focusedAgentId).toBe("B");
 		expect(h.reloadTodoSessions).toEqual([slowB.session]);
+	});
+
+	it("keeps the current attachment when a newer revive fails", async () => {
+		const slowA = makeSessionStub();
+		const { promise: renderGate, resolve: releaseRender } = Promise.withResolvers<void>();
+		let renderCalls = 0;
+		const h = makeHarness({
+			renderInitialMessages: () => {
+				renderCalls++;
+				return renderGate;
+			},
+		});
+		const { promise: reviveB, reject: failReviveB } = Promise.withResolvers<AgentSession>();
+		const lifecycle = {
+			ensureLive: (id: string) => (id === "A" ? Promise.resolve(slowA.session) : reviveB),
+		};
+		const controller = new SessionFocusController(
+			h.ctx,
+			h.registry,
+			() => lifecycle as unknown as AgentLifecycleManager,
+		);
+
+		const focusA = controller.focusAgent("A");
+		for (let i = 0; i < 50 && renderCalls === 0; i++) await Promise.resolve();
+		expect(renderCalls).toBe(1);
+
+		const focusB = controller.focusAgent("B");
+		releaseRender();
+		await focusA;
+		expect(controller.focusedAgentId).toBe("A");
+		expect(h.reloadTodoSessions).toEqual([slowA.session]);
+
+		const failure = new Error("revive failed");
+		failReviveB(failure);
+		await expect(focusB).rejects.toBe(failure);
+		expect(controller.focusedAgentId).toBe("A");
+		expect(controller.target).toBe(slowA.session);
 	});
 
 	it("drops a running attachment on dispose", async () => {

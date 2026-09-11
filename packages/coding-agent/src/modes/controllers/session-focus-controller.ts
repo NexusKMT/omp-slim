@@ -64,11 +64,6 @@ export class SessionFocusController {
 		if (this.ctx.collabGuest) throw new Error("Viewing agents is unavailable in a collab session.");
 		if (id === MAIN_AGENT_ID) return this.unfocus();
 		const request = ++this.#focusRequestSeq;
-		// Doom any in-flight attachment now, not when this request's own
-		// attach starts: a newer click (or dispose) while ensureLive() is
-		// pending must stop the superseded attach rebuilding the old session
-		// under the winner instead of running to completion.
-		++this.#attachGeneration;
 		let session: AgentSession;
 		try {
 			session = await this.lifecycle().ensureLive(id);
@@ -82,7 +77,10 @@ export class SessionFocusController {
 		// still reviving) wins: drop the stale completion instead of letting
 		// the slower revive replace the view.
 		if (request !== this.#focusRequestSeq) return;
-		if (id === this.#focusedAgentId && session === this.#attachedSession) return;
+		// Doom in-flight attachments from older requests now that this one is
+		// known usable — not at request time, so a newer revival that fails
+		// leaves the current attachment undisturbed instead of half torn down.
+		++this.#attachGeneration;
 		this.#focusedAgentId = id;
 		this.#attachedSession = session;
 		this.#registryUnsubscribe ??= this.registry.onChange(e => this.#onRegistryEvent(e));
