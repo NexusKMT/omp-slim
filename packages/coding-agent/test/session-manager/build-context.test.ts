@@ -311,6 +311,32 @@ describe("buildSessionContext", () => {
 			expect((ctx.messages[1] as { content: string }).content).toBe("after compact");
 		});
 
+		it("attaches the Anthropic native replay payload and still emits the kept raw messages", () => {
+			const nativeCompaction: CompactionEntry = {
+				...compaction("3", "2", "Native summary", "2"),
+				preserveData: {
+					anthropicCompaction: { provider: "anthropic", content: "Native summary", model: "claude-fable-5" },
+				},
+			};
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "first"),
+				msg("2", "1", "assistant", "response"),
+				nativeCompaction,
+				msg("4", "3", "user", "after compact"),
+			];
+			const ctx = buildSessionContext(entries);
+			// Summary, the kept assistant turn from firstKeptEntryId, then the new turn:
+			// the Anthropic block replaces nothing in the entry stream.
+			expect(ctx.messages.map(message => message.role)).toEqual(["compactionSummary", "assistant", "user"]);
+			if (ctx.messages[0]?.role !== "compactionSummary") throw new Error("Expected compaction summary message");
+			expect(ctx.messages[0].summary).toBe("Native summary");
+			expect(ctx.messages[0].providerPayload).toEqual({
+				type: "anthropicCompaction",
+				provider: "anthropic",
+				content: "Native summary",
+			});
+		});
+
 		it("caps snapcompact frame payload in LLM context but preserves transcript frames", () => {
 			const oldFrame = "o".repeat(Math.ceil(snapcompact.FRAME_DATA_BYTES_BUDGET / 2) + 1);
 			const newFrame = "n".repeat(oldFrame.length);

@@ -1,0 +1,9 @@
+{{#if retainedTail}}
+SCOPE: The conversation's {{retainedTail}} in context verbatim after your summary. Summarize ONLY the history before those messages. You MUST NOT restate anything from those final messages — the reader sees them right after the summary — and you MUST treat them as the most recent state when describing progress and next steps.
+{{else}}
+SCOPE: The conversation above is the transcript to summarize. The API replaces everything before your summary with it, so nothing you leave out survives into the next context window.
+{{/if}}
+
+---
+
+You MUST NOT call any tools while writing the summary; respond with the summary text only.

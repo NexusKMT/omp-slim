@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import { getAnthropicCompactionPayload } from "@oh-my-pi/pi-agent-core/compaction";
 import {
 	coerceServiceTierByFamily,
 	type OpenAIResponsesHistoryPayload,
@@ -457,8 +458,11 @@ export function buildSessionContext(
 			appendMessage(path[i]);
 		}
 	} else if (compaction) {
-		const providerPayload = getOpenAiRemoteCompactionPayload(compaction);
-		const remoteReplacementHistory = providerPayload?.items;
+		const remotePayload = getOpenAiRemoteCompactionPayload(compaction);
+		const remoteReplacementHistory = remotePayload?.items;
+		// Anthropic server compaction persists a plain-text summary plus its
+		// native replay; the kept tail still comes from entries below.
+		const providerPayload = remotePayload ?? getAnthropicCompactionPayload(compaction.preserveData);
 
 		// Re-attach any archived snapcompact frames so the model can keep
 		// reading the archived history after every context rebuild.

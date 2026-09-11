@@ -21,6 +21,7 @@ import { renderDemotedThinking } from "../dialect/demotion";
 import * as AIError from "../error";
 import { getEnvApiKey, OUTPUT_FALLBACK_BUFFER } from "../stream";
 import type {
+	AnthropicCompactionPayload,
 	AnthropicFallbackContent,
 	AnthropicMessagePayload,
 	AnthropicServerToolContent,
@@ -33,6 +34,7 @@ import type {
 	Message,
 	Model,
 	ProviderInputTransformation,
+	ProviderPayload,
 	ProviderSessionState,
 	RawSseEvent,
 	RedactedThinkingContent,
@@ -85,6 +87,8 @@ import {
 	type ToolInputSchema as AnthropicToolInputSchema,
 	type Tool as AnthropicWireTool,
 	type Usage as AnthropicWireUsage,
+	COMPACTION_BETA,
+	type CompactionEdit,
 	type ContentBlockParam,
 	type FallbackParam,
 	isAnthropicServerToolHistoryBlock,
@@ -1751,6 +1755,126 @@ function parseAnthropicFallbackWireBlock(value: unknown): AnthropicFallbackConte
 	return { type: "fallback", from: { model: from }, to: { model: to } };
 }
 
+const ANTHROPIC_COMPACTION_MIN_TRIGGER_TOKENS = 50_000;
+
+/**
+ * Whether this model's requests reach the official Anthropic API, resolved the
+ * way the transport resolves it — including the Foundry and
+ * `ANTHROPIC_BASE_URL` reroutes that leave `compat.officialEndpoint` stale.
+ */
+export function resolvesToOfficialAnthropicEndpoint(model: Model<"anthropic-messages">): boolean {
+	return isOfficialAnthropicApiUrl(resolveAnthropicBaseUrl(model));
+}
+
+/**
+ * Whether server-side compaction (`compact-2026-01-12`) may be spoken to the
+ * endpoint a request actually reaches: the official API for the first-party
+ * provider, or any endpoint that opted in through `remoteCompaction.enabled`,
+ * and never one whose deployment contract excludes context management. The
+ * same predicate gates emitting the edit, attaching the beta, and replaying a
+ * persisted block, so a route change can never leave a session sending a block
+ * its endpoint rejects.
+ */
+export function supportsAnthropicCompaction(model: Model<"anthropic-messages">, effectiveBaseUrl?: string): boolean {
+	if (model.compat.supportsContextManagement === false) return false;
+	if (model.remoteCompaction?.enabled === false) return false;
+	if (model.remoteCompaction?.enabled === true) return true;
+	return (
+		model.provider === "anthropic" &&
+		(effectiveBaseUrl === undefined
+			? resolvesToOfficialAnthropicEndpoint(model)
+			: isOfficialAnthropicApiUrl(effectiveBaseUrl))
+	);
+}
+
+/**
+ * Whether a persisted compaction summary replays as a native `compaction`
+ * block: only the provider that produced it may replay it, and only on a
+ * request whose endpoint supports compaction (the caller decides that with
+ * {@link supportsAnthropicCompaction}); every other model reads the text.
+ */
+function isReplayableAnthropicCompaction(
+	payload: ProviderPayload | undefined,
+	model: Model<"anthropic-messages">,
+): payload is AnthropicCompactionPayload {
+	return payload?.type === "anthropicCompaction" && payload.provider === model.provider && payload.content.length > 0;
+}
+
+/** Whether any message in `messages` replays a native compaction block. */
+function contextReplaysAnthropicCompaction(messages: readonly Message[], model: Model<"anthropic-messages">): boolean {
+	return messages.some(
+		message =>
+			(message.role === "user" || message.role === "developer") &&
+			isReplayableAnthropicCompaction(message.providerPayload, model),
+	);
+}
+
+/**
+ * The `compact_20260112` edit for a request that opted into server-side
+ * compaction. The trigger is clamped to the API's 50k floor: a lower value is
+ * rejected outright rather than compacting sooner.
+ */
+function buildAnthropicCompactionEdit(options: AnthropicOptions | undefined): CompactionEdit | undefined {
+	const request = options?.anthropicCompaction;
+	if (!request) return undefined;
+	const edit: CompactionEdit = { type: "compact_20260112" };
+	if (request.triggerInputTokens !== undefined && Number.isFinite(request.triggerInputTokens)) {
+		edit.trigger = {
+			type: "input_tokens",
+			value: Math.max(ANTHROPIC_COMPACTION_MIN_TRIGGER_TOKENS, Math.floor(request.triggerInputTokens)),
+		};
+	}
+	if (request.pauseAfterCompaction !== undefined) edit.pause_after_compaction = request.pauseAfterCompaction;
+	if (request.instructions) edit.instructions = request.instructions;
+	return edit;
+}
+
+/**
+ * The edit a request needs merely to replay a persisted `compaction` block:
+ * the API rejects the block unless a `compact_20260112` strategy is present.
+ * The trigger sits at the model's context window, which no in-window prompt
+ * reaches, so the live turn never compacts on its own — the harness owns
+ * when compaction happens and persists it as a compaction entry.
+ */
+function buildAnthropicCompactionReplayEdit(model: Model<"anthropic-messages">): CompactionEdit {
+	return {
+		type: "compact_20260112",
+		trigger: {
+			type: "input_tokens",
+			value: Math.max(ANTHROPIC_COMPACTION_MIN_TRIGGER_TOKENS, model.contextWindow ?? 0),
+		},
+	};
+}
+
+/**
+ * Replace the top-level token counts with the sum over every sampling
+ * iteration once a request ran a server-side compaction. The API's top-level
+ * counts exclude the compaction iteration while `message_start` still reports
+ * its cache write, so the iteration list is the only consistent total for a
+ * compacting request (and the documented one for billing). Requests without a
+ * compaction iteration are left untouched.
+ */
+function applyCompactionIterationUsage(usage: Usage, source: AnthropicWireUsage): boolean {
+	const iterations = source.iterations;
+	if (!iterations?.some(iteration => iteration?.type === "compaction")) return false;
+	let input = 0;
+	let output = 0;
+	let cacheRead = 0;
+	let cacheWrite = 0;
+	for (const iteration of iterations) {
+		if (!iteration) continue;
+		input += iteration.input_tokens ?? 0;
+		output += iteration.output_tokens ?? 0;
+		cacheRead += iteration.cache_read_input_tokens ?? 0;
+		cacheWrite += iteration.cache_creation_input_tokens ?? 0;
+	}
+	usage.input = input;
+	usage.output = output;
+	usage.cacheRead = cacheRead;
+	usage.cacheWrite = cacheWrite;
+	return true;
+}
+
 /**
  * The definitive "served by fallback" signal per Anthropic's fallback
  * billing cookbook (§4): a `fallback_message` iteration in `usage.iterations`.
@@ -2038,6 +2162,9 @@ const streamAnthropicOnce = (
 			const apiKey = options?.apiKey ?? getEnvApiKey(model.provider) ?? "";
 			const baseUrl = resolveAnthropicBaseUrl(model, apiKey) ?? "https://api.anthropic.com";
 			const supportsEagerToolInputStreaming = resolveEagerToolInputStreamingSupport(model, baseUrl);
+			// Injected SDK clients own their headers, so the compaction beta cannot
+			// be added for them; everything compaction-related stays inert there.
+			const compactionSupported = !options?.client && supportsAnthropicCompaction(model, baseUrl);
 			const providerSessionState = getAnthropicProviderSessionState(
 				options?.providerSessionState,
 				baseUrl,
@@ -2132,6 +2259,18 @@ const streamAnthropicOnce = (
 				) {
 					extraBetas.push(contextManagementBeta);
 				}
+				// Server-side compaction: the `compact_20260112` edit and any replayed
+				// `compaction` block both require the compaction beta. Gated on the
+				// endpoint the request actually reaches, matching the edit and the
+				// replay gate in buildParams / convertAnthropicMessages.
+				if (
+					compactionSupported &&
+					(options?.anthropicCompaction !== undefined ||
+						contextReplaysAnthropicCompaction(context.messages, model)) &&
+					!extraBetas.includes(COMPACTION_BETA)
+				) {
+					extraBetas.push(COMPACTION_BETA);
+				}
 				// `ttl: "1h"` requires the extended-cache-ttl beta on API-key
 				// requests. OAuth requests never add it here: agent requests
 				// already carry it in the Claude Code beta list, and utility
@@ -2191,6 +2330,7 @@ const streamAnthropicOnce = (
 			const preparedContext = await prepareAnthropicManyImageContext(context, model.input.includes("image"));
 			const prepareParams = async (): Promise<MessageCreateParamsStreaming> => {
 				let nextParams = buildParams(model, preparedContext, isOAuthToken, options, {
+					compactionSupported,
 					disableStrictTools,
 					useUmansGatewayWebSearch: umansGatewayWebSearchHeader !== undefined,
 					forceDemoteUnsignedThinking,
@@ -2456,9 +2596,15 @@ const streamAnthropicOnce = (
 								| "fallback"
 								| "anthropicServerTool"
 								| "toolCall"
+								| "compaction"
 								| "ignored";
 						}
 					>();
+					// Server-side compaction summary (compact-2026-01-12). Never an
+					// assistant content block: it becomes the message's providerPayload
+					// once its block closes. `null` is the API's "model called a tool
+					// instead of summarizing" outcome and yields no payload.
+					let compactionContent: string | null | undefined;
 
 					// Pings keep the idle deadline alive once content is flowing (Anthropic
 					// bridges legitimate generation gaps with keepalives), but only within a
@@ -2527,6 +2673,7 @@ const streamAnthropicOnce = (
 								output.usage.output = startUsage.output_tokens || 0;
 								output.usage.cacheRead = startUsage.cache_read_input_tokens || 0;
 								output.usage.cacheWrite = startUsage.cache_creation_input_tokens || 0;
+								applyCompactionIterationUsage(output.usage, startUsage);
 								output.usage.totalTokens =
 									output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
 								if (serverSideFallback) {
@@ -2694,6 +2841,10 @@ const streamAnthropicOnce = (
 									contentIndex,
 									partial: output,
 								});
+							} else if (event.content_block.type === "compaction") {
+								const started = event.content_block.content;
+								compactionContent = typeof started === "string" && started.length > 0 ? started : undefined;
+								openBlocks.set(event.index, { contentIndex: -1, kind: "compaction" });
 							} else {
 								openBlocks.set(event.index, { contentIndex: -1, kind: "ignored" });
 							}
@@ -2779,6 +2930,14 @@ const streamAnthropicOnce = (
 								streamedReplayUnsafeContent = true;
 								block.thinkingSignature = block.thinkingSignature || "";
 								block.thinkingSignature += event.delta.signature;
+							} else if (event.delta.type === "compaction_delta") {
+								if (openBlock.kind !== "compaction") {
+									reportAnthropicEnvelopeAnomaly(`received compaction_delta for ${openBlock.kind} block`);
+									continue;
+								}
+								// One delta carries the whole summary; `null` means the model
+								// called a tool during summarization instead of writing one.
+								compactionContent = event.delta.content ?? null;
 							}
 						} else if (event.type === "content_block_stop") {
 							if (sawTerminalEnvelope) {
@@ -2792,6 +2951,24 @@ const streamAnthropicOnce = (
 							}
 							if (openBlock.kind === "ignored") {
 								openBlocks.delete(event.index);
+								continue;
+							}
+							if (openBlock.kind === "compaction") {
+								openBlocks.delete(event.index);
+								closedBlockIndexes.add(event.index);
+								if (typeof compactionContent === "string" && compactionContent.length > 0) {
+									output.providerPayload = {
+										type: "anthropicCompaction",
+										provider: model.provider,
+										content: compactionContent,
+									};
+								} else {
+									logger.warn("anthropic: server-side compaction produced no summary", {
+										model: model.id,
+										reason: compactionContent === null ? "tool_call_during_summarization" : "empty",
+									});
+								}
+								compactionContent = undefined;
 								continue;
 							}
 							const block = blocks[openBlock.contentIndex];
@@ -2823,6 +3000,10 @@ const streamAnthropicOnce = (
 							if (rawStopReason) {
 								output.stopReason = mapStopReason(rawStopReason);
 								sawTerminalEnvelope = true;
+								// `pause_after_compaction` ends the response right after the
+								// summary block: a legitimate empty stop, distinguished here so
+								// the empty-completion retry leaves it alone.
+								if (rawStopReason === "compaction") output.stopDetails = { type: "compaction" };
 							}
 							if (output.stopReason === "error") {
 								const stopDetails = delta?.stop_details;
@@ -2859,6 +3040,7 @@ const streamAnthropicOnce = (
 									output.usage.cacheWrite = deltaUsage.cache_creation_input_tokens;
 								}
 								applyAnthropicUsageExtras(output.usage, deltaUsage);
+								applyCompactionIterationUsage(output.usage, deltaUsage);
 								output.usage.totalTokens =
 									output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
 								if (serverSideFallback) {
@@ -3404,7 +3586,14 @@ function disableThinkingIfToolChoiceForced(
 	if (toolChoice.type !== "any" && toolChoice.type !== "tool") return;
 
 	delete params.thinking;
-	delete params.context_management;
+	// Only the thinking edit is tied to thinking; a compaction strategy must
+	// stay because any replayed `compaction` block is rejected without it.
+	const compactionEdits = params.context_management?.edits.filter(edit => edit.type === "compact_20260112") ?? [];
+	if (compactionEdits.length > 0) {
+		params.context_management = { edits: compactionEdits };
+	} else {
+		delete params.context_management;
+	}
 
 	// Adaptive-only models can't be switched off by omitting `thinking` — a bare
 	// omission defaults to adaptive thinking ON, so a forced-tool turn would still
@@ -3885,6 +4074,12 @@ type AnthropicParamBuildOptions = {
 	providerSessionState?: AnthropicProviderSessionState;
 	/** Sanitized server-side fallback entries; defaults to `options?.fallbacks` when omitted. */
 	fallbacks?: AnthropicOptions["fallbacks"];
+	/**
+	 * Whether the endpoint this request reaches accepts server-side compaction
+	 * (see {@link supportsAnthropicCompaction}); false keeps the edit, the beta,
+	 * and block replay inert. Defaults to the model's static resolution.
+	 */
+	compactionSupported?: boolean;
 };
 
 function buildParams(
@@ -3904,6 +4099,7 @@ function buildParams(
 		droppedThinkingBlocks,
 		providerSessionState,
 		fallbacks = options?.fallbacks,
+		compactionSupported = !options?.client && supportsAnthropicCompaction(model),
 	} = buildOptions;
 	// A session-scoped auto-demote (learned from a live signing 400) clones the
 	// resolved compat with `replayUnsignedThinking: false` so every subsequent
@@ -4023,9 +4219,21 @@ function buildParams(
 		!options?.client &&
 		model.compat.supportsContextManagement !== false &&
 		(thinking?.type === "adaptive" || thinking?.type === "enabled");
-	const contextManagement = shouldKeepThinkingContext
-		? { edits: [{ type: "clear_thinking_20251015" as const, keep: "all" as const }] }
+	// Server-side compaction rides the same field. Injected clients are skipped
+	// for the same reason: the compaction beta cannot be added to their headers.
+	// Replaying a persisted block also needs a strategy present (the API
+	// rejects the block without one), so a request that merely continues a
+	// natively compacted conversation carries a never-firing edit.
+	const compactionEdit = compactionSupported
+		? (buildAnthropicCompactionEdit(options) ??
+			(contextReplaysAnthropicCompaction(context.messages, model)
+				? buildAnthropicCompactionReplayEdit(model)
+				: undefined))
 		: undefined;
+	const contextManagementEdits: NonNullable<MessageCreateParams["context_management"]>["edits"] = [];
+	if (shouldKeepThinkingContext) contextManagementEdits.push({ type: "clear_thinking_20251015", keep: "all" });
+	if (compactionEdit) contextManagementEdits.push(compactionEdit);
+	const contextManagement = contextManagementEdits.length > 0 ? { edits: contextManagementEdits } : undefined;
 
 	// Pre-compute output_config. Skip `effort` on Vertex rawPredict: it requires
 	// the `effort-2025-11-24` beta, which that adapter can only accept in the body
@@ -4033,6 +4241,7 @@ function buildParams(
 	// — so the field is dropped alongside the beta to avoid a 400 (#5614).
 	let wireMessages = convertAnthropicMessages(context.messages, effectiveModel, isOAuthToken, {
 		serverSideFallbackEnabled: !!fallbacks?.length,
+		replayCompaction: compactionSupported,
 		dropAllThinking,
 		droppedThinkingBlocks,
 	});
@@ -4245,6 +4454,13 @@ function toWellFormedDeep(value: unknown): unknown {
  * `fallback` content block from a prior turn be replayed on the wire;
  * otherwise the block is dropped to avoid a 400 on non-fallback requests
  * that don't send the beta.
+ *
+ * `opts.replayCompaction` — replay a user-role compaction summary that
+ * carries an {@link AnthropicCompactionPayload} from this provider as a
+ * native `compaction` block instead of its text. The API drops every block
+ * before the compaction block, so the assistant turn carrying it may open
+ * the conversation; the request must send the compaction beta (the stream
+ * entry point adds it whenever such a payload is present).
  */
 export function convertAnthropicMessages(
 	messages: Message[],
@@ -4252,6 +4468,7 @@ export function convertAnthropicMessages(
 	isOAuthToken: boolean,
 	opts?: {
 		serverSideFallbackEnabled?: boolean;
+		replayCompaction?: boolean;
 		dropAllThinking?: boolean;
 		droppedThinkingBlocks?: ReadonlySet<string>;
 	},
@@ -4267,6 +4484,14 @@ export function convertAnthropicMessages(
 	for (let i = 0; i < transformedMessages.length; i++) {
 		const msg = transformedMessages[i];
 
+		if (
+			opts?.replayCompaction &&
+			(msg.role === "user" || msg.role === "developer") &&
+			isReplayableAnthropicCompaction(msg.providerPayload, model)
+		) {
+			params.push({ role: "assistant", content: [{ type: "compaction", content: msg.providerPayload.content }] });
+			continue;
+		}
 		if (msg.role === "user" || msg.role === "developer") {
 			const payload =
 				msg.role === "developer" && msg.providerPayload?.type === "anthropicMessage"
@@ -4533,6 +4758,26 @@ export function convertAnthropicMessages(
 				...(hasEffort ? { output_config: { effort: developer.payload?.effort } } : {}),
 			};
 		}
+	}
+	// A replayed compaction block opens the assistant response it was produced
+	// in, so when the retained tail begins with an assistant turn the block
+	// belongs at the head of that turn — the API's own response shape — rather
+	// than in a standalone assistant param that would force a synthetic
+	// `Continue.` user turn between two assistants.
+	for (let i = params.length - 2; i >= 0; i--) {
+		const current = params[i];
+		const next = params[i + 1];
+		if (
+			current.role !== "assistant" ||
+			next?.role !== "assistant" ||
+			typeof current.content === "string" ||
+			current.content.length !== 1 ||
+			current.content[0]?.type !== "compaction" ||
+			typeof next.content === "string"
+		) {
+			continue;
+		}
+		params.splice(i, 2, { ...next, content: [current.content[0], ...next.content] });
 	}
 	// Dropped empty user/developer turns can leave two assistant params adjacent;
 	// the API rejects consecutive assistant messages. Repair with the same neutral
@@ -5089,6 +5334,8 @@ function mapStopReason(reason: string): StopReason {
 		case "refusal":
 			return "error";
 		case "pause_turn": // Stop is good enough -> resubmit
+			return "stop";
+		case "compaction": // pause_after_compaction: the summary block is the whole response
 			return "stop";
 		case "stop_sequence":
 			return "stop"; // A caller-supplied stop_sequences entry matched; the turn completed normally.
