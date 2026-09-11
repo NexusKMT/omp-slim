@@ -1767,15 +1767,18 @@ export function resolvesToOfficialAnthropicEndpoint(model: Model<"anthropic-mess
 }
 
 /**
- * Whether server-side compaction (`compact-2026-01-12`) may be spoken to the
- * endpoint a request actually reaches: the official API for the first-party
- * provider, or any endpoint that opted in through `remoteCompaction.enabled`,
- * and never one whose deployment contract excludes context management. The
- * same predicate gates emitting the edit, attaching the beta, and replaying a
- * persisted block, so a route change can never leave a session sending a block
+ * Whether server-side compaction (`compact-2026-01-12`) may be spoken for
+ * this model to the endpoint a request actually reaches: a model line the
+ * beta supports (`compat.supportsServerCompaction`, rule-owned in the
+ * catalog), on the official API for the first-party provider or on any
+ * endpoint that opted in through `remoteCompaction.enabled`, and never on one
+ * whose deployment contract excludes context management. The same predicate
+ * gates emitting the edit, attaching the beta, and replaying a persisted
+ * block, so a route or model change can never leave a session sending a block
  * its endpoint rejects.
  */
 export function supportsAnthropicCompaction(model: Model<"anthropic-messages">, effectiveBaseUrl?: string): boolean {
+	if (!model.compat.supportsServerCompaction) return false;
 	if (model.compat.supportsContextManagement === false) return false;
 	if (model.remoteCompaction?.enabled === false) return false;
 	if (model.remoteCompaction?.enabled === true) return true;
@@ -1844,6 +1847,15 @@ function buildAnthropicCompactionReplayEdit(model: Model<"anthropic-messages">):
 			value: Math.max(ANTHROPIC_COMPACTION_MIN_TRIGGER_TOKENS, model.contextWindow ?? 0),
 		},
 	};
+}
+
+/**
+ * Whether the request carries a `compact_20260112` edit — a live compaction
+ * request or a replayed block — and so must carry the compaction beta.
+ */
+function carriesCompactionEdit(params: MessageCreateParams): boolean {
+	const edits = params.context_management?.edits;
+	return edits !== undefined && edits.some(edit => edit.type === "compact_20260112");
 }
 
 /**
@@ -2162,9 +2174,9 @@ const streamAnthropicOnce = (
 			const apiKey = options?.apiKey ?? getEnvApiKey(model.provider) ?? "";
 			const baseUrl = resolveAnthropicBaseUrl(model, apiKey) ?? "https://api.anthropic.com";
 			const supportsEagerToolInputStreaming = resolveEagerToolInputStreamingSupport(model, baseUrl);
-			// Injected SDK clients own their headers, so the compaction beta cannot
-			// be added for them; everything compaction-related stays inert there.
-			const compactionSupported = !options?.client && supportsAnthropicCompaction(model, baseUrl);
+			// Injected SDK clients receive the compaction beta per request (see the
+			// request site), so eligibility is the same with and without a client.
+			const compactionSupported = supportsAnthropicCompaction(model, baseUrl);
 			const providerSessionState = getAnthropicProviderSessionState(
 				options?.providerSessionState,
 				baseUrl,
@@ -2380,9 +2392,15 @@ const streamAnthropicOnce = (
 					body: refreshParams,
 				};
 				const { requestSignal } = activeAbortTracker;
+				// A replayed compaction block needs the beta on injected clients too.
+				const refreshHeaders =
+					options?.client !== undefined && !isVertexRawPredictUrl(baseUrl) && carriesCompactionEdit(refreshParams)
+						? mergeAnthropicBetaHeader(mergedCallerHeaders, COMPACTION_BETA)
+						: undefined;
 				const requestOptions = {
 					...createSdkStreamRequestOptions(requestSignal, requestTimeoutMs),
 					maxRetries: 0,
+					...(refreshHeaders ? { headers: refreshHeaders } : {}),
 				};
 				const request: unknown =
 					isOAuthToken && client.beta
@@ -2530,6 +2548,12 @@ const streamAnthropicOnce = (
 						injectedClientBetaHeaders = mergeAnthropicBetaHeader(
 							injectedClientBetaHeaders ?? mergedCallerHeaders,
 							effortBeta,
+						);
+					}
+					if (carriesCompactionEdit(params)) {
+						injectedClientBetaHeaders = mergeAnthropicBetaHeader(
+							injectedClientBetaHeaders ?? mergedCallerHeaders,
+							COMPACTION_BETA,
 						);
 					}
 				}
@@ -4099,7 +4123,7 @@ function buildParams(
 		droppedThinkingBlocks,
 		providerSessionState,
 		fallbacks = options?.fallbacks,
-		compactionSupported = !options?.client && supportsAnthropicCompaction(model),
+		compactionSupported = supportsAnthropicCompaction(model),
 	} = buildOptions;
 	// A session-scoped auto-demote (learned from a live signing 400) clones the
 	// resolved compat with `replayUnsignedThinking: false` so every subsequent
@@ -4219,11 +4243,11 @@ function buildParams(
 		!options?.client &&
 		model.compat.supportsContextManagement !== false &&
 		(thinking?.type === "adaptive" || thinking?.type === "enabled");
-	// Server-side compaction rides the same field. Injected clients are skipped
-	// for the same reason: the compaction beta cannot be added to their headers.
-	// Replaying a persisted block also needs a strategy present (the API
-	// rejects the block without one), so a request that merely continues a
-	// natively compacted conversation carries a never-firing edit.
+	// Server-side compaction rides the same field; injected clients get the
+	// compaction beta per request, so it is not skipped for them. Replaying a
+	// persisted block also needs a strategy present (the API rejects the block
+	// without one), so a request that merely continues a natively compacted
+	// conversation carries a never-firing edit.
 	const compactionEdit = compactionSupported
 		? (buildAnthropicCompactionEdit(options) ??
 			(contextReplaysAnthropicCompaction(context.messages, model)

@@ -460,6 +460,13 @@ export interface AnthropicCompat {
 	/** Whether thinking requests may include `context_management` and its beta header. Default: true. */
 	supportsContextManagement?: boolean;
 	/**
+	 * Whether the model lineage supports Anthropic server-side compaction
+	 * (`compact-2026-01-12`: the `compact_20260112` edit and replayed
+	 * `compaction` blocks). Rule-owned per model line; the beta covers the
+	 * adaptive-thinking generation onward and rejects older lines. Default: false.
+	 */
+	supportsServerCompaction?: boolean;
+	/**
 	 * Whether requests may carry `output_config.effort` (and its effort beta
 	 * header). Vertex AI rejects the field/header. Default: true.
 	 */

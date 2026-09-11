@@ -202,6 +202,92 @@ describe("anthropic server-side compaction request", () => {
 		expect(payload.context_management).toBeUndefined();
 		expect(beta).not.toContain("compact-2026-01-12");
 	});
+
+	it("stays inert on a model line the beta rejects, even on the official endpoint", async () => {
+		// Sonnet 4.5 is budget-thinking: the catalog rule (`supports-server-compaction`)
+		// leaves it unsupported, so a route opt-in cannot resurrect the edit either.
+		const sonnet45Spec: ModelSpec<"anthropic-messages"> = {
+			id: "claude-sonnet-4-5",
+			name: "Claude Sonnet 4.5",
+			api: "anthropic-messages",
+			provider: "anthropic",
+			baseUrl: "https://api.anthropic.com",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+			contextWindow: 1_000_000,
+			maxTokens: 64_000,
+		};
+		const sonnet45 = buildModel(sonnet45Spec);
+		const { beta, payload } = await captureRequest(sonnet45, {
+			thinkingEnabled: false,
+			anthropicCompaction: { triggerInputTokens: 50_000, pauseAfterCompaction: true },
+		});
+
+		expect(sonnet45.compat.supportsServerCompaction).toBe(false);
+		expect(payload.context_management).toBeUndefined();
+		expect(beta).not.toContain("compact-2026-01-12");
+
+		const optedIn = buildModel({ ...sonnet45Spec, remoteCompaction: { enabled: true } });
+		const optedInRequest = await captureRequest(optedIn, {
+			thinkingEnabled: false,
+			anthropicCompaction: { triggerInputTokens: 50_000 },
+		});
+		expect(optedInRequest.payload.context_management).toBeUndefined();
+	});
+	it("attaches the compaction beta per request for injected clients, on compaction and on replay", async () => {
+		// Injected SDK clients own their default headers, so the beta rides the
+		// per-request headers exactly like the effort and control betas do.
+		const capture = async (options: Parameters<typeof streamAnthropic>[2], messages = context.messages) => {
+			let params: Record<string, unknown> | undefined;
+			let headers: Record<string, string> | undefined;
+			await streamAnthropic(
+				fableModel,
+				{ systemPrompt: ["auditor"], messages },
+				{
+					apiKey: "sk-ant-test",
+					...options,
+					client: {
+						messages: {
+							create: (requestParams, requestOptions) => {
+								params = requestParams as unknown as Record<string, unknown>;
+								headers = (requestOptions as { headers?: Record<string, string> } | undefined)?.headers;
+								throw new Error("stop-after-capture");
+							},
+						},
+					},
+				},
+			)
+				.result()
+				.catch(() => undefined);
+			return { params, beta: headers?.["anthropic-beta"] ?? "" };
+		};
+
+		const live = await capture({ anthropicCompaction: { triggerInputTokens: 50_000, pauseAfterCompaction: true } });
+		expect(live.params?.context_management).toEqual({
+			edits: [
+				{
+					type: "compact_20260112",
+					trigger: { type: "input_tokens", value: 50_000 },
+					pause_after_compaction: true,
+				},
+			],
+		});
+		expect(live.beta).toContain("compact-2026-01-12");
+
+		const replay = await capture({}, [
+			compactionSummaryMessage("anthropic"),
+			{ role: "user", content: "next", timestamp: 2 },
+		]);
+		expect(replay.params?.context_management).toEqual({
+			edits: [{ type: "compact_20260112", trigger: { type: "input_tokens", value: 1_000_000 } }],
+		});
+		expect(replay.beta).toContain("compact-2026-01-12");
+
+		const plain = await capture({});
+		expect(plain.params?.context_management).toBeUndefined();
+		expect(plain.beta).not.toContain("compact-2026-01-12");
+	});
 });
 
 describe("anthropic server-side compaction response", () => {

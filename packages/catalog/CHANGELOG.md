@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `supports-server-compaction` compat axis (`compat.supportsServerCompaction`): whether a model line accepts Anthropic server-side compaction (`compact-2026-01-12`). Class rules enable it for Opus 4.6+, Sonnet 4.6+, and Fable/Mythos 5 on every Anthropic-messages host; the default is `false`.
+
 ## [18.1.17] - 2026-09-10
 
 ### Added

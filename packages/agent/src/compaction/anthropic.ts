@@ -55,18 +55,15 @@ function isAnthropicMessagesModel(model: Model): model is Model<"anthropic-messa
 }
 
 /**
- * Whether a model compacts through the Anthropic compaction beta: a model the
- * beta supports (the adaptive-thinking generation — Opus 4.6+, Sonnet 4.6+,
- * Fable/Mythos 5 — matches the documented model list; Haiku 4.5 and the
- * budget-thinking generations are rejected by the API) on an endpoint that
- * accepts it. Endpoint support is resolved the way the provider resolves the
- * request URL, so a Foundry or `ANTHROPIC_BASE_URL` reroute of a first-party
- * model is excluded unless the route opted in with `remoteCompaction.enabled`.
+ * Whether a model compacts through the Anthropic compaction beta. Model
+ * eligibility is catalog policy (`compat.supportsServerCompaction`, the
+ * lineage the beta documents); endpoint eligibility is resolved the way the
+ * provider routes requests, so a Foundry or `ANTHROPIC_BASE_URL` reroute of a
+ * first-party model is excluded unless the route opted in with
+ * `remoteCompaction.enabled`.
  */
 export function shouldUseAnthropicNativeCompaction(model: Model): model is Model<"anthropic-messages"> {
-	if (!isAnthropicMessagesModel(model)) return false;
-	if (model.thinking?.mode !== "anthropic-adaptive") return false;
-	return supportsAnthropicCompaction(model);
+	return isAnthropicMessagesModel(model) && supportsAnthropicCompaction(model);
 }
 
 export function getPreservedAnthropicCompactionData(
@@ -138,11 +135,12 @@ export function describeRetainedTail(messages: readonly Message[]): string | und
 
 /**
  * Summarization prompt sent as the edit's `instructions`, which replace the
- * API default entirely: the retained-tail boundary first, so the summary
- * covers only the history the rebuilt context drops, then the same structure
- * prompt as the local summarizer, the caller's focus, and the tool-abstention
- * clause the API recommends when tools are defined (a summarization pass that
- * calls a tool yields no summary).
+ * API default entirely. The template lays out the retained-tail boundary
+ * first, so the summary covers only the history the rebuilt context drops,
+ * then the caller's extra context, the same structure prompt as the local
+ * summarizer, the caller's focus, and the tool-abstention clause the API
+ * recommends when tools are defined (a summarization pass that calls a tool
+ * yields no summary).
  */
 export function buildAnthropicCompactionInstructions(
 	basePrompt: string,
@@ -150,12 +148,12 @@ export function buildAnthropicCompactionInstructions(
 	extraContext: string | undefined,
 	retainedTail: string | undefined,
 ): string {
-	const rendered = prompt.render(anthropicCompactionInstructionsPrompt, { retainedTail });
-	const [scope, abstention] = rendered.split("\n\n---\n\n");
-	const sections = [scope, extraContext, basePrompt];
-	if (customInstructions) sections.push(`Additional focus: ${customInstructions}`);
-	sections.push(abstention);
-	return sections.filter((section): section is string => !!section && section.length > 0).join("\n\n");
+	return prompt.render(anthropicCompactionInstructionsPrompt, {
+		basePrompt,
+		customInstructions,
+		extraContext,
+		retainedTail,
+	});
 }
 
 export interface AnthropicNativeCompactionRequest {

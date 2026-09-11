@@ -4,6 +4,14 @@ SCOPE: The conversation's {{retainedTail}} in context verbatim after your summar
 SCOPE: The conversation above is the transcript to summarize. The API replaces everything before your summary with it, so nothing you leave out survives into the next context window.
 {{/if}}
 
----
+{{#if extraContext}}
+{{extraContext}}
+
+{{/if}}
+{{basePrompt}}
+{{#if customInstructions}}
+
+Additional focus: {{customInstructions}}
+{{/if}}
 
 You MUST NOT call any tools while writing the summary; respond with the summary text only.
