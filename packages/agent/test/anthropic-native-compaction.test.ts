@@ -363,19 +363,20 @@ describe("compact() Anthropic native lane", () => {
 		});
 	});
 
-	test("reuses the previous compaction timestamp so retained thinking survives the rewrite", async () => {
+	test("derives the rewrite marker from the retained tail, not the previous commit", async () => {
 		const model = makeAnthropicModel();
 		const { calls, completeImpl } = recordingCompleteImpl(() =>
 			assistantMessage(model, {
 				providerPayload: { type: "anthropicCompaction", provider: "anthropic", content: "second summary" },
 			}),
 		);
-		const previousSummaryTimestamp = new Date(1000).toISOString();
+		// A re-retained tail can predate the previous compaction's commit: the
+		// marker must still precede the tail, exactly like the live rebuild.
 		const preparation = makePreparation({
 			messagesToSummarize: [{ role: "user", content: "long history", timestamp: 2000 }],
 			recentMessages: [{ role: "user", content: "recent", timestamp: 3000 }],
 			previousSummary: "first summary",
-			previousSummaryTimestamp,
+			previousSummaryTimestamp: new Date(90_000).toISOString(),
 			previousPreserveData: {
 				anthropicCompaction: { provider: "anthropic", content: "first summary" },
 			},
@@ -385,7 +386,7 @@ describe("compact() Anthropic native lane", () => {
 
 		const [{ ctx }] = calls;
 		const first = ctx.messages[0] as { historyRewriteAt?: number };
-		expect(first.historyRewriteAt).toBe(new Date(previousSummaryTimestamp).getTime());
+		expect(first.historyRewriteAt).toBe(3_000 - 1);
 		// The rewrite marker precedes the retained tail, so prefix-bound thinking
 		// in the tail is not treated as pre-rewrite and stripped.
 		const retained = ctx.messages[ctx.messages.length - 1] as { timestamp: number };
