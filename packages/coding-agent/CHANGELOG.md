@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Legacy `settings.json` → `config.yml` migration now writes the YAML first and only then archives the JSON, surfaces failures instead of swallowing them, and recovers from an orphaned `settings.json.bak` when `config.yml` is missing ([#11569](https://github.com/can1357/oh-my-pi/issues/11569)).
+
 ## [18.1.17] - 2026-09-10
 
 ### Added
