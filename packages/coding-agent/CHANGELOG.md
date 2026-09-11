@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Eval cell timeouts no longer fatally terminate the session when a browser tab worker is being recycled ([#11707](https://github.com/can1357/oh-my-pi/issues/11707)).
+
 ## [18.1.17] - 2026-09-10
 
 ### Added
