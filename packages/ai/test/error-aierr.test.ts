@@ -159,6 +159,16 @@ describe("AIError.finalize", () => {
 		expect(AIError.is(result.id, AIError.Flag.Transient)).toBe(true);
 	});
 
+	it("applies a captured terminal 4xx before classifying a truncation error", async () => {
+		const result = await AIError.finalize(new Error("unexpected EOF"), {
+			capturedErrorResponse: { status: 400 },
+		});
+
+		expect(result.status).toBe(400);
+		expect(AIError.is(result.id, AIError.Flag.Transient)).toBe(false);
+		expect(AIError.retriable(result.id)).toBe(false);
+	});
+
 	it("preserves nested token-overflow evidence through finalization", async () => {
 		const inner = Object.assign(new Error("Error: maximum context length is 128000 tokens"), { status: 413 });
 		const result = await AIError.finalize(new Error("Provider returned error", { cause: inner }));
