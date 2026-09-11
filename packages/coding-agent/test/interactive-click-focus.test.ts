@@ -169,28 +169,39 @@ describe("inline click-to-focus geometry", () => {
 			const row = rows.findIndex(line => line.includes("HoverWorker"));
 			return row < 0 ? undefined : term.getViewportRowBackgroundValues(row);
 		};
-		const before = workerBg();
-		expect(before).toBeDefined();
-
-		// Pointer motion over the card recolors its row; moving onto the status
-		// line restores the exact prior colors. Rows are re-located by content
-		// on every poll because retirement can shift screen rows mid-stream.
-		const cardRow = plainRows(term.getViewport()).findIndex(row => row.includes("HoverWorker"));
-		term.sendInput(`\x1b[<32;5;${cardRow + 1}M`);
 		const changed = (snapshot: number[] | undefined): boolean => {
 			const now = workerBg();
 			return now !== undefined && JSON.stringify(now) !== JSON.stringify(snapshot);
 		};
-		await term.waitForRender(() => !changed(before));
-		expect(workerBg()).toEqual(before);
+		// Settle on a fresh frame so spans match the painted rows, then snapshot.
+		mode.ui.requestRender();
+		await term.waitForRender();
+		const before = workerBg();
+		expect(before).toBeDefined();
+		// Motion is single-shot against the last painted spans, which can lag
+		// one frame behind a just-mounted card: force a fresh frame, re-locate
+		// by content, and retry until the band lands. The final expect still
+		// fails loudly when nothing ever paints.
+		for (let attempt = 0; attempt < 20; attempt++) {
+			mode.ui.requestRender();
+			await term.waitForRender();
+			const rows = plainRows(term.getViewport());
+			const row = rows.findIndex(line => line.includes("HoverWorker"));
+			expect(row).toBeGreaterThanOrEqual(0);
+			term.sendInput(`\x1b[<32;5;${row + 1}M`);
+			await term.waitForRender(() => changed(before));
+			if (changed(before)) break;
+			if (attempt === 19) expect(changed(before)).toBe(true);
+		}
 
-		// Composer-level cross-check: the live frame itself must carry the band
-		// while hovered (re-hover first, since the previous step cleared it).
-		term.sendInput(`\x1b[<32;5;${cardRow + 1}M`);
-		await term.waitForRender(() => changed(before));
+		// Motion over the card bands its row.
+		expect(changed(before)).toBe(true);
+
+		// The live composer frame itself carries the band while hovered.
 		const frame = mode.composer.renderFrame({ columns: 120, rows: 32 });
 		expect(frame.viewport.filter(line => line.includes("\x1b[48")).length).toBeGreaterThan(0);
 
+		// Moving onto the status line restores the exact prior colors.
 		const bottomRow = term.getViewport().length - 1;
 		term.sendInput(`\x1b[<32;5;${bottomRow + 1}M`);
 		await term.waitForRender(() => !changed(before));

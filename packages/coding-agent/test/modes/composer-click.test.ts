@@ -93,8 +93,28 @@ describe("composer hover band", () => {
 			composer.stop();
 		}
 	});
-});
 
+	it("drops nested background opens so the band wins tinted rows", () => {
+		const term = new VirtualTerminal(80, 24);
+		const composer = new Composer({ terminal: term, preferences: { ...COMPOSER_DEFAULTS, quiet: true } });
+		composer.start();
+		try {
+			const esc = String.fromCharCode(27);
+			const tinted = `${esc}[48;2;15;18;22mcard tinted${esc}[49m`;
+			const transcript = new TranscriptContainer();
+			transcript.addChild(new ClickableBlock([tinted], ["AgentT"]));
+			composer.setRuntimeChildren([transcript]);
+			composer.setHoveredClickId("AgentT");
+			const hovered = composer.renderFrame({ columns: 80, rows: 24 });
+			const banded = hovered.viewport.filter(line => line.includes("card tinted"));
+			expect(banded).toHaveLength(1);
+			expect(banded[0]).toContain(`${esc}[48`);
+			expect(banded[0]).not.toContain("48;2;15;18;22");
+		} finally {
+			composer.stop();
+		}
+	});
+});
 class RowTarget implements Component {
 	constructor(
 		private readonly rows: readonly string[],
@@ -135,6 +155,43 @@ describe("composer click-span clipping", () => {
 			expect(frame.viewport).toHaveLength(6);
 			expect(composer.viewportClickCandidates(0)).toEqual(["row4"]);
 			expect(composer.viewportClickCandidates(5)).toEqual(["row9"]);
+		} finally {
+			composer.stop();
+		}
+	});
+});
+
+class CountingBlock implements Component {
+	renders = 0;
+	constructor(private readonly rows: readonly string[]) {}
+	render(): readonly string[] {
+		this.renders++;
+		return this.rows;
+	}
+}
+
+describe("composer chrome span recording", () => {
+	beforeAll(() => {
+		initTheme();
+	});
+
+	it("does not re-render chrome without click targets", () => {
+		const term = new VirtualTerminal(80, 24);
+		const composer = new Composer({ terminal: term, preferences: { ...COMPOSER_DEFAULTS, quiet: true } });
+		composer.start();
+		try {
+			const transcript = new TranscriptContainer();
+			const chrome = new Container();
+			const first = new CountingBlock(["status one"]);
+			const second = new CountingBlock(["status two"]);
+			chrome.addChild(first);
+			chrome.addChild(second);
+			composer.setRuntimeChildren([transcript, chrome]);
+
+			const frame = composer.renderFrame({ columns: 80, rows: 24 });
+			expect(frame.viewport.join("\n")).toContain("status two");
+			expect([first.renders, second.renders]).toEqual([1, 1]);
+			expect(composer.viewportClickCandidates(0)).toEqual([]);
 		} finally {
 			composer.stop();
 		}

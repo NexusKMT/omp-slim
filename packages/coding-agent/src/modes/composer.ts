@@ -171,6 +171,13 @@ export function routeViewportClick(spans: readonly ViewportClickSpan[], index: n
 export const PINNED_HUD_TOGGLE_ID = "@omp:toggle-pinned-hud";
 
 /**
+ * Nested background opens inside a hovered row. The band wraps the line, so a
+ * surviving nested open would paint over it for every cell it covers; the
+ * matching closes stay and become band resumes via bgFill.
+ */
+const NESTED_BG_OPEN_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[(?:4[0-7]|10[0-7]|48;[0-9;]*)m`, "g");
+
+/**
  * Candidate resolver for a row-level click target, if the component is one.
  * Shared by root and nested-child hit-testing so both stay in lockstep.
  */
@@ -330,12 +337,17 @@ export class Composer implements TerminalFrameProvider {
 			// Row targets usually nest one level down: chrome roots are plain
 			// containers (the HUD lives inside `subagentContainer`), and
 			// `Container.render` is a pure concatenation, so child spans tile
-			// the root span exactly. Child renders hit the container memo.
+			// the root span exactly. Only subtrees containing a target pay for
+			// child renders — and only up to the last target — so plain chrome
+			// costs nothing extra per frame.
 			const targets = root instanceof Container ? root.children : [root];
+			const resolves = targets.map(rowTargetCandidates);
+			const lastTarget = resolves.findLastIndex(resolve => resolve !== undefined);
+			if (lastTarget === -1) continue;
 			let offset = start;
-			for (const target of targets) {
-				const childLines = target === root ? after.length - start : target.render(width).length;
-				const resolve = rowTargetCandidates(target);
+			for (let index = 0; index <= lastTarget; index++) {
+				const childLines = targets[index] === root ? after.length - start : targets[index]!.render(width).length;
+				const resolve = resolves[index];
 				if (resolve !== undefined && childLines > 0) {
 					afterSpans.push({ start: offset, end: offset + childLines, candidates: resolve });
 				}
@@ -399,7 +411,11 @@ export class Composer implements TerminalFrameProvider {
 				if (index < span.start || index >= span.end) continue;
 				if (!span.candidates(index - span.start).includes(hovered)) continue;
 				banded = true;
-				return theme.bgFill("selectedBg", line);
+				// A wrapping band loses to background opens nested inside the row
+				// (live card rows carry the pending-tint bg, which would paint over
+				// the band for every cell it covers), so drop nested bg opens
+				// first; their closes stay and become band resumes via bgFill.
+				return theme.bgFill("selectedBg", line.replace(NESTED_BG_OPEN_PATTERN, ""));
 			}
 			return line;
 		});
