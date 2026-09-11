@@ -1,10 +1,14 @@
-import { describe, expect, it, vi } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import {
 	buildCopilotDynamicHeaders,
+	clearCopilotIntegrationCache,
+	getCachedCopilotIntegrationId,
+	getCopilotIntegrationCacheKey,
 	getCopilotInitiatorOverride,
 	getCopilotPremiumMultiplier,
 	hasCopilotVisionInput,
 	inferCopilotInitiator,
+	rememberCopilotWorkingIntegrationId,
 	resolveCopilotIntegrationIdOverride,
 	resolveCopilotRequestIdentity,
 	wrapFetchForCopilotFallback,
@@ -535,5 +539,181 @@ describe("wrapFetchForCopilotFallback", () => {
 		await expect(wrapped(request)).resolves.toBe(denied);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		expect(denied.bodyUsed).toBe(false);
+	});
+});
+
+describe("copilot working integration cache", () => {
+	afterEach(() => {
+		clearCopilotIntegrationCache();
+		vi.restoreAllMocks();
+	});
+
+	it("keys credentials by bearer hash with routing inputs, never raw bytes", () => {
+		const personal = getCopilotIntegrationCacheKey("ghu_personal_token")!;
+		expect(getCopilotIntegrationCacheKey("ghu_personal_token")).toBe(personal);
+		expect(personal).not.toContain("ghu_personal_token");
+		expect(getCopilotIntegrationCacheKey("ghu_other_token")).not.toBe(personal);
+		const enterprise = getCopilotIntegrationCacheKey(
+			JSON.stringify({ token: "ghu_personal_token", enterpriseUrl: "ghe.example.com" }),
+		)!;
+		expect(enterprise).not.toBe(personal);
+		expect(getCopilotIntegrationCacheKey(undefined)).toBeUndefined();
+		expect(getCopilotIntegrationCacheKey("   ")).toBeUndefined();
+	});
+
+	it("remembers and clears the working shape per credential", () => {
+		const key = getCopilotIntegrationCacheKey("ghu_cache_roundtrip")!;
+		expect(getCachedCopilotIntegrationId(key)).toBeUndefined();
+		rememberCopilotWorkingIntegrationId(key, "copilot-developer-cli");
+		expect(getCachedCopilotIntegrationId(key)).toBe("copilot-developer-cli");
+		rememberCopilotWorkingIntegrationId(key, "not an id\r\ninjected");
+		expect(getCachedCopilotIntegrationId(key)).toBe("copilot-developer-cli");
+		clearCopilotIntegrationCache(key);
+		expect(getCachedCopilotIntegrationId(key)).toBeUndefined();
+	});
+
+	it("prefers cached working shape over defaults but never over explicit", () => {
+		expect(
+			buildCopilotDynamicHeaders({ messages: [], hasImages: false, cachedIntegrationId: "copilot-developer-cli" })
+				.headers["Copilot-Integration-Id"],
+		).toBe("copilot-developer-cli");
+		expect(
+			buildCopilotDynamicHeaders({
+				messages: [],
+				hasImages: false,
+				integrationId: "vscode-chat",
+				cachedIntegrationId: "copilot-developer-cli",
+			}).headers["Copilot-Integration-Id"],
+		).toBe("vscode-chat");
+		expect(
+			buildCopilotDynamicHeaders({ messages: [], hasImages: false, cachedIntegrationId: "bad\r\nid" }).headers[
+				"Copilot-Integration-Id"
+			],
+		).toBe("copilot-chat");
+	});
+
+	it("lets a learned chat shape override the Enterprise CLI default", () => {
+		expect(
+			buildCopilotDynamicHeaders({
+				messages: [],
+				hasImages: false,
+				enterpriseUrl: "ghe.example.com",
+				cachedIntegrationId: "copilot-chat",
+			}).headers["Copilot-Integration-Id"],
+		).toBe("copilot-chat");
+	});
+});
+
+describe("wrapFetchForCopilotFallback working-identity cache", () => {
+	const chatUrl = "https://api.githubcopilot.com/chat/completions";
+	afterEach(() => {
+		clearCopilotIntegrationCache();
+		vi.restoreAllMocks();
+	});
+
+	function chatRequest(init?: RequestInit): [string, RequestInit | undefined] {
+		return [
+			chatUrl,
+			{
+				...init,
+				headers: {
+					Authorization: "Bearer ghu_test",
+					"Copilot-Integration-Id": COPILOT_CHAT_INTEGRATION_ID,
+				},
+			},
+		];
+	}
+
+	it("remembers CLI after a chat denial clears on retry", async () => {
+		const cacheKey = "test-working-shape-forward";
+		let calls = 0;
+		const fetchMock = vi.fn(async () => {
+			calls++;
+			if (calls === 1) return new Response("{}", { status: 403 });
+			return new Response("{}", { status: 200 });
+		});
+		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true, undefined, cacheKey);
+		const result = await wrapped(...chatRequest());
+		expect(result.status).toBe(200);
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(getCachedCopilotIntegrationId(cacheKey)).toBe("copilot-developer-cli");
+	});
+
+	it("leaves the cache empty when the CLI retry stays denied", async () => {
+		const cacheKey = "test-working-shape-still-denied";
+		const fetchMock = vi.fn(async () => new Response("{}", { status: 403 }));
+		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true, undefined, cacheKey);
+		await wrapped(...chatRequest());
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(getCachedCopilotIntegrationId(cacheKey)).toBeUndefined();
+	});
+
+	it("never caches on auth failure and never retries an explicit pin", async () => {
+		const authKey = "test-working-shape-401";
+		let calls = 0;
+		const authMock = vi.fn(async () => {
+			calls++;
+			return new Response("{}", { status: calls === 1 ? 403 : 401 });
+		});
+		await wrapFetchForCopilotFallback(
+			authMock as unknown as typeof fetch,
+			true,
+			undefined,
+			authKey,
+		)(...chatRequest());
+		expect(getCachedCopilotIntegrationId(authKey)).toBeUndefined();
+
+		const pinKey = "test-working-shape-pinned";
+		const denied = new Response("{}", { status: 403 });
+		const pinMock = vi.fn(async () => denied);
+		const pinned = wrapFetchForCopilotFallback(pinMock as unknown as typeof fetch, true, "vscode-chat", pinKey);
+		await expect(pinned(...chatRequest())).resolves.toBe(denied);
+		expect(pinMock).toHaveBeenCalledTimes(1);
+		expect(getCachedCopilotIntegrationId(pinKey)).toBeUndefined();
+	});
+
+	it("retries a stale cached CLI as chat and relearns", async () => {
+		const cacheKey = "test-working-shape-reverse";
+		rememberCopilotWorkingIntegrationId(cacheKey, "copilot-developer-cli");
+		const seen: (string | null)[] = [];
+		let calls = 0;
+		const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+			calls++;
+			seen.push(new Headers(init?.headers).get("Copilot-Integration-Id"));
+			if (calls === 1) return new Response("{}", { status: 403 });
+			return new Response("{}", { status: 200 });
+		});
+		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true, undefined, cacheKey);
+		const result = await wrapped(chatUrl, {
+			headers: { "Copilot-Integration-Id": "copilot-developer-cli" },
+		});
+		expect(result.status).toBe(200);
+		expect(seen).toEqual(["copilot-developer-cli", "copilot-chat"]);
+		expect(getCachedCopilotIntegrationId(cacheKey)).toBe("copilot-chat");
+	});
+
+	it("clears a cached CLI both sides deny", async () => {
+		const cacheKey = "test-working-shape-reverse-denied";
+		rememberCopilotWorkingIntegrationId(cacheKey, "copilot-developer-cli");
+		const fetchMock = vi.fn(async () => new Response("{}", { status: 403 }));
+		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true, undefined, cacheKey);
+		await wrapped(chatUrl, { headers: { "Copilot-Integration-Id": "copilot-developer-cli" } });
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(getCachedCopilotIntegrationId(cacheKey)).toBeUndefined();
+	});
+
+	it("leaves an uncached CLI denial terminal", async () => {
+		const denied = new Response("{}", { status: 403 });
+		const fetchMock = vi.fn(async () => denied);
+		const wrapped = wrapFetchForCopilotFallback(
+			fetchMock as unknown as typeof fetch,
+			true,
+			undefined,
+			"test-working-shape-uncached-cli",
+		);
+		await expect(wrapped(chatUrl, { headers: { "Copilot-Integration-Id": "copilot-developer-cli" } })).resolves.toBe(
+			denied,
+		);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 });

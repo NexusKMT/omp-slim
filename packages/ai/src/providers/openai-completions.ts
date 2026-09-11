@@ -78,7 +78,11 @@ import {
 	rememberOpenAIReasoningEffortFallback,
 	resolveOpenAIReasoningEffortFallback,
 } from "./openai-reasoning-fallback";
-import { resolveCopilotRequestIdentity, wrapFetchForCopilotFallback } from "./github-copilot-headers";
+import {
+	getCopilotIntegrationCacheKey,
+	resolveCopilotRequestIdentity,
+	wrapFetchForCopilotFallback,
+} from "./github-copilot-headers";
 import {
 	applyChatCompletionsReasoningParams,
 	applyChatCompletionsToolStream,
@@ -801,6 +805,7 @@ const streamOpenAICompletionsOnce = (
 							options?.fetch,
 							model.provider === "github-copilot",
 							resolveCopilotRequestIdentity(options?.headers),
+							getCopilotIntegrationCacheKey(apiKey),
 						),
 						// Transient 408/429/5xx get Retry-After-aware transport retries.
 						// The first-event watchdog above aborts `requestSignal`, which

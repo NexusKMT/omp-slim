@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
 	COPILOT_CAPI_IDENTITY_HEADERS,
 	COPILOT_CHAT_INTEGRATION_ID,
@@ -72,9 +73,93 @@ export function resolveCopilotRequestIdentity(
 		resolveCopilotIntegrationIdOverride(env)
 	);
 }
+/**
+ * Working `Copilot-Integration-Id` learned per credential.
+ *
+ * Business orgs that reject the chat-surface default pay one extra round-trip
+ * per stream until the working shape is known (issue #11669, follow-up). The
+ * cache remembers the identity that last cleared the identity gate so later
+ * streams start there instead of replaying the denial. Enterprise credentials
+ * already default to the CLI identity, so they only consult the cache when a
+ * prior reverse retry learned chat.
+ *
+ * Process-local only: a stale entry costs at most one reverse retry, which
+ * relearns the working shape. Explicit `COPILOT_INTEGRATION_ID` and caller
+ * headers bypass the cache entirely — a pin is never second-guessed.
+ */
+const COPILOT_WORKING_INTEGRATION_CACHE_LIMIT = 50;
+const copilotWorkingIntegrationCache = new Map<string, string>();
 
 /**
- * Reissue chat-surface Copilot denials once as the Copilot CLI.
+ * Stable cache key for a raw Copilot API key envelope. Hashes the bearer so
+ * token bytes never sit in the map as keys; enterprise/business routing inputs
+ * participate so the same token on two hosts does not share an entry.
+ */
+export function getCopilotIntegrationCacheKey(apiKeyRaw: string | undefined): string | undefined {
+	if (!apiKeyRaw) return undefined;
+	const trimmed = apiKeyRaw.trim();
+	if (!trimmed) return undefined;
+	const parsed = parseGitHubCopilotApiKey(trimmed);
+	if (!parsed.accessToken) return undefined;
+	const fingerprint = createHash("sha256").update(parsed.accessToken).digest("base64url");
+	return `${parsed.enterpriseUrl ?? ""}\0${parsed.apiEndpoint ?? ""}\0${fingerprint}`;
+}
+
+/** Cached working identity for a cache key, if one was learned. */
+export function getCachedCopilotIntegrationId(cacheKey: string | undefined): string | undefined {
+	if (!cacheKey) return undefined;
+	return normalizeCopilotIntegrationId(copilotWorkingIntegrationCache.get(cacheKey));
+}
+
+/** Remember the identity that cleared the identity gate for a credential. */
+export function rememberCopilotWorkingIntegrationId(cacheKey: string | undefined, integrationId: unknown): void {
+	const normalized = normalizeCopilotIntegrationId(integrationId);
+	if (!cacheKey || !normalized) return;
+	if (copilotWorkingIntegrationCache.get(cacheKey) === normalized) return;
+	if (
+		copilotWorkingIntegrationCache.size >= COPILOT_WORKING_INTEGRATION_CACHE_LIMIT &&
+		!copilotWorkingIntegrationCache.has(cacheKey)
+	) {
+		const oldest = copilotWorkingIntegrationCache.keys().next();
+		if (!oldest.done) copilotWorkingIntegrationCache.delete(oldest.value);
+	}
+	copilotWorkingIntegrationCache.set(cacheKey, normalized);
+}
+
+/** Clear one cached identity, or the whole cache when no key is given. */
+export function clearCopilotIntegrationCache(cacheKey?: string): void {
+	if (cacheKey === undefined) copilotWorkingIntegrationCache.clear();
+	else copilotWorkingIntegrationCache.delete(cacheKey);
+}
+
+/**
+ * True when a response is a client-identity denial: HTTP 403, or HTTP 400
+ * carrying `code: "model_not_supported"`. Reads a clone so the caller's body
+ * stays intact. Unreadable 400s are not denials.
+ */
+async function isCopilotIdentityDenied(response: Response): Promise<boolean> {
+	if (response.status === 403) return true;
+	if (response.status !== 400) return false;
+	try {
+		const body = (await response.clone().json()) as { error?: { code?: unknown } } | null;
+		return body?.error?.code === "model_not_supported";
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * True when a retry response proves its identity cleared the gate: not denied
+ * and not an auth failure. 401s never cache — a bad token denies every
+ * identity equally and must not pin one.
+ */
+async function isCopilotWorkingIdentityProven(response: Response): Promise<boolean> {
+	if (response.status === 401) return false;
+	return !(await isCopilotIdentityDenied(response));
+}
+
+/**
+ * Reissue Copilot client-identity denials once with the other surface.
  *
  * Chat is the default surface (`COPILOT_CHAT_INTEGRATION_ID`) because Business
  * organizations that gate premium models per client surface commonly allow
@@ -86,41 +171,68 @@ export function resolveCopilotRequestIdentity(
  * explicit identity — an explicit choice is never second-guessed. The denied
  * body is drained before reissuing, and the retry carries the CLI identity so
  * the guard passes it through: at most two requests, never a loop.
+ *
+ * When `cacheKey` is set, the CLI retry that clears the gate is remembered via
+ * `rememberCopilotWorkingIntegrationId`, so later streams for the same
+ * credential start at the working shape. A cached CLI start that is itself
+ * denied (stale after an org-policy flip) retries once as chat and relearns.
  */
 export function wrapFetchForCopilotFallback(
 	base: FetchImpl | undefined,
 	enabled: boolean,
 	integrationId?: unknown,
+	cacheKey?: string,
 ): FetchImpl {
 	const inner = base ?? fetch;
 	if (!enabled) return inner;
+	const cliIntegrationId = COPILOT_CAPI_IDENTITY_HEADERS["Copilot-Integration-Id"];
 	return async (input, init) => {
 		const response = await inner(input, init);
 		if (response.status !== 403 && response.status !== 400) return response;
 		if (input instanceof Request) return response;
 		if (normalizeCopilotIntegrationId(integrationId) !== undefined) return response;
 		const outgoing = new Headers(init?.headers);
-		if (outgoing.get("Copilot-Integration-Id") !== COPILOT_CHAT_INTEGRATION_ID) {
+		const outgoingId = outgoing.get("Copilot-Integration-Id");
+		if (outgoingId === COPILOT_CHAT_INTEGRATION_ID) {
+			if (await isCopilotIdentityDenied(response)) {
+				try {
+					await response.arrayBuffer();
+				} catch {}
+				logger.warn(
+					`GitHub Copilot chat identity denied (HTTP ${response.status}); retrying once as the Copilot CLI`,
+				);
+				const retryHeaders = new Headers(outgoing);
+				retryHeaders.set("Copilot-Integration-Id", cliIntegrationId);
+				const retry = await inner(input, { ...init, headers: retryHeaders });
+				if (cacheKey && (await isCopilotWorkingIdentityProven(retry))) {
+					rememberCopilotWorkingIntegrationId(cacheKey, cliIntegrationId);
+				}
+				return retry;
+			}
 			return response;
 		}
-		if (response.status === 400) {
-			// A 400 is only the client-identity denial when its body carries
-			// `code: "model_not_supported"`; read a clone so an unrelated 400
-			// (which must not retry) reaches the caller with its body intact.
-			let identityDenied = false;
-			try {
-				const body = (await response.clone().json()) as { error?: { code?: unknown } } | null;
-				identityDenied = body?.error?.code === "model_not_supported";
-			} catch {}
-			if (!identityDenied) return response;
+		if (outgoingId === cliIntegrationId && cacheKey) {
+			if (getCachedCopilotIntegrationId(cacheKey) !== cliIntegrationId) return response;
+			if (await isCopilotIdentityDenied(response)) {
+				try {
+					await response.arrayBuffer();
+				} catch {}
+				logger.warn(
+					`GitHub Copilot CLI identity denied (HTTP ${response.status}); retrying once as ${COPILOT_CHAT_INTEGRATION_ID}`,
+				);
+				const retryHeaders = new Headers(outgoing);
+				retryHeaders.set("Copilot-Integration-Id", COPILOT_CHAT_INTEGRATION_ID);
+				const retry = await inner(input, { ...init, headers: retryHeaders });
+				if (await isCopilotWorkingIdentityProven(retry)) {
+					rememberCopilotWorkingIntegrationId(cacheKey, COPILOT_CHAT_INTEGRATION_ID);
+				} else {
+					clearCopilotIntegrationCache(cacheKey);
+				}
+				return retry;
+			}
+			return response;
 		}
-		try {
-			await response.arrayBuffer();
-		} catch {}
-		logger.warn(`GitHub Copilot chat identity denied (HTTP ${response.status}); retrying once as the Copilot CLI`);
-		const retryHeaders = new Headers(outgoing);
-		retryHeaders.set("Copilot-Integration-Id", COPILOT_CAPI_IDENTITY_HEADERS["Copilot-Integration-Id"]);
-		return inner(input, { ...init, headers: retryHeaders });
+		return response;
 	};
 }
 export function inferCopilotInitiator(messages: unknown[]): CopilotInitiator {
@@ -222,6 +334,8 @@ export function buildCopilotDynamicHeaders(params: {
 	enterpriseUrl?: string;
 	/** Raw explicit identity; validated here, chat default when absent/invalid. */
 	integrationId?: unknown;
+	/** Learned working identity for this credential; explicit still wins, then this, then the defaults. */
+	cachedIntegrationId?: unknown;
 }): CopilotDynamicHeaders {
 	const initiator =
 		params.initiatorOverride ?? getCopilotInitiatorOverride(params.headers) ?? inferCopilotInitiator(params.messages);
@@ -232,6 +346,7 @@ export function buildCopilotDynamicHeaders(params: {
 	};
 	headers["Copilot-Integration-Id"] =
 		normalizeCopilotIntegrationId(params.integrationId) ??
+		normalizeCopilotIntegrationId(params.cachedIntegrationId) ??
 		(params.enterpriseUrl ? COPILOT_CAPI_IDENTITY_HEADERS["Copilot-Integration-Id"] : COPILOT_CHAT_INTEGRATION_ID);
 
 	if (params.hasImages) {

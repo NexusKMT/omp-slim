@@ -110,6 +110,8 @@ import {
 } from "./claude-code-fingerprint";
 import {
 	buildCopilotDynamicHeaders,
+	getCachedCopilotIntegrationId,
+	getCopilotIntegrationCacheKey,
 	hasCopilotVisionInput,
 	resolveCopilotRequestIdentity,
 	resolveGitHubCopilotBaseUrl,
@@ -2030,6 +2032,8 @@ const streamAnthropicOnce = (
 			// (and any consumer awaiting `result()`) hanging forever.
 			const apiKey = options?.apiKey ?? getEnvApiKey(model.provider) ?? "";
 			const copilotApiKey = model.provider === "github-copilot" ? parseGitHubCopilotApiKey(apiKey) : undefined;
+			const copilotCacheKey =
+				model.provider === "github-copilot" ? getCopilotIntegrationCacheKey(apiKey) : undefined;
 			const copilotDynamicHeaders = copilotApiKey
 				? buildCopilotDynamicHeaders({
 						messages: context.messages,
@@ -2039,6 +2043,7 @@ const streamAnthropicOnce = (
 						integrationId: resolveCopilotRequestIdentity(options?.headers),
 						initiatorOverride: options?.initiatorOverride,
 						enterpriseUrl: copilotApiKey.enterpriseUrl,
+						cachedIntegrationId: getCachedCopilotIntegrationId(copilotCacheKey),
 					})
 				: undefined;
 			if (copilotDynamicHeaders?.premiumRequests !== undefined) {
@@ -3295,7 +3300,12 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 			maxRetries: 5,
 			maxRetryDelayMs,
 			defaultHeaders,
-			fetch: wrapFetchForCopilotFallback(cchFetch, true, resolveCopilotRequestIdentity(headers)),
+			fetch: wrapFetchForCopilotFallback(
+				cchFetch,
+				true,
+				resolveCopilotRequestIdentity(headers),
+				getCopilotIntegrationCacheKey(apiKey),
+			),
 			fetchOptions,
 		};
 	}

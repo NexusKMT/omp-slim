@@ -92,6 +92,8 @@ import { getOpenRouterHeaders } from "../utils/openrouter-headers";
 import { isForcedToolChoice } from "../utils/tool-choice";
 import {
 	buildCopilotDynamicHeaders,
+	getCachedCopilotIntegrationId,
+	getCopilotIntegrationCacheKey,
 	hasCopilotVisionInput,
 	resolveGitHubCopilotBaseUrl,
 } from "./github-copilot-headers";
@@ -255,6 +257,7 @@ export function resolveOpenAIRequestSetup(
 	if (model.provider === "github-copilot") {
 		const copilotApiKey = parseGitHubCopilotApiKey(rawApiKey);
 		apiKey = copilotApiKey.accessToken;
+		const copilotCacheKey = getCopilotIntegrationCacheKey(rawApiKey);
 		const copilot = buildCopilotDynamicHeaders({
 			messages: options.messages,
 			hasImages: hasCopilotVisionInput(options.messages),
@@ -263,6 +266,7 @@ export function resolveOpenAIRequestSetup(
 			initiatorOverride: options.initiatorOverride,
 			enterpriseUrl: copilotApiKey.enterpriseUrl,
 			integrationId: resolveCopilotRequestIdentity(options.extraHeaders),
+			cachedIntegrationId: getCachedCopilotIntegrationId(copilotCacheKey),
 		});
 		Object.assign(headers, copilot.headers);
 		copilotPremiumRequests = copilot.premiumRequests;
