@@ -108,11 +108,9 @@ describe("AgentStorage SQLite compatibility", () => {
 				updated_at INTEGER NOT NULL DEFAULT 0
 			);
 		`);
-		seed.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)").run(
-			"theme",
-			'"dark"',
-			LEGACY_TIMESTAMP,
-		);
+		seed
+			.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)")
+			.run("theme", '"dark"', LEGACY_TIMESTAMP);
 		seed.close();
 
 		const storage = await AgentStorage.open(dbPath);
