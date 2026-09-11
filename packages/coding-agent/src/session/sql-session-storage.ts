@@ -20,11 +20,6 @@ export type SqlSessionStorageAdapter = "postgres" | "mysql" | "sqlite";
  * the table identifier is validated and then inlined while values remain bound
  * parameters.
  */
-/** Array result returned by `Bun.SQL`, including MySQL mutation metadata. */
-export interface SqlSessionStorageResult extends Array<unknown> {
-	affectedRows?: number;
-}
-
 export interface SqlSessionStorageClient {
 	unsafe(query: string, values?: unknown[]): Promise<SqlSessionStorageResult>;
 	/**
@@ -35,6 +30,11 @@ export interface SqlSessionStorageClient {
 	 */
 	options: { adapter?: string; [key: string]: unknown };
 	end?(): Promise<void>;
+}
+
+/** Array result returned by `Bun.SQL`, including MySQL mutation metadata. */
+export interface SqlSessionStorageResult extends Array<unknown> {
+	affectedRows?: number;
 }
 
 export interface SqlSessionStorageOptions {
