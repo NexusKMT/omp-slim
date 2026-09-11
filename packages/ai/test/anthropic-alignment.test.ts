@@ -1672,14 +1672,14 @@ describe("Anthropic request fingerprint alignment", () => {
 		expect(payload.tools?.[1]?.cache_control).toBeUndefined();
 		expect(payload.tools?.at(-1)?.cache_control).toEqual({ type: "ephemeral" });
 
-		// The trailing message window is untouched, and system blocks stay uncached
-		// because the OAuth cloak blocks carry per-request bytes.
+		// The trailing message window is untouched; the OAuth identity block carries its
+		// own breakpoint, while caller system blocks stay uncached.
 		const content = payload.messages?.at(-1)?.content;
 		expect(Array.isArray(content) ? content.at(-1)?.cache_control : undefined).toEqual({
 			type: "ephemeral",
 		});
-		expect(payload.system?.some(block => block.cache_control != null)).toBe(false);
-
+		expect(payload.system?.[1]?.cache_control).toEqual({ type: "ephemeral" });
+		expect(payload.system?.[2]?.cache_control).toBeUndefined();
 		// Anthropic rejects a fifth breakpoint, so the total must stay in budget.
 		const marked = (blocks: Array<{ cache_control?: unknown }> | undefined) =>
 			(blocks ?? []).filter(block => block.cache_control != null).length;
