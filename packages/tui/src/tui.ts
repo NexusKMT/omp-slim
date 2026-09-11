@@ -668,6 +668,10 @@ export class TUI extends Container {
 	// Screen row where the provider's mutable viewport begins (0-based); rows
 	// above it hold history still visible on the physical screen.
 	#providerViewportTop = 0;
+	// Leading composer rows replaced by replay history in the last paint. The
+	// published hit-test origin backs these out (see getMutableViewport): hit
+	// testing indexes composer rows, not painted rows.
+	#providerViewportPadTop = 0;
 	// Viewport-relative row of the hardware cursor after the last normal paint
 	// (0 = parked at the viewport top). A resize reflows the normal buffer
 	// before the app hears about it; terminals keep the cursor attached to its
@@ -1099,12 +1103,14 @@ export class TUI extends Container {
 	 * into this window (`screenRow - top`). Empty while the alt screen owns
 	 * the display, and while a resize transaction is settling — the anchor is
 	 * stale until the probe resolves, so hits would map to unrelated old rows.
+	 * The origin is in composer rows: a replay paint replaces leading composer
+	 * blanks with history rows, so the painted top is backed out by that pad.
 	 */
 	getMutableViewport(): { top: number; length: number } {
 		if (this.#altActive || this.#resizeAltActive || this.#resizeProbe !== undefined || this.#resizeInPlaceActive) {
 			return { top: 0, length: 0 };
 		}
-		return { top: this.#providerViewportTop, length: this.#providerWindow.length };
+		return { top: this.#providerViewportTop - this.#providerViewportPadTop, length: this.#providerWindow.length };
 	}
 
 	/**
@@ -1605,6 +1611,9 @@ export class TUI extends Container {
 			fs.appendFileSync(getDebugLogPath(), msg);
 		}
 		this.#providerViewportTop = Math.min(top, Math.max(0, height - 1));
+		// Resolved geometry invalidates the replay offset with the old anchor;
+		// the forced repaint recomputes it (usually zero).
+		this.#providerViewportPadTop = 0;
 		this.#forceViewportRepaintOnNextRender = true;
 		this.requestRender(true);
 	}
@@ -2772,6 +2781,7 @@ export class TUI extends Container {
 		else this.#recordHardwareCursorHidden();
 		this.#providerWindow = mutablePrepared;
 		this.#providerViewportTop = mutableTop;
+		this.#providerViewportPadTop = replayViewportRows;
 		this.#previousWidth = width;
 		this.#previousHeight = height;
 		this.#resizeBurstGrew = false;

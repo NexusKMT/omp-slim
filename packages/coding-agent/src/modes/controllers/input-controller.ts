@@ -692,6 +692,16 @@ export class InputController {
 		this.ctx.ui.requestRender();
 	}
 
+	/**
+	 * Forget the last hovered target without repainting. Disabling mouse
+	 * capture clears the composer's band, but with reporting off no motion
+	 * event will ever refresh this cache — so a re-enable plus motion over
+	 * the same card would look unchanged and skip restoring the band.
+	 */
+	clearHoverHighlight(): void {
+		this.#lastHoverClickId = undefined;
+	}
+
 	/** Focus the subagent under a viewport screen row, if the line names one. */
 	#focusClickedAgent(screenRow: number): void {
 		const viewport = this.ctx.ui.getMutableViewport();

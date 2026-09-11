@@ -201,6 +201,23 @@ describe("inline click-to-focus geometry", () => {
 		const frame = mode.composer.renderFrame({ columns: 120, rows: 32 });
 		expect(frame.viewport.filter(line => line.includes("\x1b[48")).length).toBeGreaterThan(0);
 
+		// Disabling capture mid-hover clears the controller cache too: after
+		// re-enabling, motion over the same card must restore the band instead
+		// of looking unchanged and skipping the repaint.
+		settings.set("tui.mouse", false);
+		mode.ui.requestRender();
+		await term.waitForRender(() => !changed(before));
+		expect(workerBg()).toEqual(before);
+
+		settings.set("tui.mouse", true);
+		mode.ui.requestRender();
+		await term.waitForRender();
+		const cardRow = plainRows(term.getViewport()).findIndex(line => line.includes("HoverWorker"));
+		expect(cardRow).toBeGreaterThanOrEqual(0);
+		term.sendInput(`\x1b[<32;5;${cardRow + 1}M`);
+		await term.waitForRender(() => changed(before));
+		expect(changed(before)).toBe(true);
+
 		// Moving onto the status line restores the exact prior colors.
 		const bottomRow = term.getViewport().length - 1;
 		term.sendInput(`\x1b[<32;5;${bottomRow + 1}M`);

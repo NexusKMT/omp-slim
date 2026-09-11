@@ -1081,7 +1081,14 @@ export class InteractiveMode implements InteractiveModeContext {
 			const on = settings.get("tui.mouse") === true;
 			// Dropping capture must also drop the band: with reporting off no
 			// motion event will ever arrive to clear a mid-hover highlight.
-			if (!on) this.composer.setHoveredClickId(undefined);
+			// The controller cache goes too, or a re-enable plus motion over
+			// the same card would look unchanged and skip restoring the band.
+			if (!on) {
+				this.composer.setHoveredClickId(undefined);
+				// The provider can fire from a synchronous forced render before
+				// init reaches the controller block below.
+				this.#inputController?.clearHoverHighlight();
+			}
 			return on;
 		});
 		this.chatContainer = new TranscriptContainer();
