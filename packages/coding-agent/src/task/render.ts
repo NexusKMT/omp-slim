@@ -1458,7 +1458,9 @@ function renderAgentResult(
 
 	// Artifact rows: paths shortened (home → `~`), tabs expanded, and width-bounded
 	// like every other rendered line; the full paths live in the model-facing summary.
-	if (result.patchPath && !aborted && result.exitCode === 0) {
+	// A nested-only run still carries its (empty) root patch path, so hide that
+	// row when the runner reports no root changes — same as the model summary.
+	if (result.patchPath && result.hasRootChanges !== false && !aborted && result.exitCode === 0) {
 		lines.push(
 			`${continuePrefix}${theme.fg("dim", truncateToWidth(`Patch: ${replaceTabs(shortenPath(result.patchPath))}`, TRUNCATE_LENGTHS.CONTENT))}`,
 		);

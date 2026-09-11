@@ -71,4 +71,16 @@ describe("task renderer: isolation artifact row labels", () => {
 		const text = await renderResultText(makeResult({ branchName: "omp/task/Worker" }));
 		expect(text).toContain("Branch:");
 	});
+
+	it("hides the empty root Patch row for nested-only work", async () => {
+		const text = await renderResultText(
+			makeResult({
+				patchPath: "/home/user/.omp/artifacts/Worker.patch",
+				hasRootChanges: false,
+				nestedPatchPaths: ["/home/user/.omp/artifacts/Worker.nested-0-inner.patch"],
+			}),
+		);
+		expect(text).not.toContain("Patch:");
+		expect(text).toContain("Nested patch:");
+	});
 });
