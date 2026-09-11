@@ -185,6 +185,14 @@ export interface OpenAIRequestSetup {
 	headers: Record<string, string>;
 	query: Record<string, string> | undefined;
 	requestHeaders: Record<string, string>;
+	/** Working-identity cache key for this credential+host; undefined off the Copilot path. */
+	copilotCacheKey: string | undefined;
+	/**
+	 * Build-time cache provenance for the wrapper: the cached value the
+	 * outgoing headers were built from, or `null` when the cache was empty at
+	 * build. `undefined` off the Copilot path (wrapper rereads at dispatch).
+	 */
+	copilotCacheSnapshot: string | null | undefined;
 }
 
 function normalizeSakanaRequestBaseUrl(baseUrl: string | undefined): string | undefined {
@@ -237,6 +245,8 @@ export function resolveOpenAIRequestSetup(
 	}
 
 	let copilotPremiumRequests: number | undefined;
+	let copilotCacheKey: string | undefined;
+	let copilotCacheSnapshot: string | null | undefined;
 	let baseUrl = model.baseUrl;
 	if (model.provider === "moonshot") {
 		// Bundled `moonshot` catalog models hardcode the international endpoint
@@ -258,7 +268,8 @@ export function resolveOpenAIRequestSetup(
 		const copilotApiKey = parseGitHubCopilotApiKey(rawApiKey);
 		apiKey = copilotApiKey.accessToken;
 		const copilotBaseUrl = resolveGitHubCopilotBaseUrl(model.baseUrl, rawApiKey) ?? model.baseUrl;
-		const copilotCacheKey = getCopilotIntegrationCacheKey(rawApiKey, copilotBaseUrl);
+		copilotCacheKey = getCopilotIntegrationCacheKey(rawApiKey, copilotBaseUrl);
+		const copilotCached = getCachedCopilotIntegrationId(copilotCacheKey);
 		const copilot = buildCopilotDynamicHeaders({
 			messages: options.messages,
 			hasImages: hasCopilotVisionInput(options.messages),
@@ -267,11 +278,12 @@ export function resolveOpenAIRequestSetup(
 			initiatorOverride: options.initiatorOverride,
 			enterpriseUrl: copilotApiKey.enterpriseUrl,
 			integrationId: resolveCopilotRequestIdentity(options.extraHeaders),
-			cachedIntegrationId: getCachedCopilotIntegrationId(copilotCacheKey),
+			cachedIntegrationId: copilotCached,
 		});
 		Object.assign(headers, copilot.headers);
 		copilotPremiumRequests = copilot.premiumRequests;
 		baseUrl = copilotBaseUrl;
+		copilotCacheSnapshot = copilotCached ?? null;
 	}
 
 	if (model.provider === "alibaba-token-plan") {
@@ -336,7 +348,7 @@ export function resolveOpenAIRequestSetup(
 	if (apiKey !== NO_AUTH_SENTINEL) {
 		headers.Authorization ??= `Bearer ${apiKey}`;
 	}
-	return { copilotPremiumRequests, baseUrl, headers, query, requestHeaders };
+	return { copilotPremiumRequests, baseUrl, headers, query, requestHeaders, copilotCacheKey, copilotCacheSnapshot };
 }
 
 export function applyOpenAIServiceTier(

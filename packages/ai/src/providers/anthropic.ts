@@ -1248,6 +1248,14 @@ export type AnthropicClientOptionsArgs = {
 	fetch?: FetchImpl;
 	maxRetryDelayMs?: number;
 	sessionId?: string;
+	/** Working-identity cache key for this credential+host; undefined off the Copilot path. */
+	copilotCacheKey?: string;
+	/**
+	 * Build-time cache provenance for the wrapper: the cached value the
+	 * outgoing headers were built from, or `null` when the cache was empty at
+	 * build. `undefined` rereads the cache at dispatch.
+	 */
+	copilotCacheSnapshot?: string | null;
 };
 
 export type AnthropicClientOptionsResult = {
@@ -2038,6 +2046,8 @@ const streamAnthropicOnce = (
 					: undefined;
 			const copilotCacheKey =
 				model.provider === "github-copilot" ? getCopilotIntegrationCacheKey(apiKey, copilotBaseUrl) : undefined;
+			const copilotCached =
+				model.provider === "github-copilot" ? getCachedCopilotIntegrationId(copilotCacheKey) : undefined;
 			const copilotDynamicHeaders = copilotApiKey
 				? buildCopilotDynamicHeaders({
 						messages: context.messages,
@@ -2047,7 +2057,7 @@ const streamAnthropicOnce = (
 						integrationId: resolveCopilotRequestIdentity(options?.headers),
 						initiatorOverride: options?.initiatorOverride,
 						enterpriseUrl: copilotApiKey.enterpriseUrl,
-						cachedIntegrationId: getCachedCopilotIntegrationId(copilotCacheKey),
+						cachedIntegrationId: copilotCached,
 					})
 				: undefined;
 			if (copilotDynamicHeaders?.premiumRequests !== undefined) {
@@ -2198,6 +2208,8 @@ const streamAnthropicOnce = (
 					thinkingDisplay: options?.thinkingDisplay,
 					fetch: options?.fetch,
 					maxRetryDelayMs: options?.maxRetryDelayMs,
+					copilotCacheKey,
+					copilotCacheSnapshot: copilotCached ?? null,
 					sessionId:
 						options?.sessionId ??
 						extractClaudeMetadataSessionId(options?.metadata?.user_id) ??
@@ -3229,6 +3241,8 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 		maxRetryDelayMs,
 		sessionId,
 		disableStrictTools: disableStrictToolsOverride,
+		copilotCacheKey,
+		copilotCacheSnapshot,
 	} = args;
 	const compat = model.compat;
 	const disableStrictTools = disableStrictToolsOverride ?? compat.disableStrictTools;
@@ -3308,7 +3322,8 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 				cchFetch,
 				true,
 				resolveCopilotRequestIdentity(headers),
-				getCopilotIntegrationCacheKey(apiKey, baseUrl),
+				copilotCacheKey ?? getCopilotIntegrationCacheKey(apiKey, baseUrl),
+				copilotCacheSnapshot,
 			),
 			fetchOptions,
 		};

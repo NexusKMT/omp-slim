@@ -177,32 +177,40 @@ async function isCopilotIdentityDenied(response: Response): Promise<boolean> {
  * body is drained before reissuing, and the retry carries the CLI identity so
  * the guard passes it through: at most two requests, never a loop.
  *
- * When `cacheKey` is set, the retry identity that clears the gate is
- * remembered via `rememberCopilotWorkingIntegrationId`, so later streams for
- * the same credential start at the working shape. A cached CLI start that is
- * itself denied (stale after an org-policy flip) retries once as chat and
- * relearns. Only a 2xx retry proves its identity: 401s deny every identity
- * equally, other 4xx are never identity-retried, and 408/429/5xx are
- * transport-retryable — the transport resends the *original* headers, so
- * recording a retryable response would pin the wrong shape and break the
- * resend's own reverse retry. Inconclusive retries leave the cache unchanged.
+ * When `cacheKey` is set, a 2xx retry remembers its identity via
+ * `rememberCopilotWorkingIntegrationId`, so later streams for the same
+ * credential start at the working shape. A cached CLI start that is itself
+ * denied (stale after an org-policy flip) retries once as chat and relearns.
+ * Only a 2xx retry proves its identity — 401s deny every identity equally and
+ * 408/429/5xx are transport-retryable (the transport resends the *original*
+ * headers), so those must never be recorded as working. Any non-2xx retry
+ * clears the entry instead: the next stream rediscovers rather than pinning a
+ * shape that just failed.
  */
 export function wrapFetchForCopilotFallback(
 	base: FetchImpl | undefined,
 	enabled: boolean,
 	integrationId?: unknown,
 	cacheKey?: string,
+	/**
+	 * Build-time cache provenance: the exact cached value the outgoing headers
+	 * were built from. `undefined` rereads the cache at dispatch (direct
+	 * callers); `null` pins "cache was empty at build" so a sibling learning
+	 * mid-flight cannot change this request's retry decision.
+	 */
+	cacheSnapshot?: string | null,
 ): FetchImpl {
 	const inner = base ?? fetch;
 	if (!enabled) return inner;
 	const cliIntegrationId = COPILOT_CAPI_IDENTITY_HEADERS["Copilot-Integration-Id"];
 	return async (input, init) => {
-		// Snapshot before dispatch: a concurrent stream can relearn the cache
-		// while this request is in flight, and the reverse retry below must be
-		// decided by what this request started as — not by what a sibling
-		// learned mid-flight. Without this, two stale-CLI streams racing would
-		// let the first relearn chat and the second then skip its own retry.
-		const cachedBeforeRequest = getCachedCopilotIntegrationId(cacheKey);
+		// Provenance fallback for direct callers: without a build-time value,
+		// snapshot at dispatch — still before any await in this invocation, so
+		// a concurrent stream cannot interleave between the snapshot and use.
+		const cachedBeforeRequest =
+			cacheSnapshot === undefined
+				? getCachedCopilotIntegrationId(cacheKey)
+				: normalizeCopilotIntegrationId(cacheSnapshot);
 		const response = await inner(input, init);
 		if (response.status !== 403 && response.status !== 400) return response;
 		if (input instanceof Request) return response;
@@ -220,8 +228,9 @@ export function wrapFetchForCopilotFallback(
 				const retryHeaders = new Headers(outgoing);
 				retryHeaders.set("Copilot-Integration-Id", cliIntegrationId);
 				const retry = await inner(input, { ...init, headers: retryHeaders });
-				if (cacheKey && retry.ok) {
-					rememberCopilotWorkingIntegrationId(cacheKey, cliIntegrationId);
+				if (cacheKey) {
+					if (retry.ok) rememberCopilotWorkingIntegrationId(cacheKey, cliIntegrationId);
+					else clearCopilotIntegrationCache(cacheKey);
 				}
 				return retry;
 			}
@@ -239,11 +248,8 @@ export function wrapFetchForCopilotFallback(
 				const retryHeaders = new Headers(outgoing);
 				retryHeaders.set("Copilot-Integration-Id", COPILOT_CHAT_INTEGRATION_ID);
 				const retry = await inner(input, { ...init, headers: retryHeaders });
-				if (retry.ok) {
-					rememberCopilotWorkingIntegrationId(cacheKey, COPILOT_CHAT_INTEGRATION_ID);
-				} else if (await isCopilotIdentityDenied(retry)) {
-					clearCopilotIntegrationCache(cacheKey);
-				}
+				if (retry.ok) rememberCopilotWorkingIntegrationId(cacheKey, COPILOT_CHAT_INTEGRATION_ID);
+				else clearCopilotIntegrationCache(cacheKey);
 				return retry;
 			}
 			return response;

@@ -751,8 +751,9 @@ describe("wrapFetchForCopilotFallback working-identity cache", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
-	it("leaves the cache unchanged when the CLI retry is indeterminate", async () => {
+	it("clears the cache when the CLI retry fails", async () => {
 		const cacheKey = "test-working-shape-forward-indeterminate";
+		rememberCopilotWorkingIntegrationId(cacheKey, "copilot-chat");
 		const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
 			const outgoing = new Headers(init?.headers).get("Copilot-Integration-Id");
 			if (outgoing === COPILOT_CHAT_INTEGRATION_ID) return new Response("{}", { status: 403 });
@@ -770,9 +771,14 @@ describe("wrapFetchForCopilotFallback working-identity cache", () => {
 		expect(getCachedCopilotIntegrationId(cacheKey)).toBeUndefined();
 	});
 
-	it("keeps reverse-retrying while chat retries stay indeterminate", async () => {
+	it("keeps reverse-retrying across transport resends and clears on failure", async () => {
 		const cacheKey = "test-working-shape-reverse-indeterminate";
 		rememberCopilotWorkingIntegrationId(cacheKey, "copilot-developer-cli");
+		// Build-time provenance, as threaded by the transports: the resend
+		// below reuses the headers (and snapshot) built before the first
+		// attempt, so it must reverse-retry even though the failed first
+		// attempt already invalidated the shared entry.
+		const snapshot = getCachedCopilotIntegrationId(cacheKey);
 		const seen: (string | null)[] = [];
 		const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
 			const outgoing = new Headers(init?.headers).get("Copilot-Integration-Id");
@@ -783,18 +789,78 @@ describe("wrapFetchForCopilotFallback working-identity cache", () => {
 				? new Response("{}", { status: 403 })
 				: new Response("{}", { status: 500 });
 		});
-		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true, undefined, cacheKey);
 		const cliRequest = {
 			headers: { "Copilot-Integration-Id": "copilot-developer-cli" },
 		};
-		const first = await wrapped(chatUrl, cliRequest);
+		const first = await wrapFetchForCopilotFallback(
+			fetchMock as unknown as typeof fetch,
+			true,
+			undefined,
+			cacheKey,
+			snapshot,
+		)(chatUrl, cliRequest);
 		expect(first.status).toBe(500);
-		expect(getCachedCopilotIntegrationId(cacheKey)).toBe("copilot-developer-cli");
-		// Transport resend with the original CLI headers must reverse-retry
-		// again instead of surfacing the CLI denial as terminal.
-		const second = await wrapped(chatUrl, cliRequest);
+		expect(getCachedCopilotIntegrationId(cacheKey)).toBeUndefined();
+		const second = await wrapFetchForCopilotFallback(
+			fetchMock as unknown as typeof fetch,
+			true,
+			undefined,
+			cacheKey,
+			snapshot,
+		)(chatUrl, cliRequest);
 		expect(second.status).toBe(500);
 		expect(seen).toEqual(["copilot-developer-cli", "copilot-chat", "copilot-developer-cli", "copilot-chat"]);
-		expect(getCachedCopilotIntegrationId(cacheKey)).toBe("copilot-developer-cli");
+		expect(getCachedCopilotIntegrationId(cacheKey)).toBeUndefined();
+	});
+
+	it("honors build-time provenance over a sibling's mid-flight relearn", async () => {
+		const cacheKey = "test-working-shape-provenance";
+		rememberCopilotWorkingIntegrationId(cacheKey, "copilot-developer-cli");
+		// Headers built from the cached CLI; a sibling relearns chat before
+		// this request dispatches. Without the build-time snapshot the wrapper
+		// would see chat, skip its reverse retry, and surface the CLI denial
+		// even though chat works.
+		const snapshot = getCachedCopilotIntegrationId(cacheKey);
+		rememberCopilotWorkingIntegrationId(cacheKey, "copilot-chat");
+		const seen: (string | null)[] = [];
+		const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+			const outgoing = new Headers(init?.headers).get("Copilot-Integration-Id");
+			seen.push(outgoing);
+			return outgoing === "copilot-developer-cli"
+				? new Response("{}", { status: 403 })
+				: new Response("{}", { status: 200 });
+		});
+		const wrapped = wrapFetchForCopilotFallback(
+			fetchMock as unknown as typeof fetch,
+			true,
+			undefined,
+			cacheKey,
+			snapshot,
+		);
+		const result = await wrapped(chatUrl, { headers: { "Copilot-Integration-Id": "copilot-developer-cli" } });
+		expect(result.status).toBe(200);
+		expect(seen).toEqual(["copilot-developer-cli", "copilot-chat"]);
+		expect(getCachedCopilotIntegrationId(cacheKey)).toBe("copilot-chat");
+	});
+
+	it("treats a null snapshot as default-built and skips reverse retry", async () => {
+		const cacheKey = "test-working-shape-null-snapshot";
+		const denied = new Response("{}", { status: 403 });
+		const fetchMock = vi.fn(async () => denied);
+		// `null` pins "cache was empty at build" (e.g. Enterprise default):
+		// a sibling learning afterwards must not turn this default-built
+		// request into a reverse retry.
+		const wrapped = wrapFetchForCopilotFallback(
+			fetchMock as unknown as typeof fetch,
+			true,
+			undefined,
+			cacheKey,
+			null,
+		);
+		rememberCopilotWorkingIntegrationId(cacheKey, "copilot-developer-cli");
+		await expect(wrapped(chatUrl, { headers: { "Copilot-Integration-Id": "copilot-developer-cli" } })).resolves.toBe(
+			denied,
+		);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 });
