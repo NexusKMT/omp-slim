@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `models.yml` now validates the per-model `compat.stripImageInput` opt-out, so a wrong-typed value is rejected like every other declared compat key instead of being silently accepted ([#11697](https://github.com/can1357/oh-my-pi/issues/11697)).
+
 ## [18.1.17] - 2026-09-10
 
 ### Added
