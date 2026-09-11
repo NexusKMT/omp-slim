@@ -322,6 +322,33 @@ describe("SessionFocusController", () => {
 			[h.main.session, undefined],
 		]);
 	});
+
+	it("drops a slower focus that resolves after a newer request", async () => {
+		const h = makeHarness();
+		const slow = makeSessionStub();
+		const fast = makeSessionStub();
+		let releaseSlow: ((session: AgentSession) => void) | undefined;
+		const slowGate = new Promise<AgentSession>(resolve => {
+			releaseSlow = resolve;
+		});
+		const lifecycle = {
+			ensureLive: (id: string) => (id === "Slow" ? slowGate : Promise.resolve(fast.session)),
+		};
+		const controller = new SessionFocusController(
+			h.ctx,
+			h.registry,
+			() => lifecycle as unknown as AgentLifecycleManager,
+		);
+
+		const slowFocus = controller.focusAgent("Slow");
+		await controller.focusAgent("Fast");
+		expect(controller.focusedAgentId).toBe("Fast");
+
+		releaseSlow?.(slow.session);
+		await slowFocus;
+		expect(controller.focusedAgentId).toBe("Fast");
+		expect(controller.target).toBe(fast.session);
+	});
 });
 
 describe("pickRecentFocusableAgentId", () => {

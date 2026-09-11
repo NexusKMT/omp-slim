@@ -42,6 +42,8 @@ export class SessionFocusController {
 	#attachedSession: AgentSession | undefined;
 	#registryUnsubscribe: (() => void) | undefined;
 	#attachGeneration = 0;
+	/** Monotonic focus-request id: a request that resolves after a newer one drops instead of clobbering the view. */
+	#focusRequestSeq = 0;
 
 	constructor(
 		private ctx: InteractiveModeContext,
@@ -57,12 +59,16 @@ export class SessionFocusController {
 	get target(): AgentSession | undefined {
 		return this.#attachedSession;
 	}
-
 	/** Focus the main view on an agent's live session. Throws an Error with a user-displayable message. */
 	async focusAgent(id: string): Promise<void> {
 		if (this.ctx.collabGuest) throw new Error("Viewing agents is unavailable in a collab session.");
 		if (id === MAIN_AGENT_ID) return this.unfocus();
+		const request = ++this.#focusRequestSeq;
 		const session = await this.lifecycle().ensureLive(id);
+		// A newer focus request (e.g. a second click while a parked agent was
+		// still reviving) wins: drop the stale completion instead of letting
+		// the slower revive replace the view.
+		if (request !== this.#focusRequestSeq) return;
 		if (id === this.#focusedAgentId && session === this.#attachedSession) return;
 		this.#focusedAgentId = id;
 		this.#attachedSession = session;

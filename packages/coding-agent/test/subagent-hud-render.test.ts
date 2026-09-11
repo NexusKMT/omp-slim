@@ -608,4 +608,20 @@ describe("InteractiveMode subagent observer UI sync", () => {
 		expect(rebuildHud).toHaveBeenCalledTimes(1);
 		expect(requestRender).toHaveBeenCalledTimes(1);
 	});
+
+	it("applies the setting over a clicked expand override", async () => {
+		await mode.init({ suppressWelcomeIntro: true });
+		for (let index = 0; index < 5; index++) {
+			eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, makeLifecycle(`Override${index}`, index, `job ${index}`));
+		}
+		await Promise.resolve();
+		const hudText = () => Bun.stripANSI(mode.subagentContainer.render(120).join("\n"));
+
+		mode.togglePinnedHudExpanded();
+		expect(hudText()).toContain("Override4");
+
+		mode.applyPinnedAgentsSetting();
+		expect(hudText()).not.toContain("Override4");
+		expect(hudText()).toContain("more — expand");
+	});
 });

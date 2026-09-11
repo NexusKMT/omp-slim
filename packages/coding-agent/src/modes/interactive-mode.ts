@@ -920,6 +920,9 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	/** Rebuild the pinned jump list for a `display.pinnedAgents` change. */
 	applyPinnedAgentsSetting(): void {
+		// An explicit settings change wins over click state: without the reset,
+		// reselecting the current value would keep showing the old override.
+		this.#pinnedHudOverride = undefined;
 		this.#renderSubagentList();
 		this.ui.requestRender();
 	}
