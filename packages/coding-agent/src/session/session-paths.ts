@@ -226,6 +226,12 @@ export function readCwdIdentity(cwd: string): CwdIdentity | undefined {
  * True when `targetCwd` is the same directory that `cwdIdentity` was recorded
  * from — i.e. the project was renamed or moved, not merely deleted/unmounted.
  * Missing identity (legacy breadcrumb, or cwd absent at write time) is not evidence.
+ *
+ * Same-filesystem `mv` and `git worktree move` preserve `dev`+`ino` and qualify.
+ * A cross-filesystem `mv` is copy+unlink (new inode, possibly new `dev`) and
+ * therefore returns false — that is intentional. Absence is not a move; we
+ * would rather leave the session in the original bucket than steal it into an
+ * unrelated continue cwd (#11565).
  */
 export function hasPositiveMovedProjectEvidence(cwdIdentity: CwdIdentity | undefined, targetCwd: string): boolean {
 	if (!cwdIdentity) return false;

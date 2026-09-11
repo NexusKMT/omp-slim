@@ -3096,6 +3096,7 @@ export class SessionManager {
 				// Absence of the recorded cwd is not a move: deleted, unmounted, and
 				// offline paths also fail existsSync. Only re-root when the continue
 				// cwd is the same directory inode the breadcrumb recorded — a rename.
+				// Cross-filesystem `mv` (new inode) is intentionally not a re-root.
 				const looksLikeMovedProject =
 					candidateForMove && hasPositiveMovedProjectEvidence(breadcrumb.cwdIdentity, resolvedCwd);
 				if (looksLikeMovedProject) {
