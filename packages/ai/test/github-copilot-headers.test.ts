@@ -692,6 +692,29 @@ describe("wrapFetchForCopilotFallback working-identity cache", () => {
 		expect(getCachedCopilotIntegrationId(cacheKey)).toBe("copilot-chat");
 	});
 
+	it("retries a stale cached CLI even when a sibling relearns mid-flight", async () => {
+		const cacheKey = "test-working-shape-reverse-race";
+		rememberCopilotWorkingIntegrationId(cacheKey, "copilot-developer-cli");
+		const seen: (string | null)[] = [];
+		const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+			const outgoing = new Headers(init?.headers).get("Copilot-Integration-Id");
+			seen.push(outgoing);
+			return outgoing === "copilot-developer-cli"
+				? new Response("{}", { status: 403 })
+				: new Response("{}", { status: 200 });
+		});
+		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true, undefined, cacheKey);
+		// The wrapper snapshots the cached CLI synchronously on invocation, so a
+		// sibling stream relearning chat between dispatch and denial must not
+		// cancel this request's own reverse retry — otherwise it would surface a
+		// denial even though chat works.
+		const second = wrapped(chatUrl, { headers: { "Copilot-Integration-Id": "copilot-developer-cli" } });
+		rememberCopilotWorkingIntegrationId(cacheKey, "copilot-chat");
+		const result = await second;
+		expect(result.status).toBe(200);
+		expect(seen).toEqual(["copilot-developer-cli", "copilot-chat"]);
+	});
+
 	it("clears a cached CLI both sides deny", async () => {
 		const cacheKey = "test-working-shape-reverse-denied";
 		rememberCopilotWorkingIntegrationId(cacheKey, "copilot-developer-cli");

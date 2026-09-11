@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
 	COPILOT_CAPI_IDENTITY_HEADERS,
 	COPILOT_CHAT_INTEGRATION_ID,
@@ -91,9 +90,11 @@ const COPILOT_WORKING_INTEGRATION_CACHE_LIMIT = 50;
 const copilotWorkingIntegrationCache = new Map<string, string>();
 
 /**
- * Stable cache key for a raw Copilot API key envelope. Hashes the bearer so
- * token bytes never sit in the map as keys; enterprise/business routing inputs
- * participate so the same token on two hosts does not share an entry.
+ * Stable cache key for a raw Copilot API key envelope. Hashes the bearer with
+ * `Bun.hash` (repo-approved hashing API; same credential-scoped pattern as the
+ * GitLab Duo and Codex account keys) so token bytes never sit in the map as
+ * keys; enterprise/business routing inputs participate so the same token on
+ * two hosts does not share an entry.
  */
 export function getCopilotIntegrationCacheKey(apiKeyRaw: string | undefined): string | undefined {
 	if (!apiKeyRaw) return undefined;
@@ -101,10 +102,9 @@ export function getCopilotIntegrationCacheKey(apiKeyRaw: string | undefined): st
 	if (!trimmed) return undefined;
 	const parsed = parseGitHubCopilotApiKey(trimmed);
 	if (!parsed.accessToken) return undefined;
-	const fingerprint = createHash("sha256").update(parsed.accessToken).digest("base64url");
+	const fingerprint = Bun.hash(parsed.accessToken).toString(36);
 	return `${parsed.enterpriseUrl ?? ""}\0${parsed.apiEndpoint ?? ""}\0${fingerprint}`;
 }
-
 /** Cached working identity for a cache key, if one was learned. */
 export function getCachedCopilotIntegrationId(cacheKey: string | undefined): string | undefined {
 	if (!cacheKey) return undefined;
@@ -187,6 +187,12 @@ export function wrapFetchForCopilotFallback(
 	if (!enabled) return inner;
 	const cliIntegrationId = COPILOT_CAPI_IDENTITY_HEADERS["Copilot-Integration-Id"];
 	return async (input, init) => {
+		// Snapshot before dispatch: a concurrent stream can relearn the cache
+		// while this request is in flight, and the reverse retry below must be
+		// decided by what this request started as — not by what a sibling
+		// learned mid-flight. Without this, two stale-CLI streams racing would
+		// let the first relearn chat and the second then skip its own retry.
+		const cachedBeforeRequest = getCachedCopilotIntegrationId(cacheKey);
 		const response = await inner(input, init);
 		if (response.status !== 403 && response.status !== 400) return response;
 		if (input instanceof Request) return response;
@@ -212,7 +218,7 @@ export function wrapFetchForCopilotFallback(
 			return response;
 		}
 		if (outgoingId === cliIntegrationId && cacheKey) {
-			if (getCachedCopilotIntegrationId(cacheKey) !== cliIntegrationId) return response;
+			if (cachedBeforeRequest !== cliIntegrationId) return response;
 			if (await isCopilotIdentityDenied(response)) {
 				try {
 					await response.arrayBuffer();
