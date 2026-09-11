@@ -272,9 +272,6 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 	const output = Array.isArray(response.output) ? response.output : [];
 	// A top-level aggregate can contain narration even without explicit phases.
 	// Prefer filtered messages; use the aggregate only when no messages exist.
-	const hasExplicitCommentary = output.some(item => item?.phase === "commentary");
-	const topLevelText = response.output_text?.trim();
-	const usableAggregateText = hasExplicitCommentary ? undefined : topLevelText || undefined;
 
 	// Explicit phases take precedence. Unphased relay messages use the last
 	// message/citation/length heuristic; keep commentary positions so removing
@@ -318,7 +315,7 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 		// Without authoritative phased content, an empty final message means
 		// no answer — do not promote heuristic-kept earlier content.
 		const lastMessage = messages.at(-1);
-		if (!lastMessage) return usableAggregateText;
+		if (!lastMessage) return response.output_text?.trim() || undefined;
 		if (lastMessage.texts.length === 0 && lastMessage.phase !== "commentary") return undefined;
 	}
 	const kept = messages.filter(

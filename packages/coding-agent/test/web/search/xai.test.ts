@@ -237,6 +237,24 @@ describe("xAI Responses answer extraction from relay output items", () => {
 		expect(response.answer).toBe("Bun 1.3.12 is the latest release.");
 	});
 
+	it("ignores commentary phases on non-message output items", async () => {
+		const relayResponse = {
+			id: "resp-relay",
+			model: "grok-4.5",
+			output_text: "Bun 1.3.12 is the latest release.",
+			output: [
+				{ type: "reasoning", phase: "commentary" },
+				{ phase: "commentary", action: { type: "search", query: "Bun latest release" } },
+				{ type: null, phase: "commentary", content: { text: "Tool metadata, not message content." } },
+			],
+			usage: { input_tokens: 10, output_tokens: 5 },
+		};
+
+		const response = await searchXAI(makeParams(makeFetchMock(relayResponse)));
+
+		expect(response.answer).toBe("Bun 1.3.12 is the latest release.");
+	});
+
 	it("treats message-level url_citation annotations as substance", async () => {
 		const relayResponse = {
 			id: "resp-relay",
@@ -396,6 +414,7 @@ describe("xAI Responses answer extraction from relay output items", () => {
 			searchXAI(
 				makeParams(
 					makeFetchMock({
+						output_text: "I'll check. Still checking.",
 						output: [
 							{ type: "message", content: [{ text: "I'll check." }] },
 							{ type: "message", phase: "commentary", content: [{ text: "Still checking." }] },
