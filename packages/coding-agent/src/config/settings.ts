@@ -1921,12 +1921,19 @@ export class Settings {
 					}
 					break;
 				}
+				// A present-but-non-object legacy file is unusable; don't fall back to a
+				// stale .bak that would overwrite the newer live file.
+				logger.warn("Settings: ignoring non-object legacy settings.json", { path: candidate });
+				break;
 			} catch (error) {
+				// Only an absent live file should trigger .bak recovery; a malformed or
+				// unreadable live file must not be replaced by a stale backup.
 				if (isEnoent(error)) continue;
 				logger.warn("Settings: failed to read legacy settings.json", {
 					path: candidate,
 					error: String(error),
 				});
+				break;
 			}
 		}
 
@@ -1954,7 +1961,7 @@ export class Settings {
 
 			if (jsonSourcePath === settingsJsonPath) {
 				try {
-					fs.renameSync(settingsJsonPath, settingsJsonBakPath);
+					await fs.promises.rename(settingsJsonPath, settingsJsonBakPath);
 				} catch (error) {
 					logger.warn("Settings: failed to archive settings.json after migration", {
 						path: settingsJsonPath,
