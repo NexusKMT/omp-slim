@@ -2382,5 +2382,37 @@ describe("Settings", () => {
 
 			warnSpy.mockRestore();
 		});
+
+		it("drops user-level warnings that #readProjectSettings does not merge", async () => {
+			const projectSettingsJson = path.join(projectDir, ".claude", "settings.json");
+			vi.spyOn(discovery, "loadCapability").mockResolvedValue({
+				items: [],
+				all: [],
+				warnings: [
+					`[Claude Code] Failed to parse JSON in ${path.join(tempDir.path(), "home", ".claude", "settings.json")}`,
+					`[Claude Code] Failed to parse JSON in ${projectSettingsJson}`,
+				],
+				providers: [],
+			});
+			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+			await Settings.init({ cwd: projectDir, agentDir, inMemory: true });
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(projectSettingsJson));
+			expect(warnSpy.mock.calls.filter(args => String(args[0]).includes("home"))).toEqual([]);
+		});
+
+		it("logs a persistently malformed project file once across reloads", async () => {
+			const claudeSettings = path.join(projectDir, ".claude", "settings.json");
+			fs.mkdirSync(path.dirname(claudeSettings), { recursive: true });
+			fs.writeFileSync(claudeSettings, '{ "symbolPreset": "ascii", }');
+
+			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			expect(warnSpy.mock.calls.filter(args => String(args[0]).includes("Failed to parse JSON"))).toHaveLength(1);
+
+			await settings.reloadFromDisk();
+			expect(warnSpy.mock.calls.filter(args => String(args[0]).includes("Failed to parse JSON"))).toHaveLength(1);
+		});
 	});
 });

@@ -490,6 +490,8 @@ export class Settings {
 	#configOverlay: RawSettings = {};
 	/** Project settings file that most recently supplied shellPath. */
 	#projectShellPathSource: string | undefined;
+	/** Capability warnings already surfaced for the current project scope; reloads stay quiet. */
+	#projectSettingsWarningsSeen = new Set<string>();
 	/** Explicit config overlay that most recently supplied shellPath. */
 	#overlayShellPathSource: string | undefined;
 	/** Runtime overrides (not persisted) */
@@ -1818,9 +1820,17 @@ export class Settings {
 		let merged: RawSettings = {};
 		try {
 			const result = await loadCapability(settingsCapability.id, { cwd: this.#cwd });
-			for (const warning of result.warnings ?? []) {
+			// `loadCapability` aggregates warnings across every level, but this
+			// method only merges project items — user-level parse failures belong
+			// to the global layer and would misattribute here. Project files live
+			// under the cwd, so scope to warnings referencing it, and remember
+			// what was surfaced so reloads stay quiet while new failures still log.
+			const projectWarnings = (result.warnings ?? []).filter(warning => warning.includes(this.#cwd));
+			for (const warning of projectWarnings) {
+				if (this.#projectSettingsWarningsSeen.has(warning)) continue;
 				logger.warn(`Settings: ${warning}`);
 			}
+			this.#projectSettingsWarningsSeen = new Set(projectWarnings);
 			for (const item of result.items as SettingsCapabilityItem[]) {
 				if (item.level === "project") {
 					merged = this.#deepMerge(merged, dropSettingsGroupShadows(item.data as RawSettings, item.path));
