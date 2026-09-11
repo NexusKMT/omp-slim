@@ -3599,12 +3599,14 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
  * Anthropic allows at most 4 cache breakpoints per request. At most one is
  * spent on tools and one on system here, leaving the remaining budget for
  * the message tail and historical decimation checkpoints in `applyPromptCaching`.
- * Head caching is skipped entirely when the head is already anchored — the OAuth
- * Claude Code path caches its own instruction block at buildAnthropicSystemBlocks,
- * and via the canonical tools → system order that single system breakpoint already
- * caches every preceding tool. Re-anchoring there would be redundant, would change
- * the OAuth wire, and could push a tool-heavy request over the 4-breakpoint budget,
- * so the general API-key path (nothing cached upstream) is the only one decorated here.
+ *
+ * The tool array is anchored on both API-key and OAuth paths: the tool definitions
+ * sit first in wire order and survive message rewrites, and sibling subagents of
+ * the same definition share this prefix byte for byte.
+ *
+ * When the OAuth Claude Code path already anchors its identity system block at
+ * buildAnthropicSystemBlocks, the system check skips adding a second system
+ * breakpoint, while the tool check still anchors the last tool definition.
  *
  * Runs after the byte-stability plane (planStableAnthropicSystem /
  * planStableAnthropicTools), which hands back fresh block/tool copies each turn
@@ -3618,15 +3620,7 @@ function applyHeadCaching(
 ): void {
 	if (!cacheControl) return;
 
-	// If anything in the head already carries a breakpoint, the head is already
-	// cached (OAuth anchors its identity system block, which — canonical order
-	// tools → system — caches all tools too). Leave it untouched.
-	const headAlreadyCached =
-		(systemBlocks?.some(block => block.cache_control != null) ?? false) ||
-		(tools?.some(tool => tool.cache_control != null) ?? false);
-	if (headAlreadyCached) return;
-
-	if (tools && tools.length > 0) {
+	if (tools && tools.length > 0 && !tools.some(tool => tool.cache_control != null)) {
 		// Deferred tools are not part of the checked prefix until referenced, so
 		// anchor the last tool that actually sits in the stable prefix.
 		for (let index = tools.length - 1; index >= 0; index--) {
@@ -3637,7 +3631,7 @@ function applyHeadCaching(
 		}
 	}
 
-	if (systemBlocks && systemBlocks.length > 0) {
+	if (systemBlocks && systemBlocks.length > 0 && !systemBlocks.some(block => block.cache_control != null)) {
 		const lastBlock = systemBlocks[systemBlocks.length - 1];
 		if (lastBlock) lastBlock.cache_control = cloneAnthropicCacheControl(cacheControl);
 	}
