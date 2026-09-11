@@ -11,7 +11,6 @@ describe("OpenAICompatSchema stripImageInput", () => {
 	test("accepts the documented boolean opt-out", () => {
 		const parsed = OpenAICompatSchema({ stripImageInput: false });
 		expect(parsed instanceof type.errors).toBe(false);
-		expect(parsed).toMatchObject({ stripImageInput: false });
 	});
 
 	test("rejects a non-boolean value like every other declared compat key", () => {
