@@ -9,6 +9,7 @@ import {
 	applyEligibleNestedPatches,
 	mergeIsolatedChanges,
 	persistNestedPatches,
+	retainIsolationWorkspace,
 	runIsolatedSubprocess,
 } from "@oh-my-pi/pi-coding-agent/task/isolation-runner";
 import type { SingleResult } from "@oh-my-pi/pi-coding-agent/task/types";
@@ -594,6 +595,40 @@ describe("runIsolatedSubprocess", () => {
 		).rejects.toThrow("ENOSPC");
 		expect(await Bun.file(path.join(artifactsDir, "Partial.nested-0-a.patch")).exists()).toBe(false);
 		expect(await Bun.file(path.join(artifactsDir, "Partial.nested-1-b.patch")).exists()).toBe(false);
+	});
+});
+
+describe("retainIsolationWorkspace", () => {
+	afterEach(async () => {
+		vi.restoreAllMocks();
+		await Promise.all(tempRoots.splice(0).map(tempRoot => fs.rm(tempRoot, { force: true, recursive: true })));
+	});
+
+	it("moves the workspace to a unique sibling out of the deterministic slot", async () => {
+		const parent = await fs.mkdtemp(path.join(os.tmpdir(), "omp-isolation-retain-"));
+		tempRoots.push(parent);
+		const baseDir = path.join(parent, "wt_abc123");
+		const isolationDir = path.join(baseDir, "m");
+		await fs.mkdir(isolationDir, { recursive: true });
+		await Bun.write(path.join(isolationDir, "work.txt"), "unrecovered");
+
+		const retainedDir = await retainIsolationWorkspace(isolationDir);
+
+		expect(retainedDir).not.toBe(isolationDir);
+		expect(path.dirname(retainedDir)).toContain(".retained-");
+		expect(await Bun.file(path.join(retainedDir, "work.txt")).text()).toBe("unrecovered");
+		expect(await Bun.file(baseDir).exists()).toBe(false);
+		tempRoots.push(path.dirname(retainedDir));
+	});
+
+	it("reports the original dir when the move fails", async () => {
+		// The helper moves the workspace base dir; point it at a base that
+		// does not exist so the rename rejects.
+		const missingParent = path.join(os.tmpdir(), `omp-isolation-retain-missing-${Date.now()}`);
+		const isolationDir = path.join(missingParent, "wt_abc123", "m");
+
+		await expect(retainIsolationWorkspace(isolationDir)).resolves.toBe(isolationDir);
+		await expect(fs.stat(missingParent)).rejects.toThrow();
 	});
 });
 

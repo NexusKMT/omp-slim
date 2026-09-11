@@ -266,6 +266,25 @@ async function writeIsolationPatch(
 	};
 }
 
+/**
+ * Move a retained isolation workspace out of its deterministic
+ * (`repoRoot` + agent id) slot into a globally unique sibling, so a later
+ * isolated run with the same id cannot wipe it: `ensureIsolation`
+ * unconditionally removes the deterministic base dir before writing its
+ * owner marker. Returns the workspace path to report (the sibling on
+ * success, the original dir when the move fails). The owner marker and `m`
+ * mount move along, so `omp worktree clear` still classifies and reclaims it.
+ */
+export async function retainIsolationWorkspace(isolationDir: string): Promise<string> {
+	const baseDir = path.dirname(isolationDir);
+	const retainedBase = `${baseDir}.retained-${Date.now().toString(36)}-${Math.floor(Math.random() * 2 ** 32).toString(16)}`;
+	try {
+		await fs.rename(baseDir, retainedBase);
+	} catch {
+		return isolationDir;
+	}
+	return path.join(retainedBase, path.basename(isolationDir));
+}
 /** Context for `isolation-error.md`: the `result.error` text for a run whose changes could not be captured or landed. */
 interface IsolationErrorContext {
 	kind: "merge-failed" | "patch-capture-failed" | "nested-capture-failed";
@@ -300,7 +319,8 @@ function renderIsolationError(context: IsolationErrorContext): string {
  *
  * The isolation handle is torn down in `finally` — except when captured
  * changes could not be written to disk, in which case the workspace is the
- * only remaining copy and is retained (its path is named in `result.error`).
+ * only remaining copy and is retained under a unique `.retained-*` sibling
+ * (its path is named in `result.error`), out of reach of later same-id runs.
  */
 export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<SingleResult> {
 	let handle: IsolationHandle | undefined;
@@ -367,6 +387,7 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 					});
 				} catch (patchErr) {
 					retainWorkspace = true;
+					const retainedDir = await retainIsolationWorkspace(isolationDir);
 					return rememberAgentArtifacts({
 						...result,
 						error: renderIsolationError({
@@ -374,7 +395,7 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 							message: msg,
 							captureError: patchErr instanceof Error ? patchErr.message : String(patchErr),
 							rescueBranch,
-							retainedDir: isolationDir,
+							retainedDir,
 						}),
 					});
 				}
@@ -396,6 +417,7 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 				});
 			} catch (persistErr) {
 				retainWorkspace = true;
+				const retainedDir = await retainIsolationWorkspace(isolationDir);
 				return rememberAgentArtifacts({
 					...result,
 					branchName: commitResult?.branchName,
@@ -404,7 +426,7 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 					error: renderIsolationError({
 						kind: "nested-capture-failed",
 						message: persistErr instanceof Error ? persistErr.message : String(persistErr),
-						retainedDir: isolationDir,
+						retainedDir,
 					}),
 				});
 			}
@@ -415,12 +437,13 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 				return rememberAgentArtifacts({ ...result, ...patchResult });
 			} catch (patchErr) {
 				retainWorkspace = true;
+				const retainedDir = await retainIsolationWorkspace(isolationDir);
 				return rememberAgentArtifacts({
 					...result,
 					error: renderIsolationError({
 						kind: "patch-capture-failed",
 						message: patchErr instanceof Error ? patchErr.message : String(patchErr),
-						retainedDir: isolationDir,
+						retainedDir,
 					}),
 				});
 			}
