@@ -2096,6 +2096,18 @@ export const SETTINGS_SCHEMA = {
 	},
 
 	// Input and startup
+	"composer.recallClearedDrafts": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "interaction",
+			group: "Input",
+			label: "Recall Cleared Drafts",
+			description:
+				"Keep drafts cleared with Ctrl+C in local Up/Down history until exit; disabling affects future clears",
+		},
+	},
+
 	doubleEscapeAction: {
 		type: "enum",
 		values: ["rewind", "tree", "none"] as const,
@@ -4909,6 +4921,31 @@ export const SETTINGS_SCHEMA = {
 			label: "Start in Plan Mode",
 			description: "Automatically enter plan mode at the start of every new session",
 			condition: "planModeEnabled",
+		},
+	},
+
+	"plan.autosave": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tasks",
+			group: "Modes",
+			label: "Autosave Plans",
+			description: "Automatically save approved plans to disk when plan mode completes",
+			condition: "planModeEnabled",
+		},
+	},
+
+	"plan.autosaveDir": {
+		type: "string",
+		default: undefined,
+		ui: {
+			tab: "tasks",
+			group: "Modes",
+			label: "Autosave Directory",
+			description:
+				"Directory for autosaved plans. Supports ~, absolute, and cwd-relative paths. Empty uses <project>/.omp/plans/.",
+			condition: "planAutosaveEnabled",
 		},
 	},
 
