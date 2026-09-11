@@ -818,6 +818,9 @@ const streamOpenAICompletionsOnce = (
 						// extend the deadline.
 						onSseEvent: rawSseObserver,
 					});
+					// Disarm the first-event watchdog as soon as headers arrive — a slow
+					// onResponse callback must not abort an already-connected stream.
+					clearTimeout(requestTimeout);
 					await notifyProviderResponse(options, response, model, requestId);
 					return events;
 				} finally {
