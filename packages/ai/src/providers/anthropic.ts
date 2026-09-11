@@ -2032,8 +2032,12 @@ const streamAnthropicOnce = (
 			// (and any consumer awaiting `result()`) hanging forever.
 			const apiKey = options?.apiKey ?? getEnvApiKey(model.provider) ?? "";
 			const copilotApiKey = model.provider === "github-copilot" ? parseGitHubCopilotApiKey(apiKey) : undefined;
+			const copilotBaseUrl =
+				model.provider === "github-copilot"
+					? (resolveAnthropicBaseUrl(model, apiKey) ?? "https://api.anthropic.com")
+					: undefined;
 			const copilotCacheKey =
-				model.provider === "github-copilot" ? getCopilotIntegrationCacheKey(apiKey) : undefined;
+				model.provider === "github-copilot" ? getCopilotIntegrationCacheKey(apiKey, copilotBaseUrl) : undefined;
 			const copilotDynamicHeaders = copilotApiKey
 				? buildCopilotDynamicHeaders({
 						messages: context.messages,
@@ -2049,7 +2053,7 @@ const streamAnthropicOnce = (
 			if (copilotDynamicHeaders?.premiumRequests !== undefined) {
 				output.usage.premiumRequests = copilotDynamicHeaders.premiumRequests;
 			}
-			const baseUrl = resolveAnthropicBaseUrl(model, apiKey) ?? "https://api.anthropic.com";
+			const baseUrl = copilotBaseUrl ?? resolveAnthropicBaseUrl(model, apiKey) ?? "https://api.anthropic.com";
 			const supportsEagerToolInputStreaming = resolveEagerToolInputStreamingSupport(model, baseUrl);
 			const providerSessionState = getAnthropicProviderSessionState(
 				options?.providerSessionState,
@@ -3304,7 +3308,7 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 				cchFetch,
 				true,
 				resolveCopilotRequestIdentity(headers),
-				getCopilotIntegrationCacheKey(apiKey),
+				getCopilotIntegrationCacheKey(apiKey, baseUrl),
 			),
 			fetchOptions,
 		};

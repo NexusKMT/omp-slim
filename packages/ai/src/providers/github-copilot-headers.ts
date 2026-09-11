@@ -5,6 +5,7 @@ import {
 	normalizeCopilotIntegrationId,
 	parseGitHubCopilotApiKey,
 } from "@oh-my-pi/pi-catalog/wire/github-copilot";
+import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import { $env, logger } from "@oh-my-pi/pi-utils";
 import type { FetchImpl, Message } from "../types";
 /**
@@ -87,42 +88,56 @@ export function resolveCopilotRequestIdentity(
  * headers bypass the cache entirely — a pin is never second-guessed.
  */
 const COPILOT_WORKING_INTEGRATION_CACHE_LIMIT = 50;
-const copilotWorkingIntegrationCache = new Map<string, string>();
+const copilotWorkingIntegrationCache = new LRUCache<string, string>({ max: COPILOT_WORKING_INTEGRATION_CACHE_LIMIT });
 
 /**
- * Stable cache key for a raw Copilot API key envelope. Hashes the bearer with
- * `Bun.hash` (repo-approved hashing API; same credential-scoped pattern as the
- * GitLab Duo and Codex account keys) so token bytes never sit in the map as
- * keys; enterprise/business routing inputs participate so the same token on
- * two hosts does not share an entry.
+ * Normalize the effective request host for cache isolation. Custom
+ * `model.baseUrl` values survive `resolveGitHubCopilotBaseUrl`, so two proxies
+ * fronting different org policies must not share a learned identity even when
+ * the token envelope matches.
  */
-export function getCopilotIntegrationCacheKey(apiKeyRaw: string | undefined): string | undefined {
+function normalizeCopilotCacheBaseUrl(baseUrl: string | undefined): string {
+	const trimmed = baseUrl?.trim().replace(/\/+$/, "") ?? "";
+	if (!trimmed) return "";
+	try {
+		const url = new URL(trimmed);
+		return `${url.protocol}//${url.host.toLowerCase()}${url.pathname.replace(/\/+$/, "")}${url.search}${url.hash}`;
+	} catch {
+		return trimmed.toLowerCase();
+	}
+}
+
+/**
+ * Stable cache key for a raw Copilot API key envelope on one effective host.
+ * Hashes the bearer with `Bun.hash` (repo-approved hashing API; same
+ * credential-scoped pattern as the GitLab Duo and Codex account keys) so token
+ * bytes never sit in the map as keys; enterprise/business routing inputs and
+ * the normalized effective base URL participate so the same token on two hosts
+ * does not share an entry.
+ */
+export function getCopilotIntegrationCacheKey(apiKeyRaw: string | undefined, baseUrl?: string): string | undefined {
 	if (!apiKeyRaw) return undefined;
 	const trimmed = apiKeyRaw.trim();
 	if (!trimmed) return undefined;
 	const parsed = parseGitHubCopilotApiKey(trimmed);
 	if (!parsed.accessToken) return undefined;
 	const fingerprint = Bun.hash(parsed.accessToken).toString(36);
-	return `${parsed.enterpriseUrl ?? ""}\0${parsed.apiEndpoint ?? ""}\0${fingerprint}`;
+	return `${parsed.enterpriseUrl ?? ""}\0${parsed.apiEndpoint ?? ""}\0${normalizeCopilotCacheBaseUrl(baseUrl)}\0${fingerprint}`;
 }
+
 /** Cached working identity for a cache key, if one was learned. */
 export function getCachedCopilotIntegrationId(cacheKey: string | undefined): string | undefined {
 	if (!cacheKey) return undefined;
 	return normalizeCopilotIntegrationId(copilotWorkingIntegrationCache.get(cacheKey));
 }
 
-/** Remember the identity that cleared the identity gate for a credential. */
+/**
+ * Remember the identity that cleared the identity gate for a credential.
+ * Every store refreshes recency, so hot credentials survive eviction.
+ */
 export function rememberCopilotWorkingIntegrationId(cacheKey: string | undefined, integrationId: unknown): void {
 	const normalized = normalizeCopilotIntegrationId(integrationId);
 	if (!cacheKey || !normalized) return;
-	if (copilotWorkingIntegrationCache.get(cacheKey) === normalized) return;
-	if (
-		copilotWorkingIntegrationCache.size >= COPILOT_WORKING_INTEGRATION_CACHE_LIMIT &&
-		!copilotWorkingIntegrationCache.has(cacheKey)
-	) {
-		const oldest = copilotWorkingIntegrationCache.keys().next();
-		if (!oldest.done) copilotWorkingIntegrationCache.delete(oldest.value);
-	}
 	copilotWorkingIntegrationCache.set(cacheKey, normalized);
 }
 
@@ -149,16 +164,6 @@ async function isCopilotIdentityDenied(response: Response): Promise<boolean> {
 }
 
 /**
- * True when a retry response proves its identity cleared the gate: not denied
- * and not an auth failure. 401s never cache — a bad token denies every
- * identity equally and must not pin one.
- */
-async function isCopilotWorkingIdentityProven(response: Response): Promise<boolean> {
-	if (response.status === 401) return false;
-	return !(await isCopilotIdentityDenied(response));
-}
-
-/**
  * Reissue Copilot client-identity denials once with the other surface.
  *
  * Chat is the default surface (`COPILOT_CHAT_INTEGRATION_ID`) because Business
@@ -172,10 +177,15 @@ async function isCopilotWorkingIdentityProven(response: Response): Promise<boole
  * body is drained before reissuing, and the retry carries the CLI identity so
  * the guard passes it through: at most two requests, never a loop.
  *
- * When `cacheKey` is set, the CLI retry that clears the gate is remembered via
- * `rememberCopilotWorkingIntegrationId`, so later streams for the same
- * credential start at the working shape. A cached CLI start that is itself
- * denied (stale after an org-policy flip) retries once as chat and relearns.
+ * When `cacheKey` is set, the retry identity that clears the gate is
+ * remembered via `rememberCopilotWorkingIntegrationId`, so later streams for
+ * the same credential start at the working shape. A cached CLI start that is
+ * itself denied (stale after an org-policy flip) retries once as chat and
+ * relearns. Only a 2xx retry proves its identity: 401s deny every identity
+ * equally, other 4xx are never identity-retried, and 408/429/5xx are
+ * transport-retryable — the transport resends the *original* headers, so
+ * recording a retryable response would pin the wrong shape and break the
+ * resend's own reverse retry. Inconclusive retries leave the cache unchanged.
  */
 export function wrapFetchForCopilotFallback(
 	base: FetchImpl | undefined,
@@ -210,7 +220,7 @@ export function wrapFetchForCopilotFallback(
 				const retryHeaders = new Headers(outgoing);
 				retryHeaders.set("Copilot-Integration-Id", cliIntegrationId);
 				const retry = await inner(input, { ...init, headers: retryHeaders });
-				if (cacheKey && (await isCopilotWorkingIdentityProven(retry))) {
+				if (cacheKey && retry.ok) {
 					rememberCopilotWorkingIntegrationId(cacheKey, cliIntegrationId);
 				}
 				return retry;
@@ -229,9 +239,9 @@ export function wrapFetchForCopilotFallback(
 				const retryHeaders = new Headers(outgoing);
 				retryHeaders.set("Copilot-Integration-Id", COPILOT_CHAT_INTEGRATION_ID);
 				const retry = await inner(input, { ...init, headers: retryHeaders });
-				if (await isCopilotWorkingIdentityProven(retry)) {
+				if (retry.ok) {
 					rememberCopilotWorkingIntegrationId(cacheKey, COPILOT_CHAT_INTEGRATION_ID);
-				} else {
+				} else if (await isCopilotIdentityDenied(retry)) {
 					clearCopilotIntegrationCache(cacheKey);
 				}
 				return retry;

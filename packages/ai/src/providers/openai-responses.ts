@@ -576,7 +576,7 @@ const streamOpenAIResponsesOnce = (
 							options?.fetch,
 							model.provider === "github-copilot",
 							resolveCopilotRequestIdentity(options?.headers),
-							getCopilotIntegrationCacheKey(apiKey),
+							getCopilotIntegrationCacheKey(apiKey, baseUrl),
 						),
 						// Transient 408/429/5xx get Retry-After-aware transport
 						// retries; the first-event watchdog aborts `requestSignal`,

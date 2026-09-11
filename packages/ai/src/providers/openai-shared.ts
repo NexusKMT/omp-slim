@@ -257,7 +257,8 @@ export function resolveOpenAIRequestSetup(
 	if (model.provider === "github-copilot") {
 		const copilotApiKey = parseGitHubCopilotApiKey(rawApiKey);
 		apiKey = copilotApiKey.accessToken;
-		const copilotCacheKey = getCopilotIntegrationCacheKey(rawApiKey);
+		const copilotBaseUrl = resolveGitHubCopilotBaseUrl(model.baseUrl, rawApiKey) ?? model.baseUrl;
+		const copilotCacheKey = getCopilotIntegrationCacheKey(rawApiKey, copilotBaseUrl);
 		const copilot = buildCopilotDynamicHeaders({
 			messages: options.messages,
 			hasImages: hasCopilotVisionInput(options.messages),
@@ -270,7 +271,7 @@ export function resolveOpenAIRequestSetup(
 		});
 		Object.assign(headers, copilot.headers);
 		copilotPremiumRequests = copilot.premiumRequests;
-		baseUrl = resolveGitHubCopilotBaseUrl(model.baseUrl, rawApiKey) ?? model.baseUrl;
+		baseUrl = copilotBaseUrl;
 	}
 
 	if (model.provider === "alibaba-token-plan") {

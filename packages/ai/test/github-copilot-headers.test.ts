@@ -561,6 +561,17 @@ describe("copilot working integration cache", () => {
 		expect(getCopilotIntegrationCacheKey("   ")).toBeUndefined();
 	});
 
+	it("isolates the same token across effective hosts", () => {
+		const token = "ghu_shared_proxy_token";
+		const hostA = getCopilotIntegrationCacheKey(token, "https://proxy-a.example")!;
+		const hostB = getCopilotIntegrationCacheKey(token, "https://proxy-b.example")!;
+		expect(hostA).not.toBe(hostB);
+		expect(getCopilotIntegrationCacheKey(token, "https://proxy-a.example/")).toBe(hostA);
+		rememberCopilotWorkingIntegrationId(hostA, "copilot-developer-cli");
+		expect(getCachedCopilotIntegrationId(hostA)).toBe("copilot-developer-cli");
+		expect(getCachedCopilotIntegrationId(hostB)).toBeUndefined();
+	});
+
 	it("remembers and clears the working shape per credential", () => {
 		const key = getCopilotIntegrationCacheKey("ghu_cache_roundtrip")!;
 		expect(getCachedCopilotIntegrationId(key)).toBeUndefined();
@@ -738,5 +749,52 @@ describe("wrapFetchForCopilotFallback working-identity cache", () => {
 			denied,
 		);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("leaves the cache unchanged when the CLI retry is indeterminate", async () => {
+		const cacheKey = "test-working-shape-forward-indeterminate";
+		const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+			const outgoing = new Headers(init?.headers).get("Copilot-Integration-Id");
+			if (outgoing === COPILOT_CHAT_INTEGRATION_ID) return new Response("{}", { status: 403 });
+			return new Response("{}", { status: 500 });
+		});
+		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true, undefined, cacheKey);
+		const result = await wrapped(chatUrl, {
+			headers: {
+				Authorization: "Bearer ghu_test",
+				"Copilot-Integration-Id": COPILOT_CHAT_INTEGRATION_ID,
+			},
+		});
+		expect(result.status).toBe(500);
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(getCachedCopilotIntegrationId(cacheKey)).toBeUndefined();
+	});
+
+	it("keeps reverse-retrying while chat retries stay indeterminate", async () => {
+		const cacheKey = "test-working-shape-reverse-indeterminate";
+		rememberCopilotWorkingIntegrationId(cacheKey, "copilot-developer-cli");
+		const seen: (string | null)[] = [];
+		const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+			const outgoing = new Headers(init?.headers).get("Copilot-Integration-Id");
+			seen.push(outgoing);
+			// CLI is identity-denied; chat hits a transport-retryable 500 the
+			// transport will resend with the original CLI headers.
+			return outgoing === "copilot-developer-cli"
+				? new Response("{}", { status: 403 })
+				: new Response("{}", { status: 500 });
+		});
+		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true, undefined, cacheKey);
+		const cliRequest = {
+			headers: { "Copilot-Integration-Id": "copilot-developer-cli" },
+		};
+		const first = await wrapped(chatUrl, cliRequest);
+		expect(first.status).toBe(500);
+		expect(getCachedCopilotIntegrationId(cacheKey)).toBe("copilot-developer-cli");
+		// Transport resend with the original CLI headers must reverse-retry
+		// again instead of surfacing the CLI denial as terminal.
+		const second = await wrapped(chatUrl, cliRequest);
+		expect(second.status).toBe(500);
+		expect(seen).toEqual(["copilot-developer-cli", "copilot-chat", "copilot-developer-cli", "copilot-chat"]);
+		expect(getCachedCopilotIntegrationId(cacheKey)).toBe("copilot-developer-cli");
 	});
 });
