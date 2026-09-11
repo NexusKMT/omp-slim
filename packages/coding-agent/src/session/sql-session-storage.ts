@@ -376,6 +376,14 @@ class SqlSessionStorageBackend implements SessionStorageBackend {
 
 		const current = await this.readFull(path);
 		const actualSize = current === null ? null : Buffer.byteLength(current, "utf8");
+		// MySQL reports `affectedRows: 0` for a matched-but-unchanged row, so a
+		// byte-identical replace looks unwritten. A size match means the size
+		// precondition holds and there is nothing to conflict about; only a real
+		// size divergence throws. (Same granularity as the size-token contract
+		// everywhere else: same-length different content is not detectable here
+		// on any dialect. Actual MySQL driver/flag behavior is unverified in
+		// this environment; this re-check is exact regardless of it.)
+		if (actualSize === expectedSize) return;
 		throw new SessionWriteConflictError(path, expectedSize, actualSize);
 	}
 
