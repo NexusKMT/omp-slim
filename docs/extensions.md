@@ -631,25 +631,32 @@ pi.on("session_start", async (_event, ctx) => {
 
 ### Session-entry roles (`message.role` is camelCase)
 
-When you iterate `ctx.sessionManager.getBranch()`, each entry has a `type`
-(`message`, `custom`, `model_change`, …; the [session-entry model](./session.md#entry-taxonomy)
-is the reference). A `type: "message"` entry carries an `AgentMessage` under `entry.message`,
-and its `role` discriminant is **camelCase** — not the snake_case used by the raw LLM wire
-format or by the `tool_call` / `tool_result` **hook** names above:
+When you iterate `ctx.sessionManager.getBranch()`, each persisted entry has a `type`
+(`message`, `custom_message`, `branch_summary`, `compaction`, …; the
+[session-entry model](./session.md#entry-taxonomy) is the reference). A `type: "message"`
+entry carries an `AgentMessage` under `entry.message`, whose `role` discriminant is
+**camelCase** — not the snake_case used by the raw LLM wire format or by the
+`tool_call` / `tool_result` **hook** names above:
 
-| `message.role`      | Meaning                                                                           |
-| ------------------- | --------------------------------------------------------------------------------- |
-| `user`              | User / tool-feedback turn.                                                        |
-| `developer`         | Developer-role instruction turn.                                                  |
-| `assistant`         | Model turn. Tool calls are `{ type: "toolCall" }` blocks inside `content`.        |
-| `toolResult`        | One tool's result — **not** `tool_result`. Has `toolCallId` / `toolName`.         |
-| `bashExecution`     | Standalone `!`-bash run.                                                          |
-| `pythonExecution`   | Standalone python run.                                                            |
-| `branchSummary`     | Summary of an abandoned branch.                                                   |
-| `compactionSummary` | Compaction summary turn.                                                          |
-| `custom`            | Extension/host message in LLM context (from `pi.sendMessage` / a `custom` entry). |
-| `hookMessage`       | Legacy hook-injected message (migration only; use `custom`).                      |
-| `fileMention`       | Inlined `@file` mention contents.                                                 |
+| Persisted `entry.message.role` | Meaning                                                                    |
+| ------------------------------ | -------------------------------------------------------------------------- |
+| `user`                         | User / tool-feedback turn.                                                 |
+| `developer`                    | Developer-role instruction turn.                                           |
+| `assistant`                    | Model turn. Tool calls are `{ type: "toolCall" }` blocks inside `content`. |
+| `toolResult`                   | One tool's result — **not** `tool_result`. Has `toolCallId` / `toolName`.  |
+| `bashExecution`                | Standalone `!`-bash run.                                                   |
+| `pythonExecution`              | Standalone python run.                                                     |
+| `hookMessage`                  | Legacy hook-injected message (migration only; use `custom`).               |
+| `fileMention`                  | Inlined `@file` mention contents.                                          |
+
+Three roles in reconstructed agent context come from dedicated source entries in
+extension-facing branch history; `getBranch()` exposes those source entries instead:
+
+| Persisted `entry.type` | Reconstructed `message.role` | Meaning                               |
+| ---------------------- | ---------------------------- | ------------------------------------- |
+| `branch_summary`       | `branchSummary`              | Summary of an abandoned branch.       |
+| `compaction`           | `compactionSummary`          | Compaction summary turn.              |
+| `custom_message`       | `custom`                     | Message sent through `pi.sendMessage` |
 
 `toolCall` is a **content-block type**, not a role: a tool call is a block in the
 `assistant` message's `content` array, and the paired result is a separate entry with
@@ -660,13 +667,25 @@ off `role` loses every tool result while user/assistant text still flows through
 
 ```ts
 for (const entry of ctx.sessionManager.getBranch()) {
-  if (entry.type !== "message") continue;
-  switch (entry.message.role) {
-    case "assistant":
-      // tool calls: entry.message.content.filter(b => b.type === "toolCall")
+  switch (entry.type) {
+    case "custom_message":
+      // pi.sendMessage payload: entry.customType, entry.content
       break;
-    case "toolResult":
-      // entry.message.toolCallId, entry.message.content
+    case "branch_summary":
+      // reconstructed as role: "branchSummary"
+      break;
+    case "compaction":
+      // reconstructed as role: "compactionSummary"
+      break;
+    case "message":
+      switch (entry.message.role) {
+        case "assistant":
+          // tool calls: entry.message.content.filter(b => b.type === "toolCall")
+          break;
+        case "toolResult":
+          // entry.message.toolCallId, entry.message.content
+          break;
+      }
       break;
   }
 }
