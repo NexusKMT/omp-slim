@@ -1626,7 +1626,7 @@ export class SessionMaintenance {
 			// reclaims materially more context at apply time.
 			const growth = contextTokens - current.armed.contextTokensAtStart;
 			const refreshBudget = Math.max(settings.keepRecentTokens, SPECULATION_LEAD_MIN_TOKENS);
-			if (growth <= refreshBudget && this.#armedSpeculationValid(current.armed)) return;
+			if (growth <= refreshBudget && this.#armedSpeculationValid(current.armed, contextTokens)) return;
 			this.cancelSpeculation();
 		}
 		const model = this.#model;
@@ -1687,7 +1687,13 @@ export class SessionMaintenance {
 		if (contextTokens >= graceCapTokens) return false;
 		const run = this.#speculation;
 		if (run) {
-			if (run.armed) return false; // ready — the real pass splices it in now
+			if (run.armed) {
+				if (!this.#armedSpeculationValid(run.armed, contextTokens)) {
+					this.cancelSpeculation();
+					return false;
+				}
+				return false; // ready — the real pass splices it in now
+			}
 			return true; // still summarizing in the background
 		}
 		this.#startSpeculationRun(contextTokens, method);
@@ -1796,8 +1802,13 @@ export class SessionMaintenance {
 	 * is still intact: its snapshot leaf is on the active path with no later
 	 * compaction or reset boundary, and any provider-native replay payload is
 	 * still readable by the active model.
+	 *
+	 * When the branch has grown past the snapshot leaf, the speculation is only
+	 * valid if applying it would still create sufficient headroom under the
+	 * recovery band without net context expansion, and (for handoffs) no subsequent
+	 * assistant or user turn was committed.
 	 */
-	#armedSpeculationValid(armed: ArmedSpeculation): boolean {
+	#armedSpeculationValid(armed: ArmedSpeculation, triggerContextTokens?: number): boolean {
 		const model = this.#model;
 		if (!model) return false;
 		const settings = this.#host.settings.getGroup("compaction");
@@ -1814,6 +1825,36 @@ export class SessionMaintenance {
 			const type = branch[i].type;
 			if (type === "compaction" || type === "reset_boundary") return false;
 		}
+		if (leafIdx < branch.length - 1) {
+			if (armed.method === "handoff") {
+				const hasCommittedTurn = branch
+					.slice(leafIdx + 1)
+					.some(
+						entry =>
+							entry.type === "message" && (entry.message.role === "assistant" || entry.message.role === "user"),
+					);
+				if (hasCommittedTurn) {
+					return false;
+				}
+			}
+
+			const keptIdx = branch.findIndex(entry => entry.id === armed.result.firstKeptEntryId);
+			if (keptIdx < 0) return false;
+
+			const projected = this.#projectCompactedContextTokens(armed.result);
+			const contextWindow = model.contextWindow ?? 0;
+			if (contextWindow > 0) {
+				const thresholdTokens = resolveThresholdTokens(contextWindow, settings);
+				const recoveryBand = Math.floor(thresholdTokens * COMPACTION_RECOVERY_BAND);
+				if (projected > recoveryBand) {
+					return false;
+				}
+			}
+			const currentTokens = triggerContextTokens ?? this.#estimateStoredContextTokens();
+			if (currentTokens > 0 && projected >= currentTokens) {
+				return false;
+			}
+		}
 		return true;
 	}
 
@@ -1822,7 +1863,7 @@ export class SessionMaintenance {
 	 * is aborted (the real pass supersedes it); an armed result is returned only
 	 * when still valid for the current branch, model, and settings.
 	 */
-	#claimArmedSpeculation(): ArmedSpeculation | undefined {
+	#claimArmedSpeculation(triggerContextTokens?: number): ArmedSpeculation | undefined {
 		const run = this.#speculation;
 		if (!run) return undefined;
 		this.#speculation = undefined;
@@ -1833,7 +1874,14 @@ export class SessionMaintenance {
 		const settings = this.#host.settings.getGroup("compaction");
 		if (settings.asyncEnabled === false) return undefined;
 		if (this.#host.extensionRunner?.hasHandlers("session_before_compact")) return undefined;
-		return this.#armedSpeculationValid(run.armed) ? run.armed : undefined;
+		if (!this.#armedSpeculationValid(run.armed, triggerContextTokens)) {
+			logger.debug("Armed speculative compaction invalidated by branch growth or headroom check", {
+				method: run.armed.method,
+				snapshotLeafId: run.armed.snapshotLeafId,
+			});
+			return undefined;
+		}
+		return run.armed;
 	}
 
 	/**
@@ -2951,10 +2999,10 @@ export class SessionMaintenance {
 	 */
 	#projectCompactedContextTokens(args: {
 		summary: string;
-		shortSummary: string | undefined;
+		shortSummary?: string | undefined;
 		tokensBefore: number;
 		firstKeptEntryId: string;
-		preserveData: Record<string, unknown> | undefined;
+		preserveData?: Record<string, unknown> | undefined;
 	}): number {
 		const archive = snapcompact.getPreservedArchive(args.preserveData);
 		const blocks = archive
@@ -2988,10 +3036,10 @@ export class SessionMaintenance {
 	 */
 	#projectExperimentalContextRolloverTokens(args: {
 		summary: string;
-		shortSummary: string | undefined;
+		shortSummary?: string | undefined;
 		tokensBefore: number;
 		firstKeptEntryId: string;
-		preserveData: Record<string, unknown> | undefined;
+		preserveData?: Record<string, unknown> | undefined;
 	}): number {
 		const branch = this.#host.sessionManager.getBranch();
 		const leaf = branch.at(-1);
@@ -3481,7 +3529,7 @@ export class SessionMaintenance {
 		// returned only when still valid for the current branch/model/settings.
 		// Snapcompact is local and instant, so an armed LLM summary (possible
 		// only when settings/model changed since arming) never overrides it.
-		const claimedSpec = this.#claimArmedSpeculation();
+		const claimedSpec = this.#claimArmedSpeculation(options.triggerContextTokens);
 		const armedSpec = method === "snapcompact" ? undefined : claimedSpec;
 
 		const effectiveSettings = resolveMethodSettings(compactionSettings, method);

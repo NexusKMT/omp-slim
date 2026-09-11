@@ -65,6 +65,10 @@ describe("async speculative compaction", () => {
 			methodOrder?: CompactionMethod[];
 			experimental?: boolean;
 			recoveryTools?: boolean;
+			generateHandoffDocument?: (
+				focus: string,
+				options?: { autoTriggered?: boolean; signal?: AbortSignal },
+			) => Promise<{ document: string } | undefined>;
 		} = {},
 	): SessionMaintenance {
 		agent = new Agent({
@@ -133,7 +137,7 @@ describe("async speculative compaction", () => {
 			getContextUsage: () => undefined,
 			shake: async () => ({ modified: false, tokensRemoved: 0 }),
 			dropImages: async () => ({ removed: 0 }),
-			generateHandoffDocument: async () => undefined,
+			generateHandoffDocument: options.generateHandoffDocument ?? (async () => undefined),
 			removeAssistantMessageFromActiveContext: () => {},
 			dropPersistedAssistantTurn: async () => undefined,
 			runRecoveryCompactionWithRollback: async () => ({ deferredHandoff: false, continuationScheduled: false }),
@@ -447,5 +451,81 @@ describe("async speculative compaction", () => {
 		maintenance = createMaintenance({ methodOrder: ["snapcompact", "soft"] });
 		expect(maintenance.deferThresholdCompactionToSpeculation(THRESHOLD + 1, CONTEXT_WINDOW)).toBe(false);
 		expect(maintenance.speculationState).toBe("idle");
+	});
+
+	it("discards an armed summary when post-snapshot branch growth prevents recovery headroom", async () => {
+		let invocation = 0;
+		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => ({
+			summary: `summary ${++invocation}`,
+			firstKeptEntryId: preparation.firstKeptEntryId,
+			tokensBefore: preparation.tokensBefore,
+			details: {},
+		}));
+		maintenance.maybeStartSpeculativeCompaction(SPECULATION_BAND_START, CONTEXT_WINDOW);
+		await waitForState("armed");
+		expect(compactSpy).toHaveBeenCalledTimes(1);
+
+		// Post-snapshot branch growth pushes projected tokens above the recovery band (recoveryBand is 40k)
+		const largeText = "large-tail-token ".repeat(45_000);
+		sessionManager.appendMessage(assistantMessage(largeText, model));
+
+		await maintenance.runAutoCompaction("threshold", false, false, false, {
+			triggerContextTokens: THRESHOLD + 40_000,
+		});
+
+		// Stale speculation was discarded and a fresh compaction was run on the new branch
+		expect(compactSpy).toHaveBeenCalledTimes(2);
+		const entry = sessionManager.getEntries().findLast(item => item.type === "compaction");
+		expect(entry?.type === "compaction" ? entry.summary : undefined).toBe("summary 2");
+	});
+
+	it("discards an armed handoff summary when an assistant turn is committed after the snapshot", async () => {
+		let handoffInvocation = 0;
+		const generateHandoffDocument = vi.fn(async () => ({
+			document: `handoff plan ${++handoffInvocation}`,
+		}));
+		maintenance = createMaintenance({
+			methodOrder: ["handoff"],
+			generateHandoffDocument,
+		});
+
+		maintenance.maybeStartSpeculativeCompaction(SPECULATION_BAND_START, CONTEXT_WINDOW);
+		await waitForState("armed");
+		expect(generateHandoffDocument).toHaveBeenCalledTimes(1);
+
+		// An assistant turn is committed after the snapshot leaf
+		sessionManager.appendMessage(assistantMessage("intermediate work completed", model));
+
+		await maintenance.runAutoCompaction("threshold", false, false, false, { triggerContextTokens: THRESHOLD });
+
+		// Stale handoff speculation was discarded and fresh handoff compaction ran
+		expect(generateHandoffDocument).toHaveBeenCalledTimes(2);
+		const entry = sessionManager.getEntries().findLast(item => item.type === "compaction");
+		expect(entry?.type === "compaction" ? entry.summary : undefined).toContain("handoff plan 2");
+	});
+
+	it("discards an armed handoff summary when a user message is committed after the snapshot", async () => {
+		let handoffInvocation = 0;
+		const generateHandoffDocument = vi.fn(async () => ({
+			document: `handoff plan ${++handoffInvocation}`,
+		}));
+		maintenance = createMaintenance({
+			methodOrder: ["handoff"],
+			generateHandoffDocument,
+		});
+
+		maintenance.maybeStartSpeculativeCompaction(SPECULATION_BAND_START, CONTEXT_WINDOW);
+		await waitForState("armed");
+		expect(generateHandoffDocument).toHaveBeenCalledTimes(1);
+
+		// A user message is committed after the snapshot leaf
+		sessionManager.appendMessage(userMessage("new directions from user"));
+
+		await maintenance.runAutoCompaction("threshold", false, false, false, { triggerContextTokens: THRESHOLD });
+
+		// Stale handoff speculation was discarded and fresh handoff compaction ran
+		expect(generateHandoffDocument).toHaveBeenCalledTimes(2);
+		const entry = sessionManager.getEntries().findLast(item => item.type === "compaction");
+		expect(entry?.type === "compaction" ? entry.summary : undefined).toContain("handoff plan 2");
 	});
 });
