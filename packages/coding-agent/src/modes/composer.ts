@@ -333,16 +333,33 @@ export class Composer implements TerminalFrameProvider {
 		const afterSpans: ViewportClickSpan[] = [];
 		for (const root of afterRoots) {
 			const start = after.length;
-			after.push(...root.render(width));
 			// Row targets usually nest one level down: chrome roots are plain
 			// containers (the HUD lives inside `subagentContainer`), and
 			// `Container.render` is a pure concatenation, so child spans tile
-			// the root span exactly. Only subtrees containing a target pay for
-			// child renders — and only up to the last target — so plain chrome
-			// costs nothing extra per frame.
+			// the root span exactly. Render those children once and share the
+			// rows for composition and measurement — a second render per frame
+			// would duplicate render-time side effects (image placement
+			// registration). Roots with a custom render keep the composed
+			// output as the source of truth and measure up to the last target.
+			const plainContainer = root instanceof Container && root.render === Container.prototype.render;
 			const targets = root instanceof Container ? root.children : [root];
 			const resolves = targets.map(rowTargetCandidates);
 			const lastTarget = resolves.findLastIndex(resolve => resolve !== undefined);
+			if (plainContainer) {
+				let offset = start;
+				for (let index = 0; index < targets.length; index++) {
+					const childLines = targets[index]!.render(width);
+					after.push(...childLines);
+					if (index > lastTarget) continue;
+					const resolve = resolves[index];
+					if (resolve !== undefined && childLines.length > 0) {
+						afterSpans.push({ start: offset, end: offset + childLines.length, candidates: resolve });
+					}
+					offset += childLines.length;
+				}
+				continue;
+			}
+			after.push(...root.render(width));
 			if (lastTarget === -1) continue;
 			let offset = start;
 			for (let index = 0; index <= lastTarget; index++) {

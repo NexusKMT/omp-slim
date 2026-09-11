@@ -196,4 +196,27 @@ describe("composer chrome span recording", () => {
 			composer.stop();
 		}
 	});
+
+	it("renders target-bearing chrome children once per frame", () => {
+		const term = new VirtualTerminal(80, 24);
+		const composer = new Composer({ terminal: term, preferences: { ...COMPOSER_DEFAULTS, quiet: true } });
+		composer.start();
+		try {
+			const transcript = new TranscriptContainer();
+			const chrome = new Container();
+			const first = new CountingBlock(["status one"]);
+			const hud = new RowTarget(["hud row"], ["AgentH"]);
+			chrome.addChild(first);
+			chrome.addChild(hud);
+			composer.setRuntimeChildren([transcript, chrome]);
+
+			const frame = composer.renderFrame({ columns: 80, rows: 24 });
+			const hudRow = frame.viewport.findIndex(line => line.includes("hud row"));
+			expect(hudRow).toBeGreaterThanOrEqual(0);
+			expect(composer.viewportClickCandidates(hudRow)).toEqual(["AgentH"]);
+			expect(first.renders).toBe(1);
+		} finally {
+			composer.stop();
+		}
+	});
 });
