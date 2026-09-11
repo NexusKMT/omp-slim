@@ -16,6 +16,7 @@ import {
 	compactionContextTokens,
 	createCompactionSummaryMessage,
 	estimateTranscriptTokens,
+	getAnthropicCompactionPayload,
 	NativeCompactionError,
 	prepareCompaction,
 	type SessionMessageEntry,
@@ -166,10 +167,17 @@ interface ActiveAdvisor {
 	retryFallbackPendingSuccess: boolean;
 	signature: string;
 }
-
 interface AdvisorCompactionSummaryMessage extends CompactionSummaryMessage {
 	firstKeptEntryId?: string;
 	advisorUsageAnchorStartIndex?: number;
+	/**
+	 * Provider-native replay state from `compact()` (e.g. the Anthropic
+	 * compaction block), mirroring entry `preserveData` on the primary
+	 * session. The message payload replays it on later requests; the next
+	 * maintenance run persists it back into the reconstructed entry so the
+	 * following preparation keeps the opaque state and cache continuity.
+	 */
+	preserveData?: Record<string, unknown>;
 }
 
 interface AdvisorRuntimeDescriptor {
@@ -1639,6 +1647,7 @@ export class SessionAdvisors {
 					shortSummary: message.shortSummary,
 					firstKeptEntryId: advisorSummary.firstKeptEntryId || `msg-${i + 1}`,
 					tokensBefore: message.tokensBefore,
+					preserveData: advisorSummary.preserveData,
 				} satisfies CompactionEntry;
 			}
 
@@ -1763,7 +1772,15 @@ export class SessionAdvisors {
 		// only assistants appended afterward can become the next usage anchor.
 		const advisorUsageAnchorStartIndex = preparation.recentMessages.length + 1;
 		const summaryMessage = {
-			...createCompactionSummaryMessage(summary, tokensBefore, new Date().toISOString(), { shortSummary }),
+			...createCompactionSummaryMessage(summary, tokensBefore, new Date().toISOString(), {
+				shortSummary,
+				// A provider-native compaction returns its replay state in
+				// preserveData; carry it on the in-memory summary so later
+				// advisor requests replay the native block (and beta/edit)
+				// instead of resending the summary as ordinary text.
+				providerPayload: getAnthropicCompactionPayload(compactResult.preserveData),
+			}),
+			preserveData: compactResult.preserveData,
 			firstKeptEntryId,
 			advisorUsageAnchorStartIndex,
 		} satisfies AdvisorCompactionSummaryMessage;
