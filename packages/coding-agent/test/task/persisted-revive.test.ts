@@ -13,6 +13,7 @@ import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession, AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import * as executorModule from "@oh-my-pi/pi-coding-agent/task/executor";
 import { createPersistedSubagentReviverFactory } from "@oh-my-pi/pi-coding-agent/task/persisted-revive";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { IrcBus, type IrcMessage } from "@oh-my-pi/pi-coding-agent/irc/bus";
@@ -174,6 +175,30 @@ describe("persisted subagent revival", () => {
 		expect(initialize).toHaveBeenCalledTimes(1);
 		expect(onError).toHaveBeenCalledTimes(1);
 		expect(emit).toHaveBeenCalledWith({ type: "session_start" });
+	});
+
+	it("anchors wake-turn artifacts to the revived ref's own dir, not the root session's (#11563)", async () => {
+		const cwd = makeTempDir("@pi-revive-artifacts-dir-");
+		const sessionFile = await createPersistedSession(cwd);
+		MCPManager.setInstance({ getTools: () => [] } as unknown as MCPManager);
+		let capturedArtifactsDir: string | undefined;
+		const attachSpy = vi.spyOn(executorModule, "attachIrcWakeTurnMonitor").mockImplementation((_session, options) => {
+			capturedArtifactsDir = options.artifactsDir;
+		});
+		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(
+			async () => ({ session: createRevivedSession([]).session }) as CreateAgentSessionResult,
+		);
+
+		const ref = createRef(sessionFile);
+		const reviver = await createFactory(cwd)(ref);
+		if (!reviver) throw new Error("Expected a persisted reviver");
+		await reviver(ref);
+
+		expect(attachSpy).toHaveBeenCalledTimes(1);
+		// Artifacts must land under the revived ref's own tree (dirname of its
+		// session file), not the live root/parent session's dir.
+		expect(capturedArtifactsDir).toBe(path.dirname(sessionFile));
+		expect(capturedArtifactsDir).not.toBe(path.join(cwd, "parent"));
 	});
 
 	it("cold-revives a restricted contract without loading hostile same-name capabilities", async () => {
