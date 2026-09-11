@@ -1864,10 +1864,12 @@ export class TUI extends Container {
 		if (this.#altActive || this.#pendingAltExit) {
 			// A pending fused exit may have been built without an OFF write to
 			// keep inline capture alive across the restore — at process quit
-			// nothing continues, so release unconditionally.
+			// nothing continues, so release unconditionally. The pending
+			// sequence itself can re-enable tracking (overlay-close restore),
+			// so the final OFF goes last or the shell keeps reporting.
 			const mouseExit = this.#mouseTracking !== "off" ? MOUSE_TRACKING_OFF : "";
 			const exitSequence = this.#pendingAltExit
-				? `${mouseExit}${this.#pendingAltExit}`
+				? `${this.#pendingAltExit}${mouseExit}`
 				: `${mouseExit}${this.#keyboardEnhancementExit()}\x1b[?1049l`;
 			this.terminal.write(exitSequence);
 			setAltScreenActive(false);

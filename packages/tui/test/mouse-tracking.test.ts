@@ -156,6 +156,29 @@ describe("inline mouse tracking", () => {
 		}
 	});
 
+	it("leaves tracking off when stopping after a fused restore exit", () => {
+		const enabled = { current: true };
+		const { terminal, tui } = makeInlineTui(enabled);
+		try {
+			tui.start();
+			const overlay = tui.showOverlay(new StaticOverlay(), { fullscreen: true, mouseTracking: false });
+			tui.renderNow();
+
+			// Destructive repaint + overlay close fuses the alt exit including
+			// the inline restore; quitting first must still leave the final
+			// OFF after any re-enable or the shell keeps reporting.
+			tui.requestRender(true, { clearScrollback: true });
+			overlay.hide();
+			tui.renderNow();
+			tui.stop();
+
+			expect(terminal.output.includes(TRACKING_OFF)).toBe(true);
+			expect(terminal.output.lastIndexOf(TRACKING_OFF)).toBeGreaterThan(terminal.output.lastIndexOf(TRACKING_ON));
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("stays off by default", () => {
 		const enabled = { current: false };
 		const { terminal, tui } = makeInlineTui(enabled);
