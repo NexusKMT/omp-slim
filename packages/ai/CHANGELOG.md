@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added historical decimation prompt-cache breakpoints every 15 user turns on Anthropic requests, so long conversations retain stable cached prefixes during branching, rewinds, and session resume ([#11665](https://github.com/can1357/oh-my-pi/pull/11665) by [@camjac251](https://github.com/camjac251)).
+
 ## [18.1.17] - 2026-09-10
 
 ### Fixed
