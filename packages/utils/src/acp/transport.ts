@@ -205,7 +205,7 @@ export class RpcConnection {
 	async #drainInbound(): Promise<void> {
 		if (this.#inbound.size === 0) return;
 		const drained = Promise.allSettled(this.#inbound).then(() => {});
-		let timer: ReturnType<typeof setTimeout> | undefined;
+		let timer: Timer | undefined;
 		const timedOut = await Promise.race([
 			drained.then(() => false),
 			new Promise<boolean>(resolve => {
