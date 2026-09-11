@@ -1826,18 +1826,6 @@ export class SessionMaintenance {
 			if (type === "compaction" || type === "reset_boundary") return false;
 		}
 		if (leafIdx < branch.length - 1) {
-			if (armed.method === "handoff") {
-				const hasCommittedTurn = branch
-					.slice(leafIdx + 1)
-					.some(
-						entry =>
-							entry.type === "message" && (entry.message.role === "assistant" || entry.message.role === "user"),
-					);
-				if (hasCommittedTurn) {
-					return false;
-				}
-			}
-
 			const keptIdx = branch.findIndex(entry => entry.id === armed.result.firstKeptEntryId);
 			if (keptIdx < 0) return false;
 
@@ -1850,8 +1838,14 @@ export class SessionMaintenance {
 					return false;
 				}
 			}
-			const currentTokens = triggerContextTokens ?? this.#estimateStoredContextTokens();
-			if (currentTokens > 0 && projected >= currentTokens) {
+			// Anchor net-expansion check on local stored token count (same basis
+			// as `projected`) to avoid basis mismatch against provider-billed tokens.
+			// Also ensure projected tokens do not exceed the trigger context if provided.
+			const storedCurrentTokens = this.#estimateStoredContextTokens();
+			if (storedCurrentTokens > 0 && projected >= storedCurrentTokens) {
+				return false;
+			}
+			if (triggerContextTokens !== undefined && triggerContextTokens > 0 && projected >= triggerContextTokens) {
 				return false;
 			}
 		}

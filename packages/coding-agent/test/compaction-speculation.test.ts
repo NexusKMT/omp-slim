@@ -479,7 +479,7 @@ describe("async speculative compaction", () => {
 		expect(entry?.type === "compaction" ? entry.summary : undefined).toBe("summary 2");
 	});
 
-	it("discards an armed handoff summary when an assistant turn is committed after the snapshot", async () => {
+	it("discards an armed handoff summary when post-snapshot branch growth prevents recovery headroom", async () => {
 		let handoffInvocation = 0;
 		const generateHandoffDocument = vi.fn(async () => ({
 			document: `handoff plan ${++handoffInvocation}`,
@@ -493,10 +493,13 @@ describe("async speculative compaction", () => {
 		await waitForState("armed");
 		expect(generateHandoffDocument).toHaveBeenCalledTimes(1);
 
-		// An assistant turn is committed after the snapshot leaf
-		sessionManager.appendMessage(assistantMessage("intermediate work completed", model));
+		// A massive turn is committed after snapshot, blowing past the recovery band
+		const largeText = "large-tail-token ".repeat(45_000);
+		sessionManager.appendMessage(assistantMessage(largeText, model));
 
-		await maintenance.runAutoCompaction("threshold", false, false, false, { triggerContextTokens: THRESHOLD });
+		await maintenance.runAutoCompaction("threshold", false, false, false, {
+			triggerContextTokens: THRESHOLD + 40_000,
+		});
 
 		// Stale handoff speculation was discarded and fresh handoff compaction ran
 		expect(generateHandoffDocument).toHaveBeenCalledTimes(2);
@@ -504,7 +507,7 @@ describe("async speculative compaction", () => {
 		expect(entry?.type === "compaction" ? entry.summary : undefined).toContain("handoff plan 2");
 	});
 
-	it("discards an armed handoff summary when a user message is committed after the snapshot", async () => {
+	it("retains and claims an armed handoff summary when post-snapshot growth fits comfortably within recovery band", async () => {
 		let handoffInvocation = 0;
 		const generateHandoffDocument = vi.fn(async () => ({
 			document: `handoff plan ${++handoffInvocation}`,
@@ -518,14 +521,14 @@ describe("async speculative compaction", () => {
 		await waitForState("armed");
 		expect(generateHandoffDocument).toHaveBeenCalledTimes(1);
 
-		// A user message is committed after the snapshot leaf
-		sessionManager.appendMessage(userMessage("new directions from user"));
+		// A modest assistant turn is committed after the snapshot leaf
+		sessionManager.appendMessage(assistantMessage("brief acknowledgment", model));
 
 		await maintenance.runAutoCompaction("threshold", false, false, false, { triggerContextTokens: THRESHOLD });
 
-		// Stale handoff speculation was discarded and fresh handoff compaction ran
-		expect(generateHandoffDocument).toHaveBeenCalledTimes(2);
+		// The armed handoff summary is claimed without paying for another LLM generation
+		expect(generateHandoffDocument).toHaveBeenCalledTimes(1);
 		const entry = sessionManager.getEntries().findLast(item => item.type === "compaction");
-		expect(entry?.type === "compaction" ? entry.summary : undefined).toContain("handoff plan 2");
+		expect(entry?.type === "compaction" ? entry.summary : undefined).toContain("handoff plan 1");
 	});
 });
