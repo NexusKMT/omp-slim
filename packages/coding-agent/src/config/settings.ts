@@ -1812,25 +1812,30 @@ export class Settings {
 	}
 
 	async #readProjectSettings(quarantineInvalid: boolean): Promise<ProjectSettingsReadResult> {
+		// Resolve once: capability discovery, fs-cache invalidation, and the
+		// warning prefix below must all derive from the same absolute scope so
+		// relative cwds (e.g. ".") produce absolute provider paths that match.
+		const discoveryCwd = path.resolve(this.#cwd);
 		const projectConfigDir = getProjectAgentDir(this.#cwd);
 		const projectConfigPath = path.join(projectConfigDir, "config.yml");
 		invalidateCapabilityFsCache(projectConfigPath);
 		invalidateCapabilityFsCache(path.join(projectConfigDir, "settings.json"));
+		invalidateCapabilityFsCache(path.join(discoveryCwd, ".claude", "settings.json"));
 		let shellPathSource: string | undefined;
 		let merged: RawSettings = {};
 		try {
-			const result = await loadCapability(settingsCapability.id, { cwd: this.#cwd });
+			const result = await loadCapability(settingsCapability.id, { cwd: discoveryCwd });
 			// `loadCapability` aggregates warnings across every level, but this
 			// method only merges project items — user-level parse failures belong
 			// to the global layer and would misattribute here. Warnings embed
 			// their source file's absolute path, so keep only warnings rooted at
-			// the resolved cwd (a bare substring would over-match relative
+			// the discovery cwd (a bare substring would over-match relative
 			// scopes such as `cwd: "."` and sibling dir prefixes). Remember what
 			// was surfaced so reloads stay quiet while new failures still log.
 			// Level attribution below the path layer (e.g. a user-scoped dir
 			// mounted inside the project) needs warning metadata from the
 			// providers, which `LoadResult.warnings` does not carry.
-			const cwdRoot = path.resolve(this.#cwd) + path.sep;
+			const cwdRoot = discoveryCwd + path.sep;
 			const projectWarnings = (result.warnings ?? []).filter(warning => warning.includes(cwdRoot));
 			for (const warning of projectWarnings) {
 				if (this.#projectSettingsWarningsSeen.has(warning)) continue;

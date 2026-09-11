@@ -2369,8 +2369,8 @@ describe("Settings", () => {
 	describe("project .claude/settings.json parse warnings", () => {
 		it("logs capability warnings when project settings.json fails to parse", async () => {
 			const claudeSettings = path.join(projectDir, ".claude", "settings.json");
-			fs.mkdirSync(path.dirname(claudeSettings), { recursive: true });
-			fs.writeFileSync(claudeSettings, '{ "symbolPreset": "ascii", }');
+			await fsp.mkdir(path.dirname(claudeSettings), { recursive: true });
+			await Bun.write(claudeSettings, '{ "symbolPreset": "ascii", }');
 
 			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
 
@@ -2405,8 +2405,8 @@ describe("Settings", () => {
 
 		it("logs a persistently malformed project file once across reloads", async () => {
 			const claudeSettings = path.join(projectDir, ".claude", "settings.json");
-			fs.mkdirSync(path.dirname(claudeSettings), { recursive: true });
-			fs.writeFileSync(claudeSettings, '{ "symbolPreset": "ascii", }');
+			await fsp.mkdir(path.dirname(claudeSettings), { recursive: true });
+			await Bun.write(claudeSettings, '{ "symbolPreset": "ascii", }');
 
 			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
 
@@ -2415,6 +2415,21 @@ describe("Settings", () => {
 
 			await settings.reloadFromDisk();
 			expect(warnSpy.mock.calls.filter(args => String(args[0]).includes("Failed to parse JSON"))).toHaveLength(1);
+		});
+
+		it("surfaces a project file that becomes malformed after startup", async () => {
+			const claudeSettings = path.join(projectDir, ".claude", "settings.json");
+			await fsp.mkdir(path.dirname(claudeSettings), { recursive: true });
+
+			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			expect(warnSpy.mock.calls.filter(args => String(args[0]).includes("Failed to parse JSON"))).toHaveLength(0);
+
+			await Bun.write(claudeSettings, '{ "symbolPreset": "ascii", }');
+			await settings.reloadFromDisk();
+
+			expect(settings.get("symbolPreset")).toBe("unicode");
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(claudeSettings));
 		});
 	});
 });
