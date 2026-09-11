@@ -48,6 +48,8 @@ app.history.search: []
 | `app.stt.toggle`             | Unbound (hold `Space`)                                                | Toggle speech-to-text. By default there is no key chord — hold the space bar to record (push-to-talk) and release to transcribe; bind a chord here for a press-to-toggle alternative |
 | `app.live.toggle`            | `Ctrl+L`                                                              | Start or stop live voice mode (same as `/live`)                                                                                                                                      |
 | `app.agents.hub`             | `Alt+A`                                                               | [Open the Agent Hub](./agent-hub.md)                                                                                                                                                 |
+| `app.agents.focusRecent`     | `Alt+O`                                                               | Focus the most recent subagent directly; repeat to cycle through recent agents                                                       |
+| `app.agents.focusSlot`       | `Alt+1`–`Alt+8`                                                       | Focus the pinned subagent in slot N                                                                                                  |
 
 ## Recover a cleared prompt
 

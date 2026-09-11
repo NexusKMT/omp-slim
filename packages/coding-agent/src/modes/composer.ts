@@ -132,13 +132,63 @@ class StatusHost implements Component {
 		return this.#lines.map(line => truncateToWidth(line, width));
 	}
 }
+
+/** One click target's row span within the mutable viewport (half-open `[start, end)`). */
+export interface ViewportClickSpan {
+	start: number;
+	end: number;
+	/** Candidate subagent ids for a span-local row. */
+	candidates: (local: number) => string[];
+}
+
+/**
+ * Row-level click target: maps rendered rows to subagent ids. Implemented by
+ * the subagent HUD, whose rows are fixed 1:1 with visible sessions.
+ */
+export interface ViewportClickRowTarget {
+	getClickAgentAtRow(row: number): string | undefined;
+}
+
+/**
+ * Candidates under a mutable-viewport line: the first span containing it.
+ * Pure seam for tests; the caller intersects with the live registry, which
+ * decides focusability and recency.
+ */
+export function routeViewportClick(spans: readonly ViewportClickSpan[], index: number): string[] {
+	if (!Number.isInteger(index) || index < 0) return [];
+	for (const span of spans) {
+		if (index < span.start || index >= span.end) continue;
+		return span.candidates(index - span.start);
+	}
+	return [];
+}
+
+/**
+ * Reserved click-candidate id for the pinned HUD expander row. Checked before
+ * any registry lookup: its `@…:…` charset cannot collide with generated agent
+ * ids (word names, numeric and `-N` suffixes, dotted nesting).
+ */
+export const PINNED_HUD_TOGGLE_ID = "@omp:toggle-pinned-hud";
+
+/**
+ * Candidate resolver for a row-level click target, if the component is one.
+ * Shared by root and nested-child hit-testing so both stay in lockstep.
+ */
+function rowTargetCandidates(target: Component): ((local: number) => string[]) | undefined {
+	const rowTarget = target as Partial<ViewportClickRowTarget>;
+	if (typeof rowTarget.getClickAgentAtRow !== "function") return undefined;
+	return (local: number) => {
+		const id = rowTarget.getClickAgentAtRow?.(local);
+		return id === undefined ? [] : [id];
+	};
+}
+
 /**
  * Canonical interactive composer, usable before session/settings exist and updatable in place.
  * It owns the terminal, welcome header, and editor; InteractiveMode later supplies authoritative
  * data and mounts the session-aware runtime children without replacing the visible header.
  */
 export class Composer implements TerminalFrameProvider {
-	/** Terminal renderer shared with InteractiveMode after adoption. */
 	readonly ui: TUI;
 	#editor: CustomEditor;
 	readonly #header = new Container();
@@ -189,6 +239,10 @@ export class Composer implements TerminalFrameProvider {
 	// it still holds; a settled replay owns every byte it emits, so it
 	// recomposes the header at the replay width and refreshes these rows.
 	#retiredHeaderRows: readonly string[] | undefined;
+	/** Click spans of the last `renderFrame` viewport, in viewport coordinates. */
+	#lastClickSpans: ViewportClickSpan[] = [];
+	/** Click-candidate id under the pointer, painted with the hover band. Id-anchored so it follows streaming rows. */
+	#hoveredClickId: string | undefined;
 	// Hard-row prefix currently above the native viewport. The first resize
 	// frame may pull part of it down before the normal buffer is borrowed.
 	#retiredHeaderStart = 0;
@@ -262,11 +316,32 @@ export class Composer implements TerminalFrameProvider {
 			: [this.#header, this.#bootstrapInputGap, this.editor, this.#statusHost];
 		const transcriptIndex = roots.findIndex(root => root instanceof TranscriptContainer);
 		if (transcriptIndex < 0) {
+			this.#lastClickSpans = [];
 			return { viewport: this.#renderRoots(roots, width).slice(-rows) };
 		}
 		const transcript = roots[transcriptIndex] as TranscriptContainer;
 		const preRoots = this.#renderRoots(roots.slice(0, transcriptIndex), width);
-		const after = this.#renderRoots(roots.slice(transcriptIndex + 1), width);
+		const afterRoots = roots.slice(transcriptIndex + 1);
+		const after: string[] = [];
+		const afterSpans: ViewportClickSpan[] = [];
+		for (const root of afterRoots) {
+			const start = after.length;
+			after.push(...root.render(width));
+			// Row targets usually nest one level down: chrome roots are plain
+			// containers (the HUD lives inside `subagentContainer`), and
+			// `Container.render` is a pure concatenation, so child spans tile
+			// the root span exactly. Child renders hit the container memo.
+			const targets = root instanceof Container ? root.children : [root];
+			let offset = start;
+			for (const target of targets) {
+				const childLines = target === root ? after.length - start : target.render(width).length;
+				const resolve = rowTargetCandidates(target);
+				if (resolve !== undefined && childLines > 0) {
+					afterSpans.push({ start: offset, end: offset + childLines, candidates: resolve });
+				}
+				offset += childLines;
+			}
+		}
 		// Offer history under capacity pressure only: blocks stay live (and keep
 		// reflowing to the current width) while the screen has room. A batch
 		// leaves the mutable viewport in the same frame it is appended, so its
@@ -278,15 +353,68 @@ export class Composer implements TerminalFrameProvider {
 		const now = performance.now();
 		const frame: AnimationFrame = { now, tick: Math.floor(now / 80) };
 		const active = transcript.renderViewport(width, Math.max(0, rows - before.length - after.length), frame);
-		const composed = [...before, ...active, ...after];
+		const activeSpans: ViewportClickSpan[] = [];
+		for (const span of transcript.getLastViewportSpans()) {
+			const ids = (span.component as Partial<{ getClickFocusAgentIds(): string[] }>).getClickFocusAgentIds?.();
+			if (!ids || ids.length === 0) continue;
+			activeSpans.push({ start: span.start, end: span.end, candidates: () => ids });
+		}
+		const drop = Math.max(0, before.length + active.length + after.length - rows);
+		const mutable = [...before, ...active, ...after].slice(drop);
+		const viewportLength = mutable.length;
+		const spans: ViewportClickSpan[] = [];
+		const shift = (span: ViewportClickSpan, base: number): void => {
+			const start = span.start + base;
+			const end = Math.min(span.end + base, viewportLength);
+			if (end > Math.max(0, start)) spans.push({ start: Math.max(0, start), end, candidates: span.candidates });
+		};
+		for (const span of activeSpans) shift(span, before.length - drop);
+		for (const span of afterSpans) shift(span, before.length + active.length - drop);
+		this.#lastClickSpans = spans;
 		if (history !== undefined && this.#offeredHistory?.source === "header") {
-			const visibleHeaderRows = Math.max(0, rows - composed.length);
+			const visibleHeaderRows = Math.max(0, rows - (mutable.length + drop));
 			this.#retiredHeaderStart = Math.max(0, history.rows.length - visibleHeaderRows);
 		}
-		return {
-			history,
-			viewport: composed.length <= rows ? composed : composed.slice(-rows),
-		};
+		return { history, viewport: this.#paintHoverBand(mutable, spans) };
+	}
+
+	/**
+	 * Band the hovered click target's current rows. Id-anchored (not
+	 * line-anchored) so the band follows an agent whose rows shift while it
+	 * streams; a retired id matches no span and simply paints nothing. Only
+	 * the viewport copy is banded — retirement reads unbanded component rows.
+	 */
+	#paintHoverBand(viewport: string[], spans: readonly ViewportClickSpan[]): string[] {
+		const hovered = this.#hoveredClickId;
+		if (hovered === undefined) return viewport;
+		let banded = false;
+		const painted = viewport.map((line, index) => {
+			for (const span of spans) {
+				if (index < span.start || index >= span.end) continue;
+				if (!span.candidates(index - span.start).includes(hovered)) continue;
+				banded = true;
+				return theme.bgFill("selectedBg", line);
+			}
+			return line;
+		});
+		return banded ? painted : viewport;
+	}
+
+	/**
+	 * Candidate subagent ids under a mutable-viewport line, for click-to-focus.
+	 * Empty when the line has no click target (chrome, separators, retired rows
+	 * are never in the viewport). Callers intersect with the live registry.
+	 */
+	viewportClickCandidates(index: number): string[] {
+		return routeViewportClick(this.#lastClickSpans, index);
+	}
+
+	/**
+	 * Point the hover band at a click-candidate id (or clear it). Takes effect
+	 * on the next frame; callers repaint only when the target actually changes.
+	 */
+	setHoveredClickId(id: string | undefined): void {
+		this.#hoveredClickId = id;
 	}
 
 	/** Acknowledges one accepted header, replay, or transcript batch. */

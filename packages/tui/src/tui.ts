@@ -81,12 +81,20 @@ const PAINT_END = `${ENABLE_AUTOWRAP}${SYNC_OUTPUT_END}`;
 const PAINT_BEGIN_NO_SYNC = `${HIDE_CURSOR}${DISABLE_AUTOWRAP}`;
 const PAINT_END_NO_SYNC = ENABLE_AUTOWRAP;
 // Mouse reporting is scoped to fullscreen overlays that opt into pointer
-// interaction. 1000h = button click tracking, 1003h = any-motion tracking for
-// hover targets, and 1006h = SGR extended coordinates past column/row 223.
-// Selection-first overlays leave these modes disabled so the terminal retains
-// native text selection.
+// interaction, plus the opt-in normal-buffer click capture below. 1000h =
+// button click tracking, 1003h = any-motion tracking for hover targets, and
+// 1006h = SGR extended coordinates past column/row 223. Selection-first
+// surfaces leave these modes disabled so the terminal retains native text
+// selection.
 const MOUSE_TRACKING_ON = "\x1b[?1000h\x1b[?1003h\x1b[?1006h";
 const MOUSE_TRACKING_OFF = "\x1b[?1006l\x1b[?1003l\x1b[?1000l";
+// Normal-buffer click capture (`tui.mouse`): hover and button reports plus SGR
+// coords. Motion reports drive the hover highlight on live click targets;
+// wheel reports arrive too and are swallowed by the inline router, so
+// Shift+wheel is the scroll gesture while this is on.
+const MOUSE_TRACKING_INLINE_ON = "\x1b[?1000h\x1b[?1003h\x1b[?1006h";
+
+type MouseTrackingState = "off" | "inline" | "full";
 
 /**
  * `PI_TUI_RESIZE_IN_PLACE=1|true` forces in-place resize (no alt-buffer borrow).
@@ -827,7 +835,9 @@ export class TUI extends Container {
 	// untouched, so exiting reconciles cleanly against the terminal-restored
 	// normal screen. #altPreviousLines is the last alt frame, for repaint-skip.
 	#altActive = false;
-	#altMouseTrackingActive = false;
+	#mouseTracking: MouseTrackingState = "off";
+	/** Product-owned probe for opt-in normal-buffer click capture (`tui.mouse`). Read every frame. */
+	#inlineMouseProvider: (() => boolean) | undefined;
 	#altPreviousLines: string[] = [];
 	#altEnterWidth = 0;
 	#altEnterHeight = 0;
@@ -1086,6 +1096,36 @@ export class TUI extends Container {
 	/** Check if there are any visible overlays */
 	hasOverlay(): boolean {
 		return this.overlayStack.some(o => this.#isOverlayVisible(o));
+	}
+
+	/**
+	 * Mutable normal-buffer viewport from the last provider frame: screen row
+	 * where it begins plus its row count. Inline click targets are indexed
+	 * into this window (`screenRow - top`). Empty while the alt screen owns
+	 * the display.
+	 */
+	getMutableViewport(): { top: number; length: number } {
+		if (this.#altActive) return { top: 0, length: 0 };
+		return { top: this.#providerViewportTop, length: this.#providerWindow.length };
+	}
+
+	/**
+	 * Probe for opt-in normal-buffer click capture. The provider is read every
+	 * frame; while it returns true (and no fullscreen overlay owns the
+	 * display) the terminal reports button clicks as SGR events for inline
+	 * click targets. Native text selection becomes Shift+drag while on.
+	 */
+	setInlineMouseTrackingProvider(provider: (() => boolean) | undefined): void {
+		this.#inlineMouseProvider = provider;
+	}
+
+	/** Transition mouse reporting, emitting only the sequences a change needs. */
+	#setMouseTracking(state: MouseTrackingState): void {
+		if (state === this.#mouseTracking) return;
+		if (this.#mouseTracking !== "off") this.terminal.write(MOUSE_TRACKING_OFF);
+		if (state === "full") this.terminal.write(MOUSE_TRACKING_ON);
+		else if (state === "inline") this.terminal.write(MOUSE_TRACKING_INLINE_ON);
+		this.#mouseTracking = state;
 	}
 
 	/** Check if an overlay entry is currently visible */
@@ -1808,12 +1848,12 @@ export class TUI extends Container {
 			setAltScreenActive(false);
 		}
 		if (this.#altActive || this.#pendingAltExit) {
-			const mouseExit = this.#altMouseTrackingActive ? MOUSE_TRACKING_OFF : "";
+			const mouseExit = this.#mouseTracking !== "off" ? MOUSE_TRACKING_OFF : "";
 			const exitSequence = this.#pendingAltExit || `${mouseExit}${this.#keyboardEnhancementExit()}\x1b[?1049l`;
 			this.terminal.write(exitSequence);
 			setAltScreenActive(false);
 			this.#altActive = false;
-			this.#altMouseTrackingActive = false;
+			this.#mouseTracking = "off";
 			this.#altPreviousLines = [];
 			this.#pendingAltExit = "";
 		}
@@ -2765,26 +2805,31 @@ export class TUI extends Container {
 		// modal there; the normal screen and all accounting stay untouched.
 		const topOverlay = this.#getTopmostVisibleOverlay();
 		const wantAlt = topOverlay?.options?.fullscreen === true;
-		const wantMouseTracking = wantAlt && topOverlay.options?.mouseTracking !== false;
+		const wantMouse: MouseTrackingState = wantAlt
+			? topOverlay.options?.mouseTracking !== false
+				? "full"
+				: "off"
+			: this.#inlineMouseProvider?.() === true
+				? "inline"
+				: "off";
 		if (wantAlt && !this.#altActive) {
 			// Enhanced keyboard modes can be buffer-local: re-push the active
 			// modified-key reporting sequence on the freshly entered alternate
 			// screen, or Esc/modified keys revert to legacy encoding inside
 			// fullscreen overlays (Ghostty/kitty/iTerm2).
 			this.#noteAltBufferToggle();
-			const mouseEnter = wantMouseTracking ? MOUSE_TRACKING_ON : "";
-			this.terminal.write(`\x1b[?1049h${this.#keyboardEnhancementEnter()}${mouseEnter}`);
+			this.terminal.write(`\x1b[?1049h${this.#keyboardEnhancementEnter()}`);
+			this.#setMouseTracking(wantMouse);
 			setAltScreenActive(true);
 			this.terminal.hideCursor();
 			this.#forgetHardwareCursorState();
 			this.#recordHardwareCursorHidden();
 			this.#altActive = true;
-			this.#altMouseTrackingActive = wantMouseTracking;
 			this.#altPreviousLines = [];
 			this.#altEnterWidth = width;
 			this.#altEnterHeight = height;
 		} else if (!wantAlt && this.#altActive) {
-			const mouseExit = this.#altMouseTrackingActive ? MOUSE_TRACKING_OFF : "";
+			const mouseExit = this.#mouseTracking !== "off" ? MOUSE_TRACKING_OFF : "";
 			const enhancementExit = this.#keyboardEnhancementExit();
 			const exitSequence = `${mouseExit}${enhancementExit}\x1b[?1049l`;
 			// Session replacement finishes while its fullscreen selector still
@@ -2799,7 +2844,7 @@ export class TUI extends Container {
 			}
 			this.#forgetHardwareCursorState();
 			this.#altActive = false;
-			this.#altMouseTrackingActive = false;
+			this.#mouseTracking = "off";
 			this.#altPreviousLines = [];
 			// The alt-buffer restore put the pre-overlay normal screen back. If
 			// that buffer resized while covered, its cursor moved with width
@@ -2813,9 +2858,8 @@ export class TUI extends Container {
 				}
 				this.#forceViewportRepaintOnNextRender = true;
 			}
-		} else if (wantMouseTracking !== this.#altMouseTrackingActive) {
-			this.terminal.write(wantMouseTracking ? MOUSE_TRACKING_ON : MOUSE_TRACKING_OFF);
-			this.#altMouseTrackingActive = wantMouseTracking;
+		} else if (wantMouse !== this.#mouseTracking) {
+			this.#setMouseTracking(wantMouse);
 		}
 		if (this.#altActive) {
 			this.#renderAltFrame(width, height);

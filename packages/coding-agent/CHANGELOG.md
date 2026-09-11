@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Press `Alt+O` to focus the most recent subagent directly from the main session; repeat to cycle through recent agents ([#11737](https://github.com/can1357/oh-my-pi/pull/11737) by [@H4vC](https://github.com/H4vC)).
+- Enable `tui.mouse` to focus live subagent cards and subagent HUD rows by clicking them; native selection becomes Shift+drag while on ([#11737](https://github.com/can1357/oh-my-pi/pull/11737) by [@H4vC](https://github.com/H4vC)).
+- The pinned `Subagents` block now lists every live agent with slot numbers; `Alt+1`–`Alt+8` focuses a slot directly with no mouse capture ([#11737](https://github.com/can1357/oh-my-pi/pull/11737) by [@H4vC](https://github.com/H4vC)).
+- Hovering a live subagent card or jump-list row highlights it while `tui.mouse` is on ([#11737](https://github.com/can1357/oh-my-pi/pull/11737) by [@H4vC](https://github.com/H4vC)).
+- The pinned list stays collapsed to a few rows with a click expander by default; `display.pinnedAgents` switches it to `full` or `off` ([#11737](https://github.com/can1357/oh-my-pi/pull/11737) by [@H4vC](https://github.com/H4vC)).
+
 ### Fixed
 
 - Models whose images are stripped on the wire (`compat.stripImageInput`) now trigger the `describeForTextModels` vision fallback and are skipped when resolving the vision model, instead of silently dropping images ([#9697](https://github.com/can1357/oh-my-pi/issues/9697)).

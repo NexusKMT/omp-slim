@@ -1,3 +1,31 @@
+import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
+import { AgentRegistry, MAIN_AGENT_ID, type AgentRef, type RegistryEvent } from "../../registry/agent-registry";
+import type { AgentSession } from "../../session/agent-session";
+import { setTerminalTitleState } from "../../utils/title-generator";
+import type { InteractiveModeContext } from "../types";
+
+/**
+ * Pick the most recently active focusable subagent. Advisors are read-only
+ * transcripts and aborted agents are terminal, so neither is focusable; the
+ * main session is the view itself, not a focus target. A focused caller passes
+ * its id to cycle to the next-most-recent agent (wrapping), so repeated
+ * presses walk the roster instead of sticking on the newest row.
+ */
+export function pickRecentFocusableAgentId(refs: readonly AgentRef[], currentId?: string): string | undefined {
+	const ordered = refs
+		.filter(ref => ref.id !== MAIN_AGENT_ID && ref.kind !== "advisor" && ref.status !== "aborted")
+		.filter(ref => ref.status === "running" || ref.status === "idle" || ref.status === "parked")
+		.toSorted(
+			(a, b) =>
+				b.lastActivity - a.lastActivity || b.createdAt - a.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+		);
+	if (ordered.length === 0) return undefined;
+	if (!currentId) return ordered[0]?.id;
+	const currentIndex = ordered.findIndex(ref => ref.id === currentId);
+	if (currentIndex === -1) return ordered[0]?.id;
+	return ordered[(currentIndex + 1) % ordered.length]?.id;
+}
+
 /**
  * SessionFocusController - Weak retargeting primitive between the rendering/
  * input layer and the AgentSession it displays.
@@ -8,13 +36,6 @@
  * re-attaches the main session and rebuilds the transcript from its
  * authoritative state.
  */
-
-import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
-import { AgentRegistry, MAIN_AGENT_ID, type RegistryEvent } from "../../registry/agent-registry";
-import type { AgentSession } from "../../session/agent-session";
-import { setTerminalTitleState } from "../../utils/title-generator";
-import type { InteractiveModeContext } from "../types";
-
 export class SessionFocusController {
 	#focusedAgentId: string | undefined;
 	/** Session currently attached while focused; undefined when unfocused. */

@@ -191,7 +191,7 @@ import { StatusLineComponent } from "./components/status-line";
 import { stopSharedSpinnerTicker, type ToolExecutionHandle } from "./components/tool-execution";
 import { TranscriptContainer } from "./components/transcript-container";
 import type { LspServerInfo as WelcomeLspServerInfo } from "./components/welcome";
-import { Composer, type ComposerStatusSnapshot } from "./composer";
+import { Composer, PINNED_HUD_TOGGLE_ID, type ComposerStatusSnapshot } from "./composer";
 import { writeComposerStatusCache, writeComposerWelcomeCache } from "./composer-cache";
 import { BtwController } from "./controllers/btw-controller";
 import { CleanseCommandController } from "./controllers/cleanse-command-controller";
@@ -491,8 +491,79 @@ const DEFERRED_PREVIEW_VIEWPORT_FRACTION = 0.4;
  *  before it auto-clears, mirroring the todo HUD's auto-clear timer. */
 const MODEL_CYCLE_TRACK_CLEAR_MS = 4000;
 
+/** Active subagent sessions the anchored HUD jump-lists, sync or detached. Slots follow registry order. */
+function isHudSubagent(session: ObservableSession): boolean {
+	return session.kind === "subagent" && session.status === "active";
+}
+
+/**
+ * Anchored subagent HUD block with its visible session order, so click-to-focus
+ * can map a rendered row back to its agent. Row 0 is the leading blank, row 1
+ * the title; item rows follow in `order`; the overflow summary maps nowhere.
+ * The expander row (when `layoutPinnedHud` shows one) resolves to the toggle
+ * sentinel, which the click router handles before any registry lookup.
+ * Rendering delegates to the same `Text` mount as before, so output bytes are
+ * unchanged — only the row map is new.
+ */
+export class SubagentHudComponent implements Component {
+	readonly #text: Text;
+	readonly #order: readonly string[];
+	readonly #toggleRow: number | undefined;
+	constructor(lines: readonly string[], order: readonly string[], toggleRow?: number) {
+		this.#text = new Text(lines.join("\n"), 1, 0);
+		this.#order = order;
+		this.#toggleRow = toggleRow;
+	}
+	render(width: number): readonly string[] {
+		return this.#text.render(width);
+	}
+	getClickAgentAtRow(row: number): string | undefined {
+		if (this.#toggleRow !== undefined && row === this.#toggleRow) return PINNED_HUD_TOGGLE_ID;
+		const index = row - 2;
+		return index >= 0 && index < this.#order.length ? this.#order[index] : undefined;
+	}
+}
+
 const SUBAGENT_HUD_VISIBLE_LIMIT = 8;
 const SUBAGENT_OBSERVER_UI_COALESCE_MS = 100;
+
+/** Item rows a collapsed jump list shows before the expander. */
+const SUBAGENT_HUD_COLLAPSED_LIMIT = 3;
+
+/** Pinned jump-list layout: painted item rows plus trailing meta rows. */
+export interface PinnedHudLayout {
+	/** Item rows painted, in registry order. */
+	itemRows: number;
+	/** Overflow summary follows the items (expanded past the slot window). */
+	showOverflow: boolean;
+	/** Expander direction, or undefined when the list fits without one. */
+	toggle: "expand" | "collapse" | undefined;
+	/** Viewport row of the expander within HUD lines (2 header rows + items + overflow). */
+	toggleRow: number | undefined;
+}
+
+/**
+ * Pinned jump-list layout for `runningTotal` live agents. Collapsed shows a
+ * few rows plus an expander; expanded shows the slotted window plus the
+ * overflow summary. Single source of truth for the renderer and the click row
+ * map, so painted rows and hit-testing can never disagree.
+ */
+export function layoutPinnedHud(runningTotal: number, expanded: boolean): PinnedHudLayout {
+	const visible = Math.min(SUBAGENT_HUD_VISIBLE_LIMIT, runningTotal);
+	if (runningTotal <= SUBAGENT_HUD_COLLAPSED_LIMIT) {
+		return { itemRows: visible, showOverflow: false, toggle: undefined, toggleRow: undefined };
+	}
+	if (!expanded) {
+		const itemRows = Math.min(SUBAGENT_HUD_COLLAPSED_LIMIT, visible);
+		return { itemRows, showOverflow: false, toggle: "expand", toggleRow: 2 + itemRows };
+	}
+	return {
+		itemRows: visible,
+		showOverflow: runningTotal > visible,
+		toggle: "collapse",
+		toggleRow: 2 + visible + (runningTotal > visible ? 1 : 0),
+	};
+}
 
 /**
  * Build the anchored subagent HUD block: a bold accent "Subagents" header plus
@@ -500,38 +571,36 @@ const SUBAGENT_OBSERVER_UI_COALESCE_MS = 100;
  * the inline task rows use (muted task preview when no description was given).
  * Layout mirrors the Todos HUD exactly: unindented header, then
  * `renderTreeList` rows (dim connectors) shifted right by one space.
- * Only detached background spawns are listed: a sync task call blocks the
- * parent turn and its inline tool block already renders progress live, and
- * eval `agent()` spawns are rendered by their own eval cell tree.
+ * Every active subagent is listed — detached background spawns and sync task
+ * calls alike — so the pinned block doubles as a jump list: each row carries
+ * its dim 1-based slot (`Alt+1`–`Alt+8` focuses it directly).
  * Returns an empty array when nothing is running so the container can clear.
  */
-export function renderSubagentHudLines(sessions: ObservableSession[], columns: number): string[] {
-	const running = sessions.filter(
-		session => session.kind === "subagent" && session.status === "active" && session.detached === true,
-	);
+export function renderSubagentHudLines(sessions: ObservableSession[], columns: number, expanded = false): string[] {
+	const running = sessions.filter(isHudSubagent);
 	if (running.length === 0) return [];
-
+	const layout = layoutPinnedHud(running.length, expanded);
 	const dot = theme.styledSymbol("status.done", "accent");
 	const visible = running.slice(0, SUBAGENT_HUD_VISIBLE_LIMIT);
+	const items = visible.slice(0, layout.itemRows);
 	const hiddenCount = running.length - visible.length;
 	const showModelBadge = isFeedModelBadgeEnabled();
 	const outerIndent = " ";
 	const rows = renderTreeList(
 		{
-			items: visible,
+			items,
 			expanded: true,
 			renderItem: (session, context) => {
+				const slot = theme.fg("dim", `${context.index + 1}`);
+				const head = `${slot} ${dot} `;
 				const rowWidth = Math.max(0, columns - visibleWidth(outerIndent) - (context.prefixWidth ?? 0));
 				const role = session.agent ?? session.progress?.agent;
-				const displayId = truncateToWidth(
-					formatTaskId(session.id),
-					Math.max(0, rowWidth - visibleWidth(`${dot} `)),
-				);
+				const displayId = truncateToWidth(formatTaskId(session.id), Math.max(0, rowWidth - visibleWidth(head)));
 				const badge = truncateToWidth(
 					agentTypeBadge(role, theme),
-					Math.max(0, rowWidth - visibleWidth(`${dot} ${displayId}`)),
+					Math.max(0, rowWidth - visibleWidth(`${head}${displayId}`)),
 				);
-				const titleBudget = Math.max(0, rowWidth - visibleWidth(`${dot} ${displayId}${badge}`));
+				const titleBudget = Math.max(0, rowWidth - visibleWidth(`${head}${displayId}${badge}`));
 				const modelBadge = showModelBadge
 					? formatFeedModelBadge(
 							session.progress?.resolvedModelIdentity ?? session.progress?.resolvedModel,
@@ -542,7 +611,7 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
 						)
 					: "";
 				const modelLead = modelBadge ? `${modelBadge} ` : "";
-				let line = `${dot} ${modelLead}${theme.fg("accent", theme.bold(displayId))}${badge}`;
+				let line = `${head}${modelLead}${theme.fg("accent", theme.bold(displayId))}${badge}`;
 				const description = session.description?.trim() || session.progress?.description?.trim();
 				const distinctDescription =
 					description && !labelEchoesHandle(session.id, description) ? description : undefined;
@@ -567,13 +636,27 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
 		},
 		theme,
 	);
-	if (hiddenCount > 0) {
+	if (layout.showOverflow) {
 		rows.push(theme.fg("dim", `… ${hiddenCount} more running — open Agent Hub for full list`));
 	}
+	const toggleRow =
+		layout.toggle === undefined
+			? []
+			: [
+					truncateToWidth(
+						`${outerIndent}${theme.fg(
+							"dim",
+							layout.toggle === "expand" ? `… ${running.length - layout.itemRows} more — expand` : "… show less",
+						)}`,
+						columns,
+						"",
+					),
+				];
 	return [
 		"",
-		truncateToWidth(theme.bold(theme.fg("accent", "Subagents")), columns),
+		truncateToWidth(`${theme.bold(theme.fg("accent", "Subagents"))}${theme.fg("dim", "  ·  Alt+1–8")}`, columns),
 		...rows.map(line => truncateToWidth(`${outerIndent}${line}`, columns, "")),
+		...toggleRow,
 	];
 }
 
@@ -836,6 +919,35 @@ export class InteractiveMode implements InteractiveModeContext {
 	unfocusSession(): Promise<void> {
 		return this.#focusController.unfocus();
 	}
+
+	resolveViewportClickCandidates(index: number): string[] {
+		return this.composer.viewportClickCandidates(index);
+	}
+
+	resolveHudSlotAgent(slot: number): string | undefined {
+		if (settings.get("display.pinnedAgents") === "off") return undefined;
+		if (!Number.isInteger(slot) || slot < 1 || slot > SUBAGENT_HUD_VISIBLE_LIMIT) return undefined;
+		const sessions = this.#observerRegistry.getSessions().filter(isHudSubagent).slice(0, SUBAGENT_HUD_VISIBLE_LIMIT);
+		return sessions[slot - 1]?.id;
+	}
+
+	/** Flip the pinned jump list between its collapsed few and the slotted window. */
+	togglePinnedHudExpanded(): void {
+		this.#pinnedHudExpanded = !this.#pinnedHudExpanded;
+		this.#renderSubagentList();
+		this.ui.requestRender();
+	}
+
+	/** Rebuild the pinned jump list for a `display.pinnedAgents` change. */
+	applyPinnedAgentsSetting(): void {
+		this.#renderSubagentList();
+		this.ui.requestRender();
+	}
+
+	setClickHoverId(id: string | undefined): void {
+		this.composer.setHoveredClickId(id);
+	}
+
 	clearTransientSessionUi(): void {
 		this.#hideSessionInfo();
 		if (this.loadingAnimation) {
@@ -872,6 +984,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	#voicePreviousUseTerminalCursor: boolean | null = null;
 	#resizeHandler?: () => void;
 	#observerRegistry: SessionObserverRegistry;
+	/** Pinned jump list clicked open past its collapsed few (`display.pinnedAgents: collapsed`). */
+	#pinnedHudExpanded = false;
 	#eventBus?: EventBus;
 	#subagentEventBus?: EventBus;
 	#eventBusUnsubscribers: Array<() => void> = [];
@@ -980,6 +1094,13 @@ export class InteractiveMode implements InteractiveModeContext {
 		setTerminalTextSizing(settings.get("tui.textSizing") && TERMINAL.supportsTextSizing);
 		// Keep generic pi-tui renderers aligned with the coding-agent setting.
 		applyHyperlinkSetting();
+		this.ui.setInlineMouseTrackingProvider(() => {
+			const on = settings.get("tui.mouse") === true;
+			// Dropping capture must also drop the band: with reporting off no
+			// motion event will ever arrive to clear a mid-hover highlight.
+			if (!on) this.composer.setHoveredClickId(undefined);
+			return on;
+		});
 		this.chatContainer = new TranscriptContainer();
 		this.pendingMessagesContainer = new AnchoredLiveContainer();
 		this.statusContainer = new StatusHudContainer(this);
@@ -2937,22 +3058,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		return [...leadingLines, combinedLine];
 	}
 
-	/**
-	 * Anchored HUD of in-flight subagents, mirroring the Todos block above the
-
-	/**
-	 * Anchored HUD of in-flight subagents, mirroring the Todos block above the
-	 * editor. Driven entirely by observer-registry change events, so rows appear
-	 * on spawn and the whole block clears itself once the last subagent leaves
-	 * the "active" state.
-	 */
-	#renderSubagentList(): void {
-		this.subagentContainer.clear();
-		const lines = renderSubagentHudLines(this.#observerRegistry.getSessions(), this.ui.terminal.columns);
-		if (lines.length === 0) return;
-		this.subagentContainer.addChild(new Text(lines.join("\n"), 1, 0));
-	}
-
 	async #loadTodoList(source: AgentSession = this.session): Promise<void> {
 		this.todoPhases = source.getTodoPhases();
 		this.#todoPhasesOwner = source;
@@ -2973,6 +3078,26 @@ export class InteractiveMode implements InteractiveModeContext {
 			});
 		}
 		return path.resolve(this.sessionManager.getCwd(), planFilePath);
+	}
+
+	/**
+	 * Anchored HUD of in-flight subagents, mirroring the Todos block above the
+	 * editor. Driven entirely by observer-registry change events, so rows appear
+	 * on spawn and the whole block clears itself once the last subagent leaves
+	 * the "active" state.
+	 */
+	#renderSubagentList(): void {
+		this.subagentContainer.clear();
+		const mode = settings.get("display.pinnedAgents");
+		if (mode === "off") return;
+		const sessions = this.#observerRegistry.getSessions();
+		const running = sessions.filter(isHudSubagent);
+		const expanded = mode === "full" || this.#pinnedHudExpanded;
+		const lines = renderSubagentHudLines(sessions, this.ui.terminal.columns, expanded);
+		if (lines.length === 0) return;
+		const layout = layoutPinnedHud(running.length, expanded);
+		const order = running.slice(0, SUBAGENT_HUD_VISIBLE_LIMIT).map(session => session.id);
+		this.subagentContainer.addChild(new SubagentHudComponent(lines, order, layout.toggleRow));
 	}
 
 	#updatePlanModeStatus(): void {

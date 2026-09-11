@@ -1,7 +1,13 @@
 import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
-import { type AutocompleteProvider, matchesKey, type PasteOptions, type SlashCommand } from "@oh-my-pi/pi-tui";
+import {
+	type AutocompleteProvider,
+	matchesKey,
+	parseSgrMouse,
+	type PasteOptions,
+	type SlashCommand,
+} from "@oh-my-pi/pi-tui";
 import { isEnoent, logger, sanitizeText } from "@oh-my-pi/pi-utils";
 import { isSettingsInitialized, settings } from "../../config/settings";
 import { resolveLocalRoot } from "../../internal-urls";
@@ -21,7 +27,10 @@ import { parseQueueShorthand, splitQueuedMessages } from "../../modes/queue-inpu
 import { buildSkillCommandPrompt, isKnownSkillCommand } from "../../modes/skill-command";
 import type { InteractiveModeContext } from "../../modes/types";
 import manualContinuePrompt from "../../prompts/system/manual-continue.md" with { type: "text" };
+import { AgentRegistry } from "../../registry/agent-registry";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
+import { PINNED_HUD_TOGGLE_ID } from "../composer";
+import { pickRecentFocusableAgentId } from "./session-focus-controller";
 import { executeBuiltinSlashCommand, lookupBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
 import { parseSlashCommand } from "../../slash-commands/helpers/parse";
 import { isTinyTitleLocalModelKey } from "../../tiny/models";
@@ -99,6 +108,20 @@ interface PasteTarget {
 
 function hasPasteText(value: unknown): value is PasteTarget {
 	return typeof value === "object" && value !== null && typeof (value as PasteTarget).pasteText === "function";
+}
+
+/**
+ * Pinned HUD jump-list slot for an `app.agents.focusSlot` chord: the trailing
+ * digits (`Alt+3` → 3). The slot limit itself is enforced by
+ * `resolveHudSlotAgent`, so this only extracts intent. Chords without trailing
+ * digits (user remaps) carry no slot and stay unregistered, never focusing
+ * the wrong agent.
+ */
+export function hudSlotForChord(chord: string): number | undefined {
+	const digits = chord.toLowerCase().match(/(\d+)$/u)?.[1];
+	if (digits === undefined) return undefined;
+	const slot = Number.parseInt(digits, 10);
+	return Number.isInteger(slot) && slot >= 1 ? slot : undefined;
 }
 
 const SHELL_PROMPT_COMMAND_RE =
@@ -197,6 +220,10 @@ export class InputController {
 	#btwBranchListenerInstalled = false;
 	#btwCopyListenerInstalled = false;
 	#expandToolsListenerInstalled = false;
+	#inlineMouseListenerInstalled = false;
+
+	/** Click-candidate id the hover band currently tracks; repaint only on change. */
+	#lastHoverClickId: string | undefined;
 
 	/** Return the last full editor snapshot delivered by its change contract. */
 	getDraftText(): string {
@@ -333,6 +360,14 @@ export class InputController {
 				this.toggleToolOutputExpansion();
 				return { consume: true };
 			});
+		}
+		if (!this.#inlineMouseListenerInstalled) {
+			this.#inlineMouseListenerInstalled = true;
+			// Inline click-to-focus (`tui.mouse`): SGR reports only arrive while
+			// the setting has tracking enabled, so this stays inert otherwise.
+			// Defers to fullscreen overlays, which own mouse handling on the
+			// alternate screen.
+			this.ctx.ui.addInputListener(data => this.#handleInlineMouse(data));
 		}
 		this.ctx.editor.onEscape = () => {
 			// `/mcp test` advertises Esc until each owner's post-settlement grace expires.
@@ -587,6 +622,14 @@ export class InputController {
 		for (const key of hubKeys) {
 			this.ctx.editor.setCustomKeyHandler(key, () => this.ctx.showAgentHub());
 		}
+		for (const key of this.ctx.keybindings.getKeys("app.agents.focusRecent")) {
+			this.ctx.editor.setCustomKeyHandler(key, () => this.#handleFocusRecentAgent());
+		}
+		for (const key of this.ctx.keybindings.getKeys("app.agents.focusSlot")) {
+			const slot = hudSlotForChord(key);
+			if (slot === undefined) continue;
+			this.ctx.editor.setCustomKeyHandler(key, () => this.#handleFocusHudSlot(slot));
+		}
 
 		// Double-tap left arrow on an empty editor: opens the agent hub from the
 		// main session, or returns the focused subagent view to the main session.
@@ -636,6 +679,95 @@ export class InputController {
 		if (this.#detectLeftDoubleTap()) {
 			void this.ctx.unfocusSession();
 		}
+	}
+
+	/**
+	 * One-action jump to a subagent's live session: the most recently active
+	 * focusable agent, or the next one when already focused (repeat to cycle).
+	 * Skips advisors and aborted agents, which have no live session to show.
+	 */
+	#handleFocusRecentAgent(): void {
+		const nextId = pickRecentFocusableAgentId(AgentRegistry.global().list(), this.ctx.focusedAgentId);
+		if (!nextId) {
+			this.ctx.showStatus("No subagents yet — spawn one with task, then Alt+O opens it here");
+			return;
+		}
+		if (nextId === this.ctx.focusedAgentId) {
+			this.ctx.showStatus(`Already viewing agent ${nextId} — Esc returns to main`);
+			return;
+		}
+		void this.ctx.focusAgentSession(nextId).catch((error: unknown) => {
+			this.ctx.showStatus(error instanceof Error ? error.message : String(error));
+		});
+	}
+
+	/**
+	 * Inline click-to-focus (`tui.mouse`): left-clicks on live subagent cards
+	 * and HUD rows focus that agent in one action, and pointer motion lights up
+	 * the hover band on the target under the cursor. Every SGR report is consumed
+	 * while inline tracking owns the terminal so button/wheel bytes never reach
+	 * the editor as typed input; clicks on chrome simply swallow.
+	 */
+	#handleInlineMouse(data: string): { consume?: boolean; data?: string } | undefined {
+		if (!data.startsWith("\x1b[<")) return undefined;
+		if (!settings.get("tui.mouse")) return undefined;
+		if (this.ctx.ui.hasOverlay()) return undefined;
+		const event = parseSgrMouse(data);
+		if (!event) return undefined;
+		if (event.motion) this.#updateHoverHighlight(event.row);
+		else if (event.leftClick) this.#focusClickedAgent(event.row);
+		return { consume: true };
+	}
+
+	/**
+	 * Track the hovered click target, repainting only when it changes. The band
+	 * is id-anchored in the composer, so it follows an agent whose rows shift
+	 * while streaming; pointing at chrome clears it.
+	 */
+	#updateHoverHighlight(screenRow: number): void {
+		const viewport = this.ctx.ui.getMutableViewport();
+		const candidates = this.ctx.resolveViewportClickCandidates(screenRow - viewport.top);
+		const hovered = candidates.length > 0 ? candidates[0] : undefined;
+		if (hovered === this.#lastHoverClickId) return;
+		this.#lastHoverClickId = hovered;
+		this.ctx.setClickHoverId(hovered);
+		this.ctx.ui.requestRender();
+	}
+
+	/** Focus the subagent under a viewport screen row, if the line names one. */
+	#focusClickedAgent(screenRow: number): void {
+		const viewport = this.ctx.ui.getMutableViewport();
+		const candidates = this.ctx.resolveViewportClickCandidates(screenRow - viewport.top);
+		if (candidates.includes(PINNED_HUD_TOGGLE_ID)) {
+			this.ctx.togglePinnedHudExpanded();
+			return;
+		}
+		if (candidates.length === 0) return;
+		const refs = AgentRegistry.global().list();
+		const scoped = refs.filter(ref => candidates.includes(ref.id));
+		const nextId =
+			pickRecentFocusableAgentId(scoped, this.ctx.focusedAgentId) ??
+			pickRecentFocusableAgentId(refs, this.ctx.focusedAgentId);
+		if (nextId === undefined) return;
+		this.#focusResolvedAgent(nextId);
+	}
+
+	/** Focus the pinned HUD jump-list slot's agent, if the slot currently names one. */
+	#handleFocusHudSlot(slot: number): void {
+		const id = this.ctx.resolveHudSlotAgent(slot);
+		if (id === undefined) {
+			this.ctx.showStatus("No live subagent in that slot");
+			return;
+		}
+		this.#focusResolvedAgent(id);
+	}
+
+	/** Focus a resolved agent id, ignoring already-viewing and surfacing errors as status. */
+	#focusResolvedAgent(nextId: string): void {
+		if (nextId === this.ctx.focusedAgentId) return;
+		void this.ctx.focusAgentSession(nextId).catch((error: unknown) => {
+			this.ctx.showStatus(error instanceof Error ? error.message : String(error));
+		});
 	}
 
 	/**

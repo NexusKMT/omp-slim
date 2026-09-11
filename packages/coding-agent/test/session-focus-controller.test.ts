@@ -1,8 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { SessionFocusController } from "@oh-my-pi/pi-coding-agent/modes/controllers/session-focus-controller";
+import {
+	pickRecentFocusableAgentId,
+	SessionFocusController,
+} from "@oh-my-pi/pi-coding-agent/modes/controllers/session-focus-controller";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
-import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { AgentRegistry, MAIN_AGENT_ID, type AgentRef } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession, AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 
 interface SessionStub {
@@ -267,5 +270,63 @@ describe("SessionFocusController", () => {
 			[worker.session, "Worker"],
 			[h.main.session, undefined],
 		]);
+	});
+});
+
+describe("pickRecentFocusableAgentId", () => {
+	function ref(id: string, overrides: Partial<AgentRef> = {}): AgentRef {
+		return {
+			id,
+			displayName: id,
+			kind: "sub",
+			status: "running",
+			session: null,
+			sessionFile: `${id}.jsonl`,
+			createdAt: 1000,
+			lastActivity: 1000,
+			...overrides,
+		};
+	}
+
+	it("picks the most recently active agent and keeps parked agents eligible for revive", () => {
+		const refs = [
+			ref("Old", { status: "idle", lastActivity: 1000 }),
+			ref("Parked", { status: "parked", lastActivity: 2000 }),
+			ref("Live", { status: "running", lastActivity: 3000 }),
+		];
+		expect(pickRecentFocusableAgentId(refs)).toBe("Live");
+		expect(pickRecentFocusableAgentId(refs.filter(r => r.id !== "Live"))).toBe("Parked");
+	});
+
+	it("skips the main session, advisors, and aborted agents", () => {
+		const refs = [
+			ref(MAIN_AGENT_ID, { kind: "main", lastActivity: 9000 }),
+			ref("Advisor", { kind: "advisor", lastActivity: 8000 }),
+			ref("Dead", { status: "aborted", lastActivity: 7000 }),
+			ref("Worker", { status: "idle", lastActivity: 1000 }),
+		];
+		expect(pickRecentFocusableAgentId(refs)).toBe("Worker");
+	});
+
+	it("returns undefined when no agent has a focusable session state", () => {
+		expect(pickRecentFocusableAgentId([])).toBeUndefined();
+		expect(
+			pickRecentFocusableAgentId([
+				ref(MAIN_AGENT_ID, { kind: "main" }),
+				ref("Advisor", { kind: "advisor" }),
+				ref("Dead", { status: "aborted" }),
+			]),
+		).toBeUndefined();
+	});
+
+	it("cycles to the next-most-recent agent from the focused one, wrapping at the end", () => {
+		const refs = [
+			ref("Newest", { lastActivity: 3000 }),
+			ref("Middle", { lastActivity: 2000 }),
+			ref("Oldest", { lastActivity: 1000 }),
+		];
+		expect(pickRecentFocusableAgentId(refs, "Newest")).toBe("Middle");
+		expect(pickRecentFocusableAgentId(refs, "Oldest")).toBe("Newest");
+		expect(pickRecentFocusableAgentId(refs, "Gone")).toBe("Newest");
 	});
 });

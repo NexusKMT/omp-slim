@@ -88,7 +88,7 @@ For a dispatch, set the agent name and task:
 
 ## Watch running agents
 
-After dispatch, press `Alt+A` to open [Agent Hub](./agent-hub.md). Its live roster shows each task agent's status, current activity, model, age, and usage. Select an agent to read its transcript and steer it directly; parked agents can be revived from the same view.
+After dispatch, press `Alt+A` to open [Agent Hub](./agent-hub.md). Its live roster shows each task agent's status, current activity, model, age, and usage. Select an agent to read its transcript and steer it directly; parked agents can be revived from the same view. Press `Alt+O` to skip the roster and focus the most recent subagent directly (repeat to cycle), `Alt+1`–`Alt+8` for the pinned jump-list slot, or enable `tui.mouse` to click live task cards and jump-list rows instead.
 
 ### `vibe_spawn` tier routing
 

@@ -1786,6 +1786,28 @@ function isTaskToolDetails(value: unknown): value is TaskToolDetails {
 	);
 }
 
+/**
+ * Subagent ids visible on a task tool card, for click-to-focus hit-testing.
+ * Reads `progress[]` (in-flight) and `results[]` (settled) defensively — card
+ * details arrive as `unknown` through the tool-result pipeline. Callers
+ * intersect with the live registry, which decides focusability and recency.
+ */
+export function taskCardAgentIds(details: unknown): string[] {
+	if (typeof details !== "object" || details === null) return [];
+	const ids: string[] = [];
+	const collect = (value: unknown): void => {
+		if (!Array.isArray(value)) return;
+		for (const item of value) {
+			if (typeof item !== "object" || item === null || !("id" in item)) continue;
+			const id: unknown = item.id;
+			if (typeof id === "string" && id.length > 0 && !ids.includes(id)) ids.push(id);
+		}
+	};
+	collect("progress" in details ? details.progress : undefined);
+	collect("results" in details ? details.results : undefined);
+	return ids;
+}
+
 // Nested subagent snapshots sit one or more levels below the frame border, so
 // they keep tree guides to convey depth (the parent prepends its own continue
 // prefix). Only the top-level agent list drops guides (the frame is its box).

@@ -40,6 +40,8 @@ interface AppKeybindings {
 	"app.clipboard.copyLine": true;
 	"app.clipboard.copyPrompt": true;
 	"app.agents.hub": true;
+	"app.agents.focusRecent": true;
+	"app.agents.focusSlot": true;
 	"app.session.new": true;
 	"app.session.tree": true;
 	"app.session.fork": true;
@@ -189,6 +191,14 @@ export const KEYBINDINGS = {
 	"app.agents.hub": {
 		defaultKeys: "alt+a",
 		description: "Open the agent hub",
+	},
+	"app.agents.focusRecent": {
+		defaultKeys: "alt+o",
+		description: "Focus the most recent subagent (repeat to cycle)",
+	},
+	"app.agents.focusSlot": {
+		defaultKeys: ["alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8"],
+		description: "Focus the pinned subagent in slot N",
 	},
 	"app.session.observe": {
 		defaultKeys: "ctrl+s",
