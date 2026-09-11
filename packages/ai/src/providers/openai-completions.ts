@@ -804,6 +804,7 @@ const streamOpenAICompletionsOnce = (
 						url: completionsUrl,
 						headers: headersWithTimeout,
 						body: params,
+						signal: requestSignal,
 						fetch: wrapFetchForCopilotFallback(
 							options?.fetch,
 							model.provider === "github-copilot",
