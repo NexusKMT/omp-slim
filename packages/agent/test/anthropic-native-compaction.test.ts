@@ -300,6 +300,21 @@ describe("compact() Anthropic native lane", () => {
 		expect(describeRetainedTail([assistant("only")])).toEqual({ count: 2, role: "assistant" });
 		// No pad without a live final turn — and collapsing still applies.
 		expect(describeRetainedTail([assistant(undefined)])).toEqual({ count: 1, role: "assistant" });
+		// Server-tool blocks serialize unconditionally, so a server-tool-only
+		// turn draws the pad too.
+		const serverToolAssistant: Message = {
+			role: "assistant",
+			content: [
+				{ type: "anthropicServerTool", block: { type: "server_tool_use", id: "srv_1", name: "web_search" } },
+			],
+			provider: "anthropic",
+			model: "claude-fable-5",
+			api: "anthropic-messages",
+			usage: ZERO_USAGE,
+			stopReason: "stop",
+			timestamp: 2,
+		};
+		expect(describeRetainedTail([user("old"), serverToolAssistant])).toEqual({ count: 3, role: "user" });
 		expect(describeRetainedTail([])).toBeUndefined();
 		// Consecutive tool results still collapse into one wire message.
 		const toolResult = (id: string): Message => ({

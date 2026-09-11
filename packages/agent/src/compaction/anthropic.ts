@@ -154,9 +154,9 @@ export function describeRetainedTail(messages: readonly Message[]): RetainedTail
 	// Mirror the provider's trailing-assistant prefill: a tail ending in a
 	// live assistant turn gains a synthetic trailing user message on the
 	// wire, which stays verbatim too. Only blocks the converter emits count —
-	// blank text never serializes, and images, redacted thinking, server
-	// tools, and fallback markers need target context this scope lacks, so a
-	// turn of only those emits nothing and draws no pad. Without the pad in
+	// blank text never serializes, and images, redacted thinking, and fallback
+	// markers need target context this scope lacks, so a turn of only those
+	// emits nothing and draws no pad. Without the pad in
 	// the scope, the summary could duplicate the tail head.
 	const last = messages[messages.length - 1];
 	if (last?.role === "assistant" && last.content.some(emitsWireBlock)) {
@@ -166,15 +166,17 @@ export function describeRetainedTail(messages: readonly Message[]): RetainedTail
 }
 
 /**
- * Whether an assistant content block reaches the wire under some target.
- * Conservative by necessity: redacted thinking, server tools, and fallback
- * markers replay only for specific deployments, which the scope cannot see.
+ * Whether an assistant content block reaches the wire. Server-tool blocks
+ * serialize unconditionally; blank text never does. Redacted thinking and
+ * fallback markers replay only for specific deployments, which the scope
+ * cannot see, so a turn of only those conservatively draws no pad.
  */
 function emitsWireBlock(block: AssistantMessage["content"][number]): boolean {
 	switch (block.type) {
 		case "text":
 			return block.text.trim().length > 0;
 		case "toolCall":
+		case "anthropicServerTool":
 			return true;
 		case "thinking":
 			return block.thinking.trim().length > 0 || (block.thinkingSignature ?? "").trim().length > 0;
