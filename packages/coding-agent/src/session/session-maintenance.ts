@@ -244,6 +244,7 @@ type CompactionProjectionArgs = {
 	firstKeptEntryId: string;
 	preserveData?: Record<string, unknown>;
 	details?: unknown;
+	method?: CompactionMethod;
 	providerReplayThroughEntryId?: string;
 };
 
@@ -1824,7 +1825,11 @@ export class SessionMaintenance {
 	 * valid if applying it would still create sufficient headroom under the
 	 * recovery band without net context expansion.
 	 */
-	#armedSpeculationValid(armed: ArmedSpeculation, triggerContextTokens?: number): boolean {
+	#armedSpeculationValid(
+		armed: ArmedSpeculation,
+		triggerContextTokens?: number,
+		pendingContextTokens?: number,
+	): boolean {
 		const model = this.#model;
 		if (!model) return false;
 		const settings = this.#host.settings.getGroup("compaction");
@@ -1847,15 +1852,18 @@ export class SessionMaintenance {
 
 			const projected = this.#projectCompactedContextTokens({
 				...armed.result,
+				method: armed.method,
 				providerReplayThroughEntryId: isRecord(armed.result.preserveData?.openaiRemoteCompaction)
 					? armed.snapshotLeafId
 					: undefined,
 			});
+			const pendingTokens = Math.max(0, pendingContextTokens ?? 0);
+			const projectedWithPending = projected + pendingTokens;
 			const contextWindow = model.contextWindow ?? 0;
 			if (contextWindow > 0) {
 				const thresholdTokens = resolveThresholdTokens(contextWindow, settings);
 				const recoveryBand = Math.floor(thresholdTokens * COMPACTION_RECOVERY_BAND);
-				if (projected > recoveryBand) {
+				if (projectedWithPending > recoveryBand) {
 					return false;
 				}
 			}
@@ -1863,10 +1871,15 @@ export class SessionMaintenance {
 			// as `projected`) to avoid basis mismatch against provider-billed tokens.
 			// Also ensure projected tokens do not exceed the trigger context if provided.
 			const storedCurrentTokens = this.#estimateStoredContextTokens();
-			if (storedCurrentTokens > 0 && projected >= storedCurrentTokens) {
+			const storedCurrentTokensWithPending = storedCurrentTokens + pendingTokens;
+			if (storedCurrentTokens > 0 && projectedWithPending >= storedCurrentTokensWithPending) {
 				return false;
 			}
-			if (triggerContextTokens !== undefined && triggerContextTokens > 0 && projected >= triggerContextTokens) {
+			if (
+				triggerContextTokens !== undefined &&
+				triggerContextTokens > 0 &&
+				projectedWithPending >= triggerContextTokens
+			) {
 				return false;
 			}
 		}
@@ -1878,7 +1891,7 @@ export class SessionMaintenance {
 	 * is aborted (the real pass supersedes it); an armed result is returned only
 	 * when still valid for the current branch, model, and settings.
 	 */
-	#claimArmedSpeculation(triggerContextTokens?: number): ArmedSpeculation | undefined {
+	#claimArmedSpeculation(triggerContextTokens?: number, pendingContextTokens?: number): ArmedSpeculation | undefined {
 		const run = this.#speculation;
 		if (!run) return undefined;
 		this.#speculation = undefined;
@@ -1889,7 +1902,7 @@ export class SessionMaintenance {
 		const settings = this.#host.settings.getGroup("compaction");
 		if (settings.asyncEnabled === false) return undefined;
 		if (this.#host.extensionRunner?.hasHandlers("session_before_compact")) return undefined;
-		if (!this.#armedSpeculationValid(run.armed, triggerContextTokens)) {
+		if (!this.#armedSpeculationValid(run.armed, triggerContextTokens, pendingContextTokens)) {
 			logger.debug("Armed speculative compaction invalidated by branch growth or headroom check", {
 				method: run.armed.method,
 				snapshotLeafId: run.armed.snapshotLeafId,
@@ -2093,7 +2106,7 @@ export class SessionMaintenance {
 		await this.runAutoCompaction("threshold", false, false, false, {
 			autoContinue: false,
 			triggerContextTokens: contextTokens,
-			pendingContextTokens: this.#tokenizer.countMessages(messages),
+			pendingContextTokens: this.#tokenizer.countMessages(messages, { excludeEncryptedReasoning: true }),
 			preparedContextTokens: this.#estimateStoredContextTokens(),
 			phase: "pre_turn",
 		});
@@ -3025,6 +3038,7 @@ export class SessionMaintenance {
 		const blocks = archive
 			? snapcompact.historyBlocks(archive, { maxFrameDataBytes: snapcompact.FRAME_DATA_BYTES_BUDGET })
 			: undefined;
+		const projectionOptions = { excludeEncryptedReasoning: true } as const;
 		if (!leaf) {
 			const summaryMessage = createCompactionSummaryMessage(
 				args.summary,
@@ -3032,10 +3046,11 @@ export class SessionMaintenance {
 				new Date().toISOString(),
 				{
 					shortSummary: args.shortSummary,
+					method: args.method,
 					blocks,
 				},
 			);
-			return nonMessageTokens + this.#tokenizer.countMessages(convertToLlm([summaryMessage]));
+			return nonMessageTokens + this.#tokenizer.countMessages(convertToLlm([summaryMessage]), projectionOptions);
 		}
 		const pending: CompactionEntry = {
 			type: "compaction",
@@ -3046,6 +3061,7 @@ export class SessionMaintenance {
 			shortSummary: args.shortSummary,
 			firstKeptEntryId: args.firstKeptEntryId,
 			tokensBefore: args.tokensBefore,
+			method: args.method,
 			details: args.details,
 			preserveData: args.preserveData,
 			providerReplayThroughEntryId: args.providerReplayThroughEntryId,
@@ -3053,16 +3069,24 @@ export class SessionMaintenance {
 		const rebuilt = buildSessionContext([...branch, pending]);
 		const rebuiltMessages = convertToLlm(rebuilt.messages);
 		const providerPayload = getOpenAiRemoteCompactionPayload(pending);
-		if (!providerPayload) return nonMessageTokens + this.#tokenizer.countMessages(rebuiltMessages);
+		if (!providerPayload) {
+			return nonMessageTokens + this.#tokenizer.countMessages(rebuiltMessages, projectionOptions);
+		}
 
 		const summaryMessage = createCompactionSummaryMessage(args.summary, args.tokensBefore, new Date().toISOString(), {
 			shortSummary: args.shortSummary,
 			providerPayload,
+			method: args.method,
 			blocks,
 		});
-		const summaryTokens = this.#tokenizer.countMessages(convertToLlm([summaryMessage]));
+		const summaryTokens = this.#tokenizer.countMessages(convertToLlm([summaryMessage]), projectionOptions);
 		const nativeHistoryTokens = this.#countOpenAiNativeHistoryTokens(providerPayload);
-		return nonMessageTokens + this.#tokenizer.countMessages(rebuiltMessages) - summaryTokens + nativeHistoryTokens;
+		return (
+			nonMessageTokens +
+			this.#tokenizer.countMessages(rebuiltMessages, projectionOptions) -
+			summaryTokens +
+			nativeHistoryTokens
+		);
 	}
 
 	#countOpenAiNativeHistoryTokens(providerPayload: OpenAIResponsesHistoryPayload): number {
@@ -3551,7 +3575,7 @@ export class SessionMaintenance {
 		// returned only when still valid for the current branch/model/settings.
 		// Snapcompact is local and instant, so an armed LLM summary (possible
 		// only when settings/model changed since arming) never overrides it.
-		const claimedSpec = this.#claimArmedSpeculation(options.triggerContextTokens);
+		const claimedSpec = this.#claimArmedSpeculation(options.triggerContextTokens, options.pendingContextTokens);
 		const armedSpec = method === "snapcompact" ? undefined : claimedSpec;
 
 		const effectiveSettings = resolveMethodSettings(compactionSettings, method);
