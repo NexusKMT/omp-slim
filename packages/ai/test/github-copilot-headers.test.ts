@@ -368,6 +368,7 @@ describe("buildCopilotDynamicHeaders integration identity", () => {
 			messages: [],
 			hasImages: false,
 			integrationId: "copilot-chat",
+			enterpriseUrl: "ghe.example.com",
 		});
 		expect(headers["Copilot-Integration-Id"]).toBe("copilot-chat");
 		expect(headers["Editor-Version"]).toBe("copilot/1.0.82");
@@ -376,6 +377,15 @@ describe("buildCopilotDynamicHeaders integration identity", () => {
 	it("falls back to the chat-surface default", () => {
 		const { headers } = buildCopilotDynamicHeaders({ messages: [], hasImages: false });
 		expect(headers["Copilot-Integration-Id"]).toBe("copilot-chat");
+	});
+
+	it("keeps the CLI identity for Enterprise requests", () => {
+		const { headers } = buildCopilotDynamicHeaders({
+			messages: [],
+			hasImages: false,
+			enterpriseUrl: "ghe.example.com",
+		});
+		expect(headers["Copilot-Integration-Id"]).toBe("copilot-developer-cli");
 	});
 
 	it("treats invalid explicit values as unset", () => {

@@ -212,9 +212,11 @@ describe("GitHub Copilot OpenAI transport base URL", () => {
 	it("routes structured enterprise credentials to the enterprise chat completions host", async () => {
 		const requestedUrls: string[] = [];
 		const requestedAuthHeaders: Array<string | null> = [];
+		const requestedIntegrationIds: Array<string | null> = [];
 		const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
 			requestedUrls.push(getRequestUrl(input));
 			requestedAuthHeaders.push(getRequestHeader(input, init, "Authorization"));
+			requestedIntegrationIds.push(getRequestHeader(input, init, "Copilot-Integration-Id"));
 			return createUnauthorizedResponse();
 		});
 
@@ -227,14 +229,17 @@ describe("GitHub Copilot OpenAI transport base URL", () => {
 		expect(result.stopReason).toBe("error");
 		expect(requestedUrls[0]).toBe("https://copilot-api.ghe.example.com/chat/completions");
 		expect(requestedAuthHeaders[0]).toBe(`Bearer ${testToken}`);
+		expect(requestedIntegrationIds[0]).toBe("copilot-developer-cli");
 	});
 
 	it("routes structured business credentials to the business chat completions host", async () => {
 		const requestedUrls: string[] = [];
 		const requestedAuthHeaders: Array<string | null> = [];
+		const requestedIntegrationIds: Array<string | null> = [];
 		const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
 			requestedUrls.push(getRequestUrl(input));
 			requestedAuthHeaders.push(getRequestHeader(input, init, "Authorization"));
+			requestedIntegrationIds.push(getRequestHeader(input, init, "Copilot-Integration-Id"));
 			return createUnauthorizedResponse();
 		});
 
@@ -247,6 +252,7 @@ describe("GitHub Copilot OpenAI transport base URL", () => {
 		expect(result.stopReason).toBe("error");
 		expect(requestedUrls[0]).toBe("https://api.business.githubcopilot.com/chat/completions");
 		expect(requestedAuthHeaders[0]).toBe(`Bearer ${testToken}`);
+		expect(requestedIntegrationIds[0]).toBe("copilot-chat");
 	});
 
 	it("routes structured enterprise credentials to the enterprise responses host", async () => {

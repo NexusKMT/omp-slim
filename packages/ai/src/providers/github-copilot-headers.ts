@@ -204,6 +204,8 @@ export function buildCopilotDynamicHeaders(params: {
 	headers?: Record<string, string>;
 	initiatorOverride?: CopilotInitiator;
 	planTier?: string;
+	/** Enterprise login domain; Enterprise keeps the CLI identity that its private endpoint accepts. */
+	enterpriseUrl?: string;
 	/** Raw explicit identity; validated here, chat default when absent/invalid. */
 	integrationId?: unknown;
 }): CopilotDynamicHeaders {
@@ -215,7 +217,8 @@ export function buildCopilotDynamicHeaders(params: {
 		"X-Interaction-Type": `conversation-${initiator}`,
 	};
 	headers["Copilot-Integration-Id"] =
-		normalizeCopilotIntegrationId(params.integrationId) ?? COPILOT_CHAT_INTEGRATION_ID;
+		normalizeCopilotIntegrationId(params.integrationId) ??
+		(params.enterpriseUrl ? COPILOT_CAPI_IDENTITY_HEADERS["Copilot-Integration-Id"] : COPILOT_CHAT_INTEGRATION_ID);
 
 	if (params.hasImages) {
 		headers["Copilot-Vision-Request"] = "true";
