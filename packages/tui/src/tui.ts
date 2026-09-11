@@ -1848,8 +1848,13 @@ export class TUI extends Container {
 			setAltScreenActive(false);
 		}
 		if (this.#altActive || this.#pendingAltExit) {
+			// A pending fused exit may have been built without an OFF write to
+			// keep inline capture alive across the restore — at process quit
+			// nothing continues, so release unconditionally.
 			const mouseExit = this.#mouseTracking !== "off" ? MOUSE_TRACKING_OFF : "";
-			const exitSequence = this.#pendingAltExit || `${mouseExit}${this.#keyboardEnhancementExit()}\x1b[?1049l`;
+			const exitSequence = this.#pendingAltExit
+				? `${mouseExit}${this.#pendingAltExit}`
+				: `${mouseExit}${this.#keyboardEnhancementExit()}\x1b[?1049l`;
 			this.terminal.write(exitSequence);
 			setAltScreenActive(false);
 			this.#altActive = false;
@@ -2811,13 +2816,14 @@ export class TUI extends Container {
 		// modal there; the normal screen and all accounting stay untouched.
 		const topOverlay = this.#getTopmostVisibleOverlay();
 		const wantAlt = topOverlay?.options?.fullscreen === true;
-		const wantMouse: MouseTrackingState = wantAlt
-			? topOverlay.options?.mouseTracking !== false
-				? "full"
-				: "off"
-			: this.#inlineMouseProvider?.() === true
-				? "inline"
-				: "off";
+		const wantMouse: MouseTrackingState =
+			topOverlay === undefined
+				? this.#inlineMouseProvider?.() === true
+					? "inline"
+					: "off"
+				: wantAlt && topOverlay.options?.mouseTracking !== false
+					? "full"
+					: "off";
 		if (wantAlt && !this.#altActive) {
 			// Enhanced keyboard modes can be buffer-local: re-push the active
 			// modified-key reporting sequence on the freshly entered alternate

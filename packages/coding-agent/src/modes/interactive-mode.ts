@@ -909,9 +909,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		return this.composer.viewportClickCandidates(index);
 	}
 
-	/** Flip the pinned jump list between its collapsed few and the full list. */
+	/** Flip the pinned jump list between its collapsed few and the full list, overriding the setting. */
 	togglePinnedHudExpanded(): void {
-		this.#pinnedHudExpanded = !this.#pinnedHudExpanded;
+		const mode = settings.get("display.pinnedAgents");
+		const expanded = this.#pinnedHudOverride ?? mode === "full";
+		this.#pinnedHudOverride = !expanded;
 		this.#renderSubagentList();
 		this.ui.requestRender();
 	}
@@ -962,8 +964,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	#voicePreviousUseTerminalCursor: boolean | null = null;
 	#resizeHandler?: () => void;
 	#observerRegistry: SessionObserverRegistry;
-	/** Pinned jump list clicked open past its collapsed few (`display.pinnedAgents: collapsed`). */
-	#pinnedHudExpanded = false;
+	/** Click override for the pinned jump-list density; undefined follows `display.pinnedAgents`. */
+	#pinnedHudOverride: boolean | undefined;
 	#eventBus?: EventBus;
 	#subagentEventBus?: EventBus;
 	#eventBusUnsubscribers: Array<() => void> = [];
@@ -3087,7 +3089,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (mode === "off") return;
 		const sessions = this.#observerRegistry.getSessions();
 		const running = sessions.filter(isHudSubagent);
-		const expanded = mode === "full" || this.#pinnedHudExpanded;
+		const expanded = this.#pinnedHudOverride ?? mode === "full";
 		const lines = renderSubagentHudLines(sessions, this.ui.terminal.columns, expanded);
 		if (lines.length === 0) return;
 		const layout = layoutPinnedHud(running.length, expanded);
