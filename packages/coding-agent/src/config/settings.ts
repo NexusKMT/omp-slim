@@ -1818,6 +1818,9 @@ export class Settings {
 		let merged: RawSettings = {};
 		try {
 			const result = await loadCapability(settingsCapability.id, { cwd: this.#cwd });
+			for (const warning of result.warnings ?? []) {
+				logger.warn(`Settings: ${warning}`);
+			}
 			for (const item of result.items as SettingsCapabilityItem[]) {
 				if (item.level === "project") {
 					merged = this.#deepMerge(merged, dropSettingsGroupShadows(item.data as RawSettings, item.path));

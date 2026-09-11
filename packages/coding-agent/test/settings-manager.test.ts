@@ -21,7 +21,7 @@ import * as discovery from "@oh-my-pi/pi-coding-agent/discovery";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { AUTO_IMAGE_PROVIDER_ORDER } from "@oh-my-pi/pi-coding-agent/tools/image-providers";
 import { SEARCH_PROVIDER_ORDER } from "@oh-my-pi/pi-coding-agent/web/search/types";
-import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
+import { getProjectAgentDir, logger, TempDir } from "@oh-my-pi/pi-utils";
 import * as fileLock from "@oh-my-pi/pi-utils/file-lock";
 import { YAML } from "bun";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "./helpers/settings-test-state";
@@ -2363,6 +2363,24 @@ describe("Settings", () => {
 
 			settings.override("extensions", ["../override-ext"]);
 			expect(settings.extensionsSourceLevel()).toBe("user");
+		});
+	});
+
+	describe("project .claude/settings.json parse warnings", () => {
+		it("logs capability warnings when project settings.json fails to parse", async () => {
+			const claudeSettings = path.join(projectDir, ".claude", "settings.json");
+			fs.mkdirSync(path.dirname(claudeSettings), { recursive: true });
+			fs.writeFileSync(claudeSettings, '{ "symbolPreset": "ascii", }');
+
+			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir, inMemory: true });
+			expect(settings.get("symbolPreset")).toBe("unicode");
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringMatching(/Settings: \[Claude Code\] Failed to parse JSON in .*settings\.json/),
+			);
+
+			warnSpy.mockRestore();
 		});
 	});
 });
