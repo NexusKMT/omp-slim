@@ -2862,8 +2862,12 @@ export class TUI extends Container {
 			// inline capture the same frame the overlay closes: no later paint
 			// is needed, so an idle session never sits untrackable.
 			const mouseExit = wantMouse === "off" && this.#mouseTracking !== "off" ? MOUSE_TRACKING_OFF : "";
+			// A fullscreen overlay that disabled reporting leaves tracking off:
+			// restore it in the fused exit or later frames see matching states
+			// and inline click/hover stays dead until the setting toggles.
+			const mouseEnter = wantMouse !== "off" && this.#mouseTracking === "off" ? MOUSE_TRACKING_ON : "";
 			const enhancementExit = this.#keyboardEnhancementExit();
-			const exitSequence = `${mouseExit}${enhancementExit}\x1b[?1049l`;
+			const exitSequence = `${mouseExit}${mouseEnter}${enhancementExit}\x1b[?1049l`;
 			// Session replacement finishes while its fullscreen selector still
 			// covers the old normal buffer. Fuse the restore into the destructive
 			// repaint so no stale frame can become visible between writes.

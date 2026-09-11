@@ -411,6 +411,71 @@ describe("SessionFocusController", () => {
 		expect(controller.focusedAgentId).toBeUndefined();
 		expect(controller.target).toBeUndefined();
 	});
+
+	it("drops a superseded attachment while a newer revive is pending", async () => {
+		const slowA = makeSessionStub();
+		const slowB = makeSessionStub();
+		const { promise: renderGate, resolve: releaseRender } = Promise.withResolvers<void>();
+		let renderCalls = 0;
+		const h = makeHarness({
+			renderInitialMessages: () => {
+				renderCalls++;
+				return renderGate;
+			},
+		});
+		const { promise: reviveB, resolve: releaseReviveB } = Promise.withResolvers<AgentSession>();
+		const lifecycle = {
+			ensureLive: (id: string) => (id === "A" ? Promise.resolve(slowA.session) : reviveB),
+		};
+		const controller = new SessionFocusController(
+			h.ctx,
+			h.registry,
+			() => lifecycle as unknown as AgentLifecycleManager,
+		);
+
+		const focusA = controller.focusAgent("A");
+		for (let i = 0; i < 50 && renderCalls === 0; i++) await Promise.resolve();
+		expect(renderCalls).toBe(1);
+
+		const focusB = controller.focusAgent("B");
+		releaseRender();
+		await focusA;
+		expect(h.reloadTodoSessions).toEqual([]);
+
+		releaseReviveB(slowB.session);
+		await focusB;
+		expect(controller.focusedAgentId).toBe("B");
+		expect(h.reloadTodoSessions).toEqual([slowB.session]);
+	});
+
+	it("drops a running attachment on dispose", async () => {
+		const slow = makeSessionStub();
+		const { promise: renderGate, resolve: releaseRender } = Promise.withResolvers<void>();
+		let renderCalls = 0;
+		const h = makeHarness({
+			renderInitialMessages: () => {
+				renderCalls++;
+				return renderGate;
+			},
+		});
+		const lifecycle = {
+			ensureLive: (_id: string) => Promise.resolve(slow.session),
+		};
+		const controller = new SessionFocusController(
+			h.ctx,
+			h.registry,
+			() => lifecycle as unknown as AgentLifecycleManager,
+		);
+
+		const focusA = controller.focusAgent("A");
+		for (let i = 0; i < 50 && renderCalls === 0; i++) await Promise.resolve();
+		expect(renderCalls).toBe(1);
+
+		controller.dispose();
+		releaseRender();
+		await focusA;
+		expect(h.reloadTodoSessions).toEqual([]);
+	});
 });
 
 describe("pickRecentFocusableAgentId", () => {

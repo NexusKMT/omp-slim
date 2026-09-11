@@ -64,6 +64,11 @@ export class SessionFocusController {
 		if (this.ctx.collabGuest) throw new Error("Viewing agents is unavailable in a collab session.");
 		if (id === MAIN_AGENT_ID) return this.unfocus();
 		const request = ++this.#focusRequestSeq;
+		// Doom any in-flight attachment now, not when this request's own
+		// attach starts: a newer click (or dispose) while ensureLive() is
+		// pending must stop the superseded attach rebuilding the old session
+		// under the winner instead of running to completion.
+		++this.#attachGeneration;
 		let session: AgentSession;
 		try {
 			session = await this.lifecycle().ensureLive(id);
@@ -81,7 +86,15 @@ export class SessionFocusController {
 		this.#focusedAgentId = id;
 		this.#attachedSession = session;
 		this.#registryUnsubscribe ??= this.registry.onChange(e => this.#onRegistryEvent(e));
-		const attached = await this.#attach(session);
+		let attached = false;
+		try {
+			attached = await this.#attach(session);
+		} catch (error) {
+			// Same supersede rule as the revive above: only the current
+			// request may surface attachment failures.
+			if (request !== this.#focusRequestSeq) return;
+			throw error;
+		}
 		if (attached && this.#focusedAgentId === id && this.#attachedSession === session) {
 			this.ctx.showStatus(`Viewing agent ${id} — Esc returns to main, ←← hops to parent`);
 		}
@@ -120,9 +133,10 @@ export class SessionFocusController {
 	}
 
 	dispose(): void {
-		// A pending revive must not land during teardown: invalidate it the
-		// same way an explicit leave-main does.
+		// A pending revive — or a running attachment — must not land during
+		// teardown: invalidate both generations the way leave-main does.
 		this.#focusRequestSeq++;
+		++this.#attachGeneration;
 		this.#registryUnsubscribe?.();
 		this.#registryUnsubscribe = undefined;
 	}

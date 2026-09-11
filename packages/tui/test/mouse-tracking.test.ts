@@ -112,6 +112,28 @@ describe("inline mouse tracking", () => {
 		}
 	});
 
+	it("restores inline capture after a mouse-disabled fullscreen overlay closes", () => {
+		const enabled = { current: true };
+		const { terminal, tui } = makeInlineTui(enabled);
+		try {
+			tui.start();
+			tui.renderNow();
+			expect(terminal.output.includes(TRACKING_ON)).toBe(true);
+
+			const overlay = tui.showOverlay(new StaticOverlay(), { fullscreen: true, mouseTracking: false });
+			tui.renderNow();
+			const offAt = terminal.output.lastIndexOf(TRACKING_OFF);
+			expect(offAt).toBeGreaterThan(-1);
+			expect(offAt).toBeGreaterThan(terminal.output.lastIndexOf(TRACKING_ON));
+
+			overlay.hide();
+			tui.renderNow();
+			expect(terminal.output.lastIndexOf(TRACKING_ON)).toBeGreaterThan(offAt);
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("releases capture on stop even with a pending alt exit", () => {
 		const enabled = { current: true };
 		const { terminal, tui } = makeInlineTui(enabled);
