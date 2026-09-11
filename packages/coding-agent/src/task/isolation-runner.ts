@@ -278,12 +278,17 @@ async function writeIsolationPatch(
 export async function retainIsolationWorkspace(isolationDir: string): Promise<string> {
 	const baseDir = path.dirname(isolationDir);
 	const retainedBase = `${baseDir}.retained-${Date.now().toString(36)}-${Math.floor(Math.random() * 2 ** 32).toString(16)}`;
-	try {
-		await fs.rename(baseDir, retainedBase);
-	} catch {
-		return isolationDir;
+	// A valid move can still fail transiently (Windows AV/indexer locks);
+	// retry briefly before conceding the deterministic slot.
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			await fs.rename(baseDir, retainedBase);
+			return path.join(retainedBase, path.basename(isolationDir));
+		} catch {
+			if (attempt < 2) await Bun.sleep(25);
+		}
 	}
-	return path.join(retainedBase, path.basename(isolationDir));
+	return isolationDir;
 }
 /** Context for `isolation-error.md`: the `result.error` text for a run whose changes could not be captured or landed. */
 interface IsolationErrorContext {
