@@ -733,7 +733,12 @@ export class InputController {
 
 	/** Focus a resolved agent id, ignoring already-viewing and surfacing errors as status. */
 	#focusResolvedAgent(nextId: string): void {
-		if (nextId === this.ctx.focusedAgentId) return;
+		if (nextId === this.ctx.focusedAgentId) {
+			// Reaffirming the current view is still the user's latest click: a
+			// parked agent reviving from an older click must not land over it.
+			this.ctx.invalidatePendingFocus();
+			return;
+		}
 		void this.ctx.focusAgentSession(nextId).catch((error: unknown) => {
 			this.ctx.showStatus(error instanceof Error ? error.message : String(error));
 		});

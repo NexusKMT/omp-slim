@@ -476,6 +476,31 @@ describe("SessionFocusController", () => {
 		await focusA;
 		expect(h.reloadTodoSessions).toEqual([]);
 	});
+
+	it("drops a pending revive when the current view is reaffirmed", async () => {
+		const h = makeHarness();
+		const focused = makeSessionStub();
+		const slow = makeSessionStub();
+		const { promise: slowGate, resolve: releaseSlow } = Promise.withResolvers<AgentSession>();
+		const lifecycle = {
+			ensureLive: (id: string) => (id === "Slow" ? slowGate : Promise.resolve(focused.session)),
+		};
+		const controller = new SessionFocusController(
+			h.ctx,
+			h.registry,
+			() => lifecycle as unknown as AgentLifecycleManager,
+		);
+
+		await controller.focusAgent("Focused");
+		expect(controller.focusedAgentId).toBe("Focused");
+
+		const slowFocus = controller.focusAgent("Slow");
+		controller.invalidatePendingFocus();
+		releaseSlow(slow.session);
+		await slowFocus;
+		expect(controller.focusedAgentId).toBe("Focused");
+		expect(controller.target).toBe(focused.session);
+	});
 });
 
 describe("pickRecentFocusableAgentId", () => {

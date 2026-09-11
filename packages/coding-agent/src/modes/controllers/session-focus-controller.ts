@@ -140,6 +140,14 @@ export class SessionFocusController {
 		this.#registryUnsubscribe?.();
 		this.#registryUnsubscribe = undefined;
 	}
+	/**
+	 * Drop pending focus requests without touching the current view. Clicking
+	 * the already-focused agent reaffirms it: that newer explicit act must win
+	 * over an older still-reviving request.
+	 */
+	invalidatePendingFocus(): void {
+		this.#focusRequestSeq++;
+	}
 
 	#onRegistryEvent(event: RegistryEvent): void {
 		if (event.ref.id !== this.#focusedAgentId) return;

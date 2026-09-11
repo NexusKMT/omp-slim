@@ -939,6 +939,9 @@ export class InteractiveMode implements InteractiveModeContext {
 	unfocusSession(): Promise<void> {
 		return this.#focusController.unfocus();
 	}
+	invalidatePendingFocus(): void {
+		this.#focusController.invalidatePendingFocus();
+	}
 
 	resolveViewportClickCandidates(index: number): string[] {
 		return this.composer.viewportClickCandidates(index);
@@ -1113,7 +1116,15 @@ export class InteractiveMode implements InteractiveModeContext {
 		// Keep generic pi-tui renderers aligned with the coding-agent setting.
 		applyHyperlinkSetting();
 		this.ui.setInlineMouseTrackingProvider(() => {
-			const on = settings.get("tui.mouse") === true;
+			// The global singleton may be uninitialized (or reset by test
+			// teardown) while renders still flow: fall back to the mode's own
+			// settings rather than throwing out of the render hot path.
+			let on: boolean;
+			try {
+				on = settings.get("tui.mouse") === true;
+			} catch {
+				on = this.settings.get("tui.mouse") === true;
+			}
 			// Dropping capture must also drop the band: with reporting off no
 			// motion event will ever arrive to clear a mid-hover highlight.
 			// The controller cache goes too, or a re-enable plus motion over
