@@ -1815,19 +1815,17 @@ export async function compact(
 		// then shares the live turn's prefix byte-for-byte. A prior snapcompact
 		// archive is already merged into that summary text, so the archive
 		// migration message the OpenAI lanes carry is omitted here.
-		// The rewrite marker must precede the retained tail, exactly like the
-		// live context rebuild: derive it from the first retained message. A
-		// previous compaction's commit timestamp is newer than a re-retained
-		// tail, so reusing it would strip that tail's bound thinking only in
-		// this request, diverging from the cached live prefix (and possibly
-		// dropping below the trigger). Manually built preparations without a
-		// retained tail fall back to the oldest input, else the current time.
+		// The rewrite marker must precede every message this request replays —
+		// summarized history and retained tail alike — exactly like the live
+		// context rebuild predates its tail. A previous compaction's commit
+		// timestamp is newer than re-retained or re-summarized turns, so
+		// reusing it would strip their bound thinking only in this request,
+		// diverging from the cached live prefix (and possibly dropping below
+		// the trigger). Manually built preparations with no input at all fall
+		// back to the current time.
+		const firstReplayed = messagesToSummarize[0] ?? turnPrefixMessages[0] ?? recentMessages[0];
 		const previousSummaryAt =
-			recentMessages[0] !== undefined
-				? new Date(recentMessages[0].timestamp - 1).toISOString()
-				: (messagesToSummarize[0] ?? turnPrefixMessages[0])
-					? new Date((messagesToSummarize[0] ?? turnPrefixMessages[0])!.timestamp).toISOString()
-					: new Date().toISOString();
+			firstReplayed !== undefined ? new Date(firstReplayed.timestamp - 1).toISOString() : new Date().toISOString();
 		const previousSummaryMessage = previousSummaryForCompaction
 			? createCompactionSummaryMessage(previousSummaryForCompaction, tokensBefore, previousSummaryAt, {
 					providerPayload:
