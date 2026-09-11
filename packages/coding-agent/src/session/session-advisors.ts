@@ -1642,7 +1642,10 @@ export class SessionAdvisors {
 					type: "compaction",
 					id,
 					parentId,
-					timestamp,
+					// ISO like every CompactionEntry: the next round reads this
+					// back as previousSummaryTimestamp, and a millis string
+					// does not survive `new Date()` (NaN rewrite marker).
+					timestamp: new Date(message.timestamp || Date.now()).toISOString(),
 					summary: message.summary,
 					shortSummary: message.shortSummary,
 					firstKeptEntryId: advisorSummary.firstKeptEntryId || `msg-${i + 1}`,
@@ -1771,14 +1774,27 @@ export class SessionAdvisors {
 		// compaction. Record their exact array boundary on the in-memory summary so
 		// only assistants appended afterward can become the next usage anchor.
 		const advisorUsageAnchorStartIndex = preparation.recentMessages.length + 1;
+		const anthropicPayload = getAnthropicCompactionPayload(compactResult.preserveData);
+		// A native summary replays its block on later requests, so its rewrite
+		// marker must precede the retained tail: a fresh timestamp would make
+		// `historyRewriteAt` newer than the tail and strip its bound thinking
+		// on the very next request. Reuse the previous compaction's marker when
+		// one exists, else sit just before the retained tail. Local summaries
+		// keep the existing fresh timestamp.
+		const firstRetained = preparation.recentMessages[0];
+		const summaryTimestamp =
+			anthropicPayload !== undefined
+				? (preparation.previousSummaryTimestamp ??
+					(firstRetained ? new Date(firstRetained.timestamp - 1).toISOString() : new Date().toISOString()))
+				: new Date().toISOString();
 		const summaryMessage = {
-			...createCompactionSummaryMessage(summary, tokensBefore, new Date().toISOString(), {
+			...createCompactionSummaryMessage(summary, tokensBefore, summaryTimestamp, {
 				shortSummary,
 				// A provider-native compaction returns its replay state in
 				// preserveData; carry it on the in-memory summary so later
 				// advisor requests replay the native block (and beta/edit)
 				// instead of resending the summary as ordinary text.
-				providerPayload: getAnthropicCompactionPayload(compactResult.preserveData),
+				providerPayload: anthropicPayload,
 			}),
 			preserveData: compactResult.preserveData,
 			firstKeptEntryId,

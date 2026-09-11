@@ -2341,8 +2341,11 @@ const streamAnthropicOnce = (
 					compactionSupported &&
 					(options?.anthropicCompaction !== undefined ||
 						contextReplaysAnthropicCompaction(context.messages, model)) &&
+					!isVertexRawPredictUrl(baseUrl) &&
 					!extraBetas.includes(COMPACTION_BETA)
 				) {
+					// Vertex rawPredict 400s on `anthropic-beta` headers; its beta
+					// rides the body instead (see buildParams).
 					extraBetas.push(COMPACTION_BETA);
 				}
 				// `ttl: "1h"` requires the extended-cache-ttl beta on API-key
@@ -4361,6 +4364,16 @@ function buildParams(
 	const vertexControlBetas = isVertexRawPredictUrl(model.baseUrl)
 		? resolveAnthropicControlBetas(model, prefixMismatchBehavior)
 		: [];
+	// Vertex rawPredict rejects `anthropic-beta` headers, so a request carrying
+	// the compaction edit (live compaction or replayed block — both require
+	// the beta) advertises it in the body instead, beside the other controls.
+	if (
+		isVertexRawPredictUrl(model.baseUrl) &&
+		compactionEdit !== undefined &&
+		!vertexControlBetas.includes(COMPACTION_BETA)
+	) {
+		vertexControlBetas.push(COMPACTION_BETA);
+	}
 
 	// Build params in the canonical field order: model → messages → system → tools →
 	// metadata → max_tokens → thinking → context_management → output_config → stream.

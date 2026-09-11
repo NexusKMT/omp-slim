@@ -370,6 +370,43 @@ describe("anthropic server-side compaction request", () => {
 		expect(opaqueOptedIn.beta).toContain("compact-2026-01-12");
 	});
 
+	it("routes the compaction beta through the body on Vertex rawPredict, never the header", async () => {
+		// Vertex 400s on `anthropic-beta` headers; a route there must still
+		// advertise the beta in `anthropic_beta` beside the edit. Stock Vertex
+		// disables context management by deployment contract, so the reachable
+		// shape is a custom provider routed at a Vertex URL with an opt-in.
+		const vertexModel = buildModel({
+			...fableSpec,
+			provider: "custom-vertex-route",
+			baseUrl:
+				"https://us-east5-aiplatform.googleapis.com/v1/projects/p/locations/us-east5/publishers/anthropic/models/claude-fable-5:rawPredict",
+			remoteCompaction: { enabled: true },
+		});
+		let capturedBeta: string | undefined;
+		let capturedBody: { anthropic_beta?: unknown; context_management?: unknown } | undefined;
+		const fetchMock = (async (_input: string | URL | Request, init?: RequestInit) => {
+			capturedBeta = new Headers(init?.headers).get("anthropic-beta") ?? "";
+			capturedBody = JSON.parse(String(init?.body ?? "{}"));
+			return new Response(
+				JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "captured" } }),
+				{ status: 400, headers: { "Content-Type": "application/json" } },
+			);
+		}) as typeof fetch;
+
+		await streamAnthropic(vertexModel, context, {
+			apiKey: "vertex-adc",
+			thinkingEnabled: false,
+			anthropicCompaction: { triggerInputTokens: 50_000, pauseAfterCompaction: true },
+			fetch: fetchMock,
+		}).result();
+
+		expect(capturedBeta ?? "").not.toContain("compact-2026-01-12");
+		expect(capturedBody?.anthropic_beta).toContain("compact-2026-01-12");
+		expect(capturedBody?.context_management).toMatchObject({
+			edits: [{ type: "compact_20260112" }],
+		});
+	});
+
 	it("replays a block held by its originating assistant message, at the head of that turn", async () => {
 		// A raw caller that appends the compacting response itself (no pause)
 		// keeps the block on the assistant message; the next request must still

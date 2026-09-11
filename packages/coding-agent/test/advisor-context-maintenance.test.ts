@@ -653,7 +653,12 @@ describe("AgentSession advisor context maintenance", () => {
 			filesText: "<files>\n# /repo/\nold.ts (Read)\n</files>",
 		});
 		expect((summaryMessage as unknown as { preserveData?: unknown }).preserveData).toEqual(nativePreserveData);
-
+		// The native summary's rewrite marker predates the retained tail, so
+		// the next request keeps the tail's bound thinking and cached prefix.
+		const retainedTail = advisor.state.messages[1];
+		if (!retainedTail) throw new Error("Expected retained advisor tail");
+		expect(summaryMessage.timestamp).toBeLessThan(retainedTail.timestamp);
+		const firstSummaryTimestamp = summaryMessage.timestamp;
 		// ...and the next maintenance round feeds it back into preparation.
 		seedOverflow(Date.now());
 		await session.prompt("second update");
@@ -662,5 +667,11 @@ describe("AgentSession advisor context maintenance", () => {
 		const secondPreparation = compactSpy.mock.calls[1]?.[0];
 		expect(secondPreparation?.previousSummary).toBe("native advisor summary");
 		expect(secondPreparation?.previousPreserveData).toEqual(nativePreserveData);
+		// The second summary reuses the first round's marker instead of minting
+		// a fresh one, keeping one stable rewrite point across compactions.
+		const [secondSummary] = advisor.state.messages;
+		expect(secondSummary?.role).toBe("compactionSummary");
+		if (secondSummary?.role !== "compactionSummary") throw new Error("Expected second advisor summary");
+		expect(secondSummary.timestamp).toBe(firstSummaryTimestamp);
 	});
 });
