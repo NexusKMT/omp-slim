@@ -366,7 +366,13 @@ export class Composer implements TerminalFrameProvider {
 		const shift = (span: ViewportClickSpan, base: number): void => {
 			const start = span.start + base;
 			const end = Math.min(span.end + base, viewportLength);
-			if (end > Math.max(0, start)) spans.push({ start: Math.max(0, start), end, candidates: span.candidates });
+			const clamped = Math.max(0, start);
+			if (end > clamped) {
+				// A clipped head must offset the callback: without the skew the
+				// first visible row would hit-test as span-local row 0.
+				const skew = clamped - start;
+				spans.push({ start: clamped, end, candidates: (local: number) => span.candidates(local + skew) });
+			}
 		};
 		for (const span of activeSpans) shift(span, before.length - drop);
 		for (const span of afterSpans) shift(span, before.length + active.length - drop);

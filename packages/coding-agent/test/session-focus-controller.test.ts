@@ -349,6 +349,30 @@ describe("SessionFocusController", () => {
 		expect(controller.focusedAgentId).toBe("Fast");
 		expect(controller.target).toBe(fast.session);
 	});
+
+	it("drops a pending focus when returning to main first", async () => {
+		const h = makeHarness();
+		const slow = makeSessionStub();
+		let releaseSlow: ((session: AgentSession) => void) | undefined;
+		const slowGate = new Promise<AgentSession>(resolve => {
+			releaseSlow = resolve;
+		});
+		const lifecycle = {
+			ensureLive: (_id: string) => slowGate,
+		};
+		const controller = new SessionFocusController(
+			h.ctx,
+			h.registry,
+			() => lifecycle as unknown as AgentLifecycleManager,
+		);
+
+		const slowFocus = controller.focusAgent("Slow");
+		await controller.unfocus();
+		releaseSlow?.(slow.session);
+		await slowFocus;
+		expect(controller.focusedAgentId).toBeUndefined();
+		expect(controller.target).toBeUndefined();
+	});
 });
 
 describe("pickRecentFocusableAgentId", () => {

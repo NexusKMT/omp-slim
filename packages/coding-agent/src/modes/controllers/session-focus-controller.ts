@@ -91,6 +91,19 @@ export class SessionFocusController {
 
 	/** Return to the main session. No-op when unfocused. */
 	async unfocus(): Promise<void> {
+		// Explicit leave-main invalidates pending focus requests: without this,
+		// an Esc pressed while a parked agent is still reviving would be
+		// followed by the delayed focus landing anyway.
+		this.#focusRequestSeq++;
+		return this.#detachToMain();
+	}
+
+	/**
+	 * Detach back to the main session without invalidating pending focus
+	 * requests. Reactive teardown (a focused agent dying under us) must not
+	 * cancel a newer explicit focus the way an explicit leave-main does.
+	 */
+	async #detachToMain(): Promise<void> {
 		if (!this.#focusedAgentId) return;
 		this.#focusedAgentId = undefined;
 		this.#attachedSession = undefined;
@@ -108,7 +121,7 @@ export class SessionFocusController {
 		const gone = event.type === "removed";
 		const dead = event.type === "status_changed" && (event.ref.status === "parked" || event.ref.status === "aborted");
 		if (!gone && !dead) return;
-		void this.unfocus().then(() => {
+		void this.#detachToMain().then(() => {
 			this.ctx.showStatus(`Agent ${event.ref.id} is ${gone ? "gone" : event.ref.status}; returned to main session`);
 		});
 	}

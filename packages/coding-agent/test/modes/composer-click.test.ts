@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "bun:test";
 import { COMPOSER_DEFAULTS, Composer } from "../../src/modes/composer";
 import { TranscriptContainer } from "../../src/modes/components/transcript-container";
 import { initTheme } from "../../src/modes/theme/theme";
-import type { Component } from "@oh-my-pi/pi-tui";
+import { Container, type Component } from "@oh-my-pi/pi-tui";
 import { VirtualTerminal } from "../../../tui/test/virtual-terminal";
 import { routeViewportClick, type ViewportClickSpan } from "../../src/modes/composer";
 
@@ -89,6 +89,52 @@ describe("composer hover band", () => {
 
 			composer.setHoveredClickId(undefined);
 			expect(composer.renderFrame({ columns: 80, rows: 24 }).viewport).toEqual(plain.viewport);
+		} finally {
+			composer.stop();
+		}
+	});
+});
+
+class RowTarget implements Component {
+	constructor(
+		private readonly rows: readonly string[],
+		private readonly ids: readonly string[],
+	) {}
+	render(): readonly string[] {
+		return this.rows;
+	}
+	getClickAgentAtRow(row: number): string | undefined {
+		return this.ids[row];
+	}
+}
+
+describe("composer click-span clipping", () => {
+	beforeAll(() => {
+		initTheme();
+	});
+
+	it("offsets hit-testing past clipped viewport rows", () => {
+		const term = new VirtualTerminal(80, 24);
+		const composer = new Composer({ terminal: term, preferences: { ...COMPOSER_DEFAULTS, quiet: true } });
+		composer.start();
+		try {
+			const transcript = new TranscriptContainer();
+			const chrome = new Container();
+			const ids = Array.from({ length: 10 }, (_, index) => `row${index}`);
+			chrome.addChild(
+				new RowTarget(
+					ids.map(id => `line ${id}`),
+					ids,
+				),
+			);
+			composer.setRuntimeChildren([transcript, chrome]);
+
+			// Ten chrome rows in a six-row viewport: the first four scroll off,
+			// so viewport row 0 must hit-test as component row 4.
+			const frame = composer.renderFrame({ columns: 80, rows: 6 });
+			expect(frame.viewport).toHaveLength(6);
+			expect(composer.viewportClickCandidates(0)).toEqual(["row4"]);
+			expect(composer.viewportClickCandidates(5)).toEqual(["row9"]);
 		} finally {
 			composer.stop();
 		}
