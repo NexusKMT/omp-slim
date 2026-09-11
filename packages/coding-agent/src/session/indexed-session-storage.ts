@@ -59,6 +59,12 @@ interface EnqueueOptions {
 	trackDrain: boolean;
 }
 
+/** Optimistic index entry a queued append installed, kept for failure rollback. */
+interface IndexAppend {
+	mtimeMs: number;
+	previous: IndexEntry | undefined;
+}
+
 const RESOLVED = Promise.resolve();
 
 function enoent(p: string): NodeJS.ErrnoException {
@@ -101,6 +107,11 @@ function titleUpdateForIndex(entry: IndexEntry): SessionTitleUpdate | undefined 
 }
 
 export class IndexedSessionStorage implements SessionStorage {
+	/**
+	 * Sync writes only update {@link #index} and queue the remote publish, so a
+	 * caller tracking a durable byte size must wait for {@link drain}.
+	 */
+	readonly defersSyncPublish = true;
 	readonly #backend: SessionStorageBackend;
 	readonly #index = new Map<string, IndexEntry>();
 	readonly #writers = new Set<IndexedSessionStorageWriter>();
@@ -158,6 +169,16 @@ export class IndexedSessionStorage implements SessionStorage {
 
 	existsSync(path: string): boolean {
 		return this.#index.has(path);
+	}
+
+	/**
+	 * Resolve once the publishes queued for `path` have settled, rejecting when
+	 * one failed. The path tail is installed synchronously by `#enqueuePaths`,
+	 * so a caller confirming immediately after `writeTextSync` observes its own
+	 * write rather than a later one.
+	 */
+	confirmWrites(path: string): Promise<void> {
+		return this.#awaitPath(path);
 	}
 
 	writeTextSync(path: string, content: string, options?: SessionStorageWriteOptions): void {
@@ -404,16 +425,17 @@ export class IndexedSessionStorage implements SessionStorage {
 		);
 	}
 
-	_appendForWriter(path: string, line: string): number {
+	_appendForWriter(path: string, line: string): IndexAppend {
 		const mtimeMs = this.#allocMtimeMs();
-		const existing = this.#index.get(path);
-		const size = (existing?.size ?? 0) + byteLength(line);
+		const previous = this.#index.get(path);
+		const size = (previous?.size ?? 0) + byteLength(line);
 		this.#setIndex(path, size, mtimeMs);
-		return mtimeMs;
+		return { mtimeMs, previous };
 	}
 
-	_queueAppend(path: string, line: string, mtimeMs: number, getError?: () => Error | undefined): Promise<void> {
-		return this.#enqueuePath(
+	_queueAppend(path: string, line: string, append: IndexAppend, getError?: () => Error | undefined): Promise<void> {
+		const { mtimeMs, previous } = append;
+		const tracked = this.#enqueuePath(
 			path,
 			async () => {
 				const error = getError?.();
@@ -422,6 +444,15 @@ export class IndexedSessionStorage implements SessionStorage {
 			},
 			{ trackDrain: true },
 		);
+		// A rejected append never reached the backend, so the optimistic index
+		// entry for it must not survive: rolling it back keeps `statSync` (and
+		// the byte size a caller derives from it) describing durable state, the
+		// same rollback every other publish path here applies. The `mtimeMs`
+		// guard leaves a later append's entry intact.
+		void tracked.catch(() => {
+			if (this.#index.get(path)?.mtimeMs === mtimeMs) this.#restoreIndex(path, previous);
+		});
+		return tracked;
 	}
 
 	#restoreIndex(path: string, entry: IndexEntry | undefined): void {
@@ -550,15 +581,15 @@ class IndexedSessionStorageWriter implements SessionStorageWriter {
 		if (this.#error) throw this.#error;
 		// Local index is updated immediately; remote publish stays ordered on the
 		// path queue. Callers that need remote durability still await append()/flush().
-		const mtimeMs = this.#storage._appendForWriter(this.#path, line);
-		void this.#trackPromise(this.#storage._queueAppend(this.#path, line, mtimeMs, () => this.#error));
+		const append = this.#storage._appendForWriter(this.#path, line);
+		void this.#trackPromise(this.#storage._queueAppend(this.#path, line, append, () => this.#error));
 	}
 
 	async append(line: string): Promise<void> {
 		if (this.#closed) throw new Error("Writer closed");
 		if (this.#error) throw this.#error;
-		const mtimeMs = this.#storage._appendForWriter(this.#path, line);
-		await this.#trackPromise(this.#storage._queueAppend(this.#path, line, mtimeMs, () => this.#error));
+		const append = this.#storage._appendForWriter(this.#path, line);
+		await this.#trackPromise(this.#storage._queueAppend(this.#path, line, append, () => this.#error));
 	}
 
 	async flush(): Promise<void> {

@@ -830,6 +830,30 @@ export class SessionManager {
 		this.#expectedDiskSize = Buffer.byteLength(body, "utf8");
 	}
 
+	/**
+	 * Indexed backends only queue what `writeTextSync` hands them, so a
+	 * synchronous rewrite records a durable size the store has not confirmed
+	 * yet. That record is provisional: a rejected publish is realigned with the
+	 * store's last confirmed size and latched, so the next append retries the
+	 * transcript instead of reusing an `expectedSize` the backend never reached.
+	 */
+	#confirmDeferredPublish(sessionFile: string): void {
+		const confirmed = this.#storage.confirmWrites?.(sessionFile);
+		if (!confirmed) return;
+		void confirmed.catch(err => {
+			this.#fileIsCurrent = false;
+			this.#rewriteRequired = true;
+			try {
+				this.#expectedDiskSize = this.#storage.existsSync(sessionFile)
+					? this.#storage.statSync(sessionFile).size
+					: null;
+			} catch {
+				// Backend unreadable: leave the record for the next write to re-establish.
+			}
+			this.#noteDiskFailure(err);
+		});
+	}
+
 	#titleSlotLine(): string {
 		return serializeTitleSlot({
 			title: this.#sessionName,
@@ -906,6 +930,7 @@ export class SessionManager {
 				this.#rewriteRequired = true;
 				this.#hasTitleSlot = true;
 			}
+			if (this.#storage.defersSyncPublish) this.#confirmDeferredPublish(targetPath);
 		} catch (err) {
 			this.#noteDiskFailure(err);
 		}
@@ -1047,12 +1072,18 @@ export class SessionManager {
 		try {
 			const writer = this.#appendWriter();
 			const line = this.#lineFor(entry);
-			if (writer.appendSync) {
+			if (writer.appendSync && !this.#storage.defersSyncPublish) {
 				writer.appendSync(line);
 				this.#recordDurableAppend(line);
 			} else {
-				void writer
-					.append(line)
+				// A backend that only queues the publish (indexed) has no synchronous
+				// durability, so the durable size may advance only once it confirms
+				// the line: a lost publish must not leave the record describing bytes
+				// the store never accepted, or the next recovery rewrite hands the
+				// backend CAS an impossible `expectedSize`.
+				if (writer.appendSync) writer.appendSync(line);
+				const confirmed = writer.appendSync ? writer.flush() : writer.append(line);
+				void confirmed
 					.then(() => this.#recordDurableAppend(line))
 					.catch(err => {
 						this.#fileIsCurrent = false;
