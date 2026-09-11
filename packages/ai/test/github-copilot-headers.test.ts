@@ -479,6 +479,32 @@ describe("wrapFetchForCopilotFallback", () => {
 		expect(seen).toEqual([COPILOT_CHAT_INTEGRATION_ID, "copilot-developer-cli"]);
 	});
 
+	it("retries a chat-default 400 model_not_supported once as the Copilot CLI", async () => {
+		const seen: (string | null)[] = [];
+		let calls = 0;
+		const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+			calls++;
+			seen.push(new Headers(init?.headers).get("Copilot-Integration-Id"));
+			const body = JSON.stringify({ error: { code: "model_not_supported" } });
+			return new Response(body, { status: calls === 1 ? 400 : 200 });
+		});
+		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true);
+		const result = await wrapped(...chatRequest());
+		expect(result.status).toBe(200);
+		expect(seen).toEqual([COPILOT_CHAT_INTEGRATION_ID, "copilot-developer-cli"]);
+	});
+
+	it("passes 400s that are not model_not_supported through with the body intact", async () => {
+		const denied = new Response(JSON.stringify({ error: { code: "invalid_request_error" } }), { status: 400 });
+		const fetchMock = vi.fn(async () => denied);
+		const wrapped = wrapFetchForCopilotFallback(fetchMock as unknown as typeof fetch, true);
+		const result = await wrapped(...chatRequest());
+		expect(result).toBe(denied);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(denied.bodyUsed).toBe(false);
+		expect(await result.json()).toEqual({ error: { code: "invalid_request_error" } });
+	});
+
 	it("preserves method, auth, and body on the retry", async () => {
 		let retryInit: RequestInit | undefined;
 		let calls = 0;
