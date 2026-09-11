@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The `providers.cacheRetention` `auto` setting now keeps Anthropic OAuth subscriber sessions on 1h prompt-cache retention and API keys on 5m, instead of 5m for both ([#11667](https://github.com/can1357/oh-my-pi/pull/11667) by [@camjac251](https://github.com/camjac251)).
+
 ## [18.1.17] - 2026-09-10
 
 ### Added

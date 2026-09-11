@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Defaulted Anthropic OAuth requests to 1h prompt-cache retention where supported, matching Claude Code subscriber behavior and preventing cache expiry during idle intervals ([#11667](https://github.com/can1357/oh-my-pi/pull/11667) by [@camjac251](https://github.com/camjac251)).
+
 ## [18.1.17] - 2026-09-10
 
 ### Fixed
