@@ -1123,6 +1123,9 @@ export async function runRpcMode(
 			}
 			process.exit(1);
 		}
+		// A failure that already reported and then recovered still leaves its notice
+		// queued here, so the success path drains the same queue before it exits.
+		await stdoutQueue;
 		process.exit(0);
 	};
 
