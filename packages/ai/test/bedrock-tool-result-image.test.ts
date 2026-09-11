@@ -124,4 +124,19 @@ describe("Bedrock tool-result image placement", () => {
 		expect(nestedContent.some(block => Reflect.has(objectValue(block, "nested block"), "image"))).toBe(true);
 		expect(content.slice(1).some(block => Reflect.has(objectValue(block, "user block"), "image"))).toBe(false);
 	});
+
+	it("hoists images for opaque OpenAI inference-profile ARNs classified as unknown", async () => {
+		const arn = "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/company-gpt-sol";
+		const target = model(arn);
+		expect(target.identity.class).toBe("unknown");
+		const content = finalUserContent(await capturePayload(target));
+		const toolResultBlock = objectValue(content[0], "tool result block");
+		const nestedContent = arrayField(
+			objectValue(Reflect.get(toolResultBlock, "toolResult"), "tool result"),
+			"content",
+		);
+
+		expect(nestedContent.some(block => Reflect.has(objectValue(block, "nested block"), "image"))).toBe(false);
+		expect(content.slice(1).some(block => Reflect.has(objectValue(block, "user block"), "image"))).toBe(true);
+	});
 });

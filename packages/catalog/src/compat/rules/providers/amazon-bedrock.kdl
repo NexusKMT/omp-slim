@@ -30,6 +30,11 @@ provider "amazon-bedrock" {
 	class "unknown" {
 		thinking-efforts "minimal" "low" "medium" "high"
 		thinking-mode "budget"
+		// Opaque application-inference-profile ARNs carry no vendor signal, so an
+		// OpenAI-backed profile classifies here and would otherwise nest images in
+		// toolResult content and hit the same rejection. Hoisting is accepted by
+		// every Converse model measured, so it is the safe default for unknowns.
+		requires-tool-result-image-hoisting #true
 	}
 	// residue: taxonomy ranks and exact globs do not isolate these models.
 	models "moonshot.kimi-k2-thinking" {

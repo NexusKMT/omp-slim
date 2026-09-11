@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Amazon Bedrock OpenAI models now carry the compatibility policy required to preserve image-bearing tool results ([#11681](https://github.com/can1357/oh-my-pi/issues/11681)).
+- Amazon Bedrock OpenAI models, plus unclassified profiles such as opaque application-inference-profile ARNs, now carry the compatibility policy required to preserve image-bearing tool results ([#11681](https://github.com/can1357/oh-my-pi/issues/11681)).
 
 ## [18.1.17] - 2026-09-10
 
