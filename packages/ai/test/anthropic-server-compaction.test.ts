@@ -370,6 +370,39 @@ describe("anthropic server-side compaction request", () => {
 		expect(opaqueOptedIn.beta).toContain("compact-2026-01-12");
 	});
 
+	it("routes injected-client compaction betas by the client's endpoint, not the model's", async () => {
+		const vertexUrl =
+			"https://us-east5-aiplatform.googleapis.com/v1/projects/p/locations/us-east5/publishers/anthropic/models/claude-fable-5:rawPredict";
+		const request = { anthropicCompaction: { triggerInputTokens: 50_000, pauseAfterCompaction: true } };
+		const edit = {
+			edits: [
+				{
+					type: "compact_20260112",
+					trigger: { type: "input_tokens", value: 50_000 },
+					pause_after_compaction: true,
+				},
+			],
+		};
+		// Vertex client on an official model: body channel, never the header.
+		const optedIn = buildModel({ ...fableSpec, remoteCompaction: { enabled: true } });
+		const vertexClient = await captureOnClient(optedIn, vertexUrl, request);
+		expect(vertexClient.params?.context_management).toEqual(edit);
+		expect(vertexClient.beta).not.toContain("compact-2026-01-12");
+		expect(vertexClient.params?.["anthropic_beta"]).toContain("compact-2026-01-12");
+
+		// Official client on a Vertex-routed model: header channel, never the body.
+		const vertexRouted = buildModel({
+			...fableSpec,
+			provider: "custom-vertex-route",
+			baseUrl: vertexUrl,
+			remoteCompaction: { enabled: true },
+		});
+		const officialClient = await captureOnClient(vertexRouted, "https://api.anthropic.com", request);
+		expect(officialClient.params?.context_management).toEqual(edit);
+		expect(officialClient.beta).toContain("compact-2026-01-12");
+		expect(officialClient.params?.["anthropic_beta"] ?? []).not.toContain("compact-2026-01-12");
+	});
+
 	it("routes the compaction beta through the body on Vertex rawPredict, never the header", async () => {
 		// Vertex 400s on `anthropic-beta` headers; a route there must still
 		// advertise the beta in `anthropic_beta` beside the edit. Stock Vertex

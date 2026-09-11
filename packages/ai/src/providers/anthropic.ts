@@ -1807,9 +1807,18 @@ export function supportsAnthropicCompactionOnClient(
 	model: Model<"anthropic-messages">,
 	client: AnthropicMessagesClientLike,
 ): boolean {
-	const baseURL = (client as { baseURL?: unknown }).baseURL;
-	if (typeof baseURL === "string" && baseURL.length > 0) return supportsAnthropicCompaction(model, baseURL);
+	const baseURL = injectedClientBaseUrl(client);
+	if (baseURL !== undefined) return supportsAnthropicCompaction(model, baseURL);
 	return isCompactionCapableModel(model) && model.remoteCompaction?.enabled === true;
+}
+
+/**
+ * Effective endpoint of a caller-owned client. SDK clients expose it as
+ * `baseURL`; a client that exposes none leaves routing to the model.
+ */
+function injectedClientBaseUrl(client: AnthropicMessagesClientLike): string | undefined {
+	const baseURL = (client as { baseURL?: unknown }).baseURL;
+	return typeof baseURL === "string" && baseURL.length > 0 ? baseURL : undefined;
 }
 
 /** The model-side half of the gate: lineage support and a deployment contract that allows it. */
@@ -2458,8 +2467,13 @@ const streamAnthropicOnce = (
 				};
 				const { requestSignal } = activeAbortTracker;
 				// A replayed compaction block needs the beta on injected clients too.
+				// Route by the client's own endpoint when it exposes one.
+				const refreshBetaRouteUrl =
+					options?.client !== undefined ? (injectedClientBaseUrl(options.client) ?? baseUrl) : baseUrl;
 				const refreshHeaders =
-					options?.client !== undefined && !isVertexRawPredictUrl(baseUrl) && carriesCompactionEdit(refreshParams)
+					options?.client !== undefined &&
+					!isVertexRawPredictUrl(refreshBetaRouteUrl) &&
+					carriesCompactionEdit(refreshParams)
 						? mergeAnthropicBetaHeader(mergedCallerHeaders, COMPACTION_BETA)
 						: undefined;
 				const requestOptions = {
@@ -2602,7 +2616,11 @@ const streamAnthropicOnce = (
 				// every beta required by fields this request actually carries. Vertex
 				// rawPredict is excluded because its betas live in `anthropic_beta`.
 				let injectedClientBetaHeaders: Record<string, string> | undefined;
-				if (options?.client !== undefined && !isVertexRawPredictUrl(baseUrl)) {
+				// A caller-owned client targets its own endpoint: route betas by
+				// the client's URL when it exposes one, not the model's routing.
+				const injectedBetaRouteUrl =
+					options?.client !== undefined ? (injectedClientBaseUrl(options.client) ?? baseUrl) : baseUrl;
+				if (options?.client !== undefined && !isVertexRawPredictUrl(injectedBetaRouteUrl)) {
 					for (const beta of controlBetas) {
 						injectedClientBetaHeaders = mergeAnthropicBetaHeader(
 							injectedClientBetaHeaders ?? mergedCallerHeaders,
@@ -4361,14 +4379,18 @@ function buildParams(
 	const modelMaxTokens = model.maxTokens ?? CLAUDE_CODE_MAX_OUTPUT_TOKENS;
 	const maxOutputTokens = isOAuthToken ? Math.min(CLAUDE_CODE_MAX_OUTPUT_TOKENS, modelMaxTokens) : modelMaxTokens;
 
-	const vertexControlBetas = isVertexRawPredictUrl(model.baseUrl)
+	// A caller-owned client targets its own endpoint: route body betas by the
+	// client's URL when it exposes one, not the model's routing.
+	const vertexRequestUrl =
+		options?.client !== undefined ? (injectedClientBaseUrl(options.client) ?? model.baseUrl) : model.baseUrl;
+	const vertexControlBetas = isVertexRawPredictUrl(vertexRequestUrl)
 		? resolveAnthropicControlBetas(model, prefixMismatchBehavior)
 		: [];
 	// Vertex rawPredict rejects `anthropic-beta` headers, so a request carrying
 	// the compaction edit (live compaction or replayed block — both require
 	// the beta) advertises it in the body instead, beside the other controls.
 	if (
-		isVertexRawPredictUrl(model.baseUrl) &&
+		isVertexRawPredictUrl(vertexRequestUrl) &&
 		compactionEdit !== undefined &&
 		!vertexControlBetas.includes(COMPACTION_BETA)
 	) {
