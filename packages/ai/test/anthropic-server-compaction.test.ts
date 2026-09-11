@@ -481,6 +481,43 @@ describe("anthropic server-side compaction request", () => {
 		});
 	});
 
+	it("routes environment-rerouted Vertex compaction betas through the body", async () => {
+		// ANTHROPIC_BASE_URL moves the effective endpoint without touching the
+		// spec URL: the header stays clean and the body carries the beta.
+		await withEnv(
+			{
+				ANTHROPIC_BASE_URL:
+					"https://us-east5-aiplatform.googleapis.com/v1/projects/p/locations/us-east5/publishers/anthropic/models/claude-fable-5:rawPredict",
+			},
+			async () => {
+				const optedIn = buildModel({ ...fableSpec, remoteCompaction: { enabled: true } });
+				let capturedBeta: string | undefined;
+				let capturedBody: { anthropic_beta?: unknown; context_management?: unknown } | undefined;
+				const fetchMock = (async (_input: string | URL | Request, init?: RequestInit) => {
+					capturedBeta = new Headers(init?.headers).get("anthropic-beta") ?? "";
+					capturedBody = JSON.parse(String(init?.body ?? "{}"));
+					return new Response(
+						JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "captured" } }),
+						{ status: 400, headers: { "Content-Type": "application/json" } },
+					);
+				}) as typeof fetch;
+
+				await streamAnthropic(optedIn, context, {
+					apiKey: "sk-ant-test",
+					thinkingEnabled: false,
+					anthropicCompaction: { triggerInputTokens: 50_000, pauseAfterCompaction: true },
+					fetch: fetchMock,
+				}).result();
+
+				expect(capturedBeta ?? "").not.toContain("compact-2026-01-12");
+				expect(capturedBody?.anthropic_beta).toContain("compact-2026-01-12");
+				expect(capturedBody?.context_management).toMatchObject({
+					edits: [{ type: "compact_20260112" }],
+				});
+			},
+		);
+	});
+
 	it("replays a block held by its originating assistant message, at the head of that turn", async () => {
 		// A raw caller that appends the compacting response itself (no pause)
 		// keeps the block on the assistant message; the next request must still

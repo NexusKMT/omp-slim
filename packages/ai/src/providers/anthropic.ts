@@ -2446,6 +2446,7 @@ const streamAnthropicOnce = (
 					droppedThinkingBlocks: providerSessionState?.prefixDroppedThinkingBlocks,
 					providerSessionState,
 					fallbacks,
+					effectiveBaseUrl: baseUrl,
 				});
 				if (disableStrictTools) {
 					dropAnthropicStrictTools(nextParams);
@@ -4283,6 +4284,12 @@ type AnthropicParamBuildOptions = {
 	 * and block replay inert. Defaults to the model's static resolution.
 	 */
 	compactionSupported?: boolean;
+	/**
+	 * Already-resolved effective endpoint for this request (reroutes applied).
+	 * Beta routing reads this instead of the spec URL so environment reroutes
+	 * land on the right channel. Defaults to `model.baseUrl`.
+	 */
+	effectiveBaseUrl?: string;
 };
 
 function buildParams(
@@ -4303,6 +4310,7 @@ function buildParams(
 		providerSessionState,
 		fallbacks = options?.fallbacks,
 		compactionSupported = supportsAnthropicCompaction(model),
+		effectiveBaseUrl,
 	} = buildOptions;
 	// A session-scoped auto-demote (learned from a live signing 400) clones the
 	// resolved compat with `replayUnsignedThinking: false` so every subsequent
@@ -4475,9 +4483,13 @@ function buildParams(
 	const maxOutputTokens = isOAuthToken ? Math.min(CLAUDE_CODE_MAX_OUTPUT_TOKENS, modelMaxTokens) : modelMaxTokens;
 
 	// A caller-owned client targets its own endpoint: route body betas by the
-	// client's URL when it exposes one, not the model's routing.
+	// client's URL when it exposes one, not the model's routing. Otherwise the
+	// already-resolved effective URL wins over the spec URL so environment
+	// reroutes land on the right channel.
 	const vertexRequestUrl =
-		options?.client !== undefined ? (injectedClientBaseUrl(options.client) ?? model.baseUrl) : model.baseUrl;
+		(options?.client !== undefined ? injectedClientBaseUrl(options.client) : undefined) ??
+		effectiveBaseUrl ??
+		model.baseUrl;
 	const vertexControlBetas = isVertexRawPredictUrl(vertexRequestUrl)
 		? resolveAnthropicControlBetas(model, prefixMismatchBehavior)
 		: [];

@@ -65,6 +65,9 @@ describe("async speculative compaction", () => {
 			methodOrder?: CompactionMethod[];
 			experimental?: boolean;
 			recoveryTools?: boolean;
+			obfuscateTextForProvider?: (text: string | undefined) => string | undefined;
+			obfuscatePreparationForProvider?: <T>(preparation: T) => T;
+			convertToLlmForSideRequest?: (messages: AgentMessage[]) => never;
 		} = {},
 	): SessionMaintenance {
 		agent = new Agent({
@@ -119,9 +122,11 @@ describe("async speculative compaction", () => {
 			reconnectToAgent: () => {},
 			drainStrandedQueuedMessages: () => {},
 			buildDisplaySessionContext: () => sessionManager.buildSessionContext(),
-			convertToLlmForSideRequest: (messages: AgentMessage[]) => messages as never,
-			obfuscateTextForProvider: (text: string | undefined) => text,
-			obfuscatePreparationForProvider: <T>(preparation: T) => preparation,
+			convertToLlmForSideRequest:
+				options.convertToLlmForSideRequest ?? ((messages: AgentMessage[]) => messages as never),
+			obfuscateTextForProvider: options.obfuscateTextForProvider ?? ((text: string | undefined) => text),
+			obfuscatePreparationForProvider:
+				options.obfuscatePreparationForProvider ?? (<T>(preparation: T) => preparation),
 			closeCodexProviderSessionsForHistoryRewrite: () => {},
 			resetCodexProviderAfterCompaction: () => {},
 			resetPlanReference: () => {},
@@ -314,6 +319,36 @@ describe("async speculative compaction", () => {
 				content: [{ type: "text", text: "post-snapshot request" }],
 			}),
 		);
+	});
+
+	it("routes speculative compaction through the session secret boundary", async () => {
+		const bundled = getBundledModel("openai", "gpt-5");
+		if (!bundled) throw new Error("Expected built-in OpenAI model");
+		model = { ...bundled, contextWindow: CONTEXT_WINDOW };
+		authStorage.setRuntimeApiKey("openai", "test-key");
+		maintenance = createMaintenance({
+			methodOrder: ["remote"],
+			obfuscatePreparationForProvider: preparation => ({ ...preparation, previousSummary: "MARKED PREVIOUS" }),
+			convertToLlmForSideRequest: messages =>
+				messages.map(message =>
+					typeof message.content === "string" ? { ...message, content: `MARKED:${message.content}` } : message,
+				) as never,
+		});
+		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => ({
+			summary: "speculative summary",
+			firstKeptEntryId: preparation.firstKeptEntryId,
+			tokensBefore: preparation.tokensBefore,
+			details: {},
+		}));
+
+		maintenance.maybeStartSpeculativeCompaction(SPECULATION_BAND_START, CONTEXT_WINDOW);
+		await waitForState("armed");
+		expect(compactSpy).toHaveBeenCalledTimes(1);
+
+		const [capturedPreparation, , , , , capturedOptions] = compactSpy.mock.calls[0] ?? [];
+		expect(capturedPreparation?.previousSummary).toBe("MARKED PREVIOUS");
+		const converted = capturedOptions?.convertToLlm?.([{ role: "user", content: "probe", timestamp: 1 }]);
+		expect(converted?.[0]).toMatchObject({ role: "user", content: "MARKED:probe" });
 	});
 
 	it("discards an armed summary after a reset boundary and re-summarizes the new branch", async () => {
