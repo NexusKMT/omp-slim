@@ -4394,10 +4394,15 @@ export function convertAnthropicMessages(
 			if (msg.role === "developer") developerParams.push({ index: params.length, payload });
 			const param: AnthropicMessageParam & ConversationalUserCarrier = { role: "user", content };
 			// Record that this wire `user` came from a real conversational turn, so
-			// prompt-cache decimation can tell it apart from a serialized `developer`
-			// message, a tool_result run, a synthetic `Continue.` pad, or the
-			// stale-tool-result note `transformMessages` emits as `user`.
-			if (msg.role === "user" && !isSyntheticUser(msg)) param[kConversationalUser] = true;
+			// prompt-cache decimation can tell it apart from everything else that
+			// serializes as `role: "user"`: a `developer` message, a tool_result run,
+			// a synthetic `Continue.` pad, the stale-tool-result note, and any
+			// agent-authored turn (`synthetic`, or `attribution: "agent"`, which is
+			// what compaction and branch summaries carry).
+			const agentAuthored = msg.synthetic === true || msg.attribution === "agent";
+			if (msg.role === "user" && !agentAuthored && !isSyntheticUser(msg)) {
+				param[kConversationalUser] = true;
+			}
 			params.push(param);
 		} else if (msg.role === "assistant") {
 			const blocks: ContentBlockParam[] = [];

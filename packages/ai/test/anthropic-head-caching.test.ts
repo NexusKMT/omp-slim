@@ -399,6 +399,36 @@ describe("anthropic head caching (general API-key path)", () => {
 		expect(cached).not.toContain(27);
 	});
 
+	it("does not count agent-authored user messages as conversational turns", async () => {
+		// Compaction and branch summaries are emitted as `role: "user"` with
+		// `attribution: "agent"`, and auto-continue injections carry `synthetic: true`.
+		// Neither is a turn the user took.
+		const messages: Message[] = [
+			{
+				role: "user",
+				content: "<compaction-summary>earlier work</compaction-summary>",
+				attribution: "agent",
+				timestamp: 1,
+			},
+			{ role: "user", content: "auto-continue", synthetic: true, timestamp: 2 },
+		];
+		for (let i = 1; i <= 15; i++) {
+			messages.push({ role: "user", content: `user ${i}`, timestamp: i * 2 + 3 });
+			messages.push(assistantMessage(`assistant ${i}`, i * 2 + 4));
+		}
+
+		const body = await captureWireBody(undefined, { ...CONTEXT, messages });
+		expect(countCacheBreakpoints(body)).toBeLessThanOrEqual(4);
+
+		// Both land on the wire as `user`, occupying indices 0 and 1, so the 15th
+		// conversational turn is at index 30. Counting them would anchor index 26.
+		expect(body.messages[0]?.role).toBe("user");
+		expect(body.messages[1]?.role).toBe("user");
+		const cached = findCachedMessageIndices(body);
+		expect(cached).toContain(30);
+		expect(cached).not.toContain(26);
+	});
+
 	it("preserves the decimation anchor when the trailing assistant turn is thinking-only", async () => {
 		const messages: Message[] = [];
 		for (let i = 1; i <= 15; i++) {
