@@ -689,6 +689,7 @@ export async function runStructuredSubagent(request: StructuredSubagentRequest):
 			mergeSummary = renderIsolationSummary({
 				kind: "capture-error",
 				error: result.error,
+				branchName: result.branchName,
 				rootPatchPath: result.hasRootChanges === false ? undefined : result.patchPath,
 				nestedPatchPaths: result.nestedPatchPaths ?? [],
 			});

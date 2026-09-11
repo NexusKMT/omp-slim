@@ -16,6 +16,9 @@ Isolation: no changes captured.
 {{/when}}
 {{#when kind "==" "capture-error"}}
 <system-notification>Isolation: {{error}}</system-notification>
+{{#if branchName}}
+Captured branch preserved as {{branchName}}.
+{{/if}}
 {{#if rootPatchPath}}
 - patch: `{{rootPatchPath}}`
 {{/if}}
