@@ -490,6 +490,15 @@ function classifyText(
 		}
 		if (isTimeoutText(errorMessage)) kinds |= Flag.Transient | Flag.Timeout;
 		else if (isTransientErrorText(errorMessage)) kinds |= Flag.Transient;
+		// A bare transport truncation ("unexpected EOF", "eof while parsing", …)
+		// is the same shape as the transient classes above but is not covered by
+		// TRANSIENT_TRANSPORT_PATTERN. Flag it explicitly so AIError.retriable and
+		// the turn-recovery layer treat it as retryable, matching the provider
+		// retry path (isProviderRetryableError). Separate `if` (not chained onto
+		// the else-if) so a timeout whose text also reads as a truncation keeps
+		// Flag.Timeout alongside Flag.Transient. The string arm applies the strict
+		// STREAM_PARSE_DIAGNOSTIC_PATTERN, per the rationale on isTransientStreamParseError.
+		if (isTransientStreamParseError(errorMessage)) kinds |= Flag.Transient;
 		// A concurrency cap (e.g. Vertex "Online prediction concurrent requests
 		// quota exceeded") is transient — shed-and-backoff. The bare wording need
 		// not match TRANSIENT_TRANSPORT_PATTERN, so flag it explicitly to keep
