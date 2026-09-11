@@ -153,9 +153,7 @@ export interface InteractiveModeContext {
 	unfocusSession(): Promise<void>;
 	/** Candidate subagent ids under a mutable-viewport line, for click-to-focus. Empty when the line has no target. */
 	resolveViewportClickCandidates(index: number): string[];
-	/** Agent id in the pinned HUD jump-list slot (1-based), for Alt+digit focus. Undefined when the slot is empty. */
-	resolveHudSlotAgent(slot: number): string | undefined;
-	/** Flip the pinned jump list between its collapsed few and the slotted window. */
+	/** Flip the pinned jump list between its collapsed few and the full list. */
 	togglePinnedHudExpanded(): void;
 	/** Rebuild the pinned jump list for a `display.pinnedAgents` change. */
 	applyPinnedAgentsSetting(): void;

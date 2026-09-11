@@ -524,45 +524,35 @@ export class SubagentHudComponent implements Component {
 	}
 }
 
-const SUBAGENT_HUD_VISIBLE_LIMIT = 8;
 const SUBAGENT_OBSERVER_UI_COALESCE_MS = 100;
 
 /** Item rows a collapsed jump list shows before the expander. */
 const SUBAGENT_HUD_COLLAPSED_LIMIT = 3;
 
-/** Pinned jump-list layout: painted item rows plus trailing meta rows. */
+/** Pinned jump-list layout: painted item rows plus the expander row. */
 export interface PinnedHudLayout {
 	/** Item rows painted, in registry order. */
 	itemRows: number;
-	/** Overflow summary follows the items (expanded past the slot window). */
-	showOverflow: boolean;
 	/** Expander direction, or undefined when the list fits without one. */
 	toggle: "expand" | "collapse" | undefined;
-	/** Viewport row of the expander within HUD lines (2 header rows + items + overflow). */
+	/** Viewport row of the expander within HUD lines (2 header rows + items). */
 	toggleRow: number | undefined;
 }
 
 /**
  * Pinned jump-list layout for `runningTotal` live agents. Collapsed shows a
- * few rows plus an expander; expanded shows the slotted window plus the
- * overflow summary. Single source of truth for the renderer and the click row
- * map, so painted rows and hit-testing can never disagree.
+ * few rows plus an expander; expanded shows every row plus a collapse row.
+ * Single source of truth for the renderer and the click row map, so painted
+ * rows and hit-testing can never disagree.
  */
 export function layoutPinnedHud(runningTotal: number, expanded: boolean): PinnedHudLayout {
-	const visible = Math.min(SUBAGENT_HUD_VISIBLE_LIMIT, runningTotal);
 	if (runningTotal <= SUBAGENT_HUD_COLLAPSED_LIMIT) {
-		return { itemRows: visible, showOverflow: false, toggle: undefined, toggleRow: undefined };
+		return { itemRows: runningTotal, toggle: undefined, toggleRow: undefined };
 	}
 	if (!expanded) {
-		const itemRows = Math.min(SUBAGENT_HUD_COLLAPSED_LIMIT, visible);
-		return { itemRows, showOverflow: false, toggle: "expand", toggleRow: 2 + itemRows };
+		return { itemRows: SUBAGENT_HUD_COLLAPSED_LIMIT, toggle: "expand", toggleRow: 2 + SUBAGENT_HUD_COLLAPSED_LIMIT };
 	}
-	return {
-		itemRows: visible,
-		showOverflow: runningTotal > visible,
-		toggle: "collapse",
-		toggleRow: 2 + visible + (runningTotal > visible ? 1 : 0),
-	};
+	return { itemRows: runningTotal, toggle: "collapse", toggleRow: 2 + runningTotal };
 }
 
 /**
@@ -572,8 +562,7 @@ export function layoutPinnedHud(runningTotal: number, expanded: boolean): Pinned
  * Layout mirrors the Todos HUD exactly: unindented header, then
  * `renderTreeList` rows (dim connectors) shifted right by one space.
  * Every active subagent is listed — detached background spawns and sync task
- * calls alike — so the pinned block doubles as a jump list: each row carries
- * its dim 1-based slot (`Alt+1`–`Alt+8` focuses it directly).
+ * calls alike — so the pinned block doubles as a click jump list.
  * Returns an empty array when nothing is running so the container can clear.
  */
 export function renderSubagentHudLines(sessions: ObservableSession[], columns: number, expanded = false): string[] {
@@ -581,9 +570,7 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
 	if (running.length === 0) return [];
 	const layout = layoutPinnedHud(running.length, expanded);
 	const dot = theme.styledSymbol("status.done", "accent");
-	const visible = running.slice(0, SUBAGENT_HUD_VISIBLE_LIMIT);
-	const items = visible.slice(0, layout.itemRows);
-	const hiddenCount = running.length - visible.length;
+	const items = running.slice(0, layout.itemRows);
 	const showModelBadge = isFeedModelBadgeEnabled();
 	const outerIndent = " ";
 	const rows = renderTreeList(
@@ -591,16 +578,17 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
 			items,
 			expanded: true,
 			renderItem: (session, context) => {
-				const slot = theme.fg("dim", `${context.index + 1}`);
-				const head = `${slot} ${dot} `;
 				const rowWidth = Math.max(0, columns - visibleWidth(outerIndent) - (context.prefixWidth ?? 0));
 				const role = session.agent ?? session.progress?.agent;
-				const displayId = truncateToWidth(formatTaskId(session.id), Math.max(0, rowWidth - visibleWidth(head)));
+				const displayId = truncateToWidth(
+					formatTaskId(session.id),
+					Math.max(0, rowWidth - visibleWidth(`${dot} `)),
+				);
 				const badge = truncateToWidth(
 					agentTypeBadge(role, theme),
-					Math.max(0, rowWidth - visibleWidth(`${head}${displayId}`)),
+					Math.max(0, rowWidth - visibleWidth(`${dot} ${displayId}`)),
 				);
-				const titleBudget = Math.max(0, rowWidth - visibleWidth(`${head}${displayId}${badge}`));
+				const titleBudget = Math.max(0, rowWidth - visibleWidth(`${dot} ${displayId}${badge}`));
 				const modelBadge = showModelBadge
 					? formatFeedModelBadge(
 							session.progress?.resolvedModelIdentity ?? session.progress?.resolvedModel,
@@ -611,7 +599,7 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
 						)
 					: "";
 				const modelLead = modelBadge ? `${modelBadge} ` : "";
-				let line = `${head}${modelLead}${theme.fg("accent", theme.bold(displayId))}${badge}`;
+				let line = `${dot} ${modelLead}${theme.fg("accent", theme.bold(displayId))}${badge}`;
 				const description = session.description?.trim() || session.progress?.description?.trim();
 				const distinctDescription =
 					description && !labelEchoesHandle(session.id, description) ? description : undefined;
@@ -636,9 +624,6 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
 		},
 		theme,
 	);
-	if (layout.showOverflow) {
-		rows.push(theme.fg("dim", `… ${hiddenCount} more running — open Agent Hub for full list`));
-	}
 	const toggleRow =
 		layout.toggle === undefined
 			? []
@@ -654,7 +639,7 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
 				];
 	return [
 		"",
-		truncateToWidth(`${theme.bold(theme.fg("accent", "Subagents"))}${theme.fg("dim", "  ·  Alt+1–8")}`, columns),
+		truncateToWidth(theme.bold(theme.fg("accent", "Subagents")), columns),
 		...rows.map(line => truncateToWidth(`${outerIndent}${line}`, columns, "")),
 		...toggleRow,
 	];
@@ -924,14 +909,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		return this.composer.viewportClickCandidates(index);
 	}
 
-	resolveHudSlotAgent(slot: number): string | undefined {
-		if (settings.get("display.pinnedAgents") === "off") return undefined;
-		if (!Number.isInteger(slot) || slot < 1 || slot > SUBAGENT_HUD_VISIBLE_LIMIT) return undefined;
-		const sessions = this.#observerRegistry.getSessions().filter(isHudSubagent).slice(0, SUBAGENT_HUD_VISIBLE_LIMIT);
-		return sessions[slot - 1]?.id;
-	}
-
-	/** Flip the pinned jump list between its collapsed few and the slotted window. */
+	/** Flip the pinned jump list between its collapsed few and the full list. */
 	togglePinnedHudExpanded(): void {
 		this.#pinnedHudExpanded = !this.#pinnedHudExpanded;
 		this.#renderSubagentList();
@@ -3080,6 +3058,23 @@ export class InteractiveMode implements InteractiveModeContext {
 		return path.resolve(this.sessionManager.getCwd(), planFilePath);
 	}
 
+	#updatePlanModeStatus(): void {
+		const status =
+			this.planModeEnabled || this.planModePaused
+				? {
+						enabled: this.planModeEnabled,
+						paused: this.planModePaused,
+					}
+				: undefined;
+		this.statusLine.setPlanModeStatus(status);
+		this.ui.requestRender();
+	}
+
+	#updateVibeModeStatus(): void {
+		this.statusLine.setVibeModeStatus(this.vibeModeEnabled ? { enabled: true } : undefined);
+		this.ui.requestRender();
+	}
+
 	/**
 	 * Anchored HUD of in-flight subagents, mirroring the Todos block above the
 	 * editor. Driven entirely by observer-registry change events, so rows appear
@@ -3096,25 +3091,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		const lines = renderSubagentHudLines(sessions, this.ui.terminal.columns, expanded);
 		if (lines.length === 0) return;
 		const layout = layoutPinnedHud(running.length, expanded);
-		const order = running.slice(0, SUBAGENT_HUD_VISIBLE_LIMIT).map(session => session.id);
+		const order = running.map(session => session.id);
 		this.subagentContainer.addChild(new SubagentHudComponent(lines, order, layout.toggleRow));
-	}
-
-	#updatePlanModeStatus(): void {
-		const status =
-			this.planModeEnabled || this.planModePaused
-				? {
-						enabled: this.planModeEnabled,
-						paused: this.planModePaused,
-					}
-				: undefined;
-		this.statusLine.setPlanModeStatus(status);
-		this.ui.requestRender();
-	}
-
-	#updateVibeModeStatus(): void {
-		this.statusLine.setVibeModeStatus(this.vibeModeEnabled ? { enabled: true } : undefined);
-		this.ui.requestRender();
 	}
 
 	#vibeParentSession(): VibeParentSession {

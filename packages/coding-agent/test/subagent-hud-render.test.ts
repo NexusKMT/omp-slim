@@ -355,17 +355,15 @@ describe("subagent HUD lines", () => {
 		expect(multiLineDesc).toContain("First line ↵ Second line");
 		expect(multiLineDesc).not.toContain("\nSecond line");
 	});
-	it("lists sync and detached spawns alike with slot numbers", () => {
+	it("lists sync and detached spawns alike", () => {
 		// Sync task spawn (parent blocked on the call) and eval `agent()` spawn
-		// (no detached flag at all) join the pinned jump list with 1-based slots.
+		// (no detached flag at all) join the pinned jump list.
 		const sessions = [
 			makeSession({ id: "SyncSpawn", description: "inline task work", detached: false }),
 			makeSession({ id: "EvalSpawn", description: "eval cell work", detached: undefined }),
 			makeSession({ id: "BackgroundSpawn", description: "detached work" }),
 		];
 		const out = render(sessions);
-		expect(out).toContain("Alt+1–8");
-		expect(out).toContain("1 • SyncSpawn: inline task work");
 		expect(out).toContain("BackgroundSpawn: detached work");
 		expect(out).toContain("SyncSpawn: inline task work");
 		expect(out).toContain("EvalSpawn: eval cell work");
@@ -453,7 +451,7 @@ describe("subagent HUD lines", () => {
 		expect(activeIds()).toEqual(["SelectorSurfaces", "BlastRadius", "VariantsSurvey"]);
 	});
 
-	it("renders the first eight active detached subagents and summarizes the rest", () => {
+	it("renders every live agent when expanded, with a collapse row", () => {
 		const active = Array.from({ length: 10 }, (_, index) =>
 			makeSession({
 				id: `Worker${index}`,
@@ -463,13 +461,10 @@ describe("subagent HUD lines", () => {
 
 		const out = Bun.stripANSI(renderSubagentHudLines(active, 120, true).join("\n"));
 
-		for (const session of active.slice(0, 8)) {
+		for (const session of active) {
 			expect(out).toContain(`${session.id}: ${session.description}`);
 		}
-		for (const session of active.slice(8)) {
-			expect(out).not.toContain(`${session.id}: ${session.description}`);
-		}
-		expect(out).toContain("2 more running");
+		expect(out).not.toContain("more running");
 		expect(out).toContain("show less");
 	});
 
@@ -521,34 +516,19 @@ describe("SubagentHudComponent click rows", () => {
 
 describe("layoutPinnedHud", () => {
 	it("fits small lists without an expander", () => {
-		expect(layoutPinnedHud(0, false)).toEqual({
-			itemRows: 0,
-			showOverflow: false,
-			toggle: undefined,
-			toggleRow: undefined,
-		});
-		expect(layoutPinnedHud(3, false)).toEqual({
-			itemRows: 3,
-			showOverflow: false,
-			toggle: undefined,
-			toggleRow: undefined,
-		});
-		expect(layoutPinnedHud(3, true)).toEqual({
-			itemRows: 3,
-			showOverflow: false,
-			toggle: undefined,
-			toggleRow: undefined,
-		});
+		expect(layoutPinnedHud(0, false)).toEqual({ itemRows: 0, toggle: undefined, toggleRow: undefined });
+		expect(layoutPinnedHud(3, false)).toEqual({ itemRows: 3, toggle: undefined, toggleRow: undefined });
+		expect(layoutPinnedHud(3, true)).toEqual({ itemRows: 3, toggle: undefined, toggleRow: undefined });
 	});
 
 	it("collapses longer lists behind an expander", () => {
-		expect(layoutPinnedHud(4, false)).toEqual({ itemRows: 3, showOverflow: false, toggle: "expand", toggleRow: 5 });
-		expect(layoutPinnedHud(10, false)).toEqual({ itemRows: 3, showOverflow: false, toggle: "expand", toggleRow: 5 });
+		expect(layoutPinnedHud(4, false)).toEqual({ itemRows: 3, toggle: "expand", toggleRow: 5 });
+		expect(layoutPinnedHud(10, false)).toEqual({ itemRows: 3, toggle: "expand", toggleRow: 5 });
 	});
 
-	it("expands to the slot window with overflow and a collapse row", () => {
-		expect(layoutPinnedHud(5, true)).toEqual({ itemRows: 5, showOverflow: false, toggle: "collapse", toggleRow: 7 });
-		expect(layoutPinnedHud(10, true)).toEqual({ itemRows: 8, showOverflow: true, toggle: "collapse", toggleRow: 11 });
+	it("expands to every row with a collapse row", () => {
+		expect(layoutPinnedHud(5, true)).toEqual({ itemRows: 5, toggle: "collapse", toggleRow: 7 });
+		expect(layoutPinnedHud(10, true)).toEqual({ itemRows: 10, toggle: "collapse", toggleRow: 12 });
 	});
 });
 
@@ -627,17 +607,5 @@ describe("InteractiveMode subagent observer UI sync", () => {
 		expect(hud).toContain("3 more — expand");
 		expect(rebuildHud).toHaveBeenCalledTimes(1);
 		expect(requestRender).toHaveBeenCalledTimes(1);
-	});
-
-	it("resolves pinned HUD slots to live agent ids in registry order", async () => {
-		await mode.init({ suppressWelcomeIntro: true });
-		eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, makeLifecycle("First", 0, "first work"));
-		eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, makeLifecycle("Second", 1, "second work", true));
-		await Promise.resolve();
-
-		expect(mode.resolveHudSlotAgent(1)).toBe("First");
-		expect(mode.resolveHudSlotAgent(2)).toBe("Second");
-		expect(mode.resolveHudSlotAgent(3)).toBeUndefined();
-		expect(mode.resolveHudSlotAgent(0)).toBeUndefined();
 	});
 });

@@ -110,20 +110,6 @@ function hasPasteText(value: unknown): value is PasteTarget {
 	return typeof value === "object" && value !== null && typeof (value as PasteTarget).pasteText === "function";
 }
 
-/**
- * Pinned HUD jump-list slot for an `app.agents.focusSlot` chord: the trailing
- * digits (`Alt+3` → 3). The slot limit itself is enforced by
- * `resolveHudSlotAgent`, so this only extracts intent. Chords without trailing
- * digits (user remaps) carry no slot and stay unregistered, never focusing
- * the wrong agent.
- */
-export function hudSlotForChord(chord: string): number | undefined {
-	const digits = chord.toLowerCase().match(/(\d+)$/u)?.[1];
-	if (digits === undefined) return undefined;
-	const slot = Number.parseInt(digits, 10);
-	return Number.isInteger(slot) && slot >= 1 ? slot : undefined;
-}
-
 const SHELL_PROMPT_COMMAND_RE =
 	/^(?:\.{0,2}\/|~\/|cd(?:\s|$)|sudo(?:\s|$)|git(?:\s|$)|bun(?:\s|$)|npm(?:\s|$)|pnpm(?:\s|$)|yarn(?:\s|$)|node(?:\s|$)|python\d*(?:\s|$)|cargo(?:\s|$)|go(?:\s|$)|make(?:\s|$)|docker(?:\s|$)|kubectl(?:\s|$))/;
 const SHELL_PROMPT_OPERATOR_RE = /(?:^|\s)(?:&&|\|\||\||2>&1|[<>]{1,2})(?:\s|$)/;
@@ -622,14 +608,6 @@ export class InputController {
 		for (const key of hubKeys) {
 			this.ctx.editor.setCustomKeyHandler(key, () => this.ctx.showAgentHub());
 		}
-		for (const key of this.ctx.keybindings.getKeys("app.agents.focusRecent")) {
-			this.ctx.editor.setCustomKeyHandler(key, () => this.#handleFocusRecentAgent());
-		}
-		for (const key of this.ctx.keybindings.getKeys("app.agents.focusSlot")) {
-			const slot = hudSlotForChord(key);
-			if (slot === undefined) continue;
-			this.ctx.editor.setCustomKeyHandler(key, () => this.#handleFocusHudSlot(slot));
-		}
 
 		// Double-tap left arrow on an empty editor: opens the agent hub from the
 		// main session, or returns the focused subagent view to the main session.
@@ -682,26 +660,6 @@ export class InputController {
 	}
 
 	/**
-	 * One-action jump to a subagent's live session: the most recently active
-	 * focusable agent, or the next one when already focused (repeat to cycle).
-	 * Skips advisors and aborted agents, which have no live session to show.
-	 */
-	#handleFocusRecentAgent(): void {
-		const nextId = pickRecentFocusableAgentId(AgentRegistry.global().list(), this.ctx.focusedAgentId);
-		if (!nextId) {
-			this.ctx.showStatus("No subagents yet — spawn one with task, then Alt+O opens it here");
-			return;
-		}
-		if (nextId === this.ctx.focusedAgentId) {
-			this.ctx.showStatus(`Already viewing agent ${nextId} — Esc returns to main`);
-			return;
-		}
-		void this.ctx.focusAgentSession(nextId).catch((error: unknown) => {
-			this.ctx.showStatus(error instanceof Error ? error.message : String(error));
-		});
-	}
-
-	/**
 	 * Inline click-to-focus (`tui.mouse`): left-clicks on live subagent cards
 	 * and HUD rows focus that agent in one action, and pointer motion lights up
 	 * the hover band on the target under the cursor. Every SGR report is consumed
@@ -745,21 +703,15 @@ export class InputController {
 		if (candidates.length === 0) return;
 		const refs = AgentRegistry.global().list();
 		const scoped = refs.filter(ref => candidates.includes(ref.id));
-		const nextId =
-			pickRecentFocusableAgentId(scoped, this.ctx.focusedAgentId) ??
-			pickRecentFocusableAgentId(refs, this.ctx.focusedAgentId);
-		if (nextId === undefined) return;
-		this.#focusResolvedAgent(nextId);
-	}
-
-	/** Focus the pinned HUD jump-list slot's agent, if the slot currently names one. */
-	#handleFocusHudSlot(slot: number): void {
-		const id = this.ctx.resolveHudSlotAgent(slot);
-		if (id === undefined) {
-			this.ctx.showStatus("No live subagent in that slot");
+		// No global fallback: when every candidate is gone (aborted, released),
+		// focusing an unrelated recent agent would open something other than
+		// what the click displayed.
+		const nextId = pickRecentFocusableAgentId(scoped, this.ctx.focusedAgentId);
+		if (nextId === undefined) {
+			this.ctx.showStatus("That subagent is gone — open the hub for live agents");
 			return;
 		}
-		this.#focusResolvedAgent(id);
+		this.#focusResolvedAgent(nextId);
 	}
 
 	/** Focus a resolved agent id, ignoring already-viewing and surfacing errors as status. */

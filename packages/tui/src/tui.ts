@@ -81,18 +81,13 @@ const PAINT_END = `${ENABLE_AUTOWRAP}${SYNC_OUTPUT_END}`;
 const PAINT_BEGIN_NO_SYNC = `${HIDE_CURSOR}${DISABLE_AUTOWRAP}`;
 const PAINT_END_NO_SYNC = ENABLE_AUTOWRAP;
 // Mouse reporting is scoped to fullscreen overlays that opt into pointer
-// interaction, plus the opt-in normal-buffer click capture below. 1000h =
-// button click tracking, 1003h = any-motion tracking for hover targets, and
-// 1006h = SGR extended coordinates past column/row 223. Selection-first
-// surfaces leave these modes disabled so the terminal retains native text
-// selection.
+// interaction, plus the opt-in normal-buffer click capture (`tui.mouse`).
+// 1000h = button click tracking, 1003h = any-motion tracking for hover
+// targets, and 1006h = SGR extended coordinates past column/row 223.
+// Selection-first surfaces leave these modes disabled so the terminal retains
+// native text selection.
 const MOUSE_TRACKING_ON = "\x1b[?1000h\x1b[?1003h\x1b[?1006h";
 const MOUSE_TRACKING_OFF = "\x1b[?1006l\x1b[?1003l\x1b[?1000l";
-// Normal-buffer click capture (`tui.mouse`): hover and button reports plus SGR
-// coords. Motion reports drive the hover highlight on live click targets;
-// wheel reports arrive too and are swallowed by the inline router, so
-// Shift+wheel is the scroll gesture while this is on.
-const MOUSE_TRACKING_INLINE_ON = "\x1b[?1000h\x1b[?1003h\x1b[?1006h";
 
 type MouseTrackingState = "off" | "inline" | "full";
 
@@ -1122,10 +1117,15 @@ export class TUI extends Container {
 	/** Transition mouse reporting, emitting only the sequences a change needs. */
 	#setMouseTracking(state: MouseTrackingState): void {
 		if (state === this.#mouseTracking) return;
-		if (this.#mouseTracking !== "off") this.terminal.write(MOUSE_TRACKING_OFF);
-		if (state === "full") this.terminal.write(MOUSE_TRACKING_ON);
-		else if (state === "inline") this.terminal.write(MOUSE_TRACKING_INLINE_ON);
+		const wasOff = this.#mouseTracking === "off";
 		this.#mouseTracking = state;
+		if (state === "off") {
+			if (!wasOff) this.terminal.write(MOUSE_TRACKING_OFF);
+			return;
+		}
+		// Inline and fullscreen reporting are the same bytes: moving between
+		// live modes needs no emission, only entering from off does.
+		if (wasOff) this.terminal.write(MOUSE_TRACKING_ON);
 	}
 
 	/** Check if an overlay entry is currently visible */
@@ -1856,6 +1856,12 @@ export class TUI extends Container {
 			this.#mouseTracking = "off";
 			this.#altPreviousLines = [];
 			this.#pendingAltExit = "";
+		} else if (this.#mouseTracking !== "off") {
+			// Inline capture with no overlay: still owned by us at quit, so
+			// release it — otherwise the parent shell keeps mouse reporting
+			// and loses native selection until a manual reset.
+			this.terminal.write(MOUSE_TRACKING_OFF);
+			this.#mouseTracking = "off";
 		}
 		// A latched destructive reset (settled rebuild-mode resize, /clear) pairs
 		// ED3 with a complete-ledger replay. Running that pair during stop would
@@ -2829,7 +2835,10 @@ export class TUI extends Container {
 			this.#altEnterWidth = width;
 			this.#altEnterHeight = height;
 		} else if (!wantAlt && this.#altActive) {
-			const mouseExit = this.#mouseTracking !== "off" ? MOUSE_TRACKING_OFF : "";
+			// Leaving reporting on when the normal buffer wants it restores
+			// inline capture the same frame the overlay closes: no later paint
+			// is needed, so an idle session never sits untrackable.
+			const mouseExit = wantMouse === "off" && this.#mouseTracking !== "off" ? MOUSE_TRACKING_OFF : "";
 			const enhancementExit = this.#keyboardEnhancementExit();
 			const exitSequence = `${mouseExit}${enhancementExit}\x1b[?1049l`;
 			// Session replacement finishes while its fullscreen selector still
@@ -2844,7 +2853,7 @@ export class TUI extends Container {
 			}
 			this.#forgetHardwareCursorState();
 			this.#altActive = false;
-			this.#mouseTracking = "off";
+			this.#mouseTracking = wantMouse;
 			this.#altPreviousLines = [];
 			// The alt-buffer restore put the pre-overlay normal screen back. If
 			// that buffer resized while covered, its cursor moved with width
