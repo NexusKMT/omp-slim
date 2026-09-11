@@ -1806,22 +1806,46 @@ function isTaskToolDetails(value: unknown): value is TaskToolDetails {
 /**
  * Subagent ids visible on a task tool card, for click-to-focus hit-testing.
  * Reads `progress[]` (in-flight) and `results[]` (settled) defensively — card
- * details arrive as `unknown` through the tool-result pipeline. Callers
- * intersect with the live registry, which decides focusability and recency.
+ * details arrive as `unknown` through the tool-result pipeline — and recurses
+ * into the same nested snapshots the card renders (`extractedToolData.task`
+ * details plus the in-flight snapshot), so a click on a nested worker row
+ * resolves to that worker instead of an outer agent. Callers intersect with
+ * the live registry, which decides focusability and recency.
  */
 export function taskCardAgentIds(details: unknown): string[] {
 	if (typeof details !== "object" || details === null) return [];
 	const ids: string[] = [];
-	const collect = (value: unknown): void => {
+	const seen = new Set<unknown>();
+	const pushId = (item: unknown): void => {
+		if (typeof item !== "object" || item === null || !("id" in item)) return;
+		const id: unknown = item.id;
+		if (typeof id === "string" && id.length > 0 && !ids.includes(id)) ids.push(id);
+	};
+	const collectDetails = (value: unknown, depth: number): void => {
+		if (typeof value !== "object" || value === null || depth > MAX_NESTED_TASK_RENDER_DEPTH) return;
+		if (seen.has(value)) return;
+		seen.add(value);
+		const record = value as { results?: unknown; progress?: unknown };
+		collectList(record.results, depth);
+		collectList(record.progress, depth);
+	};
+	const collectList = (value: unknown, depth: number): void => {
 		if (!Array.isArray(value)) return;
 		for (const item of value) {
-			if (typeof item !== "object" || item === null || !("id" in item)) continue;
-			const id: unknown = item.id;
-			if (typeof id === "string" && id.length > 0 && !ids.includes(id)) ids.push(id);
+			pushId(item);
+			if (typeof item !== "object" || item === null || seen.has(item)) continue;
+			seen.add(item);
+			const record = item as { extractedToolData?: unknown; inflightTaskDetails?: unknown };
+			const nested = record.extractedToolData;
+			if (typeof nested === "object" && nested !== null && "task" in nested) {
+				const tasks = (nested as { task?: unknown }).task;
+				if (Array.isArray(tasks)) for (const task of tasks) collectDetails(task, depth + 1);
+			}
+			collectDetails(record.inflightTaskDetails, depth + 1);
 		}
 	};
-	collect("progress" in details ? details.progress : undefined);
-	collect("results" in details ? details.results : undefined);
+	collectList("progress" in details ? details.progress : undefined, 0);
+	collectList("results" in details ? details.results : undefined, 0);
 	return ids;
 }
 

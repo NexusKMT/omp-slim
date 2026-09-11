@@ -327,6 +327,35 @@ describe("taskCardAgentIds", () => {
 		expect(taskCardAgentIds(details)).toEqual(["DoneOne"]);
 	});
 
+	it("collects nested worker ids from extracted task snapshots", () => {
+		const nested: TaskToolDetails = {
+			projectAgentsDir: null,
+			results: [makeResult("NestedDone")],
+			totalDurationMs: 1,
+			progress: [{ ...makeProgress([]), id: "NestedLive" }],
+		};
+		const inflight: TaskToolDetails = {
+			projectAgentsDir: null,
+			results: [],
+			totalDurationMs: 1,
+			progress: [{ ...makeProgress([]), id: "InflightLive" }],
+		};
+		const details: TaskToolDetails = {
+			projectAgentsDir: null,
+			results: [],
+			totalDurationMs: 1,
+			progress: [
+				{
+					...makeProgress([]),
+					id: "Outer",
+					extractedToolData: { task: [nested] },
+					inflightTaskDetails: inflight,
+				},
+			],
+		};
+		expect(taskCardAgentIds(details)).toEqual(["Outer", "NestedDone", "NestedLive", "InflightLive"]);
+	});
+
 	it("ignores non-task shapes without throwing", () => {
 		expect(taskCardAgentIds(undefined)).toEqual([]);
 		expect(taskCardAgentIds(null)).toEqual([]);

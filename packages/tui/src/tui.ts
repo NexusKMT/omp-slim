@@ -668,9 +668,10 @@ export class TUI extends Container {
 	// Screen row where the provider's mutable viewport begins (0-based); rows
 	// above it hold history still visible on the physical screen.
 	#providerViewportTop = 0;
-	// Leading composer rows replaced by replay history in the last paint. The
-	// published hit-test origin backs these out (see getMutableViewport): hit
-	// testing indexes composer rows, not painted rows.
+	// Net composer-space offset of the published hit-test origin behind the
+	// painted top, from the last paint: replay-replaced rows minus viewport
+	// rows the paint prepended for a short viewport. Negative while prepended
+	// blanks outweigh replaced rows; zero on ordinary frames.
 	#providerViewportPadTop = 0;
 	// Viewport-relative row of the hardware cursor after the last normal paint
 	// (0 = parked at the viewport top). A resize reflows the normal buffer
@@ -1104,7 +1105,8 @@ export class TUI extends Container {
 	 * the display, and while a resize transaction is settling — the anchor is
 	 * stale until the probe resolves, so hits would map to unrelated old rows.
 	 * The origin is in composer rows: a replay paint replaces leading composer
-	 * blanks with history rows, so the painted top is backed out by that pad.
+	 * blanks with history rows and prepends blanks for a short viewport, so
+	 * the painted top is backed out by that net pad.
 	 */
 	getMutableViewport(): { top: number; length: number } {
 		if (this.#altActive || this.#resizeAltActive || this.#resizeProbe !== undefined || this.#resizeInPlaceActive) {
@@ -2630,9 +2632,11 @@ export class TUI extends Container {
 
 		let historyRows = history?.rows ?? [];
 		let replayViewportRows = 0;
+		let replayPrependedBlanks = 0;
 		if (history?.kind === "replay") {
 			// Providers may omit unused leading rows from a short viewport. Make
 			// that logical space explicit before the bottom-first replay split.
+			replayPrependedBlanks = Math.max(0, height - viewport.length);
 			while (viewport.length < height) viewport.unshift("");
 			let leadingBlankRows = 0;
 			while (leadingBlankRows < viewport.length && !/\S/.test(viewport[leadingBlankRows]!)) {
@@ -2781,7 +2785,7 @@ export class TUI extends Container {
 		else this.#recordHardwareCursorHidden();
 		this.#providerWindow = mutablePrepared;
 		this.#providerViewportTop = mutableTop;
-		this.#providerViewportPadTop = replayViewportRows;
+		this.#providerViewportPadTop = replayViewportRows - replayPrependedBlanks;
 		this.#previousWidth = width;
 		this.#previousHeight = height;
 		this.#resizeBurstGrew = false;

@@ -683,13 +683,21 @@ export class InputController {
 	 * while streaming; pointing at chrome clears it.
 	 */
 	#updateHoverHighlight(screenRow: number): void {
-		const viewport = this.ctx.ui.getMutableViewport();
-		const candidates = this.ctx.resolveViewportClickCandidates(screenRow - viewport.top);
-		const hovered = candidates.length > 0 ? candidates[0] : undefined;
+		const hovered = this.#viewportCandidates(screenRow)[0];
 		if (hovered === this.#lastHoverClickId) return;
 		this.#lastHoverClickId = hovered;
 		this.ctx.setClickHoverId(hovered);
 		this.ctx.ui.requestRender();
+	}
+
+	// Candidates under a screen row, or none when the published viewport is
+	// empty (resize transactions) or the row falls outside it: routing stale
+	// spans would highlight or focus an unrelated agent from old rows.
+	#viewportCandidates(screenRow: number): string[] {
+		const viewport = this.ctx.ui.getMutableViewport();
+		const local = screenRow - viewport.top;
+		if (viewport.length === 0 || local < 0 || local >= viewport.length) return [];
+		return this.ctx.resolveViewportClickCandidates(local);
 	}
 
 	/**
@@ -704,8 +712,7 @@ export class InputController {
 
 	/** Focus the subagent under a viewport screen row, if the line names one. */
 	#focusClickedAgent(screenRow: number): void {
-		const viewport = this.ctx.ui.getMutableViewport();
-		const candidates = this.ctx.resolveViewportClickCandidates(screenRow - viewport.top);
+		const candidates = this.#viewportCandidates(screenRow);
 		if (candidates.includes(PINNED_HUD_TOGGLE_ID)) {
 			this.ctx.togglePinnedHudExpanded();
 			return;

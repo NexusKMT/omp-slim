@@ -288,6 +288,26 @@ describe("terminal frame plans", () => {
 		tui.stop();
 	});
 
+	it("publishes composer-space origin when a replay prepends blanks", () => {
+		// A short viewport is prepended with blanks before the replay split,
+		// so composer row 0 sits that many screens below the painted top even
+		// when fewer blanks were replaced by history rows.
+		const terminal = new CountingTerminal(20, 4);
+		const provider = new Provider({ viewport: ["live", "editor"] });
+		const tui = new TUI(terminal, undefined, { renderScheduler: scheduler });
+		tui.setFrameProvider(provider);
+
+		provider.plan = {
+			history: { id: 1, rows: ["history one"], kind: "replay" },
+			viewport: ["live", "editor"],
+		};
+		tui.requestRender(true);
+
+		expect(terminal.getViewport().map(row => row.trimEnd())).toEqual(["history one", "", "live", "editor"]);
+		expect(tui.getMutableViewport()).toEqual({ top: 2, length: 3 });
+		tui.stop();
+	});
+
 	it("fuses fullscreen overlay exit into a session replacement paint", () => {
 		const terminal = new CountingTerminal(171, 39);
 		const provider = new Provider({ viewport: ["old session"] });
