@@ -118,7 +118,7 @@ import {
 } from "./github-copilot-headers";
 import { getOpenAIPromptCacheKey } from "./openai-shared";
 import { applyInferenceHeaders } from "./inference-headers";
-import { transformMessages } from "./transform-messages";
+import { redactSensitiveCredentials, transformMessages } from "./transform-messages";
 import { NON_VISION_IMAGE_PLACEHOLDER } from "./vision-guard";
 
 export type AnthropicHeaderOptions = {
@@ -4562,6 +4562,22 @@ export function convertAnthropicMessages(
 	// upgraded from the `user` role to the authoritative `system` role.
 	const developerParams: Array<{ index: number; payload?: AnthropicMessagePayload }> = [];
 	const params: AnthropicMessageParam[] = [];
+	// Harness file metadata queued behind a replayed compaction block. Flushed
+	// after the next param boundary that keeps it clear of both the block (the
+	// fold below must still join the block with a following assistant turn, or
+	// that turn's thinking prefix changes) and any open tool_use turn (its
+	// results must follow it contiguously).
+	const pendingCompactionFiles: string[] = [];
+	const flushCompactionFiles = (): void => {
+		while (pendingCompactionFiles.length > 0) {
+			const filesText = pendingCompactionFiles.shift();
+			if (filesText === undefined || filesText.trim().length === 0) continue;
+			// The payload bypassed the `transformMessages` redaction pass, so
+			// the metadata takes the same credential redaction here that the
+			// dropped message text received there.
+			params.push({ role: "user", content: redactSensitiveCredentials(filesText) });
+		}
+	};
 
 	const transformedMessages = transformMessages(messages, model, normalizeToolCallId);
 
@@ -4576,14 +4592,17 @@ export function convertAnthropicMessages(
 			params.push({ role: "assistant", content: [compactionBlockParam(msg.providerPayload)] });
 			// The block carries the verbatim API summary, so the message text
 			// (which holds the harness file lists) would be dropped with it.
-			// Re-emit just the file metadata after the block: it sits past the
+			// Queue the file metadata for after the block: it sits past the
 			// compaction boundary the API enforces, unlike anything before it.
-			if (msg.providerPayload.filesText !== undefined && msg.providerPayload.filesText.trim().length > 0) {
-				params.push({ role: "user", content: msg.providerPayload.filesText });
+			// The flush waits past a following assistant turn (see above).
+			if (msg.providerPayload.filesText !== undefined) {
+				pendingCompactionFiles.push(msg.providerPayload.filesText);
 			}
 			continue;
 		}
 		if (msg.role === "user" || msg.role === "developer") {
+			// Queued file metadata predates this message, so it emits first.
+			flushCompactionFiles();
 			const payload =
 				msg.role === "developer" && msg.providerPayload?.type === "anthropicMessage"
 					? msg.providerPayload
@@ -4771,6 +4790,12 @@ export function convertAnthropicMessages(
 				role: "assistant",
 				content: blocks,
 			});
+			// Flush queued file metadata unless this turn left tool calls open:
+			// their results must follow the turn contiguously, so the metadata
+			// waits for the merged result message (or the end of the list).
+			if (!blocks.some(block => block.type === "tool_use")) {
+				flushCompactionFiles();
+			}
 		} else if (msg.role === "toolResult") {
 			// Collect all consecutive toolResult messages, needed for z.ai Anthropic endpoint
 			const toolResults: ContentBlockParam[] = [];
@@ -4803,6 +4828,9 @@ export function convertAnthropicMessages(
 				role: "user",
 				content: toolResults,
 			});
+			// An open tool_use turn's results are whole again; queued file
+			// metadata can follow without splitting the pairing.
+			flushCompactionFiles();
 		}
 	}
 
@@ -4885,6 +4913,9 @@ export function convertAnthropicMessages(
 			params.splice(i, 0, { role: "user", content: "Continue." });
 		}
 	}
+	// A trailing compaction summary leaves its file metadata queued; emit it
+	// before the prefill check so the list ends the request as a user turn.
+	flushCompactionFiles();
 	if (params.length > 0 && params[params.length - 1]?.role === "assistant") {
 		params.push({ role: "user", content: "Continue." });
 	}

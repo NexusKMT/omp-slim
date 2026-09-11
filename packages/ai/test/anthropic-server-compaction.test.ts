@@ -18,6 +18,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { convertAnthropicMessages, streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
 import { AnthropicMessages } from "@oh-my-pi/pi-ai/providers/anthropic-client";
+import { configureCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import type { AssistantMessage, Context, Model, ModelSpec, UserMessage } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { withEnv, withOfficialAnthropicEndpoint } from "./helpers";
@@ -574,6 +575,145 @@ describe("anthropic server-side compaction replay", () => {
 			{ role: "user", content: filesText },
 			{ role: "user", content: "next" },
 		]);
+	});
+
+	it("keeps file metadata clear of a folded retained assistant turn", () => {
+		// The fold joins the block with a following assistant turn; the files
+		// message must wait past that turn or the thinking prefix changes.
+		const filesText = "<files>\n# /repo/src/\nhandlers.ts (Read)\n</files>";
+		const summary: UserMessage = {
+			...compactionSummaryMessage("anthropic", SUMMARY, ENCRYPTED),
+			providerPayload: {
+				type: "anthropicCompaction",
+				provider: "anthropic",
+				content: SUMMARY,
+				encryptedContent: ENCRYPTED,
+				filesText,
+			},
+		};
+		const tail: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "text", text: "Retained answer." }],
+			timestamp: 2,
+			provider: "anthropic",
+			model: "claude-fable-5",
+			api: "anthropic-messages",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+		};
+		const params = convertAnthropicMessages(
+			[summary, tail, { role: "user", content: "next", timestamp: 3 }],
+			fableModel,
+			false,
+			{ replayCompaction: true },
+		);
+
+		expect(params).toEqual([
+			{
+				role: "assistant",
+				content: [
+					{ type: "compaction", content: SUMMARY, encrypted_content: ENCRYPTED },
+					{ type: "text", text: "Retained answer." },
+				],
+			},
+			{ role: "user", content: filesText },
+			{ role: "user", content: "next" },
+		]);
+	});
+
+	it("holds file metadata past an open tool_use turn until its results land", () => {
+		const filesText = "<files>\n# /repo/src/\nhandlers.ts (Read)\n</files>";
+		const summary: UserMessage = {
+			...compactionSummaryMessage("anthropic", SUMMARY, ENCRYPTED),
+			providerPayload: {
+				type: "anthropicCompaction",
+				provider: "anthropic",
+				content: SUMMARY,
+				encryptedContent: ENCRYPTED,
+				filesText,
+			},
+		};
+		const turn: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "toolCall", id: "toolu_1", name: "read", arguments: {} }],
+			timestamp: 2,
+			provider: "anthropic",
+			model: "claude-fable-5",
+			api: "anthropic-messages",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "toolUse",
+		};
+		const params = convertAnthropicMessages(
+			[
+				summary,
+				turn,
+				{
+					role: "toolResult",
+					toolCallId: "toolu_1",
+					toolName: "read",
+					content: [{ type: "text", text: "file bytes" }],
+					timestamp: 3,
+				},
+			],
+			fableModel,
+			false,
+			{ replayCompaction: true },
+		);
+
+		const roles = params.map(message => message.role);
+		expect(roles).toEqual(["assistant", "user", "user"]);
+		expect(params[0]).toEqual({
+			role: "assistant",
+			content: [
+				{ type: "compaction", content: SUMMARY, encrypted_content: ENCRYPTED },
+				{ type: "tool_use", id: "toolu_1", name: "read", input: {} },
+			],
+		});
+		expect(params[2]).toEqual({ role: "user", content: filesText });
+	});
+
+	it("redacts credential-shaped tokens in replayed file metadata", () => {
+		configureCredentialRedaction(true);
+		try {
+			const token = `sk-ant-${"AbC123".repeat(7)}`;
+			const summary: UserMessage = {
+				...compactionSummaryMessage("anthropic", SUMMARY, ENCRYPTED),
+				providerPayload: {
+					type: "anthropicCompaction",
+					provider: "anthropic",
+					content: SUMMARY,
+					encryptedContent: ENCRYPTED,
+					filesText: `<files>\n# /repo/\n${token}.key (Read)\n</files>`,
+				},
+			};
+			const params = convertAnthropicMessages(
+				[summary, { role: "user", content: "next", timestamp: 2 }],
+				fableModel,
+				false,
+				{ replayCompaction: true },
+			);
+
+			expect(params[1]).toEqual({
+				role: "user",
+				content: `<files>\n# /repo/\n[anthropic_token_redacted].key (Read)\n</files>`,
+			});
+		} finally {
+			configureCredentialRedaction(false);
+		}
 	});
 
 	it("keeps the summary text for another provider's payload and when replay is off", () => {
