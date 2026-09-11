@@ -1824,7 +1824,7 @@ export async function compact(
 		// retained tail when only it exists.
 		const previousSummaryAt =
 			previousSummaryTimestamp ??
-			(messagesToSummarize[0] ?? turnPrefixMessages[0]
+			((messagesToSummarize[0] ?? turnPrefixMessages[0])
 				? new Date((messagesToSummarize[0] ?? turnPrefixMessages[0])!.timestamp).toISOString()
 				: recentMessages[0]
 					? new Date(recentMessages[0].timestamp - 1).toISOString()
@@ -1840,6 +1840,7 @@ export async function compact(
 									...(previousNative.encryptedContent
 										? { encryptedContent: previousNative.encryptedContent }
 										: {}),
+									...(previousNative.filesText ? { filesText: previousNative.filesText } : {}),
 								}
 							: undefined,
 				})
@@ -1974,12 +1975,16 @@ export async function compact(
 	summary = upsertFileOperations(summary, readFiles, modifiedFiles, fileOps.read);
 	if (nativeSummary !== undefined) {
 		// The replayed block stays byte-identical to the API's summary so it
-		// matches `encryptedContent`; the harness file lists above live only in
-		// the entry text every other provider reads.
+		// matches `encryptedContent`. The harness file lists above travel
+		// separately: the converter replaces the summary message with the
+		// block and skips its text, so they would otherwise be invisible to
+		// this provider. Every other provider keeps reading the entry text.
+		const filesText = upsertFileOperations("", readFiles, modifiedFiles, fileOps.read) || undefined;
 		preserveData = withAnthropicCompactionPreserveData(preserveData, {
 			provider: model.provider,
 			content: nativeSummary,
 			...(nativeEncryptedContent ? { encryptedContent: nativeEncryptedContent } : {}),
+			...(filesText ? { filesText } : {}),
 			model: model.id,
 			usedTokens: nativeUsedTokens,
 		});

@@ -1781,8 +1781,12 @@ export function resolvesToOfficialAnthropicEndpoint(model: Model<"anthropic-mess
 export function supportsAnthropicCompaction(model: Model<"anthropic-messages">, effectiveBaseUrl?: string): boolean {
 	if (!isCompactionCapableModel(model)) return false;
 	if (model.remoteCompaction?.enabled === true) return true;
+	// First-party deployment is catalog policy (`official-endpoint` on the
+	// provider rules), never a provider-id literal: aliases and routing
+	// changes stay in KDL. The effective URL is still checked per request
+	// because a reroute leaves the resolved compat stale-true.
 	return (
-		model.provider === "anthropic" &&
+		model.compat.officialEndpoint === true &&
 		(effectiveBaseUrl === undefined
 			? resolvesToOfficialAnthropicEndpoint(model)
 			: isOfficialAnthropicApiUrl(effectiveBaseUrl))
@@ -4570,6 +4574,13 @@ export function convertAnthropicMessages(
 			isReplayableAnthropicCompaction(msg.providerPayload, model)
 		) {
 			params.push({ role: "assistant", content: [compactionBlockParam(msg.providerPayload)] });
+			// The block carries the verbatim API summary, so the message text
+			// (which holds the harness file lists) would be dropped with it.
+			// Re-emit just the file metadata after the block: it sits past the
+			// compaction boundary the API enforces, unlike anything before it.
+			if (msg.providerPayload.filesText !== undefined && msg.providerPayload.filesText.trim().length > 0) {
+				params.push({ role: "user", content: msg.providerPayload.filesText });
+			}
 			continue;
 		}
 		if (msg.role === "user" || msg.role === "developer") {

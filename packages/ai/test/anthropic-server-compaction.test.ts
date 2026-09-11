@@ -261,6 +261,20 @@ describe("anthropic server-side compaction request", () => {
 		});
 		expect(optedInRequest.payload.context_management).toBeUndefined();
 	});
+
+	it("stays inert when catalog policy marks the deployment non-official, even on the official URL", async () => {
+		// First-party deployment is KDL policy (`official-endpoint`), so a
+		// catalog opt-out wins over the provider id and the effective URL.
+		const proxied = buildModel({ ...fableSpec, compat: { officialEndpoint: false } });
+		const { beta, payload } = await captureRequest(proxied, {
+			thinkingEnabled: false,
+			anthropicCompaction: { triggerInputTokens: 50_000, pauseAfterCompaction: true },
+		});
+
+		expect(proxied.compat.officialEndpoint).toBe(false);
+		expect(payload.context_management).toBeUndefined();
+		expect(beta).not.toContain("compact-2026-01-12");
+	});
 	/**
 	 * Runs one request on a caller-owned client (its `baseURL` is the endpoint
 	 * the SDK would target) and returns the params and per-request headers.
@@ -534,6 +548,32 @@ describe("anthropic server-side compaction replay", () => {
 			role: "assistant",
 			content: [{ type: "compaction", content: SUMMARY, encrypted_content: ENCRYPTED }],
 		});
+	});
+
+	it("replays harness file metadata after the native block, not inside it", () => {
+		const filesText = "<files>\n# /repo/src/\nhandlers.ts (Read)\n</files>";
+		const summary: UserMessage = {
+			...compactionSummaryMessage("anthropic", SUMMARY, ENCRYPTED),
+			providerPayload: {
+				type: "anthropicCompaction",
+				provider: "anthropic",
+				content: SUMMARY,
+				encryptedContent: ENCRYPTED,
+				filesText,
+			},
+		};
+		const params = convertAnthropicMessages(
+			[summary, { role: "user", content: "next", timestamp: 2 }],
+			fableModel,
+			false,
+			{ replayCompaction: true },
+		);
+
+		expect(params).toEqual([
+			{ role: "assistant", content: [{ type: "compaction", content: SUMMARY, encrypted_content: ENCRYPTED }] },
+			{ role: "user", content: filesText },
+			{ role: "user", content: "next" },
+		]);
 	});
 
 	it("keeps the summary text for another provider's payload and when replay is off", () => {

@@ -7265,7 +7265,7 @@
 				}
 			},
 			{
-				"source": "providers/anthropic.kdl:5",
+				"source": "providers/anthropic.kdl:10",
 				"class": "anthropic",
 				"providers": [
 					"anthropic"
@@ -7291,7 +7291,7 @@
 				}
 			},
 			{
-				"source": "providers/anthropic.kdl:10",
+				"source": "providers/anthropic.kdl:15",
 				"providers": [
 					"anthropic"
 				],
@@ -7318,6 +7318,15 @@
 					"supportsLongCacheRetention": true,
 					"supportsMidConversationSystem": false,
 					"supportsSamplingParams": true
+				}
+			},
+			{
+				"source": "providers/anthropic.kdl:3",
+				"providers": [
+					"anthropic"
+				],
+				"wire": {
+					"officialEndpoint": true
 				}
 			},
 			{

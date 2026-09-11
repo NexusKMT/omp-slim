@@ -247,6 +247,7 @@ describe("compact() Anthropic native lane", () => {
 				provider: "anthropic",
 				content: NATIVE_SUMMARY,
 				encryptedContent: "enc_state_1",
+				filesText: "<files>\n# /repo/src/\nhandlers.ts (Read)\n</files>",
 				model: "claude-fable-5",
 				usedTokens: 79_064,
 			},
@@ -256,6 +257,7 @@ describe("compact() Anthropic native lane", () => {
 			provider: "anthropic",
 			content: NATIVE_SUMMARY,
 			encryptedContent: "enc_state_1",
+			filesText: "<files>\n# /repo/src/\nhandlers.ts (Read)\n</files>",
 		});
 	});
 
@@ -273,6 +275,7 @@ describe("compact() Anthropic native lane", () => {
 					provider: "anthropic",
 					content: "first summary",
 					encryptedContent: "enc_state_0",
+					filesText: "<files>\n# /repo/src/\nold.ts (Read)\n</files>",
 					model: "claude-fable-5",
 				},
 				appKey: "kept",
@@ -289,6 +292,7 @@ describe("compact() Anthropic native lane", () => {
 				provider: "anthropic",
 				content: "first summary",
 				encryptedContent: "enc_state_0",
+				filesText: "<files>\n# /repo/src/\nold.ts (Read)\n</files>",
 			},
 		});
 		expect(ctx.messages.slice(1).map(message => message.content)).toEqual(["long history", "recent"]);

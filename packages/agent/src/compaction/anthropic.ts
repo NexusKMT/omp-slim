@@ -47,6 +47,8 @@ export interface AnthropicCompactionPreserveData {
 	content: string;
 	/** Opaque provider state the API attached to the block; replayed verbatim. */
 	encryptedContent?: string;
+	/** Harness file metadata (`<files>` section) replayed after the native block. */
+	filesText?: string;
 	/** Model that wrote the summary. */
 	model?: string;
 	/** Prompt tokens the compaction request processed, for display. */
@@ -82,6 +84,9 @@ export function getPreservedAnthropicCompactionData(
 		...(typeof candidate.encryptedContent === "string" && candidate.encryptedContent.length > 0
 			? { encryptedContent: candidate.encryptedContent }
 			: {}),
+		...(typeof candidate.filesText === "string" && candidate.filesText.length > 0
+			? { filesText: candidate.filesText }
+			: {}),
 		...(typeof candidate.model === "string" ? { model: candidate.model } : {}),
 		...(typeof candidate.usedTokens === "number" ? { usedTokens: candidate.usedTokens } : {}),
 	};
@@ -113,6 +118,7 @@ export function getAnthropicCompactionPayload(
 		provider: preserved.provider,
 		content: preserved.content,
 		...(preserved.encryptedContent ? { encryptedContent: preserved.encryptedContent } : {}),
+		...(preserved.filesText ? { filesText: preserved.filesText } : {}),
 	};
 }
 
