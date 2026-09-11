@@ -151,7 +151,9 @@ describe("SessionManager + indexed backend durability", () => {
 
 		await manager.flush();
 		await storage.drain();
-		expect(manager.captureState().expectedDiskSize).toBe(Buffer.byteLength(backend.files.get(sessionFile) ?? "", "utf8"));
+		expect(manager.captureState().expectedDiskSize).toBe(
+			Buffer.byteLength(backend.files.get(sessionFile) ?? "", "utf8"),
+		);
 		await manager.close();
 	});
 
@@ -222,6 +224,50 @@ describe("SessionManager + indexed backend durability", () => {
 		const body = backend.files.get(sessionFile) ?? "";
 		expect(body).toContain("first turn");
 		expect(body).toContain("second turn");
+		expect(manager.captureState().expectedDiskSize).toBe(Buffer.byteLength(body, "utf8"));
+		await manager.close();
+	});
+
+	it("keeps a rewrite racing an unconfirmed publish on the confirmed size", async () => {
+		const backend = new FakeBackend();
+		const storage = new IndexedSessionStorage(backend);
+		await storage.initialize();
+		const manager = SessionManager.create("/cwd", "/sessions/proj", storage);
+		const sessionFile = manager.getSessionFile();
+		if (!sessionFile) throw new Error("expected a session file");
+
+		// The first cold rewrite is rejected by the backend while a second turn
+		// races it synchronously (hV-oB): the queued publish is only a promise,
+		// so the manager must record nothing and expose nothing as current
+		// until the backend confirms.
+		backend.failWrites = 1;
+		manager.appendMessage(assistantMessage("first turn"));
+		expect(manager.captureState().expectedDiskSize).toBeNull();
+		expect(manager.captureState().onDisk).toBe(false);
+
+		// The racing turn must not land as a bare append on the unconfirmed
+		// body: its cold-path rewrite still carries the last confirmed token,
+		// which the store's queue-time size check fail-fasts before a second
+		// provisional publish can queue behind the unconfirmed one.
+		manager.appendMessage({ role: "user", content: "second turn", timestamp: Date.now() });
+		await manager.flush().catch(() => {});
+		await storage.drain().catch(() => {});
+
+		// The rejected publish realigns to confirmed state, and the backend
+		// holds no bare append from the race.
+		expect(manager.captureState().expectedDiskSize).toBeNull();
+		expect(backend.files.get(sessionFile)).toBeUndefined();
+
+		// Recovery converges: the full transcript publishes once the backend
+		// accepts, with the durable record describing exactly those bytes.
+		manager.appendMessage({ role: "user", content: "third turn", timestamp: Date.now() });
+		await manager.flush().catch(() => {});
+		await storage.drain().catch(() => {});
+
+		const body = backend.files.get(sessionFile) ?? "";
+		expect(body).toContain("first turn");
+		expect(body).toContain("second turn");
+		expect(body).toContain("third turn");
 		expect(manager.captureState().expectedDiskSize).toBe(Buffer.byteLength(body, "utf8"));
 		await manager.close();
 	});

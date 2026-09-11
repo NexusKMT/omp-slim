@@ -380,6 +380,11 @@ export class FileSessionStorage implements SessionStorage {
 	 */
 	#withPublishLock(fpath: string, task: () => void): void {
 		const lockPath = this.#publishLockPath(fpath);
+		// The lock lives beside the session file: the directory may not exist
+		// yet when the first publish creates it (writeTextSync creates it for
+		// the temp file, but the lock claim runs first). Match that behavior
+		// so a first publish to a new directory does not fail with ENOENT.
+		this.ensureDirSync(path.dirname(lockPath));
 		this.#acquirePublishLock(fpath, lockPath);
 		try {
 			task();

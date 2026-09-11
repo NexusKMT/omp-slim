@@ -831,27 +831,41 @@ export class SessionManager {
 	}
 
 	/**
-	 * Indexed backends only queue what `writeTextSync` hands them, so a
-	 * synchronous rewrite records a durable size the store has not confirmed
-	 * yet. That record is provisional: a rejected publish is realigned with the
-	 * store's last confirmed size and latched, so the next append retries the
-	 * transcript instead of reusing an `expectedSize` the backend never reached.
+	 * Confirm a publish the backend only queued. The manager's durability state
+	 * (durable size, current-marking) advances only here, never at queue time:
+	 * until the store confirms, the record still describes the last confirmed
+	 * publish. A rejected publish is realigned with the size the store actually
+	 * holds and latched, so the next append retries the transcript instead of
+	 * reusing an `expectedSize` the backend never reached.
+	 *
+	 * `onConfirm` runs only once the backend confirms the queued publish. A
+	 * deferred rewrite must neither record the replacement nor mark the manager
+	 * current before then (hV-oB): an append racing the unconfirmed publish
+	 * would otherwise take the hot path and land a bare append on a body the
+	 * backend may still reject, inflating the CAS token past anything durable.
+	 * A rewrite racing it instead carries the last confirmed token, which the
+	 * store's queue-time size check fail-fasts before a second provisional
+	 * publish can queue behind the unconfirmed one.
 	 */
-	#confirmDeferredPublish(sessionFile: string): void {
+	#confirmDeferredPublish(sessionFile: string, onConfirm?: () => void): void {
 		const confirmed = this.#storage.confirmWrites?.(sessionFile);
 		if (!confirmed) return;
-		void confirmed.catch(err => {
-			this.#fileIsCurrent = false;
-			this.#rewriteRequired = true;
-			try {
-				this.#expectedDiskSize = this.#storage.existsSync(sessionFile)
-					? this.#storage.statSync(sessionFile).size
-					: null;
-			} catch {
-				// Backend unreadable: leave the record for the next write to re-establish.
-			}
-			this.#noteDiskFailure(err);
-		});
+		void confirmed
+			.then(() => {
+				onConfirm?.();
+			})
+			.catch(err => {
+				this.#fileIsCurrent = false;
+				this.#rewriteRequired = true;
+				try {
+					this.#expectedDiskSize = this.#storage.existsSync(sessionFile)
+						? this.#storage.statSync(sessionFile).size
+						: null;
+				} catch {
+					// Backend unreadable: leave the record for the next write to re-establish.
+				}
+				this.#noteDiskFailure(err);
+			});
 	}
 
 	#titleSlotLine(): string {
@@ -913,8 +927,29 @@ export class SessionManager {
 			this.#diskTail = Promise.resolve();
 			this.#closeWriterEventually();
 			this.#storage.writeTextSync(targetPath, body, { expectedSize: this.#expectedDiskSize });
-			this.#recordFullRewrite(body);
 			this.#clearDiskError();
+			if (this.#storage.defersSyncPublish) {
+				// The publish is only queued: record nothing and stay non-current
+				// until the backend confirms (hV-oB). A racing rewrite still
+				// carries the last confirmed token, so the store's queue-time
+				// size check fail-fasts it instead of queueing a second
+				// provisional publish behind the unconfirmed one; a racing
+				// append retries the transcript on the cold path instead of
+				// landing a bare append on a body the backend may still reject.
+				// The success handler below is the single place the replacement
+				// becomes durable state.
+				this.#confirmDeferredPublish(targetPath, () => {
+					this.#recordFullRewrite(body);
+					if (!this.#sessionFileRelocating || targetPath === this.#sessionFile) {
+						this.#fileIsCurrent = true;
+						this.#materializeBreadcrumb();
+						this.#rewriteRequired = false;
+						this.#hasTitleSlot = true;
+					}
+				});
+				return;
+			}
+			this.#recordFullRewrite(body);
 			// Only mark the manager current when writing the active session path.
 			// Mid-move writes update the live relocation path; `#sessionFile` is
 			// still the pre-repoint source until moveTo repoints it.
@@ -930,7 +965,6 @@ export class SessionManager {
 				this.#rewriteRequired = true;
 				this.#hasTitleSlot = true;
 			}
-			if (this.#storage.defersSyncPublish) this.#confirmDeferredPublish(targetPath);
 		} catch (err) {
 			this.#noteDiskFailure(err);
 		}

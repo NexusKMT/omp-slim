@@ -88,6 +88,7 @@ export function parseSessionContent(content: string): SessionLoadResult {
 		entries,
 		titleSlot: slot,
 		malformedRecords,
+		sourceSize: Buffer.byteLength(content, "utf8"),
 		invalidHeader: entries.length > 0 ? !isValidSessionHeader(entries[0]) : malformedRecords > 0,
 	};
 }

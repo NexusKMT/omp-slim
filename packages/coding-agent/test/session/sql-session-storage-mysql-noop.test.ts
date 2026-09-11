@@ -41,14 +41,17 @@ function mysqlFake(): { client: SqlSessionStorageClient; rows: Map<string, FakeR
 		async unsafe(sql: string, values: unknown[] = []): Promise<SqlSessionStorageResult> {
 			if (sql.startsWith("CREATE TABLE") || sql.startsWith("ALTER TABLE")) return mysqlResult(0);
 			if (sql.startsWith("SELECT path")) {
-				return mysqlResult(0, [...rows].map(([path, row]) => ({
-					path,
-					mtime_ms: row.mtimeMs,
-					byte_len: Buffer.byteLength(row.content, "utf8"),
-					title: null,
-					title_source: null,
-					title_updated_at: null,
-				})));
+				return mysqlResult(
+					0,
+					[...rows].map(([path, row]) => ({
+						path,
+						mtime_ms: row.mtimeMs,
+						byte_len: Buffer.byteLength(row.content, "utf8"),
+						title: null,
+						title_source: null,
+						title_updated_at: null,
+					})),
+				);
 			}
 			if (sql.startsWith("SELECT content")) {
 				const row = rows.get(values[0] as string);
@@ -71,7 +74,13 @@ function mysqlFake(): { client: SqlSessionStorageClient; rows: Map<string, FakeR
 			}
 			if (sql.startsWith("UPDATE")) {
 				const [content, mtimeMs, , , , path, expectedSize] = values as [
-					string, number, unknown, unknown, unknown, string, number,
+					string,
+					number,
+					unknown,
+					unknown,
+					unknown,
+					string,
+					number,
 				];
 				const row = rows.get(path);
 				if (!row || Buffer.byteLength(row.content, "utf8") !== expectedSize) {
