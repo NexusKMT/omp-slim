@@ -710,16 +710,18 @@ export class InputController {
 		this.#lastHoverClickId = undefined;
 	}
 
-	/** Focus the subagent under a viewport screen row, if the line names one. */
 	#focusClickedAgent(screenRow: number): void {
 		const candidates = this.#viewportCandidates(screenRow);
-		if (candidates.includes(PINNED_HUD_TOGGLE_ID)) {
-			this.ctx.togglePinnedHudExpanded();
-			return;
-		}
 		if (candidates.length === 0) return;
 		const refs = AgentRegistry.global().list();
 		const scoped = refs.filter(ref => candidates.includes(ref.id));
+		// A live agent wins over the expander sentinel: task names are
+		// user-controlled, so an agent id can equal the toggle id. The toggle
+		// row itself names no agent and still toggles.
+		if (candidates.includes(PINNED_HUD_TOGGLE_ID) && scoped.length === 0) {
+			this.ctx.togglePinnedHudExpanded();
+			return;
+		}
 		// No global fallback: when every candidate is gone (aborted, released),
 		// focusing an unrelated recent agent would open something other than
 		// what the click displayed.

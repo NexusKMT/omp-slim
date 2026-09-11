@@ -1102,14 +1102,21 @@ export class TUI extends Container {
 	 * Mutable normal-buffer viewport from the last provider frame: screen row
 	 * where it begins plus its row count. Inline click targets are indexed
 	 * into this window (`screenRow - top`). Empty while the alt screen owns
-	 * the display, and while a resize transaction is settling — the anchor is
-	 * stale until the probe resolves, so hits would map to unrelated old rows.
+	 * the display, while a resize transaction is settling, and while a Ghostty
+	 * image paint is deferred — the painted rows predate the latest spans in
+	 * all three cases, so hits would map to unrelated old rows.
 	 * The origin is in composer rows: a replay paint replaces leading composer
 	 * blanks with history rows and prepends blanks for a short viewport, so
 	 * the painted top is backed out by that net pad.
 	 */
 	getMutableViewport(): { top: number; length: number } {
-		if (this.#altActive || this.#resizeAltActive || this.#resizeProbe !== undefined || this.#resizeInPlaceActive) {
+		if (
+			this.#altActive ||
+			this.#resizeAltActive ||
+			this.#resizeProbe !== undefined ||
+			this.#resizeInPlaceActive ||
+			this.#ghosttyInitialImageDelayTimer !== undefined
+		) {
 			return { top: 0, length: 0 };
 		}
 		return { top: this.#providerViewportTop - this.#providerViewportPadTop, length: this.#providerWindow.length };
