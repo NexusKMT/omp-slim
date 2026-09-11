@@ -2403,6 +2403,21 @@ describe("Settings", () => {
 			expect(warnSpy.mock.calls.filter(args => String(args[0]).includes("Failed to load"))).toEqual([]);
 		});
 
+		it("logs project warnings when the cwd is a filesystem root", async () => {
+			const root = path.parse(projectDir).root;
+			const rootSettingsJson = path.join(root, ".claude", "settings.json");
+			vi.spyOn(discovery, "loadCapability").mockResolvedValue({
+				items: [],
+				all: [],
+				warnings: [`[Claude Code] Failed to parse JSON in ${rootSettingsJson}`],
+				providers: [],
+			});
+			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+			await Settings.init({ cwd: root, agentDir, inMemory: true });
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(rootSettingsJson));
+		});
+
 		it("logs a persistently malformed project file once across reloads", async () => {
 			const claudeSettings = path.join(projectDir, ".claude", "settings.json");
 			await fsp.mkdir(path.dirname(claudeSettings), { recursive: true });

@@ -1835,7 +1835,7 @@ export class Settings {
 			// Level attribution below the path layer (e.g. a user-scoped dir
 			// mounted inside the project) needs warning metadata from the
 			// providers, which `LoadResult.warnings` does not carry.
-			const cwdRoot = discoveryCwd + path.sep;
+			const cwdRoot = discoveryCwd.endsWith(path.sep) ? discoveryCwd : discoveryCwd + path.sep;
 			const projectWarnings = (result.warnings ?? []).filter(warning => warning.includes(cwdRoot));
 			for (const warning of projectWarnings) {
 				if (this.#projectSettingsWarningsSeen.has(warning)) continue;
