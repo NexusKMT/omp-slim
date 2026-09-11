@@ -669,9 +669,8 @@ describe("persisted subagent revival", () => {
 			return parsed.type;
 		}
 
-		function entriesOfType(sessionFile: string, keep: (type: string | undefined) => boolean): string[] {
-			return fs
-				.readFileSync(sessionFile, "utf8")
+		async function entriesOfType(sessionFile: string, keep: (type: string | undefined) => boolean): Promise<string[]> {
+			return (await Bun.file(sessionFile).text())
 				.split("\n")
 				.filter(line => line.trim().length > 0 && keep(entryType(line)));
 		}
@@ -684,25 +683,25 @@ describe("persisted subagent revival", () => {
 			// before the reviver takes the single-writer lock.
 			const reviver = await createFactory(cwd)(ref);
 			if (!reviver) throw new Error("Expected a persisted reviver");
-			fs.rmSync(sessionFile);
+			await fs.promises.rm(sessionFile);
 
 			await expect(reviver(ref)).rejects.toThrow(/ENOENT/);
 			// Fail closed without minting: the missing path stays missing.
-			expect(fs.existsSync(sessionFile)).toBe(false);
+			expect(await Bun.file(sessionFile).exists()).toBe(false);
 		});
 
 		it("refuses a transcript truncated to header+session_init without rewriting it", async () => {
 			const cwd = makeTempDir("@pi-revive-truncated-");
 			const sessionFile = await createPersistedSession(cwd);
-			const truncated = `${entriesOfType(sessionFile, type => type === "session" || type === "session_init").join("\n")}\n`;
-			fs.writeFileSync(sessionFile, truncated);
+			const truncated = `${(await entriesOfType(sessionFile, type => type === "session" || type === "session_init")).join("\n")}\n`;
+			await Bun.write(sessionFile, truncated);
 			const ref = createRef(sessionFile);
 			const reviver = await createFactory(cwd)(ref);
 			if (!reviver) throw new Error("Expected a persisted reviver");
 
 			await expect(reviver(ref)).rejects.toThrow(/no message history/);
 			// The parked transcript is evidence, not scratch space: untouched.
-			expect(fs.readFileSync(sessionFile, "utf8")).toBe(truncated);
+			expect(await Bun.file(sessionFile).text()).toBe(truncated);
 		});
 
 		it("rebuilds the contract from the reopened file, not the stale peek capture", async () => {
@@ -712,11 +711,11 @@ describe("persisted subagent revival", () => {
 			const reviver = await createFactory(cwd)(ref);
 			if (!reviver) throw new Error("Expected a persisted reviver");
 			// The file is replaced after the peek: same messages, no session_init.
-			const withoutInit = `${entriesOfType(sessionFile, type => type !== "session_init").join("\n")}\n`;
-			fs.writeFileSync(sessionFile, withoutInit);
+			const withoutInit = `${(await entriesOfType(sessionFile, type => type !== "session_init")).join("\n")}\n`;
+			await Bun.write(sessionFile, withoutInit);
 
 			await expect(reviver(ref)).rejects.toThrow(/no persisted session contract/);
-			expect(fs.readFileSync(sessionFile, "utf8")).toBe(withoutInit);
+			expect(await Bun.file(sessionFile).text()).toBe(withoutInit);
 		});
 	});
 });

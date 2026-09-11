@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
 import * as path from "node:path";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -25,7 +24,7 @@ describe("SessionManager.open with throwIfMissing", () => {
 			/ENOENT/,
 		);
 		// Fail closed means no phantom session is materialized at the requested path.
-		expect(fs.existsSync(missing)).toBe(false);
+		expect(await Bun.file(missing).exists()).toBe(false);
 	});
 
 	it("still mints at a missing path when the flag is omitted, keeping --session working", async () => {
@@ -34,18 +33,18 @@ describe("SessionManager.open with throwIfMissing", () => {
 
 		const manager = await SessionManager.open(fresh, undefined, undefined, { initialCwd: root });
 		expect(manager.getSessionFile()).toBe(path.resolve(fresh));
-		expect(fs.existsSync(fresh)).toBe(true);
+		expect(await Bun.file(fresh).exists()).toBe(true);
 		await manager.close();
 	});
 
 	it("rejects an existing but empty file instead of rewriting it", async () => {
 		const root = makeTempDir("@pi-open-throw-empty-");
 		const empty = path.join(root, "empty.jsonl");
-		fs.writeFileSync(empty, "");
+		await Bun.write(empty, "");
 
 		await expect(SessionManager.open(empty, undefined, undefined, { throwIfMissing: true })).rejects.toThrow(
 			/holds no entries/,
 		);
-		expect(fs.readFileSync(empty, "utf8")).toBe("");
+		expect(await Bun.file(empty).text()).toBe("");
 	});
 });
