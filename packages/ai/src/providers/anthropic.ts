@@ -1792,12 +1792,16 @@ export function supportsAnthropicCompaction(model: Model<"anthropic-messages">, 
 	// provider rules), never a provider-id literal. It reads its own axis
 	// rather than `officialEndpoint`, which stays URL-derived.
 	// A `transport: "pi-native"` baseUrl names the auth gateway, not the
-	// upstream model server: the gateway resolves official Anthropic
+	// upstream model server: the gateway resolves the model's own provider
 	// server-side, so the upstream URL check cannot apply to the model's own
-	// transport URL. An explicitly supplied foreign endpoint (e.g. a
+	// transport URL — but only for the KDL-owned first-party deployment. A
+	// custom provider travels the same gateway to its own upstream, whose
+	// server-side gate stays off (unless `remoteCompaction.enabled` opts the
+	// route in above). An explicitly supplied foreign endpoint (e.g. a
 	// caller-owned client's URL) is still judged on its own merits below.
 	if (
 		model.transport === "pi-native" &&
+		model.compat.firstPartyProvider === true &&
 		(effectiveBaseUrl === undefined || effectiveBaseUrl === normalizeAnthropicBaseUrl(model.baseUrl))
 	) {
 		return true;

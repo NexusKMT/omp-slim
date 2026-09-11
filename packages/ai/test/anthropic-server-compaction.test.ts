@@ -300,6 +300,24 @@ describe("anthropic server-side compaction request", () => {
 				"https://us-east5-aiplatform.googleapis.com/v1/projects/p/locations/us-east5/publishers/anthropic/models/claude-fable-5:rawPredict",
 			),
 		).toBe(false);
+		// A custom provider rides the same gateway to its own upstream, whose
+		// server-side gate stays off: only an explicit opt-in enables it.
+		const customGateway = buildModel({
+			...fableSpec,
+			provider: "custom-anthropic-proxy",
+			transport: "pi-native",
+			baseUrl: "https://gateway.example.test",
+		});
+		expect(customGateway.compat.firstPartyProvider).toBe(false);
+		expect(supportsAnthropicCompaction(customGateway)).toBe(false);
+		const optedInCustomGateway = buildModel({
+			...fableSpec,
+			provider: "custom-anthropic-proxy",
+			transport: "pi-native",
+			baseUrl: "https://gateway.example.test",
+			remoteCompaction: { enabled: true },
+		});
+		expect(supportsAnthropicCompaction(optedInCustomGateway)).toBe(true);
 	});
 
 	/**
