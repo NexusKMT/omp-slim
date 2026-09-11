@@ -69,6 +69,9 @@ async function approvePreludeInvocation(
 	context: EvalPreludeContext,
 ): Promise<void> {
 	context.signal?.throwIfAborted();
+	// Fourth execute-time site: same helper as wrapper/cursor/mcp so a missing
+	// context cannot silently yolo. Empty `context.context` fail-closes;
+	// omitting it inherits the live session settings (schema default yolo).
 	const { approvalMode: mode, userPolicies: policies } = resolveApprovalFromContext(
 		context.context ?? (context.session.settings ? { settings: context.session.settings } : undefined),
 	);
