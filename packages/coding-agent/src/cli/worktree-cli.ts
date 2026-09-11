@@ -69,9 +69,10 @@ export interface ClearWorktreesOptions {
  * Recursive `rm` through a live overlay mount destroys the preserved upper
  * layer entry by entry and then fails on the mountpoint itself — and the
  * mount survives the owning session, so the reclaim path (unlike teardown)
- * cannot rely on the creator to stop it. Best-effort and side-effect-free
- * without a retained-mount sidecar: returns whether an unmount was attempted
- * and never throws, so removal always proceeds to `fs.rm` either way.
+ * cannot rely on the creator to stop it. Side-effect-free without a
+ * retained-mount sidecar (returns false); throws when the unmount itself
+ * fails so the caller skips removal instead of traversing a live mount —
+ * the entry is then reported failed with the unmount error, data intact.
  */
 export async function stopRetainedMount(dir: string): Promise<boolean> {
 	const backend = await readRetainedMountBackend(dir);
@@ -84,9 +85,7 @@ export async function stopRetainedMount(dir: string): Promise<boolean> {
 				.then(stat => stat.isDirectory())
 				.catch(() => false)
 		) {
-			try {
-				await natives.isoStop(backend, candidate);
-			} catch {}
+			await natives.isoStop(backend, candidate);
 			return true;
 		}
 	}

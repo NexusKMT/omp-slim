@@ -116,4 +116,18 @@ describe("worktree clear task-isolation ownership", () => {
 		expect(isoStopSpy).not.toHaveBeenCalled();
 		await expect(fs.stat(plain)).rejects.toThrow();
 	});
+
+	it("keeps the workspace when its retained mount cannot stop", async () => {
+		const retained = await makeSandbox("tbusy0009");
+		await Bun.write(
+			path.join(retained, ISOLATION_OWNER_FILE),
+			JSON.stringify({ pid: await deadPid(), id: "busy0009" }),
+		);
+		await writeRetainedBackend(retained, natives.IsoBackendKind.Overlayfs);
+		vi.spyOn(natives, "isoStop").mockRejectedValue(new Error("umount EBUSY"));
+
+		await clearWorktrees({ all: false, dryRun: false, json: true });
+
+		expect(await Bun.file(path.join(retained, "m", "work.txt")).exists()).toBe(true);
+	});
 });
