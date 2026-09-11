@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { isRecord, TempDir } from "@oh-my-pi/pi-utils";
 import { disposeSessionQuietly } from "../../src/main";
 import { runPrintMode } from "../../src/modes/print-mode";
 import { formatPersistenceFailure } from "../../src/modes/persistence-failure";
@@ -228,18 +228,18 @@ describe("headless persistence-failure surface", () => {
 		expect(exitCode).toBe(1);
 	});
 
-	it("emits a notice and a stderr line when an RPC session's store fails", () => {
+	it("writes the notice frame through the mode output with no session listener in play", () => {
 		const manager = makeSessionManager();
 		manager.appendMessage(assistant("seed"));
 
-		const notices: Array<{ level: string; message: string; source?: string }> = [];
+		// Only the store observer is wired: dispose clears the session's event
+		// listeners before it closes the store, so a failure latched during that
+		// close would have no subscriber left to forward a `notice` event.
+		const frames: unknown[] = [];
 		const stderr = captureStderr();
 		const restoreWrites = failWrites();
-		registerRpcPersistenceSurface({
-			sessionManager: manager,
-			emitNotice: (level, message, source) => {
-				notices.push({ level, message, source });
-			},
+		registerRpcPersistenceSurface({ sessionManager: manager }, frame => {
+			frames.push(frame);
 		});
 
 		try {
@@ -249,12 +249,15 @@ describe("headless persistence-failure surface", () => {
 			stderr.restore();
 		}
 
-		expect(notices).toHaveLength(1);
-		expect(notices[0]?.level).toBe("error");
-		expect(notices[0]?.source).toBe("session-persistence");
-		expect(notices[0]?.message).toContain("Session persistence failed: ");
-		expect(notices[0]?.message).toContain("ENOSPC");
-		expect(notices[0]?.message).not.toContain("\n");
+		expect(frames).toHaveLength(1);
+		const frame = frames[0];
+		if (!isRecord(frame)) throw new Error(`expected a notice frame object, received ${String(frame)}`);
+		expect(frame.type).toBe("notice");
+		expect(frame.level).toBe("error");
+		expect(frame.source).toBe("session-persistence");
+		expect(String(frame.message)).toContain("Session persistence failed: ");
+		expect(String(frame.message)).toContain("ENOSPC");
+		expect(String(frame.message)).not.toContain("\n");
 		expect(stderr.written()).toContain("ENOSPC");
 	});
 
@@ -323,25 +326,25 @@ describe("headless persistence-failure surface", () => {
 		const restoreWrites = failWrites();
 		manager.appendMessage({ role: "user", content: "pre-latch", timestamp: Date.now() } as never);
 
-		const notices: Array<{ level: string; message: string; source?: string }> = [];
+		const frames: unknown[] = [];
 		const stderr = captureStderr();
 		try {
-			registerRpcPersistenceSurface({
-				sessionManager: manager,
-				emitNotice: (level, message, source) => {
-					notices.push({ level, message, source });
-				},
+			registerRpcPersistenceSurface({ sessionManager: manager }, frame => {
+				frames.push(frame);
 			});
 		} finally {
 			stderr.restore();
 			restoreWrites();
 		}
 
-		expect(notices).toHaveLength(1);
-		expect(notices[0]?.level).toBe("error");
-		expect(notices[0]?.source).toBe("session-persistence");
-		expect(notices[0]?.message).toContain("Session persistence failed: ");
-		expect(notices[0]?.message).toContain("ENOSPC");
+		expect(frames).toHaveLength(1);
+		const frame = frames[0];
+		if (!isRecord(frame)) throw new Error(`expected a notice frame object, received ${String(frame)}`);
+		expect(frame.type).toBe("notice");
+		expect(frame.level).toBe("error");
+		expect(frame.source).toBe("session-persistence");
+		expect(String(frame.message)).toContain("Session persistence failed: ");
+		expect(String(frame.message)).toContain("ENOSPC");
 		expect(stderr.written()).toContain("ENOSPC");
 	});
 });

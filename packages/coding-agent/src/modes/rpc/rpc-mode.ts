@@ -767,18 +767,24 @@ export function requestRpcDialog<T>(
 	return promise;
 }
 /**
- * Report a store failure as a `notice` (plus a stderr mirror) — issue #11493.
- * `onFailure` records the failure for the mode's own teardown attribution: a
- * failure still latched at dispose is what makes `session.dispose()` reject.
+ * Report a store failure as a `notice` frame (plus a stderr mirror) — issue
+ * #11493. The frame goes straight through the mode's `output` rather than
+ * `session.emitNotice`: dispose clears the session's event listeners before it
+ * closes the store (agent-session.ts `#doDispose`), so a failure latched during
+ * `close()` would have no subscriber left to forward it and the client would
+ * see a nonzero exit with no notice at all. `onFailure` records the failure for
+ * the mode's own teardown attribution: a failure still latched at dispose is
+ * what makes `session.dispose()` reject.
  */
 export function registerRpcPersistenceSurface(
-	session: Pick<AgentSession, "emitNotice" | "sessionManager">,
+	session: Pick<AgentSession, "sessionManager">,
+	output: (frame: object) => void,
 	onFailure?: (error: Error) => void,
 ): () => void {
 	return session.sessionManager.onPersistenceError(error => {
 		onFailure?.(error);
 		const message = formatPersistenceFailure(error.message);
-		session.emitNotice("error", message, "session-persistence");
+		output({ type: "notice", level: "error", message, source: "session-persistence" });
 		process.stderr.write(`${message}\n`);
 	});
 }
@@ -1072,9 +1078,13 @@ export async function runRpcMode(
 
 	// Discriminates a store failure from any other dispose rejection below.
 	let persistenceFailure: Error | undefined;
-	registerRpcPersistenceSurface(session, error => {
-		persistenceFailure = error;
-	});
+	registerRpcPersistenceSurface(
+		session,
+		frame => output(frame),
+		error => {
+			persistenceFailure = error;
+		},
+	);
 
 	/**
 	 * Dispose the session, then end the process. A store failure still latched

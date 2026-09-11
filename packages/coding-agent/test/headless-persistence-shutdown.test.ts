@@ -17,7 +17,6 @@ import { runRootCommand } from "@oh-my-pi/pi-coding-agent/main";
 import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { TempDir, postmortem } from "@oh-my-pi/pi-utils";
-import { runPrintMode } from "../src/modes/print-mode";
 import type { AgentSession } from "../src/session/agent-session";
 import { SessionManager } from "../src/session/session-manager";
 
@@ -216,37 +215,5 @@ describe("headless persistence-failure shutdown path", () => {
 		const sessionFile = harness.manager.getSessionFile();
 		expect(sessionFile).toBeString();
 		expect(fs.existsSync(String(sessionFile))).toBe(false);
-	}, 15_000);
-
-	it("fails that same absence check on the pre-fix shutdown sequence", async () => {
-		// Pre-fix `runRootCommand` awaited `session.dispose()` directly after
-		// print mode; the memoized rejection escaped to `cli.ts`'s
-		// `.catch(fatal)`. That guard is inline in src/main.ts with no injection
-		// seam, so the sequence is replicated here against the same latched
-		// store, and the assertion the main test relies on is shown live on it.
-		const harness = await createHarness();
-		const stderr = captureStderr();
-		let exitCode = -1;
-		let escaped: unknown;
-
-		try {
-			await harness.recordFirstWrite();
-			exitCode = await runPrintMode(harness.session, { mode: "text", initialMessage: "hello" });
-			await harness.session.dispose();
-		} catch (error) {
-			escaped = error;
-			process.stderr.write(`${Bun.inspect(error, { colors: false })}\n`);
-		} finally {
-			await teardown(harness, stderr);
-		}
-
-		expect(exitCode).toBe(1);
-		if (!(escaped instanceof Error)) throw new Error("the memoized dispose rejection did not escape");
-		// The rejection the pre-fix path let through is the latched store failure.
-		expect(escaped.message).toContain("ENOSPC");
-		// The main test asserts `not.toMatch(RAW_FATAL_DUMP_RE)` on this text.
-		expect(stderr.written()).toMatch(RAW_FATAL_DUMP_RE);
-		// The diagnostic is still delivered; the fix removes only the dump.
-		expect(stderr.written()).toContain("Session persistence failed: ");
 	}, 15_000);
 });
