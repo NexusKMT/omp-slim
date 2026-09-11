@@ -8193,30 +8193,42 @@ export class AgentSession {
 	// =========================================================================
 
 	/**
-	 * Set steering mode.
-	 * Saves to settings.
+	 * Set steering mode. `persist` saves it to global config; the default applies a
+	 * session-scoped override.
 	 */
-	setSteeringMode(mode: "all" | "one-at-a-time"): void {
+	setSteeringMode(mode: "all" | "one-at-a-time", persist = false): void {
 		this.agent.setSteeringMode(mode);
-		this.settings.set("steeringMode", mode);
+		if (persist) {
+			this.settings.set("steeringMode", mode);
+		} else {
+			this.settings.override("steeringMode", mode);
+		}
 	}
 
 	/**
-	 * Set follow-up mode.
-	 * Saves to settings.
+	 * Set follow-up mode. `persist` saves it to global config; the default applies a
+	 * session-scoped override.
 	 */
-	setFollowUpMode(mode: "all" | "one-at-a-time"): void {
+	setFollowUpMode(mode: "all" | "one-at-a-time", persist = false): void {
 		this.agent.setFollowUpMode(mode);
-		this.settings.set("followUpMode", mode);
+		if (persist) {
+			this.settings.set("followUpMode", mode);
+		} else {
+			this.settings.override("followUpMode", mode);
+		}
 	}
 
 	/**
-	 * Set interrupt mode.
-	 * Saves to settings.
+	 * Set interrupt mode. `persist` saves it to global config; the default applies a
+	 * session-scoped override.
 	 */
-	setInterruptMode(mode: "immediate" | "wait"): void {
+	setInterruptMode(mode: "immediate" | "wait", persist = false): void {
 		this.agent.setInterruptMode(mode);
-		this.settings.set("interruptMode", mode);
+		if (persist) {
+			this.settings.set("interruptMode", mode);
+		} else {
+			this.settings.override("interruptMode", mode);
+		}
 	}
 
 	/**
