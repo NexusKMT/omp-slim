@@ -263,16 +263,19 @@ describe("anthropic server-side compaction request", () => {
 		expect(optedInRequest.payload.context_management).toBeUndefined();
 	});
 
-	it("stays inert when catalog policy marks the deployment non-official, even on the official URL", async () => {
-		// First-party deployment is KDL policy (`official-endpoint`), so a
-		// catalog opt-out wins over the provider id and the effective URL.
-		const proxied = buildModel({ ...fableSpec, compat: { officialEndpoint: false } });
-		const { beta, payload } = await captureRequest(proxied, {
+	it("reads first-party provider from catalog policy, not the endpoint flag", async () => {
+		// The gate pairs the KDL `first-party-provider` fact with the runtime
+		// URL check. A custom provider on the official URL stays inert (no
+		// provider-id literal to match), while the first-party row carries the
+		// resolved fact.
+		expect(fableModel.compat.firstPartyProvider).toBe(true);
+		const alias = buildModel({ ...fableSpec, provider: "custom-anthropic-proxy" });
+		expect(alias.compat.firstPartyProvider).toBe(false);
+		const { beta, payload } = await captureRequest(alias, {
 			thinkingEnabled: false,
 			anthropicCompaction: { triggerInputTokens: 50_000, pauseAfterCompaction: true },
 		});
 
-		expect(proxied.compat.officialEndpoint).toBe(false);
 		expect(payload.context_management).toBeUndefined();
 		expect(beta).not.toContain("compact-2026-01-12");
 	});

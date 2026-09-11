@@ -7265,7 +7265,7 @@
 				}
 			},
 			{
-				"source": "providers/anthropic.kdl:10",
+				"source": "providers/anthropic.kdl:13",
 				"class": "anthropic",
 				"providers": [
 					"anthropic"
@@ -7291,7 +7291,7 @@
 				}
 			},
 			{
-				"source": "providers/anthropic.kdl:15",
+				"source": "providers/anthropic.kdl:18",
 				"providers": [
 					"anthropic"
 				],
@@ -7326,7 +7326,7 @@
 					"anthropic"
 				],
 				"wire": {
-					"officialEndpoint": true
+					"firstPartyProvider": true
 				}
 			},
 			{

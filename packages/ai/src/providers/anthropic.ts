@@ -1781,12 +1781,15 @@ export function resolvesToOfficialAnthropicEndpoint(model: Model<"anthropic-mess
 export function supportsAnthropicCompaction(model: Model<"anthropic-messages">, effectiveBaseUrl?: string): boolean {
 	if (!isCompactionCapableModel(model)) return false;
 	if (model.remoteCompaction?.enabled === true) return true;
-	// First-party deployment is catalog policy (`official-endpoint` on the
+	// First-party provider is catalog policy (`first-party-provider` on the
 	// provider rules), never a provider-id literal: aliases and routing
 	// changes stay in KDL. The effective URL is still checked per request
-	// because a reroute leaves the resolved compat stale-true.
+	// because a reroute leaves the resolved compat stale-true. This reads its
+	// own axis rather than `officialEndpoint`, which stays URL-derived: a
+	// custom `baseUrl` on this provider must keep `officialEndpoint: false`
+	// (SDK `X-Api-Key` suppression and friends read that flag).
 	return (
-		model.compat.officialEndpoint === true &&
+		model.compat.firstPartyProvider === true &&
 		(effectiveBaseUrl === undefined
 			? resolvesToOfficialAnthropicEndpoint(model)
 			: isOfficialAnthropicApiUrl(effectiveBaseUrl))

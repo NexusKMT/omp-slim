@@ -467,6 +467,13 @@ export interface AnthropicCompat {
 	 */
 	supportsServerCompaction?: boolean;
 	/**
+	 * Whether the model is served by the first-party Anthropic provider (its
+	 * default route is the official API). Rule-owned on the provider; the
+	 * compaction transport pairs it with a per-request effective-URL check
+	 * because reroutes leave it stale-true. Default: false.
+	 */
+	firstPartyProvider?: boolean;
+	/**
 	 * Whether requests may carry `output_config.effort` (and its effort beta
 	 * header). Vertex AI rejects the field/header. Default: true.
 	 */
@@ -886,6 +893,13 @@ export type ResolvedAnthropicCompat = Required<Omit<AnthropicCompat, "streamIdle
 	 * env headers, and cache-TTL shaping without per-request URL parsing.
 	 */
 	officialEndpoint: boolean;
+	/**
+	 * The model is served by the first-party Anthropic provider. Unlike
+	 * `officialEndpoint` (URL-derived per deployment), this is provider
+	 * identity for compaction gating, always paired with a per-request
+	 * effective-URL check.
+	 */
+	firstPartyProvider: boolean;
 };
 
 /**

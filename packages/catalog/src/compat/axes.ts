@@ -192,6 +192,7 @@ export const AXES: Readonly<Record<string, AxisDef>> = {
 	"disable-adaptive-thinking": wire("disableAdaptiveThinking", ["anthropic"]),
 	"disable-strict-tools": wire("disableStrictTools", ["anthropic"]),
 	"escape-builtin-tool-names": wire("escapeBuiltinToolNames", ["anthropic"]),
+	"first-party-provider": wire("firstPartyProvider", ["anthropic"]),
 	"inject-claude-code-instruction": wire("injectClaudeCodeInstruction", ["anthropic"]),
 	"official-endpoint": wire("officialEndpoint", ["anthropic", "openai-responses"]),
 	"replay-unsigned-thinking": wire("replayUnsignedThinking", ["anthropic"]),
