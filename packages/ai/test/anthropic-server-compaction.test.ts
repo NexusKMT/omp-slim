@@ -261,33 +261,46 @@ describe("anthropic server-side compaction request", () => {
 		});
 		expect(optedInRequest.payload.context_management).toBeUndefined();
 	});
-	it("attaches the compaction beta per request for injected clients, on compaction and on replay", async () => {
-		// Injected SDK clients own their default headers, so the beta rides the
-		// per-request headers exactly like the effort and control betas do.
-		const capture = async (options: Parameters<typeof streamAnthropic>[2], messages = context.messages) => {
-			let params: Record<string, unknown> | undefined;
-			let headers: Record<string, string> | undefined;
-			await streamAnthropic(
-				fableModel,
-				{ systemPrompt: ["auditor"], messages },
-				{
-					apiKey: "sk-ant-test",
-					...options,
-					client: {
-						messages: {
-							create: (requestParams, requestOptions) => {
-								params = requestParams as unknown as Record<string, unknown>;
-								headers = (requestOptions as { headers?: Record<string, string> } | undefined)?.headers;
-								throw new Error("stop-after-capture");
-							},
+	/**
+	 * Runs one request on a caller-owned client (its `baseURL` is the endpoint
+	 * the SDK would target) and returns the params and per-request headers.
+	 */
+	async function captureOnClient(
+		model: Model<"anthropic-messages">,
+		baseURL: string | undefined,
+		options: Parameters<typeof streamAnthropic>[2],
+		messages = context.messages,
+	) {
+		let params: Record<string, unknown> | undefined;
+		let headers: Record<string, string> | undefined;
+		await streamAnthropic(
+			model,
+			{ systemPrompt: ["auditor"], messages },
+			{
+				apiKey: "sk-ant-test",
+				...options,
+				client: {
+					...(baseURL === undefined ? {} : { baseURL }),
+					messages: {
+						create: (requestParams, requestOptions) => {
+							params = requestParams as unknown as Record<string, unknown>;
+							headers = (requestOptions as { headers?: Record<string, string> } | undefined)?.headers;
+							throw new Error("stop-after-capture");
 						},
 					},
 				},
-			)
-				.result()
-				.catch(() => undefined);
-			return { params, beta: headers?.["anthropic-beta"] ?? "" };
-		};
+			},
+		)
+			.result()
+			.catch(() => undefined);
+		return { params, beta: headers?.["anthropic-beta"] ?? "" };
+	}
+
+	it("attaches the compaction beta per request for injected clients, on compaction and on replay", async () => {
+		// Injected SDK clients own their default headers, so the beta rides the
+		// per-request headers exactly like the effort and control betas do.
+		const capture = (options: Parameters<typeof streamAnthropic>[2], messages = context.messages) =>
+			captureOnClient(fableModel, "https://api.anthropic.com", options, messages);
 
 		const live = await capture({ anthropicCompaction: { triggerInputTokens: 50_000, pauseAfterCompaction: true } });
 		expect(live.params?.context_management).toEqual({
@@ -313,6 +326,75 @@ describe("anthropic server-side compaction request", () => {
 		const plain = await capture({});
 		expect(plain.params?.context_management).toBeUndefined();
 		expect(plain.beta).not.toContain("compact-2026-01-12");
+	});
+
+	it("resolves eligibility from the injected client's own endpoint, never from the model", async () => {
+		const request = { anthropicCompaction: { triggerInputTokens: 50_000, pauseAfterCompaction: true } };
+		// An `AnthropicVertex`-style client carries the first-party model elsewhere.
+		const vertex = await captureOnClient(fableModel, "https://us-east5-aiplatform.googleapis.com", request);
+		expect(vertex.params?.context_management).toBeUndefined();
+		expect(vertex.beta).not.toContain("compact-2026-01-12");
+		// A client that exposes no endpoint is unknown: only an explicit opt-in counts.
+		const opaque = await captureOnClient(fableModel, undefined, request);
+		expect(opaque.params?.context_management).toBeUndefined();
+		expect(opaque.beta).not.toContain("compact-2026-01-12");
+		const optedIn = buildModel({ ...fableSpec, remoteCompaction: { enabled: true } });
+		const opaqueOptedIn = await captureOnClient(optedIn, undefined, request);
+		expect(opaqueOptedIn.params?.context_management).toEqual({
+			edits: [
+				{
+					type: "compact_20260112",
+					trigger: { type: "input_tokens", value: 50_000 },
+					pause_after_compaction: true,
+				},
+			],
+		});
+		expect(opaqueOptedIn.beta).toContain("compact-2026-01-12");
+	});
+
+	it("replays a block held by its originating assistant message, at the head of that turn", async () => {
+		// A raw caller that appends the compacting response itself (no pause)
+		// keeps the block on the assistant message; the next request must still
+		// send it with the beta and the never-firing edit.
+		const compacted: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "text", text: "Continuing from the summary." }],
+			providerPayload: {
+				type: "anthropicCompaction",
+				provider: "anthropic",
+				content: SUMMARY,
+				encryptedContent: ENCRYPTED,
+			},
+			timestamp: 1,
+			provider: "anthropic",
+			model: "claude-fable-5",
+			api: "anthropic-messages",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+		};
+		const { beta, payload } = await captureRequest(fableModel, { thinkingEnabled: false }, [
+			{ role: "user", content: "old prompt", timestamp: 0 },
+			compacted,
+			{ role: "user", content: "next", timestamp: 2 },
+		]);
+
+		const messages = payload.messages as Array<{ role: string; content: unknown }>;
+		expect(messages.map(message => message.role)).toEqual(["user", "assistant", "user"]);
+		const assistantBlocks = messages[1].content as Array<Record<string, unknown>>;
+		expect(assistantBlocks).toHaveLength(2);
+		expect(assistantBlocks[0]).toEqual({ type: "compaction", content: SUMMARY, encrypted_content: ENCRYPTED });
+		expect(assistantBlocks[1]).toMatchObject({ type: "text", text: "Continuing from the summary." });
+		expect(payload.context_management).toEqual({
+			edits: [{ type: "compact_20260112", trigger: { type: "input_tokens", value: 1_000_000 } }],
+		});
+		expect(beta).toContain("compact-2026-01-12");
 	});
 });
 

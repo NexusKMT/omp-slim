@@ -88,6 +88,7 @@ import {
 	type Tool as AnthropicWireTool,
 	type Usage as AnthropicWireUsage,
 	COMPACTION_BETA,
+	type CompactionBlockParam,
 	type CompactionEdit,
 	type ContentBlockParam,
 	type FallbackParam,
@@ -1778,15 +1779,38 @@ export function resolvesToOfficialAnthropicEndpoint(model: Model<"anthropic-mess
  * its endpoint rejects.
  */
 export function supportsAnthropicCompaction(model: Model<"anthropic-messages">, effectiveBaseUrl?: string): boolean {
-	if (!model.compat.supportsServerCompaction) return false;
-	if (model.compat.supportsContextManagement === false) return false;
-	if (model.remoteCompaction?.enabled === false) return false;
+	if (!isCompactionCapableModel(model)) return false;
 	if (model.remoteCompaction?.enabled === true) return true;
 	return (
 		model.provider === "anthropic" &&
 		(effectiveBaseUrl === undefined
 			? resolvesToOfficialAnthropicEndpoint(model)
 			: isOfficialAnthropicApiUrl(effectiveBaseUrl))
+	);
+}
+
+/**
+ * {@link supportsAnthropicCompaction} for a request on a caller-owned client:
+ * the endpoint is whatever the client targets (an `AnthropicVertex` client
+ * carries an Anthropic model to Vertex), never the model's own routing. SDK
+ * clients expose it as `baseURL`; a client that exposes no endpoint only
+ * compacts through an explicit `remoteCompaction.enabled` opt-in.
+ */
+export function supportsAnthropicCompactionOnClient(
+	model: Model<"anthropic-messages">,
+	client: AnthropicMessagesClientLike,
+): boolean {
+	const baseURL = (client as { baseURL?: unknown }).baseURL;
+	if (typeof baseURL === "string" && baseURL.length > 0) return supportsAnthropicCompaction(model, baseURL);
+	return isCompactionCapableModel(model) && model.remoteCompaction?.enabled === true;
+}
+
+/** The model-side half of the gate: lineage support and a deployment contract that allows it. */
+function isCompactionCapableModel(model: Model<"anthropic-messages">): boolean {
+	return (
+		model.compat.supportsServerCompaction === true &&
+		model.compat.supportsContextManagement !== false &&
+		model.remoteCompaction?.enabled !== false
 	);
 }
 
@@ -1803,11 +1827,21 @@ function isReplayableAnthropicCompaction(
 	return payload?.type === "anthropicCompaction" && payload.provider === model.provider && payload.content.length > 0;
 }
 
-/** Whether any message in `messages` replays a native compaction block. */
+/** The wire block for a replayed compaction payload, opaque state included. */
+function compactionBlockParam(payload: AnthropicCompactionPayload): CompactionBlockParam {
+	const { content, encryptedContent } = payload;
+	return { type: "compaction", content, ...(encryptedContent ? { encrypted_content: encryptedContent } : {}) };
+}
+
+/**
+ * Whether any message in `messages` replays a native compaction block: the
+ * harness's user-role summary message, or the assistant message that
+ * produced the block when a caller appends the response itself.
+ */
 function contextReplaysAnthropicCompaction(messages: readonly Message[], model: Model<"anthropic-messages">): boolean {
 	return messages.some(
 		message =>
-			(message.role === "user" || message.role === "developer") &&
+			(message.role === "user" || message.role === "developer" || message.role === "assistant") &&
 			isReplayableAnthropicCompaction(message.providerPayload, model),
 	);
 }
@@ -2179,9 +2213,11 @@ const streamAnthropicOnce = (
 			const apiKey = options?.apiKey ?? getEnvApiKey(model.provider) ?? "";
 			const baseUrl = resolveAnthropicBaseUrl(model, apiKey) ?? "https://api.anthropic.com";
 			const supportsEagerToolInputStreaming = resolveEagerToolInputStreamingSupport(model, baseUrl);
-			// Injected SDK clients receive the compaction beta per request (see the
-			// request site), so eligibility is the same with and without a client.
-			const compactionSupported = supportsAnthropicCompaction(model, baseUrl);
+			// A caller-owned client decides the endpoint itself (its `baseURL`, or an
+			// explicit opt-in); it receives the compaction beta per request.
+			const compactionSupported = options?.client
+				? supportsAnthropicCompactionOnClient(model, options.client)
+				: supportsAnthropicCompaction(model, baseUrl);
 			const providerSessionState = getAnthropicProviderSessionState(
 				options?.providerSessionState,
 				baseUrl,
@@ -4526,13 +4562,7 @@ export function convertAnthropicMessages(
 			(msg.role === "user" || msg.role === "developer") &&
 			isReplayableAnthropicCompaction(msg.providerPayload, model)
 		) {
-			const { content, encryptedContent } = msg.providerPayload;
-			params.push({
-				role: "assistant",
-				content: [
-					{ type: "compaction", content, ...(encryptedContent ? { encrypted_content: encryptedContent } : {}) },
-				],
-			});
+			params.push({ role: "assistant", content: [compactionBlockParam(msg.providerPayload)] });
 			continue;
 		}
 		if (msg.role === "user" || msg.role === "developer") {
@@ -4589,6 +4619,13 @@ export function convertAnthropicMessages(
 				block =>
 					block.type === "thinking" && !!block.thinkingSignature && block.thinkingSignature.trim().length > 0,
 			);
+
+			// A caller that appends the compacting response itself holds the block
+			// on the assistant message; it opened that response, so it opens the
+			// replayed turn.
+			if (opts?.replayCompaction && isReplayableAnthropicCompaction(msg.providerPayload, model)) {
+				blocks.push(compactionBlockParam(msg.providerPayload));
+			}
 
 			for (const block of msg.content) {
 				if (block.type === "text") {
