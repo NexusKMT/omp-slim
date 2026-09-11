@@ -303,6 +303,35 @@ describe("compact() Anthropic native lane", () => {
 		});
 	});
 
+	test("reuses the previous compaction timestamp so retained thinking survives the rewrite", async () => {
+		const model = makeAnthropicModel();
+		const { calls, completeImpl } = recordingCompleteImpl(() =>
+			assistantMessage(model, {
+				providerPayload: { type: "anthropicCompaction", provider: "anthropic", content: "second summary" },
+			}),
+		);
+		const previousSummaryTimestamp = new Date(1000).toISOString();
+		const preparation = makePreparation({
+			messagesToSummarize: [{ role: "user", content: "long history", timestamp: 2000 }],
+			recentMessages: [{ role: "user", content: "recent", timestamp: 3000 }],
+			previousSummary: "first summary",
+			previousSummaryTimestamp,
+			previousPreserveData: {
+				anthropicCompaction: { provider: "anthropic", content: "first summary" },
+			},
+		});
+
+		await compact(preparation, model, "sk-ant-test", undefined, undefined, { completeImpl });
+
+		const [{ ctx }] = calls;
+		const first = ctx.messages[0] as { historyRewriteAt?: number };
+		expect(first.historyRewriteAt).toBe(new Date(previousSummaryTimestamp).getTime());
+		// The rewrite marker precedes the retained tail, so prefix-bound thinking
+		// in the tail is not treated as pre-rewrite and stripped.
+		const retained = ctx.messages[ctx.messages.length - 1] as { timestamp: number };
+		expect(first.historyRewriteAt).toBeLessThan(retained.timestamp);
+	});
+
 	test("summarizes locally below the trigger floor instead of issuing a request that cannot compact", async () => {
 		const model = makeAnthropicModel();
 		const { calls, completeImpl } = recordingCompleteImpl(() =>
@@ -479,6 +508,7 @@ describe("native compaction entries read back", () => {
 
 		const next = prepareCompaction(entries, settings, makeOpenAiModel());
 		expect(next?.previousSummary).toBe("native summary text");
+		expect(next?.previousSummaryTimestamp).toBe(ts(3));
 		// The retained tail lives in entries (like a local summary), so the next
 		// compaction re-reads it from `firstKeptEntryId` rather than from the payload.
 		expect(next?.messagesToSummarize.map(message => ("content" in message ? message.content : undefined))).toEqual([

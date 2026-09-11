@@ -1256,6 +1256,8 @@ export interface CompactionPreparation {
 	tokensBefore: number;
 	/** Summary from previous compaction, for iterative update */
 	previousSummary?: string;
+	/** ISO timestamp of the previous compaction entry, for iterative update */
+	previousSummaryTimestamp?: string;
 	/** Preserved opaque compaction payload from the previous compaction, if any. */
 	previousPreserveData?: Record<string, unknown>;
 	/** File operations extracted from messagesToSummarize */
@@ -1430,6 +1432,7 @@ export function prepareCompaction(
 		isSplitTurn: cutPoint.isSplitTurn,
 		tokensBefore,
 		previousSummary: previousCompaction?.summary,
+		previousSummaryTimestamp: previousCompaction?.timestamp,
 		previousPreserveData: previousCompaction?.preserveData,
 		fileOps,
 		settings,
@@ -1556,6 +1559,7 @@ export async function compact(
 		isSplitTurn,
 		tokensBefore,
 		previousSummary,
+		previousSummaryTimestamp,
 		previousPreserveData,
 		fileOps,
 		settings,
@@ -1812,8 +1816,21 @@ export async function compact(
 		// then shares the live turn's prefix byte-for-byte. A prior snapcompact
 		// archive is already merged into that summary text, so the archive
 		// migration message the OpenAI lanes carry is omitted here.
+		// Reuse the previous compaction's timestamp so historyRewriteAt precedes
+		// the retained tail. A fresh timestamp marks every retained thinking block
+		// as preceding a new rewrite, and transformMessages strips it — breaking
+		// the cached prefix and possibly dropping below the trigger. Manually
+		// built preparations fall back to the oldest input, or just before the
+		// retained tail when only it exists.
+		const previousSummaryAt =
+			previousSummaryTimestamp ??
+			(messagesToSummarize[0] ?? turnPrefixMessages[0]
+				? new Date((messagesToSummarize[0] ?? turnPrefixMessages[0])!.timestamp).toISOString()
+				: recentMessages[0]
+					? new Date(recentMessages[0].timestamp - 1).toISOString()
+					: new Date().toISOString());
 		const previousSummaryMessage = previousSummaryForCompaction
-			? createCompactionSummaryMessage(previousSummaryForCompaction, tokensBefore, new Date().toISOString(), {
+			? createCompactionSummaryMessage(previousSummaryForCompaction, tokensBefore, previousSummaryAt, {
 					providerPayload:
 						previousNative?.provider === model.provider
 							? {
