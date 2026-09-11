@@ -110,6 +110,8 @@ import {
 } from "./claude-code-fingerprint";
 import {
 	buildCopilotDynamicHeaders,
+	getCachedCopilotIntegrationId,
+	getCopilotIntegrationCacheKey,
 	hasCopilotVisionInput,
 	resolveCopilotRequestIdentity,
 	resolveGitHubCopilotBaseUrl,
@@ -1246,6 +1248,14 @@ export type AnthropicClientOptionsArgs = {
 	fetch?: FetchImpl;
 	maxRetryDelayMs?: number;
 	sessionId?: string;
+	/** Working-identity cache key for this credential+host; undefined off the Copilot path. */
+	copilotCacheKey?: string;
+	/**
+	 * Build-time cache provenance for the wrapper: the cached value the
+	 * outgoing headers were built from, or `null` when the cache was empty at
+	 * build. `undefined` rereads the cache at dispatch.
+	 */
+	copilotCacheSnapshot?: string | null;
 };
 
 export type AnthropicClientOptionsResult = {
@@ -2030,6 +2040,14 @@ const streamAnthropicOnce = (
 			// (and any consumer awaiting `result()`) hanging forever.
 			const apiKey = options?.apiKey ?? getEnvApiKey(model.provider) ?? "";
 			const copilotApiKey = model.provider === "github-copilot" ? parseGitHubCopilotApiKey(apiKey) : undefined;
+			const copilotBaseUrl =
+				model.provider === "github-copilot"
+					? (resolveAnthropicBaseUrl(model, apiKey) ?? "https://api.anthropic.com")
+					: undefined;
+			const copilotCacheKey =
+				model.provider === "github-copilot" ? getCopilotIntegrationCacheKey(apiKey, copilotBaseUrl) : undefined;
+			const copilotCached =
+				model.provider === "github-copilot" ? getCachedCopilotIntegrationId(copilotCacheKey) : undefined;
 			const copilotDynamicHeaders = copilotApiKey
 				? buildCopilotDynamicHeaders({
 						messages: context.messages,
@@ -2039,12 +2057,13 @@ const streamAnthropicOnce = (
 						integrationId: resolveCopilotRequestIdentity(options?.headers),
 						initiatorOverride: options?.initiatorOverride,
 						enterpriseUrl: copilotApiKey.enterpriseUrl,
+						cachedIntegrationId: copilotCached,
 					})
 				: undefined;
 			if (copilotDynamicHeaders?.premiumRequests !== undefined) {
 				output.usage.premiumRequests = copilotDynamicHeaders.premiumRequests;
 			}
-			const baseUrl = resolveAnthropicBaseUrl(model, apiKey) ?? "https://api.anthropic.com";
+			const baseUrl = copilotBaseUrl ?? resolveAnthropicBaseUrl(model, apiKey) ?? "https://api.anthropic.com";
 			const supportsEagerToolInputStreaming = resolveEagerToolInputStreamingSupport(model, baseUrl);
 			const providerSessionState = getAnthropicProviderSessionState(
 				options?.providerSessionState,
@@ -2189,6 +2208,8 @@ const streamAnthropicOnce = (
 					thinkingDisplay: options?.thinkingDisplay,
 					fetch: options?.fetch,
 					maxRetryDelayMs: options?.maxRetryDelayMs,
+					copilotCacheKey,
+					copilotCacheSnapshot: copilotCached ?? null,
 					sessionId:
 						options?.sessionId ??
 						extractClaudeMetadataSessionId(options?.metadata?.user_id) ??
@@ -3220,6 +3241,8 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 		maxRetryDelayMs,
 		sessionId,
 		disableStrictTools: disableStrictToolsOverride,
+		copilotCacheKey,
+		copilotCacheSnapshot,
 	} = args;
 	const compat = model.compat;
 	const disableStrictTools = disableStrictToolsOverride ?? compat.disableStrictTools;
@@ -3295,7 +3318,13 @@ export function buildAnthropicClientOptions(args: AnthropicClientOptionsArgs): A
 			maxRetries: 5,
 			maxRetryDelayMs,
 			defaultHeaders,
-			fetch: wrapFetchForCopilotFallback(cchFetch, true, resolveCopilotRequestIdentity(headers)),
+			fetch: wrapFetchForCopilotFallback(
+				cchFetch,
+				true,
+				resolveCopilotRequestIdentity(headers),
+				copilotCacheKey ?? getCopilotIntegrationCacheKey(apiKey, baseUrl),
+				copilotCacheSnapshot,
+			),
 			fetchOptions,
 		};
 	}
