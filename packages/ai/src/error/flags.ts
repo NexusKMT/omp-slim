@@ -439,6 +439,17 @@ function matchesOverflowText(text: string): boolean {
 	return OVERFLOW_PATTERNS.some(p => p.test(text)) || OVERFLOW_NO_BODY_PATTERN.test(text);
 }
 
+/**
+ * A 4xx the provider rejected as a deterministic client error — every 4xx
+ * except 408 (Request Timeout) and 429 (Too Many Requests), the retryable
+ * pair. Mirrors the 4xx policy in {@link isProviderRetryableError}: such a
+ * request replays identically, so a transient signal riding on it (e.g. a
+ * truncation phrase in the body) must not flip it to retryable.
+ */
+function isTerminalClientErrorStatus(status: number | undefined): boolean {
+	return status !== undefined && status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
 function classifyText(
 	errorMessage: string | undefined,
 	errorStatus: number | undefined,
@@ -500,15 +511,12 @@ function classifyText(
 		// STREAM_PARSE_DIAGNOSTIC_PATTERN, per the rationale on isTransientStreamParseError.
 		// Skip a truncation phrase that rides on a terminal 4xx (e.g. a malformed
 		// request rejected as "400 unexpected EOF"): that is a deterministic client
-		// error that replays identically, so keep it terminal — mirroring
-		// isProviderRetryableError, which rejects every 4xx except 408/429.
-		const isTerminalClientErrorStatus =
-			statusClean !== undefined &&
-			statusClean >= 400 &&
-			statusClean < 500 &&
-			statusClean !== 408 &&
-			statusClean !== 429;
-		if (!isTerminalClientErrorStatus && isTransientStreamParseError(errorMessage)) kinds |= Flag.Transient;
+		// error that replays identically, so keep it terminal. classify() carries
+		// the outer terminal status down the cause chain so a wrapped truncation
+		// (ProviderHttpError 400 → cause "unexpected EOF") is caught here too.
+		if (!isTerminalClientErrorStatus(statusClean) && isTransientStreamParseError(errorMessage)) {
+			kinds |= Flag.Transient;
+		}
 		// A concurrency cap (e.g. Vertex "Online prediction concurrent requests
 		// quota exceeded") is transient — shed-and-backoff. The bare wording need
 		// not match TRANSIENT_TRANSPORT_PATTERN, so flag it explicitly to keep
@@ -547,6 +555,11 @@ export function classify(error: unknown, api?: Api): number {
 	const seen = new Set<object>();
 	const causeTokenEvidence = hasCauseTokenContextOverflowEvidence(error);
 	let link: unknown = error;
+	// A terminal 4xx on an outer link governs its own cause diagnostics: a
+	// wrapped truncation is describing why the deterministic request failed,
+	// not an independently retryable transport fault. Carry it down so the
+	// stream-parse guard in classifyText sees it on the status-less cause.
+	let governingTerminalStatus: number | undefined;
 	while (link !== undefined && link !== null) {
 		if (typeof link === "object") {
 			if (seen.has(link)) break;
@@ -621,8 +634,10 @@ export function classify(error: unknown, api?: Api): number {
 			linkMessage = (link as { message: string }).message;
 		}
 
-		const textId = classifyText(linkMessage, status(link), causeTokenEvidence, api);
+		const linkStatus = status(link);
+		const textId = classifyText(linkMessage, linkStatus ?? governingTerminalStatus, causeTokenEvidence, api);
 		kinds |= textId & KIND_MASK;
+		if (isTerminalClientErrorStatus(linkStatus)) governingTerminalStatus = linkStatus;
 
 		link = typeof link === "object" && "cause" in link ? (link as { cause: unknown }).cause : undefined;
 	}

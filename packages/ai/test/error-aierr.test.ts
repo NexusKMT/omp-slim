@@ -88,6 +88,24 @@ describe("AIError.classify — structural provider errors", () => {
 		expect(AIError.retriable(id)).toBe(true);
 	});
 
+	it("keeps a terminal 4xx that wraps a stream-truncation cause terminal", () => {
+		const err = new AIError.ProviderHttpError("Bad Request", 400, { cause: new Error("unexpected EOF") });
+		const id = AIError.classify(err);
+		expect(AIError.is(id, AIError.Flag.Transient)).toBe(false);
+		expect(AIError.retriable(id)).toBe(false);
+	});
+
+	it("keeps a retryable-status wrapper over a stream-truncation cause transient", () => {
+		for (const wrapped of [
+			new AIError.ProviderHttpError("Service Unavailable", 503, { cause: new Error("unexpected EOF") }),
+			new AIError.ProviderHttpError("Too Many Requests", 429, { cause: new Error("eof while parsing") }),
+		]) {
+			const id = AIError.classify(wrapped);
+			expect(AIError.is(id, AIError.Flag.Transient)).toBe(true);
+			expect(AIError.retriable(id)).toBe(true);
+		}
+	});
+
 	it("keeps empty response bodies on the generic transient fallback path", () => {
 		const err = new AIError.ProviderResponseError("Google API returned an empty response body", {
 			provider: "google",
