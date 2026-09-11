@@ -942,6 +942,24 @@ export class InteractiveMode implements InteractiveModeContext {
 	invalidatePendingFocus(): void {
 		this.#focusController.invalidatePendingFocus();
 	}
+	/**
+	 * Whether inline mouse capture is opted in. Never throws: the render hot
+	 * path reads this every frame, including in suites (or teardown races)
+	 * where the global singleton is uninitialized or the session carries it
+	 * dead — both fall back to off.
+	 */
+	#isMouseCaptureEnabled(): boolean {
+		try {
+			if (settings.get("tui.mouse") === true) return true;
+		} catch {
+			// Global singleton unavailable; try the mode's own settings below.
+		}
+		try {
+			return this.settings.get("tui.mouse") === true;
+		} catch {
+			return false;
+		}
+	}
 
 	resolveViewportClickCandidates(index: number): string[] {
 		return this.composer.viewportClickCandidates(index);
@@ -1116,15 +1134,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// Keep generic pi-tui renderers aligned with the coding-agent setting.
 		applyHyperlinkSetting();
 		this.ui.setInlineMouseTrackingProvider(() => {
-			// The global singleton may be uninitialized (or reset by test
-			// teardown) while renders still flow: fall back to the mode's own
-			// settings rather than throwing out of the render hot path.
-			let on: boolean;
-			try {
-				on = settings.get("tui.mouse") === true;
-			} catch {
-				on = this.settings.get("tui.mouse") === true;
-			}
+			const on = this.#isMouseCaptureEnabled();
 			// Dropping capture must also drop the band: with reporting off no
 			// motion event will ever arrive to clear a mid-hover highlight.
 			// The controller cache goes too, or a re-enable plus motion over
