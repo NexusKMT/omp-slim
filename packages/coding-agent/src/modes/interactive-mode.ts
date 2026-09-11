@@ -27,6 +27,7 @@ import {
 	Container,
 	clearRenderCache,
 	getComposerStyle,
+	getPaddingX,
 	Loader,
 	Markdown,
 	Spacer,
@@ -36,6 +37,7 @@ import {
 	Text,
 	type TUI,
 	visibleWidth,
+	wrapTextWithAnsi,
 } from "@oh-my-pi/pi-tui";
 import type { TerminalAppearanceRequestToken } from "@oh-my-pi/pi-tui/terminal";
 import { isInsideTerminalMultiplexer } from "@oh-my-pi/pi-tui/terminal-capabilities";
@@ -503,24 +505,57 @@ function isHudSubagent(session: ObservableSession): boolean {
  * The expander row (when `layoutPinnedHud` shows one) resolves to the toggle
  * sentinel, which the click router handles before any registry lookup.
  * Rendering delegates to the same `Text` mount as before, so output bytes are
- * unchanged — only the row map is new.
+ * unchanged — only the row map is new. Long rows wrap inside `Text` (content
+ * is two cells narrower than the terminal), so the map is rebuilt per render
+ * from measured wrapped heights: continuation rows belong to the agent (or
+ * toggle) whose logical row started them.
  */
 export class SubagentHudComponent implements Component {
 	readonly #text: Text;
+	readonly #lines: readonly string[];
 	readonly #order: readonly string[];
-	readonly #toggleRow: number | undefined;
+	readonly #toggleLine: number | undefined;
+	#physicalOwner: (string | undefined)[] = [];
 	constructor(lines: readonly string[], order: readonly string[], toggleRow?: number) {
 		this.#text = new Text(lines.join("\n"), 1, 0);
+		this.#lines = lines;
 		this.#order = order;
-		this.#toggleRow = toggleRow;
+		this.#toggleLine = toggleRow;
 	}
 	render(width: number): readonly string[] {
-		return this.#text.render(width);
+		const rows = this.#text.render(width);
+		this.#rebuildHitMap(width, rows.length);
+		return rows;
 	}
 	getClickAgentAtRow(row: number): string | undefined {
-		if (this.#toggleRow !== undefined && row === this.#toggleRow) return PINNED_HUD_TOGGLE_ID;
-		const index = row - 2;
-		return index >= 0 && index < this.#order.length ? this.#order[index] : undefined;
+		return row >= 0 && row < this.#physicalOwner.length ? this.#physicalOwner[row] : undefined;
+	}
+	// Native wrap splits paragraphs independently, so per-line wrapped
+	// heights compose exactly to the rendered row count. A length mismatch
+	// means the wrap contract drifted: fall back to one row per line (the
+	// old mapping) rather than misrouting clicks.
+	#rebuildHitMap(width: number, renderedRows: number): void {
+		const contentWidth = Math.max(1, width - getPaddingX(1) * 2);
+		const owner: (string | undefined)[] = [];
+		for (let index = 0; index < this.#lines.length; index++) {
+			const height = wrapTextWithAnsi(replaceTabs(this.#lines[index]!), contentWidth).length;
+			let id: string | undefined;
+			if (this.#toggleLine !== undefined && index === this.#toggleLine) id = PINNED_HUD_TOGGLE_ID;
+			else {
+				const orderIndex = index - 2;
+				id = orderIndex >= 0 && orderIndex < this.#order.length ? this.#order[orderIndex] : undefined;
+			}
+			for (let row = 0; row < height; row++) owner.push(id);
+		}
+		if (owner.length !== renderedRows) {
+			this.#physicalOwner = this.#lines.map((_line, index) => {
+				if (this.#toggleLine !== undefined && index === this.#toggleLine) return PINNED_HUD_TOGGLE_ID;
+				const orderIndex = index - 2;
+				return orderIndex >= 0 && orderIndex < this.#order.length ? this.#order[orderIndex] : undefined;
+			});
+			return;
+		}
+		this.#physicalOwner = owner;
 	}
 }
 

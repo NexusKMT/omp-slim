@@ -372,6 +372,7 @@ describe("subagent HUD lines", () => {
 			"EvalSpawn",
 			"BackgroundSpawn",
 		]);
+		hud.render(120);
 		expect(hud.getClickAgentAtRow(2)).toBe("SyncSpawn");
 		expect(hud.getClickAgentAtRow(3)).toBe("EvalSpawn");
 		expect(hud.getClickAgentAtRow(4)).toBe("BackgroundSpawn");
@@ -509,8 +510,22 @@ describe("SubagentHudComponent click rows", () => {
 
 	it("resolves the expander row to the toggle sentinel", () => {
 		const hud = new SubagentHudComponent(["", "Subagents", "row", "toggle"], ["Only"], 3);
+		hud.render(120);
 		expect(hud.getClickAgentAtRow(3)).toBe(PINNED_HUD_TOGGLE_ID);
 		expect(hud.getClickAgentAtRow(2)).toBe("Only");
+	});
+
+	it("maps wrapped continuation rows to the agent that started them", () => {
+		const long = ` ${"x".repeat(200)}`;
+		const hud = new SubagentHudComponent(["", "Subagents", long, "short"], ["Long", "Short"]);
+		const rendered = hud.render(40);
+		expect(rendered.length).toBeGreaterThan(4);
+		const shortRow = rendered.findIndex(line => Bun.stripANSI(line).includes("short"));
+		expect(shortRow).toBeGreaterThan(3);
+		expect(hud.getClickAgentAtRow(2)).toBe("Long");
+		expect(hud.getClickAgentAtRow(3)).toBe("Long");
+		expect(hud.getClickAgentAtRow(shortRow)).toBe("Short");
+		expect(hud.getClickAgentAtRow(shortRow + 1)).toBeUndefined();
 	});
 });
 

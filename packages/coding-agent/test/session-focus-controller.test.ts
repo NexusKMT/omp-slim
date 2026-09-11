@@ -327,10 +327,7 @@ describe("SessionFocusController", () => {
 		const h = makeHarness();
 		const slow = makeSessionStub();
 		const fast = makeSessionStub();
-		let releaseSlow: ((session: AgentSession) => void) | undefined;
-		const slowGate = new Promise<AgentSession>(resolve => {
-			releaseSlow = resolve;
-		});
+		const { promise: slowGate, resolve: releaseSlow } = Promise.withResolvers<AgentSession>();
 		const lifecycle = {
 			ensureLive: (id: string) => (id === "Slow" ? slowGate : Promise.resolve(fast.session)),
 		};
@@ -344,7 +341,7 @@ describe("SessionFocusController", () => {
 		await controller.focusAgent("Fast");
 		expect(controller.focusedAgentId).toBe("Fast");
 
-		releaseSlow?.(slow.session);
+		releaseSlow(slow.session);
 		await slowFocus;
 		expect(controller.focusedAgentId).toBe("Fast");
 		expect(controller.target).toBe(fast.session);
@@ -353,10 +350,7 @@ describe("SessionFocusController", () => {
 	it("drops a pending focus when returning to main first", async () => {
 		const h = makeHarness();
 		const slow = makeSessionStub();
-		let releaseSlow: ((session: AgentSession) => void) | undefined;
-		const slowGate = new Promise<AgentSession>(resolve => {
-			releaseSlow = resolve;
-		});
+		const { promise: slowGate, resolve: releaseSlow } = Promise.withResolvers<AgentSession>();
 		const lifecycle = {
 			ensureLive: (_id: string) => slowGate,
 		};
@@ -368,7 +362,7 @@ describe("SessionFocusController", () => {
 
 		const slowFocus = controller.focusAgent("Slow");
 		await controller.unfocus();
-		releaseSlow?.(slow.session);
+		releaseSlow(slow.session);
 		await slowFocus;
 		expect(controller.focusedAgentId).toBeUndefined();
 		expect(controller.target).toBeUndefined();
