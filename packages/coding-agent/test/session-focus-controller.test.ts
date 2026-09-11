@@ -367,6 +367,50 @@ describe("SessionFocusController", () => {
 		expect(controller.focusedAgentId).toBeUndefined();
 		expect(controller.target).toBeUndefined();
 	});
+
+	it("drops the failure of a superseded focus request", async () => {
+		const h = makeHarness();
+		const fast = makeSessionStub();
+		const { promise: slowGate, reject: failSlow } = Promise.withResolvers<AgentSession>();
+		const lifecycle = {
+			ensureLive: (id: string) => (id === "Slow" ? slowGate : Promise.resolve(fast.session)),
+		};
+		const controller = new SessionFocusController(
+			h.ctx,
+			h.registry,
+			() => lifecycle as unknown as AgentLifecycleManager,
+		);
+
+		const slowFocus = controller.focusAgent("Slow");
+		await controller.focusAgent("Fast");
+		expect(controller.focusedAgentId).toBe("Fast");
+
+		failSlow(new Error("revive failed"));
+		await slowFocus;
+		expect(controller.focusedAgentId).toBe("Fast");
+		expect(controller.target).toBe(fast.session);
+	});
+
+	it("drops a pending focus when disposed first", async () => {
+		const h = makeHarness();
+		const slow = makeSessionStub();
+		const { promise: slowGate, resolve: releaseSlow } = Promise.withResolvers<AgentSession>();
+		const lifecycle = {
+			ensureLive: (_id: string) => slowGate,
+		};
+		const controller = new SessionFocusController(
+			h.ctx,
+			h.registry,
+			() => lifecycle as unknown as AgentLifecycleManager,
+		);
+
+		const slowFocus = controller.focusAgent("Slow");
+		controller.dispose();
+		releaseSlow(slow.session);
+		await slowFocus;
+		expect(controller.focusedAgentId).toBeUndefined();
+		expect(controller.target).toBeUndefined();
+	});
 });
 
 describe("pickRecentFocusableAgentId", () => {

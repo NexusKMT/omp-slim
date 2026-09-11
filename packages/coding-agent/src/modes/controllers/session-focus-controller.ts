@@ -64,7 +64,15 @@ export class SessionFocusController {
 		if (this.ctx.collabGuest) throw new Error("Viewing agents is unavailable in a collab session.");
 		if (id === MAIN_AGENT_ID) return this.unfocus();
 		const request = ++this.#focusRequestSeq;
-		const session = await this.lifecycle().ensureLive(id);
+		let session: AgentSession;
+		try {
+			session = await this.lifecycle().ensureLive(id);
+		} catch (error) {
+			// A newer request owns the view now: a stale revive failure must
+			// not surface after the winner already focused.
+			if (request !== this.#focusRequestSeq) return;
+			throw error;
+		}
 		// A newer focus request (e.g. a second click while a parked agent was
 		// still reviving) wins: drop the stale completion instead of letting
 		// the slower revive replace the view.
@@ -112,6 +120,9 @@ export class SessionFocusController {
 	}
 
 	dispose(): void {
+		// A pending revive must not land during teardown: invalidate it the
+		// same way an explicit leave-main does.
+		this.#focusRequestSeq++;
 		this.#registryUnsubscribe?.();
 		this.#registryUnsubscribe = undefined;
 	}
