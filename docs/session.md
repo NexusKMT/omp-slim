@@ -161,6 +161,31 @@ Stores an `AgentMessage` directly.
 }
 ```
 
+The `message.role` discriminant is **camelCase**, not the snake_case used by the LLM
+wire format or the extension hook names. The full set of roles an entry may carry:
+
+| `role`              | Owner package | Notes                                                                             |
+| ------------------- | ------------- | --------------------------------------------------------------------------------- |
+| `user`              | pi-ai         | User/tool-feedback turn.                                                          |
+| `developer`         | pi-ai         | Developer-role instruction turn.                                                  |
+| `assistant`         | pi-ai         | Model turn; tool calls live in its `content` as `{ "type": "toolCall" }` blocks.  |
+| `toolResult`        | pi-ai         | Result of one tool call — **not** `tool_result`. Carries `toolCallId`/`toolName`. |
+| `bashExecution`     | coding-agent  | Standalone `!`-bash run.                                                          |
+| `pythonExecution`   | coding-agent  | Standalone python run.                                                            |
+| `branchSummary`     | pi-agent      | Summary of an abandoned branch.                                                   |
+| `compactionSummary` | pi-agent      | Compaction summary turn.                                                          |
+| `custom`            | coding-agent  | Extension/host message that participates in LLM context (`custom_message` entry). |
+| `hookMessage`       | coding-agent  | Legacy hook-injected message, retained for migration; new code uses `custom`.     |
+| `fileMention`       | coding-agent  | Inlined `@file` mention contents.                                                 |
+
+`toolCall` is a **content-block type inside an `assistant` message's `content` array**, not
+a message role. An extension keying off `message.role` that matches snake_case constants
+(`tool_result`, `tool_call`) or lowercases the role before comparing will silently skip
+`toolResult` (and every other camelCase role) — no error is raised. Match the camelCase
+values above verbatim. The base roles are `Message` in `packages/ai/src/types.ts`; the rest
+are merged into `CustomAgentMessages` (`packages/agent/src/compaction/messages.ts`,
+`packages/coding-agent/src/session/messages.ts`).
+
 ### `model_change`
 
 ```json
