@@ -126,6 +126,25 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 			return;
 		}
 		await this.#updates;
+		// Re-project the final arguments: streamed prefixes may have admitted
+		// operations that later source invalidates (e.g. a hoisted `tool` shadow
+		// appended after the read streamed). matchesFinal only checks the prefix
+		// relationship, so verify every admitted operation still projects from the
+		// final code; anything else discards the session before the authoritative
+		// cell can claim it. Physical work already started cannot be undone — this
+		// bounds it to claimless candidates that can never commit.
+		if (!(await this.#verifyFinalPlan(context.args))) {
+			await this.discard("final eval arguments invalidate an admitted speculative operation");
+		}
+	}
+
+	async #verifyFinalPlan(args: Readonly<Record<string, unknown>>): Promise<boolean> {
+		const { code, language } = args as { code?: unknown; language?: unknown };
+		if (typeof code !== "string" || (language !== "js" && language !== "py")) return false;
+		const plan = await this.#project(code, language);
+		if (!plan) return this.#admitted.size === 0;
+		const plannedOperationIds = new Set(plan.operations.map(operation => operation.call.id));
+		return [...this.#admitted.keys()].every(id => plannedOperationIds.has(id));
 	}
 
 	commit(): void {}
@@ -180,8 +199,8 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 		if (!result) return undefined;
 		return bridgeValueFromToolResult(name, args, result, this.#options.emitStatus);
 	}
-	async #plan(code: string, language: string): Promise<void> {
-		if (this.#closed || !code) return;
+
+	async #project(code: string, language: string): Promise<ShadowPlan | null> {
 		let plan: ShadowPlan | null = null;
 		if (language === "js") {
 			const projected = await shadowPlanIfPresent({
@@ -206,6 +225,12 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 				plan = projected;
 			}
 		}
+		return plan;
+	}
+
+	async #plan(code: string, language: string): Promise<void> {
+		if (this.#closed || !code) return;
+		const plan = await this.#project(code, language);
 		if (!plan || !this.#snapshot) {
 			if (this.#admitted.size > 0) await this.discard("streamed eval prefix cannot retain speculative operations");
 			return;

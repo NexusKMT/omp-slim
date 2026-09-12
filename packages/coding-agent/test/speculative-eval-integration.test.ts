@@ -208,6 +208,107 @@ describe("streamed eval speculation", () => {
 		await shadow.discard("test complete");
 	});
 
+	it("discards admissions the final eval code invalidates", async () => {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "speculative-eval-final-"));
+		temporaryDirectories.push(directory);
+		await fs.writeFile(path.join(directory, "note.txt"), "content");
+		const settings = Settings.isolated({ "eval.autoBackground.enabled": false, "images.autoResize": false });
+		const session: ToolSession = {
+			cwd: directory,
+			hasUI: false,
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+			getEvalSessionId: () => "speculative-eval-final-test",
+			getToolForEvalBridge: name => (name === "read" ? eraseToolSchema(read) : undefined),
+			getEvalBridgeToolNames: () => ["read"],
+			settings,
+		};
+		const read = new ReadTool(session);
+		const evalTool = new EvalTool(session);
+		await evalTool.execute("warm-final", { language: "js", code: "globalThis.shadowWarm = true" });
+		const admitted: string[] = [];
+		const discarded: string[] = [];
+		const coordinator: SpeculativeOperationSink = {
+			maxInFlight: 2,
+			async admit(definition) {
+				admitted.push(definition.candidateId);
+				return undefined;
+			},
+			async discardChildren(parentToolCallId: string, reason: string) {
+				discarded.push(`${parentToolCallId}:${reason}`);
+			},
+			close() {},
+		};
+		const prefixCode = 'await tool.read({ path: "note.txt" })';
+		const prefixArgs = { language: "js", code: prefixCode };
+		const shadow = new EvalShadowCellSession({
+			coordinator,
+			parentToolCallId: "eval-final",
+			session,
+			cwd: directory,
+			sessionId: "speculative-eval-final-test",
+		});
+		const toolCall = { type: "toolCall" as const, id: "eval-final", name: "eval", arguments: prefixArgs };
+		shadow.update(toolCall, JSON.stringify(prefixArgs));
+		// The final cell appends a hoisted `tool` shadow after the read streamed:
+		// matchesFinal still accepts (cumulative prefix), but the final plan no
+		// longer contains the admitted operation, so finalize must discard before
+		// the authoritative cell can claim it.
+		const finalArgs = { language: "js", code: `${prefixCode}\nfunction tool() {}` };
+		await shadow.finalize({ args: finalArgs });
+		expect(admitted).toHaveLength(1);
+		expect(discarded).toHaveLength(1);
+		expect(discarded[0]).toContain("eval-final");
+		await shadow.discard("test complete");
+	});
+
+	it("keeps admissions the final eval code still contains", async () => {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "speculative-eval-final-keep-"));
+		temporaryDirectories.push(directory);
+		await fs.writeFile(path.join(directory, "note.txt"), "content");
+		const settings = Settings.isolated({ "eval.autoBackground.enabled": false, "images.autoResize": false });
+		const session: ToolSession = {
+			cwd: directory,
+			hasUI: false,
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+			getEvalSessionId: () => "speculative-eval-final-keep-test",
+			getToolForEvalBridge: name => (name === "read" ? eraseToolSchema(read) : undefined),
+			getEvalBridgeToolNames: () => ["read"],
+			settings,
+		};
+		const read = new ReadTool(session);
+		const evalTool = new EvalTool(session);
+		await evalTool.execute("warm-final-keep", { language: "js", code: "globalThis.shadowWarm = true" });
+		const admitted: string[] = [];
+		const discarded: string[] = [];
+		const coordinator: SpeculativeOperationSink = {
+			maxInFlight: 2,
+			async admit(definition) {
+				admitted.push(definition.candidateId);
+				return undefined;
+			},
+			async discardChildren(parentToolCallId: string, reason: string) {
+				discarded.push(`${parentToolCallId}:${reason}`);
+			},
+			close() {},
+		};
+		const args = { language: "js", code: 'await tool.read({ path: "note.txt" })' };
+		const shadow = new EvalShadowCellSession({
+			coordinator,
+			parentToolCallId: "eval-final-keep",
+			session,
+			cwd: directory,
+			sessionId: "speculative-eval-final-keep-test",
+		});
+		const toolCall = { type: "toolCall" as const, id: "eval-final-keep", name: "eval", arguments: args };
+		shadow.update(toolCall, JSON.stringify(args));
+		await shadow.finalize({ args });
+		expect(admitted).toHaveLength(1);
+		expect(discarded).toEqual([]);
+		await shadow.discard("test complete");
+	});
+
 	it("namespaces child tool-call IDs across outer eval calls", async () => {
 		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "speculative-eval-child-ids-"));
 		temporaryDirectories.push(directory);
