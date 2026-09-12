@@ -7,12 +7,13 @@ import type {
 } from "@oh-my-pi/pi-agent-core";
 import type { ToolSession } from "../../tools";
 import { namespaceSessionId as namespaceJavaScriptSessionId } from "../js";
-import { shadowPlanIfPresent } from "../js/context-manager";
+import { shadowPlanIfPresent, snapshotVmContext } from "../js/context-manager";
 import type { RuntimeCallIdentity } from "../js/shared/runtime";
+import { shadowSnapshotDigest } from "../js/shared/runtime";
 import type { JsStatusEvent } from "../js/shared/types";
 import { bridgeValueFromToolResult } from "../js/tool-bridge";
 import { namespaceSessionId as namespacePythonSessionId } from "../py";
-import { shadowPlanPythonIfPresent } from "../py/executor";
+import { shadowPlanPythonIfPresent, snapshotPythonNamespaceIfPresent } from "../py/executor";
 import { type ShadowClaimKey, ShadowClaimStore } from "./claim-store";
 import { EvalArgsStreamDecoder } from "./eval-args-stream";
 import { evaluateShadowExpression } from "./evaluator";
@@ -69,6 +70,7 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 	#occurrenceAssignment = Promise.resolve();
 	#snapshot: Readonly<Record<string, ShadowValue | unknown>> | undefined;
 	#lastPlan: { code: string; language: string; plan: ShadowPlan | null } | undefined;
+	#snapshotToken: { language: string; revision: number; digest: string } | undefined;
 	#closed = false;
 	#updates = Promise.resolve();
 	#pendingPlan: { codePrefix: string; language: string } | undefined;
@@ -153,6 +155,52 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 		const plannedOperationIds = new Set(plan.operations.map(operation => operation.call.id));
 		return [...this.#admitted.keys()].every(id => plannedOperationIds.has(id));
 	}
+
+	/** Revision/digest captured by the first shadow plan, if any planning ran. */
+	get snapshotToken(): { language: string; revision: number; digest: string } | undefined {
+		return this.#snapshotToken;
+	}
+
+	/**
+	 * Re-checks the retained namespace against the planning snapshot.
+	 *
+	 * Retained state may change between streamed planning and dispatch (timers,
+	 * background work, concurrent session users). A mismatch means admitted
+	 * children were projected from stale state: the caller must discard this
+	 * session and run the cell without it. Fail-closed on any error or when no
+	 * retained backend answers. Known residual: the check and the later cell
+	 * start are two round trips, so a mutation landing exactly between them is
+	 * still caught only by claim fingerprinting — use the atomic
+	 * runIfSnapshotMatches/executeIfSnapshotMatches paths where available.
+	 */
+	async verifySnapshotCurrent(): Promise<boolean> {
+		const token = this.#snapshotToken;
+		if (!token) return true;
+		try {
+			if (token.language === "js") {
+				const snapshot = await snapshotVmContext({
+					sessionKey: namespaceJavaScriptSessionId(this.#options.sessionId),
+					cwd: this.#options.cwd,
+					sessionId: namespaceJavaScriptSessionId(this.#options.sessionId),
+				});
+				if (!snapshot) return false;
+				return snapshot.revision === token.revision && shadowSnapshotDigest(snapshot) === token.digest;
+			}
+			if (token.language === "py") {
+				const snapshot = await snapshotPythonNamespaceIfPresent({
+					cwd: this.#options.cwd,
+					sessionId: namespacePythonSessionId(this.#options.sessionId),
+					kernelOwnerId: this.#options.kernelOwnerId,
+				});
+				if (!snapshot) return false;
+				return snapshot.revision === token.revision && snapshot.digest === token.digest;
+			}
+			return false;
+		} catch {
+			return false;
+		}
+	}
+
 	commit(): void {}
 
 	async discard(reason: string): Promise<void> {
@@ -217,6 +265,7 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 			});
 			if (projected) {
 				this.#snapshot ??= projected.snapshot.values;
+				this.#snapshotToken ??= { language, revision: projected.snapshot.revision, digest: projected.digest };
 				plan = projected.plan;
 			}
 		} else if (language === "py") {
@@ -229,6 +278,11 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 			if (projected) {
 				this.#snapshot ??= projected.snapshot.values;
 				plan = projected;
+				this.#snapshotToken ??= {
+					language,
+					revision: projected.snapshot.revision,
+					digest: projected.snapshot.digest,
+				};
 			}
 		}
 		this.#lastPlan = { code, language, plan };

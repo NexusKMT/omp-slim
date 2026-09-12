@@ -467,11 +467,29 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 					onUpdate({ content: [{ type: "text", text }], details });
 				}
 			: undefined;
-		const run = (
+		const run = async (
 			runSignal: AbortSignal | undefined,
 			emitUpdate: ((text: string, details: EvalToolDetails) => void) | undefined,
 		): Promise<AgentToolResult<EvalToolDetails | undefined>> => {
-			const execution = runWithEvalShadowCell(shadowCell, () =>
+			// Re-check the retained namespace against the streamed planning snapshot:
+			// timers, background work, or concurrent session users may have changed
+			// it after the speculative children started. On mismatch the children
+			// were projected from stale state, so discard the session and run the
+			// cell without it (claims then miss and execution is ordinary).
+			let activeShadowCell = shadowCell;
+			const snapshotToken = shadowCell?.snapshotToken;
+			if (shadowCell && snapshotToken) {
+				const tokenIsPython = snapshotToken.language === "py";
+				let current = tokenIsPython === (cellLanguage === "python");
+				if (current) {
+					current = await shadowCell.verifySnapshotCurrent().catch(() => false);
+				}
+				if (!current) {
+					await shadowCell.discard("retained eval state changed after shadow planning").catch(() => undefined);
+					activeShadowCell = undefined;
+				}
+			}
+			const execution = runWithEvalShadowCell(activeShadowCell, () =>
 				this.#runCells({
 					session,
 					cells,

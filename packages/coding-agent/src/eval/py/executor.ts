@@ -26,7 +26,7 @@ import {
 	normalizeKernelSessionCwd,
 	requireRemainingKernelTimeoutMs,
 } from "../kernel-session-registry";
-import type { PythonShadowPlan } from "./kernel";
+import type { PythonShadowPlan, PythonShadowSnapshot } from "./kernel";
 import {
 	checkPythonKernelAvailability,
 	type KernelDisplayOutput,
@@ -541,6 +541,22 @@ export async function shadowPlanPythonIfPresent(options: {
 	});
 	if (!session?.kernel.isAlive()) return null;
 	return await session.kernel.shadowPlan(options.code, options.timeoutMs);
+}
+
+/** Captures the current retained-namespace token without planning or starting a kernel. */
+export async function snapshotPythonNamespaceIfPresent(options: {
+	cwd: string;
+	sessionId: string;
+	kernelOwnerId?: string;
+	timeoutMs?: number;
+}): Promise<Pick<PythonShadowSnapshot, "revision" | "digest"> | null> {
+	const cwd = normalizeKernelSessionCwd(options.cwd);
+	const session = sessionRegistry.getPresentSession(cwd, {
+		sessionId: options.sessionId,
+		kernelOwnerId: options.kernelOwnerId,
+	});
+	if (!session?.kernel.isAlive()) return null;
+	return await session.kernel.snapshotUserNamespace(options.timeoutMs);
 }
 
 export async function executePythonWithKernel(

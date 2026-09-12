@@ -309,6 +309,63 @@ describe("streamed eval speculation", () => {
 		await shadow.discard("test complete");
 	});
 
+	it("discards the shadow session when retained state changes before dispatch", async () => {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "speculative-eval-dispatch-"));
+		temporaryDirectories.push(directory);
+		await fs.writeFile(path.join(directory, "a.txt"), "stale content");
+		await fs.writeFile(path.join(directory, "b.txt"), "fresh content");
+		const settings = Settings.isolated({ "eval.autoBackground.enabled": false, "images.autoResize": false });
+		const session: ToolSession = {
+			cwd: directory,
+			hasUI: false,
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+			getEvalSessionId: () => "speculative-eval-dispatch-test",
+			getToolForEvalBridge: name => (name === "read" ? eraseToolSchema(read) : undefined),
+			getEvalBridgeToolNames: () => ["read"],
+			settings,
+		};
+		const read = new ReadTool(session);
+		const evalTool = new EvalTool(session);
+		await evalTool.execute("warm-dispatch", { language: "js", code: 'globalThis.target = "a.txt"' });
+		const admitted: string[] = [];
+		const discarded: string[] = [];
+		const coordinator: SpeculativeOperationSink = {
+			maxInFlight: 2,
+			async admit(definition) {
+				admitted.push(definition.candidateId);
+				return undefined;
+			},
+			async discardChildren(parentToolCallId: string, reason: string) {
+				discarded.push(`${parentToolCallId}:${reason}`);
+			},
+			close() {},
+		};
+		const stream = evalTool.speculation.stream;
+		if (!stream?.open) throw new Error("eval tool has no speculation stream policy");
+		const cell = await stream.open({ coordinator, parentToolCallId: "eval-dispatch" });
+		if (!cell) throw new Error("expected a shadow cell session");
+		const args = { language: "js" as const, code: "await tool.read({ path: target })" };
+		const toolCall = { type: "toolCall" as const, id: "eval-dispatch", name: "eval", arguments: args };
+		cell.update(toolCall, JSON.stringify(args));
+		await cell.finalize({ args, toolCall });
+		expect(admitted).toHaveLength(1);
+		// Another retained cell mutates the namespace after planning.
+		const mutation = await evalTool.execute("mutate-dispatch", {
+			language: "js",
+			code: 'globalThis.target = "b.txt"',
+		});
+		expect(mutation.isError).not.toBe(true);
+		// Dispatch must drop the stale speculative child and run the cell
+		// ordinarily against current state instead of claiming it.
+		const result = await evalTool.execute("eval-dispatch", args);
+		expect(result.isError).not.toBe(true);
+		expect(discarded.length).toBeGreaterThan(0);
+		const text = result.content?.find(entry => entry.type === "text")?.text ?? "";
+		expect(text).toContain("fresh content");
+		expect(text).not.toContain("stale content");
+	});
+
 	it("namespaces child tool-call IDs across outer eval calls", async () => {
 		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "speculative-eval-child-ids-"));
 		temporaryDirectories.push(directory);
