@@ -6304,6 +6304,30 @@ describe("speculative tool execution", () => {
 		expect(SpeculativeOperationCoordinator.take(message)).toBeUndefined();
 		await coordinator.close("test complete");
 	});
+	it("discards stream sessions whose final arguments changed", async () => {
+		const coordinator = new SpeculativeOperationCoordinator({ enabled: true });
+		const discarded: string[] = [];
+		expect(
+			coordinator.registerStreamSession("stream-1", {
+				update() {},
+				finalize() {},
+				commit() {},
+				async discard(reason: string) {
+					discarded.push(reason);
+				},
+				matchesFinalArgs: args => args.code === "original",
+			}),
+		).toBe(true);
+		const callFor = (code: string) =>
+			new Map([["stream-1", { type: "toolCall" as const, id: "stream-1", name: "eval", arguments: { code } }]]);
+		// Unchanged arguments retain the session.
+		await coordinator.reconcileFinalCalls(callFor("original"));
+		expect(discarded).toEqual([]);
+		// A hook rewrite that keeps the ID discards the stale plan.
+		await coordinator.reconcileFinalCalls(callFor("replaced"));
+		expect(discarded).toEqual(["final outer tool call arguments changed"]);
+		await coordinator.close("test complete");
+	});
 
 	it("does not attach a coordinator after its close begins", async () => {
 		const cleanup = Promise.withResolvers<void>();

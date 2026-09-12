@@ -698,6 +698,14 @@ export interface ToolSpeculationStreamSession {
 	finalize(context: ToolSpeculationAssessmentContext): void | Promise<void>;
 	commit(): void | Promise<void>;
 	discard(reason: string): void | Promise<void>;
+	/**
+	 * Whether the session's streamed plan still authorizes these final
+	 * arguments. The coordinator discards the session when the finalized call
+	 * kept its ID but a hook or argument transform replaced its arguments:
+	 * deferred work planned from the original code must never release.
+	 * Sessions without this predicate are always retained.
+	 */
+	matchesFinalArgs?(args: Readonly<Record<string, unknown>>): boolean;
 }
 
 export interface SpeculativeOperationSink {
