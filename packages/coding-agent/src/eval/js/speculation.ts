@@ -9,8 +9,8 @@ import type {
 	Expression,
 	ExpressionStatement,
 	ForOfStatement,
-	Identifier,
 	IfStatement,
+	ImportDeclaration,
 	MemberExpression,
 	Node,
 	NullLiteral,
@@ -119,6 +119,10 @@ function isIfStatement(node: Node | null | undefined): node is IfStatement {
 
 function isForOfStatement(node: Node | null | undefined): node is ForOfStatement {
 	return hasType(node, "ForOfStatement");
+}
+
+function isImportDeclaration(node: Node | null | undefined): node is ImportDeclaration {
+	return hasType(node, "ImportDeclaration");
 }
 
 function isExpression(node: Node | null | undefined): node is Expression {
@@ -398,8 +402,9 @@ function addBarrier(state: ProjectionState, reason: string, node: Node): false {
 function hasToolBinding(statements: readonly Statement[]): boolean {
 	return statements.some(
 		statement =>
-			isVariableDeclaration(statement) &&
-			statement.declarations.some(declaration => isIdentifier(declaration.id, { name: "tool" })),
+			(isVariableDeclaration(statement) &&
+				statement.declarations.some(declaration => isIdentifier(declaration.id, { name: "tool" }))) ||
+			(isImportDeclaration(statement) && statement.specifiers.some(specifier => specifier.local.name === "tool")),
 	);
 }
 
@@ -438,6 +443,15 @@ function topLevelDemotedBindings(nodes: readonly Statement[]): readonly [string,
 		}
 	}
 	return bindings;
+}
+
+function importedBindings(nodes: readonly Statement[]): readonly string[] {
+	const names: string[] = [];
+	for (const statement of nodes) {
+		if (!isImportDeclaration(statement)) continue;
+		for (const specifier of statement.specifiers) names.push(specifier.local.name);
+	}
+	return names;
 }
 
 function restoreLexicalEnvironment(environment: ReadonlyMap<string, ShadowExpression>, state: ProjectionState): void {
@@ -686,6 +700,10 @@ export async function projectJavaScriptShadowPlan(
 	for (const [name, kind] of topLevelDemotedBindings(program.body)) {
 		state.environment.set(name, { kind: "literal", value: undefined });
 		state.bindingKinds.set(name, kind);
+	}
+	for (const name of importedBindings(program.body)) {
+		state.environment.set(name, { kind: "literal", value: undefined });
+		state.bindingKinds.set(name, "const");
 	}
 	for (const statement of program.body) {
 		if (!projectStatement(statement, state, [], [])) break;

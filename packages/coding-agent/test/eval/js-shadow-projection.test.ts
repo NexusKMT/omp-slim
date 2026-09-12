@@ -159,6 +159,25 @@ if (true) {
 		expect(plan.barrier?.reason).toBe("unsupported JavaScript statement");
 	});
 
+	it("models rewritten import bindings as hoisted before a projected read", async () => {
+		const plan = await projectJavaScriptShadowPlan(`await tool.read({ path });\nimport path from "./module.js";`, {
+			snapshot: { path: "retained.txt" },
+		});
+
+		expect(plan.operations).toEqual([]);
+		expect(plan.barrier?.reason).toBe("unsupported JavaScript statement");
+	});
+
+	it("rejects an import binding that shadows the tool bridge", async () => {
+		const plan = await projectJavaScriptShadowPlan(`
+import tool from "./module.js";
+await tool.read({ path: "secret.txt" });
+`);
+
+		expect(plan.operations).toEqual([]);
+		expect(plan.barrier?.reason).toBe("JavaScript tool binding changed");
+	});
+
 	it("keeps safe independent operations before a later unsupported barrier", async () => {
 		const plan = await projectJavaScriptShadowPlan('tool.read({ path: "safe" });\nunknownCall();');
 		expect(plan.operations).toHaveLength(1);
