@@ -27,6 +27,7 @@ function makeSessionStub(opts: { isStreaming?: boolean } = {}): SessionStub {
 	let queue: { steering: string[]; followUp: string[] } = { steering: [], followUp: [] };
 	const stub = {
 		isStreaming: opts.isStreaming ?? false,
+		agent: { state: { streamMessage: null } },
 		subscribe(fn: (event: AgentSessionEvent) => Promise<void> | void) {
 			listener = fn;
 			return () => {
@@ -99,6 +100,7 @@ function makeHarness(options: { renderInitialMessages?: () => void | Promise<voi
 			resetTranscriptAnchors: () => {
 				resetTranscriptAnchors++;
 			},
+			restorePendingToolResults() {},
 		},
 		statusLine: {
 			setSession: (session: AgentSession, focusedAgentId?: string) => {
@@ -619,6 +621,49 @@ describe("SessionFocusController", () => {
 		await slowFocus;
 		expect(controller.focusedAgentId).toBe("Focused");
 		expect(controller.target).toBe(focused.session);
+	});
+
+	it("retries the same worker after an attachment failure", async () => {
+		let failReplay = true;
+		const h = makeHarness({
+			renderInitialMessages: () => {
+				if (failReplay) throw new Error("replay failed");
+			},
+		});
+		const worker = makeSessionStub();
+		worker.setQueue({ steering: ["worker input after retry"] });
+		registerSub(h.registry, "Worker", worker.session, MAIN_AGENT_ID);
+		await expect(h.controller.focusAgent("Worker")).rejects.toThrow("replay failed");
+		failReplay = false;
+		await h.controller.focusAgent("Worker");
+		expect(h.pendingMessagesContainer.render(80).join("\n")).toContain("worker input after retry");
+		expect(h.controller.target).toBe(worker.session);
+	});
+
+	it("does not clear a newer focused view when an older attachment fails", async () => {
+		const replayStarted = Promise.withResolvers<void>();
+		const oldReplay = Promise.withResolvers<void>();
+		let firstReplay = true;
+		const h = makeHarness({
+			renderInitialMessages: () => {
+				if (!firstReplay) return;
+				firstReplay = false;
+				replayStarted.resolve();
+				return oldReplay.promise;
+			},
+		});
+		const first = makeSessionStub();
+		const second = makeSessionStub();
+		second.setQueue({ steering: ["newer worker input"] });
+		registerSub(h.registry, "First", first.session, MAIN_AGENT_ID);
+		registerSub(h.registry, "Second", second.session, MAIN_AGENT_ID);
+		const oldFocus = h.controller.focusAgent("First");
+		await replayStarted.promise;
+		await h.controller.focusAgent("Second");
+		oldReplay.reject(new Error("old replay failed"));
+		await oldFocus;
+		expect(h.controller.target).toBe(second.session);
+		expect(h.pendingMessagesContainer.render(80).join("\n")).toContain("newer worker input");
 	});
 });
 
