@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { canonicalMCPToolNameCandidates, createMCPToolName } from "@oh-my-pi/pi-coding-agent/mcp/tool-bridge";
+import {
+	canonicalMCPToolNameCandidates,
+	createMCPToolName,
+	resolveMCPToolAlias,
+} from "@oh-my-pi/pi-coding-agent/mcp/tool-bridge";
 import { resolveFallbackXdevTool, type XdevState } from "@oh-my-pi/pi-coding-agent/tools/xdev";
 import type { Tool } from "@oh-my-pi/pi-coding-agent/tools/index";
 
@@ -183,5 +187,32 @@ describe("resolveFallbackXdevTool", () => {
 		expect(resolveFallbackXdevTool(state, "mcp__other__bank")).toBeUndefined();
 		expect(resolveFallbackXdevTool(state, "mcp__seedpatch-client__nonexistent")).toBeUndefined();
 		expect(resolveFallbackXdevTool(state, "read")).toBeUndefined();
+	});
+});
+
+describe("resolveMCPToolAlias", () => {
+	const bank = createMCPToolName("seedpatch-client", "bank");
+	const primaryTools = [{ name: "read" }, { name: bank }];
+	// What the isolated auto-learn capture agent advertises.
+	const captureTools = [{ name: "learn" }, { name: "manage_skill" }];
+
+	it("resolves only against the set it is given", () => {
+		// The hazard this signature exists to prevent: one agent's resolver
+		// reused for another. A capture response emitting the predictable
+		// doubled spelling must not reach a main-session MCP tool.
+		expect(resolveMCPToolAlias("mcp__seedpatch-client__bank", primaryTools)?.name).toBe(bank);
+		expect(resolveMCPToolAlias("mcp__seedpatch-client__bank", captureTools)).toBeUndefined();
+		expect(resolveMCPToolAlias("mcp__seedpatch-client__bank", [])).toBeUndefined();
+	});
+
+	it("never resolves a non-MCP name even when that tool is advertised", () => {
+		expect(resolveMCPToolAlias("read", primaryTools)).toBeUndefined();
+		expect(resolveMCPToolAlias("learn", captureTools)).toBeUndefined();
+	});
+
+	it("leaves an exactly-advertised name to the caller's own exact match", () => {
+		// An already-canonical name yields no candidates, so dispatch's primary
+		// lookup stays authoritative and this never shadows it.
+		expect(resolveMCPToolAlias(bank, primaryTools)).toBeUndefined();
 	});
 });

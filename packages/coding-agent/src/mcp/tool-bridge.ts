@@ -520,6 +520,32 @@ export function canonicalMCPToolNameCandidates(name: string): string[] {
 	return candidates;
 }
 
+/**
+ * Resolve a Claude Code-spelled MCP call against an EXPLICIT advertised set.
+ *
+ * The advertised set is a required argument rather than something read from
+ * ambient state, because the set a call must be resolved against is the one
+ * offered to the agent that emitted it. A resolver closing over one agent's
+ * tools and then shared with another — the primary session's resolver also
+ * handed to the isolated auto-learn capture agent, say — would let a capture
+ * response reach a main-session tool it was never offered. Naming the set at
+ * every call site makes that mistake unrepresentable.
+ *
+ * Returns `undefined` unless some {@link canonicalMCPToolNameCandidates} entry
+ * is present in `advertised`, so an already-registered name never reaches here
+ * and a non-MCP name can never resolve at all.
+ */
+export function resolveMCPToolAlias<T extends { readonly name: string }>(
+	name: string,
+	advertised: readonly T[],
+): T | undefined {
+	for (const candidate of canonicalMCPToolNameCandidates(name)) {
+		const match = advertised.find(tool => tool.name === candidate);
+		if (match) return match;
+	}
+	return undefined;
+}
+
 export interface MCPToolOriginSource {
 	readonly name: string;
 	readonly mcpServerName?: unknown;

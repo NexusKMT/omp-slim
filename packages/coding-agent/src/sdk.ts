@@ -142,7 +142,7 @@ import {
 	shouldFilterBrowserMCPForPrelude,
 } from "./mcp";
 import { MCP_CONNECTION_STATUS_EVENT_CHANNEL, type McpConnectionStatusEvent } from "./mcp/startup-events";
-import { canonicalMCPToolNameCandidates } from "./mcp/tool-bridge";
+import { resolveMCPToolAlias } from "./mcp/tool-bridge";
 import { createSessionMemoryRuntimeContext, resolveMemoryBackend } from "./memory-backend";
 import { MEMORY_BACKEND_TOOL_NAMES } from "./memory-backend/tool-names";
 import type { MnemopiSessionState } from "./mnemopi/state";
@@ -3019,6 +3019,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// name. Resolve that name from the canonical map and apply the same
 		// execution-only ACP decorator used by `write xd://<tool>`; docs and
 		// renderer lookup continue to use the undecorated canonical instance.
+		//
+		// BOUND TO THE PRIMARY AGENT. The MCP-alias branch resolves against
+		// `agent.state.tools`, so this closure MUST NOT be handed to an agent
+		// advertising a different set — it would resolve calls against tools that
+		// agent was never offered. Give such an agent its own resolver over its
+		// own advertised set, or no fallback at all.
 		const resolveDeviceTool = (name: string): AgentTool | undefined => {
 			const state = toolSession.xdev;
 			const device = state ? resolveFallbackXdevExecutable(state, name) : undefined;
@@ -3028,18 +3034,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// be the only place a Claude Code MCP spelling is recovered — with no
 			// state at all an advertised MCP tool would still dead-end.
 			//
-			// `agent.state.tools` is the set actually advertised to THIS caller and
-			// is already execution-wrapped by `#applyActiveToolsByName`, so a
+			// `agent.state.tools` is the set advertised to the primary agent and is
+			// already execution-wrapped by `#applyActiveToolsByName`, so a
 			// deselected, `defaultInactive`, or hidden tool stays unreachable and no
-			// permission wrapper is bypassed. The auto-learn capture agent
-			// advertises only `learn`/`manage_skill`, so it gains no MCP surface.
-			// Only `mcp__` names yield candidates, so no first-party tool is
-			// reachable this way.
-			for (const candidate of canonicalMCPToolNameCandidates(stripXdUrlPrefix(name))) {
-				const advertised = agent.state.tools.find(tool => tool.name === candidate);
-				if (advertised) return advertised;
-			}
-			return undefined;
+			// permission wrapper is bypassed. Only `mcp__` names yield candidates,
+			// so no first-party tool is reachable this way.
+			return resolveMCPToolAlias(stripXdUrlPrefix(name), agent.state.tools);
 		};
 		// Mounted devices are absent from the advertised tool set, so a miss on a
 		// device name has nothing to suggest unless the loop is told they exist.
@@ -4218,8 +4218,14 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					getToolContext: toolCall => toolContextStore.getContext(toolCall),
 					streamFn: settingsAwareStreamFn,
 					transformToolCallArguments,
-					resolveFallbackTool: resolveDeviceTool,
-					suggestFallbackToolNames: suggestDeviceToolNames,
+					// No fallback resolver. The capture agent advertises only
+					// `learn`/`manage_skill`, both of which stay top-level and never
+					// mount as devices, so it has nothing legitimate to recover — while
+					// the primary session's resolver is bound to the primary agent's
+					// tools and would have let a capture response reach a main-session
+					// MCP tool, side effects included. A hallucinated call from here
+					// correctly stays `not found`, and suggesting session devices it
+					// cannot call would only mislead it.
 					intentTracing: !!intentField,
 					pruneToolDescriptions: inlineToolDescriptors,
 					dialect: resolveDialect(settings.get("tools.format"), captureModel),
