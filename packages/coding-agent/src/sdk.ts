@@ -228,7 +228,7 @@ import {
 	listXdevTools,
 	ReadTool,
 	releaseComputerSessionsForOwner,
-	resolveFallbackXdevExecutable,
+	resolveMountedXdevExecutable,
 	supportsExternalThinking,
 	type Tool,
 	type ToolSession,
@@ -3020,26 +3020,35 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// execution-only ACP decorator used by `write xd://<tool>`; docs and
 		// renderer lookup continue to use the undecorated canonical instance.
 		//
-		// BOUND TO THE PRIMARY AGENT. The MCP-alias branch resolves against
+		// BOUND TO THE PRIMARY AGENT. The alias branch resolves against
 		// `agent.state.tools`, so this closure MUST NOT be handed to an agent
 		// advertising a different set — it would resolve calls against tools that
 		// agent was never offered. Give such an agent its own resolver over its
 		// own advertised set, or no fallback at all.
 		const resolveDeviceTool = (name: string): AgentTool | undefined => {
+			const bareName = stripXdUrlPrefix(name);
 			const state = toolSession.xdev;
-			const device = state ? resolveFallbackXdevExecutable(state, name) : undefined;
-			if (device) return device;
-			// `xd://` state is allocated only when `tools.xdev` is on AND the
-			// session is unrestricted (`createTools`), so device resolution cannot
-			// be the only place a Claude Code MCP spelling is recovered — with no
-			// state at all an advertised MCP tool would still dead-end.
+			// An exact mounted name is the name itself, not a guess.
+			const exactDevice = state ? resolveMountedXdevExecutable(state, bareName) : undefined;
+			if (exactDevice) return exactDevice;
+			// One lookup spanning BOTH presentation sets this agent can reach, so
+			// the uniqueness rule applies across their union: an alias answered by
+			// a mounted device AND by a different advertised tool is ambiguous, not
+			// a race the mounted set happens to win.
 			//
-			// `agent.state.tools` is the set advertised to the primary agent and is
+			// `xd://` state exists only when `tools.xdev` is on and the session is
+			// unrestricted (`createTools`), so the advertised arm is what recovers
+			// an MCP alias when there is no state at all. That arm reads the set
 			// already execution-wrapped by `#applyActiveToolsByName`, so a
-			// deselected, `defaultInactive`, or hidden tool stays unreachable and no
-			// permission wrapper is bypassed. Only `mcp__` names yield candidates,
-			// so no first-party tool is reachable this way.
-			return resolveMCPToolAlias(stripXdUrlPrefix(name), agent.state.tools);
+			// deselected, `defaultInactive`, hidden, or Code Mode-demoted tool
+			// stays unreachable and no permission wrapper is bypassed. Only `mcp__`
+			// names yield candidates, so no first-party tool is reachable this way.
+			return resolveMCPToolAlias(
+				bareName,
+				candidate =>
+					(state ? resolveMountedXdevExecutable(state, candidate) : undefined) ??
+					agent.state.tools.find(tool => tool.name === candidate),
+			);
 		};
 		// Mounted devices are absent from the advertised tool set, so a miss on a
 		// device name has nothing to suggest unless the loop is told they exist.

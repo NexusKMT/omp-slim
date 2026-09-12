@@ -521,15 +521,20 @@ export function canonicalMCPToolNameCandidates(name: string): string[] {
 }
 
 /**
- * Resolve a Claude Code-spelled MCP call against an EXPLICIT advertised set.
+ * Resolve a Claude Code-spelled MCP call through an EXPLICIT lookup.
  *
- * The advertised set is a required argument rather than something read from
- * ambient state, because the set a call must be resolved against is the one
- * offered to the agent that emitted it. A resolver closing over one agent's
- * tools and then shared with another — the primary session's resolver also
- * handed to the isolated auto-learn capture agent, say — would let a capture
- * response reach a main-session tool it was never offered. Naming the set at
- * every call site makes that mistake unrepresentable.
+ * The lookup is a required argument rather than something read from ambient
+ * state, because the set a call must resolve against is the one offered to the
+ * agent that emitted it. A resolver closing over one agent's tools and then
+ * shared with another — the primary session's resolver also handed to the
+ * isolated auto-learn capture agent, say — would let a capture response reach a
+ * main-session tool it was never offered. Naming the source at every call site
+ * makes that mistake unrepresentable.
+ *
+ * A caller whose tools span several presentation sets (mounted `xd://` devices
+ * plus advertised top-level tools) MUST pass one lookup covering the union.
+ * Checking each set with its own call and taking the first hit would let set
+ * order silently break the uniqueness rule below.
  *
  * Resolution requires a UNIQUE match. Two different boundaries can both name a
  * registered tool — server `foo` + tool `bar__foo_bar_baz` and server
@@ -540,16 +545,16 @@ export function canonicalMCPToolNameCandidates(name: string): string[] {
  * resolves to nothing and the call stays a recoverable `not found`.
  *
  * Returns `undefined` unless exactly one {@link canonicalMCPToolNameCandidates}
- * entry is present in `advertised`, so an already-registered name never reaches
- * here and a non-MCP name can never resolve at all.
+ * entry resolves, so an already-registered name never reaches here and a
+ * non-MCP name can never resolve at all.
  */
 export function resolveMCPToolAlias<T extends { readonly name: string }>(
 	name: string,
-	advertised: readonly T[],
+	lookup: (candidate: string) => T | undefined,
 ): T | undefined {
 	const matches: T[] = [];
 	for (const candidate of canonicalMCPToolNameCandidates(name)) {
-		const match = advertised.find(tool => tool.name === candidate);
+		const match = lookup(candidate);
 		if (match !== undefined && !matches.some(seen => seen.name === match.name)) matches.push(match);
 	}
 	return matches.length === 1 ? matches[0] : undefined;

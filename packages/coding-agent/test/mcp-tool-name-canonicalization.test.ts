@@ -4,7 +4,7 @@ import {
 	createMCPToolName,
 	resolveMCPToolAlias,
 } from "@oh-my-pi/pi-coding-agent/mcp/tool-bridge";
-import { resolveFallbackXdevTool, type XdevState } from "@oh-my-pi/pi-coding-agent/tools/xdev";
+import { resolveMountedXdevExecutable, type XdevState } from "@oh-my-pi/pi-coding-agent/tools/xdev";
 import type { Tool } from "@oh-my-pi/pi-coding-agent/tools/index";
 
 // `createMCPToolName` joins the sanitized server and tool with a SINGLE
@@ -132,7 +132,7 @@ describe("canonicalMCPToolNameCandidates", () => {
 	});
 });
 
-/** Minimal state exposing the fields `resolveFallbackXdevTool` reads. */
+/** Minimal state exposing the fields the mounted resolver reads. */
 function xdevStateWith(options: { mounted?: string[]; active?: string[] }): XdevState {
 	const mounted = options.mounted ?? [];
 	const active = options.active ?? [];
@@ -146,75 +146,49 @@ function xdevStateWith(options: { mounted?: string[]; active?: string[] }): Xdev
 	};
 }
 
-describe("resolveFallbackXdevTool", () => {
-	it("routes the Claude Code spelling of a mounted MCP device", () => {
-		// With many MCP tools the session presents them as `xd://` devices, so
-		// this is the dispatch path such a session hits.
-		const registered = createMCPToolName("seedpatch-client", "bank");
-		const state = xdevStateWith({ mounted: [registered, "github"] });
+describe("resolveMountedXdevExecutable", () => {
+	it("resolves mounted devices only, never the active set", () => {
+		const bank = createMCPToolName("seedpatch-client", "bank");
+		const state = xdevStateWith({ mounted: ["github"], active: [bank] });
 
-		expect(resolveFallbackXdevTool(state, "mcp__seedpatch-client__bank")?.name).toBe(registered);
-		expect(resolveFallbackXdevTool(state, "xd://mcp__seedpatch-client__bank")?.name).toBe(registered);
-		// Exact and bare spellings keep working.
-		expect(resolveFallbackXdevTool(state, registered)?.name).toBe(registered);
-		expect(resolveFallbackXdevTool(state, "github")?.name).toBe("github");
-	});
-
-	it("refuses an active-but-unmounted tool, keeping the Code Mode boundary", () => {
-		// Under Code Mode `#applyActiveToolsByName` clears the mounted set but
-		// sets the active predicate to the whole enabled slate, including MCP
-		// tools demoted behind the eval bridge. Resolving against `isActive`
-		// would dispatch one of those directly. Advertised top-level tools are
-		// recovered by the caller against its own agent's set instead.
-		const demoted = createMCPToolName("seedpatch-client", "bank");
-		const state = xdevStateWith({ active: [demoted] });
-
-		expect(state.mountedNames.size).toBe(0);
-		expect(resolveFallbackXdevTool(state, demoted)).toBeUndefined();
-		expect(resolveFallbackXdevTool(state, "mcp__seedpatch-client__bank")).toBeUndefined();
-	});
-
-	it("never routes an active first-party tool through the fallback", () => {
-		// The fallback runs for ANY call the advertised set does not contain, so
-		// routing `edit` here would execute a tool the model was never offered.
-		// Only `mcp__` names produce candidates, which is what forbids that.
-		const state = xdevStateWith({ active: ["edit", "read"], mounted: ["github"] });
-		expect(resolveFallbackXdevTool(state, "edit")).toBeUndefined();
-		expect(resolveFallbackXdevTool(state, "read")).toBeUndefined();
-	});
-
-	it("still refuses a name no mounted device claims", () => {
-		const state = xdevStateWith({ mounted: [createMCPToolName("seedpatch-client", "bank")] });
-		expect(resolveFallbackXdevTool(state, "mcp__other__bank")).toBeUndefined();
-		expect(resolveFallbackXdevTool(state, "mcp__seedpatch-client__nonexistent")).toBeUndefined();
-		expect(resolveFallbackXdevTool(state, "read")).toBeUndefined();
+		expect(resolveMountedXdevExecutable(state, "github")?.name).toBe("github");
+		expect(resolveMountedXdevExecutable(state, "xd://github")?.name).toBe("github");
+		// Active but unmounted. Under Code Mode `#applyActiveToolsByName` clears
+		// the mounted set while leaving the active predicate on the whole enabled
+		// slate, so resolving active names here would dispatch a tool deliberately
+		// demoted behind the eval bridge.
+		expect(resolveMountedXdevExecutable(state, bank)).toBeUndefined();
 	});
 });
 
 describe("resolveMCPToolAlias", () => {
 	const bank = createMCPToolName("seedpatch-client", "bank");
-	const primaryTools = [{ name: "read" }, { name: bank }];
+	/** Lookup over one explicit name set — the shape every caller passes. */
+	const over =
+		(names: readonly string[]) =>
+		(candidate: string): { name: string } | undefined =>
+			names.includes(candidate) ? { name: candidate } : undefined;
 	// What the isolated auto-learn capture agent advertises.
-	const captureTools = [{ name: "learn" }, { name: "manage_skill" }];
+	const captureTools = ["learn", "manage_skill"];
 
-	it("resolves only against the set it is given", () => {
+	it("resolves only through the lookup it is given", () => {
 		// The hazard this signature exists to prevent: one agent's resolver
 		// reused for another. A capture response emitting the predictable
 		// doubled spelling must not reach a main-session MCP tool.
-		expect(resolveMCPToolAlias("mcp__seedpatch-client__bank", primaryTools)?.name).toBe(bank);
-		expect(resolveMCPToolAlias("mcp__seedpatch-client__bank", captureTools)).toBeUndefined();
-		expect(resolveMCPToolAlias("mcp__seedpatch-client__bank", [])).toBeUndefined();
+		expect(resolveMCPToolAlias("mcp__seedpatch-client__bank", over(["read", bank]))?.name).toBe(bank);
+		expect(resolveMCPToolAlias("mcp__seedpatch-client__bank", over(captureTools))).toBeUndefined();
+		expect(resolveMCPToolAlias("mcp__seedpatch-client__bank", over([]))).toBeUndefined();
 	});
 
 	it("never resolves a non-MCP name even when that tool is advertised", () => {
-		expect(resolveMCPToolAlias("read", primaryTools)).toBeUndefined();
-		expect(resolveMCPToolAlias("learn", captureTools)).toBeUndefined();
+		expect(resolveMCPToolAlias("read", over(["read", bank]))).toBeUndefined();
+		expect(resolveMCPToolAlias("learn", over(captureTools))).toBeUndefined();
 	});
 
 	it("leaves an exactly-advertised name to the caller's own exact match", () => {
 		// An already-canonical name yields no candidates, so dispatch's primary
 		// lookup stays authoritative and this never shadows it.
-		expect(resolveMCPToolAlias(bank, primaryTools)).toBeUndefined();
+		expect(resolveMCPToolAlias(bank, over([bank]))).toBeUndefined();
 	});
 
 	it("refuses an ambiguous alias rather than picking a boundary", () => {
@@ -228,10 +202,32 @@ describe("resolveMCPToolAlias", () => {
 
 		const emitted = "mcp__foo__bar__foo_bar_baz";
 		expect(canonicalMCPToolNameCandidates(emitted)).toEqual(expect.arrayContaining([viaFirst, viaSecond]));
-		expect(resolveMCPToolAlias(emitted, [{ name: viaFirst }, { name: viaSecond }])).toBeUndefined();
+		expect(resolveMCPToolAlias(emitted, over([viaFirst, viaSecond]))).toBeUndefined();
 
 		// Each alone is unambiguous and still resolves.
-		expect(resolveMCPToolAlias(emitted, [{ name: viaFirst }])?.name).toBe(viaFirst);
-		expect(resolveMCPToolAlias(emitted, [{ name: viaSecond }])?.name).toBe(viaSecond);
+		expect(resolveMCPToolAlias(emitted, over([viaFirst]))?.name).toBe(viaFirst);
+		expect(resolveMCPToolAlias(emitted, over([viaSecond]))?.name).toBe(viaSecond);
+	});
+
+	it("refuses an alias ambiguous ACROSS presentation sets", () => {
+		// `sdk.ts` folds mounted devices and the agent's advertised tools into ONE
+		// lookup so uniqueness spans their union. Resolving each set with its own
+		// call and taking the first hit would let a mounted match quietly win a
+		// call that is ambiguous overall.
+		const mountedName = createMCPToolName("foo", "bar__foo_bar_baz");
+		const advertisedName = createMCPToolName("foo__bar", "foo_bar_baz");
+		const state = xdevStateWith({ mounted: [mountedName] });
+		const advertised = [{ name: advertisedName }];
+		const emitted = "mcp__foo__bar__foo_bar_baz";
+
+		const union = (candidate: string): { name: string } | undefined =>
+			resolveMountedXdevExecutable(state, candidate) ?? advertised.find(t => t.name === candidate);
+		expect(resolveMCPToolAlias(emitted, union)).toBeUndefined();
+
+		// Either set on its own still resolves; only the union is ambiguous.
+		expect(resolveMCPToolAlias(emitted, candidate => resolveMountedXdevExecutable(state, candidate))?.name).toBe(
+			mountedName,
+		);
+		expect(resolveMCPToolAlias(emitted, over([advertisedName]))?.name).toBe(advertisedName);
 	});
 });

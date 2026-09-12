@@ -14,7 +14,7 @@ import type { ExtensionRunner, SourceInfo, ToolInfo } from "../extensibility/ext
 import { ExtensionToolWrapper } from "../extensibility/extensions/wrapper";
 import { loadSkills, type Skill, type SkillWarning, setActiveSkills } from "../extensibility/skills";
 import { type LocalProtocolOptions, stripXdUrlPrefix, XD_URL_PREFIX } from "../internal-urls";
-import { canonicalMCPToolNameCandidates, deduplicateMCPToolsByName } from "../mcp/tool-bridge";
+import { deduplicateMCPToolsByName, resolveMCPToolAlias } from "../mcp/tool-bridge";
 import { resolveMemoryBackend } from "../memory-backend/resolve";
 import { MEMORY_BACKEND_TOOL_NAMES } from "../memory-backend/tool-names";
 import type { MemoryBackendStartOptions } from "../memory-backend/types";
@@ -426,21 +426,20 @@ export class SessionTools {
 	/**
 	 * Looks up a registered tool by its canonical name or `xd://` alias.
 	 *
-	 * An unmatched `mcp__` name is retried against each candidate registry key:
-	 * the identity prompt primes the Claude Code spelling `mcp__<server>__<tool>`
+	 * An unmatched `mcp__` name is retried under its canonical registry keys: the
+	 * identity prompt primes the Claude Code spelling `mcp__<server>__<tool>`
 	 * while `createMCPToolName` mints a single separator, so the doubled form is
-	 * a dead end for a tool the session does expose. Every candidate is derived
-	 * from the emitted name, so lookup stays exact-match.
+	 * a dead end for a tool the session does expose. That retry goes through the
+	 * shared {@link resolveMCPToolAlias}, so an alias two registered tools both
+	 * answer resolves to nothing here exactly as it does at dispatch — this
+	 * method is public and also picks transcript renderers, so a first-match
+	 * shortcut could render or return the wrong tool.
 	 */
 	getToolByName(name: string): AgentTool | undefined {
 		const bareName = stripXdUrlPrefix(name);
 		const direct = this.#toolRegistry.get(name) ?? this.#toolRegistry.get(bareName);
 		if (direct) return direct;
-		for (const candidate of canonicalMCPToolNameCandidates(bareName)) {
-			const tool = this.#toolRegistry.get(candidate);
-			if (tool) return tool;
-		}
-		return undefined;
+		return resolveMCPToolAlias(bareName, candidate => this.#toolRegistry.get(candidate));
 	}
 
 	/** Looks up an enabled tool through the same ACP permission gate as direct calls. */

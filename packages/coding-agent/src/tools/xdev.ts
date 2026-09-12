@@ -36,7 +36,7 @@ import { parseStreamingJson } from "@oh-my-pi/pi-utils";
 import { schemaDeclaresIntentField } from "../utils/tool-schema";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { stripXdUrlPrefix, XD_URL_PREFIX } from "../internal-urls/xd-protocol";
-import { parseMCPToolName, resolveMCPToolAlias } from "../mcp/tool-bridge";
+import { parseMCPToolName } from "../mcp/tool-bridge";
 import type { Theme } from "../modes/theme/theme";
 import { truncateHeadBytes } from "../session/streaming-output";
 import { resolveToolTier, type ToolTier } from "./approval";
@@ -276,46 +276,15 @@ export function resolveMountedXdevTool(state: XdevState, name: string): Tool | u
 /**
  * Resolve a mounted tool with its execution-only permission decorator.
  *
- * Mounted-only, matching {@link resolveMountedXdevTool}. Dispatch uses the
- * wider {@link resolveFallbackXdevExecutable}; this narrower pair stays for
- * callers that mean "a device, specifically" — and is a published export under
- * `@oh-my-pi/pi-coding-agent/tools/xdev`, so its semantics must not drift.
+ * Mounted-only, matching {@link resolveMountedXdevTool}, and a published export
+ * under `@oh-my-pi/pi-coding-agent/tools/xdev`, so its semantics must not
+ * drift. `sdk.ts` composes this with the calling agent's advertised tools to
+ * recover a Claude Code-spelled MCP name: the union has to be resolved in one
+ * pass for the ambiguity rule to hold, so that composition lives with the
+ * caller that knows both presentation sets rather than here.
  */
 export function resolveMountedXdevExecutable(state: XdevState, name: string): Tool | undefined {
 	const tool = resolveMountedXdevTool(state, name);
-	return tool && state.decorateExecution ? state.decorateExecution(tool) : tool;
-}
-
-/**
- * Resolve a tool call the advertised set did not match, for the `sdk.ts`
- * fallback. MOUNTED DEVICES ONLY.
- *
- * A model may reach a mounted device by emitting a direct tool call instead of
- * a `write`. Names arrive both bare (`github`) and carrying the very `xd://`
- * prefix the device docs advertise (`xd://github`) — strip it so both
- * spellings resolve to the same device. A mounted MCP device is additionally
- * retried under the Claude Code separator the identity prompt primes
- * (`mcp__<server>__<tool>`) rather than the single underscore
- * `createMCPToolName` mints.
- *
- * Deliberately NOT gated on `XdevState.isActive`. Under Code Mode
- * `#applyActiveToolsByName` clears the mounted set yet sets the active
- * predicate to the whole enabled slate, including MCP tools demoted behind the
- * eval bridge — resolving against it would dispatch one of those directly and
- * bust the Code Mode presentation boundary. Mounted names are the devices this
- * session genuinely offers; advertised top-level tools are recovered by the
- * caller against its own agent's tool set.
- */
-export function resolveFallbackXdevTool(state: XdevState, name: string): Tool | undefined {
-	const bareName = stripXdUrlPrefix(name);
-	const mounted = resolveMountedXdevTool(state, bareName);
-	if (mounted) return mounted;
-	return resolveMCPToolAlias(bareName, listXdevTools(state));
-}
-
-/** Resolve a fallback tool call with its execution-only permission decorator. */
-export function resolveFallbackXdevExecutable(state: XdevState, name: string): Tool | undefined {
-	const tool = resolveFallbackXdevTool(state, name);
 	return tool && state.decorateExecution ? state.decorateExecution(tool) : tool;
 }
 
