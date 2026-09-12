@@ -15,6 +15,7 @@ import {
 	getTimeBasedPricingPeriod,
 } from "@oh-my-pi/pi-catalog/models";
 import type { ModelCost, ModelSpec, Usage } from "@oh-my-pi/pi-catalog/types";
+import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { isTimeBasedCost, materializeTimeBasedCost } from "../src/pricing";
 
 function spec(id = "deepseek-v4-flash", provider = "deepseek"): ModelSpec<"openai-completions"> {
@@ -432,7 +433,12 @@ describe("deepseek provider metadata corrections", () => {
 		if (!bundled) throw new Error("Expected a bundled deepseek-flash row");
 		const resolved = buildModel(bundled as ModelSpec<"openai-completions">);
 		expect(resolved.reasoning).toBe(true);
-		expect(resolved.thinking).toEqual({ mode: "effort", efforts: ["low", "high", "max"] });
+		expect(resolved.thinking).toEqual({ mode: "effort", efforts: [Effort.Low, Effort.High, Effort.Max] });
+	});
+	it("upgrades a stale non-reasoning Flash alias spec to the V4.1 ladder", () => {
+		const resolved = buildModel({ ...spec("deepseek-flash"), reasoning: false });
+		expect(resolved.reasoning).toBe(true);
+		expect(resolved.thinking?.efforts).toEqual([Effort.Low, Effort.High, Effort.Max]);
 	});
 	it("resolves the V4.1 tool-call replay contract for the bare Flash alias", () => {
 		const bundled = getBundledModels("deepseek").find(model => model.id === "deepseek-flash");

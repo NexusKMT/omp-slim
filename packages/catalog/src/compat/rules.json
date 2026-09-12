@@ -9788,6 +9788,7 @@
 					"supportsToolChoice": false
 				},
 				"thinking": {
+					"upgradeNeutral": true,
 					"efforts": [
 						"low",
 						"high",

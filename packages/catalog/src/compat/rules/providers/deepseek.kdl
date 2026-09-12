@@ -87,6 +87,9 @@ provider "deepseek" {
 	// (synthetic placeholders rejected upstream), no tool choice, and the
 	// low/high/max effort ladder the bare alias cannot inherit by family.
 	models "deepseek-flash" "deepseek-v4-flash" "deepseek-v4.1-flash-expires-on-0910" {
+		// Stale source capability data: discovery reports the bare alias as
+		// non-reasoning, so opt into the cascade upgrade for the exact ladder.
+		thinking-upgrade-neutral #true
 		max-tokens-field "max_tokens"
 		reasoning-content-field "reasoning_content"
 		requires-assistant-content-for-tool-calls #true
