@@ -383,6 +383,7 @@ import {
 	isUserQueuedMessage,
 	queueChipText,
 	toRestoredQueuedMessage,
+	VIDEO_ATTACHMENT_TYPE,
 } from "./queued-messages";
 import type { ServingModel } from "./retry-fallback-chains";
 import {
@@ -6738,7 +6739,7 @@ export class AgentSession implements SettingsScope {
 			const isVideo = source.kind === "video";
 			notices.push({
 				role: "custom",
-				customType: isVideo ? "video-attachment" : "image-attachment",
+				customType: isVideo ? VIDEO_ATTACHMENT_TYPE : "image-attachment",
 				content: prompt.render(isVideo ? videoAttachmentPrompt : imageAttachmentPrompt, {
 					index: String(index + 1),
 					path: source.path,
@@ -8485,6 +8486,30 @@ export class AgentSession implements SettingsScope {
 				.map(queueChipText),
 			followUp: this.agent.peekFollowUpQueue().filter(isUserQueuedMessage).map(queueChipText),
 		};
+	}
+
+	/**
+	 * Remove the first matching user message and its hidden companions from one queue.
+	 * Matches queue-chip text or its prompt-template expansion. A missing or already
+	 * delivered target changes nothing; repeated calls may remove further duplicates.
+	 */
+	removeQueuedMessage(text: string, queue: "steering" | "followUp"): boolean {
+		const selected = queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue();
+		const expandedText = expandPromptTemplate(text, [...this.#promptTemplates]);
+		const index = selected.findIndex(message => {
+			if (!isUserQueuedMessage(message)) return false;
+			const chipText = queueChipText(message);
+			return chipText === text || chipText === expandedText;
+		});
+		if (index < 0) return false;
+
+		let start = index;
+		while (start > 0 && isHiddenUserCompanion(selected[start - 1])) start--;
+		const remaining = selected.slice();
+		remaining.splice(start, index - start + 1);
+		this.agent.replaceQueue(queue, remaining);
+		this.#reconcileQueuedMessageDrain();
+		return true;
 	}
 
 	/**
