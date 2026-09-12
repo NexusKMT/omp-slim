@@ -351,8 +351,22 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * `customWireName` aliases). Lets hosts route calls to tools they expose
 	 * through side transports (e.g. `xd://` device mounts) instead of failing
 	 * with "Tool not found". Returning `undefined` keeps the failure.
+	 *
+	 * `advertised` is the very snapshot exact-name dispatch just searched — the
+	 * set offered to THIS request. A host must resolve against it rather than
+	 * its own live tool state: an MCP `tools/list_changed` mid-stream reassigns
+	 * the agent's tools, so live state can hold a roster the model never saw,
+	 * and a name-recovering host would dispatch a tool this request never
+	 * advertised while exact dispatch still answered from the snapshot.
 	 */
-	resolveFallbackTool?: (name: string) => AgentTool<any> | undefined;
+	resolveFallbackTool?: (name: string, advertised: readonly AgentTool<any>[]) => AgentTool<any> | undefined;
+	/**
+	 * Names reachable through {@link resolveFallbackTool} but absent from the
+	 * advertised set (e.g. `xd://` device mounts). Consulted only to name a
+	 * plausible target when a call misses, so a mis-transcribed device call is
+	 * recoverable; never a dispatch source.
+	 */
+	suggestFallbackToolNames?: () => Iterable<string>;
 
 	/**
 	 * Enable intent tracing for tool calls.
