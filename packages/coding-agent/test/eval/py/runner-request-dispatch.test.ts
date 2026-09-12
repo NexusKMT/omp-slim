@@ -481,6 +481,52 @@ describe("Python runner request dispatch", () => {
 		}
 	});
 
+	it("rejects spoofed bridge markers and invalidates digests on rebinding", async () => {
+		// The marker alone is reproducible by evaluated code, so trust requires
+		// object identity with the first-sighted bridge as well: a later
+		// marker-carrying replacement must fail closed. And since such swaps
+		// leave no JSON-safe trace, the snapshot digest must cover the binding
+		// identity or stale plans would keep verifying.
+		const runner = spawnRunner();
+		try {
+			runner.send({
+				id: "setup",
+				code: ["class TaggedTool:", "    __omp_tool_bridge__ = True", "tool = TaggedTool()"].join("\n"),
+			});
+			await collectDoneOrder(runner, new Set(["setup"]));
+
+			runner.send({ id: "plan1", type: "shadow_plan", code: 'result = await tool.read({"path": "note.txt"})' });
+			const first = await runner.nextFrame();
+			expect(first).toMatchObject({
+				type: "shadow_plan",
+				id: "plan1",
+				eligible: true,
+				operations: [expect.anything()],
+				barrier: null,
+			});
+
+			runner.send({
+				id: "spoof",
+				code: ["class SpoofBridge:", "    __omp_tool_bridge__ = True", "tool = SpoofBridge()"].join("\n"),
+			});
+			await collectDoneOrder(runner, new Set(["spoof"]));
+
+			runner.send({ id: "plan2", type: "shadow_plan", code: 'result = await tool.read({"path": "note.txt"})' });
+			const second = await runner.nextFrame();
+			expect(second).toMatchObject({ type: "shadow_plan", id: "plan2", eligible: true, operations: [] });
+			expect(second.digest).not.toBe(first.digest);
+
+			runner.send({ id: "shadow-str", code: "str = lambda x: 1 / 0" });
+			await collectDoneOrder(runner, new Set(["shadow-str"]));
+
+			runner.send({ id: "plan3", type: "shadow_plan", code: 'result = await tool.read({"path": "note.txt"})' });
+			const third = await runner.nextFrame();
+			expect(third.digest).not.toBe(second.digest);
+		} finally {
+			await runner.dispose();
+		}
+	});
+
 	it("plans zero operations for cells that fail whole-cell compilation", async () => {
 		// `await tool.read({"path": path}); global path` parses with
 		// `ast.parse` but `compile()` rejects it (use-before-global), and

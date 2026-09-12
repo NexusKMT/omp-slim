@@ -220,6 +220,48 @@ _SHADOW_UNSUPPORTED = object()
 # cannot tell them apart (see `_shadow_tool_available`).
 _TOOL_BRIDGE_MARKER = "__omp_tool_bridge__"
 
+# Runner-owned reference to the genuine prelude tool bridge, captured on first
+# sighting: kernel init executes the prelude before user cells, so the first
+# `tool` binding observed by the planner is the installed bridge. Identity
+# (`is`) plus the marker above defeats both retained shadows and spoofed
+# markers; the residual is a hostile `%run` script that both runs before any
+# plan and reproduces the marker.
+_TRUSTED_TOOL_BRIDGE: dict[str, Any] = {}
+
+
+def _tool_binding_state(user_ns: dict[str, Any]) -> str:
+    """Reserved `tool` binding identity: absent, intact, or shadowed.
+
+    Absent with nothing ever captured is the bare-harness norm (no bridge
+    installed at all). Absent after a capture means user deletion. Present
+    means intact only for the captured genuine bridge carrying the marker.
+    """
+    if "tool" not in user_ns:
+        return "absent" if _TRUSTED_TOOL_BRIDGE.get("bridge") is None else "shadowed"
+    current = user_ns["tool"]
+    trusted = _TRUSTED_TOOL_BRIDGE.get("bridge")
+    if trusted is None:
+        if getattr(current, _TOOL_BRIDGE_MARKER, False) is True:
+            _TRUSTED_TOOL_BRIDGE["bridge"] = current
+            return "intact"
+        return "shadowed"
+    return "intact" if current is trusted else "shadowed"
+
+
+def _shadow_identity_state() -> dict[str, str]:
+    """Reserved-binding identity relevant to speculation, for the snapshot digest.
+
+    Out-of-band namespace changes (async tasks, background threads) that replace
+    `tool` or `str` may leave no JSON-safe trace and bump no revision; without
+    this the digest would still match and stale plans would verify. Predicates
+    mirror the planner gates exactly (`str` membership matches the seed in
+    `_emit_shadow_plan`; `tool` matches `_shadow_tool_available`).
+    """
+    user_ns = _STATE.user_ns
+    return {
+        "str": "shadowed" if "str" in user_ns else "absent",
+        "tool": _tool_binding_state(user_ns),
+    }
 
 def _copy_shadow_value(value: Any, depth: int, state: dict[str, Any]) -> Any:
     """Copy exact JSON-safe values without invoking user protocols."""
@@ -271,27 +313,25 @@ def _snapshot_user_namespace() -> dict[str, Any]:
 def _shadow_tool_available(snapshot: dict[str, Any], user_ns: dict[str, Any]) -> bool:
     """Whether a speculative `tool.read` may reach the genuine bridge.
 
-    Cases: (a) `tool` JSON-safe-present in the snapshot is a user shadow, so
-    authoritative execution would resolve the user value (likely failing
-    before any bridge call) — unavailable. (b) `tool` omitted from the
-    snapshot but marker-tagged in the namespace is the intact bridge —
-    available. (c) `tool` omitted and present-but-untagged is a retained
-    non-JSON-safe user shadow (e.g. `tool = object()`) — unavailable.
-    (d) `tool` wholly absent from the namespace stays available: the
-    production kernel installs the prelude bridge before user cells, and
-    bare-runner harnesses never install it, so absence is the norm there —
-    existing planner tests rely on admitting this case.
+    A JSON-safe user value is visible in the snapshot; anything else goes
+    through the binding identity, which also covers bare harnesses ("absent"
+    with nothing ever captured stays available as before).
     """
     if "tool" in snapshot:
         return False
-    if "tool" not in user_ns:
-        return True
-    return getattr(user_ns["tool"], _TOOL_BRIDGE_MARKER, False) is True
+    # A JSON-safe user value is visible above; anything else goes through the
+    # binding identity, which also covers bare harnesses ("absent" with nothing
+    # ever captured stays available as before).
+    return _tool_binding_state(user_ns) in ("intact", "absent")
 
 def _shadow_snapshot_digest(values: dict[str, Any]) -> str:
-    payload = json.dumps(values, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    payload = json.dumps(
+        {"identity": _shadow_identity_state(), "values": values},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
 
 
 def _emit_shadow_snapshot(req: dict) -> None:
