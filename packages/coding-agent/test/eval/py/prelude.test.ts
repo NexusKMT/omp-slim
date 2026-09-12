@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
 import { $which, TempDir } from "@oh-my-pi/pi-utils";
 import { PYTHON_PRELUDE } from "../../../src/eval/py/prelude";
 const pythonPath = Bun.env.PYTHON ?? ($which("python3") ? "python3" : "python");
@@ -18,7 +17,7 @@ async function runPrelude(
 	const dir = await TempDir.create("omp-py-prelude-");
 	try {
 		const scriptPath = dir.join("script.py");
-		await fs.writeFile(scriptPath, script, "utf-8");
+		await Bun.write(scriptPath, script);
 		const proc = Bun.spawn([pythonPath, scriptPath], {
 			stdout: "pipe",
 			stderr: "pipe",
