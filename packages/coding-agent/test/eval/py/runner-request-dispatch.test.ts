@@ -402,6 +402,36 @@ describe("Python runner request dispatch", () => {
 		}
 	});
 
+	it("fails closed when the retained namespace shadows str with a function", async () => {
+		// Function values are never JSON-safe, so a retained `str = lambda ...`
+		// is omitted from the shadow snapshot exactly like an absent binding.
+		// Snapshot absence alone would misread it as the intact builtin and plan
+		// a physical read, while authoritative Python invokes the lambda (here
+		// raising before any bridge call). The planner instead seeds retained
+		// user-namespace bindings and fails closed.
+		const runner = spawnRunner();
+		try {
+			runner.send({ id: "shadow-fn", code: "str = lambda x: 1 / 0" });
+			const [shadowed] = await collectDoneOrder(runner, new Set(["shadow-fn"]));
+			expect(shadowed.status).toBe("ok");
+
+			runner.send({
+				id: "rejected-fn",
+				type: "shadow_plan",
+				code: 'result = await tool.read({"path": str("secret.txt")})',
+			});
+			expect(await runner.nextFrame()).toMatchObject({
+				type: "shadow_plan",
+				id: "rejected-fn",
+				eligible: true,
+				operations: [],
+				barrier: expect.anything(),
+			});
+		} finally {
+			await runner.dispose();
+		}
+	});
+
 	it("fails closed when the retained namespace shadows the tool bridge", async () => {
 		// A retained non-JSON-safe `tool` binding (e.g. `tool = object()`) is
 		// omitted from the shadow snapshot exactly like the genuine prelude

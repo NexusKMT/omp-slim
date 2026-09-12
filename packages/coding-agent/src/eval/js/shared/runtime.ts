@@ -131,7 +131,12 @@ export type ShadowSnapshot = Readonly<{
 }>;
 
 export function shadowSnapshotDigest(snapshot: ShadowSnapshot): string {
-	return String(Bun.hash(JSON.stringify(snapshot.values)));
+	// Intrinsic-identity flags participate: an async `globalThis.String = null` that
+	// lands after planning changes no value and bumps no revision, so a
+	// values-only digest would still match at verify time while projections made
+	// against the builtin no longer describe the cell. The template conversion
+	// avoids the mutable `String` global this function itself must survive.
+	return `${Bun.hash(JSON.stringify({ values: snapshot.values, initialGlobals: snapshot.initialGlobals }))}`;
 }
 
 const SHADOW_SNAPSHOT_MAX_DEPTH = 16;

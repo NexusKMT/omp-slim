@@ -135,6 +135,22 @@ describe("JsRuntime global disposal", () => {
 		}
 	});
 
+	it("changes the snapshot digest when a retained intrinsic is replaced", async () => {
+		const globals = globalThis as Record<string, unknown>;
+		const runtime = new JsRuntime({ initialCwd: process.cwd(), sessionId: "shadow-intrinsics" });
+		const genuineString = globals.String;
+		try {
+			const before = shadowSnapshotDigest(runtime.snapshotUserGlobals());
+			globals.String = null;
+			const after = runtime.snapshotUserGlobals();
+			expect(after.initialGlobals).toMatchObject({ String: false });
+			expect(shadowSnapshotDigest(after)).not.toBe(before);
+		} finally {
+			globals.String = genuineString;
+			runtime.dispose();
+		}
+	});
+
 	it("tags repeated tool calls with source-stable site occurrences", async () => {
 		const runtime = new JsRuntime({ initialCwd: process.cwd(), sessionId: "runtime-call-identity" });
 		const identities: Array<RuntimeCallIdentity | undefined> = [];

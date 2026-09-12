@@ -486,4 +486,40 @@ describe("CodingAgentSpeculativeExecutionHost", () => {
 			"Speculative read target is unavailable",
 		);
 	});
+
+	it("vetoes a commit when the symlink target changed after execution", async () => {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "speculative-host-"));
+		temporaryDirectories.push(directory);
+		await fs.writeFile(path.join(directory, "a.txt"), "content A");
+		await fs.writeFile(path.join(directory, "b.txt"), "content B");
+		await fs.symlink(path.join(directory, "a.txt"), path.join(directory, "link.txt"));
+		const session = createSession(directory);
+		const tool = new ReadTool(session);
+		const policy = tool.speculation.finalized;
+		if (!policy) throw new Error("read tool has no finalized speculation policy");
+		const host = new CodingAgentSpeculativeExecutionHost(session.settings, session, { hasHandlers: () => false });
+		const assessment = await policy.assess({ args: { path: "link.txt" } });
+		if (!assessment.eligible || assessment.effect.kind !== "local_read") {
+			throw new Error("expected provisional admission for the link path");
+		}
+		const context: SpeculativeOperationContext = {
+			candidateId: "reswapped-link",
+			source: "direct",
+			dependencies: [],
+			tool,
+			toolCall: { type: "toolCall", id: "reswapped-link", name: "read", arguments: { path: "link.txt" } },
+			args: { path: "link.txt" },
+			effect: assessment.effect,
+		};
+		await expect(host.authorize(context)).resolves.toMatchObject({ allowed: true });
+		expect(await host.captureEvidence(context)).toBe(true);
+		const physicalOutcome = await policy.execute(context, new AbortController().signal);
+		if (physicalOutcome.kind !== "result") throw new Error("expected speculative read result");
+		// Swap to another safe in-workspace file after execution: re-authorization
+		// passes its gates, but the commit must still fail — the captured result
+		// is for bytes authoritative dispatch would never read.
+		await fs.unlink(path.join(directory, "link.txt"));
+		await fs.symlink(path.join(directory, "b.txt"), path.join(directory, "link.txt"));
+		expect(await host.validate({ ...context, physicalOutcome })).toBe(false);
+	});
 });

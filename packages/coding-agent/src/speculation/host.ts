@@ -225,7 +225,14 @@ export class CodingAgentSpeculativeExecutionHost implements SpeculativeExecution
 		}
 		const authorization = await this.authorize(context);
 		if (!authorization.allowed) return false;
-		// Re-digest the executed target at commit time: evidence was captured
+		// Re-resolve the current lexical target: a symlink swapped after execution
+		// resolves to a new target that re-authorization above happily gates, while
+		// the digest below would still read the old one. All three resolutions
+		// (capture, execution, commit) must agree, or the commit is for bytes the
+		// authoritative dispatch would never read.
+		if (typeof context.args.path !== "string") return false;
+		const current = await resolveSpeculativeReadTarget(this.toolSession.cwd, context.args.path);
+		if (!current.ok || current.resolved !== expected.path) return false;
 		// pre-execution, so anything that changed afterwards (edit, swap,
 		// restore) must veto the commit even though the execution digest matches
 		// the capture. Byte equality also re-binds the type gates — swapped-in

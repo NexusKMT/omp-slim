@@ -571,6 +571,14 @@ def _emit_shadow_plan(req: dict) -> None:
     operations: list[dict[str, Any]] = []
     controls: list[dict[str, Any]] = []
     environment: dict[str, dict[str, Any]] = {}
+    # A retained `str` binding shadows the builtin even when the JSON-safe snapshot
+    # omits it (function values are never JSON-safe), so snapshot absence alone
+    # cannot prove the builtin is intact. Seed the same snapshot-ref shape Name
+    # resolution falls back to: the `str(...)` call gate below then fails closed,
+    # and any other use resolves unresolvable. (`del str` needs no seed: removing
+    # the binding restores builtin resolution authoritatively too.)
+    if "str" in _STATE.user_ns:
+        environment["str"] = {"kind": "snapshot", "name": "str"}
     occurrences: dict[str, int] = {}
     source_order = 0
     barrier: dict[str, Any] | None = None
