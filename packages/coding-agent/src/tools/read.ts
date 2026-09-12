@@ -908,9 +908,15 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			});
 			const store = getEditStore(speculativeSession);
 			const speculativeTool = new ReadTool(speculativeSession);
+			// Execute against the requested lexical path so the committed result
+			// renders exactly like an ordinary read (hashline headers, source
+			// metadata). The resolved target above stays a validation gate and
+			// still binds content addressing below; containment and agreement are
+			// enforced by this revalidation plus the capture/execute/commit digest
+			// triple-check, never by the rendered path.
 			const result = await speculativeTool.#executeInner(
 				context.toolCall.id,
-				{ ...(context.args as ReadParams), path: absolutePath },
+				{ ...(context.args as ReadParams) },
 				signal,
 				undefined,
 				undefined,

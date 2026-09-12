@@ -167,6 +167,36 @@ describe("read speculation assessment", () => {
 		expect(store.headText(absolutePath)).toBe("plain text");
 		expect(snapshotHash ? store.seenLines(absolutePath, snapshotHash) : null).toEqual([1]);
 	});
+	it("renders speculative symlink reads under the requested lexical path", async () => {
+		const targetPath = path.join(testDir, "real.txt");
+		fs.writeFileSync(targetPath, "linked content");
+		try {
+			fs.symlinkSync(targetPath, path.join(testDir, "link.txt"), "file");
+		} catch {
+			// Windows without symlink privilege: nothing to verify.
+			return;
+		}
+		const session = createSession(testDir);
+		const tool = new ReadTool(session);
+		const policy = tool.speculation.finalized;
+		if (!policy) throw new Error("read tool has no finalized speculation policy");
+		const args = { path: "link.txt" };
+		const assessment = await policy.assess({ args });
+		if (!assessment?.eligible) throw new Error("expected speculative read admission");
+		const context = {
+			toolCall: { type: "toolCall" as const, id: "link-read", name: "read", arguments: args },
+			args,
+			effect: assessment.effect,
+		};
+		const outcome = await policy.execute(context, new AbortController().signal);
+		if (!outcome) throw new Error("expected speculative read outcome");
+		const committed = await policy.commit?.({ ...context, physicalOutcome: outcome }, outcome);
+		const text =
+			committed?.content?.find((entry): entry is { type: "text"; text: string } => entry.type === "text")?.text ??
+			"";
+		expect(text).toContain("link.txt");
+		expect(text).not.toContain("real.txt");
+	});
 
 	it("defers conflict-aware reads without mutating live conflict history", async () => {
 		const conflictPath = path.join(testDir, "conflict.txt");
