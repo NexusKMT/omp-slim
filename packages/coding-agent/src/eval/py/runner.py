@@ -328,7 +328,11 @@ def _shadow_expression_is_string(expression: dict[str, Any]) -> bool:
     )
 
 
-def _shadow_expression(node: ast.AST, environment: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+def _shadow_expression(
+    node: ast.AST,
+    environment: dict[str, dict[str, Any]],
+    snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     if isinstance(node, ast.Constant) and (
         node.value is None or type(node.value) in (bool, int, float, str)
     ):
@@ -340,7 +344,7 @@ def _shadow_expression(node: ast.AST, environment: dict[str, dict[str, Any]]) ->
     if isinstance(node, ast.Name):
         return environment.get(node.id, {"kind": "snapshot", "name": node.id})
     if isinstance(node, (ast.List, ast.Tuple)):
-        items = [_shadow_expression(item, environment) for item in node.elts]
+        items = [_shadow_expression(item, environment, snapshot) for item in node.elts]
         return (
             {"kind": "array", "items": items}
             if all(item is not None for item in items)
@@ -351,14 +355,14 @@ def _shadow_expression(node: ast.AST, environment: dict[str, dict[str, Any]]) ->
         for key, value in zip(node.keys, node.values):
             if not isinstance(key, ast.Constant) or type(key.value) is not str:
                 return None
-            projected = _shadow_expression(value, environment)
+            projected = _shadow_expression(value, environment, snapshot)
             if projected is None:
                 return None
             entries.append({"key": key.value, "value": projected})
         return {"kind": "object", "entries": entries}
     if isinstance(node, ast.Subscript):
-        target = _shadow_expression(node.value, environment)
-        key = _shadow_expression(node.slice, environment)
+        target = _shadow_expression(node.value, environment, snapshot)
+        key = _shadow_expression(node.slice, environment, snapshot)
         if target is None or key is None or key.get("kind") != "literal":
             return None
         if type(key.get("value")) not in (str, int):
@@ -372,7 +376,7 @@ def _shadow_expression(node: ast.AST, environment: dict[str, dict[str, Any]]) ->
             elif isinstance(value, ast.FormattedValue):
                 if value.conversion != -1 or value.format_spec is not None:
                     return None
-                projected = _shadow_expression(value.value, environment)
+                projected = _shadow_expression(value.value, environment, snapshot)
                 if projected is None:
                     return None
                 items.append({"kind": "transform", "name": "Python.str", "input": projected})
@@ -380,8 +384,8 @@ def _shadow_expression(node: ast.AST, environment: dict[str, dict[str, Any]]) ->
                 return None
         return {"kind": "concat", "items": items}
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left = _shadow_expression(node.left, environment)
-        right = _shadow_expression(node.right, environment)
+        left = _shadow_expression(node.left, environment, snapshot)
+        right = _shadow_expression(node.right, environment, snapshot)
         return (
             {"kind": "concat", "items": [left, right]}
             if left is not None
@@ -395,9 +399,10 @@ def _shadow_expression(node: ast.AST, environment: dict[str, dict[str, Any]]) ->
             isinstance(node.func, ast.Name)
             and node.func.id == "str"
             and node.func.id not in environment
+            and (snapshot is None or "str" not in snapshot)
             and len(node.args) == 1
         ):
-            projected = _shadow_expression(node.args[0], environment)
+            projected = _shadow_expression(node.args[0], environment, snapshot)
             return (
                 {"kind": "transform", "name": "Python.str", "input": projected}
                 if projected is not None
@@ -511,7 +516,7 @@ def _emit_shadow_plan(req: dict) -> None:
             return None
         if call_node.keywords or len(call_node.args) != 1:
             return None
-        argument_ir = _shadow_expression(call_node.args[0], environment)
+        argument_ir = _shadow_expression(call_node.args[0], environment, snapshot)
         if argument_ir is None:
             return None
         call_span = _shadow_span(call_node, line_offsets)
@@ -571,7 +576,7 @@ def _emit_shadow_plan(req: dict) -> None:
                 if operation is not None:
                     environment[target.id] = {"kind": "operation_result", "operationId": operation["call"]["id"]}
                     continue
-                projected = _shadow_expression(value_node, environment)
+                projected = _shadow_expression(value_node, environment, snapshot)
                 if projected is None:
                     barrier = {
                         "kind": "barrier",
@@ -591,7 +596,7 @@ def _emit_shadow_plan(req: dict) -> None:
             if isinstance(statement, ast.Expr):
                 if add_operation(statement.value, dynamic_path, control_dependencies) is not None:
                     continue
-                projected = _shadow_expression(statement.value, environment)
+                projected = _shadow_expression(statement.value, environment, snapshot)
                 if projected is not None and _shadow_static_value(projected, snapshot)[0]:
                     continue
                 barrier = {
@@ -601,7 +606,7 @@ def _emit_shadow_plan(req: dict) -> None:
                 }
                 return False
             if isinstance(statement, ast.If):
-                test = _shadow_expression(statement.test, environment)
+                test = _shadow_expression(statement.test, environment, snapshot)
                 if test is None:
                     barrier = {
                         "kind": "barrier",
@@ -651,7 +656,7 @@ def _emit_shadow_plan(req: dict) -> None:
                         "span": _shadow_span(statement.target, line_offsets),
                     }
                     return False
-                iterable = _shadow_expression(statement.iter, environment)
+                iterable = _shadow_expression(statement.iter, environment, snapshot)
                 ok, values = _shadow_static_value(iterable, snapshot) if iterable is not None else (False, None)
                 if not ok or type(values) is not list or len(values) > 32:
                     barrier = {

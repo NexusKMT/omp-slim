@@ -312,11 +312,7 @@ asyncio.run(check_intent())
 		});
 		const claims: Array<{ name: string; args: unknown; identity: { siteId: string; occurrence: number } }> = [];
 		const shadowCell = {
-			async claim(
-				name: string,
-				args: unknown,
-				identity: { siteId: string; occurrence: number },
-			) {
+			async claim(name: string, args: unknown, identity: { siteId: string; occurrence: number }) {
 				claims.push({ name, args, identity });
 				return undefined;
 			},

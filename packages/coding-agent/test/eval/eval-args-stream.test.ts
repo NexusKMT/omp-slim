@@ -110,4 +110,64 @@ describe("EvalArgsStreamDecoder", () => {
 			restart: false,
 		});
 	});
+	it("disables streams that repeat the reset control field instead of last-wins", () => {
+		const decoder = new EvalArgsStreamDecoder();
+		const first = decoder.update('{"reset":false,"code":"display(1)"');
+		expect(first.kind).toBe("snapshot");
+		expect(decoder.update('{"reset":false,"code":"display(1)","reset":true}')).toEqual({
+			kind: "disabled",
+			reason: "duplicate eval reset",
+			restart: false,
+		});
+	});
+
+	it("disables a repeated reset key before its second value completes", () => {
+		const decoder = new EvalArgsStreamDecoder();
+		expect(decoder.update('{"reset":false,"code":"display(1)"').kind).toBe("snapshot");
+		expect(decoder.update('{"reset":false,"code":"display(1)","reset":tru')).toEqual({
+			kind: "disabled",
+			reason: "duplicate eval reset",
+			restart: false,
+		});
+	});
+
+	it("keeps single reset, language, and timeout buffers plannable", () => {
+		expect(new EvalArgsStreamDecoder().update('{"reset":true,"code":"display(1)"}')).toEqual({
+			kind: "snapshot",
+			snapshot: {
+				revision: 1,
+				language: "js",
+				codePrefix: "display(1)",
+				reset: true,
+				timeout: undefined,
+				complete: true,
+				restart: false,
+			},
+		});
+		expect(new EvalArgsStreamDecoder().update('{"language":"py","timeout":5,"code":"print(1)"}')).toEqual({
+			kind: "snapshot",
+			snapshot: {
+				revision: 1,
+				language: "py",
+				codePrefix: "print(1)",
+				reset: undefined,
+				timeout: 5,
+				complete: true,
+				restart: false,
+			},
+		});
+	});
+
+	it("disables streams that repeat the language or timeout control fields", () => {
+		expect(new EvalArgsStreamDecoder().update('{"language":"py","code":"print(1)","language":"js"}')).toEqual({
+			kind: "disabled",
+			reason: "duplicate eval language",
+			restart: false,
+		});
+		expect(new EvalArgsStreamDecoder().update('{"timeout":5,"code":"print(1)","timeout":6}')).toEqual({
+			kind: "disabled",
+			reason: "duplicate eval timeout",
+			restart: false,
+		});
+	});
 });

@@ -359,4 +359,46 @@ describe("Python runner request dispatch", () => {
 			await runner.dispose();
 		}
 	});
+
+	it("fails closed when the retained namespace shadows str", async () => {
+		// After an earlier cell binds `str`, name resolution in a later cell
+		// selects the user-owned retained binding, not the builtin -- while
+		// the pre-fix planner only consulted same-cell bindings and still
+		// projected the builtin `Python.str` transform, planning a physical
+		// read that authoritative Python would reject with a TypeError.
+		const runner = spawnRunner();
+		try {
+			runner.send({
+				id: "admitted",
+				type: "shadow_plan",
+				code: 'result = await tool.read({"path": str("secret.txt")})',
+			});
+			expect(await runner.nextFrame()).toMatchObject({
+				type: "shadow_plan",
+				id: "admitted",
+				eligible: true,
+				operations: [expect.anything()],
+				barrier: null,
+			});
+
+			runner.send({ id: "shadow", code: "str = None" });
+			const [shadowed] = await collectDoneOrder(runner, new Set(["shadow"]));
+			expect(shadowed.status).toBe("ok");
+
+			runner.send({
+				id: "rejected",
+				type: "shadow_plan",
+				code: 'result = await tool.read({"path": str("secret.txt")})',
+			});
+			expect(await runner.nextFrame()).toMatchObject({
+				type: "shadow_plan",
+				id: "rejected",
+				eligible: true,
+				operations: [],
+				barrier: expect.anything(),
+			});
+		} finally {
+			await runner.dispose();
+		}
+	});
 });

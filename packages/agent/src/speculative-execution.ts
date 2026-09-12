@@ -43,6 +43,12 @@ type SpeculativeToolCandidate = {
 	tool: AgentTool;
 	policy: FinalizedPolicy;
 	executionArgs: Record<string, unknown>;
+	// Immutable snapshot of the raw admitted arguments. `toolCall` aliases the
+	// finalized assistant message block, which `prepareToolCallDispatch()`
+	// mutates in place when `beforeToolCall` returns replacement arguments —
+	// comparing against `toolCall.arguments` would compare new-vs-new and
+	// reuse stale admission-time `executionArgs` for the replaced call.
+	admittedArgumentsJson: string | undefined;
 	effect: ToolSpeculationEffect;
 	fingerprint: string;
 	deferBeforeToolCall: boolean;
@@ -449,7 +455,11 @@ export class SpeculativeOperationCoordinator {
 			return undefined;
 		}
 		try {
-			if (canonicalJson(rawArgs) !== canonicalJson(candidate.toolCall.arguments)) return undefined;
+			// Compare against the immutable admission snapshot: `candidate.toolCall`
+			// aliases the finalized message block, which `prepareToolCallDispatch()`
+			// rewrites in place on a `beforeToolCall` args revision.
+			if (candidate.admittedArgumentsJson === undefined) return undefined;
+			if (canonicalJson(rawArgs) !== candidate.admittedArgumentsJson) return undefined;
 		} catch {
 			// Non-canonical calls cannot safely reuse admission arguments.
 			return undefined;
@@ -465,8 +475,10 @@ export class SpeculativeOperationCoordinator {
 			let reuseAdmissionArgs = false;
 			try {
 				const finalArgs = canonicalJson(finalCall?.arguments);
+				// Raw comparison uses the immutable admission snapshot, not the
+				// aliased `toolCall.arguments` rewritten by `prepareToolCallDispatch()`.
 				reuseAdmissionArgs =
-					finalArgs === canonicalJson(candidate.toolCall.arguments) ||
+					(candidate.admittedArgumentsJson !== undefined && finalArgs === candidate.admittedArgumentsJson) ||
 					finalArgs === canonicalJson(candidate.executionArgs);
 			} catch {
 				// Non-canonical calls cannot safely reuse admission arguments.
@@ -710,6 +722,14 @@ export class SpeculativeOperationCoordinator {
 			this.ineligible(toolCall, "speculation arguments are not canonical", source, parentToolCallId);
 			return undefined;
 		}
+		// Freeze the raw admission arguments before any downstream
+		// `prepareToolCallDispatch()` mutation of the aliased message block.
+		let admittedArgumentsJson: string | undefined;
+		try {
+			admittedArgumentsJson = canonicalJson(toolCall.arguments);
+		} catch {
+			admittedArgumentsJson = undefined;
+		}
 		const controller = new AbortController();
 		const { promise, resolve, reject } = Promise.withResolvers<SpeculativePhysicalOutcome>();
 		void promise.catch(() => undefined);
@@ -723,6 +743,7 @@ export class SpeculativeOperationCoordinator {
 			tool,
 			policy,
 			executionArgs,
+			admittedArgumentsJson,
 			effect,
 			fingerprint,
 			deferBeforeToolCall: false,

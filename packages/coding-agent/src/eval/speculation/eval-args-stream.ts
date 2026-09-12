@@ -194,7 +194,9 @@ function parseSnapshot(raw: string): Omit<EvalArgsStreamSnapshot, "revision" | "
 	let languageSeen = false;
 	let codePrefix = "";
 	let reset: boolean | undefined;
+	let resetSeen = false;
 	let timeout: number | undefined;
+	let timeoutSeen = false;
 	while (true) {
 		offset = skipWhitespace(raw, offset);
 		if (offset >= raw.length) return { language, codePrefix, reset, timeout, complete: false };
@@ -212,6 +214,16 @@ function parseSnapshot(raw: string): Omit<EvalArgsStreamSnapshot, "revision" | "
 		offset = skipWhitespace(raw, offset + 1);
 		const valueStart = offset;
 		if (valueStart >= raw.length) return { language, codePrefix, reset, timeout, complete: false };
+		if (key.value === "language") {
+			if (languageSeen) return { reason: "duplicate eval language" };
+			languageSeen = true;
+		} else if (key.value === "reset") {
+			if (resetSeen) return { reason: "duplicate eval reset" };
+			resetSeen = true;
+		} else if (key.value === "timeout") {
+			if (timeoutSeen) return { reason: "duplicate eval timeout" };
+			timeoutSeen = true;
+		}
 		if (key.value === "code") {
 			const code = scanJsonString(raw, valueStart);
 			if (code.kind === "invalid") return { reason: code.reason };
@@ -229,7 +241,6 @@ function parseSnapshot(raw: string): Omit<EvalArgsStreamSnapshot, "revision" | "
 				return { reason: "invalid completed eval argument" };
 			}
 			if (key.value === "language") {
-				languageSeen = true;
 				if (parsed !== "js" && parsed !== "py" && parsed !== "rb" && parsed !== "jl") {
 					return { reason: "unsupported eval language" };
 				}
