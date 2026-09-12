@@ -600,6 +600,13 @@ async function runInteractiveMode(
 		}
 	});
 
+	const advisorConfigWarnings = session.getAdvisorConfigWarnings();
+	if (advisorConfigWarnings.length > 0) {
+		// Pulled here, not pushed from SessionAdvisors: the constructor-time
+		// `emitNotice` fired before the UI subscribed and was silently lost.
+		mode.showWarning(`WATCHDOG.yml: ${advisorConfigWarnings.join("; ")}`);
+	}
+
 	for (const notify of notifs) {
 		if (!notify) {
 			continue;
