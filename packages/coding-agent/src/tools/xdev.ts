@@ -36,7 +36,7 @@ import { parseStreamingJson } from "@oh-my-pi/pi-utils";
 import { schemaDeclaresIntentField } from "../utils/tool-schema";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { stripXdUrlPrefix, XD_URL_PREFIX } from "../internal-urls/xd-protocol";
-import { canonicalizeMCPToolName, parseMCPToolName } from "../mcp/tool-bridge";
+import { canonicalMCPToolNameCandidates, parseMCPToolName } from "../mcp/tool-bridge";
 import type { Theme } from "../modes/theme/theme";
 import { truncateHeadBytes } from "../session/streaming-output";
 import { resolveToolTier, type ToolTier } from "./approval";
@@ -265,32 +265,53 @@ export function resolveXdevTool(state: XdevState, name: string): Tool | undefine
 }
 
 /**
- * Resolve a mounted tool for top-level fallback execution.
- *
- * A model may reach a mounted device by emitting a direct tool call instead of
- * a `write`; the fallback in `sdk.ts` routes that here. Names arrive both bare
- * (`github`) and carrying the very `xd://` prefix the device docs advertise
- * (`xd://github`) — strip it so both spellings resolve to the same device.
- *
- * Mounted MCP tools additionally arrive under the Claude Code separator the
- * identity prompt primes (`mcp__<server>__<tool>`) rather than the single
- * underscore `createMCPToolName` mints, so an unmatched `mcp__` name gets one
- * retry under its canonical registry key. Lookup stays exact-match: the
- * canonical key is derived from the emitted name, never guessed from siblings.
+ * Resolve a mounted tool by name. Presentation-only: `xd://` docs and renderer
+ * lookup ask for names they already hold in canonical form.
  */
 export function resolveMountedXdevTool(state: XdevState, name: string): Tool | undefined {
 	const canonicalName = stripXdUrlPrefix(name);
-	if (state.mountedNames.has(canonicalName)) return state.tools.get(canonicalName);
-	const mcpName = canonicalizeMCPToolName(canonicalName);
-	if (mcpName === undefined || !state.mountedNames.has(mcpName)) return undefined;
-	return state.tools.get(mcpName);
+	return state.mountedNames.has(canonicalName) ? state.tools.get(canonicalName) : undefined;
 }
 
-/** Resolve a mounted tool with its execution-only permission decorator. */
-export function resolveMountedXdevExecutable(state: XdevState, name: string): Tool | undefined {
-	const tool = resolveMountedXdevTool(state, name);
+/**
+ * Resolve a tool call the advertised set did not match, for the `sdk.ts`
+ * fallback.
+ *
+ * A model may reach a mounted device by emitting a direct tool call instead of
+ * a `write`. Names arrive both bare (`github`) and carrying the very `xd://`
+ * prefix the device docs advertise (`xd://github`) — strip it so both
+ * spellings resolve to the same device.
+ *
+ * MCP tools additionally arrive under the Claude Code separator the identity
+ * prompt primes (`mcp__<server>__<tool>`) rather than the single underscore
+ * `createMCPToolName` mints, so an unmatched `mcp__` name is retried against
+ * each candidate registry key. Those retries accept an ACTIVE tool as well as
+ * a mounted one: with `tools.xdev` off — or for an explicitly requested MCP
+ * tool — the tool stays top-level and never enters `mountedNames`, yet the
+ * misspelled call still lands here after missing the advertised set.
+ *
+ * Widening to active tools cannot reach a tool the model was never offered:
+ * only `mcp__`-prefixed names produce candidates, so first-party names like
+ * `edit` have no path through here, and `resolveXdevTool` still gates every
+ * candidate on being mounted or active.
+ */
+export function resolveFallbackXdevTool(state: XdevState, name: string): Tool | undefined {
+	const bareName = stripXdUrlPrefix(name);
+	const mounted = resolveMountedXdevTool(state, bareName);
+	if (mounted) return mounted;
+	for (const candidate of canonicalMCPToolNameCandidates(bareName)) {
+		const tool = resolveXdevTool(state, candidate);
+		if (tool) return tool;
+	}
+	return undefined;
+}
+
+/** Resolve a fallback tool call with its execution-only permission decorator. */
+export function resolveFallbackXdevExecutable(state: XdevState, name: string): Tool | undefined {
+	const tool = resolveFallbackXdevTool(state, name);
 	return tool && state.decorateExecution ? state.decorateExecution(tool) : tool;
 }
+
 /** Mounted tools in presentation order, resolved from the canonical map. */
 export function listXdevTools(state: XdevState): Tool[] {
 	return [...state.mountedNames].flatMap(name => {

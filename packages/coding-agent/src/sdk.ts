@@ -227,7 +227,7 @@ import {
 	listXdevTools,
 	ReadTool,
 	releaseComputerSessionsForOwner,
-	resolveMountedXdevExecutable,
+	resolveFallbackXdevExecutable,
 	supportsExternalThinking,
 	type Tool,
 	type ToolSession,
@@ -3021,7 +3021,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const resolveDeviceTool = (name: string): AgentTool | undefined => {
 			const state = toolSession.xdev;
 			if (!state) return undefined;
-			return resolveMountedXdevExecutable(state, name);
+			return resolveFallbackXdevExecutable(state, name);
 		};
 		// Mounted devices are absent from the advertised tool set, so a miss on a
 		// device name has nothing to suggest unless the loop is told they exist.

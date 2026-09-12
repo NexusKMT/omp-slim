@@ -456,8 +456,8 @@ export function createMCPToolName(serverName: string, toolName: string): string 
 }
 
 /**
- * Canonical registry spelling for a model-emitted MCP tool name, or `undefined`
- * when the name is not `mcp__`-prefixed or is already canonical.
+ * Registry keys a model-emitted MCP tool name may have meant, in priority
+ * order. Empty when the name is not `mcp__`-prefixed or is already canonical.
  *
  * {@link createMCPToolName} joins the sanitized server and tool with a SINGLE
  * underscore, but OMP presents itself as Claude Code, whose convention is
@@ -467,20 +467,48 @@ export function createMCPToolName(serverName: string, toolName: string): string 
  * names are strictly unregistered, so dispatch dead-ends on a tool the session
  * really does expose.
  *
- * Re-running the minting sanitizer over the emitted suffix collapses every
- * separator and punctuation variant onto the key the tool was registered under.
- * This is normalization, not fuzzy matching: `sanitizeMCPToolNamePart` is
- * idempotent and registry keys are already in its output form, so a canonical
- * name maps to itself and two distinct registry keys can never collapse
- * together. Callers therefore keep exact-match dispatch — they retry the lookup
- * once under the canonical key rather than guessing a neighbour.
+ * Two candidates, because the doubled separator carries information the
+ * collapsed form loses:
+ *
+ * 1. Split at the first `__` and re-mint through the whole of
+ *    `createMCPToolName`. A sanitized server segment never contains `__`, so
+ *    that boundary is exactly where the Claude Code spelling put it. Re-minting
+ *    (rather than only sanitizing) is what reproduces redundant-server-prefix
+ *    stripping — server `puppeteer` + tool `puppeteer_screenshot` registers as
+ *    `mcp__puppeteer_screenshot`, not `mcp__puppeteer_puppeteer_screenshot` —
+ *    and the 64-char {@link capMCPToolNameLength} hash.
+ * 2. Sanitize the whole suffix, for a single-separator name whose punctuation
+ *    still differs from the minted key (`mcp__seedpatch-client_bank`).
+ *
+ * This is normalization, not fuzzy matching: every candidate is derived from
+ * the emitted name by the same rules that minted the registry, never selected
+ * from siblings. `sanitizeMCPToolNamePart` is idempotent and registry keys are
+ * already in its output form, so an already-registered name yields no
+ * candidates at all and stays on the exact-match path. Callers try each
+ * candidate as an exact lookup and keep failing when none is registered.
  */
-export function canonicalizeMCPToolName(name: string): string | undefined {
-	if (!name.startsWith(MCP_TOOL_NAME_PREFIX)) return undefined;
+export function canonicalMCPToolNameCandidates(name: string): string[] {
+	if (!name.startsWith(MCP_TOOL_NAME_PREFIX)) return [];
 	const suffix = name.slice(MCP_TOOL_NAME_PREFIX.length);
-	if (suffix.length === 0) return undefined;
-	const canonical = `${MCP_TOOL_NAME_PREFIX}${sanitizeMCPToolNamePart(suffix, "tool")}`;
-	return canonical === name ? undefined : canonical;
+	if (suffix.length === 0) return [];
+	const candidates: string[] = [];
+	const add = (candidate: string): void => {
+		if (candidate !== name && !candidates.includes(candidate)) candidates.push(candidate);
+	};
+
+	// Both halves must survive sanitization before re-minting: for `mcp____bank`
+	// or `mcp__-__tool` an emptied part would otherwise be replaced by
+	// `createMCPToolName`'s `server`/`tool` placeholders, minting a key nobody
+	// registered. The same guard rules out a fully punctuation-only suffix.
+	const survives = (part: string): boolean => sanitizeMCPToolNamePart(part, "").length > 0;
+	const boundary = suffix.indexOf("__");
+	if (boundary > 0) {
+		const serverName = suffix.slice(0, boundary);
+		const toolName = suffix.slice(boundary + 2);
+		if (survives(serverName) && survives(toolName)) add(createMCPToolName(serverName, toolName));
+	}
+	if (survives(suffix)) add(`${MCP_TOOL_NAME_PREFIX}${sanitizeMCPToolNamePart(suffix, "")}`);
+	return candidates;
 }
 
 export interface MCPToolOriginSource {
