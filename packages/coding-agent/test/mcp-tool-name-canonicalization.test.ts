@@ -57,6 +57,20 @@ describe("canonicalMCPToolNameCandidates", () => {
 		expect(recover("mcp__puppeteer__puppeteer_screenshot", registered)).toBe(registered);
 	});
 
+	it("recovers when the raw server name itself contains a doubled separator", () => {
+		// A *sanitized* server segment can never contain `__`, but the model emits
+		// the raw name, which can. Splitting only at the first occurrence would
+		// put the boundary inside the server and miss the key entirely.
+		const registered = createMCPToolName("foo__bar", "foo_bar_baz");
+		expect(registered).toBe("mcp__foo_bar_baz");
+		expect(recover("mcp__foo__bar__foo_bar_baz", registered)).toBe(registered);
+
+		// The common case must still rank first: with no `__` in the server name
+		// the earliest boundary is the right one.
+		const plain = createMCPToolName("seedpatch-client", "bank");
+		expect(canonicalMCPToolNameCandidates("mcp__seedpatch-client__bank")[0]).toBe(plain);
+	});
+
 	it("recovers a name long enough to be hash-capped", () => {
 		// Over 64 chars the minted key keeps a readable prefix plus a hash, so a
 		// candidate built without the cap could never match it.

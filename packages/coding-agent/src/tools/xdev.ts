@@ -274,6 +274,19 @@ export function resolveMountedXdevTool(state: XdevState, name: string): Tool | u
 }
 
 /**
+ * Resolve a mounted tool with its execution-only permission decorator.
+ *
+ * Mounted-only, matching {@link resolveMountedXdevTool}. Dispatch uses the
+ * wider {@link resolveFallbackXdevExecutable}; this narrower pair stays for
+ * callers that mean "a device, specifically" — and is a published export under
+ * `@oh-my-pi/pi-coding-agent/tools/xdev`, so its semantics must not drift.
+ */
+export function resolveMountedXdevExecutable(state: XdevState, name: string): Tool | undefined {
+	const tool = resolveMountedXdevTool(state, name);
+	return tool && state.decorateExecution ? state.decorateExecution(tool) : tool;
+}
+
+/**
  * Resolve a tool call the advertised set did not match, for the `sdk.ts`
  * fallback.
  *

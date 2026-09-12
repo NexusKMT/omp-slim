@@ -467,19 +467,22 @@ export function createMCPToolName(serverName: string, toolName: string): string 
  * names are strictly unregistered, so dispatch dead-ends on a tool the session
  * really does expose.
  *
- * Two candidates, because the doubled separator carries information the
- * collapsed form loses:
+ * Candidates, because the doubled separator carries information the collapsed
+ * form loses:
  *
- * 1. Split at the first `__` and re-mint through the whole of
- *    `createMCPToolName`. A sanitized server segment never contains `__`, so
- *    that boundary is exactly where the Claude Code spelling put it. Re-minting
- *    (rather than only sanitizing) is what reproduces redundant-server-prefix
- *    stripping — server `puppeteer` + tool `puppeteer_screenshot` registers as
- *    `mcp__puppeteer_screenshot`, not `mcp__puppeteer_puppeteer_screenshot` —
- *    and the 64-char {@link capMCPToolNameLength} hash.
+ * 1. Split at a `__` and re-mint through the whole of `createMCPToolName`.
+ *    Re-minting (rather than only sanitizing) is what reproduces
+ *    redundant-server-prefix stripping — server `puppeteer` + tool
+ *    `puppeteer_screenshot` registers as `mcp__puppeteer_screenshot`, not
+ *    `mcp__puppeteer_puppeteer_screenshot` — and the 64-char
+ *    {@link capMCPToolNameLength} hash. EVERY `__` is tried as the boundary:
+ *    a *sanitized* server segment can never contain one, but the model
+ *    routinely emits the RAW server name, which can (`foo__bar`), so the first
+ *    occurrence is not necessarily the split. Earlier boundaries rank first
+ *    since a server name without `__` is overwhelmingly the common case.
  * 2. Sanitize the whole suffix, for a single-separator name whose punctuation
  *    still differs from the minted key (`mcp__seedpatch-client_bank`). This
- *    candidate is capped too: without the boundary there is nothing to re-mint,
+ *    candidate is capped too: without a boundary there is nothing to re-mint,
  *    but the registered key was still length-capped, so an overlong spelling
  *    would otherwise never match its hashed form.
  *
@@ -504,8 +507,9 @@ export function canonicalMCPToolNameCandidates(name: string): string[] {
 	// `createMCPToolName`'s `server`/`tool` placeholders, minting a key nobody
 	// registered. The same guard rules out a fully punctuation-only suffix.
 	const survives = (part: string): boolean => sanitizeMCPToolNamePart(part, "").length > 0;
-	const boundary = suffix.indexOf("__");
-	if (boundary > 0) {
+	for (let boundary = suffix.indexOf("__"); boundary >= 0; boundary = suffix.indexOf("__", boundary + 1)) {
+		// A boundary at 0 would mean an empty server segment.
+		if (boundary === 0) continue;
 		const serverName = suffix.slice(0, boundary);
 		const toolName = suffix.slice(boundary + 2);
 		if (survives(serverName) && survives(toolName)) add(createMCPToolName(serverName, toolName));

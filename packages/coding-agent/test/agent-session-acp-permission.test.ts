@@ -22,7 +22,7 @@ import type {
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { dispatchXdevTool, resolveFallbackXdevExecutable, type XdevState } from "@oh-my-pi/pi-coding-agent/tools/xdev";
+import { dispatchXdevTool, resolveMountedXdevExecutable, type XdevState } from "@oh-my-pi/pi-coding-agent/tools/xdev";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 // ---------------------------------------------------------------------------
@@ -299,7 +299,7 @@ it("top-level fallback preserves ACP permission for mounted destructive tools", 
 	await session.refreshRpcHostTools([deleteTool]);
 	expect(xdev.mountedNames.has("delete")).toBe(true);
 	expect(session.getActiveToolNames()).not.toContain("delete");
-	const fallbackTool = resolveFallbackXdevExecutable(xdev, "delete");
+	const fallbackTool = resolveMountedXdevExecutable(xdev, "delete");
 	await fallbackTool!.execute(
 		"call-mounted-delete",
 		{ path: "/tmp/gone.ts" },
