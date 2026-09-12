@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, ToolCall, Usage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ToolCall, ToolResultMessage, Usage } from "@oh-my-pi/pi-ai";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-coding-agent/modes/components/assistant-message";
 import { ReadToolGroupComponent } from "@oh-my-pi/pi-coding-agent/modes/components/read-tool-group";
@@ -10,7 +10,7 @@ import { EventController } from "@oh-my-pi/pi-coding-agent/modes/controllers/eve
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import type { Component } from "@oh-my-pi/pi-tui";
+import { type Component, TERMINAL } from "@oh-my-pi/pi-tui";
 import { createInteractiveModeContext } from "./helpers/interactive-mode-context";
 
 const TOOL_CALL_A_ID = "toolu_mixed_text_order_a";
@@ -519,4 +519,62 @@ describe("EventController mixed assistant text/tool rendering", () => {
 		expect(flushed).toContain("GREP_RESULT_1_UNIQUE");
 		expect(flushed).toContain("GREP_RESULT_2_UNIQUE");
 	});
+
+	for (const arrival of ["early", "buffered"] as const) {
+		it(`renders inline images from ${arrival} held read results`, async () => {
+			const protocol = Object.getOwnPropertyDescriptor(TERMINAL, "imageProtocol")!;
+			Object.defineProperty(TERMINAL, "imageProtocol", { value: null });
+			try {
+				const { controller, chatContainer, ctx } = createFixture();
+				ctx.settings.set("terminal.showImages", true);
+				const readCall: ToolCall = {
+					type: "toolCall",
+					id: `read-image-${arrival}`,
+					name: "read",
+					arguments: { path: "pixel.png" },
+				};
+				const result: ToolResultMessage = {
+					role: "toolResult",
+					toolCallId: readCall.id,
+					toolName: "read",
+					content: [
+						{
+							type: "image",
+							mimeType: "image/png",
+							data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
+						},
+					],
+					isError: false,
+					timestamp: 1,
+				};
+				if (arrival === "buffered") {
+					ctx.session.agent.getPendingToolResults = () => [result];
+					controller.resetTranscriptAnchors();
+				}
+				await controller.handleEvent({ type: "message_start", message: assistantMessage([]) });
+				if (arrival === "early") {
+					await controller.handleEvent({
+						type: "tool_execution_end",
+						toolCallId: readCall.id,
+						toolName: "read",
+						result,
+						isError: false,
+					});
+				}
+				const message = assistantMessage([{ type: "text", text: "Inspecting the sample image." }, readCall]);
+				const update: Extract<AgentSessionEvent, { type: "message_update" }> = {
+					type: "message_update",
+					message,
+					assistantMessageEvent: { type: "toolcall_end", contentIndex: 1, toolCall: readCall, partial: message },
+				};
+				await controller.handleEvent(update);
+				await controller.handleEvent(update);
+				const rendered = Bun.stripANSI(chatContainer.render(120).join("\n"));
+				expect(rendered.match(/\[Image: image\/png\]/g)).toHaveLength(1);
+				expect(ctx.pendingTools.size).toBe(0);
+			} finally {
+				Object.defineProperty(TERMINAL, "imageProtocol", protocol);
+			}
+		});
+	}
 });

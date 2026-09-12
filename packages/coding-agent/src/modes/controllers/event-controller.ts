@@ -1723,8 +1723,10 @@ export class EventController {
 		component: ToolExecutionHandle,
 		event: Extract<AgentSessionEvent, { type: "tool_execution_end" }>,
 	): void {
+		if (event.toolName === "read") this.#inlineReadToolImages(event.toolCallId, event.result);
 		component.updateResult({ ...event.result, isError: event.isError }, false, event.toolCallId);
 		this.ctx.pendingTools.delete(event.toolCallId);
+		if (event.toolName === "read") this.#clearReadToolCall(event.toolCallId);
 		if (
 			component instanceof ToolExecutionComponent &&
 			component.isDisplaceableBlock() &&

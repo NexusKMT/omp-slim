@@ -433,6 +433,7 @@ export class Agent {
 
 	/** Buffered Cursor tool results with text length at time of call (for correct ordering) */
 	#cursorToolResultBuffer: CursorToolResultEntry[] = [];
+	#cursorToolResultDrain: CursorToolResultEntry[] | undefined;
 
 	streamFn: StreamFn;
 	getApiKey?: (model: Model) => Promise<ApiKey | undefined> | ApiKey | undefined;
@@ -1048,9 +1049,11 @@ export class Agent {
 		return this.#followUpQueue;
 	}
 
-	/** Snapshot results awaiting assistant persistence without consuming the provider buffer. */
+	/** Nonblocking snapshot of the latest results, including provisional payloads while transforms are pending. */
 	getPendingToolResults(): readonly ToolResultMessage[] {
-		return this.#cursorToolResultBuffer.map(({ toolResult }) => toolResult);
+		const results = this.#cursorToolResultDrain?.map(({ toolResult }) => toolResult) ?? [];
+		for (const { toolResult } of this.#cursorToolResultBuffer) results.push(toolResult);
+		return results;
 	}
 
 	get isAborting(): boolean {
@@ -1756,29 +1759,25 @@ export class Agent {
 	 * multi-text turns, producing duplicated text on replay.
 	 */
 	async #emitCursorSplitAssistantMessage(assistantMessage: AssistantMessage): Promise<void> {
-		// Snapshot and detach immediately so a still-pending `cursorOnToolResult`
-		// cannot push into a drained buffer. Entries already reserved stay paired
-		// with their toolCall.
 		const buffer = this.#cursorToolResultBuffer;
 		this.#cursorToolResultBuffer = [];
+		this.#cursorToolResultDrain = buffer;
+		try {
+			// Keep the detached batch observable while its transforms finish.
+			const pending = buffer.filter(entry => entry.pending !== undefined).map(entry => entry.pending);
+			if (pending.length > 0) await Promise.all(pending);
 
-		// Await any transformer still running for a reserved entry before reading
-		// its payload. The provider dispatches with `void handleServerMessage(…)`,
-		// so a `message_end` from the same chunk can reach this point while a
-		// transformer is mid-flight; without the await its rewrite would land on
-		// the detached entry after the original was already appended and emitted.
-		// Each `pending` swallows its own rejection, so this cannot throw.
-		const pending = buffer.filter(entry => entry.pending !== undefined).map(entry => entry.pending);
-		if (pending.length > 0) await Promise.all(pending);
+			this.#state.streamMessage = null;
+			this.appendMessage(assistantMessage);
+			this.#emit({ type: "message_end", message: assistantMessage });
 
-		this.#state.streamMessage = null;
-		this.appendMessage(assistantMessage);
-		this.#emit({ type: "message_end", message: assistantMessage });
-
-		for (const { toolResult } of buffer) {
-			this.#emit({ type: "message_start", message: toolResult });
-			this.appendMessage(toolResult);
-			this.#emit({ type: "message_end", message: toolResult });
+			for (const { toolResult } of buffer) {
+				this.#emit({ type: "message_start", message: toolResult });
+				this.appendMessage(toolResult);
+				this.#emit({ type: "message_end", message: toolResult });
+			}
+		} finally {
+			this.#cursorToolResultDrain = undefined;
 		}
 	}
 }
