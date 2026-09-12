@@ -14,9 +14,13 @@ import {
 	formatParseErrors,
 	formatFeedModelBadge,
 	formatScreenshot,
+	PREVIEW_LIMITS,
 	sanitizeDisplayLines,
 	sanitizeDisplayWarning,
+	sanitizeDisplayWarnings,
+	shortenEmbeddedPaths,
 	shortenPath,
+	TRUNCATE_LENGTHS,
 	truncateDiffByHunk,
 } from "@oh-my-pi/pi-coding-agent/tools/render-utils";
 import {
@@ -539,5 +543,41 @@ describe("sanitizeDisplayWarning", () => {
 		expect(warning).not.toContain("\x1b");
 		expect(warning).not.toContain("\t");
 		expect(warning).not.toContain("\n");
+	});
+});
+
+describe("shortenEmbeddedPaths", () => {
+	it("shortens home paths containing spaces before tokenizing", () => {
+		expect(shortenEmbeddedPaths("/Users/Jane Smith/.omp/WATCHDOG.yml: failed", "/Users/Jane Smith")).toBe(
+			"~/.omp/WATCHDOG.yml: failed",
+		);
+	});
+
+	it("preserves sibling paths outside the home boundary", () => {
+		const home = "/Users/Jane";
+		const sibling = "/Users/Jane2/.omp/WATCHDOG.yml: failed";
+		expect(shortenEmbeddedPaths(sibling, home)).toBe(sibling);
+	});
+
+	it("normalizes shortened Windows paths", () => {
+		const home = String.raw`C:\Users\Jane`;
+		const filePath = String.raw`C:\Users\Jane\projects\demo: failed`;
+		expect(shortenEmbeddedPaths(filePath, home)).toBe("~/projects/demo: failed");
+	});
+});
+
+describe("sanitizeDisplayWarnings", () => {
+	it("caps warning count and reports omitted warnings", () => {
+		const warnings = Array.from({ length: PREVIEW_LIMITS.COLLAPSED_ITEMS + 2 }, (_, index) => `warning-${index}`);
+		const displayed = sanitizeDisplayWarnings(warnings);
+
+		expect(displayed).toHaveLength(PREVIEW_LIMITS.COLLAPSED_ITEMS + 1);
+		expect(displayed.at(-1)).toBe("… 2 more warnings");
+	});
+
+	it("truncates each warning before display", () => {
+		const displayed = sanitizeDisplayWarnings(["warning ".repeat(TRUNCATE_LENGTHS.LONG)]);
+
+		expect(Bun.stringWidth(displayed[0])).toBeLessThanOrEqual(TRUNCATE_LENGTHS.LONG);
 	});
 });
