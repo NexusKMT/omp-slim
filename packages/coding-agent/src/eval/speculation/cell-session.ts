@@ -23,6 +23,7 @@ interface ClaimedChild {
 	handle: SpeculativeChildHandle;
 	args: Readonly<Record<string, unknown>>;
 	name: string;
+	operationId: string;
 }
 
 export interface EvalShadowCellOptions {
@@ -240,7 +241,44 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 			signal,
 		);
 		if (!outcome || signal?.aborted) return undefined;
-		return await outcome.value.handle.commit(outcome.value.args);
+		const committed = await outcome.value.handle.commit(outcome.value.args);
+		if (committed) this.#noteCommittedResult(outcome.value.operationId, outcome.value.name, normalized, committed);
+		return committed;
+	}
+
+	/**
+	 * Records a committed child result and admits dependents waiting on it.
+	 *
+	 * Dependent arguments must derive from the committed (visible) result, not the
+	 * pre-commit physical outcome: commit policies can transform the value (e.g. a
+	 * repeat-read hint appended on the third identical read), and admitting from
+	 * the physical result would start speculative I/O for arguments the
+	 * authoritative cell never uses. Never throws: this runs on the authoritative
+	 * claim path, where a projection failure must degrade to unadmitted
+	 * dependents, never to a failed cell.
+	 */
+	#noteCommittedResult(
+		operationId: string,
+		name: string,
+		args: Readonly<Record<string, unknown>>,
+		committed: AgentToolResult<unknown>,
+	): void {
+		try {
+			const value = bridgeValueFromToolResult(name, args, committed);
+			this.#results.set(operationId, {
+				value,
+				origins: [{ kind: "local_read", resource: String(args.path ?? "") }],
+			});
+		} catch {
+			return;
+		}
+		const plan = this.#lastPlan?.plan;
+		if (!plan) return;
+		for (const operation of plan.operations) {
+			if (operation.call.dependencies.includes(operationId)) {
+				void this.#admitOperation(operation).catch(() => undefined);
+			}
+		}
 	}
 
 	async claimValue(
@@ -312,13 +350,17 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 			if (operation.call.controlDependencies.length > 0 || operation.call.span.start >= unresolvedControlStart) {
 				continue;
 			}
-			if (this.#admitted.has(operation.call.id)) continue;
-			const previousOccurrenceAssignment = this.#occurrenceAssignment;
-			const occurrenceAssigned = Promise.withResolvers<void>();
-			this.#occurrenceAssignment = occurrenceAssigned.promise;
-			const admission = this.#admitWhenReady(operation, previousOccurrenceAssignment, occurrenceAssigned.resolve);
-			this.#admitted.set(operation.call.id, admission);
+			this.#admitOperation(operation);
 		}
+	}
+
+	async #admitOperation(operation: ShadowOperation): Promise<void> {
+		if (this.#admitted.has(operation.call.id)) return;
+		const previousOccurrenceAssignment = this.#occurrenceAssignment;
+		const occurrenceAssigned = Promise.withResolvers<void>();
+		this.#occurrenceAssignment = occurrenceAssigned.promise;
+		const admission = this.#admitWhenReady(operation, previousOccurrenceAssignment, occurrenceAssigned.resolve);
+		this.#admitted.set(operation.call.id, admission);
 	}
 
 	async #admitWhenReady(
@@ -388,14 +430,13 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 					await handle.discard("speculative child returned an error").catch(() => undefined);
 					return;
 				}
-				const value = bridgeValueFromToolResult(operation.call.name, runtimeArgs, outcome.result);
-				this.#results.set(operation.call.id, {
-					value,
-					origins: [{ kind: "local_read", resource: String(executionArgs.path ?? "") }],
-				});
+				// Dependent arguments are derived only from committed results (see
+				// claim()): the physical outcome may still be transformed or vetoed
+				// before it becomes visible, so recording it here would admit
+				// dependents against bytes the authoritative cell never observes.
 				this.#claims.add(key, {
 					kind: "result",
-					value: { handle, args: executionArgs, name: operation.call.name },
+					value: { handle, args: executionArgs, name: operation.call.name, operationId: operation.call.id },
 					virtualDurationMs,
 				});
 			} catch {

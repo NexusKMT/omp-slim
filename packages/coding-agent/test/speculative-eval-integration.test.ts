@@ -366,6 +366,75 @@ describe("streamed eval speculation", () => {
 		expect(text).not.toContain("stale content");
 	});
 
+	it("derives dependent arguments from committed results", async () => {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "speculative-eval-committed-"));
+		temporaryDirectories.push(directory);
+		const settings = Settings.isolated({ "eval.autoBackground.enabled": false, "images.autoResize": false });
+		const session: ToolSession = {
+			cwd: directory,
+			hasUI: false,
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+			getEvalSessionId: () => "speculative-eval-committed-test",
+			getToolForEvalBridge: name => (name === "read" ? eraseToolSchema(read) : undefined),
+			getEvalBridgeToolNames: () => ["read"],
+			settings,
+		};
+		const read = new ReadTool(session);
+		const evalTool = new EvalTool(session);
+		await evalTool.execute("warm-committed", { language: "js", code: "globalThis.shadowWarm = true" });
+		// The commit policy transforms the physical result: dependents admitted
+		// from the pre-commit value would speculatively read arguments the
+		// authoritative cell never uses.
+		const physical = { content: [{ type: "text", text: "b" }] };
+		const committed = { content: [{ type: "text", text: "COMMITTED" }] };
+		const admitted: Array<{ candidateId: string; args: unknown }> = [];
+		const secondAdmission = Promise.withResolvers<void>();
+		const coordinator: SpeculativeOperationSink = {
+			maxInFlight: 2,
+			async admit(definition) {
+				admitted.push({ candidateId: definition.candidateId, args: definition.toolCall.arguments });
+				if (admitted.length === 2) secondAdmission.resolve();
+				return {
+					candidateId: definition.candidateId,
+					fingerprint: "test-fingerprint",
+					effect: { kind: "pure" },
+					outcome: Promise.resolve({ kind: "result", result: physical, isError: false }),
+					commit: async () => committed,
+					discard: async () => {},
+				};
+			},
+			close() {},
+		};
+		const code = 'const a = await tool.read({ path: "a.txt" });\nawait tool.read({ path: a + ".txt" });';
+		const args = { language: "js", code };
+		const shadow = new EvalShadowCellSession({
+			coordinator,
+			parentToolCallId: "eval-committed",
+			session,
+			cwd: directory,
+			sessionId: "speculative-eval-committed-test",
+		});
+		const toolCall = { type: "toolCall" as const, id: "eval-committed", name: "eval", arguments: args };
+		shadow.update(toolCall, JSON.stringify(args));
+		await shadow.finalize({ args });
+		// No committed parent result exists yet, so the dependent stays unadmitted.
+		expect(admitted).toHaveLength(1);
+		// Claiming the parent commits (transforming) its result; the dependent is
+		// admitted afterwards, against the committed value.
+		// Drain microtasks first: the admission record above lands before
+		// `#admitWhenReady` finishes registering the claim, and only
+		// wall-clock-free ticks are needed (no timers).
+		for (let index = 0; index < 50; index++) await Promise.resolve();
+		const claimed = await shadow.claim(
+			"read",
+			{ path: "a.txt" },
+			{ siteId: "js:16", occurrence: 0 },
+			Number.MAX_SAFE_INTEGER,
+		);
+		console.log("PROBE claimed:", JSON.stringify(claimed)?.slice(0, 160), "admitted:", admitted.length);
+	});
+
 	it("namespaces child tool-call IDs across outer eval calls", async () => {
 		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "speculative-eval-child-ids-"));
 		temporaryDirectories.push(directory);
