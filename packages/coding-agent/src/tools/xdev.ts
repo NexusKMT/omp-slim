@@ -36,7 +36,7 @@ import { parseStreamingJson } from "@oh-my-pi/pi-utils";
 import { schemaDeclaresIntentField } from "../utils/tool-schema";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { stripXdUrlPrefix, XD_URL_PREFIX } from "../internal-urls/xd-protocol";
-import { canonicalMCPToolNameCandidates, parseMCPToolName } from "../mcp/tool-bridge";
+import { parseMCPToolName, resolveMCPToolAlias } from "../mcp/tool-bridge";
 import type { Theme } from "../modes/theme/theme";
 import { truncateHeadBytes } from "../session/streaming-output";
 import { resolveToolTier, type ToolTier } from "./approval";
@@ -288,35 +288,29 @@ export function resolveMountedXdevExecutable(state: XdevState, name: string): To
 
 /**
  * Resolve a tool call the advertised set did not match, for the `sdk.ts`
- * fallback.
+ * fallback. MOUNTED DEVICES ONLY.
  *
  * A model may reach a mounted device by emitting a direct tool call instead of
  * a `write`. Names arrive both bare (`github`) and carrying the very `xd://`
  * prefix the device docs advertise (`xd://github`) — strip it so both
- * spellings resolve to the same device.
+ * spellings resolve to the same device. A mounted MCP device is additionally
+ * retried under the Claude Code separator the identity prompt primes
+ * (`mcp__<server>__<tool>`) rather than the single underscore
+ * `createMCPToolName` mints.
  *
- * MCP tools additionally arrive under the Claude Code separator the identity
- * prompt primes (`mcp__<server>__<tool>`) rather than the single underscore
- * `createMCPToolName` mints, so an unmatched `mcp__` name is retried against
- * each candidate registry key. Those retries accept an ACTIVE tool as well as
- * a mounted one: with `tools.xdev` off — or for an explicitly requested MCP
- * tool — the tool stays top-level and never enters `mountedNames`, yet the
- * misspelled call still lands here after missing the advertised set.
- *
- * Widening to active tools cannot reach a tool the model was never offered:
- * only `mcp__`-prefixed names produce candidates, so first-party names like
- * `edit` have no path through here, and `resolveXdevTool` still gates every
- * candidate on being mounted or active.
+ * Deliberately NOT gated on `XdevState.isActive`. Under Code Mode
+ * `#applyActiveToolsByName` clears the mounted set yet sets the active
+ * predicate to the whole enabled slate, including MCP tools demoted behind the
+ * eval bridge — resolving against it would dispatch one of those directly and
+ * bust the Code Mode presentation boundary. Mounted names are the devices this
+ * session genuinely offers; advertised top-level tools are recovered by the
+ * caller against its own agent's tool set.
  */
 export function resolveFallbackXdevTool(state: XdevState, name: string): Tool | undefined {
 	const bareName = stripXdUrlPrefix(name);
 	const mounted = resolveMountedXdevTool(state, bareName);
 	if (mounted) return mounted;
-	for (const candidate of canonicalMCPToolNameCandidates(bareName)) {
-		const tool = resolveXdevTool(state, candidate);
-		if (tool) return tool;
-	}
-	return undefined;
+	return resolveMCPToolAlias(bareName, listXdevTools(state));
 }
 
 /** Resolve a fallback tool call with its execution-only permission decorator. */

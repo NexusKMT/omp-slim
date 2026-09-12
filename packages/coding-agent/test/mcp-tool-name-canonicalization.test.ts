@@ -160,17 +160,18 @@ describe("resolveFallbackXdevTool", () => {
 		expect(resolveFallbackXdevTool(state, "github")?.name).toBe("github");
 	});
 
-	it("routes the Claude Code spelling of an ACTIVE top-level MCP tool", () => {
-		// With `tools.xdev` off — or for an explicitly requested MCP tool — the
-		// tool stays top-level and never enters `mountedNames`. The exact name is
-		// matched by the advertised set, but the misspelled call reaches the
-		// fallback, which previously only accepted mounted names.
-		const registered = createMCPToolName("seedpatch-client", "bank");
-		const state = xdevStateWith({ active: [registered] });
+	it("refuses an active-but-unmounted tool, keeping the Code Mode boundary", () => {
+		// Under Code Mode `#applyActiveToolsByName` clears the mounted set but
+		// sets the active predicate to the whole enabled slate, including MCP
+		// tools demoted behind the eval bridge. Resolving against `isActive`
+		// would dispatch one of those directly. Advertised top-level tools are
+		// recovered by the caller against its own agent's set instead.
+		const demoted = createMCPToolName("seedpatch-client", "bank");
+		const state = xdevStateWith({ active: [demoted] });
 
 		expect(state.mountedNames.size).toBe(0);
-		expect(resolveFallbackXdevTool(state, "mcp__seedpatch-client__bank")?.name).toBe(registered);
-		expect(resolveFallbackXdevTool(state, "mcp__seedpatch_client__bank")?.name).toBe(registered);
+		expect(resolveFallbackXdevTool(state, demoted)).toBeUndefined();
+		expect(resolveFallbackXdevTool(state, "mcp__seedpatch-client__bank")).toBeUndefined();
 	});
 
 	it("never routes an active first-party tool through the fallback", () => {
@@ -182,7 +183,7 @@ describe("resolveFallbackXdevTool", () => {
 		expect(resolveFallbackXdevTool(state, "read")).toBeUndefined();
 	});
 
-	it("still refuses a name no mounted or active tool claims", () => {
+	it("still refuses a name no mounted device claims", () => {
 		const state = xdevStateWith({ mounted: [createMCPToolName("seedpatch-client", "bank")] });
 		expect(resolveFallbackXdevTool(state, "mcp__other__bank")).toBeUndefined();
 		expect(resolveFallbackXdevTool(state, "mcp__seedpatch-client__nonexistent")).toBeUndefined();
@@ -214,5 +215,23 @@ describe("resolveMCPToolAlias", () => {
 		// An already-canonical name yields no candidates, so dispatch's primary
 		// lookup stays authoritative and this never shadows it.
 		expect(resolveMCPToolAlias(bank, primaryTools)).toBeUndefined();
+	});
+
+	it("refuses an ambiguous alias rather than picking a boundary", () => {
+		// Two boundaries, two genuinely registered tools, one emitted spelling:
+		// nothing in the name says which was meant. MCP tools have side effects,
+		// so guessing by candidate order could run an operation the model never
+		// asked for. Refusing keeps it a recoverable `not found`.
+		const viaFirst = createMCPToolName("foo", "bar__foo_bar_baz");
+		const viaSecond = createMCPToolName("foo__bar", "foo_bar_baz");
+		expect(viaFirst).not.toBe(viaSecond);
+
+		const emitted = "mcp__foo__bar__foo_bar_baz";
+		expect(canonicalMCPToolNameCandidates(emitted)).toEqual(expect.arrayContaining([viaFirst, viaSecond]));
+		expect(resolveMCPToolAlias(emitted, [{ name: viaFirst }, { name: viaSecond }])).toBeUndefined();
+
+		// Each alone is unambiguous and still resolves.
+		expect(resolveMCPToolAlias(emitted, [{ name: viaFirst }])?.name).toBe(viaFirst);
+		expect(resolveMCPToolAlias(emitted, [{ name: viaSecond }])?.name).toBe(viaSecond);
 	});
 });

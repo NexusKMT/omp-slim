@@ -531,19 +531,28 @@ export function canonicalMCPToolNameCandidates(name: string): string[] {
  * response reach a main-session tool it was never offered. Naming the set at
  * every call site makes that mistake unrepresentable.
  *
- * Returns `undefined` unless some {@link canonicalMCPToolNameCandidates} entry
- * is present in `advertised`, so an already-registered name never reaches here
- * and a non-MCP name can never resolve at all.
+ * Resolution requires a UNIQUE match. Two different boundaries can both name a
+ * registered tool — server `foo` + tool `bar__foo_bar_baz` and server
+ * `foo__bar` + tool `foo_bar_baz` mint distinct keys yet share the spelling
+ * `mcp__foo__bar__foo_bar_baz` — and nothing in the emitted name says which was
+ * meant. Picking whichever boundary sorts first would execute an MCP operation
+ * the model did not ask for, side effects included, so an ambiguous alias
+ * resolves to nothing and the call stays a recoverable `not found`.
+ *
+ * Returns `undefined` unless exactly one {@link canonicalMCPToolNameCandidates}
+ * entry is present in `advertised`, so an already-registered name never reaches
+ * here and a non-MCP name can never resolve at all.
  */
 export function resolveMCPToolAlias<T extends { readonly name: string }>(
 	name: string,
 	advertised: readonly T[],
 ): T | undefined {
+	const matches: T[] = [];
 	for (const candidate of canonicalMCPToolNameCandidates(name)) {
 		const match = advertised.find(tool => tool.name === candidate);
-		if (match) return match;
+		if (match !== undefined && !matches.some(seen => seen.name === match.name)) matches.push(match);
 	}
-	return undefined;
+	return matches.length === 1 ? matches[0] : undefined;
 }
 
 export interface MCPToolOriginSource {
