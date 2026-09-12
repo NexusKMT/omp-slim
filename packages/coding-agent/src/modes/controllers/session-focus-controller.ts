@@ -228,11 +228,19 @@ export class SessionFocusController {
 			return true;
 		} catch (error) {
 			if (generation === this.#attachGeneration) {
-				++this.#attachGeneration;
-				this.ctx.unsubscribe?.();
-				this.ctx.unsubscribe = undefined;
 				this.#focusedAgentId = undefined;
 				this.#attachedSession = undefined;
+				// Keep a failed main replay subscribed; never recursively recover it.
+				if (target !== this.ctx.session) {
+					try {
+						await this.#attach(this.ctx.session);
+					} catch (recoveryError) {
+						throw new AggregateError(
+							[error, recoveryError],
+							"Focus attachment and main-session recovery both failed",
+						);
+					}
+				}
 			}
 			throw error;
 		}
