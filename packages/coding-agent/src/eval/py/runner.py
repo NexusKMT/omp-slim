@@ -1596,6 +1596,53 @@ async def _run_compiled_async(code, ns: dict, *, want_value: bool) -> Any:
 
 
 
+_CALL_SITE_HELPER_NAME = "__omp_with_call_site__"
+
+# Runner-owned reference to the genuine instrumentation helper. The helper is
+# defined by the eval prelude inside the user namespace, so the first callable
+# observed there is trusted: kernel init always executes the prelude before
+# user cells. Any later replacement is pollution from a retained cell.
+_TRUSTED_CALL_SITE_HELPERS: dict[str, Any] = {}
+
+
+def _restore_call_site_helper(ns: dict) -> None:
+    """Reinstall the genuine helper after retained-cell pollution.
+
+    A previous cell can assign or delete `__omp_with_call_site__`; without
+    this, the next rewritten `tool.read(...)` would resolve to
+    user-controlled state and change ordinary eval behavior even with
+    speculation disabled.
+    """
+    current = ns.get(_CALL_SITE_HELPER_NAME)
+    trusted = _TRUSTED_CALL_SITE_HELPERS.get(_CALL_SITE_HELPER_NAME)
+    if trusted is None:
+        if callable(current):
+            _TRUSTED_CALL_SITE_HELPERS[_CALL_SITE_HELPER_NAME] = current
+        return
+    if current is not trusted:
+        ns[_CALL_SITE_HELPER_NAME] = trusted
+
+
+def _cell_binds_call_site_helper(module: ast.Module) -> bool:
+    """Whether the cell binds the reserved helper name in any scope."""
+    for node in ast.walk(module):
+        if isinstance(node, ast.Name):
+            if node.id == _CALL_SITE_HELPER_NAME and isinstance(node.ctx, (ast.Store, ast.Del)):
+                return True
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if node.name == _CALL_SITE_HELPER_NAME:
+                return True
+        elif isinstance(node, ast.arg):
+            if node.arg == _CALL_SITE_HELPER_NAME:
+                return True
+        elif isinstance(node, ast.alias):
+            if node.asname == _CALL_SITE_HELPER_NAME:
+                return True
+        elif isinstance(node, ast.ExceptHandler):
+            if node.name == _CALL_SITE_HELPER_NAME:
+                return True
+    return False
+
 class _ShadowCallSiteTransformer(ast.NodeTransformer):
     def __init__(self, line_offsets: list[int]) -> None:
         self._line_offsets = line_offsets
@@ -1618,7 +1665,7 @@ class _ShadowCallSiteTransformer(ast.NodeTransformer):
         # user cell's frame; a thunk would introduce a lambda frame.
         site_id = f"py:{_shadow_span(node, self._line_offsets)['start']}"
         wrapped = ast.Call(
-            func=ast.Name(id="__omp_with_call_site__", ctx=ast.Load()),
+            func=ast.Name(id=_CALL_SITE_HELPER_NAME, ctx=ast.Load()),
             args=[
                 ast.Constant(value=site_id),
                 transformed.func,
@@ -1634,7 +1681,7 @@ def _compile_source(source: str) -> tuple[Any, Any | None, bool]:
     line_offsets = [0]
     for line in source.splitlines(keepends=True):
         line_offsets.append(line_offsets[-1] + len(line))
-    if "__omp_with_call_site__" not in source:
+    if _CALL_SITE_HELPER_NAME not in source or not _cell_binds_call_site_helper(module):
         module = _ShadowCallSiteTransformer(line_offsets).visit(module)
     ast.fix_missing_locations(module)
     if not module.body:
@@ -1654,6 +1701,7 @@ def _compile_source(source: str) -> tuple[Any, Any | None, bool]:
 
 def _exec_source(source: str, ns: dict) -> None:
     """Synchronous source execution for legacy magic helpers."""
+    _restore_call_site_helper(ns)
     body_code, expr_code, has_expr = _compile_source(source)
     if body_code is None:
         return
@@ -1669,6 +1717,7 @@ async def _exec_source_async(source: str, ns: dict) -> None:
     its value through ``__omp_display`` so dataframes/figures render rich.
     Top-level ``await`` / ``async for`` / ``async with`` is permitted; awaited
     regions yield to other requests in the runner's persistent event loop."""
+    _restore_call_site_helper(ns)
     body_code, expr_code, has_expr = _compile_source(source)
     if body_code is None:
         return

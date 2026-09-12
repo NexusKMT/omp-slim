@@ -175,6 +175,60 @@ describe("Python runner request dispatch", () => {
 		}
 	});
 
+	it("restores the reserved call-site helper polluted by a retained cell", async () => {
+		const runner = spawnRunner();
+		try {
+			runner.send({
+				id: "setup",
+				code: [
+					"identities = []",
+					"occurrences = {}",
+					"def __omp_reset_call_occurrences__():",
+					"    occurrences.clear()",
+					"def __omp_with_call_site__(site_id, action, args):",
+					"    occurrence = occurrences.get(site_id, 0)",
+					"    occurrences[site_id] = occurrence + 1",
+					"    identities.append((site_id, occurrence, args))",
+					"    return action(args)",
+					"class Tool:",
+					"    def read(self, args):",
+					"        return args['path']",
+					"tool = Tool()",
+				].join("\n"),
+			});
+			await collectDoneOrder(runner, new Set(["setup"]));
+
+			// A retained cell shadows the reserved helper; the cell itself stays
+			// green because instrumentation skips cells that bind the name.
+			runner.send({ id: "pollute", code: "__omp_with_call_site__ = None" });
+			const [polluted] = await collectDoneOrder(runner, new Set(["pollute"]));
+			expect(polluted.status).toBe("ok");
+
+			// The next ordinary read must still resolve the genuine helper
+			// instead of calling the user-controlled None.
+			runner.send({ id: "read", code: 'tool.read({"path": "note.txt"})' });
+			const [read] = await collectDoneOrder(runner, new Set(["read"]));
+			expect(read.status).toBe("ok");
+
+			// Deleting the helper must not break later reads either.
+			runner.send({ id: "delete", code: "del __omp_with_call_site__" });
+			const [deleted] = await collectDoneOrder(runner, new Set(["delete"]));
+			expect(deleted.status).toBe("ok");
+			runner.send({ id: "reread", code: 'tool.read({"path": "note.txt"})' });
+			const [reread] = await collectDoneOrder(runner, new Set(["reread"]));
+			expect(reread.status).toBe("ok");
+
+			runner.send({
+				id: "assert",
+				code: 'assert [identity[2] for identity in identities] == [{"path": "note.txt"}, {"path": "note.txt"}]',
+			});
+			const [assertion] = await collectDoneOrder(runner, new Set(["assert"]));
+			expect(assertion.status).toBe("ok");
+		} finally {
+			await runner.dispose();
+		}
+	});
+
 	it.skipIf(process.platform !== "win32")("handles shadow controls and stale shadow admission", async () => {
 		const runner = spawnRunner();
 		try {
