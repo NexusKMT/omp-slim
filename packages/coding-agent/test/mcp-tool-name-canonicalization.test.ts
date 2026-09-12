@@ -107,15 +107,27 @@ describe("canonicalMCPToolNameCandidates", () => {
 		expect(canonicalMCPToolNameCandidates("mcp__")).toEqual([]);
 	});
 
-	it("never invents a name from a degenerate segment", () => {
-		// The sanitizer substitutes `server`/`tool` placeholders for an empty
-		// part, so splitting blindly would mint keys nobody registered.
-		for (const emitted of ["mcp____bank", "mcp__srv__", "mcp____", "mcp__-__bank", "mcp__srv__-", "mcp__--"]) {
-			for (const candidate of canonicalMCPToolNameCandidates(emitted)) {
-				expect(candidate).not.toContain("_server_");
-				expect(candidate.endsWith("_tool")).toBe(false);
-			}
+	it("recovers a server name the sanitizer reduces to its placeholder", () => {
+		// `validateServerName` accepts `^[a-zA-Z0-9_.:-]+$`, so an all-digit or
+		// all-punctuation server name is configurable — and sanitizes away, which
+		// makes `createMCPToolName` substitute its `server` placeholder. That is
+		// the key registration really produces, so re-minting the split has to
+		// reproduce it rather than refuse the name.
+		for (const serverName of ["123", "1-2", "..."]) {
+			const registered = createMCPToolName(serverName, "bank");
+			expect(registered).toBe("mcp__server_bank");
+			expect(recover(`mcp__${serverName}__bank`, registered)).toBe(registered);
 		}
+	});
+
+	it("yields no split candidate when a half is genuinely absent", () => {
+		// A missing half describes no split at all, so there is nothing faithful
+		// to re-mint: the placeholder pair would be a key nobody registered.
+		expect(canonicalMCPToolNameCandidates("mcp____")).toEqual([]);
+		expect(canonicalMCPToolNameCandidates("mcp__")).toEqual([]);
+		// Present-but-empty halves must not reach `createMCPToolName`.
+		expect(canonicalMCPToolNameCandidates("mcp____bank")).not.toContain("mcp__server_bank");
+		expect(canonicalMCPToolNameCandidates("mcp__srv__")).not.toContain("mcp__srv_tool");
 	});
 
 	it("keeps servers distinct whose sanitized names prefix-collide", () => {

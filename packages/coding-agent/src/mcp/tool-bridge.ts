@@ -484,7 +484,9 @@ export function createMCPToolName(serverName: string, toolName: string): string 
  *    still differs from the minted key (`mcp__seedpatch-client_bank`). This
  *    candidate is capped too: without a boundary there is nothing to re-mint,
  *    but the registered key was still length-capped, so an overlong spelling
- *    would otherwise never match its hashed form.
+ *    would otherwise never match its hashed form. Unlike a split, it has no
+ *    minted fallback shape to reproduce, so a suffix that sanitizes away yields
+ *    nothing.
  *
  * This is normalization, not fuzzy matching: every candidate is derived from
  * the emitted name by the same rules that minted the registry, never selected
@@ -502,20 +504,24 @@ export function canonicalMCPToolNameCandidates(name: string): string[] {
 		if (candidate !== name && !candidates.includes(candidate)) candidates.push(candidate);
 	};
 
-	// Both halves must survive sanitization before re-minting: for `mcp____bank`
-	// or `mcp__-__tool` an emptied part would otherwise be replaced by
-	// `createMCPToolName`'s `server`/`tool` placeholders, minting a key nobody
-	// registered. The same guard rules out a fully punctuation-only suffix.
-	const survives = (part: string): boolean => sanitizeMCPToolNamePart(part, "").length > 0;
+	// A split needs both halves NONEMPTY — not to survive sanitization.
+	// `createMCPToolName` substitutes its `server`/`tool` placeholder for a part
+	// that sanitizes away, and it is the same function registration uses, so a
+	// server named `123` (valid per `validateServerName`) really does register as
+	// `mcp__server_bank`. Re-minting therefore reproduces that key instead of
+	// inventing one, and requiring the halves to survive sanitization would drop
+	// exactly the names that need recovering. Only a genuinely absent half
+	// (`mcp____bank`, `mcp__srv__`) describes no split at all.
 	for (let boundary = suffix.indexOf("__"); boundary >= 0; boundary = suffix.indexOf("__", boundary + 1)) {
-		// A boundary at 0 would mean an empty server segment.
-		if (boundary === 0) continue;
 		const serverName = suffix.slice(0, boundary);
 		const toolName = suffix.slice(boundary + 2);
-		if (survives(serverName) && survives(toolName)) add(createMCPToolName(serverName, toolName));
+		if (serverName.length > 0 && toolName.length > 0) add(createMCPToolName(serverName, toolName));
 	}
-	if (survives(suffix)) {
-		add(capMCPToolNameLength(`${MCP_TOOL_NAME_PREFIX}${sanitizeMCPToolNamePart(suffix, "")}`));
+	// The whole-suffix candidate has no boundary, so there is no minted fallback
+	// shape to reproduce: a suffix that sanitizes away is a dead end.
+	const sanitizedSuffix = sanitizeMCPToolNamePart(suffix, "");
+	if (sanitizedSuffix.length > 0) {
+		add(capMCPToolNameLength(`${MCP_TOOL_NAME_PREFIX}${sanitizedSuffix}`));
 	}
 	return candidates;
 }
