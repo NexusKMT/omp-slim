@@ -1214,6 +1214,54 @@ describe("agentLoop with AgentMessage", () => {
 		);
 	});
 
+	it("hands resolveFallbackTool the request's advertised snapshot", async () => {
+		// A host that recovers a mis-spelled name must resolve it against the set
+		// THIS request advertised, not its own live tool state: an MCP
+		// `tools/list_changed` reassigns the agent's tools mid-stream, so live
+		// state can hold a roster the model never saw. The loop therefore hands
+		// over the same snapshot exact-name dispatch searched.
+		const toolSchema = type({ value: "string" });
+		const advertisedTool: AgentTool<typeof toolSchema, { value: string }> = {
+			name: "mcp__srv_bank",
+			label: "Bank",
+			description: "Advertised MCP tool",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				return { content: [{ type: "text", text: `bank: ${params.value}` }], details: params };
+			},
+		};
+		const advertisedTools = [advertisedTool];
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: advertisedTools };
+		const seen: Array<readonly { name: string }[]> = [];
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [{ type: "toolCall", id: "tool-1", name: "mcp__srv__bank", arguments: { value: "read" } }],
+				},
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			// Resolve ONLY from the handed-over snapshot; never from ambient state.
+			resolveFallbackTool: (name, advertised) => {
+				seen.push(advertised);
+				return name === "mcp__srv__bank" ? advertised.find(tool => tool.name === "mcp__srv_bank") : undefined;
+			},
+		};
+
+		const messages = await agentLoop([createUserMessage("go")], context, config, undefined, mock.stream).result();
+
+		// The snapshot is the context's own array, so it cannot drift from what
+		// exact-name dispatch matched against for this request.
+		expect(seen.length).toBeGreaterThan(0);
+		for (const advertised of seen) expect(advertised).toBe(advertisedTools);
+		const result = messages.find((m): m is ToolResultMessage => m.role === "toolResult" && m.toolCallId === "tool-1");
+		expect(result?.isError).toBeFalsy();
+		expect(result?.content).toContainEqual({ type: "text", text: "bank: read" });
+	});
+
 	it("suggests the intended tool when a miss shares its trailing segment", async () => {
 		const toolSchema = type({ path: "string" });
 		const makeTool = (name: string): AgentTool<typeof toolSchema, { path: string }> => ({

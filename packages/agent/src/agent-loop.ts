@@ -2461,8 +2461,10 @@ function resolveToolForCall(
 		tools?.find(t => t.name === toolCall.name) ??
 		tools?.find(t => t.customWireName !== undefined && t.customWireName === toolCall.name) ??
 		// Not in the advertised set: let the host route side-transport tools
-		// (e.g. xd:// device mounts) called by their top-level name.
-		resolveFallbackTool?.(toolCall.name)
+		// (e.g. xd:// device mounts) called by their top-level name. It receives
+		// the snapshot searched above, never the agent's live tools, so a
+		// mid-stream roster change cannot widen what this request can reach.
+		resolveFallbackTool?.(toolCall.name, tools ?? [])
 	);
 }
 

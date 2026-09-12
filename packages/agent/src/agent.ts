@@ -251,7 +251,7 @@ export interface AgentOptions {
 	 * route calls to tools exposed through side transports (e.g. `xd://`
 	 * device mounts) instead of failing with "Tool not found".
 	 */
-	resolveFallbackTool?: (name: string) => AgentTool<any> | undefined;
+	resolveFallbackTool?: (name: string, advertised: readonly AgentTool<any>[]) => AgentTool<any> | undefined;
 
 	/**
 	 * Names routable by {@link resolveFallbackTool} that the advertised set
@@ -418,7 +418,7 @@ export class Agent {
 	#preferWebsockets?: boolean;
 	#transformToolCallArguments?: (args: Record<string, unknown>, toolName: string) => Record<string, unknown>;
 	#speculativeToolExecution?: SpeculativeToolExecutionConfig;
-	#resolveFallbackTool?: (name: string) => AgentTool<any> | undefined;
+	#resolveFallbackTool?: (name: string, advertised: readonly AgentTool<any>[]) => AgentTool<any> | undefined;
 	#suggestFallbackToolNames?: () => Iterable<string>;
 	#intentTracing: boolean;
 	#pruneToolDescriptions: boolean;
