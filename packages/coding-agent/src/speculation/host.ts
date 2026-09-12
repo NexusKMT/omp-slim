@@ -17,7 +17,7 @@ import { normalizeToLF } from "../edit/normalize";
 import type { ToolSession } from "../tools";
 import { type ApprovalMode, resolveApproval } from "../tools/approval";
 import { CONVERTIBLE_EXTENSIONS } from "../utils/markit";
-import { type LocalReadSpeculationEvidence, SNAPSHOT_MAX_BYTES } from "../tools/read";
+import { type LocalReadSpeculationEvidence, resolveSpeculativeReadTarget, SNAPSHOT_MAX_BYTES } from "../tools/read";
 import { isCpuProfilePath } from "../utils/cpuprofile";
 import { isSampleProfilePath } from "../utils/sample-profile";
 
@@ -142,46 +142,30 @@ export class CodingAgentSpeculativeExecutionHost implements SpeculativeExecution
 		}
 		// Content inspection starts here — after the lifecycle, approval, and
 		// shape gates above have allowed the candidate — so a denied read
-		// never touches the filesystem.
-		let resolved: string;
-		try {
-			const workspacePath = await fs.realpath(this.toolSession.cwd);
-			resolved = await fs.realpath(resource.path);
-			const workspaceRelativePath = path.relative(workspacePath, resolved);
-			if (
-				workspaceRelativePath.length === 0 ||
-				workspaceRelativePath === ".." ||
-				workspaceRelativePath.startsWith(`..${path.sep}`) ||
-				path.isAbsolute(workspaceRelativePath)
-			) {
-				return { allowed: false, reason: "local read target is unsafe" };
-			}
-			const targetStat = await fs.stat(resolved);
-			if (!targetStat.isFile() || targetStat.size > SNAPSHOT_MAX_BYTES) {
-				return { allowed: false, reason: "local read target is unsafe" };
-			}
-			if (
-				resolved.toLowerCase().endsWith(".ipynb") ||
-				isSampleProfilePath(resolved) ||
-				isCpuProfilePath(resolved) ||
-				CONVERTIBLE_EXTENSIONS.has(path.extname(resolved).toLowerCase()) ||
-				resolved.endsWith(".svg") ||
-				resolved.endsWith(".svgz")
-			) {
-				return { allowed: false, reason: "local read target is unsafe" };
-			}
-			if (await readImageMetadata(resolved)) return { allowed: false, reason: "local read target is unsafe" };
-			const sniffed = await Bun.file(resolved).slice(0, BINARY_SNIFF_BYTES).bytes();
-			const header = Buffer.from(sniffed.buffer, sniffed.byteOffset, sniffed.byteLength);
-			if (
-				isProbablyBinaryHeader(header) ||
-				header.subarray(0, 5).toString("ascii") === "%PDF-" ||
-				header.subarray(0, 16).toString("ascii") === "SQLite format 3\u0000"
-			) {
-				return { allowed: false, reason: "local read target is unsafe" };
-			}
-		} catch {
-			return { allowed: false, reason: "local read path is unavailable" };
+		// never touches the filesystem. The resolver is shared with speculative
+		// execution so both bind the same target (see resolveSpeculativeReadTarget).
+		const target = await resolveSpeculativeReadTarget(this.toolSession.cwd, resource.path);
+		if (!target.ok) return { allowed: false, reason: target.reason };
+		const resolved = target.resolved;
+		if (
+			resolved.toLowerCase().endsWith(".ipynb") ||
+			isSampleProfilePath(resolved) ||
+			isCpuProfilePath(resolved) ||
+			CONVERTIBLE_EXTENSIONS.has(path.extname(resolved).toLowerCase()) ||
+			resolved.endsWith(".svg") ||
+			resolved.endsWith(".svgz")
+		) {
+			return { allowed: false, reason: "local read target is unsafe" };
+		}
+		if (await readImageMetadata(resolved)) return { allowed: false, reason: "local read target is unsafe" };
+		const sniffed = await Bun.file(resolved).slice(0, BINARY_SNIFF_BYTES).bytes();
+		const header = Buffer.from(sniffed.buffer, sniffed.byteOffset, sniffed.byteLength);
+		if (
+			isProbablyBinaryHeader(header) ||
+			header.subarray(0, 5).toString("ascii") === "%PDF-" ||
+			header.subarray(0, 16).toString("ascii") === "SQLite format 3\u0000"
+		) {
+			return { allowed: false, reason: "local read target is unsafe" };
 		}
 		const evidence = await captureEvidence(resolved);
 		if (!evidence) return { allowed: false, reason: "local read target is unsafe" };

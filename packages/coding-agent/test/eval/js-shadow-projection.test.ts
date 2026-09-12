@@ -275,4 +275,60 @@ tool.read({ path: selected });
 			entries: [{ key: "path", value: { kind: "literal", value: "base" } }],
 		});
 	});
+
+	it("models destructured bindings as hoisted before a projected read", async () => {
+		for (const declaration of [
+			"const { path } = value;",
+			"const [path] = parts;",
+			"const { nested: { path } } = value;",
+			"const { path = fallback } = value;",
+		]) {
+			const plan = await projectJavaScriptShadowPlan(`await tool.read({ path });\n${declaration}`, {
+				snapshot: { path: "retained.txt" },
+			});
+			expect(plan.operations).toEqual([]);
+		}
+	});
+
+	it("rejects a destructured binding that shadows the tool bridge", async () => {
+		const plan = await projectJavaScriptShadowPlan(`const { tool } = bridges;\nawait tool.read({ path: "x" });`);
+		expect(plan.barrier?.reason).toBe("JavaScript tool binding changed");
+	});
+
+	it("preserves loop-carried assignments across static iterations", async () => {
+		const plan = await projectJavaScriptShadowPlan(
+			`let path = "";\nfor (const part of ["a", "b"]) {\n  path = path + part;\n  await tool.read({ path });\n}`,
+		);
+		expect(plan.barrier).toBeUndefined();
+		expect(plan.operations).toHaveLength(2);
+		expect(plan.operations[0]?.call.args).toMatchObject({
+			kind: "object",
+			entries: [
+				{
+					key: "path",
+					value: {
+						kind: "concat",
+						items: [
+							{ kind: "literal", value: "" },
+							{ kind: "literal", value: "a" },
+						],
+					},
+				},
+			],
+		});
+		// The second iteration must build on the first iteration's result ("ab"),
+		// not the pre-loop value (which would project a stale "b" read).
+		expect(plan.operations[1]?.call.args).toMatchObject({
+			kind: "object",
+			entries: [
+				{
+					key: "path",
+					value: {
+						kind: "concat",
+						items: [{ kind: "concat" }, { kind: "literal", value: "b" }],
+					},
+				},
+			],
+		});
+	});
 });

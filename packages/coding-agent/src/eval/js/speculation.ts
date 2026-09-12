@@ -405,20 +405,51 @@ function statements(node: Statement | BlockStatement): readonly Statement[] {
 	return isBlockStatement(node) ? node.body : [node];
 }
 
+/**
+ * Every identifier bound by a declaration pattern: plain identifiers plus names
+ * nested in object/array/rest/assignment patterns. Only the names matter here —
+ * default expressions execute at the declaration, so reads before it are
+ * unaffected by them while the hoisted binding itself shadows retained state.
+ */
+function collectPatternNames(node: Node | null | undefined, names: string[]): void {
+	if (isIdentifier(node)) {
+		names.push(node.name);
+	} else if (hasType(node, "ObjectPattern")) {
+		for (const property of node.properties) {
+			if (hasType(property, "RestElement")) collectPatternNames(property.argument, names);
+			else if (hasType(property, "ObjectProperty")) collectPatternNames(property.value, names);
+		}
+	} else if (hasType(node, "ArrayPattern")) {
+		for (const element of node.elements) collectPatternNames(element, names);
+	} else if (hasType(node, "RestElement")) {
+		collectPatternNames(node.argument, names);
+	} else if (hasType(node, "AssignmentPattern")) {
+		collectPatternNames(node.left, names);
+	}
+}
+
 function addBarrier(state: ProjectionState, reason: string, node: Node): false {
 	state.barrier ??= { kind: "barrier", reason, span: span(node) };
 	return false;
 }
 
 function hasToolBinding(statements: readonly Statement[]): boolean {
-	return statements.some(
-		statement =>
-			(isVariableDeclaration(statement) &&
-				statement.declarations.some(declaration => isIdentifier(declaration.id, { name: "tool" }))) ||
-			(isImportDeclaration(statement) && statement.specifiers.some(specifier => specifier.local.name === "tool")) ||
-			(isFunctionDeclaration(statement) && statement.id !== null && isIdentifier(statement.id, { name: "tool" })) ||
-			(isClassDeclaration(statement) && statement.id !== null && isIdentifier(statement.id, { name: "tool" })),
-	);
+	return statements.some(statement => {
+		if (isVariableDeclaration(statement)) {
+			return statement.declarations.some(declaration => {
+				const names: string[] = [];
+				collectPatternNames(declaration.id, names);
+				return names.includes("tool");
+			});
+		}
+		if (isImportDeclaration(statement)) {
+			return statement.specifiers.some(specifier => specifier.local.name === "tool");
+		}
+		if (isFunctionDeclaration(statement) || isClassDeclaration(statement)) {
+			return statement.id !== null && isIdentifier(statement.id, { name: "tool" });
+		}
+		return false;
+	});
 }
 
 function hasLexicalBindings(statements: readonly Statement[]): boolean {
@@ -447,7 +478,9 @@ function demotedTopLevelBindings(nodes: readonly Statement[]): Array<[string, "v
 			(statement.kind === "var" || statement.kind === "let" || statement.kind === "const")
 		) {
 			for (const declaration of statement.declarations) {
-				if (isIdentifier(declaration.id)) bindings.push([declaration.id.name, statement.kind]);
+				const names: string[] = [];
+				collectPatternNames(declaration.id, names);
+				for (const name of names) bindings.push([name, statement.kind]);
 			}
 		} else if (isImportDeclaration(statement)) {
 			for (const specifier of statement.specifiers) bindings.push([specifier.local.name, "const"]);
@@ -471,7 +504,9 @@ function demotedTopLevelBindings(nodes: readonly Statement[]): Array<[string, "v
 		} else if (isForOfStatement(statement)) {
 			if (isVariableDeclaration(statement.left) && statement.left.kind === "var") {
 				for (const declaration of statement.left.declarations) {
-					if (isIdentifier(declaration.id)) bindings.push([declaration.id.name, "var"]);
+					const names: string[] = [];
+					collectPatternNames(declaration.id, names);
+					for (const name of names) bindings.push([name, "var"]);
 				}
 			}
 			for (const [name, kind] of demotedTopLevelBindings(statements(statement.body))) {
@@ -681,7 +716,6 @@ function projectStatement(
 		};
 		state.controls.push(loop);
 		for (const [index, value] of evaluated.value.entries()) {
-			const environment = new Map(state.environment);
 			state.bindingKinds.set(declaration.id.name, statement.left.kind);
 			state.environment.set(declaration.id.name, { kind: "literal", value });
 			if (hasToolBinding(statements(statement.body))) {
@@ -693,7 +727,12 @@ function projectStatement(
 			for (const child of statements(statement.body)) {
 				if (!projectStatement(child, state, [...dynamicPath, `loop:${index}`], controlDependencies)) return false;
 			}
-			restoreLexicalEnvironment(environment, state);
+			// Preserve loop-carried outer assignments across iterations: bodies
+			// with their own bindings barrier out above, so anything left in the
+			// environment is either outer state (mutations persist, as at runtime)
+			// or the loop variable (overwritten next iteration). Restoring the
+			// pre-iteration environment here used to lose those mutations and
+			// project later iterations against stale values.
 		}
 		return true;
 	}

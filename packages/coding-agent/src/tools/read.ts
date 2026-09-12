@@ -715,6 +715,44 @@ const LOCAL_READ_SPECULATION_INELIGIBLE: ToolSpeculationAssessment = {
 	reason: "read target is not a speculation-safe local path",
 };
 
+export type SpeculativeReadTargetFailure = "local read path is unavailable" | "local read target is unsafe";
+
+/**
+ * Resolve a speculative local-read target and validate it against the workspace.
+ *
+ * Shared by host authorization and speculative execution so both bind the same
+ * target: assessment is metadata-only and the authorize-to-execute window admits
+ * a symlink swap, so execution must re-resolve and re-validate before reading.
+ * Anything else fails into ordinary execution, never commit. Resolution failures
+ * report unavailable; containment/file/size failures report unsafe (reason
+ * strings pinned by speculative-host tests).
+ */
+export async function resolveSpeculativeReadTarget(
+	cwd: string,
+	lexicalPath: string,
+): Promise<{ ok: true; resolved: string } | { ok: false; reason: SpeculativeReadTargetFailure }> {
+	try {
+		const workspace = await fs.realpath(cwd);
+		const resolved = await fs.realpath(path.resolve(cwd, lexicalPath));
+		const workspaceRelativePath = path.relative(workspace, resolved);
+		if (
+			workspaceRelativePath.length === 0 ||
+			workspaceRelativePath === ".." ||
+			workspaceRelativePath.startsWith(`..${path.sep}`) ||
+			path.isAbsolute(workspaceRelativePath)
+		) {
+			return { ok: false, reason: "local read target is unsafe" };
+		}
+		const targetStat = await fs.stat(resolved);
+		if (!targetStat.isFile() || targetStat.size > SNAPSHOT_MAX_BYTES) {
+			return { ok: false, reason: "local read target is unsafe" };
+		}
+		return { ok: true, resolved };
+	} catch {
+		return { ok: false, reason: "local read path is unavailable" };
+	}
+}
+
 export interface LocalReadSpeculationEvidence {
 	kind: "local_read";
 	resource: string;
@@ -844,20 +882,13 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		if (context.effect.kind !== "local_read" || context.effect.resources.length !== 1) {
 			throw new Error("Invalid speculative read operation");
 		}
-		// The assessment is metadata-only, so the effect carries the lexical
-		// path. Resolve it here — after host authorization — so the read and
-		// its evidence bind to the same target the host validated. A target
-		// that no longer resolves fails into ordinary execution, never commit.
-		// The discard guard registers synchronously so a racing discard cannot
-		// slip in before the first filesystem access.
 		const execution = { discarded: false };
 		this.#speculativeReadExecutions.set(context.toolCall.id, execution);
-		let absolutePath: string;
-		try {
-			absolutePath = await fs.realpath(context.effect.resources[0].path);
-		} catch {
+		const target = await resolveSpeculativeReadTarget(this.session.cwd, context.effect.resources[0].path);
+		if (!target.ok) {
 			throw new Error("Speculative read target is unavailable");
 		}
+		const absolutePath = target.resolved;
 		let snapshotDigest: string | undefined;
 		try {
 			const speculativeSession = Object.create(this.session) as ToolSession;

@@ -393,4 +393,40 @@ describe("CodingAgentSpeculativeExecutionHost", () => {
 		expect(text).toContain("hook-allowed content");
 		await coordinator.close("test complete");
 	});
+
+	it("refuses a speculative read whose symlink target changed after authorization", async () => {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "speculative-host-"));
+		temporaryDirectories.push(directory);
+		const outside = await fs.mkdtemp(path.join(os.tmpdir(), "speculative-host-outside-"));
+		temporaryDirectories.push(outside);
+		await fs.writeFile(path.join(directory, "real.txt"), "inside content");
+		await fs.writeFile(path.join(outside, "secret.txt"), "outside secret");
+		await fs.symlink(path.join(directory, "real.txt"), path.join(directory, "link.txt"));
+		const session = createSession(directory);
+		const tool = new ReadTool(session);
+		const policy = tool.speculation.finalized;
+		if (!policy) throw new Error("read tool has no finalized speculation policy");
+		const host = new CodingAgentSpeculativeExecutionHost(session.settings, session, { hasHandlers: () => false });
+		const assessment = await policy.assess({ args: { path: "link.txt" } });
+		if (!assessment.eligible || assessment.effect.kind !== "local_read") {
+			throw new Error("expected provisional admission for the link path");
+		}
+		const context: SpeculativeOperationContext = {
+			candidateId: "swapped-link",
+			source: "direct",
+			dependencies: [],
+			tool,
+			toolCall: { type: "toolCall", id: "swapped-link", name: "read", arguments: { path: "link.txt" } },
+			args: { path: "link.txt" },
+			effect: assessment.effect,
+		};
+		await expect(host.authorize(context)).resolves.toMatchObject({ allowed: true });
+		// Repoint the link outside the workspace between authorization and execution.
+		await fs.unlink(path.join(directory, "link.txt"));
+		await fs.symlink(path.join(outside, "secret.txt"), path.join(directory, "link.txt"));
+		// Execution must fail into ordinary dispatch before reading the new target.
+		await expect(policy.execute(context, new AbortController().signal)).rejects.toThrow(
+			"Speculative read target is unavailable",
+		);
+	});
 });
