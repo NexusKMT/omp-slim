@@ -193,6 +193,7 @@ function parseSnapshot(raw: string): Omit<EvalArgsStreamSnapshot, "revision" | "
 	let language: EvalStreamLanguage | undefined;
 	let languageSeen = false;
 	let codePrefix = "";
+	let codeSeen = false;
 	let reset: boolean | undefined;
 	let resetSeen = false;
 	let timeout: number | undefined;
@@ -217,6 +218,9 @@ function parseSnapshot(raw: string): Omit<EvalArgsStreamSnapshot, "revision" | "
 		if (key.value === "language") {
 			if (languageSeen) return { reason: "duplicate eval language" };
 			languageSeen = true;
+		} else if (key.value === "code") {
+			if (codeSeen) return { reason: "duplicate eval code" };
+			codeSeen = true;
 		} else if (key.value === "reset") {
 			if (resetSeen) return { reason: "duplicate eval reset" };
 			resetSeen = true;

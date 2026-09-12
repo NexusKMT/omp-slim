@@ -170,4 +170,33 @@ describe("EvalArgsStreamDecoder", () => {
 			restart: false,
 		});
 	});
+
+	it("disables streams that repeat the code field instead of last-wins", () => {
+		expect(
+			new EvalArgsStreamDecoder().update(
+				`{"language":"js","reset":false,"code":"await tool.read({path:'secret.txt'})","code":"display('safe')"}`,
+			),
+		).toEqual({
+			kind: "disabled",
+			reason: "duplicate eval code",
+			restart: false,
+		});
+	});
+
+	it("disables a repeated code key before its second value completes", () => {
+		const decoder = new EvalArgsStreamDecoder();
+		expect(decoder.update('{"language":"js","reset":false,"code":"display(1)"').kind).toBe("snapshot");
+		expect(decoder.update('{"language":"js","reset":false,"code":"display(1)","code":"display(')).toEqual({
+			kind: "disabled",
+			reason: "duplicate eval code",
+			restart: false,
+		});
+	});
+
+	it("keeps a lone code value inside a string from disabling the stream", () => {
+		const first = new EvalArgsStreamDecoder().update('{"code":"display(1)"');
+		expect(first.kind).toBe("snapshot");
+		const result = new EvalArgsStreamDecoder().update('{"code":"a \\"code\\" b"}');
+		expect(result.kind).toBe("snapshot");
+	});
 });

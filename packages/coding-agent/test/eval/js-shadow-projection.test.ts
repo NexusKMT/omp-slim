@@ -177,6 +177,25 @@ await tool.read({ path: "secret.txt" });
 		expect(plan.operations).toEqual([]);
 		expect(plan.barrier?.reason).toBe("JavaScript tool binding changed");
 	});
+	it("rejects a hoisted function binding that shadows the tool bridge", async () => {
+		const plan = await projectJavaScriptShadowPlan(`
+await tool.read({ path: "secret.txt" });
+function tool() {}
+`);
+
+		expect(plan.operations).toEqual([]);
+		expect(plan.barrier?.reason).toBe("JavaScript tool binding changed");
+	});
+
+	it("rejects a hoisted class binding that shadows the tool bridge", async () => {
+		const plan = await projectJavaScriptShadowPlan(`
+await tool.read({ path: "secret.txt" });
+class tool {}
+`);
+
+		expect(plan.operations).toEqual([]);
+		expect(plan.barrier?.reason).toBe("JavaScript tool binding changed");
+	});
 
 	it("keeps safe independent operations before a later unsupported barrier", async () => {
 		const plan = await projectJavaScriptShadowPlan('tool.read({ path: "safe" });\nunknownCall();');

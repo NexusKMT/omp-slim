@@ -226,10 +226,108 @@ function containsCallSiteUnsafeSyntax(value: unknown, root = true): boolean {
 	return false;
 }
 
+const CALL_SITE_HELPER = "__omp_with_call_site__";
+
+function patternBindsCallSiteHelper(pattern: unknown): boolean {
+	const names: string[] = [];
+	collectBindingNames(pattern, names);
+	return names.includes(CALL_SITE_HELPER);
+}
+
+function isCallSiteHelperIdentifier(value: unknown): boolean {
+	if (!value || typeof value !== "object") return false;
+	const node = value as Record<string, unknown>;
+	return node.type === "Identifier" && node.name === CALL_SITE_HELPER;
+}
+
+// A bare textual mention of the helper (comment, string literal) must not suppress
+// instrumentation — comments never reach the walker and string contents are not
+// Identifier nodes. Only a real `__omp_with_call_site__(...)` call (already
+// instrumented code, where wrapping again would double-count the site) or a real
+// binding of the name (which would shadow the worker-injected helper, so fail
+// closed) skips instrumentation.
+function containsCallSiteHelperSyntax(root: unknown): boolean {
+	let found = false;
+	walkNodes(root, node => {
+		if (found) return;
+		switch (node.type) {
+			case "CallExpression":
+				if (isCallSiteHelperIdentifier(node.callee)) found = true;
+				break;
+			case "VariableDeclarator":
+				if (patternBindsCallSiteHelper(node.id)) found = true;
+				break;
+			case "FunctionDeclaration":
+			case "FunctionExpression":
+			case "ArrowFunctionExpression":
+			case "ObjectMethod":
+			case "ClassMethod":
+			case "ClassPrivateMethod": {
+				if (isCallSiteHelperIdentifier(node.id)) {
+					found = true;
+				} else if (Array.isArray(node.params)) {
+					for (const param of node.params) {
+						if (patternBindsCallSiteHelper(param)) {
+							found = true;
+							break;
+						}
+					}
+				}
+				break;
+			}
+			case "ClassDeclaration":
+			case "ClassExpression":
+			case "TSEnumDeclaration":
+				if (isCallSiteHelperIdentifier(node.id)) found = true;
+				break;
+			case "ImportSpecifier":
+			case "ImportDefaultSpecifier":
+			case "ImportNamespaceSpecifier":
+				if (isCallSiteHelperIdentifier(node.local)) found = true;
+				break;
+			case "CatchClause":
+				if (patternBindsCallSiteHelper(node.param)) found = true;
+				break;
+			case "AssignmentExpression":
+				if (patternBindsCallSiteHelper(node.left)) found = true;
+				break;
+			case "UpdateExpression":
+				if (isCallSiteHelperIdentifier(node.argument)) found = true;
+				break;
+			case "ForInStatement":
+			case "ForOfStatement": {
+				const left = node.left;
+				if (left && typeof left === "object" && "type" in left && left.type === "VariableDeclaration") {
+					if ("declarations" in left && Array.isArray(left.declarations)) {
+						for (const declaration of left.declarations) {
+							if (
+								declaration &&
+								typeof declaration === "object" &&
+								"id" in declaration &&
+								patternBindsCallSiteHelper(declaration.id)
+							) {
+								found = true;
+								break;
+							}
+						}
+					}
+				} else if (patternBindsCallSiteHelper(left)) {
+					found = true;
+				}
+				break;
+			}
+			default:
+				break;
+		}
+	});
+	return found;
+}
+
 async function instrumentRuntimeCallSites(code: string): Promise<string> {
-	if (!code.includes("tool") || code.includes("__omp_with_call_site__")) return code;
+	if (!code.includes("tool")) return code;
 	const ast = await parseProgram(code);
 	if (!ast) return code;
+	if (code.includes(CALL_SITE_HELPER) && containsCallSiteHelperSyntax(ast)) return code;
 	const edits: Array<{ offset: number; text: string; closing: boolean }> = [];
 	walkNodes(ast, node => {
 		if (!runtimeCallKind(node)) return;

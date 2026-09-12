@@ -6,9 +6,11 @@ import type {
 	BlockStatement,
 	BooleanLiteral,
 	CallExpression,
+	ClassDeclaration,
 	Expression,
 	ExpressionStatement,
 	ForOfStatement,
+	FunctionDeclaration,
 	Identifier,
 	IfStatement,
 	ImportDeclaration,
@@ -124,6 +126,14 @@ function isForOfStatement(node: Node | null | undefined): node is ForOfStatement
 
 function isImportDeclaration(node: Node | null | undefined): node is ImportDeclaration {
 	return hasType(node, "ImportDeclaration");
+}
+
+function isFunctionDeclaration(node: Node | null | undefined): node is FunctionDeclaration {
+	return hasType(node, "FunctionDeclaration");
+}
+
+function isClassDeclaration(node: Node | null | undefined): node is ClassDeclaration {
+	return hasType(node, "ClassDeclaration");
 }
 
 function isExpression(node: Node | null | undefined): node is Expression {
@@ -405,7 +415,9 @@ function hasToolBinding(statements: readonly Statement[]): boolean {
 		statement =>
 			(isVariableDeclaration(statement) &&
 				statement.declarations.some(declaration => isIdentifier(declaration.id, { name: "tool" }))) ||
-			(isImportDeclaration(statement) && statement.specifiers.some(specifier => specifier.local.name === "tool")),
+			(isImportDeclaration(statement) && statement.specifiers.some(specifier => specifier.local.name === "tool")) ||
+			(isFunctionDeclaration(statement) && statement.id !== null && isIdentifier(statement.id, { name: "tool" })) ||
+			(isClassDeclaration(statement) && statement.id !== null && isIdentifier(statement.id, { name: "tool" })),
 	);
 }
 
