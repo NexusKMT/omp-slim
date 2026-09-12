@@ -15,6 +15,7 @@ import {
 	formatFeedModelBadge,
 	formatScreenshot,
 	sanitizeDisplayLines,
+	sanitizeDisplayWarning,
 	shortenPath,
 	truncateDiffByHunk,
 } from "@oh-my-pi/pi-coding-agent/tools/render-utils";
@@ -524,5 +525,19 @@ describe("sanitizeDisplayLines", () => {
 
 	it("collapses carriage-return progress overwrites to the final segment", () => {
 		expect(sanitizeDisplayLines("50%\r100%")).toEqual(["100%"]);
+	});
+});
+
+describe("sanitizeDisplayWarning", () => {
+	it("strips terminal controls, expands tabs, flattens lines, and shortens home paths", () => {
+		const filePath = path.join(os.homedir(), ".omp", "WATCHDOG.yml");
+		const warning = sanitizeDisplayWarning(`${filePath}: advisor "\x1b[31mBad\tName\x1b[0m\nfollow-up" dropped`);
+
+		expect(warning).toContain("~/.omp/WATCHDOG.yml");
+		expect(warning).toContain('advisor "Bad   Name follow-up" dropped');
+		expect(warning).not.toContain(filePath);
+		expect(warning).not.toContain("\x1b");
+		expect(warning).not.toContain("\t");
+		expect(warning).not.toContain("\n");
 	});
 });

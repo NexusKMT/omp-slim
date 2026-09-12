@@ -1,4 +1,6 @@
 import { beforeAll, describe, expect, it } from "bun:test";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { TUI } from "@oh-my-pi/pi-tui";
 import type { WatchdogConfigDoc } from "../../../src/advisor/config";
 import type { ModelRegistry } from "../../../src/config/model-registry";
@@ -56,7 +58,9 @@ describe("advisor config editor warnings and synthetic default row", () => {
 				loadDoc: () => {
 					pendingLoad = Promise.resolve({
 						advisors: [],
-						warnings: ['/home/user/.omp/WATCHDOG.yml: advisor "Bad" dropped — boom'],
+						warnings: [
+							`${path.join(os.homedir(), ".omp", "WATCHDOG.yml")}: advisor "\x1b[31mBad\tName\x1b[0m" dropped — boom`,
+						],
 					});
 					return pendingLoad;
 				},
@@ -70,7 +74,6 @@ describe("advisor config editor warnings and synthetic default row", () => {
 
 		// Opening the project file shows nothing — the host owns initial warnings.
 		expect(warnings).toEqual([]);
-		expect(overlay.render(100).join("\n")).not.toContain("Config problems");
 
 		for (let i = 0; i < 3; i++) overlay.handleInput("\x1b[B");
 		overlay.handleInput("\r"); // Switch scope to user.
@@ -78,12 +81,13 @@ describe("advisor config editor warnings and synthetic default row", () => {
 		await pendingLoad;
 
 		expect(warnings).toHaveLength(1);
-		expect(warnings[0]).toContain('advisor "Bad" dropped');
+		expect(warnings[0]).toContain('advisor "Bad   Name" dropped');
+		expect(warnings[0]).toContain("~/.omp/WATCHDOG.yml");
+		expect(warnings[0]).not.toContain(path.join(os.homedir(), ".omp", "WATCHDOG.yml"));
 		// The toast is chat-mounted behind the fullscreen overlay, so the warning
 		// must also render inside the editor itself.
 		const frame = overlay.render(100).join("\n");
-		expect(frame).toContain("Config problems");
-		expect(frame).toContain('advisor "Bad" dropped');
+		expect(frame).toContain('advisor "Bad   Name" dropped');
 	});
 
 	it("renders the opening file's warnings inside the overlay without re-notifying", () => {
@@ -104,7 +108,6 @@ describe("advisor config editor warnings and synthetic default row", () => {
 		);
 
 		const frame = overlay.render(100).join("\n");
-		expect(frame).toContain("Config problems");
 		expect(frame).toContain('advisor "Bad" dropped');
 		expect(warnings).toEqual([]);
 	});

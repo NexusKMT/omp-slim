@@ -42,6 +42,7 @@ import type { PerAdvisorStat } from "../../session/agent-session";
 import type { OAuthAccountIdentity } from "../../session/auth-storage";
 import { formatCompactQuota } from "../controllers/command-controller";
 import { getSelectListTheme, theme } from "../theme/theme";
+import { sanitizeDisplayWarning } from "../../tools/render-utils";
 import { HookEditorComponent } from "./hook-editor";
 import { buildBrowserItems, ModelBrowser, sortModelItems } from "./model-browser";
 import {
@@ -274,7 +275,9 @@ export class AdvisorConfigOverlayComponent implements Component {
 		const warnings = this.#doc.warnings?.length
 			? [
 					theme.fg("warning", "⚠ Config problems — dropped while loading:"),
-					...this.#doc.warnings.flatMap(w => wrap(w, bodyWidth).map(line => theme.fg("warning", line))),
+					...this.#doc.warnings.flatMap(w =>
+						wrap(sanitizeDisplayWarning(w), bodyWidth).map(line => theme.fg("warning", line)),
+					),
 					"",
 				].map(line => truncateToWidth(line, bodyWidth))
 			: [];
@@ -437,7 +440,7 @@ export class AdvisorConfigOverlayComponent implements Component {
 			// the initial scope's warnings when the overlay opens, so only switches
 			// report here — no double-showing the opening file.
 			if (doc.warnings?.length) {
-				const message = `WATCHDOG.yml: ${doc.warnings.join("; ")}`;
+				const message = `WATCHDOG.yml: ${doc.warnings.map(sanitizeDisplayWarning).join("; ")}`;
 				if (this.#cb.warn) this.#cb.warn(message);
 				else this.#cb.notify(message);
 			}

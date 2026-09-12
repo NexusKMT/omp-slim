@@ -106,6 +106,7 @@ import { createPersistedSubagentReviverFactory } from "./task/persisted-revive";
 import { createTelemetryExportConfig, initTelemetryExport, isTelemetryExportEnabled } from "./telemetry-export";
 import { concreteThinkingLevel, parseConfiguredThinkingLevel } from "./thinking";
 import type { LspStartupServerInfo } from "./tools";
+import { sanitizeDisplayWarning } from "./tools/render-utils";
 import { getChangelogPath, resolveStartupChangelogForDisplay, type StartupChangelogSelection } from "./utils/changelog";
 import { EventBus } from "./utils/event-bus";
 
@@ -604,7 +605,7 @@ async function runInteractiveMode(
 	if (advisorConfigWarnings.length > 0) {
 		// Pulled here, not pushed from SessionAdvisors: the constructor-time
 		// `emitNotice` fired before the UI subscribed and was silently lost.
-		mode.showWarning(`WATCHDOG.yml: ${advisorConfigWarnings.join("; ")}`);
+		mode.showWarning(`WATCHDOG.yml: ${advisorConfigWarnings.map(sanitizeDisplayWarning).join("; ")}`);
 	}
 
 	for (const notify of notifs) {

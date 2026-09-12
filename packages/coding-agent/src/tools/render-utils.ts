@@ -851,6 +851,15 @@ export function shortenEmbeddedPaths(text: string): string {
 		.join(" ");
 }
 
+/** Sanitize warning text before showing it in TUI, including embedded home paths. */
+export function sanitizeDisplayWarning(text: string): string {
+	return shortenEmbeddedPaths(
+		replaceTabs(sanitizeText(text))
+			.replace(/[\r\n]+/g, " ")
+			.trim(),
+	);
+}
+
 export function formatToolWorkingDirectory(workdir: string | undefined, projectDir: string): string | undefined {
 	if (!workdir) return undefined;
 	const resolvedProjectDir = path.resolve(projectDir);
